@@ -2,23 +2,28 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
 /**
- * How tracked bets are scored on the Performance tab.
+ * How tracked bets are scored on the Performance tab (lib/trackedStake).
  *
- *   'flat'   — $100 per bet (default; matches the rest of the app's records)
- *   'custom' — per-bet dollar amounts the user enters (default $100 each)
+ *   'posted' — the posted stake, the Record tab's units (default): 1u to win
+ *              at the decided price, risk capped at 3u, no price at 1u
+ *   'custom' — "My stakes": the member's own stake on the bets they set, in
+ *              units; a bet they leave alone stays as posted
  *
- * A 'kelly' mode used to size each bet off an on-device bankroll and a Kelly
- * aggressiveness multiplier. Both were removed on 2026-09-20 — every stake the
- * app publishes is flat units now, so a dollar mode keyed on a private bankroll
- * had nothing left to derive from. `sanitizeMode` folds the stored legacy value
- * back to 'flat' so an upgrading device does not land on a mode that is gone.
+ * Stakes are STORED at the 100-is-1u scale (lib/format FLAT_UNIT). Screens
+ * show units and never dollars (mike, 2026-11-03: "everything must be
+ * units"). A custom amount saved before that change was typed as dollars; it
+ * now reads as that number / 100 in units.
+ *
+ * Retired modes fold to 'posted' in `sanitizeMode`, so an upgrading device
+ * never lands on a mode that is gone. The old default scored every tracked
+ * pick at 1u risked, a second unit basis beside the Record tab's (#1138
+ * Decision 1, 2026-11-03). A 'kelly' mode sized each bet off an on-device
+ * bankroll until 2026-09-20.
  *
  * Stored on-device (module store + AsyncStorage). Custom stakes are keyed by
  * pick_id.
  */
-export type StakeMode = 'flat' | 'custom';
-
-export const FLAT_STAKE = 100;
+export type StakeMode = 'posted' | 'custom';
 
 const MODE_KEY = 'stake.mode.v1';
 const CUSTOM_KEY = 'stake.custom.v1';
@@ -28,14 +33,15 @@ interface StakeState {
   custom: Record<string, number>;
 }
 
-const DEFAULT_STATE: StakeState = { mode: 'flat', custom: {} };
+const DEFAULT_STATE: StakeState = { mode: 'posted', custom: {} };
 
 const listeners = new Set<(s: StakeState) => void>();
 let cached: StakeState | null = null;
 
 function sanitizeMode(raw: string | null): StakeMode {
-  // 'kelly' is the retired third mode; anything unrecognised falls to flat.
-  return raw === 'custom' ? raw : 'flat';
+  // The retired 1u-risked and Kelly modes, and anything unrecognised, read
+  // as the posted stake.
+  return raw === 'custom' ? raw : 'posted';
 }
 
 function sanitizeCustom(raw: string | null): Record<string, number> {
@@ -87,6 +93,12 @@ async function saveCustomStake(pickId: number, amount: number | null) {
   }
   emit({ ...(cached ?? DEFAULT_STATE), custom });
   await AsyncStorage.setItem(CUSTOM_KEY, JSON.stringify(custom));
+}
+
+/** Account deletion. Posted stakes, no custom stakes, and both keys removed. */
+export async function clearStakeSettingsForAccountDeletion(): Promise<void> {
+  emit({ ...DEFAULT_STATE, custom: {} });
+  await AsyncStorage.multiRemove([MODE_KEY, CUSTOM_KEY]);
 }
 
 export function useStakeSettings() {

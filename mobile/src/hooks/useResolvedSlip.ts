@@ -4,7 +4,7 @@ import { useLineLegs } from '@/hooks/useLineLegs';
 import { useLivePicksUnfocused, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { gameLineLegFromRows, isGameSpec, lineLegFromRows, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
+import { gameLineHold, isGameSpec, lineLegFromRows, lineLegKey, pregameUnpricedLeg, type LineLegSpec } from '@/lib/lineLegs';
 import { canPruneSlip, resolveSlipLegs, type ParlayLeg } from '@/lib/parlay';
 import { fetchGameById, fetchGameLineRows, fetchPropLineRows } from '@/lib/queries';
 import type { EnrichedPick } from '@/types';
@@ -34,9 +34,11 @@ import type { EnrichedPick } from '@/types';
  * LINE LEGS (2026-09-04, lib/lineLegs.ts) resolve the same way from their own
  * store: each spec re-reads that player's latest lines and re-prices; a spec
  * whose read SUCCEEDED and priced nothing (game started, line pulled) is
- * pruned, a spec whose read failed is held — same rule as pick keys. They
- * follow the pick legs in slip order. A GAME line leg (the Teams board,
- * 2026-09-05) re-reads its game market's latest lines the same way.
+ * pruned, a spec whose read failed is held — same rule as pick keys. An
+ * alternate spread or total after kickoff is held too, marked as a pre-game
+ * price, and the user removes it (gameLineHold). They follow the pick legs
+ * in slip order. A GAME line leg (the Teams board, 2026-09-05) re-reads its
+ * game market's latest lines the same way.
  *
  * LIVE PICKS (2026-09-06, Matt) can be added to the slip, so the board resolved
  * against is today's picks PLUS the in-play ones. This is not optional
@@ -119,7 +121,13 @@ export function useResolvedSlip() {
           const game = fetchGameById(spec.game_id).catch(() => null);
           if (isGameSpec(spec)) {
             const rows = await fetchGameLineRows(spec.game_id, spec.market);
-            return [key, gameLineLegFromRows(spec, rows, await game)];
+            const gameRow = await game;
+            const held = gameLineHold(spec, rows, gameRow);
+            if (held.hold === 'pregame' && held.leg) {
+              return [key, { ...held.leg, pregameStale: true }];
+            }
+            if (held.hold === 'pregame') return [key, pregameUnpricedLeg(spec, gameRow)];
+            return [key, held.leg];
           }
           const rows = await fetchPropLineRows(spec.game_id, spec.market, spec.player_name);
           return [key, lineLegFromRows(spec, rows, await game)];
@@ -178,6 +186,10 @@ export function useResolvedSlip() {
     slip,
     lineLegs,
     picks,
+    /** Today's picks plus in-play, the same list the slip resolves against.
+     *  A restore uses it to name the player before the injury guard. */
+    board,
+    boardLoading: loading || livePicks.loading,
     legs,
     /** Every selection, pick keys and line legs alike. */
     count,

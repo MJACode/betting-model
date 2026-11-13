@@ -48,6 +48,9 @@ def test_every_relation_the_app_reads_is_declared():
 # only with the migration that creates it, and it leaves the moment mobile/src
 # reads it -- an allowlist must not hide a grant the app already uses.
 AHEAD_OF_THE_APP = frozenset({
+    # Read by Claude chats through the Supabase connector, not by a screen
+    # (data/migrations/open_picks_view_2026_11_04.sql).
+    "open_picks",
     "v_nhl_player_prop_odds",
     "v_player_season_totals_nhl",
     "v_team_season_totals_nhl",
@@ -136,7 +139,11 @@ def test_unapplied_facts_tables_are_not_granted_until_they_exist():
     the migration has created them."""
     from scripts.apply_anon_grants import MAY_BE_UNAPPLIED, _anon_can_read
 
-    assert MAY_BE_UNAPPLIED == ("byom_game_facts", "byom_prop_facts")
+    assert MAY_BE_UNAPPLIED == (
+        "byom_game_facts",
+        "byom_prop_facts",
+        "v_player_season_totals_ncaabw",
+    )
     dry = " | ".join(_plan())
     for rel in MAY_BE_UNAPPLIED:
         assert f'ON public."{rel}"' in dry
@@ -208,15 +215,18 @@ def test_the_dynamic_rpc_resolver_actually_finds_the_ternary_names():
 
 
 def test_every_rpc_the_app_calls_is_declared_or_known_absent():
-    from data.anon_readable import RPC_ANON_CALLABLE, RPC_MISSING_IN_PROD
+    from data.anon_readable import (
+        RPC_AFTER_SIGN_IN, RPC_ANON_CALLABLE, RPC_MISSING_IN_PROD)
 
-    known = set(RPC_ANON_CALLABLE) | set(RPC_MISSING_IN_PROD)
+    known = set(RPC_ANON_CALLABLE) | set(RPC_MISSING_IN_PROD) | set(RPC_AFTER_SIGN_IN)
     undeclared = sorted(_app_rpcs() - known)
     assert not undeclared, (
         f"mobile/src calls {undeclared}, which data/anon_readable.py does not "
         f"declare. After ALTER DEFAULT PRIVILEGES ... ON FUNCTIONS a new RPC "
         f"404s through PostgREST. Add it to RPC_ANON_CALLABLE and re-run "
-        f"`python -m scripts.apply_anon_grants --apply`.")
+        f"`python -m scripts.apply_anon_grants --apply`. A saved-model RPC "
+        f"goes in RPC_AFTER_SIGN_IN instead: the grant sweep must not name it "
+        f"before its migration is applied.")
 
 
 def test_the_transitive_helper_is_granted():

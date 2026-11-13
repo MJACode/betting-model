@@ -38,8 +38,9 @@ TEAM_BOARD_SPORTS: tuple[str, ...] = ("MLB", "WNBA", "NBA", "NHL", "NFL", "NCAAF
 def team_board_seasons(today: date | None = None) -> tuple[int, ...]:
     """The seasons the app can ask for, and one more.
 
-    The app tries the current calendar year then the previous one
-    (`seasonCandidates`). NHL, NBA and NCAAF label a season by its ENDING year
+    The app asks for the sport's own season label (`teamBoardSeason`: the
+    ending year for NBA and NHL from October) and falls back one label
+    (`fetchTeamStats`). NHL, NBA and NCAAF label a season by its ENDING year
     (CLAUDE.md §4), so a season in progress each autumn carries NEXT year's
     label — refreshing year+1 too means the board is never empty for those
     sports the week a season opens. A pair with no finished games writes zero

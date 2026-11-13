@@ -1268,8 +1268,11 @@ class TestMarketCardPublisher:
         assert r["sport"] == "NFL" and r["signal_type"] == "BET"
         # edge on the row must be the quantity the rule selected on
         assert abs((r["model_probability"] - r["dk_implied_prob"]) - r["edge"]) < 1e-9
-        # the label names the book, since it is not DraftKings' price
-        assert "Josh Allen" in r["pick_label"] and "DK" in r["pick_label"]
+        # the book is a column. The label is the bet; rows already stored
+        # still carry "(DK)".
+        assert r["pick_label"] == "Josh Allen Over 250.5 Pass Yds"
+        assert r["decision_book"] == "draftkings"
+        assert r["decision_odds"] == r["dk_odds"]
 
     def test_row_clears_the_action_filter_it_will_be_shown_under(self):
         import config

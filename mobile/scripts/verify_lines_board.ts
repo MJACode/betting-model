@@ -207,11 +207,9 @@ check('a game with no prices is one line, not six cells', card.includes('LINES_G
 check('the Pick chip opens detail and the paused chip is named', /onOpenPick\(picked\.picks, 'pick'\)/.test(card) && /linesPausedChipLabel/.test(card) && /colors\.pausedInk/.test(card));
 check('the lines read is the all-books view, paged, for the board markets', /function fetchLinesBoardOdds[\s\S]*?\.from\('v_latest_odds_all_books'\)[\s\S]*?LINES_ODDS_MARKETS[\s\S]*?fetchAllPages/.test(queries) || /fetchAllPages<OddsByBookRow>\([\s\S]*?\.from\('v_latest_odds_all_books'\)[\s\S]*?LINES_ODDS_MARKETS/.test(queries));
 check('games are read for the lines sports, not only picked games', /function fetchGamesForLinesBoard[\s\S]*?\.from\('games'\)[\s\S]*?LINES_SPORTS/.test(queries));
-check('a paused-only row is not the Pick chip', /const linesPicks: LinesPickRef\[\] = allData\.map/.test(picksHome) && /const linesPaused: LinesPickRef\[\] = pausedData\.map/.test(picksHome));
+check('Scoreboard replaced the Lines segment', picksHome.includes('label="Scoreboard"') && !picksHome.includes('label="Lines"') && picksHome.includes('<ScoreboardBoard'));
 check('the pick chip opens Pick Detail', /navigation\.navigate\('PickDetail'/.test(picksHome));
-check('several paused picks are titled as paused', /Paused picks on this game/.test(picksHome));
-const sportsStyle = picksHome.slice(picksHome.indexOf('linesSports:'), picksHome.indexOf('linesSports:') + 900);
-check('the sport-chip row keeps 8pt under itself', /marginBottom: spacing\.sm/.test(sportsStyle) && !/marginBottom: spacing\.lg/.test(sportsStyle));
+check('LinesBoard is not mounted on Picks', !picksHome.includes('<LinesBoard') && !picksHome.includes('useLinesBoard'));
 check('the sheet keeps VoiceOver on its rows', /accessibilityViewIsModal/.test(sheet));
 const repo = join(import.meta.dirname, '..', '..');
 const mig = readFileSync(join(repo, 'data/migrations/add_draw_price_to_latest_odds_view_2026_10_16.sql'), 'utf8');

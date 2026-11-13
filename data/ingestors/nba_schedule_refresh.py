@@ -48,12 +48,20 @@ no field different but status and TV.
 
 TYPES. season.type 2 is the regular season, the Cup quarterfinals and
 semifinals included (they count in the standings, NBA.com types them 002);
-a type-2 game whose note reads "NBA Cup Championship" is the Cup final
-(cup_final, NBA.com's 006); 3 playoff; 5 play-in. Preseason (1) and anything
-else is not stored. A slot whose teams are not set (TBD) is skipped: the
-schedule keeps the league's own placeholder for it. The totals model reads
-those placeholders' dates (models/nba_total_luck.regular_season), so this
-never writes, removes or renames one.
+a type-2 game whose note says "Championship" is the Cup final (cup_final,
+NBA.com's 006), and so is any type-2 game on the date the league's own schedule
+gives the Cup final, whatever its note says (plan, below); 3 playoff; 5 play-in.
+Preseason (1) and anything else is not stored. A slot whose teams are not set
+(TBD) is skipped: the schedule keeps the league's own placeholder for it. The
+totals model reads those placeholders' dates
+(models/nba_total_luck.regular_season), so this never writes, removes or
+renames one.
+
+THE CUP FINAL'S TYPE IS WHAT KEEPS FOUR MODELS OFF IT. ESPN's season type does not
+tell a Cup final from a regular-season game; only the note does, and a listed
+'regular' row passes every other NBA model's gate. ESPN's own wording has changed:
+its 2023 final reads "NBA In-Season Tournament Championship", its 2024 and 2025
+finals and today's 2026 slot "NBA Cup Championship" (ESPN, read 2026-11-02).
 
 WHAT IT WRITES, for the months it fetched (this ET month and the next
 MONTHS_AHEAD):
@@ -89,6 +97,16 @@ MONTHS_AHEAD):
     the prop cards' slate reads `games`, so a game only the schedule lists is
     invisible to them. A row only this refresh wrote follows ESPN's tip; any
     other row keeps its own start (the odds feed rewrites its rows itself).
+    A play-in, playoff or Cup final game is inserted the same way, on its own
+    day only (`today`): the odds feed normally writes its row first, and this
+    keeps the game on a day it did not. Never sooner, so a series that ends
+    early leaves no row for a game nobody plays. Every stored one of these tips
+    at least 39.5 hours after either team's previous tip (2023-24..2025-26), so
+    by this 6am run nothing can still cancel it. Not when the feed already holds
+    the same game the other way round (`flipped`): the feed and ESPN can disagree
+    on who is home at a neutral court, the props land on the feed's id
+    (prop_odds_ingestor), and a second row would take the final and leave the bet
+    with none. nba_results_ingestor.match_game scores the feed's row instead.
 It NEVER deletes a game. A game the schedule lists, with two teams, in a
 fetched month, that ESPN no longer lists under that game_id is counted in
 `not_on_espn` and named in a WARNING: a moved game changes its game_id (the
@@ -161,8 +179,11 @@ _REF_SEASON = re.compile(r"/seasons/(\d{4})")
 _REF_TEAM = re.compile(r"/seasons/\d{4}/teams/(-?\d+)")
 
 ESPN_TYPES = {2: "regular", 3: "playoff", 5: "playin"}
-CUP_FINAL_NOTE = "cup championship"
+CUP_FINAL_NOTE = "championship"
 STORED_TYPES = ("regular", "cup_final", "playin", "playoff")
+# What this refresh inserts into `games` on its day (models/nba_total_luck.POSTSEASON_TYPES,
+# pinned by test: this module is imported by jobs that do not otherwise need that one).
+POSTSEASON_TYPES = ("playin", "playoff", "cup_final")
 _POSTPONED = re.compile(r"(?i)(ppd|postpon|cancel)")
 _NOT_A_TEAM = {"", "NAN", "NONE", "NULL", "TBD"}
 
@@ -354,18 +375,26 @@ def core_month(month: str, fetch=None, teams: dict | None = None) -> dict:
 
 # ── the plan (pure) ──────────────────────────────────────────────────────────
 
+def flipped_id(row: dict) -> str:
+    """Our id for this ESPN row's game with home and away the other way round."""
+    return _build_game_id(row["game_date"], row["home_team"], row["away_team"])
+
+
 def plan(espn: list[dict], stored: list[dict], games: dict[str, dict],
-         fetched: list[str]) -> dict:
+         fetched: list[str], today: str | None = None) -> dict:
     """What to write, given ESPN's rows for the `fetched` months (YYYYMM), the
-    nba_schedule rows stored for those months, and `games` (game_id ->
-    {commence_time, data_source}) for every game ESPN listed.
+    nba_schedule rows stored for those months, `games` (game_id ->
+    {commence_time, data_source}) for every game ESPN listed and its id the other
+    way round, and `today` (the ET date of this run, which allows the game-day insert).
 
     -> {upsert: ESPN rows to insert or update under their 'espn:' key,
         times: (nba_game_id, new tip, old tip) the odds feed agrees with,
         tip_disputed: (game_id, stored tip, ESPN's, the feed's) it does not,
         status: (nba_game_id, text), confirm: NBA.com-keyed rows ESPN listed,
         superseded: 'espn:' rows whose game has an NBA.com row, games_insert:
-        regular-season rows `games` lacks, games_times: (game_id, new tip) for
+        regular-season rows `games` lacks and today's postseason rows it lacks,
+        flipped: (ESPN's id, the games row the other way round) for a postseason
+        game not inserted for that reason, games_times: (game_id, new tip) for
         games rows only this refresh wrote, not_on_espn: stored games ESPN did
         not list}
     """
@@ -373,12 +402,17 @@ def plan(espn: list[dict], stored: list[dict], games: dict[str, dict],
     for r in stored:
         by_gid.setdefault(r["game_id"], []).append(r)
     out = {"upsert": [], "times": [], "tip_disputed": [], "status": [], "confirm": [],
-           "superseded": [], "games_insert": [], "games_times": [], "not_on_espn": []}
+           "superseded": [], "games_insert": [], "flipped": [], "games_times": [], "not_on_espn": []}
+    # The league's own Cup final row is a placeholder with no teams, and its date is the
+    # one thing about the final no note can reword.
+    cup_days = {str(x.get("game_date"))[:10] for x in stored if x.get("game_type") == "cup_final"}
     seen = set()
     for r in espn:
         if r["game_id"] in seen:
             continue
         seen.add(r["game_id"])
+        if r["game_type"] == "regular" and str(r["game_date"])[:10] in cup_days:
+            r = {**r, "game_type": "cup_final"}
         rows = by_gid.get(r["game_id"], [])
         nba = [x for x in rows if not str(x["nba_game_id"]).startswith(ESPN_KEY)]
         g = games.get(r["game_id"])
@@ -403,6 +437,11 @@ def plan(espn: list[dict], stored: list[dict], games: dict[str, dict],
         if g is None:
             if r["game_type"] == "regular":
                 out["games_insert"].append(r)
+            elif r["game_type"] in POSTSEASON_TYPES and today and str(r["game_date"])[:10] == today:
+                if flipped_id(r) in games:
+                    out["flipped"].append((r["game_id"], flipped_id(r)))
+                else:
+                    out["games_insert"].append(r)
         elif g.get("data_source") == DATA_SOURCE and r["commence_time"] \
                 and _ts(r["commence_time"]) != _ts(g.get("commence_time")):
             out["games_times"].append((r["game_id"], r["commence_time"]))
@@ -568,9 +607,13 @@ def refresh(run_date: str | None = None, *, get_json=None, core_json=None, conne
             conn.rollback()
             return totals
         stored = [r for r in stored if str(r["game_date"])[:7].replace("-", "") in totals["fetched"]]
-        p = plan(rows, stored, read_games(conn, sorted({r["game_id"] for r in rows})),
-                 totals["fetched"])
+        p = plan(rows, stored,
+                 read_games(conn, sorted({r["game_id"] for r in rows} | {flipped_id(r) for r in rows})),
+                 totals["fetched"], today=today.isoformat())
         totals.update(_counts(p))
+        for gid, other in p["flipped"]:
+            logger.warning(f"NBA schedule refresh: ESPN lists {gid}, the odds feed {other}: one game, home "
+                           f"and away the other way round. No second games row; the final lands on {other}")
         if p["not_on_espn"]:
             logger.warning(f"NBA schedule refresh: {len(p['not_on_espn'])} listed game(s) ESPN no "
                            f"longer shows on their date (moved or dropped? left as stored): "

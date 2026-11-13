@@ -1,10 +1,13 @@
 // SharpSports integration — account link (Booklink context) + read-only bet sync.
 //
-// One function, two actions (POST body { action }):
+// One function, three actions (POST body { action }):
 //   - "context": create a Booklink context for a device, return the hosted
 //     link URL the app opens so the user can log into their sportsbook.
 //   - "bets":    read this device's linked accounts + synced bets from our DB
 //     (optionally pull fresh from SharpSports first when { refresh: true }).
+//   - "unlink":  set access=false on each bettorAccount (SharpSports public
+//     key, POST /bettorAccounts/{id}) and delete this install's rows.
+//     Same internalId bearer as "bets". Not an auth.uid() delete.
 //
 // The SharpSports PRIVATE key lives only here (Edge Function secret) — never on
 // device. The app authenticates with the Supabase anon JWT (verify_jwt=true);
@@ -242,6 +245,43 @@ async function readBets(internalId: string): Promise<Response> {
   return json({ accounts: accounts ?? [], bets: bets ?? [], summary });
 }
 
+// Remove SharpSports access for this install, then drop our copies.
+// Docs: POST /v1/bettorAccounts/{id} with the public key and { access: false }.
+// A SharpSports failure still deletes our rows. The account-deletion RPC does
+// not touch these tables — they are keyed by internal_id, not auth.uid().
+async function unlinkDevice(internalId: string): Promise<Response> {
+  const { data: accounts, error: readError } = await admin
+    .from("linked_sportsbook_accounts")
+    .select("bettor_account_id")
+    .eq("internal_id", internalId);
+  if (readError) throw readError;
+
+  const ids = (accounts ?? [])
+    .map((a) => a.bettor_account_id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+
+  if (PUBLIC_KEY) {
+    for (const id of ids) {
+      try {
+        await ssPost(`/bettorAccounts/${encodeURIComponent(id)}`, PUBLIC_KEY, {
+          access: false,
+        });
+      } catch (e) {
+        console.error("sharpsports remove access", id, e);
+      }
+    }
+  }
+
+  const bets = await admin.from("synced_bets").delete().eq("internal_id", internalId);
+  if (bets.error) throw bets.error;
+  const links = await admin
+    .from("linked_sportsbook_accounts")
+    .delete()
+    .eq("internal_id", internalId);
+  if (links.error) throw links.error;
+  return json({ ok: true, removed: ids.length });
+}
+
 // ── Router ──────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -265,6 +305,8 @@ Deno.serve(async (req) => {
         if (body?.refresh) await pullAndUpsert(internalId);
         return await readBets(internalId);
       }
+      case "unlink":
+        return await unlinkDevice(internalId);
       default:
         return json({ error: "unknown action" }, 400);
     }

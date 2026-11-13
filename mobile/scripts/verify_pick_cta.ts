@@ -409,7 +409,10 @@ check('PickCard: cta = pickCtaFor(pick, game, liveState) (game_time fallback, po
   /const cta = pickCtaFor\(pick, game, liveState\);/.test(card) && !/gameHasStarted\(game, liveState\)\s*;/.test(card));
 check('PickCard: the price check reads the live snapshot', /priceCheckForItem\(item, liveState\)/.test(card));
 check('LineMovementCard: footer is changesFooter (no "Last 8 of 8")', /changesFooter\(recent, \{ fromPick: hist\.fromPick, gap: hist\.gap \}\)/.test(read('src/lib/lineMovementView.ts')));
-check('PickCard: hand-off only while cta.handoff', /offersBook && cta\.handoff\s*\?\s*bestHandoffForPick/.test(card));
+check(
+  'PickCard: hand-off only while cta.handoff, and a pre-game card waits for the member\'s books',
+  /offersBook && cta\.handoff && \(myBooksReady \|\| pick\.is_live === true\)\s*\?\s*bestHandoffForPick/.test(card),
+);
 check('PickCard: canSlip ends with cta.slip, canTrack with cta.track',
   /const canSlip =[^;]*&& cta\.slip;/.test(card) && /const canTrack = [^;]*&& open && cta\.track;/.test(card));
 const startedDef = card.match(/const startedText =[^;]*;/)?.[0] ?? '';

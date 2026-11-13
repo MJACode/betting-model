@@ -121,6 +121,102 @@ def test_only_a_regular_season_game_is_written_into_games():
     assert len(p["upsert"]) == 1 and p["games_insert"] == []
 
 
+PO = "NBA_2027-04-20_MIA_BOS"
+PO_FLIPPED = "NBA_2027-04-20_BOS_MIA"
+
+
+@pytest.mark.parametrize("kind", ["playin", "playoff", "cup_final"])
+def test_a_postseason_game_gets_a_games_row_on_its_own_day(kind):
+    """The feed normally writes it first; this keeps the game on a day it did not."""
+    p = nsr.plan([_espn(PO, kind=kind)], [], {}, ["202704"], today="2027-04-20")
+    assert [r["game_id"] for r in p["games_insert"]] == [PO] and p["flipped"] == []
+
+
+@pytest.mark.parametrize("today", ["2027-04-19", "2027-04-21"])
+def test_a_postseason_game_gets_no_games_row_on_any_other_day(today):
+    """A series can end early. Inserted any sooner, its Game 6 is a row for a game nobody plays,
+    which reads as owed a score every pass for three days."""
+    p = nsr.plan([_espn(PO, kind="playoff")], [], {}, ["202704"], today=today)
+    assert p["games_insert"] == [] and len(p["upsert"]) == 1
+
+
+def test_a_games_row_the_feed_already_wrote_is_not_inserted_again():
+    games = {PO: {"commence_time": "2027-04-20T23:10:00+00:00", "data_source": "live"}}
+    p = nsr.plan([_espn(PO, kind="playoff")], [], games, ["202704"], today="2027-04-20")
+    assert p["games_insert"] == []
+
+
+def test_no_second_row_for_a_game_the_feed_holds_the_other_way_round():
+    """The props and any bet sit on the feed's id. A second row would take ESPN's final, and the
+    bet would stay open for good."""
+    games = {PO_FLIPPED: {"commence_time": "2027-04-20T23:10:00+00:00", "data_source": "live"}}
+    p = nsr.plan([_espn(PO, kind="cup_final")], [], games, ["202704"], today="2027-04-20")
+    assert p["games_insert"] == [] and p["flipped"] == [(PO, PO_FLIPPED)]
+    assert [r["game_id"] for r in p["upsert"]] == [PO]          # the schedule still lists it
+
+
+def test_the_run_passes_its_date_and_reads_each_game_the_other_way_round_too():
+    """Pure parts passing tests is not the step working: the refresh has to hand them both."""
+    day = "2025-12-16"       # the fixture's Cup final
+    final = "NBA_2025-12-16_SAS_NYK"
+    flipped = "NBA_2025-12-16_NYK_SAS"
+    conn = _Conn()
+    t = nsr.refresh(day, get_json=lambda url, p: _board(p["dates"]), connect=lambda: conn,
+                    now=datetime(2025, 12, 16, 11, 0, tzinfo=timezone.utc))
+    inserts = [rows for sql, rows in conn.writes if sql.startswith("INSERT INTO games")]
+    assert any(r[0] == final for rows in inserts for r in rows), t
+    conn = _Conn(games=[(flipped, "2025-12-17T01:40:00+00:00", "live")])
+    t = nsr.refresh(day, get_json=lambda url, p: _board(p["dates"]), connect=lambda: conn,
+                    now=datetime(2025, 12, 16, 11, 0, tzinfo=timezone.utc))
+    inserts = [rows for sql, rows in conn.writes if sql.startswith("INSERT INTO games")]
+    assert not any(r[0] == final for rows in inserts for r in rows) and t["flipped"] == 1
+
+
+def test_the_postseason_types_are_the_models():
+    import models.nba_total_luck as tl
+    assert nsr.POSTSEASON_TYPES == tl.POSTSEASON_TYPES
+
+
+def _final_event(note, event_date="2026-12-12T01:00Z"):
+    return {"id": "401909456", "date": event_date, "season": {"type": 2, "year": 2027},
+            "status": {"type": {"name": "STATUS_SCHEDULED", "description": "Scheduled"}},
+            "competitions": [{"date": event_date, "timeValid": True, "neutralSite": True,
+                              "notes": [{"headline": note}] if note else [],
+                              "competitors": [
+                                  {"homeAway": "home", "team": {"abbreviation": "OKC", "displayName": "Oklahoma City Thunder"}},
+                                  {"homeAway": "away", "team": {"abbreviation": "NY", "displayName": "New York Knicks"}}]}]}
+
+
+@pytest.mark.parametrize("note", ["NBA Cup Championship", "NBA In-Season Tournament Championship",
+                                  "Emirates NBA Cup Championship Game"])
+def test_a_type_2_game_noted_a_championship_is_the_cup_final(note):
+    """ESPN's own 2023 final read "NBA In-Season Tournament Championship", which the first version of
+    this typed regular. A listed 'regular' row passes every other NBA model's gate."""
+    assert nsr.event_rows({"events": [_final_event(note)]})[0]["game_type"] == "cup_final"
+
+
+@pytest.mark.parametrize("note", ["NBA Cup - Semifinals", "NBA Cup - Quarterfinals", None])
+def test_the_knockouts_before_the_final_stay_regular_season(note):
+    """They count in the standings and both prop models were graded on them."""
+    assert nsr.event_rows({"events": [_final_event(note)]})[0]["game_type"] == "regular"
+
+
+def test_any_game_on_the_leagues_cup_final_date_is_the_cup_final_whatever_espn_calls_it():
+    """The league's own placeholder holds the date, and no note can reword that."""
+    place = {"nba_game_id": "0062600001", "game_id": "NBA_2026-12-11_nan_nan", "season": 2027,
+             "game_type": "cup_final", "game_date": "2026-12-11",
+             "commence_time": "2026-12-12T01:00:00+00:00", "home_team": "NaN", "away_team": "NaN",
+             "status_text": "Scheduled"}
+    espn = nsr.event_rows({"events": [_final_event("Championship Game no more".replace("Championship", "Title"))]})
+    assert espn[0]["game_type"] == "regular"                    # the note alone did not say
+    p = nsr.plan(espn, [place], {}, ["202612"], today="2026-12-11")
+    assert [r["game_type"] for r in p["upsert"]] == ["cup_final"]
+    # and on any other date a regular game stays one
+    other = nsr.event_rows({"events": [_final_event(None, "2026-12-13T01:00Z")]})
+    p = nsr.plan(other, [place], {}, ["202612"], today="2026-12-12")
+    assert [r["game_type"] for r in p["upsert"]] == ["regular"]
+
+
 def test_a_listed_game_is_confirmed_and_never_rewritten():
     stored = [_stored(G1, "0022600400")]
     p = nsr.plan([_espn(G1)], stored, {G1: {"commence_time": "2026-12-23T00:00:00+00:00",

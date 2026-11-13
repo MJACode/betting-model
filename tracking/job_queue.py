@@ -433,6 +433,12 @@ def _validate_historical_odds(args: dict) -> dict:
     sport = str(args.get("sport") or "").upper()
     if sport not in SPORT_KEYS:
         raise ValueError(f"unknown sport {sport!r}")
+    if sport == "NCAAB":
+        # run_historical_odds_range refuses NCAAB (it would ledger an hour whose
+        # unresolved events it drops, so paid data would be lost and never
+        # re-bought). NCAAB history is bought only by ncaab_odds_history, which
+        # keeps unmatched events.
+        raise ValueError("NCAAB history is bought by the ncaab_odds_history job, not historical_odds")
     # Markets are what the endpoint bills by, so a job names what it funds.
     # Restricted to the bulk-endpoint set: anything else 422s the whole call.
     markets = [str(m) for m in (args.get("markets") or MARKETS)]
@@ -477,6 +483,509 @@ def _validate_nhl_odds_history(args: dict) -> dict:
     if not 0 < cap <= 200_000:
         raise ValueError(f"max_credits must be 1..200000, got {cap}")
     return {"max_credits": cap}
+
+
+# The NBA purchases mike approved on 2026-10-24 ("Buy alts and do #2 as well. Go"):
+# docs/nba_models_2026.md sections 10 and 11. Each mode buys one fixed scope and
+# its ceiling cannot exceed what was stated for it -- alternate ladders on every
+# 2023-24 .. 2025-26 game (measured 30 credits a game, ~111,000), and the slate
+# every 5 minutes around 2024-25 and 2025-26 injury-report changes (the plan file
+# names 8,810 requests, 264,300 credits, docs/nba_models_2026.md 11.6). Both buyers
+# skip what is stored, and retry an unanswered call once at the end, so a
+# re-queue after a worker restart buys nothing twice. The floor keeps the live
+# feeds funded to the monthly reset (September 2026 ran the balance to 0).
+NBA_ODDS_HISTORY_MODES = {
+    "alternates": {"cap": 130_000, "seasons": (2024, 2026), "argv": ["--alternates"]},
+    "news_windows": {"cap": 270_000, "seasons": (2025, 2026),
+                     "argv": ["--instants", "jobs/nba_news_windows_2025_2026.json",
+                              "--why", "news_window"]},
+}
+NBA_ODDS_HISTORY_MIN_FLOOR = 500_000
+
+
+def _job_nba_odds_history(**kw):
+    """One of the two NBA purchases (NBA_ODDS_HISTORY_MODES), through
+    data.ingestors.nba_odds_history's own credit meter (ceiling and floor)."""
+    mode = NBA_ODDS_HISTORY_MODES[kw["mode"]]
+    argv = list(mode["argv"])
+    if kw["mode"] == "news_windows":
+        argv[1] = str(Path(__file__).resolve().parent.parent / argv[1])
+    first, last = mode["seasons"]
+    argv += ["--seasons", str(first), str(last), "--apply",
+             "--max-credits", str(kw["max_credits"]), "--floor", str(kw["floor"])]
+    return _run_script_main("data.ingestors.nba_odds_history", argv)[-4000:]
+
+
+def _validate_nba_odds_history(args: dict) -> dict:
+    extra = sorted(set(args) - {"mode", "max_credits", "floor"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes mode, max_credits and floor")
+    mode = args.get("mode")
+    if mode not in NBA_ODDS_HISTORY_MODES:
+        raise ValueError(f"mode must be one of {sorted(NBA_ODDS_HISTORY_MODES)}, got {mode!r}")
+    cap = int(args.get("max_credits") or 0)
+    top = NBA_ODDS_HISTORY_MODES[mode]["cap"]
+    if not 0 < cap <= top:
+        raise ValueError(f"max_credits for {mode} must be 1..{top:,}, got {cap}")
+    floor = int(args.get("floor") or 0)
+    if floor < NBA_ODDS_HISTORY_MIN_FLOOR:
+        raise ValueError(f"floor must be at least {NBA_ODDS_HISTORY_MIN_FLOOR:,}, got {floor}")
+    return {"mode": mode, "max_credits": cap, "floor": floor}
+
+
+# The NCAAB purchases mike approved on 2026-10-26 ("3 approved"): game lines on
+# every 2020-21 .. 2025-26 game (~375,000 credits planned at 30 a snapshot), and
+# first-half + team-total lines on every 2023-24 .. 2025-26 game at the close
+# and at the open (up to ~1,380,000 together, at most 40 a game). Each mode buys
+# one fixed scope under a ceiling it cannot exceed; `probe` makes one measured
+# call of each kind and writes nothing. The buyer resumes on its own ledgers,
+# so a re-queue after a floor stop or a worker restart buys nothing twice. The
+# floor keeps the live feeds funded (September 2026 ran the balance to 0).
+NCAAB_ODDS_HISTORY_MODES = {
+    "lines": {"cap": 420_000, "seasons": (2021, 2026), "argv": ["--lines"]},
+    "deriv_close": {"cap": 800_000, "seasons": (2024, 2026),
+                    "argv": ["--derivatives", "close"]},
+    "deriv_open": {"cap": 800_000, "seasons": (2024, 2026),
+                   "argv": ["--derivatives", "open"]},
+    "probe": {"cap": 200, "seasons": (2026, 2026), "argv": ["--probe"]},
+    # BUILT 2026-10-30, NOT APPROVED AND NOT QUEUED: the opener grid, a bulk
+    # snapshot every 60 or 30 minutes from 72 hours before each tip, so each
+    # book's first posted line is dated to the step (ncaab_odds_history
+    # --opener-grid). No worker_jobs row or declared job until mike approves
+    # the spend. The ceiling is the largest scope it can be asked for: every
+    # half hour with the pre-start window, 2020-21..2025-26, 38,028 snapshots
+    # at 30 credits (1,140,840, the dry run on 2026-10-30), plus room for calls
+    # billed above 30 (job 805227's 7,403 snapshots averaged 30.56 in
+    # api_call_log). The job's own max_credits is set when it is approved.
+    "opener_grid": {"cap": 1_170_000, "seasons": (2021, 2026), "argv": ["--opener-grid"]},
+    # The game-day first-half and team-total times (mike, 2026-11-02): 15:00Z
+    # and 18:00Z on the game's date and tip minus 60 minutes, 2023-24..2025-26,
+    # each under its own source. Approved that day: the 50-game test at 15:00Z
+    # (at most 50 x 40 + 50 lists = 2,050), then the full 15:00Z buy if books
+    # post first-half lines by then; 18:00Z and tip-60 follow on 2026-12-01.
+    # Each cap sits above the measured ceiling (40 a game FG-listed by the
+    # time + 1 a date, api_call_log + odds, 2026-11-02): 15:00Z 687,686,
+    # 18:00Z 628,965, tip-60 689,286. {"mode": ..., "dry_run": true} prints
+    # the plan against production and makes no call.
+    "deriv_15z": {"cap": 700_000, "seasons": (2024, 2026), "argv": ["--derivatives", "15z"]},
+    "deriv_18z": {"cap": 650_000, "seasons": (2024, 2026), "argv": ["--derivatives", "18z"]},
+    "deriv_tip60": {"cap": 700_000, "seasons": (2024, 2026),
+                    "argv": ["--derivatives", "tip60"]},
+    "deriv_15z_test": {"cap": 2_500, "seasons": (2024, 2026),
+                       "argv": ["--derivatives", "15z", "--sample", "50"]},
+}
+NCAAB_GAMEDAY_DERIV_MODES = frozenset({"deriv_15z", "deriv_18z", "deriv_tip60", "deriv_15z_test"})
+# Paid calls in flight at once for the grid and the first-half purchases
+# (mike, 2026-11-02: "I want it all done"). A job whose stored args name none
+# runs at the default, so a job reclaimed after a redeploy (the opener grid,
+# job 936020) picks it up. The buyer's meter clears every call with the calls
+# in flight counted at their most, so the floor holds at any setting.
+NCAAB_ODDS_HISTORY_CONCURRENT_MODES = frozenset(
+    {"opener_grid", "deriv_close", "deriv_open"} | NCAAB_GAMEDAY_DERIV_MODES)
+NCAAB_ODDS_HISTORY_DEFAULT_CONCURRENCY = 6
+NCAAB_ODDS_HISTORY_MAX_CONCURRENCY = 10
+
+
+def _ncaab_concurrency(args: dict) -> dict:
+    """{"concurrency": n} when the args name one (1..10, an integer), else {}."""
+    if "concurrency" not in args:
+        return {}
+    n = args["concurrency"]
+    if isinstance(n, bool) or not isinstance(n, int)             or not 1 <= n <= NCAAB_ODDS_HISTORY_MAX_CONCURRENCY:
+        raise ValueError(f"concurrency must be an integer 1..{NCAAB_ODDS_HISTORY_MAX_CONCURRENCY}, "
+                         f"got {n!r}")
+    return {"concurrency": n}
+# 300,000 = 3.5 of October's worst organic days (84,534 credits on 2026-10-04,
+# odds_api_quota) ahead of a refill that lands about 00:00Z on the 1st (the
+# Sept and Oct resets both show a full day's burn by the 1st's 23:40Z reading).
+# mike, 2026-10-28: "dont stop the spend" — lowered from 500,000.
+NCAAB_ODDS_HISTORY_MIN_FLOOR = 300_000
+
+# The same job's FREE mode, which spends nothing and so takes no ceiling or
+# floor (2026-10-29): `replay_unmatched` stores the raw events the purchase
+# kept in ncaab_odds_unmatched that resolve now, after the team-name fix, over
+# every purchased season. It runs with --apply; {"dry_run": true} runs it
+# read only and prints what it would store.
+NCAAB_ODDS_HISTORY_FREE_MODES = {
+    "replay_unmatched": {"seasons": (2021, 2026), "argv": ["--replay-unmatched"]},
+}
+
+
+def _job_ncaab_odds_history(**kw):
+    """One of the NCAAB purchases (NCAAB_ODDS_HISTORY_MODES), through
+    data.ingestors.ncaab_odds_history's own credit meter (ceiling and floor).
+    The buyer raises before any paid call when the ESPN schedule is not yet
+    stored for a season, so the purchase can never outrun the backfill. A
+    free mode (NCAAB_ODDS_HISTORY_FREE_MODES) makes no paid call at all."""
+    if kw["mode"] in NCAAB_ODDS_HISTORY_FREE_MODES:
+        free = NCAAB_ODDS_HISTORY_FREE_MODES[kw["mode"]]
+        first, last = free["seasons"]
+        argv = list(free["argv"]) + ["--seasons", str(first), str(last),
+                                     "--dry-run" if kw.get("dry_run") else "--apply"]
+        return _run_script_main("data.ingestors.ncaab_odds_history", argv)[-4000:]
+    mode = NCAAB_ODDS_HISTORY_MODES[kw["mode"]]
+    first, last = kw.get("seasons") or mode["seasons"]
+    argv = list(mode["argv"]) + ["--seasons", str(first), str(last)]
+    if kw["mode"] == "opener_grid":
+        argv += ["--step", str(kw["step_min"])] + (["--pre-start"] if kw.get("pre_start") else [])
+        if kw.get("dry_run"):
+            return _run_script_main("data.ingestors.ncaab_odds_history",
+                                    argv + ["--dry-run"])[-4000:]
+    if kw["mode"] in NCAAB_GAMEDAY_DERIV_MODES and kw.get("dry_run"):
+        return _run_script_main("data.ingestors.ncaab_odds_history", argv + ["--dry-run"])[-4000:]
+    if kw["mode"] in NCAAB_ODDS_HISTORY_CONCURRENT_MODES:
+        argv += ["--concurrency",
+                 str(kw.get("concurrency") or NCAAB_ODDS_HISTORY_DEFAULT_CONCURRENCY)]
+    argv += ["--apply", "--max-credits", str(kw["max_credits"]), "--floor", str(kw["floor"])]
+    return _run_script_main("data.ingestors.ncaab_odds_history", argv)[-4000:]
+
+
+def _validate_ncaab_opener_grid(args: dict) -> dict:
+    """The opener grid's args: step_min 60 or 30; pre_start and dry_run true or
+    false; seasons [first, last] inside the mode's (2020-21..2025-26). A dry run
+    buys nothing and takes no credit limit; a purchase takes both, under the
+    mode's ceiling and over the floor."""
+    extra = sorted(set(args) - {"mode", "step_min", "pre_start", "seasons", "dry_run",
+                                "max_credits", "floor", "concurrency"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; opener_grid takes step_min, pre_start, seasons, "
+                         f"dry_run, max_credits, floor and concurrency")
+    step = args.get("step_min")
+    if isinstance(step, bool) or step not in (60, 30):
+        raise ValueError(f"step_min must be 60 or 30, got {step!r}")
+    out: dict = {"mode": "opener_grid", "step_min": step}
+    for flag in ("pre_start", "dry_run"):
+        v = args.get(flag, False)
+        if not isinstance(v, bool):
+            raise ValueError(f"{flag} must be true or false, got {v!r}")
+        out[flag] = v
+    lo, hi = NCAAB_ODDS_HISTORY_MODES["opener_grid"]["seasons"]
+    seasons = args.get("seasons", [lo, hi])
+    if (not isinstance(seasons, (list, tuple)) or len(seasons) != 2
+            or any(isinstance(x, bool) or not isinstance(x, int) for x in seasons)
+            or not lo <= seasons[0] <= seasons[1] <= hi):
+        raise ValueError(f"seasons must be [first, last] within {lo}..{hi}, got {seasons!r}")
+    out["seasons"] = (seasons[0], seasons[1])
+    if out["dry_run"]:
+        if "max_credits" in args or "floor" in args or "concurrency" in args:
+            raise ValueError("a dry run buys nothing; it takes no max_credits, floor or "
+                             "concurrency")
+        return out
+    cap = int(args.get("max_credits") or 0)
+    top = NCAAB_ODDS_HISTORY_MODES["opener_grid"]["cap"]
+    if not 0 < cap <= top:
+        raise ValueError(f"max_credits for opener_grid must be 1..{top:,}, got {cap}")
+    floor = int(args.get("floor") or 0)
+    if floor < NCAAB_ODDS_HISTORY_MIN_FLOOR:
+        raise ValueError(f"floor must be at least {NCAAB_ODDS_HISTORY_MIN_FLOOR:,}, got {floor}")
+    return {**out, "max_credits": cap, "floor": floor, **_ncaab_concurrency(args)}
+
+
+def _validate_ncaab_odds_history(args: dict) -> dict:
+    if args.get("mode") in NCAAB_ODDS_HISTORY_FREE_MODES:
+        extra = sorted(set(args) - {"mode", "dry_run"})
+        if extra:
+            raise ValueError(f"unknown args {extra}; {args['mode']} buys nothing and takes "
+                             f"mode and dry_run only")
+        dry = args.get("dry_run", False)
+        if not isinstance(dry, bool):
+            raise ValueError(f"dry_run must be true or false, got {dry!r}")
+        return {"mode": args["mode"], "dry_run": dry}
+    if args.get("mode") == "opener_grid":
+        return _validate_ncaab_opener_grid(args)
+    if args.get("mode") in NCAAB_GAMEDAY_DERIV_MODES and "dry_run" in args:
+        # A game-day time's dry run buys nothing and takes no credit limit;
+        # dry_run false is a purchase, held to the checks below.
+        dry, args = args["dry_run"], {k: v for k, v in args.items() if k != "dry_run"}
+        if not isinstance(dry, bool):
+            raise ValueError(f"dry_run must be true or false, got {dry!r}")
+        if dry:
+            extra = sorted(set(args) - {"mode"})
+            if extra:
+                raise ValueError(f"a dry run buys nothing; it takes mode and dry_run only, "
+                                 f"not {extra}")
+            return {"mode": args["mode"], "dry_run": True}
+    allowed = {"mode", "max_credits", "floor"}
+    if args.get("mode") in NCAAB_ODDS_HISTORY_CONCURRENT_MODES:
+        allowed.add("concurrency")
+    extra = sorted(set(args) - allowed)
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes {', '.join(sorted(allowed))}")
+    mode = args.get("mode")
+    if mode not in NCAAB_ODDS_HISTORY_MODES:
+        raise ValueError(f"mode must be one of "
+                         f"{sorted(NCAAB_ODDS_HISTORY_MODES) + sorted(NCAAB_ODDS_HISTORY_FREE_MODES)}"
+                         f", got {mode!r}")
+    cap = int(args.get("max_credits") or 0)
+    top = NCAAB_ODDS_HISTORY_MODES[mode]["cap"]
+    if not 0 < cap <= top:
+        raise ValueError(f"max_credits for {mode} must be 1..{top:,}, got {cap}")
+    floor = int(args.get("floor") or 0)
+    if floor < NCAAB_ODDS_HISTORY_MIN_FLOOR:
+        raise ValueError(f"floor must be at least {NCAAB_ODDS_HISTORY_MIN_FLOOR:,}, got {floor}")
+    return {"mode": mode, "max_credits": cap, "floor": floor, **_ncaab_concurrency(args)}
+
+
+# The NCAAF first-half and team-total purchase mike approved on 2026-11-10
+# ("Buy all"; docs/ncaaf_market_audit.md section 7): the first-half moneyline,
+# spread and total and the team totals on every 2023-2025 game that holds
+# stored full-game prices, at the two times those are stored at (`am` 14:00
+# UTC on the game's Eastern date, `pm` 23:00 UTC the Eastern date before).
+# Each limit is the buyer's own plan at its most (40 credits a game, 1 a
+# date's event list), measured on the local copy of the database on
+# 2026-11-10: 2,510 games on 180 dates at `am` (100,580 credits) and 2,435 on
+# 186 at `pm` (97,586). THAT IS ABOVE THE 92,765 A READ THE AUDIT STATED, which
+# was 2,314 games on 205 dates: the count of games with any stored pull, not
+# of either read. At the morning read the audit's own extract holds 2,257
+# games with a final on 180 dates; the plan adds 210 whose final sits on
+# CFBD's row under another spelling of the school, and 43 with no final
+# stored. A job may ask for less. A test buy of N games a read
+# ({"sample": N}) is held to N games and N lists (50 at one read: 2,050). The
+# buyer cuts its own ceiling to its printed plan, raises the floor to the
+# measured reserve, and skips every game its ledger holds, so a re-queue
+# after a stop or a worker restart buys nothing twice.
+# {"read": ..., "dry_run": true} prints the plan against production and makes
+# no call. NOT A DECLARED JOB: nothing is bought until a row is queued.
+NCAAF_DERIVATIVE_HISTORY_CAPS = {"am": 100_580, "pm": 97_586, "both": 198_166}
+NCAAF_DERIVATIVE_HISTORY_SEASONS = (2023, 2025)
+NCAAF_DERIVATIVE_HISTORY_GAME_COST = 40 + 1      # a game's call and, at most, its own date's list
+
+
+def _job_ncaaf_derivative_history(**kw):
+    """The NCAAF first-half and team-total purchase, through
+    data.ingestors.ncaaf_derivative_history's own command line, credit meter
+    and ledger."""
+    first, last = NCAAF_DERIVATIVE_HISTORY_SEASONS
+    argv = ["--read", kw["read"], "--seasons", str(first), str(last)]
+    if kw.get("sample") is not None:
+        argv += ["--sample", str(kw["sample"])]
+    if kw.get("dry_run"):
+        return _run_script_main("data.ingestors.ncaaf_derivative_history",
+                                argv + ["--dry-run"])[-4000:]
+    argv += ["--concurrency",
+             str(kw.get("concurrency") or NCAAB_ODDS_HISTORY_DEFAULT_CONCURRENCY),
+             "--apply", "--max-credits", str(kw["max_credits"]), "--floor", str(kw["floor"])]
+    return _run_script_main("data.ingestors.ncaaf_derivative_history", argv)[-4000:]
+
+
+def _validate_ncaaf_derivative_history(args: dict) -> dict:
+    extra = sorted(set(args) - {"read", "sample", "dry_run", "max_credits", "floor",
+                                "concurrency"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes read, sample, dry_run, "
+                         f"max_credits, floor and concurrency")
+    read = args.get("read")
+    if read not in NCAAF_DERIVATIVE_HISTORY_CAPS:
+        raise ValueError(f"read must be one of {sorted(NCAAF_DERIVATIVE_HISTORY_CAPS)}, "
+                         f"got {read!r}")
+    out: dict = {"read": read}
+    top = NCAAF_DERIVATIVE_HISTORY_CAPS[read]
+    if "sample" in args:
+        n = args["sample"]
+        if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+            raise ValueError(f"sample must be a whole number of games, 1 or more, got {n!r}")
+        out["sample"] = n
+        reads = 2 if read == "both" else 1
+        top = min(top, n * NCAAF_DERIVATIVE_HISTORY_GAME_COST * reads)
+    dry = args.get("dry_run", False)
+    if not isinstance(dry, bool):
+        raise ValueError(f"dry_run must be true or false, got {dry!r}")
+    if dry:
+        spend = sorted(set(args) & {"max_credits", "floor", "concurrency"})
+        if spend:
+            raise ValueError(f"a dry run buys nothing; it takes read and sample only, "
+                             f"not {spend}")
+        return {**out, "dry_run": True}
+    cap = int(args.get("max_credits") or 0)
+    if not 0 < cap <= top:
+        raise ValueError(f"max_credits for read {read} must be 1..{top:,}, got {cap}")
+    floor = int(args.get("floor") or 0)
+    if floor < NCAAB_ODDS_HISTORY_MIN_FLOOR:
+        raise ValueError(f"floor must be at least {NCAAB_ODDS_HISTORY_MIN_FLOOR:,}, got {floor}")
+    return {**out, "max_credits": cap, "floor": floor, **_ncaab_concurrency(args)}
+
+
+# The free NCAAB feed check (scripts/ncaab_feed_probe.py). Its only paid calls
+# are the per-event market lists, 1 credit each, at most 10.
+_NCAAB_FEED_PROBE_MAX_EVENTS = 10
+_NCAAB_FEED_PROBE_STDOUT_CAP = 200_000
+
+
+def _job_ncaab_feed_probe(**kw):
+    """The feed probe's printout, its compact summary first (the job card shows
+    the first 900 characters of the result)."""
+    from scripts.ncaab_feed_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.ncaab_feed_probe",
+                            ["--market-events", str(kw["market_events"])]).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:1500] or "(no output)",
+            "stdout": text[-_NCAAB_FEED_PROBE_STDOUT_CAP:],
+            "truncated": len(text) > _NCAAB_FEED_PROBE_STDOUT_CAP}
+
+
+def _job_ncaab_injury_probe(**kw):
+    """Both injury pages: HTTP status and parsed player count. Writes nothing."""
+    from scripts.ncaab_injury_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.ncaab_injury_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _job_splits_source_probe(**kw):
+    """DK Network's splits page and Action Network's book ids. Writes nothing,
+    no Odds API call (scripts/splits_source_probe.py)."""
+    from scripts.splits_source_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.splits_source_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _job_book_app_links_probe(**kw):
+    """Each sportsbook's apple-app-site-association file, and whether the
+    betslip links we store are claimed by its app. Writes nothing, no Odds API
+    call (scripts/book_app_links_probe.py)."""
+    from scripts.book_app_links_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.book_app_links_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _validate_book_app_links_probe(args: dict) -> dict:
+    if args:
+        raise ValueError(f"unknown args {sorted(args)}; this job takes none")
+    return {}
+
+
+def _validate_splits_source_probe(args: dict) -> dict:
+    if args:
+        raise ValueError(f"unknown args {sorted(args)}; this job takes none")
+    return {}
+
+
+def _validate_ncaab_injury_probe(args: dict) -> dict:
+    if args:
+        raise ValueError(f"unknown args {sorted(args)}; this job takes none")
+    return {}
+
+
+def _validate_ncaab_feed_probe(args: dict) -> dict:
+    extra = sorted(set(args) - {"market_events"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes market_events")
+    raw = args.get("market_events", 5)
+    if isinstance(raw, bool):
+        raise ValueError("market_events must be a whole number")
+    n = int(raw)
+    if not 0 <= n <= _NCAAB_FEED_PROBE_MAX_EVENTS:
+        raise ValueError(f"market_events must be 0..{_NCAAB_FEED_PROBE_MAX_EVENTS}, got {n}")
+    return {"market_events": n}
+
+
+# The ESPN NCAAB schedule and results backfill (data/ingestors/ncaab_espn_ingestor.py,
+# free). Idempotent: it upserts ESPN's own rows. The span cap is 2,400 days so
+# the declared 2020-11-01 .. 2027-04-10 safety net (2,351 days, six and a half
+# seasons) fits in one job; a typo'd decade does not.
+_NCAAB_BACKFILL_MAX_DAYS = 2_400
+
+
+def _job_ncaab_schedule_backfill(**kw):
+    return _run_script_main("data.ingestors.ncaab_espn_ingestor",
+                            ["--backfill", kw["first"], kw["last"]])[-4000:]
+
+
+def _validate_ncaab_schedule_backfill(args: dict) -> dict:
+    extra = sorted(set(args) - {"first", "last"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes first and last")
+    first, last = str(args.get("first") or ""), str(args.get("last") or "")
+    d0 = datetime.strptime(first, "%Y-%m-%d")      # raises ValueError if malformed
+    d1 = datetime.strptime(last, "%Y-%m-%d")
+    if d1 < d0:
+        raise ValueError(f"last {last} is before first {first}")
+    if (d1 - d0).days > _NCAAB_BACKFILL_MAX_DAYS:
+        raise ValueError(f"span {(d1 - d0).days} days exceeds {_NCAAB_BACKFILL_MAX_DAYS:,}")
+    # strptime takes "2027-4-10"; the ingestor is handed the ISO form it parses.
+    return {"first": d0.date().isoformat(), "last": d1.date().isoformat()}
+
+
+# NCAAB box scores and period scores from ESPN (data/ingestors/ncaab_espn_box.py,
+# free, no key). kind "periods": one scoreboard call per date, every final of
+# the seasons that has no period row (2020-21 to 2025-26 is 855 dates and
+# 35,323 finals, counted 2026-10-30). kind "box": one summary call per final
+# with no 'espn_summary' box row, box and period scores together. Both skip
+# what is stored, so a re-run stores nothing twice. The box backfill is held
+# to the current season, the only one sportsdataverse does not cover; an
+# older season would put a second source on games NCAA's rows already hold.
+# "players": per-player box scores (data/ingestors/ncaab_player_box.py) for
+# the Stats tab, 2025-26 on (Matt, 2026-11-03: "This season + 2025-26").
+NCAAB_BOX_BACKFILL_SPANS = {"periods": (2011, 2027), "box": (2027, 2027),
+                            "players": (2026, 2027)}
+
+
+def _validate_ncaab_box_backfill(args: dict) -> dict:
+    extra = sorted(set(args) - {"kind", "first", "last"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes kind, first and last")
+    kind = str(args.get("kind") or "")
+    if kind not in NCAAB_BOX_BACKFILL_SPANS:
+        raise ValueError(f"kind must be one of {sorted(NCAAB_BOX_BACKFILL_SPANS)}, got {kind!r}")
+    lo, hi = NCAAB_BOX_BACKFILL_SPANS[kind]
+    try:
+        first, last = int(args.get("first", lo)), int(args.get("last", hi))
+    except (TypeError, ValueError):
+        raise ValueError("first and last must be whole seasons") from None
+    if not (lo <= first <= last <= hi):
+        raise ValueError(f"{kind} seasons must sit inside {lo}..{hi}, got {first}..{last}")
+    return {"kind": kind, "first": first, "last": last}
+
+
+def _job_ncaab_box_backfill(**kw) -> str:
+    if kw["kind"] == "players":
+        return _run_script_main("data.ingestors.ncaab_player_box",
+                                ["--seasons", str(kw["first"]), str(kw["last"])])[-4000:]
+    flag = "--periods" if kw["kind"] == "periods" else "--box"
+    return _run_script_main("data.ingestors.ncaab_espn_box",
+                            [flag, "--seasons", str(kw["first"]), str(kw["last"])])[-4000:]
+
+
+# Free NCAAB history into Supabase on the worker. Built here because the local
+# DATABASE_URL was stale from 2026-10-26 (password authentication failed on
+# both pooler ports) until mike replaced it on 2026-10-29. Each kind is one
+# importer's CLI with a fixed argv; seasons are bounded to what each source
+# publishes.
+NCAAB_HISTORY_IMPORTS = {
+    "box_scores": ("data.ingestors.ncaab_sdv_import", ["--seasons"], (2011, 2026)),
+    "prediction_tracker": ("data.ingestors.ncaab_archive_import", ["--pt"], (2005, 2026)),
+    "sbro": ("data.ingestors.ncaab_archive_import", ["--sbro"], (2008, 2021)),
+    "match": ("data.ingestors.ncaab_archive_import", ["--match"], None),
+}
+
+
+def _validate_ncaab_history_import(args: dict) -> dict:
+    extra = sorted(set(args) - {"kind", "first", "last"})
+    if extra:
+        raise ValueError(f"unknown args: {extra}")
+    kind = str(args.get("kind") or "")
+    if kind not in NCAAB_HISTORY_IMPORTS:
+        raise ValueError(f"kind must be one of {sorted(NCAAB_HISTORY_IMPORTS)}, got {kind!r}")
+    span = NCAAB_HISTORY_IMPORTS[kind][2]
+    if span is None:
+        if "first" in args or "last" in args:
+            raise ValueError(f"{kind} takes no seasons")
+        return {"kind": kind}
+    first = int(args.get("first", span[0]))
+    last = int(args.get("last", span[1]))
+    if not (span[0] <= first <= last <= span[1]):
+        raise ValueError(f"{kind} seasons must sit inside {span}, got {first}..{last}")
+    return {"kind": kind, "first": first, "last": last}
+
+
+def _job_ncaab_history_import(**kw) -> str:
+    mod, argv, span = NCAAB_HISTORY_IMPORTS[kw["kind"]]
+    argv = list(argv)
+    if span is not None:
+        argv += [str(kw["first"]), str(kw["last"])]
+    return _run_script_main(mod, argv)[-4000:]
 
 
 # Keys this job will read. Anything else — including max_credits, credit_cap,
@@ -672,6 +1181,42 @@ def _job_derive_first_pitch(**kw):
         conn.close()
 
 
+def _validate_restore_swept_ncaab_none_rows(args: dict) -> dict:
+    """apply defaults false (counts only). Only the boolean true writes.
+    wait_s (default 660) is how long the job waits before it reads."""
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError(f"apply must be true or false, got {apply!r}")
+    wait_s = args.get("wait_s", 660)
+    if isinstance(wait_s, bool) or not isinstance(wait_s, int) or not 0 <= wait_s <= 1800:
+        raise ValueError(f"wait_s must be an integer 0-1800, got {wait_s!r}")
+    return {"apply": apply, "wait_s": wait_s}
+
+
+def _job_restore_swept_ncaab_none_rows(**kw):
+    """2026-11-06: put back the NCAAB cards' NONE rows the scorer's sweep
+    deleted, for games not yet started. tracking/restore_swept_ncaab_none_rows.py.
+
+    It waits first. The deploy that carries the fix is also the one that
+    queues this job, and the container it replaces keeps running its
+    in-flight step for up to railway.json's drainingSeconds (600) after
+    SIGTERM -- a scoring step whose sweep would delete the restored rows
+    again. 660 s outlasts that drain. The queue runs on the pipeline role
+    only (scheduler._PIPELINE_JOBS), the same container as the refresh
+    passes; the pollers role runs no full scoring pass."""
+    import time
+
+    from data.db import get_connection
+    from tracking.restore_swept_ncaab_none_rows import restore
+
+    time.sleep(kw["wait_s"])
+    conn = get_connection()
+    try:
+        return restore(conn, apply=kw["apply"])
+    finally:
+        conn.close()
+
+
 def _validate_publish_oct13_nhl_reply(args: dict) -> dict:
     """No arguments. The line and the tweet it replies to are fixed."""
     if args:
@@ -683,6 +1228,7 @@ def _validate_publish_oct13_nhl_reply(args: dict) -> dict:
 def _job_publish_oct13_nhl_reply(**kw):
     """Reply the Oct 13 line under the correction tweet. Discord is skipped
     when that follow-up is already in push_sent."""
+    config.require_record_restatement_approval("record_correction:2026-10-13-nhl")
     from data.db import get_connection
     from scripts.post_record_correction import publish_oct13_reply
 
@@ -703,6 +1249,7 @@ def _validate_publish_oct13_nhl_line(args: dict) -> dict:
 
 def _job_publish_oct13_nhl_line(**kw):
     """Post the Oct 13 NHL line once. The longer correction has already gone."""
+    config.require_record_restatement_approval("record_correction:2026-10-13-nhl")
     from data.db import get_connection
     from scripts.post_record_correction import publish_oct13_line
 
@@ -715,6 +1262,7 @@ def _job_publish_oct13_nhl_line(**kw):
 
 def _job_publish_full_record_standard(**kw):
     """Full record in the standard recap embed, once, Discord only."""
+    config.require_record_restatement_approval("full_record_std:2026-10-14")
     from data.db import get_connection
     from scripts.post_record_correction import publish_full_record_standard
 
@@ -741,6 +1289,7 @@ def _validate_publish_full_record(args: dict) -> dict:
 
 def _job_publish_full_record(**kw):
     """Post the 2026-10-14 full record once to Discord results. Not X."""
+    config.require_record_restatement_approval("full_record:2026-10-14")
     from data.db import get_connection
     from scripts.post_record_correction import publish_full_record
 
@@ -765,6 +1314,7 @@ def _job_publish_record_correction(**kw):
     The words live in scripts/post_record_correction.py. This job does not
     take a text argument, and a retry skips any surface already in push_sent.
     """
+    config.require_record_restatement_approval("record_correction:2026-10-14")
     from data.db import get_connection
     from scripts.post_record_correction import publish_record_correction
 
@@ -795,6 +1345,9 @@ def _job_publish_x_results(**kw):
     The day-is-over guard in notify_x_results is NOT bypassed: this clears the
     ledger and calls the ordinary path, so a date that is not over still posts
     nothing. That is the safety property, and re-posting must not cost it.
+
+    A date that has already posted needs mike's approval. Clearing the ledger
+    is what turns a second post into a "first".
     """
     from data.db import get_connection
     from tracking.x_publisher import notify_x_results
@@ -813,6 +1366,8 @@ def _job_publish_x_results(**kw):
             "SELECT count(*) FROM push_sent "
             "WHERE lock_key = %s AND kind = 'x_results'",
             (lock_key,)).fetchone()[0])
+        if removed:
+            config.require_record_restatement_approval(game_date)
         conn.execute(
             "DELETE FROM push_sent WHERE lock_key = %s AND kind = 'x_results'",
             (lock_key,))
@@ -842,6 +1397,9 @@ def _job_publish_results(**kw):
     the ordinary paths, so a date that is not over still posts nothing. The
     results_snapshots row for the date is overwritten by the Discord post
     (ON CONFLICT ... DO UPDATE), so the stored receipt matches the re-post.
+
+    A date that has already posted needs mike's approval. Clearing the ledger
+    is what turns a second post into a "first".
     """
     from data.db import get_connection
     from tracking.discord_notifier import notify_discord_results
@@ -857,6 +1415,8 @@ def _job_publish_results(**kw):
             "SELECT count(*) FROM push_sent "
             "WHERE lock_key = ANY(%s) AND kind IN ('discord_results', 'x_results')",
             (keys,)).fetchone()[0])
+        if removed:
+            config.require_record_restatement_approval(game_date)
         conn.execute(
             "DELETE FROM push_sent "
             "WHERE lock_key = ANY(%s) AND kind IN ('discord_results', 'x_results')",
@@ -1038,12 +1598,176 @@ def _job_discord_probe(**kw):
         except Exception as exc:                              # noqa: BLE001
             out[label] = {"error": str(exc)[:200]}
 
+    # A sport that posts through its channel id and the bot token
+    # (DISCORD_CHANNEL_<SPORT>, NCAAB from 2026-10-30) has no webhook variable
+    # to probe: report the bot's webhook in that channel instead, read by GET
+    # only and never with its token. A webhook variable, when set, wins in the
+    # notifier, so it is what was probed above.
+    from tracking.discord_notifier import channel_hook_info
+    by_channel = [s for s in sorted(getattr(config, "DISCORD_CHANNELS", {}) or {})
+                  if s not in config.DISCORD_WEBHOOKS]
+    for sport in by_channel:
+        try:
+            out[f"sport:{sport}"] = channel_hook_info(sport)
+        except Exception as exc:                              # noqa: BLE001
+            out[f"sport:{sport}"] = {"error": type(exc).__name__}
+
     channels = [v.get("channel_id") for v in out.values() if v.get("channel_id")]
     out["_summary"] = {
-        "probed": len(targets),
+        "probed": len(targets) + len(by_channel),
         "distinct_channels": len(set(channels)),
         "collisions": sorted({c for c in channels if channels.count(c) > 1}),
     }
+    return out
+
+
+def _job_discord_create_channel(**kw):
+    """Create a sport's Discord channel as a copy of another sport's
+    (scripts/discord_create_sport_channel.py): the same category, the position
+    after it, the same permission overwrites. The worker holds
+    DISCORD_BOT_TOKEN and no laptop does, so it runs here. apply defaults
+    false: a dry run reads the guild's channels and prints the body it would
+    send. The printout carries the new channel's id (not a secret) and never
+    the token."""
+    argv = ["--name", kw["name"], "--like", kw["like"]]
+    if kw.get("guild"):
+        argv += ["--guild", kw["guild"]]
+    if not kw["apply"]:
+        argv.append("--dry-run")
+    return _run_script_main("scripts.discord_create_sport_channel", argv)[-3000:]
+
+
+def _job_discord_test_post(**kw):
+    """Post ONE plain test message to a sport's pick channel, through the same
+    route a real pick takes (discord_notifier._webhook_for_sport: the sport's
+    webhook variable, else DISCORD_CHANNEL_<SPORT> + the bot token, which finds
+    or creates the bot's webhook in that channel).
+
+    mike, 2026-11-02: "Run a test to ncaab then" -- #ncaab was wired by channel
+    id only, so the first real pick would also be the first time the bot made
+    the channel's webhook. This proves that path before a pick depends on it.
+
+    Writes nothing to picks or any other table, so it is not a pick and touches
+    no record. Exactly one POST, no retry (a timed-out POST may already have
+    landed, and a retry would post twice), and it never raises: a failure is
+    returned as the job's result, so the queue does not re-run it. The webhook
+    URL and token never appear in the result."""
+    import requests
+    from tracking import discord_notifier as dn
+    sport = kw["sport"]
+    try:
+        url = dn._webhook_for_sport(sport)
+    except Exception as exc:  # noqa: BLE001
+        return {"sport": sport, "posted": False, "error": f"resolve: {type(exc).__name__}"}
+    if not url:
+        return {"sport": sport, "posted": False,
+                "error": f"no webhook for {sport}: set DISCORD_WEBHOOK_{sport}, or "
+                         f"DISCORD_CHANNEL_{sport} with DISCORD_BOT_TOKEN (the bot needs "
+                         "Manage Webhooks on the channel); see the worker log"}
+    try:
+        r = requests.post(f"{url}?wait=true", json={"content": kw["message"]}, timeout=20)
+    except Exception as exc:  # noqa: BLE001 -- never retried, see docstring
+        return {"sport": sport, "posted": "unknown", "error": type(exc).__name__}
+    out = {"sport": sport, "status": r.status_code, "posted": r.status_code in (200, 204)}
+    if out["posted"]:
+        try:
+            body = r.json()
+            out.update(message_id=str(body.get("id")), channel_id=str(body.get("channel_id")),
+                       webhook_id=str(body.get("webhook_id")))
+        except Exception:  # noqa: BLE001
+            pass
+    else:
+        out["error"] = dn._WEBHOOK_IN_TEXT.sub("[webhook]", r.text[:180])
+    try:
+        out["channel"] = dn.channel_hook_info(sport) if config.DISCORD_CHANNELS.get(sport) else None
+    except Exception as exc:  # noqa: BLE001
+        out["channel"] = {"error": type(exc).__name__}
+    return out
+
+
+def _validate_discord_test_post(args: dict) -> dict:
+    extra = sorted(set(args) - {"sport", "message"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes sport, message")
+    sport = str(args.get("sport") or "").strip().upper()
+    if sport not in config.DISCORD_SPORTS:
+        raise ValueError(f"sport must be one of {list(config.DISCORD_SPORTS)}")
+    message = str(args.get("message") or "").strip() or (
+        f"\U0001f9ea Test: Signalbase {sport} pick feed is connected. Not a pick.")
+    if len(message) > 300 or "@" in message:
+        raise ValueError("message must be under 300 characters with no mentions")
+    return {"sport": sport, "message": message}
+
+
+def _discord_channel_name_ok(v: str) -> bool:
+    """A Discord channel name: optional one-emoji prefix, then a slug.
+
+    The slug is the old shape (lowercase, digits, hyphens, 2-32 characters)
+    and must contain a letter. One leading pictograph plus a hyphen is
+    allowed ('🔴-ncaab-live'). A mention, a path, a shell token, an emoji
+    in the middle, a name that is only an emoji, or a name that is only
+    digits is not.
+    """
+    import re
+    if not v or not re.fullmatch(
+        r"(?:[\U0001F300-\U0001FAFF]\uFE0F?|[\u2600-\u27BF]\uFE0F?)-"
+        r"[a-z0-9][a-z0-9-]{1,31}"
+        r"|[a-z0-9][a-z0-9-]{1,31}",
+        v,
+    ):
+        return False
+    slug = v.split("-", 1)[1] if ord(v[0]) > 127 else v
+    return any(c.isalpha() for c in slug)
+
+
+def _job_nba_live_ig2_artifact(**kw):
+    """The post-merge step of #1180: store the committed NBA in-play artifact
+    in model_artifacts, then register its live rule(s) in model_registry
+    (scripts/build_nba_live_ig2_artifact.py --store / --register). The worker
+    holds DATABASE_URL and the committed file; no laptop needs either. The
+    path is fixed to the committed artifact, never an argument."""
+    path = str(Path(__file__).resolve().parent.parent / "models" / "saved" / "nba_live_ig2_2027.json")
+    argv = ["--store", path] if kw["step"] == "store" else ["--register", path]
+    return _run_script_main("scripts.build_nba_live_ig2_artifact", argv)[-3000:] or f"{kw['step']} done"
+
+
+def _validate_nba_live_ig2_artifact(args: dict) -> dict:
+    extra = sorted(set(args) - {"step"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes step")
+    step = str(args.get("step") or "").strip()
+    if step not in ("store", "register"):
+        raise ValueError("step must be 'store' or 'register'")
+    return {"step": step}
+
+
+def _validate_discord_create_channel(args: dict) -> dict:
+    import re
+    extra = sorted(set(args) - {"name", "like", "guild", "apply"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes name, like, guild, apply")
+    out = {}
+    # A name has a letter in it; `like` may instead be the source channel's
+    # id (17-20 digits), because the server's college football channel is
+    # not called "ncaaf" (dry run, 2026-10-31). An emoji prefix is one
+    # pictograph plus a hyphen ('🔴-ncaab-live').
+    for k in ("name", "like"):
+        v = str(args.get(k) or "").strip()
+        is_name = _discord_channel_name_ok(v)
+        is_id = k == "like" and bool(re.fullmatch(r"[0-9]{17,20}", v))
+        if not (is_name or is_id):
+            raise ValueError(f"{k} must be a channel name like 'ncaab' or "
+                             f"'🔴-ncaab-live'"
+                             f"{' or a channel id' if k == 'like' else ''}, got {v!r}")
+        out[k] = v
+    guild = str(args.get("guild") or "").strip()
+    if guild and not guild.isdigit():
+        raise ValueError("guild must be a numeric id")
+    out["guild"] = guild or None
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError("apply must be true or false")
+    out["apply"] = apply
     return out
 
 
@@ -1218,6 +1942,33 @@ def _job_health_check(**kw):
             "checks": len(res.get("results") or [])}
 
 
+def _job_nba_quarters(**kw):
+    """Run the daily nba_quarters step ON THE WORKER, on demand.
+
+    mike, 2026-10-30: "Run it now instead of waiting for 6am tomorrow", after
+    #1097 fixed fill_gaps. The step reads free ESPN endpoints and writes
+    the NBA stats tables (quarter scores, nba_pbp_games, nba_stints,
+    nba_team_q1_games, team_period_results): no model, pick, stake or
+    threshold is touched. Since 2026-11-13 it also buys the half and quarter
+    closing lines of finished games that lack them (Matt approved the
+    backfill and the daily buy), under nba_odds_history.buy_period_lines_daily's
+    own plan-derived ceiling and measured floor. It goes
+    through run_pipeline._timed_step, the same dispatch the daily run uses, so
+    pipeline_log gets the usual dispatch:nba-quarters row with its error_msg.
+
+    A False step is the step's own handled failure, and _timed_step has already
+    written that error row. health_check and model_quality return {"ok": false}
+    for a non-ok result and do not raise. Raising here would put the job back
+    to pending and run the step again, up to MAX_ATTEMPTS. The queue records
+    this result once.
+    """
+    import run_pipeline
+    run_date = kw.get("run_date") or config.today_et()
+    ok = run_pipeline._timed_step(
+        "nba-quarters", lambda: run_pipeline.step_nba_quarters(run_date), run_date)
+    return {"ok": bool(ok), "run_date": run_date}
+
+
 def _job_model_quality(**kw):
     """Run the model-quality monitor ON THE WORKER.
 
@@ -1381,10 +2132,13 @@ def _job_team_stats_asof_verify(**kw):
 
     verify() skips the current max (live) season for impossible-games,
     tolerates a 1-game date-boundary mismatch, and excuses a thin snapshot
-    count on that live season only while its finals span fewer than
-    MIN_SNAPSHOTS_PER_SEASON days — see that function. Historical seasons
-    are not excused. This wrapper only reports what verify returns; it
-    never rebuilds or DELETE.
+    count on that live season in two shapes: while its finals span fewer
+    than MIN_SNAPSHOTS_PER_SEASON days, or while its own snapshot series
+    is a young snapshot series (first as_of_date fewer than that many days
+    before the check, newest row today or yesterday). A series that has
+    collapsed or stopped stays thin, and an empty games read is not an
+    excuse. Historical seasons are not excused. This wrapper only reports
+    what verify returns; it never rebuilds or DELETE.
     """
     from data.db import get_connection
     from data.team_stats_rebuild import SPORTS, verify
@@ -1535,7 +2289,7 @@ def _run_script_main(mod_name: str, argv: list[str]) -> str:
     return text
 
 
-_GAME_LINE_SPORTS = frozenset({"MLB", "NCAAF"})
+_GAME_LINE_SPORTS = frozenset({"MLB", "NCAAF", "NCAAB"})
 _GAME_LINE_MARKETS = frozenset({"h2h", "spreads", "totals"})
 
 
@@ -1559,7 +2313,7 @@ def _validate_game_line_market_sweep(args: dict) -> dict:
         from scripts.game_line_market_sweep import SNAPSHOT_TYPES, VS_MODES
         sport = str(args.get("sport") or "MLB").upper()
         if sport not in _GAME_LINE_SPORTS:
-            raise ValueError(f"sport must be MLB|NCAAF, got {sport!r}")
+            raise ValueError(f"sport must be MLB|NCAAF|NCAAB, got {sport!r}")
         markets = args.get("markets") or args.get("market") or ["spreads", "totals"]
         if isinstance(markets, str):
             markets = [markets]
@@ -1833,37 +2587,216 @@ def _job_mlb_over_under_retrain_sweep(**kw):
 
 
 def _validate_byom_game_facts(args: dict) -> dict:
-    """NFL game facts. apply defaults false so a queued job writes nothing
-    until someone asks. Seasons before DraftKings history are refused.
+    """NFL or NBA game facts. apply defaults false so a queued job writes
+    nothing until someone asks. A missing sport is NFL. Sport is stripped
+    and uppercased. An NFL season before 2020, and an NBA season before
+    2021, are refused. Those seasons have no DraftKings game lines.
     """
-    from byom.constants import DK_HISTORY_START_SEASON
+    from byom.constants import (
+        DK_HISTORY_START_SEASON,
+        NBA_DK_HISTORY_START_SEASON,
+        NHL_DK_HISTORY_START_SEASON,
+    )
 
-    sport = str(args.get("sport") or "NFL")
-    if sport != "NFL":
-        raise ValueError(f"byom_game_facts builds NFL only, got {sport!r}")
+    sport = str(args.get("sport") or "NFL").strip().upper()
+    if sport not in ("NFL", "NBA", "NHL"):
+        raise ValueError(f"byom_game_facts builds NFL, NBA or NHL, got {sport!r}")
     season = args.get("season")
     if season in (None, ""):
         season = None
     else:
         season = int(season)
-        if season < DK_HISTORY_START_SEASON:
+        floor = {"NFL": DK_HISTORY_START_SEASON,
+                 "NBA": NBA_DK_HISTORY_START_SEASON,
+                 "NHL": NHL_DK_HISTORY_START_SEASON}[sport]
+        if season < floor:
             raise ValueError(
-                f"season {season} is before DraftKings history "
-                f"({DK_HISTORY_START_SEASON})")
+                f"season {season} is before DraftKings history ({floor})")
     apply = args.get("apply", False)
     if not isinstance(apply, bool):
         raise ValueError(f"apply must be true or false, got {apply!r}")
     return {"sport": sport, "season": season, "apply": apply}
 
 
+def _validate_byom_prop_facts(args: dict) -> dict:
+    """NFL or NBA prop facts. apply defaults false. Seasons before the
+    prop history start are refused. A missing sport is NFL. Sport is
+    stripped and uppercased, the same as byom_game_facts."""
+    from byom.constants import PROP_HISTORY_START_SEASON
+
+    sport = str(args.get("sport") or "NFL").strip().upper()
+    if sport not in ("NFL", "NBA"):
+        raise ValueError(f"byom_prop_facts builds NFL or NBA, got {sport!r}")
+    season = args.get("season")
+    if season in (None, ""):
+        season = None
+    else:
+        season = int(season)
+        if season < PROP_HISTORY_START_SEASON:
+            raise ValueError(
+                f"season {season} is before player_prop_odds history "
+                f"({PROP_HISTORY_START_SEASON})")
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError(f"apply must be true or false, got {apply!r}")
+    return {"sport": sport, "season": season, "apply": apply}
+
+
+def _byom_connection():
+    """A connection whose leaked transaction dies after 60s of idle.
+
+    The builders commit each season, and a quote read rolls back before
+    the lock search. This is the backstop when one of those is missed:
+    Postgres ends the session, which drops RowExclusiveLock, instead of
+    sitting idle in transaction until the process exits. It is set on
+    this connection only. It is not a role or server setting, and a
+    reconnect keeps it.
+    """
+    from data.db import POLLER_IDLE_IN_TRANSACTION_MS, get_connection
+    return get_connection(idle_in_transaction_ms=POLLER_IDLE_IN_TRANSACTION_MS)
+
+
+def _job_byom_prop_facts(**kw):
+    """Write byom_prop_facts. Does not touch picks or a live model."""
+    from byom.prop_load import build_seasons
+
+    conn = _byom_connection()
+    try:
+        # A declared job can be claimed before the deploy's first pass has
+        # applied its migrations, and the build writes byom_official_legs
+        # (byom_official_legs_2026_11_04.sql). Idempotent, never raises.
+        from data.view_migrations import apply_view_migrations
+        apply_view_migrations(conn)
+        result = build_seasons(
+            conn, kw.get("season"), apply=bool(kw.get("apply")),
+            sport=str(kw.get("sport") or "NFL").strip().upper())
+        if kw.get("apply"):
+            # The planner's row counts, after a write (byom/analyze.py).
+            from byom.analyze import analyze_tables
+            analyze_tables(conn)
+        return result
+    finally:
+        conn.close()
+
+
+def _validate_byom_refresh(args: dict) -> dict:
+    """Current-season refresh. apply defaults false, so a queued job
+    reports freshness and writes nothing until someone asks."""
+    sport = str(args.get("sport") or "NFL").strip().upper()
+    if sport not in ("NFL", "NBA", "NHL"):
+        raise ValueError(f"byom_refresh builds NFL, NBA or NHL, got {sport!r}")
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError(f"apply must be true or false, got {apply!r}")
+    return {"sport": sport, "apply": apply}
+
+
+def _job_byom_refresh(**kw):
+    """Freshness, and the due games when apply is true.
+
+    Does not touch picks or a live model. apply false does not read
+    odds and does not write.
+    """
+    from byom.refresh import refresh
+
+    conn = _byom_connection()
+    try:
+        # A declared job can be claimed before the deploy's first pass has
+        # applied its migrations, and the build writes byom_official_legs
+        # (byom_official_legs_2026_11_04.sql). Idempotent, never raises.
+        from data.view_migrations import apply_view_migrations
+        apply_view_migrations(conn)
+        return refresh(conn, apply=bool(kw.get("apply")),
+                       sport=str(kw.get("sport") or "NFL").strip().upper())
+    finally:
+        conn.close()
+
+
+def _validate_daily_pipeline(args: dict) -> dict:
+    """No arguments. A stake, a threshold, or a model id is not a way in."""
+    if args:
+        raise ValueError(
+            "daily_pipeline takes no arguments; it runs the full daily once"
+        )
+    return {}
+
+
+def _job_daily_pipeline(**kw):
+    """Run the full daily once, in this process, under the daily lock.
+
+    The boot catch-up stops after the deploy-kill bound or 22:00 ET. A row
+    in worker_jobs is the manual kick, and it is not declared, so a merge
+    does not enqueue one. It does not change a threshold, a stake, or a
+    pause. If this process is already inside a daily, the result is
+    skipped and a second pipeline is not started. That result is not a
+    failure: raising would retry the job, up to MAX_ATTEMPTS, and could
+    start the daily again after the first one ends.
+    """
+    import scheduler
+    from zoneinfo import ZoneInfo
+    start_number = None
+    deploy_kills = None
+    real_failures = None
+    try:
+        from data.db import get_connection
+        from tracking.daily_retry import load_today_dailies, today_counts
+        now = datetime.now(ZoneInfo("America/New_York"))
+        conn = get_connection()
+        try:
+            runs = load_today_dailies(conn, now)
+        finally:
+            conn.close()
+        if runs is not None:
+            start_number = len(runs) + 1
+            deploy_kills, real_failures = today_counts(runs)
+    except Exception:  # noqa: BLE001 — the kick still runs; the note lacks a number
+        logger.exception("daily_pipeline job: could not count today's starts")
+    status = scheduler.run_daily_pipeline(
+        retry_reason="manual worker_jobs daily_pipeline",
+        retry_source="worker_jobs",
+        retry_start_number=start_number,
+        retry_kind="manual",
+        deploy_kills=deploy_kills,
+        real_failures=real_failures,
+    )
+    if status == "skipped":
+        return {
+            "status": "skipped",
+            "reason": "daily already running in this process",
+        }
+    return {"status": status or "unknown", "start_number": start_number}
+
+
+def _job_byom_analyze(**kw):
+    """ANALYZE the BYOM tables. Reads a sample; changes no row."""
+    from byom.analyze import analyze_tables
+
+    conn = _byom_connection()
+    try:
+        return {"analyzed": analyze_tables(conn)}
+    finally:
+        conn.close()
+
+
 def _job_byom_game_facts(**kw):
     """Write byom_game_facts. Does not touch picks or a live model."""
-    from data.db import get_connection
     from byom.load import build_seasons
 
-    conn = get_connection()
+    conn = _byom_connection()
     try:
-        return build_seasons(conn, kw.get("season"), apply=bool(kw.get("apply")))
+        # A declared job can be claimed before the deploy's first pass has
+        # applied its migrations, and the build writes byom_official_legs
+        # (byom_official_legs_2026_11_04.sql). Idempotent, never raises.
+        from data.view_migrations import apply_view_migrations
+        apply_view_migrations(conn)
+        result = build_seasons(
+            conn, kw.get("season"), apply=bool(kw.get("apply")),
+            sport=str(kw.get("sport") or "NFL").strip().upper())
+        if kw.get("apply"):
+            # The planner's row counts, after a write (byom/analyze.py).
+            from byom.analyze import analyze_tables
+            analyze_tables(conn)
+        return result
     finally:
         conn.close()
 
@@ -1890,9 +2823,15 @@ JOBS = {
     # Read-mostly: writes only system_health_checks. Here so nobody has to
     # borrow another service's container to run it -- see _job_health_check.
     "health_check":    (_job_health_check,     _validate_health_check),
+    # Full daily, once, under the in-process daily lock. Not declared:
+    # inserting a worker_jobs row is the manual kick when the catch-up
+    # has stopped. See _job_daily_pipeline.
+    "daily_pipeline":  (_job_daily_pipeline,   _validate_daily_pipeline),
     # Read-mostly: writes only model_quality_checks. Report only — never
     # pauses. Same invoke path as health_check (CLI / --step / worker_jobs).
     "model_quality":   (_job_model_quality,    _validate_model_quality),
+    # Stats only: the daily nba_quarters step, on demand (dispatch:nba-quarters).
+    "nba_quarters":    (_job_nba_quarters,     _validate_health_check),
     "promote_calibration": (_job_promote_calibration, _validate_promote_calibration),
     "team_stats_asof_verify": (_job_team_stats_asof_verify,
                               _validate_team_stats_asof_verify),
@@ -1929,13 +2868,50 @@ JOBS = {
     "publish_oct13_nhl_reply": (_job_publish_oct13_nhl_reply,
                                 _validate_publish_oct13_nhl_reply),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
+    # One-off, 2026-11-06: the NCAAB NONE rows the scorer's sweep deleted,
+    # for games not yet started. apply defaults false.
+    "restore_swept_ncaab_none_rows": (_job_restore_swept_ncaab_none_rows,
+                                      _validate_restore_swept_ncaab_none_rows),
     # Read-only: asks Discord which channel each webhook points at.
     "discord_probe": (_job_discord_probe, lambda a: {}),
+    # One-off: a sport's channel cloned from another's (NCAAB from NCAAF,
+    # 2026-10-30). apply defaults false. See _job_discord_create_channel.
+    "discord_create_channel": (_job_discord_create_channel,
+                               _validate_discord_create_channel),
+    # One plain test message to a sport's pick channel, via the pick route.
+    # Writes no table; one POST, never retried. See _job_discord_test_post.
+    "discord_test_post": (_job_discord_test_post, _validate_discord_test_post),
+    # #1180 post-merge: store, then register, the committed NBA in-play artifact.
+    "nba_live_ig2_artifact": (_job_nba_live_ig2_artifact, _validate_nba_live_ig2_artifact),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
     "historical_odds": (_job_historical_odds,  _validate_historical_odds),
     "nhl_odds_history": (_job_nhl_odds_history, _validate_nhl_odds_history),
+    # NBA alternate ladders and the injury-news windows (mike, 2026-10-24).
+    "nba_odds_history": (_job_nba_odds_history, _validate_nba_odds_history),
+    # NCAAB game lines, first-half and team-total history, and the probe
+    # (mike, 2026-10-26). See NCAAB_ODDS_HISTORY_MODES.
+    "ncaab_odds_history": (_job_ncaab_odds_history, _validate_ncaab_odds_history),
+    # NCAAF first-half and team-total history, 2023-2025, at the two times the
+    # full-game history is stored at (mike, 2026-11-10). Not declared: queued
+    # by hand. See NCAAF_DERIVATIVE_HISTORY_CAPS.
+    "ncaaf_derivative_history": (_job_ncaaf_derivative_history,
+                                 _validate_ncaaf_derivative_history),
+    # Free NCAAB feed and College Basketball Data check (at most 10 credits).
+    "ncaab_feed_probe": (_job_ncaab_feed_probe, _validate_ncaab_feed_probe),
+    # Reachability of the two public NCAAB injury pages. Writes nothing.
+    "ncaab_injury_probe": (_job_ncaab_injury_probe, _validate_ncaab_injury_probe),
+    # Where the Scoreboard splits can come from: DK Network + AN book ids. Free, writes nothing.
+    "splits_source_probe": (_job_splits_source_probe, _validate_splits_source_probe),
+    "book_app_links_probe": (_job_book_app_links_probe, _validate_book_app_links_probe),
+    # ESPN NCAAB schedule and results backfill. Free, idempotent.
+    "ncaab_history_import": (_job_ncaab_history_import,
+                             _validate_ncaab_history_import),
+    "ncaab_schedule_backfill": (_job_ncaab_schedule_backfill,
+                                _validate_ncaab_schedule_backfill),
+    # Free ESPN box and period scores; see NCAAB_BOX_BACKFILL_SPANS.
+    "ncaab_box_backfill": (_job_ncaab_box_backfill, _validate_ncaab_box_backfill),
     # Derivative totals (team, alternate, first period). No credit ceiling:
     # Michael, 2026-10-03. Dry run is apply=false. See
     # _job_nhl_derivative_odds_history.
@@ -1955,10 +2931,29 @@ JOBS = {
     # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
     # unreachable from the dev sandbox. See _job_player_positions.
     "player_positions": (_job_player_positions, _validate_player_positions),
-    # NFL Build Your Own Model game facts. apply defaults false. Not listed
-    # in jobs/declared_jobs.json, so a merge does not backfill production.
+    # NFL or NBA game facts. apply defaults false. A missing sport is NFL.
+    # jobs/declared_jobs.json lists byom-nba-game-facts with enabled
+    # false and apply false, so a merge does not enqueue a writer.
+    # Enable that row before byom-nba-prop-facts. There is no runtime
+    # lock; the prop-facts note says the same order.
     # The 120h and 24h windows are UNCONFIRMED (byom/constants.py).
     "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
+    # NFL or NBA prop facts. apply defaults false when the arg is omitted.
+    # byom-nfl-prop-facts is enabled with apply true and no season, so
+    # sync enqueues one backfill from 2023-09-01. byom-nba-prop-facts is
+    # enabled false and apply false. Enable byom-nba-game-facts first,
+    # in its own change, then this NBA row. Sport is stripped and
+    # uppercased, the same as byom_game_facts.
+    "byom_prop_facts": (_job_byom_prop_facts, _validate_byom_prop_facts),
+    # Current-season refresh. apply defaults false. Listed in
+    # declared_jobs.json with enabled false and apply false, so a merge
+    # does not enqueue a writer. Not a schedule: sync enqueues a declared
+    # job once. The owner turns it on. apply false is the freshness
+    # report and does not read odds.
+    "byom_refresh": (_job_byom_refresh, _validate_byom_refresh),
+    # 2026-11-05: the planner's row counts for the BYOM tables
+    # (byom/analyze.py). No arguments, no rows changed.
+    "byom_analyze": (_job_byom_analyze, lambda a: {}),
 }
 
 
@@ -2035,6 +3030,12 @@ def sync_declared_jobs(conn, path: Path | None = None) -> list[int]:
     queued = []
     for entry in declared if isinstance(declared, list) else []:
         try:
+            # Missing `enabled` stays on. Only the boolean false is off, so
+            # a string or a 0 does not silently drop a job that was meant
+            # to run. byom-nfl-refresh ships false. byom-nfl-prop-facts is
+            # enabled with apply true (Matt, 2026-10-28).
+            if entry.get("enabled", True) is False:
+                continue
             key = str(entry["key"])
             job_id = enqueue(conn, entry["job_type"], entry.get("args") or {},
                              requested_by=entry.get("requested_by", "declared"),

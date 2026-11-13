@@ -174,7 +174,10 @@ function main() {
     meetsGradeFloor('A', 'B') && !meetsGradeFloor('C', 'B') && !meetsGradeFloor('C', 'B', false));
   check('the switch is only offered once a floor is set', /\{minGrade \? \(\s*\n\s*<View style=\{styles\.ungradedRow\}/.test(stats));
   check('the chip, the summary and the pill name the setting the same way',
-    /label=\{g\}/.test(stats) && /\$\{minGrade\} or better/.test(stats) && !/label=\{`\$\{g\}\+`\}/.test(stats));
+    /matchupStrengthFloorSpoken\(filled\)/.test(stats) &&
+    /summarySpoken=\{/.test(stats) &&
+    !/\$\{minGrade\} or better/.test(stats) &&
+    !/label=\{g\}/.test(stats));
   check('the slate chip stands down while a specific game is picked',
     /disabled=\{gamesPicked\}/.test(stats) && /gamesPicked \|\| isOnSlate/.test(stats));
   check('the game cut is visible in the Picks bar, not just its sheet',
@@ -186,7 +189,7 @@ function main() {
   check('its rows truncate rather than wrap', (gfs.match(/numberOfLines=\{1\}/g) ?? []).length >= 2);
   check('the "All games" checkbox row is gone, replaced by a section Clear',
     !/All games<\/Text>/.test(gfs) && /onClear\?: \(\) => void;/.test(read('src/components/filters/FilterSheet.tsx')));
-  check('and only where the sport can grade one', /showMatchupCol \? \(\s*\n\s*<FilterSection\s*\n\s*title="Matchup grade"/.test(stats));
+  check('and only where the sport can grade one', /showMatchupCol \? \(\s*\n\s*<FilterSection\s*\n\s*title="Matchup"/.test(stats));
 
   console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
   process.exit(failures === 0 ? 0 : 1);

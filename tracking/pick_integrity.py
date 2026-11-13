@@ -47,6 +47,19 @@ Checked:
                   so it cannot be read as the full-game total, and does not
                   name the other team as the one whose points it is. Keyed on
                   the model's market, so no other model's verdict changes.
+  * first half -- a pick that settles on Q1 + Q2 points (its model's market is
+                  totals_h1) says "First Half", so it cannot be read as the
+                  full-game total. Keyed on the model's market too. The same
+                  for a first-half spread (spreads_h1, settled on the first
+                  half's margin): it says "First Half", and its team and signed
+                  number are checked as a spread's are, after that phrase.
+  * first quarter -- a pick that settles on the first quarter's margin (its
+                  model's market is spreads_q1, models/nba_q1_trend.py) says
+                  "First Quarter", so it cannot be read as the full-game spread;
+                  its team and signed number are checked as a spread's are.
+                  The first quarter's moneyline (h2h_q1,
+                  models/nba_q1_trend_ml.py) says it too, so it cannot be read
+                  as the full-game moneyline.
 
 A producer that does not supply `side` and `line` cannot be checked, so its
 picks are refused too. A check that dead code can satisfy is not a check (§1b).
@@ -146,13 +159,81 @@ def _team_total_problem(label: str, model_id: str | None,
     return None
 
 
+_FIRST_HALF = re.compile(r"\bfirst[\s-]*half\b", re.IGNORECASE)
+
+
+def _first_half_problem(label: str, model_id: str | None) -> str | None:
+    """A first-half pick whose label reads as the full game. None for every
+    model whose market is not a first-half one."""
+    market = _market(model_id)
+    if market not in ("totals_h1", "spreads_h1"):
+        return None
+    if not _FIRST_HALF.search(label):
+        if market == "spreads_h1":
+            return ("the label does not say First Half, so it reads as the "
+                    "full-game spread; the pick settles on the first half's margin")
+        return ("the label does not say First Half, so it reads as the "
+                "full-game total; the pick settles on the first half's points")
+    return None
+
+
+_LEADING_FIRST_HALF = re.compile(r"^first[\s-]*(half|quarter)\s+", re.IGNORECASE)
+
+_FIRST_QUARTER = re.compile(r"\bfirst[\s-]*quarter\b", re.IGNORECASE)
+
+
+def _first_quarter_problem(label: str, model_id: str | None) -> str | None:
+    """A first-quarter pick whose label reads as the full game. None for every model whose market is not a
+    first-quarter one."""
+    market = _market(model_id)
+    if market not in ("spreads_q1", "h2h_q1"):
+        return None
+    if not _FIRST_QUARTER.search(label):
+        if market == "h2h_q1":
+            return ("the label does not say First Quarter, so it reads as the full-game moneyline; the pick settles "
+                    "on the first quarter's winner")
+        return ("the label does not say First Quarter, so it reads as the full-game spread; the pick settles on "
+                "the first quarter's margin")
+    return None
+
+
 def _tail(label: str) -> str:
-    """The bet itself: the opener writes "BUF @ HOU — BUF +1 (...)"."""
-    return label.rsplit("— ", 1)[-1].strip()
+    """The bet itself: the opener writes "BUF @ HOU — BUF +1 (...)". A
+    first-half label's "First Half " is not part of it: "Duke @ Kansas — First
+    Half Duke +3.5" is a bet on Duke +3.5, checked as a spread is."""
+    return _LEADING_FIRST_HALF.sub("", label.rsplit("— ", 1)[-1].strip())
 
 
 def _names(text: str, team: str | None) -> bool:
     return bool(team) and (text == team or text.startswith(f"{team} "))
+
+
+# The old NFL sizing figure on a stored label: a "·", a number, then "u",
+# followed by another "·" tag or the end of the label. NFL wind and opener
+# labels written before this change end in it ("LA @ WAS Under 47.5 · 0.87u",
+# "DAL @ IND — IND +7.5 · 0.79u · NEW 0m"): the model's own Kelly sizing,
+# kelly_fraction / 1%. It is not the stake anyone books. Every surface shows
+# the posted stake beside the label -- 1u to win at COALESCE(decision_odds,
+# dk_odds), risk capped at 3u (stake_for, published_pick_stake) -- so one row
+# showed two unit numbers that disagreed (mike, 2026-11-04: "everything must
+# be units"). New labels carry no unit figure, as no other sport's does.
+# The SAME pattern strips it in public.open_picks
+# (data/migrations/open_picks_view_2026_11_04.sql) and in the app
+# (mobile/src/lib/format.ts labelWithoutStake); tests/test_nfl_label_units.py and
+# tests/test_mobile_label_units.py pin the three copies together.
+_STAKE_TOKEN = re.compile(r"\s*·\s*\d+(?:\.\d+)?u(?!\s*[^\s·])")
+
+
+def label_without_stake(label) -> str:
+    """A stored pick_label as a surface shows it beside the posted stake.
+
+    Drops only the old NFL sizing figure (`_STAKE_TOKEN`). The bet -- team,
+    side, line -- the age tag ("NEW 0m") and every parenthetical stay word for
+    word (CLAUDE.md §00), and the stored row is never rewritten (§1c). A label
+    with no such figure, which is every label written since and every other
+    sport's, is returned as stored. None reads as "".
+    """
+    return _STAKE_TOKEN.sub("", str(label or ""))
 
 
 def pick_problems(label, side, line, model_id, home=None, away=None,
@@ -200,6 +281,12 @@ def pick_problems(label, side, line, model_id, home=None, away=None,
     team_total = _team_total_problem(label, model_id, home, away)
     if team_total:
         problems.append(team_total)
+    first_half = _first_half_problem(label, model_id)
+    if first_half:
+        problems.append(first_half)
+    first_quarter = _first_quarter_problem(label, model_id)
+    if first_quarter:
+        problems.append(first_quarter)
     return problems
 
 

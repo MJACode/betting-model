@@ -12,6 +12,7 @@ import {
   computeCustomModelStats,
   EMPTY_STATS,
   mergeStats,
+  recordStatsFromPublished,
   splitRulesByCoverage,
   summaryToStats,
   type BacktestPickRow,
@@ -24,7 +25,7 @@ import {
   writeSettledCache,
 } from '@/lib/settledPickCache';
 import { applySettledMarkers } from '@/lib/settledPickMarkers';
-import { isDuplicateCopy } from '@/lib/thresholds';
+import { isDuplicateCopy, postedPickUnits } from '@/lib/thresholds';
 import { todayET } from '@/lib/format';
 import { LIVE_RECORD_START } from '@/lib/recordStart';
 import { attachDiscordPublish } from '@/lib/discordPublish';
@@ -121,24 +122,30 @@ export function useSettledPicksSincePaperStart() {
   return { rows, records, loading, error, refresh: load };
 }
 
-/** Adapt a full-outcome view row to the CustomModelStats shape the screens render.
- *  Units in the view are 1-unit (flat); screens display at a $100 notional stake,
- *  so scale by 100 to match computeBuiltInModelStats. roi_pct is NULL when
- *  nothing was priced — surface 0 ROI rather than NaN. */
+/** Adapt a published per-model record to the stats the screens render: the
+ *  view's own posted-stake units and risk (lib/customModelBacktest
+ *  recordStatsFromPublished), the Record tab's basis. */
 export function viewRecordToStats(rec: FullOutcomeRecord): CustomModelStats {
-  const decided = rec.wins + rec.losses;
-  const priced = rec.priced_bets ?? 0;
-  const units = Number(rec.units ?? 0);
-  return {
-    picks: rec.bets,
-    wins: rec.wins,
-    losses: rec.losses,
-    pushes: rec.pushes,
-    winRate: decided > 0 ? rec.wins / decided : 0,
-    profitFlat: units * 100,
-    stakedFlat: priced * 100,
-    roiFlat: rec.roi_pct == null ? 0 : Number(rec.roi_pct) / 100,
-  };
+  return recordStatsFromPublished(rec);
+}
+
+/**
+ * A built-in model's stats for the Models list and its page: the published
+ * view's row when it has one with the posted columns, otherwise the settled
+ * picks on the phone (computeBuiltInModelStats), which books the same
+ * published stake. Either way the Record tab's units.
+ */
+export function publishedOrSettledStats(
+  modelId: string,
+  records: Record<string, FullOutcomeRecord>,
+  settled: SettledPick[],
+): CustomModelStats {
+  const rec = records[modelId];
+  if (rec) {
+    const s = recordStatsFromPublished(rec);
+    if (s.postedKnown) return s;
+  }
+  return computeBuiltInModelStats(modelId, settled);
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +219,9 @@ export function useCustomModelBacktest(
               pick_label: p.pick_label,
               signal_type: p.signal_type as SignalType,
               result: p.result,
-              profit_flat: p.profit_units == null ? null : Number(p.profit_units) * 100,
+              // The published stake at the decided price, never profit_units
+              // (1u risked) — the Record tab's units for the same pick.
+              units: postedPickUnits({ dk_odds: p.dk_odds, decision_odds: p.decision_odds, result: p.result }).units,
             })),
           );
           setError(null);
@@ -247,6 +256,10 @@ export function useCustomModelBacktest(
     return settled
       .filter((p) => pickMatchesModel(p, sub) && p.result != null && p.result !== 'NO_ACTION'
         && !isDuplicateCopy(p))
+      // A custom model is the member's own: each row at the flat 1u to win,
+      // not the pick's stake_units, as computeCustomModelStats and the server
+      // rows above book it.
+      .map((row) => ({ ...row, stake_units: null }))
       .map((p) => ({
         pick_id: p.pick_id,
         model_id: p.model_id,
@@ -254,7 +267,10 @@ export function useCustomModelBacktest(
         pick_label: p.pick_label,
         signal_type: p.signal_type,
         result: p.result as string,
-        profit_flat: p.profit_flat == null ? null : Number(p.profit_flat),
+        // Price-aware, never the stored profit_flat: settlement fills that in
+        // at an invented -110 when a pick has no price. postedPickUnits books
+        // such a pick at the bare 1u, as the Record tab does.
+        units: postedPickUnits(p).units,
       }));
   }, [model, withPicks, uncovered, settled]);
 

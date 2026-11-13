@@ -1,194 +1,103 @@
-# Claude mobile — daily picks interface
+# Open picks in any Claude chat
 
-> Moved out of CLAUDE.md on 2026-08-30 (that file had reached 909 KB and was
-> being re-read in full every session). Content is verbatim unless noted.
-> Session-by-session history: `docs/sessions/`.
+**Ask any Claude chat that has the Supabase connector "what are my open
+picks?"** Claude reads one view, `public.open_picks`, in project
+`vvprgnrmzeekokzkrkfu`:
 
-## 16. Claude Mobile — Daily Picks Interface
-Matt queries picks daily via Claude on his phone. The Supabase MCP is connected to claude.ai.
+```sql
+SELECT * FROM open_picks;
+```
 
-### Setup
-- Supabase integration connected at claude.ai Settings → Integrations
-- Claude Project created with picks query and schema context baked in
-- Project ID (Supabase): `vvprgnrmzeekokzkrkfu`
+Nothing is pasted anywhere and no claude.ai project is needed (mike,
+2026-11-04: *"no pasting anywhere, ever"*). The logic lives in the database, so
+it changes in a reviewed migration and every chat reads the new version the
+moment it lands.
 
-### Daily workflow
-1. The **Railway worker** (`scheduler.py`, deployed per `docs/cloud_worker.md` — LIVE as of 2026-07-19) runs the **full pipeline at 6am ET** automatically. GitHub Actions no longer schedules anything — `daily_pipeline.yml` is `workflow_dispatch`-only break-glass. Steps (in order):
-   - Settle yesterday's picks
-   - Injuries
-   - Game odds (DK full-game lines) + F5 odds (per-event endpoint, `FETCH_F5_LIVE=1`)
-   - Prop odds (all 11 DK player prop markets via event-level endpoint)
-   - MLB team stats, NHL stats, weather
-   - Game scoring (moneyline, O/U, runline, F5 models)
-   - Game log ingestion (yesterday's completed games — feeds prop rolling stats)
-   - Prop scoring (all 11 markets: pitcher K/hits/ER/outs/walks + batter hits/TB/HR/RBI/runs/SB/walks — picks written to `picks` table alongside game picks)
-   - **At the 6am run, batter prop picks do NOT fire** because confirmed lineups don't post until evening — `lineup_slots` is empty so `run_batter_prop_scorer` no-ops. Game picks + pitcher props (which rely on MLB Stats API probable starters) generate normally.
-2. The same Railway worker runs the **hourly refresh at :17, 7am–5pm ET** (11 runs/day), then the **evening fast-lines loop every 10 minutes from 6pm through 11pm ET**. Every pass runs `scripts/refresh_pass.sh`: full-game odds + F5 odds (`FETCH_F5_LIVE=1`) + player prop odds + lineups, then re-scores game and prop models. Total ≈ 42 refresh passes/day. Settlement, stats, weather, and injuries only run in the 6am pipeline. (The old `refresh_picks.yml` / `evening_lines.yml` workflows are `workflow_dispatch`-only break-glass now.)
-3. Open Claude mobile → Betting project → ask "what are today's picks?"
-4. Claude queries Supabase live and returns filtered picks
+## What a row is
 
-### Refresh mid-day (when lines move)
-The Railway worker already refreshes every hour (and every 10 min in the evening), so a manual refresh is rarely needed. Break-glass option if the worker is down:
-1. GitHub mobile → `github.com/MJACode/betting-model` → Actions → **Refresh Picks** → Run workflow (manual dispatch — costs Actions minutes only when you fire it)
-2. Wait ~2 min, then start a new Claude conversation to see updated picks
+One open pre-game bet, as the app, Discord and push show it (CLAUDE.md §1b),
+ordered by start time.
 
-### Picks filter (action threshold)
-**The prompt does not carry the cuts. It joins `model_action_thresholds`.**
-(2026-09-12, mike: *"I am connected through claude rc to my computer - why does
-mobile matter, it should not."*)
+| Column | What it holds |
+|---|---|
+| `sport` | MLB, NBA, NHL, NFL, NCAAF, NCAAB, WNBA, UFC |
+| `game_date` | the game's date in Eastern time |
+| `start_time_et` | the start, e.g. `7:40 PM ET` (empty if the start is unknown) |
+| `matchup` | `AWAY @ HOME` (UFC: `A vs B`) |
+| `pick` | the pick's label as stored. Quote it word for word and never rebuild the line (CLAUDE.md §00). Older NFL wind and opener labels end in a sizing figure (`· 0.87u`) that is not the stake; the view leaves that figure off, so `stake` is the only unit number on a row |
+| `price` | the American price the pick was decided at |
+| `book` | the book that price came from |
+| `stake` | the published stake in units, e.g. `1.15u to win 1u`: 1 unit to win at that price, never more than 3 units laid, a bare `1u` when there is no price. The same text Discord posts |
+| `risk_units`, `to_win_units` | the same stake as two numbers |
+| `model` | the model's name as the app shows it |
+| `decided_at_et` | when the pick was decided, in Eastern time |
+| `pick_id`, `model_id` | for looking a pick up in `picks` |
 
-It used to carry them: 52 per-model literals, regenerated with
-`scripts/emit_threshold_sql` and pasted by hand into the project instructions.
-That block went stale on every threshold change, pause, unpause and new model,
-and nothing in this repo can write that field — which is why "paste the prompt
-block" kept coming back as a task only a person could do. The doc itself
-recorded the damage: at one point the pasted copy carried 42 model ids against
-config's 41, three missing and four stale, surfacing picks the scorer had
-stopped making.
+Every stake and result is in units, never dollars (CLAUDE.md §4). For a record
+("how did yesterday go?"), read units and risked from `v_public_track_record`
+(per model) or `v_public_track_record_daily` (per day), the record Discord and
+the app publish. Never quote `profit_flat` as money: it is stored per 100
+staked, so `profit_flat / 100.0` is units at one unit risked, and it is invented
+at -110 on a pick with no price.
 
-The table is written from `config.py` by the 6am pipeline
-(`data/threshold_sync.py`) and is the same row the app's action filter, Discord
-and push read, so the prompt now cannot disagree with them. **Paste it once.**
+Zero rows is a valid answer: no open bets right now.
 
-`scripts/emit_threshold_sql` still exists for `docs/thresholds.md` and for
-reading the cuts at a glance; it is no longer part of this prompt.
+## Which picks are in it
 
-**The table mirrors BOTH pause registers** — `config.PAUSED_MODELS` (a person's
-call) and leftover `model_auto_pauses` rows. The 250-bet review no longer writes
-that table (mike, 2026-09-14: nothing autopauses). Until 2026-09-12 the sync
-carried only the first register, so an auto-paused model read `paused = false`
-to every reader above; on the two busiest recent slates that was 4
-`mlb_prop_pitcher_k` picks the scorer's own register excludes. After the
-2026-09-14 worker migration the auto-pause set is empty (identity).
+- A `BET`, not graded, pre-game (no in-play picks), for a game that has not
+  started. No date horizon: a pick written days ahead is open now.
+- Not VOID, not the second copy of one bet (`DUPLICATE`), not written while its
+  model was paused, and its model is not paused now.
+- **Discord has posted it.** The app, Discord and push show the same picks,
+  and the app shows a bet once the channel has it. Discord posts a bet only
+  after it clears its model's own cut in `model_action_thresholds` (the table
+  `data.threshold_sync` writes from `config.py`) at the price it was decided
+  at. A posted bet stays in even if that cut has moved since, the same rule as
+  the app's action filter (mike, 2026-10-15 and 10-16).
 
-Zero picks on a given day is valid — it means no high-conviction plays.
+### Where it can differ from the app, and why
+
+- **A VOID that Discord posted.** The app keeps it on the board until its void
+  notice posts. This view leaves every VOID out.
+- **A game in progress.** The app's Today board keeps a bet until the game
+  ends. This view drops it at the start, as the Discord producer does.
+- **A pick further ahead than the app's board looks** (same day for MLB, NBA
+  and WNBA; 7 days for UFC, NHL and NCAAB; 11 for NFL; 150 for NCAAF). The view
+  has no horizon, like Discord.
+
+Measured on 2026-11-04 at 6:06 PM ET: 23 rows (NBA 6, NFL 5, NHL 5, NCAAF 4,
+NCAAB 3), the same 23 picks the app's filter selects, with none on one side
+only. No bet that cleared its cut was waiting to be posted.
+
+## Changing it
+
+Edit `data/migrations/open_picks_view_2026_11_04.sql`. The migration skips once
+the view's comment matches a hash of its body, so a changed body needs the new
+hash in both places; `tests/test_open_picks_view.py` fails with the value to
+use. Columns can only be added at the end. The worker applies it on its next
+pass (`data.view_migrations`).
+
+## History
+
+Until 2026-11-04 this page held a long prompt and query to paste into a
+claude.ai "Betting" project. Matt set one up once; mike has none, and was
+wrongly told to paste into it. The copy also went stale whenever the query
+changed. The query is now the `open_picks` view.
+
+## Background kept from the old page
+
+**The thresholds table mirrors both pause registers**: `config.PAUSED_MODELS`
+(a person's call) and leftover `model_auto_pauses` rows. The 250-bet review no
+longer writes that table (mike, 2026-09-14: nothing autopauses).
 
 **DK / multi-book F5 odds coverage (re-measured 2026-09-15):**
-- `h2h_1st_5_innings` (F5 ML): DraftKings **does** carry this. Scorer uses real DK odds (then best-line re-check); skips if no real price.
-- `totals_1st_5_innings` (F5 O/U): DraftKings' Odds API feed still returns **zero** rows. FanDuel / BetMGM / William Hill do. Scorer takes the first bettable book in `BEST_LINE_BOOKMAKERS` order. **BET paused** until the 2026-05-08 leak-era artifacts are retrained on real F5 prices. No synthetic DK line for live BET.
-- `spreads_1st_5_innings` (F5 RL): Same as F5 O/U.
+- `h2h_1st_5_innings` (F5 ML): DraftKings **does** carry this. The scorer uses
+  real DK odds (then the best-line re-check) and skips if there is no real price.
+- `totals_1st_5_innings` (F5 O/U): DraftKings' Odds API feed returns **zero**
+  rows. FanDuel / BetMGM / William Hill do, and the scorer takes the first
+  bettable book in `BEST_LINE_BOOKMAKERS` order. **BET paused** until the
+  2026-05-08 leak-era artifacts are retrained on real F5 prices.
+- `spreads_1st_5_innings` (F5 RL): same as F5 O/U.
 
-F5 O/U and F5 RL write NONE rows against real book quotes so a later sweep has a universe. They do not publish BET. Full-game `mlb_runline` / `mlb_over_under` stay paused independently (honest-era negative / coin-flip AUC); a human CLE −1.5 is not `mlb_runline` output.
-
-### Claude Mobile — Full Picks Chart Prompt (paste into project instructions)
-
-This prompt produces a full chart of today's qualifying picks with game time (ET), live DK odds, weather, injury flags, and a Kelly-sized bet recommendation scaled to the bankroll the user provides.
-
-```
-You are a sports betting copilot connected to a Supabase database (project ref vvprgnrmzeekokzkrkfu).
-
-When I ask "what are today's picks?" or similar:
-
-1. Ask me for my current bankroll if I haven't given it. Accept any plain number ($1500, 1500, 1.5k).
-
-2. Query the picks table joined to games, game_weather, and the latest live DK odds. Use today's date in America/New_York (ET) — never UTC.
-
-   Use this SQL via the Supabase MCP (replace {today_et} with today's ET date YYYY-MM-DD):
-
-   WITH latest_odds AS (
-     SELECT DISTINCT ON (o.game_id, o.market) o.game_id, o.market,
-            o.home_price, o.away_price, o.over_price, o.under_price,
-            o.spread_home, o.total_line, o.snapshot_at
-     FROM odds o
-     WHERE o.bookmaker = 'draftkings'
-     ORDER BY o.game_id, o.market, o.snapshot_at DESC
-   )
-   SELECT
-     p.pick_id, p.pick_label, p.model_id, p.pick_side,
-     p.model_probability, p.dk_implied_prob, p.edge,
-     p.dk_odds AS scored_dk_odds, p.scored_line,
-     -- The price the pick was DECIDED at (2026-09-09); NULL = DraftKings.
-     p.decision_book, p.decision_odds, p.decision_edge,
-     p.kelly_fraction, p.confidence_tier,
-     p.injury_flag, p.injury_detail,
-     p.public_bet_pct, p.public_money_pct,
-     g.home_team, g.away_team, g.commence_time,
-     w.temp_f, w.wind_mph, w.wind_dir_deg, w.wind_out_component,
-     w.precip_mm, w.is_dome_game, w.venue,
-     lo.home_price AS live_home_price, lo.away_price AS live_away_price,
-     lo.over_price  AS live_over_price, lo.under_price AS live_under_price,
-     lo.spread_home AS live_spread_home, lo.total_line AS live_total_line
-   FROM picks p
-   JOIN games g ON g.game_id = p.game_id
-   -- The model's own cut, from the table the pipeline syncs from config.
-   JOIN model_action_thresholds t ON t.model_id = p.model_id
-   LEFT JOIN game_weather w ON w.game_id = p.game_id
-   LEFT JOIN latest_odds lo ON lo.game_id = p.game_id
-        AND lo.market = CASE
-            WHEN p.model_id LIKE '%f5_over_under%' THEN 'totals_1st_5_innings'
-            WHEN p.model_id LIKE '%f5_runline%'    THEN 'spreads_1st_5_innings'
-            WHEN p.model_id LIKE '%f5_moneyline%'  THEN 'h2h_1st_5_innings'
-            WHEN p.model_id LIKE '%over_under%'    THEN 'totals'
-            WHEN p.model_id = 'ufc_total_rounds'   THEN 'totals'
-            WHEN p.model_id = 'nfl_wind_totals'    THEN 'totals'
-            WHEN p.model_id = 'nba_total_luck' OR p.model_id = 'mlb_total_market' OR p.model_id = 'mlb_total_public_fade' THEN 'totals'
-            WHEN p.model_id = 'nba_team_total_luck' THEN 'team_totals_home'
-            WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
-            WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' OR p.model_id LIKE '%spread%' THEN 'spreads'
-            ELSE 'h2h' END
-   WHERE p.game_date = '{today_et}'
-     AND p.signal_type = 'BET'
-     -- THE CUT COMES FROM THE TABLE, NOT FROM THIS PROMPT (2026-09-12).
-     -- model_action_thresholds is written from config.py by the 6am pipeline
-     -- (data/threshold_sync.py) and is the same row the app's action filter,
-     -- Discord and push read. Listing the cuts here instead meant this prompt
-     -- went stale on every threshold change, pause, unpause or new model, and
-     -- somebody had to paste a fresh block into the project instructions.
-     AND t.paused = FALSE
-     AND p.model_probability >= t.min_prob
-     AND (t.prob_only = TRUE
-          OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
-     AND (t.min_odds IS NULL
-          OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
-          OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
-     -- A VOIDED pick is not publishable (CLAUDE.md 1c).
-     AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
-   ORDER BY g.commence_time, COALESCE(p.decision_edge, p.edge) DESC;
-
-3. For each row, compute the bet size from MY bankroll (not bankroll_at_pick):
-       bet_size = round(kelly_fraction * my_bankroll, 2)
-   kelly_fraction is already capped at 0.05 (5%) by the scorer, so no further cap is needed.
-
-4. Render the result as a single Markdown table with these columns, in this order:
-
-   | Game Time (ET) | Matchup | Pick | Model | Model % | DK Odds | Edge | Public | Conf | Kelly % | Bet ($) | Weather | Injuries | Notes |
-
-   - Game Time (ET): convert commence_time to America/New_York, format "h:mm AM/PM ET"
-   - Matchup: "AWY @ HOM"
-   - Pick: pick_label as stored, word for word. NEVER rebuild the line from scored_line: for spreads it is the HOME team's number, so an away pick's line is its negation (a "BUF +1" pick stores -1)
-   - Model: short label (ML / O/U / RL / F5 ML / F5 O/U / F5 RL / TT). TT is a team total (model_id 'nba_team_total_luck'): the HOME team's own points, overtime included, never the game total
-   - Model %: model_probability × 100, 1 decimal (e.g. 67.3%)
-   - DK Odds: prefer live odds for the pick_side; fall back to scored_dk_odds; "N/A" if both null (F5 prob-only). Display as American format with sign (+150, -110).
-   - Edge: edge × 100, 1 decimal, signed (+12.5%)
-   - Conf: confidence_tier (HIGH / MED / LOW)
-   - Kelly %: kelly_fraction × 100, 1 decimal (e.g. 3.0%)
-   - Bet ($): the bet_size you computed in step 3
-   - Weather: "Dome" if is_dome_game = 1; otherwise "{temp_f}°F, wind {wind_mph} mph (out {wind_out_component:+.1f})"; "—" if no weather row
-   - Public: Action Network public backing on the pick side — "{public_bet_pct:.0f}% bets / {public_money_pct:.0f}% money" (e.g. "63% bets / 71% money"). Show "—" if both NULL (no splits ingested, or a prop/F5 pick — only full-game ML/O/U/RL carry splits). Low public % on a high-edge pick = possible sharp side; high public % despite our edge = line-movement risk.
-   - Injuries: injury_flag if non-empty, else "—". Show injury_detail in a footnote if HIGH-confidence pick has any injury.
-   - Notes: flag any F5 pick (model_id starts with 'mlb_f5_') where model_probability is between 0.68 and 0.70 as "⚠ Borderline (probability may shift on next hourly refresh)". Otherwise "—".
-
-5. Below the table, print:
-   - Bankroll: ${my_bankroll}
-   - Total exposure: $sum(bet_size) and as % of bankroll
-   - Number of picks by signal: BET count
-   - Borderline F5 count: count of picks flagged ⚠ in Notes
-   - Reminder: "Picks may flip to AVOID on later refreshes — re-query before placing bets. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm."
-
-6. If zero rows, say "No picks meet the threshold for {today_et}. Zero picks is a valid signal — no high-conviction plays today."
-
-Important rules:
-- Never bet a pick that's flipped to AVOID. Only signal_type = 'BET' rows are returned.
-- F5 picks have dk_odds = NULL (no DK F5 lines available). Display as "N/A" — settlement uses -110 for P&L.
-- Since 2026-09-09 a pick is DECIDED, sized and settled at the best bettable price at the DraftKings line: show decision_book / decision_odds / decision_edge as the pick's book, price and edge (fall back to DK / dk_odds / edge when they are NULL — rows from before the flip). dk_odds is the DraftKings reference price, not necessarily where to place the bet.
-- mlb_prop_batter_hr and mlb_prop_batter_rbi are RETIRED (2026-09-02) — never surface a pick from either, whatever the row says.
-- SB picks (model_id = 'mlb_prop_batter_sb') always use pick_side = 'over' — DK only prices Over 0.5 SBs. AUC 0.567 (v2, 2026-06-12 — up from 0.528, still marginal) — flag these picks with "⚠ SB model v2 (marginal AUC)" in Notes.
-- All times in ET. The pipeline uses America/New_York for game_date.
-- If the user gives a new bankroll mid-conversation, re-render the table with updated bet sizes.
-```
-
-Save this in the Claude Mobile project's "Project Instructions" (claude.ai → Projects → Betting → Instructions). Update whenever thresholds or schema change. The codebase is the source of truth: after any threshold change run
-`python -m scripts.emit_threshold_sql --prefix p.` and paste the block it prints
-over the one inside step 2. Never hand-edit it — that is how the old copies drifted.
-
----
+The pipeline schedule (6am ET daily run, hourly and evening refresh passes) is
+in `docs/cloud_worker.md`.

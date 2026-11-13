@@ -698,6 +698,8 @@ CREATE TABLE IF NOT EXISTS picks (
     market_clv_pp      REAL,               -- that comparison in probability points
     market_clv_method  TEXT,               -- power | power_3way | zero_vig
     pinnacle_close_odds REAL,              -- Pinnacle American on our side, same line
+    stake_units        REAL,               -- the pick's own units TO WIN (1..3); NULL is 1u (2026-11-06)
+    stake_reason       TEXT,               -- why stake_units is above 1u
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (from The Odds API)
     -- The model probability mapped to what it is actually worth
     -- (models/probability_calibration.py). DISPLAY ONLY: edge, the signal,
@@ -1476,6 +1478,9 @@ _MIGRATIONS = [
     ("picks", "market_clv_pp",       "NUMERIC"),
     ("picks", "market_clv_method",   "TEXT"),
     ("picks", "pinnacle_close_odds", "NUMERIC"),
+    # A pick's own stake (pick_stake_units_2026_11_06.sql): units to win, 1..3.
+    ("picks", "stake_units",         "NUMERIC"),
+    ("picks", "stake_reason",        "TEXT"),
     # DraftKings betslip deep links (The Odds API includeLinks/includeSids)
     ("odds", "home_link",  "TEXT"),
     ("odds", "away_link",  "TEXT"),
@@ -1551,6 +1556,12 @@ _MIGRATIONS = [
     ("games", "first_pitch_at", "TEXT"),
     ("picks", "prop_market", "TEXT"),
     ("picks", "player_key",  "TEXT"),
+    # Capper rows are one table for every tracked Discord capper. Boot adds
+    # the columns before the 15-minute poll. The view migration backfills
+    # eggz and sets the default. NULL capper_key is Eggz until that lands.
+    ("capper_picks", "capper_key", "TEXT"),
+    ("capper_picks", "parlay_id", "BIGINT"),
+    ("capper_messages", "capper_key", "TEXT"),
 ]
 
 

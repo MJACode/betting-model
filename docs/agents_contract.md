@@ -124,14 +124,28 @@ fire has passed does not misfire on a fresh scheduler. `pipeline_watch` at
 run (Steps 0d/3/3b/5c); hourlies never touch them, so live MLB models scored on
 stale features until the next calendar day.
 
-`scheduler.py::catch_up_daily_pipeline()` closes that. It runs on boot and
-again from `run_pipeline_watch` (after the report, so a 20-minute retry does
-not delay the morning post). Decision: `tracking/daily_retry.py`. Guards: a
-successful daily today is left alone; an in-process daily is not started
-twice; at most one automatic retry per ET calendar day (two ledgered starts
-total); a daily that finished with only later-step failures (typically
-`health_check`) is treated as complete for MLB freshness. Kill switch:
-`RUN_DAILY_RETRY=0`. No model, threshold, pause or calibration change.
+`scheduler.py::catch_up_daily_pipeline()` closes that. It is a one-off job
+five seconds after the scheduler starts, and it runs again from
+`run_pipeline_watch` (after the report, so a 20-minute retry does not delay
+the morning post). It is not called on the main thread before
+`sched.start()`: on 2026-11-04 the 13:01Z boot did that, the daily held the
+thread until the next deploy, and the 13:17Z hourly never ledgered.
+Decision: `tracking/daily_retry.py`. Guards: a successful daily today is
+left alone; an in-process daily is not started twice; a daily that finished
+with only later-step failures (typically `health_check`) is treated as
+complete for MLB freshness. A deploy that kills the retry starts it again
+the same ET day. Boot stamps that unfinished row `aborted` first. A
+deploy-kill (`failed_steps` contains `aborted`, or the row is still
+unfinished) does not consume the failure cap. Those stop at
+`MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY` (12) or at 22:00 ET, whichever comes
+first. A daily that finishes and fails before the MLB freshness steps for
+any other reason gets one retry (`MAX_NON_ABORTED_FAILURES`, 2), then
+stops, so an upstream outage does not buy odds on every boot. The ops note
+names which start this is and why it relaunched. A `worker_jobs` row of
+type `daily_pipeline` runs the full daily once under the same in-process
+lock; it is not declared, so a merge does not enqueue it. Kill switch:
+`RUN_DAILY_RETRY=0` (the manual job is not that switch). No model,
+threshold, pause or calibration change.
 
 ---
 

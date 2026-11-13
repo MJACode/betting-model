@@ -199,6 +199,12 @@ class FakeDB:
         if "FROM nba_team_total_luck_decisions" in s:
             return _Cur([(r["game_id"],) for r in self._select(
                 "nba_team_total_luck_decisions", s, params)])
+        if s.startswith("SELECT game_id, min(model_id) FROM picks"):
+            # scripts/nba_game_totals_door.other_bets: each game's other model, grouped
+            got: dict[str, str] = {}
+            for r in self._select("picks", s, params):
+                got[r["game_id"]] = min(got.get(r["game_id"], r["model_id"]), r["model_id"])
+            return _Cur(sorted(got.items()))
         if "FROM picks" in s:
             return _Cur(sorted({(r["game_id"],) for r in self._select("picks", s, params)}))
         if "FROM odds" in s:
@@ -556,10 +562,17 @@ def test_the_quota_telemetry_carries_each_call_s_own_cost():
 def test_the_prune_protects_every_ladder_source_by_its_writer_s_own_name():
     """RULE: the pruner keeps one row per (game, market, book), which thins a
     ladder to arbitrary rungs. The live team totals and the two paid ladder
-    purchases are protected, named exactly as their writers stamp them."""
+    purchases are protected, named exactly as their writers stamp them. The
+    NCAAB first-half and team-total purchases (close and open) are a paid
+    history too (mike, 2026-10-26), and so is the NCAAF one at its two reads
+    (mike, 2026-11-10)."""
     from data import prune_odds
-    from data.ingestors import nba_odds_history, nhl_derivative_odds_history
-    for src in (feed.SOURCE, nba_odds_history.DERIV_SOURCE, nhl_derivative_odds_history.SOURCE):
+    from data.ingestors import (nba_odds_history, ncaab_odds_history,
+                                ncaaf_derivative_history, nhl_derivative_odds_history)
+    for src in (feed.SOURCE, nba_odds_history.DERIV_SOURCE, nba_odds_history.ALT_SOURCE,
+                nhl_derivative_odds_history.SOURCE,
+                *ncaab_odds_history.DERIV_SOURCES.values(),     # close, open, 15z, 18z, tip60
+                *ncaaf_derivative_history.SOURCES.values()):    # am, pm
         assert src in prune_odds.PROTECTED_SOURCES, src
         params: dict = {}
         prune_odds._unprotected(params, table="odds")

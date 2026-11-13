@@ -40,7 +40,7 @@ def test_the_recap_query_drops_an_unposted_bet_and_a_voided_lock():
         sport, model_id, result, kelly_fraction, dk_odds, decision_odds,
         clv_pct, is_live, game_date, signal_type, downgrade_reason,
         condition_status, game_id, pick_side, player_id, player_key, prop_market,
-        clv_method)""")
+        clv_method, stake_units)""")
     db.execute("CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)")
     rows = [
         ("MLB", "m_posted", "WIN", 0.02, -110, None, None, 0, "2026-10-01", "BET", None, None, "g1", None, None, None, None, None),
@@ -142,6 +142,9 @@ def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     assert ACTIVE_MIGRATIONS.index("byom_facts_schema_2026_10_16.sql") < ACTIVE_MIGRATIONS.index("published_pick_units_2026_10_17.sql")
     for name in ACTIVE_MIGRATIONS[ACTIVE_MIGRATIONS.index(clv) + 1:]:
         if name == units:
+            continue
+        # Push counts on the live view. Not a rewrite of wins or units.
+        if name == "clv_push_beat_rate_2026_11_04.sql":
             continue
         body = (ROOT / "data" / "migrations" / name).read_text(encoding="utf-8")
         assert "v_public_track_record" not in body, name

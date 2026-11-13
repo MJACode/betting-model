@@ -1055,5 +1055,644 @@
     "requested_by": "owner",
     "note": "Owner, 2026-10-14 18:27 ET: delete the custom-format full record, Discord message 1560045816352079957, via the results webhook. Standard post 1560049598565715999 and X untouched.",
     "args": {}
+  },
+  {
+    "key": "byom-nfl-prop-facts",
+    "job_type": "byom_prop_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-10-28: enabled and apply are both true. sync_declared_jobs enqueues this once. Apply data/migrations/byom_prop_facts_dk_prices_2026_10_28.sql before the job runs. A failed row keeps dedupe_key byom-nfl-prop-facts, so a retry needs that row gone. No season arg: every NFL season from 2023 whose game_date is on or after 2023-09-01. The line is the last DraftKings snapshot at or before kickoff. over_price and under_price are the American prices on that same quote. A side with no American price on that quote is null. No alt ladders. No other book. No constant price. A player who did not play, and a row with no line, are not graded. Does not write picks. The backtest that stakes these prices is data/migrations/byom_backtest_prop_dk_prices_2026_10_28.sql, applied by hand.",
+    "args": {
+      "sport": "NFL",
+      "apply": true
+    }
+  },
+  {
+    "key": "byom-nfl-refresh",
+    "job_type": "byom_refresh",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: turn it on. The builder showed a frozen record: byom_game_facts was last built 2026-10-24, and 27 played games had no score in it. enabled and apply are true, so sync_declared_jobs enqueues this catch-up once. A declared job is not a schedule: scheduler.run_byom_nfl_refresh queues the same job every day at 10:41am ET with a dated dedupe key. apply true rebuilds the current season's games from yesterday through 7 days ahead, plus a past game with no fact row, a past fact row still missing a score, and a past game that has facts but no prop facts and has not been scanned yet. Writes byom_game_facts, byom_prop_facts and byom_official_legs. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": true
+    }
+  },
+  {
+    "key": "byom-nfl-game-facts-official-2026-11-04",
+    "job_type": "byom_game_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: the official pick (first match) beside the closing line. Rebuilds every NFL season from 2020 and writes byom_official_legs in the same transaction (byom/official.py). The job applies data/migrations/byom_official_legs_2026_11_04.sql first. Closing facts are rebuilt from the same quotes, so a game's close does not change unless its quotes did. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": true
+    }
+  },
+  {
+    "key": "byom-nfl-prop-facts-official-2026-11-04",
+    "job_type": "byom_prop_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: official prop legs. Rebuilds every NFL prop season from 2023-09-01 and writes each prop's first-match over and under to byom_official_legs. The role at the lock reads the game's DraftKings spread history. The 2026-10-28 run of byom-nfl-prop-facts took 5m29s; this one also reads each game's spreads. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": true
+    }
+  },
+  {
+    "key": "byom-nfl-game-facts-official-lock-bands-2026-11-04",
+    "job_type": "byom_game_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: the official lock is the first DraftKings quote that fits the role and the line, price, spread and total bands. Rebuilds every NFL season from 2020 and rewrites byom_official_legs as one candidate per snapshot (context_at_lock). The earlier official rebuild stored one row per role, and a band could not move that lock. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": true
+    }
+  },
+  {
+    "key": "byom-nfl-prop-facts-official-lock-bands-2026-11-04",
+    "job_type": "byom_prop_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: official prop candidates, so a line, price, spread or total band is part of the lock search. Rebuilds every NFL prop season from 2023-09-01. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": true
+    }
+  },
+  {
+    "key": "byom-nba-game-facts",
+    "job_type": "byom_game_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: the NBA builder gets what NFL got (\"do the same as what I said for nfl\"). enabled and apply are true, so sync_declared_jobs enqueues this once. Rebuilds every NBA season from 2021 (DraftKings game lines start 2020-21) and writes the official candidates to byom_official_legs in the same transaction. byom_nba_props_2026_10_29.sql is applied in production (version 20261029173618). The job applies ACTIVE_MIGRATIONS first. The daily refresh (scheduler.run_byom_nfl_refresh) keeps the current season current after this. Does not write picks.",
+    "args": {
+      "sport": "NBA",
+      "apply": true
+    }
+  },
+  {
+    "key": "byom-nba-prop-facts",
+    "job_type": "byom_prop_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: NBA props were empty in production (zero byom_prop_facts rows), so every NBA prop preview was blank. enabled and apply are true; sync_declared_jobs enqueues this once, after byom-nba-game-facts in file order. Every NBA season from 2023-09-01. Reads player_prop_odds and nba_player_game_log already stored: no API credits. Writes the closing facts and the official candidates (one per change in the prop's own line or price). Do not enable both from a branch the worker has not deployed. Does not write picks.",
+    "args": {
+      "sport": "NBA",
+      "apply": true
+    }
+  },
+  {
+    "key": "byom-nhl-game-facts",
+    "job_type": "byom_game_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-05: NHL game bets on the builder (\"Yes go\"). enabled and apply are true, so sync_declared_jobs enqueues this once. Every NHL season from 2021 (2020-21 is the first with a DraftKings line; measured 2026-11-05: 2019 and 2020 have none). Writes byom_game_facts and the official candidates in byom_official_legs. Moneyline, puck line (spreads) and totals; no props. The job applies ACTIVE_MIGRATIONS first, so byom_nhl_2026_11_05.sql is in place. The daily refresh keeps the current season current. Reads stored odds only: no API credits. Does not write picks.",
+    "args": {
+      "sport": "NHL",
+      "apply": true
+    }
+  },
+  {
+    "key": "nba-alt-history-2024-2026",
+    "job_type": "nba_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-24: 'Buy alts'. Every book's alternate spread, total and team-total ladder, one purchase per 2023-24..2025-26 game 60 minutes before tip (docs/nba_models_2026.md 10.3). Measured 30 credits a game; ~3,679 games left after the 11-game pilot, ~111,000 credits.",
+    "args": {
+      "mode": "alternates",
+      "max_credits": 130000,
+      "floor": 800000
+    }
+  },
+  {
+    "key": "nba-news-windows-2025-2026",
+    "job_type": "nba_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-24: 'do #2 as well'. The feed's snapshot just after each 5-minute mark from 5 before to 25 after every 2024-25 and 2025-26 injury-report change worth 0.5 points or more (docs/nba_models_2026.md 11.1 and 11.5; plan jobs/nba_news_windows_2025_2026.json: 1,927 changes, 8,810 requests, 264,300 credits at 30 each).",
+    "args": {
+      "mode": "news_windows",
+      "max_credits": 270000,
+      "floor": 800000
+    }
+  },
+  {
+    "key": "discord-void-ncaaf-ev-floor-2026-10-26-dry",
+    "job_type": "publish_discord_void",
+    "requested_by": "matt",
+    "note": "matt 2026-10-26: 'Void - if we voided in discord, let's clear it'. Five posted NCAAF ncaaf_over_under BETs voided 2026-09-19 under the global EV floor (mike) whose Discord posts never got a void notice, so v_discord_published still holds them and the app still shows them. Only games not yet played (11/7-12/12); matt: not worried about past games. Dry run: returns the payload, posts nothing.",
+    "args": {
+      "pick_ids": [
+        2109187,
+        2109205,
+        1769753,
+        2109285,
+        1769812
+      ],
+      "reason": "Voided: these picks were under the minimum expected-value bar that took effect 9/19. They are void and do not count in the record. The original posts are left as they were.",
+      "dry_run": true
+    }
+  },
+  {
+    "key": "discord-void-ncaaf-ev-floor-2026-10-26",
+    "job_type": "publish_discord_void",
+    "requested_by": "matt",
+    "note": "matt 2026-10-26: 'Void - if we voided in discord, let's clear it'. Five posted NCAAF ncaaf_over_under BETs voided 2026-09-19 under the global EV floor (mike) whose Discord posts never got a void notice, so v_discord_published still holds them and the app still shows them. Only games not yet played (11/7-12/12); matt: not worried about past games. Real post, held until after the dry run has been read.",
+    "run_after": "2026-10-26T03:00:00+00:00",
+    "args": {
+      "pick_ids": [
+        2109187,
+        2109205,
+        1769753,
+        2109285,
+        1769812
+      ],
+      "reason": "Voided: these picks were under the minimum expected-value bar that took effect 9/19. They are void and do not count in the record. The original posts are left as they were.",
+      "dry_run": false
+    }
+  },
+  {
+    "key": "ncaab-feed-probe-2026-10-26",
+    "job_type": "ncaab_feed_probe",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. Before the NCAAB history purchase and the live poll: is basketball_ncaab active on The Odds API, how many events, which feed team names the ESPN registry cannot place, and how many events land on an ESPN game (free calls, x-requests-last must read 0); the market keys each book offers on the 5 soonest events (1 credit each, 5 credits); and what College Basketball Data serves on the CFBD key (teams, Duke's 2025-26 games and lines, the line providers).",
+    "args": {
+      "market_events": 5
+    }
+  },
+  {
+    "key": "ncaab-schedule-2026-27",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2026-27 (season label 2027); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2026-11-01",
+      "last": "2027-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2025-26",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2025-26 (season label 2026); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2025-11-01",
+      "last": "2026-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2024-25",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2024-25 (season label 2025); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2024-11-01",
+      "last": "2025-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2023-24",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2023-24 (season label 2024); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2023-11-01",
+      "last": "2024-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2022-23",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2022-23 (season label 2023); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2022-11-01",
+      "last": "2023-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2021-22",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2021-22 (season label 2022); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2021-11-01",
+      "last": "2022-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2020-21",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2020-21 (season label 2021); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2020-11-01",
+      "last": "2021-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2019-20",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2019-20 (season label 2020); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2019-11-01",
+      "last": "2020-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2018-19",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2018-19 (season label 2019); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2018-11-01",
+      "last": "2019-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2017-18",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2017-18 (season label 2018); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2017-11-01",
+      "last": "2018-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2016-17",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2016-17 (season label 2017); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2016-11-01",
+      "last": "2017-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2015-16",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2015-16 (season label 2016); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2015-11-01",
+      "last": "2016-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2014-15",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2014-15 (season label 2015); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2014-11-01",
+      "last": "2015-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2013-14",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2013-14 (season label 2014); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2013-11-01",
+      "last": "2014-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2012-13",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2012-13 (season label 2013); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2012-11-01",
+      "last": "2013-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2011-12",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2011-12 (season label 2012); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2011-11-01",
+      "last": "2012-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2010-11",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2010-11 (season label 2011); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2010-11-01",
+      "last": "2011-04-10"
+    }
+  },
+  {
+    "key": "ncaab-history-import-box-scores",
+    "job_type": "ncaab_history_import",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). Free history into Supabase on the worker: NCAA possession box scores and season player minutes, 2010-11..2025-26 (sportsdataverse).",
+    "args": {
+      "kind": "box_scores"
+    }
+  },
+  {
+    "key": "ncaab-history-import-prediction-tracker",
+    "job_type": "ncaab_history_import",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). Free history into Supabase on the worker: Prediction Tracker opening and updated lines plus the public systems, 2004-05..2025-26.",
+    "args": {
+      "kind": "prediction_tracker"
+    }
+  },
+  {
+    "key": "ncaab-history-import-sbro",
+    "job_type": "ncaab_history_import",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). Free history into Supabase on the worker: SBRO opening/closing spreads and totals, moneylines and second-half lines, 2007-08..2020-21.",
+    "args": {
+      "kind": "sbro"
+    }
+  },
+  {
+    "key": "ncaab-history-import-match",
+    "job_type": "ncaab_history_import",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). Free history into Supabase on the worker: match the archive lines onto ESPN games by date and final score.",
+    "args": {
+      "kind": "match"
+    }
+  },
+  {
+    "key": "ncaab-period-scores-2021-2026",
+    "job_type": "ncaab_box_backfill",
+    "requested_by": "mike",
+    "enabled": true,
+    "note": "ON (mike, 2026-10-30: do all outstanding tasks). Free, no key: ESPN's NCAAB scoreboard, one call per date, stores the first-half, second-half and overtime scores of every 2020-21 to 2025-26 final that has none in ncaab_period_scores (855 dates, 35,323 finals counted 2026-10-30; about 15-20 minutes at one call a second). Skips what is stored, so a re-run stores nothing twice. Replaces the research round's halves file that lived only on one laptop.",
+    "args": {
+      "kind": "periods",
+      "first": 2021,
+      "last": 2026
+    }
+  },
+  {
+    "key": "ncaab-player-box-2026-2027",
+    "job_type": "ncaab_box_backfill",
+    "requested_by": "matt",
+    "enabled": true,
+    "note": "ON (Matt, 2026-11-03: men's college basketball on the Stats tab, history 'This season + 2025-26'). Free, no key: one ESPN game summary per 2025-26 and 2026-27 final with no row in ncaab_player_game_log, into that table (data/ingestors/ncaab_player_box.py). About one call a second. Skips what is stored, so a re-run stores nothing twice. New finals after this are stored by the hourly ncaab-box step from the summary it already fetches.",
+    "args": {
+      "kind": "players",
+      "first": 2026,
+      "last": 2027
+    }
+  },
+  {
+    "key": "ncaab-box-scores-2027",
+    "job_type": "ncaab_box_backfill",
+    "requested_by": "owner",
+    "enabled": false,
+    "note": "OFF until someone turns it on after the merge (set enabled to true). Free, no key: one ESPN game summary per 2026-27 final with no 'espn_summary' row in ncaab_team_game_stats, box and period scores together. The refresh pass already covers the last 3 ET dates, so this is only needed if the merge lands after 2026-11-04, a pass missed games, or ESPN refused every game for a while (step ncaab-box red with espn-box-refused): it tries refused games again, ignoring their attempt count. Skips what is stored.",
+    "args": {
+      "kind": "box",
+      "first": 2027,
+      "last": 2027
+    }
+  },
+  {
+    "key": "ncaab-history-probe-2026-10-26",
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. One real paid call of each kind the NCAAB purchase makes (1 bulk snapshot at 30 credits planned, 1 event list at 1, 1 game's first-half and team-total lines at up to 40), writing nothing, printing the MEASURED x-requests-last of each so the per-call cost is a reading before the big runs. Ceiling 200. mike 2026-10-28: 'dont stop the spend' — floor lowered to 300,000 (3.5 of October's worst organic days, measured from odds_api_quota) and the resume brought forward to the first safe tick after the refill, which lands about 00:00Z on the 1st (the Sept and Oct resets).",
+    "args": {
+      "mode": "probe",
+      "max_credits": 200,
+      "floor": 300000
+    }
+  },
+  {
+    "key": "ncaab-history-lines-2021-2026",
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. NCAAB game lines (moneyline, spread, total; ten books) on every 2020-21..2025-26 game: per ET game date the evening-before opener (D-1 22Z), D 15Z, and the hour 5-65 minutes before every tip, 30 credits a bulk snapshot (the NBA purchase's measured cost on the same endpoint and books). Approved at ~375,000 credits; ceiling 420,000, floor 500,000. Resumes on odds_history_pulls (sport NCAAB). mike 2026-10-28: 'dont stop the spend' — floor lowered to 300,000 (3.5 of October's worst organic days, measured from odds_api_quota) and the resume brought forward to the first safe tick after the refill, which lands about 00:00Z on the 1st (the Sept and Oct resets).",
+    "args": {
+      "mode": "lines",
+      "max_credits": 420000,
+      "floor": 300000
+    }
+  },
+  {
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "args": {
+      "mode": "lines",
+      "max_credits": 420000,
+      "floor": 300000
+    },
+    "key": "ncaab-history-lines-2021-2026-r1",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history); 2026-10-28: 'dont stop the spend'. The game-line purchase resumed on the first safe tick after the 2026-11-01 refill (the reset lands about 00:00Z on the 1st; 06:00Z leaves six hours' margin). Buys only the snapshots the ledger does not hold; the -r2 copy on 2026-11-02 is the backstop if this fires before the refill and stops at the floor at once.",
+    "run_after": "2026-11-01T06:00:00+00:00"
+  },
+  {
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "args": {
+      "mode": "lines",
+      "max_credits": 420000,
+      "floor": 300000
+    },
+    "key": "ncaab-history-lines-2021-2026-r2",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). The game-line purchase resumed after the 2026-11-01 credit refill: a floor stop marks the first job done, and this one buys only the snapshots the ledger does not hold. Same scope and ceiling as ncaab-history-lines-2021-2026. mike 2026-10-28: 'dont stop the spend' — floor lowered to 300,000 (3.5 of October's worst organic days, measured from odds_api_quota) and the resume brought forward to the first safe tick after the refill, which lands about 00:00Z on the 1st (the Sept and Oct resets).",
+    "run_after": "2026-11-02T00:20:00+00:00"
+  },
+  {
+    "key": "ncaab-game-line-market-sweep-spreads-2026-10-26",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). MEASURE ONLY: Pinnacle's vig-free spreads price against the bettable books at the same number, pre-game, on the bought 2020-21..2025-26 history (runs after the game-line purchase; if that stopped at the floor, this grades what was stored by then).",
+    "args": {
+      "sport": "NCAAB",
+      "markets": [
+        "spreads"
+      ],
+      "edges": [
+        0.02,
+        0.03,
+        0.04
+      ],
+      "snapshot_type": "open",
+      "bettable": true,
+      "by_month": true,
+      "vs": "devig",
+      "pin_lean": false,
+      "date_from": "2020-11-25",
+      "date_to": "2026-04-07"
+    }
+  },
+  {
+    "key": "ncaab-game-line-market-sweep-totals-2026-10-26",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). MEASURE ONLY: Pinnacle's vig-free totals price against the bettable books at the same number, pre-game, on the bought 2020-21..2025-26 history (runs after the game-line purchase; if that stopped at the floor, this grades what was stored by then).",
+    "args": {
+      "sport": "NCAAB",
+      "markets": [
+        "totals"
+      ],
+      "edges": [
+        0.02,
+        0.03,
+        0.04
+      ],
+      "snapshot_type": "open",
+      "bettable": true,
+      "by_month": true,
+      "vs": "devig",
+      "pin_lean": false,
+      "date_from": "2020-11-25",
+      "date_to": "2026-04-07"
+    }
+  },
+  {
+    "key": "ncaab-game-line-market-sweep-h2h-2026-10-26",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). MEASURE ONLY: Pinnacle's vig-free h2h price against the bettable books at the same number, pre-game, on the bought 2020-21..2025-26 history (runs after the game-line purchase; if that stopped at the floor, this grades what was stored by then).",
+    "args": {
+      "sport": "NCAAB",
+      "markets": [
+        "h2h"
+      ],
+      "edges": [
+        0.02,
+        0.03,
+        0.04
+      ],
+      "snapshot_type": "open",
+      "bettable": true,
+      "by_month": true,
+      "vs": "devig",
+      "pin_lean": false,
+      "date_from": "2020-11-25",
+      "date_to": "2026-04-07"
+    }
+  },
+  {
+    "key": "ncaab-history-deriv-close-2024-2026",
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. NCAAB first-half moneyline, spread and total plus team totals at the close (tip minus 10 minutes) on every 2023-24..2025-26 game: 1 credit an event list a date, up to 40 a game (10 a market returned, 4 markets; an empty answer is free per the feed's docs). Approved with the open at up to ~1,380,000 together; ceiling 800,000, floor 500,000. Stored under odds_api_ncaab_derivative_close; a game holding rows is skipped. mike 2026-10-28: 'dont stop the spend' — floor lowered to 300,000 (3.5 of October's worst organic days, measured from odds_api_quota) and the resume brought forward to the first safe tick after the refill, which lands about 00:00Z on the 1st (the Sept and Oct resets).",
+    "args": {
+      "mode": "deriv_close",
+      "max_credits": 800000,
+      "floor": 300000
+    }
+  },
+  {
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "args": {
+      "mode": "deriv_close",
+      "max_credits": 800000,
+      "floor": 300000
+    },
+    "key": "ncaab-history-deriv-close-2024-2026-r1",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history); 2026-10-28: 'dont stop the spend'. The first-half and team-total close purchase resumed on the first safe tick after the 2026-11-01 refill; the -r2 copy on 2026-11-02 is the backstop.",
+    "run_after": "2026-11-01T06:10:00+00:00"
+  },
+  {
+    "key": "ncaab-history-deriv-close-2024-2026-r2",
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. The close purchase resumed after the 2026-11-01 credit refill: a floor stop marks the first job done, and this one buys only the games it left (the source marker is the resume). Same scope and ceiling as ncaab-history-deriv-close-2024-2026. mike 2026-10-28: 'dont stop the spend' — floor lowered to 300,000 (3.5 of October's worst organic days, measured from odds_api_quota) and the resume brought forward to the first safe tick after the refill, which lands about 00:00Z on the 1st (the Sept and Oct resets).",
+    "run_after": "2026-11-02T00:30:00+00:00",
+    "args": {
+      "mode": "deriv_close",
+      "max_credits": 800000,
+      "floor": 300000
+    }
+  },
+  {
+    "key": "ncaab-history-deriv-open-2024-2026",
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. NCAAB first-half lines and team totals at the open (D-1 22Z or tip minus 20 hours, whichever is later) on every 2023-24..2025-26 game, after the 2026-11-01 refill (run_after 06:20Z, six hours after the measured reset): 1 credit an event list a date, up to 40 a game. Approved with the close at up to ~1,380,000 together; ceiling 800,000, floor 500,000. Stored under odds_api_ncaab_derivative_open. mike 2026-10-28: 'dont stop the spend' — floor lowered to 300,000 (3.5 of October's worst organic days, measured from odds_api_quota) and the resume brought forward to the first safe tick after the refill, which lands about 00:00Z on the 1st (the Sept and Oct resets).",
+    "run_after": "2026-11-01T06:20:00+00:00",
+    "args": {
+      "mode": "deriv_open",
+      "max_credits": 800000,
+      "floor": 300000
+    }
+  },
+  {
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "args": {
+      "mode": "deriv_open",
+      "max_credits": 800000,
+      "floor": 300000
+    },
+    "key": "ncaab-history-deriv-open-2024-2026-r2",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history); 2026-10-28: 'dont stop the spend'. Backstop for the opener purchase if the 2026-11-01 run fired before the refill and stopped at the floor at once.",
+    "run_after": "2026-11-02T01:00:00+00:00"
+  },
+  {
+    "key": "ncaab-injury-reachability-2026-10-30",
+    "job_type": "ncaab_injury_probe",
+    "requested_by": "mike",
+    "note": "Reachability of the two public NCAAB injury pages (RotoWire JSON and Covers HTML) from the worker. Writes nothing. A non-200 or a body that does not parse fails the job; zero player rows is still a successful check.",
+    "args": {}
+  },
+  {
+    "key": "splits-source-probe-2026-11-03",
+    "job_type": "splits_source_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-03: 'Pull the numbers where we can reliably.' Fetches DK Network's betting-splits page and Action Network's v2 scoreboard (no bookIds filter) plus /web/v1/books, to measure whether DraftKings' own handle/bets % can be pulled and which AN book ids carry splits. Writes nothing, no Odds API credits.",
+    "args": {}
+  },
+  {
+    "key": "byom-analyze-2026-11-05",
+    "job_type": "byom_analyze",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "2026-11-05: the NBA points preview took 6.0s for the current season (anon cuts off at 3s) because 11,075 byom_prop_facts rows were written after the last automatic analyze and the planner counted 1 row for NBA 2027. Runs ANALYZE on byom_game_facts, byom_prop_facts and byom_official_legs once. Reads a sample, changes no row, uses no API credits. The builders analyze after every write from this change on (byom/analyze.py). Does not write picks.",
+    "args": {}
+  },
+  {
+    "key": "restore-swept-ncaab-none-rows-2026-11-06",
+    "job_type": "restore_swept_ncaab_none_rows",
+    "requested_by": "claude",
+    "enabled": true,
+    "note": "2026-11-06: the game scorer's end-of-pass sweep deleted the NCAAB cards' NONE rows (priced, not bet; no stake) minutes after each card wrote them, from 2026-11-04 (PR #1147). The deploy that carries this entry scopes the sweep to the models its pass re-writes, so this runs once after it: for every NCAAB card NONE row picks_log shows deleted whose game has not started and which has no row in picks now, it inserts the logged row back with its own pick_id and created_at. Rows of started games are not restored. Publishes nothing, settles nothing, uses no API credits.",
+    "args": {
+      "apply": true
+    }
+  },
+  {
+    "key": "nhl-derivative-totals-regrade-2026-11-09",
+    "job_type": "nhl_research",
+    "requested_by": "mike",
+    "note": "mike, 2026-11-09: 'rebuild NHL grading fix on current master'. The derivative-totals grade (team totals, alternate totals, first period) again with both fixes: team totals settle on the full-game score only, and on a whole-number line the model's chance of a push no longer counts as an under win (expected value returns the stake on a push). Adds the Pinnacle-against-a-bettable-book table. Read-only, writes nothing, uses no API credits. Result: worker_jobs.result->>'stdout'.",
+    "args": {
+      "script": "nhl_derivative_totals_backtest"
+    }
+  },
+  {
+    "key": "book-app-links-probe-2026-11-12",
+    "job_type": "book_app_links_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-12: 'it should pull up the app not the website ... MGM link took me to the website', then 'Yes continue' to the worker probe. Fetches each sportsbook host's apple-app-site-association file (Apple CDN first, then the host) and reports whether the stored betslip links are claimed by the book's app. Writes nothing, no Odds API credits.",
+    "args": {}
+  },
+  {
+    "key": "nba-period-lines-and-results-2026-11-13",
+    "job_type": "nba_quarters",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-13: half and quarter ATS / O-U on the Stats tab's Betting filters; '4. Yes' (backfill this season's period lines) and '5. Yes' (add them to the regular pull). Runs the daily nba_quarters step now instead of at 6am: buys the half and quarter closing lines (spreads and totals, H1 and Q1-Q4, tip minus 5 minutes) for every finished 2026-27 game that lacks them, under a ceiling equal to its own plan (10 credits a market a game, 101 a game, upper bound: the endpoint bills only markets it returns) and the measured reserve floor, then builds team_period_results. No model, pick, stake or threshold is touched.",
+    "args": {}
   }
 ]

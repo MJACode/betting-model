@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -14,19 +13,25 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@/types';
 import { EmptyState } from '@/components/EmptyState';
+import { FeatureGate } from '@/components/FeatureGate';
 import { ParlayLegCard } from '@/components/ParlayLegCard';
 import { BetslipBooksRow } from '@/components/BetslipBooksRow';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SettingsButton } from '@/components/SettingsButton';
 import { showToast } from '@/components/Toast';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
-import { isLineLeg } from '@/lib/lineLegs';
+import { betslipPlayerFromPick, slipKeysAfterAdd } from '@/lib/betslipGuard';
+import { EMPTY_INJURY_INDEX, type InjuryIndex } from '@/lib/injuryStatus';
+import { injuryIndexForSport } from '@/lib/injuryLookup';
+import { EditLineLegSheet } from '@/components/EditLineLegSheet';
+import { isLineLeg, lineLegKey, slipLegCanEdit, type LineLegSpec } from '@/lib/lineLegs';
 import {
   setEditingParlayId,
   setManualCustomLegs,
@@ -36,27 +41,34 @@ import {
 } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
+import { useEnteredSgpPrices, useSgpHaircuts } from '@/hooks/useSgpHaircuts';
+import type { SgpHaircuts } from '@/lib/sgpPricing';
 import { fetchPlayerTeams } from '@/lib/queries';
 import {
   isValidCombo,
+  legsForPricing,
   lineShopParlay,
+  slipSignature,
   makeCustomLeg,
+  CUSTOM_MODEL_ID,
   parlayRecommendedUnits,
+  slipKeyForPick,
   type LineShop,
   type ParlayLeg,
 } from '@/lib/parlay';
-import { formatStake } from '@/lib/thresholds';
+import { formatStake, formatUnits } from '@/lib/thresholds';
+import { unitsSpeech } from '@/lib/a11y';
 import {
   computeCorrelatedMetrics,
+  withDecimalPayout,
   GRADE_LABEL,
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel, bookName } from '@/lib/markets';
+import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
-  formatCurrency,
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
@@ -84,7 +96,7 @@ function parseAmerican(text: string): number | null {
  * come from "Add to betslip" (Stats, Picks, pick detail) or a hand-entered
  * custom leg, and every one of them can be removed individually or all at once.
  */
-export function ParlayScreen() {
+function ParlayScreenBody() {
   const navigation = useNavigation<ParlayNav>();
   // One hook owns the slip, the board it resolves against, and the pruning of
   // selections that no longer resolve — so this screen and the persistent
@@ -94,6 +106,8 @@ export function ParlayScreen() {
     lineLegs,
     count: slipCount,
     picks: { data, loading, error, refresh },
+    board,
+    boardLoading,
     legs: slipLegs,
     stale: staleKeys,
     removed: removedCount,
@@ -135,6 +149,10 @@ export function ParlayScreen() {
   // under it, the way every native stack header in this app behaves.
   const [scrolled, setScrolled] = useState<boolean>(false);
   const [customOpen, setCustomOpen] = useState<boolean>(false);
+  // The custom leg the form is editing (its pickId), or null when it adds one.
+  const [editingCustomId, setEditingCustomId] = useState<number | null>(null);
+  // The Stats line leg whose line is being changed (Matt, 2026-10-28).
+  const [editingLine, setEditingLine] = useState<LineLegSpec | null>(null);
   const [customLabel, setCustomLabel] = useState<string>('');
   const [customOddsText, setCustomOddsText] = useState<string>('');
 
@@ -161,10 +179,23 @@ export function ParlayScreen() {
   // slipLegs comes from useResolvedSlip (the persisted slip resolved against
   // today's picks, cross-sport, any signal); session custom legs append here.
   const legs = useMemo(() => [...slipLegs, ...manualCustom], [slipLegs, manualCustom]);
-  const metrics = useMemo(
-    () => computeCorrelatedMetrics(legs, rho, resolveTeam),
-    [legs, rho, resolveTeam],
-  );
+  // A pre-game alternate held after kickoff stays in `legs` (the card, the
+  // remove control) and is left out of the price, the book row, and a save.
+  const pricedLegs = useMemo(() => legsForPricing(legs), [legs]);
+  // Legs sharing a game are priced as an estimated same-game parlay
+  // (lib/sgpPricing.ts); a price the member typed in from a book's own slip
+  // replaces the estimate at that book, for this slip only.
+  const sgpFits = useSgpHaircuts();
+  // Shared with the betslip bar, keyed to this exact slip (hooks/useSgpHaircuts).
+  const sig = useMemo(() => slipSignature(legs), [legs]);
+  const { prices: enteredPrices, enter: handleSgpEntered, clear: handleSgpCleared } = useEnteredSgpPrices(sig);
+  const metrics = useMemo(() => {
+    const m = computeCorrelatedMetrics(pricedLegs, rho, resolveTeam, undefined, sgpFits);
+    const dkTyped = enteredPrices[MODEL_BOOK];
+    return m.sgpGroups > 0 && dkTyped != null ? withDecimalPayout(m, americanToDecimal(dkTyped)) : m;
+  }, [pricedLegs, rho, resolveTeam, sgpFits, enteredPrices]);
+  // Every card still on the slip counts, including a held pre-game alt.
+  // The price, the book row, and a save use pricedLegs.
   const valid = useMemo(() => isValidCombo(legs), [legs]);
 
   // The sport a saved slip is filed under: the first real pick's sport (custom
@@ -196,6 +227,50 @@ export function ParlayScreen() {
     [slip, slipLegs, lineLegs],
   );
 
+  // Edit a leg (Matt, 2026-10-28: "if I select 10 points … I should be able
+  // to edit and change it to 15"; 2026-10-29: game lines too). Any Stats line
+  // leg -- a prop, a moneyline, a spread, a total -- opens the line picker; a
+  // custom leg reopens its form. Model picks have no edit: a pick is a bet of
+  // record at its own line (CLAUDE.md §1c).
+  const editableSpec = useCallback(
+    (leg: ParlayLeg): LineLegSpec | null => {
+      if (!slipLegCanEdit(leg, lineLegs.specs) || leg.modelId === CUSTOM_MODEL_ID) return null;
+      return lineLegs.specs.find((s) => lineLegKey(s) === leg.slipKey) ?? null;
+    },
+    [lineLegs.specs],
+  );
+  const canEdit = useCallback(
+    (leg: ParlayLeg) => slipLegCanEdit(leg, lineLegs.specs),
+    [lineLegs.specs],
+  );
+  const handleEdit = useCallback(
+    (pickId: number) => {
+      const leg = legs.find((l) => l.pickId === pickId);
+      if (!leg) return;
+      const spec = editableSpec(leg);
+      if (spec) {
+        setEditingLine(spec);
+        return;
+      }
+      if (leg.modelId === CUSTOM_MODEL_ID) {
+        setEditingCustomId(leg.pickId);
+        setCustomLabel(leg.label);
+        setCustomOddsText(formatAmerican(leg.americanOdds).replace(/\u2212/g, '-'));
+        setCustomOpen(true);
+      }
+    },
+    [legs, editableSpec],
+  );
+  const saveEditedLine = useCallback(
+    async (next: LineLegSpec): Promise<'ok' | 'duplicate' | 'sidelined'> => {
+      if (!editingLine) return 'duplicate';
+      const outcome = await lineLegs.replace(lineLegKey(editingLine), next);
+      if (outcome === 'ok') showToast('Leg updated');
+      return outcome;
+    },
+    [editingLine, lineLegs],
+  );
+
   const handleClear = useCallback(() => {
     slip.clear();
     lineLegs.clear();
@@ -213,12 +288,16 @@ export function ParlayScreen() {
   }, [staleKeys, slip, lineLegs]);
 
   const openCustom = useCallback(() => {
+    setEditingCustomId(null);
     setCustomLabel('');
     setCustomOddsText('');
     setCustomOpen(true);
   }, []);
 
-  const closeCustom = useCallback(() => setCustomOpen(false), []);
+  const closeCustom = useCallback(() => {
+    setCustomOpen(false);
+    setEditingCustomId(null);
+  }, []);
 
   // Send the user to the Stats tab to browse players; adding one brings them
   // back here automatically (fromParlay flag handled in StatsScreen). This
@@ -233,12 +312,38 @@ export function ParlayScreen() {
   // custom/stale legs seed the session state directly.
   useEffect(() => {
     if (!restorePending) return;
-    slip.clear();
-    restorePending.slipKeys.forEach((key) => slip.add(key));
-    setManualCustomLegs(restorePending.customLegs);
-    setEditingParlayId(restorePending.editingId ?? null);
+    // Wait until today's board has settled, including in-play. A key whose
+    // pick is on it names the player, and a sidelined player is not put back
+    // on the slip. An empty or failed board has no name to look up, so those
+    // keys are kept.
+    if (boardLoading) return;
+    const pending = restorePending;
     consumeRestore();
-  }, [restorePending]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Read every sport once, drop sidelined players, then write the slip
+    // once. clear() first flashed an empty slip while those reads were out.
+    void (async () => {
+      const indexes = new Map<string, InjuryIndex>();
+      let kept: string[] = [];
+      for (const key of pending.slipKeys) {
+        const ep = board.find((p) => slipKeyForPick(p.pick) === key);
+        const player = ep ? betslipPlayerFromPick(ep.pick) : null;
+        let index = EMPTY_INJURY_INDEX;
+        if (player?.name) {
+          let hit = indexes.get(player.sport);
+          if (!hit) {
+            hit = await injuryIndexForSport(player.sport);
+            indexes.set(player.sport, hit);
+          }
+          index = hit;
+        }
+        const next = slipKeysAfterAdd(kept, key, player, index);
+        if (next) kept = next;
+      }
+      slip.replace(kept);
+      setManualCustomLegs(pending.customLegs);
+      setEditingParlayId(pending.editingId ?? null);
+    })();
+  }, [restorePending, boardLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Removing the last leg ends the edit, the same way "Clear" does. Without
   // this the binding outlived the slip: empty it leg by leg, build a brand new
@@ -256,11 +361,25 @@ export function ParlayScreen() {
   const handleSaveCustom = useCallback(() => {
     const odds = parseAmerican(customOddsText);
     if (customLabel.trim().length === 0 || odds == null) return;
-    setManualCustomLegs((prev) => [...prev, makeCustomLeg(customLabel, odds)]);
+    if (editingCustomId != null) {
+      // Same place in the slip, same id; the snapshot it may have been
+      // restored from no longer describes it, so it is dropped.
+      setManualCustomLegs((prev) =>
+        prev.map((l) => {
+          if (l.pickId !== editingCustomId) return l;
+          const fresh = makeCustomLeg(customLabel, odds);
+          return { ...fresh, pickId: l.pickId, slipKey: l.slipKey, gameId: l.gameId };
+        }),
+      );
+      showToast('Leg updated');
+    } else {
+      setManualCustomLegs((prev) => [...prev, makeCustomLeg(customLabel, odds)]);
+    }
+    setEditingCustomId(null);
     setCustomLabel('');
     setCustomOddsText('');
     setCustomOpen(false);
-  }, [customLabel, customOddsText]);
+  }, [customLabel, customOddsText, editingCustomId]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -339,24 +458,33 @@ export function ParlayScreen() {
         ) : (
           <SlipBody
             legs={legs}
+            pricedLegs={pricedLegs}
             metrics={metrics}
             valid={valid}
             staleCount={staleKeys.length}
             removedCount={removedCount}
             sport={sport}
             onRemove={handleRemove}
+            onEdit={handleEdit}
+            canEdit={canEdit}
             onAddCustom={openCustom}
             onFindPlayers={goFindPlayers}
             onClear={handleClear}
             onClearStale={handleClearStale}
             editingId={editingId}
             onSaved={setEditingParlayId}
+            sgpFits={sgpFits}
+            enteredPrices={enteredPrices}
+            onSgpEntered={handleSgpEntered}
+            onSgpCleared={handleSgpCleared}
           />
         )}
       </ScrollView>
 
+      <EditLineLegSheet spec={editingLine} onClose={() => setEditingLine(null)} onSave={saveEditedLine} />
+
       {/* ── Custom-leg form ─────────────────────────────────────────── */}
-      <Modal visible={customOpen} animationType="slide" transparent onRequestClose={closeCustom}>
+      <Modal trackName="ParlayScreen" visible={customOpen} animationType="slide" transparent onRequestClose={closeCustom}>
         {/* Without this the keyboard slides up OVER the bottom sheet and hides
             the inputs entirely — the sheet must rise with the keyboard. */}
         <KeyboardAvoidingView
@@ -365,7 +493,7 @@ export function ParlayScreen() {
         >
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Custom leg</Text>
+              <Text style={styles.modalTitle}>{editingCustomId != null ? 'Edit custom leg' : 'Custom leg'}</Text>
               <Pressable
                 onPress={closeCustom}
                 hitSlop={8}
@@ -407,7 +535,7 @@ export function ParlayScreen() {
 
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Add leg"
+              accessibilityLabel={editingCustomId != null ? 'Update leg' : 'Add leg'}
               accessibilityState={{ disabled: !customValid }}
               onPress={handleSaveCustom}
               disabled={!customValid}
@@ -418,7 +546,7 @@ export function ParlayScreen() {
               ]}
             >
               <Ionicons name="checkmark" size={18} color={colors.textInverse} />
-              <Text style={styles.buildBtnText}>Add leg</Text>
+              <Text style={styles.buildBtnText}>{editingCustomId != null ? 'Update leg' : 'Add leg'}</Text>
             </Pressable>
           </View>
         </KeyboardAvoidingView>
@@ -456,6 +584,7 @@ function ParlaySaveButton({
   sport,
   editingId,
   droppedCount,
+  pregameCount = 0,
   onSaved,
 }: {
   legs: ParlayLeg[];
@@ -465,6 +594,9 @@ function ParlaySaveButton({
   /** Legs the board could not price back — they are NOT in `legs`, so updating
    *  a save would drop them. The caption says so before the tap. */
   droppedCount: number;
+  /** Pre-game alternates held after kickoff. They stay on the slip and are
+   *  left out of the save. Not the same sentence as a leg that left the board. */
+  pregameCount?: number;
   /** Called with the id the slip now lives under, so a second tap updates it. */
   onSaved: (id: string) => void;
 }) {
@@ -498,19 +630,31 @@ function ParlaySaveButton({
   // undo behind it — so it asks first, naming what goes. An update that keeps
   // every leg does not: confirming a save nobody can lose anything to is noise.
   const onSave = useCallback(() => {
-    if (!editingId || droppedCount === 0) {
+    const leaving = droppedCount + pregameCount;
+    if (!editingId || leaving === 0) {
       applySave();
       return;
     }
+    const bits: string[] = [];
+    if (droppedCount > 0) {
+      bits.push(
+        `${droppedCount} leg${droppedCount === 1 ? '' : 's'} ${droppedCount === 1 ? 'is' : 'are'} no longer on the board`,
+      );
+    }
+    if (pregameCount > 0) {
+      bits.push(
+        `${pregameCount} pre-game leg${pregameCount === 1 ? '' : 's'} ${pregameCount === 1 ? 'isn’t' : 'aren’t'} in the price — the game has started`,
+      );
+    }
     Alert.alert(
       'Update without those legs?',
-      `${droppedCount} leg${droppedCount === 1 ? '' : 's'} in this parlay ${droppedCount === 1 ? 'is' : 'are'} no longer on the board. Updating saves it without ${droppedCount === 1 ? 'it' : 'them'}, and that can't be undone.`,
+      `${bits.join('. ')}. Updating saves this slip without ${leaving === 1 ? 'it' : 'them'}, and that can't be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Update', style: 'destructive', onPress: applySave },
       ],
     );
-  }, [applySave, editingId, droppedCount]);
+  }, [applySave, editingId, droppedCount, pregameCount]);
 
   if (legs.length === 0) return null;
 
@@ -636,18 +780,35 @@ function GradeBadge({ grade, small }: { grade: ParlayGrade; small?: boolean }) {
  * edge) on this exact slip, and — when same-game legs are correlated — the joint
  * probability vs the naïve product, which is the whole point of the engine.
  */
-function CorrelatedExtras({ m, allDk }: { m: CorrelatedMetrics; allDk: boolean }) {
+function CorrelatedExtras({
+  m,
+  allDk,
+  estimated,
+}: {
+  m: CorrelatedMetrics;
+  allDk: boolean;
+  /** The slip price is an estimated same-game price (lib/sgpPricing.ts). */
+  estimated: boolean;
+}) {
   const holdPositive = m.dkHoldPct >= 0;
+  const est = estimated ? 'est. ' : '';
   return (
     <View style={styles.corrExtras}>
       <View style={styles.corrRow}>
         <Text style={styles.corrLabel}>Fair odds</Text>
         <Text style={styles.corrValue}>
-          {formatAmerican(m.fairAmerican)} · {allDk ? 'DK' : 'slip'} {formatAmerican(m.americanOdds)}
+          {formatAmerican(m.fairAmerican)} · {allDk ? 'DK' : 'slip'} {est}{formatAmerican(m.americanOdds)}
         </Text>
       </View>
       <View style={styles.corrRow}>
-        <Text style={styles.corrLabel}>{holdPositive ? (allDk ? 'DK hold on this slip' : 'Hold on this slip') : 'Your edge on this slip'}</Text>
+        <Text style={styles.corrLabel}>
+          {estimated ? 'Est. ' : ''}
+          {holdPositive
+            ? estimated
+              ? allDk ? 'DK hold on this slip' : 'hold on this slip'
+              : allDk ? 'DK hold on this slip' : 'Hold on this slip'
+            : estimated ? 'edge on this slip' : 'Your edge on this slip'}
+        </Text>
         <Text style={[styles.corrValue, { color: holdPositive ? colors.avoidInk : colors.betInk }]}>
           {formatPct(Math.abs(m.dkHoldPct))}
         </Text>
@@ -717,48 +878,65 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
  */
 function SlipBody({
   legs,
+  pricedLegs,
   metrics,
   valid,
   staleCount,
   removedCount,
   sport,
   onRemove,
+  onEdit,
+  canEdit,
   onAddCustom,
   onFindPlayers,
   onClear,
   onClearStale,
   editingId,
   onSaved,
+  sgpFits,
+  enteredPrices,
+  onSgpEntered,
+  onSgpCleared,
 }: {
   legs: ParlayLeg[];
+  /** `legs` minus pre-game alternates held after kickoff. The price, the
+   *  book row, and a save use this. The card list uses `legs`. */
+  pricedLegs: ParlayLeg[];
   metrics: CorrelatedMetrics;
   valid: boolean;
   staleCount: number;
   removedCount: number;
   sport: string;
   onRemove: (pickId: number) => void;
+  onEdit: (pickId: number) => void;
+  canEdit: (leg: ParlayLeg) => boolean;
   onAddCustom: () => void;
   onFindPlayers: () => void;
   onClear: () => void;
   onClearStale: () => void;
   editingId: string | null;
   onSaved: (id: string) => void;
+  sgpFits: SgpHaircuts;
+  enteredPrices: Readonly<Record<string, number>>;
+  onSgpEntered: (book: string, american: number) => void;
+  onSgpCleared: (book: string) => void;
 }) {
   // Every leg priced at DraftKings? A Stats line leg DK never posted is not,
   // and four labels below attribute the slip's number to DK only when it is.
-  const allDk = legs.every((l) => l.dkPriced !== false);
+  const allDk = pricedLegs.every((l) => l.dkPriced !== false);
   // Every leg a Stats line the user chose themselves? Then nothing on this
   // slip is a model's number, and two labels below must not say it is.
-  const modelBacked = legs.some((l) => !isLineLeg(l));
+  const modelBacked = pricedLegs.some((l) => !isLineLeg(l));
   const dkException = useMemo(() => {
-    const off = legs.filter((l) => l.dkPriced === false);
+    const off = pricedLegs.filter((l) => l.dkPriced === false);
     if (off.length === 0) return null;
     return off.map((l) => `${l.label} at ${bookName(l.pricedAt ?? '')}`).join(' and ');
-  }, [legs]);
+  }, [pricedLegs]);
   const dkExceptionCount = useMemo(
-    () => legs.filter((l) => l.dkPriced === false).length,
-    [legs],
+    () => pricedLegs.filter((l) => l.dkPriced === false).length,
+    [pricedLegs],
   );
+  const pregameCount = legs.length - pricedLegs.length;
   // Past ~1.3 the two-up grid's fixed 45% cells are narrower than their own
   // labels, so it stacks instead of truncating them (UX review).
   const { fontScale } = useWindowDimensions();
@@ -828,7 +1006,41 @@ function SlipBody({
     );
   }
 
+  // Every remaining leg is a pre-game alternate held after kickoff. There is
+  // no live price to package. The cards stay so the user can remove them.
+  if (pricedLegs.length === 0) {
+    return (
+      <View>
+        {staleNote}
+        <Text style={styles.heldStatus}>No live price. Remove these pre-game lines.</Text>
+        <View style={styles.heldBlock}>
+          {legs.map((leg) => (
+            <ParlayLegCard
+              key={leg.pickId}
+              leg={leg}
+              onRemove={() => onRemove(leg.pickId)}
+              onEdit={canEdit(leg) ? () => onEdit(leg.pickId) : undefined}
+            />
+          ))}
+        </View>
+        <Pressable
+          onPress={confirmClear}
+          accessibilityRole="button"
+          accessibilityLabel="Clear betslip"
+          hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+          style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+        >
+          <Ionicons name="trash-outline" size={18} color={colors.avoid} />
+          <Text style={styles.clearBtnText}>Clear betslip</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   const stake = parlayRecommendedUnits(metrics);
+  // DraftKings' price is our estimate when legs share a game and the member has
+  // not typed DK's own price in.
+  const estimated = metrics.sgpGroups > 0 && enteredPrices[MODEL_BOOK] == null;
   const payout = stake.risk * metrics.decimalPayout;
 
   return (
@@ -846,10 +1058,18 @@ function SlipBody({
 
       <View style={styles.resultCard}>
         <View style={styles.resultHeader}>
-          <Text style={styles.resultTitle}>{legs.length}-Leg Play</Text>
+          <Text style={styles.resultTitle}>{pricedLegs.length}-Leg Play</Text>
           <View style={styles.resultHeaderRight}>
             <GradeBadge grade={metrics.grade} />
-            <Text style={styles.resultOdds}>{formatAmerican(metrics.americanOdds)}</Text>
+            {/* One VoiceOver stop: the qualifier must not be skippable. */}
+            <View
+              accessible
+              accessibilityLabel={`${estimated ? 'estimated ' : ''}${formatAmerican(metrics.americanOdds)}`}
+              style={styles.resultOddsWrap}
+            >
+              {estimated ? <Text style={styles.resultOddsEst}>est.</Text> : null}
+              <Text style={styles.resultOdds}>{formatAmerican(metrics.americanOdds)}</Text>
+            </View>
           </View>
         </View>
 
@@ -872,21 +1092,21 @@ function SlipBody({
         </View>
 
         <View style={styles.stakeRow}>
-          <Stat label="Stake" value={formatStake(stake)} />
-          <Stat label="Potential payout" value={formatCurrency(payout)} />
+          <Stat label="Stake" value={formatStake(stake)} spoken={unitsSpeech(formatStake(stake))} />
+          <Stat label="Potential payout" value={formatUnits(payout)} spoken={unitsSpeech(formatUnits(payout))} />
         </View>
 
-        <CorrelatedExtras m={metrics} allDk={allDk} />
+        <CorrelatedExtras m={metrics} allDk={allDk} estimated={estimated} />
 
         {/* The staleness caveat has to follow the leg to the screen the bet is
             placed from, not stay on the board it was picked off. One line, and
             only when a live leg is actually in the slip. */}
-        {legs.some((l) => l.isLive) ? (
+        {pricedLegs.some((l) => l.isLive) ? (
           <View style={styles.liveLegNote}>
             <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
             <Text style={styles.liveLegNoteText}>
-              This slip has an in-play leg. Live prices are DraftKings’ and can be up to
-              ~45s old — check the number at DK before you place it.
+              This slip has an in-play leg, priced at the number it locked at. In-play
+              prices move fast — check the number at the book before you place it.
             </Text>
           </View>
         ) : null}
@@ -911,9 +1131,18 @@ function SlipBody({
           />
         ) : null}
 
-        <BetslipBooksRow legs={legs} />
+        {/* Same-game price entry lives in each estimated tile's sheet (Matt,
+            2026-11-09: the yellow box here took too much room). */}
+        <BetslipBooksRow
+          legs={pricedLegs}
+          sgpFits={sgpFits}
+          enteredPrices={enteredPrices}
+          sgpGroups={metrics.sgpGroups}
+          onSgpEntered={onSgpEntered}
+          onSgpCleared={onSgpCleared}
+        />
 
-        <LineShopRow lineShop={lineShopParlay(legs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
+        <LineShopRow lineShop={lineShopParlay(pricedLegs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
 
         {metrics.ev >= 0 ? (
           <ParlayHoldNote
@@ -925,11 +1154,30 @@ function SlipBody({
         ) : null}
 
         <View style={styles.legsList}>
-          {legs.map((leg) => (
-            <ParlayLegCard key={leg.pickId} leg={leg} onRemove={() => onRemove(leg.pickId)} />
+          {pricedLegs.map((leg) => (
+            <ParlayLegCard
+              key={leg.pickId}
+              leg={leg}
+              onRemove={() => onRemove(leg.pickId)}
+              onEdit={canEdit(leg) ? () => onEdit(leg.pickId) : undefined}
+            />
           ))}
         </View>
       </View>
+
+      {pregameCount > 0 ? (
+        <View style={styles.heldBlock}>
+          <Text style={styles.heldHeader}>Not in this price</Text>
+          {legs.filter((leg) => leg.pregameStale).map((leg) => (
+            <ParlayLegCard
+              key={leg.pickId}
+              leg={leg}
+              onRemove={() => onRemove(leg.pickId)}
+              onEdit={canEdit(leg) ? () => onEdit(leg.pickId) : undefined}
+            />
+          ))}
+        </View>
+      ) : null}
 
       {/* The loss, stated before the tap: updating writes the shorter slip over
           the save, and there is no undo. Shaped like the same-game warning
@@ -937,14 +1185,18 @@ function SlipBody({
           2.20:1 here, half the AA floor, so the tint, the icon and the wording
           all have to carry it. Above the grid, not inside it: a full-width
           banner as a fifth grid cell splits the two rows apart. */}
-      {editingId && staleCount + removedCount > 0 ? (
+      {editingId && (staleCount + removedCount > 0 || pregameCount > 0) ? (
         <View style={styles.warnBanner}>
           <Ionicons name="warning-outline" size={16} color={colors.medInk} />
           <Text style={styles.warnText}>
-            {staleCount + removedCount} leg{staleCount + removedCount === 1 ? '' : 's'}{' '}
-            {staleCount + removedCount === 1 ? 'is' : 'are'} no longer on the board —
+            {staleCount + removedCount > 0
+              ? `${staleCount + removedCount} leg${staleCount + removedCount === 1 ? '' : 's'} ${staleCount + removedCount === 1 ? 'is' : 'are'} no longer on the board. `
+              : ''}
+            {pregameCount > 0
+              ? `${pregameCount} pre-game leg${pregameCount === 1 ? '' : 's'} ${pregameCount === 1 ? 'isn’t' : 'aren’t'} in the price — the game has started. `
+              : ''}
             “Update parlay” saves this slip without{' '}
-            {staleCount + removedCount === 1 ? 'it' : 'them'}.
+            {staleCount + removedCount + pregameCount === 1 ? 'it' : 'them'}.
           </Text>
         </View>
       ) : null}
@@ -962,10 +1214,11 @@ function SlipBody({
           having to do at the DEFAULT size. */}
       <View style={[styles.manualActions, stacked && styles.manualActionsStacked]}>
         <ParlaySaveButton
-          legs={legs}
+          legs={pricedLegs}
           sport={sport}
           editingId={editingId}
           droppedCount={staleCount + removedCount}
+          pregameCount={pregameCount}
           onSaved={onSaved}
         />
         <Pressable
@@ -1007,9 +1260,18 @@ function SlipBody({
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
+/** Headerless stack screen. The gate supplies Back while the slip is locked. */
+export function ParlayScreen() {
   return (
-    <View style={styles.stat}>
+    <FeatureGate heading="Parlay" chrome>
+      <ParlayScreenBody />
+    </FeatureGate>
+  );
+}
+
+function Stat({ label, value, color, spoken }: { label: string; value: string; color?: string; spoken?: string }) {
+  return (
+    <View style={styles.stat} accessible={spoken != null} accessibilityLabel={spoken != null ? `${label}, ${spoken}` : undefined}>
       <Text style={styles.statLabel}>{label}</Text>
       <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
     </View>
@@ -1241,6 +1503,16 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: font.size.footnote,
   },
+  resultOddsWrap: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.xs,
+  },
+  resultOddsEst: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.medInk,
+  },
   customInput: {
     backgroundColor: colors.noneSoft,
     borderRadius: radii.sm,
@@ -1393,6 +1665,22 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
+  },
+  heldBlock: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
+  heldHeader: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  heldStatus: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    fontSize: font.size.body,
+    color: colors.textSecondary,
   },
   pressed: {
     opacity: 0.6,

@@ -103,6 +103,7 @@ def main() -> None:
         store(a.store)
         return
     art = build(H.CACHE, a.bets)
+    art = tl.with_pricing_table(art, tl.pricing_dist, tl.newest_season)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = ROOT / "models" / "saved" / f"{tl.MODEL_ID}_{stamp}.pkl"
     with open(out, "wb") as fh:

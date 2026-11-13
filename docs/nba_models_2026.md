@@ -272,6 +272,26 @@ The feed has returned DraftKings, FanDuel, Fanatics, BetParx and BetRivers for 2
 (BetMGM, Caesars and Hard Rock not yet), so the five-book row is the expectation, and
 less than that: the best cell of a 546-cell search runs high.
 
+**How to read this record, dated 2026-11-02.** A separate check reproduced the card to the bet (92,877 of 92,877
+rows) and then measured three things the figures above do not say. No bet and no live price changes.
+
+- **It is one draw of five.** The trainer's fits are not pinned to a thread count, so the same seed on another
+  machine is a different model (`models/nba_props.py:703-704`). Refitted on 2, 3, 4 and 6 threads, the card made
+  +3.95%, +3.65%, +3.82% and +3.81% at eight books, against this record's +4.12%; at five books +3.31%, +3.28%,
+  +3.33% and +3.16% against +3.60%. Read the record as about +3.8% at eight books and +3.3% at five. The capped
+  grade, +9.69% on 1,867 bets, falls to +8.96% if a voided bet keeps its slot, as it does live.
+- **One input read tonight's box.** The returning-teammates input in the graded history counted anyone in the
+  game's own box (`models/nba_props.py:550-561`). The live card counts the pre-game roster and players a book
+  prices, so no live bet read it. Fed what live knows, the card makes +4.09% at eight books and +3.59% at five,
+  against +4.12% and +3.60%. Refitted on it, +3.76% and +3.31%, inside the spread between draws.
+- **A team's first ten games earned nothing.** Eight books: 10,244 bets, +15.1 units, +0.15% (-1.86% to +2.07%),
+  against 73,116 bets, +3,395.0 units, +4.68% after. The gap at 5, 7, 10, 12, 15 and 20 games is +3.22, +3.73,
+  +4.53, +2.92, +3.40 and +2.37 points, so ten is the peak of a range and not a boundary. It is not card-wide:
+  threes lose 92.9 units there, while blocks under and rebounds + assists under make money. This was found after
+  the record, so it is not a rule. Every live bet so far is in this window.
+- **The feed now returns all eight books.** Live decisions have been taken at Hard Rock, BetMGM and Caesars, so the
+  five-book row above is no longer the expectation.
+
 **Prices it lays:** min −200, 5th percentile −166, median +108, 95th +170, max +3000;
 64% plus money, 9% at −150 or shorter. 558 bets are longer than +200 (they lose 4.9
 units); the +1,600..+3,000 tail is threes overs at 0.5 quoted by one book, at stakes of
@@ -336,6 +356,69 @@ from this machine against production), storing every player's mean in
 fetch. Each game is decided once (`nba_prop_projection_decisions`). The injury list each
 game was projected with is kept in `nba_injury_asof`, which also holds the 2018-19..2025-26
 history from the official report.
+
+**The probability a pick stores (mike, 2026-11-06: "Yes, ship it").** Graded walk-forward on 2024-25 and 2025-26,
+every eighth of the model's EV range claims about three times what its bets return (the EV
+calibration grade, PR #1178). So for games from 2026-11-07, a picks row stores and the app
+shows the model's probability pulled toward the price it was bet at: p' = implied + k (p −
+implied), implied from the decision price, k = 0.325 (`config.MODEL_PROB_SHRINK`). A row for
+an earlier game stores p, whenever it was written, so every reader tells the two apart from
+the row's own `game_date`. `model_probability`, `model_probability_cal`, `edge`,
+`decision_edge` and `best_edge` all come from p', so the shown EV and the shown edge at the
+bet's price are k times what they were. **The bet does not change**: `find_bets` decides on p
+against the same floors, and the door ranks on the raw EV.
+
+- *k.* Maximum likelihood on all three seasons' 66,588 graded bets (`calfit.py` method `k`,
+  grid 0.005): 0.325; on a 0.001 grid 0.324; 90% likelihood range 0.270 to 0.377. Fitted on
+  earlier seasons only, it was 0.325 (2023-24) and 0.300 (2023-24 + 2024-25).
+- *The replay* (`tests/test_nba_prop_projection_shrink.py`, every graded bet of both NBA prop
+  models through the live `pick_rows`, the door's `choose` and Discord's `price_bound`, with the
+  boundary moved before them; it runs where the research bet lists exist). With and without the shrink the door chose the same bets
+  in the same order, with the same reason for every candidate it dropped: 1,867 bets at four a
+  night, 2,639 at six. Every stored probability is implied + k (p − implied). The smallest
+  stored decision edge is +0.0015, so the action filter's cut (decision edge ≥ 0.0) keeps every
+  bet. Discord's "good to" price is printed identically on all 66,588.
+- *What a member sees.* At the door (six a night), the projection model's 1,852 bets: the EV
+  stored until now claims +28.1%, the shrunk EV +9.1%, and the bets returned +9.9% (+147.5
+  units). In-sample, because k was fitted on these seasons; walk-forward the shrunk claim was
+  +8.5% against +10.8% returned. One live pick: "Myles Turner Under 1.5 Blocks" at BetParx +110
+  (2026-11-04) is stored as 58.85% with an edge of +11.2% and an EV of +23.6%; shrunk it would
+  show 51.3%, +3.7% and +7.7%. Same bet, price, stake and "good to".
+
+Every reader of the three numbers, and what changes:
+
+| reader | what it reads | after the change |
+|---|---|---|
+| The app: pick card, reasoning card, model screen ("Model %", "Edge", EV) | `model_probability`, `decision_edge` | the shrunk numbers; no app release |
+| The app, Discord and push action filter | probability ≥ 0.0, `COALESCE(decision_edge, edge)` ≥ 0.0 | unchanged: every bet passes |
+| Record views (`v_model_full_record`, `v_model_full_outcome_*`), BYOM backtests | `decision_edge` ≥ the cut | unchanged, the same reason |
+| Discord posts | no probability or edge is posted; "good to" solves the EV floor from `model_probability` | identical: `discord_notifier._honest` recovers the decided number (`models/honest_ev.decision_probability`). Without it, 31,143 of 66,588 bets would have posted no "good to" |
+| The free pick of the day (Discord free channel, X) | the probability and DraftKings `edge` copied into `opening_signals` at capture | "good to" identical (`discord_notifier._decided`, the same recovery); eligibility cuts on the DraftKings `edge` ≥ 0.0, see below |
+| `models/honest_ev.gate`, `config.MODELS_ON_OWN_PROBABILITY` | the model's own number, before the write | unchanged; it stays on its own number (a promoted map would be applied before the floor and change bets) |
+| The door (`models/nba_prop_rank.py`) | `_ev`, the raw EV | unchanged |
+| Closing-line value | prices only | unchanged |
+| Calibration monitor (`tracking/system_health`), weekly fitter | `COALESCE(model_probability_cal, model_probability)` of settled bets | new picks are graded on the shrunk number; see below |
+| A member's own-book EV, parlays, BYOM filters | `model_probability` | the shrunk number |
+| Claude mobile's `confirmed_picks` view; the picks email renderer (no job calls it) | the stored probability and edge | the shrunk numbers |
+| The app's sharp score | the model's edge bar | none for this model, as before (it has no bar) |
+| Local dashboard (`dashboard/app.py`) | `edge` (DraftKings) ≥ 0.0 | a pick whose DraftKings price is worse than its book's can drop off its list |
+
+**Not rewritten, and the boundary.** The 78 BET rows written through 2026-11-04 (28 of them
+VOID), and every row for a game before 2026-11-07, keep the raw number (CLAUDE.md 1c).
+`models/honest_ev.decision_probability` gives the decided number for any row from its stored
+number, decision price and game date. The date has to be one no pick was written for before the
+change deploys: a raw row the old code wrote for a game on or after it would be read as shrunk
+(re-posted by Discord, it would say "good to −200"). Without the date at all, a re-post of an
+old pick would do the same: "Myles Turner Under 1.5 Blocks", stored 0.5885, posts −136 and
+would have posted −200. Flagged, not fixed: the
+calibration monitor's window opens at the model's version date, so until the old picks age out
+it averages raw and shrunk claims together. And the DraftKings-reference `edge` goes negative
+more often: on the 55 live picks with a DraftKings price, 1 is negative now and 8 would be.
+Two readers cut on it: the local dashboard, and the free pick's eligibility
+(`discord_notifier._free_pick_candidates`, `os.edge`), which unlike the app's filter does not
+read the decision edge. So such a pick is still a bet on every board and channel, but is not
+offered as the free pick. Making the free pick cut on the decision edge, as the app does, would
+change every model's free-pick pool, so it is left for its own change.
 
 ## 6. Second search: spread, moneyline and total (pre-registered 2026-10-17, before any grid)
 
@@ -1486,8 +1569,10 @@ full-game model, and chance. Replication and look-ahead found no fault in either
 reproduces exactly, every bet settles the same way from the cache, and changing a game's own
 box score moves none of the signals.
 
-**C1 is not built.** It passed the house standard, which section 8 says is built live; this is
-a judgement against that, made after looking, and is reported as such.
+**C1 was not built at first; it is now, as `nba_first_half_total_luck`** (mike, 2026-10-30:
+"Build the model that passed."). It passed the house standard, which section 8 says is built
+live. The first decision, made after looking and reported as such, went against that. The reasons
+it gave stand as the model's known weaknesses:
 - The effect is incoherent. A total set wrong by shooting luck should be wrong in both halves.
   Against games with a gap between -1 and +1, C1's games ran +1.89 points over in the first half
   (interval +0.68 to +3.09) and -0.45 in the second (-1.80 to +0.87); the difference is +2.34
@@ -1500,6 +1585,29 @@ a judgement against that, made after looking, and is reported as such.
   out after looking and is not a registered strategy.
 - By chance: in 5,000 shuffled 24-cell families, a pass at +8.0% or better appears in 3.0% to
   4.1% of them, depending on the shuffle.
+- Its quotes are not all main numbers, which this section's first paragraph implies. The
+  first-half purchase kept one listed pair per book, the last one listed
+  (`odds_ingestor._parse_total_outcomes`), so the main-number rule had nothing to choose among.
+  Against Pinnacle's number in the same game, the stored rows sit at least 1.5 points off it at
+  BetRivers 84.6%, betPARX 82.7% and Hard Rock 34.0% of the time, and 1.1% or less at every
+  other deciding book. That reads as a ladder cut to one rung; the ladder is inferred, because
+  no raw response was stored. 78 of the 595 bets are at those three books, including all ten
+  priced above +105 and all eleven at -125 or worse. **The prices it lays are -130 to +114 across
+  all books, and -118 to +105 at the four books whose rows look like main numbers (517 bets).**
+  Live takes each book's real main number, so it will not be offered the quotes behind some
+  bets. That does not change which games are bet, because the gap decides the game. Re-graded
+  through the live code (`python -m scripts.nba_first_half_total_luck_replay --quote-bounds`):
+
+  | Quotes | Bets | Units | Return | 95% interval | Offers changed | Results flipped |
+  |---|---|---|---|---|---|---|
+  | The lab's | 595 | +51.49 | +8.01% | +0.43% to +15.37% | | |
+  | BetRivers and betPARX rows with prices over 6 points of probability apart removed | 595 | +51.32 | +7.97% | +0.40% to +15.30% | 10 | 0 |
+  | The same, including Hard Rock | 595 | +52.16 | +8.05% | +0.69% to +15.39% | 45 | 1 |
+  | All three books removed entirely | 595 | +48.12 | +7.44% | -0.04% to +14.85% | 79 | 3 |
+
+  Fanatics has no purchase rows at all, so it is a deciding book the graded bets never saw. The
+  first live ticks replace the inference with a measurement: the `totals_h1_alternate` rows per
+  book in `odds`.
 
 **C2 is built live** as `nba_team_total_luck`.
 - Not one book: DraftKings alone 340 bets, +14.8% (interval +4.4% to +24.8%); FanDuel alone
@@ -1962,7 +2070,1160 @@ bets.
 - **F8, the early season: too few games to tell.** The six cells place 112, 65, 43, 37, 18 and
   17 bets over all priced seasons. Full-game overs with last season weighted as 5, 10 or 20
   games: -0.9%, +0.1%, +11.4%; home team-total unders: -2.4%, -15.1%, -21.5%. The 10-game wait
-  stays.
+  stays. (mike removed the wait on 2026-11-02; `docs/sports/nba.md` has the replay on the
+  plain season-to-date number, which is not this blend.)
 
 **Closed for 2026-27: team first-quarter and first-half shares, and an early-season start for
 the two live models.** Nothing here is built.
+
+
+## 10. Sixth search: alternate lines (pre-registered 2026-10-21, before any alternate price was graded)
+
+mike, 2026-10-21: *"I don't understand how all strategies keep failing … I want a deeper version
+of this task, not a bigger one"*, then *"move forward I want the game market models"*. A
+professional judges an NBA model by whether it beats the closing line, and looks for the books
+that are slow or formulaic rather than for a better team rating. Section 10.1 records three
+free checks that say where the market is NOT slow; 10.2 registers the one new raw material
+those checks leave: every book's alternate ladder.
+
+**Written before any alternate rung was graded against a result. Nothing below changes after a
+result is seen; a later change gets its own dated line and reason.**
+
+### 10.1 Three free checks (2026-10-21; prices only, no game score read except where named)
+
+1. **Closing-line value of every earlier cell** (read from the stored cell files, no new grade):
+   the median bet's value at Pinnacle's no-vig close.
+   - The model families lose value by the close at every decision time: ratings × minutes (F1)
+     −2.4% median over 144 cells, best −0.7%; absences (F5) −2.8%; shooting luck (F4) −2.5%;
+     the market-anchored model (P1) −1.8%.
+   - A bigger player-and-minutes model on the same inputs would be a bigger F1. Its morning
+     picks already move against it, so the market already holds what it knows.
+   - The only positive values come from comparing soft books with Pinnacle at the same
+     moment (P2 moneylines, best cell +4.7%; F2 underdogs +1.9%). Those are mostly underdogs
+     priced with the proportional no-vig method, which flatters a longshot.
+2. **How fast the spread prices an official injury-report change** (2021-22 → 2023-24,
+   34,849 report-to-report changes; the implied move is 2.26 points per 48 expected minutes
+   lost, §4.1). Of the 3,108 changes worth 0.25 points or more:
+   - 22% of the eventual move is in the line before the report's printed time;
+   - 86% by the first stored price 30 minutes after it;
+   - the rest of the way to the close is 7–10% of the implied move.
+   The market finishes inside 30 minutes. Whether a book is slow inside those 30 minutes needs
+   prices every 5 minutes (the feed's spacing). About 600 report times a season carry a change
+   of 0.5 points or more; 7 extra prices around each at 30 credits is about 126,000 credits a
+   season. Not bought yet.
+3. **Does the line price who will play?** Each Questionable, Doubtful or Probable player at the
+   morning price and at 3–6 hours before tip, against whether he played (box score), with his
+   own earlier listings as a prior:
+   - The prior predicts well: Questionable players with a prior of 0.3 or less played 4% of
+     the time, 0.9 or more 81%.
+   - The line already uses it. The slope of the line's move to the close on the prior's
+     predicted move is 0.06 (interval −0.33 to +0.40) in the morning and 0.23 (0.03 to 0.43)
+     3–6 hours out, on a typical predicted move of 0.18 points: about 0.04 points. Not
+     bettable.
+
+Scripts: `%TEMP%/nba_game_edge/deep/` on the build machine (`clv_table.py`, `news_mech.py`,
+`q_mech.py`).
+
+### 10.2 The hypothesis
+
+Soft books hang 20 to 60 alternate rungs per game on spreads, totals and team totals, priced
+from their main number by their own curve. Pinnacle hangs about 11, within 2 to 3 points of its
+main number. The NBA's results around a sharp main number have a measured shape (4,770 games
+of results around Pinnacle's close before 2024-25: spread SD 13.3, total SD 18.1). Where a
+book's curve is thinner or fatter than that shape, a rung far from the main number is
+mispriced. One probe game (2025-01-15, NYK @ PHI, prices only) showed rungs 5–6% above a fair
+price at three books, all on the favourite laying 13–16 points. One game is not evidence; it is
+why the purchase is worth making.
+
+### 10.3 Data (all into Supabase first)
+
+- Every book's `alternate_spreads`, `alternate_totals` and `alternate_team_totals`, one
+  purchase per regular-season game 60 minutes before tip, 2023-24 → 2025-26 (the feed holds
+  these from 2023-05-03). `odds`, `source = 'odds_api_nba_alt_history'`, one row per rung:
+  `spread_home` is the HOME number, team totals filed as `alternate_team_totals_home` /
+  `_away`. Writer: `data/ingestors/nba_odds_history.py --alternates`. Protected from the
+  prune by name (`data/prune_odds.PROTECTED_SOURCES`).
+- Cost, measured: 30 credits a game at ten books plus 1 a date. Pilot 2025-01-15: 11 games,
+  331 credits, 6,727 rungs stored. The three seasons: about 111,000 credits.
+
+### 10.4 Rules every cell is graded under
+
+1. **Decision:** the alternate purchase (60 minutes before tip, its own stamp). One decision
+   per game per cell.
+2. **Fair line:** Pinnacle's main number in the same purchase, with its proportional no-vig
+   price. For spreads and totals that is Pinnacle's alternate rung with prices closest to even.
+   For team totals it is Pinnacle's team total in the derivative purchase (§8) at the same
+   lead, stamped within 10 minutes of the alternate purchase. The centre is solved through the
+   empirical distribution of results around Pinnacle's close on the seasons before the graded
+   one (`H.close_dist`); for team totals, results around Pinnacle's team-total number at the
+   derivative purchase on earlier seasons once they hold 300 or more games, else P2's
+   stand-in (§8.2). A game with no Pinnacle main for the market gets no bet.
+3. **Deciding books:** `config.BEST_LINE_BOOKMAKERS`; Pinnacle and Bovada are never bet.
+4. **A rung is eligible when:**
+   - its two prices are coherent (implied sum 1.00–1.15);
+   - it is at least 1.5 points from that book's own main rung (its rung closest to even), so the
+     search is about alternates, not mains, which §6 and §8 already graded;
+   - that book's main rung is within 1.0 point of Pinnacle's main number (a ladder that has not
+     moved with the market is not bet);
+   - the side's price is between −200 and +400. Rungs above +400 are graded as a control,
+     never a candidate.
+5. **Choice:** the eligible rung with the highest EV on the cell's side, one per game (team
+   totals: per team). Ties go to the book order in `BEST_LINE_BOOKMAKERS`.
+6. **Units and settlement:** the harness's. One unit to win, risk capped at 3; a push returns
+   the stake and leaves the denominator. Spreads and totals settle on the final score,
+   overtime counted; team totals on that team's final score, overtime counted.
+7. **Seasons:** 2023-24, 2024-25 and 2025-26, pooled. Nothing is fitted on alternate prices,
+   so every season is graded.
+
+### 10.5 The cells (30)
+
+| Family | Sides | EV cuts | Cells |
+|---|---|---|---|
+| A1 alternate spreads | home, away | 0.02, 0.04, 0.06, 0.08, 0.10 | 10 |
+| A2 alternate totals | over, under | same | 10 |
+| A3 alternate team totals (both teams; each bet keeps its market) | over, under | same | 10 |
+
+**Bands** (bar 5): [0, 0.02), [0.02, 0.04), [0.04, 0.06), [0.06, 0.08), [0.08, 0.10),
+[0.10, ∞).
+
+**Controls, graded and reported, never candidates:** the same 30 with rungs above +400 only;
+the main rung only (the earlier searches' bet, for comparison).
+
+### 10.6 The bars
+
+§9.1's house standard, unchanged: 200 or more bets pooled; the whole-day bootstrap 95% interval
+above zero; seasons mostly positive; beats the blind bet on its side; every band from the band
+below the cut to the top positive; beats the 95th percentile of 200 placebo shuffles.
+
+- **Blind bet:** the same side at the best deciding price at each book's main rung, every game
+  in the cell's population.
+- **Placebo:** Pinnacle's centre shuffled between games on the same date in the same market;
+  prices and rungs stay.
+- **Reported, never bars:** closing-line value (EV at Pinnacle's main no-vig close through the
+  same distribution); DraftKings alone; without the single best book; prices −200 to +150
+  against +150 to +400; rung distance 1.5–4, 4–8 and 8+ points.
+- **Expected passes by chance:** 30 × 0.025 ≈ 0.75 cells clear bar 2 alone, before correlation.
+- **A pass is built live** (§2: every model is real money), with its own EV floor at the passing
+  cut and the price range it lays stated before it ships.
+
+### 10.7 Two changes after two checks, before any rung was graded (2026-10-21)
+
+**1. Each ladder keeps its own update time, and a stale ladder is not bet (10.3, 10.4).**
+- Checked on the probe purchase (2025-01-15, NYK @ PHI): every book's alternate markets were
+  updated 0 to 35 seconds before the purchase, Pinnacle's 4.5 minutes before. Not stale here.
+- But the first version of the writer stored one time per purchase, so a stale ladder could not
+  be seen. The writer now stores each market's own update time as the rung's `snapshot_at`,
+  as the main-line archive stores each book's.
+- The lab's decision time for a game is its newest stamp (the purchase). A ladder stamped more
+  than 15 minutes before it is not eligible and does not give Pinnacle's main number.
+- The 11 pilot games were bought again under the new writer after their first rows
+  were deleted (331 credits), so every stored rung carries its market's time.
+
+**2. Spreads are priced through the shape of games with a line of the same size (10.4.2).**
+- Checked on results around Pinnacle's close, 2020-21 → 2025-26, before any alternate rung was
+  graded. With the residual signed toward the favourite:
+
+  | Closing line | Games before 2023-24 | Mean | Favourite by 12+ more | Underdog by 12+ more |
+  |---|---|---|---|---|
+  | 5 or less | 1,749 | −0.5 | 15.6% | 18.4% |
+  | 5 to 10 | 1,355 | −0.4 | 15.1% | 19.1% |
+  | more than 10 | 436 | +0.9 | 19.0% | 15.4% |
+
+  2023-24 on reads the same way (more than 10: 18.7% against 13.9%, 820 games).
+- One shape for every game makes a far underdog rung look too likely in a big-line game and too
+  unlikely in a close one. Books price alternate ladders off curves that move with the line, so a
+  "mispricing" found with a single shape could be the lab's own error.
+- So spreads are priced through the shape of results for games whose closing line was the same
+  size (5 or less, 5 to 10, more than 10 points), from the seasons before the graded one, signed
+  toward the favourite and mirrored when the away team is favoured. A level line uses the pooled
+  shape. Closing-line value is priced the same way.
+- Full-game totals keep one shape. Split by the size of the total, the spread of results moves
+  by at most 1.7 points (SD 17.0 to 18.7) and the 12-point tails by at most 2.6 points; split by
+  the size of the spread, the 15-point tails stay within 18.5% to 22.3%.
+- **Team totals are split the same way as spreads, by the game's line and by favourite or
+  underdog** (each team's score around the team total Pinnacle's full-game close implies,
+  2020-21 → 2025-26). A team favoured by more than 10 ran 15 or more under its number in 6.5% of
+  1,256 games and 15 or more over in 10.2%; a team in a game of 5 or less, 8.9% both ways. One
+  shape would make a big favourite's far under look too likely, which is where the pilot night's
+  best team-total rungs sat. So a team total is priced through the shape of teams in the same
+  role in games with a line of the same size, from the seasons before the graded one, centred on
+  Pinnacle's own team-total price. The game's line is Pinnacle's main spread in the same
+  alternate purchase; with none, or a level line, the pooled shape of 10.4.2 is used.
+- Both checks are synthetic-tested: the lab drops a ladder 30 minutes older than its purchase,
+  and it fails when the favourite's shape is mirrored the wrong way.
+
+### 10.8 A change after the first grade: impossible total rungs (2026-10-29)
+
+**Made after the first grade had been read, and stated as such.** The first full run (run
+`2026-10-29-sixth`, stored in Supabase, superseded by `2026-10-29-sixth-r2`) passed 0 of 30
+cells. Two cells cleared the 95% interval: full-game alternate totals, over, EV ≥ 0.08 (35 bets,
++81.6%) and ≥ 0.10 (30 bets, +94.2%). Their bets showed why. 26 of the 35 were Fanatics rows filed
+as full-game alternate totals with lines from 9.5 to 107.5, between 2025-10-29 and 2025-11-02.
+One more was a FanDuel 57.5. No full-game total is 9.5, so each was priced as a near-certain over
+and won.
+
+- **Measured on the whole purchase** (2,224,067 rungs): every full-game total rung sits within 40
+  points of the median of its game's stored total rungs, except 191 rows (Fanatics 160, FanDuel
+  31, 36 games, 2023-12-23 to 2025-11-02) that sit 120 or more away. Nothing lies between 40 and
+  120. Alternate spreads and both team totals have no such rows.
+- **The rule:** a full-game total rung 40 or more points from the median of the game's stored
+  total rungs is not a full-game total and is not eligible (`IMPOSSIBLE_GAP`,
+  `scripts/nba_game6_alt.frame_alt`). It removes exactly those 191 rows. The cut sits in the empty
+  gap, so 30 or 100 would remove the same rows.
+- A synthetic check builds a total ladder with one 9.5 rung. It fails with the rule removed.
+- Every cell is graded again under the rule, as run `2026-10-29-sixth-r2`. The first run stays in
+  Supabase as the record of what the defect did.
+- Also fixed: the first run's bet file was not written (a price-shape column cannot be stored);
+  the lab now drops that column before writing.
+
+### 10.9 Results (graded 2026-10-29, run `2026-10-29-sixth-r2`)
+
+Graded on the research cache refreshed 2026-10-29 (2,224,067 stored rungs on 3,690 games), under
+10.8's rule, then `python -m scripts.nba_game2_verdict --house5`. Stored in Supabase as run
+`2026-10-29-sixth-r2`; the first run, before 10.8, is `2026-10-29-sixth`.
+
+**0 of the 30 cells pass, and none clears the 95% interval on its own** (about 0.75 would by
+chance). The 14 cells with 200 or more bets have a median return of +0.2%; 8 are positive.
+
+| Family | Cell | Bets | Units | Return | 95% interval | 2023-24 / 2024-25 / 2025-26 | Fails |
+|---|---|---|---|---|---|---|---|
+| A1 alternate spreads | away, EV ≥ 0.04 | 868 | +22.1 | +5.2% | −3.9% to +14.7% | +8.7% / +10.0% / −1.9% | interval, bands |
+| A1 alternate spreads | home, EV ≥ 0.04 | 628 | +17.5 | +5.6% | −5.8% to +16.6% | +6.4% / +12.7% / −2.2% | interval, bands |
+| A2 alternate totals | under, EV ≥ 0.02 | 254 | −33.5 | −11.5% | −23.9% to +0.5% | −15.5% / −9.0% / −12.0% | all but bets |
+| A2 alternate totals | over, EV ≥ 0.02 | 147 | −4.5 | −3.7% | −21.2% to +13.1% | −17.2% / −11.7% / +22.3% | all |
+| A3 alternate team totals | under, EV ≥ 0.04 | 616 | +7.5 | +2.5% | −8.9% to +13.6% | −1.1% / +5.6% / +1.9% | interval, bands, placebo |
+| A3 alternate team totals | over, EV ≥ 0.02 | 217 | +0.2 | +0.1% | −10.7% to +11.2% | −16.3% / −1.1% / +8.4% | interval, seasons, bands, placebo |
+
+**Reported, never bars, for the best cell (A1 away, EV ≥ 0.04):**
+- DraftKings alone, the rule re-run with DraftKings as the only book: 247 bets, −6.6%. (The cell's
+  own 108 DraftKings bets: +5.1%. The two differ because the re-run picks other rungs.)
+- Without BetMGM, its biggest book (473 of 868 bets), re-run: 518 bets, +2.8%.
+- By distance from the book's main number: 1.5-4 points 100 bets +4.7%; 4-8 points 272 bets
+  −4.0%; 8 or more points 496 bets +17.6%. The far bets are all away underdogs priced +260 to
+  +400 (26.4% won). At DraftKings alone they lose (167 bets, −2.1%), and by book they run from
+  +12.3% (BetRivers) to −20.6% (Fanatics). That split was found after looking, inside a failed
+  cell.
+- Closing-line value is not independent evidence here (11.5, item 3), and the team-total cells
+  have none: the derivative purchase holds one Pinnacle team-total quote per game, at the
+  decision.
+
+**Independent verification** (workflow `nba-alt-lines-regrade-verify`, scripts under
+`%TEMP%/q1trend/verify6/` on the build machine):
+- All 3,709 bets of six headline cells settled again from final scores: 0 differ. Every bet's rung
+  is in the purchase at that book, line and price, before tip, 1.5 or more from the book's main,
+  priced −200 to +400, from a ladder no more than 15 minutes old.
+- **A gap in 11.5's first change, flagged and not fixed.** That change takes each book's main
+  number from the hourly archive, up to 60 minutes old, so "the book's main is within 1 point of
+  Pinnacle" no longer tests the ladder itself. 54,905 priced offers come from ladders more than 1
+  point from Pinnacle at the purchase; 475 bets used them. Recomputed without them: the best cell
+  is 838 bets, +6.3% (−3.4% to +15.8%); A3 under at 0.04 falls from +2.5% to −4.6%. **0 of 30
+  pass under every cleaning tried.** One FanDuel totals ladder (ORL at CHI, 2023-11-15), centred
+  15 points from the market, made the search's single highest-EV bet (under 216.5 at +310) and won.
+
+**Closed for 2026-27: alternate spreads, totals and team totals.** Nothing is built.
+
+## 11. Seventh search: the minutes after an injury report (pre-registered 2026-10-24, before any of its prices were bought)
+
+mike, 2026-10-24: *"Buy alts and do #2 as well. Go"*. Section 10.1's second check found that
+NBA lines finish 86% of an injury report's move within 30 minutes of it, and that the hourly
+archive cannot see inside those 30 minutes. This search buys the slate every 5 minutes around
+each report change and asks two questions a professional asks: is any book still at the old
+price after Pinnacle has moved, and has anyone moved at all in the first minutes?
+
+**Written before any 5-minute price was bought. Nothing below changes after a result is seen;
+a later change gets its own dated line and reason.**
+
+### 11.1 Data
+
+- **Events.** A change between two consecutive submitted injury reports of one team for one
+  game. Expected minutes = the sum over listed players of P(plays) × his minutes per game as of
+  the game (Out 0, Doubtful 0.1, Questionable 0.5, Probable 0.95, Available or unlisted 1; his
+  last 10 played games, else last season). The implied change in the HOME margin is 2.26 points
+  per 48 minutes (§4.1), both teams at that report summed: `s`. An event is a report with
+  |s| ≥ 0.5 printed at least 30 minutes before tip. 2024-25: 821 events at 648 report times;
+  2025-26: 1,092 at 904.
+- **Prices.** The whole slate (h2h, spreads, totals; ten books with Pinnacle) at R−5, R, R+5,
+  …, R+25 minutes around each event's printed time R, on the feed's 5-minute grid, less the
+  instants already held: 9,820 instants, 294,600 credits at 30 each. Plan:
+  `jobs/nba_news_windows_2025_2026.json` (`scripts/nba_news_window_plan.py`). Buyer:
+  `data/ingestors/nba_odds_history.py --instants`, ledgered in `odds_history_fetches` with
+  `why = 'news_window'`, so the harness reads them like every other fetch. Run on the worker as
+  the declared job `nba-news-windows-2025-2026`.
+- **Seasons graded:** 2024-25 and 2025-26, pooled. The slope in N2 below was measured on
+  2021-22 → 2023-24 (10.1), so nothing is chosen on the graded seasons.
+
+### 11.2 Rules every cell is graded under
+
+1. **Decision times** (a cell axis): t = R+5, R+10, R+15. R+5 assumes a live system reads the
+   report within 5 minutes of its printed time; when each file became downloadable is unknown
+   (§6.1), so the later times show how fast any edge decays.
+2. **Quotes.** A book's quote at a fetch is the one that fetch returned for it. A deciding
+   quote must be stamped within 5 minutes of t (the feed refreshes a book's stamp on every
+   poll, §6.1), so "the book has not moved" means the feed saw it unmoved, not that the feed
+   stopped looking.
+3. **Fair price.** Pinnacle's no-vig price at its own number. Spreads go through the shape for
+   games with a line of the same size (10.7), totals through the pooled shape, moneylines
+   directly. A game with no Pinnacle quote at the fetch has no bet.
+4. **Deciding books** `config.BEST_LINE_BOOKMAKERS`, price −200 or better; units, pushes and
+   settlement are the harness's (§6.2). One bet per game, market and cell (the first event of
+   the game that qualifies).
+
+### 11.3 The families and their cells (26)
+
+- **N1, the stale book.** At t, Pinnacle's fair centre has moved since R−5 by at least
+  1 point (spreads, totals) or 0.02 in win chance (moneylines), and a deciding book's quote at t
+  is identical (number and both prices) to its quote at R−5. Bet that book toward Pinnacle's
+  move, priced at Pinnacle's centre at t. Markets spreads, totals, moneyline × t (3) × EV ≥ 0.02,
+  0.04: **18 cells.** The side is per game (toward the move); bar 4 reads the real sides.
+- **N2, nobody has moved.** At t, Pinnacle's centre has moved less than a quarter of |s| since
+  R−5 (spreads) or less than 0.01 in win chance (moneylines). The fair centre is Pinnacle's at
+  R−5 plus 0.47 × s: the share of the implied move the market made from the hour before a report
+  to the close in 2021-22 → 2023-24 (10.1: 0.375 in the window, 0.097 after). Bet the side the
+  news favours at the best deciding price. Spreads, moneyline × t = R+5, R+10 × EV ≥ 0.02,
+  0.04: **8 cells.**
+
+**Bands** (bar 5): [0, 0.02), [0.02, 0.04), [0.04, ∞).
+
+**Controls, graded and reported, never candidates:**
+- **N1 quiet:** the N1 rule at the same offsets around report times where neither team's
+  expected minutes changed by 0.5 points' worth. If stale books pay as well without news, the
+  news is not the reason.
+- **N1 hourly:** the N1 rule on the hourly archive alone (t = the first fetch at least 30
+  minutes after R), the resolution every earlier search had.
+
+### 11.4 The bars
+
+§9.1's house standard, unchanged (200 bets pooled, 95% interval above zero, seasons mostly
+positive, beats the blind bet on its side, bands, 200 placebo runs).
+
+- **Placebo (N1):** the direction of Pinnacle's move is shuffled between events on the same
+  date in the same market; prices stay. **(N2):** `s` is shuffled between events on the same
+  date.
+- **Reported, never bars:** closing-line value at Pinnacle's last pre-tip no-vig price; the
+  same cells at DraftKings alone; how much of Pinnacle's move happened between R−5 and R (news
+  out before the printed time); the median minutes a stale book took to move.
+- **Expected passes by chance:** 26 × 0.025 ≈ 0.65 before correlation.
+- **What a pass needs before it is live:** a live poller that reads the official report within
+  minutes of each slot and prices the slate immediately. A pass at R+5 that fails at R+10 is
+  reported as needing that speed; it is not shipped on a slower clock.
+
+### 11.5 Changes after an independent review of sections 10 and 11, before any price was graded or the purchases ran (2026-10-24)
+
+Four reviewers read the two labs, the two purchases and these sections, and two more checked
+each finding (`%TEMP%/nba_game_edge/deep/`; workflow `nba-purchase-and-lab-review`). Fourteen
+findings held. Every change below was made before any alternate rung or 5-minute price was
+graded, and before either purchase ran.
+
+**The alternate-lines search (section 10)**
+
+1. **A book's main number is its main-market quote, not a rung of its ladder.** DraftKings and
+   Hard Rock leave the main number out of their alternate ladders. On the pilot night the
+   ladder's "closest to even" rung differed from the book's real main on 40 of 40 DraftKings
+   ladders and 20 of 20 Hard Rock ones. That dropped 4 DraftKings ladders sitting at Pinnacle's
+   number and admitted rungs only 1 point from the real main. The main is now the full-game
+   spread or total the hourly archive shows at or before the decision (within 60 minutes),
+   and the derivative purchase's team total within 10 minutes. A book with no main quote is
+   not bet. The blind bet and the main-rung control use the same quote.
+2. **The placebo swaps the result shape, not only the centre.** Section 10.2's idea is that a
+   book's curve is the wrong shape. Swapping centres between games keeps that kind of
+   mispricing, so a real edge could fail the bar. Each placebo run now gives every game a shape
+   drawn at random from that season's shapes for its market, and re-solves the centre from
+   Pinnacle's real price under it:
+   - spreads: the six line-size and favourite shapes;
+   - team totals: the six;
+   - totals: the pooled shape, its mirror image, and a normal of the same SD.
+
+   The centre-swap placebo is reported beside it (50 runs), never judged.
+3. **Closing-line value here is not an independent check.** It prices the bet at Pinnacle's
+   main close through the same shape that chose it. So it measures the lab's own disagreement
+   plus Pinnacle's main-line move, not whether the rung beat its own close. It stays reported,
+   and it is never cited as beating the closing line. Results and the bars decide.
+4. **Bar 5 reads every band.** The pass/fail script read five bands; the 0.02 cells carry six,
+   so the top band [0.10, ∞) was never judged. It now reads every band a row carries
+   (`scripts/nba_game2_verdict.band_slots`).
+5. **The 5-minute news prices stay out of this grade.** The harness leaves them out unless a
+   lab asks (`H.load(include_news_windows=True)`, which only section 11's lab passes). So
+   section 10's close and shapes do not depend on when the cache is refreshed.
+
+**The injury-news search (section 11)**
+
+6. **What "R+5" means.** The feed returns the latest 5-minute snapshot at or before a request,
+   and its snapshots sit 38–39 seconds past each mark (measured on 13 requests, 2022-11 to
+   2026-02). A request at R+5 returns R+0:38. So the plan now asks one minute past each mark,
+   and "R+5" is the snapshot at about R+5:38. Each fetch's own snapshot time (the purchase
+   stores it) dates the window, and "fresh" means a book stamped within 5 minutes of that
+   time, not of the request.
+7. **Minutes per game are the last 10 games played, as 11.1 says.** The first plan averaged
+   the last 10 box-score rows, games missed included. Replanned: 1,917 events (820 in 2024-25,
+   1,097 in 2025-26), 8,776 requests, **263,280 credits**. The approved figure was about
+   252,000; the plan before these fixes said 294,600. Re-measured with the corrected minutes,
+   N2's slope is unchanged: 0.375 in the window and 0.096 after, 0.47.
+8. **The N1 placebo is a null.** Shuffling only the bet's side and pricing it at Pinnacle's
+   real centre made every placebo a subset of the real bets, so no edge could pass. Now each
+   event's move direction is shuffled between events on the same date, market and offset, and
+   the fair centre moves with it (centre at R−5 plus the shuffled direction × the move's own
+   size). A synthetic check now asserts a planted edge clears the placebo's 95th percentile.
+9. **The blind bet** is the house standard's: the best fresh deciding offer on each side under
+   Pinnacle's centre at t, on games with a Pinnacle quote. It had ranked offers by raw price.
+10. **The quiet control** keeps report times where NEITHER team changed by 0.5 points' worth;
+    it had used the net of both teams.
+11. **The registered reports are computed.** These are the share of Pinnacle's move already in
+    the snapshot at R, the median minutes a stale book took to move, and closing-line value for
+    moneylines (the no-vig close win chance), which had none.
+12. **Both purchases retry.** A rate-limit or server answer is retried, and every game or
+    instant that still got none is bought once more at the end of the run.
+
+### 11.6 A second review of the fixes, before any price was graded or the purchases ran (2026-10-24)
+
+Two reviewers re-read the fixes above, and two more checked each finding (workflow
+`nba-fix-rereview`). Four findings held; all are fixed.
+
+1. **Minutes per game are taken as of the game date.** The first fix still read a listed
+   player's minutes from his last box-score row, so a player ruled out on a date with no row
+   lost his latest games. A player with no game yet this season read as 0 minutes instead of
+   last season's average: 30 players who averaged 28 or more minutes the season before. Now it
+   is the mean of his last 10 games played strictly before the date, else last season's. The
+   plan was rebuilt: **1,927 events (824 in 2024-25, 1,103 in 2025-26), 8,810 requests,
+   264,300 credits**, under the job's 270,000 ceiling. N2's slope, re-measured on 2021-22 →
+   2023-24 with the plan's own event definition: 0.373 in the window plus 0.095 after, still
+   0.47 (86% of the move done by the first price 30 minutes after a report).
+2. **A window is dated by the snapshot the feed returned**, read from the stored snapshot
+   time. If the feed answers a request with an older snapshot (one missing), that fetch is
+   filed where its snapshot belongs. The count of such fetches is printed with the grade.
+3. **The alternate lab no longer crashes on its first bet.** Its rung-distance report merged a
+   column the bets already carried. The synthetic check now builds one family's cells end to
+   end on placed bets.
+4. **A night whose game list got no answer is listed again at the end of the run**, and its
+   games bought, under the same ceiling and floor.
+
+**What 11.5's first change leaves out (measured 2026-10-24 on the stored derivative purchase).**
+A book's alternate team totals can be bet only where that book also quotes a main team total.
+Share of games with one, 2023-24 / 2024-25 / 2025-26:
+
+| Book | 2023-24 | 2024-25 | 2025-26 |
+|---|---|---|---|
+| BetRivers | 87% | 100% | 100% |
+| DraftKings | 90% | 100% | 99% |
+| FanDuel | 80% | 99% | 100% |
+| Caesars | 60% | 93% | 99% |
+| BetMGM | 51% | 0% | 0% |
+| Hard Rock | 14% | 0% | 0% |
+| betPARX | 0% | 0% | 100% |
+| Fanatics | 0% | 0% | 0% |
+
+So the team-total cells (A3) mostly test BetRivers, DraftKings, FanDuel and Caesars. BetMGM's,
+Hard Rock's and Fanatics' alternate team totals are mostly out of scope. A thin A3 result means
+those books were not tested, not that their ladders hold nothing.
+
+
+### 11.7 Results (graded 2026-10-30, run `2026-10-30-seventh`)
+
+Graded on the research cache refreshed 2026-10-29: the ledger holds all 8,810 injury-report
+requests the plan called for; 9 fetches are filed by the snapshot the feed returned rather than the
+one asked for (11.6, item 2). Of the plan's 1,927 events, 1,894 have a window at R+5 and R+10 and
+1,888 at R+15, on 1,328 games. Stored in Supabase as run `2026-10-30-seventh`.
+
+**0 of the 26 cells pass.** The verdict counts 10 that clear the 95% interval; every one holds 1 to
+4 bets.
+
+**N1, the stale book: almost never a bet.** 0 to 4 bets per cell over two seasons (3 spread bets at
+R+5). An independent recount from the raw quotes (workflow `nba-injury-news-verify`, scripts under
+`%TEMP%/q1trend/verify7/` on the build machine) found the same candidates row for row, so the rule
+saw every stale quote the data holds. What it showed instead:
+- After Pinnacle's number moves a point or more, a deciding book's quote is often unchanged: 18% to
+  41% of the time, by book.
+- But 89% to 93% of those unchanged books were already on the number Pinnacle then moved to (median
+  distance from Pinnacle's new number: 0 points). Pinnacle was catching up to them. Bet, they carry
+  a median EV of −4% to −5%: the price of the bet.
+- A book truly left on Pinnacle's old number, still unmoved and fresh: 5 to 25 games per market and
+  offset over two seasons (an upper bound), and even those average slightly negative EV, because a
+  1-point move is about the size of the vig.
+- Five minutes after a report, Pinnacle's spread had not moved at all about two-thirds of the time,
+  and had moved a full point after about one report in thirty.
+
+**N2, nobody has moved: loses.**
+
+| Cell | Bets | Units | Return | 95% interval | 2024-25 / 2025-26 |
+|---|---|---|---|---|---|
+| R+5, spread, EV ≥ 0.02 | 222 | −14.2 | −6.0% | −18.9% to +7.2% | −10.9% / −0.8% |
+| R+5, moneyline, EV ≥ 0.02 | 243 | −8.0 | −4.9% | −20.1% to +10.0% | −4.4% / −5.3% |
+| R+10, spread, EV ≥ 0.02 | 197 | −17.3 | −8.2% | −20.7% to +4.4% | −15.8% / −1.2% |
+| R+10, moneyline, EV ≥ 0.02 | 218 | −13.2 | −9.1% | −25.2% to +7.5% | −9.9% / −8.3% |
+
+The EV ≥ 0.04 cells (72 spread bets +2.6%, 150 moneyline bets +2.4%) are under 200 with intervals
+through zero. The rule picks exactly the games where the move never came: Pinnacle's close moved
+about 0.2 points toward the news after an R+5 decision, against the 0.65 the rule assumed. It did no
+better than bets on shuffled sides. Over all events the market does price the news at about the
+size assumed: roughly 30% in the hour before the report, about a fifth more by five minutes after,
+most of the rest over the next 20 minutes.
+
+**Verification.** All 880 bets of the four N2 cells above settled again from final scores and found
+in their fetch at that book, number and price, fresh: 0 differ. 22 R+10 bets were priced from an
+hourly or gap-fill fetch at the same five-minute mark (the purchase did not re-buy marks the archive
+held); without them R+10 spreads is −11.1% and R+10 moneyline −8.1%.
+
+**Flagged, not fixed (none changes a result):**
+- **The N1 placebo is not a null on the real data.** Most N1 candidates are the only event on their
+  date in that market and offset, so the within-date shuffle has nothing to swap: in the four R+5
+  and R+10 spread cells all 200 runs reproduce the real return. Those cells could not have passed
+  bar 6. They fail on bet count anyway. The synthetic world put 4 events on every date, so its check
+  could not see this.
+- The share of Pinnacle's move before R is blank on the N2 cells (the column the lab reads exists
+  only on N1 candidates), and the DraftKings-alone returns carry no count.
+- The first `--full` ran 9 hours without finishing: each candidate pass looked Pinnacle's centres up
+  one key at a time, and N2's placebo repeats the pass 200 times. The lookup now uses a dictionary
+  built once; old and new candidates are identical on 400 real windows (n1 222 s to 9 s, n2 76 s to
+  7 s). The second run took 41 minutes.
+
+**Closed for 2026-27: the minutes after an injury report.** Nothing is built, and the live report
+poller 11.4 named is not needed.
+
+## 12. Eighth search: the first-quarter trend method (pre-registered 2026-10-28, before any cell was graded)
+
+mike, 2026-10-28, describing how he picks first-quarter bets by hand:
+
+> *"I use EV analytics website for 1Q ATS records and home/away numbers … and team rankings
+> website for 1Q PPG and average 1Q margin. So my process was to go through each game looking
+> for teams with a 4-1/5-0 ATS home/away depending where they're playing L5 games vs Teams
+> 1-4/0-5 ATS home/away, from there would look at average 1Q point for/against both sides and
+> average 1Q points margin … I would also look at L10 games sometimes, a example would be you
+> have a team that 4-1 ATS L5 vs a team that's 2-3 ATS L5, I usually bump it out to L10 to see
+> if there's a edge. I was starting to mess around with 1Q totals also, same kind of concept,
+> looking L5/10 O/U, scoring stats and with the totals I would also look at pace of play."*
+
+**What earlier searches tested on first-quarter markets, and what they did not.** The first
+search's market rules (§4.2), the fourth search's market-anchored model, market rules and
+ratings projection (§8.4; best first-quarter cell: away spread, EV ≥ 0.06, 562 bets, 0.0%) and
+the fifth search's team first-quarter scoring shares (§9.9, 0 of 54 cells). **None of them
+graded a team's recent first-quarter cover record or over/under record.** The 2026-10-28 session
+note that cites §9 as the reason no first-quarter model was built is about a different idea.
+This search grades mike's method as he described it.
+
+**Written before any cell was graded. Nothing below changes after a result is seen; a later
+change gets its own dated line and reason.** Lab: `scripts/nba_game8_q1_trends.py`. Pass/fail:
+`scripts/nba_game2_verdict.py --house5` (§9.1's bars). No data is bought.
+
+### 12.1 Data
+
+- **First-quarter prices:** spreads and totals at each game's one purchase 45-75 minutes before
+  tip (decision point D, `H.per_event_times`), 2023-24, 2024-25 and 2025-26, ten books with
+  Pinnacle (`odds`, `source = 'odds_api_nba_derivative_history'`). The feed holds period
+  markets from 2023-05-03, so **no first-quarter number exists before 2023-24**; a team has no
+  record until it has played enough priced games.
+- **First-quarter scores:** `nba_period_scores`, through the first search's check
+  (`H.with_periods`).
+- **Pace:** possessions per team game from the box score (`models.nba_total_luck.team_box`).
+- Read from the research cache of 2026-10-17/18, which holds every first-quarter price bought
+  (all 1,229-1,230 games of each of the three seasons).
+- **Not inspected:** EVAnalytics and TeamRankings themselves (evanalytics.com was blocked from
+  the 2026-10-28 sandbox). Their records may be kept against a different line, such as the
+  close. This search keeps them against the number a bettor saw 45-75 minutes before tip.
+- **This season:** no first-quarter line is stored for any 2026-27 game. `latest_odds` holds
+  full-game spreads and totals for 98 games from 2026-10-20 and no `spreads_q1` or `totals_q1`
+  row (read 2026-10-29 01:30Z). A passing cell needs a first-quarter capture before it can bet.
+
+### 12.2 Definitions
+
+- **The game's first-quarter number:** at the game's purchase, Pinnacle's main first-quarter
+  spread (the HOME number, §4) or total where Pinnacle quotes it; else the median of the
+  deciding books' main numbers (`models.nba_book_numbers.visible_numbers`), rounded to the
+  nearest half point.
+- **A team's result in a game:** against that number, its first-quarter margin covers (W),
+  fails (L) or lands on it (P). For totals: over (O), under (U) or push.
+- **Venue record, last N:** the team's last N games at the SAME venue it plays at today (home
+  games for the home team, road games for the away team) that have a number and trustworthy
+  first-quarter scores, strictly before today's date. It reaches into the previous season, as
+  every NBA last-N read here does (Matt, 2026-10-23). **net = W − L** (or O − U); a push counts
+  0. A team with fewer than N such games has no record, and the game has no bet.
+- **Spreads, the hot team:** the team with the higher venue net; a tie is no bet. The cold team
+  is the other. **k = min(hot net, −cold net).** mike's rule, 4-1 or 5-0 against 1-4 or 0-5, is
+  k ≥ 3 on the last 5. His last-10 version, 7-3 against 3-7, is k ≥ 4 on the last 10.
+- **Totals:** for the over, k = min(home venue net, away venue net); for the under,
+  k = min(−home venue net, −away venue net).
+- **Season-to-date first-quarter averages** (the "1Q PPG and average 1Q margin" check): each
+  team's average first-quarter points scored (PF) and allowed (PA) in this season's games
+  before today, every venue, at least 5 games each, else the filter cell has no bet.
+  - **Spread check:** projected hot-team margin = ((hot PF + cold PA) − (cold PF + hot PA)) / 2.
+    It passes when the projection covers the game's number from the hot team's side. The
+    average margin is PF − PA, so a separate margin check would repeat this one.
+  - **Total check (scoring):** projected total = (home PF + away PA) / 2 + (away PF + home PA) / 2;
+    the over passes when it is above the game's number, the under when it is below.
+  - **Total check (pace):** the two teams' season-to-date possessions per game, averaged, against
+    the league's over the same season's games before today; the over passes when it is higher,
+    the under when lower. At least 5 games each.
+
+### 12.3 The cells (64)
+
+| Family | Market, side | Window | Cut on k | Checks | Cells |
+|---|---|---|---|---|---|
+| Q1A | first-quarter spread, the hot team (a per-game side) | last 5 | ≥ 1 / 3 / 5 | none; the spread check | 6 |
+| Q1A | same | last 10 | ≥ 2 / 4 / 6 | none; the spread check | 6 |
+| Q1A | same: **mike's "bump it out to L10"**: a last-5 hot team at net ≥ 3 against an opponent at net −1 or −2 (2-3), judged on the last-10 k of the same two teams (the last-5 hot team bet) | last 5 then 10 | last-10 k ≥ 2 / 4 | none; the spread check | 4 |
+| Q1T | first-quarter total, over and under | last 5 | ≥ 1 / 3 / 5 | none; scoring; pace; both | 24 |
+| Q1T | same | last 10 | ≥ 2 / 4 / 6 | none; scoring; pace; both | 24 |
+| **Total** | | | | | **64** |
+
+- **The price:** the best deciding offer on the cell's side, at that book's own main number, under
+  the first-quarter market's fair line (`H.market_fair` priced by §8.3's market pricing): the
+  rule mechanism F4 and F7 used. DraftKings alone is reported beside every cell.
+- **Bands (bar 5)** run along k within one window, side and check. Last 5: from −1, edges 1, 3,
+  5. Last 10: from 0, edges 2, 4, 6. The last-10 step: from 0, edges 2, 4. The band just below
+  the cut and every band from the cut up must be positive where they hold 30 or more bets.
+- **Seasons:** 2023-24, 2024-25 and 2025-26 graded and pooled; 2023-24 and 2024-25 are the
+  choosing seasons the placebo reads (`P3.choosing`). Nothing is fitted, so every season is
+  graded.
+- **Settlement:** first-quarter points (`nba_period_scores`); a push returns the stake.
+
+### 12.4 The bars
+
+§9.1's house standard, unchanged: 200 or more pooled bets; the pooled whole-day bootstrap 95%
+interval above zero; seasons mostly positive; beats the blind bet on its dominant real side;
+the bands; the choosing seasons' return above the 95th percentile of 200 placebo runs.
+
+- **Placebo, 200 runs, seeds 1-200:** each game's trend inputs (both teams' venue records, their
+  season-to-date averages and pace) are moved together to another game on the same date. Each
+  game keeps its own first-quarter number and prices, and the rule is recomputed.
+- **Controls, graded and reported, never judged:** the fade of every unchecked cell (the cold
+  team; the other total side).
+- **A thin cell is still reported.** Two venue records landing on 4-1 against 1-4 is rare. A cell
+  under 200 pooled bets fails bar 1, and its bets, units, return, interval and season split are
+  printed anyway. For such a cell the answer is "too few games to tell", not "it loses" (the
+  §9.9 F8 reading).
+- **Expected passes by chance:** 64 × 0.025 ≈ 1.6 cells clear bar 2 alone, before correlation.
+- **A pass is built live** (§2) with its own EV floor and the prices it lays stated before it
+  ships, once first-quarter lines are captured for 2026-27.
+
+### 12.5 Counts before grading (2026-10-28)
+
+Counted by `python -m scripts.nba_game8_q1_trends --smoke`, before any cell was graded: the games
+each cell would bet with a deciding offer at or above the price floor. No result of a bet game
+was read.
+
+**Found by the first count, fixed before grading:** every check cell counted 0 bets. The
+season-average and pace inputs were attached to each game by row label instead of by position,
+so almost every game read as having no averages. Fixed in the lab, and
+`test_each_team_reads_its_record_at_todays_venue` now passes a filtered index (it fails on the
+old code).
+
+Games with a decision: 1,225 / 1,224 / 1,218 (2023-24 / 2024-25 / 2025-26). A last-5 venue
+record exists for 1,075 of 2023-24's games and a last-10 record for 925; both exist for every
+game of the two later seasons.
+
+| Cell | 2023-24 | 2024-25 | 2025-26 | Pooled |
+|---|---|---|---|---|
+| **mike's rule: last 5, k ≥ 3, no check** | 71 | 84 | 82 | **237** |
+| last 5, k ≥ 3, the spread check | 41 | 51 | 39 | 131 |
+| last 5, k ≥ 1 / k ≥ 5, no check | 480 / 6 | 574 / 2 | 595 / 0 | 1,649 / 8 |
+| **last 10, k ≥ 4 (7-3 against 3-7), no check** | 41 | 68 | 69 | **178** |
+| last 10, k ≥ 4, the spread check | 25 | 41 | 40 | 106 |
+| last 10, k ≥ 2 / k ≥ 6, no check | 222 / 4 | 311 / 5 | 351 / 11 | 884 / 20 |
+| the last-10 step, k ≥ 2 / k ≥ 4, no check | 35 / 8 | 45 / 14 | 64 / 13 | 144 / 35 |
+| totals, last 5, k ≥ 3, over / under, no check | 20 / 38 | 31 / 51 | 46 / 31 | 97 / 120 |
+| totals, last 10, k ≥ 4, over / under, no check | 9 / 29 | 27 / 36 | 36 / 21 | 72 / 86 |
+
+So mike's own last-5 rule clears the 200-bet bar (237); with his season-average check it does
+not (131), and neither does his last-10 rule (178). Every first-quarter total cell at k ≥ 3
+(last 5) or k ≥ 4 (last 10) is under 200. Those cells are graded and printed in full; by 12.4
+their answer is "too few games to tell". The full table is in the lab's output.
+
+### 12.6 Results (graded 2026-10-28)
+
+Run `2026-10-28-eighth`: 64 registered cells and 20 controls (`--full`, then
+`python -m scripts.nba_game2_verdict --house5`). The cells, bets and per-game inputs are on the
+build machine under `%TEMP%/q1trend/results/`, and in Supabase (84 rows, read back 2026-11-01, after the login
+that first blocked storing them was fixed).
+
+**0 of the 64 cells pass.** The verdict counts 7 whose 95% interval clears zero, against about
+1.6 expected by chance. Six of those hold a single bet each. One cell with a real sample clears
+(the last row below).
+
+mike's method, the spread cells (first-quarter spread, the hot team, best deciding price):
+
+| Cell | Bets | Units | Return | 95% interval | 2023-24 / 2024-25 / 2025-26 | DraftKings alone, 2023-24 and 2024-25 | Fails |
+|---|---|---|---|---|---|---|---|
+| **Last 5, 4-1 or better against 1-4 or worse (k ≥ 3)** | 237 | +15.6 | +6.1% | −6.0% to +18.5% | +11.9% / −12.0% / +20.0% | −0.6% | interval, bands, placebo |
+| same, with the season-average check | 131 | +19.3 | +13.7% | −2.8% to +30.6% | +14.7% / +0.8% / +30.1% | +9.1% | bets, interval, bands, placebo |
+| **Last 10, 7-3 or better against 3-7 or worse (k ≥ 4)** | 178 | −7.7 | −4.0% | −19.0% to +10.5% | −10.6% / −4.4% / +0.2% | −9.2% | bets, interval, seasons, bands, placebo |
+| same, with the season-average check | 106 | −1.7 | −1.5% | −20.9% to +17.8% | −5.5% / +3.2% / −3.9% | −3.1% | bets, interval, blind, bands, placebo |
+| **"Bump it out to L10"** (last 5: 4-1 against 2-3; last 10: k ≥ 2) | 144 | +19.3 | +12.2% | −2.7% to +27.7% | +12.5% / +31.5% / −1.4% | +22.8% | bets, interval, bands |
+| same, with the season-average check | 88 | +26.3 | +27.4% | +8.9% to +44.8% | +21.5% / +49.6% / +11.1% | +36.6% | bets, bands |
+
+- **mike's main rule is not shown to work.** Its pooled +6.1% has an interval from −6.0% to
+  +18.5%. On 2023-24 and 2024-25 together it returned −1.2%. The 200 shuffled versions (each
+  game given another game's records from the same night) have a 95th percentile of +6.2%, so the
+  real records did no better than shuffled ones. The positive pool comes from 2025-26.
+- **Its band below lost.** Games at k 1 to 3 (3-2 against 2-3 and similar) returned −1.3% on
+  1,412 bets. The 5-0 against 0-5 games are 8 bets.
+- **Fading it lost more.** The cold team in the same 237 games returned −13.9% (interval −26.3%
+  to −1.5%). Betting both sides of the same games at the best price averages −4.0%, which is
+  the price of the bet. The hot side sits 10 points above that and the cold side 10 below. The
+  interval's half-width is 12 points, so that is about 1.6 standard errors, and the placebo
+  above says it is ordinary.
+- **The last-10 version loses** (−4.0% on 178).
+- **The one cell whose interval clears zero** is the narrowest: the "bump it out to L10" step
+  with the season-average check, 88 bets in three seasons, 58-29-1, +27.4%, every season
+  positive, ahead of its placebo. DraftKings alone over the three seasons: 86 bets, +24.9%
+  (+5.8% to +44.0%); the table's +36.6% is its first two seasons only. It fails the 200-bet
+  bar, and the band just below it (last-10 k from 0 to 2) lost 5.9% on 88 bets. By 12.4 its
+  answer is **too few games to tell**. An independent stress test (workflow
+  `nba-q1-trend-postgrade-verify`, scripts under `%TEMP%/q1trend/verify/stress0008/`) found:
+  - it is not one team, date or book: leaving any one team out keeps it above +22%;
+  - it clears zero only at the best of the books' numbers: at the worst deciding offer the
+    interval is −1% to +35%, and 17 bets at a number no other book hung went 15-1-1 for
+    +13.9 of its +26.3 units;
+  - it is fading: its first 44 bets by date made +42.7%, its last 44 +12.7%;
+  - all 88 bets sit inside the last-10 spread-check cell at k ≥ 2 (507 bets, +2.5%), whose
+    other 419 bets lost 2.8%;
+  - across the 39 cells with 30 or more bets (the other six that clear the interval hold one
+    bet each), a cell this far above its own placebo appeared in 12 of 200 shuffled runs
+    (about 6.5%);
+  - at about 29 bets a season, telling a true +5% from zero would take about 2,530 bets,
+    roughly 86 seasons. More seasons cannot settle it on any useful timescale.
+- **Closing-line value cannot be measured** for any first-quarter cell: one first-quarter quote
+  is stored per game (median 54 minutes before tip), so the decision quote is the last one.
+
+**Totals: nothing.** The best total cell with 200 or more bets is last 10, over, with the scoring
+check, k ≥ 2: 202 bets, +13.0 units, +5.8%, interval −6.4% to +18.1%. The 17 cells with 200 or
+more bets have a median return of −0.4%; 6 are positive. Both-teams-trending at k ≥ 3 (last 5)
+is 97 overs (+3.6%) and 120 unders (+1.9%).
+
+**Closed for 2026-27: the first-quarter cover-record and over/under-record method.** Nothing is
+built. The step-with-check cell is recorded, not built: it is too thin to decide and too rare
+to become decidable.
+
+
+## 13. The searches after the eighth (2026-10-30 to 2026-11-02)
+
+mike, 2026-10-30, on the NBA having no spread or moneyline model: *"whatever is missing, find it."* A sweep ranked what
+had not been tried, and these seven were pre-registered and graded. Each doc holds its rules, written before any cell
+was graded, its counts, and its results at the end. All runs are stored in Supabase (`nba_game2_cells`).
+
+| Search | Doc | Run | Cells | Pass | What it says |
+|---|---|---|---|---|---|
+| Favourites shorter than -200 | `docs/nba_search_fav200.md` | `2026-10-31-fav200` | 40 | 0 | The blind favourite does not pay; the model families have too few games to tell |
+| The popular-team tax | `docs/nba_search_popular.md` | `2026-10-31-popular` | 9 | 0 | Betting against the popular team does not clear |
+| Shooting luck from shot location | `docs/nba_search_shotluck.md` | `2026-10-31-shotluck` | 48 | 0 | Nearest miss +3.9%, -0.8% to +8.5%; the live totals models are unchanged |
+| The starters and the first quarter | `docs/nba_search_starters.md` | `2026-11-01-starters` | 32 | 0 | Knowing who starts does not separate from the first-quarter or first-half market |
+| Result shapes by line size | `docs/nba_search_shapes.md` | `2026-11-02-shapes` | 256 | 0 | The earlier moneyline and spread verdicts did not rest on the pricing choice |
+| Props off Pinnacle's line, the consensus, and an anchored prop model | `docs/nba_search_propoffline.md` | `2026-10-31-propoffline` | 36 | 8 | **All unders. An independent check found none is a new model** |
+| The two prop models on the postseason | `docs/nba_search_postseason.md` | `2026-10-31-postseason` | 7 | 1 | **`nba_prop_market` passes on 272 Cup final, play-in and playoff games: 1,953 bets, +138.87 units, +6.8%** |
+| First-quarter player props (added 2026-11-04) | `docs/nba_search_q1props.md` | `2026-11-04-q1props` | 18 | 0 | Nearest miss assists over, +3.0%, -1.7% to +7.6%; the blind bets lose 5% to 8% |
+| First-quarter and first-half team totals (added 2026-11-04) | `docs/nba_search_q1tt.md` | `2026-11-04-q1tt` | 26 | 0 | Books set them from their own period spread and total; the live home team-total rule carried over makes +3%, too few bets to tell |
+| First-quarter props anchored to the full-game market (added 2026-11-06) | `docs/nba_search_q1anchor.md` | `2026-11-06-q1anchor` | 36 | 0 | Off Pinnacle's full-game number: nothing. Off the soft books' number, for players Pinnacle does not quote, assists overs clear five of six bars (754 bets, +7.9%, +0.1% to +15.8%) and fail the bands bar on one band |
+| First-quarter and first-half team totals against Pinnacle's period lines (added 2026-11-06) | `docs/nba_search_q1pin.md` | `2026-11-06-q1pin` | 12 | 0 | The books' team totals sit within half a point of Pinnacle's period numbers 95% of the time; 11 cells under 200 bets, the twelfth +5.1%, −3.6% to +14.1% |
+| First-quarter moneyline on the cover-record step, first-quarter total on the shooting-luck gap (added 2026-11-07) | `docs/nba_search_q1mt.md` | `2026-11-07-q1mt` | 12 | 0 | The total: nothing (the first half's +8% is +0.9% on the first quarter). The moneyline on the live step rule: 87 bets, +25.8%, +1.7% to +50.0%, fails only the bet count; it bets the same team in the same games as `nba_q1_trend`. Built live anyway as `nba_q1_trend_ml` (mike, 2026-11-07) |
+| In-play spread and moneyline on 2026-27's live prices, and a late-game leader (added 2026-11-04) | `docs/nba_search_ingame27.md` | `2026-11-04-ingame27` | 24 | 0 | Every cell under 200 bets this season; quarter 3 and 4 spreads read positive, moneylines lose; the leader is closed by the -200 floor |
+
+**Where this leaves the spread and moneyline.** No pre-game full-game spread or moneyline cell has passed in any search.
+That is now tested from the projection, the injury report, the shooting-luck gap, the popular team, the favourite and
+the line-size shape. The pre-game cells that have passed bet totals and player props. The one exception is in-play:
+six of section 7's game-state cells on the live moneyline and spread passed, with every warning sign of stale quotes
+written down beforehand, and that needs an NBA in-play loop that does not exist.
+
+**Where this leaves the first quarter.** No first-quarter cell has passed in any search: spreads and totals in the fifth
+search, the eighth (mike's method) and the starters search; player props and team totals after their prices were
+bought on 2026-11-03 (two seasons, 2024-25 and 2025-26; the feed holds none for 2023-24). Pinnacle prices none of the
+first-quarter prop or team-total markets, so the sharp-reference rule behind the live prop model cannot run on them. The anchored search (2026-11-06) priced them off the same player's full-game number instead: Pinnacle's found nothing, and the soft books' found assists overs that fail only the bands bar. Those near misses would bet about once in 16 days live: this season Pinnacle quotes nearly every player Hard Rock lists. Team totals priced at Pinnacle's own period spread and total (2026-11-06) found nothing either. No first-quarter route the stored data supports is left untested.
+
+**The postseason pass is real arithmetic with a warning on it.** Most of its return is a general lean to unders, and
+its one-a-game, four-a-night version is 251 bets, +12.37 units, +6.7%, with an interval of -8.7% to +20.9%. Section 9.1
+of its doc has the check.
+
+## 14. Pick volume: one game total a game, six props a night (2026-11-04, mike)
+
+mike, 2026-11-04: *"Betting Game Over Under AND individual team totals AND 1H over under seems
+duplicitiave - too many pciks. ONly selected the highest EV one, unless it;s exceptioanlly high"*,
+and on props, *"props seems to be coming fro earlier games only recently? because we articidially
+limit to 4 ... we can go slightly more than 4 if we need to cause the picks are that good or
+less"*. The goal he set: the highest-EV picks, to maximise units won and closing-line value.
+
+The tables are in `docs/thresholds.md` (the `nba_first_half_total_luck` section, "One bet a game
+across the NBA game totals", and the `nba_prop_market` section, "Six a night"). What they say:
+
+**Game totals.** The full-game over (gap >= 3) and the first-half over (gap >= 2) read the same
+gap, so every game the full-game model bet, the first-half model bet too: 323 of 323 graded
+games. The twins returned +3.7% against +10.2% for the full-game bet on the same games. The home
+team total under met an over on 2 of 942 games. So:
+
+- the first-half over bets only below the full-game cut (`FULL_GAME_GAP_CUT`), and
+- one bet a game holds across the three models (`scripts/nba_game_totals_door.py`), the first
+  writer keeping the game.
+
+Graded: +152.79 units on 1,267 bets with every bet, +139.08 on 942 with one a game, the full game
+first. Choosing by the highest model EV instead: +124.40. A bigger gap did not win more, so no
+"exceptionally strong" tier keeps both.
+
+On the population the models bet live (no 10-game wait): every full-game bet had its twin (450 of
+450), the twins +3.7%; every bet +156.27 units on 1,624, the live rule +136.74 on 1,162.
+
+**Props.** The early-game lean is real and comes from the night filling in tip order. It is also
+where the money was: on nights of six or more games, the first four tips' bets returned +8.0%, the
+rest +2.0%. Each model's EV percentile does not rank quality at its top (0.80-0.90 +10.1%,
+0.98-1.00 +4.7%), so filling the night by EV graded worse (+102.5 units for the best four of a
+night against +153.6 in tip order). Six a night in tip order is where the units stop growing:
++183.7 units, +8.17%; the 7th and 8th bets of a night earned -0.8.
+
+**What did not ship.** Taking each game's best bet below its model's top 2% graded +19.6 units
+better at six a night, but the top 1.5% and 2.5% did not hold up: a peak, not a plateau.
+
+**Sizing 1 to 3 units instead of flat (mike, 2026-11-04: *"why not explore fewer bets, but 1-3
+unit spreads with 3 on more confident bets?"*).** Units grow with the stake, so 3 units on
+everything is three times the units at three times the risk: that is the size of a unit, a
+bankroll choice. The question a sizing rule answers is where the same risk goes. So each scheme
+below is scaled to the flat rule's total risk (its return times flat's risk), with a 90% range on
+its difference from flat (nights resampled). Signals fixed before grading. Live rules,
+2023-24..2025-26:
+
+| Scheme | Bets | Units at flat's risk | Return | Difference from flat, 90% range |
+|---|---|---|---|---|
+| Props, flat 1 unit (live: one a game, six a night) | 2,639 | +183.7 | +8.17% | |
+| 1/2/3 units by the model's own EV percentile | 2,639 | +158.5 | +7.05% | -57.7 to +8.9 |
+| 1 to 3 units shaped like Kelly (EV over price) | 2,639 | +189.4 | +8.43% | -21.7 to +32.4 |
+| 3 units on each night's top 2, the rest not bet | 968 | +180.5 | +8.03% | -107.8 to +102.7 |
+| 3 units on the top third, the rest not bet | 880 | +103.8 | +4.62% | -198.6 to +36.2 |
+| 3/2/1, reversed (most on the lowest EV) | 2,639 | +208.1 | +9.26% | -8.0 to +57.5 |
+| Game totals, flat 1 unit (live) | 1,162 | +136.7 | +10.75% | |
+| 1/2/3 units by the luck gap, within each model | 1,162 | +135.9 | +10.68% | -24.8 to +23.6 |
+| 3 team total, 2 full game, 1 first half | 1,162 | +141.8 | +11.14% | -17.5 to +27.3 |
+
+- **Sizing up on the model's confidence loses.** It puts the most money on the props the models
+  overstate most (section 14 above), the same pattern that took the 1-3 unit scale off every model
+  on 2026-08-29 (`tracking/discord_notifier.conviction_for`).
+- **Fewer bets at 3 units does not help.** At the same risk, the top two a night earn what six a
+  night earn, with a far wider range; the top third earns less.
+- **The reversed scale is better in all three seasons** (+10.7 / +8.9 / +8.4% against +9.0 / +7.7 /
+  +7.9%), but its range includes zero, and the same inversion was unstable on the 2026-08-29 data.
+  It is the overconfidence again, which the projection model's calibration work addresses, not a
+  sizing rule.
+- **The game totals have no size signal either.** The full-game over's largest-gap third returned
+  +1.6% (the middle third +12.1%). The home team total under by its own number, on its 429 bets:
+  weakest third +7.3%, middle +25.4%, strongest +10.2%; 1/2/3 units gives +71.1 at flat's risk
+  against +68.7.
+- **Verdict: flat stays.** `conviction_for`'s rule holds: re-open when a signal chosen in advance
+  survives a time split. Scripts: `nba_game_edge/volume1104/sizing.py`, `tt_signal.py`.
+
+Updated-By: mike.
+
+## 15. The projection model's EV claims three times what it returns, and a corrected EV does not rank the night better (2026-11-04, mike)
+
+Asked for while grading section 14: the projection model's highest-EV props looked
+overconfident, and that looked like the reason ranking the night by EV lost to tip order. The
+task was a calibration fix for the top of `nba_prop_projection`'s EV range, graded walk-forward,
+then the six-a-night door re-graded with the corrected EVs.
+
+**Population.** Both NBA prop models' graded bets, 2023-24..2025-26, loaded as the cap grade
+loads them: `nba_prop_projection` 66,588 bets (the five books the live feed returns, assists
+overs removed), `nba_prop_market` 24,572. Every bet is a proposition that clears today's floors;
+the lists hold nothing below a floor, so nothing here can move one. Walk-forward: 2024-25 is
+mapped by a fit on 2023-24, and 2025-26 by a fit on 2023-24 + 2024-25 (40,532 projection bets
+between them). 2023-24 has no season before it. It is mapped from the other two seasons only so
+the three-season door grade has a number for it, and it never judges a map. "Claimed" is the
+risk-weighted mean EV, "returned" is units over units risked, and units are one to win.
+Closing-line value is not in these bet lists. Scripts and outputs: temp folder
+`nba_game_edge/projcal1104` (`calfit.py`, `door.py`, `door_roi.py`, `kcheck.py`).
+
+**The overclaim is not at the top. It is in every part of the range.** Eighths of the model's
+EV, the two walk-forward seasons, uncorrected (%):
+
+| eighth of EV | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| claimed | 2.5 | 4.4 | 5.7 | 7.1 | 8.8 | 11.1 | 14.4 | 23.2 |
+| returned | 1.4 | 1.4 | 2.1 | 1.6 | 1.5 | 4.8 | 6.7 | 6.9 |
+| 90% range | -0.9..+3.6 | -0.9..+3.7 | -0.2..+4.3 | -0.7..+3.9 | -0.8..+3.9 | +2.5..+7.2 | +4.3..+9.1 | +4.5..+9.4 |
+
+Seven of the eight claims sit outside their 90% range. Every eighth claims about three times what
+it returns. The top eighth's 16-point gap is the same ratio on a bigger number.
+
+**The fix that clears: multiply the EV by one factor.** EV' = k x EV, which is the model's
+probability pulled toward the price's own implied probability, p' = implied + k (p - implied).
+k is fitted by maximum likelihood on the earlier seasons: 0.325 from 2023-24, 0.300 from
+2023-24 + 2024-25 (0.320 from the other two seasons, for 2023-24). Walk-forward:
+
+| eighth of EV | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| claimed | 0.8 | 1.4 | 1.8 | 2.2 | 2.7 | 3.4 | 4.5 | 7.2 |
+| returned | 1.1 | 2.4 | 2.2 | 0.9 | 2.2 | 5.5 | 5.8 | 6.3 |
+| 90% range | -1.2..+3.3 | +0.1..+4.6 | -0.1..+4.4 | -1.4..+3.2 | -0.1..+4.5 | +3.1..+7.8 | +3.4..+8.2 | +3.9..+8.8 |
+
+- All eight claims are inside their 90% range; the largest gap is 2.1 points.
+- Before and after mid-January (the list's own split): quartiles, 8 of 8 inside.
+- By season: 2024-25, 6 of 6 bands inside; 2025-26, 5 of 6 (its 75th-90th percentile returned
+  +10.6% against +4.4% claimed, an under-claim).
+- The one place it still over-claims: the top 2% claims +11.3% and returned +4.4% (90% range
+  -1.9 to +10.8), just outside.
+- At the door (today's six a night), the projection model's bets claim +28.1% uncorrected and
+  +8.9% shrunk, and returned +9.8% (walk-forward: 27.0 / 8.5 / 10.8).
+
+Because one number multiplies every EV, it changes no bet and no ranking: the door picks the same
+bets bet for bet. It is the honest size of the edge, nothing more.
+
+**What did not clear: a map that ranks the top better.** Five maps that do reorder bets, each
+fitted the same walk-forward way. The return on each map's own top eighth (%):
+
+| map | top eighth returned |
+|---|---|
+| the model's own EV (or the shrink, which keeps its order) | +6.3 to +6.9 |
+| blend: logit p' = a + b logit(implied) + c logit(p); b 0.90-0.98, c 0.19-0.24 | +4.1 |
+| the blend fitted per market and side | +4.3 |
+| the blend plus a squared gap term (lets the edge peak and fall) | +5.5 |
+| isotonic, return on EV | +5.1 |
+| the earlier seasons' return in the bet's EV-percentile band | +6.3 |
+
+None beats the model's own order. By the model's own EV percentile, walk-forward (%):
+
+| percentile | 0-50 | 50-70 | 70-80 | 80-90 | 90-95 | 95-98 | 98-100 |
+|---|---|---|---|---|---|---|---|
+| bets | 20,266 | 8,106 | 4,053 | 4,053 | 2,027 | 1,216 | 811 |
+| returned | +1.6 | +2.7 | +5.7 | +8.3 | +5.2 | +5.6 | +5.9 |
+| 90% range | +0.5..+2.7 | +0.9..+4.6 | +3.0..+8.3 | +5.6..+11.0 | +1.2..+9.1 | +0.5..+10.8 | -0.4..+12.3 |
+
+The EV ranks quality up to about the 80th-90th percentile. Above that the return is flat at about
++5% to +8%, and the top bands sit inside each other's ranges. A percentile that ranks quality at
+the very top cannot be built from these inputs.
+
+**The door, re-graded.** One bet a game across both NBA prop models, 2023-24..2025-26 (2023-24
+mapped leave one out), each rule paired with today's door night by night (4,000 resamples of
+nights; 90% ranges). "Walk-forward" is the same comparison on 2024-25 and 2025-26 only. "One
+scale" sets the projection model's shrunk EV directly against the market model's EV as it is,
+whose claims already track its returns on its own list (below).
+
+| rule | units | return | risk vs today | return vs today, points | units vs today | walk-forward units vs today |
+|---|---|---|---|---|---|---|
+| **today:** own percentile of raw EV, first six games by tip | +183.7 | +8.17% | - | - | - | - |
+| today's percentile, best six of the night | +158.7 | +7.19% | -2% | -1.0 (-3.2..+1.3) | -25.0 (-74.0..+26.9) | -30.1 (-71.6..+13.7) |
+| shrunk EV, one scale with the market model, first six by tip | +179.2 | +8.08% | -1% | -0.1 (-1.5..+1.3) | -4.4 (-35.1..+26.9) | -3.9 (-29.0..+22.4) |
+| shrunk EV, one scale, best six of the night | +154.2 | +7.11% | -4% | -1.1 (-3.5..+1.4) | -29.4 (-83.2..+24.3) | -21.8 (-66.2..+23.1) |
+| blend percentile, first six by tip | +251.7 | +8.69% | +29% | +0.5 (-2.5..+3.5) | +68.1 (-9.5..+146.9) | +55.5 (-17.6..+129.3) |
+| blend percentile, best six of the night | +272.7 | +9.55% | +27% | +1.4 (-1.9..+4.6) | +89.0 (+5.8..+171.0) | +70.5 (-5.5..+148.9) |
+| shrunk EV x risk (expected units), first six by tip | +229.9 | +7.52% | +36% | -0.7 (-3.8..+2.6) | +46.3 (-36.5..+136.3) | +10.1 (-56.6..+80.0) |
+| control, no model: the shortest price in each game, first six by tip | +190.6 | +4.21% | +101% | -4.0 (-8.2..+0.3) | +6.9 (-124.1..+141.5) | -42.3 (-154.3..+72.6) |
+
+The neighbourhood around the shrunk EV:
+
+- Capped at 0.03, 0.04, 0.05, 0.06 or 0.08, so every bet above the cap counts equal: first six
+  by tip -4.3 to +8.5 units against today; best six of the night -25.1 to +0.9.
+- A floor in tip order (the only "best first" rule a per-game decision window can run live):
+  shrunk EV at least 0.00, 0.01, 0.02, 0.03, 0.04 or 0.05, at most six: -3.4 to -28.3 units.
+  Today's own-percentile floor at 0.3 to 0.9: +1.4 to -59.1.
+- By half, first six by tip: today +61.3 early / +122.3 late; the shrunk EV on one scale +72.0 /
+  +107.2; its best six of the night +63.8 / +90.5.
+
+What the door table says:
+
+- **Ranking the night by a corrected EV still loses to tip order.** With the shrink, the best six
+  of the night graded -29.4 units against today (walk-forward -21.8), the same as today's
+  percentile (-25.0). The top of the range is flat (above), so a corrected EV has nothing there
+  to rank by.
+- **Every rule that wins more units than today does it by betting favourites.** Units are one to
+  win, so a -150 bet risks 1.5 for the unit a +150 bet risks 0.67 for: at the same return, a
+  favourite earns more units. The blend percentile moves the median price from +120 to -102 and
+  plus-money bets from 78% to 49%, and risks 29% more. Its return per unit risked is 0.5 points
+  better (-2.5 to +3.5); at today's risk it would be +195.2 units, not +251.7. The no-model control
+  shows the effect alone: the shortest price in each game matches today's units at twice the risk
+  and half the return. None of these clears its walk-forward 90% range.
+- **One row looks like a result and is not.** The percentile of the shrunk EV, with each season
+  mapped by its own fold, graded +21.6 units (+5.8 to +38.2). 55 bets differ from today, 34 of
+  them in 2025-26, because the fitted factor drifted from 0.325 to 0.300 between folds. One
+  factor for every season leaves every percentile, and so the door, exactly as it is.
+
+**Sizing by a corrected EV.** Section 14 graded 1 to 3 units on today's door: sizing up by the
+model's own EV percentile lost to flat, and the reversed scale won. The question here was whether
+a calibration fix removes that. It cannot. The shrink multiplies the projection model's EV by one
+number, so within the model every third holds the same bets as before. Re-graded on the same
+2,639 bets, each scheme scaled to flat's total risk as in section 14 (flat +183.7 units):
+
+| scheme | units at flat's risk | difference from flat, 90% range |
+|---|---|---|
+| 1/2/3 by own percentile, raw EV (section 14) | +158.5 | -57.7 to +8.9 |
+| 3/2/1 reversed, raw EV (section 14) | +208.1 | -8.0 to +57.5 |
+| 1/2/3 by EV third within each model, raw or shrunk (the same bets) | +165.7 | -51.6 to +15.3 |
+| 1/2/3 by shrunk EV, one scale across the two models | +170.8 | -44.9 to +19.8 |
+| 3/2/1 by shrunk EV, one scale | +195.9 | -19.3 to +43.0 |
+| 1 to 3 shaped like Kelly on the shrunk EV, one scale | +172.1 | -35.6 to +12.1 |
+| 1/2/3 by the blend, one scale | +176.8 | -38.4 to +24.1 |
+| 1/2/3 by isotonic, one scale | +180.9 | -35.5 to +31.1 |
+
+- **Inside the door, EV does not rank either model's bets.** The projection model's lowest-EV
+  third returned +14.1% (616 bets), its middle third +6.2%, its top third +8.9%. The market
+  model's thirds returned +4.1%, +10.4% and +0.1% (about 264 bets each). The door already takes
+  each game's top bet, so its bets sit on the flat top of the range (above).
+- **No corrected EV makes sizing up pay.** Putting both models on one scale halves the reversed
+  scale's lead (+12.2 units against +24.4) but does not remove it. Every 90% range includes zero.
+  Flat stays, as section 14 decided. Script: `sizing_cal.py` in the same temp folder.
+
+**Decision: nothing ships.** The door stays one a game, six a night, first by tip, ranked by each
+model's own percentile of raw EV. The prices it lays are unchanged: -194 to +380, median +120,
+78% plus money.
+
+**Flagged, not fixed here:**
+
+- The market model at the door claims +7.9% and returned +3.0% walk-forward (+7.8% and +5.0%
+  over the three seasons). On its own bet list its claims track its returns (largest gap 3.9
+  points across eighths, one of eight outside its range), but its top 2% by its own EV returned
+  +1.9% (-7.6 to +11.4, 321 bets), and a single shrink factor for it is unstable (1.35, 0.98,
+  0.62 across folds). Worked in section 16 (2026-11-05): nothing clears.
+- The probability each projection pick stores and shows (`model_probability`, and `edge` from it)
+  is the uncorrected number, about three times the edge its bets return. Storing the shrunk one
+  changes no bet, but every reader of that column would see the change. Changed by #1196: picks
+  from 2026-11-07 store and show the shrunk number (`config.MODEL_PROB_SHRINK`, k 0.325; section 5).
+
+No model change, so no `Updated-By`.
+
+## 16. The market model at the door: its top 2% returns nothing, and no re-weighting against the projection model clears (2026-11-05, mike)
+
+Section 15 flagged it: at the door, `nba_prop_market` claims +7.9% and returned +3.0%
+walk-forward. The door gives each game to the bet with the highest percentile within its own
+model, so a market bet high in its own range takes the game from a projection bet. Two questions:
+does the market model's EV rank its own bets at the top, and should the door count a market bet
+for less when a projection bet in the same game competes with it?
+
+**Population and method.** The same bets as section 15, built by the same loader:
+`nba_prop_market` 24,572 graded bets (every one an under), `nba_prop_projection` 66,588,
+2023-24..2025-26. "Percentile" is the door's own key: a bet's EV percentile within its model over
+the three seasons (the breakpoints in `models/nba_prop_rank.py`). "Returned" is units over units
+risked; units are one to win. 90% ranges resample nights. Every door rule is compared with today's
+door night by night (4,000 resamples). "Walk-forward" is that comparison on 2024-25 and 2025-26
+only. Each door rule is a family with one setting, so the neighbourhood of settings is shown, plus
+a walk-forward pick: each test season uses the setting that did best on the seasons before it.
+The three "one scale" rows use maps fitted as in section 15: 2024-25 from 2023-24, 2025-26 from
+the two seasons before it, and 2023-24 from the other two (labelled there). "Early" and "late" are the two halves of each season (split in mid-January). Scripts and outputs:
+temp folder `nba_game_edge/mktdoor1105` (`s1_baseline.py` to `s7_drop.py`).
+
+### 16.1 The market model's EV ranks its bets up to its 98th percentile, then turns over
+
+The market model's whole list, by its own EV percentile, three seasons (%):
+
+| percentile | 0-50 | 50-70 | 70-80 | 80-90 | 90-95 | 95-98 | 98-100 |
+|---|---|---|---|---|---|---|---|
+| bets | 12,292 | 4,910 | 2,454 | 2,460 | 1,226 | 738 | 492 |
+| claimed | 0.9 | 2.5 | 3.6 | 4.7 | 5.9 | 7.3 | 10.5 |
+| returned | +2.8 | +1.4 | +4.3 | +4.0 | +5.7 | +7.7 | -1.6 |
+| 90% range | +1.2..+4.3 | -1.0..+3.7 | +1.1..+7.5 | +0.7..+7.3 | +1.2..+10.4 | +1.5..+13.8 | -9.1..+5.9 |
+
+- From the 70th to the 98th percentile its claims track its returns. The bottom half claims less
+  than it returns (+0.9% against +2.8%).
+- The top 2% claims +10.5% and returned -1.6%. Its bets have EVs of 0.082 to 0.296. The median
+  price is +110, and 68% are plus money (38% on the whole list). No single book or prop type
+  makes up the top 2%: the biggest book is Hard Rock at 28%, and the five prop types each hold
+  15-24%.
+
+The top 2% against the band just below it (90th-98th percentile):
+
+| | top 2% returned | 90-98 returned | gap, points (90% range) |
+|---|---|---|---|
+| three seasons | -1.6% (492 bets) | +6.4% (1,964) | -8.0 (-16.4..+0.5) |
+| walk-forward seasons | +0.2% (398) | +6.3% (1,359) | -6.1 (-15.9..+3.8) |
+| 2023-24 | -9.6% (94) | +6.7% (605) | -16.3 (-34.8..+1.5) |
+| 2024-25 | -2.0% (194) | +6.9% (734) | -8.9 (-22.6..+5.0) |
+| 2025-26 | +2.3% (204) | +5.5% (625) | -3.2 (-17.2..+10.2) |
+| early half | +0.9% (220) | +6.8% (958) | -5.9 (-18.8..+6.5) |
+| late half | -3.6% (272) | +6.0% (1,006) | -9.6 (-21.2..+1.7) |
+
+The gap points the same way in every season and in both halves. Every one of its 90% ranges
+includes zero. (Section 15's +1.9% on 321 bets ranked the walk-forward seasons among themselves.
+Here the top 2% is the door's own cut, 398 bets in those seasons.)
+
+**That is the door's over-claim.** Today's door bets the market model 791 times:
+
+| the door's market bets | bets | claimed | returned (90% range) | walk-forward: bets, claimed, returned |
+|---|---|---|---|---|
+| below its 98th percentile | 514 | +6.3% | +8.2% (+1.2..+15.8) | 378, +6.2%, +5.7% |
+| 98th percentile and up | 277 | +10.9% | -1.8% (-12.7..+8.5) | 235, +10.8%, -1.9% |
+
+### 16.2 The projection bets those market bets displace were no better
+
+The market model wins 778 of today's door games in which the projection model also had a bet.
+For each one, here is the market bet next to the projection bet it pushed out (the projection
+model's best bet in that game by its own percentile). Same game, same night:
+
+| | units | risked | returned |
+|---|---|---|---|
+| market bet (bet today) | +38.6 | 749.1 | +5.2% |
+| projection bet it displaced | +41.3 | 656.8 | +6.3% |
+| market minus projection | -2.6 (-61.8..+59.2) | | -1.1 points (-9.7..+7.7) |
+
+- By the market bet's percentile there is no pattern. In the 95-97 band the market bet beat the
+  projection bet by +18.9 units. At 98-99 it lost by 10.8 units, and at 99-100 it beat it by 3.7.
+- In the 277 games where the market bet was in its top 2%, the market bet returned -1.8% and the
+  projection bet it displaced returned +1.2% (+2.7 units). Both were poor bets in those games.
+
+### 16.3 The door, re-graded
+
+One bet a game across both models, six a night, first by tip. Each rule changes only which bet a
+game gets, so only games where both models had a bet can change. Each row is compared with today's
+door night by night. Risk is units risked; units at today's risk is the rule's return times
+today's risk.
+
+| rule | units | return | risk vs today | units at today's risk | return vs today, points | units vs today | walk-forward units vs today |
+|---|---|---|---|---|---|---|---|
+| **today:** own percentile, first six by tip | +183.7 | +8.17% | - | +183.7 | - | - | - |
+| market percentile lowered by 0.02 | +192.3 | +8.67% | -1.3% | +194.8 | +0.5 (-0.9..+2.0) | +8.7 (-22.5..+40.8) | +0.7 (-25.6..+28.0) |
+| market percentile lowered by 0.10 | +183.8 | +8.49% | -3.6% | +190.7 | +0.3 (-1.9..+2.6) | +0.1 (-48.8..+51.3) | +2.4 (-41.2..+48.4) |
+| projection bet whenever it has one | +183.2 | +8.53% | -4.4% | +191.5 | +0.4 (-2.3..+3.1) | -0.5 (-59.2..+59.7) | -4.2 (-58.6..+51.2) |
+| market percentile raised by 0.05 | +159.3 | +6.78% | +4.5% | +152.4 | -1.4 (-3.5..+0.7) | -24.3 (-72.9..+24.0) | -8.2 (-44.7..+28.0) |
+| control: market bet whenever it has one | +92.0 | +3.45% | +18.6% | +77.5 | -4.7 (-8.3..-1.0) | -91.7 (-179.1..+0.2) | -37.8 (-109.5..+31.6) |
+| market percentile capped at 0.95 | +160.8 | +7.23% | -1.0% | +162.5 | -0.9 (-2.2..+0.3) | -22.9 (-50.4..+5.3) | -27.7 (-50.7..-3.8) |
+| market percentile capped at 0.97 | +172.6 | +7.71% | -0.4% | +173.2 | -0.5 (-1.3..+0.3) | -11.1 (-28.6..+6.7) | -19.4 (-34.6..-3.8) |
+| market top 3% loses its game to the projection bet | +190.5 | +8.62% | -1.6% | +193.6 | +0.4 (-1.2..+2.3) | +6.8 (-30.3..+48.6) | -4.9 (-40.9..+30.3) |
+| market top 2% loses its game to the projection bet | +190.7 | +8.57% | -0.9% | +192.5 | +0.4 (-1.1..+2.0) | +7.1 (-26.0..+43.3) | +0.4 (-31.9..+33.2) |
+| market top 3% ranked last in its game (its next-best bet, either model, goes first; it is still bet when alone) | +212.0 | +9.51% | -0.8% | +213.7 | +1.3 (-0.4..+3.2) | +28.4 (-11.3..+70.7) | +14.0 (-23.5..+52.0) |
+| market top 2% ranked last in its game (the same) | +204.3 | +9.11% | -0.2% | +204.7 | +0.9 (-0.6..+2.6) | +20.7 (-14.5..+56.7) | +12.9 (-20.7..+46.9) |
+| both models on one return scale: earlier seasons' return in the bet's band | +120.2 | +5.02% | +6.5% | +112.9 | -3.2 (-7.4..+1.1) | -63.4 (-162.7..+36.0) | -45.5 (-123.6..+30.5) |
+| both on one scale: isotonic return on EV | +149.5 | +6.66% | 0.0% | +149.5 | -1.5 (-4.0..+1.0) | -34.2 (-91.1..+21.8) | -39.2 (-89.9..+11.3) |
+| both on one scale: EV x each model's fitted factor | +183.1 | +8.22% | -0.9% | +184.8 | +0.1 (-1.5..+1.8) | -0.6 (-35.9..+37.3) | -8.3 (-35.0..+18.7) |
+
+The neighbourhoods (units against today; walk-forward in brackets):
+
+- **Market percentile lowered** by 0.01, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15, 0.20, 0.30 or 0.50:
+  -7.3 to +9.6 (-13.6 to +6.6). Risk -0.5% to -4.6%, return -0.1 to +0.7 points. Walk-forward
+  pick of the setting: -24.7 (-62.1..+13.9) when picked by units, -16.3 (-69.2..+37.7) when
+  picked by return.
+- **Market percentile capped** at 0.90, 0.93, 0.95, 0.96, 0.97, 0.98 or 0.99: -2.5 to -27.0
+  (-0.8 to -27.7). A cap hands the game to the projection model's own top bets, which are no
+  better than its 80th-90th percentile (section 15). Walk-forward pick: -17.5 (-33.4..-0.9).
+- **Market top bets lose their game to the projection bet,** top 10%, 7%, 5%, 4%, 3%, 2% or 1%:
+  -2.3, +0.9, -12.1, -14.4, +6.8, +7.1, -3.7 (-1.4, +0.3, -16.5, -22.4, -4.9, +0.4, -9.5).
+  Walk-forward pick (the top 3% both times): -4.9 (-40.9..+30.3).
+- **Market top bets ranked last in their game,** top 5%, 4%, 3%, 2% or 1%: -1.3, +4.5, +28.4, +20.7,
+  +8.3. Walk-forward pick (the top 3% both times): +14.0 (-23.5..+52.0).
+
+What the table says:
+
+- **Counting a market bet for less changes nothing.** Lowering its percentile by any amount from
+  0.01 to 0.50 lands within 10 units of today. Giving the projection model every game it has a
+  bet in moves -0.5 units. The market bets it replaces returned about what the projection bets
+  would have (16.2).
+- **The one row that looks like a result is a peak, and half of it is not market against
+  projection.** Ranking the market model's top 3% last in its game gains +28.4 units. Not betting
+  those bets at all grades the same to the unit, at every setting from the top 5% to the top 1%:
+  no game in the three seasons had only such bets to choose from. Taken apart:
+  - +10.3 from games handed to the projection model;
+  - +10.3 from games handed to the market model's own next-best bet;
+  - +2.2 from one game only the market model bet;
+  - +5.6 from a different game taking the sixth slot when several games tip at the same time.
+
+  Its neighbours are +4.5 (top 4%) and +8.3 (top 1%). At the top 3% the gain is all in the early
+  half (+27.6 early, +0.8 late). Walk-forward it is +14.0, and the 90% range includes zero. The
+  clean version, where the game goes only to the projection bet, is +6.8 (walk-forward -4.9).
+- **Early and late point opposite ways.** Every "lowered" row gains in the early half and gives it
+  back late: giving the projection model every contested game is +31.3 early and -31.8 late. In
+  the contested games the market bet lost to the projection bet in the early half (-37.2 units)
+  and beat it late (+34.6). By season the early half does not hold: 2023-24 -7.1, 2024-25 -37.2,
+  2025-26 +7.1. The late half favours the market bet in all three seasons (+2.8, +11.6, +20.3).
+  That is too small and too unsteady to build a rule on.
+- **None of these wins by betting favourites.** The rules that hand games to the projection model
+  risk up to 4.6% less, because its prices are longer (median +122 to +130, against +120
+  today). That is why each one's units at today's risk sit a few units above its raw units. The
+  market-first control shows the opposite effect: 18.6% more risk and 4.7 points less return.
+- **A ceiling on the market model itself is not worth it either.** On its whole list, its bets
+  with EV above 0.08 made +5.3 units (542 bets; +8.7 walk-forward). Above 0.09 they made -0.3,
+  above 0.07 +40.7. Cutting the top of the market model would move a few units either way. It
+  would also be a model change, which needs `Updated-By`.
+
+**Decision: nothing ships.** The answer to the first question is yes up to the 98th percentile and
+no above it: the market model's top 2% returns nothing, and that is all of its over-claim at the
+door. The answer to the second is no. No way of counting a market bet differently against a
+projection bet clears: the projection bets it would hand the game to did no better. The door
+stays one a game, six a night, first by tip, ranked by each model's own percentile of raw EV.
+The prices it lays are unchanged: -194 to +380, median +120, 78% plus money. No model change,
+so no `Updated-By`.

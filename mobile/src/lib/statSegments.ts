@@ -27,7 +27,10 @@ export type StatSegment =
   | 'players'
   | 'qb' | 'rb' | 'wrte' | 'def'
   | 'hitters' | 'pitchers'
-  | 'teams';
+  | 'teams'
+  // NBA only: the 1st Basket board (Matt, 2026-11-08). Its own board, like
+  // Teams, with no catalog chips (components/NbaFirstBasketBoard.tsx).
+  | 'firstBasket';
 
 /** One chip in a segment: a catalog entry, by its group and column key. */
 interface ChipRef {
@@ -46,7 +49,12 @@ type ChipSpec = ChipRef | ReturnType<typeof WHOLE_GROUP>;
  * other chips come from.
  */
 const FOOTBALL_CHIPS: Record<'qb' | 'rb' | 'wrte' | 'def', ChipSpec[]> = {
-  qb: [WHOLE_GROUP('Passing'), { group: 'Rushing', key: 'rushing_yards' }],
+  // QBs run touchdowns in too (Matt, 2026-11-02: NFL, then NCAAF).
+  qb: [
+    WHOLE_GROUP('Passing'),
+    { group: 'Rushing', key: 'rushing_yards' },
+    { group: 'Rushing', key: 'rush_rec_tds' },
+  ],
   rb: [
     { group: 'Rushing', key: 'rushing_yards' },
     { group: 'Rushing', key: 'carries' },
@@ -66,7 +74,9 @@ const FOOTBALL_SEGMENTS: StatSegment[] = ['qb', 'rb', 'wrte', 'def'];
 const MLB_SEGMENTS: StatSegment[] = ['hitters', 'pitchers'];
 
 /**
- * The row for a sport, left to right. Teams rides at the end wherever the
+ * The merged list for a sport, left to right; `boardSegmentsFor` and
+ * `positionSegmentsFor` below split it into the header's two rows.
+ * Originally the single row: Teams rides at the end wherever the
  * sport has a team board, exactly as the old Players | Teams toggle did —
  * so UFC and golf get no row at all (SegmentTabs renders nothing under two
  * items) and the NHL keeps Players | Teams.
@@ -79,15 +89,43 @@ export function segmentsForSport(sport: Sport): StatSegment[] {
   return supportsTeamBoard(sport) ? [...players, 'teams'] : players;
 }
 
+/**
+ * Players | Teams on top, on every sport, as on NBA (Matt, 2026-11-02). The
+ * position segments (QB / RB / WR/TE / DEF, Hitters / Pitchers) are a second
+ * row under Players, shown only on the Players board. `segmentsForSport` stays
+ * the one list; these two split it into the two rows.
+ */
+export function boardSegmentsFor(sport: Sport): BoardSegment[] {
+  const base: BoardSegment[] = supportsTeamBoard(sport) ? ['players', 'teams'] : ['players'];
+  // 1st Basket rides the top row on the NBA only (Matt, 2026-11-08: "only the
+  // stats tab", NBA). It is a board, not a stat chip: first basket is not an
+  // over/under game-log stat, so it has no Hit Rate or Averages view.
+  return supportsFirstBasketBoard(sport) ? [...base, 'firstBasket'] : base;
+}
+
+/** The top row's boards. */
+export type BoardSegment = 'players' | 'teams' | 'firstBasket';
+
+/** The 1st Basket board exists for the NBA and nowhere else. */
+export function supportsFirstBasketBoard(sport: Sport): boolean {
+  return sport === 'NBA';
+}
+
+/** The second row: the sport's position segments, or none (NBA, WNBA, NHL). */
+export function positionSegmentsFor(sport: Sport): StatSegment[] {
+  return segmentsForSport(sport).filter((s) => s !== 'teams' && s !== 'players');
+}
+
 /** The segment a sport opens on — the one its default stat lives in. */
 export function defaultSegmentFor(sport: Sport): StatSegment {
   return segmentsForSport(sport).find((s) => s !== 'teams') ?? 'players';
 }
 
 /**
- * Compact labels. The NFL row is five tabs — QB / RB / WR/TE / DEF / Teams,
- * WR/TE being one — and at 393pt each gets 78.6pt; the widest label is about
- * 45pt at font.size.body semibold (verify_stat_segments.ts does the sum).
+ * Compact labels. The football position row is four tabs (QB / RB / WR/TE /
+ * DEF), about 98pt each at 393pt, drawn second-level (uppercase footnote) —
+ * narrower text than the old five-tab body-size row verify_stat_segments.ts
+ * sums, so its width check stays a safe upper bound.
  */
 export function segmentLabel(seg: StatSegment): string {
   switch (seg) {
@@ -99,6 +137,7 @@ export function segmentLabel(seg: StatSegment): string {
     case 'hitters': return 'Hitters';
     case 'pitchers': return 'Pitchers';
     case 'teams': return 'Teams';
+    case 'firstBasket': return '1st Basket';
   }
 }
 
@@ -109,6 +148,7 @@ export function segmentAccessibilityLabel(seg: StatSegment): string {
     case 'rb': return 'Running backs';
     case 'wrte': return 'Receivers and tight ends';
     case 'def': return 'Defense';
+    case 'firstBasket': return 'First basket';
     default: return segmentLabel(seg);
   }
 }
@@ -280,7 +320,7 @@ export function isPositionSegment(seg: StatSegment): seg is 'qb' | 'rb' | 'wrte'
 export function positionFallbackNote(
   sport: Sport,
   seg: StatSegment,
-  boardMode: 'players' | 'teams',
+  boardMode: BoardSegment,
   positions: ReadonlySet<string> | null,
 ): string | null {
   if (boardMode !== 'players' || positions !== null || !isPositionSegment(seg)) return null;

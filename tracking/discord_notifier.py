@@ -8,9 +8,12 @@ Producers, each independently enabled by whether its webhook is configured:
     §16 mobile query use). Reads `picks`, not `opening_signals`, so what posts is
     the same set the app shows.
   • notify_discord_live    — in-play BET signals from the live loops (MLB,
-    NCAAF, and the NFL in-play worker), to the SPORT'S live channel
-    (DISCORD_WEBHOOK_LIVE_{SPORT}; mike, 2026-09-09), else the shared live
-    channel, else the sport's pre-game channel.
+    NCAAF, and the NFL-leader loop on pollers; the retired NFL in-play
+    worker on the pipeline worker), to the SPORT'S live channel
+    (DISCORD_WEBHOOK_LIVE_{SPORT} if set, else DISCORD_CHANNEL_LIVE_{SPORT}
+    through the bot token, webhook named "<sport>-live"; mike, 2026-09-09),
+    else the shared live channel, else the sport's pre-game channel. A live
+    channel id this process cannot open does not fall through.
   • notify_discord_results — one morning recap after settlement: yesterday's
     record, P&L and ROI, overall and by sport. The same webhook also gets
     the Monday weekly recap and the first-Monday monthly recap.
@@ -40,6 +43,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import time
 import random
@@ -62,7 +66,8 @@ from tracking.publish_keys import (
 from tracking.publish_keys import key_partition_sql, lock_key_sql, posted_sql
 from tracking.postable import still_pre_game as _still_pre_game
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
-from tracking.pick_integrity import refuse_mismatched
+from tracking.clv_math import clv_outcome
+from tracking.pick_integrity import label_without_stake, refuse_mismatched
 
 ET = ZoneInfo("America/New_York")
 
@@ -264,13 +269,33 @@ def conviction_for(kelly_fraction) -> float:
     pre-specified signal, per-half records and a Wilson CI, per the §31 house
     rules. `kelly_fraction` is untouched on the pick and still carries the
     model's own conviction for whenever that day comes.
+
+    A pick's OWN stake overrides the flat unit: `stake_units` (picks.stake_units,
+    1..3 units to win), written by the card that decided the pick and read by
+    every surface. The first writer is NCAAB's agreement rule (mike, 2026-11-06;
+    docs/sports/ncaab.md, "Agreement sizing"), the signal that survived the
+    time split, the per-half records and the Wilson interval above asked for.
+    Anything outside 1..3, or missing, is the flat unit.
     """
     return FLAT_CONVICTION
 
 
-def stake_for(kelly_fraction, dk_odds=None) -> UnitStake:
-    """Conviction + the price-aware risk/win pair. See the block comment above."""
-    conviction = conviction_for(kelly_fraction)
+def pick_conviction(kelly_fraction, stake_units=None) -> float:
+    """The conviction a pick publishes: its own stake_units when that is a
+    number from 1 to 3, else conviction_for() (flat)."""
+    try:
+        u = float(stake_units)
+    except (TypeError, ValueError):
+        return conviction_for(kelly_fraction)
+    if MIN_CONVICTION <= u <= MAX_CONVICTION:
+        return u
+    return conviction_for(kelly_fraction)
+
+
+def stake_for(kelly_fraction, dk_odds=None, stake_units=None) -> UnitStake:
+    """Conviction + the price-aware risk/win pair. See the block comment above.
+    `stake_units` is the pick's own stake (picks.stake_units); None is 1u."""
+    conviction = pick_conviction(kelly_fraction, stake_units)
     dec = _decimal_or_none(dk_odds)
     if dec is None or dec <= 1.0:
         # No price to gross up against — publish the bare conviction.
@@ -284,12 +309,12 @@ def stake_for(kelly_fraction, dk_odds=None) -> UnitStake:
     return UnitStake(conviction, risk, conviction, False, True)
 
 
-def units_for(kelly_fraction, dk_odds=None) -> float:
+def units_for(kelly_fraction, dk_odds=None, stake_units=None) -> float:
     """
     Units LAID on a pick — what exposure sums and the recap tally should add up.
     Price-aware: at -110 a 1u-conviction play returns 1.1.
     """
-    return stake_for(kelly_fraction, dk_odds).risk
+    return stake_for(kelly_fraction, dk_odds, stake_units).risk
 
 
 def fmt_stake(stake: UnitStake) -> str:
@@ -323,7 +348,8 @@ def fmt_units(u: float) -> str:
 
 _SPORT_EMOJI = {
     "MLB": "\u26be", "NFL": "\U0001f3c8", "NCAAF": "\U0001f3c8",
-    "NBA": "\U0001f3c0", "WNBA": "\U0001f3c0", "NHL": "\U0001f3d2",
+    "NBA": "\U0001f3c0", "WNBA": "\U0001f3c0", "NCAAB": "\U0001f3c0", "NCAABW": "\U0001f3c0",
+    "NHL": "\U0001f3d2",
     "UFC": "\U0001f94a", "GOLF": "\u26f3",
 }
 
@@ -484,12 +510,37 @@ def _decimal_to_american(dec: float) -> int:
     return -int(math.floor(100.0 / (dec - 1.0) + 1e-9))
 
 
-def _honest(model_id, prob):
-    """The promoted calibration map applied (models.honest_ev); the raw
-    number when there is no map or the lookup fails. Never raises."""
+def _decided(model_id, prob, odds, game_date):
+    """The number a pick was decided on, from the one its row stores
+    (models.honest_ev.decision_probability): the stored number for every model
+    but one in config.MODEL_PROB_SHRINK, whose rows from its "from" game_date
+    store it pulled toward `odds`, the decision price. None when such a row has
+    no date or no price. Never raises."""
+    try:
+        from models.honest_ev import decision_probability
+        return decision_probability(str(model_id), float(prob), odds, game_date)
+    except Exception:  # noqa: BLE001 - a display bound must not stop a post
+        return prob
+
+
+def _honest(model_id, prob, odds=None, game_date=None):
+    """The number the EV floor was applied to, from the stored one: the promoted
+    calibration map applied (models.honest_ev); the raw number when there is no
+    map or the lookup fails. Never raises.
+
+    `odds` and `game_date`, the pick's decision price and game date: a model in
+    config.MODEL_PROB_SHRINK stores a probability pulled toward that price
+    (display only) for games from its "from" date, so the decided number is
+    recovered from it first. Without that, the "good to" bound would solve the
+    raw-scale floor on a k-sized EV and vanish (price_bound returns None) for
+    most of those picks; and without the date, a row written before the shrink
+    would be un-shrunk and inflated (a "good to" at the -200 price floor)."""
+    decided = _decided(model_id, prob, odds, game_date)
+    if decided is None:
+        return None
     try:
         from models.honest_ev import honest_probability
-        return honest_probability(str(model_id), float(prob))
+        return honest_probability(str(model_id), float(decided))
     except Exception:  # noqa: BLE001 - a display bound must not stop a post
         return prob
 
@@ -610,26 +661,195 @@ def _post_picks(url: str, sport: str, signals: list[dict], game_date: str,
 
 
 def _webhook_for_sport(sport: str) -> str | None:
-    return config.DISCORD_WEBHOOKS.get(sport) or config.DISCORD_WEBHOOK_DEFAULT or None
+    return (config.DISCORD_WEBHOOKS.get(sport) or _channel_webhook(sport)
+            or config.DISCORD_WEBHOOK_DEFAULT or None)
+
+
+# A sport that names its channel (config.DISCORD_CHANNELS, a channel id) and no
+# webhook: the bot token finds or makes the channel's webhook. Cached per
+# process; the URL is a bearer credential, so it lives in memory only and no
+# log line, error or job result ever carries it.
+_DISCORD_API = "https://discord.com/api/v10"
+_CHANNEL_HOOKS: dict = {}
+
+
+def _channel_hook_name(sport: str, *, live: bool = False) -> str:
+    """The name a created webhook posts under.
+
+    Pre-game is the sport's, lower case, as the other sports' webhooks are
+    named ('ncaaf', 'nba'). A live channel uses '<sport>-live' so the webhook
+    the bot creates there is never the pre-game one, even if both channels
+    were listed side by side.
+    """
+    name = sport.lower()
+    return f"{name}-live" if live else name
+
+
+def _bot_hook_in_channel(sport: str, channel: str, headers: dict) -> tuple[dict | None, str | None]:
+    """(the bot's own webhook in `channel`, None) or (None, why not). GET
+    only: creates nothing. 'why not' is None with no hook when the bot simply
+    has no webhook there yet."""
+    me = requests.get(f"{_DISCORD_API}/users/@me", headers=headers, timeout=15)
+    if me.status_code != 200:
+        return None, f"bot identity read failed for {sport} ({me.status_code})"
+    bot_id = str(me.json().get("id"))
+    got = requests.get(f"{_DISCORD_API}/channels/{channel}/webhooks", headers=headers,
+                       timeout=15)
+    if got.status_code != 200:
+        return None, (f"listing webhooks of the {sport} channel failed "
+                      f"({got.status_code}); the bot needs Manage Webhooks there")
+    return next((h for h in (got.json() or [])
+                 if str((h.get("user") or {}).get("id")) == bot_id and h.get("token")), None), None
+
+
+def _bot_headers() -> dict | None:
+    token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+    if not token:
+        return None
+    return {"Authorization": f"Bot {token}", "Content-Type": "application/json"}
+
+
+def channel_hook_info(sport: str) -> dict:
+    """What `sport`'s configured channel posts through, for the discord_probe
+    job: the channel id, the bot's webhook id and name. GET only, and never
+    the webhook's token or URL (a bearer credential)."""
+    channel = config.DISCORD_CHANNELS.get(sport)
+    if not channel:
+        return {"error": f"no DISCORD_CHANNEL_{sport}"}
+    headers = _bot_headers()
+    if headers is None:
+        return {"channel_id": channel, "error": "no DISCORD_BOT_TOKEN on this service"}
+    try:
+        hook, why = _bot_hook_in_channel(sport, channel, headers)
+    except (requests.RequestException, ValueError) as exc:
+        return {"channel_id": channel, "error": type(exc).__name__}
+    if why:
+        return {"channel_id": channel, "error": why}
+    if hook is None:
+        return {"status": "no bot webhook in the channel yet", "channel_id": channel}
+    return {"status": 200, "channel_id": str(hook.get("channel_id") or channel),
+            "guild_id": hook.get("guild_id"), "webhook_id": str(hook.get("id")),
+            "webhook_name": hook.get("name"), "via": "channel id + bot token"}
+
+
+def _resolve_channel_webhook(label: str, channel: str | None, name: str,
+                             cache_key: str) -> str | None:
+    """The webhook URL for `channel`, or None.
+
+    Reuses a webhook in that channel that the bot itself created (its `user`
+    is the bot), else creates one named `name`. Needs DISCORD_BOT_TOKEN with
+    Manage Webhooks on the channel. A failure is logged by status code and
+    returns None, so the sport is skipped exactly as an unset webhook is
+    (its picks stay unsent and post once the channel resolves). `cache_key`
+    is per destination: the pre-game sport and its live channel must not
+    share a URL."""
+    if not channel:
+        return None
+    if cache_key in _CHANNEL_HOOKS:
+        return _CHANNEL_HOOKS[cache_key]
+    headers = _bot_headers()
+    if headers is None:
+        return None
+    try:
+        hook, why = _bot_hook_in_channel(label, channel, headers)
+        if why:
+            logger.error(f"Discord: {why}")
+            return None
+        if hook is None:
+            made = requests.post(f"{_DISCORD_API}/channels/{channel}/webhooks", headers=headers,
+                                 json={"name": name}, timeout=15)
+            if made.status_code not in (200, 201):
+                logger.error(f"Discord: creating the {label} channel's webhook failed "
+                             f"({made.status_code})")
+                return None
+            hook = made.json()
+            logger.info(f"Discord: created a webhook in the {label} channel")
+    except (requests.RequestException, ValueError) as exc:
+        logger.error(f"Discord: resolving the {label} channel's webhook failed: "
+                     f"{type(exc).__name__}")
+        return None
+    url = f"https://discord.com/api/webhooks/{hook['id']}/{hook['token']}"
+    _CHANNEL_HOOKS[cache_key] = url
+    return url
+
+
+def _channel_webhook(sport: str) -> str | None:
+    """The webhook URL for `sport`'s configured pre-game channel, or None."""
+    return _resolve_channel_webhook(
+        sport, config.DISCORD_CHANNELS.get(sport), _channel_hook_name(sport), sport)
+
+
+# One line per sport per process. A live pass calls this for every pick, and
+# the missing token does not change until the process is redeployed.
+_LIVE_CHANNEL_TOKEN_WARNED: set = set()
+
+
+def _live_channel_webhook(sport: str) -> str | None:
+    """The webhook URL for `sport`'s live channel id, or None.
+
+    Same path as `_channel_webhook`: reuse the bot's own webhook in
+    DISCORD_CHANNEL_LIVE_<SPORT>, else create one. The created webhook is
+    named '<sport>-live' and cached apart from the pre-game URL.
+
+    No bot token is a soft skip. The URL is not invented, nothing is posted,
+    and the caller does not ledger the pick. Logged once per sport: the MLB,
+    NCAAF and NFL-leader loops that call notify_discord_live run on pollers,
+    and that service has no DISCORD_BOT_TOKEN.
+    """
+    channel = (getattr(config, "DISCORD_CHANNELS_LIVE", None) or {}).get(sport)
+    if not channel:
+        return None
+    if _bot_headers() is None:
+        if sport not in _LIVE_CHANNEL_TOKEN_WARNED:
+            _LIVE_CHANNEL_TOKEN_WARNED.add(sport)
+            logger.error(
+                f"Discord(live): DISCORD_CHANNEL_LIVE_{sport} is set but this "
+                f"process has no DISCORD_BOT_TOKEN, so the {sport.lower()}-live "
+                f"webhook cannot be opened. {sport} live picks are skipped and "
+                f"not marked sent. Set DISCORD_BOT_TOKEN on this service (the "
+                f"bot needs Manage Webhooks on that channel), or set "
+                f"DISCORD_WEBHOOK_LIVE_{sport}."
+            )
+        return None
+    return _resolve_channel_webhook(
+        f"{sport} live", channel, _channel_hook_name(sport, live=True), f"{sport}:live")
 
 
 def _live_webhook_for_sport(sport: str) -> str | None:
     """Where an IN-PLAY signal for `sport` posts.
 
-    The sport's own live channel first (mike, 2026-09-09: live picks go to
-    #nfl-live / #mlb-live / #ncaaf-live), then the shared live channel, then
-    the sport's pre-game channel. The last fallback is deliberate: a sport that
-    has a live loop and no live channel yet still posts SOMEWHERE its members
-    read, and the ledger keeps it from re-posting once the channel is added.
+    The sport's own live webhook first (mike, 2026-09-09: live picks go to
+    #nfl-live / #mlb-live / #ncaaf-live). With no webhook variable, the
+    sport's live channel id (DISCORD_CHANNEL_LIVE_<SPORT>) is opened through
+    the bot token. Then the shared live channel, then the sport's pre-game
+    channel. The last two are for a sport that has no live destination yet:
+    it still posts somewhere its members read, and the ledger keeps it from
+    re-posting once a live channel is added.
+
+    A live channel id that is set and cannot be opened does not use those
+    fallbacks. Posting the pick somewhere else would ledger it, and the live
+    channel would never receive it.
     """
-    return (config.DISCORD_WEBHOOKS_LIVE.get(sport)
-            or config.DISCORD_WEBHOOK_LIVE
-            or _webhook_for_sport(sport))
+    explicit = config.DISCORD_WEBHOOKS_LIVE.get(sport)
+    if explicit:
+        return explicit
+    if (getattr(config, "DISCORD_CHANNELS_LIVE", None) or {}).get(sport):
+        return _live_channel_webhook(sport)
+    if sport in getattr(config, "DISCORD_LIVE_CHANNEL_REQUIRED", ()):
+        # No fallback for these sports: a pick posted to the shared or the
+        # pre-game channel is ledgered as sent to live and never re-posts.
+        logger.error(f"Discord(live): no DISCORD_WEBHOOK_LIVE_{sport} or DISCORD_CHANNEL_LIVE_{sport}; "
+                     f"{sport} live picks are not posted anywhere else and stay unsent")
+        return None
+    return config.DISCORD_WEBHOOK_LIVE or _webhook_for_sport(sport)
 
 
 def _configured() -> bool:
+    live_by_channel = bool(getattr(config, "DISCORD_CHANNELS_LIVE", None)) and _bot_headers() is not None
     return bool(config.DISCORD_WEBHOOKS
+                or config.discord_sports_wired()
                 or config.DISCORD_WEBHOOKS_LIVE
+                or live_by_channel
                 or config.DISCORD_WEBHOOK_DEFAULT
                 or config.DISCORD_WEBHOOK_LIVE
                 or config.DISCORD_WEBHOOK_RESULTS)
@@ -770,7 +990,9 @@ def _new_signals(conn, target_date: str, *,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
                    t.min_edge, t.min_odds, p.game_date,
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
-                   p.pick_side, p.scored_line, p.prop_market
+                   p.pick_side, p.scored_line, p.prop_market,
+                   p.decision_book, p.decision_odds AS decision_odds_raw,
+                   p.stake_units, p.stake_reason
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -833,7 +1055,7 @@ def _new_signals(conn, target_date: str, *,
         # On the HONEST probability (2026-09-19): the same promoted map the
         # EV floor was applied through, so the bound solves the gate the pick
         # actually cleared. The card still SHOWS model_probability, as the app.
-        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19],
+        "good_to": price_bound(_honest(r[3], r[4], r[19], r[18]), r[3], r[16], r[17], r[19],
                                r[22] if len(r) > 22 else None),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
@@ -846,6 +1068,15 @@ def _new_signals(conn, target_date: str, *,
         # What tracking/pick_integrity checks the label against.
         "side": r[20], "line": r[21],
         "prop_market": r[22] if len(r) > 22 else None,
+        # The book the price was taken at, and the raw decision price (not
+        # the COALESCE above). book_for_pick names decision_book only when
+        # that price is the number in dk_odds.
+        "decision_book": r[23] if len(r) > 23 else None,
+        "decision_odds_raw": r[24] if len(r) > 24 else None,
+        # The pick's own stake (picks.stake_units, units to win; None is 1u)
+        # and why it is above 1u. stake_for reads it; the card shows both.
+        "stake_units": r[25] if len(r) > 25 else None,
+        "stake_reason": r[26] if len(r) > 26 else None,
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
         # Belt and braces with the SQL bound above, and the only guard that
@@ -895,7 +1126,9 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
                    t.min_edge, t.min_odds, p.game_date,
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
-                   p.pick_side, p.scored_line, p.prop_market
+                   p.pick_side, p.scored_line, p.prop_market,
+                   p.decision_book, p.decision_odds AS decision_odds_raw,
+                   p.stake_units, p.stake_reason
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -948,7 +1181,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # On the HONEST probability (2026-09-19): the same promoted map the
         # EV floor was applied through, so the bound solves the gate the pick
         # actually cleared. The card still SHOWS model_probability, as the app.
-        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19],
+        "good_to": price_bound(_honest(r[3], r[4], r[19], r[18]), r[3], r[16], r[17], r[19],
                                r[22] if len(r) > 22 else None),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
@@ -959,6 +1192,12 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # september 7th, the post to discord says september 6th".
         "game_date": r[18],
         "side": r[20], "line": r[21],
+        "decision_book": r[23] if len(r) > 23 else None,
+        "decision_odds_raw": r[24] if len(r) > 24 else None,
+        # The pick's own stake (picks.stake_units, units to win; None is 1u)
+        # and why it is above 1u. stake_for reads it; the card shows both.
+        "stake_units": r[25] if len(r) > 25 else None,
+        "stake_reason": r[26] if len(r) > 26 else None,
     } for r in rows]
 
 
@@ -968,8 +1207,9 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
 # A price with no book attached is not checkable. "Over 44.5 -115" invites
 # "-115 where?", and the honest answer differs by model: nearly everything here
 # is priced against DraftKings (config.ODDS_API_BOOKMAKER is the scoring book
-# and every scorer hard-filters to it), but the standalone NFL rules
-# deliberately line-shop and put the winning book in pick_label.
+# and every scorer hard-filters to it). The line-shopped cards store the
+# book on decision_book. Rows written before that still name it in
+# pick_label, and those labels keep parsing.
 _BOOK_NAMES = {
     "draftkings": "DraftKings", "dk": "DraftKings",
     "fanduel": "FanDuel", "fd": "FanDuel",
@@ -990,31 +1230,67 @@ _BOOK_NAMES = {
     "fliff": "Fliff",
 }
 
-# "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
+# Old labels, still in `picks` and not rewritten:
+#   "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
+#   "... (no bet, FD)"
+# The "· 1.00u" sizing figure is off new NFL labels (mike, 2026-11-04) and is
+# dropped on display (label_without_stake); this book parse is unaffected.
+# A trailing "(FD)" on a prop is not read. Those stored labels still show
+# the book. A new row of the same card does not, so the price line has to.
 _LABEL_BOOK_RE = re.compile(r"\((?:[^()]*,\s*)([A-Za-z_]+)\)")
+# Cards that write the soft book's own price into dk_odds and the same
+# number into decision_odds. When the two prices match, dk_odds is that
+# book's number and the reader is sent there. MLB is not in this set:
+# its price line stays DraftKings unless a best price is strictly better.
+_DECISION_BOOK_MODELS = frozenset({
+    "nfl_wind_totals", "nfl_opener_spread",
+    "nfl_prop_market", "wnba_prop_market",
+})
+
+
+def _display_book(token: str) -> str:
+    """Human name for a feed key or an old label abbreviation.
+
+    An unknown token is returned as stored, not guessed into a known book.
+    """
+    text = (token or "").strip()
+    return _BOOK_NAMES.get(text.lower(), text)
+
+
+def _same_american(a, b) -> bool:
+    """True when both prices are present and equal. A missing price does not
+    match: decision_book is named only for the number it was taken at."""
+    if a is None or b is None:
+        return False
+    try:
+        return abs(float(a) - float(b)) <= 1e-6
+    except (TypeError, ValueError):
+        return False
 
 
 def book_for_pick(s: dict) -> str | None:
     """Human name of the book whose price is being published.
 
-    Order matters. An explicitly recorded book wins; then the NFL label, which
-    is the only place a line-shopped book is stored; then the platform default,
-    but ONLY for a pick that actually carries a price -- a prob-only pick has no
-    book because it has no quote, and naming one would assert a price that did
-    not exist.
+    An explicit `book` wins. Then `decision_book`, for a soft-book card
+    (`_DECISION_BOOK_MODELS`) when `decision_odds` is the same number as
+    `dk_odds`: that column is the book the price came from, and the label
+    no longer says it. Then the old comma annotation, for an NFL row
+    written before the column. Then DraftKings, and only when the pick
+    carries a price. A prop suffix, an MLB `decision_book`, "(F5)" and
+    "(Regulation)" do not change the name.
     """
-    raw = (s.get("book") or "").strip().lower()
+    raw = (s.get("book") or "").strip()
     if raw:
-        return _BOOK_NAMES.get(raw, raw)
-    label = s.get("label") or ""
-    if (s.get("model_id") or "").startswith("nfl_"):
-        m = _LABEL_BOOK_RE.search(label)
+        return _display_book(raw)
+    model = s.get("model_id") or ""
+    decided = (s.get("decision_book") or "").strip()
+    if (model in _DECISION_BOOK_MODELS and decided
+            and _same_american(s.get("decision_odds_raw"), s.get("dk_odds"))):
+        return _display_book(decided)
+    if model.startswith("nfl_"):
+        m = _LABEL_BOOK_RE.search(s.get("label") or "")
         if m:
-            key = m.group(1).strip().lower()
-            # Unknown abbrev is reported as-is rather than guessed into a
-            # known book -- a label that names the wrong book is worse than
-            # one that names an unfamiliar one.
-            return _BOOK_NAMES.get(key, m.group(1).strip())
+            return _display_book(m.group(1))
     if s.get("dk_odds") is None:
         return None
     return "DraftKings"
@@ -1082,7 +1358,7 @@ def _signal_field(s: dict) -> dict:
     # The stake is grossed up by the price being PUBLISHED, not by DraftKings'.
     # Telling a reader to risk 1.39u at -139 while pointing them at BetMGM's
     # -120 would have them lay 16% more than the bet needs.
-    stake = fmt_stake(stake_for(s.get("kelly"), odds))
+    stake = fmt_stake(stake_for(s.get("kelly"), odds, s.get("stake_units")))
 
     price = _american(odds)
     if book:
@@ -1110,8 +1386,16 @@ def _signal_field(s: dict) -> dict:
     posted = _posted_et(s.get("posted_at"), seconds=bool(s.get("live")))
     if posted:
         line += f" · posted {posted}"
+    # A pick staked above 1u says why, once, on its own line (picks.stake_reason;
+    # NCAAB agreement sizing, mike 2026-11-06). A flat pick adds nothing.
+    reason = s.get("stake_reason")
+    if reason and pick_conviction(s.get("kelly"), s.get("stake_units")) > FLAT_CONVICTION:
+        line += "\n" + reason
+    # The label beside the posted stake, without the old NFL sizing figure
+    # ("· 0.79u"): one unit number per pick (mike, 2026-11-04). The bet is
+    # word for word; the stored row is not touched.
     return {
-        "name": s["label"],
+        "name": label_without_stake(s["label"]),
         "value": f"{context}\n{line}" if context else line,
         "inline": False,
     }
@@ -1222,82 +1506,46 @@ def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
 # published.
 DISCORD_RESTATE_DATES: frozenset[str] = frozenset({"2026-08-28"})
 
-# ── Restating a published recap ──────────────────────────────────────────────
+# ── A published record is never re-posted ────────────────────────────────────
 #
-# A recap can only count what has settled when it posts. A sport that settles
-# LATER -- UFC results the next afternoon, an NCAAF score that lands two days
-# on, the NFL props of 2026-09-09 that graded an hour after the 6am post --
-# leaves a published number that is wrong and stays wrong, because the date is
-# ledgered. Until 2026-09-10 the only remedy was a hand-run job (or, for
-# 2026-08-29, a date hard-coded here).
+# mike, 2026-10-30: "No restated records of any kind unless I give the approval."
+# From 2026-09-10 every settle pass re-posted any recap a late grade had changed,
+# on Discord and on X: 19 days each in the 45 days to 10-30 (push_sent). That
+# path is gone, and neither notifier can post a second copy of a day.
 #
-# Now every settle pass asks: for each recap published in the last week, did
-# any pick in its universe settle AFTER it was published? If so, both surfaces
-# re-post the date labelled "restated", and the Discord post overwrites the
-# snapshot (new published_at), so the same late batch never fires twice. The
-# ledger key carries the published_at of the recap being corrected, so a
-# SECOND late batch (new published_at) restates again, and a repeat pass over
-# the same batch does not.
+# The hold in front of both notifiers (record_held_for_grading) is what keeps a
+# recap from going out short. If one still does, the pick reaches the all-time
+# line of the next recap and the published day stands. Ops hears once, because
+# mike is the only one who can approve anything else
+# (config.RECORD_RESTATEMENT_APPROVALS, then the publish_results job).
 #
-# THE TRIGGER IS LATE SETTLEMENT, NOT A COUNT DIFFERENCE. Measured 2026-09-10:
+# A LATE GRADE IS THE ONLY SIGNAL, NOT A COUNT DIFFERENCE. Measured 2026-09-10:
 # every daily snapshot from 09-01 to 09-08 disagrees with the count the recap
 # query returns today (09-01: 56 then, 33 now), because the query applies the
-# CURRENT action cuts and those moved (the live cut re-sweep of 09-09, pauses).
-# A count trigger would have restated eight days for nothing. settled_at >
-# published_at is the only thing that means "this recap missed a pick".
-#
-# Recaps published before RESULTS_RESTATE_FROM are never restated
-# automatically. Set to 2026-09-04 (mike, 2026-09-10: "ensure what's there is
-# accurate"): the 09-04 and 09-05 recaps each carry picks that settled after
-# they posted (2 NCAAF; 4 NCAAF + 2 UFC) and are corrected in place, labelled.
-RESULTS_RESTATE_FROM = "2026-09-04"
-RESULTS_RESTATE_LOOKBACK_DAYS = 7
+# CURRENT action cuts and those moved. settled_at > published_at is the only
+# thing that means "this recap missed a pick".
+RECAP_LATE_LOOKBACK_DAYS = 7
+RECORD_SHORT_KIND = "record_short"
 
 
-def results_restate_note(late: int, prev_settled: int, now_settled: int) -> str:
-    """The correction, stated: what settled late, and what the two counts are.
+def recaps_gone_short(conn, through: str | None = None,
+                      lookback_days: int = RECAP_LATE_LOOKBACK_DAYS) -> list[dict]:
+    """Published recaps with a pick that graded after they were posted.
 
-    When the two counts differ by more than the late picks, the rest is the
-    action cuts having moved since the recap first posted (the recap query
-    applies the CURRENT cuts) -- and the note says so, because "2 settled
-    late, 56 then, 33 now" without that sentence reads as a contradiction."""
-    picks = "pick" if late == 1 else "picks"
-    note = (f"Restated. {late} {picks} settled after this recap was first "
-            f"posted ({prev_settled} settled then, {now_settled} now).")
-    if now_settled - prev_settled != late:
-        note += (" The rest of the difference is the action cuts, which have "
-                 "moved since; this is the day under the current cuts.")
-    return note + (" Same picks, same results \u2014 this is the full day as "
-                   "the record stands now.")
-
-
-def recaps_needing_restatement(conn, through: str | None = None,
-                               lookback_days: int = RESULTS_RESTATE_LOOKBACK_DAYS,
-                               game_date: str | None = None) -> list[dict]:
-    """Published recaps with a pick that settled after they were posted.
-
-    One dict per date: game_date, published_at (of the snapshot being
-    corrected -- the ledger key), settled (what it published), late (how many
-    of the CURRENT universe settled after that). Dates < `through` (today ET)
-    only, so a day still in play is never touched; bounded below by the
-    lookback and by RESULTS_RESTATE_FROM."""
+    One dict per date: game_date, published_at, settled (what it published),
+    late (how many of the CURRENT universe graded after that). Dates before
+    `through` (today ET) only, so a day still in play is never read."""
     if through is None:
         through = datetime.now(ET).date().isoformat()
-    floor = max(RESULTS_RESTATE_FROM,
-                (datetime.fromisoformat(through).date()
-                 - timedelta(days=lookback_days)).isoformat())
-    params: list = [through, floor]
-    date_clause = ""
-    if game_date is not None:
-        date_clause = " AND game_date = %s"
-        params.append(game_date)
-    snaps = conn.execute(f"""
+    floor = (datetime.fromisoformat(through).date()
+             - timedelta(days=lookback_days)).isoformat()
+    snaps = conn.execute("""
         SELECT game_date, published_at, settled
         FROM results_snapshots
         WHERE scope = 'daily' AND sport IS NULL
-          AND game_date < %s AND game_date >= %s{date_clause}
+          AND game_date < %s AND game_date >= %s
         ORDER BY game_date
-    """, tuple(params)).fetchall()
+    """, (through, floor)).fetchall()
     out = []
     for d, published_at, settled in snaps:
         d = str(d)
@@ -1311,40 +1559,46 @@ def recaps_needing_restatement(conn, through: str | None = None,
     return out
 
 
-def restate_published_recaps(through: str | None = None,
-                             dry_run: bool = False,
-                             now: datetime | None = None) -> int:
-    """Re-post every recap a late settlement has invalidated, both surfaces.
+def flag_recaps_gone_short(through: str | None = None,
+                           now: datetime | None = None) -> int:
+    """Tell ops about a recap that went out short. Never posts a recap.
 
-    Called at the end of every settle pass, and only from 6:00am through
-    noon ET. A game of that sport in progress waits for a later pass.
-    Discord first, then X, off the same scan result, so the two carry the
-    same correction and the same key. Returns the number of posts made."""
+    Called at the end of every settle pass, 6:00am through noon ET. One alert
+    per published recap. A failed alert is not ledgered, so a later pass asks
+    again. Returns the number of alerts sent."""
+    from tracking.watch_util import post_ops_alert
+
     now = _as_et(now)
     if not in_daily_recap_window(now):
         return 0
     conn = get_connection()
+    sent = 0
     try:
-        due = recaps_needing_restatement(conn, through)
+        for item in recaps_gone_short(conn, through or now.date().isoformat()):
+            lock = restate_lock_key(RECORD_SHORT_KIND, item["game_date"],
+                                    item["published_at"])
+            if conn.execute(
+                "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
+                (lock, RECORD_SHORT_KIND),
+            ).fetchone():
+                continue
+            if not post_ops_alert(
+                "Daily record went out short",
+                f"The {item['game_date']} record posted {item['settled']} settled "
+                f"picks. {item['late']} more graded after it went out. It was not "
+                f"re-posted, and will not be without mike's approval. The next "
+                f"recap's all-time line counts them.",
+            ):
+                continue
+            conn.execute(
+                "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, %s, %s) "
+                "ON CONFLICT (lock_key, kind) DO NOTHING",
+                (lock, RECORD_SHORT_KIND, now.isoformat()))
+            conn.commit()
+            sent += 1
     finally:
         conn.close()
-    if not due:
-        return 0
-    from tracking.x_publisher import notify_x_results
-    posted = 0
-    for item in due:
-        try:
-            posted += notify_discord_results(item["game_date"], dry_run=dry_run,
-                                             restate=item, now=now)
-        except Exception as exc:                          # noqa: BLE001
-            logger.error(f"Discord restate {item['game_date']} failed: {exc}")
-            _record_restate_exception(item, exc)
-        try:
-            posted += notify_x_results(item["game_date"], dry_run=dry_run,
-                                       restate=item, now=now)
-        except Exception as exc:                          # noqa: BLE001
-            logger.error(f"X restate {item['game_date']} failed: {exc}")
-    return posted
+    return sent
 
 
 # ── A recap the 6am run could not post ───────────────────────────────────────
@@ -1377,7 +1631,7 @@ RECAP_DAILY_HOUR_ET = 6
 RECAP_MORNING_END_HOUR_ET = 12
 # A missed day keeps trying each morning for this many days, the same span
 # a week stays due.
-DAILY_CATCHUP_DAYS = RESULTS_RESTATE_LOOKBACK_DAYS
+DAILY_CATCHUP_DAYS = RECAP_LATE_LOOKBACK_DAYS
 # A started game with no final score is still in progress for this long.
 # Past it, a missing score is not a game that is being played.
 SPORT_LIVE_HOURS = 8
@@ -1419,8 +1673,7 @@ def post_missed_recap(now: datetime | None = None,
     """Post a day the morning window has not posted yet, on both surfaces.
 
     Called by step_settle on a refresh pass (one that settles TODAY), after
-    the ordinary attempt and BEFORE restate_published_recaps. Yesterday is
-    the usual date. A day that missed its morning stays eligible on later
+    the ordinary attempt. Yesterday is the usual date. A day that missed its morning stays eligible on later
     mornings, oldest first, for DAILY_CATCHUP_DAYS. The post names that
     date. After noon, nothing runs, and the next morning asks again.
 
@@ -1455,49 +1708,20 @@ def post_missed_recap(now: datetime | None = None,
             continue
         logger.info(f"Results recap for {game_date} did not post at 6am; "
                     f"posting it now that a counting pick has settled")
-        discord_posted = 0
         try:
-            discord_posted = notify_discord_results(
+            posted += notify_discord_results(
                 game_date, dry_run=dry_run, now=now)
-            posted += discord_posted
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"Discord recap retry {game_date} failed: {exc}")
         try:
             posted += notify_x_results(game_date, dry_run=dry_run, now=now)
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"X recap retry {game_date} failed: {exc}")
-        if discord_posted and x_sent_at is not None:
-            posted += _restate_x_if_behind(game_date, x_sent_at, dry_run, now)
     return posted
 
 
-def _restate_x_if_behind(game_date: str, x_sent_at, dry_run: bool,
-                         now: datetime | None = None) -> int:
-    """Restate X for a date when a counting pick settled after its tweet."""
-    from tracking.x_publisher import notify_x_results
-    conn = get_connection()
-    try:
-        late = _execute_settled(
-            conn,
-            _SETTLED_SQL.format(window="= %s") + "\n          AND p.settled_at > %s",
-            (game_date, x_sent_at)).fetchall()
-    finally:
-        conn.close()
-    if not late:
-        return 0
-    try:
-        return notify_x_results(game_date, dry_run=dry_run, restate={
-            "game_date": game_date, "published_at": x_sent_at,
-            "late": len(late)}, now=now)
-    except Exception as exc:                              # noqa: BLE001
-        logger.error(f"X restate {game_date} after the Discord retry "
-                     f"failed: {exc}")
-        return 0
-
-
 def restate_lock_key(kind: str, game_date: str, published_at) -> str:
-    """`{kind}:{date}:{published_at of the recap being corrected}` -- one key
-    per correction generation, shared in shape by both surfaces."""
+    """`{kind}:{date}:{published_at of the recap concerned}`."""
     stamp = published_at.isoformat() if hasattr(published_at, "isoformat") else str(published_at)
     return f"{kind}:{game_date}:{stamp}"
 
@@ -1523,10 +1747,15 @@ def notify_discord_restate(target_date: str | None = None,
 
     Renders through the SAME _post_picks/_signal_field path as a normal slate, so
     a restated stake cannot drift from what the next slate would publish.
+
+    Needs mike's approval for that date as well (config.RECORD_RESTATEMENT_APPROVALS).
     """
     if target_date is None:
         target_date = date.today().isoformat()
     if target_date not in DISCORD_RESTATE_DATES or not _configured():
+        return 0
+    if not config.record_restatement_approved(target_date):
+        logger.error(f"Discord restate {target_date} refused: no approval recorded")
         return 0
 
     conn = get_connection()
@@ -1764,7 +1993,8 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
                -- headline through publish_price, like the pre-game cards.
                p.best_book, p.best_odds, p.best_bet_link,
                COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
-               p.decision_book, p.scored_line, p.prop_market
+               p.decision_book, p.scored_line, p.prop_market,
+               p.decision_odds AS decision_odds_raw
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         -- The model's own gates, from the same table the app's action filter
@@ -1787,6 +2017,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "commence": r[13], "posted_at": r[14], "live": True,
         "best_book": r[18], "best_odds": r[19], "best_bet_link": r[20],
         "decision_odds": r[21], "decision_book": r[22],
+        "decision_odds_raw": r[25] if len(r) > 25 else None,
         "side": r[2], "line": r[23],
         # The market the pick settles against, so pick_integrity can check that
         # the label does not NAME a different one. Without this the stat check
@@ -1888,7 +2119,8 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
                os.kelly_fraction, g.home_team, g.away_team, g.commence_time,
                pk.created_at, pk.best_book, pk.best_odds,
                os.model_id, os.model_probability, t.min_edge, t.min_odds,
-               os.pick_side, os.scored_line, pk.prop_market
+               os.pick_side, os.scored_line, pk.prop_market,
+               pk.decision_book, pk.decision_odds, pk.stake_units
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -1897,7 +2129,8 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
             -- under: it carries player AND market, so a player bet in two
             -- markets in one transaction (same created_at) cannot lend one
             -- bet the other's price and book.
-            SELECT p.created_at, p.best_book, p.best_odds, p.prop_market
+            SELECT p.created_at, p.best_book, p.best_odds, p.prop_market,
+                   p.decision_book, p.decision_odds, p.stake_units
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -1921,8 +2154,16 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         "kelly": r[4], "home": r[5], "away": r[6], "commence": r[7],
         "posted_at": r[8], "best_book": r[9], "best_odds": r[10],
         "model_id": r[11], "side": r[15], "line": r[16],
-        # Same "good to" the paid channels publish, from the same gates.
-        "good_to": price_bound(r[12], r[11], r[13], r[14], r[3], r[17] if len(r) > 17 else None),
+        "decision_book": r[18] if len(r) > 18 else None,
+        "decision_odds_raw": r[19] if len(r) > 19 else None,
+        "stake_units": r[20] if len(r) > 20 else None,
+        # Same "good to" the paid channels publish, from the same gates. On the
+        # number the pick was DECIDED on: a model in config.MODEL_PROB_SHRINK
+        # stores (and the capture copies) a number pulled toward its decision
+        # price, r[19], for games from its "from" date (every candidate here is
+        # target_date's); for every other model _decided is the stored number.
+        "good_to": price_bound(_decided(r[11], r[12], r[19] if len(r) > 19 else None, target_date),
+                               r[11], r[13], r[14], r[3], r[17] if len(r) > 17 else None),
     } for r in rows], "Discord(free)")
 
 
@@ -1957,7 +2198,7 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
     # book and price"). The free card is the shop window; a shop window showing
     # a worse number than the shop is a strange thing to have built.
     odds, book = publish_price(pick)
-    stake = fmt_stake(stake_for(pick.get("kelly"), odds))
+    stake = fmt_stake(stake_for(pick.get("kelly"), odds, pick.get("stake_units")))
     price = _american(odds)
     if book:
         price = f"{price} @ {book}"
@@ -1973,7 +2214,8 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
                   f"Free Pick of the Day — {pretty}"),
         "color": _COLOR_SIGNAL,
         "fields": [{
-            "name": pick["label"],
+            # Beside the posted stake: no old NFL sizing figure (_signal_field).
+            "name": label_without_stake(pick["label"]),
             "value": (f"{context}\n" if context else "") + line,
             "inline": False,
         }],
@@ -2100,8 +2342,8 @@ def notify_discord_free_pick(target_date: str | None = None,
 # condition_status = config.DUPLICATE_STATUS and counts once, here and on
 # every other record surface. Its result is never touched.
 #
-# POSTED TO DISCORD (owner, 2026-10-14). Daily, the 7-day restatement, and
-# all-time all read this query, and X and the snapshot builder read it too.
+# POSTED TO DISCORD (owner, 2026-10-14). Daily and
+# all-time both read this query, and X and the snapshot builder read it too.
 # A settled BET Discord never carried is not in that record. The lock is
 # posted_sql: push_sent discord_signal / discord_live, the same key
 # v_discord_published joins, dropped when a newer discord_void notice holds.
@@ -2111,8 +2353,8 @@ _SETTLED_SQL = r"""
                COALESCE(p.decision_odds, p.dk_odds),
                CASE WHEN p.clv_method = 'standard_v2' THEN p.clv_pct END,
                p.is_live,
-               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result),
-               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result)
+               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units),
+               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units)
         FROM picks p
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'
@@ -2126,8 +2368,8 @@ _SETTLED_SQL = r"""
 
 
 _UNIT_COLUMN_SQL = (
-    ",\n               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result)"
-    ",\n               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result)"
+    ",\n               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units)"
+    ",\n               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units)"
 )
 
 
@@ -2142,7 +2384,12 @@ def _sql_without_unit_functions(sql: str) -> str:
 
 
 def _unit_functions_missing(exc: BaseException) -> bool:
+    """The posted-stake functions, or the stake_units column their third
+    argument reads (both from pick_stake_units_2026_11_06.sql), are not there
+    yet. Dropping the function columns drops every stake_units reference too."""
     text = str(exc).lower()
+    if "stake_units" in text:
+        return "does not exist" in text or "no such column" in text
     if "published_pick_unit_" not in text:
         return False
     return "does not exist" in text or "no such function" in text
@@ -2263,12 +2510,17 @@ def sport_in_progress(conn, sports: tuple[str, ...] | None = None,
 
 
 def window_still_live(conn, start: str, end: str, sports: tuple[str, ...] | None = None) -> bool:
-    """A game on a slate date in the window has no final score.
+    """A game in the window has no final score and carries a pick this recap
+    publishes or counts.
 
-    Slate dates are dates that have a BET in the window. Every game of that
-    sport on that date has to be final. An unfinished game in another sport
-    does not hold the recap. A connection with no execute is not live, so a
-    test double that only ledgers still posts.
+    The pick is on that game (`picks.game_id = games.game_id`), in the same
+    population as `_SETTLED_SQL`: a posted BET, not a paused-model row, not a
+    duplicate copy, not a struck model, graded or still open. An unscored
+    game with no such pick does not hold the day. A game that was never bet
+    does not, including one the score feed will never final. The recap goes
+    out once every game that carries such a pick is final. An unfinished game in
+    another sport does not hold it. A connection with no execute is not live,
+    so a test double that only ledgers still posts.
     """
     execute = getattr(conn, "execute", None)
     if execute is None:
@@ -2277,18 +2529,132 @@ def window_still_live(conn, start: str, end: str, sports: tuple[str, ...] | None
     if not sports:
         return False
     marks = ", ".join(["%s"] * len(sports))
+    # Same pick filters as _SETTLED_SQL, without requiring a grade. A posted
+    # pick that is not graded yet still belongs to its game. A VOID
+    # (result NO_ACTION) does not. The LIKE percents are doubled for
+    # psycopg2, the same way _SETTLED_SQL writes them.
     sql = (
         "SELECT 1 FROM games g "
         f"WHERE g.game_date BETWEEN %s AND %s AND g.sport IN ({marks}) "
         "AND (g.home_score IS NULL OR g.away_score IS NULL) "
         "AND EXISTS (SELECT 1 FROM picks p "
-        "WHERE p.game_date = g.game_date AND p.sport = g.sport "
+        "WHERE p.game_id = g.game_id "
         "AND p.signal_type = 'BET' "
-        "AND p.game_date BETWEEN %s AND %s) "
-        "LIMIT 1"
+        "AND (p.is_live IS NOT TRUE OR p.model_id LIKE '%%\\_live\\_%%') "
+        "AND (p.result IS NULL OR p.result IN ('WIN', 'LOSS', 'PUSH'))"
+        + config.record_exclusion_sql("p")
+        + config.paused_row_exclusion_sql("p")
+        + config.duplicate_copy_exclusion_sql("p")
+        + "\n          AND " + posted_sql("p")
+        + ") LIMIT 1"
     )
-    row = execute(sql, (start, end, *sports, start, end)).fetchone()
+    row = execute(sql, (start, end, *sports)).fetchone()
     return row is not None
+
+
+# ── Every pick graded before a record goes out ───────────────────────────────
+# mike, 2026-10-30: "checks prior to the daily record going out to ensure all
+# picks are graded, if not grade them. games are all long finished by the time."
+#
+# Both surfaces and both record lengths ask this before they read a single
+# result, so no path can post a record that a later grade would change. The
+# picks are the record's own: _SETTLED_SQL with its result clause swapped, so a
+# paused model's row or a pick that never posted cannot hold anything.
+#
+# A pick that stays ungraded after the attempt holds the record. It does not post
+# short. The morning passes ask again (post_missed_recap, DAILY_CATCHUP_DAYS), and
+# ops hears once a morning, with the picks named.
+_UNGRADED_SQL = (
+    "SELECT p.sport, p.model_id, p.pick_label, p.game_id, p.game_date\n"
+    "         FROM picks p"
+    + _SETTLED_SQL.split("FROM picks p", 1)[1].replace(
+        "p.result IN ('WIN', 'LOSS', 'PUSH')", "p.result IS NULL"))
+RECORD_HELD_KIND = "record_held"
+
+
+def ungraded_picks(conn, start: str, end: str | None = None) -> list[tuple]:
+    """Picks this record will count that have no result yet."""
+    execute = getattr(conn, "execute", None)
+    if execute is None:
+        return []
+    if end is None or end == start:
+        return execute(_UNGRADED_SQL.format(window="= %s"), (start,)).fetchall()
+    return execute(_UNGRADED_SQL.format(window="BETWEEN %s AND %s"),
+                   (start, end)).fetchall()
+
+
+def _grade_outstanding(rows: list[tuple]) -> None:
+    """Try to grade these picks. Never raises: the re-count that follows decides.
+
+    NHL goes first. A goalie prop grades only on a goalie flagged as the
+    starter, the evening box often has no start flagged for him, and the box is
+    never fetched twice. The stats pull has the flag and overwrites the row:
+    measured 2026-10-30, Jake Oettinger's row was written at 22:46, flagged by
+    the 06:09 pull, and his pick graded on the next settle at 07:24."""
+    dates = sorted({str(r[4]) for r in rows})
+    if any(r[0] == "NHL" for r in rows):
+        try:
+            from data.ingestors.nhl_game_logs import top_up
+            from data.ingestors.nhl_stats_ingestor import LOG_TOPUP_DAYS
+            today = config.today_et()
+            back = (date.fromisoformat(today) - date.fromisoformat(dates[0])).days + 1
+            top_up(max(LOG_TOPUP_DAYS, back), apply=True, today=today)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"NHL logs before grading failed: {exc}")
+    from tracking.paper_tracker import settle_picks
+    for game_date in dates:
+        try:
+            settle_picks(game_date)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"Grading {game_date} before its record failed: {exc}")
+
+
+def _alert_record_held(conn, label: str, rows: list[tuple], now: datetime) -> None:
+    """One ops alert per record per morning, naming the picks. Both surfaces hold
+    the same record on the same pass, and the second finds the first's row."""
+    from tracking.watch_util import post_ops_alert
+
+    lock = f"{RECORD_HELD_KIND}:{label}:{now.date().isoformat()}"
+    if conn.execute(
+        "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
+        (lock, RECORD_HELD_KIND),
+    ).fetchone():
+        return
+    names = "; ".join(str(r[2] or r[1]) for r in rows[:10])
+    more = f" and {len(rows) - 10} more" if len(rows) > 10 else ""
+    if post_ops_alert(
+        "Record held: picks not graded",
+        f"{label}: {len(rows)} pick(s) still have no result after a grading "
+        f"attempt, so the record did not post on Discord or X. It tries again "
+        f"on the next morning pass. {names}{more}",
+    ):
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, %s, %s) "
+            "ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock, RECORD_HELD_KIND, now.isoformat()))
+        conn.commit()
+
+
+def record_held_for_grading(conn, start: str, end: str | None = None, *,
+                            label: str, dry_run: bool = False,
+                            now: datetime | None = None) -> bool:
+    """True when this record may not post, because a pick it counts has no result.
+
+    Grades first. A dry run reports the hold and writes nothing."""
+    rows = ungraded_picks(conn, start, end)
+    if not rows:
+        return False
+    logger.info(f"Record {label}: {len(rows)} ungraded pick(s)")
+    if dry_run:
+        return True
+    conn.commit()         # no read held open across the grading, which has its own
+    _grade_outstanding(rows)
+    rows = ungraded_picks(conn, start, end)
+    if not rows:
+        return False
+    logger.warning(f"Record {label} held: {len(rows)} pick(s) still ungraded")
+    _alert_record_held(conn, label, rows, _as_et(now))
+    return True
 
 
 def _settled_rows(conn, game_date: str) -> list[tuple]:
@@ -2347,7 +2713,7 @@ def _tally(rows: list[tuple]) -> dict:
     was never on the board.
     """
     t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0,
-         "clv_n": 0, "clv_beat": 0, "live": 0}
+         "clv_n": 0, "clv_beat": 0, "clv_push": 0, "live": 0}
     for row in rows:
         _sport, _model_id, result, kelly, price, clv = row[:6]
         # is_live is optional so a caller passing the older 6-tuple still works.
@@ -2361,11 +2727,22 @@ def _tally(rows: list[tuple]) -> dict:
         # skips them at source, so this is belt-and-braces rather than the only
         # guard -- but a figure this easy to misread deserves both.
         # Column 6 is already NULL unless clv_method is standard_v2. Columns
-        # 8 and 9 are the posted-stake units and risked.
+        # 8 and 9 are the posted-stake units and risked, at the pick's own
+        # stake_units (picks.stake_units; NULL is 1u). The shorter fallback
+        # tuple (the three-argument functions not yet migrated) is 1u.
+        # A same-book close that equals the price taken (0% at the stored
+        # grain) is a push. It is not a beat and it is not a loss, so it
+        # stays out of clv_n. The average, where one is taken, still
+        # includes it as 0. In-play rows stay out of all three counts.
         if clv is not None and not is_live:
-            t["clv_n"] += 1
-            if float(clv) > 0:
+            outcome = clv_outcome(clv)
+            if outcome == "push":
+                t["clv_push"] += 1
+            elif outcome == "beat":
+                t["clv_n"] += 1
                 t["clv_beat"] += 1
+            elif outcome == "loss":
+                t["clv_n"] += 1
         if result == "WIN":
             t["w"] += 1
         elif result == "LOSS":
@@ -2395,16 +2772,29 @@ def _tally(rows: list[tuple]) -> dict:
 
 
 def clv_line(t: dict) -> str:
-    """Share of graded bets that beat the closing line, with its DENOMINATOR.
+    """Headline beat rate, with its denominator.
 
-    The denominator is not decoration: CLV is only captured for game-level picks
-    that have a closing DK price, which today is a minority of settled bets
-    (props price in a different table). Publishing a bare percentage would imply
+    Beat rate is beats / (beats + losses). ``clv_n`` is that denominator.
+    A 0% close is a push (``clv_push``) and is not in it. The push count is
+    inside the parentheses when it is not zero: ``50% beat close (1/2, 7 push)``.
+    An all-push slate has no rate to divide, so the line is ``0 measured, N push``.
+    Nothing measured and no pushes → empty, and the caller omits the clause.
+
+    The denominator is not decoration: CLV is only captured where the same
+    book closed on the same line. Publishing a bare percentage would imply
     it covers every bet in the record beside it."""
-    if not t.get("clv_n"):
+    beats = int(t.get("clv_beat") or 0)
+    pushes = int(t.get("clv_push") or 0)
+    decisive = int(t.get("clv_n") or 0)
+    if decisive <= 0 and pushes <= 0:
         return ""
-    pct = t["clv_beat"] / t["clv_n"] * 100
-    return f"{pct:.0f}% beat close ({t['clv_beat']}/{t['clv_n']})"
+    if decisive <= 0:
+        return f"0 measured, {pushes} push"
+    pct = beats / decisive * 100
+    line = f"{pct:.0f}% beat close ({beats}/{decisive}"
+    if pushes:
+        line += f", {pushes} push"
+    return line + ")"
 
 
 def _tally_line(t: dict, with_clv: bool = False) -> str:
@@ -2435,6 +2825,8 @@ def snapshot_rows(game_date: str, published_at: str,
 
     def add(scope, sport, t, settled):
         roi = (t["units"] / t["risked"] * 100) if t["risked"] > 0 else None
+        # clv_n is beats + losses. A 0% close is clv_push and is not in
+        # this rate. No decisive row stores NULL, including an all-push slate.
         clv = (t["clv_beat"] / t["clv_n"] * 100) if t.get("clv_n") else None
         out.append((game_date, scope, sport, t["w"], t["l"], t["p"], settled,
                     round(t["units"], 4),
@@ -2541,8 +2933,7 @@ def _recap_missing_id_recorded(conn, lock_key: str, kind: str) -> bool:
 
 def _alert_recap_missing_id(game_date: str, kind: str, reason: str,
                             lock_key: str, *, recorded: bool) -> None:
-    """One ops alert. The lock key is the row to delete, and a restatement's
-    key includes the published_at of the recap it corrects.
+    """One ops alert. The lock key is the row to delete.
 
     recorded means that row is in push_sent, so later passes do not post.
     An insert that failed leaves nothing to stop the next pass, and the
@@ -2568,44 +2959,34 @@ def _alert_recap_missing_id(game_date: str, kind: str, reason: str,
         logger.error(f"recap no-message-id alert failed ({type(exc).__name__})")
 
 
-def _record_restate_exception(item: dict, exc: BaseException) -> None:
-    """A restatement that raised still leaves a row. The log line alone is
-    gone when the container is."""
-    conn = get_connection()
-    try:
-        key = restate_lock_key("discord_results_restate", item["game_date"],
-                               item["published_at"])
-        _record_delivery_failure(
-            conn, key, "discord_results_restate",
-            f"{type(exc).__name__}: {exc}")
-    except Exception as inner:                            # noqa: BLE001
-        logger.error(f"Discord restate failure was not recorded "
-                     f"({type(inner).__name__})")
-    finally:
-        conn.close()
+def render_all_time_fields(rows: list[tuple], since: str) -> list[dict]:
+    """One overall field, then one per sport. The daily recap, the standalone
+    full-record post, and the Eggz recap all render this."""
+    overall = _tally(rows)
+    by_sport: dict[str, list[tuple]] = {}
+    for r in rows:
+        by_sport.setdefault(r[0], []).append(r)
+    fields = [{
+        "name": f"\u200b\nAll-time  ·  since {since}",
+        "value": f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                 f"{len(rows)} settled",
+        "inline": False,
+    }]
+    for sport, group in sorted(by_sport.items()):
+        fields.append({
+            "name": f"{sport} (all-time)",
+            "value": _tally_line(_tally(group), with_clv=True),
+            "inline": False,
+        })
+    return fields
 
 
 def all_time_fields(conn, through: str) -> tuple[list[dict], dict, int]:
     """The recap's all-time block: one overall field, then one per sport.
     The daily recap and the standalone full-record post both render this."""
     all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, through)
-    all_overall = _tally(all_rows)
-    all_by_sport: dict[str, list[tuple]] = {}
-    for r in all_rows:
-        all_by_sport.setdefault(r[0], []).append(r)
-    fields = [{
-        "name": f"\u200b\nAll-time  ·  since {config.PAPER_TRADING_START}",
-        "value": f"**{_tally_line(all_overall, with_clv=True)}**  ·  "
-                 f"{len(all_rows)} settled",
-        "inline": False,
-    }]
-    for sport, group in sorted(all_by_sport.items()):
-        fields.append({
-            "name": f"{sport} (all-time)",
-            "value": _tally_line(_tally(group), with_clv=True),
-            "inline": False,
-        })
-    return fields, all_overall, len(all_rows)
+    return (render_all_time_fields(all_rows, config.PAPER_TRADING_START),
+            _tally(all_rows), len(all_rows))
 
 
 def all_time_embed(conn, through: str) -> dict:
@@ -2621,19 +3002,11 @@ def all_time_embed(conn, through: str) -> dict:
 
 
 def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
-                           restate=None, now: datetime | None = None) -> int:
+                           now: datetime | None = None) -> int:
     """Post one recap of a settled day: overall record / P&L / ROI plus a
     per-sport breakdown. Ledgered per date so re-running settle can't repost,
-    and refuses any date that is not already over. Returns 1 if posted, else 0.
-
-    `restate` re-posts a date whose published recap a later settlement has
-    invalidated (recaps_needing_restatement): pass the scan's dict, or True
-    to resolve it here. Its own ledger kind, keyed on the published_at of the
-    recap being corrected, so one late batch fires exactly once and cannot
-    collide with the original. The original is left in place: a channel that
-    quietly loses a number people saw is worse than one carrying a visible
-    correction. Renders through the SAME path as a normal recap, so a restated
-    figure cannot drift from what tomorrow's recap would publish.
+    refuses any date that is not already over, and holds until every pick it
+    counts is graded. Returns 1 if posted, else 0.
     """
     clock = _as_et(now)
     if game_date is None:
@@ -2647,7 +3020,7 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
     # `--step settle` (run on every refresh pass by scripts/refresh_pass.sh)
     # settles TODAY, grading games as they finish — recapping that would post
     # a partial record mid-slate and then ledger it, so the real end-of-day
-    # recap could never post. The same window binds a restatement. A pass
+    # recap could never post. A pass
     # after noon returns here, unledgered, and the next morning asks again.
     # The daily 6am pipeline settles yesterday, which is the run this is
     # meant to fire on; when it cannot (nothing counting settled yet, or the
@@ -2659,14 +3032,8 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
 
     conn = get_connection()
     try:
-        if restate is True:
-            found = recaps_needing_restatement(conn, game_date=game_date)
-            restate = found[0] if found else None
-            if restate is None:
-                return 0                  # nothing settled late: no correction
-        kind = "discord_results_restate" if restate else "discord_results"
-        lock_key = (restate_lock_key(kind, game_date, restate["published_at"])
-                    if restate else f"discord_results:{game_date}")
+        kind = "discord_results"
+        lock_key = f"discord_results:{game_date}"
         if conn.execute(
             "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
             (lock_key, kind),
@@ -2676,6 +3043,9 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         # The message may already be in the channel. Another pass would post
         # another copy. One such row stops this recap for good.
         if _recap_missing_id_recorded(conn, lock_key, kind):
+            return 0
+        if record_held_for_grading(conn, game_date, label=game_date,
+                                   dry_run=dry_run, now=clock):
             return 0
 
         rows = _settled_rows(conn, game_date)
@@ -2720,13 +3090,9 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
 
         pretty = datetime.fromisoformat(game_date).strftime("%a %b %d").replace(" 0", " ")
         embed = {
-            "title": (f"\U0001F4CA Results — {pretty}"
-                      + ("  ·  restated" if restate else "")),
-            "description": (
-                (results_restate_note(restate["late"], restate["settled"],
-                                      len(rows)) + "\n\n") if restate else ""
-            ) + f"**{_tally_line(overall, with_clv=True)}**  ·  "
-                f"{len(rows)} settled",
+            "title": f"\U0001F4CA Results — {pretty}",
+            "description": (f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                            f"{len(rows)} settled"),
             "color": color,
             "fields": fields,
         }
@@ -2738,7 +3104,7 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         # _post appends ?wait=true and returns the message id. A 2xx with no
         # id used to be ledgered as a success. The row then
         # blocked every retry, and the message could not be opened. Measured
-        # 2026-10-14: the Oct 13 restatement is that row (null message_id)
+        # 2026-10-14: an Oct 13 post is that row (null message_id)
         # and it is not a message anyone can find. No id is not a delivery.
         # It is also not a miss we can safely repeat: the body may have
         # landed. One error row, one alert, and no later pass posts it.
@@ -2748,8 +3114,7 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
                      and message_id not in ("", _POST_OK_NO_ID) else None)
         if not stored_id:
             reason = _delivery_failure_reason(raw)
-            logger.error(f"Discord(results) {game_date} "
-                         f"{'restate ' if restate else ''}not confirmed ({reason})")
+            logger.error(f"Discord(results) {game_date} not confirmed ({reason})")
             _record_delivery_failure(conn, lock_key, kind, reason)
             if isinstance(raw, str) and raw == _POST_OK_NO_ID:
                 try:
@@ -2777,20 +3142,16 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         # reconnects and raises ConnectionLost) or a failed snapshot statement
         # (PostgreSQL turns the COMMIT into a ROLLBACK and raises nothing)
         # silently took this row with it. With the refresh passes retrying a
-        # missed recap (post_missed_recap) and restating late ones on every
-        # pass, a lost row means the same post again on every pass until
-        # midnight.
+        # missed recap (post_missed_recap), a lost row means the same post again
+        # on every pass until noon.
         conn.commit()
-        # The snapshot is the published record for that date, so a restatement
-        # OVERWRITES it rather than adding a second row: the corrected numbers
-        # are the ones that should reproduce later, and two rows for one date
-        # would leave which-is-authoritative to whoever reads them next.
+        # The snapshot is the published record for that date. A re-post mike has
+        # approved overwrites it rather than adding a second row: two rows for
+        # one date would leave which-is-authoritative to whoever reads them next.
         _store_snapshot(conn, snapshot_rows(
             game_date, published_at, overall, by_sport, all_overall,
             all_by_sport, len(rows), len(all_rows)))
-        logger.success(
-            f"✓ Discord(results): {'restated' if restate else 'posted'} "
-            f"recap for {game_date}")
+        logger.success(f"✓ Discord(results): posted recap for {game_date}")
         return 1
     finally:
         conn.close()
@@ -2918,6 +3279,10 @@ def notify_discord_period(span: str, start: date, end: date,
             "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
             (lock_key, kind),
         ).fetchone():
+            return 0
+        if record_held_for_grading(conn, start.isoformat(), end.isoformat(),
+                                   label=f"{span} of {start.isoformat()}",
+                                   dry_run=dry_run, now=now):
             return 0
         rows = _settled_rows_since(conn, start.isoformat(), end.isoformat())
         if not rows:

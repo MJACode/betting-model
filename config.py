@@ -146,6 +146,36 @@ RECORD_EXCLUSIONS: tuple[dict[str, str], ...] = (
 )
 
 
+# NO RESTATED RECORDS (mike, 2026-10-30: "No restated records of any kind unless
+# I give the approval."). A record that has gone out is not re-posted, corrected
+# or relabelled on any surface. This is the only way to open one: a key here, its
+# value quoting mike's approval in chat with the date. Keyed by game date, or by
+# the lock of a written correction. tests/test_record_never_restated.py pins
+# the entries, so an entry changes that test in the same commit. Nothing else
+# opens this, a job argument and a CLI flag included.
+RECORD_RESTATEMENT_APPROVALS: dict[str, str] = {
+    "2026-11-02": (
+        "mike, 2026-11-03: Corrected recap for the Eggz 2026-11-02 daily "
+        "recap. The all-time line was off by 1 win and 1u."
+    ),
+}
+
+
+class RecordRestatementRefused(RuntimeError):
+    """A path tried to post a record again without mike's approval."""
+
+
+def record_restatement_approved(key: str) -> bool:
+    return str(key) in RECORD_RESTATEMENT_APPROVALS
+
+
+def require_record_restatement_approval(key: str) -> None:
+    if not record_restatement_approved(key):
+        raise RecordRestatementRefused(
+            f"{key} has already been published. A restated record needs mike's "
+            f"approval in config.RECORD_RESTATEMENT_APPROVALS.")
+
+
 def record_exclusion_sql(alias: str = "p") -> str:
     """RECORD_EXCLUSIONS as a SQL predicate, ANDed into a record query.
 
@@ -267,16 +297,53 @@ LINE_CHANGE_NOTIFY_PP: float = float(os.environ.get("LINE_CHANGE_NOTIFY_PP", 4.0
 # connection, no hosting) — one channel per sport. Set only the sports you want:
 #   DISCORD_WEBHOOK_MLB, DISCORD_WEBHOOK_NFL, DISCORD_WEBHOOK_NBA,
 #   DISCORD_WEBHOOK_NHL, DISCORD_WEBHOOK_WNBA, DISCORD_WEBHOOK_UFC,
-#   DISCORD_WEBHOOK_GOLF, DISCORD_WEBHOOK_NCAAF
+#   DISCORD_WEBHOOK_GOLF, DISCORD_WEBHOOK_NCAAF, DISCORD_WEBHOOK_NCAAB,
+#   DISCORD_WEBHOOK_NCAABW
 # A sport with no webhook is SKIPPED and its signals are NOT marked as sent, so
 # adding that channel later still delivers the rest of the day's picks.
 # (Listed literally rather than derived from SPORTS — that registry is defined
 # further down this file, and a webhook name is a stable, user-facing env var.)
-DISCORD_SPORTS: tuple = ("MLB", "NHL", "WNBA", "NBA", "UFC", "GOLF", "NCAAF", "NFL")
+# NCAABW is women's college basketball (2026-11-03): its channel is
+# DISCORD_CHANNEL_NCAABW, same shape as NCAAB, not a separate model registry.
+DISCORD_SPORTS: tuple = (
+    "MLB", "NHL", "WNBA", "NBA", "UFC", "GOLF", "NCAAF", "NFL", "NCAAB", "NCAABW",
+)
 DISCORD_WEBHOOKS: dict = {
     sport: url for sport in DISCORD_SPORTS
     if (url := os.environ.get(f"DISCORD_WEBHOOK_{sport}", "").strip())
 }
+# A sport with no DISCORD_WEBHOOK_<SPORT> may instead name its CHANNEL:
+# DISCORD_CHANNEL_<SPORT> is a channel id (not a secret). The notifier then
+# resolves that channel's webhook at runtime through DISCORD_BOT_TOKEN, reusing
+# one the bot owns or creating it, and keeps the URL in memory only
+# (tracking/discord_notifier._channel_webhook). Added for NCAAB (2026-10-30),
+# whose channel is created by scripts/discord_create_sport_channel.py; a
+# webhook variable, when set, still wins.
+DISCORD_CHANNELS: dict = {
+    sport: cid for sport in DISCORD_SPORTS
+    if (cid := os.environ.get(f"DISCORD_CHANNEL_{sport}", "").strip())
+}
+# In-play channel ids. A sport with no DISCORD_WEBHOOK_LIVE_<SPORT> may set
+# DISCORD_CHANNEL_LIVE_<SPORT> (a channel id, not a secret). The notifier
+# opens that channel's webhook through DISCORD_BOT_TOKEN and names it
+# "<sport>-live" (lowercase) so it is never the pre-game sport webhook.
+# Added for #ncaab-live and #ncaabw-live (2026-11-03). A webhook variable,
+# when set, still wins. The id only resolves on a service that holds the
+# bot token. The MLB, NCAAF and NFL-leader live loops run on pollers, which
+# has no token (measured 2026-11-03); a channel id set there cannot post.
+DISCORD_CHANNELS_LIVE: dict = {
+    sport: cid for sport in DISCORD_SPORTS
+    if (cid := os.environ.get(f"DISCORD_CHANNEL_LIVE_{sport}", "").strip())
+}
+
+
+def discord_sports_wired() -> set:
+    """The sports whose picks have somewhere to post: a webhook, or a channel
+    id the bot token can resolve one for."""
+    wired = set(DISCORD_WEBHOOKS)
+    if os.environ.get("DISCORD_BOT_TOKEN", "").strip():
+        wired |= set(DISCORD_CHANNELS)
+    return wired
 
 # Catch-all for any sport without its own channel. Leave unset to post nothing
 # for unmapped sports rather than dumping every sport into one channel.
@@ -290,7 +357,10 @@ DISCORD_WEBHOOK_DEFAULT: str = os.environ.get("DISCORD_WEBHOOK_DEFAULT", "").str
 # pollers -- the NFL in-play worker runs on one, the MLB and NCAAF loops on the
 # other), never in this file. Resolution order for an in-play signal, in
 # tracking/discord_notifier._live_webhook_for_sport:
-#   the sport's LIVE channel -> the shared LIVE channel -> the sport's channel.
+#   the sport's LIVE webhook -> the sport's LIVE channel id (bot token,
+#   webhook named "<sport>-live") -> the shared LIVE channel -> the sport's
+#   channel. A LIVE channel id this process cannot open does not fall
+#   through: the pick stays unsent, so it is not ledgered against another room.
 DISCORD_WEBHOOKS_LIVE: dict = {
     sport: url for sport in DISCORD_SPORTS
     if (url := os.environ.get(f"DISCORD_WEBHOOK_LIVE_{sport}", "").strip())
@@ -301,6 +371,29 @@ DISCORD_WEBHOOKS_LIVE: dict = {
 # separating from the pre-game picks. Falls back to the sport's channel when
 # unset.
 DISCORD_WEBHOOK_LIVE: str = os.environ.get("DISCORD_WEBHOOK_LIVE", "").strip()
+
+# Sports whose in-play picks post ONLY to their own live channel
+# (DISCORD_WEBHOOK_LIVE_<SPORT> or DISCORD_CHANNEL_LIVE_<SPORT>), never to the
+# shared live channel or the sport's pre-game channel. With neither set the
+# pick stays unsent and unledgered, so it posts once the channel exists.
+# NBA (2026-11-04, operations review): pollers had no NBA live destination, so
+# the fallback would have posted NBA in-play bets to #nba and ledgered them as
+# sent to live, never to re-post. models/nba_live_loop.py refuses to decide
+# while neither variable is set.
+# NCAAB (2026-11-07): the in-play models post to #ncaab-live
+# (DISCORD_CHANNEL_LIVE_NCAAB on pollers) and nowhere else.
+# NCAABW (2026-11-11): the halftime total posts to #ncaabw-live
+# (DISCORD_CHANNEL_LIVE_NCAABW on pollers) and nowhere else.
+DISCORD_LIVE_CHANNEL_REQUIRED: frozenset = frozenset({"NBA", "NCAAB", "NCAABW"})
+
+# Sports whose in-play picks are announced only while the game has no final
+# score in `games` (tracking/publish_filters.live_publishable_sql). Only a
+# sport whose `games` score is written at the final, never during the game,
+# belongs here; NBA's is written by data/ingestors/nba_results_ingestor.
+# NCAAB's is written by data/ingestors/ncaab_espn_ingestor only for a
+# completed event (2026-11-07). NCAABW's is written by
+# data/ingestors/ncaabw_espn_ingestor, the same rule (2026-11-11).
+LIVE_ANNOUNCE_WHILE_IN_PROGRESS: frozenset = frozenset({"NBA", "NCAAB", "NCAABW"})
 
 # Channel for the morning results recap (cross-sport, so it needs its own home).
 # Falls back to DISCORD_WEBHOOK_DEFAULT.
@@ -328,6 +421,15 @@ DISCORD_WEBHOOK_OPS: str = os.environ.get("DISCORD_WEBHOOK_OPS", "").strip()
 DISCORD_WEBHOOK_EGGZ: str = os.environ.get("DISCORD_WEBHOOK_EGGZ", "").strip()
 DISCORD_EGGZ_CHANNEL_ID: str = os.environ.get("DISCORD_EGGZ_CHANNEL_ID", "").strip()
 DISCORD_EGGZ_AUTHOR_ID: str = os.environ.get("DISCORD_EGGZ_AUTHOR_ID", "").strip()
+
+# ParlayMatt's own results, in #parlaymatt-picks. Same rules as Eggz: no
+# fallback, and these recaps never go to #results or to X. Unset channel,
+# author, or webhook: that half no-ops. The bot token is DISCORD_BOT_TOKEN.
+DISCORD_WEBHOOK_PARLAYMATT: str = os.environ.get("DISCORD_WEBHOOK_PARLAYMATT", "").strip()
+DISCORD_PARLAYMATT_CHANNEL_ID: str = os.environ.get(
+    "DISCORD_PARLAYMATT_CHANNEL_ID", "").strip()
+DISCORD_PARLAYMATT_AUTHOR_ID: str = os.environ.get(
+    "DISCORD_PARLAYMATT_AUTHOR_ID", "").strip()
 
 # How stale the newest pipeline_runs row may get before the watchdog calls it a
 # stall, in minutes. The tightest real cadence is the evening refresh at every
@@ -619,7 +721,10 @@ ACTION_THRESHOLDS: dict = {
     # 2026-10-20 (mike: "Only the strongest picks need to be sent, like NHL")
     # one bet a game across both NBA prop models and four a night, strongest
     # first by each bet's EV percentile within its own model
-    # (scripts/nba_props_card.py); the 10-16 no-cap rule is replaced.
+    # (scripts/nba_props_card.py); the 10-16 no-cap rule is replaced. Six a
+    # night from 2026-11-04 (mike: "we can go slightly more than 4 if we need
+    # to"): +183.7 units against +153.6 in tip order, where the units stop
+    # growing (docs/nba_models_2026.md section 14).
     "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
     # The NBA projection model (2026-10-16, mike: "build the projection model",
     # "maximize units won"): minutes x per-minute rate, a negative-binomial width
@@ -628,8 +733,9 @@ ACTION_THRESHOLDS: dict = {
     # 2023-24..2025-26 at the best bettable price: 83,360 bets, +4.12%
     # (docs/nba_models_2026.md section 5). THE CUT IS EV, per market, in the card.
     # Written through scripts/nba_props_card.py from 2026-10-20 (mike): one bet a
-    # game across both NBA prop models and four a night, strongest first by each
-    # bet's EV percentile within its own model (models/nba_prop_rank.py).
+    # game across both NBA prop models and four a night (six from 2026-11-04),
+    # strongest first by each bet's EV percentile within its own model
+    # (models/nba_prop_rank.py).
     "nba_prop_projection":      {"min_prob": 0.0, "min_edge": 0.0},
     # NBA full-game totals, OVER only (2026-10-17, mike: "Find it ... edge like
     # we have with other sports"): models/nba_total_luck.py, written by
@@ -651,6 +757,190 @@ ACTION_THRESHOLDS: dict = {
     # +64.72 units on 390.37 risked, +16.6%, every season positive. prob / edge
     # are 0.0 for the same reason as nba_total_luck's.
     "nba_team_total_luck":      {"min_prob": 0.0, "min_edge": 0.0},
+    # NBA FIRST-HALF total, OVER only (the fourth NBA search's cell C1; mike,
+    # 2026-10-30: "Build the model that passed."): written by the
+    # nba_first_half_total_luck card. THE CUT IS THE FULL-GAME SHOOTING-LUCK GAP
+    # (>= 2.0 points, applied in the card), the offer the best expected value
+    # under the market's fair line, decided about an hour before tip. Settles on
+    # Q1 + Q2 points. Graded walk-forward at bought prices, 2023-24..2025-26
+    # pooled: 595 bets, 333-259-3, +51.49 units on 643.19 risked, +8.0%, interval
+    # +0.4% to +15.4%, every season positive. prob / edge are 0.0 for the same
+    # reason as nba_total_luck's. From 2026-11-04 (mike: "Only select the
+    # highest EV one") the gap must also be BELOW nba_total_luck's 3.0: at 3.0
+    # or more that model bets the same game on the same gap (323 of 323 graded
+    # games), so this bet was its twin (+3.7% on those 323). Kept: gap 2.0-3.0,
+    # 272 bets, +37.73 units, +12.7%. And one bet a game across the three NBA
+    # game-total models (scripts/nba_game_totals_door.py). docs/nba_models_2026.md
+    # section 14.
+    "nba_first_half_total_luck": {"min_prob": 0.0, "min_edge": 0.0},
+    # NBA FIRST-QUARTER spread, the hot team (mike, 2026-11-07: build the first-quarter model, "I WANT THAT
+    # MODEL"): written by the nba_q1_trend card. mike's cover-record trend, the eighth NBA search's "bump it
+    # out to L10" step with his season-average check (docs/nba_models_2026.md section 12). THE CUT IS THE RULE
+    # (last-5 venue nets 3+ against -1 or -2, last-10 k >= 2, the check), applied in the card; the offer the
+    # best EV under the market's fair line. It did NOT pass the house standard (the 200-bet bar): 88 bets,
+    # 58-29-1, +26.33 units, +27.4%, interval +8.85% to +44.79%, every season positive. prob / edge are 0.0
+    # for the same reason as nba_total_luck's.
+    "nba_q1_trend":             {"min_prob": 0.0, "min_edge": 0.0},
+    # NBA FIRST-QUARTER MONEYLINE, the same hot team (mike, 2026-11-07: "Build it anyway"): written by the
+    # nba_q1_trend_ml card. nba_q1_trend's rule exactly, bet on the first-quarter moneyline
+    # (docs/nba_search_q1mt.md, family Q1M). THE CUT IS THE RULE, in the card; the offer the best EV under the
+    # moneyline's no-vig fair price. It did NOT pass the house standard (the 200-bet bar): 87 bets, 46-35-6,
+    # +17.78 units, +25.8%, interval +1.7% to +50.0%. It bets the same team in the same games as nba_q1_trend.
+    "nba_q1_trend_ml":          {"min_prob": 0.0, "min_edge": 0.0},
+    # NCAAB full-game totals (2026-10-30, mike: "Yes to the totals model"):
+    # models/ncaab_total_blend.py, written by scripts/ncaab_total_card.py.
+    # Team ratings refit as of DraftKings' total, a residual on as-of shooting
+    # luck and style rates, blended with DraftKings' total; bet the side whose
+    # P(win | no push) beats DraftKings' implied probability by more than 0.04,
+    # both teams 10+ games. Graded exactly as it runs live (box-score
+    # possessions, no roster input, 2026-10-30): 2021-2025 1,094 bets, +87.48
+    # units, +7.32%, date-resampled 95% interval [2.0, 12.7], 5 of 5 seasons;
+    # 2025-26 349 bets +7.03%. Neighbours (2021-2025): 0.02 +5.18%, 0.03
+    # +5.45%, 0.05 +9.85%, 0.06 +10.45%. 92% overs; prices -120 to +102.
+    # min_edge 0.04 IS the card's cut: model_probability is P(win | no push),
+    # so decision_edge is exactly the edge the card cut on and every publisher
+    # agrees with it. min_prob 0.0: the edge is the cut, and a probability
+    # floor could only hide a pick the card wrote (the smallest written
+    # probability on 2021-2025 is 0.5403).
+    # RAISED 0.04 -> 0.05 (2026-11-07, mike: "Make the two cuts", fewer picks
+    # on a full slate). First-post replay 2021-22..2025-26: 0.04 2,436 bets
+    # +180.71 units (+6.77%); 0.045 1,867 +137.84; 0.05 1,432 +136.06
+    # (+8.68%, [3.51, 13.55]); 0.055 1,076 +129.57; 0.06 806 +111.00. Every
+    # season positive at 0.05 (+25.6 / +16.9 / +17.9 / +29.8 / +45.9), both
+    # halves too. The removed bets were profitable (+44.65 units over five
+    # seasons, about 9 a season): a volume cut, not an edge gain. Prices -120
+    # to +102. It also feeds fewer 2u agreements (models/ncaab_stake.py).
+    "ncaab_total_blend":        {"min_prob": 0.0, "min_edge": 0.05},
+    # NCAAB full-game spreads (2026-11-02, mike: "we need to build 1H and game
+    # lines ML and Spread no matter what"; no games-played wait):
+    # models/ncaab_spread_market.py, written by scripts/ncaab_spread_card.py.
+    # At 15:00 UTC on game day, every bettable book's spread priced against the
+    # books' median line with an empirical final-margin distribution; bet the
+    # single best quote when its P(win | no push) beats its own price's implied
+    # probability by more than 0.03 and 3+ other books quote the game.
+    # Walk-forward replay of the card's own code (the research's 613 bets
+    # matched game by game): 2021-2025 409 bets, +44.60 units, +9.97%,
+    # date-resampled 95% interval [0.8, 18.4], 5 of 5 seasons positive;
+    # 2025-26 133 bets +20.96% (a second look, not a clean hold-out).
+    # Neighbours, research, every game: 0.02 +4.72%, 0.04 +23.32%. Prices
+    # -120 to +114. min_edge 0.03 IS the card's cut: model_probability is
+    # P(win | no push) at the bet book's line and decision_edge that minus the
+    # bet price's implied, so every publisher agrees with the card. min_prob
+    # 0.0: the edge is the cut (the smallest written probability in the
+    # replay is 0.5134).
+    "ncaab_spread_market":      {"min_prob": 0.0, "min_edge": 0.03},
+    # NCAAB full-game moneylines (2026-11-02, mike: "we need to build 1H and
+    # game lines ML and Spread no matter what", "-200 max"; no games-played
+    # wait): models/ncaab_moneyline_own_spread.py, written by
+    # scripts/ncaab_moneyline_card.py. At 15:00 UTC on game day, every
+    # bettable book's moneyline priced off THE SAME BOOK'S spread through the
+    # final-margin distribution; flagged quotes and sides shorter than -200
+    # removed before the pick; bet the single largest edge of the game when it
+    # is above 0.01. Walk-forward replay of the card's own code (the
+    # research's 914 bets matched game by game): 2021-2025 838 bets, +53.11
+    # units, +4.22%, date-resampled 95% interval [-1.22, 9.25] -- BELOW ZERO,
+    # it does not clear the research bar; every season positive; 2025-26 76
+    # bets +14.04 units +15.05%. Chosen AFTER the fact, from the 162 versions
+    # (18 rule variants x 9 cuts) the research regraded at mike's -200 limit
+    # (scratch round4/moneyline/floor200_grid.csv). Neighbours 0.005 +12.00 units, 0.015
+    # +13.57 units (2021-2025). min_edge 0.01 IS the card's cut:
+    # model_probability is P(the bet side wins) from the bet book's own
+    # spread and decision_edge that minus the bet price's implied, so every
+    # publisher agrees with the card. min_prob 0.0: the edge is the cut.
+    "ncaab_moneyline_own_spread": {"min_prob": 0.0, "min_edge": 0.01},
+    # NCAAB full-game moneylines at a book's FIRST moneyline post (2026-11-03,
+    # mike: a new model when a new search beats what is live; "-200 max"):
+    # models/ncaab_moneyline_first_post.py, written every minute by
+    # scripts/ncaab_moneyline_first_post_card.py. The moment a bettable book
+    # first posts its moneyline for a game, that new moneyline is priced off
+    # the SAME book's spread at that moment (the 15:00 UTC model's pricing,
+    # flags and -200 floor before the pick), with 3+ OTHER bettable
+    # moneylines already up; bet when the edge is above 0.015. One bet a game
+    # across both moneyline models, whichever bets first. Replay of the card's
+    # own code on the round-5 half-hourly history (the research's 297 + 56
+    # bets matched game by game): 2021-2025 297 bets, +67.11 units, +15.15%,
+    # date-resampled 95% interval [7.34, 23.37], every season positive;
+    # 2025-26 56 bets +9.33 units +13.87%. Neighbours: 0.02 150 bets +14.78%
+    # [3.74]; 0.01 587 bets +7.27% but 3 of 5 seasons positive, so it fails
+    # the bar. A SECONDARY cell of that search (its pre-registered moneyline
+    # cell was the first moment four books stand), and the history saw the
+    # board only every 30 minutes: at least 69% of the 2021-2025 bet quotes,
+    # and only 34% in 2025-26, are known to have stood five minutes. min_edge
+    # 0.015 IS the card's cut (decision_edge = P(side wins) minus the bet
+    # price's implied). min_prob 0.0: the edge is the cut.
+    "ncaab_moneyline_first_post": {"min_prob": 0.0, "min_edge": 0.015},
+    # NCAAB FIRST-HALF spread (2026-11-02, mike: "we need to build 1H and game
+    # lines ML and Spread no matter what"; no games-played wait):
+    # models/ncaab_first_half_spread.py, written by
+    # scripts/ncaab_first_half_spread_card.py. About ten minutes before tip:
+    # mu = a + b x the bettable books' full-game consensus + a shrunk team
+    # first-half tendency; every bettable book's first-half spread priced
+    # through an empirical first-half-margin table; bet the single best quote
+    # when P(cover | no push) minus its implied probability is above 0.02.
+    # Graded on every game at the bought tip-minus-10 quotes (the research's
+    # round 4, family A): 2023-24..2025-26 1,253 bets, +68.07 units, +4.91%,
+    # date-resampled 95% interval [-0.30, +10.63] -- IT DID NOT CLEAR THE
+    # RESEARCH BAR (the lower bound is below zero). 2023-24 +6.06%, 2024-25
+    # +2.80%, 2025-26 +7.19% on 243 bets. Neighbours: 0.01 +81.36 units, 0.03
+    # +35.65 units. Without the 10 best dates +16.75 units. Prices -140 to
+    # +125. min_edge 0.02 IS the card's cut (decision_edge is that edge);
+    # min_prob 0.0 because the edge is the cut.
+    # RAISED 0.02 -> 0.025 (2026-11-07, mike: "Make the two cuts"). Replay
+    # 2023-24..2025-26: 0.02 1,253 bets +68.07 units (+4.91%); 0.0225 1,035
+    # +44.93; 0.025 845 +57.43 (+6.13%, [0.04, 12.29]); 0.0275 705 +49.71;
+    # 0.03 575 +35.65. Every season positive at 0.025 (+31.0 / +6.9 / +19.6).
+    # The grid is bumpy (0.0225 dips), so read 0.025 as a volume cut whose
+    # removed bets made +10.64 units, not as a better cut. Prices -140 to +125.
+    "ncaab_first_half_spread":  {"min_prob": 0.0, "min_edge": 0.025},
+    # NCAAB FIRST-HALF total (2026-11-03, mike: "we need to build 1H ... no
+    # matter what", "I want it all done and go live now"; no games-played
+    # wait): models/ncaab_first_half_total.py, written by
+    # scripts/ncaab_first_half_total_card.py. At the fetch an hour before tip:
+    # mu = a + b x the bettable books' full-game consensus total + the two
+    # teams' shrunk first-half scoring tendencies; every bettable book's
+    # first-half total priced through an empirical first-half-total table; bet
+    # the single best quote (sides shorter than -200 set aside first) when
+    # P(win | no push) minus its implied probability is above 0.02. Graded on
+    # every game at the bought tip-minus-60 quotes (the research's round 5,
+    # family A_to; the same model is positive pooled at all four fetch times
+    # graded and every cut 0.00-0.04, and this cell in all three seasons):
+    # 2023-24..2025-26 2,529 bets,
+    # +125.78 units, +4.40%, date-resampled 95% interval [0.57, 8.12]; with
+    # the -200 floor 2,527 bets, +123.78 units, [0.45, 8.05]. 2023-24 +67.27,
+    # 2024-25 +41.03, 2025-26 +15.48 units (+1.65%, the floor on). Neighbours:
+    # 0.01 +129.76 units, 0.03 +76.86 units. Without the 10 best dates +48.11
+    # units. 78% unders. 14 of the 1,036 cells cleared the interval test where
+    # about 26 would by chance. min_edge IS the card's cut (decision_edge is
+    # that edge); min_prob 0.0 because the edge is the cut.
+    # RAISED 0.02 -> 0.025 (2026-11-06, mike: fewer picks, units and closing
+    # value the only goal). The same replay with the -200 floor, by cut:
+    # 0.02 2,527 bets +123.78 units (+4.34%); 0.0215 2,297 +127.16; 0.0235
+    # 2,051 +134.27; 0.025 1,887 +127.31 (+5.98%, [1.51, 10.33]); 0.0265
+    # 1,711 +114.09; 0.03 1,369 +76.86 (+4.98%, [-0.20, 10.08]). 0.025 sits
+    # in the 0.0215-0.0265 plateau: a quarter fewer bets than 0.02 for +3.5
+    # units, positive every season (2023-24 664 +54.28, 2024-25 620 +44.03,
+    # 2025-26 603 +29.01) and in both halves of the seasons (Nov-Dec 890
+    # +18.04, Jan on 997 +109.27). Prices -160 to +115.
+    "ncaab_first_half_total":   {"min_prob": 0.0, "min_edge": 0.025},
+    # NCAABW (women's college basketball) full-game totals (2026-11-09, mike:
+    # "Take everything we learned about building the NCAAB models and now build
+    # models for the womens NCAABW"): models/ncaabw_total_blend.py, written by
+    # scripts/ncaabw_total_card.py. The men's totals method on the women's
+    # games: ratings refit as of DraftKings' first posted total, a residual on
+    # as-of shooting luck and style rates, blended with that total; bet the
+    # side whose P(win | no push) beats DraftKings' implied probability by more
+    # than 0.05, only while the first post still stands. The cut is the
+    # women's own (docs/sports/ncaabw.md "Research"), not the men's copied.
+    # Two priced seasons exist (the feed's history starts 2024-11-12).
+    # 2025-26 on numbers fitted on 2024-25 only: 402 bets, 225-177, +29.96
+    # units, +6.77%, date-resampled 95% interval [-2.2, +15.1]. Each season on
+    # the other season's blend, pooled: 0.02 785 bets +6.72%; 0.03 644 +9.64%;
+    # 0.04 538 +11.02%; 0.05 453 bets, 264-189, +55.76 units, +11.18% [+2.7,
+    # +19.3]; 0.06 378 +12.03%; 0.08 286 +12.71%. Every cut positive. On the
+    # blend it runs on (both seasons, in sample): 374 bets, +75.73 units,
+    # 21.6% of priced games, prices -115 to -105. November was flat in both
+    # seasons; December on carried it. min_prob 0.0: the edge is the cut.
+    "ncaabw_total_blend":       {"min_prob": 0.0, "min_edge": 0.05},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -685,7 +975,12 @@ ACTION_THRESHOLDS: dict = {
     # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
     "ncaaf_live_win_prob": {"min_prob": 0.50, "min_edge": 0.16},  # 2026-09-19 mike: RE-SWEPT ON THE HONEST NUMBER WITH THE 0.30 FLOOR ON (scripts/live_honest_cut, the bought 2025 replay, fresh quotes, promoted map a=1 b=-0.270). Under the floor the old 0.65/0.10 takes ZERO bets: EV 0.30 at a favourite's price needs a calibrated ~0.70+ that the map no longer grants. What clears is the other end -- calibrated >= 0.50 at +160 or longer, edge >= 0.16: 43 bets 20-23 +38.6%, halves +26.4%/+50.2%, 5 positive neighbours; the widest surviving cell 0.50/0.02 is 73 bets +24.1% (+31.1%/+17.4%). A different population from the favourites the 2026 forward record was built on (25 bets, claimed 0.75). Previously (2026-09-12): RE-SWEPT ON THE CORRECTED SCALE. Stage 3 (ncaaf_live/serve.correct_for_pregame) changed what this number means, so the 0.62/0.68 cuts swept on raw probabilities were the wrong number on the wrong scale -- 0.68 took 2 bets on the held-out half and lost both. On corrected probabilities 0.65 x EV 0.26 is 33 bets +25.7%, halves +23.8%/+34.2%, and its four neighbours are ALL positive in both halves: a plateau, where the raw scale only ever had islands
     "ncaaf_live_total":    {"min_prob": 0.73, "min_edge": 0.12},  # 2026-09-13 mike ("only the best of the best"): 0.72 x EV 0.22 -> 0.73 x EV 0.24, shipped WITH the FBS-only gate in ncaaf_live/serve.price. 2025 replay, first signal per game, FBS-vs-FBS: 39 bets +2.9% -> 17 bets +21.3% (0.097 -> 0.042 per game). Of those 17, 14 are first-half (+21.5%) and 3 second-half (+20.0%): the replay says NOT WORSE, it does not prove better, and there is no production evidence of profit yet. 0.735 flips negative on one second-half bet. A stricter cut, not a pause and not a cap
-    # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
+    # 0.65 sits just under P(over) at the +/-8.0 gate, the weaker of the two
+    # arms (--fit-totals prints both): 0.6503 on the single fit of
+    # 2026-08-25 and 0.6554 on the eleven-seed fit of 2026-11-10 (the under
+    # arm is 0.7098 on both). So the floor admits both arms exactly at the
+    # gate on either artifact and did not move with the refit
+    # (tests/test_ncaaf_totals_seed_fit.py pins it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
     # residuals are not centred, so a prob floor ALONE would imply an
     # asymmetric gate (over at +8, under at ~-5) and ship a looser rule on the
@@ -695,6 +990,29 @@ ACTION_THRESHOLDS: dict = {
     # moneyline also carries a -250 MODEL_MIN_ODDS floor — most of a CFB slate
     # is priced -1000 or worse and is not bettable at any edge.
     "ncaaf_moneyline":  {"min_prob": 0.62, "min_edge": 0.08},
+    # NCAAF full-game moneylines against the books' consensus spread
+    # (2026-11-10, mike, asked after the market audit whether he wanted a
+    # moneyline model live although nothing measured clears: "ML model yes"):
+    # models/ncaaf_moneyline_market.py, written by
+    # scripts/ncaaf_moneyline_card.py. At 14:00 UTC on the game's Eastern
+    # date, the best deciding-book moneyline against the win chance the ten
+    # books' median spread implies through the final-margin distribution;
+    # sides shorter than -200 are removed before the pick; the largest edge
+    # of the game is bet when above 0.02 with 3+ other books in the consensus.
+    # The classifier above (ncaaf_moneyline) stays paused and is a different
+    # model. The build's replay of the card's own path matched all 311
+    # research bets (scripts/ncaaf_moneyline_market_build.py). 2023-2025:
+    # 311 bets, 122-189, +14.70 units, +7.8%, 95% interval -4.7% to +21.6%;
+    # by season -2.8, +16.7, +0.8 units. IT DID NOT CLEAR: the interval
+    # reaches below zero, the profit is one season, 294 of the 311 are road
+    # teams (the fitted home/away offset at work), and without its 10 best
+    # dates it is -9.3 units. Neighbour cuts: 0.01 601 bets +13.78 units,
+    # 0.03 136 bets +10.27, 0.04 43 bets +5.45. Prices laid on the replay:
+    # +110 to +430 (median +146), no favourites. docs/sports/ncaaf.md.
+    # model_probability is the bet side's fair chance and decision_edge that
+    # minus the bet price's implied, so every publisher agrees with the card.
+    # min_prob 0.0: the edge is the cut.
+    "ncaaf_moneyline_market": {"min_prob": 0.0, "min_edge": 0.02},
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -785,6 +1103,54 @@ ACTION_THRESHOLDS: dict = {
     # min_prob 0.0: the rule has no probability floor; the edge is the cut.
     # Go-live gate standing: 0 settled of 50.
     "nfl_live_leader_ml": {"min_prob": 0.0, "min_edge": 0.02},
+    # NBA in-play game-state model, the quarters 1-2 spread (models/nba_live_ig2.py,
+    # run by models/nba_live_loop.py; LIVE 2026-11-04, mike). The cut is EV >=
+    # 0.05 at the best of the eight deciding books, -200 floor, at the first
+    # fetch in the phase holding a fresh quote, which is MODEL_OWN_EV_FLOOR
+    # below; neither number here can bind beyond it (an EV >= 0.05 bet has a
+    # positive edge). Graded on the loop's own fetch times (the archive's
+    # hourly purchases, 2021-22 .. 2025-26, the shipped rule, section 9's house
+    # standard): 1,348 bets +96.6u +6.4% (95% +1.4..+11.3), 5 of 5 seasons,
+    # every bar passed. NOT HERE, held out by the same gate (mike, 2026-11-04:
+    # the backtest is the gate): the quarter-3 moneyline (503 bets +8.3%, 95%
+    # -2.7..+19.3, fails the interval and the bands), the quarter-3 spread (813
+    # bets +4.5%, -2.0..+11.0, fails the interval, the bands and the placebo)
+    # and the quarter-4 spread (failed the placebo bar). Their code stays
+    # (models/nba_live_ig2.HELD_OUT_RULES); each is added the day it passes.
+    # Go-live gate standing: 0 settled of 50.
+    "nba_live_spread_q12": {"min_prob": 0.0, "min_edge": 0.0},
+    # NCAAB in play (models/ncaab_live_loop.py, LIVE 2026-11-07, mike: "3-5 best
+    # per night"). Three rules, each passing the house standard at every cut
+    # from its floor up on the half-hour purchase, 2021-22 .. 2025-26. The cut
+    # is EV and set per NIGHT (models/ncaab_live_ig.night_cut: the EV the
+    # graded decisions exceeded 4 times per expected decision on a slate that
+    # size, never under the rule's floor), at most 5 bets a night. Graded,
+    # walk-forward, 2022-23 .. 2025-26: 2,533 bets on 588 nights, +290.4u,
+    # +10.1% (95% +6.4..+13.8), every season positive. NOT HERE, held out by the
+    # same gate: the first-half total and the second-half moneyline (fail the
+    # bands); the first-half moneyline passes and is held out for the
+    # stale-soft-book signature. Go-live gate standing: 0 settled of 50.
+    "ncaab_live_spread_h1": {"min_prob": 0.0, "min_edge": 0.0},
+    "ncaab_live_spread_h2": {"min_prob": 0.0, "min_edge": 0.0},
+    "ncaab_live_total_h2":  {"min_prob": 0.0, "min_edge": 0.0},
+    # NCAABW halftime total (models/ncaabw_live_loop.py, 2026-11-11, mike: "why
+    # no live or ML / spread models for NCAABW?"). The full-game total, bet
+    # during the halftime break: a game-state model (the pre-game total and
+    # the first half's surprise) against each bettable book's in-play total at
+    # the first five-minute read of the break holding an eligible quote; bet
+    # at EV >= 0.05 (the artifact's cut; MODEL_OWN_EV_FLOOR), one decision a
+    # game. Two priced seasons exist. 2025-26 with a model fitted on 2024-25:
+    # 669 bets, 398-271, +89.96 units, +11.84% (95% +5.1..+18.1). 2024-25 with
+    # a model fitted on 2025-26 (a second look, not walk-forward): 298 bets,
+    # 178-119, +42.10 units, +12.35% (+0.6..+23.7). Every cut from 0.02 to
+    # 0.12 is positive in both. Blind overs and unders at the same reads lose,
+    # the bets turned round lose 24.6% and 25.3%, another game's decision
+    # loses 4.1% and 7.0%. November-December and January on are both positive
+    # in both seasons. The halftime SPREAD is not here (398 bets, +6.35%,
+    # interval through zero), nor a pre-game spread or moneyline (nothing
+    # clears). docs/sports/ncaabw.md, "In play". Go-live gate standing: 0
+    # settled of 50.
+    "ncaabw_live_total_ht": {"min_prob": 0.0, "min_edge": 0.0},
     # MLB run-line market-relative rule (models/mlb_game_market). Replaces
     # the paused mlb_runline *publish path* — mlb_runline stays paused
     # until mike unpauses it. 1.8pp is the 2026 BETTABLE-book plateau
@@ -1679,6 +2045,21 @@ MAX_KELLY_FRACTION: float   = float(os.environ.get("MAX_KELLY_FRACTION",   0.05)
 # because quarter-Kelly always exceeded the 5% cap (picks were all flat-bet at 5%).
 # Tenth-Kelly keeps bets at 2-4% of bankroll, letting edge size drive differentiation.
 KELLY_MULTIPLIER: float     = float(os.environ.get("KELLY_MULTIPLIER",      0.10))
+# NCAAB agreement sizing (2026-11-06, mike: "I want a pick that has a higher
+# confidence and higher long term win to be higher units, you can slice this
+# from back testing"). A NCAAB BET on the same game and side as an EARLIER
+# NCAAB BET (totals: the same Over/Under, full game or first half; sides: the
+# same team across the spread, both moneylines and the first-half spread) is
+# written with picks.stake_units = this many units TO WIN, risk still capped at
+# 3u (models/ncaab_stake.py). On the six models' replays, 2023-24..2025-26:
+# 233 such bets, +21.3% flat (95% interval 10.7 to 31.8), 67.8% won against a
+# 55.5% break-even, positive in all five seasons and both halves; every other
+# bet +6.4%. Graded walk-forward on 2025-26 at the same bets: 2u returns 6.90%
+# per unit risked against 6.18% flat (+32.2 units at the same risk), 3u 7.30%
+# (+50.4). 2u because the interval's low end (10.7%) is still 1.7x the base
+# return; 3u leans on the point estimate. 1 turns it off. Every other model
+# and every other NCAAB bet stays flat 1u (stake_units NULL).
+NCAAB_AGREEMENT_STAKE_UNITS: float = float(os.environ.get("NCAAB_AGREEMENT_STAKE_UNITS", 2.0))
 # Edges above this magnitude are almost certainly model noise — filter them out
 MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20))
 
@@ -1884,6 +2265,13 @@ MODEL_MIN_ODDS: dict = {
     # slate is priced -1000 or worse where no realistic model edge survives
     # the juice. -250 keeps the model to games that are actually contested.
     "ncaaf_moneyline":           -250,
+    # NCAAF moneylines against the consensus spread (2026-11-10, mike). The
+    # card removes every side shorter than -200 BEFORE it picks
+    # (models/ncaaf_moneyline_market step 5, the research's rule), so this is
+    # the second guard, pinned so a Railway DEFAULT_MIN_ODDS override cannot
+    # move it. It laid +110 to +430 on its 311 replayed bets (median +146);
+    # the rule itself has no upper price limit.
+    "ncaaf_moneyline_market":    -200,
     # NHL totals rule (2026-10-08, mike): -200 is the price floor its evidence
     # was graded at (scripts/nhl_totals_lab.py, `price >= -200`). Pinned here
     # so a Railway DEFAULT_MIN_ODDS override cannot move it off its evidence.
@@ -1904,6 +2292,51 @@ MODEL_MIN_ODDS: dict = {
     # (median -112), so -200 admits prices it was never graded at. Pinned so a
     # Railway DEFAULT_MIN_ODDS override cannot move it.
     "nba_team_total_luck":       -200,
+    # NBA first-half overs: it laid -130 to +114 on its 595 graded bets (median
+    # -110), so -200 admits prices it was never graded at. Pinned so a Railway
+    # DEFAULT_MIN_ODDS override cannot move it.
+    "nba_first_half_total_luck": -200,
+    # NBA first-quarter spreads, the hot team: it laid -125 to +118 on its 88 graded bets (median -110), so -200 admits prices
+    # it was never graded at. Pinned so a Railway DEFAULT_MIN_ODDS override cannot move it.
+    "nba_q1_trend":              -200,
+    # NBA first-quarter moneylines, the hot team: it laid -192 to +360 on its 87 graded bets (median +130), so -200
+    # is the floor it was graded at. Pinned so a Railway DEFAULT_MIN_ODDS override cannot move it.
+    "nba_q1_trend_ml":           -200,
+    # NCAAB totals (2026-10-30, mike): it laid -120 to +102 on its 1,094
+    # graded 2021-2025 bets (median -110). Pinned so a Railway DEFAULT_MIN_ODDS
+    # override cannot move it.
+    "ncaab_total_blend":         -200,
+    # NCAAB spreads (2026-11-02, mike): it laid -120 to +114 on its 613
+    # replayed bets (median -110). Pinned so a Railway DEFAULT_MIN_ODDS
+    # override cannot move it.
+    "ncaab_spread_market":       -200,
+    # NCAAB moneylines (2026-11-02, mike: "-200 max"). The card removes every
+    # side shorter than -200 BEFORE it picks (models/ncaab_moneyline_own_spread
+    # step 4), so this is the second guard, pinned so a Railway
+    # DEFAULT_MIN_ODDS override cannot move it. It laid -200 to +1000 on its
+    # 914 replayed bets (median -159).
+    "ncaab_moneyline_own_spread": -200,
+    # NCAAB moneylines at a book's first post (2026-11-03, mike: "-200 max").
+    # The card removes every side shorter than -200 BEFORE it picks
+    # (models/ncaab_moneyline_first_post.py), so this is the second guard,
+    # pinned so a Railway DEFAULT_MIN_ODDS override cannot move it. It laid
+    # -200 to +400 on its 353 replayed bets (median -161).
+    "ncaab_moneyline_first_post": -200,
+    # NCAAB first-half spread (2026-11-02, mike): it laid -140 to +125 on its
+    # 1,253 graded bets, so -200 admits prices it was never graded at. Pinned
+    # so a Railway DEFAULT_MIN_ODDS override cannot move it.
+    "ncaab_first_half_spread":   -200,
+    # NCAAB first-half total (2026-11-03, mike): the research's cell laid -240
+    # to +155; the card sets a side shorter than -200 aside BEFORE it picks
+    # the best book (models/ncaab_first_half_total.best_offer), which made
+    # 2,527 bets of the 2,529 (prices -160 to +155), so this is the second
+    # guard. Pinned so a Railway DEFAULT_MIN_ODDS override cannot move it.
+    "ncaab_first_half_total":    -200,
+    # NCAABW totals (2026-11-09, mike): it laid -115 to -105 on its 374
+    # replayed bets, and DraftKings' women's totals were priced -120 to -102
+    # on every pre-game row of 2024-25 to 2026-27 to date. Pinned so a Railway
+    # DEFAULT_MIN_ODDS override cannot move it.
+    "ncaabw_total_blend":        -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -1913,6 +2346,23 @@ MODEL_MIN_ODDS: dict = {
     # longer. A bet shorter than the floor is refused and the game is tried
     # again at its next slot (gameday.platform_gates). docs/thresholds.md.
     "nfl_live_leader_ml":        -140,
+    # The NBA in-play quarters 1-2 spread (models/nba_live_ig2.py) was graded
+    # at the -200 floor (docs/nba_models_2026.md 7.1 and 7.3). Pinned so a
+    # Railway DEFAULT_MIN_ODDS override cannot move it off it. Prices its bets
+    # laid on the loop's hourly fetch times (min / median / max): -160 / -114 /
+    # +114.
+    "nba_live_spread_q12":       -200,
+    # The NCAAB in-play rules (models/ncaab_live_ig.py) were graded at the -200
+    # floor; pinned so a DEFAULT_MIN_ODDS override cannot move them off it.
+    # Prices the night's selection laid (min / median / max): -145 / -115 / +185.
+    "ncaab_live_spread_h1":      -200,
+    "ncaab_live_spread_h2":      -200,
+    "ncaab_live_total_h2":       -200,
+    # NCAABW halftime total (2026-11-11, mike): the rule takes no price beyond
+    # -250 or +250, and its 967 replayed bets were laid at -148 to +200
+    # (median -115; none shorter than -150, 8 at plus money). -200 has never
+    # bound; pinned so a DEFAULT_MIN_ODDS override cannot move it.
+    "ncaabw_live_total_ht":      -200,
 }
 
 
@@ -2082,6 +2532,26 @@ MODEL_OWN_EV_FLOOR: dict = {
     # (+16.94u; a -500 favourite needs an edge of 0.167 to clear it) -- a
     # population nobody graded. Smallest EV among the 167: 0.0205.
     "nfl_live_leader_ml":        0.02,
+    # The NBA in-play quarters 1-2 spread (2026-11-04, mike). 0.05 IS its
+    # graded cut (docs/nba_models_2026.md 7.3: EV >= 0.05 at the deciding
+    # price, a push returning the stake). models/nba_live_ig2.rule_cut reads
+    # this number for the rule itself, and the row's probability is P(win | no
+    # push), whose config.expected_value is never below the rule's EV, so this
+    # gate cannot refuse a bet the rule took. No record yet: re-read at 50.
+    "nba_live_spread_q12":       0.05,
+    # The NCAAB in-play rules (2026-11-07, mike): each rule's FLOOR, its lowest
+    # cut that passed the house standard (models/ncaab_live_ig.RULES). The
+    # night's cut is never under it, and the row's probability is P(win | no
+    # push), whose config.expected_value is never below the rule's EV, so this
+    # gate cannot refuse a bet the rule took. No record yet: re-read at 50.
+    "ncaab_live_spread_h1":      0.02,
+    "ncaab_live_spread_h2":      0.05,
+    "ncaab_live_total_h2":       0.02,
+    # The NCAABW halftime total (2026-11-11, mike). 0.05 IS its graded cut
+    # (the artifact's `cut`, read by models/ncaabw_live_loop.py for the rule
+    # itself); the row's probability is P(win | no push), the number that EV
+    # was graded on. No record yet: re-read at 50.
+    "ncaabw_live_total_ht":      0.05,
     "nfl_prop_pass_completions": 0.20,   # n=1, min +0.329, never bet under 0.20
     "nfl_prop_rec_yards":        0.20,   # n=3, min +0.302, never bet under 0.20
     "nfl_prop_receptions":       0.20,   # n=3, min +0.290, never bet under 0.20
@@ -2158,6 +2628,94 @@ MODEL_OWN_EV_FLOOR: dict = {
     # uplift (+0.1022), it removes one: NBA_2025-01-24_POR_CHA, FanDuel under
     # 109.5 at -118, -0.113. The next smallest is +0.053, the median +0.169.
     "nba_team_total_luck":      0.00,
+    # NBA first-half overs. Same reasoning: the cut is the gap, and this floor is
+    # applied in the card to p_model x decimal - 1 (a push scored as a loss),
+    # p_model being the fair probability plus the walk-forward uplift. On its 595
+    # graded bets, at the 2026-27 uplift (+0.0572), it removes two, both wins:
+    # NBA_2024-11-18_IND_TOR, Hard Rock over 118.5 at -110, -0.051, and
+    # NBA_2025-01-02_BOS_MIN, DraftKings over 109 at -110, -0.030. That takes the
+    # graded record to 593 bets, +49.49 units, +7.7%. The next smallest is +0.005,
+    # the median +0.074.
+    "nba_first_half_total_luck": 0.00,
+    # NBA first-quarter spreads (mike, 2026-11-07). The cut is the rule, in the card; its probability is the
+    # market-fair P(win) plus the cell's uplift (+0.1526 for 2026-27, fitted on all 88 graded bets), so every
+    # graded bet sits far above 0.00 and this floor removes none of them.
+    "nba_q1_trend": 0.00,
+    # NBA first-quarter moneylines (mike, 2026-11-07). The cut is the rule, in the card; its probability is the
+    # market-fair P(win | not level) plus the cell's uplift (+0.1416 for 2026-27, fitted on the 81 decided graded
+    # bets). Swept on its own 87: every floor from 0.00 to 0.15 keeps all 87 (the lowest EV is +0.182), 0.20 drops
+    # 7. So 0.00, as its spread sibling, removes none of them.
+    "nba_q1_trend_ml": 0.00,
+    # NCAAB totals (2026-10-30, mike). The cut is the edge (0.04, in
+    # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
+    # that cut admitted on 2021-2025: P(win | no push) x decimal - 1 = +0.0743
+    # (1,094 bets; median +0.0996). An edge above 0.04 at -120 or longer is EV
+    # above 0.073, so 0.07 never removes a bet the evidence took. Re-measured
+    # 2026-11-03 at DraftKings' first posted total (mike): +0.0734 over the
+    # replay's 2,436 bets of 2022-2026, so 0.07 stands.
+    # Unchanged at the 0.05 cut (2026-11-07): an edge above 0.05 at -200 or
+    # longer is EV above 0.075, so 0.07 still removes nothing the cut takes;
+    # the replay's smallest EV at 0.05 is +0.0936.
+    "ncaab_total_blend":        0.07,
+    # NCAAB spreads (2026-11-02, mike). The cut is the edge (0.03, in
+    # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
+    # that cut admitted in the replay of 2021-2026 with 3+ other books:
+    # P(win | no push) x decimal - 1 = +0.0563 (542 bets; median +0.0697).
+    # EV is edge x decimal, so an edge above 0.03 clears 0.05 at any price
+    # shorter than -150; it laid -120 at the shortest.
+    "ncaab_spread_market":      0.05,
+    # NCAAB moneylines (2026-11-02, mike). The cut is the edge (0.01, in
+    # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
+    # that cut admitted in the replay of 2021-2026: P(side wins) x decimal - 1
+    # = +0.0156 (914 bets; median +0.027). EV is edge x decimal, and the
+    # shortest price it may lay is -200 (decimal 1.5), so an edge above 0.01
+    # is EV above 0.015 at every price it can bet: this floor never removes a
+    # bet the cut takes.
+    "ncaab_moneyline_own_spread": 0.015,
+    # NCAAB moneylines at a book's first post (2026-11-03, mike). The cut is
+    # the edge (0.015, in MODEL_EDGE_THRESHOLDS), so this floor sits just
+    # under the smallest EV that cut admitted in the replay of 2021-2026:
+    # P(side wins) x decimal - 1 = +0.0226 (353 bets; median +0.0359). EV is
+    # edge x decimal and the shortest price it may lay is -200 (decimal 1.5),
+    # so an edge above 0.015 is EV above 0.0225 at every price it can bet:
+    # this floor never removes a bet the cut takes.
+    "ncaab_moneyline_first_post": 0.022,
+    # NCAAB first-half spread (2026-11-02, mike). The cut is the edge (0.02, in
+    # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
+    # that cut admitted in the replay of 2023-24..2025-26: P(cover | no push) x
+    # decimal - 1 = +0.0346 (1,253 bets; median +0.0552). An edge above 0.02
+    # at -140 or longer is EV above 0.034, so 0.03 never removes a bet the
+    # evidence took.
+    # Unchanged at the 0.025 cut (2026-11-07): an edge above 0.025 at -200 or
+    # longer is EV above 0.0375, so 0.03 still removes nothing the cut takes;
+    # the replay's smallest EV at 0.025 is +0.0436.
+    "ncaab_first_half_spread":  0.03,
+    # NCAAB first-half total (2026-11-03, mike; cut raised 2026-11-06, mike).
+    # The cut is the edge (0.025, in MODEL_EDGE_THRESHOLDS), so this floor
+    # sits just under the smallest EV that cut admitted in the replay of
+    # 2023-24..2025-26 with the -200 floor: P(win | no push) x decimal - 1 =
+    # +0.0426 (1,887 bets; median +0.068). EV is edge x decimal and the
+    # shortest price it may lay is -200 (decimal 1.5), so an edge above 0.025
+    # is EV above 0.0375 at every price it can bet: at 0.037 this floor never
+    # removes a bet the cut takes (0.042 would, at -150 and shorter). Was 0.03
+    # at the 0.02 cut.
+    "ncaab_first_half_total":   0.037,
+    # NCAABW totals (2026-11-09, mike). The cut is the edge (0.05, in
+    # MODEL_EDGE_THRESHOLDS), so this floor sits just under what that cut can
+    # admit: EV is edge x decimal odds, so an edge above 0.05 at -200 or
+    # longer is EV above 0.075. The smallest EV on its replayed bets is
+    # +0.0956 (374 bets, the blend it runs on; median +0.137). 0.07 never
+    # removes a bet the cut takes.
+    "ncaabw_total_blend":       0.07,
+    # NCAAF moneylines against the consensus spread (2026-11-10, mike). The
+    # cut is the edge (0.02, in MODEL_EDGE_THRESHOLDS), so this floor sits
+    # just under the smallest EV that cut admitted in the replay of
+    # 2023-2025: fair chance x decimal - 1 = +0.0437 (311 bets; median
+    # +0.0816). EV is edge x decimal, so an edge above 0.02 at -200 or longer
+    # is EV above 0.03: at 0.04 this floor can remove a bet the cut takes at
+    # a price shorter than +100, and the replay laid none (its shortest price
+    # was +110).
+    "ncaaf_moneyline_market":   0.04,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2273,6 +2831,22 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # has no graded bet to fit a map on: the pooled offset borrowed from other
     # models would move every probability and with it the population.
     "nfl_live_leader_ml",
+    # 2026-11-04 (mike). The NBA in-play quarters 1-2 spread's number is
+    # IG-2's own game-state probability (models/nba_live_ig2.py), the one its
+    # EV >= 0.05 cut was graded on. No record, so a promoted map would be the
+    # pooled offset borrowed from other models.
+    "nba_live_spread_q12",
+    # 2026-11-07 (mike). The NCAAB in-play rules' number is their game-state
+    # model's own probability (models/ncaab_live_ig.py), the one their EV cuts
+    # were graded on. No record, so a promoted map would be borrowed.
+    "ncaab_live_spread_h1",
+    "ncaab_live_spread_h2",
+    "ncaab_live_total_h2",
+    # 2026-11-11 (mike). The NCAABW halftime total's number is its game-state
+    # model's own P(win | no push) (models/ncaabw_live_ht.py), the one its EV
+    # cut was graded on, and it tracked the result up to a claimed 0.70 on
+    # the two replayed seasons. No record, so a promoted map would be borrowed.
+    "ncaabw_live_total_ht",
     # 2026-10-15 (mike: "use what you've learned in this repo"). The NBA prop
     # rule's probability IS Pinnacle's proportional no-vig under at the same
     # line in the same fetch, which its EV >= 0.00 cut was measured on. It has
@@ -2293,6 +2867,48 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # walk-forward uplift of the earlier graded seasons, which is what its
     # floor was set on. No record either, so the same reasoning.
     "nba_team_total_luck",
+    # The NBA first-half overs: the market's fair P(over) plus the walk-forward
+    # uplift of the earlier graded seasons, which is what its floor was set on.
+    # No record either, so the same reasoning.
+    "nba_first_half_total_luck",
+    # The NBA first-quarter spreads: the market's fair P(win) plus the walk-forward uplift of the graded cell.
+    "nba_q1_trend",
+    # The NBA first-quarter moneylines: the market's no-vig P(win | not level) plus the graded cell's uplift.
+    "nba_q1_trend_ml",
+    # 2026-10-30 (mike, "Yes to the totals model"). NCAAB totals: its number
+    # is the blend's P(win | no push) at DraftKings' line, which its 0.04 cut
+    # was measured on. It has no record, so its map would be the offset
+    # borrowed from other models.
+    "ncaab_total_blend",
+    # 2026-11-02 (mike). NCAAB spreads: its number is P(win | no push) at the
+    # bet book's line from the final-margin distribution, which its 0.03 cut
+    # was measured on. No record either.
+    "ncaab_spread_market",
+    # 2026-11-02 (mike). NCAAB moneylines: its number is P(the bet side wins)
+    # from the bet book's own spread through the final-margin distribution,
+    # which its 0.01 cut was measured on. No record either.
+    "ncaab_moneyline_own_spread",
+    # 2026-11-03 (mike). NCAAB moneylines at a book's first post: the same
+    # number, P(the bet side wins) from the posting book's own spread, which
+    # its 0.015 cut was measured on. No record either.
+    "ncaab_moneyline_first_post",
+    # 2026-11-02 (mike). NCAAB first-half spread: its number is P(cover | no
+    # push) from its own first-half table, which its 0.02 cut was measured on.
+    # It has no record, so its map would be the offset borrowed from others.
+    "ncaab_first_half_spread",
+    # 2026-11-03 (mike). NCAAB first-half total: its number is P(win | no
+    # push) from its own first-half total table, which its 0.02 cut was
+    # measured on. No record either.
+    "ncaab_first_half_total",
+    # 2026-11-09 (mike). NCAABW totals: its number is the blend's P(win | no
+    # push) at DraftKings' line, which its 0.05 cut was measured on. It has no
+    # record, so its map would be the offset borrowed from other models.
+    "ncaabw_total_blend",
+    # 2026-11-10 (mike). NCAAF moneylines: its number is the bet side's fair
+    # chance from the books' consensus spread through the final-margin
+    # distribution, which its 0.02 cut was measured on. It has no record, so
+    # its map would be the offset borrowed from other models.
+    "ncaaf_moneyline_market",
 })
 
 
@@ -2312,6 +2928,38 @@ MODEL_MARKET_EV_FLOOR: dict = {
         "player_rebounds_assists": 0.04,
         "player_threes":           0.04,
     },
+}
+
+
+# A model whose STORED and SHOWN probability is its own pulled toward the price
+# it was bet at (mike, 2026-11-06: "Yes, ship it"): p' = implied + k (p - implied), implied from the
+# decision price, so the EV a pick shows is k x the EV it was decided on.
+#
+# THE DECISION DOES NOT USE IT. The card, its floors (MODEL_MARKET_EV_FLOOR
+# above), the door's ranking (models/nba_prop_rank.py) and the Discord "good to"
+# price all run on the model's own number, exactly as graded. Only what a picks
+# row stores and the app shows -- model_probability, model_probability_cal,
+# edge, decision_edge, best_edge -- is the shrunk one. One number multiplies
+# every EV, so it moves no bet and no ranking. It is not a promoted calibration
+# map on purpose: models/honest_ev.honest_probability runs BEFORE the floor,
+# and a map there would hold a k-sized EV against floors set on the raw scale.
+#
+# "from": the first game_date whose rows store the shrunk number. Every row of
+# an earlier game_date stores the raw one, written before or after this shipped,
+# so a reader (Discord's "good to", a restated slate, research) tells the two
+# apart from the row alone (models/honest_ev.shrink_factor). It must be a date
+# no pick has been written for when this deploys: a row the old code wrote raw
+# on or after it would be read as shrunk.
+#
+# nba_prop_projection, k = 0.325: maximum likelihood (calfit.py method "k",
+# grid 0.005) on all three graded seasons, 66,588 bets, 2023-24..2025-26; 0.324
+# on a 0.001 grid; 90% likelihood range 0.270 to 0.377. Walk-forward it was
+# 0.325 (2023-24 alone) and 0.300 (2023-24 + 2024-25), and with it every eighth
+# of the EV range sat inside its 90% range, where uncorrected seven of eight
+# claimed about three times what the bets returned (docs/nba_models_2026.md,
+# "The probability a pick stores", section 5).
+MODEL_PROB_SHRINK: dict = {
+    "nba_prop_projection": {"k": 0.325, "from": "2026-11-07"},
 }
 
 
@@ -2404,6 +3052,24 @@ SCORING_METHODS: dict = {
     # Trained and registered (scripts/nba_prop_projection_train.py), scored by
     # scripts/nba_prop_projection_card.py, written by scripts/nba_props_card.py.
     "nba_prop_projection": SCORING_ARTIFACT,
+    # The NBA in-play quarters 1-2 spread: IG-2's state model and its prior
+    # distribution in one JSON artifact (models/saved/nba_live_ig2_2027.json,
+    # built by scripts/build_nba_live_ig2_artifact.py), registered in
+    # model_registry after the merge (--register) and scored by
+    # models/nba_live_loop.py.
+    "nba_live_spread_q12": SCORING_ARTIFACT,
+    # The NCAAB in-play rules: their state models and the night table in one
+    # JSON artifact committed under models/saved/ (ncaab_live_ig_2027.json,
+    # scripts/build_ncaab_live_ig_artifact.py), loaded by its pinned path by
+    # models/ncaab_live_loop.py, never registered.
+    "ncaab_live_spread_h1": "rule",
+    "ncaab_live_spread_h2": "rule",
+    "ncaab_live_total_h2":  "rule",
+    # The NCAABW halftime total: its state model in one JSON artifact committed
+    # under models/saved/ (ncaabw_live_ht_2027.json,
+    # scripts/build_ncaabw_live_ht_artifact.py), loaded by its pinned path by
+    # models/ncaabw_live_loop.py, never registered.
+    "ncaabw_live_total_ht": "rule",
     # A rule with a parameter artifact committed under models/saved/ (the
     # residual sample and the bucket counts, models/nba_total_luck.py), never
     # registered: the card loads it by its pinned path.
@@ -2411,6 +3077,49 @@ SCORING_METHODS: dict = {
     # The same shape: a rule whose parameter artifact holds the residual sample
     # and the per-season uplift buckets, loaded by the card, never registered.
     "nba_team_total_luck": "rule",
+    # The same shape again: its artifact holds the rows its first-half pricing is
+    # fitted on and the per-season uplift buckets.
+    "nba_first_half_total_luck": "rule",
+    # The same shape: its artifact holds the first-quarter pricing rows and the graded cell's uplift buckets.
+    "nba_q1_trend":        "rule",
+    # The same shape: its artifact holds the graded cell's uplift buckets (the moneyline needs no pricing rows).
+    "nba_q1_trend_ml":     "rule",
+    # A rule with a parameter artifact committed under models/saved/ (last
+    # season's ratings, the residual and blend coefficients,
+    # models/ncaab_total_blend.py), never registered: the card loads it by
+    # its pinned path. Not in SPORTS or MODELS, which the trainer and the
+    # loaders iterate.
+    "ncaab_total_blend":   "rule",
+    # The same shape: the NCAAB spread rule's artifact holds the mean offset
+    # and the final-margin table (models/ncaab_spread_market.py), loaded by
+    # scripts/ncaab_spread_card.py by its pinned path, never registered.
+    "ncaab_spread_market": "rule",
+    # The same shape: the NCAAB moneyline rule's artifact names the spread
+    # model's final-margin table and pins its digest
+    # (models/ncaab_moneyline_own_spread.py), loaded by
+    # scripts/ncaab_moneyline_card.py by its pinned path, never registered.
+    "ncaab_moneyline_own_spread": "rule",
+    # The same shape: the first-post moneyline rule's artifact names the same
+    # final-margin table and pins its digest
+    # (models/ncaab_moneyline_first_post.py), loaded by
+    # scripts/ncaab_moneyline_first_post_card.py by its pinned path.
+    "ncaab_moneyline_first_post": "rule",
+    # The same shape: a rule whose parameter artifact
+    # (models/saved/ncaab_first_half_spread_<season>.json) holds its first-half
+    # map, table sample and team term, loaded by the card, never registered.
+    "ncaab_first_half_spread": "rule",
+    # The same shape: models/saved/ncaab_first_half_total_<season>.json holds
+    # the first-half total's map, table sample and team term.
+    "ncaab_first_half_total": "rule",
+    # The women's twin of ncaab_total_blend: a rule with a parameter artifact
+    # committed under models/saved/ (models/ncaabw_total_blend.py), loaded by
+    # scripts/ncaabw_total_card.py by its pinned path, never registered.
+    "ncaabw_total_blend":  "rule",
+    # The same shape: the NCAAF moneyline rule's artifact holds the fitted
+    # offset and the final-margin table (models/ncaaf_moneyline_market.py),
+    # loaded by scripts/ncaaf_moneyline_card.py by its pinned path, never
+    # registered. Not in MODELS, which the scorer and the trainer iterate.
+    "ncaaf_moneyline_market": "rule",
 }
 
 
@@ -2440,6 +3149,16 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
+    "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
+    "nba_q1_trend":             0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
+    "nba_q1_trend_ml":          0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
+    "ncaab_total_blend":        0.05,   # 2026-10-30 mike, raised 2026-11-07 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
+    "ncaab_spread_market":      0.03,   # 2026-11-02 mike: THE cut, P(win | no push) minus the bet price's implied; see ACTION_THRESHOLDS
+    "ncaab_moneyline_own_spread": 0.01,  # 2026-11-02 mike: THE cut, P(side wins) minus the bet price's implied; see ACTION_THRESHOLDS
+    "ncaab_moneyline_first_post": 0.015,  # 2026-11-03 mike: THE cut, at a book's first moneyline post; see ACTION_THRESHOLDS
+    "ncaab_first_half_spread":  0.025,  # 2026-11-02 mike, raised 2026-11-07 mike: THE cut, P(cover | no push) minus the bet book's implied; see ACTION_THRESHOLDS
+    "ncaab_first_half_total":   0.025,  # 2026-11-03 mike, raised 2026-11-06 mike: THE cut, P(win | no push) minus the bet book's implied; see ACTION_THRESHOLDS
+    "ncaabw_total_blend":       0.05,   # 2026-11-09 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2486,6 +3205,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaaf_live_total":    0.12,
     "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
+    "ncaaf_moneyline_market": 0.02,  # 2026-11-10 mike: THE cut, the bet side's fair chance minus the bet price's implied; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -2497,6 +3217,11 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_prop_market":            0.05,   # see ACTION_THRESHOLDS
     "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
     "nfl_live_leader_ml":          0.02,   # 2026-10-13 mike; the backtest's cut, see ACTION_THRESHOLDS
+    "nba_live_spread_q12":         0.0,    # 2026-11-04 mike; the cut is EV, see ACTION_THRESHOLDS
+    "ncaab_live_spread_h1":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaab_live_spread_h2":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaab_live_total_h2":         0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaabw_live_total_ht":        0.0,    # 2026-11-11 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
     "mlb_spread_market":           0.018,  # see ACTION_THRESHOLDS
     "mlb_total_market":            0.02,   # see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -2530,6 +3255,16 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
+    "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
+    "nba_q1_trend":             0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
+    "nba_q1_trend_ml":          0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
+    "ncaab_total_blend":        0.0,    # 2026-10-30 mike: the cut is the edge; see ACTION_THRESHOLDS
+    "ncaab_spread_market":      0.0,    # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
+    "ncaab_moneyline_own_spread": 0.0,  # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
+    "ncaab_moneyline_first_post": 0.0,  # 2026-11-03 mike: the cut is the edge; see ACTION_THRESHOLDS
+    "ncaab_first_half_spread":  0.0,    # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
+    "ncaab_first_half_total":   0.0,    # 2026-11-03 mike: the cut is the edge; see ACTION_THRESHOLDS
+    "ncaabw_total_blend":       0.0,    # 2026-11-09 mike: the cut is the edge; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS
@@ -2585,8 +3320,13 @@ MODEL_PROB_THRESHOLDS: dict = {
     # (data/migrations/demote_ncaaf_over_under_platt_2026_09_26.sql). This
     # floor and the +/-8 gate are unchanged. Do not re-promote without a
     # new Updated-By.
+    # 2026-11-10 (mike: "Refit the totals model as an average of 11 fits?"
+    # "yes"): on the eleven-seed fit's residuals P(over) at +8 is 0.6554 and
+    # P(under) at -8 is 0.7098, so 0.65 still sits just under the weaker arm
+    # and is unchanged. docs/sports/ncaaf.md, the 2026-11-10 section.
     "ncaaf_over_under": 0.65,
     "ncaaf_moneyline":  0.62,
+    "ncaaf_moneyline_market": 0.0,  # 2026-11-10 mike: the cut is the edge; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -2598,6 +3338,11 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_prop_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_live_leader_ml":          0.0,    # 2026-10-13 mike; edge is the cut, see ACTION_THRESHOLDS
+    "nba_live_spread_q12":         0.0,    # 2026-11-04 mike; the cut is EV, see ACTION_THRESHOLDS
+    "ncaab_live_spread_h1":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaab_live_spread_h2":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaab_live_total_h2":         0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaabw_live_total_ht":        0.0,    # 2026-11-11 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
     "mlb_spread_market":           0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -2786,6 +3531,17 @@ RUN_PREGAME_POLLER: bool = os.environ.get("RUN_PREGAME_POLLER", "1") == "1"
 # credits a day against 4,661,626 remaining. Read `odds_api_quota`, never this
 # comment, before quoting a number (section 1b).
 #
+# One cause of that overstatement, measured 2026-10-29: each process logged the
+# change in the ACCOUNT's x-requests-used since its own previous call, so it
+# also logged whatever every other process spent in between. The NCAAB history
+# purchase (worker job 805227, 04:25-07:04Z) was charged to this loop that way,
+# 40,918 to 74,463 credits an hour on its usual ~600 calls an hour, and the cap
+# stopped the loop at 200,280 for the rest of the ET day. The fix (branch
+# fix/odds-credits-per-call): monitoring/probe.py logs each call's own
+# x-requests-last, and the day starts at ET midnight, not 00:00Z
+# (data/ingestors/pregame_line_poller.py). The cap now sums this loop's own
+# spend, where it summed roughly everyone's.
+#
 # Set = 0 to run uncapped.
 PREGAME_POLL_DAILY_CREDIT_CAP: int = int(
     os.environ.get("PREGAME_POLL_DAILY_CREDIT_CAP", 200000))
@@ -2864,6 +3620,32 @@ LIVE_MODELS = {
     # are in-sample for it.
     "nfl_live_leader_ml":  ("NFL", "h2h", "engine",
                             "Late 4th-quarter leader (4-16) on the DraftKings live moneyline, per-lead win probability"),
+    # NBA in-play game-state model, the quarters 1-2 spread
+    # (models/nba_live_ig2.py, run from the repo root by scheduler job
+    # nba_live; LIVE 2026-11-04, mike). Registered here for SETTLEMENT: a
+    # spread on the full-game margin against scored_line, the HOME number
+    # (CLAUDE.md section 4). models/live_scorer.py skips 'engine' entries. The
+    # two quarter-3 models are held out (see ACTION_THRESHOLDS). Evidence:
+    # docs/sports/nba.md "In play", docs/nba_models_2026.md section 7.3.
+    "nba_live_spread_q12": ("NBA", "spreads", "engine",
+                            "Live spread, quarters 1-2: IG-2 game-state model, EV >= 0.05 at the first fresh fetch"),
+    # NCAAB in play (models/ncaab_live_loop.py, LIVE 2026-11-07, mike).
+    # Settled on the FULL GAME, overtime included: a spread against
+    # scored_line, the HOME number (CLAUDE.md section 4); a total against
+    # scored_line, the live total at the bet. The half in the name is when
+    # the bet is made. docs/sports/ncaab.md, "In play".
+    "ncaab_live_spread_h1": ("NCAAB", "spreads", "engine",
+                             "Live spread, first half: game-state model, the night's best few at the first fresh fetch"),
+    "ncaab_live_spread_h2": ("NCAAB", "spreads", "engine",
+                             "Live spread, second half: game-state model, the night's best few at the first fresh fetch"),
+    "ncaab_live_total_h2":  ("NCAAB", "totals", "engine",
+                             "Live total, second half: game-state model, the night's best few at the first fresh fetch"),
+    # NCAABW halftime total (models/ncaabw_live_loop.py, 2026-11-11, mike).
+    # Settled on the FULL GAME, overtime included, against scored_line, the
+    # in-play total taken at the break. docs/sports/ncaabw.md, "In play".
+    "ncaabw_live_total_ht": ("NCAABW", "totals", "engine",
+                             "Full-game total at the halftime break: game-state model, EV >= 0.05 at the first "
+                             "read holding an eligible quote"),
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────
@@ -3371,13 +4153,35 @@ SHARP_BOOKMAKERS = [
 # narrow loses a bet we could have had — recoverable, and it shows up as a
 # missing row. Too wide LOCKS AN UNPLACEABLE PICK FOREVER, and §1c means
 # nothing can take it back.
-NON_BETTABLE_BOOKMAKERS = {"pinnacle", "bovada"}
+#
+# STATE-LIMITED BOOKS ARE FETCHED, AND NEVER THE BOOK A PICK NAMES (mike,
+# 2026-11-06: "global rule. remove betparx from sports books for recommeding
+# betting lines in picks only niche avaialble in a few states"). betPARX ships
+# one app per state -- Maryland, Pennsylvania, New Jersey
+# (mobile/src/lib/sportsbookLinks.ts) -- so a pick decided there sends most
+# members to a book they cannot open. 60 BETs had been decided at it by that
+# day (14 models, 53 of them in the previous 30 days, measured in `picks`).
+#
+# It stays in LINE_SHOP_BOOKMAKERS on purpose: the NCAAB consensus models take
+# a median over every book and were fitted with betPARX in the set
+# (models/ncaab_book_quotes.BOOKS), so its quotes must keep arriving. What
+# changes is only where a pick may be DECIDED and where a member is SENT.
+#
+# Unlike espnbet below, this is NOT reversible by an environment variable:
+# BETTABLE_BOOKS and BEST_LINE_BOOKMAKERS drop these books after any override.
+# Adding a book here is the one edit; tests/test_betparx_never_a_pick_book.py
+# pins every copy of the list (the NFL cards' fallback, the app's mirror).
+STATE_LIMITED_BOOKMAKERS = {"betparx"}
+NON_BETTABLE_BOOKMAKERS = {"pinnacle", "bovada", *STATE_LIMITED_BOOKMAKERS}
 BETTABLE_BOOKS = [
-    b.strip().lower()
-    for b in (os.environ.get("BETTABLE_BOOKS") or ",".join(
-        b for b in LINE_SHOP_BOOKMAKERS if b not in NON_BETTABLE_BOOKMAKERS
-    )).split(",")
-    if b.strip()
+    b for b in (
+        b.strip().lower()
+        for b in (os.environ.get("BETTABLE_BOOKS") or ",".join(
+            b for b in LINE_SHOP_BOOKMAKERS if b not in NON_BETTABLE_BOOKMAKERS
+        )).split(",")
+        if b.strip()
+    )
+    if b not in STATE_LIMITED_BOOKMAKERS
 ]
 
 # Retention for line-shop (non-DraftKings) odds snapshots — see data/prune_odds.py.
@@ -3530,14 +4334,18 @@ SCORE_OFF_ANY_BOOK_LINE: bool = (
 # (WynnBET exited US online sports betting).
 #
 # Override with BEST_LINE_EXCLUDE_BOOKMAKERS (comma-separated) to add or, with
-# an empty value, to shop every book in LINE_SHOP_BOOKMAKERS.
-_BEST_LINE_EXCLUDE_DEFAULT = "pinnacle,bovada,espnbet"
-BEST_LINE_EXCLUDE_BOOKMAKERS = [
-    b.strip().lower()
-    for b in os.environ.get("BEST_LINE_EXCLUDE_BOOKMAKERS",
-                            _BEST_LINE_EXCLUDE_DEFAULT).split(",")
-    if b.strip()
-]
+# an empty value, to shop every book in LINE_SHOP_BOOKMAKERS -- every book
+# except STATE_LIMITED_BOOKMAKERS (betparx, mike 2026-11-06), which no override
+# puts back.
+_BEST_LINE_EXCLUDE_DEFAULT = ",".join(
+    ["pinnacle", "bovada", "espnbet", *sorted(STATE_LIMITED_BOOKMAKERS)])
+BEST_LINE_EXCLUDE_BOOKMAKERS = list(dict.fromkeys([
+    *(b.strip().lower()
+      for b in os.environ.get("BEST_LINE_EXCLUDE_BOOKMAKERS",
+                              _BEST_LINE_EXCLUDE_DEFAULT).split(",")
+      if b.strip()),
+    *sorted(STATE_LIMITED_BOOKMAKERS),
+]))
 
 BEST_LINE_BOOKMAKERS = [
     b for b in (
@@ -4297,8 +5105,10 @@ NFL_PLAYER_STATS_BACKFILL_SEASONS: int = int(
 # no card). Rate-limited — the backfill is paced and resumable.
 CFBD_API_KEY: str = os.environ.get("CFBD_API_KEY", "")
 CFBD_BASE_URL: str = os.environ.get("CFBD_BASE_URL", "https://api.collegefootballdata.com")
-# Seconds to sleep between CFBD calls during backfill (free-tier politeness).
-CFBD_REQUEST_PAUSE: float = float(os.environ.get("CFBD_REQUEST_PAUSE", "0.6"))
+# Seconds to sleep between successful CFBD calls, including each weekly
+# stats pull. 1.0 after the 2026-11-04 daily: /stats/season/advanced
+# returned 429 on week 2 at the old 0.6 default. The env still overrides.
+CFBD_REQUEST_PAUSE: float = float(os.environ.get("CFBD_REQUEST_PAUSE", "1.0"))
 
 # Which /lines providers to persist as historical training lines, in PREFERENCE
 # ORDER. We ingest ALL of them rather than picking one, and the feature engine
@@ -4408,6 +5218,156 @@ NCAAF_PROMOTED_TO_FBS: dict = {
     "North Dakota State": 2026,
     "Sacramento State":   2026,
 }
+
+# Men's college basketball: an odds-feed team name -> ESPN team id, for the
+# names data.ingestors.ncaab_teams.resolve_team_name cannot place on its own
+# (it matches ESPN's display name, "school mascot", school, short name,
+# alternate names, then the feed's shortened school names like "Michigan St").
+# Fill it from the unresolved-name list the ncaab_feed_probe worker job and
+# the history purchase print. A value is an ESPN id, not a name, so a school
+# renaming itself cannot silently re-point an entry.
+#
+# The entries below (2026-10-29) are the feed names in ncaab_odds_unmatched
+# that no rule can place: a renamed school, a renamed mascot, or a name with
+# nothing in common with ESPN's. Each id is the team ESPN's schedule plays
+# against the feed event's other (resolved) team on the event's date, in the
+# share of that name's events given, measured on the Supabase connector.
+NCAAB_ODDS_API_MAP: dict = {
+    "Albany Great Danes": 399,              # ESPN "UAlbany Great Danes"; 158 of 158 events
+    "Appalachian St Mountaineers": 2026,    # ESPN "App State Mountaineers"; 143 of 143
+    "Arkansas-Little Rock Trojans": 2031,   # ESPN "Little Rock Trojans" (not Arkansas, 8); 118 of 121
+    "Dixie State Trailblazers": 3101,       # ESPN "Utah Tech Trailblazers"; 16 of 16
+    "Fort Wayne Mastodons": 2870,           # ESPN "Purdue Fort Wayne Mastodons"; 119 of 121
+    "George Washington Colonials": 45,      # ESPN "George Washington Revolutionaries"; 85 of 90
+    "GW Revolutionaries": 45,               # ESPN "George Washington Revolutionaries"; 69 of 69
+    "Houston Baptist Huskies": 2277,        # ESPN "Houston Christian Huskies" (not Houston, 248); 68 of 70
+    "IUPUI Jaguars": 85,                    # ESPN "IU Indianapolis Jaguars"; 101 of 101
+    "LIU Brooklyn Blackbirds": 112358,      # ESPN "Long Island University Sharks", NOT 6446 "LIU Brooklyn"; 19 of 19
+    "LIU Sharks": 112358,                   # ESPN "Long Island University Sharks"; 104 of 106
+    "Long Beach St 49ers": 299,             # ESPN "Long Beach State Beach"; 118 of 122
+    "Mcneese St Mcneese": 2377,             # ESPN "McNeese Cowboys"; 27 of 27
+    "New Orleans Privateers": 2443,         # ESPN "LSU New Orleans Privateers"; 121 of 122
+    "Seattle Redhawks": 2547,               # ESPN "Seattle U Redhawks"; 122 of 125
+    "St. Francis (PA) Red Flash": 2598,     # ESPN "Saint Francis Red Wolves"; 129 of 132
+    "Tenn-Martin Skyhawks": 2630,           # ESPN "UT Martin Skyhawks" (not Tennessee, 2633); 103 of 104
+    "Texas A&M-Commerce Lions": 2837,       # ESPN "East Texas A&M Lions" (not Texas A&M or Texas); 62 of 63
+    "UMKC Kangaroos": 140,                  # ESPN "Kansas City Roos"; 118 of 120
+    "Valparaiso Crusaders": 2674,           # ESPN "Valparaiso Beacons"; 36 of 37
+}
+
+# Injury-page team string -> ESPN team id. Checked before
+# ncaab_teams.resolve_team_name, and only for that exact string. Empty until
+# a miss log names a string the resolver cannot place. Do not guess an id.
+NCAAB_INJURY_TEAM_MAP: dict = {}
+
+# "espn_team_id|player_key" -> player_key on that team's roster. Used when the
+# feed spells a name the roster does not. The value is applied only when it is
+# on the roster; a value that is not is a miss, not a match. Empty until a
+# miss is confirmed by hand.
+NCAAB_INJURY_PLAYER_MAP: dict = {}
+
+# Women's college basketball (NCAABW): an odds-feed team name -> ESPN team id,
+# for the names data.ingestors.ncaabw_teams.resolve_team_name cannot place on
+# its own. The same shape as NCAAB_ODDS_API_MAP above, and its own map: the
+# feed names many women's teams by the men's mascot ("Oklahoma St Cowboys" for
+# ESPN's "Oklahoma State Cowgirls"), so a name here is a women's feed name.
+# ESPN gives a school's women's team the same id as its men's team.
+#
+# The entries below (2026-11-09) are the feed names no rule can place among
+# the 353 names on the 2,293 women's events the feed listed from 2024-11-12 to
+# 2026-04-05. Each count is that name's events. Each id is in ncaabw_teams
+# under the school named, and is the team ESPN's women's schedule plays
+# against the event's other team on its date (docs/sports/ncaabw.md, "Feed
+# team names").
+NCAABW_ODDS_API_MAP: dict = {
+    "GW Revolutionaries": 45,               # ESPN "George Washington Revolutionaries"; 6
+    "UMKC Kangaroos": 140,                  # ESPN "Kansas City Roos"; 5
+    "Albany Great Danes": 399,              # ESPN "UAlbany Great Danes"; 5
+    "Tenn-Martin Skyhawks": 2630,           # ESPN "UT Martin Skyhawks" (not Tennessee, 2633); 4
+    "Seattle Redhawks": 2547,               # ESPN "Seattle U Redhawks"; 3
+    "Miss Valley St Delta Devilettes": 2400,  # ESPN "Mississippi Valley State Devilettes"; 3
+    "Arkansas-Little Rock Trojans": 2031,   # ESPN "Little Rock Trojans" (not Arkansas, 8); 2
+    "Long Beach St 49ers": 299,             # ESPN "Long Beach State Beach"; 2
+    "LIU Sharks": 112358,                   # ESPN "Long Island University Sharks"; 2
+    "Fort Wayne Mastodons": 2870,           # ESPN "Purdue Fort Wayne Mastodons"; 1
+    "New Orleans Privateers": 2443,         # ESPN "LSU New Orleans Privateers"; 1
+    "Appalachian St Mountaineers": 2026,    # ESPN "App State Mountaineers"; 1
+}
+
+# Women's college basketball: the books fetched and stored for NCAABW on top of
+# LINE_SHOP_BOOKMAKERS. None of them is a book a pick may name (they are not in
+# BEST_LINE_BOOKMAKERS); they are stored because the women's board is thin and
+# has no Pinnacle. Measured 2026-11-09 on 14 history snapshots, every region
+# the feed sells (219 pre-game events): the books pricing women's games were
+# DraftKings, FanDuel, BetMGM, Caesars, Fanatics, BetRivers and these six;
+# Pinnacle, Bovada and betPARX priced none. betwhale is the seventh: it priced
+# 3 of the 5 games listed live that evening. Seventeen books in all, so a
+# women's bulk call bills two regions (the bookmakers param counts ten books
+# as one region): 6 credits live, 60 from history.
+NCAABW_EXTRA_BOOKMAKERS: list = [
+    "espnbet", "ballybet", "fliff", "betonlineag", "lowvig", "unibet", "betwhale",
+]
+
+# EuroLeague: the odds feed's club name -> EuroLeague's own club code
+# (data/ingestors/euroleague_teams.py). Every name on the feed's 2,164 events of
+# 2020-10 to 2026-11 (27 names, 26 clubs), read 2026-11-12; the count is the
+# events naming it. Compared accent-folded, so 'Zalgiris' finds 'Žalgiris'.
+EUROLEAGUE_ODDS_API_MAP: dict = {
+    "ALBA Berlin": "BER",                      # 173
+    "AS Monaco": "MCO",                        # 199
+    "ASVEL Lyon Villeurbanne": "ASV",          # 221
+    "Anadolu Efes": "IST",                     # 242
+    "BC Khimki": "KHI",                        # 35
+    "Beşiktaş J.K.": "BES",                    # 11
+    "CSKA Moscow": "CSK",                      # 67
+    "Dubai Basketball": "DUB",                 # 50
+    "FC Barcelona Bàsquet": "BAR",             # 252
+    "FC Bayern München": "MUN",                # 231
+    "Fenerbahce SK": "ULK",                    # 136
+    "Fenerbahçe Beko": "ULK",                  # 111
+    "Hapoel Tel Aviv": "HTA",                  # 55
+    "KK Crvena zvezda": "RED",                 # 223
+    "KK Partizan NIS": "PAR",                  # 158
+    "Maccabi Tel Aviv": "TEL",                 # 235
+    "Olympiacos": "OLY",                       # 251
+    "Pallacanestro Olimpia Milano": "MIL",     # 235
+    "Panathinaikos": "PAN",                    # 244
+    "Paris Basketball": "PRS",                 # 89
+    "Real Madrid": "MAD",                      # 255
+    "Saski Baskonia": "BAS",                   # 225
+    "Unics Kazan": "UNK",                      # 22
+    "Valencia Basket": "PAM",                  # 158
+    "Virtus Segafredo Bologna": "VIR",         # 153
+    "Zenit Saint Petersburg": "DYR",           # 69
+    "Žalgiris": "ZAL",                         # 228
+}
+
+# EuroLeague books (docs/sports/euroleague.md, "The books"). One history snapshot
+# naming these ten billed 30 credits on 2026-11-12; naming an eleventh billed
+# 60, because the feed bills every group of ten named books as a region. Read
+# off five history snapshots at every region (2021-03, 2022-12, 2023-12,
+# 2024-12, 2025-12): DraftKings priced every sampled game from 2022-23 on,
+# FanDuel, BetMGM, BetRivers and Fanatics from 2025-26, Pinnacle and Bovada
+# most games of every season, and Marathonbet, Unibet and Paddy Power every
+# game of every season. Caesars, Hard Rock and betPARX, three of the line-shop
+# ten, priced none, so the history does not ask for them.
+EUROLEAGUE_HISTORY_BOOKMAKERS: list = [
+    "draftkings", "fanduel", "betmgm", "betrivers", "fanatics",
+    "pinnacle", "bovada", "marathonbet", "unibet", "paddypower",
+]
+# The live pull asks for the line-shop ten plus these: thirteen books, two
+# regions (6 credits a pass for three markets). None is a book a pick may name;
+# they are the European consensus the history holds, kept going forward.
+EUROLEAGUE_EXTRA_BOOKMAKERS: list = ["marathonbet", "unibet", "paddypower"]
+# The ten asked for EuroLeague's first-half, quarter, team-total and alternate
+# lines (data/ingestors/euroleague_period_history.py). The books that returned
+# any of those markets on the sampled 2024-12, 2025-12 and 2026-10 games:
+# FanDuel, BetMGM, BetRivers, Fanatics, GTbets, BetUS, MyBookie, and Pinnacle's
+# alternates; DraftKings and Bovada are asked because they price the full game.
+EUROLEAGUE_PERIOD_BOOKMAKERS: list = [
+    "fanduel", "betmgm", "betrivers", "fanatics", "draftkings",
+    "pinnacle", "bovada", "gtbets", "betus", "mybookieag",
+]
 
 # The Odds API team name → CFBD canonical school name.
 #
@@ -4782,3 +5742,23 @@ PLAYER_NEWS_MAX_TEAM_FETCHES: int = int(
 # sheet shows the most recent few and the table is a cache we can always re-read.
 PLAYER_NEWS_RETENTION_DAYS: int = int(
     os.environ.get("PLAYER_NEWS_RETENTION_DAYS", 21))
+
+# ── every paid call is logged, however the process was started ──────────────
+# Last in this file on purpose: every constant above exists before anything is
+# imported here. Every Odds API caller in the repo imports this module, so
+# installing the call logger here is what makes api_call_log hold a call made
+# by a plain module run, a runpy launcher or a one-off script -- not only by
+# the scheduler, the pipeline and the entrypoints that install it themselves.
+# On 2026-11-03 the NBA first-quarter history purchase ran on mike's PC as a
+# module run (runpy.run_module("data.ingestors.nba_odds_history")) and about
+# 112,813 credits went out with almost nothing in the log. An entrypoint that
+# calls install("pipeline") afterwards only renames its rows; nothing is
+# wrapped twice. The writer thread starts on the first recorded call, so a
+# process that makes none starts no thread. PIPELINE_TELEMETRY=0 still turns it
+# off. Best-effort: importing config must never fail because of telemetry.
+# monitoring/probe.py, tests/test_odds_call_log_everywhere.py.
+try:
+    from monitoring.probe import install as _install_api_call_log
+    _install_api_call_log()
+except Exception:  # noqa: BLE001
+    pass

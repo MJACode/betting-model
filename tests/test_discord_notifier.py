@@ -869,7 +869,11 @@ def test_failed_free_post_ledgers_nothing_so_it_retries(monkeypatch):
 # ── Restatement ──────────────────────────────────────────────────────────────
 
 def _restate_env(monkeypatch, ledger: set, signals: list, ok=True):
-    """Wire the notifier to a fake webhook + ledger. Returns the posts list."""
+    """Wire the notifier to a fake webhook + ledger. Returns the posts list.
+
+    A slate re-post needs mike's approval now (config.RECORD_RESTATEMENT_APPROVALS).
+    These tests are about what it does once it has one."""
+    monkeypatch.setitem(dn.config.RECORD_RESTATEMENT_APPROVALS, "2026-08-28", "test")
     posts = []
     monkeypatch.setattr(dn, "_post", lambda url, payload: (posts.append((url, payload)), ok)[1])
     monkeypatch.setattr(dn.time, "sleep", lambda *_: None)
@@ -1171,10 +1175,11 @@ def test_clv_line_is_empty_when_nothing_was_measured():
     assert "beat close" not in dn._tally_line(t, with_clv=True)
 
 
-def test_exactly_flat_clv_is_not_a_beat():
-    """Matching the close is not beating it."""
+def test_exactly_flat_clv_is_a_push():
+    """A close that equals the price taken is a push, not a non-beat."""
     t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, 0.0)])
-    assert (t["clv_n"], t["clv_beat"]) == (1, 0)
+    assert (t["clv_n"], t["clv_beat"], t["clv_push"]) == (0, 0, 1)
+    assert dn.clv_line(t) == "0 measured, 1 push"
 
 
 def test_tally_line_omits_clv_unless_asked():
@@ -1353,34 +1358,6 @@ def test_a_six_column_row_still_tallies():
 # ── Restating a recap (2026-08-30; automatic since 2026-09-10) ───────────────
 # The full contract is tests/test_recap_restatement.py. What stays here is
 # the boundary with the SLATE restatement above.
-
-def test_a_restate_with_nothing_settled_late_is_a_no_op():
-    """No webhook configured in the test env, so this returns before the
-    database; the point pinned is the signature -- restate=True is accepted
-    and resolves to 'nothing to correct' rather than raising."""
-    assert dn.notify_discord_results(game_date="2026-01-01", restate=True) == 0
-
-
-def test_the_record_restatement_and_the_slate_restatement_are_separate():
-    """One restates a RECORD (its own ledger kind, keyed per correction), the
-    other a SLATE (a hard-coded date set). Sharing a trigger would re-post a
-    day's picks every time its numbers were corrected, and vice versa."""
-    assert "discord_results_restate" in dn.restate_lock_key(
-        "discord_results_restate", "2026-09-09", "2026-09-10T10:02:22+00:00")
-    assert dn.DISCORD_RESTATE_DATES, "the slate set still exists on its own"
-    assert not hasattr(dn, "DISCORD_RESULTS_RESTATE_DATES"), (
-        "the record restatement no longer runs off a hard-coded date list")
-
-
-def test_a_restated_recap_is_labelled_and_says_why():
-    """A correction that looks identical to the original is worse than none —
-    a reader has no way to tell which number is current."""
-    n = dn.results_restate_note(3, 7, 10).lower()
-    assert n.startswith("restated")
-    assert "settled after" in n, "must say WHAT changed"
-    assert "same picks" in n, "must say what did NOT change"
-    assert "7 settled then, 10 now" in n, "must carry both counts"
-
 
 # ── Live (in-play) bets count toward the recap (2026-08-30) ──────────────────
 # Matt: live bets fold into their sport's totals. The is_live COLUMN cannot
@@ -1683,6 +1660,143 @@ def test_live_webhook_map_reads_the_per_sport_env_vars(monkeypatch):
                   "DISCORD_WEBHOOK_LIVE_NCAAF"):
             monkeypatch.delenv(k, raising=False)
         importlib.reload(cfg)
+
+
+def test_ncaabw_and_live_channel_ids_are_read_from_their_env_vars(monkeypatch):
+    """NCAABW joins the sport list so DISCORD_CHANNEL_NCAABW is picked up.
+    Live channel ids are DISCORD_CHANNEL_LIVE_<SPORT>, not webhook URLs."""
+    import importlib
+    import config as cfg
+    monkeypatch.setenv("DISCORD_CHANNEL_NCAABW", " 1567289818138808474 ")
+    monkeypatch.setenv("DISCORD_CHANNEL_LIVE_NCAAB", "1567288562078973994")
+    monkeypatch.setenv("DISCORD_CHANNEL_LIVE_NCAABW", "1567291076111245505")
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "tok")
+    monkeypatch.delenv("DISCORD_WEBHOOK_NCAABW", raising=False)
+    monkeypatch.delenv("DISCORD_WEBHOOK_LIVE_NCAAB", raising=False)
+    monkeypatch.delenv("DISCORD_WEBHOOK_LIVE_NCAABW", raising=False)
+    keys = ("DISCORD_CHANNEL_NCAABW", "DISCORD_CHANNEL_LIVE_NCAAB",
+            "DISCORD_CHANNEL_LIVE_NCAABW", "DISCORD_BOT_TOKEN")
+    try:
+        importlib.reload(cfg)
+        assert "NCAABW" in cfg.DISCORD_SPORTS
+        assert cfg.DISCORD_CHANNELS["NCAABW"] == "1567289818138808474"
+        assert cfg.DISCORD_CHANNELS_LIVE["NCAAB"] == "1567288562078973994"
+        assert cfg.DISCORD_CHANNELS_LIVE["NCAABW"] == "1567291076111245505"
+        assert "NCAABW" not in cfg.DISCORD_WEBHOOKS
+        assert "NCAAB" not in cfg.DISCORD_WEBHOOKS_LIVE
+        assert "NCAABW" in cfg.discord_sports_wired()
+    finally:
+        for k in keys:
+            monkeypatch.delenv(k, raising=False)
+        importlib.reload(cfg)
+
+
+def _live_channel_http(monkeypatch):
+    """Scripted Discord reads. Nothing here is a real call."""
+    made = []
+
+    def get(url, headers=None, timeout=None):
+        if url.endswith("/users/@me"):
+            return _Resp(200, {"id": "999"})
+        return _Resp(200, [])
+
+    def post(url, headers=None, json=None, timeout=None):
+        made.append((url, json))
+        token = "pre" if "/channels/111/" in url else "live"
+        wid = "1" if token == "pre" else "2"
+        return _Resp(201, {"id": wid, "token": token})
+
+    monkeypatch.setattr(dn.requests, "get", get)
+    monkeypatch.setattr(dn.requests, "post", post)
+    return made
+
+
+def test_a_live_webhook_variable_beats_the_live_channel_id(monkeypatch):
+    """DISCORD_WEBHOOK_LIVE_<SPORT> still wins, and no Discord call is made."""
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS_LIVE", {"NCAAB": "http://ncaab-live-hook"})
+    monkeypatch.setattr(dn.config, "DISCORD_CHANNELS_LIVE", {"NCAAB": "222"})
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_LIVE", "http://shared")
+
+    def boom(*a, **k):
+        raise AssertionError("a webhook variable must not call Discord")
+
+    monkeypatch.setattr(dn.requests, "get", boom)
+    monkeypatch.setattr(dn.requests, "post", boom)
+    assert dn._live_webhook_for_sport("NCAAB") == "http://ncaab-live-hook"
+
+
+def test_a_live_channel_id_creates_a_webhook_named_sport_live(monkeypatch):
+    """The live webhook is '<sport>-live' and is not the pre-game URL."""
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS", {})
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS_LIVE", {})
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_LIVE", "")
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_DEFAULT", "")
+    monkeypatch.setattr(dn.config, "DISCORD_CHANNELS", {"NCAAB": "111"})
+    monkeypatch.setattr(dn.config, "DISCORD_CHANNELS_LIVE", {"NCAAB": "222", "NCAABW": "333"})
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "tok")
+    dn._CHANNEL_HOOKS.clear()
+    made = _live_channel_http(monkeypatch)
+    assert dn._webhook_for_sport("NCAAB") == "https://discord.com/api/webhooks/1/pre"
+    assert dn._live_webhook_for_sport("NCAAB") == "https://discord.com/api/webhooks/2/live"
+    assert [body for _, body in made] == [{"name": "ncaab"}, {"name": "ncaab-live"}]
+    assert made[1][0].endswith("/channels/222/webhooks")
+    n = len(made)
+    assert dn._live_webhook_for_sport("NCAAB").endswith("/live") and len(made) == n
+    assert dn._live_webhook_for_sport("NCAABW").endswith("/live")
+    assert made[-1][1] == {"name": "ncaabw-live"}
+    assert made[-1][0].endswith("/channels/333/webhooks")
+
+
+def test_a_live_channel_id_without_a_bot_token_skips_and_does_not_ledger(monkeypatch):
+    """Pollers posts live picks and has no DISCORD_BOT_TOKEN. A channel id
+    set there must not raise, must not call Discord, must not fall through
+    onto another channel, and must not mark the pick sent."""
+    from loguru import logger
+
+    posts = _live_setup(monkeypatch, live={}, shared="http://shared-live",
+                        sport={"NCAAB": "http://ncaab"})
+    monkeypatch.setattr(dn.config, "DISCORD_CHANNELS_LIVE", {"NCAAB": "222"})
+    monkeypatch.setattr(dn.config, "DISCORD_CHANNELS", {"NCAAB": "111"})
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+    dn._LIVE_CHANNEL_TOKEN_WARNED.clear()
+    dn._CHANNEL_HOOKS.clear()
+
+    def boom(*a, **k):
+        raise AssertionError("no bot token must not call Discord")
+
+    monkeypatch.setattr(dn.requests, "get", boom)
+    monkeypatch.setattr(dn.requests, "post", boom)
+    lines = []
+    sink = logger.add(lines.append, level="ERROR", format="{message}")
+    try:
+        conn = _FakeConn([_live_row("NCAAB", "G9")])
+        assert dn._post_new_live_signals(conn, "2026-08-29", dry_run=False) == 0
+        assert dn._live_webhook_for_sport("NCAAB") is None
+    finally:
+        logger.remove(sink)
+    text = "".join(str(m) for m in lines)
+    assert posts == []
+    assert conn.inserts == []
+    assert "DISCORD_CHANNEL_LIVE_NCAAB" in text
+    assert "DISCORD_BOT_TOKEN" in text
+    assert "not marked sent" in text
+    assert "http://shared-live" not in text and "http://ncaab" not in text
+
+
+def test_only_a_live_channel_id_counts_when_the_bot_token_is_present(monkeypatch):
+    """notify_discord_live returns before reading picks when nothing is
+    configured. A live channel id plus the bot token is a destination."""
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS", {})
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS_LIVE", {})
+    monkeypatch.setattr(dn.config, "DISCORD_CHANNELS", {})
+    monkeypatch.setattr(dn.config, "DISCORD_CHANNELS_LIVE", {"NCAAB": "222"})
+    for attr in ("DISCORD_WEBHOOK_DEFAULT", "DISCORD_WEBHOOK_LIVE",
+                 "DISCORD_WEBHOOK_RESULTS"):
+        monkeypatch.setattr(dn.config, attr, "")
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+    assert dn._configured() is False
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "tok")
+    assert dn._configured() is True
 
 
 def test_notify_syncs_thresholds_before_the_select():

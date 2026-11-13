@@ -235,6 +235,43 @@ def _build_pick_label(pick_side: str, home_team: str, away_team: str,
         direction = "Over" if pick_side == "over" else "Under"
         line_str = f" {line}" if line is not None else ""
         return f"{away_team} @ {home_team} — {team} Team Total {direction}{line_str}"
+    elif market == "totals_h1":
+        # The first half's points: "BOS @ MIL — First Half Over 112.5". The
+        # matchup leads, as a team total's does, so the label cannot be read as
+        # the full-game total. tracking/pick_integrity refuses a first-half
+        # label that does not say so.
+        direction = "Over" if pick_side == "over" else "Under"
+        line_str = f" {line}" if line is not None else ""
+        return f"{away_team} @ {home_team} — First Half {direction}{line_str}"
+    elif market == "spreads_h1":
+        # The first half's spread: "Duke @ Kansas — First Half Duke +3.5". The
+        # matchup leads, as the first-half total's does, so the label cannot be
+        # read as the full-game spread; the signed number is the side's own
+        # (the home number, negated for an away pick).
+        # tracking/pick_integrity refuses a first-half label that does not say so.
+        team = home_team if pick_side == "home" else away_team
+        if line is None:
+            return f"{away_team} @ {home_team} — First Half {team} Spread"
+        spread = line if pick_side == "home" else -line
+        sign = "+" if spread > 0 else ""
+        return f"{away_team} @ {home_team} — First Half {team} {sign}{spread:.1f}"
+    elif market == "spreads_q1":
+        # The first quarter's spread: "DEN @ LAC — First Quarter DEN +1.5" (models/nba_q1_trend.py). The matchup
+        # leads, as the first half's does, so the label cannot be read as the full-game spread; the signed number is
+        # the side's own (the HOME number, negated for an away pick). tracking/pick_integrity refuses a
+        # first-quarter label that does not say so.
+        team = home_team if pick_side == "home" else away_team
+        if line is None:
+            return f"{away_team} @ {home_team} — First Quarter {team} Spread"
+        spread = line if pick_side == "home" else -line
+        sign = "+" if spread > 0 else ""
+        return f"{away_team} @ {home_team} — First Quarter {team} {sign}{spread:.1f}"
+    elif market == "h2h_q1":
+        # The first quarter's moneyline: "DEN @ LAC — First Quarter DEN ML" (models/nba_q1_trend_ml.py). The matchup
+        # leads, as the first-quarter spread's does, so the label cannot be read as the full-game moneyline.
+        # tracking/pick_integrity refuses a first-quarter label that does not say so.
+        team = home_team if pick_side == "home" else away_team
+        return f"{away_team} @ {home_team} — First Quarter {team} ML"
     elif market in ("spreads", "spreads_1st_5_innings"):
         team = home_team if pick_side == "home" else away_team
         if line is not None:
@@ -359,6 +396,18 @@ def score_game(conn: DBConnection,
     x = np.array([_feature_value(feat.get(c)) for c in feat_cols],
                   dtype=float).reshape(1, -1)
 
+    # THE WEATHER HOLD (NCAAF totals; see totals_weather_hold). A dome game is
+    # served the dome's own weather first, so the only game held is one that
+    # is really waiting for a forecast.
+    weather_wait = None
+    if artifact.get("kind") in _WEATHER_HELD_KINDS:
+        dome = _dome_weather(feat_cols, feat)
+        if dome:
+            feat = {**feat, **dome}
+            x = np.array([_feature_value(feat.get(c)) for c in feat_cols],
+                         dtype=float).reshape(1, -1)
+        weather_wait = totals_weather_hold(feat_cols, feat)
+
     home_team = features.get("home_team", "")
     away_team = features.get("away_team", "")
     game_date = features.get("game_date", "")
@@ -388,7 +437,19 @@ def score_game(conn: DBConnection,
     no_signal: str | None = None
 
     # Get model probability
-    if artifact.get("kind") == "margin_regression":
+    if weather_wait:
+        # No forecast yet: the model's number for this game is not a
+        # prediction, so it is not asked for one and none is stored. The row
+        # is still written (0.5 a side, DraftKings' number, the reason) the
+        # way a schedule hold's is, and a NONE row never locks, so the first
+        # pass after the forecast exists decides the game. No DraftKings total
+        # means no row, as in the totals branch below.
+        w_odds = _get_dk_odds(conn, game_id, market)
+        if not w_odds or w_odds.get("total_line") is None:
+            return []
+        home_prob = away_prob = 0.5
+        schedule_hold = schedule_hold or weather_wait
+    elif artifact.get("kind") == "margin_regression":
         # NCAAF spread margin artifact (scripts/ncaaf_margin_eval --fit): the
         # model predicts the MARGIN from fundamentals — the market number is
         # deliberately not in its feature list — and the probability is the
@@ -1677,6 +1738,62 @@ def _schedule_hold(books: dict, sport: str, game_id: str, game_date: str,
         return SCHEDULE_UNREADABLE
 
 
+# ── The NCAAF totals weather hold ─────────────────────────────────────────────
+#
+# mike, 2026-11-10, asked whether the totals model should wait for a game's
+# weather forecast before it can bet: "yes wait for a weather forecast".
+# docs/sports/ncaaf.md, the 2026-11-10 section.
+#
+# The forecast step (run_pipeline.step_ncaaf_weather) writes weather for games
+# up to 7 days out, once a day in the morning pipeline. The totals rule scores
+# any game DraftKings prices. A game scored before its forecast exists is
+# served with its three weather inputs missing, and a tree sends a missing
+# value wherever its training rows happened to teach it: of the 7,570 games in
+# the training frame ONE has no weather. Measured on the 2025 games, a game
+# with no forecast reads 1.9 points low on the fit of 2026-08-25 and 11.7 low
+# on the eleven-seed fit, against a gate of 8. Over 2022-2025 the rule with
+# no weather was 486-450, -9.0 units; with the true weather 235-191, +24.9.
+#
+# So while any of the three is missing the game is not decided: its rows are
+# written NONE with WEATHER_HOLD, like a schedule hold. A NONE row never
+# locks, so the first pass after the forecast exists decides it. A BET that
+# is already locked is never scored again, so nothing here can touch it.
+# Only the totals model reads these inputs (features.feature_engine
+# .NCAAF_TOTALS_FEATURES), so only it is held.
+#
+# A DOME game is not waiting for anything: its weather is DOME_WEATHER in
+# training rows and at serve time alike, so that is what it is served when it
+# has no row (a dome more than 7 days out, or one whose venue has no
+# coordinates and so never gets a row).
+_WEATHER_HELD_KINDS = ("total_regression",)
+WEATHER_HOLD = "waiting for the weather forecast"
+
+
+def totals_weather_hold(feature_cols, features: dict) -> str | None:
+    """Why a totals regression may not decide this game yet, or None.
+
+    WEATHER_HOLD when any weather input the model reads is missing (None or
+    NaN; a real 0.0 is weather). scripts/ncaaf_margin_eval.register_totals
+    calls this to prove a game with missing weather cannot be decided before
+    it lets an artifact that swings on missing weather go live.
+    """
+    from features.ncaaf_feature_engine import DOME_WEATHER
+    for col in DOME_WEATHER:
+        if col in feature_cols and numeric_feature_value(features.get(col)) is None:
+            return WEATHER_HOLD
+    return None
+
+
+def _dome_weather(feature_cols, features: dict) -> dict:
+    """The weather inputs a DOME game is missing, at the dome's own values.
+    Empty for an outdoor game and for a dome that has its weather row."""
+    from features.ncaaf_feature_engine import DOME_WEATHER
+    if numeric_feature_value(features.get("is_dome_game")) != 1.0:
+        return {}
+    return {col: value for col, value in DOME_WEATHER.items()
+            if col in feature_cols and numeric_feature_value(features.get(col)) is None}
+
+
 def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
     """Price-quality gate (config.MODEL_MIN_ODDS): True when the model has a
     floor on acceptable American odds and the DK price is juicier than it
@@ -2861,7 +2978,9 @@ def _clear_left_out_ufc_id(conn: DBConnection, game_id: str) -> None:
     statement as the per-game clear in run_scorer: BETs, in-play rows and NFL
     props are never touched. The sweep after the loop would also catch these
     rows, but it yields when it cannot get its locks within 10 s. Housekeeping
-    only, so a failure is logged and never fails the pass."""
+    only, so a failure is logged and never fails the pass. Like the per-game
+    clear, only the models a full pass re-writes (_pass_rewritten_models)."""
+    _mf, _mp = _model_id_filter(_pass_rewritten_models(False))
     try:
         conn.execute("""
             DELETE FROM picks
@@ -2870,7 +2989,7 @@ def _clear_left_out_ufc_id(conn: DBConnection, game_id: str) -> None:
               AND signal_type != 'BET'
               AND is_live IS NOT TRUE
               AND model_id NOT LIKE 'nfl_prop_%%'
-        """, (game_id,))
+        """ + _mf, (game_id,) + _mp)
         conn.commit()
     except Exception as exc:                                  # noqa: BLE001
         try:
@@ -3056,6 +3175,36 @@ def _get_public_betting(conn: DBConnection, game_id: str,
     return {"public_bet_pct": None, "public_money_pct": None}
 
 
+def _game_board(conn: DBConnection, target_date: str, ufc_horizon: str,
+                ncaaf_horizon: str, game_horizon: str) -> list[tuple]:
+    """run_scorer's game list: every unscored game dated `target_date`, and the
+    look-ahead sports' games inside their horizons, as (game_id, sport, season,
+    game_date, home_team, away_team, commence_time).
+
+    An NHL row only the schedule refresh has written is a game no book has
+    listed (data/ingestors/nhl_schedule_refresh.py stores the season ahead).
+    Before that refresh it had no row, so it is not on the list now. Without
+    this the look-ahead price filter would still drop the future ones, but a
+    filter that failed open would hand the models every one of them, and a
+    game no book listed by its own day would be scored with no price."""
+    from data.ingestors.nhl_schedule_refresh import DATA_SOURCE as nhl_schedule_only
+    _ahead_marks = ",".join(["?"] * len(GAME_SCORE_AHEAD_SPORTS))
+    return conn.execute(f"""
+        SELECT game_id, sport, season, game_date, home_team, away_team, commence_time
+        FROM games
+        WHERE home_score IS NULL
+          AND NOT (sport = 'NHL' AND COALESCE(data_source, '') = '{nhl_schedule_only}')
+          AND (game_date = ?
+               OR (sport = 'UFC' AND game_date > ? AND game_date <= ?)
+               OR (sport = 'NCAAF' AND game_date > ? AND game_date <= ?)
+               OR (sport IN ({_ahead_marks})
+                   AND game_date > ? AND game_date <= ?))
+        ORDER BY sport, game_date
+    """, (target_date, target_date, ufc_horizon,
+          target_date, ncaaf_horizon,
+          *GAME_SCORE_AHEAD_SPORTS, target_date, game_horizon)).fetchall()
+
+
 def _commence_time_map(conn: DBConnection, game_date: str, sport: str) -> dict:
     """
     {game_id: commence_time} for a sport+date, so prop scorers can stamp each
@@ -3106,12 +3255,41 @@ def _pregame_cutoff_map(conn: DBConnection, game_date: str, sport: str) -> dict:
     return {r[0]: r[1] for r in rows}
 
 
-def _game_started(pregame_cutoff: str | None) -> bool:
+def _parse_cutoff(pregame_cutoff):
+    """UTC datetime for a pregame cutoff, or None when it cannot be read.
+
+    None, blank and unparseable all mean unknown. A naive value is UTC.
+    Datetimes from the driver are accepted as-is.
+    """
+    if not pregame_cutoff:
+        return None
+    if isinstance(pregame_cutoff, datetime):
+        dt = pregame_cutoff
+    else:
+        ts = str(pregame_cutoff).strip()
+        if not ts:
+            return None
+        if ts.endswith(("Z", "z")):
+            ts = ts[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(ts)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _game_started(pregame_cutoff: str | None, *, now: datetime | None = None) -> bool:
     """
     True if a game's first pitch/tip is in the past — i.e. any DK snapshot
     taken now is an IN-PLAY price. Callers pass the PRE-GAME CUTOFF
     (_pregame_cutoff_map), not the scheduled start, so a game that began
     early is recognised as started when it actually started.
+
+    `now` defaults to `_utcnow()` at call time. A once-per-pass snapshot
+    must not be passed in: a long scoring pass reaches later games after
+    they have started.
 
     Prop scorers use this to skip started games entirely. Without the guard,
     the evening refresh loop kept scoring props DURING games: a player whose
@@ -3124,20 +3302,16 @@ def _game_started(pregame_cutoff: str | None) -> bool:
     Timestamp formats vary ('Z' suffix, ±HH:MM offset, naive) — parse in
     Python, never string-compare (session-93 lesson). Unknown/unparseable
     start time → False (don't skip; the morning pipeline must still score
-    games whose start hasn't been ingested yet).
+    games whose start hasn't been ingested yet). The cutoff itself counts
+    as started.
     """
-    if not pregame_cutoff:
+    dt = _parse_cutoff(pregame_cutoff)
+    if dt is None:
         return False
-    ts = str(pregame_cutoff).strip()
-    try:
-        if ts.endswith("Z"):
-            ts = ts[:-1] + "+00:00"
-        dt = datetime.fromisoformat(ts)
-    except ValueError:
-        return False
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-    return dt <= datetime.now(ZoneInfo("UTC"))
+    clock = now or _utcnow()
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    return dt <= clock.astimezone(timezone.utc)
 
 
 def _final_game_ids(conn: DBConnection, game_date: str, sport: str) -> set:
@@ -3197,7 +3371,75 @@ def _calibrated(model_id, prob):
         return float(prob)
 
 
+def _cutoff_by_game(conn: DBConnection, game_ids: list[str]) -> dict | None:
+    """{game_id: pregame cutoff} for these games. Missing ids are absent.
+
+    The value is `pregame_cutoff_sql` — actual first pitch, clamped — not
+    the scheduled start. A game with no row, or a NULL cutoff, is unknown.
+    None means the read failed; the caller keeps the rows.
+    """
+    if not game_ids:
+        return {}
+    try:
+        rows = conn.execute(
+            f"SELECT game_id, {pregame_cutoff_sql('games')} "
+            "FROM games WHERE game_id = ANY(?)",
+            (list(game_ids),),
+        ).fetchall()
+    except Exception as exc:  # noqa: BLE001 — unknown start is kept
+        logger.warning(
+            f"pregame cutoff lookup failed ({exc!r}); keeping the rows"
+        )
+        return None
+    return {r[0]: r[1] for r in rows}
+
+
+def _drop_pregame_after_cutoff(conn: DBConnection, picks: list[dict]) -> list[dict]:
+    """Drop `is_live` false rows once a fresh now() is at or past the cutoff.
+
+    Unknown start (no game row, NULL cutoff, unparseable) is kept. A live
+    row is kept and is not looked up. Every drop is one structured warning
+    with game_id, model and minutes_after_start. Order of the kept rows
+    matches the input.
+    """
+    if not picks:
+        return picks
+    pregame_ids = [
+        p.get("game_id") for p in picks
+        if not p.get("is_live") and p.get("game_id")
+    ]
+    if not pregame_ids:
+        return list(picks)
+    cutoffs = _cutoff_by_game(conn, sorted(set(pregame_ids)))
+    # A failed read is not evidence the game has started. Keep the rows;
+    # the next pass reads the cutoff again.
+    if cutoffs is None:
+        return list(picks)
+    now = _utcnow()
+    kept: list[dict] = []
+    for p in picks:
+        if p.get("is_live"):
+            kept.append(p)
+            continue
+        gid = p.get("game_id")
+        raw = cutoffs.get(gid) if gid else None
+        start = _parse_cutoff(raw)
+        if start is None or not _game_started(raw, now=now):
+            kept.append(p)
+            continue
+        minutes = (now - start).total_seconds() / 60.0
+        logger.bind(
+            game_id=gid,
+            model=p.get("model_id"),
+            minutes_after_start=round(minutes, 4),
+        ).warning("pregame pick rejected: at or past the pregame cutoff")
+    return kept
+
+
 def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
+    picks = _drop_pregame_after_cutoff(conn, picks)
+    if not picks:
+        return
     sql = """
         INSERT INTO picks (
             game_id, model_id, sport, game_date, pick_side, pick_label,
@@ -3377,12 +3619,28 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               -- tests/test_rule_model_markets_everywhere.py).
               WHEN p.model_id = 'nba_total_luck' OR p.model_id = 'mlb_total_market'
                 OR p.model_id = 'mlb_total_public_fade' OR p.model_id = 'nfl_wind_totals'
+                OR p.model_id = 'ncaab_total_blend'
+                OR p.model_id = 'ncaabw_total_blend'
                 THEN 'totals'
               -- The home team's own points, not the game total.
               WHEN p.model_id = 'nba_team_total_luck' THEN 'team_totals_home'
+              -- The first half's points, not the game total.
+              WHEN p.model_id = 'nba_first_half_total_luck' THEN 'totals_h1'
+              -- The first half's spread, not the game's.
+              WHEN p.model_id = 'ncaab_first_half_spread' THEN 'spreads_h1'
+              -- The first quarter's spread, not the game's.
+              WHEN p.model_id = 'nba_q1_trend' THEN 'spreads_q1'
+              -- The first quarter's moneyline, not the game's.
+              WHEN p.model_id = 'nba_q1_trend_ml' THEN 'h2h_q1'
+              -- The NCAAB first half's points, not the game total.
+              WHEN p.model_id = 'ncaab_first_half_total' THEN 'totals_h1'
               WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'
                 OR p.model_id = 'mlb_spread_market' OR p.model_id = 'nfl_opener_spread'
+                OR p.model_id = 'ncaab_spread_market'
                 THEN 'spreads'
+              -- ncaab_moneyline_own_spread has 'spread' in its id but bets
+              -- moneylines: it falls to h2h here, and no pattern above may
+              -- match it (tests/test_rule_model_markets_everywhere.py).
               ELSE 'h2h' END
         ORDER BY o.snapshot_at DESC
     """, (game_date,)).fetchall()
@@ -3404,7 +3662,7 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
 
         # Named markets, not a substring: "totals" in market would also start
         # line-checking the MLB first-five totals, which this never covered.
-        if market in ("totals", "team_totals_home", "team_totals_away"):
+        if market in ("totals", "team_totals_home", "team_totals_away", "totals_h1"):
             cur_line = current.get("total_line")
             if cur_line is not None and scored_line is not None:
                 delta = cur_line - scored_line
@@ -3610,6 +3868,32 @@ def _model_id_filter(model_ids) -> tuple[str, tuple]:
     return f" AND model_id IN ({','.join(['%s'] * len(ids))})", tuple(ids)
 
 
+def _pass_rewritten_models(game_models_only: bool) -> set[str]:
+    """The models whose unsettled no-bet rows a run_scorer clear may delete:
+    the ones this pass re-writes, and no other model's.
+
+    The pre-game poller (game_models_only) re-runs this scorer and nothing
+    else, so only the game models (config.MODELS). A full pass -- the refresh
+    pass and the daily pipeline -- also clears the MLB and WNBA prop models,
+    because their scorers run right after it in the same pass and that clear
+    is what releases a player the prop lock holds at NONE
+    (tests/test_prop_no_bet_rows_survive_to_tipoff.py). NFL props stay out:
+    the evening refresh does not re-run them. Golf has its own scorer and its
+    own delete.
+
+    Every other writer's NONE rows are that writer's (2026-11-06). Until then
+    a full pass cleared every model's: 257 of the 278 NONE rows the five
+    NCAAB cards wrote from 2026-11-04 (PR #1147) were deleted by the sweep
+    below, and a card decides a game once and never writes it again; the NFL
+    opener and wind rows, which publish_scored keeps current in place, were
+    deleted every pass and came back as new rows at the next NFL poll.
+    tests/test_scorer_spares_other_writers_no_bet_rows.py."""
+    if game_models_only:
+        return set(MODELS)
+    return (set(MODELS) | set(_PITCHER_PROP_CONFIG)
+            | set(_BATTER_PROP_CONFIG) | set(_WNBA_PROP_CONFIG))
+
+
 # ── Main Daily Run ────────────────────────────────────────────────────────────
 
 def run_scorer(target_date: str = None, dry_run: bool = False,
@@ -3691,20 +3975,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         game_horizon = (
             date.fromisoformat(target_date) + timedelta(days=GAME_SCORE_AHEAD_DAYS)
         ).isoformat()
-        _ahead_marks = ",".join(["?"] * len(GAME_SCORE_AHEAD_SPORTS))
-        games = conn.execute(f"""
-            SELECT game_id, sport, season, game_date, home_team, away_team, commence_time
-            FROM games
-            WHERE home_score IS NULL
-              AND (game_date = ?
-                   OR (sport = 'UFC' AND game_date > ? AND game_date <= ?)
-                   OR (sport = 'NCAAF' AND game_date > ? AND game_date <= ?)
-                   OR (sport IN ({_ahead_marks})
-                       AND game_date > ? AND game_date <= ?))
-            ORDER BY sport, game_date
-        """, (target_date, target_date, ufc_horizon,
-              target_date, ncaaf_horizon,
-              *GAME_SCORE_AHEAD_SPORTS, target_date, game_horizon)).fetchall()
+        games = _game_board(conn, target_date, ufc_horizon, ncaaf_horizon, game_horizon)
 
         # Narrow to the caller's subset BEFORE the price prefilter and the
         # feature build, or the restriction saves nothing.
@@ -4118,8 +4389,21 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 skipped_postponed += 1
                 continue
 
-            # Skip games that have already started — their picks are locked in
-            if commence_time and commence_time <= now_utc:
+            # Skip games that have already started — their picks are locked in.
+            # Re-read the cutoff and the clock here. `commence_time` is the
+            # scheduled start from the games query at the top of the pass,
+            # and `now_utc` was captured once before the loop; neither is the
+            # pregame cutoff, and both are stale by the time a long pass
+            # reaches this game. Unknown cutoff does not skip (the insert
+            # gate below is the same rule). A failed read fails open so one
+            # lookup cannot abort the pass; `_insert_picks` reads it again.
+            cutoff = _fail_open(
+                conn, "sp_game_started",
+                lambda gid=game_id: _pregame_cutoff(conn, gid),
+                None,
+                f"started-game cutoff for {game_id}",
+            )
+            if _game_started(cutoff):
                 skipped_started += 1
                 continue
 
@@ -4253,8 +4537,13 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                         # as before on both paths: a stale row left in place
                         # would turn the re-insert into a silent no-op
                         # (uq_picks_one_row_per_pick, ON CONFLICT DO NOTHING).
-                        _mf, _mp = (_model_id_filter(relevant_models)
-                                    if game_models_only else ("", ()))
+                        #
+                        # Never another writer's rows (2026-11-06): the full
+                        # pass clears only the models it and the prop scorers
+                        # after it re-write (_pass_rewritten_models).
+                        _mf, _mp = _model_id_filter(
+                            relevant_models if game_models_only
+                            else _pass_rewritten_models(False))
                         conn.execute("""
                             DELETE FROM picks
                             WHERE game_id = %s
@@ -4456,6 +4745,14 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # reason the per-game clear does not exempt a game that started
         # mid-pass: a start the feed pushes back makes that exemption hold
         # prop players the prop scorers would otherwise have re-scored.
+        #
+        # AND ONLY THE MODELS THIS PASS RE-WRITES, on every path (2026-11-06).
+        # The full pass had no model filter, so this sweep took every
+        # writer's unsettled no-bet rows on every unstarted game in the
+        # window: the NCAAB cards' NONE rows (written once, at the decision,
+        # never again -- 257 of 278 deleted from 2026-11-04) and the NFL
+        # opener and wind rows publish_scored keeps current in place. Those
+        # writers own their rows. _pass_rewritten_models says whose are ours.
         if not dry_run:
             _sc, _sp = _scope()
             _keep = ""
@@ -4463,8 +4760,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             if rescored:
                 _keep = f" AND game_id NOT IN ({','.join(['%s'] * len(rescored))})"
                 _keep_p = tuple(sorted(rescored))
-            _mf, _mp = (_model_id_filter(MODELS) if game_models_only
-                        else ("", ()))
+            _mf, _mp = _model_id_filter(_pass_rewritten_models(game_models_only))
             try:
                 conn.execute("SET LOCAL lock_timeout = '10s'")
                 conn.execute("""

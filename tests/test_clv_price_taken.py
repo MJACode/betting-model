@@ -74,14 +74,22 @@ class _Conn:
             cols = [c.strip().split(".")[-1] for c in s[7:s.index(" FROM picks")].split(",")]
             return _Res([tuple(p[c] for c in cols) for p in self.picks
                          if p["game_date"] == params[0]])
+        if "FROM nba_schedule" in s:    # an NBA game here is on its league row, tipping when written
+            return _Res([(p["game_id"], p["game_time"], "regular") for p in self.picks
+                         if p["game_id"] in params[0]])
         if "FROM odds" in s:
+            params = list(params)
+            created_after = None
+            if "snapshot_at::timestamptz >" in s:
+                created_after = params.pop()
             if "spread_home = %s" in s or "total_line = %s" in s:
                 game_id, market, book, bound, line = params
             else:
                 game_id, market, book, bound = params
                 line = None
             rows = sorted((q for q in self.quotes
-                           if q[0] == book and q[1] == market and _ts(q[2]) <= _ts(bound)),
+                           if q[0] == book and q[1] == market and _ts(q[2]) <= _ts(bound)
+                           and (created_after is None or _ts(q[2]) > _ts(created_after))),
                           key=lambda q: _ts(q[2]), reverse=True)
             if line is not None and "spreads" in market:
                 rows = [q for q in rows if q[3].get("spread_home") == line]
@@ -160,6 +168,13 @@ TOTALS = [  # group A: DraftKings -115, BetMGM -105 at the same 8.5
      "CAR @ CLE Under 42.5 (Wind 11 mph, fanatics) · 0.78u", (-110.0, "fanatics")),
     ("nfl_wind_totals", -105.0, None, None,
      "DEN @ KC Under 43.5 (Wind 12 mph, DK) · 1.15u", (-105.0, "draftkings")),
+    # new labels: the book is on the row, and the annotation is gone
+    ("nfl_wind_totals", -105.0, -105.0, "fanduel",
+     "NYJ @ MIA Under 43.5 · 1.00u", (-105.0, "fanduel")),
+    ("nfl_opener_spread", -105.0, -105.0, "betmgm",
+     "TEN @ NYG — NYG -1 · 1.96u · NEW 0m", (-105.0, "betmgm")),
+    ("nfl_prop_market", -120.0, -120.0, "fanduel",
+     "Jadarian Price Over 1.5 Rec", (-120.0, "fanduel")),
     # a parenthesis on a model that never names a book in its label is NOT a book
     ("mlb_f5_moneyline", -130.0, None, None, "NYY ML (F5)", (-130.0, "draftkings")),
     # nothing priced

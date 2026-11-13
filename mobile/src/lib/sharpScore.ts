@@ -18,9 +18,11 @@ import { decisionEdge } from '@/lib/decisionPrice';
 
 // ── Model CLV pedigree store ────────────────────────────────────────────────
 export interface ModelClv {
-  beatRate: number | null; // share of settled picks that beat the close (clv_beat / clv_settled)
+  beatRate: number | null; // beats / (beats + losses). A 0% close is not in this rate.
   avgClvPct: number | null;
-  settled: number; // settled picks with a captured CLV (sample size)
+  settled: number; // settled picks with a captured CLV, pushes included (sample size)
+  /** Matching closes. Optional so a cached v2 map still parses. */
+  push?: number;
 }
 
 // Below this CLV sample a model is treated as "unproven" — the pedigree

@@ -31,9 +31,10 @@ Three properties are pinned here, each of which has a silent failure mode:
    delete the leg a second later with no error anywhere. The add would simply
    not work.
 
-3. THE DK-ONLY PRICING CAVEAT IS SCOPED TO THE LIVE VIEW. It is load-bearing
-   (CLAUDE.md §6: the models decide on DraftKings, and the in-play feed is a
-   ~45s cache) and it is wrong on the pre-game board, which is multi-book.
+3. THE LIVE PRICING CAVEAT IS SCOPED TO THE LIVE VIEW. It is load-bearing
+   (CLAUDE.md §6: each in-play pick is decided at the book named on its card,
+   and the in-play feed is a ~45s cache) and it is wrong on the pre-game
+   board, where the price ages are different.
 """
 
 from __future__ import annotations
@@ -153,9 +154,10 @@ def test_the_live_dot_on_the_segment_is_conditional():
     src = _read(PICKS)
     m = re.search(r'<SubTabBtn\s+label="Live Signals"(.*?)/>', src, re.S)
     assert m, "the Live Signals segment is gone, or was renamed"
-    assert re.search(r"dot=\{liveData\.length > 0\}", m.group(1)), (
-        "the live dot is not gated on there being live picks -- a dot that is "
-        "always lit has stopped meaning anything"
+    assert re.search(r"dot=\{!signalsLocked && liveData\.length > 0\}", m.group(1)), (
+        "the live dot is not gated on there being live picks, and it stays on "
+        "while Signals is locked -- a free member must not be told a live pick "
+        "is waiting, and a dot that is always lit has stopped meaning anything"
     )
     # and the dot the button draws must be the gated prop, not "this is the live
     # board" -- which `live` now is, on every render of the live segment.
@@ -296,27 +298,29 @@ def test_the_empty_live_board_does_not_blink_to_a_spinner():
     assert re.search(
         r"const liveFirstLoad = liveLoading && prevLiveCount\.current === null;", src
     ), "the live spinner is not restricted to the first load"
-    assert re.search(r"const busy = view === 'live' \? liveFirstLoad : loading;", src), (
-        "the live board's busy flag is back on every poll"
+    assert re.search(r"const busy = view === 'live' \? liveFirstLoad : loading && !loaded;", src), (
+        "the busy flag is back on every poll"
     )
     # ... and pull-to-refresh must still spin, which it can no longer read off `busy`.
-    assert "setPulling(true)" in src and "refreshing={view === 'live' ? pulling : busy}" in src, (
+    assert "setPulling(true)" in src and "refreshing={pulling}" in src, (
         "pull-to-refresh on the live board no longer shows the reader anything"
     )
 
 
 def test_the_paywall_card_never_replaces_the_live_empty_state():
-    """SignalLockCard is for picks that EXIST and are hidden, not for an empty board.
+    """A free member's lock is the whole Picks surface, not a sentence about an empty live board.
 
-    At count 0 it says the models "haven't found a bet that clears the line yet
-    today" -- on a sport with no in-play model that is a promise the app cannot
-    keep, which is the sentence lib/liveSports.ts exists to prevent, and it pitches
-    a trial on a board that is structurally empty there (UX review, 2026-09-12).
+    The 2026-09-12 card at count 0 said the models "haven't found a bet that
+    clears the line yet today" — a promise the app cannot keep on a sport with
+    no in-play model. A free member can use the Record tab (Matt, 2026-10-27): the lock
+    replaces All, Signals, Live and Lines, and it does not claim the board is
+    empty. An entitled reader still gets the live empty state.
     """
     src = _read(PICKS)
-    assert re.search(
-        r"\{signalsLocked && !\(view === 'live' && liveData\.length === 0\) \?", src
-    ), "an unentitled reader gets the paywall card instead of the live empty state"
+    card = _read(MOBILE / "src" / "components" / "SignalLockCard.tsx")
+    assert "signalsLocked ?" in src, "a free member is not shown the lock instead of the board"
+    assert "haven't found a bet" not in card
+    assert "Unlock with Premium" in card
 
 
 def test_the_selected_segment_can_be_scrolled_into_view():
@@ -489,13 +493,13 @@ def test_pruning_is_held_while_the_live_half_is_unknown():
     assert "livePicks.error" in body, "a failed live fetch can prune a live leg"
 
 
-# ── 4. the DK-only caveat stays where it is true ──────────────────────────────
+# ── 4. the live pricing caveat stays where it is true ─────────────────────────
 
 
 def test_the_live_pricing_caveat_is_scoped_to_the_live_view():
     src = _read(PICKS)
-    assert "priced and placed at DraftKings only" in src, (
-        "the live DK-only / staleness caveat was lost in the merge (CLAUDE.md §6)"
+    assert "priced and placed at the sportsbook named on its card" in src, (
+        "the live pricing / staleness caveat was lost in the merge (CLAUDE.md §6)"
     )
     m = re.search(
         r"\{view === 'live' && liveData\.length > 0 \? \(\s*<View style=\{styles\.liveNoteWrap\}>(.*?)\)\s*:\s*null\}",
@@ -509,7 +513,16 @@ def test_the_live_pricing_caveat_is_scoped_to_the_live_view():
         "2026-09-12) -- and on a sport with no live model it sits above an empty "
         "state saying exactly that."
     )
-    assert "DraftKings only" in m.group(1)
+    note = m.group(1)
+    assert "the book on each card" in note
+    # Since 2026-09-10 the in-play models decide at the best bettable in-play
+    # price, so an in-play pick can be a FanDuel or BetMGM bet. "DraftKings
+    # only" above those cards told the reader to bet a book that never took
+    # the pick (CLAUDE.md §6: the row records which book decided it).
+    assert "DraftKings only" not in note and "at DraftKings only" not in src, (
+        "the live board says in-play picks are DraftKings only again; they are "
+        "decided at decision_book, which is often another book"
+    )
 
 
 def test_the_caveat_does_not_reintroduce_the_your_sportsbook_contradiction():
@@ -519,3 +532,30 @@ def test_the_caveat_does_not_reintroduce_the_your_sportsbook_contradiction():
     m = re.search(r"styles\.liveNoteWrap\}>(.*?)</View>", src, re.S)
     assert m, "live caveat block not found"
     assert "your sportsbook" not in m.group(1).lower()
+
+
+def test_the_pregame_boards_reload_while_open():
+    """All and Signals reload every TODAY_POLL_MS while the tab is focused, and on return.
+
+    Matt, 2026-11-12: a Signals card said "FD line now 41.5 (-120)" after FanDuel
+    had been 40.5 for hours. The odds table had it; the board had loaded once
+    and never again. A background reload must not swap the rows for a skeleton
+    or spin the pull-to-refresh control, so `busy` is first-load only.
+    """
+    src = _read(PICKS)
+    hook = _read(MOBILE / "src" / "hooks" / "useTodayPicks.ts")
+    assert re.search(r"export const TODAY_POLL_MS = 10 \* 60_000;", hook)
+    focus = src[src.index("useFocusEffect(\n    useCallback(() => {\n      reloadToday("):]
+    focus = focus[: focus.index("[reloadToday]")]
+    assert "setInterval(" in focus and "TODAY_POLL_MS" in focus, "no reload loop on the pre-game boards"
+    assert "AppState.addEventListener('change'" in focus and "clearInterval(id)" in focus
+    assert "loading && !loaded" in src, "a background reload would blank the board"
+    # Overlapping loads (pull during poll, a resume past midnight ET): newest wins.
+    load = hook[hook.index("const load = useCallback"):hook.index("}, [target]);")]
+    assert "const mine = ++seq.current" in load
+    # The error clears on success only, so a failing poll does not re-announce
+    # the banner every 10 minutes.
+    first_clear = load.index("setError(null)")
+    assert load.index("if (!current()) return;") < first_clear, "error is cleared before the load succeeds"
+    # The partial banner hides for a tap's retry, not for every background poll.
+    assert "{!error && !loading && partial ?" not in src

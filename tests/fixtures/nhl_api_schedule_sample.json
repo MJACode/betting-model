@@ -1,0 +1,1054 @@
+{
+ "_note": "Trimmed copies of two api-web.nhle.com/v1/schedule/<date> answers fetched 2026-10-22: the week of 2026-10-22 (all 12 games of 10-22 and all 5 of 10-25, incl. the Heritage Classic at a neutral site; two games on each other day) and the week of 2027-04-08 (the last regular-season week, nextStartDate null; two games a day). Fields kept: what the refresh reads.",
+ "2026-10-22": {
+  "nextStartDate": "2026-10-29",
+  "previousStartDate": "2026-10-15",
+  "preSeasonStartDate": "2026-09-19",
+  "regularSeasonStartDate": "2026-09-29",
+  "regularSeasonEndDate": "2027-04-10",
+  "playoffEndDate": "2027-06-10",
+  "numberOfGames": 49,
+  "gameWeek": [
+   {
+    "date": "2026-10-22",
+    "dayAbbrev": "THU",
+    "numberOfGames": 12,
+    "games": [
+     {
+      "id": 2026020154,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-22T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "NSH",
+       "placeName": {
+        "default": "Nashville"
+       },
+       "commonName": {
+        "default": "Predators"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "BOS",
+       "placeName": {
+        "default": "Boston"
+       },
+       "commonName": {
+        "default": "Bruins"
+       }
+      }
+     },
+     {
+      "id": 2026020155,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-22T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Toronto",
+      "awayTeam": {
+       "abbrev": "NYR",
+       "placeName": {
+        "default": "New York"
+       },
+       "commonName": {
+        "default": "Rangers"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "TOR",
+       "placeName": {
+        "default": "Toronto"
+       },
+       "commonName": {
+        "default": "Maple Leafs"
+       }
+      }
+     },
+     {
+      "id": 2026020156,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-22T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "SJS",
+       "placeName": {
+        "default": "San Jose"
+       },
+       "commonName": {
+        "default": "Sharks"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "OTT",
+       "placeName": {
+        "default": "Ottawa"
+       },
+       "commonName": {
+        "default": "Senators",
+        "fr": "Sénateurs"
+       }
+      }
+     },
+     {
+      "id": 2026020157,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-22T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "ANA",
+       "placeName": {
+        "default": "Anaheim"
+       },
+       "commonName": {
+        "default": "Ducks"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "NJD",
+       "placeName": {
+        "default": "New Jersey"
+       },
+       "commonName": {
+        "default": "Devils"
+       }
+      }
+     },
+     {
+      "id": 2026020158,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-22T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "FLA",
+       "placeName": {
+        "default": "Florida",
+        "fr": "Floride"
+       },
+       "commonName": {
+        "default": "Panthers"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "PIT",
+       "placeName": {
+        "default": "Pittsburgh"
+       },
+       "commonName": {
+        "default": "Penguins"
+       }
+      }
+     },
+     {
+      "id": 2026020159,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-22T23:30:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/New_York",
+      "awayTeam": {
+       "abbrev": "LAK",
+       "placeName": {
+        "default": "Los Angeles"
+       },
+       "commonName": {
+        "default": "Kings"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "NYI",
+       "placeName": {
+        "default": "New York"
+       },
+       "commonName": {
+        "default": "Islanders"
+       }
+      }
+     },
+     {
+      "id": 2026020160,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-23T00:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Central",
+      "awayTeam": {
+       "abbrev": "VGK",
+       "placeName": {
+        "default": "Vegas"
+       },
+       "commonName": {
+        "default": "Golden Knights"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "STL",
+       "placeName": {
+        "default": "St. Louis"
+       },
+       "commonName": {
+        "default": "Blues"
+       }
+      }
+     },
+     {
+      "id": 2026020161,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-23T00:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Central",
+      "awayTeam": {
+       "abbrev": "WPG",
+       "placeName": {
+        "default": "Winnipeg"
+       },
+       "commonName": {
+        "default": "Jets"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "DAL",
+       "placeName": {
+        "default": "Dallas"
+       },
+       "commonName": {
+        "default": "Stars"
+       }
+      }
+     },
+     {
+      "id": 2026020162,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-23T01:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Edmonton",
+      "awayTeam": {
+       "abbrev": "MIN",
+       "placeName": {
+        "default": "Minnesota"
+       },
+       "commonName": {
+        "default": "Wild"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "CGY",
+       "placeName": {
+        "default": "Calgary"
+       },
+       "commonName": {
+        "default": "Flames"
+       }
+      }
+     },
+     {
+      "id": 2026020163,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-23T01:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Edmonton",
+      "awayTeam": {
+       "abbrev": "CAR",
+       "placeName": {
+        "default": "Carolina",
+        "fr": "Caroline"
+       },
+       "commonName": {
+        "default": "Hurricanes"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "EDM",
+       "placeName": {
+        "default": "Edmonton"
+       },
+       "commonName": {
+        "default": "Oilers"
+       }
+      }
+     },
+     {
+      "id": 2026020164,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-23T02:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Pacific",
+      "awayTeam": {
+       "abbrev": "UTA",
+       "placeName": {
+        "default": "Utah"
+       },
+       "commonName": {
+        "default": "Mammoth"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "SEA",
+       "placeName": {
+        "default": "Seattle"
+       },
+       "commonName": {
+        "default": "Kraken"
+       }
+      }
+     },
+     {
+      "id": 2026020165,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-23T02:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Vancouver",
+      "awayTeam": {
+       "abbrev": "DET",
+       "placeName": {
+        "default": "Detroit"
+       },
+       "commonName": {
+        "default": "Red Wings"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "VAN",
+       "placeName": {
+        "default": "Vancouver"
+       },
+       "commonName": {
+        "default": "Canucks"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "date": "2026-10-23",
+    "dayAbbrev": "FRI",
+    "numberOfGames": 2,
+    "games": [
+     {
+      "id": 2026020166,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-24T00:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Chicago",
+      "awayTeam": {
+       "abbrev": "MTL",
+       "placeName": {
+        "default": "Montréal"
+       },
+       "commonName": {
+        "default": "Canadiens"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "CHI",
+       "placeName": {
+        "default": "Chicago"
+       },
+       "commonName": {
+        "default": "Blackhawks"
+       }
+      }
+     },
+     {
+      "id": 2026020167,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-24T01:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Denver",
+      "awayTeam": {
+       "abbrev": "TBL",
+       "placeName": {
+        "default": "Tampa Bay"
+       },
+       "commonName": {
+        "default": "Lightning"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "COL",
+       "placeName": {
+        "default": "Colorado"
+       },
+       "commonName": {
+        "default": "Avalanche"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "date": "2026-10-24",
+    "dayAbbrev": "SAT",
+    "numberOfGames": 2,
+    "games": [
+     {
+      "id": 2026020168,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-24T17:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "ANA",
+       "placeName": {
+        "default": "Anaheim"
+       },
+       "commonName": {
+        "default": "Ducks"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "PHI",
+       "placeName": {
+        "default": "Philadelphia",
+        "fr": "Philadelphie"
+       },
+       "commonName": {
+        "default": "Flyers"
+       }
+      }
+     },
+     {
+      "id": 2026020169,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-24T19:30:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "LAK",
+       "placeName": {
+        "default": "Los Angeles"
+       },
+       "commonName": {
+        "default": "Kings"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "NJD",
+       "placeName": {
+        "default": "New Jersey"
+       },
+       "commonName": {
+        "default": "Devils"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "date": "2026-10-25",
+    "dayAbbrev": "SUN",
+    "numberOfGames": 5,
+    "games": [
+     {
+      "id": 2026020180,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-25T19:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Chicago",
+      "awayTeam": {
+       "abbrev": "FLA",
+       "placeName": {
+        "default": "Florida",
+        "fr": "Floride"
+       },
+       "commonName": {
+        "default": "Panthers"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "CHI",
+       "placeName": {
+        "default": "Chicago"
+       },
+       "commonName": {
+        "default": "Blackhawks"
+       }
+      }
+     },
+     {
+      "id": 2026020181,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-25T22:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Central",
+      "awayTeam": {
+       "abbrev": "NYI",
+       "placeName": {
+        "default": "New York"
+       },
+       "commonName": {
+        "default": "Islanders"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "DAL",
+       "placeName": {
+        "default": "Dallas"
+       },
+       "commonName": {
+        "default": "Stars"
+       }
+      }
+     },
+     {
+      "id": 2026020182,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": true,
+      "startTimeUTC": "2026-10-25T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Winnipeg",
+      "awayTeam": {
+       "abbrev": "MTL",
+       "placeName": {
+        "default": "Montréal"
+       },
+       "commonName": {
+        "default": "Canadiens"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "WPG",
+       "placeName": {
+        "default": "Winnipeg"
+       },
+       "commonName": {
+        "default": "Jets"
+       }
+      }
+     },
+     {
+      "id": 2026020183,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-26T00:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Central",
+      "awayTeam": {
+       "abbrev": "COL",
+       "placeName": {
+        "default": "Colorado"
+       },
+       "commonName": {
+        "default": "Avalanche"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "NSH",
+       "placeName": {
+        "default": "Nashville"
+       },
+       "commonName": {
+        "default": "Predators"
+       }
+      }
+     },
+     {
+      "id": 2026020184,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-26T02:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Vancouver",
+      "awayTeam": {
+       "abbrev": "MIN",
+       "placeName": {
+        "default": "Minnesota"
+       },
+       "commonName": {
+        "default": "Wild"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "VAN",
+       "placeName": {
+        "default": "Vancouver"
+       },
+       "commonName": {
+        "default": "Canucks"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "date": "2026-10-26",
+    "dayAbbrev": "MON",
+    "numberOfGames": 2,
+    "games": [
+     {
+      "id": 2026020185,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-26T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/New_York",
+      "awayTeam": {
+       "abbrev": "LAK",
+       "placeName": {
+        "default": "Los Angeles"
+       },
+       "commonName": {
+        "default": "Kings"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "NYR",
+       "placeName": {
+        "default": "New York"
+       },
+       "commonName": {
+        "default": "Rangers"
+       }
+      }
+     },
+     {
+      "id": 2026020186,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-27T00:30:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Edmonton",
+      "awayTeam": {
+       "abbrev": "TOR",
+       "placeName": {
+        "default": "Toronto"
+       },
+       "commonName": {
+        "default": "Maple Leafs"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "CGY",
+       "placeName": {
+        "default": "Calgary"
+       },
+       "commonName": {
+        "default": "Flames"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "date": "2026-10-27",
+    "dayAbbrev": "TUE",
+    "numberOfGames": 2,
+    "games": [
+     {
+      "id": 2026020188,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-27T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "CBJ",
+       "placeName": {
+        "default": "Columbus"
+       },
+       "commonName": {
+        "default": "Blue Jackets"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "PHI",
+       "placeName": {
+        "default": "Philadelphia",
+        "fr": "Philadelphie"
+       },
+       "commonName": {
+        "default": "Flyers"
+       }
+      }
+     },
+     {
+      "id": 2026020189,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-28T00:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "BOS",
+       "placeName": {
+        "default": "Boston"
+       },
+       "commonName": {
+        "default": "Bruins"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "CAR",
+       "placeName": {
+        "default": "Carolina",
+        "fr": "Caroline"
+       },
+       "commonName": {
+        "default": "Hurricanes"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "date": "2026-10-28",
+    "dayAbbrev": "WED",
+    "numberOfGames": 2,
+    "games": [
+     {
+      "id": 2026020199,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-28T23:30:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "PHI",
+       "placeName": {
+        "default": "Philadelphia",
+        "fr": "Philadelphie"
+       },
+       "commonName": {
+        "default": "Flyers"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "WSH",
+       "placeName": {
+        "default": "Washington"
+       },
+       "commonName": {
+        "default": "Capitals"
+       }
+      }
+     },
+     {
+      "id": 2026020200,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2026-10-29T00:30:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Edmonton",
+      "awayTeam": {
+       "abbrev": "CGY",
+       "placeName": {
+        "default": "Calgary"
+       },
+       "commonName": {
+        "default": "Flames"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "EDM",
+       "placeName": {
+        "default": "Edmonton"
+       },
+       "commonName": {
+        "default": "Oilers"
+       }
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "2027-04-08": {
+  "nextStartDate": null,
+  "previousStartDate": "2027-04-01",
+  "preSeasonStartDate": "2026-09-19",
+  "regularSeasonStartDate": "2026-09-29",
+  "regularSeasonEndDate": "2027-04-10",
+  "playoffEndDate": "2027-06-10",
+  "numberOfGames": 29,
+  "gameWeek": [
+   {
+    "date": "2027-04-08",
+    "dayAbbrev": "THU",
+    "numberOfGames": 2,
+    "games": [
+     {
+      "id": 2026021316,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2027-04-08T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "WSH",
+       "placeName": {
+        "default": "Washington"
+       },
+       "commonName": {
+        "default": "Capitals"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "OTT",
+       "placeName": {
+        "default": "Ottawa"
+       },
+       "commonName": {
+        "default": "Senators",
+        "fr": "Sénateurs"
+       }
+      }
+     },
+     {
+      "id": 2026021317,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2027-04-08T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "MTL",
+       "placeName": {
+        "default": "Montréal"
+       },
+       "commonName": {
+        "default": "Canadiens"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "TBL",
+       "placeName": {
+        "default": "Tampa Bay"
+       },
+       "commonName": {
+        "default": "Lightning"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "date": "2027-04-09",
+    "dayAbbrev": "FRI",
+    "numberOfGames": 2,
+    "games": [
+     {
+      "id": 2026021325,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2027-04-09T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Detroit",
+      "awayTeam": {
+       "abbrev": "PIT",
+       "placeName": {
+        "default": "Pittsburgh"
+       },
+       "commonName": {
+        "default": "Penguins"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "DET",
+       "placeName": {
+        "default": "Detroit"
+       },
+       "commonName": {
+        "default": "Red Wings"
+       }
+      }
+     },
+     {
+      "id": 2026021326,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2027-04-09T23:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "BOS",
+       "placeName": {
+        "default": "Boston"
+       },
+       "commonName": {
+        "default": "Bruins"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "FLA",
+       "placeName": {
+        "default": "Florida",
+        "fr": "Floride"
+       },
+       "commonName": {
+        "default": "Panthers"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "date": "2027-04-10",
+    "dayAbbrev": "SAT",
+    "numberOfGames": 2,
+    "games": [
+     {
+      "id": 2026021329,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2027-04-10T16:30:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "US/Eastern",
+      "awayTeam": {
+       "abbrev": "WSH",
+       "placeName": {
+        "default": "Washington"
+       },
+       "commonName": {
+        "default": "Capitals"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "PHI",
+       "placeName": {
+        "default": "Philadelphia",
+        "fr": "Philadelphie"
+       },
+       "commonName": {
+        "default": "Flyers"
+       }
+      }
+     },
+     {
+      "id": 2026021330,
+      "season": 20262027,
+      "gameType": 2,
+      "neutralSite": false,
+      "startTimeUTC": "2027-04-10T19:00:00Z",
+      "gameState": "FUT",
+      "gameScheduleState": "OK",
+      "venueTimezone": "America/Denver",
+      "awayTeam": {
+       "abbrev": "MIN",
+       "placeName": {
+        "default": "Minnesota"
+       },
+       "commonName": {
+        "default": "Wild"
+       }
+      },
+      "homeTeam": {
+       "abbrev": "COL",
+       "placeName": {
+        "default": "Colorado"
+       },
+       "commonName": {
+        "default": "Avalanche"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "date": "2027-04-11",
+    "dayAbbrev": "SUN",
+    "numberOfGames": 0,
+    "games": []
+   },
+   {
+    "date": "2027-04-12",
+    "dayAbbrev": "MON",
+    "numberOfGames": 0,
+    "games": []
+   },
+   {
+    "date": "2027-04-13",
+    "dayAbbrev": "TUE",
+    "numberOfGames": 0,
+    "games": []
+   },
+   {
+    "date": "2027-04-14",
+    "dayAbbrev": "WED",
+    "numberOfGames": 0,
+    "games": []
+   }
+  ]
+ }
+}

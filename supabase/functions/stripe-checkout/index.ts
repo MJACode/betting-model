@@ -15,9 +15,9 @@
 //
 // Secrets (supabase secrets set):
 //   STRIPE_SECRET_KEY            sk_test_… / sk_live_…
-//   STRIPE_PRICE_MONTHLY         price_…  ($29.99 / month)
+//   STRIPE_PRICE_MONTHLY         price_…  ($24.99 / month)
 //   STRIPE_PRICE_SEMIANNUAL      price_…  ($129.99 / 6 months)
-//   STRIPE_PRICE_ANNUAL          price_…  ($199.99 / year)
+//   STRIPE_PRICE_ANNUAL          price_…  ($149.99 / year)
 //   STRIPE_TRIAL_DAYS            optional, defaults to 7
 //   BILLING_RETURN_URL           optional, defaults to the app scheme below
 // SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are injected automatically.
@@ -143,6 +143,46 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const plan = String(body?.plan ?? "");
+    const endTrial = body?.end_trial === true;
+
+    // End the trial on the subscription they already have. Never open a
+    // second Checkout beside it. A different plan, or no Stripe subscription
+    // id, is refused — that would switch tiers or start another sub.
+    if (endTrial) {
+      if (plan !== "monthly" && plan !== "annual") {
+        return json(
+          { error: "Ending the trial would switch you to a different plan or start a second subscription. That was refused." },
+          409,
+        );
+      }
+      const { data: trialRow } = await admin
+        .from("subscriptions")
+        .select("status, plan, stripe_subscription_id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (
+        !trialRow ||
+        trialRow.status !== "trialing" ||
+        !trialRow.stripe_subscription_id
+      ) {
+        return json(
+          { error: "Ending the trial here would start a second subscription. That was refused." },
+          409,
+        );
+      }
+      if (trialRow.plan && trialRow.plan !== plan) {
+        return json(
+          { error: "Ending the trial would switch you to a different plan or start a second subscription. That was refused." },
+          409,
+        );
+      }
+      const updated = await stripe(
+        `/subscriptions/${trialRow.stripe_subscription_id}`,
+        form({ trial_end: "now" }),
+      );
+      return json({ ended: true, status: updated.status });
+    }
+
     const priceId = PRICES[plan];
     if (!priceId) {
       return json(

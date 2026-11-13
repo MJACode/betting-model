@@ -26,8 +26,9 @@ const readUtf8 = (p: string) => readFileSync(p, 'utf-8').replace(/\r\n/g, '\n');
 import { join, relative, sep } from 'node:path';
 
 import {
-  formatCurrency,
-  formatCurrencySigned,
+  FLAT_UNIT_TONE_SCALE,
+  formatFlatStake,
+  formatFlatUnits,
   formatPctSigned,
   formatSigned,
   formatSignedUnits,
@@ -226,15 +227,17 @@ check(
 const TONE_CASES: [string, number, number, number, string, string][] = [
   // label, value, digits, scale, printed, tone
   ['−0.0004 as a percent', -0.0004, 1, 100, formatPctSigned(-0.0004), 'textSecondary'],
-  ['1e-13 dollars', 1e-13, 2, 1, formatCurrencySigned(1e-13), 'textSecondary'],
-  ['−1e-13 dollars', -1e-13, 2, 1, formatCurrencySigned(-1e-13), 'textSecondary'],
+  ['1e-11 stored (0.00u)', 1e-11, 2, FLAT_UNIT_TONE_SCALE, formatFlatUnits(1e-11), 'textSecondary'],
+  ['−1e-11 stored (0.00u)', -1e-11, 2, FLAT_UNIT_TONE_SCALE, formatFlatUnits(-1e-11), 'textSecondary'],
+  ['+0.4 stored (0.00u)', 0.4, 2, FLAT_UNIT_TONE_SCALE, formatFlatUnits(0.4), 'textSecondary'],
+  ['+90.91 stored (+0.91u)', 90.91, 2, FLAT_UNIT_TONE_SCALE, formatFlatUnits(90.91), 'betInk'],
   ['CLV −0.03pp', -0.03, 1, 1, formatSigned(-0.03, 1, 'pp'), 'textSecondary'],
   ['0.0008 as a percent', 0.0008, 1, 100, formatPctSigned(0.0008), 'betInk'],
   ['−0.0008 as a percent', -0.0008, 1, 100, formatPctSigned(-0.0008), 'avoidInk'],
   // Half-way cases: whatever toFixed does, the tone and the print agree
   // (checked just below), because both come from the same rounding.
   ['0.0005 as a percent (a tie)', 0.0005, 1, 100, formatPctSigned(0.0005), pnlTone(0.0005, 1, 100)],
-  ['$0.005 (a tie)', 0.005, 2, 1, formatCurrencySigned(0.005), pnlTone(0.005, 2)],
+  ['0.5 stored (a tie)', 0.5, 2, FLAT_UNIT_TONE_SCALE, formatFlatUnits(0.5), pnlTone(0.5, 2, FLAT_UNIT_TONE_SCALE)],
 ];
 for (const [label, v, d, sc, printed, tone] of TONE_CASES) {
   check(`pnlTone(${label}) = ${tone}`, pnlTone(v, d, sc) === tone, pnlTone(v, d, sc));
@@ -243,7 +246,7 @@ for (const [label, v, d, sc, printed, tone] of TONE_CASES) {
 }
 check('pnlTone −0.0004 @1dp% prints "0.0%"', formatPctSigned(-0.0004) === '0.0%');
 check('pnlTone 0.0008 @1dp% prints "+0.1%"', formatPctSigned(0.0008) === '+0.1%');
-check('pnlTone 1e-13 prints "$0.00"', formatCurrencySigned(1e-13) === '$0.00');
+check('pnlTone 1e-11 stored prints "0.00u"', formatFlatUnits(1e-11) === '0.00u');
 check('roundedAt(-0.0004, 1, 100) is a zero', roundedAt(-0.0004, 1, 100) === 0 && roundsToZero(-0.0004, 1, 100));
 check('roundedAt coerces a NUMERIC string', roundedAt('12.5' as unknown as number, 1) === 12.5);
 check('pnlTone reads a NUMERIC string', pnlTone('-3.2' as unknown as number, 2) === 'avoidInk');
@@ -266,16 +269,16 @@ const CASES: [string, string][] = [
   [formatPctSigned(0.0001), '0.0%'],
   [formatPctSigned(-0.0004), '0.0%'],
   [formatPctSigned(undefined), '—'],
-  [formatCurrencySigned(-25), `${MINUS}$25.00`],
-  [formatCurrencySigned(30), '+$30.00'],
-  [formatCurrencySigned(0.004), '$0.00'],
-  [formatCurrencySigned(0), '$0.00'],
-  [formatCurrencySigned(1e-13), '$0.00'],
-  [formatCurrencySigned(Infinity), '—'],
-  [formatCurrency(-4), `${MINUS}$4.00`],
-  [formatCurrency(30.5), '$30.50'],
-  [formatCurrency(-0.001), '$0.00'],
-  [formatCurrency(null), '—'],
+  [formatFlatUnits(-2500), `${MINUS}25.00u`],
+  [formatFlatUnits(3000), '+30.00u'],
+  [formatFlatUnits(0.4), '0.00u'],
+  [formatFlatUnits(0), '0.00u'],
+  [formatFlatUnits(1e-11), '0.00u'],
+  [formatFlatUnits(Infinity), '—'],
+  [formatFlatStake(400), '4u'],
+  [formatFlatStake(3050), '30.5u'],
+  [formatFlatStake(0.1), '0u'],
+  [formatFlatStake(null), '—'],
   [formatSignedUnits(2.44), '+2.4u'],
   [formatSignedUnits(-0.5), `${MINUS}0.5u`],
   [formatSignedUnits(0.04), '0.0u'],
@@ -412,7 +415,9 @@ for (const f of files) {
   for (const m of code(readUtf8(f)).matchAll(/pnlColor\(((?:[^()]|\([^()]*\))*)\)/g)) {
     if (/^value, digits/.test(m[1])) continue;
     toneCalls.push(rel);
-    if (!/,\s*(1,\s*100|2|1)\s*$/.test(m[1])) badToneCalls.push(`${rel}: pnlColor(${m[1]})`);
+    // `2, FLAT_UNIT_TONE_SCALE` is formatFlatUnits' precision: two decimals of
+    // a stored per-100 result shown as units (lib/format).
+    if (!/,\s*(1,\s*100|2,\s*FLAT_UNIT_TONE_SCALE|2|1)\s*$/.test(m[1])) badToneCalls.push(`${rel}: pnlColor(${m[1]})`);
   }
 }
 check(`every pnlColor() call passes the display's digits/scale (${toneCalls.length} calls)`, toneCalls.length >= 20 && badToneCalls.length === 0, badToneCalls.join(', '));

@@ -28,6 +28,10 @@ ODDS_COLS = ("odds_id", "game_id", "sport", "market", "bookmaker", "snapshot_typ
              "total_line", "over_price", "under_price", "source")
 PROP_COLS = ("prop_id", "game_id", "game_date", "player_name", "market", "bookmaker",
              "snapshot_type", "snapshot_at", "line", "over_price")
+GAME_COLS = ("game_id", "sport", "game_date", "commence_time", "first_pitch_at")
+# The three columns most fixtures fill; the start times stay NULL, which is
+# the close rule before 2026-10-26 (it falls open without a start time).
+GAMES_INSERT = "INSERT INTO games (game_id, sport, game_date) VALUES (?, ?, ?)"
 
 
 # ── the SQLite stand-in ──────────────────────────────────────────────────────
@@ -51,6 +55,41 @@ def render(sql: str, params) -> str:
         parts = sql.split("%s")
         assert len(parts) == len(params) + 1, "placeholder count"
         sql = parts[0] + "".join(_lit(p) + rest for p, rest in zip(params, parts[1:]))
+    return sql
+
+
+def _operand_start(sql: str, at: int) -> int:
+    """Where the operand of the cast ending at `at` begins: a balanced
+    parenthesised group, or one (possibly qualified) column name."""
+    i = at
+    if sql[i - 1] == ")":
+        depth = 0
+        while True:
+            i -= 1
+            if sql[i] == ")":
+                depth += 1
+            elif sql[i] == "(":
+                depth -= 1
+                if depth == 0:
+                    return i
+    while i > 0 and (sql[i - 1].isalnum() or sql[i - 1] in "_."):
+        i -= 1
+    return i
+
+
+def sqlite_casts(sql: str) -> str:
+    """The Postgres time arithmetic the prune sends, in SQLite's terms.
+
+    `x::timestamptz` becomes julianday(x), a day count that orders like the
+    timestamp and reads 'Z' and '+00:00' as the same instant, as the cast
+    does; `interval 'N minutes'` becomes N minutes as a fraction of a day. The
+    close bound (2026-10-26) is the first statement here that needs either."""
+    sql = re.sub(r"interval '(\d+) minutes'", r"(\1 / 1440.0)", sql)
+    cast = "::timestamptz"
+    while cast in sql:
+        at = sql.index(cast)
+        start = _operand_start(sql, at)
+        sql = f"{sql[:start]}julianday({sql[start:at]}){sql[at + len(cast):]}"
     return sql
 
 
@@ -89,7 +128,8 @@ class StandIn:
         self.db = sqlite3.connect(":memory:")
         self.db.execute(f"CREATE TABLE odds ({', '.join(ODDS_COLS)})")
         self.db.execute(f"CREATE TABLE player_prop_odds ({', '.join(PROP_COLS)})")
-        self.db.execute("CREATE TABLE games (game_id PRIMARY KEY, sport, game_date)")
+        self.db.execute(f"CREATE TABLE games ({GAME_COLS[0]} PRIMARY KEY, "
+                        f"{', '.join(GAME_COLS[1:])})")
         self.db.execute("CREATE TABLE job_heartbeats (job_id TEXT PRIMARY KEY, "
                         "last_run_at TEXT NOT NULL, last_status TEXT, detail TEXT)")
         self.log: list[tuple[str, str]] = []      # ("sql", text) / ("commit", "")
@@ -100,9 +140,9 @@ class StandIn:
         if self.fail and self.fail(sql, params):
             raise Timeout("canceling statement due to statement timeout")
         text = render(sql, params)
-        self.log.append(("sql", text))
+        self.log.append(("sql", text))           # what Postgres would be sent
         before = self.db.total_changes
-        cur = self.db.execute(text)
+        cur = self.db.execute(sqlite_casts(text))
         if _is_delete_sql(text):
             n = self.db.total_changes - before
             self.deleted.append(n)
@@ -142,7 +182,7 @@ def build(conn: StandIn, seed: int = 7) -> None:
         ("NFL_G", "NFL", "2026-10-21"), ("NBA_H", "NBA", "2026-10-15"),
         ("NHL_I", "NHL", "2026-10-12"), ("UFC_J", "UFC", None),
     ]
-    conn.db.executemany("INSERT INTO games VALUES (?, ?, ?)", games)
+    conn.db.executemany(GAMES_INSERT, games)
     books = ["fanduel", "betmgm", "pinnacle", "draftkings", "sbr_consensus",
              "cfbd_bovada", "bovada"]
     sources = [None, None, None, None, "bovada_direct", *po.PROTECTED_SOURCES]
@@ -165,7 +205,7 @@ def build(conn: StandIn, seed: int = 7) -> None:
     pid = 0
     moved = [("NFL_POST", "NFL", "2026-10-19"), ("NFL_SWAP", "NFL", "2026-10-19")]
     prop_games = [(g, s, d) for g, s, d in games if d] + moved
-    conn.db.executemany("INSERT INTO games VALUES (?, ?, ?)", moved)
+    conn.db.executemany(GAMES_INSERT, moved)
     for gid, _, gdate in prop_games:
         for market in ("player_points", "player_rec_yds_alternate"):
             for player in ("Ann", "Bo"):
@@ -327,7 +367,7 @@ def test_ties_keep_the_lowest_id_as_the_opener():
     """A ladder writes many rows per book per pass. Which tied row is the
     opener is fixed by the primary key, so a re-run cannot change its mind."""
     conn = StandIn()
-    conn.db.execute("INSERT INTO games VALUES ('G', 'MLB', '2026-10-10')")
+    conn.db.execute(GAMES_INSERT, ("G", "MLB", "2026-10-10"))
     for i in (1, 2, 3):
         conn.db.execute(
             f"INSERT INTO odds ({', '.join(ODDS_COLS)}) VALUES "
@@ -377,7 +417,7 @@ def test_every_statement_the_prune_sends_names_its_game(monkeypatch):
     every statement it sent."""
     conn = StandIn()
     build(conn)
-    conn.db.execute("INSERT INTO games VALUES ('NBA_K', 'NBA', '2026-10-18')")
+    conn.db.execute(GAMES_INSERT, ("NBA_K", "NBA", "2026-10-18"))
     for i in range(4):
         conn.db.execute(
             f"INSERT INTO odds ({', '.join(ODDS_COLS)}) VALUES "
@@ -768,7 +808,7 @@ def nba_paths(conn: StandIn, seed: int = 5) -> None:
     dates and today: three markets, three books, pre-game and in-play rows,
     NULL snapshot types, and paid (non-NULL source) rows mixed in."""
     rnd = random.Random(seed)
-    conn.db.executemany("INSERT INTO games VALUES (?, 'NBA', ?)", list(NBA_DAYS.items()))
+    conn.db.executemany(GAMES_INSERT, [(g, "NBA", d) for g, d in NBA_DAYS.items()])
     oid = 500000
     for gid in NBA_DAYS:
         for market in NBA_MARKETS:

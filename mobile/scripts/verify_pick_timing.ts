@@ -191,6 +191,11 @@ function mkPick(over: Partial<Pick>): Pick {
     nbaTotals?.note);
   check('NBA totals overs note has no void line', Boolean(nbaTotals && !nbaTotals.note.includes('Void')));
   // The NBA home team-total unders post the same way, in the same hour.
+  const nbaFirstHalf = pickTimingInfo(mkPick({ sport: 'NBA', model_id: 'nba_first_half_total_luck', created_at: NOW }));
+  check('an nba_first_half_total_luck pick posts once and carries no void line',
+    nbaFirstHalf?.kind === 'posted' && Boolean(nbaFirstHalf?.note.startsWith('Posted once and never re-priced'))
+      && !nbaFirstHalf.note.includes('Void'),
+    nbaFirstHalf?.note);
   const nbaTeamTotal = pickTimingInfo(mkPick({ sport: 'NBA', model_id: 'nba_team_total_luck', created_at: NOW }));
   check('NBA home team-total unders take the posted-once note',
     nbaTeamTotal?.kind === 'posted' && Boolean(nbaTeamTotal?.note.startsWith('Posted once and never re-priced')),
@@ -230,6 +235,46 @@ function mkPick(over: Partial<Pick>): Pick {
     Boolean(nflLive?.label.includes('· Q4')) && !nflLive?.label.includes('inning'),
     nflLive?.label,
   );
+
+  // The NBA loop writes the quarter into the same column (nba_live_loop.build_pick).
+  const nbaLive = pickTimingInfo(
+    mkPick({ sport: 'NBA', model_id: 'nba_live_spread_q12', is_live: true, inning_at_pick: 2 }),
+  );
+  check(
+    'NBA live shows a quarter, not an inning',
+    Boolean(nbaLive?.label.includes('· Q2')) && !nbaLive?.label.includes('inning'),
+    nbaLive?.label,
+  );
+
+  // The NCAAB loop writes the HALF (ncaab_live_loop.build_pick): halves, never a quarter.
+  const ncaabEarly = pickTimingInfo(
+    mkPick({ sport: 'NCAAB', model_id: 'ncaab_live_spread_h1', is_live: true, inning_at_pick: 1 }),
+  );
+  check('NCAAB early live shows the first half, not a quarter',
+    Boolean(ncaabEarly?.label.includes('· 1st half')) && !ncaabEarly?.label.includes('Q1'), ncaabEarly?.label);
+  const ncaabBreak = pickTimingInfo(
+    mkPick({ sport: 'NCAAB', model_id: 'ncaab_live_total_h2', is_live: true, inning_at_pick: 1 }),
+  );
+  check('an NCAAB late bet at period 1 was placed at halftime',
+    Boolean(ncaabBreak?.label.includes('· halftime')), ncaabBreak?.label);
+  const ncaabLate = pickTimingInfo(
+    mkPick({ sport: 'NCAAB', model_id: 'ncaab_live_spread_h2', is_live: true, inning_at_pick: 2 }),
+  );
+  check('NCAAB late live shows the second half', Boolean(ncaabLate?.label.includes('· 2nd half')), ncaabLate?.label);
+
+  // The NCAABW loop bets during the halftime break only and stores quarter 2
+  // (ncaabw_live_loop.build_pick): the card says halftime, never "Q2".
+  const ncaabwHalf = pickTimingInfo(
+    mkPick({ sport: 'NCAABW', model_id: 'ncaabw_live_total_ht', is_live: true, inning_at_pick: 2 }),
+  );
+  check('an NCAABW live bet says halftime, not a quarter',
+    Boolean(ncaabwHalf?.label.includes('· halftime')) && !ncaabwHalf?.label.includes('Q2'), ncaabwHalf?.label);
+  check('its note says the bet is on the full game and when the price was read',
+    Boolean(ncaabwHalf?.note.includes('on the full-game total'))
+    && Boolean(ncaabwHalf?.note.includes('read during the break, shortly before the time above'))
+    && !ncaabwHalf?.note.includes('Locked the moment this crossed'), ncaabwHalf?.note);
+  check('every other live pick keeps the general note',
+    Boolean(nbaLive?.note.includes('Locked the moment this crossed')), nbaLive?.note);
 
   const noPeriod = pickTimingInfo(mkPick({ is_live: true, inning_at_pick: null }));
   check(
@@ -286,6 +331,9 @@ function mkPick(over: Partial<Pick>): Pick {
 check('an nba_total_luck pick reads the totals market', gameMarketForModel('nba_total_luck') === 'totals',
   String(gameMarketForModel('nba_total_luck')));
 // The home team-total unders read the home team's own team-total rows.
+check('an nba_first_half_total_luck pick reads the first-half market',
+  gameMarketForModel('nba_first_half_total_luck') === 'totals_h1',
+  String(gameMarketForModel('nba_first_half_total_luck')));
 check('an nba_team_total_luck pick reads the home team-total market',
   gameMarketForModel('nba_team_total_luck') === 'team_totals_home',
   String(gameMarketForModel('nba_team_total_luck')));

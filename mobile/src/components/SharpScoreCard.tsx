@@ -44,7 +44,9 @@ export function SharpScoreCard({ pick }: { pick: Pick }) {
         max={40}
         sub={
           parts.pedigreeKnown && clv?.beatRate != null
-            ? `This model has beaten the closing line on ${formatPct(clv.beatRate, 0)} of its settled bets — the strongest evidence of a real edge.`
+            ? `This model has beaten the closing line on ${formatPct(clv.beatRate, 0)} of closes that did not match${
+                (clv.push ?? 0) > 0 ? ` (${clv.push} push)` : ''
+              } — the strongest evidence of a real edge.`
             : 'Not enough settled picks with closing-line data yet — scored neutral until the model proves it.'
         }
       />

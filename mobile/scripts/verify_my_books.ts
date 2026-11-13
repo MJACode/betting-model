@@ -102,10 +102,14 @@ check('EV at −105 is p × (1 + 100/105) − 1', near(evAtPrice(0.598, -105), 0
   check('no book of theirs: no hand-off at all', nothing == null, JSON.stringify(nothing));
 }
 {
-  // Live picks are DraftKings only: a member without DK gets no live hand-off.
+  // A live pick hands off only to the book that decided it: a member without
+  // that book gets no live hand-off.
   const live = mkPick({ is_live: true, decision_book: 'draftkings', decision_odds: -110 });
   check('live, member has DK → DK', bestHandoffForPick(live, [], null, undefined, [MODEL_BOOK])?.bookmaker === MODEL_BOOK);
   check('live, member lacks DK → no hand-off', bestHandoffForPick(live, [], null, undefined, ['fanduel']) == null);
+  const liveFd = mkPick({ is_live: true, decision_book: 'fanduel', decision_odds: -105 });
+  check('live decided at FD, member has FD → FD', bestHandoffForPick(liveFd, [], null, undefined, ['fanduel'])?.bookmaker === 'fanduel');
+  check('live decided at FD, member has only DK → no hand-off', bestHandoffForPick(liveFd, [], null, undefined, [MODEL_BOOK]) == null);
 }
 
 if (failures > 0) {

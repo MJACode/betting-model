@@ -3,7 +3,12 @@
  * Run: npx tsx scripts/verify_tracked_performance.ts
  */
 import { computeTrackedResults, trackedBetStatus } from '../src/lib/trackedPerformance';
+import { customTrackedStake, trackedStakeFor } from '../src/lib/trackedStake';
 import type { Pick } from '../src/types';
+
+// The Performance tab's default: the posted stake (1u to win at the decided
+// price), the Record tab's units. Amounts are at the 100-is-1u scale.
+const asPosted = trackedStakeFor('posted', {});
 
 let failures = 0;
 function check(name: string, cond: boolean) {
@@ -72,10 +77,10 @@ check('PUSH → push', trackedBetStatus(push) === 'push');
 check('NO_ACTION → no_action', trackedBetStatus(noAction) === 'no_action');
 check('null → open', trackedBetStatus(open1) === 'open');
 
-console.log('computeTrackedResults — record + P&L');
+console.log('computeTrackedResults — record + units, as posted');
 const trackedIds = [1, 2, 3, 4, 5, 6, 7]; // 7 has no matching pick (pre-lock era)
 const picks = [win, loss, push, open1, open2, noAction, untrackedWin];
-const { rows, summary } = computeTrackedResults(trackedIds, picks);
+const { rows, summary } = computeTrackedResults(trackedIds, picks, asPosted);
 
 check('untracked pick excluded', rows.every((r) => r.pick.pick_id !== 99));
 check('missing id dropped silently', rows.length === 6);
@@ -84,9 +89,11 @@ check('losses counted', summary.losses === 1);
 check('pushes counted', summary.pushes === 1);
 check('open counted', summary.open === 2);
 check('settled = W+L+P', summary.settled === 3);
-check('net = sum of settled profit', Math.abs(summary.net - (66.67 - 100 + 0)) < 1e-9);
+// −150 posted: a win pays 1u (100), a loss costs 1.5u (150), a push risks nothing.
+check('net = posted win − posted loss', Math.abs(summary.net - (100 - 150)) < 1e-6);
 check('NO_ACTION excluded from net + record', rows.find((r) => r.status === 'no_action')!.profit === 0);
-check('ROI over settled stake', Math.abs((summary.roi ?? 0) - (66.67 - 100) / 300) < 1e-9);
+check('staked = what the win and the loss risked (a push risks nothing)', Math.abs(summary.staked - 300) < 1e-6);
+check('ROI = net / risked', Math.abs((summary.roi ?? 0) - (100 - 150) / 300) < 1e-6);
 
 console.log('computeTrackedResults — ordering');
 check('open rows first', rows[0].status === 'open' && rows[1].status === 'open');
@@ -97,16 +104,16 @@ check(
 );
 
 console.log('computeTrackedResults — edges');
-const empty = computeTrackedResults([], []);
+const empty = computeTrackedResults([], [], asPosted);
 check('empty → no rows', empty.rows.length === 0);
 check('empty → roi null', empty.summary.roi === null);
-const dup = computeTrackedResults([1], [win, win]);
+const dup = computeTrackedResults([1], [win, win], asPosted);
 check('duplicate pick rows deduped', dup.rows.length === 1 && dup.summary.wins === 1);
-const openOnly = computeTrackedResults([4], [open1]);
+const openOnly = computeTrackedResults([4], [open1], asPosted);
 check('open-only → settled 0, roi null', openOnly.summary.settled === 0 && openOnly.summary.roi === null);
 
-console.log('computeTrackedResults — stakeFor (stake modes)');
-// win at -110 (profit_flat ~ +90.91), loss (profit_flat -100)
+console.log('computeTrackedResults — My stakes (the member\'s own stake, risked at the price)');
+// win at -110, loss at -110
 const w50 = mkPick({ pick_id: 21, result: 'WIN', profit_flat: 90.91, dk_odds: -110 });
 const l50 = mkPick({
   pick_id: 22,
@@ -115,21 +122,23 @@ const l50 = mkPick({
   dk_odds: -110,
   game_date: '2026-06-29',
 });
-const half = computeTrackedResults([21, 22], [w50, l50], () => 50);
+const half = computeTrackedResults([21, 22], [w50, l50], (p) => customTrackedStake(p, 50));
 check(
-  'stake 50 scales win to ~45.46',
-  Math.abs(half.rows.find((r) => r.pick.pick_id === 21)!.profit - 45.46) < 0.01,
+  'stake 50 on a −110 win pays 45.45',
+  Math.abs(half.rows.find((r) => r.pick.pick_id === 21)!.profit - 45.45) < 1e-9,
 );
 check('stake 50 scales loss to -50', half.rows.find((r) => r.pick.pick_id === 22)!.profit === -50);
 check('staked sums settled stakes', half.summary.staked === 100);
 check('roi = net / staked', Math.abs((half.summary.roi ?? 0) - half.summary.net / 100) < 1e-9);
-const perBet = computeTrackedResults([21, 22], [w50, l50], (p) => (p.pick_id === 21 ? 200 : 100));
+const perBet = computeTrackedResults([21, 22], [w50, l50], (p) =>
+  customTrackedStake(p, p.pick_id === 21 ? 200 : 100),
+);
 check(
   'per-bet custom stakes',
   Math.abs(perBet.rows.find((r) => r.pick.pick_id === 21)!.profit - 181.82) < 0.01 &&
     perBet.summary.staked === 300,
 );
-const zero = computeTrackedResults([21], [w50], () => 0);
+const zero = computeTrackedResults([21], [w50], (p) => customTrackedStake(p, 0));
 check('zero stake → 0 profit, roi null', zero.summary.net === 0 && zero.summary.roi === null);
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

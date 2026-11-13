@@ -11,7 +11,7 @@
 import { errorText } from './errors';
 
 /** Where a user's access came from, as reported by public.my_access(). */
-export type AccessSource = 'app' | 'discord' | 'both' | 'none';
+export type AccessSource = 'app' | 'discord' | 'both' | 'none' | 'comped' | 'app_review';
 
 /** The row public.my_access() returns. One read, the whole picture. */
 export interface AccessRow {
@@ -67,14 +67,22 @@ export function parseAccess(raw: unknown): AccessRow {
   if (!row || typeof row !== 'object') return NO_ACCESS;
   const r = row as Record<string, unknown>;
   const bool = (k: string): boolean => r[k] === true;
-  const source = r.source;
+  const rawSource = r.source;
+  const source =
+    rawSource === 'app' ||
+    rawSource === 'discord' ||
+    rawSource === 'both' ||
+    rawSource === 'comped' ||
+    rawSource === 'app_review'
+      ? rawSource
+      : 'none';
+  // source 'discord' is a Whop match and the app stays locked. A stale
+  // my_access() that ORs that match into entitled must not unlock the app.
+  const whopOnly = source === 'discord';
   return {
-    entitled: bool('entitled'),
-    source:
-      source === 'app' || source === 'discord' || source === 'both'
-        ? source
-        : 'none',
-    app_access: bool('app_access'),
+    entitled: bool('entitled') && !whopOnly,
+    source,
+    app_access: bool('app_access') && !whopOnly,
     discord_access: bool('discord_access'),
     discord_linked: bool('discord_linked'),
     discord_username:
@@ -125,24 +133,24 @@ export function parseDiscordCallback(url: string): DiscordCallback {
 }
 
 /**
- * One line describing the Discord connection for the Settings card.
+ * One line describing the Discord connection.
  *
- * States it plainly when the membership is the thing PAYING for the app —
- * a Discord subscriber should never be left wondering why they were not
- * charged, or worry that they need to buy again.
+ * A Whop membership ties the person. It does not pay for the app, so this
+ * line never says that it does. An Apple subscription still includes our
+ * Discord role.
  */
 export function describeDiscordLink(access: AccessRow): string {
   if (!access.discord_linked) {
     return access.discord_access
-      ? 'Your Discord membership covers the app. Connect Discord to manage it here.'
+      ? 'A Discord membership matches this account. Connect Discord to tie them together.'
       : 'Connect your Discord account to join the subscriber server.';
   }
   const who = access.discord_username ?? 'Discord';
-  if (access.discord_access) {
-    return `Connected as ${who} — your Discord membership includes the app.`;
-  }
   if (access.app_role_granted) {
     return `Connected as ${who} — your subscription includes the Discord.`;
+  }
+  if (access.discord_access) {
+    return `Connected as ${who}.`;
   }
   if (access.guild_member) {
     return `Connected as ${who}. Subscribe to unlock the subscriber channels.`;
@@ -151,21 +159,38 @@ export function describeDiscordLink(access: AccessRow): string {
 }
 
 /**
- * What the "one membership covers both" line on the paywall should say, given
- * where the user's access comes from. Empty string when there is nothing worth
- * saying, so the caller can render it conditionally without a null check.
+ * Paywall line for where access came from. Empty when there is nothing to
+ * say, so the caller can skip it. A Whop-only match (`source === 'discord'`)
+ * does not unlock the app and gets no "included" line.
  */
 export function accessSourceCopy(access: AccessRow): string {
   switch (access.source) {
-    case 'discord':
-      return 'Included with your Discord membership — no second subscription needed.';
-    case 'both':
-      return 'You have both an app subscription and a Discord membership. You are only being charged for the app subscription if it is active in the App Store.';
     case 'app':
+    case 'both':
       return 'Your subscription includes access to the subscriber Discord.';
     default:
       return '';
   }
+}
+
+/**
+ * The Apple-paid invite. Not exported: a screen that wants it has to go
+ * through discordInviteIfPaid, and only after the App Store row is active.
+ */
+const APPLE_PAID_DISCORD_INVITE = 'https://discord.gg/JWMUzK9Da';
+
+/**
+ * The invite URL, or null. `paid` means an active Apple subscription, not a
+ * trial and not a Whop membership. Free and trial must not be handed a string
+ * they could render or open.
+ */
+export function discordInviteIfPaid(
+  paid: boolean,
+  inviteUrl: string = APPLE_PAID_DISCORD_INVITE,
+): string | null {
+  if (!paid) return null;
+  const url = inviteUrl.trim();
+  return url.length > 0 ? url : null;
 }
 
 /** Turn a link failure into something worth showing a user. */

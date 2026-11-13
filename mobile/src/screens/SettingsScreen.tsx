@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -8,6 +8,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  useWindowDimensions,
   StyleSheet,
   Text,
   TextInput,
@@ -16,9 +17,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, type RouteProp } from '@react-navigation/native';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
-import { booksLabel, booksName, booksShortList, MODEL_BOOK } from '@/lib/markets';
+import { bookLabelShort, booksLabel, booksName, MODEL_BOOK } from '@/lib/markets';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { StatePickerSheet } from '@/components/StatePickerSheet';
 import { useBettingState } from '@/hooks/useBettingState';
@@ -35,44 +36,68 @@ import {
   checkBankroll,
   commitBankrollText,
   editBankrollInput,
+  formatDollars,
   formatPct,
+  saveBankrollOnLeave,
+  unitDollars,
   unitRowSubtitle,
   unitRowTitle,
   visibleBankrollError,
 } from '@/lib/bankroll';
 import { NotificationsCard } from '@/components/NotificationsCard';
+import { usePushOptIn } from '@/hooks/usePushOptIn';
+import { usePushState } from '@/hooks/usePushNotifications';
 import { useFeedbackUnread } from '@/hooks/useFeedback';
 import { useAuth } from '@/hooks/useAuth';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { authErrorMessage } from '@/lib/auth';
-import { useSubscription } from '@/hooks/useSubscription';
 import { useAccess } from '@/hooks/useAccess';
-import { useEntitlement } from '@/hooks/useEntitlement';
-import { billingReady } from '@/lib/billingConfig';
+import { useMembership } from '@/hooks/useMembership';
+import { billingReady, planFor } from '@/lib/billingConfig';
 import { discordLinkReady } from '@/lib/discordConfig';
-import { describeDiscordLink, discordErrorMessage } from '@/lib/discord';
+import { describeDiscordLink, discordErrorMessage, discordInviteIfPaid } from '@/lib/discord';
 import { DiscordLinkModal } from '@/components/DiscordLinkModal';
-import { billingErrorMessage, openManageSubscription } from '@/lib/billing';
-import { describeSubscription } from '@/lib/billingHelpers';
+import { billingErrorMessage, endTrialEarly, openManageSubscription, restorePurchases } from '@/lib/billing';
+import { earlyUnlockLine, isPlanKey, planStatusCopy } from '@/lib/billingHelpers';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 import { isUpdateReady, subscribeUpdateReady, UPDATE_READY_SETTINGS } from '@/lib/updateReady';
 import {
   APP_VERSION,
-  DISCORD_URL,
+  PRIVACY_URL,
+  TERMS_URL,
   TWITTER_URL,
   WEBSITE_URL,
   openLink,
 } from '@/lib/socialLinks';
+import {
+  EXPLORE_TILE_SUMMARY,
+  LEGAL_TILE_SUMMARY,
+  SETTINGS_GRID_SECTIONS,
+  SETTINGS_SECTION_TITLE,
+  accountTileSummary,
+  bankrollTileSummary,
+  communityTileSummary,
+  isSettingsSectionId,
+  notificationsTileSummary,
+  settingsHomeLayout,
+  sportsbooksTileSummary,
+  type SettingsSectionId,
+} from '@/lib/settingsHome';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-/** Section heading — turns a long flat list of cards into scannable groups. */
-function SectionHeader({ title }: { title: string }) {
-  return <Text style={styles.sectionHeader}>{title}</Text>;
-}
+const SECTION_ICON: Record<SettingsSectionId, React.ComponentProps<typeof Ionicons>['name']> = {
+  sportsbooks: 'storefront-outline',
+  bankroll: 'wallet-outline',
+  notifications: 'notifications-outline',
+  explore: 'compass-outline',
+  community: 'chatbubble-outline',
+  account: 'person-outline',
+  legal: 'shield-checkmark-outline',
+};
 
 /**
  * A tappable row that opens another screen or an external link.
@@ -117,308 +142,309 @@ function LinkRow({
   );
 }
 
-/** The iOS decimal pad has no return key; this bar is its Done. */
-const BANKROLL_ACCESSORY_ID = 'bankrollDone';
+export function SettingsScreen() {
+  const navigation = useNavigation<Nav>();
+  const { fontScale, width } = useWindowDimensions();
+  const { summaries, accountSpoken, showAccountSection } = useSettingsHomeModel();
+  const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
+  // A newer bundle is downloaded and runs at the next start (src/lib/updateReady.ts).
+  const updateReady = useSyncExternalStore(subscribeUpdateReady, isUpdateReady);
+  const open = (section: SettingsSectionId) => {
+    navigation.navigate('SettingsSection', { section });
+  };
+  const grid = SETTINGS_GRID_SECTIONS.filter((id) => id !== 'account' || showAccountSection);
+  // Half-width tiles collide once Dynamic Type is up, on a narrow phone, or
+  // when the count is odd. Legal is always full width, below these.
+  const { paired, fullWidth } = settingsHomeLayout(grid, fontScale, width);
 
-/** A labeled Lower | Raise pair — words, not icon steppers, so VoiceOver reads
- *  the action (#786 removed the icon-only ones for exactly that). */
-function LowerRaise({
-  what,
-  canLower,
-  canRaise,
-  onStep,
-}: {
-  what: string;
-  canLower: boolean;
-  canRaise: boolean;
-  onStep: (dir: -1 | 1) => void;
-}) {
   return (
-    <View style={styles.stepPill}>
-      {([-1, 1] as const).map((dir) => {
-        const enabled = dir === -1 ? canLower : canRaise;
-        const word = dir === -1 ? 'Lower' : 'Raise';
-        return (
-          <Pressable
-            key={dir}
-            onPress={() => onStep(dir)}
-            disabled={!enabled}
-            accessibilityRole="button"
-            accessibilityLabel={`${word} ${what}`}
-            accessibilityState={{ disabled: !enabled }}
-            hitSlop={{ top: 6, bottom: 6 }}
-            style={({ pressed }) => [
-              styles.stepBtn,
-              dir === 1 && styles.stepBtnRight,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={[styles.stepText, !enabled && styles.stepTextOff]}>{word}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
+    <SettingsScroll>
+      {paired.length > 0 ? (
+        <View style={styles.grid}>
+          {paired.map((id) => (
+            <View key={id} style={styles.tileWrap}>
+              <SettingsTile
+                title={SETTINGS_SECTION_TITLE[id]}
+                summary={summaries[id]}
+                spoken={id === 'account' ? accountSpoken : summaries[id]}
+                icon={SECTION_ICON[id]}
+                onPress={() => open(id)}
+              />
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {fullWidth.map((id) => (
+        <SettingsTile
+          key={id}
+          wide
+          title={SETTINGS_SECTION_TITLE[id]}
+          summary={summaries[id]}
+          spoken={id === 'account' ? accountSpoken : summaries[id]}
+          icon={SECTION_ICON[id]}
+          onPress={() => open(id)}
+        />
+      ))}
+      <SettingsTile
+        wide
+        title={SETTINGS_SECTION_TITLE.legal}
+        summary={summaries.legal}
+        icon={SECTION_ICON.legal}
+        onPress={() => open('legal')}
+      />
+      <Pressable
+        onPress={() => openLink(WEBSITE_URL, 'the website')}
+        accessibilityRole="link"
+        accessibilityLabel={`Signalbase version ${APP_VERSION}, build ${BUILD_STAMP}, ${websiteLabel}`}
+        accessibilityHint="Opens the website"
+        hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
+        style={({ pressed }) => pressed && styles.pressed}
+      >
+        <Text style={styles.version}>
+          Signalbase v{APP_VERSION} · {BUILD_STAMP} · {websiteLabel}
+        </Text>
+      </Pressable>
+      {/* Its own line, outside the website link, so the status is not buried
+          in a wrapped caption (UX review, 2026-10-19). */}
+      {updateReady ? <Text style={styles.version}>{UPDATE_READY_SETTINGS}</Text> : null}
+    </SettingsScroll>
   );
+}
+
+export function SettingsSectionScreen({
+  route,
+}: {
+  route: RouteProp<RootStackParamList, 'SettingsSection'>;
+}) {
+  const section = route.params?.section;
+  switch (section) {
+    case 'sportsbooks':
+      return <SportsbooksSection />;
+    case 'bankroll':
+      return <BankrollSection />;
+    case 'notifications':
+      return <NotificationsSection />;
+    case 'explore':
+      return <ExploreSection />;
+    case 'community':
+      return <CommunitySection />;
+    case 'account':
+      return <AccountSection />;
+    case 'legal':
+      return <LegalSection />;
+    default:
+      return (
+        <SettingsScroll>
+          <Text style={styles.sub}>That section is not available.</Text>
+        </SettingsScroll>
+      );
+  }
 }
 
 /**
- * The optional bankroll — display only (lib/bankroll.ts). It converts the
- * app's flat units into the member's dollars and sizes nothing. Typing only
- * edits the field (the unit row follows it); blur or Done saves a valid amount,
- * clears on empty, and on invalid keeps the saved amount, shows the error and
- * puts the saved amount back. Every error waits for blur or Done except the
- * over-$10M one, which shows as you type.
+ * One scroll for every Settings surface. automaticallyAdjustKeyboardInsets
+ * keeps the bankroll field above the keyboard; the betslip spacer is the
+ * last child so the bar never covers the last row.
  */
-function BankrollCard() {
-  const { settings, ready, setAmount, stepUnit } = useBankroll();
-  const [text, setText] = useState(() => bankrollFieldText(settings.amount));
-  const [focused, setFocused] = useState(false);
-  const [blurError, setBlurError] = useState<string | null>(null);
-
-  // The stored amount arrives after the first render (AsyncStorage); show it
-  // unless the member is mid-edit.
-  useEffect(() => {
-    if (!focused) setText(bankrollFieldText(settings.amount));
-  }, [settings.amount]); // not `focused`: a blur must not undo the text just committed
-
-  const fieldMessage = visibleBankrollError(checkBankroll(text), false) ?? blurError;
-  const shown = bankrollDraft(text, settings.unitPct);
-
-  const onChange = (raw: string) => {
-    setText(editBankrollInput(text, raw));
-    setBlurError(null);
-  };
-
-  const commit = () => {
-    setFocused(false);
-    const c = commitBankrollText(text, settings.amount);
-    setText(c.text);
-    setBlurError(c.error);
-    if (c.save !== undefined) setAmount(c.save);
-  };
-
+function SettingsScroll({
+  children,
+  overlay,
+}: {
+  children: React.ReactNode;
+  overlay?: React.ReactNode;
+}) {
   return (
-    <View style={styles.card}>
-      <View style={styles.bookRow}>
-        <Text style={[styles.cardLabel, styles.noMargin]}>Your bankroll</Text>
-        <Text style={styles.bookPillMuted}>Optional</Text>
-      </View>
-      <Text style={styles.bookHint}>{BANKROLL_CARD_COPY}</Text>
-      <View style={[styles.moneyField, fieldMessage ? styles.moneyFieldError : null]}>
-        <Text
-          style={[styles.moneyPrefix, text === '' && styles.moneyPrefixEmpty]}
-          accessibilityElementsHidden
-          importantForAccessibility="no"
-        >
-          $
-        </Text>
-        <TextInput
-          style={styles.moneyInput}
-          value={text}
-          onChangeText={onChange}
-          onFocus={() => setFocused(true)}
-          onBlur={commit}
-          onSubmitEditing={() => Keyboard.dismiss()}
-          keyboardType="decimal-pad"
-          returnKeyType="done"
-          clearButtonMode="while-editing"
-          placeholder="Enter amount"
-          placeholderTextColor={colors.textTertiary}
-          inputAccessoryViewID={Platform.OS === 'ios' ? BANKROLL_ACCESSORY_ID : undefined}
-          accessibilityLabel="Your bankroll in dollars, optional"
-          accessibilityHint="Only used to show your units in dollars. Stays on this device."
-        />
-      </View>
-      {fieldMessage ? (
-        <View style={styles.fieldErrorRow} accessibilityRole="alert" accessibilityLiveRegion="polite">
-          <Ionicons name="alert-circle" size={14} color={colors.avoid} />
-          <Text style={styles.fieldErrorText}>{fieldMessage}</Text>
-        </View>
-      ) : null}
-
-      <View style={styles.unitRow}>
-        <View style={styles.unitRowText}>
-          <Text style={styles.unitRowTitle}>{unitRowTitle(shown)}</Text>
-          <Text style={styles.unitRowSub}>{unitRowSubtitle(shown)}</Text>
-        </View>
-        {/* Disabled until the stored % has loaded, and stepped inside the
-            store from the latest value either way. */}
-        <LowerRaise
-          what={`unit size, now ${formatPct(settings.unitPct)} of bankroll`}
-          canLower={ready && canStepUnitPct(settings.unitPct, -1)}
-          canRaise={ready && canStepUnitPct(settings.unitPct, 1)}
-          onStep={stepUnit}
-        />
-      </View>
-      <Text style={styles.bankrollFooter}>{BANKROLL_FOOTER_COPY}</Text>
-
-      {Platform.OS === 'ios' ? (
-        <InputAccessoryView nativeID={BANKROLL_ACCESSORY_ID}>
-          <View style={styles.doneBar}>
-            <Pressable
-              onPress={() => Keyboard.dismiss()}
-              accessibilityRole="button"
-              accessibilityLabel="Done"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
-            >
-              <Text style={styles.doneText}>Done</Text>
-            </Pressable>
-          </View>
-        </InputAccessoryView>
-      ) : null}
-    </View>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <ScrollView
+        contentContainerStyle={styles.list}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
+        {children}
+        <BetslipBarSpacer />
+      </ScrollView>
+      {overlay}
+    </SafeAreaView>
   );
 }
 
-export function SettingsScreen() {
+function SettingsTile({
+  title,
+  summary,
+  spoken,
+  icon,
+  onPress,
+  wide = false,
+}: {
+  title: string;
+  summary: string;
+  /** VoiceOver text when the visible summary is shortened. */
+  spoken?: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  onPress: () => void;
+  wide?: boolean;
+}) {
+  const glyph = (
+    <View
+      style={styles.tileIcon}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <Ionicons name={icon} size={18} color={colors.textSecondary} />
+    </View>
+  );
+  const chevron = <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${title}. ${spoken ?? summary}`}
+      onPress={onPress}
+      style={({ pressed }) => [wide ? styles.tileWide : styles.tile, pressed && styles.pressed]}
+    >
+      {wide ? (
+        <>
+          {glyph}
+          <View style={styles.tileWideText}>
+            <Text style={[styles.tileTitle, styles.tileTitleInline]}>{title}</Text>
+            <Text style={styles.tileSummary} numberOfLines={2}>{summary}</Text>
+          </View>
+          {chevron}
+        </>
+      ) : (
+        <>
+          <View style={styles.tileTop}>
+            {glyph}
+            {chevron}
+          </View>
+          <Text style={styles.tileTitle}>{title}</Text>
+          <Text style={styles.tileSummary} numberOfLines={2}>{summary}</Text>
+        </>
+      )}
+    </Pressable>
+  );
+}
+
+/** One row inside an inset group. The label includes the sub so VoiceOver
+ *  reads both; these rows have no separate status pill. */
+function GroupRow({
+  label,
+  sub,
+  onPress,
+  icon = 'chevron-forward',
+  first = false,
+}: {
+  label: string;
+  sub: string;
+  onPress: () => void;
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
+  first?: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${label}. ${sub}`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.groupRow, !first && styles.groupRule, pressed && styles.pressed]}
+    >
+      <View style={styles.groupText}>
+        <Text style={styles.cardLabel}>{label}</Text>
+        <Text style={styles.sub}>{sub}</Text>
+      </View>
+      <Ionicons name={icon} size={18} color={colors.textTertiary} />
+    </Pressable>
+  );
+}
+
+function useSettingsPlan() {
+  const navigation = useNavigation<Nav>();
+  const { signedIn, email: authEmail, user: authUser, signOut } = useAuth();
+  // `subscription` describes the App Store plan. A Whop membership does not
+  // make this row Premium.
+  const { subscription, hold: planHold, discordPaid, refresh: refreshMembership } = useMembership();
+  const { access, unlink, busy: discordBusy } = useAccess();
+  const comped = access.source === 'comped';
+  const planStatus = planHold
+    ? { badge: 'Free' as const, line: 'Checking your plan…' }
+    : planStatusCopy(subscription, { discordPaid: access.discord_access, comped });
+  const storePaid = discordPaid;
+  const trialPlan = subscription?.plan && isPlanKey(subscription.plan) ? planFor(subscription.plan) : null;
+  const linkedName = access.discord_username ?? 'Discord';
+  // Discord lives under Community, so it does not open an empty Account section.
+  const showAccountSection = AUTH_ENABLED || billingReady();
+  const showDiscord = billingReady() ? signedIn : discordLinkReady() && signedIn;
+  const planLabel = !billingReady() ? null : planHold ? 'Checking plan…' : planStatus.badge;
+  return {
+    navigation,
+    signedIn,
+    authEmail,
+    authUser,
+    signOut,
+    subscription,
+    planHold,
+    refreshMembership,
+    access,
+    unlink,
+    discordBusy,
+    planStatus,
+    storePaid,
+    trialPlan,
+    linkedName,
+    showAccountSection,
+    showDiscord,
+    planLabel,
+  };
+}
+
+function useSettingsHomeModel() {
+  const plan = useSettingsPlan();
+  const { books, ready: booksReady } = usePreferredBooks();
+  const { name: stateName, ready: stateReady } = useBettingState();
+  const { settings: bankroll, ready: bankrollReady } = useBankroll();
+  const { enabled, ready: pushReady } = usePushOptIn();
+  const { status } = usePushState();
+  const feedbackUnread = useFeedbackUnread();
+  const unit = unitDollars(bankroll);
+  const unitLabel =
+    unit == null ? `1u = ${formatPct(bankroll.unitPct)}` : `1u = ${formatDollars(unit, unit)}`;
+  const amountLabel = bankroll.amount == null ? null : formatDollars(bankroll.amount, bankroll.amount);
+  const accountSpoken = accountTileSummary(plan.signedIn, plan.authEmail, plan.planLabel);
+  const summaries: Record<SettingsSectionId, string> = {
+    sportsbooks:
+      booksReady && stateReady
+        ? sportsbooksTileSummary(books.map(bookLabelShort), stateName)
+        : 'Checking',
+    bankroll: bankrollReady ? bankrollTileSummary(amountLabel, unitLabel) : 'Checking',
+    notifications: notificationsTileSummary(enabled, status, pushReady),
+    explore: EXPLORE_TILE_SUMMARY,
+    community: communityTileSummary(plan.showDiscord, feedbackUnread),
+    account: accountTileSummary(plan.signedIn, plan.authEmail, plan.planLabel, true),
+    legal: LEGAL_TILE_SUMMARY,
+  };
+  return { summaries, accountSpoken, showAccountSection: plan.showAccountSection };
+}
+
+function SportsbooksSection() {
   const navigation = useNavigation<Nav>();
   const { books } = usePreferredBooks();
   const [bookPickerOpen, setBookPickerOpen] = useState(false);
   const { name: stateName } = useBettingState();
   const [statePickerOpen, setStatePickerOpen] = useState(false);
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
-  const { replay: replayIntro } = useOnboarding();
-  const feedbackUnread = useFeedbackUnread();
-  const { signedIn, email: authEmail, user: authUser, signOut } = useAuth();
-  // Two different questions, deliberately asked of two different hooks:
-  // `subscription` DESCRIBES the app subscription (this row is about it), while
-  // `entitled` DECIDES access and has to include a Discord-paid member.
-  const { subscription } = useSubscription();
-  const { entitled } = useEntitlement();
-  const { access, unlink, busy: discordBusy } = useAccess();
-  const [discordSheet, setDiscordSheet] = useState(false);
-  const openHelpline = () => {
-    Linking.openURL('tel:1-800-522-4700').catch(() =>
-      Alert.alert('Need help?', 'Call or text 1-800-GAMBLER (1-800-522-4700), available 24/7.'),
-    );
-  };
-
-  const confirmSignOut = () => {
-    Alert.alert('Sign out?', 'Your models and tracked bets stay on this device.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign out',
-        style: 'destructive',
-        onPress: () => {
-          signOut().catch((e) => Alert.alert('Could not sign out', authErrorMessage(e)));
-        },
-      },
-    ]);
-  };
-
-  const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
-  // A newer bundle is downloaded and runs at the next start (src/lib/updateReady.ts).
-  const updateReady = useSyncExternalStore(subscribeUpdateReady, isUpdateReady);
-  const showAccountSection = AUTH_ENABLED || billingReady() || discordLinkReady();
-
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
-      {/* automaticallyAdjustKeyboardInsets (iOS): the keyboard insets the list
-          and RN scrolls the focused field — the bankroll input, with its Done
-          bar — above it natively, so no measure/scrollTo is needed. Android
-          resizes the window. "handled" was already here: a tap on a switch or
-          row while the keyboard is up still lands. */}
-      <ScrollView
-        contentContainerStyle={styles.list}
-        keyboardShouldPersistTaps="handled"
-        automaticallyAdjustKeyboardInsets
-      >
-
-        {/* Account + Subscription. Both are behind flags — while auth is dark
-            this is the ONLY sign-in entry point in the app, so the whole
-            section stays invisible until a flag flips. */}
-        {showAccountSection ? <SectionHeader title="Account" /> : null}
-
-        {AUTH_ENABLED ? (
-          signedIn ? (
-            <View style={styles.card}>
-              <View style={styles.bookRow}>
-                <Text style={[styles.cardLabel, styles.flexShrink]} numberOfLines={1}>
-                  {authEmail ?? 'Signed in'}
-                </Text>
-                <View style={styles.bookPill}>
-                  <View style={styles.bookDot} />
-                  <Text style={styles.bookPillText}>Signed in</Text>
-                </View>
-              </View>
-              <Text style={styles.sub}>
-                Your models and tracked bets stay on this device.
-              </Text>
-              <Pressable
-                onPress={confirmSignOut}
-                accessibilityRole="button"
-                accessibilityLabel="Sign out"
-                style={({ pressed }) => [styles.signOutBtn, pressed && styles.pressed]}
-              >
-                <Text style={styles.signOutText}>Sign out</Text>
-              </Pressable>
-            </View>
-          ) : (
-            // Deliberately does NOT promise cross-device sync — auth is
-            // session-only today. Update when account-scoped data lands.
-            <LinkRow
-              label="Sign in"
-              sub="Optional. Everything works without an account — your models and tracked bets stay on this device."
-              onPress={() => navigation.navigate('SignIn')}
-              right={<Text style={styles.bookPillMuted}>Not signed in</Text>}
-            />
-          )
-        ) : null}
-
-        {/* Subscription renders only when billing is live AND auth is on —
-            billingReady() enforces that pairing, since a subscription with no
-            account behind it can't survive a reinstall. */}
-        {billingReady() ? (
-          <LinkRow
-            label="Subscription"
-            sub={
-              subscription
-                ? `${describeSubscription(subscription)} Tap to manage or cancel.`
-                : access.discord_access
-                  ? 'Included with your Discord membership — nothing to pay here. Manage it where you bought it.'
-                  : 'Signals are locked. Tap to see plans.'
-            }
-            onPress={() => {
-              // A Discord-paid member has no App Store subscription to manage,
-              // and sending them to the paywall would invite them to buy a
-              // second time for something they already have.
-              if (subscription) {
-                openManageSubscription(authUser?.id ?? null).catch((e) =>
-                  Alert.alert('Could not open billing', billingErrorMessage(e)),
-                );
-              } else if (access.discord_access) {
-                Alert.alert(
-                  'Included with Discord',
-                  'Your Discord membership covers the app. Manage or cancel it where you bought it — cancelling there ends app access too.',
-                );
-              } else {
-                navigation.navigate('Paywall');
-              }
-            }}
-            right={
-              entitled ? (
-                <View style={styles.bookPill}>
-                  <View style={styles.bookDot} />
-                  <Text style={styles.bookPillText}>
-                    {subscription ? 'Active' : 'Discord'}
-                  </Text>
-                </View>
-              ) : (
-                <Text style={styles.bookPillMuted}>Free</Text>
-              )
-            }
-          />
-        ) : null}
-
-        <SectionHeader title="Betting" />
-
+    <SettingsScroll
+      overlay={
+        <>
+          <SportsbookPickerSheet visible={bookPickerOpen} onClose={() => setBookPickerOpen(false)} />
+          <StatePickerSheet visible={statePickerOpen} onClose={() => setStatePickerOpen(false)} />
+        </>
+      }
+    >
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Your sportsbooks</Text>
           <Text style={styles.bookHint}>
             The books you can bet at. Picks and Stats show the best price among them. You get
             the most value by using every book you can. Model records and stats still use the
-            best price across all books.
+            price the model found.
           </Text>
           {/* One selection surface app-wide: this row opens the same picker
               sheet the boards use, instead of carrying its own chip selector. */}
@@ -505,44 +531,37 @@ export function SettingsScreen() {
             )
           }
         />
+    </SettingsScroll>
+  );
+}
 
-        {/* Display only: units in the member's dollars. The daily exposure
-            limit below is unchanged and does not read it. */}
-        <SectionHeader title="Bankroll" />
+function BankrollSection() {
+  return (
+    <SettingsScroll>
+      {/* Display only: units in the member's dollars. Nothing is sized off it. */}
+      <BankrollCard />
+    </SettingsScroll>
+  );
+}
 
-        <BankrollCard />
+function NotificationsSection() {
+  return (
+    <SettingsScroll>
+      <NotificationsCard />
+    </SettingsScroll>
+  );
+}
 
-        <SectionHeader title="Staying in control" />
-
-        {/* The daily exposure limit card that sat above this was removed on
-            2026-09-26 (Matt), with the Picks banner it drove. The helpline
-            stays: it is the one support resource in the app. */}
-        <View style={styles.card}>
-          <Pressable
-            onPress={openHelpline}
-            accessibilityRole="link"
-            accessibilityLabel="Call or text 1-800-GAMBLER, the national problem gambling helpline"
-            // The row's top padding is inside the card's divider; slop below
-            // brings a one-line wrap up to 44pt without moving the rule (M9).
-            hitSlop={{ top: 0, bottom: 12, left: 0, right: 0 }}
-            style={styles.helplineRow}
-          >
-            <Ionicons name="call-outline" size={15} color={colors.tint} />
-            <Text style={styles.helplineText}>
-              Gambling a problem? Call/text 1-800-GAMBLER — 24/7, free, confidential.
-            </Text>
-          </Pressable>
-        </View>
-
-        <SectionHeader title="Alerts" />
-
-        <NotificationsCard />
-
-        <SectionHeader title="Explore" />
-
-        <LinkRow
+function ExploreSection() {
+  const navigation = useNavigation<Nav>();
+  const { replay: replayIntro } = useOnboarding();
+  return (
+    <SettingsScroll>
+      <View style={styles.groupCard}>
+        <GroupRow
+          first
           label="Track record"
-          sub="Every settled pick on record — win rate, flat ROI and CLV by sport and model. Nothing cherry-picked."
+          sub="Every settled pick on record — win rate, return on bets and CLV by sport and model. Nothing cherry-picked."
           // Track Record is a bottom tab, and Settings is a stack screen above
           // the tab navigator — navigate() only bubbles UP, so a bare
           // navigate('TrackRecord') here is never handled. Target the tab
@@ -550,7 +569,7 @@ export function SettingsScreen() {
           onPress={() => navigation.navigate('Tabs', { screen: 'TrackRecord' })}
         />
 
-        <LinkRow
+        <GroupRow
           label="Live Signals (beta)"
           sub="In-play picks that update while games are running. They show on Picks under Live Signals, which is always there and fills while a game is in play. The live models are unproven — treat them that way."
           onPress={() =>
@@ -558,21 +577,71 @@ export function SettingsScreen() {
           }
         />
 
-        <LinkRow
+        <GroupRow
           label="How this works"
           sub="Edge, BET/AVOID, unit sizing and how results are tracked — explained."
           onPress={() => navigation.navigate('Explainer')}
         />
 
-        <LinkRow
+        <GroupRow
           label="Replay intro"
           sub="Re-read how the model works and what realistic results look like."
           onPress={replayIntro}
           icon="refresh-outline"
         />
+      </View>
+    </SettingsScroll>
+  );
+}
 
-        <SectionHeader title="Community" />
+function CommunitySection() {
+  const {
+    navigation,
+    signedIn,
+    authUser,
+    subscription,
+    planHold,
+    refreshMembership,
+    access,
+    unlink,
+    discordBusy,
+    planStatus,
+    storePaid,
+    trialPlan,
+    linkedName,
+  } = useSettingsPlan();
+  const feedbackUnread = useFeedbackUnread();
+  const [discordSheet, setDiscordSheet] = useState(false);
+  const [endingTrial, setEndingTrial] = useState(false);
 
+  const onUnlockDiscord = () => {
+    const userId = authUser?.id;
+    const plan = subscription?.plan;
+    if (!userId || !plan || !isPlanKey(plan)) {
+      Alert.alert(
+        'Could not end the trial',
+        'Your trial plan is not on this device yet. Try again in a moment.',
+      );
+      return;
+    }
+    setEndingTrial(true);
+    endTrialEarly(plan, userId)
+      .then((result) => {
+        if (result.outcome !== 'completed') return;
+        return refreshMembership().then(() => {
+          setTimeout(() => {
+            void refreshMembership();
+          }, 4000);
+        });
+      })
+      .catch((e) => Alert.alert('Could not end the trial', billingErrorMessage(e)))
+      .finally(() => setEndingTrial(false));
+  };
+
+  return (
+    <SettingsScroll
+      overlay={<DiscordLinkModal visible={discordSheet} onClose={() => setDiscordSheet(false)} />}
+    >
         <LinkRow
           label="Follow us on X"
           sub="Model notes, daily results and release news."
@@ -580,11 +649,123 @@ export function SettingsScreen() {
           icon="logo-x"
         />
 
-        {/* While linking is dark this is exactly today's row: a plain invite
-            link, no account involved. Once it is live the row becomes the
-            connect/disconnect control, because the invite alone can't grant
-            the subscriber role. */}
-        {discordLinkReady() && signedIn ? (
+        {/* No public invite. Join Discord is inside the paid card only. */}
+        {billingReady() ? (
+          !signedIn ? null : planHold ? (
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>Discord for members</Text>
+            <Text style={styles.sub}>Checking your plan…</Text>
+          </View>
+          ) : (
+          <>
+          <View style={styles.card}>
+            <View style={styles.bookRow}>
+              <Text style={styles.cardLabel}>Discord for members</Text>
+              {storePaid ? (
+                <View style={styles.bookPill}>
+                  <View style={styles.bookDot} />
+                  <Text style={styles.bookPillText}>Included</Text>
+                </View>
+              ) : (
+                <Ionicons name="lock-closed" size={16} color={colors.textTertiary} />
+              )}
+            </View>
+            <Text style={styles.sub}>
+              {storePaid
+                ? 'Talk picks with other subscribers.'
+                : planStatus.badge === 'Trial'
+                  ? 'Unlocks when your paid plan starts, after the free trial. No invite is shown until then.'
+                  : 'Included with a paid plan. No invite is shown until then.'}
+            </Text>
+            {planStatus.badge === 'Trial' && trialPlan ? (
+              <Text style={[styles.sub, styles.chargeLine]}>{earlyUnlockLine(trialPlan.key)}</Text>
+            ) : null}
+            {storePaid ? (
+              <Pressable
+                onPress={() => {
+                  const invite = discordInviteIfPaid(true);
+                  if (invite) void openLink(invite, 'Discord');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Join Discord"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Join Discord</Text>
+              </Pressable>
+            ) : planStatus.badge === 'Trial' ? (
+              <Pressable
+                onPress={onUnlockDiscord}
+                disabled={endingTrial}
+                accessibilityRole="button"
+                accessibilityLabel="Unlock Discord early"
+                accessibilityState={{ busy: endingTrial, disabled: endingTrial }}
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                {endingTrial ? (
+                  <ActivityIndicator color={colors.textInverse} />
+                ) : (
+                  <Text style={styles.manageText}>Unlock Discord early</Text>
+                )}
+              </Pressable>
+            ) : planStatus.badge === 'Free' ? (
+              <Pressable
+                onPress={() => navigation.navigate('Paywall')}
+                accessibilityRole="button"
+                accessibilityLabel="Upgrade to Premium"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Upgrade to Premium</Text>
+              </Pressable>
+            ) : null}
+            {access.discord_linked ? (
+              <>
+                <Text style={[styles.sub, styles.connectedLine]}>{`Connected as ${linkedName}.`}</Text>
+                <Pressable
+                  onPress={() => {
+                    Alert.alert(
+                      'Disconnect Discord?',
+                      "We'll remove the subscriber role we granted you. You'll stay in the server.",
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Disconnect',
+                          style: 'destructive',
+                          onPress: () => {
+                            unlink().catch((e) =>
+                              Alert.alert('Could not disconnect', discordErrorMessage(e)),
+                            );
+                          },
+                        },
+                      ],
+                    );
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Disconnect Discord"
+                  style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+                >
+                  <Text style={styles.restoreText}>Disconnect Discord</Text>
+                </Pressable>
+              </>
+            ) : null}
+          </View>
+          {!access.discord_linked && (planStatus.badge === 'Free' || planStatus.badge === 'Trial') ? (
+            <View style={styles.card}>
+              <Text style={styles.sub}>
+                Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.
+              </Text>
+              <Pressable
+                onPress={() => setDiscordSheet(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Connect Discord"
+                style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.restoreText}>Connect Discord</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          </>
+          )
+        ) : discordLinkReady() && signedIn ? (
           <LinkRow
             label={access.discord_linked ? 'Discord' : 'Connect Discord'}
             sub={describeDiscordLink(access)}
@@ -595,12 +776,7 @@ export function SettingsScreen() {
               }
               Alert.alert(
                 'Disconnect Discord?',
-                // Say plainly what they lose. A Discord-paid member who
-                // disconnects here would lose their free app access, and
-                // finding that out afterwards is the worst way to learn it.
-                access.discord_access
-                  ? 'Your Discord membership is what gives you access to the app. Disconnecting will lock the app until you subscribe here or reconnect.'
-                  : "We'll remove the subscriber role we granted you. You'll stay in the server.",
+                "We'll remove the subscriber role we granted you. You'll stay in the server.",
                 [
                   { text: 'Cancel', style: 'cancel' },
                   {
@@ -629,14 +805,7 @@ export function SettingsScreen() {
               )
             }
           />
-        ) : (
-          <LinkRow
-            label="Join our Discord"
-            sub="Talk picks with other users and tell us what to build next."
-            onPress={() => openLink(DISCORD_URL, 'Discord')}
-            icon="logo-discord"
-          />
-        )}
+        ) : null}
 
         <LinkRow
           label="Send feedback"
@@ -657,28 +826,389 @@ export function SettingsScreen() {
             ) : undefined
           }
         />
+    </SettingsScroll>
+  );
+}
 
-        <Pressable
-          onPress={() => openLink(WEBSITE_URL, 'the website')}
-          accessibilityRole="link"
-          accessibilityLabel={`Signalbase version ${APP_VERSION}, build ${BUILD_STAMP}, ${websiteLabel}`}
-          accessibilityHint="Opens the website"
-          hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
-          style={({ pressed }) => pressed && styles.pressed}
+function AccountSection() {
+  const {
+    navigation,
+    signedIn,
+    authEmail,
+    authUser,
+    signOut,
+    subscription,
+    planHold,
+    planStatus,
+  } = useSettingsPlan();
+
+  const onRestore = () => {
+    const userId = authUser?.id;
+    if (!userId) return;
+    restorePurchases(userId)
+      .then((restored) => {
+        Alert.alert(
+          restored ? 'Purchases restored' : 'Nothing to restore',
+          restored
+            ? 'Your subscription is active on this device.'
+            : 'No active subscription was found for this App Store account.',
+        );
+      })
+      .catch((e) => Alert.alert('Could not restore', billingErrorMessage(e)));
+  };
+
+  const onManage = () => {
+    if (subscription) {
+      openManageSubscription(authUser?.id ?? null).catch((e) =>
+        Alert.alert('Could not open billing', billingErrorMessage(e)),
+      );
+      return;
+    }
+    navigation.navigate('Paywall');
+  };
+
+  const confirmSignOut = () => {
+    Alert.alert('Sign out?', 'Your models and tracked bets stay on this device.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        onPress: () => {
+          signOut().catch((e) => Alert.alert('Could not sign out', authErrorMessage(e)));
+        },
+      },
+    ]);
+  };
+
+  return (
+    <SettingsScroll>
+        {/* Account + Subscription, near the bottom (Matt, 2026-11-09). Both are
+            behind flags, so the whole section stays invisible until one flips. */}
+        {AUTH_ENABLED ? (
+          signedIn ? (
+            <>
+            <View style={styles.card}>
+              <View
+                accessible
+                accessibilityLabel={`Signed in as ${authEmail ?? 'your account'}`}
+                style={styles.bookRow}
+              >
+                <Text style={[styles.cardLabel, styles.flexShrink]} numberOfLines={1}>
+                  {authEmail ?? 'Signed in'}
+                </Text>
+                <View style={styles.bookPill}>
+                  <View style={styles.bookDot} />
+                  <Text style={styles.bookPillText}>Signed in</Text>
+                </View>
+              </View>
+              <Text style={styles.sub}>
+                Your models and tracked bets stay on this device.
+              </Text>
+              <Pressable
+                onPress={confirmSignOut}
+                accessibilityRole="button"
+                accessibilityLabel="Sign out"
+                style={({ pressed }) => [styles.signOutBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.signOutText}>Sign out</Text>
+              </Pressable>
+            </View>
+            <Pressable
+              onPress={() => navigation.navigate('DeleteAccount')}
+              accessibilityRole="button"
+              accessibilityLabel="Delete account"
+              accessibilityHint="Opens a screen that explains what is deleted."
+              style={({ pressed }) => [styles.deleteRow, pressed && styles.pressed]}
+            >
+              <Text style={styles.deleteText}>Delete account</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+            </Pressable>
+            </>
+          ) : (
+            // Deliberately does NOT promise cross-device sync — auth is
+            // session-only today. Update when account-scoped data lands.
+            <LinkRow
+              label="Sign in"
+              sub="An account is needed to start a trial, subscribe and restore purchases. Your models and tracked bets stay on this device."
+              onPress={() => navigation.navigate('SignIn')}
+              right={<Text style={styles.bookPillMuted}>Not signed in</Text>}
+            />
+          )
+        ) : null}
+
+        {/* Subscription renders only when billing is live AND auth is on —
+            billingReady() enforces that pairing, since a subscription with no
+            account behind it can't survive a reinstall. */}
+        {billingReady() ? (
+          <View style={styles.card}>
+            <View style={styles.bookRow}>
+              <Text style={styles.cardLabel}>Plan</Text>
+              {planHold ? null : planStatus.badge === 'Free' ? (
+                <View style={styles.freePill}>
+                  <Text style={styles.freePillText}>{planStatus.badge}</Text>
+                </View>
+              ) : (
+                <View style={styles.bookPill}>
+                  <View style={styles.bookDot} />
+                  <Text style={styles.bookPillText}>{planStatus.badge}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.sub}>{planStatus.line}</Text>
+            {planHold ? null : planStatus.badge === 'Free' ? (
+              <Pressable
+                onPress={() => navigation.navigate('Paywall')}
+                accessibilityRole="button"
+                accessibilityLabel="Upgrade to Premium"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Upgrade to Premium</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={onManage}
+                accessibilityRole="button"
+                accessibilityLabel="Manage subscription"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Manage subscription</Text>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={onRestore}
+              accessibilityRole="button"
+              accessibilityLabel="Restore purchases"
+              style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.restoreText}>Restore purchases</Text>
+            </Pressable>
+          </View>
+        ) : null}
+    </SettingsScroll>
+  );
+}
+
+function LegalSection() {
+  // Starts collapsed, the same disclosure as before. Terms and Privacy are
+  // the pages the paywall already opens. The Apple EULA stays on the paywall.
+  const [helpOpen, setHelpOpen] = useState(false);
+  const openHelpline = () => {
+    Linking.openURL('tel:1-800-522-4700').catch(() =>
+      Alert.alert('Need help?', 'Call or text 1-800-GAMBLER (1-800-522-4700), available 24/7.'),
+    );
+  };
+  const termsHost = TERMS_URL.replace(/^https?:\/\//, '');
+  const privacyHost = PRIVACY_URL.replace(/^https?:\/\//, '');
+  return (
+    <SettingsScroll>
+      <View style={styles.groupCard}>
+          <Pressable
+            onPress={() => setHelpOpen((o) => !o)}
+            accessibilityRole="button"
+            accessibilityLabel="Gambling help and resources"
+            accessibilityState={{ expanded: helpOpen }}
+            style={({ pressed }) => [styles.disclosureRow, pressed && styles.pressed]}
+          >
+            <Text style={[styles.cardLabel, styles.noMargin]}>Gambling help &amp; resources</Text>
+            <Ionicons
+              name={helpOpen ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={colors.textTertiary}
+            />
+          </Pressable>
+          {helpOpen ? (
+            <Pressable
+              onPress={openHelpline}
+              accessibilityRole="link"
+              accessibilityLabel="Call or text 1-800-GAMBLER, the national problem gambling helpline"
+              style={styles.helplineRow}
+            >
+              <Ionicons name="call-outline" size={15} color={colors.tint} />
+              <Text style={styles.helplineText}>
+                Gambling a problem? Call/text 1-800-GAMBLER — 24/7, free, confidential.
+              </Text>
+            </Pressable>
+          ) : null}
+        <GroupRow
+          label="Terms of Use"
+          sub={termsHost}
+          onPress={() => openLink(TERMS_URL, 'Terms of Use')}
+        />
+        <GroupRow
+          label="Privacy Policy"
+          sub={privacyHost}
+          onPress={() => openLink(PRIVACY_URL, 'Privacy Policy')}
+        />
+      </View>
+    </SettingsScroll>
+  );
+}
+
+/** The iOS decimal pad has no return key; this bar is its Done. */
+const BANKROLL_ACCESSORY_ID = 'bankrollDone';
+
+/** A labeled Lower | Raise pair — words, not icon steppers, so VoiceOver reads
+ *  the action (#786 removed the icon-only ones for exactly that). */
+function LowerRaise({
+  what,
+  canLower,
+  canRaise,
+  onStep,
+}: {
+  what: string;
+  canLower: boolean;
+  canRaise: boolean;
+  onStep: (dir: -1 | 1) => void;
+}) {
+  return (
+    <View style={styles.stepPill}>
+      {([-1, 1] as const).map((dir) => {
+        const enabled = dir === -1 ? canLower : canRaise;
+        const word = dir === -1 ? 'Lower' : 'Raise';
+        return (
+          <Pressable
+            key={dir}
+            onPress={() => onStep(dir)}
+            disabled={!enabled}
+            accessibilityRole="button"
+            accessibilityLabel={`${word} ${what}`}
+            accessibilityState={{ disabled: !enabled }}
+            hitSlop={{ top: 6, bottom: 6 }}
+            style={({ pressed }) => [
+              styles.stepBtn,
+              dir === 1 && styles.stepBtnRight,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={[styles.stepText, !enabled && styles.stepTextOff]}>{word}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * The optional bankroll — display only (lib/bankroll.ts). It converts the
+ * app's flat units into the member's dollars and sizes nothing. Typing only
+ * edits the field (the unit row follows it); blur or Done saves a valid amount,
+ * clears on empty, and on invalid keeps the saved amount, shows the error and
+ * puts the saved amount back. Every error waits for blur or Done except the
+ * over-$10M one, which shows as you type.
+ */
+function BankrollCard() {
+  const { settings, ready, setAmount, stepUnit } = useBankroll();
+  const [text, setText] = useState(() => bankrollFieldText(settings.amount));
+  const [focused, setFocused] = useState(false);
+  const [blurError, setBlurError] = useState<string | null>(null);
+
+  // The stored amount arrives after the first render (AsyncStorage); show it
+  // unless the member is mid-edit.
+  useEffect(() => {
+    if (!focused) setText(bankrollFieldText(settings.amount));
+  }, [settings.amount]); // not `focused`: a blur must not undo the text just committed
+
+  const fieldMessage = visibleBankrollError(checkBankroll(text), false) ?? blurError;
+  const shown = bankrollDraft(text, settings.unitPct);
+
+  const onChange = (raw: string) => {
+    setText(editBankrollInput(text, raw));
+    setBlurError(null);
+  };
+
+  const commit = () => {
+    setFocused(false);
+    const c = commitBankrollText(text, settings.amount);
+    setText(c.text);
+    setBlurError(c.error);
+    if (c.save !== undefined) setAmount(c.save);
+  };
+
+  // Back can unmount the field without a blur. Save the same way blur does.
+  const latest = useRef({ text, amount: settings.amount });
+  latest.current = { text, amount: settings.amount };
+  const setAmountRef = useRef(setAmount);
+  setAmountRef.current = setAmount;
+  useEffect(() => {
+    return () => {
+      saveBankrollOnLeave(
+        latest.current.text,
+        latest.current.amount,
+        (amount) => setAmountRef.current(amount),
+      );
+    };
+  }, []);
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.bookRow}>
+        <Text style={[styles.cardLabel, styles.noMargin]}>Your bankroll</Text>
+        <Text style={styles.bookPillMuted}>Optional</Text>
+      </View>
+      <Text style={styles.bookHint}>{BANKROLL_CARD_COPY}</Text>
+      <View style={[styles.moneyField, fieldMessage ? styles.moneyFieldError : null]}>
+        <Text
+          style={[styles.moneyPrefix, text === '' && styles.moneyPrefixEmpty]}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
         >
-          <Text style={styles.version}>
-            Signalbase v{APP_VERSION} · {BUILD_STAMP} · {websiteLabel}
-          </Text>
-        </Pressable>
-        {/* Its own line, outside the website link, so the status is not buried
-            in a wrapped caption (UX review, 2026-10-19). */}
-        {updateReady ? <Text style={styles.version}>{UPDATE_READY_SETTINGS}</Text> : null}
-        <BetslipBarSpacer />
-      </ScrollView>
-      <SportsbookPickerSheet visible={bookPickerOpen} onClose={() => setBookPickerOpen(false)} />
-      <StatePickerSheet visible={statePickerOpen} onClose={() => setStatePickerOpen(false)} />
-      <DiscordLinkModal visible={discordSheet} onClose={() => setDiscordSheet(false)} />
-    </SafeAreaView>
+          $
+        </Text>
+        <TextInput
+          style={styles.moneyInput}
+          value={text}
+          onChangeText={onChange}
+          onFocus={() => setFocused(true)}
+          onBlur={commit}
+          onSubmitEditing={() => Keyboard.dismiss()}
+          keyboardType="decimal-pad"
+          returnKeyType="done"
+          clearButtonMode="while-editing"
+          placeholder="Enter amount"
+          placeholderTextColor={colors.textTertiary}
+          inputAccessoryViewID={Platform.OS === 'ios' ? BANKROLL_ACCESSORY_ID : undefined}
+          accessibilityLabel="Your bankroll in dollars, optional"
+          accessibilityHint="Only used to show your units in dollars. Stays on this device."
+        />
+      </View>
+      {fieldMessage ? (
+        <View style={styles.fieldErrorRow} accessibilityRole="alert" accessibilityLiveRegion="polite">
+          <Ionicons name="alert-circle" size={14} color={colors.avoid} />
+          <Text style={styles.fieldErrorText}>{fieldMessage}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.unitRow}>
+        <View style={styles.unitRowText}>
+          <Text style={styles.unitRowTitle}>{unitRowTitle(shown)}</Text>
+          <Text style={styles.unitRowSub}>{unitRowSubtitle(shown)}</Text>
+        </View>
+        {/* Disabled until the stored % has loaded, and stepped inside the
+            store from the latest value either way. */}
+        <LowerRaise
+          what={`unit size, now ${formatPct(settings.unitPct)} of bankroll`}
+          canLower={ready && canStepUnitPct(settings.unitPct, -1)}
+          canRaise={ready && canStepUnitPct(settings.unitPct, 1)}
+          onStep={stepUnit}
+        />
+      </View>
+      <Text style={styles.bankrollFooter}>{BANKROLL_FOOTER_COPY}</Text>
+
+      {Platform.OS === 'ios' ? (
+        <InputAccessoryView nativeID={BANKROLL_ACCESSORY_ID}>
+          <View style={styles.doneBar}>
+            <Pressable
+              onPress={() => Keyboard.dismiss()}
+              accessibilityRole="button"
+              accessibilityLabel="Done"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.doneText}>Done</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
+    </View>
   );
 }
 
@@ -692,15 +1222,85 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.xl,
   },
-  sectionHeader: {
-    fontSize: font.size.footnote,
+  // Negative margin lets the half-width cells share a 16pt gutter and still
+  // line up with the full-width Legal tile.
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -spacing.sm,
+  },
+  tileWrap: {
+    width: '50%',
+    paddingHorizontal: spacing.sm,
+    paddingBottom: spacing.md,
+  },
+  tile: {
+    flex: 1,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    minHeight: 44,
+  },
+  tileWide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    minHeight: 44,
+  },
+  tileWideText: {
+    flex: 1,
+  },
+  tileTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  tileIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tileTitle: {
+    fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    color: colors.textPrimary,
     marginTop: spacing.sm,
-    marginBottom: spacing.sm,
-    marginLeft: 2,
+  },
+  tileTitleInline: {
+    marginTop: 0,
+  },
+  tileSummary: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+    lineHeight: 18,
+  },
+  groupCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    marginBottom: spacing.md,
+    overflow: 'hidden',
+  },
+  groupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.lg,
+    minHeight: 44,
+  },
+  groupRule: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  groupText: {
+    flex: 1,
   },
   card: {
     backgroundColor: colors.bgCard,
@@ -784,6 +1384,12 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     lineHeight: 18,
+  },
+  chargeLine: {
+    marginTop: spacing.sm,
+  },
+  connectedLine: {
+    marginTop: spacing.md,
   },
   noMargin: {
     marginBottom: 0,
@@ -899,12 +1505,24 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
+  // The whole row toggles, at least 44pt tall (HIG), with no extra bottom gap.
+  disclosureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
   helplineRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     marginTop: spacing.md,
     paddingTop: spacing.md,
+    paddingBottom: spacing.md,
+    paddingHorizontal: spacing.lg,
+    minHeight: 44,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
   },
@@ -952,6 +1570,17 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     fontWeight: font.weight.medium,
   },
+  freePill: {
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  freePillText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
   unreadPill: {
     backgroundColor: colors.tint,
     paddingHorizontal: spacing.sm,
@@ -963,15 +1592,55 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
     fontWeight: font.weight.semibold,
   },
+  manageBtn: {
+    marginTop: spacing.md,
+    minHeight: 48,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brandNavy,
+  },
+  manageText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textInverse,
+  },
+  restoreBtn: {
+    marginTop: spacing.sm,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restoreText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
   signOutBtn: {
     marginTop: spacing.md,
     minHeight: 44,
     borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.avoidSoft,
+    backgroundColor: colors.tintSoft,
   },
   signOutText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  deleteRow: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  deleteText: {
+    flexShrink: 1,
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.avoidInk,

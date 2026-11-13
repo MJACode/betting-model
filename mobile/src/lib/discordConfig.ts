@@ -2,22 +2,24 @@
  * Discord account linking — feature flag and configuration.
  *
  * ============================================================================
- * ONE MEMBERSHIP, TWO SURFACES. This is the flag for the Discord half.
+ * APPLE UNLOCKS THE APP. WHOP IS DISCORD-ONLY. This is the link flag.
  * ============================================================================
  *
- * The rule Matt set (2026-08-30):
- *   * Pay in the app  -> you get access to the subscriber Discord.
- *   * Pay via Discord (Whop) -> the app costs you nothing extra.
- *   * Lose access on one side -> you lose it on the other.
+ * Matt, 2026-10-27: Whop is Discord-only checkout, outside the App Store.
+ * App Store IAP unlocks the app and our Discord role. Linking ties the same
+ * person across both. A Whop membership does not unlock the app.
  *
- * Mechanically that is one linked identity plus two roles in the guild: the
- * one WE grant for app subscribers, and the one Whop grants for Discord
- * subscribers. Each side only ever revokes its own, so a member who lets their
- * App Store subscription lapse but still pays Whop keeps their access — which
- * is correct, they are still paying.
+ * Two roles in the guild: the one WE grant for an Apple subscription, and the
+ * one Whop grants for its Discord product. Each side only ever revokes its
+ * own, so a lapsed App Store subscription does not strip Whop's role.
+ *
+ * Do not set DISCORD_LINK_ENABLED, AUTH_ENABLED, or BILLING_ENABLED until
+ * `add_discord_link_and_whop_memberships.sql` is applied in that environment.
+ * With either gate on, `fetchAccess()` calls `my_access()` and throws if the
+ * function is missing.
  *
  * While `DISCORD_LINK_ENABLED` is false:
- *   - Settings shows the plain "Join our Discord" invite row exactly as today.
+ *   - Settings does not open the invite. The invite is Apple-paid only.
  *   - No Connect button renders, and no edge function is ever called.
  *   - `useDiscordLink()` reports status 'disabled' and never touches the network.
  *
@@ -53,14 +55,3 @@ export const DISCORD_REDIRECT_URL = 'signalbase://discord-callback';
 
 /** The edge function that owns the OAuth exchange and the role sync. */
 export const DISCORD_LINK_FUNCTION = 'discord-link';
-
-/**
- * Where a Discord-side membership is actually sold. Shown to a signed-in user
- * with no access as the alternative to the App Store — some people would
- * rather buy where the community is.
- *
- * PLACEHOLDER until the Whop product is live; the "Get access on Discord" row
- * is hidden while this is empty rather than linking somewhere broken.
- */
-export const WHOP_CHECKOUT_URL: string =
-  process.env.EXPO_PUBLIC_WHOP_CHECKOUT_URL ?? '';

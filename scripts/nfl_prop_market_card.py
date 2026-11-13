@@ -381,20 +381,26 @@ def pick_rows(bets, games, names, bankroll: float) -> list[dict]:
         # fallback keeps working on these rows.
         label = (f"{who} {side} {b.line:g} {mkt}"
                  if b.market != "player_anytime_td" else f"{who} Anytime TD")
+        implied = b.fair - b.edge
+        book = (b.book or "").strip().lower()
         rows.append({
             "game_id": b.game_id, "model_id": MODEL_ID, "sport": "NFL",
             "game_date": g.get("date"), "game_time": g.get("kickoff"),
-            "pick_side": b.side, "pick_label": f"{label} ({_BOOK.get(b.book, b.book)})",
+            "pick_side": b.side, "pick_label": label,
             "model_probability": b.fair,
             "model_probability_cal": round(ev.cal_prob, 4),
             # The soft book's own de-vigged number, so edge on the row is the
             # same quantity the rule selected on: fair - book's de-vigged prob.
-            "dk_implied_prob": b.fair - b.edge,
+            "dk_implied_prob": implied,
             "edge": b.edge,
-            # dk_odds holds the SOFT BOOK's price, named in pick_label. This
-            # model never scores against DraftKings, so the platform's DK-only
-            # invariant does not apply — the §28 wind card set that precedent.
+            # dk_odds holds the SOFT BOOK's price. decision_odds is that same
+            # number, so stake and the grade do not move; decision_book names
+            # the feed key. Rows already stored still say "(FD)" on the label.
             "dk_odds": b.price, "scored_line": b.line,
+            "decision_book": book or None,
+            "decision_odds": b.price if book else None,
+            "decision_implied_prob": implied if book else None,
+            "decision_edge": b.edge if book else None,
             "kelly_fraction": 0.01, "recommended_bet": round(0.01 * bankroll, 2),
             "bankroll_at_pick": bankroll, "signal_type": "BET",
             "confidence_tier": "MED",
@@ -409,13 +415,15 @@ _INSERT = """
                        edge, dk_odds, scored_line, kelly_fraction,
                        recommended_bet, bankroll_at_pick, signal_type,
                        confidence_tier, prop_market, player_key,
-                       model_probability_cal)
+                       model_probability_cal, decision_book, decision_odds,
+                       decision_implied_prob, decision_edge)
     VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(game_time)s,
             %(pick_side)s, %(pick_label)s, %(model_probability)s,
             %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(signal_type)s, %(confidence_tier)s, %(prop_market)s, %(player_key)s,
-            %(model_probability_cal)s)
+            %(model_probability_cal)s, %(decision_book)s, %(decision_odds)s,
+            %(decision_implied_prob)s, %(decision_edge)s)
     ON CONFLICT DO NOTHING
 """
 

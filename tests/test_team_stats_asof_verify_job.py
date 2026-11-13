@@ -59,6 +59,10 @@ def test_job_calls_verify_and_never_rebuilds():
     # summary (not a rebuild). The grace is not itself a failure.
     assert "skipped_live_season" in src
     assert "live_snapshot_grace" in src
+    # The job reports verify's grace and does not treat it as a breach.
+    # Both shapes live in verify; this pin keeps the wrapper from
+    # describing only the opening-week one.
+    assert "young snapshot series" in src
     fail_block = src[src.index("if v[\"impossible\"]"):]
     assert "live_snapshot_grace" not in fail_block
 

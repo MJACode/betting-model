@@ -12,9 +12,9 @@
  *     once it is over: a final game's price is not live);
  *   - Slip is hidden (a slip leg would be bet at the in-play price);
  *   - Track stays (tracking scores the pick at its lock).
- * Live in-play signals (is_live) are made in-game at DraftKings, so their CTA
- * is unchanged. Before the start the hand-off is always the best available
- * book (bestHandoffForPick), never DraftKings-only.
+ * Live in-play signals (is_live) are made in-game, at the book that decided
+ * them, so their CTA is unchanged. Before the start the hand-off is always
+ * the best available book (bestHandoffForPick), never DraftKings-only.
  *
  * A game called off before first pitch (gameStartState 'postponed') is not
  * "started": no "Game started" line, and no hand-off or Slip either — there is
