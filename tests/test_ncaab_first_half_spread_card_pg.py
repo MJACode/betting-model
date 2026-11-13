@@ -61,7 +61,7 @@ LATEST_DDL = "CREATE TABLE latest_odds (game_id TEXT, market TEXT, bookmaker TEX
 QUOTA_DDL = """CREATE TABLE odds_api_quota (quota_date TEXT PRIMARY KEY, requests_used NUMERIC,
                requests_remaining NUMERIC, observed_at TEXT)"""
 PICKS_DDL = ("CREATE TABLE picks (pick_id SERIAL PRIMARY KEY, result TEXT, settled_at TEXT, "
-             "profit_kelly REAL, " + ", ".join(
+             "profit_kelly REAL, condition_status TEXT, " + ", ".join(
                  f"{c} {'REAL' if c in ('model_probability', 'model_probability_cal', 'dk_implied_prob', 'edge', 'dk_odds', 'scored_line', 'kelly_fraction', 'recommended_bet', 'bankroll_at_pick', 'decision_odds', 'decision_implied_prob', 'decision_edge', 'best_odds', 'best_implied_prob', 'best_edge') else 'TEXT'}"
                  for c in card._COLS) + ")")
 

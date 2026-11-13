@@ -252,12 +252,14 @@ def _lateral(sql: str, alias: str) -> str:
 def test_the_sql_recompute_reads_a_team_total_close_from_close_rows_only(alias):
     """The migration's recompute (run on every apply) reads the bet book's
     close at the number (bs), its latest main number (bm) and Pinnacle's
-    close (ps): each takes only 'close' rows for a team total (and for a
-    first half's total or spread), and every other market keeps its pre-game
-    rows. Text, because the recompute runs only in Postgres; checked there
-    with EXPLAIN."""
+    close (ps): each takes only 'close' rows for a team total and for an NBA
+    first half. An NCAAB first half reads its newest pre-tip row after the
+    pick was created. Every other market keeps its pre-game rows. Text,
+    because the recompute runs only in Postgres; checked there with EXPLAIN."""
     body = _lateral(MIGRATION.read_text(encoding="utf-8"), alias)
-    assert ("((s.game_market LIKE 'team_totals%' OR s.game_market IN ('totals_h1', 'spreads_h1')) "
-            "AND o.snapshot_type = 'close') OR "
-            "(s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN ('totals_h1', 'spreads_h1') "
-            "AND o.snapshot_type <> 'in_play')") in body
+    assert ("((s.game_market LIKE 'team_totals%' OR (s.sport_prefix = 'NBA' "
+            "AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1'))) AND o.snapshot_type = 'close') "
+            "OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1') "
+            "AND o.snapshot_type <> 'in_play' AND o.snapshot_at::timestamptz > s.created_at) "
+            "OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN "
+            "('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1') AND o.snapshot_type <> 'in_play')") in body

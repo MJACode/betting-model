@@ -265,10 +265,13 @@ def build_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict], list
             "game_date": game_date,
             "game_time": commence_iso,
             "pick_side": "under",
-            "pick_label": (
-                f"{away} @ {home} Under {_fmt_line(total_line)} "
-                f"· {stake_pct:.2f}u"
-            ),
+            # The bet only. The unit figure the label used to end in
+            # ("· 0.87u", stake_pct) is the model's sizing, still on the row
+            # as kelly_fraction. It is not the stake anyone books: every
+            # surface shows the posted one, 1u to win at the decided price
+            # (mike, 2026-11-04: "everything must be units"). Rows written
+            # before keep it; label_without_stake drops it on display.
+            "pick_label": f"{away} @ {home} Under {_fmt_line(total_line)}",
             "model_probability": model_prob,
             "model_probability_cal": round(ev.cal_prob, 4),
             "dk_implied_prob": market_prob,   # de-vigged best-book prob
@@ -391,10 +394,12 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
             "game_date": game_date,
             "game_time": commence_iso,
             "pick_side": side,
-            "pick_label": (
-                f"{away} @ {home} — {bet_team} {side_line:+g} "
-                f"· {kelly_fraction / OPENER_UNIT_PCT:.2f}u{age}"
-            ),
+            # The bet and the age of its number. No unit figure: the
+            # sizing ("· 0.79u", kelly_fraction / OPENER_UNIT_PCT) stays on
+            # the row as kelly_fraction, and every surface shows the posted
+            # stake beside the label (mike, 2026-11-04). Rows written before
+            # keep it; label_without_stake drops it on display.
+            "pick_label": f"{away} @ {home} — {bet_team} {side_line:+g}{age}",
             "model_probability": model_prob,
             "model_probability_cal": round(ev.cal_prob, 4),
             "dk_implied_prob": market_prob,

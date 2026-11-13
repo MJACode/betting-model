@@ -84,6 +84,8 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
+from models import cbb_pairs  # noqa: E402
+from models import ncaab_stake  # noqa: E402
 import data.ingestors.ncaab_first_half_odds as feed  # noqa: E402
 import models.ncaab_first_half_spread as fh  # noqa: E402
 import models.ncaab_quote_bounds as qb  # noqa: E402
@@ -418,7 +420,8 @@ _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", 
          "confidence_tier", "dk_bet_link", "line_book",
          "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
          "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link",
-         "downgrade_reason")
+         "downgrade_reason",
+         "stake_units", "stake_reason")
 # Its own column list, NOT models.scorer._insert_picks: that one stamps
 # model_probability_cal from the promoted map, and this model decides on its
 # own number (config.MODELS_ON_OWN_PROBABILITY).
@@ -556,7 +559,9 @@ def publish(conn, rows: list[dict], decided: list[dict]) -> tuple[int, int]:
             continue
         n_decided += 1
         row = by_game.get(rec["game_id"])
-        if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
+        # A bet an earlier NCAAB bet on this game and side agrees with is
+        # staked at NCAAB_AGREEMENT_STAKE_UNITS (models/ncaab_stake.py).
+        if row is not None and conn.execute(_INSERT, ncaab_stake.stamp(conn, row, _COLS)).fetchone():
             n_bets += row["signal_type"] == "BET"
     conn.commit()
     return n_bets, n_decided
@@ -686,6 +691,9 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         if do_publish and decisions:
             from models.scorer import _get_current_bankroll
             rows, refused = pick_rows(decisions, games, _get_current_bankroll(conn))
+            # An under beside a big favourite's spread bet on the same game is not bet
+            # (models/cbb_pairs.py; mike, 2026-11-11): the later of the two becomes a NONE row.
+            cbb_pairs.hold_back(conn, rows, refused)
             bet_ids = {r["game_id"] for r in rows if r["signal_type"] == "BET"}
             decided = [decision_row(d, fa, lead, ages, miss, d.game_id in bet_ids,
                                     refused.get(d.game_id))

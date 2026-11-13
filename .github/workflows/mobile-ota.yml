@@ -133,9 +133,34 @@ jobs:
           if [ -z "$EXPO_TOKEN" ]; then
             echo "::error::EXPO_TOKEN secret is not set"; exit 1
           fi
-          eas update --channel production \
+          # Export first, then publish that directory. eas update's own bundling
+          # does not leave the bundle and its source maps in dist/, so an upload
+          # aimed at dist/ after a plain eas update warns and ships the update
+          # unmapped (review on #1199). --skip-bundler publishes these files.
+          npx expo export --source-maps --dump-assetmap --output-dir dist \
+            --platform ios --platform android
+          eas update --skip-bundler --input-dir dist --channel production \
             --message "${{ inputs.message || format('master {0}', github.sha) }}" \
             --non-interactive
+
+      # Sentry (mobile/src/lib/sentry.ts): upload the maps from that same export
+      # so a stack trace from this OTA maps back to source. Release and dist
+      # are the native SDK's (bundle id, version, build from app.json). Skipped,
+      # not failed, until the secrets exist: the update has already shipped, and
+      # a missing map only makes traces harder to read.
+      - name: Upload source maps to Sentry
+        working-directory: mobile
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ] || [ -z "$SENTRY_ORG" ] || [ -z "$SENTRY_PROJECT" ]; then
+            echo "::warning::Sentry secrets not set; source maps not uploaded"
+            exit 0
+          fi
+          node scripts/upload-ota-sourcemaps.mjs dist || \
+            echo "::warning::Sentry source map upload failed; the update itself shipped"
 
       - name: Next steps
         run: |

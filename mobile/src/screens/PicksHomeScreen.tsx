@@ -32,7 +32,7 @@
  * Which sport is live is still carried by the red dot on the sport chips
  * (SportToggle `liveSports`). A sport with no in-play model AT ALL says so in
  * its own empty state (lib/liveSports.ts): "no edge right now" is a false
- * promise on NBA, which has no live lane that could find one.
+ * promise on NHL, which has no in-play model that could find one.
  *
  * Picks lock the first time a model scores them each day (game markets at the
  * first run, props at their first signal) and never change again for the rest
@@ -46,6 +46,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   FlatList,
   type LayoutChangeEvent,
   Pressable,
@@ -59,7 +60,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
@@ -69,6 +70,7 @@ import {
   showLivePricesBanner,
   sportChipsAvailable,
   todayHeaderCounts,
+  sportSpokenName,
 } from '@/lib/loadState';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import { InfoTooltip } from '@/components/InfoTooltip';
@@ -90,13 +92,14 @@ import { useMembership } from '@/hooks/useMembership';
 import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useThresholdsRevision } from '@/hooks/useActionThresholds';
-import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { useTodayPicks, TODAY_POLL_MS, TODAY_RESUME_MIN_AGE_MS } from '@/hooks/useTodayPicks';
 import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
+import { LIVE_PRICE_SLOT_ONLY } from '@/lib/markets';
 import { gameFilterSummary, isGameSelected, selectableGames } from '@/lib/gameFilter';
 import {
   dateOptionsFor,
@@ -140,7 +143,7 @@ const SUBTAB_REACH_BELOW = 6;
 const subTabsReach = reachFrame(0, SUBTAB_REACH_BELOW);
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
-import { hasLiveModel, liveModelSportsSentence } from '@/lib/liveSports';
+import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence } from '@/lib/liveSports';
 import { errorText, friendlyCause } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ScoreboardBoard } from '@/components/ScoreboardBoard';
@@ -178,6 +181,37 @@ export function PicksHomeScreen() {
   const [filter, setFilter] = useState<PicksFilterState>(freshFilter);
   const [sortKey, setSortKey] = useState<SortKey>('edge');
   const [search, setSearch] = useState('');
+
+  // The pre-game boards reload while they are open, so "line now" is the
+  // book's line now and not the one from when the screen first loaded (Matt,
+  // 2026-11-12: the card said FD 41.5 hours after FanDuel moved to 40.5).
+  // Every 10 minutes while this tab is focused and the app is in front, and once on coming back to the app or
+  // the tab, if the last load is older than a minute. A screen, inside the
+  // navigator, so useFocusEffect is safe here (.claude/rules/frontend.md).
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const lastTodayLoad = useRef(Date.now());
+  const reloadToday = useCallback((minAgeMs: number) => {
+    if (Date.now() - lastTodayLoad.current < minAgeMs) return;
+    lastTodayLoad.current = Date.now();
+    void refreshRef.current();
+  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      reloadToday(TODAY_RESUME_MIN_AGE_MS);
+      const id = setInterval(() => {
+        // Skipped when a pull or a resume reloaded in the last few minutes.
+        if (AppState.currentState === 'active') reloadToday(TODAY_POLL_MS - 30_000);
+      }, TODAY_POLL_MS);
+      const sub = AppState.addEventListener('change', (state) => {
+        if (state === 'active') reloadToday(TODAY_RESUME_MIN_AGE_MS);
+      });
+      return () => {
+        clearInterval(id);
+        sub.remove();
+      };
+    }, [reloadToday]),
+  );
 
   // In-play picks, across every sport (the sport cut happens below, so the
   // toggle can mark the sports that are live). Polled fast only while the user
@@ -243,6 +277,14 @@ export function PicksHomeScreen() {
   const liveData = useMemo(
     () => liveInProgress.filter((d) => d.pick.sport === sport),
     [liveInProgress, sport],
+  );
+  // Cards on this board that draw a live price at all. The NBA in-play
+  // model's never do (markets.LIVE_PRICE_SLOT_ONLY), so with only those on
+  // the board the "~45s old" strip and the prices-unavailable banner do not
+  // describe anything on screen.
+  const liveWithPriceCount = useMemo(
+    () => liveData.filter((d) => !LIVE_PRICE_SLOT_ONLY.has(d.pick.model_id ?? '')).length,
+    [liveData],
   );
   // Sports with an in-play pick standing right now — the red dot on the chips.
   const liveSports = useMemo(
@@ -575,10 +617,11 @@ export function PicksHomeScreen() {
     return { total: todayData.length, bet, paused };
   }, [todayData, thresholdsRevision]);
 
-  // Signals / Live views: exposure of the recommended stakes on screen.
+  // Signals / Live views: exposure of the recommended stakes on screen, each
+  // at the pick's own stake_units when it carries one (the card's stake).
   const signalExposure = useMemo(() => {
     if (view === 'today') return 0;
-    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick)), 0);
+    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick), d.pick.stake_units), 0);
   }, [filtered, view]);
 
   // FIRST LOAD ONLY on the live board. `refresh()` sets loading on every poll,
@@ -588,7 +631,9 @@ export function PicksHomeScreen() {
   // blink out to a spinner twice a minute (UX review, 2026-09-12). prevLiveCount
   // is null until the first settled fetch, which is exactly "never loaded".
   const liveFirstLoad = liveLoading && prevLiveCount.current === null;
-  const busy = view === 'live' ? liveFirstLoad : loading;
+  // Same for today's boards since they reload every 10 minutes: the skeleton
+  // is for a board never loaded, not for a background reload of one on screen.
+  const busy = view === 'live' ? liveFirstLoad : loading && !loaded;
   // A FAILED load with nothing to show for this view. It replaces the empty
   // state rather than sitting above it: "No MLB picks today" under a timeout
   // told the user the opposite of what happened (usability audit H3). With
@@ -610,8 +655,10 @@ export function PicksHomeScreen() {
     knownCount(0, { loaded, error, hasData: allData.length > 0 || pausedData.length > 0 }) === null;
   const liveUnknown = knownCount(0, { loaded: liveLoaded, error: liveError, hasData: allLiveData.length > 0 }) === null;
   // Pull-to-refresh still has to spin, and it cannot read `busy` any more for the
-  // same reason. Local, because the hook cannot tell a poll from a pull.
+  // same reason, on either board: both now reload in the background. Local,
+  // because the hooks cannot tell a poll from a pull.
   const [pulling, setPulling] = useState(false);
+  const [partialRetrying, setPartialRetrying] = useState(false);
   const stakedSuffix = signalExposure > 0 ? ` · ${formatUnits(signalExposure)} staked` : '';
   const subtitle = view === 'scoreboard'
     ? ''
@@ -667,8 +714,8 @@ export function PicksHomeScreen() {
                 : // The live sports are INTERPOLATED, not typed out: this sentence
                   // and the empty state are the two places a reader is told which
                   // sports have an in-play model, and a hand-written list here would
-                  // be the one that goes stale when a lane ships (lib/liveSports.ts).
-                  `All = every pick the model scored today. Picks from a paused model show here too, marked PAUSED — they are the model’s number, not a bet, and never appear on Signals.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, priced at DraftKings while a game is running. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()} today. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nScoreboard = today’s games, with the score and DraftKings’ spread, total and moneyline. It is every game, not our picks. Live Signals stays the in-play picks. NFL, NCAAF and MLB can show a live score when one is stored. NBA and NHL stay on Upcoming until a live feed exists. Tap a game for the line. There is no bet button on this board.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
+                  // be the one that goes stale when a model ships (lib/liveSports.ts).
+                  `All = every pick the model scored today. Picks from a paused model show here too, marked PAUSED — they are the model’s number, not a bet, and never appear on Signals.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, made while a game is running, each priced at the sportsbook named on its card. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()}. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nScoreboard = today’s games, with the score and DraftKings’ spread, total and moneyline. It is every game, not our picks. Live Signals stays the in-play picks. NFL, NCAAF and MLB can show a live score when one is stored. NBA and NHL stay on Upcoming until a live feed exists. Tap a game for the line. There is no bet button on this board.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
             }
             accessibilityLabel="About these boards"
           />
@@ -817,19 +864,27 @@ export function PicksHomeScreen() {
       <>
 
       {/* Live pricing caveats, and ONLY on the live segment. Both are
-          load-bearing (CLAUDE.md §6): the feed serves one cached in-play
-          snapshot for ~45s so a number here can be behind DK's own app, and the
-          in-play model reads DK's line and the bet is placed there. Kept as one
-          paragraph: "bet your sportsbook's number" beside "your sportsbook
-          doesn't apply" contradicted itself (UX review). */}
+          load-bearing (CLAUDE.md §6): each in-play pick is decided, and the
+          bet placed, at the book named on its card (decision_book, which since
+          2026-09-10 need not be DraftKings), and the feed serves one cached
+          in-play snapshot for ~45s, so a number here can be behind the book's
+          own app. The NBA in-play model reads the books only once an hour, so
+          its cards show no live number at all (markets.LIVE_PRICE_SLOT_ONLY),
+          and a board of only those cards says so instead of "~45s".
+          Kept as one paragraph: "bet your sportsbook's number" beside "your
+          sportsbook doesn't apply" contradicted itself (UX review). */}
       {view === 'live' && liveData.length > 0 ? (
         <View style={styles.liveNoteWrap}>
           <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
-          <Text style={styles.liveNote}>DraftKings only · prices up to ~45s old</Text>
+          <Text style={styles.liveNote}>
+            {liveWithPriceCount === 0
+              ? 'Bet at the book on each card · live price not shown after the bet'
+              : 'Bet at the book on each card · prices up to ~45s old'}
+          </Text>
           <InfoTooltip
             title="Live pricing"
             body={
-              'Live picks are priced and placed at DraftKings only — the in-play model reads DK’s line and the bet is placed there, so your own sportsbook setting does not apply here.\n\nOur feed serves one cached in-play snapshot for about 45 seconds, and its bulk and per-event endpoints return the same cache — so a number here can be up to ~45s behind DraftKings’ own app. Polling faster would not change that.\n\nBet the number DraftKings shows, and skip it if it has moved past the edge.'
+              'Each live pick is priced and placed at the sportsbook named on its card, the book where the model found the bet. If that book is not one of the books you chose in Settings, the card says so and offers no link.\n\nOur feed serves one cached in-play snapshot for about 45 seconds, so a live price here can be up to ~45s behind the book’s own app. Polling faster would not change that. The NBA in-play model reads the books once an hour, the NCAAB in-play models twice an hour, and the NCAABW in-play model only during a game’s halftime break, so their cards show the locked price and open the book without a live number.\n\nBet the number the book shows, and skip it if it has moved past the edge.'
             }
             accessibilityLabel="About live pricing"
           />
@@ -852,12 +907,17 @@ export function PicksHomeScreen() {
       {/* The picks loaded but something behind them did not — the odds views
           the line pills read, or one sport's look-ahead card. Say so and
           offer the retry; an empty pill and silence is how the 2026-09-04
-          timeouts went unseen here. Hidden while reloading, so a tap on Retry
+          timeouts went unseen here. Hidden while a TAP's reload runs, so Retry
           answers at once and the banner only returns if the reload fails
-          again (UX review). */}
-      {!error && !loading && partial ? (
+          again (UX review). Not hidden for a background reload: that made it
+          blink, and the list jump, every 10 minutes (UX review 2026-11-12). */}
+      {!error && !partialRetrying && !pulling && partial ? (
         <Pressable
-          onPress={() => void refresh()}
+          onPress={() => {
+            setPartialRetrying(true);
+            lastTodayLoad.current = Date.now();
+            void refresh().finally(() => setPartialRetrying(false));
+          }}
           accessibilityRole="button"
           accessibilityLabel={partialSentence(partial)}
           accessibilityHint="Reloads today’s picks"
@@ -870,14 +930,16 @@ export function PicksHomeScreen() {
         </Pressable>
       ) : null}
 
-      {/* Picks came back, DraftKings' in-play prices did not: every card would
+      {/* Picks came back, the in-play prices did not: every card would
           quietly lose its Now price. Say so, with the same retry as the Today
           partial banner (usability audit M2). */}
       {showLivePricesBanner({
         view,
         liveError,
         pricesUnavailable: livePricesUnavailable,
-        liveCount: liveData.length,
+        // Only cards that draw a live price can lose it: Retry cannot bring
+        // back a number the NBA in-play cards never show.
+        liveCount: liveWithPriceCount,
       }) ? (
         <Pressable
           onPress={() => void refreshLive()}
@@ -983,15 +1045,16 @@ export function PicksHomeScreen() {
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl
-            refreshing={view === 'live' ? pulling : busy}
+            refreshing={pulling}
             onRefresh={() => {
               // Pull-to-refresh on the live segment must hit the live fetch —
               // refreshing today's board there would spin and change nothing.
+              setPulling(true);
               if (view !== 'live') {
-                void refresh();
+                lastTodayLoad.current = Date.now();
+                void refresh().finally(() => setPulling(false));
                 return;
               }
-              setPulling(true);
               void refreshLive().finally(() => setPulling(false));
             }}
           />
@@ -1085,7 +1148,14 @@ function EmptyForView({
     return (
       <EmptyState
         title={`No ${sport} picks today`}
-        subtitle={`No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`}
+        subtitle={
+          // The women's totals model posts when DraftKings opens a game's
+          // total, not on the refresh cadence, so the refresh times would
+          // send a member back at the wrong hour (UX review, 2026-11-10).
+          sport === 'NCAABW'
+            ? `No NCAABW picks have posted for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
+            : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+        }
       />
     );
   }
@@ -1109,14 +1179,15 @@ function EmptyForView({
       return (
         <EmptyState
           title={`No live model for ${sport} yet`}
-          subtitle={`In-play models run on ${liveModelSportsSentence()} today, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
+          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
+          subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSentence(sportSpokenName)}, so this board stays empty for ${sportSpokenName(sport)}. The All and Signals boards carry its pre-game picks.`}
         />
       );
     }
     return (
       <EmptyState
         title={`No ${sport} live signals right now`}
-        subtitle="Live signals appear while a game is in play and the in-play model finds an edge at DraftKings’ live number. Zero of them is a valid answer, not a board that failed to load."
+        subtitle={liveEmptySubtitle(sport)}
       />
     );
   }

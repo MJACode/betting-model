@@ -23,6 +23,32 @@ the three places the port's brief disagreed with production.
 and Record tabs, and Retool's `q_performance`) now reads one shared view from
 the live date; read the next two sections before this paragraph.
 
+### The Retool dashboard: tabs, model names, tiles and saved layouts (2026-11-11/12, mike)
+
+Four tabs: **Models**, **Volume**, **Ops**, **Picks & CLV**.
+
+- **Volume** is the one place a person changes what gets posted: one row per
+  model with its four bands and a dropdown, writing through
+  `set_model_volume` with the signed-in person's email (`docs/thresholds.md`,
+  "Volume settings"). It began as a panel under the Model Roster on
+  2026-11-11 and moved to its own tab on 2026-11-12, because mike could not
+  find it there. Every other tab only reads.
+- **Model names are the app's.** The dashboard reads `model_display_names`,
+  which holds every model's `longLabel` and `shortLabel` from
+  `mobile/src/lib/modelMeta.ts`. The id shows small beneath the name, because
+  a few names are shared (a paused model and the one that replaced it). When
+  a model is added or renamed in `modelMeta.ts`, run
+  `python -m scripts.model_display_names`; `tests/test_dashboard_support.py`
+  fails until it is run.
+- **Every section is a tile.** "Arrange" unlocks dragging and resizing. A
+  layout can be saved under a name, per tab and per person, in
+  `dashboard_layouts` (owner = the signed-in email, set by the dashboard's
+  server code). Each tab also has a built-in Default. The last layout chosen
+  is remembered in the browser; the layouts themselves are only in the
+  database.
+- **The redesign changed no number.** Every pre-existing backend query was
+  kept byte for byte; the work added queries for names and layouts only.
+
 ### The official live date is 2026-09-01, and the app now mirrors Retool
 
 Matt, 2026-09-04: *"Just mirror retool for now. But only start tracking bets as

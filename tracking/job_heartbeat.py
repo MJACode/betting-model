@@ -75,6 +75,13 @@ MAX_SILENCE: dict = {
     # RETURNS, and one launch can run a whole Sunday slate (1pm to ~7:30pm
     # ET, ~6.5h), which 700 also clears.
     "nfl_live_leader": 700,
+    # 11am to 2:50am ET, */10: off 3am-11am, ~8h of legitimate silence; one
+    # launch can run a whole evening slate (~7pm to ~1:30am ET, 6.5h).
+    "nba_live": 700,
+    # The same shape: 11am to 2:50am ET, */10; one launch runs a slate.
+    "ncaab_live": 700,
+    # The NCAABW halftime loop: 11am to 2:55am ET, every 10 minutes.
+    "ncaabw_live": 700,
     # The watcher. 10-minute cadence; 45 minutes of silence means the thing
     # that reports everything else has stopped reporting.
     "failure_alerter": 45,
@@ -104,6 +111,8 @@ MAX_SILENCE: dict = {
     # of ncaab_events, then return, all off-season), so 20 minutes is four
     # missed ticks: a stopped capture, and opener times going unrecorded.
     "ncaab_odds_capture": 20,
+    # The women's capture: the same cadence and the same bound.
+    "ncaabw_odds_capture": 20,
     # Every five minutes, 24x7. The tick beats when it returns, including the
     # ones that poll nothing because the cadence has not elapsed, so 20
     # minutes is four missed ticks: a stopped feed, not a quiet afternoon.
@@ -112,6 +121,8 @@ MAX_SILENCE: dict = {
     # ledger and first-total reads), so 20 minutes is four missed ticks: a
     # stopped card, and DraftKings' first totals going by unbet.
     "ncaab_total_card": 20,
+    # The women's card: the same cadence and the same bound.
+    "ncaabw_total_card": 20,
     # The same cadence: hourly at five past, 24x7 UTC, beating on the idle
     # hours too. It decides only in the 15:00 UTC hour, so a stopped card is
     # also caught by the next run's `missed` failure.
@@ -119,6 +130,10 @@ MAX_SILENCE: dict = {
     # The NCAAB moneyline card: the same cadence and the same 15:00 UTC
     # decision, so the same bound.
     "ncaab_moneyline_card": 150,
+    # The NCAAF moneyline card: the same cadence (hourly at five past, 24x7
+    # UTC, beating on the idle hours too). It decides only in the 14:00 UTC
+    # hour, so a stopped card is also caught by the next run's `missed` failure.
+    "ncaaf_moneyline_card": 150,
     # Every minute, 24x7, and it beats on the idle ticks too (one read, then
     # return), so 20 minutes is 20 missed ticks: a stopped job, and every game
     # tipping meanwhile undecided by the NCAAB first-half spread model.
@@ -137,6 +152,14 @@ MAX_SILENCE: dict = {
 # reported around 23:40 ET, after the slate it exists for.
 ACTIVE_HOURS_ET: dict = {
     "nhl_goalie_window": (11, 23, 30),
+    # The NBA in-play loop beats every 5 minutes while a slate runs
+    # (models/nba_live_loop.Loop.heartbeat) and on every idle relaunch (every
+    # 10 minutes), so 30 minutes of silence in its hours is a hung loop.
+    "nba_live": (11, 23, 30),
+    # The NCAAB in-play loop beats the same way (models/ncaab_live_loop.Loop.heartbeat).
+    "ncaab_live": (11, 23, 30),
+    # The NCAABW halftime loop beats the same way (models/ncaabw_live_loop.Loop.heartbeat).
+    "ncaabw_live": (11, 23, 30),
 }
 _ET = ZoneInfo("America/New_York")
 

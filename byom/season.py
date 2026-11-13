@@ -35,6 +35,12 @@ def current_nfl_season(today: date | datetime | None = None) -> int:
     return year - 1
 
 
+def current_nhl_season(today: date | datetime | None = None) -> int:
+    """Ending year, the NBA split: October through December are next
+    year's label. The NHL regular season opens in October."""
+    return current_nba_season(today)
+
+
 def current_nba_season(today: date | datetime | None = None) -> int:
     """Ending year. October through December are next year's label.
 

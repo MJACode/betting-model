@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { SettingsButton } from '@/components/SettingsButton';
@@ -20,7 +20,7 @@ import { useSportsbookSync } from '@/hooks/useSportsbookSync';
 import { useManualBets, type ManualBet, type ManualBetResult } from '@/hooks/useManualBets';
 import { useTrackedBetResults, type StakeMode } from '@/hooks/useTrackedBetResults';
 import { ManualBetModal } from '@/components/ManualBetModal';
-import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatAmerican, formatFlatStake, formatFlatUnits } from '@/lib/format';
+import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatAmerican, formatFlatStake, formatFlatUnits, labelWithoutStake } from '@/lib/format';
 import { unitsSpeech } from '@/lib/a11y';
 import type { SyncedBet } from '@/lib/sharpsports';
 import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance';
@@ -78,7 +78,7 @@ export function PerformanceScreen() {
         }
       }}
       onRowLongPress={(row) => {
-        Alert.alert('Stop tracking?', row.pick.pick_label, [
+        Alert.alert('Stop tracking?', labelWithoutStake(row.pick.pick_label), [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Untrack',
@@ -463,7 +463,7 @@ function TrackedBetsCard({
               onLongPress={() => onRowLongPress(row)}
               accessibilityRole="button"
               accessibilityLabel={[
-                row.pick.pick_label,
+                labelWithoutStake(row.pick.pick_label),
                 formatGameDate(row.pick.game_date),
                 decisionOdds(row.pick) != null
                   ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
@@ -592,7 +592,7 @@ function StakeEditModal({
   };
 
   return (
-    <Modal visible={row != null} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal trackName="PerformanceScreen" visible={row != null} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.stakeModalBackdrop}>
         {/* Tap outside the card to dismiss (audit M10). A sibling behind the
             card, not its parent, so VoiceOver still reaches the card's input
@@ -606,7 +606,7 @@ function StakeEditModal({
         <View style={styles.stakeModalCard} accessibilityViewIsModal>
           <Text style={styles.stakeModalTitle}>Your stake for this bet, in units</Text>
           <Text style={styles.stakeModalLabel} numberOfLines={2}>
-            {row?.pick.pick_label ?? ''}
+            {labelWithoutStake(row?.pick.pick_label)}
           </Text>
           <Text style={styles.stakeModalHint}>
             What you risk on this bet, settled at its posted price. Leave it empty to keep the

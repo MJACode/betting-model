@@ -383,6 +383,17 @@ export function commitBankrollText(
   return { text: bankrollFieldText(savedAmount, seps), error, save: undefined };
 }
 
+/** What Back does when the field unmounts without a blur. Same commit as blur. */
+export function saveBankrollOnLeave(
+  text: string,
+  savedAmount: number | null,
+  setAmount: (amount: number | null) => void,
+  seps: NumberSeparators = DEVICE_SEPARATORS,
+): void {
+  const c = commitBankrollText(text, savedAmount, seps);
+  if (c.save !== undefined) setAmount(c.save);
+}
+
 // ── Units → dollars (display only) ────────────────────────────────────────
 /** One unit in dollars, or null with no bankroll. */
 export function unitDollars(s: BankrollSettings): number | null {

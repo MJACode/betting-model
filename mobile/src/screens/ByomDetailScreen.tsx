@@ -8,6 +8,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ByomPreviewCard } from '@/components/byom/ByomPreviewCard';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
+import { ByomSeasonBreakdown } from '@/components/byom/ByomSeasonBreakdown';
+import { currentByomSeason } from '@/lib/byomRecord';
 import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
@@ -19,7 +21,7 @@ import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { byomBetsAvailable, deleteByomModel } from '@/lib/byom';
 import { friendlyCause, isAbortError } from '@/lib/errors';
-import { isPropMarket, isWholeSeason, marketLabel, showsUnits, byomEmptyLabel, type ByomSport } from '@/lib/byomRecord';
+import { isPropMarket, isWholeSeason, marketLabel, showsUnits, byomEmptyLabel, type ByomSport, asByomSport } from '@/lib/byomRecord';
 import { propFilterSummary } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -33,9 +35,10 @@ export function ByomDetailScreen() {
   const { scope } = useByomSeason();
   const { model, loading, error, missing, reload, signedIn } = useByomSavedModel(modelId);
   const graded = model != null && !isWholeSeason(model.filters);
-  const sport: ByomSport = model?.sport === 'NBA' ? 'NBA' : 'NFL';
+  const sport: ByomSport = asByomSport(model?.sport);
   const filterMarket = model?.filters.markets?.[0] ?? null;
-  const filterLine = model == null || !isPropMarket(filterMarket)
+  // Game models show their sheet and trend filters too (UX review, 2026-11-05).
+  const filterLine = model == null || filterMarket == null
     ? null
     : propFilterSummary(model.filters, sport, filterMarket);
   const facts = useNbaGameFacts(model == null ? null : sport);
@@ -48,7 +51,6 @@ export function ByomDetailScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({
       title: model?.name ?? 'Model',
-      headerBackTitle: 'My models',
       headerRight: model == null ? undefined : () => (
         <Pressable
           onPress={() => navigation.navigate('ByomEdit', { modelId })}
@@ -119,7 +121,7 @@ export function ByomDetailScreen() {
               style={styles.banner}
             />
           ) : null}
-          <Text style={styles.market}>{marketLabel(model.filters)}</Text>
+          <Text style={styles.market}>{marketLabel(model.filters, sport)}</Text>
           {filterLine ? <Text style={styles.filters}>{filterLine}</Text> : null}
           <ByomSeasonToggle />
           <ByomPreviewCard
@@ -130,12 +132,18 @@ export function ByomDetailScreen() {
             showsUnits={showsUnits(model.filters)}
             emptyLabel={graded && model ? byomEmptyLabel(sport, facts.status, model.filters) : '—'}
             closeRecord={graded ? preview.closeRecord : null}
-            closingHeadline={sport === 'NFL' && preview.timing === 'close'}
+            closingHeadline={preview.timing === 'close'}
             onShowBets={graded && byomBetsAvailable() && preview.record != null && preview.record.bets > 0
               ? () => navigation.navigate('ByomBets', {
                 filters: model.filters, sport, title: model.name, timing: preview.timing,
               })
               : undefined}
+          />
+          <ByomSeasonBreakdown
+            record={preview.record}
+            seasons={preview.seasons}
+            currentSeason={currentByomSeason(sport)}
+            showsUnits={showsUnits(model.filters)}
           />
           <ByomUnitsNote />
           <Pressable

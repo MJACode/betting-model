@@ -549,7 +549,7 @@ def test_prop_facts_normalizes_sport_the_same_way_as_game_facts(monkeypatch):
             seen["closed"] = True
 
     monkeypatch.setattr("byom.prop_load.build_seasons", build_seasons)
-    monkeypatch.setattr("data.db.get_connection", lambda: Conn())
+    monkeypatch.setattr("data.db.get_connection", lambda *a, **k: Conn())
     fn, validate = JOBS["byom_prop_facts"]
     stored = validate({"sport": " nba ", "apply": False})
     out = fn(**stored)
@@ -588,14 +588,15 @@ def test_the_job_is_enabled_and_the_price_migrations_are_hand_applied():
     nba = [e for e in declared if e["key"] == "byom-nba-prop-facts"]
     assert len(nba) == 1
     assert nba[0]["job_type"] == "byom_prop_facts"
-    assert nba[0]["enabled"] is False
+    # Matt, 2026-11-04: NBA props were empty; the backfill is on.
+    assert nba[0]["enabled"] is True
     assert nba[0]["requested_by"] == "owner"
-    assert nba[0]["args"] == {"sport": "NBA", "apply": False}
+    assert nba[0]["args"] == {"sport": "NBA", "apply": True}
     assert "season" not in nba[0]["args"]
-    assert "byom_nba_props_2026_10_29.sql" in nba[0]["note"]
     assert "byom-nba-game-facts" in nba[0]["note"]
-    assert "own change" in nba[0]["note"]
-    assert "Do not enable both" in nba[0]["note"]
+    assert "no API credits" in nba[0]["note"]
+    keys = [e["key"] for e in declared]
+    assert keys.index("byom-nba-game-facts") < keys.index("byom-nba-prop-facts")
     assert _validate_byom_prop_facts({"sport": " nba "})["sport"] == "NBA"
     assert _validate_byom_prop_facts({"sport": "nfl"})["sport"] == "NFL"
     assert all(e["key"] != "byom-nfl-game-facts-shop" for e in declared)

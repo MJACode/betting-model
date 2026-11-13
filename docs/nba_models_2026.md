@@ -357,6 +357,69 @@ fetch. Each game is decided once (`nba_prop_projection_decisions`). The injury l
 game was projected with is kept in `nba_injury_asof`, which also holds the 2018-19..2025-26
 history from the official report.
 
+**The probability a pick stores (mike, 2026-11-06: "Yes, ship it").** Graded walk-forward on 2024-25 and 2025-26,
+every eighth of the model's EV range claims about three times what its bets return (the EV
+calibration grade, PR #1178). So for games from 2026-11-07, a picks row stores and the app
+shows the model's probability pulled toward the price it was bet at: p' = implied + k (p −
+implied), implied from the decision price, k = 0.325 (`config.MODEL_PROB_SHRINK`). A row for
+an earlier game stores p, whenever it was written, so every reader tells the two apart from
+the row's own `game_date`. `model_probability`, `model_probability_cal`, `edge`,
+`decision_edge` and `best_edge` all come from p', so the shown EV and the shown edge at the
+bet's price are k times what they were. **The bet does not change**: `find_bets` decides on p
+against the same floors, and the door ranks on the raw EV.
+
+- *k.* Maximum likelihood on all three seasons' 66,588 graded bets (`calfit.py` method `k`,
+  grid 0.005): 0.325; on a 0.001 grid 0.324; 90% likelihood range 0.270 to 0.377. Fitted on
+  earlier seasons only, it was 0.325 (2023-24) and 0.300 (2023-24 + 2024-25).
+- *The replay* (`tests/test_nba_prop_projection_shrink.py`, every graded bet of both NBA prop
+  models through the live `pick_rows`, the door's `choose` and Discord's `price_bound`, with the
+  boundary moved before them; it runs where the research bet lists exist). With and without the shrink the door chose the same bets
+  in the same order, with the same reason for every candidate it dropped: 1,867 bets at four a
+  night, 2,639 at six. Every stored probability is implied + k (p − implied). The smallest
+  stored decision edge is +0.0015, so the action filter's cut (decision edge ≥ 0.0) keeps every
+  bet. Discord's "good to" price is printed identically on all 66,588.
+- *What a member sees.* At the door (six a night), the projection model's 1,852 bets: the EV
+  stored until now claims +28.1%, the shrunk EV +9.1%, and the bets returned +9.9% (+147.5
+  units). In-sample, because k was fitted on these seasons; walk-forward the shrunk claim was
+  +8.5% against +10.8% returned. One live pick: "Myles Turner Under 1.5 Blocks" at BetParx +110
+  (2026-11-04) is stored as 58.85% with an edge of +11.2% and an EV of +23.6%; shrunk it would
+  show 51.3%, +3.7% and +7.7%. Same bet, price, stake and "good to".
+
+Every reader of the three numbers, and what changes:
+
+| reader | what it reads | after the change |
+|---|---|---|
+| The app: pick card, reasoning card, model screen ("Model %", "Edge", EV) | `model_probability`, `decision_edge` | the shrunk numbers; no app release |
+| The app, Discord and push action filter | probability ≥ 0.0, `COALESCE(decision_edge, edge)` ≥ 0.0 | unchanged: every bet passes |
+| Record views (`v_model_full_record`, `v_model_full_outcome_*`), BYOM backtests | `decision_edge` ≥ the cut | unchanged, the same reason |
+| Discord posts | no probability or edge is posted; "good to" solves the EV floor from `model_probability` | identical: `discord_notifier._honest` recovers the decided number (`models/honest_ev.decision_probability`). Without it, 31,143 of 66,588 bets would have posted no "good to" |
+| The free pick of the day (Discord free channel, X) | the probability and DraftKings `edge` copied into `opening_signals` at capture | "good to" identical (`discord_notifier._decided`, the same recovery); eligibility cuts on the DraftKings `edge` ≥ 0.0, see below |
+| `models/honest_ev.gate`, `config.MODELS_ON_OWN_PROBABILITY` | the model's own number, before the write | unchanged; it stays on its own number (a promoted map would be applied before the floor and change bets) |
+| The door (`models/nba_prop_rank.py`) | `_ev`, the raw EV | unchanged |
+| Closing-line value | prices only | unchanged |
+| Calibration monitor (`tracking/system_health`), weekly fitter | `COALESCE(model_probability_cal, model_probability)` of settled bets | new picks are graded on the shrunk number; see below |
+| A member's own-book EV, parlays, BYOM filters | `model_probability` | the shrunk number |
+| Claude mobile's `confirmed_picks` view; the picks email renderer (no job calls it) | the stored probability and edge | the shrunk numbers |
+| The app's sharp score | the model's edge bar | none for this model, as before (it has no bar) |
+| Local dashboard (`dashboard/app.py`) | `edge` (DraftKings) ≥ 0.0 | a pick whose DraftKings price is worse than its book's can drop off its list |
+
+**Not rewritten, and the boundary.** The 78 BET rows written through 2026-11-04 (28 of them
+VOID), and every row for a game before 2026-11-07, keep the raw number (CLAUDE.md 1c).
+`models/honest_ev.decision_probability` gives the decided number for any row from its stored
+number, decision price and game date. The date has to be one no pick was written for before the
+change deploys: a raw row the old code wrote for a game on or after it would be read as shrunk
+(re-posted by Discord, it would say "good to −200"). Without the date at all, a re-post of an
+old pick would do the same: "Myles Turner Under 1.5 Blocks", stored 0.5885, posts −136 and
+would have posted −200. Flagged, not fixed: the
+calibration monitor's window opens at the model's version date, so until the old picks age out
+it averages raw and shrunk claims together. And the DraftKings-reference `edge` goes negative
+more often: on the 55 live picks with a DraftKings price, 1 is negative now and 8 would be.
+Two readers cut on it: the local dashboard, and the free pick's eligibility
+(`discord_notifier._free_pick_candidates`, `os.edge`), which unlike the app's filter does not
+read the decision edge. So such a pick is still a bet on every board and channel, but is not
+offered as the free pick. Making the free pick cut on the decision edge, as the app does, would
+change every model's free-pick pool, so it is left for its own change.
+
 ## 6. Second search: spread, moneyline and total (pre-registered 2026-10-17, before any grid)
 
 mike, 2026-10-16: *"We need nba spread / ml / totals models … find edge and I don't care how
@@ -2746,6 +2809,10 @@ was graded, its counts, and its results at the end. All runs are stored in Supab
 | The two prop models on the postseason | `docs/nba_search_postseason.md` | `2026-10-31-postseason` | 7 | 1 | **`nba_prop_market` passes on 272 Cup final, play-in and playoff games: 1,953 bets, +138.87 units, +6.8%** |
 | First-quarter player props (added 2026-11-04) | `docs/nba_search_q1props.md` | `2026-11-04-q1props` | 18 | 0 | Nearest miss assists over, +3.0%, -1.7% to +7.6%; the blind bets lose 5% to 8% |
 | First-quarter and first-half team totals (added 2026-11-04) | `docs/nba_search_q1tt.md` | `2026-11-04-q1tt` | 26 | 0 | Books set them from their own period spread and total; the live home team-total rule carried over makes +3%, too few bets to tell |
+| First-quarter props anchored to the full-game market (added 2026-11-06) | `docs/nba_search_q1anchor.md` | `2026-11-06-q1anchor` | 36 | 0 | Off Pinnacle's full-game number: nothing. Off the soft books' number, for players Pinnacle does not quote, assists overs clear five of six bars (754 bets, +7.9%, +0.1% to +15.8%) and fail the bands bar on one band |
+| First-quarter and first-half team totals against Pinnacle's period lines (added 2026-11-06) | `docs/nba_search_q1pin.md` | `2026-11-06-q1pin` | 12 | 0 | The books' team totals sit within half a point of Pinnacle's period numbers 95% of the time; 11 cells under 200 bets, the twelfth +5.1%, −3.6% to +14.1% |
+| First-quarter moneyline on the cover-record step, first-quarter total on the shooting-luck gap (added 2026-11-07) | `docs/nba_search_q1mt.md` | `2026-11-07-q1mt` | 12 | 0 | The total: nothing (the first half's +8% is +0.9% on the first quarter). The moneyline on the live step rule: 87 bets, +25.8%, +1.7% to +50.0%, fails only the bet count; it bets the same team in the same games as `nba_q1_trend`. Built live anyway as `nba_q1_trend_ml` (mike, 2026-11-07) |
+| In-play spread and moneyline on 2026-27's live prices, and a late-game leader (added 2026-11-04) | `docs/nba_search_ingame27.md` | `2026-11-04-ingame27` | 24 | 0 | Every cell under 200 bets this season; quarter 3 and 4 spreads read positive, moneylines lose; the leader is closed by the -200 floor |
 
 **Where this leaves the spread and moneyline.** No pre-game full-game spread or moneyline cell has passed in any search.
 That is now tested from the projection, the injury report, the shooting-luck gap, the popular team, the favourite and
@@ -2756,8 +2823,407 @@ written down beforehand, and that needs an NBA in-play loop that does not exist.
 **Where this leaves the first quarter.** No first-quarter cell has passed in any search: spreads and totals in the fifth
 search, the eighth (mike's method) and the starters search; player props and team totals after their prices were
 bought on 2026-11-03 (two seasons, 2024-25 and 2025-26; the feed holds none for 2023-24). Pinnacle prices none of the
-first-quarter prop or team-total markets, so the sharp-reference rule behind the live prop model cannot run on them.
+first-quarter prop or team-total markets, so the sharp-reference rule behind the live prop model cannot run on them. The anchored search (2026-11-06) priced them off the same player's full-game number instead: Pinnacle's found nothing, and the soft books' found assists overs that fail only the bands bar. Those near misses would bet about once in 16 days live: this season Pinnacle quotes nearly every player Hard Rock lists. Team totals priced at Pinnacle's own period spread and total (2026-11-06) found nothing either. No first-quarter route the stored data supports is left untested.
 
 **The postseason pass is real arithmetic with a warning on it.** Most of its return is a general lean to unders, and
 its one-a-game, four-a-night version is 251 bets, +12.37 units, +6.7%, with an interval of -8.7% to +20.9%. Section 9.1
 of its doc has the check.
+
+## 14. Pick volume: one game total a game, six props a night (2026-11-04, mike)
+
+mike, 2026-11-04: *"Betting Game Over Under AND individual team totals AND 1H over under seems
+duplicitiave - too many pciks. ONly selected the highest EV one, unless it;s exceptioanlly high"*,
+and on props, *"props seems to be coming fro earlier games only recently? because we articidially
+limit to 4 ... we can go slightly more than 4 if we need to cause the picks are that good or
+less"*. The goal he set: the highest-EV picks, to maximise units won and closing-line value.
+
+The tables are in `docs/thresholds.md` (the `nba_first_half_total_luck` section, "One bet a game
+across the NBA game totals", and the `nba_prop_market` section, "Six a night"). What they say:
+
+**Game totals.** The full-game over (gap >= 3) and the first-half over (gap >= 2) read the same
+gap, so every game the full-game model bet, the first-half model bet too: 323 of 323 graded
+games. The twins returned +3.7% against +10.2% for the full-game bet on the same games. The home
+team total under met an over on 2 of 942 games. So:
+
+- the first-half over bets only below the full-game cut (`FULL_GAME_GAP_CUT`), and
+- one bet a game holds across the three models (`scripts/nba_game_totals_door.py`), the first
+  writer keeping the game.
+
+Graded: +152.79 units on 1,267 bets with every bet, +139.08 on 942 with one a game, the full game
+first. Choosing by the highest model EV instead: +124.40. A bigger gap did not win more, so no
+"exceptionally strong" tier keeps both.
+
+On the population the models bet live (no 10-game wait): every full-game bet had its twin (450 of
+450), the twins +3.7%; every bet +156.27 units on 1,624, the live rule +136.74 on 1,162.
+
+**Props.** The early-game lean is real and comes from the night filling in tip order. It is also
+where the money was: on nights of six or more games, the first four tips' bets returned +8.0%, the
+rest +2.0%. Each model's EV percentile does not rank quality at its top (0.80-0.90 +10.1%,
+0.98-1.00 +4.7%), so filling the night by EV graded worse (+102.5 units for the best four of a
+night against +153.6 in tip order). Six a night in tip order is where the units stop growing:
++183.7 units, +8.17%; the 7th and 8th bets of a night earned -0.8.
+
+**What did not ship.** Taking each game's best bet below its model's top 2% graded +19.6 units
+better at six a night, but the top 1.5% and 2.5% did not hold up: a peak, not a plateau.
+
+**Sizing 1 to 3 units instead of flat (mike, 2026-11-04: *"why not explore fewer bets, but 1-3
+unit spreads with 3 on more confident bets?"*).** Units grow with the stake, so 3 units on
+everything is three times the units at three times the risk: that is the size of a unit, a
+bankroll choice. The question a sizing rule answers is where the same risk goes. So each scheme
+below is scaled to the flat rule's total risk (its return times flat's risk), with a 90% range on
+its difference from flat (nights resampled). Signals fixed before grading. Live rules,
+2023-24..2025-26:
+
+| Scheme | Bets | Units at flat's risk | Return | Difference from flat, 90% range |
+|---|---|---|---|---|
+| Props, flat 1 unit (live: one a game, six a night) | 2,639 | +183.7 | +8.17% | |
+| 1/2/3 units by the model's own EV percentile | 2,639 | +158.5 | +7.05% | -57.7 to +8.9 |
+| 1 to 3 units shaped like Kelly (EV over price) | 2,639 | +189.4 | +8.43% | -21.7 to +32.4 |
+| 3 units on each night's top 2, the rest not bet | 968 | +180.5 | +8.03% | -107.8 to +102.7 |
+| 3 units on the top third, the rest not bet | 880 | +103.8 | +4.62% | -198.6 to +36.2 |
+| 3/2/1, reversed (most on the lowest EV) | 2,639 | +208.1 | +9.26% | -8.0 to +57.5 |
+| Game totals, flat 1 unit (live) | 1,162 | +136.7 | +10.75% | |
+| 1/2/3 units by the luck gap, within each model | 1,162 | +135.9 | +10.68% | -24.8 to +23.6 |
+| 3 team total, 2 full game, 1 first half | 1,162 | +141.8 | +11.14% | -17.5 to +27.3 |
+
+- **Sizing up on the model's confidence loses.** It puts the most money on the props the models
+  overstate most (section 14 above), the same pattern that took the 1-3 unit scale off every model
+  on 2026-08-29 (`tracking/discord_notifier.conviction_for`).
+- **Fewer bets at 3 units does not help.** At the same risk, the top two a night earn what six a
+  night earn, with a far wider range; the top third earns less.
+- **The reversed scale is better in all three seasons** (+10.7 / +8.9 / +8.4% against +9.0 / +7.7 /
+  +7.9%), but its range includes zero, and the same inversion was unstable on the 2026-08-29 data.
+  It is the overconfidence again, which the projection model's calibration work addresses, not a
+  sizing rule.
+- **The game totals have no size signal either.** The full-game over's largest-gap third returned
+  +1.6% (the middle third +12.1%). The home team total under by its own number, on its 429 bets:
+  weakest third +7.3%, middle +25.4%, strongest +10.2%; 1/2/3 units gives +71.1 at flat's risk
+  against +68.7.
+- **Verdict: flat stays.** `conviction_for`'s rule holds: re-open when a signal chosen in advance
+  survives a time split. Scripts: `nba_game_edge/volume1104/sizing.py`, `tt_signal.py`.
+
+Updated-By: mike.
+
+## 15. The projection model's EV claims three times what it returns, and a corrected EV does not rank the night better (2026-11-04, mike)
+
+Asked for while grading section 14: the projection model's highest-EV props looked
+overconfident, and that looked like the reason ranking the night by EV lost to tip order. The
+task was a calibration fix for the top of `nba_prop_projection`'s EV range, graded walk-forward,
+then the six-a-night door re-graded with the corrected EVs.
+
+**Population.** Both NBA prop models' graded bets, 2023-24..2025-26, loaded as the cap grade
+loads them: `nba_prop_projection` 66,588 bets (the five books the live feed returns, assists
+overs removed), `nba_prop_market` 24,572. Every bet is a proposition that clears today's floors;
+the lists hold nothing below a floor, so nothing here can move one. Walk-forward: 2024-25 is
+mapped by a fit on 2023-24, and 2025-26 by a fit on 2023-24 + 2024-25 (40,532 projection bets
+between them). 2023-24 has no season before it. It is mapped from the other two seasons only so
+the three-season door grade has a number for it, and it never judges a map. "Claimed" is the
+risk-weighted mean EV, "returned" is units over units risked, and units are one to win.
+Closing-line value is not in these bet lists. Scripts and outputs: temp folder
+`nba_game_edge/projcal1104` (`calfit.py`, `door.py`, `door_roi.py`, `kcheck.py`).
+
+**The overclaim is not at the top. It is in every part of the range.** Eighths of the model's
+EV, the two walk-forward seasons, uncorrected (%):
+
+| eighth of EV | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| claimed | 2.5 | 4.4 | 5.7 | 7.1 | 8.8 | 11.1 | 14.4 | 23.2 |
+| returned | 1.4 | 1.4 | 2.1 | 1.6 | 1.5 | 4.8 | 6.7 | 6.9 |
+| 90% range | -0.9..+3.6 | -0.9..+3.7 | -0.2..+4.3 | -0.7..+3.9 | -0.8..+3.9 | +2.5..+7.2 | +4.3..+9.1 | +4.5..+9.4 |
+
+Seven of the eight claims sit outside their 90% range. Every eighth claims about three times what
+it returns. The top eighth's 16-point gap is the same ratio on a bigger number.
+
+**The fix that clears: multiply the EV by one factor.** EV' = k x EV, which is the model's
+probability pulled toward the price's own implied probability, p' = implied + k (p - implied).
+k is fitted by maximum likelihood on the earlier seasons: 0.325 from 2023-24, 0.300 from
+2023-24 + 2024-25 (0.320 from the other two seasons, for 2023-24). Walk-forward:
+
+| eighth of EV | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| claimed | 0.8 | 1.4 | 1.8 | 2.2 | 2.7 | 3.4 | 4.5 | 7.2 |
+| returned | 1.1 | 2.4 | 2.2 | 0.9 | 2.2 | 5.5 | 5.8 | 6.3 |
+| 90% range | -1.2..+3.3 | +0.1..+4.6 | -0.1..+4.4 | -1.4..+3.2 | -0.1..+4.5 | +3.1..+7.8 | +3.4..+8.2 | +3.9..+8.8 |
+
+- All eight claims are inside their 90% range; the largest gap is 2.1 points.
+- Before and after mid-January (the list's own split): quartiles, 8 of 8 inside.
+- By season: 2024-25, 6 of 6 bands inside; 2025-26, 5 of 6 (its 75th-90th percentile returned
+  +10.6% against +4.4% claimed, an under-claim).
+- The one place it still over-claims: the top 2% claims +11.3% and returned +4.4% (90% range
+  -1.9 to +10.8), just outside.
+- At the door (today's six a night), the projection model's bets claim +28.1% uncorrected and
+  +8.9% shrunk, and returned +9.8% (walk-forward: 27.0 / 8.5 / 10.8).
+
+Because one number multiplies every EV, it changes no bet and no ranking: the door picks the same
+bets bet for bet. It is the honest size of the edge, nothing more.
+
+**What did not clear: a map that ranks the top better.** Five maps that do reorder bets, each
+fitted the same walk-forward way. The return on each map's own top eighth (%):
+
+| map | top eighth returned |
+|---|---|
+| the model's own EV (or the shrink, which keeps its order) | +6.3 to +6.9 |
+| blend: logit p' = a + b logit(implied) + c logit(p); b 0.90-0.98, c 0.19-0.24 | +4.1 |
+| the blend fitted per market and side | +4.3 |
+| the blend plus a squared gap term (lets the edge peak and fall) | +5.5 |
+| isotonic, return on EV | +5.1 |
+| the earlier seasons' return in the bet's EV-percentile band | +6.3 |
+
+None beats the model's own order. By the model's own EV percentile, walk-forward (%):
+
+| percentile | 0-50 | 50-70 | 70-80 | 80-90 | 90-95 | 95-98 | 98-100 |
+|---|---|---|---|---|---|---|---|
+| bets | 20,266 | 8,106 | 4,053 | 4,053 | 2,027 | 1,216 | 811 |
+| returned | +1.6 | +2.7 | +5.7 | +8.3 | +5.2 | +5.6 | +5.9 |
+| 90% range | +0.5..+2.7 | +0.9..+4.6 | +3.0..+8.3 | +5.6..+11.0 | +1.2..+9.1 | +0.5..+10.8 | -0.4..+12.3 |
+
+The EV ranks quality up to about the 80th-90th percentile. Above that the return is flat at about
++5% to +8%, and the top bands sit inside each other's ranges. A percentile that ranks quality at
+the very top cannot be built from these inputs.
+
+**The door, re-graded.** One bet a game across both NBA prop models, 2023-24..2025-26 (2023-24
+mapped leave one out), each rule paired with today's door night by night (4,000 resamples of
+nights; 90% ranges). "Walk-forward" is the same comparison on 2024-25 and 2025-26 only. "One
+scale" sets the projection model's shrunk EV directly against the market model's EV as it is,
+whose claims already track its returns on its own list (below).
+
+| rule | units | return | risk vs today | return vs today, points | units vs today | walk-forward units vs today |
+|---|---|---|---|---|---|---|
+| **today:** own percentile of raw EV, first six games by tip | +183.7 | +8.17% | - | - | - | - |
+| today's percentile, best six of the night | +158.7 | +7.19% | -2% | -1.0 (-3.2..+1.3) | -25.0 (-74.0..+26.9) | -30.1 (-71.6..+13.7) |
+| shrunk EV, one scale with the market model, first six by tip | +179.2 | +8.08% | -1% | -0.1 (-1.5..+1.3) | -4.4 (-35.1..+26.9) | -3.9 (-29.0..+22.4) |
+| shrunk EV, one scale, best six of the night | +154.2 | +7.11% | -4% | -1.1 (-3.5..+1.4) | -29.4 (-83.2..+24.3) | -21.8 (-66.2..+23.1) |
+| blend percentile, first six by tip | +251.7 | +8.69% | +29% | +0.5 (-2.5..+3.5) | +68.1 (-9.5..+146.9) | +55.5 (-17.6..+129.3) |
+| blend percentile, best six of the night | +272.7 | +9.55% | +27% | +1.4 (-1.9..+4.6) | +89.0 (+5.8..+171.0) | +70.5 (-5.5..+148.9) |
+| shrunk EV x risk (expected units), first six by tip | +229.9 | +7.52% | +36% | -0.7 (-3.8..+2.6) | +46.3 (-36.5..+136.3) | +10.1 (-56.6..+80.0) |
+| control, no model: the shortest price in each game, first six by tip | +190.6 | +4.21% | +101% | -4.0 (-8.2..+0.3) | +6.9 (-124.1..+141.5) | -42.3 (-154.3..+72.6) |
+
+The neighbourhood around the shrunk EV:
+
+- Capped at 0.03, 0.04, 0.05, 0.06 or 0.08, so every bet above the cap counts equal: first six
+  by tip -4.3 to +8.5 units against today; best six of the night -25.1 to +0.9.
+- A floor in tip order (the only "best first" rule a per-game decision window can run live):
+  shrunk EV at least 0.00, 0.01, 0.02, 0.03, 0.04 or 0.05, at most six: -3.4 to -28.3 units.
+  Today's own-percentile floor at 0.3 to 0.9: +1.4 to -59.1.
+- By half, first six by tip: today +61.3 early / +122.3 late; the shrunk EV on one scale +72.0 /
+  +107.2; its best six of the night +63.8 / +90.5.
+
+What the door table says:
+
+- **Ranking the night by a corrected EV still loses to tip order.** With the shrink, the best six
+  of the night graded -29.4 units against today (walk-forward -21.8), the same as today's
+  percentile (-25.0). The top of the range is flat (above), so a corrected EV has nothing there
+  to rank by.
+- **Every rule that wins more units than today does it by betting favourites.** Units are one to
+  win, so a -150 bet risks 1.5 for the unit a +150 bet risks 0.67 for: at the same return, a
+  favourite earns more units. The blend percentile moves the median price from +120 to -102 and
+  plus-money bets from 78% to 49%, and risks 29% more. Its return per unit risked is 0.5 points
+  better (-2.5 to +3.5); at today's risk it would be +195.2 units, not +251.7. The no-model control
+  shows the effect alone: the shortest price in each game matches today's units at twice the risk
+  and half the return. None of these clears its walk-forward 90% range.
+- **One row looks like a result and is not.** The percentile of the shrunk EV, with each season
+  mapped by its own fold, graded +21.6 units (+5.8 to +38.2). 55 bets differ from today, 34 of
+  them in 2025-26, because the fitted factor drifted from 0.325 to 0.300 between folds. One
+  factor for every season leaves every percentile, and so the door, exactly as it is.
+
+**Sizing by a corrected EV.** Section 14 graded 1 to 3 units on today's door: sizing up by the
+model's own EV percentile lost to flat, and the reversed scale won. The question here was whether
+a calibration fix removes that. It cannot. The shrink multiplies the projection model's EV by one
+number, so within the model every third holds the same bets as before. Re-graded on the same
+2,639 bets, each scheme scaled to flat's total risk as in section 14 (flat +183.7 units):
+
+| scheme | units at flat's risk | difference from flat, 90% range |
+|---|---|---|
+| 1/2/3 by own percentile, raw EV (section 14) | +158.5 | -57.7 to +8.9 |
+| 3/2/1 reversed, raw EV (section 14) | +208.1 | -8.0 to +57.5 |
+| 1/2/3 by EV third within each model, raw or shrunk (the same bets) | +165.7 | -51.6 to +15.3 |
+| 1/2/3 by shrunk EV, one scale across the two models | +170.8 | -44.9 to +19.8 |
+| 3/2/1 by shrunk EV, one scale | +195.9 | -19.3 to +43.0 |
+| 1 to 3 shaped like Kelly on the shrunk EV, one scale | +172.1 | -35.6 to +12.1 |
+| 1/2/3 by the blend, one scale | +176.8 | -38.4 to +24.1 |
+| 1/2/3 by isotonic, one scale | +180.9 | -35.5 to +31.1 |
+
+- **Inside the door, EV does not rank either model's bets.** The projection model's lowest-EV
+  third returned +14.1% (616 bets), its middle third +6.2%, its top third +8.9%. The market
+  model's thirds returned +4.1%, +10.4% and +0.1% (about 264 bets each). The door already takes
+  each game's top bet, so its bets sit on the flat top of the range (above).
+- **No corrected EV makes sizing up pay.** Putting both models on one scale halves the reversed
+  scale's lead (+12.2 units against +24.4) but does not remove it. Every 90% range includes zero.
+  Flat stays, as section 14 decided. Script: `sizing_cal.py` in the same temp folder.
+
+**Decision: nothing ships.** The door stays one a game, six a night, first by tip, ranked by each
+model's own percentile of raw EV. The prices it lays are unchanged: -194 to +380, median +120,
+78% plus money.
+
+**Flagged, not fixed here:**
+
+- The market model at the door claims +7.9% and returned +3.0% walk-forward (+7.8% and +5.0%
+  over the three seasons). On its own bet list its claims track its returns (largest gap 3.9
+  points across eighths, one of eight outside its range), but its top 2% by its own EV returned
+  +1.9% (-7.6 to +11.4, 321 bets), and a single shrink factor for it is unstable (1.35, 0.98,
+  0.62 across folds). Worked in section 16 (2026-11-05): nothing clears.
+- The probability each projection pick stores and shows (`model_probability`, and `edge` from it)
+  is the uncorrected number, about three times the edge its bets return. Storing the shrunk one
+  changes no bet, but every reader of that column would see the change. Changed by #1196: picks
+  from 2026-11-07 store and show the shrunk number (`config.MODEL_PROB_SHRINK`, k 0.325; section 5).
+
+No model change, so no `Updated-By`.
+
+## 16. The market model at the door: its top 2% returns nothing, and no re-weighting against the projection model clears (2026-11-05, mike)
+
+Section 15 flagged it: at the door, `nba_prop_market` claims +7.9% and returned +3.0%
+walk-forward. The door gives each game to the bet with the highest percentile within its own
+model, so a market bet high in its own range takes the game from a projection bet. Two questions:
+does the market model's EV rank its own bets at the top, and should the door count a market bet
+for less when a projection bet in the same game competes with it?
+
+**Population and method.** The same bets as section 15, built by the same loader:
+`nba_prop_market` 24,572 graded bets (every one an under), `nba_prop_projection` 66,588,
+2023-24..2025-26. "Percentile" is the door's own key: a bet's EV percentile within its model over
+the three seasons (the breakpoints in `models/nba_prop_rank.py`). "Returned" is units over units
+risked; units are one to win. 90% ranges resample nights. Every door rule is compared with today's
+door night by night (4,000 resamples). "Walk-forward" is that comparison on 2024-25 and 2025-26
+only. Each door rule is a family with one setting, so the neighbourhood of settings is shown, plus
+a walk-forward pick: each test season uses the setting that did best on the seasons before it.
+The three "one scale" rows use maps fitted as in section 15: 2024-25 from 2023-24, 2025-26 from
+the two seasons before it, and 2023-24 from the other two (labelled there). "Early" and "late" are the two halves of each season (split in mid-January). Scripts and outputs:
+temp folder `nba_game_edge/mktdoor1105` (`s1_baseline.py` to `s7_drop.py`).
+
+### 16.1 The market model's EV ranks its bets up to its 98th percentile, then turns over
+
+The market model's whole list, by its own EV percentile, three seasons (%):
+
+| percentile | 0-50 | 50-70 | 70-80 | 80-90 | 90-95 | 95-98 | 98-100 |
+|---|---|---|---|---|---|---|---|
+| bets | 12,292 | 4,910 | 2,454 | 2,460 | 1,226 | 738 | 492 |
+| claimed | 0.9 | 2.5 | 3.6 | 4.7 | 5.9 | 7.3 | 10.5 |
+| returned | +2.8 | +1.4 | +4.3 | +4.0 | +5.7 | +7.7 | -1.6 |
+| 90% range | +1.2..+4.3 | -1.0..+3.7 | +1.1..+7.5 | +0.7..+7.3 | +1.2..+10.4 | +1.5..+13.8 | -9.1..+5.9 |
+
+- From the 70th to the 98th percentile its claims track its returns. The bottom half claims less
+  than it returns (+0.9% against +2.8%).
+- The top 2% claims +10.5% and returned -1.6%. Its bets have EVs of 0.082 to 0.296. The median
+  price is +110, and 68% are plus money (38% on the whole list). No single book or prop type
+  makes up the top 2%: the biggest book is Hard Rock at 28%, and the five prop types each hold
+  15-24%.
+
+The top 2% against the band just below it (90th-98th percentile):
+
+| | top 2% returned | 90-98 returned | gap, points (90% range) |
+|---|---|---|---|
+| three seasons | -1.6% (492 bets) | +6.4% (1,964) | -8.0 (-16.4..+0.5) |
+| walk-forward seasons | +0.2% (398) | +6.3% (1,359) | -6.1 (-15.9..+3.8) |
+| 2023-24 | -9.6% (94) | +6.7% (605) | -16.3 (-34.8..+1.5) |
+| 2024-25 | -2.0% (194) | +6.9% (734) | -8.9 (-22.6..+5.0) |
+| 2025-26 | +2.3% (204) | +5.5% (625) | -3.2 (-17.2..+10.2) |
+| early half | +0.9% (220) | +6.8% (958) | -5.9 (-18.8..+6.5) |
+| late half | -3.6% (272) | +6.0% (1,006) | -9.6 (-21.2..+1.7) |
+
+The gap points the same way in every season and in both halves. Every one of its 90% ranges
+includes zero. (Section 15's +1.9% on 321 bets ranked the walk-forward seasons among themselves.
+Here the top 2% is the door's own cut, 398 bets in those seasons.)
+
+**That is the door's over-claim.** Today's door bets the market model 791 times:
+
+| the door's market bets | bets | claimed | returned (90% range) | walk-forward: bets, claimed, returned |
+|---|---|---|---|---|
+| below its 98th percentile | 514 | +6.3% | +8.2% (+1.2..+15.8) | 378, +6.2%, +5.7% |
+| 98th percentile and up | 277 | +10.9% | -1.8% (-12.7..+8.5) | 235, +10.8%, -1.9% |
+
+### 16.2 The projection bets those market bets displace were no better
+
+The market model wins 778 of today's door games in which the projection model also had a bet.
+For each one, here is the market bet next to the projection bet it pushed out (the projection
+model's best bet in that game by its own percentile). Same game, same night:
+
+| | units | risked | returned |
+|---|---|---|---|
+| market bet (bet today) | +38.6 | 749.1 | +5.2% |
+| projection bet it displaced | +41.3 | 656.8 | +6.3% |
+| market minus projection | -2.6 (-61.8..+59.2) | | -1.1 points (-9.7..+7.7) |
+
+- By the market bet's percentile there is no pattern. In the 95-97 band the market bet beat the
+  projection bet by +18.9 units. At 98-99 it lost by 10.8 units, and at 99-100 it beat it by 3.7.
+- In the 277 games where the market bet was in its top 2%, the market bet returned -1.8% and the
+  projection bet it displaced returned +1.2% (+2.7 units). Both were poor bets in those games.
+
+### 16.3 The door, re-graded
+
+One bet a game across both models, six a night, first by tip. Each rule changes only which bet a
+game gets, so only games where both models had a bet can change. Each row is compared with today's
+door night by night. Risk is units risked; units at today's risk is the rule's return times
+today's risk.
+
+| rule | units | return | risk vs today | units at today's risk | return vs today, points | units vs today | walk-forward units vs today |
+|---|---|---|---|---|---|---|---|
+| **today:** own percentile, first six by tip | +183.7 | +8.17% | - | +183.7 | - | - | - |
+| market percentile lowered by 0.02 | +192.3 | +8.67% | -1.3% | +194.8 | +0.5 (-0.9..+2.0) | +8.7 (-22.5..+40.8) | +0.7 (-25.6..+28.0) |
+| market percentile lowered by 0.10 | +183.8 | +8.49% | -3.6% | +190.7 | +0.3 (-1.9..+2.6) | +0.1 (-48.8..+51.3) | +2.4 (-41.2..+48.4) |
+| projection bet whenever it has one | +183.2 | +8.53% | -4.4% | +191.5 | +0.4 (-2.3..+3.1) | -0.5 (-59.2..+59.7) | -4.2 (-58.6..+51.2) |
+| market percentile raised by 0.05 | +159.3 | +6.78% | +4.5% | +152.4 | -1.4 (-3.5..+0.7) | -24.3 (-72.9..+24.0) | -8.2 (-44.7..+28.0) |
+| control: market bet whenever it has one | +92.0 | +3.45% | +18.6% | +77.5 | -4.7 (-8.3..-1.0) | -91.7 (-179.1..+0.2) | -37.8 (-109.5..+31.6) |
+| market percentile capped at 0.95 | +160.8 | +7.23% | -1.0% | +162.5 | -0.9 (-2.2..+0.3) | -22.9 (-50.4..+5.3) | -27.7 (-50.7..-3.8) |
+| market percentile capped at 0.97 | +172.6 | +7.71% | -0.4% | +173.2 | -0.5 (-1.3..+0.3) | -11.1 (-28.6..+6.7) | -19.4 (-34.6..-3.8) |
+| market top 3% loses its game to the projection bet | +190.5 | +8.62% | -1.6% | +193.6 | +0.4 (-1.2..+2.3) | +6.8 (-30.3..+48.6) | -4.9 (-40.9..+30.3) |
+| market top 2% loses its game to the projection bet | +190.7 | +8.57% | -0.9% | +192.5 | +0.4 (-1.1..+2.0) | +7.1 (-26.0..+43.3) | +0.4 (-31.9..+33.2) |
+| market top 3% ranked last in its game (its next-best bet, either model, goes first; it is still bet when alone) | +212.0 | +9.51% | -0.8% | +213.7 | +1.3 (-0.4..+3.2) | +28.4 (-11.3..+70.7) | +14.0 (-23.5..+52.0) |
+| market top 2% ranked last in its game (the same) | +204.3 | +9.11% | -0.2% | +204.7 | +0.9 (-0.6..+2.6) | +20.7 (-14.5..+56.7) | +12.9 (-20.7..+46.9) |
+| both models on one return scale: earlier seasons' return in the bet's band | +120.2 | +5.02% | +6.5% | +112.9 | -3.2 (-7.4..+1.1) | -63.4 (-162.7..+36.0) | -45.5 (-123.6..+30.5) |
+| both on one scale: isotonic return on EV | +149.5 | +6.66% | 0.0% | +149.5 | -1.5 (-4.0..+1.0) | -34.2 (-91.1..+21.8) | -39.2 (-89.9..+11.3) |
+| both on one scale: EV x each model's fitted factor | +183.1 | +8.22% | -0.9% | +184.8 | +0.1 (-1.5..+1.8) | -0.6 (-35.9..+37.3) | -8.3 (-35.0..+18.7) |
+
+The neighbourhoods (units against today; walk-forward in brackets):
+
+- **Market percentile lowered** by 0.01, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15, 0.20, 0.30 or 0.50:
+  -7.3 to +9.6 (-13.6 to +6.6). Risk -0.5% to -4.6%, return -0.1 to +0.7 points. Walk-forward
+  pick of the setting: -24.7 (-62.1..+13.9) when picked by units, -16.3 (-69.2..+37.7) when
+  picked by return.
+- **Market percentile capped** at 0.90, 0.93, 0.95, 0.96, 0.97, 0.98 or 0.99: -2.5 to -27.0
+  (-0.8 to -27.7). A cap hands the game to the projection model's own top bets, which are no
+  better than its 80th-90th percentile (section 15). Walk-forward pick: -17.5 (-33.4..-0.9).
+- **Market top bets lose their game to the projection bet,** top 10%, 7%, 5%, 4%, 3%, 2% or 1%:
+  -2.3, +0.9, -12.1, -14.4, +6.8, +7.1, -3.7 (-1.4, +0.3, -16.5, -22.4, -4.9, +0.4, -9.5).
+  Walk-forward pick (the top 3% both times): -4.9 (-40.9..+30.3).
+- **Market top bets ranked last in their game,** top 5%, 4%, 3%, 2% or 1%: -1.3, +4.5, +28.4, +20.7,
+  +8.3. Walk-forward pick (the top 3% both times): +14.0 (-23.5..+52.0).
+
+What the table says:
+
+- **Counting a market bet for less changes nothing.** Lowering its percentile by any amount from
+  0.01 to 0.50 lands within 10 units of today. Giving the projection model every game it has a
+  bet in moves -0.5 units. The market bets it replaces returned about what the projection bets
+  would have (16.2).
+- **The one row that looks like a result is a peak, and half of it is not market against
+  projection.** Ranking the market model's top 3% last in its game gains +28.4 units. Not betting
+  those bets at all grades the same to the unit, at every setting from the top 5% to the top 1%:
+  no game in the three seasons had only such bets to choose from. Taken apart:
+  - +10.3 from games handed to the projection model;
+  - +10.3 from games handed to the market model's own next-best bet;
+  - +2.2 from one game only the market model bet;
+  - +5.6 from a different game taking the sixth slot when several games tip at the same time.
+
+  Its neighbours are +4.5 (top 4%) and +8.3 (top 1%). At the top 3% the gain is all in the early
+  half (+27.6 early, +0.8 late). Walk-forward it is +14.0, and the 90% range includes zero. The
+  clean version, where the game goes only to the projection bet, is +6.8 (walk-forward -4.9).
+- **Early and late point opposite ways.** Every "lowered" row gains in the early half and gives it
+  back late: giving the projection model every contested game is +31.3 early and -31.8 late. In
+  the contested games the market bet lost to the projection bet in the early half (-37.2 units)
+  and beat it late (+34.6). By season the early half does not hold: 2023-24 -7.1, 2024-25 -37.2,
+  2025-26 +7.1. The late half favours the market bet in all three seasons (+2.8, +11.6, +20.3).
+  That is too small and too unsteady to build a rule on.
+- **None of these wins by betting favourites.** The rules that hand games to the projection model
+  risk up to 4.6% less, because its prices are longer (median +122 to +130, against +120
+  today). That is why each one's units at today's risk sit a few units above its raw units. The
+  market-first control shows the opposite effect: 18.6% more risk and 4.7 points less return.
+- **A ceiling on the market model itself is not worth it either.** On its whole list, its bets
+  with EV above 0.08 made +5.3 units (542 bets; +8.7 walk-forward). Above 0.09 they made -0.3,
+  above 0.07 +40.7. Cutting the top of the market model would move a few units either way. It
+  would also be a model change, which needs `Updated-By`.
+
+**Decision: nothing ships.** The answer to the first question is yes up to the 98th percentile and
+no above it: the market model's top 2% returns nothing, and that is all of its over-claim at the
+door. The answer to the second is no. No way of counting a market bet differently against a
+projection bet clears: the projection bets it would hand the game to did no better. The door
+stays one a game, six a night, first by tip, ranked by each model's own percentile of raw EV.
+The prices it lays are unchanged: -194 to +380, median +120, 78% plus money. No model change,
+so no `Updated-By`.

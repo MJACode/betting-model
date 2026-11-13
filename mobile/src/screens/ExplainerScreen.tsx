@@ -196,7 +196,8 @@ export function ExplainerScreen() {
           </Bullet>
           <Bullet>
             <Strong>Model CLV pedigree (40 pts).</Strong> How often this specific
-            model has <Strong>beaten the closing line</Strong> on its settled bets.
+            model has <Strong>beaten the closing line</Strong> on closes that did not
+            match the price taken. A matching close is left out of that rate.
             CLV is the best evidence a model is genuinely sharp rather than lucky, so
             a model with a strong track record lifts every one of its picks. New
             models score neutral until they've proven it.

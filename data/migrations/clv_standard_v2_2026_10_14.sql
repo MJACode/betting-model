@@ -18,16 +18,17 @@
 -- any row is written; a mismatch raises and the transaction rolls back.
 -- Puck-line rows are not rewritten: the close matches the stored HOME sign.
 -- A team total's close is its 'close' snapshot only: its other rows are the
--- decision fetch, the price taken (data/ingestors/nba_team_total_odds.py). A
--- first half's total is the same (data/ingestors/nba_first_half_odds.py), and
--- so is the NCAAB first half's spread (data/ingestors/ncaab_first_half_odds.py),
--- which takes no close: it is unmeasured, never 0.0 against its own price. The
--- NCAAB first half's total comes from the same feed and is the same.
+-- decision fetch, the price taken (data/ingestors/nba_team_total_odds.py). An
+-- NBA first half is the same (data/ingestors/nba_first_half_odds.py). An NCAAB
+-- first half (totals_h1, spreads_h1) is not: data/ingestors/ncaab_first_half_odds.py
+-- files every pull 'open'. Its close is the bet book's newest pre-tip row on
+-- the same line pulled strictly after the pick was created. No such row leaves
+-- the pick unmeasured. A null close is not stamped standard_v2 for that market.
 -- results_snapshots is not touched.
 
 DO $mig$
 DECLARE
-  fn_comment text := 'clv-standard-v2-power-80-0.05-12-ncaab-moneyline-first-post';
+  fn_comment text := 'clv-standard-v2-power-80-0.05-12-ncaaf-moneyline-market';
   work_left boolean;
   def text;
   new_def text;
@@ -211,12 +212,16 @@ BEGIN
         WHEN 'nba_total_luck' THEN 'totals'
         WHEN 'nba_team_total_luck' THEN 'team_totals_home'
         WHEN 'nba_first_half_total_luck' THEN 'totals_h1'
+        WHEN 'nba_q1_trend' THEN 'spreads_q1'
+        WHEN 'nba_q1_trend_ml' THEN 'h2h_q1'
         WHEN 'ncaab_total_blend' THEN 'totals'
         WHEN 'ncaab_spread_market' THEN 'spreads'
         WHEN 'ncaab_moneyline_own_spread' THEN 'h2h'
         WHEN 'ncaab_moneyline_first_post' THEN 'h2h'
         WHEN 'ncaab_first_half_spread' THEN 'spreads_h1'
         WHEN 'ncaab_first_half_total' THEN 'totals_h1'
+        WHEN 'ncaabw_total_blend' THEN 'totals'
+        WHEN 'ncaaf_moneyline_market' THEN 'h2h'
         ELSE 'h2h'
       END
     $body$;
@@ -368,7 +373,7 @@ BEGIN
     $body$;
 
     COMMENT ON FUNCTION public.clv_power_fair(double precision[]) IS
-      'clv-standard-v2-power-80-0.05-12-ncaab-moneyline-first-post';
+      'clv-standard-v2-power-80-0.05-12-ncaaf-moneyline-market';
   END IF;
 
   SELECT EXISTS (
@@ -394,6 +399,30 @@ BEGIN
             AND ns.commence_time IS NOT NULL
             AND (ns.game_type NOT IN ('playin', 'playoff', 'cup_final')
                  OR g.commence_time::timestamptz <= ns.commence_time::timestamptz + interval '30 minutes')
+        )
+      )
+      -- NCAAB first half with no post-creation pre-tip row stays unmeasured.
+      -- It is not stamped empty, and it must not keep this recompute running.
+      AND NOT (
+        p.model_id IN ('ncaab_first_half_total', 'ncaab_first_half_spread')
+        AND g.commence_time::timestamptz <= now()
+        AND NOT EXISTS (
+          SELECT 1 FROM public.odds o
+          WHERE o.game_id = p.game_id
+            AND o.market = CASE p.model_id
+                  WHEN 'ncaab_first_half_total' THEN 'totals_h1'
+                  ELSE 'spreads_h1' END
+            AND o.bookmaker = lower(btrim(CASE
+                  WHEN p.decision_odds IS NOT NULL
+                   AND btrim(COALESCE(p.decision_book, '')) <> ''
+                  THEN p.decision_book ELSE 'draftkings' END))
+            AND o.snapshot_type <> 'in_play'
+            AND o.snapshot_at::timestamptz > p.created_at::timestamptz
+            AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
+            AND (
+              (p.model_id = 'ncaab_first_half_total' AND o.total_line = p.scored_line)
+              OR (p.model_id = 'ncaab_first_half_spread' AND o.spread_home = p.scored_line)
+            )
         )
       )
   ) INTO work_left;
@@ -455,7 +484,8 @@ BEGIN
         END AS prop_market,
         public.clv_game_market(p.model_id) AS game_market,
         substring(p.pick_label FROM '^(.+?)\s+(?:Over|Under)\s+') AS player_name,
-        split_part(p.game_id, '_', 1) AS sport_prefix
+        split_part(p.game_id, '_', 1) AS sport_prefix,
+        p.created_at::timestamptz AS created_at
       FROM public.picks p
       JOIN public.games g ON g.game_id = p.game_id
       WHERE p.signal_type = 'BET'
@@ -517,10 +547,17 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = s.bet_book
-          AND (((s.game_market LIKE 'team_totals%' OR s.game_market IN ('totals_h1', 'spreads_h1'))
-                AND o.snapshot_type = 'close')
-            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN ('totals_h1', 'spreads_h1')
-                AND o.snapshot_type <> 'in_play'))
+          AND (
+            ((s.game_market LIKE 'team_totals%'
+              OR (s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')))
+             AND o.snapshot_type = 'close')
+            OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')
+                AND o.snapshot_type <> 'in_play'
+                AND o.snapshot_at::timestamptz > s.created_at)
+            OR (s.game_market NOT LIKE 'team_totals%'
+                AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')
+                AND o.snapshot_type <> 'in_play')
+          )
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
             (s.game_market LIKE '%spreads%' AND o.spread_home = s.scored_line)
@@ -540,10 +577,17 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = s.bet_book
-          AND (((s.game_market LIKE 'team_totals%' OR s.game_market IN ('totals_h1', 'spreads_h1'))
-                AND o.snapshot_type = 'close')
-            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN ('totals_h1', 'spreads_h1')
-                AND o.snapshot_type <> 'in_play'))
+          AND (
+            ((s.game_market LIKE 'team_totals%'
+              OR (s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')))
+             AND o.snapshot_type = 'close')
+            OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')
+                AND o.snapshot_type <> 'in_play'
+                AND o.snapshot_at::timestamptz > s.created_at)
+            OR (s.game_market NOT LIKE 'team_totals%'
+                AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')
+                AND o.snapshot_type <> 'in_play')
+          )
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
             s.game_market <> 'spreads'
@@ -575,10 +619,17 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = 'pinnacle'
-          AND (((s.game_market LIKE 'team_totals%' OR s.game_market IN ('totals_h1', 'spreads_h1'))
-                AND o.snapshot_type = 'close')
-            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN ('totals_h1', 'spreads_h1')
-                AND o.snapshot_type <> 'in_play'))
+          AND (
+            ((s.game_market LIKE 'team_totals%'
+              OR (s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')))
+             AND o.snapshot_type = 'close')
+            OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')
+                AND o.snapshot_type <> 'in_play'
+                AND o.snapshot_at::timestamptz > s.created_at)
+            OR (s.game_market NOT LIKE 'team_totals%'
+                AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')
+                AND o.snapshot_type <> 'in_play')
+          )
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
             (s.game_market LIKE '%spreads%' AND o.spread_home = s.scored_line)
@@ -886,6 +937,10 @@ BEGIN
        AND o.clv_pct IS NULL
        AND o.line_pts IS NULL
        AND o.market_pct IS NULL
+       -- A null close is not a measurement. NCAAB first half stays unmeasured
+       -- so a later pre-tip pull can still be read. Other markets keep the
+       -- empty stamp so a row that cannot be measured leaves the queue.
+       AND p.model_id NOT IN ('ncaab_first_half_total', 'ncaab_first_half_spread')
        AND (
          o.old_method IS NOT NULL
          OR o.commence_ts < now() - interval '6 hours'

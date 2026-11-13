@@ -62,6 +62,13 @@ import { LIVE_RECORD_START } from '@/lib/recordStart';
 // averages standard_v2 only. On a v8 envelope the field is undefined, the
 // filter drops every row, and a pre-migration cache would also show the old
 // probability-point number as a percent.
+// NOT bumped for stake_units (2026-11-06). The column was born that day, so a
+// v9 row from before it is NULL, the flat 1u, and a missing field reads the
+// same way. A newer row cached by a build that did not select the column is
+// fetched again with it, because mergeSettled replaces the last
+// REFRESH_WINDOW_DAYS on every load. Only such a row that the new build first
+// loads more than 21 days after its game keeps the flat 1u. A bump would
+// re-download every member's whole settled history to cover that.
 const KEY = 'settledPicks.v9';
 
 /**

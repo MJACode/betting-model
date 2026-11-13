@@ -37,7 +37,7 @@ THE RULE, per game, ONCE (the first look that can price it; see DECIDED ONCE):
   6. One candidate per (game, player, market): the best EV among the books,
      a tie to the earlier book in SOFT_BOOKS (DraftKings first). Every
      qualifying proposition is a CANDIDATE; what is written is one bet a game
-     across both NBA prop models and four a night, strongest first by each
+     across both NBA prop models and six a night, strongest first by each
      bet's EV percentile within its own model
      (scripts/nba_props_card.py; mike, 2026-10-20: "Only the strongest picks
      need to be sent, like NHL", replacing 2026-10-16's no-cap rule).

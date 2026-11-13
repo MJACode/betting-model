@@ -35,7 +35,7 @@ export function ByomBetCount({
   closeRecord?: ByomRecord | null;
   /** Opens the list of the bets this count is made of. */
   onShowBets?: () => void;
-  /** NFL fallback: this count is the close because official rows are empty. */
+  /** Fallback: this count is the close because official rows are empty. */
   closingHeadline?: boolean;
 }) {
   if (blocked) {

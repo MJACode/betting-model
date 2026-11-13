@@ -10,6 +10,17 @@ snapshot a game). One bet per game — per team, for a team total — at the lin
 with the best expected value. The blind rows are every game at the line whose
 over is closest to -110, which is the number a bettor would call the main one.
 
+Team totals settle on the full-game score, overtime and the shootout goal
+included: that is what the books price (models/nhl_derivative_totals.py,
+SETTLEMENT). A whole-number line can push, and the model's expected value
+returns the stake on one (side_frame).
+
+The last table is Pinnacle against a bettable book: Pinnacle's no-vig chance
+at the same number in the same snapshot, bet at a bettable book when that
+chance makes the book's price positive. Carried over from PR #863's lab, where
+one cell stood out (first-period totals at 2% or more: +19.3% on 160 bets,
+interval +1.9 to +37.4) and was asked to be read again on 2026-27 prices.
+
     python -m scripts.nhl_derivative_totals_backtest
     python -m scripts.nhl_derivative_totals_backtest --cache /tmp/nhl_deriv
 """
@@ -31,7 +42,13 @@ pd.set_option("display.max_columns", 30)
 pd.set_option("display.max_rows", 200)
 
 NON_BETTABLE = {"pinnacle", "bovada", "espnbet"}
+SHARP = "pinnacle"
 SOURCE = "odds_api_nhl_totals_history"
+# The Pinnacle table's cuts are PR #863's, so its 2% cell can be read again.
+SHARP_EV_CUTS = (0.0, 0.02, 0.04, 0.06, 0.08, 0.10, 0.15)
+# A two-way quote whose implied chances sum outside this is not a real market.
+# Wider than dt.COHERENT_SUM because alternates carry a wider margin (PR #863).
+SHARP_COHERENT = (1.00, 1.25)
 
 
 def _csv(path: Path, name: str) -> pd.DataFrame:
@@ -78,16 +95,14 @@ def load(cache: str | None):
         conn.close()
 
 
-def regulation(periods: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
+def outcomes(periods: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
+    """The settling counts: full-game goals (overtime and the shootout goal in) and first-period goals."""
     p = periods.copy()
     p["rank"] = np.where(p["source"].eq("nhl_api_score"), 0, 1)
     p = p.sort_values("rank").drop_duplicates("game_id", keep="first")
-    g = games.merge(p[["game_id", "home_p1", "away_p1", "home_p2", "away_p2", "home_p3", "away_p3"]],
-                    on="game_id", how="left")
-    for c in ("home_p1", "away_p1", "home_p2", "away_p2", "home_p3", "away_p3", "home_score", "away_score"):
+    g = games.merge(p[["game_id", "home_p1", "away_p1"]], on="game_id", how="left")
+    for c in ("home_p1", "away_p1", "home_score", "away_score"):
         g[c] = pd.to_numeric(g[c], errors="coerce")
-    g["reg_home"] = g.home_p1 + g.home_p2 + g.home_p3
-    g["reg_away"] = g.away_p1 + g.away_p2 + g.away_p3
     g["total"] = g.home_score + g.away_score
     g["p1_total"] = g.home_p1 + g.away_p1
     return g
@@ -191,22 +206,94 @@ def game_sides(px: pd.DataFrame, means: pd.DataFrame, market: str, mu_col: str,
                          q.under_price.values, q[actual_col].values, dispersion)
 
 
+# ── Pinnacle against a bettable book (PR #863's sharp_vs_soft) ──────────────
+
+FAMILIES = (("team total", ("team_totals_home", "team_totals_away")),
+            ("alternate total", ("alternate_totals",)),
+            ("1st-period total", ("totals_p1",)))
+
+
+def _implied(price) -> np.ndarray:
+    a = np.asarray(price, dtype=float)
+    return np.where(a > 0, 100.0 / (a + 100.0), -a / (-a + 100.0))
+
+
+def _payout(price) -> np.ndarray:
+    a = np.asarray(price, dtype=float)
+    return np.where(a > 0, a / 100.0, 100.0 / -a)
+
+
+def settling_count(px: pd.DataFrame) -> np.ndarray:
+    """The count each quote settles on: a team's full-game goals, first-period goals, or the full-game total."""
+    return np.select([px.market.eq("team_totals_home"), px.market.eq("team_totals_away"),
+                      px.market.eq("totals_p1")],
+                     [px.home_score, px.away_score, px.p1_total], default=px.total).astype(float)
+
+
+def sharp_sides(px: pd.DataFrame, bettable: list[str]) -> pd.DataFrame:
+    """Every bettable side that Pinnacle quoted at the same number in the same snapshot.
+
+    `pin` is Pinnacle's no-vig chance for that side and `ev` is what it makes
+    of the bettable price. On a whole number Pinnacle's two prices say nothing
+    about the push, so `pin` is the chance given no push; the sign of `ev` is
+    the same either way. A two-way quote whose implied chances sum outside
+    SHARP_COHERENT is dropped, at either book. Price floor -200.
+    """
+    q = px.copy()
+    q["actual"] = settling_count(q)
+    two = q.over_price.notna() & q.under_price.notna()
+    implied_sum = _implied(q.over_price.fillna(100)) + _implied(q.under_price.fillna(100))
+    q = q[q.actual.notna() & (~two | ((implied_sum >= SHARP_COHERENT[0]) & (implied_sum <= SHARP_COHERENT[1])))]
+    pin = q[(q.bookmaker == SHARP) & q.over_price.notna() & q.under_price.notna()].copy()
+    io, iu = _implied(pin.over_price), _implied(pin.under_price)
+    pin["pin_over"] = io / (io + iu)
+    key = ["game_id", "market", "total_line", "snap"]
+    pin = pin[key + ["pin_over"]].drop_duplicates(key)
+    soft = q[q.bookmaker.isin(bettable)].merge(pin, on=key, how="inner")
+    parts = []
+    for side, col in (("over", "over_price"), ("under", "under_price")):
+        s = soft[soft[col].notna()].copy()
+        s["side"] = side
+        s["price"] = s[col].astype(float)
+        s["pin"] = s.pin_over if side == "over" else 1.0 - s.pin_over
+        s["ev"] = s.pin * (1.0 + _payout(s.price)) - 1.0
+        s["profit"] = dt.profit(s.actual, s.total_line, s.price, side)
+        parts.append(s)
+    if not parts:
+        return pd.DataFrame()
+    out = pd.concat(parts, ignore_index=True)
+    return out[(out.price >= dt.PRICE_FLOOR) & out.profit.notna()].reset_index(drop=True)
+
+
+def sharp_rows(sides: pd.DataFrame, which: tuple[str, ...]) -> list[dict]:
+    """One bet per game per market at each cut: the bettable side with the best EV on Pinnacle's number."""
+    rows = []
+    for cut in SHARP_EV_CUTS:
+        b = sides[(sides.ev >= cut) & sides.side.isin(which)]
+        b = (b.sort_values(["ev", "bookmaker"], ascending=[False, True], kind="mergesort")
+             .drop_duplicates(["game_id", "market"])
+             .sort_values(["game_date", "game_id"]))
+        rows.append(_line({"pin EV>=": cut}, b))
+    return rows
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--cache", default=None)
     a = ap.parse_args()
     team, periods, games, prices = load(a.cache)
-    games = regulation(periods, games)
+    games = outcomes(periods, games)
     px = pregame(prices, games)
     print(f"{len(px):,} pre-game derivative quotes, {px.game_id.nunique():,} games, "
           f"books {sorted(px.bookmaker.unique())}")
+    print(f"first-period goals known for {int(games.p1_total.notna().sum()):,} of {len(games):,} scored games")
 
     frame = dt.build_team_frame(team)
     p1 = dt.build_p1_frame(periods, games)
     pred = dt.walk_forward(frame, p1)
     means = dt.game_means(pred)
-    means = means.merge(games[["game_id", "total", "p1_total", "reg_home", "reg_away",
-                               "home_score", "away_score"]], on="game_id", how="left")
+    means = means.merge(games[["game_id", "total", "p1_total", "home_score", "away_score"]],
+                        on="game_id", how="left")
     print(f"walk-forward team-games {len(pred):,}; games with both means {len(means):,}; "
           f"goal dispersion {pred.dispersion.iloc[0]:.3f}")
 
@@ -220,11 +307,8 @@ def main() -> None:
          blind_rows(dk[dk.market == "totals_p1"], "p1_total", ["game_id"]))
 
     tt = px[px.market.isin(["team_totals_home", "team_totals_away"])].copy()
-    tt["reg_side"] = np.where(tt.market.eq("team_totals_home"), tt.reg_home, tt.reg_away)
     tt["full_side"] = np.where(tt.market.eq("team_totals_home"), tt.home_score, tt.away_score)
-    show("BLIND team total, FanDuel, regulation goals (3 periods)",
-         blind_rows(tt[tt.bookmaker == "fanduel"], "reg_side", ["game_id", "market"]))
-    show("BLIND team total, FanDuel, full-game goals (overtime included)",
+    show("BLIND team total, FanDuel, full-game goals (overtime and the shootout goal included)",
          blind_rows(tt[tt.bookmaker == "fanduel"], "full_side", ["game_id", "market"]))
 
     # ── model ───────────────────────────────────────────────────────────────
@@ -248,12 +332,10 @@ def main() -> None:
     report("MODEL 1st-period total, DraftKings", p1_dk, ["game_id"])
     report("MODEL 1st-period total, best bettable price", p1_bt, ["game_id"])
 
-    tt_reg = team_sides(tt[tt.bookmaker.isin(bettable)], pred, "reg_side")
     tt_full = team_sides(tt[tt.bookmaker.isin(bettable)], pred, "full_side")
-    report("MODEL team total, best bettable price, REGULATION settlement", tt_reg, ["game_id", "team"])
-    report("MODEL team total, best bettable price, FULL-GAME settlement", tt_full, ["game_id", "team"])
+    report("MODEL team total, best bettable price, full-game settlement", tt_full, ["game_id", "team"])
 
-    # Ablation at the publish cut, best bettable, regulation / game total, floor -200.
+    # Ablation at the publish cut, best bettable, game total, floor -200.
     ablate = []
     for name, feats in (("no shots", [f for f in dt.GOAL_FEATURES if f not in dt.SHOT_FEATURES]),
                         ("no rest", [f for f in dt.GOAL_FEATURES if f not in dt.REST_FEATURES])):
@@ -266,6 +348,16 @@ def main() -> None:
         b = dt.select_bets(sides, side="over", cut=dt.PUBLISH_CUT, floor=dt.PRICE_FLOOR, keys=["game_id"])
         ablate.append(_line({"features": name, "market": "alternate", "side": "over"}, b))
     show(f"ABLATION alternate total, best bettable, EV>={dt.PUBLISH_CUT}, floor -200", ablate)
+
+    # ── Pinnacle against a bettable book, same number, same snapshot ────────
+    sharp = sharp_sides(px, bettable)
+    for family, markets in FAMILIES:
+        f = sharp[sharp.market.isin(markets)] if len(sharp) else sharp
+        print(f"\n{family}: bettable sides with Pinnacle at the same number in the same snapshot: "
+              f"{len(f):,} ({f.game_id.nunique() if len(f) else 0:,} games)")
+        for which, label in ((("over", "under"), "either side"), (("under",), "unders"), (("over",), "overs")):
+            show(f"PINNACLE vs BETTABLE {family}, {label}: best bettable price, one bet a game per market, "
+                 f"floor -200", sharp_rows(f, which) if len(f) else [])
 
     print("\nPUBLISHED =", dt.PUBLISHED or "()  — nothing cleared, not publishing")
 

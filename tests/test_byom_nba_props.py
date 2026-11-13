@@ -112,14 +112,14 @@ def test_the_nba_migration_is_not_registered_and_does_not_drop():
                 and e.get("job_type") == "byom_prop_facts"]
     assert len(nba_jobs) == 1
     assert nba_jobs[0]["key"] == "byom-nba-prop-facts"
-    assert nba_jobs[0]["enabled"] is False
-    assert nba_jobs[0]["args"]["apply"] is False
-    assert "byom_nba_props_2026_10_29.sql" in nba_jobs[0]["note"]
+    # Matt, 2026-11-04: both NBA backfills are on.
+    assert nba_jobs[0]["enabled"] is True
+    assert nba_jobs[0]["args"]["apply"] is True
     game = [e for e in declared if e.get("key") == "byom-nba-game-facts"]
     assert len(game) == 1
-    assert game[0]["enabled"] is False
+    assert game[0]["enabled"] is True
     assert game[0]["job_type"] == "byom_game_facts"
-    assert game[0]["args"] == {"sport": "NBA", "apply": False}
+    assert game[0]["args"] == {"sport": "NBA", "apply": True}
 
 
 def test_alt_ladders_and_other_books_are_not_nba_facts():

@@ -5,10 +5,12 @@
 // The tap persists, the same way a SportToggle tap does (useSportFilter).
 
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
+import { sportSpokenName } from '@/lib/loadState';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 export function StatsSportButton() {
@@ -26,14 +28,14 @@ export function StatsSportButton() {
         onPress={() => setOpen(true)}
         hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
         accessibilityRole="button"
-        accessibilityLabel={`${sport}, sport`}
+        accessibilityLabel={`${sportSpokenName(sport)}, sport`}
         accessibilityHint="Opens the sport list"
         style={({ pressed }) => [styles.btn, pressed && styles.pressed]}
       >
         <Text style={styles.label}>{sport}</Text>
         <Ionicons name="chevron-down" size={12} color={colors.textSecondary} />
       </Pressable>
-      <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
+      <Modal trackName="StatsSportButton" visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
         <View style={styles.backdrop}>
           <Pressable
             style={StyleSheet.absoluteFill}
@@ -69,7 +71,7 @@ export function StatsSportButton() {
                     onPress={() => pick(s)}
                     accessibilityRole="radio"
                     accessibilityState={{ checked: active }}
-                    accessibilityLabel={s}
+                    accessibilityLabel={sportSpokenName(s)}
                     style={({ pressed }) => [styles.row, active && styles.rowActive, pressed && styles.pressed]}
                   >
                     <Text style={styles.rowName}>{s}</Text>

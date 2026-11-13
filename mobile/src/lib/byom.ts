@@ -11,8 +11,8 @@
  * Two timings (Matt, 2026-11-04). `official` is the first DraftKings
  * quote where the bet fit the model's rules: the line and price it
  * became a pick at. `close` is the last DraftKings quote before kickoff.
- * byom_record returns both, byom_bets lists one. NFL only has official
- * rows; an NBA model is graded at the close.
+ * byom_record returns both, byom_bets lists one. NFL and NBA both have
+ * official rows (Matt, 2026-11-04).
  *
  * LINE_BASIS is the label stored on each fact row. The backtest RPC
  * returns season totals, not that label per game. A screen shows this
@@ -22,9 +22,8 @@
 import { byomFilters, readStoredFilters, type ByomFilters } from './byomFilters';
 import {
   assertByomSide,
+  seasonListFor,
   headlineFromCounts,
-  nbaSeasonList,
-  nflSeasonList,
   type ByomSeasonScope,
   type ByomSport,
 } from './byomRecord';
@@ -173,7 +172,7 @@ function rpcFilters(
   // until byom_nba_props_2026_10_29.sql is applied, and a missing
   // sport there is NFL. Sending it on every NFL call would break the
   // live builder before that file is applied.
-  if (sport === 'NBA') return { ...checked, sport: 'NBA' };
+  if (sport !== 'NFL') return { ...checked, sport };
   return checked;
 }
 
@@ -232,10 +231,12 @@ export async function fetchByomBacktest(
 export type ByomTiming = 'official' | 'close';
 
 export interface ByomTimedRows {
-  /** The timing the screen leads with: official on NFL, close otherwise. */
+  /** The timing the screen leads with: official, or the close when official is empty. */
   headline: ByomTiming;
   official: ByomBacktestRow[];
   close: ByomBacktestRow[];
+  /** One entry per season read. Season is null for the current-season read. */
+  seasons: { season: number | null; official: ByomBacktestRow[]; close: ByomBacktestRow[] }[];
 }
 
 function isMissingFunction(error: { code?: unknown; message?: unknown }): boolean {
@@ -284,9 +285,13 @@ export function byomBetsAvailable(): boolean {
   return !recordMissing;
 }
 
-/** Official leads on NFL once the server has it. Everything else is the close. */
-export function headlineTiming(sport: ByomSport): ByomTiming {
-  return sport === 'NFL' && !recordMissing ? 'official' : 'close';
+/**
+ * Official leads once the server has it, on NFL and NBA alike (Matt,
+ * 2026-11-04: "do the same as what I said for nfl"). `sport` stays in
+ * the signature so a later sport can opt in or out.
+ */
+export function headlineTiming(_sport: ByomSport): ByomTiming {
+  return recordMissing ? 'close' : 'official';
 }
 
 function countedBets(rows: readonly ByomBacktestRow[]): number {
@@ -294,7 +299,7 @@ function countedBets(rows: readonly ByomBacktestRow[]): number {
 }
 
 /**
- * The card's headline. NFL leads with the official record once the server
+ * The card's headline. It leads with the official record once the server
  * has it. An empty official record beside a closing record (the rebuild
  * has not finished, or the season has no official rows) leads with the
  * close, so the card is not stuck at 0-0.
@@ -317,7 +322,7 @@ export async function fetchByomScopedRecord(
   const parsed = byomFilters(filters);
   const seasons: (number | null)[] = scope === 'current'
     ? [null]
-    : sport === 'NBA' ? nbaSeasonList(now) : nflSeasonList(now);
+    : seasonListFor(sport, now);
   const groups = await pool(seasons, 4, (season) => fetchByomRecord(season, parsed, sport));
   const official = groups.flatMap((group) => group.official);
   const close = groups.flatMap((group) => group.close);
@@ -325,6 +330,11 @@ export async function fetchByomScopedRecord(
     headline: headlineFor(sport, official, close),
     official,
     close,
+    seasons: groups.map((group, index) => ({
+      season: seasons[index] ?? null,
+      official: group.official,
+      close: group.close,
+    })),
   };
 }
 
@@ -385,7 +395,7 @@ export async function fetchByomScopedBets(
   const parsed = byomFilters(filters);
   const seasons: (number | null)[] = scope === 'current'
     ? [null]
-    : (sport === 'NBA' ? nbaSeasonList(now) : nflSeasonList(now)).slice().reverse();
+    : seasonListFor(sport, now).slice().reverse();
   const pages = await pool(seasons, 4, async (season) => {
     const { data, error } = await supabase.rpc('byom_bets', {
       p_season: season,
@@ -439,7 +449,7 @@ export async function fetchByomScopedBacktest(
 ): Promise<ByomBacktestRow[]> {
   const parsed = byomFilters(filters);
   if (scope === 'current') return fetchByomBacktest(null, parsed, sport);
-  const seasons = sport === 'NBA' ? nbaSeasonList(now) : nflSeasonList(now);
+  const seasons = seasonListFor(sport, now);
   const groups = await pool(seasons, 4, (season) => fetchByomBacktest(season, parsed, sport));
   return groups.flat();
 }

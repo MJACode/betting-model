@@ -92,6 +92,30 @@ eq(
   null,
 );
 eq(
+  'a comped grant stays entitled',
+  parseAccess([{ entitled: true, source: 'comped', app_access: true }]).entitled,
+  true,
+);
+eq(
+  'a comped grant keeps its source',
+  parseAccess([{ entitled: true, source: 'comped', app_access: true }]).source,
+  'comped',
+);
+eq(
+  'an app_review grant unlocks the app and is not comped',
+  parseAccess([{ entitled: true, source: 'app_review', app_access: true }]),
+  {
+    entitled: true,
+    source: 'app_review',
+    app_access: true,
+    discord_access: false,
+    discord_linked: false,
+    discord_username: null,
+    guild_member: false,
+    app_role_granted: false,
+  },
+);
+eq(
   'a Whop-only row cannot unlock the app',
   parseAccess([
     {
@@ -280,8 +304,8 @@ check(
 const modalSrc = readFileSync(join(__dirname, '..', 'src', 'components', 'DiscordLinkModal.tsx'), 'utf8');
 check(
   'connect discord during a trial does not open the invite',
-  modalSrc.includes("subscription.status === 'active'") &&
-    modalSrc.includes('discordInviteIfPaid(applePaid)') &&
+  modalSrc.includes('discordInviteIfPaid(discordPaid)') &&
+    modalSrc.includes('const { discordPaid } = useMembership()') &&
     modalSrc.includes('onPress={onConnect}') &&
     modalSrc.includes('const linked = await link()'),
 );
@@ -363,9 +387,11 @@ check(
     !shared.includes('.from("whop_memberships")'),
 );
 check(
-  'the role sync grants only an active subscription',
+  'the role sync grants an active subscription or a comped grant',
   shared.includes('subscriptionGrantsDiscordRole(sub)') &&
-    !shared.includes('shouldHold = subscriptionEntitles'),
+    shared.includes('discord_grant_access_for') &&
+    !shared.includes('shouldHold = subscriptionEntitles') &&
+    !shared.includes('.from("whop_memberships")'),
 );
 check(
   'the role sync never throws into a webhook response',

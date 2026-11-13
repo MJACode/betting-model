@@ -335,8 +335,8 @@ the pick that already exists?* The only acceptable answer is "nothing".
 ## 2. Project Purpose
 Building a **personal sports betting model** targeting **DraftKings** as the
 primary sportsbook. The long-term goal is all major US sports with all player
-props. Eight sports are live today — MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF and
-NCAAB (§8). **GOLF was retired 2026-09-08** (mike) — `config.RETIRED_MODELS`.
+props. Nine sports are live today (§8). **GOLF was retired 2026-09-08** (mike) —
+`config.RETIRED_MODELS`.
 
 **Every model is live real money.** There is no second mode that counts a
 graded pick in the win-loss record and leaves it out of the units, and there
@@ -473,11 +473,13 @@ silently fails to reach production.
   the source of truth for the variable list.
 - **Thresholds → canonical in `config.py`, mirrored to Supabase** by
   `data.threshold_sync` (every refresh + daily after migrations). The scorer reads
-  `config.py`, so the BET decision is config-canonical wherever it runs. **A hand
-  edit to `model_action_thresholds` is temporary** — the next sync overwrites
-  it from `config.py` on master.
+  `config.py`, so the BET decision is config-canonical. **A hand edit to
+  `model_action_thresholds` is temporary.** A volume setting
+  (`set_model_volume`) lifts `min_*` over config's cut, kept in
+  `base_min_*` (`docs/thresholds.md`).
 - **Sportsbooks → `config.py`, env-overridable.** `LINE_SHOP_BOOKMAKERS` is what
   gets fetched; `BEST_LINE_BOOKMAKERS` is the set a pick may be DECIDED at.
+  **betPARX is fetched, and never the book a pick names** (few states; mike 11-06).
 
 **The invariants that must not be broken are in
 `.claude/rules/config-topology.md`** (loads on `config.py`, the scorers,
@@ -493,10 +495,10 @@ is scoped to. In one line each, so you know they exist:
   names it. These picks are a NEW population; report them separately.
 - **`picks.profit_flat` fabricates -110 for any pick with no price**, so every
   read of it must be gated on a non-NULL price.
-- **App access is `public.my_access()` / `has_app_access()` from Apple
-  `subscriptions` only** (trialing/active, period open). Whop does not unlock
-  the app. Do not flip AUTH/BILLING/DISCORD until that migration is applied
-  (`fetchAccess` throws). Detail: `mobile/docs/DISCORD_LINKING.md`.
+- **App access is `my_access()` / `has_app_access()`**: RevenueCat
+  `subscriptions` (trialing/active, period open) OR an active `access_grants`
+  row (`comped` or `app_review`). Whop does not unlock the app. Discord invite
+  is active or `comped`, not a trial. Detail: `mobile/docs/DISCORD_LINKING.md`.
 - **Pre-game and in-play prices never mix**, and the evening refresh keeps
   writing `open` rows after first pitch, so bound on
   `snapshot_at <= commence_time`.
@@ -574,13 +576,13 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB. 73 models carry
-  their own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB, NCAABW. 82
+  models carry their own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are
+  paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no
   games, no odds and no picks, ever. The ingestors, feature engine and pipeline
   steps are left in place; reviving it starts with the key, not with config.
-- **Every model is live real money.** Units and the record are the same graded set (§2).
 - **Where it runs:** the Railway worker (`scheduler.py`) — 6am daily pipeline,
   intraday refresh passes, the MLB and NCAAF live loops, the NFL card poll.
   See `docs/cloud_worker.md`.
@@ -598,7 +600,7 @@ to be known BEFORE deciding which file to open.
 | **The durable follow-up backlog** | `docs/followups.md` |
 | Session-by-session history (192 entries — grep it) | `docs/sessions/README.md` |
 | Thresholds, review cadence, per-model evidence | `docs/thresholds.md` |
-| Claude-mobile picks prompt + the generated SQL | `docs/mobile_picks_prompt.md` |
+| Open picks for Claude chats: `open_picks` view | `docs/mobile_picks_prompt.md` |
 | Discord routing, producers, delivery post-mortems | `docs/discord.md` |
 | Auth, billing, Discord membership (one membership, two surfaces) | `mobile/docs/{AUTHENTICATION,BILLING,DISCORD_LINKING}.md` |
 | Live (in-play) betting — models, loop, credit safety | `docs/live_betting.md` |
@@ -647,7 +649,7 @@ to be known BEFORE deciding which file to open.
 | **Build Your Own Model, NFL facts (not picks)** | `docs/byom_nfl.md` |
 | **Build Your Own Model, NBA props (not picks)** | `docs/byom_nba.md` |
 
-**Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf,ncaab}.md` — each
+**Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf,ncaab,ncaabw}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —
 carries that sport's models, data sources, load-bearing conventions, pipeline
 steps and first-time setup.

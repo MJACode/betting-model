@@ -7,12 +7,11 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus } from '@/lib/format';
+import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus, labelWithoutStake } from '@/lib/format';
 import {
   bestHandoffForPick,
   handoffQuotesForPick,
   bookLabel,
-  bookLabelShort,
   bookName,
   currentLineQuotes,
   formatSideLine,
@@ -21,6 +20,7 @@ import {
   marketForPick,
   movementFromLatest,
   numOrNull,
+  otherLineQuotesForPick,
   pickTimingInfo,
   playerNameFromPickLabel,
   priceAgeFor,
@@ -28,13 +28,12 @@ import {
   splitPickTitle,
   storedQuoteBook,
   todayBoardHandoff,
-  MODEL_BOOK,
   type BoardHandoff,
   type HeroAmerican,
   type Movement,
 } from '@/lib/markets';
 import { modelHistoryMark, modelLongWithMark, isPropModel } from '@/lib/modelMeta';
-import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
+import { stakeFor, stakeReasonLine, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
 import { pnlTone, roundedAt, signalDisplayName } from '@/lib/tone';
@@ -45,8 +44,10 @@ import { PickBooksSheet } from './PickBooksSheet';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import {
   foundAtText,
+  liveNotAtMyBooksText,
   myBooksView,
   NOT_AT_MY_BOOKS,
+  NOT_AT_MY_BOOKS_AT_THIS_LINE,
   recordNoteShortFor,
 } from '@/lib/myBooks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
@@ -208,7 +209,8 @@ export function PickCard({
     myBooksReady && pick.signal_type === 'BET' && hasPricedLine(pick) && openForAction(pick)
       ? myBooksView({
           quotes: currentLineQuotes(pick, item.bookRows, modelHero, priceAge),
-          recordBook: pick.is_live === true ? MODEL_BOOK : storedQuoteBook(pick),
+          // Live or not, the record is kept at the book that decided it (§6).
+          recordBook: storedQuoteBook(pick),
           myBooks,
           modelProbability: pick.model_probability,
         })
@@ -239,13 +241,20 @@ export function PickCard({
   const noEdgeAtMine = myView?.status === 'mine' && (myView.edge ?? 0) <= 0;
   // One short line on a scanned board (UX review): where the model found it,
   // and that the record is kept there. The longer sentence is on Pick Detail.
-  const myBooksNote = myQuote && modelPrice != null
-    ? `${foundAtText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))}${
-        noEdgeAtMine ? ' · No edge at your books' : ` · ${recordNoteShortFor(pick.model_id)}`
-      }`
-    : notAtMyBooks
-      ? NOT_AT_MY_BOOKS
-      : null;
+  // The caption is not a pill slot, so it takes the full short label (PARX,
+  // not the pill's clipped PAR), and the spoken copy takes the book's name.
+  const myBooksNoteWith = (book: string) =>
+    myQuote && modelPrice != null
+      ? `${foundAtText(book, formatAmerican(modelPrice))}${
+          noEdgeAtMine ? ' · No edge at your books' : ` · ${recordNoteShortFor(pick.model_id)}`
+        }`
+      : notAtMyBooks
+        ? pick.is_live === true && modelPrice != null
+          ? liveNotAtMyBooksText(book, formatAmerican(modelPrice))
+          : otherLinesControl != null
+            ? NOT_AT_MY_BOOKS_AT_THIS_LINE
+            : NOT_AT_MY_BOOKS
+        : null;
   // Green only when the edge on screen is one they can take: at their price
   // it may be gone, and off their books there is nothing to take.
   const myEdgeGone = (myView?.status === 'mine' && (myView.edge ?? 0) <= 0) || notAtMyBooks;
@@ -299,8 +308,9 @@ export function PickCard({
 
   // Stake stays on the deciding price, never the Now snapshot — §6.
   // On 'mine' the risk is grossed up at their price, so "Bet 0.95u · Win 1u"
-  // is what that book takes to win the same unit.
-  const stake = stakeFor(pick.kelly_fraction, myQuote ? myQuote.price : decisionOdds(pick));
+  // is what that book takes to win the same unit. The units to win are the
+  // pick's own stake_units when it carries one (2u: "Bet 2.2u · Win 2u").
+  const stake = stakeFor(pick.kelly_fraction, myQuote ? myQuote.price : decisionOdds(pick), pick.stake_units);
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
@@ -344,7 +354,7 @@ export function PickCard({
   const offersBook = !preview && !paused && pick.signal_type === 'BET' && !signalsMuted && !notAtMyBooks;
   // Until the member's books have loaded, a pre-game card does not name a
   // shop book or open the sheet (the default set is every book, for one
-  // frame). A live pick stays the DraftKings quote.
+  // frame). A live pick never shops: its one book is the one that decided it.
   const handoff = offersBook && cta.handoff && (myBooksReady || pick.is_live === true)
     ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge, myBooksReady ? myBooks : undefined)
     : null;
@@ -355,12 +365,53 @@ export function PickCard({
   const shopQuotes = handoff
     ? handoffQuotesForPick(pick, item.bookRows, heroPrice, priceAge, myBooksReady ? myBooks : undefined)
     : [];
-  // Live is DraftKings only. A dash on another book would pretend we shopped it.
+  // Live offers only the book that decided it. A dash on another book would
+  // pretend we shopped it.
+  const signalsGameMarket = gameMarketForModel(pick.model_id);
+  const signalsPropMarket = signalsGameMarket ? null : propMarketForPick(pick);
+  // The bet written out at a given number. At the pick's own number it is
+  // the headline; at another book's number it names that book's bet.
+  const betHeadlineAt = (line: number | string | null) =>
+    signalsBetHeadline({
+      side: pick.pick_side,
+      line,
+      market: signalsGameMarket ?? signalsPropMarket,
+      homeTeam: game?.home_team ?? '',
+      awayTeam: game?.away_team ?? '',
+      player: signalsPropMarket && isPropModel(pick.model_id)
+        ? playerNameFromPickLabel(pick.pick_label)
+        : null,
+      stat: pick.model_id === 'ufc_total_rounds' ? 'Rounds' : null,
+      label: pick.pick_label,
+    });
+  const betHeadline = betHeadlineAt(pick.scored_line);
+  // Their books at a DIFFERENT number (Matt, 2026-11-12): each one's line is
+  // shown and can be opened, also when none of their books has the pick's
+  // number. Hand-off only; the pick, its edge and its record stay at the
+  // model's line. A row is only offered when its bet can be written out with
+  // that number (a stored-label headline cannot), and never on a live,
+  // paused, preview, muted or started card.
+  const otherLinesOffered =
+    pick.is_live !== true && !preview && !paused && pick.signal_type === 'BET' &&
+    !signalsMuted && openForAction(pick) && myBooksReady && cta.handoff &&
+    (Boolean(handoff) || notAtMyBooks);
+  const otherLineRows = otherLinesOffered
+    ? otherLineQuotesForPick(pick, item.bookRows, myBooks, priceAge)
+        .sort((a, b) => {
+          const scored = numOrNull(pick.scored_line) ?? 0;
+          return Math.abs(a.line - scored) - Math.abs(b.line - scored);
+        })
+        .map((q) => ({ ...q, lineText: betHeadlineAt(q.line) }))
+        .filter((q) => q.lineText !== betHeadline)
+    : [];
   const sheetRows = pickSportsbookRows(
     shopQuotes,
     pick.is_live === true || !myBooksReady ? null : myBooks,
+    otherLineRows,
   );
-  const pricedRows = sheetRows.filter((row) => row.price != null);
+  // Best, Bet and the lead are same-line rows only: a price at another
+  // number is a different bet.
+  const pricedRows = sheetRows.filter((row) => row.price != null && !row.otherLine);
   const leadRow = pricedRows[0] ?? null;
   const sheetBetLabel = leadRow?.price != null
     ? signalsCtaLabel(leadRow.short, formatAmerican(leadRow.price))
@@ -403,6 +454,9 @@ export function PickCard({
       : stake.priced
         ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
         : formatUnits(stake.conviction);
+  // A stake above the usual 1u says why, once, in a caption under the stake
+  // (picks.stake_reason). Only where a stake is shown; nothing on a 1u pick.
+  const stakeReason = stakeCaption ? stakeReasonLine(stake, pick.stake_reason) : null;
   const caption = [
     `Model ${formatPct(pick.model_probability)}`,
     flagged ? 'EV —' : ev == null ? null : `EV ${formatPctSigned(ev)}`,
@@ -494,6 +548,17 @@ export function PickCard({
       sheet: true,
     };
   };
+  // None of their books has the pick's number, but some have another one:
+  // the control opens the sheet, where each row shows that book's line.
+  const otherLinesControl =
+    notAtMyBooks && otherLineRows.length > 0
+      ? { label: 'Other lines', speech: 'Other lines at your books', sheet: true }
+      : null;
+  // Built here, after otherLinesControl: the 'none' wording follows the
+  // control, so "This line is not offered…" shows only where "Other lines"
+  // is there to open (UX review).
+  const myBooksNote = myBooksNoteWith(bookLabel(storedQuoteBook(pick)));
+  const myBooksNoteSpoken = myBooksNoteWith(bookName(storedQuoteBook(pick)));
   const signalsControl = bookControlFor(handoff);
   const boardControl = bookControlFor(boardHandoff);
   const signalsCta = signalsControl?.label ?? null;
@@ -507,20 +572,6 @@ export function PickCard({
   // The player name has no column (player_key is a slug on some models), so
   // a prop passes that one token from the label. The headline is still not
   // the label: the "· 0.77u" suffix and the wind parenthetical stay out.
-  const signalsGameMarket = gameMarketForModel(pick.model_id);
-  const signalsPropMarket = signalsGameMarket ? null : propMarketForPick(pick);
-  const betHeadline = signalsBetHeadline({
-    side: pick.pick_side,
-    line: pick.scored_line,
-    market: signalsGameMarket ?? signalsPropMarket,
-    homeTeam: game?.home_team ?? '',
-    awayTeam: game?.away_team ?? '',
-    player: signalsPropMarket && isPropModel(pick.model_id)
-      ? playerNameFromPickLabel(pick.pick_label)
-      : null,
-    stat: pick.model_id === 'ufc_total_rounds' ? 'Rounds' : null,
-    label: pick.pick_label,
-  });
   const reasonLine = signalsReasonLine({
     modelId: pick.model_id,
     windMph: weather?.wind_mph,
@@ -545,7 +596,7 @@ export function PickCard({
         })
       : (heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null);
   const signalsStakeSpoken = signalsStakeShown
-    ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}`
+    ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}${stakeReason ? `. ${stakeReason}` : ''}`
     : 'Stake unavailable';
   const statusSpeech = gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
   // The first spoken word is the chip on the card. A paused or preview row
@@ -566,7 +617,7 @@ export function PickCard({
         edge: flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
         modelChance: `Model chance ${formatPct(pick.model_probability)}`,
         expectedReturn: flagged || ev == null ? 'Expected return unavailable' : `Expected return ${formatPctSigned(ev)}`,
-        stake: myBooksNote ? `${signalsStakeSpoken}. ${myBooksNote}` : signalsStakeSpoken,
+        stake: myBooksNoteSpoken ? `${signalsStakeSpoken}. ${myBooksNoteSpoken}` : signalsStakeSpoken,
         modelName: `${markedModel} model`,
         posted: timing?.label ?? null,
         paused: null,
@@ -577,7 +628,8 @@ export function PickCard({
     : joinCardSpeech([
         matchup,
         gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
-        pick.pick_label,
+        // The title's words (splitPickTitle): no old NFL sizing figure.
+        labelWithoutStake(pick.pick_label),
         paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type),
         // The signals footer speaks the model. The board layout has no
         // model line, so a shared paused or retired name is spoken here.
@@ -588,7 +640,9 @@ export function PickCard({
         flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
         heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null,
         stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null,
-        myBooksNote,
+        // Why the stake is above 1u, spoken once, right after it.
+        stakeReason,
+        myBooksNoteSpoken,
         timing ? timing.label : null,
         startedSpoken,
       ]);
@@ -598,6 +652,7 @@ export function PickCard({
   // Today uses boardHandoff, which is Open when the slip would be a
   // different line from the lock the button would otherwise quote.
   const actionHandoff = signals ? handoff : boardHandoff;
+  const actionOtherLines = !actionHandoff && !startedText ? otherLinesControl : null;
   const actionControl = signals ? signalsControl : boardControl;
   const a11yActions = [
     ...(actionHandoff && actionControl
@@ -607,7 +662,9 @@ export function PickCard({
             ? `${actionControl.speech}. Opens your sportsbooks`
             : actionControl.speech,
         }]
-      : []),
+      : actionOtherLines
+        ? [{ name: 'book', label: `${actionOtherLines.speech}. Opens your sportsbooks` }]
+        : []),
     ...(canSlip ? [{ name: 'slip', label: inSlip ? 'Remove from betslip' : 'Add to betslip' }] : []),
     ...(canTrack ? [{ name: 'track', label: tracked ? 'Untrack' : 'Track' }] : []),
   ];
@@ -628,6 +685,7 @@ export function PickCard({
           if (actionControl?.sheet) setBooksOpen(true);
           else void openBookBetslip(actionHandoff.bookmaker, actionHandoff.link);
         }
+        else if (name === 'book' && actionOtherLines) setBooksOpen(true);
         else if (name === 'slip' && canSlip) onToggleSlip!();
         else if (name === 'track' && canTrack) onToggleTrack!();
       }}
@@ -760,6 +818,22 @@ export function PickCard({
           {caption}
         </Text>
       ) : null}
+      {stakeReason ? (
+        // A sized-up pick (picks.stake_units > 1) says why, with a glyph so it
+        // reads as its own line on a full board (UX review, 2026-11-06). Same
+        // row shape as the books note; textSecondary, never the BET green.
+        <View style={styles.stakeReasonRow}>
+          <Ionicons
+            name="layers-outline"
+            size={13}
+            color={colors.textSecondary}
+            style={styles.extraIcon}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          />
+          <Text style={styles.stakeReasonText}>{trueMinus(stakeReason)}</Text>
+        </View>
+      ) : null}
       {myBooksNote ? (
         <View style={styles.myBooksRow}>
           <Ionicons
@@ -877,7 +951,7 @@ export function PickCard({
         </View>
       ) : null}
 
-      {boardHandoff || startedText || canTrack || canSlip ? (
+      {boardHandoff || startedText || canTrack || canSlip || otherLinesControl ? (
         <View style={styles.actionsRow}>
           {startedText ? (
             // Not a button: the pick was made at this price, before the start.
@@ -909,6 +983,13 @@ export function PickCard({
                 if (boardControl.sheet) setBooksOpen(true);
                 else void openBookBetslip(boardHandoff.bookmaker, boardHandoff.link);
               }}
+            />
+          ) : otherLinesControl ? (
+            <BookControl
+              label={otherLinesControl.label}
+              speech={otherLinesControl.speech}
+              sheet
+              onPress={() => setBooksOpen(true)}
             />
           ) : (
             <View />
@@ -1055,6 +1136,22 @@ export function PickCard({
       <Text style={[styles.stakeRow, signalsStakeShown == null ? styles.metricMuted : null]}>
         {signalsStakeShown ?? '—'}
       </Text>
+      {stakeReason ? (
+        // A sized-up pick (picks.stake_units > 1) says why, with a glyph so it
+        // reads as its own line on a full board (UX review, 2026-11-06). Same
+        // row shape as the books note; textSecondary, never the BET green.
+        <View style={styles.stakeReasonRow}>
+          <Ionicons
+            name="layers-outline"
+            size={13}
+            color={colors.textSecondary}
+            style={styles.extraIcon}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          />
+          <Text style={styles.stakeReasonText}>{trueMinus(stakeReason)}</Text>
+        </View>
+      ) : null}
       {myBooksNote ? (
         <View style={styles.myBooksRow}>
           <Ionicons
@@ -1172,7 +1269,7 @@ export function PickCard({
         </View>
       ) : null}
 
-      {handoff || startedText || canTrack || canSlip ? (
+      {handoff || startedText || canTrack || canSlip || otherLinesControl ? (
         <View style={styles.signalsActions}>
           {startedText ? (
             <View
@@ -1201,6 +1298,13 @@ export function PickCard({
                 if (signalsControl.sheet) setBooksOpen(true);
                 else void openBookBetslip(handoff.bookmaker, handoff.link);
               }}
+            />
+          ) : otherLinesControl ? (
+            <BookControl
+              label={otherLinesControl.label}
+              speech={otherLinesControl.speech}
+              sheet
+              onPress={() => setBooksOpen(true)}
             />
           ) : (
             <View />
@@ -1238,13 +1342,13 @@ export function PickCard({
       <Text style={styles.modelCaption}>{modelCaption}</Text>
       </>
       )}
-      {leadRow && sheetBetLabel ? (
+      {(leadRow && sheetBetLabel) || otherLinesControl ? (
         <PickBooksSheet
           visible={booksOpen}
           title={betHeadline}
           subtitle={contextLine}
           lineNote={
-            heroPrice?.movedLine != null && leadRow.bookmaker === heroPrice.book
+            heroPrice?.movedLine != null && leadRow?.bookmaker === heroPrice.book
               ? signalsNow
               : null
           }
@@ -1253,7 +1357,7 @@ export function PickCard({
           betSpeech={sheetBetSpeech}
           onBet={() => {
             setBooksOpen(false);
-            void openBookBetslip(leadRow.bookmaker, leadRow.link, { sameBookOnly: true });
+            if (leadRow) void openBookBetslip(leadRow.bookmaker, leadRow.link, { sameBookOnly: true });
           }}
           onRow={(row) => {
             setBooksOpen(false);
@@ -1326,6 +1430,17 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: font.size.caption,
     color: colors.textTertiary,
+  },
+  stakeReasonRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: spacing.xs,
+  },
+  stakeReasonText: {
+    flex: 1,
+    marginLeft: spacing.xs,
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
   },
   card: {
     // Declared tap floor (verify_a11y); the card is already ~150pt, so this

@@ -27,7 +27,8 @@ written as `missed` without failing.
 A RUN THAT CANNOT DECIDE ITS GAMES FAILS, after writing every game it could:
 an artifact for another season (the game is then `missed` next hour); every
 due game with no quote at all (the odds steps have stopped); a best quote at a
-book config.BEST_LINE_BOOKMAKERS no longer lists; a best edge above the
+book config.BEST_LINE_BOOKMAKERS no longer lists (except a state-limited one,
+config.STATE_LIMITED_BOOKMAKERS: that game is an ordinary no-bet); a best edge above the
 data-error cap (models/ncaab_quote_bounds.EDGE_CAP: the game is written as
 edge_cap with no bet).
 
@@ -76,6 +77,8 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
+from models import cbb_pairs  # noqa: E402
+from models import ncaab_stake  # noqa: E402
 import models.ncaab_book_quotes as bq  # noqa: E402
 import models.ncaab_spread_market as sm  # noqa: E402
 from data.anon_readable import API_ROLES, lock_down  # noqa: E402
@@ -210,7 +213,8 @@ _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", 
          "confidence_tier", "dk_bet_link", "line_book",
          "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
          "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link",
-         "downgrade_reason")
+         "downgrade_reason",
+         "stake_units", "stake_reason")
 # Its own column list, NOT models.scorer._insert_picks: that one stamps
 # model_probability_cal from the promoted map, and this model decides on its
 # own number (config.MODELS_ON_OWN_PROBABILITY).
@@ -367,7 +371,9 @@ def publish(conn, rows: list[dict], decisions: list[sm.Decision], check_hour: da
         if not got:
             continue
         n_decided += 1
-        if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
+        # A bet an earlier NCAAB bet on this game and side agrees with is
+        # staked at NCAAB_AGREEMENT_STAKE_UNITS (models/ncaab_stake.py).
+        if row is not None and conn.execute(_INSERT, ncaab_stake.stamp(conn, row, _COLS)).fetchone():
             n_bets += row["signal_type"] == "BET"
     conn.commit()
     return n_bets, n_decided
@@ -471,7 +477,15 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                                     f"may have stopped")
                 for d in got:
                     if d.status == "book_not_bettable":
-                        problems.append(f"book_not_bettable {d.game_id} ({d.detail})")
+                        book = str((d.best or {}).get("bookmaker") or "").lower()
+                        if book in config.STATE_LIMITED_BOOKMAKERS:
+                            # Expected, not broken: the consensus reads this book and a
+                            # pick may never name it (mike, 2026-11-06). The game is a
+                            # no-bet, as on the stored seasons' re-grade (docs/sports/ncaab.md).
+                            logger.info(f"NCAAB spread card: {d.game_id} not bet, its best "
+                                        f"quote is at {book}, which a pick never names")
+                        else:
+                            problems.append(f"book_not_bettable {d.game_id} ({d.detail})")
                     elif d.status == "edge_cap":
                         logger.error(f"NCAAB spread card: {d.game_id} not bet, its edge is a data "
                                      f"error: {d.detail}")
@@ -483,6 +497,9 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         if do_publish and decisions:
             from models.scorer import _get_current_bankroll
             prows, refused = pick_rows(decisions, games, _get_current_bankroll(conn))
+            # An under beside a big favourite's spread bet on the same game is not bet
+            # (models/cbb_pairs.py; mike, 2026-11-11): the later of the two becomes a NONE row.
+            cbb_pairs.hold_back(conn, prows, refused)
             published, n_decided = publish(conn, prows, decisions, hour, games, refused)
         logger.info("\n" + render(decisions, diag, published if do_publish else None,
                                   n_decided if do_publish else None))

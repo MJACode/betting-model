@@ -522,15 +522,19 @@ class PgStore:
 
     def ensure_dnp_table(self) -> None:
         """Create nba_player_dnp once. Gated on the catalog: CREATE TABLE IF NOT
-        EXISTS is real DDL and fires PostgREST's schema reload (data/ddl_guard.py)."""
+        EXISTS is real DDL and fires PostgREST's schema reload (data/ddl_guard.py).
+
+        Not lock_down. The player page reads this table. lock_down revokes anon
+        and leaves RLS with no policy, which is an empty screen, and it would
+        undo anon_read_nba_player_dnp_2026_11_11.sql on the next results pass.
+        Writes stay with the table owner. The migration grants SELECT and adds
+        the read policy.
+        """
         if self._dnp_ready:
             return
-        from data.anon_readable import API_ROLES, lock_down
         from data.ddl_guard import schema_is_current
-        if not schema_is_current(self.conn, DNP_TABLE, columns=DNP_COLUMNS,
-                                 rls=True, revoked_from=API_ROLES):
+        if not schema_is_current(self.conn, DNP_TABLE, columns=DNP_COLUMNS):
             self.conn.execute(DNP_DDL)
-            lock_down(self.conn, DNP_TABLE)
             self.conn.commit()
         self._dnp_ready = True
 

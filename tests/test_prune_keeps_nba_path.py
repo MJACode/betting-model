@@ -112,18 +112,36 @@ def test_a_dry_run_counts_and_deletes_nothing():
 def test_the_two_prune_tiers_never_select_a_path_kept_sport():
     params: dict = {}
     pred = po._unprotected(params, "odds")
-    # NCAAB joined 2026-10-26, for its first season (first game 2026-11-01).
-    assert "path_kept_sports" in pred and params["path_kept_sports"] == ("NBA", "NCAAB")
+    # NCAAB joined 2026-10-26, for its first season (first game 2026-11-01);
+    # NCAABW (women's college basketball) 2026-11-09, for the same reason.
+    # NCAAF 2026-11-10: its settled games held one or two rows a book.
+    # EUROLEAGUE 2026-11-12, from its first stored day.
+    assert "path_kept_sports" in pred and params["path_kept_sports"] == (
+        "NBA", "NCAAB", "NCAABW", "NCAAF", "EUROLEAGUE")
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE odds (bookmaker, source, sport)")
     db.executemany("INSERT INTO odds VALUES (?, NULL, ?)",
-                   [("fanduel", "NBA"), ("fanduel", "NCAAB"), ("fanduel", "MLB")])
+                   [("fanduel", "NBA"), ("fanduel", "NCAAB"), ("fanduel", "NCAABW"),
+                    ("fanduel", "NCAAF"), ("fanduel", "EUROLEAGUE"), ("fanduel", "MLB")])
     # the predicate's own SQL, run: only the MLB line-shop row is prunable
     sql = pred
     for k, v in params.items():
         lit = "(" + ", ".join(f"'{x}'" for x in v) + ")" if isinstance(v, tuple) else f"'{v}'"
         sql = sql.replace(f"%({k})s", lit)
     assert [r[0] for r in db.execute(f"SELECT sport FROM odds WHERE {sql}")] == ["MLB"]
+
+
+def test_ncaaf_keeps_each_book_s_moves_and_loses_only_repeats():
+    """NCAAF joined 2026-11-10: a settled college football game used to keep a
+    book's opener and close only, so no season could be read for when a book
+    moved. Every move stays; the middle of an unchanged run goes."""
+    assert "NCAAF" in po.PATH_KEPT_SPORTS
+    c = _Conn()
+    c.game("CFB", sport="NCAAF")
+    path = [(-110, -110), (-110, -110), (-110, -110), (-105, -115), (-105, -115), (-105, -115)]
+    ids = [c.quote("CFB", _ts(i), h, a, sport="NCAAF") for i, (h, a) in enumerate(path)]
+    po.thin_repeats(c, today="2026-10-22")
+    assert c.ids() == {ids[0], ids[2], ids[3], ids[5]}
 
 
 def test_ncaab_keeps_its_path_like_the_nba():

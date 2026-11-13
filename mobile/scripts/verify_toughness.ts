@@ -122,6 +122,11 @@ function main() {
     dated?.text === 'vs NE · NE allows 17.9 pts/g (2025)', `${dated?.text}`);
   check('and the spoken form is words, not a slash',
     dated?.fact === 'NE 17.9 points allowed per game (2025)', `${dated?.fact}`);
+  // NBA labels a season by its ENDING year. "(2027)" in November reads as a
+  // season not yet started; the Teams board says "2026-27" (2026-11-06).
+  const nba = grade('NBA', { def_rating: 115.2 }, 'PHX', 2027);
+  check('an NBA season is named the way the Teams board names it',
+    nba?.text === 'vs PHX · PHX 115.2 def rtg (2026-27)', `${nba?.text}`);
   check('with no season it makes no claim about one', !/\(\d{4}\)/.test(seaSide?.text ?? ''), `${seaSide?.text}`);
   // The visible label is the Teams board's own wording for the same number, so
   // one stat is not two idioms on one tab.

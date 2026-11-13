@@ -37,7 +37,7 @@ LADDER = [(110.5, -150, +120), (112.5, -105, -115), (114.5, +130, -160)]
 DECISIONS = card.DECISIONS_TABLE
 
 
-def card_world(monkeypatch, gap=3.0, **kw):
+def card_world(monkeypatch, gap=2.5, **kw):
     """The feed and the card on one fake database; the gap forced to `gap`."""
     bodies = kw.pop("bodies", {"ev-mil": [h1_book("fanduel", LADDER),
                                           h1_book("pinnacle", [(112.5, -108, -108)])]})
@@ -65,6 +65,15 @@ def _run(clock, after_s=30):
     return card.run_card(do_publish=True, now=clock() + timedelta(seconds=after_s))
 
 
+
+def _one_none_row(db, model_id):
+    """Scored and not bet: exactly one NONE row, no stake (Matt, 2026-11-10:
+    the All tab shows every scored game; scripts/nba_none_rows.py)."""
+    rows = [r for r in db.rows["picks"] if r["model_id"] == model_id]
+    assert [r["signal_type"] for r in rows] == ["NONE"], rows
+    assert rows[0]["kelly_fraction"] == 0.0 and rows[0]["recommended_bet"] == 0.0
+    return rows[0]
+
 def test_a_game_with_no_draftkings_first_half_is_stored_decided_and_bet(monkeypatch):
     """RULE: DraftKings hung no first-half total; FanDuel's over is the best price
     at Pinnacle's fair line, so the bet is written there, with no DraftKings price
@@ -84,11 +93,54 @@ def test_a_game_with_no_draftkings_first_half_is_stored_decided_and_bet(monkeypa
     assert (p["best_book"], p["best_bet_link"]) == ("fanduel", "https://fanduel/over/112.5")
     assert p["model_probability"] == p["model_probability_cal"]
     [d] = db.rows[DECISIONS]
-    assert d["n_bets"] == 1 and d["gap_total"] == 3.0 and d["book"] == "fanduel"
+    assert d["n_bets"] == 1 and d["gap_total"] == 2.5 and d["book"] == "fanduel"
     assert p["model_probability"] == pytest.approx(
         d["p_fair"] + fh.uplift(card.artifact(), 2027), abs=1e-4)
     assert set(json.loads(d["book_ages"])) == {"fanduel", "pinnacle"}
     assert 55.0 < d["lead_min"] < 56.0
+
+
+def test_a_game_the_team_total_model_already_bet_gets_no_first_half_bet(monkeypatch):
+    """RULE (mike, 2026-11-04): one NBA game-total bet a game across the three NBA
+    game-total models (scripts/nba_game_totals_door.py). The home team total under
+    was written first; this card still decides the game, records the offer it would
+    have taken and why, and writes no pick. A VOIDed pick still holds the game, as
+    the NBA prop door counts one."""
+    clock, db, f, _ = card_world(monkeypatch)
+    db.rows["picks"].append({"game_id": GID, "model_id": "nba_team_total_luck",
+                             "signal_type": "BET", "condition_status": "VOID"})
+    feed.fetch_first_half([GID], "open", conn=db)
+    out = _run(clock)
+    assert out["published"] == 0 and out["decided"] == 1
+    assert [r["model_id"] for r in db.rows["picks"] if r["signal_type"] == "BET"] == ["nba_team_total_luck"]
+    _one_none_row(db, "nba_first_half_total_luck")
+    [d] = db.rows[DECISIONS]
+    assert d["n_bets"] == 0 and d["book"] == "fanduel" and d["gap_total"] == 2.5
+    assert d["detail"].endswith("; one_total_a_game:nba_team_total_luck_already_bet")
+    assert _run(clock, after_s=90)["published"] == 0      # decided once, never again
+
+
+def test_a_prop_bet_on_the_game_does_not_hold_it(monkeypatch):
+    """The rule is among the three game-total models only: an NBA prop on the same
+    game does not stop the first-half over."""
+    clock, db, f, _ = card_world(monkeypatch)
+    db.rows["picks"].append({"game_id": GID, "model_id": "nba_prop_projection",
+                             "signal_type": "BET", "condition_status": None})
+    feed.fetch_first_half([GID], "open", conn=db)
+    assert _run(clock)["published"] == 1
+
+
+def test_at_the_full_game_cut_the_game_is_decided_with_no_bet(monkeypatch):
+    """RULE: at gap 3.0 or more the full-game over bets this game, so the card
+    records the decision, its gap and its best offer, and writes nothing."""
+    clock, db, f, _ = card_world(monkeypatch, gap=3.4)
+    feed.fetch_first_half([GID], "open", conn=db)
+    out = _run(clock)
+    assert out["published"] == 0 and out["decided"] == 1
+    _one_none_row(db, "nba_first_half_total_luck")
+    [d] = db.rows[DECISIONS]
+    assert d["detail"] == "full_game_model_bets:3.40" and d["n_bets"] == 0 and d["gap_total"] == 3.4
+    assert d["book"] == "fanduel"
 
 
 def test_draftkings_own_over_at_the_number_is_the_reference(monkeypatch):
@@ -107,7 +159,8 @@ def test_under_the_cut_writes_a_decision_and_no_bet(monkeypatch):
     clock, db, f, _ = card_world(monkeypatch, gap=1.5)
     feed.fetch_first_half([GID], "open", conn=db)
     out = _run(clock)
-    assert (out["published"], out["decided"]) == (0, 1) and db.rows["picks"] == []
+    assert (out["published"], out["decided"]) == (0, 1)
+    _one_none_row(db, "nba_first_half_total_luck")
     [d] = db.rows[DECISIONS]
     assert d["detail"].startswith("gap_below_cut") and d["book"] == "fanduel"
 
@@ -139,7 +192,7 @@ def test_a_fetch_that_offered_nothing_decides_the_game_with_no_bet(monkeypatch):
     out = _run(clock)
     assert out["decided"] == 1 and out["published"] == 0 and db.rows["picks"] == []
     [d] = db.rows[DECISIONS]
-    assert d["detail"] == "no_fair_line" and d["n_bets"] == 0 and d["gap_total"] == 3.0
+    assert d["detail"] == "no_fair_line" and d["n_bets"] == 0 and d["gap_total"] == 2.5
     clock.tick(60)
     f.bodies["ev-mil"] = [h1_book("fanduel", LADDER), h1_book("pinnacle", [(112.5, -108, -108)])]
     feed.fetch_first_half([GID], "open", conn=db)
@@ -194,7 +247,8 @@ def test_a_bet_under_the_model_s_ev_floor_is_refused_and_the_game_still_decided(
     monkeypatch.setattr(fh, "uplift", lambda art, season: -0.30)
     feed.fetch_first_half([GID], "open", conn=db)
     out = _run(clock)
-    assert out["published"] == 0 and out["decided"] == 1 and db.rows["picks"] == []
+    assert out["published"] == 0 and out["decided"] == 1
+    _one_none_row(db, "nba_first_half_total_luck")
     [d] = db.rows[DECISIONS]
     assert d["n_bets"] == 0 and "refused ev_below_floor" in d["detail"]
 
@@ -233,7 +287,7 @@ def test_the_card_refuses_a_season_the_artifact_does_not_end_just_before(monkeyp
 def _bet(**kw) -> fh.FirstHalfBet:
     """A bet as decide() returns it: FanDuel's over 112.5 at -105."""
     base = dict(game_id=GID, season=2027, line=112.5, price=-105.0, book="fanduel",
-                gap_total=3.0, p_fair=0.52, p_push=0.0, ev_fair=0.0,
+                gap_total=2.5, p_fair=0.52, p_push=0.0, ev_fair=0.0,
                 uplift=0.0572, p_model=0.5772, fair_ref="pinnacle", fair_mu=112.5,
                 fetch_at=TIP - timedelta(minutes=55), dk_price=None,
                 link="https://fanduel/over/112.5", dk_link=None)
@@ -290,6 +344,6 @@ def test_a_paused_model_s_rows_carry_the_paused_marker(monkeypatch, paused):
     want = config.PAUSED_NOTE if paused else None
     assert rows[0]["downgrade_reason"] == want
     db = H1DB(Clock(TIP - timedelta(minutes=54)), tables=(card.DECISIONS_TABLE,))
-    d = fh.FirstHalfDecision(GID, _bet().fetch_at, 3.0, 1, "bet")
+    d = fh.FirstHalfDecision(GID, _bet().fetch_at, 2.5, 1, "bet")
     assert card.publish(db, rows, [d], {GID: 55.0}, {}) == (1, 1)
     assert db.rows["picks"][0]["downgrade_reason"] == want

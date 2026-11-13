@@ -9,9 +9,10 @@ import { useSubscription } from './useSubscription';
 /**
  * THE GATE. One question — "can this person see paid signals?" — answered once.
  *
- * The database is the arbiter. `public.my_access().entitled` is the Apple
- * subscription (trialing/active, period open). A Whop membership is
- * `discord_access` and does not unlock the app, so this hook does not OR it in.
+ * The database is the arbiter. `public.my_access().entitled` is a RevenueCat
+ * subscription (trialing/active, period open) or an active comped/app_review
+ * grant. A Whop membership is `discord_access` and does not unlock the app,
+ * so this hook does not OR it in.
  * The receipt-validated client signal from a just-completed purchase is folded
  * in on top, so a user who has paid this second is not staring at a lock while
  * the RevenueCat webhook is still in flight.

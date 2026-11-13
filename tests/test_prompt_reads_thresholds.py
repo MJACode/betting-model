@@ -11,8 +11,11 @@ repo can write that field, which is why "paste the prompt block" kept coming
 back as a task only mike could do.
 
 `model_action_thresholds` is written from `config.py` by the 6am pipeline and
-is already what the app's action filter, Discord and push read. The prompt now
-joins it. It is pasted once and never again.
+is already what the app's action filter, Discord and push read. The prompt
+joined it from 2026-09-12. Since 2026-11-04 there is no prompt to paste at all:
+the query is the public.open_picks view
+(data/migrations/open_picks_view_2026_11_04.sql), which joins the same table,
+and these tests read the view.
 
 AND THE TABLE HAS TO TELL THE WHOLE TRUTH, which it did not: `threshold_sync`
 wrote `paused` from `config.PAUSED_MODELS` alone, so a model auto-paused by the
@@ -26,7 +29,9 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PROMPT = (ROOT / "docs" / "mobile_picks_prompt.md").read_text(encoding="utf-8")
+# The query any Claude chat reads for the open picks.
+PROMPT = (ROOT / "data" / "migrations" / "open_picks_view_2026_11_04.sql").read_text(encoding="utf-8")
+DOC = (ROOT / "docs" / "mobile_picks_prompt.md").read_text(encoding="utf-8")
 SYNC = (ROOT / "data" / "threshold_sync.py").read_text(encoding="utf-8")
 
 
@@ -39,13 +44,19 @@ def test_the_prompt_carries_no_per_model_cut():
 
 
 def test_the_prompt_joins_the_thresholds_table_and_applies_every_gate():
-    assert "JOIN model_action_thresholds t ON t.model_id = p.model_id" in PROMPT
+    """The view shows only bets Discord posted, and the Discord producer
+    posts only what clears the table's cut. So the view joins the table for
+    the pause, and the cut gates live in the producer it reads the ledger of."""
+    assert "JOIN public.model_action_thresholds t ON t.model_id = p.model_id" in PROMPT
     for gate in ("t.paused = FALSE",
-                 "p.model_probability >= t.min_prob",
-                 "COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0)",
-                 "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds",
+                 "FROM public.v_discord_published pub",
                  "p.condition_status IS NULL OR p.condition_status <> 'VOID'"):
-        assert gate in PROMPT, f"the prompt lost the gate: {gate}"
+        assert gate in PROMPT, f"the open picks view lost the gate: {gate}"
+    producer = (ROOT / "tracking" / "discord_notifier.py").read_text(encoding="utf-8")
+    for gate in ("p.model_probability >= t.min_prob",
+                 "COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0)",
+                 "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds"):
+        assert gate in producer, f"the Discord producer lost the gate: {gate}"
 
 
 def test_the_sync_mirrors_both_pause_registers():
@@ -64,8 +75,8 @@ def test_the_auto_pause_lookup_fails_open():
     assert "except Exception" in body and "auto_paused_set = set()" in body
 
 
-def test_the_prompt_still_says_it_is_pasted_once():
-    """If the doc goes back to telling a human to regenerate and paste a block
-    on every change, the recurring task is back."""
-    assert "python -m scripts.emit_threshold_sql --prefix p." not in PROMPT.split(
-        "## ")[0] + PROMPT[:PROMPT.index("```") if "```" in PROMPT else 0]
+def test_the_doc_asks_for_no_paste():
+    """If the doc goes back to telling a human to regenerate and paste a block,
+    the recurring task is back."""
+    assert "python -m scripts.emit_threshold_sql --prefix p." not in DOC
+    assert "open_picks" in DOC

@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ByomBetCount } from '@/components/byom/ByomBetCount';
@@ -19,6 +19,7 @@ import type { ByomSheetTab } from '@/components/byom/ByomPropSideFields';
 import { searchByomPlayerNames } from '@/lib/byom';
 import {
   betTypeLabel,
+  isPropMarket,
   isYesOnlyProp,
   type ByomMarket,
   type ByomPropSide,
@@ -27,14 +28,16 @@ import {
 } from '@/lib/byomRecord';
 import {
   KICK_SLOTS,
+  LINE_MOVE_CHOICES,
+  PREV_ATS_CHOICES,
+  PREV_RESULT_CHOICES,
+  PREV_TOTAL_CHOICES,
   PRICE_CHOICES,
-  SPREAD_SCALE,
   canMoveBand,
   canMovePrice,
   daysFor,
   formatAmericanBand,
   formatLineNumber,
-  formatSpread,
   lineScale,
   lineStepNote,
   monthsFor,
@@ -45,7 +48,6 @@ import {
   resetSheetFilters,
   shownKickSlots,
   toggleMember,
-  totalScale,
   withKickSlots,
   type ByomBand,
   type ByomPriceBand,
@@ -101,21 +103,29 @@ export function ByomFilterSheet({
     : loading
       ? 'Updating…'
       : `Show ${bets} bet${bets === 1 ? '' : 's'}`;
-  const sideLabel = isYesOnlyProp(market)
-    ? 'Yes'
-    : propSide === 'under'
-      ? 'Under'
-      : propSide === 'over'
-        ? 'Over'
-        : 'Any';
+  const prop = isPropMarket(market);
+  // A total has no Matchup tab, so a stale 'matchup' falls back to Odds.
+  const shown = tab === 'matchup' && market === 'totals' ? 'odds' : tab;
+  const gameSide = side === 'home' ? 'Home' : side === 'away' ? 'Away'
+    : side === 'over' ? 'Over' : side === 'under' ? 'Under' : 'Any';
+  const sideLabel = !prop
+    ? gameSide
+    : isYesOnlyProp(market)
+      ? 'Yes'
+      : propSide === 'under'
+        ? 'Under'
+        : propSide === 'over'
+          ? 'Over'
+          : 'Any';
   const reset = () => {
-    const next = resetSheetFilters(propFilters);
+    const next = resetSheetFilters(propFilters, prop);
     onPropFilters(next);
-    onSide(null);
+    // A game bet's side is step 2's required choice, not a sheet filter.
+    if (prop) onSide(null);
     if (next.kickSlots.includes('prime')) onPrimetime(null);
   };
   return (
-    <Modal
+    <Modal trackName="ByomFilterSheet"
       visible={tab != null}
       animationType="slide"
       presentationStyle="pageSheet"
@@ -147,9 +157,12 @@ export function ByomFilterSheet({
           </Pressable>
         </View>
         <View style={styles.segment} accessibilityRole="tablist">
-          {(['odds', 'time', 'matchup'] as const).map((item) => {
-            const selected = item === tab;
-            const label = item === 'odds' ? 'Odds' : item === 'time' ? 'Time' : 'Matchup';
+          {(market === 'totals'
+            ? (['odds', 'time', 'trends'] as const)
+            : (['odds', 'time', 'matchup', 'trends'] as const)).map((item) => {
+            const selected = item === shown;
+            const label = item === 'odds' ? 'Odds' : item === 'time' ? 'Time'
+              : item === 'matchup' ? 'Matchup' : 'Trends';
             return (
               <Pressable
                 key={item}
@@ -165,14 +178,14 @@ export function ByomFilterSheet({
           })}
         </View>
         <Text style={styles.context}>
-          {sport} · {betTypeLabel(market)} · {sideLabel}
+          {sport} · {betTypeLabel(market, sport)} · {sideLabel}
         </Text>
         <ScrollView
           style={styles.flex}
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
-          {tab === 'odds' ? (
+          {shown === 'odds' ? (
             <OddsTab
               sport={sport}
               market={market}
@@ -180,21 +193,32 @@ export function ByomFilterSheet({
               onPropFilters={onPropFilters}
             />
           ) : null}
-          {tab === 'time' ? (
+          {shown === 'time' ? (
             <TimeTab
               sport={sport}
+              prop={prop}
               primetime={primetime}
               propFilters={propFilters}
               onPrimetime={onPrimetime}
               onPropFilters={onPropFilters}
             />
           ) : null}
-          {tab === 'matchup' ? (
+          {shown === 'matchup' ? (
             <MatchupTab
               sport={sport}
+              market={market}
+              prop={prop}
               side={side}
               propFilters={propFilters}
               onSide={onSide}
+              onPropFilters={onPropFilters}
+            />
+          ) : null}
+          {shown === 'trends' ? (
+            <TrendsTab
+              sport={sport}
+              market={market}
+              propFilters={propFilters}
               onPropFilters={onPropFilters}
             />
           ) : null}
@@ -251,10 +275,9 @@ function OddsTab({
   onPropFilters: (next: ByomPropFilterState) => void;
 }) {
   const scale = lineScale(market);
-  const hidden = isYesOnlyProp(market);
+  // A game bet has no player line (Matt, 2026-11-05: game bets get these filters).
+  const hidden = isYesOnlyProp(market) || !isPropMarket(market);
   const locked = !hidden && scale == null;
-  const spread = SPREAD_SCALE;
-  const total = totalScale(sport);
   const setPrice = (band: ByomPriceBand | 'any') => {
     if (band === 'any') {
       onPropFilters({ ...propFilters, priceBand: null, priceCustom: null });
@@ -273,7 +296,7 @@ function OddsTab({
           title="Player line"
           detail={locked
             ? 'Custom needs exactly one stat'
-            : `The player’s ${betTypeLabel(market)} line at game start`}
+            : `The player’s ${betTypeLabel(market)} line when the bet became official`}
         >
           <View style={styles.chips}>
             <ByomCheckChip
@@ -311,7 +334,7 @@ function OddsTab({
           ) : null}
         </Card>
       )}
-      <Card title="Price" detail="DraftKings price on your side at game start">
+      <Card title="Price" detail="DraftKings price on your side when the bet became official">
         <View style={styles.chips}>
           {PRICE_CHOICES.map((choice) => (
             <ByomCheckChip
@@ -333,73 +356,20 @@ function OddsTab({
           />
         ) : null}
       </Card>
-      <Card title="Game spread" detail="Player’s team spread at game start">
-        <View style={styles.chips}>
-          <ByomCheckChip
-            label="Any"
-            exclusive
-            selected={propFilters.spreadBand == null}
-            onPress={() => onPropFilters({ ...propFilters, spreadBand: null })}
-          />
-          <ByomCheckChip
-            label="Custom"
-            exclusive
-            selected={propFilters.spreadBand != null}
-            onPress={() => onPropFilters({
-              ...propFilters,
-              spreadBand: propFilters.spreadBand ?? openBand(spread),
-            })}
-          />
-        </View>
-        {propFilters.spreadBand ? (
-          <BandStepper
-            band={propFilters.spreadBand}
-            scale={spread}
-            formatValue={formatSpread}
-            onChange={(spreadBand) => onPropFilters({ ...propFilters, spreadBand })}
-          />
-        ) : null}
-        <Text style={styles.note}>Team spread from −14 to +14 in 0.5 steps.</Text>
-      </Card>
-      <Card title="Game total" detail="Game over/under at game start">
-        <View style={styles.chips}>
-          <ByomCheckChip
-            label="Any"
-            exclusive
-            selected={propFilters.totalBand == null}
-            onPress={() => onPropFilters({ ...propFilters, totalBand: null })}
-          />
-          <ByomCheckChip
-            label="Custom"
-            exclusive
-            selected={propFilters.totalBand != null}
-            onPress={() => onPropFilters({
-              ...propFilters,
-              totalBand: propFilters.totalBand ?? openBand(total),
-            })}
-          />
-        </View>
-        {propFilters.totalBand ? (
-          <BandStepper
-            band={propFilters.totalBand}
-            scale={total}
-            formatValue={formatLineNumber}
-            onChange={(totalBand) => onPropFilters({ ...propFilters, totalBand })}
-          />
-        ) : null}
-      </Card>
     </View>
   );
 }
 
 function TimeTab({
   sport,
+  prop,
   primetime,
   propFilters,
   onPrimetime,
   onPropFilters,
 }: {
   sport: ByomSport;
+  prop: boolean;
   primetime: boolean | null;
   propFilters: ByomPropFilterState;
   onPrimetime: (primetime: boolean | null) => void;
@@ -435,7 +405,10 @@ function TimeTab({
           ))}
         </View>
       </Card>
-      <Card title="Day of week" detail={sport === 'NBA' ? 'Tipoff day, ET' : 'Kickoff day, ET'}>
+      <Card
+        title="Day of week"
+        detail={sport === 'NBA' ? 'Tipoff day, ET' : sport === 'NHL' ? 'Puck drop day, ET' : 'Kickoff day, ET'}
+      >
         <View style={styles.chips}>
           <ByomCheckChip
             label="Any"
@@ -481,6 +454,30 @@ function TimeTab({
           </Text>
         </Card>
       ) : null}
+      {sport === 'NFL' && !prop ? (
+        <Card title="Rest" detail="Days since this team’s last game">
+          <View style={styles.chips}>
+            <ByomCheckChip
+              label="Any"
+              exclusive
+              selected={!propFilters.shortWeek && !propFilters.offBye}
+              onPress={() => onPropFilters({ ...propFilters, shortWeek: false, offBye: false })}
+            />
+            <ByomCheckChip
+              label="Short week (6 days or fewer)"
+              exclusive
+              selected={propFilters.shortWeek}
+              onPress={() => onPropFilters({ ...propFilters, shortWeek: true, offBye: false })}
+            />
+            <ByomCheckChip
+              label="Off a bye (12+ days)"
+              exclusive
+              selected={propFilters.offBye}
+              onPress={() => onPropFilters({ ...propFilters, shortWeek: false, offBye: true })}
+            />
+          </View>
+        </Card>
+      ) : null}
       {sport === 'NFL' ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Weeks</Text>
@@ -494,12 +491,16 @@ function TimeTab({
 
 function MatchupTab({
   sport,
+  market,
+  prop,
   side,
   propFilters,
   onSide,
   onPropFilters,
 }: {
   sport: ByomSport;
+  market: ByomMarket;
+  prop: boolean;
   side: 'home' | 'away' | 'over' | 'under' | null;
   propFilters: ByomPropFilterState;
   onSide: (side: 'home' | 'away' | 'over' | 'under' | null) => void;
@@ -508,8 +509,11 @@ function MatchupTab({
   const teamSide = side === 'home' || side === 'away' ? side : 'any';
   const [teamQuery, setTeamQuery] = useState('');
   const teams = filterTeams(teamsForSport(sport), teamQuery);
+  // A total has no team, so it has no opponent.
+  const opponents = market !== 'totals';
   return (
     <View>
+      {prop ? (
       <Card title="Player’s team" detail="Home or away for the player’s team">
         <View style={styles.chips}>
           {([
@@ -527,6 +531,8 @@ function MatchupTab({
           ))}
         </View>
       </Card>
+      ) : null}
+      {opponents ? (
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Opponent</Text>
         <Text style={styles.cardDetail}>Any by default · pick one or more</Text>
@@ -578,7 +584,122 @@ function MatchupTab({
           );
         })}
       </View>
-      <PlayerPicker sport={sport} propFilters={propFilters} onPropFilters={onPropFilters} />
+      ) : null}
+      {prop ? <PlayerPicker sport={sport} propFilters={propFilters} onPropFilters={onPropFilters} /> : null}
+    </View>
+  );
+}
+
+function ChoiceRow<T extends string>({
+  choices,
+  value,
+  onChange,
+}: {
+  choices: readonly { value: T; label: string }[];
+  value: T | null;
+  onChange: (value: T | null) => void;
+}) {
+  return (
+    <View style={styles.chips}>
+      <ByomCheckChip label="Any" exclusive selected={value == null} onPress={() => onChange(null)} />
+      {choices.map((choice) => (
+        <ByomCheckChip
+          key={choice.value}
+          label={choice.label}
+          exclusive
+          selected={value === choice.value}
+          onPress={() => onChange(choice.value)}
+        />
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Trend filters (Matt, 2026-11-05: "we need more data input to narrow
+ * down bets"). Each is known before the bet: on the official line a move
+ * counts up to the quote that became the bet, and a last-game filter
+ * waits for that game to finish.
+ */
+function TrendsTab({
+  sport,
+  market,
+  propFilters,
+  onPropFilters,
+}: {
+  sport: ByomSport;
+  market: ByomMarket;
+  propFilters: ByomPropFilterState;
+  onPropFilters: (next: ByomPropFilterState) => void;
+}) {
+  const teamBet = market !== 'totals';
+  // Matt, 2026-11-05: "Didn't move" is dropped. On the official line it is
+  // nearly every bet (the opener has not moved). A model saved with it
+  // still shows it, so the choice can be cleared.
+  const moveChoices = LINE_MOVE_CHOICES.filter(
+    (choice) => choice.value !== 'none' || propFilters.lineMove === 'none');
+  // Measured 2026-11-05: NBA props before 2026-27 hold one stored line each.
+  const noPropHistory = sport === 'NBA' && isPropMarket(market);
+  return (
+    <View>
+      <Card
+        title="Line movement"
+        detail="The DraftKings line since it opened, up to when the bet became official (the close, on the closing line). Toward means the market moved onto this side: fewer points on a spread, a higher total for an over or a lower one for an under, or a shorter moneyline price. Away is the reverse."
+      >
+        <ChoiceRow
+          choices={moveChoices}
+          value={propFilters.lineMove}
+          onChange={(lineMove) => onPropFilters({ ...propFilters, lineMove })}
+        />
+        {noPropHistory ? (
+          <Text style={styles.note}>
+            NBA prop line history starts in 2026-27. Before that, this filter finds no bets.
+          </Text>
+        ) : null}
+      </Card>
+      {teamBet ? (
+        <Card title="Last game" detail="This team’s previous game this season">
+          <Text style={styles.chipLabel}>Result</Text>
+          <ChoiceRow
+            choices={PREV_RESULT_CHOICES}
+            value={propFilters.prevResult}
+            onChange={(prevResult) => onPropFilters({ ...propFilters, prevResult })}
+          />
+          <Text style={styles.chipLabel}>Against the spread</Text>
+          <ChoiceRow
+            choices={PREV_ATS_CHOICES}
+            value={propFilters.prevAts}
+            onChange={(prevAts) => onPropFilters({ ...propFilters, prevAts })}
+          />
+        </Card>
+      ) : null}
+      <Card title="Last game total" detail="Both teams’ previous games this season">
+        <ChoiceRow
+          choices={PREV_TOTAL_CHOICES}
+          value={propFilters.prevTotal}
+          onChange={(prevTotal) => onPropFilters({ ...propFilters, prevTotal })}
+        />
+      </Card>
+      <Card title="Division">
+        <View style={styles.chips}>
+          {([
+            [null, 'Any'],
+            [true, 'Division game'],
+            [false, 'Not a division game'],
+          ] as const).map(([value, label]) => (
+            <ByomCheckChip
+              key={label}
+              label={label}
+              exclusive
+              selected={propFilters.division === value}
+              onPress={() => onPropFilters({ ...propFilters, division: value })}
+            />
+          ))}
+        </View>
+      </Card>
+      <Text style={styles.note}>
+        A team’s first game of the season has no last game, so a last-game filter leaves it out. The opener is the first DraftKings line we stored. On a spread, total or player line, only the number counts as a move, not the price.
+      </Text>
     </View>
   );
 }
@@ -849,6 +970,12 @@ const styles = StyleSheet.create({
   note: {
     marginTop: spacing.sm,
     fontSize: font.size.caption,
+    color: colors.textSecondary,
+  },
+  chipLabel: {
+    marginTop: spacing.md,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
     color: colors.textSecondary,
   },
   weekLine: {

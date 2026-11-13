@@ -353,6 +353,9 @@ class _Cursor:
     def fetchall(self):
         return self._rows
 
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
 
 class _Conn:
     def __init__(self, rows=None, raises=False):
@@ -365,6 +368,11 @@ class _Conn:
 
     def execute(self, sql, params=None):
         self.sqls.append(sql)
+        head = sql.lstrip().upper()
+        # The catch-up waits on the scoring lease before it reads the ledger.
+        # That session lock is not the daily query.
+        if "PG_ADVISORY" in head or head.startswith("SET ") or head.startswith("SELECT 1"):
+            return _Cursor([(True,)])
         if self.raises and "SELECT" in sql.upper():
             raise RuntimeError('relation "pipeline_runs" does not exist')
         if "SELECT" in sql.upper():

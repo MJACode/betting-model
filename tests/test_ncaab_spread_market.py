@@ -80,8 +80,12 @@ def test_its_ledger_is_worker_only():
 
 
 def test_its_books_are_the_bettable_books():
-    assert set(bq.BOOKS) <= set(config.BEST_LINE_BOOKMAKERS)
-    assert not set(bq.BOOKS) & set(config.BEST_LINE_EXCLUDE_BOOKMAKERS)
+    # The consensus keeps betparx (fitted with it); the card's bettable= is
+    # config.BEST_LINE_BOOKMAKERS, which never holds it (mike 2026-11-06).
+    rest = set(bq.BOOKS) - config.STATE_LIMITED_BOOKMAKERS
+    assert rest <= set(config.BEST_LINE_BOOKMAKERS)
+    assert not rest & set(config.BEST_LINE_EXCLUDE_BOOKMAKERS)
+    assert "betparx" in bq.BOOKS and "betparx" not in config.BEST_LINE_BOOKMAKERS
 
 
 # ── the committed artifact ───────────────────────────────────────────────────
@@ -289,6 +293,23 @@ def test_below_the_cut_no_quotes_and_a_book_no_longer_bettable():
     (d,) = sm.decide(["g"], _snap(GOOD), c, t, 0.03, bettable=bettable)
     assert d.status == "book_not_bettable" and d.best["bookmaker"] == "betrivers"
 
+
+
+def test_an_exact_tie_with_a_book_that_cannot_be_bet_goes_to_the_book_that_can():
+    """The same line and price at betPARX and BetRivers is the same bet, and
+    betPARX is fetch-only (mike, 2026-11-06). By name betPARX sorts first, so
+    without this the game was a no-bet (74 of 89 replayed betPARX bets were
+    exact ties). A betPARX number that is strictly best is still not replaced."""
+    c, t = _art()
+    seven = tuple(b for b in bq.BOOKS if b != "betparx")
+    tie = GOOD + [("g", "betparx", 30, -8.0, -110, -110)]
+    (d,) = sm.decide(["g"], _snap(tie), c, t, 0.03, bettable=seven)
+    assert d.status == "bets" and d.best["bookmaker"] == "betrivers" and d.best["line"] == -8.0
+    (d,) = sm.decide(["g"], _snap(tie), c, t, 0.03)         # every book bettable: the evidence's order
+    assert d.status == "bets" and d.best["bookmaker"] == "betparx"
+    strict = GOOD + [("g", "betparx", 30, -7.5, -110, -110)]
+    (d,) = sm.decide(["g"], _snap(strict), c, t, 0.03, bettable=seven)
+    assert d.status == "book_not_bettable" and d.best["bookmaker"] == "betparx"
 
 # ── the card's rows ──────────────────────────────────────────────────────────
 

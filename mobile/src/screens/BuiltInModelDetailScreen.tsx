@@ -22,7 +22,9 @@ import {
   formatPctSigned,
   formatSigned,
   gameDayLabelET,
+  labelWithoutStake,
 } from '@/lib/format';
+import { clvOutcome } from '@/lib/clvBeat';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelDetailTitle, modelLong, modelPageTiming, modelShort, sportOfModel } from '@/lib/modelMeta';
 import { navShowsSportOnly } from '@/lib/modelBadgeLayout';
@@ -349,14 +351,24 @@ export function BuiltInModelDetailScreen() {
                     caption={
                       ledgerUnread
                         ? 'Discord check did not finish, so this includes picks whose posting status is unknown'
-                        : 'vs the book we bet'
+                        : 'vs the book we bet. A matching close stays in this average'
                     }
                   />
                   <StatTile
                     label="Beat close"
-                    value={formatPct(clv.beatRate)}
-                    tint={clv.beatRate >= 0.5 ? colors.betInk : colors.avoidInk}
-                    caption={`${clv.count} picks with CLV`}
+                    value={
+                      clv.beatRate == null
+                        ? (clv.pushes > 0 ? `0 measured, ${clv.pushes} push` : '—')
+                        : formatPct(clv.beatRate)
+                    }
+                    tint={
+                      clv.beatRate == null
+                        ? undefined
+                        : clv.beatRate >= 0.5
+                          ? colors.betInk
+                          : colors.avoidInk
+                    }
+                    caption={clv.caption}
                   />
                 </View>
               </>
@@ -443,7 +455,7 @@ function TodayPickRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[pick.pick_label, signalDisplayName(pick.signal_type), timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
+      accessibilityLabel={[labelWithoutStake(pick.pick_label), signalDisplayName(pick.signal_type), timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
       style={styles.pickRow}
       onPress={onPress}
     >
@@ -487,7 +499,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={[
-        pick.pick_label,
+        labelWithoutStake(pick.pick_label),
         pick.result,
         dayLabelSpokenET(pick.game_date),
         `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`,
@@ -524,14 +536,27 @@ function edgeColorStyle(edge: number) {
 function computeClvStats(
   modelId: string,
   settled: SettledPick[],
-): { avg: number; beatRate: number; count: number } | null {
+): { avg: number; beatRate: number | null; count: number; caption: string; pushes: number } | null {
   const vals = settled
     .filter((p) => p.model_id === modelId && passesRecordFilter(p) && publishedRecordKeeps(p) && p.clv_method === 'standard_v2' && p.clv_pct != null)
     .map((p) => Number(p.clv_pct));
   if (vals.length === 0) return null;
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-  const beatRate = vals.filter((v) => v > 0).length / vals.length;
-  return { avg, beatRate, count: vals.length };
+  let beats = 0;
+  let losses = 0;
+  let pushes = 0;
+  for (const v of vals) {
+    const outcome = clvOutcome(v);
+    if (outcome === 'beat') beats += 1;
+    else if (outcome === 'loss') losses += 1;
+    else if (outcome === 'push') pushes += 1;
+  }
+  const decisive = beats + losses;
+  const beatRate = decisive > 0 ? beats / decisive : null;
+  const caption = pushes > 0
+    ? `${vals.length} picks with CLV, ${pushes} push`
+    : `${vals.length} picks with CLV`;
+  return { avg, beatRate, count: vals.length, caption, pushes };
 }
 
 function categoryLabel(type: 'game' | 'pitcher_prop' | 'batter_prop' | 'player_prop'): string {

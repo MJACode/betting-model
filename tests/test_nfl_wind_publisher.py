@@ -87,22 +87,22 @@ class TestBuildRows:
         assert p["recommended_bet"] == 10.0          # 1% of 1000
         assert p["bankroll_at_pick"] == 1000.0
 
-    def test_label_names_line_wind_book_and_stake(self):
-        # The stake belongs ON the pick — a unit count in a column somebody has
-        # to go looking for is not "applied when providing a pick".
+    def test_label_is_the_bet_and_the_book_is_a_column(self):
+        # The label is the bet only (mike, 2026-11-04). It used to end in the
+        # model's sizing ("· 1.00u"), which is not the stake: every surface
+        # shows the posted stake, 1u to win at the decided price, beside the
+        # label. The sizing stays on the row as kelly_fraction.
         _, picks = build_rows([_card_row()], bankroll=1000.0)
         label = picks[0]["pick_label"]
-        assert label.startswith("NYJ @ MIA Under 43.5 ·")
+        assert label == "NYJ @ MIA Under 43.5"
         assert "Wind" not in label and "(" not in label
         assert picks[0]["decision_book"] == "fanduel"
         assert picks[0]["decision_odds"] == picks[0]["dk_odds"]
-        assert label.endswith("u"), label
-        staked = float(label.rsplit("· ", 1)[1].rstrip("u"))
-        assert abs(staked - picks[0]["kelly_fraction"] * 100) < 1e-6
+        assert picks[0]["kelly_fraction"] == 0.01
 
     def test_integer_line_renders_without_decimal(self):
         _, picks = build_rows([_card_row(total_line="44.0")], bankroll=1000.0)
-        assert "Under 44 ·" in picks[0]["pick_label"]
+        assert picks[0]["pick_label"].endswith("Under 44")
         assert "44.5" not in picks[0]["pick_label"]
 
     def test_unknown_book_falls_back_to_raw_key(self):

@@ -24,10 +24,48 @@ export const BYOM_NFL_FIRST_SEASON = 2020;
  */
 export const BYOM_NBA_FIRST_SEASON = 2023;
 
-export type ByomSport = 'NFL' | 'NBA';
+/**
+ * First NHL season with a DraftKings line (byom.constants
+ * NHL_DK_HISTORY_START_SEASON, measured 2026-11-05). Ending-year label:
+ * 2021 is 2020-21.
+ */
+export const BYOM_NHL_FIRST_SEASON = 2021;
+
+export type ByomSport = 'NFL' | 'NBA' | 'NHL';
+
+/** A sport string from a route param or a row. Anything else is NFL. */
+export function asByomSport(value: unknown): ByomSport {
+  return value === 'NBA' || value === 'NHL' ? value : 'NFL';
+}
+
+/** The builder offers player props on these sports. NHL is game bets only. */
+export function byomHasProps(sport: ByomSport): boolean {
+  return sport !== 'NHL';
+}
 
 /**
- * The card headline. `preferred` is official on NFL once the server has
+ * NBA and NHL: seasons named by the ending year, rest-day chips
+ * (back-to-back, 2+ days) instead of primetime.
+ */
+export function byomUsesRest(sport: ByomSport): boolean {
+  return sport === 'NBA' || sport === 'NHL';
+}
+
+/** The word for game start. */
+export function byomStartWord(sport: ByomSport): string {
+  if (sport === 'NBA') return 'tipoff';
+  if (sport === 'NHL') return 'puck drop';
+  return 'kickoff';
+}
+
+/** A game market's name on this sport. The NHL spread is the puck line. */
+export function gameMarketLabel(market: ByomGameMarket, sport: ByomSport): string {
+  if (market === 'spreads' && sport === 'NHL') return 'Puck line';
+  return MARKET_LABEL[market];
+}
+
+/**
+ * The card headline. `preferred` is official once the server has
  * the RPC. An empty official count beside a closing count leads with
  * the close (rebuild not finished, or a season with no official rows).
  */
@@ -45,7 +83,7 @@ export function headlineFromCounts(
 export const BYOM_MODEL_CAP = 25;
 
 export const BYOM_UNITS_COPY =
-  'u = units. Each bet is 1u to win, risking no more than 3u, the same as our models. NFL bets are graded at the official line: the first DraftKings line where the bet fit your rules. The closing line is the last DraftKings line before kickoff. A push returns the stake.';
+  'u = units. Each bet is 1u to win, risking no more than 3u, the same as our models. Bets are graded at the official line: the first DraftKings line where the bet fit your rules. The closing line is the last DraftKings line before the game starts. A push returns the stake.';
 
 export type ByomSeasonScope = 'all' | 'current';
 
@@ -208,9 +246,9 @@ export function propSideForMarket(
   return propSide === 'over' || propSide === 'under' ? propSide : null;
 }
 
-export function betTypeLabel(market: ByomMarket): string {
+export function betTypeLabel(market: ByomMarket, sport: ByomSport = 'NFL'): string {
   if (market === 'h2h' || market === 'spreads' || market === 'totals') {
-    return MARKET_LABEL[market];
+    return gameMarketLabel(market, sport);
   }
   return propMarketLabel(market) ?? '—';
 }
@@ -312,6 +350,33 @@ export function currentNbaSeason(now: Date = new Date()): number {
   return month >= 10 ? year + 1 : year;
 }
 
+/** NHL uses the NBA split: the ending year, October on is next year. */
+export function currentNhlSeason(now: Date = new Date()): number {
+  return currentNbaSeason(now);
+}
+
+/** 2021 through the current NHL season, inclusive. */
+export function nhlSeasonList(now: Date = new Date()): number[] {
+  const end = currentNhlSeason(now);
+  const seasons: number[] = [];
+  for (let year = BYOM_NHL_FIRST_SEASON; year <= end; year += 1) seasons.push(year);
+  return seasons;
+}
+
+/** The season still being played: the last one seasonListFor reads. */
+export function currentByomSeason(sport: ByomSport, now: Date = new Date()): number {
+  const list = seasonListFor(sport, now);
+  return list[list.length - 1];
+}
+
+/** Every season in scope for this sport, oldest first. */
+
+export function seasonListFor(sport: ByomSport, now: Date = new Date()): number[] {
+  if (sport === 'NBA') return nbaSeasonList(now);
+  if (sport === 'NHL') return nhlSeasonList(now);
+  return nflSeasonList(now);
+}
+
 /** 2023 through the current NBA season, inclusive. */
 export function nbaSeasonList(now: Date = new Date()): number[] {
   const end = currentNbaSeason(now);
@@ -358,7 +423,7 @@ export function gameMarket(filters: ByomFilters | null | undefined): ByomGameMar
   return null;
 }
 
-export function marketLabel(filters: ByomFilters | null | undefined): string {
+export function marketLabel(filters: ByomFilters | null | undefined, sport: ByomSport = 'NFL'): string {
   const parsed = byomFilters(filters);
   const markets = parsed.markets;
   if (markets == null || markets.length === 0) return '—';
@@ -366,7 +431,7 @@ export function marketLabel(filters: ByomFilters | null | undefined): string {
   let props = false;
   for (const market of markets) {
     if (market === 'h2h' || market === 'spreads' || market === 'totals') {
-      parts.push(MARKET_LABEL[market]);
+      parts.push(gameMarketLabel(market, sport));
     } else {
       const label = propMarketLabel(market);
       if (label) parts.push(label);
@@ -432,6 +497,52 @@ export function byomRoi(record: ByomRecord): number | null {
   return record.units / record.risked;
 }
 
+/**
+ * Fewer bets than this reads as a small sample. The same 50 the main
+ * models need before their record is judged (CLAUDE.md §2).
+ */
+export const BYOM_SMALL_SAMPLE_BETS = 50;
+
+/** Matt, 2026-11-05: more filters make luck easier to find. */
+export function smallSampleNote(record: ByomRecord | null): string | null {
+  if (record == null || record.bets <= 0 || record.bets >= BYOM_SMALL_SAMPLE_BETS) return null;
+  return `Only ${record.bets} bet${record.bets === 1 ? '' : 's'}. A record this small can come from luck. Check it holds in more than one season.`;
+}
+
+/** NFL labels the start year. NBA and NHL label the ending year: 2027 is 2026-27. */
+export function byomSeasonName(sport: ByomSport, season: number): string {
+  if (sport === 'NFL') return String(season);
+  return `${season - 1}-${String(season % 100).padStart(2, '0')}`;
+}
+
+export interface ByomSeasonRow {
+  season: number;
+  label: string;
+  record: ByomRecord;
+}
+
+/** Newest first. A season with no counted bet is left out. */
+export function seasonRows(
+  sport: ByomSport,
+  seasons: readonly { season: number | null; rows: readonly ByomCountedRow[] }[],
+): ByomSeasonRow[] {
+  const out: ByomSeasonRow[] = [];
+  for (const item of seasons) {
+    if (item.season == null) continue;
+    const record = recordFromRows(item.rows);
+    if (record.bets <= 0) continue;
+    out.push({ season: item.season, label: byomSeasonName(sport, item.season), record });
+  }
+  return out.sort((a, b) => b.season - a.season);
+}
+
+/** "Up in 2 of 5 seasons". Null when units are unknown or one season counts. */
+export function seasonsUpLine(rows: readonly ByomSeasonRow[]): string | null {
+  if (rows.length < 2 || rows.some((row) => row.record.units == null)) return null;
+  const up = rows.filter((row) => (row.record.units ?? 0) > 0).length;
+  return `Up in ${up} of ${rows.length} seasons`;
+}
+
 /** W–L–P. Ties sit in the third count with pushes; both return the stake. */
 export function formatByomRecord(record: ByomRecord): string {
   return `${record.wins}\u2013${record.losses}\u2013${record.pushes + record.ties}`;
@@ -455,8 +566,9 @@ export function filtersForDraft(
     const team = sideForMarket(draft.market, draft.side);
     if (team === 'home' || team === 'away') next.side = team;
     else delete next.side;
-    if (draft.role === 'favorite' || draft.role === 'underdog') next.role = draft.role;
-    else delete next.role;
+    // Matt, 2026-11-04: favorite or underdog is a team bet, not a player
+    // prop filter. A prop never carries a role.
+    delete next.role;
     const direction = propSideForMarket(draft.market, draft.propSide);
     if (direction) next.prop_side = direction;
     else delete next.prop_side;
@@ -468,7 +580,7 @@ export function filtersForDraft(
     if (draft.market === 'totals' || !draft.role) delete next.role;
     else next.role = draft.role;
   }
-  if (sport === 'NBA') {
+  if (byomUsesRest(sport)) {
     delete next.primetime;
     const rest = draft.rest ?? null;
     if (rest === 'b2b') {
@@ -493,6 +605,12 @@ export function filtersForDraft(
     marketCount: 1,
     primetime: draft.primetime,
   });
+  if (draft.market === 'totals') {
+    // A total has no team: no opponent, and no team's last game.
+    delete next.opponents;
+    delete next.prev_result;
+    delete next.prev_ats;
+  }
   return byomFilters(next);
 }
 
@@ -517,11 +635,11 @@ export function draftFromFilters(filters: ByomFilters | null | undefined): ByomD
     ? parsed.prop_side
     : null;
   const propFilters = propStateFromFilters(parsed);
-  const role = parsed.role === 'favorite' || parsed.role === 'underdog' ? parsed.role : null;
   return {
     market,
     side: sideForMarket(market, parsed.side ?? null),
-    role,
+    // A prop has no favorite or underdog (Matt, 2026-11-04).
+    role: null,
     primetime: parsed.primetime ?? null,
     propSide: propSideForMarket(market, stored),
     rest: restChoice(parsed),
@@ -545,7 +663,7 @@ export function assertByomSide(filters: ByomFilters | null | undefined): void {
 
 /** Shown when byom_save_model refuses a name that belongs to the other sport. */
 export const OTHER_SPORT_NAME =
-  'This name is saved on the other sport. Choose another name.';
+  'This name is saved on another sport. Choose another name.';
 
 /** Preview copy when NBA game facts have not been built yet. */
 export const NBA_NO_HISTORY = 'No history yet';
@@ -591,8 +709,9 @@ export function filtersNeedGameFacts(filters: ByomFilters | null | undefined): b
 export const NBA_GAME_BETS_WHEN =
   'Game bets show up once NBA results are in.';
 
-export function otherSportName(sport: ByomSport): ByomSport {
-  return sport === 'NBA' ? 'NFL' : 'NBA';
+/** Three sports now, so the name is never guessed (UX review, 2026-11-05). */
+export function otherSportName(_sport: ByomSport): string {
+  return 'another sport';
 }
 
 export function otherSportAlert(name: string, theirs: string): { title: string; body: string } {

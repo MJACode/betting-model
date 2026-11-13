@@ -404,6 +404,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # v_public_track_record. Sits with the other display reads, before the
     # posted-stake pair. Guards each piece so the DDL fires once.
     "position_defense_ranks_nfl_2026_10_18.sql",
+    # 2026-11-07 (Matt): the player page's defense-toughness filter. One
+    # player's games over his last 3 seasons played, each with that season's
+    # rank of the opponent's defense (1 = toughest), plus the next
+    # opponent's rank. NBA, WNBA, NFL. Display only. Does not rewrite
+    # v_public_track_record. Guards on all three existing, so the DDL fires
+    # once. Needs player_positions (above).
+    "add_player_vs_defense_rpcs_2026_11_07.sql",
     # 2026-10-19: the member's own sportsbooks (onboarding + Settings).
     # Display only: one new table behind two device-scoped RPCs. No model,
     # pick or record view reads it. Returns on a catalog read once applied.
@@ -464,8 +471,47 @@ ACTIVE_MIGRATIONS: list[str] = [
     # team-spread and game-total bands. Replaces byom_legs. Adds
     # team_spread, game_total and context_at_lock, and the snapshot to
     # the primary key. Keeps byom_official_legs_v1 in the function so the
-    # file above still skips. Does not write picks.
+    # file above still skips. This file's own skip matches
+    # to_regprocedure('public.byom_legs(integer, jsonb, text)') and a body
+    # that does not contain the damaged `p_filters %s` marker. A damaged
+    # body is replaced with jsonb_exists. Does not write picks.
     "byom_official_lock_bands_2026_11_04.sql",
+    # 2026-11-04: covering index for the official lock read (#1159, CE).
+    # byom_legs filters sport/season/match_role, then DISTINCT ON the leg
+    # key ordered by locked_at. Returns on a catalog read once the index
+    # exists. No function change. Sits before the posted-stake pair.
+    "byom_official_legs_lock_read_idx_2026_11_04.sql",
+    # 2026-11-04 (Matt, NBA builder parity): byom_legs filters market and
+    # side inside the official lock search (the existing season index
+    # serves it). Same answers; one market's candidates, not the season's. Keeps
+    # the two earlier markers. Skips once its own marker is in the body.
+    "byom_official_market_pushdown_2026_11_04.sql",
+    # 2026-11-04: NBA prop records inside the 3s anon limit. Indexes
+    # byom_prop_facts (canonical_key, market, player_key) and (sport,
+    # season, market); the closing prop branch filters market and side
+    # first. Measured before: 3,687 ms for one NBA market. Same answers.
+    # 2026-11-05 (#1172 Medium, Matt via CE): byom_legs sets
+    # plan_cache_mode = force_custom_plan. The skip requires that
+    # proconfig entry, so an already-applied body still gains it once.
+    "byom_prop_lookup_2026_11_04.sql",
+    # 2026-11-05 (Matt): NHL game bets on the builder. byom_legs and
+    # byom_save_model accept NHL; a null season is the ending year.
+    # Skips once both bodies carry byom_nhl_v1.
+    "byom_nhl_2026_11_05.sql",
+    # 2026-11-05 (Matt): a saved model keeps every filter the preview
+    # grades (22 keys); an unknown key is refused by name, not dropped.
+    # Skips once byom_save_model carries byom_save_filters_v1.
+    "byom_save_filters_2026_11_05.sql",
+    # 2026-11-05: byom_win_units / byom_risk_units without a SET clause,
+    # so the planner inlines them. Four full calls per row took 2.6s of
+    # the 2.7s NBA 2025-26 points record. Same staking. Skips once both
+    # carry byom_units_inline_v1 and no proconfig.
+    "byom_units_inline_2026_11_05.sql",
+    # 2026-11-05 (Matt: "Add 1-3 for now"): trend filters on every bet,
+    # line_move, prev_result, prev_ats, prev_total, division_game. byom_legs
+    # and byom_save_model gain them; byom_line_move and byom_team_division
+    # are new. Skips once both bodies carry byom_trend_filters_v1.
+    "byom_trend_filters_2026_11_05.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.
@@ -480,6 +526,19 @@ ACTIVE_MIGRATIONS: list[str] = [
     # marker comment exist. Does not rewrite picks, odds or the record.
     # Sits before the posted-stake pair so those two stay adjacent.
     "add_nba_team_q1_2026_10_28.sql",
+    # 2026-11-08 (Matt): NBA first-basket stats on the Stats tab. Two
+    # tables written by data/ingestors/nba_first_basket.py, SELECT policies,
+    # and two security_invoker season views. Returns on a catalog read once
+    # both tables, both policies and both views' marker comments exist.
+    # Does not rewrite picks, odds or the record. Sits before the
+    # posted-stake pair so those two stay adjacent.
+    "add_nba_first_basket_2026_11_08.sql",
+    # 2026-11-13 (Matt): the Stats tab's Betting filters (period, last N,
+    # home/away). One table written by data/ingestors/team_period_results.py,
+    # RLS on with a SELECT policy. Returns on a catalog read once the table,
+    # its index and the policy exist. Does not rewrite picks, odds or the
+    # record. Sits before the posted-stake pair so those two stay adjacent.
+    "add_team_period_results_2026_11_13.sql",
     # 2026-10-29 (Matt): Scoreboard live scores for NFL, NBA and NHL.
     # One table, written by data/ingestors/live_scoreboard.py, with a
     # SELECT policy and a SELECT-only grant. Returns on a catalog read once
@@ -531,6 +590,78 @@ ACTIVE_MIGRATIONS: list[str] = [
     # touches no view, pick or existing function. Returns on a catalog read
     # once it exists. plpgsql, so it may sit before the posted-stake pair.
     "custom_model_backtest_posted_2026_11_03.sql",
+    # 2026-11-04 (mike): a 0% same-book close is a CLV push. The record
+    # view gains clv_push, clv_game_push and clv_prop_push. The average
+    # is unchanged. Does not rewrite picks, snapshots, units, or the
+    # win-loss record. Sits before the posted-stake pair, which stays
+    # last and only inserts units when they are absent.
+    "clv_push_beat_rate_2026_11_04.sql",
+    # 2026-11-04 (mike): the NBA in-play loop's decision ledger, one row per
+    # game and in-play rule (models/nba_live_loop.py). A new table, RLS on,
+    # anon and authenticated revoked; touches no view, pick or function.
+    # Returns on a catalog read once it exists. The loop refuses to decide
+    # until it does.
+    "nba_live_decisions_2026_11_04.sql",
+    # 2026-11-07 (mike): the NCAAB in-play loop's decision ledger, one row per
+    # game and in-play rule (models/ncaab_live_loop.py). A new table, RLS on,
+    # anon and authenticated revoked; touches no view, pick or function.
+    # Returns on a catalog read once it exists. The loop refuses to decide
+    # until it does.
+    "ncaab_live_decisions_2026_11_07.sql",
+    # 2026-11-11 (mike): the NCAABW halftime loop's decision ledger, one final
+    # row per game (models/ncaabw_live_loop.py). A new table, RLS on, anon and
+    # authenticated revoked; touches no view, pick or function. Returns on a
+    # catalog read once it exists. The loop refuses to decide until it does.
+    "ncaabw_live_decisions_2026_11_11.sql",
+    # 2026-11-11 (mike): a volume setting per pre-game model, set by one
+    # input (set_model_volume) and shown with its bands (model_volume_bands).
+    # Adds base_min_edge / base_min_prob to model_action_thresholds (config's
+    # own cut, which data.threshold_sync writes), two worker-only tables, a
+    # log trigger, apply_model_volume_settings() and the view. With no
+    # setting made it changes no cut: min_edge and min_prob stay config's.
+    # Returns on a catalog read once the view's comment matches the hash of
+    # this file. The view calls the three-argument posted-unit functions, so
+    # on a fresh database it waits (a NOTICE, not an error) until the pair
+    # below has run. Does not write picks, push_sent or the record.
+    "model_volume_settings_2026_11_11.sql",
+    # 2026-11-12 (mike): what the ops dashboard reads for its redesign. The
+    # view model_display_names (every model's name as the mobile app shows
+    # it, written from modelMeta.ts by scripts/model_display_names.py) and
+    # the worker-only table dashboard_layouts (a person's saved tile
+    # arrangement). Touches no pick, cut or record. Returns on a catalog
+    # read once the view's comment matches the hash of this file.
+    "dashboard_support_2026_11_12.sql",
+    # 2026-11-12 (mike: NCAAB live bets must fire in under 10 seconds): the
+    # in-play latency probe's raw reads (scripts/ncaab_live_latency_probe.py).
+    # A new table, RLS on, anon and authenticated revoked; touches no view,
+    # pick, cut or record. Returns on a catalog read once it exists.
+    "live_latency_probe_2026_11_12.sql",
+    # 2026-11-12 (mike: "as close to Real time as possible"): DraftKings' own
+    # in-play board, written from mike's machine (data/ingestors/dk_live_board.py)
+    # and read by the NCAAB in-play loop's fast path (models/ncaab_live_dk.py).
+    # Two new tables, RLS on, anon and authenticated revoked; touches no view,
+    # pick, cut or record. Returns on a catalog read once both exist.
+    "dk_live_reads_2026_11_12.sql",
+    # 2026-11-13 (mike: "Move everything over to the fast way"): the moneyline
+    # and football columns of dk_live_reads, so the feed carries every sport
+    # with an in-play model. Adds columns only; touches no view, pick, cut or
+    # record. Returns on a catalog read once all six exist.
+    "dk_live_reads_all_sports_2026_11_13.sql",
+    # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
+    # open pre-game BET the app, Discord and push show, for any Claude chat
+    # with the Supabase connector. One security_invoker view and its SELECT
+    # grant. Returns on a catalog read once the view's comment matches the
+    # hash of its body. It calls published_pick_stake, so on a fresh database
+    # it waits (a NOTICE, not an error) until the pair below has run. Does
+    # not write picks, push_sent or the record. Sits before the pair.
+    "open_picks_view_2026_11_04.sql",
+    # 2026-11-06 (mike): a pick can carry its own stake, picks.stake_units
+    # (units to win, 1..3; NULL is 1u). The two columns (picks and
+    # picks_log, and the audit trigger), the three-argument stake functions,
+    # and open_picks switched to pass it. After open_picks' owner above;
+    # before the pair below, whose view patch calls the three-argument
+    # functions. A NULL row grades exactly as before.
+    "pick_stake_units_2026_11_06.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
@@ -540,8 +671,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # The two record views gain units and risked from the functions
     # above. Both sums keep WIN/LOSS/PUSH only. profit_flat stays.
     # Reads the live view, so it runs after every owner above, including
-    # the CLV stamp. Does not rewrite snapshots, picks, or push_sent,
-    # and does not post. This file stays last.
+    # the CLV stamp. Since 2026-11-06 it passes each pick's stake_units
+    # (the three-argument pair, from pick_stake_units_2026_11_06.sql) and
+    # switches a view that still calls the two-argument pair. Does not
+    # rewrite snapshots, picks, or push_sent, and does not post. This file
+    # stays last.
     "published_record_units_2026_10_16.sql",
 ]
 

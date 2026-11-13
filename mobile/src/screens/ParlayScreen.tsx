@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -14,6 +13,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -41,11 +41,14 @@ import {
 } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
+import { useEnteredSgpPrices, useSgpHaircuts } from '@/hooks/useSgpHaircuts';
+import type { SgpHaircuts } from '@/lib/sgpPricing';
 import { fetchPlayerTeams } from '@/lib/queries';
 import {
   isValidCombo,
   legsForPricing,
   lineShopParlay,
+  slipSignature,
   makeCustomLeg,
   CUSTOM_MODEL_ID,
   parlayRecommendedUnits,
@@ -57,11 +60,12 @@ import { formatStake, formatUnits } from '@/lib/thresholds';
 import { unitsSpeech } from '@/lib/a11y';
 import {
   computeCorrelatedMetrics,
+  withDecimalPayout,
   GRADE_LABEL,
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel, bookName } from '@/lib/markets';
+import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -178,10 +182,18 @@ function ParlayScreenBody() {
   // A pre-game alternate held after kickoff stays in `legs` (the card, the
   // remove control) and is left out of the price, the book row, and a save.
   const pricedLegs = useMemo(() => legsForPricing(legs), [legs]);
-  const metrics = useMemo(
-    () => computeCorrelatedMetrics(pricedLegs, rho, resolveTeam),
-    [pricedLegs, rho, resolveTeam],
-  );
+  // Legs sharing a game are priced as an estimated same-game parlay
+  // (lib/sgpPricing.ts); a price the member typed in from a book's own slip
+  // replaces the estimate at that book, for this slip only.
+  const sgpFits = useSgpHaircuts();
+  // Shared with the betslip bar, keyed to this exact slip (hooks/useSgpHaircuts).
+  const sig = useMemo(() => slipSignature(legs), [legs]);
+  const { prices: enteredPrices, enter: handleSgpEntered, clear: handleSgpCleared } = useEnteredSgpPrices(sig);
+  const metrics = useMemo(() => {
+    const m = computeCorrelatedMetrics(pricedLegs, rho, resolveTeam, undefined, sgpFits);
+    const dkTyped = enteredPrices[MODEL_BOOK];
+    return m.sgpGroups > 0 && dkTyped != null ? withDecimalPayout(m, americanToDecimal(dkTyped)) : m;
+  }, [pricedLegs, rho, resolveTeam, sgpFits, enteredPrices]);
   // Every card still on the slip counts, including a held pre-game alt.
   // The price, the book row, and a save use pricedLegs.
   const valid = useMemo(() => isValidCombo(legs), [legs]);
@@ -461,6 +473,10 @@ function ParlayScreenBody() {
             onClearStale={handleClearStale}
             editingId={editingId}
             onSaved={setEditingParlayId}
+            sgpFits={sgpFits}
+            enteredPrices={enteredPrices}
+            onSgpEntered={handleSgpEntered}
+            onSgpCleared={handleSgpCleared}
           />
         )}
       </ScrollView>
@@ -468,7 +484,7 @@ function ParlayScreenBody() {
       <EditLineLegSheet spec={editingLine} onClose={() => setEditingLine(null)} onSave={saveEditedLine} />
 
       {/* ── Custom-leg form ─────────────────────────────────────────── */}
-      <Modal visible={customOpen} animationType="slide" transparent onRequestClose={closeCustom}>
+      <Modal trackName="ParlayScreen" visible={customOpen} animationType="slide" transparent onRequestClose={closeCustom}>
         {/* Without this the keyboard slides up OVER the bottom sheet and hides
             the inputs entirely — the sheet must rise with the keyboard. */}
         <KeyboardAvoidingView
@@ -764,18 +780,35 @@ function GradeBadge({ grade, small }: { grade: ParlayGrade; small?: boolean }) {
  * edge) on this exact slip, and — when same-game legs are correlated — the joint
  * probability vs the naïve product, which is the whole point of the engine.
  */
-function CorrelatedExtras({ m, allDk }: { m: CorrelatedMetrics; allDk: boolean }) {
+function CorrelatedExtras({
+  m,
+  allDk,
+  estimated,
+}: {
+  m: CorrelatedMetrics;
+  allDk: boolean;
+  /** The slip price is an estimated same-game price (lib/sgpPricing.ts). */
+  estimated: boolean;
+}) {
   const holdPositive = m.dkHoldPct >= 0;
+  const est = estimated ? 'est. ' : '';
   return (
     <View style={styles.corrExtras}>
       <View style={styles.corrRow}>
         <Text style={styles.corrLabel}>Fair odds</Text>
         <Text style={styles.corrValue}>
-          {formatAmerican(m.fairAmerican)} · {allDk ? 'DK' : 'slip'} {formatAmerican(m.americanOdds)}
+          {formatAmerican(m.fairAmerican)} · {allDk ? 'DK' : 'slip'} {est}{formatAmerican(m.americanOdds)}
         </Text>
       </View>
       <View style={styles.corrRow}>
-        <Text style={styles.corrLabel}>{holdPositive ? (allDk ? 'DK hold on this slip' : 'Hold on this slip') : 'Your edge on this slip'}</Text>
+        <Text style={styles.corrLabel}>
+          {estimated ? 'Est. ' : ''}
+          {holdPositive
+            ? estimated
+              ? allDk ? 'DK hold on this slip' : 'hold on this slip'
+              : allDk ? 'DK hold on this slip' : 'Hold on this slip'
+            : estimated ? 'edge on this slip' : 'Your edge on this slip'}
+        </Text>
         <Text style={[styles.corrValue, { color: holdPositive ? colors.avoidInk : colors.betInk }]}>
           {formatPct(Math.abs(m.dkHoldPct))}
         </Text>
@@ -860,6 +893,10 @@ function SlipBody({
   onClearStale,
   editingId,
   onSaved,
+  sgpFits,
+  enteredPrices,
+  onSgpEntered,
+  onSgpCleared,
 }: {
   legs: ParlayLeg[];
   /** `legs` minus pre-game alternates held after kickoff. The price, the
@@ -879,6 +916,10 @@ function SlipBody({
   onClearStale: () => void;
   editingId: string | null;
   onSaved: (id: string) => void;
+  sgpFits: SgpHaircuts;
+  enteredPrices: Readonly<Record<string, number>>;
+  onSgpEntered: (book: string, american: number) => void;
+  onSgpCleared: (book: string) => void;
 }) {
   // Every leg priced at DraftKings? A Stats line leg DK never posted is not,
   // and four labels below attribute the slip's number to DK only when it is.
@@ -997,6 +1038,9 @@ function SlipBody({
   }
 
   const stake = parlayRecommendedUnits(metrics);
+  // DraftKings' price is our estimate when legs share a game and the member has
+  // not typed DK's own price in.
+  const estimated = metrics.sgpGroups > 0 && enteredPrices[MODEL_BOOK] == null;
   const payout = stake.risk * metrics.decimalPayout;
 
   return (
@@ -1017,7 +1061,15 @@ function SlipBody({
           <Text style={styles.resultTitle}>{pricedLegs.length}-Leg Play</Text>
           <View style={styles.resultHeaderRight}>
             <GradeBadge grade={metrics.grade} />
-            <Text style={styles.resultOdds}>{formatAmerican(metrics.americanOdds)}</Text>
+            {/* One VoiceOver stop: the qualifier must not be skippable. */}
+            <View
+              accessible
+              accessibilityLabel={`${estimated ? 'estimated ' : ''}${formatAmerican(metrics.americanOdds)}`}
+              style={styles.resultOddsWrap}
+            >
+              {estimated ? <Text style={styles.resultOddsEst}>est.</Text> : null}
+              <Text style={styles.resultOdds}>{formatAmerican(metrics.americanOdds)}</Text>
+            </View>
           </View>
         </View>
 
@@ -1044,7 +1096,7 @@ function SlipBody({
           <Stat label="Potential payout" value={formatUnits(payout)} spoken={unitsSpeech(formatUnits(payout))} />
         </View>
 
-        <CorrelatedExtras m={metrics} allDk={allDk} />
+        <CorrelatedExtras m={metrics} allDk={allDk} estimated={estimated} />
 
         {/* The staleness caveat has to follow the leg to the screen the bet is
             placed from, not stay on the board it was picked off. One line, and
@@ -1053,8 +1105,8 @@ function SlipBody({
           <View style={styles.liveLegNote}>
             <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
             <Text style={styles.liveLegNoteText}>
-              This slip has an in-play leg. Live prices are DraftKings’ and can be up to
-              ~45s old — check the number at DK before you place it.
+              This slip has an in-play leg, priced at the number it locked at. In-play
+              prices move fast — check the number at the book before you place it.
             </Text>
           </View>
         ) : null}
@@ -1079,7 +1131,16 @@ function SlipBody({
           />
         ) : null}
 
-        <BetslipBooksRow legs={pricedLegs} />
+        {/* Same-game price entry lives in each estimated tile's sheet (Matt,
+            2026-11-09: the yellow box here took too much room). */}
+        <BetslipBooksRow
+          legs={pricedLegs}
+          sgpFits={sgpFits}
+          enteredPrices={enteredPrices}
+          sgpGroups={metrics.sgpGroups}
+          onSgpEntered={onSgpEntered}
+          onSgpCleared={onSgpCleared}
+        />
 
         <LineShopRow lineShop={lineShopParlay(pricedLegs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
 
@@ -1441,6 +1502,16 @@ const styles = StyleSheet.create({
   missingNoteText: {
     color: colors.textSecondary,
     fontSize: font.size.footnote,
+  },
+  resultOddsWrap: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.xs,
+  },
+  resultOddsEst: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.medInk,
   },
   customInput: {
     backgroundColor: colors.noneSoft,

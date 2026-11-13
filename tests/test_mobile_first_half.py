@@ -175,5 +175,12 @@ def test_the_mobile_threshold_is_generated_from_config():
                                   "models/nba_first_half_total_luck.py",
                                   "scripts/nba_first_half_total_luck_card.py"])
 def test_nothing_of_this_model_writes_a_first_quarter(path):
-    """Its copy says first half; a first-quarter label would be another bet."""
-    assert "1Q" not in (ROOT / path).read_text(encoding="utf-8")
+    """Its copy says first half; a first-quarter label would be another bet. The first-quarter spread and
+    moneyline models (nba_q1_trend and nba_q1_trend_ml, 2026-11-07) have their own entries, which are cut out
+    before the check: only they may say 1Q."""
+    src = (ROOT / path).read_text(encoding="utf-8")
+    for entry in ("  nba_q1_trend: {", "  nba_q1_trend_ml: {"):
+        if entry in src:
+            i = src.index(entry)
+            src = src[:i] + src[src.index("  },", i):]
+    assert "1Q" not in src

@@ -497,8 +497,14 @@ def test_the_card_applies_the_price_age_rule():
     hero = hero[:hero.index("\nexport function ")]
     assert "priceAge?: PriceAgeContext" in hero
     assert "priceAgeApplies(pick, priceAge)" in hero and "stale: true" in hero
-    handoff = markets[markets.index("export function bestHandoffForPick("):]
-    assert re.search(r"currentLineQuotes\(pick, bookRows, hero, priceAge(, allowedBooks)?\)", handoff[:1800])
+    # The hand-off's body, bounded by its own end rather than a character
+    # count: a longer in-play branch ahead of the call (the deciding book,
+    # 2026-11-04) is not a regression.
+    best = markets[markets.index("export function bestHandoffForPick("):]
+    assert "return resolveBoardHandoff(pick, bookRows, hero, priceAge, allowedBooks)" in best[:best.index("\n}\n")]
+    handoff = markets[markets.index("function resolveBoardHandoff("):]
+    handoff = handoff[:handoff.index("\n}\n")]
+    assert re.search(r"currentLineQuotes\(pick, bookRows, hero, priceAge(, allowedBooks)?\)", handoff)
     # One list for the card's hand-off and Pick Detail's chips.
     shop = markets[markets.index("export function currentLineQuotes("):]
     shop = shop[:shop.index("\nexport function ")]

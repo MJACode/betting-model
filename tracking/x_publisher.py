@@ -6,7 +6,7 @@ SCOPE. mike, 2026-08-30, chose "A without links": one free pick plus the
 settled recap. mike, 2026-10-18, widened that to every pre-game pick the
 system releases, and later the same day took the free-pick concept off X:
 every pick post is the same format. No "Free pick" label, no "More in
-Discord", no #FreePicks, and X does not read or wait on Discord's free-pick
+Discord", no hashtags, and X does not read or wait on Discord's free-pick
 choice. Discord's own free pick is unchanged and is not an input here.
 Live picks stay off X.
 
@@ -57,9 +57,12 @@ Kill switch: RUN_X_PUBLISHER=0
 Slate switch: X_POST_ALL_PICKS=1 (default) posts every released pre-game
     pick, each in the same format. =0 posts no pick slate. It does not
     restore a free-pick-only tweet; X no longer has one.
-Reach tags: X_HASHTAG_POOL=GamblingX,SportsBetting,BettingTips
-    (comma-separated, with or without the '#'). #FreePicks is dropped if
-    it is put in the pool. It is not added on any pick.
+No hashtags. mike, 2026-11-10: X had started treating @SignalBasePicks as
+    spam (reach at 0-10 views, some posts hidden), and the stacked tags
+    were a likely cause. Pick posts and the daily, weekly, and monthly
+    recaps carry none. X_HASHTAG_POOL is not read. The characters those
+    tags used to reserve belong to the text. A post still stops at 280
+    weighted characters, which is X's own limit.
 
 GETTING THOSE FOUR KEYS. Written down because it is fiddly, the two traps are
 silent, and the answers are not guessable -- the first draft of these
@@ -148,6 +151,11 @@ X_PROFILE_URL = "https://api.x.com/1.1/account/update_profile.json"
 PROFILE_NAME_MAX = 50
 PROFILE_DESCRIPTION_MAX = 160
 MAX_TWEET = 280
+# twitter-text v3, the count X enforces. A code point in one of these
+# ranges is one weighted character. Emoji and everything else are two.
+# Scale is 100, so a configured weight of 200 is two characters. A URL
+# would be charged as 23; this module refuses URLs before a post is sent.
+_ONE_WEIGHT = ((0, 4351), (8192, 8205), (8208, 8223), (8242, 8247))
 # One-shot tweet_image on POST /2/media/upload. GIF and video use a different
 # category and are not accepted here.
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -247,132 +255,62 @@ _SPORT_EMOJI = {"MLB": "⚾", "WNBA": "\U0001F3C0", "NBA": "\U0001F3C0",
                 "UFC": "\U0001F94A", "GOLF": "⛳"}
 
 
-# ── Reach ─────────────────────────────────────────────────────────────────────
-# Two hashtags, never three, and both chosen rather than generic.
-#
-# Measured behaviour of the 2026 algorithm, not folklore: 1-2 hashtags carry
-# about +21% engagement, and 3 or more actively TRIP SPAM FILTERS and cut reach.
-# So the cap is a hard slice, not a style guide -- a third tag makes a post
-# perform worse than no tags at all.
-#
-# One sport tag (the niche the post belongs to) plus one community tag. Generic
-# tags like #betting or #sports are explicitly avoided: they are the ones the
-# ranker treats as noise, and they compete with the entire platform rather than
-# putting the post in front of people who follow this subject.
-_SPORT_TAG = {"MLB": "#MLB", "WNBA": "#WNBA", "NBA": "#NBA", "NHL": "#NHL",
-              "NFL": "#NFL", "NCAAF": "#CFB", "UFC": "#UFC", "GOLF": "#PGA"}
-_COMMUNITY_TAG = "#GamblingTwitter"
-MAX_HASHTAGS = 2
+def _weight(ch: str) -> int:
+    n = ord(ch)
+    for lo, hi in _ONE_WEIGHT:
+        if lo <= n <= hi:
+            return 1
+    return 2
 
 
-def hashtags_for(sport: str | None) -> str:
-    """At most two tags: the sport's own, plus the community one.
+def weighted_len(text: str) -> int:
+    """How many characters X charges for this text.
 
-    This is the recap's tag line. A pick uses pick_hashtags instead: team
-    nicknames plus a short reach pool, capped at MAX_PICK_HASHTAGS.
+    The emoji this module emits are one code point each, so they count as
+    two, which is what X charges. A longer emoji sequence would be counted
+    per code point and the post would only get shorter.
     """
-    tags = []
-    tag = _SPORT_TAG.get((sport or "").upper())
-    if tag:
-        tags.append(tag)
-    tags.append(_COMMUNITY_TAG)
-    return " ".join(tags[:MAX_HASHTAGS])
+    return sum(_weight(ch) for ch in text)
 
 
-# Pick posts. mike, 2026-10-18: every post carries the club nickname(s), then
-# a few reach tags, and the whole line stays at or under four. The recap
-# keeps the two-tag cap above; three-plus was measured as a spam-filter trip
-# for a post that had nothing else to say, and a pick that names its teams
-# is a different post. Four is the ceiling, not a target to fill.
-MAX_PICK_HASHTAGS = 4
-_DEFAULT_REACH_POOL = ("#GamblingX", "#SportsBetting", "#BettingTips")
-# Not a reach tag. A pool entry of this name is dropped so it cannot land
-# on a pick post.
-_BANNED_PICK_TAG = "#FreePicks"
-# NCAAB is not a live sport. The tag is here so a later id does not fall
-# through to no league tag. NCAAF stays #CFB.
-_SPORT_TAG["NCAAB"] = "#CBB"
-_SPORT_TAG["CBB"] = "#CBB"
+def _trim(text: str, limit: int = MAX_TWEET) -> str:
+    """The longest prefix whose weighted length is at most `limit`."""
+    if weighted_len(text) <= limit:
+        return text
+    out: list[str] = []
+    used = 0
+    for ch in text:
+        w = _weight(ch)
+        if used + w > limit:
+            break
+        out.append(ch)
+        used += w
+    return "".join(out)
 
 
-def reach_pool() -> tuple[str, ...]:
-    """The configurable reach tags, in priority order.
+def assemble_text(body: str, keep: list[str] | None = None) -> str:
+    """Body, then the pinned date and matchup.
 
-    X_HASHTAG_POOL is comma-separated. Empty or unset uses the default pool.
-    A token may arrive with or without the leading '#'. #FreePicks is
-    dropped wherever it appears.
-    """
-    raw = os.environ.get("X_HASHTAG_POOL", "").strip()
-    source = raw.split(",") if raw else _DEFAULT_REACH_POOL
-    tags: list[str] = []
-    for part in source:
-        token = str(part).strip()
-        if not token:
-            continue
-        if not token.startswith("#"):
-            token = "#" + token
-        if token.lower() == _BANNED_PICK_TAG.lower():
-            continue
-        if token not in tags:
-            tags.append(token)
-    return tuple(tags)
-
-
-def pick_hashtags(pick: dict, *,
-                  mascots: dict | None = None) -> tuple[list[str], list[str]]:
-    """(team tags, reach tags). Together they never exceed MAX_PICK_HASHTAGS.
-
-    Team tags are kept in full up to the cap. Reach fills whatever slots
-    remain: the league tag, then the pool. The caller drops reach tags,
-    never team tags, when the character limit bites.
-    """
-    from tracking.x_teams import team_tags
-
-    teams = team_tags(pick, mascots)[:MAX_PICK_HASHTAGS]
-    slots = MAX_PICK_HASHTAGS - len(teams)
-    reach: list[str] = []
-
-    def _add(tag: str | None) -> None:
-        nonlocal slots
-        if tag and slots > 0 and tag not in reach and tag not in teams:
-            reach.append(tag)
-            slots -= 1
-
-    _add(_SPORT_TAG.get((pick.get("sport") or "").upper()))
-    for tag in reach_pool():
-        _add(tag)
-    return teams, reach
-
-
-def assemble_text(body: str, team_tags: list[str], reach_tags: list[str],
-                  keep: list[str] | None = None) -> str:
-    """Body, then pinned text, then team tags, then as many reach tags as fit.
-
-    Reach tags are dropped from the end first. `keep` (the event date and the
-    matchup) and the team tags stay. If the body plus those still overflow,
-    the body is shortened and the pinned text and team tags are kept whole.
+    The pinned text stays whole. If the body plus that text overflows 280
+    weighted characters, the body is shortened and the pinned text is kept.
     """
     pinned = [p for p in (keep or []) if p]
-    teams = [t for t in team_tags if t]
-    reach = [t for t in reach_tags if t]
-    protected = pinned + teams
+    suffix = " ".join(pinned)
 
-    def _join(text: str, extra: list[str]) -> str:
-        parts = [text.strip(), " ".join(extra)]
+    def _join(text: str) -> str:
+        parts = [text.strip(), suffix]
         return " ".join(p for p in parts if p)
 
-    while reach and len(_join(body, protected + reach)) > MAX_TWEET:
-        reach.pop()
-    text = _join(body, protected + reach)
-    if len(text) <= MAX_TWEET:
+    text = _join(body)
+    if weighted_len(text) <= MAX_TWEET:
         return text
-    suffix = " ".join(protected)
     if not suffix:
-        return text[:MAX_TWEET]
-    room = MAX_TWEET - len(suffix) - 1
+        return _trim(body.strip())
+    # The space between the body and the pinned text is one character.
+    room = MAX_TWEET - weighted_len(suffix) - 1
     if room < 1:
-        return suffix[:MAX_TWEET]
-    return body.strip()[:room].rstrip() + " " + suffix
+        return _trim(suffix)
+    return _trim(body.strip(), room).rstrip() + " " + suffix
 
 
 def _assert_no_link(text: str) -> None:
@@ -393,7 +331,7 @@ def _american(odds) -> str:
     return f"+{v}" if v > 0 else str(v)
 
 
-def render_pick(pick: dict, mascots: dict | None = None) -> str:
+def render_pick(pick: dict) -> str:
     """One released pick, in one tweet. Every pick uses this format.
 
     IT LEADS WITH THE BEST BETTABLE PRICE AND THE BOOK THAT HAS IT, the same
@@ -411,15 +349,16 @@ def render_pick(pick: dict, mascots: dict | None = None) -> str:
     Every pick names the event date in America/New_York ('Tue 10/20'), from
     the game's start, or from game_date when the start is missing. A prop
     also names the matchup ('NYY @ BOS'). A side or total that does not
-    already name both clubs gets that clause when it fits. Over 280
-    characters, reach tags drop before the date, the matchup, or a team tag.
+    already name both clubs gets that clause when it fits. The post stays
+    within 280 weighted characters. Over that, the body shortens; the date
+    and the matchup stay whole.
 
     "Good to" is the worst price the model would still have fired at, so it is
     book-agnostic: at or better than that number the bet holds wherever it is
     placed. Dropped rather than truncated when the tweet would overflow — a
     half-written price is worse than none.
     """
-    text = _render_pick(pick, mascots=mascots)
+    text = _render_pick(pick)
     _assert_no_link(text)
     return text
 
@@ -484,14 +423,19 @@ def matchup_clause(pick: dict) -> tuple[str | None, bool]:
     return f"{away} @ {home}", required
 
 
-def _render_pick(pick: dict, *, mascots: dict | None) -> str:
+def _render_pick(pick: dict) -> str:
+    # Imported here, as publish_due_picks does, so the module keeps its
+    # import-time dependencies.
+    from tracking.pick_integrity import label_without_stake
+
     emoji = _SPORT_EMOJI.get(pick.get("sport"), "🎯")
     odds, book = _publish_price(pick)
-    head = f"{emoji} {pick['label']}"
+    # No old NFL sizing figure ("· 0.79u"): it is not the posted stake
+    # (mike, 2026-11-04). The bet is word for word.
+    head = f"{emoji} {label_without_stake(pick['label'])}"
     price = ""
     if odds is not None:
         price = f"{_american(odds)} at {book}" if book else _american(odds)
-    teams, reach = pick_hashtags(pick, mascots=mascots)
     when = event_date_label(pick)
     matchup, matchup_required = matchup_clause(pick)
 
@@ -511,43 +455,25 @@ def _render_pick(pick: dict, *, mascots: dict | None) -> str:
 
     base = _body(None)
     # A prop matchup stays even when the label has to shorten. Any other
-    # matchup is added only when the label, the price, the date and the
-    # team tags still fit after every reach tag is dropped.
+    # matchup is added only when the label, the price and the date still fit.
     include_matchup = bool(matchup) and (
-        matchup_required or _fits_whole(base, teams, [], keep=_keep(True)))
+        matchup_required or _fits_whole(base, keep=_keep(True)))
     keep = _keep(include_matchup)
     good_to = pick.get("good_to")
     if good_to:
         richer = _body(_american(good_to))
         # The clause is dropped whole. A half-written price is worse than
-        # none, and it does not get to push the date, the matchup, or a
-        # team tag off the post. Reach tags may go.
-        if _fits_whole(richer, teams, reach, keep=keep):
-            return assemble_text(richer, teams, reach, keep=keep)
-    return assemble_text(base, teams, reach, keep=keep)
+        # none, and it does not get to push the date or the matchup off.
+        if _fits_whole(richer, keep=keep):
+            return assemble_text(richer, keep=keep)
+    return assemble_text(base, keep=keep)
 
 
-def _fits_whole(body: str, team_tags: list[str], reach_tags: list[str],
-                keep: list[str] | None = None) -> bool:
-    """True when body + pinned text + tags fit without shortening the body."""
+def _fits_whole(body: str, keep: list[str] | None = None) -> bool:
+    """True when body + pinned text fit without shortening the body."""
     pinned = [p for p in (keep or []) if p]
-    teams = [t for t in team_tags if t]
-    protected = " ".join(pinned + teams)
-
-    def _text(extra: list[str]) -> str:
-        parts = [body.strip(), protected, " ".join(extra)]
-        return " ".join(p for p in parts if p)
-
-    reach = [t for t in reach_tags if t]
-    if len(_text(reach)) <= MAX_TWEET:
-        return True
-    # Reach tags may be dropped. The body, the date, the matchup and the
-    # team tags may not.
-    while reach:
-        reach.pop()
-        if len(_text(reach)) <= MAX_TWEET:
-            return True
-    return False
+    parts = [body.strip(), " ".join(pinned)]
+    return weighted_len(" ".join(p for p in parts if p)) <= MAX_TWEET
 
 
 _BOOK_DISPLAY = {
@@ -674,24 +600,23 @@ def render_results(recap: dict, game_date: str,
         # the first four and say nothing, which on an eight-sport day is the
         # same class of bug as the one this module was just fixed for: a
         # silently partial number. Sports are dropped only when the 280
-        # characters genuinely run out, and then it says how many (mike,
-        # 2026-09-02, choosing the embed's ordering over most-bets-first).
-        tags = hashtags_for(None)
-        room = (MAX_TWEET - len(lines[0]) - len(tags) - 2      # two newlines
-                - (len(clv) + 1 if clv else 0))                 # its newline
+        # weighted characters genuinely run out, and then it says how many
+        # (mike, 2026-09-02, choosing the embed's ordering over most-bets-first).
+        # The tag line is gone, so its characters belong to this split.
+        clv_cost = weighted_len(clv) + 1 if clv else 0
+        room = MAX_TWEET - weighted_len(lines[0]) - 1 - clv_cost
         split = ""
         for k in range(len(parts), 0, -1):
             dropped = len(parts) - k
             split = " · ".join(parts[:k]) + (f" · +{dropped} more" if dropped else "")
-            if len(split) <= room:
+            if weighted_len(split) <= room:
                 break
         lines.append(split)
     if clv:
         lines.append(clv)
-    lines.append(hashtags_for(None))
     text = "\n".join(x for x in lines if x)
     _assert_no_link(text)
-    return text[:MAX_TWEET]
+    return _trim(text)
 
 
 # ── Posting ───────────────────────────────────────────────────────────────────
@@ -1167,32 +1092,6 @@ def _game_already_started(pick: dict, now: datetime) -> bool:
     return ts.astimezone(ZoneInfo("UTC")) <= _as_et(now).astimezone(ZoneInfo("UTC"))
 
 
-def _college_mascots(conn, picks: list[dict]) -> dict[str, str]:
-    """school -> mascot for the NCAAF clubs in this batch. Empty on any failure.
-
-    The nickname lives in ncaaf_teams, not in the games row (that row is the
-    school name). A miss falls back to the school name inside team_hashtag.
-    """
-    schools: list[str] = []
-    for pick in picks:
-        if (pick.get("sport") or "").upper() != "NCAAF":
-            continue
-        for key in ("home", "away"):
-            name = pick.get(key)
-            if name:
-                schools.append(str(name))
-    if not schools:
-        return {}
-    try:
-        rows = conn.execute(
-            "SELECT school, mascot FROM ncaaf_teams WHERE school = ANY(%s)",
-            (sorted(set(schools)),)).fetchall()
-    except Exception as exc:                                  # noqa: BLE001
-        logger.warning(f"X publisher: college nicknames unavailable ({exc})")
-        return {}
-    return {row[0]: row[1] for row in rows if row[0] and row[1]}
-
-
 def _post_released_picks(conn, target_date: str, dry_run: bool = False,
                          now: datetime | None = None) -> int:
     """Tweet at most one released pre-game pick that has no X row yet.
@@ -1238,11 +1137,6 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"X slate failed: {exc}")
             return 0
-        try:
-            mascots = _college_mascots(conn, picks)
-        except Exception as exc:                              # noqa: BLE001
-            logger.warning(f"X publisher: mascot load failed ({exc})")
-            mascots = {}
         posted = 0
         for pick in picks:
             key = pick.get("lock_key")
@@ -1254,7 +1148,7 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
                 logger.info(f"X picks: {key} game has started — not posting")
                 continue
             try:
-                text = render_pick(pick, mascots=mascots)
+                text = render_pick(pick)
             except ValueError as exc:
                 logger.error(f"X publisher: {exc}")
                 continue

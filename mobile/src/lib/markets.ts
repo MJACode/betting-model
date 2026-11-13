@@ -9,7 +9,7 @@
  *   - total/spread line moved 0.5+ against the pick    → SKIP
  */
 
-import { americanImplied, americanToDecimal, formatStampET, gameHasStarted, parseStamp } from './format';
+import { americanImplied, americanToDecimal, formatStampET, gameHasStarted, labelWithoutStake, parseStamp } from './format';
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '@/types';
 import { decisionBook, decisionOdds, hasPricedLine, lineBook } from './decisionPrice';
@@ -45,6 +45,15 @@ export function gameMarketForModel(modelId: string): string | null {
   // about twice as big. Before the 'spread' substring rule below, which would
   // read the full-game spread for it.
   if (modelId === 'ncaab_first_half_spread') return 'spreads_h1';
+  // The NBA first quarter's spread (models/nba_q1_trend.py): stored under its
+  // own market, never the game's 'spreads' rows. Its id has no 'spread' in it,
+  // so without this every price, movement and line-shop lookup would read the
+  // moneyline rows.
+  if (modelId === 'nba_q1_trend') return 'spreads_q1';
+  // The NBA first quarter's moneyline (models/nba_q1_trend_ml.py): stored
+  // under its own market, never the game's 'h2h' rows, which price the whole
+  // game's winner.
+  if (modelId === 'nba_q1_trend_ml') return 'h2h_q1';
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'spreads';
@@ -61,6 +70,8 @@ export function gameMarketForModel(modelId: string): string | null {
   if (modelId === 'nba_total_luck') return 'totals';
   // The NCAAB totals model (models/ncaab_total_blend.py): same trap.
   if (modelId === 'ncaab_total_blend') return 'totals';
+  // The NCAABW totals model (models/ncaabw_total_blend.py), the women's: the same.
+  if (modelId === 'ncaabw_total_blend') return 'totals';
   // The NBA home team total (unders): the home team's own points, stored
   // under its own market, never the game's 'totals' rows.
   if (modelId === 'nba_team_total_luck') return 'team_totals_home';
@@ -72,6 +83,9 @@ export function gameMarketForModel(modelId: string): string | null {
   if (modelId === 'ncaab_first_half_total') return 'totals_h1';
   if (modelId === 'mlb_live_total_runs') return 'totals';
   if (modelId === 'ncaaf_live_total') return 'totals';
+  // The NCAABW halftime total (models/ncaabw_live_ht.py): the game's total,
+  // and its id has no 'over_under' in it either.
+  if (modelId === 'ncaabw_live_total_ht') return 'totals';
   return 'h2h';
 }
 
@@ -190,9 +204,10 @@ export function playerNameFromPickLabel(label: string): string | null {
  * (CLAUDE.md §00 / §1c).
  */
 /**
- * A team total's or a first half's bet, quoted from its label after the dash:
- * "BOS @ MIL — MIL Team Total Under 115.5" -> "MIL Team Total Under 115.5",
- * "BOS @ MIL — First Half Over 112.5" -> "First Half Over 112.5".
+ * A team total's, a first half's or a first quarter's bet, quoted from its label
+ * after the dash: "BOS @ MIL — MIL Team Total Under 115.5" -> "MIL Team Total
+ * Under 115.5", "BOS @ MIL — First Half Over 112.5" -> "First Half Over 112.5",
+ * "DEN @ LAC — First Quarter DEN -1.5" -> "First Quarter DEN -1.5".
  * Null for any other label. The whole label is wider than a phone's one-line
  * title, so it clipped the side and the number, the part the row is for.
  */
@@ -200,7 +215,7 @@ export function matchupLedBet(label: string): string | null {
   const dash = label.indexOf(' — ');
   if (dash <= 0) return null;
   const bet = label.slice(dash + 3).trim();
-  return bet.includes(' Team Total ') || bet.startsWith('First Half ') ? bet : null;
+  return bet.includes(' Team Total ') || /^First (Half|Quarter) /.test(bet) ? bet : null;
 }
 
 /**
@@ -209,21 +224,21 @@ export function matchupLedBet(label: string): string | null {
  * stored. A team total names its team and the row's date places the game; a
  * first half names no team, so pickRowMatchup puts it on its own line. A prop
  * keeps its player name. The row's accessibility label keeps the whole stored
- * label.
+ * label, less the old NFL sizing figure (labelWithoutStake), as this title is.
  */
 export function pickRowTitle(pick: { pick_label: string }): string {
-  const label = pick.pick_label ?? '';
+  const label = labelWithoutStake(pick.pick_label);
   return matchupLedBet(label) ?? label;
 }
 
 /**
- * The caption under a first half's row title, quoted from the label before the
- * dash: "BOS @ MIL — First Half Over 112.5" -> "BOS @ MIL". Null for every other
- * label, whose title already says who plays.
+ * The caption under a first half's or a first quarter's row title, quoted from
+ * the label before the dash: "BOS @ MIL — First Half Over 112.5" -> "BOS @ MIL".
+ * Null for every other label, whose title already says who plays.
  */
 export function pickRowMatchup(pick: { pick_label: string }): string | null {
-  const label = pick.pick_label ?? '';
-  if (!matchupLedBet(label)?.startsWith('First Half ')) return null;
+  const label = labelWithoutStake(pick.pick_label);
+  if (!/^First (Half|Quarter) /.test(matchupLedBet(label) ?? '')) return null;
   return label.slice(0, label.indexOf(' — ')).trim();
 }
 
@@ -231,7 +246,8 @@ export function splitPickTitle(pick: { pick_label: string }): {
   primary: string;
   secondary: string | null;
 } {
-  const label = pick.pick_label ?? '';
+  // The old NFL sizing figure ("· 0.79u") is not the stake the card shows.
+  const label = labelWithoutStake(pick.pick_label);
   // A team total or a first half: the bold line is the bet (the card's header
   // already shows the matchup).
   const bet = matchupLedBet(label);
@@ -272,6 +288,8 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'game_total';
   if (modelId === 'nba_total_luck') return 'game_total';
   if (modelId === 'ncaab_total_blend') return 'game_total';
+  if (modelId === 'ncaabw_total_blend') return 'game_total';
+  if (modelId === 'ncaabw_live_total_ht') return 'game_total';
   // One team's points move with the game total, so the nearest class.
   if (modelId === 'nba_team_total_luck') return 'game_total';
   // The first half's points move with the game total too.
@@ -279,6 +297,10 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'ncaab_first_half_total') return 'game_total';
   // A moneyline, though its id has 'spread' in it (see gameMarketForModel).
   if (modelId === 'ncaab_moneyline_own_spread') return 'game_ml';
+  // A spread, though its id has no 'spread' in it: the first quarter's.
+  if (modelId === 'nba_q1_trend') return 'game_spread';
+  // A moneyline, though its id has no 'moneyline' in it: the first quarter's.
+  if (modelId === 'nba_q1_trend_ml') return 'game_ml';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -358,8 +380,37 @@ export function linkForSide(
  *                         customers, Bovada is offshore, and ESPN BET was
  *                         removed by mike; they stay in the feed as reference
  *                         prices but are never offered as "where to bet".
+ *                         betPARX joined them on 2026-11-06 (mike): it is
+ *                         licensed in only a few states (one app each for
+ *                         MD, PA, NJ), so it is never the book a pick names
+ *                         (config.STATE_LIMITED_BOOKMAKERS).
  * The picker and the per-pick line chips read BETTABLE_BOOKS; the All-books
- * table on the detail screen reads everything.
+ * table on the detail screen is passed the member's own books.
+ *
+ * TEN BOOKS, IN config.py's ORDER (2026-11-06). The server cut fourteen to ten
+ * on 2026-09-20 (mike: "yes drop the 4 books") and this list was never cut
+ * with it, so the member's book picker offered Bally Bet, ReBet and Fliff —
+ * none priced since 2026-09-20 — and ESPN BET, none since 2026-10-01
+ * (v_latest_odds_all_books, measured 2026-11-06). scripts/verify_book_lines.ts and
+ * tests/test_mobile_book_lists_match_config.py now compare these lists with
+ * what config.py actually fetches and decides at, so the next cut on one
+ * side fails on the other.
+ *
+ * A dropped book keeps its name and label below: settled picks and NFL card
+ * labels still name it, and bookName() must keep rendering them.
+ *
+ * Women's college basketball stores seven more books for its games
+ * (config.NCAABW_EXTRA_BOOKMAKERS: espnbet, ballybet, fliff, betonlineag,
+ * lowvig, unibet, betwhale). They are reference prices: none of the seven is
+ * in this ten-book fetch list, and none is a book a pick may name, so none is
+ * a book a member is sent to (2026-11-10). Read in production that day,
+ * v_latest_odds_all_books held rows at all seven for the women's games of
+ * 2026-11-08 to 11-10. betonlineag, lowvig, unibet and betwhale were never
+ * fetched. They have a name and a label below: Pick Detail passes the
+ * member's own books to the All-books table, so these four draw only in the
+ * frame before that set loads, or in a table that is ever shown unfiltered.
+ * Without a label the fallback clips the key to four letters (BETO, LOWV,
+ * UNIB, BETW).
  */
 export const MODEL_BOOK = 'draftkings' as const;
 
@@ -368,36 +419,34 @@ export type BookKey =
   | 'fanduel'
   | 'betmgm'
   | 'williamhill_us'
-  | 'espnbet'
   | 'fanatics'
   | 'bovada'
   | 'pinnacle'
   | 'betrivers'
   | 'hardrockbet'
-  | 'ballybet'
-  | 'betparx'
-  | 'rebet'
-  | 'fliff';
+  | 'betparx';
 
 export const LINE_SHOP_BOOKS: BookKey[] = [
   'draftkings',
   'fanduel',
   'betmgm',
   'williamhill_us',
-  'espnbet',
   'fanatics',
   'bovada',
   'pinnacle',
   'betrivers',
   'hardrockbet',
-  'ballybet',
   'betparx',
-  'rebet',
-  'fliff',
 ];
 
-/** Reference-only books — mirrors config.BEST_LINE_EXCLUDE_BOOKMAKERS. */
-export const REFERENCE_ONLY_BOOKS: BookKey[] = ['pinnacle', 'bovada', 'espnbet'];
+/** Reference-only books — mirrors config.BEST_LINE_EXCLUDE_BOOKMAKERS, as a
+ *  set. ESPN BET is no longer fetched; it stays listed because config keeps
+ *  it excluded, so a book re-added to the fetch list stays out of the picker.
+ *  betPARX is fetched and reference-only (config.STATE_LIMITED_BOOKMAKERS).
+ *  Bally Bet and Fliff are not here and not in LINE_SHOP_BOOKS: the fetch list
+ *  dropped them, and women's college basketball still stores them as reference
+ *  prices (config.NCAABW_EXTRA_BOOKMAKERS). They stay out of the picker. */
+export const REFERENCE_ONLY_BOOKS: readonly string[] = ['pinnacle', 'bovada', 'espnbet', 'betparx'];
 
 /** Books a member can be sent to — mirrors config.BEST_LINE_BOOKMAKERS. */
 export const BETTABLE_BOOKS: BookKey[] = LINE_SHOP_BOOKS.filter(
@@ -423,6 +472,15 @@ const BOOK_LABELS: Record<string, string> = {
   ballybet: 'BALLY',
   betparx: 'PARX',
   rebet: 'REBET',
+  // No longer fetched, but 62 stored picks still name it (2026-11-06); without
+  // this they showed the fallback badge FLIF. Women's games still store it.
+  fliff: 'FLIFF',
+  // Women's college basketball reference books. The fallback clips the key to
+  // four letters, which read BETO, LOWV, UNIB and BETW.
+  betonlineag: 'BOL',
+  lowvig: 'LV',
+  unibet: 'UNI',
+  betwhale: 'WHALE',
 };
 
 const BOOK_NAMES: Record<string, string> = {
@@ -441,6 +499,11 @@ const BOOK_NAMES: Record<string, string> = {
   fliff: 'Fliff',
   betparx: 'betPARX',
   rebet: 'ReBet',
+  // Women's college basketball reference books (config.NCAABW_EXTRA_BOOKMAKERS).
+  betonlineag: 'BetOnline',
+  lowvig: 'LowVig',
+  unibet: 'Unibet',
+  betwhale: 'BetWhale',
 };
 
 export function bookLabel(key: string): string {
@@ -830,9 +893,11 @@ export interface LineQuote extends BookQuote {
  *   - The scorer's own best-price stamp (`best_book` / `best_odds`) fills in
  *     when today's per-book rows don't carry that book — it is the same
  *     number the Discord post's "also … @ …" line quotes.
- *   - LIVE PICKS ARE DRAFTKINGS ONLY (Matt, 2026-09-03): the in-play model
- *     reads DK's line and the bet is placed there, so a live pick gets the
- *     record chip and nothing else.
+ *   - A LIVE PICK GETS THE RECORD CHIP AND NOTHING ELSE: the book that
+ *     decided it, at the price it was decided at. Since 2026-09-10 the in-play
+ *     models decide at the best bettable in-play price (DraftKings until then,
+ *     Matt 2026-09-03), so the record book is `decision_book`, which may not
+ *     be DraftKings. No other book's in-play number is shopped.
  */
 export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
   const recordBook = storedQuoteBook(pick);
@@ -1024,6 +1089,78 @@ export function quoteIsCurrent(snapshotAt: string | null | undefined, now: numbe
  */
 export const LIVE_PRICE_STOPS_AT_BET: ReadonlySet<string> = new Set(['nfl_live_leader_ml']);
 
+/**
+ * In-play models whose loop reads the books only at fixed instants: the NBA
+ * loop fetches once an hour, and only while some game still has an undecided
+ * rule (models/nba_live_loop.py). Any in-play row we hold for these games is
+ * up to an hour old, so it is never shown as the live price. The card shows
+ * the lock, says the live price is not tracked, and opens the deciding book
+ * without quoting a number — the LIVE_PRICE_STOPS_AT_BET shape, with no
+ * "newer row" exception.
+ */
+export const LIVE_PRICE_SLOT_ONLY: ReadonlySet<string> = new Set([
+  'nba_live_spread_q12',
+  // models/ncaab_live_loop.py reads the books at each :00 and :30 only.
+  'ncaab_live_spread_h1',
+  'ncaab_live_spread_h2',
+  'ncaab_live_total_h2',
+  // models/ncaabw_live_loop.py reads the books every five minutes, and only
+  // while a game is at its halftime break: after the bet no row is current.
+  'ncaabw_live_total_ht',
+]);
+
+/**
+ * The in-play rows a Live-board pick may carry: DraftKings' (the reference
+ * row) and the book that decided it, never another pick's deciding book on the
+ * same game. A LIVE_PRICE_SLOT_ONLY model keeps DraftKings' row only: its
+ * deciding book's row is up to an hour old, and parlay.legFromPick would turn
+ * it into an "Open with" price in the slip — the number the card itself never
+ * shows. The card's hand-off reads the lock (recordLink), not these rows.
+ */
+export function liveBookRowsForPick<R extends { bookmaker: string }>(
+  pick: Pick,
+  rows: readonly R[],
+): R[] {
+  const decided = storedQuoteBook(pick);
+  const slotOnly = LIVE_PRICE_SLOT_ONLY.has(pick.model_id ?? '');
+  return rows.filter((r) => r.bookmaker === MODEL_BOOK || (!slotOnly && r.bookmaker === decided));
+}
+
+/**
+ * Is the deciding book's live price one this app does not hold, so the card
+ * must not draw "Now —" (which reads as "still loading") for the whole game?
+ *
+ *   - a LIVE_PRICE_SLOT_ONLY model: always (see above);
+ *   - a LIVE_PRICE_STOPS_AT_BET model: when there is no current price, or
+ *     its row is not newer than the lock (that row IS the lock's quote);
+ *   - any other in-play pick decided away from DraftKings: when we hold
+ *     in-play rows for the game but none at the deciding book. The NCAAF
+ *     loop shops every book's in-play price but stores only DraftKings'
+ *     (measured 2026-11-04 on two FanDuel-decided games), so a FanDuel bet
+ *     has no FanDuel row to show. With no rows at all the read may simply
+ *     have failed, and the board's banner says so; that keeps "Now —".
+ */
+function livePriceUntracked(
+  pick: Pick,
+  book: string,
+  latest: LatestDkOddsRow | null | undefined,
+  bookRows: BookPricedRow[] | undefined,
+  hasCurrent: boolean,
+): boolean {
+  const id = pick.model_id ?? '';
+  if (LIVE_PRICE_SLOT_ONLY.has(id)) return true;
+  if (LIVE_PRICE_STOPS_AT_BET.has(id)) {
+    if (!hasCurrent) return true;
+    const at = bookSnapshotAt(book, latest, bookRows);
+    const lockT = pick.created_at ? parseStamp(pick.created_at).getTime() : NaN;
+    return at == null || Number.isNaN(lockT) || !(parseStamp(at).getTime() > lockT);
+  }
+  if (book === MODEL_BOOK) return false;
+  const rows = bookRows ?? [];
+  const holdsGame = latest != null || rows.length > 0;
+  return holdsGame && !rows.some((r) => r.bookmaker === book);
+}
+
 /** The newest stamp we hold for `book` on this pick's market, or null. */
 function bookSnapshotAt(
   book: string,
@@ -1142,7 +1279,10 @@ export function heroAmericanForPick(
   const locked = decisionOdds(pick);
   if (locked == null) return null;
   const live = pick.is_live === true;
-  const book = live ? MODEL_BOOK : storedQuoteBook(pick);
+  // The book that decided the pick, live or not (§6). An in-play pick is
+  // decided at the best bettable in-play price since 2026-09-10, so its Now
+  // price is that book's too, never DraftKings' beside another book's lock.
+  const book = storedQuoteBook(pick);
 
   // The scorer's rule: an unstarted game's price older than the bound is no
   // price. Only a row we HOLD can be stale; a missing one keeps the old path.
@@ -1166,26 +1306,23 @@ export function heroAmericanForPick(
   let current = currentAtBook(pick, book, latest, bookRows);
   const lockedLine = numOrNull(pick.scored_line);
 
-  // A model whose loop stops reading the book once its bet is written holds
-  // no live price after the bet: its newest in-play row IS the lock's own
-  // quote, which would otherwise read as the live price for the rest of the
-  // game. Every other in-play model keeps logging, and DraftKings simply has
-  // not republished yet (a median 43 s after the lock on the last 60 live
-  // bets, UX review 2026-10-14), so its row stays the live price.
-  const untracked = live && LIVE_PRICE_STOPS_AT_BET.has(pick.model_id ?? '');
-  if (untracked && current != null) {
-    const at = bookSnapshotAt(book, latest, bookRows);
-    const lockT = pick.created_at ? parseStamp(pick.created_at).getTime() : NaN;
-    if (at == null || Number.isNaN(lockT) || !(parseStamp(at).getTime() > lockT)) current = null;
-  }
+  // A live price this app does not hold (livePriceUntracked): a model whose
+  // loop stops reading the book once its bet is written, whose newest in-play
+  // row IS the lock's own quote; the NBA loop, which reads the books only
+  // once an hour; and a book whose in-play prices are not stored. Every other
+  // in-play model keeps logging, and the book simply has not republished yet
+  // (DraftKings: a median 43 s after the lock on the last 60 live bets, UX
+  // review 2026-10-14), so its row stays the live price.
+  const untracked = live && livePriceUntracked(pick, book, latest, bookRows, current != null);
+  if (untracked) current = null;
 
   if (live && current == null) {
     return {
       kind: 'now',
       price: null,
-      book: MODEL_BOOK,
+      book,
       line: null,
-      link: pick.dk_bet_link ?? null,
+      link: recordLink(pick, book),
       lockedPrice: locked,
       showLockedCaption: true,
       ...(untracked ? { untracked: true } : {}),
@@ -1308,6 +1445,96 @@ export function currentLineQuotes(
 }
 
 /**
+ * A pick's game-market rows: every book's main line, then, for a book whose
+ * main line is at another number, its alternate-ladder rung AT THE PICK'S
+ * NUMBER (queries.addSameLineLadder). Main rows come first, so a reader that takes a
+ * book's first row (currentAtBook, snapshotSideLink) still gets its main line.
+ * A rung at any other number is dropped: it is a sister pick's line, not this
+ * one's.
+ *
+ * Why (Matt, 2026-11-12): "Coppin State +10.5" was found at Hard Rock +120 and
+ * the card said "Not offered at your books", while BetMGM (+115) and
+ * DraftKings (+111) had +10.5 on their ladders. Their MAIN lines were +12.5.
+ */
+export function gameRowsForPick<R extends BookPricedRow & { market?: string | null }>(
+  pick: Pick,
+  market: string,
+  rows: readonly R[],
+): R[] {
+  const main = rows.filter((r) => !(r.market ?? '').startsWith('alternate_'));
+  const ladder = rows.filter((r) => (r.market ?? '').startsWith('alternate_'));
+  if (ladder.length === 0) return main;
+  const haveSameBet = new Set(
+    main.filter((r) => rowIsSameBet(pick, r, market)).map((r) => r.bookmaker),
+  );
+  const out = [...main];
+  for (const r of ladder) {
+    if (haveSameBet.has(r.bookmaker)) continue;
+    if (!rowIsSameBet(pick, r, market)) continue;
+    haveSameBet.add(r.bookmaker);
+    out.push(r);
+  }
+  return out;
+}
+
+/** A member's book that prices this side at a DIFFERENT number. */
+export interface OtherLineQuote {
+  bookmaker: string;
+  price: number;
+  link: string | null;
+  /** The book's number, stored the pick's way (spreads: the HOME number). */
+  line: number;
+}
+
+/**
+ * The member's books that do not have the pick's bet at its number but price
+ * the same side at another one — what each book's line is (Matt, 2026-11-12:
+ * "if there is no line to get because we don't have that book, we still want
+ * to allow them to bet it even if it's slightly different. Everything goes
+ * off the main model for tracking").
+ *
+ * DISPLAY AND HAND-OFF ONLY. A different number is a different bet: the pick,
+ * its line, price, edge, stake, record and every published surface stay at
+ * the model's number (§1c, §6). No edge is worked out here: the model gave a
+ * probability for its number only.
+ *
+ * One quote per book: the number nearest the pick's. Pre-game only (a live
+ * pick hands off to its deciding book alone), bettable books only, and the
+ * price-age rule drops a book whose rows have all gone stale.
+ */
+export function otherLineQuotesForPick(
+  pick: Pick,
+  bookRows: BookPricedRow[] | undefined,
+  allowedBooks: readonly string[],
+  priceAge?: PriceAgeContext,
+): OtherLineQuote[] {
+  if (pick.is_live === true) return [];
+  const market = marketForPick(pick);
+  const scored = numOrNull(pick.scored_line);
+  if (market == null || market.startsWith('h2h') || scored == null) return [];
+  const allowed = new Set(allowedBooks);
+  const rows = freshBookRows(pick, bookRows, priceAge);
+  const sameLine = new Set(
+    rows.filter((r) => rowIsSameBet(pick, r, market) && priceForSide(r, pick.pick_side) != null)
+      .map((r) => r.bookmaker),
+  );
+  // The record book is a same-line quote by construction (pickLineQuotes).
+  sameLine.add(storedQuoteBook(pick));
+  const byBook = new Map<string, OtherLineQuote>();
+  for (const r of rows) {
+    if (!allowed.has(r.bookmaker) || sameLine.has(r.bookmaker)) continue;
+    if (!isBettableBook(r.bookmaker)) continue;
+    const line = lineFromSnapshot(r, market);
+    const price = priceForSide(r, pick.pick_side);
+    if (line == null || price == null || line === scored) continue;
+    const held = byBook.get(r.bookmaker);
+    if (held && Math.abs(held.line - scored) <= Math.abs(line - scored)) continue;
+    byBook.set(r.bookmaker, { bookmaker: r.bookmaker, price, link: linkForSide(r, pick.pick_side), line });
+  }
+  return Array.from(byBook.values());
+}
+
+/**
  * Side link on the book's current row. Not `dk_bet_link`: that link was
  * stamped with the lock, so it still opens the old line after the number moves.
  */
@@ -1352,21 +1579,26 @@ function resolveBoardHandoff(
   allowedBooks?: readonly string[],
 ): { handoff: BoardHandoff | null; quotes: LineQuote[] } {
   if (pick.is_live === true) {
-    if (allowedBooks && !allowedBooks.includes(MODEL_BOOK)) return { handoff: null, quotes: [] };
+    // The one book an in-play pick hands off to is the book that decided it
+    // (decision_book; DraftKings before 2026-09-10). Not one of the member's
+    // books: no hand-off, as on a pre-game card (Matt, 2026-10-19).
+    const book = hero?.book ?? storedQuoteBook(pick);
+    if (allowedBooks && !allowedBooks.includes(book)) return { handoff: null, quotes: [] };
+    const recordHref = recordLink(pick, book);
     // No live number to quote after the bet: open the book without one,
     // rather than print the lock as if it were still on offer.
     if (hero?.untracked) {
       return {
-        handoff: { bookmaker: MODEL_BOOK, price: null, link: hero.link ?? pick.dk_bet_link ?? null, verb: 'Open' },
+        handoff: { bookmaker: book, price: null, link: hero.link ?? recordHref, verb: 'Open' },
         quotes: [],
       };
     }
     const price = hero?.kind === 'now' && hero.price != null ? hero.price : decisionOdds(pick);
     if (price == null) return { handoff: null, quotes: [] };
-    const link = hero?.link ?? pick.dk_bet_link ?? null;
+    const link = hero?.link ?? recordHref;
     return {
-      handoff: { bookmaker: MODEL_BOOK, price, link, verb: 'Bet' },
-      quotes: [loneQuote(MODEL_BOOK, price, link, true)],
+      handoff: { bookmaker: book, price, link, verb: 'Bet' },
+      quotes: [loneQuote(book, price, link, true)],
     };
   }
   // No hand-off to a book whose newest price is older than the bound
@@ -1704,10 +1936,12 @@ export function computeMovement(
  *
  * The NCAAB first-half spread card (scripts/ncaab_first_half_spread_card.py)
  * writes the same row shape, and so does the NCAAB first-half total card
- * (scripts/ncaab_first_half_total_card.py).
+ * (scripts/ncaab_first_half_total_card.py), and the NBA first-quarter spread
+ * card (scripts/nba_q1_trend_card.py).
  */
 const BET_BOOK_LINE_MODELS: readonly string[] = [
   'nba_first_half_total_luck',
+  'nba_q1_trend',
   'ncaab_first_half_spread',
   'ncaab_first_half_total',
   'nba_prop_market',
@@ -1932,12 +2166,31 @@ const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_
  *   - unlocked look-ahead previews (future UFC/golf), which re-price until
  *     game day.
  */
-// The two NCAAB full-game moneyline models: a moneyline has no line, so their
-// Pick Detail note names only the price.
-const NCAAB_MONEYLINE_MODELS: readonly string[] = [
+// The posted-once moneyline models: two NCAAB, the NCAAF full-game moneyline,
+// and the NBA first quarter's (models/nba_q1_trend_ml.py). A moneyline has no
+// line, so their Pick Detail note names only the price.
+const POSTED_MONEYLINE_MODELS: readonly string[] = [
   'ncaab_moneyline_own_spread',
   'ncaab_moneyline_first_post',
+  'ncaaf_moneyline_market',
+  'nba_q1_trend_ml',
 ];
+
+/**
+ * The half an NCAAB live bet was placed in. Men's college basketball plays two
+ * halves; the loop stores the period (1, 2, then overtimes). A second-half
+ * model's bet stored with period 1 was placed at the halftime break (the state
+ * is the first half's last play, models/ncaab_live_ig.phase_of).
+ */
+export function ncaabLivePeriod(period: number, modelId: string | null | undefined): string {
+  if (period >= 3) return 'overtime';
+  if (period === 2) return '2nd half';
+  return (modelId ?? '').endsWith('_h2') ? 'halftime' : '1st half';
+}
+
+// The women's in-play model: the full-game total, bet during the halftime
+// break (models/ncaabw_live_ht.py).
+const NCAABW_HALFTIME_MODEL = 'ncaabw_live_total_ht';
 
 export function pickTimingInfo(pick: Pick): PickTiming | null {
   if (!pick.created_at) return null;
@@ -1953,20 +2206,38 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   }
 
   if (pick.is_live) {
+    // `inning_at_pick` is the shared period column: the inning for MLB, the
+    // half for NCAAB (models/ncaab_live_loop.build_pick), the quarter for every
+    // other in-play sport (NCAAF, NFL, and NBA, whose loop writes the quarter
+    // there — models/nba_live_loop.build_pick).
     const period =
       pick.inning_at_pick != null
-        ? pick.sport === 'NCAAF' || pick.sport === 'NFL'
-          ? ` · Q${pick.inning_at_pick}`
-          : ` · inning ${pick.inning_at_pick}`
+        ? pick.sport === 'MLB'
+          ? ` · inning ${pick.inning_at_pick}`
+          : pick.sport === 'NCAAB'
+            ? ` · ${ncaabLivePeriod(pick.inning_at_pick, pick.model_id)}`
+            : pick.model_id === NCAABW_HALFTIME_MODEL
+              ? // Bet during the halftime break only
+                // (models/ncaabw_live_loop.build_pick stores quarter 2).
+                ' · halftime'
+              : ` · Q${pick.inning_at_pick}`
         : '';
     return {
       kind: 'live',
       verb: 'Locked',
       label: `Locked ${stamp}${period} — bet of record`,
       note:
-        'Locked the moment this crossed, and never re-priced — this is the line and price that ' +
-        'were on offer then, not the current ones. In-play numbers move fast, so check the book ' +
-        'before betting.',
+        pick.model_id === NCAABW_HALFTIME_MODEL
+          ? // The loop reads the price, waits for ESPN's play list twice, then
+            // writes the bet (models/ncaabw_live_loop.py), so the stamp is
+            // minutes after the price.
+            'Decided once, during the halftime break, on the full-game total: it settles on the ' +
+            'final score, overtime included. Never re-priced: this is the line and price read ' +
+            'during the break, shortly before the time above, not the current ones. The total ' +
+            'moves once play resumes, so check the book before betting.'
+          : 'Locked the moment this crossed, and never re-priced — this is the line and price that ' +
+            'were on offer then, not the current ones. In-play numbers move fast, so check the book ' +
+            'before betting.',
     };
   }
 
@@ -2002,6 +2273,12 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // about an hour before tip. The NCAAB opening-moneyline card
   // (scripts/ncaab_moneyline_first_post_card.py) bets a game at most once,
   // the moment a book first posts its moneyline, and never re-prices.
+  // The NCAABW totals card (scripts/ncaabw_total_card.py), the women's,
+  // decides like the men's totals card: once, at DraftKings' first posted
+  // total, and never re-prices. Its first total stood a median 136 minutes in
+  // 2024-25 and 85 in 2025-26 (docs/sports/ncaabw.md), and one in ten changed
+  // within 10 minutes (the card's own header), so its note says "can change
+  // within minutes", not the men's "often changes within half an hour".
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
@@ -2009,10 +2286,14 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'nba_total_luck' ||
     pick.model_id === 'nba_team_total_luck' ||
     pick.model_id === 'nba_first_half_total_luck' ||
+    pick.model_id === 'nba_q1_trend' ||
+    pick.model_id === 'nba_q1_trend_ml' ||
     pick.model_id === 'ncaab_total_blend' ||
+    pick.model_id === 'ncaabw_total_blend' ||
     pick.model_id === 'ncaab_spread_market' ||
     pick.model_id === 'ncaab_moneyline_own_spread' ||
     pick.model_id === 'ncaab_moneyline_first_post' ||
+    pick.model_id === 'ncaaf_moneyline_market' ||
     pick.model_id === 'ncaab_first_half_spread' ||
     pick.model_id === 'ncaab_first_half_total' ||
     nbaPosted
@@ -2025,7 +2306,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
         // A moneyline has no line (UX review, 2026-11-03), and an opening
         // price moves fast: the opening-moneyline model says so where the
         // member places the bet.
-        (NCAAB_MONEYLINE_MODELS.includes(pick.model_id)
+        (POSTED_MONEYLINE_MODELS.includes(pick.model_id)
           ? 'Posted once and never re-priced. This is when the bet posted, at the price shown.'
           : 'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
             'shown.') +
@@ -2034,6 +2315,10 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
           : '') +
         (pick.model_id === 'ncaab_total_blend'
           ? ' An opening total often changes within half an hour: check DraftKings’ total and price before you bet.'
+          : '') +
+        (pick.model_id === 'ncaabw_total_blend'
+          ? ' An opening total can change within minutes: check DraftKings’ total and price before you bet.' +
+            ' This pick is for the total and price shown, not a later one.'
           : '') +
         (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
         (nbaPosted ? ' Void if the player doesn’t play.' : ''),

@@ -302,6 +302,7 @@ export function TrackRecordScreen() {
             the one we took, on the same number. Beating that book's close is the headline. Market
             edge, when we have it, is the same bet against Pinnacle’s fair close. Game lines and
             props are counted apart. A moved number is left out of the beat rate.
+            A close that matches the price we took is a push and is left out of the rate too.
             {overall.clvSettled < 30
               ? ' We’ve only just started capturing it, so this number is still building.'
               : ''}

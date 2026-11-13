@@ -14,7 +14,7 @@ import { useByomLeaderboard } from '@/hooks/useByomLeaderboard';
 import { useByomSeason } from '@/hooks/useByomSeason';
 import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
-import { byomEmptyLabel } from '@/lib/byomRecord';
+import { asByomSport, byomEmptyLabel } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Sport } from '@/hooks/useSportFilter';
 import type { RootStackParamList } from '@/types';
@@ -24,8 +24,9 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export function ByomModelList({ sport }: { sport: Sport }) {
   const navigation = useNavigation<Nav>();
   const { scope } = useByomSeason();
-  const built = sport === 'NFL' || sport === 'NBA';
-  const facts = useNbaGameFacts(sport === 'NBA' ? 'NBA' : 'NFL');
+  const built = sport === 'NFL' || sport === 'NBA' || sport === 'NHL';
+  const byomSport = asByomSport(sport);
+  const facts = useNbaGameFacts(byomSport);
   const { rows, loading, error, reload, signedIn, authReady } = useByomLeaderboard(sport, scope);
   const busy = built && (!authReady || (signedIn && loading && rows.length === 0));
   const failedRefresh = error != null && rows.length > 0;
@@ -35,7 +36,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
   }, [reload]));
 
   const openBuilder = () => navigation.navigate('ByomBuilder', {
-    sport: sport === 'NBA' ? 'NBA' : 'NFL',
+    sport: byomSport,
   });
 
   return (
@@ -82,8 +83,9 @@ export function ByomModelList({ sport }: { sport: Sport }) {
           showsUnits={item.showsUnits}
           ungraded={item.ungraded}
           failed={item.failed}
-          emptyLabel={byomEmptyLabel(sport === 'NBA' ? 'NBA' : 'NFL', facts.status, item.model.filters)}
-          closingHeadline={sport === 'NFL' && item.timing === 'close'}
+          emptyLabel={byomEmptyLabel(byomSport, facts.status, item.model.filters)}
+          closingHeadline={item.timing === 'close'}
+          sport={byomSport}
           onPress={() => navigation.navigate('ByomDetail', { modelId: item.model.model_id })}
         />
       )}
@@ -118,7 +120,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
         ) : (
           <EmptyState
             title={`No ${sport} models yet`}
-            subtitle="Switch to NFL or NBA to build a model."
+            subtitle="Switch to NFL, NBA or NHL to build a model."
           />
         )
       }

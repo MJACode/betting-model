@@ -76,7 +76,9 @@ export const NBA_TEAMS: readonly ByomTeam[] = [
   { abbrev: 'WAS', name: 'Washington Wizards' },
 ];
 
-export function teamsForSport(sport: 'NFL' | 'NBA'): readonly ByomTeam[] {
+/** The matchup sheet's teams. It is a prop sheet, and NHL has no props. */
+export function teamsForSport(sport: 'NFL' | 'NBA' | 'NHL'): readonly ByomTeam[] {
+  if (sport === 'NHL') return [];
   return sport === 'NBA' ? NBA_TEAMS : NFL_TEAMS;
 }
 

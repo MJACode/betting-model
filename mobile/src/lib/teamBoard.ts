@@ -14,9 +14,9 @@
  *
  *  2. SAMPLE GUARD. A 3-2 ATS split shows as 60% and would top the board on
  *     rate alone. Splits carry their sample, and anything under
- *     MIN_SPLIT_SAMPLE is shown as its record (or its game count) instead of
- *     a percentage, left untinted, and ranked below every split that has
- *     enough games (Matt, 2026-11-03).
+ *     MIN_SPLIT_SAMPLE is left untinted, ranked below every split that has
+ *     enough games, and marked "small sample" beside its percent and record
+ *     (Matt, 2026-11-03; since 2026-11-13 the percent always shows).
  *
  * Verify with: npx tsx scripts/verify_team_board.ts
  */
@@ -27,10 +27,10 @@ import type { TeamStatsRow } from '@/types';
 export type Tier = 'good' | 'mid' | 'bad' | 'none';
 
 /**
- * Below this many games a split is not shown as a percentage: the board
- * prints its record (or game count) instead, uncoloured, and ranks it after
- * every split with enough games. Matt, 2026-11-03: "when a team has fewer
- * than 10 games in a split, show the record instead of a percentage".
+ * Below this many games a split is uncoloured, ranked after every split with
+ * enough games, and marked "small sample". Matt, 2026-11-03 set the floor
+ * ("fewer than 10 games in a split"); on 2026-11-13 he asked for record AND
+ * percent on every Betting stat, so the percent is no longer hidden under it.
  */
 export const MIN_SPLIT_SAMPLE = 10;
 

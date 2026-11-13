@@ -279,7 +279,7 @@ def test_a_job_queued_without_sport_uses_nfl(monkeypatch):
             seen["closed"] = True
 
     monkeypatch.setattr("byom.load.build_seasons", build_seasons)
-    monkeypatch.setattr("data.db.get_connection", lambda: Conn())
+    monkeypatch.setattr("data.db.get_connection", lambda *a, **k: Conn())
 
     fn, validate = JOBS["byom_game_facts"]
     stored = validate({})
@@ -320,7 +320,7 @@ def test_a_job_queued_without_sport_uses_nfl(monkeypatch):
     assert out["sport"] == "NBA"
 
 
-def test_the_job_defaults_to_not_writing_and_nba_stays_off():
+def test_the_job_defaults_to_not_writing_and_nba_is_declared_on():
     from tracking.job_queue import JOBS, _validate_byom_game_facts
 
     assert "byom_game_facts" in JOBS
@@ -342,16 +342,16 @@ def test_the_job_defaults_to_not_writing_and_nba_stays_off():
     declared = json.loads(
         (ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     game = [entry for entry in declared if entry["job_type"] == "byom_game_facts"
-            and not entry["key"].startswith("byom-nfl-game-facts-official")]
+            and not entry["key"].startswith("byom-nfl-game-facts-official")
+            and entry["key"] != "byom-nhl-game-facts"]
     assert len(game) == 1
     assert game[0]["key"] == "byom-nba-game-facts"
-    assert game[0]["enabled"] is False
+    # Matt, 2026-11-04: the NBA builder gets what NFL got.
+    assert game[0]["enabled"] is True
     assert game[0]["requested_by"] == "owner"
-    assert game[0]["args"] == {"sport": "NBA", "apply": False}
+    assert game[0]["args"] == {"sport": "NBA", "apply": True}
     assert "season" not in game[0]["args"]
-    assert "byom_nba_props_2026_10_29.sql" in game[0]["note"]
-    assert "byom-nba-prop-facts" in game[0]["note"]
-    assert "own change" in game[0]["note"]
+    assert "byom_nba_props_2026_10_29.sql is applied" in game[0]["note"]
     assert "from 2021" in game[0]["note"]
     assert all(entry["key"] != "byom-nfl-game-facts" for entry in declared)
     from data.view_migrations import ACTIVE_MIGRATIONS

@@ -32,13 +32,13 @@ export function ByomPreviewCard({
   emptyLabel?: string;
   /**
    * The same bets at the closing line. Set when `record` is the official
-   * pick (NFL). Null when `record` already is the close.
+   * pick. Null when `record` already is the close.
    */
   closeRecord?: ByomRecord | null;
   /** Opens the list of the bets this record counts. */
   onShowBets?: () => void;
   /**
-   * NFL, and the official rows are empty, so `record` is the close.
+   * The official rows are empty, so `record` is the close.
    * Names that basis. The secondary close row stays off.
    */
   closingHeadline?: boolean;

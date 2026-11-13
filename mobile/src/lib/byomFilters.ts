@@ -36,6 +36,15 @@ export interface ByomFilters {
   opponents?: string[];
   /** One player, matched to the stored name. */
   player?: string;
+  /** The DraftKings line since the opener, on this side (2026-11-05). */
+  line_move?: 'toward' | 'against' | 'none';
+  /** The bet team's previous game this season. */
+  prev_result?: 'won' | 'lost';
+  prev_ats?: 'covered' | 'not_covered';
+  /** Both teams' previous games went over, or both under. */
+  prev_total?: 'over' | 'under';
+  /** Both teams in one division that season. */
+  division_game?: boolean;
 }
 
 const FILTER_KEYS: (keyof ByomFilters)[] = [
@@ -60,6 +69,11 @@ const FILTER_KEYS: (keyof ByomFilters)[] = [
   'kick_slots',
   'opponents',
   'player',
+  'line_move',
+  'prev_result',
+  'prev_ats',
+  'prev_total',
+  'division_game',
 ];
 
 const FILTER_KEY_SET = new Set<string>(FILTER_KEYS);

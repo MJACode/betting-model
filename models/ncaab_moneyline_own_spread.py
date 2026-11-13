@@ -243,13 +243,19 @@ def price_sides(ml: pd.DataFrame, sp: pd.DataFrame, min_price: float = MIN_PRICE
     return z[z["price"] >= min_price][SIDE_COLS].reset_index(drop=True)
 
 
-def best_per_game(z: pd.DataFrame) -> pd.DataFrame:
+def best_per_game(z: pd.DataFrame, bettable=None) -> pd.DataFrame:
     """The single largest-edge side per game; a tie goes to the longer price,
-    then the book's name."""
-    z = z[z["edge"].notna()]
-    z = z.sort_values(["game_id", "edge", "dec", "bookmaker"],
-                      ascending=[True, False, False, True], kind="mergesort")
-    return z.drop_duplicates("game_id", keep="first")
+    then a book in `bettable` (None: every book is), then the book's name.
+
+    A tie on edge and price is the same bet at two books, so the bettable book
+    takes it (mike, 2026-11-07: of the 38 replayed bets betPARX held, 36 were
+    exact ties with a book that can still be bet). With every book bettable the
+    order is the evidence's exactly."""
+    z = z[z["edge"].notna()].copy()
+    z["_unbettable"] = 0 if bettable is None else (~z["bookmaker"].isin(list(bettable))).astype(int)
+    z = z.sort_values(["game_id", "edge", "dec", "_unbettable", "bookmaker"],
+                      ascending=[True, False, False, True, True], kind="mergesort")
+    return z.drop_duplicates("game_id", keep="first").drop(columns=["_unbettable"])
 
 
 # ── the artifact ──────────────────────────────────────────────────────────────
@@ -352,7 +358,8 @@ def decide(game_ids, ml: pd.DataFrame, sp: pd.DataFrame, cut: float,
     bettable: the books a bet may be placed at now
     (config.BEST_LINE_BOOKMAKERS); the best side is chosen over the eight
     books first, as the evidence chose it, and a best side at a book not
-    bettable now is not replaced by the next one. dropped: the moneylines and
+    bettable now is not replaced by the next one. An exact tie (same edge and
+    price) is the same bet, so it goes to the bettable book (best_per_game). dropped: the moneylines and
     spreads the read dropped as data errors (models/ncaab_book_quotes
     .dropped_quotes, with `market`), listed in each game's decision; nothing
     is priced from them."""
@@ -361,7 +368,7 @@ def decide(game_ids, ml: pd.DataFrame, sp: pd.DataFrame, cut: float,
     ml_by = {g: x for g, x in ml.groupby("game_id")} if len(ml) else {}
     sp_by = {g: x for g, x in sp.groupby("game_id")} if len(sp) else {}
     sides = price_sides(ml, sp, min_price)
-    best = best_per_game(sides).set_index("game_id") if len(sides) else None
+    best = best_per_game(sides, bettable).set_index("game_id") if len(sides) else None
     for gid in game_ids:
         m = ml_by.get(gid)
         s = sp_by.get(gid, sp.iloc[0:0] if len(sp) else pd.DataFrame())

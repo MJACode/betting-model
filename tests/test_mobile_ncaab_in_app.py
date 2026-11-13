@@ -177,7 +177,8 @@ def test_a_model_page_row_says_the_day_of_a_game_that_is_not_today():
         "formatGameTimeET(game?.commence_time));"
     ) in row
     # One label, used for both what is drawn and what is spoken.
-    assert "accessibilityLabel={[pick.pick_label, signalDisplayName(pick.signal_type), timeLabel," in row
+    # The label without the old NFL sizing figure (tests/test_mobile_label_units.py).
+    assert "accessibilityLabel={[labelWithoutStake(pick.pick_label), signalDisplayName(pick.signal_type), timeLabel," in row
     assert "{timeLabel ? <Text style={styles.pickMetaText}>{timeLabel}</Text> : null}" in row
     imports = src[:src.index("\nfunction ")]
     assert re.search(r"import \{[^}]*\bgameDayLabelET\b[^}]*\} from '@/lib/format';", imports)
@@ -308,9 +309,18 @@ def test_the_ncaab_look_ahead_reads_only_the_picks_games():
     in their window; for NCAAB that is up to eleven 1,000-row pages per mount.
     So the picks are read first and every other read asks only for the games
     those picks are on.
+
+    From 2026-11-10 the read is shared with the women's sport
+    (fetchUpcomingCollegeBasketballPicks, tests/test_mobile_ncaabw_in_app.py):
+    fetchUpcomingNcaabPicks passes it 'NCAAB'.
     """
-    body = _fn(_read(QUERIES), "fetchUpcomingNcaabPicks")
-    assert ".eq('sport', 'NCAAB')" in body
+    q = _read(QUERIES)
+    assert (
+        "return fetchUpcomingCollegeBasketballPicks('NCAAB', afterDate, throughDate, onEnrichmentError);"
+        in _fn(q, "fetchUpcomingNcaabPicks")
+    )
+    body = _fn(q, "fetchUpcomingCollegeBasketballPicks")
+    assert ".eq('sport', sport)" in body
     assert ".gt('game_date', afterDate)" in body
     assert ".lte('game_date', throughDate)" in body
     assert ".gte('game_date', afterDate)" not in body
@@ -381,7 +391,7 @@ def test_the_stats_players_board_reads_ncaab_own_views():
     assert groups and "\n  NCAAB: ['NCAAB']," in groups.group(1)
     for key in ("points", "rebounds", "assists", "threes", "pra", "steals", "blocks", "minutes"):
         assert re.search(rf"key: '{key}', label: '[^']+', sport: 'NCAAB'", cat), key
-    assert "if (def.sport === 'NCAAB') return null;" in _fn(cat, "propMarketForStat")
+    assert "if (def.sport === 'NCAABW' || def.sport === 'NCAAB') return null;" in _fn(cat, "propMarketForStat")
     team = _read(TEAM_STAT_CATALOG)
     assert "const TEAM_SPORTS = new Set<Sport>(BALL);" in team
     ball = re.search(r"const BALL: Sport\[\] = \[(.*?)\];", team)
@@ -395,8 +405,11 @@ def test_the_stats_players_board_reads_ncaab_own_views():
         assert f"sport === 'NCAAB' ? '{rpc}'" in _fn(q, name), name
     for name in ("fetchSeasonTotals", "fetchWindowTotals"):
         assert "sport === 'NCAAB') return [];" not in _fn(q, name), name
+    # NCAABW joined the line on 2026-11-10: no women's team stats either.
+    # The women's code is named first so a prefix check cannot file it as men's.
     assert re.search(
-        r"if \(sport === 'UFC' \|\| sport === 'GOLF' \|\| sport === 'NCAAB'\) return \{ season: null, rows: \[\] \};",
+        r"if \(sport === 'UFC' \|\| sport === 'GOLF' \|\| sport === 'NCAABW' \|\| sport === 'NCAAB'\) "
+        r"return \{ season: null, rows: \[\] \};",
         _fn(q, "fetchTeamStats"),
     )
     for name in ("fetchRecentGames", "fetchSeasonStatValues", "fetchPositionVsOpponent"):

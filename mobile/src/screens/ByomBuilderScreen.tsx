@@ -26,6 +26,8 @@ import {
   type ByomSheetTab,
 } from '@/components/byom/ByomPropSideFields';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
+import { ByomSeasonBreakdown } from '@/components/byom/ByomSeasonBreakdown';
+import { currentByomSeason } from '@/lib/byomRecord';
 import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { useAuth } from '@/hooks/useAuth';
 import { useByomRecord } from '@/hooks/useByomRecord';
@@ -53,8 +55,7 @@ import {
   type ByomDraft,
   type ByomMarket,
   type ByomPropSide,
-  type ByomSport,
-} from '@/lib/byomRecord';
+  type ByomSport, asByomSport, byomUsesRest, gameMarketLabel } from '@/lib/byomRecord';
 import { EMPTY_PROP_FILTERS, type ByomPropFilterState } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -65,7 +66,7 @@ type Route = RouteProp<RootStackParamList, 'ByomBuilder'>;
 export function ByomBuilderScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
-  const sport: ByomSport = route.params?.sport === 'NBA' ? 'NBA' : 'NFL';
+  const sport: ByomSport = asByomSport(route.params?.sport);
   const { signedIn } = useAuth();
   const { scope } = useByomSeason();
   const facts = useNbaGameFacts(sport);
@@ -92,7 +93,7 @@ export function ByomBuilderScreen() {
       role,
       primetime,
       propSide,
-      rest: sport === 'NBA' ? rest : null,
+      rest: byomUsesRest(sport) ? rest : null,
       propFilters,
     };
   const sideReason = draft == null ? null : saveBlockReason(draft);
@@ -102,7 +103,7 @@ export function ByomBuilderScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: sport === 'NBA' ? 'New NBA model' : 'New NFL model',
+      title: `New ${sport} model`,
       headerLeft: () => (
         <Pressable
           onPress={() => navigation.goBack()}
@@ -123,7 +124,7 @@ export function ByomBuilderScreen() {
   useEffect(() => {
     if (step !== 3 || market == null || sideReason != null) return;
     const next = suggestedName({
-      market, side, role, primetime, propSide, rest: sport === 'NBA' ? rest : null, propFilters,
+      market, side, role, primetime, propSide, rest: byomUsesRest(sport) ? rest : null, propFilters,
     });
     setName((current) => (current.trim() === '' || current === suggestion.current ? next : current));
     suggestion.current = next;
@@ -273,13 +274,11 @@ export function ByomBuilderScreen() {
           <ByomPropSideFields
             market={market}
             propSide={propSide}
-            role={role}
             primetime={primetime}
             sport={sport}
             rest={rest}
             propFilters={propFilters}
             onPropSide={setPropSide}
-            onRole={setRole}
             onPrimetime={setPrimetime}
             onRest={setRest}
             onPropFilters={setPropFilters}
@@ -295,7 +294,11 @@ export function ByomBuilderScreen() {
       ) : null}
       {step === 2 && market != null && !isPropMarket(market) ? (
         <>
-          <Text style={[styles.title, styles.titleTight]}>{betTypeLabel(market)}</Text>
+          <Text style={[styles.title, styles.titleTight]}>
+            {market === 'h2h' || market === 'spreads' || market === 'totals'
+              ? gameMarketLabel(market, sport)
+              : betTypeLabel(market)}
+          </Text>
           <Text style={styles.lead}>Which side?</Text>
           <ByomSideFields
             market={market}
@@ -311,6 +314,15 @@ export function ByomBuilderScreen() {
             onPrimetime={setPrimetime}
             onPropSide={setPropSide}
             onRest={setRest}
+          />
+          <ByomMoreFiltersCard
+            sport={sport}
+            side={side}
+            primetime={primetime}
+            propFilters={propFilters}
+            game
+            totals={market === 'totals'}
+            onOpen={setSheet}
           />
         </>
       ) : null}
@@ -340,7 +352,7 @@ export function ByomBuilderScreen() {
               onRetry={() => void preview.reload()}
               showsUnits={showsUnits(filters)}
               closeRecord={preview.closeRecord}
-              closingHeadline={sport === 'NFL' && preview.timing === 'close'}
+              closingHeadline={preview.timing === 'close'}
               onShowBets={byomBetsAvailable() && preview.record != null && preview.record.bets > 0
                 ? () => navigation.navigate('ByomBets', {
                   filters, sport, title: 'Bets that match', timing: preview.timing,
@@ -356,7 +368,7 @@ export function ByomBuilderScreen() {
               showsUnits={showsUnits(filters)}
               emptyLabel={byomEmptyLabel(sport, facts.status, filters)}
               closeRecord={preview.closeRecord}
-              closingHeadline={sport === 'NFL' && preview.timing === 'close'}
+              closingHeadline={preview.timing === 'close'}
               onShowBets={byomBetsAvailable() && preview.record != null && preview.record.bets > 0
                 ? () => navigation.navigate('ByomBets', {
                   filters, sport, title: 'Bets that match', timing: preview.timing,
@@ -364,6 +376,12 @@ export function ByomBuilderScreen() {
                 : undefined}
             />
           )}
+          <ByomSeasonBreakdown
+            record={preview.record}
+            seasons={preview.seasons}
+            currentSeason={currentByomSeason(sport)}
+            showsUnits={showsUnits(filters)}
+          />
           <ByomUnitsNote />
         </>
       ) : null}
@@ -414,7 +432,7 @@ export function ByomBuilderScreen() {
       </View>
       <BetslipBarSpacer />
     </KeyboardAvoidingView>
-    {market != null && isPropMarket(market) ? (
+    {market != null ? (
       <ByomFilterSheet
         tab={sheet}
         sport={sport}

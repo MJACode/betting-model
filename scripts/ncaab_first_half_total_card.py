@@ -85,6 +85,8 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
+from models import cbb_pairs  # noqa: E402
+from models import ncaab_stake  # noqa: E402
 import data.ingestors.ncaab_first_half_odds as feed  # noqa: E402
 import models.ncaab_first_half_total as ft  # noqa: E402
 import models.ncaab_quote_bounds as qb  # noqa: E402
@@ -256,6 +258,26 @@ def decision_quotes(conn, cuts: dict[str, datetime]) -> pd.DataFrame:
     return df
 
 
+def favourite_lays(conn, cuts: dict[str, datetime]) -> dict[str, float]:
+    """{game_id: the points the favourite lays in the first half}: the median
+    over the books of the absolute first-half spread the decision fetch itself
+    stored. A game no book quoted a first-half spread for is absent."""
+    if not cuts:
+        return {}
+    gids, ts = _cuts_sql(cuts)
+    rows = conn.execute("""
+        WITH t AS (SELECT * FROM unnest(%s::text[], %s::timestamptz[]) AS t(game_id, cut))
+        SELECT o.game_id, o.spread_home
+        FROM odds o JOIN t ON t.game_id = o.game_id
+        WHERE o.market = 'spreads_h1' AND o.source = %s AND o.snapshot_type = %s
+          AND o.created_at::timestamptz = t.cut AND o.spread_home IS NOT NULL
+    """, (gids, ts, feed.SOURCE, feed.SNAPSHOT_TYPE)).fetchall()
+    df = pd.DataFrame(rows, columns=["game_id", "spread_home"])
+    df["lays"] = pd.to_numeric(df["spread_home"], errors="coerce").abs()
+    df = df[df["lays"].notna() & (df["lays"] <= 45.0)]
+    return {g: float(v) for g, v in df.groupby("game_id")["lays"].median().items()}
+
+
 def book_ages(quotes: pd.DataFrame, fetch_at: datetime) -> dict[str, float]:
     """{book: minutes from its first-half total's own last update to the
     fetch}, from the stored rows' snapshot_at (the market's last_update)."""
@@ -275,7 +297,8 @@ _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", 
          "confidence_tier", "dk_bet_link", "line_book",
          "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
          "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link",
-         "downgrade_reason")
+         "downgrade_reason",
+         "stake_units", "stake_reason")
 # Its own column list, NOT models.scorer._insert_picks: that one stamps
 # model_probability_cal from the promoted map, and this model decides on its
 # own number (config.MODELS_ON_OWN_PROBABILITY).
@@ -285,7 +308,9 @@ _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
 
 
 # Priced, and its best side did not clear the cut: written as a NONE row.
-SCORED_NO_BET = ("below_cut",)
+# Priced and not bet: a NONE row at the same book, side and number. An under
+# set aside for a big favourite is one, so it can still be graded later.
+SCORED_NO_BET = ("below_cut", "big_favourite")
 
 
 def pick_label(side: str, home: str, away: str, line: float) -> str:
@@ -343,7 +368,7 @@ def pick_rows(decisions: list[ft.Decision], games: dict[str, dict],
             "game_id": d.game_id, "model_id": MODEL_ID, "sport": SPORT,
             "game_date": g.get("game_date"), "game_time": g.get("commence_time"),
             "pick_side": b.side, "pick_label": label,
-            # P(side wins | no push) at this number: the number the 0.02 cut
+            # P(side wins | no push) at this number: the number the cut
             # was measured on (models/ncaab_first_half_total.py).
             "model_probability": round(b.prob, 4),
             "model_probability_cal": round(b.prob, 4),
@@ -409,7 +434,9 @@ def publish(conn, rows: list[dict], decided: list[dict]) -> tuple[int, int]:
             continue
         n_decided += 1
         row = by_game.get(rec["game_id"])
-        if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
+        # A bet an earlier NCAAB bet on this game and side agrees with is
+        # staked at NCAAB_AGREEMENT_STAKE_UNITS (models/ncaab_stake.py).
+        if row is not None and conn.execute(_INSERT, ncaab_stake.stamp(conn, row, _COLS)).fetchone():
             n_bets += row["signal_type"] == "BET"
     conn.commit()
     return n_bets, n_decided
@@ -454,7 +481,7 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         return {"games": 0, "bets": 0, "published": 0, "decided": 0, "off": True}
     diag = {"games": 0, "already_decided": 0, "no_fetch_yet": 0, "missed": 0,
             "wrong_season": 0, "bets": 0, "below_cut": 0, "below_floor": 0, "no_quote": 0,
-            "no_fg_line": 0, "edge_cap": 0, "quotes_dropped": 0}
+            "no_fg_line": 0, "edge_cap": 0, "big_favourite": 0, "quotes_dropped": 0}
     conn = get_connection()
     try:
         games = slate(conn, now)
@@ -498,6 +525,7 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         cuts = {g: f[0] for g, f in due.items()}
         quotes = decision_quotes(conn, cuts)
         fgc = fg_consensus(conn, cuts)
+        lays = favourite_lays(conn, cuts)
         books = bet_books()
         floor = config.min_odds_for(MODEL_ID)
         stale: list[str] = []
@@ -524,7 +552,7 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 q = quotes[quotes["game_id"] == gid]
                 t = tau.loc[gid].to_dict() if gid in tau.index else None
                 d = ft.decide(gid, q, fgc.get(gid), t, art, config.MODEL_EDGE_THRESHOLDS[MODEL_ID],
-                              books=books, min_price=floor)
+                              books=books, min_price=floor, fav_lays=lays.get(gid))
                 diag[d.status] = diag.get(d.status, 0) + 1
                 diag["quotes_dropped"] += _log_dropped(
                     ft.out_of_range(q, books), "first-half", "total_line", ft.QUOTE_PRICES)
@@ -541,6 +569,8 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         if do_publish and decisions:
             from models.scorer import _get_current_bankroll
             rows, refused = pick_rows(decisions, games, _get_current_bankroll(conn))
+            # An under beside a big favourite's spread bet on the same game is not bet.
+            cbb_pairs.hold_back(conn, rows, refused)
             bet_ids = {r["game_id"] for r in rows if r["signal_type"] == "BET"}
             decided = [decision_row(d, fa, lead, ages, miss, d.game_id in bet_ids,
                                     refused.get(d.game_id))

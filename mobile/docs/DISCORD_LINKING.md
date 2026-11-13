@@ -35,7 +35,8 @@ throws if it is missing. That throw is a ship blocker, not an empty state.
 | You pay… | …and you get |
 |---|---|
 | in the app (App Store / RevenueCat) | the app **and** our subscriber Discord role |
-| on Discord (Whop), outside the app | Whop's Discord role only. The app stays locked until an Apple subscription entitles |
+| a `comped` grant (ops SQL, no IAP) | the app and our Discord invite. `app_review` is the app only |
+| on Discord (Whop), outside the app | Whop's Discord role only. The app stays locked |
 | nothing | neither |
 
 A Whop member who also buys in the app is the same person: `discord_access`
@@ -45,8 +46,9 @@ leaves Whop's role alone.
 
 Two roles:
 
-- **`DISCORD_APP_ROLE_ID`** — ours. `syncAppRoleForUser` grants it from the
-  Apple subscription and removes it when that subscription lapses.
+- **`DISCORD_APP_ROLE_ID`** — ours. `syncAppRoleForUser` grants it for an
+  active subscription or a comped grant, and removes it when both are gone.
+  A trial does not receive it.
 - **Whop's own role** — Whop's. `whop-webhook` never touches it.
 
 `discord_links.app_role_granted` records that OUR role is on.

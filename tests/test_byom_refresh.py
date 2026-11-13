@@ -20,8 +20,10 @@ def test_the_job_is_on_daily_and_does_not_write_by_default():
 
     assert "byom_refresh" in JOBS
     assert _validate_byom_refresh({}) == {"sport": "NFL", "apply": False}
+    # NBA joined 2026-11-04. Any other sport is refused.
+    assert _validate_byom_refresh({"sport": " nba ", "apply": True}) == {"sport": "NBA", "apply": True}
     with pytest.raises(ValueError):
-        _validate_byom_refresh({"sport": "NBA"})
+        _validate_byom_refresh({"sport": "MLB"})
     with pytest.raises(ValueError):
         _validate_byom_refresh({"apply": "yes"})
     declared = json.loads(
@@ -33,7 +35,8 @@ def test_the_job_is_on_daily_and_does_not_write_by_default():
     assert found[0]["args"]["apply"] is True
     sched = (ROOT / "scheduler.py").read_text(encoding="utf-8")
     assert 'id="byom_nfl_refresh"' in sched
-    assert 'dedupe_key=f"byom-nfl-refresh-{today}"' in sched
+    assert 'dedupe_key=f"byom-{sport.lower()}-refresh-{today}"' in sched
+    assert 'for sport in ("NFL", "NBA", "NHL"):' in sched
     assert '"byom_nfl_refresh"}' in sched  # owned by the pipeline role
     assert found[0]["args"]["sport"] == "NFL"
     text = (ROOT / "byom" / "refresh.py").read_text(encoding="utf-8").lower()
@@ -193,6 +196,11 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         wrote = refresh(conn, apply=True, today=AS_OF)
         assert wrote["written_game_facts"] == 6
         assert wrote["written_prop_facts"] == 1
+        # The planner's row counts follow the write (byom/analyze.py).
+        from byom.analyze import TABLES
+        assert wrote["analyzed"] == list(TABLES)
+        analyzed = [sql for sql, _p in conn.calls if sql.startswith("ANALYZE ")]
+        assert analyzed == [f"ANALYZE public.{t}" for t in TABLES]
         touched = set()
         for _sql, params in conn.calls:
             if not params:

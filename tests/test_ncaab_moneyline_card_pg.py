@@ -75,7 +75,7 @@ def db(dsn, monkeypatch, p_home):
                  home_price TEXT, away_price TEXT, home_link TEXT, away_link TEXT)""")
     cols = ", ".join(f"{col} TEXT" for col in card._COLS
                      if col not in ("model_probability", "dk_implied_prob", "edge", "scored_line"))
-    c.execute(f"""CREATE TABLE picks (pick_id SERIAL PRIMARY KEY, {cols},
+    c.execute(f"""CREATE TABLE picks (pick_id SERIAL PRIMARY KEY, {cols}, condition_status TEXT,
                   model_probability NUMERIC NOT NULL, dk_implied_prob NUMERIC NOT NULL,
                   edge NUMERIC NOT NULL, scored_line NUMERIC,
                   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
@@ -194,3 +194,37 @@ def test_the_first_run_ever_after_15z_records_the_days_games_without_failing(db)
     assert out["bets"] == 0 and out["decided"] == 3
     assert {v[0] for v in _ledger(db).values()} == {"missed"}
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
+
+
+# ── a best side at a state-limited book (betPARX, mike 2026-11-06) ──────────
+# betPARX at BetRivers' home price against the same -3.5 is the same bet, so
+# BetRivers takes it. A betPARX price that is strictly best is an ordinary
+# no-bet (the 2026-11-07 re-grade, docs/sports/ncaab.md), and the run must not fail.
+
+def _parx(db, home_price, away_price):
+    db.execute("INSERT INTO odds (game_id, market, bookmaker, snapshot_type, snapshot_at, "
+               "home_price, away_price) VALUES (%s, 'h2h', 'betparx', 'open', %s, %s, %s)",
+               (DUKE, f"{DAY}T14:45:00Z", str(home_price), str(away_price)))
+    db.commit()
+
+
+def test_an_exact_tie_at_a_state_limited_book_bets_at_the_book_that_can_be_bet(db, p_home):
+    _parx(db, _american(p_home - 0.04), _american(1 - p_home + 0.06))
+    out = card.run_card(do_publish=True, now=datetime(2026, 12, 5, 15, 5, tzinfo=UTC))
+    assert out["bets"] == 1
+    assert _ledger(db)[DUKE][:2] == ("bets", "betrivers")
+
+
+def test_a_best_side_at_a_state_limited_book_is_a_no_bet_and_the_run_does_not_fail(db, p_home):
+    _parx(db, _american(p_home - 0.05), _american(1 - p_home + 0.06))
+    out = card.run_card(do_publish=True, now=datetime(2026, 12, 5, 15, 5, tzinfo=UTC))
+    assert out["bets"] == 0
+    assert _ledger(db)[DUKE][:2] == ("book_not_bettable", "betparx")
+    assert db.execute("SELECT COUNT(*) FROM picks WHERE signal_type = 'BET'").fetchone()[0] == 0
+
+
+def test_any_other_book_that_cannot_be_bet_still_fails_the_run(db, monkeypatch):
+    monkeypatch.setattr(card.config, "BEST_LINE_BOOKMAKERS",
+                        [b for b in card.config.BEST_LINE_BOOKMAKERS if b != "betrivers"])
+    with pytest.raises(card.CardIncomplete, match="book_not_bettable"):
+        card.run_card(do_publish=True, now=datetime(2026, 12, 5, 15, 5, tzinfo=UTC))

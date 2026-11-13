@@ -25,10 +25,11 @@ import logging
 from byom.constants import (
     DK_HISTORY_START_SEASON,
     NBA_DK_HISTORY_START_SEASON,
+    NHL_DK_HISTORY_START_SEASON,
     SPORT,
 )
 from byom.game_facts import _pre_start, assemble_game, parse_date, parse_game_id
-from byom.official import OFFICIAL_COLUMNS, game_lock_candidates
+from byom.official import OFFICIAL_SPORTS, OFFICIAL_COLUMNS, game_lock_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -113,19 +114,33 @@ FACT_COLUMNS = (
 
 
 def _fetch(conn, sql, params):
+    """Read, then end a clean transaction before the caller uses the rows.
+
+    Autocommit is off. A SELECT therefore holds its locks until commit
+    or rollback. The lock search that follows a quote fetch is Python,
+    and Postgres shows that gap as idle in transaction. A connection
+    that already has uncommitted writes is left open: that transaction
+    belongs to the caller, who commits it.
+    """
+    from data.db import release_read
     cur = conn.execute(sql, params)
-    return cur.fetchall()
+    try:
+        return cur.fetchall()
+    finally:
+        release_read(conn)
 
 
 def _dk_history_floor(sport: str) -> int | None:
     """First season whose DraftKings game lines are built.
 
-    NFL is 2020. NBA is 2021. Any other sport has no floor.
+    NFL is 2020. NBA and NHL are 2021. Any other sport has no floor.
     """
     if sport == SPORT:
         return DK_HISTORY_START_SEASON
     if sport == "NBA":
         return NBA_DK_HISTORY_START_SEASON
+    if sport == "NHL":
+        return NHL_DK_HISTORY_START_SEASON
     return None
 
 
@@ -229,10 +244,10 @@ def facts_for_season(conn, season: int,
         quotes = _dk_quotes(conn, game["game_id"], sport)
         fact = assemble_game(game, quotes, played)
         if fact is not None:
-            if sport == SPORT:
+            if sport in OFFICIAL_SPORTS:
                 # Not a column. Every pre-kickoff candidate, written to
                 # byom_official_legs in the same transaction. The lock is
-                # chosen when the model is read. NFL only.
+                # chosen when the model is read. NFL and NBA.
                 fact["_official"] = game_lock_candidates(
                     fact,
                     _pre_start(quotes, "h2h"),
@@ -362,9 +377,14 @@ def build_season(conn, season: int, apply: bool = False,
     legs = [leg for fact in facts for leg in fact.get("_official") or ()]
     written = _upsert(conn, facts) if apply else 0
     official = 0
-    if apply and sport == SPORT:
+    if apply and sport in OFFICIAL_SPORTS:
         official = write_official_legs(
             conn, [fact["canonical_key"] for fact in facts], legs, props=False)
+    if apply:
+        # The next season, and the prop builder after a game refresh,
+        # read odds on this same connection. An uncommitted DELETE/INSERT
+        # on byom_official_legs holds RowExclusiveLock across that read.
+        conn.commit()
     return {
         "season": season, "sport": sport,
         "facts": len(facts), "written": written,

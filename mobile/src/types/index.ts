@@ -1,6 +1,7 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { DiscordPublish } from '@/lib/discordPublish';
 import type { PlayerLogSport } from '@/lib/playerLog';
+import type { SettingsSectionId } from '@/lib/settingsHome';
 
 export type SignalType = 'BET' | 'AVOID' | 'NONE';
 export type ConfidenceTier = 'HIGH' | 'MED' | 'LOW' | null;
@@ -137,6 +138,17 @@ export interface Pick {
   decision_odds: number | null;
   decision_implied_prob: number | null;
   decision_edge: number | null;
+  /**
+   * The pick's own stake in units TO WIN, 1 to 3 (2026-11-06; NCAAB
+   * agreement sizing). NULL is the usual 1u to win. Read it through
+   * stakeFor's third argument, never as a number on its own: anything
+   * outside 1..3 is the flat 1u there, as in tracking/discord_notifier.
+   * Optional so hand-built rows and older caches still type-check.
+   */
+  stake_units?: number | null;
+  /** Why stake_units is above 1, in words, shown under the stake on the
+   *  card. NULL on a 1u pick. */
+  stake_reason?: string | null;
 }
 
 /**
@@ -194,6 +206,11 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // from before v8 lacks them and is dropped by the cache-key bump.
   player_key?: string | null;
   prop_market?: string | null;
+  // The pick's own stake (Pick.stake_units), selected by SETTLED_PICK_COLUMNS
+  // so a model page books a 2u pick as the Record tab does. Optional: a row
+  // cached before the column existed lacks it and reads as the flat 1u, which
+  // is what every such row was (see settledPickCache.ts on why no bump).
+  stake_units?: number | null;
   // Client-only. attachDiscordPublish stamps it after the fetch. Not a
   // column, so it stays out of SETTLED_PICK_COLUMNS and the cache key.
   discordPublish?: DiscordPublish;
@@ -498,13 +515,13 @@ export type RootStackParamList = {
   ModelEdit: { modelId?: string };
   ModelDetail: { modelId: string };
   BuiltInModelDetail: { modelId: string };
-  ByomBuilder: { sport?: 'NFL' | 'NBA' } | undefined;
+  ByomBuilder: { sport?: 'NFL' | 'NBA' | 'NHL' } | undefined;
   ByomEdit: { modelId: string };
   ByomDetail: { modelId: string };
   /** The bets one BYOM record counts. Filters are the model's, unsaved or saved. */
   ByomBets: {
     filters: import('@/lib/byomFilters').ByomFilters;
-    sport: 'NFL' | 'NBA';
+    sport: 'NFL' | 'NBA' | 'NHL';
     title?: string;
     /** The card's headline. Omitted starts on official for NFL. */
     timing?: 'official' | 'close';
@@ -619,6 +636,8 @@ export type RootStackParamList = {
   Paywall: { autoCloseIfEntitled?: boolean } | undefined;
   // Settings moved off the tab bar — now opened via the top-right gear.
   Settings: undefined;
+  /** One section of Settings, pushed from the home grid. */
+  SettingsSection: { section: SettingsSectionId };
   // Account deletion. Reachable from Settings only while signed in.
   DeleteAccount: undefined;
   // In-app feedback: the composer + your past conversations, and one thread.
@@ -638,6 +657,8 @@ export interface OpeningVsLiveRow {
   clv_settled: number;
   clv_beat: number;
   avg_clv_pct: number | null;
+  /** Same-book closes that equal the price taken. Absent until the migration. */
+  clv_push?: number | null;
 }
 
 /** One row from v_opening_signal_slices — opening track sliced by line move / public side. */
@@ -671,8 +692,10 @@ export interface TrackRecordRow {
   units?: number;
   /** Units laid (published_pick_unit_risked). Pushes contribute 0. */
   risked?: number;
-  clv_settled: number;    // settled picks with a same-book price CLV
+  clv_settled: number;    // settled picks with a same-book price CLV, pushes included
   clv_beat: number;       // of those, how many beat that book's close (clv_pct > 0)
+  /** 0% closes. Beat rate is clv_beat / (clv_settled - clv_push). */
+  clv_push?: number | null;
   avg_clv_pct: number | null;
   first_date: string;
   last_date: string;
@@ -684,6 +707,8 @@ export interface TrackRecordRow {
   clv_prop_settled?: number | null;
   clv_prop_beat?: number | null;
   avg_clv_prop_pct?: number | null;
+  clv_game_push?: number | null;
+  clv_prop_push?: number | null;
   market_clv_settled?: number | null;
   market_clv_beat?: number | null;
   avg_market_clv_pct?: number | null;
@@ -1044,6 +1069,24 @@ export interface PositionVsOpponentRow {
   /** 1 = allows the most per qualifying player-game. */
   rank_most_allowed: number;
   teams_ranked: number;
+}
+
+/**
+ * One row of player_vs_defense_<sport>: a game the player played, with that
+ * season's rank of the opponent's defense, or (game_id null) the next
+ * opponent's rank. Rank 1 = the toughest defense.
+ */
+export interface PlayerVsDefenseRow {
+  season: number;
+  game_id: string | null;
+  game_date: string | null;
+  opponent: string | null;
+  is_home: boolean | null;
+  value: number | string | null;
+  def_rank: number | null;
+  teams_ranked: number | null;
+  avg_allowed: number | string | null;
+  def_team_games: number | null;
 }
 
 export interface H2HStatValuesRow {

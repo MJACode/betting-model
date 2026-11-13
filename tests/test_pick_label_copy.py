@@ -5,6 +5,11 @@ team or player, the side and the line, and drops "(Opener … vs Pinnacle,
 BOOK)", "(Wind N mph, BOOK)" and "(BOOK)". Rows already stored keep the
 old text, so every reader still parses it.
 
+mike, 2026-11-04: one unit basis. The NFL labels' sizing figure ("· 1.96u")
+is not the posted stake, so new labels drop it too and a surface shows a
+stored one without it (tests/test_nfl_label_units.py). NEW_OPENER and
+NEW_WIND below are the 10-23 shape, which is now also a stored old shape.
+
 Nothing here posts, writes, or grades a live pick.
 """
 
@@ -21,7 +26,7 @@ from tracking import discord_notifier as dn  # noqa: E402
 from tracking import paper_tracker as pt  # noqa: E402
 from tracking import push_notifier as push  # noqa: E402
 from tracking import x_publisher as xp  # noqa: E402
-from tracking.pick_integrity import pick_problems  # noqa: E402
+from tracking.pick_integrity import label_without_stake, pick_problems  # noqa: E402
 
 OLD_OPENER = "TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u · NEW 0m"
 NEW_OPENER = "TEN @ NYG — NYG -1 · 1.96u · NEW 0m"
@@ -31,6 +36,10 @@ OLD_PROP = "Jadarian Price Over 1.5 Rec (FD)"
 NEW_PROP = "Jadarian Price Over 1.5 Rec"
 OLD_WNBA = "A'ja Wilson Over 21.5 Pts (DK)"
 NEW_WNBA = "A'ja Wilson Over 21.5 Pts"
+# As a surface shows them beside the posted stake (mike, 2026-11-04).
+SHOWN_OLD_OPENER = "TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · NEW 0m"
+SHOWN_NEW_OPENER = "TEN @ NYG — NYG -1 · NEW 0m"
+SHOWN_NEW_WIND = "NYJ @ MIA Under 43.5"
 
 
 def _sig(**kw):
@@ -103,7 +112,7 @@ def test_the_discord_embed_names_the_book_and_not_the_annotation():
                 decision_book="fanduel", decision_odds_raw=-110.0)
     embed = dn._picks_embed("NFL", [opener, wind], "2026-10-23")
     names = [f["name"] for f in embed["fields"]]
-    assert names == [NEW_OPENER, NEW_WIND]
+    assert names == [SHOWN_NEW_OPENER, SHOWN_NEW_WIND]
     blob = json.dumps(embed)
     assert "Pinnacle" not in blob
     assert "Opener" not in blob
@@ -112,7 +121,7 @@ def test_the_discord_embed_names_the_book_and_not_the_annotation():
     assert "@ FanDuel" in embed["fields"][1]["value"]
     # A stored opener label still puts BetMGM on the price line.
     old = dn._signal_field(_sig(model_id="nfl_opener_spread", label=OLD_OPENER))
-    assert old["name"] == OLD_OPENER
+    assert old["name"] == SHOWN_OLD_OPENER
     assert "@ BetMGM" in old["value"]
 
 
@@ -180,7 +189,7 @@ def test_x_names_the_book_the_soft_price_came_from():
         model_id="nfl_opener_spread", label=NEW_OPENER,
         decision_book="betmgm", decision_odds_raw=-105.0,
         game_date="2026-10-23"))
-    assert NEW_OPENER in tweet
+    assert SHOWN_NEW_OPENER in tweet and "1.96u" not in tweet
     assert "at BetMGM" in tweet
     assert "DraftKings" not in tweet
     assert "Pinnacle" not in tweet and "Opener" not in tweet
@@ -228,13 +237,14 @@ def test_fd_and_mgm_prices_are_named_on_discord_and_x():
         tweet = xp.render_pick(dict(row, game_date="2026-10-23"))
         assert f"at {shown}" in tweet
         embed = dn._signal_field(row)
-        assert embed["name"] == label
+        assert embed["name"] == label_without_stake(label)
         assert f"@ {shown}" in embed["value"]
 
 
 def test_push_still_reads_both_labels():
     body = push._summary_body([OLD_OPENER, NEW_WIND])
-    assert OLD_OPENER in body and NEW_WIND in body
+    assert SHOWN_OLD_OPENER in body and SHOWN_NEW_WIND in body
+    assert "1.96u" not in body and "1.00u" not in body
     assert "Wind" not in NEW_WIND
 
 

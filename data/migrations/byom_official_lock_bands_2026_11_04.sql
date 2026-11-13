@@ -35,11 +35,24 @@ BEGIN
     RAISE EXCEPTION 'apply byom_official_legs_2026_11_04.sql first';
   END IF;
 
+  -- pg_get_function_identity_arguments includes the parameter names.
+  -- On PostgreSQL 16 and 17 this function's identity is
+  -- 'p_season integer, p_filters jsonb, p_timing text'. A types-only
+  -- comparison never matches, so the ALTER below ran on every pass
+  -- and took AccessExclusiveLock whenever a reader held the table.
   IF EXISTS (
+    -- to_regprocedure, not pg_get_function_identity_arguments: that one
+    -- returns the argument NAMES too ('p_season integer, ...'), so the old
+    -- comparison never matched and this file re-ran on every worker pass
+    -- (2026-11-04), each time through data.db's adapter, which stored the
+    -- jsonb key operator as %s and broke every BYOM preview.
     SELECT 1 FROM pg_proc p
-     WHERE p.proname = 'byom_legs'
-       AND pg_get_function_identity_arguments(p.oid) = 'integer, jsonb, text'
+     WHERE p.oid = to_regprocedure('public.byom_legs(integer, jsonb, text)')
        AND position('byom_official_lock_bands_v1' in p.prosrc) > 0
+       -- A body the adapter damaged (`p_filters %s`) is not present:
+       -- re-create it once. The replacement calls jsonb_exists, which
+       -- has no bare key operator for the adapter to rewrite.
+       AND position('p_filters %s' in p.prosrc) = 0
   ) THEN
     RAISE NOTICE 'byom official lock bands already present - skipping';
     RETURN;
@@ -170,7 +183,7 @@ BEGIN
     END IF;
     v_min_rest := (p_filters->>'min_rest_days')::integer;
     v_max_rest := (p_filters->>'max_rest_days')::integer;
-    IF p_filters ? 'primetime' AND p_filters->>'primetime' IS NOT NULL
+    IF jsonb_exists(p_filters, 'primetime') AND p_filters->>'primetime' IS NOT NULL
        AND p_filters->>'primetime' <> '' THEN
       v_primetime := (p_filters->>'primetime')::boolean;
     END IF;
@@ -202,7 +215,7 @@ BEGIN
       IF EXISTS (SELECT 1 FROM unnest(v_months) AS m(m) WHERE m < 1 OR m > 12) THEN
         RAISE EXCEPTION 'unknown filter key: months';
       END IF;
-    ELSIF p_filters ? 'months' AND jsonb_typeof(p_filters->'months') NOT IN ('array', 'null') THEN
+    ELSIF jsonb_exists(p_filters, 'months') AND jsonb_typeof(p_filters->'months') NOT IN ('array', 'null') THEN
       RAISE EXCEPTION 'unknown filter key: months';
     END IF;
     IF jsonb_typeof(p_filters->'weekdays') = 'array'
@@ -212,7 +225,7 @@ BEGIN
       IF EXISTS (SELECT 1 FROM unnest(v_weekdays) AS d(d) WHERE d < 0 OR d > 6) THEN
         RAISE EXCEPTION 'unknown filter key: weekdays';
       END IF;
-    ELSIF p_filters ? 'weekdays' AND jsonb_typeof(p_filters->'weekdays') NOT IN ('array', 'null') THEN
+    ELSIF jsonb_exists(p_filters, 'weekdays') AND jsonb_typeof(p_filters->'weekdays') NOT IN ('array', 'null') THEN
       RAISE EXCEPTION 'unknown filter key: weekdays';
     END IF;
     IF jsonb_typeof(p_filters->'kick_slots') = 'array'
@@ -222,7 +235,7 @@ BEGIN
                   WHERE s NOT IN ('early', 'late', 'prime')) THEN
         RAISE EXCEPTION 'unknown filter key: kick_slots';
       END IF;
-    ELSIF p_filters ? 'kick_slots' AND jsonb_typeof(p_filters->'kick_slots') NOT IN ('array', 'null') THEN
+    ELSIF jsonb_exists(p_filters, 'kick_slots') AND jsonb_typeof(p_filters->'kick_slots') NOT IN ('array', 'null') THEN
       RAISE EXCEPTION 'unknown filter key: kick_slots';
     END IF;
     IF jsonb_typeof(p_filters->'opponents') = 'array' THEN
@@ -232,7 +245,7 @@ BEGIN
       IF cardinality(v_opponents) = 0 THEN
         v_opponents := NULL;
       END IF;
-    ELSIF p_filters ? 'opponents' AND jsonb_typeof(p_filters->'opponents') <> 'null' THEN
+    ELSIF jsonb_exists(p_filters, 'opponents') AND jsonb_typeof(p_filters->'opponents') <> 'null' THEN
       RAISE EXCEPTION 'unknown filter key: opponents';
     END IF;
 

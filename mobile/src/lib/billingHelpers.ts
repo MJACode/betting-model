@@ -266,7 +266,7 @@ function formatStatusDate(iso: string | null, withYear: boolean): string | null 
  */
 export function planStatusCopy(
   sub: SubscriptionRow | null | undefined,
-  _opts: { discordPaid?: boolean } = {},
+  opts: { discordPaid?: boolean; comped?: boolean } = {},
   now: Date = new Date(),
 ): PlanStatusCopy {
   if (sub && isEntitled(sub, now) && sub.status === 'trialing') {
@@ -284,6 +284,7 @@ export function planStatusCopy(
     }
     return { badge: 'Premium', line: when ? `${planName} · renews ${when}` : planName };
   }
+  if (opts.comped) return { badge: 'Premium', line: 'Premium' };
   return { badge: 'Free', line: 'Free plan' };
 }
 

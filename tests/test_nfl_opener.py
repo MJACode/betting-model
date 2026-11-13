@@ -260,11 +260,11 @@ class TestBuildOpenerRows:
         # strong bet — 0.5818 at -105 — so it stakes ABOVE one unit.
         assert p["kelly_fraction"] > 0.01
         assert p["recommended_bet"] == round(p["kelly_fraction"] * 1000, 2)
-        assert p["pick_label"].startswith("NYJ @ MIA — NYJ +5 ·")
+        # The bet only: no annotation, no unit figure (mike, 2026-11-04).
+        assert p["pick_label"] == "NYJ @ MIA — NYJ +5"
         assert "Opener" not in p["pick_label"] and "Pinnacle" not in p["pick_label"]
         assert p["decision_book"] == "betmgm"
         assert p["decision_odds"] == p["dk_odds"]
-        assert p["pick_label"].endswith("u")
 
     def test_stake_scales_with_the_bet(self):
         # 89% of opener picks carry ~+1.6pp of edge and return -0.30%, while
@@ -318,11 +318,14 @@ class TestBuildOpenerRows:
         _, picks = build_opener_rows([_card_row(stake_pct="0.0")], bankroll=1000.0)
         assert picks == []
 
-    def test_unit_appears_on_the_pick_label(self):
-        # The stake has to be visible wherever the pick is read, not only in a
-        # column somebody has to go looking for.
+    def test_the_sizing_is_on_the_row_not_the_label(self):
+        # The label used to end in the sizing ("· 1.47u"). That is not the
+        # stake: every surface shows the posted one, 1u to win at the decided
+        # price, beside the label (mike, 2026-11-04: one unit basis). The
+        # sizing stays on the row as kelly_fraction.
         _, picks = build_opener_rows([_card_row(stake_pct="1.470")], bankroll=1000.0)
-        assert picks[0]["pick_label"].endswith("1.47u")
+        assert picks[0]["pick_label"] == "NYJ @ MIA — NYJ +5"
+        assert picks[0]["kelly_fraction"] == 0.0147
 
     def test_card_emits_the_stake_columns(self):
         rows = _both_sides("pinnacle", -3.5, -110, -110) +                _both_sides("betmgm", -1.0, -108, -112)
@@ -810,15 +813,15 @@ class TestFreshNumberLabel:
                     model_prob="0.5557", market_prob="0.5122", edge="0.0435",
                     dev="2.0", book="betmgm", stake_pct="1.958")
         _, picks = build_opener_rows([dict(base, held_min="0.0")], 1000.0)
-        assert picks[0]["pick_label"] == \
-            "TEN @ NYG — NYG -1 · 1.96u · NEW 0m"
+        # The age stays on the label; the sizing figure does not (mike, 2026-11-04).
+        assert picks[0]["pick_label"] == "TEN @ NYG — NYG -1 · NEW 0m"
         _, picks = build_opener_rows([dict(base, held_min="")], 1000.0)
-        assert picks[0]["pick_label"].endswith("· 1.96u · age unknown")
+        assert picks[0]["pick_label"] == "TEN @ NYG — NYG -1 · age unknown"
         _, picks = build_opener_rows([dict(base, held_min="1500")], 1000.0)
-        assert picks[0]["pick_label"].endswith("· 1.96u · up 25h")
-        # A card written before the column existed: the label is unchanged.
+        assert picks[0]["pick_label"] == "TEN @ NYG — NYG -1 · up 25h"
+        # A card written before the column existed: the bet alone.
         _, picks = build_opener_rows([base], 1000.0)
-        assert picks[0]["pick_label"].endswith("· 1.96u")
+        assert picks[0]["pick_label"] == "TEN @ NYG — NYG -1"
 
     def test_the_label_still_names_its_book_and_its_line(self):
         # Discord reads the book out of the parenthesised group and the

@@ -46,9 +46,9 @@ export function ParlayLegCard({ leg, onRemove, onSwap, onEdit }: Props) {
             </View>
           )}
           {/* An in-play leg is a different kind of bet from the pre-game ones
-              beside it — its price is a ~45s-old snapshot of a number that is
-              still moving — and this card is on the screen the bet is actually
-              placed from. Same live dot the board uses. */}
+              beside it — its price is the number it locked at, while the
+              book's number keeps moving — and this card is on the screen the
+              bet is actually placed from. Same live dot the board uses. */}
           {leg.isLive ? (
             <View style={[styles.tag, styles.liveTag]}>
               <LiveDot />

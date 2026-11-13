@@ -16,7 +16,7 @@
  * weather row has no number.
  */
 
-import { MINUS } from './format';
+import { labelWithoutStake, MINUS } from './format';
 
 /** ASCII hyphen used as a minus sign → U+2212. Names with hyphens are left. */
 export function trueMinus(text: string): string {
@@ -74,7 +74,7 @@ export interface SignalsBetFields {
    * name (golf `yes`, a UFC method class). Anything else uses `label`. */
   side: string;
   line: number | string | null;
-  /** Odds market (`totals`, `spreads`, `h2h`, `team_totals_home`, `totals_h1`, a prop key). */
+  /** Odds market (`totals`, `spreads`, `h2h`, `team_totals_home`, `totals_h1`, `spreads_q1`, `h2h_q1`, a prop key). */
   market: string | null;
   homeTeam?: string | null;
   awayTeam?: string | null;
@@ -102,8 +102,8 @@ function stripTrailingLabelNoise(text: string): string {
   let prev = '';
   while (prev !== text) {
     prev = text;
-    text = text
-      .replace(/\s*·\s*\d+(?:\.\d+)?u\s*$/iu, '')
+    // The stake is the app's one pattern (format.ts labelWithoutStake).
+    text = labelWithoutStake(text)
       .replace(/\s*·\s*NEW\s+\d+m\s*$/iu, '')
       .replace(/\s*·\s*up\s+\d+(?:\.\d+)?[hd]\s*$/iu, '')
       .replace(/\s*·\s*age unknown\s*$/iu, '');
@@ -173,7 +173,9 @@ function isPropMarket(market: string | null, player: string | null): boolean {
  * total names the club the market belongs to and the market ("Boston Bruins Team
  * Total Over 3.5"), as DraftKings names it. A first half's total says so
  * ("First Half Over 112.5"): a bare "Over 112.5" reads as the game total. So
- * does a first half's spread ("First Half Duke +3.5").
+ * does a first half's spread ("First Half Duke +3.5"), a first quarter's
+ * spread ("First Quarter DEN -1.5") and a first quarter's moneyline ("First
+ * Quarter DEN ML").
  * Regulation moneyline is "(Regulation)", not "ML" — it pays only on a
  * regulation win. Golf and UFC method of victory have no structured market,
  * so the stored label is the headline.
@@ -211,11 +213,21 @@ export function signalsBetHeadline(fields: SignalsBetFields): string {
     // A first half's spread says so: a bare "Duke +3.5" reads as the game's.
     const num = line == null ? '' : spreadNumber(line, side, market);
     bet = ['First Half', team, num].filter((part) => part.length > 0).join(' ');
+  } else if (market === 'spreads_q1') {
+    // A first quarter's spread says so too (models/nba_q1_trend.py): a bare
+    // "DEN -1.5" reads as the game's. The stored line is the HOME number;
+    // spreadNumber flips it for the away side.
+    const num = line == null ? '' : spreadNumber(line, side, market);
+    bet = ['First Quarter', team, num].filter((part) => part.length > 0).join(' ');
   } else if (market != null && market.startsWith('spreads')) {
     const num = line == null ? '' : spreadNumber(line, side, market);
     bet = [team, num].filter((part) => part.length > 0).join(' ');
   } else if (regulation) {
     bet = team ? `${team} (Regulation)` : 'Regulation';
+  } else if (market === 'h2h_q1') {
+    // A first quarter's moneyline says so (models/nba_q1_trend_ml.py): a bare
+    // "DEN ML" reads as the game's.
+    bet = team ? `First Quarter ${team} ML` : 'First Quarter ML';
   } else if (
     market != null && market.startsWith('h2h')
     || (market == null && (side === 'home' || side === 'away') && !player)

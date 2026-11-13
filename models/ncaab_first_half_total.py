@@ -29,7 +29,8 @@ first-half fetch an hour before each tip:
      best is chosen, so the next book takes the game (the research's -200
      floor test, after_fact.py AF1). The single best eligible quote is the one
      with the largest edge, ties to the alphabetically first book key. The game
-     is bet there when that edge is above 0.02 (config.MODEL_EDGE_THRESHOLDS);
+     is bet there when that edge is above the cut, 0.025 from 2026-11-06
+     (0.02 before; config.MODEL_EDGE_THRESHOLDS);
      otherwise it is decided with no bet. One decision a game, ever (CLAUDE.md
      1c).
 
@@ -106,6 +107,17 @@ H0 = 0.75
 NMIN = 500
 # The team term's shrinkage (the research's K_T, round 4 tilt_reliability.csv).
 K_TOTAL = 236.0
+# No UNDER when the favourite lays this many points or more in the first half
+# (mike, 2026-11-11: "half time unders should not be taken along with big
+# favorite spreads"). This model decides fifty minutes before the first-half
+# spread model, which this season takes those favourites, so the under is the
+# leg that gives way, and it is the weak one: on the replay of 2023-24 to
+# 2025-26 at this model's cut the unders with the favourite laying 12 or more
+# went 171-159, -8.50 units on 331 bets (+6.62, -4.09 and -11.03 by season),
+# against +77.99 on the other 1,110 (positive every season). The first-half
+# number is the median over the books of the decision fetch's own first-half
+# spreads. docs/sports/ncaab.md, "An under beside a big favourite".
+UNDER_BIG_FAVOURITE = 12.0
 W_PREV = 0.5
 
 
@@ -292,13 +304,18 @@ def first_half_mean(T: float, tau_home: float, tau_away: float, art: dict) -> fl
 
 
 def decide(game_id: str, quotes: pd.DataFrame, fg: dict | None, tau: dict | None,
-           art: dict, cut: float, books=BOOKS, min_price: float | None = None) -> Decision:
+           art: dict, cut: float, books=BOOKS, min_price: float | None = None,
+           fav_lays: float | None = None) -> Decision:
     """One game's decision from its decision-fetch quotes.
 
     fg:  {"cons": consensus full-game total, "nb": books} or None.
     tau: {"tau_home", "tau_away", "n_home", "n_away"} or None (zero tendencies).
     min_price: the shortest price a side may lay (config.min_odds_for), None
     for none (the research's own grid).
+    fav_lays: the points the favourite lays in the first half at the decision
+    fetch, None when no book quoted a first-half spread or for the research's
+    own grid (the replay). An under that clears the cut with the favourite
+    laying UNDER_BIG_FAVOURITE or more is decided `big_favourite`, not bet.
     """
     bad = out_of_range(quotes, books)
     dropped = [{"book": str(r["bookmaker"]), "line": r["total_line"], "over": r["over_price"],
@@ -329,7 +346,13 @@ def decide(game_id: str, quotes: pd.DataFrame, fg: dict | None, tau: dict | None
     b = d.best
     capped = qb.edge_problem(b.edge, MODEL_ID)
     d.status = "edge_cap" if capped else "bets" if b.edge > cut else "below_cut"
+    big = (d.status == "bets" and b.side == "under" and fav_lays is not None
+           and float(fav_lays) >= UNDER_BIG_FAVOURITE)
+    if big:
+        d.status = "big_favourite"
     d.detail = (f"{b.side} {b.line:g} @{b.book} {b.price:+.0f} edge {b.edge:+.4f} "
                 f"p {b.prob:.4f} mu {mu:.3f} T {T:.2f} ({d.fg_books} books)"
-                + (f"; {capped}: a data error, not a bet" if capped else "") + note)
+                + (f"; {capped}: a data error, not a bet" if capped else "")
+                + (f"; the favourite lays {float(fav_lays):g} in the half: no under beside a "
+                   f"favourite laying {UNDER_BIG_FAVOURITE:g} or more" if big else "") + note)
     return d

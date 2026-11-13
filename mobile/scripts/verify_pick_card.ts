@@ -423,6 +423,25 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
   );
 }
 {
+  // An in-play pick decided at FanDuel (decision_book, since 2026-09-10): its
+  // Now price, book and hand-off are FanDuel's, never DraftKings'.
+  const fdLive = mkPick({ is_live: true, decision_book: 'fanduel', decision_odds: -105, best_book: 'fanduel' });
+  const rows: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -125, total_line: 8.5 },
+    { bookmaker: 'fanduel', over_price: -112, total_line: 8.5, over_link: 'fd://now' },
+  ];
+  const h = heroAmericanForPick(fdLive, latest({ over_price: -125 }), rows);
+  check('live decided at FD → Now is FD\'s price at FD',
+    h?.kind === 'now' && h.book === 'fanduel' && h.price === -112 && h.lockedPrice === -105, JSON.stringify(h));
+  const ho = bestHandoffForPick(fdLive, rows, h);
+  check('… and the hand-off is Bet FD', ho?.bookmaker === 'fanduel' && ho.verb === 'Bet' && ho.price === -112);
+  // No FanDuel row while DraftKings has one (NCAAF stores DK's in-play rows only).
+  const nofd = heroAmericanForPick(fdLive, latest({ over_price: -125 }), [rows[0]]);
+  check('live decided at FD with no FD row → not tracked, at FD',
+    nofd?.book === 'fanduel' && nofd.price === null && nofd.untracked === true, JSON.stringify(nofd));
+  check('… and an Open FD hand-off', bestHandoffForPick(fdLive, [rows[0]], nofd)?.verb === 'Open');
+}
+{
   const hero = heroAmericanForPick(mkPick({ is_live: true }), null, []);
   const h = bestHandoffForPick(mkPick({ is_live: true }), [], hero);
   check(
@@ -1415,7 +1434,7 @@ check(
       /bookControl: \{[\s\S]*?minHeight: 44/.test(card) &&
       !card.includes('handoffNavy') &&
       !card.includes('bestNow') &&
-      /movedLine != null && leadRow\.bookmaker === heroPrice\.book/.test(card) &&
+      /movedLine != null && leadRow\??\.bookmaker === heroPrice\.book/.test(card) &&
       card.includes('lineNote=') &&
       card.includes('betSpeech={sheetBetSpeech}') &&
       card.includes('myBooksReady || pick.is_live === true') &&

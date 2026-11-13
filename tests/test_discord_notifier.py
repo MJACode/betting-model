@@ -1175,10 +1175,11 @@ def test_clv_line_is_empty_when_nothing_was_measured():
     assert "beat close" not in dn._tally_line(t, with_clv=True)
 
 
-def test_exactly_flat_clv_is_not_a_beat():
-    """Matching the close is not beating it."""
+def test_exactly_flat_clv_is_a_push():
+    """A close that equals the price taken is a push, not a non-beat."""
     t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, 0.0)])
-    assert (t["clv_n"], t["clv_beat"]) == (1, 0)
+    assert (t["clv_n"], t["clv_beat"], t["clv_push"]) == (0, 0, 1)
+    assert dn.clv_line(t) == "0 measured, 1 push"
 
 
 def test_tally_line_omits_clv_unless_asked():

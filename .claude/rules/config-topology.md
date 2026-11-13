@@ -48,10 +48,35 @@ The scorer pauses from `config.PAUSED_MODELS`; the publishers pause from the
 table. A 6am-only sync left those two a day apart after #727 (five MLB props
 unposted 2026-09-14).
 
+**The table holds two cuts per model since 2026-11-11** (mike: a volume input
+per model). `base_min_prob` / `base_min_edge` are config's. `min_prob` /
+`min_edge`, which every surface reads, are the cut IN FORCE: the tighter of
+config's and the model's volume setting (`model_volume_settings`, set only
+through `set_model_volume`). The sync writes config's cut into both and calls
+`apply_model_volume_settings()` before it commits; a writer that sets `min_*`
+without that call drops every setting until the next pass. A setting never
+loosens, never moves an in-play model, and changes what is POSTED, not what
+the scorer writes. Code that needs config's cut from the table reads
+`base_min_*`. Detail: `docs/thresholds.md`, "Volume settings".
+
 **Sportsbooks → `config.py`, env-overridable.** `LINE_SHOP_BOOKMAKERS` drives the
 Odds API `bookmakers` param (the `us2` books cost a second region — measured,
 `docs/best_line.md` §2); `BEST_LINE_BOOKMAKERS` is the set a pick may be DECIDED
 at, and it excludes the books a member cannot bet.
+
+**A STATE-LIMITED BOOK IS FETCHED AND NEVER THE BOOK A PICK NAMES.** (mike,
+2026-11-06: *"global rule. remove betparx from sports books for recommeding
+betting lines in picks only niche avaialble in a few states"*.) betPARX is
+licensed in Maryland, Pennsylvania and New Jersey only, so it sits in
+`config.STATE_LIMITED_BOOKMAKERS`. That one set takes it out of
+`BEST_LINE_BOOKMAKERS` and `BETTABLE_BOOKS` after any environment override,
+which the espnbet exclusion does not do. It stays in `LINE_SHOP_BOOKMAKERS`,
+because the NCAAB consensus models take a median over every book and were
+fitted with it. The app (`REFERENCE_ONLY_BOOKS` in `mobile/src/lib/markets.ts`),
+the NFL cards' standalone fallback (`nfl/data_ingest/books.py`) and the NBA
+in-play fetch (`feed_books`) each carry a copy, and
+`tests/test_betparx_never_a_pick_book.py` pins all of them. A new deciding
+path reads `BEST_LINE_BOOKMAKERS`, never its own list.
 
 ### Two invariants that must not be broken
 

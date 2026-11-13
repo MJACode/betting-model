@@ -81,6 +81,23 @@ def test_legal_source_stays_intact_and_the_pages_drop_placeholders(tmp_path):
     assert 'href="/support">Support</a>' in privacy
     home = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert 'href="/support">Support</a>' in home
+    for page in (terms, privacy, support, home):
+        assert "© 2026 Signal Base LLC." in page
+        assert "© 2026 Signal Base." not in page
+    assert "operated by Signal Base LLC" in terms
+    assert 'operated by Signal Base ("' not in terms
+    assert "owned by Signal Base LLC" in terms
+    assert "SIGNAL BASE LLC AND ITS OWNERS" in terms
+    assert "hold Signal Base LLC harmless" in terms
+    assert "between you and Signal Base LLC only, not Apple" in terms
+    assert "Signal Base LLC, not Apple, is solely responsible" in terms
+    assert "between you and Signal Base LLC only, not Google" in terms
+    assert "Signal Base LLC · Email:" in terms
+    assert "Signal Base LLC · Email:" in privacy
+    assert (
+        "how Signal Base LLC (&quot;Signal Base LLC,&quot; &quot;we,&quot; &quot;us&quot;)"
+        in privacy
+    )
 
 
 def test_a_leftover_bracket_fails_the_build():

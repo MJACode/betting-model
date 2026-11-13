@@ -26,7 +26,7 @@ from byom.prop_facts import (
     _pre_start as _prop_pre_start,
     facts_for_game,
 )
-from byom.official import PointClock, RoleClock, prop_lock_candidates
+from byom.official import OFFICIAL_SPORTS, PointClock, RoleClock, prop_lock_candidates
 
 # Month 01-12 and day 01-31. '2024-13-45' matches a leading-year check
 # and the cast then aborts the game. A value that fails this pattern is
@@ -83,8 +83,13 @@ def _log_table(sport: str) -> tuple[str, tuple[str, ...]]:
 
 
 def _fetch(conn, sql, params):
+    """Read, then end a clean transaction. See byom.load._fetch."""
+    from data.db import release_read
     cur = conn.execute(sql, params)
-    return cur.fetchall()
+    try:
+        return cur.fetchall()
+    finally:
+        release_read(conn)
 
 
 def _games(conn, season: int, sport: str = SPORT) -> list[dict]:
@@ -191,14 +196,14 @@ def facts_for_season(conn, season: int,
         quotes = _quotes_for_game(conn, game["game_id"], sport)
         log_rows = _log_for_game(conn, game["game_id"], sport)
         game_facts = facts_for_game(game, quotes, log_rows)
-        if sport == "NFL" and game_facts:
-            _attach_official(conn, game, quotes, game_facts)
+        if sport in OFFICIAL_SPORTS and game_facts:
+            _attach_official(conn, game, quotes, game_facts, sport)
         facts.extend(game_facts)
     return facts, keys
 
 
 def _attach_official(conn, game: dict, quotes: list[dict],
-                     game_facts: list[dict]) -> None:
+                     game_facts: list[dict], sport: str = "NFL") -> None:
     """Official (first-match) legs on each fact, under `_official`.
 
     The role clock is the game's DraftKings spread history, read with
@@ -207,7 +212,7 @@ def _attach_official(conn, game: dict, quotes: list[dict],
     from byom.game_facts import _pre_start as _game_pre_start
     from byom.load import _dk_quotes
 
-    dk = _dk_quotes(conn, game["game_id"], "NFL")
+    dk = _dk_quotes(conn, game["game_id"], sport)
     clock = RoleClock(_game_pre_start(dk, "spreads"))
     total_clock = PointClock(_game_pre_start(dk, "totals"), _rank)
     pools: dict[tuple, list[dict]] = {}
@@ -269,9 +274,13 @@ def build_season(conn, season: int, apply: bool = False,
     legs = [leg for fact in facts for leg in fact.get("_official") or ()]
     written = _upsert(conn, facts, keys) if apply else 0
     official = 0
-    if apply and sport == "NFL":
+    if apply and sport in OFFICIAL_SPORTS:
         from byom.load import write_official_legs
         official = write_official_legs(conn, keys, legs, props=True)
+    if apply:
+        # Same boundary as byom.load.build_season: the next season's
+        # odds read must not sit inside this official-leg write.
+        conn.commit()
     return {
         "season": season, "sport": sport, "facts": len(facts), "written": written,
         "official_legs": len(legs), "official_written": official,

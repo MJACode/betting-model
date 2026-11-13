@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { BookChecklist, toggleBook } from '@/components/BookChecklist';
@@ -98,7 +99,7 @@ export function OnboardingModal({
   const skip = () => setStep(SLIDES.length);
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
+    <Modal trackName="OnboardingModal" visible={visible} animationType="slide" presentationStyle="fullScreen">
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.skipRow}>
           {onBooks ? (

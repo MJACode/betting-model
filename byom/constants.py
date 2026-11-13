@@ -26,4 +26,9 @@ DK_HISTORY_START_SEASON = 2020
 # 2021 is 2020-21. The in-progress season stays above this floor.
 NBA_DK_HISTORY_START_SEASON = 2021
 
+# Measured 2026-11-05 on byom_game_facts: NHL seasons 2019 and 2020 have
+# no DraftKings line; 2021 (2020-21) is the first, with 97% moneylines.
+# NHL season is the ending year, the same split as NBA.
+NHL_DK_HISTORY_START_SEASON = 2021
+
 SPORT = "NFL"

@@ -57,6 +57,8 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from tracking.deploy_drain import DEPLOY_KILL_MARKERS
+
 ET = ZoneInfo("America/New_York")
 
 # The scheduled daily. Catch-up must not fire before this, or a 5:55am deploy
@@ -183,7 +185,9 @@ def completed_mlb_freshness(run: DailyRun) -> bool:
     if _truthy_ok(run.ok):
         return True
     failed = _failed_steps(run)
-    if not failed or "aborted" in failed:
+    # ``aborted`` is the boot sweep. ``deploy-cutoff`` is the SIGTERM drain
+    # closing its own row. Either way the worker was replaced.
+    if not failed or failed & DEPLOY_KILL_MARKERS:
         return False
     return failed.isdisjoint(MLB_FRESHNESS_STEPS)
 
@@ -196,22 +200,23 @@ def _non_aborted_failure(run: DailyRun) -> bool:
     """
     if run.finished_at is None or completed_mlb_freshness(run):
         return False
-    return "aborted" not in _failed_steps(run)
+    return not (_failed_steps(run) & DEPLOY_KILL_MARKERS)
 
 
 def _deploy_killed(run: DailyRun) -> bool:
     """The process was replaced before the daily finished.
 
     `failed_steps` contains `aborted` (the boot sweep, or a later same-kind
-    start, stamped a row the worker never closed), or `finished_at` is still
-    NULL because nothing has stamped it yet. A run that finished and named
-    a step is a real failure, not one of these.
+    start, stamped a row the worker never closed) or `deploy-cutoff` (the
+    SIGTERM drain closed its own row), or `finished_at` is still NULL
+    because nothing has stamped it yet. A run that finished and named a
+    step is a real failure, not one of these.
     """
     if completed_mlb_freshness(run):
         return False
     if run.finished_at is None:
         return True
-    return "aborted" in _failed_steps(run)
+    return bool(_failed_steps(run) & DEPLOY_KILL_MARKERS)
 
 
 def today_counts(runs: list[DailyRun]) -> tuple[int, int]:

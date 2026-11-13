@@ -1,7 +1,9 @@
-const { getDefaultConfig } = require('expo/metro-config');
+// getSentryExpoConfig = Expo's default config plus Sentry's debug ids, so a
+// stack trace from an OTA bundle maps back to source (lib/sentry.ts).
+const { getSentryExpoConfig } = require('@sentry/react-native/metro');
 const path = require('path');
 
-const config = getDefaultConfig(__dirname);
+const config = getSentryExpoConfig(__dirname);
 
 // @supabase/supabase-js ESM bundle (index.mjs) contains:
 //   import(OTEL_PKG)  — dynamic import with a variable argument

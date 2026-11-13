@@ -48,6 +48,10 @@ from byom.prop_facts import _capture_rank, grade_ou
 
 MATCH_ROLES = ("any", "favorite", "underdog", "pickem")
 
+# Sports whose builders write official candidates. NBA joined 2026-11-04
+# (Matt: "do the same as what I said for nfl").
+OFFICIAL_SPORTS = ("NFL", "NBA", "NHL")
+
 # (market, leg_side, price field on the quote). price_home is the over
 # on a total, price_away the under: the same mapping as byom/load.py.
 GAME_LEGS = (
@@ -226,7 +230,15 @@ def _num(value):
     return Decimal(str(value))
 
 
-def _keep_changes(rows: list[dict]) -> list[dict]:
+# A prop is filtered on its own line and price only (Matt, 2026-11-04:
+# favorite/underdog, team spread and game total are team bets), so a
+# snapshot where only the game moved is not a new prop candidate. That
+# keeps the NBA prop history, about 108 props a game, inside the app's
+# read limit.
+_PROP_STATE = ("point", "price")
+
+
+def _keep_changes(rows: list[dict], state: tuple = None) -> list[dict]:
     """Drop a snapshot that repeats the previous candidate's lock state.
 
     The earliest quote that enters a band is unchanged: a later quote
@@ -236,7 +248,8 @@ def _keep_changes(rows: list[dict]) -> list[dict]:
     kept = []
     prev = None
     for row in rows:
-        if prev is not None and all(prev[key] == row[key] for key in _STATE):
+        keys = _STATE if state is None else state
+        if prev is not None and all(prev[key] == row[key] for key in keys):
             continue
         kept.append(row)
         prev = row
@@ -396,7 +409,7 @@ def prop_lock_candidates(fact: dict, pool: list[dict], clock: RoleClock,
                     graded[0] if side == "over" else graded[1]),
                 player_key=fact["player_key"],
             ))
-        out.extend(_keep_changes(rows))
+        out.extend(_keep_changes(rows, _PROP_STATE))
     return out
 
 

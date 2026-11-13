@@ -266,6 +266,61 @@ card is not 0-0 while the rebuild is unfinished or for a season the
 official build does not cover. The closing line stays under the official
 headline. The bets are on `ByomBetsScreen`.
 
+## Trend filters (2026-11-05)
+
+Matt, 2026-11-05: game bets needed more inputs ("if you don't select prime
+time it's basically every bet"), and he approved three steps.
+
+**The More filters sheet on game bets.** Moneyline, spread (puck line) and
+total get the sheet props already had: price, month, weekday, NFL kickoff
+slot, opponent. A game bet has no player line and no player; a total has
+no team, so it has no opponent and no team's last game. NFL game bets get
+Rest (short week, 6 days or fewer; off a bye, 12 or more), the same cuts the
+NFL prop chips use. NBA and NHL keep their back-to-back and 2+ days chips.
+
+**Five server keys** (`byom_trend_filters_2026_11_05.sql`, graded by
+`byom_legs` and kept by `byom_save_model`):
+
+| Key | Values | Meaning |
+|---|---|---|
+| `line_move` | toward / against / none | The DraftKings line since the first stored quote (the opener), on this side. A spread moves toward home when the home number falls; a total or a prop toward the over when it rises; a moneyline toward a side when its implied chance rises. |
+| `prev_result` | won / lost | The bet team's previous game this season. |
+| `prev_ats` | covered / not_covered | That game against its closing spread. |
+| `prev_total` | over / under | Both teams' previous games went over (or both under). |
+| `division_game` | true / false | Both teams in one division that season (`byom_team_division`). |
+
+**No lookahead.** On the official line, `line_move` is the move up to the
+quote that became the bet, so the lock is the first quote where the move
+fits; the close is never used for an official bet. A last-game filter is not
+known until that game is over: 4 hours after the previous start.
+A stored candidate is the line until the next one (a row is written only
+on a change), so the lock is the quote still in force at that moment, made
+official at that moment; a line that never moved after the previous game is
+not dropped (CE review, #1187). The wait is the bet team's previous start
+for `prev_result` / `prev_ats`, and both teams' for `prev_total`. On the
+closing line both are known at kickoff. A team's first game of a season has
+no previous game, so a last-game filter leaves it out. The opener is the
+first DraftKings quote stored, not necessarily DraftKings' own open; a move
+on a spread, total or prop is the number only, not the price.
+
+**Chips (Matt, 2026-11-05).** The app offers Moved toward and Moved away;
+"Didn't move" is dropped, because on the official line the opener has not
+moved, so it was nearly every bet. The server still accepts `none`, and a
+model saved with it still shows the chip. NBA player props hold one stored
+line each before 2026-27 (measured 2026-11-05: 1.00 candidates per prop for
+2023-24 to 2025-26, 10.97 for 2026-27), so the Trends tab says line history
+starts in 2026-27. NFL props hold about 2.4 per prop for 2023-2025.
+
+**Divisions** are a fixed list in `byom_team_division`: NFL since 2002, NBA
+since 2004-05, NHL from 2013-14 with the 2020-21 temporary divisions and the
+2021-22 realignment. NHL's UTA code is Arizona through 2023-24 and Utah
+after. Codes match `byom_game_facts` (measured 2026-11-05).
+
+**Season breakdown.** Under All seasons the record card is followed by one
+row per season (the headline's timing) and "Up in X of Y seasons". Under 50
+bets (`BYOM_SMALL_SAMPLE_BETS`, the main models' gate) a note says the record
+could be luck.
+
 ## Refresh
 
 Since 2026-11-04 the scheduler queues `byom_refresh` with apply true every
@@ -305,10 +360,16 @@ user sees their own rows. The cap is 25 models. Saving an existing name
 updates that model and appends a snapshot of `byom_backtest` at that
 moment. The snapshot totals and the per-market summary are that one
 read. The snapshot stores wins, losses, pushes, and ties. A
-stake or kelly filter is rejected. Phase A line and price keys are
-accepted by `byom_prop_phase_a_filters_2026_10_29.sql`. An
-allowlisted key in the wrong case is rejected. There
-is no recommended stake.
+stake or kelly filter is rejected. Since
+`byom_save_filters_2026_11_05.sql` (ACTIVE_MIGRATIONS, 2026-11-05) the
+save keeps all 22 keys the preview grades (`byom_legs`): before it, the
+live save kept 9 and silently dropped the Phase A keys (price, player,
+opponents, months, weekdays, kick slots, team spread, game total) and
+refused `min_line` / `max_line`. An unknown key is refused by name, a
+null value is not stored, and the values are checked by the preview's
+parser, because the save grades through `byom_backtest` before it
+writes. An allowlisted key in the wrong case is rejected. An NHL model
+cannot be a pick'em. There is no recommended stake.
 
 The RPCs are `SECURITY DEFINER`: `byom_save_model`, `byom_list_models`,
 `byom_delete_model`. The user id comes from `auth.uid()`, not from an

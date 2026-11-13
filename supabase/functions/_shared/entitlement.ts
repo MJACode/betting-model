@@ -95,7 +95,24 @@ export async function syncAppRoleForUser(
     .maybeSingle();
 
   // Trial keeps the app. It does not receive the paid Discord role.
-  const shouldHold = subscriptionGrantsDiscordRole(sub);
+  // An active comped grant does. Whop is not read here.
+  // A missing function means the grant migration is not applied yet: keep the
+  // old subscription-only answer. Any other lookup failure must not strip a
+  // role we cannot prove should go.
+  const shouldHoldSub = subscriptionGrantsDiscordRole(sub);
+  let comped = false;
+  const { data: grantFlag, error: grantErr } = await admin.rpc(
+    "discord_grant_access_for",
+    { p_user_id: userId },
+  );
+  const grantMissing = Boolean(
+    grantErr && /does not exist|schema cache|PGRST202/i.test(grantErr.message ?? ""),
+  );
+  if (grantErr && !grantMissing && !shouldHoldSub) {
+    return { skipped: true, reason: "grant lookup failed" };
+  }
+  if (!grantErr && grantFlag === true) comped = true;
+  const shouldHold = shouldHoldSub || comped;
   const holds = Boolean(link.app_role_granted);
 
   // Already in the desired state. Re-asserting is harmless (both Discord calls

@@ -12,10 +12,12 @@ push, the Record tab, the website) publishes the flat unit stake from
 when the pick has no price. So the prompt quoted a different bet from the one
 the channel posted for the same pick.
 
-The prompt now takes the stake from the database function that the published
-record is built on (``published_pick_stake``), so it cannot drift from the
-channel. ``tests/test_record_units_agree.py`` pins that function's SQL body to
-``stake_for``; this file pins that the prompt uses it and quotes no money.
+The stake comes from the database function that the published record is
+built on (``published_pick_stake``), so it cannot drift from the channel.
+``tests/test_record_units_agree.py`` pins that function's SQL body to
+``stake_for``. Since 2026-11-04 there is no prompt to paste: the open picks are
+the ``public.open_picks`` view, and this file pins that the view uses that
+function and quotes no money, and that the doc reads records in units.
 """
 from __future__ import annotations
 
@@ -27,12 +29,9 @@ from tracking.discord_notifier import fmt_stake, stake_for
 ROOT = Path(__file__).resolve().parent.parent
 DOC = (ROOT / "docs" / "mobile_picks_prompt.md").read_text(encoding="utf-8")
 
-# The block pasted into the project instructions: the first fenced block after
-# the heading that introduces it.
-_HEADING = "Full Picks Chart Prompt"
-_AFTER = DOC[DOC.index(_HEADING):]
-_OPEN = _AFTER.index("```") + 3
-BLOCK = _AFTER[_OPEN:_AFTER.index("```", _OPEN)]
+# The query a Claude chat reads: the open_picks view body.
+_MIG = (ROOT / "data" / "migrations" / "open_picks_view_2026_11_04.sql").read_text(encoding="utf-8")
+BLOCK = re.search(r"\$view\$(.*?)\$view\$", _MIG, re.S).group(1)
 
 STAKE_PRICE = "COALESCE(p.decision_odds, p.dk_odds)"
 
@@ -40,7 +39,8 @@ STAKE_PRICE = "COALESCE(p.decision_odds, p.dk_odds)"
 def test_the_prompt_quotes_no_dollar_amount():
     """No dollar sign anywhere in what Claude is told to print or compute."""
     hits = [line.strip() for line in BLOCK.splitlines() if "$" in line]
-    assert not hits, f"dollar signs in the pasted prompt: {hits}"
+    assert not hits, f"dollar signs in the open picks view: {hits}"
+    assert "$" not in DOC.replace("$view$", ""), "a dollar sign in the doc"
 
 
 def test_the_prompt_never_sizes_a_pick_off_a_bankroll():
@@ -57,29 +57,30 @@ def test_the_prompt_never_sizes_a_pick_off_a_bankroll():
 def test_the_stake_comes_from_the_published_stake_function():
     """The same function v_public_track_record and Discord #results book, at
     the price the pick was decided at."""
-    for col in (f"(published_pick_stake({STAKE_PRICE})).risk",
-                f"(published_pick_stake({STAKE_PRICE})).win"):
-        assert col in BLOCK, f"the prompt SQL lost the unit stake: {col}"
-    header = next(line for line in BLOCK.splitlines()
-                  if line.strip().startswith("| Game Time (ET)"))
-    assert "| Stake |" in header, header
+    assert f"public.published_pick_stake({STAKE_PRICE}) s" in BLOCK
+    for col in ("ROUND(s.risk, 2) AS risk_units", "ROUND(s.win, 2) AS to_win_units",
+                "END AS stake"):
+        assert col in BLOCK, f"the view lost the unit stake: {col}"
 
 
 def test_the_stake_examples_match_the_channel_format():
-    """The prompt shows Claude how a stake reads. Those strings must be what
-    fmt_stake prints for the same price, or the two surfaces read differently."""
-    examples = {-110: "1.1u to win 1u", 150: "0.67u to win 1u", -350: "3u to win 0.86u"}
+    """The view writes the stake as text. It must read the way fmt_stake prints
+    it: two decimals, half up, zeros trimmed, a bare 1u with no price. The SQL
+    was compared with fmt_stake on production for 21 prices on 2026-11-04."""
+    examples = {-110: "1.1u to win 1u", 150: "0.67u to win 1u", -350: "3u to win 0.86u",
+                -115: "1.15u to win 1u"}
     for price, text in examples.items():
         assert fmt_stake(stake_for(None, price)) == text, (price, fmt_stake(stake_for(None, price)))
-        assert text in BLOCK, f"the prompt lost the {price} example: {text}"
+    assert "1.15u to win 1u" in DOC
+    assert "trim_scale(ROUND(s.risk, 2))::text || 'u to win '" in BLOCK
     # Unpriced: the bare conviction, never a made-up -110 price.
     assert fmt_stake(stake_for(None, None)) == "1u"
-    assert '"1u"' in BLOCK
+    assert "THEN '1u'" in BLOCK
 
 
 def test_records_are_read_in_units():
     """A follow-up like "how did yesterday go?" must not be answered by
     summing profit_flat and quoting it as money."""
-    assert "v_public_track_record" in BLOCK
-    assert "units and risked" in BLOCK
-    assert "profit_flat / 100.0" in BLOCK
+    assert "v_public_track_record" in DOC
+    assert "units and risked" in DOC
+    assert "profit_flat / 100.0" in DOC

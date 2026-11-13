@@ -22,7 +22,34 @@ from zoneinfo import ZoneInfo
 from byom.constants import DK_HISTORY_START_SEASON, SPORT
 from byom.game_facts import parse_date, parse_game_id
 from byom.load import _fetch, _games
-from byom.season import current_nfl_season
+from byom.season import current_nba_season, current_nfl_season, current_nhl_season
+
+# NFL and NBA (Matt, 2026-11-04: the NBA builder gets the same refresh).
+# NHL game bets joined 2026-11-05 (Matt: "Yes go").
+REFRESH_SPORTS = ("NFL", "NBA", "NHL")
+
+# Sports whose builder has player props. A game in any other sport is
+# never due for a missing prop pass, or every past game would be due
+# every day.
+PROP_SPORTS = ("NFL", "NBA")
+
+
+def _season_for(sport: str, as_of) -> int:
+    if sport == "NBA":
+        return current_nba_season(as_of)
+    if sport == "NHL":
+        return current_nhl_season(as_of)
+    return current_nfl_season(as_of)
+
+
+def _game_key(game: dict, sport: str) -> str | None:
+    """canonical_key: the NFL key parsed from the id, the game id elsewhere."""
+    if sport != SPORT:
+        return str(game["game_id"]) if game.get("game_id") else None
+    parsed = parse_game_id(game["game_id"])
+    if parsed is None or parsed[1] < DK_HISTORY_START_SEASON:
+        return None
+    return parsed[0]
 
 # Not a lock window. The due set is this many days back and this many
 # days forward from the report date, inclusive.
@@ -67,7 +94,7 @@ def _window(as_of: date) -> tuple[date, date]:
     )
 
 
-def _fact_rows(conn, season: int) -> dict[str, tuple]:
+def _fact_rows(conn, season: int, sport: str = SPORT) -> dict[str, tuple]:
     """canonical_key -> (home_score, away_score, built_at, props_scanned_at).
 
     One read. Freshness uses built_at from this row. It does not query
@@ -80,17 +107,17 @@ def _fact_rows(conn, season: int) -> dict[str, tuple]:
                    built_at, props_scanned_at
               FROM byom_game_facts
              WHERE sport = %s AND season = %s
-        """, (SPORT, season))
+        """, (sport, season))
     }
 
 
-def _prop_keys(conn, season: int) -> set[str]:
+def _prop_keys(conn, season: int, sport: str = SPORT) -> set[str]:
     return {
         row[0]
         for row in _fetch(conn, """
             SELECT DISTINCT canonical_key FROM byom_prop_facts
              WHERE sport = %s AND season = %s
-        """, (SPORT, season))
+        """, (sport, season))
     }
 
 
@@ -101,11 +128,6 @@ def _incomplete(row: tuple | None) -> bool:
     return row[0] is None or row[1] is None
 
 
-def _buildable(parsed: tuple) -> bool:
-    """Same refusal as assemble_game. An unbuildable id is not due."""
-    return parsed[1] >= DK_HISTORY_START_SEASON
-
-
 def _props_recorded(stored: tuple | None) -> bool:
     """The prop pass already read this game, whether or not it wrote a row."""
     return stored is not None and stored[3] is not None
@@ -113,7 +135,8 @@ def _props_recorded(stored: tuple | None) -> bool:
 
 def due_games(conn, today: date | datetime | None = None,
               facts: dict[str, tuple] | None = None,
-              props: set[str] | None = None) -> list[dict]:
+              props: set[str] | None = None,
+              sport: str = SPORT) -> list[dict]:
     """Games the refresh would rebuild. No odds read.
 
     A past fact row with a null score is incomplete: the row was written
@@ -127,19 +150,18 @@ def due_games(conn, today: date | datetime | None = None,
     Pass `facts` and `props` when the caller already read them.
     """
     as_of, _now = _clock(today)
-    season = current_nfl_season(as_of)
+    season = _season_for(sport, as_of)
     start, end = _window(as_of)
     if facts is None:
-        facts = _fact_rows(conn, season)
+        facts = _fact_rows(conn, season, sport)
     if props is None:
-        props = _prop_keys(conn, season)
+        props = _prop_keys(conn, season, sport)
     due = []
-    for game in _games(conn, season):
-        parsed = parse_game_id(game["game_id"])
+    for game in _games(conn, season, sport):
+        key = _game_key(game, sport)
         day = parse_date(game.get("game_date"))
-        if parsed is None or day is None or not _buildable(parsed):
+        if key is None or day is None:
             continue
-        key = parsed[0]
         in_window = start <= day <= end
         past = day < as_of
         stored = facts.get(key)
@@ -149,7 +171,8 @@ def due_games(conn, today: date | datetime | None = None,
             reason = "missing"
         elif past and _incomplete(stored):
             reason = "incomplete"
-        elif past and key not in props and not _props_recorded(stored):
+        elif (past and sport in PROP_SPORTS and key not in props
+              and not _props_recorded(stored)):
             reason = "props"
         else:
             continue
@@ -165,36 +188,36 @@ def due_games(conn, today: date | datetime | None = None,
 def freshness(conn, today: date | datetime | None = None,
               due: list[dict] | None = None,
               facts: dict[str, tuple] | None = None,
-              props: set[str] | None = None) -> dict:
+              props: set[str] | None = None,
+              sport: str = SPORT) -> dict:
     """Read-only counts. Does not read odds and does not write.
 
     Pass `due`, `facts`, and `props` when the caller already read them.
     Scores and built_at come from that one facts read.
     """
     as_of, now = _clock(today)
-    season = current_nfl_season(as_of)
+    season = _season_for(sport, as_of)
     start, end = _window(as_of)
     stale_before = now - timedelta(hours=FRESHNESS_MAX_AGE_HOURS)
     if facts is None:
-        facts = _fact_rows(conn, season)
+        facts = _fact_rows(conn, season, sport)
     if props is None:
-        props = _prop_keys(conn, season)
+        props = _prop_keys(conn, season, sport)
     in_window = 0
     missing_game_facts = 0
     incomplete_game_facts = 0
     stale_game_facts = 0
     window_missing_prop_facts = 0
-    for game in _games(conn, season):
-        parsed = parse_game_id(game["game_id"])
+    for game in _games(conn, season, sport):
+        key = _game_key(game, sport)
         day = parse_date(game.get("game_date"))
-        if parsed is None or day is None or not _buildable(parsed):
+        if key is None or day is None:
             continue
-        key = parsed[0]
         window = start <= day <= end
         stored = facts.get(key)
         if window:
             in_window += 1
-            if key not in props:
+            if sport in PROP_SPORTS and key not in props:
                 window_missing_prop_facts += 1
             stamped = None if stored is None else stored[2]
             if stamped is not None and stamped < stale_before:
@@ -204,8 +227,9 @@ def freshness(conn, today: date | datetime | None = None,
         if day < as_of and _incomplete(stored):
             incomplete_game_facts += 1
     if due is None:
-        due = due_games(conn, today=today, facts=facts, props=props)
+        due = due_games(conn, today=today, facts=facts, props=props, sport=sport)
     return {
+        "sport": sport,
         "season": season,
         "as_of": as_of.isoformat(),
         "due": len(due),
@@ -218,7 +242,7 @@ def freshness(conn, today: date | datetime | None = None,
     }
 
 
-def _mark_props_scanned(conn, keys: list[str]) -> None:
+def _mark_props_scanned(conn, keys: list[str], sport: str = SPORT) -> None:
     """Record the prop pass on each game fact it read.
 
     A game with no DraftKings prop still gets the stamp, so the next
@@ -229,19 +253,22 @@ def _mark_props_scanned(conn, keys: list[str]) -> None:
     conn.execute(
         """UPDATE byom_game_facts
               SET props_scanned_at = now()
-            WHERE canonical_key = ANY(%s)""",
-        (list(dict.fromkeys(keys)),))
+            WHERE sport = %s AND canonical_key = ANY(%s)""",
+        (sport, list(dict.fromkeys(keys))))
 
 
-def refresh(conn, apply: bool = False, today: date | datetime | None = None) -> dict:
+def refresh(conn, apply: bool = False, today: date | datetime | None = None,
+            sport: str = SPORT) -> dict:
     """Freshness always. Writes only when apply is true, and only the due games."""
+    if sport not in REFRESH_SPORTS:
+        raise ValueError(f"byom refresh builds {REFRESH_SPORTS}, got {sport!r}")
     as_of, _now = _clock(today)
-    season = current_nfl_season(as_of)
-    facts = _fact_rows(conn, season)
-    props = _prop_keys(conn, season)
-    due = due_games(conn, today=today, facts=facts, props=props)
+    season = _season_for(sport, as_of)
+    facts = _fact_rows(conn, season, sport)
+    props = _prop_keys(conn, season, sport)
+    due = due_games(conn, today=today, facts=facts, props=props, sport=sport)
     report = freshness(
-        conn, today=today, due=due, facts=facts, props=props)
+        conn, today=today, due=due, facts=facts, props=props, sport=sport)
     report["apply"] = bool(apply)
     report["written_game_facts"] = 0
     report["written_prop_facts"] = 0
@@ -253,12 +280,21 @@ def refresh(conn, apply: bool = False, today: date | datetime | None = None) -> 
     from byom.load import build_season
     from byom.prop_load import build_season as build_props
 
+    # build_season commits the game facts and byom_official_legs before
+    # it returns. The prop read below is a new transaction.
     game = build_season(
-        conn, report["season"], apply=True, game_ids=ids)
-    prop = build_props(
-        conn, report["season"], apply=True, game_ids=ids)
-    _mark_props_scanned(conn, prop.get("canonical_keys") or [])
+        conn, report["season"], apply=True, game_ids=ids, sport=sport)
+    prop = {"written": 0, "canonical_keys": []}
+    if sport in PROP_SPORTS:
+        prop = build_props(
+            conn, report["season"], apply=True, game_ids=ids, sport=sport)
+        _mark_props_scanned(conn, prop.get("canonical_keys") or [], sport)
     conn.commit()
     report["written_game_facts"] = game["written"]
     report["written_prop_facts"] = prop["written"]
+    # A daily refresh never changes 10% of a table, so Postgres would not
+    # re-count it, and a new season reads as empty to the planner (6.0s
+    # NBA preview, 2026-11-05). byom/analyze.py.
+    from byom.analyze import analyze_tables
+    report["analyzed"] = analyze_tables(conn)
     return report

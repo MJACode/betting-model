@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { formatAmerican, MINUS } from '@/lib/format';
@@ -126,7 +127,7 @@ export function EditLineLegSheet({
   };
 
   return (
-    <Modal visible={spec != null} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal trackName="EditLineLegSheet" visible={spec != null} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <Pressable
           style={StyleSheet.absoluteFill}

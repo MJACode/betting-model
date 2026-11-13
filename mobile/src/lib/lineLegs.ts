@@ -47,6 +47,7 @@
 import { americanToDecimal, formatStampET, parseStamp } from '@/lib/format';
 import { bookLineLabel } from '@/lib/hitMode';
 import { nhlOffLineCount } from '@/lib/nhlBoard';
+import { normalizePlayerName } from '@/lib/playerNews';
 import { CUSTOM_MODEL_ID, type LegBookPrice, type ParlayLeg } from '@/lib/parlay';
 import { bookName, isBettableBook, linkForSide, MODEL_BOOK, priceForSide } from '@/lib/markets';
 import type { StatsOddsQuote, TeamLineQuote } from '@/lib/statsOdds';
@@ -92,8 +93,9 @@ export function isGameSpec(s: LineLegSpec): s is GameLineLegSpec {
   return s.kind === 'game';
 }
 
-/** modelId every line leg carries: no model, and parlayCorrelation reads it as
- *  an offense-neutral 'other' class so a line leg never trips correlation. */
+/** modelId every line leg carries: no model, so parlayCorrelation reads it as
+ *  an offense-neutral 'other' class. A PROP line leg carries `prop` instead,
+ *  which the market-level correlation reads (lib/propCorrelation.ts). */
 export const LINE_LEG_MODEL_ID = 'stats_line';
 
 /**
@@ -243,6 +245,16 @@ function buildLeg<R extends { bookmaker: string; fromLadder?: boolean; snapshot_
     pricedAt: anchor.bookmaker,
     pricedFromLadder: anchor.fromLadder === true,
     pricedAsOf: anchor.fromLadder ? anchor.snapshot_at ?? null : null,
+    // What the same-game correlation is looked up by (lib/propCorrelation.ts).
+    prop: isGameSpec(spec)
+      ? undefined
+      : {
+          sport: spec.sport,
+          market: spec.market,
+          player: normalizePlayerName(spec.player_name),
+          team: spec.team ?? null,
+          side: spec.side,
+        },
   };
 }
 

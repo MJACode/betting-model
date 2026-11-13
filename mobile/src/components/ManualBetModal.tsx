@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -9,6 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { addBetHint } from '@/lib/a11y';
 import type { ManualBetInput } from '@/hooks/useManualBets';
@@ -61,7 +61,7 @@ export function ManualBetModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal trackName="ManualBetModal" visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.backdrop}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
