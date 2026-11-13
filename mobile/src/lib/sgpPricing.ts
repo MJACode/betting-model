@@ -3,15 +3,32 @@
  *
  * A book prices legs from ONE game together, as a same-game parlay, and pays
  * less than those legs multiplied out. Legs from different games it simply
- * multiplies. No feed we buy publishes the same-game price (Matt, 2026-11-06:
- * the slip showed +5993 / FD +6040 where FanDuel's own slip said +4254), so:
+ * multiplies. No feed we buy publishes the same-game price, so:
  *
- *   estimate = (legs multiplied at that book) x (1 - cut) ^ sameGameGroups
+ *   fair     = (legs multiplied at that book) / max(1, lift)
+ *   estimate = 1 + (fair - 1) x (1 - cut) ^ extraLegs
  *
- * where a same-game group is a game with 2+ legs on the slip. The cut is fitted
- * per book from prices members enter (`sgp_haircuts()`, the median over 120
- * days, data/migrations/add_sgp_price_observations_2026_11_06.sql) once a book
- * has SGP_MIN_OBSERVATIONS of them, and DEFAULT_SGP_HAIRCUT until then.
+ *   lift       how much more often the legs all hit than multiplied out says,
+ *              from the leg correlations (parlayCorrelation.sgpCorrelationLift)
+ *   extraLegs  legs past the first in each game with 2+ legs
+ *   cut        the book's margin per extra same-game leg, taken off the PROFIT
+ *              (a cut off the whole payout drives a short-priced slip to -10000)
+ *
+ * A lift below 1 (legs that pull against each other) is used for the win %
+ * but never raises the price above the legs multiplied out: no book has been
+ * seen to pay that, so the estimate does not claim it.
+ *
+ * History. 2026-11-06 (Matt): +5993 / FD +6040 where FanDuel said +4254, two
+ * 2-leg NBA games. The first fix cut 15.8% once per GAME. 2026-11-12 (Matt):
+ * a 5-leg WAS@NYG slip showed FD +8037 where FanDuel said +3085, because one
+ * game with five legs got the same single cut as one with two, and NFL had no
+ * correlations at all. The legs multiplied out at FanDuel are +9564; the
+ * measured NFL correlations (lib/propCorrelation.ts) lift the joint chance
+ * 1.87x, which takes it to +5080; the rest is the book's margin.
+ *
+ * The cut is fitted per book from prices members enter (`sgp_haircuts()`, the
+ * median over 120 days, data/migrations/sgp_per_leg_cut_2026_11_12.sql) once a
+ * book has SGP_MIN_OBSERVATIONS of them, and DEFAULT_SGP_HAIRCUT until then.
  *
  * Pure: no React, no network. The hook and the RPCs live in
  * hooks/useSgpHaircuts.ts.
@@ -19,13 +36,18 @@
 import type { ParlayLeg } from '@/lib/parlay';
 
 /**
- * The cut per same-game group before a book has its own fit. Measured once:
- * the app's FanDuel tile read +6040 (61.40) for two 2-leg same-game groups and
- * FanDuel quoted +4254 (43.54), so 1 - (43.54 / 61.40) ^ (1/2) = 0.158.
- * One slip, one book. It is the starting point, not a property of any book;
- * entered prices replace it.
+ * The cut per EXTRA same-game leg, off the profit, before a book has its own
+ * fit. Two FanDuel slips, both screenshots of FanDuel's own price:
+ *   2026-11-06  NBA, 2 extra legs, lift 1 (no NBA line-leg correlation),
+ *               fair 61.40, paid 43.54:  1 - (42.54 / 60.40) ^ (1/2)   = 0.161
+ *   2026-11-12  NFL, 4 extra legs, lift 1.866 (exact bivariate-normal),
+ *               fair 96.64 / 1.866 = 51.79, paid 31.85:
+ *                                        1 - (30.85 / 50.79) ^ (1/4)   = 0.119
+ * The default is their geometric mean, 1 - sqrt(0.839 x 0.881) = 0.140. Two
+ * slips, one book, and it is fitted to the very slips it is checked against:
+ * a starting point, not a property of any book. Entered prices replace it.
  */
-export const DEFAULT_SGP_HAIRCUT = 0.158;
+export const DEFAULT_SGP_HAIRCUT = 0.14;
 
 /** DISTINCT devices (one vote each, sgp_haircuts()) a book needs before its
  *  own fitted cut replaces the default. */
@@ -53,8 +75,18 @@ function sameGameKey(leg: ParlayLeg): string | null {
   return id;
 }
 
-/** How many games on the slip carry 2+ legs. */
-export function sameGameGroupCount(legs: readonly ParlayLeg[]): number {
+/** A slip's same-game shape. `lift` is 1 here; parlayCorrelation.sgpShapeFor
+ *  fills it in from the leg correlations. */
+export interface SgpShape {
+  /** Games with 2+ legs. */
+  groups: number;
+  /** Legs past the first in each of those games. */
+  extraLegs: number;
+  /** P(all legs hit) / (legs multiplied out), at the book's leg prices. */
+  lift: number;
+}
+
+export function sgpShape(legs: readonly ParlayLeg[]): SgpShape {
   const counts = new Map<string, number>();
   for (const l of legs) {
     const k = sameGameKey(l);
@@ -62,8 +94,19 @@ export function sameGameGroupCount(legs: readonly ParlayLeg[]): number {
     counts.set(k, (counts.get(k) ?? 0) + 1);
   }
   let groups = 0;
-  for (const n of counts.values()) if (n >= 2) groups += 1;
-  return groups;
+  let extraLegs = 0;
+  for (const n of counts.values()) {
+    if (n >= 2) {
+      groups += 1;
+      extraLegs += n - 1;
+    }
+  }
+  return { groups, extraLegs, lift: 1 };
+}
+
+/** How many games on the slip carry 2+ legs. */
+export function sameGameGroupCount(legs: readonly ParlayLeg[]): number {
+  return sgpShape(legs).groups;
 }
 
 /** This book's own fitted cut, or null when it has too few entries or the
@@ -82,40 +125,64 @@ export function fittedHaircut(book: string, fits: SgpHaircuts = NO_SGP_FITS): nu
   return null;
 }
 
-/** The cut this book applies per same-game group. */
+/** The cut this book applies per extra same-game leg. */
 export function haircutFor(book: string, fits: SgpHaircuts = NO_SGP_FITS): number {
   return fittedHaircut(book, fits) ?? DEFAULT_SGP_HAIRCUT;
 }
 
 /**
- * Multiply a book's multiplied-out decimal payout down to its estimated
- * same-game price. Returns the input unchanged when no game has 2+ legs.
- * Never returns a payout at or below 1 (a price that cannot win anything).
+ * Take a book's multiplied-out decimal payout down to its estimated same-game
+ * price. Returns the input unchanged when no game has 2+ legs. Never returns a
+ * payout at or below 1 (a price that cannot win anything).
  */
 export function applySgpHaircut(
   multipliedDecimal: number,
-  groups: number,
+  shape: SgpShape,
   book: string,
   fits: SgpHaircuts = NO_SGP_FITS,
 ): number {
-  if (groups <= 0 || !(multipliedDecimal > 1)) return multipliedDecimal;
-  const est = multipliedDecimal * Math.pow(1 - haircutFor(book, fits), groups);
-  return est > 1 ? est : multipliedDecimal;
+  if (shape.groups <= 0 || !(multipliedDecimal > 1)) return multipliedDecimal;
+  const fair = multipliedDecimal / priceLift(shape.lift);
+  return 1 + (fair - 1) * Math.pow(1 - haircutFor(book, fits), shape.extraLegs);
+}
+
+/** The lift the PRICE uses: never below 1 (see the header). */
+export function priceLift(lift: number): number {
+  return lift > 1 && Number.isFinite(lift) ? lift : 1;
 }
 
 /**
  * The cut implied by one entered price, the same formula `sgp_haircuts()`
- * applies server-side: 1 - (book / multiplied) ^ (1 / groups).
+ * applies server-side: 1 - ((book - 1) / (fair - 1)) ^ (1 / extraLegs), with
+ * fair = multiplied / max(1, lift).
  */
-export function impliedHaircut(bookDecimal: number, multipliedDecimal: number, groups: number): number {
-  if (groups <= 0 || !(bookDecimal > 1) || !(multipliedDecimal > 1)) return NaN;
-  return 1 - Math.pow(bookDecimal / multipliedDecimal, 1 / groups);
+export function impliedHaircut(bookDecimal: number, multipliedDecimal: number, shape: SgpShape): number {
+  if (shape.extraLegs <= 0 || !(bookDecimal > 1) || !(multipliedDecimal > 1)) return NaN;
+  const fair = multipliedDecimal / priceLift(shape.lift);
+  if (!(fair > 1)) return NaN;
+  return 1 - Math.pow((bookDecimal - 1) / (fair - 1), 1 / shape.extraLegs);
 }
 
-/** The ratio the server accepts (log_sgp_price), so the app can say "check
- *  that number" instead of sending one the server will refuse. */
-export function enteredPriceIsPlausible(bookDecimal: number, multipliedDecimal: number): boolean {
+/** The cut the server's typo check measures against: the default, fixed, so
+ *  the app and log_sgp_price agree whatever a book's own fit says. */
+const PLAUSIBLE_REF_CUT = 0.14;
+
+/**
+ * The range the server accepts (log_sgp_price), so the app can say "check
+ * that number" instead of sending one the server will refuse. With a shape,
+ * the entered price is checked against the estimate at the reference cut,
+ * within 4x either way: a correlated 7-leg NFL stack is paid about a sixth of
+ * its legs multiplied out, which the old 0.2 floor on the raw ratio refused
+ * (PR #1261 review M2). Without one, the old raw-ratio check.
+ */
+export function enteredPriceIsPlausible(bookDecimal: number, multipliedDecimal: number, shape?: SgpShape): boolean {
   if (!(bookDecimal > 1) || !(multipliedDecimal > 1)) return false;
+  if (shape && shape.extraLegs > 0) {
+    const fair = multipliedDecimal / priceLift(shape.lift);
+    const est = 1 + (fair - 1) * Math.pow(1 - PLAUSIBLE_REF_CUT, shape.extraLegs);
+    const r = bookDecimal / est;
+    return r >= 0.25 && r <= 4 && bookDecimal <= multipliedDecimal * 1.2;
+  }
   const r = bookDecimal / multipliedDecimal;
   return r >= 0.2 && r <= 1.2;
 }
