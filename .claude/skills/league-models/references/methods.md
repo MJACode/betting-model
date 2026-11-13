@@ -104,7 +104,11 @@ edge is where the rule misses something the state shows.
   outcome table. *Worked*: men's college first-half total (1,887 bets +5.98%)
   and spread (845 bets +6.13%). *Failed*: hockey team, alternate and period
   totals ("the books price these markets off the main line, correctly"); college
-  football first halves and team totals (every quote loses -3.7% to -6.6%).
+  football first halves and team totals (every quote loses -3.7% to -6.6%);
+  EuroLeague first halves and quarters, round 1 (the books set the half at
+  50.05-50.29% of the full-game total and stray 0.23-0.55 points from it; the
+  one positive version was a slope that held only in 2025-26:
+  `docs/euroleague_market_audit.md`).
 - **In-play game-state model.** Points still to come from the pre-game prior,
   the current margin, pace and late-game terms; the first fresh eligible quote
   decides. *Worked*: men's college in-play (three markets, the best 5 a night,

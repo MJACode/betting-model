@@ -19,6 +19,62 @@ No paid calls, no sign-ups. The only API calls were free, keyless GETs to the of
 
 Evidence grades: **Strong** = out-of-sample, real prices, bet count, interval or CLV, nothing to sell. **Weak** = win rate only, flat -110, in-sample, one season, or undated. **Noise** = pick sellers, tipsters.
 
+## First half and first quarter, round 1 (2026-11-13)
+
+Run by a read-only research agent on the local cache (no paid call, no
+production read). Every table, each naming the script that printed it:
+`docs/euroleague_1h1q_round1.md`; the scripts are
+`scripts/euroleague_research/r1_*.py` (`r1_report.py` reruns them all).
+**Verdict: nothing clears.** The numbers below are the agent's, from those
+scripts.
+
+- **Settlement.** A tied half or quarter pushes the two-way moneyline: no
+  two-way quote carries a draw price, and at BetRivers the two-way price with
+  the margin removed equals the three-way price with the draw removed (mean
+  difference 0.0012 over 2,461 first-half pairs). Fanatics posts only the
+  three-way first-half moneyline, where a tie loses. Ties: 6.31% of 2,125 games
+  after one quarter, 3.39% at the half.
+- **Bettable coverage.** No book a pick may name priced these markets before
+  2025-26. 2025-26: FanDuel and BetMGM on about 314 of 402 games (first-half
+  spread and total), BetRivers both moneylines on 316. 2026-27 to date: FanDuel
+  and BetRivers on 106-107 of 107.
+- **Baselines.** 556 cells; of the 103 positive ones with 25+ bets, none
+  survives a multiple-comparison correction and none has a 90% interval above
+  zero. Best at the best bettable close, 2025-26 and 2026-27: first-half
+  moneyline underdog, 465 bets, +19.14 units, +4.22% [-4.64, +12.35]. Worst:
+  first-half spread favourite, 423 bets, -50.67 units, -10.65% [-17.21, -3.55].
+- **The books price the periods off the full game, and closely.** The
+  first-half total sits at 50.05-50.29% of the full-game total and the first
+  quarter at 25.07-25.37%, the books' numbers within 0.23-0.55 points of that.
+  The moneylines close favourites too short (calibration slope 0.877 first
+  half, 0.751 first quarter).
+- **The catalogued method, unchanged** (a half priced from the full-game
+  consensus): first-half totals on a 2025-26 time split, 51 bets +29.78%
+  [+8.56, +49.99], **dead**: refitted on every season it leaves 9 bets, the
+  frozen fit loses on the seasons it never saw (2026-27 -15.1% on 38, 2023-24
+  -9.6% on 127), and it is +2.9% without its 10 best dates.
+- **The one lead:** first-quarter totals, walk-forward, anchored on Pinnacle's
+  full-game alternate ladder: 59 bets +14.96% [-5.49, +32.97]. Passed the
+  placebo, the market-alone control, the cut neighbourhood, early/late and the
+  other reads. **Failed:** 57 of 59 bets are unders, 55 of 59 fall in one
+  season, and it is -13.1% without its 10 best dates. Frozen; to be read
+  unchanged on 2026-27 as games are played.
+- **What the sample resolves:** about 423 bettable games a market, so a return
+  is resolved to roughly +/-7-9 points.
+- **A data trap, checked in the main session.** A book's main first-half key
+  can hold only an alternate rung: every one of BetMGM's 104 stored 2026-27
+  first-half spreads sits 2+ points off FanDuel's, and on
+  EUROLEAGUE_E2025_404 BetMGM's answer held one number, -6.5 at +160/-235,
+  against FanDuel's -2.5. Fanatics' 58 stored 2025-26 spreads are the same.
+  The purchase kept the only number it was given; the research treats a main
+  number whose two prices are far from even as a rung.
+- **Next round (queued):** read the frozen first-quarter under lead on 2026-27
+  as it is played; the first-half home underdog on the offshore seasons; the
+  moneylines with probabilities shrunk toward 50% (the calibration slopes
+  above); the method on every season once the older full-game lines are
+  stored, with the team half-tendency term restored; three mechanisms of our
+  own before either market is called null (`SKILL.md`, step 5).
+
 ---
 
 ## 1. Leads

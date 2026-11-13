@@ -30,8 +30,8 @@ on (2,398 games); referees, venue and attendance per game.
 | Full-game moneyline | final, overtime included | the feed's full path, 10 books, 2020-21 on | to do (needs the purchase) |
 | Full-game spread | final margin, overtime included | the same | to do |
 | Full-game total | both scores, overtime included | the same | to do |
-| First-half moneyline, spread, total | quarters 1-2 | bought: every game 2023-24 to 2025-26 at eight times before tip, 6 books (fewer before 2025-26) | to do: research |
-| First-quarter moneyline, spread, total | quarter 1 | bought with the first half: from 2023-24 (2,050 of 2,648 pairs that season) | to do: research |
+| First-half moneyline, spread, total | quarters 1-2; a tied half pushes the two-way moneyline | bought, 2023-24 on; a book a pick may name only from 2025-26 (2023-24 BetUS alone, 2024-25 BetUS and GTbets) | **round 1: nothing clears** (`docs/euroleague_market_audit.md`, round 1); next round queued |
+| First-quarter moneyline, spread, total | quarter 1; a tied quarter (6.31% of games) pushes the two-way moneyline | bought with the first half | **round 1: nothing clears**; one lead (unders off a full-game anchor) fails three kill tests |
 | Second-quarter spread and total | quarter 2 | FanDuel only | to do; likely parked (one book) |
 | Team totals, full game and first half | one club's points | BetMGM, BetRivers, Fanatics (first half: BetRivers) | to do |
 | Alternate spreads and totals | final | BetMGM, BetRivers, Fanatics, Pinnacle | to do |

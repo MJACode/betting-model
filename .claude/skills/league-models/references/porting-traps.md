@@ -78,6 +78,11 @@ down this list.
   book; non-monotone ladders; a book's line mispaired with another's price
   (a coherence filter — implied probabilities summing to 1.00-1.15 — took one
   rule from +31.1% to -0.9%). Every reader goes through quote-bounds guards.
+- **A main key holding an alternate rung.** The feed served BetMGM's 2026-27
+  EuroLeague first-half spread as one number at +160/-235, 2+ points off every
+  other book on all 104 games, under the main key. Treat a "main" number whose
+  two prices are far from even as a rung before reading any per-book result
+  (`docs/euroleague_market_audit.md`, round 1).
 - **Missing books.** No Pinnacle, Bovada or betPARX on the women's college
   board; two books dropped first halves in one season; no two-way college
   props at two books. Know which books exist before designing a cross-book
