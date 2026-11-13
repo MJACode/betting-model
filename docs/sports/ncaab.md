@@ -1528,8 +1528,9 @@ edge was 0.453).
   2026-11-12, `scripts/ncaab_live_latency_probe.py`, run `2026-11-12-ncaab`).
   Indiana -16.5 (live): DraftKings set -16.5 at 23:54:58Z, the provider served
   it to our fetch at 23:55:54.8 (57 s later), the decision came at 23:59:07.9
-  (the 150 s of ESPN waits plus 43 s of other games' reads one after another,
-  fixed 2026-11-12) and Discord received it at 23:59:09.7. A DraftKings live
+  (the 150 s of ESPN waits, then two other games' 20 s header re-reads and
+  every game's reads one after another; from 2026-11-12 they run together,
+  about 22 s sooner) and Discord received it at 23:59:09.7. A DraftKings live
   college spread is still up (number and price) 10 s later 77% of the time,
   60 s 26%, 240 s 4%; the provider's DraftKings number differed from
   DraftKings' own board at the moment it served it 28% of the time (792
