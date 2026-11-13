@@ -14,6 +14,17 @@
 > **No model is live yet.** This file holds the groundwork, what each source
 > holds, the settlement rules, the market grid and the purchases.
 
+## Discord
+
+Two channels, created 2026-11-13 by the worker's `discord_create_channel` job on
+mike's yes (worker_jobs 1282265 and 1282266), as copies of #🏀-ncaabw (same
+category, same four permission overwrites): **#atp-tennis** (1570859599299354677)
+and **#wta-tennis** (1570860861705166878). `config.DISCORD_SPORTS` names `ATP`
+and `WTA`, and `config.DEFAULT_DISCORD_CHANNELS` carries the two ids (a channel
+id is not a secret; a `DISCORD_CHANNEL_<SPORT>` variable on the worker still
+wins), so no Railway variable is needed. The first post through each is the
+`discord_test_post` job once this branch is on master.
+
 ## What the sources hold (measured 2026-11-13)
 
 | Source | What it holds |
@@ -27,7 +38,7 @@
 | The match archive | Jeff Sackmann's datasets via the public mirror `Aneeshers/tennis-sackmann-archive` (commit 83733587, an upstream snapshot of June 2026; the upstream repositories answer 404). Score, round, surface, ranks, minutes, and serve and return counts for both players. **Licence: CC BY-NC-SA 4.0, non-commercial**, as the mirror's README states. Stored: men's tour 2000-2026 and challengers/qualifying 2010-2026; women's tour 2000-2026 and qualifying/ITF 2010-2026 without the $10k-$25k levels. |
 | Pinnacle's own site (`guest.api.arcadia.pinnacle.com/0.1`, no key) | Every level: on 2026-11-13 its tennis board held 33 leagues (Challengers, ITF men's and women's, a WTA 125, a 250, the Davis Cup, both Finals). Two calls hold the whole sport: every matchup (a match is a Sets parent and a Games child), and every price with its version and stake limit. Logged every 30 minutes from 2026-11-13 into `tennis_pinnacle_matchups` and `tennis_pinnacle_prices` (`data/ingestors/tennis_pinnacle.py`); the first pass held 121 matchups and 1,079 prices. It priced both Finals while the odds feed showed no Pinnacle for them. |
 | TennisExplorer's results pages (`tennisexplorer.com/results/?type=atp-single` or `wta-single`) | Every level on one page a day per tour: both players (a stable profile link), sets, games with tiebreak points, two decimal prices. Robots allow the results pages; the terms page is closed to crawlers, so not read. 2025-08-31 men's: 417 matches, 290 ITF (23 priced), 75 Challenger (74 priced), 48 other (UTR series, a team league: dropped). Collecting 2020-01-01 to date into `tennis_te_matches`, one page every 2 seconds (`data/ingestors/tennis_explorer.py`). |
-| DraftKings' own site | Lists the lower levels, but reading it needs a browser-style session; the permission check refused that request on 2026-11-13. Not read. |
+| DraftKings' own site | Lists the lower levels. Reading it needs a browser-style session, which the permission check refused from a Claude session on 2026-11-13, twice, the second time after mike's yes in chat. `scripts/tennis_dk_probe.py` saves DraftKings' tennis leagues raw for the reader to be built from; it runs from mike's terminal or once his settings allow it. Not read yet. |
 | ESPN, Challengers and ITF | None: ESPN's 2025 men's results hold 61 events (the tour, every 250) and its women's 106 (the tour and the 125s); no Challenger or ITF event. |
 | tennis-data.co.uk (one price per match: Bet365, Pinnacle, best, average) | **Refused**: a Cloudflare block ("Sorry, you have been blocked") from mike's PC on 2026-11-13, its notes page too. Copies of its files on GitHub are not used. |
 | Betfair historical data | BASIC (one-minute last traded price) is free with an account, from 2016 (scout). Not used: no account. |

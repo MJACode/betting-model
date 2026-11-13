@@ -305,8 +305,12 @@ LINE_CHANGE_NOTIFY_PP: float = float(os.environ.get("LINE_CHANGE_NOTIFY_PP", 4.0
 # further down this file, and a webhook name is a stable, user-facing env var.)
 # NCAABW is women's college basketball (2026-11-03): its channel is
 # DISCORD_CHANNEL_NCAABW, same shape as NCAAB, not a separate model registry.
+# ATP and WTA are men's and women's professional tennis at every level
+# (2026-11-13, mike: "mens and womans should be different model groups /
+# discord channels"); docs/sports/tennis.md.
 DISCORD_SPORTS: tuple = (
     "MLB", "NHL", "WNBA", "NBA", "UFC", "GOLF", "NCAAF", "NFL", "NCAAB", "NCAABW",
+    "ATP", "WTA",
 )
 DISCORD_WEBHOOKS: dict = {
     sport: url for sport in DISCORD_SPORTS
@@ -319,9 +323,18 @@ DISCORD_WEBHOOKS: dict = {
 # (tracking/discord_notifier._channel_webhook). Added for NCAAB (2026-10-30),
 # whose channel is created by scripts/discord_create_sport_channel.py; a
 # webhook variable, when set, still wins.
+# The tennis channels were created by the worker's discord_create_channel job
+# on 2026-11-13 (worker_jobs 1282265 and 1282266, mike's yes), as copies of
+# #🏀-ncaabw. A channel id is not a secret, so it is the default here, and a
+# DISCORD_CHANNEL_<SPORT> variable on the worker still wins.
+DEFAULT_DISCORD_CHANNELS: dict = {
+    "ATP": "1570859599299354677",   # #atp-tennis
+    "WTA": "1570860861705166878",   # #wta-tennis
+}
 DISCORD_CHANNELS: dict = {
     sport: cid for sport in DISCORD_SPORTS
-    if (cid := os.environ.get(f"DISCORD_CHANNEL_{sport}", "").strip())
+    if (cid := (os.environ.get(f"DISCORD_CHANNEL_{sport}", "").strip()
+                or DEFAULT_DISCORD_CHANNELS.get(sport, "")))
 }
 # In-play channel ids. A sport with no DISCORD_WEBHOOK_LIVE_<SPORT> may set
 # DISCORD_CHANNEL_LIVE_<SPORT> (a channel id, not a secret). The notifier
