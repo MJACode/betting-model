@@ -151,6 +151,48 @@ def last_values(conn) -> dict:
     return {r[0]: (r[1], r[2]) for r in rows}
 
 
+# The league board holds only the match winner; every other market is a
+# subcategory page of its own. What the first pass of 2026-11-13 found (31
+# boards): ITF events list the match winner alone before a match; Challengers
+# and the WTA 125 add games spread, total games, set spread, set betting and
+# the listed-set winner, total and correct score; tour events add the first-set
+# winner and tiebreak, ace, service-game and win-every-set props. These
+# categories are in-play micro-markets, useless at this cadence, and skipped:
+SKIP_CATEGORIES = {"game by game", "point by point", "quick hits"}
+SUB_URL = LEAGUE_URL + "/categories/{category}/subcategories/{sub}"
+# A league or page that is no longer there answers 404 (the first pass met one:
+# a finished ITF event still named on the tennis page). That is skipped; any
+# other refusal ends the pass.
+GONE = (404, 410)
+
+
+def subpages(body: dict) -> list[tuple[str, str, str]]:
+    """(category id, subcategory id, name) of every market page a league board
+    lists, except the default one it already holds and the skipped kinds."""
+    cats = {str(c.get("id")): str(c.get("name") or "") for c in body.get("categories") or []}
+    held = {str(m.get("subcategoryId")) for m in body.get("markets") or []}
+    out = []
+    for sc in body.get("subcategories") or []:
+        cid, sid = str(sc.get("categoryId")), str(sc.get("id"))
+        if sid in held or cats.get(cid, "").strip().lower() in SKIP_CATEGORIES:
+            continue
+        out.append((cid, sid, str(sc.get("name") or "")))
+    return out
+
+
+def _store(conn, last: dict, rows: list[tuple]) -> int:
+    fresh = []
+    for row in rows:
+        val = (row[15], row[16])
+        if last.get(row[0]) != val:
+            last[row[0]] = val
+            fresh.append(row)
+    if fresh and conn is not None:
+        conn.executemany(_INSERT, fresh)
+        conn.commit()
+    return len(fresh)
+
+
 def one_pass(s, conn, last: dict, out_dir: Path | None) -> dict:
     seen_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     r = s.get(BOOT_URL, timeout=20)
@@ -159,29 +201,48 @@ def one_pass(s, conn, last: dict, out_dir: Path | None) -> dict:
     if r.status_code != 200:
         return {"refused": f"tennis page HTTP {r.status_code}"}
     leagues = league_ids(r.text)
-    stored = seen = 0
+    stored = seen = pages = gone = sub_tried = sub_gone = 0
     for lid, name in leagues.items():
         time.sleep(PAUSE_S)
         x = s.get(LEAGUE_URL.format(league=lid), timeout=20)
+        if x.status_code in GONE:
+            gone += 1
+            continue
         if x.status_code != 200:
             return {"refused": f"league {lid} HTTP {x.status_code}", "leagues": len(leagues),
-                    "seen": seen, "stored": stored}
+                    "pages": pages, "seen": seen, "stored": stored}
         body = x.json()
+        pages += 1
         if out_dir:
             (out_dir / f"league_{lid}.json").write_text(json.dumps(body), encoding="utf-8")
         rows = selection_rows(body, lid, name, seen_at)
         seen += len(rows)
-        fresh = []
-        for row in rows:
-            val = (row[15], row[16])
-            if last.get(row[0]) != val:
-                last[row[0]] = val
-                fresh.append(row)
-        if fresh and conn is not None:
-            conn.executemany(_INSERT, fresh)
-            conn.commit()
-        stored += len(fresh)
-    return {"seen_at": seen_at, "leagues": len(leagues), "seen": seen, "stored": stored}
+        stored += _store(conn, last, rows)
+        for cid, sid, _sname in subpages(body):
+            time.sleep(PAUSE_S)
+            sub_tried += 1
+            y = s.get(SUB_URL.format(league=lid, category=cid, sub=sid), timeout=20)
+            if y.status_code in GONE:
+                sub_gone += 1
+                continue
+            if y.status_code != 200:
+                return {"refused": f"league {lid} page {sid} HTTP {y.status_code}",
+                        "leagues": len(leagues), "pages": pages, "seen": seen, "stored": stored}
+            sub = y.json()
+            pages += 1
+            if out_dir:
+                (out_dir / f"league_{lid}_sub_{sid}.json").write_text(json.dumps(sub), encoding="utf-8")
+            rows = selection_rows(sub, lid, name, seen_at)
+            seen += len(rows)
+            stored += _store(conn, last, rows)
+    out = {"seen_at": seen_at, "leagues": len(leagues), "pages": pages,
+           "leagues_gone": gone, "subpages_tried": sub_tried, "subpages_gone": sub_gone,
+           "seen": seen, "stored": stored}
+    # Every sub-page missing is not a set of finished events: it is the
+    # sub-page address being wrong. Say so, loudly, every pass.
+    if sub_tried and sub_gone == sub_tried:
+        out["warning"] = "every sub-page answered 404: SUB_URL is wrong; only match winners stored"
+    return out
 
 
 def main(argv=None) -> int:
