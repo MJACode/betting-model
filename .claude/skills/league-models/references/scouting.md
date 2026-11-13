@@ -19,23 +19,29 @@ Timeboxed every time. The output is a leads table, never an essay.
 
 ## Where to look, and what answered from mike's PC
 
-Measured 2026-11-12 from mike's PC; the last column is the cloud sandbox's answer on 2026-11-13 (`curl -s -o /dev/null -w '%{http_code}'`). In the sandbox "blocked (proxy 403)" means the egress proxy refused the tunnel (curl exit 56, code 000): that is the sandbox's allowlist, not the site, so it says nothing about the PC column. Re-measure before relying on a "no": a refusal today is
+Measured 2026-11-12. Re-measure before relying on a "no": a refusal today is
 not a refusal forever, and a route that failed one way may answer another
 (`~/.claude/CLAUDE.md` §0).
 
-| Route | How | Answered 2026-11-12 | Cloud, 2026-11-13 |
-|---|---|---|---|
-| Web search | the `WebSearch` tool (load it with ToolSearch, `select:WebSearch`) | yes | the WebSearch tool, not curl-probed |
-| GitHub repositories and code | `gh search repos "<league> betting model" --sort stars`, `gh search code "<term>"` | yes | api.github.com 200; github.com 400 on a bare request |
-| Covers and Sportsbook Review forums | a plain fetch of the forum pages | yes (200) | blocked (proxy 403) |
-| Reddit (r/sportsbook and the sport's own) | a plain fetch of reddit.com and old.reddit.com | **no (403 both)** — reach threads through web search results, or try the web-fetch agent and record what it returns | blocked (proxy 403 tunnel) |
-| arXiv | `https://export.arxiv.org/api/query?search_query=...` | yes (200; plain http redirects) | blocked (proxy 403) |
-| Kaggle datasets | the dataset search page | yes (200) | blocked (proxy 403) |
-| Pinnacle's betting articles | `pinnacle.com/betting-resources` | yes (200) | blocked (proxy 403) |
-| eurohoops.net, basketnews.com, jhse.es, econpapers.repec.org, oddspapi.io | a plain fetch | yes (200, 2026-11-12, EuroLeague scout) | blocked (proxy 403) |
-| euroleaguebasketball.net (injury reports) | a plain fetch, and curl | **no (429, a Vercel security checkpoint)**; Eurohoops reposts the reports | blocked (proxy 403) |
-| University repositories (cris.unibo.it, iris.uniroma4.it), bettingexpert.com | a plain fetch | **no (403)**; centaur.reading.ac.uk serves a bot-check page; read abstracts through search results | cris.unibo.it, bettingexpert.com blocked (proxy 403) |
-| OddsPortal, BetExplorer, Flashscore odds archives | robots.txt | **read, and they disallow the archives**: OddsPortal bars every past-season path (`-1998` to `-2024`). Not scraped. | oddsportal.com blocked (proxy 403); robots.txt not re-read |
+| Route | How | Answered 2026-11-12 |
+|---|---|---|
+| Web search | the `WebSearch` tool (load it with ToolSearch, `select:WebSearch`) | yes |
+| GitHub repositories and code | `gh search repos "<league> betting model" --sort stars`, `gh search code "<term>"` | yes |
+| Covers and Sportsbook Review forums | a plain fetch of the forum pages | yes (200) |
+| Reddit (r/sportsbook and the sport's own) | a plain fetch of reddit.com and old.reddit.com | **no (403 both)** — reach threads through web search results, or try the web-fetch agent and record what it returns |
+| arXiv | `https://export.arxiv.org/api/query?search_query=...` | yes (200; plain http redirects) |
+| Kaggle datasets | the dataset search page | yes (200) |
+| Pinnacle's betting articles | `pinnacle.com/betting-resources` | yes (200) |
+| eurohoops.net, basketnews.com, jhse.es, econpapers.repec.org, oddspapi.io | a plain fetch | yes (200, 2026-11-12, EuroLeague scout) |
+| euroleaguebasketball.net (injury reports) | a plain fetch, and curl | **no (429, a Vercel security checkpoint)**; Eurohoops reposts the reports |
+| University repositories (cris.unibo.it, iris.uniroma4.it), bettingexpert.com | a plain fetch | **no (403)**; centaur.reading.ac.uk serves a bot-check page; read abstracts through search results |
+| OddsPortal, BetExplorer, Flashscore odds archives | robots.txt | **read, and they disallow the archives**: OddsPortal bars every past-season path (`-1998` to `-2024`). Not scraped. |
+
+**The weekly cloud review cannot re-probe this table.** Its network refused
+17 of 18 sites on 2026-11-13 (only `api.github.com` answered; the egress
+proxy returned 403 for the rest, including every site above that answered
+from mike's PC). Those refusals describe the cloud sandbox, not the sites, so
+they are not recorded here: re-probe from mike's PC, during a build.
 
 Not yet probed, worth trying: sports-analytics conference papers (the MIT
 Sloan conference), journals (Journal of Quantitative Analysis in Sports,

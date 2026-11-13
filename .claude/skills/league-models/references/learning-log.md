@@ -47,11 +47,14 @@ review as its own entry.
    nor contradicted, and no verdict was touched. Next review: for each live
    model, settled BETs in `picks` by `model_id` and date, units through
    `published_pick_unit_profit` (columns looked up first).
-3. **New.** Cloud answers added as their own column in the scouting routes
-   table (`scouting.md`): of 18 sites probed, only `api.github.com` answered
-   (200; `github.com` bare gave 400). Every other site, including the ones that
-   answered from the PC, returned code 0 with a 403 from the egress proxy. That
-   is the sandbox allowlist, not the sites.
+3. **New.** The cloud cannot re-probe the scouting routes: of 18 sites, only
+   `api.github.com` answered (200; `github.com` bare gave 400). Every other
+   site, including the ones that answered from the PC, returned code 0 with a
+   403 from the egress proxy. That is the sandbox allowlist, not the sites. The
+   review first added these answers as a column in `scouting.md`; the same day
+   that column was replaced by one note under the table, because 17 "blocked"
+   cells beside the PC's answers would read as the sites being down. The
+   routine no longer probes routes from the cloud.
 4. **Corrected.** Nothing measured was contradicted. Nothing was promoted:
    no trap or failure appears in two entries yet (the clean-up-thins-the-purchase
    and the curl-from-the-cloud limits each appear once).
