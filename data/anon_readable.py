@@ -438,6 +438,9 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/tennis_explorer.ensure_tables: every level's results and
     # one price pair a match, from TennisExplorer's daily pages.
     "tennis_te_matches",
+    # scripts/tennis_dk_probe.ensure_tables: DraftKings' own tennis board,
+    # every level and market, change-only. Run from mike's terminal.
+    "tennis_dk_selections",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and
