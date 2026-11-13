@@ -340,19 +340,44 @@ def held_snapshots(conn, key: str) -> set:
     return {r[0] for r in rows}
 
 
+def held_asks(conn, key: str) -> dict:
+    """Every ask this purchase already made for `key`: asked time -> (the
+    snapshot the feed answered with, its next snapshot). A resumed walk replays
+    these from the ledger without calling the feed, so it pays for nothing
+    twice. Measured cost of not doing this: 30 credits a held hour, because the
+    first group's answer was the only way to see the hour was held."""
+    rows = conn.execute(f"SELECT asked_ts, max(snapshot_ts), max(next_ts) FROM {FETCHES} "
+                        f"WHERE source = %s AND sport_key = %s AND endpoint = 'odds' "
+                        f"GROUP BY asked_ts", (SOURCE, key)).fetchall()
+    return {r[0]: (r[1], r[2]) for r in rows}
+
+
 def walk_window(conn, meter: Meter, key: str, start: datetime, end: datetime,
                 step: timedelta) -> dict:
     """Bulk snapshots of one key from `start` to `end`, one ask per `step`, each
     ask moved forward to the feed's next real snapshot when the feed kept none
     in between (never paying twice for one snapshot). Each answer is stored in
-    the same transaction as its ledger row."""
+    the same transaction as its ledger row. An ask already in the ledger is
+    replayed from it, not asked again: if a run stopped between the two book
+    groups of one ask, that ask's second group is not re-bought (at most one
+    snapshot's second group per stop)."""
     ensure_tables(conn)
     last = _last_values(conn, key)
     held = held_snapshots(conn, key)
+    done = held_asks(conn, key)
     params_base = {"apiKey": _key(), "markets": ",".join(MARKETS), "oddsFormat": "american"}
-    t, asks, stored, empty = start, 0, 0, 0
+    t, asks, stored, empty, replayed = start, 0, 0, 0, 0
     prev_snap = None
     while t <= end:
+        if t in done:
+            snap, nxt_snap = done[t]
+            replayed += 1
+            prev_snap = snap
+            nxt = t + step
+            if nxt_snap is not None and nxt_snap > nxt:
+                nxt = nxt_snap
+            t = nxt
+            continue
         rows_total = 0
         snap = nxt_snap = None
         for gi, group in enumerate(BOOK_GROUPS):
@@ -392,7 +417,8 @@ def walk_window(conn, meter: Meter, key: str, start: datetime, end: datetime,
         logger.info(f"{key} asked {_iso(t)} got {snap and _iso(snap)} rows {rows_total} "
                     f"spent {meter.spent:,} left {meter.remaining}")
         t = nxt
-    return {"key": key, "asks": asks, "rows": stored, "empty": empty, "spent": meter.spent}
+    return {"key": key, "asks": asks, "rows": stored, "empty": empty, "replayed": replayed,
+            "spent": meter.spent}
 
 
 # The plan reset to 15,000,000 credits on 2026-11-08 (odds_api_quota: used
@@ -508,7 +534,9 @@ def main(argv=None) -> int:
         return 0
     if not a.max_credits:
         raise SystemExit("--max-credits is required for any call that spends")
-    from data.db import get_connection
+    import psycopg2
+    from data.db import ConnectionLost, get_connection
+    LOST = (ConnectionLost, psycopg2.OperationalError, psycopg2.InterfaceError)
     conn = get_connection()
     ensure_tables(conn)
     floor = a.floor if a.floor is not None else credit_floor(
@@ -526,7 +554,25 @@ def main(argv=None) -> int:
                         logger.info(json.dumps(w))
         if a.buy:
             for w in shard(load_windows(a.buy), a.shard):
-                result.append(walk_window(conn, meter, w["key"], w["start"], w["end"], step))
+                for attempt in range(6):
+                    try:
+                        result.append(walk_window(conn, meter, w["key"], w["start"], w["end"], step))
+                        break
+                    except LOST as exc:
+                        # The database dropped the connection (shard 5 stopped
+                        # on this, 2026-11-13 11:58 ET). Reconnect and resume the
+                        # window from the ledger: the ask whose commit was lost
+                        # is not in it, so it is the one asked again.
+                        logger.warning(f"{w['key']}: connection lost ({exc}); "
+                                       f"resuming, attempt {attempt + 1}")
+                        time.sleep(30)
+                        try:
+                            conn.close()
+                        except Exception:                       # noqa: BLE001
+                            pass
+                        conn = get_connection()
+                else:
+                    raise SystemExit(f"{w['key']}: six connection losses in a row")
                 logger.info(json.dumps(result[-1]))
         if a.live_until:
             until = datetime.fromisoformat(a.live_until).replace(tzinfo=timezone.utc)

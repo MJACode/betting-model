@@ -211,3 +211,56 @@ def test_shards_split_the_windows_and_their_ceilings_sum_to_the_plan(tmp_path):
     assert keys == sorted(w["key"] for w in windows)            # every window once
     step = timedelta(hours=1)
     assert sum(toh.plan(p, step)["max_credits"] for p in parts) == toh.plan(windows, step)["max_credits"]
+
+
+class _LedgerConn(_FakeConn):
+    """A fake database that keeps the purchase ledger, so a second walk can
+    read back what the first one bought."""
+    def __init__(self):
+        super().__init__()
+        self.ledger = []
+
+    def execute(self, sql, params=None):
+        if sql.startswith(f"INSERT INTO {toh.FETCHES}"):
+            self.ledger.append(params)
+            return _Rows()
+        if "GROUP BY asked_ts" in sql:
+            by = {}
+            for row in self.ledger:
+                asked = datetime.fromisoformat(row[2].replace("Z", "+00:00"))
+                snap = datetime.fromisoformat(row[3].replace("Z", "+00:00")) if row[3] else None
+                nxt = datetime.fromisoformat(row[5].replace("Z", "+00:00")) if row[5] else None
+                by[asked] = (snap, nxt)
+
+            class _R:
+                def fetchall(self_inner):
+                    return [(k, v[0], v[1]) for k, v in by.items()]
+            return _R()
+        return _Rows()
+
+
+def test_a_resumed_walk_pays_for_nothing_already_bought(monkeypatch):
+    """Shard 5 stopped mid-window on a lost connection (2026-11-13). Resuming
+    must replay the bought hours from the ledger: the second walk over the same
+    window makes no call at all and follows the same path."""
+    t0 = datetime(2025, 8, 30, 0, 0, tzinfo=timezone.utc)
+    asked = []
+
+    def fake_get(meter, url, params, cost):
+        when = datetime.fromisoformat(params["date"].replace("Z", "+00:00"))
+        asked.append(when)
+        nxt = when + (timedelta(hours=5) if when.hour == 2 else timedelta(minutes=5))
+        body = {"timestamp": toh._iso(when), "next_timestamp": toh._iso(nxt), "data": []}
+        r = _Resp(body)
+        return r, meter.after(r)
+
+    monkeypatch.setattr(toh, "_get", fake_get)
+    monkeypatch.setattr(toh, "_key", lambda: "k")
+    conn = _LedgerConn()
+    end = t0 + timedelta(hours=10)
+    first = toh.walk_window(conn, toh.Meter(10_000, 0), "k", t0, end, timedelta(hours=1))
+    n_first = len(asked)
+    second = toh.walk_window(conn, toh.Meter(10_000, 0), "k", t0, end, timedelta(hours=1))
+    assert n_first == first["asks"] > 0
+    assert len(asked) == n_first and second["asks"] == 0     # nothing asked again
+    assert second["replayed"] == n_first // 2                 # each hour once, both groups held
