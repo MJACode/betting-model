@@ -36,8 +36,8 @@ ONE PASS (every NCAAB_LIVE_POLL_SEC, default 20 s)
   3. Inside a fetch window, while a game in progress has an undecided rule: ONE
      bulk Odds API call (spreads + totals, the ten books the history was bought
      at; 2 credits), its rows to `odds` as in_play (source ncaab_live_loop).
-  4. Wait PBP_WAIT_SEC after the fetch, read each game's ESPN summary, wait
-     PBP_RECHECK_SEC and read it again (ESPN served NCAAB scoring plays a
+  4. Wait PBP_WAIT_SEC after the fetch, read every game's ESPN summary at once,
+     wait PBP_RECHECK_SEC and read them all again (ESPN served NCAAB scoring plays a
      median 37 s after their wallclock, 99th percentile 55 s, longest 58 s;
      2026-11-07, 433 scoring plays). Fail closed: a play logged at or before
      the served time that only the second read carries, ESPN's header score
@@ -94,6 +94,8 @@ FETCH_OFFSET_SEC = float(os.environ.get("NCAAB_LIVE_FETCH_OFFSET_SEC", str(M.FET
 FETCH_WINDOW_SEC = float(os.environ.get("NCAAB_LIVE_FETCH_WINDOW_SEC", "240"))
 RETRY_GAP_SEC = float(os.environ.get("NCAAB_LIVE_RETRY_GAP_SEC", "60"))
 HEADER_RECHECK_SEC = float(os.environ.get("NCAAB_LIVE_HEADER_RECHECK_SEC", "20"))
+# Summaries of a fetch's games are read at once on this many threads (Loop.summaries).
+SUMMARY_THREADS = int(os.environ.get("NCAAB_LIVE_SUMMARY_THREADS", "16"))
 # While ESPN's clock runs, a newest play older than this means its play list
 # has stopped: the scoring 99th-percentile lag (55 s) plus a minute between plays.
 PLAY_LAG_MAX_SEC = float(os.environ.get("NCAAB_LIVE_PLAY_LAG_MAX_SEC", "120"))
@@ -607,6 +609,18 @@ class Loop:
                 self.sleep(gap_s)
         return None
 
+    def summaries(self, ctxs: list) -> dict:
+        """{game_id: summary or None} for every game, read at the same time.
+        Read one after another, every game's reads plus two other games' 20 s
+        header re-reads held the 2026-11-12 Indiana decision 43 s past the
+        designed 150 s (fetch 23:55:54.8, decided 23:59:07.9)."""
+        if len(ctxs) <= 1:
+            return {c.game_id: self.summary(c.espn_event_id) for c in ctxs}
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(SUMMARY_THREADS, len(ctxs))) as ex:
+            got = list(ex.map(lambda c: self.summary(c.espn_event_id), ctxs))
+        return {c.game_id: s for c, s in zip(ctxs, got)}
+
     def note(self, c: GameCtx, g, outcome: str, reason: str, fetch_at=None) -> str:
         rules = self.open_rules(c, g)
         (log.warning if outcome == "skipped" else log.info)(
@@ -758,13 +772,24 @@ class Loop:
         left = self.wait - (self.clock() - served).total_seconds()
         if left > 0:
             self.sleep(left)
-        first = {c.game_id: self.summary(c.espn_event_id) for c, _g in todo}
+        ctxs = [c for c, _g in todo]
+        first = self.summaries(ctxs)
         if self.recheck > 0:
             self.sleep(self.recheck)
+        seconds = self.summaries(ctxs)
+        # Every game whose header is ahead of its plays is re-read once, together:
+        # one game's re-read never holds another game's decision back.
+        ahead = [c for c in ctxs if first.get(c.game_id) is not None and seconds.get(c.game_id) is not None
+                 and not late_plays(first[c.game_id], seconds[c.game_id], served)
+                 and score_mismatch(seconds[c.game_id])]
+        thirds: dict = {}
+        if ahead:
+            self.sleep(HEADER_RECHECK_SEC)
+            thirds = self.summaries(ahead)
         decisions = []                                 # (ctx, g, rule, best, offers, state, notes)
         for c, g in todo:
             try:
-                second = self.summary(c.espn_event_id)
+                second = seconds.get(c.game_id)
                 if first.get(c.game_id) is None or second is None:
                     out[c.game_id] = self.note(c, g, "skipped", "ESPN summary unreadable", served)
                     continue
@@ -776,8 +801,7 @@ class Loop:
                     continue
                 why = score_mismatch(second)
                 if why:
-                    self.sleep(HEADER_RECHECK_SEC)
-                    third = self.summary(c.espn_event_id)
+                    third = thirds.get(c.game_id)
                     why = "ESPN summary unreadable" if third is None else score_mismatch(third)
                     if not why and late_plays(second, third, served):
                         why = "ESPN served a play logged before the served time only on the header re-read"
