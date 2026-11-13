@@ -662,6 +662,17 @@ ACTIVE_MIGRATIONS: list[str] = [
     # before the pair below, whose view patch calls the three-argument
     # functions. A NULL row grades exactly as before.
     "pick_stake_units_2026_11_06.sql",
+    # 2026-11-13 (mike, finishing #818): three 2026-09-26 NCAAF games each
+    # have a second games row under the Odds API's nickname for the FCS
+    # visitor (William and Mary Tribe, LIU Sharks, Houston Baptist Huskies).
+    # The nickname rows hold the odds; the CFBD rows hold the finals.
+    # Moves the odds onto the CFBD ids, drops the nickname rows' copies of
+    # latest_odds and weather, then deletes the empty nickname rows. Keyed
+    # by the six explicit game ids; a pass after the nickname rows are gone
+    # is a no-op. Never deletes or regrades a pick (none exist on them).
+    # Does not rewrite the record views. Sits before the posted-stake pair
+    # so those two stay adjacent and the view patch stays last.
+    "ncaaf_fcs_opponent_alias_2026_10_21.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
