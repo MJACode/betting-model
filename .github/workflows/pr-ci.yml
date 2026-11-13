@@ -394,7 +394,8 @@ jobs:
             tests/test_scoring_lease.py \
             tests/test_ncaaf_fcs_opponent_alias_migration.py \
             tests/test_ncaaf_game_identity.py \
-            tests/test_cfbd_ingestor.py \n            tests/test_clv_pinnacle_mainline.py
+            tests/test_cfbd_ingestor.py \
+            tests/test_clv_pinnacle_mainline.py
           # -q does not name a passed test, and a skip exits 0. Re-run this
           # file verbosely and refuse a skip so the scratch cluster is in
           # the log. The file is also in the list above.
