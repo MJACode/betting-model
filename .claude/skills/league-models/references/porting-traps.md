@@ -83,6 +83,13 @@ down this list.
   other book on all 104 games, under the main key. Treat a "main" number whose
   two prices are far from even as a rung before reading any per-book result
   (`docs/euroleague_market_audit.md`, round 1).
+- **A free source behind Cloudflare rate-limits.** EuroLeague's shot chart
+  answered HTTP 429 (error 1015) after 63 games asked four at a time; one call
+  every 1.5 seconds with a back-off on 429 held. Ask a free source one call at
+  a time first.
+- **A hold-out read needs a cache past the freeze.** A rule frozen on games
+  to a date and read on a cache that ends on that date only reproduces itself
+  (EuroLeague round 2): refresh the cache, and read only games after the freeze.
 - **Missing books.** No Pinnacle, Bovada or betPARX on the women's college
   board; two books dropped first halves in one season; no two-way college
   props at two books. Know which books exist before designing a cross-book
