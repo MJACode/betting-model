@@ -19,23 +19,23 @@ Timeboxed every time. The output is a leads table, never an essay.
 
 ## Where to look, and what answered from mike's PC
 
-Measured 2026-11-12. Re-measure before relying on a "no": a refusal today is
+Measured 2026-11-12; re-probed from mike's PC 2026-11-13 (answers marked below). Re-measure before relying on a "no": a refusal today is
 not a refusal forever, and a route that failed one way may answer another
 (`~/.claude/CLAUDE.md` §0).
 
 | Route | How | Answered 2026-11-12 |
 |---|---|---|
-| Web search | the `WebSearch` tool (load it with ToolSearch, `select:WebSearch`) | yes |
+| Web search | the `WebSearch` tool (load it with ToolSearch, `select:WebSearch`) | yes (still yes 2026-11-13: NBA totals papers returned, not pick sites) |
 | GitHub repositories and code | `gh search repos "<league> betting model" --sort stars`, `gh search code "<term>"` | yes |
-| Covers and Sportsbook Review forums | a plain fetch of the forum pages | yes (200) |
-| Reddit (r/sportsbook and the sport's own) | a plain fetch of reddit.com and old.reddit.com | **no (403 both)** — reach threads through web search results, or try the web-fetch agent and record what it returns |
-| arXiv | `https://export.arxiv.org/api/query?search_query=...` | yes (200; plain http redirects) |
+| Covers and Sportsbook Review forums | a plain fetch of the forum pages | yes (200); 2026-11-13: covers.com/forum 200, `forum.sportsbookreview.com` no answer (curl 000), `sportsbookreview.com/forum/` 200 |
+| Reddit (r/sportsbook and the sport's own) | a plain fetch of reddit.com and old.reddit.com | **no (403 both, again 2026-11-13)** — reach threads through web search results, or try the web-fetch agent and record what it returns |
+| arXiv | `https://export.arxiv.org/api/query?search_query=...` | yes (200; plain http redirects; 200 again 2026-11-13) |
 | Kaggle datasets | the dataset search page | yes (200) |
-| Pinnacle's betting articles | `pinnacle.com/betting-resources` | yes (200) |
-| eurohoops.net, basketnews.com, jhse.es, econpapers.repec.org, oddspapi.io | a plain fetch | yes (200, 2026-11-12, EuroLeague scout) |
-| euroleaguebasketball.net (injury reports) | a plain fetch, and curl | **no (429, a Vercel security checkpoint)**; Eurohoops reposts the reports |
-| University repositories (cris.unibo.it, iris.uniroma4.it), bettingexpert.com | a plain fetch | **no (403)**; centaur.reading.ac.uk serves a bot-check page; read abstracts through search results |
-| OddsPortal, BetExplorer, Flashscore odds archives | robots.txt | **read, and they disallow the archives**: OddsPortal bars every past-season path (`-1998` to `-2024`). Not scraped. |
+| Pinnacle's betting articles | `pinnacle.com/betting-resources` | yes (200); 2026-11-13: 301 to the articles page, `/en/betting-articles/` 200 |
+| eurohoops.net, basketnews.com, jhse.es, econpapers.repec.org, oddspapi.io | a plain fetch | yes (200, 2026-11-12, EuroLeague scout); 2026-11-13: econpapers 200, eurohoops/basketnews/jhse/oddspapi redirect (301/302), not followed |
+| euroleaguebasketball.net (injury reports) | a plain fetch, and curl | **no (429, a Vercel security checkpoint; 429 again 2026-11-13)**; Eurohoops reposts the reports |
+| University repositories (cris.unibo.it, iris.uniroma4.it), bettingexpert.com | a plain fetch | **no (403 both, again 2026-11-13)**; centaur.reading.ac.uk 200 on 2026-11-13 (bot-check page on 2026-11-12); bettingexpert.com 200 on 2026-11-13; read abstracts through search results |
+| OddsPortal, BetExplorer, Flashscore odds archives | robots.txt | **read (robots.txt answered 200 on all three again 2026-11-13), and they disallow the archives**: OddsPortal bars every past-season path (`-1998` to `-2024`). Not scraped. |
 
 **The weekly cloud review cannot re-probe this table.** Its network refused
 17 of 18 sites on 2026-11-13 (only `api.github.com` answered; the egress
