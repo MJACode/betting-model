@@ -840,6 +840,22 @@ def _job_splits_source_probe(**kw):
     return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
 
 
+def _job_book_app_links_probe(**kw):
+    """Each sportsbook's apple-app-site-association file, and whether the
+    betslip links we store are claimed by its app. Writes nothing, no Odds API
+    call (scripts/book_app_links_probe.py)."""
+    from scripts.book_app_links_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.book_app_links_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _validate_book_app_links_probe(args: dict) -> dict:
+    if args:
+        raise ValueError(f"unknown args {sorted(args)}; this job takes none")
+    return {}
+
+
 def _validate_splits_source_probe(args: dict) -> dict:
     if args:
         raise ValueError(f"unknown args {sorted(args)}; this job takes none")
@@ -1930,9 +1946,13 @@ def _job_nba_quarters(**kw):
     """Run the daily nba_quarters step ON THE WORKER, on demand.
 
     mike, 2026-10-30: "Run it now instead of waiting for 6am tomorrow", after
-    #1097 fixed fill_gaps. The step only reads free ESPN endpoints and writes
+    #1097 fixed fill_gaps. The step reads free ESPN endpoints and writes
     the NBA stats tables (quarter scores, nba_pbp_games, nba_stints,
-    nba_team_q1_games): no model, pick, stake or threshold is touched. It goes
+    nba_team_q1_games, team_period_results): no model, pick, stake or
+    threshold is touched. Since 2026-11-13 it also buys the half and quarter
+    closing lines of finished games that lack them (Matt approved the
+    backfill and the daily buy), under nba_odds_history.buy_period_lines_daily's
+    own plan-derived ceiling and measured floor. It goes
     through run_pipeline._timed_step, the same dispatch the daily run uses, so
     pipeline_log gets the usual dispatch:nba-quarters row with its error_msg.
 
@@ -2884,6 +2904,7 @@ JOBS = {
     "ncaab_injury_probe": (_job_ncaab_injury_probe, _validate_ncaab_injury_probe),
     # Where the Scoreboard splits can come from: DK Network + AN book ids. Free, writes nothing.
     "splits_source_probe": (_job_splits_source_probe, _validate_splits_source_probe),
+    "book_app_links_probe": (_job_book_app_links_probe, _validate_book_app_links_probe),
     # ESPN NCAAB schedule and results backfill. Free, idempotent.
     "ncaab_history_import": (_job_ncaab_history_import,
                              _validate_ncaab_history_import),

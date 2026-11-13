@@ -391,7 +391,7 @@ def test_the_stats_players_board_reads_ncaab_own_views():
     assert groups and "\n  NCAAB: ['NCAAB']," in groups.group(1)
     for key in ("points", "rebounds", "assists", "threes", "pra", "steals", "blocks", "minutes"):
         assert re.search(rf"key: '{key}', label: '[^']+', sport: 'NCAAB'", cat), key
-    assert "if (def.sport === 'NCAAB') return null;" in _fn(cat, "propMarketForStat")
+    assert "if (def.sport === 'NCAABW' || def.sport === 'NCAAB') return null;" in _fn(cat, "propMarketForStat")
     team = _read(TEAM_STAT_CATALOG)
     assert "const TEAM_SPORTS = new Set<Sport>(BALL);" in team
     ball = re.search(r"const BALL: Sport\[\] = \[(.*?)\];", team)
@@ -406,8 +406,9 @@ def test_the_stats_players_board_reads_ncaab_own_views():
     for name in ("fetchSeasonTotals", "fetchWindowTotals"):
         assert "sport === 'NCAAB') return [];" not in _fn(q, name), name
     # NCAABW joined the line on 2026-11-10: no women's team stats either.
+    # The women's code is named first so a prefix check cannot file it as men's.
     assert re.search(
-        r"if \(sport === 'UFC' \|\| sport === 'GOLF' \|\| sport === 'NCAAB' \|\| sport === 'NCAABW'\) "
+        r"if \(sport === 'UFC' \|\| sport === 'GOLF' \|\| sport === 'NCAABW' \|\| sport === 'NCAAB'\) "
         r"return \{ season: null, rows: \[\] \};",
         _fn(q, "fetchTeamStats"),
     )

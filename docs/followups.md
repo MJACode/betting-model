@@ -21,6 +21,96 @@
 
 ---
 
+## [ ] EuroLeague: finish the two history purchases (2026-11-12)
+mike approved about 4.4M on 2026-11-13 ("Do the 4.4m"; `docs/sports/euroleague.md`,
+"The purchase"): no 2020-21, the full game every snapshot near and during games
+and one every 15 minutes otherwise, plus first half, quarters, team totals and
+alternates. 2021-22 to 2025-26 started 2026-11-13 01:39Z; 2026-27 waits for the
+branch's merge (the clean-up visits this season's dates). Then the grid's
+baselines.
+
+## [ ] EuroLeague: a live first-half and quarter fetch, and relocated home games (2026-11-12)
+The forward pull covers the full game only. Period lines need a per-event
+fetch at the decision times (the shape of `data/ingestors/ncaab_first_half_odds.py`).
+Relocated "home" games (Maccabi in Belgrade, Hapoel in Sofia, Dubai in Bosnia)
+need a club-arena table before any model reads home advantage.
+
+## [ ] Betting filters for NCAAB: halves (Matt, 2026-11-13: "Start with NBA then move to college basketball")
+
+`team_period_results` and `mobile/src/lib/teamPeriodSplits.ts` are NBA only.
+NCAAB needs: a period-score source in the writer (`ncaab_period_scores`,
+halves only: FG / H1 / H2), its own period markets (`spreads_h1` / `totals_h1`
+are already captured live by `ncaab_first_half_odds`; check H2), NCAAB's
+short-rest rule, and a Teams board, which NCAAB does not have
+(`teamStatCatalog` BALL excludes it). Row count first: ~360 teams.
+
+## [ ] Records on every Betting split for the other sports (2026-11-13)
+
+Matt asked for record AND percent on every Betting stat. NBA gets every record
+from `team_period_results`. For MLB, WNBA, NHL, NFL and NCAAF the season board
+(`team_stats_board_compute`) still returns no W-L for ATS Home / Away, as Fav /
+as Dog, Rest Edge or Short Rest, so those rows show the percent, and a game
+count only under 10 games. Fix: either return the counts from the function (a RETURNS TABLE change:
+DROP and recreate, plus `team_stats_board_cache`), or extend
+`team_period_results` to those sports' full game.
+
+---
+
+## [x] Volume settings: the dashboard panel, once the branch is merged (2026-11-11, done 2026-11-12)
+
+Done: merged in #1251, published 2026-11-11 23:56Z, moved to its own
+"Volume" tab 2026-11-12 (`docs/monitoring.md`). The text below is the plan as
+it stood.
+
+
+Branch `claude/model-volume-dial` builds the database side and the sync. The
+panel on the dashboard's Models tab cannot be built before the merge: it reads
+`model_volume_bands` and calls `set_model_volume`, and neither exists in
+production until `data.view_migrations` runs the migration. After the merge:
+run the migrations, run the threshold sync, read `get_advisors`, then build
+the panel (one row per model with its four bands, one dropdown, the name of
+the signed-in person passed as `who`), and add it to `docs/monitoring.md`.
+
+## [ ] Volume settings: in-play models are listed and not moved (2026-11-11)
+
+Their posting does not read the edge cut, and a loop's first bet locks its
+game, so a posting cut would hide a bet without freeing the game. To give
+them an input, each loop's own decision needs a bar it reads before it writes
+(the women's and men's college loops already rank candidates a night; the
+bar would sit beside that). Nine models (`config.LIVE_MODELS`).
+
+## [ ] Volume settings: an unposted bet still counts in three checks (2026-11-11)
+
+A bet held back by a setting is still a BET row. Three readers take BET rows
+and do not ask whether the row was posted: the scorer's check that one game
+never carries two bets that cannot both win (`models/scorer.
+_apply_side_conflicts`), the college basketball check that an under is not
+held beside a big favourite's spread bet (`models/cbb_pairs.clash`), and
+NCAAB agreement sizing (`models/ncaab_stake.py`). So a held-back under would
+still stop the favourite's spread bet on its game, and nothing would be
+posted there. With no setting made, nothing changes.
+
+Do this before the dashboard panel is published. The test for "standing" is
+not "passes the cut in force": measured 2026-11-11, 7 of 31
+`ncaab_first_half_spread` bets and 3 of 67 `ncaab_first_half_total` bets sit
+under today's cut because they were posted when the cut was 0.02, and a
+posted bet keeps the cut it was written under. The predicate is the app's:
+posted already, or passes the cut in force (`open_picks` has it in SQL).
+One shared fragment, three readers.
+
+## [ ] NCAAF has no stored half-time or quarter scores (2026-11-11)
+
+Found grading the bought first-half prices (`docs/ncaaf_first_half_team_totals.md`).
+The research read half-time scores out of `ncaaf_plays`, which is right for
+99.1% of games against ESPN and cannot settle a bet. Two things wait on a
+real table (`ncaaf_period_scores`, the shape of `ncaab_period_scores`):
+any first-half model that ships, and the Eggz first-half legs, which stay
+`needs_review` for NCAAF today (#1243). Sources, both free: ESPN's
+scoreboard carries quarter scores for every game and answers from mike's
+PC (the check script reads it); CFBD's `/games` carries line scores and
+needs the key the worker holds, and `parse_games` drops them today.
+`ncaaf_plays` now holds 2015-2025 (pulled 2026-11-11 by `ncaaf_pbp_pull`).
+
 ## [x] NCAABW totals model: build it live (2026-11-09, done 2026-11-10)
 
 Live as `ncaabw_total_blend`: the box feed, the model, card and build, the
@@ -118,6 +208,28 @@ page the read. Found by the same review; it predates the women's sport.
 The checks were run and the halftime total was built (`ncaabw_live_total_ht`,
 `docs/sports/ncaabw.md` "In play: the halftime total"). The halftime spread
 does not clear.
+
+## [ ] NCAAB first-half spread model bets big favourites far more than its replay did (2026-11-11)
+
+Where the favourite lays 12 or more in the half, the replay of 2023-24 to
+2025-26 bet the favourite 37 times and the underdog 485 times; from
+2026-11-03 to 11-10 the live model bet the favourite 15 times (11-4) and the
+underdog 10 (4-6). The books' first-half number for a favourite of 25 or more
+is 0.55 to 0.56 of the full-game number this season against a median 0.59 in
+the replay seasons, so the model's number is at or above the book's where it
+used to sit below. Find out which moved: the books' first-half numbers, the
+full-game consensus the model reads at tip minus 10, or the model's map for
+spreads this large (the fit has few of them). Until then its record on these
+bets is a population the replay barely holds. Queries: `docs/sports/ncaab.md`,
+"An under beside a big favourite".
+
+## [ ] NCAAB first-half unders: the 6 to 12 band is flat too (2026-11-11)
+
+The rule stops unders at 12 or more points (mike's "big favourite"). Unders
+with the favourite laying 6 to 12 in the half went 198-180, -5.64 units on
+379 replayed bets (-7.20, -3.12, +4.67 by season). Moving the bar to 6 is
+mike's call; it was put to him on 2026-11-11. The NONE rows the rule writes
+(`big_favourite`) let the 12-and-up unders be graded live: read them at 100.
 
 ## [ ] NCAABW halftime total: measure ESPN's publishing lag on the women's game (2026-11-11)
 

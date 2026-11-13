@@ -48,6 +48,17 @@ The scorer pauses from `config.PAUSED_MODELS`; the publishers pause from the
 table. A 6am-only sync left those two a day apart after #727 (five MLB props
 unposted 2026-09-14).
 
+**The table holds two cuts per model since 2026-11-11** (mike: a volume input
+per model). `base_min_prob` / `base_min_edge` are config's. `min_prob` /
+`min_edge`, which every surface reads, are the cut IN FORCE: the tighter of
+config's and the model's volume setting (`model_volume_settings`, set only
+through `set_model_volume`). The sync writes config's cut into both and calls
+`apply_model_volume_settings()` before it commits; a writer that sets `min_*`
+without that call drops every setting until the next pass. A setting never
+loosens, never moves an in-play model, and changes what is POSTED, not what
+the scorer writes. Code that needs config's cut from the table reads
+`base_min_*`. Detail: `docs/thresholds.md`, "Volume settings".
+
 **Sportsbooks → `config.py`, env-overridable.** `LINE_SHOP_BOOKMAKERS` drives the
 Odds API `bookmakers` param (the `us2` books cost a second region — measured,
 `docs/best_line.md` §2); `BEST_LINE_BOOKMAKERS` is the set a pick may be DECIDED

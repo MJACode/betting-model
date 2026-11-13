@@ -135,6 +135,14 @@ ANON_READABLE: tuple[str, ...] = (
     # through playerLog.LOG_TABLE, like the WNBA and NBA logs, so the log is
     # not a literal .from() and is not listed here.
     "v_player_season_totals_ncaab",
+    # Women's college basketball Stats tab. security_invoker over
+    # ncaabw_player_game_log. The table, the view and the four functions are
+    # created by add_ncaabw_player_game_log_2026_11_12.sql, which is NOT in
+    # ACTIVE_MIGRATIONS: apply it by hand. The player page reads the log
+    # through playerLog.LOG_TABLE, so the log is not a literal .from().
+    # MAY_BE_UNAPPLIED until that apply, so a grant sweep does not GRANT a
+    # view that is not in the catalog yet.
+    "v_player_season_totals_ncaabw",
     # NHL Stats tab, ahead of the screen (2026-10-16). The app does not
     # .from() these yet; tests/test_anon_readable.py keeps them on an
     # explicit ahead-of-the-app list so the stale-entry check stays strict
@@ -152,6 +160,10 @@ ANON_READABLE: tuple[str, ...] = (
     # (add_nba_first_basket_2026_11_08.sql).
     "v_nba_first_basket_team_season",
     "v_nba_first_basket_player_season",
+    # Stats tab, Betting filters (Matt, 2026-11-13): one row per team, game
+    # and period, written by data/ingestors/team_period_results.py; RLS on
+    # with a SELECT policy (add_team_period_results_2026_11_13.sql).
+    "team_period_results",
     # Betslip game-line edit (Matt, 2026-10-29): the current alternate
     # spread/total ladder per game, written by data/ingestors/alt_game_lines.py
     # (add_alt_game_lines_2026_10_29.sql: RLS on, SELECT policy).
@@ -395,6 +407,21 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/ncaabw_pbp.py; model input, never read by the app.
     "ncaabw_pbp",
     "ncaabw_pbp_games",
+    # EuroLeague (2026-11-12). Created on demand by
+    # data/ingestors/euroleague_teams.ensure_tables and
+    # data/ingestors/euroleague_api.ensure_tables (identity, schedule, quarter
+    # scores, the raw API answers); data/ingestors/euroleague_odds_history.py
+    # (the purchase ledger, in-play quotes, unplaced events); and
+    # data/ingestors/euroleague_period_history.py (its ledger). Never read by
+    # the app.
+    "euroleague_teams",
+    "euroleague_events",
+    "euroleague_api_raw",
+    "euroleague_period_scores",
+    "euroleague_odds_snapshots",
+    "euroleague_inplay_quotes",
+    "euroleague_odds_unmatched",
+    "euroleague_period_fetches",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and
@@ -658,12 +685,14 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_recent_games_mlb",
     "player_recent_games_nba",
     "player_recent_games_ncaaf",
+    "player_recent_games_ncaabw",
     "player_recent_games_ncaab",
     "player_recent_games_nfl",
     "player_recent_games_wnba",
     "player_season_stat_values_mlb",
     "player_season_stat_values_nba",
     "player_season_stat_values_ncaaf",
+    "player_season_stat_values_ncaabw",
     "player_season_stat_values_ncaab",
     "player_season_stat_values_nfl",
     "player_season_stat_values_wnba",
@@ -676,6 +705,7 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_h2h_stat_values_mlb",
     "player_h2h_stat_values_nba",
     "player_h2h_stat_values_ncaaf",
+    "player_h2h_stat_values_ncaabw",
     "player_h2h_stat_values_ncaab",
     "player_h2h_stat_values_nfl",
     "player_h2h_stat_values_wnba",
@@ -697,6 +727,7 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",
+    "player_window_totals_ncaabw",
     "player_window_totals_ncaab",
     "player_window_totals_nfl",
     "player_window_totals_wnba",

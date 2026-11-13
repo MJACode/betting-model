@@ -5308,6 +5308,67 @@ NCAABW_EXTRA_BOOKMAKERS: list = [
     "espnbet", "ballybet", "fliff", "betonlineag", "lowvig", "unibet", "betwhale",
 ]
 
+# EuroLeague: the odds feed's club name -> EuroLeague's own club code
+# (data/ingestors/euroleague_teams.py). Every name on the feed's 2,164 events of
+# 2020-10 to 2026-11 (27 names, 26 clubs), read 2026-11-12; the count is the
+# events naming it. Compared accent-folded, so 'Zalgiris' finds 'Žalgiris'.
+EUROLEAGUE_ODDS_API_MAP: dict = {
+    "ALBA Berlin": "BER",                      # 173
+    "AS Monaco": "MCO",                        # 199
+    "ASVEL Lyon Villeurbanne": "ASV",          # 221
+    "Anadolu Efes": "IST",                     # 242
+    "BC Khimki": "KHI",                        # 35
+    "Beşiktaş J.K.": "BES",                    # 11
+    "CSKA Moscow": "CSK",                      # 67
+    "Dubai Basketball": "DUB",                 # 50
+    "FC Barcelona Bàsquet": "BAR",             # 252
+    "FC Bayern München": "MUN",                # 231
+    "Fenerbahce SK": "ULK",                    # 136
+    "Fenerbahçe Beko": "ULK",                  # 111
+    "Hapoel Tel Aviv": "HTA",                  # 55
+    "KK Crvena zvezda": "RED",                 # 223
+    "KK Partizan NIS": "PAR",                  # 158
+    "Maccabi Tel Aviv": "TEL",                 # 235
+    "Olympiacos": "OLY",                       # 251
+    "Pallacanestro Olimpia Milano": "MIL",     # 235
+    "Panathinaikos": "PAN",                    # 244
+    "Paris Basketball": "PRS",                 # 89
+    "Real Madrid": "MAD",                      # 255
+    "Saski Baskonia": "BAS",                   # 225
+    "Unics Kazan": "UNK",                      # 22
+    "Valencia Basket": "PAM",                  # 158
+    "Virtus Segafredo Bologna": "VIR",         # 153
+    "Zenit Saint Petersburg": "DYR",           # 69
+    "Žalgiris": "ZAL",                         # 228
+}
+
+# EuroLeague books (docs/sports/euroleague.md, "The books"). One history snapshot
+# naming these ten billed 30 credits on 2026-11-12; naming an eleventh billed
+# 60, because the feed bills every group of ten named books as a region. Read
+# off five history snapshots at every region (2021-03, 2022-12, 2023-12,
+# 2024-12, 2025-12): DraftKings priced every sampled game from 2022-23 on,
+# FanDuel, BetMGM, BetRivers and Fanatics from 2025-26, Pinnacle and Bovada
+# most games of every season, and Marathonbet, Unibet and Paddy Power every
+# game of every season. Caesars, Hard Rock and betPARX, three of the line-shop
+# ten, priced none, so the history does not ask for them.
+EUROLEAGUE_HISTORY_BOOKMAKERS: list = [
+    "draftkings", "fanduel", "betmgm", "betrivers", "fanatics",
+    "pinnacle", "bovada", "marathonbet", "unibet", "paddypower",
+]
+# The live pull asks for the line-shop ten plus these: thirteen books, two
+# regions (6 credits a pass for three markets). None is a book a pick may name;
+# they are the European consensus the history holds, kept going forward.
+EUROLEAGUE_EXTRA_BOOKMAKERS: list = ["marathonbet", "unibet", "paddypower"]
+# The ten asked for EuroLeague's first-half, quarter, team-total and alternate
+# lines (data/ingestors/euroleague_period_history.py). The books that returned
+# any of those markets on the sampled 2024-12, 2025-12 and 2026-10 games:
+# FanDuel, BetMGM, BetRivers, Fanatics, GTbets, BetUS, MyBookie, and Pinnacle's
+# alternates; DraftKings and Bovada are asked because they price the full game.
+EUROLEAGUE_PERIOD_BOOKMAKERS: list = [
+    "fanduel", "betmgm", "betrivers", "fanatics", "draftkings",
+    "pinnacle", "bovada", "gtbets", "betus", "mybookieag",
+]
+
 # The Odds API team name → CFBD canonical school name.
 #
 # LOAD-BEARING CONVENTION: the canonical NCAAF team identifier is the CFBD

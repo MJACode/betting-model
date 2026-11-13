@@ -25,9 +25,9 @@ import {
 import type { PlayerType } from '@/types';
 
 /** Sports with a per-game player log — the ones that can show player detail. */
-export type PlayerLogSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB';
+export type PlayerLogSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAABW' | 'NCAAB';
 
-const LOG_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB']);
+const LOG_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAABW', 'NCAAB']);
 
 /** The two football leagues share a log shape (and a weekly cadence). */
 const FOOTBALL = new Set<PlayerLogSport>(['NFL', 'NCAAF']);
@@ -43,11 +43,11 @@ export function supportsPlayerDetail(sport: Sport): sport is PlayerLogSport {
 }
 
 /**
- * Per-game minutes on the player page. NBA, WNBA and NCAAB logs carry
+ * Per-game minutes on the player page. NBA, WNBA, NCAAB and NCAABW logs carry
  * `minutes`. NFL and NCAAF do not (snap share is a different design). NHL
  * player detail is still closed. MLB already shows volume as IP / AB.
  */
-const MINUTES_SPORTS = new Set<Sport>(['NBA', 'WNBA', 'NCAAB']);
+const MINUTES_SPORTS = new Set<Sport>(['NBA', 'WNBA', 'NCAABW', 'NCAAB']);
 
 export function sportTracksMinutes(sport: Sport): boolean {
   return MINUTES_SPORTS.has(sport);
@@ -118,6 +118,10 @@ export const LOG_TABLE: Record<PlayerLogSport, string> = {
   // Men's college basketball (add_ncaab_player_game_log_2026_11_03.sql):
   // WNBA's column names, so the basketball column list reads it unchanged.
   NCAAB: 'ncaab_player_game_log',
+  // Women's (add_ncaabw_player_game_log_2026_11_12.sql): the same columns.
+  // Named after the check sites put NCAABW first; the key itself cannot
+  // be swallowed by NCAAB because this is a record lookup, not a prefix.
+  NCAABW: 'ncaabw_player_game_log',
 };
 
 export const LOG_COLUMNS: Record<PlayerLogSport, string> = {
@@ -127,6 +131,7 @@ export const LOG_COLUMNS: Record<PlayerLogSport, string> = {
   NFL: NFL_COLUMNS,
   NCAAF: NCAAF_COLUMNS,
   NCAAB: BASKETBALL_COLUMNS,
+  NCAABW: BASKETBALL_COLUMNS,
 };
 
 /**
@@ -155,7 +160,7 @@ export function logFetchLimit(sport: PlayerLogSport): number {
  */
 export function normalizeLogRow(sport: PlayerLogSport, raw: Record<string, unknown>): PlayerLogEntry {
   const row = { ...raw } as PlayerLogEntry;
-  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+  if (sport === 'NCAABW' || sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
     row.threes = num(raw.fg3_made);
     row.pra = sum(raw.points, raw.rebounds, raw.assists);
     row.blocks_steals = sum(raw.blocks, raw.steals);
@@ -183,7 +188,7 @@ export function minutesPlayed(row: { minutes?: unknown }): number | null {
 /**
  * A basketball log row with no minutes. Did-not-play players are not in the
  * game log. NBA stores them in `nba_player_dnp` and the page merges those
- * rows. WNBA and NCAAB drop a didNotPlay athlete and keep no table, so those
+ * rows. WNBA, NCAAB and NCAABW drop a didNotPlay athlete and keep no table, so those
  * games are not invented here. A row that has a stat and no minutes is a
  * missing number, not a did-not-play.
  */
@@ -1223,10 +1228,11 @@ export function gameContextLine(
     const wk = row.week != null ? `Wk ${row.week}` : null;
     return [team, opp, wk].filter(Boolean).join(' · ');
   }
-  if (sport === 'NCAAB') {
+  if (sport === 'NCAABW' || sport === 'NCAAB') {
     // Two full school names on one truncating line: the minutes go first so
-    // they are never the part cut (UX review, 2026-11-03). The player's own
-    // school only when it is not the header's (a transfer's earlier rows).
+    // they are never the part cut (UX review, 2026-11-03, same for NCAABW).
+    // The player's own school only when it is not the header's (a transfer's
+    // earlier rows).
     const min = num(row.minutes);
     const own = row.team && row.team !== currentTeam ? row.team : null;
     const minText = min == null ? (didNotPlay ? 'DNP' : '— min') : `${min.toFixed(0)} min`;

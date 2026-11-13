@@ -349,7 +349,7 @@ def test_the_price_floor_and_the_ev_floor_refuse_a_bet():
 def test_the_card_passes_the_floor_into_the_decision():
     src = (ROOT / "scripts" / "ncaab_first_half_total_card.py").read_text(encoding="utf-8")
     assert "floor = config.min_odds_for(MODEL_ID)" in src
-    assert "books=books, min_price=floor)" in src
+    assert "books=books, min_price=floor, fav_lays=lays.get(gid))" in src
 
 
 def test_the_book_ages_are_the_total_s_own_update_times():

@@ -15,7 +15,6 @@ import { isModelRetired, isPausedForDisplay } from '@/lib/thresholds';
 import { errorText, isAbortError } from '@/lib/errors';
 import {
   loadTodayBoard,
-  loadTodayBoardOnForeground,
   setTodayBoardReader,
   todayBoardIsStale,
   todayPicksDateKey,
@@ -90,6 +89,35 @@ const NCAAB_AHEAD_DAYS = 7;
  */
 const NCAABW_AHEAD_DAYS = 7;
 
+/** How often the Picks tab reloads today's boards while it is open. The app's
+ *  own help text says lines refresh every 10 minutes at the busiest; a reload
+ *  more often than the data changes buys nothing (Matt, 2026-11-12). */
+export const TODAY_POLL_MS = 10 * 60_000;
+/** Returning to the app or the tab reloads only when the last load is older. */
+export const TODAY_RESUME_MIN_AGE_MS = 60_000;
+
+/*
+ * Who reloads today's board, in one place. PicksHomeScreen owns every reload:
+ * every TODAY_POLL_MS while its tab is focused and the app is in front, and
+ * once on coming back to the app or the tab when its last load is older than
+ * TODAY_RESUME_MIN_AGE_MS, plus pull-to-refresh. Each of those calls
+ * `refresh` below. This hook does not reload on its own when the app comes
+ * back; it only moves an undated board onto the new Eastern date after
+ * midnight, and the first read of that new day is a first read, not a reload.
+ *
+ * Underneath, every mount of one date shares a single in-flight read
+ * (lib/todayPicksFlight.ts): the betslip bar, Picks, Player Stats and the
+ * model screens wait on the same request instead of each starting the seven
+ * sports again. A mount reuses a finished read younger than
+ * TODAY_PICKS_STALE_MS; Picks' timer and pull always read.
+ *
+ * Overlapping reloads (a pull during a poll) are ordered by the flight: one
+ * read per date at a time, and a refresh that arrives mid-read runs one
+ * follow-up, so the newest read is the one every mount settles on. The error
+ * banner is cleared only by a read that succeeds, so a failing background
+ * reload does not unmount it and mount it again (UX review, 2026-11-12).
+ */
+
 /**
  * The seven-sport read, once. The flight cache (lib/todayPicksFlight.ts) is
  * what makes a second mount wait instead of starting it again. The split
@@ -139,8 +167,9 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
     partial = next;
   };
 
+  // No setError(null) here: `error` starts null, and the shown banner is the
+  // flight's, which clears it only when a read succeeds.
   setLoading(true);
-  setError(null);
   const whats: string[] = [];
   let reason: string | null = null;
   const note = (what: string) => (e: unknown) => {
@@ -219,8 +248,8 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
 setTodayBoardReader(readTodayBoard);
 
 export function useTodayPicks(date?: string) {
-  // The default day is state so a foreground after midnight ET switches the
-  // board. todayET() read once at mount would keep yesterday until the
+  // The default day is state so a return to the app after midnight ET
+  // switches the board. todayET() read once at mount would keep yesterday until the
   // component happened to re-render. An explicit `date` argument is left
   // alone: the caller asked for that day.
   const [liveDay, setLiveDay] = useState(() => todayET());
@@ -263,22 +292,26 @@ export function useTodayPicks(date?: string) {
     };
   }, [target, date]);
 
-  // Coming back to the app: re-read only when the shared board is stale, and
-  // switch to the new Eastern date after midnight. Same AppState hook as
-  // useLinesBoard. A focus hook is off limits here: the betslip bar is
+  // Coming back to the app after midnight ET: move an undated board onto the
+  // new Eastern date. This does NOT reload. Reloading on return is
+  // PicksHomeScreen's rule (TODAY_RESUME_MIN_AGE_MS), and a second resume
+  // reload here would start another read on top of it. A new date re-runs the
+  // effect above, whose read joins Picks' if one is in flight. Same AppState
+  // hook as useLinesBoard. A focus hook is off limits here: the betslip bar is
   // mounted outside the navigator.
   useEffect(() => {
+    if (date != null) return undefined;
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
       const day = todayET();
-      if (date == null) setLiveDay((prev) => (prev === day ? prev : day));
-      void loadTodayBoardOnForeground(date ?? day);
+      setLiveDay((prev) => (prev === day ? prev : day));
     });
     return () => sub.remove();
   }, [date]);
 
-  // Pull-to-refresh, and any other caller of `refresh`, skips the finished
-  // read. A refresh during an in-flight read waits for one follow-up.
+  // Pull-to-refresh, Picks' 10-minute timer and its resume reload all call
+  // this. It skips the finished read. A refresh during an in-flight read
+  // waits for one follow-up.
   // Only this caller spins: the shared read updates every other mount's rows
   // without flipping their loading flag.
   const refresh = useCallback(() => {
