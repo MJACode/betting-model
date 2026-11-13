@@ -76,15 +76,32 @@ error.
   on the game." *Worked*: men's college spreads, 409 bets +9.97% [0.8, 18.4]
   (the doc's own estimate of the true edge: about +2% a bet). *Failed*: college
   football (337 of 338 bets were road teams: a tilt in the fitted table); the
-  women's college game (the book standing apart was more often right).
+  women's college game (the book standing apart was more often right);
+  EuroLeague spreads (99.6% of 538 bets were home teams, closing value
+  negative: a home lean, not shopping; `docs/euroleague_market_audit.md`).
 - **A book's moneyline against the same book's spread.** De-vig the spread,
   invert the margin table, take the win probability. *Shipped without
   clearing*: men's college, 838 bets +4.22% [-1.2, 9.3], chosen from 162
   versions after the fact. *Failed*: college football, women's college, pro
-  basketball (-25.0% in 2025-26).
+  basketball (-25.0% in 2025-26), EuroLeague (-11.00% on 86).
 - **The first post.** Decide at the moment a book first posts, with enough
   other books up to form a reference. *Worked*: men's college opening
-  moneyline, 297 bets +15.15% [7.34, 23.37].
+  moneyline, 297 bets +15.15% [7.34, 23.37]. *Could not run*: EuroLeague,
+  where the sharp book was up at only 103 of DraftKings' first posts in three
+  seasons; check that the reference is up at the soft book's first post
+  before planning this rule.
+- **A rating model anchored on the first posted price.** The open is one
+  book's first guess; ratings built before the fight say which way it will
+  be corrected. *Worked*: UFC fight winner, anchored on Pinnacle's no-vig
+  price at least a week out and bet at the best deciding book, on the
+  bought 2020-2026 history: 846 bets +12.85% [+8.0, +17.5], every year
+  positive, +2.2% against Pinnacle's close, placebo -1.9%; live as
+  `ufc_open_moneyline`. The edge grows with the lead and is negative inside
+  a week. On an archive's open (whichever book posted first) it read +7.8%
+  on 1,531; on our 2026 store's 104 DraftKings openers it looked dead, which
+  the purchase overturned. At the close it finds nothing. *Failed* in the
+  same sport: betting the side the line moved toward, at the worst close,
+  lost in every band of move size (`docs/ufc_market_audit.md` §3, §8).
 - **A stale opener.** Bet the side the sharp book favours at a soft book's
   stale opening number. *Passed the placebos* (reversed books null, other
   opens null, CLV 0.694, every season positive) and *failed executability*:
@@ -120,6 +137,12 @@ edge is where the rule misses something the state shows.
 - **The halftime break as the decision point.** The state is fixed and "a
   bettor has minutes, not seconds". *Worked*: women's college halftime total,
   669 bets +11.84% [+5.1, +18.1], replayed on the loop's own code.
+  *EuroLeague*: the total, ported unchanged, failed (574 bets -1.93%: it
+  expected too many second-half points); the spread is a lead that misses the
+  bar (364 bets +10.93% [+3.40, +18.48], placebo passed, the false-discovery
+  correction failed), with a measured mechanism: the books carry 50% of the
+  pre-game margin into the second half where the games carried 40%
+  (`docs/euroleague_market_audit.md`, Halftime).
 - **Live re-anchoring off the pre-game number and the clock.** The book's live
   prop line is re-hung from the opener and time elapsed; it under-adjusts for
   the game script. *Measured, in sample*: pro football rushing-attempt unders
@@ -202,7 +225,7 @@ edge is where the rule misses something the state shows.
 - Pro football: 11 of 11 stat-projection props lost (2,133 bets -1.90%); the
   book prices its main line flat and the information test found nothing the
   line lacked. Pro basketball: a minutes × rate projection is live (66,588 bets
-  +3.60%). Hockey: count models on their own probability worked on unders.
+  +3.60% in the backtest; live `nba_prop_projection`, all settled to 2026-11-13: 84 bets 36-48, -0.42 units, -0.6%, too few to overturn the backtest, reviewed 2026-11-13). Hockey: count models on their own probability worked on unders.
 - **The architecture is a decision before code**
   (`docs/nfl_props_build_prompt.md`): one model across prop markets, one per
   market, or a shared usage core feeding per-market heads. Decide from the
@@ -242,6 +265,14 @@ sections above with its result.
 - Men's Grand Slam games spreads: does the book price best of five like best
   of three (mechanism 5)?
 
+- UFC: a Pinnacle-anchored finish model for round totals on the bought
+  history (every blind total loses; Pinnacle's over is near fair).
+- UFC: notice length from the feed's first listing of a pairing; a
+  DraftKings total left stale when its moneyline moves; the five-round
+  favourite at per-book prices (null at the worst close, fails the late
+  half); BestFightOdds'
+  per-book prop pages as a round-total price route
+  (`docs/ufc_market_audit.md` §8, §9).
 - A third live book for live props, turning them into the cross-book
   construction (`docs/nfl_live_prop_assessment.md` §7).
 - Live rushing overs at a low pace ratio; the rushing under out of sample on

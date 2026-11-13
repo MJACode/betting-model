@@ -2102,9 +2102,13 @@ CREATE POLICY "anon read parlay_track_record" ON parlay_track_record
 
 -- ── PUSH NOTIFICATIONS ───────────────────────────────────────────────────────
 -- Applied via migration add_push_notifications. device_push_tokens holds opted-in
--- Expo tokens (anon INSERT/UPDATE only — no SELECT, so tokens can't be enumerated);
--- push_sent is the ledger preventing double-notification. Pipeline writes push_sent
--- + reads tokens via service-role DATABASE_URL.
+-- Expo tokens. The app writes through save_device_push_token() (SECURITY DEFINER,
+-- data/migrations/save_device_push_token_2026_11_11.sql, hand-applied, not in
+-- ACTIVE_MIGRATIONS). That migration revokes anon/authenticated INSERT and
+-- UPDATE and drops the old write policies: a plain INSERT succeeded under
+-- WITH CHECK (true). There is no SELECT policy. push_sent is the ledger
+-- preventing double-notification. The pipeline writes push_sent and reads
+-- tokens via service-role DATABASE_URL.
 CREATE TABLE IF NOT EXISTS device_push_tokens (
     token       TEXT PRIMARY KEY,
     platform    TEXT,
@@ -2193,10 +2197,11 @@ ALTER TABLE push_sent ENABLE ROW LEVEL SECURITY;
 -- default privileges grant anon/authenticated by name.
 ALTER TABLE pipeline_runs ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON pipeline_runs FROM anon, authenticated;
-CREATE POLICY "anon insert device token" ON device_push_tokens
-    FOR INSERT TO anon, authenticated WITH CHECK (true);
-CREATE POLICY "anon update device token" ON device_push_tokens
-    FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+-- Direct writes are closed. Recreating either policy, or granting INSERT or
+-- UPDATE back to anon/authenticated, lets a caller skip save_device_push_token.
+REVOKE INSERT, UPDATE ON device_push_tokens FROM anon, authenticated;
+DROP POLICY IF EXISTS "anon insert device token" ON device_push_tokens;
+DROP POLICY IF EXISTS "anon update device token" ON device_push_tokens;
 
 -- Track-a-bet (migration add_tracked_bets). A device opts to be notified of big
 -- DK line moves on a specific pick. UI "tracked" state is local on-device; this

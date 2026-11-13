@@ -1049,6 +1049,61 @@ def _settle_prop_picks(
 
 # ── UFC Settlement ────────────────────────────────────────────────────────────
 
+# A UFC bet whose fight did not happen on its card. The feed lists a fight up to
+# weeks ahead, and ufc_open_moneyline bets a week or more out, so some of its
+# bets will be on bouts that are cancelled or moved (on the bought 2020-2026
+# history, 474 events priced a week out by Pinnacle and a deciding book were
+# not fought on the card they were listed for; every one but two sat within a
+# day of a logged UFC card: docs/ufc_market_audit.md). The book refunds such a
+# bet. Without this its games row never gets a score, _settle_ufc_picks never
+# selects it, and an ungraded posted bet holds the daily record
+# (tracking/discord_notifier.ungraded_picks) for good. So once the card is in
+# the fight log, a bet on a pair of whom NEITHER fought on it settles NO_ACTION.
+# One fighter on the card is the same bout under another spelling (the
+# settlement's anchor rule), left to the normal path. Names match by slug,
+# else by a unique token set (data/ufc_identity.resolve_slug).
+_UFC_UNFOUGHT_MIN_AGE_DAYS = 2
+
+
+def _settle_unfought_ufc_picks(conn: DBConnection, game_date: str, settled_at: str) -> int:
+    """NO_ACTION for unsettled UFC BETs whose card is logged without them.
+    Returns how many were settled."""
+    from data.ingestors.ufc_stats_ingestor import slugify_fighter
+    from data.ufc_identity import resolve_slug
+
+    cutoff = (datetime.strptime(game_date, "%Y-%m-%d")
+              - timedelta(days=_UFC_UNFOUGHT_MIN_AGE_DAYS)).strftime("%Y-%m-%d")
+    picks = conn.execute("""
+        SELECT p.pick_id, p.pick_label, p.game_date, g.home_team, g.away_team
+          FROM picks p
+          JOIN games g ON g.game_id = p.game_id
+         WHERE p.result IS NULL AND p.signal_type = 'BET'
+           AND p.model_id LIKE 'ufc_%%'
+           AND g.home_score IS NULL
+           AND p.game_date <= %s
+    """, (cutoff,)).fetchall()
+    n = 0
+    for pick_id, label, pdate, home, away in picks:
+        d = datetime.strptime(str(pdate)[:10], "%Y-%m-%d")
+        card = {slugify_fighter(r[0]) for r in conn.execute("""
+            SELECT fighter_name FROM ufc_fight_log WHERE game_date BETWEEN %s AND %s
+        """, ((d - timedelta(days=1)).strftime("%Y-%m-%d"),
+              (d + timedelta(days=1)).strftime("%Y-%m-%d"))).fetchall()}
+        if not card:
+            continue                      # the card is not logged yet
+        fought = [s for s in (slugify_fighter(home or ""), slugify_fighter(away or ""))
+                  if s and (s in card or resolve_slug(s, card))]
+        if fought:
+            continue
+        conn.execute("""
+            UPDATE picks SET result = 'NO_ACTION', profit_flat = 0, profit_kelly = 0,
+                   settled_at = %s
+             WHERE pick_id = %s AND result IS NULL
+        """, (settled_at, pick_id))
+        logger.info(f"  UFC: {label} was not fought on its logged card -- NO_ACTION")
+        n += 1
+    return n
+
 _UFC_METHOD_CLASSES = ("decision", "ko_tko", "submission")
 
 
@@ -1074,8 +1129,18 @@ def _settle_ufc_picks(
       • Prob-only picks (totals/method) have dk_odds NULL → −110 flat P&L.
 
     Returns (wins, losses, pushes, no_actions, total_flat, total_kelly).
+
+    The market comes from _market_for_pick, so a UFC model settles here only if
+    it resolves to "h2h", "totals" or "method" there: a trained model through
+    config.MODELS, a rule card through _RULE_MODEL_MARKETS, a retired one
+    through _RETIRED_MODEL_MARKETS. A new ufc_* id that is in none of them
+    would fall to "h2h" -- register it before its first BET.
     """
     from data.ingestors.ufc_stats_ingestor import rounds_completed, slugify_fighter
+
+    # A bet on a fight that was not fought settles first: its games row has no
+    # score, so the read below never selects it.
+    unfought = _settle_unfought_ufc_picks(conn, game_date, settled_at)
 
     picks = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.pick_label,
@@ -1091,7 +1156,7 @@ def _settle_ufc_picks(
     """, (game_date,)).fetchall()
 
     if not picks:
-        return 0, 0, 0, 0, 0.0, 0.0
+        return 0, 0, 0, unfought, 0.0, 0.0
 
     logger.info(f"Found {len(picks)} unsettled UFC picks (through {game_date})")
 
@@ -1160,7 +1225,8 @@ def _settle_ufc_picks(
             return anchored[0]
         return None
 
-    wins = losses = pushes = no_actions = 0
+    wins = losses = pushes = 0
+    no_actions = unfought
     total_flat = total_kelly = 0.0
 
     for (pick_id, game_id, model_id, pick_side, pick_label,
@@ -2271,11 +2337,22 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             moved_snap, _moved_book = _first_game_close(
                 conn, game_id, market, close_bound, pick_book=bookmaker,
                 match_line=None, created_at=created) if has_line else (closing, close_book)
-            pin_snap, _pin_book = (closing, sharp) if bookmaker == sharp else (
-                _first_game_close(
+            # Market edge uses Pinnacle's latest main line (match_line=None:
+            # MLB/NHL spreads stay on ±1.5). Filtering to scored_line first
+            # kept the last time Pinnacle still showed our number, which on
+            # 2026-10-14 was hours before the close for 78 of 301 game
+            # spread/total rows. pin_moved below turns that into NULL. The
+            # SQL recompute in clv_standard_v2_2026_10_14.sql reads Pinnacle
+            # the same way.
+            if has_line:
+                pin_snap, _pin_book = _first_game_close(
                     conn, game_id, market, close_bound, pick_book=sharp,
-                    match_line=scored_line if has_line else None,
-                    created_at=created))
+                    match_line=None, created_at=created)
+            else:
+                pin_snap, _pin_book = (closing, sharp) if bookmaker == sharp else (
+                    _first_game_close(
+                        conn, game_id, market, close_bound, pick_book=sharp,
+                        match_line=None, created_at=created))
             # The number that line-CLV measures is the book's latest main
             # line, which may have left the number we bet.
             if has_line and moved_snap:
@@ -2324,8 +2401,9 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         if closing_price is not None and not line_moved:
             clv_pct, clv_pp = same_book_clv(bet_price, closing_price)
 
-        # Market edge: Pinnacle only, and only while Pinnacle's line is the
-        # number we bet. Raw taken vs power-de-vigged close.
+        # Market edge: Pinnacle's latest main line only, and only while that
+        # close is still the number we bet. A main line that has moved off
+        # is NULL. Raw taken vs power-de-vigged close.
         market_pct = market_pp = market_method = pin_price = None
         pin_line = _closing_line_for(prop_market, market, pin_snap) if pin_snap else None
         pin_moved = (pin_line is not None and scored_line is not None
@@ -2565,6 +2643,11 @@ _RULE_MODEL_MARKETS = {
     # NULL. The pick sits on the odds feed's row of the game, which takes its
     # final from CFBD's row (cfbd_ingestor.mirror_scores_to_alias_rows).
     "ncaaf_moneyline_market": "h2h",
+    # UFC fight winner a week out (models/ufc_open_moneyline.py, 2026-11-13,
+    # mike). Settled by _settle_ufc_picks like every ufc_* pick: home_win,
+    # a draw or no contest a push. Named here so its market is never the
+    # default's guess.
+    "ufc_open_moneyline": "h2h",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).
@@ -2579,6 +2662,13 @@ _RULE_MODEL_MARKETS = {
 _RETIRED_MODEL_MARKETS = {
     "mlb_live_win_prob": "h2h",
     "mlb_live_runline":  "spreads",
+    # The three UFC models retired 2026-11-13 (config.RETIRED_MODELS). Zero of
+    # their BETs were unsettled at retirement, but a re-settle or a CLV pass
+    # over their graded rows must still read round totals as totals and method
+    # as method, never fall to 'h2h'. _settle_ufc_picks reads these.
+    "ufc_moneyline":         "h2h",
+    "ufc_total_rounds":      "totals",
+    "ufc_method_of_victory": "method",
 }
 
 # A retired model's picks stay in the table and keep grading (§1c), but they are

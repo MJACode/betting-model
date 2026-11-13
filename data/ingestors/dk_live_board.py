@@ -1,8 +1,18 @@
-"""DraftKings' own in-play board, every few seconds, into Supabase.
+"""DraftKings' own in-play boards, every second, into Supabase: every sport with
+an in-play model (NCAAB, women's college basketball, NBA, NCAAF, NFL; mike,
+2026-11-13: "Move everything over to the fast way").
 
-    python -m data.ingestors.dk_live_board                 # NCAAB, until no game is live for a while
-    python -m data.ingestors.dk_live_board --dry-run       # read and print, write nothing
-    python -m data.ingestors.dk_live_board --minutes 240 --poll 2.5
+    python -m data.ingestors.dk_live_board                 # every league, until none is live for a while
+    python -m data.ingestors.dk_live_board --sports NBA NCAAB --dry-run
+    python -m data.ingestors.dk_live_board --log feed.log  # the scheduled task's form
+
+One process reads every league in turn: a league with a game live every second,
+an idle one every 30 s, and never two requests closer than MIN_GAP_SEC (0.5 s),
+so three live leagues read each about every 1.5 s at two requests a second.
+Each sport's DraftKings names resolve onto OUR games rows by their own rule
+(RESOLVERS): NBA and NFL by DraftKings' nickname, college football by school
+name, both college basketballs through the team registries; every one refuses
+an ambiguous pair, and an unmatched game is logged and skipped.
 
 RUNS ON MIKE'S MACHINE, NOT THE WORKER. DraftKings answers a residential
 address with a browser TLS fingerprint and refuses the Railway worker
@@ -65,15 +75,35 @@ if str(ROOT) not in sys.path:
 
 log = logging.getLogger("data.ingestors.dk_live_board")
 
-LEAGUES = {"NCAAB": "92483"}          # DraftKings' league ids, read off the board's own `leagues`
+# DraftKings' league ids, each read off its own board's `leagues` key (2026-11-13):
+# 92483 "NCAAB", 36647 "College Basketball (W)", 42648 "NBA", 87637 "College
+# Football", 88808 "NFL".
+LEAGUES = {"NCAAB": "92483", "NCAABW": "36647", "NBA": "42648", "NCAAF": "87637", "NFL": "88808"}
 BOARD_URL = "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusoh/v1/leagues/{league}"
-BOOT_URL = {"NCAAB": "https://sportsbook.draftkings.com/leagues/basketball/ncaab"}
+BOOT_URL = "https://sportsbook.draftkings.com/leagues/basketball/ncaab"
+HALVES = {"NCAAB"}                     # every other sport here plays quarters
+FOOTBALL = {"NCAAF", "NFL"}
+# Between ANY two requests, whichever leagues are live: an evening with three
+# leagues live reads each about every 1.5 s, and this address never sends more
+# than two requests a second (mike's home address is the one DraftKings would block).
+MIN_GAP_SEC = float(os.environ.get("DK_LIVE_MIN_GAP_SEC", "0.5"))
 POLL_SEC = float(os.environ.get("DK_LIVE_POLL_SEC", "1.0"))
 # A refusal doubles the gap between reads, up to MAX_POLL_SEC; a minute without
 # one halves it back toward POLL_SEC (his home address is the one at stake).
 MAX_POLL_SEC = 5.0
 # One feed at a time on this machine: a second start finds the port taken and exits.
-LOCK_PORT = int(os.environ.get("DK_LIVE_LOCK_PORT", "47231"))
+# 47232 since the all-sports feed (2026-11-13): the NCAAB-only feed of #1268
+# holds 47231 until its last game ends, and the two may run side by side that day.
+LOCK_PORT = int(os.environ.get("DK_LIVE_LOCK_PORT", "47232"))
+# --exit-on-new-master (the scheduled task's launcher passes it): every
+# MASTER_CHECK_SEC the feed fetches origin/master, and when a merge changed one
+# of FEED_FILES it exits with NEW_MASTER_EXIT; the launcher checks the new
+# master out and starts it again at once. Any other merge is ignored, so the
+# feed is not down for a merge that does not touch it.
+MASTER_CHECK_SEC = 300.0
+NEW_MASTER_EXIT = 3
+FEED_FILES = ("data/ingestors/dk_live_board.py", "data/ingestors/ncaab_teams.py", "data/ingestors/ncaabw_teams.py",
+              "data/db.py", "scripts/dk_live_board_run.ps1")
 IDLE_POLL_SEC = float(os.environ.get("DK_LIVE_IDLE_POLL_SEC", "30"))
 RESOLVE_RETRY_SEC = 60.0
 RESOLVER_REFRESH_SEC = 600.0
@@ -82,19 +112,27 @@ RESOLVER_REFRESH_SEC = 600.0
 REFUSALS_BEFORE_BACKOFF = 5
 BACKOFF_SEC = 120.0
 
-# DraftKings' period names (seen 2026-11-12: "1st Half", "2nd Half",
-# "Halftime", "OT") -> (period, the clock to use). Halftime is the end of the
-# first half: period 1, clock 0, and the model reads it as the break.
-_PERIODS = {"1st Half": 1, "2nd Half": 2, "Halftime": 1}
+# DraftKings' period names, seen live: NCAAB "1st Half", "2nd Half", "Halftime",
+# "OT" (2026-11-12); college football "3rd Quarter", "4th Quarter" (2026-11-13).
+# Halftime is the end of the first half: the last period before it, clock 0.
+# A label not listed here is no period: the reader skips the game and the feed
+# logs the label once, so a new name costs a decision, never a wrong one.
+_HALF_PERIODS = {"1st Half": 1, "2nd Half": 2, "Halftime": 1}
+_QUARTER_PERIODS = {"1st Quarter": 1, "2nd Quarter": 2, "3rd Quarter": 3, "4th Quarter": 4, "Halftime": 2}
+_unknown_labels: set = set()
 
 
-def period_of(label: str | None) -> int | None:
+def period_of(label: str | None, sport: str = "NCAAB") -> int | None:
     if not label:
         return None
-    if label in _PERIODS:
-        return _PERIODS[label]
-    if "OT" in label.upper():
-        return 3                        # overtime: in no phase of any rule
+    table = _HALF_PERIODS if sport in HALVES else _QUARTER_PERIODS
+    if label in table:
+        return table[label]
+    if "OT" in label.upper() or "OVERTIME" in label.upper():
+        return 3 if sport in HALVES else 5      # overtime: in no phase of any rule
+    if (sport, label) not in _unknown_labels:
+        _unknown_labels.add((sport, label))
+        log.warning("%s: DraftKings period %r is not a known period - its games are skipped", sport, label)
     return None
 
 
@@ -128,6 +166,14 @@ class BoardEvent:
     total_line: float | None
     over_price: float | None
     under_price: float | None
+    home_nick: str | None = None       # DraftKings' nickname ("Pacers"): how NBA and NFL teams resolve
+    away_nick: str | None = None
+    home_ml: float | None = None       # the main moneyline
+    away_ml: float | None = None
+    possession: str | None = None      # football: 'home' / 'away' on DraftKings' sides
+    down: int | None = None
+    distance: int | None = None
+    yardline: int | None = None        # DraftKings' own number; its scale is not yet measured against ESPN
 
 
 def _suspended(obj: dict) -> bool:
@@ -146,13 +192,17 @@ def _int(x):
         return None
 
 
-def parse_board(body: dict) -> list[BoardEvent]:
+_MAIN = {"Spread": "Spread", "Point Spread": "Spread", "Total": "Total", "Total Points": "Total",
+         "Moneyline": "Moneyline"}
+
+
+def parse_board(body: dict, sport: str = "NCAAB") -> list[BoardEvent]:
     """Every STARTED event of one league board. Pure: no clock, no network."""
     events = [e for e in body.get("events") or [] if e.get("status") == "STARTED"]
     markets: dict = {}
     for m in body.get("markets") or []:
-        if m.get("main") and m.get("name") in ("Spread", "Total") and not _suspended(m):
-            markets[str(m.get("id"))] = (str(m.get("eventId")), m["name"])
+        if m.get("main") and m.get("name") in _MAIN and not _suspended(m):
+            markets[str(m.get("id"))] = (str(m.get("eventId")), _MAIN[m["name"]])
     sels: dict = {}
     for s in body.get("selections") or []:
         k = markets.get(str(s.get("marketId")))
@@ -174,11 +224,25 @@ def parse_board(body: dict) -> list[BoardEvent]:
             h_sc, a_sc = s2, s1
         lg = e.get("liveGameState") or {}
         label = lg.get("period")
-        per = period_of(label)
+        per = period_of(label, sport)
         clock = 0.0 if label == "Halftime" else (float(lg["gameTime"]) if lg.get("gameTime") is not None else None)
         sp = sels.get((eid, "Spread"), {})
         to = sels.get((eid, "Total"), {})
+        ml = sels.get((eid, "Moneyline"), {})
         sh = sp.get("Home")
+        fb = {}
+        if sport in FOOTBALL:
+            ls = sc.get("liveScoreData") or {}
+            pos = str(ls.get("americanFootballPossession") or "")
+            # "Possession [T1]" is the first-listed team (sortOrder 1); T2 the other
+            first_is_home = first is not None and home is not None and first is home
+            if "[T1]" in pos:
+                fb["possession"] = "home" if first_is_home else "away"
+            elif "[T2]" in pos:
+                fb["possession"] = "away" if first_is_home else "home"
+            fb["down"] = _int(ls.get("americanFootballCurrentDown"))
+            fb["distance"] = _int(ls.get("americanFootballYardsToGo"))
+            fb["yardline"] = _int(ls.get("americanFootballYardLine"))
         out.append(BoardEvent(
             dk_event_id=eid, name=str(e.get("name") or ""), start=e.get("startEventDate"),
             home_name=(home or {}).get("name"), away_name=(away or {}).get("name"),
@@ -190,7 +254,12 @@ def parse_board(body: dict) -> list[BoardEvent]:
             total_line=None if to.get("Over") is None or to["Over"].get("points") is None
             else float(to["Over"]["points"]),
             over_price=None if to.get("Over") is None else american(to["Over"]),
-            under_price=None if to.get("Under") is None else american(to["Under"])))
+            under_price=None if to.get("Under") is None else american(to["Under"]),
+            home_nick=((home or {}).get("metadata") or {}).get("rosettaTeamName"),
+            away_nick=((away or {}).get("metadata") or {}).get("rosettaTeamName"),
+            home_ml=None if ml.get("Home") is None else american(ml["Home"]),
+            away_ml=None if ml.get("Away") is None else american(ml["Away"]),
+            **fb))
     return out
 
 
@@ -201,25 +270,32 @@ def oriented(ev: BoardEvent, flipped: bool) -> dict:
     if not flipped:
         h, a = ev.home_score, ev.away_score
         sp, hp, ap = ev.spread_home, ev.spread_home_price, ev.spread_away_price
+        hml, aml, pos = ev.home_ml, ev.away_ml, ev.possession
     else:
         h, a = ev.away_score, ev.home_score
         sp = None if ev.spread_home is None else -ev.spread_home
         hp, ap = ev.spread_away_price, ev.spread_home_price
+        hml, aml = ev.away_ml, ev.home_ml
+        pos = {"home": "away", "away": "home"}.get(ev.possession or "")
     return {"dk_event_id": ev.dk_event_id, "flipped": bool(flipped), "period_label": ev.period_label,
             "period": ev.period, "clock_s": ev.clock_s, "clock_running": ev.clock_running,
             "home_score": h, "away_score": a, "spread_home": sp, "spread_home_price": hp,
             "spread_away_price": ap, "total_line": ev.total_line, "over_price": ev.over_price,
-            "under_price": ev.under_price}
+            "under_price": ev.under_price, "home_ml": hml, "away_ml": aml, "possession": pos,
+            "down": ev.down, "distance": ev.distance, "yardline": ev.yardline}
 
 
 CHANGE_KEY = ("period_label", "home_score", "away_score", "spread_home", "spread_home_price",
-              "spread_away_price", "total_line", "over_price", "under_price")
+              "spread_away_price", "total_line", "over_price", "under_price", "home_ml", "away_ml",
+              "possession", "down", "distance", "yardline")
 READ_COLS = ("sport", "game_id", "read_at", "dk_event_id", "flipped", "period_label", "period", "clock_s",
              "clock_running", "home_score", "away_score", "spread_home", "spread_home_price",
-             "spread_away_price", "total_line", "over_price", "under_price")
+             "spread_away_price", "total_line", "over_price", "under_price", "home_ml", "away_ml",
+             "possession", "down", "distance", "yardline")
 
 
-LINE_KEYS = ("spread_home", "spread_home_price", "spread_away_price", "total_line", "over_price", "under_price")
+LINE_KEYS = ("spread_home", "spread_home_price", "spread_away_price", "total_line", "over_price", "under_price",
+             "home_ml", "away_ml")
 
 
 def changed(prev: dict | None, row: dict) -> bool:
@@ -259,8 +335,9 @@ class Board:
         if self.resolver is None or time.monotonic() - self.resolver_at > RESOLVER_REFRESH_SEC:
             self.resolver = self.resolver_factory(self.c())
             self.resolver_at = time.monotonic()
-        hit = None if self.resolver is None else self.resolver(ev.home_name or "", ev.away_name or "",
-                                                               ev.start or "")
+        home, away = ((ev.home_nick, ev.away_nick) if self.sport in NICKNAME_SPORTS
+                      else (ev.home_name, ev.away_name))
+        hit = None if self.resolver is None else self.resolver(home or "", away or "", ev.start or "")
         if hit is None:
             self.tried[ev.dk_event_id] = time.monotonic()
             log.warning("%s: DraftKings event %s (%s) does not resolve onto a game", self.sport, ev.dk_event_id,
@@ -285,7 +362,7 @@ class Board:
             return self._beat(False, 0, 0, f"HTTP {r.status_code}", at)
         self.refusals = 0
         try:
-            evs = parse_board(r.json())
+            evs = parse_board(r.json(), self.sport)
         except Exception as exc:          # noqa: BLE001
             return self._beat(False, 0, 0, f"unparsable board: {type(exc).__name__}", at)
         rows, present = [], set()
@@ -399,6 +476,53 @@ def single_instance(port: int = LOCK_PORT):
     return s
 
 
+def raise_priority() -> str:
+    """The feed is the one latency-critical job on mike's machine: Windows'
+    HIGH_PRIORITY_CLASS for this process, so other work cannot starve it.
+    On 2026-11-13 the machine sat at 100% CPU (a history purchase, eight
+    research processes, four test runs) and the feed fell from a read every
+    1.5 s to one every few minutes; at high priority it read every 1.5 s again
+    on the same load. Returns what it did; never raises."""
+    if os.name != "nt":
+        return "not Windows: priority unchanged"
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        # the handle is pointer-sized; left to ctypes' int default it is cut to
+        # 32 bits and the call is refused
+        k.GetCurrentProcess.restype = ctypes.c_void_p
+        k.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        k.SetPriorityClass.restype = ctypes.c_int
+        ok = k.SetPriorityClass(k.GetCurrentProcess(), 0x00000080)      # HIGH_PRIORITY_CLASS
+        return "priority high" if ok else "priority unchanged (SetPriorityClass refused)"
+    except Exception as exc:              # noqa: BLE001
+        return f"priority unchanged ({type(exc).__name__})"
+
+
+def feed_changed_on_master(root: Path = ROOT) -> bool:
+    """True when origin/master changes one of FEED_FILES against this
+    checkout's HEAD. Any git failure is False: never restart on a doubt."""
+    import subprocess
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}   # never wait on a prompt
+    try:
+        subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin", "master"], capture_output=True, timeout=60,
+                       env=env)
+        out = subprocess.run(["git", "-C", str(root), "diff", "--name-only", "HEAD", "origin/master", "--",
+                              *FEED_FILES], capture_output=True, text=True, timeout=30)
+        return out.returncode == 0 and bool(out.stdout.strip())
+    except Exception:                     # noqa: BLE001
+        return False
+
+
+def columns_ready(conn) -> bool:
+    row = conn.execute("""SELECT COUNT(*) FROM information_schema.columns
+                           WHERE table_schema = 'public' AND table_name = 'dk_live_reads'
+                             AND column_name IN ('home_ml', 'away_ml', 'possession', 'down', 'distance', 'yardline')
+                       """).fetchone()
+    conn.commit()
+    return bool(row and int(row[0]) == 6)
+
+
 def tables_ready(conn) -> bool:
     row = conn.execute("SELECT to_regclass('public.dk_live_reads') IS NOT NULL "
                        "AND to_regclass('public.dk_live_feed') IS NOT NULL").fetchone()
@@ -410,71 +534,265 @@ def dk_session(sport: str):
     from curl_cffi import requests as cr
     s = cr.Session(impersonate="chrome124")
     try:
-        s.get(BOOT_URL[sport], timeout=15)
+        s.get(BOOT_URL, timeout=15)
     except Exception:                     # noqa: BLE001
         pass
     return s
 
 
+# ─── each sport's DraftKings names onto OUR games rows ────────────────────────
+#
+# A wrong match puts one game's line on another game's row and nothing
+# downstream can tell; an unmatched game only costs a decision and is logged.
+# So every resolver refuses on ambiguity and on anything it does not know.
+
+def _today_et() -> str:
+    from zoneinfo import ZoneInfo
+    return datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York")).date().isoformat()
+
+
+# DraftKings' college basketball school names our team registry does not
+# resolve, each mapped to the registry's own name (read off DraftKings' NCAAB
+# board on 2026-11-13: 10 of that night's 55 games did not resolve, all ten do
+# through these). A wrong one cannot mis-place a line: the game must still
+# match its opponent and its date, so it would only stay unmatched.
+CBB_ALIASES = {"A&M-Corpus Christi": "Texas A&M-Corpus Christi", "Miami FL": "Miami",
+               "Appalachian State": "App State", "LIU": "Long Island University",
+               "Mount Saint Marys": "Mount St. Mary's", "SE Missouri State": "Southeast Missouri State",
+               "Alcorn": "Alcorn State", "ULM": "UL Monroe", "Mississippi Valley": "Mississippi Valley State",
+               "Illinois Chicago": "UIC"}
+
+
+def _cbb(name: str) -> str:
+    n = (name or "").replace("[W]", "").strip()
+    return CBB_ALIASES.get(n, n)
+
+
 def ncaab_resolver(conn):
     from data.ingestors.ncaab_teams import make_resolver
-    return make_resolver(conn, datetime.now(timezone.utc).astimezone().date().isoformat())
+    inner = make_resolver(conn, _today_et())
+    if inner is None:
+        return None
+    return lambda home, away, start: inner(_cbb(home), _cbb(away), start)
+
+
+def ncaabw_resolver(conn):
+    """Women's college basketball: DraftKings writes "Florida [W]"; the tag is
+    dropped and the name goes through the women's team registry, as the odds
+    feed's names do (data.ingestors.ncaabw_teams.make_resolver)."""
+    from data.ingestors.ncaabw_teams import make_resolver
+    inner = make_resolver(conn, _today_et())
+    if inner is None:
+        return None
+
+    def resolve(home: str, away: str, start: str):
+        return inner(_cbb(home), _cbb(away), start)
+    return resolve
+
+
+# DraftKings' nickname (participants[].metadata.rosettaTeamName) -> OUR team id,
+# pinned against the ids the games table holds (tests/test_dk_live_board_all.py).
+NBA_NICKNAMES = {
+    "Hawks": "ATL", "Nets": "BKN", "Celtics": "BOS", "Hornets": "CHA", "Bulls": "CHI", "Cavaliers": "CLE",
+    "Mavericks": "DAL", "Nuggets": "DEN", "Pistons": "DET", "Warriors": "GSW", "Rockets": "HOU",
+    "Pacers": "IND", "Clippers": "LAC", "Lakers": "LAL", "Grizzlies": "MEM", "Heat": "MIA", "Bucks": "MIL",
+    "Timberwolves": "MIN", "Pelicans": "NOP", "Knicks": "NYK", "Thunder": "OKC", "Magic": "ORL",
+    "76ers": "PHI", "Suns": "PHX", "Trail Blazers": "POR", "Kings": "SAC", "Spurs": "SAS", "Raptors": "TOR",
+    "Jazz": "UTA", "Wizards": "WAS"}
+NFL_NICKNAMES = {
+    "Cardinals": "ARI", "Falcons": "ATL", "Ravens": "BAL", "Bills": "BUF", "Panthers": "CAR", "Bears": "CHI",
+    "Bengals": "CIN", "Browns": "CLE", "Cowboys": "DAL", "Broncos": "DEN", "Lions": "DET", "Packers": "GB",
+    "Texans": "HOU", "Colts": "IND", "Jaguars": "JAX", "Chiefs": "KC", "Rams": "LA", "Chargers": "LAC",
+    "Raiders": "LV", "Dolphins": "MIA", "Vikings": "MIN", "Patriots": "NE", "Saints": "NO", "Giants": "NYG",
+    "Jets": "NYJ", "Eagles": "PHI", "Steelers": "PIT", "Seahawks": "SEA", "49ers": "SF", "Buccaneers": "TB",
+    "Titans": "TEN", "Commanders": "WAS"}
+NICKNAME_SPORTS = {"NBA": NBA_NICKNAMES, "NFL": NFL_NICKNAMES}
+
+# DraftKings' college football school names that differ from OUR (CFBD) names
+# once accents and punctuation are folded; read off the 2026-11-13..15 slate
+# (132 of 138 names matched as they stand).
+NCAAF_ALIASES = {"Appalachian State": "App State", "FIU": "Florida International", "Miami FL": "Miami",
+                 "ULM": "UL Monroe"}
+
+
+def _fold(name: str) -> str:
+    import re
+    import unicodedata
+    n = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]", "", n.lower())
+
+
+def _slate_games(conn, sport: str) -> list:
+    from datetime import date, timedelta
+    d = date.fromisoformat(_today_et())
+    rows = conn.execute("""
+        SELECT game_id, game_date, home_team, away_team FROM games
+         WHERE sport = %s AND game_date BETWEEN %s AND %s
+    """, (sport, (d - timedelta(days=1)).isoformat(), (d + timedelta(days=1)).isoformat())).fetchall()
+    conn.commit()
+    return [(str(g), str(gd)[:10], str(h or ""), str(a or "")) for g, gd, h, a in rows]
+
+
+def pair_match(games: list, home_key: str, away_key: str, start: str, key) -> tuple | None:
+    """(game_id, flipped) for the one game on the start's ET date (else the
+    day either side) whose two teams are these two, either way round; None
+    when there is none or more than one."""
+    import pandas as pd
+    try:
+        et = pd.Timestamp(start).tz_convert("America/New_York").date().isoformat()
+    except (ValueError, TypeError):
+        et = None
+    hits = [(g, gd, key(h) == home_key) for g, gd, h, a in games
+            if {key(h), key(a)} == {home_key, away_key} and home_key != away_key]
+    if et is not None:
+        same = [x for x in hits if x[1] == et]
+        hits = same or hits
+    if len(hits) != 1:
+        return None
+    return hits[0][0], not hits[0][2]
+
+
+def nickname_resolver(sport: str):
+    nick = NICKNAME_SPORTS[sport]
+
+    def factory(conn):
+        games = _slate_games(conn, sport)
+
+        def resolve(home: str, away: str, start: str):
+            h, a = nick.get(home), nick.get(away)
+            if not h or not a:
+                return None
+            return pair_match(games, h, a, start, key=lambda t: t)
+        return resolve
+    return factory
+
+
+def ncaaf_resolver(conn):
+    games = _slate_games(conn, "NCAAF")
+
+    def resolve(home: str, away: str, start: str):
+        h, a = (_fold(NCAAF_ALIASES.get(home, home)), _fold(NCAAF_ALIASES.get(away, away)))
+        if not h or not a:
+            return None
+        return pair_match(games, h, a, start, key=_fold)
+    return resolve
+
+
+RESOLVERS = {"NCAAB": ncaab_resolver, "NCAABW": ncaabw_resolver, "NBA": nickname_resolver("NBA"),
+             "NFL": nickname_resolver("NFL"), "NCAAF": ncaaf_resolver}
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sport", default="NCAAB", choices=sorted(LEAGUES))
-    ap.add_argument("--poll", type=float, default=POLL_SEC)
+    ap.add_argument("--sports", nargs="*", default=sorted(LEAGUES), choices=sorted(LEAGUES))
+    ap.add_argument("--poll", type=float, default=POLL_SEC, help="seconds between reads of a league with a game live")
     ap.add_argument("--minutes", type=float, default=None, help="stop after this long (default: idle exit)")
     ap.add_argument("--idle-exit", type=float, default=45.0, help="minutes with no live event before exiting")
+    ap.add_argument("--log", type=Path, default=None, help="log to this file (UTF-8) instead of the console")
+    ap.add_argument("--exit-on-new-master", action="store_true",
+                    help="exit with code 3 when a merge to master changes the feed's files")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if a.log is not None:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+                            filename=str(a.log), encoding="utf-8")
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     from data.db import get_connection
     lock = single_instance()
     if lock is None:
         log.info("a DraftKings board feed is already running on this machine - exiting")
         return 0
-    board = Board(a.sport, get_connection, dk_session, ncaab_resolver, dry_run=a.dry_run)
-    if not a.dry_run and not tables_ready(board.c()):
+    if not a.dry_run:
+        log.info("%s", raise_priority())
+    boards = {sp: Board(sp, get_connection, dk_session, RESOLVERS[sp], dry_run=a.dry_run) for sp in a.sports}
+    first = next(iter(boards.values()))
+    if not a.dry_run and not tables_ready(first.c()):
         log.warning("dk_live_reads / dk_live_feed do not exist yet (data/migrations/dk_live_reads_2026_11_12.sql, "
                     "applied by data.view_migrations) - exiting without reading DraftKings")
         return 0
-    board.load_last()
-    gap, last_refusal = a.poll, time.monotonic()
+    if not a.dry_run and not columns_ready(first.c()):
+        log.warning("dk_live_reads lacks the moneyline and football columns "
+                    "(data/migrations/dk_live_reads_all_sports_2026_11_13.sql) - exiting without reading DraftKings")
+        return 0
+    for b in boards.values():
+        b.load_last()
+    log.info("reading %s; a live league every %.1f s, an idle one every %.0f s, at least %.1f s between requests",
+             ", ".join(boards), a.poll, IDLE_POLL_SEC, MIN_GAP_SEC)
+    plan = Pacer(list(boards), a.poll)
     end = None if a.minutes is None else time.monotonic() + a.minutes * 60
     idle_since = None
     n = 0
+    checked = time.monotonic()
     while end is None or time.monotonic() < end:
-        t0 = time.monotonic()
-        res = board.read()
+        if a.exit_on_new_master and time.monotonic() - checked >= MASTER_CHECK_SEC:
+            checked = time.monotonic()
+            if feed_changed_on_master():
+                log.info("a merge to master changed the feed - exiting so the launcher starts the new one")
+                return NEW_MASTER_EXIT
+        sp, wait = plan.next()
+        if wait > 0:
+            time.sleep(wait)
+        res = boards[sp].read()
         n += 1
-        if n % 40 == 1:
-            log.info("%s read %d: %s", a.sport, n, res)
-        if res.get("live"):
+        plan.done(sp, res, boards[sp])
+        if n % 100 == 1:
+            log.info("read %d (%s): %s", n, sp, res)
+        if plan.any_live():
             idle_since = None
         elif idle_since is None:
             idle_since = time.monotonic()
         elif time.monotonic() - idle_since > a.idle_exit * 60:
-            log.info("%s: no live event for %.0f minutes - exiting", a.sport, a.idle_exit)
+            log.info("no live event in %s for %.0f minutes - exiting", ", ".join(boards), a.idle_exit)
             return 0
-        if board.refusals >= REFUSALS_BEFORE_BACKOFF:
-            log.error("%s: %d refusals in a row - backing off %.0f s", a.sport, board.refusals, BACKOFF_SEC)
-            time.sleep(BACKOFF_SEC)
-            board.refusals = 0
-            continue
+    return 0
+
+
+class Pacer:
+    """Which league to read next, and when: a league with a game live every
+    `poll` seconds (doubled on a refusal up to MAX_POLL_SEC, halved back after
+    a quiet minute), an idle one every IDLE_POLL_SEC, five refusals in a row
+    BACKOFF_SEC, and never two requests closer than MIN_GAP_SEC."""
+
+    def __init__(self, sports: list, poll: float, clock=time.monotonic):
+        self.clock, self.poll = clock, float(poll)
+        now = clock()
+        self.due = {sp: now for sp in sports}
+        self.gap = {sp: float(poll) for sp in sports}
+        self.quiet_since = {sp: now for sp in sports}
+        self.live = {sp: False for sp in sports}
+        self.last_request = None
+
+    def next(self) -> tuple:
+        now = self.clock()
+        sp = min(self.due, key=lambda k: self.due[k])
+        at = self.due[sp]
+        if self.last_request is not None:
+            at = max(at, self.last_request + MIN_GAP_SEC)
+        return sp, max(0.0, at - now)
+
+    def done(self, sp: str, res: dict, board=None) -> None:
+        now = self.clock()
+        self.last_request = now
+        self.live[sp] = bool(res.get("live"))
         refused = not res.get("ok") and "HTTP" in str(res.get("detail") or "")
         if refused:
-            last_refusal = time.monotonic()
-        new_gap = next_gap(gap, refused, time.monotonic() - last_refusal, base=a.poll)
-        if new_gap != gap:
-            log.warning("%s: reading every %.1f s (was %.1f s)", a.sport, new_gap, gap)
+            self.quiet_since[sp] = now
+        g = next_gap(self.gap[sp], refused, now - self.quiet_since[sp], base=self.poll)
+        if g != self.gap[sp]:
+            log.warning("%s: reading every %.1f s (was %.1f s)", sp, g, self.gap[sp])
             if not refused:
-                last_refusal = time.monotonic()      # the next halving waits another quiet minute
-            gap = new_gap
-        wait = gap if res.get("live") else IDLE_POLL_SEC
-        time.sleep(max(0.0, wait - (time.monotonic() - t0)))
-    return 0
+                self.quiet_since[sp] = now
+            self.gap[sp] = g
+        if board is not None and board.refusals >= REFUSALS_BEFORE_BACKOFF:
+            log.error("%s: %d refusals in a row - backing off %.0f s", sp, board.refusals, BACKOFF_SEC)
+            board.refusals = 0
+            self.due[sp] = now + BACKOFF_SEC
+            return
+        self.due[sp] = now + (self.gap[sp] if self.live[sp] else IDLE_POLL_SEC)
+
+    def any_live(self) -> bool:
+        return any(self.live.values())
 
 
 if __name__ == "__main__":

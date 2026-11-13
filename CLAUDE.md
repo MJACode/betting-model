@@ -118,8 +118,7 @@ alternatives, and building everything. Matt has final say on all decisions.
 ---
 
 ## 1b. Standing Rules From Matt (do not relitigate, do not forget)
-**The reply format in Section 0 is the first of these rules — it was asked
-for three times before it was written down. Do not drop it.**
+**The reply format in Section 0 is the first of these rules. Do not drop it.**
 
 These are instructions Matt has given that MUST survive across sessions. A new
 session starts with no memory of previous ones, so anything Matt says to
@@ -264,6 +263,8 @@ opens — always.** The full rule loads automatically from
 by any path. Only `config.RECORD_RESTATEMENT_APPROVALS` opens one. Every record
 holds until each pick it counts is graded. Mechanics:
 `.claude/rules/picks-and-publishing.md`.
+
+**TEST IT NOW** (mike, 11-13): run anything built for later now; route around a dependency that is down; what must wait gets an `outstanding` issue (`~/.claude/CLAUDE.md` §6). List: `python -m scripts.outstanding`.
 
 **WRITE THE SESSION SUMMARY TO `docs/sessions/`, NOT TO THIS FILE.**
 (Repo-level rule, 2026-08-30.) "Update CLAUDE.md after every commit" grew this
@@ -539,10 +540,8 @@ Claude opens a file they apply to — `data-integrity.md` for `data/`, `models/`
 the scripts. Twenty-one rules, none rewritten, costing nothing on a session that
 never touches those directories.
 
-They are NOT optional reading that got demoted. A path-scoped rule is *more*
-reliably present than a line in a long file: it arrives in context at the moment
-the file is opened, rather than 700 lines earlier. What stays here is what has
-to be known BEFORE deciding which file to open.
+What stays here is what has to be known BEFORE deciding which file to open
+(§10: a path-scoped rule is not a demoted one).
 
 - **A TEST WRITTEN FROM THE SAME UNDERSTANDING THAT PRODUCED THE CODE INHERITS
   ITS BLIND SPOT.** Five guards in one day (2026-09-04) passed while the thing
@@ -576,8 +575,8 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB, NCAABW. 82
-  models carry their own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB, NCAABW. 80
+  models carry their own prob/edge cut in `config.ACTION_THRESHOLDS`; 28 are
   paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no

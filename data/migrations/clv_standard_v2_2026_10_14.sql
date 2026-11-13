@@ -8,7 +8,7 @@
 -- Beat = clv_pct > 0. No pre-start close at that book on that line → NULL.
 -- Another book is not a substitute.
 --
--- Secondary, only when Pinnacle has a pre-start close on that line:
+-- Secondary, only when Pinnacle's latest pre-start main line is that line:
 --   market_clv_pct = (taken_decimal * fair_close_prob - 1) * 100
 --   fair_close from power de-vig (3-way when the close has a draw).
 --
@@ -28,7 +28,7 @@
 
 DO $mig$
 DECLARE
-  fn_comment text := 'clv-standard-v2-power-80-0.05-12-ncaaf-moneyline-market';
+  fn_comment text := 'clv-standard-v2-power-80-0.05-12-ufc-open-moneyline';
   work_left boolean;
   def text;
   new_def text;
@@ -222,6 +222,7 @@ BEGIN
         WHEN 'ncaab_first_half_total' THEN 'totals_h1'
         WHEN 'ncaabw_total_blend' THEN 'totals'
         WHEN 'ncaaf_moneyline_market' THEN 'h2h'
+        WHEN 'ufc_open_moneyline' THEN 'h2h'
         ELSE 'h2h'
       END
     $body$;
@@ -373,7 +374,7 @@ BEGIN
     $body$;
 
     COMMENT ON FUNCTION public.clv_power_fair(double precision[]) IS
-      'clv-standard-v2-power-80-0.05-12-ncaaf-moneyline-market';
+      'clv-standard-v2-power-80-0.05-12-ufc-open-moneyline';
   END IF;
 
   SELECT EXISTS (
@@ -631,10 +632,15 @@ BEGIN
                 AND o.snapshot_type <> 'in_play')
           )
           AND o.snapshot_at::timestamptz <= s.close_bound
+          -- Pinnacle's latest main line, not its last quote on our number
+          -- (the same read as tracking/paper_tracker._capture_clv).
+          -- MLB and NHL spreads stay on the ±1.5 run/puck line. pin_moved
+          -- below leaves the market edge NULL when that close has left
+          -- scored_line.
           AND (
-            (s.game_market LIKE '%spreads%' AND o.spread_home = s.scored_line)
-            OR (s.game_market LIKE '%totals%' AND o.total_line = s.scored_line)
-            OR (s.game_market NOT LIKE '%spreads%' AND s.game_market NOT LIKE '%totals%')
+            s.game_market <> 'spreads'
+            OR s.sport_prefix NOT IN ('MLB', 'NHL')
+            OR ABS(o.spread_home) = 1.5
           )
         ORDER BY o.snapshot_at::timestamptz DESC
         LIMIT 1

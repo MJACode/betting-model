@@ -86,6 +86,12 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         fetched books' moneylines and spreads as of 14:00Z; then publishes. A
         later run that finds a game undecided writes it as missed, never bets
         it, and fails. RUN_NCAAF_MONEYLINE_CARD=0 stops it.)
+  * UFC opening-price card  hourly at :25, 24x7, UTC -> run_ufc_open_moneyline_card
+        (scripts/ufc_open_moneyline_card.py: the UFC fight-winner model bets
+        a fight still a week or more out on the 12:25Z run, at the latest
+        pull where Pinnacle and a deciding book both quote it; every other
+        run closes the fights that reached the week-out mark. Then publishes.
+        RUN_UFC_OPEN_MONEYLINE=0 stops it.)
   * NCAAB first-post ML   every minute, 24x7    -> run_ncaab_moneyline_first_post
         (scripts/ncaab_moneyline_first_post_card.py: one keyed planning read
         for a bettable book's NEW moneyline on an NCAAB game, stored by the
@@ -151,6 +157,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from concurrent.futures import ThreadPoolExecutor
@@ -317,6 +324,49 @@ log = logging.getLogger("scheduler")
 # tracking.daily_retry.MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY.
 _DAILY_LOCK = threading.Lock()
 
+# How often a pass re-checks the other's lock, and how long the daily will
+# wait for a refresh that is already scoring. The refresh chain was cut
+# from about 12 minutes; 30 covers a slow pass. Past that, the daily scores
+# anyway — a stuck refresh must not skip the only writer of the MLB
+# freshness tables.
+_WRITER_POLL_S = 0.5
+_DAILY_WAIT_FOR_REFRESH_S = 30 * 60
+
+
+def _refresh_wait_for_daily_s() -> float:
+    """How long a refresh waits for a daily before scoring anyway.
+
+    ``MAX_DAILY_RUN`` is the longest a daily ledger row is treated as live.
+    One extra minute lets a daily that finishes on that boundary release
+    the lock before the refresh deletes and rewrites the same pick rows.
+    """
+    from tracking.daily_retry import MAX_DAILY_RUN
+    return MAX_DAILY_RUN.total_seconds() + 60
+
+
+def _wait_for_refresh_to_finish(label: str) -> bool:
+    """Block while a refresh holds ``_REFRESH_LOCK``. The caller holds
+    ``_DAILY_LOCK`` for the wait. True when the refresh lock cleared in time.
+
+    The refresh side does the opposite: it does not hold its lock while it
+    waits, or the two waits deadlock. A refresh that has not started work
+    sees this daily lock and waits. A refresh already inside its run keeps
+    going; this wait ends when that run releases the lock.
+    """
+    if not _REFRESH_LOCK.locked():
+        return True
+    log.info("%s: a refresh pass is running — waiting to score", label)
+    deadline = time.monotonic() + _DAILY_WAIT_FOR_REFRESH_S
+    while _REFRESH_LOCK.locked():
+        if time.monotonic() >= deadline:
+            log.warning(
+                "%s: a refresh still holds its lock after %ss — scoring anyway",
+                label, _DAILY_WAIT_FOR_REFRESH_S,
+            )
+            return False
+        time.sleep(_WRITER_POLL_S)
+    return True
+
 
 # ---------------------------------------------------------------------------
 # Jobs — each just runs an existing entrypoint as a subprocess.
@@ -427,6 +477,10 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
         log.info("daily-pipeline already running in this process — skip")
         return "skipped"
     try:
+        # A refresh already scoring deletes and rewrites the same pick rows
+        # this daily is about to. Wait, still holding this lock, so a refresh
+        # that has not started sees it and waits instead of starting.
+        _wait_for_refresh_to_finish("daily-pipeline")
         if retry_reason:
             log.info("daily-pipeline retry (%s/%s) start %s: %s",
                      retry_source or "catch-up",
@@ -502,10 +556,50 @@ def _wait_for_nhl_window(label: str) -> bool:
 def run_refresh_pass(mode: str = "hourly") -> None:
     # The single-source-of-truth refresh chain (odds + prop odds + lineups + scoring
     # for every sport, opening-signals, parlay record, push notifications).
-    if not _REFRESH_LOCK.acquire(blocking=False):
-        log.info("refresh-pass[%s]: a pass is already running in this process — skip",
-                 mode)
-        return
+    #
+    # A daily and this pass both DELETE unlocked pick rows across the
+    # look-ahead window and then insert (models/scorer.py). Inside one
+    # refresh those writers are sequential for that reason
+    # (scripts/refresh_pass.sh). The daily is a different process entry
+    # and used to run beside this one: boot catch-up at +5s, this catch-up
+    # at +60s, and the :17 cron while a relaunch is still going. The unique
+    # index drops a second INSERT of the same pick. It does not stop one
+    # pass deleting a row the other just wrote, including a pick that
+    # already posted. So this pass waits until the daily lock is free.
+    #
+    # The wait does not hold ``_REFRESH_LOCK``. The daily holds its lock
+    # while it waits for this one. Holding both directions deadlocks.
+    # A second refresh skips at once while the first is scoring: the
+    # acquire below fails and returns. A refresh that is still waiting
+    # behind the daily does not hold the lock, so a second one waits too.
+    # When the daily lets go, one of them takes the lock and the other's
+    # acquire fails, so one pass runs.
+    deadline = time.monotonic() + _refresh_wait_for_daily_s()
+    announced = False
+    while True:
+        if not _REFRESH_LOCK.acquire(blocking=False):
+            log.info("refresh-pass[%s]: a pass is already running in this process — skip",
+                     mode)
+            return
+        if not _DAILY_LOCK.locked():
+            break
+        _REFRESH_LOCK.release()
+        if not announced:
+            log.info("refresh-pass[%s]: a daily is running — waiting to score", mode)
+            announced = True
+        if time.monotonic() >= deadline:
+            log.warning(
+                "refresh-pass[%s]: a daily still holds its lock after %ss — scoring anyway",
+                mode, _refresh_wait_for_daily_s(),
+            )
+            if not _REFRESH_LOCK.acquire(blocking=False):
+                log.info(
+                    "refresh-pass[%s]: a pass is already running in this process — skip",
+                    mode,
+                )
+                return
+            break
+        time.sleep(_WRITER_POLL_S)
     try:
         _wait_for_nhl_window(f"refresh-pass[{mode}]")
         _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
@@ -957,6 +1051,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes NCAAF moneyline picks through its own card, reading
                   # the NCAAF odds the hourly passes stored.
                   "ncaaf_moneyline_card",
+                  # Writes UFC fight-winner picks through its own card, reading
+                  # the UFC odds the refresh passes stored.
+                  "ufc_open_moneyline_card",
                   # Writes NCAAB first-post moneyline picks through its own
                   # card, reading the odds the capture and the passes store.
                   "ncaab_moneyline_first_post",
@@ -2049,6 +2146,31 @@ def run_ncaaf_moneyline_card() -> None:
     _publish_new_signals("ncaaf-moneyline-card")
     if outcome != "ok":
         raise RuntimeError(f"NCAAF moneyline card did not finish: {outcome}")
+
+
+# The UFC opening-price card reads the UFC slate, the fight log (one replay of
+# every logged fight) and three hours of stored moneylines; seconds.
+UFC_OPEN_MONEYLINE_CARD_TIMEOUT_S = 600
+
+
+def run_ufc_open_moneyline_card() -> None:
+    """One UFC opening-price card run (scripts/ufc_open_moneyline_card.py),
+    then publish.
+
+    Hourly at 25 past, UTC. Bets are decided only on the 12:25Z run (the
+    backtest bought one pull a day at noon UTC, and the refresh pass stores
+    the 12Z pull at about :16), on fights still at least a week out; every
+    other run closes the fights that reached the week-out mark without a bet
+    as NONE rows. The script returns at once when RUN_UFC_OPEN_MONEYLINE=0;
+    the job still beats. A run that fails or is killed raises AFTER
+    publishing, so the heartbeat records "error", while a bet that was
+    written still goes out.
+    """
+    outcome = _run([sys.executable, "-m", "scripts.ufc_open_moneyline_card", "--publish"],
+                   "ufc-open-moneyline-card", timeout=UFC_OPEN_MONEYLINE_CARD_TIMEOUT_S)
+    _publish_new_signals("ufc-open-moneyline-card")
+    if outcome != "ok":
+        raise RuntimeError(f"UFC opening-price card did not finish: {outcome}")
 
 
 # The NCAAB first-half window's steps, bounded so a stuck one cannot hold the
@@ -3307,6 +3429,19 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute=5, timezone="UTC"),
         id="ncaaf_moneyline_card",
         name="NCAAF moneyline card (hourly at :05 UTC: decide in the 14Z hour on the 14Z quotes)",
+        max_instances=1, coalesce=True, misfire_grace_time=600,
+    )
+
+    # UFC opening-price card -- hourly at 25 past, UTC
+    # (run_ufc_open_moneyline_card). Bets only on the 12:25Z run, on the pull
+    # the noon refresh pass stored at about :16; hourly so the week-out mark
+    # is closed within the hour and a stopped card shows in the heartbeat.
+    # Unconditional; the kill switch is in the script.
+    sched.add_job(
+        run_ufc_open_moneyline_card,
+        CronTrigger(minute=25, timezone="UTC"),
+        id="ufc_open_moneyline_card",
+        name="UFC opening-price card (hourly at :25 UTC: bet on the 12:25Z run, a week or more out)",
         max_instances=1, coalesce=True, misfire_grace_time=600,
     )
 

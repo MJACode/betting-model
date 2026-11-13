@@ -93,12 +93,23 @@ down this list.
   other book on all 104 games, under the main key. Treat a "main" number whose
   two prices are far from even as a rung before reading any per-book result
   (`docs/euroleague_market_audit.md`, round 1).
+- **A free source behind Cloudflare rate-limits.** EuroLeague's shot chart
+  answered HTTP 429 (error 1015) after 63 games asked four at a time; one call
+  every 1.5 seconds with a back-off on 429 held. Ask a free source one call at
+  a time first.
+- **A hold-out read needs a cache past the freeze.** A rule frozen on games
+  to a date and read on a cache that ends on that date only reproduces itself
+  (EuroLeague round 2): refresh the cache, and read only games after the freeze.
 - **Missing books.** No Pinnacle, Bovada or betPARX on the women's college
   board; two books dropped first halves in one season; no two-way college
   props at two books. Know which books exist before designing a cross-book
   rule.
 - **Markets the feed serves differ by league** even within one sport: probe
   them (`references/market-grid.md`).
+- **A store that keeps an event only once one book lists it** holds no
+  other book's opener. UFC's ingest keeps a fight once DraftKings lists it
+  (every book's first stored row equals DraftKings' on all 345 fights of
+  2026), so an opener study needs the feed's history, not our store.
 - **The in-play snapshot is served minutes before the asked instant** (261 to
   300 seconds, men's college).
 

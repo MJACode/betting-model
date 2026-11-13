@@ -15,6 +15,18 @@
 -- "Team wins by 11+" is the same outcome as that team at -10.5. For the
 -- underdog that is DOG -10.5 (not dog +10.5, which is "dog loses by 10 or
 -- fewer, or wins"), so the DK comparison column is dk_alt_dog_m10_5.
+--
+-- Sample floor: internal.ncaab_margin_config.min_baseline_n_games = 100.
+-- Matt chose 100 on 2026-11-08. On the archive that day, three cells sit
+-- under it and get no fair odds and no min odds:
+--   rest, spread 35.0, 80 games
+--   rest, spread 34.5, 92 games
+--   nov,  spread 35.0, 97 games
+-- A cell under the floor keeps n_games, mean and sd, stores null band
+-- probabilities, and the price row nulls fair odds and min odds and sets
+-- below_sample_floor. Raising the floor also blanks prices on the next
+-- refresh when an older baseline row still holds probabilities. Lowering it
+-- prices those cells again only after refresh_ncaab_margin_baseline.
 
 create schema if not exists internal;
 
@@ -48,6 +60,75 @@ returns numeric language sql immutable as $$
               else ceil(-100.0 / ((1 + cushion) / p - 1)) end
 $$;
 
+-- Matt, 2026-11-08: price a cell only when it rests on at least 100 games.
+create table if not exists internal.ncaab_margin_config (
+  singleton boolean primary key default true check (singleton),
+  min_baseline_n_games integer not null check (min_baseline_n_games >= 0)
+);
+insert into internal.ncaab_margin_config (singleton, min_baseline_n_games)
+select true, 100
+where not exists (select 1 from internal.ncaab_margin_config);
+comment on column internal.ncaab_margin_config.min_baseline_n_games is
+  'Matt, 2026-11-08. A baseline cell is priced only when n_games is at least this. 100 blanks three current-archive cells: rest 35.0 (80), rest 34.5 (92), nov 35.0 (97).';
+
+create or replace function internal.ncaab_margin_min_baseline_n_games()
+returns integer language sql stable security invoker set search_path = '' as $$
+  select c.min_baseline_n_games from internal.ncaab_margin_config c
+$$;
+
+create or replace function internal.ncaab_margin_norm_team(t text)
+returns text language sql immutable security invoker set search_path = '' as $$
+  select nullif(lower(btrim(regexp_replace(coalesce(t, ''), '\s+', ' ', 'g'))), '')
+$$;
+
+-- espn id wins when the manual row carries one. Otherwise the normalized
+-- display name, or school / short_name / abbreviation on that espn id.
+create or replace function internal.ncaab_margin_team_matches(
+  entered_team text, entered_espn integer, band_team text, band_espn integer)
+returns boolean language plpgsql stable security invoker set search_path = '' as $$
+declare
+  norm_entered text := internal.ncaab_margin_norm_team(entered_team);
+begin
+  if entered_espn is not null then
+    return band_espn is not null and entered_espn = band_espn;
+  end if;
+  if norm_entered is null then
+    return false;
+  end if;
+  if norm_entered = internal.ncaab_margin_norm_team(band_team) then
+    return true;
+  end if;
+  if band_espn is null then
+    return false;
+  end if;
+  return exists (
+    select 1 from public.ncaab_teams t
+     where t.espn_id = band_espn
+       and norm_entered in (
+         internal.ncaab_margin_norm_team(t.display_name),
+         internal.ncaab_margin_norm_team(t.school),
+         internal.ncaab_margin_norm_team(t.short_name),
+         internal.ncaab_margin_norm_team(t.abbreviation))
+  );
+end $$;
+
+-- 'fav' or 'dog' when the entry matches exactly one side, else null.
+create or replace function internal.ncaab_margin_team_side(
+  entered_team text, entered_espn integer,
+  fav_team text, fav_espn integer, dog_team text, dog_espn integer)
+returns text language plpgsql stable security invoker set search_path = '' as $$
+declare
+  fav_hit boolean := internal.ncaab_margin_team_matches(entered_team, entered_espn, fav_team, fav_espn);
+  dog_hit boolean := internal.ncaab_margin_team_matches(entered_team, entered_espn, dog_team, dog_espn);
+begin
+  if fav_hit and not dog_hit then
+    return 'fav';
+  elsif dog_hit and not fav_hit then
+    return 'dog';
+  end if;
+  return null;
+end $$;
+
 -- ---------------------------------------------------------------- 1. baseline
 create table if not exists internal.ncaab_margin_baseline (
   abs_spread    numeric(4,1) not null,
@@ -55,10 +136,10 @@ create table if not exists internal.ncaab_margin_baseline (
   n_games       integer not null,
   mean_margin   numeric not null,   -- favourite's mean margin
   sd_margin     numeric not null,
-  p_fav_1_10    numeric not null,
-  p_fav_11p     numeric not null,
-  p_dog_1_10    numeric not null,
-  p_dog_11p     numeric not null,
+  p_fav_1_10    numeric,   -- null when n_games is under the sample floor
+  p_fav_11p     numeric,
+  p_dog_1_10    numeric,
+  p_dog_11p     numeric,
   seasons_from  integer not null,
   seasons_to    integer not null,
   built_at      timestamptz not null default now(),
@@ -75,6 +156,7 @@ returns integer language plpgsql security invoker set search_path = '' as $$
 declare
   t0 timestamptz := clock_timestamp();
   n  integer;
+  floor_n integer := internal.ncaab_margin_min_baseline_n_games();
 begin
   delete from internal.ncaab_margin_baseline;
 
@@ -102,10 +184,10 @@ begin
      p_fav_1_10, p_fav_11p, p_dog_1_10, p_dog_11p, seasons_from, seasons_to)
   select g.s, g.ph, count(*),
          avg(b.fm), stddev_samp(b.fm),
-         avg((b.fm between 1 and 10)::int),
-         avg((b.fm >= 11)::int),
-         avg((b.fm between -10 and -1)::int),
-         avg((b.fm <= -11)::int),
+         case when count(*) >= floor_n then avg((b.fm between 1 and 10)::int) end,
+         case when count(*) >= floor_n then avg((b.fm >= 11)::int) end,
+         case when count(*) >= floor_n then avg((b.fm between -10 and -1)::int) end,
+         case when count(*) >= floor_n then avg((b.fm <= -11)::int) end,
          min(b.season), max(b.season)
     from grid g
     join base b on b.ph = g.ph and b.a between g.s - 1 and g.s + 1
@@ -129,12 +211,15 @@ create table if not exists internal.ncaab_margin_prices (
   fav_team           text not null,
   dog_team           text not null,
   fav_is_home        boolean not null,
+  fav_espn_id        integer,
+  dog_espn_id        integer,
   neutral_site       boolean,
   center_spread      numeric(4,1) not null,  -- favourite's line, negative
   spread_source      text not null check (spread_source in ('pinnacle','median')),
   n_books            integer,
   season_phase       text not null,
   off_grid           boolean not null default false,  -- |spread| > 35: no fair prices
+  below_sample_floor boolean not null default false,  -- baseline n_games under the stored floor
   fav_1_10_fair_prob numeric, fav_1_10_fair_american numeric, fav_1_10_min_odds numeric,
   fav_11p_fair_prob  numeric, fav_11p_fair_american  numeric, fav_11p_min_odds  numeric,
   dog_1_10_fair_prob numeric, dog_1_10_fair_american numeric, dog_1_10_min_odds numeric,
@@ -209,31 +294,59 @@ begin
   dk as (
     select g.game_id,
       -- team at -10.5: home -> row spread_home = -10.5, home_price; away -> row +10.5, away_price
+      -- alternate_spreads wins when the main line is also +/-10.5; home_price, away_price break a remaining tie
       (select case when g.fav_home then q.home_price else q.away_price end from q
         where q.game_id = g.game_id and q.bookmaker = 'draftkings' and q.market in ('alternate_spreads','spreads')
-          and q.spread_home = case when g.fav_home then -10.5 else 10.5 end limit 1) as fav_m10_5,
+          and q.spread_home = case when g.fav_home then -10.5 else 10.5 end
+        order by (q.market = 'alternate_spreads') desc, q.market, q.home_price, q.away_price
+        limit 1) as fav_m10_5,
       (select case when g.fav_home then q.away_price else q.home_price end from q
         where q.game_id = g.game_id and q.bookmaker = 'draftkings' and q.market in ('alternate_spreads','spreads')
-          and q.spread_home = case when g.fav_home then -10.5 else 10.5 end limit 1) as dog_p10_5,
+          and q.spread_home = case when g.fav_home then -10.5 else 10.5 end
+        order by (q.market = 'alternate_spreads') desc, q.market, q.home_price, q.away_price
+        limit 1) as dog_p10_5,
       (select case when g.fav_home then q.away_price else q.home_price end from q
         where q.game_id = g.game_id and q.bookmaker = 'draftkings' and q.market in ('alternate_spreads','spreads')
-          and q.spread_home = case when g.fav_home then 10.5 else -10.5 end limit 1) as dog_m10_5,
+          and q.spread_home = case when g.fav_home then 10.5 else -10.5 end
+        order by (q.market = 'alternate_spreads') desc, q.market, q.home_price, q.away_price
+        limit 1) as dog_m10_5,
       (select case when g.fav_home then q.home_price else q.away_price end from q
         where q.game_id = g.game_id and q.bookmaker = 'draftkings' and q.market in ('alternate_spreads','spreads')
-          and q.spread_home = case when g.fav_home then 10.5 else -10.5 end limit 1) as fav_p10_5,
+          and q.spread_home = case when g.fav_home then 10.5 else -10.5 end
+        order by (q.market = 'alternate_spreads') desc, q.market, q.home_price, q.away_price
+        limit 1) as fav_p10_5,
       (select case when g.fav_home then q.home_price else q.away_price end from q
-        where q.game_id = g.game_id and q.bookmaker = 'draftkings' and q.market = 'h2h' limit 1) as ml_fav,
+        where q.game_id = g.game_id and q.bookmaker = 'draftkings' and q.market = 'h2h'
+        order by q.home_price, q.away_price
+        limit 1) as ml_fav,
       (select case when g.fav_home then q.away_price else q.home_price end from q
-        where q.game_id = g.game_id and q.bookmaker = 'draftkings' and q.market = 'h2h' limit 1) as ml_dog
+        where q.game_id = g.game_id and q.bookmaker = 'draftkings' and q.market = 'h2h'
+        order by q.home_price, q.away_price
+        limit 1) as ml_dog
     from g
   ),
   r as (
     select g.game_id, (g.ct at time zone 'America/New_York')::date as gd, g.ct,
-           case when g.fav_home then th.display_name else ta.display_name end as fav_team,
-           case when g.fav_home then ta.display_name else th.display_name end as dog_team,
+           coalesce(case when g.fav_home then th.display_name else ta.display_name end, '?') as fav_team,
+           coalesce(case when g.fav_home then ta.display_name else th.display_name end, '?') as dog_team,
+           case when g.fav_home then g.home_espn_id else g.away_espn_id end as fav_espn_id,
+           case when g.fav_home then g.away_espn_id else g.home_espn_id end as dog_espn_id,
            g.fav_home, g.neutral_site, -g.abs_line as center_spread, g.src, g.n_books, g.ph,
            (g.abs_line > 35) as off_grid,
-           b.p_fav_1_10, b.p_fav_11p, b.p_dog_1_10, b.p_dog_11p,
+           coalesce(b.n_games is not null
+                      and b.n_games < internal.ncaab_margin_min_baseline_n_games(), false) as below_sample_floor,
+           case when g.abs_line <= 35
+                 and b.n_games >= internal.ncaab_margin_min_baseline_n_games()
+                then b.p_fav_1_10 end as p_fav_1_10,
+           case when g.abs_line <= 35
+                 and b.n_games >= internal.ncaab_margin_min_baseline_n_games()
+                then b.p_fav_11p end as p_fav_11p,
+           case when g.abs_line <= 35
+                 and b.n_games >= internal.ncaab_margin_min_baseline_n_games()
+                then b.p_dog_1_10 end as p_dog_1_10,
+           case when g.abs_line <= 35
+                 and b.n_games >= internal.ncaab_margin_min_baseline_n_games()
+                then b.p_dog_11p end as p_dog_11p,
            dk.fav_m10_5, dk.dog_m10_5, dk.ml_fav, dk.ml_dog,
            -- vig-removed pairs: fav -10.5 vs dog +10.5; dog -10.5 vs fav +10.5; ML
            (1/internal.american_to_decimal(dk.fav_m10_5)) /
@@ -263,23 +376,34 @@ begin
           where p.game_id = fin.game_id order by p.computed_at desc limit 1) last
         where last.center_spread = fin.center_spread
           and last.spread_source = fin.src
+          and last.fav_is_home is not distinct from fin.fav_home
+          and last.fav_team is not distinct from fin.fav_team
+          and last.dog_team is not distinct from fin.dog_team
+          and last.fav_espn_id is not distinct from fin.fav_espn_id
+          and last.dog_espn_id is not distinct from fin.dog_espn_id
+          and last.below_sample_floor is not distinct from fin.below_sample_floor
           and last.dk_alt_fav_m10_5 is not distinct from fin.fav_m10_5
           and last.dk_alt_dog_m10_5 is not distinct from fin.dog_m10_5
           and last.dk_ml_fav is not distinct from fin.ml_fav
           and last.dk_ml_dog is not distinct from fin.ml_dog
-          and last.fav_11p_fair_prob is not distinct from fin.p_fav_11p)
+          and last.fav_1_10_fair_prob is not distinct from fin.p_fav_1_10
+          and last.fav_11p_fair_prob is not distinct from fin.p_fav_11p
+          and last.dog_1_10_fair_prob is not distinct from fin.p_dog_1_10
+          and last.dog_11p_fair_prob is not distinct from fin.p_dog_11p)
   )
   insert into internal.ncaab_margin_prices (
-    game_id, game_date, commence_time, fav_team, dog_team, fav_is_home, neutral_site,
-    center_spread, spread_source, n_books, season_phase, off_grid,
+    game_id, game_date, commence_time, fav_team, dog_team, fav_is_home,
+    fav_espn_id, dog_espn_id, neutral_site,
+    center_spread, spread_source, n_books, season_phase, off_grid, below_sample_floor,
     fav_1_10_fair_prob, fav_1_10_fair_american, fav_1_10_min_odds,
     fav_11p_fair_prob,  fav_11p_fair_american,  fav_11p_min_odds,
     dog_1_10_fair_prob, dog_1_10_fair_american, dog_1_10_min_odds,
     dog_11p_fair_prob,  dog_11p_fair_american,  dog_11p_min_odds,
     dk_alt_fav_m10_5, dk_alt_dog_m10_5, ev_fav_11p, ev_dog_11p,
     dk_ml_fav, dk_ml_dog, dk_implied_fav_1_10, dk_implied_dog_1_10, computed_at)
-  select game_id, gd, ct, coalesce(fav_team, '?'), coalesce(dog_team, '?'), fav_home, neutral_site,
-         center_spread, src, n_books, ph, off_grid,
+  select game_id, gd, ct, fav_team, dog_team, fav_home,
+         fav_espn_id, dog_espn_id, neutral_site,
+         center_spread, src, n_books, ph, off_grid, below_sample_floor,
          p_fav_1_10, internal.prob_to_american(p_fav_1_10), internal.min_american(p_fav_1_10),
          p_fav_11p,  internal.prob_to_american(p_fav_11p),  internal.min_american(p_fav_11p),
          p_dog_1_10, internal.prob_to_american(p_dog_1_10), internal.min_american(p_dog_1_10),
@@ -304,16 +428,55 @@ create table if not exists internal.ncaab_margin_dk_odds (
   id          bigint generated always as identity primary key,
   game_id     text not null,
   band        text not null check (band in ('fav_1_10','fav_11p','dog_1_10','dog_11p')),
-  team        text not null,
-  dk_american numeric not null check (dk_american <= -100 or dk_american >= 100),
+  team         text not null,
+  team_espn_id integer,   -- when set, this is the match key and the name is not
+  dk_american  numeric not null check (dk_american <= -100 or dk_american >= 100),
   entered_at  timestamptz not null default now(),
   source      text not null default 'manual'
 );
 create index if not exists ncaab_margin_dk_odds_game_idx on internal.ncaab_margin_dk_odds (game_id, band, entered_at desc);
 
+-- Reject a team that is not exactly one side of the event. A favourite flip
+-- stays valid (the school is still in the game); the band check is the views'.
+create or replace function internal.ncaab_margin_dk_odds_team_ok()
+returns trigger language plpgsql security invoker set search_path = '' as $$
+declare
+  home_name text;
+  away_name text;
+  home_id integer;
+  away_id integer;
+  home_hit boolean;
+  away_hit boolean;
+begin
+  select th.display_name, e.home_espn_id, ta.display_name, e.away_espn_id
+    into home_name, home_id, away_name, away_id
+    from public.ncaab_events e
+    left join public.ncaab_teams th on th.espn_id = e.home_espn_id
+    left join public.ncaab_teams ta on ta.espn_id = e.away_espn_id
+   where e.game_id = new.game_id;
+  if not found then
+    raise exception using
+      message = 'ncaab_margin_dk_odds has no ncaab_events row for game ' || coalesce(new.game_id, '');
+  end if;
+  home_hit := internal.ncaab_margin_team_matches(new.team, new.team_espn_id, home_name, home_id);
+  away_hit := internal.ncaab_margin_team_matches(new.team, new.team_espn_id, away_name, away_id);
+  if home_hit = away_hit then
+    raise exception using
+      message = 'ncaab_margin_dk_odds team does not match exactly one side of game ' || coalesce(new.game_id, '');
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists ncaab_margin_dk_odds_team_ok on internal.ncaab_margin_dk_odds;
+create trigger ncaab_margin_dk_odds_team_ok
+  before insert or update of team, team_espn_id, game_id
+  on internal.ncaab_margin_dk_odds
+  for each row
+  execute function internal.ncaab_margin_dk_odds_team_ok();
+
 -- Latest price row per game x latest manual DK odds per (game, band).
--- team_mismatch: the entered team is not the band's team on the latest row
--- (the favourite flipped, or a typo). bet_flag is false when it mismatches.
+-- team_mismatch: the entry is not exactly the band's side (flip, other team,
+-- or an espn id that contradicts the name). bet_flag is false when it mismatches.
 create or replace view internal.ncaab_margin_edges as
 with lp as (
   select distinct on (game_id) * from internal.ncaab_margin_prices order by game_id, computed_at desc
@@ -322,18 +485,23 @@ ld as (
   select distinct on (game_id, band) * from internal.ncaab_margin_dk_odds order by game_id, band, entered_at desc
 ),
 bands as (
-  select lp.game_id, lp.game_date, lp.commence_time, lp.computed_at, v.band, v.band_team, v.fair_prob, v.fair_american, v.min_odds
+  select lp.game_id, lp.game_date, lp.commence_time, lp.computed_at,
+         lp.fav_team, lp.fav_espn_id, lp.dog_team, lp.dog_espn_id,
+         v.band, v.band_side, v.band_team, v.fair_prob, v.fair_american, v.min_odds
     from lp cross join lateral (values
-      ('fav_1_10', lp.fav_team, lp.fav_1_10_fair_prob, lp.fav_1_10_fair_american, lp.fav_1_10_min_odds),
-      ('fav_11p',  lp.fav_team, lp.fav_11p_fair_prob,  lp.fav_11p_fair_american,  lp.fav_11p_min_odds),
-      ('dog_1_10', lp.dog_team, lp.dog_1_10_fair_prob, lp.dog_1_10_fair_american, lp.dog_1_10_min_odds),
-      ('dog_11p',  lp.dog_team, lp.dog_11p_fair_prob,  lp.dog_11p_fair_american,  lp.dog_11p_min_odds)
-    ) v(band, band_team, fair_prob, fair_american, min_odds)
+      ('fav_1_10', 'fav', lp.fav_team, lp.fav_1_10_fair_prob, lp.fav_1_10_fair_american, lp.fav_1_10_min_odds),
+      ('fav_11p',  'fav', lp.fav_team, lp.fav_11p_fair_prob,  lp.fav_11p_fair_american,  lp.fav_11p_min_odds),
+      ('dog_1_10', 'dog', lp.dog_team, lp.dog_1_10_fair_prob, lp.dog_1_10_fair_american, lp.dog_1_10_min_odds),
+      ('dog_11p',  'dog', lp.dog_team, lp.dog_11p_fair_prob,  lp.dog_11p_fair_american,  lp.dog_11p_min_odds)
+    ) v(band, band_side, band_team, fair_prob, fair_american, min_odds)
 )
-select b.*, ld.team as dk_team, ld.dk_american, ld.entered_at, ld.source,
-       (ld.team is not null and ld.team <> b.band_team) as team_mismatch,
+select b.game_id, b.game_date, b.commence_time, b.computed_at, b.band, b.band_team,
+       b.fair_prob, b.fair_american, b.min_odds,
+       ld.team as dk_team, ld.team_espn_id as dk_team_espn_id, ld.dk_american, ld.entered_at, ld.source,
+       (internal.ncaab_margin_team_side(ld.team, ld.team_espn_id, b.fav_team, b.fav_espn_id, b.dog_team, b.dog_espn_id)
+          is distinct from b.band_side) as team_mismatch,
        round((b.fair_prob * internal.american_to_decimal(ld.dk_american) - 1) * 100, 2) as edge_pct,
-       coalesce(ld.team = b.band_team
+       coalesce(internal.ncaab_margin_team_side(ld.team, ld.team_espn_id, b.fav_team, b.fav_espn_id, b.dog_team, b.dog_espn_id) = b.band_side
                 and internal.american_to_decimal(ld.dk_american) >= internal.american_to_decimal(b.min_odds), false) as bet_flag
   from bands b
   join ld on ld.game_id = b.game_id and ld.band = b.band;
@@ -411,19 +579,27 @@ ld as (  -- manual DK odds entered before tip
 ),
 b as (
   select r.game_id, r.game_date, lp.center_spread, lp.season_phase, r.fav_margin, r.band_hit,
-         v.band, v.fair_prob, v.min_odds, v.alt_price, (r.band_hit = v.band) as hit
+         lp.fav_team, lp.fav_espn_id, lp.dog_team, lp.dog_espn_id,
+         v.band, v.band_side, v.fair_prob, v.min_odds, v.alt_price, (r.band_hit = v.band) as hit
     from internal.ncaab_margin_results r
     join lp on lp.game_id = r.game_id
     cross join lateral (values
-      ('fav_1_10', lp.fav_1_10_fair_prob, lp.fav_1_10_min_odds, null::numeric),
-      ('fav_11p',  lp.fav_11p_fair_prob,  lp.fav_11p_min_odds,  lp.dk_alt_fav_m10_5),
-      ('dog_1_10', lp.dog_1_10_fair_prob, lp.dog_1_10_min_odds, null::numeric),
-      ('dog_11p',  lp.dog_11p_fair_prob,  lp.dog_11p_min_odds,  lp.dk_alt_dog_m10_5)
-    ) v(band, fair_prob, min_odds, alt_price)
+      ('fav_1_10', 'fav', lp.fav_1_10_fair_prob, lp.fav_1_10_min_odds, null::numeric),
+      ('fav_11p',  'fav', lp.fav_11p_fair_prob,  lp.fav_11p_min_odds,  lp.dk_alt_fav_m10_5),
+      ('dog_1_10', 'dog', lp.dog_1_10_fair_prob, lp.dog_1_10_min_odds, null::numeric),
+      ('dog_11p',  'dog', lp.dog_11p_fair_prob,  lp.dog_11p_min_odds,  lp.dk_alt_dog_m10_5)
+    ) v(band, band_side, fair_prob, min_odds, alt_price)
 )
-select b.*, (b.fair_prob - b.hit::int)^2 as brier,
+select b.game_id, b.game_date, b.center_spread, b.season_phase, b.fav_margin, b.band_hit,
+       b.band, b.fair_prob, b.min_odds, b.alt_price, b.hit,
+       (b.fair_prob - b.hit::int)^2 as brier,
        ld.dk_american,
-       internal.american_to_decimal(ld.dk_american) >= internal.american_to_decimal(b.min_odds) as bet_flag,
+       case
+         when ld.dk_american is null then null
+         when internal.ncaab_margin_team_side(ld.team, ld.team_espn_id, b.fav_team, b.fav_espn_id, b.dog_team, b.dog_espn_id)
+              is distinct from b.band_side then false
+         else internal.american_to_decimal(ld.dk_american) >= internal.american_to_decimal(b.min_odds)
+       end as bet_flag,
        case when ld.dk_american is null then null
             when b.hit then least(1.0, 3.0 * (internal.american_to_decimal(ld.dk_american) - 1))
             else -least(3.0, 1.0 / (internal.american_to_decimal(ld.dk_american) - 1)) end as units_manual,
@@ -456,6 +632,7 @@ select lp.commence_time, lp.dog_team || ' vs ' || lp.fav_team as matchup,
  order by lp.commence_time, lp.game_id, v.ord;
 
 -- ---------------------------------------------------------------- lock down
+alter table internal.ncaab_margin_config   enable row level security;
 alter table internal.ncaab_margin_baseline enable row level security;
 alter table internal.ncaab_margin_prices   enable row level security;
 alter table internal.ncaab_margin_dk_odds  enable row level security;

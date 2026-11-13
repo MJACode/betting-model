@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import inspect
 import importlib
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -34,6 +36,8 @@ from tracking.daily_retry import (
     DailyRun,
     announce_daily_retry,
     assess_daily_completion,
+    classify_relaunch,
+    daily_pipeline_reclaim_decision,
     decide_daily_retry,
     load_today_dailies,
 )
@@ -213,7 +217,7 @@ def test_a_missing_daily_after_the_cutoff_waits_until_tomorrow():
 
 
 def test_a_real_failure_is_retried_once_and_then_stops():
-    """    An upstream outage before MLB freshness is not a killed worker.
+    """An upstream outage before MLB freshness is not a killed worker.
     The scheduled run plus one retry is the failure cap. A third start
     would buy odds again on every boot and at 7:15. An aborted start
     between the two failures does not reset the count, and does not
@@ -569,7 +573,9 @@ def test_boot_schedules_the_daily_catch_up_without_blocking_the_scheduler():
     assert main.index('id="daily_catch_up"') < start
     assert main.index('id="refresh_catch_up"') < start
     refresh = src[src.index("def run_refresh_pass"):src.index("def run_savant_refresh")]
-    assert "_DAILY_LOCK" not in refresh
+    assert "_REFRESH_LOCK.acquire(blocking=False)" in refresh
+    assert "_DAILY_LOCK" in refresh
+    assert "waiting to score" in refresh
 
 
 def test_pipeline_watch_requeues_after_it_reports():
@@ -749,6 +755,7 @@ def test_the_manual_job_runs_one_daily_and_skips_when_the_lock_is_held(
     assert ran == []
     assert skipped["status"] == "skipped"
     assert "already running" in skipped["reason"]
+    assert skipped["start_number"] == 2
 
 
 def test_a_daily_that_finished_its_freshness_steps_is_ok():
@@ -762,3 +769,392 @@ def test_a_daily_that_finished_its_freshness_steps_is_ok():
     status, detail = assess_daily_completion(now, [run])
     assert status == "OK"
     assert "completed" in detail
+
+
+# ── overlap: a relaunched daily and a refresh both write picks ───────────────
+
+def _quiet_passes(sched, monkeypatch, *, daily_wait=3, refresh_wait=3):
+    monkeypatch.setattr(sched, "_WRITER_POLL_S", 0.01)
+    monkeypatch.setattr(sched, "_DAILY_WAIT_FOR_REFRESH_S", daily_wait)
+    monkeypatch.setattr(sched, "_refresh_wait_for_daily_s", lambda: refresh_wait)
+    monkeypatch.setattr(sched, "_wait_for_nhl_window", lambda label: True)
+    monkeypatch.setattr(
+        "tracking.daily_retry.announce_daily_retry", lambda *a, **k: True,
+    )
+
+
+def _sleep_until_wait(monkeypatch) -> threading.Event:
+    """Set when the pass's wait loop actually sleeps, so the assertion
+    cannot pass just because the thread has not started yet."""
+    entered = threading.Event()
+    original = time.sleep
+
+    def spy(seconds):
+        if seconds == 0.01:
+            entered.set()
+        original(seconds)
+
+    monkeypatch.setattr(time, "sleep", spy)
+    return entered
+
+
+def test_refresh_does_not_score_while_the_daily_lock_is_held(sched, monkeypatch):
+    """Boot refresh is +60s and the :17 cron keeps firing. Neither may
+    enter refresh_pass.sh while the daily still holds its lock."""
+    ran = []
+    _quiet_passes(sched, monkeypatch)
+    entered = _sleep_until_wait(monkeypatch)
+    monkeypatch.setattr(sched, "_run", lambda *a, **k: ran.append(a) or "ok")
+    assert sched._DAILY_LOCK.acquire(blocking=False)
+    thread = threading.Thread(target=sched.run_refresh_pass)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        assert ran == []
+    finally:
+        sched._DAILY_LOCK.release()
+    thread.join(2)
+    assert not thread.is_alive()
+    assert len(ran) == 1
+    assert ran[0][0][1] == "scripts/refresh_pass.sh"
+
+
+def test_daily_does_not_score_while_a_refresh_holds_the_lock(sched, monkeypatch):
+    """pipeline_watch at 7:15 starts a daily while the 7:17 hourly may
+    already be inside the pass. The daily waits, then scores."""
+    import sys
+    ran = []
+    _quiet_passes(sched, monkeypatch)
+    entered = _sleep_until_wait(monkeypatch)
+    monkeypatch.setattr(
+        sched, "_run", lambda *a, **k: ran.append(a[0]) or "ok",
+    )
+    assert sched._REFRESH_LOCK.acquire(blocking=False)
+    thread = threading.Thread(target=sched.run_daily_pipeline)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        assert ran == []
+    finally:
+        sched._REFRESH_LOCK.release()
+    thread.join(2)
+    assert not thread.is_alive()
+    assert ran == [[sys.executable, "run_pipeline.py"]]
+
+
+def test_a_daily_and_a_refresh_do_not_score_at_the_same_time(sched, monkeypatch):
+    """The post-deploy case: both passes are started together. Their
+    subprocesses must not overlap. Concurrent look-ahead deletes empty a
+    board; the unique index only drops a second insert."""
+    _quiet_passes(sched, monkeypatch, daily_wait=5, refresh_wait=5)
+    gate = threading.Lock()
+    busy = {"daily": False, "refresh": False}
+    overlap = []
+    counts = {"daily": 0, "refresh": 0}
+
+    def fake_run(cmd, label, **kw):
+        kind = "daily" if label == "daily-pipeline" else "refresh"
+        with gate:
+            counts[kind] += 1
+            other = "refresh" if kind == "daily" else "daily"
+            if busy[other]:
+                overlap.append(kind)
+            busy[kind] = True
+        time.sleep(0.12)
+        with gate:
+            busy[kind] = False
+        return "ok"
+
+    monkeypatch.setattr(sched, "_run", fake_run)
+    daily = threading.Thread(
+        target=lambda: sched.run_daily_pipeline(retry_reason="overlap"),
+    )
+    refresh = threading.Thread(target=sched.run_refresh_pass)
+    daily.start()
+    refresh.start()
+    daily.join(5)
+    refresh.join(5)
+    assert not daily.is_alive()
+    assert not refresh.is_alive()
+    assert overlap == []
+    assert counts == {"daily": 1, "refresh": 1}
+    assert busy == {"daily": False, "refresh": False}
+
+
+def test_a_second_refresh_skips_without_waiting_out_the_daily(sched, monkeypatch):
+    """Waiting is for the daily. Another refresh in this process still
+    returns immediately, which is what keeps two passes from buying odds."""
+    _quiet_passes(sched, monkeypatch, refresh_wait=30)
+    ran = []
+    monkeypatch.setattr(sched, "_run", lambda *a, **k: ran.append("ran") or "ok")
+    assert sched._REFRESH_LOCK.acquire(blocking=False)
+    try:
+        started = time.monotonic()
+        sched.run_refresh_pass()
+        assert time.monotonic() - started < 0.5
+    finally:
+        sched._REFRESH_LOCK.release()
+    assert ran == []
+
+
+def test_two_refreshes_waiting_behind_a_daily_run_one_pass(sched, monkeypatch):
+    """A refresh waiting behind the daily does not hold its lock, so a
+    second one (the boot catch-up beside a :17 cron) waits too. When the
+    daily lets go, exactly one of them runs refresh_pass.sh."""
+    _quiet_passes(sched, monkeypatch, refresh_wait=30)
+    waiting = set()
+    both = threading.Event()
+    original = time.sleep
+
+    def spy(seconds):
+        if seconds == 0.01:
+            waiting.add(threading.current_thread().name)
+            if len(waiting) >= 2:
+                both.set()
+        original(seconds)
+
+    monkeypatch.setattr(time, "sleep", spy)
+    gate = threading.Lock()
+    ran = []
+
+    def fake_run(*a, **k):
+        with gate:
+            ran.append(a[0])
+        original(0.12)
+        return "ok"
+
+    monkeypatch.setattr(sched, "_run", fake_run)
+    assert sched._DAILY_LOCK.acquire(blocking=False)
+    first = threading.Thread(target=sched.run_refresh_pass, name="cron")
+    second = threading.Thread(target=sched.run_refresh_pass, name="catch-up")
+    first.start()
+    second.start()
+    try:
+        assert both.wait(2), "both refreshes should be waiting on the daily"
+        assert ran == []
+    finally:
+        sched._DAILY_LOCK.release()
+    first.join(5)
+    second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+    assert len(ran) == 1
+    assert ran[0][1] == "scripts/refresh_pass.sh"
+    assert not sched._REFRESH_LOCK.locked()
+
+
+def test_a_refresh_scores_if_the_daily_lock_never_clears(sched, monkeypatch):
+    """A stuck daily must not silence every later hour. Past the wait the
+    refresh scores anyway."""
+    ran = []
+    _quiet_passes(sched, monkeypatch, refresh_wait=0)
+    monkeypatch.setattr(sched, "_run", lambda *a, **k: ran.append("ran") or "ok")
+    assert sched._DAILY_LOCK.acquire(blocking=False)
+    try:
+        sched.run_refresh_pass()
+    finally:
+        sched._DAILY_LOCK.release()
+    assert ran == ["ran"]
+
+
+def test_classify_relaunch_uses_the_latest_start_not_list_order():
+    """load_today_dailies orders by started_at. A caller that does not
+    still classifies the latest row. runs[-1] would call this a deploy-kill."""
+    early_kill = _run(
+        started=SIX_AM,
+        finished=datetime(2026, 9, 18, 6, 10, tzinfo=ET),
+        ok=False, failed="aborted",
+    )
+    late_real = _run(
+        started=datetime(2026, 9, 18, 8, 0, tzinfo=ET),
+        finished=datetime(2026, 9, 18, 8, 20, tzinfo=ET),
+        ok=False, failed="mlb_stats",
+    )
+    assert classify_relaunch([late_real, early_kill]) == "real-failure"
+    assert classify_relaunch([early_kill, late_real]) == "real-failure"
+    src = inspect.getsource(load_today_dailies)
+    assert "ORDER BY started_at" in src
+
+
+# ── reclaim of a deploy-killed manual daily ──────────────────────────────────
+
+class _ReclaimConn:
+    """Applies the reclaim UPDATEs. A pending daily_pipeline is what the
+    next claim_one would start."""
+
+    def __init__(self, ledger_rows, *, raise_ledger=False):
+        self.ledger_rows = list(ledger_rows)
+        self.raise_ledger = raise_ledger
+        self.jobs = {
+            42: {
+                "status": "running",
+                "job_type": "daily_pipeline",
+                "attempts": 1,
+                "error": "",
+            },
+        }
+        self.sql: list[str] = []
+        self._last = ""
+        self._one = None
+        self._rows: list = []
+        self.rolled_back = 0
+
+    def execute(self, sql, params=None):
+        self.sql.append(sql)
+        self._last = sql
+        if self.raise_ledger and "pipeline_runs" in sql:
+            raise RuntimeError('relation "pipeline_runs" does not exist')
+        if "SELECT job_id FROM worker_jobs" in sql and "daily_pipeline" in sql:
+            self._rows = [
+                (jid,) for jid, job in self.jobs.items()
+                if job["status"] == "running" and job["job_type"] == "daily_pipeline"
+            ]
+        elif "pipeline_runs" in sql:
+            self._rows = list(self.ledger_rows)
+        elif "GREATEST" in sql and "status = 'running'" in sql:
+            exclude = "job_type <> 'daily_pipeline'" in sql
+            self._rows = []
+            for jid, job in list(self.jobs.items()):
+                if job["status"] != "running":
+                    continue
+                if exclude and job["job_type"] == "daily_pipeline":
+                    continue
+                job["status"] = "pending"
+                job["attempts"] = max(job["attempts"] - 1, 0)
+                self._rows.append((jid,))
+        elif (
+            "UPDATE worker_jobs" in sql
+            and "status = 'failed'" in sql
+            and "daily_pipeline" in sql
+        ):
+            for job in self.jobs.values():
+                if job["status"] == "running" and job["job_type"] == "daily_pipeline":
+                    job["status"] = "failed"
+                    job["error"] = params[0] if params else ""
+            self._rows = []
+        elif "SET status = 'running'" in sql and "SKIP LOCKED" in sql:
+            pending = [jid for jid, job in self.jobs.items() if job["status"] == "pending"]
+            self._one = None
+            if pending:
+                jid = pending[0]
+                job = self.jobs[jid]
+                job["status"] = "running"
+                job["attempts"] += 1
+                self._one = (jid, job["job_type"], {}, job["attempts"])
+        else:
+            self._rows = []
+        return self
+
+    def fetchall(self):
+        return list(self._rows)
+
+    def fetchone(self):
+        if "RETURNING job_id, job_type" in self._last:
+            return self._one
+        return None
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        self.rolled_back += 1
+
+
+def _killed_ledger(minute: int):
+    started = datetime(2026, 11, 4, 11, minute, tzinfo=timezone.utc).isoformat()
+    finished = datetime(2026, 11, 4, 11, minute, 20, tzinfo=timezone.utc).isoformat()
+    return (started, finished, False, "aborted")
+
+
+def _reclaim_then_claim(conn, now):
+    from tracking.job_queue import _reclaim_stale, claim_one
+    _reclaim_stale(conn, now)
+    return claim_one(conn)
+
+
+def test_the_first_claim_of_a_manual_daily_is_not_the_reclaim_bounds():
+    """A pending row is the kick after the catch-up has stopped. The
+    bounds apply when a deploy left that row running, not on the first
+    claim."""
+    from tracking.job_queue import _job_daily_pipeline, _reclaim_stale
+    kick = inspect.getsource(_job_daily_pipeline)
+    assert "decide_daily_retry" not in kick
+    assert "daily_pipeline_reclaim_decision" not in kick
+    reclaim = inspect.getsource(_reclaim_stale)
+    assert "_refuse_stale_daily_pipeline" in reclaim
+
+
+def test_reclaim_inside_the_bounds_leaves_the_manual_daily_pending():
+    """One deploy-kill, afternoon, kill switch on: the row goes back to
+    pending and the next claim would start it. This is the control the
+    bound tests have to fail against."""
+    conn = _ReclaimConn([_killed_ledger(0)])
+    job = _reclaim_then_claim(conn, datetime(2026, 11, 4, 15, 0, tzinfo=ET))
+    assert job is not None
+    assert job["job_type"] == "daily_pipeline"
+    assert conn.jobs[42]["status"] == "running"
+
+
+def test_reclaim_after_the_deploy_kill_cap_does_not_start_a_daily(monkeypatch):
+    started = []
+    monkeypatch.setattr(
+        "scheduler.run_daily_pipeline",
+        lambda **kw: started.append(kw) or "ok",
+    )
+    rows = [_killed_ledger(i) for i in range(MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY)]
+    conn = _ReclaimConn(rows)
+    job = _reclaim_then_claim(conn, datetime(2026, 11, 4, 15, 0, tzinfo=ET))
+    assert job is None
+    assert started == []
+    assert conn.jobs[42]["status"] == "failed"
+    assert "deploy-killed" in conn.jobs[42]["error"]
+    assert "not reclaimed" in conn.jobs[42]["error"]
+
+
+def test_reclaim_after_the_cutoff_does_not_start_a_daily(monkeypatch):
+    started = []
+    monkeypatch.setattr(
+        "scheduler.run_daily_pipeline",
+        lambda **kw: started.append(kw) or "ok",
+    )
+    conn = _ReclaimConn([_killed_ledger(0)])
+    job = _reclaim_then_claim(conn, datetime(2026, 11, 4, 22, 5, tzinfo=ET))
+    assert job is None
+    assert started == []
+    assert conn.jobs[42]["status"] == "failed"
+    assert "cutoff" in conn.jobs[42]["error"]
+
+
+def test_reclaim_with_the_kill_switch_off_does_not_start_a_daily(monkeypatch):
+    started = []
+    monkeypatch.setenv("RUN_DAILY_RETRY", "0")
+    monkeypatch.setattr(
+        "scheduler.run_daily_pipeline",
+        lambda **kw: started.append(kw) or "ok",
+    )
+    conn = _ReclaimConn([_killed_ledger(0)])
+    job = _reclaim_then_claim(conn, datetime(2026, 11, 4, 15, 0, tzinfo=ET))
+    assert job is None
+    assert started == []
+    assert conn.jobs[42]["status"] == "failed"
+    assert "RUN_DAILY_RETRY" in conn.jobs[42]["error"]
+
+
+def test_reclaim_does_not_start_a_daily_when_the_ledger_is_unreadable():
+    conn = _ReclaimConn([_killed_ledger(0)], raise_ledger=True)
+    job = _reclaim_then_claim(conn, datetime(2026, 11, 4, 15, 0, tzinfo=ET))
+    assert job is None
+    assert conn.jobs[42]["status"] == "failed"
+    assert "ledger unreadable" in conn.jobs[42]["error"]
+    assert conn.rolled_back == 1
+
+
+def test_the_reclaim_decision_matches_the_catch_up():
+    """The queue does not grow a second copy of the bounds."""
+    conn = _ReclaimConn([_killed_ledger(0)])
+    now = datetime(2026, 11, 4, 22, 5, tzinfo=ET)
+    decision = daily_pipeline_reclaim_decision(conn, now)
+    assert decision.action == "skip"
+    assert decision.reason == decide_daily_retry(
+        now=now,
+        runs=load_today_dailies(conn, now),
+    ).reason

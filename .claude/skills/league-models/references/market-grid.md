@@ -74,6 +74,13 @@ after all of them (CLAUDE.md §1b).
    (the college football stats API carries closes), sportsdataverse season
    files, a prediction market's history.
 4. **The prior season's close**, as a last resort for a baseline.
+   Before it: **free public archives** a sport's own community keeps.
+   UFC has two (2026-11-13): fight-canon-db (GitHub releases, MIT;
+   BestFightOdds open and closing range, 2007+) and the Ultimate UFC
+   Dataset (CC BY 4.0; a near-close fight price and method prices by
+   fighter, 2012+). Store one in Supabase like a bought one, keyed on
+   `source`, before the first table is read from it
+   (`data/ingestors/ufc_price_archive.py`).
 5. **Paid providers** other than the feed: `docs/odds_sources.md` prices them.
    More thin books add rejections, not edge; the case for a new provider is a
    book or market we cannot get (a sharp prop book, for example).
@@ -94,6 +101,13 @@ actually returns (an empty answer is free). How far back it goes differs by
 league: EuroLeague's answers from 2023 (HTTP 422 on a 2022-12 game), with
 DraftKings in none of it (`docs/sports/euroleague.md`). Ask every market key
 the league has ever shown: one no book holds costs nothing.
+
+**When a game moment happened on the wall clock** (halftime, a quarter's
+end) is what an in-play model needs against timestamped prices. Play-by-play
+often carries only the game clock; look for a feed that stamps events in UTC.
+EuroLeague's shot chart (`live.euroleague.net/api/Points`) does: every shot
+carries `UTC`, so the last shot of the second quarter and the first of the
+third bracket halftime (`data/ingestors/euroleague_shots.py`).
 
 **Buying history.** Plan the credit budget from measured numbers
 (`data/ingestors/odds_quota.plan_credit_budget`, which refuses when it cannot
@@ -154,9 +168,14 @@ define it here when it is built.
 - **Starter-dominated (baseball).** The starting pitcher is a gate; first-five
   markets isolate the starters; weather and park move totals; the stored team
   and pitcher stats leaked season-final numbers until rebuilt.
-- **One against one (fighting, tennis, golf).** Ratings per competitor; method
-  and duration props, often with no price history at all (the fighting models
-  were backtested on probability alone); thin history per competitor.
+- **One against one (fighting, tennis, golf).** Ratings per competitor; thin
+  history per competitor. In UFC the close is efficient, the first posted
+  price is not, and duration and method props are priced with heavy margin
+  (method: free near-close history 2012+, every blind bet negative; round
+  totals: no free history, the feed's from 2021). The odds feed's MMA key
+  serves fight winner, round totals, a points spread and Pinnacle's
+  alternate totals; it rejects every method, distance and round key
+  (`docs/ufc_market_audit.md` §2).
   **Tennis** (`docs/sports/tennis.md`, 2026-11-13): the feed sells it as one
   key per tournament (53 keys, top tiers only, each active only while its
   event runs), so the key list is read from `/v4/sports?all=true` and a key's

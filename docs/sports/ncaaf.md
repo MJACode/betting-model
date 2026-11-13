@@ -473,7 +473,9 @@ and models."* Three changes, all reading the stored schedule through one module
   population — not this rule.
 - Canonical team id = CFBD SCHOOL NAME (accents folded via `_fold`); game_id
   slugs. Odds API names no fold / "school mascot" / prefix rule can bridge
-  (Southern Miss, App State, UMass, SE Louisiana, The Citadel) live in
+  (Southern Miss, App State, UMass, SE Louisiana, The Citadel, William &
+  Mary, Long Island University, and the Houston Baptist → Houston Christian
+  rename) live in
   `config.NCAAF_ODDS_API_MAP`; without an entry the odds ingest mints a
   second `games` row and `ncaaf_game_identity` goes CRIT. Historical lines
   under `cfbd_*` bookmakers (provider priority

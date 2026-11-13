@@ -592,22 +592,26 @@ def test_the_rule_is_in_claude_md():
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
 def test_a_custom_model_counts_the_kept_copy_once(tmp_path: Path):
     """The labelled copy keeps its real WIN, so a custom model's own W/L/P
-    tally counted it until it learned the label (UX review, 2026-10-09)."""
+    tally counted it until it learned the label (UX review, 2026-10-09).
+
+    The fixture was the June ufc_total_rounds pair until that model was retired
+    (2026-11-13): a custom model no longer counts a retired model at all, so a
+    live model stands in. NCAAF writes the same twin (an ET and a UTC date)."""
     _copy_for_node(tmp_path, ("customModelBacktest.ts", "customModelFilters.ts",
                               "modelMeta.ts", "thresholds.ts", "thresholds.generated.ts",
                               "decisionPrice.ts", "discordPublish.ts", "format.ts"))
     script = """
 import { computeCustomModelStats } from './customModelBacktest.ts';
-const bet = { model_id: 'ufc_total_rounds', sport: 'UFC', signal_type: 'BET', result: 'WIN',
-              pick_side: 'over', model_probability: 0.6, edge: 0.05, dk_odds: -130,
+const bet = { model_id: 'ncaaf_over_under', sport: 'NCAAF', signal_type: 'BET', result: 'WIN',
+              pick_side: 'over', model_probability: 0.7, edge: 0.05, dk_odds: -130,
               decision_odds: -130, profit_flat: 76.92, is_live: false, downgrade_reason: null,
-              condition_status: null, game_date: '2026-06-20' };
+              condition_status: null, game_date: '2026-09-20' };
 const settled = [
-  { ...bet, pick_id: 332605, game_id: 'UFC_2026-06-20_kevin-borjas_andre-lima' },
-  { ...bet, pick_id: 332615, game_id: 'UFC_2026-06-20_andre-lima_kevin-borjas',
+  { ...bet, pick_id: 332605, game_id: 'NCAAF_2026-09-20_usc_wisconsin' },
+  { ...bet, pick_id: 332615, game_id: 'NCAAF_2026-09-21_usc_wisconsin',
     condition_status: 'DUPLICATE' },
 ];
-const model = { id: 'm', name: 'm', rules: [{ model_id: 'ufc_total_rounds' }], filters: {} };
+const model = { id: 'm', name: 'm', rules: [{ model_id: 'ncaaf_over_under' }], filters: {} };
 const s = computeCustomModelStats(model, settled);
 console.log(JSON.stringify({ picks: s.picks, wins: s.wins }));
 """

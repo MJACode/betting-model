@@ -143,7 +143,8 @@ SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB", "NCAABW", "EUROLEAGUE")
 # DraftKings row reaches the models, and an NCAAB model must refuse to decide
 # without the reference price.
 # EuroLeague too (2026-11-12): DraftKings priced 3 of the 10 games listed that
-# day and posts nearest the tip, and it priced no game at all in 2020-21.
+# day (it first posts a median 45-73 hours before the tip, while other books
+# list a round five days out), and it priced no sampled game in 2020-21.
 DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB", "NCAABW", "EUROLEAGUE"})
 
 # Books stored for ONE sport on top of LINE_SHOP_BOOKMAKERS, and asked for in
@@ -319,8 +320,9 @@ def _commence_passed(ev: dict, now: datetime | None = None) -> bool:
     return ts <= now
 
 # UFC: the bulk endpoint reliably carries only h2h for MMA. Round totals are
-# attempted per-event (like MLB F5) — absent lines are non-fatal and the
-# ufc_total_rounds model falls back to prob-only scoring.
+# attempted per-event (like MLB F5) — absent lines are non-fatal. (The
+# ufc_total_rounds model that scored prob-only without one was retired
+# 2026-11-13; the capture stays for the models that replace it.)
 UFC_BULK_MARKETS = ["h2h"]
 UFC_EVENT_MARKETS = ["totals"]
 
@@ -966,8 +968,7 @@ def _fetch_ufc_totals_per_event(sport_key: str, snapshot_type: str,
     ODDS_API_BOOKMAKERS_PARAM, not DraftKings alone -- measured 2026-09-03, one
     market either way, so this widening costs nothing here. UFC volume is low
     (~13 fights/event, ~1 event/week) so this runs on every odds fetch.
-    Returns [] without raising when the market isn't offered — the
-    ufc_total_rounds model then scores prob-only against a synthetic line.
+    Returns [] without raising when the market isn't offered.
 
     known_slugs (optional): skip non-UFC promotions' events BEFORE spending a
     per-event credit on them (same predicate as the bulk phantom filter).

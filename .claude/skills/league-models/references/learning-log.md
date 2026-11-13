@@ -69,6 +69,99 @@ review as its own entry.
    recurs: when a price route refuses (a site block), the copy of its data
    elsewhere is not a route; the permission check refused it, and the feed's
    own history was the price source that matched the live path anyway.
+## 2026-11-13 — UFC, a rebuild from zero
+
+1. **Scope.** mike: *"Use the model building skill to build models for UFC.
+   Ignore and delete any existing models in the repo."* The three old models
+   retired; every market the feed and the free archives price worked to a
+   verdict (`docs/ufc_market_audit.md`, `docs/sports/ufc.md` grid).
+2. **Tried.** Fight winner: blind bets by band, a market-anchored rating
+   model walk-forward at the close and at the first posted price, the same
+   at each US book's first price, Pinnacle-anchored line shopping,
+   five-round fights, big line moves. Round totals: blind by book, a
+   finish-time model. Method of victory: blind by method and side. Then the
+   feed's history was bought (150,240 credits) and the open-anchored model
+   graded at the books a pick may name. **One model ships,
+   `ufc_open_moneyline`**: Pinnacle-anchored at a week out, 846 bets
+   +12.85% [+8.0, +17.5], every year positive, +2.2% against Pinnacle's
+   close. Totals and method: nothing clears.
+3. **New.**
+   - Method (`methods.md` §1): a rating model anchored on the sharp book's
+     price a week or more out, bet at the best deciding book; the edge
+     grows with the lead (7-14 days +7%, 14-30 +20%, inside a week negative).
+   - Kill test (`kill-tests.md`): an archive's open is not a book we can
+     bet; and a small forward sample can say the opposite of the history
+     (104 bets with negative closing value, against 846 positive on 2,457
+     fights), so a purchase settles it, not the sample.
+   - Price routes (`market-grid.md`): the MMA key's coverage; two free
+     archives; the bulk history from 2020-06-06 at 20 credits a market.
+   - Trap (`porting-traps.md`): our UFC ingest stores a fight only once
+     DraftKings lists it, and kept DraftKings alone before 2026-08.
+   - Scout routes (`scouting.md`): six answers and refusals.
+4. **Corrected.** The first entry's open question (is `ufc_total_rounds`
+   paused?) is closed: it was, and it is retired. The fighting shape in
+   `market-grid.md` said method and duration props have no price history:
+   method props have a free one (2012+), round totals the feed's (2021+).
+   A 2026 pilot said round totals carry their margin on the over; 2,403
+   fights say the under (-6.8% blind at Pinnacle).
+5. **The framework.** A free archive was analysed before it was stored;
+   step 2 now stores a free archive like a bought one, before the first
+   table is read from it. The card decides on the same cadence the history
+   was bought at (one noon pull a day), the first-come-lock trap avoided by
+   construction rather than by replay.
+
+## 2026-11-13 — EuroLeague halftime
+
+1. **Scope.** The EuroLeague build: the halftime break, now that the shot
+   chart places it on the wall clock.
+2. **Tried.** Fresh-quote coverage by book, blind bets at the break, the
+   women's halftime method ported unchanged for total, spread and moneyline,
+   a structural check of how the books re-hang the halftime line, 183 cells
+   with a false-discovery correction. Nothing clears.
+3. **New.** In `methods.md`, the halftime method's EuroLeague result and its
+   mechanism: a book that carries too much of the pre-game margin into the
+   second half. A check worth running in every league with in-play history:
+   measure the share of the pre-game margin and of the first-half surprise
+   the books carry into the halftime line, against what the games carried.
+4. **Corrected.** Nothing in the skill was contradicted.
+5. **The framework.** Nothing changed.
+
+## 2026-11-13 — EuroLeague round 2, and halftime placed on the wall clock
+
+1. **Scope.** The EuroLeague build, round 2 (`docs/euroleague_market_audit.md`).
+2. **Tried.** The home lean within a -200 floor, market-anchored models with
+   home, crowd, venue, rest and schedule inputs, referee crews and the opening
+   total, and the invention floor for the first half and quarter (three
+   mechanisms each, all run). 109 cells; nothing clears.
+3. **New.** A price route for in-play timing (`market-grid.md`): EuroLeague's
+   play-by-play has only the game clock, but its shot chart stamps every shot
+   in UTC, which brackets halftime. A trap (`porting-traps.md`): the shot
+   chart's host rate-limits through Cloudflare (HTTP 429, error 1015) after
+   about 60 calls four at a time; one call every 1.5 seconds holds. And a
+   research trap: a hold-out read needs a cache refreshed past the freeze
+   date, or the frozen rule only reproduces itself.
+4. **Corrected.** Nothing in the skill was contradicted.
+5. **The framework.** Nothing changed in `SKILL.md`; the stuck ladder's
+   remaining rungs (new information, the halftime moment, a fresh read) are
+   the next round.
+
+## 2026-11-13 — EuroLeague full game, round 1
+
+1. **Scope.** The EuroLeague build: moneyline, spread and total, 2021-22 on.
+2. **Tried.** The data check, baselines at the first post and the close, the
+   four catalogued basketball methods unchanged, the scout's relocation and
+   club-home-edge leads, 283 cells with a false-discovery correction
+   (`docs/euroleague_market_audit.md`, full game round 1). Nothing clears.
+3. **New.** Three method results in `methods.md` (line shopping and a
+   book's moneyline against its own spread both fail here; the first post
+   could not run because the sharp book was rarely up). A lead that is a
+   decision, not a pass: favourites at -500 or shorter win 93.1% against an
+   84.1% price, on a price band whose neighbour loses -7.11%.
+4. **Corrected.** "DraftKings posts nearest the tip" (the league doc and an
+   `odds_ingestor` comment) came from one day's board; the history says a
+   median 45-73 hours before the tip. The research brief's "DraftKings
+   priced nothing in 2021-22" was a misreading of the 2020-21 census.
+5. **The framework.** Nothing changed in `SKILL.md`.
 
 ## 2026-11-13 — EuroLeague first half and first quarter, round 1
 
@@ -95,6 +188,39 @@ review as its own entry.
 5. **The framework.** Nothing changed in `SKILL.md`. Not called null: the
    invention floor (three mechanisms of our own) and the stuck ladder are the
    next round.
+
+## 2026-11-13 — Review (second, from mike's PC)
+
+1. **Scope.** The weekly self-review run on mike's PC, after the cloud run
+   earlier the same day could not read the database or probe the routes. Since:
+   the 2026-11-13 Review entry below.
+2. **Tried.** `git log` on master since that entry: only the merge of that
+   review (#1271); `config.py` and `docs/sports` unchanged, so no model or
+   sport lacks a log entry. **Live records, read directly and read-only**
+   (settled BETs by `model_id`, units on the posted stake): `ncaaf_over_under`
+   94 bets 54-40, +9.76 units, +9.3% (matches the claim in `methods.md`);
+   `nhl_moneyline` since its rebuild (2026-10-15) 51 bets, +0.75 units, +1.4%
+   (all time 57 bets, -2.24, -3.7%, mostly the old model); `nba_prop_projection`
+   84 bets 36-48, -0.42 units, -0.6%; `ncaab_first_half_total` 72 bets +5.52
+   units, +6.3% (backtest +5.98%); `ncaaf_live_total` 98 bets -5.20 units, -4.4%
+   (consistent with "college football in-play failed"); `mlb_live_total_runs`
+   162 bets +18.90 units, +9.5%. Under 50 settled bets, nothing changed:
+   `nfl_wind_totals` 36 (+1.60, +4.2%), `ncaabw_total_blend` 4,
+   `ncaab_total_blend` 2, `ncaabw_live_total_ht` 7 (-3.55, -45.5%),
+   `nba_total_luck` 23 (-16.7%), `nba_team_total_luck` 29 (-15.0%),
+   `nba_first_half_total_luck` 14, `nfl_live_leader_ml` 5.
+3. **New.** Routes re-probed from this PC (`scouting.md`, dated): all answers
+   of 2026-11-12 held; `forum.sportsbookreview.com` gave no answer but
+   `sportsbookreview.com/forum/` gave 200; Pinnacle's old path now redirects
+   to `/en/betting-articles/` (200); centaur.reading.ac.uk now 200. Reddit, the
+   EuroLeague site, cris.unibo.it and iris.uniroma4.it still refuse.
+4. **Corrected.** One annotation, no verdict: the pro basketball
+   minutes x rate props line in `methods.md` quoted only the backtest (+3.60%);
+   it now carries the live 84-bet record (-0.6%), which is too few bets to
+   overturn it. The shooting-luck totals are live at 14 to 29 bets each with
+   negative returns; they stay unchanged until 50 settle.
+5. **The framework.** Nothing changed. Open: the cloud run and the PC run can
+   both fire on one day; this one used the `-2` branch name as instructed.
 
 ## 2026-11-13 — Review
 

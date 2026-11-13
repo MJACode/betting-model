@@ -38,7 +38,8 @@ _IDENT = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 # Nothing here is user-scoped; anon is how the app reads before sign-in.
 ANON_READABLE: tuple[str, ...] = (
     # ── tables ──────────────────────────────────────────────────────────────
-    "device_push_tokens",
+    # device_push_tokens is not here. The app does not .from() it. The write
+    # is save_device_push_token(), and there is no SELECT policy on purpose.
     "fighters",
     "game_weather",
     "games",
@@ -222,11 +223,12 @@ AUTHENTICATED_ONLY: tuple[str, ...] = (
 # over. Revoked anyway, because a view that is later simplified can silently
 # become updatable and nothing would flag it.
 ANON_WRITABLE: dict[str, tuple[str, ...]] = {
-    # `.upsert(..., { onConflict: 'token' })` in
-    # mobile/src/hooks/usePushNotifications.ts. An upsert is INSERT ... ON
-    # CONFLICT DO UPDATE, so it needs both verbs and only those. Nothing deletes
-    # a push token -- that hook is the only reference to the table in the app.
-    "device_push_tokens": ("INSERT", "UPDATE"),
+    # device_push_tokens is DELIBERATELY ABSENT. The hook calls
+    # rpc('save_device_push_token') (mobile/src/hooks/usePushNotifications.ts).
+    # That function is SECURITY DEFINER, so it writes as the owner and needs
+    # no anon grant on the table. A direct upsert is INSERT ... ON CONFLICT
+    # DO UPDATE, which Postgres rejects under these RLS policies (no SELECT
+    # policy). Do not put the table back here to "match" the old policies.
     # `.insert()` and `.delete()` in mobile/src/lib/queries.ts. A tracked bet is
     # added and removed, never edited, so UPDATE is not needed.
     "tracked_bets": ("INSERT", "DELETE"),
@@ -240,9 +242,12 @@ ANON_WRITABLE: dict[str, tuple[str, ...]] = {
 
 # HOW THESE WERE DERIVED, because the difference is the whole point: each entry
 # is the set of verbs the APP DEMONSTRABLY USES, read off the call sites -- not
-# the set it happened to hold. The two agree with the RLS policies exactly:
+# the set it happened to hold. tracked_bets agrees with its policies. The other
+# two app writes do not go through the table:
 #
-#     device_push_tokens   policies a,w   ->  INSERT, UPDATE
+#     device_push_tokens   policies a,w   ->  nothing; save_device_push_token
+#                                            is SECURITY DEFINER. The policies
+#                                            do not make an upsert succeed.
 #     tracked_bets         policies a,d   ->  INSERT, DELETE
 #     feedback             policy   a     ->  nothing; the RPC is SECURITY DEFINER
 #
@@ -441,6 +446,18 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # scripts/tennis_dk_probe.ensure_tables: DraftKings' own tennis board,
     # every level and market, change-only. Run from mike's terminal.
     "tennis_dk_selections",
+    # UFC price history from two free public archives (2026-11-13), created
+    # on demand by data/ingestors/ufc_price_archive.ensure_tables. Research
+    # input, never read by the app.
+    "ufc_price_archive",
+    # UFC odds history bought 2026-11-13 and its ledger, created on demand by
+    # data/ingestors/ufc_odds_history.ensure_tables. Research input.
+    "ufc_odds_history",
+    "ufc_odds_history_pulls",
+    # EuroLeague shot charts with wall-clock times (2026-11-13,
+    # data/ingestors/euroleague_shots.py); model input, never read by the app.
+    "euroleague_shots",
+    "euroleague_shot_fetches",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and
@@ -510,6 +527,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # and their flags (scripts/ncaaf_moneyline_card.py, which creates it on
     # demand). Read by the card, never by the app.
     "ncaaf_moneyline_decisions",
+    # The UFC opening-price card's decisions ledger: one row per fight it has
+    # decided, bet or not (scripts/ufc_open_moneyline_card.py, which creates
+    # it on demand). Read by the card, never by the app.
+    "ufc_open_moneyline_decisions",
     # The NCAAB first-post moneyline card's ledger: one row per (game, book)
     # first moneyline post it has decided, bet or not, with every book's
     # moneyline and own spread, and the fill check the capture writes on its
@@ -770,6 +791,11 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # carries its own GRANT). SECURITY INVOKER over the BYOM facts tables.
     "byom_record",
     "byom_bets",
+    # push registration -- SECURITY DEFINER, returns nothing. The migration
+    # (data/migrations/save_device_push_token_2026_11_11.sql) is hand-applied
+    # and not in ACTIVE_MIGRATIONS. apply_anon_grants skips the GRANT until
+    # pg_proc has the function; the migration grants EXECUTE itself.
+    "save_device_push_token",
     # in-app feedback -- SECURITY DEFINER, device-keyed, so callable pre-sign-in
     "feedback_mark_read",
     "feedback_messages_for_thread",
