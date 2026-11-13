@@ -45,6 +45,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Every call this module sends to the Odds API is logged to api_call_log,
+# however the process was started (monitoring/probe.py), installed on import
+# as every Odds API caller's is (tests/test_odds_call_log_everywhere.py).
+try:
+    from monitoring.probe import install as _install_api_call_log
+    _install_api_call_log()
+except Exception:  # noqa: BLE001
+    pass
+
 SB = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
 SUM = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/summary"
 DK = "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusoh/v1/leagues/92483"
