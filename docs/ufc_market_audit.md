@@ -39,7 +39,7 @@ on 2026-11-13: moneyline 5 settled BETs (3-2) plus one void, round totals 14
 record (`v_public_track_record`): round totals 1-0, +1.0 units (Mario Pinto
 vs Ryan Spann Under 1.5, the 2026-09-05 card), carried in every all-time
 line posted since. Retiring takes it out of every published total; mike
-approved that in chat on 2026-11-13. The three models' registry rows were
+approved that in chat on 2026-11-13. Retiring alone left the bet in the record views and the Discord recap, which exclude only `config.RECORD_EXCLUSIONS`, so the three are struck there (`data/migrations/record_strikes_ufc_retired_2026_11_13.sql`). The three models' registry rows were
 switched off in production the same day, on his instruction.
 
 ## 2. What the sources hold (measured 2026-11-13)
