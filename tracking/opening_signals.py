@@ -238,6 +238,20 @@ def capture_opening_signals(target_date: str | None = None,
 
 # ── Settle ──────────────────────────────────────────────────────────────────
 
+def _priced_profit(dk_odds, profit_flat, profit_kelly):
+    """No price, no profit (2026-11-03). The result still grades; the money
+    columns stay NULL rather than carry the -110 the grade was worked at.
+
+    Twelve rows settled before this change carry that invented -110
+    (nhl_over_under 5, nba_team_total_luck 3, nba_total_luck 2,
+    nba_first_half_total_luck 2: +1.37 units between them). Stored rows are
+    not rewritten.
+    """
+    if dk_odds is None:
+        return None, None
+    return profit_flat, profit_kelly
+
+
 def settle_opening_signals(conn: DBConnection, game_date: str,
                            settled_at: str) -> tuple[int, int, int, int, float, float]:
     """
@@ -257,8 +271,8 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
     """
     # Lazy imports to avoid a circular import (paper_tracker imports this module).
     from tracking.paper_tracker import (
-        _compute_result, _first_game_close, _market_for_pick, _SIDE_PRICE_COL,
-        _line_clv_pts,
+        _compute_result, _first_game_close, first_half_points, _market_for_pick,
+        _SIDE_PRICE_COL, _line_clv_pts,
     )
     from tracking.clv_math import same_book_clv
 
@@ -306,6 +320,12 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
             settle_away = away_score_f5
             settle_home_win = (int(home_score_f5 > away_score_f5)
                                if home_score_f5 != away_score_f5 else None)
+        elif market in ("totals_h1", "spreads_h1"):
+            first_half = first_half_points(conn, game_id, home_score, away_score)
+            if first_half is None:
+                continue  # stays pending, as the live record's copy does
+            settle_home, settle_away = first_half
+            settle_home_win = None
         else:
             settle_home = home_score
             settle_away = away_score
@@ -322,6 +342,9 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
             odds_for_calc, spread_home, total_line,
             rec_bet or 0.0,
         )
+        # odds_for_calc's -110 only lets an unpriced pick GRADE; its profit
+        # is not written (no price, no profit).
+        profit_flat, profit_kelly = _priced_profit(dk_odds, profit_flat, profit_kelly)
 
         # Line story: same-book raw pp vs our opening DraftKings lock.
         # Historical rows settled before 2026-09-14 used raw one-sided implied;
@@ -382,12 +405,12 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
 
         if result == "WIN":
             wins += 1
-            total_flat += profit_flat
-            total_kelly += profit_kelly
+            total_flat += profit_flat or 0.0
+            total_kelly += profit_kelly or 0.0
         elif result == "LOSS":
             losses += 1
-            total_flat += profit_flat
-            total_kelly += profit_kelly
+            total_flat += profit_flat or 0.0
+            total_kelly += profit_kelly or 0.0
         elif result == "PUSH":
             pushes += 1
         else:
@@ -397,7 +420,8 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
         logger.info(
             f"Opening-signal shadow settle {game_date}: "
             f"{wins}W / {losses}L / {pushes}P / {no_actions}N "
-            f"(flat ${total_flat:+,.2f})"
+            # profit_flat is stored per $100 staked: /100 is units (§4).
+            f"(flat {total_flat / 100:+.2f}u)"
         )
     return wins, losses, pushes, no_actions, total_flat, total_kelly
 

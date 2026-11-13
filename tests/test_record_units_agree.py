@@ -103,8 +103,9 @@ def test_profit_and_risked_call_the_stake_function_and_nothing_else():
 
 
 def test_the_recap_adds_the_function_columns_and_does_not_recompute_them():
-    assert f"{PROFIT_FN}(COALESCE(p.decision_odds, p.dk_odds), p.result)" in _SETTLED_SQL
-    assert f"{RISKED_FN}(COALESCE(p.decision_odds, p.dk_odds), p.result)" in _SETTLED_SQL
+    # The pick's own stake rides along as the third argument (2026-11-06).
+    assert f"{PROFIT_FN}(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units)" in _SETTLED_SQL
+    assert f"{RISKED_FN}(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units)" in _SETTLED_SQL
     # A win at -110 is +1u on 1.1 risked via stake_for. The columns win.
     forced = _tally([("MLB", "m", "WIN", 0.02, -110, None, False, 5.5, 2.25)])
     assert forced["units"] == pytest.approx(5.5)
@@ -155,6 +156,8 @@ def test_both_record_views_sum_the_same_functions():
     assert "push_sent" not in text.split("DO $mig$")[1]
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert MIG.name == ACTIVE_MIGRATIONS[-1]
+    # The three-argument pair it calls (2026-11-06) is created before the pair.
+    assert ACTIVE_MIGRATIONS.index("pick_stake_units_2026_11_06.sql") < ACTIVE_MIGRATIONS.index(FN_MIG.name)
     assert ACTIVE_MIGRATIONS.index(FN_MIG.name) == ACTIVE_MIGRATIONS.index(MIG.name) - 1
     assert ACTIVE_MIGRATIONS.index("clv_standard_v2_2026_10_14.sql") < ACTIVE_MIGRATIONS.index(FN_MIG.name)
     assert text.count("DO $mig$") == 1
@@ -235,8 +238,12 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "pnlColor(summary.roi, 1, 100)" in card
     assert "summary.units != null" in card
     assert "overall.units == null" in screen
-    assert "Models use a flat $100 bet" in hero
-    assert "Yesterday and Models use a flat $100 bet" not in hero
+    # One unit basis (2026-11-03): the Models tab books this same stake, so
+    # the sheet no longer says its percentages differ.
+    assert "on the Models tab" in hero
+    assert "won\\u2019t match" not in hero
+    assert "Yesterday and Models use a flat" not in hero
+    assert "$100" not in hero
     assert "unpriced, staked at 1u" in screen
     assert "flat $100" not in curve
     assert "colors.positive" not in curve
@@ -280,14 +287,14 @@ def test_the_view_sum_drops_voids_and_ungraded_rows():
     db = sqlite3.connect(":memory:")
     install_sqlite(db)
     db.execute(
-        "CREATE TABLE picks (model_id TEXT, result TEXT, decision_odds REAL, dk_odds REAL)"
+        "CREATE TABLE picks (model_id TEXT, result TEXT, decision_odds REAL, dk_odds REAL, stake_units REAL)"
     )
     db.execute(
         f"CREATE VIEW v_public_track_record AS SELECT model_id, {cols} "
         "FROM picks p GROUP BY model_id"
     )
     db.executemany(
-        "INSERT INTO picks VALUES (?,?,?,?)",
+        "INSERT INTO picks (model_id, result, decision_odds, dk_odds) VALUES (?,?,?,?)",
         [
             ("m", "WIN", -110, None),
             ("m", "LOSS", -110, None),
@@ -349,7 +356,7 @@ def test_the_fallback_rollback_is_only_safe_because_callers_read_first():
     body = src.split("def notify_discord_results", 1)[1].split("\ndef ", 1)[0]
     assert body.index("_settled_rows(") < body.index("INSERT INTO push_sent")
     assert body.index("_settled_rows_since(") < body.index("INSERT INTO push_sent")
-    for name in ("recaps_needing_restatement", "post_missed_recap", "_restate_x_if_behind"):
+    for name in ("recaps_gone_short", "post_missed_recap"):
         other = src.split(f"def {name}", 1)[1].split("\ndef ", 1)[0]
         assert "INSERT" not in other
 
@@ -374,6 +381,10 @@ def test_the_share_text_drops_a_zero_from_before_the_migration():
         (folder / "shareRecord.ts").write_text(share, encoding="utf-8")
         (folder / "format.ts").write_text(
             (mobile / "src" / "lib" / "format.ts").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        (folder / "clvBeat.ts").write_text(
+            (mobile / "src" / "lib" / "clvBeat.ts").read_text(encoding="utf-8"),
             encoding="utf-8",
         )
         (folder / "package.json").write_text('{"type": "module"}\n', encoding="utf-8")

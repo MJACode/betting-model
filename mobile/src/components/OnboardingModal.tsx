@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { BookChecklist, toggleBook } from '@/components/BookChecklist';
@@ -40,7 +41,7 @@ const SLIDES: Slide[] = [
     icon: 'wallet-outline',
     title: 'Bet to stay in the game',
     body:
-      'Every pick is a flat 1-unit play, so no single call can run away with your roll. Pick a unit you can afford to lose, shop for the best price, skip the parlays the books push, and never chase. Tools here are built to help you last — not to promise you can’t lose.',
+      'Every pick is staked to win 1 unit, with never more than 3 units laid, so no single call can run away with your roll. Pick a unit you can afford to lose, shop for the best price, skip the parlays the books push, and never chase. Tools here are built to help you last — not to promise you can’t lose.',
   },
 ];
 
@@ -98,7 +99,7 @@ export function OnboardingModal({
   const skip = () => setStep(SLIDES.length);
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
+    <Modal trackName="OnboardingModal" visible={visible} animationType="slide" presentationStyle="fullScreen">
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.skipRow}>
           {onBooks ? (

@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import sqlite3
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sys
 
@@ -46,6 +46,7 @@ from config import (
     NFL_ODDS_API_MAP,
 )
 from data.db import get_connection, DBConnection
+from data.name_match import normalize_player_name
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -840,8 +841,9 @@ def fetch_return_ramp_players(conn: sqlite3.Connection, sport: str,
 
 def _upsert_injuries(conn: DBConnection, injuries: list[dict]) -> int:
     """
-    Insert injury rows. We insert fresh rows each day (append-only log).
-    Deduplication done at query time by using the most recent report_date.
+    Insert injury rows. We insert fresh rows each run (append-only log).
+    A day holds one full copy of the list per run. The reader uses the
+    newest copy that existed at tip-off, and only the players on it.
     Returns number of rows inserted.
     """
     if not injuries:
@@ -860,6 +862,99 @@ def _upsert_injuries(conn: DBConnection, injuries: list[dict]) -> int:
     """
     conn.executemany(sql, injuries)
     return len(injuries)
+
+
+# ── Current status (what the app reads) ─────────────────────────────────────
+
+# Which row wins when one player appears twice in a pull (ESPN plus the MLB
+# transactions backup, or two ESPN entries): the more serious absence.
+_CURRENT_STATUS_RANK = {
+    "IL60": 0, "IL15": 1, "IL10": 2, "Out": 3,
+    "Doubtful": 4, "Day-To-Day": 5, "Questionable": 6,
+}
+
+# A pull whose teams answered at least this share is treated as the whole
+# list: teams with no rows are cleared. Below it the pull is degraded and only
+# the teams that answered are replaced, so an ESPN hiccup cannot wipe a sport.
+_HEALTHY_PULL_SHARE = 0.5
+
+
+def _static_team_count(sport: str) -> int:
+    """League size from the offline team maps -- no request, unlike
+    `_espn_team_ids`, which re-reads ESPN's teams endpoint for three sports."""
+    return len({
+        "MLB": ESPN_MLB_TEAM_IDS, "NHL": ESPN_NHL_TEAM_IDS,
+        "WNBA": ESPN_WNBA_TEAM_IDS, "NBA": ESPN_NBA_TEAM_IDS,
+        "NFL": ESPN_NFL_TEAM_IDS,
+    }.get(sport, {}))
+
+
+def current_status_rows(injuries: list[dict]) -> list[dict]:
+    """
+    Fold one pull into one row per (sport, team, player_key).
+
+    Only absences reach the app: scenario B ('Returning') and NFL 'Active'
+    are dropped, and so is any status the board has no tag for.
+    """
+    best: dict[tuple, dict] = {}
+    for r in injuries:
+        if r.get("scenario") != "A":
+            continue
+        status = r.get("status")
+        if status not in _CURRENT_STATUS_RANK:
+            continue
+        key = normalize_player_name(r.get("player_name"))
+        team = r.get("team")
+        if not key or not team:
+            continue
+        k = (r["sport"], team, key)
+        prev = best.get(k)
+        if prev is None or _CURRENT_STATUS_RANK[status] < _CURRENT_STATUS_RANK[prev["status"]]:
+            best[k] = {
+                "sport": r["sport"],
+                "team": team,
+                "player_key": key,
+                "player_name": r.get("player_name"),
+                "player_id": r.get("player_id"),
+                "status": status,
+                "injury_type": r.get("injury_type"),
+                "status_ts": r.get("status_ts"),
+            }
+    return list(best.values())
+
+
+def _replace_current_status(conn: DBConnection, sport: str, injuries: list[dict],
+                            teams_expected: int) -> int:
+    """
+    Replace `injury_status_current` for one sport from this pull.
+
+    A healthy pull (most teams answered) replaces the whole sport, so a
+    player taken off every list is cleared. A degraded pull replaces only the
+    teams that answered; the rest keep their rows and age out on the app's
+    freshness window. An EMPTY pull writes nothing.
+    """
+    rows = current_status_rows(injuries)
+    teams = sorted({r["team"] for r in rows})
+    if not teams:
+        return 0
+    healthy = teams_expected > 0 and len(teams) >= teams_expected * _HEALTHY_PULL_SHARE
+    if healthy:
+        conn.execute("DELETE FROM injury_status_current WHERE sport = %s", (sport,))
+    else:
+        conn.execute(
+            "DELETE FROM injury_status_current WHERE sport = %s AND team = ANY(%s)",
+            (sport, teams),
+        )
+    conn.executemany("""
+        INSERT INTO injury_status_current (
+            sport, team, player_key, player_name, player_id,
+            status, injury_type, status_ts, as_of
+        ) VALUES (
+            %(sport)s, %(team)s, %(player_key)s, %(player_name)s, %(player_id)s,
+            %(status)s, %(injury_type)s, %(status_ts)s, NOW()
+        )
+    """, rows)
+    return len(rows)
 
 
 def _log_pipeline(conn: DBConnection, run_date: str,
@@ -889,6 +984,7 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
     total_inserted = 0
 
     conn = get_connection()
+    current_pulls: list[tuple[str, list[dict]]] = []
 
     try:
         for sp in sports:
@@ -896,9 +992,11 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
             all_injuries = []
 
             # ── Source 1: ESPN ────────────────────────────────────────────────
+            espn_ok = False
             try:
                 espn_rows = fetch_espn_injuries(sp, report_date)
                 all_injuries.extend(espn_rows)
+                espn_ok = bool(espn_rows)
             except Exception as exc:
                 logger.error(f"ESPN {sp} ingestion error: {exc}")
 
@@ -931,6 +1029,8 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
             _log_pipeline(conn, report_date, "success",
                           records_in=n, records_out=n, duration_s=duration)
             logger.success(f"{sp} injuries: {n} rows inserted ({duration:.1f}s)")
+            if espn_ok:
+                current_pulls.append((sp, all_injuries))
 
         conn.commit()
 
@@ -940,7 +1040,21 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
         _log_pipeline(conn, report_date, "error", 0, 0, total_duration, str(exc))
         conn.commit()
         logger.error(f"Injury ingestor failed: {exc}")
+        conn.close()
         raise
+
+    # The app's current-status table, AFTER the log is committed and in its own
+    # transaction: a missing table (the migration lands on the next pass) or
+    # any failure here must never cost the log rows the models read.
+    try:
+        for sp, rows in current_pulls:
+            expected = _static_team_count(sp)
+            n_cur = _replace_current_status(conn, sp, rows, expected)
+            logger.info(f"{sp} injury_status_current: {n_cur} rows")
+        conn.commit()
+    except Exception as exc:                                  # noqa: BLE001
+        conn.rollback()
+        logger.warning(f"injury_status_current not updated: {exc}")
     finally:
         conn.close()
 
@@ -952,46 +1066,229 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
     }
 
 
+def _parse_injury_ts(value) -> datetime | None:
+    """UTC time of a stored injury stamp or a game's tip.
+
+    `created_at` is Postgres `NOW()::text` (`2026-10-13 04:17:18.147923+00`).
+    `games.commence_time` is `2026-10-13T23:30:00Z` or `...+00:00`. String
+    order is not time order across those shapes.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith(("Z", "z")):
+            text = text[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _player_key(row: dict) -> str | None:
+    """Identity for one player across snapshots. None when the row has neither
+    an id nor a name, so a fixture row that never carried one is not merged
+    with a different anonymous row."""
+    pid = str(row.get("player_id") or "").strip()
+    if pid:
+        return "id:" + pid
+    name = str(row.get("player_name") or "").strip().lower()
+    if name:
+        return "name:" + name
+    return None
+
+
+def _snapshot_rank(row: dict) -> tuple:
+    """The same clock keeps the later insert."""
+    ts = _parse_injury_ts(row.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        iid = int(row.get("injury_id"))
+    except (TypeError, ValueError):
+        iid = -1
+    return (ts, iid)
+
+
+def snapshot_instant(rows: list[dict], as_of=None) -> datetime | None:
+    """The newest `created_at` in `rows` that is still at or before `as_of`.
+
+    `rows` is the pool that defines the pull: the sport's copies of one
+    report, not one team's private history. No `as_of` means the newest
+    stamp in the pool.
+    """
+    cutoff = _parse_injury_ts(as_of) if as_of else None
+    best: datetime | None = None
+    for row in rows:
+        stamp = _parse_injury_ts(row.get("created_at"))
+        if stamp is None:
+            continue
+        if cutoff is not None and stamp > cutoff:
+            continue
+        if best is None or stamp > best:
+            best = stamp
+    return best
+
+
+def _one_player_per_row(rows: list[dict]) -> list[dict]:
+    """One row per player inside a single pull. A row with no id and no name
+    stays, so two nameless rows are not treated as the same person."""
+    best: dict[str, dict] = {}
+    anonymous: list[dict] = []
+    for row in rows:
+        key = _player_key(row)
+        if key is None:
+            anonymous.append(row)
+            continue
+        prev = best.get(key)
+        if prev is None or _snapshot_rank(row) >= _snapshot_rank(prev):
+            best[key] = row
+    return list(best.values()) + anonymous
+
+
+def latest_injury_rows(rows: list[dict], as_of=None) -> list[dict]:
+    """Players on the single newest pull in `rows` at or before `as_of`.
+
+    Each ingest writes a full copy of the list. The copy that counts is the
+    newest one already stored at tip-off. A player who is missing from that
+    pull does not count, including one an earlier copy the same day listed.
+    Inside the pull, a player stored twice keeps the later insert. A pull
+    taken after `as_of` is ignored. When nothing in the pool has a clock,
+    the undated rows are that one pull.
+    """
+    instant = snapshot_instant(rows, as_of=as_of)
+    if instant is not None:
+        pool = [r for r in rows if _parse_injury_ts(r.get("created_at")) == instant]
+        return _one_player_per_row(pool)
+    if any(_parse_injury_ts(r.get("created_at")) is not None for r in rows):
+        # Every stamped copy is after tip.
+        return []
+    return _one_player_per_row(list(rows))
+
+
+_INJURY_ROW_COLS = [
+    "player_name", "player_id", "status", "injury_type",
+    "scenario", "severity_weight", "return_ramp_factor",
+    "games_since_return", "activation_date",
+    "created_at", "injury_id",
+]
+
+
+def _report_date_as_of(conn, sport: str, game_date: str, as_of) -> str | None:
+    """Latest `report_date` on or before `game_date` that has a snapshot
+    at or before `as_of`. No `as_of` means the latest report date, as before.
+
+    The clock filter is applied here in Python. `created_at` is text, and
+    this query also runs against the sqlite fixtures the feature tests build,
+    which have no `timestamptz` cast.
+    """
+    cutoff = _parse_injury_ts(as_of) if as_of else None
+    bound = game_date
+    for _ in range(14):
+        row = conn.execute("""
+            SELECT MAX(report_date)
+            FROM injuries
+            WHERE sport = ?
+              AND report_date <= ?
+        """, (sport, bound)).fetchone()
+        latest = row[0] if row else None
+        if not latest:
+            return None
+        if cutoff is None:
+            return latest
+        early = conn.execute("""
+            SELECT created_at
+            FROM injuries
+            WHERE sport = ?
+              AND report_date = ?
+              AND created_at IS NOT NULL
+            ORDER BY created_at
+            LIMIT 1
+        """, (sport, latest)).fetchone()
+        ts = _parse_injury_ts(early[0]) if early and early[0] is not None else None
+        if ts is None or ts <= cutoff:
+            return latest
+        prev = (date.fromisoformat(str(latest)[:10]) - timedelta(days=1)).isoformat()
+        if prev >= bound:
+            return None
+        bound = prev
+    return None
+
+
+def _snapshot_rows(conn, sport: str, report_date: str) -> list[dict]:
+    """One dict per stored `created_at` on this report, so the newest pull
+    is the sport's, not whichever team happens to be asked first."""
+    rows = conn.execute("""
+        SELECT DISTINCT created_at
+        FROM injuries
+        WHERE sport = ?
+          AND report_date = ?
+          AND created_at IS NOT NULL
+    """, (sport, report_date)).fetchall()
+    return [{"created_at": r[0]} for r in rows]
+
+
+def _team_injury_rows(conn, sport: str, team: str, report_date: str,
+                      as_of, instant: datetime | None) -> list[dict]:
+    rows = conn.execute("""
+        SELECT player_name, player_id, status, injury_type,
+               scenario, severity_weight, return_ramp_factor,
+               games_since_return, activation_date,
+               created_at, injury_id
+        FROM injuries
+        WHERE sport = ?
+          AND team = ?
+          AND report_date = ?
+    """, (sport, team, report_date)).fetchall()
+    parsed = [dict(zip(_INJURY_ROW_COLS, r)) for r in rows]
+    if instant is None:
+        return latest_injury_rows(parsed, as_of=as_of)
+    on_pull = [r for r in parsed if _parse_injury_ts(r.get("created_at")) == instant]
+    return _one_player_per_row(on_pull)
+
+
 def query_injuries_for_game(conn: sqlite3.Connection,
                              sport: str,
                              home_team: str,
                              away_team: str,
-                             game_date: str) -> dict:
+                             game_date: str,
+                             game_id: str | None = None,
+                             as_of=None) -> dict:
     """
-    Helper used by feature engine to pull injury context for a specific game.
-    Returns dict with keys: home_injuries, away_injuries (list of injury rows).
-    Pulls the most recent injury report on or before game_date.
-    """
-    latest_date = conn.execute("""
-        SELECT MAX(report_date)
-        FROM injuries
-        WHERE sport = ?
-          AND report_date <= ?
-    """, (sport, game_date)).fetchone()[0]
+    Injury rows for one game: home_injuries, away_injuries.
 
+    The list is the newest ingest on the latest `report_date` that already
+    had a copy at tip-off. Only the players on that one pull count. A name
+    an earlier copy the same day listed, and that this pull left off, is
+    not injured for this game. `as_of` is that tip when the caller passes
+    it; otherwise `game_id` is looked up on `games.commence_time`. A game
+    that has not started has its tip in the future, so the newest copy
+    stored so far is the pull. A game already started does not read a copy
+    taken after tip. No tip on the game means the newest copy of the latest
+    report date.
+    """
+    if as_of is None and game_id:
+        tip = conn.execute(
+            "SELECT commence_time FROM games WHERE game_id = ?",
+            (game_id,),
+        ).fetchone()
+        as_of = tip[0] if tip else None
+
+    latest_date = _report_date_as_of(conn, sport, game_date, as_of)
     if not latest_date:
         return {"home_injuries": [], "away_injuries": []}
 
-    def _get_team_injuries(team: str) -> list[dict]:
-        rows = conn.execute("""
-            SELECT player_name, player_id, status, injury_type,
-                   scenario, severity_weight, return_ramp_factor,
-                   games_since_return, activation_date
-            FROM injuries
-            WHERE sport = ?
-              AND team = ?
-              AND report_date = ?
-            ORDER BY severity_weight DESC
-        """, (sport, team, latest_date)).fetchall()
-
-        cols = ["player_name", "player_id", "status", "injury_type",
-                "scenario", "severity_weight", "return_ramp_factor",
-                "games_since_return", "activation_date"]
-        return [dict(zip(cols, r)) for r in rows]
-
+    instant = snapshot_instant(_snapshot_rows(conn, sport, latest_date), as_of=as_of)
     return {
-        "home_injuries": _get_team_injuries(home_team),
-        "away_injuries": _get_team_injuries(away_team),
+        "home_injuries": _team_injury_rows(
+            conn, sport, home_team, latest_date, as_of, instant),
+        "away_injuries": _team_injury_rows(
+            conn, sport, away_team, latest_date, as_of, instant),
     }
 
 

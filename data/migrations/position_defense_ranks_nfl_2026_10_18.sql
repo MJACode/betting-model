@@ -163,12 +163,17 @@ BEGIN
     -- Season read gains pos. Guarded on the result type, not on the function
     -- existing: the original create is not in ACTIVE_MIGRATIONS, and a later
     -- pass must not drop a function that already returns pos.
+    -- Identity arguments include the parameter names. A types-only list
+    -- never matches, so the drop would run on every pass.
     IF NOT EXISTS (SELECT 1
                      FROM pg_proc p
                      JOIN pg_namespace n ON n.oid = p.pronamespace
                     WHERE n.nspname = 'public'
                       AND p.proname = 'player_season_stat_values_nfl'
-                      AND pg_get_function_identity_arguments(p.oid) = 'integer, text'
+                      -- 2026-11-04: identity arguments include the names, so
+                      -- the old text comparison never matched and this
+                      -- dropped and recreated the function on every pass.
+                      AND p.oid = to_regprocedure('public.player_season_stat_values_nfl(integer, text)')
                       AND pg_get_function_result(p.oid) ILIKE '%pos text%') THEN
         EXECUTE 'DROP FUNCTION IF EXISTS public.player_season_stat_values_nfl(integer, text)';
         EXECUTE $ddl$
@@ -226,12 +231,16 @@ BEGIN
         RAISE NOTICE 'player_season_stat_values_nfl already returns pos — skipping';
     END IF;
 
+    -- Same named-identity rule as the season read above.
     IF NOT EXISTS (SELECT 1
                      FROM pg_proc p
                      JOIN pg_namespace n ON n.oid = p.pronamespace
                     WHERE n.nspname = 'public'
                       AND p.proname = 'player_h2h_stat_values_nfl'
-                      AND pg_get_function_identity_arguments(p.oid) = 'integer[], text, text[], text[]'
+                      -- 2026-11-04: identity arguments include the names, so
+                      -- the old text comparison never matched and this
+                      -- dropped and recreated the function on every pass.
+                      AND p.oid = to_regprocedure('public.player_h2h_stat_values_nfl(integer[], text, text[], text[])')
                       AND pg_get_function_result(p.oid) ILIKE '%pos text%') THEN
         EXECUTE 'DROP FUNCTION IF EXISTS public.player_h2h_stat_values_nfl(integer[], text, text[], text[])';
         EXECUTE $ddl$

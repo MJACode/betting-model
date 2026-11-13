@@ -66,11 +66,14 @@ def _by_game_ids(conn, sql: str, ids: list[str], chunk: int = 150) -> pd.DataFra
 
 def cache_lines(conn, games: pd.DataFrame) -> None:
     ids = games.loc[games["game_date"] >= "2020-12-01", "game_id"].tolist()
+    # The alternate ladders (2.2 million rows) have their own cache file, read by
+    # scripts/nba_game6_alt.cache_alt; no lab reads them from nba_odds. 60 games a
+    # read since the injury-report windows (2.4 million rows) joined these games.
     df = _by_game_ids(conn, """
         SELECT game_id, market, bookmaker, snapshot_type, snapshot_at, source, created_at,
                home_price, away_price, spread_home, total_line, over_price, under_price
-          FROM odds WHERE game_id = ANY(%s)
-    """, ids)
+          FROM odds WHERE game_id = ANY(%s) AND source <> 'odds_api_nba_alt_history'
+    """, ids, chunk=60)
     local_store.write_table("nba_odds", df, SEASONS)
     logger.info(f"odds {len(df):,}")
     # When each stored fetch was ASKED FOR. A quote's snapshot_at is the book's
@@ -79,12 +82,16 @@ def cache_lines(conn, games: pd.DataFrame) -> None:
     # pulled_at (one transaction writes both). docs/nba_models_2026.md §6.5.
     parts = [_frame(conn, """
         SELECT (snapshot_date || 'T' || lpad(hour_utc::text, 2, '0') || ':00:00+00')::timestamptz
-                   AS requested_at, pulled_at, rows, 'hourly' AS why
+                   AS requested_at, pulled_at, rows, 'hourly' AS why, NULL::text AS snapshot_ts
           FROM odds_history_pulls WHERE sport = 'NBA'
     """)]
     if _table_exists(conn, "odds_history_fetches"):
+        # snapshot_ts: the feed's own time for the slate it returned (the body's
+        # `timestamp`), the latest 5-minute snapshot at or before requested_at --
+        # about 4.4 minutes earlier for a request on the 5-minute mark
+        # (docs/nba_models_2026.md 11.5). The hourly ledger never stored it.
         parts.append(_frame(conn, """
-            SELECT requested_at, pulled_at, rows, why
+            SELECT requested_at, pulled_at, rows, why, snapshot_ts::text AS snapshot_ts
               FROM odds_history_fetches WHERE sport = 'NBA'
         """))
     led = pd.concat(parts, ignore_index=True)

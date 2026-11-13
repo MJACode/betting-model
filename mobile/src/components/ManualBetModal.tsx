@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -9,9 +8,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { addBetHint } from '@/lib/a11y';
 import type { ManualBetInput } from '@/hooks/useManualBets';
+import { FLAT_UNIT } from '@/lib/format';
 
 /** Add-a-bet form for the manual fallback (sync gaps / unsupported books). */
 export function ManualBetModal({
@@ -50,7 +51,9 @@ export function ManualBetModal({
     onAdd({
       description: desc.trim(),
       book: book.trim() || null,
-      stake: stakeNum,
+      // Typed in units; kept at the Performance tab's stored scale, where 100
+      // is 1u (lib/format FLAT_UNIT), so every stake there reads the same way.
+      stake: stakeNum * FLAT_UNIT,
       odds_american: oddsNum != null && Number.isFinite(oddsNum) ? oddsNum : null,
     });
     reset();
@@ -58,7 +61,7 @@ export function ManualBetModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal trackName="ManualBetModal" visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.backdrop}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -96,14 +99,14 @@ export function ManualBetModal({
             />
           </Field>
           <View style={styles.row}>
-            <Field label="Stake ($)" style={{ flex: 1 }}>
+            <Field label="Stake (units)" style={{ flex: 1 }}>
               <TextInput
-                accessibilityLabel="Stake in dollars"
+                accessibilityLabel="Stake in units"
                 style={styles.input}
                 value={stake}
                 onChangeText={setStake}
                 keyboardType="decimal-pad"
-                placeholder="50"
+                placeholder="1"
                 placeholderTextColor={colors.textTertiary}
               />
             </Field>

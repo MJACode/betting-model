@@ -1,6 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
+import { lineLegsAfterAdd, lineLegsAfterEdit } from '@/lib/betslipGuard';
+import { EMPTY_INJURY_INDEX } from '@/lib/injuryStatus';
+import { injuryIndexForSport } from '@/lib/injuryLookup';
 import { isGameSpec, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
 
 /**
@@ -10,6 +13,11 @@ import { isGameSpec, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
  * a pick leg is a stable KEY resolved against today's picks, a line leg has
  * no pick to resolve against, so the whole SPEC is stored and re-priced from
  * the latest lines on read (lib/lineLegs.ts). Ordered by insertion.
+ *
+ * A sidelined player is not inserted (Matt, 2026-10-24). The add reads the
+ * same injury index the Stats board does and admits the spec through
+ * lineLegsAfterAdd. A rejection is a no-op: the caller toasts only when this
+ * returns true. A game line has no player and is not looked up.
  */
 
 const STORAGE_KEY = 'betslip.lineLegs.v1';
@@ -76,6 +84,13 @@ async function save(specs: LineLegSpec[]) {
   }
 }
 
+/** Account deletion. Clears line legs (`betslip.lineLegs.v1`). */
+export async function clearLineLegsForAccountDeletion(): Promise<void> {
+  cached = [];
+  listeners.forEach((fn) => fn([]));
+  await AsyncStorage.removeItem(STORAGE_KEY);
+}
+
 export function useLineLegs() {
   const [specs, setSpecs] = useState<LineLegSpec[]>(cached ?? []);
   const [ready, setReady] = useState<boolean>(cached != null);
@@ -100,11 +115,17 @@ export function useLineLegs() {
     [specs],
   );
 
-  const add = useCallback((spec: LineLegSpec) => {
-    const cur = cached ?? [];
-    const key = lineLegKey(spec);
-    if (cur.some((s) => lineLegKey(s) === key)) return;
-    save([...cur, spec]).catch((err) => console.warn('[lineLegs] add failed', err));
+  const add = useCallback((spec: LineLegSpec): Promise<boolean> => {
+    return (async () => {
+      // The read happens before the list is touched. A game line has no player.
+      const index = isGameSpec(spec) ? EMPTY_INJURY_INDEX : await injuryIndexForSport(spec.sport);
+      // No await between this read of `cached` and `save` assigning it, so two
+      // adds cannot each snapshot the list and drop the other.
+      const next = lineLegsAfterAdd(cached ?? [], spec, index);
+      if (!next) return false;
+      await save(next);
+      return true;
+    })();
   }, []);
 
   const remove = useCallback((key: string) => {
@@ -115,9 +136,25 @@ export function useLineLegs() {
     );
   }, []);
 
+  /** Swap a leg for its edited version in place (the betslip's Edit).
+   *  Resolves 'ok', 'duplicate' (a no-op, or a bet already on the slip), or
+   *  'sidelined': an edit commits a new bet, so it passes the same injury gate
+   *  as an add (Matt, 2026-10-24) — a player ruled out after the leg was added
+   *  cannot be re-bet by editing the line. */
+  const replace = useCallback((oldKey: string, next: LineLegSpec): Promise<'ok' | 'duplicate' | 'sidelined'> => {
+    return (async () => {
+      const index = isGameSpec(next) ? EMPTY_INJURY_INDEX : await injuryIndexForSport(next.sport);
+      // No await between this read of `cached` and `save` assigning it.
+      const result = lineLegsAfterEdit(cached ?? [], oldKey, next, index);
+      if (result.outcome !== 'ok') return result.outcome;
+      await save(result.specs);
+      return 'ok';
+    })();
+  }, []);
+
   const clear = useCallback(() => {
     save([]).catch((err) => console.warn('[lineLegs] clear failed', err));
   }, []);
 
-  return { specs, count: specs.length, ready, has, add, remove, clear };
+  return { specs, count: specs.length, ready, has, add, remove, replace, clear };
 }

@@ -33,6 +33,7 @@ from xgboost import XGBClassifier
 sys.path.insert(0, ".")
 
 from data.db import get_connection
+from tracking.clv_math import CLV_EXACT_PUSH_EPS, clv_beat_rate
 from data.ingestors.nhl_sbr_archive import SOURCE
 from features import feature_engine as fe
 from features.feature_engine import build_training_dataset
@@ -94,7 +95,9 @@ def summarise(profits: np.ndarray, clv: np.ndarray | None = None) -> dict:
            "ci": f"{(roi - 1.96 * se) * 100:+.1f}..{(roi + 1.96 * se) * 100:+.1f}"}
     if clv is not None and len(clv):
         out["clv_pts"] = round(float(np.nanmean(clv)) * 100, 2)
-        out["beat_close"] = round(float(np.nanmean(clv > 0)) * 100, 1)
+        # A zero move is a push. It stays in clv_pts and leaves the beat rate.
+        rate = clv_beat_rate(clv, eps=CLV_EXACT_PUSH_EPS)
+        out["beat_close"] = None if rate is None else round(float(rate) * 100, 1)
     return out
 
 

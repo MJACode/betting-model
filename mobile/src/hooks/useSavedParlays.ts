@@ -121,6 +121,15 @@ async function persist(items: SavedParlay[]) {
   }
 }
 
+/** Account deletion. Drops saved parlays and any half-built custom legs. */
+export async function clearSavedParlaysForAccountDeletion(): Promise<void> {
+  cached = [];
+  listeners.forEach((fn) => fn([]));
+  setEditingParlayId(null);
+  setManualCustomLegs([]);
+  await AsyncStorage.removeItem(STORAGE_KEY);
+}
+
 export function useSavedParlays() {
   const [items, setItems] = useState<SavedParlay[]>(cached ?? []);
   const [ready, setReady] = useState<boolean>(cached != null);

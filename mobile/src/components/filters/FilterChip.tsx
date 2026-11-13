@@ -20,6 +20,16 @@ export interface FilterChipProps {
   size?: 'sm' | 'md';
   /** Leading icon (Ionicons name). Tinted with the chip's text color. */
   icon?: React.ComponentProps<typeof Ionicons>['name'];
+  /**
+   * Leading mark that keeps its own colours (the matchup meter). Hidden from
+   * VoiceOver; `accessibilityLabel` names it.
+   */
+  leading?: React.ReactNode;
+  /**
+   * Selected state. `fill` is the navy chip. `outline` stays on a light ground
+   * so a coloured mark inside the chip still clears contrast.
+   */
+  appearance?: 'fill' | 'outline';
   /** Trailing count, e.g. the "(12)" on a view tab. */
   count?: number;
   /** Dim + block taps — used for sports with nothing on the board today. */
@@ -44,13 +54,22 @@ export function FilterChip({
   onPress,
   size = 'md',
   icon,
+  leading,
+  appearance = 'fill',
   count,
   disabled = false,
   busy = false,
   accessibilityLabel,
   accessibilityHint,
 }: FilterChipProps) {
-  const fg = disabled ? colors.textTertiary : active ? colors.textInverse : colors.textSecondary;
+  const outline = appearance === 'outline';
+  const fg = disabled
+    ? colors.textTertiary
+    : active && !outline
+      ? colors.textInverse
+      : active
+        ? colors.textPrimary
+        : colors.textSecondary;
   return (
     <Pressable
       onPress={onPress}
@@ -68,12 +87,14 @@ export function FilterChip({
       style={({ pressed }) => [
         styles.chip,
         size === 'sm' && styles.chipSm,
-        active && styles.chipActive,
+        active && !outline && styles.chipActive,
+        active && outline && styles.chipOutline,
         disabled && styles.chipDisabled,
         pressed && styles.pressed,
       ]}
     >
       {icon ? <Ionicons name={icon} size={size === 'sm' ? 11 : 13} color={fg} /> : null}
+      {leading}
       <Text style={[styles.text, size === 'sm' && styles.textSm, { color: fg }]}>{label}</Text>
       {count != null ? (
         <View style={[styles.countWrap, active && styles.countWrapActive]}>
@@ -103,6 +124,12 @@ const styles = StyleSheet.create({
   },
   chipActive: {
     backgroundColor: colors.tint,
+    borderColor: colors.tint,
+  },
+  // White, not the navy fill and not tintSoft: the meter’s empty segment is
+  // #D1D1D6, and it has to stay visible so the filled count can be read.
+  chipOutline: {
+    backgroundColor: colors.bgCard,
     borderColor: colors.tint,
   },
   chipDisabled: {

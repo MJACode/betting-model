@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { HIT_MODES, hitModeHeadline, rulerValueLabel, type HitMode } from '@/lib/hitMode';
@@ -53,7 +54,7 @@ export function HitModeSheet({
   unavailableNote?: string | null;
 }) {
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal trackName="HitModeSheet" visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
             parent: an accessible Pressable groups everything inside it into

@@ -41,6 +41,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import duplicate_copy_exclusion_sql, record_exclusion_sql, today_et
 from data.db import get_connection
 from data.ddl_guard import schema_is_current
+from tracking.clv_math import clv_outcome
+from tracking.discord_notifier import units_for
 
 OK, FLAGGED, SKIPPED, ERROR = "OK", "FLAGGED", "SKIPPED", "ERROR"
 WARN, CRIT = "WARN", "CRIT"
@@ -147,12 +149,18 @@ def is_public_fade_pick(pick: dict) -> bool:
     return value <= FADE_PUBLIC_LOW or value >= FADE_PUBLIC_HIGH
 
 
-def units_from_recommended_bet(recommended_bet) -> float:
-    """recommended_bet is dollars-per-$100-unit, same scale as profit_flat."""
-    try:
-        return float(recommended_bet or 0.0) / 100.0
-    except (TypeError, ValueError):
-        return 0.0
+def units_laid(pick: dict) -> float:
+    """Units the published stake lays on this BET (CLAUDE.md §4).
+
+    stake_for's risk at COALESCE(decision_odds, dk_odds): 1u to win, risk
+    capped at 3u, the bare 1u when there is no price. Not recommended_bet,
+    which is Kelly dollars on the paper bankroll; dividing that by 100 gave a
+    number labelled "u" that no published stake ever laid.
+    """
+    price = pick.get("decision_odds")
+    if price is None:
+        price = pick.get("dk_odds")
+    return units_for(pick.get("kelly_fraction"), price)
 
 
 def units_from_profit_flat(profit_flat, price) -> float | None:
@@ -340,11 +348,13 @@ def detect_clv_degradation(
 
     Only `clv_method` = `standard_v2` and a numeric `clv_pct` (same-book
     percent). Older methods are a different definition and are ignored.
-    Beat-rate uses `clv_beat_close` when present, else `clv_pct > 0`.
+    The mean includes a 0% close as 0. The beat rate does not: a push is
+    left out of the denominator. No beat and no loss → the rate is None.
     """
     def _sample(rows: list[dict]) -> tuple[int, float | None, float | None]:
         clvs: list[float] = []
         beats = 0
+        losses = 0
         for row in rows:
             method = str(row.get("clv_method") or "")
             if method not in CLV_METHODS:
@@ -357,14 +367,16 @@ def detect_clv_degradation(
             except (TypeError, ValueError):
                 continue
             clvs.append(clv)
-            beat = row.get("clv_beat_close")
-            if beat is None:
-                beat = clv > 0
-            if beat:
+            outcome = clv_outcome(clv)
+            if outcome == "beat":
                 beats += 1
+            elif outcome == "loss":
+                losses += 1
         if not clvs:
             return 0, None, None
-        return len(clvs), sum(clvs) / len(clvs), beats / len(clvs)
+        decisive = beats + losses
+        beat_rate = None if decisive == 0 else beats / decisive
+        return len(clvs), sum(clvs) / len(clvs), beat_rate
 
     n_r, mean_r, beat_r = _sample(recent)
     n_b, mean_b, beat_b = _sample(baseline)
@@ -383,13 +395,14 @@ def detect_clv_degradation(
         ),
     }
     drop = metrics["drop_pp"]
+    beat_txt = "n/a" if beat_r is None else f"{beat_r:.0%}"
     if (mean_r is not None and mean_r <= CLV_CRIT_PP
             and beat_r is not None and beat_r < CLV_CRIT_BEAT
             and n_r >= MIN_CLV_CRIT_N):
         return {
             "status": FLAGGED, "severity": CRIT,
             "detail": (
-                f"recent same-book CLV {mean_r:+.2f}% / beat {beat_r:.0%} "
+                f"recent same-book CLV {mean_r:+.2f}% / beat {beat_txt} "
                 f"on {n_r} settled BET(s)"
             ),
             "metrics": metrics,
@@ -407,7 +420,7 @@ def detect_clv_degradation(
     return {
         "status": OK, "severity": WARN,
         "detail": (
-            f"recent same-book CLV {mean_r:+.2f}% / beat {beat_r:.0%} "
+            f"recent same-book CLV {mean_r:+.2f}% / beat {beat_txt} "
             f"on {n_r} settled BET(s)"
         ),
         "metrics": metrics,
@@ -511,8 +524,7 @@ def detect_volume_spike(
     zero BETs are omitted so an off-day does not collapse the median.
     """
     n_today = len(today_picks)
-    units_today = sum(units_from_recommended_bet(p.get("recommended_bet"))
-                      for p in today_picks)
+    units_today = sum(units_laid(p) for p in today_picks)
     if n_today == 0:
         return None
     counts = [float(n) for n, _u in daily_history]
@@ -639,7 +651,7 @@ def _result_row(run_date: str, check_name: str, model_key: str, sport: str,
 _OPEN_BET_SQL = """
     SELECT p.model_id, p.sport, p.game_id, p.pick_side,
            p.public_bet_pct, p.public_money_pct, p.recommended_bet,
-           p.kelly_fraction
+           p.kelly_fraction, p.dk_odds, p.decision_odds
     FROM picks p
     WHERE p.signal_type = 'BET'
       AND p.game_date = ?
@@ -658,15 +670,15 @@ _SETTLED_BET_SQL = """
       {excl}
 """
 
+# One row per BET, so each day's units are the published stake (units_laid),
+# summed in Python. Fourteen days of BETs is a few hundred rows.
 _VOLUME_HISTORY_SQL = """
-    SELECT p.model_id, p.game_date,
-           COUNT(*) AS n,
-           SUM(COALESCE(p.recommended_bet, 0)) AS stake
+    SELECT p.model_id, p.game_date, p.kelly_fraction, p.dk_odds,
+           p.decision_odds
     FROM picks p
     WHERE p.signal_type = 'BET'
       AND p.game_date >= ? AND p.game_date < ?
       AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
-    GROUP BY p.model_id, p.game_date
 """
 
 
@@ -680,6 +692,8 @@ def _row_open(row) -> dict:
         "public_money_pct": row[5],
         "recommended_bet": row[6],
         "kelly_fraction": row[7],
+        "dk_odds": row[8],
+        "decision_odds": row[9],
     }
 
 
@@ -781,10 +795,15 @@ def run_model_quality(run_date: str | None = None) -> dict:
             logger.error(f"model_quality: volume query failed: {exc}")
             hist_rows = []
 
+        per_day: dict[tuple[str, str], list] = defaultdict(lambda: [0, 0.0])
+        for mid, gd, kelly, dk_odds, decision_odds in hist_rows:
+            day = per_day[(str(mid), str(gd))]
+            day[0] += 1
+            day[1] += units_laid({"kelly_fraction": kelly, "dk_odds": dk_odds,
+                                  "decision_odds": decision_odds})
         hist_by_model: dict[str, list[tuple[int, float]]] = defaultdict(list)
-        for mid, _gd, n, stake in hist_rows:
-            hist_by_model[str(mid)].append(
-                (int(n or 0), float(stake or 0.0) / 100.0))
+        for (mid, _gd), (n, units) in sorted(per_day.items()):
+            hist_by_model[mid].append((n, units))
 
         model_keys = sorted(
             set(open_by_model)

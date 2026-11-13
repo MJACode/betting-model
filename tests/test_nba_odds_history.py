@@ -111,6 +111,125 @@ def test_derivative_markets_parse_into_the_odds_shape():
                if r["market"].startswith("team_totals")) == 2
 
 
+ALT_BOOK = [
+    {"key": "alternate_spreads", "outcomes": [
+        {"name": "Detroit Pistons", "price": -400, "point": -12.5},   # home -12.5 ...
+        {"name": "Phoenix Suns", "price": 290, "point": 12.5},        # ... pairs with away +12.5
+        {"name": "Detroit Pistons", "price": 150, "point": 4.5},      # home +4.5 ...
+        {"name": "Phoenix Suns", "price": -180, "point": -4.5},       # ... pairs with away -4.5
+        {"name": "Phoenix Suns", "price": 700, "point": 20.5}]},      # no home side: not a rung
+    {"key": "alternate_totals", "outcomes": [
+        {"name": "Over", "price": 200, "point": 240.5}, {"name": "Under", "price": -260, "point": 240.5},
+        {"name": "Over", "price": -900, "point": 200.5}]},
+    {"key": "alternate_team_totals", "outcomes": [
+        {"name": "Over", "description": "Detroit Pistons", "price": 150, "point": 120.5},
+        {"name": "Under", "description": "Detroit Pistons", "price": -190, "point": 120.5},
+        {"name": "Over", "description": "Phoenix Suns", "price": -300, "point": 99.5},
+        {"name": "Under", "description": "Phoenix Suns", "price": 230, "point": 99.5}]},
+]
+
+
+def test_alternate_ladders_store_each_rung_at_the_home_number():
+    rows = h.parse_alternates(ALT_BOOK, "Detroit Pistons", "DET", "PHX")
+    spreads = {r["spread_home"]: r for r in rows if r["market"] == "alternate_spreads"}
+    # the home team's own point is the stored number; the away price is the opposite rung
+    assert set(spreads) == {-12.5, 4.5}
+    assert (spreads[-12.5]["home_price"], spreads[-12.5]["away_price"]) == (-400, 290)
+    assert (spreads[4.5]["home_price"], spreads[4.5]["away_price"]) == (150, -180)
+    totals = [r for r in rows if r["market"] == "alternate_totals"]
+    assert [(r["total_line"], r["over_price"], r["under_price"]) for r in totals] == [(240.5, 200, -260)]
+    tt = {r["market"]: r for r in rows if r["market"].startswith("alternate_team_totals")}
+    assert (tt["alternate_team_totals_home"]["total_line"], tt["alternate_team_totals_home"]["over_price"]) == (120.5, 150)
+    assert (tt["alternate_team_totals_away"]["total_line"], tt["alternate_team_totals_away"]["under_price"]) == (99.5, 230)
+
+
+def test_each_alternate_rung_carries_its_market_s_own_update_stamp():
+    book = [dict(ALT_BOOK[0], last_update="2025-01-15T22:51:00Z"), ALT_BOOK[1]]
+    rows = h.parse_alternates(book, "Detroit Pistons", "DET", "PHX")
+    assert {r["snapshot_at"] for r in rows if r["market"] == "alternate_spreads"} == {"2025-01-15T22:51:00Z"}
+    # a market with no stamp leaves the purchase's own stamp to the writer
+    assert all("snapshot_at" not in r for r in rows if r["market"] == "alternate_totals")
+
+
+PERIOD_BOOK = [
+    {"key": "team_totals_q1", "outcomes": [
+        {"name": "Over", "description": "Detroit Pistons", "price": -115, "point": 28.5},
+        {"name": "Under", "description": "Detroit Pistons", "price": -105, "point": 28.5},
+        {"name": "Over", "description": "Phoenix Suns", "price": 100, "point": 27.5},
+        {"name": "Under", "description": "Phoenix Suns", "price": -120, "point": 27.5}]},
+    {"key": "team_totals_h1", "outcomes": [
+        {"name": "Over", "description": "Detroit Pistons", "price": -110, "point": 57.5},
+        {"name": "Under", "description": "Detroit Pistons", "price": -110, "point": 57.5},
+        {"name": "Over", "description": "Some Other Team", "price": -110, "point": 50.5}]},
+    {"key": "totals_q1", "outcomes": [{"name": "Over", "price": -110, "point": 55.5},
+                                      {"name": "Under", "price": -110, "point": 55.5}]},
+]
+
+
+def test_period_team_totals_are_filed_by_period_and_team():
+    rows = {r["market"]: r for r in h.parse_period_team_totals(PERIOD_BOOK, "Detroit Pistons", "DET", "PHX")}
+    assert set(rows) == {"team_totals_q1_home", "team_totals_q1_away", "team_totals_h1_home"}
+    assert (rows["team_totals_q1_home"]["total_line"], rows["team_totals_q1_home"]["over_price"]) == (28.5, -115)
+    assert (rows["team_totals_q1_away"]["total_line"], rows["team_totals_q1_away"]["under_price"]) == (27.5, -120)
+    assert rows["team_totals_h1_home"]["total_line"] == 57.5
+
+
+def test_the_period_team_totals_are_their_own_source_and_kept_by_the_pruner():
+    from data import prune_odds
+    assert h.PERIOD_TT_SOURCE not in (h.DERIV_SOURCE, h.ALT_SOURCE)
+    assert not h.PERIOD_TT_SOURCE.startswith(h.SOURCE_PREFIX)     # _deriv_done reads that prefix
+    assert h.PERIOD_TT_SOURCE in prune_odds.PROTECTED_SOURCES
+
+
+class _PropMeter:
+    """The two calls a date makes: the event list, then one game's odds."""
+    spent, remaining = 0, 9_000_000
+
+    def __init__(self, body):
+        self.body, self.asked = body, []
+
+    def stop_reason(self, next_cost):
+        return None
+
+    def get(self, url, params):
+        self.asked.append(params)
+
+        class R:
+            status_code = 200
+
+            def __init__(s, payload):
+                s.payload = payload
+
+            def json(s):
+                return s.payload
+        if url.endswith("/events"):
+            return R({"data": [{"id": "e1", "commence_time": "2026-01-16T00:30:00Z",
+                                "home_team": "Detroit Pistons", "away_team": "Phoenix Suns"}]})
+        return R(self.body)
+
+
+def test_first_quarter_props_ask_for_and_keep_only_the_first_quarter_markets():
+    body = {"timestamp": "2026-01-15T23:30:00Z", "data": {"bookmakers": [{"key": "draftkings", "markets": [
+        {"key": "player_points_q1", "outcomes": [
+            {"name": "Over", "description": "Cade Cunningham", "price": -110, "point": 7.5},
+            {"name": "Under", "description": "Cade Cunningham", "price": -110, "point": 7.5}]},
+        {"key": "player_points", "outcomes": [
+            {"name": "Over", "description": "Cade Cunningham", "price": -110, "point": 26.5},
+            {"name": "Under", "description": "Cade Cunningham", "price": -110, "point": 26.5}]}]}]}}
+    meter, kept = _PropMeter(body), []
+    games = [{"game_id": "NBA_2026-01-15_PHX_DET", "home": "DET", "away": "PHX", "commence_time": "x"}]
+    s = h.buy_props_date(None, meter, "2026-01-15", games, 60, write=lambda c, rows: kept.extend(rows),
+                         stamp_games=False, markets=h.Q1_PROP_MARKETS, apply=False)
+    assert meter.asked[-1]["markets"] == "player_points_q1,player_rebounds_q1,player_assists_q1"
+    assert s["markets"] == {"player_points_q1": ["draftkings"]}      # the full-game row is not kept
+    assert s["prop_rows"] == 1
+
+
+def test_alternate_purchases_are_their_own_source_and_never_read_as_derivatives():
+    assert h.ALT_SOURCE != h.DERIV_SOURCE
+    assert not h.ALT_SOURCE.startswith(h.SOURCE_PREFIX)    # _deriv_done reads that prefix
+
+
 # ── the second game-market search: extra hours and the tip-relative gap fill ──
 from datetime import datetime, timedelta, timezone
 

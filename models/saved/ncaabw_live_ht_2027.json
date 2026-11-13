@@ -1,0 +1,156 @@
+{
+ "kind": "ncaabw_live_ht",
+ "version": "ncaabw_live_ht_2027_v1",
+ "model_id": "ncaabw_live_total_ht",
+ "season": 2027,
+ "built_at": "2026-11-11T18:10:12Z",
+ "cut": 0.05,
+ "total": {
+  "b": [
+   1.0338131290881478,
+   -0.0009245531151852726,
+   0.3156032356070593,
+   5.556776125609467
+  ],
+  "s": [
+   32.58476482701033,
+   182.53150635647577,
+   57.225665341655464
+  ]
+ },
+ "fitted_on": {
+  "seasons": [
+   2025,
+   2026
+  ],
+  "games": 2223,
+  "states": 175471,
+  "what": "the score every 30 seconds of regulation of every game with a pre-game spread and total and a play-by-play"
+ },
+ "rule": {
+  "price_band": [
+   -250.0,
+   250.0
+  ],
+  "outlier_pts": 6.0,
+  "min_others": 2,
+  "line_range": [
+   60.0,
+   260.0
+  ],
+  "cadence_min": 5,
+  "fetch_after_sec": 37.0,
+  "books": [
+   "draftkings",
+   "fanduel",
+   "betmgm",
+   "williamhill_us",
+   "fanatics",
+   "betrivers",
+   "hardrockbet"
+  ]
+ },
+ "replay": {
+  "research": {
+   "2026": {
+    "label": "2025-26, model from 2024-25 (walk-forward)",
+    "counts": {
+     "games": 1314,
+     "decided": 1039,
+     "break_passed_undecided": 22,
+     "never_in_break": 253
+    },
+    "bets": 689,
+    "won": 398,
+    "lost": 291,
+    "units": 66.59,
+    "roi_pct": 8.5,
+    "price_min": -148.0,
+    "price_max": 200.0
+   },
+   "2025": {
+    "label": "2024-25, model from 2025-26 (second look)",
+    "counts": {
+     "games": 879,
+     "decided": 494,
+     "break_passed_undecided": 63,
+     "never_in_break": 322
+    },
+    "bets": 303,
+    "won": 182,
+    "lost": 120,
+    "units": 44.96,
+    "roi_pct": 12.97,
+    "price_min": -130.0,
+    "price_max": 105.0
+   },
+   "2027": {
+    "label": "2026-27 to date, model from 2024-26 (walk-forward)",
+    "counts": {
+     "games": 60,
+     "decided": 55,
+     "break_passed_undecided": 2,
+     "never_in_break": 3
+    },
+    "bets": 16,
+    "won": 8,
+    "lost": 8,
+    "units": -0.96,
+    "roi_pct": -5.21,
+    "price_min": -132.0,
+    "price_max": -105.0
+   }
+  },
+  "production": {
+   "2026": {
+    "label": "2025-26, model from 2024-25 (walk-forward)",
+    "counts": {
+     "games": 1314,
+     "decided": 1039,
+     "break_passed_undecided": 22,
+     "never_in_break": 253
+    },
+    "bets": 669,
+    "won": 398,
+    "lost": 271,
+    "units": 89.96,
+    "roi_pct": 11.84,
+    "price_min": -148.0,
+    "price_max": 200.0
+   },
+   "2025": {
+    "label": "2024-25, model from 2025-26 (second look)",
+    "counts": {
+     "games": 879,
+     "decided": 494,
+     "break_passed_undecided": 63,
+     "never_in_break": 322
+    },
+    "bets": 298,
+    "won": 178,
+    "lost": 119,
+    "units": 42.1,
+    "roi_pct": 12.35,
+    "price_min": -130.0,
+    "price_max": 105.0
+   },
+   "2027": {
+    "label": "2026-27 to date, model from 2024-26 (walk-forward)",
+    "counts": {
+     "games": 60,
+     "decided": 55,
+     "break_passed_undecided": 2,
+     "never_in_break": 3
+    },
+    "bets": 14,
+    "won": 7,
+    "lost": 7,
+    "units": -0.91,
+    "roi_pct": -5.59,
+    "price_min": -132.0,
+    "price_max": -105.0
+   }
+  }
+ },
+ "evidence": "docs/sports/ncaabw.md, 'In play'"
+}

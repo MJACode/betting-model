@@ -13,9 +13,23 @@
  */
 
 import { isOutcomeGraded, pickMatchesModel } from './customModelFilters';
-import { flatPnl, isDuplicateCopy, isModelRetired, passesRecordFilter, publishedRecordKeeps } from './thresholds';
+import { flatPnl, isDuplicateCopy, isModelRetired, passesRecordFilter, postedPickUnits, publishedRecordKeeps } from './thresholds';
 import type { CustomModel, CustomModelRule, SettledPick, SignalType } from '@/types';
+import type { FullOutcomeRecord } from './queries';
 
+/**
+ * A model's (or a custom model's) graded set.
+ *
+ * `units` / `risked` / `roi` are what every screen shows, on ONE basis: the
+ * published stake (CLAUDE.md §2; mike, 2026-11-03), 1u to win at
+ * COALESCE(decision_odds, dk_odds), risk capped at 3u, a pick with no price at
+ * the bare 1u. The same numbers the Record tab, Yesterday and Discord book
+ * (postedPickUnits, published_pick_unit_profit / _risked).
+ *
+ * `profitFlat` / `stakedFlat` / `roiFlat` are the stored per-100, 1u-RISKED
+ * figures. No screen prints them. They remain for the priced-pick count and
+ * as the fallback a server answer without the posted columns falls back to.
+ */
 export interface CustomModelStats {
   picks: number;
   wins: number;
@@ -25,6 +39,18 @@ export interface CustomModelStats {
   profitFlat: number;
   stakedFlat: number;
   roiFlat: number;
+  /** Units won or lost at the published stake. */
+  units: number;
+  /** Units laid at the published stake (graded wins and losses only). */
+  risked: number;
+  /** units / risked; 0 when nothing was risked. */
+  roi: number;
+  /**
+   * False when a server half answered without the posted columns (the
+   * custom_model_backtest_posted function not yet applied, or an older
+   * v_public_track_record). units / risked then hold the 1u-risked figure.
+   */
+  postedKnown: boolean;
 }
 
 export const EMPTY_STATS: CustomModelStats = {
@@ -36,10 +62,17 @@ export const EMPTY_STATS: CustomModelStats = {
   profitFlat: 0,
   stakedFlat: 0,
   roiFlat: 0,
+  units: 0,
+  risked: 0,
+  roi: 0,
+  postedKnown: true,
 };
 
 /** Aggregate result of the custom_model_backtest RPC. units are 1u flat;
- *  roi_pct is over priced picks only (prob-only picks have no honest P&L). */
+ *  roi_pct is over priced picks only (prob-only picks have no honest P&L).
+ *  posted_units / posted_risked are custom_model_backtest_posted's answer
+ *  over the same matched picks, on the published stake; absent until that
+ *  function exists (data/migrations/custom_model_backtest_posted_2026_11_03.sql). */
 export interface CustomBacktestSummary {
   bets: number;
   wins: number;
@@ -48,6 +81,8 @@ export interface CustomBacktestSummary {
   priced: number;
   units: number;
   roi_pct: number | null;
+  posted_units?: number | null;
+  posted_risked?: number | null;
 }
 
 /** One graded pick from the custom_model_picks RPC. */
@@ -71,8 +106,9 @@ export interface CustomBacktestPickRow {
   decision_edge: number | null;
 }
 
-/** One graded pick for display, whichever half it came from. profit_flat is at
- *  the app's $100-notional convention; null = unpriced. */
+/** One graded pick for display, whichever half it came from. `units` is the
+ *  published stake's result (postedPickUnits): never profit_flat, which
+ *  invents −110 on a pick with no price. */
 export interface BacktestPickRow {
   pick_id: number;
   model_id: string;
@@ -80,7 +116,57 @@ export interface BacktestPickRow {
   pick_label: string;
   signal_type: SignalType;
   result: string;
-  profit_flat: number | null;
+  units: number;
+}
+
+/**
+ * The units and risk a set of graded picks books at the published stake.
+ * `ownStake` reads each pick's stake_units (a built-in model, booked as
+ * v_public_track_record books it). Without it every pick is the flat 1u to
+ * win (a custom model is the member's own, and its server half, the
+ * two-argument function, books it flat too).
+ */
+function postedTotals(picks: Iterable<{ kelly_fraction?: number | null; dk_odds?: number | null;
+  decision_odds?: number | null; result?: string | null; stake_units?: number | null }>,
+  ownStake: boolean): { units: number; risked: number } {
+  let units = 0;
+  let risked = 0;
+  for (const p of picks) {
+    const u = postedPickUnits(ownStake ? p : { ...p, stake_units: null });
+    units += u.units;
+    risked += u.risked;
+  }
+  return { units, risked };
+}
+
+/**
+ * A published per-model record (v_public_track_record, shaped by
+ * fetchPublishedModelRecord) as the stats the Models list and the model page
+ * show. `units` / `risked` are the view's own posted-stake columns, the same
+ * numbers the Record tab sums. Without them (an older view) `postedKnown` is
+ * false and the caller recomputes from the settled picks.
+ */
+export function recordStatsFromPublished(rec: FullOutcomeRecord): CustomModelStats {
+  const decided = rec.wins + rec.losses;
+  const priced = rec.priced_bets ?? 0;
+  const flatUnits = Number(rec.units ?? 0);
+  const known = rec.posted_units != null && rec.posted_risked != null;
+  const units = known ? Number(rec.posted_units) : flatUnits;
+  const risked = known ? Number(rec.posted_risked) : priced;
+  return {
+    picks: rec.bets,
+    wins: rec.wins,
+    losses: rec.losses,
+    pushes: rec.pushes,
+    winRate: decided > 0 ? rec.wins / decided : 0,
+    profitFlat: flatUnits * 100,
+    stakedFlat: priced * 100,
+    roiFlat: rec.roi_pct == null ? 0 : Number(rec.roi_pct) / 100,
+    units,
+    risked,
+    roi: risked > 0 ? units / risked : 0,
+    postedKnown: known,
+  };
 }
 
 /** Split a model's rules by whether the server grades that model's every pick.
@@ -104,6 +190,10 @@ export function splitRulesByCoverage(rules: CustomModelRule[]): {
 
 export function summaryToStats(s: CustomBacktestSummary): CustomModelStats {
   const decided = s.wins + s.losses;
+  // PostgREST can send NUMERIC as a string.
+  const known = s.posted_units != null && s.posted_risked != null;
+  const units = known ? Number(s.posted_units) : Number(s.units);
+  const risked = known ? Number(s.posted_risked) : Number(s.priced);
   return {
     picks: s.bets,
     wins: s.wins,
@@ -113,6 +203,10 @@ export function summaryToStats(s: CustomBacktestSummary): CustomModelStats {
     profitFlat: s.units * 100,
     stakedFlat: s.priced * 100,
     roiFlat: s.priced > 0 ? s.units / s.priced : 0,
+    units,
+    risked,
+    roi: risked > 0 ? units / risked : 0,
+    postedKnown: known,
   };
 }
 
@@ -122,6 +216,8 @@ export function mergeStats(a: CustomModelStats, b: CustomModelStats): CustomMode
   const losses = a.losses + b.losses;
   const profitFlat = a.profitFlat + b.profitFlat;
   const stakedFlat = a.stakedFlat + b.stakedFlat;
+  const units = a.units + b.units;
+  const risked = a.risked + b.risked;
   return {
     picks: a.picks + b.picks,
     wins,
@@ -131,6 +227,10 @@ export function mergeStats(a: CustomModelStats, b: CustomModelStats): CustomMode
     profitFlat,
     stakedFlat,
     roiFlat: stakedFlat > 0 ? profitFlat / stakedFlat : 0,
+    units,
+    risked,
+    roi: risked > 0 ? units / risked : 0,
+    postedKnown: a.postedKnown && b.postedKnown,
   };
 }
 
@@ -148,6 +248,7 @@ export function computeCustomModelStats(model: CustomModel, settled: SettledPick
   let pushes = 0;
   let profitFlat = 0;
   let stakedFlat = 0;
+  const counted: SettledPick[] = [];
 
   for (const p of settled) {
     if (!pickMatchesModel(p, model)) continue;
@@ -162,6 +263,7 @@ export function computeCustomModelStats(model: CustomModel, settled: SettledPick
     else if (p.result === 'PUSH') pushes++;
     else continue;
     picks++;
+    counted.push(p);
     // Money only on a priced pick — see flatPnl. Matches the server half
     // (custom_model_backtest: profit_units NULL and priced=0 when dk_odds is
     // NULL), so the two halves mergeStats adds are priced on the same rule.
@@ -171,6 +273,10 @@ export function computeCustomModelStats(model: CustomModel, settled: SettledPick
   }
 
   const decided = wins + losses;
+  // The published stake's price math (an unpriced pick at 1u), at the flat
+  // 1u to win: a custom model is the member's own, not the posted pick's
+  // stake_units, and the server half books it the same way.
+  const posted = postedTotals(counted, false);
   return {
     picks,
     wins,
@@ -180,6 +286,10 @@ export function computeCustomModelStats(model: CustomModel, settled: SettledPick
     profitFlat,
     stakedFlat,
     roiFlat: stakedFlat > 0 ? profitFlat / stakedFlat : 0,
+    units: posted.units,
+    risked: posted.risked,
+    roi: posted.risked > 0 ? posted.units / posted.risked : 0,
+    postedKnown: true,
   };
 }
 
@@ -193,6 +303,7 @@ export function computeBuiltInModelStats(modelId: string, settled: SettledPick[]
   let pushes = 0;
   let profitFlat = 0;
   let stakedFlat = 0;
+  const counted: SettledPick[] = [];
 
   for (const p of settled) {
     if (p.model_id !== modelId) continue;
@@ -213,6 +324,7 @@ export function computeBuiltInModelStats(modelId: string, settled: SettledPick[]
     else if (p.result === 'PUSH') pushes++;
     else continue;
     picks++;
+    counted.push(p);
     // Money only on a priced pick — see flatPnl. This is the Models-tab row
     // for every sport the full-outcome view does not grade (UFC/NHL/NBA/golf/
     // NFL/NCAAF), so it has to price exactly what v_public_track_record's
@@ -223,6 +335,9 @@ export function computeBuiltInModelStats(modelId: string, settled: SettledPick[]
   }
 
   const decided = wins + losses;
+  // The published stake, as the Record tab books it (an unpriced pick at its
+  // bare stake), each pick at its own stake_units when it carries one.
+  const posted = postedTotals(counted, true);
   return {
     picks,
     wins,
@@ -232,5 +347,9 @@ export function computeBuiltInModelStats(modelId: string, settled: SettledPick[]
     profitFlat,
     stakedFlat,
     roiFlat: stakedFlat > 0 ? profitFlat / stakedFlat : 0,
+    units: posted.units,
+    risked: posted.risked,
+    roi: posted.risked > 0 ? posted.units / posted.risked : 0,
+    postedKnown: true,
   };
 }

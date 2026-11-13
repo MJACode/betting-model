@@ -19,6 +19,7 @@ import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AddLineSheet } from '@/components/AddLineSheet';
+import { PlayerStatsHeaderTitle } from '@/components/StackBackButton';
 import { GroupTabs } from '@/components/GroupTabs';
 import { HitModeSheet } from '@/components/HitModeSheet';
 import { HitRateChart } from '@/components/HitRateChart';
@@ -28,8 +29,10 @@ import { PositionVsOpponentCard, PositionVsOpponentPending } from '@/components/
 import { TrendStrip } from '@/components/TrendStrip';
 import { useNow } from '@/hooks/useNow';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
+import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { usePlayerPropQuote } from '@/hooks/usePlayerPropQuote';
 import { logValues, trendBuckets, usePlayerTrends } from '@/hooks/usePlayerTrends';
+import { fetchPlayerMinutes } from '@/lib/queries';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
@@ -46,6 +49,19 @@ import {
   groupsOfChips,
   lineStepFor,
   logStatValue,
+  attachMinuteRows,
+  averageAndMedian,
+  chartGames,
+  minutesStillNeeded,
+  isMinutesContextStat,
+  lookupLogMinutes,
+  minutesPlayed,
+  opponentLabel,
+  scoredChartValues,
+  sportTracksMinutes,
+  windowAverageMinutes,
+  withLowMinutes,
+  shortGameDate,
   openingChip,
   pagePlayerId,
   playerSubtitle,
@@ -54,9 +70,11 @@ import {
   stepLineFrom,
   stepperRowLayout,
   windowOptionsFor,
+  type ChartGame,
   type GameWindow,
   type PlayerLogEntry,
   type PlayerLogSport,
+  type StepperRowLayout,
 } from '@/lib/playerLog';
 import { propMarketForStat, propModelForStat } from '@/lib/statCatalog';
 import type { StatDef } from '@/lib/statCatalog';
@@ -75,11 +93,12 @@ import { computeHitRate, isHit, type HitDirection } from '@/lib/hitRate';
 import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
-import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
-import { reachFrame } from '@/lib/a11y';
+import { colors, font, radii, spacing } from '@/lib/theme';
+import { reachFrame, unitsSpeech } from '@/lib/a11y';
 import { ErrorBanner } from '@/components/ErrorState';
+import { MatchupStrengthBar } from '@/components/MatchupStrengthBar';
 import { friendlyCause } from '@/lib/errors';
-import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
+import { matchupStrengthPhrase, strengthForGrade, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
 import { bookName, sideNotPostedNote, storedQuoteBook } from '@/lib/markets';
 import { decisionOdds } from '@/lib/decisionPrice';
@@ -90,10 +109,12 @@ import { usePlayerDetail, type PlayerNextGame } from '@/hooks/usePlayerDetail';
 import { formatGameTimeET, formatPct, weekdayShortET } from '@/lib/format';
 import { sportHasLivePropModel } from '@/lib/modelMeta';
 import {
-  bookLineFromThreshold,
+  defaultPlayerWindow,
   formatRecordLine,
+  playerLineNote,
   HIT_RATE_GOOD,
   HIT_RATE_WEAK,
+  rangeToRemember,
   thresholdFromBookLine,
   type PlayerPickRecord,
   type PropLineMove,
@@ -105,8 +126,26 @@ import {
 import type { LineupSlotRow, PlayerType, SavantStatsRow } from '@/types';
 import { ordinal } from '@/lib/teamDetail';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import {
+  DEFENSE_SEASONS_PLAYED,
+  DEFENSE_TIERS,
+  groupNoun,
+  nextDefenseLine,
+  openingDefenseFilter,
+  tierChartGames,
+  tierCounts,
+  tierLabel,
+  tierPips,
+  type DefenseFilter,
+} from '@/lib/defenseTier';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
+
+/** A recent-games span, or every meeting with tonight's opponent over the last
+ *  two seasons — the Stats board's H2H, offered here too (Matt, 2026-10-28:
+ *  "H2H is on the main screen but when you click on a player is not
+ *  available"). */
+type RangeChoice = GameWindow | 'h2h';
 
 /** The keyboard bar under the typed line field. */
 const LINE_ACCESSORY_ID = 'player-line-input';
@@ -119,7 +158,6 @@ export function PlayerStatsScreen() {
   // still fits through Accessibility Large (2.143). From Accessibility Extra
   // Large (2.643) the mode control takes the line above − / field / +.
   const { fontScale } = useWindowDimensions();
-  const stepperLayout = stepperRowLayout(fontScale);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playerId, playerName, playerType } = route.params;
   const fromParlay = route.params.fromParlay === true;
@@ -127,6 +165,7 @@ export function PlayerStatsScreen() {
   // anywhere else. Typed loosely on the route (a string) and narrowed here.
   const matchupText = route.params.matchupText ?? null;
   const matchupGrade = (route.params.matchupGrade as MatchupGrade | undefined) ?? null;
+  const matchupStrength = strengthForGrade(matchupGrade);
   // Older navigation state (a screen restored from a build before player detail
   // went multi-sport) carries no sport — MLB was the only one that could open it.
   const sport: PlayerLogSport = route.params.sport ?? 'MLB';
@@ -155,7 +194,7 @@ export function PlayerStatsScreen() {
     () => requested ?? defaultChipForPlayer(sport, playerType),
   );
   const windows = useMemo(() => windowOptionsFor(sport), [sport]);
-  const [gameWindow, setGameWindow] = useState<GameWindow>(10);
+  const [gameWindow, setGameWindow] = useState<RangeChoice>(10);
   // The "at least" threshold. null = auto-default to the rounded median once data loads.
   const [line, setLine] = useState<number | null>(null);
   // At Least / Over / Under — the SAME control the Stats board has had since
@@ -165,9 +204,18 @@ export function PlayerStatsScreen() {
   // was showing, so the card cannot open on the complement of the row tapped.
   const [mode, setMode] = useState<HitMode>(requestedMode);
   const [modeOpen, setModeOpen] = useState(false);
+  // Defense-toughness filter (Matt, 2026-11-07). Until the reader taps a
+  // chip, the page follows the next opponent's tier (openingDefenseFilter);
+  // after a tap it keeps theirs.
+  const [defensePicked, setDefensePicked] = useState<DefenseFilter | null>(null);
 
   useEffect(() => {
-    navigation.setOptions({ title: playerName });
+    navigation.setOptions({
+      title: playerName,
+      // One line, narrower than the gap around the Back pill. The native
+      // stack centers this label, and it would otherwise draw across Back.
+      headerTitle: (props) => <PlayerStatsHeaderTitle {...props} />,
+    });
   }, [navigation, playerName]);
 
   // Sport/player changed (the screen is reused across pushes) — reset to that
@@ -175,14 +223,17 @@ export function PlayerStatsScreen() {
   useEffect(() => {
     setPicked(requested ?? defaultChipForPlayer(sport, playerType));
     setMode(requestedMode);
+    setDefensePicked(null);
     // The board's window when this screen offers that span (Stats L3 → L3
-    // here); else this screen's own default. 'Season' and H2H have no
-    // equivalent span here, so they fall back rather than guess one.
+    // here, H2H → H2H); else this screen's own default. 'Season' has no
+    // equivalent span here, so it falls back rather than guess one.
     const asked = route.params.gameWindow;
     setGameWindow(
-      asked != null && windows.some((w) => w.value === asked)
-        ? (asked as GameWindow)
-        : windows.some((w) => w.value === 10) ? 10 : windows[0]!.value,
+      asked === 'h2h'
+        ? 'h2h'
+        : asked != null && windows.some((w) => w.value === asked)
+          ? (asked as GameWindow)
+          : defaultPlayerWindow(windows),
     );
   }, [sport, playerType, playerId, windows, requested, requestedMode, route.params.gameWindow]);
 
@@ -226,6 +277,18 @@ export function PlayerStatsScreen() {
     if (picked && chips.some((c) => c.key === picked.key && c.group === picked.group)) return picked;
     return openingChip(chips, filled);
   }, [picked, chips, filled]);
+  // Minutes is context: no line, no Bet, no betslip. Avg MIN is the third
+  // figure on every other basketball stat, so the stepper takes its own row
+  // even at the default type size — three figures do not fit beside it.
+  const minutesContext = isMinutesContextStat(stat);
+  const showAvgMin = sportTracksMinutes(sport) && !minutesContext;
+  const measuredLayout = stepperRowLayout(fontScale);
+  const cardLayout: StepperRowLayout =
+    showAvgMin && measuredLayout === 'inline' ? 'stacked' : measuredLayout;
+  const [outlinedGameId, setOutlinedGameId] = useState<string | null>(null);
+  const onChartSelect = useCallback((game: ChartGame, _index: number, fromUser: boolean) => {
+    setOutlinedGameId(fromUser ? game.gameId ?? null : null);
+  }, []);
 
   // Charted off the rows already in hand, for the stat resolved above — never
   // a second fetch, so the numbers and the label they sit under always belong
@@ -272,13 +335,19 @@ export function PlayerStatsScreen() {
     selection,
   });
   // Has the reader stepped the line themselves? Until they do, the ruler
-  // follows the BOOK's posted line once it arrives — a hit rate at 5.5 when
-  // the book hangs 6.5 answers a question nobody is being asked.
+  // follows the MODEL'S PICK line when one exists, else the BOOK's posted
+  // line, else the median — a hit rate at 5.5 when the book hangs 6.5
+  // answers a question nobody is being asked.
   const [lineTouched, setLineTouched] = useState(false);
   // The line was handed over by the Stats board rather than stepped here —
   // held like a touched line (the book's line does not replace it) but NAMED
   // for where it came from, not "your line" (UX review, 2026-09-25).
   const [lineFromBoard, setLineFromBoard] = useState(false);
+  // Pick Detail hands the pick's line the same way, with the pick's RAW
+  // scored line beside it: the caption names the pick, side and all, the way
+  // the organic snap does ("pick Under 10.5"), never "board line" when no
+  // board was on screen and never the threshold's inverse (7+ is not 6.5).
+  const pickScoredLine = route.params.pickScoredLine ?? null;
 
   // ── The betslip leg ────────────────────────────────────────────────────────
   // The Stats board's line pills open the sportsbook (Matt, 2026-09-04), so
@@ -286,7 +355,7 @@ export function PlayerStatsScreen() {
   // not the chart's threshold: a parlay leg is a bet of record (§1c), and the
   // pick states its own line, so the card can never offer a bet at a number
   // nobody priced. No edge, no EV — the Stats surface stays out of the models.
-  const { data: todayPicks } = useTodayPicks();
+  const { data: todayPicks, loading: picksLoading, refresh: refreshPicks } = useTodayPicks();
   const slip = useParlaySlip();
   //
   // GATED ON THE LINE THE CHART IS SHOWING. The card sits directly under a
@@ -298,22 +367,33 @@ export function PlayerStatsScreen() {
   // This screen's stepper is an "N+" threshold; the market line is the
   // half-point below it, which is how lineFor() converts on the Stats board.
   //
-  // OVER ONLY. A prop model's pick is an over at its scored line; offering it
-  // under an "Under 1.5" card would hand someone the opposite of the bet they
-  // are reading. The card's own bet bar covers the under — the model does not.
+  // THE PICK'S OWN SIDE. Prop models write Overs AND Unders (since 2026-08-01
+  // the split is roughly even), so the card shows the pick only when the bet
+  // under the ruler — line and side — is the bet the model wrote. Offering an
+  // Under pick beneath an "Over 1.5" headline, or hiding every Under pick
+  // because the mode is Under, each hands the reader the wrong bet (UX
+  // review, 2026-10-21: the Under bail emptied the card for every Under pick
+  // opened from Pick Detail once that screen seeded the side).
   const slipPick = useMemo(() => {
-    if (line == null || mode === 'under') return null;
+    if (line == null) return null;
     const idx = buildPickIndex(todayPicks, propModelForStat(stat));
     const found = slipPickFor({ player_id: pageId }, idx, line - 0.5);
-    return found && found.pick.result == null ? found : null;
+    if (!found || found.pick.result != null) return null;
+    return selectionFor(line, mode).side === found.pick.pick_side ? found : null;
   }, [todayPicks, stat, pageId, line, mode]);
   const slipKey = slipPick ? slipKeyForPick(slipPick.pick) : null;
   const inSlip = slipKey != null && slip.has(slipKey);
   const toggleSlip = () => {
     if (slipKey == null) return;
     const adding = !inSlip;
-    slip.toggle(slipKey);
-    if (adding && fromParlay) navigation.navigate('Betslip');
+    void (async () => {
+      const ok = await slip.toggle(slipKey, {
+        sport,
+        name: playerName,
+        team: games[0]?.team ?? null,
+      });
+      if (adding && ok && fromParlay) navigation.navigate('Betslip');
+    })();
   };
 
   const step = useMemo(() => lineStepFor(stat), [stat]);
@@ -352,13 +432,147 @@ export function PlayerStatsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stat?.key, sport, playerId]);
 
-  // Values come most-recent-first. Window slices the most recent N.
-  const windowed = useMemo(
-    () => (gameWindow === 'all' ? values : values.slice(0, gameWindow)),
-    [values, gameWindow],
-  );
+  // NCAAF school → short code, so "Michigan State" is not cut to MICH.
+  const ncaafAbbrevs = useNcaafAbbrevs(sport === 'NCAAF');
 
-  const { avg, median } = useMemo(() => computeAvgMedian(windowed), [windowed]);
+  // H2H is offered only where there is an opponent to read against and the
+  // server holds the stat (detail.h2hOpponent), and only while there is a
+  // meeting to chart (or the read is still out, or failed and can be retried):
+  // a chip with nothing behind it would swap the hit card, stepper and
+  // tonight's price for an empty card. The board's H2H list likewise only
+  // holds players who have met the opponent (UX review, 2026-10-29). Asked for
+  // from the board where it is not available, the range falls back to the
+  // default span once the reads have answered, rather than charting nothing.
+  //
+  // `loaded` flips in an effect, so the frame a new player arrives still holds
+  // the previous player's rows. Remember who that settled log belongs to and
+  // do not treat H2H as answered until it is this player's — otherwise the
+  // fallback below would commit against the previous player and a row opened
+  // from the board's H2H window would land on L10.
+  const logOwner = useRef<string | null>(null);
+  if (!loaded) {
+    logOwner.current = null;
+  } else if (playerId !== '' && games.length > 0 && games[0]!.player_id !== playerId) {
+    logOwner.current = null;
+  } else if (logOwner.current == null) {
+    logOwner.current = playerId;
+  }
+  const logSettled = loaded && logOwner.current === playerId;
+  const h2hOpponent = detail.h2hOpponent;
+  const h2hOffered =
+    h2hOpponent != null
+    && (detail.h2hLoading || detail.h2hError != null || (detail.h2hMeetings?.length ?? 0) > 0);
+  const rangeOptions = useMemo(
+    () => (h2hOffered ? [...windows, { value: 'h2h' as const, label: 'H2H' }] : windows),
+    [windows, h2hOffered],
+  );
+  const h2hPending =
+    !logSettled
+    || detail.h2hLoading
+    || (detail.slateLoading && h2hOpponent == null);
+  const range: RangeChoice = rangeToRemember(gameWindow, h2hOffered, h2hPending, windows);
+  // Remember the fallback. Charting the default span while `gameWindow` stays
+  // `'h2h'` makes the next server-held stat that has meetings jump back to
+  // H2H, even though the chip last shown selected was the default span.
+  useEffect(() => {
+    if (range !== gameWindow) setGameWindow(range);
+  }, [range, gameWindow]);
+  const isH2H = range === 'h2h';
+
+  // The toughness filter applies to the L5 / L10 / L20 / All spans, never to
+  // H2H (one opponent is one tier). Offered once the read has tiered games.
+  const defenseGames = detail.defenseGames;
+  const defenseCounts = useMemo(
+    () => (defenseGames ? tierCounts(defenseGames.games) : null),
+    [defenseGames],
+  );
+  const defenseOffered =
+    !isH2H && defenseCounts != null && defenseCounts.tough + defenseCounts.avg + defenseCounts.soft > 0;
+  const defenseFilter: DefenseFilter = !defenseOffered
+    ? 'all'
+    : defensePicked ?? openingDefenseFilter(defenseGames);
+  const defenseNoun = detail.defenseGroup ? groupNoun(detail.defenseGroup) : '';
+
+  // The windowed games, most recent first, each with its date and opponent so
+  // every bar on the chart says which game it is (Matt, 2026-10-28). A number
+  // or All slices the log. H2H charts the meetings, newest first — the same
+  // rows the head-to-head card lists. That row has a date and a value and no
+  // venue, so the label is the bare opponent name: opponentLabel will not
+  // print "vs" without a home game it can vouch for.
+  const baseGames = useMemo(() => {
+    // A toughness tier charts the player's games against that tier over his
+    // last three seasons played, newest first, cut to the same span chips.
+    // Those rows carry no minutes; the loaded log fills them when it has the day.
+    if (range !== 'h2h' && defenseFilter !== 'all' && defenseGames) {
+      return lookupLogMinutes(tierChartGames(defenseGames.games, defenseFilter, range), games, sport);
+    }
+    if (range === 'h2h') {
+      const row = { opponent: h2hOpponent, venue: null };
+      const meetings = (detail.h2hMeetings ?? []).map((m) => ({
+        value: m.value,
+        date: shortGameDate(m.date),
+        iso: m.date,
+        opp: opponentLabel(row, true, ncaafAbbrevs, sport === 'NCAABW' || sport === 'NCAAB'),
+        oppFull: opponentLabel(row, false),
+      }));
+      return lookupLogMinutes(meetings, games, sport);
+    }
+    const all = chartGames(
+      games,
+      (r) => logStatValue(r, stat),
+      ncaafAbbrevs,
+      sport === 'NCAABW' || sport === 'NCAAB',
+      sport,
+    );
+    return range === 'all' ? all : all.slice(0, range);
+  }, [range, detail.h2hMeetings, h2hOpponent, games, stat, ncaafAbbrevs, defenseFilter, defenseGames, sport]);
+  // H2H and defense-tier games older than the loaded log. Asked by game_id
+  // when the row has one, otherwise by date. Not a wider "last N".
+  const missingMinutes = useMemo(
+    () => (showAvgMin ? minutesStillNeeded(baseGames) : { gameIds: [] as string[], dates: [] as string[] }),
+    [showAvgMin, baseGames],
+  );
+  const [fetchedMinutes, setFetchedMinutes] = useState<Awaited<ReturnType<typeof fetchPlayerMinutes>>>([]);
+  const minuteIdKey = missingMinutes.gameIds.join('|');
+  const minuteDateKey = missingMinutes.dates.join('|');
+  useEffect(() => {
+    setFetchedMinutes([]);
+  }, [sport, pageId]);
+  useEffect(() => {
+    if (!pageId || (missingMinutes.gameIds.length === 0 && missingMinutes.dates.length === 0)) return;
+    let cancelled = false;
+    fetchPlayerMinutes(sport, pageId, missingMinutes)
+      .then((rows) => {
+        if (!cancelled) setFetchedMinutes(rows);
+      })
+      .catch((err) => {
+        console.warn('[playerLog] minutes lookup failed', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sport, pageId, minuteIdKey, minuteDateKey, missingMinutes]);
+  const builtGames = useMemo(
+    () => attachMinuteRows(baseGames, fetchedMinutes),
+    [baseGames, fetchedMinutes],
+  );
+  const scored = useMemo(() => scoredChartValues(builtGames), [builtGames]);
+  const { avg, median } = useMemo(() => averageAndMedian(scored), [scored]);
+  // Avg MIN only when every played game in the window has minutes. Games
+  // outside the loaded log are filled by fetchPlayerMinutes; a game that
+  // read does not return stays blank.
+  const avgMin = useMemo(
+    () => (showAvgMin ? windowAverageMinutes(builtGames) : null),
+    [showAvgMin, builtGames],
+  );
+  const windowedGames = useMemo(
+    () => withLowMinutes(builtGames, minutesContext, minutesContext ? avg : avgMin),
+    [builtGames, minutesContext, avg, avgMin],
+  );
+  // The values ARE the labelled games' values, so the chart's bars and labels
+  // cannot fall out of step (review, 2026-10-28). DNP slots stay in this list
+  // so the bar and the "DNP" label share an index; averages use `scored`.
+  const windowed = useMemo(() => windowedGames.map((g) => g.value), [windowedGames]);
   const maxValue = useMemo(() => (values.length ? Math.max(...values) : 0), [values]);
 
   // Auto-pick a sensible starting line (the median, snapped onto the stepper's
@@ -376,12 +590,28 @@ export function PlayerStatsScreen() {
   // because a Rush Yards book line of 62.5 rounded to a 65+ ruler while the
   // card beneath said 62.5 (UX review, 2026-09-20). The ± stepper still moves
   // in `step` increments from wherever the ruler sits.
-  const pickThreshold = useMemo(() => {
+  // The pick's own scored_line, kept raw: thresholdFromBookLine is for
+  // snapping the ruler, not for the label. bookLineFromThreshold(7) is 6.5,
+  // which mislabels an integer pick line as a half-point (Reviewer Medium
+  // on #781). The book label already prints tonight.line for the same reason.
+  // The SIDE rides with it: prop models write Unders as well as Overs, and
+  // "pick line 10.5" under an "11+ Reb" headline read an Under pick as an
+  // Over (UX review, 2026-10-21). The label says which, the way pick_label
+  // does (§00: quote a pick from its label).
+  const openPick = useMemo(() => {
     if (!pageId) return null;
     const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(pageId);
-    const sl = ep && ep.pick.result == null ? Number(ep.pick.scored_line) : NaN;
-    return Number.isFinite(sl) ? thresholdFromBookLine(sl) : null;
+    if (!ep || ep.pick.result != null) return null;
+    // Number(null) is 0, and 0 is finite. A pick with no scored_line is not
+    // "pick line 0".
+    const raw = ep.pick.scored_line;
+    if (raw == null) return null;
+    const sl = Number(raw);
+    return Number.isFinite(sl) ? { line: sl, side: ep.pick.pick_side } : null;
   }, [todayPicks, stat, pageId]);
+  const pickLine = openPick?.line ?? null;
+  const pickSideWord = openPick?.side === 'under' ? 'Under' : 'Over';
+  const pickThreshold = pickLine != null ? thresholdFromBookLine(pickLine) : null;
   const postedThreshold = detail.tonight ? thresholdFromBookLine(detail.tonight.line) : null;
   const snapThreshold = pickThreshold ?? postedThreshold;
   useEffect(() => {
@@ -389,11 +619,20 @@ export function PlayerStatsScreen() {
     setLine((prev) => (prev === snapThreshold ? prev : snapThreshold));
   }, [snapThreshold, lineTouched]);
   // Named on the hit card, so nobody reads a 7+ hit rate without knowing the
-  // 7 came from a 6.5 posted line (UX review).
+  // 7 came from a 6.5 posted line (UX review). The number is the SOURCE
+  // line — scored_line or tonight.line — never the threshold inverse.
   const lineProvenance = lineTouched
-    ? lineFromBoard ? 'board line' : 'your line'
-    : pickThreshold != null && line === pickThreshold
-      ? `pick line ${bookLineFromThreshold(pickThreshold)}`
+    ? lineFromBoard
+      ? pickScoredLine != null
+        // The SIDE is the pick's, not the ruler's: the seeded mode is the
+        // pick's side on arrival, and it stays the caption's source after
+        // the reader toggles At Least / Over / Under, or an Over pick would
+        // read "pick Under" (§00: quote a pick from its label).
+        ? `pick ${requestedMode === 'under' ? 'Under' : 'Over'} ${pickScoredLine}`
+        : 'board line'
+      : 'your line'
+    : pickThreshold != null && line === pickThreshold && pickLine != null
+      ? `pick ${pickSideWord} ${pickLine}`
       : postedThreshold != null && line === postedThreshold && detail.tonight
         ? `book line ${detail.tonight.line}`
         : null;
@@ -407,7 +646,7 @@ export function PlayerStatsScreen() {
     sport,
     team: games[0]?.team ?? null,
     playerName,
-    market: line == null ? null : market,
+    market: minutesContext || line == null ? null : market,
     line: selection.line,
     side: selection.side,
     books,
@@ -439,8 +678,8 @@ export function PlayerStatsScreen() {
   // card's side — so an under card counts unders instead of silently counting
   // overs, and the count agrees with the chart bar for bar.
   const { hits, total: hitTotal, pct: hitPct } = useMemo(
-    () => (line == null ? { hits: 0, total: 0, pct: 0 } : computeHitRate(windowed, selection.line, selection.side)),
-    [windowed, line, selection],
+    () => (line == null || minutesContext ? { hits: 0, total: 0, pct: 0 } : computeHitRate(scored, selection.line, selection.side)),
+    [scored, line, selection, minutesContext],
   );
   // This player has no number at all for the charted stat in the loaded
   // window — a never-filled chip inside a surviving tab, or the position
@@ -450,11 +689,18 @@ export function PlayerStatsScreen() {
   // same stat is untouched: 25 of 25 is a real answer to a real question.
   const noEvidence =
     stat != null && (filled.get(chipKey(stat)) ?? 0) === 0 && hitTotal > 0 && hits === 0;
+  // A window of did-not-play rows has nothing to hit. A red 0% would read as
+  // a cold streak. Real logs omit these rows; the chart still has to say so.
+  const nonePlayed = !minutesContext && hitTotal === 0 && windowedGames.some((g) => g.dnp);
   // The stat keeps its own capitalisation: lower-casing a label that is half
   // acronym renders "No rush+rec tds in 10 games", which reads as a typo on
   // the one sentence a reader who tapped that stat came for (UX review).
-  const noEvidenceText = `No ${statLabel} in the last ${hitTotal} games`;
-  const hitColor = noEvidence
+  const noEvidenceText = isH2H
+    ? `No ${statLabel} in ${hitTotal} games vs ${h2hOpponent}`
+    : defenseFilter !== 'all'
+      ? `No ${statLabel} in ${hitTotal} games vs ${tierLabel(defenseFilter).toLowerCase()} defenses`
+      : `No ${statLabel} in the last ${hitTotal} games`;
+  const hitColor = noEvidence || nonePlayed
     ? colors.none
     : hitPct >= HIT_RATE_GOOD
       ? colors.bet
@@ -488,7 +734,27 @@ export function PlayerStatsScreen() {
     setLine(result.line);
   };
 
-  const windowLabel = gameWindow === 'all' ? `${windowed.length} games` : `last ${gameWindow}`;
+  const windowLabel = isH2H
+    ? `vs ${h2hOpponent} · last 2 seasons`
+    : defenseFilter !== 'all'
+      ? `vs ${tierLabel(defenseFilter).toLowerCase()} defenses · ${
+        range === 'all' ? `${windowed.length} games` : `last ${windowed.length}`
+      }`
+      : range === 'all' ? `${windowed.length} games` : `last ${range}`;
+  const playingTitle = isH2H
+    ? `Playing time vs ${h2hOpponent}`
+    : defenseFilter !== 'all'
+      ? `Playing time vs ${tierLabel(defenseFilter).toLowerCase()} defenses`
+      : range === 'all'
+        ? `Playing time, ${scored.length} games`
+        : `Playing time, last ${range} games`;
+  const avgMinWindow = isH2H
+    ? `head to head with ${h2hOpponent}`
+    : defenseFilter !== 'all'
+      ? `games vs ${tierLabel(defenseFilter).toLowerCase()} defenses`
+      : range === 'all'
+        ? 'all games'
+        : `last ${range} games`;
   const activeGroup = stat?.group ?? groups[0];
   const groupChips = groups.length > 1 ? chips.filter((c) => c.group === activeGroup) : chips;
 
@@ -506,10 +772,14 @@ export function PlayerStatsScreen() {
   }, [activeChipKey]);
 
   // The pull spinner shows for a PULL only; each section has its own.
+  // Busy is every hook the pull reloads — detail alone left the chart,
+  // news and quote stale (Reviewer Medium on #781).
   const [pulled, setPulled] = useState(false);
+  const refreshBusy =
+    detail.loading || loading || news.loading || propQuote.loading || picksLoading;
   useEffect(() => {
-    if (!detail.loading) setPulled(false);
-  }, [detail.loading]);
+    if (!refreshBusy) setPulled(false);
+  }, [refreshBusy]);
 
   // H9 (lib/a11y reachFrame). The stat chips sit flush under the group tabs
   // and share an 8pt gap with the range chips (4 each), so under the tabs they
@@ -518,11 +788,13 @@ export function PlayerStatsScreen() {
   const statReachAbove = groups.length === 1 && groupsOfChips(allChips).length > 1 ? 6 : 0;
   const statReach = reachFrame(statReachAbove);
   // The range chips reach 6pt down over the next sibling, raised so it is
-  // hit-tested first: the hit card's 8pt top margin, the empty card's 16pt
-  // padding or the spinner's margin — never the ErrorBanner, whose Retry
-  // starts at its top edge.
+  // hit-tested first: the defense row's label when that row is drawn, else
+  // the hit card's 8pt top margin, the empty card's 16pt padding or the
+  // spinner's margin — never the ErrorBanner, whose Retry starts at its top
+  // edge. The defense chips reach the same 6pt over what follows them.
   const rangeReachBelow = error ? 0 : 6;
   const rangeReach = reachFrame(0, rangeReachBelow, { raise: rangeReachBelow > 0 });
+  const defenseReach = reachFrame(0, rangeReachBelow, { raise: rangeReachBelow > 0 });
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
@@ -530,10 +802,14 @@ export function PlayerStatsScreen() {
         keyboardDismissMode="on-drag"
         refreshControl={
           <RefreshControl
-            refreshing={pulled && detail.loading}
+            refreshing={pulled && refreshBusy}
             onRefresh={() => {
               setPulled(true);
+              reloadTrends();
+              news.reload();
+              propQuote.reload();
               detail.reload();
+              void refreshPicks();
             }}
           />
         }
@@ -543,29 +819,23 @@ export function PlayerStatsScreen() {
             <Text style={styles.playerName}>{playerName}</Text>
             <Text style={styles.meta}>{playerSubtitle(sport, games[0]?.team ?? null, games[0], playerType)}</Text>
             {/* Tonight's matchup, in full. The Stats board's MATCHUP column is
-                a bare grade as of 2026-09-05, so this is where the FACT behind
-                it lives for a sighted user — Matt's own alternative home for it
-                ("have it be in the player data when you click on a record",
-                2026-09-04). Only present when the board handed it over, so a
-                player opened from anywhere else shows nothing here rather than
-                an empty row. */}
+                the bar, so this is where the FACT behind it lives for a sighted
+                user — Matt's own alternative home for it ("have it be in the
+                player data when you click on a record", 2026-09-04). Only
+                present when the board handed it over, so a player opened from
+                anywhere else shows nothing here rather than an empty row. */}
             {matchupText ? (
-              // Labelled, because VoiceOver drops a bare "+" and would
-              // announce a B+ as a B — gradeSpoken exists for exactly this and
-              // the screen that now OWNS this fact was the one mis-speaking it
-              // (UX review, 2026-09-05).
+              // The letter is gone (Matt, 2026-10-28). The bar is the strength
+              // and this line is the fact behind it. VoiceOver says the count,
+              // then the fact — a bare "+" used to be dropped (UX review, 2026-09-05).
               <View
                 style={styles.matchupRow}
                 accessible
                 accessibilityLabel={`Tonight's matchup, ${
-                  matchupGrade ? `${gradeSpoken(matchupGrade)}, ` : ''
+                  matchupStrength ? `${matchupStrengthPhrase(matchupStrength)}, ` : ''
                 }${matchupText.replace(/ · /g, ', ')}`}
               >
-                {matchupGrade ? (
-                  <Text style={[styles.matchupGrade, { color: gradeColor(matchupGrade) }]}>
-                    {matchupGrade}
-                  </Text>
-                ) : null}
+                {matchupStrength ? <MatchupStrengthBar filled={matchupStrength} grow /> : null}
                 <Text style={styles.matchupLine} numberOfLines={2}>
                   {matchupText}
                 </Text>
@@ -643,7 +913,7 @@ export function PlayerStatsScreen() {
                     // was paid.
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
-                    accessibilityLabel={`${c.label} bets`}
+                    accessibilityLabel={isMinutesContextStat(c) ? c.label : `${c.label} bets`}
                     style={[styles.windowChip, active && styles.windowChipActive]}
                   >
                     <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
@@ -665,8 +935,8 @@ export function PlayerStatsScreen() {
           style={rangeReach.frame}
           contentContainerStyle={[styles.windowRow, rangeReach.content]}
         >
-          {windows.map((w) => {
-            const active = w.value === gameWindow;
+          {rangeOptions.map((w) => {
+            const active = w.value === range;
             return (
               <Pressable
                 // In-bounds only: the row's 4pt padding (4 above is its half of
@@ -677,7 +947,9 @@ export function PlayerStatsScreen() {
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
                 accessibilityLabel={
-                  w.value === 'all' ? 'All games' : `Last ${w.value} games`
+                  w.value === 'h2h'
+                    ? `Head to head with ${h2hOpponent}, last 2 seasons`
+                    : w.value === 'all' ? 'All games' : `Last ${w.value} games`
                 }
                 style={[styles.windowChip, active && styles.windowChipActive]}
               >
@@ -689,6 +961,76 @@ export function PlayerStatsScreen() {
           })}
         </ScrollView>
 
+        {/* Defense-toughness filter (Matt, 2026-11-07): how this player does
+            against defenses like the next one. The next opponent's tier is
+            tagged NEXT and is where the page opens. */}
+        {defenseOffered && defenseCounts ? (
+          <View style={styles.defenseBlock}>
+            <Text style={styles.defenseLabel} accessibilityRole="header">
+              Vs defenses that are
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={defenseReach.frame}
+              contentContainerStyle={[styles.defenseRow, defenseReach.content]}
+            >
+              {(['all', ...DEFENSE_TIERS] as DefenseFilter[]).map((f) => {
+                const active = f === defenseFilter;
+                const isNext = f !== 'all' && defenseGames?.next?.tier === f;
+                const count = f === 'all' ? null : defenseCounts[f];
+                const name = f === 'all' ? 'All' : tierLabel(f);
+                return (
+                  <Pressable
+                    key={f}
+                    onPress={() => setDefensePicked(f)}
+                    hitSlop={{ top: 4, bottom: 4 + rangeReachBelow, left: 2, right: 2 }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={
+                      f === 'all'
+                        ? 'All defenses'
+                        : `${name} defenses, ${count} game${count === 1 ? '' : 's'}${
+                          isNext ? `, next opponent ${defenseGames?.next?.opponent} is in this tier` : ''
+                        }`
+                    }
+                    style={[styles.windowChip, styles.defenseChip, active && styles.windowChipActive]}
+                  >
+                    {f !== 'all' ? (
+                      <View style={styles.pips} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                        {[0, 1, 2].map((i) => (
+                          <View
+                            key={i}
+                            style={[
+                              styles.pip,
+                              { backgroundColor: active ? colors.textInverse : colors.textSecondary },
+                              i >= tierPips(f) && styles.pipOff,
+                            ]}
+                          />
+                        ))}
+                      </View>
+                    ) : null}
+                    <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
+                      {count != null ? `${name} ${count}` : name}
+                    </Text>
+                    {isNext ? (
+                      <View style={styles.nextTag}>
+                        <Text style={styles.nextTagText}>NEXT</Text>
+                      </View>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Text style={styles.defenseNote}>
+              {defenseGames?.next
+                ? `${nextDefenseLine(defenseGames.next, defenseNoun)}. `
+                : ''}
+              Last {DEFENSE_SEASONS_PLAYED} seasons played.{defenseFilter !== 'all' ? ' #1 = toughest.' : ''}
+            </Text>
+          </View>
+        ) : null}
+
         {error ? (
           <ErrorBanner
             what="recent games"
@@ -699,8 +1041,27 @@ export function PlayerStatsScreen() {
           />
         ) : null}
 
-        {loading && games.length === 0 ? (
-          <ActivityIndicator style={styles.loading} accessibilityLabel="Loading recent games" />
+        {(loading && games.length === 0)
+          || (!isH2H && defensePicked == null && detail.defensePending)
+          || (isH2H && windowed.length === 0 && (detail.h2hLoading || h2hOpponent == null || !logSettled)) ? (
+          <ActivityIndicator
+            style={styles.loading}
+            accessibilityLabel={
+              isH2H
+                ? h2hOpponent
+                  ? `Loading games against ${h2hOpponent}`
+                  : 'Loading head to head'
+                : 'Loading recent games'
+            }
+          />
+        ) : isH2H && windowed.length === 0 && detail.h2hError ? (
+          <ErrorBanner
+            what={`games against ${h2hOpponent}`}
+            error={detail.h2hError}
+            onRetry={detail.reloadH2h}
+            retrying={detail.h2hLoading}
+            style={styles.errorBannerInset}
+          />
         ) : windowed.length === 0 ? (
           <View style={styles.emptyCard}>
             {/* Two different nothings: no games at all, or games with no value
@@ -709,7 +1070,11 @@ export function PlayerStatsScreen() {
                 a populated Recent games list made the screen contradict
                 itself (UX review, 2026-09-20). */}
             <Text style={styles.emptyText}>
-              {games.length === 0
+              {isH2H
+                ? `No meetings with ${h2hOpponent} in the last 2 seasons.`
+                : defenseFilter !== 'all'
+                ? `No games vs ${tierLabel(defenseFilter).toLowerCase()} defenses in the last ${DEFENSE_SEASONS_PLAYED} seasons played.`
+                : games.length === 0
                 ? 'No recent games on file.'
                 : `No ${statLabel.toLowerCase()} in the last ${games.length} games.`}
             </Text>
@@ -721,27 +1086,40 @@ export function PlayerStatsScreen() {
               <View style={styles.hitTop}>
                 <View>
                   <Text style={styles.hitLabel}>
-                    {headline} · {windowLabel}
-                    {lineProvenance ? ` · ${lineProvenance}` : ''}
+                    {minutesContext
+                      ? `Minutes · ${windowLabel}`
+                      : `${headline} · ${windowLabel}${lineProvenance ? ` · ${lineProvenance}` : ''}`}
                   </Text>
                   <Text style={styles.hitCount}>
-                    {noEvidence ? noEvidenceText : `Hit ${hits} of ${hitTotal} games`}
+                    {minutesContext
+                      ? playingTitle
+                      : nonePlayed
+                        ? 'No played games in this window'
+                        : noEvidence
+                          ? noEvidenceText
+                          : `Hit ${hits} of ${hitTotal} games`}
                   </Text>
                 </View>
-                <View
-                  style={[styles.hitBadge, { backgroundColor: hitColor }]}
-                  accessible
-                  accessibilityLabel={
-                    noEvidence ? noEvidenceText : `Hit rate ${Math.round(hitPct * 100)} percent`
-                  }
-                >
-                  <Text style={styles.hitBadgeText}>
-                    {noEvidence ? '—' : `${Math.round(hitPct * 100)}%`}
-                  </Text>
-                </View>
+                {minutesContext ? null : (
+                  <View
+                    style={[styles.hitBadge, { backgroundColor: hitColor }]}
+                    accessible
+                    accessibilityLabel={
+                      nonePlayed
+                        ? 'No played games in this window'
+                        : noEvidence
+                          ? noEvidenceText
+                          : `Hit rate ${Math.round(hitPct * 100)} percent`
+                    }
+                  >
+                    <Text style={styles.hitBadgeText}>
+                      {noEvidence || nonePlayed ? '—' : `${Math.round(hitPct * 100)}%`}
+                    </Text>
+                  </View>
+                )}
               </View>
 
-              <View style={[styles.statsRow, stepperLayout !== 'inline' && styles.statsRowStacked]}>
+              <View style={[styles.statsRow, cardLayout !== 'inline' && styles.statsRowStacked]}>
                 <View style={styles.statCell}>
                   <Text style={styles.statCellValue}>{avg != null ? avg.toFixed(1) : '—'}</Text>
                   <Text style={styles.statCellLabel}>Avg</Text>
@@ -750,10 +1128,25 @@ export function PlayerStatsScreen() {
                   <Text style={styles.statCellValue}>{median != null ? median.toFixed(1) : '—'}</Text>
                   <Text style={styles.statCellLabel}>Median</Text>
                 </View>
+                {showAvgMin ? (
+                  <View
+                    style={styles.statCell}
+                    accessible
+                    accessibilityLabel={
+                      avgMin == null
+                        ? `Average minutes unavailable for ${avgMinWindow}`
+                        : `Average minutes ${avgMin.toFixed(1)} for ${avgMinWindow}`
+                    }
+                  >
+                    <Text style={styles.statCellValue}>{avgMin != null ? avgMin.toFixed(1) : '—'}</Text>
+                    <Text style={styles.statCellLabel}>Avg MIN</Text>
+                  </View>
+                ) : null}
+                {minutesContext ? null : (
                 <View
                   style={[
-                    stepperLayout === 'inline' ? styles.stepper : styles.stepperStacked,
-                    stepperLayout === 'split' && styles.stepperSplit,
+                    cardLayout === 'inline' ? styles.stepper : styles.stepperStacked,
+                    cardLayout === 'split' && styles.stepperSplit,
                   ]}
                 >
                   {/* The board's own mode control, not a second one. It opens
@@ -768,7 +1161,7 @@ export function PlayerStatsScreen() {
                     accessibilityLabel={`Direction: ${hitModeLabel(mode)}. Change`}
                     style={({ pressed }) => [
                       styles.modeBtn,
-                      stepperLayout === 'split' && styles.modeBtnSplit,
+                      cardLayout === 'split' && styles.modeBtnSplit,
                       pressed && { opacity: 0.7 },
                     ]}
                   >
@@ -778,7 +1171,7 @@ export function PlayerStatsScreen() {
                   {/* The three stay one group so a wrap can move them together
                       without a second copy of the field. At the default size
                       the group is only as wide as its contents. */}
-                  <View style={[styles.stepperControls, stepperLayout === 'split' && styles.stepperControlsSplit]}>
+                  <View style={[styles.stepperControls, cardLayout === 'split' && styles.stepperControlsSplit]}>
                     {/* Icon-only, so the label is the only thing VoiceOver has
                         — an unlabelled glyph button is announced as "button" and
                         nothing else. Pre-existing; cleared here because this
@@ -823,43 +1216,55 @@ export function PlayerStatsScreen() {
                     </Pressable>
                   </View>
                 </View>
+                )}
               </View>
 
-              {/* The bet, between the control that sets it and the evidence
-                  for it. Above the chart because the stepper directly above
-                  changes which bet this is and the price is that change's
-                  result — and because below a 200pt chart it fell entirely
-                  under the fold on a 4.7" phone, which is a poor home for the
-                  one thing this screen gained (UX review). NOT pinned:
-                  BetslipBar is mounted at the app root and owns the bottom of
-                  this screen the moment the slip has a leg. */}
-              <PlayerBetBar
-                quote={propQuote.quote}
-                game={propQuote.game}
-                headline={headline}
-                mode={mode}
-                side={selection.side}
-                books={books}
-                statLabel={statLabel}
-                marketPriced={market != null}
-                hasGame={propQuote.hasGame}
-                sidePosted={propQuote.sidePosted}
-                loading={propQuote.loading}
-                error={propQuote.error}
-                onRetry={propQuote.reload}
-                onCompare={openCompare}
-              />
+              {minutesContext ? (
+                <Text style={styles.minutesNote}>
+                  Not a bet market — playing time for the selected window.
+                </Text>
+              ) : (
+                /* The bet, between the control that sets it and the evidence
+                   for it. Above the chart because the stepper directly above
+                   changes which bet this is and the price is that change's
+                   result — and because below a 200pt chart it fell entirely
+                   under the fold on a 4.7" phone, which is a poor home for the
+                   one thing this screen gained (UX review). NOT pinned:
+                   BetslipBar is mounted at the app root and owns the bottom of
+                   this screen the moment the slip has a leg. */
+                <PlayerBetBar
+                  quote={propQuote.quote}
+                  game={propQuote.game}
+                  headline={headline}
+                  mode={mode}
+                  side={selection.side}
+                  books={books}
+                  statLabel={statLabel}
+                  marketPriced={market != null}
+                  hasGame={propQuote.hasGame}
+                  sidePosted={propQuote.sidePosted}
+                  loading={propQuote.loading}
+                  error={propQuote.error}
+                  onRetry={propQuote.reload}
+                  onCompare={openCompare}
+                />
+              )}
 
               <HitRateChart
                 values={windowed}
-                line={selection.line}
+                games={windowedGames}
+                unit={statLabel}
+                line={minutesContext ? 0 : selection.line}
                 side={selection.side}
                 lineLabel={modeLineLabel(selection.line, selection.side, mode, true)}
                 avg={avg}
                 median={median}
+                showMinuteLabels={showAvgMin}
+                minutesMode={minutesContext}
+                onSelect={onChartSelect}
               />
 
-              <View style={styles.legendRow}>
+              {minutesContext ? null : <View style={styles.legendRow}>
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: colors.bet }]} />
                   {/* Both halves named in the ACTIVE idiom. "Hit (2+)" beside
@@ -874,7 +1279,7 @@ export function PlayerStatsScreen() {
                   <View style={[styles.legendDot, { backgroundColor: colors.avoid }]} />
                   <Text style={styles.legendText}>Miss</Text>
                 </View>
-              </View>
+              </View>}
             </View>
 
 
@@ -882,7 +1287,7 @@ export function PlayerStatsScreen() {
                 sportsbook now, so this is the one place a leg joins OUR slip —
                 and only where the model actually made a pick, because a leg is
                 a bet of record and carries its own line. */}
-            {slipPick ? (
+            {minutesContext || !slipPick ? null : (
               <View style={styles.slipCard}>
                 <View style={styles.slipBody}>
                   <Text style={styles.slipLabel} numberOfLines={2}>
@@ -916,9 +1321,11 @@ export function PlayerStatsScreen() {
                   </Text>
                 </Pressable>
               </View>
-            ) : null}
+            )}
 
-            {/* ── Tonight's line for this stat, and what the market says about it ── */}
+            {/* ── Tonight's line for this stat, and what the market says about it.
+                   Minutes is not a market, so none of the bet cards follow it. ── */}
+            {minutesContext ? null : <>
             <TonightLineCard
               statLabel={statLabel}
               nextGame={detail.nextGame}
@@ -951,6 +1358,8 @@ export function PlayerStatsScreen() {
                 betLabel={modeLineLabel(selection.line, selection.side, mode)}
                 selection={selection}
                 loading={detail.h2hLoading}
+                error={detail.h2hError}
+                onRetry={detail.reloadH2h}
               />
             ) : null}
 
@@ -994,6 +1403,7 @@ export function PlayerStatsScreen() {
                 </View>
               </>
             ) : null}
+            </>}
 
             {/* ── MLB context the prop models train on ─────────────────── */}
             {sport === 'MLB' && detail.savant ? (
@@ -1021,16 +1431,23 @@ export function PlayerStatsScreen() {
             />
 
             <Text style={styles.sectionHeader}>Recent games</Text>
-            {games.map((g) => (
-              <GameRow
-                key={g.game_id}
-                row={g}
-                sport={sport}
-                stat={stat}
-                line={selection.line}
-                side={selection.side}
-              />
-            ))}
+            {games.map((g) => {
+              const charted = windowedGames.find((c) => c.gameId === g.game_id);
+              return (
+                <GameRow
+                  key={g.game_id}
+                  row={g}
+                  sport={sport}
+                  stat={stat}
+                  line={selection.line}
+                  side={selection.side}
+                  currentTeam={games[0]?.team ?? null}
+                  minutesContext={minutesContext}
+                  lowMin={charted?.lowMin === true}
+                  outlined={outlinedGameId != null && g.game_id === outlinedGameId}
+                />
+              );
+            })}
           </>
         )}
         <BetslipBarSpacer />
@@ -1093,48 +1510,54 @@ export function PlayerStatsScreen() {
   );
 }
 
-function computeAvgMedian(values: number[]): { avg: number | null; median: number | null } {
-  if (values.length === 0) return { avg: null, median: null };
-  const avg = values.reduce((a, b) => a + b, 0) / values.length;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const median =
-    sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
-  return { avg, median };
-}
-
 function GameRow({
   row,
   sport,
   stat,
   line,
   side,
+  currentTeam,
+  lowMin,
+  outlined,
+  minutesContext,
 }: {
   row: PlayerLogEntry;
   sport: PlayerLogSport;
   stat: StatDef | null;
+  /** The newest game's team, which the header names: NCAAB prints a row's
+   *  own school only when it differs (gameContextLine). */
+  currentTeam?: string | null;
   /** The book's half-point line, so the dot, the chart and the count all
    *  compare the same number the same way. */
   line: number;
   side: HitDirection;
+  /** This row is in the chart window and under 70% of that window's average. */
+  lowMin?: boolean;
+  /** The bar the reader tapped. */
+  outlined?: boolean;
+  /** Minutes tab: the dot is navy, not a hit or a miss. */
+  minutesContext?: boolean;
 }) {
   const num = logStatValue(row, stat);
+  const didNotPlay = sportTracksMinutes(sport) && minutesPlayed(row) == null && num == null;
   // Yardage arrives as a NUMERIC string and can be fractional in nflverse — one
   // decimal at most, so a 78-yard game never renders as 78.0000001.
   const value = num == null ? '—' : String(Math.round(num * 10) / 10);
   const hit = isHit(num, line, side);
+  const dot = num == null ? null : minutesContext ? colors.tint : hit ? colors.bet : colors.avoid;
   return (
-    <View style={styles.gameRow}>
+    <View style={[styles.gameRow, outlined && styles.gameRowOutlined]}>
       <View style={styles.gameDot}>
-        {num != null ? (
-          <View
-            style={[styles.dot, { backgroundColor: hit ? colors.bet : colors.avoid }]}
-          />
-        ) : null}
+        {dot != null ? <View style={[styles.dot, { backgroundColor: dot }]} /> : null}
       </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.gameDate}>{row.game_date}</Text>
-        <Text style={styles.gameMeta}>{gameContextLine(sport, row)}</Text>
+      <View style={styles.gameBody}>
+        {/* The chart's own date idiom ("10/26"), so the bar and the row
+            name the game the same way. */}
+        <Text style={styles.gameDate}>{shortGameDate(row.game_date)}</Text>
+        <View style={styles.gameMetaRow}>
+          <Text style={styles.gameMeta} numberOfLines={1}>{gameContextLine(sport, row, currentTeam, didNotPlay)}</Text>
+          {lowMin ? <Text style={styles.lowMin}>Low MIN</Text> : null}
+        </View>
       </View>
       <View style={styles.gameStat}>
         <Text style={styles.gameStatValue}>{value}</Text>
@@ -1171,6 +1594,8 @@ function HeadToHeadCard({
   betLabel,
   selection,
   loading,
+  error,
+  onRetry,
 }: {
   h2h: PlayerHeadToHead;
   statLabel: string;
@@ -1180,6 +1605,9 @@ function HeadToHeadCard({
    *  so one meeting cannot be green in one list and red in the other. */
   selection: { line: number; side: HitDirection };
   loading: boolean;
+  /** A failed read is not "they have not met". Null when the read settled. */
+  error: string | null;
+  onRetry: () => void;
 }) {
   const b = h2h.bucket;
   const [showAll, setShowAll] = useState(false);
@@ -1205,6 +1633,14 @@ function HeadToHeadCard({
         <View style={styles.card}>
           <ActivityIndicator style={styles.loadingInline} />
         </View>
+      ) : error ? (
+        <ErrorBanner
+          what={`games against ${h2h.opponent}`}
+          error={error}
+          onRetry={onRetry}
+          retrying={loading}
+          style={styles.errorBannerInset}
+        />
       ) : b.games === 0 ? (
         <View style={styles.card}>
           <Text style={styles.muted}>No meetings with {h2h.opponent} in the last 2 seasons.</Text>
@@ -1348,6 +1784,26 @@ function TonightLineCard({
         }`
       : null;
 
+  // College basketball shows no player-prop lines (Matt, 2026-11-03), so the
+  // card is the fixture only: no line copy, no tooltip about prices it can
+  // never show, and no claim that books do not price the stat.
+  if (sport === 'NCAABW' || sport === 'NCAAB') {
+    return (
+      <>
+        <SectionTitle title="Next game" />
+        <View style={styles.card}>
+          <Text style={styles.fixture}>
+            {side}
+            <Text style={styles.fixtureWhen}>  {when}</Text>
+          </Text>
+          <Text style={[styles.muted, styles.gapTop]}>
+            Player props aren’t shown for college basketball.
+          </Text>
+        </View>
+      </>
+    );
+  }
+
   return (
     <>
       <SectionTitle
@@ -1356,7 +1812,8 @@ function TonightLineCard({
           title: 'The posted number',
           body:
             'The line your sportsbooks have hung for this stat tonight, and the best over and under price ' +
-            'among them. The chart above follows this number until you move the ruler.\n\n' +
+            'among them. The chart above starts on our pick’s line when we have one for this stat, else on this ' +
+            'number, else the median — until you move the ruler.\n\n' +
             'SINCE OPEN is DraftKings’ opening number against its latest — a line that has climbed is ' +
             'money on the over. SHARP compares Pinnacle’s no-vig over with your book’s no-vig over at the ' +
             'same line; a positive gap means your book prices the over richer than Pinnacle does.',
@@ -1597,8 +2054,8 @@ function PickRecordCard({
         tooltip={{
           title: 'Posted bets only',
           body:
-            `Posted settled bets on ${playerName}, by market. A pick Discord did not post is left out. Results are in units: one unit is one ` +
-            'flat bet. A pick that carried no price counts in the record and not the units.',
+            `Posted settled bets on ${playerName}, by market. A pick Discord did not post is left out. Results are in units at the stake ` +
+            'Discord posts: each pick to win 1 unit, never more than 3 units laid. A pick that carried no price counts at 1 unit.',
         }}
       />
       {loading && record.settled === 0 ? (
@@ -1619,9 +2076,15 @@ function PickRecordCard({
         <View style={styles.card}>
           <View style={styles.recordTop}>
             <Text style={styles.recordTotal}>{formatRecordLine(record)}</Text>
-            <Text style={styles.recordCount}>
+            <Text
+              style={styles.recordCount}
+              accessibilityLabel={unitsSpeech(
+                `${record.settled} posted ${record.settled === 1 ? 'bet' : 'bets'}` +
+                  (record.unpriced > 0 ? `, ${record.unpriced} unpriced, staked at 1u` : ''),
+              )}
+            >
               {record.settled} posted {record.settled === 1 ? 'bet' : 'bets'}
-              {record.unpriced > 0 ? ` · ${record.unpriced} unpriced` : ''}
+              {record.unpriced > 0 ? ` · ${record.unpriced} unpriced, staked at 1u` : ''}
             </Text>
             {record.ledgerUnread ? (
               <Text style={styles.muted}>
@@ -1634,11 +2097,7 @@ function PickRecordCard({
               key={l.key}
               label={l.label}
               value={formatRecordLine(l)}
-              note={
-                l.overs + l.unders > 0
-                  ? `${l.overs} over${l.overs === 1 ? '' : 's'} · ${l.unders} under${l.unders === 1 ? '' : 's'}`
-                  : undefined
-              }
+              note={playerLineNote(l, record.lines)}
             />
           ))}
         </View>
@@ -1766,10 +2225,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
-  matchupGrade: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.bold,
-  },
   windowRow: {
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
@@ -1794,6 +2249,57 @@ const styles = StyleSheet.create({
   },
   windowChipTextActive: {
     color: colors.textInverse,
+  },
+  defenseBlock: {
+    marginTop: spacing.xs,
+  },
+  defenseLabel: {
+    paddingHorizontal: spacing.lg,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  defenseRow: {
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  defenseChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  pips: {
+    flexDirection: 'row',
+    gap: 2,
+  },
+  pip: {
+    width: spacing.xs,
+    height: spacing.xs,
+    borderRadius: radii.pill,
+  },
+  pipOff: {
+    opacity: 0.3,
+  },
+  // Amber lives on navy chrome only (UX_REVIEW §2: amber on white is 1.9:1).
+  nextTag: {
+    backgroundColor: colors.brandNavy,
+    borderRadius: radii.xs,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 1,
+  },
+  nextTagText: {
+    fontSize: font.size.nano,
+    fontWeight: font.weight.bold,
+    color: colors.brand,
+    letterSpacing: 0.3,
+  },
+  defenseNote: {
+    paddingHorizontal: spacing.lg,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
   },
   hitCard: {
     backgroundColor: colors.bgCard,
@@ -1986,6 +2492,27 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  gameRowOutlined: {
+    borderColor: colors.textPrimary,
+  },
+  gameBody: { flex: 1 },
+  gameMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  lowMin: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
+    color: colors.medInk,
+  },
+  minutesNote: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
   },
   gameDot: {
     width: 16,
@@ -2002,6 +2529,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   gameMeta: {
+    flex: 1,
     fontSize: font.size.caption,
     color: colors.textSecondary,
     marginTop: 2,

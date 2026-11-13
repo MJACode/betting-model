@@ -1,0 +1,344 @@
+{
+ "kind": "ncaab_moneyline_first_post",
+ "model_id": "ncaab_moneyline_first_post",
+ "season": 2027,
+ "prior_season": 2026,
+ "built_at": "2026-11-03T22:37:40Z",
+ "command": "python -m scripts.ncaab_moneyline_first_post_build --rows <rows.parquet> --instants <ledger.parquet> --games <games.parquet> --table-cache <cache> --last-season 2026",
+ "books": [
+  "draftkings",
+  "fanduel",
+  "betmgm",
+  "williamhill_us",
+  "fanatics",
+  "betrivers",
+  "hardrockbet",
+  "betparx"
+ ],
+ "ref_books": [
+  "draftkings",
+  "fanduel",
+  "betmgm",
+  "williamhill_us",
+  "fanatics",
+  "betrivers",
+  "hardrockbet",
+  "betparx",
+  "pinnacle",
+  "bovada"
+ ],
+ "min_lead_min": 5,
+ "cut": 0.015,
+ "min_price": -200,
+ "min_other_books": 3,
+ "isum_range": [
+  1.0,
+  1.15
+ ],
+ "disagree_line": 1.5,
+ "window": "none: each book's newest stored row",
+ "margin_table_from": "models/saved/ncaab_spread_market_2027.json",
+ "margin_table_sha256": "d7b14050731a80b136f90bf62d595beb308beaa987c625aa310e7520a6e9b335",
+ "table_train_seasons": [
+  2012,
+  2026
+ ],
+ "table_train_games": 70268,
+ "table_check": {
+  "2021": {
+   "pmf": 0.0,
+   "ge": 0.0
+  },
+  "2022": {
+   "pmf": 0.0,
+   "ge": 0.0
+  },
+  "2023": {
+   "pmf": 0.0,
+   "ge": 0.0
+  },
+  "2024": {
+   "pmf": 0.0,
+   "ge": 0.0
+  },
+  "2025": {
+   "pmf": 0.0,
+   "ge": 0.0
+  },
+  "2026": {
+   "pmf": 0.0,
+   "ge": 0.0
+  }
+ },
+ "replay": {
+  "cut": 0.015,
+  "min_price": -200,
+  "min_other_books": 3,
+  "rule": "a bettable book's first moneyline post, priced off its own spread at that moment, flagged quotes out, sides shorter than -200 out before the pick, 3+ other bettable moneylines up, edge above the cut, one bet a game",
+  "posts_decided": 183212,
+  "statuses_at_lowest_cut": {
+   "below_cut": 96625,
+   "too_few_books": 77779,
+   "no_clean_quote": 8004,
+   "bets": 732,
+   "not_best": 72
+  },
+  "quotes_dropped_as_data_errors": 0,
+  "max_edge_bets": 0.2416,
+  "max_edge_priced_posts": 0.2416,
+  "priced_posts_with_3_others": 97429,
+  "by_season": {
+   "2021": {
+    "bets": 4,
+    "record": "3-1",
+    "units": 1.51,
+    "roi_pct": 23.52,
+    "ci95_dates": [
+     -55.43,
+     70.92
+    ],
+    "price_min": -189.0,
+    "price_median": -164.0,
+    "price_max": -125.0,
+    "units_without_10_best_dates": 0.0,
+    "ev_min": 0.0267,
+    "ev_median": 0.0334,
+    "lead_h_median": 9.75
+   },
+   "2022": {
+    "bets": 96,
+    "record": "64-32",
+    "units": 17.41,
+    "roi_pct": 11.66,
+    "ci95_dates": [
+     -1.87,
+     26.79
+    ],
+    "price_min": -200.0,
+    "price_median": -164.0,
+    "price_max": 400.0,
+    "units_without_10_best_dates": -2.59,
+    "ev_min": 0.0246,
+    "ev_median": 0.0353,
+    "lead_h_median": 12.0
+   },
+   "2023": {
+    "bets": 63,
+    "record": "50-13",
+    "units": 29.7,
+    "roi_pct": 30.01,
+    "ci95_dates": [
+     13.69,
+     45.96
+    ],
+    "price_min": -200.0,
+    "price_median": -165.0,
+    "price_max": 150.0,
+    "units_without_10_best_dates": 9.45,
+    "ev_min": 0.0244,
+    "ev_median": 0.0313,
+    "lead_h_median": 14.98
+   },
+   "2024": {
+    "bets": 64,
+    "record": "42-22",
+    "units": 10.26,
+    "roi_pct": 10.53,
+    "ci95_dates": [
+     -6.02,
+     26.75
+    ],
+    "price_min": -200.0,
+    "price_median": -165.0,
+    "price_max": 235.0,
+    "units_without_10_best_dates": -4.74,
+    "ev_min": 0.023,
+    "ev_median": 0.0352,
+    "lead_h_median": 15.0
+   },
+   "2025": {
+    "bets": 70,
+    "record": "42-28",
+    "units": 8.24,
+    "roi_pct": 9.06,
+    "ci95_dates": [
+     -7.7,
+     27.14
+    ],
+    "price_min": -200.0,
+    "price_median": -141.5,
+    "price_max": 222.0,
+    "units_without_10_best_dates": -4.49,
+    "ev_min": 0.0226,
+    "ev_median": 0.0382,
+    "lead_h_median": 17.71
+   },
+   "2026": {
+    "bets": 56,
+    "record": "33-23",
+    "units": 9.33,
+    "roi_pct": 13.87,
+    "ci95_dates": [
+     -9.2,
+     35.15
+    ],
+    "price_min": -198.0,
+    "price_median": -135.0,
+    "price_max": 310.0,
+    "units_without_10_best_dates": -6.95,
+    "ev_min": 0.0241,
+    "ev_median": 0.0363,
+    "lead_h_median": 11.25
+   },
+   "2021-2025": {
+    "bets": 297,
+    "record": "201-96",
+    "units": 67.11,
+    "roi_pct": 15.15,
+    "ci95_dates": [
+     7.34,
+     23.37
+    ],
+    "price_min": -200.0,
+    "price_median": -164.0,
+    "price_max": 400.0,
+    "units_without_10_best_dates": 41.86,
+    "ev_min": 0.0226,
+    "ev_median": 0.0353,
+    "lead_h_median": 14.5
+   }
+  },
+  "neighbour_cuts": {
+   "0.01": {
+    "2026": {
+     "bets": 124,
+     "record": "70-54",
+     "units": 10.75,
+     "roi_pct": 6.89,
+     "ci95_dates": [
+      -7.86,
+      21.42
+     ],
+     "price_min": -200.0,
+     "price_median": -143.5,
+     "price_max": 500.0,
+     "units_without_10_best_dates": -11.76,
+     "ev_min": 0.0157,
+     "ev_median": 0.0273,
+     "lead_h_median": 15.25
+    },
+    "2021-2025": {
+     "bets": 587,
+     "record": "365-222",
+     "units": 62.77,
+     "roi_pct": 7.27,
+     "ci95_dates": [
+      0.89,
+      13.79
+     ],
+     "price_min": -200.0,
+     "price_median": -161.0,
+     "price_max": 520.0,
+     "units_without_10_best_dates": 22.11,
+     "ev_min": 0.0156,
+     "ev_median": 0.0267,
+     "lead_h_median": 14.0
+    }
+   },
+   "0.02": {
+    "2026": {
+     "bets": 22,
+     "record": "13-9",
+     "units": 3.02,
+     "roi_pct": 10.43,
+     "ci95_dates": [
+      -23.72,
+      40.97
+     ],
+     "price_min": -198.0,
+     "price_median": -140.0,
+     "price_max": 310.0,
+     "units_without_10_best_dates": -7.98,
+     "ev_min": 0.0315,
+     "ev_median": 0.0469,
+     "lead_h_median": 11.25
+    },
+    "2021-2025": {
+     "bets": 150,
+     "record": "103-47",
+     "units": 33.78,
+     "roi_pct": 14.78,
+     "ci95_dates": [
+      3.74,
+      26.46
+     ],
+     "price_min": -200.0,
+     "price_median": -161.0,
+     "price_max": 340.0,
+     "units_without_10_best_dates": 14.78,
+     "ev_min": 0.0317,
+     "ev_median": 0.0459,
+     "lead_h_median": 14.0
+    }
+   }
+  },
+  "min_ev": 0.0226,
+  "min_prob": 0.2179,
+  "books": {
+   "draftkings": 157,
+   "williamhill_us": 122,
+   "betmgm": 32,
+   "betparx": 20,
+   "fanduel": 9,
+   "hardrockbet": 7,
+   "fanatics": 4,
+   "betrivers": 2
+  }
+ },
+ "research_check": {
+  "replay_bets": 353,
+  "research_bets": 353,
+  "both": 353,
+  "replay_only": [],
+  "research_only": [],
+  "same_game_side_price": 353,
+  "same_book_too": 353,
+  "same_moment_too": 353,
+  "max_abs_edge_diff": 0.0,
+  "replay_bets_2021-2025": 297,
+  "replay_bets_2026": 56
+ },
+ "combined_with_15z": {
+  "live_15z_bets": 914,
+  "2021-2025": {
+   "bets": 1053,
+   "record": "655-398",
+   "units": 102.42,
+   "roi_pct": 6.52,
+   "ci95_dates": [
+    1.76,
+    11.01
+   ],
+   "price_min": -200.0,
+   "price_median": -161.0,
+   "price_max": 1000.0,
+   "units_without_10_best_dates": 52.27
+  },
+  "2026": {
+   "bets": 123,
+   "record": "71-52",
+   "units": 17.46,
+   "roi_pct": 11.82,
+   "ci95_dates": [
+    -5.78,
+    27.32
+   ],
+   "price_min": -200.0,
+   "price_median": -132.0,
+   "price_max": 880.0,
+   "units_without_10_best_dates": -9.05
+  },
+  "games_taken_by_first_post": 351,
+  "first_post_games_the_15z_model_also_bet": 91
+ }
+}

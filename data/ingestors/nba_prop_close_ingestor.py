@@ -80,10 +80,22 @@ def due(tip: datetime, now: datetime, has_bet: bool, close_taken: bool,
     return tip - timedelta(minutes=opens_min) <= now < tip - timedelta(minutes=closes_min)
 
 
+def _schedule_rows(conn: DBConnection, rows) -> dict[str, tuple]:
+    """{game_id: (start, type)} for these bet rows' games, under their own id and the other way round."""
+    ids = sorted({gid for gid, *_ in rows} | {f"NBA_{str(r[4])[:10]}_{r[2]}_{r[3]}" for r in rows})
+    if not ids:
+        return {}
+    return {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT game_id, commence_time, game_type FROM nba_schedule WHERE game_id = ANY(%s)", (ids,)).fetchall()}
+
+
 def bet_games(conn: DBConnection, now: datetime) -> dict[str, dict]:
     """{game_id: {"markets": [...], "tip", "home", "away", "game_date"}} for every
-    NBA prop BET (MODEL_IDS) whose game tips within the close window's far end."""
-    from models.nba_prop_market import tip_of
+    NBA prop BET (MODEL_IDS) whose game tips within the close window's far end. The tip is the one the
+    bet's card decided on: a play-in, playoff or Cup final game by models.nba_prop_market.postseason_tip,
+    so a false early start from ESPN does not buy the close hours ahead, and any other by `tip_of`. A
+    game the schedule holds the other way round (a neutral court) reads that row."""
+    from models.nba_prop_market import postseason_tip, tip_of
     today = now.astimezone(ET).date()
     dates = [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)]
     rows = conn.execute("""
@@ -94,9 +106,12 @@ def bet_games(conn: DBConnection, now: datetime) -> dict[str, dict]:
         LEFT JOIN nba_schedule s ON s.game_id = p.game_id
         WHERE p.model_id = ANY(%s) AND p.signal_type = 'BET' AND p.game_date = ANY(%s)
     """, (list(MODEL_IDS), dates)).fetchall()
+    listed = _schedule_rows(conn, rows)
     out: dict[str, dict] = {}
     for gid, market, home, away, gd, g_ct, s_ct in rows:
-        tip = tip_of(s_ct, g_ct)
+        start, kind = listed.get(gid) or listed.get(f"NBA_{str(gd)[:10]}_{home}_{away}") or (None, None)
+        s_ct = s_ct or start
+        tip = tip_of(s_ct, g_ct) if kind == "regular" else postseason_tip(s_ct, g_ct)[0]
         if tip is None or tip <= now or tip - now > timedelta(minutes=NBA_PROP_CLOSE_OPENS_MIN):
             continue
         g = out.setdefault(gid, {"markets": [], "tip": tip, "home": home,

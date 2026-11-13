@@ -44,6 +44,7 @@ from tracking.clv_math import (
     CLV_METHOD_STANDARD,
     DEFAULT_SHARP_CLOSE_BOOKS,
     close_book_candidates,
+    clv_outcome,
     market_edge_clv,
     other_side_prices,
     same_book_clv,
@@ -1407,10 +1408,44 @@ _SIDE_PRICE_COL = {
 }
 
 
+_NCAAB_HALF_MARKETS = ("totals_h1", "spreads_h1")
+
+
+def _ncaab_first_half_market(game_id: str, market: str) -> bool:
+    """NCAAB first-half total or spread. The live feed files every pull 'open'."""
+    return str(game_id).split("_", 1)[0] == "NCAAB" and market in _NCAAB_HALF_MARKETS
+
+
+def _close_rows_only(game_id: str, market: str) -> bool:
+    """NBA team totals and NBA first-half markets file a separate 'close' row.
+
+    NCAAB totals_h1 / spreads_h1 do not: data/ingestors/ncaab_first_half_odds.py
+    writes every pull as 'open'.
+    """
+    if market.startswith("team_totals"):
+        return True
+    # The NBA first-quarter spread (data/ingestors/nba_first_quarter_odds.py) files its closing snapshot 'close',
+    # as the NBA first half does.
+    if market in ("spreads_q1", "h2h_q1"):
+        return True
+    return market in _NCAAB_HALF_MARKETS and not _ncaab_first_half_market(game_id, market)
+
+
+def _real_close(closing_price, closing_line, line_clv, market_pct, pin_price=None) -> bool:
+    """A pick is measured only when a close was read.
+
+    standard_v2 with every closing field empty is not a measurement. Zero is a
+    real line move (the number did not move); None is the absence of a close.
+    """
+    return any(v is not None for v in (
+        closing_price, closing_line, line_clv, market_pct, pin_price))
+
+
 def _closing_odds(conn: DBConnection, game_id: str, market: str,
                   commence_time: str | None,
                   bookmaker: str = "draftkings",
-                  match_line=None) -> dict | None:
+                  match_line=None,
+                  created_at=None) -> dict | None:
     """Last pre-game snapshot at `bookmaker` at or before first pitch.
 
     No unbounded fallback. The evening refresh writes post-first-pitch rows as
@@ -1433,11 +1468,29 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
     nba_team_total_odds.py): the decision fetch, filed 'open', and the close,
     filed 'close'. The decision fetch is the price taken, so read as the close
     it graded a pick whose close was never stored at exactly 0.0, for good.
-    With no 'close' row the pick is unmeasured.
+    With no 'close' row the pick is unmeasured. An NBA first-half total is the
+    same shape (data/ingestors/nba_first_half_odds.py), and so is an NBA
+    first-half spread.
+
+    AN NCAAB FIRST-HALF CLOSE IS THE BET BOOK'S NEWEST PRE-TIP ROW on the same
+    line, and only a row pulled strictly after the pick was created
+    (data/ingestors/ncaab_first_half_odds.py files every pull 'open'; there is
+    no 'close' row). The decision pull is the price taken, so a row at or
+    before created_at is not a close. No such row leaves the pick unmeasured.
+    `created_at` is required for that market; without it the read returns None
+    rather than grading the pick against its own decision pull.
     """
     if not commence_time:
         return None
-    snapshot_filter = ("snapshot_type = 'close'" if market.startswith("team_totals")
+    ncaab_half = _ncaab_first_half_market(game_id, market)
+    after_filter = ""
+    created_bound = None
+    if ncaab_half:
+        created_bound = _as_utc(created_at)
+        if created_bound is None:
+            return None
+        after_filter = "AND snapshot_at::timestamptz > %s::timestamptz"
+    snapshot_filter = ("snapshot_type = 'close'" if _close_rows_only(game_id, market)
                        else "snapshot_type != 'in_play'")
     cols = ["home_price", "away_price", "draw_price",
             "spread_home", "total_line", "over_price", "under_price"]
@@ -1455,6 +1508,8 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
         # the price comparison uses; this one is the "did the number move"
         # read, still restricted to ±1.5 so an alternate is not the close.
         line_filter = "AND ABS(spread_home) = 1.5"
+    if created_bound is not None:
+        params.append(created_bound.isoformat())
     row = conn.execute(f"""
         SELECT home_price, away_price, draw_price,
                spread_home, total_line, over_price, under_price
@@ -1465,6 +1520,7 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
           AND {snapshot_filter}
           AND snapshot_at::timestamptz <= %s::timestamptz
           {line_filter}
+          {after_filter}
         ORDER BY snapshot_at::timestamptz DESC
         LIMIT 1
     """, tuple(params)).fetchone()
@@ -1490,13 +1546,17 @@ def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
 
 def _first_game_close(conn: DBConnection, game_id: str, market: str,
                       commence_time: str | None, pick_book: str,
-                      match_line=None) -> tuple[dict | None, str | None]:
-    """That book's pre-game close, or (None, None). No other book is tried."""
+                      match_line=None, created_at=None) -> tuple[dict | None, str | None]:
+    """That book's pre-game close, or (None, None). No other book is tried.
+
+    `created_at` is the pick's creation time. NCAAB first-half markets use it
+    to refuse the decision pull; other markets ignore it.
+    """
     book = (pick_book or "").strip().lower()
     if not book:
         return None, None
     snap = _closing_odds(conn, game_id, market, commence_time, book,
-                         match_line=match_line)
+                         match_line=match_line, created_at=created_at)
     return (snap, book) if snap else (None, None)
 
 
@@ -1597,12 +1657,13 @@ _PROP_MARKET_FOR_MODEL = {
     "nhl_prop_assists": "player_assists",
 }
 
-# The market-relative cards write the SOFT book's price into dk_odds and name
-# the book only in the label suffix -- "Jadarian Price Over 1.5 Rec (FD)" --
-# so their close has to be read at THAT book: an FD open against a DK close is
-# arithmetic on two different books. One inverse of the cards' _BOOK map,
-# pinned against both cards by test. A book outside the map is written raw
+# Rows written before decision_book was filled name the soft book only in
+# the label suffix -- "Jadarian Price Over 1.5 Rec (FD)" -- so their close
+# has to be read at THAT book: an FD open against a DK close is arithmetic
+# on two different books. One inverse of the cards' _BOOK map, pinned
+# against both cards by test. A book outside the map is written raw
 # ("(fliff)"), so a raw key is accepted too; no suffix means DraftKings.
+# New rows carry decision_book and decision_odds and leave the suffix off.
 _LABEL_BOOK = {"DK": "draftkings", "FD": "fanduel", "MGM": "betmgm",
                "CZR": "williamhill_us", "ESPN": "espnbet", "PIN": "pinnacle"}
 _LABEL_BOOK_RE = re.compile(r"\(([A-Za-z_]+)\)\s*$")
@@ -1617,12 +1678,15 @@ def _book_from_label(pick_label: str | None) -> str:
     return _LABEL_BOOK.get(token.upper(), token.lower())
 
 
-# The NFL cards (scripts/nfl_wind_publisher.py) store the best book's price in
-# dk_odds and name the book INSIDE the label's annotation, not as a suffix:
+# NFL wind and opener rows written before decision_book was filled name the
+# book INSIDE the label's annotation, not as a suffix:
 #   "PIT @ CLE Under 38.5 (Wind 11 mph, CZR) · 1.19u"
 #   "HOU @ TEN — TEN +9.5 (Opener +2 vs Pinnacle, BR) · 1.67u · NEW 0m"
 # One inverse of that publisher's BOOK_ABBREV, pinned by test. An unmapped book
 # is written raw ("fanatics"), so a raw key is accepted, as for _LABEL_BOOK.
+# New rows carry decision_book and leave the annotation off. The parse stays
+# so a stored label still grades at the book it names. New rows also leave
+# off the "· 1.67u" sizing figure (mike, 2026-11-04); this parse never read it.
 _NFL_LABEL_BOOK = {"DK": "draftkings", "FD": "fanduel", "MGM": "betmgm",
                    "CZR": "williamhill_us", "ESPN": "espnbet", "BR": "betrivers",
                    "BOV": "bovada", "PIN": "pinnacle"}
@@ -1799,6 +1863,31 @@ def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
           AND g.commence_time IS NOT NULL
           AND p.created_at::timestamptz <= g.commence_time::timestamptz
           AND p.clv_method IS DISTINCT FROM %s
+          -- An NCAAB first-half bet with no post-creation pre-tip row cannot
+          -- be measured, and it is not stamped standard_v2 with an empty close.
+          -- Leaving it in this scan pins the date at the head of the queue.
+          AND NOT (
+            p.model_id IN ('ncaab_first_half_total', 'ncaab_first_half_spread')
+            AND g.commence_time::timestamptz <= now()
+            AND NOT EXISTS (
+              SELECT 1 FROM odds o
+              WHERE o.game_id = p.game_id
+                AND o.market = CASE p.model_id
+                      WHEN 'ncaab_first_half_total' THEN 'totals_h1'
+                      ELSE 'spreads_h1' END
+                AND o.bookmaker = lower(btrim(CASE
+                      WHEN p.decision_odds IS NOT NULL
+                       AND btrim(COALESCE(p.decision_book, '')) <> ''
+                      THEN p.decision_book ELSE 'draftkings' END))
+                AND o.snapshot_type <> 'in_play'
+                AND o.snapshot_at::timestamptz > p.created_at::timestamptz
+                AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
+                AND (
+                  (p.model_id = 'ncaab_first_half_total' AND o.total_line = p.scored_line)
+                  OR (p.model_id = 'ncaab_first_half_spread' AND o.spread_home = p.scored_line)
+                )
+            )
+          )
         ORDER BY p.game_date
         LIMIT %s
     """
@@ -1907,6 +1996,52 @@ def _closing_prop_odds(conn: DBConnection, game_id: str, player_name: str,
     return {"over_price": row[0], "under_price": row[1], "line": row[2]}
 
 
+# How long an NBA bet with no league tip stays open for one to arrive (a schedule row the morning
+# refresh has not written yet) before it is stamped empty and leaves the backfill's queue.
+_NBA_NO_TIP_WAIT_DAYS = 2
+
+
+def _reversed_nba_id(game_id: str) -> str:
+    """NBA_<date>_<away>_<home> with home and away the other way round."""
+    parts = str(game_id).split("_")
+    return "_".join((parts[0], parts[1], parts[3], parts[2])) if len(parts) == 4 else str(game_id)
+
+
+def _nba_schedule_rows(conn: DBConnection, game_ids: list[str]) -> dict[str, tuple]:
+    """{game_id: (start, type)} for these NBA games, under their own id and the other way round."""
+    ids = sorted(set(game_ids) | {_reversed_nba_id(g) for g in game_ids})
+    if not ids:
+        return {}
+    return {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT game_id, commence_time, game_type FROM nba_schedule WHERE game_id = ANY(%s)",
+        (ids,)).fetchall()}
+
+
+def _nba_league_tip(game_id: str, feed_start, schedule: dict[str, tuple]) -> "datetime | None":
+    """The start an NBA bet's close can be bounded on, or None when there is none.
+
+    The odds feed's start runs 2 to 20 minutes behind the real tip on every game it has written
+    (2026-10-20..11-02), and refresh passes store in-play rows typed 'open', so a close bounded on it
+    can be an in-play price. That is every bet whose only start is the feed's: a game the schedule
+    does not list and one with no tip there. A game the schedule holds the other way round reads
+    that row. A postseason start far before the feed's is read as ESPN's error
+    (models.nba_prop_market.postseason_tip), so that game has no start to trust either.
+    data/migrations/clv_standard_v2_2026_10_14.sql holds the same test: it recomputes any bet not
+    yet stamped, so a test here alone would be overwritten on its next pass."""
+    from models.nba_prop_market import START_GAP_MIN, parse_ts
+    from models.nba_total_luck import POSTSEASON_TYPES
+    for gid in (game_id, _reversed_nba_id(game_id)):
+        start, kind = schedule.get(gid, (None, None))
+        tip = parse_ts(start)
+        if tip is None:
+            continue
+        feed = _as_utc(feed_start)
+        if kind in POSTSEASON_TYPES and feed is not None and feed - tip > timedelta(minutes=START_GAP_MIN):
+            return None
+        return tip
+    return None
+
+
 def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     """
     Record closing line value for each official (BET) pick on game_date.
@@ -1932,9 +2067,11 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
       - clv_method      : standard_v2
       - clv_close_book  : the bet book, when its close was found
       - line_clv_pts    : points the line moved toward our side
-      - clv_beat_close  : clv_pct > 0. NULL when the primary is NULL
-                          (a moved line, or no same-book close). Line CLV
-                          stays in line_clv_pts and does not enter the beat.
+      - clv_beat_close  : True when clv_pct is a beat. False when it is a
+                          loss or a push (the close equals the price taken).
+                          NULL when the primary is NULL (a moved line, or no
+                          same-book close). Line CLV stays in line_clv_pts
+                          and does not enter the beat.
 
     THE CLOSE IS RECORDED EVEN WHEN THE LINE MOVED (2026-08-30, matt). It did
     not used to be: a moved line failed the same-line guard and the pick was
@@ -1979,6 +2116,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
 
     now_utc = datetime.now(timezone.utc)
     updated = 0
+    nba_schedule = _nba_schedule_rows(conn, sorted({r[1] for r in rows if str(r[1]).startswith("NBA_")}))
     for (pick_id, game_id, model_id, pick_side, dk_odds, commence_time,
          pick_label, scored_line, created_at, row_prop_market,
          _row_clv_method, decision_odds, decision_book, game_time) in rows:
@@ -2062,7 +2200,14 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         revisiting = bool(_row_clv_method)
         sharp = _sharp_close_book()
 
-        def _stamp_empty(pick_id=pick_id, book=bookmaker, revisiting=revisiting):
+        def _stamp_empty(pick_id=pick_id, book=bookmaker, revisiting=revisiting,
+                         market=None):
+            # A null close is not a measurement. NCAAB first half stays
+            # unmeasured when no pull landed after the pick was created,
+            # including a row that already carried an older method: stamping
+            # standard_v2 here would record every closing field empty.
+            if _ncaab_first_half_market(game_id, market or ""):
+                return 0
             if not revisiting:
                 return 0
             conn.execute("""
@@ -2083,6 +2228,18 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
                 WHERE pick_id = %s
             """, (CLV_METHOD_STANDARD, book, pick_id))
             return 1
+
+        # AN NBA BET WITH NO LEAGUE TIP HAS NO CLOSE. The closing-line columns stay empty rather
+        # than holding an in-play price, and it is stamped once a schedule row is no longer coming.
+        if str(game_id).startswith("NBA_"):
+            league_tip = _nba_league_tip(game_id, commence_time, nba_schedule)
+            if league_tip is None:
+                waited = (now_utc.astimezone(ZoneInfo("America/New_York")).date()
+                          - datetime.strptime(str(game_date)[:10], "%Y-%m-%d").date()).days
+                updated += _stamp_empty(revisiting=revisiting or waited >= _NBA_NO_TIP_WAIT_DAYS)
+                continue
+            if league_tip < _as_utc(close_bound):
+                close_bound = league_tip.isoformat()
 
         has_line = False
         moved_snap = None
@@ -2109,14 +2266,16 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             # opposite sign is a different bet; its price is not our close.
             closing, close_book = _first_game_close(
                 conn, game_id, market, close_bound, pick_book=bookmaker,
-                match_line=scored_line if has_line else None)
+                match_line=scored_line if has_line else None,
+                created_at=created)
             moved_snap, _moved_book = _first_game_close(
                 conn, game_id, market, close_bound, pick_book=bookmaker,
-                match_line=None) if has_line else (closing, close_book)
+                match_line=None, created_at=created) if has_line else (closing, close_book)
             pin_snap, _pin_book = (closing, sharp) if bookmaker == sharp else (
                 _first_game_close(
                     conn, game_id, market, close_bound, pick_book=sharp,
-                    match_line=scored_line if has_line else None))
+                    match_line=scored_line if has_line else None,
+                    created_at=created))
             # The number that line-CLV measures is the book's latest main
             # line, which may have left the number we bet.
             if has_line and moved_snap:
@@ -2128,7 +2287,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             closing_for_line = closing
 
         if not closing and not pin_snap and not moved_snap:
-            updated += _stamp_empty()
+            updated += _stamp_empty(market=market)
             continue
 
         price_col = _SIDE_PRICE_COL.get(pick_side)
@@ -2180,12 +2339,16 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
 
         # Headline beat is the same-book price only. A moved number keeps
         # line_clv_pts and does not count as a beat.
-        if clv_pct is None and line_clv is None and market_pct is None and not revisiting:
+        # Only a real close marks the pick measured. A null close is not
+        # standard_v2, on any market. Clearing an older method, or an NBA bet
+        # whose schedule row is not coming, is _stamp_empty and is not this write.
+        measured_price = closing_price if not line_moved else _px(closing_for_line)
+        if not _real_close(measured_price, closing_line, line_clv, market_pct, pin_price):
+            updated += _stamp_empty(market=market)
             continue
-        if clv_pct is None and line_clv is None and market_pct is None:
-            updated += _stamp_empty()
-            continue
-        beat_close = (clv_pct > 0) if clv_pct is not None else None
+        # A 0% close is a push, so the boolean is false. It is not a beat.
+        outcome = clv_outcome(clv_pct)
+        beat_close = None if outcome is None else outcome == "beat"
 
         conn.execute("""
             UPDATE picks
@@ -2249,6 +2412,18 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "away":
             won = (home_win == 0)
 
+    elif market == "h2h_q1":
+        # The first quarter's moneyline (models/nba_q1_trend_ml.py): the caller passes the FIRST QUARTER's points as
+        # the two scores (_first_quarter_points). A level quarter is a PUSH: a two-way first-quarter moneyline voids
+        # a tie at every book, and the graded record counts it so (46-35-6). Never NO_ACTION, which the full-game
+        # h2h arm above returns for a missing home_win.
+        if margin == 0:
+            return "PUSH", 0.0, 0.0
+        if pick_side == "home":
+            won = margin > 0
+        elif pick_side == "away":
+            won = margin < 0
+
     elif market == "h2h_3way":
         # Regulation only. Undetermined regulation outcome → NO_ACTION rather
         # than a fabricated loss (a draw still settles off went_to_ot).
@@ -2261,7 +2436,10 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "draw":
             won = (went_to_ot == 1)
 
-    elif market in ("totals", "totals_1st_5_innings"):
+    elif market in ("totals", "totals_1st_5_innings", "totals_h1"):
+        # totals_h1: the caller passes the FIRST HALF's points as the two scores
+        # (_first_half_points), as it passes the first five innings' for an F5
+        # market. Never reach this with the full-game final.
         if total_line is None:
             return "NO_ACTION", 0.0, 0.0
         if total == total_line:
@@ -2284,7 +2462,10 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "under":
             won = (team_pts < total_line)
 
-    elif market in ("spreads", "spreads_1st_5_innings"):
+    elif market in ("spreads", "spreads_1st_5_innings", "spreads_h1", "spreads_q1"):
+        # spreads_h1: the caller passes the FIRST HALF's points as the two
+        # scores (_ncaab_first_half_points); a level half on a whole number is a
+        # push, as books settle it. Never reach this with the full-game final.
         if spread_home is None:
             return "NO_ACTION", 0.0, 0.0
         covered_margin = margin + spread_home
@@ -2333,6 +2514,57 @@ _RULE_MODEL_MARKETS = {
     # team's final score, overtime included, as DraftKings settles a team
     # total. NEVER "totals": that sums both teams and grades every under a loss.
     "nba_team_total_luck": "team_totals_home",
+    # NBA first half's points, overs (models/nba_first_half_total_luck.py).
+    # scored_line is the first half's line; it settles on Q1 + Q2 from
+    # nba_period_scores (_first_half_points). NEVER "totals": that sums the two
+    # finals and grades every over a win.
+    "nba_first_half_total_luck": "totals_h1",
+    # NBA first quarter's spread, the hot team (models/nba_q1_trend.py). scored_line is the first quarter's HOME
+    # number; it settles on period 1 of nba_period_scores (_first_quarter_points), overtime never counted. NEVER
+    # "spreads": that grades the full-game margin.
+    "nba_q1_trend": "spreads_q1",
+    # NBA first quarter's moneyline, the same hot team (models/nba_q1_trend_ml.py). scored_line is NULL; it settles
+    # on period 1 of nba_period_scores (_first_quarter_points), a level quarter a PUSH. NEVER "h2h": that grades the
+    # full-game winner.
+    "nba_q1_trend_ml": "h2h_q1",
+    # NCAAB full-game totals (models/ncaab_total_blend.py). scored_line is the
+    # total; the stored final includes overtime, as books settle it.
+    "ncaab_total_blend": "totals",
+    # NCAABW full-game totals (models/ncaabw_total_blend.py), the women's
+    # twin: scored_line is the total; the stored final includes overtime.
+    "ncaabw_total_blend": "totals",
+    # NCAAB full-game spreads (models/ncaab_spread_market.py). scored_line is
+    # the bet book's HOME number (section 4); the stored final includes
+    # overtime, as books settle it.
+    "ncaab_spread_market": "spreads",
+    # NCAAB full-game moneylines (models/ncaab_moneyline_own_spread.py). The
+    # id has 'spread' in it but the pick is a MONEYLINE: it settles on
+    # games.home_win (overtime included, as books settle it), scored_line
+    # NULL. Named here so every SQL mapping must name it too
+    # (tests/test_rule_model_markets_everywhere.py), since the ones that read
+    # '%spread%' would otherwise send it to the spreads rows.
+    "ncaab_moneyline_own_spread": "h2h",
+    # NCAAB full-game moneylines at a book's first post
+    # (models/ncaab_moneyline_first_post.py): a MONEYLINE, settled on
+    # games.home_win (overtime included), scored_line NULL.
+    "ncaab_moneyline_first_post": "h2h",
+    # NCAAB first-half spread (models/ncaab_first_half_spread.py). scored_line
+    # is the first half's HOME number; it settles on period 1 of
+    # ncaab_period_scores (_ncaab_first_half_points), no overtime. NEVER
+    # "spreads": that grades the full-game margin.
+    "ncaab_first_half_spread": "spreads_h1",
+    # NCAAB first-half total (models/ncaab_first_half_total.py). scored_line
+    # is the first half's total; it settles on period 1 of
+    # ncaab_period_scores (first_half_points routes an NCAAB game there), no
+    # overtime. NEVER "totals": that sums the two finals and grades every
+    # under a loss.
+    "ncaab_first_half_total": "totals_h1",
+    # NCAAF full-game moneylines against the books' consensus spread
+    # (models/ncaaf_moneyline_market.py): a MONEYLINE, settled on
+    # games.home_win (overtime included, as books settle it), scored_line
+    # NULL. The pick sits on the odds feed's row of the game, which takes its
+    # final from CFBD's row (cfbd_ingestor.mirror_scores_to_alias_rows).
+    "ncaaf_moneyline_market": "h2h",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).
@@ -2415,6 +2647,87 @@ _GAME_LEVEL_MODEL_FILTER = """
           AND p.model_id NOT LIKE 'ufc_%%'
           AND p.model_id NOT LIKE 'golf_%%'
 """
+
+
+def _first_half_points(conn: DBConnection, game_id: str,
+                       home_score, away_score) -> tuple[int, int] | None:
+    """(home, away) points in the first half, or None when the game has no
+    period rows this settlement can trust. Then the pick stays PENDING: no result,
+    never the full-game score, never a made-up one.
+
+    The check is data/ingestors/nba_period_scores.first_half_from_periods, which
+    the repair of rows that disagree with the final also reads.
+    """
+    from data.ingestors.nba_period_scores import first_half_from_periods
+    rows = conn.execute(
+        "SELECT period, home_points, away_points FROM nba_period_scores WHERE game_id = %s",
+        (game_id,)).fetchall()
+    if not rows:
+        return None
+    points = first_half_from_periods(rows, home_score, away_score)
+    if points is None:
+        logger.warning(f"{game_id}: its period scores do not add up to the final "
+                       f"({away_score}-{home_score}) or a period is missing: "
+                       f"{sorted(tuple(r) for r in rows)}. Its first-half picks stay pending.")
+    return points
+
+
+def _first_quarter_points(conn: DBConnection, game_id: str,
+                          home_score, away_score) -> tuple[int, int] | None:
+    """(home, away) points in an NBA first quarter, or None when the game has no period rows this settlement can
+    trust (data/ingestors/nba_period_scores.first_quarter_from_periods: the first search's check, the one the graded
+    bets were settled on). Then the pick stays PENDING: no result, never the full-game score."""
+    from data.ingestors.nba_period_scores import first_quarter_from_periods
+    rows = conn.execute(
+        "SELECT period, home_points, away_points FROM nba_period_scores WHERE game_id = %s",
+        (game_id,)).fetchall()
+    if not rows:
+        return None
+    points = first_quarter_from_periods(rows, home_score, away_score)
+    if points is None:
+        logger.warning(f"{game_id}: its period scores do not add up to the final "
+                       f"({away_score}-{home_score}) or a period is missing: "
+                       f"{sorted(tuple(r) for r in rows)}. Its first-quarter picks stay pending.")
+    return points
+
+
+def _ncaab_first_half_points(conn: DBConnection, game_id: str,
+                             home_score, away_score) -> tuple[int, int] | None:
+    """(home, away) points in an NCAAB first half (period 1 of
+    ncaab_period_scores), or None when the game's periods cannot be trusted:
+    they must be numbered 1..n with n >= 2 (two halves, then any overtimes) and
+    add up to the stored final. Then the pick stays PENDING: no result, never
+    the full-game score, never a made-up one. The model's history was graded on
+    exactly this rule (models/ncaab_first_half_spread.valid_halves)."""
+    rows = conn.execute(
+        "SELECT period, home_points, away_points FROM ncaab_period_scores WHERE game_id = %s",
+        (game_id,)).fetchall()
+    if not rows:
+        return None
+    per = {}
+    for p, h, a in rows:
+        per[int(p)] = (h, a)
+    n = max(per)
+    if (n < 2 or set(per) != set(range(1, n + 1)) or len(rows) != n
+            or any(v is None for pts in per.values() for v in pts)
+            or home_score is None or away_score is None
+            or sum(float(v[0]) for v in per.values()) != float(home_score)
+            or sum(float(v[1]) for v in per.values()) != float(away_score)):
+        logger.warning(f"{game_id}: its NCAAB period scores do not add up to the final "
+                       f"({away_score}-{home_score}) or a period is missing: "
+                       f"{sorted(tuple(r) for r in rows)}. Its first-half picks stay pending.")
+        return None
+    return int(per[1][0]), int(per[1][1])
+
+
+def first_half_points(conn: DBConnection, game_id: str,
+                      home_score, away_score) -> tuple[int, int] | None:
+    """A first half's (home, away) points for any sport that has one stored:
+    an NCAAB game's period 1 (ncaab_period_scores, two halves), an NBA game's
+    Q1 + Q2 (nba_period_scores). None keeps the pick pending."""
+    if str(game_id).startswith("NCAAB_"):
+        return _ncaab_first_half_points(conn, game_id, home_score, away_score)
+    return _first_half_points(conn, game_id, home_score, away_score)
 
 
 def _game_settle_window_days(conn: DBConnection, game_date: str) -> int:
@@ -2703,6 +3016,18 @@ def _settle_game_picks(
             settle_home = home_score_f5
             settle_away = away_score_f5
             settle_home_win = int(home_score_f5 > away_score_f5) if home_score_f5 != away_score_f5 else None
+        elif market in ("totals_h1", "spreads_h1"):
+            first_half = first_half_points(conn, game_id, home_score, away_score)
+            if first_half is None:
+                continue  # stays pending: no period rows, no result
+            settle_home, settle_away = first_half
+            settle_home_win = None
+        elif market in ("spreads_q1", "h2h_q1"):
+            first_quarter = _first_quarter_points(conn, game_id, home_score, away_score)
+            if first_quarter is None:
+                continue  # stays pending: no period rows, no result
+            settle_home, settle_away = first_quarter
+            settle_home_win = None
         else:
             settle_home = home_score
             settle_away = away_score
@@ -2762,6 +3087,31 @@ def _settle_game_picks_window(
         for i, v in enumerate(day_results):
             totals[i] += v
     return tuple(totals)
+
+
+def _posted_units_line(conn: DBConnection, settled_at: str) -> str:
+    """This pass's BET results on the published stake, for the settle log.
+
+    stake_for: 1u to win at COALESCE(decision_odds, dk_odds), risk capped at
+    3u, a pick with no price at the bare 1u (tracking/published_units). Read
+    back from the rows this pass stamped, so it is the record's number and
+    never the -110 a settler grades an unpriced pick's profit_flat at.
+    """
+    from tracking.published_units import unit_profit, unit_risked
+    rows = conn.execute("""
+        SELECT COALESCE(decision_odds, dk_odds), result
+        FROM picks
+        WHERE settled_at = %s
+          AND signal_type = 'BET'
+          AND result IN ('WIN', 'LOSS', 'PUSH')
+    """, (settled_at,)).fetchall()
+    units = risked = 0.0
+    for price, result in rows:
+        price = None if price is None else float(price)
+        units += unit_profit(price, result)
+        risked += unit_risked(price, result)
+    roi = f" (ROI {units / risked:.1%})" if risked > 0 else ""
+    return f"Units: {units:+.2f}u on {risked:.2f}u risked{roi}"
 
 
 def settle_picks(game_date: str = None) -> dict:
@@ -2847,6 +3197,22 @@ def settle_picks(game_date: str = None) -> dict:
             logger.warning(
                 f"Prop box scores failed ({exc}) — props grade on whatever is stored")
 
+        # First-half picks grade off nba_period_scores, and the only other writer
+        # of those rows is the 6am run's nba-quarters step, which runs AFTER the
+        # 6am settle and in no refresh pass. Pull a missing game's quarters the
+        # same way, on its own connection, so a finished game's first-half pick
+        # grades on this pass and is in the morning recap. Stored rows that
+        # disagree with the final are asked for again and replaced by rows that
+        # agree. A failure leaves the pick pending; the next pass asks again.
+        try:
+            from data.ingestors.nba_period_scores import ensure_first_half_period_scores
+            quarters = ensure_first_half_period_scores()
+            if quarters.get("dates"):
+                logger.info(f"NBA quarter scores for first-half picks: {quarters}")
+        except Exception as exc:
+            logger.warning(
+                f"NBA quarter scores failed ({exc}) — first-half picks stay pending")
+
         wins = losses = pushes = no_actions = 0
         total_profit_flat  = 0.0
         total_profit_kelly = 0.0
@@ -2926,13 +3292,16 @@ def settle_picks(game_date: str = None) -> dict:
         win_rate = wins / max(wins + losses, 1)
         flat_roi = total_profit_flat / max((wins + losses) * 100, 1)
 
+        # Units, never dollars (§4), on the published stake: the same units
+        # Discord #results and the Record tab book for these picks. Not the
+        # settlers' profit_flat total, which grades an unpriced pick at an
+        # invented -110 (the return dict keeps that stored figure).
         logger.success(
             f"\n{'═'*50}\n"
             f"  Settled: {game_date}\n"
             f"  Results: {wins}W / {losses}L / {pushes}P / {no_actions}N\n"
             f"  Win Rate: {win_rate:.1%}\n"
-            f"  Flat P&L: ${total_profit_flat:+,.2f} (ROI: {flat_roi:.1%})\n"
-            f"  Kelly P&L: ${total_profit_kelly:+,.2f}\n"
+            f"  {_posted_units_line(conn, settled_at)}\n"
             f"{'═'*50}"
         )
 
@@ -2967,17 +3336,21 @@ def print_performance_summary(days: int = 30) -> dict:
 
     conn = get_connection()
     try:
-        # Overall stats
+        # Overall stats. Units come from priced picks only: profit_flat
+        # fabricates -110 on a pick with no price (config-topology, §6).
         overall = conn.execute(f"""
             SELECT
                 COUNT(*) as total_picks,
                 SUM(CASE WHEN result = 'WIN'  THEN 1 ELSE 0 END) as wins,
                 SUM(CASE WHEN result = 'LOSS' THEN 1 ELSE 0 END) as losses,
                 SUM(CASE WHEN result = 'PUSH' THEN 1 ELSE 0 END) as pushes,
-                SUM(profit_flat)  as total_flat_pnl,
+                SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
+                         THEN profit_flat END) as total_flat_pnl,
                 SUM(profit_kelly) as total_kelly_pnl,
                 AVG(edge)         as avg_edge,
-                MAX(bankroll_at_pick) as bankroll_at_pick
+                SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
+                          AND result IN ('WIN', 'LOSS') THEN 1 ELSE 0 END)
+                                  as priced_decided
             FROM picks
             WHERE game_date >= ?
               AND result IS NOT NULL
@@ -2990,7 +3363,8 @@ def print_performance_summary(days: int = 30) -> dict:
             SELECT model_id,
                    COUNT(*) as picks,
                    SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins,
-                   SUM(profit_flat) as flat_pnl,
+                   SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
+                            THEN profit_flat END) as flat_pnl,
                    SUM(profit_kelly) as kelly_pnl,
                    AVG(edge) as avg_edge
             FROM picks
@@ -3001,15 +3375,6 @@ def print_performance_summary(days: int = 30) -> dict:
             GROUP BY model_id
             ORDER BY flat_pnl DESC
         """, (cutoff,)).fetchall()
-
-        # Current bankroll
-        current_bankroll = conn.execute("""
-            SELECT bankroll_at_pick + COALESCE(profit_kelly, 0)
-            FROM picks
-            WHERE result IS NOT NULL
-            ORDER BY settled_at DESC
-            LIMIT 1
-        """).fetchone()
 
         # Running bankroll history (for chart)
         bankroll_history = conn.execute(f"""
@@ -3032,26 +3397,25 @@ def print_performance_summary(days: int = 30) -> dict:
     logger.info(f"{'═'*60}")
 
     if overall and overall[0]:
-        total, wins, losses, pushes, flat_pnl, kelly_pnl, avg_edge, _ = overall
+        total, wins, losses, pushes, flat_pnl, _kelly, avg_edge, priced = overall
         decided = max(wins + losses, 1)
+        units = (flat_pnl or 0) / 100            # units, never dollars (§4)
+        roi = units / priced if priced else 0.0
         logger.info(f"  Total Picks:  {total}")
         logger.info(f"  Record:       {wins}W / {losses}L / {pushes}P")
         logger.info(f"  Win Rate:     {wins/decided:.1%}")
-        logger.info(f"  Flat P&L:     ${flat_pnl:+,.2f} (ROI: {flat_pnl/(decided*100):.1%})")
-        logger.info(f"  Kelly P&L:    ${kelly_pnl:+,.2f}")
+        logger.info(f"  Flat units:   {units:+.2f}u (ROI: {roi:.1%} on {priced} priced)")
         logger.info(f"  Avg Edge:     {avg_edge:.2%}" if avg_edge else "")
-        if current_bankroll and current_bankroll[0]:
-            logger.info(f"  Bankroll:     ${current_bankroll[0]:,.2f}")
 
     if by_model:
-        logger.info(f"\n  {'Model':<30} {'Picks':>5} {'W/L':>7} {'Flat P&L':>10} {'Avg Edge':>9}")
+        logger.info(f"\n  {'Model':<30} {'Picks':>5} {'W/L':>7} {'Units':>10} {'Avg Edge':>9}")
         logger.info(f"  {'-'*63}")
         for row in by_model:
             mid, picks, wins, flat_pnl, kelly_pnl, avg_edge = row
             losses = picks - wins if wins else picks
             wl = f"{wins}/{losses}" if wins is not None else "–"
             logger.info(f"  {mid:<30} {picks:>5} {wl:>7} "
-                         f"${flat_pnl or 0:>9,.2f} {avg_edge or 0:>8.2%}")
+                         f"{(flat_pnl or 0) / 100:>+9.2f}u {avg_edge or 0:>8.2%}")
 
     logger.info(f"{'═'*60}\n")
 

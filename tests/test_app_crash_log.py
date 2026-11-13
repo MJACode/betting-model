@@ -72,14 +72,24 @@ def test_app_errors_is_write_only_for_the_anon_key():
         "the 60/hour cap filters device_id and received_at and needs that index"
 
 
+# The newest file that sets the kind list. add_app_errors.sql set the first
+# five; the freeze-tracking kinds (2026-11-06) replaced the CHECK and the RPC.
+KINDS_MIGRATION = ROOT / "data" / "migrations" / "app_errors_freeze_kinds_2026_11_06.sql"
+
+
 def test_kinds_agree_between_app_and_server():
-    sql = MIGRATION.read_text(encoding="utf-8")
+    """A kind the server does not accept fails its send, and the crash queue
+    stops at the first failed send, so every report behind it is stuck."""
+    sql = KINDS_MIGRATION.read_text(encoding="utf-8")
     src = (MOBILE / "src" / "lib" / "crashLog.ts").read_text(encoding="utf-8")
     app = set(re.findall(r"'([a-z_]+)'", src.split("export type ReportKind =", 1)[1].split(";", 1)[0]))
-    check = re.search(r"kind\s+TEXT NOT NULL CHECK \(kind IN\s*\(([^)]*)\)\)", sql)
+    check = re.search(r"ADD CONSTRAINT app_errors_kind_check CHECK \(kind IN\s*\(([^)]*)\)\)", sql)
     assert check, "app_errors.kind CHECK not found"
+    rpc = re.search(r"IF p_kind NOT IN \(([^)]*)\)", sql)
+    assert rpc, "log_app_error kind list not found"
     server = set(re.findall(r"'([a-z_]+)'", check.group(1)))
     assert app == server, (app, server)
+    assert set(re.findall(r"'([a-z_]+)'", rpc.group(1))) == server
 
 
 def test_the_app_calls_the_rpc_and_mounts_the_boundary():

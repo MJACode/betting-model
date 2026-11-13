@@ -1,23 +1,27 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
+import { sportSpokenName } from '@/lib/loadState';
 import { unitsSpeech } from '@/lib/a11y';
-import { addDays, formatAmerican } from '@/lib/format';
-import { modelLong, modelShort } from '@/lib/modelMeta';
+import { addDays, formatAmerican, labelWithoutStake } from '@/lib/format';
+import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
+import { modelHistoryMark, modelLong, modelShort } from '@/lib/modelMeta';
 import { postedPickUnits } from '@/lib/thresholds';
 import { CalendarGrid } from '@/components/CalendarGrid';
+import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import {
   ALL_SPORTS,
   dayRoiText,
@@ -147,7 +151,7 @@ export function DailyResultsModal({
     // SafeAreaProvider doesn't reach it — without this local provider the
     // SafeAreaView gets a 0 top inset and the close button ends up under the
     // status bar (untappable). onRequestClose handles the Android back button.
-    <Modal
+    <Modal trackName="DailyResultsModal"
       visible={visible}
       animationType="slide"
       presentationStyle="fullScreen"
@@ -274,7 +278,7 @@ export function DailyResultsModal({
                     key={s}
                     onPress={() => setSportFilter(s)}
                     style={[styles.sportChip, active && styles.sportChipActive]}
-                    accessibilityLabel={s === 'ALL' ? 'All sports' : s}
+                    accessibilityLabel={s === 'ALL' ? 'All sports' : sportSpokenName(s)}
                   >
                     <Text style={[styles.sportChipText, active && styles.sportChipTextActive]}>
                       {s === 'ALL' ? 'All' : s}
@@ -415,9 +419,9 @@ export function DailyResultsModal({
               Settled picks that Discord posted. Each pick risks the amount
               needed to win 1 unit. At −110 that’s 1.1 units to win 1. Risk is
               capped at 3 units, and a pick with no price counts as 1 unit. The
-              percentage is units won or lost divided by units risked. The Models
-              tab uses a flat $100 bet, so its percentages won’t match. Open
-              picks settle after their games go final.
+              percentage is units won or lost divided by units risked. Each pick is
+              booked at the same stake the Models tab uses. Open picks settle after
+              their games go final.
             </Text>
           </ScrollView>
         )}
@@ -488,7 +492,7 @@ function SportCard({
           onPress={onToggle}
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
-          accessibilityLabel={`${s.sport}, ${sub}${
+          accessibilityLabel={`${sportSpokenName(s.sport)}, ${sub}${
             s.total.picks === 0
               ? s.pending > 0
                 ? `, ${s.pending} pending`
@@ -521,24 +525,31 @@ function HeroStat({ label, value, color }: { label: string; value: string; color
 
 function ModelRow({ model }: { model: ModelDayStats }) {
   const priced = model.risked > 0;
+  const mark = modelHistoryMark(model.modelId);
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const recordBelow = modelRecordBelow(fontScale, windowWidth);
   return (
-    <View style={styles.modelRow}>
-      <View style={styles.modelLeft}>
-        <View style={styles.chip}>
-          <Text style={styles.chipText}>{modelShort(model.modelId)}</Text>
-        </View>
-        <View style={styles.modelNameWrap}>
-          <Text style={styles.modelName} numberOfLines={1}>
+    <View style={[styles.modelRow, recordBelow && styles.modelRowStacked]}>
+      <View style={recordBelow ? styles.modelLeftStacked : styles.modelLeft}>
+        <ModelBadgeRow badge={modelShort(model.modelId)} variant="tile">
+          {/* Wraps on spaces. At 1.3× text, or on a narrow phone, the badge
+              sits above the name so a word is not split. */}
+          <Text style={styles.modelName}>
             {modelLong(model.modelId)}
           </Text>
           <Text style={styles.modelSub}>
             {recordLine(model)}
             {` · ${stakeLine(model)}`}
+            {mark ? ` · ${mark}` : ''}
           </Text>
-        </View>
+        </ModelBadgeRow>
       </View>
       <Text
-        style={[styles.modelRoi, { color: priced ? roiColor(model.roi) : colors.textSecondary }]}
+        style={[
+          styles.modelRoi,
+          recordBelow && styles.modelRoiStacked,
+          { color: priced ? roiColor(model.roi) : colors.textSecondary },
+        ]}
         accessibilityLabel={priced ? undefined : 'Return on bets unavailable'}
       >
         {dayRoiText(model.risked, model.roi)}
@@ -569,7 +580,7 @@ function PickRow({ pick }: { pick: Pick }) {
       </View>
       <View style={styles.modelNameWrap}>
         <Text style={styles.modelName} numberOfLines={2}>
-          {pick.pick_label}
+          {labelWithoutStake(pick.pick_label)}
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}
@@ -597,7 +608,7 @@ function PendingPickRow({ pick }: { pick: Pick }) {
       </View>
       <View style={styles.modelNameWrap}>
         <Text style={styles.modelName} numberOfLines={2}>
-          {pick.pick_label}
+          {labelWithoutStake(pick.pick_label)}
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}
@@ -885,14 +896,12 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
   },
-  modelLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: spacing.sm },
-  chip: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radii.sm,
-    backgroundColor: colors.noneSoft,
+  modelRowStacked: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
   },
-  chipText: { fontSize: font.size.caption, fontWeight: font.weight.semibold, color: colors.textSecondary },
+  modelLeft: { flex: 1 },
+  modelLeftStacked: { ...STACKED_BLOCK, alignSelf: 'stretch' },
   resultBadge: {
     width: 26,
     height: 26,
@@ -906,6 +915,7 @@ const styles = StyleSheet.create({
   modelName: { fontSize: font.size.body, fontWeight: font.weight.medium, color: colors.textPrimary },
   modelSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 1 },
   modelRoi: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.sm },
+  modelRoiStacked: { alignSelf: 'flex-end', marginTop: spacing.xs },
   openLabel: {
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,

@@ -34,6 +34,17 @@ async function persist(enabled: boolean) {
   }
 }
 
+/** Opt-out for account deletion. The token row is cleared separately. */
+export async function clearPushOptInForAccountDeletion(): Promise<void> {
+  cached = false;
+  listeners.forEach((fn) => fn(false));
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch (err) {
+    console.warn('[pushOptIn] account wipe failed', err);
+  }
+}
+
 export function usePushOptIn() {
   const [enabled, setEnabled] = useState<boolean>(cached ?? false);
   const [ready, setReady] = useState<boolean>(cached != null);

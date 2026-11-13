@@ -33,24 +33,84 @@ the recap is cross-sport), each falling back sensibly.
 **Live picks go to their SPORT'S live channel** (mike, 2026-09-09: *"Push
 picks to discord in live games to their live channels"*): `#nfl-live`,
 `#mlb-live`, `#ncaaf-live`, one `DISCORD_WEBHOOK_LIVE_{SPORT}` each, collected
-into `config.DISCORD_WEBHOOKS_LIVE`. `_live_webhook_for_sport` resolves an
-in-play signal as the sport's live channel, else the shared
-`DISCORD_WEBHOOK_LIVE`, else the sport's pre-game channel. The three URLs are
-Railway variables on BOTH services: the NFL in-play worker runs on `worker`
-(it owns the volume its decision log writes to), the MLB and NCAAF loops on
-`pollers`. The channel probe (`worker_jobs` kind `discord_probe`) reports
-each as `live:{SPORT}`, so a live webhook pasted from the pre-game channel
-shows up as a collision.
+into `config.DISCORD_WEBHOOKS_LIVE`. A sport with no live webhook may instead
+set `DISCORD_CHANNEL_LIVE_<SPORT>` (`config.DISCORD_CHANNELS_LIVE`; an id is
+not a secret). `_live_webhook_for_sport` resolves an in-play signal as the
+sport's live webhook, else that channel id through the bot token (the webhook
+it creates is named `<sport>-live`, lowercase, so it is not the pre-game
+webhook), else the shared `DISCORD_WEBHOOK_LIVE`, else the sport's pre-game
+channel. A live channel id that this process cannot open does not use the
+last two: the pick stays unsent, so it is not ledgered against another room.
+The webhook URLs are Railway variables on BOTH services. Measured 2026-11-03
+from the production logs and variable names: `worker` is `SERVICE_ROLE=pipeline`
+and skips `live_loop`, `ncaaf_live_loop` and `nfl_live_leader`; `pollers` is
+`SERVICE_ROLE=poller` and runs those loops. `pollers` has
+`DISCORD_WEBHOOK_LIVE_{MLB,NCAAF,NFL}`. **Re-read 2026-11-07** (Railway
+`list-variables`, names only): `pollers` now also holds `DISCORD_BOT_TOKEN` and
+the channel ids `DISCORD_CHANNEL_LIVE_NBA`, `DISCORD_CHANNEL_LIVE_NCAAB` and
+`DISCORD_CHANNEL_LIVE_NCAABW`, so the NBA and NCAAB in-play loops, which run
+there, open #nba-live and #ncaab-live through the bot. NBA and NCAAB live picks
+post only to their own live channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`),
+never the shared live or the pre-game channel. The same holds for NCAABW from
+2026-11-11: its halftime loop (`models/ncaabw_live_loop.py`) runs on `pollers`
+and posts to #ncaabw-live only. A live post from a service
+without the bot token cannot open a channel id; it needs the token (Manage
+Webhooks) and the channel id, or a `DISCORD_WEBHOOK_LIVE_{SPORT}` URL. The notifier logs that once per sport
+and skips the pick. The channel probe (`worker_jobs` kind `discord_probe`)
+reports each live webhook as `live:{SPORT}`, so a live webhook pasted from the
+pre-game channel shows up as a collision.
+
+**A channel id can stand in for a webhook (2026-10-30, NCAAB).** NCAAB went
+live with no channel and no `DISCORD_WEBHOOK_NCAAB`. `NCAAB` is now in
+`config.DISCORD_SPORTS` (NCAABW added 2026-11-03, women's college basketball,
+`DISCORD_CHANNEL_NCAABW`), and a sport with no webhook variable may instead set
+`DISCORD_CHANNEL_<SPORT>` to its channel id (`config.DISCORD_CHANNELS`; an id is
+not a secret). `_webhook_for_sport` then asks `_channel_webhook`, which uses
+`DISCORD_BOT_TOKEN` to list the channel's webhooks, reuses the one the bot
+itself created, or creates one named after the sport (`ncaab`, as the other
+sports' webhooks are named `ncaaf`, `nba`), and caches the URL in memory for
+the life of the process. The URL is never logged or stored; a
+failure is logged by status code only and returns nothing, so the sport is
+skipped exactly as an unset webhook is and its picks post once the channel
+resolves. A webhook variable, when set, still wins. The bot needs Manage
+Webhooks on that channel. The delivery health check counts a sport as wired
+when it has either (`config.discord_sports_wired`). The `discord_probe` job
+reports such a sport as `sport:NCAAB` with the channel id and the bot's
+webhook id and name, read by GET only and never with its token; it creates
+nothing, so before the first post it says there is no bot webhook yet.
+
+**Worker posts the NCAAB card.** The channel id resolves only on a service
+that also holds `DISCORD_BOT_TOKEN`. `worker` runs the NCAAB totals card and
+publishes right after it. `pollers` holds the token too (variable names read
+2026-11-05; it had none on 2026-10-30) but not `DISCORD_CHANNEL_NCAAB`, so
+its publish passes log `Discord: no webhook for NCAAB` and skip those picks
+without marking them sent, and the worker posts them. If the worker is
+down, NCAAB does not post until it is back.
+
+The channel itself is made once by `scripts/discord_create_sport_channel.py`
+(`--name ncaab --like ncaaf`), run on the worker where the bot token lives. It
+copies `#ncaaf`'s category, puts the new channel right after it, and copies
+its permission overwrites role by role, so exactly the members who can see
+`#ncaaf` can see `#ncaab`. It does not copy the topic, which would describe
+football. It prints the new channel's id, which goes into
+`DISCORD_CHANNEL_NCAAB` on the worker (then redeploy it).
+`--dry-run` prints what it would create. It refuses when `#ncaab` already
+exists and prints that channel's id instead. The bot needs Manage Channels.
+`--like` takes the source channel's name or its id. The server's college
+football channel is not called `ncaaf`: the first dry run (2026-10-31) stopped
+on "no #ncaaf channel". Its id is the one the webhook probe reports for
+`sport:NCAAF`, 1541173382190596311 (2026-09-06). When the source is not found,
+the stop message lists the guild's text channels by name and id.
 
 ### Producers (`tracking/discord_notifier.py`)
 
 | Function | Source of truth | Called from |
 |---|---|---|
-| `notify_discord_signals` | **`picks` ⋈ `model_action_thresholds`** — the same table the app reads, at the same cut as its `passesActionFilter` and the `docs/mobile_picks_prompt.md` query. Was `opening_signals` until 2026-09-05; see "One board" below | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
-| `notify_discord_live` | `picks WHERE is_live` BET rows, through `tracking/publish_filters.live_publishable_sql` (2026-09-12) | end of `models/live_scorer.run_live_scorer`, end of each `ncaaf_live.gameday` pass, and `nfl/live_model/pick_writer.announce_live_picks` after every NFL live BET the in-play worker commits (2026-09-09; before that the NFL lane announced nowhere) |
+| `notify_discord_signals` | **`picks` ⋈ `model_action_thresholds`** — the same table the app reads, at the same cut as its `passesActionFilter` and the `open_picks` view (`docs/mobile_picks_prompt.md`). Was `opening_signals` until 2026-09-05; see "One board" below | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
+| `notify_discord_live` | `picks WHERE is_live` BET rows, through `tracking/publish_filters.live_publishable_sql` (2026-09-12) | end of `models/live_scorer.run_live_scorer` and each `ncaaf_live.gameday` pass (both `pollers` jobs), end of `nfl_live_leader.gameday` (also `pollers`), and `nfl/live_model/pick_writer.announce_live_picks` on `worker` after every NFL live BET the retired in-play worker commits when `RUN_NFL_LIVE=1` (2026-09-09; before that the NFL lane announced nowhere) |
 | `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
 | `notify_discord_free_pick` | ONE random qualifying signal per day (NFL preferred once the season produces signals) | same step as the signals producer |
-| `notify_discord_restate` | **`picks`**, same cut, minus the not-yet-posted filter — the whole date, not whatever happens to be unposted. Was `opening_signals` until 2026-09-05; see "The repair paths" below | same step as the signals producer, gated on `DISCORD_RESTATE_DATES` |
+| `notify_discord_restate` | **`picks`**, same cut, minus the not-yet-posted filter — the whole date, not whatever happens to be unposted. Was `opening_signals` until 2026-09-05; see "The repair paths" below | same step as the signals producer, gated on `DISCORD_RESTATE_DATES` and on mike's approval (`config.RECORD_RESTATEMENT_APPROVALS`) |
 | `_job_publish_discord_signals` | calls `notify_discord_signals` unchanged | `worker_jobs`, claimed by the worker every 5 min |
 
 ### One board — the app, Discord and push publish the same set (2026-09-05)
@@ -387,15 +447,15 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   land BEFORE Step 0 settle.** On 2026-09-10 the NFL player log was filled
   after settle (Steps 4b/4c); the 6am recap for 09-09 went out MLB-only and
   the three NFL BETs settled an hour later, against an already-ledgered date.
-  Now Step 0h. **And a recap a later settlement invalidates is restated by
-  itself** (session 275): every settle pass scans the last week's daily
-  snapshots for a pick in the recap's universe with `settled_at >
-  published_at`, and re-posts Discord (title "· restated", note with both
-  counts) then X ("results (restated)"), ledgered per correction on the
-  published_at being corrected. Late settlement is the only trigger: a count
-  difference is not, because the recap query applies today's cuts. Hand
-  re-posts stay a worker job: `publish_results` with `{"game_date": ...}`
-  clears both ledger rows and posts through the ordinary paths.
+  Now Step 0h, and Step 0h1 pulls the NHL per-game logs for the same reason (a
+  goalie prop grades only once the stats pull has flagged his start).
+- **A record holds until every pick it counts is graded, and it is never posted
+  twice** (mike, 2026-10-30). `record_held_for_grading` runs in front of the daily,
+  weekly and monthly notifiers on both surfaces: it finds the picks with no result
+  (`_UNGRADED_SQL`, the record's own universe), grades them, and holds the post if
+  any are left, telling ops once a morning. The automatic restatement that ran
+  from 2026-09-10 is gone, and a late grade now only alerts ops
+  (`flag_recaps_gone_short`). Rule and every route: `.claude/rules/picks-and-publishing.md`.
 - **A day the 6am run could not recap posts at the first pass that can.**
   2026-10-12's only counting bets (two NHL props) were graded at 07:24 on
   10-13, after the 6am run had found nothing to recap, and nothing asked again
@@ -481,6 +541,17 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   is `needs_review` (`no_regulation_score`) and is tried again. A message
   whose parse_status is still `needs_review` is reparsed on the next grade
   pass.
+- **ParlayMatt's recap is his channel only.** `DISCORD_WEBHOOK_PARLAYMATT`
+  has no fallback to `#results` or X. The windows and the 15-minute read
+  are the same as Eggz. Ledger keys are `discord_parlaymatt_results_day`,
+  `discord_parlaymatt_results_week`, and `discord_parlaymatt_results_month`.
+  The poll uses `DISCORD_PARLAYMATT_CHANNEL_ID` and
+  `DISCORD_PARLAYMATT_AUTHOR_ID`. Unset channel, author, or webhook: his
+  half does not call Discord and does not post. A parlay header is one bet
+  at its stated price and stake. The legs are not a second unit. Anything
+  that does not parse, including a round robin, is `needs_review` and is
+  kept. His all-time line starts at his own first graded game date. His
+  rows stay out of `picks`.
 - **Units and the record are the same graded picks.** A home-run bet with a
   real price counts in both. One with no price is staked at the bare
   conviction. Neither is left out of the units.
@@ -623,7 +694,7 @@ date, so a Sunday-night bet is Monday's) rather than a clock date.
 
 Two changes that only make sense together.
 
-**Selectivity.** Swept every settled live BET at real DK prices, flat $100:
+**Selectivity.** Swept every settled live BET at real DK prices, one flat unit per bet:
 
 | model | at 0.65/0.10 | verdict |
 |---|---|---|

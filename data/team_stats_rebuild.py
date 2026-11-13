@@ -44,7 +44,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -57,6 +57,12 @@ from data.db import DBConnection, get_connection
 # leaked tables had 1 or 2; NCAAF, which is correct, has 14-16 weekly snapshots
 # and must not be flagged.
 MIN_SNAPSHOTS_PER_SEASON = 5
+
+# A daily writer stamps as_of_date with the pipeline's America/New_York run
+# date. The check's clock is UTC. Those two dates disagree by one day from
+# midnight UTC until the next morning's run, so a row dated yesterday is
+# still the current series. Two days behind means a run was missed.
+SNAPSHOT_SERIES_RECENT_DAYS = 1
 
 # Per sport: the table, the scoring noun its columns use, the last-N windows it
 # stores, and whether it carries NHL's regulation/OT split.
@@ -188,6 +194,39 @@ def live_season_snapshot_grace(game_dates: list[str],
     d0 = datetime.strptime(dates[0], "%Y-%m-%d")
     d1 = datetime.strptime(dates[-1], "%Y-%m-%d")
     return (d1 - d0).days < floor
+
+
+def young_snapshot_series(as_of_dates: list[str], *, today: str,
+                          floor: int = MIN_SNAPSHOTS_PER_SEASON,
+                          recent_days: int = SNAPSHOT_SERIES_RECENT_DAYS) -> bool:
+    """True when this snapshot series started fewer than `floor` days before
+    `today` and its newest row is still current.
+
+    The ingestor writes one as_of_date per pipeline day. A live season whose
+    finals already span `floor` days can still be on its first snapshots:
+    NBA 2027's finals run 2026-10-20..2026-11-02 (107 games), and the first
+    `nba_team_stats` row of that season is as_of 2026-11-03. That is a young
+    series, not the leak of 1–2 snapshots across a finished season.
+
+    Young: the earliest as_of_date is strictly fewer than `floor` days
+    before `today`. Recent: the latest as_of_date is `today` or at most
+    `recent_days` behind. A series whose first row is older than the floor
+    has collapsed (days are missing). A series whose last row is older than
+    `recent_days` has stopped.
+
+    Empty dates are not a grace. `verify` also refuses to apply this when
+    the games read for the live season returned nothing — an empty read
+    must not hide a collapsed series.
+    """
+    dates = sorted({str(d)[:10] for d in as_of_dates if d})
+    if not dates or not today:
+        return False
+    clock = datetime.strptime(str(today)[:10], "%Y-%m-%d")
+    first = datetime.strptime(dates[0], "%Y-%m-%d")
+    last = datetime.strptime(dates[-1], "%Y-%m-%d")
+    young = (clock - first).days < floor
+    lag = (clock - last).days
+    return young and 0 <= lag <= recent_days
 
 
 # ── building the series ──────────────────────────────────────────────────────
@@ -353,7 +392,8 @@ def rebuild_sport(conn: DBConnection, sport: str, seasons: list[int],
     return summary
 
 
-def verify(conn: DBConnection, sport: str, seasons: list[int]) -> dict:
+def verify(conn: DBConnection, sport: str, seasons: list[int],
+           today: str | None = None) -> dict:
     """Run both invariants against what is actually stored.
 
     The current max season is skipped for the impossible-games check: it is
@@ -362,16 +402,30 @@ def verify(conn: DBConnection, sport: str, seasons: list[int]) -> dict:
     scored rows alone yields thousands of false CRITs (e.g. MIN 2026-05-05
     claimed 35 / scored 27).
 
-    Thin-snapshot detection still covers every historical season, and it
-    still covers the live season once that season's finals span
-    MIN_SNAPSHOTS_PER_SEASON days. A shorter span is opening week: one
-    as-of date per pipeline day is expected (NHL 2027 on 2026-09-30 was
-    one snapshot and one final date, and the health gate marked it
-    STALE/CRIT). A live season that already spans the floor and still has
-    1–2 snapshots is the original leak shape and stays thin.
+    Thin-snapshot detection still covers every historical season. On the
+    live season it is excused in two shapes, and nowhere else:
+
+    - Opening week: the finals span fewer than MIN_SNAPSHOTS_PER_SEASON
+      days. One as-of date per pipeline day is expected (NHL 2027 on
+      2026-09-30 was one snapshot and one final date, and the health gate
+      marked it STALE/CRIT).
+    - A young snapshot series: the first as_of_date is fewer than that
+      many days before `today` and the newest row is today or yesterday.
+      NBA 2027 on 2026-11-03 had finals spanning 13 days and a series that
+      had started that morning.
+
+    A live season whose series has collapsed (first row older than the
+    floor, still under it in count) or stopped (newest row more than a day
+    behind) stays thin. No completed dates is not a grace: a games read
+    that returns nothing must not hide a collapsed series.
     `live_snapshot_grace` is that season when the thin hit was excused,
-    else None.
+    else None. `today` defaults to the UTC date of the check.
     """
+    if today is None:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    else:
+        today = str(today)[:10]
+
     table = SPORTS[sport]["table"]
     marks = ",".join("?" for _ in seasons)
     # Both game_date and as_of_date are TEXT; compare as YYYY-MM-DD only.
@@ -399,7 +453,15 @@ def verify(conn: DBConnection, sport: str, seasons: list[int]) -> dict:
     if live_season is not None and any(s == live_season for s, _n in thin):
         live_dates = [g["date"] for g in _games(conn, sport, [live_season])
                       if int(g["season"]) == int(live_season)]
-        if live_season_snapshot_grace(live_dates):
+        snap_dates = [r["as_of_date"] for r in stored
+                      if r["season"] == live_season]
+        # Opening week, or a series that itself just started and is still
+        # being written. No completed date — an empty read, or dates that
+        # are blank — is neither. That read must not hide a collapsed series.
+        completed = [d for d in live_dates if d]
+        if live_season_snapshot_grace(completed) or (
+                bool(completed)
+                and young_snapshot_series(snap_dates, today=today)):
             grace_season = live_season
             thin = [(s, n) for s, n in thin if s != live_season]
 

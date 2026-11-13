@@ -75,11 +75,11 @@ class _PoisonConn:
         return self
 
     def fetchone(self):
-        # The started-game skip re-reads the pregame cutoff. These games'
-        # commence_time is in 1999, and the cutoff read has to say the same
-        # thing or the loop builds features for them.
-        if "first_pitch_at" in self.last:
-            return ("1999-01-01T00:00:00+00:00",)
+        # The scoring loop's started-game check (#931) re-reads each game's
+        # pregame cutoff. Answer it with the start these games already have,
+        # so they are skipped before any feature build, as the test intends.
+        if "FROM games WHERE game_id" in self.last:
+            return ("1999-01-01T00:00:00",)
         return None
 
     def fetchall(self):

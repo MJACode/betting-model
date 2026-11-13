@@ -99,7 +99,7 @@ class TestTheCard:
         assert len(rows) == 1
         r = rows[0]
         assert r["pick_side"] == "under" and r["scored_line"] == 1.5 and r["dk_odds"] == 105
-        assert r["pick_label"] == "Charlie McAvoy Under 1.5 Blocked Shots (DK)"
+        assert r["pick_label"] == "Charlie McAvoy Under 1.5 Blocked Shots"
         assert r["prop_market"] == bs.MARKET and r["player_id"] == "1" and r["signal_type"] == "BET"
         assert not pick_problems(r["pick_label"], r["pick_side"], r["scored_line"], r["model_id"],
                                  prop_market=r["prop_market"])

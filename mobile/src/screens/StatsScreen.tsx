@@ -13,7 +13,6 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -25,22 +24,26 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
+import { AppSwitch } from '@/components/AppSwitch';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { AddLineSheet } from '@/components/AddLineSheet';
+import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { HitModeSheet } from '@/components/HitModeSheet';
 import { propLineSheetInput } from '@/lib/lineLegs';
 import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { AnytimeMatchupCell } from '@/components/AnytimeMatchupCell';
+import { MatchupFloorMark, MatchupStrengthBar } from '@/components/MatchupStrengthBar';
 import { BookMark } from '@/components/BookMark';
 import { SegmentTabs } from '@/components/GroupTabs';
 import { InfoSheet, InfoTooltip } from '@/components/InfoTooltip';
 import { SectionTitle } from '@/components/SectionTitle';
 import { showToast } from '@/components/Toast';
-import { SportToggle } from '@/components/SportToggle';
+import { StatsSportButton } from '@/components/StatsSportButton';
 import { TeamsBoard } from '@/components/TeamsBoard';
+import { NbaFirstBasketBoard } from '@/components/NbaFirstBasketBoard';
+import { InjuryChip } from '@/components/InjuryChip';
 import { SettingsButton } from '@/components/SettingsButton';
 import { FilterChip } from '@/components/filters/FilterChip';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
@@ -97,17 +100,18 @@ import { parseTypedLine, stepLineFrom, supportsPlayerDetail } from '@/lib/player
 import {
   buildMatchupMap,
   defenceMetricSpoken,
-  gradeColorDiscriminates,
   gradeMatchup,
   gradeOpponentDefence,
-  gradeSpoken,
   gradesOnDefence,
+  matchupStrengthFloorSpoken,
+  matchupStrengthSpoken,
   meetsGradeFloor,
+  strengthForGrade,
   GRADE_FLOORS,
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
-import { addDays, etDate, formatAmerican, MINUS, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
+import { addDays, boardSeasonET, etDate, formatAmerican, MINUS, monthET, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_MAX,
@@ -157,6 +161,8 @@ import {
   type TonightSlate,
 } from '@/lib/statsBoard';
 import { normalizePlayerName } from '@/lib/playerNews';
+import { pricePillActivation, sinkSidelined, type InjuryTag } from '@/lib/injuryStatus';
+import { useInjuryStatus } from '@/hooks/useInjuryStatus';
 import {
   mostCommonPostedLine,
   nhlBetCaption,
@@ -176,12 +182,16 @@ import {
   type StatDef,
 } from '@/lib/statCatalog';
 import {
+  boardSegmentsFor,
+  supportsFirstBasketBoard,
+  type BoardSegment,
   chipsForSegment,
   defaultSegmentFor,
   emptiedByPosition,
   matchesPosition,
   positionEmptyText,
   positionFallbackNote,
+  positionSegmentsFor,
   positionsForSegment,
   readCarriesPosition,
   segmentAccessibilityLabel,
@@ -197,6 +207,13 @@ import {
   defaultLineN,
   pointInBubble,
   previewTypedLine,
+  compactRulerHeight,
+  rulerMarkHeight,
+  stopUnderOffset,
+  RULER_MARK_H,
+  RULER_TICKS_H,
+  markerBoxInGesture,
+  markerHitOverhang,
   programmaticPick,
   rulerChromeHeight,
   rulerHi,
@@ -217,7 +234,7 @@ import {
   type BubbleBox,
   type RulerScale,
 } from '@/lib/lineRuler';
-import { supportsTeamBoard } from '@/lib/teamStatCatalog';
+import { supportsTeamBoard, teamBoardSeason, teamSeasonLabel } from '@/lib/teamStatCatalog';
 import {
   ATD_COPY,
   ATD_HIT_W,
@@ -231,11 +248,11 @@ import {
   compareAnytimeRows,
   defenseKey,
   groupsUsedByBoard,
-  ranksInGroup,
   isAnytimeTdBoard,
   meetsTierFloor,
   nextMatchupSort,
-  tierFloorLabel,
+  tierBars,
+  tierFloorSpoken,
   TIER_FLOORS,
   type AnytimeMatchupView,
   type DefenseRank,
@@ -243,7 +260,16 @@ import {
   type MatchupTier,
 } from '@/lib/anytimeMatchup';
 import { nflPositionGroup } from '@/lib/positionVsOpponent';
-import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
+import {
+  HEADLINE_WRAP_FONT_SCALE,
+  PICKER_AFTER_DISMISS_MS,
+  SHEET_DISMISS_FALLBACK_MS,
+  boardNotesAccessibilityLabel,
+  lineHeadlineNumberOfLines,
+  reducePickerHandoff,
+  type PickerHandoffPhase,
+} from '@/lib/statsBoardA11y';
+import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText, errorKind, friendlyCause, isAbortError, type ErrorKind } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import type {
@@ -271,7 +297,7 @@ type Nav = CompositeNavigationProp<
 type StatsRoute = RouteProp<TabParamList, 'Stats'>;
 type Basis = 'total' | 'perGame';
 /** Which half of the Stats tab is showing. */
-type BoardMode = 'players' | 'teams';
+type BoardMode = BoardSegment;
 type Mode = 'totals' | 'hitRate';
 const MODES: Mode[] = ['hitRate', 'totals'];
 // Last-N-games window. 'season' = whole season (null window on the totals RPC;
@@ -308,20 +334,9 @@ const SEASON = yearET();
  *     perfectly and then clips the PRICE at about fontScale 1.3, which is the
  *     one number on the row a user came for.
  */
-// The GRADE column holds two characters now, not a stacked opponent + fact
-// (2026-09-05), so it gives ~24pt back to the player name — which is exactly
-// where the new subline needs it.
-//
-// The header word is GRADE, not MATCHUP: "MATCHUP" at 11pt semibold needs
-// ~56-58pt and truncated to "MATCHU…" inside a 52pt box (UX review). It is
-// also the more honest label — the cell IS a grade, and the subline above
-// already says who the opponent is, so "MATCHUP" promises a fixture the column
-// no longer prints.
-//
-// 64, not 52, because the header carries the LEGEND: "B+" explains nothing on
-// its own — not which end is good, not what it is graded against, not why some
-// rows are a dash — where the two-line cell it replaces explained itself by
-// printing "S. Gray 5.90 ERA". Still 12pt narrower than the old SPOT column.
+// The column is five bars, not a stacked opponent + fact (2026-09-05) and not
+// a letter (2026-10-28). 64pt holds the meter. The header word sits to the
+// right of the info icon so it shares the bars' trailing edge.
 const MATCHUP_W = 64;
 const ODDS_W = 62;
 
@@ -334,6 +349,8 @@ const ODDS_W = 62;
  * never returns at all (see the slate effect).
  */
 const SLATE_GATE_MS = 4000;
+/** How long the 1st Basket board waits on a slate read before calling it failed (review L4). */
+const SLATE_FAIL_MS = 12000;
 
 /** Stable identity, so swapping to "no rows" cannot itself re-render the list. */
 const EMPTY_ROWS: never[] = [];
@@ -431,6 +448,14 @@ export function StatsScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<StatsRoute>();
   const { sport } = useSportFilter();
+  // Injury tags (Matt, 2026-10-23: Doubs ranked #3 on IR). Re-read on pull.
+  const [injuryReload, setInjuryReload] = useState(0);
+  const injuries = useInjuryStatus(sport, injuryReload);
+  const injuryFor = useCallback(
+    (row: { player_name?: string | null; team?: string | null }): InjuryTag | null =>
+      injuries.lookup(row.player_name, row.team),
+    [injuries],
+  );
   // Today's board — hangs a live price off each leaderboard row, and backs the
   // player odds sheet (all-books prices + add-to-betslip) behind the odds pill.
   // The user's sportsbooks: the column prints the best of THOSE books and
@@ -448,6 +473,13 @@ export function StatsScreen() {
   // The "hasn't posted lines" note is the switch — an instruction sits with
   // the control that performs it.
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Mirrors pickerOpen. A present iOS refuses does not clear the flag, and
+  // writing true again does not present. The sheet hand-off reads this.
+  const pickerOpenRef = useRef(false);
+  const setPickerOpenTracked = (open: boolean) => {
+    pickerOpenRef.current = open;
+    setPickerOpen(open);
+  };
 
   const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [mode, setMode] = useState<Mode>('hitRate');
@@ -487,6 +519,18 @@ export function StatsScreen() {
   const [failedGroups, setFailedGroups] = useState<ReadonlySet<string>>(new Set());
   const [rankReload, setRankReload] = useState(0);
   const [matchupInfoOpen, setMatchupInfoOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  // About sheet → sportsbook picker. iOS presents the picker only after the
+  // sheet has dismissed (reducePickerHandoff). The timer is the fallback
+  // when onDismiss does not arrive, and the short defer after it does.
+  const pickerHandoff = useRef<PickerHandoffPhase>('idle');
+  const pickerHandoffTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pickerHandoffToken = useRef(0);
+  useEffect(() => {
+    return () => {
+      if (pickerHandoffTimer.current != null) clearTimeout(pickerHandoffTimer.current);
+    };
+  }, []);
   // Default ON: a dash means we hold no rating for that defence, not that the
   // spot is bad, and on an NCAAF Saturday the ungraded rows are the FCS
   // visitors — the softest spots on the board. Excluding them by default made
@@ -553,6 +597,11 @@ export function StatsScreen() {
   // changes (midnight, or a resume via useNow), so a board left open overnight
   // does not keep yesterday's teams under "Playing today".
   const [slateReload, setSlateReload] = useState(0);
+  // Whether the slate READ itself has returned for a sport, and failed. The
+  // release timer below settles `slateFor` without a read, which is right for
+  // the leaderboard (it fails open to the whole league) and wrong for the 1st
+  // Basket board, which is nothing but the slate (UX review, 2026-11-08).
+  const [slateRead, setSlateRead] = useState<{ sport: string; failed: boolean } | null>(null);
   // The opponent's DEFENCE, for the sports with no matchup view. MLB and WNBA
   // grade a spot off the probable starter or the lineup; every other sport had
   // a column of dashes, so a toughness filter over it would have filtered
@@ -582,6 +631,7 @@ export function StatsScreen() {
     setSlate(EMPTY_SLATE);
     setSlateGames([]);
     setSlateFor(null);
+    setSlateRead(null);
   }
   // Every book's latest line for the selected stat's market on the slate date.
   const [propLines, setPropLines] = useState<{
@@ -594,9 +644,9 @@ export function StatsScreen() {
   }>({ market: '', rows: [], status: 'ok' });
   // Players | Teams. Teams is a separate board with its own stats and data.
   const [boardMode, setBoardMode] = useState<BoardMode>('players');
-  // The position row's player segment (QB / RB / WR/TE / DEF, Hitters /
-  // Pitchers, or Players). Teams stays `boardMode`, so the Teams board and its
-  // sport-switch rule are untouched; the row shows Teams when that is on.
+  // The player segment (QB / RB / WR/TE / DEF, Hitters / Pitchers, or
+  // Players). Teams stays `boardMode` and lives on the top Players | Teams row;
+  // the pick is kept while Teams is on, so tapping Players comes back to it.
   const [segmentPick, setSegmentPick] = useState<StatSegment>(() => defaultSegmentFor(sport));
   // Read through the sport's own list: for the one render between a sport
   // switch and the reset effect below, the stored pick can belong to the old
@@ -605,7 +655,9 @@ export function StatsScreen() {
     ? segmentPick
     : defaultSegmentFor(sport);
   const activeSegment: StatSegment =
-    boardMode === 'teams' && supportsTeamBoard(sport) ? 'teams' : segment;
+    boardMode === 'teams' && supportsTeamBoard(sport) ? 'teams'
+    : boardMode === 'firstBasket' && supportsFirstBasketBoard(sport) ? 'firstBasket'
+    : segment;
 
   // Hit Rate only exists for sports with per-game player logs (MLB/WNBA/NBA).
   const canHitRate = supportsHitRate(sport);
@@ -647,12 +699,15 @@ export function StatsScreen() {
     }
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
+    // 1st Basket is NBA only: leaving the NBA on it lands on Players.
+    if (!supportsFirstBasketBoard(sport)) setBoardMode((m) => (m === 'firstBasket' ? 'players' : m));
     // Drop the previous sport's slate in the same commit as the chip reset.
     // Until the new read lands, hasSlate would still be true and the
     // Availability label would name the outgoing slate.
     setSlate(EMPTY_SLATE);
     setSlateGames([]);
     setSlateFor(null);
+    setSlateRead(null);
   }, [sport]);
 
   // Load tonight's matchups (MLB/WNBA; others resolve to []). Failure-tolerant —
@@ -682,6 +737,15 @@ export function StatsScreen() {
   useEffect(() => {
     let cancelled = false;
     const from = etDay;
+    // A sport with no player leaderboard and no Teams board draws only its
+    // empty state, so its week of games would be read and thrown away (472
+    // NCAAB games for 2026-11-02 to 11-08, before NCAAB had a board).
+    if (!defaultStatFor(sport) && !supportsTeamBoard(sport)) {
+      setSlate(EMPTY_SLATE);
+      setSlateGames([]);
+      setSlateFor(sport);
+      return;
+    }
     // BOUNDED, because .finally() is not a guarantee that anything happens.
     // The supabase client is created with no fetch timeout, so a request that
     // hangs never settles: no `.finally`, no `error` to render the Retry banner
@@ -693,16 +757,25 @@ export function StatsScreen() {
     const release = setTimeout(() => {
       if (!cancelled) setSlateFor(sport);
     }, SLATE_GATE_MS);
+    // A read with no fetch timeout can hang for good, so the 1st Basket board
+    // is told it failed and shows Retry rather than spin, but only after
+    // SLATE_FAIL_MS: a slow, healthy read at the 4 s gate is not a failure
+    // (review L4, 2026-11-08). A late answer overwrites it in then/catch.
+    const failAfter = setTimeout(() => {
+      if (!cancelled) setSlateRead((r) => (r?.sport === sport ? r : { sport, failed: true }));
+    }, SLATE_FAIL_MS);
     fetchSlateGames(sport, from, addDays(from, 7))
       .then((games: GameRow[]) => {
         if (cancelled) return;
         setSlate(buildTonightSlate(games, sport, from));
         setSlateGames(games.filter((g) => g.sport === sport));
+        setSlateRead({ sport, failed: false });
       })
       .catch(() => {
         if (cancelled) return;
         setSlate(EMPTY_SLATE);
         setSlateGames([]);
+        setSlateRead({ sport, failed: true });
       })
       .finally(() => {
         if (!cancelled) setSlateFor(sport);
@@ -710,6 +783,7 @@ export function StatsScreen() {
     return () => {
       cancelled = true;
       clearTimeout(release);
+      clearTimeout(failAfter);
     };
   }, [slateKey, etDay, sport, slateReload]);
 
@@ -721,7 +795,11 @@ export function StatsScreen() {
       return;
     }
     let cancelled = false;
-    fetchTeamStats(sport, SEASON)
+    // The SAME season the Teams board reads. `SEASON` is the calendar year, and
+    // NBA/NHL/NCAAB label a season by its ENDING year — so in November it asked
+    // for LAST season and graded tonight's spot on 2025-26 defences (Matt,
+    // 2026-11-06: every NBA row drew three bars).
+    fetchTeamStats(sport, teamBoardSeason(sport))
       .then((res) => {
         if (!cancelled) setTeamStats(res);
       })
@@ -897,7 +975,7 @@ export function StatsScreen() {
             touchFailureRef.current = { key: failedKey, kind };
             setTouchFailure(touchFailureRef.current);
           };
-          touchJob = fetchWindowTotals(sport, SEASON, null, playerType)
+          touchJob = fetchWindowTotals(sport, boardSeasonET(sport), null, playerType)
             .then((t) => {
               // Same stamp as the reads below. A response for a sport or
               // player type the user has already left must not replace the
@@ -933,16 +1011,16 @@ export function StatsScreen() {
           // rather than sent unnarrowed (fetchH2HStatValues returns [] on an
           // empty list either way — this keeps the board's empty state honest
           // about WHY, see emptySubtitle).
-          const data = await fetchH2HStatValues(sport, SEASON, key, h2hFixtures, playerType);
+          const data = await fetchH2HStatValues(sport, boardSeasonET(sport), key, h2hFixtures, playerType);
           if (inFlight.current !== stamp) return;
           setH2hValues({ statKey: key, rows: data });
         } else if (timeWindow === 'season') {
           const key = String(stat.key);
-          const data = await fetchSeasonStatValues(sport, SEASON, key, playerType, teams);
+          const data = await fetchSeasonStatValues(sport, boardSeasonET(sport), key, playerType, teams);
           if (inFlight.current !== stamp) return;
           setSeasonValues({ statKey: key, rows: data });
         } else {
-          const data = await fetchRecentGames(sport, SEASON, timeWindow, playerType, teams);
+          const data = await fetchRecentGames(sport, boardSeasonET(sport), timeWindow, playerType, teams);
           if (inFlight.current !== stamp) return;
           setRecentRows(data);
         }
@@ -956,7 +1034,7 @@ export function StatsScreen() {
         // than cast so that if that pairing is ever broken the board falls back
         // to the whole season instead of sending 'h2h' as a game count.
         const win = typeof timeWindow === 'number' ? timeWindow : null;
-        const data = await fetchWindowTotals(sport, SEASON, win, playerType, teams);
+        const data = await fetchWindowTotals(sport, boardSeasonET(sport), win, playerType, teams);
         if (inFlight.current !== stamp) return;
         setRows(data);
       }
@@ -974,6 +1052,7 @@ export function StatsScreen() {
   }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey, h2hKey]);
 
   const refreshBoard = useCallback(() => {
+    setInjuryReload((n) => n + 1);
     setSlateReload((n) => n + 1);
     setRankReload((n) => n + 1);
     void load();
@@ -1028,15 +1107,15 @@ export function StatsScreen() {
   };
 
   /**
-   * The position row. Teams flips to the Teams board; a player segment keeps
+   * Both header rows call this. Teams flips to the Teams board; a player segment keeps
    * the selected stat when it has one (the same chip, or the same column
    * filed under another group — Anytime TD is Rushing on RB and Receiving on
    * WR/TE) and otherwise lands on its first chip (lib/statSegments.ts).
    * Keeping the column keeps the line the user was reading, too.
    */
   const pickSegment = (next: StatSegment) => {
-    if (next === 'teams') {
-      setBoardMode('teams');
+    if (next === 'teams' || next === 'firstBasket') {
+      setBoardMode(next);
       return;
     }
     setBoardMode('players');
@@ -1568,8 +1647,8 @@ export function StatsScreen() {
   /**
    * The Anytime TD cell. Rank 1 is the defense that allows the most to this
    * position. A missing opponent is a named dash, never the A–F grade.
-   * `inactive` stays unset: this board has no injury feed, so "Not playing"
-   * is not invented from a blank status.
+   * `inactive` comes from the injury feed and only says "Not playing" for a
+   * player a team lists as Out / IR / IL. A blank status is not invented.
    */
   const atdViewFor = useCallback(
     (row: {
@@ -1603,20 +1682,20 @@ export function StatsScreen() {
           // H2H names the opponent on the row even when the kickoff index has
           // not caught up. A named opponent is a game.
           teamHasGame: !!fixture || !!named,
-          inactive: null,
+          // The injury feed: Out / IR / IL reads "Not playing".
+          inactive: injuryFor(row)?.sidelined ?? null,
         },
         rank,
-        groupRanks: group ? ranksInGroup(defenseRanks, group) : null,
       });
     },
-    [rankStatus, failedGroups, slateGameIndex, h2hIndex, defenseRanks, leagueHasGames],
+    [rankStatus, failedGroups, slateGameIndex, h2hIndex, defenseRanks, leagueHasGames, injuryFor],
   );
 
   /** Does the column have anything to say for this sport at all? */
   const showMatchupCol = matchupByTeam.size > 0 || (gradesOnDefence(sport) && defenceByTeam.size > 0);
 
   /**
-   * The GRADE column's legend, per sport and naming the season it graded on.
+   * The MATCHUP column's legend, per sport and naming the season it measured.
    *
    * It has to be per sport because the column now answers the same question
    * three different ways, and it has to name the season because the football
@@ -1625,21 +1704,25 @@ export function StatsScreen() {
    * the one place it explains itself.
    */
   const matchupTooltip = useMemo(() => {
-    const seasonWords = defenceSeason != null ? `the ${defenceSeason} season` : 'the season so far';
+    // NBA labels are ENDING years: 2026 reads as "2025-26", or an October
+    // bettor takes "the 2026 season" for the one in progress.
+    // One formatter with the Teams board (teamSeasonLabel).
+    const seasonName = defenceSeason == null ? null : teamSeasonLabel(sport, defenceSeason);
+    const seasonWords = seasonName != null ? `the ${seasonName} season` : 'the season so far';
     const head =
-      'How hard tonight\u2019s spot is for this player, graded against the rest of ' +
-      'the league. A+ is the easiest matchup on the board and F the hardest.';
+      'How hard tonight\u2019s spot is for this player. Five filled bars is the ' +
+      'strongest spot on the board. One filled bar is the weakest.';
     const how = gradesOnDefence(sport)
-      ? `Graded on ${defenceMetricSpoken(sport)} for the team this player faces, over ${seasonWords}.`
-      : 'Batters are graded on the opposing starter\u2019s ERA, pitchers on the ' +
+      ? `Measured on ${defenceMetricSpoken(sport)} for the team this player faces, over ${seasonWords}.`
+      : 'Batters are measured on the opposing starter\u2019s ERA, pitchers on the ' +
         'opposing lineup\u2019s wOBA and strikeout rate, and WNBA players on the ' +
         'opposing defence\u2019s rating.';
     const dash = gradesOnDefence(sport)
-      ? 'A dash means we have no matchup data for this row yet \u2014 no game ' +
+      ? 'A dash means we have no matchup for this row yet \u2014 no game ' +
         'tonight, or nothing on file for the opponent. An unknown matchup is ' +
-        'never graded as average.'
-      : 'A dash means the starter isn\u2019t confirmed yet \u2014 an unknown matchup ' +
-        'is never graded as average.';
+        'a dash, never a bar.'
+      : 'A dash means the starter isn\u2019t confirmed yet. An unknown matchup ' +
+        'is a dash, never a bar.';
     return `${head}\n\n${how}\n\n${dash}`;
   }, [sport, defenceSeason]);
 
@@ -1921,8 +2004,9 @@ export function StatsScreen() {
         );
         return cmp || base;
       });
-    return ranked;
-  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, atdOn, minTier, matchupOrder, atdViewFor, quoteFor]);
+    // Not playing sorts last, whatever his number (Matt, 2026-10-23).
+    return sinkSidelined(ranked, (x) => !!injuryFor(x.row)?.sidelined);
+  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, atdOn, minTier, matchupOrder, atdViewFor, quoteFor, injuryFor]);
 
   // A filter preserves order, so the cut costs one pass and no re-sort.
   const ranked = useMemo(
@@ -2058,8 +2142,9 @@ export function StatsScreen() {
         );
         return cmp || base;
       });
-    return sorted;
-  }, [recentRows, seasonValues, h2hValues, touchSet, playerType, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, atdOn, minTier, matchupOrder, atdViewFor, quoteFor]);
+    // Not playing sorts last, whatever his hit rate (Matt, 2026-10-23).
+    return sinkSidelined(sorted, (p) => !!injuryFor(p)?.sidelined);
+  }, [recentRows, seasonValues, h2hValues, touchSet, playerType, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, pricedByKey, atdOn, minTier, matchupOrder, atdViewFor, quoteFor, injuryFor]);
 
   // The position cut, last and separate for the same reason as `ranked`.
   const hitRateBase = useMemo<HitRatePlayer[]>(
@@ -2122,6 +2207,33 @@ export function StatsScreen() {
   const nhlLogEmpty =
     sport === 'NHL' && effectiveMode === 'totals' && rows.length === 0 && lineOnlyList.length > 0;
   const nhlLinesOnly = sport === 'NHL' && lineOnlyList.length > 0 && effectiveMode === 'totals';
+  // The odds column header opens the sportsbook sheet where it is on screen.
+  // Teams, a settled empty Players board, and a board with no odds column
+  // have no such header — the book line is the visible control there.
+  // While the player list or the book list is still loading, the odds header
+  // is about to appear, so the line stays off and the header does not jump.
+  const playersBoardSettling =
+    loading ||
+    (timeWindow === 'h2h' && slateChecking) ||
+    (touchView === 'loading' && !error);
+  const oddsHeaderSlot = boardChrome.showHeader && (showOdds || !booksReady);
+  // A Players board that can never carry a line (NCAAB and NCAABW: no college
+  // props, Matt 2026-11-03) does not name a book whose lines it will not show.
+  const showHeaderBookLine =
+    (boardMode === 'teams' && supportsTeamBoard(sport)) ||
+    (sport !== 'NCAABW' && sport !== 'NCAAB' && (!stat || (!oddsHeaderSlot && !playersBoardSettling)));
+  // Resting ruler is 28pt. The marker's hit box is 44pt, so the pad and the
+  // stack grow by the overhang and pull the same amount back with a negative
+  // margin. The typing field reports overhang 0 and the pad matches it.
+  const [rulerChrome, setRulerChrome] = useState(() => {
+    const visual = compactRulerHeight(windowFontScale);
+    return { visual, overhang: markerHitOverhang(visual) };
+  });
+  const onRulerChrome = useCallback((visual: number, overhang: number) => {
+    setRulerChrome((prev) =>
+      prev.visual === visual && prev.overhang === overhang ? prev : { visual, overhang },
+    );
+  }, []);
   const lineOnlySection =
     lineOnlyList.length > 0 ? (
       <View>
@@ -2136,6 +2248,7 @@ export function StatsScreen() {
             <LineOnlyRow
               key={p.key}
               name={p.name}
+              injury={injuries.lookup(p.name, null)}
               subline={game ? fixtureSubline(game, showOdds ? null : started) : null}
               quote={quote}
               started={started}
@@ -2181,22 +2294,6 @@ export function StatsScreen() {
   // a verdict on the bet rather than a ranking of players. Computed over what
   // is actually on screen, so the board never colours what it cannot
   // distinguish.
-  /**
-   * Does the GRADE column span more than one colour on what is rendered?
-   *
-   * Computed here, over the visible rows, for the same reason `colorful` is:
-   * on a two-team NFL slate whose defences were both elite, every row grades
-   * D- and the column paints one red block beside a live price. The letter
-   * stays — it is true — and only the ramp goes quiet.
-   */
-  const gradesColorful = useMemo(() => {
-    const rowsOnScreen: { team?: string | null; player_name?: string | null }[] =
-      effectiveMode === 'hitRate' ? hitRatePlayers : ranked.map((r) => r.row);
-    return gradeColorDiscriminates(
-      rowsOnScreen.slice(0, 60).map((r) => matchupFor(r)?.grade ?? null),
-    );
-  }, [effectiveMode, hitRatePlayers, ranked, matchupFor]);
-
   const colorful = useMemo(
     () => hitRateColorDiscriminates(hitRatePlayers.map((p) => p.pct)),
     [hitRatePlayers],
@@ -2250,14 +2347,18 @@ export function StatsScreen() {
       // not open as "69+ over L10" (Matt, 2026-09-25). Hit Rate mode only,
       // for the same reason as the side: an Averages row asked no line.
       line: effectiveMode === 'hitRate' ? lineN : undefined,
-      gameWindow: typeof timeWindow === 'number' ? timeWindow : undefined,
+      gameWindow: typeof timeWindow === 'number' || timeWindow === 'h2h' ? timeWindow : undefined,
     });
   };
 
   // Does Hit Rates | Averages still fit on the end of the window row? Read at
   // render rather than cached in state: a Dynamic Type change re-renders the
   // tree, and a stale flag here is a clipped control.
-  const stackModeTabs = PixelRatio.getFontScale() >= 1.4;
+  const fontScale = PixelRatio.getFontScale();
+  // Accessibility sizes wrap the bet headline (it names the bet, and a
+  // one-line cap ellipsizes it). The same cut stacks Hit Rates | Averages.
+  const stackModeTabs = fontScale >= HEADLINE_WRAP_FONT_SCALE;
+  const headlineLines = lineHeadlineNumberOfLines(fontScale);
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
   // NHL says the bet once, in words ("3 or more shots"), on the caption and
   // on the sheet. Every other sport keeps the ruler's idiom ("25+ Points",
@@ -2380,18 +2481,25 @@ export function StatsScreen() {
       });
     }
     if (atdOn && minTier) {
+      const spoken = tierFloorSpoken(minTier);
       out.push({
         key: 'tier',
-        label: `${tierFloorLabel(minTier)}${includeUngraded ? '' : ', ranked only'}`,
+        label: includeUngraded ? '' : 'ranked only',
+        spoken: includeUngraded ? `matchup ${spoken}` : `matchup ${spoken}, ranked only`,
+        leading: <MatchupFloorMark filled={tierBars(minTier)} tone="tint" />,
         onRemove: () => {
           setMinTier(null);
           setIncludeUngraded(true);
         },
       });
     } else if (!atdOn && minGrade) {
+      const filled = strengthForGrade(minGrade);
+      const spoken = filled ? matchupStrengthFloorSpoken(filled) : 'matchup';
       out.push({
         key: 'grade',
-        label: `${minGrade} or better${includeUngraded ? '' : ', graded only'}`,
+        label: includeUngraded ? '' : 'ranked only',
+        spoken: includeUngraded ? `matchup ${spoken}` : `matchup ${spoken}, ranked only`,
+        leading: filled ? <MatchupFloorMark filled={filled} tone="tint" /> : undefined,
         onRemove: () => {
           setMinGrade(null);
           setIncludeUngraded(true);
@@ -2460,6 +2568,13 @@ export function StatsScreen() {
       const missing = nhlEmptyBoardText(hasLines, betLabel || (stat?.label ?? 'lines'));
       if (missing && rows.length === 0) return missing;
     }
+    // Men's college basketball's first weeks: the board is empty because the
+    // season is new, not because a feed broke, and the reader is told when it
+    // fills (UX review, 2026-11-03). November only, on the ET clock.
+    if ((sport === 'NCAABW' || sport === 'NCAAB') && rows.length === 0 && monthET() === 11) {
+      const s = boardSeasonET(sport);
+      return `The ${s - 1}\u2013${String(s).slice(2)} season has just tipped off. Player stats appear as each game goes final.`;
+    }
     const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
   }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures, positionEmptied, segment, propMarket, propLines, betLabel, rows.length]);
@@ -2472,13 +2587,17 @@ export function StatsScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <View style={styles.titleRow}>
-            <Text style={styles.title}>Stats</Text>
+            <View style={styles.titleCluster}>
+              <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                Stats
+              </Text>
+              <StatsSportButton />
+            </View>
             <SettingsButton />
           </View>
-          <SportsbookIndicator coverageNote={coverageNote} />
-          <SportToggle />
+          {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
-        <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
+        <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
         <TeamsBoard
           sport={sport}
           onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
@@ -2498,6 +2617,39 @@ export function StatsScreen() {
     );
   }
 
+  // 1st Basket board (NBA only, Matt 2026-11-08): one card per game on the
+  // slate. Ahead of the empty-catalog guard, like Teams.
+  if (boardMode === 'firstBasket' && supportsFirstBasketBoard(sport)) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <View style={styles.titleRow}>
+            <View style={styles.titleCluster}>
+              <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                Stats
+              </Text>
+              <StatsSportButton />
+            </View>
+            <SettingsButton />
+          </View>
+        </View>
+        <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
+        <NbaFirstBasketBoard
+          games={slate.date ? slateGames.filter((g) => g.game_date === slate.date) : []}
+          slateLabel={slateLabel}
+          slateSettled={slateRead?.sport === sport}
+          slateFailed={slateRead?.sport === sport && slateRead.failed}
+          injuryFor={injuries.lookup}
+          nowMs={now}
+          onRefresh={() => {
+            setSlateReload((n) => n + 1);
+            setInjuryReload((n) => n + 1);
+          }}
+        />
+      </SafeAreaView>
+    );
+  }
+
   // A sport whose catalog is empty. Golf is no longer a chip. NHL is not this
   // branch: it has a skater board, and its Teams/Goalies view is the Players |
   // Teams segment above, which returns before this guard.
@@ -2506,12 +2658,17 @@ export function StatsScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <View style={styles.titleRow}>
-            <Text style={styles.title}>Stats</Text>
+            <View style={styles.titleCluster}>
+              <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                Stats
+              </Text>
+              <StatsSportButton />
+            </View>
             <SettingsButton />
           </View>
-          <SportToggle />
+          {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
-        <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
+        <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
         <EmptyState
           title="No player leaderboard"
           subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
@@ -2561,40 +2718,129 @@ export function StatsScreen() {
     </FilterSection>
   );
 
+  // BOARD NOTES live behind ONE ⓘ at the end of the window strip (Matt,
+  // 2026-10-29: "way too much room at the top… language we feel we need to
+  // have should be on a tool tip"). Each was a full-width caption row; on the
+  // Anytime TD board two of them pushed the first player below the fold. The
+  // retry row is NOT here — it is a control, not a note. Same strings, same
+  // conditions as the captions they replace.
+  const boardNotes: string[] = [];
+  if (positionNote) boardNotes.push(positionNote);
+  if (effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitData.length > 0) {
+    boardNotes.push(
+      'H2H · each player against their next opponent, last 2 seasons. Many are a single meeting — the count is under every rate.',
+    );
+  }
+  if (noLinesNote) boardNotes.push(noLinesNote.text);
+  if (atdOn && (rankStatus === 'ok' || rankStatus === 'partial') && anyBlended(defenseRanks.values())) {
+    boardNotes.push(ATD_COPY.earlySeason);
+  }
+  const notesCanSwitch = noLinesNote?.canSwitch === true;
+  // The price column is absent exactly when showOdds is false. That is when
+  // the note explains missing prices. A one-sided book (dirLockNote) keeps
+  // the column, so it stays in the sheet body and is not spoken as "prices
+  // are missing". Dash cells are not mounted in the absent-column case.
+  const missingPriceReason = showOdds ? null : (noLinesNote?.text ?? null);
+  // The notes can empty while the sheet is open (a stat change, a refetch);
+  // close it then, or it would pop back open on the next note.
+  // Not an effect: this sits below the `!stat` early return, so a hook here
+  // would change the hook count. A same-render state reset is allowed.
+  if (notesOpen && boardNotes.length === 0) setNotesOpen(false);
+  const windowStripHidden =
+    sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0;
+  const notesButton =
+    boardNotes.length > 0 ? (
+      <Pressable
+        onPress={() => {
+          // A leftover arm (the fallback presented, onDismiss never came)
+          // must not open the picker when this sheet is later dismissed
+          // with Got it.
+          pickerHandoff.current = 'idle';
+          cancelPickerHandoffTimer();
+          setNotesOpen(true);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={boardNotesAccessibilityLabel(boardNotes.length, missingPriceReason)}
+        accessibilityHint="Opens notes about this board"
+        style={({ pressed }) => [styles.notesBtn, pressed && styles.pressed]}
+      >
+        <Ionicons name="information-circle-outline" size={20} color={colors.tint} />
+        {/* A dot when a note explains missing prices: the column of dashes
+            is otherwise the only sign anything is behind the ⓘ. */}
+        {noLinesNote ? <View style={styles.notesDot} importantForAccessibility="no" /> : null}
+      </Pressable>
+    ) : null;
+
+  const cancelPickerHandoffTimer = () => {
+    pickerHandoffToken.current += 1;
+    if (pickerHandoffTimer.current != null) {
+      clearTimeout(pickerHandoffTimer.current);
+      pickerHandoffTimer.current = null;
+    }
+  };
+  // iOS will not present a Modal while another is fading out. The tap arms
+  // the hand-off and closes the sheet; the picker opens from onDismiss,
+  // one beat after the fade, so the presenter is free. The fallback covers
+  // a dropped onDismiss. A release that is not armed (Got it) opens nothing.
+  const onChangeSportsbooks = () => {
+    const step = reducePickerHandoff(
+      pickerHandoff.current,
+      Platform.OS === 'ios' ? 'tap-ios' : 'tap-other',
+    );
+    pickerHandoff.current = step.phase;
+    if (step.closeSheet) setNotesOpen(false);
+    if (step.openPicker) setPickerOpenTracked(true);
+    if (!step.armFallback) return;
+    cancelPickerHandoffTimer();
+    const token = pickerHandoffToken.current;
+    pickerHandoffTimer.current = setTimeout(() => {
+      if (pickerHandoffToken.current !== token) return;
+      pickerHandoffTimer.current = null;
+      // Stay armed. If this present is refused because the sheet is still
+      // up, onDismiss presents again.
+      const released = reducePickerHandoff(pickerHandoff.current, 'fallback');
+      pickerHandoff.current = released.phase;
+      if (released.openPicker) setPickerOpenTracked(true);
+    }, SHEET_DISMISS_FALLBACK_MS);
+  };
+  const onNotesSheetDismiss = () => {
+    const step = reducePickerHandoff(pickerHandoff.current, 'release');
+    pickerHandoff.current = step.phase;
+    if (!step.openPicker) return;
+    cancelPickerHandoffTimer();
+    const token = pickerHandoffToken.current;
+    // The fallback may already have set the flag. If iOS refused that
+    // present, writing true again changes nothing. Drop it, then present
+    // once the sheet has released the screen.
+    if (pickerOpenRef.current) setPickerOpenTracked(false);
+    pickerHandoffTimer.current = setTimeout(() => {
+      if (pickerHandoffToken.current !== token) return;
+      pickerHandoffTimer.current = null;
+      setPickerOpenTracked(true);
+    }, PICKER_AFTER_DISMISS_MS);
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <View style={styles.titleRow}>
-          <Text style={styles.title}>Stats</Text>
+          <View style={styles.titleCluster}>
+            <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              Stats
+            </Text>
+            <StatsSportButton />
+          </View>
           <View style={styles.rightActions}>
-            {/* "Clear all" lives beside the control it undoes rather than on a
-                row of its own at the bottom of the stack — MasterClass puts
-                FILTERS and CLEAR FILTERS on one line, and with the duplicate
-                slate pill suppressed below there was nothing else left on that
-                row to justify its 34pt (UX review, 2026-09-12). */}
-            {activeFilterCount > 0 ? (
-              <Pressable
-                onPress={resetFilters}
-                hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-                accessibilityRole="button"
-                accessibilityLabel="Clear all filters"
-                style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
-              >
-                <Text style={styles.clearText}>Clear all</Text>
-              </Pressable>
-            ) : null}
             <Pressable
               onPress={() => setFiltersOpen(true)}
-              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               accessibilityRole="button"
-              // The badge is a bare number in a View next to the word, so
-              // VoiceOver read "Filters, 2" with no trait and no idea what the
-              // 2 counted — the button said the same whether one filter was on
-              // or five. Two changes landed on this in one day and both fixed
-              // it: master made the sheet the only route to the Availability
-              // cut, which promoted a standing scan finding into a real one,
-              // and the control-stack collapse hit it from the scan side (UX
-              // reviews, 2026-09-12).
+              hitSlop={{ top: 0, bottom: 0, left: 4, right: 4 }}
+              // The badge is a bare number in a View, so VoiceOver read
+              // "Filters, 2" with no trait and no idea what the 2 counted.
+              // The word is drawn again (Matt, 2026-10-25): icon-only was
+              // how the sport pill fit, and it was not obvious. "Clear all"
+              // sits on the next line so this row — Stats, NFL ▾, Filters,
+              // gear — stays inside a 390pt phone.
               accessibilityLabel={
                 activeFilterCount > 0 ? `Filters, ${activeFilterCount} active` : 'Filters'
               }
@@ -2612,13 +2858,25 @@ export function StatsScreen() {
             <SettingsButton />
           </View>
         </View>
-        <SportsbookIndicator coverageNote={coverageNote} />
-        <SportToggle />
+        {activeFilterCount > 0 ? (
+          <View style={styles.clearRow}>
+            <Pressable
+              onPress={resetFilters}
+              hitSlop={{ top: 0, bottom: 0, left: 6, right: 6 }}
+              accessibilityRole="button"
+              accessibilityLabel="Clear all filters"
+              style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.clearText}>Clear all</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
       </View>
 
-      <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
+      <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
 
-      {/* Stat selector — the primary control, straight under the position row,
+      {/* Stat selector — the primary control, under the header's tab rows,
           and the one row on this screen that is never allowed to cost less: it
           is the board's subject, one tap, directly manipulated.
           ONE row. It was a chip row per group (4 for NFL), then a group tab row
@@ -2655,21 +2913,19 @@ export function StatsScreen() {
           The pill does not also say the snapshot is old. Prop rows carry
           snapshot_at, and the game-line age rule (markets.priceAgeApplies)
           does not cover props — their normal age is hours. A second caption
-          on this shared cell would be a new flag on every sport's board. */}
+          on this shared cell would be a new flag on every sport's board.
+          It stays INLINE when the other notes moved behind the ⓘ: it names
+          the bet, it is not an explanation (UX review, 2026-10-29). */}
       {!canHitRate && showOdds && lineHeadline ? (
         <View style={styles.noLinesRow}>
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{lineHeadline}</Text>
-        </View>
-      ) : null}
-
-      {/* The position row picked a position the board cannot filter by: say
-          so once, in the same quiet caption as the no-lines note, rather than
-          label a list of every position "QB" (Designer + Reviewer, #830). */}
-      {positionNote ? (
-        <View style={styles.noLinesRow}>
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{positionNote}</Text>
+          <Text
+            style={styles.noLinesText}
+            numberOfLines={headlineLines}
+            accessibilityLabel={lineHeadline}
+          >
+            {lineHeadline}
+          </Text>
         </View>
       ) : null}
 
@@ -2679,21 +2935,24 @@ export function StatsScreen() {
           enabled={lineScroll}
           maxHeight={Math.max(160, Math.round(windowHeight * 0.45))}
         >
-          <View style={styles.lineStack}>
-          <View style={styles.lineRow}>
+          <View pointerEvents="box-none" style={styles.lineStack}>
+          {/* Compact B: the direction is a label, the book's number sits on
+              the same line, and the ruler underneath is the short tick row.
+              The label still opens At Least / Over / Under. */}
+          <View style={styles.lineCaption}>
             {/* Locked to the one side the member's books actually sell. It
-                loses the chevron AND the chip's fill and border, because a
-                DIMMED BORDERED CHIP is iOS for "a button you cannot use right
-                now" and gets tapped again; a label has no container (UX
-                review). The text stays at full textSecondary strength rather
-                than being faded onto a chip, which would land at ~3.5:1.
-                The reason lives in the coverage note below, so this carries no
-                accessibilityState and no sentence — VoiceOver was reading the
-                whole thing twice, once here and once from the caption, and
-                announcing "dimmed" on an element declared as static text. */}
+                loses the chip's fill and border, because a DIMMED BORDERED
+                CHIP is iOS for "a button you cannot use right now" and gets
+                tapped again; a label has no container (UX review). The text
+                stays at full textSecondary strength rather than being faded
+                onto a chip, which would land at ~3.5:1. The reason lives in
+                the coverage note below, so this carries no accessibilityState
+                and no sentence — VoiceOver was reading the whole thing twice,
+                once here and once from the caption, and announcing "dimmed"
+                on an element declared as static text. */}
             <Pressable
               onPress={() => setModeOpen(true)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
               accessibilityRole="button"
               // Not "Show bets that are": this control survives on a column
               // with no line at all (NCAAF carries, sacks), where it is the
@@ -2706,12 +2965,41 @@ export function StatsScreen() {
               style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
             >
               <Text style={styles.dirPillText} numberOfLines={1}>
-                {hitModeLabel(hitMode)}
+                {hitMode === 'atLeast' ? 'At least' : hitModeLabel(hitMode)}
               </Text>
-              {/* chevron-expand, not chevron-down: this opens a menu in place,
-                  it does not navigate. */}
-              <Ionicons name="chevron-expand" size={14} color={colors.textSecondary} />
             </Pressable>
+            {/* At Least only, and a footnote rather than a headline. The row
+                this replaces restated the stat, the number and the direction —
+                all three already on screen — in the screen's second-largest
+                type, outweighing the hit rate the board exists to show (UX
+                review, 2026-09-12). Only the book's half-point line was novel,
+                so only it survives. Over and Under ARE that number already. */}
+            {hitMode === 'atLeast' ? (
+              // Silent: `describe` below already appends this exact string to
+              // the ruler's accessibilityValue, so leaving it reachable made
+              // VoiceOver read "Over 1.5" twice — once in the adjustable, once
+              // on the next swipe. Same double-read the direction pill's note
+              // records fixing on 2026-09-05.
+              <Text style={styles.bookLine} numberOfLines={1} importantForAccessibility="no">
+                {hitModeLineLabel(lineN, hitMode)}
+              </Text>
+            ) : null}
+          </View>
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.lineRulerPad,
+              {
+                height: rulerChrome.visual + rulerChrome.overhang * 2,
+                // The top wing overlaps the caption. "At least" sits on the
+                // left of that line, clear of the marker. The bottom wing
+                // stays inside this pad: a negative margin here pulled the
+                // window chip under the marker into the wing (UX review).
+                marginTop: -rulerChrome.overhang,
+                zIndex: 1,
+              },
+            ]}
+          >
             {/* Every mode resolves a stop to the SAME half-point line — only
                 the face differs — so a mode change renames the bet without
                 moving it (lib/hitMode.ts). The stops are not quite the same
@@ -2746,23 +3034,8 @@ export function StatsScreen() {
               // the stops VoiceOver can step — LineRuler's `hi`, not
               // `scale.max`. Junk still parses as nothing.
               parseTyped={(text) => parseTypedLine(text, hitMode)}
+              onChrome={onRulerChrome}
             />
-            {/* At Least only, and a footnote rather than a headline. The row
-                this replaces restated the stat, the number and the direction —
-                all three already on screen — in the screen's second-largest
-                type, outweighing the hit rate the board exists to show (UX
-                review, 2026-09-12). Only the book's half-point line was novel,
-                so only it survives. Over and Under ARE that number already. */}
-            {hitMode === 'atLeast' ? (
-              // Silent: `describe` above already appends this exact string to
-              // the ruler's accessibilityValue, so leaving it reachable made
-              // VoiceOver read "Over 1.5" twice — once in the adjustable, once
-              // on the next swipe. Same double-read the direction pill's note
-              // records fixing on 2026-09-05.
-              <Text style={styles.bookLine} numberOfLines={1} importantForAccessibility="no">
-                {hitModeLineLabel(lineN, hitMode)}
-              </Text>
-            ) : null}
           </View>
           {Platform.OS !== 'ios' && lineEditBar ? (
             <ThresholdDoneBar onCancel={lineEditBar.cancel} onDone={lineEditBar.commit} />
@@ -2788,10 +3061,14 @@ export function StatsScreen() {
           RN ScrollViews default to flexGrow/flexShrink 1, so a direct child of
           the screen column gets crushed to a sliver whenever the controls +
           list overflow the screen (labels clip out entirely). The WRAPPER is
-          that child now and carries the pin; the scroller inside it flexes on
-          the horizontal axis, which cannot crush anything. The FlatList below
-          stays the one flexible region. */}
-      {sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0 ? null : (
+          that child now and carries the pin. The scroller is flex: 1 with
+          basis 0 (styles.rowScroller) so it takes the width the labels leave
+          and the chips scroll; a content-sized basis measured "Hit Rates" and
+          "Averages" down to their padding at 390×1. The FlatList below stays
+          the one flexible region. */}
+      {windowStripHidden ? (
+        notesButton ? <View style={styles.notesFallbackRow}>{notesButton}</View> : null
+      ) : (
       <View style={[styles.fixedRow, styles.windowStrip]}>
         <ScrollView
           horizontal
@@ -2825,7 +3102,7 @@ export function StatsScreen() {
             whole strip to its natural height and the FlatList stays the one
             flexible child of the screen column. */}
         {canHitRate && !stackModeTabs ? (
-          <View style={styles.modeSeg}>
+          <View style={[styles.modeSeg, notesButton ? styles.modeSegBeforeNotes : null]}>
             <SegmentTabs
               items={MODES}
               active={effectiveMode}
@@ -2835,6 +3112,7 @@ export function StatsScreen() {
             />
           </View>
         ) : null}
+        {notesButton}
       </View>
       )}
       {/* At accessibility text sizes the inline segment is ~302pt of a 375pt
@@ -2904,58 +3182,16 @@ export function StatsScreen() {
               accessibilityRole="button"
               key={p.key}
               onPress={p.onRemove}
-              accessibilityLabel={`Remove filter ${p.label}`}
+              accessibilityLabel={`Remove filter ${p.spoken ?? p.label}`}
               style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
               hitSlop={6}
             >
-              <Text style={styles.pillText}>{p.label}</Text>
+              {p.leading}
+              {p.label ? <Text style={styles.pillText}>{p.label}</Text> : null}
               <Ionicons name="close" size={12} color={colors.tint} />
             </Pressable>
           ))}
         </ScrollView>
-      ) : null}
-
-      {/* WHAT THE COLUMN IS COUNTING. The chip says it in three characters and
-          nothing else on the board expands them: under H2H the percentage is
-          against ONE opponent over two seasons, not a recent-form window, and a
-          reader who has not tapped through to a player has no way to know that.
-          Same quiet caption idiom as the no-lines note below it. */}
-      {effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitData.length > 0 ? (
-        <View style={styles.noLinesRow}>
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>
-            H2H · each player against their next opponent, last 2 seasons. Many are a
-            single meeting — the count is under every rate.
-          </Text>
-        </View>
-      ) : null}
-
-      {noLinesNote ? (
-        <Pressable
-          hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
-          onPress={noLinesNote.canSwitch ? () => setPickerOpen(true) : undefined}
-          disabled={!noLinesNote.canSwitch}
-          accessibilityRole={noLinesNote.canSwitch ? 'button' : undefined}
-          accessibilityLabel={
-            noLinesNote.canSwitch ? `${noLinesNote.text} Switch sportsbook` : noLinesNote.text
-          }
-          style={({ pressed }) => [styles.noLinesRow, pressed && styles.pressed]}
-        >
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>
-            {noLinesNote.text}
-            {noLinesNote.canSwitch ? (
-              <Text style={styles.noLinesLink}> Change your sportsbooks ›</Text>
-            ) : null}
-          </Text>
-        </Pressable>
-      ) : null}
-
-      {atdOn && (rankStatus === 'ok' || rankStatus === 'partial') && anyBlended(defenseRanks.values()) ? (
-        <View style={styles.noLinesRow}>
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{ATD_COPY.earlySeason}</Text>
-        </View>
       ) : null}
 
       {atdOn && (rankStatus === 'error' || rankStatus === 'partial') ? (
@@ -2998,6 +3234,7 @@ export function StatsScreen() {
           atdStack={stackAtd}
           matchupOrder={matchupOrder}
           onMatchupSort={() => setMatchupOrder((current) => nextMatchupSort(current))}
+          onOpenBooks={() => setPickerOpenTracked(true)}
         />
       ) : null}
 
@@ -3017,12 +3254,12 @@ export function StatsScreen() {
               <HitRateRow
                 rank={index + 1}
                 player={item}
+                injury={injuryFor(item)}
                 matchup={matchupFor(item)}
                 showMatchup={showMatchupCol}
                 atdView={atdOn ? atdViewFor(item) : undefined}
                 atdStack={stackAtd}
                 onMatchupExplain={openMatchupInfo}
-                gradeColorful={gradesColorful}
                 subline={sublineFor(item)}
                 quote={quote}
                 started={item.team ? startedTeams.get(item.team) ?? null : null}
@@ -3031,7 +3268,7 @@ export function StatsScreen() {
                 hitMode={hitMode}
                 sport={sport}
                 colorful={colorful}
-                thinSample={timeWindow === 'h2h'}
+                thinSample
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail && canOpenPlayerDetail(item.player_id)}
@@ -3079,6 +3316,7 @@ export function StatsScreen() {
               <LeaderRow
                 rank={index + 1}
                 row={item.row}
+                injury={injuryFor(item.row)}
                 value={item.value}
                 gp={item.gp}
                 basis={basis}
@@ -3087,7 +3325,6 @@ export function StatsScreen() {
                 atdView={atdOn ? atdViewFor(item.row) : undefined}
                 atdStack={stackAtd}
                 onMatchupExplain={openMatchupInfo}
-                gradeColorful={gradesColorful}
                 subline={sublineFor(item.row)}
                 quote={quote}
                 started={item.row.team ? startedTeams.get(item.row.team) ?? null : null}
@@ -3129,6 +3366,21 @@ export function StatsScreen() {
       )}
 
       <InfoSheet
+        visible={notesOpen}
+        title="About this board"
+        body={boardNotes.join('\n\n')}
+        onClose={() => setNotesOpen(false)}
+        onDismiss={onNotesSheetDismiss}
+        action={
+          notesCanSwitch
+            ? {
+                label: 'Change your sportsbooks',
+                onPress: onChangeSportsbooks,
+              }
+            : null
+        }
+      />
+      <InfoSheet
         visible={matchupInfoOpen}
         title={ATD_COPY.infoTitle}
         body={ATD_COPY.infoBody}
@@ -3136,7 +3388,7 @@ export function StatsScreen() {
       />
       <SportsbookPickerSheet
         visible={pickerOpen}
-        onClose={() => setPickerOpen(false)}
+        onClose={() => setPickerOpenTracked(false)}
         coverageNote={coverageNote}
       />
       <HitModeSheet
@@ -3226,7 +3478,7 @@ export function StatsScreen() {
             <Text style={[styles.ungradedLabel, slateCutDead && styles.rowDisabled]}>
               {hasSlate ? slateLabel : 'Playing today'}
             </Text>
-            <Switch
+            <AppSwitch
               value={tonightActive && !gamesPicked}
               onValueChange={setTonightOnly}
               disabled={slateCutDead}
@@ -3281,7 +3533,9 @@ export function StatsScreen() {
           <FilterSection
             title={ATD_COPY.filterTitle}
             subtitle={ATD_COPY.filterSubtitle}
-            summary={minTier ? tierFloorLabel(minTier) : 'Any matchup'}
+            summary={minTier ? undefined : 'Any matchup'}
+            summaryNode={minTier ? <MatchupFloorMark filled={tierBars(minTier)} /> : undefined}
+            summarySpoken={minTier ? tierFloorSpoken(minTier) : undefined}
             defaultOpen={minTier != null}
             onClear={minTier ? () => { setMinTier(null); setIncludeUngraded(true); } : undefined}
           >
@@ -3294,8 +3548,11 @@ export function StatsScreen() {
               {TIER_FLOORS.map((tier) => (
                 <FilterChip
                   key={tier}
-                  label={tierFloorLabel(tier)}
+                  appearance="outline"
+                  label="+"
+                  leading={<MatchupStrengthBar filled={tierBars(tier)} size="chip" />}
                   active={minTier === tier}
+                  accessibilityLabel={tierFloorSpoken(tier)}
                   onPress={() => setMinTier(minTier === tier ? null : tier)}
                 />
               ))}
@@ -3303,7 +3560,7 @@ export function StatsScreen() {
             {minTier ? (
               <View style={styles.ungradedRow}>
                 <Text style={styles.ungradedLabel}>{ATD_COPY.includeUnranked}</Text>
-                <Switch
+                <AppSwitch
                   value={includeUngraded}
                   onValueChange={setIncludeUngraded}
                   accessibilityLabel={ATD_COPY.includeUnranked}
@@ -3313,13 +3570,24 @@ export function StatsScreen() {
           </FilterSection>
         ) : showMatchupCol ? (
           <FilterSection
-            title="Matchup grade"
+            title="Matchup"
             // The comparison is stated once, here, so the chip, this summary
             // and the pill all say the same thing. The chips were labelled
             // "A+" and set floor 'A' — ambiguous on a scale where A+ is a real
-            // grade, and a second name for one setting (UX review).
-            subtitle="How soft the defence is, at or above the grade you pick. A is the easiest spot on the board."
-            summary={minGrade ? `${minGrade} or better` : 'Any matchup'}
+            // grade, and a second name for one setting (UX review). The floor
+            // is now the bar count: A is five filled, and the chip draws that.
+            subtitle="Five bars, filled from the left. The floor keeps that strength and every stronger spot."
+            summary={minGrade ? undefined : 'Any matchup'}
+            summaryNode={
+              minGrade && strengthForGrade(minGrade)
+                ? <MatchupFloorMark filled={strengthForGrade(minGrade)!} />
+                : undefined
+            }
+            summarySpoken={
+              minGrade && strengthForGrade(minGrade)
+                ? matchupStrengthFloorSpoken(strengthForGrade(minGrade)!)
+                : undefined
+            }
             defaultOpen={minGrade != null}
             onClear={minGrade ? () => { setMinGrade(null); setIncludeUngraded(true); } : undefined}
           >
@@ -3329,15 +3597,21 @@ export function StatsScreen() {
                 active={minGrade == null}
                 onPress={() => setMinGrade(null)}
               />
-              {GRADE_FLOORS.map((g) => (
-                <FilterChip
-                  key={g}
-                  label={g}
-                  active={minGrade === g}
-                  accessibilityLabel={`${gradeSpoken(g)} or better`}
-                  onPress={() => setMinGrade(minGrade === g ? null : g)}
-                />
-              ))}
+              {GRADE_FLOORS.map((g) => {
+                const filled = strengthForGrade(g);
+                if (!filled) return null;
+                return (
+                  <FilterChip
+                    key={g}
+                    appearance="outline"
+                    label="+"
+                    leading={<MatchupStrengthBar filled={filled} size="chip" />}
+                    active={minGrade === g}
+                    accessibilityLabel={matchupStrengthFloorSpoken(filled)}
+                    onPress={() => setMinGrade(minGrade === g ? null : g)}
+                  />
+                );
+              })}
             </View>
             {/* A dash is "no rating for that defence", not "a bad spot" — and
                 on a college Saturday those rows are the FCS visitors, the
@@ -3345,11 +3619,11 @@ export function StatsScreen() {
                 anyone who wants only rows we can vouch for. */}
             {minGrade ? (
               <View style={styles.ungradedRow}>
-                <Text style={styles.ungradedLabel}>Include ungraded matchups</Text>
-                <Switch
+                <Text style={styles.ungradedLabel}>Include matchups we can’t rank</Text>
+                <AppSwitch
                   value={includeUngraded}
                   onValueChange={setIncludeUngraded}
-                  accessibilityLabel="Include players whose matchup has no grade"
+                  accessibilityLabel="Include matchups we can’t rank"
                 />
               </View>
             ) : null}
@@ -3552,6 +3826,7 @@ function LineRuler({
   statLabel = '',
   onNotice,
   onEditBar,
+  onChrome,
   parseTyped,
 }: {
   a11yLabel: string;
@@ -3562,6 +3837,8 @@ function LineRuler({
   /** Android and web draw Cancel and Done under the whole row. iOS ignores
    *  this and uses the keyboard accessory. Null when the field is closed. */
   onEditBar?: (bar: { cancel: () => void; commit: () => void } | null) => void;
+  /** Resting strip height and how far the 44pt marker target hangs past it. */
+  onChrome?: (visualH: number, overhang: number) => void;
   /** Reads a typed line into a stop, or null to refuse it. UNCLAMPED — the
    *  commit decides min / max. When given, the centre bubble is the field
    *  (Matt, 2026-10-09: "need to allow user to edit manually"). A typed
@@ -3640,6 +3917,42 @@ function LineRuler({
 
   const offsetFor = (v: number) => stopIndexOf(v, scale) * tickW;
 
+  // The stop under the pointer WHILE a finger moves the strip (Matt,
+  // 2026-10-28: "The line should show where I'm heading"). The bubble draws
+  // it live; the board itself still re-filters once, when the strip settles,
+  // so the list does not jump under the thumb. Only a finger drag (and the
+  // fling after it) previews: a programmatic scroll — a tick tap, a typed
+  // line parking on the nearest stop — must not show a stop the value is not.
+  const [preview, setPreview] = useState<number | null>(null);
+  const previewRef = useRef<number | null>(null);
+  const fingerRef = useRef(false);
+  const fingerEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endPreview = () => {
+    fingerRef.current = false;
+    if (fingerEndTimer.current != null) clearTimeout(fingerEndTimer.current);
+    fingerEndTimer.current = null;
+    previewRef.current = null;
+    setPreview(null);
+  };
+  useEffect(() => () => {
+    if (fingerEndTimer.current != null) clearTimeout(fingerEndTimer.current);
+  }, []);
+  // An outside change (stat switch, a settle that moved the value) ends any
+  // preview, so the bubble never keeps a stale number.
+  useEffect(() => {
+    if (!fingerRef.current) {
+      previewRef.current = null;
+      setPreview(null);
+    }
+  }, [value]);
+  const onLiveScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!fingerRef.current) return;
+    const v = stopUnderOffset(e.nativeEvent.contentOffset.x, tickW, scale);
+    if (v === previewRef.current) return;
+    previewRef.current = v;
+    setPreview(v);
+  };
+
   // Position the strip once the viewport is measured (contentOffset alone is
   // unreliable on Android), and again whenever the value changes from outside.
   useEffect(() => {
@@ -3703,12 +4016,14 @@ function LineRuler({
   const commitTaken = useRef(false);
   const openedValue = useRef(value);
   const bubbleBox = useRef<BubbleBox | null>(null);
+  const rawBubble = useRef<BubbleBox | null>(null);
   // A tap that started on the bubble also lands on the tick underneath.
   // That tick must not move the line. The tick's onPress can arrive after
   // the tap handler's END, so the guard stays up through this turn and drops
   // on the next frame, or sooner when the next touch begins.
   const suppressTick = useRef(false);
   const suppressRelease = useRef<number | null>(null);
+  const wingOrigin = useRef<{ x: number; y: number } | null>(null);
   const releaseTickGuard = () => {
     if (suppressRelease.current != null) cancelAnimationFrame(suppressRelease.current);
     suppressRelease.current = requestAnimationFrame(() => {
@@ -3725,13 +4040,30 @@ function LineRuler({
     scrollRef.current?.scrollTo({ x: offsetFor(v), animated: false });
   };
   const openDraft = () => {
-    if (!parseTyped || draft != null) return;
+    // The wing responder and the strip's tap handler can both see one
+    // press. The second call is a no-op.
+    if (!parseTyped || draft != null || editingRef.current) return;
     commitTaken.current = false;
     editingRef.current = true;
     openedValue.current = value;
     onNotice?.(null);
     setForceSelect(true);
     setDraft(faceOf(value));
+  };
+  const onWingGrant = (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+    wingOrigin.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+  };
+  // A flick that starts in the 8pt wing must not open the field. The strip's
+  // tap handler already gives up past this distance; the wing was calling
+  // openDraft on every release.
+  const onWingRelease = (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+    const origin = wingOrigin.current;
+    wingOrigin.current = null;
+    if (origin == null) return;
+    const dx = e.nativeEvent.pageX - origin.x;
+    const dy = e.nativeEvent.pageY - origin.y;
+    if (dx * dx + dy * dy > THRESHOLD_TAP_MAX_DIST * THRESHOLD_TAP_MAX_DIST) return;
+    openDraft();
   };
   const closeDraft = () => {
     editingRef.current = false;
@@ -3778,6 +4110,18 @@ function LineRuler({
   commitRef.current = commitDraft;
   cancelRef.current = cancelDraft;
   const fieldOpen = draft != null;
+  // Resting row is the short tick strip. Opening the field grows it so the
+  // 44pt typing bubble is not clipped.
+  const visualH = fieldOpen ? rulerChromeHeight(fontScale) : compactRulerHeight(fontScale);
+  // The press handler used to be this strip (~28pt). pointInBubble already
+  // grew a 22pt pill to 44pt on paper, and the touches never arrived: the
+  // gesture view was the strip. The wings below are that missing band, only
+  // as wide as the pill, so a neighbouring tick still receives its own tap.
+  const overhang = fieldOpen ? 0 : markerHitOverhang(visualH);
+  const hitH = visualH + overhang * 2;
+  // The resting marker draws with the text, and stops at 1.6× so a 2×
+  // setting does not swallow the strip (lib/lineRuler.ts rulerMarkHeight).
+  const markH = rulerMarkHeight(fontScale);
   useEffect(() => {
     if (Platform.OS === 'ios' || !onEditBar) return;
     if (!fieldOpen) {
@@ -3804,7 +4148,10 @@ function LineRuler({
   };
   const onBubbleLayout = (e: { nativeEvent: { layout: BubbleBox } }) => {
     const box = e.nativeEvent.layout;
-    bubbleBox.current = box;
+    rawBubble.current = box;
+    // Layout is inside the visual strip. The gesture view starts `overhang`
+    // above that strip; the wings live in that band.
+    bubbleBox.current = markerBoxInGesture(box, overhang);
     setBubbleFrame((prev) =>
       prev &&
       prev.x === box.x &&
@@ -3815,6 +4162,13 @@ function LineRuler({
         : box,
     );
   };
+  useEffect(() => {
+    const raw = rawBubble.current;
+    if (raw) bubbleBox.current = markerBoxInGesture(raw, overhang);
+  }, [overhang]);
+  useEffect(() => {
+    onChrome?.(visualH, overhang);
+  }, [visualH, overhang, onChrome]);
   const onBubbleTap = (e: { nativeEvent: { state: number; x: number; y: number } }) => {
     const box = bubbleBox.current;
     const { state, x, y } = e.nativeEvent;
@@ -3861,7 +4215,8 @@ function LineRuler({
           onHandlerStateChange={onBubbleTap}
         >
           <View
-            style={[styles.rulerWrap, { height: rulerChromeHeight(fontScale) }]}
+            pointerEvents="box-none"
+            style={[styles.rulerWrap, { height: hitH, minHeight: hitH }]}
             collapsable={false}
             onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
             // Not while typing, so VoiceOver can reach the field.
@@ -3896,19 +4251,84 @@ function LineRuler({
               if (next >= min && next <= hi) pickTick(next);
             }}
           >
+            {overhang > 0 && bubbleFrame != null ? (
+              <View
+                pointerEvents="box-none"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: bubbleFrame.x,
+                  width: bubbleFrame.width,
+                  height: overhang,
+                }}
+              >
+                <View
+                  collapsable={false}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  onStartShouldSetResponder={() => true}
+                  onResponderGrant={onWingGrant}
+                  onResponderRelease={onWingRelease}
+                  style={{ width: bubbleFrame.width, height: overhang }}
+                />
+              </View>
+            ) : null}
+            {overhang > 0 && bubbleFrame != null ? (
+              <View
+                pointerEvents="box-none"
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: bubbleFrame.x,
+                  width: bubbleFrame.width,
+                  height: overhang,
+                }}
+              >
+                <View
+                  collapsable={false}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  onStartShouldSetResponder={() => true}
+                  onResponderGrant={onWingGrant}
+                  onResponderRelease={onWingRelease}
+                  style={{ width: bubbleFrame.width, height: overhang }}
+                />
+              </View>
+            ) : null}
+            <View pointerEvents="box-none" style={{ height: visualH, marginTop: overhang }}>
             {width > 0 ? (
               <GestureScrollView
                 ref={scrollRef}
                 simultaneousHandlers={tapRef}
+                style={{ height: visualH }}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 snapToInterval={tickW}
                 decelerationRate="fast"
                 contentOffset={{ x: offsetFor(value), y: 0 }}
                 contentContainerStyle={{ paddingHorizontal: sidePad }}
-                onMomentumScrollEnd={settle}
-                onScrollEndDrag={settle}
+                onScroll={onLiveScroll}
+                scrollEventThrottle={16}
+                onMomentumScrollBegin={() => {
+                  // The fling keeps previewing; cancel the no-fling fallback.
+                  if (fingerEndTimer.current != null) clearTimeout(fingerEndTimer.current);
+                  fingerEndTimer.current = null;
+                }}
+                onMomentumScrollEnd={(e) => {
+                  settle(e);
+                  endPreview();
+                }}
+                onScrollEndDrag={(e) => {
+                  settle(e);
+                  // A drag released without a fling gets no momentum events.
+                  // If none begins shortly, the preview ends here.
+                  if (fingerEndTimer.current != null) clearTimeout(fingerEndTimer.current);
+                  fingerEndTimer.current = setTimeout(endPreview, 250);
+                }}
                 onScrollBeginDrag={() => {
+                  fingerRef.current = true;
+                  if (fingerEndTimer.current != null) clearTimeout(fingerEndTimer.current);
+                  fingerEndTimer.current = null;
                   // A drag is the finger taking the strip. Drop an open draft
                   // so the settle lands on the dragged stop, and so the blur
                   // that follows does not commit the half-typed number.
@@ -3929,6 +4349,7 @@ function LineRuler({
                 }}
               >
                 {Array.from({ length: count }, (_, i) => {
+                  const tickColBox = { width: tickW, height: visualH, paddingTop: fieldOpen ? visualH - RULER_TICKS_H : markH };
                   const v = stopAt(i, scale);
                   const labeled = v % labelUnits === 0 || v === min || v === hi;
                   return (
@@ -3943,25 +4364,20 @@ function LineRuler({
                       accessible={false}
                       accessibilityElementsHidden
                       importantForAccessibility="no-hide-descendants"
-                      style={[styles.tickCol, { width: tickW }]}
+                      style={[styles.tickCol, styles.tickColCompact, tickColBox]}
                     >
-                      <View style={[styles.tick, labeled && styles.tickMajor]} />
-                      {/* The label is wider than its tick column — centre it with a
-                          negative margin so it can't clip, and only label ticks far
-                          enough apart (labelEvery) that neighbours can't collide. */}
-                      <Text
-                        style={[styles.tickLabel, { marginHorizontal: -(LABEL_W - tickW) / 2 }]}
-                        numberOfLines={1}
-                        // The box is a fixed LABEL_W, so a face that outgrows it
-                        // TAIL-TRUNCATES — and "149.…" on a tick does not read as a
-                        // truncation, it reads as a different number. Capping the
-                        // scale is the sanctioned trade for numerals in a dense
-                        // strip (UX_REVIEW §5); it matters more now that the wide
-                        // branch labels EVERY stop on a five-character Over face.
-                        maxFontSizeMultiplier={1.3}
-                      >
-                        {labeled ? faceOf(v) : ''}
-                      </Text>
+                      <View style={[styles.tick, styles.tickCompact, labeled && styles.tickMajorCompact]} />
+                      {/* The number under a major tick, so the values passing
+                          the pointer can be read mid-drag (Matt, 2026-10-28). */}
+                      {labeled ? (
+                        <Text
+                          style={[styles.tickNumber, { left: (tickW - LABEL_W) / 2 }]}
+                          numberOfLines={1}
+                          maxFontSizeMultiplier={1.3}
+                        >
+                          {faceOf(v)}
+                        </Text>
+                      ) : null}
                     </Pressable>
                   );
                 })}
@@ -3971,8 +4387,8 @@ function LineRuler({
                 number reaches the strip. A quick tap is the gesture handler
                 on the wrap: it fails past THRESHOLD_TAP_MAX_DIST, and the
                 scroll keeps the gesture. The field takes touch only while open. */}
-            <View pointerEvents="box-none" style={styles.centerMarker}>
-              <View pointerEvents="none" style={styles.centerLine} />
+            <View pointerEvents="box-none" style={[styles.centerMarker, draft == null && styles.centerMarkerCompact]}>
+              {draft != null ? <View pointerEvents="none" style={styles.centerLine} /> : null}
               {draft != null ? (
                 <TextInput
                   value={draft}
@@ -3996,17 +4412,33 @@ function LineRuler({
                   accessibilityLabel={`Type a ${a11yLabel}, now ${describeOf(value)}`}
                 />
               ) : (
-                <View
-                  pointerEvents="none"
-                  style={[styles.thresholdBubble, bubblePressed && styles.pressed]}
-                  onLayout={onBubbleLayout}
-                  accessibilityElementsHidden
-                  importantForAccessibility="no-hide-descendants"
-                >
-                  <Text style={styles.tickValueActive}>{faceOf(value)}</Text>
-                  {parseTyped ? <Ionicons name="pencil" size={12} color={colors.tint} /> : null}
-                </View>
+                <>
+                  <View
+                    pointerEvents="none"
+                    style={[
+                      styles.thresholdMark,
+                      { height: markH, minWidth: markH * 2, borderRadius: markH / 2 },
+                      bubblePressed && styles.pressed,
+                    ]}
+                    onLayout={onBubbleLayout}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                  >
+                    {/* Live while dragging: the stop under the pointer. */}
+                    <Text style={styles.thresholdMarkText} maxFontSizeMultiplier={1.3}>
+                      {faceOf(preview ?? value)}
+                    </Text>
+                    {/* Says the number can be tapped and typed. Part of the
+                        marker, not a separate button (verify_line_ruler). */}
+                    {parseTyped ? (
+                      <Ionicons name="pencil" size={12} color={colors.textInverse} style={styles.thresholdMarkIcon} />
+                    ) : null}
+                  </View>
+                  {/* Pointer from the bubble onto the exact stop. */}
+                  <View pointerEvents="none" style={styles.markPointer} />
+                </>
               )}
+            </View>
             </View>
           </View>
         </TapGestureHandler>
@@ -4027,7 +4459,7 @@ function LineRuler({
               bubbleFrame
                 ? {
                     left: bubbleFrame.x,
-                    top: bubbleFrame.y,
+                    top: bubbleFrame.y + overhang,
                     width: Math.max(bubbleFrame.width, THRESHOLD_BUBBLE_W),
                     height: Math.max(bubbleFrame.height, THRESHOLD_BUBBLE_H),
                   }
@@ -4046,35 +4478,57 @@ function LineRuler({
 }
 
 /**
- * The position row (Designer, Option A, Matt 2026-09-25): QB / RB / WR/TE /
- * DEF / Teams on the football boards, Hitters / Pitchers / Teams on MLB, and
- * the old Players | Teams everywhere else. It REPLACES Players | Teams rather
- * than stacking under it, so the header gains no height, and it is the same
- * first-level SegmentTabs (tint underline) the toggle was.
+ * The Stats header's tab rows. Players | Teams on top on every sport, the same
+ * toggle NBA has (Matt, 2026-11-02, reversing the 2026-09-25 single row that
+ * folded Teams into QB / RB / WR/TE / DEF / Teams). Where a sport has
+ * positions — NFL, NCAAF, MLB — they ride a second-level row under Players,
+ * one tap each as before, and the row hides on the Teams board.
  *
- * Width: the row splits the screen evenly. On a 393pt phone the NFL's five
- * segments get 78.6pt each, and the widest label ("WR/TE", "Teams") is about
- * 45pt at font.size.body semibold. `fit` shrinks a label at the largest
- * Dynamic Type sizes rather than truncating it.
+ * Tapping Players returns to the position last picked (`segment`), so a trip
+ * to Teams and back does not reset the board to QB.
  */
 function StatSegmentRow({
   sport,
   active,
+  segment,
   onChange,
 }: {
   sport: Sport;
+  /** 'teams' / 'firstBasket' while that board is on, else the player segment. */
   active: StatSegment;
+  /** The player segment last picked, kept while Teams is on. */
+  segment: StatSegment;
   onChange: (s: StatSegment) => void;
 }) {
+  const positions = positionSegmentsFor(sport);
+  // The top row's board: Teams and 1st Basket are their own boards; any other
+  // segment is the Players board.
+  const board: BoardSegment = active === 'teams' || active === 'firstBasket' ? active : 'players';
   return (
-    <SegmentTabs
-      items={segmentsForSport(sport)}
-      active={active}
-      onChange={onChange}
-      labelFor={segmentLabel}
-      accessibilityLabelFor={segmentAccessibilityLabel}
-      fit
-    />
+    <>
+      <SegmentTabs
+        items={boardSegmentsFor(sport)}
+        active={board}
+        onChange={(next) => onChange(next === 'players' ? (positions.length ? segment : 'players') : next)}
+        labelFor={segmentLabel}
+        accessibilityLabelFor={segmentAccessibilityLabel}
+        tight
+        // Three tabs on the NBA (Players | Teams | 1st Basket): about 96pt each
+        // at 320pt, so labels shrink rather than truncate (UX review, 2026-11-08).
+        fit
+      />
+      {board === 'players' ? (
+        <SegmentTabs
+          items={positions}
+          active={segment}
+          onChange={onChange}
+          labelFor={segmentLabel}
+          accessibilityLabelFor={segmentAccessibilityLabel}
+          second
+          fit
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -4112,6 +4566,21 @@ export function offLineCaption(
   return modeLineLabel(line, side, mode, true);
 }
 
+/** A disabled Pressable does not take the touch, so the row under the pill
+ *  would open the player. This view claims that touch and does not act on it.
+ *  The pill stays disabled, with no onPress. */
+function holdSidelinedTap(muted: boolean, pill: React.ReactElement): React.ReactElement {
+  if (!muted) return pill;
+  return (
+    <View
+      onStartShouldSetResponder={() => true}
+      onResponderTerminationRequest={() => false}
+    >
+      {pill}
+    </View>
+  );
+}
+
 function OddsCell({
   quote,
   started,
@@ -4123,6 +4592,7 @@ function OddsCell({
   onPress,
   bestPrice = false,
   priceFixed = false,
+  muted = false,
 }: {
   quote: StatsOddsQuote | null;
   started?: 'Live' | 'Final' | null;
@@ -4142,6 +4612,9 @@ function OddsCell({
   bestPrice?: boolean;
   /** Lock the column width. Off once the metrics have stacked under the name. */
   priceFixed?: boolean;
+  /** The player is not playing: the price stays, but never as a filled book
+   *  pill beside an IR tag (UX review, 2026-10-23). */
+  muted?: boolean;
 }) {
   const wrapStyle = [styles.oddsWrap, bestPrice && priceFixed && styles.oddsWrapFixed];
   if (quote == null) {
@@ -4155,7 +4628,9 @@ function OddsCell({
       );
     }
     // The dash is not read out: the row's own label already says the player and
-    // the stat, and "em dash" is not information.
+    // the stat, and "em dash" is not information. A column that is absent
+    // entirely is explained on the board-notes ⓘ, not on a cell that is not
+    // mounted.
     return (
       <View style={wrapStyle} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <Text style={styles.oddsEmpty}>—</Text>
@@ -4167,14 +4642,25 @@ function OddsCell({
   // the hit rate, which is the number this board exists to show — and a tint
   // pill also reads as one of our own buttons rather than as FanDuel's price.
   const c = bookButtonColors(quote.book);
-  const filled = quote.book === MODEL_BOOK;
+  const filled = !muted && quote.book === MODEL_BOOK;
   const sideWord = quote.side === 'under' ? 'under' : 'over';
   // The pill is a nested Pressable, so VoiceOver reads it as its own element and
   // inherits nothing from the row — without the player and the stat it is 25
   // near-identical prices with no way to tell whose is whose. The line goes in
   // here precisely because it is no longer printed on the row.
   const priceText = formatAmerican(quote.price).replace(/-/g, MINUS);
-  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${priceText} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
+  const label = `${playerName}${muted ? ', not playing' : ''}, ${sideWord} ${quote.line} ${statLabel}, ${priceText} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
+  // Sidelined: the outlined pill and the ", not playing" label stay. The press
+  // does not. Questionable and Doubtful are not muted, so they still press.
+  const pill = pricePillActivation(muted, onPress != null);
+  const pillA11y = {
+    onPress: pill.pressable ? onPress : undefined,
+    disabled: pill.disabled,
+    // Role and label stay literal on each Pressable: verify_a11y reads them
+    // from the JSX and cannot see through a spread.
+    accessibilityState: muted ? { disabled: true } : undefined,
+    ...(pill.pressable ? { accessibilityHint: 'Asks to add this line to your betslip' } : {}),
+  };
   // The book's OWN line, when it does not post the board's: printed under the
   // price in whichever idiom the header is speaking — "3+" in At Least, the
   // book's own "O 2.5" in Over/Under — so it reads against the header without
@@ -4189,16 +4675,14 @@ function OddsCell({
   const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;
   const caption = bestPrice ? null : [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
   if (bestPrice) {
-    return (
+    return holdSidelinedTap(muted, (
       <Pressable
-        onPress={onPress}
-        disabled={!onPress}
+        {...pillA11y}
+        accessibilityRole="button"
+        accessibilityLabel={label}
         // Vertical slop crossed into the matchup line and the next name once
         // the stacked gap shrank to 2pt. The 44pt box is the target.
         hitSlop={{ top: 0, bottom: 0, left: 8, right: 8 }}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        accessibilityHint="Asks to add this line to your betslip"
         style={({ pressed }) => [
           styles.oddsBestWrap,
           priceFixed && styles.oddsWrapFixed,
@@ -4222,24 +4706,22 @@ function OddsCell({
           </View>
         ) : null}
       </Pressable>
-    );
+    ));
   }
-  return (
+  return holdSidelinedTap(muted, (
     <Pressable
-      onPress={onPress}
-      disabled={!onPress}
+      {...pillA11y}
+      accessibilityRole="button"
+      accessibilityLabel={label}
       // Dropping the caption shrank the target below 44pt, so hitSlop makes up
       // the difference; a mis-tap opens a dismissible sheet, never a book.
       hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityHint="Asks to add this line to your betslip"
       style={({ pressed }) => [styles.oddsWrap, pressed && styles.pressed]}
     >
       <View
         style={[
           styles.oddsPill,
-          filled ? { backgroundColor: c.bg } : styles.oddsPillOutlined,
+          filled ? { backgroundColor: c.bg } : muted ? styles.oddsPillNeutral : styles.oddsPillOutlined,
         ]}
       >
         <Text
@@ -4262,46 +4744,26 @@ function OddsCell({
         </Text>
       ) : null}
     </Pressable>
-  );
+  ));
 }
 
-/** MATCHUP: how hard this spot is, as one letter.
+/** MATCHUP: how hard this spot is, as five bars.
  *
- * Matt, 2026-09-05: "update spot column to just be difficulty of that match up
- * and have a bigger scale besides low med and high". So the cell is the grade
- * and nothing else — the opponent moved under the name the same day, and the
- * FACT behind the grade (the opposing starter and his ERA, the defence's
- * rating) moved to the player's detail screen, which was Matt's own alternative
- * home for it on 2026-09-04 ("or have it be in the player data when you click
- * on a record"). It is also still spoken in full here, in the cell's label.
+ * Matt, 2026-09-05: the column is the difficulty of the matchup, and the FACT
+ * behind it (the opposing starter and his ERA, the defence's rating) lives on
+ * the player's detail screen. Matt, 2026-10-28: the letter is gone. Five
+ * segments, filled from the left. VoiceOver says "Matchup strength N of 5".
  *
- * The grade is a percentile against MEASURED league distributions, not the
- * three hand-set cliffs it replaces — `lib/matchup.ts` carries the numbers and
- * why the old bands called 77% of WNBA matchups favourable.
+ * The count is a percentile against MEASURED league distributions — `lib/matchup.ts`
+ * carries the numbers. Colour is the `colors.grade*` ramp, NOT bet/avoid, and
+ * it is not the only carrier: the filled count is the fact.
  *
- * Colour is the `colors.grade*` ramp, NOT bet/avoid: those are this app's
- * BET/AVOID semantics and the hit-rate column 60pt away is already a traffic
- * light. It is also never the only carrier — the letter is the fact, the
- * colour only speeds up the scan, and the label spells the letter out
- * ("B plus", because VoiceOver reads a bare "+" as nothing).
- *
- * An ungraded matchup is a DASH, never a C: grading a starter we do not know
+ * An ungraded matchup is a DASH, never a bar: grading a starter we do not know
  * as average invents the one fact this column exists to report.
  */
-function MatchupCell({
-  matchup,
-  colorful = true,
-}: {
-  matchup: MatchupInfo | null;
-  /**
-   * False when every visible row lands in the same colour band — the letter is
-   * still right, but a whole column of one colour beside a live price reads as
-   * a verdict on the bet rather than a ranking of players (the same rule
-   * `colorful` applies to the hit-rate column).
-   */
-  colorful?: boolean;
-}) {
-  if (!matchup?.grade) {
+function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
+  const filled = strengthForGrade(matchup?.grade);
+  if (!filled) {
     return (
       <View
         style={styles.matchupWrap}
@@ -4316,17 +4778,9 @@ function MatchupCell({
     <View
       style={styles.matchupWrap}
       accessible
-      accessibilityLabel={`Matchup grade ${gradeSpoken(matchup.grade)}${matchup.fact ? `, ${matchup.fact}` : ''}`}
+      accessibilityLabel={`${matchupStrengthSpoken(filled)}${matchup?.fact ? `, ${matchup.fact}` : ''}`}
     >
-      <Text
-        style={[
-          styles.matchupGrade,
-          { color: colorful ? gradeColor(matchup.grade) : colors.textPrimary },
-        ]}
-        numberOfLines={1}
-      >
-        {matchup.grade}
-      </Text>
+      <MatchupStrengthBar filled={filled} />
     </View>
   );
 }
@@ -4344,6 +4798,7 @@ function ColumnHeader({
   atdStack = false,
   matchupOrder = null,
   onMatchupSort,
+  onOpenBooks,
 }: {
   rightLabel: string;
   /** False when the ranked list is empty. A line-only board is not sorted. */
@@ -4361,6 +4816,8 @@ function ColumnHeader({
   atdStack?: boolean;
   matchupOrder?: MatchupSort | null;
   onMatchupSort?: () => void;
+  /** Opens the sportsbook sheet. The header book line is gone (Compact B). */
+  onOpenBooks: () => void;
 }) {
   const { width: headerWidth, fontScale } = useWindowDimensions();
   // Room for MATCHUP on the stacked header line, after RK, PLAYER, and the
@@ -4416,17 +4873,29 @@ function ColumnHeader({
       {sorted ? <Ionicons name="arrow-down" size={9} color={colors.textTertiary} /> : null}
     </View>
   );
+  const oddsSpoken = oddsDateLabel ? `${oddsLabel} ${oddsDateLabel}` : oddsLabel;
   const oddsHead = showOdds ? (
-    <Text
-      style={
-        atd
-          ? [styles.atdHeaderLabel, atdStack ? styles.atdHeaderLabelFree : styles.atdOddsHeadText]
-          : [styles.colHeaderRight, styles.colHeaderOdds]
-      }
-      numberOfLines={atd ? 2 : 1}
+    <Pressable
+      onPress={onOpenBooks}
+      accessibilityRole="button"
+      accessibilityLabel={`Sportsbooks, ${oddsSpoken}. Tap to change.`}
+      accessibilityHint="Opens the sportsbook list"
+      style={[
+        styles.oddsBookBtn,
+        atd ? (atdStack ? styles.atdHeaderLabelFree : styles.atdOddsHeadText) : styles.colHeaderOdds,
+      ]}
     >
-      {oddsDateLabel ? `${oddsLabel} ${oddsDateLabel}` : oddsLabel}
-    </Text>
+      <Text
+        style={
+          atd
+            ? [styles.atdHeaderLabel, atdStack ? styles.atdHeaderLabelFree : styles.atdOddsHeadText]
+            : [styles.colHeaderRight, styles.colHeaderOdds]
+        }
+        numberOfLines={atd ? 2 : 1}
+      >
+        {oddsSpoken}
+      </Text>
+    </Pressable>
   ) : null;
   const matchupHead = showMatchup ? (
     atd ? (
@@ -4463,20 +4932,25 @@ function ColumnHeader({
       </View>
     ) : (
       <View style={styles.colHeaderMatchup}>
-        <Text style={styles.colHeaderRight} numberOfLines={1}>
-          GRADE
-        </Text>
-        {/* The column's only legend, so it has to describe the grade the
-            reader is ACTUALLY looking at. It named the two baseball answers
+        {/* Icon first so MATCHUP and the bars share the trailing edge.
+            The column's only legend. It named the two baseball answers
             alone and asserted "this season" -- both wrong for the three
-            sports now graded on defence, whose numbers come from the season
+            sports now measured on defence, whose numbers come from the season
             this text names, which on opening night is LAST season (UX
             review, 2026-09-09). */}
         <InfoTooltip
-          title="Matchup grade"
+          title="Matchup"
           body={matchupTooltip}
-          accessibilityLabel="What the matchup grade means"
+          accessibilityLabel="What the matchup bars mean"
         />
+        <Text
+          style={styles.matchupHeaderWord}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+        >
+          MATCHUP
+        </Text>
       </View>
     )
   ) : null;
@@ -4530,9 +5004,21 @@ function ColumnHeader({
   );
 }
 
+/** ", injured reserve" for a row's spoken label; "" when he is not listed. */
+function injurySpoken(injury: InjuryTag | null | undefined): string {
+  return injury ? `, ${injury.spoken.toLowerCase()}` : '';
+}
+
+/**
+ * IR / O / D / Q beside the name. Text on a tint, never colour alone: the
+ * letters carry the meaning (WCAG 1.4.1), and the inks clear AA on their
+ * soft grounds (theme.ts). Hidden from VoiceOver -- the row's label already
+ * says the status in words, and "I R" read out letter by letter does not.
+ */
 function LeaderRow({
   rank,
   row,
+  injury = null,
   value,
   gp,
   basis,
@@ -4541,7 +5027,6 @@ function LeaderRow({
   atdView,
   atdStack = false,
   onMatchupExplain,
-  gradeColorful,
   subline,
   quote,
   started,
@@ -4556,18 +5041,18 @@ function LeaderRow({
 }: {
   rank: number;
   row: SeasonTotalsRow;
+  /** On a team injury report. Out / IR / IL greys the row. */
+  injury?: InjuryTag | null;
   value: number;
   gp: number;
   basis: Basis;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
-  /** Set on NFL Anytime TD. Replaces the A–F grade on this board only. */
+  /** Set on NFL Anytime TD. Same five-bar meter, from the defense rank. */
   atdView?: AnytimeMatchupView;
   /** Metrics move under the name once Dynamic Type would clip the price. */
   atdStack?: boolean;
   onMatchupExplain: () => void;
-  /** False when every visible grade lands in one colour band. */
-  gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
   subline: string | null;
   quote: StatsOddsQuote | null;
@@ -4591,15 +5076,28 @@ function LeaderRow({
         accessibilityRole={tappable ? 'button' : undefined}
         accessibilityLabel={
           tappable
-            ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}, ${fmtValue(value, basis)} ${statLabel}${subline ? `, ${sublineSpoken(subline)}` : ''}`
+            ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}${injurySpoken(injury)}, ${fmtValue(value, basis)} ${statLabel}${subline ? `, ${sublineSpoken(subline)}` : ''}`
             : undefined
         }
         accessibilityHint={tappable ? 'Opens this player' : undefined}
       >
-        <Text style={styles.rowName} numberOfLines={1}>
-          {row.player_name}
-          {row.team ? <Text style={styles.rowTeam}>  {row.team}</Text> : null}
-        </Text>
+        <View style={styles.nameLine}>
+          <Text
+            style={[styles.rowName, styles.rowNameShrink, injury?.sidelined && styles.rowNameSidelined]}
+            numberOfLines={1}
+            // A row that cannot be tapped (NHL; no player id) has no row label,
+            // and the chip is hidden, so the name says the status itself.
+            accessibilityLabel={
+              !tappable && injury
+                ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}${injurySpoken(injury)}`
+                : undefined
+            }
+          >
+            {row.player_name}
+            {row.team ? <Text style={styles.rowTeam}>  {row.team}</Text> : null}
+          </Text>
+          {injury ? <InjuryChip tag={injury} /> : null}
+        </View>
         {subline ? (
           // The spoken form goes on the Text itself, not only in the row's
           // label: a row that is NOT tappable (NHL, UFC, Golf) sets
@@ -4637,15 +5135,23 @@ function LeaderRow({
           onPress={onOddsPress}
           bestPrice={!!atdView}
           priceFixed={!!atdView && !atdStack}
+          muted={!!injury?.sidelined}
         />
       ) : null}
-      {!atdView && showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
+      {!atdView && showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
   const body = atdView && atdStack ? (
     <>
       <View style={styles.rowTop}>
-        <Text style={styles.rank}>{rank}</Text>
+        <Text
+          style={styles.rank}
+          // The name already says the status; a spoken dash adds a stop, not news.
+          accessibilityElementsHidden={!!injury?.sidelined}
+          importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+        >
+          {injury?.sidelined ? '–' : rank}
+        </Text>
         {nameBlock}
       </View>
       {atdView ? (
@@ -4657,12 +5163,19 @@ function LeaderRow({
     </>
   ) : (
     <>
-      <Text style={styles.rank}>{rank}</Text>
+      <Text
+        style={styles.rank}
+        // The name already says the status; a spoken dash adds a stop, not news.
+        accessibilityElementsHidden={!!injury?.sidelined}
+        importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+      >
+        {injury?.sidelined ? '–' : rank}
+      </Text>
       {nameBlock}
       {metrics}
     </>
   );
-  const rowStyle = [styles.row, atdView && atdStack && styles.rowStacked];
+  const rowStyle = [styles.row, atdView && atdStack && styles.rowStacked, injury?.sidelined && styles.rowSidelined];
   if (!tappable) return <View style={rowStyle}>{body}</View>;
   return (
     // accessible={false}: a Pressable is accessible by default, which collapses
@@ -4688,6 +5201,7 @@ function LeaderRow({
  */
 function LineOnlyRow({
   name,
+  injury = null,
   subline,
   quote,
   started,
@@ -4704,6 +5218,8 @@ function LineOnlyRow({
   omitNoGames = false,
 }: {
   name: string;
+  /** Matched by name alone: the feed names no team for these rows. */
+  injury?: InjuryTag | null;
   subline: string | null;
   quote: StatsOddsQuote | null;
   started: 'Live' | 'Final' | null;
@@ -4725,14 +5241,17 @@ function LineOnlyRow({
         style={styles.rowMain}
         accessible
         accessibilityLabel={lineOnlyRowLabel(
-          name,
+          `${name}${injurySpoken(injury)}`,
           subline ? sublineSpoken(subline) : null,
           omitNoGames ? '' : undefined,
         )}
       >
-        <Text style={styles.rowName} numberOfLines={1}>
-          {name}
-        </Text>
+        <View style={styles.nameLine}>
+          <Text style={[styles.rowName, styles.rowNameShrink, injury?.sidelined && styles.rowNameSidelined]} numberOfLines={1}>
+            {name}
+          </Text>
+          {injury ? <InjuryChip tag={injury} /> : null}
+        </View>
         {subline ? (
           <Text style={styles.rowSubline} numberOfLines={1} accessibilityLabel={sublineSpoken(subline)}>
             {subline}
@@ -4772,6 +5291,7 @@ function LineOnlyRow({
           onPress={onOddsPress}
           bestPrice={!!atdView}
           priceFixed={!!atdView && !atdStack}
+          muted={!!injury?.sidelined}
         />
       ) : null}
       {!atdView && showMatchup ? <MatchupCell matchup={null} /> : null}
@@ -4799,18 +5319,22 @@ function LineOnlyRow({
   );
   // Not a button. There is no player id, and PlayerStats with a blank id is
   // an empty page. The price pill stays its own control.
-  return <View style={[styles.row, atdView && atdStack && styles.rowStacked]}>{body}</View>;
+  return (
+    <View style={[styles.row, atdView && atdStack && styles.rowStacked, injury?.sidelined && styles.rowSidelined]}>
+      {body}
+    </View>
+  );
 }
 
 function HitRateRow({
   rank,
   player,
+  injury = null,
   matchup,
   showMatchup,
   atdView,
   atdStack = false,
   onMatchupExplain,
-  gradeColorful,
   subline,
   quote,
   started,
@@ -4827,13 +5351,13 @@ function HitRateRow({
 }: {
   rank: number;
   player: HitRatePlayer;
+  /** On a team injury report. Out / IR / IL greys the row. */
+  injury?: InjuryTag | null;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
   atdView?: AnytimeMatchupView;
   atdStack?: boolean;
   onMatchupExplain: () => void;
-  /** False when every visible grade lands in one colour band. */
-  gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
   subline: string | null;
   quote: StatsOddsQuote | null;
@@ -4855,9 +5379,10 @@ function HitRateRow({
   onPress: () => void;
 }) {
   // `games < 3` is the player page's rule (SplitsCard / HeadToHeadCard), and
-  // under H2H the board has to share it or the SAME 1-of-1 is grey on the
-  // detail screen and full green on the board. Scoped to H2H because every
-  // other window has a uniform denominator, where the rule would say nothing.
+  // the board shares it or the SAME 1-of-1 is grey on the detail screen and
+  // full green on the board. Every window, not only H2H: in a season's first
+  // week L3/L5/L10 are 1-of-1 rows too (NCAAB tipped off 2026-11-03; UX
+  // review), so the denominator is not uniform there either.
   const pctColor = hitRateColor(player.pct, colorful && !(thinSample && player.total < 3));
   const nameBlock = (
       <View
@@ -4866,15 +5391,28 @@ function HitRateRow({
         accessibilityRole={tappable ? 'button' : undefined}
         accessibilityLabel={
           tappable
-            ? `${player.player_name}${player.team ? `, ${player.team}` : ''}, ${Math.round(player.pct * 100)} percent, ${player.hits} of ${player.total}${subline ? `, ${sublineSpoken(subline)}` : ''}`
+            ? `${player.player_name}${player.team ? `, ${player.team}` : ''}${injurySpoken(injury)}, ${Math.round(player.pct * 100)} percent, ${player.hits} of ${player.total}${subline ? `, ${sublineSpoken(subline)}` : ''}`
             : undefined
         }
         accessibilityHint={tappable ? 'Opens this player' : undefined}
       >
-        <Text style={styles.rowName} numberOfLines={1}>
-          {player.player_name}
-          {player.team ? <Text style={styles.rowTeam}>  {player.team}</Text> : null}
-        </Text>
+        <View style={styles.nameLine}>
+          <Text
+            style={[styles.rowName, styles.rowNameShrink, injury?.sidelined && styles.rowNameSidelined]}
+            numberOfLines={1}
+            // A row that cannot be tapped (NHL; no player id) has no row label,
+            // and the chip is hidden, so the name says the status itself.
+            accessibilityLabel={
+              !tappable && injury
+                ? `${player.player_name}${player.team ? `, ${player.team}` : ''}${injurySpoken(injury)}`
+                : undefined
+            }
+          >
+            {player.player_name}
+            {player.team ? <Text style={styles.rowTeam}>  {player.team}</Text> : null}
+          </Text>
+          {injury ? <InjuryChip tag={injury} /> : null}
+        </View>
         {subline ? (
           // The spoken form goes on the Text itself, not only in the row's
           // label: a row that is NOT tappable (NHL, UFC, Golf) sets
@@ -4920,15 +5458,23 @@ function HitRateRow({
           onPress={onOddsPress}
           bestPrice={!!atdView}
           priceFixed={!!atdView && !atdStack}
+          muted={!!injury?.sidelined}
         />
       ) : null}
-      {!atdView && showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
+      {!atdView && showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
   const body = atdView && atdStack ? (
     <>
       <View style={styles.rowTop}>
-        <Text style={styles.rank}>{rank}</Text>
+        <Text
+          style={styles.rank}
+          // The name already says the status; a spoken dash adds a stop, not news.
+          accessibilityElementsHidden={!!injury?.sidelined}
+          importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+        >
+          {injury?.sidelined ? '–' : rank}
+        </Text>
         {nameBlock}
       </View>
       {atdView ? (
@@ -4940,12 +5486,19 @@ function HitRateRow({
     </>
   ) : (
     <>
-      <Text style={styles.rank}>{rank}</Text>
+      <Text
+        style={styles.rank}
+        // The name already says the status; a spoken dash adds a stop, not news.
+        accessibilityElementsHidden={!!injury?.sidelined}
+        importantForAccessibility={injury?.sidelined ? 'no' : 'auto'}
+      >
+        {injury?.sidelined ? '–' : rank}
+      </Text>
       {nameBlock}
       {metrics}
     </>
   );
-  const rowStyle = [styles.row, atdView && atdStack && styles.rowStacked];
+  const rowStyle = [styles.row, atdView && atdStack && styles.rowStacked, injury?.sidelined && styles.rowSidelined];
   if (!tappable) return <View style={rowStyle}>{body}</View>;
   return (
     // accessible={false}: a Pressable is accessible by default, which collapses
@@ -5005,8 +5558,9 @@ const styles = StyleSheet.create({
     color: colors.tint,
   },
   clearBtn: {
+    minHeight: 44,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    justifyContent: 'center',
   },
   clearText: {
     fontSize: font.size.caption,
@@ -5033,20 +5587,31 @@ const styles = StyleSheet.create({
 
   header: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xs,
+    paddingTop: spacing.sm,
+    paddingBottom: 0,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  titleCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    minWidth: 0,
+    gap: spacing.sm,
   },
   rightActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
     gap: spacing.sm,
   },
   title: {
+    flexShrink: 1,
+    minWidth: 0,
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
@@ -5061,11 +5626,21 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
+    // padding + the 16pt icon is 24. Vertical slop on top of that crossed
+    // Clear all. The control itself is the 44pt target (Designer, 2026-10-26).
+    minHeight: 44,
   },
   filterBtnText: {
     fontSize: font.size.footnote,
     color: colors.tint,
     fontWeight: font.weight.semibold,
+  },
+  // Under the title row, not in it. The word Filters plus NFL ▾ plus the
+  // gear already fill a 390pt phone once a badge is on; Clear all on that
+  // same line clips Stats.
+  clearRow: {
+    alignItems: 'flex-end',
+    marginTop: 2,
   },
   filterBadge: {
     minWidth: 18,
@@ -5089,6 +5664,18 @@ const styles = StyleSheet.create({
   lineStack: {
     alignSelf: 'stretch',
   },
+  // "At least" and the book's number on one line; the short ruler sits under them.
+  lineCaption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginTop: 2,
+  },
+  lineRulerPad: {
+    paddingHorizontal: spacing.lg,
+  },
   lineRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -5099,13 +5686,12 @@ const styles = StyleSheet.create({
   dirPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 9,
-    borderRadius: radii.sm,
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.separator,
+    justifyContent: 'center',
+    flexShrink: 0,
+    // 44pt in the view. Bottom hit slop sits under the ruler and does not
+    // receive the tap (UX review, Compact B).
+    minHeight: 44,
+    paddingRight: spacing.sm,
   },
   dirPillLocked: {
     // The container is what says "button", so the container goes. Padding is
@@ -5122,9 +5708,9 @@ const styles = StyleSheet.create({
   },
   dirPillText: {
     flexShrink: 1,
-    fontSize: font.size.footnote,
+    fontSize: font.size.body,
     fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
+    color: colors.tint,
   },
   rulerRow: {
     flex: 1,
@@ -5139,9 +5725,11 @@ const styles = StyleSheet.create({
     flex: 1,
     // A floor, so nothing sharing the row can shrink the strip out of
     // existence. Below this the ticks are unusable anyway. The rendered
-    // height comes from rulerChromeHeight so a 44pt bubble is not clipped.
+    // height is compactRulerHeight at rest and rulerChromeHeight while the
+    // typing field is open, passed inline so this floor does not pin the
+    // short ruler at 72pt.
     minWidth: 120,
-    minHeight: 72,
+    minHeight: 28,
     justifyContent: 'center',
   },
   tickCol: {
@@ -5161,6 +5749,61 @@ const styles = StyleSheet.create({
     width: 2,
     height: 20,
     backgroundColor: colors.separatorOpaque,
+  },
+  // Compact B resting strip: short ticks, no per-stop numerals. The selected
+  // face is the marker. tickCol's 44pt floor is for the old labeled strip.
+  tickColCompact: {
+    minHeight: 28,
+    justifyContent: 'flex-start',
+  },
+  tickCompact: {
+    height: 10,
+  },
+  // Under a major tick. Wider than the tick (LABEL_W), centred on it.
+  tickNumber: {
+    position: 'absolute',
+    bottom: 2,
+    width: LABEL_W,
+    fontSize: font.size.nano,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  tickMajorCompact: {
+    width: 2,
+    height: 16,
+    backgroundColor: colors.separatorOpaque,
+  },
+  centerMarkerCompact: {
+    justifyContent: 'flex-start',
+    paddingTop: 0,
+  },
+  thresholdMark: {
+    minWidth: 60,
+    height: RULER_MARK_H,
+    paddingHorizontal: spacing.md,
+    borderRadius: RULER_MARK_H / 2,
+    backgroundColor: colors.tint,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  thresholdMarkText: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.bold,
+    color: colors.textInverse,
+    fontVariant: ['tabular-nums'],
+  },
+  thresholdMarkIcon: {
+    opacity: 0.85,
+  },
+  // From the bubble down onto the tick row, ending at the selected stop.
+  markPointer: {
+    width: 2,
+    height: 12,
+    borderRadius: 1,
+    backgroundColor: colors.tint,
   },
   tickLabel: {
     width: LABEL_W,
@@ -5307,11 +5950,45 @@ const styles = StyleSheet.create({
   },
 
   // Shared by the two rows that pair a pinned control with a scroller.
+  // flex: 1 (basis 0), not flexGrow alone. A horizontal ScrollView's basis
+  // is otherwise its content, which is wider than the phone, and the Hit
+  // Rates | Averages labels beside it were measured into the leftover —
+  // about 16pt, the tab padding, at 390×1. minWidth 0 lets the chips scroll
+  // inside the space the labels leave.
   rowScroller: {
-    flexGrow: 1,
-    flexShrink: 1,
+    flex: 1,
+    minWidth: 0,
+  },
+  // The board-notes ⓘ: 20pt glyph + 12pt slop each side = 44pt target.
+  notesBtn: {
+    flexGrow: 0,
+    flexShrink: 0,
+    minWidth: 44,
+    minHeight: 44,
+    marginRight: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notesDot: {
+    position: 'absolute',
+    top: 10,
+    right: 9,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.tint,
+    borderWidth: 1.5,
+    borderColor: colors.bg,
+  },
+  modeSegBeforeNotes: { paddingRight: spacing.xs },
+  notesFallbackRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingVertical: spacing.xs,
   },
   modeSeg: {
+    flexGrow: 0,
+    flexShrink: 0,
     paddingRight: spacing.lg,
     paddingLeft: spacing.sm,
   },
@@ -5415,6 +6092,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   colHeaderOdds: { minWidth: ODDS_W, textAlign: 'right' },
+  // The odds header is the way back to the sportsbook sheet now the header
+  // book line is gone. 44pt so the new Pressable clears the tap floor.
+  oddsBookBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+  },
   // Anytime TD locks the three metric columns so the header cannot drift.
   // The labels do not use colHeaderRight: that style is 48pt wide, and a
   // later `width: undefined` does not clear it, so MATCHUP drew in 48pt.
@@ -5536,8 +6220,8 @@ const styles = StyleSheet.create({
   // Inside the row the label gives up its own fixed width and shrinks instead,
   // so the arrow beside it can never be truncated away.
   colHeaderSortLabel: { width: undefined, flexShrink: 1 },
-  // "FanDuel doesn't post Hits lines today" — the book's coverage, in words,
-  // where a column of dashes would otherwise read as a broken screen.
+  // Caption text on the defense-rank retry row. The board's info notes
+  // moved behind the ⓘ in the window strip (boardNotes).
   noLinesRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -5551,7 +6235,6 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     lineHeight: font.size.caption * 1.35,
   },
-  noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
   atdRetryRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -5567,6 +6250,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 2,
+  },
+  // The info icon sits to the left of the word, so the word and the bars
+  // share the row's trailing edge. The word shrinks when the name needs the room.
+  matchupHeaderWord: {
+    flexShrink: 1,
+    textAlign: 'right',
+    fontSize: font.size.micro,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    letterSpacing: 0,
   },
   // Rows are deliberately compact — more players visible per screen.
   rowStacked: {
@@ -5635,6 +6328,20 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
+  // Name + injury chip on one line. The name shrinks; the chip never clips.
+  nameLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  rowNameShrink: { flexShrink: 1 },
+  // Not playing (Out / IR / IL): the page grey behind the row and a quieter
+  // name. Not opacity -- that would drop the chip and the price under AA.
+  rowSidelined: { backgroundColor: colors.bg },
+  // textTertiary is 4.69:1 on bg (AA at 13pt semibold); textSecondary read
+  // as barely different from a playing row (UX review, 2026-10-23).
+  rowNameSidelined: { color: colors.textTertiary },
   rowTeam: {
     fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
@@ -5792,15 +6499,7 @@ const styles = StyleSheet.create({
     maxWidth: MATCHUP_W * 1.4,
     flexShrink: 1,
     alignItems: 'flex-end',
-  },
-  // One letter (two with a modifier), so it can carry the row's weight — it is
-  // the only thing in the column and it has to be legible at a glance down 25
-  // rows. Bumped from caption because a bold "B+" at 12pt reads as a footnote
-  // rather than a grade.
-  matchupGrade: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.bold,
-    letterSpacing: 0.2,
+    justifyContent: 'center',
   },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },

@@ -5,16 +5,23 @@ import { colors, font, spacing } from '@/lib/theme';
 interface Props {
   title: string;
   subtitle?: string;
+  /** What VoiceOver reads for the subtitle when its text holds codes that
+   *  are spelled out letter by letter (two sport codes side by side). */
+  subtitleAccessibilityLabel?: string;
   /** Optional undo, e.g. "Clear games" on a Games-emptied board. */
   actionLabel?: string;
   onAction?: () => void;
 }
 
-export function EmptyState({ title, subtitle, actionLabel, onAction }: Props) {
+export function EmptyState({ title, subtitle, subtitleAccessibilityLabel, actionLabel, onAction }: Props) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{title}</Text>
-      {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+      {subtitle ? (
+        <Text style={styles.subtitle} accessibilityLabel={subtitleAccessibilityLabel}>
+          {subtitle}
+        </Text>
+      ) : null}
       {actionLabel && onAction ? (
         <Pressable
           onPress={onAction}

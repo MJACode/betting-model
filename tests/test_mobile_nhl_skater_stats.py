@@ -41,8 +41,8 @@ def test_nhl_skater_chips_and_the_read_are_in_source():
     assert "'NHL:goals': 'player_goal_scorer_anytime'" in catalog
     assert "'NHL:assists': 'player_assists'" in catalog
     assert "NHL: ['NHL']" in catalog
-    # Hit rate stays on the five sports that already have a per-game grant.
-    assert "new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF'])" in catalog
+    # Hit rate stays off for NHL. NCAABW is named before NCAAB.
+    assert "new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAABW', 'NCAAB'])" in catalog
     assert "const fn = 'player_window_totals_nhl'" in queries
     assert ".from('nhl_skater_stats')" not in queries
     assert ".from('nhl_skater_game_log')" not in queries

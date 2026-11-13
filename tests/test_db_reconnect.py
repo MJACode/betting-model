@@ -234,3 +234,24 @@ def test_the_factory_hands_the_wrapper_its_url(monkeypatch):
     monkeypatch.setattr(db, "_open", fake_open)
     w = db._connect("postgresql://u:p@h:6543/d")
     assert w._url == "postgresql://u:p@h:6543/d" == seen["url"]
+
+
+def test_an_explicit_idle_timeout_is_on_the_connection_and_the_reconnect(monkeypatch):
+    opened = []
+
+    def fake_open(url, options=None):
+        c = _Conn(f"c{len(opened)}")
+        opened.append((c, options))
+        return c
+
+    monkeypatch.setattr(db, "_open", fake_open)
+    monkeypatch.setattr(db.time, "sleep", lambda s: None)
+    monkeypatch.delenv("DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", raising=False)
+    monkeypatch.delenv("DB_STATEMENT_TIMEOUT_MS", raising=False)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@127.0.0.1:5432/d")
+    w = db.get_connection(idle_in_transaction_ms=60_000)
+    assert "idle_in_transaction_session_timeout=60000" in opened[0][1]
+    assert w._idle_ms == 60_000
+    opened[0][0].fail_next = _lost()
+    w.execute("SELECT 1")
+    assert "idle_in_transaction_session_timeout=60000" in opened[1][1]

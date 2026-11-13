@@ -1,0 +1,931 @@
+# NCAABW — women's college basketball: data, odds capture, models
+
+> **Started 2026-11-09** (mike: *"Take everything we learned about building the
+> NCAAB models and now build models for the womens NCAABW - ensure all
+> learnings are incorporated, all odds API buys are auto approved"*). The sport
+> code is `NCAABW`, the code Discord routing already used (2026-11-03). Season
+> label: the ENDING year, as ESPN labels it (2026-27 is 2027). The 2026-27
+> season opened Sunday 2026-11-01; ESPN's 2026-11-02 board holds 163 games.
+>
+> This is the women's twin of `docs/sports/ncaab.md`. Read that first: the
+> rules it records (ESPN owns the games row, the home number, decide once,
+> evidence and live on the same quotes) hold here unchanged. This file says
+> what the women's sources hold, what was built, and where the women's game
+> differs.
+
+## What the sources hold (measured 2026-11-09)
+
+The men's models were built on six seasons of paid lines at ten books, with
+first-half lines and half-hourly in-play prices. The women's market is a
+different size, and every number below was read off the source that day.
+
+| Source | What it holds for women's college basketball |
+|---|---|
+| The odds feed, key `basketball_wncaab` | History from the games of **2024-11-12** on. No event at all at any date asked before that (eight dates, 2020-12 to 2024-01). So **two finished seasons** of prices, 2024-25 and 2025-26. |
+| Its event lists | **2,293 events** from 2024-11-12 to 2026-04-05: 942 in 2024-25, 1,351 in 2025-26. A median **7 a game day**, 18 at the 90th percentile, 39 at the most (261 game days). ESPN's board holds about 6,000 games a season, so the feed lists roughly one game in five. A game first appears a median 3.5 hours before its tip (sampled four times a day). |
+| Its books | Twelve priced women's games in 14 history snapshots asked at every region: DraftKings, FanDuel, BetMGM, Caesars, Fanatics (2025-26 only), BetRivers, and six that a pick may never name (ESPN BET, Bally Bet, Fliff, BetOnline, LowVig, Unibet). **Pinnacle, Bovada and betPARX priced none.** DraftKings priced a spread and a total on 87 of 92 pre-game events in the 2024-25 snapshots and 114 of 127 in 2025-26; Caesars 4 and 78; FanDuel 39 and 108; BetMGM mostly totals and moneylines (spreads on 18 and 17). |
+| Its other markets | **None.** 17 past games on four dates, asked 20 minutes before the tip for first-half, quarter, second-half, team-total, alternate and player-points lines: BetMGM's first-half moneyline on six Sweet 16 games of 2026-03-27/28, and nothing else. The five games listed live on 2026-11-09 showed the same (BetMGM's first-half moneyline on two). |
+| ESPN's site API, `womens-college-basketball` | The same endpoints and shape as the men's: 363 Division I teams, the scoreboard by ET date (118 events on 2026-01-24), a game summary with the box score, player lines and a play-by-play with wallclock times. **Four quarters**: a regulation final is period 4. |
+| ESPN's own odds (core API) | One provider a game. On the dates sampled: almost no line before 2021-22; a projection provider on most games of 2021-22; one sportsbook on 122 of 130 finals of 2023-01-14 and 49 of 60 of 2023-12-06; then 4 to 12 games a day from January 2024 (ESPN BET, DraftKings from 2025-26), with an opening and a closing number. Not imported yet (see Open items). |
+| sportsdataverse's season files | NCAA's possession box scores `ncaa_wbb_team_box` 2010 to 2027 (the 2027 file held 479 games through 2026-11-08, so it is being built in season), player box scores, and ESPN's play-by-play `espn_womens_college_basketball_pbp` 2004 to 2027. |
+
+**The feed keeps no snapshot while nothing moves, and an ask for a time it has
+none at is billed for the one before.** Asked for 2026-01-24 07:00Z, 09:00Z,
+12:00Z and 14:00Z it answered each time with its 02:15:38Z snapshot and billed
+60 credits each time; asked for 2025-07-15 it answered with 2025-04-06's. The
+purchase below walks the feed's own chain (`next_timestamp`) for that reason.
+
+### The market grid
+
+| Market | Settles on | Inputs held | Prices | Status |
+|---|---|---|---|---|
+| Full-game total | both scores, overtime included | NCAA box scores 2010-27, ESPN finals 2015-16 on | the feed, 2024-25 and 2025-26 | **live** from 2026-11-10 (`ncaabw_total_blend`) |
+| Full-game spread | final margin, overtime included | the books' own lines; the team ratings | the same | **nothing clears**: a line-shopping rule fails, and the team ratings add nothing to DraftKings' first spread in 2025-26 (both below) |
+| Full-game moneyline | winner, overtime included | each book's own spread; the team ratings | the same | **nothing clears**: an own-spread rule, the team ratings and every price band (below) |
+| Halftime total | both scores, overtime included | the halftime score, the pre-game total | the feed's snapshots, five minutes apart | **built** 2026-11-11 (`ncaabw_live_total_ht`, "In play" below) |
+| Halftime spread | final margin | the same | the same | **does not clear**: the walk-forward interval reaches zero, and 2026-27 to date is 11-17 (below) |
+| In play outside the break | the final | ESPN play-by-play with wallclock | the same | first-half total loses, first-half spread is flat (below) |
+| First-half moneyline | the first two quarters | none | BetMGM alone, tournament games | parked: one book, a handful of games |
+| First-half spread and total, quarters, team totals, alternates, player props | | | none in the feed | parked: no price source. The men's two first-half models have no women's twin. |
+
+## What differs from the men's game
+
+- **Four 10-minute quarters since 2015-16**, two halves before. Overtime is
+  ESPN's period 5 or later (`ncaabw_teams.regulation_periods`); the men's rule
+  (period 3 or later) would have marked every women's game as overtime. Stored
+  overtime share: 3.9% to 4.6% a season, 2015-16 to 2025-26.
+- **ESPN gives a school's women's team its men's team id** (UConn is 41 in
+  both), so the women's identity lives in its own tables.
+- **The feed names many women's teams the men's way.** ESPN's "Oklahoma State
+  Cowgirls" is the feed's "Oklahoma St Cowboys"; ESPN's 21 "Lady ..." mascots
+  lose the "Lady". See Feed team names.
+- **No sharp book.** Pinnacle does not price the women's board, so there is no
+  Pinnacle close to measure closing value against. BetOnline and LowVig are
+  the nearest thing, on under half the games.
+- **No first-half, quarter or team-total line, and no player prop**, in the
+  feed (above).
+
+## Identity: ESPN owns the games row
+
+`data/ingestors/ncaabw_teams.py`, a fork of the men's `ncaab_teams.py`.
+
+- `ncaabw_teams` (ESPN team id, school, slug, mascot), `ncaabw_events` (ESPN
+  event id to our game id, both team ids), `ncaabw_venues`. Worker-only.
+- Game ids are `NCAABW_<ET date>_<away slug>_<home slug>` in ESPN's
+  orientation, written only by `data/ingestors/ncaabw_espn_ingestor.py`.
+- The odds feed never mints an NCAABW game. Its events resolve onto ESPN's
+  games by the unordered team pair within a day of the tip, and the names are
+  swapped first when the feed calls ESPN's away team home, so the stored
+  spread is ESPN's home number (CLAUDE.md §4).
+- **Stored 2026-11-09:** 61,431 games, 2015-16 to 2026-11-08, every one with
+  its event row; 1,069 teams, 363 of them Division I. Games dated today or
+  later are left to the worker's own schedule step, so nothing unscored sits
+  in `games` before that step runs.
+
+| Season | Games | Scored | Overtime |
+|---|---|---|---|
+| 2015-16 | 5,618 | 5,617 | 4.1% |
+| 2016-17 | 5,622 | 5,608 | 4.1% |
+| 2017-18 | 5,630 | 5,630 | 4.4% |
+| 2018-19 | 5,658 | 5,658 | 3.9% |
+| 2019-20 | 5,436 | 5,434 | 4.6% |
+| 2020-21 | 3,825 | 3,823 | 4.3% |
+| 2021-22 | 5,536 | 5,534 | 4.2% |
+| 2022-23 | 5,828 | 5,828 | 4.5% |
+| 2023-24 | 5,867 | 5,866 | 4.0% |
+| 2024-25 | 5,924 | 5,923 | 4.0% |
+| 2025-26 | 6,000 | 6,000 | 4.3% |
+| 2026-27 to 11-08 | 487 | 487 | 1.6% |
+
+**A day's new events are written together.** The men's ingestor writes each
+event in its own savepoint, three statements each, and has only ever run on
+the worker, beside the database, where a season took 13 minutes. From a laptop
+four processes wrote 55 dates between them in 47 minutes. The women's ingestor
+writes the day's never-seen events in three statements for the whole day
+(`_write_new_events`); a season then took 8 minutes from the same laptop.
+Events seen before still take the one-at-a-time path, and a batch that fails
+falls back to it.
+
+## Feed team names (2026-11-09)
+
+The census: the 353 team names on the feed's 2,293 events. The men's rules
+placed 326. The other 27 names (113 events) are placed by:
+
+- **The "Lady" rule** (`_resolve_shortened_school`): where ESPN's mascot starts
+  "Lady", the feed's name without it is accepted, once the school has matched.
+  Nine names: "Alabama St Hornets" is ESPN's Alabama State Lady Hornets.
+- **Six mascot aliases** (`MASCOT_ALIASES`): Oklahoma State (Cowboys), Montana
+  (Grizzlies), Louisiana Tech (Bulldogs), Hawai'i (Rainbow Warriors), Western
+  Kentucky (Hilltoppers), Stephen F. Austin (Lumberjacks). Wyoming and McNeese
+  (Cowboys) are there by the same pattern; the feed has not named either yet.
+- **Twelve overrides** (`config.NCAABW_ODDS_API_MAP`): eleven are names the
+  men's feed also uses for the same schools ("UMKC Kangaroos", "Albany Great
+  Danes"); the twelfth is "Miss Valley St Delta Devilettes".
+
+All 353 names now place a team. Against the stored schedule, **2,273 of the
+2,293 events land on an ESPN game** (47 of them flipped, neutral courts). The
+other 20 are pairs ESPN has no game for within a day of the listed tip; the
+purchase keeps them raw in `ncaabw_odds_unmatched`.
+
+One thing the resolver would do and the census never asked of it: a name like
+"Missouri St Tigers" would land on Missouri (Tigers), because a school that
+starts the name and shares the mascot's last word is accepted. No census name
+has that shape.
+
+## The odds history purchase
+
+`data/ingestors/ncaabw_odds_history.py`. One purchase, not the men's four:
+every bulk snapshot of moneyline, spread and total the feed kept, at the
+seventeen books `odds_ingestor.sport_bookmakers_param("NCAABW")` names (the
+ten line-shop books and `config.NCAABW_EXTRA_BOOKMAKERS`). Seventeen books are
+two regions, so a snapshot bills 60 credits.
+
+- **Fetch.** Each UTC day is its own chain: ask for 00:05, then follow
+  `next_timestamp` to the end of the day. One ask per snapshot the feed really
+  kept. 2026-01-24 held 148 snapshots, five minutes apart, with one gap of 11
+  hours 45 minutes overnight; it cost 8,880 credits and no ask was wasted.
+  Answers go to a spool folder with each day's state beside them, so a stopped
+  run resumes where each day stopped. Several processes may share a spool; a
+  day is claimed with a lock file.
+- **Store.** The spool, oldest snapshot first, into Supabase. Pre-game quotes
+  go to `odds`, change-only (a book's first quote and every change), source
+  `odds_api_ncaabw_history`. In-play quotes go to `ncaabw_inplay_quotes`, every
+  one of every snapshot, keyed on the snapshot's own time. Unplaced events go
+  raw to `ncaabw_odds_unmatched`. One ledger row a snapshot in
+  `ncaabw_odds_snapshots`, in the same transaction.
+- **Why in-play quotes have their own table.** The men's sit in `odds` and are
+  tied to their snapshot by matching `created_at` to the ledger's `pulled_at`.
+  Here the snapshot time is a column, the rows stay out of the table the app
+  reads every minute, and a market a book took down is simply absent from that
+  snapshot.
+- **Credits.** The ceiling is the plan at its most; the floor is seven days of
+  the measured daily burn (59,831 a day on 2026-11-09, so 418,817). The balance
+  was 14,940,720 at 2026-11-10 00:10Z.
+- **What it bought (2026-11-09 to 11-10 03:00Z).** 317 UTC days, 2024-11-10 to
+  2026-11-09: **49,527 snapshots, 2,971,620 credits** billed for them, and
+  2,580 more for 43 first asks of a day that were answered with the day
+  before's last snapshot (the dry run prints both). Not in those figures: the
+  fetch was stopped and restarted four times while it was being made faster,
+  and a call in flight at a stop was paid for and not recorded, at most 128
+  calls (7,680 credits); and 15 answers were asked for again after a state
+  file could not be replaced. The balance read 11,952,537 when the last day
+  finished. 2024-25 holds 22,861 snapshots, 2025-26 24,592, 2026-27 to date
+  2,074.
+- **What it holds.** 147,268 pre-game rows on 2,448 games (a first quote and
+  every change), 773,059 in-play rows on 2,612 games. DraftKings posted a total
+  on 1,772 games and a spread on 1,772; FanDuel 1,608 and 1,612; BetRivers
+  1,817 and 2,154; BetMGM 2,054 totals and 542 spreads; Caesars 1,063 and
+  1,085; Fanatics 1,093 and 1,093; Hard Rock 18 (it first appears in 2026-27).
+  34 team pairs resolved and had no ESPN game.
+- **200 games have in-play quotes and no pre-game ones** (37 in 2024-25, 136
+  in 2025-26, 27 in 2026-27). Their first quote came a median 15 minutes after
+  ESPN's stored tip, and on the 168 with a play-by-play the first play came a
+  median 3 minutes after it, so the stored tips are right: the books listed
+  those games in play only.
+- **A game the feed lists under two events at once keeps one in-play quote per
+  book and market** (the table's key). Checked while the store was running: the
+  ledger counted 154,933 in-play rows offered and the table held 154,394.
+- **Speed, measured.** With a new connection per call, 40 calls in flight kept
+  four processes at 0.84 of a core each for 138 snapshots a minute. One
+  kept-alive connection per thread made 630 in 33 seconds and met the feed's
+  rate limit (HTTP 429, about 1,000 in all), which the meter's shared pause
+  absorbs.
+
+Commands (from a checkout with production settings):
+
+    python -m data.ingestors.ncaabw_odds_history --seasons 2025 2027 --spool DIR
+    python -m data.ingestors.ncaabw_odds_history --seasons 2025 2027 --spool DIR --fetch --store
+
+**Stored, checked 2026-11-10.** The ledger holds all 49,527 snapshots
+(2024-11-12 21:15Z to 2026-11-09 23:55Z). `odds` holds 147,268 pre-game rows
+under `odds_api_ncaabw_history` on 2,448 games, the spool's own count game by
+game, so the connection that dropped during the store wrote nothing twice.
+`ncaabw_inplay_quotes` holds 772,377 rows against 773,059 counted: in 28
+snapshots the feed listed an event twice, and the table's key (snapshot, game,
+book, market) keeps the first listing. 2,186 events matched no ESPN game and
+are kept raw in `ncaabw_odds_unmatched`.
+
+## What runs, and where it lands
+
+| Piece | What | Where |
+|---|---|---|
+| ESPN schedule and results | Teams, venues, every game, finals for settlement; the daily pipeline refreshes 14 days ahead, every refresh pass fills finals for started games | `data/ingestors/ncaabw_espn_ingestor.py`, steps `ncaabw-schedule` / `ncaabw-results` |
+| Live odds | Full-game moneyline, spread and total at the seventeen books on every refresh pass; NCAABW is exempt from the DraftKings-must-list gate, like the men's, so every book's first post is kept | `data/ingestors/odds_ingestor.py` |
+| Opener capture | Every 5 minutes, a minute after the men's, change-only; 6 credits a call when a game is listed; no call when no game tips within 36 hours; `RUN_NCAABW_ODDS_CAPTURE=0` stops it | `scripts/ncaabw_odds_capture.py`, job `ncaabw_odds_capture` |
+| Price-path retention | NCAABW keeps every book's whole price path | `data/prune_odds.py` (`PATH_KEPT_SPORTS`) |
+| Paid history | Every snapshot of 2024-25, 2025-26 and 2026-27 to date (above) | `data/ingestors/ncaabw_odds_history.py` |
+| Free history | NCAA possession box scores and season player minutes, 2010 to 2027 | `data/ingestors/ncaabw_sdv_import.py` |
+| Box scores, this season | ESPN's summary after each final on the hourly passes (step `ncaabw-box`); NCAA's file once a day (step `ncaabw-ncaa-box`, new contests only) | `data/ingestors/ncaabw_espn_box.py`, `ncaabw_sdv_import.refresh_season` |
+| Totals model card | Every 5 minutes, three after each capture tick: decides each game once at DraftKings' first posted total, bets only while it still stands, then publishes; `RUN_NCAABW_TOTAL_CARD=0` stops it | `scripts/ncaabw_total_card.py`, job `ncaabw_total_card` |
+| Play-by-play | ESPN's plays with their wallclock, 2024-25 on, from sportsdataverse's season files; the halftime loop reads the same feed live | `data/ingestors/ncaabw_pbp.py` |
+| Halftime total loop | On pollers: reads the books every five minutes while a game is at the half, decides each game once, posts to the women's live channel; `RUN_NCAABW_LIVE=0` stops it | `models/ncaabw_live_loop.py`, job `ncaabw_live` |
+
+## Box scores and period scores (ESPN, from 2026-27)
+
+`data/ingestors/ncaabw_espn_box.py`, a fork of the men's feed. After each
+final, ESPN's game summary gives the team box score (two rows in
+`ncaabw_team_game_stats`, source `espn_summary`, `contest_id`
+`espn:<ESPN event id>`) and the period scores (`ncaabw_period_scores`:
+**periods 1 to 4 are the quarters, 5 and later the overtimes**). Step
+`ncaabw-box` runs on the hourly refresh passes after `ncaabw-results`; a game
+it will not store gets a row in `ncaabw_box_misses`. The possession estimate,
+the refusals and the red-run rule are the men's (`docs/sports/ncaab.md`, "Box
+scores and period scores"). What differs: a game's length is 40 minutes plus 5
+for each period past the fourth, a regulation game must show four periods
+(two before 2015-16), and there is no women's player box.
+
+**Two sources, one game.** NCAA's rows (sportsdataverse) and ESPN's can both
+hold a game, and this season both do. Keep one source per game, both of its
+rows, NCAA's where it holds the game. **ESPN's game id cannot be the key.**
+NCAA's rows carry it in three seasons only (read 2026-11-10: 99.6% of 2023-24
+rows, 94.3% of 2024-25, 100% of 2025-26, none of any other season, and none
+of 2026-27's 958). A row with no id is placed on its game by the date and both
+team ids, then by the date within a day, one team and the exact score.
+`models.ncaabw_total_blend.place_box` does it, and the totals card and the
+build both read through it. On 2026-11-10 it placed all 1,996 stored 2026-27
+rows and kept 1,048: NCAA's for 479 games, ESPN's for 45.
+
+**The first real run** (the 2026-27 backfill, 2026-11-09): 525 finals due, 519
+stored, 6 refused (5 where the box's made shots do not add up to the final
+score, 1 with no shooting numbers). 2,085 period rows: four a game and nine
+overtime periods. NCAA's file held 5 of the 6 refused games, which is why the
+model reads both sources. `python -m scripts.ncaabw_research.box_coverage`
+prints the season's coverage the way the card reads it.
+
+## Open items
+
+- **ESPN's own odds are not imported.** They would add one sportsbook's lines
+  on most games of 2022-23 and the first weeks of 2023-24. One call a game to
+  ESPN's core API, free.
+- **The season's schedule is loaded whole by hand.** The daily step stores 14
+  days ahead. 2026-27 was loaded to 2027-03-06 on 2026-11-10 (5,769 games).
+  Each October: `python -m data.ingestors.ncaabw_espn_ingestor --backfill
+  <first> <last>`. The totals card fails its run, by name, if it was not.
+- **NCAA's 2026-27 file is not updated every day.** It held games through
+  2026-11-08 on both 2026-11-09 and 2026-11-10.
+
+## The totals model: `ncaabw_total_blend` (live from 2026-11-10)
+
+mike, 2026-11-09: build the women's models from everything learned on the
+men's. The men's totals method on the women's games, at the women's own cut.
+
+| | | |
+|---|---|---|
+| model | ratings refit as of the quote, a correction on shooting luck and style, blended with DraftKings' total | `models/ncaabw_total_blend.py` |
+| card | decides each game once at DraftKings' first posted total, only while it still stands | `scripts/ncaabw_total_card.py` |
+| frozen numbers | `models/saved/ncaabw_total_blend_2027.json` | `scripts/ncaabw_total_blend_build.py` |
+| cut | edge above 0.05: P(win, push left out) minus DraftKings' implied probability | `config.MODEL_EDGE_THRESHOLDS` |
+| EV floor / price floor | 0.07 / -200 | `config.MODEL_OWN_EV_FLOOR`, `MODEL_MIN_ODDS` |
+| stake | the flat 1 unit to win, risk capped at 3 | no `stake_units` written |
+| decided once | a row in `ncaabw_total_decisions`, bet or not | the card |
+| settles as | full-game total, overtime included | `tracking/paper_tracker._RULE_MODEL_MARKETS` |
+| posts to | the NCAABW channel (`DISCORD_CHANNEL_NCAABW`, set on the worker) | `tracking/signal_publisher` |
+
+**The frozen numbers** (built 2026-11-10). Ratings settings: the men's,
+untouched. Stage 2 fitted on 2015-16 to 2025-26. Blend on the 1,730 priced
+games of 2024-25 and 2025-26: every game c +0.574, beta 0.677, sigma 15.92;
+December on (1,512 games) c +0.260, beta 0.760, sigma 15.81. November has 218
+priced games, under the 300 a fit needs, so a November game is priced with the
+every-game fit.
+
+**What the build proves.** It reproduces the research tables to the bet (402
+bets, 225-177, +29.96 units for 2025-26 on numbers from 2024-25; 453 and
++55.76 for each season on the other's blend; 374 and +75.73 on the blend it
+runs on). Then it replays the card's own decision code on all 903 priced games
+of 2025-26 with that season's numbers built as the artifact is: 402 bets, the
+same 402 games and sides as the replay, none held, none refused by a floor,
+largest edge difference 0.00000004. The artifact's `replay` block holds all of
+it (its intervals come from its own resample and differ from the tables below
+in the first decimal).
+
+**November against December on, at the 0.05 cut:**
+
+| | November | December on |
+|---|---|---|
+| Each season on the other's blend | 80 bets, 43-37, +2.30 units, +2.61% [-14.8, +19.3] | 373 bets, 221-152, +53.46 units, +13.01% [+3.6, +22.4] |
+| The blend it runs on (in sample) | 68 bets, 36-32, +0.77 units, +1.03% [-18.2, +20.4] | 306 bets, 196-110, +74.96 units, +22.25% [+12.0, +32.0] |
+
+November is flat, not losing, and the model bets it (no hold was graded as
+better).
+
+**Prices.** Every replayed bet was laid at -115 to -105. DraftKings priced
+every women's total it posted in 2024-25 to 2026-27 between -120 and -102.
+The floor is -200.
+
+**2026-27 to date, through the card's own reads** (2026-11-10, `python -m
+scripts.ncaabw_research.season_to_date`): 42 priced finals. At 0.05: 14 bets,
+7-7, -0.75 units. At 0.03: 22 bets, 10-12, -3.25 units. The line's error on
+those games is 15.95 points and the model's 15.95.
+
+### In the app (2026-11-10)
+
+NCAABW is a sport chip right after NCAAB on the Picks, Models and Stats tabs,
+and the model is "NCAABW Totals" (badge O/U). The Today board reads its picks
+7 days ahead, because DraftKings' first total came up to 6 dates before the
+game. The Stats tab has a Players board (the same chips as the men's, no
+props and no Teams board). The in-play model is in its own section below.
+VoiceOver says "Women's college basketball" wherever a control speaks the sport,
+so the men's and women's chips do not sound alike.
+
+- **Stats tab, Players board.** Points, Rebounds, Assists, 3PM, PRA, Steals,
+  Blocks, Minutes, with Hit Rates and Averages, the men's set. Source
+  `ncaabw_player_game_log`, one row per player per game from sportsdataverse's
+  `ncaa_wbb_player_box` (`data/ingestors/ncaabw_sdv_import.py`). ESPN's women's
+  player box is not ingested. The school name is the one on the games row.
+  The player id is the team ESPN id plus the folded name, because NCAA's own
+  player id changes every season. Reads: `v_player_season_totals_ncaabw`,
+  `player_window_totals_ncaabw`, `player_recent_games_ncaabw`,
+  `player_season_stat_values_ncaabw`, `player_h2h_stat_values_ncaabw`
+  (`add_ncaabw_player_game_log_2026_11_12.sql`). That file is not in
+  `ACTIVE_MIGRATIONS`. Apply it by hand once Matt says so, and before the
+  app build reaches users: a master merge ships the Stats tab, and an empty
+  table in November shows the tip-off sentence. The worker does not have to
+  be updated first. The daily box step then fills the current season. Earlier
+  seasons (the second year head-to-head reads) stay empty until
+  `python -m data.ingestors.ncaabw_sdv_import --log --seasons 2026 2027`,
+  which writes the log only and does not rewrite stored team rows.
+  No player-prop line. No Teams board. No starter flag: the file
+  does not carry one, so the player page has no Starting / Off bench split.
+- **The prefix trap.** `modelId.startsWith('ncaab')` is true for
+  `ncaabw_total_blend`, so both places that file a model under a sport test
+  the women's prefix first (`modelMeta.sportOfModel`, `ModelsScreen.sportOf`).
+  `tests/test_mobile_ncaabw_in_app.py` fails if a third prefix test appears.
+- **The seven extra books.** Bally Bet and Fliff moved to the app's
+  reference-only list for every sport, so neither is in the sportsbook picker
+  or on a line chip (mike, 2026-11-10: *"get rid of bally and fliff"*). The feed stopped fetching both on 2026-09-20; the only
+  newer prices at either are the women's. Read 2026-11-10: of 28 stored book
+  sets, none held only those two and 4 held one beside other books. BetOnline,
+  LowVig, Unibet and BetWhale were never selectable and now have display
+  names.
+- **The name on screen is "NCAABW"**, the Discord channel's name. The UX
+  review preferred "NCAAW" (ESPN's name), because the code reads as the men's
+  plus a letter. mike, 2026-11-10: *"leave it"*.
+
+### What a straight copy of the men's card got wrong
+
+Each was found by running the fork on the stored women's tables before it
+went live, and each has a test.
+
+1. **Every team would have been pooled into one.** The model pools a team
+   with fewer than 10 games on the season's schedule. The men's schedule is
+   stored whole (6,009 games to 2027-03-07). The women's held 1,245 games to
+   2026-11-23, so no team had 10 and every game would have been priced off
+   one pooled rating. The season was loaded (5,769 games; 363 Division I
+   teams, fewest 25 games), and the card now refuses a game with a Division I
+   team under 10 stored games and fails its run (`schedule_short`).
+2. **Both box sources would have been counted.** See "Two sources, one game".
+3. **The blend had no November.** The men's artifact holds a fit per phase.
+   The women's November has 218 priced games, so the men's code would have
+   refused every November game as `no_blend`. `blend_for` falls back to the
+   every-game fit, as the research graded it.
+4. **The ranges were the men's.** Totals 90 to 200 (the men's 220; no women's
+   total stored is above 179.5) and spreads to 85 either way (the men's 60
+   would drop 274 real rows). The edge cap is 0.30: the largest edge over all
+   1,730 priced games is 0.2076.
+5. **A second stake.** The men's card sizes a bet up when an earlier NCAAB
+   bet agrees with it. There is one women's model, so every bet is flat.
+
+## In play: the halftime total, `ncaabw_live_total_ht` (2026-11-11)
+
+mike, 2026-11-11: *"why no live or ML / spread models for NCAABW?"*
+
+**What it bets.** The full-game total, over or under, at a book's in-play
+number during the halftime break. One decision a game: the first five-minute
+price read of the break that holds an eligible quote decides it, on the best
+quote there, bet at an expected value of 0.05 or more and spent either way.
+It settles on the final total, overtime included, against the total taken.
+
+**The model** (`models/ncaabw_live_ht.py`). The points still to come are
+normal. Their mean is a share of the pre-game total plus a share of the first
+half's surprise (the halftime score less half the pre-game total); their
+spread is a fixed number at the half. The pre-game total is the median of the
+books' last pre-game totals. It is fitted on the score at every 30 seconds of
+every priced game: 175,471 states of 2,223 games of 2024-25 and 2025-26 for
+the file the loop loads (`models/saved/ncaabw_live_ht_2027.json`). At the
+half that file expects 51.7% of the pre-game total still to come, plus 7.8% of
+the surprise, give or take 11.8 points.
+
+**A quote is eligible when** it is a bettable book's; the half had ended on
+ESPN's play list when the book stamped it, and the third quarter had not
+started at the read; no point was logged between its stamp and the read; the
+price of the side taken is between -250 and +250; its total is within 6
+points of the median of every book's total for the game in that read; at
+least 2 other books quote the game's total in that read; and the total is
+between 60 and 260.
+
+### The evidence
+
+`python -m scripts.build_ncaabw_live_ht_artifact` replays the loop's own
+decision code on every five-minute snapshot of the two priced seasons, and
+writes the model file only when the replay equals the numbers pinned in it.
+
+| Cut (EV at or above) | 2025-26, model fitted on 2024-25 (walk-forward) | 2024-25, model fitted on 2025-26 (second look) | Both |
+|---|---|---|---|
+| 0.02 | 810 bets, +82.43 units, +8.94% [+2.9, +14.6] | 363, +44.84, +10.77% [-0.1, +20.8] | 1,173, +127.27, +9.51% [+4.5, +14.8] |
+| 0.03 | 762, +90.61, +10.46% [+4.7, +15.8] | 341, +44.46, +11.38% [-0.3, +21.8] | 1,103, +135.07, +10.75% [+5.6, +15.8] |
+| **0.05** | **669, 398-271, +89.96, +11.84% [+5.1, +18.1]** | **298, 178-119, +42.10, +12.35% [+0.6, +23.7]** | **967, 576-390, +132.06, +11.99% [+6.3, +17.6]** |
+| 0.08 | 488, +71.34, +12.89% [+5.1, +20.9] | 229, +24.36, +9.31% [-4.6, +23.2] | 717, +95.70, +11.74% [+4.8, +18.8] |
+| 0.12 | 310, +70.59, +20.14% [+10.7, +29.7] | 154, +18.26, +10.40% [-5.2, +25.4] | 464, +88.85, +16.89% [+8.5, +24.8] |
+
+Stake: one unit to win, risk capped at 3, at the quoted price. Intervals are
+95%, resampled by date. 2026-27 through 2026-11-09, on the file the loop
+loads: 14 bets, 7-7, -0.91 units.
+
+Of 1,314 games of 2025-26 with an in-play total and a play-by-play, 1,039 were
+decided in the break, 22 passed their break with no eligible quote, and 253
+had no read inside it. For 2024-25: 879, 494, 63, 322.
+
+| Check, at 0.05 | 2025-26 | 2024-25 | Reads as |
+|---|---|---|---|
+| The rule | +11.84% | +12.35% | |
+| Blind: every over at the deciding read | -0.81% | -4.19% | the side alone is not it |
+| Blind: every under | -9.36% | -8.25% | |
+| The rule's bets, turned round | -24.62% | -25.28% | the model picks the side |
+| Another game's decision, 200 shuffles | -4.05% [-11.6, +2.4] | -7.03% [-18.5, +4.3] | the link to the game is what pays |
+| November-December | +19.41% on 139 | +18.58% on 102 | both parts of the season |
+| January on | +9.85% on 530 | +9.10% on 196 | |
+
+By claimed EV, the deciding quote of every game of 2025-26: under 0, +2.71%
+on 142; 0 to 0.02, +7.63% on 87; 0.02 to 0.05, -4.66% on 141; 0.05 to 0.08,
++9.02% on 181; 0.08 to 0.12, +0.37% on 178; 0.12 to 0.20, +15.47% on 231;
+0.20 and up, +34.04% on 79. The bands do not rise in step; the top two carry
+most of it.
+
+**Claimed against won, every decided game of both seasons:** 0.52-0.55
+claimed 0.537, won 0.525 (335); 0.55-0.58 0.564, 0.557 (431); 0.58-0.62
+0.598, 0.590 (422); 0.62-0.70 0.644, 0.643 (221); 0.70 and up 0.750, 0.593
+(27). Honest to 0.70; above it the model is too sure on 27 games, which still
+made +3.16 units. No cap or shrink was added for them. On the walk-forward
+season alone the 14 bets claimed above 0.70 won 64.3% against a claim of
+74.3% and made +3.09 units.
+
+**The prices it lays.** The 967 bets: -148 at the shortest, +200 at the
+longest, median -115, nine in ten between -125 and -105, none shorter than
+-150, 8 at plus money. `config.MODEL_MIN_ODDS` holds it at -200.
+
+**How many.** 198 days with a bet over the two seasons: a median 3 bets on
+such a day, 11 on one day in ten, 25 at the most. Nothing limits a day.
+
+**Sides and books, both seasons at 0.05.** Overs 546 bets, +16.83% [+9.1,
++24.5]; unders 421, +5.78% [-3.9, +15.5]. BetMGM 407 bets, +11.41%;
+DraftKings 253, +19.43%; FanDuel 163, +4.78%; Fanatics 58, -0.97%; BetRivers
+50, +15.93%; Caesars 36, +14.18%. The deciding quote was a median 27 seconds
+old at the read in 2025-26 and 34 in 2024-25 (nine in ten under 50 and 88).
+
+### The score is the highest logged so far
+
+The research read the state at an instant as "the last play ESPN logged".
+ESPN logs corrections late, with a new wallclock and the running score of the
+moment they belong to: a first-quarter substitution entered two minutes into
+the break reads 2-2 after the half ended 37-20 (Fresno State at Washington,
+2025-11-20). That reading gave 54 of the research's 689 bets of 2025-26 a
+wrong halftime score. Those 54 went 24-30, -10.71 units, at a claimed win
+chance of 0.823; the other 635 went 374-261, +77.30. A score never falls, so
+`states_from_rows` takes the running maximum, as it already did for the
+clock. On that reading 667 of the 669 bets of 2025-26 and all 298 of 2024-25
+carry the play list's own halftime score.
+
+The build shows both. On the research's reading the loop's code reproduces
+the research bet for bet (689 bets, 398-291, +66.59 units; 303, 182-120,
++44.96), which shows the code is the research's rule. On the corrected
+reading it gives the table above, which is the model's evidence. The research
+script agrees with it (`NCAABW_INPLAY_STATE=max python -m
+scripts.ncaabw_research.inplay`, then `inplay_checks 0.05 halftime`).
+
+The research's "far too sure above 0.70" (claimed 0.833, won 0.548 on 73
+games) was mostly those wrong scores.
+
+### What a copy of existing in-play code got wrong on the women's data
+
+1. **The clock.** Four 10-minute quarters since 2015-16, so the half ends
+   with period 2 and the game at 1,200 of 2,400 seconds. `ncaabw_pbp.
+   game_seconds` reads the period count per season.
+2. **Play numbers are not time order.** In 83% of the 2026-27 games ESPN's
+   play number does not rise with its wallclock. The state is read in
+   wallclock order.
+3. **The last play logged is not the score** (above).
+4. **A season's play-by-play file can lack a column.** 2024-25 has no
+   `points_attempted`; a fixed column list failed on it.
+5. **The board bills two regions.** Seventeen books, so a three-market call
+   costs 6 credits, and the sharpest two (BetOnline, LowVig) quote no in-play
+   total: there is no sharp line to compare a bet with.
+6. **The app said the sport has no in-play model**, and would have printed
+   "Q2" on a bet placed at the break. Both now say halftime.
+
+### How it runs
+
+`models/ncaabw_live_loop.py`, job `ncaabw_live` on the pollers service, every
+10 minutes from 11am to 2:55am ET as a supervisor; it exits when no women's
+game is in progress. `RUN_NCAABW_LIVE=0` stops it.
+
+- It reads the books at each five-minute mark plus 37 seconds, the instants of
+  the history it was graded on, and only while an undecided game is in its
+  second quarter, at the half or in its third quarter on ESPN's scoreboard.
+  One call for every game: moneylines, spreads and totals at the seventeen
+  books, 6 credits. Every row is stored as an in-play price (source
+  `ncaabw_live_loop`), so this season's halftime prices collect themselves.
+- It then fetches ESPN's play list 90 seconds later and again 60 seconds after
+  that. A play logged before the read that only the second fetch carries, or
+  ESPN's header score differing from the play list's, skips the game at that
+  read. So a bet posts about two and a half minutes after its price was read.
+  The same side at the same book five minutes on still made +4.70% and +8.72%
+  in the research (first reading; not re-run).
+- Every decision is written to `ncaabw_live_decisions` first: `bet`, `no_bet`
+  (under the cut), `declined` (a gate refused it), or `missed` (the third
+  quarter began with nothing eligible seen). One final row a game, never
+  replaced; a read it could not decide on is a `skipped` row with the reason.
+- A bet goes to `picks` under the first-signal live lock, then to push and the
+  women's live channel (`DISCORD_CHANNEL_LIVE_NCAABW`, set on pollers) and
+  nowhere else. With no live channel set the loop decides nothing.
+
+**Three gates on a bet, each a `declined` row.** A price shorter than -200. A
+decision edge above 0.40 (the largest replayed edge is 0.371; the wrong-score
+bets reached 0.48). And a bet that cannot win together with the game's
+standing pre-game total bet (mike, 2026-10-17: *"It can't be both"*): in the
+replay that is 24 of the 967 bets, and those 24 lost 5.75 units.
+
+### An under beside a big favourite (2026-11-11, mike)
+
+mike asked that an under never sits beside a big favourite's spread bet, in
+the men's and the women's models (`docs/sports/ncaab.md`, the section of the
+same name, has what he saw and the measurement). For the women's models:
+
+- **The check is in both writers** (`models/cbb_pairs.py`): the totals card
+  and the halftime loop each ask whether the game holds a spread bet on a
+  favourite laying 20 or more (12 or more on a first-half spread) before
+  they bet an under. There is no women's spread model, so nothing can trip
+  it today.
+- **No rule by the size of the favourite was added**, because the women's
+  halftime unders are at their best there. The replayed halftime bets of
+  both seasons by the points the pre-game favourite lays:
+
+| Pre-game favourite lays | Unders | Overs |
+|---|---|---|
+| under 10 | 197 bets, -13.96 units | 247, +32.35 |
+| 10 to 20 | 123, +6.60 | 154, +42.75 |
+| 20 or more | 101, 70-31, +35.23, +30.88% [+13.2, +47.9] | 145, +29.09, +17.66% |
+
+  Unders with the favourite laying 20 or more made +20.44 units in 2024-25
+  and +14.79 in 2025-26. With no model, the full-game relation on the
+  women's closing lines is the men's: the favourite's cover and the under
+  come in together in 22.9% of games where it lays 30 or more, against
+  25.5% if unrelated (341 games).
+
+### In the app (2026-11-11)
+
+- **Its name is "NCAABW Live Totals", badge "LIVE O/U".** Not "Halftime
+  Totals": to a bettor a halftime bet is a bet on the second half, and this
+  one is on the full game (UX review, 2026-11-11). The open-picks view uses
+  the same name.
+- Its bets are on the Live Signals board only. The lock row reads "Locked
+  8:42 PM ET · halftime", and Pick Detail says the bet is on the full-game
+  total, settles on the final score, and was priced during the break shortly
+  before the time shown.
+- The card shows the locked price and opens the book without a live number:
+  the loop reads prices only during the break.
+- The empty Live board says the model checks each game during its halftime
+  break and bets it at most once. The sport's empty Today board says halftime
+  bets post on Live Signals.
+- The sentence that lists the sports with an in-play model ends "NCAAB and
+  NCAABW", and VoiceOver reads the sports by name.
+
+**Not measured.** How late ESPN publishes a women's play. The two waits are
+the ones measured on the men's game on 2026-11-07 (scoring plays a median 37
+seconds after their wallclock, 58 at the longest). The ledger stores the
+seconds between ESPN's newest play and each read (`play_lag_s`).
+
+**The play-by-play is in Supabase** (`ncaabw_pbp`, `ncaabw_pbp_games`;
+`python -m data.ingestors.ncaabw_pbp --seasons 2025 2027`): 5,013,067 plays
+of 11,894 games, loaded 2026-11-11. 74 games in the files are not on our
+schedule and were left out; the last running score differs from the stored
+final in 64 games (62 of them in 2024-25).
+
+## Research (2026-11-09)
+
+Scripts: `scripts/ncaabw_research/` (its README says how to rebuild the cache).
+Every table is one unit to win with risk capped at 3 (the house stake), at the
+quoted price, with a 95% interval resampled by date. Two priced seasons exist,
+so "walk-forward" here means one thing: 2025-26 graded on numbers fitted only
+on 2024-25 (and the first week of 2026-27 on both). 2024-25 graded on numbers
+from 2025-26 is a second look and is labelled as one.
+
+### Full-game totals: the men's totals model passes
+
+The men's model unchanged (`models/ncaab_total_blend.py`): ratings and the luck
+and style correction as of the hour of DraftKings' own time on its first posted
+total, blended with that total, priced at DraftKings' two prices. Settings are
+the men's; none was tuned on the women's prices.
+
+**The rating model alone** (`totals_a`; 61,408 games from 2015-16, possessions
+on 61,146): mean absolute error of the predicted total 13.05 points over
+2016-17 to 2026-27, against 15.34 for last season's league average. Its 487
+games of 2026-27 were predicted with every team pooled into one (only the
+played games of the season were stored then, so no team had 10 on the
+schedule); nothing is read from them here.
+
+**Against lines it was never fitted to** (`totals_espn`; ESPN's stored
+sportsbook total, one provider, capture time unknown, no usable price, so this
+is about information, not profit). In `total - line = c + beta x (model - line)`:
+
+| Season | Games | beta | 95% interval | Error: line | model |
+|---|---|---|---|---|---|
+| 2022-23 | 4,881 | 0.820 | [0.691, 0.942] | 12.85 | 12.68 |
+| 2023-24 | 2,968 | 0.869 | [0.689, 1.044] | 13.13 | 12.93 |
+
+Where the model sat 5 or more points off that line the game landed its side
+324-185 in 2022-23 and 309-193 in 2023-24. The men's model never beat a
+posted line on raw error; this one does, on those lines.
+
+**At DraftKings' first posted total** (`totals_b`, `totals_c`; 1,772 priced
+games: 827 in 2024-25, 903 in 2025-26, 42 in 2026-27). DraftKings first posts
+a women's total a median 6.0 hours before the tip in 2024-25 and 4.9 in
+2025-26, and that first number stood a median 136 and 85 minutes (the men's
+about 30). On these games the model's error is 12.69 against the line's 12.85
+in 2024-25, and 12.40 against 12.34 in 2025-26.
+
+*2025-26, walk-forward* (blend fitted on 2024-25: beta 1.05, so it trusts the
+model fully and bets over half the games):
+
+| Cut | Bets | Record | Units | ROI | 95% interval |
+|---|---|---|---|---|---|
+| 0.03 | 516 | 283-233 | +26.33 | +4.63% | [-3.7, +12.1] |
+| 0.04 | 462 | 257-205 | +31.13 | +6.12% | [-1.6, +14.1] |
+| 0.05 | 402 | 225-177 | +29.96 | +6.77% | [-2.2, +15.1] |
+| 0.06 | 345 | 194-151 | +27.59 | +7.26% | [-2.3, +16.8] |
+| 0.08 | 276 | 160-116 | +32.16 | +10.57% | [-0.1, +20.9] |
+
+Every over blind lost 0.26% and every under 8.87% on the same 903 games.
+Bet lines beat the closing consensus by 0.56 to 0.72 points.
+
+*2024-25, the second look* (blend fitted on 2025-26: beta 0.46): 128 bets at
+0.03, 87-41, +42.02 units, +29.89% [16.5, 43.8]; 51 at 0.05, 39-12, +25.80.
+
+*Both seasons, each on the other's blend* (`totals_c`):
+
+| Cut | Bets | Record | Units | ROI | 95% interval |
+|---|---|---|---|---|---|
+| 0.02 | 785 | 439-346 | +58.02 | +6.72% | [+0.7, +12.6] |
+| 0.03 | 644 | 370-274 | +68.35 | +9.64% | [+2.9, +16.1] |
+| 0.04 | 538 | 313-225 | +65.23 | +11.02% | [+3.9, +18.5] |
+| 0.05 | 453 | 264-189 | +55.76 | +11.18% | [+2.7, +19.3] |
+| 0.06 | 378 | 222-156 | +50.09 | +12.03% | [+2.4, +21.0] |
+| 0.08 | 286 | 169-117 | +40.06 | +12.71% | [+1.8, +22.9] |
+
+*The blend it would run on in 2026-27* (fitted on both seasons: c +0.57, beta
+0.677, sigma 15.92 on 1,730 games; December on c +0.26, beta 0.760, sigma
+15.81 on 1,512; November has under 300 games and uses the all-season fit). In
+sample for those three numbers:
+
+| Cut | Bets | Units | ROI | 95% interval | 2024-25 | 2025-26 | Share of priced games |
+|---|---|---|---|---|---|---|---|
+| 0.04 | 484 | +63.89 | +11.99% | [+4.3, +19.5] | 177, +32.2 | 307, +31.7 | 28.0% |
+| 0.05 | 374 | +75.73 | +18.39% | [+9.3, +27.5] | 124, +38.0 | 250, +37.7 | 21.6% |
+| 0.06 | 283 | +76.96 | +24.69% | [+14.8, +34.6] | 88, +37.6 | 195, +39.4 | 16.4% |
+
+Prices at 0.04: -118 to -105. This paragraph first quoted 2026-27's first
+week as 30 bets at 0.03, 20-10, +9.03 units. That was computed with every
+team pooled into one and is withdrawn; the season to date is under "The
+totals model" below.
+
+**Read before trusting it:**
+
+- **One walk-forward season, and its own interval includes zero** (lower bound
+  -3.7% to -0.1% across the cuts). The pooled table clears zero at every cut
+  from 0.02 to 0.08, but half of it is 2024-25 on a blend fitted a season
+  later (three numbers).
+- **The blend is not stable.** Beta was 1.05 on 2024-25 and 0.46 on 2025-26:
+  DraftKings' first totals got sharper (their error fell from 12.85 to 12.34).
+  If they sharpen again the two-season blend will claim too much.
+- **It claims more than it hits.** Each season on the other's blend: claimed
+  0.563 won 0.527 (281 games), 0.599 won 0.571 (198), 0.651 won 0.577 (168).
+- **November is flat.** At 0.04 on the two-season blend: 81 November bets,
+  -3.33% [-21.3, +14.6]; December on, 403 bets, +15.07% [+6.4, +23.3].
+- **A first post that stood under 10 minutes** is 30 of the 484 bets at 0.04
+  (+46%); the 454 that stood 10 minutes or more made +9.72% [+1.9, +17.5].
+- **Overs and unders both pay** at 0.04: overs 310 bets +13.27% [+2.7, +23.6],
+  unders 174 bets +9.73% [-2.3, +21.7].
+
+### Full-game spread and moneyline: the men's two market rules fail
+
+`market`. Boards are the newest snapshot at or before the tip less a lead. The
+men's final-margin table needs 70,268 games with a closing line; the women's
+feed has two seasons, so the margin is a normal around the consensus with a
+spread fitted on the earlier season's closes (12.2 points, flat in the size
+of the line).
+
+*Spread, line shopping against the consensus, edge above 0.03, three other
+books:*
+
+| Lead before tip | 2025-26 (walk-forward) | 2024-25 (second look) |
+|---|---|---|
+| 10 min | 127 bets, +5.75% [-11.6, +22.8] | 55, -2.81% [-26.4, +18.7] |
+| 30 min | 124, -0.84% [-16.7, +15.2] | 49, +1.10% [-23.2, +24.0] |
+| 60 min | 118, -5.28% [-22.1, +13.0] | 47, -14.84% [-40.4, +12.1] |
+| 120 min | 111, +6.02% [-10.9, +24.3] | 41, +12.07% [-15.2, +37.6] |
+| 240 min | 63, -0.91% [-22.8, +22.5] | 24, -28.76% [-64.2, +9.5] |
+
+No lead is positive in both seasons with an interval clear of zero, and the
+sign flips between neighbouring leads. The same bets placed at the consensus
+line at -110 lost 6.7% and 12.6% (2025-26, 10 and 60 minutes) and 20.2% and
+35.0% (2024-25): on the women's board the book that stands apart is more often
+right than wrong.
+
+*Moneyline off the book's own spread, -200 or longer, edge above 0.01:*
+2025-26 at 10, 30, 60, 120 and 240 minutes: +6.09%, +15.57%, -7.98%, +6.77%,
+-25.24% on 54 to 125 bets, every interval spanning zero; 2024-25: -4.06%,
+-3.43%, +1.18%, +0.56%, -2.00% on 171 to 267 bets. With favourites shorter
+than -200 removed, what is left on a board full of 20-point spreads is long
+underdogs (prices to +3500, 21 to 33 winners in 107 to 125 bets). Nothing here.
+
+### In play: the first look (its checks are in the next section)
+
+`inplay`. A game-state model on the women's clock (four quarters): what is
+still to come is normal around the pre-game closing consensus scaled by the
+share of regulation left, the surprise so far, and for totals a late-and-close
+term; fitted on every 30 seconds of the earlier season's priced games. Out of
+sample on 2025-26 the margin's mean error is +0.02 points and the total's
++0.35, spread ratios 1.01 and 1.04. A quote is priced on the play-by-play
+state at its own stamp and is eligible at a bettable book, priced -250 to
++250, within 6 points of the other books in its snapshot, with two other
+books quoting, and no point scored between its stamp and the snapshot.
+
+The men's decision rule (the first snapshot of the phase holding an eligible
+quote decides the rule for the game), EV at or above 0.05:
+
+| Rule | 2025-26 (walk-forward) | 2024-25 (second look) | 2026-27, first week |
+|---|---|---|---|
+| Total, halftime to two minutes left | 698 bets, +8.75% [+2.2, +15.7] | 305, +12.84% [+2.0, +23.4] | 16, -5.21% |
+| Spread, halftime to two minutes left | 405, +6.80% [-2.4, +16.6] | 156, +13.44% [+1.1, +26.6] | 29, -22.90% |
+| Spread, first half | 387, +5.69% [-4.3, +15.1] | 219, +0.05% [-12.0, +11.3] | 30, -0.29% |
+| Total, first half | 1,082, -5.31% [-11.3, +1.0] | 472, -1.22% [-10.3, +7.5] | 51, -8.64% |
+
+The second-half total is positive at every cut from 0.02 to 0.12 in 2025-26
+(lower bounds +0.3 to +2.6). **Not yet done**, each of which the men's in-play
+models had to pass: the blind same-side baseline, the bands below and above
+the cut, the placebo (another game's model), and the stale-quote checks. The
+claimed EV (mean 0.16 at the 0.05 cut) is about twice the return, and the
+first week of 2026-27 is negative on every rule (16 to 51 bets each). The
+checks were run on 2026-11-11 and are the next two sections.
+
+### The second-half total is a halftime total, and it passes its checks (2026-11-11)
+
+`inplay_checks 0.05` for the checks and `inplay_checks 0.05 halftime` for the
+break-only tables (both read the priced quotes `inplay` leaves in the cache).
+
+**It is a halftime rule.** "The first second-half snapshot holding an eligible
+quote" sits in the halftime break for 1,039 of 1,055 decided games of 2025-26
+and 494 of 503 of 2024-25: the score is the halftime score, the quote is
+stamped a median 2.2 minutes after the half ends (one in ten within 20
+seconds, nine in ten within 4.4 minutes), and a game has a median 3 snapshots
+in its break. So the state is fixed, the books have had time to hang a
+number, and a bettor has minutes, not seconds.
+
+**The grid, break only** (EV at or above the cut; one bet a game; one unit to
+win, risk capped at 3; 95% interval resampled by date):
+
+| Cut | 2025-26 (walk-forward) | 2024-25 (second look) | Both |
+|---|---|---|---|
+| 0.02 | 822 bets, +60.00 units, +6.41% [+0.5, +12.3] | 370, +47.44, +11.18% [+0.7, +21.0] | 1,192, +107.44, +7.90% [+2.6, +13.1] |
+| 0.03 | 779, +66.44, +7.50% [+1.5, +13.4] | 347, +48.22, +12.13% [+1.3, +22.1] | 1,126, +114.66, +8.93% [+3.5, +13.8] |
+| **0.05** | **689, 398-291, +66.59, +8.50% [+1.6, +15.4]** | **303, 182-120, +44.96, +12.97% [+1.7, +24.2]** | **992, 580-411, +111.55, +9.87% [+4.0, +15.7]** |
+| 0.08 | 522, +57.79, +9.75% [+2.1, +17.9] | 242, +30.92, +11.18% [-0.8, +23.0] | 764, +88.71, +10.20% [+3.6, +17.0] |
+| 0.12 | 357, +42.35, +10.47% [+0.5, +21.0] | 160, +17.82, +9.77% [-4.9, +23.8] | 517, +60.17, +10.25% [+2.3, +18.4] |
+
+The walk-forward season clears zero at every cut. 2026-27 to 2026-11-08: 16
+bets, 8-8, -0.96 units.
+
+**The four checks** (the whole rule at 0.05; 698 and 305 bets, of which 689
+and 303 are in the break):
+
+| Check | 2025-26 (walk-forward) | 2024-25 (second look) | Reads as |
+|---|---|---|---|
+| The rule | +8.75% [+2.0, +15.5] | +12.84% [+1.6, +23.8] | |
+| Blind: every over at the same snapshots | +0.03% (1,055 bets) | -3.66% (503) | the side alone is not the edge |
+| Blind: every under | -10.37% | -8.38% | halftime totals sit low; unders pay the price |
+| The rule's bets turned round | -21.63% | -25.80% | |
+| Placebo: another game's decision, same side mix | -5.41% [-13.3, +1.1] | -6.90% [-17.0, +3.2] | the link to the game is what pays |
+| Quote under 30 s old at its snapshot | +4.99% (374) | +21.69% (134) | no pattern by age: |
+| Quote 30 to 60 s old | +18.39% (275) | -6.08% (97) | the two seasons disagree |
+| Stamped 90 s or more after the last score | +8.57% (554) | +14.40% (225) | not a just-scored artifact |
+| Same side, same book, the NEXT snapshot | +4.70% [-2.4, +12.0] | +8.72% [-3.1, +19.9] | half to two thirds survives five minutes |
+
+By claimed EV, the deciding quote of every game, 2025-26 then 2024-25: under
+0, +15.20% and -17.83% (138 and 86 bets, opposite signs: noise); 0 to 0.02,
+-6.56% and +4.05%; 0.02 to 0.05, -4.32% and +1.62%; 0.05 to 0.08, +4.98% and
++18.11%; 0.08 to 0.12, +8.68% and +13.90%; 0.12 to 0.20, +9.84% and -0.32%;
+0.20 and up, +11.91% and +26.41%. Above the cut it pays, below it does not.
+
+**What it claims against what it wins** (both seasons, every decided game):
+claimed 0.537 won 0.519 (320 games); 0.565 won 0.554 (410); 0.598 won 0.590
+(400); 0.644 won 0.620 (237); 0.833 won 0.548 (73). Honest to 0.62, far too
+sure above 0.70.
+
+**Splits at 0.05, both seasons.** Overs 539 bets, +16.63% [+8.7, +25.0];
+unders 453 bets, +1.93% [-8.1, +11.3]. DraftKings 244 bets, +20.00% [+8.5,
++31.5]; BetMGM 411, +11.20% [+3.1, +19.5]; FanDuel 161, +4.91%; Fanatics 77,
+-12.93%; BetRivers 62, +2.28%; Caesars 37, +11.11%. November and December
++16.57% and +18.58% (142 and 102 bets); January on +6.74% and +9.96%.
+
+**Prices and volume.** Bets were laid at -148 to +200: median -115, nine in
+ten between -125 and -105, none shorter than -150. A bet on 198 game days in
+the two seasons: a median 4 a day, 11 on one day in ten, 26 at most.
+
+**Not checked, because the board cannot:** the two sharpest books on the
+women's board (BetOnline, LowVig) quote no in-play totals, so there is no
+sharp line to compare the bet with.
+
+**Built 2026-11-11.** The tables in this section are on the research's first
+reading of the play list, which gave 54 of the 689 bets of 2025-26 a wrong
+halftime score. The model's evidence is the corrected reading's, in "In
+play: the halftime total" above.
+
+### Halftime spread: close, and it does not clear (2026-11-11)
+
+The same rule on the spread, break only:
+
+| Cut | 2025-26 (walk-forward) | 2024-25 (second look) |
+|---|---|---|
+| 0.02 | 581 bets, +41.71 units, +6.24% [-2.5, +15.1] | 229, +27.39, +10.28% [-1.4, +23.1] |
+| 0.05 | 398, +29.00, +6.35% [-3.5, +15.7] | 149, +23.80, +13.74% [+1.6, +27.0] |
+| 0.08 | 279, +32.11, +10.00% [-1.7, +21.8] | 107, +18.64, +15.06% [-1.5, +32.9] |
+| 0.12 | 171, +7.90, +4.02% [-10.8, +18.7] | 64, -2.78, -3.74% [-27.8, +20.2] |
+
+The walk-forward interval spans zero at every cut. Its claimed-EV bands do
+not rise (0.12 to 0.20 lost 13.10% on 105 bets in 2025-26; 0.20 and up lost
+9.68% on 29 in 2024-25), the placebo is -7.36% and -7.39%, and 2026-27 to
+date is 28 bets, 12-16, -6.50 units. What would change it: a third priced
+season with the walk-forward interval clear of zero.
+
+**On the corrected reading of the play list (2026-11-11).** The table above
+is on the research's first reading, which gave some games a wrong halftime
+score (see "The score is the highest logged so far"). Read again with the
+score as the highest logged so far:
+
+| Cut | 2025-26 (walk-forward) | 2024-25 (second look) | Both |
+|---|---|---|---|
+| 0.02 | 562 bets, +52.51 units, +8.12% [-0.1, +16.6] | 226, +26.48, +10.07% [-1.6, +22.1] | 788, +78.99, +8.68% [+1.9, +15.8] |
+| 0.05 | 371, 215-156, +36.14, +8.48% [-1.9, +18.2] | 145, 88-57, +21.89, +12.97% [+0.5, +26.0] | 516, +58.03, +9.75% [+1.8, +17.7] |
+| 0.08 | 252, +39.31, +13.55% [+1.1, +25.5] | 103, +16.84, +14.13% [-2.8, +32.5] | 355, +56.15, +13.72% [+4.0, +23.8] |
+| 0.12 | 148, +14.78, +8.68% [-7.7, +23.7] | 60, -4.58, -6.58% [-30.4, +18.9] | 208, +10.20, +4.25% [-8.6, +18.1] |
+
+Better, and still not clear. The walk-forward interval reaches zero at 0.02,
+0.03, 0.05 and 0.12. Its claimed chance is not honest where it matters:
+claimed 0.649 won 0.500 on 106 games between 0.62 and 0.70. And 2026-27 to
+date is 28 bets, 11-17, -8.60 units. What would change it: this season's
+halftime prices, which the halftime loop now stores at every read.
+
+### Spread and moneyline off the team ratings: nothing clears (2026-11-11)
+
+`sides`. The totals model's ratings read as a home margin, (home efficiency
+less away efficiency) x possessions / 100, as of DraftKings' first posted
+spread (1,772 games; 1,771 carry the same stamp as its first total), blended
+with the line as the total is: actual margin less the line on model margin
+less the line.
+
+**The line already holds it.** The blend's beta, the share of the model's
+disagreement with the line that comes true, is -0.03 fitted on 2024-25 and
+-0.05 on 2025-26 (the total's is 1.05 and 0.46). The line's error is 10.03
+and 10.19 points; the model's 11.08 and 12.31.
+
+| Spread, edge above | 2025-26 on 2024-25's numbers | 2024-25 on 2025-26's | Both |
+|---|---|---|---|
+| 0.00 | 150 bets, -3.93 units, -2.42% [-17.9, +15.3] | 599, -36.80, -5.59% [-12.6, +1.4] | 749, -40.73, -4.97% [-11.2, +1.4] |
+| 0.01 | 59, +0.74, +1.15% [-17.8, +23.8] | 267, -18.07, -6.17% | 326, -17.33, -4.86% |
+| 0.02 | 17, +0.51 | 60, -4.78 | 77, -4.27, -5.10% |
+| 0.04 | 0 | 2 | 2 |
+
+Blind, both seasons (1,730 games): every home side -1.74% [-6.4, +2.6], every
+away side -7.33%, every favourite -3.05%, every underdog -6.02%.
+
+**Is it the ratings' settings?** Eight were tried (`sides grid`). With less
+shrinkage and more carry-over from last season the model beats the line's
+error in 2024-25 (9.86 against 10.03) and its beta there is 0.88, but in
+2025-26 the same settings give 0.18 and an error of 10.36 against 10.19.
+Walk-forward at edge above 0.01: -17.36 units on 373 bets (shrinkage 4),
+-16.11 on 547 (shrinkage 1.5), -12.68 on 411 (full carry-over), +7.30 on 558
+(all three moved; -1.21 on 495 at 0.02). DraftKings' first spreads were
+beatable in 2024-25 and were not in 2025-26.
+
+**Moneyline**, P(win) from the same blended margin, at DraftKings' first
+moneyline (1,403 games in the two seasons; it posts one on four games in
+five):
+
+| Edge above | 2025-26 (walk-forward) | 2024-25 (second look) | Both | Both, nothing shorter than -200 |
+|---|---|---|---|---|
+| 0.00 | 349 bets, +4.47 units, +3.60% [-12.5, +21.1] | 434, -10.38, -3.59% | 783, -5.91, -1.43% [-10.9, +7.5] | 769, -9.48, -2.49% |
+| 0.02 | 83, -4.04, -17.69% | 219, -4.93, -3.73% | 302, -8.97, -5.79% | 300, -10.97, -7.30% |
+| 0.03 | 20, +0.67 | 114, -4.95, -10.09% | 134, -4.28, -7.91% | 133, -5.28, -10.14% |
+
+Its bets are long underdogs (prices to +4000; 19 winners in 115 at 0.03).
+
+**No price-only rule either.** Every side by price band, both seasons:
+favourites -200 to -400 lose 13.33% [-21.1, -5.4] (265 bets, both seasons
+negative) and -400 to -1000 lose 7.20% [-13.0, -1.5]; underdogs +150 to +300
+make 11.81% [-5.0, +28.5] on 319, but -0.31 units in 2024-25 and +18.53 in
+2025-26. Every underdog: +0.28% [-7.2, +8.3] on 1,403. Every favourite:
+-5.34% [-7.8, -2.8].
+
+**What would change it:** a third priced season (every first post of 2026-27
+is being stored), to see whether the first spread stays as sharp as in
+2025-26; or an input the line does not hold. Player availability is the
+obvious one, and no women's source for it is stored.

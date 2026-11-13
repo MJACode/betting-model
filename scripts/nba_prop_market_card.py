@@ -7,6 +7,12 @@ window (scheduler.run_nba_prop_window), so the fetch it reads is the one just
 stored. It decides only games whose tip is 45-57 minutes away; every other
 game is counted in the diagnostic line and left alone.
 
+THE PLAY-IN, THE PLAYOFFS AND THE CUP FINAL TOO, AND THIS MODEL ALONE (mike's rule,
+unchanged: same cut, same floor, same one a game and six a night). `rule_slate`
+adds them to `slate` for this card and nothing else; every other NBA model, the
+projection model included, keeps reading the regular-season `slate` (`rule_slate`,
+and tests/test_nba_postseason_gate.py).
+
 LIVE, with no default-off write switch: the MLB cards' switches flipped off on
 a redeploy and those models went dark without a trace (config.py,
 MLB_*_PUBLISH).
@@ -56,8 +62,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -73,6 +81,7 @@ from tracking.pick_integrity import pick_problems  # noqa: E402
 
 MODEL_ID = mk.MODEL_ID
 SPORT = mk.SPORT
+_ET = ZoneInfo("America/New_York")
 
 # ── the decisions ledger ──────────────────────────────────────────────────────
 # One row per game the card has decided (models/nba_prop_market, DECIDED ONCE).
@@ -119,8 +128,8 @@ def slate(conn, now: datetime, skipped: list | None = None,
           horizon_min: int | None = None) -> dict[str, dict]:
     """REGULAR-SEASON NBA games that have not tipped and tip within the
     decision window's far end (or `horizon_min`, for the window job's look
-    ahead). Both NBA prop models read this slate (the projection card and the
-    five-minute window job call it too).
+    ahead). nba_prop_projection reads this slate (its card, and its share of the
+    five-minute window job), and this card reads it through `rule_slate`.
 
     The totals card's slate, read with this window
     (scripts.nba_total_luck_card.slate): the tip is the earlier of
@@ -137,19 +146,75 @@ def slate(conn, now: datetime, skipped: list | None = None,
     bought for 2023-24..2025-26 cover 1,230 regular-season games a season,
     the Cup quarterfinals and semifinals included.
 
-    NOT the play-in, the playoffs or the NBA Cup final, on purpose. Neither
-    prop model has been graded on one: the stored prop history holds 0 of
-    those 272 games of 2023-24..2025-26 (18 play-in, 251 playoff, 3 Cup
-    finals) against 3,690 of 3,690 regular-season games (player_prop_odds
-    joined to nba_schedule by game type, production, 2026-10-20). Grading them
-    means buying those props first (data/ingestors/nba_odds_history.py
-    --props over the postseason dates). Each is skipped and named in
-    `skipped`, as is a game the schedule does not list on a day that is not
-    a regular-season day.
+    NOT the play-in, the playoffs or the NBA Cup final, on purpose: none of the
+    six nba_prop_projection cells passed on those 272 games
+    (docs/nba_search_postseason.md, branch nba-searches-graded). Each is skipped
+    and named in `skipped`, as is a game the schedule does not list on a day
+    that is not a regular-season day.
     """
     return tlcard.slate(conn, now, skipped,
                         horizon_min=horizon_min if horizon_min is not None
                         else mk.DECISION_WINDOW_MIN[1])
+
+
+def rule_slate(conn, now: datetime, skipped: list | None = None,
+               horizon_min: int | None = None) -> dict[str, dict]:
+    """`slate`, plus the play-in, playoff and Cup final games only this model may bet.
+
+    nba_prop_market passed on all 272 of them; nothing else with an NBA model id did, or
+    was graded on them, so nothing else reads this (tests/test_nba_postseason_gate.py).
+    A game this adds is marked `postseason`, and only these are: an unlisted Cup
+    quarterfinal has no type either, and it is a regular-season game.
+    """
+    far = horizon_min if horizon_min is not None else mk.DECISION_WINDOW_MIN[1]
+    regular_skipped: list[str] = []
+    games = slate(conn, now, regular_skipped, horizon_min=far)
+    until = now + timedelta(minutes=far)
+    today = now.astimezone(_ET).date()
+    refused: dict[str, str] = {}
+    post = tlcard.postseason_games(conn, [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)],
+                                   lambda tip: now < tip <= until, refused)
+    # The postseason read names any row it turns away. A row the regular read kept is priced,
+    # and calling it refused would tell whoever is looking for a stranded bet there could be none.
+    refused = {g: t for g, t in refused.items() if g not in games}
+    if skipped is not None:
+        # `slate` skips what it refuses, and these are the games it refuses: a game priced
+        # here is not to be logged as "not priced".
+        skipped += [s for s in regular_skipped if s.split()[0] not in post and s.split()[0] not in refused]
+        skipped += [f"{g} (the schedule lists this game as {t})" for g, t in sorted(refused.items())]
+    return {**{g: v for g, v in post.items() if g not in games}, **games}
+
+
+def tipped_rule_games(conn, now: datetime, hours: float,
+                      refused: dict | None = None) -> dict[str, dict]:
+    """The games this model owed a decision that tipped in the `hours` before `now`: `rule_slate`
+    looking back, for the alert (scripts/nba_pregame_window.undecided_rule_games). Reads only."""
+    games = tlcard.tipped_games(conn, now, hours)
+    oldest = now - timedelta(hours=hours)
+    today = now.astimezone(_ET).date()
+    turned_away: dict[str, str] = {}
+    post = tlcard.postseason_games(conn, [(today + timedelta(days=d)).isoformat() for d in (-2, -1, 0)],
+                                   lambda tip: oldest <= tip <= now, turned_away)
+    if refused is not None:             # as in rule_slate: a row the regular read kept could hold a bet
+        refused.update({g: t for g, t in turned_away.items() if g not in games})
+    return {**{g: v for g, v in post.items() if g not in games}, **games}
+
+
+def disputed_start_games(conn, now: datetime, hours: float) -> dict[str, dict]:
+    """The play-in, playoff and Cup final games within `hours` of `now`, either side, whose schedule
+    and feed starts sit over mk.START_GAP_MIN apart: {game_id: game}. For the alert. Reads only."""
+    oldest, until = now - timedelta(hours=hours), now + timedelta(hours=hours)
+    today = now.astimezone(_ET).date()
+    post = tlcard.postseason_games(conn, [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)],
+                                   lambda tip: oldest <= tip <= until)
+    return {g: v for g, v in post.items() if mk.starts_disagree(v["schedule_start"], v["games_start"])}
+
+
+def _postseason_detail(game: dict) -> str:
+    """What a decision on one of these games adds to its ledger row, so its bets can be reported
+    apart: the type, and which start the window was measured against."""
+    return (f"game_type={game.get('game_type') or 'unlisted'} tip_source={game.get('tip_source')} "
+            f"schedule_start={game.get('schedule_start')} feed_start={game.get('games_start')}")
 
 
 def load_roster(conn, games: dict[str, dict]) -> mk.Roster:
@@ -279,9 +344,9 @@ def look(conn, now: datetime) -> dict:
     """One look, no write: the games in reach, every qualifying proposition and the games this
     look decides. -> {"games", "bets", "diag", "decisions"}."""
     skipped: list[str] = []
-    games = slate(conn, now, skipped)
+    games = rule_slate(conn, now, skipped)
     if skipped:
-        logger.info(f"nba-prop-market: not a regular-season game, not priced: {skipped}")
+        logger.info(f"nba-prop-market: not priced: {skipped}")
     if not games:
         return {"games": {}, "bets": [], "diag": dict.fromkeys(mk.DIAG_KEYS, 0), "decisions": []}
     ensure_decisions_table(conn)
@@ -293,6 +358,8 @@ def look(conn, now: datetime) -> dict:
     roster = load_roster(conn, in_window) if in_window else mk.Roster([])
     bets, diag, decisions = mk.find_bets(quotes, games, roster, now, taken=taken,
                                          decided=decided)
+    decisions = [replace(d, detail=f"{d.detail} {_postseason_detail(games[d.game_id])}".strip())
+                 if games[d.game_id].get("postseason") else d for d in decisions]
     for gid, g in sorted(games.items()):
         lead = mk.minutes_to_tip(g["tip"], now)
         if gid in taken or gid in decided or lead >= mk.DECISION_WINDOW_MIN[0]:

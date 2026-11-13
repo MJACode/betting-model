@@ -32,6 +32,11 @@ def test_aborted_sentinel_is_excluded():
     assert "aborted" in _meta_steps()
 
 
+def test_deploy_cutoff_sentinel_is_excluded():
+    """The SIGTERM drain writes this. A deploy is not a producer step."""
+    assert "deploy-cutoff" in _meta_steps()
+
+
 def test_sentinel_matches_the_writer():
     """The excluded string must be exactly what run_ledger writes — if one side
     is renamed and the other is not, the alarm silently returns."""

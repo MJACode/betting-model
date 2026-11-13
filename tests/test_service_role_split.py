@@ -112,7 +112,17 @@ _EXPECTED_POLLERS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
                      # 2026-10-13 (mike): the NFL in-play leader moneyline loop,
                      # Supabase-only and volume-free like ncaaf_live_loop.
                      "nfl_live_leader",
-                     "dk_direct_feed", "bovada_feed"}
+                     "dk_direct_feed", "bovada_feed",
+                     # 2026-10-29 (Matt): Scoreboard live scores, every minute;
+                     # a pipeline deploy must not stop them mid-game.
+                     "live_scoreboard",
+                     # 2026-11-04 (mike): the NBA in-play loop, Supabase-only
+                     # and volume-free like nfl_live_leader.
+                     "nba_live",
+                     # 2026-11-07 (mike): the NCAAB in-play loop, the same shape.
+                     "ncaab_live",
+                     # 2026-11-11 (mike): the NCAABW halftime loop, the same shape.
+                     "ncaabw_live"}
 
 
 def test_the_poller_service_owns_exactly_the_long_running_supervisors(monkeypatch):

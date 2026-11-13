@@ -36,6 +36,8 @@ from config import (
     ODDS_API_REGIONS,
     ODDS_HISTORY_BOOKMAKERS,
     LINE_SHOP_BOOKMAKERS,
+    NCAABW_EXTRA_BOOKMAKERS,
+    EUROLEAGUE_EXTRA_BOOKMAKERS,
     SPORTS,
     WNBA_ODDS_API_MAP,
     NBA_ODDS_API_MAP,
@@ -69,6 +71,19 @@ SPORT_KEYS = {
     #
     # THE NFL IS READ-ONLY AGAINST `games` — see NFL_GAMES_ARE_NOT_OURS below.
     "NFL": "americanfootball_nfl",
+    # 2026-10-26: men's college basketball for 2026-27 (first tip 2026-11-01).
+    # READ-ONLY AGAINST `games` like the NFL, and stricter: see
+    # NCAAB_GAMES_ARE_NOT_OURS below.
+    "NCAAB": "basketball_ncaab",
+    # 2026-11-09: women's college basketball (NCAABW), the same shape as the
+    # men's: READ-ONLY AGAINST `games`, resolved onto ESPN's women's schedule
+    # (data/ingestors/ncaabw_teams.py). The feed lists a median 7 women's
+    # games a game day (2,293 events from 2024-11-12 to 2026-04-05).
+    "NCAABW": "basketball_wncaab",
+    # 2026-11-12: EuroLeague, READ-ONLY AGAINST `games` like the college games:
+    # EuroLeague's own API owns the schedule (data/ingestors/euroleague_api.py)
+    # and the feed's events are resolved onto it (euroleague_teams.py).
+    "EUROLEAGUE": "basketball_euroleague",
 }
 
 # The NFL is the one sport here whose games this ingestor MUST NOT create.
@@ -85,8 +100,115 @@ SPORT_KEYS = {
 # with a warning: a line we cannot attach to a game is not a line we can price.
 NFL_GAMES_ARE_NOT_OURS = True
 
-# Markets to pull (full-game)
+# Men's college basketball games belong to ESPN's schedule, never to this file
+# (data/ingestors/ncaab_teams.py says why in full, from what NCAAF cost). The
+# two reasons in one line each:
+#
+# * 360-odd Division I schools collide in three letters, so the fallback in
+#   _normalize_team would file "Kentucky Wildcats" and "Kansas State Wildcats"
+#   under one id (measured 2026-10-26: NCAAB_2026-11-03_WIL_WIL).
+# * On a neutral court the feed may call ESPN's away team home. NCAAF minted a
+#   twin games row for those, odds on one and the final on the other.
+#
+# So every NCAAB event is resolved onto ESPN's games row through
+# ncaab_teams.make_resolver, which also says when the feed's orientation is
+# flipped; _process_events then swaps the names before reading any outcome, so
+# spread_home is ESPN's home number (CLAUDE.md §4).
+#
+# STRICTER THAN THE NFL: an NCAAB event processed with no resolver at all is
+# dropped, not minted. The NFL still mints when a caller passes no resolver
+# (the two historical entry points do), and turning that off is its own change
+# with its own backfills to check; NCAAB starts closed.
+NCAAB_GAMES_ARE_NOT_OURS = True
+RESOLVE_ONLY_SPORTS = frozenset({"NCAAB", "NCAABW", "EUROLEAGUE"})
+
+# The sports whose games come from a schedule another ingestor owns, so every
+# live caller builds a resolver before parsing and skips the sport (never
+# mints) when it cannot build one. See _schedule_resolver.
+SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB", "NCAABW", "EUROLEAGUE")
+
+# Sports stored even when DraftKings does not list the event yet.
+#
+# Every other sport skips an event DraftKings has not posted, because the
+# models are scored against DraftKings and a game it does not list is a game
+# nobody can price. NCAAB is exempt on purpose (2026-10-26): the opener timing
+# work needs the FIRST post of each line from whichever book makes it, and
+# under the gate a game DraftKings has not listed yet is dropped whole, every
+# other book with it, until DraftKings does. The stored opener would then be
+# whatever was up at DraftKings' first listing, not the real one.
+#
+# This widens what is RECORDED. Whether a game can be bet is the scorer's
+# call: its DraftKings price gate (models/scorer.py, `ahead_unpriced`) covers
+# games AFTER the target date only, so a same-day NCAAB game with no
+# DraftKings row reaches the models, and an NCAAB model must refuse to decide
+# without the reference price.
+# EuroLeague too (2026-11-12): DraftKings priced 3 of the 10 games listed that
+# day (it first posts a median 45-73 hours before the tip, while other books
+# list a round five days out), and it priced no sampled game in 2020-21.
+DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB", "NCAABW", "EUROLEAGUE"})
+
+# Books stored for ONE sport on top of LINE_SHOP_BOOKMAKERS, and asked for in
+# that sport's bulk call. Women's college basketball only (2026-11-09,
+# config.NCAABW_EXTRA_BOOKMAKERS says what was measured): its board is thin and
+# has no Pinnacle, so the six other books that price it are kept as the
+# consensus and the reference. None is a book a pick may name. Every other
+# sport's call and stored books are unchanged.
+SPORT_EXTRA_BOOKMAKERS: dict = {"NCAABW": tuple(NCAABW_EXTRA_BOOKMAKERS),
+                                 "EUROLEAGUE": tuple(EUROLEAGUE_EXTRA_BOOKMAKERS)}
+
+
+def sport_bookmakers_param(sport: str) -> str:
+    """The `bookmakers` value of a sport's bulk call: the line-shop books, plus
+    the sport's own extra books when it has any."""
+    extra = SPORT_EXTRA_BOOKMAKERS.get(sport, ())
+    if not extra:
+        return ODDS_API_BOOKMAKERS_PARAM
+    return ",".join(dict.fromkeys([*ODDS_API_BOOKMAKERS_PARAM.split(","), *extra]))
+
+
+_SPORT_OF_KEY: dict = {}
+
+
+def _bookmakers_for_key(sport_key: str) -> str:
+    """sport_bookmakers_param by the feed's sport key (what _get_odds is given)."""
+    if not _SPORT_OF_KEY:
+        _SPORT_OF_KEY.update({v: k for k, v in SPORT_KEYS.items()})
+    return sport_bookmakers_param(_SPORT_OF_KEY.get(sport_key, ""))
+
+# Sports whose LIVE pulls (the refresh pass and the 30-second pre-game poller)
+# label a row stamped after the event's start 'in_play' at write time, the
+# rule the historical purchases already apply (_mark_in_play). The bulk /odds
+# endpoint keeps serving a game once it is under way, and until 2026-11-04
+# every such NBA row was stored 'open', the label every pre-game reader trusts:
+# on the 15 games of 2026-11-02, 5,735 of 16,508 'open' full-game NBA rows
+# (35%) were stamped after the listed tip (production, read 2026-11-04). The
+# NBA in-play models (models/nba_live_ig2.py) read the clock, not the label,
+# so this changes none of their inputs; it stops a pre-game reader that trusts
+# the label from reading a live price. Other sports are not in the set: each
+# would change what its line-shop views show for a game under way, and the
+# readers of theirs bound on the start time already (docs/live_betting.md).
+LIVE_PULL_IN_PLAY_SPORTS = frozenset({"NBA"})
+
+# Markets to pull (full-game). The bulk endpoint. Alternate ladders are NOT
+# in this list: mixing them in 422s the whole slate, the same failure as
+# h2h_3way. They are additional markets, fetched per event below.
 MARKETS = ["h2h", "spreads", "totals"]
+
+# One row per rung, under these keys, so the main spreads/totals row the
+# models read stays the one number. The edit sheet reads the ladder from
+# alt_game_lines: the 6am run fills it for the next 3 days, and this pass
+# refreshes it every pass for games in the next ALT_GAME_LINES_WINDOW_HOURS.
+# The pass buys only when FETCH_ALT_GAME_LINES is "1" (its own extra gate,
+# default on) AND alt_game_lines.buy_allowance allows it — the same
+# ALT_GAME_LINES_ENABLED kill switch and ALT_GAME_LINES_MAX_GAMES cap as
+# the daily run. UFC is absent: its bulk feed is h2h.
+ALT_GAME_LINE_MARKETS = ["alternate_spreads", "alternate_totals"]
+# Matt, 2026-10-29: option B, every pass, for games starting in the next 24
+# hours (the 6am alt_game_lines run keeps the 3-day look-ahead). Unbounded,
+# this pass bought a ladder for every event the bulk call listed, days out,
+# 53 times a day. ALT_GAME_LINES_WINDOW_HOURS overrides; 0 removes the window.
+ALT_GAME_LINES_WINDOW_HOURS_DEFAULT = 24.0
+ALT_GAME_LINE_SPORTS = frozenset({"MLB", "NHL", "WNBA", "NBA", "NCAAF", "NFL", "NCAAB"})
 
 # Stamped on every row the /historical endpoint writes, and protected by name
 # in data/prune_odds.py. Rows from the live poll carry NULL. Without the stamp
@@ -177,6 +299,25 @@ def _within_lookahead(ev: dict, now: datetime | None = None,
         ts = ts.replace(tzinfo=timezone.utc)
     now = now or datetime.now(timezone.utc)
     return ts <= now + timedelta(days=days)
+
+
+def _commence_passed(ev: dict, now: datetime | None = None) -> bool:
+    """True when the event's start is already in the past.
+
+    FAILS OPEN, the same way _within_lookahead does: a missing or unparseable
+    commence_time is not treated as started, so a real game is still fetched.
+    """
+    raw = ev.get("commence_time")
+    if not raw:
+        return False
+    try:
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return ts <= now
 
 # UFC: the bulk endpoint reliably carries only h2h for MMA. Round totals are
 # attempted per-event (like MLB F5) — absent lines are non-fatal and the
@@ -291,6 +432,13 @@ def _normalize_team(name: str, sport: str) -> str:
         # ncaaf_teams registry and falls back to the input unchanged.
         from data.ingestors.cfbd_ingestor import resolve_odds_api_school
         return resolve_odds_api_school(name)
+    if sport in ("NCAAB", "NCAABW", "EUROLEAGUE"):
+        # NCAAB never mints an id here (NCAAB_GAMES_ARE_NOT_OURS): the game id
+        # comes from ESPN's schedule through the resolver, so this value is
+        # never used. Returned untouched and silently, because the 3-letter
+        # fallback below would warn on every school every pass and invent the
+        # colliding ids the resolver exists to avoid.
+        return name
     if sport == "NFL":
         from config import NFL_ODDS_API_MAP
         mapping = NFL_ODDS_API_MAP
@@ -357,6 +505,84 @@ def _nfl_resolver(conn, around_date: str):
         return hit[0] if hit else None
 
     return resolve
+
+
+# ── Schedule resolution (NCAAB) ──────────────────────────────────────────────
+
+def _ncaab_resolver(conn, around_date: str):
+    """A `resolve_game_id` for `_process_events` returning (game_id, flipped).
+
+    Thin on purpose: the matching lives in data/ingestors/ncaab_teams.py, the
+    one place that knows ESPN's identity contract. Same failure rule as the
+    NFL: anything that stops the resolver being built returns None, and the
+    caller skips NCAAB for the pass.
+
+    The cached team registry is dropped first, at the cost of one read of one
+    table per build. The registry caches an EMPTY list when its table is
+    unreadable, so a long-lived process (the 30-second pre-game poller) that
+    first looked before the ESPN ingestor had written the table would
+    otherwise skip NCAAB until it restarted.
+
+    Thirty days ahead, not the resolver's default ten: NCAAB is exempt from the
+    DraftKings gate so the FIRST price any book posts is kept, and a game the
+    feed lists more than ten days out would otherwise be dropped until it came
+    inside the window (review, 2026-10-26). The window is one indexed read of
+    ncaab_events, about 4,000 rows at mid-season.
+    """
+    try:
+        from data.ingestors import ncaab_teams
+        ncaab_teams.reset_registry_cache()
+        return ncaab_teams.make_resolver(conn, str(around_date)[:10], days_fwd=30)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(f"NCAAB: could not build the schedule resolver ({exc}); odds skipped")
+        return None
+
+
+def _ncaabw_resolver(conn, around_date: str):
+    """The women's twin of _ncaab_resolver: data/ingestors/ncaabw_teams.py owns
+    the matching, the cached registry is dropped first, and anything that
+    stops the resolver being built returns None, so the caller skips NCAABW
+    for the pass and never mints an id."""
+    try:
+        from data.ingestors import ncaabw_teams
+        ncaabw_teams.reset_registry_cache()
+        return ncaabw_teams.make_resolver(conn, str(around_date)[:10], days_fwd=30)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(f"NCAABW: could not build the schedule resolver ({exc}); odds skipped")
+        return None
+
+
+def _euroleague_resolver(conn, around_date: str):
+    """EuroLeague's twin of _ncaabw_resolver: data/ingestors/euroleague_teams.py
+    owns the matching, and anything that stops the resolver being built returns
+    None, so the caller skips EuroLeague for the pass and never mints an id."""
+    try:
+        from data.ingestors import euroleague_teams
+        euroleague_teams.reset_registry_cache()
+        return euroleague_teams.make_resolver(conn, str(around_date)[:10], days_fwd=30)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(f"EUROLEAGUE: could not build the schedule resolver ({exc}); odds skipped")
+        return None
+
+
+def _schedule_resolver(sport: str, conn, around_date: str):
+    """The resolver for a SCHEDULE_RESOLVED_SPORTS sport, or None.
+
+    One dispatcher for both live callers, so the hourly pass and the pre-game
+    poller cannot drift apart on which sports resolve. None means "skip this
+    sport now", never "mint instead". The historical paths build none: both
+    refuse RESOLVE_ONLY_SPORTS before paying (see run_historical_odds_range),
+    and the NFL there still mints, as it did before NCAAB.
+    """
+    if sport == "NFL":
+        return _nfl_resolver(conn, around_date)
+    if sport == "NCAAB":
+        return _ncaab_resolver(conn, around_date)
+    if sport == "NCAABW":
+        return _ncaabw_resolver(conn, around_date)
+    if sport == "EUROLEAGUE":
+        return _euroleague_resolver(conn, around_date)
+    return None
 
 
 # ── Game ID Builder ───────────────────────────────────────────────────────────
@@ -444,6 +670,64 @@ def _parse_total_outcomes(outcomes: list) -> dict:
     return result
 
 
+def _parse_alternate_spread_rows(outcomes: list, home_team_name: str) -> list[dict]:
+    """One row per home number. The home outcome at p pairs with the away
+    outcome at -p (spread_home is the HOME number, CLAUDE.md §4). A rung
+    missing either side is not a line. Links and sids ride along the same
+    way the main spread parser stores them."""
+    home_at: dict[float, dict] = {}
+    away_at: dict[float, dict] = {}
+    for o in outcomes:
+        point = o.get("point")
+        price = o.get("price")
+        if point is None or price is None:
+            continue
+        slot = {"price": price, "link": o.get("link"), "sid": o.get("sid")}
+        (home_at if o.get("name") == home_team_name else away_at)[float(point)] = slot
+    rows = []
+    for p, h in home_at.items():
+        a = away_at.get(-p)
+        if a is None:
+            continue
+        rows.append({
+            "spread_home": p,
+            "home_price": h["price"],
+            "away_price": a["price"],
+            "home_link": h["link"],
+            "away_link": a["link"],
+            "home_sid": h["sid"],
+            "away_sid": a["sid"],
+        })
+    return rows
+
+
+def _parse_alternate_total_rows(outcomes: list) -> list[dict]:
+    """One row per total, Over and Under both present. Same link/sid columns
+    as the main total parser."""
+    slots: dict[float, dict] = {}
+    for o in outcomes:
+        name = o.get("name") or ""
+        point = o.get("point")
+        if point is None or name not in ("Over", "Under") or o.get("price") is None:
+            continue
+        slots.setdefault(float(point), {})[name] = o
+    rows = []
+    for pt, s in slots.items():
+        if "Over" not in s or "Under" not in s:
+            continue
+        ov, un = s["Over"], s["Under"]
+        rows.append({
+            "total_line": pt,
+            "over_price": ov.get("price"),
+            "under_price": un.get("price"),
+            "over_link": ov.get("link"),
+            "under_link": un.get("link"),
+            "over_sid": ov.get("sid"),
+            "under_sid": un.get("sid"),
+        })
+    return rows
+
+
 # ── API Fetcher ───────────────────────────────────────────────────────────────
 
 def _get_odds(sport_key: str, markets: list[str]) -> list[dict]:
@@ -461,7 +745,7 @@ def _get_odds(sport_key: str, markets: list[str]) -> list[dict]:
         "markets":      ",".join(markets),
         # Multi-book for line shopping (game markets). Counts as ONE region on
         # The Odds API, so this does not increase credit cost vs DK-only.
-        "bookmakers":   ODDS_API_BOOKMAKERS_PARAM,
+        "bookmakers":   _bookmakers_for_key(sport_key),
         "oddsFormat":   "american",
         "includeLinks": "true",   # DK betslip deep links (no extra credit cost)
         "includeSids":  "true",   # bookmaker selection ids
@@ -773,6 +1057,120 @@ def _fetch_nhl_3way_per_event(sport_key: str, snapshot_type: str,
     return [r for r in odds_rows if r.get("market") == NHL_3WAY_MARKET]
 
 
+def _alt_window_hours() -> float:
+    try:
+        return float(os.environ.get("ALT_GAME_LINES_WINDOW_HOURS",
+                                    ALT_GAME_LINES_WINDOW_HOURS_DEFAULT))
+    except ValueError:
+        return ALT_GAME_LINES_WINDOW_HOURS_DEFAULT
+
+
+def _within_alt_window(ev: dict, now: datetime, hours: float) -> bool:
+    """Inside the alternate-line window. FAILS CLOSED on a missing or
+    unparseable start: every event here is a paid call, and a game we cannot
+    date is one we cannot bound. hours <= 0 means no window."""
+    if hours <= 0:
+        return True
+    raw = ev.get("commence_time")
+    if not raw:
+        return False
+    try:
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts <= now + timedelta(hours=hours)
+
+
+def _fetch_alternate_game_lines(sport_key: str, sport: str, events: list[dict],
+                                snapshot_type: str, snapshot_at: str,
+                                resolve_game_id=None, meter: dict | None = None,
+                                now: datetime | None = None,
+                                budget: dict | None = None) -> list[dict]:
+    """Alternate spreads and totals for the events the bulk call already
+    listed. Those are the upcoming games this pass is storing main lines
+    for. The events endpoint lists a whole future season and is not used
+    here (the NHL 3-way loop's out-of-season walk).
+
+    Billing is the per-event rule measured on F5 in `_get_event_odds`: one
+    credit per market returned. Both markets coming back is two credits for
+    that event. Not the 30-second poller, and not the historical endpoint
+    (that one bills 10x). A 422 on one event is skipped; the main lines
+    already stored for the slate stay.
+
+    `budget` is the pass's shared allowance (alt_game_lines.buy_allowance):
+    skipped set, or remaining 0, buys nothing. Unset remaining means no cap.
+    Calls taken are subtracted so the next sport in this pass sees what is
+    left. Eligible events are taken in game-id order, the same rule as the
+    daily run's sport-then-game-id cap.
+    """
+    from data.ingestors.alt_game_lines import _bounded, buy_allowance, game_for_event
+    if budget is None:
+        budget = {}
+    if "remaining" not in budget and "skipped" not in budget:
+        reason, remaining = buy_allowance()
+        budget["skipped"] = reason
+        budget["remaining"] = remaining
+    if budget.get("skipped") or budget.get("remaining") == 0:
+        return []
+
+    event_responses = []
+    now = now or datetime.now(timezone.utc)
+    hours = _alt_window_hours()
+    eligible = [
+        ev for ev in events
+        if ev.get("id") and not _commence_passed(ev, now)
+        and _within_alt_window(ev, now, hours)
+    ]
+    eligible.sort(key=lambda ev: (
+        (game_for_event(sport, ev, resolve_game_id) or ("",))[0],
+        str(ev.get("id") or ""),
+    ))
+    take, budget["remaining"] = _bounded(eligible, budget.get("remaining"))
+    for ev in take:
+        event_id = ev.get("id")
+        # The feed's own x-requests-last for this call, summed for the pass
+        # ledger (alt_game_line_fetches): the cost is measured, not assumed.
+        from data.ingestors import odds_quota as _oq
+        before = _oq.latest()
+        if meter is not None:
+            meter["calls"] = meter.get("calls", 0) + 1
+        try:
+            ev_odds = _get_event_odds(sport_key, event_id, ALT_GAME_LINE_MARKETS)
+        except Exception as exc:
+            # AssertionError is a test refusing the network. Swallowing it
+            # would let a pass spend credits the test exists to forbid.
+            if type(exc) is AssertionError:
+                raise
+            logger.warning(f"  {sport} alternate lines failed for {event_id}: {exc}")
+            _meter_add(meter, before, _oq.latest())
+            continue
+        _meter_add(meter, before, _oq.latest())
+        if ev_odds:
+            event_responses.append(ev_odds)
+        time.sleep(REQUEST_SLEEP)
+
+    if not event_responses:
+        return []
+
+    _, odds_rows = _process_events(
+        event_responses, sport, snapshot_type, snapshot_at,
+        resolve_game_id=resolve_game_id)
+    return [r for r in odds_rows if r.get("market") in ALT_GAME_LINE_MARKETS]
+
+
+def _meter_add(meter: dict | None, before, after) -> None:
+    """Add one call's x-requests-last to the pass meter; count it as
+    unreported when the call recorded none."""
+    if meter is None:
+        return
+    if after is None or after is before or after.get("last") is None:
+        meter["unreported"] = meter.get("unreported", 0) + 1
+    else:
+        meter["credits"] = meter.get("credits", 0.0) + float(after["last"])
+
+
 def _get_historical_odds(sport_key: str, markets: list[str],
                           snapshot_date: str, hour_utc: int = 12,
                           bookmakers: list[str] | None = None) -> list[dict]:
@@ -821,6 +1219,35 @@ def _get_historical_odds(sport_key: str, markets: list[str],
 
 # ── Event Processor ───────────────────────────────────────────────────────────
 
+def _season_label(sport: str, game_date: str) -> int:
+    """The season a games row minted here is filed under, from its ET date."""
+    year = int(game_date[:4])
+    month = int(game_date[5:7])
+    if sport == "NHL":
+        # Ending-year label, and the season can open in September
+        # (2026-27: 09-29). The old October rule split that opening week across
+        # two seasons — data/season_labels.py.
+        from data.season_labels import nhl_season_label
+        return nhl_season_label(game_date)
+    if sport == "EUROLEAGUE" and month >= 8:
+        # Labelled by the ENDING year (E2026 is 2027) and it opens in late
+        # September. Never minted here; the stored label is the API's own.
+        return year + 1
+    if sport in ("NBA", "NCAAB", "NCAABW") and month >= 10:
+        # Oct–Jun (NBA) and Nov–Apr (NCAAB), both labelled by the ENDING year:
+        # ESPN calls 2026-27 college basketball season 2027. An NCAAB games
+        # row is never minted here (NCAAB_GAMES_ARE_NOT_OURS), so the stored
+        # NCAAB season is the ESPN ingestor's; this keeps the label right for
+        # anything that reads it from this function.
+        return year + 1
+    if sport == "NCAAF" and month <= 2:
+        # CFB is labeled by the year of the FALL, so a January bowl or
+        # playoff game belongs to the PRIOR season. Mirror image of the
+        # NHL/NBA rule above — and the same footgun if it is missed.
+        return year - 1
+    return year
+
+
 def _process_events(events: list[dict], sport: str,
                     snapshot_type: str, snapshot_at: str,
                     include_3way: bool = False,
@@ -829,15 +1256,31 @@ def _process_events(events: list[dict], sport: str,
     Parse a list of Odds API event dicts.
     Returns (game_rows, odds_rows) ready for DB insert.
 
-    `resolve_game_id(home_name, away_name, commence_time) -> game_id | None`
-    makes this read-only against `games` for the sport that passes one: the id
-    comes from the schedule, NO game row is emitted, and an event that does not
-    resolve is dropped. The NFL is the only caller today and must stay one
-    (NFL_GAMES_ARE_NOT_OURS); everything else still mints its own id, which is
-    correct because for those sports this ingestor IS the schedule.
+    `resolve_game_id(home_name, away_name, commence_time)` makes this
+    read-only against `games` for the sport that passes one: the id comes from
+    the schedule, NO game row is emitted, and an event that does not resolve
+    is dropped. It returns either
+
+      * a game_id, or None (the NFL: NFL_GAMES_ARE_NOT_OURS), or
+      * (game_id, flipped), or None (NCAAB: NCAAB_GAMES_ARE_NOT_OURS), where
+        `flipped` means the feed called the schedule's AWAY team home. The two
+        names are then swapped before any outcome is read, so home_price and
+        spread_home are the schedule's home team's.
+
+    A RESOLVE_ONLY_SPORTS sport with no resolver writes nothing. Everything
+    else still mints its own id, which is correct because for those sports
+    this ingestor IS the schedule.
     """
     game_rows = []
     odds_rows = []
+
+    if resolve_game_id is None and sport in RESOLVE_ONLY_SPORTS:
+        # Fail closed: a caller that forgot the resolver must not mint
+        # NCAAB_<date>_WIL_WIL. One warning per call, not one per event.
+        if events:
+            logger.warning(f"{sport}: {len(events)} event(s) dropped -- no schedule "
+                           f"resolver was passed, and {sport} games are never minted here")
+        return game_rows, odds_rows
 
     _ET = ZoneInfo("America/New_York")
     for event in events:
@@ -867,38 +1310,32 @@ def _process_events(events: list[dict], sport: str,
         home_team = _normalize_team(home_name, sport)
         away_team = _normalize_team(away_name, sport)
 
-        # Extract season from game_date
-        year = int(game_date[:4])
-        month = int(game_date[5:7])
-        if sport == "NHL":
-            # Ending-year label, and the season can open in September
-            # (2026-27: 09-29). The old October rule split that opening week across
-            # two seasons — data/season_labels.py.
-            from data.season_labels import nhl_season_label
-            season = nhl_season_label(game_date)
-        elif sport == "NBA" and month >= 10:
-            season = year + 1   # NBA seasons span Oct–Jun, labeled by ending year
-        elif sport == "NCAAF" and month <= 2:
-            # CFB is labeled by the year of the FALL, so a January bowl or
-            # playoff game belongs to the PRIOR season. Mirror image of the
-            # NHL/NBA rule above — and the same footgun if it is missed.
-            season = year - 1
-        else:
-            season = year
+        season = _season_label(sport, game_date)
 
         if resolve_game_id is not None:
             # Read-only against the schedule. The resolver owns the date match
             # too (a prime-time kickoff lands on the NEXT day in UTC), so the
             # raw commence_time goes in rather than the ET date derived above.
             resolved = resolve_game_id(home_name, away_name, commence_ts)
-            if not resolved:
+            if isinstance(resolved, tuple):
+                game_id, flipped = resolved
+            else:
+                game_id, flipped = resolved, False
+            if not game_id:
                 logger.warning(
                     f"{sport}: no scheduled game for {away_name!r} @ {home_name!r} "
                     f"at {commence_ts!r}; {len(event.get('bookmakers', []))} "
                     f"book(s) dropped rather than filed under an invented id")
                 continue
-            game_id = resolved
-            # DELIBERATELY NO game_rows.append: see NFL_GAMES_ARE_NOT_OURS.
+            if flipped:
+                # The feed's home is the schedule's away (a neutral court).
+                # Outcomes are keyed by team NAME, so swapping the names here,
+                # before the bookmaker loop, is what puts the schedule's home
+                # team's price in home_price and its line in spread_home.
+                home_name, away_name = away_name, home_name
+                home_team, away_team = away_team, home_team
+            # DELIBERATELY NO game_rows.append: see NFL_GAMES_ARE_NOT_OURS and
+            # NCAAB_GAMES_ARE_NOT_OURS.
         else:
             game_id = _build_game_id(sport, game_date, away_team, home_team)
 
@@ -917,13 +1354,16 @@ def _process_events(events: list[dict], sport: str,
         # Bookmaker odds. Store a row per line-shop book (DraftKings is the book
         # the models score against; the others are kept for line shopping only).
         # Require DK to be present — if DK doesn't list a game we don't score it.
+        # Except DK_GATE_EXEMPT_SPORTS, whose first post from any book is kept.
         bookmakers = event.get("bookmakers", [])
-        if not any(b.get("key") == ODDS_API_BOOKMAKER for b in bookmakers):
+        if (sport not in DK_GATE_EXEMPT_SPORTS
+                and not any(b.get("key") == ODDS_API_BOOKMAKER for b in bookmakers)):
             continue
 
         for book in bookmakers:
             book_key = book.get("key")
-            if book_key not in LINE_SHOP_BOOKMAKERS:
+            if (book_key not in LINE_SHOP_BOOKMAKERS
+                    and book_key not in SPORT_EXTRA_BOOKMAKERS.get(sport, ())):
                 continue
 
             for mkt in book.get("markets", []):
@@ -975,6 +1415,14 @@ def _process_events(events: list[dict], sport: str,
                     parsed = _parse_total_outcomes(outcomes)
                     row = {**base_row, **parsed, "market": market_key}
                     odds_rows.append(row)
+
+                elif market_key == "alternate_spreads":
+                    for parsed in _parse_alternate_spread_rows(outcomes, home_name):
+                        odds_rows.append({**base_row, **parsed, "market": market_key})
+
+                elif market_key == "alternate_totals":
+                    for parsed in _parse_alternate_total_rows(outcomes):
+                        odds_rows.append({**base_row, **parsed, "market": market_key})
 
     return game_rows, odds_rows
 
@@ -1046,9 +1494,9 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
     the MMA feed mixes promotions, and a poller writing phantom games every 30
     seconds would accumulate them 40x faster than the hourly pass did.
 
-    Per-event markets (F5, NHL 3-way, UFC round totals) are NOT fetched. They
-    cost one call per event, which is the expensive shape, and none of them is
-    what a fast pre-game watch is for.
+    Per-event markets (F5, NHL 3-way, UFC round totals, alternate spreads and
+    totals) are NOT fetched. They cost one call per event, which is the
+    expensive shape, and none of them is what a fast pre-game watch is for.
 
     IT ALSO UPSERTS THE GAMES IT SEES, which is not tidiness. `odds` carries a
     foreign key to `games`, and `_insert_odds` writes its whole batch in one
@@ -1085,17 +1533,19 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
         if not events:
             continue
         resolve = None
-        if sp == "NFL":
+        if sp in SCHEDULE_RESOLVED_SPORTS:
             try:
                 conn = conn or get_connection()
-                resolve = _nfl_resolver(conn, snapshot_at)
+                resolve = _schedule_resolver(sp, conn, snapshot_at)
             except Exception as exc:                          # noqa: BLE001
-                logger.warning(f"pregame fetch: NFL resolver unavailable ({exc})")
+                logger.warning(f"pregame fetch: {sp} resolver unavailable ({exc})")
                 resolve = None
             if resolve is None:
-                continue        # never fall back to minting NFL game ids
+                continue        # never fall back to minting NFL or NCAAB game ids
         game_rows, odds_rows = _process_events(events, sp, snapshot_type, snapshot_at,
                                                resolve_game_id=resolve)
+        if sp in LIVE_PULL_IN_PLAY_SPORTS:
+            _mark_in_play(game_rows, odds_rows)
         if sp == "UFC":
             try:
                 conn = conn or get_connection()
@@ -1145,12 +1595,32 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     if target_date is None:
         target_date = datetime.now(_ET).strftime("%Y-%m-%d")
 
-    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF", "NFL"]
+    # NCAAB joined 2026-10-26 for the 2026-27 season, LAST on purpose: building
+    # its resolver reads ncaab_teams / ncaab_events, which roll the connection
+    # back when unreadable, so it runs after every other sport's rows are
+    # committed (see the commit before the resolver below). NCAABW (2026-11-09)
+    # follows it for the same reason, so the two run last, men's then women's.
+    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF", "NFL",
+                                    "NCAAB", "NCAABW", "EUROLEAGUE"]
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
     total_games = 0
     total_odds  = 0
+
+    # The pass's alternate buy uses the same kill switch and cap as the
+    # daily run (buy_allowance). FETCH_ALT_GAME_LINES is an extra gate on
+    # this path only: "0" skips the pass and leaves the daily run alone.
+    # One budget for the whole pass, so the cap is not per sport.
+    fetch_alt = os.environ.get("FETCH_ALT_GAME_LINES", "1") == "1"
+    alt_budget: dict = {"skipped": "FETCH_ALT_GAME_LINES=0", "remaining": None}
+    if fetch_alt:
+        from data.ingestors.alt_game_lines import buy_allowance
+        reason, remaining = buy_allowance()
+        alt_budget = {"skipped": reason, "remaining": remaining}
+        if reason:
+            log = logger.error if str(reason).startswith("ALT_GAME_LINES_MAX_GAMES") else logger.info
+            log(f"Alternate game lines on this pass: {reason}")
 
     conn = get_connection()
 
@@ -1184,10 +1654,18 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 continue
 
             resolve = None
-            if sp == "NFL":
-                resolve = _nfl_resolver(conn, target_date)
+            if sp in SCHEDULE_RESOLVED_SPORTS:
+                # Commit what the earlier sports wrote BEFORE the schedule
+                # read. ncaab_teams rolls the connection back when its tables
+                # are unreadable (they are created by the ESPN ingestor's first
+                # write), and every sport's odds sit uncommitted on this one
+                # connection until the end of the loop -- so without this, an
+                # NCAAB schedule that is not there yet would silently take the
+                # pass's MLB, NHL and NFL rows with it.
+                conn.commit()
+                resolve = _schedule_resolver(sp, conn, target_date)
                 if resolve is None:
-                    continue    # never fall back to minting NFL game ids
+                    continue    # never fall back to minting NFL or NCAAB game ids
             game_rows, odds_rows = _process_events(
                 events, sp, snapshot_type, snapshot_at, resolve_game_id=resolve
             )
@@ -1204,6 +1682,10 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                     logger.info(f"UFC: skipped {n_phantom} non-UFC "
                                 f"(unknown-fighter) event(s)")
 
+            if sp in LIVE_PULL_IN_PLAY_SPORTS:
+                n_live = _mark_in_play(game_rows, odds_rows)
+                if n_live:
+                    logger.info(f"{sp}: {n_live} row(s) stamped after the start stored as in_play")
             n_games = _upsert_games(conn, game_rows)
             n_odds  = _insert_odds(conn, odds_rows)
             total_games += n_games
@@ -1219,6 +1701,64 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 f"{sp}: {n_games} games, {n_odds} odds rows "
                 f"({snapshot_type}) — {duration:.1f}s"
             )
+
+            # Alternate spreads and totals — per-event additional markets.
+            # Two gates, both required. FETCH_ALT_GAME_LINES=0 turns this
+            # pass off (default on: Matt accepted the cost) and does not
+            # affect the daily run. ALT_GAME_LINES_ENABLED and
+            # ALT_GAME_LINES_MAX_GAMES are the same kill switch and cap as
+            # that daily run (buy_allowance); a set cap is shared across
+            # sports in this pass. Started games are skipped inside the
+            # fetch: the latest view drops in-play rows, so buying them
+            # spends credits for a ladder the sheet will not show. Billing
+            # is the per-event rule measured on F5: one credit per market
+            # returned, two when both ladders come back, once per unstarted
+            # event per pass. The odds step runs on each refresh
+            # (scheduler.py: :17 for hours 0-5 and 7-17 ET, every 10 minutes
+            # for hours 18-23 ET) plus the 6am daily pipeline. Only games
+            # starting inside ALT_GAME_LINES_WINDOW_HOURS (24) are bought
+            # (Matt, 2026-10-29, option B); alt_game_lines.py buys the
+            # 3-day window at 6am.
+            if (sp in ALT_GAME_LINE_SPORTS and events and fetch_alt
+                    and not alt_budget.get("skipped")
+                    and alt_budget.get("remaining") != 0):
+                try:
+                    meter: dict = {}
+                    asked_at = datetime.now(timezone.utc)
+                    try:
+                        alt_rows = _fetch_alternate_game_lines(
+                            sport_key, sp, events, snapshot_type, snapshot_at, resolve,
+                            meter=meter, budget=alt_budget)
+                    except Exception as fetch_exc:
+                        # The calls already made were billed: keep the meter
+                        # and still ledger them below (review of #1093, L4).
+                        if type(fetch_exc) is AssertionError:
+                            raise
+                        meter["error"] = repr(fetch_exc)[:200]
+                        alt_rows = []
+                        logger.warning(f"{sp} alternate game lines fetch failed: {fetch_exc}")
+                    if alt_rows:
+                        n_alt = _insert_odds(conn, alt_rows)
+                        total_odds += n_alt
+                        logger.success(
+                            f"{sp} alternate spreads/totals: {n_alt} odds rows stored")
+                    # The app reads the ladder from alt_game_lines, so the pass
+                    # refreshes it for the games it just bought, and ledgers the
+                    # pass's measured credits beside the daily run's.
+                    # Commit what this pass has stored so far first. The ladder
+                    # refresh's catalog check (data/ddl_guard) rolls the
+                    # connection back if its first query fails, and nothing in
+                    # this pass is committed until every sport is done, so a
+                    # failure there must not be able to discard the main odds.
+                    conn.commit()
+                    from data.ingestors.alt_game_lines import store_pass_ladders
+                    store_pass_ladders(conn, sp, alt_rows, meter, asked_at)
+                except Exception as exc:
+                    if type(exc) is AssertionError:
+                        raise
+                    logger.warning(
+                        f"{sp} alternate game lines failed (non-fatal — main "
+                        f"lines for this sport are already stored): {exc}")
 
             # F5 markets — MLB only, fetched via the per-event endpoint (additional
             # markets are not returned by the bulk /odds endpoint). Gated by env var
@@ -1305,6 +1845,18 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
 
     snapshot_at = f"{snapshot_date}T12:00:00Z"
     start = datetime.now()
+
+    if sport in RESOLVE_ONLY_SPORTS:
+        # This single-date path builds no resolver, so _process_events would
+        # drop every NCAAB event AFTER the 10x call had been paid for. Refused
+        # before the call. run_historical_odds_range refuses NCAAB too (it
+        # would ledger an hour whose unresolved events it dropped; the reason
+        # is written there): NCAAB history needs a buyer that keeps them.
+        logger.warning(f"historical {sport}: refused, nothing fetched -- {sport} "
+                       f"games resolve onto the schedule, and this path cannot")
+        return {"snapshot_date": snapshot_date, "sport": sport, "games": 0,
+                "odds_rows": 0, "duration_s": 0.0,
+                "skipped": "resolve_only_sport"}
 
     logger.info(f"Fetching HISTORICAL odds for {sport} on {snapshot_date} "
                 f"(uses 10× credits!)")
@@ -1499,6 +2051,30 @@ def run_historical_odds_range(sport: str, start: str, end: str,
              "games": 0, "odds_rows": 0, "errors": 0,
              "stopped_early": False, "last_date": None}
 
+    if sport in RESOLVE_ONLY_SPORTS:
+        # Refused before the connection, the paid call and the ledger. This
+        # loop ledgers every (date, hour) it buys, and a resolve-only sport
+        # drops every event that does not resolve onto ESPN's schedule (a
+        # feed name not yet in the registry or NCAAB_ODDS_API_MAP, a pair
+        # ESPN has no game for). Measured on this branch, 2026-10-26: one
+        # resolved and one unresolved event in a bought slate stored the
+        # first, dropped the second and still wrote the ledger row, so the
+        # dropped event was paid for and gone, and a re-run skipped the hour.
+        #
+        # Worse, the ledger key (sport, snapshot_date, hour_utc) is the one
+        # the dedicated NCAAB history purchase resumes on too, and that one
+        # keeps unmatched events as raw JSON for replay. An hour bought here
+        # first would read as held there, and its unmatched events could
+        # never be recovered. And this path is reachable from a worker_jobs
+        # row: tracking/job_queue's historical_odds job takes any SPORT_KEYS
+        # sport, which now includes NCAAB.
+        logger.warning(f"historical {sport}: refused, nothing fetched or ledgered -- "
+                       f"this backfill drops events that do not resolve onto the "
+                       f"schedule; {sport} history must come from a buyer that "
+                       f"keeps them")
+        stats["skipped"] = "resolve_only_sport"
+        return stats
+
     conn = get_connection()
     try:
         conn.execute(PULL_LEDGER_DDL)
@@ -1616,7 +2192,8 @@ def get_latest_odds_for_game(conn: DBConnection,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run odds ingestor")
-    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF"],
+    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF",
+                                            "NFL", "NCAAB", "NCAABW", "EUROLEAGUE"],
                         help="Sport to fetch (default: all)")
     parser.add_argument("--snapshot", default="open",
                         choices=["open", "close", "live"],

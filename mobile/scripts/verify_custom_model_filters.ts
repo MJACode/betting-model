@@ -595,6 +595,8 @@ check(
   const local = {
     picks: 5, wins: 2, losses: 3, pushes: 0, winRate: 0.4,
     profitFlat: -120, stakedFlat: 500, roiFlat: -0.24,
+    // The published stake (one unit basis, 2026-11-03).
+    units: -1.4, risked: 5.5, roi: -1.4 / 5.5, postedKnown: true,
   };
   const merged = mergeStats(server, local);
   check(
@@ -604,7 +606,11 @@ check(
       merged.profitFlat === 30 &&
       merged.stakedFlat === 1500 &&
       Math.abs(merged.roiFlat - 30 / 1500) < 1e-12 &&
-      Math.abs(merged.winRate - 8 / 15) < 1e-12,
+      Math.abs(merged.winRate - 8 / 15) < 1e-12 &&
+      // The server half has no posted columns here, so it falls back to its
+      // 1u-risked units and the merge says the basis is not known.
+      Math.abs(merged.units - (1.5 - 1.4)) < 1e-12 &&
+      merged.postedKnown === false,
   );
   check(
     'merging with an empty half is identity',

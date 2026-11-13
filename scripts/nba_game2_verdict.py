@@ -234,10 +234,18 @@ def placebo_runs(v) -> np.ndarray:
     return np.where(np.isfinite(a), a, 0.0)
 
 
+def band_slots(row: pd.Series) -> int:
+    """How many bands the lab wrote for this row: one past the highest bandN_n column, and
+    never fewer than BAND_SLOTS. The sixth search writes up to six for its lowest cut
+    (docs/nba_models_2026.md 10.5); a fixed five would never judge the top band."""
+    idx = [int(k[4:-2]) for k in row.index if k.startswith("band") and k.endswith("_n") and k[4:-2].isdigit()]
+    return max([BAND_SLOTS] + [i + 1 for i in idx])
+
+
 def bands_ok(row: pd.Series, min_bets: int = BAND_MIN_BETS) -> bool:
     """Every band the lab wrote (band0 = just below the cut, band1.. = from
     the cut up) with at least `min_bets` pooled bets has a positive return."""
-    for i in range(BAND_SLOTS):
+    for i in range(band_slots(row)):
         n = row.get(f"band{i}_n", 0)
         n = 0 if n is None or not np.isfinite(n) else n
         if n < min_bets:

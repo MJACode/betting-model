@@ -130,6 +130,21 @@ in-week during the season.
   Railway-log card remains the primary read; the CSV in `nfl/data/cards/` is on
   ephemeral disk and resets on redeploy. Manual runs per the Runbook still work
   anytime.
+- **What a wind or opener `pick_label` says.** The bet, and for the opener the
+  age of its number: `LA @ WAS Under 47.5`, `DAL @ IND — IND +7.5 · NEW 0m`.
+  The book is `decision_book`. There is no unit figure (mike,
+  2026-11-04: one unit basis). Older labels end in the model's own sizing,
+  `· 0.87u` (`kelly_fraction` / 1%, still on the row). That is not the stake:
+  every surface shows the posted stake, 1u to win at
+  `COALESCE(decision_odds, dk_odds)`, risk capped at 3u. Stored labels are not
+  rewritten (CLAUDE.md §1c). Discord's pick and free-pick fields, X, push, the
+  `open_picks` view and the app (pick rows, results, model pages, betslip,
+  pick detail, VoiceOver) drop that one token on display
+  (`tracking/pick_integrity.label_without_stake`, the app's
+  `labelWithoutStake`). The bet, the age tag and the old `(Opener …, BOOK)` /
+  `(Wind …, BOOK)` annotation stay word for word, and so does the void notice,
+  which quotes the message it voids. 61 stored labels carry the figure, all
+  `nfl_wind_totals` and `nfl_opener_spread` BETs (production, 2026-11-04).
 - **The OPENER rule is also live (2026-08-16, `nfl_opener_spread`):** NEW
   `nfl/scripts/daily_opener_card.py` deploys the corrected backtest_opener rule —
   in the T-7..T-2 window, wherever a clean soft book's HOME spread deviates

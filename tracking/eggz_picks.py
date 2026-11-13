@@ -1,19 +1,45 @@
-"""Read Eggz's posts in #eggz-picks, grade them, and recap that channel only.
+"""Read a tracked capper's Discord channel, grade it, and recap that channel only.
 
-The model record stays in `picks`. These rows live in `capper_messages` and
-`capper_picks`. A line that cannot be parsed or matched is `needs_review`.
-It is stored and logged. It is not dropped, and it is not given a result.
+Eggz is the first. ParlayMatt is the second. Each has a channel, an author,
+a webhook, a display name, and its own push_sent kinds. They share
+`capper_messages` and `capper_picks`. `capper_key` says whose row it is.
+NULL is Eggz, so a row written before that column existed stays his.
+
+The model record stays in `picks`. A line that cannot be parsed or matched
+is `needs_review`. It is stored and logged. It is not dropped, and it is
+not given a result. A pending or needs_review leg holds that day's recap.
+`settle_manual` is how a set-aside leg gets a WIN, LOSS, or PUSH.
+`restate_eggz_day` posts a Corrected recap and leaves the original
+`push_sent` row in place.
 
 The Oct 18 and Oct 20 posts are the grammar the tests pin: a sport/date
 header, `All 1U` as the message stake, and `60 Minute ML` as `h2h_3way`.
-Anything else is needs_review.
+A date with no sport (`Friday Oct. 22`) and `Player (TEAM) O5.5 Receptions`
+parse too. A bare sport line (`NCAAB`, `NCAABW`) is a header, not a bet.
+`Syracuse/Indiana U146.5` is a total, and the school names match the same
+way a college moneyline does. `Anthony Black (ORL)` on its own line is the
+player for the `O14.5 Points` lines under it. `.5U` is half a unit.
+`Virginia Tech 1st Half +3.5` is a first-half spread. NBA and NCAAB grade
+that from the period scores. A sport with no first-half source stays
+needs_review. The full-game score is not the half. A Discord mention is
+not a line. `U47.5` is a total, and `/` between two teams is a matchup.
+A line that still does not parse is needs_review, and the recap waits.
 
-Env, all optional. Any one missing and that half no-ops:
-    DISCORD_BOT_TOKEN          existing bot token (monitoring/discord_stats.py)
-    DISCORD_EGGZ_CHANNEL_ID    #eggz-picks channel id
-    DISCORD_EGGZ_AUTHOR_ID     his user id (username jack_mehoff123,
-                               display name Dr. Eggz)
-    DISCORD_WEBHOOK_EGGZ       recaps only. Never #results, never X.
+A line that is a parlay header (`PARLAY +450 1u`, `3 leg parlay`) is one
+bet at that price and stake. The lines under it are legs. The parlay row
+is the unit. A leg is not a second unit. A round robin is not one price,
+so that block is needs_review. A push that would change the stated price
+is needs_review. Anything still unparsed is needs_review.
+
+Env, all optional. Any one missing and that capper's half no-ops:
+    DISCORD_BOT_TOKEN                 existing bot token
+    DISCORD_EGGZ_CHANNEL_ID           #eggz-picks channel id
+    DISCORD_EGGZ_AUTHOR_ID            his user id (username jack_mehoff123,
+                                      display name Dr. Eggz)
+    DISCORD_WEBHOOK_EGGZ              Eggz recaps only. Never #results, never X.
+    DISCORD_PARLAYMATT_CHANNEL_ID     #parlaymatt-picks channel id
+    DISCORD_PARLAYMATT_AUTHOR_ID      his user id
+    DISCORD_WEBHOOK_PARLAYMATT        ParlayMatt recaps only. Never #results, never X.
 
 The bot needs View Channel, Read Message History, and the Message Content
 intent. Without that intent Discord returns an empty body.
@@ -41,6 +67,8 @@ from tracking.discord_notifier import (
     clv_line,
     period_heading,
     recap_periods_due,
+    restate_lock_key,
+    render_all_time_fields,
     DAILY_CATCHUP_DAYS,
     in_daily_recap_window,
     in_period_recap_window,
@@ -78,10 +106,39 @@ _PROP_STATS = {
     "outs": ("pitcher", "COMPUTE_OUTS", "pitcher_outs"),
     "walks": ("batter", "walks", "batter_walks"),
     "pitcher walks": ("pitcher", "p_walks", "pitcher_walks"),
+    # His prop line is "Player (TEAM) O5.5 Receptions". The stat word is the
+    # column the sport log grades. A stat this map does not know stays a
+    # needs_review leg; it is not dropped.
+    "receptions": ("log", "receptions", "player_receptions"),
+    "receiving yards": ("log", "receiving_yards", "player_reception_yds"),
+    "passing yards": ("log", "passing_yards", "player_pass_yds"),
+    "rushing yards": ("log", "rushing_yards", "player_rush_yds"),
+    "points": ("log", "points", "player_points"),
+    "rebounds": ("log", "rebounds", "player_rebounds"),
+    "assists": ("log", "assists", "player_assists"),
+}
+# (sport, column) -> (table, column). The column is a key of this map, never
+# a string from the post, so it can go in the SELECT.
+_LOG_STAT = {
+    ("NFL", "receptions"): ("nfl_player_game_log", "receptions"),
+    ("NFL", "receiving_yards"): ("nfl_player_game_log", "receiving_yards"),
+    ("NFL", "passing_yards"): ("nfl_player_game_log", "passing_yards"),
+    ("NFL", "rushing_yards"): ("nfl_player_game_log", "rushing_yards"),
+    ("NFL", "passing_tds"): ("nfl_player_game_log", "passing_tds"),
+    ("NFL", "rushing_tds"): ("nfl_player_game_log", "rushing_tds"),
+    ("NFL", "receiving_tds"): ("nfl_player_game_log", "receiving_tds"),
+    ("NBA", "points"): ("nba_player_game_log", "points"),
+    ("NBA", "rebounds"): ("nba_player_game_log", "rebounds"),
+    ("NBA", "assists"): ("nba_player_game_log", "assists"),
+    ("WNBA", "points"): ("wnba_player_game_log", "points"),
+    ("WNBA", "rebounds"): ("wnba_player_game_log", "rebounds"),
+    ("WNBA", "assists"): ("wnba_player_game_log", "assists"),
 }
 _STAT_ALT = "|".join(sorted(_PROP_STATS, key=len, reverse=True))
 _PRICE_RE = re.compile(r"(?<![\d.])([+-]\d{3,})(?!\d)")
-_STAKE_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*u(?:nits?)?\b", re.I)
+# `.5U` is half a unit. The dot is not part of a price or a total.
+_STAKE_RE = re.compile(
+    r"(?<![\d.])(\d*\.\d+|\d+(?:\.\d+)?)\s*u(?:nits?)?\b", re.I)
 _SPREAD_RE = re.compile(r"(?<![\d.])([+-]\d{1,2}(?:\.\d+)?)(?!\d)")
 _LINE_NUM_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)(?!\d)")
 _EMOJI_RE = re.compile(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D✅❌✔✖]+")
@@ -90,10 +147,16 @@ _REG_RE = re.compile(
     r"\b(?:60\s*min(?:ute)?s?\s*ml|reg(?:ulation)?\s*ml|3\s*[- ]?way(?:\s*ml)?)\b",
     re.I)
 _SLATE_RE = re.compile(
-    r"^(?P<sport>nhl|nfl|mlb|nba|wnba|ncaaf|ufc)\b"
+    r"^(?P<sport>nhl|nfl|mlb|nba|wnba|ncaabw|ncaab|ncaaf|ufc)\b"
     r"(?:\s+(?P<weekday>[A-Za-z]+day))?"
     r"(?:\s+(?P<mon>[A-Za-z]+)\.?\s+(?P<day>\d{1,2}))?"
     r"\s*$",
+    re.I)
+# "Friday Oct. 22" is a slate date with no sport. The sport is the later
+# "NFL" / "NBA" / "NCAAF" line. A line that is not a month and a day is not
+# this header.
+_DATE_ONLY_RE = re.compile(
+    r"^(?:(?P<weekday>[A-Za-z]+day)\s+)?(?P<mon>[A-Za-z]+)\.?\s+(?P<day>\d{1,2})\s*$",
     re.I)
 _MONTHS = {
     "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
@@ -102,19 +165,111 @@ _MONTHS = {
     "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
 _FUZZY_CUTOFF = 0.88
+_CAPPER_KEY_RE = re.compile(r"^[a-z]+$")
+_PARLAY_HEADER_RE = re.compile(
+    r"^(?:(?P<tag>[A-Za-z][A-Za-z0-9]{0,12})\s+)?"
+    r"(?:(?P<nlegs>\d+)\s*[- ]?\s*leg\s+)?"
+    r"parlay\b(?P<rest>.*)$",
+    re.I)
+_ROUND_ROBIN_RE = re.compile(r"\bround\s*robin\b", re.I)
+_BULLET_RE = re.compile(r"^(?:[-*•]+|\d+[.)])\s+")
+# User, nickname, role, channel, @everyone, @here. A mention is not a pick.
+_MENTION_RE = re.compile(
+    r"<(?:@[!&]?|#)\d+>|@everyone\b|@here\b",
+    re.I)
+# "@", "vs", and "at" need spaces, so a name like Patriots does not split.
+# "/" is the separator on the 2026-10-29 total (`Panthers/GB`), with or
+# without spaces around it.
+_MATCHUP_SEP = r"(?:\s+(?:@|vs\.?|at)\s+|\s*/\s*)"
+# "Anthony Black (ORL)" with no number under it is the player for the
+# stat lines that follow. A line that already has the bet stays a bet.
+# The team is an abbreviation, not a stake or a price: "(1U)" and "(1.5U)"
+# are the stake on the bet in front of them.
+_PLAYER_HEADER_RE = re.compile(
+    r"^(?P<player>[A-Za-z].{0,60}?)\s*"
+    r"\((?P<team>[A-Za-z0-9][^)]{0,24})\)\s*$")
+_PAREN_STAKE_RE = re.compile(
+    r"^[+-]?\d*\.?\d+\s*u(?:nits?)?$", re.I)
+# "1st Half" / "first half" is not part of the team name.
+_HALF_RE = re.compile(r"\b(?:1st|first)\s+half\b", re.I)
+# Period scores the settler already trusts. NCAAF is not one of them.
+_HALF_SPORTS = {"NBA", "NCAAB"}
+
+
+class Capper:
+    """One Discord capper. Keys and kinds are fixed strings, not user input."""
+
+    def __init__(self, key: str, display_name: str, channel_attr: str,
+                 author_attr: str, webhook_attr: str, results_prefix: str,
+                 review_kind: str):
+        if not _CAPPER_KEY_RE.match(key):
+            raise ValueError(key)
+        self.key = key
+        self.display_name = display_name
+        self.channel_attr = channel_attr
+        self.author_attr = author_attr
+        self.webhook_attr = webhook_attr
+        self.results_prefix = results_prefix
+        self.review_kind = review_kind
+
+    def channel_id(self) -> str:
+        return getattr(config, self.channel_attr, "") or ""
+
+    def author_id(self) -> str:
+        return getattr(config, self.author_attr, "") or ""
+
+    def webhook(self) -> str:
+        return getattr(config, self.webhook_attr, "") or ""
+
+
+EGGZ = Capper(
+    key="eggz",
+    display_name="Eggz",
+    channel_attr="DISCORD_EGGZ_CHANNEL_ID",
+    author_attr="DISCORD_EGGZ_AUTHOR_ID",
+    webhook_attr="DISCORD_WEBHOOK_EGGZ",
+    results_prefix="discord_eggz_results",
+    review_kind="eggz_review",
+)
+PARLAYMATT = Capper(
+    key="parlaymatt",
+    display_name="ParlayMatt",
+    channel_attr="DISCORD_PARLAYMATT_CHANNEL_ID",
+    author_attr="DISCORD_PARLAYMATT_AUTHOR_ID",
+    webhook_attr="DISCORD_WEBHOOK_PARLAYMATT",
+    results_prefix="discord_parlaymatt_results",
+    review_kind="parlaymatt_review",
+)
+CAPPERS = {"eggz": EGGZ, "parlaymatt": PARLAYMATT}
+
+
+def _owner_clause(capper: Capper, alias: str = "") -> str:
+    """Rows that belong to this capper, including parlay legs.
+
+    NULL capper_key is Eggz. Those rows were written before the column.
+    """
+    prefix = f"{alias}." if alias else ""
+    if capper.key == "eggz":
+        return f"COALESCE({prefix}capper_key, 'eggz') = 'eggz'"
+    return f"{prefix}capper_key = '{capper.key}'"
+
+
+def _record_clause(capper: Capper, alias: str = "") -> str:
+    """Graded bets that count as units. A parlay leg is not one of them."""
+    prefix = f"{alias}." if alias else ""
+    return f"{_owner_clause(capper, alias)} AND {prefix}parlay_id IS NULL"
 
 
 def _token() -> str:
     return os.environ.get("DISCORD_BOT_TOKEN", "").strip()
 
 
-def configured_to_read() -> bool:
-    return bool(_token() and config.DISCORD_EGGZ_CHANNEL_ID
-                and config.DISCORD_EGGZ_AUTHOR_ID)
+def configured_to_read(capper: Capper = EGGZ) -> bool:
+    return bool(_token() and capper.channel_id() and capper.author_id())
 
 
-def configured_to_post() -> bool:
-    return bool(config.DISCORD_WEBHOOK_EGGZ)
+def configured_to_post(capper: Capper = EGGZ) -> bool:
+    return bool(capper.webhook())
 
 
 _SKIP_LAST = {"team", "fc", "club"}
@@ -202,6 +357,11 @@ def _strip_emoji(text: str) -> str:
     return _EMOJI_RE.sub("", text or "")
 
 
+def _without_mentions(text: str) -> str:
+    """Drop Discord mentions. A line that is only a mention comes back empty."""
+    return " ".join(_MENTION_RE.sub(" ", text or "").split())
+
+
 def _price_and_stake(text: str, default_stake: float = 1.0
                      ) -> tuple[str, float | None, float]:
     stake = default_stake
@@ -214,7 +374,9 @@ def _price_and_stake(text: str, default_stake: float = 1.0
     if pm:
         price = float(pm.group(1))
         text = (text[:pm.start()] + " " + text[pm.end():]).strip()
-    text = text.replace("(", " ").replace(")", " ")
+    # (+116) leaves an empty pair. A team in parentheses, "(NE)", stays:
+    # the prop line is "Player (TEAM) O5.5 Receptions".
+    text = re.sub(r"\(\s*\)", " ", text)
     text = " ".join(text.split())
     return text, price, stake
 
@@ -235,21 +397,34 @@ def _slate_date(month: int, day: int, posted: datetime | None) -> str | None:
 
 
 def _slate_header(text: str, posted: datetime | None) -> dict | None:
-    """'NHL Sunday Oct. 18' is the sport and the slate date, not a bet."""
+    """'NHL Sunday Oct. 18' is the sport and the slate date, not a bet.
+
+    'Friday Oct. 22' is the date with no sport. The sport is a later line.
+    A date-only header does not clear a sport already set.
+    """
     m = _SLATE_RE.match(text.strip())
-    if not m:
-        return None
-    out = {"sport": m.group("sport").upper()}
-    if not m.group("mon"):
+    if m:
+        out = {"sport": m.group("sport").upper()}
+        if not m.group("mon"):
+            return out
+        month = _MONTHS.get(m.group("mon").lower())
+        if not month:
+            return None
+        slate = _slate_date(month, int(m.group("day")), posted)
+        if not slate:
+            return None
+        out["slate_date"] = slate
         return out
-    month = _MONTHS.get(m.group("mon").lower())
+    dated = _DATE_ONLY_RE.match(text.strip())
+    if not dated:
+        return None
+    month = _MONTHS.get(dated.group("mon").lower())
     if not month:
         return None
-    slate = _slate_date(month, int(m.group("day")), posted)
+    slate = _slate_date(month, int(dated.group("day")), posted)
     if not slate:
         return None
-    out["slate_date"] = slate
-    return out
+    return {"slate_date": slate}
 
 
 def _fuzzy_one(text: str, sport: str) -> str | None:
@@ -289,6 +464,97 @@ def _spread_number(text: str) -> tuple[str, float | None]:
     return (text[:m.start()] + " " + text[m.end():]).strip(), float(m.group(1))
 
 
+def _strip_bullet(text: str) -> str:
+    return _BULLET_RE.sub("", text, count=1).strip()
+
+
+def _parlay_header(raw: str, default_stake: float) -> dict | None:
+    """A parlay header, or None when the line is an ordinary bet.
+
+    `PARLAY +450 1u` and `3 leg parlay +450` are one bet. The price on the
+    header is the price. A missing price stays missing. Round robin is not
+    one stated price, so it is not a header the grader can settle.
+    """
+    if _ROUND_ROBIN_RE.search(raw):
+        return None
+    m = _PARLAY_HEADER_RE.match(raw.strip())
+    if not m:
+        return None
+    _text, price, stake = _price_and_stake(m.group("rest") or "", default_stake)
+    return {
+        "price": price,
+        "stake_units": stake,
+        "raw": raw,
+        "legs": [],
+        "broken": False,
+        "ok": False,
+    }
+
+
+def _finish_parlay(parlay: dict | None, reviews: list[dict]) -> None:
+    if parlay is None:
+        return
+    parlay["ok"] = (not parlay["broken"]) and len(parlay["legs"]) >= 2
+    if not parlay["legs"]:
+        reviews.append({
+            "line_no": parlay["line_no"],
+            "raw": parlay["raw"],
+            "reason": "unparsed",
+        })
+
+
+def _start_broken_parlay(raw: str, n: int, default_stake: float,
+                         context) -> dict:
+    """A round robin. The lines under it stay needs_review, not singles."""
+    return {
+        "price": None,
+        "stake_units": default_stake,
+        "raw": raw,
+        "legs": [],
+        "broken": True,
+        "ok": False,
+        "line_no": n,
+        "sport_hint": (context or {}).get("sport"),
+        "slate_date": (context or {}).get("slate_date"),
+    }
+
+
+def _clear_player(context: dict | None) -> None:
+    if not context:
+        return
+    context.pop("player_name", None)
+    context.pop("player_team", None)
+
+
+def _player_header(raw: str) -> dict | None:
+    """A name and a team, and nothing else. The stat lines are below it.
+
+    A price, a stake, ML, a spread, or an over/under on the line is a bet.
+    `(1U)` is that stake, not a team. The bet parses the way it did before
+    a player block existed.
+    """
+    text = (raw or "").strip()
+    m = _PLAYER_HEADER_RE.match(text)
+    if not m:
+        return None
+    player = " ".join(m.group("player").split())
+    team = " ".join(m.group("team").split())
+    if not player or not team:
+        return None
+    _rest, price, _stake = _price_and_stake(text)
+    if price is not None or _STAKE_RE.search(text):
+        return None
+    if _PAREN_STAKE_RE.match(team):
+        return None
+    if re.search(r"\b(?:ml|moneyline|over|under)\b", player, re.I):
+        return None
+    if re.search(r"\b[ou]\d", player, re.I):
+        return None
+    if _SPREAD_RE.search(player) or _LINE_NUM_RE.search(player):
+        return None
+    return {"player": player, "team": team}
+
+
 def parse_message(body: str, posted_at: datetime | None = None
                   ) -> tuple[list[dict], list[dict]]:
     """(legs, reviews). A review is a line that was not turned into a bet.
@@ -298,33 +564,126 @@ def parse_message(body: str, posted_at: datetime | None = None
     date. `All 1U` sets the stake for the lines that do not name their own.
     Neither of those is a bet. Stake defaults to 1 unit to win. A missing
     price stays missing.
+
+    A parlay header groups the bet lines under it into one bet. Those legs
+    carry `parlay_header`. A line with no parlay header is the same bet it
+    was before.
+
+    A Discord mention (`<@id>`, `<@!id>`, `<@&id>`, `<#id>`, `@everyone`,
+    `@here`) is removed first. A line that is only a mention creates no
+    row. The other lines keep the numbers they had.
+
+    `Player (TEAM)` with no bet is the player for the stat lines under it
+    (`O14.5 Points`). Those lines are props. The name line is not a second
+    bet. A name that nothing under it uses stays needs_review.
     """
     legs: list[dict] = []
     reviews: list[dict] = []
     context: dict | None = None
     default_stake = 1.0
+    parlay: dict | None = None
+    open_name: dict | None = None
     lines = [_strip_emoji(ln).strip() for ln in (body or "").splitlines()]
     lines = [ln for ln in lines if ln and not ln.startswith("#")]
+
+    def _drop_open_name() -> None:
+        nonlocal open_name, context
+        if open_name is None:
+            return
+        reviews.append({
+            "line_no": open_name["line_no"],
+            "raw": open_name["raw"],
+            "reason": "unparsed",
+        })
+        open_name = None
+        _clear_player(context)
+
+    def _keep_player(leg) -> None:
+        """A bare stat line used the name above it. Any other line did not."""
+        nonlocal open_name
+        if leg is not None and leg.pop("used_player_context", False):
+            open_name = None
+            return
+        if open_name is not None:
+            _drop_open_name()
+        elif leg is not None and leg.get("market") != "prop":
+            _clear_player(context)
+
     if not lines:
         reviews.append({"line_no": 1, "raw": body or "", "reason": "empty"})
         return legs, reviews
     for n, raw in enumerate(lines, start=1):
+        raw = _without_mentions(raw)
+        if not raw:
+            continue
         slate = _slate_header(raw, posted_at)
         if slate:
+            _drop_open_name()
+            _clear_player(context)
+            _finish_parlay(parlay, reviews)
+            parlay = None
             context = dict(context or {})
             context.update(slate)
             continue
         all_stake = _ALL_STAKE_RE.match(raw.strip())
         if all_stake:
+            _drop_open_name()
+            _clear_player(context)
+            _finish_parlay(parlay, reviews)
+            parlay = None
             default_stake = float(all_stake.group(1))
+            continue
+        if _ROUND_ROBIN_RE.search(raw):
+            _drop_open_name()
+            _clear_player(context)
+            _finish_parlay(parlay, reviews)
+            parlay = _start_broken_parlay(raw, n, default_stake, context)
+            continue
+        header = _parlay_header(raw, default_stake)
+        if header:
+            _drop_open_name()
+            _clear_player(context)
+            _finish_parlay(parlay, reviews)
+            header["line_no"] = n
+            header["sport_hint"] = (context or {}).get("sport")
+            header["slate_date"] = (context or {}).get("slate_date")
+            parlay = header
+            continue
+        if parlay is not None:
+            stripped, price, _stake = _price_and_stake(
+                _strip_bullet(raw), parlay["stake_units"])
+            leg = _parse_line(stripped, price, parlay["stake_units"], context, raw)
+            if leg is not None:
+                leg.pop("used_player_context", None)
+            if leg is None:
+                reviews.append({"line_no": n, "raw": raw, "reason": "unparsed"})
+                parlay["broken"] = True
+                continue
+            leg["line_no"] = n
+            leg["sport_hint"] = (context or {}).get("sport")
+            leg["slate_date"] = (context or {}).get("slate_date")
+            leg["parlay_header"] = parlay
+            parlay["legs"].append(leg)
+            legs.append(leg)
+            continue
+        named = _player_header(raw)
+        if named:
+            _drop_open_name()
+            context = dict(context or {})
+            context["player_name"] = named["player"]
+            context["player_team"] = named["team"]
+            open_name = {"line_no": n, "raw": raw}
             continue
         stripped, price, stake = _price_and_stake(raw, default_stake)
         header = _matchup_header(stripped)
         if header and price is None and not _STAKE_RE.search(raw):
+            _drop_open_name()
+            _clear_player(context)
             context = dict(context or {})
             context.update(header)
             continue
         leg = _parse_line(stripped, price, stake, context, raw)
+        _keep_player(leg)
         if leg is None:
             reviews.append({"line_no": n, "raw": raw, "reason": "unparsed"})
             continue
@@ -332,39 +691,85 @@ def parse_message(body: str, posted_at: datetime | None = None
         leg["sport_hint"] = (context or {}).get("sport")
         leg["slate_date"] = (context or {}).get("slate_date")
         legs.append(leg)
+    _drop_open_name()
+    _finish_parlay(parlay, reviews)
     return legs, reviews
 
 
-def _matchup_header(text: str) -> dict | None:
-    m = re.match(r"^(?P<a>.+?)\s+(?:@|vs\.?|at)\s+(?P<b>.+)$", text, re.I)
+def _split_matchup(text: str) -> tuple[str, str] | None:
+    m = re.match(rf"^(?P<a>.+?){_MATCHUP_SEP}(?P<b>.+)$", (text or "").strip(), re.I)
     if not m:
         return None
     a, b = m.group("a").strip(), m.group("b").strip()
-    if _teams_in(a) and _teams_in(b) and not re.search(r"\b(over|under|ml)\b", text, re.I):
+    if not a or not b:
+        return None
+    return a, b
+
+
+def _matchup_header(text: str) -> dict | None:
+    parts = _split_matchup(text)
+    if not parts:
+        return None
+    a, b = parts
+    if (_teams_in(a) and _teams_in(b)
+            and not re.search(r"\b(over|under|ml)\b", text, re.I)
+            and not _HALF_RE.search(text)):
         return {"away_text": a, "home_text": b, "raw": text}
     return None
 
 
 def _parse_line(text: str, price, stake, context, raw: str) -> dict | None:
+    # "O5.5" has no space. "(NE)" is the team, and it is optional.
     prop = re.match(
-        rf"^(?P<player>.+?)\s+(?P<side>over|under|o|u)\s+"
-        rf"(?P<line>\d+(?:\.\d+)?)\s+(?P<stat>{_STAT_ALT})\b",
+        rf"^(?P<player>.+?)"
+        rf"(?:\s*\((?P<team>[A-Za-z0-9][^)]{{0,24}})\))?"
+        rf"\s+(?P<side>over|under|o|u)\s*"
+        rf"(?P<line>\d+(?:\.\d+)?)\s+"
+        rf"(?P<stat>{_STAT_ALT})\b",
         text, re.I)
     if prop:
         stat = prop.group("stat").lower()
         kind, col, market = _PROP_STATS[stat]
         side = prop.group("side").lower()
         side = {"o": "over", "u": "under"}.get(side, side)
+        team = (prop.group("team") or "").strip() or None
         return {
             "market": "prop", "side": side, "line": float(prop.group("line")),
             "price": price, "stake_units": stake,
             "player_name": prop.group("player").strip(" -"),
             "prop_stat": col, "prop_kind": kind, "prop_market": market,
-            "team_text": None, "away_text": (context or {}).get("away_text"),
+            "team_text": team, "away_text": (context or {}).get("away_text"),
             "home_text": (context or {}).get("home_text"), "raw": raw,
         }
+    # "O14.5 Points" under "Anthony Black (ORL)". No player on this line.
+    # The name line is the player. Without that name this stays a total.
+    bare = re.match(
+        rf"^(?P<side>over|under|o|u)\s*(?P<line>\d+(?:\.\d+)?)\s+"
+        rf"(?P<stat>{_STAT_ALT})\b\s*$",
+        text, re.I)
+    named = ((context or {}).get("player_name") or "").strip()
+    if bare and named:
+        stat = bare.group("stat").lower()
+        kind, col, market = _PROP_STATS[stat]
+        side = bare.group("side").lower()
+        side = {"o": "over", "u": "under"}.get(side, side)
+        team = ((context or {}).get("player_team") or "").strip() or None
+        return {
+            "market": "prop", "side": side, "line": float(bare.group("line")),
+            "price": price, "stake_units": stake, "player_name": named,
+            "prop_stat": col, "prop_kind": kind, "prop_market": market,
+            "team_text": team, "away_text": (context or {}).get("away_text"),
+            "home_text": (context or {}).get("home_text"), "raw": raw,
+            "used_player_context": True,
+        }
+    # "Lakers 1st Half ML" and "GB/CHI 1st Half U21.5" are not the full game.
+    # A half spread is the only half this grader settles. The others stay
+    # needs_review, so a pro alias cannot grade them on the final.
+    if _HALF_RE.search(text) and _spread_number(text)[1] is None:
+        return None
+    # "U47.5" has no space after the side. "Over 8.5" still has one.
     ou = re.match(
-        r"^(?:(?P<pre>.+?)\s+)?(?P<side>over|under|o|u)\s+(?P<line>\d+(?:\.\d+)?)\b\s*(?P<post>.*)$",
+        r"^(?:(?P<pre>.+?)\s+)?(?P<side>over|under|o|u)\s*(?P<line>\d+(?:\.\d+)?)\b\s*(?P<post>.*)$",
         text, re.I)
     if ou:
         side = ou.group("side").lower()
@@ -400,8 +805,14 @@ def _parse_line(text: str, price, stake, context, raw: str) -> dict | None:
         }
     rest, spread = _spread_number(text)
     if spread is not None and abs(spread) < 100:
+        market = "spreads"
+        if _HALF_RE.search(rest):
+            # The half is the market. It is not part of the school name, and
+            # it is not the full-game spread.
+            rest = " ".join(_HALF_RE.sub(" ", rest).split())
+            market = "spreads_h1"
         return {
-            "market": "spreads", "side": None, "line": spread, "price": price,
+            "market": market, "side": None, "line": spread, "price": price,
             "stake_units": stake, "player_name": None, "prop_stat": None,
             "prop_kind": None, "prop_market": None, "team_text": rest,
             "away_text": (context or {}).get("away_text"),
@@ -412,12 +823,64 @@ def _parse_line(text: str, price, stake, context, raw: str) -> dict | None:
 
 def _split_sides(rest: str, context) -> tuple[str | None, str | None]:
     if rest:
-        m = re.match(r"^(?P<a>.+?)\s+(?:@|vs\.?|at)\s+(?P<b>.+)$", rest, re.I)
-        if m:
-            return m.group("a").strip(), m.group("b").strip()
+        parts = _split_matchup(rest)
+        if parts:
+            return parts
     if context:
         return context.get("away_text"), context.get("home_text")
     return None, None
+
+
+def _has_final(game: dict) -> bool:
+    return game.get("home_score") is not None and game.get("away_score") is not None
+
+
+def _prefer_twin(a: dict, b: dict) -> dict:
+    """One row for one kickoff. A final beats an unscored stub, so the leg
+    can grade. When both have a final, the earlier game_date is the odds
+    row (Eastern kickoff). game_id breaks a remaining tie."""
+    if _has_final(a) != _has_final(b):
+        return a if _has_final(a) else b
+    ka = (str(a.get("game_date") or "9999"), str(a.get("game_id") or ""))
+    kb = (str(b.get("game_date") or "9999"), str(b.get("game_id") or ""))
+    return a if ka <= kb else b
+
+
+def _collapse_same_matchup(candidates: list[dict]) -> list[dict]:
+    """Same sport, same two teams, kickoffs within 3 hours: one game.
+
+    Night NCAAF rows ingested before 2026-09-13 are dated by CFBD's UTC
+    startDate, and the odds ingestor files the same kickoff on the Eastern
+    date. Army at Tulsa is NCAAF_2026-10-23_army_tulsa (odds, 1,642 prices)
+    and NCAAF_2026-10-24_army_tulsa (CFBD, the player log). The CFBD id was
+    written 2026-08-29 and is retained on purpose: re-keying it would orphan
+    ncaaf_team_game_log and ncaaf_qb_game. New CFBD games already use
+    eastern_game_date. The pair is the same kickoff, not two games.
+    A later start the same day (an MLB doubleheader) stays two games.
+    """
+    kept: list[dict] = []
+    for cand in candidates:
+        if (not cand.get("home_team") or not cand.get("away_team")
+                or "commence" not in cand):
+            kept.append(cand)
+            continue
+        merged = False
+        for i, prev in enumerate(kept):
+            if not prev.get("home_team") or "commence" not in prev:
+                continue
+            same = (
+                prev.get("sport") == cand.get("sport")
+                and prev.get("home_team") == cand.get("home_team")
+                and prev.get("away_team") == cand.get("away_team")
+                and abs(prev["commence"] - cand["commence"]) <= timedelta(hours=3)
+            )
+            if same:
+                kept[i] = _prefer_twin(prev, cand)
+                merged = True
+                break
+        if not merged:
+            kept.append(cand)
+    return kept
 
 
 def choose_game(candidates: list[dict], posted_at: datetime) -> tuple[dict | None, str | None]:
@@ -425,7 +888,9 @@ def choose_game(candidates: list[dict], posted_at: datetime) -> tuple[dict | Non
 
     Two sports in the window, or two games within 18 hours, are not a guess.
     A post after every candidate has started is posted_after_start.
+    An ET/UTC twin of one kickoff is one game (_collapse_same_matchup).
     """
+    candidates = _collapse_same_matchup(candidates)
     future = [c for c in candidates if c["commence"] > posted_at]
     if not future:
         if candidates:
@@ -479,8 +944,10 @@ def units_for_result(stake_units, price, result: str) -> tuple[float, float]:
 
 
 def fetch_channel_messages(channel_id: str, *, after: str | None = None,
-                           before: str | None = None) -> list[dict] | None:
+                           before: str | None = None,
+                           capper: Capper = EGGZ) -> list[dict] | None:
     """One Discord page. None means the call failed and the cursor must stay."""
+    name = capper.display_name
     params: dict[str, str | int] = {"limit": _PAGE}
     if after:
         params["after"] = after
@@ -494,20 +961,20 @@ def fetch_channel_messages(channel_id: str, *, after: str | None = None,
             timeout=20,
         )
     except requests.RequestException as exc:
-        logger.error(f"Eggz read failed: {exc}")
+        logger.error(f"{name} read failed: {exc}")
         return None
     if r.status_code == 429:
-        logger.error("Eggz read rate-limited (429); cursor left where it was")
+        logger.error(f"{name} read rate-limited (429); cursor left where it was")
         return None
     if r.status_code in (401, 403, 404):
-        logger.error(f"Eggz read refused ({r.status_code})")
+        logger.error(f"{name} read refused ({r.status_code})")
         return None
     if r.status_code >= 300:
-        logger.error(f"Eggz read HTTP {r.status_code}")
+        logger.error(f"{name} read HTTP {r.status_code}")
         return None
     body = r.json()
     if not isinstance(body, list):
-        logger.error("Eggz read returned a non-list")
+        logger.error(f"{name} read returned a non-list")
         return None
     return body
 
@@ -519,17 +986,22 @@ def _snow(message_id: str) -> int:
         return 0
 
 
-def ingest_messages(conn, fetch=fetch_channel_messages) -> int:
+def ingest_messages(conn, fetch=None, capper: Capper = EGGZ) -> int:
     """Store new messages from the configured author. Returns rows written.
 
     The cursor is the newest snowflake examined, including other authors,
     so the next poll asks Discord for messages after that id. The first
-    runs walk backward until a short page, then forward.
+    runs walk backward until a short page, then forward. One cursor per
+    channel. Eggz and ParlayMatt do not share one.
     """
-    if not configured_to_read():
+    if fetch is None:
+        def fetch(channel_id, *, after=None, before=None):
+            return fetch_channel_messages(
+                channel_id, after=after, before=before, capper=capper)
+    if not configured_to_read(capper):
         return 0
-    channel = config.DISCORD_EGGZ_CHANNEL_ID
-    author = config.DISCORD_EGGZ_AUTHOR_ID
+    channel = capper.channel_id()
+    author = capper.author_id()
     cur = conn.execute(
         "SELECT newest_id, oldest_id, backfill_done FROM capper_ingest_cursor "
         "WHERE channel_id = %s", (channel,)).fetchone()
@@ -546,10 +1018,12 @@ def ingest_messages(conn, fetch=fetch_channel_messages) -> int:
                 break
             batch_ids = [str(m.get("id")) for m in batch if m.get("id")]
             if not batch_ids:
-                logger.error("Eggz page had no message ids; cursor left where it was")
+                logger.error(
+                    f"{capper.display_name} page had no message ids; "
+                    "cursor left where it was")
                 conn.commit()
                 return written
-            written += _store_batch(conn, batch, channel, author)
+            written += _store_batch(conn, batch, channel, author, capper)
             oldest = min(batch_ids, key=_snow)
             newest = max([newest, max(batch_ids, key=_snow)], key=lambda x: _snow(x or "0"))
             pages += 1
@@ -568,12 +1042,14 @@ def ingest_messages(conn, fetch=fetch_channel_messages) -> int:
     if batch:
         batch_ids = [str(m.get("id")) for m in batch if m.get("id")]
         if not batch_ids:
-            logger.error("Eggz page had no message ids; cursor left where it was")
+            logger.error(
+                f"{capper.display_name} page had no message ids; "
+                "cursor left where it was")
         else:
-            written += _store_batch(conn, batch, channel, author)
+            written += _store_batch(conn, batch, channel, author, capper)
             newest = max(batch_ids, key=_snow)
             _save_cursor(conn, channel, newest, oldest, True)
-    _refresh_edits(conn, fetch, channel, author)
+    _refresh_edits(conn, fetch, channel, author, capper)
     conn.commit()
     return written
 
@@ -590,17 +1066,18 @@ def _save_cursor(conn, channel, newest, oldest, done) -> None:
     )
 
 
-def _store_batch(conn, batch: list[dict], channel: str, author: str) -> int:
+def _store_batch(conn, batch: list[dict], channel: str, author: str,
+                 capper: Capper = EGGZ) -> int:
     n = 0
     for msg in batch:
         if str((msg.get("author") or {}).get("id")) != str(author):
             continue
-        if _upsert_message(conn, msg, channel):
+        if _upsert_message(conn, msg, channel, capper):
             n += 1
     return n
 
 
-def _upsert_message(conn, msg: dict, channel: str) -> bool:
+def _upsert_message(conn, msg: dict, channel: str, capper: Capper = EGGZ) -> bool:
     mid = str(msg.get("id") or "")
     if not mid:
         return False
@@ -610,7 +1087,7 @@ def _upsert_message(conn, msg: dict, channel: str) -> bool:
     edited = _parse_ts(msg.get("edited_timestamp"))
     if posted is None:
         _flag_message(conn, mid, channel, author, body or "", datetime.now(timezone.utc),
-                      "needs_review", "no timestamp")
+                      "needs_review", "no timestamp", capper)
         return True
     existing = conn.execute(
         "SELECT body, edited_at FROM capper_messages WHERE message_id = %s",
@@ -623,38 +1100,41 @@ def _upsert_message(conn, msg: dict, channel: str) -> bool:
     conn.execute(
         "INSERT INTO capper_messages (message_id, channel_id, author_id, "
         "author_username, author_display, body, posted_at, edited, edited_at, "
-        "parse_status, parse_note) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "parse_status, parse_note, capper_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT (message_id) DO UPDATE SET body = EXCLUDED.body, "
         "edited = EXCLUDED.edited, edited_at = EXCLUDED.edited_at, "
         "author_username = EXCLUDED.author_username, "
-        "author_display = EXCLUDED.author_display",
+        "author_display = EXCLUDED.author_display, "
+        "capper_key = EXCLUDED.capper_key",
         (mid, channel, str(author.get("id") or ""),
          author.get("username"), author.get("global_name") or author.get("username"),
          body, posted.isoformat(), edited is not None,
          edited.isoformat() if edited else None,
-         "parsed", None),
+         "parsed", None, capper.key),
     )
     if graded:
         return True
-    _replace_legs(conn, mid, body, posted)
+    _replace_legs(conn, mid, body, posted, capper)
     return True
 
 
-def _flag_message(conn, mid, channel, author, body, posted, status, note) -> None:
+def _flag_message(conn, mid, channel, author, body, posted, status, note,
+                  capper: Capper = EGGZ) -> None:
     conn.execute(
         "INSERT INTO capper_messages (message_id, channel_id, author_id, "
         "author_username, author_display, body, posted_at, edited, parse_status, "
-        "parse_note) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "parse_note, capper_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT (message_id) DO NOTHING",
         (mid, channel, str((author or {}).get("id") or ""),
          (author or {}).get("username"),
          (author or {}).get("global_name"),
-         body, posted.isoformat(), False, status, note),
+         body, posted.isoformat(), False, status, note, capper.key),
     )
-    _surface_review(conn, mid, note)
+    _surface_review(conn, mid, note, capper)
 
 
-def _replace_legs(conn, message_id: str, body: str, posted: datetime) -> None:
+def _replace_legs(conn, message_id: str, body: str, posted: datetime,
+                  capper: Capper = EGGZ) -> None:
     prev = conn.execute(
         "SELECT parse_note FROM capper_messages WHERE message_id = %s",
         (message_id,)).fetchone()
@@ -664,15 +1144,25 @@ def _replace_legs(conn, message_id: str, body: str, posted: datetime) -> None:
         (message_id,))
     legs, reviews = parse_message(body, posted)
     note_parts = []
+    seen_parlays: set[int] = set()
     for leg in legs:
+        header = leg.get("parlay_header")
+        if header is not None:
+            if id(header) in seen_parlays:
+                continue
+            seen_parlays.add(id(header))
+            note_parts.extend(
+                _store_parlay(conn, message_id, header, posted, capper))
+            continue
         game, reason = _match_leg(conn, leg, posted)
         if reason:
-            _insert_pick(conn, message_id, leg, posted, "needs_review", reason, game)
+            _insert_pick(conn, message_id, leg, posted, "needs_review", reason, game,
+                         capper)
             note_parts.append(f"line {leg['line_no']}: {reason}")
         else:
-            _insert_pick(conn, message_id, leg, posted, "pending", None, game)
+            _insert_pick(conn, message_id, leg, posted, "pending", None, game, capper)
     for rev in reviews:
-        _insert_review(conn, message_id, rev, posted)
+        _insert_review(conn, message_id, rev, posted, capper)
         note_parts.append(f"line {rev['line_no']}: {rev['reason']}")
     status = "needs_review" if note_parts else "parsed"
     note = "; ".join(note_parts)[:500] or None
@@ -680,26 +1170,28 @@ def _replace_legs(conn, message_id: str, body: str, posted: datetime) -> None:
         "UPDATE capper_messages SET parse_status = %s, parse_note = %s "
         "WHERE message_id = %s", (status, note, message_id))
     if note_parts and note != old_note:
-        _surface_review(conn, message_id, note)
+        _surface_review(conn, message_id, note, capper)
 
 
-def _insert_review(conn, message_id, rev, posted) -> None:
+def _insert_review(conn, message_id, rev, posted, capper: Capper = EGGZ) -> None:
     conn.execute(
         "INSERT INTO capper_picks (message_id, line_no, status, review_reason, "
-        "stake_units, posted_at) VALUES (%s,%s,'needs_review',%s,1,%s) "
+        "stake_units, posted_at, capper_key) VALUES (%s,%s,'needs_review',%s,1,%s,%s) "
         "ON CONFLICT (message_id, line_no) DO NOTHING",
         (message_id, rev["line_no"], f"{rev['reason']}: {rev['raw'][:240]}",
-         posted.isoformat()),
+         posted.isoformat(), capper.key),
     )
 
 
-def _insert_pick(conn, message_id, leg, posted, status, reason, game) -> None:
+def _insert_pick(conn, message_id, leg, posted, status, reason, game,
+                 capper: Capper = EGGZ, parlay_id=None) -> None:
     g = game or {}
     conn.execute(
         "INSERT INTO capper_picks (message_id, line_no, status, review_reason, "
         "sport, game_id, game_date, home_team, away_team, commence_time, market, "
         "side, line, price, stake_units, player_name, prop_stat, prop_market, "
-        "posted_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "posted_at, capper_key, parlay_id) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT (message_id, line_no) DO UPDATE SET status = EXCLUDED.status, "
         "review_reason = EXCLUDED.review_reason, sport = EXCLUDED.sport, "
         "game_id = EXCLUDED.game_id, game_date = EXCLUDED.game_date, "
@@ -707,24 +1199,100 @@ def _insert_pick(conn, message_id, leg, posted, status, reason, game) -> None:
         "commence_time = EXCLUDED.commence_time, market = EXCLUDED.market, "
         "side = EXCLUDED.side, line = EXCLUDED.line, price = EXCLUDED.price, "
         "stake_units = EXCLUDED.stake_units, player_name = EXCLUDED.player_name, "
-        "prop_stat = EXCLUDED.prop_stat, prop_market = EXCLUDED.prop_market",
+        "prop_stat = EXCLUDED.prop_stat, prop_market = EXCLUDED.prop_market, "
+        "capper_key = EXCLUDED.capper_key, parlay_id = EXCLUDED.parlay_id "
+        "WHERE capper_picks.status <> 'graded'",
         (message_id, leg["line_no"], status, reason, g.get("sport"), g.get("game_id"),
          g.get("game_date"), g.get("home_team"), g.get("away_team"),
          g.get("commence_time"), leg["market"], g.get("side") or leg.get("side"),
          leg.get("line"), leg.get("price"), leg.get("stake_units") or 1,
          leg.get("player_name"), leg.get("prop_stat"), leg.get("prop_market"),
-         posted.isoformat()),
+         posted.isoformat(), capper.key, parlay_id),
     )
+
+
+def _store_parlay(conn, message_id: str, header: dict, posted: datetime,
+                  capper: Capper) -> list[str]:
+    """One parlay row at the header price and stake, plus one row per leg.
+
+    The parlay row is the unit. Legs carry parlay_id so the record query
+    leaves them out. A parlay that is short a leg, or that says round robin,
+    is needs_review. The lines are still stored.
+    """
+    notes: list[str] = []
+    matched = []
+    for leg in header["legs"]:
+        game, reason = _match_leg(conn, leg, posted)
+        matched.append((leg, game, reason))
+        if reason:
+            notes.append(f"line {leg['line_no']}: {reason}")
+    if not header.get("ok"):
+        notes.append(f"line {header['line_no']}: parlay_incomplete")
+    games = [game for _leg, game, reason in matched if game and not reason]
+    dates = [game.get("game_date") for game in games if game.get("game_date")]
+    if header.get("slate_date"):
+        dates.append(header["slate_date"])
+    game_date = max(dates) if dates else None
+    sports = {game.get("sport") for game in games if game.get("sport")}
+    if len(sports) == 1:
+        sport = sports.pop()
+    elif len(sports) > 1:
+        sport = "PARLAY"
+    else:
+        sport = header.get("sport_hint")
+    ready = bool(header.get("ok")) and not any(reason for _l, _g, reason in matched)
+    status = "pending" if ready else "needs_review"
+    reason = "; ".join(notes)[:500] if status != "pending" else None
+    parent_id = _insert_parlay_parent(
+        conn, message_id, header, posted, capper, status, reason, sport, game_date)
+    for leg, game, leg_reason in matched:
+        if status == "pending":
+            leg_status, leg_note = "pending", None
+        else:
+            leg_status = "needs_review"
+            leg_note = leg_reason or "parlay_incomplete"
+        _insert_pick(conn, message_id, leg, posted, leg_status, leg_note, game,
+                     capper, parent_id)
+    return notes
+
+
+def _insert_parlay_parent(conn, message_id, header, posted, capper, status,
+                          reason, sport, game_date):
+    row = conn.execute(
+        "INSERT INTO capper_picks (message_id, line_no, status, review_reason, "
+        "sport, game_date, market, price, stake_units, posted_at, capper_key) "
+        "VALUES (%s,%s,%s,%s,%s,%s,'parlay',%s,%s,%s,%s) "
+        "ON CONFLICT (message_id, line_no) DO UPDATE SET "
+        "status = EXCLUDED.status, review_reason = EXCLUDED.review_reason, "
+        "sport = EXCLUDED.sport, game_date = EXCLUDED.game_date, "
+        "market = EXCLUDED.market, price = EXCLUDED.price, "
+        "stake_units = EXCLUDED.stake_units, capper_key = EXCLUDED.capper_key "
+        "WHERE capper_picks.status <> 'graded' "
+        "RETURNING id",
+        (message_id, header["line_no"], status, reason, sport, game_date,
+         header.get("price"), header.get("stake_units") or 1,
+         posted.isoformat(), capper.key),
+    ).fetchone()
+    if row:
+        return row[0]
+    existing = conn.execute(
+        "SELECT id FROM capper_picks WHERE message_id = %s AND line_no = %s",
+        (message_id, header["line_no"])).fetchone()
+    return existing[0] if existing else None
 
 
 def _match_leg(conn, leg: dict, posted: datetime) -> tuple[dict | None, str | None]:
     away_text, home_text = leg.get("away_text"), leg.get("home_text")
     team_text = leg.get("team_text")
-    if leg["market"] in ("h2h", "h2h_3way", "spreads") and not (team_text or "").strip():
+    if (leg["market"] in ("h2h", "h2h_3way", "spreads", "spreads_h1")
+            and not (team_text or "").strip()):
         return None, "no_team"
     if leg["market"] == "totals" and not (away_text and home_text):
         return None, "no_matchup"
-    if leg["market"] == "prop" and not (away_text and home_text):
+    # A prop names one team, "A.J. Brown (NE)", or both under a matchup
+    # header. Neither, and there is no game to look up. That leg is
+    # needs_review. It is not dropped.
+    if leg["market"] == "prop" and not (away_text and home_text) and not (team_text or "").strip():
         return None, "no_matchup"
     candidates = _candidate_games(conn, leg, posted)
     if candidates and candidates[0].get("ambiguous"):
@@ -737,51 +1305,87 @@ def _match_leg(conn, leg: dict, posted: datetime) -> tuple[dict | None, str | No
         return None, "team_not_in_game"
     chosen = dict(chosen)
     chosen["side"] = side
-    if leg["market"] == "spreads":
+    if leg["market"] in ("spreads", "spreads_h1"):
         # The number in the post is that team's spread. Settlement wants the
-        # HOME number (CLAUDE.md §4).
+        # HOME number (CLAUDE.md §4). The first half uses the same sign.
         team_line = float(leg["line"])
         chosen_line = team_line if side == "home" else -team_line
         leg["line"] = chosen_line
     return chosen, None
 
 
+def _fold_name(value: str) -> str:
+    import unicodedata
+    v = unicodedata.normalize("NFD", (value or "").strip().lower())
+    return " ".join(
+        "".join(ch for ch in v if ch.isalnum() or ch == " ").split())
+
+
 def _side_for(leg, game) -> str | None:
     if leg["market"] in ("totals", "prop"):
         return leg.get("side")
-    hits = _teams_in(leg.get("team_text") or "")
-    if not hits:
-        return None
-    abbrs = {abbr for _tok, _sport, abbr in hits if _sport == game["sport"]}
-    if not abbrs:
-        abbrs = {abbr for _tok, _sport, abbr in hits}
-    if game["home_team"] in abbrs and game["away_team"] not in abbrs:
+    text = leg.get("team_text") or ""
+    hits = _teams_in(text)
+    if hits:
+        abbrs = {abbr for _tok, _sport, abbr in hits if _sport == game["sport"]}
+        if not abbrs:
+            abbrs = {abbr for _tok, _sport, abbr in hits}
+        if game["home_team"] in abbrs and game["away_team"] not in abbrs:
+            return "home"
+        if game["away_team"] in abbrs and game["home_team"] not in abbrs:
+            return "away"
+    # NCAAF's id is the school name. "Tulsa" is not in the pro-team alias map.
+    folded = _fold_name(text)
+    home = _fold_name(str(game.get("home_team") or ""))
+    away = _fold_name(str(game.get("away_team") or ""))
+    if folded and folded == home and folded != away:
         return "home"
-    if game["away_team"] in abbrs and game["home_team"] not in abbrs:
+    if folded and folded == away and folded != home:
         return "away"
     return None
+
+
+_GAME_SELECT = (
+    "SELECT game_id, sport, game_date, home_team, away_team, "
+    "commence_time, home_score, away_score, home_win, home_win_reg, "
+    "went_to_ot FROM games WHERE "
+)
+
+
+def _fetch_games(conn, where: str, params: tuple, slate: str | None):
+    """The slate date first. A header that names a day with no such game
+    falls back to the commence window, so a wrong date does not drop the leg.
+    """
+    sql = _GAME_SELECT + where
+    if slate:
+        found = conn.execute(sql + " AND game_date = %s", params + (slate,)).fetchall()
+        if found:
+            return found
+    return conn.execute(sql, params).fetchall()
 
 
 def _candidate_games(conn, leg, posted: datetime) -> list[dict]:
     start = (posted - timedelta(hours=6)).isoformat()
     end = (posted + timedelta(days=7)).isoformat()
+    slate = leg.get("slate_date")
+    window = "commence_time::timestamptz BETWEEN %s::timestamptz AND %s::timestamptz"
     away_text, home_text = leg.get("away_text"), leg.get("home_text")
     if away_text and home_text:
         pairs = _pair_teams(away_text, home_text)
         if leg.get("sport_hint"):
             pairs = [p for p in pairs if p[0] == leg["sport_hint"]]
-        if not pairs:
-            return []
-        rows = []
-        for sport, away, home in pairs:
-            rows.extend(conn.execute(
-                "SELECT game_id, sport, game_date, home_team, away_team, "
-                "commence_time, home_score, away_score, home_win, home_win_reg, "
-                "went_to_ot FROM games WHERE sport = %s AND home_team = %s "
-                "AND away_team = %s AND commence_time::timestamptz BETWEEN %s::timestamptz "
-                "AND %s::timestamptz",
-                (sport, home, away, start, end)).fetchall())
-        return [_game_dict(r) for r in rows]
+        if pairs:
+            rows = []
+            for sport, away, home in pairs:
+                rows.extend(_fetch_games(
+                    conn,
+                    f"sport = %s AND home_team = %s AND away_team = %s AND {window}",
+                    (sport, home, away, start, end), slate))
+            return [_game_dict(r) for r in rows]
+        # "Syracuse/Indiana" is not in the pro alias map. The moneyline path
+        # matches a school name exactly. A total of two schools does the same.
+        return _school_matchup(conn, away_text, home_text, leg.get("sport_hint"),
+                               window, start, end, slate)
     hits = _teams_in(leg.get("team_text") or "")
     sport_hint = leg.get("sport_hint")
     if sport_hint:
@@ -792,29 +1396,48 @@ def _candidate_games(conn, leg, posted: datetime) -> list[dict]:
                 hits = [(leg.get("team_text") or "", sport_hint, abbr)]
         if len({h[2] for h in hits}) > 1:
             return [{"ambiguous": True}]
-    if not hits:
-        return []
-    slate = leg.get("slate_date")
     rows = []
     seen = set()
-    for _tok, sport, abbr in hits:
-        sql = (
-            "SELECT game_id, sport, game_date, home_team, away_team, "
-            "commence_time, home_score, away_score, home_win, home_win_reg, "
-            "went_to_ot FROM games WHERE sport = %s AND (home_team = %s OR "
-            "away_team = %s) AND commence_time::timestamptz BETWEEN %s::timestamptz "
-            "AND %s::timestamptz"
-        )
-        params: list = [sport, abbr, abbr, start, end]
-        if slate:
-            sql += " AND game_date = %s"
-            params.append(slate)
-        found = conn.execute(sql, tuple(params)).fetchall()
-        for row in found:
-            if row[0] not in seen:
-                seen.add(row[0])
-                rows.append(row)
-    return [_game_dict(r) for r in rows]
+    if hits:
+        for _tok, sport, abbr in hits:
+            found = _fetch_games(
+                conn,
+                f"sport = %s AND (home_team = %s OR away_team = %s) AND {window}",
+                (sport, abbr, abbr, start, end), slate)
+            for row in found:
+                if row[0] not in seen:
+                    seen.add(row[0])
+                    rows.append(row)
+        return [_game_dict(r) for r in rows]
+    # School names (NCAAF) are not in the pro alias map. Match the posted
+    # text to home_team / away_team. No row is a review, not a silent drop.
+    text = (leg.get("team_text") or "").strip()
+    if not text:
+        return []
+    where = f"(lower(home_team) = lower(%s) OR lower(away_team) = lower(%s)) AND {window}"
+    params: tuple = (text, text, start, end)
+    if sport_hint:
+        where = "sport = %s AND " + where
+        params = (sport_hint,) + params
+    return [_game_dict(r) for r in _fetch_games(conn, where, params, slate)]
+
+
+def _school_matchup(conn, away_text, home_text, sport_hint, window, start, end,
+                    slate):
+    """Exact school names, away then home, the order `/` already parsed."""
+    away = (away_text or "").strip()
+    home = (home_text or "").strip()
+    if not away or not home:
+        return []
+    where = (
+        f"lower(away_team) = lower(%s) AND lower(home_team) = lower(%s) "
+        f"AND {window}"
+    )
+    params: tuple = (away, home, start, end)
+    if sport_hint:
+        where = "sport = %s AND " + where
+        params = (sport_hint,) + params
+    return [_game_dict(r) for r in _fetch_games(conn, where, params, slate)]
 
 
 def _pair_teams(away_text, home_text) -> list[tuple[str, str, str]]:
@@ -842,7 +1465,7 @@ def _game_dict(row) -> dict:
     }
 
 
-def _refresh_edits(conn, fetch, channel, author) -> None:
+def _refresh_edits(conn, fetch, channel, author, capper: Capper = EGGZ) -> None:
     """The newest page, so an edit of a recent post is stored.
 
     Graded legs are left alone. The cursor does not move backward.
@@ -850,20 +1473,22 @@ def _refresh_edits(conn, fetch, channel, author) -> None:
     batch = fetch(channel)
     if not batch:
         return
-    _store_batch(conn, batch, channel, author)
+    _store_batch(conn, batch, channel, author, capper)
 
 
-def _surface_review(conn, message_id: str, note: str) -> None:
-    logger.error(f"Eggz message {message_id} needs review: {note}")
+def _surface_review(conn, message_id: str, note: str, capper: Capper = EGGZ) -> None:
+    logger.error(f"{capper.display_name} message {message_id} needs review: {note}")
     url = config.DISCORD_WEBHOOK_OPS
     if not url:
         return
-    kind = "eggz_review"
+    kind = capper.review_kind
     if conn.execute(
         "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
         (message_id, kind)).fetchone():
         return
-    posted = _post(url, {"content": f"Eggz pick needs review ({message_id}): {note[:1500]}"})
+    posted = _post(url, {"content": (
+        f"{capper.display_name} pick needs review ({message_id}): {note[:1500]}"
+    )})
     if not posted:
         return
     conn.execute(
@@ -873,35 +1498,37 @@ def _surface_review(conn, message_id: str, note: str) -> None:
     )
 
 
-def reparse_stored(conn) -> int:
+def reparse_stored(conn, capper: Capper = EGGZ) -> int:
     """Re-read stored messages whose parse was needs_review.
 
     A graded leg is left as it was. A message that already parsed is left
-    as it was, so a later grade is not wiped on the next poll.
+    as it was, so a later grade is not wiped on the next poll. Only this
+    capper's messages are re-read.
     """
     rows = conn.execute(
-        "SELECT message_id, body, posted_at, parse_status FROM capper_messages"
+        "SELECT message_id, body, posted_at, parse_status FROM capper_messages "
+        "WHERE " + _owner_clause(capper)
     ).fetchall()
     n = 0
     for mid, body, posted, status in rows:
         if status != "needs_review":
             continue
-        graded = conn.execute(
-            "SELECT 1 FROM capper_picks WHERE message_id = %s AND status = 'graded' "
-            "LIMIT 1", (mid,)).fetchone()
-        if graded:
-            continue
+        # A message can hold a graded leg and a set-aside leg. Re-read it.
+        # The insert leaves a graded row where it is.
         ts = _parse_ts(posted)
         if ts is None or body is None:
             continue
-        _replace_legs(conn, mid, body, ts)
+        if capper is EGGZ:
+            _replace_legs(conn, mid, body, ts)
+        else:
+            _replace_legs(conn, mid, body, ts, capper)
         n += 1
     if n:
         conn.commit()
     return n
 
 
-def grade_pending(conn) -> int:
+def grade_pending(conn, capper: Capper = EGGZ) -> int:
     """Grade pending legs whose game is final. Returns how many settled.
 
     Stored messages that are still needs_review are reparsed first, so a
@@ -909,27 +1536,30 @@ def grade_pending(conn) -> int:
 
     Game markets use `_compute_result` and the DraftKings pre-start close
     (`_closing_odds`, `same_book_clv`). MLB props use the same player_game_log
-    columns the prop settler reads. A final with no grade becomes
-    needs_review, so the recap is not held open by a leg that cannot settle.
+    columns the prop settler reads. An NFL, NBA, or WNBA box score that has
+    not arrived stays pending. A player missing from a log that has arrived
+    is needs_review. Both hold the recap.
     """
-    reparse_stored(conn)
+    reparse_stored(conn, capper)
     rows = conn.execute(
         "SELECT id, game_id, market, side, line, price, stake_units, "
         "player_name, prop_stat, prop_market, commence_time, sport "
         "FROM capper_picks WHERE game_id IS NOT NULL AND ("
         "status = 'pending' OR (status = 'needs_review' AND "
-        "review_reason = 'no_regulation_score'))"
+        "review_reason = 'no_regulation_score')) AND "
+        + _owner_clause(capper)
     ).fetchall()
     n = 0
     for row in rows:
-        if _grade_one(conn, row):
+        if _grade_one(conn, row, capper):
             n += 1
+    n += _grade_parlays(conn, capper)
     if n:
         conn.commit()
     return n
 
 
-def _grade_one(conn, row) -> bool:
+def _grade_one(conn, row, capper: Capper = EGGZ) -> bool:
     (pid, game_id, market, side, line, price, stake, player, prop_stat,
      prop_market, commence, sport) = row
     prop_kind = "pitcher" if prop_stat in {
@@ -942,30 +1572,53 @@ def _grade_one(conn, row) -> bool:
     if not game or game[0] is None or game[1] is None:
         return False
     home_score, away_score, home_win, home_win_reg, went_to_ot, commence_db, _gd = game
+    if market == "parlay":
+        return False
     if market == "prop":
         return _grade_prop(conn, pid, game_id, side, line, price, stake, player,
                            prop_stat, prop_kind, prop_market, commence or commence_db,
-                           sport)
+                           sport, capper)
     if market == "h2h_3way":
         return _grade_regulation(conn, pid, game_id, side, price, stake,
-                                 commence or commence_db, home_win_reg, went_to_ot)
+                                 commence or commence_db, home_win_reg, went_to_ot,
+                                 capper)
+    half = market == "spreads_h1"
+    if half:
+        # NBA quarters and NCAAB halves are the stored first-half scores.
+        # Anything else, including NCAAF, has no half source here. The final
+        # is not a stand-in. The leg stays needs_review and holds the recap.
+        if sport not in _HALF_SPORTS:
+            _mark_review(conn, pid, "no_first_half_score", capper)
+            return True
+        from tracking.paper_tracker import first_half_points
+        scored = first_half_points(conn, game_id, home_score, away_score)
+        if scored is None:
+            return False
+        home_score, away_score = scored
+        home_win = None
     if home_win is None and home_score is not None and away_score is not None:
         if float(home_score) > float(away_score):
             home_win = 1
         elif float(home_score) < float(away_score):
             home_win = 0
-    spread_home = float(line) if market == "spreads" and line is not None else None
+    spread_home = (
+        float(line) if market in ("spreads", "spreads_h1") and line is not None
+        else None)
     total_line = float(line) if market == "totals" and line is not None else None
     result, _flat, _kelly = _compute_result(
         side or "", market, float(home_score), float(away_score),
         home_win, home_win_reg, int(went_to_ot or 0),
         price, spread_home, total_line, 0.0)
     if result == "NO_ACTION":
-        _mark_review(conn, pid, "ungraded")
+        _mark_review(conn, pid, "ungraded", capper)
         return True
     profit, risked = units_for_result(stake, price, result)
-    clv, close_px, beat = _game_clv(
-        conn, game_id, market, side, line, price, commence or commence_db)
+    # A first-half spread has no full-game close. Leave CLV empty.
+    if half:
+        clv, close_px, beat = None, None, None
+    else:
+        clv, close_px, beat = _game_clv(
+            conn, game_id, market, side, line, price, commence or commence_db)
     _write_grade(conn, pid, result, profit, risked, clv, close_px, beat)
     return True
 
@@ -993,7 +1646,7 @@ def _regulation_from_game(side, home_win_reg, went_to_ot) -> str | None:
 
 
 def _grade_regulation(conn, pid, game_id, side, price, stake, commence,
-                      home_win_reg, went_to_ot) -> bool:
+                      home_win_reg, went_to_ot, capper: Capper = EGGZ) -> bool:
     """60-minute ML. A regulation tie, including OT/SO, is a loss for either side.
 
     Period rows win when any exist: the score is the sum of the three period
@@ -1009,7 +1662,7 @@ def _grade_regulation(conn, pid, game_id, side, price, stake, commence,
     if not rows:
         result = _regulation_from_game(side, home_win_reg, went_to_ot)
         if result is None:
-            return _mark_review(conn, pid, "no_regulation_score")
+            return _mark_review(conn, pid, "no_regulation_score", capper)
         profit, risked = units_for_result(stake, price, result)
         clv, close_px, beat = _game_clv(
             conn, game_id, "h2h_3way", side, None, price, commence)
@@ -1023,10 +1676,10 @@ def _grade_regulation(conn, pid, game_id, side, price, stake, commence,
                 int(away_p1) + int(away_p2) + int(away_p3),
             ))
         except (TypeError, ValueError):
-            _mark_review(conn, pid, "no_regulation_score")
+            _mark_review(conn, pid, "no_regulation_score", capper)
             return True
     if len(set(sums)) != 1:
-        _mark_review(conn, pid, "regulation_scores_disagree")
+        _mark_review(conn, pid, "regulation_scores_disagree", capper)
         return True
     reg_home, reg_away = sums[0]
     if reg_home == reg_away:
@@ -1042,10 +1695,44 @@ def _grade_regulation(conn, pid, game_id, side, price, stake, commence,
     return True
 
 
+def _grade_log_prop(conn, pid, game_id, side, line, price, stake, player,
+                    table: str, column: str, capper: Capper = EGGZ) -> bool:
+    """NFL / NBA / WNBA box score. An empty log waits. A log that does not
+    name this player is needs_review, never a graded NO_ACTION that the
+    recap then leaves out."""
+    from data.name_match import normalize_player_name
+    rows = conn.execute(
+        f"SELECT player_name, {column} FROM {table} WHERE game_id = %s",
+        (game_id,)).fetchall()
+    if not rows:
+        return False
+    want = normalize_player_name(player)
+    hits = [actual for name, actual in rows
+            if normalize_player_name(name) == want]
+    if len(hits) != 1 or hits[0] is None or line is None:
+        _mark_review(conn, pid, "player_not_in_log", capper)
+        return True
+    actual = hits[0]
+    if float(actual) == float(line):
+        result = "PUSH"
+    elif (float(actual) > float(line)) == (side == "over"):
+        result = "WIN"
+    else:
+        result = "LOSS"
+    profit, risked = units_for_result(stake, price, result)
+    _write_grade(conn, pid, result, profit, risked, None, None, None)
+    return True
+
+
 def _grade_prop(conn, pid, game_id, side, line, price, stake, player,
-                prop_stat, prop_kind, prop_market, commence, sport) -> bool:
+                prop_stat, prop_kind, prop_market, commence, sport,
+                capper: Capper = EGGZ) -> bool:
+    spec = _LOG_STAT.get((sport, prop_stat))
+    if spec and line is not None:
+        return _grade_log_prop(conn, pid, game_id, side, line, price, stake,
+                               player, spec[0], spec[1], capper)
     if prop_kind not in ("batter", "pitcher") or not prop_stat or line is None:
-        _mark_review(conn, pid, "prop_not_graded")
+        _mark_review(conn, pid, "prop_not_graded", capper)
         return True
     rows = conn.execute(
         "SELECT player_name, player_type, innings_pitched, p_strikeouts, "
@@ -1057,7 +1744,7 @@ def _grade_prop(conn, pid, game_id, side, line, price, stake, player,
         # table, so leaving it pending would hold the recap open.
         if sport == "MLB":
             return False
-        _mark_review(conn, pid, "prop_not_graded")
+        _mark_review(conn, pid, "prop_not_graded", capper)
         return True
     cols = ["player_name", "player_type", "innings_pitched", "p_strikeouts",
             "p_walks", "p_hits_allowed", "p_earned_runs", "hits", "total_bases",
@@ -1080,6 +1767,9 @@ def _grade_prop(conn, pid, game_id, side, line, price, stake, player,
             actual = d.get(prop_stat)
         break
     if not found or actual is None:
+        # MLB name miss stays the prop settler's did-not-play grade. NFL,
+        # NBA, and WNBA name misses are needs_review in _grade_log_prop,
+        # so they hold the recap instead of leaving the units.
         conn.execute(
             "UPDATE capper_picks SET status = 'graded', result = 'NO_ACTION', "
             "units = 0, risked = 0, graded_at = %s, review_reason = %s "
@@ -1140,51 +1830,131 @@ def _write_grade(conn, pid, result, profit, risked, clv, close_px, beat) -> None
          datetime.now(timezone.utc).isoformat(), pid))
 
 
-def _mark_review(conn, pid, reason: str) -> bool:
+def _mark_review(conn, pid, reason: str, capper: Capper = EGGZ) -> bool:
     changed = conn.execute(
         "UPDATE capper_picks SET status = 'needs_review', review_reason = %s "
         "WHERE id = %s AND status = 'pending' RETURNING id",
         (reason, pid)).fetchone()
     if changed:
-        logger.error(f"Eggz pick {pid} needs review: {reason}")
+        logger.error(f"{capper.display_name} pick {pid} needs review: {reason}")
     return bool(changed)
 
 
-_GRADED_LEGS = (
-    "SELECT sport, 'eggz', result, NULL, price, "
-    "CASE WHEN clv_pct IS NOT NULL THEN clv_pct END, FALSE, units, risked "
-    "FROM capper_picks WHERE status = 'graded' "
-    "AND result IN ('WIN','LOSS','PUSH') "
-)
+def _grade_parlays(conn, capper: Capper) -> int:
+    """Settle a parlay once every leg is graded. The stated price is the price.
+
+    Any LOSS loses the parlay. All WIN wins it. All PUSH pushes it. A push
+    mixed with wins would need a new price, and the post did not state one,
+    so that parlay is needs_review. A leg that is not graded yet waits.
+    """
+    rows = conn.execute(
+        "SELECT id, price, stake_units FROM capper_picks "
+        "WHERE market = 'parlay' AND status='pending' AND "
+        + _owner_clause(capper)
+    ).fetchall()
+    n = 0
+    for pid, price, stake in rows:
+        legs = conn.execute(
+            "SELECT status, result FROM capper_picks WHERE parlay_id = %s",
+            (pid,)).fetchall()
+        if not legs:
+            continue
+        if any(status != "graded" for status, _result in legs):
+            continue
+        results = [result for _status, result in legs]
+        if any(result == "LOSS" for result in results):
+            outcome = "LOSS"
+        elif all(result == "WIN" for result in results):
+            outcome = "WIN"
+        elif all(result == "PUSH" for result in results):
+            outcome = "PUSH"
+        elif any(result in (None, "NO_ACTION") for result in results):
+            if _mark_review(conn, pid, "parlay_leg_unsettled", capper):
+                n += 1
+            continue
+        else:
+            if _mark_review(conn, pid, "parlay_push_changes_price", capper):
+                n += 1
+            continue
+        profit, risked = units_for_result(stake, price, outcome)
+        _write_grade(conn, pid, outcome, profit, risked, None, None, None)
+        n += 1
+    return n
 
 
-def _window_rows(conn, start: str, end: str) -> list[tuple]:
+def _graded_legs(capper: Capper = EGGZ) -> str:
+    return (
+        f"SELECT sport, '{capper.key}', result, NULL, price, "
+        "CASE WHEN clv_pct IS NOT NULL THEN clv_pct END, FALSE, units, risked "
+        "FROM capper_picks WHERE status = 'graded' "
+        "AND result IN ('WIN','LOSS','PUSH') "
+        f"AND {_record_clause(capper)} "
+    )
+
+
+_GRADED_LEGS = _graded_legs(EGGZ)
+
+
+def _window_rows(conn, start: str, end: str, capper: Capper = EGGZ) -> list[tuple]:
     return conn.execute(
-        _GRADED_LEGS + "AND game_date BETWEEN %s AND %s",
+        _graded_legs(capper) + "AND game_date BETWEEN %s AND %s",
         (start, end)).fetchall()
 
 
-def _all_time_rows(conn, through: str) -> list[tuple]:
-    """Every graded Eggz leg from the start of tracking through `through`.
+def _all_time_rows(conn, through: str, capper: Capper = EGGZ) -> list[tuple]:
+    """Every graded leg of this capper from his first one through `through`.
 
     needs_review and pending stay out. A leg whose game_date is after the
     recap's period stays out, including one that is already graded. Every
-    graded leg inside the bound is in the units.
+    graded leg inside the bound is in the units. A parlay leg is not a
+    second unit. ParlayMatt's since-date is his own first graded game_date.
     """
     return conn.execute(
-        _GRADED_LEGS + "AND game_date <= %s",
+        _graded_legs(capper) + "AND game_date <= %s",
         (through,)).fetchall()
 
 
-def _pending_in(conn, start: str, end: str) -> int:
+def _pending_in(conn, start: str, end: str, capper: Capper = EGGZ) -> int:
     row = conn.execute(
         "SELECT COUNT(*) FROM capper_picks WHERE status = 'pending' "
-        "AND game_date BETWEEN %s AND %s",
+        "AND game_date BETWEEN %s AND %s AND " + _record_clause(capper),
         (start, end)).fetchone()
     return int(row[0]) if row else 0
 
 
-def _slate_unfinished(conn, start: str, end: str) -> bool:
+def _unresolved_in(conn, start: str, end: str, capper: Capper = EGGZ) -> int:
+    """Pending and needs_review legs in this window.
+
+    A set-aside leg with a game_date is in the window it was matched to.
+    One that never matched has no game_date; it belongs to the New York
+    date it was posted. Either one holds the recap. A graded leg is not
+    in this count. A parlay leg does not hold it on its own. The parlay
+    row does.
+    """
+    scope = _record_clause(capper)
+    row = conn.execute(
+        "SELECT COUNT(*) FROM capper_picks "
+        "WHERE status IN ('pending', 'needs_review') "
+        "AND game_date BETWEEN %s AND %s AND " + scope,
+        (start, end)).fetchone()
+    n = int(row[0]) if row and row[0] else 0
+    loose = conn.execute(
+        "SELECT posted_at FROM capper_picks "
+        "WHERE status IN ('pending', 'needs_review') "
+        "AND game_date IS NULL AND posted_at IS NOT NULL AND " + scope,
+    ).fetchall()
+    for row in loose or []:
+        posted = row[0] if row else None
+        ts = _parse_ts(posted)
+        if ts is None:
+            continue
+        day = ts.astimezone(ET).date().isoformat()
+        if start <= day <= end:
+            n += 1
+    return n
+
+
+def _slate_unfinished(conn, start: str, end: str, capper: Capper = EGGZ) -> bool:
     """A game on a slate date in this window has no final score.
 
     The slate dates are the dates he has a pick. Every game of that sport
@@ -1200,19 +1970,22 @@ def _slate_unfinished(conn, start: str, end: str) -> bool:
         "AND (g.home_score IS NULL OR g.away_score IS NULL) "
         "AND EXISTS (SELECT 1 FROM capper_picks c "
         "WHERE c.game_date = g.game_date AND c.sport = g.sport "
-        "AND c.game_date BETWEEN %s AND %s) "
+        "AND c.game_date BETWEEN %s AND %s AND "
+        + _record_clause(capper, "c") + ") "
         "LIMIT 1",
         (start, end, start, end)).fetchone()
     return row is not None
 
 
-def eggz_embed(heading: str, rows: list[tuple], pending: int,
-               all_time: list[tuple] | None = None) -> dict | None:
+def capper_embed(capper: Capper, heading: str, rows: list[tuple], pending: int,
+                 all_time: list[tuple] | None = None, since: str | None = None,
+                 corrected: bool = False) -> dict | None:
     """The Discord embed, or None when the window is not ready to post.
 
-    `all_time` is every graded leg through the end of this period. The
-    footer is that record, in the same W-L, units, and ROI shape as the
-    period line. The sport fields stay the period.
+    `pending` counts unresolved legs, including needs_review. `all_time` is
+    every graded leg through the end of this period. The all-time block is
+    the same shape as the main recap: overall, then one field per sport,
+    with beat-the-close and the settled count.
     """
     if pending:
         return None
@@ -1229,57 +2002,108 @@ def eggz_embed(heading: str, rows: list[tuple], pending: int,
         "value": _tally_line(_tally(group), with_clv=True),
         "inline": False,
     } for sport, group in sorted(by_sport.items())]
+    if all_time is not None:
+        fields.extend(render_all_time_fields(
+            all_time, since or "the first graded leg"))
     color = 0x3BA55D if overall["units"] > 0 else 0xED4245 if overall["units"] < 0 else 0x4F545C
-    embed = {
-        "title": f"\U0001F4CA Eggz — {heading}",
-        "description": (
-            f"**{_tally_line(overall, with_clv=True)}**  ·  {len(rows)} settled"
-        ),
+    title = f"\U0001F4CA {capper.display_name} — {heading}"
+    description = f"**{_tally_line(overall, with_clv=True)}**  ·  {len(rows)} settled"
+    if corrected:
+        title += "  ·  Corrected"
+        description = (
+            "Corrected. The earlier post for this day left graded picks out.\n\n"
+            + description
+        )
+    return {
+        "title": title,
+        "description": description,
         "color": color,
         "fields": fields,
         "clv": clv_line(overall),
     }
-    if all_time is not None:
-        embed["footer"] = {"text": f"All-time: {_tally_line(_tally(all_time))}"}
-    return embed
+
+
+def eggz_embed(heading: str, rows: list[tuple], pending: int,
+               all_time: list[tuple] | None = None, since: str | None = None,
+               corrected: bool = False) -> dict | None:
+    """Eggz's embed. The title and the tally are the ones already posted."""
+    return capper_embed(EGGZ, heading, rows, pending, all_time, since, corrected)
+
+
+def _record_since(conn, through: str, capper: Capper = EGGZ) -> str:
+    row = conn.execute(
+        "SELECT MIN(game_date) FROM capper_picks WHERE status = 'graded' "
+        "AND result IN ('WIN', 'LOSS', 'PUSH') AND game_date IS NOT NULL "
+        "AND game_date <= %s AND " + _record_clause(capper),
+        (through,)).fetchone()
+    if row and row[0]:
+        return str(row[0])[:10]
+    return "the first graded leg"
+
+
+def _blocked(conn, span: str, start: str, end: str, now,
+             capper: Capper = EGGZ) -> bool:
+    unresolved = _unresolved_in(conn, start, end, capper)
+    if unresolved:
+        logger.error(
+            f"{capper.display_name} {span} {start}..{end} held: {unresolved} "
+            f"unresolved or set-aside leg(s)")
+        return True
+    if _slate_unfinished(conn, start, end, capper):
+        return True
+    return False
 
 
 def _post_window(conn, span: str, start: str, end: str, heading: str,
-                 dry_run: bool = False, now: datetime | None = None) -> int:
-    if not configured_to_post():
+                 dry_run: bool = False, now: datetime | None = None,
+                 restate_published_at=None, capper: Capper = EGGZ) -> int:
+    if not configured_to_post(capper):
         return 0
-    kind = f"discord_eggz_results_{span}"
-    lock = f"{kind}:{start}"
+    kind = f"{capper.results_prefix}_{span}"
+    if restate_published_at is not None:
+        if not config.record_restatement_approved(start):
+            logger.error(f"{capper.display_name} {start} correction refused: "
+                         f"no approval recorded")
+            return 0
+        kind = f"{kind}_restate"
+        lock = restate_lock_key(kind, start, restate_published_at)
+    else:
+        lock = f"{kind}:{start}"
     if conn.execute(
         "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
         (lock, kind)).fetchone():
         return 0
-    pending = _pending_in(conn, start, end)
-    if pending or _slate_unfinished(conn, start, end):
+    if _blocked(conn, span, start, end, now, capper):
         return 0
-    rows = _window_rows(conn, start, end)
+    rows = _window_rows(conn, start, end, capper)
     sports = tuple({r[0] for r in rows if r[0]})
     if sport_in_progress(conn, sports, now):
-        logger.info(f"Eggz {span} waits, a game of that sport is in progress")
+        logger.info(
+            f"{capper.display_name} {span} waits, a game of that sport is in progress")
         return 0
-    all_time = _all_time_rows(conn, end) if rows else None
-    embed = eggz_embed(heading, rows, 0, all_time)
+    all_time = _all_time_rows(conn, end, capper) if rows else None
+    since = _record_since(conn, end, capper) if all_time else None
+    embed = capper_embed(
+        capper, heading, rows, 0, all_time, since,
+        corrected=restate_published_at is not None)
     if embed is None:
         return 0
     embed.pop("clv", None)
     if dry_run:
-        logger.info(f"[dry-run] eggz {span} {heading}")
-        return 0
-    message_id = _post(config.DISCORD_WEBHOOK_EGGZ, {"embeds": [embed]})
+        logger.info(
+            f"[dry-run] {capper.key} {span} {heading}: {embed.get('title')} "
+            f"{embed.get('description')}")
+        return 1
+    message_id = _post(capper.webhook(), {"embeds": [embed]})
     if not message_id:
-        logger.error(f"Eggz {span} recap not confirmed")
+        logger.error(f"{capper.display_name} {span} recap not confirmed")
         return 0
     conn.execute(
         "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
         "VALUES (%s, %s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
         (lock, kind, datetime.now(ET).isoformat(), message_id))
     conn.commit()
-    logger.info(f"Eggz {span} recap posted: {heading}")
+    logger.info(f"{capper.display_name} {span} recap posted: {heading}")
     return 1
 
 
@@ -1291,63 +2115,201 @@ def _as_et(now: datetime | None) -> datetime:
     return now.astimezone(ET)
 
 
-def post_eggz_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
+def post_capper_recaps(capper: Capper, now: datetime | None = None,
+                       dry_run: bool = False) -> int:
     """Daily from 6:00am ET, week and month from 7:30am ET, all through noon.
 
-    Skips when DISCORD_WEBHOOK_EGGZ is unset. Does not post to X or #results.
+    Skips when that capper's webhook is unset. Does not post to X or #results.
     The day is yesterday in America/New_York. A day that missed its morning
     stays eligible for DAILY_CATCHUP_DAYS mornings, oldest first, and the
-    post names that date. A pending leg, a slate date that is not final, or
-    a game of that sport in progress is left unledgered. After noon the miss
-    waits for the next morning.
+    post names that date. A pending leg, a needs_review leg, a slate date
+    that is not final, or a game of that sport in progress is left
+    unledgered. After noon the miss waits for the next morning.
     """
-    if not configured_to_post():
+    if not configured_to_post(capper):
         return 0
     from data.db import get_connection
     now = _as_et(now)
     conn = get_connection()
     try:
         try:
-            ingest_messages(conn)
+            if capper is EGGZ:
+                ingest_messages(conn)
+            else:
+                ingest_messages(conn, capper=capper)
         except Exception as exc:                              # noqa: BLE001
-            logger.error(f"Eggz ingest before recap failed: {exc}")
+            logger.error(f"{capper.display_name} ingest before recap failed: {exc}")
         try:
-            grade_pending(conn)
+            if capper is EGGZ:
+                grade_pending(conn)
+            else:
+                grade_pending(conn, capper)
         except Exception as exc:                              # noqa: BLE001
-            logger.error(f"Eggz grade before recap failed: {exc}")
+            logger.error(f"{capper.display_name} grade before recap failed: {exc}")
         posted = 0
         if in_daily_recap_window(now):
             for back in range(DAILY_CATCHUP_DAYS, 0, -1):
                 day = (now.date() - timedelta(days=back)).isoformat()
-                posted += _post_window(
-                    conn, "day", day, day, _day_heading(day), dry_run, now)
+                if capper is EGGZ:
+                    posted += _post_window(
+                        conn, "day", day, day, _day_heading(day), dry_run, now)
+                else:
+                    posted += _post_window(
+                        conn, "day", day, day, _day_heading(day), dry_run, now,
+                        capper=capper)
         if in_period_recap_window(now):
             for window in recap_periods_due(now):
-                posted += _post_window(
-                    conn, window["span"], window["start"].isoformat(),
-                    window["end"].isoformat(), window["heading"], dry_run, now)
+                if capper is EGGZ:
+                    posted += _post_window(
+                        conn, window["span"], window["start"].isoformat(),
+                        window["end"].isoformat(), window["heading"], dry_run, now)
+                else:
+                    posted += _post_window(
+                        conn, window["span"], window["start"].isoformat(),
+                        window["end"].isoformat(), window["heading"], dry_run, now,
+                        capper=capper)
         return posted
     finally:
         conn.close()
+
+
+def post_eggz_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
+    """Eggz's recap. Unset DISCORD_WEBHOOK_EGGZ posts nothing."""
+    return post_capper_recaps(EGGZ, now, dry_run)
+
+
+def post_parlaymatt_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
+    """ParlayMatt's recap. Unset DISCORD_WEBHOOK_PARLAYMATT posts nothing."""
+    return post_capper_recaps(PARLAYMATT, now, dry_run)
 
 
 def _day_heading(day: str) -> str:
     return datetime.fromisoformat(day).strftime("%b %d").replace(" 0", " ")
 
 
-def run_eggz_ingest() -> None:
-    """Poll, parse, and grade. Recaps stay on the daily and Monday jobs."""
-    if not configured_to_read():
+def run_capper_ingest(capper: Capper) -> None:
+    """Poll, parse, and grade. Recaps stay on the daily and Monday jobs.
+
+    Unset token, channel, or author returns before any Discord call.
+    """
+    if not configured_to_read(capper):
         return
     from data.db import get_connection
     conn = get_connection()
     try:
-        n = ingest_messages(conn)
-        g = grade_pending(conn)
+        if capper is EGGZ:
+            n = ingest_messages(conn)
+            g = grade_pending(conn)
+        else:
+            n = ingest_messages(conn, capper=capper)
+            g = grade_pending(conn, capper)
         if n or g:
-            logger.info(f"Eggz ingest stored {n}, graded {g}")
+            logger.info(f"{capper.display_name} ingest stored {n}, graded {g}")
     except Exception as exc:                                  # noqa: BLE001
-        logger.error(f"Eggz ingest failed: {exc}")
+        logger.error(f"{capper.display_name} ingest failed: {exc}")
+    finally:
+        conn.close()
+
+
+def run_eggz_ingest() -> None:
+    """Poll Eggz. Recaps stay on the daily and Monday jobs."""
+    run_capper_ingest(EGGZ)
+
+
+def run_parlaymatt_ingest() -> None:
+    """Poll ParlayMatt. No-op when his channel or author is unset."""
+    run_capper_ingest(PARLAYMATT)
+
+
+_MANUAL_RESULTS = {"WIN", "LOSS", "PUSH"}
+
+
+class EggzSettleError(ValueError):
+    """A manual result was refused. The row is unchanged."""
+
+
+def open_legs(conn, capper: Capper = EGGZ) -> list[tuple]:
+    """Pending and needs_review legs, oldest id first. Read only."""
+    return conn.execute(
+        "SELECT id, status, review_reason, game_date, sport, market, "
+        "player_name, side, price, stake_units, posted_at "
+        "FROM capper_picks WHERE status IN ('pending', 'needs_review') AND "
+        + _owner_clause(capper) + " ORDER BY id"
+    ).fetchall()
+
+
+def settle_manual(conn, pick_id, result: str, note: str, apply: bool = True,
+                  capper: Capper = EGGZ) -> dict:
+    """Grade one set-aside leg from a stated result. The price already stored
+    is the price. A missing price stays the bare stake. A graded row is
+    refused. A row with no game_date is refused: the recap only sums legs
+    that have one, so a result written there would not be in the units.
+
+    `apply` False computes the units and writes nothing.
+    """
+    result = (result or "").strip().upper()
+    note = (note or "").strip()
+    if result not in _MANUAL_RESULTS:
+        raise EggzSettleError("result must be WIN, LOSS, or PUSH")
+    if not note:
+        raise EggzSettleError("a note is required")
+    row = conn.execute(
+        "SELECT id, status, price, stake_units, game_date FROM capper_picks "
+        "WHERE id = %s AND " + _owner_clause(capper),
+        (pick_id,)).fetchone()
+    if not row:
+        raise EggzSettleError(f"no capper_picks row {pick_id}")
+    _id, status, price, stake, game_date = row
+    if status == "graded":
+        raise EggzSettleError(f"pick {pick_id} is already graded")
+    if not game_date:
+        raise EggzSettleError(
+            f"pick {pick_id} has no game_date. Run grade so the parser can "
+            "match it. A result on an unmatched line would not enter the recap.")
+    profit, risked = units_for_result(stake, price, result)
+    out = {"id": int(pick_id), "result": result, "units": profit,
+           "risked": risked, "applied": False}
+    if not apply:
+        return out
+    changed = conn.execute(
+        "UPDATE capper_picks SET status = 'graded', result = %s, units = %s, "
+        "risked = %s, graded_at = %s, review_reason = %s "
+        "WHERE id = %s AND status <> 'graded' RETURNING id",
+        (result, profit, risked, datetime.now(timezone.utc).isoformat(),
+         f"manual: {note[:300]}", pick_id)).fetchone()
+    if not changed:
+        raise EggzSettleError(f"pick {pick_id} was not updated")
+    conn.commit()
+    out["applied"] = True
+    return out
+
+
+def restate_eggz_day(game_date: str, dry_run: bool = False,
+                     now: datetime | None = None, capper: Capper = EGGZ) -> int:
+    """Post a Corrected recap for a day that already has a sent recap.
+
+    The original push_sent row stays. One correction per that row's
+    sent_at. Unresolved legs, an unfinished slate, a sport in progress, and a
+    date with no approval in config.RECORD_RESTATEMENT_APPROVALS return 0 and
+    post nothing. This does not ingest and does not grade.
+    dry_run returns 1 when a post would go out, and writes nothing.
+    """
+    if not configured_to_post(capper):
+        return 0
+    from data.db import get_connection
+    kind = f"{capper.results_prefix}_day"
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT sent_at FROM push_sent WHERE lock_key = %s AND kind = %s",
+            (f"{kind}:{game_date}", kind)).fetchone()
+        if not row or not row[0]:
+            logger.error(
+                f"{capper.display_name} day {game_date} has no sent recap to correct")
+            return 0
+        return _post_window(
+            conn, "day", game_date, game_date, _day_heading(game_date),
+            dry_run, now, restate_published_at=row[0], capper=capper)
     finally:
         conn.close()
 

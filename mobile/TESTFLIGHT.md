@@ -86,6 +86,14 @@ with status "Processing" (15–30 min) → "Ready to Submit" → fill out:
   - **Email:** matt.alksninis@gmail.com
   - **Privacy Policy URL:** https://signalbase-ai.com/privacy
   - **What to Test:** see `APP_STORE_METADATA.md`
+  - **App Review sign-in** is not a TestFlight tester account. The demo
+    email is `review@signalbase-ai.com`. The code is not in the repo. Matt
+    pastes a fresh code only into App Store Connect and sets
+    `APP_REVIEW_DEMO_OTP` to the same value. It works only after that secret,
+    `APP_REVIEW_DEMO_EMAIL`, and a hand apply of
+    `data/migrations/app_review_sign_in_attempts_2026_11_04.sql`. Unset
+    `APP_REVIEW_DEMO_OTP` after App Review approves the binary. See
+    `mobile/docs/AUTHENTICATION.md`.
 - **Export Compliance:** "Does your app use encryption?" → **No** (we set
   `ITSAppUsesNonExemptEncryption: false` in `app.json` so this should auto-fill).
 

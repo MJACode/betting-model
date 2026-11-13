@@ -1,19 +1,15 @@
-// Whop webhook → Discord-side membership state.
+// Whop webhook → Discord-side membership mirror.
 //
-// Whop sells the Discord membership and assigns its own role in the server.
-// This function does NOT touch roles — Whop already owns that half. Its job is
-// to mirror membership validity into `whop_memberships` so the app can answer
-// "this person already pays through Discord, so the app is included."
+// Whop sells Discord access outside the App Store and assigns its own role.
+// This function mirrors that membership into `whop_memberships` and stores the
+// identity keys (Discord id, email) the link flow uses to tie the same person
+// to an app account. It does not unlock the app. It does not write
+// `subscriptions`. It does not grant or revoke our App Subscriber role —
+// Whop keeps its own role, and the Apple webhook is the only writer of ours.
 //
-// That mirror is what makes both halves of the rule work:
-//   * Whop membership goes VALID   -> the linked app account is entitled, free
-//   * Whop membership goes INVALID -> that free access disappears on the next
-//                                     read, unless they also pay in the app
-//
-// Access is COMPUTED on read (public.my_access()), never cached as a grant, so
-// a revocation takes effect the moment this row flips — there is no second
-// table to keep in step and no window where a cancelled member still holds a
-// stale entitlement.
+// A row going invalid drops discord_access on the next my_access() read. The
+// app stays locked unless an Apple subscription (trialing/active, period open)
+// entitles it. Nothing here caches a grant.
 //
 // verify_jwt MUST be false (Whop sends no Supabase JWT). Authenticity is an
 // HMAC-SHA256 signature over the RAW body, compared constant-time.

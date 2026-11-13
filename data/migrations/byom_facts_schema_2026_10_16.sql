@@ -25,19 +25,41 @@
 
 DO $mig$
 BEGIN
+  -- A later pass adds the scan stamp without rebuilding the tables.
+  -- The early return below still runs once the column is present, so
+  -- this ALTER does not run on every worker boot.
   IF to_regclass('public.byom_game_facts') IS NOT NULL
-     AND to_regclass('public.byom_prop_facts') IS NOT NULL THEN
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_attribute
+        WHERE attrelid = to_regclass('public.byom_game_facts')
+          AND attname = 'props_scanned_at'
+          AND attnum > 0
+          AND NOT attisdropped)
+  THEN
+    ALTER TABLE public.byom_game_facts
+      ADD COLUMN props_scanned_at TIMESTAMPTZ;
+  END IF;
+
+  IF to_regclass('public.byom_game_facts') IS NOT NULL
+     AND to_regclass('public.byom_prop_facts') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM pg_attribute
+        WHERE attrelid = to_regclass('public.byom_game_facts')
+          AND attname = 'props_scanned_at'
+          AND attnum > 0
+          AND NOT attisdropped)
+  THEN
     IF (SELECT relrowsecurity FROM pg_class
-         WHERE oid = to_regclass('public.byom_game_facts'))
+         WHERE oid = 'public.byom_game_facts'::regclass)
        AND (SELECT relrowsecurity FROM pg_class
-             WHERE oid = to_regclass('public.byom_prop_facts'))
+             WHERE oid = 'public.byom_prop_facts'::regclass)
        AND EXISTS (
          SELECT 1 FROM pg_policy
-          WHERE polrelid = to_regclass('public.byom_game_facts')
+          WHERE polrelid = 'public.byom_game_facts'::regclass
             AND polname = 'anon read byom_game_facts')
        AND EXISTS (
          SELECT 1 FROM pg_policy
-          WHERE polrelid = to_regclass('public.byom_prop_facts')
+          WHERE polrelid = 'public.byom_prop_facts'::regclass
             AND polname = 'anon read byom_prop_facts')
        AND has_table_privilege('anon', 'public.byom_game_facts', 'SELECT')
        AND has_table_privilege('authenticated', 'public.byom_game_facts', 'SELECT')
@@ -94,6 +116,9 @@ BEGIN
     is_primetime            BOOLEAN,
     home_role               TEXT,
     away_role               TEXT,
+    -- Set when the prop pass has read this game. Not a line and not a
+    -- filter. A past game with no prop row is not due again after this.
+    props_scanned_at        TIMESTAMPTZ,
     built_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT byom_game_facts_ats_home CHECK (
       ats_home_result IS NULL OR ats_home_result IN ('win', 'loss', 'push')),
@@ -160,7 +185,7 @@ BEGIN
 
   IF NOT EXISTS (
     SELECT 1 FROM pg_policy
-     WHERE polrelid = to_regclass('public.byom_game_facts')
+     WHERE polrelid = 'public.byom_game_facts'::regclass
        AND polname = 'anon read byom_game_facts') THEN
     CREATE POLICY "anon read byom_game_facts"
       ON public.byom_game_facts
@@ -169,7 +194,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_policy
-     WHERE polrelid = to_regclass('public.byom_prop_facts')
+     WHERE polrelid = 'public.byom_prop_facts'::regclass
        AND polname = 'anon read byom_prop_facts') THEN
     CREATE POLICY "anon read byom_prop_facts"
       ON public.byom_prop_facts

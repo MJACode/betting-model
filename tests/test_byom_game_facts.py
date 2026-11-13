@@ -12,7 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from byom.constants import DK_HISTORY_START_SEASON, LINE_BASIS
+from byom.constants import (
+    DK_HISTORY_START_SEASON,
+    LINE_BASIS,
+    NBA_DK_HISTORY_START_SEASON,
+)
 from byom.game_facts import (
     assemble_game,
     grade_ats,
@@ -27,8 +31,8 @@ _BANNED_KEYS = (
     "lock_window_hours", "near_window_hours", "lock_spread_at",
     "close_spread_home", "near_spread_home", "line_source",
     "grade_spread_home_price", "grade_spread_home_book",
-    "dk_spread_home_price", "ats_home_units_uncapped",
-    "ats_home_units_capped", "ml_home_units_uncapped",
+    "ats_home_units_uncapped", "ats_home_units_capped",
+    "ml_home_units_uncapped",
 )
 
 
@@ -86,6 +90,7 @@ def test_the_line_basis_is_a_label():
     text = (ROOT / "byom" / "constants.py").read_text(encoding="utf-8")
     assert LINE_BASIS == "DraftKings line at game start"
     assert DK_HISTORY_START_SEASON == 2020
+    assert NBA_DK_HISTORY_START_SEASON == 2021
     assert "LOCK_WINDOW" not in text
     assert "SHOP_LAG" not in text
     assert "120" not in text
@@ -232,11 +237,11 @@ def test_rest_days_and_a_sunday_afternoon_is_not_primetime():
 def test_quotes_are_read_per_game_and_the_odds_cast_is_inside_a_case():
     text = (ROOT / "byom" / "load.py").read_text(encoding="utf-8")
     assert "game_id IN (%s, %s)" in text
+    assert "WHERE o.game_id = %s" in text
     assert "bookmaker = 'draftkings'" in text
-    assert "market IN ('spreads', 'totals')" in text
-    assert "'h2h'" not in text
+    assert "('h2h', 'spreads', 'totals')" in text
     assert "make_interval" not in text
-    assert "price_home" not in text
+    assert "price_home" in text
     assert "_shop_quotes" not in text
     assert "bookmaker <> 'draftkings'" not in text
     assert "FROM nfl_odds_history\n WHERE season = %s" not in text
@@ -257,22 +262,139 @@ def test_the_builder_has_no_spread_price_or_line_filter_and_does_not_touch_picks
         assert banned not in lowered, banned
 
 
-def test_the_job_defaults_to_not_writing_and_is_not_declared():
+def test_a_job_queued_without_sport_uses_nfl(monkeypatch):
+    """A queued byom_game_facts row with no sport builds NFL and writes nothing."""
+    from tracking.job_queue import JOBS
+
+    seen = {}
+
+    def build_seasons(conn, seasons, apply=False, sport="NFL"):
+        seen["sport"] = sport
+        seen["apply"] = apply
+        seen["seasons"] = seasons
+        return {"apply": apply, "sport": sport, "seasons": []}
+
+    class Conn:
+        def close(self):
+            seen["closed"] = True
+
+    monkeypatch.setattr("byom.load.build_seasons", build_seasons)
+    monkeypatch.setattr("data.db.get_connection", lambda *a, **k: Conn())
+
+    fn, validate = JOBS["byom_game_facts"]
+    stored = validate({})
+    assert stored["sport"] == "NFL"
+    assert stored["apply"] is False
+    # The runner calls the job with the validated args. Dropping sport here
+    # is a row whose args never carried it: the job still builds NFL.
+    out = fn(**{key: value for key, value in stored.items() if key != "sport"})
+    assert seen["sport"] == "NFL"
+    assert seen["apply"] is False
+    assert seen["seasons"] is None
+    assert seen["closed"] is True
+    assert out["sport"] == "NFL"
+    # An explicit null is the same call. .get's default does not apply
+    # when the key is present, so the job must treat None as NFL.
+    seen.clear()
+    out = fn(sport=None, season=None, apply=False)
+    assert seen["sport"] == "NFL"
+    assert seen["apply"] is False
+    assert seen["closed"] is True
+    assert out["sport"] == "NFL"
+    # NBA is the same runner. The validator's stored args are what a
+    # queued row carries, and the job forwards that sport.
+    seen.clear()
+    stored_nba = validate({"sport": " nba ", "apply": False})
+    out = fn(**stored_nba)
+    assert stored_nba["sport"] == "NBA"
+    assert seen["sport"] == "NBA"
+    assert seen["apply"] is False
+    assert seen["seasons"] is None
+    assert seen["closed"] is True
+    assert out["sport"] == "NBA"
+    # The runner strips the same way the validator does, so a hand edit
+    # that skips validation still builds NBA.
+    seen.clear()
+    out = fn(sport=" nba ", season=None, apply=False)
+    assert seen["sport"] == "NBA"
+    assert out["sport"] == "NBA"
+
+
+def test_the_job_defaults_to_not_writing_and_nba_is_declared_on():
     from tracking.job_queue import JOBS, _validate_byom_game_facts
 
     assert "byom_game_facts" in JOBS
     assert _validate_byom_game_facts({}) == {
         "sport": "NFL", "season": None, "apply": False}
+    assert _validate_byom_game_facts({"sport": "NBA", "apply": False}) == {
+        "sport": "NBA", "season": None, "apply": False}
     with pytest.raises(ValueError):
         _validate_byom_game_facts({"season": 2019})
+    # NBA DraftKings game lines start in 2021. 2019 and 2020 have none.
     with pytest.raises(ValueError):
-        _validate_byom_game_facts({"sport": "NBA"})
+        _validate_byom_game_facts({"sport": "NBA", "season": 2019})
+    with pytest.raises(ValueError):
+        _validate_byom_game_facts({"sport": "NBA", "season": 2020})
+    assert _validate_byom_game_facts(
+        {"sport": "NBA", "season": 2021})["season"] == 2021
+    with pytest.raises(ValueError):
+        _validate_byom_game_facts({"sport": "MLB"})
     declared = json.loads(
         (ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
-    assert all(entry["job_type"] != "byom_game_facts" for entry in declared)
+    game = [entry for entry in declared if entry["job_type"] == "byom_game_facts"
+            and not entry["key"].startswith("byom-nfl-game-facts-official")
+            and entry["key"] != "byom-nhl-game-facts"]
+    assert len(game) == 1
+    assert game[0]["key"] == "byom-nba-game-facts"
+    # Matt, 2026-11-04: the NBA builder gets what NFL got.
+    assert game[0]["enabled"] is True
+    assert game[0]["requested_by"] == "owner"
+    assert game[0]["args"] == {"sport": "NBA", "apply": True}
+    assert "season" not in game[0]["args"]
+    assert "byom_nba_props_2026_10_29.sql is applied" in game[0]["note"]
+    assert "from 2021" in game[0]["note"]
+    assert all(entry["key"] != "byom-nfl-game-facts" for entry in declared)
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert "byom_game_facts_units_2026_10_16.sql" not in ACTIVE_MIGRATIONS
     assert not (ROOT / "data" / "migrations" / "byom_game_facts_units_2026_10_16.sql").exists()
+
+
+def test_an_nba_season_before_draftkings_history_is_not_built():
+    from byom.load import build_season, seasons_in_games
+    from scripts.byom_game_facts import main
+
+    early = build_season(None, 2020, apply=True, sport="NBA")
+    assert early["sport"] == "NBA"
+    assert early["facts"] == 0
+    assert early["written"] == 0
+    assert early["skipped"] == "before DraftKings history"
+    nfl = build_season(None, 2019, sport="NFL")
+    assert nfl["skipped"] == "before DraftKings history"
+
+    class Conn:
+        def __init__(self):
+            self.params = None
+
+        def execute(self, sql, params=None):
+            self.params = params
+            return self
+
+        def fetchall(self):
+            return []
+
+    conn = Conn()
+    assert seasons_in_games(conn, "NBA") == []
+    assert conn.params == ("NBA", NBA_DK_HISTORY_START_SEASON)
+    nfl_conn = Conn()
+    assert seasons_in_games(nfl_conn, "NFL") == []
+    assert nfl_conn.params == ("NFL", DK_HISTORY_START_SEASON)
+
+    with pytest.raises(SystemExit) as nba_exit:
+        main(["--sport", "NBA", "--season", "2020"])
+    assert "2021" in str(nba_exit.value)
+    with pytest.raises(SystemExit) as nfl_exit:
+        main(["--sport", "NFL", "--season", "2019"])
+    assert "2020" in str(nfl_exit.value)
 
 
 def test_build_on_scratch_postgres_grades_the_stored_lines():
@@ -314,12 +436,19 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
               odds_id bigserial PRIMARY KEY, game_id text, sport text,
               market text, bookmaker text, snapshot_type text, snapshot_at text,
               home_price numeric, away_price numeric, spread_home numeric,
-              total_line numeric, over_price numeric, under_price numeric);
+              total_line numeric, over_price numeric, under_price numeric,
+              created_at text);
         """)
         text = (ROOT / "data/migrations" / "byom_facts_schema_2026_10_16.sql").read_text(
             encoding="utf-8")
         cur.execute(text)
         cur.execute(text)
+        price = (ROOT / "data/migrations" / "byom_dk_start_price_2026_10_23.sql").read_text(
+            encoding="utf-8")
+        cur.execute(price)
+        cur.execute(price)
+        cur.execute((ROOT / "data/migrations" / "byom_official_legs_2026_11_04.sql").read_text(
+            encoding="utf-8"))
         _load_fixture(cur)
         raw.autocommit = False
         from byom.load import build_season
@@ -374,6 +503,20 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
         assert row[7] == "loss"
         assert row[8] == "favorite"
         assert row[9] is True
+        cur.execute("""
+            SELECT dk_spread_home_price, dk_spread_away_price,
+                   dk_total_over_price, dk_total_under_price,
+                   dk_ml_home_price, dk_ml_away_price
+              FROM byom_game_facts
+             WHERE canonical_key = '2024_01_BAL_KC'
+        """)
+        px = [None if value is None else Decimal(str(value))
+              for value in cur.fetchone()]
+        assert px == [
+            Decimal("-112"), Decimal("-108"),
+            Decimal("-110"), Decimal("-110"),
+            Decimal("-150"), Decimal("130"),
+        ]
         cur.execute("""
             SELECT dk_spread_home, ats_home_result, ml_home_result, line_basis
               FROM byom_game_facts WHERE canonical_key = '2024_03_NYJ_SF'

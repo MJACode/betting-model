@@ -54,12 +54,27 @@ ANON_READABLE: tuple[str, ...] = (
     # (data/migrations/add_team_stats_board.sql, "anon read ncaaf_teams").
     # Declared now that a `.from()` names it. A miss stays the school name.
     "ncaaf_teams",
+    # Scoreboard live scores for NFL, NBA and NHL (2026-10-29), one row per
+    # game from data/ingestors/live_scoreboard.py. Policy and grant:
+    # add_live_scoreboard_2026_10_29.sql.
+    "live_scoreboard",
+    # Scoreboard % bets / % money (2026-10-29), display only; policy and
+    # grant in add_scoreboard_splits_2026_10_29.sql.
+    "scoreboard_splits",
     "odds",
     "parlay_correlations",
     "parlay_track_record",
     "picks",
     "player_game_log",
+    # ESPN did-not-play list for the NBA player page. RLS stays on; the
+    # SELECT policy is data/migrations/anon_read_nba_player_dnp_2026_11_11.sql,
+    # which is not applied until Matt says so. The results ingestor must not
+    # lock_down this table or the next run revokes the grant.
+    "nba_player_dnp",
     "player_handedness",
+    # Each player's current injury tag on the Stats board (2026-10-23).
+    # data/migrations/add_injury_status_current_2026_10_23.sql.
+    "injury_status_current",
     "player_news",
     # NBA/WNBA/NCAAF positions: the player page reads one row by key to pick
     # the card's group, and the position_vs_opponent_* functions join it
@@ -72,10 +87,9 @@ ANON_READABLE: tuple[str, ...] = (
     # NO policy -- deny-all -- so the grant alone read as an empty screen.
     # The policy is data/migrations/anon_read_public_betting_2026_09_20.sql.
     "public_betting",
-    # Build Your Own Model facts (2026-10-16). Granted before the screen
-    # exists: an undeclared table arrives with no SELECT and the first read
-    # is an empty error. Nothing in mobile/src names these yet, so they are
-    # also AHEAD_OF_THE_APP. Display data only: no picks, no stakes.
+    # Build Your Own Model facts (2026-10-16). Display data only: no picks,
+    # no stakes. The NBA builder reads byom_game_facts. byom_prop_facts is
+    # still unread, so it stays on AHEAD_OF_THE_APP.
     "byom_game_facts",
     "byom_prop_facts",
     "tracked_bets",
@@ -95,10 +109,12 @@ ANON_READABLE: tuple[str, ...] = (
     # after a later pick reholds the shared game:model key.
     "v_discord_void_notice",
     "v_latest_dk_odds",
-    "v_latest_inplay_odds_all_books",
     "v_latest_odds_all_books",
     "v_latest_prop_odds_all_books",
     "v_live_game_state_latest",
+    # Scoreboard: latest NCAAF live state per game. The log itself is
+    # VIEW_BASE_TABLES (ncaaf_live_states) — the app never .from()s it.
+    "v_ncaaf_scoreboard_latest",
     "v_model_full_outcome_picks",
     "v_model_full_outcome_record",
     "v_opening_signal_slices",
@@ -113,6 +129,20 @@ ANON_READABLE: tuple[str, ...] = (
     "v_player_season_totals_ncaaf",
     "v_player_season_totals_nfl",
     "v_player_season_totals_wnba",
+    # Men's college basketball Stats tab (Matt, 2026-11-03). security_invoker
+    # over ncaab_player_game_log, whose SELECT policy and grant are in
+    # add_ncaab_player_game_log_2026_11_03.sql. The player page reads the log
+    # through playerLog.LOG_TABLE, like the WNBA and NBA logs, so the log is
+    # not a literal .from() and is not listed here.
+    "v_player_season_totals_ncaab",
+    # Women's college basketball Stats tab. security_invoker over
+    # ncaabw_player_game_log. The table, the view and the four functions are
+    # created by add_ncaabw_player_game_log_2026_11_12.sql, which is NOT in
+    # ACTIVE_MIGRATIONS: apply it by hand. The player page reads the log
+    # through playerLog.LOG_TABLE, so the log is not a literal .from().
+    # MAY_BE_UNAPPLIED until that apply, so a grant sweep does not GRANT a
+    # view that is not in the catalog yet.
+    "v_player_season_totals_ncaabw",
     # NHL Stats tab, ahead of the screen (2026-10-16). The app does not
     # .from() these yet; tests/test_anon_readable.py keeps them on an
     # explicit ahead-of-the-app list so the stale-entry check stays strict
@@ -120,15 +150,40 @@ ANON_READABLE: tuple[str, ...] = (
     "v_nhl_player_prop_odds",
     "v_player_season_totals_nhl",
     "v_team_season_totals_nhl",
+    # NBA team page, first quarter (Matt, 2026-10-28). The table is written
+    # by data/ingestors/nba_team_q1.py; RLS on with a SELECT policy, and the
+    # view is security_invoker over it (add_nba_team_q1_2026_10_28.sql).
+    "nba_team_q1_games",
+    "v_nba_team_q1_season",
+    # NBA Stats tab, 1st Basket board (Matt, 2026-11-08): the two season
+    # views, security_invoker over the tables in VIEW_BASE_TABLES below
+    # (add_nba_first_basket_2026_11_08.sql).
+    "v_nba_first_basket_team_season",
+    "v_nba_first_basket_player_season",
+    # Stats tab, Betting filters (Matt, 2026-11-13): one row per team, game
+    # and period, written by data/ingestors/team_period_results.py; RLS on
+    # with a SELECT policy (add_team_period_results_2026_11_13.sql).
+    "team_period_results",
+    # Betslip game-line edit (Matt, 2026-10-29): the current alternate
+    # spread/total ladder per game, written by data/ingestors/alt_game_lines.py
+    # (add_alt_game_lines_2026_10_29.sql: RLS on, SELECT policy).
+    "alt_game_lines",
+    # Every open pre-game BET, for any Claude chat with the Supabase
+    # connector (mike, 2026-11-04: no pasting anywhere). security_invoker
+    # over picks, games, model_action_thresholds and v_discord_published,
+    # all already readable here (data/migrations/open_picks_view_2026_11_04.sql).
+    # No mobile `.from()` reads it; tests/test_anon_readable.py lists it as
+    # ahead of the app.
+    "open_picks",
     "v_public_track_record",
     "v_public_track_record_daily",
 )
 
 # In ANON_READABLE, and not yet named by a mobile `.from()`. The stale-entry
 # test subtracts this tuple and fails if anything else is granted unread.
-# Build Your Own Model facts: the NFL tables land before the screen.
+# byom_prop_facts is granted and the app does not .from() it yet.
+# byom_game_facts left this list when the NBA builder started reading it.
 AHEAD_OF_THE_APP: tuple[str, ...] = (
-    "byom_game_facts",
     "byom_prop_facts",
 )
 
@@ -225,6 +280,11 @@ VIEW_BASE_TABLES: tuple[str, ...] = (
     "latest_odds",
     "latest_prop_odds",
     "latest_live_game_state",
+    # Scoreboard NCAAF live row. security_invoker view
+    # v_ncaaf_scoreboard_latest. Policy is
+    # add_ncaaf_scoreboard_latest_2026_10_28.sql. The app does not
+    # .from() the log.
+    "ncaaf_live_states",
     # security_invoker bases of the NHL Stats views. The logs were created
     # with RLS on and no policy (add_nhl_game_logs.sql). The stats migration
     # adds a SELECT policy; the caller still needs the grant, and nothing in
@@ -232,6 +292,11 @@ VIEW_BASE_TABLES: tuple[str, ...] = (
     "nhl_goalie_game_log",
     "nhl_skater_game_log",
     "nhl_team_game_log",
+    # security_invoker bases of the NBA 1st Basket views, written by
+    # data/ingestors/nba_first_basket.py (RLS on, SELECT policy;
+    # add_nba_first_basket_2026_11_08.sql). The app reads only the views.
+    "nba_first_basket_games",
+    "nba_first_basket_players",
 )
 
 # ── worker-only tables: the second lock ──────────────────────────────────────
@@ -273,11 +338,99 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # recurrence shape as the rest of this list.
     "api_call_daily",
     "brand_assets",
+    # Men's college basketball history: free line archives (Prediction
+    # Tracker, SBRO) matched onto ESPN games, per-game team box scores and
+    # season player minutes. Created on demand by
+    # data/ingestors/ncaab_archive_import.py and ncaab_sdv_import.py; model
+    # input, never read by the app.
+    "ncaab_archive_lines",
+    "ncaab_player_season",
+    "ncaab_team_game_stats",
+    # NCAAB period scores and the ESPN box-score miss ledger. Created on
+    # demand by data/ingestors/ncaab_espn_box.py (and by
+    # add_ncaab_period_scores_2026_10_30.sql); model and grading input,
+    # never read by the app.
+    "ncaab_period_scores",
+    "ncaab_box_misses",
     "model_artifacts",
+    # NCAAB odds events the history purchase paid for but could not place on
+    # an ESPN game, kept raw so a later name fix can replay them. Created on
+    # demand by data/ingestors/ncaab_odds_history.py; never read by the app.
+    "ncaab_odds_unmatched",
     # The 250-bet review's two tables. Created on demand by
     # tracking/threshold_review.ensure_schema, never read by the app -- the
     # pause is applied server-side by models/scorer.py through auto_paused().
     "model_auto_pauses",
+    # The NCAAF first-half and team-total history purchase's ledger: one row
+    # per game and read, with what was asked for, what the feed served, the
+    # credits billed and the rows stored, so nothing is bought twice. Created
+    # on demand by data/ingestors/ncaaf_derivative_history.py; never read by
+    # the app.
+    "ncaaf_derivative_fetches",
+    # Men's college basketball identity: the ESPN team registry, the ESPN
+    # event <-> game_id map the odds join reads, and the venues. Created on
+    # demand by data/ingestors/ncaab_teams.ensure_tables; never read by the app.
+    "ncaab_events",
+    "ncaab_teams",
+    "ncaab_venues",
+    # Women's college basketball (NCAABW) identity, the same three tables on
+    # their own names (ESPN gives a school's women's team the men's team id).
+    # Created on demand by data/ingestors/ncaabw_teams.ensure_tables; never
+    # read by the app.
+    "ncaabw_events",
+    "ncaabw_teams",
+    "ncaabw_venues",
+    # The NCAABW odds history purchase: its ledger of every snapshot stored,
+    # every in-play quote of every snapshot, and the events it paid for and
+    # could not place on an ESPN game, kept raw. Created on demand by
+    # data/ingestors/ncaabw_odds_history.py; never read by the app.
+    "ncaabw_odds_snapshots",
+    "ncaabw_inplay_quotes",
+    "ncaabw_odds_unmatched",
+    # NCAABW history: NCAA's per-game team box scores and season player
+    # minutes from sportsdataverse's season files. Created on demand by
+    # data/ingestors/ncaabw_sdv_import.py; model input, never read by the app.
+    "ncaabw_team_game_stats",
+    "ncaabw_player_season",
+    # NCAABW period scores (four quarters, then overtimes) and the ESPN
+    # box-score miss ledger. Created on demand by
+    # data/ingestors/ncaabw_espn_box.py; model input, never read by the app.
+    "ncaabw_period_scores",
+    "ncaabw_box_misses",
+    # The NCAABW totals card's decisions ledger: one row per game it has
+    # decided, bet or not, with the quote, the cutoff and the reason
+    # (scripts/ncaabw_total_card.py, which creates it on demand). Read by the
+    # card, never by the app.
+    "ncaabw_total_decisions",
+    # NCAABW play-by-play and its per-game load ledger: the game state the
+    # halftime total model is fitted on. Created on demand by
+    # data/ingestors/ncaabw_pbp.py; model input, never read by the app.
+    "ncaabw_pbp",
+    "ncaabw_pbp_games",
+    # EuroLeague (2026-11-12). Created on demand by
+    # data/ingestors/euroleague_teams.ensure_tables and
+    # data/ingestors/euroleague_api.ensure_tables (identity, schedule, quarter
+    # scores, the raw API answers); data/ingestors/euroleague_odds_history.py
+    # (the purchase ledger, in-play quotes, unplaced events); and
+    # data/ingestors/euroleague_period_history.py (its ledger). Never read by
+    # the app.
+    "euroleague_teams",
+    "euroleague_events",
+    "euroleague_api_raw",
+    "euroleague_period_scores",
+    "euroleague_odds_snapshots",
+    "euroleague_inplay_quotes",
+    "euroleague_odds_unmatched",
+    "euroleague_period_fetches",
+    # NCAAB pre-tip injury change log, the open report it diffs against, the
+    # poll backoff and the name misses. Created by
+    # data/ingestors/ncaab_injury_feed.py and
+    # data/migrations/add_ncaab_injury_changes_2026_10_30.sql. Tags only,
+    # via injury_status_current; the app does not read these four.
+    "ncaab_injury_changes",
+    "ncaab_injury_open",
+    "ncaab_injury_polls",
+    "ncaab_injury_misses",
     # The league's NBA injury report archive and its pull ledger. Created on
     # demand by data/ingestors/nba_injury_report.py; model input, never read
     # by the app.
@@ -293,13 +446,12 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # Created on demand by data/ingestors/nba_public_splits_ingestor.py;
     # research control input, never read by the app.
     "nba_public_splits",
-    # NBA quarter scores (data/ingestors/nba_period_scores.py), the ESPN
-    # did-not-play reasons (data/ingestors/nba_results_ingestor.py) and the
+    # NBA quarter scores (data/ingestors/nba_period_scores.py) and the
     # stats.nba.com schedule (data/ingestors/nba_schedule_ingestor.py). Created
     # on demand by their writers; model and settlement input, never read by the
-    # app.
+    # app. nba_player_dnp left this list when the player page started reading
+    # it (anon_read_nba_player_dnp_2026_11_11.sql).
     "nba_period_scores",
-    "nba_player_dnp",
     "nba_schedule",
     # Free ESPN play-by-play (sportsdataverse release), its box scores, the
     # ESPN -> NBA.com player id map and the lineup segments derived from them.
@@ -319,6 +471,33 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # bet or not, with the reason (scripts/nba_total_luck_card.py, which
     # creates it on demand). Read by the card, never by the app.
     "nba_total_luck_decisions",
+    # The NCAAB totals card's decisions ledger: one row per game it has
+    # decided, bet or not, with the quote, the cutoff and the reason
+    # (scripts/ncaab_total_card.py, which creates it on demand). Read by the
+    # card, never by the app.
+    "ncaab_total_decisions",
+    # The NCAAB spread card's decisions ledger: one row per game it has
+    # decided at 15:00 UTC, bet or not, with every book's quote, the
+    # consensus and the reason (scripts/ncaab_spread_card.py, which creates it
+    # on demand). Read by the card, never by the app.
+    "ncaab_spread_decisions",
+    # The NCAAB moneyline card's decisions ledger: one row per game it has
+    # decided at 15:00 UTC, bet or not, with every book's moneyline and own
+    # spread and their flags (scripts/ncaab_moneyline_card.py, which creates
+    # it on demand). Read by the card, never by the app.
+    "ncaab_moneyline_decisions",
+    # The NCAAF moneyline card's decisions ledger: one row per game it has
+    # decided at 14:00 UTC, bet or not, with every book's moneyline and spread
+    # and their flags (scripts/ncaaf_moneyline_card.py, which creates it on
+    # demand). Read by the card, never by the app.
+    "ncaaf_moneyline_decisions",
+    # The NCAAB first-post moneyline card's ledger: one row per (game, book)
+    # first moneyline post it has decided, bet or not, with every book's
+    # moneyline and own spread, and the fill check the capture writes on its
+    # next poll (scripts/ncaab_moneyline_first_post_card.py, which creates it
+    # on demand; scripts/ncaab_first_post_fill.py). Read by the card and the
+    # capture, never by the app.
+    "ncaab_moneyline_first_post_decisions",
     # The NBA home team-total model's two: its decisions ledger, one row per
     # decided game with the home team's part of the gap and the best under
     # offer (scripts/nba_team_total_luck_card.py), and its fetch ledger, one
@@ -327,6 +506,30 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # writer; read by the card and the window job, never by the app.
     "nba_team_total_luck_decisions",
     "nba_team_total_fetches",
+    # The NBA first-half model's two, the same pair
+    # (scripts/nba_first_half_total_luck_card.py,
+    # data/ingestors/nba_first_half_odds.py).
+    "nba_first_half_total_luck_decisions",
+    "nba_first_half_total_fetches",
+    # The NBA first-quarter spread model's two, the same pair (scripts/nba_q1_trend_card.py,
+    # data/ingestors/nba_first_quarter_odds.py).
+    "nba_q1_trend_decisions",
+    "nba_first_quarter_fetches",
+    # The NBA first-quarter moneyline model's ledger (scripts/nba_q1_trend_ml_card.py); its fetch is the spread's.
+    "nba_q1_trend_ml_decisions",
+    # The NCAAB first-half spread model's three
+    # (scripts/ncaab_first_half_spread_card.py, data/ingestors/ncaab_first_half_odds.py):
+    # its decisions ledger, its fetch ledger (one row per Odds API call with
+    # the credits it billed), and each finished game's halves and closing
+    # consensus lines, the team term's input. Each created on demand by its
+    # writer; read by the card and the window job, never by the app.
+    "ncaab_first_half_spread_decisions",
+    "ncaab_first_half_fetches",
+    "ncaab_first_half_team_games",
+    # The NCAAB first-half total model's decisions ledger
+    # (scripts/ncaab_first_half_total_card.py, created on demand); it reads the
+    # same fetch ledger and team games as the spread model.
+    "ncaab_first_half_total_decisions",
     # The NBA projection model's three (scripts/nba_prop_projection_card.py,
     # which creates them on demand): its decisions ledger, each player's
     # stored projection, and the injury list each game was projected with.
@@ -341,7 +544,8 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "odds_history_pulls",
     # NBA purchase fetches OFF the hour (a gap fill at 23:30Z): odds_history_pulls
     # keys on an integer hour and cannot hold them. Created on demand by
-    # data/ingestors/nba_odds_history.py, never read by the app.
+    # data/ingestors/nba_odds_history.py, never read by the app. The NCAAB
+    # opener grid files its half hours here too (ncaab_odds_history.py).
     "odds_history_fetches",
     # The NBA game-market search's graded cells and populations, stored by
     # scripts/nba_game2_store.py before anything reads them; never read by the app.
@@ -481,11 +685,15 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_recent_games_mlb",
     "player_recent_games_nba",
     "player_recent_games_ncaaf",
+    "player_recent_games_ncaabw",
+    "player_recent_games_ncaab",
     "player_recent_games_nfl",
     "player_recent_games_wnba",
     "player_season_stat_values_mlb",
     "player_season_stat_values_nba",
     "player_season_stat_values_ncaaf",
+    "player_season_stat_values_ncaabw",
+    "player_season_stat_values_ncaab",
     "player_season_stat_values_nfl",
     "player_season_stat_values_wnba",
     # NHL hit-rate arrays (per game, last 5, last 10, season). The app does
@@ -497,6 +705,8 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_h2h_stat_values_mlb",
     "player_h2h_stat_values_nba",
     "player_h2h_stat_values_ncaaf",
+    "player_h2h_stat_values_ncaabw",
+    "player_h2h_stat_values_ncaab",
     "player_h2h_stat_values_nfl",
     "player_h2h_stat_values_wnba",
     # Same-position-vs-opponent card on the player page
@@ -509,9 +719,16 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # Anytime TD board: one rank per defense for a position group
     # (data/migrations/position_defense_ranks_nfl_2026_10_18.sql).
     "position_defense_ranks_nfl",
+    # Player page defense-toughness filter
+    # (data/migrations/add_player_vs_defense_rpcs_2026_11_07.sql).
+    "player_vs_defense_nba",
+    "player_vs_defense_nfl",
+    "player_vs_defense_wnba",
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",
+    "player_window_totals_ncaabw",
+    "player_window_totals_ncaab",
     "player_window_totals_nfl",
     "player_window_totals_wnba",
     # NHL Players board. Reads nhl_skater_game_log (shots, ending-year
@@ -524,7 +741,16 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # byom_game_facts and byom_prop_facts, not picks.
     "custom_model_backtest",
     "custom_model_picks",
+    # The same backtest's units on the published stake (2026-11-03,
+    # data/migrations/custom_model_backtest_posted_2026_11_03.sql, which
+    # carries its own GRANT). SECURITY INVOKER over custom_model_picks.
+    "custom_model_backtest_posted",
     "byom_backtest",
+    # BYOM official pick beside the close, and the bet list (Matt, 2026-11-04;
+    # data/migrations/byom_official_legs_2026_11_04.sql, in ACTIVE_MIGRATIONS,
+    # carries its own GRANT). SECURITY INVOKER over the BYOM facts tables.
+    "byom_record",
+    "byom_bets",
     # in-app feedback -- SECURITY DEFINER, device-keyed, so callable pre-sign-in
     "feedback_mark_read",
     "feedback_messages_for_thread",
@@ -539,6 +765,15 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # crash logging -- SECURITY DEFINER, insert-only, returns nothing
     # (data/migrations/add_app_errors.sql, mobile/src/lib/crashLogSetup.ts)
     "log_app_error",
+    # load-time logging -- SECURITY DEFINER, insert-only, returns nothing
+    # (data/migrations/add_app_timings.sql, mobile/src/lib/perfLogSetup.ts)
+    "log_app_timings",
+    # same-game parlay prices a member read off a book's slip -- SECURITY
+    # DEFINER, insert-only, returns nothing; and the per-book fitted cut,
+    # aggregates only (data/migrations/add_sgp_price_observations_2026_11_06.sql,
+    # mobile/src/lib/queries.ts)
+    "log_sgp_price",
+    "sgp_haircuts",
     # NOT called by the app, but REQUIRED by it: custom_model_picks and
     # custom_model_backtest are SECURITY INVOKER and both call this helper, so
     # the CALLER needs EXECUTE. Revoking it breaks the custom-model screen with
@@ -551,8 +786,9 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
 RPC_REVOKE: tuple[str, ...] = (
     # the support-side reply path; already anon-revoked, authenticated too
     "feedback_reply",
-    # superseded by has_app_access()/my_access(), which cannot see a Whop-paid
-    # member (data/supabase_schema.sql). Nothing in the repo or the app calls it.
+    # Older app-subscription check. has_app_access()/my_access() are the gate
+    # once their migration is applied, and they are also Apple-only — a Whop
+    # membership does not unlock the app. Nothing in the repo calls this.
     "has_active_subscription",
     # The Teams board's compute-and-swap pair (2026-09-04, migration
     # cache_team_stats_board). team_stats_board_compute is the 31 s season
@@ -581,5 +817,24 @@ RPC_LEFT_ALONE: tuple[str, ...] = (
 # docs/followups.md.
 RPC_MISSING_IN_PROD: tuple[str, ...] = (
     "my_access",
+    # Distinct BYOM player names for the matchup sheet. Granted inside
+    # byom_prop_phase_a_filters_2026_10_29.sql, which is hand-applied and
+    # not in ACTIVE_MIGRATIONS. The grant sweep must not name it first.
+    "byom_player_names",
+)
+
+# Authenticated RPCs whose migrations are not in ACTIVE_MIGRATIONS.
+# scripts/apply_anon_grants.py must not mention them: GRANT on a missing
+# function is a warning today only because the function plan skips an
+# absent signature — a table grant would raise and roll the sweep back.
+# Each migration grants EXECUTE to authenticated only. Usable once Matt
+# applies it and turns sign-in on. Do not add these names to RPC_ANON_CALLABLE.
+# delete_my_account / delete_my_login: data/migrations/delete_my_account_2026_10_24.sql.
+RPC_AFTER_SIGN_IN: tuple[str, ...] = (
+    "byom_save_model",
+    "byom_list_models",
+    "byom_delete_model",
+    "delete_my_account",
+    "delete_my_login",
 )
 

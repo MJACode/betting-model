@@ -54,8 +54,10 @@ THE RULE, per regular-season game:
   2. PROJECTION: pace = mean of the two teams' possessions per game;
        total = pace/100 x [ORtg_H + DRtg_A + ORtg_A + DRtg_H - 2 x league rating]
      gap = adjusted total - raw total, in points.
-  3. BOTH TEAMS NEED 10+ GAMES this season (CLAUDE.md section 3). The first
-     bets therefore come in mid-November.
+  3. NO 10-GAME WAIT (mike, 2026-11-02). A team needs one game this season so
+     it has a number at all (LIVE_MIN_GAMES). The evidence above is the games
+     with both teams on 10+ (MIN_GAMES, which the labs and replays keep);
+     docs/sports/nba.md, "No 10-game wait" has the replay with no wait.
   4. DECISION TIME (decision point C: "the newest fetch 60-180 minutes before
      tip"): the newest fetch, when it landed 60 to 66 minutes before tip and
      is at most 5 minutes old (timing below). A job of its own makes that
@@ -111,9 +113,10 @@ its 0.024 chance of a push refunded it would have been +0.011). The next
 smallest is +0.030 and the median +0.090.
 
 THE ARTIFACT (models/saved/, ARTIFACT_PATH): the residual sample (final total
-minus Pinnacle's closing total, per season, 2020-21 to 2025-26) and the
-per-season bucket counts. The live model and the replay of the lab read the
-same rows, so they rank offers identically. It must be refitted before
+minus Pinnacle's closing total, per season, 2020-21 to 2025-26), the
+per-season bucket counts, and the finished price table of 2026-27 (THE PRICE TABLE
+IS STORED, below). The live model and the replay of the lab read the same rows, so
+they rank offers identically. It must be refitted before
 2027-28: the card refuses a season the artifact does not end just before.
 """
 from __future__ import annotations
@@ -136,7 +139,7 @@ GAP_CUT = 3.0
 REFERENCE_BOOK = "draftkings"
 
 ROOT = Path(__file__).resolve().parent.parent
-ARTIFACT_PATH = "models/saved/nba_total_luck_20261017_090305.pkl"
+ARTIFACT_PATH = "models/saved/nba_total_luck_20261031_095356.pkl"
 ARTIFACT_KIND = "nba_total_luck"
 
 # Decision point C is "the newest fetch 60-180 minutes before tip". Live, the
@@ -156,7 +159,8 @@ STALE_FETCH_MAX_MIN = 5.0
 # ── F4: team box scores and as-of ratings (moved from scripts/nba_game2_luck.py) ──
 
 FTA_POSS = 0.44              # Oliver / Hollinger possession estimate
-MIN_GAMES = 10               # CLAUDE.md section 3 early-season rule
+MIN_GAMES = 10               # the population every lab and replay graded
+LIVE_MIN_GAMES = 1           # the live models: no 10-game wait (mike, 2026-11-02)
 
 BOX_COLS = {"points": "pts", "fg_att": "fga", "fg3_made": "fg3m", "fg3_att": "fg3a",
             "ft_made": "ftm", "ft_att": "fta", "offensive_reb": "oreb", "turnovers": "tov"}
@@ -205,7 +209,7 @@ def as_of_ratings(tb: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
         # empty box is object dtype, and the cumulative sums below raised
         # "function is not implemented for this dtype: cumsum": both NBA game
         # cards failed every tick of 2026-10-20 until the first game was final.
-        # No games means no ratings and n = 0, which the 10-game rule declines.
+        # No games means no ratings and n = 0, which every caller declines.
         out = targets[["season", "team", "game_date"]].copy().reset_index(drop=True)
         out["n"] = 0.0
         for c in ("pace", "lg_rtg", "ortg_raw", "drtg_raw", "ortg_adj", "drtg_adj"):
@@ -257,19 +261,20 @@ def pair_ratings(games: pd.DataFrame, r: pd.DataFrame) -> pd.DataFrame:
     return g.merge(h, on=["season", "game_date", "home_team"]).merge(a, on=["season", "game_date", "away_team"])
 
 
-def f4_projections(games: pd.DataFrame, tb: pd.DataFrame) -> pd.DataFrame:
+def f4_projections(games: pd.DataFrame, tb: pd.DataFrame,
+                   min_games: int = MIN_GAMES) -> pd.DataFrame:
     """Per game: raw and adjusted projected margin (no home court) and total,
-    and the gaps. Games where either team has < MIN_GAMES are dropped."""
+    and the gaps. Games where either team has < min_games are dropped."""
     r = as_of_ratings(tb, team_targets(games))
     x = pair_ratings(games, r)
-    x = x[(x["h_n"] >= MIN_GAMES) & (x["a_n"] >= MIN_GAMES)].copy()
+    x = x[(x["h_n"] >= min_games) & (x["a_n"] >= min_games)].copy()
     return project_ratings(x)
 
 
 def project_ratings(x: pd.DataFrame) -> pd.DataFrame:
     """Raw and adjusted projected margin and total, and the gaps, on a frame of
     paired ratings (pair_ratings); a game with no gap is dropped. No games
-    filter: f4_projections applies the 10-game rule before calling this, and
+    filter: f4_projections applies its games rule before calling this, and
     the fifth search's early-season versions (scripts/nba_game5.py) call it on
     blended ratings."""
     x = x.copy()
@@ -329,18 +334,48 @@ def residual_frame(art: dict) -> pd.DataFrame:
     return r.assign(season=r["season"].astype(int), market=MARKET)[["season", "market", "resid"]]
 
 
+# THE PRICE TABLE IS STORED IN THE ARTIFACT (the three NBA game total models). Each
+# card is a process of its own, so a table rebuilt by each run was rebuilt on every
+# tick that decides a game: 18.5 s here, 17.3 s for the first half, 41.0 s for the
+# team total, measured one after the other on this machine, with no other work to
+# do. On the worker the team-total card was killed at its 180-second limit on 60 of
+# 74 attempts from 2026-10-24 to 10-31. The table is a pure function of the residuals
+# already in the artifact, so the artifact stores it for the one season it prices
+# live, and a graded season, or an artifact without one, still builds.
+
+
+def stored_dist(art: dict, season: int):
+    """The finished table the artifact holds for `season`, else None."""
+    state = (art.get("pricing_tables") or {}).get(int(season))
+    if state is None:
+        return None
+    from scripts import nba_game_harness as H
+    return H.ResidDist.from_state(state)
+
+
+def with_pricing_table(art: dict, pricing_dist, newest_season) -> dict:
+    """`art` plus the finished table of the season it prices live, the one after
+    its newest (the cards refuse any other). `pricing_dist` and `newest_season` are
+    the model's own."""
+    live = int(newest_season(art)) + 1
+    return {**art, "pricing_tables": {live: pricing_dist(art, live).state()}}
+
+
 _DIST_CACHE: dict = {}
 
 
 def pricing_dist(art: dict, season: int):
     """The empirical totals distribution the harness prices season `season`
-    with: scripts.nba_game_harness.dist_by_season on the stored residuals,
-    which uses the seasons BEFORE `season` (the lab's close_dist). Built once
-    per artifact and season in a process (the table takes a few seconds)."""
-    from scripts import nba_game_harness as H
+    with: the table the artifact stores for it, else
+    scripts.nba_game_harness.dist_by_season on the stored residuals, which uses the
+    seasons BEFORE `season` (the lab's close_dist). Once per artifact and season in
+    a process."""
     key = (art.get("built_at"), len(art["close_resid"]), int(season))
     if key not in _DIST_CACHE:
-        d = H.dist_by_season(residual_frame(art), [int(season)]).get((int(season), MARKET))
+        d = stored_dist(art, season)
+        if d is None:
+            from scripts import nba_game_harness as H
+            d = H.dist_by_season(residual_frame(art), [int(season)]).get((int(season), MARKET))
         if d is None:
             raise ValueError(f"{MODEL_ID}: the artifact holds no residuals to price {season}")
         _DIST_CACHE[key] = d
@@ -445,11 +480,20 @@ class TotalLuckBet:
 
 @dataclass(frozen=True)
 class Decision:
+    """One per decided game, bet or not. The best over offer is recorded on
+    every game that had one (as the team-total and first-half models do), so
+    a game the rule scored and did not bet is written as a NONE row and the
+    app's All board shows it (Matt, 2026-11-10)."""
     game_id: str
     fetch_at: datetime
     gap: float | None
     n_bets: int
     detail: str
+    book: str | None = None
+    line: float | None = None
+    price: float | None = None
+    p_fair: float | None = None
+    p_model: float | None = None
 
 
 DIAG_KEYS = ("games", "score_missing", "box_missing", "box_mismatch", "early_season",
@@ -541,6 +585,126 @@ def regular_season(rows: pd.DataFrame, days: pd.DataFrame) -> pd.DataFrame:
     return rows[keep]
 
 
+# ── the play-in, the playoffs and the Cup final: for one model only ─────────
+#
+# nba_prop_market was graded on these 272 games and passed; nothing else that
+# has an NBA model id was graded on them, or passed (docs/nba_search_postseason.md,
+# branch nba-searches-graded). So `regular_season` above stays exactly as it is
+# for every other card, and only scripts/nba_prop_market_card.py reads this.
+#
+# The schedule's types are ESPN's on the worker, and it lists a game only once
+# its teams are set. The odds feed can write a `games` row sooner, or on a day the
+# refresh failed, so an unlisted row still counts on a day only these games fall on:
+# a day the schedule gives one of them, or after the season's last regular-season
+# day. June 30 bounds that (the latest Finals stored is 2025-06-22), so a summer row
+# is never taken. Every NBA season here is labelled by its ending year, so
+# December 2026 and June 2027 are both season 2027.
+POSTSEASON_TYPES = ("playin", "playoff", "cup_final")
+POSTSEASON_LAST_DAY = "06-30"
+# How far apart a listed game and an unlisted row with the same two teams can be and
+# still be one game filed twice. The four wrong-date rows the feed wrote in the 2026
+# WNBA playoffs sat one to two days before the real game.
+TWIN_DAYS = 2
+
+
+def listed_twin(game_id: str, game_date, home, away, sched: pd.DataFrame) -> str | None:
+    """The schedule row that says this unlisted `games` row is not a game of its own, or None.
+
+    A bet settles on its own game_id, ESPN's final lands on ESPN's id, and one bet a
+    game counts by id. So a bet on a second row for one real game can stay open for
+    good, and the real game can then take a second bet. A row is refused when the
+    schedule lists its two teams, either way round, within TWIN_DAYS under another id,
+    with these two exceptions:
+
+      * that game already has its final. A series plays every two days or so
+        (143 of the 251 playoff games of 2023-24..2025-26 are within two days of the
+        previous one), so Game 4 waiting on a refresh beside a played Game 3 is a real
+        game, not a twin.
+      * it is the same date the other way round and has no `games` row. Then this row
+        is the only one the final can land on: the results step matches it
+        (data/ingestors/nba_results_ingestor.match_game), and the refresh does not give
+        ESPN's id a row of its own. If ESPN's id does have one, the final goes there,
+        so it is a twin.
+    """
+    if sched is None or sched.empty:
+        return None
+    pair = {home, away}
+    day = pd.Timestamp(str(game_date)[:10])
+    for x in sched.itertuples(index=False):
+        if x.game_id == game_id or {x.home_team, x.away_team} != pair:
+            continue
+        gap = abs((pd.Timestamp(str(x.game_date)[:10]) - day).days)
+        if gap > TWIN_DAYS:
+            continue
+        if gap == 0 and not x.in_games:
+            continue
+        if gap != 0 and x.scored:
+            continue
+        return x.game_id
+    return None
+
+
+def postseason_twin(game_date, home, away, sched: pd.DataFrame) -> str | None:
+    """The play-in, playoff or Cup final row an unlisted `games` row is a misdated copy of, or None.
+
+    `regular_season` counts any unlisted row between the season's first and last regular-season day
+    unless that date holds another kind of game, so a postseason game the feed dated a day early,
+    onto a regular-season day, reaches every other NBA model. The schedule lists the two teams,
+    either way round, under a postseason type within TWIN_DAYS: that row is the game.
+
+    It cannot see a wrong date before the schedule lists the real game with its teams. The Cup
+    final's slot has no teams until ESPN sets them (docs/followups.md). Every real regular-season
+    game is listed, and a listed row is never asked about, so no real game is turned away.
+    """
+    if sched is None or sched.empty:
+        return None
+    pair = {home, away}
+    day = pd.Timestamp(str(game_date)[:10])
+    for x in sched.itertuples(index=False):
+        if x.game_type not in POSTSEASON_TYPES or {x.home_team, x.away_team} != pair:
+            continue
+        if abs((pd.Timestamp(str(x.game_date)[:10]) - day).days) <= TWIN_DAYS:
+            return x.game_id
+    return None
+
+
+def graded_postseason(rows: pd.DataFrame, sched: pd.DataFrame) -> pd.DataFrame:
+    """The rows of `games` that are play-in, playoff or Cup final games.
+
+    rows   game_id, season, game_date, home_team, away_team and game_type: the type of
+           the matching nba_schedule row, None when the schedule does not list the game
+    sched  scripts.nba_total_luck_card.schedule_rows: the season's nba_schedule rows of
+           every type (placeholders included), with their teams, in_games and scored
+    A listed game counts when the schedule gives it one of these types and it has two
+    real teams; an unlisted one as the comment above says, unless listed_twin names
+    another row for it. With no schedule for the season, nothing counts. No row is both
+    this and `regular_season`.
+    """
+    if rows is None or rows.empty:
+        return rows
+    d = sched.assign(_d=sched["game_date"].astype(str).str[:10],
+                     season=pd.to_numeric(sched["season"], errors="coerce"))
+    last_regular = d[d["game_type"] == "regular"].groupby("season")["_d"].max().to_dict()
+    post_days = {(int(a), b) for a, b in
+                 d.loc[d["game_type"].isin(POSTSEASON_TYPES), ["season", "_d"]].itertuples(index=False)}
+
+    def counts(r) -> bool:
+        if not (_known_team(r.home_team) and _known_team(r.away_team)):
+            return False
+        if not pd.isna(r.game_type):
+            return r.game_type in POSTSEASON_TYPES
+        season = pd.to_numeric(r.season, errors="coerce")
+        if pd.isna(season):
+            return False
+        season, day = int(season), str(r.game_date)[:10]
+        late = season in last_regular and last_regular[season] < day <= f"{season}-{POSTSEASON_LAST_DAY}"
+        if not late and (season, day) not in post_days:
+            return False
+        return listed_twin(r.game_id, r.game_date, r.home_team, r.away_team, sched) is None
+
+    return rows[[counts(r) for r in rows.itertuples(index=False)]]
+
+
 def scheduled_games(rows: pd.DataFrame) -> pd.DataFrame:
     """The season's scheduled regular-season games, one row per game_id:
     (game_id, game_date, postponed). `rows` may list a game twice (nba_schedule
@@ -618,9 +782,11 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
            final_games: pd.DataFrame, times: pd.DataFrame, art: dict, *,
            scheduled: pd.DataFrame,
            books=None, min_odds: float | None = None, gap_cut: float = GAP_CUT,
-           bucket_uplift: float | None = None) -> tuple[list[TotalLuckBet], list[Decision], dict]:
+           bucket_uplift: float | None = None, min_games: int = LIVE_MIN_GAMES
+           ) -> tuple[list[TotalLuckBet], list[Decision], dict]:
     """The rule on frames. Pure given its inputs, so the card and the replay of
-    the lab run the same code.
+    the lab run the same code; a replay passes min_games=MIN_GAMES, the
+    population the lab graded.
 
     targets      game_id, season, game_date, home_team, away_team (one season)
     quotes       the harness quote frame (scripts.nba_game_harness.frame_quotes),
@@ -655,7 +821,7 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
     sig = {(season, MARKET): pricing_dist(art, season)}
 
     tb = team_box(box, final_games)
-    proj = f4_projections(targets, tb)
+    proj = f4_projections(targets, tb, min_games=min_games)
     gaps = dict(zip(proj["game_id"], proj["gap_total"]))
     missing = missing_inputs(targets, scheduled_games(scheduled), final_games, tb)
 
@@ -669,7 +835,10 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
     cand = side_strength(neutral, f4_signal(proj))
     chosen = H.choose(cand[cand["strength"] >= gap_cut], -np.inf, books=books,
                       sides=[SIDE], floor=floor)
+    # The record: the best over offer on every game, whatever its gap.
+    best = H.choose(neutral, -np.inf, books=books, sides=[SIDE], floor=floor)
     by_game = {r.game_id: r for r in chosen.itertuples(index=False)}
+    best_by = {r.game_id: r for r in best.itertuples(index=False)}
     fair_by = {(r.game_id): r for r in fair[fair["market"] == MARKET].itertuples(index=False)}
     t_by = dict(zip(t["game_id"], t["T"]))
 
@@ -682,40 +851,44 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
         diag["games"] += 1
         T = t_by[gid]
         gap = gaps.get(gid)
+        o = by_game.get(gid) or best_by.get(gid)
+        offer = {} if o is None else {
+            "book": str(o.book), "line": float(o.line), "price": float(o.price),
+            "p_fair": float(o.p_win), "p_model": float(o.p_win + up)}
         miss = missing[gid]
         presumed.update(miss["presumed_unplayed"])
         if miss["score_missing"]:
             diag["score_missing"] += 1
             decisions.append(Decision(gid, T, None, 0,
-                                      f"score_missing:{_named(miss['score_missing'])}"))
+                                      f"score_missing:{_named(miss['score_missing'])}", **offer))
             continue
         if miss["box_missing"]:
             diag["box_missing"] += 1
             decisions.append(Decision(gid, T, None, 0,
-                                      f"box_missing:{_named(miss['box_missing'])}"))
+                                      f"box_missing:{_named(miss['box_missing'])}", **offer))
             continue
         if miss["box_mismatch"]:
             diag["box_mismatch"] += 1
             decisions.append(Decision(gid, T, None, 0,
-                                      f"box_mismatch:{_named(miss['box_mismatch'])}"))
+                                      f"box_mismatch:{_named(miss['box_mismatch'])}", **offer))
             continue
         if gap is None:
             diag["early_season"] += 1
-            decisions.append(Decision(gid, T, None, 0, "early_season: a team has under "
-                                                         f"{MIN_GAMES} games"))
+            decisions.append(Decision(gid, T, None, 0,
+                                      f"early_season: a team has under {min_games} games", **offer))
             continue
         if gap < gap_cut:
             diag["gap_below_cut"] += 1
-            decisions.append(Decision(gid, T, float(gap), 0, f"gap_below_cut:{gap:.2f}"))
+            decisions.append(Decision(gid, T, float(gap), 0, f"gap_below_cut:{gap:.2f}", **offer))
             continue
         if gid not in fair_by:
             diag["no_fair_line"] += 1
-            decisions.append(Decision(gid, T, float(gap), 0, "no_fair_line"))
+            decisions.append(Decision(gid, T, float(gap), 0, "no_fair_line", **offer))
             continue
         c = by_game.get(gid)
         if c is None:
             diag["no_offer"] += 1
-            decisions.append(Decision(gid, T, float(gap), 0, "no_offer"))
+            decisions.append(Decision(gid, T, float(gap), 0, "no_offer", **offer))
             continue
         dk = vis[(vis["game_id"] == gid) & (vis["book"] == REFERENCE_BOOK) & vis["coherent"]
                  & np.isclose(vis["line"], c.line)]
@@ -730,6 +903,6 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
             fair_mu=float(fr.mu), fetch_at=T, dk_price=dk_price,
             link=getattr(c, "link_a", None), dk_link=dk_link))
         diag["bets"] += 1
-        decisions.append(Decision(gid, T, float(gap), 1, f"bet:{c.book} {c.line:g} {c.price:+.0f}"))
+        decisions.append(Decision(gid, T, float(gap), 1, f"bet:{c.book} {c.line:g} {c.price:+.0f}", **offer))
     diag["presumed_unplayed"] = sorted(presumed)
     return bets, decisions, diag

@@ -2,20 +2,20 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { AppSwitch } from '@/components/AppSwitch';
 import { useCustomModels, pickMatchesModel } from '@/hooks/useCustomModels';
 import {
   useCustomModelBacktest,
@@ -239,15 +239,14 @@ export function ModelEditScreen() {
             </Pressable>
           </View>
           <Text style={styles.helper}>
-            Pick a sport, then ML, the line (Run line in baseball, Spread in football and
-            basketball), or Player props. Player props adds every active player market for that
+            Pick a sport, then ML, Spread, or Player props. Player props adds every active player market for that
             sport. Every minimum starts blank: leave it that way for Any and the bet type qualifies
             on its own.
           </Text>
           <Text style={styles.helper}>
-            Model % is our projected win probability. Edge is model % minus DraftKings' implied
-            probability. EV is expected profit per $1 at the DK price (picks with no DK price can
-            never clear an EV floor).
+            Model % is our projected win probability. Edge is model % minus the implied
+            probability at the price the model found. EV is expected profit per unit staked at that
+            same price (a pick with no price can never clear an EV floor).
           </Text>
 
           {rules.length === 0 ? (
@@ -340,7 +339,7 @@ export function ModelEditScreen() {
                 Drops picks where a relevant player is carrying an injury flag.
               </Text>
             </View>
-            <Switch
+            <AppSwitch
               accessibilityLabel="Skip injury-flagged picks"
               value={filters.excludeInjuries === true}
               onValueChange={(on) =>
@@ -415,9 +414,10 @@ function PreviewFooter({
   saveLabel: string;
   onSave: () => void;
 }) {
-  const roi = backtest?.roiFlat ?? 0;
+  // The published stake's return (one unit basis, CLAUDE.md §2).
+  const roi = backtest?.roi ?? 0;
   const roiColor =
-    !backtest || backtest.picks === 0 ? colors.textSecondary : pnlColor(roi, 1, 100);
+    !backtest || backtest.risked === 0 ? colors.textSecondary : pnlColor(roi, 1, 100);
   const decided = (backtest?.wins ?? 0) + (backtest?.losses ?? 0);
 
   return (
@@ -440,9 +440,9 @@ function PreviewFooter({
             caption={backtest && backtest.pushes > 0 ? `${backtest.pushes} push` : 'since Apr 14'}
           />
           <PreviewStat
-            label="Flat ROI"
-            value={backtest && backtest.picks > 0 ? formatPctSigned(roi) : '—'}
-            caption="$100/bet"
+            label="Return"
+            value={backtest && backtest.risked > 0 ? formatPctSigned(roi) : '—'}
+            caption={backtest == null || backtest.postedKnown ? '1u to win' : '1u risked'}
             color={roiColor}
           />
         </View>
@@ -802,7 +802,7 @@ function ModelPickerModal({
   const insets = useSafeAreaInsets();
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal trackName="ModelEditScreen" visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={styles.modalContainer}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle} numberOfLines={1}>

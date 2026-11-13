@@ -30,6 +30,7 @@ warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from features.build import feature_columns
+from tracking.clv_math import CLV_EXACT_PUSH_EPS, clv_beat_counts
 
 SPLITS = [
     (list(range(2020, 2022)), 2022, 2023),
@@ -108,8 +109,11 @@ def summarize(clv: np.ndarray, label: str) -> dict:
     if len(clv) < 2:
         return {}
     t, p = stats.ttest_1samp(clv, 0.0)
+    beats, losses, pushes = clv_beat_counts(clv, eps=CLV_EXACT_PUSH_EPS)
+    decisive = beats + losses
     return dict(label=label, n=len(clv), mean=clv.mean(), sd=clv.std(ddof=1),
-                pct_pos=np.mean(clv > 0), pct_zero=np.mean(clv == 0),
+                pct_pos=(beats / decisive) if decisive else float("nan"),
+                pct_zero=pushes / len(clv),
                 t=t, p=p)
 
 

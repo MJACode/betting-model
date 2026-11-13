@@ -833,7 +833,9 @@ check(
       && !screen2.includes('styles.dirLockNote'));
   check('and it offers the action that lifts it — canSwitch opens the picker',
     screen2.includes('? { text: dirLockNote, canSwitch: true }')
-      && screen2.includes('onPress={noLinesNote.canSwitch ? () => setPickerOpen(true) : undefined}'));
+      && screen2.includes('const notesCanSwitch = noLinesNote?.canSwitch === true;')
+      && screen2.includes("Platform.OS === 'ios' ? 'tap-ios' : 'tap-other'")
+      && screen2.includes('onPress: onChangeSportsbooks'));
   // Scoped to the style block itself: a loose [\\s\\S] window runs past the
   // closing brace into later styles that legitimately use opacity.
   const dirPillLockedBlock = screen2.slice(

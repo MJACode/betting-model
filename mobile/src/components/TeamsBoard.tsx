@@ -28,6 +28,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { AddLineSheet } from '@/components/AddLineSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { GroupTabs } from '@/components/GroupTabs';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import { FilterChip } from '@/components/filters/FilterChip';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { BookMark } from '@/components/BookMark';
@@ -39,7 +40,7 @@ import { addDays, etDate, formatAmerican, weekdayET, gameStatus } from '@/lib/fo
 import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK } from '@/lib/markets';
 import { teamLineSheetInput } from '@/lib/lineLegs';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
-import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/queries';
+import { fetchGameLinesForDate, fetchSlateGames, fetchTeamPeriodRows, fetchTeamStats } from '@/lib/queries';
 import {
   buildSlateGameIndex,
   buildTonightSlate,
@@ -71,31 +72,40 @@ import {
 } from '@/lib/teamBoard';
 import {
   defaultTeamStatFor,
+  explainSections,
   formatRecord,
   formatTeamStat,
+  TEAM_GROUP_INTRO,
+  teamBoardSeason,
   teamGroupsForSport,
+  teamSeasonLabel,
   teamStatValue,
   teamStatsForSport,
   type TeamStatDef,
   type TeamStatGroup,
 } from '@/lib/teamStatCatalog';
+import {
+  applyPeriodSplits,
+  DEFAULT_PERIOD_FILTER,
+  GAMES_OPTIONS,
+  isDefaultPeriodFilter,
+  PERIOD_OPTIONS,
+  periodFilterShort,
+  periodFilterSpoken,
+  periodStatDef,
+  SIDE_OPTIONS,
+  SIDE_REPLACED_KEYS,
+  supportsPeriodFilters,
+  type PeriodFilter,
+  type PeriodKey,
+  type TeamPeriodRow,
+} from '@/lib/teamPeriodSplits';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
 import { ErrorBanner } from '@/components/ErrorState';
 import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
-
-/**
- * Seasons to try, newest first. Every league except MLB/WNBA is out of season
- * for part of the calendar year, and NFL/NCAAF label a season by its starting
- * year — so the current year is frequently empty and the board should fall
- * back to the most recent season with data rather than render blank.
- */
-function seasonCandidates(): number[] {
-  const y = new Date().getUTCFullYear();
-  return [y, y - 1];
-}
 
 function tierColor(tier: Tier): string | undefined {
   if (tier === 'good') return colors.gradeGood;
@@ -132,6 +142,14 @@ export function TeamsBoard({
   // since 2026-09-05; the Teams board never got it. Off by default, like
   // Players (StatsScreen SLATE_ONLY_DEFAULT), and reset with the sport.
   const [slateOnly, setSlateOnly] = useState<boolean>(false);
+  // The Betting tab's filters (Matt, 2026-11-13): period, games window and
+  // side, counted on the device from team_period_results. One read per
+  // period, kept for the session of this sport and season.
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>(DEFAULT_PERIOD_FILTER);
+  const [periodRows, setPeriodRows] = useState<Partial<Record<PeriodKey, TeamPeriodRow[]>>>({});
+  const [periodFailed, setPeriodFailed] = useState<PeriodKey | null>(null);
+  const [periodError, setPeriodError] = useState<string | null>(null);
+  const [periodReload, setPeriodReload] = useState(0);
 
   // ── The LINE column: the user's sportsbook's number for each team's next
   // game, from that team's side. Matt, 2026-09-03: "see a current line for a
@@ -234,6 +252,9 @@ export function TeamsBoard({
   useEffect(() => {
     setStat(defaultTeamStatFor(sport));
     setQuery('');
+    setPeriodFilter(DEFAULT_PERIOD_FILTER);
+    setPeriodRows({});
+    setPeriodFailed(null);
     setSlateOnly(false); // a different sport is a different slate
     // Drop the previous sport's games in the same commit. Until the new read
     // lands, `hasSlate` would still be true and the chip would filter by the
@@ -252,8 +273,9 @@ export function TeamsBoard({
       // the candidates itself; fetchTeamStats owns the fallback now, so asking
       // for 2026 can return 2025 rows and only the reply knows which — label
       // the header from that, never from what we asked for (UX review,
-      // 2026-09-09).
-      const { season: used, rows: data } = await fetchTeamStats(sport, seasonCandidates()[0]);
+      // 2026-09-09). The season asked for is the SPORT's label: NBA and NHL
+      // name a season by its ending year (teamBoardSeason).
+      const { season: used, rows: data } = await fetchTeamStats(sport, teamBoardSeason(sport));
       setRows(data);
       setSeason(used);
     } catch (e: unknown) {
@@ -268,12 +290,40 @@ export function TeamsBoard({
     void load();
   }, [load]);
 
+  const activeGroup = stat?.group ?? groups[0];
+  const periodsOn = supportsPeriodFilters(sport) && activeGroup === 'Betting';
+  const periodKey = periodFilter.period;
+  const periodData = periodRows[periodKey];
+
+  // The period read, only while the Betting tab is open on a sport that has
+  // the filters, and only once per period (a refresh clears the cache).
+  useEffect(() => {
+    if (!periodsOn || season == null || periodData) return;
+    let cancelled = false;
+    setPeriodFailed(null);
+    fetchTeamPeriodRows(sport, periodKey, season)
+      .then((data) => {
+        if (cancelled) return;
+        setPeriodRows((m) => ({ ...m, [periodKey]: data }));
+        setPeriodError(null);
+      })
+      .catch((e: unknown) => {
+        if (cancelled || isAbortError(e)) return;
+        setPeriodFailed(periodKey);
+        setPeriodError(errorText(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [periodsOn, season, sport, periodKey, periodData, periodReload]);
+
   const refresh = useCallback(() => {
     setSlateReload((n) => n + 1);
+    setPeriodRows({});
+    setPeriodReload((n) => n + 1);
     void load();
   }, [load]);
 
-  const activeGroup = stat?.group ?? groups[0];
   const pickGroup = (g: TeamStatGroup) => {
     if (g === activeGroup) return;
     const first = teamStatsForSport(sport).find((s) => s.group === g);
@@ -302,9 +352,24 @@ export function TeamsBoard({
   // team's league rank and league tertile colour: "#33 in ATS%" is the fact,
   // and re-ranking the dozen teams playing today would print #1 on a team
   // that is middle of the pack.
+  // On a sport with the filters, every Betting number is recounted from the
+  // period rows, Full + Season + Both included, so all of them carry a record.
+  // Until the period's rows arrive the board shows nothing rather than the
+  // full-game numbers under a 1Q header.
+  const periodWaiting = periodsOn && !periodData;
+  const boardRows = useMemo<TeamStatsRow[]>(() => {
+    if (!periodsOn) return rows;
+    // An answered read with no rows is "no results yet", not 30 rows of dashes.
+    if (!periodData || periodData.length === 0 || season == null) return [];
+    return applyPeriodSplits(rows, periodData, periodFilter, season);
+  }, [periodsOn, rows, periodData, periodFilter, season]);
+  const boardStat = useMemo(
+    () => (stat && periodsOn ? periodStatDef(stat, periodFilter) : stat),
+    [stat, periodsOn, periodFilter],
+  );
   const { rows: rankedAll, cuts } = useMemo(
-    () => (stat ? rankTeams(rows, stat) : { rows: [], cuts: null }),
-    [rows, stat],
+    () => (boardStat ? rankTeams(boardRows, boardStat) : { rows: [], cuts: null }),
+    [boardRows, boardStat],
   );
   const ranked = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -376,7 +441,10 @@ export function TeamsBoard({
   // Gated on the DAY and the BOOKS, never on which stat is selected — the
   // column must not come and go as the user taps through chips.
   const mine = useMemo(() => new Set<string>(books), [books]);
+  // The LINE pill is the full-game market; beside a 1Q or 1H record it would
+  // read as that period's line and add a full-game leg (UX review, 2026-11-13).
   const showLines =
+    !(periodsOn && periodFilter.period !== 'FG') &&
     booksReady &&
     unstarted.size > 0 &&
     gameLines.some((r) => mine.has(r.bookmaker) && unstarted.has(r.game_id));
@@ -405,6 +473,14 @@ export function TeamsBoard({
       {/* Group tabs — Efficiency first by design, and the same two-level tab
           bar the Players board uses (Matt, 2026-09-04). */}
       <GroupTabs groups={groups} active={activeGroup} onChange={pickGroup} />
+      {/* Only the Betting caveat stays on screen; the other groups' line opens
+          each Details sheet instead, so the header stays short (UX review,
+          2026-11-03). No line cap: the caveat is the clause that matters. */}
+      {activeGroup === 'Betting' ? (
+        <View style={styles.groupIntroRow}>
+          <Text style={styles.groupIntroText}>{TEAM_GROUP_INTRO.Betting}</Text>
+        </View>
+      ) : null}
 
       <ScrollView
         horizontal
@@ -415,6 +491,8 @@ export function TeamsBoard({
       >
         {teamStatsForSport(sport)
           .filter((s) => s.group === activeGroup)
+          // The Side filter asks the home/away question for every stat.
+          .filter((s) => !(supportsPeriodFilters(sport) && SIDE_REPLACED_KEYS.has(String(s.key))))
           .map((s) => (
             <FilterChip
               key={String(s.key)}
@@ -425,18 +503,59 @@ export function TeamsBoard({
           ))}
       </ScrollView>
 
-      {/* What this number is, and — for the betting group — what it isn't. */}
-      {stat.hint ? (
-        <View style={styles.hintRow}>
-          <Text style={styles.hintText}>{stat.hint}</Text>
-        </View>
-      ) : null}
-      {activeGroup === 'Betting' && !stat.hint ? (
-        <View style={styles.hintRow}>
-          <Text style={styles.hintText}>
-            Betting records describe what already happened. They regress toward .500 once
-            the market prices a trend in — read them as context, not as an edge.
-          </Text>
+      {/* What this number is in one line; "Details" opens what it is, what's
+          good, how to use it for a bet and what to watch for (Matt,
+          2026-11-03). Every stat in the catalog carries both. */}
+      <View style={styles.hintRow}>
+        <InfoTooltip
+          label={stat.hint}
+          title={stat.label}
+          body={activeGroup === 'Betting' ? undefined : TEAM_GROUP_INTRO[activeGroup]}
+          sections={explainSections(stat.explain)}
+        />
+      </View>
+
+      {periodsOn ? (
+        // Two rows, not three (UX review, 2026-11-13: three stacked chip rows
+        // left 3-4 teams on screen on a small phone): Period, then Games and
+        // Side side by side with a divider, as the Players window row does.
+        <View style={styles.periodBlock}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.fixedRow}
+            contentContainerStyle={styles.filterChips}
+            keyboardShouldPersistTaps="handled"
+          >
+            <ChipGroup
+              title="Period"
+              options={PERIOD_OPTIONS}
+              value={periodFilter.period}
+              busy={periodWaiting && periodFailed !== periodKey}
+              onChange={(period) => setPeriodFilter((f) => ({ ...f, period }))}
+            />
+          </ScrollView>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.fixedRow}
+            contentContainerStyle={styles.filterChips}
+            keyboardShouldPersistTaps="handled"
+          >
+            <ChipGroup
+              title="Games"
+              options={GAMES_OPTIONS}
+              value={periodFilter.games}
+              onChange={(games) => setPeriodFilter((f) => ({ ...f, games }))}
+            />
+            <View style={styles.filterDivider} />
+            <ChipGroup
+              title="Side"
+              options={SIDE_OPTIONS}
+              value={periodFilter.side}
+              onChange={(side) => setPeriodFilter((f) => ({ ...f, side }))}
+            />
+          </ScrollView>
         </View>
       ) : null}
 
@@ -486,6 +605,15 @@ export function TeamsBoard({
         <ErrorBanner what={`the ${sport} teams`} error={error} onRetry={() => void load()} retrying={loading} />
       ) : null}
 
+      {periodsOn && periodFailed === periodKey ? (
+        <ErrorBanner
+          what={`the ${PERIOD_OPTIONS.find((o) => o.key === periodKey)?.spoken.toLowerCase()} results`}
+          error={periodError ?? 'The results didn’t load.'}
+          onRetry={() => setPeriodReload((n) => n + 1)}
+          retrying={periodWaiting && periodFailed !== periodKey}
+        />
+      ) : null}
+
       {noLinesNote ? (
         <Pressable
           hitSlop={{ top: 5, bottom: 5, left: 0, right: 0 }}
@@ -504,10 +632,20 @@ export function TeamsBoard({
       {ranked.length > 0 ? (
         <View style={styles.colHeader}>
           <Text style={styles.colHeaderRank}>RK</Text>
-          <Text style={styles.colHeaderName}>
-            TEAM{season ? ` · ${season}` : ''}
+          {/* The filter summary lives in the wide TEAM column (UX review). A
+              last-N window can reach into last season, so it names no season. */}
+          <Text style={styles.colHeaderName} numberOfLines={1}>
+            TEAM
+            {season && !(periodsOn && periodFilter.games !== 'season') ? ` · ${teamSeasonLabel(sport, season)}` : ''}
+            {periodsOn && !isDefaultPeriodFilter(periodFilter) ? (
+              <Text style={styles.colHeaderFilter}>{` · ${periodFilterShort(periodFilter).toUpperCase()}`}</Text>
+            ) : null}
           </Text>
-          <Text style={styles.colHeaderRight} numberOfLines={1}>
+          <Text
+            style={styles.colHeaderRight}
+            numberOfLines={1}
+            accessibilityLabel={periodsOn ? `${stat.label}, ${periodFilterSpoken(periodFilter)}` : stat.label}
+          >
             {stat.label.toUpperCase()}
           </Text>
           {showLines ? (
@@ -528,7 +666,7 @@ export function TeamsBoard({
             <TeamRow
               rank={rank}
               row={item}
-              def={stat}
+              def={boardStat ?? stat}
               cuts={cuts}
               quote={quote}
               started={startedTeams.get(item.team) ?? null}
@@ -541,12 +679,18 @@ export function TeamsBoard({
               showLine={showLines}
               // The pill asks: a tap opens the add-to-betslip sheet.
               onLinePress={quote ? () => setLineSheet(quote) : undefined}
-              onOpen={onOpenTeam ? () => onOpenTeam(item, season) : undefined}
+              // The team page labels its numbers "season": hand it the
+              // board's own season row, never the period-filtered copy.
+              onOpen={
+                onOpenTeam
+                  ? () => onOpenTeam(rows.find((r) => r.team === item.team) ?? item, season)
+                  : undefined
+              }
             />
           );
         }}
         ListEmptyComponent={
-          loading ? (
+          periodsOn && periodFailed === periodKey ? null : loading || periodWaiting ? (
             <ActivityIndicator style={styles.loading} />
           ) : (
             <EmptyState
@@ -556,6 +700,8 @@ export function TeamsBoard({
               subtitle={
                 query.trim()
                   ? `Nothing matched "${query.trim()}"${slateActive ? ` among teams on this slate (${slateLabel.toLowerCase()})` : ''}.`
+                  : periodsOn && rows.length > 0
+                    ? 'No results for this period yet. They fill in as games are played and lines are stored.'
                   : slateActive && rows.length > 0
                     ? `None of the teams on this slate have ${sport} team stats yet.`
                   : `No ${sport} team stats yet. Records fill in as games are played and lines are stored.`
@@ -614,8 +760,23 @@ function TeamRow({
   // A thin split still shows its number, but is never tinted as if it ranked.
   const tier: Tier = thin ? 'none' : tierFor(value, cuts, def.better);
   const color = tierColor(tier);
-  const record = formatRecord(row, def);
   const sample = def.sample ? sampleFor(row, def) : null;
+  // RECORD AND PERCENT, ALWAYS, on every Betting stat (Matt, 2026-11-13,
+  // replacing his 2026-11-03 rule that hid the percent under 10 games): the
+  // percent on top, the record under it ("7-5", or "6o-5u" for overs and
+  // unders). Under MIN_SPLIT_SAMPLE the row is untinted, ranked below the
+  // established ones and marked "small sample". A split with no stored
+  // record shows its game count instead. "—" stays "no data".
+  const gamesText = `${sample} game${sample === 1 ? '' : 's'}`;
+  const isOU = def.key === 'over_pct';
+  const record = isOU && def.record
+    ? `${row.ou_o}o-${row.ou_u}u${row.ou_p ? `-${row.ou_p}p` : ''}`
+    : formatRecord(row, def);
+  const shown = formatTeamStat(value, def.format);
+  const under = record ?? (thin && sample != null ? gamesText : null);
+  const spokenRecord = isOU
+    ? `${row.ou_o} overs, ${row.ou_u} unders${row.ou_p ? `, ${row.ou_p} pushes` : ''}`
+    : record ? `${record} record` : '';
 
   return (
     <View style={[styles.row, subline ? styles.rowWithGame : null]}>
@@ -668,21 +829,66 @@ function TeamRow({
           {row.point_diff_pg != null
             ? ` · ${row.point_diff_pg > 0 ? '+' : ''}${Number(row.point_diff_pg).toFixed(1)}/g`
             : ''}
-          {thin ? ` · ${sample} game${sample === 1 ? '' : 's'}` : ''}
         </Text>
       </Pressable>
-      <View style={styles.valueWrap}>
-        <Text style={[styles.value, color ? { color } : null]}>
-          {formatTeamStat(value, def.format)}
+      <View
+        style={styles.valueWrap}
+        accessible
+        accessibilityLabel={`${def.label} ${value == null ? 'no data' : shown}${spokenRecord ? `, ${spokenRecord}` : ''}${
+          thin && sample != null && value != null ? `, small sample, ${gamesText}` : ''
+        }`}
+      >
+        <Text style={[styles.value, color ? { color } : null, thin ? styles.thinValue : null]}>
+          {shown}
         </Text>
-        {record ? (
-          <Text style={styles.valueLabel}>{record}</Text>
-        ) : thin ? (
-          <Text style={styles.thinLabel}>thin</Text>
+        {/* No line cap: at large text the record wraps rather than losing its
+            last part (UX review Blocker, 2026-11-13). */}
+        {under ? (
+          <Text style={thin ? styles.thinLabel : styles.valueLabel}>
+            {thin && record && value != null ? `${under} · small sample` : under}
+          </Text>
         ) : null}
       </View>
       {showLine ? <TeamLineCell quote={quote} team={row.team} started={started} onPress={onLinePress} /> : null}
     </View>
+  );
+}
+
+/** One titled group of single-choice chips (Period, Games or Side), laid
+ *  inline in a horizontal scroller. The spoken label starts with the visible
+ *  text, so Voice Control's "Tap 1Q" matches (WCAG 2.5.3). */
+function ChipGroup<K extends string | number>({
+  title,
+  options,
+  value,
+  busy,
+  onChange,
+}: {
+  title: string;
+  options: { key: K; label: string; spoken: string }[];
+  value: K;
+  /** The selected chip's read is in flight. */
+  busy?: boolean;
+  onChange: (k: K) => void;
+}) {
+  return (
+    <>
+      <Text style={styles.filterTitle} accessibilityElementsHidden importantForAccessibility="no">
+        {title}
+      </Text>
+      {options.map((o) => (
+        <FilterChip
+          key={String(o.key)}
+          label={o.label}
+          active={o.key === value}
+          busy={busy && o.key === value}
+          onPress={() => {
+            if (o.key !== value) onChange(o.key);
+          }}
+          accessibilityLabel={`${o.label}, ${o.spoken}, ${title}`}
+        />
+      ))}
+    </>
   );
 }
 
@@ -762,8 +968,32 @@ const styles = StyleSheet.create({
   listFlex: { flex: 1 },
   list: { paddingBottom: spacing.xl },
   chipRow: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingVertical: 2 },
-  hintRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: 2 },
-  hintText: { fontSize: font.size.micro, color: colors.textTertiary, lineHeight: 15 },
+  hintRow: { paddingHorizontal: spacing.lg },
+  periodBlock: { paddingTop: spacing.xs },
+  // paddingVertical 6 makes each scroller ~44pt, so the chips' hitSlop counts
+  // (FilterChip: only the part inside a horizontal ScrollView does).
+  filterChips: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 6,
+  },
+  // Inline before its chips, never truncated: it scrolls with them.
+  filterTitle: {
+    flexShrink: 0,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
+  filterDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    marginVertical: 4,
+    backgroundColor: colors.separator,
+  },
+  colHeaderFilter: { color: colors.tint },
+  groupIntroRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs },
+  groupIntroText: { fontSize: font.size.caption, color: colors.textSecondary, lineHeight: 16 },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -905,8 +1135,11 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
-  valueLabel: { fontSize: font.size.nano, color: colors.textTertiary },
-  thinLabel: { fontSize: font.size.nano, color: colors.textTertiary, fontStyle: 'italic' },
+  // textSecondary: the record is a required number now, not a footnote, and
+  // textTertiary at this size is under AA on the card (UX_REVIEW §5).
+  valueLabel: { fontSize: font.size.nano, color: colors.textSecondary, textAlign: 'right' },
+  thinLabel: { fontSize: font.size.nano, color: colors.textSecondary, fontStyle: 'italic', textAlign: 'right' },
+  thinValue: { fontWeight: font.weight.regular, color: colors.textSecondary },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
 });

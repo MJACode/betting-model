@@ -486,3 +486,175 @@ class _FixedNow(datetime):
     @classmethod
     def now(cls, tz=None):
         return AFTER if tz else AFTER.replace(tzinfo=None)
+
+
+# ── the play-in, the playoffs and the Cup final ──────────────────────────────
+#
+# nba_prop_market bets these, and a bet must settle the way a regular-season bet does. Real
+# ESPN payloads, trimmed (tests/fixtures/espn_nba_postseason_sample.json, read 2026-11-02):
+# the 2025-26 Cup final, a 2026 play-in game, 2026 Finals Game 5 (which holds the 0-minute row).
+
+POST = _load("espn_nba_postseason_sample.json")
+POST_GAME = {"cup_final": ("NBA_2025-12-16_SAS_NYK", "NYK", "SAS", 124, 113, 2026),
+             "playin": ("NBA_2026-04-14_MIA_CHA", "CHA", "MIA", 127, 126, 2026),
+             "playoff": ("NBA_2026-06-13_NYK_SAS", "SAS", "NYK", 90, 94, 2026)}
+
+
+class _PostESPN:
+    def __init__(self, kind):
+        self.fix = POST[kind]
+
+    def __call__(self, url, params):
+        return self.fix["scoreboard"] if url.endswith("scoreboard") else self.fix["summary"]
+
+
+def _post_store(kind, **kw):
+    gid, home, away, _, _, season = POST_GAME[kind]
+    return FakeStore([{"game_id": gid, "game_date": POST[kind]["date"], "season": season, "home": home,
+                       "away": away, "home_score": None, "away_score": None, "went_to_ot": 0,
+                       "commence_time": POST[kind]["scoreboard"]["events"][0]["date"],
+                       "source": "games", **kw}])
+
+
+def _post_run(store, kind, **kw):
+    return nri.ingest_nba_results(dates=[POST[kind]["date"]], get_json=_PostESPN(kind), store=store,
+                                  sleep=0, now=datetime(2026, 7, 1, tzinfo=timezone.utc), **kw)
+
+
+def _settle_on(log_rows, player_id, player_name, gid, line=0.5):
+    """A real pick through tracking.paper_tracker._settle_prop_picks, on these box rows."""
+    import tracking.paper_tracker as pt
+
+    class _C:
+        def __init__(self):
+            self.updates = []
+
+        def execute(self, sql, params=None):
+            q = " ".join(sql.split())
+            self._rows = []
+            if q.upper().startswith("UPDATE"):
+                self.updates.append((q, params))
+            elif " FROM picks" in q:
+                self._rows = [("pk", gid, "nba_prop_market", "under", -110, 10.0, line, player_id,
+                               f"{player_name} Under {line:g} Pts", "player_points", player_name)]
+            elif " FROM nba_player_game_log" in q:
+                cols = [c.strip().split()[-1].split(".")[-1]
+                        for c in q.split(" FROM ")[0].replace("SELECT", "").split(",")]
+                self._rows = [tuple(r.get(c) for c in cols) for r in log_rows]
+            return self
+
+        def fetchall(self):
+            return self._rows
+
+        def fetchone(self):
+            return self._rows[0] if self._rows else None
+
+    conn = _C()
+    pt._settle_prop_picks(conn, "2026-06-13", "2026-06-14T06:00:00Z")
+    got = [(q, a) for q, a in conn.updates if "SET result" in q]
+    if not got:
+        return None
+    q, a = got[-1]
+    return "NO_ACTION" if "'NO_ACTION'" in q else a[0]
+
+
+@pytest.mark.parametrize("kind", ["cup_final", "playin", "playoff"])
+def test_a_postseason_final_is_scored_and_its_whole_box_logged(kind):
+    """A games row is all it takes: no regular-season test stands between this game and its score."""
+    gid, _, _, home_score, away_score, _ = POST_GAME[kind]
+    store = _post_store(kind)
+    totals = _post_run(store, kind)
+    assert totals["scores_filled"] == 1 and totals["box_games"] == 1 and totals["box_incomplete"] == 0
+    g = store.games[gid]
+    assert (g["home_score"], g["away_score"]) == (home_score, away_score)
+    assert g["home_win"] == (1 if home_score > away_score else 0)
+    assert {k[1] for k in store.log} == {gid}
+    assert len(store.log) == len(parse_nba_box(POST[kind]["summary"]))
+
+
+def test_a_postseason_game_with_no_games_row_is_not_invented():
+    """The results step adds only a regular-season game of the schedule's. A postseason game
+    arrives by the feed or the game-day insert, so a slot that was never played leaves no row."""
+    store = FakeStore([])
+    totals = _post_run(store, "playoff", recheck=True)      # read the final though nothing is pending
+    assert totals["not_in_games"] == 1 and store.writes == [] and store.games == {}
+
+
+def test_a_postseason_bet_settles_on_the_box_the_results_step_wrote():
+    store = _post_store("playoff")
+    _post_run(store, "playoff")
+    gid = POST_GAME["playoff"][0]
+    rows = list(store.log.values())
+    scorer = next(r for r in rows if (r["points"] or 0) > 10)
+    assert _settle_on(rows, scorer["player_id"], scorer["player_name"], gid) == "LOSS"       # under 0.5
+
+
+def test_a_player_absent_from_a_logged_postseason_box_settles_no_action():
+    """A did-not-play row, an inactive player: logged game, no row for him, the bet is void."""
+    store = _post_store("playoff")
+    _post_run(store, "playoff")
+    rows = list(store.log.values())
+    dnp = parse_nba_dnp(POST["playoff"]["summary"])
+    assert dnp and all(d["name"] != r["player_name"] for d in dnp for r in rows)
+    assert _settle_on(rows, "99999", dnp[0]["name"], POST_GAME["playoff"][0]) == "NO_ACTION"
+
+
+def test_a_postseason_game_not_logged_yet_leaves_the_bet_open():
+    """No box yet: nothing is graded and nothing is voided. The next pass retries."""
+    assert _settle_on([], "1", "Anyone", POST_GAME["playoff"][0]) is None
+
+
+def test_espn_s_zero_minutes_counts_as_played_and_settles():
+    """Not the did-not-play branch: ESPN's "0" is a row in the box. The search broke such a tie with
+    NBA.com's seconds, which the worker cannot reach, so regular-season bets carry the same call."""
+    store = _post_store("playoff")
+    _post_run(store, "playoff")
+    rows = list(store.log.values())
+    sochan = next(r for r in rows if r["player_name"] == "Jeremy Sochan")
+    assert sochan["minutes"] == 0 and sochan["points"] == 0
+    assert _settle_on(rows, sochan["player_id"], "Jeremy Sochan", POST_GAME["playoff"][0]) == "WIN"
+
+
+# ── a feed row the other way round: the bet must not be stranded ─────────────
+
+FLIP_GID = "NBA_2025-12-16_NYK_SAS"          # the feed's id for the Cup final ESPN has as SAS @ NYK
+
+
+def _flip_store(**extra_games):
+    return FakeStore([{"game_id": FLIP_GID, "game_date": "2025-12-16", "season": 2026, "home": "SAS",
+                       "away": "NYK", "home_score": None, "away_score": None, "went_to_ot": 0,
+                       "commence_time": "2025-12-17T01:40:00+00:00", "source": "games"}, *extra_games.values()])
+
+
+def test_a_final_lands_on_a_feed_row_with_home_and_away_the_other_way_round():
+    """ESPN's final (NYK 124, SAS 113) on the row the bet sits on, with each team's own score, and
+    the box accepted: the players' points are checked per team, so this fails if the scores land
+    the wrong way round as well as if the row is not found."""
+    store = _flip_store()
+    totals = _post_run(store, "cup_final")
+    assert totals["scores_filled"] == 1 and totals["box_games"] == 1 and totals["box_incomplete"] == 0
+    g = store.games[FLIP_GID]
+    assert (g["home_score"], g["away_score"], g["home_win"]) == (113, 124, 0)      # SAS is this row's home
+    assert {k[1] for k in store.log} == {FLIP_GID}
+
+
+def test_a_flipped_row_loses_to_the_id_espn_actually_has():
+    """Both rows in games: the final goes to ESPN's, and models.nba_total_luck refuses the other,
+    so no bet is on the row left without a final."""
+    espn_row = {"game_id": POST_GAME["cup_final"][0], "game_date": "2025-12-16", "season": 2026,
+                "home": "NYK", "away": "SAS", "home_score": None, "away_score": None, "went_to_ot": 0,
+                "commence_time": "2025-12-17T01:30:00+00:00", "source": "games"}
+    store = _flip_store(espn=espn_row)
+    _post_run(store, "cup_final")
+    assert store.games[POST_GAME["cup_final"][0]]["home_score"] == 124
+    assert store.games[FLIP_GID]["home_score"] is None
+
+
+def test_a_series_game_a_day_off_the_other_way_round_is_not_this_final():
+    """Same date only. A row the next day is another game of the series, and giving it this final
+    would grade every bet on it against the wrong game."""
+    store = FakeStore([{"game_id": "NBA_2025-12-17_NYK_SAS", "game_date": "2025-12-17", "season": 2026,
+                        "home": "SAS", "away": "NYK", "home_score": None, "away_score": None,
+                        "went_to_ot": 0, "commence_time": "2025-12-18T01:40:00+00:00", "source": "games"}])
+    totals = _post_run(store, "cup_final", recheck=True)
+    assert totals["not_in_games"] == 1 and store.writes == []

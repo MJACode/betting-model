@@ -72,13 +72,13 @@ export function AllBooksCard({
       </View>
 
       {quotes.map((q) => {
-        // Pinnacle / Bovada / ESPN BET are reference prices — shown, because
+        // Pinnacle / Bovada / ESPN BET / betPARX are reference prices — shown, because
         // the number is real, but never a hand-off (the picker and the chip
         // row exclude them for the same reason).
         const reference = !isBettableBook(q.bookmaker);
         return (
           <Pressable
-            key={q.bookmaker}
+            key={`${q.bookmaker}|${q.line ?? ''}`}
             style={[styles.row, reference && styles.rowReference]}
             // ~38-46pt row (one or two lines); 3pt slop tops up the one-line case.
             hitSlop={{ top: 3, bottom: 3, left: 0, right: 0 }}
@@ -89,7 +89,7 @@ export function AllBooksCard({
               q.line != null ? `${formatSideLine(q.line, pick.pick_side, market)} at ` : ''
             }${formatAmerican(q.price)}${
               q.isBest ? ', best price' : ''
-            }${reference ? ', reference price, not bettable' : ''}`}
+            }${reference ? ', reference price only' : ''}`}
             // The shared hand-off: the betslip link, else the book's app or
             // site. A bettable book with no per-outcome link still opens,
             // rather than a dead row beside live ones.

@@ -48,6 +48,43 @@ jobs:
           npx tsc --noEmit > tsc.log 2>&1 || true
           python3 scripts/check_tsc_baseline.py tsc.log tsc-baseline.txt
 
+      # The pytest job does not npm ci, so a verify script that needs tsx
+      # skips there. This job already installed mobile deps. Same role as
+      # the pytest files that shell out to mobile/scripts/verify_*.ts.
+      - name: Paused catalog
+        working-directory: mobile
+        run: npx tsx scripts/verify_paused_catalog.ts
+
+      # Same reason as the step above: the pytest job does not npm ci, so a
+      # verify script it shells out to skips there. This one has to fail the
+      # PR. verify_line_legs exits 1 on any failed check.
+      - name: Line legs
+        working-directory: mobile
+        run: npx tsx scripts/verify_line_legs.ts
+
+      # Same skip as the two steps above. The scoreboard checks cover the
+      # live-line split rule; pytest-subset does not npm ci.
+      - name: Scoreboard
+        working-directory: mobile
+        run: npx tsx scripts/verify_scoreboard.ts
+
+      # Same skip as the steps above. The pytest job runs this only when
+      # mobile/node_modules is already installed, which it is not there.
+      - name: App Review sign-in
+        working-directory: mobile
+        run: npx tsx scripts/verify_app_review_sign_in.ts
+
+      # NBA 1st Basket board: ranking, "x of N" copy, NBA-only segment.
+      - name: NBA first basket
+        working-directory: mobile
+        run: npx tsx scripts/verify_nba_first_basket.ts
+
+      # Player page minutes: Low MIN threshold, DNP versus a stat line, and
+      # minutes joined onto games outside the loaded window.
+      - name: Player log
+        working-directory: mobile
+        run: npx tsx scripts/verify_player_log.ts
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -59,11 +96,115 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      # Scratch-cluster tests (tests/byom_scratch.py and the discord void
-      # notice) shell out to initdb. The runner has no Postgres until this
-      # step; without it those tests skip and CI never applies the SQL.
+      # Scratch-cluster tests shell out to initdb/pg_ctl and start their own
+      # server (tests/byom_scratch.py, tests/_pg.py, tests/test_nhl_stats_views.py).
+      # A service container would not put those binaries on PATH. Ubuntu noble's
+      # postgresql metapackage is Postgres 16, the tree those finders already
+      # search. Hosted runners fail DNS for azure.archive.ubuntu.com and one
+      # apt then dies before pytest (run 43033373680). A hostname that does not
+      # resolve within 3s is skipped: no second try of the same mirror. If
+      # archive.ubuntu.com also fails that probe, the step installs the
+      # embedded-postgres 18.x wheel on PATH instead of waiting out apt.
+      # Each apt command is timeout -k 5 90, and update && install, because
+      # set -e does not fire inside `if`. The step still fails if initdb is
+      # missing, so the scratch tests cannot skip quietly.
       - name: Install Postgres for scratch-cluster tests
-        run: sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql
+        run: |
+          sudo tee /etc/apt/apt.conf.d/99-ci-retries >/dev/null <<'EOF'
+          Acquire::Retries "3";
+          Acquire::http::Timeout "15";
+          Acquire::https::Timeout "15";
+          EOF
+          export DEBIAN_FRONTEND=noninteractive
+
+          release_apt() {
+            sudo killall -q apt-get apt dpkg >/dev/null 2>&1 || true
+            sudo rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock \
+              /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock
+          }
+          # `if apt_install` suppresses set -e for the whole function, so a
+          # failed update must not fall through into the install.
+          apt_install() {
+            sudo timeout -k 5 90 apt-get update -qq \
+              && sudo timeout -k 5 90 apt-get install -y -qq postgresql
+          }
+          # Same resolver apt uses. A miss is terminal for that hostname.
+          mirror_resolves() {
+            timeout -k 2 3 getent hosts "$1" >/dev/null 2>&1
+          }
+
+          provisioned=""
+          if mirror_resolves azure.archive.ubuntu.com; then
+            if apt_install; then
+              provisioned="apt"
+            else
+              echo "apt against azure.archive.ubuntu.com failed; not retrying that host"
+              release_apt
+            fi
+          else
+            echo "azure.archive.ubuntu.com did not resolve; skipping apt"
+          fi
+
+          if [ -z "$provisioned" ]; then
+            if mirror_resolves archive.ubuntu.com; then
+              echo "pointing apt at archive.ubuntu.com"
+              sudo find /etc/apt -type f \
+                \( -name 'sources.list' -o -name '*.sources' -o -name '*.list' -o -name 'apt-mirrors.txt' \) \
+                -exec sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' {} +
+              release_apt
+              if apt_install; then
+                provisioned="archive.ubuntu.com"
+              else
+                echo "apt against archive.ubuntu.com failed; not retrying that host"
+                release_apt
+              fi
+            else
+              echo "archive.ubuntu.com did not resolve; skipping apt retarget"
+            fi
+          fi
+
+          if [ -z "$provisioned" ]; then
+            echo "apt cannot reach an Ubuntu mirror; installing embedded-postgres"
+            release_apt
+            python -m pip install "embedded-postgres>=18,<19"
+            bin_dir="$(python -c 'import warnings; warnings.filterwarnings("ignore"); import embedded_postgres, pathlib; print(pathlib.Path(embedded_postgres.__file__).resolve().parent / "pginstall" / "bin")')"
+            if [ ! -x "$bin_dir/initdb" ] || [ ! -x "$bin_dir/pg_ctl" ]; then
+              echo "embedded-postgres has no initdb/pg_ctl in ${bin_dir}" >&2
+              exit 1
+            fi
+            echo "$bin_dir" >> "$GITHUB_PATH"
+            export PATH="$bin_dir:$PATH"
+            provisioned="embedded-postgres"
+          fi
+
+          echo "postgres provisioned via ${provisioned}"
+          python - <<'PY'
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          missing = []
+          for name in ("initdb", "pg_ctl"):
+              found = shutil.which(name)
+              if not found:
+                  root = Path("/usr/lib/postgresql")
+                  if root.is_dir():
+                      for version in sorted(root.iterdir(), reverse=True):
+                          cand = version / "bin" / name
+                          if cand.is_file():
+                              found = str(cand)
+                              break
+              if not found:
+                  missing.append(name)
+                  continue
+              print(f"{name}: {found}")
+              print(subprocess.check_output([found, "--version"], text=True).strip())
+          if missing:
+              raise SystemExit(
+                  "initdb/pg_ctl still missing (%s); scratch-cluster tests would skip"
+                  % ", ".join(missing)
+              )
+          PY
 
       - name: Install minimal test deps
         run: |
@@ -103,10 +244,12 @@ jobs:
         run: |
           python -m pytest -q -rs \
             tests/test_config.py \
+            tests/test_claude_settings_allowlist.py \
             tests/test_mlb_retrain_freeze.py \
             tests/test_retired_models.py \
             tests/test_mobile_threshold_parity.py \
             tests/test_mobile_bankroll.py \
+            tests/test_mobile_settings_home.py \
             tests/test_nfl_prop_thresholds.py \
             tests/test_pick_lock_is_on_picks.py \
             tests/test_pick_lock_survives_settlement.py \
@@ -121,6 +264,7 @@ jobs:
             tests/test_record_units_agree.py \
             tests/test_record_hero.py \
             tests/test_app_crash_log.py \
+            tests/test_app_timings.py \
             tests/test_yesterday_discord_units.py \
             tests/test_settlement_timing.py \
             tests/test_nhl_boxscore.py \
@@ -135,6 +279,7 @@ jobs:
             tests/test_nba_props.py \
             tests/test_nba_results_ingestor.py \
             tests/test_nba_results_wiring.py \
+            tests/test_nba_first_basket.py \
             tests/test_nba_schedule_ingestor.py \
             tests/test_prop_odds_book_last_update.py \
             tests/test_prop_box_scores.py \
@@ -147,6 +292,7 @@ jobs:
             tests/test_paused_and_no_signal_rows.py \
             tests/test_paused_keeps_real_verdict.py \
             tests/test_nfl_scored_rows.py \
+            tests/test_pick_label_copy.py \
             tests/test_nfl_rule_2026_track.py \
             tests/test_game_scorer_spares_nfl_props.py \
             tests/test_nfl_prop_unstarted_clear.py \
@@ -175,9 +321,12 @@ jobs:
             tests/test_mobile_betslip_combine.py \
             tests/test_mobile_contrast_tokens.py \
             tests/test_mobile_error_states.py \
+            tests/test_mobile_paused_catalog.py \
             tests/test_mobile_pick_cta.py \
             tests/test_mobile_line_movement.py \
             tests/test_mobile_a11y.py \
+            tests/test_mobile_back_button.py \
+            tests/test_stats_board_a11y.py \
             tests/test_mobile_nhl_lookahead.py \
             tests/test_discord_publish_sync.py \
             tests/test_discord_void_notice.py \
@@ -187,6 +336,12 @@ jobs:
             tests/test_byom_game_facts.py \
             tests/test_byom_prop_facts.py \
             tests/test_byom_backtest.py \
+            tests/test_byom_dk_start_price.py \
+            tests/test_byom_refresh.py \
+            tests/test_byom_saved_models.py \
+            tests/test_byom_mobile.py \
+            tests/test_byom_bet_row_date.py \
+            tests/test_byom_official_legs.py \
             tests/test_clv_card_price_taken.py \
             tests/test_publish_key_identity.py \
             tests/test_void_picks.py \
@@ -195,7 +350,12 @@ jobs:
             tests/test_results_recap_message_id.py \
             tests/test_backfill_results_recap.py \
             tests/test_job_queue.py \
+            tests/test_ncaab_teams.py \
+            tests/test_ncaab_odds_history.py \
+            tests/test_ncaab_odds_replay_pg.py \
+            tests/test_ncaab_injury_feed.py \
             tests/test_idle_read_transaction.py \
+            tests/test_monitoring.py \
             tests/test_view_migration_lock_noop.py \
             tests/test_record_correction_post.py \
             tests/test_voided_pick_not_rechosen.py \
@@ -213,4 +373,15 @@ jobs:
             tests/test_ddl_guard.py \
             tests/test_nfl_wind_stability.py \
             tests/test_mobile_lines_board.py \
-            tests/test_pregame_insert_cutoff.py
+            tests/test_alternate_game_lines.py \
+            tests/test_alt_game_lines.py \
+            tests/test_latest_line_state.py \
+            tests/test_mobile_scoreboard.py \
+            tests/test_live_scoreboard.py \
+            tests/test_scoreboard_splits.py \
+            tests/test_pregame_insert_cutoff.py \
+            tests/test_health_pregame_prices_current.py \
+            tests/test_web_site.py \
+            tests/test_app_review_sign_in.py \
+            tests/test_deploy_drain.py \
+            tests/test_scoring_lease.py

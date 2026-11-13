@@ -126,6 +126,13 @@ def test_eastern_game_date_matches_the_odds_ingestor_for_a_night_kick():
     assert eastern_game_date("2026-11-15T02:19:00.000Z") == "2026-11-14"
 
 
+def test_eastern_game_date_files_army_tulsa_on_oct_23():
+    """CFBD 2026-10-24T00:30:00Z is 8:30pm ET on Oct 23. The odds row is
+    NCAAF_2026-10-23_army_tulsa. NCAAF_2026-10-24_army_tulsa was written
+    2026-08-29, before this conversion, and is retained."""
+    assert eastern_game_date("2026-10-24T00:30:00.000Z") == "2026-10-23"
+
+
 def test_eastern_game_date_agrees_with_utc_before_8pm_et():
     assert eastern_game_date("2025-09-06T16:00:00.000Z") == "2025-09-06"
 
@@ -1102,3 +1109,127 @@ def test_the_resolved_id_is_the_cfbd_texas_am_row(citadel_registry):
     home = citadel_registry.resolve_odds_api_school("Texas A&M Aggies")
     assert build_ncaaf_game_id("2026-10-17", away, home) == \
         "NCAAF_2026-10-17_the-citadel_texas-a-m"
+
+
+# ── 429 backoff (2026-11-04 daily, week 2 advanced stats) ────────────────────
+
+class _Resp:
+    def __init__(self, status, body=None, headers=None):
+        self.status_code = status
+        self._body = [] if body is None else body
+        self.headers = headers or {}
+
+    def json(self):
+        return self._body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"status {self.status_code}")
+
+
+class _Sess:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = 0
+        self.params = None
+
+    def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        self.params = params
+        if not self.responses:
+            raise AssertionError("CFBD fake session ran out of responses")
+        return self.responses.pop(0)
+
+
+def _arm_cfbd(monkeypatch, responses, pause=0):
+    import data.ingestors.cfbd_ingestor as cf
+    sleeps = []
+    monkeypatch.setattr(config, "CFBD_API_KEY", "test-key")
+    monkeypatch.setattr(config, "CFBD_REQUEST_PAUSE", pause)
+    monkeypatch.setattr(cf.time, "sleep", sleeps.append)
+    sess = _Sess(responses)
+    monkeypatch.setattr(cf, "_session", lambda: sess)
+    return cf, sess, sleeps
+
+
+def test_the_default_pause_between_cfbd_calls_is_one_second():
+    text = (Path(__file__).resolve().parents[1] / "config.py").read_text(encoding="utf-8")
+    assert 'os.environ.get("CFBD_REQUEST_PAUSE", "1.0")' in text
+
+
+def test_a_429_waits_for_retry_after_then_returns_the_body(monkeypatch):
+    cf, sess, sleeps = _arm_cfbd(monkeypatch, [
+        _Resp(429, headers={"Retry-After": "7"}),
+        _Resp(200, body=[{"ok": 1}]),
+    ])
+    assert cf._get("/stats/season/advanced", year=2026) == [{"ok": 1}]
+    assert sleeps == [7.0, 0]
+    assert sess.params == {"year": 2026}
+    assert "_budget" not in (sess.params or {})
+
+
+def test_retry_after_is_capped_at_sixty_seconds(monkeypatch):
+    cf, _sess, sleeps = _arm_cfbd(monkeypatch, [
+        _Resp(429, headers={"Retry-After": "90"}),
+        _Resp(200, body={"ok": True}),
+    ])
+    assert cf._get("/ratings/elo") == {"ok": True}
+    assert sleeps[0] == 60.0
+
+
+def test_a_missing_retry_after_uses_exponential_backoff(monkeypatch):
+    cf, sess, sleeps = _arm_cfbd(monkeypatch, [_Resp(429) for _ in range(6)])
+    assert cf._get("/stats/season/advanced") is None
+    assert sess.calls == 6
+    assert sleeps == [5.0, 10.0, 20.0, 40.0, 60.0]
+
+
+def test_an_http_date_retry_after_is_seconds_from_now(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from email.utils import format_datetime
+    when = datetime.now(timezone.utc) + timedelta(seconds=12)
+    cf, _sess, sleeps = _arm_cfbd(monkeypatch, [
+        _Resp(429, headers={"Retry-After": format_datetime(when, usegmt=True)}),
+        _Resp(200, body=[]),
+    ])
+    assert cf._get("/talent") == []
+    assert sleeps[0] == pytest.approx(12, abs=2)
+    assert sleeps[0] < cf._CFBD_BACKOFF_CAP_S
+
+
+def test_a_call_stops_when_the_next_sleep_would_pass_its_budget(monkeypatch):
+    cf, sess, sleeps = _arm_cfbd(monkeypatch, [
+        _Resp(429, headers={"Retry-After": "30"}),
+        _Resp(200, body=[1]),
+    ])
+    monkeypatch.setattr(cf, "_CFBD_CALL_BUDGET_S", 0)
+    assert cf._get("/stats/season/advanced", year=2026) is None
+    assert sess.calls == 1
+    assert sleeps == []
+
+
+def test_a_shared_season_budget_stops_a_later_429(monkeypatch):
+    cf, sess, sleeps = _arm_cfbd(monkeypatch, [
+        _Resp(429),
+        _Resp(200, body=[1]),
+    ])
+    clock = cf._RetryClock(0)
+    assert cf._get("/ratings/elo", _budget=clock, week=2) is None
+    assert sess.calls == 1
+    assert sleeps == []
+    assert sess.params == {"week": 2}
+
+
+def test_a_connection_error_uses_the_same_backoff_and_then_succeeds(monkeypatch):
+    import requests
+    cf, sess, sleeps = _arm_cfbd(monkeypatch, [_Resp(200, body={"n": 1})])
+
+    def get(url, params=None, timeout=None):
+        sess.calls += 1
+        if sess.calls == 1:
+            raise requests.ConnectionError("reset")
+        return sess.responses.pop(0)
+
+    sess.get = get
+    assert cf._get("/ratings/sp", year=2025) == {"n": 1}
+    assert sleeps == [5.0, 0]

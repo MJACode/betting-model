@@ -113,7 +113,7 @@ def test_an_uncalibrated_lead_is_sized_rather_than_zeroed_on_the_card():
     """
     out = _probe(
         _CLE_JAX +
-        "b = w.select_bets(g, threshold=11.0, bankroll=1.0, max_fire_lead=99)\n"
+        "b = w.select_bets(g, threshold=11.0, max_fire_lead=99)\n"
         "print(len(b))\n"
         "print(float(b.units.iloc[0]))\n"
         "print(bool(b.calibrated_lead.iloc[0]))\n"
@@ -134,7 +134,7 @@ def test_at_the_default_gate_that_same_row_does_not_fire_at_all():
     insert-once, so the two decisions could not be separated once it fired.
     """
     out = _probe(_CLE_JAX +
-                 "print(len(w.select_bets(g, threshold=11.0, bankroll=1.0)))\n"
+                 "print(len(w.select_bets(g, threshold=11.0)))\n"
                  "print(w.MAX_FIRE_LEAD)\n")
     assert int(out[0]) == 0, (
         f"a lead-8.71 bet fired at the default gate (MAX_FIRE_LEAD={out[1]})")

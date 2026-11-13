@@ -1,9 +1,9 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { formatAmerican, formatPct } from '@/lib/format';
+import { formatAmerican, formatPct, formatStampET } from '@/lib/format';
 import { bookLabel } from '@/lib/markets';
-import { isLineLeg } from '@/lib/lineLegs';
+import { isLineLeg, PREGAME_ALT_NOTE } from '@/lib/lineLegs';
 import { modelShort } from '@/lib/modelMeta';
 import { LiveDot } from '@/components/LiveDot';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -15,11 +15,14 @@ interface Props {
   onRemove?: () => void;
   /** Optional — when omitted (e.g. manual builder) the swap control is hidden. */
   onSwap?: () => void;
+  /** Optional — change the leg's line (a Stats line leg) or its text and odds
+   *  (a custom leg). Omitted for model picks, which keep their own line. */
+  onEdit?: () => void;
 }
 
 /** Compact card for a single parlay leg, modeled on PickCard. Read-mostly with
  * trailing remove / swap controls. */
-export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
+export function ParlayLegCard({ leg, onRemove, onSwap, onEdit }: Props) {
   // A leg rebuilt from a saved parlay carries no live game, but its snapshot
   // kept the matchup — so it reads "MIL @ CHC / Over 8.5" here the same way it
   // does on the saved card, instead of losing the game it belongs to.
@@ -35,15 +38,17 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
           <View style={styles.modelChip}>
             <Text style={styles.modelChipText}>{modelShort(leg.modelId)}</Text>
           </View>
-          <View style={[styles.tag, leg.isFavorite ? styles.favTag : styles.dogTag]}>
-            <Text style={[styles.tagText, leg.isFavorite ? styles.favText : styles.dogText]}>
-              {leg.isFavorite ? 'FAV' : 'DOG'}
-            </Text>
-          </View>
+          {leg.pregameUnpriced ? null : (
+            <View style={[styles.tag, leg.isFavorite ? styles.favTag : styles.dogTag]}>
+              <Text style={[styles.tagText, leg.isFavorite ? styles.favText : styles.dogText]}>
+                {leg.isFavorite ? 'FAV' : 'DOG'}
+              </Text>
+            </View>
+          )}
           {/* An in-play leg is a different kind of bet from the pre-game ones
-              beside it — its price is a ~45s-old snapshot of a number that is
-              still moving — and this card is on the screen the bet is actually
-              placed from. Same live dot the board uses. */}
+              beside it — its price is the number it locked at, while the
+              book's number keeps moving — and this card is on the screen the
+              bet is actually placed from. Same live dot the board uses. */}
           {leg.isLive ? (
             <View style={[styles.tag, styles.liveTag]}>
               <LiveDot />
@@ -52,26 +57,51 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
           ) : null}
           {/* A Stats line leg has no model: its probability is the odds-implied
               one, and it says so rather than reading as a model call. */}
-          <Text style={styles.stat}>
-            {isLineLeg(leg) ? `implied ${formatPct(leg.modelProb)}` : formatPct(leg.modelProb)}
-          </Text>
-          <Text style={styles.stat}>
-            {formatAmerican(leg.americanOdds)}
-            {leg.dkPriced === false && leg.pricedAt ? ` · ${bookLabel(leg.pricedAt)}` : ''}
-          </Text>
+          {leg.pregameUnpriced ? null : (
+            <>
+              <Text style={[styles.stat, leg.pregameStale && styles.struck]}>
+                {isLineLeg(leg) ? `implied ${formatPct(leg.modelProb)}` : formatPct(leg.modelProb)}
+              </Text>
+              <Text style={[styles.stat, leg.pregameStale && styles.struck]}>
+                {formatAmerican(leg.americanOdds)}
+                {leg.dkPriced === false && leg.pricedAt ? ` · ${bookLabel(leg.pricedAt)}` : ''}
+              </Text>
+            </>
+          )}
+          {/* A price from the alternate ladder says how old it is, so it is
+              not read as this hour's number (UX review, 2026-10-29). */}
+          {leg.pricedFromLadder && !leg.pregameStale ? (
+            <Text style={styles.ladderAge}>
+              alt price {formatStampET(leg.pricedAsOf) || 'today'}
+            </Text>
+          ) : null}
           {leg.bestBook ? (
             <Text style={styles.bestBook}>
               {bookLabel(leg.bestBook.bookmaker)} {formatAmerican(leg.bestBook.american)}
             </Text>
           ) : null}
         </View>
+        {/* After kickoff an alternate the user already took stays on the
+            slip. Its own line, so the sentence can wrap. */}
+        {leg.pregameStale ? (
+          <Text style={styles.pregameNote}>{PREGAME_ALT_NOTE}</Text>
+        ) : null}
       </View>
-      {onSwap || onRemove ? (
+      {onSwap || onRemove || onEdit ? (
         <View style={styles.controls}>
+          {onEdit ? (
+            <Pressable
+              onPress={onEdit}
+              accessibilityRole="button"
+              accessibilityLabel={`Edit ${leg.label}`}
+              style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
+            >
+              <Ionicons name="create-outline" size={20} color={colors.tint} />
+            </Pressable>
+          ) : null}
           {onSwap ? (
             <Pressable
               onPress={onSwap}
-              hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={`Swap ${leg.label} for another leg`}
               style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
@@ -82,7 +112,6 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
           {onRemove ? (
             <Pressable
               onPress={onRemove}
-              hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={`Remove ${leg.label} from the slip`}
               style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
@@ -166,6 +195,20 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: font.weight.medium,
   },
+  ladderAge: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  pregameNote: {
+    fontSize: font.size.footnote,
+    color: colors.medInk,
+    fontWeight: font.weight.medium,
+    marginTop: spacing.xs,
+  },
+  struck: {
+    textDecorationLine: 'line-through',
+    color: colors.textSecondary,
+  },
   bestBook: {
     fontSize: font.size.footnote,
     color: colors.betInk,
@@ -174,11 +217,16 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    marginLeft: spacing.sm,
+    marginLeft: spacing.xs,
   },
+  // A 44pt box each, no hit slop: Edit and Remove sit side by side and
+  // slop made their targets overlap, so a near-miss on Edit removed the leg
+  // (UX review, 2026-10-28).
   ctrl: {
-    padding: 4,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pressed: {
     opacity: 0.5,
