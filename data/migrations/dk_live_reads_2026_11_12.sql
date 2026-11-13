@@ -37,10 +37,15 @@ BEGIN
   FOREACH t IN ARRAY ARRAY['public.dk_live_reads', 'public.dk_live_feed'] LOOP
     IF to_regclass(t) IS NULL
        OR NOT EXISTS (SELECT 1 FROM pg_class WHERE oid = to_regclass(t) AND relrowsecurity)
-       OR has_table_privilege('anon', t, 'SELECT') OR has_table_privilege('anon', t, 'INSERT')
-       OR has_table_privilege('anon', t, 'UPDATE') OR has_table_privilege('anon', t, 'DELETE')
-       OR has_table_privilege('authenticated', t, 'SELECT') OR has_table_privilege('authenticated', t, 'INSERT')
-       OR has_table_privilege('authenticated', t, 'UPDATE') OR has_table_privilege('authenticated', t, 'DELETE')
+       -- the oid form: a missing table is NULL here, never a "does not exist" error
+       OR has_table_privilege('anon', to_regclass(t), 'SELECT')
+       OR has_table_privilege('anon', to_regclass(t), 'INSERT')
+       OR has_table_privilege('anon', to_regclass(t), 'UPDATE')
+       OR has_table_privilege('anon', to_regclass(t), 'DELETE')
+       OR has_table_privilege('authenticated', to_regclass(t), 'SELECT')
+       OR has_table_privilege('authenticated', to_regclass(t), 'INSERT')
+       OR has_table_privilege('authenticated', to_regclass(t), 'UPDATE')
+       OR has_table_privilege('authenticated', to_regclass(t), 'DELETE')
     THEN
       done := false;
     END IF;
