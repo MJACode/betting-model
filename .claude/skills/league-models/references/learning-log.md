@@ -30,6 +30,24 @@ review as its own entry.
 
 ---
 
+## 2026-11-13 — EuroLeague full game, round 1
+
+1. **Scope.** The EuroLeague build: moneyline, spread and total, 2021-22 on.
+2. **Tried.** The data check, baselines at the first post and the close, the
+   four catalogued basketball methods unchanged, the scout's relocation and
+   club-home-edge leads, 283 cells with a false-discovery correction
+   (`docs/euroleague_market_audit.md`, full game round 1). Nothing clears.
+3. **New.** Three method results in `methods.md` (line shopping and a
+   book's moneyline against its own spread both fail here; the first post
+   could not run because the sharp book was rarely up). A lead that is a
+   decision, not a pass: favourites at -500 or shorter win 93.1% against an
+   84.1% price, on a price band whose neighbour loses -7.11%.
+4. **Corrected.** "DraftKings posts nearest the tip" (the league doc and an
+   `odds_ingestor` comment) came from one day's board; the history says a
+   median 45-73 hours before the tip. The research brief's "DraftKings
+   priced nothing in 2021-22" was a misreading of the 2020-21 census.
+5. **The framework.** Nothing changed in `SKILL.md`.
+
 ## 2026-11-13 — EuroLeague first half and first quarter, round 1
 
 1. **Scope.** The EuroLeague build (mike, 2026-11-12, "all markets including

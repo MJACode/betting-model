@@ -76,15 +76,20 @@ error.
   on the game." *Worked*: men's college spreads, 409 bets +9.97% [0.8, 18.4]
   (the doc's own estimate of the true edge: about +2% a bet). *Failed*: college
   football (337 of 338 bets were road teams: a tilt in the fitted table); the
-  women's college game (the book standing apart was more often right).
+  women's college game (the book standing apart was more often right);
+  EuroLeague spreads (99.6% of 538 bets were home teams, closing value
+  negative: a home lean, not shopping; `docs/euroleague_market_audit.md`).
 - **A book's moneyline against the same book's spread.** De-vig the spread,
   invert the margin table, take the win probability. *Shipped without
   clearing*: men's college, 838 bets +4.22% [-1.2, 9.3], chosen from 162
   versions after the fact. *Failed*: college football, women's college, pro
-  basketball (-25.0% in 2025-26).
+  basketball (-25.0% in 2025-26), EuroLeague (-11.00% on 86).
 - **The first post.** Decide at the moment a book first posts, with enough
   other books up to form a reference. *Worked*: men's college opening
-  moneyline, 297 bets +15.15% [7.34, 23.37].
+  moneyline, 297 bets +15.15% [7.34, 23.37]. *Could not run*: EuroLeague,
+  where the sharp book was up at only 103 of DraftKings' first posts in three
+  seasons; check that the reference is up at the soft book's first post
+  before planning this rule.
 - **A stale opener.** Bet the side the sharp book favours at a soft book's
   stale opening number. *Passed the placebos* (reversed books null, other
   opens null, CLV 0.694, every season positive) and *failed executability*:

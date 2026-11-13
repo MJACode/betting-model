@@ -19,6 +19,62 @@ No paid calls, no sign-ups. The only API calls were free, keyless GETs to the of
 
 Evidence grades: **Strong** = out-of-sample, real prices, bet count, interval or CLV, nothing to sell. **Weak** = win rate only, flat -110, in-sample, one season, or undated. **Noise** = pick sellers, tipsters.
 
+## Full game, round 1 (2026-11-13)
+
+Moneyline, spread and total, 2021-22 to 2026-27 to date, run by a read-only
+research agent on the local cache. Every table, each naming its script:
+`docs/euroleague_fullgame_round1.md`; the scripts are
+`scripts/euroleague_research/r2_*.py` (`r2_report.py` reruns them all).
+**Verdict: nothing clears the bar.** The numbers are the agent's.
+
+- **The data.** 24 of 397,197 pre-game quotes were incoherent and dropped; the
+  home spread's sign agrees with the moneyline favourite on 98-100% of pairs
+  at every book. `snapshot_at` is the book's own update stamp (the snapshot
+  that caught it came a median 46 seconds later). DraftKings priced 292 games
+  of 2021-22 and first posts a median 45-73 hours before the tip; Pinnacle
+  28-43 hours. Pinnacle priced 240/299, 272/328, 291/331, 330/330, 402/402
+  and 107/107 games, 2021-22 to 2026-27.
+- **Baselines.** Worst: the away moneyline at DraftKings' close, -14.39%
+  [-18.25, -10.05]; underdogs longer than +300 lose about 40%. Best: the home
+  moneyline at the best price, about +1.4%, interval through zero. Pinnacle's
+  open is as accurate as its close (moneyline log loss 0.6105 against 0.6116
+  on 1,642 games). Home teams won 63% against a 60% no-vig price; in 2026-27
+  to date 54% against 60%.
+- **The four basketball methods, unchanged.** Line shopping against the
+  median: +7.78% on 538 spread bets, but 99.6% are home teams, 64% sit on the
+  consensus number and closing-line value is negative: a home lean, not line
+  shopping (+2.61% [-4.54, +9.48] without its 10 best dates, 2026-27 -25%).
+  A book's moneyline against its own spread: -11.00% on 86. The first post
+  against Pinnacle could not run: Pinnacle was up at 45, 52 and 6 of
+  DraftKings' first posts. Sharp against soft at one snapshot: 13-23 bets,
+  null.
+- **The scout's leads.** Relocated "home" games show no shortfall (+0.74
+  points against +0.48 at normal home games). A club's home edge does not
+  persist season to season (slope 0.30, SE 0.31).
+- **Home underdogs against the spread:** 454 bets +9.72% [+2.44, +16.89],
+  rising to +19.4% at +5 or more. **Fails** three kill tests: 2025-26 carries
+  64% of the units, +5.37% without its 10 best dates, +3.16% walk-forward;
+  it misses the multiplicity bar and was chosen with the table in view.
+  Frozen, to be read unchanged on 2026-27.
+- **Moneyline favourites at -500 or shorter:** at DraftKings' close 188 bets,
+  175-13, +34.59 units, +6.13% [+2.27, +9.60] (they won 93.1% against an
+  84.1% price); +7.74% at its first post; +6.32% at Pinnacle's close; 5 of 6
+  seasons positive (2022-23 -1.39%); +4.69% [+0.71, +8.41] without its 10
+  best dates; survives the false-discovery correction at the first post and
+  the best decidable close. **What it misses:** 188 bets, under the 200 of
+  the stricter bar; one season negative; it is a price band read off the
+  table, and the band beside it loses (-500 to -200: 793 bets, -151.38 units,
+  -7.11%), so the edge sits on a cliff, not a plateau. **The price range:**
+  median -675, shortest -4,000, 564 units risked to win 73.6, each loss 3
+  units, 96% home favourites. Whether to bet it is mike's call.
+- **Multiplicity:** 283 cells, 4 survive at a 10% false-discovery rate.
+- **What the sample resolves:** about +/-3.5-3.8 points for one side over
+  1,770 games; about +/-7 for a 450-bet rule.
+- **Next:** the home lean on moneylines and first halves; a market-anchored
+  model with home-underdog and attendance terms; totals by referee crew and
+  at the opening total (DraftKings first-post overs lose -1.4% against -7.7%
+  for unders).
+
 ## First half and first quarter, round 1 (2026-11-13)
 
 Run by a read-only research agent on the local cache (no paid call, no
