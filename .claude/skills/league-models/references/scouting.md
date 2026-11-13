@@ -36,6 +36,11 @@ not a refusal forever, and a route that failed one way may answer another
 | euroleaguebasketball.net (injury reports) | a plain fetch, and curl | **no (429, a Vercel security checkpoint; 429 again 2026-11-13)**; Eurohoops reposts the reports |
 | University repositories (cris.unibo.it, iris.uniroma4.it), bettingexpert.com | a plain fetch | **no (403 both, again 2026-11-13)**; centaur.reading.ac.uk 200 on 2026-11-13 (bot-check page on 2026-11-12); bettingexpert.com 200 on 2026-11-13; read abstracts through search results |
 | OddsPortal, BetExplorer, Flashscore odds archives | robots.txt | **read (robots.txt answered 200 on all three again 2026-11-13), and they disallow the archives**: OddsPortal bars every past-season path (`-1998` to `-2024`). Not scraped. |
+| GitHub release assets and raw files (fight-canon-db, ultimate_ufc_dataset, nlbair/ufc-data) | a plain download | yes (200, 2026-11-13, UFC scout) |
+| bestfightodds.com robots.txt | a plain fetch | **allows everything but `/cnadm/`** (2026-11-13); its per-book prop pages not yet read |
+| tapology.com robots.txt | a plain fetch | **disallows Claude's crawlers by name** (2026-11-13). Not fetched. |
+| Springer article pages (J. Econ. Finance) | a plain fetch | **redirects to a login**; Crossref gives the title and date |
+| biblos.hec.ca, statds.org, thescholarship.ecu.edu (thesis and poster PDFs) | a plain fetch | yes (200, 2026-11-13) |
 
 **The weekly cloud review cannot re-probe this table.** Its network refused
 17 of 18 sites on 2026-11-13 (only `api.github.com` answered; the egress

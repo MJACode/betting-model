@@ -8,7 +8,9 @@ not played, being played, or played but not yet in the logs its inputs read.
 The shapes below are the measured ones: pick 3688041 (Wisconsin vs USC Under
 52.5, decided 10-17 10:22Z, 13 hours before Wisconsin played at UCLA), the
 WNBA postseason picks written while game N was still on, and a UFC card not
-yet in the fight log.
+yet in the fight log. (The UFC shape ran through this scorer until its three
+models were retired on 2026-11-13; the rule itself is pinned in
+tests/test_schedule_context.py.)
 
 No database: the connection is a stand-in that answers the scorer's reads.
 """
@@ -95,9 +97,8 @@ def _run(monkeypatch, conn, sport):
     monkeypatch.setattr(scorer, "_get_postponed_games", lambda _d: set())
     monkeypatch.setattr(scorer, "_get_dk_odds", lambda *a, **k: {"home_price": -110})
     import features.ncaaf_feature_engine as nfe
-    import features.ufc_feature_engine as ufe
     import features.wnba_feature_engine as wfe
-    for mod, name in ((nfe, "build_ncaaf_game_features"), (ufe, "build_ufc_game_features"),
+    for mod, name in ((nfe, "build_ncaaf_game_features"),
                       (wfe, "build_wnba_game_features")):
         monkeypatch.setattr(mod, name, lambda *a, **k: {"f": 1})
     monkeypatch.setattr(scorer, "build_nhl_game_features", lambda *a, **k: {"f": 1})
@@ -211,25 +212,6 @@ def test_a_row_no_book_priced_inside_the_scoring_window_is_not_a_game(monkeypatc
     holds = _run(monkeypatch, _BoardConn(board, schedule, priced={real}), "WNBA")
     real_holds = {k: v for k, v in holds.items() if k[0] == real}
     assert real_holds and set(real_holds.values()) == {None}, real_holds
-
-
-# ── UFC: a card not in the fight log yet ─────────────────────────────────────
-
-def test_ufc_waits_for_a_fighters_card_to_reach_the_fight_log(monkeypatch):
-    target = f"UFC_{_d(5)}_jan-blachowicz_alex-pereira"
-    prev = f"UFC_{_d(-2)}_alex-pereira_jiri-prochazka"
-    board = [(target, "UFC", 2026, _d(5), "Alex Pereira", "Jan Blachowicz", _t(5 * 24))]
-    schedule = [(target, _d(5), "Alex Pereira", "Jan Blachowicz", _t(5 * 24), None, None),
-                (prev, _d(-2), "Jiri Prochazka", "Alex Pereira", _t(-50), None, None)]
-    holds = _run(monkeypatch, _BoardConn(board, schedule, priced={prev}, ufc_cards=[_d(-30)]),
-                 "UFC")
-    assert holds and all(
-        v == f"waiting for Alex Pereira's {_d(-2)} fight to be played and logged"
-        for v in holds.values()), holds
-    # The card lands: decided.
-    holds = _run(monkeypatch, _BoardConn(board, schedule, priced={prev},
-                                         ufc_cards=[_d(-30), _d(-2)]), "UFC")
-    assert holds and set(holds.values()) == {None}, holds
 
 
 # ── MLB: World Series game N+1 while game N is on, or not yet logged ─────────
@@ -352,53 +334,6 @@ def test_a_paused_models_held_row_keeps_the_pause_note(monkeypatch):
                    paused=True)
     assert picks and {p["signal_type"] for p in picks} == {"NONE"}
     assert {p["downgrade_reason"] for p in picks} == {config.PAUSED_NOTE}
-
-
-class _Clf3:
-    def predict_proba(self, X):
-        return np.array([[0.80, 0.15, 0.05]])
-
-
-class _ClfOver:
-    def predict_proba(self, X):
-        return np.array([[0.10, 0.90]])
-
-
-UFC_HOLD = "waiting for Alex Pereira's 2026-10-18 fight to be played and logged"
-
-
-def _ufc_score(monkeypatch, model_id, clf, *, hold=None):
-    """score_game on a UFC fight with no DraftKings line, so the method model
-    and the round-totals model each take their own writing path. The price
-    rule is off (REQUIRE_DK_PRICE=0 is a supported setting) so both would BET."""
-    monkeypatch.setattr(scorer, "load_model", lambda mid: {"model": clf, "feature_cols": []})
-    monkeypatch.setattr(scorer, "_get_scoring_odds", lambda *a, **k: None)
-    monkeypatch.setattr(scorer, "_get_dk_odds", lambda *a, **k: None)
-    monkeypatch.setattr(scorer, "REQUIRE_DK_PRICE", False)
-    monkeypatch.setattr(scorer, "_is_paused", lambda mid: False)
-    return scorer.score_game(
-        None, "UFC_2026-10-25_jan-blachowicz_alex-pereira", model_id,
-        {"home_team": "Alex Pereira", "away_team": "Jan Blachowicz",
-         "game_date": "2026-10-25", "total_line": 2.5},
-        bankroll=1000.0, dry_run=True, commence_time="2026-10-26T03:00:00Z",
-        **({"schedule_hold": hold} if hold else {}))
-
-
-def test_the_ufc_method_model_writes_its_held_row_none_with_the_reason(monkeypatch):
-    assert {p["signal_type"] for p in _ufc_score(
-        monkeypatch, "ufc_method_of_victory", _Clf3())} == {"BET"}
-    (pick,) = _ufc_score(monkeypatch, "ufc_method_of_victory", _Clf3(), hold=UFC_HOLD)
-    assert pick["signal_type"] == "NONE" and pick["downgrade_reason"] == UFC_HOLD
-    assert pick["recommended_bet"] == 0.0
-
-
-def test_ufc_round_totals_with_no_book_line_write_their_held_row_none(monkeypatch):
-    assert {p["signal_type"] for p in _ufc_score(
-        monkeypatch, "ufc_total_rounds", _ClfOver())} == {"BET"}
-    picks = _ufc_score(monkeypatch, "ufc_total_rounds", _ClfOver(), hold=UFC_HOLD)
-    assert picks and {p["signal_type"] for p in picks} == {"NONE"}
-    assert {p["downgrade_reason"] for p in picks} == {UFC_HOLD}
-
 
 
 # ── NCAAF: the night-game stub takes CFBD's schedule row ─────────────────────

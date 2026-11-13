@@ -427,6 +427,14 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "euroleague_inplay_quotes",
     "euroleague_odds_unmatched",
     "euroleague_period_fetches",
+    # UFC price history from two free public archives (2026-11-13), created
+    # on demand by data/ingestors/ufc_price_archive.ensure_tables. Research
+    # input, never read by the app.
+    "ufc_price_archive",
+    # UFC odds history bought 2026-11-13 and its ledger, created on demand by
+    # data/ingestors/ufc_odds_history.ensure_tables. Research input.
+    "ufc_odds_history",
+    "ufc_odds_history_pulls",
     # EuroLeague shot charts with wall-clock times (2026-11-13,
     # data/ingestors/euroleague_shots.py); model input, never read by the app.
     "euroleague_shots",
@@ -500,6 +508,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # and their flags (scripts/ncaaf_moneyline_card.py, which creates it on
     # demand). Read by the card, never by the app.
     "ncaaf_moneyline_decisions",
+    # The UFC opening-price card's decisions ledger: one row per fight it has
+    # decided, bet or not (scripts/ufc_open_moneyline_card.py, which creates
+    # it on demand). Read by the card, never by the app.
+    "ufc_open_moneyline_decisions",
     # The NCAAB first-post moneyline card's ledger: one row per (game, book)
     # first moneyline post it has decided, bet or not, with every book's
     # moneyline and own spread, and the fill check the capture writes on its
