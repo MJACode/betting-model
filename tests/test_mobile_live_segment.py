@@ -493,6 +493,22 @@ def test_pruning_is_held_while_the_live_half_is_unknown():
     assert "livePicks.error" in body, "a failed live fetch can prune a live leg"
 
 
+def test_pruning_is_held_on_a_partial_read_and_on_yesterdays_board():
+    """A read with one sport's card missing counts as loaded with no error.
+
+    Design review, 2026-11-13: when this week's NFL card failed, the bar pruned
+    every slip leg on it. And just after midnight ET the bar's board can still be
+    yesterday's, which holds none of today's legs.
+    """
+    src = _read(SLIP)
+    assert "const { data, loading, error, partial } = picks;" in src
+    m = re.search(r"canPruneSlip\(\{(.*?)\}\)", src, re.S)
+    assert m, "canPruneSlip call not found"
+    body = m.group(1)
+    assert "partial: partial != null" in body, "a partial read can prune the legs it is missing"
+    assert "onToday: picks.date === todayET()" in body, "yesterday's board can prune today's legs"
+
+
 # ── 4. the live pricing caveat stays where it is true ─────────────────────────
 
 
