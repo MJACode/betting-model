@@ -12,12 +12,15 @@
 
 import {
   loadTodayBoard,
+  moveTodayBoardDay,
   resetTodayBoardForTests,
   setTodayBoardClockForTests,
   setTodayBoardReader,
   setTodayPicksStaleMsForTests,
   subscribeTodayBoard,
+  subscribeTodayBoardDay,
   TODAY_PICKS_STALE_MS,
+  todayBoardDay,
   todayBoardIsStale,
   todayBoardSnapshot,
   todayPicksDateKey,
@@ -107,11 +110,16 @@ async function refreshDuringFlightIsOneFollowUp(): Promise<void> {
   const second = loadTodayBoard(DATE, false);
   const refresh = loadTodayBoard(DATE, true);
   check('a refresh during the read does not start a second one yet', calls === 1, `calls=${calls}`);
+  const heardIds: Array<number | undefined> = [];
+  const stopHearing = subscribeTodayBoard<Row>(DATE, (snap) => heardIds.push(snap.data[0]?.id));
   holds[0]?.release();
   // The follow-up is the second read. Let it start before releasing it.
   await Promise.resolve();
   await Promise.resolve();
   check('that refresh schedules exactly one follow-up', calls === 2, `calls=${calls}`);
+  // A pull during a background read must not wait two full reads to see rows.
+  check('the first read is shown while the follow-up runs', heardIds.includes(1), JSON.stringify(heardIds));
+  stopHearing();
   holds[1]?.release();
   await Promise.all([first, second, refresh]);
   check('the follow-up is the value callers settle on', todayBoardSnapshot<Row>(DATE).data[0]?.id === 2);
@@ -254,6 +262,74 @@ async function aCancelledReloadKeepsTheError(): Promise<void> {
   check('a cancelled reload leaves the shown error and the rows',
     calls === 3 && snap.error === 'timed out' && snap.data[0]?.id === 1,
     `calls=${calls} error=${snap.error}`);
+}
+
+/** A reader that throws: a cancel shows no error, anything else shows readable text. */
+async function aThrownReadIsReadable(): Promise<void> {
+  resetTodayBoardForTests();
+  let calls = 0;
+  setTodayBoardReader(async () => {
+    calls += 1;
+    if (calls === 1) return ok(1);
+    if (calls === 2) throw { message: 'canceling statement due to statement timeout', code: '57014' };
+    const abort = new Error('Aborted');
+    abort.name = 'AbortError';
+    throw abort;
+  });
+  await loadTodayBoard(DATE, false);
+  await loadTodayBoard(DATE, true);
+  check('a thrown database error reads as its message, not "Something went wrong"',
+    todayBoardSnapshot<Row>(DATE).error === 'canceling statement due to statement timeout (57014)',
+    String(todayBoardSnapshot<Row>(DATE).error));
+  await loadTodayBoard(DATE, true);
+  check('a thrown cancel leaves the shown error and the rows',
+    todayBoardSnapshot<Row>(DATE).error === 'canceling statement due to statement timeout (57014)'
+      && todayBoardSnapshot<Row>(DATE).data[0]?.id === 1,
+    String(todayBoardSnapshot<Row>(DATE).error));
+}
+
+/**
+ * Two undated boards, the betslip bar and Picks. After midnight ET Picks
+ * refreshes onto the new day. The bar never pulls, never comes back to the
+ * app and never remounts, and it still has to end on the new day (design
+ * review, 2026-11-13). Each "mount" below does what useTodayPicks does with
+ * its day: hold its own, follow the shared one, and move it on a refresh.
+ */
+async function undatedBoardsFollowOneDay(): Promise<void> {
+  resetTodayBoardForTests();
+  const seen: string[] = [];
+  setTodayBoardReader(async (date: string) => {
+    seen.push(date);
+    return ok(seen.length);
+  });
+  function mount(today: string) {
+    const m = { day: moveTodayBoardDay(today), stop: () => {} };
+    m.stop = subscribeTodayBoardDay((d) => {
+      if (d > m.day) {
+        m.day = d;
+        void loadTodayBoard(d, false);
+      }
+    });
+    void loadTodayBoard(m.day, false);
+    return m;
+  }
+  const bar = mount('2026-11-11');
+  const picks = mount('2026-11-11');
+  await Promise.resolve();
+  // After midnight: Picks' refresh, in the order useTodayPicks.refresh does it:
+  // start the read, then move the shared day.
+  const day = todayPicksDateKey({ held: picks.day, today: '2026-11-12', heldIsStale: false, refresh: true });
+  const flight = loadTodayBoard(day, true);
+  picks.day = moveTodayBoardDay(day);
+  await flight;
+  check('after midnight the bar follows Picks onto the new date',
+    bar.day === '2026-11-12' && picks.day === '2026-11-12', `bar=${bar.day} picks=${picks.day}`);
+  check('the shared day is the new date', todayBoardDay() === '2026-11-12', String(todayBoardDay()));
+  check("the bar joined Picks' read of the new date instead of starting another",
+    seen.filter((d) => d === '2026-11-12').length === 1, seen.join(','));
+  check('the shared day never moves back', moveTodayBoardDay('2026-11-11') === '2026-11-12' && bar.day === '2026-11-12');
+  bar.stop();
+  picks.stop();
 }
 
 function midnightEt(): void {
@@ -492,6 +568,8 @@ async function main(): Promise<void> {
   await ageWindow();
   await aFailingReloadKeepsTheError();
   await aCancelledReloadKeepsTheError();
+  await aThrownReadIsReadable();
+  await undatedBoardsFollowOneDay();
   midnightEt();
   await midnightEtWithAStaleRead();
   await infinityNeverExpiresAMount();

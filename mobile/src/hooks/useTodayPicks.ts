@@ -15,7 +15,10 @@ import { isModelRetired, isPausedForDisplay } from '@/lib/thresholds';
 import { errorText, isAbortError } from '@/lib/errors';
 import {
   loadTodayBoard,
+  moveTodayBoardDay,
   setTodayBoardReader,
+  subscribeTodayBoardDay,
+  todayBoardDay,
   todayBoardIsStale,
   todayPicksDateKey,
   subscribeTodayBoard,
@@ -252,8 +255,22 @@ export function useTodayPicks(date?: string) {
   // switches the board. todayET() read once at mount would keep yesterday until the
   // component happened to re-render. An explicit `date` argument is left
   // alone: the caller asked for that day.
-  const [liveDay, setLiveDay] = useState(() => todayET());
+  //
+  // Every undated mount also follows one shared day (lib/todayPicksFlight).
+  // When one of them moves onto a new Eastern day, by mounting, refreshing or
+  // coming back to the app on it, the rest move too. Without that the betslip
+  // bar, which never pulls or remounts, kept yesterday's board after Picks had
+  // moved on (design review, 2026-11-13). The day only moves forward.
+  const [liveDay, setLiveDay] = useState(() => {
+    const today = todayET();
+    const shared = todayBoardDay();
+    return shared != null && shared > today ? shared : today;
+  });
   const target = date ?? liveDay;
+  const moveDay = useCallback((day: string) => {
+    const next = moveTodayBoardDay(day);
+    setLiveDay((prev) => (prev >= next ? prev : next));
+  }, []);
   const [board, setBoard] = useState<TodayBoardSnapshot<EnrichedPick>>(() => todayBoardSnapshot<EnrichedPick>(target));
   // The rows are shared. The spinner is not. A pull on Picks must not turn the
   // betslip's resolving state back on, or replace a model screen's known empty
@@ -274,9 +291,11 @@ export function useTodayPicks(date?: string) {
     // the Eastern date has moved. Switch before subscribing, so the effect
     // runs again on today instead of refreshing yesterday.
     if (day !== target) {
-      setLiveDay(day);
+      moveDay(day);
       return;
     }
+    // An undated mount on a newer day than the others brings them along.
+    if (date == null) moveTodayBoardDay(target);
     let alive = true;
     const token = ++loadGen.current;
     const current = todayBoardSnapshot<EnrichedPick>(target);
@@ -290,7 +309,17 @@ export function useTodayPicks(date?: string) {
       alive = false;
       stop();
     };
-  }, [target, date]);
+  }, [target, date, moveDay]);
+
+  // Follow the shared day. A mount that missed a move between its render and
+  // this effect catches up here.
+  useEffect(() => {
+    if (date != null) return undefined;
+    const follow = (day: string) => setLiveDay((prev) => (prev >= day ? prev : day));
+    const shared = todayBoardDay();
+    if (shared != null) follow(shared);
+    return subscribeTodayBoardDay(follow);
+  }, [date]);
 
   // Coming back to the app after midnight ET: move an undated board onto the
   // new Eastern date. This does NOT reload. Reloading on return is
@@ -303,11 +332,10 @@ export function useTodayPicks(date?: string) {
     if (date != null) return undefined;
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
-      const day = todayET();
-      setLiveDay((prev) => (prev === day ? prev : day));
+      moveDay(todayET());
     });
     return () => sub.remove();
-  }, [date]);
+  }, [date, moveDay]);
 
   // Pull-to-refresh, Picks' 10-minute timer and its resume reload all call
   // this. It skips the finished read. A refresh during an in-flight read
@@ -324,11 +352,14 @@ export function useTodayPicks(date?: string) {
       heldIsStale: todayBoardIsStale(target),
       refresh: true,
     });
-    if (date == null) setLiveDay((prev) => (prev === day ? prev : day));
-    return loadTodayBoard(day, true).finally(() => {
+    // Start the read BEFORE moving the shared day, so every board that follows
+    // onto the new day joins this read instead of starting its own.
+    const flight = loadTodayBoard(day, true).finally(() => {
       if (loadGen.current === token) setLoading(false);
     });
-  }, [date, target]);
+    if (date == null) moveDay(day);
+    return flight;
+  }, [date, target, moveDay]);
 
   return {
     data: board.data,

@@ -41,8 +41,15 @@ def test_the_hook_reads_through_the_shared_flight():
     # refresh() forces a read of today's Eastern date, so a pull or a Picks
     # reload after midnight reads the new day, not the one it mounted on.
     refresh = src[src.index("const refresh = useCallback"):]
-    refresh = refresh[: refresh.index("}, [date, target]);")]
+    refresh = refresh[: refresh.index("}, [date, target")]
     assert "refresh: true" in refresh and "loadTodayBoard(day, true)" in refresh
+    # ...and moves every other undated board onto that day, AFTER its read has
+    # started so they join it (design review, 2026-11-13: the betslip bar,
+    # which never pulls or remounts, kept yesterday's board after midnight).
+    assert "moveDay(day)" in refresh, "a refresh after midnight leaves the other boards on yesterday"
+    assert refresh.index("loadTodayBoard(day, true)") < refresh.index("moveDay(day)")
+    assert "subscribeTodayBoardDay(" in src, "undated boards no longer follow the shared day"
+    assert "moveTodayBoardDay(" in src
     assert "setTodayBoardReader(readTodayBoard)" in src
     # Coming back to the app moves an undated board onto the new Eastern date.
     # AppState, not useFocusEffect: the betslip bar is outside the navigator.
@@ -56,7 +63,7 @@ def test_the_hook_reads_through_the_shared_flight():
     handler = src[src.index("AppState.addEventListener"):]
     handler = handler[: handler.index("return () => sub.remove();")]
     assert "loadTodayBoard" not in handler, "the hook reloads on resume as well as Picks"
-    assert "setLiveDay(" in handler, "a return after midnight no longer moves the board to the new date"
+    assert "moveDay(todayET())" in handler, "a return after midnight no longer moves the boards to the new date"
     flight = (MOBILE / "src" / "lib" / "todayPicksFlight.ts").read_text(encoding="utf-8")
     assert "export const TODAY_PICKS_STALE_MS = 5 * 60 * 1000;" in flight
     assert "TODAY_BOARD_MAX_AGE_MS" not in flight
@@ -77,6 +84,8 @@ def test_single_flight_and_refresh_invalidation():
     assert "a reload from Picks reads even inside the window" in proc.stdout
     assert "a background reload does not clear the error when it starts" in proc.stdout
     assert "a cancelled reload leaves the shown error and the rows" in proc.stdout
+    assert "after midnight the bar follows Picks onto the new date" in proc.stdout
+    assert "the first read is shown while the follow-up runs" in proc.stdout
     assert "pull-to-refresh after midnight ET reads the new date" in proc.stdout
     assert "a stale mount after midnight ET rolls forward" in proc.stdout
     assert "the staleness age is five minutes" in proc.stdout

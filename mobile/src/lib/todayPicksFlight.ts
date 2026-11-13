@@ -26,6 +26,8 @@
  * No React and no native module, so the dedupe can be run under node.
  */
 
+import { errorText, isAbortError } from './errors';
+
 /**
  * How old a finished read may be before the next MOUNT starts another one.
  * Picks' timer, its resume reload and pull-to-refresh read whatever this is.
@@ -70,6 +72,43 @@ interface Slot<Row> {
 }
 
 const slots = new Map<string, Slot<unknown>>();
+
+/*
+ * The Eastern day every UNDATED board is on. Each mount of useTodayPicks keeps
+ * its own day, so after midnight ET a mount that never pulls, never returns
+ * to the app and never remounts (the betslip bar, while the app stays open)
+ * kept yesterday's board after Picks had moved on. Now the first undated
+ * mount to move onto a new day moves this, and every undated mount follows
+ * (design review, 2026-11-13). It only moves forward. A mount given an
+ * explicit date ignores it.
+ */
+let boardDay: string | null = null;
+const dayListeners = new Set<(day: string) => void>();
+
+/** The Eastern day undated boards are on, or null before any has mounted. */
+export function todayBoardDay(): string | null {
+  return boardDay;
+}
+
+/**
+ * An undated board is on `day` (it mounted, refreshed, or came back to the
+ * app on it). If that is later than the shared day, every other undated
+ * board is told to follow. Returns the day undated boards should now show.
+ */
+export function moveTodayBoardDay(day: string): string {
+  if (boardDay != null && day <= boardDay) return boardDay;
+  boardDay = day;
+  dayListeners.forEach((fn) => fn(day));
+  return day;
+}
+
+/** Hear the shared day move. Every undated mount listens. */
+export function subscribeTodayBoardDay(listener: (day: string) => void): () => void {
+  dayListeners.add(listener);
+  return () => {
+    dayListeners.delete(listener);
+  };
+}
 
 let reader: ((date: string) => Promise<TodayBoardRead<unknown>>) | null = null;
 let nowMs: () => number = () => Date.now();
@@ -219,11 +258,13 @@ export async function loadTodayBoard(date: string, force = false): Promise<void>
       try {
         result = await read(date);
       } catch (e: unknown) {
+        // The same text the hook's own catch gives. A cancel is not a
+        // failure: no error, so the shown one stays as it was.
         result = {
           data: [],
           pausedData: [],
           loaded: false,
-          error: e instanceof Error ? e.message : 'Something went wrong',
+          error: isAbortError(e) ? null : errorText(e),
           partial: null,
         };
       }
@@ -243,6 +284,12 @@ export async function loadTodayBoard(date: string, force = false): Promise<void>
         slot.value = { ...slot.value, error: result.error, loading: true };
       }
       if (!slot.again) break;
+      // A refresh arrived during this pass, so one more read follows. Show
+      // this pass's rows now rather than holding them for the follow-up:
+      // a pull during a background read would otherwise see nothing until
+      // two full reads finished. Only a pass that loaded is shown early; a
+      // failed one could put up an error the follow-up clears a moment later.
+      if (result.loaded) publish(slot);
     }
   } finally {
     // Drop the in-flight marker BEFORE publishing. A listener that refreshes
@@ -258,6 +305,8 @@ export async function loadTodayBoard(date: string, force = false): Promise<void>
 
 export function resetTodayBoardForTests(): void {
   slots.clear();
+  boardDay = null;
+  dayListeners.clear();
   nowMs = () => Date.now();
   staleMsOverride = null;
 }
