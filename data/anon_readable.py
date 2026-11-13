@@ -422,6 +422,15 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "euroleague_inplay_quotes",
     "euroleague_odds_unmatched",
     "euroleague_period_fetches",
+    # Tennis (2026-11-13). Created on demand by
+    # data/ingestors/tennis_archive.ensure_tables (the match archive),
+    # data/ingestors/tennis_espn.ensure_tables (ESPN's results) and
+    # data/ingestors/tennis_odds_history.ensure_tables (every paid call, and the
+    # change-only quotes). Model input; never read by the app.
+    "tennis_archive_matches",
+    "tennis_espn_matches",
+    "tennis_odds_fetches",
+    "tennis_odds_quotes",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and
