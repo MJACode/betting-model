@@ -8,8 +8,14 @@ THE DECISION TIMES are fixed here, before any result is read:
   first   each book's first quote on the match (its first post)
   t12     the latest quote at least 12 hours before the listed start
   close   the latest quote before the listed start
-A quote counts only if both its snapshot and its last update are at or before
-the listed start, so no in-play price is graded as pre-match.
+A quote counts only if both its snapshot and its last update are at least 10
+minutes before the EARLIER of ESPN's start and the feed's last listed start
+(pre_match). The feed's listed start is not the start: on the 2025-08-30
+trial it was 10 to 60 minutes early for the day's later matches, a placeholder
+up to 29 hours early for the next round's, revised on 13 of 16 matches, and
+once 10 minutes after ESPN's start (Sinner v Shapovalov); when a match goes
+live the feed stamps it to the second (15:03:57 against ESPN's 15:10). Bounding
+on the listed start alone lets in-play prices in as the close.
 
 THE REFERENCE is Pinnacle's own two prices at the same snapshot, de-vigged
 multiplicatively; the Betfair exchange's back prices de-vigged the same way are
@@ -49,8 +55,7 @@ def load_quotes(conn, keys: list[str] | None = None) -> pd.DataFrame:
     q = pd.DataFrame(rows, columns=cols)
     for c in ("commence_time", "last_update", "snapshot_ts"):
         q[c] = pd.to_datetime(q[c], utc=True)
-    pre = (q.snapshot_ts <= q.commence_time) & (q.last_update.isna() | (q.last_update <= q.commence_time))
-    return q[pre].copy()
+    return q
 
 
 def load_results(conn) -> pd.DataFrame:
@@ -120,6 +125,23 @@ def link(quotes: pd.DataFrame, results: pd.DataFrame,
                     on="event_id")
 
 
+PRE_MATCH_MARGIN = pd.Timedelta(minutes=10)
+
+
+def pre_match(q: pd.DataFrame, linked: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
+    """The quotes of linked events that stood before the match: snapshot and
+    last update both at least PRE_MATCH_MARGIN before the earlier of ESPN's
+    start and the feed's last listed start. Unlinked events drop out."""
+    last_listed = q.groupby("event_id").commence_time.max().rename("listed_last")
+    starts = linked.dropna(subset=["comp_id"]).merge(
+        results[["comp_id", "start_time"]], on="comp_id")[["event_id", "start_time"]]
+    b = starts.merge(last_listed, left_on="event_id", right_index=True)
+    b["bound"] = b[["start_time", "listed_last"]].min(axis=1) - PRE_MATCH_MARGIN
+    x = q.merge(b[["event_id", "bound"]], on="event_id")
+    ok = (x.snapshot_ts <= x.bound) & (x.last_update.isna() | (x.last_update <= x.bound))
+    return x[ok].drop(columns="bound")
+
+
 # ── prices at a decision time ────────────────────────────────────────────────
 
 def decision_quotes(q: pd.DataFrame, decision: str) -> pd.DataFrame:
@@ -130,7 +152,10 @@ def decision_quotes(q: pd.DataFrame, decision: str) -> pd.DataFrame:
     if decision == "close":
         return q.groupby(["event_id", "bookmaker", "market"], as_index=False).tail(1)
     if decision == "t12":
-        cut = q[q.snapshot_ts <= q.commence_time - pd.Timedelta(hours=12)]
+        # 12 hours before the feed's last listed start: books first post a
+        # median 17 to 19 hours before it (the 2025-08-30 trial, 16 matches).
+        listed = q.groupby("event_id").commence_time.transform("max")
+        cut = q[q.snapshot_ts <= listed - pd.Timedelta(hours=12)]
         return cut.groupby(["event_id", "bookmaker", "market"], as_index=False).tail(1)
     raise ValueError(decision)
 
@@ -153,3 +178,45 @@ def wilson_return_interval(units: np.ndarray, risked: np.ndarray, z: float = 1.6
     m = units.sum() / risked.sum()
     se = r.std(ddof=1) / math.sqrt(len(r))
     return (m - z * se, m + z * se)
+
+
+# ── the match-winner table: a decidable book against the sharp no-vig price ──
+
+def moneyline_candidates(q: pd.DataFrame, linked: pd.DataFrame, results: pd.DataFrame,
+                         decision: str, ref: str = "pinnacle") -> pd.DataFrame:
+    """Every (event, decidable book, side) at the decision time, with the
+    reference's no-vig probability at the same snapshot, the EV at the book's
+    price, the retirement-adjusted EV for DraftKings, and the grade at the
+    book's own rule. One row per side, so the table is the whole universe
+    (every quote both ways), not only the bets."""
+    pm = pre_match(q, linked, results)
+    h2h = pm[pm.market == "h2h"]
+    dq = decision_quotes(h2h, decision)
+    dq = dq[dq.bookmaker.isin(DECIDABLE)]
+    refq = h2h[h2h.bookmaker == ref].sort_values("snapshot_ts")
+    res_by = results.set_index("comp_id")
+    lk = linked.set_index("event_id")
+    out = []
+    for r in dq.itertuples(index=False):
+        rq = refq[(refq.event_id == r.event_id) & (refq.snapshot_ts <= r.snapshot_ts)]
+        if rq.empty or pd.isna(r.home_price) or pd.isna(r.away_price):
+            continue
+        ref_row = rq.iloc[-1]
+        if pd.isna(ref_row.home_price) or pd.isna(ref_row.away_price):
+            continue
+        p_home, p_away = tc.no_vig_pair(ref_row.home_price, ref_row.away_price)
+        link_row = lk.loc[r.event_id]
+        espn = res_by.loc[link_row.comp_id]
+        res = espn_result(espn, a_is_p1=bool(link_row.home_is_p1))
+        if res is None:
+            continue
+        for side, price, p in (("a", r.home_price, p_home), ("b", r.away_price, p_away)):
+            d = tc.american_to_decimal(price)
+            grade = tc.grade_moneyline(res, side, r.bookmaker)
+            out.append({"event_id": r.event_id, "book": r.bookmaker, "side": side,
+                        "price": int(price), "ref_p": p, "ev": p * d - 1,
+                        "snapshot_ts": r.snapshot_ts, "ref_age_min":
+                        (r.snapshot_ts - ref_row.snapshot_ts).total_seconds() / 60,
+                        "grade": grade, "units": tc.units(grade, price),
+                        "risk": min(1 / (d - 1), 3.0)})
+    return pd.DataFrame(out)

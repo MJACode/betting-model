@@ -76,6 +76,11 @@ down this list.
   fetch-name label can collide so a pull never decides; a purchase can keep
   the last listed pair per book rather than the main number (ladder rungs
   mistaken for main lines).
+- **A listed start that moves, and one that lies** (tennis, 2026-11-13). In a
+  sport scheduled by order of play the feed's start is an estimate: revised on
+  13 of 16 trial matches, up to 29 hours early for an unscheduled next round,
+  once 10 minutes after the real start. Bound on the earlier of an
+  independent start (ESPN's) and the feed's last listed start, with a margin.
 - **"Open" rows written after the start.** 35% of one league's `open` rows and
   23% of one prop market's were received after tip or first pitch. Bound on
   `snapshot_at <= commence_time` and exclude `in_play`.

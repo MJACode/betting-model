@@ -26,6 +26,24 @@
 | tennis-data.co.uk (one price per match: Bet365, Pinnacle, best, average) | **Refused**: a Cloudflare block ("Sorry, you have been blocked") from mike's PC on 2026-11-13, its notes page too. Copies of its files on GitHub are not used. |
 | Betfair historical data | BASIC (one-minute last traded price) is free with an account, from 2016 (scout). Not used: no account. |
 
+## The listed start is not the start
+
+Measured on the trial's 16 matches (2025-08-30, all 16 linked to ESPN by the
+two players' names within 60 hours). The feed revised the listed start on 13
+of them. For the day's later matches it was 10 to 60 minutes before ESPN's
+start; for the next round's (not yet scheduled) it was a placeholder up to 29
+hours early; once it was 10 minutes after ESPN's start (Sinner v Shapovalov,
+17:30 against 17:20). When a match goes live the feed stamps the start to the
+second (Musetti v Cobolli 15:03:57, ESPN 15:10; Wong v Rublev 18:04:47, ESPN
+18:00), so the two disagree by up to about 10 minutes either way.
+
+So every research read keeps a quote only when its snapshot and its last
+update are at least 10 minutes before the earlier of ESPN's start and the
+feed's last listed start (`scripts/tennis_market_study.pre_match`). A live
+model decides at a fixed lead before the listed start (books first post a
+median 17 to 19 hours before it: DraftKings 18.1, Pinnacle 18.6), far from
+the start, and never on a match ESPN shows in progress.
+
 ## Settlement — read before grading anything
 
 `models/tennis_common.py` states each rule and grades by it. The sources:
@@ -185,7 +203,26 @@ asks, **1,500 credits**, 2,861 change-only quotes on the 16 third-round
 matches, 30 books (Pinnacle's match-winner on 127 rows, its games spread on
 125).
 
+**The study path, run end to end on the trial** (`scripts/tennis_market_study.
+moneyline_candidates`, a plumbing check, not a result: one day). Ten of the 16
+matches had a Pinnacle price inside the pre-match bound; at the 12-hours-out
+decision the seven decidable books quoted 140 prices (both sides of each), and
+their median EV against Pinnacle's no-vig price at the same snapshot was
+-4.8% (-4.6% at the first post, -4.7% at the close). Three of the 16 matches
+ended in a retirement, so 32 of the 140 graded VOID at the books' own rules.
+Every decidable book's margin there is about twice the 2.4 points a side the
+single women's quote suggested, so the retirement option (1.1 points) does not
+cover it on an average quote; any edge is in the quotes that stand apart.
+
 ## Open items
+
+- The purchase (above) waits on mike's yes. Then: the baselines on every
+  grid row, mechanisms 1 to 6 in that order, the kill tests on anything
+  positive.
+- The forward log runs on mike's PC until 2026-11-23; a worker job takes it
+  over when the first model ships.
+- The code graph is rebuilt and named once, after the last code change of
+  this build, before its merge.
 
 - Pinnacle's absence from the 2026-11-13 board: read the board again near a
   match's start before any live model relies on Pinnacle as its reference.

@@ -50,7 +50,8 @@ review as its own entry.
 3. **New.** `market-grid.md`: tennis in the one-against-one shape, and finding
    a part-year key's windows with three 1-credit event lists. `porting-traps.md`:
    settlement differs by book (a retirement), a source's format field can be
-   wrong, a per-tournament key can hold two windows a year. `methods.md` §7: a
+   wrong, a per-tournament key can hold two windows a year, a listed start
+   that moves and once came after the real start. `methods.md` §7: a
    settlement rule that hands the bettor an option, with its measured size;
    three tennis lines in the frontier. `scouting.md`: four routes (two refused).
 4. **Corrected.** Nothing in the skill was contradicted by a measurement.
