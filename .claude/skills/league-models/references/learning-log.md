@@ -30,6 +30,32 @@ review as its own entry.
 
 ---
 
+## 2026-11-13 — EuroLeague first half and first quarter, round 1
+
+1. **Scope.** The EuroLeague build (mike, 2026-11-12, "all markets including
+   1h and 1q"), the first research round on its first-half and first-quarter
+   markets, once their history was bought (mike, 2026-11-13: "Do the 4.4m").
+2. **Tried.** Settlement, bettable coverage by season, 556 blind cells, the
+   close's accuracy, the catalogued half-from-the-full-game method unchanged,
+   cross-book disagreement, and the kill tests on every positive cell
+   (`docs/euroleague_market_audit.md`, round 1). Nothing clears; one
+   first-quarter under lead is frozen.
+3. **New.** In `methods.md`, the half-from-the-full-game method's EuroLeague
+   failure (the books hold the half at 50.05-50.29% of the full-game total).
+   In `porting-traps.md`, a book's main key can hold only an alternate rung.
+   And a practice: a whole-history purchase sized for one cycle can be cut to
+   about 40% by asking every snapshot only from 30 minutes before each tip to
+   2.5 hours after it, and one every 15 minutes otherwise
+   (`euroleague_odds_history --pregame-step-min`), keeping the close and the
+   in-play path whole.
+4. **Corrected.** The league doc's claim that first-quarter lines exist only
+   from 2025-26 came from a three-game sample: the bought history holds them
+   from 2023-24 (`docs/sports/euroleague.md`, corrected in place). Nothing in
+   the skill's own files was contradicted.
+5. **The framework.** Nothing changed in `SKILL.md`. Not called null: the
+   invention floor (three mechanisms of our own) and the stuck ladder are the
+   next round.
+
 ## 2026-11-13 — Review
 
 1. **Scope.** The first weekly self-review (mike, 2026-11-13: *"the skill
