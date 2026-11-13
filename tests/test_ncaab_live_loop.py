@@ -17,6 +17,7 @@ Pinned here:
 """
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
@@ -280,6 +281,95 @@ def test_espn_publishing_later_than_the_wait_fails_closed(art, monkeypatch):
     loop, db, *_ = standard(art, monkeypatch, plays=plays, lag=120.0)
     loop.tick()
     assert db.ledger == {} and db.skips and "publishing late" in db.skips[0]["reason"]
+
+
+G2_ID, G2_EVENT = "NCAAB_2026-11-07_wake-forest_virginia", 401999998
+G2_HOME_FEED, G2_AWAY_FEED = "Virginia Cavaliers", "Wake Forest Demon Deacons"
+
+
+class TwoGameEspn(FakeEspn):
+    """The synthetic game served under two ESPN events; each event's SECOND
+    summary read shows ESPN's header two points ahead of its newest play."""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.reads: dict = {}
+
+    def scoreboard(self, d):
+        self.calls += 1
+        sb = S.scoreboard()
+        ev2 = json.loads(json.dumps(sb["events"][0]))
+        ev2["id"] = str(G2_EVENT)
+        sb["events"].append(ev2)
+        return parse_scoreboard(sb) if d == S.GAME_DATE else []
+
+    def summary(self, eid):
+        self.calls += 1
+        n = self.reads[eid] = self.reads.get(eid, 0) + 1
+        s = S.summary(self.plays, known_until=self.clock.now - timedelta(seconds=self.lag))
+        if n == 2:
+            home = next(c for c in s["header"]["competitions"][0]["competitors"] if c["homeAway"] == "home")
+            home["score"] = str(int(home["score"]) + 2)
+        return s
+
+
+class TwoGameFeed(FakeFeed):
+    def fetch(self):
+        f = super().fetch()
+        ev2 = json.loads(json.dumps(f.events[0]).replace(S.HOME_FEED, G2_HOME_FEED)
+                         .replace(S.AWAY_FEED, G2_AWAY_FEED))
+        ev2["id"] = "ev2"
+        return Fetch(f.events + [ev2], f.fetched_at, f.credits, f.remaining)
+
+
+def test_header_rereads_of_two_games_happen_together_not_one_after_another(art, monkeypatch):
+    """2026-11-12: Indiana -16.5 (live) was decided 193 s after its fetch, not
+    the designed 150 s, because every game's summaries and two other games'
+    20 s header re-reads ran one after another. Two games whose second read
+    has ESPN's header ahead of its plays are re-read once, together, and both
+    are decided 90 + 60 + 20 s after the fetch (one after another: 190 s)."""
+    plays = S.build_plays()
+    w = S.wall_of(plays, 1, 600.0)
+    slot = w + timedelta(seconds=20)
+    db = Db(slate=2).install(monkeypatch)
+    ctxs = {S.EVENT_ID: LP.GameCtx(S.GAME_ID, S.GAME_DATE, 2027, S.HOME, S.AWAY, pd.Timestamp(S.TIP),
+                                   S.EVENT_ID, S.HOME_ID, S.AWAY_ID),
+            G2_EVENT: LP.GameCtx(G2_ID, S.GAME_DATE, 2027, "Virginia", "Wake Forest", pd.Timestamp(S.TIP),
+                                 G2_EVENT, S.HOME_ID, S.AWAY_ID)}
+    monkeypatch.setattr(LP, "slate_games", lambda conn, dates: dict(ctxs))
+    clock = Clock(slot)
+    loop = LP.Loop(art, TwoGameEspn(plays, clock), TwoGameFeed(clock, lambda now: books(w + timedelta(seconds=5))),
+                   lambda: FakeConn(), wait=90.0, recheck=60.0, sleep=clock.sleep, clock=clock,
+                   slate_dates=lambda: [S.GAME_DATE], slots=slots_at(slot),
+                   resolver_factory=lambda: (lambda home, away, commence:
+                                             (G2_ID if home == G2_HOME_FEED else S.GAME_ID, False)))
+    loop.tick()
+    assert db.skips == []
+    assert {k[0] for k in db.ledger} == {S.GAME_ID, G2_ID}
+    assert loop.espn.reads == {S.EVENT_ID: 3, G2_EVENT: 3}
+    assert (clock.now - slot).total_seconds() == pytest.approx(90.0 + 60.0 + LP.HEADER_RECHECK_SEC)
+
+
+def test_summaries_are_read_at_the_same_time():
+    """Three reads that each wait for the other two: read one after another,
+    the first would never return (the barrier breaks and every read is None)."""
+    import threading
+    gate = threading.Barrier(3, timeout=2.0)
+
+    class Espn:
+        calls = 0
+
+        def summary(self, eid):
+            try:
+                gate.wait()
+            except threading.BrokenBarrierError:
+                return None
+            return {"event": eid}
+
+    loop = LP.Loop(None, Espn(), None, lambda: FakeConn(), sleep=lambda s: None)
+    ctxs = [LP.GameCtx(f"g{i}", S.GAME_DATE, 2027, "H", "A", pd.Timestamp(S.TIP), i, None, None) for i in (1, 2, 3)]
+    got = loop.summaries(ctxs)
+    assert got == {"g1": {"event": 1}, "g2": {"event": 2}, "g3": {"event": 3}}
 
 
 def test_an_unreadable_summary_is_skipped_and_retried_in_the_window(art, monkeypatch):

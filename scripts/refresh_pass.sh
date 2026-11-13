@@ -351,6 +351,10 @@ par_wait
 if [ "$MODE" = "hourly" ]; then
   step wnba-results
   step golf-results
+  # EuroLeague's schedule and finals: one keyless call for the whole season
+  # (data/ingestors/euroleague_api.py). Hourly is enough: no EuroLeague model
+  # settles off it yet, and the 6am run stores the evening's finals too.
+  step euroleague-games
 fi
 
 # Settles TODAY. From 7am ET it also posts YESTERDAY's results recap if the

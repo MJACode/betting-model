@@ -283,6 +283,9 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      "odds_api_nba_alt_history",
                      # First-quarter and first-half team totals, bought 2026-11-03.
                      "odds_api_nba_period_team_total_history",
+                     # Half and quarter closing lines (2026-11-13, Matt): the Stats
+                     # tab's Betting filters grade every team-game against them.
+                     "odds_api_nba_period_close_history",
                      "odds_api_nhl_totals_history",
                      "odds_api_nba_team_totals_live",
                      "odds_api_nba_first_half_live",
@@ -316,7 +319,17 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      # data/ingestors/ncaaf_derivative_history.SOURCES): paid
                      # rows on past games, several team-total lines a book.
                      "odds_api_ncaaf_derivative_am",
-                     "odds_api_ncaaf_derivative_pm")
+                     "odds_api_ncaaf_derivative_pm",
+                     # EuroLeague (2026-11-12): every snapshot the feed holds of
+                     # the full game, pre-game (change-only) and in play
+                     # (data/ingestors/euroleague_odds_history.py), and the
+                     # first-half, quarter, team-total and alternate lines at
+                     # eight times before each tip
+                     # (data/ingestors/euroleague_period_history.py). Paid rows on
+                     # past games.
+                     "odds_api_euroleague_history",
+                     "odds_api_euroleague_inplay_history",
+                     "odds_api_euroleague_period_history")
 
 # Sports whose `odds` rows keep their whole PRICE PATH (2026-10-17, mike: "We
 # need nba spread / ml / totals models ... find edge"; docs/nba_models_2026.md
@@ -347,7 +360,11 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
 # that compares books during the week could be read forward on 2026, and the
 # 2023-2025 purchase (two pulls a day) is the only multi-book history there
 # is. The weeks already thinned cannot be put back.
-PATH_KEPT_SPORTS = ("NBA", "NCAAB", "NCAABW", "NCAAF")
+#
+# EuroLeague joins it from its first stored day (2026-11-12): a new league whose
+# research reads when each book moved, and a small board (about ten games a
+# round).
+PATH_KEPT_SPORTS = ("NBA", "NCAAB", "NCAABW", "NCAAF", "EUROLEAGUE")
 
 
 def _unprotected(params: dict, table: str | None = None) -> str:

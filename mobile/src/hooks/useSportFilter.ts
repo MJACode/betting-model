@@ -21,8 +21,8 @@ export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW
 // NCAAB (men's college basketball) sits beside NCAAF. It joined 2026-10-30 for
 // its totals model; it has no player or team stats in the app yet.
 // NCAABW (women's college basketball) sits right after NCAAB. It joined
-// 2026-11-10 for its totals model, the one women's model; it has no player
-// stats, team stats or in-play model in the app.
+// 2026-11-10 for its totals model. The Stats tab has the same Players board
+// as NCAAB (no props, no Teams board).
 export const SPORTS: Sport[] = ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW', 'UFC', 'NHL'];
 
 const STORAGE_KEY = 'sportFilter.selected';

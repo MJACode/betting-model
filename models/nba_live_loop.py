@@ -117,6 +117,21 @@ PBP_WAIT_SEC = float(os.environ.get("NBA_LIVE_PBP_WAIT_SEC", "170"))
 PBP_RECHECK_SEC = float(os.environ.get("NBA_LIVE_PBP_RECHECK_SEC", "60"))
 # The archive's hourly purchase served the market 264 s before the hour.
 FETCH_OFFSET_SEC = float(os.environ.get("NBA_LIVE_FETCH_OFFSET_SEC", "264"))
+# THE FAST WAY (mike, 2026-11-13: "Move everything over to the fast way"). The
+# window's provider call stays (it carries Pinnacle, which the rule pairs every
+# quote with); DraftKings' rows in it are DraftKings' own board's
+# (models/ncaab_live_dk.py: the read where the board first showed the number is
+# the stamp), and DraftKings is the only book a fast decision may bet. The
+# ESPN wait becomes "until ESPN has caught up": DraftKings shows a basket a
+# median 3.7 s after it, so once ESPN's newest play carries DraftKings' current
+# score the plays the rule reads are all there, and the game is decided on that
+# read. ESPN is re-read every DK_CATCHUP_GAP_SEC, at most DK_CATCHUP_MAX_SEC;
+# a game that has not caught up by then takes the graded waits.
+DK_ON = os.environ.get("NBA_LIVE_DK", "1") != "0"
+DK_CATCHUP_GAP_SEC = float(os.environ.get("NBA_LIVE_DK_CATCHUP_GAP_SEC", "3"))
+DK_CATCHUP_MAX_SEC = float(os.environ.get("NBA_LIVE_DK_CATCHUP_MAX_SEC", "60"))
+SUMMARY_THREADS = 16
+FAST_BOOKS = ("draftkings", "pinnacle")      # the decider and the pair
 FETCH_WINDOW_SEC = float(os.environ.get("NBA_LIVE_FETCH_WINDOW_SEC", "240"))
 RETRY_GAP_SEC = float(os.environ.get("NBA_LIVE_RETRY_GAP_SEC", "60"))
 # ESPN's header score ahead of its play list: re-read once after this many
@@ -577,6 +592,61 @@ def evaluate_game(ctx: GameCtx, art: M.Artifact, q: pd.DataFrame, summary: dict,
     return out, notes
 
 
+def dk_score_now(reads: pd.DataFrame, game_id: str) -> tuple | None:
+    """DraftKings' newest (home, away) score for a game, OUR sides."""
+    g = reads[reads["game_id"] == game_id]
+    if not len(g):
+        return None
+    last = g.sort_values("read_at").iloc[-1]
+    if pd.isna(last["home_score"]) or pd.isna(last["away_score"]):
+        return None
+    return int(last["home_score"]), int(last["away_score"])
+
+
+def espn_score_ours(summary: dict, ctx) -> tuple | None:
+    """ESPN's newest play's (home, away) score on OUR sides."""
+    from data.ingestors.nba_live_feed import newest_play_score, plays_from_summary
+    sc = newest_play_score(summary)
+    if sc is None:
+        return None
+    got = plays_from_summary(summary, ctx.espn_event_id, ctx.game_id, ctx.season, ctx.game_date, ctx.home,
+                             ctx.away)
+    swapped = bool(got[1]) if got is not None else False
+    return (int(sc[1]), int(sc[0])) if swapped else (int(sc[0]), int(sc[1]))
+
+
+def overlay_dk_rows(rows_all: list, reads: pd.DataFrame, last_read, fetched_at) -> tuple[list, set]:
+    """The fetch's rows with each game's DraftKings spread replaced by
+    DraftKings' own board's (stamped where the board first showed it), and the
+    games that now carry a board quote. The rule bets spreads only, so the
+    moneyline rows stay the provider's."""
+    from models import ncaab_live_dk as DK
+    at = max(pd.Timestamp(last_read), pd.Timestamp(fetched_at))
+    cur = DK.current_quotes(reads, at, markets=("spreads",))
+    board = {}
+    for _i, r in cur.iterrows():
+        board[(r["game_id"], "spreads")] = {"spread_home": float(r["spread_home"]), "home_price": float(r["home_price"]),
+                                            "away_price": float(r["away_price"]), "snapshot_at": r["stamp"]}
+    if not board:
+        return rows_all, set()
+    out = [r for r in rows_all if not (r.get("bookmaker") == "draftkings"
+                                       and (r.get("game_id"), r.get("market")) in board)]
+    games = set()
+    for (gid, market), v in board.items():
+        tmpl = next((r for r in rows_all if r.get("game_id") == gid and r.get("market") == market), None)
+        if tmpl is None:
+            continue                     # the provider's fetch does not carry this game's market
+        row = {k: None for k in tmpl}
+        row.update({"game_id": gid, "sport": tmpl.get("sport"), "market": market, "bookmaker": "draftkings",
+                    "snapshot_type": "in_play", "snapshot_at": pd.Timestamp(v["snapshot_at"]).isoformat(),
+                    "home_price": v["home_price"], "away_price": v["away_price"], "spread_home": v["spread_home"],
+                    "source": "dk_live_board"})
+        out.append(row)
+        if market == "spreads":
+            games.add(gid)
+    return out, games
+
+
 def resolve_conflicts(decisions: list, standing: list[dict]) -> dict:
     """{model_id: reason} for this pass's bets that the one-game rule declines
     (mike, 2026-10-17: "It can't be both")."""
@@ -607,9 +677,10 @@ class Loop:
     """One process's state across a slate. tick() is one pass; the feeds and
     the connection factory are injected so a test can drive a whole window."""
 
-    def __init__(self, art: M.Artifact, espn, feed, connect, *, dry_run: bool = False,
+    def __init__(self, art: M.Artifact, espn, feed, connect, *, dry_run: bool = False, dk=None,
                  wait: float = PBP_WAIT_SEC, recheck: float = PBP_RECHECK_SEC, sleep=time.sleep,
                  clock=None, slate_dates=None, slots: Slots | None = None):
+        self.dk = dk                           # DraftKings' own board (models/ncaab_live_dk.DbSource)
         self.art, self.espn, self.feed, self.connect = art, espn, feed, connect
         self.dry_run, self.wait, self.recheck, self.sleep = dry_run, float(wait), float(recheck), sleep
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -730,6 +801,53 @@ class Loop:
             if k + 1 < tries:
                 self.sleep(gap_s)
         return None
+
+    def summaries(self, ctxs: list) -> dict:
+        """{game_id: summary or None}, every game read at the same time."""
+        if len(ctxs) <= 1:
+            return {c.game_id: self.summary(c.espn_event_id) for c in ctxs}
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(SUMMARY_THREADS, len(ctxs))) as ex:
+            got = list(ex.map(lambda c: self.summary(c.espn_event_id), ctxs))
+        return {c.game_id: x for c, x in zip(ctxs, got)}
+
+    def dk_board(self, game_ids: set):
+        """(DraftKings' reads for these games, the feed's last read), or None
+        while the feed is not live (mike's machine off): the slow way decides."""
+        if self.dk is None:
+            return None
+        from models import ncaab_live_dk as DK
+        try:
+            last = self.dk.last_read()
+            if not DK.feed_is_live(last, self.clock()):
+                return None
+            reads = self.dk.reads(game_ids)
+        except Exception as exc:                      # noqa: BLE001
+            log.warning("DraftKings board read failed (the slow way decides): %s", exc)
+            self.recycle()
+            return None
+        return (reads, last[0]) if len(reads) else None
+
+    def caught_up(self, games: list, dk_reads: pd.DataFrame) -> dict:
+        """{game_id: summary} for each game whose ESPN play list carries
+        DraftKings' current score, re-reading ESPN every DK_CATCHUP_GAP_SEC for
+        at most DK_CATCHUP_MAX_SEC. A game missing here has not caught up."""
+        want = {gid: dk_score_now(dk_reads, gid) for gid in [c.game_id for c in games]}
+        got, left = {}, list(games)
+        waited = 0.0
+        while left:
+            sums = self.summaries(left)
+            for c in list(left):
+                sm = sums.get(c.game_id)
+                if sm is not None and want.get(c.game_id) is not None \
+                        and espn_score_ours(sm, c) == want[c.game_id]:
+                    got[c.game_id] = sm
+                    left.remove(c)
+            if not left or waited + DK_CATCHUP_GAP_SEC > DK_CATCHUP_MAX_SEC:
+                break
+            self.sleep(DK_CATCHUP_GAP_SEC)
+            waited += DK_CATCHUP_GAP_SEC
+        return got
 
     def note(self, c: GameCtx, g, outcome: str, reason: str, fetch_at=None) -> str:
         """A row per open rule for an attempt that decided nothing: 'skipped'
@@ -870,6 +988,11 @@ class Loop:
             except Exception as exc:                  # noqa: BLE001
                 log.warning("live price log failed (non-fatal): %s", exc)
                 self.recycle()
+        board = self.dk_board({c.game_id for c, _g in todo})
+        fast_ids: set = set()
+        if board is not None:
+            rows_all, fast_ids = overlay_dk_rows(rows_all, board[0], board[1], fetch.fetched_at)
+            fast_ids &= {c.game_id for c, _g in todo}
         rows = pd.DataFrame(rows_all)
         if rows.empty:
             for c, g in todo:
@@ -893,13 +1016,35 @@ class Loop:
         todo = [(c, g) for c, g in todo if c.game_id in have]
         if not todo:
             return 0, out
+        n = 0
+        fast = [(c, g) for c, g in todo if c.game_id in fast_ids]
+        if fast:
+            ready = self.caught_up([c for c, _g in fast], board[0])
+            q_fast = q_all[q_all["book"].isin(FAST_BOOKS)]
+            for c, g in fast:
+                if c.game_id not in ready:
+                    continue
+                try:
+                    k, outcome = self.decide_game(slot, fetch, c, g, rows, q_fast, gframe, ready[c.game_id],
+                                                  False, source="DraftKings board")
+                except Exception as exc:              # noqa: BLE001
+                    log.exception("%s failed: %s", c.game_id, exc)
+                    self.recycle()
+                    k, outcome = 0, self.skip(c, g, f"evaluation failed: {type(exc).__name__}: {exc}",
+                                              fetch.fetched_at)
+                n += k
+                out[c.game_id] = outcome
+            todo = [(c, g) for c, g in todo if c.game_id not in out]
+            if not todo:
+                settled = {gid for gid, o in out.items() if o != "skipped"}
+                self.seen |= {k for k in fresh_stamps if k[0] in settled}
+                return n, out
         left = self.wait - (self.clock() - fetch.fetched_at).total_seconds()
         if left > 0:
             self.sleep(left)
         first = {c.game_id: self.summary(c.espn_event_id) for c, _g in todo}
         if self.recheck > 0:
             self.sleep(self.recheck)
-        n = 0
         for c, g in todo:
             try:
                 second = self.summary(c.espn_event_id)
@@ -939,7 +1084,8 @@ class Loop:
         return n, out
 
     def decide_game(self, slot, fetch, c: GameCtx, g, rows: pd.DataFrame, q_all: pd.DataFrame,
-                    gframe: pd.DataFrame, summary: dict, running: bool = False) -> tuple[int, str]:
+                    gframe: pd.DataFrame, summary: dict, running: bool = False,
+                    source: str | None = None) -> tuple[int, str]:
         """(decisions written, 'decided' | 'carried' | 'refused' | 'skipped')."""
         if c.top is None:
             try:
@@ -984,6 +1130,8 @@ class Loop:
         n = 0
         for rule, d, st in decs:
             outcome, reason, pick = ("bet", "BET", None) if d.bet else ("no_bet", d.reason, None)
+            if source:
+                reason = f"{reason} ({source})"
             if d.bet:
                 if rule.model_id in conflicts:
                     outcome, reason = "declined", conflicts[rule.model_id]
@@ -1060,6 +1208,11 @@ def main(argv=None) -> int:
     use_poller_session()
     loop = Loop(art, Espn(), LiveOddsFeed(CALL_CAP, CREDIT_CAP), get_connection,
                 dry_run=a.dry_run, wait=a.wait, recheck=a.recheck)
+    if DK_ON:
+        from models.ncaab_live_dk import DbSource
+        loop.dk = DbSource(loop.c, sport="NBA")
+        log.info("fast path on: DraftKings' own board for DraftKings' quote, ESPN read until it shows "
+                 "DraftKings' score (every %.0f s, at most %.0f s)", DK_CATCHUP_GAP_SEC, DK_CATCHUP_MAX_SEC)
     if not a.dry_run:
         try:
             if not ledger_ready(loop.c()):

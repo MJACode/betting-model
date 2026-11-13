@@ -8,9 +8,8 @@
  * dropped `sport: 'NCAABW'` from a push, and filed every ncaabw_* model under
  * the MEN'S sport: 'ncaabw_total_blend'.startsWith('ncaab') is true.
  *
- * One model, `ncaabw_total_blend` (models/ncaabw_total_blend.py MODEL_ID), and
- * nothing else: no player stats, no Teams board. Its one in-play model is the
- * halftime total (2026-11-11).
+ * One pre-game model, `ncaabw_total_blend`, the halftime total, and a Players
+ * board with the same chips as NCAAB. No props and no Teams board.
  */
 
 import { SPORTS, type Sport } from '../src/hooks/useSportFilter';
@@ -24,7 +23,7 @@ import {
   pickLineQuotes, pickTimingInfo,
 } from '../src/lib/markets';
 import type { BookPricedRow, Pick } from '../src/types';
-import { GROUP_ORDER, defaultStatFor, statsForSport, supportsHitRate } from '../src/lib/statCatalog';
+import { GROUP_ORDER, defaultStatFor, propMarketForStat, statsForSport, supportsHitRate } from '../src/lib/statCatalog';
 import { supportsTeamBoard, teamBoardSeason, teamSeasonLabel } from '../src/lib/teamStatCatalog';
 import { supportsPlayerDetail } from '../src/lib/playerLog';
 import { boardSegmentsFor, segmentsForSport } from '../src/lib/statSegments';
@@ -177,12 +176,18 @@ const chips = pickLineQuotes(mkPick({}), [
 check('a women\'s pick offers DraftKings\' locked price and FanDuel\'s, and none of the seven',
   JSON.stringify(chips) === JSON.stringify(['fanduel:-105', 'draftkings:-110:record']), chips.join(' '));
 
-// ── Stats: nothing, said as nothing ──────────────────────────────────────────
-check('NCAABW has no leaderboard stat', GROUP_ORDER.NCAABW.length === 0 && statsForSport(NCAABW).length === 0
-  && defaultStatFor(NCAABW) === null, String(defaultStatFor(NCAABW)?.key));
-check('NCAABW has no hit-rate view', !supportsHitRate(NCAABW));
+// ── Stats: the Players board, the same chips as NCAAB, and nothing else ──────
+const statKeys = statsForSport(NCAABW).map((d) => d.key);
+check('NCAABW has the NCAAB chips, Points first',
+  GROUP_ORDER.NCAABW.join() === 'NCAABW'
+    && defaultStatFor(NCAABW)?.key === 'points'
+    && statKeys.join() === 'points,rebounds,assists,threes,pra,steals,blocks,minutes',
+  statKeys.join());
+check('NCAABW has a hit-rate view', supportsHitRate(NCAABW));
+check('NCAABW has a player page', supportsPlayerDetail(NCAABW));
 check('NCAABW has no Teams board', !supportsTeamBoard(NCAABW));
-check('NCAABW has no player page', !supportsPlayerDetail(NCAABW));
+check('no NCAABW chip carries a prop market',
+  statsForSport(NCAABW).every((d) => propMarketForStat(d) == null));
 check('NCAABW draws no segment row',
   segmentsForSport(NCAABW).length < 2 && boardSegmentsFor(NCAABW).length < 2, segmentsForSport(NCAABW).join(','));
 // The halftime total (models/ncaabw_live_ht.py, 2026-11-11) is the women's

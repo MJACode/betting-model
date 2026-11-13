@@ -21,7 +21,47 @@
 
 ---
 
-## [ ] Volume settings: the dashboard panel, once the branch is merged (2026-11-11)
+## [ ] EuroLeague: finish the two history purchases (2026-11-12)
+mike approved about 4.4M on 2026-11-13 ("Do the 4.4m"; `docs/sports/euroleague.md`,
+"The purchase"): no 2020-21, the full game every snapshot near and during games
+and one every 15 minutes otherwise, plus first half, quarters, team totals and
+alternates. 2021-22 to 2025-26 started 2026-11-13 01:39Z; 2026-27 waits for the
+branch's merge (the clean-up visits this season's dates). Then the grid's
+baselines.
+
+## [ ] EuroLeague: a live first-half and quarter fetch, and relocated home games (2026-11-12)
+The forward pull covers the full game only. Period lines need a per-event
+fetch at the decision times (the shape of `data/ingestors/ncaab_first_half_odds.py`).
+Relocated "home" games (Maccabi in Belgrade, Hapoel in Sofia, Dubai in Bosnia)
+need a club-arena table before any model reads home advantage.
+
+## [ ] Betting filters for NCAAB: halves (Matt, 2026-11-13: "Start with NBA then move to college basketball")
+
+`team_period_results` and `mobile/src/lib/teamPeriodSplits.ts` are NBA only.
+NCAAB needs: a period-score source in the writer (`ncaab_period_scores`,
+halves only: FG / H1 / H2), its own period markets (`spreads_h1` / `totals_h1`
+are already captured live by `ncaab_first_half_odds`; check H2), NCAAB's
+short-rest rule, and a Teams board, which NCAAB does not have
+(`teamStatCatalog` BALL excludes it). Row count first: ~360 teams.
+
+## [ ] Records on every Betting split for the other sports (2026-11-13)
+
+Matt asked for record AND percent on every Betting stat. NBA gets every record
+from `team_period_results`. For MLB, WNBA, NHL, NFL and NCAAF the season board
+(`team_stats_board_compute`) still returns no W-L for ATS Home / Away, as Fav /
+as Dog, Rest Edge or Short Rest, so those rows show the percent, and a game
+count only under 10 games. Fix: either return the counts from the function (a RETURNS TABLE change:
+DROP and recreate, plus `team_stats_board_cache`), or extend
+`team_period_results` to those sports' full game.
+
+---
+
+## [x] Volume settings: the dashboard panel, once the branch is merged (2026-11-11, done 2026-11-12)
+
+Done: merged in #1251, published 2026-11-11 23:56Z, moved to its own
+"Volume" tab 2026-11-12 (`docs/monitoring.md`). The text below is the plan as
+it stood.
+
 
 Branch `claude/model-volume-dial` builds the database side and the sync. The
 panel on the dashboard's Models tab cannot be built before the merge: it reads
@@ -57,6 +97,19 @@ under today's cut because they were posted when the cut was 0.02, and a
 posted bet keeps the cut it was written under. The predicate is the app's:
 posted already, or passes the cut in force (`open_picks` has it in SQL).
 One shared fragment, three readers.
+
+## [ ] NCAAF has no stored half-time or quarter scores (2026-11-11)
+
+Found grading the bought first-half prices (`docs/ncaaf_first_half_team_totals.md`).
+The research read half-time scores out of `ncaaf_plays`, which is right for
+99.1% of games against ESPN and cannot settle a bet. Two things wait on a
+real table (`ncaaf_period_scores`, the shape of `ncaab_period_scores`):
+any first-half model that ships, and the Eggz first-half legs, which stay
+`needs_review` for NCAAF today (#1243). Sources, both free: ESPN's
+scoreboard carries quarter scores for every game and answers from mike's
+PC (the check script reads it); CFBD's `/games` carries line scores and
+needs the key the worker holds, and `parse_games` drops them today.
+`ncaaf_plays` now holds 2015-2025 (pulled 2026-11-11 by `ncaaf_pbp_pull`).
 
 ## [x] NCAABW totals model: build it live (2026-11-09, done 2026-11-10)
 

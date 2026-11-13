@@ -124,6 +124,17 @@ ALT_SOURCE = "odds_api_nba_alt_history"
 Q1_PROP_MARKETS = ["player_points_q1", "player_rebounds_q1", "player_assists_q1"]
 PERIOD_TT_MARKETS = ["team_totals_q1", "team_totals_h1"]
 PERIOD_TT_SOURCE = "odds_api_nba_period_team_total_history"
+# Every period's main spread and total at the close, for the Stats tab's Betting filters (Matt,
+# 2026-11-13: "add halves and quarters", backfill approved and daily capture approved). One
+# purchase per game PERIOD_LINE_LEAD_MIN before tip; the per-event endpoint bills per market
+# RETURNED, so a period no book quotes before tip costs nothing. --probe-periods reads the real
+# cost and which periods are quoted on one game first. Rows land in `odds` under their own
+# source; data/ingestors/team_period_results.py grades every team-game against them.
+PERIOD_LINE_MARKETS = ["spreads_h1", "totals_h1",
+                       "spreads_q1", "totals_q1", "spreads_q2", "totals_q2",
+                       "spreads_q3", "totals_q3", "spreads_q4", "totals_q4"]
+PERIOD_LINE_SOURCE = "odds_api_nba_period_close_history"
+PERIOD_LINE_LEAD_MIN = 5
 # The marker a re-run reads back. Game lines resume on odds_history_pulls and
 # props on the game's stored player_points rows (player_prop_odds has no source
 # column); the derivative rows carry this.
@@ -749,6 +760,25 @@ def parse_derivatives(book_markets: list[dict], home_name: str, home: str, away:
     return rows
 
 
+def parse_period_lines(book_markets: list[dict], home_name: str, home: str, away: str) -> list[dict]:
+    """One `odds`-shaped dict per period market for one book: spreads keyed on the HOME number
+    (CLAUDE.md section 4), totals on the line. Anything not in PERIOD_LINE_MARKETS is ignored."""
+    rows = []
+    for m in book_markets:
+        key, outs = m.get("key"), m.get("outcomes") or []
+        if key not in PERIOD_LINE_MARKETS:
+            continue
+        if key.startswith("spreads_"):
+            p = _parse_spread_outcomes(outs, home_name)
+            if p.get("spread_home") is not None:
+                rows.append({"market": key, **p})
+        else:
+            p = _parse_total_outcomes(outs)
+            if p.get("total_line") is not None:
+                rows.append({"market": key, **p})
+    return rows
+
+
 def _team_total_rows(outs: list[dict], home: str, away: str, market: str) -> list[dict]:
     """One team-total market's outcomes, filed as <market>_home / <market>_away by team; a team
     that is not in the game is never filed under either side."""
@@ -853,6 +883,15 @@ def _period_tt_done(conn, game_ids: list[str]) -> set[str]:
     return have
 
 
+def _period_lines_done(conn, game_ids: list[str]) -> set[str]:
+    have: set[str] = set()
+    for i in range(0, len(game_ids), 500):
+        have |= {r[0] for r in conn.execute(
+            "SELECT DISTINCT game_id FROM odds WHERE game_id = ANY(%s) AND source = %s",
+            (game_ids[i:i + 500], PERIOD_LINE_SOURCE)).fetchall()}
+    return have
+
+
 def _deriv_done(conn, game_ids: list[str]) -> set[str]:
     have: set[str] = set()
     for i in range(0, len(game_ids), 500):
@@ -881,6 +920,85 @@ def buy_period_team_totals(conn, meter: Meter, first_season: int, last_season: i
     return _buy_per_event(conn, meter, first_season, last_season, lead_min, PERIOD_TT_MARKETS,
                           PERIOD_TT_SOURCE, parse_period_team_totals, _period_tt_done,
                           "period team totals")
+
+
+def buy_period_lines(conn, meter: Meter, first_season: int, last_season: int,
+                     lead_min: int = PERIOD_LINE_LEAD_MIN,
+                     dates: tuple[str, str] | None = None) -> dict:
+    """Every finished game's half and quarter spreads and totals, one purchase `lead_min` before
+    tip. A game already holding PERIOD_LINE_SOURCE rows is skipped, so the nightly run buys only
+    the games finished since the last one."""
+    return _buy_per_event(conn, meter, first_season, last_season, lead_min, PERIOD_LINE_MARKETS,
+                          PERIOD_LINE_SOURCE, parse_period_lines, _period_lines_done,
+                          "period lines", dates=dates)
+
+
+def buy_period_lines_daily(conn, season: int) -> dict:
+    """The pipeline's purchase (Matt, 2026-11-13, "5. Yes": add the period lines to the regular
+    pull): every finished game of `season` that holds no PERIOD_LINE_SOURCE row yet. On the
+    first run that is the season so far (the backfill Matt approved the same day); after it,
+    yesterday's slate.
+
+    The ceiling is this run's own plan (games x markets x 10, plus one event list a game, an
+    upper bound since the endpoint bills only the markets it returns) and the floor is the
+    measured reserve (odds_quota.plan_credit_budget). A plan the reserve cannot cover is not
+    started: it says why and buys nothing."""
+    from data.ingestors.odds_quota import plan_credit_budget
+    if not config.ODDS_API_KEY:
+        return {"skipped": "no ODDS_API_KEY"}
+    games = _known_games(conn, season, season)
+    done = _period_lines_done(conn, list(games))
+    todo = [g for g in games if g not in done]
+    if not todo:
+        return {"season": season, "games": 0}
+    per_game = 10 * len(PERIOD_LINE_MARKETS) + 1
+    budget, problems = plan_credit_budget(conn, shard_calls=len(todo), total_calls=len(todo),
+                                          credits_per_call=per_game)
+    if problems:
+        return {"season": season, "games": len(todo), "skipped": problems}
+    meter = Meter(ceiling=budget.ceiling, floor=budget.floor)
+    out = buy_period_lines(conn, meter, season, season)
+    persist_quota(conn)
+    return {"season": season, "games": len(todo), "ceiling": budget.ceiling,
+            "spent": meter.spent, **out}
+
+
+def probe_period_lines(conn, meter: Meter, game_date: str,
+                       lead_min: int = PERIOD_LINE_LEAD_MIN) -> dict:
+    """One finished game on `game_date`, every PERIOD_LINE_MARKETS market in one call: which
+    books quote each period before tip, the numbers, and what it cost. Writes nothing."""
+    season = int(game_date[:4]) + (1 if int(game_date[5:7]) >= 9 else 0)
+    games = [g for g in _known_games(conn, season, season).values() if g["game_date"] == game_date]
+    by_teams = {(g["away"], g["home"]): g for g in games}
+    noon = datetime.fromisoformat(f"{game_date}T12:00:00").replace(tzinfo=ET)
+    r = meter.get(f"{BASE}/events", {"date": noon.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    if r is None or r.status_code != 200:
+        return {"error": getattr(r, "status_code", "network")}
+    for ev in (r.json().get("data") or []):
+        start = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00"))
+        g = by_teams.get((_normalize_team(ev.get("away_team", ""), "NBA"),
+                          _normalize_team(ev.get("home_team", ""), "NBA")))
+        if g is None or start.astimezone(ET).date().isoformat() != game_date:
+            continue
+        snap = (start - timedelta(minutes=lead_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        before = meter.spent
+        resp = meter.get(f"{BASE}/events/{ev['id']}/odds", {
+            "date": snap, "markets": ",".join(PERIOD_LINE_MARKETS),
+            "bookmakers": BOOKS, "oddsFormat": "american"})
+        if resp is None or resp.status_code != 200:
+            return {"game_id": g["game_id"], "error": getattr(resp, "status_code", "network")}
+        body = resp.json()
+        books: dict[str, list[str]] = defaultdict(list)
+        for book in (body.get("data") or {}).get("bookmakers", []):
+            for p in parse_period_lines(book.get("markets", []), ev.get("home_team", ""),
+                                        g["home"], g["away"]):
+                num = p.get("spread_home") if p["market"].startswith("spreads_") else p.get("total_line")
+                books[p["market"]].append(f"{book.get('key')} {num}")
+        return {"game_id": g["game_id"], "snapshot": body.get("timestamp") or snap,
+                "credits": meter.spent - before,
+                "quoted": {m: sorted(books.get(m, [])) for m in PERIOD_LINE_MARKETS},
+                "markets_with_no_book": [m for m in PERIOD_LINE_MARKETS if m not in books]}
+    return {"error": "no game matched"}
 
 
 def probe_first_quarter(conn, meter: Meter, game_date: str) -> dict:
@@ -1054,6 +1172,11 @@ def main() -> None:
                     help="first-quarter points, rebounds and assists props, into player_prop_odds")
     ap.add_argument("--period-team-totals", action="store_true",
                     help="first-quarter and first-half team totals, into odds")
+    ap.add_argument("--period-lines", action="store_true",
+                    help="every finished game's half and quarter spreads and totals at the close")
+    ap.add_argument("--probe-periods", metavar="DATE",
+                    help="one game on DATE, every half and quarter line: books, numbers and cost; "
+                         "writes nothing")
     ap.add_argument("--probe-q1", metavar="DATE",
                     help="one game on DATE, every first-quarter market: books and cost; writes nothing")
     ap.add_argument("--probe-props", metavar="DATE", help="2 games on DATE, writes nothing")
@@ -1083,6 +1206,11 @@ def main() -> None:
             print(s)
             print(f"MEASURED {meter.spent} credits for {s['events']} games; balance {meter.remaining}")
             return
+        if a.probe_periods:
+            meter = Meter(ceiling=200, floor=a.floor)
+            print(probe_period_lines(conn, meter, a.probe_periods))
+            print(f"MEASURED {meter.spent} credits; balance {meter.remaining}")
+            return
         if a.probe_q1:
             meter = Meter(ceiling=200, floor=a.floor)
             print(probe_first_quarter(conn, meter, a.probe_q1))
@@ -1090,7 +1218,7 @@ def main() -> None:
             return
         if not a.seasons or not (a.lines or a.props or a.derivatives or a.alternates or a.fill_gaps
                                  or a.instants or a.postseason_props or a.q1_props
-                                 or a.period_team_totals):
+                                 or a.period_team_totals or a.period_lines):
             ap.error("give --lines, --fill-gaps, --props, --derivatives or --alternates "
                      "with --seasons FIRST LAST")
         if not a.apply:
@@ -1116,6 +1244,9 @@ def main() -> None:
                                                     what="first-quarter props"))
         if a.period_team_totals:
             print("period team totals:", buy_period_team_totals(conn, meter, *a.seasons, a.lead_min))
+        if a.period_lines:
+            print("period lines:", buy_period_lines(conn, meter, *a.seasons, a.lead_min,
+                                                    dates=tuple(a.dates) if a.dates else None))
         if a.derivatives:
             print("derivatives:", buy_derivatives(conn, meter, *a.seasons, a.lead_min))
         if a.alternates:
