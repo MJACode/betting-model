@@ -4089,6 +4089,10 @@ export interface SgpPriceEntry {
   bookAmerican: number;
   multipliedDecimal: number;
   sgpGroups: number;
+  /** Legs past the first in each same-game group (lib/sgpPricing.ts). */
+  extraLegs: number;
+  /** The leg-correlation lift the app divided the price by. */
+  corrLift: number;
   legCount: number;
   legs: { label: string; gameId: string | null }[];
   appVersion: string | null;
@@ -4105,6 +4109,8 @@ export async function logSgpPrice(e: SgpPriceEntry): Promise<void> {
     p_leg_count: e.legCount,
     p_legs: e.legs,
     p_app_version: e.appVersion,
+    p_extra_legs: e.extraLegs,
+    p_corr_lift: e.corrLift,
   });
   if (error) throw error;
 }
