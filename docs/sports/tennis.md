@@ -254,9 +254,15 @@ cover it on an average quote; any edge is in the quotes that stand apart.
 - The code graph is rebuilt and named once, after the last code change of
   this build, before its merge.
 
-- Pinnacle's absence from the 2026-11-13 board: read the board again near a
-  match's start before any live model relies on Pinnacle as its reference
-  (issue #1278: the forward log answers it after the evening's matches).
+- Pinnacle on the feed's tennis board is thin and late (answered 2026-11-13,
+  #1278): the women's Finals matches of that evening got no Pinnacle quote on
+  the feed at all, and the men's Finals matches of 11-15 got their first one
+  at 19:23 UTC on 11-13 (6 quotes), while Pinnacle's own site priced every one
+  of them all day. A live model's sharp reference is Pinnacle's own site
+  (`tennis_pinnacle_prices`), with the feed's Pinnacle as a second copy.
+- DraftKings' own price, checked against the feed's DraftKings price for the
+  same match (Sabalenka v Svitolina, 2026-11-13): -237 / +190 from the reader
+  at 20:07 UTC, -237 / +190 from the feed at 20:04 UTC.
 - DraftKings' rules are the Massachusetts edition of 2024-08-01; read the
   current rules page before the retirement option goes live.
 - The archive's licence is non-commercial (above).
