@@ -1049,6 +1049,61 @@ def _settle_prop_picks(
 
 # ── UFC Settlement ────────────────────────────────────────────────────────────
 
+# A UFC bet whose fight did not happen on its card. The feed lists a fight up to
+# weeks ahead, and ufc_open_moneyline bets a week or more out, so some of its
+# bets will be on bouts that are cancelled or moved (on the bought 2020-2026
+# history, 474 events priced a week out by Pinnacle and a deciding book were
+# not fought on the card they were listed for; every one but two sat within a
+# day of a logged UFC card: docs/ufc_market_audit.md). The book refunds such a
+# bet. Without this its games row never gets a score, _settle_ufc_picks never
+# selects it, and an ungraded posted bet holds the daily record
+# (tracking/discord_notifier.ungraded_picks) for good. So once the card is in
+# the fight log, a bet on a pair of whom NEITHER fought on it settles NO_ACTION.
+# One fighter on the card is the same bout under another spelling (the
+# settlement's anchor rule), left to the normal path. Names match by slug,
+# else by a unique token set (data/ufc_identity.resolve_slug).
+_UFC_UNFOUGHT_MIN_AGE_DAYS = 2
+
+
+def _settle_unfought_ufc_picks(conn: DBConnection, game_date: str, settled_at: str) -> int:
+    """NO_ACTION for unsettled UFC BETs whose card is logged without them.
+    Returns how many were settled."""
+    from data.ingestors.ufc_stats_ingestor import slugify_fighter
+    from data.ufc_identity import resolve_slug
+
+    cutoff = (datetime.strptime(game_date, "%Y-%m-%d")
+              - timedelta(days=_UFC_UNFOUGHT_MIN_AGE_DAYS)).strftime("%Y-%m-%d")
+    picks = conn.execute("""
+        SELECT p.pick_id, p.pick_label, p.game_date, g.home_team, g.away_team
+          FROM picks p
+          JOIN games g ON g.game_id = p.game_id
+         WHERE p.result IS NULL AND p.signal_type = 'BET'
+           AND p.model_id LIKE 'ufc_%%'
+           AND g.home_score IS NULL
+           AND p.game_date <= %s
+    """, (cutoff,)).fetchall()
+    n = 0
+    for pick_id, label, pdate, home, away in picks:
+        d = datetime.strptime(str(pdate)[:10], "%Y-%m-%d")
+        card = {slugify_fighter(r[0]) for r in conn.execute("""
+            SELECT fighter_name FROM ufc_fight_log WHERE game_date BETWEEN %s AND %s
+        """, ((d - timedelta(days=1)).strftime("%Y-%m-%d"),
+              (d + timedelta(days=1)).strftime("%Y-%m-%d"))).fetchall()}
+        if not card:
+            continue                      # the card is not logged yet
+        fought = [s for s in (slugify_fighter(home or ""), slugify_fighter(away or ""))
+                  if s and (s in card or resolve_slug(s, card))]
+        if fought:
+            continue
+        conn.execute("""
+            UPDATE picks SET result = 'NO_ACTION', profit_flat = 0, profit_kelly = 0,
+                   settled_at = %s
+             WHERE pick_id = %s AND result IS NULL
+        """, (settled_at, pick_id))
+        logger.info(f"  UFC: {label} was not fought on its logged card -- NO_ACTION")
+        n += 1
+    return n
+
 _UFC_METHOD_CLASSES = ("decision", "ko_tko", "submission")
 
 
@@ -3268,6 +3323,7 @@ def settle_picks(game_date: str = None) -> dict:
         u_wins, u_losses, u_pushes, u_no_actions, u_flat, u_kelly = (
             _settle_ufc_picks(conn, game_date, settled_at)
         )
+        u_no_actions += _settle_unfought_ufc_picks(conn, game_date, settled_at)
         wins       += u_wins
         losses     += u_losses
         pushes     += u_pushes

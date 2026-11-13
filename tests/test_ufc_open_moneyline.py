@@ -221,3 +221,53 @@ def test_the_card_is_scheduled_hourly_and_its_heartbeat_is_bounded():
     assert '"scripts.ufc_open_moneyline_card", "--publish"' in src
     from tracking.job_heartbeat import MAX_SILENCE
     assert MAX_SILENCE["ufc_open_moneyline_card"] == 150
+
+
+def test_the_feed_s_placeholder_date_is_not_a_fight_to_bet():
+    conn = _Conn([("UFC_2026-12-31_ilia-topuria_justin-gaethje", "2026-12-31", "Justin Gaethje",
+                   "Ilia Topuria", "2026-12-31T05:00:00+00:00"),
+                  ("UFC_2027-01-01_khamzat-chimaev_sean-strickland", "2027-01-01", "Sean Strickland",
+                   "Khamzat Chimaev", "2027-01-01T03:00:00+00:00"),
+                  ("UFC_2026-12-12_diego-lopes_charles-oliveira", "2026-12-12", "Charles Oliveira",
+                   "Diego Lopes", "2026-12-13T04:00:00+00:00")])
+    assert list(card.slate(conn, NOW)) == ["charles-oliveira|diego-lopes|2026-12-12"]
+
+
+# ── settlement of a fight that did not happen ───────────────────────────────
+
+class _SettleConn:
+    """Answers the two reads of _settle_unfought_ufc_picks; records the update."""
+
+    def __init__(self, picks, card):
+        self.picks, self.card, self.updates = picks, card, []
+
+    def execute(self, sql, params=None):
+        s = " ".join(sql.split())
+        if s.startswith("SELECT p.pick_id"):
+            return _Rows(self.picks)
+        if s.startswith("SELECT fighter_name FROM ufc_fight_log"):
+            return _Rows([(n,) for n in self.card])
+        if s.startswith("UPDATE picks SET result = 'NO_ACTION'"):
+            self.updates.append(params)
+        return _Rows([])
+
+
+PICK = (7, "Ilia Topuria ML", "2026-11-14", "Justin Gaethje", "Ilia Topuria")
+
+
+def test_a_bet_on_a_fight_missing_from_its_logged_card_settles_no_action():
+    from tracking.paper_tracker import _settle_unfought_ufc_picks
+    conn = _SettleConn([PICK], ["Alex Pereira", "Jamahal Hill"])
+    assert _settle_unfought_ufc_picks(conn, "2026-11-17", "2026-11-17T11:00:00Z") == 1
+    assert conn.updates == [("2026-11-17T11:00:00Z", 7)]
+
+
+def test_a_card_not_logged_yet_or_a_fighter_on_it_settles_nothing():
+    from tracking.paper_tracker import _settle_unfought_ufc_picks
+    # the card is not in the fight log yet
+    conn = _SettleConn([PICK], [])
+    assert _settle_unfought_ufc_picks(conn, "2026-11-17", "x") == 0 and conn.updates == []
+    # one fighter is on the card under the log's spelling: the same bout, left
+    # to the normal path (the anchor rule)
+    conn = _SettleConn([PICK], ["Gaethje Justin", "Max Holloway"])
+    assert _settle_unfought_ufc_picks(conn, "2026-11-17", "x") == 0 and conn.updates == []

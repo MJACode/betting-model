@@ -18,7 +18,10 @@ Ignore and delete any existing models in the repo."*
 It holds a fight while either fighter has an earlier fight not yet logged,
 and skips a fighter it cannot place on his ufcstats record (debutants, until
 their first fight is logged). The card keys its decisions on the fight, not
-the stored id, because the feed stores each fight under two ids.
+the stored id, because the feed stores each fight under two ids. It skips the
+feed's placeholder dates (December 31 and January 1). A bet on a fight that
+is cancelled or moved settles NO_ACTION once its card is in the fight log
+without either fighter (`tracking/paper_tracker._settle_unfought_ufc_picks`).
 
 The three models of 2026-06-11 (`ufc_moneyline`, `ufc_total_rounds`,
 `ufc_method_of_victory`) are in `config.RETIRED_MODELS`; their feature

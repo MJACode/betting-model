@@ -207,6 +207,15 @@ and each placebo's best below its result. 7 days is the middle of it.
   price, opinions equal to 2.6e-12; 49 had two books at the same best price
   and named a different one of them (the card now breaks a tie in the
   deciding-book order, DraftKings first).
+- Fights that never happen (`non_ufc_events.py`): 474 events Pinnacle and a
+  deciding book priced a week out, both fighters on ufcstats, were not
+  fought on the card they were listed for (cancelled or moved bouts); 472
+  sat within a day of a logged UFC card. A bet on one is refunded by the
+  book; the settlement now writes NO_ACTION once the card is logged without
+  either fighter, so it cannot hold the daily record. The other two carried
+  the feed's placeholder date for an unscheduled fight (December 31), which
+  the card skips; no UFC fight of the history was listed on that date or
+  January 1.
 - The live path can meet it: our store keeps a Pinnacle quote every pull
   (about every ten minutes, 2026-11-13) on most fights since 2026-09
   (Pinnacle on 78 of 102 October fights; before August our store kept

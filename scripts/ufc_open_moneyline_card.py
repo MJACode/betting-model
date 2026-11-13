@@ -45,6 +45,11 @@ from tracking.pick_integrity import pick_problems
 MODEL_ID = om.MODEL_ID
 SPORT = om.SPORT
 FRESH_H = 3.0            # a pull older than this is not a pull
+# The feed dates an unscheduled fight December 31 or January 1 (2026-11-13:
+# Topuria-Gaethje, Masvidal-McGregor, Chimaev-Strickland and others). None of
+# the 2,457 UFC fights of the bought 2020-2026 history was listed on either
+# day, so the backtest never bet one; the card does not either.
+PLACEHOLDER_DAYS = ("12-31", "01-01")
 HORIZON_DAYS = 120       # fights further out than this are not read
 SHARP = "pinnacle"
 
@@ -141,6 +146,8 @@ def slate(conn, now: datetime) -> dict[str, dict]:
         k = fight_key(gid)
         start = _utc(ct)
         if k is None or start is None or start <= now:
+            continue
+        if start.strftime("%m-%d") in PLACEHOLDER_DAYS:
             continue
         groups[k[0]].append({"game_id": gid, "day": k[1], "game_date": str(gd)[:10],
                              "home": home, "away": away, "start": start})

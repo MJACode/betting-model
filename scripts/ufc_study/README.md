@@ -28,7 +28,8 @@ the working directory, and imports its siblings from this folder.
    `feed_kill.py <min lead hours>` (the shipped rule's kill tests),
    `feed_debut.py`, and `card_replay.py` (the card's own code against the
    research, bet for bet; needs DATABASE_URL). `live_replay.py` replays the
-   rule on our own 2026 store.
+   rule on our own 2026 store; `non_ufc_events.py <spool>` counts the fights
+   listed but not fought on their card.
 
 `feed_probe.py` is PAID (2 credits a market live, 20 in history) and logs every
 call to `api_call_log` through `config`.
