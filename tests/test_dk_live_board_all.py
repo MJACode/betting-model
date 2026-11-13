@@ -226,3 +226,22 @@ def test_a_merge_that_changes_the_feed_restarts_it_and_any_other_merge_does_not(
     _git(other, "push", "-q", "origin", "HEAD:master")
     assert B.feed_changed_on_master(here) is True
     assert B.feed_changed_on_master(tmp_path / "not-a-repo") is False  # a doubt is never a restart
+
+
+def test_the_feed_raises_its_own_priority_on_windows(monkeypatch):
+    """On a machine at 100% CPU the feed must not be starved (2026-11-13)."""
+    import os
+    if os.name != "nt":
+        assert B.raise_priority().startswith("not Windows")
+        return
+    import ctypes
+    k = ctypes.windll.kernel32
+    k.GetCurrentProcess.restype = ctypes.c_void_p
+    k.GetPriorityClass.argtypes = [ctypes.c_void_p]
+    k.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    before = k.GetPriorityClass(k.GetCurrentProcess())
+    try:
+        assert B.raise_priority() == "priority high"
+        assert k.GetPriorityClass(k.GetCurrentProcess()) == 0x80
+    finally:
+        k.SetPriorityClass(k.GetCurrentProcess(), before)
