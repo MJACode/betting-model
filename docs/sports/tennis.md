@@ -56,6 +56,33 @@ number, every DraftKings moneyline is worth about the retirement chance of
 the side bet more than its price says. That is a mechanism, not yet a result
 (see the grid).
 
+**How much the option is worth** (the archive, tour-level matches 2015-2026,
+walkovers out: 86,797 matches, 173,594 player-matches;
+`python -m scripts.tennis_retirement_rates`, run 2026-11-13). A player retires after the first set is complete in **1.13%** of
+their matches: men 1.14%, women 1.13%; men's Grand Slams 1.24% a side, women's
+0.48%. The retiring player was the rating underdog in 51.8% of the 1,965
+cases, so the option is not a disguised underdog bet. What moves it:
+
+| Player-match | Retirement after set one | Player-matches |
+|---|---|---|
+| all | 1.13% | 173,594 |
+| previous match in the same event over 3½ hours | 3.02% | 927 |
+| previous match in the same event 2½ to 3½ hours | 1.17% | 7,856 |
+| previous match in the same event under 1½ hours | 0.99% | 31,791 |
+| retired after a set within the last 30 days | 1.73% | 4,347 |
+| no such retirement in the last 180 days | 1.05% | 148,621 |
+| men's best of five | 1.67% | 11,586 |
+| aged 30 to 33 | 1.39% | 21,295 |
+| aged under 22 | 0.94% | 29,834 |
+| grass | 0.86% | 20,064 |
+
+DraftKings' two prices on the 2026-11-13 WTA Finals match (-295 and +232)
+carry a 4.8% overround, about 2.4 points a side. So the option hands back
+about half of DraftKings' margin on an average bet, and up to all of it on the
+riskiest player-matches: alone it is not an edge. Its value is as a term
+added to every DraftKings price when that price is compared with a sharp
+book's no-vig number (mechanism 1 below).
+
 ## The market grid
 
 | Market | Settles on | Inputs held | Prices | Baseline | Method | Result | Status |
@@ -103,7 +130,7 @@ as the reference.
 |---|---|---|---|
 | Lyócsa and Výrost 2018 (40 rules, data-snooping check) | apparent rules fade after correction | strong, for the null | apply a multiple-testing correction to every swept cut |
 | Valtonen 2013 (7,555 men's matches at Betfair's close) | no favourite-longshot bias at the exchange close | strong, for the null | calibration of Pinnacle's no-vig close on our matches |
-| Clegg and Cartlidge 2025 (8,375 matches) | Elo Brier 0.215 against Pinnacle's 0.196 | strong: Elo trails the market | reproduced here: men's tour 2023-2025 Brier 0.218, 0.215, 0.219 |
+| Clegg and Cartlidge 2025 (8,375 matches) | Elo Brier 0.215 against Pinnacle's 0.196 | strong: Elo trails the market | the same order here: `models/tennis_ratings.py` on men's tour matches between players with 10+ rated matches, Brier 0.2176, 0.2152, 0.2188 in 2023, 2024, 2025 (a different test set from theirs) |
 | Tennis Abstract 2017 (7,200 men's Slam matches) | previous-match length cuts the next win rate | weak (against Elo, not the market) | mechanism 4 |
 | Point-based models (Barnett and Clarke 2005, Ingram 2019) | hold and break probabilities price games | weak; no betting test of games markets found anywhere | mechanism 3 |
 | `pietroschiona/trading_alpha_tennis` | 63-65% win rate on 6,000 bets at Pinnacle's open | noise: its flat-stake equity implies +30% return, its "edge" is the close minus the open, its data is synthetic | none |
@@ -111,8 +138,46 @@ as the reference.
 
 ## The purchase
 
-To be filled from the coverage sweep (`tennis_odds_fetches`, endpoint
-`events`) and the trial below.
+**The coverage sweep (2026-11-13, 332 credits plus 5 for one repair).** Three
+history event lists per key and year find each window: asked at the end of the
+year, the feed answers with the key's last snapshot; asked 40 days before that,
+its `next_timestamp` is the window's first listing. Every answer is a row in
+`tennis_odds_fetches` (endpoint `events`). **129 windows**: 4 in 2020, 8 a year
+in 2021 to 2023 (the Grand Slams only), 17 in 2024, 31 in 2025, 53 in 2026. A
+Grand Slam window runs 14 to 17 days (qualifying is listed from about three
+days before the main draw). Three windows are odd and kept: the 2024 women's
+US Open key runs 33 days (to 2024-09-25), the 2026 women's Madrid key 27 days
+(from 2026-04-05), and the women's Rome key held a second listing in July 2025
+(13 to 16 July) after its real event (6 to 17 May). That last case is why the
+sweep repeats when the snapshot before a window is in the same year: the first
+version found only the July listing.
+
+**The plan.** Every window, newest first, one ask an hour for both groups of
+ten books (60 credits an ask), each ask moved forward to the feed's next real
+snapshot when it kept nothing in between: **38,204 asks, at most 2,292,240
+credits** (`--plan`). Hours with no snapshot are not billed twice, so the real
+bill is lower; Grand Slam days bill at the ceiling (the trial's 25 asks were
+25 fresh snapshots). It buys every match the feed priced on these keys since
+the 2020 US Open at DraftKings, FanDuel, BetMGM, Caesars, Fanatics, BetRivers,
+Hard Rock, Pinnacle, Bovada, betPARX, the Betfair and Matchbook exchanges,
+LowVig, BetOnline, Bally, ESPN BET, Marathonbet, Unibet, William Hill and
+BetAnySports, in all three markets.
+
+**Credits, read 2026-11-13.** The plan is 15,000,000 a month since 2026-11-08
+(`odds_api_quota`: 19,666 used that day against 4,630,560 the day before).
+5,814,551 left after the sweep; 5,772,644 were used on 11-13 before this build
+spent anything. Measured burn 83,982 a day (`odds_quota.daily_burn`). The
+run's floor is that burn for every day to the reset plus seven: **2,687,424**,
+assuming the reset is 2026-12-08 (the later of the two candidates: earlier
+cycles reset on the 1st). At the ceiling the purchase leaves about 3.5 million.
+The meter stops the run at the floor whatever else is spending.
+
+    python C:/Users/micha/tennis_research/run_with_db.py data.ingestors.tennis_odds_history         --buy C:/Users/micha/tennis_research/coverage_windows.json --step-min 60 --max-credits 2300000
+
+**The forward log (from 2026-11-13).** Every active tennis key, both book
+groups, every 20 minutes, through the live endpoint (12 credits a pass),
+stored in `tennis_odds_quotes` beside the history (`tennis_odds_fetches`
+endpoint `live`). Started on mike's PC for the two Finals, until 2026-11-23.
 
 **The trial (2026-11-13).** One day, the 2025 US Open men's key, hourly asks
 from 2025-08-30 00:00 to 2025-08-31 00:00 UTC, both groups of ten books: 25

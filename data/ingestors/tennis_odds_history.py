@@ -236,30 +236,41 @@ def events_at(conn, meter: Meter, key: str, when: datetime) -> dict:
     return j
 
 
-def sweep_key_year(conn, meter: Meter, key: str, year: int) -> dict | None:
-    """The key's window in `year`, from three event lists.
+def sweep_key_year(conn, meter: Meter, key: str, year: int) -> list[dict]:
+    """Every window the key held in `year`, newest first, from event lists.
 
     1. Asked at the end of the year, the feed answers with the key's last
-       snapshot at or before then: the end of that year's event, or an earlier
-       year's when the key held nothing this year.
+       snapshot at or before then: the end of that year's last event, or an
+       earlier year's when the key held nothing this year.
     2. Asked 40 days before that end, it answers with a snapshot from before the
-       event; its `next_timestamp` is the first snapshot after it.
-    3. That snapshot is the event's first listing when it falls in this year.
+       event; its `next_timestamp` is the first snapshot after it, the event's
+       first listing.
+    3. When the snapshot from step 2 is itself in `year`, the key held an
+       earlier window that year (the women's Rome key: May 2025, then a stray
+       July listing), so the walk repeats from it.
     """
-    end_ask = min(datetime(year, 12, 31, 23, 0, tzinfo=timezone.utc),
-                  datetime.now(timezone.utc) - timedelta(minutes=10))
-    last = events_at(conn, meter, key, end_ask)
-    last_ts = _parse_ts(last.get("timestamp"))
-    if last_ts is None or last_ts.year != year:
-        return None
-    before = events_at(conn, meter, key, last_ts - timedelta(days=40))
-    first_ts = _parse_ts(before.get("next_timestamp"))
-    if first_ts is None or first_ts > last_ts:
-        return {"key": key, "year": year, "first": None, "last": _iso(last_ts)}
-    first = events_at(conn, meter, key, first_ts)
-    return {"key": key, "year": year, "first": first.get("timestamp"),
-            "last": _iso(last_ts), "first_events": len(first.get("data") or []),
-            "last_events": len(last.get("data") or [])}
+    out: list[dict] = []
+    ask = min(datetime(year, 12, 31, 23, 0, tzinfo=timezone.utc),
+              datetime.now(timezone.utc) - timedelta(minutes=10))
+    for _ in range(6):
+        last = events_at(conn, meter, key, ask)
+        last_ts = _parse_ts(last.get("timestamp"))
+        if last_ts is None or last_ts.year != year:
+            return out
+        before = events_at(conn, meter, key, last_ts - timedelta(days=40))
+        first_ts = _parse_ts(before.get("next_timestamp"))
+        if first_ts is None or first_ts > last_ts:
+            out.append({"key": key, "year": year, "first": None, "last": _iso(last_ts)})
+            return out
+        first = events_at(conn, meter, key, first_ts)
+        out.append({"key": key, "year": year, "first": first.get("timestamp"),
+                    "last": _iso(last_ts), "first_events": len(first.get("data") or []),
+                    "last_events": len(last.get("data") or [])})
+        prev_ts = _parse_ts(before.get("timestamp"))
+        if prev_ts is None or prev_ts.year != year:
+            return out
+        ask = prev_ts
+    return out
 
 
 # ── the snapshot walk ────────────────────────────────────────────────────────
@@ -487,8 +498,7 @@ def main(argv=None) -> int:
             keys = a.keys or tennis_keys()
             for key in keys:
                 for y in range(a.sweep[0], a.sweep[1] + 1):
-                    w = sweep_key_year(conn, meter, key, y)
-                    if w:
+                    for w in sweep_key_year(conn, meter, key, y):
                         result.append(w)
                         logger.info(json.dumps(w))
         if a.buy:
