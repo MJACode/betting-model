@@ -682,12 +682,16 @@ def check_resume(conn, first: int, last: int) -> tuple[int, int]:
     accounts for what `odds` holds under the marker. Rows and ledger row are
     written in one transaction, so the two agree; were the ledger lost or
     cleared, a re-run would store every pre-game row a second time, so this
-    REFUSES instead. Read through the seasons' game ids (indexed), never a
-    scan of `odds` by source."""
+    REFUSES instead. Read through the seasons' game ids, passed as a list so
+    the game_id index is the only plan: as a sub-select (`game_id IN (SELECT
+    ...)`) the planner scanned `odds` by source and hit the 120-second
+    statement timeout on 2026-11-13, after a whole season had been fetched."""
+    ids = [r[0] for r in conn.execute(
+        f"SELECT game_id FROM {et.EVENTS} WHERE season BETWEEN %s AND %s",
+        (first, last)).fetchall()]
     have = int(conn.execute(
-        "SELECT COUNT(*) FROM odds WHERE source = %s AND game_id IN "
-        f"(SELECT game_id FROM {et.EVENTS} WHERE season BETWEEN %s AND %s)",
-        (PREGAME_SOURCE, first, last)).fetchone()[0])
+        "SELECT COUNT(*) FROM odds WHERE game_id = ANY(%s) AND source = %s",
+        (ids, PREGAME_SOURCE)).fetchone()[0]) if ids else 0
     ledgered = int(conn.execute(
         f"SELECT COALESCE(SUM(pregame_rows), 0) FROM {LEDGER}").fetchone()[0])
     conn.commit()
@@ -860,6 +864,7 @@ def run_chunked(spool: Path, first: int, last: int, chunk_days: int, reserve_day
         conn.commit()
     plan = chunk_plan(games, now, first, last, chunk_days)
     tips = tips_by_utc_day(games)
+    unstored: list[int] = []
     code = 0
     stopped = False
     for season in sorted({s for s, _ in plan}, reverse=True):
@@ -896,16 +901,33 @@ def run_chunked(spool: Path, first: int, last: int, chunk_days: int, reserve_day
             if stats.get("stopped"):
                 code, stopped = max(code, 1), True
                 break
-        if do_store:
-            with get_connection() as conn:
-                st = store(conn, spool, season, season, now)
-            print(f"EuroLeague odds store, season {season}:", json.dumps(st, default=str))
-            if st.get("errors"):
-                code = max(code, 1)
+        if do_store and not _store_one(spool, season, now):
+            unstored.append(season)
+            code = max(code, 1)
         if stopped:
             print(f"EuroLeague odds history stopped in season {season}; a re-run resumes")
             break
+    # A season whose store failed is fetched and paid for, so it is tried again
+    # once every fetch is done rather than left on one disk.
+    for season in list(unstored):
+        if _store_one(spool, season, now):
+            unstored.remove(season)
+    if unstored:
+        print(f"EuroLeague odds store: seasons {unstored} are in the spool and NOT in Supabase; "
+              "re-run with --store")
     return code
+
+
+def _store_one(spool: Path, season: int, now: datetime) -> bool:
+    """Store one season's spool; False (logged, never raised) when it failed."""
+    try:
+        with get_connection() as conn:
+            st = store(conn, spool, season, season, now)
+    except Exception as exc:                                    # noqa: BLE001
+        logger.error(f"EuroLeague odds store, season {season}, failed: {exc}")
+        return False
+    print(f"EuroLeague odds store, season {season}:", json.dumps(st, default=str))
+    return not st.get("errors")
 
 
 def main(argv=None) -> int:
