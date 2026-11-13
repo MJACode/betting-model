@@ -5,9 +5,11 @@ Pinnacle had moved, that quote was hours before the close. The close is the
 latest pre-start main line (MLB and NHL spreads stay on ±1.5). A different
 number is NULL.
 
-The historical rows are already standard_v2, so the Python capture will not
-revisit them. data/migrations/clv_pinnacle_mainline_2026_10_14.sql copies
-those rows and nulls the moved ones, once.
+Two writers stamp it: the Python capture and the SQL recompute in
+data/migrations/clv_standard_v2_2026_10_14.sql, which stamps most new picks.
+Both read the main line. The historical rows are already standard_v2, so
+neither writer revisits them; data/migrations/clv_pinnacle_mainline_2026_10_14.sql
+copies those rows and nulls the moved ones, once.
 """
 from __future__ import annotations
 
@@ -216,34 +218,36 @@ def test_an_mlb_main_line_that_flipped_sign_is_null():
 
 # ── the migration, against a local Postgres ──────────────────────────────────
 
-def _scratch():
-    psycopg2 = pytest.importorskip("psycopg2")
-    from tests.byom_scratch import ScratchPostgres, pg_bin
+@pytest.fixture(scope="module")
+def _cluster():
+    """One scratch cluster for the module (tests/_pg.py: PATH, the Debian
+    path, or the embedded-postgres wheel, which is the route on Windows).
+    tests/byom_scratch.py's cluster waits forever on Windows: pg_ctl keeps
+    the captured pipe open (measured 2026-11-13, the run timed out)."""
+    pytest.importorskip("psycopg2")
+    from tests._pg import can_scratch, scratch_cluster
 
-    if pg_bin("initdb") is None:
+    if not can_scratch():
         if __import__("os").environ.get("GITHUB_ACTIONS"):
             pytest.fail("initdb is missing in CI — the migration test would skip")
         pytest.skip("initdb is not installed")
-    cluster = ScratchPostgres()
-    try:
-        dsn = cluster.start()
-    except Exception as exc:  # noqa: BLE001
-        cluster.stop()
-        pytest.skip(f"scratch cluster did not start: {exc}")
-    conn = psycopg2.connect(dsn)
-    conn.autocommit = False
-    return cluster, conn
+    with scratch_cluster("clv-pin-mainline-") as dsn:
+        yield dsn
 
 
 @pytest.fixture
-def pg():
-    cluster, conn = _scratch()
+def pg(_cluster):
+    """A connection whose whole test is one transaction, rolled back after,
+    so every test starts from an empty database."""
+    import psycopg2
+
+    conn = psycopg2.connect(_cluster)
+    conn.autocommit = False
     try:
         yield conn
     finally:
         conn.rollback()
         conn.close()
-        cluster.stop()
 
 
 def _exec(conn, sql, params=None):
@@ -261,7 +265,15 @@ def _base_schema(conn):
     _exec(conn, """
         CREATE TABLE public.games (
           game_id text PRIMARY KEY,
-          commence_time text
+          commence_time text,
+          game_date text,
+          home_team text,
+          away_team text
+        );
+        CREATE TABLE public.nba_schedule (
+          game_id text,
+          commence_time text,
+          game_type text
         );
         CREATE TABLE public.picks (
           pick_id bigint PRIMARY KEY,
@@ -331,6 +343,7 @@ def _market_fns(conn):
             WHEN 'mlb_over_under' THEN 'totals'
             WHEN 'mlb_runline' THEN 'spreads'
             WHEN 'mlb_moneyline' THEN 'h2h'
+            WHEN 'nba_over_under' THEN 'totals'
             ELSE NULL
           END
         $fn$;
@@ -352,7 +365,8 @@ def _game(conn, game_id, commence="2026-09-20T23:05:00Z"):
 
 
 def _bet(conn, pick_id, game_id, model_id, scored_line, market_pct,
-         pinnacle, clv_pct=1.25, method="standard_v2", signal="BET"):
+         pinnacle, clv_pct=1.25, method="standard_v2", signal="BET",
+         created_at="2026-09-20T15:00:00Z", game_time="2026-09-20T23:05:00Z"):
     _exec(conn, """
         INSERT INTO public.picks (
           pick_id, game_id, model_id, pick_side, pick_label, scored_line,
@@ -361,11 +375,11 @@ def _bet(conn, pick_id, game_id, model_id, scored_line, market_pct,
           market_clv_method, pinnacle_close_odds, result
         ) VALUES (
           %s, %s, %s, 'over', 'label', %s,
-          %s, false, -110, '2026-09-20T15:00:00Z', '2026-09-20T23:05:00Z',
+          %s, false, -110, %s, %s,
           %s, %s, %s, 0.50, 'power', %s, 'WIN'
         )
-    """, (pick_id, game_id, model_id, scored_line, signal, clv_pct, method,
-          market_pct, pinnacle))
+    """, (pick_id, game_id, model_id, scored_line, signal, created_at,
+          game_time, clv_pct, method, market_pct, pinnacle))
 
 
 def _odds(conn, game_id, market, at, **cols):
@@ -524,12 +538,170 @@ def test_a_second_pass_does_not_write(pg):
     """)[0] == 1
 
 
-def test_the_applied_standard_v2_file_is_not_edited():
-    """clv_standard_v2 has already run in production. The data fix is the
-    new file, not a second edit of that migration."""
+def test_an_nba_close_is_bounded_on_the_league_tip_not_the_feed_start(pg):
+    """The odds feed's start runs behind the NBA's own tip, and refresh
+    passes store in-play rows typed 'open'. Both writers bound the close on
+    the earlier tip (nba_schedule), so the data fix must too: an 'open' row
+    after the tip on a different number is not Pinnacle's close."""
+    _base_schema(pg)
+    _market_fns(pg)
+    _watch_rewrites(pg)
+    gid = "NBA_2026-11-01_NYK_OKC"
+    _exec(pg, """
+        INSERT INTO public.games (game_id, commence_time, game_date, home_team, away_team)
+        VALUES (%s, '2026-11-02T00:15:00Z', '2026-11-01', 'OKC', 'NYK')
+    """, (gid,))
+    _exec(pg, """
+        INSERT INTO public.nba_schedule (game_id, commence_time, game_type)
+        VALUES (%s, '2026-11-02T00:00:00Z', 'regular')
+    """, (gid,))
+    _bet(pg, 1, gid, "nba_over_under", 220.5, 2.10, -112,
+         created_at="2026-11-01T18:00:00Z", game_time="2026-11-02T00:15:00Z")
+    _odds(pg, gid, "totals", "2026-11-01T23:50:00Z", total_line=220.5, over_price=-112)
+    # After the tip, before the feed's start, typed 'open': an in-play price.
+    _odds(pg, gid, "totals", "2026-11-02T00:05:00Z", total_line=226.5, over_price=-110)
+
+    _run_file(pg, MAIN)
+
+    assert _one_sql(pg, """
+        SELECT market_clv_pct, pinnacle_close_odds FROM public.picks WHERE pick_id = 1
+    """) == (2.10, -112)
+    assert _one_sql(pg, "SELECT count(*) FROM public._rewrite_log")[0] == 0
+
+
+def test_the_recompute_reads_pinnacle_s_main_line_and_does_not_carry_the_data_fix():
+    """The SQL recompute in clv_standard_v2 stamps most new captures (457 of
+    484 since 2026-10-22, measured 2026-11-13), so it must read Pinnacle the
+    way paper_tracker does. The bet book's own close stays on our number."""
     text = V2.read_text(encoding="utf-8")
-    assert "clv_standard_v2_once" not in text
-    assert "clv_pinnacle_mainline" not in text
+    pin = _lateral(text, "ps")
+    assert "o.bookmaker = 'pinnacle'" in pin
+    assert "o.spread_home = s.scored_line" not in pin
+    assert "o.total_line = s.scored_line" not in pin
+    assert "ABS(o.spread_home) = 1.5" in pin
+    bet_book = _lateral(text, "bs")
+    assert "o.spread_home = s.scored_line" in bet_book
+    assert "o.total_line = s.scored_line" in bet_book
+    # The one-time data fix lives in its own file, not in the recompute.
+    assert "clv_pinnacle_mainline_backup" not in text
+    assert "clv_pinnacle_mainline_once" not in text
+
+
+def _lateral(sql: str, alias: str) -> str:
+    """The body of the LATERAL subquery the recompute names `alias`."""
+    end = sql.index(f") {alias} ON TRUE")
+    start = sql.rindex("LEFT JOIN LATERAL (", 0, end)
+    return " ".join(sql[start:end].split())
+
+
+# The recompute itself, on a schema it accepts (the shape
+# tests/test_nba_clv_feed_start.py runs it on).
+_V2_SCHEMA = """
+CREATE TABLE public.games (
+    game_id TEXT PRIMARY KEY, sport TEXT NOT NULL, season INTEGER NOT NULL, game_date TEXT NOT NULL,
+    home_team TEXT NOT NULL, away_team TEXT NOT NULL, home_score NUMERIC, away_score NUMERIC,
+    commence_time TEXT);
+CREATE TABLE public.nba_schedule (
+    nba_game_id TEXT PRIMARY KEY, game_id TEXT, season INTEGER NOT NULL, game_type TEXT NOT NULL,
+    game_date TEXT NOT NULL, commence_time TEXT, home_team TEXT NOT NULL, away_team TEXT NOT NULL);
+CREATE TABLE public.picks (
+    pick_id SERIAL PRIMARY KEY, game_id TEXT REFERENCES public.games(game_id), model_id TEXT NOT NULL,
+    game_date TEXT NOT NULL, game_time TEXT, pick_side TEXT, pick_label TEXT, scored_line DOUBLE PRECISION,
+    signal_type TEXT NOT NULL, result TEXT, is_live BOOLEAN DEFAULT FALSE, dk_odds NUMERIC,
+    decision_odds NUMERIC, decision_book TEXT, prop_market TEXT, created_at TEXT,
+    closing_dk_odds NUMERIC, closing_line NUMERIC, clv_pct NUMERIC, line_clv_pts NUMERIC,
+    clv_beat_close BOOLEAN, clv_captured_at TEXT, clv_method TEXT, clv_close_book TEXT, clv_bet_book TEXT,
+    clv_pp NUMERIC, market_clv_pct NUMERIC, market_clv_pp NUMERIC, market_clv_method TEXT,
+    pinnacle_close_odds NUMERIC);
+CREATE TABLE public.player_prop_odds (
+    game_id TEXT, player_name TEXT, market TEXT, bookmaker TEXT, line DOUBLE PRECISION,
+    over_price DOUBLE PRECISION, under_price DOUBLE PRECISION, snapshot_at TEXT, snapshot_type TEXT);
+CREATE TABLE public.odds (
+    game_id TEXT, market TEXT, bookmaker TEXT, snapshot_at TEXT, snapshot_type TEXT,
+    home_price DOUBLE PRECISION, away_price DOUBLE PRECISION, draw_price DOUBLE PRECISION,
+    spread_home DOUBLE PRECISION, total_line DOUBLE PRECISION, over_price DOUBLE PRECISION,
+    under_price DOUBLE PRECISION);
+CREATE VIEW public.v_public_track_record AS SELECT 1 AS clv_game_settled;
+"""
+
+
+def _v2_game(conn, gid, home, away):
+    _exec(conn, """
+        INSERT INTO public.games (game_id, sport, season, game_date, home_team, away_team, commence_time)
+        VALUES (%s, 'MLB', 2026, '2026-09-20', %s, %s, '2026-09-20T23:05:00Z')
+    """, (gid, home, away))
+
+
+def _v2_bet(conn, gid, model_id, side, line, label, dk_odds):
+    _exec(conn, """
+        INSERT INTO public.picks (game_id, model_id, game_date, game_time, pick_side, pick_label,
+                                  scored_line, signal_type, dk_odds, created_at)
+        VALUES (%s, %s, '2026-09-20', '2026-09-20T23:05:00Z', %s, %s, %s, 'BET', %s,
+                '2026-09-20T15:00:00Z')
+    """, (gid, model_id, side, label, line, dk_odds))
+
+
+def _v2_odds(conn, gid, book, market, at, snapshot_type="open", **cols):
+    _exec(conn, """
+        INSERT INTO public.odds (game_id, market, bookmaker, snapshot_at, snapshot_type,
+                                 home_price, away_price, spread_home, total_line, over_price, under_price)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (gid, market, book, at, snapshot_type, cols.get("home_price"), cols.get("away_price"),
+          cols.get("spread_home"), cols.get("total_line"), cols.get("over_price"),
+          cols.get("under_price")))
+
+
+def test_the_recompute_leaves_market_edge_null_when_pinnacle_s_main_line_moved(pg):
+    """The same three cases as the Python tests above, through the SQL that
+    actually stamps most picks: a moved total, a total whose latest main
+    line is still ours, and a run line whose latest ±1.5 flipped sign under
+    a later alternate."""
+    _exec(pg, _V2_SCHEMA)
+    moved, held, flipped = ("MLB_2026-09-20_NYY_BOS", "MLB_2026-09-20_SF_LAD",
+                            "MLB_2026-09-20_STL_CHC")
+    _v2_game(pg, moved, "BOS", "NYY")
+    _v2_game(pg, held, "LAD", "SF")
+    _v2_game(pg, flipped, "CHC", "STL")
+    _v2_bet(pg, moved, "mlb_over_under", "over", 8.5, "NYY @ BOS Over 8.5", -110)
+    _v2_bet(pg, held, "mlb_over_under", "over", 8.5, "SF @ LAD Over 8.5", -110)
+    _v2_bet(pg, flipped, "mlb_runline", "away", 1.5, "STL +1.5", 130)
+    for gid in (moved, held):
+        _v2_odds(pg, gid, "draftkings", "totals", "2026-09-20T22:50:00Z",
+                 total_line=8.5, over_price=-120, under_price=100)
+    _v2_odds(pg, flipped, "draftkings", "spreads", "2026-09-20T22:50:00Z",
+             spread_home=1.5, home_price=-155, away_price=130)
+    # Moved: Pinnacle left 8.5 for 9.5. An in-play 8.5 after that is not the close.
+    _v2_odds(pg, moved, "pinnacle", "totals", "2026-09-20T01:00:00Z",
+             total_line=8.5, over_price=-105, under_price=-115)
+    _v2_odds(pg, moved, "pinnacle", "totals", "2026-09-20T22:40:00Z",
+             total_line=9.5, over_price=-115, under_price=-105)
+    _v2_odds(pg, moved, "pinnacle", "totals", "2026-09-20T22:58:00Z", "in_play",
+             total_line=8.5, over_price=-101, under_price=-119)
+    # Held: the latest main line is still 8.5; its price is the close.
+    _v2_odds(pg, held, "pinnacle", "totals", "2026-09-20T01:00:00Z",
+             total_line=8.5, over_price=-150, under_price=130)
+    _v2_odds(pg, held, "pinnacle", "totals", "2026-09-20T22:40:00Z",
+             total_line=8.5, over_price=-130, under_price=110)
+    # Flipped: the latest ±1.5 is −1.5; the later +2.5 is an alternate.
+    _v2_odds(pg, flipped, "pinnacle", "spreads", "2026-09-20T01:00:00Z",
+             spread_home=1.5, home_price=-150, away_price=100)
+    _v2_odds(pg, flipped, "pinnacle", "spreads", "2026-09-20T22:20:00Z",
+             spread_home=-1.5, home_price=-140, away_price=120)
+    _v2_odds(pg, flipped, "pinnacle", "spreads", "2026-09-20T22:50:00Z",
+             spread_home=2.5, home_price=-200, away_price=180)
+
+    _run_file(pg, V2)
+
+    def row(gid):
+        return _one_sql(pg, """
+            SELECT clv_method, clv_pct IS NOT NULL, market_clv_pct IS NOT NULL,
+                   pinnacle_close_odds, closing_dk_odds
+            FROM public.picks WHERE game_id = %s
+        """, (gid,))
+
+    assert row(moved) == ("standard_v2", True, False, None, -120)
+    assert row(held) == ("standard_v2", True, True, -130, -120)
+    assert row(flipped) == ("standard_v2", True, False, None, 130)
 
 
 def test_both_migrations_are_on_the_worker_list_in_order():

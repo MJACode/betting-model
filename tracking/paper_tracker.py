@@ -2275,7 +2275,9 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             # MLB/NHL spreads stay on ±1.5). Filtering to scored_line first
             # kept the last time Pinnacle still showed our number, which on
             # 2026-10-14 was hours before the close for 78 of 301 game
-            # spread/total rows. pin_moved below turns that into NULL.
+            # spread/total rows. pin_moved below turns that into NULL. The
+            # SQL recompute in clv_standard_v2_2026_10_14.sql reads Pinnacle
+            # the same way.
             if has_line:
                 pin_snap, _pin_book = _first_game_close(
                     conn, game_id, market, close_bound, pick_book=sharp,
