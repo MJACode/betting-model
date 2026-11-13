@@ -1,0 +1,302 @@
+{
+ "_fixture": "ESPN scoreboard sb_20251127.json, trimmed to events ['401809397', '401812276', '401830875'] (fetched 2026-10-26)",
+ "eventsDate": {
+  "date": "2025-11-28T01:00Z",
+  "seasonType": 2
+ },
+ "events": [
+  {
+   "id": "401809397",
+   "date": "2025-11-27T16:00Z",
+   "name": "Richmond Spiders at Furman Paladins",
+   "shortName": "RICH VS FUR",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "competitions": [
+    {
+     "id": "401809397",
+     "date": "2025-11-27T16:00Z",
+     "timeValid": true,
+     "neutralSite": true,
+     "conferenceCompetition": false,
+     "venue": {
+      "id": "7374",
+      "fullName": "State Farm Field House",
+      "address": {
+       "city": "Kissimmee",
+       "state": "FL"
+      },
+      "indoor": true
+     },
+     "notes": [
+      {
+       "type": "event",
+       "headline": "Terry's Chocolate ESPN Events Invitational - Imagination Bracket"
+      }
+     ],
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 2,
+      "type": {
+       "id": "3",
+       "name": "STATUS_FINAL",
+       "state": "post",
+       "completed": true,
+       "description": "Final",
+       "detail": "Final",
+       "shortDetail": "Final"
+      }
+     },
+     "competitors": [
+      {
+       "id": "231",
+       "homeAway": "home",
+       "winner": true,
+       "score": "73",
+       "team": {
+        "id": "231",
+        "location": "Furman",
+        "name": "Paladins",
+        "abbreviation": "FUR",
+        "displayName": "Furman Paladins",
+        "shortDisplayName": "Furman",
+        "conferenceId": "24",
+        "isActive": true
+       }
+      },
+      {
+       "id": "257",
+       "homeAway": "away",
+       "winner": false,
+       "score": "72",
+       "team": {
+        "id": "257",
+        "location": "Richmond",
+        "name": "Spiders",
+        "abbreviation": "RICH",
+        "displayName": "Richmond Spiders",
+        "shortDisplayName": "Richmond",
+        "conferenceId": "3",
+        "isActive": true
+       }
+      }
+     ]
+    }
+   ],
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0:00",
+    "period": 2,
+    "type": {
+     "id": "3",
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "description": "Final",
+     "detail": "Final",
+     "shortDetail": "Final"
+    }
+   }
+  },
+  {
+   "id": "401830875",
+   "date": "2025-11-27T22:30Z",
+   "name": "South Florida Bulls at Western Kentucky Hilltoppers",
+   "shortName": "USF VS WKU",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "competitions": [
+    {
+     "id": "401830875",
+     "date": "2025-11-27T22:30Z",
+     "timeValid": true,
+     "neutralSite": true,
+     "conferenceCompetition": false,
+     "venue": {
+      "id": "2761",
+      "fullName": "Imperial Arena",
+      "address": {
+       "city": "Nassau",
+       "state": "Bahamas"
+      },
+      "indoor": true
+     },
+     "notes": [
+      {
+       "type": "event",
+       "headline": "Marriott Bonvoy Battle 4 Atlantis"
+      }
+     ],
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 3,
+      "type": {
+       "id": "3",
+       "name": "STATUS_FINAL",
+       "state": "post",
+       "completed": true,
+       "description": "Final",
+       "detail": "Final/OT",
+       "shortDetail": "Final/OT",
+       "altDetail": "OT"
+      }
+     },
+     "competitors": [
+      {
+       "id": "98",
+       "homeAway": "home",
+       "winner": false,
+       "score": "91",
+       "team": {
+        "id": "98",
+        "location": "Western Kentucky",
+        "name": "Hilltoppers",
+        "abbreviation": "WKU",
+        "displayName": "Western Kentucky Hilltoppers",
+        "shortDisplayName": "Western KY",
+        "conferenceId": "11",
+        "isActive": true
+       }
+      },
+      {
+       "id": "58",
+       "homeAway": "away",
+       "winner": true,
+       "score": "97",
+       "team": {
+        "id": "58",
+        "location": "South Florida",
+        "name": "Bulls",
+        "abbreviation": "USF",
+        "displayName": "South Florida Bulls",
+        "shortDisplayName": "South Florida",
+        "conferenceId": "62",
+        "isActive": true
+       }
+      }
+     ]
+    }
+   ],
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0:00",
+    "period": 3,
+    "type": {
+     "id": "3",
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "description": "Final",
+     "detail": "Final/OT",
+     "shortDetail": "Final/OT",
+     "altDetail": "OT"
+    }
+   }
+  },
+  {
+   "id": "401812276",
+   "date": "2025-11-28T03:51Z",
+   "name": "Oklahoma State Cowboys at Northwestern Wildcats",
+   "shortName": "OKST @ NU",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "competitions": [
+    {
+     "id": "401812276",
+     "date": "2025-11-28T03:51Z",
+     "timeValid": true,
+     "neutralSite": false,
+     "conferenceCompetition": false,
+     "venue": {
+      "id": "1847",
+      "fullName": "United Center",
+      "address": {
+       "city": "Chicago",
+       "state": "IL"
+      },
+      "indoor": true
+     },
+     "notes": [
+      {
+       "type": "event",
+       "headline": "CBS Sports Thanksgiving Classic"
+      }
+     ],
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 2,
+      "type": {
+       "id": "3",
+       "name": "STATUS_FINAL",
+       "state": "post",
+       "completed": true,
+       "description": "Final",
+       "detail": "Final",
+       "shortDetail": "Final"
+      }
+     },
+     "competitors": [
+      {
+       "id": "77",
+       "homeAway": "home",
+       "winner": false,
+       "score": "81",
+       "team": {
+        "id": "77",
+        "location": "Northwestern",
+        "name": "Wildcats",
+        "abbreviation": "NU",
+        "displayName": "Northwestern Wildcats",
+        "shortDisplayName": "Northwestern",
+        "conferenceId": "7",
+        "isActive": true
+       }
+      },
+      {
+       "id": "197",
+       "homeAway": "away",
+       "winner": true,
+       "score": "86",
+       "team": {
+        "id": "197",
+        "location": "Oklahoma State",
+        "name": "Cowboys",
+        "abbreviation": "OKST",
+        "displayName": "Oklahoma State Cowboys",
+        "shortDisplayName": "Oklahoma St",
+        "conferenceId": "8",
+        "isActive": true
+       }
+      }
+     ]
+    }
+   ],
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0:00",
+    "period": 2,
+    "type": {
+     "id": "3",
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "description": "Final",
+     "detail": "Final",
+     "shortDetail": "Final"
+    }
+   }
+  }
+ ]
+}

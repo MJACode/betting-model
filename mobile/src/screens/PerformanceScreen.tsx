@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { SettingsButton } from '@/components/SettingsButton';
@@ -20,14 +20,17 @@ import { useSportsbookSync } from '@/hooks/useSportsbookSync';
 import { useManualBets, type ManualBet, type ManualBetResult } from '@/hooks/useManualBets';
 import { useTrackedBetResults, type StakeMode } from '@/hooks/useTrackedBetResults';
 import { ManualBetModal } from '@/components/ManualBetModal';
-import { formatAmerican, formatCurrency, formatCurrencySigned } from '@/lib/format';
+import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatAmerican, formatFlatStake, formatFlatUnits, labelWithoutStake } from '@/lib/format';
+import { unitsSpeech } from '@/lib/a11y';
 import type { SyncedBet } from '@/lib/sharpsports';
 import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance';
+import { postedTrackedStake } from '@/lib/trackedStake';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
-import { bookLabelShort, pickRowTitle, storedQuoteBook } from '@/lib/markets';
+import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { PickRowTitle } from '@/components/PickRowTitle';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -75,7 +78,7 @@ export function PerformanceScreen() {
         }
       }}
       onRowLongPress={(row) => {
-        Alert.alert('Stop tracking?', row.pick.pick_label, [
+        Alert.alert('Stop tracking?', labelWithoutStake(row.pick.pick_label), [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Untrack',
@@ -150,7 +153,11 @@ export function PerformanceScreen() {
     Array.from(new Set(accounts.map((a) => a.book).filter(Boolean) as string[])),
   );
   // Ink, not the bright bet/avoid hues (2.22 / 3.55:1 as text; audit H2).
-  const profitColor = pnlColor(summary.net_profit, 2);
+  // Sync is not live (no keys; the screen above is the real state). Until
+  // it is, synced amounts read at the tab's one scale, 100 = 1u, like the
+  // logged and tracked bets. Which unit a synced bet should use once sync
+  // ships (the member's own, from Settings?) is an open decision.
+  const profitColor = pnlColor(summary.net_profit, 2, FLAT_UNIT_TONE_SCALE);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -200,10 +207,14 @@ export function PerformanceScreen() {
         ) : null}
 
         <View style={styles.summaryCard}>
-          <View style={styles.summaryMain}>
-            <Text style={styles.summaryLabel}>Net P&L</Text>
+          <View
+            style={styles.summaryMain}
+            accessible
+            accessibilityLabel={`Net units, ${unitsSpeech(formatFlatUnits(summary.net_profit))}`}
+          >
+            <Text style={styles.summaryLabel}>Net units</Text>
             <Text style={[styles.summaryProfit, { color: profitColor }]}>
-              {formatCurrencySigned(summary.net_profit)}
+              {formatFlatUnits(summary.net_profit)}
             </Text>
           </View>
           <View style={styles.summaryStatsRow}>
@@ -281,7 +292,7 @@ function ManualBetsCard({
       {bets.length === 0 ? (
         <>
           <Text style={styles.manualEmpty}>
-            Record the bets you place — any book, any sport — and your P&L builds here. Stored on
+            Record the bets you place — any book, any sport — and your record builds here. Stored on
             this device.
           </Text>
           <Pressable
@@ -295,8 +306,14 @@ function ManualBetsCard({
         </>
       ) : (
         <>
-          <Text style={styles.manualSummary}>
-            {formatCurrencySigned(net)} · {wins}–{losses}
+          <Text
+            style={styles.manualSummary}
+            accessibilityLabel={unitsSpeech(
+              `${formatFlatUnits(net)}, ${wins} won, ${losses} lost` +
+                (settled.length < bets.length ? `, ${bets.length - settled.length} open` : ''),
+            )}
+          >
+            {formatFlatUnits(net)} · {wins}–{losses}
             {settled.length < bets.length ? ` · ${bets.length - settled.length} open` : ''}
           </Text>
           {bets.map((b) => (
@@ -307,9 +324,9 @@ function ManualBetsCard({
               accessibilityLabel={[
                 b.description,
                 b.book,
-                `${formatCurrency(b.stake)} risk`,
+                unitsSpeech(`${formatFlatStake(b.stake)} risk`),
                 b.odds_american != null ? formatAmerican(b.odds_american) : null,
-                b.result === 'open' ? 'Open' : formatCurrencySigned(b.profit),
+                b.result === 'open' ? 'Open' : unitsSpeech(formatFlatUnits(b.profit)),
               ]
                 .filter(Boolean)
                 .join(', ')}
@@ -323,7 +340,7 @@ function ManualBetsCard({
                 <Text style={styles.manualSub} numberOfLines={1}>
                   {[
                     b.book,
-                    `${formatCurrency(b.stake)} risk`,
+                    `${formatFlatStake(b.stake)} risk`,
                     b.odds_american != null ? formatAmerican(b.odds_american) : null,
                   ]
                     .filter(Boolean)
@@ -331,7 +348,7 @@ function ManualBetsCard({
                 </Text>
               </View>
               <Text style={[styles.manualRight, { color: manualResultColor(b.result, b.profit) }]}>
-                {b.result === 'open' ? 'Open' : formatCurrencySigned(b.profit)}
+                {b.result === 'open' ? 'Open' : formatFlatUnits(b.profit)}
               </Text>
             </Pressable>
           ))}
@@ -344,19 +361,26 @@ function ManualBetsCard({
 
 function manualResultColor(result: ManualBetResult, profit: number): string {
   if (result === 'open') return colors.textSecondary;
-  return pnlColor(profit, 2);
+  return pnlColor(profit, 2, FLAT_UNIT_TONE_SCALE);
 }
 
 const TRACKED_ROW_CAP = 40;
 
+// As posted is the Record tab's stake (lib/trackedStake), so a tracked pick
+// shows the Record's units. My stakes is the member's own override.
 const STAKE_MODES: { value: StakeMode; label: string }[] = [
-  { value: 'flat', label: '$100 flat' },
-  { value: 'custom', label: 'Custom' },
+  { value: 'posted', label: 'As posted' },
+  { value: 'custom', label: 'My stakes' },
 ];
 
 function stakeCaption(mode: StakeMode): string {
-  if (mode === 'custom') return 'Custom stakes - tap a stake to edit (default $100)';
-  return 'Scored at $100 flat per bet';
+  if (mode === 'custom') return 'Tap a stake to set your own, in units. Bets you leave alone stay as posted';
+  return 'Each pick to win 1u at its posted price, risk capped at 3u, as on the Record tab';
+}
+
+/** "2u your stake" when the member set it, "1.5u as posted" when they have not. */
+function stakeChipText(row: TrackedBetRow): string {
+  return `${formatFlatStake(row.stake)} ${row.customStake ? 'your stake' : 'as posted'}`;
 }
 
 function TrackedBetsCard({
@@ -394,9 +418,17 @@ function TrackedBetsCard({
         </Text>
       ) : (
         <>
-          <Text style={styles.manualSummary}>
+          <Text
+            style={styles.manualSummary}
+            accessibilityLabel={unitsSpeech(
+              (summary.settled > 0
+                ? `${formatFlatUnits(summary.net)}, ${summary.wins} won, ${summary.losses} lost` +
+                  (summary.pushes > 0 ? `, ${summary.pushes} pushed` : '')
+                : 'Nothing settled yet') + (summary.open > 0 ? `, ${summary.open} open` : ''),
+            )}
+          >
             {summary.settled > 0
-              ? `${formatCurrencySigned(summary.net)} · ${summary.wins}–${summary.losses}` +
+              ? `${formatFlatUnits(summary.net)} · ${summary.wins}–${summary.losses}` +
                 (summary.pushes > 0 ? `–${summary.pushes}` : '')
               : 'Nothing settled yet'}
             {summary.open > 0 ? ` · ${summary.open} open` : ''}
@@ -431,13 +463,13 @@ function TrackedBetsCard({
               onLongPress={() => onRowLongPress(row)}
               accessibilityRole="button"
               accessibilityLabel={[
-                row.pick.pick_label,
+                labelWithoutStake(row.pick.pick_label),
                 formatGameDate(row.pick.game_date),
                 decisionOdds(row.pick) != null
                   ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
                   : null,
-                stakeMode === 'custom' ? `${formatCurrency(row.stake)} stake` : null,
-                trackedResultLabel(row),
+                unitsSpeech(stakeMode === 'custom' ? stakeChipText(row) : `${formatFlatStake(row.stake)} risk`),
+                unitsSpeech(trackedResultLabel(row)),
               ]
                 .filter(Boolean)
                 .join(', ')}
@@ -457,15 +489,16 @@ function TrackedBetsCard({
               style={styles.manualRow}
             >
               <View style={{ flex: 1 }}>
-                <Text style={styles.manualDesc} numberOfLines={1}>
-                  {pickRowTitle(row.pick)}
-                </Text>
+                <PickRowTitle pick={row.pick} titleStyle={styles.manualDesc} matchupStyle={styles.manualSub} />
                 <Text style={styles.manualSub} numberOfLines={1}>
                   {[
                     formatGameDate(row.pick.game_date),
                     decisionOdds(row.pick) != null
                       ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
                       : null,
+                    // As posted, risk runs 0.25u to 3u by price, so the row says
+                    // what it laid, as the logged bets above do (UX review).
+                    stakeMode === 'posted' ? `${formatFlatStake(row.stake)} risk` : null,
                   ]
                     .filter(Boolean)
                     .join(' · ')}
@@ -477,11 +510,11 @@ function TrackedBetsCard({
                     // row doesn't grow (audit M10: was an 11pt pencil, slop 6).
                     hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
                     accessibilityRole="button"
-                    accessibilityLabel={`Edit stake, ${formatCurrency(row.stake)}`}
+                    accessibilityLabel={`Edit stake, ${unitsSpeech(stakeChipText(row))}`}
                     style={styles.stakeChip}
                   >
                     <Ionicons name="pencil-outline" size={11} color={colors.tint} />
-                    <Text style={styles.stakeChipText}>{formatCurrency(row.stake)} stake</Text>
+                    <Text style={styles.stakeChipText}>{stakeChipText(row)}</Text>
                   </Pressable>
                 ) : null}
               </View>
@@ -511,7 +544,7 @@ function trackedResultLabel(row: TrackedBetRow): string {
     case 'push':
       return 'Push';
     default:
-      return formatCurrencySigned(row.profit);
+      return formatFlatUnits(row.profit);
   }
 }
 
@@ -543,17 +576,23 @@ function StakeEditModal({
 }) {
   const [amount, setAmount] = useState('');
   useEffect(() => {
-    if (row) setAmount(String(row.stake));
+    // Stored at the 100-is-1u scale (lib/format FLAT_UNIT); edited in units.
+    // A posted row opens empty, so the placeholder shows the posted stake and
+    // Save without typing keeps it posted (it used to save the rounded figure
+    // as the member's own). A stake the member set opens filled in.
+    if (row) {
+      setAmount(row.customStake ? String(Math.round((row.stake / FLAT_UNIT) * 100) / 100) : '');
+    }
   }, [row]);
 
   const save = () => {
     const n = parseFloat(amount);
-    // Empty / invalid input resets the bet back to the $100 default.
-    onSave(Number.isFinite(n) && n >= 0 ? n : null);
+    // Empty / invalid input puts the bet back on the posted stake.
+    onSave(Number.isFinite(n) && n >= 0 ? n * FLAT_UNIT : null);
   };
 
   return (
-    <Modal visible={row != null} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal trackName="PerformanceScreen" visible={row != null} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.stakeModalBackdrop}>
         {/* Tap outside the card to dismiss (audit M10). A sibling behind the
             card, not its parent, so VoiceOver still reaches the card's input
@@ -565,18 +604,23 @@ function StakeEditModal({
           accessibilityLabel="Close stake editor"
         />
         <View style={styles.stakeModalCard} accessibilityViewIsModal>
-          <Text style={styles.stakeModalTitle}>Stake for this bet</Text>
+          <Text style={styles.stakeModalTitle}>Your stake for this bet, in units</Text>
           <Text style={styles.stakeModalLabel} numberOfLines={2}>
-            {row?.pick.pick_label ?? ''}
+            {labelWithoutStake(row?.pick.pick_label)}
+          </Text>
+          <Text style={styles.stakeModalHint}>
+            What you risk on this bet, settled at its posted price. Leave it empty to keep the
+            posted stake.
           </Text>
           <TextInput
-            accessibilityLabel="Stake in dollars"
+            accessibilityLabel="Stake in units"
             style={styles.stakeModalInput}
             value={amount}
             onChangeText={(t) => setAmount(t.replace(/[^0-9.]/g, ''))}
             keyboardType="decimal-pad"
+            clearButtonMode="while-editing"
             autoFocus
-            placeholder="100"
+            placeholder={row ? `${formatFlatStake(postedTrackedStake(row.pick).risk)} as posted` : 'As posted'}
             placeholderTextColor={colors.textTertiary}
           />
           <View style={styles.stakeModalActions}>
@@ -584,9 +628,9 @@ function StakeEditModal({
               onPress={() => onSave(null)}
               hitSlop={12}
               accessibilityRole="button"
-              accessibilityLabel="Reset to $100"
+              accessibilityLabel="Use the posted stake"
             >
-              <Text style={styles.stakeModalReset}>Reset to $100</Text>
+              <Text style={styles.stakeModalReset}>Use posted stake</Text>
             </Pressable>
             <View style={styles.stakeModalRight}>
               <Pressable onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Cancel">
@@ -615,11 +659,11 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
 function BetRow({ bet }: { bet: SyncedBet }) {
   const settled = bet.settled;
   const profit = Number(bet.profit ?? 0);
-  const resultColor = !settled ? colors.textSecondary : pnlColor(profit, 2);
+  const resultColor = !settled ? colors.textSecondary : pnlColor(profit, 2, FLAT_UNIT_TONE_SCALE);
   const right = settled
-    ? formatCurrencySigned(profit)
+    ? formatFlatUnits(profit)
     : bet.stake != null
-      ? `${formatCurrency(bet.stake)} risked`
+      ? `${formatFlatStake(bet.stake)} risked`
       : 'Open';
 
   return (
@@ -639,7 +683,9 @@ function BetRow({ bet }: { bet: SyncedBet }) {
             .join(' · ')}
         </Text>
       </View>
-      <Text style={[styles.betRight, { color: resultColor }]}>{right}</Text>
+      <Text style={[styles.betRight, { color: resultColor }]} accessibilityLabel={unitsSpeech(right)}>
+        {right}
+      </Text>
     </View>
   );
 }
@@ -941,6 +987,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 2,
+    marginBottom: spacing.sm,
+  },
+  stakeModalHint: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
     marginBottom: spacing.md,
   },
   stakeModalInput: {

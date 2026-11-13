@@ -39,9 +39,11 @@ at the same cut (713 bets, +61.3 units; docs/nba_models_2026.md 8.4).
 
 THE RULE, per regular-season game:
   1. RATINGS AND COMPLETENESS: exactly models/nba_total_luck.py's (team_box,
-     f4_projections, missing_inputs, regular_season), imported. Both teams need
-     10+ games this season (MIN_GAMES); every scheduled game of the season
-     before the date must be scored and boxed, else the game is declined.
+     f4_projections, missing_inputs, regular_season), imported. No 10-game wait
+     (mike, 2026-11-02): a team needs one game this season (LIVE_MIN_GAMES),
+     where the evidence above is both teams on 10+ (docs/sports/nba.md,
+     "No 10-game wait"). Every scheduled game of the season before the date must be
+     scored and boxed, else the game is declined.
   2. THE QUOTES (models/nba_book_numbers.py, the lab's own code): each book's
      MAIN number per fetch (coherent rungs first, prices closest to even, ties
      to the lower number); each book's newest fetch at or before the decision
@@ -94,8 +96,10 @@ exactly one, NBA_2025-01-24_POR_CHA, FanDuel under 109.5 at -118 (scripts/
 nba_team_total_luck_replay.py measures it).
 
 THE ARTIFACT (models/saved/, ARTIFACT_PATH; scripts/nba_team_total_luck_build.py):
-the team-total residuals per season (2020-21 .. 2025-26) and the bucket's
-per-season counts. It must be refitted before 2027-28: the card refuses a
+the team-total residuals per season (2020-21 .. 2025-26), the bucket's
+per-season counts, and the finished price table of 2026-27
+(models/nba_total_luck.py, THE PRICE TABLE IS STORED). It must be refitted before
+2027-28: the card refuses a
 season the artifact does not end just before.
 """
 from __future__ import annotations
@@ -113,7 +117,7 @@ import models.nba_total_luck as tl
 from models import nba_book_numbers as NB
 from models.nba_book_numbers import ALTERNATE_MARKET, split_main_rungs  # noqa: F401
 from models.nba_total_luck import (  # noqa: F401
-    BOX_COLS, DIAG_KEYS, MIN_GAMES, UNPLAYED_AFTER_DAYS, f4_projections, lead_minutes,
+    BOX_COLS, DIAG_KEYS, LIVE_MIN_GAMES, UNPLAYED_AFTER_DAYS, f4_projections, lead_minutes,
     missing_inputs, regular_season, scheduled_games, side_strength, team_box)
 
 MODEL_ID = "nba_team_total_luck"
@@ -124,7 +128,7 @@ GAP_CUT = 2.0
 REFERENCE_BOOK = "draftkings"
 
 ROOT = Path(__file__).resolve().parent.parent
-ARTIFACT_PATH = "models/saved/nba_team_total_luck_20261018_014024.pkl"
+ARTIFACT_PATH = "models/saved/nba_team_total_luck_20261031_095356.pkl"
 ARTIFACT_KIND = "nba_team_total_luck"
 # Two residuals per game, 300 games: scripts/nba_game2_market.team_total_dist.
 MIN_PRIOR_ROWS = 600
@@ -206,23 +210,28 @@ _DIST_CACHE: dict = {}
 
 def pricing_dist(art: dict, season: int):
     """The empirical team-total distribution season `season` is priced with:
-    every stored residual of the seasons BEFORE it, re-centred
+    the table the artifact stores for it (models.nba_total_luck, THE PRICE TABLE IS
+    STORED), else every stored residual of the seasons BEFORE it, re-centred
     (scripts.nba_game_harness.ResidDist), the rows in the order
     scripts/nba_game2_market.team_total_resid wrote them, so it is the lab's
     team_total_dist exactly. Fewer than MIN_PRIOR_ROWS refuses: there is no
-    fallback to the season's own results. Built once per artifact and season
-    in a process."""
-    from scripts import nba_game_harness as H
+    fallback to the season's own results. Once per artifact and season in a
+    process."""
     key = (art.get("built_at"), len(art["tt_resid"]), int(season))
     if key not in _DIST_CACHE:
-        r = pd.DataFrame(art["tt_resid"], columns=["season", "resid"])
-        prior = r[r["season"].astype(int) < int(season)]
-        if len(prior) < MIN_PRIOR_ROWS:
-            raise ValueError(f"{MODEL_ID}: {len(prior)} team-total residuals before {season} "
-                             f"(need {MIN_PRIOR_ROWS}); no own-season fallback")
-        _DIST_CACHE[key] = H.ResidDist(prior["resid"].to_numpy(float),
-                                       f"{season} team_totals (seasons before)")
+        stored = tl.stored_dist(art, season)
+        _DIST_CACHE[key] = stored if stored is not None else _build_dist(art, season)
     return _DIST_CACHE[key]
+
+
+def _build_dist(art: dict, season: int):
+    from scripts import nba_game_harness as H
+    r = pd.DataFrame(art["tt_resid"], columns=["season", "resid"])
+    prior = r[r["season"].astype(int) < int(season)]
+    if len(prior) < MIN_PRIOR_ROWS:
+        raise ValueError(f"{MODEL_ID}: {len(prior)} team-total residuals before {season} "
+                         f"(need {MIN_PRIOR_ROWS}); no own-season fallback")
+    return H.ResidDist(prior["resid"].to_numpy(float), f"{season} team_totals (seasons before)")
 
 
 def uplift(art: dict, season: int) -> float:
@@ -246,18 +255,20 @@ QUOTE_ROW_COLS = ("game_id", "bookmaker", "market", "snapshot_type", "snapshot_a
                   "under_link")
 
 
-def quote_frame(rows: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
+def quote_frame(rows: pd.DataFrame, games: pd.DataFrame, market: str = MARKET) -> pd.DataFrame:
     """Stored `odds` rows (QUOTE_ROW_COLS; the links may be absent) -> the
     harness's quote frame, through scripts.nba_game_harness.frame_quotes:
-    line = total_line, price_a = the over, price_b = the under.
+    line = total_line, price_a = the over, price_b = the under. `market` is
+    this model's, unless another per-event total model shares the shaping
+    (models/nba_first_half_total_luck.py).
 
     The fetch instant is `created_at` (one fetch, one transaction). The
     harness's staleness rule reads snapshot_at, and for this market it is set
     to the fetch instant, as in the lab (STALENESS, above); the book's own
-    last_update is kept as `book_update_at`. Pre-game ('open') home team
-    totals only; `games` carries season, game_date and tip."""
+    last_update is kept as `book_update_at`. Pre-game ('open') rows of `market`
+    only; `games` carries season, game_date and tip."""
     from scripts import nba_game_harness as H
-    o = rows[(rows["market"] == MARKET) & (rows["snapshot_type"] == "open")].copy()
+    o = rows[(rows["market"] == market) & (rows["snapshot_type"] == "open")].copy()
     o["fetch_at"] = pd.to_datetime(o["created_at"], utc=True, format="mixed")
     o["book_update_at"] = pd.to_datetime(o["snapshot_at"], utc=True, format="mixed")
     o["snapshot_at"] = o["fetch_at"]
@@ -333,10 +344,11 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
            final_games: pd.DataFrame, times: pd.DataFrame, art: dict, *,
            scheduled: pd.DataFrame,
            books=None, min_odds: float | None = None, gap_cut: float = GAP_CUT,
-           bucket_uplift: float | None = None
+           bucket_uplift: float | None = None, min_games: int = LIVE_MIN_GAMES
            ) -> tuple[list[TeamTotalBet], list[TeamTotalDecision], dict]:
     """The rule on frames. Pure given its inputs, so the card and the replay of
-    the lab run the same code.
+    the lab run the same code; a replay passes min_games=MIN_GAMES of
+    models/nba_total_luck.py, the population the lab graded.
 
     targets      game_id, season, game_date, home_team, away_team (one season)
     quotes       quote_frame(...) rows, team_totals_home, with link_a / link_b
@@ -365,7 +377,7 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
     sig = {(season, MARKET): pricing_dist(art, season)}
 
     tb = team_box(box, final_games)
-    proj = f4_projections(targets, tb)
+    proj = f4_projections(targets, tb, min_games=min_games)
     parts = dict(zip(proj["game_id"], home_part(proj)))
     totals = dict(zip(proj["game_id"], proj["gap_total"]))
     missing = missing_inputs(targets, scheduled_games(scheduled), final_games, tb)
@@ -419,7 +431,7 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
             continue
         if part is None:
             diag["early_season"] += 1
-            record(0, f"early_season: a team has under {MIN_GAMES} games")
+            record(0, f"early_season: a team has under {min_games} games")
             continue
         if -part < gap_cut:
             diag["gap_below_cut"] += 1

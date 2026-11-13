@@ -883,12 +883,90 @@ def _session() -> requests.Session:
     return _SESSION
 
 
-def _get(path: str, **params):
+# 2026-11-04 daily: /stats/season/advanced 429'd on week 2. Three sleeps
+# of 5, 10 and 15 seconds were not enough, and the header was ignored.
+# Six tries, each wait capped at 60s. One call also stops once its own
+# wait would pass _CFBD_CALL_BUDGET_S, and a season snapshot shares
+# _CFBD_SEASON_RETRY_BUDGET_S, so a stuck 429 cannot hold the daily open.
+_CFBD_MAX_ATTEMPTS = 6
+_CFBD_BACKOFF_CAP_S = 60.0
+_CFBD_CALL_BUDGET_S = 150.0
+_CFBD_SEASON_RETRY_BUDGET_S = 600.0
+
+
+class _RetryClock:
+    """A monotonic deadline. `room_for` is false once `wait` would pass it."""
+
+    def __init__(self, seconds: float):
+        self.deadline = time.monotonic() + seconds
+
+    def room_for(self, wait: float) -> bool:
+        return time.monotonic() + wait <= self.deadline
+
+
+def _retry_after_seconds(response) -> float | None:
+    """Retry-After as delta-seconds, or None when the header is absent
+    or not a delay we can use. An HTTP-date is seconds from now."""
+    headers = getattr(response, "headers", None)
+    if headers is None or not hasattr(headers, "get"):
+        return None
+    raw = headers.get("Retry-After")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return (when - datetime.now(timezone.utc)).total_seconds()
+
+
+def _cfbd_delay(attempt: int, response) -> float:
+    """Seconds before the next try. A positive Retry-After is the wait,
+    capped at 60. Otherwise 5, 10, 20, 40, then 60."""
+    header = _retry_after_seconds(response) if response is not None else None
+    if header is not None and header > 0:
+        return min(_CFBD_BACKOFF_CAP_S, header)
+    return min(_CFBD_BACKOFF_CAP_S, 5.0 * (2 ** attempt))
+
+
+def _cfbd_sleep(path: str, wait: float, call_budget: _RetryClock,
+                season_budget: _RetryClock | None, *, limited: bool) -> bool:
+    """Sleep `wait` unless either budget would be crossed. False means
+    the caller should give up instead of sleeping."""
+    if not call_budget.room_for(wait) or (
+        season_budget is not None and not season_budget.room_for(wait)
+    ):
+        logger.warning(
+            f"CFBD {path} retry budget spent — not sleeping {wait:.0f}s")
+        return False
+    why = "429" if limited else "error"
+    logger.warning(f"CFBD {why} on {path} — sleeping {wait:.0f}s")
+    time.sleep(wait)
+    return True
+
+
+def _get(path: str, _budget: _RetryClock | None = None, **params):
     """
     One CFBD GET. Returns the decoded body, or None on any failure.
 
     Fails soft on purpose: a single missing week must never sink a multi-season
     backfill, and the callers all treat None as "no rows for this slice".
+    A 429 uses Retry-After when it parses, otherwise the exponential
+    delay. Either wait is capped, and the call stops when the next sleep
+    would pass its budget. `_budget` is a season-wide clock the snapshot
+    builder shares; it is not sent to CFBD.
     """
     if not config.CFBD_API_KEY:
         raise RuntimeError(
@@ -898,22 +976,34 @@ def _get(path: str, **params):
         )
     url = f"{config.CFBD_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
     clean = {k: v for k, v in params.items() if v is not None}
-    for attempt in range(3):
+    call_budget = _RetryClock(_CFBD_CALL_BUDGET_S)
+    last_exc: Exception | None = None
+    for attempt in range(_CFBD_MAX_ATTEMPTS):
         try:
             r = _session().get(url, params=clean, timeout=30)
-            if r.status_code == 429:          # rate limited — back off and retry
-                wait = 5 * (attempt + 1)
-                logger.warning(f"CFBD 429 on {path} — sleeping {wait}s")
-                time.sleep(wait)
+            if r.status_code == 429:
+                if attempt + 1 >= _CFBD_MAX_ATTEMPTS:
+                    logger.warning(
+                        f"CFBD 429 on {path} — giving up after "
+                        f"{_CFBD_MAX_ATTEMPTS} attempts")
+                    return None
+                wait = _cfbd_delay(attempt, r)
+                if not _cfbd_sleep(path, wait, call_budget, _budget, limited=True):
+                    return None
                 continue
             r.raise_for_status()
             time.sleep(config.CFBD_REQUEST_PAUSE)
             return r.json()
         except Exception as exc:                        # noqa: BLE001
-            if attempt == 2:
+            last_exc = exc
+            if attempt + 1 >= _CFBD_MAX_ATTEMPTS:
                 logger.warning(f"CFBD {path} {clean} failed: {exc}")
                 return None
-            time.sleep(2 * (attempt + 1))
+            wait = _cfbd_delay(attempt, None)
+            if not _cfbd_sleep(path, wait, call_budget, _budget, limited=False):
+                logger.warning(f"CFBD {path} {clean} failed: {exc}")
+                return None
+    logger.warning(f"CFBD {path} {clean} failed: {last_exc}")
     return None
 
 
@@ -1328,7 +1418,7 @@ def _local_aggregates(log_rows: list[dict]) -> dict:
     return out
 
 
-def _prior_season_context(season: int) -> dict:
+def _prior_season_context(season: int, _budget: _RetryClock | None = None) -> dict:
     """
     Everything the preseason prior is built from: the PRIOR season's final SP+,
     SRS, talent, returning production and efficiency.
@@ -1345,9 +1435,9 @@ def _prior_season_context(season: int) -> dict:
     # rows from earlier runs with NULLs — that is exactly how the 2016-2025
     # weekly snapshots lost SP+/SRS/EPA on 2026-08-23. Refuse loudly instead;
     # the fault-isolated backfill reports the season and moves on.
-    sp_p  = _get("/ratings/sp", year=prev)
-    srs_p = _get("/ratings/srs", year=prev)
-    adv_p = _get("/stats/season/advanced", year=prev)
+    sp_p  = _get("/ratings/sp", year=prev, _budget=_budget)
+    srs_p = _get("/ratings/srs", year=prev, _budget=_budget)
+    adv_p = _get("/stats/season/advanced", year=prev, _budget=_budget)
     if sp_p is None or srs_p is None or adv_p is None:
         raise RuntimeError(
             f"CFBD prior-season context for {season} unavailable "
@@ -1360,8 +1450,8 @@ def _prior_season_context(season: int) -> dict:
     # Talent/returning can be legitimately absent in early seasons (talent
     # starts ~2015) — an empty payload is fine; only a FAILED fetch of the
     # core trio above is fatal.
-    tal  = parse_talent(_get("/talent", year=season))          # recruiting: current year is preseason-known
-    ret  = parse_returning(_get("/player/returning", year=season))
+    tal  = parse_talent(_get("/talent", year=season, _budget=_budget))          # recruiting: current year is preseason-known
+    ret  = parse_returning(_get("/player/returning", year=season, _budget=_budget))
     adv  = parse_advanced_stats(adv_p)
     merged: dict = {}
     for team in set(sp) | set(srs) | set(tal) | set(ret) | set(adv):
@@ -1440,6 +1530,10 @@ def ingest_ncaaf_team_stats(season: int, conn=None) -> int:
     """
     own = conn is None
     conn = conn or get_connection()
+    # One clock for the prior-season pulls and every weekly advanced/elo
+    # call. A 429 that would sleep past it returns None, and the week
+    # loop aborts rather than writing NULL efficiency over a good row.
+    budget = _RetryClock(_CFBD_SEASON_RETRY_BUDGET_S)
     try:
         teams_meta = {
             r[0]: {"conference": r[1], "classification": r[2]}
@@ -1461,7 +1555,7 @@ def ingest_ncaaf_team_stats(season: int, conn=None) -> int:
             WHERE season = %(y)s
         """, {"y": season}).fetchall()]
 
-        prior = _prior_season_context(season)
+        prior = _prior_season_context(season, budget)
         prior_log = [dict(zip(log_cols, r)) for r in conn.execute(f"""
             SELECT {', '.join(log_cols)} FROM ncaaf_team_game_log
             WHERE season = %(y)s
@@ -1486,8 +1580,8 @@ def ingest_ncaaf_team_stats(season: int, conn=None) -> int:
             # failed fetch, and writing this week's rows anyway would blanket-
             # overwrite previously-good snapshots with NULL efficiency columns.
             adv_p = _get("/stats/season/advanced", year=season,
-                         startWeek=1, endWeek=wk - 1)
-            elo_p = _get("/ratings/elo", year=season, week=wk)
+                         startWeek=1, endWeek=wk - 1, _budget=budget)
+            elo_p = _get("/ratings/elo", year=season, week=wk, _budget=budget)
             if adv_p is None or elo_p is None:
                 raise RuntimeError(
                     f"CFBD weekly stats fetch failed for {season} week {wk} "
@@ -1885,11 +1979,9 @@ def _load_schools(conn=None) -> list[dict]:
     try:
         _SCHOOL_CACHE = [
             {"school": r[0], "mascot": r[1],
-             "alt": [a for a in (r[2] or "").split("|") if a],
-             "abbreviation": r[3]}
+             "alt": [a for a in (r[2] or "").split("|") if a]}
             for r in conn.execute(
-                "SELECT school, mascot, alt_names, abbreviation FROM ncaaf_teams"
-            ).fetchall()
+                "SELECT school, mascot, alt_names FROM ncaaf_teams").fetchall()
         ]
     except Exception as exc:                            # noqa: BLE001
         logger.warning(f"ncaaf_teams unavailable ({exc}) — name resolution is identity-only")
@@ -1907,18 +1999,10 @@ def reset_school_cache() -> None:
 
 
 def _fold(v: str) -> str:
-    """Case-, accent- and punctuation-insensitive comparison key.
-
-    "&" is punctuation, so "William & Mary" folds to "william mary" while
-    "William and Mary" keeps the word. Those are the same school (Odds API
-    wrote "William and Mary Tribe" on 2026-09-22). Drop "and" only when it
-    is its own token — "Anderson" stays. Measured on all 683 ncaaf_teams
-    schools that day: the new fold still collides with nothing.
-    """
+    """Case-, accent- and punctuation-insensitive comparison key."""
     import unicodedata
     v = unicodedata.normalize("NFD", (v or "").strip().lower())
-    folded = "".join(ch for ch in v if ch.isalnum() or ch == " ").replace("  ", " ")
-    return " ".join(p for p in folded.split() if p != "and")
+    return "".join(ch for ch in v if ch.isalnum() or ch == " ").replace("  ", " ")
 
 
 def _rest_is_mascot(rest: str, mascot: str | None) -> bool:
@@ -1945,10 +2029,9 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
     The Odds API team name → CFBD canonical school name.
 
     The Odds API lists NCAAF teams with the mascot appended ("Ohio State
-    Buckeyes"), so this strips it by matching against ncaaf_teams.     Resolution
-    order: explicit config override → exact school → "school mascot" →
-    abbreviation (or abbreviation + mascot) → longest school that prefixes
-    the input → alt name → the input unchanged (warned).
+    Buckeyes"), so this strips it by matching against ncaaf_teams. Resolution
+    order: explicit config override → exact school → "school mascot" → longest
+    school that prefixes the input → alt name → the input unchanged (warned).
 
     Identity fallback is deliberate: an unresolved name yields a game_id that
     simply won't match a stats row, so the scorer skips that game — far safer
@@ -1979,28 +2062,6 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
     for s in schools:
         if s["mascot"] and _fold(f"{s['school']} {s['mascot']}") == lowered:
             return s["school"]
-    # Abbreviation, exact. "LIU Sharks" is Long Island University's
-    # abbreviation plus mascot; school+mascot looks for "Long Island
-    # University Sharks" and misses. Bare abbreviations shorter than three
-    # letters ("OU", "ME", "SC") are not matched on their own — too many
-    # of those are also ordinary syllables — but abbreviation+mascot is
-    # exact either way. Measured 2026-09-22: every abbreviation is unique,
-    # and no abbreviation+mascot equals a different school's name.
-    abbrev_hits: list[str] = []
-    for s in schools:
-        raw_abbrev = s.get("abbreviation") or ""
-        abbrev = _fold(raw_abbrev)
-        if not abbrev:
-            continue
-        mascot = s.get("mascot") or ""
-        if mascot and _fold(f"{raw_abbrev} {mascot}") == lowered:
-            abbrev_hits.append(s["school"])
-            continue
-        alnum = sum(ch.isalnum() for ch in abbrev)
-        if alnum >= 3 and abbrev == lowered:
-            abbrev_hits.append(s["school"])
-    if len(abbrev_hits) == 1:
-        return abbrev_hits[0]
     # A school that PREFIXES the input is a match only when what follows it is
     # that school's mascot. ncaaf_teams was /teams/fbs only until 2026-09-07,
     # so an FCS opponent whose name extends an FBS school's found no exact
@@ -2036,126 +2097,6 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
     logger.warning(f"Unresolved NCAAF school from Odds API: '{name}' — "
                    f"add it to config.NCAAF_ODDS_API_MAP")
     return name
-
-
-def school_in_registry(name: str, conn=None) -> bool:
-    """True when `name` is a canonical ncaaf_teams.school, not a passthrough."""
-    if not name:
-        return False
-    return any(s.get("school") == name for s in _load_schools(conn))
-
-
-def commence_instant(value) -> str | None:
-    """UTC instant to the second, so `.000Z` and `+00:00` compare equal."""
-    from datetime import datetime, timezone
-    if value is None or value == "":
-        return None
-    if isinstance(value, datetime):
-        dt = value
-    else:
-        raw = str(value).strip().replace("Z", "+00:00")
-        if " " in raw and "T" not in raw:
-            raw = raw.replace(" ", "T", 1)
-        if raw.endswith("+00"):
-            raw = raw + ":00"
-        try:
-            dt = datetime.fromisoformat(raw)
-        except ValueError:
-            return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-
-
-def fetch_ncaaf_schedule(conn, start: str, end: str) -> list[dict]:
-    """NCAAF games rows in [start, end], for odds to attach to instead of minting."""
-    rows = conn.execute("""
-        SELECT game_id, game_date, home_team, away_team, commence_time, data_source
-        FROM games
-        WHERE sport = 'NCAAF' AND game_date BETWEEN %s AND %s
-    """, (start, end)).fetchall()
-    out = []
-    for row in rows:
-        if len(row) < 6:
-            continue
-        game_id, game_date, home, away, commence, source = row[:6]
-        gd = game_date.isoformat() if hasattr(game_date, "isoformat") else str(game_date)[:10]
-        out.append({
-            "game_id": game_id,
-            "game_date": gd,
-            "home_team": home,
-            "away_team": away,
-            "commence_time": commence,
-            "data_source": source,
-        })
-    return out
-
-
-def adopt_ncaaf_game_id(schedule: list[dict] | None, *,
-                        candidate_id: str,
-                        home: str,
-                        away: str,
-                        home_known: bool,
-                        away_known: bool,
-                        commence_time,
-                        game_date: str) -> str | None:
-    """Existing games.game_id for this Odds API event, or None.
-
-    Slug equality is not the only key. When one side resolved to a registry
-    school and the other is an unmapped nickname, the row with that side,
-    this ET date and the same kickoff is the game. That is the 2026-09-22
-    split: William & Mary, LIU and Houston Christian already had CFBD rows,
-    and the odds ingest minted a second id from the feed's name.
-
-    Two rows at that kickoff: the single data_source='cfbd' row, if there
-    is one. Otherwise the candidate, if it is already one of those rows —
-    never a third id. Both sides canonical: only the row whose teams are
-    exactly those schools.
-    """
-    schedule = schedule or []
-    by_id = {g.get("game_id"): g for g in schedule}
-    key = commence_instant(commence_time)
-
-    def _hits(require_both: bool) -> list[dict]:
-        if key is None:
-            return []
-        found = []
-        for g in schedule:
-            gd = str(g.get("game_date") or "")[:10]
-            if gd != game_date:
-                continue
-            if commence_instant(g.get("commence_time")) != key:
-                continue
-            home_hit = home_known and g.get("home_team") == home
-            away_hit = away_known and g.get("away_team") == away
-            if require_both:
-                if home_hit and away_hit:
-                    found.append(g)
-            elif home_hit or away_hit:
-                found.append(g)
-        return found
-
-    def _prefer(hits: list[dict]) -> str | None:
-        if len(hits) == 1:
-            return hits[0]["game_id"]
-        cfbd = [g for g in hits if g.get("data_source") == "cfbd"]
-        if len(cfbd) == 1:
-            return cfbd[0]["game_id"]
-        if any(g.get("game_id") == candidate_id for g in hits):
-            return candidate_id
-        return None
-
-    if home_known and away_known:
-        chosen = _prefer(_hits(require_both=True))
-        if chosen:
-            return chosen
-        return candidate_id if candidate_id in by_id else None
-    if home_known or away_known:
-        chosen = _prefer(_hits(require_both=False))
-        if chosen:
-            return chosen
-        return candidate_id if candidate_id in by_id else None
-    return candidate_id if candidate_id in by_id else None
 
 
 def ingest_ncaaf_season(season: int, conn=None, with_lines: bool = True) -> dict:

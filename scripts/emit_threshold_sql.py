@@ -11,11 +11,12 @@ SQL should be generated from it rather than transcribed.
 Usage
 -----
     python -m scripts.emit_threshold_sql              # bare column names
-    python -m scripts.emit_threshold_sql --prefix p.  # for the Claude-mobile join
+    python -m scripts.emit_threshold_sql --prefix p.  # columns on a `p.` alias
     python -m scripts.emit_threshold_sql --paused     # also list paused models
 
-Paste the output into the Claude-mobile project instructions whenever a
-threshold changes (see docs/mobile_picks_prompt.md).
+The output is for docs/thresholds.md and for reading a cut by eye. Nothing
+pasted carries it: the open picks any Claude chat reads are the open_picks
+view, which joins model_action_thresholds (docs/mobile_picks_prompt.md).
 """
 from __future__ import annotations
 

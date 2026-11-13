@@ -88,14 +88,16 @@ export interface Plan {
 
 /**
  * The ladder — Weekly / Monthly / Annual, set 2026-08-30 to mirror the layout
- * Matt asked for.
+ * Matt asked for. Display prices locked 2026-10-27 (Matt): weekly $9.99 with
+ * no trial, monthly $24.99 and annual $149.99, each with a 7-day trial.
  *
  * These numbers are DISPLAY ONLY. The store (App Store Connect) is the source
  * of truth for what is actually charged, and the paywall prefers the store's
  * own localized price string whenever it can fetch one; these are the fallback
  * for the moment before that arrives. If you change a price in App Store
  * Connect, change it here too or the fallback quotes a number the user is not
- * charged.
+ * charged. Product ids are documented in STORE_PRODUCT_IDS. This repo does
+ * not create them in App Store Connect or RevenueCat.
  */
 export const PLANS: readonly Plan[] = [
   {
@@ -109,16 +111,16 @@ export const PLANS: readonly Plan[] = [
   {
     key: 'monthly',
     name: 'Monthly',
-    price: 29.99,
+    price: 24.99,
     months: 1,
     blurb: 'Cancel anytime.',
-    badge: 'Most popular',
+    // No badge. Annual is the only one marked (Best value), Matt 2026-10-27.
     trialDays: 7,
   },
   {
     key: 'annual',
     name: 'Annual',
-    price: 199.99,
+    price: 149.99,
     months: 12,
     blurb: 'Every sport, all year.',
     badge: 'Best value',
@@ -132,6 +134,31 @@ export const PLANS: readonly Plan[] = [
  * offered, which is what the marketing line is about.
  */
 export const TRIAL_DAYS = 7;
+
+/** Plan selected when the paywall opens. Annual, Matt 2026-10-27. */
+export const DEFAULT_PLAN_KEY: PlanKey = 'annual';
+
+/**
+ * Suggested App Store product ids. Not created by this repo.
+ * The intro products carry the free trial. They are not what Unlock Discord
+ * early purchases.
+ */
+export const STORE_PRODUCT_IDS: Record<PlanKey, string> = {
+  weekly: 'com.mja.bettingpicks.premium.weekly',
+  monthly: 'com.mja.bettingpicks.premium.monthly',
+  annual: 'com.mja.bettingpicks.premium.annual',
+};
+
+/**
+ * Same-tier convert ids. No introductory offer. Not created by this repo.
+ * Each one must sit in the same App Store subscription group as its trial
+ * sibling so StoreKit replaces that subscription instead of starting a second.
+ * Weekly has no trial, so it has no convert id.
+ */
+export const EARLY_UNLOCK_PRODUCT_IDS: Partial<Record<PlanKey, string>> = {
+  monthly: 'com.mja.bettingpicks.premium.monthly.notrial',
+  annual: 'com.mja.bettingpicks.premium.annual.notrial',
+};
 
 /** Where Stripe Checkout sends the browser back to. */
 export const BILLING_RETURN_URL = 'signalbase://billing-return';

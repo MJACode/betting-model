@@ -15,13 +15,12 @@ import { APP_URL } from '@/lib/shareRecord';
  * link copied out of the X share sheet are per-share tracking tokens, not part
  * of the address, and they do not belong in a link we ship to every user.
  *
- * DISCORD_URL is a permanent invite link — if it is ever regenerated or set to
- * expire, replace it here.
+ * The Discord invite is not exported here. It is Apple-paid only and lives
+ * behind discordInviteIfPaid (lib/discordHelpers.ts).
  */
 /** Re-exported so the share message and the Settings footer can never drift. */
 export const WEBSITE_URL = APP_URL;
 export const TWITTER_URL = 'https://x.com/signalbasepicks';
-export const DISCORD_URL = 'https://discord.gg/JWMUzK9Da';
 export const SUPPORT_EMAIL = 'matt.alksninis@gmail.com';
 
 /**

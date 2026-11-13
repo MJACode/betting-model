@@ -20,11 +20,11 @@
  * line is the half-point below it. `thresholdFromBookLine` / `bookLineFromThreshold`
  * are the only two places that conversion lives here.
  */
-import { americanImplied, formatSignedUnits } from '@/lib/format';
+import { americanImplied, formatSigned } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
-import { isDuplicateCopy, isPausedRow, publishedRecordKeeps, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
+import { isDuplicateCopy, isPausedRow, postedPickUnits, publishedRecordKeeps, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
-import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
+import { logStatValue, type GameWindow, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropMarket, statForPropModel, type StatDef } from '@/lib/statCatalog';
 import { modelLong, modelShort, sportOfModel } from '@/lib/modelMeta';
 import type { GameRow, PropOddsByBookRow, PropOddsSnapshotRow, SettledPick } from '@/types';
@@ -37,7 +37,9 @@ export function thresholdFromBookLine(line: number): number {
   return Number.isInteger(line) ? line : Math.ceil(line);
 }
 
-/** The page's "6+" is the book's 5.5. */
+/** The page's "6+" is the book's 5.5. Inverse of a HALF-POINT conversion
+ *  only — an integer scored_line of 7 is already 7, not a 7+ threshold
+ *  that came from 6.5. Provenance labels print the source line instead. */
 export function bookLineFromThreshold(threshold: number): number {
   return threshold - 0.5;
 }
@@ -250,6 +252,53 @@ export interface PlayerHeadToHead {
 }
 
 /**
+ * The meetings alone, newest first: no line, no side. The page's H2H range
+ * chip charts these, and it cannot wait on a line, because the line's own
+ * default is the median of whatever the chip charts.
+ *
+ * Sorted here. The RPC aggregates newest-first, and the chart assumes that
+ * the same way `chartGames` does — newest bar on the right. A row that
+ * arrived oldest-first would put the latest meeting on the left. Same-day
+ * meetings keep their incoming order (the RPC's game-id order).
+ */
+export function h2hMeetings(values: readonly number[], dates: readonly string[]): H2HMeeting[] {
+  const n = Math.min(values.length, dates.length);
+  const meetings: H2HMeeting[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = Number(values[i]);
+    if (!Number.isFinite(v)) continue;
+    meetings.push({ date: dates[i]!, value: v });
+  }
+  meetings.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  return meetings;
+}
+
+/** A recent-games span, or every meeting with tonight's opponent. */
+export type PlayerRange = GameWindow | 'h2h';
+
+/** This screen's opening span: L10 where the sport offers it, else the first. */
+export function defaultPlayerWindow(windows: readonly { value: GameWindow }[]): GameWindow {
+  return windows.some((w) => w.value === 10) ? 10 : windows[0]!.value;
+}
+
+/**
+ * The span to remember. Asked-for H2H that the chip does not offer falls
+ * back to the default once that answer has settled (`pending` is false).
+ * Leaving the state at `'h2h'` makes the next stat that does have meetings
+ * jump back to H2H, even though the chip the reader last saw selected was
+ * the default span.
+ */
+export function rangeToRemember(
+  gameWindow: PlayerRange,
+  h2hOffered: boolean,
+  h2hPending: boolean,
+  windows: readonly { value: GameWindow }[],
+): PlayerRange {
+  if (gameWindow === 'h2h' && !h2hOffered && !h2hPending) return defaultPlayerWindow(windows);
+  return gameWindow;
+}
+
+/**
  * The H2H card's numbers, off one player_h2h_stat_values_* row.
  *
  * THIS REPLACED A `vsOpponent` SPLIT COMPUTED OVER THE LOADED LOG, and the
@@ -271,13 +320,7 @@ export function playerHeadToHead(
   line: number,
   side: HitDirection,
 ): PlayerHeadToHead {
-  const n = Math.min(values.length, dates.length);
-  const meetings: H2HMeeting[] = [];
-  for (let i = 0; i < n; i++) {
-    const v = Number(values[i]);
-    if (!Number.isFinite(v)) continue;
-    meetings.push({ date: dates[i]!, value: v });
-  }
+  const meetings = h2hMeetings(values, dates);
   const nums = meetings.map((m) => m.value);
   // `computeHitRate`, not `>=`: the board's H2H branch uses it, and two
   // surfaces of one feature disagreeing about which side won is worse than
@@ -402,19 +445,30 @@ export interface PlayerPickRecord {
 
 /**
  * What a multi-market model's line on the player page is called after its
- * stat: the parenthetical of the model's own name, so "Points (vs Pinnacle)"
- * for the three rules priced against Pinnacle and "Steals (Projection)" for
- * the NBA projection model, which is not priced against Pinnacle. The short
- * name when the long one carries no parenthetical.
+ * stat. The prop-market rules are named "<SPORT> Props"; reading the badge
+ * would label the line "Points (Props)". Those lines are the stat alone.
+ * The projection model is a second rule on the same stats, so its lines
+ * keep "Projection" ("Steals (Projection)"). Any other multi-market id
+ * falls back to the badge.
  */
-function multiMarketModelName(modelId: string): string {
-  return /\(([^()]+)\)\s*$/.exec(modelLong(modelId))?.[1] ?? modelShort(modelId);
+const PLAYER_LINE_QUALIFIER: Readonly<Record<string, string | null>> = {
+  nba_prop_market: null,
+  nfl_prop_market: null,
+  wnba_prop_market: null,
+  nba_prop_projection: 'Projection',
+};
+
+function multiMarketQualifier(modelId: string): string | null {
+  if (Object.prototype.hasOwnProperty.call(PLAYER_LINE_QUALIFIER, modelId)) {
+    return PLAYER_LINE_QUALIFIER[modelId];
+  }
+  return modelShort(modelId);
 }
 
 /**
  * Settled BETs on this player, grouped by model. Input is already the record
  * filter (BET, a real result); this only sorts and sums. A pick with no price
- * counts in the record and not in the units (CLAUDE.md §6).
+ * counts in the record and in the units at the bare 1u, as the Record tab books it.
  */
 export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
   const by = new Map<string, PlayerPickLine>();
@@ -436,19 +490,20 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     // A multi-market model (nba/wnba/nfl_prop_market, nba_prop_projection) is
     // one model id across several markets, so its picks are split by the
     // row's prop_market and each line is named for that market's stat.
-    // Without this every one of its bets was one line labelled "Prop Mkt".
+    // Without this every one of its bets was one line labelled "Props".
     const modelStat = statForPropModel(p.model_id);
     const market = modelStat ? null : (p.prop_market ?? null);
     const key = market ? `${p.model_id}|${market}` : p.model_id;
     let line = by.get(key);
     if (!line) {
       const stat = modelStat ?? statForPropMarket(sportOfModel(p.model_id), market);
-      // A rule's line names the rule too: named for the stat alone, it read
-      // as a second per-stat line ("Assists 1-0" over "Assists 0-1").
+      const qualifier = market ? multiMarketQualifier(p.model_id) : null;
+      // A blank qualifier is the stat alone ("Points"), never "Points (Props)".
+      // "Projection" stays on the projection model so it is not that rule's line.
       const label = !stat
         ? modelShort(p.model_id)
-        : market
-          ? `${stat.label} (${multiMarketModelName(p.model_id)})`
+        : qualifier
+          ? `${stat.label} (${qualifier})`
           : stat.label;
       line = {
         key,
@@ -464,13 +519,14 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     const side = String(p.pick_side ?? '').toLowerCase();
     if (side === 'over') line.overs += 1;
     else if (side === 'under') line.unders += 1;
-    // Through decisionPrice, never the columns (UX_REVIEW §0).
-    const priced = hasPricedLine(p);
-    const pf = num(p.profit_flat);
-    if (priced && pf != null) {
-      line.units = (line.units ?? 0) + pf / 100;
-      total.units = (total.units ?? 0) + pf / 100;
-    } else {
+    // The published stake (one unit basis, CLAUDE.md §2): 1u to win at the
+    // decided price, risk capped at 3u, a pick with no price at the bare 1u,
+    // as the Record tab books it. Never profit_flat, which is 1u risked and
+    // invents -110 on a pick with no price. The unpriced count is named.
+    const u = postedPickUnits(p).units;
+    line.units = (line.units ?? 0) + u;
+    total.units = (total.units ?? 0) + u;
+    if (!hasPricedLine(p)) {
       line.unpriced += 1;
       total.unpriced += 1;
     }
@@ -481,8 +537,28 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
   return total;
 }
 
+/**
+ * The note under a player-record row. The label stays the stat. When two
+ * rows share that word (a per-stat model and a prop-market rule), the note
+ * leads with the model name so the rows can be told apart. The label does
+ * not become "Assists (Props)".
+ */
+export function playerLineNote(
+  line: PlayerPickLine,
+  lines: readonly PlayerPickLine[],
+): string | undefined {
+  const side = line.overs + line.unders > 0
+    ? `${line.overs} over${line.overs === 1 ? '' : 's'} · ${line.unders} under${line.unders === 1 ? '' : 's'}`
+    : undefined;
+  const shared = lines.filter((other) => other.label === line.label).length > 1;
+  if (!shared) return side;
+  const name = modelLong(line.modelId);
+  return side ? `${name} · ${side}` : name;
+}
+
 export function formatRecordLine(r: { wins: number; losses: number; pushes: number; units: number | null }): string {
   const rec = r.pushes > 0 ? `${r.wins}-${r.losses}-${r.pushes}` : `${r.wins}-${r.losses}`;
   if (r.units == null) return rec;
-  return `${rec} · ${formatSignedUnits(r.units)}`;
+  // Two decimals, as the Record tab and the model pages print units.
+  return `${rec} · ${formatSigned(r.units, 2, 'u')}`;
 }

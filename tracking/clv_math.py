@@ -7,9 +7,10 @@ side is de-vigged.
     clv_pct = (taken_decimal / close_decimal − 1) × 100     # percent
     clv_pp  = (raw_close_implied − raw_taken_implied) × 100  # probability points
 
-Beat = the price we took is better than that book's close (``clv_pct > 0``).
-No snapshot at that book on that line → both are None. Another book is not
-a substitute.
+A beat is ``clv_pct`` above the stored grain (``clv_outcome``). A same-book
+close that equals the price taken is 0.00 and is a push: it stays in the
+average and it is left out of the beat rate. No snapshot at that book on
+that line → both are None. Another book is not a substitute.
 
 SECONDARY — market edge. Pinnacle's last pre-start snapshot only, power
 de-vigged (3-way power when the close has a draw). The taken side stays raw.
@@ -105,6 +106,61 @@ def implied_to_american(p: float) -> int | None:
     if x >= 0.5:
         return -int(round(100.0 * x / (1.0 - x)))
     return int(round(100.0 * (1.0 - x) / x))
+
+
+# picks.clv_pct is percent, written by _round_pct at 2 decimal places.
+# Half a hundredth is inside that grain: float dust and a true 0.00 are
+# a push, and a stored 0.01 is a real beat. Equal American prices land
+# on 0.00 (same_book_clv).
+CLV_PCT_PUSH_EPS = 0.005
+
+# Series that are not the stored percent (a raw ratio, probability
+# points, a point move). Only float dust is a push. A real 0.001 is not.
+CLV_EXACT_PUSH_EPS = 1e-9
+
+
+def clv_outcome(value, *, eps: float = CLV_PCT_PUSH_EPS) -> str | None:
+    """``beat``, ``loss``, or ``push``. None when there is no measurement.
+
+    A push is a close that equals the price taken: ``abs(value) < eps``.
+    The default grain is the stored percent. Pass ``CLV_EXACT_PUSH_EPS``
+    for a series that was not rounded to 2 decimal percent.
+    """
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if v != v:  # NaN
+        return None
+    if abs(v) < eps:
+        return "push"
+    return "beat" if v > 0 else "loss"
+
+
+def clv_beat_counts(values, *, eps: float = CLV_PCT_PUSH_EPS) -> tuple[int, int, int]:
+    """``(beats, losses, pushes)``. Unmeasured and NaN values are skipped."""
+    beats = losses = pushes = 0
+    for raw in values:
+        outcome = clv_outcome(raw, eps=eps)
+        if outcome == "beat":
+            beats += 1
+        elif outcome == "loss":
+            losses += 1
+        elif outcome == "push":
+            pushes += 1
+    return beats, losses, pushes
+
+
+def clv_beat_rate(values, *, eps: float = CLV_PCT_PUSH_EPS) -> float | None:
+    """Beats / (beats + losses). None when every measured row is a push
+    or nothing was measured. Pushes are not in the denominator."""
+    beats, losses, _pushes = clv_beat_counts(values, eps=eps)
+    decisive = beats + losses
+    if decisive == 0:
+        return None
+    return beats / decisive
 
 
 def _round_pct(value: float | None) -> float | None:

@@ -3,6 +3,7 @@
  * Run: npx tsx scripts/verify_live_tracked.ts
  */
 import { computeLiveTrackedResults } from '../src/lib/liveTracked';
+import { customTrackedStake, trackedStakeFor } from '../src/lib/trackedStake';
 import type { LiveTrackSnapshot } from '../src/hooks/useTrackedBets';
 import type { Pick } from '../src/types';
 
@@ -77,17 +78,20 @@ function snap(overrides: Partial<LiveTrackSnapshot>): LiveTrackSnapshot {
 }
 
 const G = 'MLB_2026-07-22_NYY_BOS';
+// The Performance tab's default: the posted stake, at the 100-is-1u scale.
+const asPosted = trackedStakeFor('posted', {});
 
-// 1. Settled WIN — graded at $100 flat, counts.
+// 1. Settled WIN — graded at the posted stake (1u to win at −150), counts.
 {
   const s = snap({});
   // churn: an old (deleted-in-reality) unsettled row + the settled final row.
   const settledWin = mkPick({ pick_id: 20, result: 'WIN', profit_flat: 66.67 });
-  const { rows, summary } = computeLiveTrackedResults([s], [settledWin], () => true);
+  const { rows, summary } = computeLiveTrackedResults([s], [settledWin], () => true, asPosted);
   check('settled WIN → won', rows[0].status === 'won');
-  check('settled WIN profit = 66.67', Math.abs(rows[0].profit - 66.67) < 1e-9);
+  check('settled WIN profit = 1u (100), as posted', Math.abs(rows[0].profit - 100) < 1e-9);
   check('settled WIN uses the settled pick_id', rows[0].pick.pick_id === 20);
-  check('summary wins=1, net 66.67', summary.wins === 1 && Math.abs(summary.net - 66.67) < 1e-9);
+  check('summary wins=1, net 100 on 150 risked',
+    summary.wins === 1 && Math.abs(summary.net - 100) < 1e-9 && Math.abs(summary.staked - 150) < 1e-6);
 }
 
 // 2. Churn: prefers the SETTLED row over a stale unsettled one for the same key.
@@ -95,7 +99,7 @@ const G = 'MLB_2026-07-22_NYY_BOS';
   const s = snap({});
   const stale = mkPick({ pick_id: 10, result: null });
   const settledLoss = mkPick({ pick_id: 30, result: 'LOSS', profit_flat: -100 });
-  const { rows } = computeLiveTrackedResults([s], [stale, settledLoss], () => true);
+  const { rows } = computeLiveTrackedResults([s], [stale, settledLoss], () => true, asPosted);
   check('prefers settled over unsettled', rows[0].pick.pick_id === 30 && rows[0].status === 'lost');
 }
 
@@ -104,7 +108,7 @@ const G = 'MLB_2026-07-22_NYY_BOS';
   const s = snap({});
   const older = mkPick({ pick_id: 40, result: null });
   const newer = mkPick({ pick_id: 41, result: null });
-  const { rows, summary } = computeLiveTrackedResults([s], [older, newer], () => false);
+  const { rows, summary } = computeLiveTrackedResults([s], [older, newer], () => false, asPosted);
   check('in-progress → open', rows[0].status === 'open');
   check('open uses latest pick_id', rows[0].pick.pick_id === 41);
   check('open not counted (profit 0)', rows[0].profit === 0 && summary.open === 1);
@@ -120,7 +124,7 @@ const G = 'MLB_2026-07-22_NYY_BOS';
     result: 'WIN',
     profit_flat: 90,
   });
-  const { rows, summary } = computeLiveTrackedResults([s], [otherSide], () => true);
+  const { rows, summary } = computeLiveTrackedResults([s], [otherSide], () => true, asPosted);
   check('flipped-off side, game final → no_action', rows[0].status === 'no_action');
   check('no_action synthetic pick_id is negative', rows[0].pick.pick_id < 0);
   check('no_action not counted', summary.settled === 0 && summary.net === 0);
@@ -130,23 +134,23 @@ const G = 'MLB_2026-07-22_NYY_BOS';
 // 5. No matching pick, game NOT final → open (synthetic, game still going).
 {
   const s = snap({ pick_side: 'away' });
-  const { rows } = computeLiveTrackedResults([s], [], () => false);
+  const { rows } = computeLiveTrackedResults([s], [], () => false, asPosted);
   check('no pick + not final → open', rows[0].status === 'open' && rows[0].pick.pick_id < 0);
 }
 
-// 6. Kelly stake scales profit; dedupe of duplicate snapshot keys.
+// 6. The member's own stake, risked at the price; dedupe of duplicate snapshot keys.
 {
   const s = snap({});
   const dup = snap({});
-  const settledWin = mkPick({ pick_id: 60, result: 'WIN', profit_flat: 50, kelly_fraction: 0.04 });
+  const settledWin = mkPick({ pick_id: 60, result: 'WIN', profit_flat: 66.67, kelly_fraction: 0.04 });
   const { rows, summary } = computeLiveTrackedResults(
     [s, dup],
     [settledWin],
     () => true,
-    () => 200,
+    (p) => customTrackedStake(p, 200),
   );
   check('duplicate snapshot keys deduped', rows.length === 1);
-  check('stake 200 scales profit 50 → 100', Math.abs(rows[0].profit - 100) < 1e-9);
+  check('a 2u stake on a −150 win pays 1.33u (133.33)', Math.abs(rows[0].profit - 133.33) < 1e-9);
   check('staked=200', summary.staked === 200);
 }
 
@@ -155,7 +159,7 @@ const G = 'MLB_2026-07-22_NYY_BOS';
 {
   const s = snap({ game_id: G });
   const otherGame = mkPick({ game_id: 'MLB_2026-07-22_LAD_SF', result: 'WIN', profit_flat: 80 });
-  const { rows } = computeLiveTrackedResults([s], [otherGame], () => false);
+  const { rows } = computeLiveTrackedResults([s], [otherGame], () => false, asPosted);
   check('different game does not resolve the snapshot', rows[0].pick.pick_id < 0 && rows[0].status === 'open');
 }
 

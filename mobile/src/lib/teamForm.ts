@@ -17,6 +17,8 @@ export function teamScoreUnit(sport: string | null | undefined): string {
     case 'WNBA':
     case 'NFL':
     case 'NCAAF':
+    case 'NCAAB':
+    case 'NCAABW':
       return 'PTS';
     default:
       // A sport with no team form strip today (UFC, golf): the old label.

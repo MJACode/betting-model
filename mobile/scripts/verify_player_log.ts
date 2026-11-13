@@ -33,6 +33,28 @@ import {
   detailStatForPropModel,
   filledChipCounts,
   gameContextLine,
+  attachMinuteRows,
+  attachGameSides,
+  dnpEntries,
+  mergePlayedAndDnp,
+  minutesStillNeeded,
+  opponentLabel,
+  shortGameDate,
+  averageAndMedian,
+  chartGames,
+  chartMinutes,
+  describeSelectedGame,
+  isDidNotPlay,
+  isLowMinutes,
+  isMinutesContextStat,
+  lookupLogMinutes,
+  minutesPlayed,
+  scoredChartValues,
+  sportTracksMinutes,
+  statCaptionUnit,
+  windowAverageMinutes,
+  withLowMinutes,
+  LOW_MINUTES_RATIO,
   groupsOfChips,
   ipToOuts,
   lineStepFor,
@@ -58,7 +80,8 @@ import {
   statsForSport,
   type StatDef,
 } from '../src/lib/statCatalog';
-import { playerPickRecord } from '../src/lib/playerDetail';
+import { playerLineNote, playerPickRecord } from '../src/lib/playerDetail';
+import { modelLong } from '../src/lib/modelMeta';
 import type { SettledPick } from '../src/types';
 
 let failures = 0;
@@ -71,7 +94,7 @@ const statOf = (sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF', label: string, 
   chipsForPlayer(sport, playerType).find((s) => s.label === label)!;
 
 // ── Which sports get a detail screen ────────────────────────────────────────
-for (const s of ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF'] as const) {
+for (const s of ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAABW', 'NCAAB'] as const) {
   check(`${s} has a player detail screen`, supportsPlayerDetail(s));
 }
 for (const s of ['UFC', 'NHL', 'GOLF'] as const) {
@@ -266,17 +289,22 @@ check('basketball subtitle is team only (no position column in the log)',
 check('a player with no games loaded still renders a subtitle',
   playerSubtitle('NBA', null, undefined) === '—');
 
+// The opponent carries its venue once attachGameSides has run ("vs" home,
+// "@" away); with no venue it is the bare name, never a guessed home game
+// (review, 2026-10-28).
 check('NFL game line shows opponent and week',
-  gameContextLine('NFL', nflRow) === 'SF · vs SEA · Wk 4');
+  gameContextLine('NFL', nflRow) === 'SF · SEA · Wk 4'
+    && gameContextLine('NFL', { ...nflRow, venue: 'away' }) === 'SF · @SEA · Wk 4');
 check('NCAAF game line shows opponent and week',
-  gameContextLine('NCAAF', ncaafRow) === 'Ohio State · vs Michigan · Wk 13');
+  gameContextLine('NCAAF', ncaafRow) === 'Ohio State · Michigan · Wk 13'
+    && gameContextLine('NCAAF', { ...ncaafRow, venue: 'home' }) === 'Ohio State · vs Michigan · Wk 13');
 check('NCAAF subtitle is team only (CFBD names participants, not positions)',
   playerSubtitle('NCAAF', 'Ohio State', ncaafRow) === 'Ohio State');
 check('basketball game line shows minutes', gameContextLine('WNBA', wnbaRow) === 'LV · 31 min');
 check('MLB pitcher game line shows IP',
   gameContextLine('MLB', { ...mlbPitch, team: 'BAL' } as PlayerLogEntry) === 'BAL · 5.2 IP');
 check('MLB batter game line shows AB',
-  gameContextLine('MLB', { team: 'BAL', at_bats: 4, player_type: 'batter' } as PlayerLogEntry) ===
+  gameContextLine('MLB', { team: 'BAL', at_bats: 4, player_type: 'batter' } as never) ===
     'BAL · 4 AB');
 
 // ── Prop pick → the stat its player detail opens on ─────────────────────────
@@ -364,14 +392,13 @@ check('the projection model names no single stat of its own',
     settled({ pick_id: 4, model_id: 'mlb_prop_batter_runs', sport: 'MLB', prop_market: null, pick_side: 'over' }),
   ]);
   const labels = rec.lines.map((l) => l.label).sort().join(',');
-  // A rule's line is named for its stat AND the rule, so it can never read as
-  // a per-stat model's line ("Assists 1-0" beside "Assists 0-1"; designer
-  // review, 2026-10-16). Per-stat models keep the bare stat name.
-  check('a multi-market rule gets one line per market, named for its stat and the rule',
-    labels === 'Points (vs Pinnacle),Rebounds (vs Pinnacle),Runs');
+  // The label is the stat. A second row with the same stat names its model
+  // on the note (playerLineNote), not as "Assists (Props)".
+  check('a multi-market rule gets one line per market, named for its stat',
+    labels === 'Points,Rebounds,Runs');
   check('each line has its own key, so two lines of one model never share a React key',
     new Set(rec.lines.map((l) => l.key)).size === rec.lines.length);
-  const pts = rec.lines.find((l) => l.label === 'Points (vs Pinnacle)');
+  const pts = rec.lines.find((l) => l.label === 'Points');
   check('the points line carries both its bets', pts?.wins === 1 && pts.losses === 1 && pts.unders === 2);
   check('the total still counts every bet once', rec.settled === 4);
 
@@ -381,11 +408,22 @@ check('the projection model names no single stat of its own',
     settled({ pick_id: 6, model_id: 'wnba_prop_market', sport: 'WNBA', prop_market: 'player_assists', result: 'LOSS', profit_flat: -100 }),
   ]);
   const bothLabels = both.lines.map((l) => l.label).sort().join(',');
-  check('a per-stat Assists line and the rule\'s Assists line read differently',
-    bothLabels === 'Assists,Assists (vs Pinnacle)');
+  // The prop-market rule has no parenthetical, so this pair shares the word
+  // "Assists". The rows stay separate (different keys). "Assists (Props)" is
+  // the reading the rename refused.
+  check('a per-stat Assists line and the WNBA Props line both use the stat name',
+    bothLabels === 'Assists,Assists');
+  check('those two Assists lines are still two rows',
+    new Set(both.lines.map((l) => l.key)).size === 2);
+  check('a shared stat label names the model on the note, not in the label',
+    both.lines.every((l) => !l.label.includes('Props') && playerLineNote(l, both.lines)?.startsWith(modelLong(l.modelId))) &&
+      both.lines.map((l) => playerLineNote(l, both.lines)).sort().join(' | ') ===
+        'WNBA Assists · 0 overs · 1 under | WNBA Props · 0 overs · 1 under');
+  check('a stat that only one model priced does not prefix the model name',
+    playerLineNote(pts!, rec.lines) === '0 overs · 2 unders');
 
-  // The NBA projection model is not priced against Pinnacle, so its lines
-  // carry its own name; it bets overs as well as unders.
+  // The NBA projection model keeps "Projection" on its lines; the prop-market
+  // rule does not. It bets overs as well as unders.
   const proj = playerPickRecord([
     settled({ pick_id: 7, model_id: 'nba_prop_projection', prop_market: 'player_steals', pick_side: 'over',
       pick_label: 'A Player Over 1.5 Steals' }),
@@ -398,8 +436,8 @@ check('the projection model names no single stat of its own',
     settled({ pick_id: 11, prop_market: 'player_rebounds', pick_label: 'A Player Under 8.5 Reb' }),
   ]);
   const projLabels = proj.lines.map((l) => l.label).sort().join(',');
-  check('the projection model\'s lines are named "(Projection)", the rule\'s stay "(vs Pinnacle)"',
-    projLabels === 'Blocks+Steals (Projection),Reb+Ast (Projection),Rebounds (vs Pinnacle),Steals (Projection)');
+  check('the projection model\'s lines are named "(Projection)", the rule\'s are the stat alone',
+    projLabels === 'Blocks+Steals (Projection),Reb+Ast (Projection),Rebounds,Steals (Projection)');
   check('no projection line claims Pinnacle',
     proj.lines.filter((l) => l.modelId === 'nba_prop_projection').every((l) => !l.label.includes('Pinnacle')));
   const steals = proj.lines.find((l) => l.label === 'Steals (Projection)');
@@ -579,14 +617,15 @@ check('Done and blur share one commit, and the field resets the latch on focus',
   && /commitTypedLineOnce\(lineDraft, lineCommitTaken\.current, mode, line\)/.test(playerScreen)
   && /lineCommitTaken\.current = false/.test(playerScreen)
   && /lineCommitTaken\.current = result\.taken/.test(playerScreen));
-check('the card places the stepper from stepperRowLayout',
+check('the card places the stepper from stepperRowLayout, and Avg MIN stacks it at the default size',
   /const \{ fontScale \} = useWindowDimensions\(\)/.test(playerScreen)
-  && /const stepperLayout = stepperRowLayout\(fontScale\)/.test(playerScreen)
-  && /stepperLayout === 'inline' \? styles\.stepper : styles\.stepperStacked/.test(playerScreen)
-  && /stepperLayout !== 'inline' && styles\.statsRowStacked/.test(playerScreen)
-  && /stepperLayout === 'split' && styles\.stepperSplit/.test(playerScreen)
-  && /stepperLayout === 'split' && styles\.modeBtnSplit/.test(playerScreen)
-  && /stepperLayout === 'split' && styles\.stepperControlsSplit/.test(playerScreen));
+  && /const measuredLayout = stepperRowLayout\(fontScale\)/.test(playerScreen)
+  && /showAvgMin && measuredLayout === 'inline' \? 'stacked' : measuredLayout/.test(playerScreen)
+  && /cardLayout === 'inline' \? styles\.stepper : styles\.stepperStacked/.test(playerScreen)
+  && /cardLayout !== 'inline' && styles\.statsRowStacked/.test(playerScreen)
+  && /cardLayout === 'split' && styles\.stepperSplit/.test(playerScreen)
+  && /cardLayout === 'split' && styles\.modeBtnSplit/.test(playerScreen)
+  && /cardLayout === 'split' && styles\.stepperControlsSplit/.test(playerScreen));
 const stackedBlock = /stepperStacked: \{([\s\S]*?)\n  \},/.exec(playerScreen)?.[1] ?? '';
 check('the stacked stepper takes the full line and does not keep flex: 1',
   /width: '100%'/.test(stackedBlock) && !/flex:\s*1/.test(stackedBlock));
@@ -623,6 +662,286 @@ check('the pick-threshold lookup keys on the resolved id',
 // games among them (NFL is the card's sport, and its rule picks have no id).
 check('the same-position card excludes the player by the resolved id',
   /<PositionVsOpponentCard[\s\S]*?playerId=\{pageId\}/.test(playerScreen));
+
+// ── Chart labels: opponent and date on every bar (Matt, 2026-10-28) ────────
+{
+  const base = { player_id: 'p', player_name: 'K', season: 2026 } as const;
+  const log = [
+    { ...base, team: 'NYK', game_id: 'g3', game_date: '2026-10-26', points: 27 },
+    { ...base, team: 'NYK', game_id: 'g2', game_date: '2026-10-24', points: null },
+    { ...base, team: 'NYK', game_id: 'g1', game_date: '2026-10-22', points: 22 },
+    { ...base, team: 'NYK', game_id: 'gX', game_date: '2026-10-20', points: 19 },
+  ];
+  const sided = attachGameSides(log as never, [
+    { game_id: 'g3', home_team: 'CHI', away_team: 'NYK' },
+    { game_id: 'g2', home_team: 'NYK', away_team: 'BOS' },
+    { game_id: 'g1', home_team: 'NYK', away_team: 'ORL' },
+  ]);
+  check('an away game reads @CHI, a home game vs ORL',
+    opponentLabel(sided[0]!) === '@CHI' && opponentLabel(sided[2]!) === 'vs ORL'
+      && opponentLabel(sided[2]!, true) === 'vs ORL');
+  check('a stored opponent with no venue reads as the bare name, never as a home game',
+    opponentLabel({ opponent: 'Michigan', venue: null }) === 'Michigan');
+  // NCAAB has no abbreviation map the app can read: a long school is never
+  // cut to four letters (Michigan / Michigan State both read MICH).
+  check('an NCAAB chart label is the venue marker, never a sliced school',
+    opponentLabel({ opponent: 'Michigan State', venue: 'away' }, true, undefined, true) === '@'
+      && opponentLabel({ opponent: 'Michigan State', venue: 'home' }, true, undefined, true) === 'vs'
+      && opponentLabel({ opponent: 'Michigan State', venue: null }, true, undefined, true) === null
+      && opponentLabel({ opponent: 'Duke', venue: 'away' }, true, undefined, true) === '@Duke'
+      && opponentLabel({ opponent: 'Michigan State', venue: 'away' }, true) === '@MICH');
+  {
+    const row = normalizeLogRow('NCAAB', {
+      player_id: 'p', player_name: 'A', team: 'Duke', game_id: 'g', game_date: '2026-11-04',
+      season: 2027, minutes: 31, points: 20, rebounds: 8, assists: 5, fg3_made: 3,
+      opponent: 'Mississippi Valley State', venue: 'away',
+    });
+    check('an NCAAB row derives threes and PRA like the other basketball logs',
+      row.threes === 3 && row.pra === 33);
+    check('an NCAAB game line leads with minutes and names its school only when it differs',
+      gameContextLine('NCAAB', row, 'Duke') === '31 min · @Mississippi Valley State'
+        && gameContextLine('NCAAB', row, 'Kentucky') === '31 min · @Mississippi Valley State · Duke');
+    const women = normalizeLogRow('NCAABW', {
+      player_id: 'p', player_name: 'A', team: 'UConn', game_id: 'g', game_date: '2026-11-04',
+      season: 2027, minutes: 28, points: 18, rebounds: 6, assists: 4, fg3_made: 2,
+      opponent: 'South Carolina', venue: 'home',
+    });
+    check('an NCAABW row derives threes and PRA, and the line leads with minutes',
+      women.threes === 2 && women.pra === 28
+        && gameContextLine('NCAABW', women, 'UConn') === '28 min · vs South Carolina');
+  }
+  check('the chart values are the labelled games\' values',
+    /const windowed = useMemo\(\(\) => windowedGames\.map\(\(g\) => g\.value\)/.test(playerScreen));
+  check('a game missing from games keeps no opponent and no venue',
+    opponentLabel(sided[3]!) === null && sided[3]!.venue == null);
+  check('a stored football opponent is kept, venue still added',
+    attachGameSides([{ ...base, team: 'Ohio State', opponent: 'Michigan', game_id: 'f', game_date: '2026-11-28' }] as never,
+      [{ game_id: 'f', home_team: 'Michigan', away_team: 'Ohio State' }])[0]!.venue === 'away');
+  const abbr = new Map([['Michigan', 'MICH'], ['Michigan State', 'MSU']]);
+  check('a school name uses its own abbreviation, so two Michigans stay two',
+    opponentLabel({ opponent: 'Michigan State', venue: 'away' }, true, abbr) === '@MSU'
+      && opponentLabel({ opponent: 'Michigan', venue: 'home' }, true, abbr) === 'vs MICH'
+      && opponentLabel({ opponent: 'Michigan State', venue: 'away' }) === '@Michigan State');
+  check('a school with no abbreviation falls back to four letters under a bar',
+    opponentLabel({ opponent: 'Ohio State', venue: 'away' }, true) === '@OHIO');
+  check('dates print as 10/26, junk as empty',
+    shortGameDate('2026-10-26') === '10/26' && shortGameDate('2026-01-05') === '1/5' && shortGameDate(null) === '');
+  // logValues DROPS a game with no value. The labels must drop the same game,
+  // or every bar after the gap carries the previous game's opponent.
+  const cg = chartGames(sided, (r) => (r.points == null ? null : Number(r.points)));
+  check('chart labels skip the same games the values skip, in the same order',
+    cg.length === 3 && cg[0]!.value === 27 && cg[0]!.opp === '@CHI' && cg[0]!.date === '10/26'
+      && cg[1]!.value === 22 && cg[1]!.opp === 'vs ORL' && cg[2]!.value === 19 && cg[2]!.opp === null);
+  check('the Recent games row names the opponent in basketball too',
+    gameContextLine('NBA', { ...sided[0]!, minutes: 34 } as never) === 'NYK · @CHI · 34 min');
+  check('the player chart is handed the labelled games',
+    /<HitRateChart[\s\S]*?games=\{windowedGames\}/.test(playerScreen));
+}
+
+// ── Minutes on the player page (NBA / WNBA / NCAAB only) ────────────────────
+check('low-minutes cut is 70% of the window average', LOW_MINUTES_RATIO === 0.7);
+{
+  const mins = [34, 12, 35, 33, 38, 36, 34];
+  const { avg, median } = averageAndMedian(mins);
+  check('minutes average and median', avg != null && median === 34 && Math.abs(avg - 222 / 7) < 1e-9);
+  check('an even count averages the two middle minutes',
+    averageAndMedian([10, 30]).median === 20 && averageAndMedian([]).avg === null);
+  const avgMin = avg!;
+  check('under 70% of that average is low minutes', isLowMinutes(12, avgMin) && !isLowMinutes(24, avgMin));
+  check('exactly 70% is not low', !isLowMinutes(avgMin * LOW_MINUTES_RATIO, avgMin));
+  check('a hair under 70% is low', isLowMinutes(avgMin * LOW_MINUTES_RATIO - 0.01, avgMin));
+  check('zero minutes is low, and a missing average flags nothing',
+    isLowMinutes(0, avgMin) && !isLowMinutes(12, null) && !isLowMinutes(null, avgMin));
+}
+for (const s of ['NBA', 'WNBA', 'NCAABW', 'NCAAB'] as const) {
+  check(`${s} tracks minutes`, sportTracksMinutes(s));
+  const chips = chipsForPlayer(s);
+  const pra = chips.findIndex((c) => c.key === 'pra');
+  const minutes = chips.findIndex((c) => c.key === 'minutes');
+  check(`${s} Minutes chip sits immediately after PRA`, pra >= 0 && minutes === pra + 1);
+  check(`${s} Minutes chip is context, not a bet`, isMinutesContextStat(chips[minutes]!));
+}
+for (const s of ['NFL', 'NCAAF', 'MLB'] as const) {
+  check(`${s} does not track minutes`, !sportTracksMinutes(s));
+  check(`${s} has no Minutes chip`, !chipsForPlayer(s).some((c) => c.key === 'minutes'));
+}
+check('a points chip is not the minutes context tab',
+  !isMinutesContextStat(chipsForPlayer('NBA').find((c) => c.key === 'points')!));
+{
+  const chips = chipsForPlayer('NBA');
+  const filled = new Map<string, number>();
+  for (const c of chips) {
+    if (c.key === 'minutes') filled.set(chipKey(c), 10);
+    if (c.key === 'points') filled.set(chipKey(c), 8);
+  }
+  check('Minutes does not steal the opening chip from a stat the player fills',
+    openingChip(chips, filled)?.label === 'Points');
+  const onlyMinutes = new Map<string, number>([[chipKey(chips.find((c) => c.key === 'minutes')!), 10]]);
+  check('Minutes can open when it is the only filled chip',
+    openingChip(chips, onlyMinutes)?.key === 'minutes');
+}
+
+const minuteRows: PlayerLogEntry[] = [
+  { player_id: 'p', player_name: 'A', team: 'NYK', game_id: 'g3', game_date: '2026-11-08', season: 2026,
+    points: 28, minutes: 34, opponent: 'BOS', venue: 'home' },
+  { player_id: 'p', player_name: 'A', team: 'NYK', game_id: 'g2', game_date: '2026-11-06', season: 2026,
+    points: null, minutes: null, opponent: 'MIL', venue: 'away' },
+  { player_id: 'p', player_name: 'A', team: 'NYK', game_id: 'g1', game_date: '2026-11-04', season: 2026,
+    points: 8, minutes: 12, opponent: 'CHI', venue: 'away' },
+  { player_id: 'p', player_name: 'A', team: 'NYK', game_id: 'g0', game_date: '2026-11-02', season: 2026,
+    points: 0, minutes: 0, opponent: 'MIA', venue: 'home' },
+];
+{
+  const chart = chartGames(minuteRows, (r) => (r.points == null ? null : Number(r.points)), undefined, false, 'NBA');
+  check('a null-minutes null-points row is a DNP slot, and zero minutes is a played game',
+    chart.length === 4
+    && chart[1]!.dnp === true && chart[1]!.minutes === null && chart[1]!.gameId === 'g2'
+    && chart[3]!.dnp !== true && chart[3]!.minutes === 0 && chart[3]!.value === 0);
+  check('DNP is excluded from the scored values and from the minutes average',
+    scoredChartValues(chart).join() === '28,8,0'
+    && windowAverageMinutes(chart) === (34 + 12 + 0) / 3);
+  const played = chart.slice(0, 3);
+  const flagged = withLowMinutes(played, false, windowAverageMinutes(played));
+  check('12 minutes is low against a 34-minute night, and a DNP is not flagged',
+    windowAverageMinutes(played) === 23
+    && flagged[2]!.lowMin === true && flagged[0]!.lowMin === false && flagged[1]!.lowMin !== true);
+  check('zero minutes is a played game and it is low',
+    withLowMinutes([chart[3]!], false, 30)[0]!.lowMin === true);
+  check('a played game with no minutes blanks the window average',
+    windowAverageMinutes([
+      { value: 10, date: '11/8', opp: null, oppFull: null, minutes: 30 },
+      { value: 8, date: '11/6', opp: null, oppFull: null, minutes: null },
+    ]) === null);
+  check('DNP alone does not blank the average',
+    windowAverageMinutes([
+      { value: 10, date: '11/8', opp: null, oppFull: null, minutes: 30 },
+      { value: 0, date: '11/6', opp: null, oppFull: null, minutes: null, dnp: true },
+    ]) === 30);
+  const nfl = chartGames(
+    [{ ...minuteRows[1]!, points: null, minutes: null }],
+    () => null,
+    undefined,
+    false,
+    'NFL',
+  );
+  check('football does not invent a DNP bar from a missing minutes column', nfl.length === 0 && !isDidNotPlay('NFL', minuteRows[1]!));
+  check('basketball null minutes is a did-not-play', isDidNotPlay('NBA', minuteRows[1]!) && !isDidNotPlay('NBA', minuteRows[0]!));
+  check('a string minutes value still counts', minutesPlayed({ minutes: '31.4' }) === 31.4 && minutesPlayed({ minutes: '--' }) === null);
+}
+check('the caption shortens Points so the minutes fit', statCaptionUnit('Points') === 'pts');
+{
+  const game = {
+    value: 8, date: '10/29', opp: '@MIL', oppFull: '@ MIL', minutes: 12, lowMin: true,
+  };
+  const read = describeSelectedGame({
+    ago: '5 games ago', game, unit: 'Points', hit: false, mode: 'stat',
+    rankCaption: null, rankSpoken: null,
+  });
+  check('the tap caption names the stat and the minutes, and flags low minutes',
+    read.caption === '5 games ago · 10/29 · @ MIL'
+    && read.detail === '8 pts · 12 min'
+    && read.spoken === '5 games ago, 10/29, at MIL, 8 points, 12 minutes, low minutes, miss'
+    && read.result === 'Miss' && read.low === true);
+  const dnp = describeSelectedGame({
+    ago: 'Latest', game: { ...game, dnp: true, minutes: null, value: 0 }, unit: 'Points',
+    hit: false, mode: 'stat', rankCaption: null, rankSpoken: null,
+  });
+  check('a DNP caption says Did not play and is not a miss',
+    dnp.caption === 'Latest · 10/29 · @ MIL'
+    && dnp.detail === 'Did not play'
+    && dnp.spoken === 'Latest, 10/29, at MIL, did not play'
+    && dnp.result === null && dnp.low === false);
+  const mins = describeSelectedGame({
+    ago: 'Latest', game: { value: 34, date: '11/8', opp: 'vs BOS', oppFull: 'vs BOS', minutes: 34 },
+    unit: 'Minutes', hit: true, mode: 'minutes', rankCaption: null, rankSpoken: null,
+  });
+  check('the Minutes tab caption has no hit or miss',
+    mins.caption === 'Latest · 11/8 · vs BOS'
+    && mins.detail === '34 min'
+    && mins.spoken === 'Latest, 11/8, vs BOS, 34 minutes'
+    && mins.result === null);
+  const plain = describeSelectedGame({
+    ago: 'Latest', game: { value: 28, date: '11/8', opp: 'vs BOS', oppFull: 'vs BOS' },
+    unit: 'Points', hit: true, mode: 'plain', rankCaption: null, rankSpoken: null,
+  });
+  check('a chart without minutes keeps the previous caption',
+    plain.caption === 'Latest · 11/8 · vs BOS · 28'
+    && plain.spoken === 'Latest, 11/8, vs BOS, 28 Points, hit');
+}
+{
+  const joined = lookupLogMinutes(
+    [{ value: 22, date: '11/8', iso: '2026-11-08', opp: 'vs BOS', oppFull: 'vs BOS' }],
+    minuteRows,
+    'NBA',
+  );
+  check('a head-to-head bar picks up minutes from the loaded log',
+    joined[0]!.minutes === 34 && joined[0]!.gameId === 'g3');
+  const missed = lookupLogMinutes(
+    [{ value: 22, date: '1/1', iso: '2025-01-01', opp: 'vs BOS', oppFull: 'vs BOS' }],
+    minuteRows,
+    'NBA',
+  );
+  check('a game the log does not cover is left without minutes', missed[0]!.minutes === undefined);
+  const football = lookupLogMinutes(
+    [{ value: 80, date: '11/8', iso: '2026-11-08', opp: 'vs BOS', oppFull: 'vs BOS' }],
+    minuteRows,
+    'NFL',
+  );
+  check('football does not borrow a minutes number', football[0]!.minutes === undefined);
+  check('the Minutes tab can read minutes off the bar value',
+    chartMinutes({ value: 34, date: '', opp: null, oppFull: null }, true) === 34
+    && chartMinutes({ value: 8, date: '', opp: null, oppFull: null, dnp: true }, true) === null);
+}
+check('a basketball game with no minutes and no stat reads DNP',
+  gameContextLine('NBA', { team: 'NYK', opponent: 'CHI', venue: 'away', minutes: null } as never, null, true) === 'NYK · @CHI · DNP'
+  && gameContextLine('WNBA', { team: 'LV', minutes: null } as never, null, true) === 'LV · DNP');
+check('a missing minutes value on a game that has a stat stays a blank, not DNP',
+  gameContextLine('NBA', { team: 'NYK', opponent: 'CHI', venue: 'away', minutes: null } as never) === 'NYK · @CHI · — min');
+check('the Minutes tab is context only on the player page',
+  playerScreen.includes('Not a bet market — playing time for the selected window.')
+  && playerScreen.includes('showMinuteLabels={showAvgMin}')
+  && playerScreen.includes('minutesMode={minutesContext}')
+  && playerScreen.includes('accessibilityLabel={isMinutesContextStat(c) ? c.label : `${c.label} bets`}'));
+{
+  const withStat = chartGames(
+    [{ ...minuteRows[0]!, game_id: 'gx', minutes: null, points: 22 }],
+    (r) => (r.points == null ? null : Number(r.points)),
+    undefined,
+    false,
+    'NBA',
+  );
+  check('a stat line with no minutes is not drawn as DNP',
+    withStat.length === 1 && withStat[0]!.dnp !== true && withStat[0]!.minutes === null && withStat[0]!.value === 22);
+  const played = minuteRows[0]!;
+  const merged = mergePlayedAndDnp(
+    [played],
+    dnpEntries([
+      { player_id: 'p', player_name: 'A', team: 'NYK', game_id: 'g3', game_date: '2026-11-08', season: 2026 },
+      { player_id: 'p', player_name: 'A', team: 'NYK', game_id: 'd1', game_date: '2026-11-07', season: 2026 },
+    ]),
+  );
+  check('a DNP row joins the log, and the played row wins when the game_id is in both',
+    merged.map((r) => r.game_id).join() === 'g3,d1'
+    && merged[0]!.points === 28
+    && merged[1]!.minutes === null
+    && merged[1]!.points == null);
+  const outside = [{ value: 19, date: '10/2/26', iso: '2026-10-02', opp: '@BOS', oppFull: '@ BOS', gameId: 'old' }];
+  check('a chart game outside the loaded log is asked for by its game id',
+    minutesStillNeeded(outside).gameIds.join() === 'old' && minutesStillNeeded(outside).dates.length === 0);
+  check('a head-to-head game with only a date is asked for by that date',
+    minutesStillNeeded([{ value: 19, date: '10/2', iso: '2026-10-02', opp: null, oppFull: null }]).dates.join() === '2026-10-02');
+  check('a game that already has minutes is not fetched again',
+    minutesStillNeeded([{ value: 19, date: '11/8', iso: '2026-11-08', opp: null, oppFull: null, minutes: 34, gameId: 'g3' }])
+      .gameIds.length === 0);
+  const filled = attachMinuteRows(outside, [{ game_id: 'old', game_date: '2026-10-02', minutes: 31 }]);
+  check('fetched minutes land on the game id, and the bar stays a stat',
+    filled[0]!.minutes === 31 && filled[0]!.dnp !== true && filled[0]!.value === 19);
+  const byDate = attachMinuteRows(
+    [{ value: 11, date: '9/1', iso: '2026-09-01', opp: null, oppFull: null }],
+    [{ game_id: 'h', game_date: '2026-09-01', minutes: 28 }],
+  );
+  check('a head-to-head date with one fetched row gets those minutes', byDate[0]!.minutes === 28);
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

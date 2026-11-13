@@ -126,6 +126,13 @@ def test_eastern_game_date_matches_the_odds_ingestor_for_a_night_kick():
     assert eastern_game_date("2026-11-15T02:19:00.000Z") == "2026-11-14"
 
 
+def test_eastern_game_date_files_army_tulsa_on_oct_23():
+    """CFBD 2026-10-24T00:30:00Z is 8:30pm ET on Oct 23. The odds row is
+    NCAAF_2026-10-23_army_tulsa. NCAAF_2026-10-24_army_tulsa was written
+    2026-08-29, before this conversion, and is retained."""
+    assert eastern_game_date("2026-10-24T00:30:00.000Z") == "2026-10-23"
+
+
 def test_eastern_game_date_agrees_with_utc_before_8pm_et():
     assert eastern_game_date("2025-09-06T16:00:00.000Z") == "2025-09-06"
 
@@ -1056,30 +1063,6 @@ def test_odds_ingest_builds_the_cfbd_id_for_this_matchup(
         "NCAAF_2026-09-19_se-louisiana_ul-monroe"}
 
 
-# ── William & Mary / LIU / Houston Christian (2026-09-22) ────────────────────
-#
-# ncaaf_game_identity STALE: three 2026-09-26 games each had a CFBD row and
-# a data_source=live row minted from the Odds API nickname. alt_names NULL.
-
-
-@pytest.fixture
-def fcs_alias_registry(monkeypatch):
-    from data.ingestors import cfbd_ingestor as cf
-    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
-        {"school": "William & Mary", "mascot": "Tribe", "abbreviation": "W&M", "alt": []},
-        {"school": "Duke", "mascot": "Blue Devils", "abbreviation": "DUKE", "alt": []},
-        {"school": "Long Island University", "mascot": "Sharks", "abbreviation": "LIU", "alt": []},
-        {"school": "Florida International", "mascot": "Panthers", "abbreviation": "FIU", "alt": []},
-        {"school": "Houston Christian", "mascot": "Huskies", "abbreviation": "HCU", "alt": []},
-        {"school": "Houston", "mascot": "Cougars", "abbreviation": "HOU", "alt": []},
-        {"school": "North Texas", "mascot": "Mean Green", "abbreviation": "UNT", "alt": []},
-        {"school": "Washington", "mascot": "Huskies", "abbreviation": "WASH", "alt": []},
-        {"school": "Washington and Lee", "mascot": "Generals", "abbreviation": "W&L", "alt": []},
-    ])
-    return cf
-
-
-
 # ── The Citadel / Citadel Bulldogs (2026-10-16) ─────────────────────────────
 #
 # The pollers warned "Unresolved NCAAF school from Odds API: 'Citadel
@@ -1100,141 +1083,6 @@ def citadel_registry(monkeypatch):
     ])
     return cf
 
-
-
-def test_and_versus_ampersand_resolves_without_the_map(fcs_alias_registry, monkeypatch):
-    """Watched failing shape before the fold treated "and" as "&"."""
-    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
-    assert fcs_alias_registry.resolve_odds_api_school(
-        "William and Mary Tribe") == "William & Mary"
-    assert fcs_alias_registry.resolve_odds_api_school(
-        "William and Mary") == "William & Mary"
-
-
-def test_abbreviation_plus_mascot_resolves_liu_without_the_map(
-        fcs_alias_registry, monkeypatch):
-    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
-    assert fcs_alias_registry.resolve_odds_api_school("LIU Sharks") == \
-        "Long Island University"
-    assert fcs_alias_registry.resolve_odds_api_school("LIU") == \
-        "Long Island University"
-
-
-def test_houston_baptist_does_not_resolve_without_the_map(
-        fcs_alias_registry, monkeypatch):
-    """Rename, not a fold. HCU is the abbreviation; "Houston" is a different
-    school and its mascot is not Huskies, so the prefix rule must not fire."""
-    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
-    assert fcs_alias_registry.resolve_odds_api_school(
-        "Houston Baptist Huskies") == "Houston Baptist Huskies"
-    assert fcs_alias_registry.resolve_odds_api_school(
-        "Houston Baptist") == "Houston Baptist"
-
-
-def test_the_map_resolves_houston_baptist_to_houston_christian(fcs_alias_registry):
-    assert fcs_alias_registry.resolve_odds_api_school(
-        "Houston Baptist Huskies") == "Houston Christian"
-    assert fcs_alias_registry.resolve_odds_api_school(
-        "Houston Baptist") == "Houston Christian"
-
-
-def test_dropping_and_does_not_hand_washington_and_lee_to_washington(
-        fcs_alias_registry, monkeypatch):
-    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
-    assert fcs_alias_registry.resolve_odds_api_school(
-        "Washington and Lee Generals") == "Washington and Lee"
-    assert fcs_alias_registry.resolve_odds_api_school(
-        "Washington Huskies") == "Washington"
-
-
-def test_the_resolved_ids_are_the_cfbd_rows(fcs_alias_registry):
-    assert build_ncaaf_game_id(
-        "2026-09-26",
-        fcs_alias_registry.resolve_odds_api_school("William and Mary Tribe"),
-        fcs_alias_registry.resolve_odds_api_school("Duke Blue Devils"),
-    ) == "NCAAF_2026-09-26_william-mary_duke"
-    assert build_ncaaf_game_id(
-        "2026-09-26",
-        fcs_alias_registry.resolve_odds_api_school("LIU Sharks"),
-        fcs_alias_registry.resolve_odds_api_school("Florida International Panthers"),
-    ) == "NCAAF_2026-09-26_long-island-university_florida-international"
-    assert build_ncaaf_game_id(
-        "2026-09-26",
-        fcs_alias_registry.resolve_odds_api_school("Houston Baptist Huskies"),
-        fcs_alias_registry.resolve_odds_api_school("North Texas Mean Green"),
-    ) == "NCAAF_2026-09-26_houston-christian_north-texas"
-
-
-def test_kickoff_and_home_attach_an_unmapped_nickname_to_the_cfbd_row(
-        fcs_alias_registry, monkeypatch):
-    """The backstop. Map emptied, so Houston Baptist stays unresolved, and
-    the schedule already holds both the CFBD row and the live duplicate.
-    Odds must land on the CFBD id, not mint a third and not keep the live one.
-    """
-    from data.ingestors.odds_ingestor import _process_events
-    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
-    schedule = [
-        {"game_id": "NCAAF_2026-09-26_houston-christian_north-texas",
-         "game_date": "2026-09-26", "home_team": "North Texas",
-         "away_team": "Houston Christian",
-         "commence_time": "2026-09-26T23:30:00.000Z", "data_source": "cfbd"},
-        {"game_id": "NCAAF_2026-09-26_houston-baptist-huskies_north-texas",
-         "game_date": "2026-09-26", "home_team": "North Texas",
-         "away_team": "Houston Baptist Huskies",
-         "commence_time": "2026-09-26T23:30:00+00:00", "data_source": "live"},
-    ]
-    event = {
-        "id": "hcu-unt",
-        "commence_time": "2026-09-26T23:30:00Z",
-        "home_team": "North Texas Mean Green",
-        "away_team": "Houston Baptist Huskies",
-        "bookmakers": [{
-            "key": "draftkings",
-            "markets": [{"key": "totals", "outcomes": [
-                {"name": "Over", "price": -110, "point": 61.5},
-                {"name": "Under", "price": -110, "point": 61.5},
-            ]}],
-        }],
-    }
-    games, odds = _process_events(
-        [event], "NCAAF", "open", "2026-09-22T05:59:20Z",
-        ncaaf_schedule=schedule)
-    assert [g["game_id"] for g in games] == [
-        "NCAAF_2026-09-26_houston-christian_north-texas"]
-    assert games[0]["away_team"] == "Houston Christian"
-    assert games[0]["home_team"] == "North Texas"
-    assert {o["game_id"] for o in odds} == {
-        "NCAAF_2026-09-26_houston-christian_north-texas"}
-
-
-def test_two_different_known_opponents_do_not_share_a_kickoff(
-        fcs_alias_registry, monkeypatch):
-    """Both sides canonical and they are not the scheduled pair: do not
-    attach to the home team's other game."""
-    from data.ingestors.cfbd_ingestor import adopt_ncaaf_game_id
-    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
-    schedule = [{
-        "game_id": "NCAAF_2026-09-26_houston-christian_north-texas",
-        "game_date": "2026-09-26", "home_team": "North Texas",
-        "away_team": "Houston Christian",
-        "commence_time": "2026-09-26T23:30:00.000Z", "data_source": "cfbd",
-    }]
-    assert adopt_ncaaf_game_id(
-        schedule,
-        candidate_id="NCAAF_2026-09-26_houston_north-texas",
-        home="North Texas",
-        away="Houston",
-        home_known=True,
-        away_known=True,
-        commence_time="2026-09-26T23:30:00Z",
-        game_date="2026-09-26",
-    ) is None
-
-
-def test_commence_z_and_offset_are_the_same_instant():
-    from data.ingestors.cfbd_ingestor import commence_instant
-    assert commence_instant("2026-09-26T19:30:00.000Z") == \
-        commence_instant("2026-09-26T19:30:00+00:00")
 
 def test_no_resolver_rule_bridges_citadel_bulldogs_to_the_citadel(
         citadel_registry, monkeypatch):
@@ -1261,3 +1109,127 @@ def test_the_resolved_id_is_the_cfbd_texas_am_row(citadel_registry):
     home = citadel_registry.resolve_odds_api_school("Texas A&M Aggies")
     assert build_ncaaf_game_id("2026-10-17", away, home) == \
         "NCAAF_2026-10-17_the-citadel_texas-a-m"
+
+
+# ── 429 backoff (2026-11-04 daily, week 2 advanced stats) ────────────────────
+
+class _Resp:
+    def __init__(self, status, body=None, headers=None):
+        self.status_code = status
+        self._body = [] if body is None else body
+        self.headers = headers or {}
+
+    def json(self):
+        return self._body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"status {self.status_code}")
+
+
+class _Sess:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = 0
+        self.params = None
+
+    def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        self.params = params
+        if not self.responses:
+            raise AssertionError("CFBD fake session ran out of responses")
+        return self.responses.pop(0)
+
+
+def _arm_cfbd(monkeypatch, responses, pause=0):
+    import data.ingestors.cfbd_ingestor as cf
+    sleeps = []
+    monkeypatch.setattr(config, "CFBD_API_KEY", "test-key")
+    monkeypatch.setattr(config, "CFBD_REQUEST_PAUSE", pause)
+    monkeypatch.setattr(cf.time, "sleep", sleeps.append)
+    sess = _Sess(responses)
+    monkeypatch.setattr(cf, "_session", lambda: sess)
+    return cf, sess, sleeps
+
+
+def test_the_default_pause_between_cfbd_calls_is_one_second():
+    text = (Path(__file__).resolve().parents[1] / "config.py").read_text(encoding="utf-8")
+    assert 'os.environ.get("CFBD_REQUEST_PAUSE", "1.0")' in text
+
+
+def test_a_429_waits_for_retry_after_then_returns_the_body(monkeypatch):
+    cf, sess, sleeps = _arm_cfbd(monkeypatch, [
+        _Resp(429, headers={"Retry-After": "7"}),
+        _Resp(200, body=[{"ok": 1}]),
+    ])
+    assert cf._get("/stats/season/advanced", year=2026) == [{"ok": 1}]
+    assert sleeps == [7.0, 0]
+    assert sess.params == {"year": 2026}
+    assert "_budget" not in (sess.params or {})
+
+
+def test_retry_after_is_capped_at_sixty_seconds(monkeypatch):
+    cf, _sess, sleeps = _arm_cfbd(monkeypatch, [
+        _Resp(429, headers={"Retry-After": "90"}),
+        _Resp(200, body={"ok": True}),
+    ])
+    assert cf._get("/ratings/elo") == {"ok": True}
+    assert sleeps[0] == 60.0
+
+
+def test_a_missing_retry_after_uses_exponential_backoff(monkeypatch):
+    cf, sess, sleeps = _arm_cfbd(monkeypatch, [_Resp(429) for _ in range(6)])
+    assert cf._get("/stats/season/advanced") is None
+    assert sess.calls == 6
+    assert sleeps == [5.0, 10.0, 20.0, 40.0, 60.0]
+
+
+def test_an_http_date_retry_after_is_seconds_from_now(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from email.utils import format_datetime
+    when = datetime.now(timezone.utc) + timedelta(seconds=12)
+    cf, _sess, sleeps = _arm_cfbd(monkeypatch, [
+        _Resp(429, headers={"Retry-After": format_datetime(when, usegmt=True)}),
+        _Resp(200, body=[]),
+    ])
+    assert cf._get("/talent") == []
+    assert sleeps[0] == pytest.approx(12, abs=2)
+    assert sleeps[0] < cf._CFBD_BACKOFF_CAP_S
+
+
+def test_a_call_stops_when_the_next_sleep_would_pass_its_budget(monkeypatch):
+    cf, sess, sleeps = _arm_cfbd(monkeypatch, [
+        _Resp(429, headers={"Retry-After": "30"}),
+        _Resp(200, body=[1]),
+    ])
+    monkeypatch.setattr(cf, "_CFBD_CALL_BUDGET_S", 0)
+    assert cf._get("/stats/season/advanced", year=2026) is None
+    assert sess.calls == 1
+    assert sleeps == []
+
+
+def test_a_shared_season_budget_stops_a_later_429(monkeypatch):
+    cf, sess, sleeps = _arm_cfbd(monkeypatch, [
+        _Resp(429),
+        _Resp(200, body=[1]),
+    ])
+    clock = cf._RetryClock(0)
+    assert cf._get("/ratings/elo", _budget=clock, week=2) is None
+    assert sess.calls == 1
+    assert sleeps == []
+    assert sess.params == {"week": 2}
+
+
+def test_a_connection_error_uses_the_same_backoff_and_then_succeeds(monkeypatch):
+    import requests
+    cf, sess, sleeps = _arm_cfbd(monkeypatch, [_Resp(200, body={"n": 1})])
+
+    def get(url, params=None, timeout=None):
+        sess.calls += 1
+        if sess.calls == 1:
+            raise requests.ConnectionError("reset")
+        return sess.responses.pop(0)
+
+    sess.get = get
+    assert cf._get("/ratings/sp", year=2025) == {"n": 1}
+    assert sleeps == [5.0, 0]

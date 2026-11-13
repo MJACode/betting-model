@@ -22,6 +22,10 @@ _HOSTS: dict[str, tuple[str, str, bool]] = {
     "the-odds-api.com":                  ("The Odds API",      "odds",     True),
     "api.collegefootballdata.com":       ("CFBD",              "stats",    True),
     "collegefootballdata.com":           ("CFBD",              "stats",    True),
+    # College Basketball Data, CFBD's basketball sibling on the same key and
+    # Patreon tier (scripts/ncaab_feed_probe.py, 2026-10-26).
+    "api.collegebasketballdata.com":     ("CBBD",              "stats",    True),
+    "collegebasketballdata.com":         ("CBBD",              "stats",    True),
     "feeds.datagolf.com":                ("DataGolf",          "odds",     True),
     "api.elections.kalshi.com":          ("Kalshi",            "odds",     True),
     "api.oddspapi.io":                   ("OddsPapi",          "odds",     True),

@@ -1,44 +1,46 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { errorSurface, loadPresentation } from '@/lib/loadState';
 import { Skeleton, SkeletonRow } from '@/components/Skeleton';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
-import { useCustomModels, pickMatchesModel } from '@/hooks/useCustomModels';
+import { ByomModelList } from '@/components/byom/ByomModelList';
 import {
-  computeBuiltInModelStats,
-  EMPTY_STATS,
-  useCustomModelBacktests,
+  publishedOrSettledStats,
   useSettledPicksSincePaperStart,
-  viewRecordToStats,
 } from '@/hooks/useCustomModelStats';
-import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
-import { betTypeLabel, betTypeStatusSuffix, MODEL_META, modelLong, modelShort, withdrawnRulesEmpty } from '@/lib/modelMeta';
+import { formatPctSigned, formatSigned } from '@/lib/format';
+import { unitsSpeech } from '@/lib/a11y';
+import { returnOnBetsSpeech } from '@/lib/recordHero';
+import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
+import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
-import { BACKTEST_START_LABEL, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
-import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
-import { decisionOdds } from '@/lib/decisionPrice';
-import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import type { RootStackParamList } from '@/types';
+import type { CustomModelStats } from '@/lib/customModelBacktest';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-type Tab = 'builtin' | 'custom';
+type Tab = 'builtin' | 'mine';
 
 const BUILTIN_MODEL_IDS = Object.keys(MODEL_META);
 
 /** Sport a model belongs to, derived from its id prefix. */
-function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL' {
+function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' {
   if (modelId.startsWith('ufc')) return 'UFC';
   if (modelId.startsWith('ncaaf')) return 'NCAAF';
+  // The women's prefix first: every ncaabw_ id starts with 'ncaab' too, and
+  // would be listed on the men's tab (modelMeta sportOfModel, the same order).
+  if (modelId.startsWith('ncaabw')) return 'NCAABW';
+  if (modelId.startsWith('ncaab')) return 'NCAAB';
   if (modelId.startsWith('nfl')) return 'NFL';
   if (modelId.startsWith('golf')) return 'GOLF';
   if (modelId.startsWith('nhl')) return 'NHL';
@@ -51,7 +53,6 @@ export function ModelsScreen() {
   const navigation = useNavigation<Nav>();
   const [tab, setTab] = useState<Tab>('builtin');
   const { sport } = useSportFilter();
-  const { models, ready } = useCustomModels();
   const { rows, records, loading, error, refresh } = useSettledPicksSincePaperStart();
   // Nothing settled has loaded yet (first fetch in flight, or it failed): the
   // per-model stats would all be EMPTY_STATS, and a card per model reading
@@ -62,34 +63,9 @@ export function ModelsScreen() {
   const firstLoad = body === 'skeleton';
   const failedLoad = body === 'error';
   // Where a failure is SAID (lib/loadState). The Built-in list owns a failed
-  // first load (its ErrorState); the Custom list is local models and never
-  // does, so there a failed settled-records load is always the banner — never
-  // silence that reads as "no models" (Reviewer, #845 MEDIUM 1).
+  // first load (its ErrorState). My models does not, so there a failed
+  // settled-records load is always the banner.
   const surface = errorSurface(load, tab === 'builtin');
-
-  // Custom models show under a sport if any of their rules target that sport.
-  // Stats come from the server-graded every-pick universe (RPC), not just the
-  // settled BET set.
-  const { statsById } = useCustomModelBacktests(models);
-  // The board a saved model is playing right now. A model's card leads with the
-  // bets it actually produces, so an empty one is visible as empty instead of
-  // being inferred from a wall of filter chips.
-  const { data: todayPicks, loading: todayLoading } = useTodayPicks();
-  const customWithStats = useMemo(
-    () =>
-      models
-        // A user's model stays listed even when every bet type in it has been
-        // retired — it is theirs, and hiding it would leave a model in storage
-        // they can no longer open, rename or delete. The card says why it is
-        // empty instead.
-        .filter((m) => m.rules.some((r) => sportOf(r.model_id) === sport))
-        .map((m) => ({
-          model: m,
-          stats: statsById[m.id] ?? EMPTY_STATS,
-          live: todayPicks.filter((ep) => pickMatchesModel(ep.pick, m)),
-        })),
-    [models, statsById, sport, todayPicks],
-  );
 
   // Catalog hide (Matt, 2026-09-19): paused models are not followable — same
   // `isModelPaused` the action filter and Live board already use (server flag,
@@ -110,9 +86,7 @@ export function ModelsScreen() {
         // reads) when the model has one; otherwise fall back to the on-device
         // settled picks, which now means "no settled bet in the published
         // window yet" rather than "a sport the view doesn't cover".
-        stats: records[modelId]
-          ? viewRecordToStats(records[modelId])
-          : computeBuiltInModelStats(modelId, rows),
+        stats: publishedOrSettledStats(modelId, records, rows),
       })),
     [rows, records, sport],
   );
@@ -123,24 +97,15 @@ export function ModelsScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Models</Text>
           <View style={styles.rightActions}>
-            {tab === 'custom' ? (
-              <Pressable
-                onPress={() => navigation.navigate('ModelEdit', {})}
-                style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
-                hitSlop={6}
-                accessibilityRole="button"
-                accessibilityLabel="New custom model"
-              >
-                <Ionicons name="add" size={22} color={colors.textInverse} />
-              </Pressable>
-            ) : null}
             <SettingsButton />
           </View>
         </View>
         <Text style={styles.subtitle}>
           {tab === 'builtin'
             ? `How each model has performed since ${LIVE_RECORD_START_LABEL}, our live date. Tap one to see today’s picks.`
-            : `Save your own pick filters and see how they would have performed since ${BACKTEST_START_LABEL} — backtests use our full graded history, not just the live window.`}
+            : sport === 'NFL' || sport === 'NBA' || sport === 'NHL'
+              ? `Your ${sport} models, ranked by units won.`
+              : 'Your models for this sport.'}
         </Text>
 
         {/* H9: the 12pt margin above the row is whitespace, so the frame takes
@@ -151,13 +116,18 @@ export function ModelsScreen() {
 
         <View style={styles.segmentRow} accessibilityRole="tablist">
           <SegmentPill label="Built-in" active={tab === 'builtin'} onPress={() => setTab('builtin')} />
-          <SegmentPill label="Custom" active={tab === 'custom'} onPress={() => setTab('custom')} />
+          <SegmentPill
+            label="My models"
+            active={tab === 'mine'}
+            onPress={() => setTab('mine')}
+            accessibilityLabel="My models"
+          />
         </View>
       </View>
 
       {/* A failed refresh over a record already on screen: keep it, say so,
           offer Retry. A failed FIRST load replaces the Built-in list instead
-          (below); on Custom it is this banner, on any load. */}
+          (below). On My models it is this banner, on any load. */}
       {surface === 'banner' ? (
         <ErrorBanner
           what="the latest model records"
@@ -240,37 +210,7 @@ export function ModelsScreen() {
           contentContainerStyle={styles.list}
         />
       ) : (
-        <FlatList
-          ListFooterComponent={<BetslipBarSpacer />}
-          data={customWithStats}
-          keyExtractor={(item) => item.model.id}
-          renderItem={({ item }) => (
-            <CustomModelRow
-              model={item.model}
-              live={item.live}
-              liveLoading={todayLoading}
-              picks={item.stats.picks}
-              winRate={item.stats.winRate}
-              wins={item.stats.wins}
-              losses={item.stats.losses}
-              roiFlat={item.stats.roiFlat}
-              profitFlat={item.stats.profitFlat}
-              onPress={() => navigation.navigate('ModelDetail', { modelId: item.model.id })}
-              onEdit={() => navigation.navigate('ModelEdit', { modelId: item.model.id })}
-            />
-          )}
-          ListEmptyComponent={
-            !ready || loading ? (
-              <ActivityIndicator style={styles.loading} />
-            ) : (
-              <EmptyState
-                title="No custom models yet"
-                subtitle="Tap + above to build one: pick the bet types it plays (moneyline, totals, any prop) with your own model %, edge and EV minimums, then narrow by side, price, line, game time and more. We'll backtest it live as you build."
-              />
-            )
-          }
-          contentContainerStyle={styles.list}
-        />
+        <ByomModelList sport={sport} />
       )}
     </SafeAreaView>
   );
@@ -280,10 +220,12 @@ function SegmentPill({
   label,
   active,
   onPress,
+  accessibilityLabel,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
+  accessibilityLabel?: string;
 }) {
   return (
     <Pressable
@@ -292,7 +234,7 @@ function SegmentPill({
       hitSlop={{ top: 9, bottom: 9, left: 2, right: 2 }}
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
-      accessibilityLabel={`${label} models`}
+      accessibilityLabel={accessibilityLabel ?? `${label} models`}
       style={[styles.segmentPill, active && styles.segmentPillActive]}
     >
       <Text style={[styles.segmentPillText, active && styles.segmentPillTextActive]}>
@@ -304,15 +246,14 @@ function SegmentPill({
 
 interface BuiltInRowProps {
   modelId: string;
-  stats: ReturnType<typeof computeBuiltInModelStats>;
+  stats: CustomModelStats;
   onPress: () => void;
 }
 
 function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   const decided = stats.wins + stats.losses;
-  // Picks settled with no book price: in the W-L, not in the money (flatPnl).
-  // Named on the row so an 8-5 next to a negative ROI reads as "six of those
-  // had no price" rather than as a bug.
+  // Picks settled with no book price: staked at the bare 1u, as the Record
+  // tab books them. Named on the row so the reader knows which they are.
   const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
   // A percentage on a handful of bets is not a result — see
   // MIN_PICKS_FOR_COLOURED_ROI. The number still shows; it just stops wearing
@@ -321,13 +262,17 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   // One sentence, shared with the Record tab's rows and gate-free — see
   // thinSampleCaption, which is the only place this wording is written.
   const thinNote = thinSampleCaption();
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const recordBelow = modelRecordBelow(fontScale, windowWidth);
   // Each figure's tone comes from the number it prints, rounded as printed.
+  // One unit basis (CLAUDE.md §2): the published stake, the Record tab's.
   const roiColor = thin
     ? colors.textSecondary
-    : pnlColor(stats.roiFlat, 1, 100);
+    : pnlColor(stats.roi, 1, 100);
+  const unitsText = formatSigned(stats.units, 2, 'u');
   const profitColor = thin
     ? colors.textSecondary
-    : pnlColor(stats.profitFlat, 2);
+    : pnlColor(stats.units, 2);
   return (
     <Pressable
       onPress={onPress}
@@ -335,19 +280,24 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
       accessibilityLabel={
         `${modelLong(modelId)} model, ${stats.picks} pick${stats.picks === 1 ? '' : 's'}` +
         (decided > 0 ? `, ${stats.wins} wins and ${stats.losses} losses` : '') +
-        (stats.stakedFlat > 0 ? `, ROI ${formatPctSigned(stats.roiFlat)}` : '') +
+        (stats.risked > 0 ? `, ${returnOnBetsSpeech(formatPctSigned(stats.roi))}, ${unitsSpeech(unitsText)}` : '') +
         (stats.picks === 0 ? ', no settled bets yet' : '') +
         (thin && stats.picks > 0 ? `, ${thinNote}` : '') +
-        (unpriced > 0 ? `, ${unpriced} unpriced` : '')
+        (unpriced > 0 ? `, ${unpriced} unpriced, staked at 1 unit` : '')
       }
-      style={({ pressed }) => [styles.builtInCard, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        styles.builtInCard,
+        recordBelow && styles.builtInCardStacked,
+        pressed && styles.pressed,
+      ]}
     >
-      <View style={styles.builtInLeft}>
-        <View style={styles.modelChip}>
-          <Text style={styles.modelChipText}>{modelShort(modelId)}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.modelName} numberOfLines={1}>
+      <View style={recordBelow ? styles.builtInLeftStacked : styles.builtInLeft}>
+        <ModelBadgeRow badge={modelShort(modelId)}>
+          {/* No line cap. One line ellipsized the bet type ("NBA Projected
+              Pro…", and every NCAAF name as "NCAA…" at larger text). The
+              name wraps on spaces. At 1.3× text, or on a narrow phone, the
+              badge sits above this name so a word is not split. */}
+          <Text style={styles.modelName}>
             {modelLong(modelId)}
           </Text>
           <Text style={styles.subtle}>
@@ -370,155 +320,19 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
             // Its own line: on a 375pt phone the sub-line has ~160pt, and a
             // mid-phrase wrap would orphan the one segment that explains the
             // ROI beside it.
-            <Text style={styles.subtle}>{unpriced} unpriced · not in the money</Text>
+            <Text style={styles.subtle}>{unpriced} unpriced, staked at 1u</Text>
           ) : null}
-        </View>
+        </ModelBadgeRow>
       </View>
-      <View style={styles.builtInRight}>
+      <View style={[styles.builtInRight, recordBelow && styles.builtInRightStacked]}>
         <Text style={[styles.roi, { color: roiColor }]}>
-          {stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
+          {stats.risked > 0 ? formatPctSigned(stats.roi) : '—'}
         </Text>
         <Text style={[styles.profit, { color: profitColor }]}>
-          {stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
+          {stats.picks > 0 ? unitsText : '—'}
         </Text>
       </View>
     </Pressable>
-  );
-}
-
-interface CustomRowProps {
-  model: CustomModel;
-  /** Today's board (plus the look-ahead sports) filtered to this model. */
-  live: EnrichedPick[];
-  liveLoading: boolean;
-  picks: number;
-  winRate: number;
-  wins: number;
-  losses: number;
-  roiFlat: number;
-  profitFlat: number;
-  onPress: () => void;
-  onEdit: () => void;
-}
-
-/** How many qualifying bets a card lists before collapsing to a "+N more". */
-const CARD_BET_LIMIT = 3;
-
-function CustomModelRow({
-  model,
-  live,
-  liveLoading,
-  picks,
-  winRate,
-  wins,
-  losses,
-  roiFlat,
-  profitFlat,
-  onPress,
-  onEdit,
-}: CustomRowProps) {
-  const decided = wins + losses;
-  const roiColor = pnlColor(roiFlat, 1, 100);
-  const profitColor = pnlColor(profitFlat, 2);
-  const shown = live.slice(0, CARD_BET_LIMIT);
-  const withdrawnEmpty = withdrawnRulesEmpty(model.rules);
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={model.name}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-    >
-      <View style={styles.cardHeader}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.modelName}>{model.name}</Text>
-          <Text style={styles.ruleCount} numberOfLines={2}>
-            {model.rules
-              .map((r) => betTypeLabel(r.model_id) + betTypeStatusSuffix(r.model_id))
-              .join(' · ')}
-          </Text>
-        </View>
-        <Pressable
-          onPress={onEdit}
-          hitSlop={8}
-          style={styles.editBtn}
-          accessibilityRole="button"
-          accessibilityLabel={`Edit ${model.name}`}
-        >
-          <Ionicons name="pencil" size={16} color={colors.tint} />
-        </Pressable>
-      </View>
-
-      <View style={styles.betsBlock}>
-        <Text style={styles.betsHeader}>
-          QUALIFYING BETS{live.length > 0 ? ` · ${live.length}` : ''}
-        </Text>
-        {live.length === 0 ? (
-          <Text style={styles.betsEmpty}>
-            {withdrawnEmpty
-              ? withdrawnEmpty
-              : liveLoading
-                ? 'Checking today’s board…'
-                : 'Nothing on the board qualifies right now.'}
-          </Text>
-        ) : (
-          <>
-            {shown.map((ep) => (
-              <View key={ep.pick.pick_id} style={styles.betRow}>
-                <Text style={styles.betLabel} numberOfLines={1}>
-                  {ep.pick.pick_label}
-                </Text>
-                <Text style={styles.betOdds}>
-                  {decisionOdds(ep.pick) == null ? '—' : `${bookLabelShort(storedQuoteBook(ep.pick))} ${formatAmerican(decisionOdds(ep.pick))}`}
-                </Text>
-              </View>
-            ))}
-            {live.length > shown.length ? (
-              <Text style={styles.betsMore}>+{live.length - shown.length} more</Text>
-            ) : null}
-          </>
-        )}
-      </View>
-
-      <View style={styles.statsRow}>
-        <Stat label="Picks" value={String(picks)} />
-        <Stat
-          label="Win %"
-          value={decided > 0 ? formatPct(winRate) : '—'}
-          caption={decided > 0 ? `${wins}-${losses}` : 'no decided'}
-        />
-        <Stat
-          label="Flat ROI"
-          value={picks > 0 ? formatPctSigned(roiFlat) : '—'}
-          color={roiColor}
-        />
-        <Stat
-          label="P&L"
-          value={picks > 0 ? formatCurrencySigned(profitFlat) : '—'}
-          color={profitColor}
-        />
-      </View>
-    </Pressable>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  color,
-  caption,
-}: {
-  label: string;
-  value: string;
-  color?: string;
-  caption?: string;
-}) {
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
-      {caption ? <Text style={styles.statCaption}>{caption}</Text> : null}
-    </View>
   );
 }
 
@@ -574,14 +388,6 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
     fontWeight: font.weight.semibold,
   },
-  addBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.tint,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   pressed: { opacity: 0.7 },
   list: {
     paddingTop: spacing.sm,
@@ -598,28 +404,24 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     gap: spacing.md,
   },
+  builtInCardStacked: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
   builtInLeft: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+  },
+  builtInLeftStacked: {
+    ...STACKED_BLOCK,
+    alignSelf: 'stretch',
   },
   builtInRight: {
     alignItems: 'flex-end',
     minWidth: 90,
   },
-  modelChip: {
-    backgroundColor: colors.noneSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radii.pill,
-    minWidth: 50,
-    alignItems: 'center',
-  },
-  modelChipText: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
+  builtInRightStacked: {
+    alignSelf: 'flex-end',
+    marginTop: spacing.xs,
   },
   subtle: {
     fontSize: font.size.caption,
@@ -640,87 +442,11 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     marginTop: 2,
   },
-  card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
   modelName: {
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
     flexShrink: 1,
-  },
-  ruleCount: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  editBtn: {
-    padding: 6,
-  },
-  betsBlock: {
-    marginBottom: spacing.md,
-  },
-  betsHeader: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    letterSpacing: 0.5,
-    marginBottom: spacing.xs,
-  },
-  betsEmpty: {
-    fontSize: font.size.footnote,
-    color: colors.textTertiary,
-  },
-  betRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    paddingVertical: 2,
-  },
-  betLabel: {
-    flex: 1,
-    fontSize: font.size.footnote,
-    color: colors.textPrimary,
-  },
-  betOdds: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
-  },
-  betsMore: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    marginTop: 2,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  stat: { flex: 1 },
-  statLabel: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    marginBottom: 2,
-  },
-  statValue: {
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
-  statCaption: {
-    fontSize: font.size.micro,
-    color: colors.textTertiary,
-    marginTop: 1,
   },
   loading: { marginVertical: spacing.xxl },
   // Same box as builtInCard, so the list does not jump when rows land.

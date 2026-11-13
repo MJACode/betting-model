@@ -6,7 +6,8 @@
  * curve's end pill. The grid's return is that stake's units / risked, the
  * percentage beside Discord's units. The visible name is "Return on bets".
  * VoiceOver still hears Discord's "All-time". Yesterday uses this same
- * posted stake. Models still use a flat $100 bet. Do not put the Models
+ * posted stake, and so do the Models tab and the model pages (one unit
+ * basis, 2026-11-03). Do not put the Models
  * tab's book on this card.
  */
 
@@ -86,6 +87,7 @@ export function heroAccessibilityLabel(o: {
   pushes: number;
   winRate: number;
   clvBeatRate: number | null;
+  clvPush?: number;
 }): string {
   const units = o.notLoaded || o.unitsKnown === false
     ? 'Units unavailable'
@@ -101,6 +103,12 @@ export function heroAccessibilityLabel(o: {
       : `Record ${o.wins} wins, ${o.losses} losses${o.pushes > 0 ? `, ${o.pushes} pushes` : ''}`;
   const win = winRateText(o.winRate, o.wins, o.losses, quiet);
   const clv = clvText(o.clvBeatRate, quiet);
+  const pushes = o.clvPush ?? 0;
+  const clvSpoken = quiet
+    ? 'unavailable'
+    : clv === '—'
+      ? (pushes > 0 ? `0 measured, ${pushes} push` : 'unavailable')
+      : pushes > 0 ? `${clv}, ${pushes} push` : clv;
   return [
     units,
     o.label,
@@ -108,7 +116,7 @@ export function heroAccessibilityLabel(o: {
     roi,
     record,
     `Win rate ${win === '—' ? 'unavailable' : win}`,
-    `Beat the closing line ${clv === '—' ? 'unavailable' : clv}`,
+    `Beat the closing line ${clvSpoken}`,
   ].join('. ');
 }
 
@@ -134,8 +142,8 @@ export function roiSheetBody(): string {
     'At −110 that\u2019s 1.1 units to win 1. ' +
     'Risk is capped at 3 units, and a pick with no price counts as 1 unit. ' +
     'This number is units won or lost divided by units risked. ' +
-    'It matches the percentage in Discord\u2019s all-time line and on Yesterday. ' +
-    'Models use a flat $100 bet, so their percentages won\u2019t match.'
+    'It matches the percentage in Discord\u2019s all-time line. ' +
+    'Yesterday\u2019s percentage, and each model\u2019s on the Models tab, is worked out the same way.'
   );
 }
 
@@ -144,32 +152,44 @@ export const CLOSING_LINE_TITLE = 'Beat the closing line';
 export function closingLineBody(o: {
   clvSettled: number;
   clvBeatRate: number | null;
+  clvPush?: number;
   clvGameSettled: number;
   clvGameBeatRate: number | null;
+  clvGamePush?: number;
   clvPropSettled: number;
   clvPropBeatRate: number | null;
+  clvPropPush?: number;
   marketClvSettled: number;
   marketClvBeatRate: number | null;
 }): string {
   const lead =
     'Closing line value checks whether the book we bet closed at a shorter price than the one we took, on the same number. ' +
-    'A moved number is left out. Game lines and props are both in the figure.';
-  if (!(o.clvSettled > 0) || o.clvBeatRate == null) {
+    'A moved number is left out. A close that matches the price we took is a push and is left out of the rate. Game lines and props are both in the figure.';
+  const pushes = o.clvPush ?? 0;
+  if (!(o.clvSettled > 0)) {
     return `${lead}\n\nWe don’t have a closing price for these bets yet.`;
   }
+  if (o.clvBeatRate == null) {
+    return `${lead}\n\n0 measured, ${pushes} push`;
+  }
   const figures = [
-    `Overall  ${formatPct(o.clvBeatRate, 0)} of ${o.clvSettled}`,
-    splitPiece('Game lines', o.clvGameSettled, o.clvGameBeatRate),
-    splitPiece('Props', o.clvPropSettled, o.clvPropBeatRate),
+    splitPiece('Overall', o.clvSettled, o.clvBeatRate, pushes),
+    splitPiece('Game lines', o.clvGameSettled, o.clvGameBeatRate, o.clvGamePush ?? 0),
+    splitPiece('Props', o.clvPropSettled, o.clvPropBeatRate, o.clvPropPush ?? 0),
   ];
   if (o.marketClvSettled > 0 && o.marketClvBeatRate != null) {
-    figures.push(splitPiece('Pinnacle’s fair close', o.marketClvSettled, o.marketClvBeatRate));
+    figures.push(
+      `${splitPiece('Pinnacle’s fair close', o.marketClvSettled, o.marketClvBeatRate, 0)}. A matching Pinnacle price still counts here`,
+    );
   }
   return [lead, '', ...figures.filter((line) => line !== '')].join('\n');
 }
 
-function splitPiece(label: string, settled: number, rate: number | null): string {
+function splitPiece(label: string, settled: number, rate: number | null, pushes: number): string {
   if (settled <= 0) return '';
-  if (settled < MIN_PICKS_FOR_COLOURED_ROI) return `${label}  ${thinSampleCaption()}`;
-  return `${label}  ${rate != null ? formatPct(rate, 0) : '—'} of ${settled}`;
+  const decisive = Math.max(0, settled - pushes);
+  if (decisive <= 0) return `${label}  0 measured, ${pushes} push`;
+  const pushNote = pushes > 0 ? `, ${pushes} push` : '';
+  if (decisive < MIN_PICKS_FOR_COLOURED_ROI) return `${label}  ${thinSampleCaption()}${pushNote}`;
+  return `${label}  ${rate != null ? formatPct(rate, 0) : '—'} of ${decisive}${pushNote}`;
 }

@@ -132,22 +132,28 @@ def pick_rows(bets, games, quotes, pid_by_name, game_date: str,
         side = "Over" if b.side == "over" else "Under"
         q = quotes.get((b.game_id, b.player, b.market, b.book), {})
         link = q.get("over_link") if b.side == "over" else q.get("under_link")
+        implied = b.fair - b.edge
+        book = (b.book or "").strip().lower()
         rows.append({
             "game_id": b.game_id, "model_id": MODEL_ID, "sport": "WNBA",
             "game_date": game_date, "game_time": g.get("commence_time"),
             "pick_side": b.side,
             "pick_label": (f"{b.player} {side} {b.line:g} "
-                           f"{_LABEL.get(b.market, b.market)} ({_BOOK.get(b.book, b.book)})"),
+                           f"{_LABEL.get(b.market, b.market)}"),
             # model_probability IS Pinnacle's de-vigged number; edge is vs the
             # soft book's own de-vigged prob — the exact quantities the NFL
-            # rule validated on. dk_odds holds the SOFT book's price with the
-            # book named in pick_label (the §28 precedent for rules that don't
-            # score against DK).
+            # rule validated on. dk_odds holds the SOFT book's price.
+            # decision_odds is that same number; decision_book is the feed key.
+            # Rows already stored still say "(FD)" on the label.
             "model_probability": b.fair,
             "model_probability_cal": round(ev.cal_prob, 4),
-            "dk_implied_prob": b.fair - b.edge,
+            "dk_implied_prob": implied,
             "edge": b.edge,
             "dk_odds": b.price, "scored_line": b.line,
+            "decision_book": book or None,
+            "decision_odds": b.price if book else None,
+            "decision_implied_prob": implied if book else None,
+            "decision_edge": b.edge if book else None,
             "kelly_fraction": 0.01, "recommended_bet": round(0.01 * bankroll, 2),
             "bankroll_at_pick": bankroll, "signal_type": "BET",
             "confidence_tier": "MED",
@@ -164,14 +170,17 @@ _INSERT = """
                        edge, dk_odds, scored_line, kelly_fraction,
                        recommended_bet, bankroll_at_pick, signal_type,
                        confidence_tier, prop_market, player_key, player_id,
-                       dk_bet_link, model_probability_cal)
+                       dk_bet_link, model_probability_cal,
+                       decision_book, decision_odds,
+                       decision_implied_prob, decision_edge)
     VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(game_time)s,
             %(pick_side)s, %(pick_label)s, %(model_probability)s,
             %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(signal_type)s, %(confidence_tier)s, %(prop_market)s,
             %(player_key)s, %(player_id)s, %(dk_bet_link)s,
-            %(model_probability_cal)s)
+            %(model_probability_cal)s, %(decision_book)s, %(decision_odds)s,
+            %(decision_implied_prob)s, %(decision_edge)s)
 """
 
 

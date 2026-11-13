@@ -20,6 +20,8 @@ import { MODEL_BOOK } from '@/lib/markets';
 import {
   fetchGameLineRowsAllMarkets,
   fetchHeadToHead,
+  fetchNbaTeamQ1Games,
+  fetchNbaTeamQ1Season,
   fetchNflTeamGameStats,
   fetchOpeningLine,
   fetchPublicSplits,
@@ -28,6 +30,8 @@ import {
   fetchTeamRecentGamesForSport,
   fetchTeamStats,
 } from '@/lib/queries';
+import type { NbaQ1Game, NbaQ1SeasonRow } from '@/lib/nbaQ1';
+import { teamBoardSeason } from '@/lib/teamStatCatalog';
 import { earliestUpcomingGame, type SlateGame } from '@/lib/statsBoard';
 import { unstartedGameIds } from '@/lib/statsOdds';
 import {
@@ -124,8 +128,10 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
   // it used; the page labels its numbers from that, never from the request.
   const board = useSection<{ season: number | null; rows: TeamStatsRow[] }>(
     { season: null, rows: [] },
-    // The ET year, never a bare new Date(): CLAUDE.md §7's "today is ET".
-    () => fetchTeamStats(sport, season ?? Number(today.slice(0, 4))),
+    // The ET clock, never a bare new Date(): CLAUDE.md §7's "today is ET".
+    // No season handed in (opened from a pick, not the board): the sport's
+    // own label, so NBA/NHL ask for 2026-27 as 2027, not the calendar year.
+    () => fetchTeamStats(sport, season ?? teamBoardSeason(sport)),
     [sport, season, nonce],
   );
   const row = useMemo(() => board.data.rows.find((r) => r.team === team) ?? null, [board.data.rows, team]);
@@ -234,6 +240,22 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
     [h2hGames.data, team, opponent],
   );
 
+  // ── NBA first quarter (Matt, 2026-10-28) ────────────────────────────────
+  // The team's last 40 team-games (Last 5 / Last 10 only), then the season
+  // view for the newest game's season (the Season row and the ranks). NBA
+  // only; every other sport skips both reads.
+  const q1Games = useSection<NbaQ1Game[]>(
+    [],
+    sport === 'NBA' ? () => fetchNbaTeamQ1Games(team) : null,
+    [sport, team, nonce],
+  );
+  const q1SeasonLabel = q1Games.data[0]?.season ?? null;
+  const q1Season = useSection<NbaQ1SeasonRow[]>(
+    [],
+    sport === 'NBA' && q1SeasonLabel != null ? () => fetchNbaTeamQ1Season(team, q1SeasonLabel) : null,
+    [sport, team, q1SeasonLabel, nonce],
+  );
+
   const loading = board.loading || recent.loading || slate.loading;
   // The picks read waits on the recent-games read, so "loading" is both — or
   // the card prints its empty sentence for a frame before the spinner.
@@ -257,5 +279,7 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
     marketError: market.error,
     h2h,
     h2hLoading: h2hGames.loading,
+    q1Games,
+    q1Season,
   };
 }

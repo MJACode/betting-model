@@ -14,8 +14,9 @@
  *
  *  2. SAMPLE GUARD. A 3-2 ATS split shows as 60% and would top the board on
  *     rate alone. Splits carry their sample, and anything under
- *     MIN_SPLIT_SAMPLE is tinted neutral and flagged — the number is still
- *     shown, it just stops being ranked as if it meant something.
+ *     MIN_SPLIT_SAMPLE is left untinted, ranked below every split that has
+ *     enough games, and marked "small sample" beside its percent and record
+ *     (Matt, 2026-11-03; since 2026-11-13 the percent always shows).
  *
  * Verify with: npx tsx scripts/verify_team_board.ts
  */
@@ -26,17 +27,19 @@ import type { TeamStatsRow } from '@/types';
 export type Tier = 'good' | 'mid' | 'bad' | 'none';
 
 /**
- * Below this many games a split is shown but not trusted: no tint, and the
- * board marks it. Chosen to be small enough that it only catches genuinely
- * thin cuts (a handful of short-rest spots), not a normal season split.
+ * Below this many games a split is uncoloured, ranked after every split with
+ * enough games, and marked "small sample". Matt, 2026-11-03 set the floor
+ * ("fewer than 10 games in a split"); on 2026-11-13 he asked for record AND
+ * percent on every Betting stat, so the percent is no longer hidden under it.
  */
-export const MIN_SPLIT_SAMPLE = 8;
+export const MIN_SPLIT_SAMPLE = 10;
 
-/** Sample behind a stat: its own `sample` column, else games played. */
+/** Sample behind a stat: the sum of its `sample` columns, else games played. */
 export function sampleFor(row: TeamStatsRow, def: TeamStatDef): number {
-  if (def.sample) {
-    const n = teamStatValue(row, { ...def, key: def.sample });
-    return n ?? 0;
+  if (def.sample && def.sample.length > 0) {
+    let n = 0;
+    for (const key of def.sample) n += teamStatValue(row, { ...def, key }) ?? 0;
+    return n;
   }
   const gp = teamStatValue(row, { ...def, key: 'games_played' });
   return gp ?? 0;
@@ -46,7 +49,7 @@ export function sampleFor(row: TeamStatsRow, def: TeamStatDef): number {
 export function isThinSample(row: TeamStatsRow, def: TeamStatDef): boolean {
   // Only the betting splits carry an explicit sample; a season-long efficiency
   // metric is not "thin" just because the season is young.
-  if (!def.sample) return false;
+  if (!def.sample || def.sample.length === 0) return false;
   return sampleFor(row, def) < MIN_SPLIT_SAMPLE;
 }
 
@@ -84,7 +87,9 @@ export function tierFor(
 
 /**
  * Sort rows by the selected stat, best first. Nulls always sink to the bottom
- * regardless of direction — a team with no value should never lead the board.
+ * regardless of direction — a team with no value should never lead the board —
+ * and a thin split sits below every split with enough games, so a 3-1 start
+ * never leads a column of 12-game records.
  * Ties break on sample size so the better-established number ranks first.
  */
 export function compareTeams(a: TeamStatsRow, b: TeamStatsRow, def: TeamStatDef): number {
@@ -93,6 +98,9 @@ export function compareTeams(a: TeamStatsRow, b: TeamStatsRow, def: TeamStatDef)
   if (av == null && bv == null) return (a.team ?? '').localeCompare(b.team ?? '');
   if (av == null) return 1;
   if (bv == null) return -1;
+  const at = isThinSample(a, def);
+  const bt = isThinSample(b, def);
+  if (at !== bt) return at ? 1 : -1;
   if (av !== bv) return def.better === 'low' ? av - bv : bv - av;
   return sampleFor(b, def) - sampleFor(a, def);
 }

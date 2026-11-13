@@ -25,21 +25,23 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_lines_is_a_picks_view():
+def test_scoreboard_replaced_the_lines_view():
     m = re.search(r"export type PicksView = ([^;]+);", _read(TYPES))
     assert m, "PicksView is not declared in types/index.ts"
-    assert "'lines'" in m.group(1)
+    assert "'scoreboard'" in m.group(1)
+    assert "'lines'" not in m.group(1)
 
 
-def test_the_lines_segment_is_unconditional_and_after_live():
+def test_the_scoreboard_segment_is_unconditional_and_after_live():
     src = _read(PICKS)
     live = src.find('label="Live Signals"')
-    lines = src.find('label="Lines"')
-    assert live != -1 and lines != -1
-    assert lines > live, "Lines is not after Live Signals"
-    preceding = src[max(0, lines - 180) : lines]
+    board = src.find('label="Scoreboard"')
+    assert live != -1 and board != -1
+    assert board > live, "Scoreboard is not after Live Signals"
+    preceding = src[max(0, board - 180) : board]
     assert "length > 0 ?" not in preceding
-    assert "view === 'lines' ?" not in preceding
+    assert "view === 'scoreboard' ?" not in preceding
+    assert "<LinesBoard" not in src
 
 
 def test_the_lines_read_names_the_view_and_pages():

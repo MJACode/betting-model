@@ -320,7 +320,7 @@ def test_the_recap_excludes_a_settled_paused_bet_and_keeps_a_live_models_bet():
     db.execute("""CREATE TABLE picks (sport, model_id, result, kelly_fraction,
                   dk_odds, decision_odds, clv_pct, is_live, game_date, signal_type,
                   downgrade_reason, condition_status, game_id, pick_side,
-                  player_id, player_key, prop_market, clv_method)""")
+                  player_id, player_key, prop_market, clv_method, stake_units)""")
     db.execute("""CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)""")
     rows = [
         ("MLB", "m_live", "WIN", 0.02, -110, None, None, 0, "2026-09-28", "BET", None, None, "g1"),
@@ -458,6 +458,6 @@ def test_the_live_board_drops_the_paused_row():
     """The #850 guard the Live board missed: a BET written while its lane was
     paused stays not-a-signal after an unpause."""
     src = _src("mobile/src/screens/PicksHomeScreen.tsx")
-    block = src.split("const liveInProgress = useMemo(")[1].split("[allLiveData, liveStates]")[0]
+    block = src.split("const liveInProgress = useMemo(")[1].split("[allLiveData, liveStates, thresholdsRevision]")[0]
     assert "!isModelPaused(d.pick.model_id)" in block
     assert "!isPausedRow(d.pick)" in block

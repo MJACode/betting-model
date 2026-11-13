@@ -17,15 +17,17 @@
  *     (excluded from the record). Rendered from the tracked snapshot.
  *   - no live pick and game not final          → open (rendered from snapshot).
  *
- * P&L convention matches trackedPerformance: profit_flat is dollars at a $100
- * flat stake, so a bet at stake S grades as profit_flat x S/100.
+ * Units match trackedPerformance: the caller's `stakeFor` (posted by default,
+ * lib/trackedStake) and gradeTrackedBet, never profit_flat.
  */
 import type { Pick } from '@/types';
 import type { LiveTrackSnapshot } from '@/hooks/useTrackedBets';
 import {
+  gradeTrackedBet,
   trackedBetStatus,
   type TrackedBetRow,
   type TrackedBetSummary,
+  type TrackedStakeFor,
 } from './trackedPerformance';
 
 function keyOf(p: Pick): string {
@@ -67,7 +69,7 @@ export function computeLiveTrackedResults(
   snapshots: LiveTrackSnapshot[],
   livePicks: Pick[],
   isGameFinal: (gameId: string) => boolean,
-  stakeFor: (p: Pick) => number = () => 100,
+  stakeFor: TrackedStakeFor,
 ): { rows: TrackedBetRow[]; summary: TrackedBetSummary } {
   const byKey = new Map<string, Pick[]>();
   for (const p of livePicks) {
@@ -116,19 +118,18 @@ export function computeLiveTrackedResults(
       status = isGameFinal(s.game_id) ? 'no_action' : 'open';
     }
 
-    const rawStake = stakeFor(pick);
-    const stake = Number.isFinite(rawStake) && rawStake >= 0 ? rawStake : 0;
-    const isCounted = status === 'won' || status === 'lost' || status === 'push';
-    const profit = isCounted ? Math.round(Number(pick.profit_flat ?? 0) * stake) / 100 : 0;
+    const stake = stakeFor(pick);
+    const { profit, risked } = gradeTrackedBet(status, stake);
 
     if (status === 'won') wins++;
     else if (status === 'lost') losses++;
     else if (status === 'push') pushes++;
     else if (status === 'open') open++;
-    if (isCounted) staked += stake;
+    staked += risked;
     net += profit;
 
-    rows.push({ pick, status, stake, profit });
+    const shown = Number.isFinite(stake.risk) && stake.risk >= 0 ? stake.risk : 0;
+    rows.push({ pick, status, stake: shown, customStake: stake.custom, profit });
   }
 
   const settled = wins + losses + pushes;

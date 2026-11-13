@@ -1,38 +1,45 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
 import { TagChip } from '@/components/TagChip';
-import { computeBuiltInModelStats, useSettledPicksSincePaperStart, viewRecordToStats } from '@/hooks/useCustomModelStats';
+import { publishedOrSettledStats, useSettledPicksSincePaperStart } from '@/hooks/useCustomModelStats';
 import { useModelRegistry } from '@/hooks/useModelRegistry';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
   dayLabelET,
   dayLabelSpokenET,
   formatAmerican,
-  formatCurrencySigned,
   formatGameTimeET,
   formatPct,
   formatPctSigned,
   formatSigned,
+  gameDayLabelET,
+  labelWithoutStake,
 } from '@/lib/format';
+import { clvOutcome } from '@/lib/clvBeat';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
-import { MODEL_META, modelLong, modelPageTiming, modelShort } from '@/lib/modelMeta';
+import { MODEL_META, modelDetailTitle, modelLong, modelPageTiming, modelShort, sportOfModel } from '@/lib/modelMeta';
+import { navShowsSportOnly } from '@/lib/modelBadgeLayout';
+import { signalsContextTime } from '@/lib/signalsCard';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
-import { isModelPaused, isUnlockedPreview, passesRecordFilter, publishedRecordKeeps } from '@/lib/thresholds';
+import { isModelPaused, isUnlockedPreview, passesRecordFilter, postedPickUnits, publishedRecordKeeps } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
-import { bookLabelShort, pickRowTitle, storedQuoteBook } from '@/lib/markets';
+import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { PickRowTitle } from '@/components/PickRowTitle';
+import { unitsSpeech } from '@/lib/a11y';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -75,10 +82,7 @@ export function BuiltInModelDetailScreen() {
   );
 
   const stats = useMemo(
-    () =>
-      fullOutcomeRecords[modelId]
-        ? viewRecordToStats(fullOutcomeRecords[modelId])
-        : computeBuiltInModelStats(modelId, settledRows),
+    () => publishedOrSettledStats(modelId, fullOutcomeRecords, settledRows),
     [modelId, settledRows, fullOutcomeRecords],
   );
   const { registry } = useModelRegistry(modelId);
@@ -130,19 +134,23 @@ export function BuiltInModelDetailScreen() {
     [history, latestSettledDate],
   );
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
+  const { fontScale } = useWindowDimensions();
 
-  // The long name: three prop rules share the short label "Prop Mkt", so a
+  // The long name: the prop-market rules share the short label "Props", so a
   // short title made their screens indistinguishable. The chip keeps it.
+  // At 1.5× and above the bar truncates ("NBA Team T…"), so it shows the sport.
   useEffect(() => {
-    navigation.setOptions({ title: modelLong(modelId) });
-  }, [navigation, modelId]);
+    navigation.setOptions({
+      title: navShowsSportOnly(fontScale) ? sportOfModel(modelId) : modelLong(modelId),
+    });
+  }, [navigation, modelId, fontScale]);
 
   // Prop models are Poisson count projections, so the model card labels their
   // holdout accuracy as over/under accuracy rather than a straight hit rate.
   const isProp = meta != null && meta.type !== 'game';
 
   const decided = stats.wins + stats.losses;
-  // Settled with no book price: in the W-L, not in the money (flatPnl).
+  // Settled with no book price: staked at the bare 1u, as the Record tab does.
   const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
   // The row that opened this screen greys a thin ROI and captions it; the
   // drill-down is where a member lingers and screenshots, so it cannot be the
@@ -150,12 +158,13 @@ export function BuiltInModelDetailScreen() {
   // qualifier. Same constant, same caption, same rule.
   const thin = decided < MIN_PICKS_FOR_COLOURED_ROI;
   // Each tile's tone comes from the number it prints, rounded as printed.
+  // One unit basis (CLAUDE.md §2): the published stake, the Record tab's.
   const roiColor = thin
     ? colors.textSecondary
-    : pnlColor(stats.roiFlat, 1, 100);
+    : pnlColor(stats.roi, 1, 100);
   const pnlTint = thin
     ? colors.textSecondary
-    : pnlColor(stats.profitFlat, 2);
+    : pnlColor(stats.units, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -165,13 +174,20 @@ export function BuiltInModelDetailScreen() {
         ListHeaderComponent={
           <>
             <View style={styles.headerCard}>
-              <View style={styles.headerRow}>
-                <View style={styles.modelChip}>
-                  <Text style={styles.modelChipText}>{modelShort(modelId)}</Text>
-                </View>
-                <Text style={styles.modelTitle}>{modelLong(modelId)}</Text>
-                {paused ? <TagChip label="Paused" /> : null}
-              </View>
+              <ModelBadgeRow badge={modelShort(modelId)}>
+                <Text
+                  style={styles.modelTitle}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.85}
+                >
+                  {modelDetailTitle(modelId)}
+                </Text>
+                {paused ? (
+                  <View style={styles.pausedChip}>
+                    <TagChip label="Paused" />
+                  </View>
+                ) : null}
+              </ModelBadgeRow>
               <Text style={styles.modelSubtitle}>
                 {meta ? `Built-in ${categoryLabel(meta.type)} model` : 'Built-in model'}
               </Text>
@@ -226,7 +242,7 @@ export function BuiltInModelDetailScreen() {
               <StatTile
                 label="Picks"
                 value={String(stats.picks)}
-                caption={`settled, as posted${unpriced > 0 ? ` · ${unpriced} unpriced` : ''}`}
+                caption={`settled, as posted${unpriced > 0 ? ` · ${unpriced} unpriced, staked at 1u` : ''}`}
               />
               <StatTile
                 label="Win %"
@@ -240,14 +256,14 @@ export function BuiltInModelDetailScreen() {
             </View>
             <View style={styles.statRow}>
               <StatTile
-                label="Flat ROI"
-                value={stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
+                label="Return on bets"
+                value={stats.risked > 0 ? formatPctSigned(stats.roi) : '—'}
                 tint={roiColor}
-                caption={thin && stats.stakedFlat > 0 ? thinSampleCaption() : 'vs $100 flat per bet'}
+                caption={thin && stats.risked > 0 ? thinSampleCaption() : 'each pick to win 1u'}
               />
               <StatTile
-                label="P&L"
-                value={stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
+                label="Units"
+                value={stats.picks > 0 ? formatSigned(stats.units, 2, 'u') : '—'}
                 tint={pnlTint}
                 caption="settled only"
               />
@@ -335,14 +351,24 @@ export function BuiltInModelDetailScreen() {
                     caption={
                       ledgerUnread
                         ? 'Discord check did not finish, so this includes picks whose posting status is unknown'
-                        : 'vs the book we bet'
+                        : 'vs the book we bet. A matching close stays in this average'
                     }
                   />
                   <StatTile
                     label="Beat close"
-                    value={formatPct(clv.beatRate)}
-                    tint={clv.beatRate >= 0.5 ? colors.betInk : colors.avoidInk}
-                    caption={`${clv.count} picks with CLV`}
+                    value={
+                      clv.beatRate == null
+                        ? (clv.pushes > 0 ? `0 measured, ${clv.pushes} push` : '—')
+                        : formatPct(clv.beatRate)
+                    }
+                    tint={
+                      clv.beatRate == null
+                        ? undefined
+                        : clv.beatRate >= 0.5
+                          ? colors.betInk
+                          : colors.avoidInk
+                    }
+                    caption={clv.caption}
                   />
                 </View>
               </>
@@ -422,19 +448,20 @@ function TodayPickRow({
   onPress: () => void;
 }) {
   const { pick, game } = enriched;
-  const timeLabel = formatGameTimeET(game?.commence_time);
+  // The day as well as the time for a game that is not today: look-ahead
+  // rows (the NCAAB totals model usually decides the day before) read as tonight with a
+  // clock time alone. A game today keeps the time alone.
+  const timeLabel = signalsContextTime(gameDayLabelET(game?.commence_time), formatGameTimeET(game?.commence_time));
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[pick.pick_label, signalDisplayName(pick.signal_type), timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
+      accessibilityLabel={[labelWithoutStake(pick.pick_label), signalDisplayName(pick.signal_type), timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
       style={styles.pickRow}
       onPress={onPress}
     >
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.pickLabel} numberOfLines={1}>
-            {pickRowTitle(pick)}
-          </Text>
+          <PickRowTitle pick={pick} titleStyle={styles.pickLabel} matchupStyle={styles.pickMatchup} />
           <View style={styles.pickMeta}>
             <SignalBadge signal={pick.signal_type} small />
             {timeLabel ? <Text style={styles.pickMetaText}>{timeLabel}</Text> : null}
@@ -453,7 +480,8 @@ function TodayPickRow({
 }
 
 // One settled pick in the model's history — shows the outcome (WIN/LOSS/PUSH)
-// and its flat P&L, colored by result. Tap to open the pick detail.
+// and its units at the published stake (the Record tab's), colored by result.
+// Tap to open the pick detail.
 function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => void }) {
   const resultColor =
     pick.result === 'WIN'
@@ -461,14 +489,17 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       : pick.result === 'LOSS'
         ? colors.avoidInk
         : colors.textSecondary;
-  const profitLabel = decisionOdds(pick) == null ? '—' : formatCurrencySigned(pick.profit_flat);
+  // postedPickUnits: 1u to win at the decided price, risk capped at 3u, a
+  // pick with no price at the bare 1u. Never the stored profit_flat.
+  const unitsText = formatSigned(postedPickUnits(pick).units, 2, 'u');
+  const profitLabel = unitsSpeech(unitsText);
   return (
     <Pressable
       style={styles.pickRow}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={[
-        pick.pick_label,
+        labelWithoutStake(pick.pick_label),
         pick.result,
         dayLabelSpokenET(pick.game_date),
         `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`,
@@ -477,9 +508,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
     >
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.pickLabel} numberOfLines={1}>
-            {pickRowTitle(pick)}
-          </Text>
+          <PickRowTitle pick={pick} titleStyle={styles.pickLabel} matchupStyle={styles.pickMatchup} />
           <View style={styles.pickMeta}>
             <Text style={styles.pickMetaText}>{dayLabelET(pick.game_date)}</Text>
             <Text style={styles.pickMetaText}>· {bookLabelShort(storedQuoteBook(pick))} {formatAmerican(decisionOdds(pick))}</Text>
@@ -489,9 +518,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       <View style={styles.historyRight}>
         <Text style={[styles.historyResult, { color: resultColor }]}>{pick.result}</Text>
         <Text style={[styles.historyProfit, { color: resultColor }]}>
-          {/* No price, no money — the row's total excludes this pick, so the
-              list must not show the -110 that settlement invented for it. */}
-          {decisionOdds(pick) == null ? '—' : formatCurrencySigned(pick.profit_flat)}
+          {unitsText}
         </Text>
       </View>
     </Pressable>
@@ -509,14 +536,27 @@ function edgeColorStyle(edge: number) {
 function computeClvStats(
   modelId: string,
   settled: SettledPick[],
-): { avg: number; beatRate: number; count: number } | null {
+): { avg: number; beatRate: number | null; count: number; caption: string; pushes: number } | null {
   const vals = settled
     .filter((p) => p.model_id === modelId && passesRecordFilter(p) && publishedRecordKeeps(p) && p.clv_method === 'standard_v2' && p.clv_pct != null)
     .map((p) => Number(p.clv_pct));
   if (vals.length === 0) return null;
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-  const beatRate = vals.filter((v) => v > 0).length / vals.length;
-  return { avg, beatRate, count: vals.length };
+  let beats = 0;
+  let losses = 0;
+  let pushes = 0;
+  for (const v of vals) {
+    const outcome = clvOutcome(v);
+    if (outcome === 'beat') beats += 1;
+    else if (outcome === 'loss') losses += 1;
+    else if (outcome === 'push') pushes += 1;
+  }
+  const decisive = beats + losses;
+  const beatRate = decisive > 0 ? beats / decisive : null;
+  const caption = pushes > 0
+    ? `${vals.length} picks with CLV, ${pushes} push`
+    : `${vals.length} picks with CLV`;
+  return { avg, beatRate, count: vals.length, caption, pushes };
 }
 
 function categoryLabel(type: 'game' | 'pitcher_prop' | 'batter_prop' | 'player_prop'): string {
@@ -537,29 +577,14 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.md,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  modelChip: {
-    backgroundColor: colors.noneSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radii.pill,
-    minWidth: 50,
-    alignItems: 'center',
-  },
-  modelChipText: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
+  pausedChip: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.xs,
   },
   modelTitle: {
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
-    flex: 1,
   },
   modelSubtitle: {
     fontSize: font.size.footnote,
@@ -614,6 +639,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
+  },
+  pickMatchup: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   pickMeta: {
     flexDirection: 'row',

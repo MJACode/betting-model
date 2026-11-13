@@ -152,8 +152,8 @@ def test_the_model_has_its_own_chip_and_no_picker_slot(tmp_path):
     _run(tmp_path, META_FILES, """
 import { MODEL_META, betSlotForModel, modelLong, modelPageTiming, modelProbabilityNote } from './modelMeta.ts';
 const m = MODEL_META.nba_team_total_luck;
-eq([m.type, m.shortLabel, m.statKey, m.statLabel], ['game', 'TT Luck', null, ''], 'entry');
-eq(modelLong('nba_team_total_luck'), 'Home Team Total (Unders)', 'long name');
+eq([m.type, m.shortLabel, m.statKey, m.statLabel], ['game', 'TT', null, ''], 'entry');
+eq(modelLong('nba_team_total_luck'), 'NBA Team Totals', 'long name');
 eq(betSlotForModel('nba_team_total_luck', 'game'), null, 'not a picker slot');
 // The probability is the graded seasons' own win rate: the note says to plan on less.
 const note = modelProbabilityNote('nba_team_total_luck');
@@ -194,6 +194,24 @@ for (const [pick, market, now] of cases) {
   for (const [what, m] of [['card chip', movementFromLatest(pick, dk, [now])],
                            ['detail card', movementFromSameBookHistory(pick, now, market)]]) {
     eq([m && m.severity, m && m.lineMovedAgainst], ['skip', true], `${pick.model_id} ${what}`);
+  }
+}
+// The NCAAB spread card writes the same row: FanDuel decided Duke -13.5 while
+// DraftKings hung -13.5 too, so line_book is empty. FanDuel then moved a point
+// against each side at a better price.
+const NCAAB = { ...PICK, game_id: 'NCAAB_2026-12-05_kansas_duke', model_id: 'ncaab_spread_market',
+  sport: 'NCAAB', scored_line: -13.5, dk_odds: -110, decision_odds: -110, decision_book: 'fanduel' };
+const spreads = [
+  [{ ...NCAAB, pick_side: 'home', pick_label: 'Duke -13.5' },
+   { bookmaker: 'fanduel', spread_home: -14.5, home_price: 100, away_price: -120 }],
+  [{ ...NCAAB, pick_side: 'away', pick_label: 'Kansas +13.5' },
+   { bookmaker: 'fanduel', spread_home: -12.5, home_price: -120, away_price: 100 }],
+];
+for (const [pick, now] of spreads) {
+  const dk = { market: 'spreads', spread_home: pick.scored_line, home_price: -110, away_price: -110 };
+  for (const [what, m] of [['card chip', movementFromLatest(pick, dk, [now])],
+                           ['detail card', movementFromSameBookHistory(pick, now, 'spreads')]]) {
+    eq([m && m.severity, m && m.lineMovedAgainst], ['skip', true], `${pick.pick_label} ${what}`);
   }
 }
 """)

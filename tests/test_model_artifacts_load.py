@@ -96,6 +96,18 @@ def test_artifact_deserialises(path: Path):
         assert {2024, 2025, 2026} <= {int(s) for s in artifact["bucket"]}, f"{path.name}: bucket seasons"
         assert all(v["n"] > 0 for v in artifact["bucket"].values()), f"{path.name}: an empty bucket season"
         return
+    if isinstance(artifact, dict) and artifact.get("kind") == "nba_first_half_total_luck":
+        # A rule's parameters, not an estimator (models/nba_first_half_total_luck.py):
+        # each game's Pinnacle closing total and first-half total, one row a game
+        # per season, and the over bucket's per-season counts its probability's
+        # uplift is fitted on. 2026-27 is priced on 7,230 games (2020-21 .. 2025-26).
+        assert artifact["model"] is None
+        seasons = {int(row[0]) for row in artifact["h1_rows"]}
+        assert seasons == {2021, 2022, 2023, 2024, 2025, 2026}, f"{path.name}: seasons {seasons}"
+        assert len(artifact["h1_rows"]) >= 7000, f"{path.name}: too few rows"
+        assert {2024, 2025, 2026} <= {int(s) for s in artifact["bucket"]}, f"{path.name}: bucket seasons"
+        assert all(v["n"] > 0 for v in artifact["bucket"].values()), f"{path.name}: an empty bucket season"
+        return
     if isinstance(artifact, dict):
         assert "model" in artifact, f"{path.name} has no 'model' key"
         # A NULL `model` is legitimate for a RULE. ncaaf_spread and

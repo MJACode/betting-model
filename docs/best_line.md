@@ -158,6 +158,13 @@ hits the per-event fetch and the prop fetch. Against ~35k credits/day and a
 The marginal cost of books 2-5 is **zero** — once one `us2` book is on the list
 the second region is paid for — so this is all-or-nothing, not a dial.
 
+**betparx left the offered set on 2026-11-06** (mike: *"remove betparx from
+sports books for recommeding betting lines in picks only niche avaialble in a
+few states"*). It is licensed in Maryland, Pennsylvania and New Jersey only.
+It is still fetched, and it is now in `config.STATE_LIMITED_BOOKMAKERS`, which no
+environment override of `BEST_LINE_BOOKMAKERS` or `BETTABLE_BOOKS` can put back.
+Evidence and the volume it cost: `docs/rules_evidence.md`, §6 entry.
+
 ---
 
 ## 3. Stage 1 — shipped in this change (no model behaviour changes)
@@ -234,7 +241,9 @@ preference:
 > mattered: after `keep_days` the pruner already kept exactly one non-DK row per
 > (proposition, book) — but it was the **opener**, which cannot reconstruct a
 > decision-time price. It now keeps the opener AND the **close** (the last
-> pre-game-typed snapshot). Measured cost: **+6 MB/day**. See
+> pre-game-typed snapshot at or before the start: until 2026-10-26 it was the
+> last pre-game-TYPED row, which the evening refresh writes after tip-off, so
+> the kept "close" was an in-play price). Measured cost: **+6 MB/day**. See
 > `data/prune_odds.py` and `tests/test_prune_keeps_the_close.py`.
 
 Raising `PRUNE_NON_DK_KEEP_DAYS` wholesale is the expensive third option. What

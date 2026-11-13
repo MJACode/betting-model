@@ -39,6 +39,7 @@ def dsn():
 
 ROOT = Path(__file__).parent.parent
 MIGRATION = ROOT / "data" / "migrations" / "latest_line_state_tables.sql"
+ALT_MIGRATION = ROOT / "data" / "migrations" / "alternate_game_lines_latest_odds_2026_10_29.sql"
 
 # The log tables as the migration sees them: every column it references, the
 # real types. Roles because the migration grants to them and the views run as
@@ -86,6 +87,7 @@ def db(dsn):
     cur = conn.cursor()
     cur.execute(SCHEMA)
     cur.execute(io.open(MIGRATION, encoding="utf-8").read())
+    cur.execute(io.open(ALT_MIGRATION, encoding="utf-8").read())
     yield cur
     conn.close()
 
@@ -165,6 +167,45 @@ def test_relabelling_the_latest_row_as_in_play_falls_back_to_the_previous_pre_ga
     # ...and the reverse repair (repair_bogus_first_pitch_labels) restores it.
     db.execute("UPDATE odds SET snapshot_type = 'open' WHERE odds_id = %s", (last,))
     assert as_app(db, "SELECT home_price FROM v_latest_dk_odds WHERE game_id = 'G1'") == [(-140,)]
+
+
+def test_an_alternate_ladder_keeps_every_rung_and_a_main_line_stays_one(db):
+    """alternate_spreads is many numbers. spreads is still the one newest row.
+    A later pass replaces the ladder; it does not leave the dropped rung."""
+    for pt, price in ((-7.5, 120), (-3.5, -105), (-2.5, -110)):
+        odds(db, "G1", "alternate_spreads", "draftkings", "2026-10-29T18:00:00Z",
+             price, spread_home=pt, away_price=-price)
+    odds(db, "G1", "spreads", "draftkings", "2026-10-29T18:00:00Z", -110, spread_home=-3.5)
+    rows = as_app(db, """SELECT spread_home FROM v_latest_odds_all_books
+                          WHERE game_id = 'G1' AND market = 'alternate_spreads' ORDER BY 1""")
+    assert rows == [(-7.5,), (-3.5,), (-2.5,)]
+    for pt, price in ((-6.5, 100), (-3.5, -110)):
+        odds(db, "G1", "alternate_spreads", "draftkings", "2026-10-29T19:00:00Z",
+             price, spread_home=pt, away_price=-price)
+    odds(db, "G1", "spreads", "draftkings", "2026-10-29T19:00:00Z", -115, spread_home=-4.5)
+    # A late older rung must not come back.
+    odds(db, "G1", "alternate_spreads", "draftkings", "2026-10-29T18:00:00Z",
+         140, spread_home=-10.5, away_price=-140)
+    alt = as_app(db, """SELECT spread_home, home_price FROM v_latest_odds_all_books
+                         WHERE game_id = 'G1' AND market = 'alternate_spreads' ORDER BY 1""")
+    main = as_app(db, """SELECT spread_home, home_price FROM v_latest_odds_all_books
+                          WHERE game_id = 'G1' AND market = 'spreads'""")
+    assert alt == [(-6.5, 100), (-3.5, -110)]
+    assert main == [(-4.5, -115)]
+
+
+def test_an_alternate_total_keeps_every_rung_of_the_newest_pass(db):
+    for pt, price in ((44.5, -110), (47.5, -105), (51.5, 120)):
+        odds(db, "G1", "alternate_totals", "fanduel", "2026-10-29T18:00:00Z",
+             None, total_line=pt, over_price=price, under_price=-price)
+    rows = as_app(db, """SELECT total_line FROM v_latest_odds_all_books
+                          WHERE game_id = 'G1' AND market = 'alternate_totals' ORDER BY 1""")
+    assert rows == [(44.5,), (47.5,), (51.5,)]
+    odds(db, "G1", "alternate_totals", "fanduel", "2026-10-29T19:00:00Z",
+         None, total_line=48.5, over_price=-115, under_price=-105, snapshot_type="in_play")
+    rows = as_app(db, """SELECT total_line FROM v_latest_odds_all_books
+                          WHERE game_id = 'G1' AND market = 'alternate_totals' ORDER BY 1""")
+    assert rows == [(44.5,), (47.5,), (51.5,)], "an in-play rung is not the latest pre-game ladder"
 
 
 def test_the_date_filter_is_answered_from_games(db):

@@ -223,6 +223,12 @@ def _credits_used_today(conn: DBConnection) -> float:
     the tick on the network, and this connection is reused for the life of the
     process: an uncommitted SELECT holds AccessShareLock on api_call_log across
     that call and across every quiet tick that never writes.
+
+    "Today" starts at ET midnight. date_trunc on the ET wall clock gives a
+    timestamp WITHOUT zone; compared with `ts` it was read in the session's
+    zone, UTC, so the day began at 00:00Z, 8 pm ET the evening before
+    (measured 2026-10-30 00:49Z: 2026-10-29 00:00+00 against the true
+    04:00+00). The second AT TIME ZONE turns it back into ET midnight.
     """
     from data.db import release_read
     try:
@@ -230,7 +236,8 @@ def _credits_used_today(conn: DBConnection) -> float:
             SELECT COALESCE(SUM(credits), 0) FROM api_call_log
             WHERE host = 'api.the-odds-api.com'
               AND source = 'pregame_poller'
-              AND ts >= date_trunc('day', now() AT TIME ZONE 'America/New_York')
+              AND ts >= (date_trunc('day', now() AT TIME ZONE 'America/New_York')
+                         AT TIME ZONE 'America/New_York')
         """).fetchone()
         return float(row[0]) if row else 0.0
     except Exception as exc:                                  # noqa: BLE001

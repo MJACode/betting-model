@@ -194,23 +194,23 @@ def test_run_cards_gathers_both_models_before_it_chooses(monkeypatch):
 # ── the night ────────────────────────────────────────────────────────────────
 
 def test_the_night_cap_counts_the_bets_already_written():
-    """Three bets already written tonight and a cap of four: one more, the highest percentile,
-    whatever game."""
-    rows = (_rule_rows(*[_rule_bet(f"G{i}", 0.01 * (i + 1)) for i in range(4)])
+    """One slot left tonight: one more, the highest percentile, whatever game."""
+    k = door.MAX_NBA_PROP_BETS_PER_NIGHT
+    rows = (_rule_rows(*[_rule_bet(f"G{i}", 0.01 * (i + 1)) for i in range(k)])
             + _proj_rows(_proj_bet("G9", 0.035)))
-    decs = [_rule_dec(f"G{i}") for i in range(4)]
-    conn = _Conn(night={NIGHT: door.MAX_NBA_PROP_BETS_PER_NIGHT - 1})
+    decs = [_rule_dec(f"G{i}") for i in range(k)]
+    conn = _Conn(night={NIGHT: k - 1})
     out = door.publish_across_models(conn, rows, decs, [_proj_dec("G9")])
-    assert out["written"] == 1 and [p["game_id"] for p in conn.picks] == ["G3"]      # rule EV 0.04
-    full = _Conn(night={NIGHT: door.MAX_NBA_PROP_BETS_PER_NIGHT})
+    assert out["written"] == 1 and [p["game_id"] for p in conn.picks] == [f"G{k - 1}"]
+    full = _Conn(night={NIGHT: k})
     assert door.publish_across_models(full, rows, decs, [_proj_dec("G9")])["written"] == 0
     assert full.picks == []
-    # a fresh night takes the best four, one a game: the projection's 0.035 is about its 10th
+    # a fresh night takes the best k, one a game: the projection's 0.035 is about its 10th
     # percentile, below the rule's 0.01 (about its 29th)
     fresh = _Conn()
     door.publish_across_models(fresh, rows, decs, [_proj_dec("G9")])
-    assert sorted(p["game_id"] for p in fresh.picks) == ["G0", "G1", "G2", "G3"]
-    assert len(fresh.picks) == door.MAX_NBA_PROP_BETS_PER_NIGHT
+    assert sorted(p["game_id"] for p in fresh.picks) == [f"G{i}" for i in range(k)]
+    assert len(fresh.picks) == k
 
 
 def test_a_voided_bet_does_not_use_a_nights_slot():
@@ -226,9 +226,12 @@ def test_a_voided_bet_does_not_use_a_nights_slot():
     assert "VOID" not in conn.sql[-1]
 
 
-def test_the_nba_night_cap_is_four():
-    """NBA's own number, set by the NBA grade (4 a night in tip order); not tied to NHL's."""
-    assert door.MAX_NBA_PROP_BETS_PER_NIGHT == 4
+def test_the_nba_night_cap_is_six():
+    """NBA's own number, set by the NBA grade in tip order: 4 from 2026-10-20, 6 from 2026-11-04
+    (mike: "we can go slightly more than 4 if we need to cause the picks are that good"), where
+    the graded units stop growing (+183.7 at 6, +182.8 at 8). Not tied to NHL's."""
+    assert door.MAX_NBA_PROP_BETS_PER_NIGHT == 6
+    assert door.MAX_NBA_PROP_BETS_PER_GAME == 1
     assert door.PROP_MODEL_IDS == (RULE, PROJ)
     for name in ("one_per_game", "per_night", "games_with_a_prop_bet", "prop_bets_by_night",
                  "publish_across_models"):
@@ -367,14 +370,15 @@ def test_a_tie_on_percentile_goes_to_the_higher_raw_ev():
 
 
 def test_the_night_is_filled_by_percentile_too():
-    """Five games deciding in one look: the lowest percentile is the one left out, even where its
-    raw EV is the largest."""
+    """One game more than the night holds, deciding in one look: the lowest percentile is the one
+    left out, even where its raw EV is the largest."""
+    k = door.MAX_NBA_PROP_BETS_PER_NIGHT
     q_r, q_p = rank.BREAKPOINTS[RULE], rank.BREAKPOINTS[PROJ]
-    rows = (_rule_rows(*[_rule_bet(f"G{i}", q_r[90 + i]) for i in range(4)])
+    rows = (_rule_rows(*[_rule_bet(f"G{i}", q_r[90 + i]) for i in range(k)])
             + _proj_rows(_proj_bet("G9", q_p[50])))
-    assert q_p[50] > max(q_r[90:94])
+    assert q_p[50] > max(q_r[90:90 + k])
     chosen = door.per_night(door.one_per_game(rows))
-    assert sorted(r["game_id"] for r in chosen) == ["G0", "G1", "G2", "G3"]
+    assert sorted(r["game_id"] for r in chosen) == [f"G{i}" for i in range(k)]
 
 
 # ── one model's look failing does not stop the other ─────────────────────────

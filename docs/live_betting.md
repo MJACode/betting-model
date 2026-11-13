@@ -33,6 +33,7 @@ switch: `RUN_LIVE_LOOP=0` in Railway Variables. Manual runs on Matt's machine st
 | ~~`mlb_live_win_prob`~~ | binary + Platt | home wins | **RETIRED 2026-08-30** — 15 bets 6-9 / −34.1% |
 | ~~`mlb_live_runline`~~ | binary + Platt | home wins by 2+ | **RETIRED 2026-08-30** — 14 bets 5-9 / −39.9% |
 | `nfl_live_leader_ml` | per-lead logistic WP (JSON artifact) | the 4-16 point leader wins, 4th quarter, ≤ 10:00 on the last snap | DraftKings live moneyline, edge ≥ 0.02 vs 1/decimal with vig. **LIVE 2026-10-13** (mike); runs in `nfl_live_leader/`, not the MLB loop — `docs/sports/nfl.md` |
+| `nba_live_spread_q12` | IG-2 game-state model (Stern normal on the final home margin, JSON artifact) | the live spread in quarters 1-2 | the best of the eight deciding books, EV >= 0.05, -200 floor, first fresh fetch per game, fetched only at each hour minus 264 s (the archive's hourly purchase). **LIVE 2026-11-04** (mike); runs in `models/nba_live_loop.py`, not the MLB loop. The quarter-3 moneyline and spread are held out (they fail the house standard on those fetches). Section "NBA in play" below and `docs/sports/nba.md` |
 
 **MLB live is ONE model now (2026-08-30).** Both binary models were paused on 2026-08-29 and
 retired the next day: they were negative at every cut AND got worse as the probability floor rose
@@ -267,6 +268,159 @@ open; game final but the model flipped off that side (no settled pick for it) �
 
 
 ---
+
+## The fast way: every in-play model on DraftKings' own board (2026-11-12/13, mike)
+
+mike, 2026-11-12, after Indiana -16.5 (live) posted 4 min 12 s after DraftKings
+set the line: *"This is live betting ... as close to Real time as possible"*;
+2026-11-13: *"Move everything over to the fast way"*.
+
+**What was slow, measured from each model's own bets.** Every model posted 0.7-3.4 s
+after writing its pick; the delay was all before the write. NBA a median 232 s
+from fetch to decision (ESPN waits of 170 s and 60 s), NCAAB 153-194 s, women's
+halftime 151 s; NCAAF and the NFL leader had no ESPN wait but priced on the odds
+provider's copy of DraftKings, a median 31 s and 26 s old when the bet was
+written. A DraftKings live college spread is still up 10 s later 77% of the
+time and 60 s later 26% (scripts/ncaab_live_latency_probe.py, 2026-11-12).
+
+**The source.** DraftKings' own board, read on mike's machine every second per
+live league (`data/ingestors/dk_live_board.py`, scheduled task
+`BettingModel\DkLiveBoard`; DraftKings refuses the worker), into
+`dk_live_reads` (a row when a game's score, period or a line changes; the read
+time is the quote's stamp) and `dk_live_feed` (every read). DraftKings shows a
+score a median 3.7 s after a basket and moves its line in the same read or
+later in 177 of 180 baskets. A loop trusts the rows only while the feed's last
+read is under 8 s old; otherwise it decides the old way.
+
+| Model | The fast way | Unchanged |
+|---|---|---|
+| NCAAB (three) | decided on the board at the window's first read: DraftKings' line, score and clock; no provider call, no ESPN wait; one read's confirmation | the :00/:30 windows, the night's cut and cap |
+| Women's halftime total | judged on ESPN read at once when the half ended 120 s before the read; DraftKings' total from the board | the 5-minute reads, the provider's other books (the rule needs two) |
+| NBA quarters 1-2 spread | DraftKings' spread from the board; decided as soon as ESPN's newest play carries DraftKings' score (re-read every 3 s, at most 60 s) | the hourly windows, the Pinnacle pair from the provider |
+| NCAAF win probability and total | DraftKings' moneyline and total from the board; a game priced only while DraftKings' score equals our state's | the engine, its state feed and guards |
+| NFL late-game leader | DraftKings' moneyline from the board; a score DraftKings shows first waits a tick without spending the slot | the 5-minute grid |
+
+On every fast path DraftKings is the only book a decision bets (the others are
+the provider's ~30 s-old copies), and the ledger or log names the board.
+
+## NBA in play: the game-state model's quarters 1-2 spread (2026-11-04, mike)
+
+The full story, the evidence and the warning signs are in `docs/sports/nba.md`,
+"In play". One model is live: `nba_live_spread_q12`, graded on the loop's own
+hourly fetch times at 1,348 bets, +96.6 units, +6.4% (95% +1.4 .. +11.3), 5 of
+5 seasons, every bar of the house standard passed, laying -160 / -114 / +114.
+The quarter-3 moneyline (503 bets, +8.3%, -2.7 .. +19.3) and spread (813 bets,
++4.5%, -2.0 .. +11.0) fail it there and are held out with the quarter-4 spread
+(mike, 2026-11-04: the backtest is the gate); their code stays
+(`models/nba_live_ig2.HELD_OUT_RULES`) and each is added the day it passes.
+What a session touching the live loops needs:
+
+```
+ESPN scoreboard every 20 s (free)          -> which games are in progress
+at each hour minus 264 s (the archive's hourly purchase; retried to +240 s)
+   -> ONE bulk Odds API call: h2h + spreads, 8 deciding books + Pinnacle (2 credits)
+   -> rows to odds as in_play (live_price_log), credits to live_credit_telemetry
+   -> ESPN summary per game at +170 s, again at +230 s (fail closed on a late play,
+      a header score ahead of the plays, or a stopped play list under a running clock)
+   -> models/nba_live_ig2: state, freshness, phases, the decision
+   -> nba_live_decisions (one row per game and rule, plus skipped / carried rows),
+      then picks (is_live), then push and Discord's NBA live channel (no fallback)
+```
+
+`python -m models.nba_live_loop` (scheduler job `nba_live`, pollers service,
+11am to 2:50am ET every 10 minutes; kill switch `RUN_NBA_LIVE=0`; variables in
+`docs/cloud_worker.md`). `--dry-run` makes no Odds API call and writes nothing.
+
+**How it differs from the other live loops, each on purpose:**
+
+- **It fetches at the archive's hourly purchase moments, not continuously.**
+  The rule decides at "the first fetch in the phase holding a fresh quote".
+  Polling every few seconds would make that first fetch the first minute of
+  each quarter, a population never graded. The archive's :30 gap-fill purchases
+  were built from listed tips, which the loop cannot rebuild, so it never
+  fetches at them.
+- **Its freshness guard is the grade's own** (`docs/nba_models_2026.md` 7.1): no
+  point scored between a quote's stamp and the fetch, for the deciding quote and
+  its Pinnacle pair, and Pinnacle within 60 seconds. ESPN's wallclock is when it
+  logged a play, which is what the grade read; the summary serves a play a
+  median 34 seconds later (99th percentile 168 for scoring plays, measured
+  2026-11-04). So the loop reads twice, 170 and 230 seconds after the fetch,
+  and refuses a game whose second read carries a play logged before the fetch
+  that the first did not. `docs/sports/nba.md`, "In play", has the measurement
+  and what still gets through.
+- **No BookMoveClock** (the picks rule's corollary for every live loop). The
+  clock anchors a book's number between changes in our state and needs a series
+  of quotes; this loop sees one quote per book per fetch, an hour
+  apart, so there is nothing for it to compare. The grade's freshness rule is
+  applied instead, on the information the grade had. Named in the PR as a
+  deviation from the house rule.
+- **No quote-age, edge or settled-state cap**: none existed in the grade.
+- **Decided at the best of the eight deciding books, at any line they hang**, as
+  graded (not "the best price at DraftKings' line"): `scored_line` is the
+  deciding book's HOME number, `line_book` names that book when DraftKings does
+  not hang the same number in the fetch, and the DraftKings columns are its own
+  quote at that number, else NULL.
+- **A decision ledger** (`nba_live_decisions`): a fresh fetch that does not clear
+  the cut spends the rule, and a pick row exists only for a bet, so without the
+  ledger a restart would decide a spent rule again.
+
+**Cost.** 6 fetch moments a slate at the median on the 2026-27 schedule (14 at
+most), 2 credits each plus 2 a retry, fetched only while a game has a rule not
+yet decided. Caps: 100 calls and 200 credits a process, and no fetch below
+1,000 credits left (the 15%-of-plan floor was removed 2026-11-07, mike). The first call of each process logs its
+`x-requests-last`.
+
+**Discord.** NBA live picks post only to the NBA live channel
+(`DISCORD_CHANNEL_LIVE_NBA` or `DISCORD_WEBHOOK_LIVE_NBA`), never the shared
+live channel; with neither set the loop decides nothing and its job fails. A
+pick is announced only while its game is in progress.
+
+
+---
+
+## NCAABW in play: the full-game total at halftime (2026-11-11, mike)
+
+The full story and the evidence are in `docs/sports/ncaabw.md`, "In play: the
+halftime total". One model, `ncaabw_live_total_ht`: the full-game total, bet
+once a game during the halftime break at EV >= 0.05, on a model of the points
+still to come from the pre-game total and the first half's surprise. Replayed
+on the loop's own code: 669 bets, +89.96 units, +11.84% (95% +5.1 .. +18.1) on
+2025-26 with a model fitted on 2024-25, and 298 bets, +42.10 units, +12.35%
+(+0.6 .. +23.7) on 2024-25 the other way round; it laid -148 to +200. The loop
+(`models/ncaabw_live_loop.py`, pollers) reads the books every five minutes
+while a game is at the half and posts to the women's live channel only.
+
+## NCAAB in play: three game-state models, the best few a night (2026-11-07, mike)
+
+The full story and the evidence are in `docs/sports/ncaab.md`, "In play". Three
+models are live, `ncaab_live_spread_h1`, `ncaab_live_spread_h2` and
+`ncaab_live_total_h2`, each passing the house standard on the half-hour in-play
+purchase (2021-22 to 2025-26), and they post only the night's best few: at most
+five a night across the three (mike: *"3-5 best per night"*). Graded
+walk-forward on that selection, 2022-23 to 2025-26: 2,533 bets on 588 nights,
++290.4 units, +10.1% (95% +6.4 .. +13.8), every season positive, laying -145 /
+-115 / +185.
+
+```
+ESPN Division I scoreboard every 20 s (free)       -> which games are in progress
+at each :00 and :30 minus 262 s (the purchase's served time; retried to +240 s)
+   -> ONE bulk Odds API call: spreads + totals, the ten books the history was bought at (2 credits)
+   -> rows to odds as in_play (source ncaab_live_loop), credits to live_credit_telemetry
+   -> ESPN summary per game at +90 s, again at +150 s (fail closed on a late play,
+      a header score ahead of the plays, or a stopped play list under a running clock)
+   -> models/ncaab_live_ig: state, freshness, phase, the decision, the night's cut
+   -> ncaab_live_decisions (one row per game and rule), then picks (is_live),
+      then push and #ncaab-live (no fallback)
+```
+
+`python -m models.ncaab_live_loop` (scheduler job `ncaab_live`, pollers, 11am
+to 2:50am ET every 10 minutes; `RUN_NCAAB_LIVE=0` stops it; `--dry-run` makes
+no paid call). Like the NBA loop it fetches only at the purchase's moments, has
+no BookMoveClock (one quote per book per half hour), and decides each game and
+rule once. Unlike it: no Pinnacle pairing (in-play NCAAB Pinnacle quotes too
+few games), a night's cut and cap of 5, and an EV floor per rule (0.02 / 0.05 /
+0.02). Cost: 2 credits a fetch moment while a game has an undecided rule.
+
 
 ## Cutoffs, and why they are re-derived every pass (2026-08-30)
 

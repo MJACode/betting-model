@@ -7,8 +7,11 @@ import { setBetslipBarInset } from '@/hooks/useBetslipBarInset';
 import { useLineLegs } from '@/hooks/useLineLegs';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
-import { betslipSummary, shouldShowBetslipBar, BETSLIP_BAR_STAKE } from '@/lib/parlay';
-import { formatAmerican, formatCurrency } from '@/lib/format';
+import { betslipSummary, shouldShowBetslipBar, slipSignature, BETSLIP_BAR_STAKE } from '@/lib/parlay';
+import { MODEL_BOOK } from '@/lib/markets';
+import { formatAmerican } from '@/lib/format';
+import { useEnteredSgpPrices, useSgpHaircuts } from '@/hooks/useSgpHaircuts';
+import { formatUnits } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
@@ -65,23 +68,29 @@ function BetslipBarContent({
 }) {
   const insets = useSafeAreaInsets();
   const { legs, count, resolving } = useResolvedSlip();
+  const sgpFits = useSgpHaircuts();
+  // A DraftKings price the member typed on the Betslip screen shows here too,
+  // so the bar and the screen's headline never disagree.
+  const sig = useMemo(() => slipSignature(legs), [legs]);
+  const { prices: typed } = useEnteredSgpPrices(sig);
+  const typedDk = typed[MODEL_BOOK];
 
   const summary = useMemo(
-    () => betslipSummary(legs, count),
-    [legs, count],
+    () => betslipSummary(legs, count, sgpFits, typedDk),
+    [legs, count, sgpFits, typedDk],
   );
 
   // Over the tab bar the home-indicator inset is already spent by the tabs;
   // over a pushed stack screen the bar owns the bottom and must clear it itself.
   const overTabBar = bottomOffset > 0;
-  const priced = summary.americanOdds != null && summary.payoutPerTen != null;
+  const priced = summary.americanOdds != null && summary.payoutPerUnit != null;
 
   // Nothing in the slip resolves to a live, priceable bet — there is no bet to
-  // show, so show no bar. Any selection behind this has already been pruned by
-  // useResolvedSlip; what's left is an untrusted board (offline, or a genuinely
-  // empty slate), where hiding is still the honest answer. The exception is the
-  // first paint after an add, where the board hasn't landed yet: that renders
-  // with a chevron instead of a price, so the add visibly registers.
+  // show, so show no bar. A selection the pruner is about to remove stays
+  // hidden. A pre-game alt held after kickoff is the exception that stays:
+  // the bar says there is no live price, so the user can open the slip and
+  // remove it. The other exception is the first paint after an add, where
+  // the board hasn't landed yet: a chevron, so the add visibly registers.
   const visible = shouldShowBetslipBar(summary, resolving);
   // Publish 0 whenever the bar isn't drawn (and on unmount — empty slip, or a
   // NO_BETSLIP_BAR route), so BetslipBarSpacer only reserves room while the
@@ -95,10 +104,11 @@ function BetslipBarContent({
 
   if (!visible) return null;
 
-  // The badge counts what's actually in the slip: once the board is known the
-  // pruner has reconciled the two, and while it's still loading the raw
-  // selection count is the only number we have.
-  const badgeCount = priced ? summary.resolved : summary.count;
+  // While the board is still resolving, the only number we have is the raw
+  // selection count. Once it has settled, the badge is the priced legs plus
+  // any pre-game alt still held.
+  const badgeCount = resolving ? summary.count : summary.resolved + summary.held;
+  const heldOnly = !priced && summary.held > 0 && !resolving;
 
   return (
     <Pressable
@@ -113,8 +123,10 @@ function BetslipBarContent({
       accessibilityRole="button"
       accessibilityLabel={
         priced
-          ? `Open betslip, ${badgeCount} selection${badgeCount === 1 ? '' : 's'}, ${formatAmerican(summary.americanOdds)}`
-          : `Open betslip, ${badgeCount} selection${badgeCount === 1 ? '' : 's'}`
+          ? `Open betslip, ${badgeCount} selection${badgeCount === 1 ? '' : 's'}, ${summary.sgpEstimated ? 'estimated ' : ''}${formatAmerican(summary.americanOdds)}${summary.held > 0 ? ', odds exclude pre-game lines' : ''}`
+          : heldOnly
+            ? `Open betslip, ${badgeCount} selection${badgeCount === 1 ? '' : 's'}, no live price`
+            : `Open betslip, ${badgeCount} selection${badgeCount === 1 ? '' : 's'}`
       }
       style={({ pressed }) => [
         styles.bar,
@@ -149,14 +161,19 @@ function BetslipBarContent({
       {priced ? (
         <View style={styles.right}>
           <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>{summary.isParlay ? 'Parlay odds' : 'Odds'}</Text>
+            <Text style={styles.priceLabel}>
+              {summary.sgpEstimated ? 'Est. odds' : summary.isParlay ? 'Parlay odds' : 'Odds'}
+              {summary.held > 0 ? ' · live' : ''}
+            </Text>
             <Text style={styles.priceValue}>{formatAmerican(summary.americanOdds)}</Text>
           </View>
           <View style={styles.priceRow}>
-            <Text style={styles.payLabel}>${BETSLIP_BAR_STAKE} pays</Text>
-            <Text style={styles.payValue}>{formatCurrency(summary.payoutPerTen)}</Text>
+            <Text style={styles.payLabel}>{formatUnits(BETSLIP_BAR_STAKE)} pays</Text>
+            <Text style={styles.payValue}>{summary.payoutPerUnit == null ? '—' : formatUnits(summary.payoutPerUnit)}</Text>
           </View>
         </View>
+      ) : heldOnly ? (
+        <Text style={styles.priceValue}>No live price</Text>
       ) : (
         <Ionicons name="chevron-forward" size={20} color={colors.textInverse} />
       )}

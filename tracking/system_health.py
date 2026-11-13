@@ -90,6 +90,14 @@ SKIP_BUDGET_DAYS: dict = {
     # The same offseason, read through a 45-day look ahead: dark from mid-June
     # until next season's games reach `games`, well inside 165.
     "nba_schedule_refresh": 165,
+    # NHL: shut while no game is held only by the schedule refresh, which is
+    # from the last playoff game no book has listed yet to the day the NHL API
+    # lists the next season (the walk follows its nextStartDate across the
+    # summer; asked on 2026-10-22 for the week of 2026-07-10 it points at the
+    # 09-18 preseason, but when it first listed 2026-27 is not recorded). The
+    # 2025-26 final was 2026-06-14 and 2026-27 opened 09-29 (`games`), 107
+    # days: the worst case, an API that listed nothing before opening night.
+    "nhl_schedule_refresh": 120,
     # WNBA: mid-September to early May is ~230 days off. The 2026 season also
     # carries a FIBA World Cup break (Sept 4-13, resuming Sept 17), which is
     # well inside this budget and correctly stays quiet.
@@ -572,12 +580,109 @@ PREGAME_CURRENT_WINDOW_HOURS: int = 36
 PREGAME_STALE_SHARE: float = 0.5
 PREGAME_STALE_MIN_GAMES: int = 2
 PREGAME_SAME_GAME_HOURS: int = 6
+# A PULLED FUTURE SLATE IS NOT A DEAD FETCH (2026-10-29 15:25Z). The stored
+# row was CRIT, "NBA 7 of 13" (NCAAF 0 of 5, NHL 0 of 11, WNBA 0 of 1). The
+# seven were ORL@TOR, NYK@PHI, LAC@MIN, HOU@DAL, IND@MIA, LAL@GSW and DEN@PHX,
+# tips 23:40Z Oct 30 to 02:10Z Oct 31 (32.2 to 34.8 hours out). On `odds`,
+# each game's newest h2h/spread/total from any book was 2026-10-22 or
+# 2026-10-23; the other six NBA games had a DraftKings price at 15:16:48Z
+# (tips 8.7 to 10.8 hours out, plus three Friday games the books had
+# relisted). latest_odds for ORL@TOR matches that odds read (Fanatics
+# 2026-10-23 02:20Z). The books listed the Friday games early and pulled
+# them. The 3-hour price rule already refuses those rows. 24 hours is the
+# line between that slate and a game close enough that a missing price is
+# the board emptying.
+#
+# A stale game is left out of the share only when all three hold: no book has
+# a main-market price inside the bound, it starts more than
+# PREGAME_PULLED_LEAD_HOURS away, and the same sport has another game more
+# than that far out that a book is still pricing. A same-day game being fresh
+# is not that. The early-lines pass can stop while today's games stay priced,
+# and those games would otherwise turn every far game into "a slate the books
+# pulled" (review 5700672772). The any-book stamp is that game's own newest
+# h2h/spread/total in latest_odds, so a trickle of alternate totals (the
+# 09-29 and 09-30 outage) cannot mark it listed. The 09-27 to 09-30 outage
+# has no game a book is still pricing, so the share is unchanged (11 of 11,
+# 6 of 6, 9 of 9, 11 of 11). A sport whose every far game went quiet stays in
+# the share too. A game inside the lead stays in even when no book lists it.
+PREGAME_PULLED_LEAD_HOURS: int = 24
+# A WEEKS-OLD EARLY LINE THE PROVIDER IS NOT LISTING IS NOT A DEAD FETCH
+# (2026-11-05 15:26Z). The stored row was STALE, "NBA 2 of 4" (NCAAB 0 of 44,
+# NCAAF 0 of 7, NHL 0 of 11). The two were PHI@CLE (tip 2026-11-07 00:40Z)
+# and POR@LAL (tip 03:10Z). On odds and on latest_odds, each game's newest
+# h2h, spread or total from any book is 2026-10-23 02:10:42Z or 02:11:27Z.
+# The other seven Nov 6 NBA games have no price from any book, so they are
+# not in the share. MIA@GSW and ORL@PHX have a DraftKings price at
+# 15:17:01Z. The 15:17Z calls to /v4/sports/basketball_nba/events (434 bytes)
+# and /v4/sports/basketball_nba/odds (4,822 bytes) both returned 200: the
+# provider was listing today's two games and not the Nov 6 slate. Nov 5's
+# games first got a DraftKings price at 2026-11-05 05:17:22Z, so a check
+# near 04:58Z does not reach the next evening's slate and this only fires
+# once the 36-hour window does.
+#
+# Left out of the share only when all of these hold: no book has a
+# main-market price inside the bound, the game starts more than
+# PREGAME_PULLED_LEAD_HOURS away, that price is more than
+# PREGAME_UNLISTED_EARLY_LINE_DAYS old, the same sport has a game inside
+# that lead with a fresh DraftKings price, and a successful bulk odds or
+# events-list call for that sport landed inside the bound. A same-day price
+# with no such call is not that: the early-lines pass can stop while today's
+# games stay priced. A price only a few days old is not that either: on
+# 2026-09-30 18:00Z every NHL game's newest price was 2026-09-26 22:59Z,
+# under four days, and that outage stays 11 of 11. Seven days sits between
+# that outage and this 13-day early line. A game inside the lead stays in
+# even when the call succeeded. A sport with no fresh nearer game stays in
+# even when the call succeeded. A per-event prop or alternate call is not
+# the list: it is for a game the bulk call already returned.
+PREGAME_UNLISTED_EARLY_LINE_DAYS: int = 7
 # The newest of the three main markets: DraftKings pulls a lopsided game's
 # moneyline and keeps its spread and total (a moneyline-only read called one
 # 10-09 NCAAF game stale that was not). One LIMIT 1 read per market rides
 # idx_odds_book_snap backwards: 394 ms for 124 games on 2026-10-09, where a
 # MAX(snapshot_at) over every DraftKings row took 11 s.
 _PREGAME_CURRENT_MARKETS = ("h2h", "spreads", "totals")
+
+
+def _slate_list_path(path: str | None) -> bool:
+    """True for the bulk /odds call and the /events list.
+
+    A per-event /events/{id}/odds call is a prop or an alternate line for a
+    game the bulk call already returned. It is not the list of games the
+    provider is offering."""
+    if not path:
+        return False
+    parts = str(path).split("?", 1)[0].strip("/").split("/")
+    return (len(parts) == 4 and parts[0] == "v4" and parts[1] == "sports"
+            and parts[3] in ("odds", "events"))
+
+
+def _sports_with_a_live_slate_call(conn, floor: datetime) -> set:
+    """Sports whose bulk odds or events list succeeded inside the bound.
+
+    Empty when the read fails. No evidence the provider omitted a game, so
+    the game stays in the share: a failed read must not hide an outage and
+    must not turn this check into an error of its own."""
+    try:
+        rows = conn.execute("""
+            SELECT sport, path, status, ok, ts
+            FROM api_call_log
+            WHERE ts >= ? AND path LIKE '/v4/sports/%%'
+        """, (floor.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),)
+        ).fetchall()
+    except Exception:                                          # noqa: BLE001
+        getattr(conn, "rollback", lambda: None)()
+        return set()
+    found = set()
+    try:
+        for row in rows:
+            sport, path, status, ok, ts = row[:5]
+            stamp = _parse_ts(ts)
+            if (sport and ok and status == 200 and stamp is not None
+                    and stamp >= floor and _slate_list_path(path)):
+                found.add(sport)
+    except (TypeError, ValueError):
+        return set()
+    return found
 
 
 def _swapped_ufc_id(game_id: str) -> str | None:
@@ -620,6 +725,40 @@ def check_nba_schedule_refresh(conn, r: "HealthReport", run_date: str) -> None:
                gate_note=f"no NBA games scheduled {lo}..{hi}")
 
 
+# ── Is the NHL schedule being kept current? ──────────────────────────────────
+# Until 2026-10-22 an NHL game reached `games` only when a book listed it,
+# about a day ahead. The daily `nhl-schedule` step (data/ingestors/
+# nhl_schedule_refresh.py) now stores the rest of the season and stamps
+# updated_at on every row it wrote that the NHL API still lists, so the newest
+# updated_at among those rows IS the last refresh that reached the API. A row
+# leaves that set the moment the odds feed lists the game (data_source becomes
+# 'live') or the game is scored. 36 hours: one day's 6am run and slack for a
+# late one, as nba_schedule_refresh. The gate is "some unplayed game ahead is
+# held only by the refresh": while the season has weeks to run that is always
+# true, and a refresh that has stopped leaves those rows behind it.
+NHL_SCHEDULE_MAX_AGE_HOURS = 36
+
+
+def check_nhl_schedule_refresh(conn, r: "HealthReport", run_date: str) -> None:
+    """Add the nhl_schedule_refresh row (WARN): has the refresh confirmed its
+    own rows while games it stored are still ahead?"""
+    from data.ingestors.nhl_schedule_refresh import DATA_SOURCE
+    own = (f"(SELECT updated_at FROM games WHERE sport = 'NHL' "
+           f"AND data_source = '{DATA_SOURCE}' AND home_score IS NULL) nhl_schedule_rows")
+    try:
+        ahead = _scalar(conn, f"SELECT COUNT(*) FROM games WHERE sport = 'NHL' "
+                              f"AND data_source = ? AND home_score IS NULL AND game_date >= ?",
+                        (DATA_SOURCE, run_date)) or 0
+    except Exception as exc:                                  # noqa: BLE001
+        getattr(conn, "rollback", lambda: None)()
+        r.add("nhl_schedule_refresh", ERROR, "WARN", f"query failed: {exc}",
+              reason=REASON_QUERY_ERROR)
+        return
+    r.ts_check(conn, "nhl_schedule_refresh", "WARN", own, "updated_at",
+               NHL_SCHEDULE_MAX_AGE_HOURS, gate_ok=ahead > 0,
+               gate_note=f"no NHL game from {run_date} on is held only by the schedule refresh")
+
+
 def check_pregame_prices_current(conn, r: "HealthReport",
                                  now: datetime | None = None) -> None:
     """Add the odds_dk_pregame_current row (CRIT): do the games about to be
@@ -641,12 +780,20 @@ def check_pregame_prices_current(conn, r: "HealthReport",
                 AND o.bookmaker = ? AND o.snapshot_type <> 'in_play'
               ORDER BY o.snapshot_at DESC LIMIT 1)"""
         for m in _PREGAME_CURRENT_MARKETS)
+    # One row per (game, market, book), so this is a short index read. A
+    # MAX over `odds` is the 11s scan the DraftKings reads above were written
+    # to avoid. Main markets only: alternate totals are not "a book lists it".
+    any_book_col = """(SELECT lo.snapshot_at FROM latest_odds lo
+              WHERE lo.game_id = g.game_id
+                AND lo.market IN ('h2h', 'spreads', 'totals')
+              ORDER BY lo.snapshot_at DESC LIMIT 1)"""
     try:
         # NFL and golf are left out: the scorer runs no NFL game model and
         # golf is retired, so this bound never refuses a price for either.
         rows = conn.execute(f"""
             SELECT g.game_id, g.sport, g.commence_time, g.home_team, g.away_team,
-                   {newest_cols}
+                   {newest_cols},
+                   {any_book_col}
             FROM games g
             WHERE g.game_date >= ? AND g.game_date <= ?
               AND g.sport NOT IN ('GOLF', 'NFL')
@@ -662,16 +809,22 @@ def check_pregame_prices_current(conn, r: "HealthReport",
         return
 
     # Every fetched row, in the window or not: a leftover's live id can start
-    # just outside it.
+    # just outside it. Columns after the names are the three DraftKings
+    # markets, then the newest main-market stamp from any book. The any-book
+    # stamp must not fold into the DraftKings max: a fresh other book is how
+    # a game stays "behind" rather than "pulled".
     info: dict = {}                      # game_id -> (sport, start, names, newest)
+    any_at: dict = {}
     window: list = []
     for row in rows:
         game_id, sport, commence, home, away = row[:5]
-        stamps = [t for t in (_parse_ts(c) for c in row[5:]) if t is not None]
+        dk_cols = row[5:8] if len(row) > 8 else row[5:]
+        stamps = [t for t in (_parse_ts(c) for c in dk_cols) if t is not None]
         start = _parse_ts(commence)
         names = frozenset(str(n).strip().lower() for n in (home, away)
                           if n is not None and str(n).strip())
         info[game_id] = (sport, start, names, max(stamps) if stamps else None)
+        any_at[game_id] = _parse_ts(row[8]) if len(row) > 8 else None
         if start is not None and now < start <= horizon:
             window.append(game_id)
 
@@ -724,17 +877,103 @@ def check_pregame_prices_current(conn, r: "HealthReport",
     groups: dict = {}
     for g in stale_ids:
         groups.setdefault(_root(g), []).append(g)
+    # The newer of the DraftKings stamp and the any-book stamp is the one
+    # that counts, so a latest_odds row sitting behind the odds read cannot
+    # hide that DraftKings price, and a missing any-book stamp cannot turn a
+    # dead fetch into a pulled slate.
+    def _listed_at(game_id: str):
+        stamps = [t for t in (any_at.get(game_id), info[game_id][3]) if t is not None]
+        return max(stamps) if stamps else None
+
+    # A far game is "books pulled" only when the same sport still has a far
+    # game a book is pricing. Today's games stay fresh through an early-lines
+    # outage, so they must not be what lists the sport.
+    lead = timedelta(hours=PREGAME_PULLED_LEAD_HOURS)
+    early_line = timedelta(days=PREGAME_UNLISTED_EARLY_LINE_DAYS)
+    sport_far_listed = set()
+    sport_near_fresh = set()
+    for game_id in window:
+        start = info[game_id][1]
+        if start is None:
+            continue
+        if (start - now) <= lead:
+            dk = info[game_id][3]
+            if dk is not None and dk >= floor:
+                sport_near_fresh.add(info[game_id][0])
+            continue
+        listed = _listed_at(game_id)
+        if listed is not None and listed >= floor:
+            sport_far_listed.add(info[game_id][0])
+
+    def _weeks_old(stamp) -> bool:
+        return stamp is not None and stamp < (now - early_line)
+
+    wants_call = False
     for members in groups.values():
         sport = info[members[0]][0]
+        if sport in sport_far_listed or sport not in sport_near_fresh:
+            continue
+        listed_last = max(_listed_at(g) or info[g][3] for g in members)
+        start = min(info[g][1] for g in members)
+        far = start is not None and (start - now) > lead
+        if listed_last < floor and far and _weeks_old(listed_last):
+            wants_call = True
+            break
+    slate_sports = (_sports_with_a_live_slate_call(conn, floor)
+                    if wants_call else set())
+
+    pulled: dict = {}
+    unlisted: dict = {}
+    for members in groups.values():
+        sport = info[members[0]][0]
+        dk_last = max(info[g][3] for g in members)
+        listed_last = max(_listed_at(g) or dk_last for g in members)
+        start = min(info[g][1] for g in members)
+        far = start is not None and (start - now) > lead
+        if listed_last < floor and far and sport in sport_far_listed:
+            pulled[sport] = pulled.get(sport, 0) + 1
+            continue
+        if (listed_last < floor and far and _weeks_old(listed_last)
+                and sport in sport_near_fresh and sport in slate_sports):
+            unlisted[sport] = unlisted.get(sport, 0) + 1
+            continue
         priced[sport] = priced.get(sport, 0) + 1
-        stale.setdefault(sport, []).append(max(info[g][3] for g in members))
+        stale.setdefault(sport, []).append(dk_last)
     merged = len(stale_ids) - len(groups)
+    pulled_n = sum(pulled.values())
+    unlisted_n = sum(unlisted.values())
+
+    def _pulled_note(lead_in: str) -> str:
+        if not pulled_n:
+            return ""
+        who = ", ".join(f"{s} {pulled[s]}" for s in sorted(pulled))
+        noun = "game" if pulled_n == 1 else "games"
+        return (f"{lead_in}{pulled_n} {noun} more than "
+                f"{PREGAME_PULLED_LEAD_HOURS} hours from start, with no price "
+                f"from any book in the last {limit} minutes, left out ({who}): "
+                f"the same sport still has a game more than "
+                f"{PREGAME_PULLED_LEAD_HOURS} hours out that a book is pricing, "
+                f"so this is a slate the books pulled, not a dead fetch")
+
+    def _unlisted_note(lead_in: str) -> str:
+        if not unlisted_n:
+            return ""
+        who = ", ".join(f"{s} {unlisted[s]}" for s in sorted(unlisted))
+        noun = "game" if unlisted_n == 1 else "games"
+        return (f"{lead_in}{unlisted_n} {noun} more than "
+                f"{PREGAME_PULLED_LEAD_HOURS} hours from start, whose only "
+                f"price is more than {PREGAME_UNLISTED_EARLY_LINE_DAYS} days "
+                f"old, left out ({who}): a nearer game in that sport has a "
+                f"DraftKings price from the last {limit} minutes, and a "
+                f"successful odds-list call in that window did not list them")
 
     hours = PREGAME_CURRENT_WINDOW_HOURS
     n_priced = sum(priced.values())
     n_stale = sum(len(v) for v in stale.values())
-    if n_priced < PREGAME_STALE_MIN_GAMES:
+    if n_priced < PREGAME_STALE_MIN_GAMES and not pulled_n and not unlisted_n:
         # Too few games for the share to mean anything: is the feed alive?
+        # A pulled slate does not take this branch: the same sport still has
+        # a far game a book is pricing, which is what `pulled_n` required.
         try:
             fresh = conn.execute("""
                 SELECT 1 FROM odds
@@ -756,10 +995,16 @@ def check_pregame_prices_current(conn, r: "HealthReport",
                   f"games in the next {hours} hours to judge game by game)",
                   reason=REASON_STALE_DATA, cadence=cadence)
             return
-    if n_priced == 0:
+    if n_priced == 0 and not pulled_n and not unlisted_n:
         r.add(check, SKIPPED, "CRIT",
               f"no game DraftKings prices kicks off in the next {hours} hours",
               reason=REASON_GATE_SHUT, cadence=cadence)
+        return
+    if n_priced == 0:
+        r.add(check, OK, "CRIT",
+              "no game a book is still listing kicks off in the next "
+              f"{hours} hours" + _pulled_note("; ") + _unlisted_note("; "),
+              reason=REASON_FRESH, cadence=cadence)
         return
 
     def _alarm(n_s: int, n_p: int) -> bool:
@@ -778,7 +1023,9 @@ def check_pregame_prices_current(conn, r: "HealthReport",
               f"them, so the board is emptying: check the odds fetch. Raised "
               f"when at least half the priced games (overall or in one sport) "
               f"and at least {PREGAME_STALE_MIN_GAMES} are behind, because a "
-              f"cancelled fight or a pulled game is normal.",
+              f"cancelled fight or a pulled game is normal."
+              + _pulled_note(" ")
+              + _unlisted_note(" "),
               last.isoformat(),
               reason=(f"{late_h:.0f} hours late" if late_h >= 1 else "Just late"),
               cadence=cadence)
@@ -789,6 +1036,8 @@ def check_pregame_prices_current(conn, r: "HealthReport",
     if n_stale:
         detail += (f"; {n_stale} do not ({by_sport}), under the alarm level of "
                    f"half the priced games and at least {PREGAME_STALE_MIN_GAMES}")
+    detail += _pulled_note("; ")
+    detail += _unlisted_note("; ")
     if leftovers or merged:
         detail += (f"; {leftovers + merged} extra ids of a game counted under "
                    f"another id were left out")
@@ -1104,6 +1353,36 @@ def pick_unique_index_problems(rows) -> list[str]:
     return problems
 
 
+def _record_daily_pipeline_completion(conn, r) -> None:
+    """Flag a killed or missing 6:00am ET daily.
+
+    ``refresh_pass_completion`` waits 2 hours and then only speaks when the
+    latest finished pass is still inside 90 minutes. On 2026-11-04 the daily
+    retry had been unfinished for 81 minutes while the 12:17Z hourly finished
+    clean, so that check stayed on its OK branch.
+    """
+    from tracking.daily_retry import assess_daily_completion, daily_run_from_row
+
+    try:
+        rows = conn.execute(
+            "SELECT started_at, finished_at, ok, failed_steps "
+            "FROM pipeline_runs WHERE run_kind = 'daily' "
+            "AND (finished_at IS NULL OR started_at >= ?)",
+            ((datetime.now(timezone.utc) - timedelta(hours=36)).isoformat(),),
+        ).fetchall()
+    except Exception as exc:  # noqa: BLE001 — one check must not sink the rest
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        r.add("daily_pipeline_completion", ERROR, "CRIT",
+              f"cannot read pipeline_runs: {exc}")
+        return
+    runs = [daily_run_from_row(row) for row in rows or []]
+    status, detail = assess_daily_completion(datetime.now(timezone.utc), runs)
+    r.add("daily_pipeline_completion", status, "CRIT", detail)
+
+
 def run_system_health(run_date: str | None = None) -> dict:
     """Run all checks, upsert results into system_health_checks, log a summary.
 
@@ -1243,6 +1522,21 @@ def run_system_health(run_date: str | None = None) -> dict:
         except Exception as exc:
             r.add("odds_api_credits", ERROR, "WARN", f"query failed: {exc}")
 
+        # ── NBA in-play loop OUTPUTS (models/nba_live_loop.py) ───────────────
+        # Its heartbeat says it ran; this says it did its job on yesterday's
+        # slate: every final game the loop could have covered has a row in
+        # nba_live_decisions, and every fetch window at or after go-live that
+        # had a game to decide made its Odds API call. Games and windows that
+        # finished before the first supervisor tick (2026-11-05 11:00 ET) are
+        # not scored (tracking/nba_live_health.py).
+        try:
+            from tracking.nba_live_health import check as _nba_live_check
+            _st, _det = _nba_live_check(conn, yday)
+            r.add("nba_live_outputs", {"ok": OK, "stale": STALE, "skipped": SKIPPED}[_st], "WARN", _det)
+        except Exception as exc:
+            getattr(conn, "rollback", lambda: None)()
+            r.add("nba_live_outputs", ERROR, "WARN", f"query failed: {type(exc).__name__}: {exc}")
+
         # ── MLB stat feeds (MLB Stats API / Savant / Open-Meteo / ESPN) ─────
         r.date_check(conn, "mlb_team_stats", "CRIT", "mlb_team_stats", "as_of_date",
                      yday if daily_pipeline_pending else run_date,
@@ -1252,9 +1546,13 @@ def run_system_health(run_date: str | None = None) -> dict:
         # The two invariants that would have caught the leak on day one:
         # impossible games_played (row claims games not yet played) and thin
         # snapshot seasons (< MIN_SNAPSHOTS_PER_SEASON distinct as_of_dates).
-        # verify() excuses the current season's opening days — one daily
-        # snapshot until finals span that many days — and does not excuse
-        # any historical season.
+        # verify() excuses two live-season shapes and no historical season:
+        # opening days (one daily snapshot until finals span
+        # MIN_SNAPSHOTS_PER_SEASON days), and a young snapshot series whose
+        # first as_of_date is fewer than that many days before the check
+        # and whose newest row is today or yesterday. A series that has
+        # collapsed or stopped stays thin. An empty games read is not an
+        # excuse.
         # Rebuild landed 2026-09-03; marker set 2026-09-14. This is the ongoing
         # health gate — same checks as `python -m data.team_stats_rebuild
         # --verify-only` / the team_stats_asof_verify worker job. Never rebuilds.
@@ -1431,6 +1729,9 @@ def run_system_health(run_date: str | None = None) -> dict:
 
         # ── NBA schedule: confirmed by its daily ESPN refresh ────────────────
         check_nba_schedule_refresh(conn, r, run_date)
+
+        # ── NHL schedule: confirmed by its daily NHL API refresh ─────────────
+        check_nhl_schedule_refresh(conn, r, run_date)
 
         # ── ESPN reachability probe (diagnostic, not an impact check) ────────
         # WNBA finals come from site.api.espn.com, which stopped serving the
@@ -1688,6 +1989,34 @@ def run_system_health(run_date: str | None = None) -> dict:
         else:
             r.add("settlement_lag", OK, "WARN", "no settled-score picks awaiting settlement")
 
+        # The same picks past settlement_lag's window, with no ceiling. A pick that
+        # cannot settle went quiet after a fortnight, and it still walks every
+        # settle pass back to its date (paper_tracker._game_settle_window_days). A
+        # first-half pick lands here when its quarters disagree with the final
+        # (data/ingestors/nba_period_scores.py asks ESPN again on every pass).
+        stranded_before = (d - timedelta(days=14)).strftime("%Y-%m-%d")
+        n_stranded = _scalar(conn, """
+            SELECT COUNT(*) FROM picks p JOIN games g ON g.game_id = p.game_id
+            WHERE p.signal_type = 'BET' AND p.result IS NULL
+              AND p.game_date < ?
+              AND g.home_score IS NOT NULL AND p.is_live IS NOT TRUE
+        """, (stranded_before,)) or 0
+        if n_stranded > 0:
+            oldest = conn.execute("""
+                SELECT p.model_id, p.game_id, p.game_date
+                FROM picks p JOIN games g ON g.game_id = p.game_id
+                WHERE p.signal_type = 'BET' AND p.result IS NULL
+                  AND p.game_date < ?
+                  AND g.home_score IS NOT NULL AND p.is_live IS NOT TRUE
+                ORDER BY p.game_date LIMIT 10
+            """, (stranded_before,)).fetchall()
+            r.add("settlement_stranded", STALE, "WARN",
+                  f"{n_stranded} BET pick(s) over 14 days old with final scores but no "
+                  f"result; oldest: " + ", ".join(f"{m} {g}" for m, g, _ in oldest))
+        else:
+            r.add("settlement_stranded", OK, "WARN",
+                  "no BET older than 14 days is waiting on a result")
+
         # Opening-signal capture. This is the step that feeds Discord posts, the
         # mobile signal push AND the shadow track — and when it dies it dies
         # SILENTLY as far as the data is concerned: picks keep scoring, so every
@@ -1761,10 +2090,12 @@ def run_system_health(run_date: str | None = None) -> dict:
 
         # A run that started long ago and never finished = hang / OOM / killed
         # worker. Absence of finished_at is the only way that becomes visible.
-        # Deploy-killed hourly/evening rows are stamped aborted at pipeline
-        # boot (run_ledger.abort_prior_refresh_orphans), so a row still open
-        # past 2h is a pass this process may still be inside. A daily is not
-        # closed by that sweep.
+        # Deploy-killed hourly/evening/daily rows are stamped aborted at
+        # pipeline boot (run_ledger.abort_prior_refresh_orphans), so a row
+        # still open past 2h is a pass this process may still be inside.
+        # A daily killed and left unfinished under 2h is
+        # daily_pipeline_completion, not this check: hourlies keep finishing,
+        # so the 90-minute branch stays green (2026-11-04).
         stuck = 0
         if ledger_readable:
             stuck = _scalar(conn, """
@@ -1839,7 +2170,9 @@ def run_system_health(run_date: str | None = None) -> dict:
             # writes into failed_steps when it closes a run whose worker was
             # replaced mid-pass. Both live in the same column, so both must be
             # excluded or a deploy reports itself as a failing pipeline step.
-            _META_STEPS = {"health-check", "model-quality", "aborted"}
+            # "deploy-cutoff" is the SIGTERM drain closing its own row.
+            # Same column as a real step name, same exclusion as "aborted".
+            _META_STEPS = {"health-check", "model-quality", "aborted", "deploy-cutoff"}
             per_pass = [set((row[0] or "").split(",")) - {""} - _META_STEPS
                         for row in recent]
             persistent = sorted(set.intersection(*per_pass))
@@ -1856,6 +2189,8 @@ def run_system_health(run_date: str | None = None) -> dict:
             else:
                 r.add("refresh_pass_steps", OK, "CRIT",
                       "no step failures in the last 3 refresh passes")
+
+        _record_daily_pipeline_completion(conn, r)
 
         # ── Signal delivery (picks -> Discord ledger) ────────────────────────
         # The notifier reads `picks`, not `opening_signals` (2026-09-05, Matt:
@@ -1874,10 +2209,12 @@ def run_system_health(run_date: str | None = None) -> dict:
         # after the 10:02Z threshold_sync, hours after first pitch. A genuine
         # notifier outage still alarms: those picks are pre-commence.
         try:
-            from config import DISCORD_WEBHOOKS, DISCORD_WEBHOOK_DEFAULT
+            from config import DISCORD_WEBHOOK_DEFAULT, discord_sports_wired
+            # A sport with a channel id and the bot token posts too
+            # (tracking/discord_notifier._channel_webhook).
+            wired = discord_sports_wired()
         except Exception:
-            DISCORD_WEBHOOKS, DISCORD_WEBHOOK_DEFAULT = {}, ""
-        wired = set(DISCORD_WEBHOOKS)
+            DISCORD_WEBHOOK_DEFAULT, wired = "", set()
         if not wired and not DISCORD_WEBHOOK_DEFAULT:
             r.add("signal_delivery", SKIPPED, "CRIT",
                   "no DISCORD_WEBHOOK_* configured - nothing to deliver to")

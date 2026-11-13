@@ -311,9 +311,37 @@ export function previewTypedLine(
   return Math.min(ceil, Math.max(floor, parsed));
 }
 
+/** Finger target for the compact marker. The strip itself stays short. */
+export const MARKER_HIT_H = 44;
+
+/**
+ * How far a 44pt marker target hangs past the short strip, each side.
+ * Zero once the strip is already at least 44pt (the typing field).
+ */
+export function markerHitOverhang(visualH: number, hitH = MARKER_HIT_H): number {
+  if (!Number.isFinite(visualH) || visualH <= 0) return 0;
+  const target = Number.isFinite(hitH) && hitH > 0 ? hitH : MARKER_HIT_H;
+  return Math.max(0, (target - visualH) / 2);
+}
+
+/**
+ * Marker layout measured inside the visual strip, shifted into the gesture
+ * view. The strip sits `overhang` below that view's top; the wings occupy
+ * the overhang and are only as wide as the pill.
+ */
+export function markerBoxInGesture(box: BubbleBox, overhang: number): BubbleBox {
+  const shift = Number.isFinite(overhang) ? overhang : 0;
+  return { x: box.x, y: box.y + shift, width: box.width, height: box.height };
+}
+
 export function pointInBubble(x: number, y: number, box: BubbleBox): boolean {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-  return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+  // The compact marker draws at 22pt inside a 28pt strip. The finger target
+  // is at least 44pt tall, grown equally above and below the drawn pill.
+  // Width stays the pill's, so a tap on a neighbouring tick still moves the line.
+  const height = Math.max(box.height, MARKER_HIT_H);
+  const top = box.y - (height - box.height) / 2;
+  return x >= box.x && x <= box.x + box.width && y >= top && y <= top + height;
 }
 
 /** VoiceOver name for the bubble. The stat label is the unit ("Pass Yards").
@@ -356,4 +384,43 @@ export function rulerChromeHeight(fontScale: number): number {
   const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
   const bubble = Math.max(THRESHOLD_BUBBLE_H, Math.round(THRESHOLD_BUBBLE_H * Math.min(scale, 2)));
   return Math.max(72, 26 + bubble);
+}
+
+/**
+ * Resting height of the Stats ruler.
+ *
+ * Matt, 2026-10-28: the 28pt "Compact B" strip "looks too small and I cannot
+ * tell what I'm dragging to". It is now three bands: the selected number on a
+ * marker bubble (RULER_MARK_H), a pointer from that bubble onto the ticks,
+ * and the tick row with its numbers printed under it (RULER_TICKS_H), so the
+ * values passing under the pointer are readable while dragging. Taller than
+ * the 44pt tap target, so the marker needs no overhang wings at rest. The
+ * marker scales with text up to 1.6x; 2x text scrolls the control
+ * (`thresholdControlsScroll`).
+ */
+export const RULER_MARK_H = 30;
+/** Tick marks plus the number row printed under them. */
+export const RULER_TICKS_H = 32;
+
+/** Marker bubble height at a text scale (capped at 1.6x). */
+export function rulerMarkHeight(fontScale: number): number {
+  const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
+  return Math.round(RULER_MARK_H * Math.min(Math.max(scale, 1), 1.6));
+}
+
+export function compactRulerHeight(fontScale: number): number {
+  return rulerMarkHeight(fontScale) + RULER_TICKS_H;
+}
+
+/**
+ * The stop sitting under the centre pointer at a scroll offset — what the
+ * bubble shows WHILE the strip is moving, before it settles. Clamped to the
+ * strip's ends so an overscroll bounce never names a stop that does not
+ * exist.
+ */
+export function stopUnderOffset(offsetX: number, tickW: number, s: RulerScale): number {
+  if (!Number.isFinite(offsetX) || !(tickW > 0)) return s.min;
+  const last = stopCount(s) - 1;
+  const i = Math.min(Math.max(Math.round(offsetX / tickW), 0), Math.max(last, 0));
+  return stopAt(i, s);
 }

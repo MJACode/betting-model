@@ -202,8 +202,8 @@ def test_the_odds_api_map_bridges_names_no_rule_can():
     # A&M 2026-10-17 matchup was already split (605 odds rows on the alias).
     assert m.get("Citadel Bulldogs") == "The Citadel"
     assert m.get("Citadel") == "The Citadel"
-    # 2026-09-22: three FCS visitors on the 09-26 slate. The fold and the
-    # abbreviation rule also bridge the first two; Houston Baptist does not.
+    # 2026-09-22: three FCS visitors on the 09-26 slate. No resolver rule
+    # bridges any of them; these entries are the only bridge.
     assert m.get("William and Mary Tribe") == "William & Mary"
     assert m.get("William and Mary") == "William & Mary"
     assert m.get("LIU Sharks") == "Long Island University"

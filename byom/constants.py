@@ -9,8 +9,26 @@ It is not a filter and it is not a reason to skip a game.
 # check constraint.
 LINE_BASIS = "DraftKings line at game start"
 
+# player_prop_odds NFL coverage used by this builder starts 2023-09-01.
+# Seasons before 2023 are refused. A 2023 game dated before that day is
+# not built.
+PROP_HISTORY_START_SEASON = 2023
+PROP_HISTORY_START_DATE = "2023-09-01"
+
 # Measured 2026-10-16: min(season) in nfl_odds_history for bookmaker
 # 'draftkings' is 2020. games holds 2015-2019. Those seasons are not built.
 DK_HISTORY_START_SEASON = 2020
+
+# Measured 2026-10-29 on games joined to odds (bookmaker draftkings,
+# market h2h/spreads/totals): season 2021 is the first NBA season with
+# a DraftKings game line (1080 of 1080). Seasons 2019 and 2020 are in
+# games and have zero of those rows. NBA season is the ending year, so
+# 2021 is 2020-21. The in-progress season stays above this floor.
+NBA_DK_HISTORY_START_SEASON = 2021
+
+# Measured 2026-11-05 on byom_game_facts: NHL seasons 2019 and 2020 have
+# no DraftKings line; 2021 (2020-21) is the first, with 97% moneylines.
+# NHL season is the ending year, the same split as NBA.
+NHL_DK_HISTORY_START_SEASON = 2021
 
 SPORT = "NFL"

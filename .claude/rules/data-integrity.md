@@ -88,9 +88,10 @@ Every one of these is a way a number can be wrong while looking right.
   Before writing a `DISTINCT ON`, a `LATERAL ... LIMIT 1` or a skip scan for
   the app, ask what the read costs on the biggest day the log will ever have.
   The trigger's cost is measured in `tests/test_latest_line_state.py` and in
-  `docs/rules_evidence.md`; a DELETE of a key's newest row is NOT trapped (the
-  pruner never does that), so if it ever must be, `latest_lines_rebuild_*`
-  reconciles a range.
+  `docs/rules_evidence.md`; a DELETE of a key's newest row is NOT trapped.
+  Since 2026-10-26 the pruner does delete one on settled games (a post-start
+  row typed pre-game is no longer kept as the close), which leaves that
+  game's latest-line row stale; `latest_lines_rebuild_*` reconciles a range.
 - **Leakage hides in "latest snapshot".** Every bulk feature loader that takes
   the newest odds row must bound on `snapshot_at <= commence_time` AND exclude
   `in_play`. Without it, 67% of completed 2026 WNBA games were featurized with a

@@ -27,7 +27,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from data.team_stats_rebuild import (MIN_SNAPSHOTS_PER_SEASON,
                                      impossible_games_played,
                                      live_season_snapshot_grace,
-                                     seasons_with_too_few_snapshots)
+                                     seasons_with_too_few_snapshots,
+                                     young_snapshot_series)
 
 
 # ── 1. a row cannot know about games that have not been played ───────────────
@@ -558,6 +559,31 @@ def test_snapshot_grace_is_opening_night_not_a_finished_season():
         ["2026-10-07", "2027-04-16"]) is False
 
 
+def test_young_snapshot_series_is_recent_and_under_five_days():
+    """The check clock is 2026-11-03. A series that started that morning,
+    or four days earlier and still writing, is young. Five days, or a
+    last row two days behind, is not."""
+    today = "2026-11-03"
+    assert young_snapshot_series([], today=today) is False
+    assert young_snapshot_series(["2026-11-03"], today=today) is True
+    assert young_snapshot_series(
+        ["2026-10-30", "2026-11-03"], today=today) is True
+    assert young_snapshot_series(
+        ["2026-11-02"], today=today) is True
+    # Exactly five days before the check: a daily writer would hold five
+    # dates. The floor is exclusive.
+    assert young_snapshot_series(
+        ["2026-10-29", "2026-11-03"], today=today) is False
+    # Started inside the window, then stopped (last row is the first row,
+    # four days behind).
+    assert young_snapshot_series(["2026-10-30"], today=today) is False
+    # Newest row two days behind: a missed run, not the ET/UTC one-day skew.
+    assert young_snapshot_series(
+        ["2026-11-01"], today=today) is False
+    # A future as_of_date is not "current".
+    assert young_snapshot_series(["2026-11-04"], today=today) is False
+
+
 class _SeasonConn:
     """verify() fake that honors the season bind on the games query."""
 
@@ -657,8 +683,10 @@ def test_verify_four_day_opening_span_is_still_grace():
 
 
 def test_verify_five_day_span_with_one_snapshot_is_thin():
-    """Sep 29 through Oct 4 is five days. One snapshot is a stuck writer,
-    which is the leak shape on a season that should already be a series."""
+    """Sep 29 through Oct 4 is five days. The only snapshot is the first
+    morning, four days behind the check on Oct 4: a stuck writer. The
+    series is still inside five days of age and is not current, so the
+    young-series grace does not apply."""
     from data.team_stats_rebuild import verify
 
     stats = [("BOS", 2027, "2026-09-30", 1)]
@@ -666,6 +694,116 @@ def test_verify_five_day_span_with_one_snapshot_is_thin():
         ("2026-09-29", 2027, "BOS", "MTL", 3, 1, 1, None, None),
         ("2026-10-04", 2027, "BOS", "MTL", 2, 1, 1, None, None),
     ]
-    v = verify(_SeasonConn(stats, games), "NHL", [2027])
+    v = verify(_SeasonConn(stats, games), "NHL", [2027], today="2026-10-04")
     assert v["live_snapshot_grace"] is None
     assert (2027, 1) in v["thin_seasons"]
+
+
+def test_verify_young_snapshot_series_on_a_live_season_is_not_thin():
+    """NBA 2027 on 2026-11-03: finals 2026-10-20..2026-11-02 (13 days, 107
+    games), and the first nba_team_stats row of the season is as_of
+    2026-11-03 (30 rows, created 11:04:53Z). The games span is past the
+    opening-week floor. The snapshot series itself is one day old and
+    current, which is not the historical leak. A thin historical season
+    beside it still CRITs."""
+    from data.team_stats_rebuild import verify
+
+    stats = [
+        ("BOS", 2027, "2026-11-03", 8),
+        ("BOS", 2023, "2022-09-01", 82),
+    ]
+    games = [
+        ("2026-10-20", 2027, "BOS", "PHI", 110, 100, 1, None, None),
+        ("2026-11-02", 2027, "BOS", "PHI", 108, 99, 1, None, None),
+        ("2023-04-10", 2023, "BOS", "PHI", 112, 98, 1, None, None),
+    ]
+    v = verify(_SeasonConn(stats, games), "NBA", [2023, 2027], today="2026-11-03")
+    assert v["live_snapshot_grace"] == 2027
+    assert not any(s == 2027 for s, _n in v["thin_seasons"])
+    assert (2023, 1) in v["thin_seasons"]
+    assert any(r["season"] == 2023 and r["claimed"] == 82 for r in v["impossible"])
+
+
+def test_verify_young_series_still_writing_yesterday_is_not_thin():
+    """A series that started four days ago and whose newest row is
+    yesterday has not had time to clear five daily snapshots."""
+    from data.team_stats_rebuild import verify
+
+    stats = [
+        ("BOS", 2027, "2026-10-31", 6),
+        ("BOS", 2027, "2026-11-02", 8),
+    ]
+    games = [
+        ("2026-10-20", 2027, "BOS", "PHI", 110, 100, 1, None, None),
+        ("2026-11-02", 2027, "BOS", "PHI", 108, 99, 1, None, None),
+    ]
+    v = verify(_SeasonConn(stats, games), "NBA", [2027], today="2026-11-03")
+    assert v["live_snapshot_grace"] == 2027
+    assert v["thin_seasons"] == []
+
+
+def test_verify_stopped_young_series_stays_thin():
+    """First snapshot four days ago and no newer row: the series started
+    inside the window and then stopped. Games have kept going."""
+    from data.team_stats_rebuild import verify
+
+    stats = [("BOS", 2027, "2026-10-30", 4)]
+    games = [
+        ("2026-10-20", 2027, "BOS", "PHI", 110, 100, 1, None, None),
+        ("2026-11-02", 2027, "BOS", "PHI", 108, 99, 1, None, None),
+    ]
+    v = verify(_SeasonConn(stats, games), "NBA", [2027], today="2026-11-03")
+    assert v["live_snapshot_grace"] is None
+    assert (2027, 1) in v["thin_seasons"]
+
+
+def test_verify_collapsed_series_with_a_fresh_row_stays_thin():
+    """Two as-of dates, the first twelve days ago and the last today.
+    The newest row is current and the series is not young."""
+    from data.team_stats_rebuild import verify
+
+    stats = [
+        ("BOS", 2027, "2026-10-22", 1),
+        ("BOS", 2027, "2026-11-03", 8),
+    ]
+    games = [
+        ("2026-10-20", 2027, "BOS", "PHI", 110, 100, 1, None, None),
+        ("2026-11-02", 2027, "BOS", "PHI", 108, 99, 1, None, None),
+    ]
+    v = verify(_SeasonConn(stats, games), "NBA", [2027], today="2026-11-03")
+    assert v["live_snapshot_grace"] is None
+    assert (2027, 2) in v["thin_seasons"]
+
+
+def test_verify_five_day_old_series_with_two_snapshots_stays_thin():
+    """Five days before the check, a daily writer would already hold five
+    as-of dates. Two dates means days are missing."""
+    from data.team_stats_rebuild import verify
+
+    stats = [
+        ("BOS", 2027, "2026-10-29", 3),
+        ("BOS", 2027, "2026-11-03", 8),
+    ]
+    games = [
+        ("2026-10-20", 2027, "BOS", "PHI", 110, 100, 1, None, None),
+        ("2026-11-02", 2027, "BOS", "PHI", 108, 99, 1, None, None),
+    ]
+    v = verify(_SeasonConn(stats, games), "NBA", [2027], today="2026-11-03")
+    assert v["live_snapshot_grace"] is None
+    assert (2027, 2) in v["thin_seasons"]
+
+
+def test_verify_empty_games_read_does_not_hide_a_young_series():
+    """A games read that returns nothing must not excuse a one-snapshot
+    live season, even when that snapshot is dated today."""
+    from data.team_stats_rebuild import verify
+
+    stats = [("BOS", 2027, "2026-11-03", 8)]
+    v = verify(_SeasonConn(stats, []), "NBA", [2027], today="2026-11-03")
+    assert v["live_snapshot_grace"] is None
+    assert (2027, 1) in v["thin_seasons"]
+    # A blank game date is the same empty read, not a completed final.
+    blank = [("", 2027, "BOS", "PHI", 110, 100, 1, None, None)]
+    v_blank = verify(_SeasonConn(stats, blank), "NBA", [2027], today="2026-11-03")
+    assert v_blank["live_snapshot_grace"] is None
+    assert (2027, 1) in v_blank["thin_seasons"]

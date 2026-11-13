@@ -82,15 +82,20 @@ BOARD = {"bookmakers": [
 
 
 class _Conn:
-    def __init__(self, closes=()):
+    def __init__(self, closes=(), bets=None, listed=()):
         self.closes, self.inserted, self.commits = set(closes), [], 0
+        self.bets = bets if bets is not None else [
+            (GID, "player_points", "LAL", "GSW", "2026-10-21",
+             "2026-10-22T00:10:00+00:00", "2026-10-22T00:00:00+00:00")]
+        self.listed = list(listed)
 
     def execute(self, sql, params=None):
         s = " ".join(sql.split())
         self._rows = []
         if "FROM picks p" in s:
-            self._rows = [(GID, "player_points", "LAL", "GSW", "2026-10-21",
-                           "2026-10-22T00:10:00+00:00", "2026-10-22T00:00:00+00:00")]
+            self._rows = self.bets
+        elif s.startswith("SELECT game_id, commence_time, game_type FROM nba_schedule"):
+            self._rows = [r for r in self.listed if r[0] in params[0]]
         elif "snapshot_type = %s" in s:
             self._rows = [(g,) for g in params[0] if g in self.closes]
         return self
@@ -169,6 +174,42 @@ def test_the_tip_is_the_schedules_not_the_feeds_later_one(monkeypatch, wired):
     monkeypatch.setattr(ing, "get_connection", lambda: conn)
     games = ing.bet_games(conn, TIP - timedelta(minutes=14))
     assert games[GID]["tip"] == TIP
+
+
+def _bet(gid=GID, feed=TIP, sched=None, home="LAL", away="GSW"):
+    return [(gid, "player_points", home, away, "2026-10-21", feed.isoformat(), sched.isoformat() if sched else None)]
+
+
+@pytest.mark.parametrize("kind,espn_early_is_used", [("playoff", False), ("playin", False), ("cup_final", False),
+                                                     ("regular", True)])
+def test_a_false_early_start_does_not_buy_a_postseason_close_hours_ahead(kind, espn_early_is_used):
+    """The close follows the tip the bet's card decided on. On a postseason row a start five hours before
+    the feed's is read as ESPN's error, and the close is bought before the feed's start. A regular-season
+    row is the league's, and stays on the earlier."""
+    espn = TIP - timedelta(hours=5)
+    conn = _Conn(bets=_bet(feed=TIP, sched=espn), listed=[(GID, espn.isoformat(), kind)])
+    at_espn = ing.bet_games(conn, espn - timedelta(minutes=14))
+    at_feed = ing.bet_games(conn, TIP - timedelta(minutes=14))
+    if espn_early_is_used:
+        assert at_espn[GID]["tip"] == espn and at_feed == {}
+    else:
+        assert at_espn == {} and at_feed[GID]["tip"] == TIP
+
+
+def test_a_bet_on_a_row_the_other_way_round_reads_espns_tip():
+    """The feed's start is 15 minutes late here, so the close 12-25 minutes before it could land after
+    the real tip."""
+    feed_id, espn_id = "NBA_2026-10-21_LAL_GSW", "NBA_2026-10-21_GSW_LAL"
+    conn = _Conn(bets=_bet(gid=feed_id, feed=TIP + timedelta(minutes=15), home="GSW", away="LAL"),
+                 listed=[(espn_id, TIP.isoformat(), "cup_final")])
+    assert ing.bet_games(conn, TIP - timedelta(minutes=14))[feed_id]["tip"] == TIP
+
+
+def test_a_bet_with_only_the_feeds_start_is_still_bought_on_it():
+    """No close is lost: its closing-line value stays empty (tests/test_nba_clv_feed_start.py), and the
+    row is there if the schedule's tip arrives."""
+    conn = _Conn(bets=_bet(feed=TIP), listed=[])
+    assert ing.bet_games(conn, TIP - timedelta(minutes=14))[GID]["tip"] == TIP
 
 
 def test_the_step_is_wired_into_the_refresh_pass():

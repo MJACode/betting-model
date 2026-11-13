@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useTrackedBets, type LiveTrackSnapshot } from './useTrackedBets';
-import { useStakeSettings, FLAT_STAKE, type StakeMode } from './useStakeSettings';
+import { useStakeSettings, type StakeMode } from './useStakeSettings';
 import { fetchPicksByIds, fetchLivePicksForGames, fetchGamesByIds } from '@/lib/queries';
 import {
   computeTrackedResults,
@@ -11,6 +11,7 @@ import {
   type TrackedBetSummary,
 } from '@/lib/trackedPerformance';
 import { computeLiveTrackedResults } from '@/lib/liveTracked';
+import { trackedStakeFor } from '@/lib/trackedStake';
 import type { Pick } from '@/types';
 
 /**
@@ -26,9 +27,9 @@ import type { Pick } from '@/types';
  * Fetch is failure-tolerant — a network error keeps the last-known rows so the
  * card degrades instead of vanishing.
  *
- * Stake per bet comes from useStakeSettings: $100 flat (default) or a per-bet
- * custom amount. There is no bankroll-derived mode — the app publishes flat
- * units and holds no bankroll to size off.
+ * Stake per bet comes from useStakeSettings through lib/trackedStake: the
+ * posted stake by default, so a tracked pick shows the Record tab's units, or
+ * the member's own stake on the bets they set ("My stakes").
  */
 export function useTrackedBetResults() {
   const { ids, liveSnapshots, untrackPick } = useTrackedBets();
@@ -73,13 +74,8 @@ export function useTrackedBetResults() {
     void load();
   }, [load]);
 
-  const stakeFor = useCallback(
-    (p: Pick): number => {
-      if (stakes.mode === 'custom') {
-        return stakes.customStakes[String(p.pick_id)] ?? FLAT_STAKE;
-      }
-      return FLAT_STAKE;
-    },
+  const stakeFor = useMemo(
+    () => trackedStakeFor(stakes.mode, stakes.customStakes),
     [stakes.mode, stakes.customStakes],
   );
 

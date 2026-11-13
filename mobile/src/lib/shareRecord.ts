@@ -5,10 +5,22 @@
  * (a native module → full rebuild) and is a deliberate follow-up.
  */
 
+import { formatClvBeatLine } from '@/lib/clvBeat';
 import { formatPct, formatPctSigned, formatSigned } from '@/lib/format';
 import type { TrackRecordSummary } from '@/lib/trackRecord';
 
 export const APP_URL = 'https://signalbase-ai.com';
+
+function clvShareLine(s: TrackRecordSummary): string | null {
+  const pushes = s.clvPush ?? 0;
+  const beats = s.clvBeat ?? 0;
+  const decisive = Math.max(0, (s.clvSettled ?? 0) - pushes);
+  const losses = Math.max(0, decisive - beats);
+  if (s.clvBeatRate == null && pushes <= 0) return null;
+  const clause = formatClvBeatLine(beats, losses, pushes);
+  if (!clause) return null;
+  return `Beat the closing price at the book we bet, ${clause}`;
+}
 
 export function buildShareMessage(
   s: TrackRecordSummary,
@@ -28,9 +40,7 @@ export function buildShareMessage(
         `${formatSigned(opts.endUnits, 2, 'u').replace(/u$/, '')} units, 1 to win`
       : null,
     roiKnown ? `${formatPctSigned(s.roi)} ROI · ${recordLine}` : recordLine,
-    s.clvBeatRate != null
-      ? `Beat the closing price at the book we bet, ${Math.round(s.clvBeatRate * 100)}% of the time`
-      : null,
+    clvShareLine(s),
     opts.since ? `${s.picks} settled picks since ${opts.since}` : null,
     '',
     'Every pick public — wins, losses, no-pick days. Nothing cherry-picked.',

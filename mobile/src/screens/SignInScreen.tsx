@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -9,18 +9,22 @@ import {
   Text,
   TextInput,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import {
+  appReviewCodePrompt,
+  isAppReviewDemoEmail,
+} from '@/lib/appReview';
 import {
   authErrorMessage,
   isCompleteOtp,
   isValidEmail,
   normalizeOtp,
-  providerLabel,
   sendEmailCode,
   signInWithProvider,
   verifyEmailCode,
@@ -29,14 +33,53 @@ import {
 } from '@/lib/auth';
 import { BrandMark } from '@/components/BrandMark';
 import { AUTH_PROVIDERS, EMAIL_OTP_LENGTH } from '@/lib/authConfig';
+import { billingReady } from '@/lib/billingConfig';
+import { fetchSubscription, isEntitled } from '@/lib/billing';
+import { postSignInRoutes } from '@/lib/authShell';
+import { fetchAccess } from '@/lib/discord';
+import { signalsEntitled } from '@/lib/iap';
+import { isAppPremium } from '@/lib/membership';
+import { PRIVACY_URL, TERMS_URL, openLink } from '@/lib/socialLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 /**
- * Sign-in screen. Unreachable while `AUTH_ENABLED` is false — nothing navigates
- * here — but kept fully wired so turning auth on is a one-line change.
+ * The system Sign in with Apple button. Loaded only on iOS, and only by
+ * `require`, so Android and a binary without the module never evaluate it.
+ */
+interface AppleSignInButtonModule {
+  isAvailableAsync: () => Promise<boolean>;
+  AppleAuthenticationButton: React.ComponentType<{
+    onPress: () => void;
+    buttonType: number;
+    buttonStyle: number;
+    cornerRadius?: number;
+    style?: StyleProp<ViewStyle>;
+    accessibilityState?: { disabled?: boolean };
+    pointerEvents?: 'none' | 'auto';
+  }>;
+  AppleAuthenticationButtonType: { CONTINUE: number };
+  AppleAuthenticationButtonStyle: { WHITE: number };
+}
+
+function loadAppleSignInButton(): AppleSignInButtonModule | null {
+  if (Platform.OS !== 'ios') return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require('expo-apple-authentication') as AppleSignInButtonModule;
+    if (typeof mod?.AppleAuthenticationButton !== 'function') return null;
+    if (typeof mod.isAvailableAsync !== 'function') return null;
+    return mod;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sign-in. Required when auth is on — cold open lands here, and there is no
+ * skip. Unreachable while `AUTH_ENABLED` is false.
  *
  * Email uses a 6-digit code rather than a magic link, so the flow never leaves
  * the app and can't be broken by an email client that rewrites links.
@@ -44,39 +87,57 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export function SignInScreen() {
   const navigation = useNavigation<Nav>();
   const providers = useMemo(() => visibleProviders(Platform.OS), []);
+  const appleButton = useMemo(
+    () => (providers.includes('apple') ? loadAppleSignInButton() : null),
+    [providers],
+  );
+  const [appleNativeOk, setAppleNativeOk] = useState(appleButton != null);
+
+  useEffect(() => {
+    if (!appleButton) return;
+    let cancelled = false;
+    appleButton.isAvailableAsync().then(
+      (ok) => {
+        if (!cancelled) setAppleNativeOk(ok);
+      },
+      () => {
+        if (!cancelled) setAppleNativeOk(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [appleButton]);
 
   const [step, setStep] = useState<'email' | 'code'>('email');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState<AuthProvider | 'email' | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
-  const dismiss = useCallback(() => {
-    if (navigation.canGoBack()) navigation.goBack();
+  const finish = useCallback(async (userId: string | undefined) => {
+    let premium = false;
+    if (billingReady()) {
+      const [access, sub] = await Promise.all([
+        fetchAccess().catch(() => null),
+        fetchSubscription().catch(() => null),
+      ]);
+      let rcSignals = false;
+      if (access?.entitled !== true && !isEntitled(sub) && userId) {
+        rcSignals = await signalsEntitled(userId);
+      }
+      premium = isAppPremium({
+        accessEntitled: access?.entitled === true,
+        subscription: sub,
+        rcSignals,
+      });
+    }
+    const routes = postSignInRoutes(billingReady(), premium);
+    navigation.reset({ index: routes.length - 1, routes });
   }, [navigation]);
 
-  const onProvider = useCallback(
-    async (provider: AuthProvider) => {
-      setError(null);
-      setNotice(null);
-      setBusy(provider);
-      try {
-        const session = await signInWithProvider(provider);
-        // null = the user dismissed the browser. Not an error; stay put.
-        if (session) dismiss();
-      } catch (e) {
-        setError(authErrorMessage(e));
-      } finally {
-        setBusy(null);
-      }
-    },
-    [dismiss],
-  );
-
-  const onSendCode = useCallback(async () => {
+  const startEmailCode = useCallback(async () => {
     setError(null);
-    setNotice(null);
     if (!isValidEmail(email)) {
       setError('Enter a valid email address.');
       return;
@@ -86,7 +147,6 @@ export function SignInScreen() {
       await sendEmailCode(email);
       setCode('');
       setStep('code');
-      setNotice(`We sent a ${EMAIL_OTP_LENGTH}-digit code to ${email.trim()}.`);
     } catch (e) {
       setError(authErrorMessage(e));
     } finally {
@@ -94,28 +154,55 @@ export function SignInScreen() {
     }
   }, [email]);
 
+  const onProvider = useCallback(
+    async (provider: AuthProvider) => {
+      // The demo address takes the code step from these buttons, for the
+      // reviewer and for anyone else who types that address. An empty field
+      // still starts Apple or Google. The labels stay Apple and Google
+      // because the review notes tell the reviewer to tap them.
+      if (isAppReviewDemoEmail(email)) {
+        await startEmailCode();
+        return;
+      }
+      setError(null);
+      setBusy(provider);
+      try {
+        const session = await signInWithProvider(provider);
+        // null = the user dismissed the Apple sheet or the Google browser.
+        // Not an error; stay put.
+        if (session) await finish(session.user.id);
+      } catch (e) {
+        setError(authErrorMessage(e));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [email, finish, startEmailCode],
+  );
+
+  const onSendCode = startEmailCode;
+
   const onVerify = useCallback(async () => {
     setError(null);
     setBusy('email');
     try {
-      await verifyEmailCode(email, code);
-      dismiss();
+      const session = await verifyEmailCode(email, code);
+      await finish(session.user.id);
     } catch (e) {
       setError(authErrorMessage(e));
     } finally {
       setBusy(null);
     }
-  }, [email, code, dismiss]);
+  }, [email, code, finish]);
 
   const onBackToEmail = useCallback(() => {
     setStep('email');
     setCode('');
     setError(null);
-    setNotice(null);
   }, []);
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -124,196 +211,237 @@ export function SignInScreen() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
-          <BrandMark size={64} style={styles.mark} />
-          <Text style={styles.title}>
-            {step === 'email' ? 'Sign in to Signalbase' : 'Check your email'}
-          </Text>
-          <Text style={styles.subtitle}>
-            {/* No cross-device-sync promise here: auth is session-only today. */}
-            {step === 'email'
-              ? 'Signing in is optional. Your models and tracked bets stay on this device.'
-              : `Enter the ${EMAIL_OTP_LENGTH}-digit code we sent you.`}
-          </Text>
+          <View style={styles.card}>
+            <BrandMark size={64} style={styles.mark} />
+            <Text style={styles.title}>Sign in to Signalbase</Text>
+            <Text style={styles.subtitle}>Model picks with a public record.</Text>
+            <Text style={styles.body}>
+              An account is needed to start a trial, subscribe and restore purchases.
+            </Text>
 
-          {error ? (
-            <View style={styles.errorBanner}>
-              <Ionicons name="alert-circle" size={16} color={colors.avoid} />
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
+            {error ? (
+              <View
+                style={styles.errorBanner}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+              >
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            ) : null}
 
-          {notice && !error ? (
-            <View style={styles.noticeBanner}>
-              <Ionicons name="mail-outline" size={16} color={colors.tint} />
-              <Text style={styles.noticeText}>{notice}</Text>
-            </View>
-          ) : null}
-
-          {step === 'email' ? (
-            <>
-              {providers.map((provider) => {
-                const isApple = provider === 'apple';
-                const pending = busy === provider;
-                return (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={isApple ? 'Continue with Apple' : 'Continue with Google'}
-                    accessibilityState={{ busy: pending, disabled: busy != null }}
-                    key={provider}
-                    onPress={() => onProvider(provider)}
-                    disabled={busy != null}
-                    style={({ pressed }) => [
-                      styles.providerBtn,
-                      isApple ? styles.appleBtn : styles.googleBtn,
-                      pressed && styles.btnPressed,
-                      busy != null && busy !== provider && styles.btnDisabled,
-                    ]}
-                  >
-                    {pending ? (
-                      <ActivityIndicator
-                        color={isApple ? colors.textInverse : colors.textPrimary}
+            {step === 'email' ? (
+              <>
+                {providers.map((provider) => {
+                  const isApple = provider === 'apple';
+                  const pending = busy === provider;
+                  if (isApple && appleButton && appleNativeOk) {
+                    if (pending) {
+                      return (
+                        <View
+                          key={provider}
+                          style={[styles.appleBtn, styles.appleNativeBtn]}
+                          accessibilityRole="progressbar"
+                          accessibilityLabel="Continue with Apple"
+                        >
+                          <ActivityIndicator color={colors.textPrimary} />
+                        </View>
+                      );
+                    }
+                    const AppleButton = appleButton.AppleAuthenticationButton;
+                    return (
+                      <AppleButton
+                        key={provider}
+                        buttonType={appleButton.AppleAuthenticationButtonType.CONTINUE}
+                        buttonStyle={appleButton.AppleAuthenticationButtonStyle.WHITE}
+                        cornerRadius={radii.md}
+                        style={[
+                          styles.appleNativeBtn,
+                          busy != null && busy !== provider && styles.btnDisabled,
+                        ]}
+                        pointerEvents={busy != null ? 'none' : 'auto'}
+                        accessibilityState={busy != null ? { disabled: true } : undefined}
+                        onPress={() => {
+                          if (busy != null) return;
+                          void onProvider('apple');
+                        }}
                       />
-                    ) : (
-                      <>
-                        <Ionicons
-                          name={isApple ? 'logo-apple' : 'logo-google'}
-                          size={18}
-                          color={isApple ? colors.textInverse : colors.textPrimary}
-                        />
+                    );
+                  }
+                  return (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={isApple ? 'Continue with Apple' : 'Continue with Google'}
+                      accessibilityState={{ busy: pending, disabled: busy != null }}
+                      key={provider}
+                      onPress={() => onProvider(provider)}
+                      disabled={busy != null}
+                      style={({ pressed }) => [
+                        styles.providerBtn,
+                        isApple ? styles.appleBtn : styles.googleBtn,
+                        pressed && styles.btnPressed,
+                        busy != null && busy !== provider && styles.btnDisabled,
+                      ]}
+                    >
+                      {pending ? (
+                        <ActivityIndicator color={isApple ? colors.textPrimary : colors.textInverse} />
+                      ) : (
                         <Text
                           style={[
                             styles.providerBtnText,
-                            isApple
-                              ? styles.appleBtnText
-                              : styles.googleBtnText,
+                            isApple ? styles.appleFallbackText : styles.googleBtnText,
                           ]}
                         >
-                          {providerLabel(provider)}
+                          {isApple ? 'Continue with Apple' : 'Continue with Google'}
                         </Text>
-                      </>
-                    )}
-                  </Pressable>
-                );
-              })}
+                      )}
+                    </Pressable>
+                  );
+                })}
 
-              {providers.length > 0 && AUTH_PROVIDERS.email ? (
-                <View style={styles.dividerRow}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>or</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-              ) : null}
+                {providers.length > 0 && AUTH_PROVIDERS.email ? (
+                  <View style={styles.dividerRow}>
+                    <View style={styles.dividerLine} />
+                    <Text style={styles.dividerText}>or</Text>
+                    <View style={styles.dividerLine} />
+                  </View>
+                ) : null}
 
-              {AUTH_PROVIDERS.email ? (
-                <>
-                  <TextInput
-                    accessibilityLabel="Email address"
-                    style={styles.input}
-                    value={email}
-                    onChangeText={setEmail}
-                    placeholder="you@example.com"
-                    placeholderTextColor={colors.textTertiary}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    autoComplete="email"
-                    textContentType="emailAddress"
-                    editable={busy == null}
-                    onSubmitEditing={onSendCode}
-                    returnKeyType="go"
-                  />
+                {AUTH_PROVIDERS.email ? (
+                  <>
+                    <TextInput
+                      accessibilityLabel="Email address"
+                      style={styles.input}
+                      value={email}
+                      onChangeText={setEmail}
+                      placeholder="Email address"
+                      placeholderTextColor={colors.brandMuted}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      autoComplete="email"
+                      textContentType="emailAddress"
+                      editable={busy == null}
+                      onSubmitEditing={onSendCode}
+                      returnKeyType="go"
+                    />
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Email me a code"
+                      accessibilityState={{ busy: busy === 'email', disabled: busy != null }}
+                      onPress={onSendCode}
+                      disabled={busy != null}
+                      style={({ pressed }) => [
+                        styles.primaryBtn,
+                        pressed && styles.btnPressed,
+                        busy != null && styles.btnDisabled,
+                      ]}
+                    >
+                      {busy === 'email' ? (
+                        <ActivityIndicator color={colors.brandInk} />
+                      ) : (
+                        <Text style={styles.primaryBtnText}>Email me a code</Text>
+                      )}
+                    </Pressable>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Text style={styles.kicker}>
+                  {isAppReviewDemoEmail(email) ? 'Enter your code' : 'Check your email'}
+                </Text>
+                <Text style={styles.body}>
+                  {isAppReviewDemoEmail(email)
+                    ? appReviewCodePrompt(EMAIL_OTP_LENGTH)
+                    : `We sent a ${EMAIL_OTP_LENGTH}-digit code to ${email.trim()}.`}
+                </Text>
+                {isAppReviewDemoEmail(email) ? (
+                  <Text style={styles.body}>{email.trim()}</Text>
+                ) : null}
+                <TextInput
+                  accessibilityLabel={`${EMAIL_OTP_LENGTH}-digit sign-in code`}
+                  style={[styles.input, styles.codeInput]}
+                  value={code}
+                  onChangeText={(t) => setCode(normalizeOtp(t))}
+                  placeholder={'·'.repeat(EMAIL_OTP_LENGTH)}
+                  placeholderTextColor={colors.brandMuted}
+                  keyboardType="number-pad"
+                  autoComplete="one-time-code"
+                  textContentType="oneTimeCode"
+                  maxLength={EMAIL_OTP_LENGTH}
+                  editable={busy == null}
+                  autoFocus
+                  onSubmitEditing={onVerify}
+                  returnKeyType="go"
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Verify and sign in"
+                  accessibilityState={{
+                    busy: busy === 'email',
+                    disabled: busy != null || !isCompleteOtp(code),
+                  }}
+                  onPress={onVerify}
+                  disabled={busy != null || !isCompleteOtp(code)}
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    pressed && styles.btnPressed,
+                    (busy != null || !isCompleteOtp(code)) && styles.btnDisabled,
+                  ]}
+                >
+                  {busy === 'email' ? (
+                    <ActivityIndicator color={colors.brandInk} />
+                  ) : (
+                    <Text style={styles.primaryBtnText}>Verify and sign in</Text>
+                  )}
+                </Pressable>
+
+                {isAppReviewDemoEmail(email) ? null : (
                   <Pressable
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                     accessibilityRole="button"
-                    accessibilityLabel="Email me a code"
-                    accessibilityState={{ busy: busy === 'email', disabled: busy != null }}
+                    accessibilityLabel="Send a new code"
                     onPress={onSendCode}
                     disabled={busy != null}
-                    style={({ pressed }) => [
-                      styles.primaryBtn,
-                      pressed && styles.btnPressed,
-                      busy != null && styles.btnDisabled,
-                    ]}
                   >
-                    {busy === 'email' ? (
-                      <ActivityIndicator color={colors.textInverse} />
-                    ) : (
-                      <Text style={styles.primaryBtnText}>Email me a code</Text>
-                    )}
+                    <Text style={styles.linkText}>Send a new code</Text>
                   </Pressable>
-                </>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <TextInput
-                accessibilityLabel={`${EMAIL_OTP_LENGTH}-digit sign-in code`}
-                style={[styles.input, styles.codeInput]}
-                value={code}
-                onChangeText={(t) => setCode(normalizeOtp(t))}
-                placeholder={'0'.repeat(EMAIL_OTP_LENGTH)}
-                placeholderTextColor={colors.textTertiary}
-                keyboardType="number-pad"
-                autoComplete="one-time-code"
-                textContentType="oneTimeCode"
-                maxLength={EMAIL_OTP_LENGTH}
-                editable={busy == null}
-                autoFocus
-                onSubmitEditing={onVerify}
-                returnKeyType="go"
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Verify and sign in"
-                accessibilityState={{ busy: busy === 'email', disabled: busy != null || !isCompleteOtp(code) }}
-                onPress={onVerify}
-                disabled={busy != null || !isCompleteOtp(code)}
-                style={({ pressed }) => [
-                  styles.primaryBtn,
-                  pressed && styles.btnPressed,
-                  (busy != null || !isCompleteOtp(code)) && styles.btnDisabled,
-                ]}
-              >
-                {busy === 'email' ? (
-                  <ActivityIndicator color={colors.textInverse} />
-                ) : (
-                  <Text style={styles.primaryBtnText}>Verify and sign in</Text>
                 )}
-              </Pressable>
+                <Pressable
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Use a different email"
+                  onPress={onBackToEmail}
+                  disabled={busy != null}
+                >
+                  <Text style={styles.linkText}>Use a different email</Text>
+                </Pressable>
+              </>
+            )}
 
+            <Text style={styles.legal}>By continuing you agree to the</Text>
+            <View style={styles.legalRow}>
               <Pressable
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                accessibilityRole="button"
-                accessibilityLabel="Send a new code"
-                onPress={onSendCode}
-                disabled={busy != null}
+                accessibilityRole="link"
+                accessibilityLabel="Terms"
+                onPress={() => openLink(TERMS_URL, 'Terms')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.legalHit}
               >
-                <Text style={styles.linkText}>Send a new code</Text>
+                <Text style={styles.legalLink}>Terms</Text>
               </Pressable>
+              <Text style={styles.legal}>and</Text>
               <Pressable
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                accessibilityRole="button"
-                accessibilityLabel="Use a different email"
-                onPress={onBackToEmail}
-                disabled={busy != null}
+                accessibilityRole="link"
+                accessibilityLabel="Privacy Policy"
+                onPress={() => openLink(PRIVACY_URL, 'Privacy Policy')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.legalHit}
               >
-                <Text style={styles.linkText}>Use a different email</Text>
+                <Text style={styles.legalLink}>Privacy Policy</Text>
               </Pressable>
-            </>
-          )}
-
-          <Pressable
-            hitSlop={{ top: 0, bottom: 0, left: 16, right: 16 }}
-            accessibilityRole="button"
-            accessibilityLabel="Not now"
-            onPress={dismiss}
-            disabled={busy != null}
-          >
-            <Text style={styles.skipText}>Not now</Text>
-          </Pressable>
-
-          <Text style={styles.footnote}>
-            Picks, models and the track record work without an account.
-          </Text>
+            </View>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -322,74 +450,81 @@ export function SignInScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgGrouped },
-  content: { padding: spacing.lg, gap: spacing.md },
-  // The brand mark, decorative: the title beneath it already names the app,
-  // so it carries no label of its own.
-  mark: {
-    marginBottom: spacing.xs,
+  content: { padding: spacing.lg, flexGrow: 1 },
+  card: {
+    backgroundColor: colors.brandNavy,
+    borderRadius: radii.lg,
+    padding: spacing.xl,
+    gap: spacing.md,
+    alignItems: 'center',
   },
+  mark: { marginBottom: spacing.xs },
   title: {
     fontFamily: font.family,
     fontSize: font.size.title1,
     fontWeight: font.weight.bold,
-    color: colors.textPrimary,
+    color: colors.textInverse,
+    textAlign: 'center',
   },
   subtitle: {
     fontFamily: font.family,
     fontSize: font.size.body,
-    color: colors.textSecondary,
-    marginBottom: spacing.sm,
+    fontWeight: font.weight.semibold,
+    color: colors.textInverse,
+    textAlign: 'center',
+  },
+  body: {
+    fontFamily: font.family,
+    fontSize: font.size.footnote,
+    color: colors.brandMuted,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  kicker: {
+    fontFamily: font.family,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.brandMuted,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    alignSelf: 'stretch',
   },
   errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+    alignSelf: 'stretch',
     backgroundColor: colors.avoidSoft,
     borderRadius: radii.md,
     padding: spacing.md,
   },
   errorText: {
-    flex: 1,
     fontFamily: font.family,
     fontSize: font.size.footnote,
     color: colors.avoidInk,
   },
-  noticeBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.noneSoft,
-    borderRadius: radii.md,
-    padding: spacing.md,
-  },
-  noticeText: {
-    flex: 1,
-    fontFamily: font.family,
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-  },
   providerBtn: {
-    flexDirection: 'row',
+    alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.sm,
-    height: 50,
+    minHeight: 50,
     borderRadius: radii.md,
   },
-  appleBtn: { backgroundColor: '#000000' },
-  googleBtn: {
-    backgroundColor: colors.bgElevated,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.separatorOpaque,
+  appleBtn: { backgroundColor: colors.textInverse },
+  appleNativeBtn: {
+    alignSelf: 'stretch',
+    width: '100%',
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  googleBtn: { backgroundColor: colors.textPrimary },
   providerBtnText: {
     fontFamily: font.family,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
   },
-  appleBtnText: { color: colors.textInverse },
-  googleBtnText: { color: colors.textPrimary },
+  appleFallbackText: { color: colors.textPrimary },
+  googleBtnText: { color: colors.textInverse },
   dividerRow: {
+    alignSelf: 'stretch',
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
@@ -398,23 +533,22 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.separatorOpaque,
+    backgroundColor: colors.brandSeparator,
   },
   dividerText: {
     fontFamily: font.family,
     fontSize: font.size.footnote,
-    color: colors.textTertiary,
+    color: colors.brandMuted,
   },
   input: {
-    backgroundColor: colors.bgElevated,
+    alignSelf: 'stretch',
+    backgroundColor: colors.brandNavyRaised,
     borderRadius: radii.md,
     paddingHorizontal: spacing.md,
-    height: 50,
+    minHeight: 50,
     fontFamily: font.family,
     fontSize: font.size.callout,
-    color: colors.textPrimary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.separatorOpaque,
+    color: colors.textInverse,
   },
   codeInput: {
     textAlign: 'center',
@@ -423,9 +557,10 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
   },
   primaryBtn: {
-    height: 50,
+    alignSelf: 'stretch',
+    minHeight: 50,
     borderRadius: radii.md,
-    backgroundColor: colors.tint,
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -433,29 +568,41 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
-    color: colors.textInverse,
+    color: colors.brandInk,
   },
   btnPressed: { opacity: 0.6 },
   btnDisabled: { opacity: 0.4 },
   linkText: {
     fontFamily: font.family,
     fontSize: font.size.footnote,
-    color: colors.tint,
-    textDecorationLine: 'underline',
+    fontWeight: font.weight.semibold,
+    color: colors.brand,
     textAlign: 'center',
     paddingVertical: spacing.sm,
   },
-  skipText: {
-    fontFamily: font.family,
-    fontSize: font.size.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    paddingVertical: spacing.md,
-  },
-  footnote: {
+  legal: {
     fontFamily: font.family,
     fontSize: font.size.caption,
-    color: colors.textTertiary,
+    color: colors.brandMuted,
     textAlign: 'center',
+    lineHeight: 18,
+  },
+  legalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  legalHit: {
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  legalLink: {
+    fontFamily: font.family,
+    fontSize: font.size.caption,
+    color: colors.brand,
+    textDecorationLine: 'underline',
+    fontWeight: font.weight.semibold,
   },
 });

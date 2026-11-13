@@ -1,19 +1,22 @@
 /**
- * Stats > NFL > Anytime TD matchup column (Designer Option A).
+ * Stats > NFL > Anytime TD matchup column.
  *
- * The A–F grade stays on every other board. This one answers "how easy is
- * the defense for this position?" with five bars, a tier word, and a rank
- * line ("3rd easiest", or "3rd toughest" when that end is nearer). Rank 1
- * allows the most touchdowns to the position.
+ * Five bars, filled from the left. Rank 1 allows the most touchdowns to the
+ * position. Over 32 teams: 1–6 fills 5, 7–13 fills 4, 14–19 fills 3,
+ * 20–26 fills 2, 27–32 fills 1. The count is the strength. No tier word and
+ * no "Nth easiest" on the row (Matt, 2026-10-28, Option A).
  *
- * Tiers, over 32 teams: 1–6 Great, 7–13 Good, 14–19 Average, 20–26 Tough,
- * 27–32 Very tough.
  * The server blends last season until a defense has played
  * BLEND_UNTIL_TEAM_GAMES this season (the same 8 the SQL comments name).
  *
  * Visible strings live in ATD_COPY so the screen and the verifier share one
  * list. Matt signs that list off; do not paraphrase it in the component.
  */
+import {
+  matchupStrengthFloorSpoken,
+  matchupStrengthSpoken,
+  type MatchupStrength,
+} from './matchup';
 import { nflPositionGroup, type NflPositionGroup } from './positionVsOpponent';
 import { FONT_SIZE_MICRO } from './typeScale';
 
@@ -64,17 +67,17 @@ export const TIER_ORDER: readonly MatchupTier[] = [
   'Great', 'Good', 'Average', 'Tough', 'Very tough',
 ];
 
-/** Floors a person can set. Very tough includes everyone, so it is not a chip. */
+/** Floors a person can set. One bar includes everyone, so it is not a chip. */
 export const TIER_FLOORS: readonly MatchupTier[] = ['Great', 'Good', 'Average', 'Tough'];
 
-/** The chip and the pill. "Tough" alone hides that the floor includes Great. */
-export function tierFloorLabel(tier: MatchupTier): string {
-  return `${tier} or easier`;
+/** Bars that tier fills. The name is the stored floor; the chip draws this count. */
+export function tierBars(tier: MatchupTier): MatchupStrength {
+  return (5 - TIER_ORDER.indexOf(tier)) as MatchupStrength;
 }
 
-/** Large text: one left-aligned line. "Great · 5th easiest". */
-export function stackedMatchupLine(tier: MatchupTier, line: string): string {
-  return `${tier} · ${line}`;
+/** The chip and the pill. "strength 4 or more" — the floor includes every stronger bar. */
+export function tierFloorSpoken(tier: MatchupTier): string {
+  return matchupStrengthFloorSpoken(tierBars(tier));
 }
 
 /** Position groups present on the rows, in GROUP_ORDER. An unmapped pos adds nothing. */
@@ -117,17 +120,15 @@ export const ATD_COPY = {
   infoBody:
     'How easy this week’s defense is for the player’s position.\n\n'
     + 'Counted: touchdowns that defense has allowed to this position, per player-game. Rank 1 allows the most. Ties share a rank, and the next rank skips.\n\n'
-    + 'The line counts from the nearer end. 1st easiest allows the most. 1st toughest allows the fewest.\n\n'
-    + 'Five bars in the compact column. Great is five filled, Very tough is one. At larger text the tier and the rank are one line.\n\n'
-    + 'Tiers: 1st–6th Great, 7th–13th Good, 14th–19th Average, 20th–26th Tough, 27th–32nd Very tough.\n\n'
+    + 'Five bars, filled from the left. The count is the strength. Five filled is ranks 1–6. Four is 7–13. Three is 14–19. Two is 20–26. One is 27–32.\n\n'
     + 'This season’s games, once a defense has played 8. Before that, this season and last are combined. A short sample can move the rank. One note on the board says when that blend is on.\n\n'
-    + 'A dash is not an average. The reason sits under it in the compact column, and beside it at larger text: No game, Bye, Not playing, No rank, or No position.\n\n'
+    + 'There is no bar when the defense cannot be ranked. Bye, No game, Not playing, and No position name the reason. A dash means no rank.\n\n'
     + 'Tap the Matchup header to sort. Ties go to the higher hit rate, then the better price.',
   explainHint: 'Opens what this matchup means.',
   partialNote: 'Some defense ranks didn’t load. Those matchups say Unavailable.',
   filterTitle: 'Matchup',
   filterSubtitle:
-    'How easy the defense is for this position. A tier includes every easier tier.',
+    'Five bars for this position. The floor keeps that strength and every stronger spot.',
   filterAny: 'Any',
   includeUnranked: 'Include matchups we can’t rank',
   unavailableNote: 'Defense ranks didn’t load. Ranked matchups say Unavailable.',
@@ -147,9 +148,9 @@ export const ATD_COPY = {
   } as Record<GapReason, string>,
   loadingSpoken: 'Matchup, loading.',
   unavailableSpoken: 'Matchup unavailable.',
-  sortEasiest: 'Matchup, sorted easiest first.',
-  sortToughest: 'Matchup, sorted toughest first.',
-  sortOff: 'Matchup, not sorted. Sorts easiest first.',
+  sortEasiest: 'Matchup, sorted strongest first.',
+  sortToughest: 'Matchup, sorted weakest first.',
+  sortOff: 'Matchup, not sorted. Sorts strongest first.',
   sortHint: 'Changes the matchup sort.',
 } as const;
 
@@ -203,9 +204,12 @@ export function ranksInGroup(ranks: Iterable<[string, DefenseRank]>, group: stri
 }
 
 /**
- * Count from the nearer end of the ranked defenses. Rank 3 of 32 is
- * "3rd easiest". Rank 30 of 32 is "3rd toughest". A tie at equal distance
- * stays on the easy end. Missing team count uses 32.
+ * Count from the nearer end of the ranked defenses. Not rendered: the row is
+ * bars, and VoiceOver says the filled count. Kept so the nearer-end count
+ * still has one definition.
+ *
+ * Rank 3 of 32 is "3rd easiest". Rank 30 of 32 is "3rd toughest". A tie at
+ * equal distance stays on the easy end. Missing team count uses 32.
  *
  * `fromToughEnd` is `toughEndRank` for the position group. Omit it and a
  * unique rank keeps `teamsRanked - rank + 1`. A tie at rank 1 stays
@@ -237,9 +241,10 @@ const GROUP_SPOKEN: Record<NflPositionGroup, string> = {
   DB: 'defensive backs',
 };
 
-export function matchupSpoken(tier: MatchupTier, line: string, group: NflPositionGroup | null): string {
+export function matchupSpoken(bars: number, group: NflPositionGroup | null): string {
   const who = group ? `, ${GROUP_SPOKEN[group]}` : '';
-  return `Matchup, ${tier}, ${line}${who}.`;
+  const n = Math.min(5, Math.max(1, Math.round(bars))) as MatchupStrength;
+  return `${matchupStrengthSpoken(n)}${who}.`;
 }
 
 export function meetsTierFloor(
@@ -323,7 +328,6 @@ export type AnytimeMatchupView =
       tier: MatchupTier;
       bars: number;
       rank: number;
-      line: string;
       spoken: string;
       group: NflPositionGroup;
     };
@@ -341,8 +345,6 @@ export function buildAnytimeMatchup(args: {
   status: 'loading' | 'error' | 'ok';
   placement: MatchupPlacement;
   rank: DefenseRank | null;
-  /** The position group's ranks. A bottom tie counts from this list. */
-  groupRanks?: readonly { rank: number | null }[] | null;
 }): AnytimeMatchupView {
   // A bye, a missing game, a known absence, or no position does not need a
   // rank. Those stay labeled when the fetch is still running or has failed.
@@ -356,19 +358,12 @@ export function buildAnytimeMatchup(args: {
   if (gap) return gapView(gap);
   const hit = tierForRank(args.rank!.rank);
   if (!hit || !group || args.rank!.rank == null) return gapView('too_early');
-  const peers = args.groupRanks;
-  const line = rankLine(
-    args.rank!.rank,
-    args.rank!.teamsRanked,
-    peers && peers.length > 0 ? toughEndRank(args.rank!.rank, peers) : null,
-  );
   return {
     kind: 'rank',
     tier: hit.tier,
     bars: hit.bars,
     rank: args.rank!.rank,
-    line,
-    spoken: matchupSpoken(hit.tier, line, group),
+    spoken: matchupSpoken(hit.bars, group),
     group,
   };
 }

@@ -44,7 +44,8 @@ violates one is a **Blocker** regardless of how it looks.
 - **Every model is live real money** (§2). The words "paper",
   "simulated", and "not real money" must not appear in user-facing copy.
 - **Access is `useEntitlement()`**, never `useSubscription().entitled` (§6).
-  A Discord (Whop) member is entitled in the app.
+  A Whop membership does not unlock the app. Entitlement is the Apple
+  subscription (trialing or active). Source `discord` stays locked.
 - **"Today" is ET** (`todayET()` in `src/lib/format.ts`), never
   `new Date().toISOString().slice(0,10)`.
 - **A native module needs a TestFlight build**, not an OTA. If the change adds

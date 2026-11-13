@@ -387,6 +387,67 @@ def notify_live(target_date: str) -> None:
         log.error("live Discord post failed (non-fatal): %s", exc)
 
 
+# ─── the fast way: DraftKings' own board (mike, 2026-11-13) ───────────────────
+#
+# "Move everything over to the fast way". The provider's DraftKings moneyline
+# was a median 26 s old when this model's bets were written (5 bets,
+# 2026-10-16 .. 11-02), and the build's own review measured the cost: the 2025
+# return fell from +1.84u to -0.50u as the state lagged the quote by 0 -> 45 s.
+# DraftKings' moneyline now comes from its own board (dk_live_reads, written on
+# mike's machine), stamped where the board first showed it, while the feed is
+# seconds old. DraftKings shows a score in seconds and ESPN's core feed later,
+# so a game whose DraftKings score differs from our state's is not evaluated
+# and its slot is NOT spent: it waits for the next tick, as a transitional
+# state does. The 5-minute cadence is the backtest's grid and stays. The feed
+# off, or a game the board does not carry: the provider, as before.
+
+DK_ON = os.environ.get("NFL_LIVE_LEADER_DK", "1") != "0"
+
+
+def dk_board_quotes(src, ctxs: list) -> dict | None:
+    """{game_id: {"prices": {abbr: price}, "ts", "score"}} from DraftKings'
+    board for these games, or None while the feed is not live."""
+    if src is None or not ctxs:
+        return None
+    import pandas as pd
+    from models import ncaab_live_dk as DK
+    try:
+        last = src.last_read()
+        if not DK.feed_is_live(last, datetime.now(timezone.utc)):
+            return None
+        reads = src.reads({c.game_id for c in ctxs})
+    except Exception as exc:                         # noqa: BLE001
+        log.warning("DraftKings board read failed (the provider's quote stands): %s", exc)
+        try:
+            src.reset()
+        except Exception:                            # noqa: BLE001
+            pass
+        return None
+    if not len(reads):
+        return {}
+    cur = DK.current_quotes(reads, last[0], markets=("h2h",))
+    by = {c.game_id: c for c in ctxs}
+    out: dict = {}
+    for _i, q in cur.iterrows():
+        ctx = by.get(q["game_id"])
+        g = reads[reads["game_id"] == q["game_id"]].sort_values("read_at").iloc[-1]
+        if ctx is None or pd.isna(g["home_score"]) or pd.isna(g["away_score"]):
+            continue
+        out[ctx.game_id] = {"prices": {ctx.home: float(q["home_price"]), ctx.away: float(q["away_price"])},
+                            "ts": pd.Timestamp(q["stamp"]).isoformat(),
+                            "score": (int(g["home_score"]), int(g["away_score"])), "source": "dk_live_board"}
+    return out
+
+
+def dk_source(conn_fn):
+    if not DK_ON:
+        return None
+    from models.ncaab_live_dk import DbSource
+    src = DbSource(conn_fn, sport=SPORT)
+    src.reset = lambda: None
+    return src
+
+
 # ─── one evaluation ───────────────────────────────────────────────────────────
 
 def evaluate(art: M.Artifact, st: LiveState, ctx: GameContext, q: dict | None,
@@ -468,6 +529,11 @@ def main(argv=None) -> int:
         if conn is None:
             conn = get_connection()
         return conn
+
+    dk_src = dk_source(_conn)
+    fast_ready: list = []
+    if dk_src is not None:
+        log.info("fast path on: DraftKings' moneyline from its own board while that feed is live")
 
     if not a.dry_run:
         # The published record counts a settled BET only while Discord holds
@@ -587,6 +653,23 @@ def main(argv=None) -> int:
                     ready.append((s, ctx))
 
                 payload = None
+                board = dk_board_quotes(dk_src, [ctx for _s, ctx in ready]) if ready else None
+                waiting = []
+                if board:
+                    still = []
+                    for s, ctx in ready:
+                        b = board.get(ctx.game_id)
+                        if b is None:
+                            still.append((s, ctx))
+                        elif b["score"] != (s.home_score, s.away_score):
+                            # DraftKings' line already knows a score our state does not:
+                            # the slot is not spent, the next tick tries again
+                            log.info("%s: DraftKings shows %s-%s, our state %s-%s - next tick", ctx.game_id,
+                                     b["score"][0], b["score"][1], s.home_score, s.away_score)
+                            waiting.append((s, ctx))
+                        else:
+                            fast_ready.append((s, ctx, b))
+                    ready = still
                 if ready and time.monotonic() < fetch_backoff_until:
                     log.info("odds fetch backing off %.0fs more after %d failure(s)",
                              fetch_backoff_until - time.monotonic(), fetch_failures)
@@ -600,13 +683,16 @@ def main(argv=None) -> int:
                                     "(failure %d)", len(ready), wait, fetch_failures)
                     else:
                         fetch_failures = 0
+                evaluate_now = [(s, ctx, b) for s, ctx, b in fast_ready]
                 if ready and payload is not None:
                     quotes = quotes_by_teams(payload)
+                    evaluate_now += [(s, ctx, quote_for_game(quotes, ctx)) for s, ctx in ready]
+                fast_ready = []
+                if evaluate_now:
                     priced_at = datetime.now(timezone.utc).isoformat()
                     price_rows = []
-                    for s, ctx in ready:
+                    for s, ctx, q in evaluate_now:
                         cadence.mark(s.event_id, wall)          # this slot is consumed
-                        q = quote_for_game(quotes, ctx)
                         hp, apx, ts = side_prices(ctx, q)
                         if hp is not None or apx is not None:
                             from data.ingestors.live_price_log import rows_from_quote

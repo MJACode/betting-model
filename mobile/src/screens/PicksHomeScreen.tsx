@@ -1,6 +1,6 @@
 /**
  * Merged Picks tab — a single home for the daily board with a
- * `All | Signals | Live | Lines` segmented control. Replaces the old separate
+ * `All | Signals | Live | Scoreboard` segmented control. Replaces the old separate
  * Picks and Signals tabs (which both showed BET picks and read as redundant):
  *   - All      = every scored pick today (the old Picks tab; labelled
  *                "Today" until 2026-09-26, Matt).
@@ -32,7 +32,7 @@
  * Which sport is live is still carried by the red dot on the sport chips
  * (SportToggle `liveSports`). A sport with no in-play model AT ALL says so in
  * its own empty state (lib/liveSports.ts): "no edge right now" is a false
- * promise on NBA, which has no live lane that could find one.
+ * promise on NHL, which has no in-play model that could find one.
  *
  * Picks lock the first time a model scores them each day (game markets at the
  * first run, props at their first signal) and never change again for the rest
@@ -46,9 +46,9 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   FlatList,
   type LayoutChangeEvent,
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -60,7 +60,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
@@ -70,6 +70,7 @@ import {
   showLivePricesBanner,
   sportChipsAvailable,
   todayHeaderCounts,
+  sportSpokenName,
 } from '@/lib/loadState';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import { InfoTooltip } from '@/components/InfoTooltip';
@@ -87,16 +88,18 @@ import { BetslipButton } from '@/components/BetslipButton';
 import { LiveDot } from '@/components/LiveDot';
 import { SignalLockCard } from '@/components/SignalLockCard';
 import { showToast } from '@/components/Toast';
-import { useEntitlement } from '@/hooks/useEntitlement';
+import { useMembership } from '@/hooks/useMembership';
 import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter } from '@/hooks/useSportFilter';
-import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { useThresholdsRevision } from '@/hooks/useActionThresholds';
+import { useTodayPicks, TODAY_POLL_MS, TODAY_RESUME_MIN_AGE_MS } from '@/hooks/useTodayPicks';
 import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
+import { LIVE_PRICE_SLOT_ONLY } from '@/lib/markets';
 import { gameFilterSummary, isGameSelected, selectableGames } from '@/lib/gameFilter';
 import {
   dateOptionsFor,
@@ -105,6 +108,7 @@ import {
   rowsByDay,
   type DayRow,
 } from '@/lib/dateFilter';
+import { betslipPlayerFromPick } from '@/lib/betslipGuard';
 import { slipKeyForPick } from '@/lib/parlay';
 import {
   ALL_SIGNALS,
@@ -124,7 +128,7 @@ import {
   unitsFor,
   formatUnits,
 } from '@/lib/thresholds';
-import { formatCurrency, formatPct, gameStatus, todayET } from '@/lib/format';
+import { formatPct, gameStatus, liveSlateDatesET, todayET } from '@/lib/format';
 import { reachFrame, unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
 
 /**
@@ -139,20 +143,15 @@ const SUBTAB_REACH_BELOW = 6;
 const subTabsReach = reachFrame(0, SUBTAB_REACH_BELOW);
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
-import { hasLiveModel, liveModelSportsSentence } from '@/lib/liveSports';
-import { friendlyCause } from '@/lib/errors';
+import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence } from '@/lib/liveSports';
+import { errorText, friendlyCause } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
-import { LinesBoard } from '@/components/LinesBoard';
-import { FilterChip } from '@/components/filters/FilterChip';
-import { useLinesBoard } from '@/hooks/useLinesBoard';
-import {
-  LINES_SPORT_CHIPS,
-  filterLinesGames,
-  linesHaveOdds,
-  linesHeaderSubtitle,
-  type LinesPickRef,
-  type LinesSportFilter,
-} from '@/lib/linesBoard';
+import { ScoreboardBoard } from '@/components/ScoreboardBoard';
+import { useScoreboard } from '@/hooks/useScoreboard';
+import { useAuth } from '@/hooks/useAuth';
+import { freeSegmentOpensPaywall } from '@/lib/authShell';
+import { restorePurchases } from '@/lib/billing';
+import { type ScoreboardSport } from '@/lib/scoreboard';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 export type { PicksView };
@@ -165,19 +164,54 @@ export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteProp<TabParamList, 'Picks'>>();
   const { data: allData, pausedData, loading, loaded, error, partial, refresh, date } = useTodayPicks();
+  // The threshold store is a module. The fetch does not set React state.
+  // This revision is what makes Signals re-run passesActionFilter when it lands.
+  const thresholdsRevision = useThresholdsRevision();
   const { sport } = useSportFilter();
   const tracked = useTrackedBets();
   const slip = useParlaySlip();
 
   const [view, setView] = useState<PicksView>('today');
-  const [linesSport, setLinesSport] = useState<LinesSportFilter>('all');
-  const lines = useLinesBoard(view === 'lines');
+  const [sbSport, setSbSport] = useState<ScoreboardSport>('NFL');
+  const [sbDate, setSbDate] = useState(todayET);
+  const sbDates = sbDate === todayET() ? liveSlateDatesET() : [sbDate];
   // School abbreviations for the Signals compact line. Other sports already
   // store abbreviations on the game row.
   const ncaafAbbrevs = useNcaafAbbrevs(sport === 'NCAAF');
   const [filter, setFilter] = useState<PicksFilterState>(freshFilter);
   const [sortKey, setSortKey] = useState<SortKey>('edge');
   const [search, setSearch] = useState('');
+
+  // The pre-game boards reload while they are open, so "line now" is the
+  // book's line now and not the one from when the screen first loaded (Matt,
+  // 2026-11-12: the card said FD 41.5 hours after FanDuel moved to 40.5).
+  // Every 10 minutes while this tab is focused and the app is in front, and once on coming back to the app or
+  // the tab, if the last load is older than a minute. A screen, inside the
+  // navigator, so useFocusEffect is safe here (.claude/rules/frontend.md).
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const lastTodayLoad = useRef(Date.now());
+  const reloadToday = useCallback((minAgeMs: number) => {
+    if (Date.now() - lastTodayLoad.current < minAgeMs) return;
+    lastTodayLoad.current = Date.now();
+    void refreshRef.current();
+  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      reloadToday(TODAY_RESUME_MIN_AGE_MS);
+      const id = setInterval(() => {
+        // Skipped when a pull or a resume reloaded in the last few minutes.
+        if (AppState.currentState === 'active') reloadToday(TODAY_POLL_MS - 30_000);
+      }, TODAY_POLL_MS);
+      const sub = AppState.addEventListener('change', (state) => {
+        if (state === 'active') reloadToday(TODAY_RESUME_MIN_AGE_MS);
+      });
+      return () => {
+        clearInterval(id);
+        sub.remove();
+      };
+    }, [reloadToday]),
+  );
 
   // In-play picks, across every sport (the sport cut happens below, so the
   // toggle can mark the sports that are live). Polled fast only while the user
@@ -238,11 +272,19 @@ export function PicksHomeScreen() {
           !isPausedRow(d.pick) &&
           gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null).kind === 'live',
       ),
-    [allLiveData, liveStates],
+    [allLiveData, liveStates, thresholdsRevision],
   );
   const liveData = useMemo(
     () => liveInProgress.filter((d) => d.pick.sport === sport),
     [liveInProgress, sport],
+  );
+  // Cards on this board that draw a live price at all. The NBA in-play
+  // model's never do (markets.LIVE_PRICE_SLOT_ONLY), so with only those on
+  // the board the "~45s old" strip and the prices-unavailable banner do not
+  // describe anything on screen.
+  const liveWithPriceCount = useMemo(
+    () => liveData.filter((d) => !LIVE_PRICE_SLOT_ONLY.has(d.pick.model_id ?? '')).length,
+    [liveData],
   );
   // Sports with an in-play pick standing right now — the red dot on the chips.
   const liveSports = useMemo(
@@ -338,38 +380,59 @@ export function PicksHomeScreen() {
   // switch tabs and land on whatever segment was already showing. The param is
   // cleared after use so a second tap works and a back-navigation does not
   // re-trigger it.
+  // A free member keeps Record and this teaser (Matt, 2026-10-27). Signals
+  // and Live Signals open the same paywall as a locked pick. Scoreboard stays
+  // visible and soft-locks its content. `contentLocked` is false while
+  // billing is dark, and while the subscription row is still loading, so a
+  // subscriber does not flash the lock.
+  const { contentLocked: signalsLocked, hold: picksHold } = useMembership();
+  const { user } = useAuth();
+  const board = useScoreboard(
+    view === 'scoreboard' && !signalsLocked && !picksHold,
+    sbDates,
+    sbSport,
+    sbDate,
+  );
+  const openPaywall = useCallback(() => {
+    navigation.navigate('Paywall');
+  }, [navigation]);
+  const selectView = useCallback((next: PicksView) => {
+    if (signalsLocked && freeSegmentOpensPaywall(next)) {
+      openPaywall();
+      return;
+    }
+    setView(next);
+  }, [openPaywall, signalsLocked]);
+
   useEffect(() => {
-    if (!requestedView) return;
-    setView(requestedView);
+    if (signalsLocked && freeSegmentOpensPaywall(view)) setView('today');
+  }, [signalsLocked, view]);
+
+  useEffect(() => {
+    if (!requestedView || picksHold) return;
+    const next = (requestedView as string) === 'lines' ? 'scoreboard' : requestedView;
+    if (signalsLocked && freeSegmentOpensPaywall(next)) openPaywall();
+    else if (signalsLocked) setView(next === 'scoreboard' ? 'scoreboard' : 'today');
+    else setView(next);
     navigation.setParams({ view: undefined } as never);
-  }, [requestedView, navigation]);
+  }, [requestedView, navigation, signalsLocked, picksHold, openPaywall]);
   // Signals per sport, across ALL sports (not just the selected one) — the
   // toggle badge. The boards show one sport at a time, so without this a user
   // parked on their usual sport never learns another has bets waiting.
-  const sportSignalCounts = useMemo(() => signalCountsBySport(allData), [allData]);
+  const sportSignalCounts = useMemo(
+    () => signalCountsBySport(allData),
+    [allData, thresholdsRevision],
+  );
   // A pick is only a SIGNAL once it's locked. Future-dated UFC/golf picks
   // re-score until game day — they show on Today as lines/previews but are
   // excluded here (and from every signal count) until they lock.
   const live = useMemo(
     () => todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)),
-    [todayData],
+    [todayData, thresholdsRevision],
   );
 
   const activeItems: EnrichedPick[] =
-    view === 'today' ? todayData : view === 'live' ? liveData : view === 'lines' ? [] : live;
-
-  // Signals is the paid surface; Today (every scored pick, with
-  // model % and edge) stays free. Lines is the board of prices, so it stays
-  // up when Signals is locked; the pick mark on a card is the signal, and
-  // that mark waits for entitlement. `entitled` is true whenever billing is
-  // off, so this is inert until the flag flips.
-  const { entitled } = useEntitlement();
-  const signalsLocked = !entitled && view !== 'today' && view !== 'lines';
-  const linesGames = filterLinesGames(lines.games, linesSport);
-  // Posted paused picks stay in allData and mark as a pick. The rest are a
-  // grey "Paused pick" chip, with no navy dot.
-  const linesPicks: LinesPickRef[] = allData.map((d) => d.pick);
-  const linesPaused: LinesPickRef[] = pausedData.map((d) => d.pick);
+    view === 'today' ? todayData : view === 'live' ? liveData : view === 'scoreboard' ? [] : live;
 
   // Restrict the filter's Market options to what is on screen — on EVERY view,
   // not just the signal ones. Today passed `undefined` here until 2026-09-09,
@@ -489,7 +552,7 @@ export function PicksHomeScreen() {
           // counted three bets (UX review, 2026-09-26).
           (displayFilter.signals.size === ALL_SIGNALS.length || !isPausedForDisplay(d.pick)),
       ),
-    [datedItems, displayFilter, gamePicker.selected],
+    [datedItems, displayFilter, gamePicker.selected, thresholdsRevision],
   );
   const filtered = useMemo(() => searchPicks(unsearched, search), [unsearched, search]);
   const publicSortLive = useMemo(() => publicSortAvailable(filtered), [filtered]);
@@ -513,7 +576,7 @@ export function PicksHomeScreen() {
       ...all.filter((d) => !isPausedForDisplay(d.pick)),
       ...all.filter((d) => isPausedForDisplay(d.pick)),
     ];
-  }, [filtered, sortKey, liveStates]);
+  }, [filtered, sortKey, liveStates, thresholdsRevision]);
   // Time sort reads as a schedule, so it is split by day with a header per
   // day (Matt, 2026-09-28). Every other sort is a ranking and stays one list.
   const rows: DayRow<EnrichedPick>[] = useMemo(
@@ -526,7 +589,7 @@ export function PicksHomeScreen() {
             (d) => isPausedForDisplay(d.pick),
           )
         : sorted.map((d) => ({ kind: 'item' as const, key: String(d.pick.pick_id), item: d })),
-    [filtered, sorted, sortKey],
+    [filtered, sorted, sortKey, thresholdsRevision],
   );
 
   // Games is shared with Stats. A game picked there (or here) can empty THIS
@@ -552,12 +615,13 @@ export function PicksHomeScreen() {
     const bet = todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)).length;
     const paused = todayData.filter((d) => isPausedForDisplay(d.pick)).length;
     return { total: todayData.length, bet, paused };
-  }, [todayData]);
+  }, [todayData, thresholdsRevision]);
 
-  // Signals / Live views: exposure of the recommended stakes on screen.
+  // Signals / Live views: exposure of the recommended stakes on screen, each
+  // at the pick's own stake_units when it carries one (the card's stake).
   const signalExposure = useMemo(() => {
     if (view === 'today') return 0;
-    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick)), 0);
+    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick), d.pick.stake_units), 0);
   }, [filtered, view]);
 
   // FIRST LOAD ONLY on the live board. `refresh()` sets loading on every poll,
@@ -567,7 +631,9 @@ export function PicksHomeScreen() {
   // blink out to a spinner twice a minute (UX review, 2026-09-12). prevLiveCount
   // is null until the first settled fetch, which is exactly "never loaded".
   const liveFirstLoad = liveLoading && prevLiveCount.current === null;
-  const busy = view === 'live' ? liveFirstLoad : loading;
+  // Same for today's boards since they reload every 10 minutes: the skeleton
+  // is for a board never loaded, not for a background reload of one on screen.
+  const busy = view === 'live' ? liveFirstLoad : loading && !loaded;
   // A FAILED load with nothing to show for this view. It replaces the empty
   // state rather than sitting above it: "No MLB picks today" under a timeout
   // told the user the opposite of what happened (usability audit H3). With
@@ -589,18 +655,13 @@ export function PicksHomeScreen() {
     knownCount(0, { loaded, error, hasData: allData.length > 0 || pausedData.length > 0 }) === null;
   const liveUnknown = knownCount(0, { loaded: liveLoaded, error: liveError, hasData: allLiveData.length > 0 }) === null;
   // Pull-to-refresh still has to spin, and it cannot read `busy` any more for the
-  // same reason. Local, because the hook cannot tell a poll from a pull.
+  // same reason, on either board: both now reload in the background. Local,
+  // because the hooks cannot tell a poll from a pull.
   const [pulling, setPulling] = useState(false);
+  const [partialRetrying, setPartialRetrying] = useState(false);
   const stakedSuffix = signalExposure > 0 ? ` · ${formatUnits(signalExposure)} staked` : '';
-  const subtitle = view === 'lines'
-    ? linesHeaderSubtitle({
-        loaded: lines.loaded,
-        error: lines.error != null,
-        date: lines.date,
-        games: linesGames,
-        hasOdds: linesHaveOdds(linesGames.map((g) => g.game_id), lines.odds),
-        sport: linesSport,
-      })
+  const subtitle = view === 'scoreboard'
+    ? ''
     : failed
     ? view === 'live'
       ? 'Live signals unavailable'
@@ -640,14 +701,21 @@ export function PicksHomeScreen() {
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Text style={styles.title}>Picks</Text>
+          {signalsLocked ? (
+            <View style={styles.freePill}>
+              <Text style={styles.freePillText}>Free</Text>
+            </View>
+          ) : null}
           <InfoTooltip
             title="These boards"
             body={
-              // The live sports are INTERPOLATED, not typed out: this sentence
-              // and the empty state are the two places a reader is told which
-              // sports have an in-play model, and a hand-written list here would
-              // be the one that goes stale when a lane ships (lib/liveSports.ts).
-              `All = every pick the model scored today. Picks from a paused model show here too, marked PAUSED — they are the model’s number, not a bet, and never appear on Signals.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, priced at DraftKings while a game is running. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()} today. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nLines = today’s NHL and NBA games, with the best price a bettable book is offering on the puck line or spread, the moneyline and the total. Every game is listed, not only games with a pick. A pick is marked on its game; open a market to see every book.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
+              signalsLocked
+                ? 'Signals and Live Signals are Premium. Their counts and the live dot appear after you subscribe.'
+                : // The live sports are INTERPOLATED, not typed out: this sentence
+                  // and the empty state are the two places a reader is told which
+                  // sports have an in-play model, and a hand-written list here would
+                  // be the one that goes stale when a model ships (lib/liveSports.ts).
+                  `All = every pick the model scored today. Picks from a paused model show here too, marked PAUSED — they are the model’s number, not a bet, and never appear on Signals.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, made while a game is running, each priced at the sportsbook named on its card. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()}. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nScoreboard = today’s games, with the score and DraftKings’ spread, total and moneyline. It is every game, not our picks. Live Signals stays the in-play picks. NFL, NCAAF and MLB can show a live score when one is stored. NBA and NHL stay on Upcoming until a live feed exists. Tap a game for the line. There is no bet button on this board.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
             }
             accessibilityLabel="About these boards"
           />
@@ -656,23 +724,15 @@ export function PicksHomeScreen() {
             <SettingsButton />
           </View>
         </View>
+        {picksHold ? null : (
+        <>
+        {!signalsLocked && view !== 'scoreboard' ? (
         <Text style={styles.subtitle} accessibilityLabel={unknownCountSpeech(unitsSpeech(subtitle))}>{subtitle}</Text>
+        ) : null}
         {/* Neutral chips until today's board (and the live one) is known: built
             from empty data, every chip read muted and "no picks today" after a
             failure or before the first load (Designer #845). */}
-        {view === 'lines' ? (
-          <View style={styles.linesSports}>
-            {LINES_SPORT_CHIPS.map((c) => (
-              <FilterChip
-                key={c.id}
-                label={c.label}
-                active={linesSport === c.id}
-                onPress={() => setLinesSport(c.id)}
-                accessibilityLabel={c.id === 'all' ? 'All sports' : c.label}
-              />
-            ))}
-          </View>
-        ) : (
+        {!signalsLocked && view !== 'scoreboard' ? (
           <SportToggle
             available={sportChipsAvailable(availableSports, !todayUnknown && !liveUnknown)}
             signalCounts={sportSignalCounts}
@@ -683,7 +743,7 @@ export function PicksHomeScreen() {
             reachAbove={6}
             reachBelow={4}
           />
-        )}
+        ) : null}
         {/* Horizontal scroller, the same one SportToggle uses. Three segments
             with counts and a dot fit comfortably at default text size, but only
             the labels scale: the row ran off the right edge at roughly the first
@@ -709,8 +769,8 @@ export function PicksHomeScreen() {
           contentContainerStyle={[styles.subTabsScroll, subTabsReach.content]}
         >
           <View style={styles.subTabs} accessibilityRole="tablist">
-            <SubTabBtn label="All" count={todayUnknown ? null : todayStats.total} active={view === 'today'} onPress={() => setView('today')} onLayout={onSegmentLayout('today')} />
-            <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} active={view === 'signals'} onPress={() => setView('signals')} onLayout={onSegmentLayout('signals')} />
+            <SubTabBtn label="All" count={todayUnknown ? null : todayStats.total} active={view === 'today'} onPress={() => selectView('today')} onLayout={onSegmentLayout('today')} />
+            <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} hideCount={signalsLocked} locked={signalsLocked} lockedLabel="Signals, Premium" active={view === 'signals'} onPress={() => selectView('signals')} onLayout={onSegmentLayout('signals')} />
             {/* UNCONDITIONAL, on every sport (matt, 2026-09-12) — see the file
                 header. The count and the dot carry what the conditional render
                 used to: `(0)` with no dot is the "nothing in play" answer, in a
@@ -720,18 +780,21 @@ export function PicksHomeScreen() {
             <SubTabBtn
               label="Live Signals"
               count={liveUnknown ? null : liveData.length}
+              hideCount={signalsLocked}
+              locked={signalsLocked}
+              lockedLabel="Live Signals, Premium"
               active={view === 'live'}
-              onPress={() => setView('live')}
+              onPress={() => selectView('live')}
               live
-              dot={liveData.length > 0}
+              dot={!signalsLocked && liveData.length > 0}
               onLayout={onSegmentLayout('live')}
             />
             <SubTabBtn
-              label="Lines"
-              count={lines.loaded ? linesGames.length : null}
-              active={view === 'lines'}
-              onPress={() => setView('lines')}
-              onLayout={onSegmentLayout('lines')}
+              label="Scoreboard"
+              hideCount
+              active={view === 'scoreboard'}
+              onPress={() => selectView('scoreboard')}
+              onLayout={onSegmentLayout('scoreboard')}
             />
           </View>
         </ScrollView>
@@ -749,56 +812,79 @@ export function PicksHomeScreen() {
           </View>
         ) : null}
         </View>
+        </>
+        )}
       </View>
 
-      {view === 'lines' ? (
-        <LinesBoard
-          games={lines.games}
-          odds={lines.odds}
-          picks={linesPicks}
-          pausedPicks={linesPaused}
-          sport={linesSport}
-          loading={lines.loading && !lines.loaded}
-          loaded={lines.loaded}
-          error={lines.error}
-          retrying={lines.loading}
-          onRefresh={lines.refresh}
-          showMarks={entitled}
-          onOpenPick={(rows, kind) => {
-            if (rows.length === 1) {
-              navigation.navigate('PickDetail', { pickId: rows[0]!.pickId });
+      {picksHold ? (
+        <PicksSkeleton sport={sport} />
+      ) : view === 'scoreboard' ? (
+        <ScoreboardBoard
+          games={board.games}
+          quotes={board.quotes}
+          feeds={board.feeds}
+          inplay={board.inplay}
+          splits={board.splits}
+          nextGame={board.nextGame}
+          sport={sbSport}
+          onSport={setSbSport}
+          date={sbDate}
+          today={todayET()}
+          onDate={setSbDate}
+          loading={board.loading}
+          loaded={board.loaded}
+          error={board.error}
+          linesError={board.linesError}
+          liveError={board.liveError}
+          ncaafUnavailable={board.ncaafUnavailable}
+          liveScoresUnavailable={board.liveScoresUnavailable}
+          retrying={board.loading}
+          onRefresh={board.refresh}
+          locked={signalsLocked}
+          onUnlock={openPaywall}
+          onTrial={openPaywall}
+          onRecord={() => navigation.navigate('Tabs', { screen: 'TrackRecord' })}
+          onRestore={() => {
+            if (!user?.id) {
+              openPaywall();
               return;
             }
-            Alert.alert(
-              kind === 'paused' ? 'Paused picks on this game' : 'Picks on this game',
-              undefined,
-              [
-                ...rows.map((row) => ({
-                  text: row.label,
-                  onPress: () => navigation.navigate('PickDetail', { pickId: row.pickId }),
-                })),
-                { text: 'Cancel', style: 'cancel' as const },
-              ],
-            );
+            void restorePurchases(user.id)
+              .then((ok) => showToast(ok ? 'Purchase restored' : 'No purchase to restore'))
+              .catch((e: unknown) => showToast(errorText(e)));
           }}
+          onOpenGame={(gameId) => navigation.navigate('ScoreboardGame', { gameId })}
+        />
+      ) : signalsLocked ? (
+        <SignalLockCard
+          onPress={openPaywall}
+          onRecord={() => navigation.navigate('Tabs', { screen: 'TrackRecord' })}
         />
       ) : (
       <>
 
       {/* Live pricing caveats, and ONLY on the live segment. Both are
-          load-bearing (CLAUDE.md §6): the feed serves one cached in-play
-          snapshot for ~45s so a number here can be behind DK's own app, and the
-          in-play model reads DK's line and the bet is placed there. Kept as one
-          paragraph: "bet your sportsbook's number" beside "your sportsbook
-          doesn't apply" contradicted itself (UX review). */}
+          load-bearing (CLAUDE.md §6): each in-play pick is decided, and the
+          bet placed, at the book named on its card (decision_book, which since
+          2026-09-10 need not be DraftKings), and the feed serves one cached
+          in-play snapshot for ~45s, so a number here can be behind the book's
+          own app. The NBA in-play model reads the books only once an hour, so
+          its cards show no live number at all (markets.LIVE_PRICE_SLOT_ONLY),
+          and a board of only those cards says so instead of "~45s".
+          Kept as one paragraph: "bet your sportsbook's number" beside "your
+          sportsbook doesn't apply" contradicted itself (UX review). */}
       {view === 'live' && liveData.length > 0 ? (
         <View style={styles.liveNoteWrap}>
           <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
-          <Text style={styles.liveNote}>DraftKings only · prices up to ~45s old</Text>
+          <Text style={styles.liveNote}>
+            {liveWithPriceCount === 0
+              ? 'Bet at the book on each card · live price not shown after the bet'
+              : 'Bet at the book on each card · prices up to ~45s old'}
+          </Text>
           <InfoTooltip
             title="Live pricing"
             body={
-              'Live picks are priced and placed at DraftKings only — the in-play model reads DK’s line and the bet is placed there, so your own sportsbook setting does not apply here.\n\nOur feed serves one cached in-play snapshot for about 45 seconds, and its bulk and per-event endpoints return the same cache — so a number here can be up to ~45s behind DraftKings’ own app. Polling faster would not change that.\n\nBet the number DraftKings shows, and skip it if it has moved past the edge.'
+              'Each live pick is priced and placed at the sportsbook named on its card, the book where the model found the bet. If that book is not one of the books you chose in Settings, the card says so and offers no link.\n\nOur feed serves one cached in-play snapshot for about 45 seconds, so a live price here can be up to ~45s behind the book’s own app. Polling faster would not change that. The NBA in-play model reads the books once an hour, the NCAAB in-play models twice an hour, and the NCAABW in-play model only during a game’s halftime break, so their cards show the locked price and open the book without a live number.\n\nBet the number the book shows, and skip it if it has moved past the edge.'
             }
             accessibilityLabel="About live pricing"
           />
@@ -821,12 +907,17 @@ export function PicksHomeScreen() {
       {/* The picks loaded but something behind them did not — the odds views
           the line pills read, or one sport's look-ahead card. Say so and
           offer the retry; an empty pill and silence is how the 2026-09-04
-          timeouts went unseen here. Hidden while reloading, so a tap on Retry
+          timeouts went unseen here. Hidden while a TAP's reload runs, so Retry
           answers at once and the banner only returns if the reload fails
-          again (UX review). */}
-      {!error && !loading && partial ? (
+          again (UX review). Not hidden for a background reload: that made it
+          blink, and the list jump, every 10 minutes (UX review 2026-11-12). */}
+      {!error && !partialRetrying && !pulling && partial ? (
         <Pressable
-          onPress={() => void refresh()}
+          onPress={() => {
+            setPartialRetrying(true);
+            lastTodayLoad.current = Date.now();
+            void refresh().finally(() => setPartialRetrying(false));
+          }}
           accessibilityRole="button"
           accessibilityLabel={partialSentence(partial)}
           accessibilityHint="Reloads today’s picks"
@@ -839,14 +930,16 @@ export function PicksHomeScreen() {
         </Pressable>
       ) : null}
 
-      {/* Picks came back, DraftKings' in-play prices did not: every card would
+      {/* Picks came back, the in-play prices did not: every card would
           quietly lose its Now price. Say so, with the same retry as the Today
           partial banner (usability audit M2). */}
       {showLivePricesBanner({
         view,
         liveError,
         pricesUnavailable: livePricesUnavailable,
-        liveCount: liveData.length,
+        // Only cards that draw a live price can lose it: Retry cannot bring
+        // back a number the NBA in-play cards never show.
+        liveCount: liveWithPriceCount,
       }) ? (
         <Pressable
           onPress={() => void refreshLive()}
@@ -864,7 +957,7 @@ export function PicksHomeScreen() {
         </Pressable>
       ) : null}
 
-      {activeItems.length > 0 && !signalsLocked ? (
+      {activeItems.length > 0 ? (
         <PickFilters
           state={displayFilter}
           onChange={setFilter}
@@ -889,18 +982,6 @@ export function PicksHomeScreen() {
         />
       ) : null}
 
-      {/* The paywall card is for picks that EXIST and are hidden behind it. On an
-          empty live board it said "the models haven't found a bet that clears the
-          line yet today", which on a sport with no in-play model is a promise the
-          app cannot keep — the exact sentence lib/liveSports.ts exists to prevent
-          — and it pitched a trial on a board that is structurally empty there
-          (UX review, 2026-09-12). */}
-      {signalsLocked && !(view === 'live' && liveData.length === 0) ? (
-        <SignalLockCard
-          count={view === 'live' ? liveData.length : live.length}
-          onPress={() => navigation.navigate('Paywall')}
-        />
-      ) : (
       <FlatList
         ListFooterComponent={<BetslipBarSpacer />}
         data={rows}
@@ -925,7 +1006,9 @@ export function PicksHomeScreen() {
               tracked={tracked.isTracked(item.pick)}
               onToggleTrack={() => tracked.toggle(item.pick)}
               inSlip={slip.has(slipKeyForPick(item.pick))}
-              onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
+              onToggleSlip={() => {
+                void slip.toggle(slipKeyForPick(item.pick), betslipPlayerFromPick(item.pick));
+              }}
               liveState={liveStates.get(item.pick.game_id) ?? null}
               showSignalBadge={view === 'today'}
               paused={isPausedForDisplay(item.pick)}
@@ -962,21 +1045,21 @@ export function PicksHomeScreen() {
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl
-            refreshing={view === 'live' ? pulling : busy}
+            refreshing={pulling}
             onRefresh={() => {
               // Pull-to-refresh on the live segment must hit the live fetch —
               // refreshing today's board there would spin and change nothing.
+              setPulling(true);
               if (view !== 'live') {
-                void refresh();
+                lastTodayLoad.current = Date.now();
+                void refresh().finally(() => setPulling(false));
                 return;
               }
-              setPulling(true);
               void refreshLive().finally(() => setPulling(false));
             }}
           />
         }
       />
-      )}
       </>
       )}
     </SafeAreaView>
@@ -986,7 +1069,7 @@ export function PicksHomeScreen() {
 function boardLabel(view: PicksView): string {
   if (view === 'today') return 'All';
   if (view === 'signals') return 'Signals';
-  if (view === 'lines') return 'Lines';
+  if (view === 'scoreboard') return 'Scoreboard';
   return 'Live';
 }
 
@@ -1065,7 +1148,14 @@ function EmptyForView({
     return (
       <EmptyState
         title={`No ${sport} picks today`}
-        subtitle={`No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`}
+        subtitle={
+          // The women's totals model posts when DraftKings opens a game's
+          // total, not on the refresh cadence, so the refresh times would
+          // send a member back at the wrong hour (UX review, 2026-11-10).
+          sport === 'NCAABW'
+            ? `No NCAABW picks have posted for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
+            : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+        }
       />
     );
   }
@@ -1089,20 +1179,20 @@ function EmptyForView({
       return (
         <EmptyState
           title={`No live model for ${sport} yet`}
-          subtitle={`In-play models run on ${liveModelSportsSentence()} today, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
+          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
+          subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSentence(sportSpokenName)}, so this board stays empty for ${sportSpokenName(sport)}. The All and Signals boards carry its pre-game picks.`}
         />
       );
     }
     return (
       <EmptyState
         title={`No ${sport} live signals right now`}
-        subtitle="Live signals appear while a game is in play and the in-play model finds an edge at DraftKings’ live number. Zero of them is a valid answer, not a board that failed to load."
+        subtitle={liveEmptySubtitle(sport)}
       />
     );
   }
-  // Lines has its own empty states (no games, no lines). It never reaches
-  // this copy.
-  if (view === 'lines') return null;
+  // Scoreboard has its own empty states. It never reaches this copy.
+  if (view === 'scoreboard') return null;
   // Exhaustive over the pick views — a view added later has to say what it
   // shows here rather than silently inheriting the Signals copy (UX review).
   // The null is unreachable; the annotation is what fails the build.
@@ -1113,7 +1203,10 @@ function EmptyForView({
 
 function SubTabBtn({
   label,
-  count,
+  count = null,
+  hideCount = false,
+  locked = false,
+  lockedLabel,
   active,
   onPress,
   live = false,
@@ -1122,7 +1215,12 @@ function SubTabBtn({
 }: {
   label: string;
   /** null = never loaded (a failed first load): shown as "—", not 0. */
-  count: number | null;
+  count?: number | null;
+  /** Scoreboard is not a pick count. Locked Signals hide the count too. */
+  hideCount?: boolean;
+  /** Opens the paywall. A lock icon, not an empty tab. */
+  locked?: boolean;
+  lockedLabel?: string;
   active: boolean;
   onPress: () => void;
   /** Reports where this segment sits, so the selected one can be scrolled to. */
@@ -1137,7 +1235,14 @@ function SubTabBtn({
    */
   dot?: boolean;
 }) {
-  const noun = label === 'All' ? 'picks' : label === 'Lines' ? 'games' : live ? 'picks in play' : 'signals';
+  const noun = label === 'All' ? 'picks' : label === 'Scoreboard' ? 'games' : live ? 'picks in play' : 'signals';
+  const spoken = locked
+    ? (lockedLabel ?? `${label}, Premium`)
+    : hideCount
+      ? label
+      : count == null
+        ? `${label}, count not available`
+        : `${label}, ${count} ${noun}`;
   return (
     <Pressable
       onPress={onPress}
@@ -1147,15 +1252,19 @@ function SubTabBtn({
       // row: 6 above (its half of the gap to the sport chips) and 2 + 6 below
       // (subTabsReach) → ~46pt (audit H9/M8).
       hitSlop={{ top: SUBTAB_REACH_ABOVE, bottom: 2 + SUBTAB_REACH_BELOW }}
-      accessibilityRole="tab"
+      accessibilityRole={locked ? 'button' : 'tab'}
       accessibilityState={{ selected: active }}
-      accessibilityLabel={count == null ? `${label}, count not available` : `${label}, ${count} ${noun}`}
+      accessibilityLabel={spoken}
+      accessibilityHint={locked ? 'Opens the subscription screen' : undefined}
       style={({ pressed }) => [styles.subTab, active && styles.subTabActive, pressed && styles.pressed]}
     >
       <View style={styles.subTabInner}>
         {dot ? <LiveDot /> : null}
+        {locked ? (
+          <Ionicons name="lock-closed" size={12} color={colors.tint} />
+        ) : null}
         <Text style={[styles.subTabText, active && styles.subTabTextActive]}>
-          {label} ({count ?? '—'})
+          {hideCount ? label : `${label} (${count ?? '—'})`}
         </Text>
       </View>
     </Pressable>
@@ -1192,6 +1301,17 @@ const styles = StyleSheet.create({
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  freePill: {
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  freePillText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
   },
   subtitle: {
     fontSize: font.size.footnote,
@@ -1251,16 +1371,6 @@ const styles = StyleSheet.create({
   },
   subTabTextActive: {
     color: colors.tint,
-  },
-  linesSports: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-    // 8pt, not 16. FilterChip's lower slop is 8pt and the segment scroller
-    // takes touches 6pt above itself. 8pt keeps that slop out of the scroller
-    // (the chip stays a 44pt target) and is half the gap that was trimmed.
-    marginBottom: spacing.sm,
   },
   firstDayHeader: { marginTop: 0 },
   list: {

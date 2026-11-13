@@ -1,0 +1,87 @@
+{
+ "_source": "site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?dates=20261110&groups=50, fetched 2026-10-26, trimmed to the two Champions Classic games",
+ "events": [
+  {
+   "id": "401909564",
+   "date": "2026-11-11T00:00Z",
+   "season": {
+    "year": 2027,
+    "type": 2
+   },
+   "competitions": [
+    {
+     "neutralSite": true,
+     "venue": {
+      "id": "1847",
+      "fullName": "United Center"
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "team": {
+        "id": "150",
+        "location": "Duke",
+        "name": "Blue Devils",
+        "displayName": "Duke Blue Devils",
+        "shortDisplayName": "Duke",
+        "abbreviation": "DUKE"
+       }
+      },
+      {
+       "homeAway": "away",
+       "team": {
+        "id": "127",
+        "location": "Michigan State",
+        "name": "Spartans",
+        "displayName": "Michigan State Spartans",
+        "shortDisplayName": "Michigan St",
+        "abbreviation": "MSU"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909786",
+   "date": "2026-11-11T02:30Z",
+   "season": {
+    "year": 2027,
+    "type": 2
+   },
+   "competitions": [
+    {
+     "neutralSite": true,
+     "venue": {
+      "id": "1847",
+      "fullName": "United Center"
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "team": {
+        "id": "96",
+        "location": "Kentucky",
+        "name": "Wildcats",
+        "displayName": "Kentucky Wildcats",
+        "shortDisplayName": "Kentucky",
+        "abbreviation": "UK"
+       }
+      },
+      {
+       "homeAway": "away",
+       "team": {
+        "id": "2305",
+        "location": "Kansas",
+        "name": "Jayhawks",
+        "displayName": "Kansas Jayhawks",
+        "shortDisplayName": "Kansas",
+        "abbreviation": "KU"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
