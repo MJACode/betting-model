@@ -104,8 +104,9 @@ FINAL = ("bet", "no_bet", "declined", "missed")
 BULK_PURPOSE = "ncaabw_live_bulk:h2h,spreads,totals"
 # THE FAST WAY (mike, 2026-11-13: "Move everything over to the fast way"). The
 # break's score is frozen, so ESPN's two waits buy nothing once every play of
-# the first half is published: a read at least HT_SETTLED_SEC after the half's
-# last play is judged on ESPN's summary read at once (ESPN published a college
+# the first half is published and the break is still on: a read at least
+# HT_SETTLED_SEC after the half's last play, of a game DraftKings' board shows
+# at halftime now, is judged on ESPN's summary read at once (ESPN published a college
 # play at most 92 s after its wallclock, 2026-11-12/13). And DraftKings' total
 # in the read is DraftKings' own board's (models/ncaab_live_dk.py), stamped
 # where the board first showed it, while that feed is seconds old; the other
@@ -458,6 +459,7 @@ class Loop:
                  dk=None):
         self.art, self.espn, self.feed, self.connect = art, espn, feed, connect
         self.dk = dk                           # DraftKings' own board (models/ncaab_live_dk.DbSource)
+        self.dk_break: set = set()             # games DraftKings' board shows at halftime at this read
         self.dry_run, self.wait, self.recheck, self.sleep = dry_run, float(wait), float(recheck), sleep
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.slate_dates = slate_dates
@@ -540,7 +542,9 @@ class Loop:
 
     def dk_totals(self, game_ids: set, served) -> pd.DataFrame | None:
         """DraftKings' own current totals for these games, or None while the
-        feed is not live (mike's machine off): the read then stays the provider's."""
+        feed is not live (mike's machine off): the read then stays the provider's.
+        Also leaves self.dk_break: the games DraftKings' board shows at halftime now."""
+        self.dk_break = set()
         if self.dk is None:
             return None
         from models import ncaab_live_dk as DK
@@ -555,6 +559,8 @@ class Loop:
             return None
         if not len(reads):
             return None
+        newest = reads.sort_values("read_at").groupby("game_id").tail(1)
+        self.dk_break = set(newest.loc[newest["period_label"] == "Halftime", "game_id"])
         return DK.current_quotes(reads, max(pd.Timestamp(last[0]), pd.Timestamp(served)), markets=("totals",))
 
     def note(self, c: GameCtx, outcome: str, reason: str, fetch_at=None, state: dict | None = None,
@@ -698,8 +704,16 @@ class Loop:
         # A game whose half ended HT_SETTLED_SEC before the read is judged on
         # ESPN's summary read now; the rest wait as graded.
         now_read = self.summaries([c for c, _g in todo])
+        # SETTLED needs a second, independent witness that the break is still on:
+        # DraftKings' board, which shows the game's state seconds after it changes.
+        # ESPN alone cannot say it: running 100 s behind, its list and header can
+        # still show the break after the third quarter has begun (2026-11-13; the
+        # stored breaks are a median 15-17 minutes, but 6% of games show the third
+        # quarter's first play under 8 minutes after the second's last). A game
+        # DraftKings does not list, or shows in any other period, waits as graded.
         settled = {c.game_id for c, _g in todo
-                   if now_read.get(c.game_id) is not None and half_settled(now_read[c.game_id], c, served)}
+                   if c.game_id in getattr(self, "dk_break", set())
+                   and now_read.get(c.game_id) is not None and half_settled(now_read[c.game_id], c, served)}
         slow = [(c, g) for c, g in todo if c.game_id not in settled]
         first = {gid: now_read[gid] for gid in settled}
         second_of = {gid: now_read[gid] for gid in settled}
