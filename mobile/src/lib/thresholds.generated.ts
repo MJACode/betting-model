@@ -4,7 +4,7 @@
  * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).
  * Regenerate: python -m scripts.generate_mobile_thresholds
  * Check (CI):  python -m scripts.generate_mobile_thresholds --check
- * Last generated: 2026-11-11
+ * Last generated: 2026-11-13
  */
 
 export interface ModelThreshold {
@@ -14,6 +14,7 @@ export interface ModelThreshold {
 }
 
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
+  euroleague_live_spread_ht: { min_prob: 0, min_edge: 0, min_odds: -200 },
   mlb_f5_moneyline: { min_prob: 0.58, min_edge: 0.02, min_odds: -200 },
   mlb_f5_over_under: { min_prob: 0.65, min_edge: 0.15, min_odds: -200 },
   mlb_f5_runline: { min_prob: 0.65, min_edge: 0.15, min_odds: -200 },

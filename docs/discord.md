@@ -53,7 +53,13 @@ there, open #nba-live and #ncaab-live through the bot. NBA and NCAAB live picks
 post only to their own live channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`),
 never the shared live or the pre-game channel. The same holds for NCAABW from
 2026-11-11: its halftime loop (`models/ncaabw_live_loop.py`) runs on `pollers`
-and posts to #ncaabw-live only. A live post from a service
+and posts to #ncaabw-live only. EUROLEAGUE joined `config.DISCORD_SPORTS` and
+`config.DISCORD_LIVE_CHANNEL_REQUIRED` on 2026-11-13 for its halftime spread
+(`models/euroleague_live_loop.py`, `pollers`): its picks post to the EuroLeague
+live channel only, through `DISCORD_CHANNEL_LIVE_EUROLEAGUE` (or
+`DISCORD_WEBHOOK_LIVE_EUROLEAGUE`). **Neither the channel nor the variable
+exists yet**; until one is set the loop decides nothing. No pre-game EuroLeague
+model exists, so no `DISCORD_CHANNEL_EUROLEAGUE` is needed. A live post from a service
 without the bot token cannot open a channel id; it needs the token (Manage
 Webhooks) and the channel id, or a `DISCORD_WEBHOOK_LIVE_{SPORT}` URL. The notifier logs that once per sport
 and skips the pick. The channel probe (`worker_jobs` kind `discord_probe`)

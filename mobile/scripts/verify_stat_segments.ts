@@ -68,6 +68,7 @@ const WANT_SEGMENTS: Record<Sport, StatSegment[]> = {
   NHL: ['players', 'teams'], // unchanged: Players | Teams
   UFC: ['players'], // one item → SegmentTabs renders no row
   GOLF: ['players'], // unchanged: no row
+  EUROLEAGUE: ['players'], // no stats in the app yet: the Players board says so, no row
 };
 for (const sport of Object.keys(WANT_SEGMENTS) as Sport[]) {
   const got = segmentsForSport(sport);

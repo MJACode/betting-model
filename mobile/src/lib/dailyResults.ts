@@ -127,6 +127,8 @@ const SPORT_ORDER: Record<string, number> = {
   NCAABW: 6,
   UFC: 7,
   NHL: 8,
+  // EUROLEAGUE joined 2026-11-13 (its in-play model), last as on the sport chips.
+  EUROLEAGUE: 9,
   // GOLF retired 2026-09-08 (mike) -- omitted so the recap grows no chip that
   // can only ever report zero. DailyResultsModal appends any sport the lib
   // returns that is missing here, so a golf row could still never be dropped.

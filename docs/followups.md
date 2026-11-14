@@ -21,6 +21,22 @@
 
 ---
 
+## [ ] EuroLeague halftime spread: the live channel, then watch the first slate (2026-11-13)
+`euroleague_live_spread_ht` decides nothing until mike creates the EuroLeague
+live Discord channel and sets `DISCORD_CHANNEL_LIVE_EUROLEAGUE` (or
+`DISCORD_WEBHOOK_LIVE_EUROLEAGUE`) on pollers. Then, on the first slate
+(2026-11-17): EuroLeague's API timing at the break (when 'EP', 'BP' and each
+shot appear), the first call's `x-requests-last` (3 credits derived, not
+measured), the decision rows' reasons, and whether `games` ever holds a
+mid-game score before the final (`docs/sports/euroleague.md`, "Halftime spread").
+
+## [ ] EuroLeague: DraftKings' own live board (2026-11-13)
+DraftKings' navigation listed no EuroLeague league for Ohio, New Jersey or
+Massachusetts on 2026-11-13 at about 23:15 UTC, 89 hours before the next game.
+Read it again while a round is posted; if listed, add the id and a club-name
+resolver to `data/ingestors/dk_live_board.py` and re-measure which quote the
+halftime spread should read.
+
 ## [ ] EuroLeague: finish the two history purchases (2026-11-12)
 mike approved about 4.4M on 2026-11-13 ("Do the 4.4m"; `docs/sports/euroleague.md`,
 "The purchase"): no 2020-21, the full game every snapshot near and during games

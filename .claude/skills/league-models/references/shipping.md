@@ -116,7 +116,9 @@ A new writer that skips one of these bets something it should not:
   `test_open_picks_view::test_every_model_has_its_app_name`; re-hash the view
   marker after editing it.
 - **CLV**: the `clv_game_market` `CASE` and its comment stamp
-  (`tests/test_rule_model_markets_everywhere.py`).
+  (`tests/test_rule_model_markets_everywhere.py`), for a pre-game model only.
+  The closing-line recompute skips in-play picks (`p.is_live IS NOT TRUE`), so
+  an in-play model is not added (EuroLeague, 2026-11-13).
 - **Mobile thresholds**: `python -m scripts.generate_mobile_thresholds`
   (`--check` fails on drift).
 - **A new sport in the app**: the sport chip, the model catalog order, the

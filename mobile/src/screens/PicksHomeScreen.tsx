@@ -1154,7 +1154,12 @@ function EmptyForView({
           // send a member back at the wrong hour (UX review, 2026-11-10).
           sport === 'NCAABW'
             ? `No NCAABW picks have posted for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
-            : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+            : // EuroLeague has no pre-game model: its one model bets during the
+              // halftime break, so the refresh times would promise a list that
+              // never fills (models/euroleague_live_loop.py).
+              sport === 'EUROLEAGUE'
+              ? 'EuroLeague has no pre-game model. Its one model bets during the halftime break, and those bets post on Live Signals.'
+              : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
         }
       />
     );
@@ -1163,7 +1168,11 @@ function EmptyForView({
     return (
       <EmptyState
         title="No signal bets right now"
-        subtitle="Zero picks is a valid signal — no high-conviction plays right now. Open the All board to see everything the model scored, or check back after the next refresh."
+        subtitle={
+          sport === 'EUROLEAGUE'
+            ? 'EuroLeague has no pre-game model. Its one model bets during the halftime break, and those bets post on Live Signals.'
+            : 'Zero picks is a valid signal — no high-conviction plays right now. Open the All board to see everything the model scored, or check back after the next refresh.'
+        }
       />
     );
   }

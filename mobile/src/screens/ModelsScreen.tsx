@@ -34,7 +34,7 @@ type Tab = 'builtin' | 'mine';
 const BUILTIN_MODEL_IDS = Object.keys(MODEL_META);
 
 /** Sport a model belongs to, derived from its id prefix. */
-function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' {
+function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' | 'EUROLEAGUE' {
   if (modelId.startsWith('ufc')) return 'UFC';
   if (modelId.startsWith('ncaaf')) return 'NCAAF';
   // The women's prefix first: every ncaabw_ id starts with 'ncaab' too, and
@@ -46,6 +46,7 @@ function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'N
   if (modelId.startsWith('nhl')) return 'NHL';
   if (modelId.startsWith('wnba')) return 'WNBA';
   if (modelId.startsWith('nba')) return 'NBA';
+  if (modelId.startsWith('euroleague')) return 'EUROLEAGUE';
   return 'MLB';
 }
 

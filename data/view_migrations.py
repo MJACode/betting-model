@@ -650,6 +650,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # with an in-play model. Adds columns only; touches no view, pick, cut or
     # record. Returns on a catalog read once all six exist.
     "dk_live_reads_all_sports_2026_11_13.sql",
+    # 2026-11-13 (mike): the EuroLeague halftime loop's decision ledger, one
+    # final row per game (models/euroleague_live_loop.py). A new table, RLS
+    # on, anon and authenticated revoked; touches no view, pick or function.
+    # Returns on a catalog read once it exists. The loop refuses to decide
+    # until it does.
+    "euroleague_live_decisions_2026_11_13.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT

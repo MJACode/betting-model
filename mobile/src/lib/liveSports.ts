@@ -2,7 +2,7 @@
  * WHICH SPORTS HAVE AN IN-PLAY MODEL AT ALL.
  *
  * Mirror of the in-play models in the Python registry: `config.LIVE_MODELS`
- * (MLB, NBA, NCAAB, NCAABW and NCAAF) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
+ * (MLB, NBA, NCAAB, NCAABW, NCAAF and EUROLEAGUE) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
  * in `nfl/live_model/config.MODEL_IDS`). PINNED BY
  * tests/test_mobile_live_segment.py, which fails until this set equals those
  * two sources — the same mechanism lib/thresholds.ts uses, for the same reason:
@@ -21,8 +21,9 @@
 /** Sports with at least one in-play model writing `is_live` picks. */
 // Ordered so the two college basketball codes close the sentence ("... NCAAB
 // and NCAABW"): side by side in the middle of a list they read as one word
-// typed twice (UX review, 2026-11-11).
-export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW']);
+// typed twice (UX review, 2026-11-11). EUROLEAGUE (2026-11-13) sits before them
+// for the same reason.
+export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NBA', 'NFL', 'NCAAF', 'EUROLEAGUE', 'NCAAB', 'NCAABW']);
 
 /** Does this sport have an in-play model at all? */
 export function hasLiveModel(sport: string): boolean {
@@ -74,6 +75,15 @@ export function liveEmptySubtitle(sport: string): string {
     return (
       'The NCAABW in-play model checks each game during its halftime break and bets it at most once, ' +
       'on the full-game total. ' +
+      LIVE_EMPTY_VALID
+    );
+  }
+  if (sport === 'EUROLEAGUE') {
+    // models/euroleague_live_loop.py: one decision a game, during the halftime
+    // break, on the full-game spread.
+    return (
+      'The EuroLeague in-play model checks each game during its halftime break and bets it at most once, ' +
+      'on the full-game spread. ' +
       LIVE_EMPTY_VALID
     );
   }

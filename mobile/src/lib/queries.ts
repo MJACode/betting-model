@@ -300,7 +300,7 @@ const totalsRowKey = (r: SeasonTotalsRow): string =>
  * (opponent defense/pace). Other sports return [] (no matchup view yet).
  */
 export async function fetchTonightMatchups(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
 ): Promise<TonightMatchupRow[]> {
   if (sport !== 'MLB' && sport !== 'WNBA') return [];
   const view = sport === 'MLB' ? 'v_mlb_tonight_matchups' : 'v_wnba_tonight_matchups';
@@ -316,15 +316,16 @@ export async function fetchTonightMatchups(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
-  // No golf leaderboard (v1). Named, or the sport falls to the MLB read below.
-  if (sport === 'GOLF') return [];
+  // No golf leaderboard (v1), and no EuroLeague one (2026-11-13). Named, or the
+  // sport falls to the MLB read below.
+  if (sport === 'GOLF' || sport === 'EUROLEAGUE') return [];
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
     for (const s of footballSeasonCandidates(season)) {
@@ -406,12 +407,14 @@ function pageRpc<T>(
  * 25 server-side.
  */
 export async function fetchRecentGames(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
   season: number,
   window: number,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<RecentGameRow[]> {
+  // EuroLeague has no player stats in the app (2026-11-13): named, or it falls to the MLB read.
+  if (sport === 'EUROLEAGUE') return [];
   // The heaviest read on the board — N rows per player, league-wide. Every
   // sport is over the 1,000-row cap here (WNBA 2,074, NBA 5,447, MLB 6,216,
   // NFL 12,850, NCAAF 54,687), so it is both paged and narrowed.
@@ -490,12 +493,14 @@ const recentGameRowKey = (r: RecentGameRow): string => `${r.player_id}:${r.game_
  * keys in statCatalog); unknown keys return zero rows.
  */
 export async function fetchSeasonStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
   season: number,
   statKey: string,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonStatValuesRow[]> {
+  // EuroLeague has no player stats in the app (2026-11-13): named, or it falls to the MLB read.
+  if (sport === 'EUROLEAGUE') return [];
   // One compact row per player, but still over the cap where the league is
   // big: 1,798 NFL players on a season stat, 12,204 NCAAF.
   const key = (r: SeasonStatValuesRow) =>
@@ -612,13 +617,14 @@ function h2hSeasonCandidates(sport: string, season: number): number[] {
  * ask about, and an unnarrowed H2H read is the cross product.
  */
 export async function fetchH2HStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
   season: number,
   statKey: string,
   matchups: H2HMatchups,
   playerType?: 'batter' | 'pitcher',
 ): Promise<H2HStatValuesRow[]> {
-  if (matchups.teams.length === 0) return [];
+  // EuroLeague has no player stats in the app (2026-11-13): named, or it falls to the MLB read.
+  if (sport === 'EUROLEAGUE' || matchups.teams.length === 0) return [];
   // (player, opponent) is the row's identity: a player whose team appears in
   // the slate twice (an MLB doubleheader) still resolves to one opponent, but
   // the key must not collapse two different ones if that ever changes.
@@ -3426,12 +3432,14 @@ export async function untrackBet(deviceId: string, pickId: number): Promise<void
  * Returns [] for sports with no teams (UFC, golf) rather than erroring.
  */
 export async function fetchTeamStats(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
   season: number,
 ): Promise<TeamSeasonStats> {
   // Neither college basketball sport has a Teams board (teamStatCatalog BALL).
   // NCAABW is named before NCAAB.
   if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAABW' || sport === 'NCAAB') return { season: null, rows: [] };
+  // EuroLeague has no stats in the app (2026-11-13).
+  if (sport === 'EUROLEAGUE') return { season: null, rows: [] };
   // RETURNS THE SEASON IT ACTUALLY USED, and that is not decoration. The Teams
   // board prints "TEAM · {season}" over these numbers and used to run the
   // fallback itself, one call per candidate; moving the loop in here without

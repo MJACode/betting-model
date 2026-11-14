@@ -789,6 +789,20 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // ── EUROLEAGUE ────────────────────────────────────────────────────────────
+  // EuroLeague in play (models/euroleague_live_ht.py, 2026-11-13): the
+  // full-game spread, bet once a game during the halftime break. It SETTLES ON
+  // THE FULL GAME, overtime included. The name is mike's ("EuroLeague Halftime
+  // Spread"); the model's page and the pick's timing line say the bet is on
+  // the full game, not the second half. Its picks appear on the Live segment
+  // only. The id starts with 'euroleague', a prefix no other sport's ids share.
+  euroleague_live_spread_ht: {
+    shortLabel: 'Live Spread',
+    longLabel: 'EuroLeague Halftime Spread',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Matt, 2026-10-24: "NFL Totals", badge O/U, same as the other totals.
   // No other NFL model uses this name.
   nfl_wind_totals: {
@@ -1231,6 +1245,9 @@ const NCAAB_LIVE_TIMING: Readonly<Record<string, { when: string; market: string 
 // decided during the halftime break (models/ncaabw_live_loop.py reads the
 // books every five minutes while a game is at the half).
 const NCAABW_HALFTIME_MODEL = 'ncaabw_live_total_ht';
+// The EuroLeague in-play model (models/euroleague_live_ht.py): the same shape,
+// on the full-game spread (models/euroleague_live_loop.py).
+const EUROLEAGUE_HALFTIME_MODEL = 'euroleague_live_spread_ht';
 
 const LIVE_NOT_IN_LIST = 'Its bets appear on the Live Signals board while the game is in play, not in this list.';
 const NEVER_REPRICED = 'A posted bet is never re-priced: it stays at the line and price it posted at.';
@@ -1264,6 +1281,17 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
           'sportsbook with the best offer. The bet is on the full-game total: it settles on the final ' +
           `score, overtime included, not on a half. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
         empty: `This model checks each NCAABW game during its halftime break. ${LIVE_NOT_IN_LIST}`,
+        note: 'In-play bets appear on Live Signals, not in this list.',
+      };
+    }
+    if (modelId === EUROLEAGUE_HALFTIME_MODEL) {
+      return {
+        title: 'Bets at halftime',
+        body:
+          'This model checks each EuroLeague game during its halftime break and bets it at most once, at the ' +
+          'sportsbook with the best offer. The bet is on the full-game spread: it settles on the final ' +
+          `score, overtime included, not on the second half. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
+        empty: `This model checks each EuroLeague game during its halftime break. ${LIVE_NOT_IN_LIST}`,
         note: 'In-play bets appear on Live Signals, not in this list.',
       };
     }
@@ -1441,7 +1469,7 @@ export function isPropModel(modelId: string): boolean {
 // Bet-type catalog — what the custom-model builder offers
 // ---------------------------------------------------------------------------
 
-export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'NHL' | 'GOLF';
+export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'NHL' | 'GOLF' | 'EUROLEAGUE';
 
 /**
  * The on-screen title. "Double-Double" is one word to the wrapper; a
@@ -1464,6 +1492,7 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('ufc')) return 'UFC';
   if (modelId.startsWith('nhl')) return 'NHL';
   if (modelId.startsWith('golf')) return 'GOLF';
+  if (modelId.startsWith('euroleague')) return 'EUROLEAGUE';
   return 'MLB';
 }
 
@@ -1502,6 +1531,7 @@ const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
   'UFC',
   'NHL',
   'GOLF',
+  'EUROLEAGUE',
 ];
 
 /**
