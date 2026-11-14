@@ -44,6 +44,7 @@ import { ScoreboardGameScreen } from '@/screens/ScoreboardGameScreen';
 import { FeedbackScreen } from '@/screens/FeedbackScreen';
 import { FeedbackThreadScreen } from '@/screens/FeedbackThreadScreen';
 import { useOnboarding } from '@/hooks/useOnboarding';
+import { useDiscordJoin } from '@/hooks/useDiscordJoin';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
@@ -62,6 +63,7 @@ import { AppErrorBoundary } from '@/components/AppErrorBoundary';
 import { useDailyResults } from '@/hooks/useDailyResults';
 import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
 import { OnboardingModal } from '@/components/OnboardingModal';
+import { DiscordJoinModal } from '@/components/DiscordJoinModal';
 import { DailyResultsModal } from '@/components/DailyResultsModal';
 import { RESULTS_MIN_DATE } from '@/lib/dailyResults';
 import { addDays, todayET } from '@/lib/format';
@@ -284,10 +286,11 @@ else void sentryStarting.then(startOtherLoggers);
 
 function App() {
   const { seen, ready, markSeen } = useOnboarding();
-  const { ready: authReady, signedIn } = useAuth();
+  const { ready: authReady, signedIn, user } = useAuth();
+  const { discordPaid, trialConfirmed, subscriptionReady, hold: membershipHold, access } = useMembership();
   // A member who saw the intro before the sportsbook step existed gets that
   // step on its own, once (OnboardingModal booksOnly).
-  const { needsChoice: needsBooks } = usePreferredBooks();
+  const { needsChoice: needsBooks, ready: booksReady } = usePreferredBooks();
   useActionThresholds(); // hydrate live action thresholds from model_action_thresholds
   useModelClvPedigree(); // hydrate per-model CLV pedigree for the Sharp Score
   usePushNotifications(); // register push token when user opts in
@@ -333,6 +336,21 @@ function App() {
   // The paywall is the first screen after a fresh sign-in. The intro and the
   // daily recap are modals, so they would cover it. Hold both until Close.
   const holdIntro = routeName === 'Paywall' || routeName === 'SignIn';
+  // Books storage has to have answered, or a books-only step and the Join
+  // screen can stack for one frame. The Join screen waits until this intro
+  // is finished, and the daily recap waits until the Join screen is decided.
+  const onboardingFinished = ready && booksReady && seen && !needsBooks;
+  const surfaceClear = (!AUTH_ENABLED || signedIn) && !holdIntro;
+  const join = useDiscordJoin({
+    userId: user?.id ?? null,
+    trialConfirmed,
+    subscriptionReady,
+    discordPaid,
+    comped: access.source === 'comped',
+    onboardingFinished,
+    surfaceClear,
+    membershipHold,
+  });
 
   // Auth on: the shell is unreachable signed out. Read the module status, not
   // the React copy — a sign-in updates the module before this render, and a
@@ -353,9 +371,17 @@ function App() {
       <OnboardingModal
         visible={ready && (!seen || needsBooks) && (!AUTH_ENABLED || signedIn) && !holdIntro}
         booksOnly={seen && needsBooks}
+        discordPaid={discordPaid}
+        joinSeen={join.joinSeen}
         onDone={markSeen}
       />
-      <DailyRecap onboardingDone={ready && seen && !needsBooks && (!AUTH_ENABLED || signedIn) && !holdIntro} />
+      <DiscordJoinModal
+        visible={join.show}
+        variant={join.variant}
+        discordPaid={discordPaid}
+        onChoose={join.choose}
+      />
+      <DailyRecap onboardingDone={onboardingFinished && surfaceClear && !join.blocking} />
       {authHold ? (
         <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={colors.tint} />

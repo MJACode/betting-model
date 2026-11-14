@@ -1,4 +1,6 @@
 import { billingReady } from '@/lib/billingConfig';
+import { isEntitled } from '@/lib/billingHelpers';
+import { confirmedTrial } from '@/lib/discordJoin';
 import { contentLocked, membershipTier, type MembershipTier } from '@/lib/membership';
 import { useEntitlement } from './useEntitlement';
 import { useSubscription } from './useSubscription';
@@ -30,6 +32,17 @@ export function useMembership() {
     hold: billingOn && !resolved,
     contentLocked: resolved && contentLocked(tier),
     discordPaid: resolved && tier === 'paid',
+    /**
+     * A loaded `trialing` row whose period is still open. Not the fallback
+     * tier: entitled-with-no-row is also reported as `trial`.
+     */
+    trialConfirmed: confirmedTrial({
+      subLoading,
+      status: subscription?.status,
+      periodEntitled: isEntitled(subscription),
+    }),
+    /** The subscription read has settled, including a failed one. */
+    subscriptionReady: !subLoading,
     subscription,
     entitled: resolved ? entitled : false,
     access,

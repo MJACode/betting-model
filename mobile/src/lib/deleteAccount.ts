@@ -34,6 +34,7 @@ import { clearTrackedBetsForAccountDeletion } from '@/hooks/useTrackedBets';
 import { AUTH_ENABLED } from './authConfig';
 import { assertAuthEnabled } from './authHelpers';
 import { ACCOUNT_WIPE_KEYS, QUERY_CACHE_KEYS, isStaleSessionError } from './deleteAccountHelpers';
+import { forgetDiscordJoinUser } from './discordJoinStore';
 import { discordLinkReady } from './discordConfig';
 import { unlinkDiscord } from './discord';
 import { setModelClv } from './sharpScore';
@@ -66,6 +67,18 @@ export async function clearQueryCache(): Promise<void> {
 }
 
 /**
+ * Drop this account from the Join-screen map. Other accounts on the phone
+ * keep their own records. The hook drops the same id from memory so a later
+ * write cannot put it back.
+ */
+async function forgetDiscordJoinForCurrentUser(): Promise<void> {
+  const { data } = await supabase.auth.getSession();
+  const userId = data.session?.user.id;
+  if (!userId) return;
+  await forgetDiscordJoinUser(userId);
+}
+
+/**
  * Wipe this install's copies. Returns 'tracked' when the tracked_bets delete
  * failed (that one is surfaced on its own). Returns 'wipe' for any other
  * failure. Does not sign out and does not rewrite the device books row.
@@ -73,6 +86,11 @@ export async function clearQueryCache(): Promise<void> {
 export async function wipeLocalAccountData(deviceId: string | null): Promise<LocalFailure | null> {
   let failure: LocalFailure | null = null;
   try {
+    try {
+      await forgetDiscordJoinForCurrentUser();
+    } catch (e) {
+      console.warn('[deleteAccount] discord join flag', e);
+    }
     await Promise.all([
       clearCustomModelsForAccountDeletion(),
       clearTrackedBetsForAccountDeletion(),

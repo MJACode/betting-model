@@ -69,8 +69,12 @@ eq(
 );
 eq('explore summary', home.EXPLORE_TILE_SUMMARY, 'Record, Live Signals, intro');
 eq('legal summary', home.LEGAL_TILE_SUMMARY, 'Help line · Terms · Privacy');
-eq('community with discord', home.communityTileSummary(true, 0), 'X · Feedback · Discord');
+eq('community with discord', home.communityTileSummary(true, 0), 'Discord · X · Feedback');
 eq('community without discord', home.communityTileSummary(false, 0), 'X · Feedback');
+eq('paid discord tile shows Included', home.communityIncludedChip(true, true), true);
+eq('trial discord tile has no Included chip', home.communityIncludedChip(true, false), false);
+eq('flags-off tile has no Included chip', home.communityIncludedChip(false, true), false);
+eq('an unread reply hides the Included chip', home.communityIncludedChip(true, true, 2), false);
 eq('community unread replaces the static list', home.communityTileSummary(true, 2), 'X · 2 new replies');
 eq('community one reply', home.communityTileSummary(false, 1), 'X · 1 new reply');
 eq(
