@@ -44,6 +44,13 @@ not a refusal forever, and a route that failed one way may answer another
 | tapology.com robots.txt | a plain fetch | **disallows Claude's crawlers by name** (2026-11-13). Not fetched. |
 | Springer article pages (J. Econ. Finance) | a plain fetch | **redirects to a login**; Crossref gives the title and date |
 | biblos.hec.ca, statds.org, thescholarship.ecu.edu (thesis and poster PDFs) | a plain fetch | yes (200, 2026-11-13) |
+| tennis-data.co.uk (one price per tennis match: Bet365, Pinnacle, best, average) | a plain fetch, and the web-fetch agent | **no (Cloudflare "Sorry, you have been blocked", 2026-11-13)**. Copies of its files on GitHub exist and are not used: the permission check refused fetching them as a way round the block |
+| Jeff Sackmann's tennis repositories (`JeffSackmann/tennis_atp`, `tennis_wta`) | `gh api repos/...` | **no (404, 2026-11-13)**; the public archive `Aneeshers/tennis-sackmann-archive` answered (June 2026 snapshot, CC BY-NC-SA 4.0) |
+| ESPN's tennis scoreboard (`site.api.espn.com/apis/site/v2/sports/tennis/{atp,wta}/scoreboard`) | a plain fetch | yes (200, 2026-11-13); its core odds endpoint holds nothing for tennis |
+| Pinnacle's public site API (`guest.api.arcadia.pinnacle.com/0.1/sports/<id>/matchups` and `/markets/straight`) | a plain request | yes (2026-11-13): every tennis level, prices with versions and stake limits |
+| TennisExplorer results pages (every tennis level, one price pair a match) | a plain request, two seconds apart | yes (2026-11-13); robots allow results pages, the terms page is closed to crawlers. Its prices are an average of books near the close (`docs/sports/tennis.md`) |
+| DraftKings' own site API, read for a new sport | a browser-style session | **refused by the permission check (2026-11-13)** although the repo's in-play reader uses it on mike's recorded call: a new use needs his permission rule |
+| A book's house rules as a PDF (massgaming.com hosts DraftKings') | the web-fetch agent saves the PDF; WebFetch extracts no text, `pypdf` does | yes (2026-11-13) |
 
 **The weekly cloud review cannot re-probe this table.** Its network refused
 17 of 18 sites on 2026-11-13 (only `api.github.com` answered; the egress

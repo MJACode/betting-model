@@ -215,6 +215,18 @@ edge is where the rule misses something the state shows.
   bets +15.6% (`docs/nfl_prop_profitability_search.md` §4). Settlement rules
   (overtime, regulation-only second halves, whole-number pushes) produce
   phantom edges the same way.
+- **A settlement rule that hands the bettor an option.** DraftKings voids a
+  tennis moneyline bet on a player who retires after the first set, where the
+  sharp book grades it a loss (DraftKings house rules, p. 47). Priced off the
+  sharp book, every DraftKings tennis price is worth the side's chance of
+  retiring more than it says: 1.13% a side on average, 3.0% after a previous
+  match over 3½ hours, 1.7% within 30 days of a retirement
+  (`scripts/tennis_retirement_rates.py`, 86,797 tour matches 2015-2026). About
+  half DraftKings' 2.4-point margin a side on average, so not an edge alone;
+  a term to add when a DraftKings price is compared with the sharp no-vig
+  number. *Not yet graded against prices* (`docs/sports/tennis.md`). Look for
+  the same shape elsewhere: any market where one book voids what another
+  settles.
 
 ## 8. Stat projections — the default that usually fails
 
@@ -253,6 +265,21 @@ edge is where the rule misses something the state shows.
 Each line is a hypothesis with its doc. Run it, then move it into the
 sections above with its result.
 
+- Tennis total games and games spreads priced from each player's hold and
+  break rates; the scout found no published test of these markets anywhere
+  (`docs/sports/tennis.md`, mechanism 3).
+- Tennis fatigue (the previous match's length) against the market's own
+  number, decided at the next match's first post (mechanism 4).
+- Men's Grand Slam games spreads: does the book price best of five like best
+  of three (mechanism 5)?
+
+- UFC: a Pinnacle-anchored finish model for round totals on the bought
+  history (every blind total loses; Pinnacle's over is near fair).
+- UFC: notice length from the feed's first listing of a pairing; a
+  DraftKings total left stale when its moneyline moves; the five-round
+  favourite at per-book prices (null at the worst close, fails the late
+  half); BestFightOdds'
+  per-book prop pages as a round-total price route
 - UFC round totals, the card-day over: Pinnacle's no-vig total plus a
   per-line intercept fitted on earlier years, decided on fight-day pulls,
   bet at DraftKings when EV >= 0. It fails the bar: 228 bets +6.92%
