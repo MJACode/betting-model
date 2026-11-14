@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Discord join screen headline shortened to "Join the Discord" |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Bet all on Signals: every pre-game signal for a sport as single bets, best line (default) or one sportsbook, never a parlay (`combineSinglesLinks`), placed-bet prompt tracks them, live excluded and said so; eligibility shared with the card via `pickPriceView` |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Picks filter gets a Status section (Not started / Live / Final) from the cards' own gameStatus() |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, sportsbook hand-off opens the book's app or the App Store: new iOS native module `open-in-app` (`universalLinksOnly`), `appClaimedLink` (BetMGM's betslip query moved under `/sportsapp/`, the only path its app claims), wired into `openBookBetslip`; needs a TestFlight build; not yet seen on a device |
