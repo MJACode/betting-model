@@ -27,7 +27,7 @@ DO $mig$
 BEGIN
   IF to_regclass('public.model_display_names') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.model_display_names'), 'pg_class'), '')
-         = 'dashboard_support a49c08740edc'
+         = 'dashboard_support 52e538b5d6a8'
      AND to_regclass('public.dashboard_layouts') IS NOT NULL
      AND NOT has_table_privilege('anon', 'public.dashboard_layouts', 'SELECT')
      AND NOT has_table_privilege('authenticated', 'public.dashboard_layouts', 'SELECT')
@@ -64,6 +64,7 @@ BEGIN
            (n.model_id LIKE '%\_live\_%') AS in_play
       FROM (VALUES
         -- names:begin
+        ('atp_moneyline_shop', 'ATP Match Winner', 'ML'),
         ('golf_make_cut', 'Golf Make Cut', 'Cut'),
         ('golf_matchup', 'Golf Matchups', 'H2H'),
         ('golf_outright', 'Golf Outright', 'Win'),
@@ -168,10 +169,11 @@ BEGIN
         ('wnba_prop_player_pra', 'WNBA Pts + Reb + Ast', 'PRA'),
         ('wnba_prop_player_rebounds', 'WNBA Rebounds', 'REB'),
         ('wnba_prop_player_threes', 'WNBA Threes', '3PM'),
-        ('wnba_spread', 'WNBA Spreads', 'Spread')
+        ('wnba_spread', 'WNBA Spreads', 'Spread'),
+        ('wta_moneyline_shop', 'WTA Match Winner', 'ML')
         -- names:end
       ) AS n(model_id, name, short_name)
   $view$;
-  EXECUTE $c$COMMENT ON VIEW public.model_display_names IS 'dashboard_support a49c08740edc'$c$;
+  EXECUTE $c$COMMENT ON VIEW public.model_display_names IS 'dashboard_support 52e538b5d6a8'$c$;
   REVOKE ALL ON public.model_display_names FROM anon, authenticated;
 END $mig$;
