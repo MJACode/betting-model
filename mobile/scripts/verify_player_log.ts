@@ -97,7 +97,7 @@ const statOf = (sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF', label: string, 
 for (const s of ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAABW', 'NCAAB'] as const) {
   check(`${s} has a player detail screen`, supportsPlayerDetail(s));
 }
-for (const s of ['UFC', 'NHL', 'GOLF'] as const) {
+for (const s of ['UFC', 'NHL', 'GOLF', 'ATP', 'WTA'] as const) {
   check(`${s} has NO player detail screen (no per-game player log)`, !supportsPlayerDetail(s));
 }
 

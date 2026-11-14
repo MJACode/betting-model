@@ -41,7 +41,9 @@ import { clvBetQuote } from '@/lib/clvBet';
 import { openForAction } from '@/lib/discordPublish';
 import { betslipPlayerFromPick } from '@/lib/betslipGuard';
 import { slipKeyForPick } from '@/lib/parlay';
-import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus, labelWithoutStake } from '@/lib/format';
+import {
+  basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus, isVersusSport, labelWithoutStake,
+} from '@/lib/format';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, modelLongWithMark, sportOfModel } from '@/lib/modelMeta';
 import {
@@ -290,9 +292,15 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   const inSlip = slip.has(slipKeyForPick(pick));
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
-  // don't promise alerts on props or already-started games.
+  // don't promise alerts on props or already-started games. Nor on tennis:
+  // the notifier reads DraftKings' line from the shared odds table
+  // (tracking/push_notifier._line_change_alerts), and tennis prices are
+  // stored in tennis_odds_quotes, never there, so no alert can fire. (The
+  // tennis card fills dk_odds with the deciding price when DraftKings has
+  // none, so dk_odds != null says nothing for tennis.)
   const trackAlertsEligible =
     isGameModel && pick.dk_odds != null && pick.player_id == null &&
+    pick.sport !== 'ATP' && pick.sport !== 'WTA' &&
     gameStatus(game, liveState).kind === 'pre';
   // Who's on base, shown under the matchup while the game is actually in play.
   const liveBases =
@@ -318,10 +326,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // Golf picks are per-player on a one-row tournament (no two teams) — there is
   // no run-based team form to show, so skip the trend strips like UFC.
   const isGolf = game?.sport === 'GOLF' || pick.sport === 'GOLF';
-  const showTeamTrends = isGameModel && !isUfc && !isGolf;
   // The form strips read the pick's own sport: `games` stores the Celtics, the
   // Red Sox and the Bruins all as 'BOS'.
   const teamSport = game?.sport ?? pick.sport ?? null;
+  // A fight or a tennis match is two players, not two teams: no team form
+  // (useTeamTrends would ask the team reads for "Jannik Sinner").
+  const showTeamTrends = isGameModel && !isVersusSport(teamSport) && !isGolf;
 
   const homeTrends = useTeamTrends(
     showTeamTrends ? teamSport : null,
@@ -420,7 +430,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
               <Text style={styles.matchup}>
                 {game.sport === 'GOLF'
                   ? game.home_team
-                  : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`}
+                  : `${game.away_team} ${isVersusSport(game.sport) ? 'vs' : '@'} ${game.home_team}`}
               </Text>
               <GameStatusPill game={game} compact={false} live={liveState} />
             </View>

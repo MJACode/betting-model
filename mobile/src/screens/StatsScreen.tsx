@@ -2219,9 +2219,11 @@ export function StatsScreen() {
   const oddsHeaderSlot = boardChrome.showHeader && (showOdds || !booksReady);
   // A Players board that can never carry a line (NCAAB and NCAABW: no college
   // props, Matt 2026-11-03) does not name a book whose lines it will not show.
+  // Neither does tennis, which has no board at all (2026-11-14).
   const showHeaderBookLine =
     (boardMode === 'teams' && supportsTeamBoard(sport)) ||
-    (sport !== 'NCAABW' && sport !== 'NCAAB' && (!stat || (!oddsHeaderSlot && !playersBoardSettling)));
+    (sport !== 'NCAABW' && sport !== 'NCAAB' && sport !== 'ATP' && sport !== 'WTA' &&
+      (!stat || (!oddsHeaderSlot && !playersBoardSettling)));
   // Resting ruler is 28pt. The marker's hit box is 44pt, so the pad and the
   // stack grow by the overhang and pull the same amount back with a negative
   // margin. The typing field reports overhang 0 and the pad matches it.
@@ -2670,8 +2672,15 @@ export function StatsScreen() {
         </View>
         <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
         <EmptyState
-          title="No player leaderboard"
-          subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
+          title={sport === 'ATP' || sport === 'WTA' ? `No stats for ${sport}` : 'No player leaderboard'}
+          subtitle={
+            // Tennis has no stats in the app. The copy says where its picks
+            // are rather than promising a board with "yet" (the NCAABW copy
+            // of 2026-11-10, before that sport had a board).
+            sport === 'ATP' || sport === 'WTA'
+              ? `There are no player stats for ${sport === 'ATP' ? 'men’s' : 'women’s'} tennis. Its match-winner picks are on the Picks tab.`
+              : `Player stat leaderboards aren't available for ${sport} yet.`
+          }
         />
       </SafeAreaView>
     );

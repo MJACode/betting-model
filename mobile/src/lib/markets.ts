@@ -278,8 +278,14 @@ export type MarketClass =
   | 'other';
 
 export function marketClassForModel(modelId: string): MarketClass {
-  // UFC / golf have no same-game offensive structure we model — treat as independent.
-  if (modelId.startsWith('ufc_') || modelId.startsWith('golf_')) return 'other';
+  // UFC / golf have no same-game offensive structure we model — treat as
+  // independent. Nor does a tennis match: the match winner is its one market.
+  if (
+    modelId.startsWith('ufc_') || modelId.startsWith('golf_') ||
+    modelId.startsWith('atp_') || modelId.startsWith('wta_')
+  ) {
+    return 'other';
+  }
   if (modelId.startsWith('mlb_prop_pitcher_')) return 'pitching_prop';
   if (modelId.includes('prop')) return 'off_prop'; // batter / player scoring props
   if (modelId.includes('over_under') || modelId.includes('total_runs')) return 'game_total';
@@ -2220,13 +2226,16 @@ const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_
  *     game day.
  */
 // The posted-once moneyline models: two NCAAB, the NCAAF full-game moneyline,
-// and the NBA first quarter's (models/nba_q1_trend_ml.py). A moneyline has no
-// line, so their Pick Detail note names only the price.
+// the NBA first quarter's (models/nba_q1_trend_ml.py) and the two tennis match
+// winners. A moneyline has no line, so their Pick Detail note names only the
+// price.
 const POSTED_MONEYLINE_MODELS: readonly string[] = [
   'ncaab_moneyline_own_spread',
   'ncaab_moneyline_first_post',
   'ncaaf_moneyline_market',
   'nba_q1_trend_ml',
+  'atp_moneyline_shop',
+  'wta_moneyline_shop',
 ];
 
 /**
@@ -2332,6 +2341,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // 2024-25 and 85 in 2025-26 (docs/sports/ncaabw.md), and one in ten changed
   // within 10 minutes (the card's own header), so its note says "can change
   // within minutes", not the men's "often changes within half an hour".
+  // The tennis card (scripts/tennis_moneyline_card.py) decides each match
+  // once, 25 to 35 minutes before its listed start, at the best price, and
+  // never re-prices: not "the first scoring run of the day" either.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
@@ -2349,6 +2361,8 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'ncaaf_moneyline_market' ||
     pick.model_id === 'ncaab_first_half_spread' ||
     pick.model_id === 'ncaab_first_half_total' ||
+    pick.model_id === 'atp_moneyline_shop' ||
+    pick.model_id === 'wta_moneyline_shop' ||
     nbaPosted
   ) {
     return {

@@ -606,8 +606,10 @@ export function isOnSlate(
  * (`isOnSlate`'s second clause), and its rows carry no team to match them
  * against — narrowing on `team` there would return nothing at all. Null for an
  * unresolved or empty slate too: the board is showing the league, so read it.
+ * Tennis (ATP, WTA) is keyed by player too. It has no stats board today; the
+ * set says what the slate is if it ever gets one.
  */
-const TEAMLESS_SPORTS = new Set(['UFC', 'GOLF']);
+const TEAMLESS_SPORTS = new Set(['UFC', 'GOLF', 'ATP', 'WTA']);
 
 export function slateTeams(
   sport: string,
@@ -653,8 +655,9 @@ export interface SlateGame {
   isHome: boolean | null;
 }
 
-/** Sports whose `games` row has no home side — see `SlateGame.isHome`. */
-const NEUTRAL_SITE_SPORTS = new Set(['UFC', 'GOLF']);
+/** Sports whose `games` row has no home side — see `SlateGame.isHome`. A
+ *  tennis match stores its two players the way a UFC bout stores fighters. */
+const NEUTRAL_SITE_SPORTS = new Set(['UFC', 'GOLF', 'ATP', 'WTA']);
 
 function toSlateGame(game: GameRow, key: string): SlateGame {
   const isHome = NEUTRAL_SITE_SPORTS.has(game.sport) ? null : game.home_team === key;

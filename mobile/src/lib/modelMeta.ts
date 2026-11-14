@@ -1516,7 +1516,8 @@ export function isPropModel(modelId: string): boolean {
 // Bet-type catalog — what the custom-model builder offers
 // ---------------------------------------------------------------------------
 
-export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'NHL' | 'GOLF';
+export type BetTypeSport =
+  | 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'NHL' | 'GOLF';
 
 /**
  * The on-screen title. "Double-Double" is one word to the wrapper; a
@@ -1537,6 +1538,12 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('ncaab')) return 'NCAAB';
   if (modelId.startsWith('nfl')) return 'NFL';
   if (modelId.startsWith('ufc')) return 'UFC';
+  // The tennis tours (models/tennis_moneyline_shop.py MODEL_IDS). Without
+  // them both models fell to the MLB line below, onto the MLB tab and into
+  // the custom-model builder's MLB moneyline row. 'wta' shares only its first
+  // letter with 'wnba'.
+  if (modelId.startsWith('atp')) return 'ATP';
+  if (modelId.startsWith('wta')) return 'WTA';
   if (modelId.startsWith('nhl')) return 'NHL';
   if (modelId.startsWith('golf')) return 'GOLF';
   return 'MLB';
@@ -1575,6 +1582,8 @@ const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
   'NCAAB',
   'NCAABW',
   'UFC',
+  'ATP',
+  'WTA',
   'NHL',
   'GOLF',
 ];
