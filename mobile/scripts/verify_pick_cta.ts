@@ -33,7 +33,7 @@ import { join } from 'node:path';
 
 import { gameHasStarted, gameStartState } from '../src/lib/format';
 import { changesFooter, collapseLineHistory, recentChanges } from '../src/lib/lineHistory';
-import { bestHandoffForPick, heroAmericanForPick, MODEL_BOOK } from '../src/lib/markets';
+import { bestHandoffForPick, heroAmericanForPick, MODEL_BOOK, staleLineMoveFromScoredBook } from '../src/lib/markets';
 import { heroPriceSpeech, lockedCaptionText, priceCheckChipText, priceCheckSpeech } from '../src/lib/heroPriceText';
 import { gameStartedLine, pickCta, pickCtaFor, reasoningHeading } from '../src/lib/pickCta';
 import { priceCheckForItem } from '../src/lib/pickPriceCheck';
@@ -432,7 +432,7 @@ check('PickCard: the label speaks the reason and the lock (heroPriceText)',
   /heroPrice \? heroPriceSpeech\(heroPrice, cta\.priceTag\) : null/.test(card) && /\{lockedCaptionText\(heroPrice\)\}/.test(card));
 check('PickCard: flagged → "—" for edge and "EV —"', /flagged \? '—' : formatPctSigned\(shownEdge\)/.test(card) && /: decisionEdge\(pick\);/.test(card) && /flagged \? 'EV —'/.test(card));
 check('PickCard: NONE / AVOID edge demoted to a secondary line', /const demoteEdge = pick\.signal_type !== 'BET';/.test(card) && /edgeSecondary: \{[\s\S]*?font\.size\.footnote[\s\S]*?colors\.textSecondary/.test(card));
-check('PickCard: a flagged row’s movement line is suppressed', /kind === 'pre' && !flagged/.test(card));
+check('PickCard: a flagged row’s own movement line is suppressed (an Old price card reads the scored book instead)', /pregame && !flagged\s*\?\s*movementFromLatest\(/.test(card) && /const pregame = gameStatus\(game, liveState\)\.kind === 'pre';/.test(card));
 const detail = read('src/screens/PickDetailScreen.tsx');
 check('PickDetail: hand-off (BookLinesRow) only while cta.handoff, started line otherwise',
   /cta\.handoff && \(lineQuotes\.length > 0 \|\| hero\?\.untracked\) \? \(\s*<View style=\{styles\.linesCard\}>/.test(detail) && /cta\.startedLine && openHere/.test(detail) && /gameStartedLine\(decisionOdds\(pick\), bookLabel\(storedQuoteBook\(pick\)\)\)/.test(detail));
@@ -451,6 +451,48 @@ check('LineMovementCard: rows keyed by r.key (timestamps can repeat)', /key=\{r\
 const pc = read('src/lib/priceCheck.ts');
 check('priceCheck.ts: pure, and says it is a display heuristic only', !/^import /m.test(pc) && /DISPLAY HEURISTICS ONLY/.test(pc) && /MAX_EDGE_CAP/.test(pc));
 check('the thresholds live only in priceCheck.ts', !/PRICE_CHECK_MAX_(EDGE|CENTS)\s*=/.test(card + detail + home));
+
+// Matt, 2026-11-14 (MINN @ PSU): a Fanatics-decided Under 43.5 −110 showed
+// only "Old price" (Fanatics last priced 11:17 AM ET) while DraftKings, the
+// book the line was scored at, had moved 43.5 → 42.5 (−112). The card must
+// show that move, read at DraftKings, never Fanatics' own stale 42.0.
+{
+  const nowMs = Date.parse('2026-11-14T00:48:00Z');
+  const pick = mkPick({
+    game_id: 'NCAAF_2026-11-14_minnesota_penn-state', model_id: 'ncaaf_over_under', sport: 'NCAAF',
+    pick_side: 'under' as PickSide, pick_label: 'Penn State vs Minnesota Under 43.5',
+    scored_line: 43.5, dk_odds: -115, decision_odds: -110, decision_book: 'fanatics', line_book: null,
+  });
+  const dk = latest({ game_id: pick.game_id, total_line: 42.5, under_price: -112, over_price: -108, snapshot_at: '2026-11-14T00:40:42Z' });
+  const fan = { ...dk, bookmaker: 'fanatics', total_line: 42.0, under_price: -110, snapshot_at: '2026-11-13T16:17:13Z' } as unknown as BookPricedRow;
+  const hero = heroAmericanForPick(pick, dk, [fan], { started: false, now: nowMs });
+  check('MINN@PSU: Fanatics is stale (the "Old price" card)', hero?.stale === true);
+  const ref = staleLineMoveFromScoredBook(pick, dk, [fan], nowMs);
+  check('MINN@PSU: the move is read at DraftKings, 42.5 at −112', ref?.book === 'draftkings' && ref.line === 42.5 && ref.price === -112, JSON.stringify(ref));
+  check('MINN@PSU: an Under that dropped a point is a move against the bet',
+    ref?.movement?.severity === 'skip' && ref.movement.scoredLine === 43.5 && ref.movement.currentLine === 42.5);
+  check('MINN@PSU: a stale DraftKings row is no reference either',
+    staleLineMoveFromScoredBook(pick, { ...dk, snapshot_at: '2026-11-13T10:00:00Z' }, [fan], nowMs) === null);
+  check('a DraftKings-decided pick is not this path (its own hero shows the move)',
+    staleLineMoveFromScoredBook({ ...pick, decision_book: 'draftkings' }, dk, [fan], nowMs) === null);
+  // Review M1 (#1302): a move FOR the Under (43.5 → 44.5) is a 'good' movement;
+  // the card shows the neutral "DK line now 44.5" row, and the Signals render
+  // hides a green movement row on a muted (Old price) card.
+  const forUs = staleLineMoveFromScoredBook(pick, { ...dk, total_line: 44.5 }, [fan], nowMs);
+  check('MINN@PSU: DK line up a point (for the Under) is a good move with the new line, not a warning',
+    forUs?.line === 44.5 && forUs.movement?.severity === 'good' && forUs.movement.lineMovedAgainst === false, JSON.stringify(forUs));
+  const priceOnly = staleLineMoveFromScoredBook(pick, { ...dk, total_line: 43.5, under_price: -135 }, [fan], nowMs);
+  check('no line change, DK price −115 → −135 (steam): no line, and no movement row (DK price is not this bet’s)',
+    priceOnly != null && priceOnly.line === null && priceOnly.movement === null, JSON.stringify(priceOnly));
+}
+check('PickCard: an "Old price" card reads the line move at the scored book',
+  /onlyStalePrice\(check\) && heroPrice\?\.stale\s*\?\s*staleLineMoveFromScoredBook\(/.test(card) &&
+  /: \(staleLineMove\?\.movement \?\? null\)/.test(card) &&
+  /const signalsNow = staleLineMove\s*\?\s*staleNowFor\(bookLabel\(staleLineMove\.book\)\)/.test(card) &&
+  /layout === 'signals' && pregame && flagged/.test(card) &&
+  /staleMoveSpoken\]\.filter\(Boolean\)/.test(card) &&
+  /movementSummary && hero\.has\('movement'\) && !\(signalsMuted && movementSummary\.color === colors\.bet\)/.test(card) &&
+  card.indexOf('lockedCaptionText(heroPrice))}</Text>\n      ) : null}\n      {signalsNow ?') > 0);
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASS');
 process.exit(failures ? 1 : 0);

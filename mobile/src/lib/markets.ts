@@ -2010,6 +2010,59 @@ export function movementFromLatest(
 }
 
 /**
+ * The line move on a card whose DECIDING book stopped updating its price
+ * (hero.stale, the "Old price" chip). That book says nothing current, so the
+ * move is read at the book the line was SCORED at (DraftKings unless the pick
+ * names another, `scoredLineBook`): its row against `scored_line` is a
+ * same-book comparison, never one book's total against another's. Null when
+ * that book is the stale one, holds no row for the market, or its own row is
+ * past the price-age bound too.
+ *
+ * Matt, 2026-11-14: a Fanatics-decided Under 43.5 showed "Old price" while
+ * DraftKings had moved 43.5 → 42.5; the DraftKings-decided card beside it
+ * showed its move. Both say the line moved now.
+ */
+export function staleLineMoveFromScoredBook(
+  pick: Pick,
+  latest: LatestDkOddsRow | null | undefined,
+  bookRows?: BookPricedRow[] | null,
+  now?: number,
+): { book: string; movement: Movement | null; line: number | null; price: number | null } | null {
+  if (!hasPricedLine(pick)) return null;
+  const lineAt = scoredLineBook(pick);
+  if (lineAt === storedQuoteBook(pick)) return null;
+  let snap: PricedSnapshot | null = null;
+  let market: string | null = null;
+  let scoredPrice: number | null = null;
+  let at: string | null | undefined = null;
+  if (lineAt === MODEL_BOOK && latest) {
+    snap = latest;
+    market = latest.market;
+    scoredPrice = numOrNull(pick.dk_odds);
+    at = latest.snapshot_at;
+  } else {
+    const row = (bookRows ?? []).find((r) => r.bookmaker === lineAt);
+    if (row) {
+      snap = row;
+      market = marketForPick(pick);
+      at = row.snapshot_at;
+    }
+  }
+  if (snap == null || !at || !quoteIsCurrent(at, now)) return null;
+  const currentLine = lineFromSnapshot(snap, market);
+  const scoredLine = numOrNull(pick.scored_line);
+  return {
+    book: lineAt,
+    // Line only: the reference book's price is not this bet's price, so a
+    // price-only move there would print a number the member never got
+    // (UX review, 2026-11-14).
+    movement: computeMovement(pick, snap, market, { lineOnly: true, scoredPrice }),
+    line: currentLine != null && scoredLine != null && currentLine !== scoredLine ? currentLine : null,
+    price: priceForSide(snap, pick.pick_side),
+  };
+}
+
+/**
  * Detail-card path. Snapshots MUST be the deciding book (`historyBookForPick`).
  * scoredPrice is decisionOdds — same book as the fetch. Passing a DK row
  * for a FanDuel lock is the cross-book false steam; the card must not

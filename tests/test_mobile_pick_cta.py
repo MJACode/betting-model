@@ -559,7 +559,10 @@ def test_pick_card_wiring():
     assert "flagged ? '—' : formatPctSigned(shownEdge)" in card and "flagged ? 'EV —'" in card
     assert ": decisionEdge(pick);" in card
     assert "const demoteEdge = pick.signal_type !== 'BET';" in card
-    assert "kind === 'pre' && !flagged" in card
+    # A flagged row never shows a move built from its own suspect price; an
+    # "Old price" card reads the scored book's line instead (2026-11-14).
+    assert "const pregame = gameStatus(game, liveState).kind === 'pre';" in card
+    assert "pregame && !flagged\n      ? movementFromLatest(" in card
 
 
 def test_pick_detail_board_and_copy_wiring():
