@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, UFC props graded on BestFightOdds' per-book history (563,286 prices stored, 2021-2026): nothing clears at a price known to be live; goes the distance (anchored, +10.0% on 791) to the frontier |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, UFC round totals searched to the end of the league skill: nothing clears (#1305); the skill no longer lets a market park as "no price" until the book's own board and odds-comparison sites are tried; EuroLeague player props and women's college basketball first halves reopened; the app check broken since #1293 fixed (#1306) |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, live Discord posts show each pick's signal time and Discord's counting "x seconds ago"; the 45 s note retired (#1294); the app's ~45s line is about the card's provider price and stays |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, UFC rebuilt with the league skill: the three old models retired; `ufc_open_moneyline` live on merge (fight winner a week out, Pinnacle-anchored ratings, 846 backtest bets +12.85% on the bought 2020-2026 history); the history bought for 150,240 credits; two free price archives stored |

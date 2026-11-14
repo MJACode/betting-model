@@ -7,24 +7,30 @@ found the route: BestFightOdds keeps a page per UFC card holding every book's
 price on every prop, and a price history behind each one. This stores both,
 so the prop markets can be graded at the prices that were really offered.
 
-WHAT THE SITE HOLDS (measured 2026-11-13). robots.txt allows everything but
-/cnadm/. An event page shows, per fight, each book's LAST RECORDED price on
-the fight winner and on ~150 props (method by fighter, inside the distance,
-goes the distance, round betting, round totals, ...). The page's columns are
-the site's current books: DraftKings, FanDuel, BetMGM, Caesars, BetRivers,
-BetWay and Unibet carry prices from the June 2021 cards (FanDuel's props from
-2022). A book that left the site (Bet365, id 19) and the site's own "Ref"
-line (id 12) are not on the page, but their price histories answer.
+WHAT THE SITE HOLDS (measured 2026-11-13/14). robots.txt allows everything
+but /cnadm/. An event page shows, per fight, each book's LAST RECORDED price
+on the fight winner and on ~150 props (method by fighter, inside the
+distance, goes the distance, round betting, round totals, ...). The page's
+columns are the site's current books: DraftKings, FanDuel, BetMGM, Caesars,
+BetRivers, BetWay and Unibet carry prices from the June 2021 cards. Two
+books are not on the page: Bet365 (id 19) and the site's unnamed "Ref" line
+(id 12). Both answered with prop histories for two 2022 fights and with
+nothing for two 2024 fights, so neither covers the whole window. Ref's
+fight-winner prices on those 2022 fights moved with Pinnacle's but were not
+Pinnacle's (on one fight, 7 of 15 pulls within 5 cents).
 
 TWO STAGES.
 
   * PAGES: every UFC event page in the sitemap from FIRST_DAY to the last
-    completed card, one request each. The page does not date its prices: a
-    book that stopped moving days before the fight shows that older price. So
-    the tables call it the last recorded price, not the close.
+    completed card, one request each (328 from 2021-06 to 2026-11-07). The
+    page does not date its prices: a book that stopped moving days before the
+    fight shows that older price. So the tables call it the last recorded
+    price, not the close.
   * CHARTS: one request per (book, fight, prop, side) history, from
-    /api/ggd. Each answer is every price change with its time. Only the
-    series in --series are asked (see chart_jobs), for the books in --books.
+    /api/ggd. Each answer is every price change with its time. By default the
+    priced CORE_SERIES cells at the five books a pick may name: 147,356
+    histories, about five days at PAUSE_S. --sample N asks a seeded random N
+    of them; --jobs FILE asks a study's own list.
 
 FETCH, THEN STORE. --fetch asks each page or history once, politely (one
 request at a time, PAUSE_S apart, a User-Agent that names us), and writes the
@@ -32,10 +38,13 @@ answer to the spool (DIR/pages/<event id>.html.gz, DIR/charts/<key>.txt.gz),
 so a stopped run asks nothing twice. --store reads the spool and writes:
 
   * ufc_prop_history_fights: one row per BFO fight (matchup): the card, both
-    fighters, and our ufc_fight_log game id and fighter id for each (the
-    unordered slug pair within two days, names through
-    config.UFC_NAME_ALIASES and BFO_NAME_ALIASES). Unplaced fights are kept
-    with game_id NULL.
+    fighters, and our ufc_fight_log game id and fighter id for each: the
+    fighter pair within two days, matched by name (config.UFC_NAME_ALIASES,
+    BFO_NAME_ALIASES, BFO's own slug, other name orders, no hyphens), or one
+    fighter by name and the log's other fighter in that fight spelled close.
+    Unplaced fights (mostly bouts that fell through) are kept with game_id
+    NULL. BFO sometimes splits one fight in two when books spell a fighter
+    differently; both halves are placed on the same game.
   * ufc_prop_history: one row per (fight, book, prop, fighter, side), the
     page's last recorded price. prop_type 0 is the fight winner.
   * ufc_prop_history_ticks: one row per price change in a history.
@@ -43,11 +52,13 @@ so a stopped run asks nothing twice. --store reads the spool and writes:
     written in the same transaction as its rows.
 
 An event dated after the last card in ufc_fight_log is neither spooled nor
-ledgered, so a later run asks for it again once it has been fought.
+ledgered, so a later run asks for it again once it has been fought. One dated
+before FIRST_DAY is spooled (never asked again) and not stored. --replace
+places every stored fight again after an alias is added.
 
     python -m data.ingestors.ufc_prop_history --spool DIR                  # the plan
     python -m data.ingestors.ufc_prop_history --spool DIR --stage pages --fetch --store
-    python -m data.ingestors.ufc_prop_history --spool DIR --stage charts --fetch --store
+    python -m data.ingestors.ufc_prop_history --spool DIR --stage charts --jobs FILE --fetch --store
 """
 from __future__ import annotations
 
@@ -734,6 +745,8 @@ def main() -> None:
     ap.add_argument("--events", help="comma-separated BFO event ids (a trial)")
     ap.add_argument("--books", default="22,21,23,24,25",
                     help="chart stage: BFO book ids to ask histories for")
+    ap.add_argument("--jobs", type=Path,
+                    help="chart stage: a file of histories to ask for, one 'book,matchup,prop,team,side' a line")
     ap.add_argument("--sample", type=int, default=0,
                     help="chart stage: ask only this many histories, drawn at random (seeded)")
     ap.add_argument("--pause", type=float, default=PAUSE_S)
@@ -763,7 +776,12 @@ def main() -> None:
             if a.store and a.stage == "pages":
                 logger.success(f"store pages: {store_pages(conn, a.spool, placer)}")
         if a.stage in (None, "charts"):
-            jobs = chart_jobs(conn, [int(b) for b in a.books.split(",")])
+            if a.jobs:
+                # a study's own list: "book,matchup,prop_type,team,side" per line
+                jobs = [tuple(int(x) for x in ln.split(",")) for ln in
+                        a.jobs.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            else:
+                jobs = chart_jobs(conn, [int(b) for b in a.books.split(",")])
             if a.sample:
                 import random
                 jobs = sorted(random.Random(20261113).sample(jobs, min(a.sample, len(jobs))))

@@ -41,8 +41,10 @@ The grid below says where every other market stands.
 | Total rounds (0.5-4.5) | rounds completed from `ufc_fight_log` end round and time; five-round fights from `scheduled_rounds` | same | `ufc_odds_history` (bought): Pinnacle 2020+ (2,421 fights, 2,384 at 1.5/2.5/4.5), DraftKings late 2023+ (1,072, 1,058 at those lines); `odds` 2026-06+; no free archive | Last pull: 2.5 over +0.1% at Pinnacle, -0.9% at DraftKings; 2.5 under -9.6% and -16.1%; 4.5 over +11.0% (127) and +8.5% (53). DraftKings' margin 6.2% against Pinnacle's 4.1% | Pinnacle-anchored finish model, walk-forward; four mechanisms of our own; the stuck ladder | Fighter inputs add nothing to Pinnacle's total (placebo equal); return falls as the cut rises; the card-day over (+6.9% on 228, interval below zero, 2025 negative) fails the bar and sits in the frontier | **Nothing clears** (audit §4) |
 | Points spread | not known: DraftKings and Bovada list one (Holland +7.5) | | feed, live, 2 books | | | | **Parked**: what it settles on is unknown |
 | Alternate round totals | as total rounds | | Pinnacle only on the feed | | | | **Parked**: no book a pick may name |
-| Method of victory (by fighter) | `ufc_fight_log.method` | same | DraftKings' own board, live, the day before a card (the feed rejects every key); BestFightOdds per-book history, US books from 2021; free archive 2012-2026 near-close prices (audit §5) | Every blind method bet loses: favourite by decision -3.3% (5,821), finishes -20% to -41% | Blind by method and side | No profit blind; no model fitted | **To do**: crawl BestFightOdds, fit and grade at each book's price (audit §5e) |
-| Goes the distance, round betting, exact round, inside the distance | `ufc_fight_log` | same | DraftKings' own board, live; BestFightOdds per-book history (audit §5) | | | | **To do**: as method of victory |
+| Method of victory (by fighter) | `ufc_fight_log.method`; a DQ or could-not-continue end voided (graded as a TKO: -15.7% to -15.0%) | same | `ufc_prop_history` (BestFightOdds, stored 2026-11-14): last recorded price at DraftKings, FanDuel, BetMGM, Caesars, BetRivers, 2021-06 to 2026-11; DraftKings' own board live (audit §5a) | Best of five, 2021-2026: decision -2.1% (5,412), favourite by decision +2.4% [-2.1, +7.1], KO/TKO -15.7%, submission -19.3% | Three mechanisms (a book straying from the others, the anchored model, coherence with the fight winner), walk-forward by year | Decision anchored +9.7% on 1,112 but fails early/late and is a peak; KO/TKO and submission nothing | **Nothing clears** (audit §5f) |
+| Goes the distance | `ufc_fight_log.method` = decision (a draw is a decision) | same | `ufc_prop_history`, as above | Best of five: yes +0.9% (2,712), no -9.2% | Same three | Anchored +10.0% on 791 [+2.5, +17.8], plateau, 0 of 50 placebos; 2026 -1.0%; DraftKings alone -4.0% | **Lead, frontier**: re-grade at the price an hour before the fight, then forward at FanDuel and Caesars (audit §5f) |
+| Round betting, exact round, fight ends in round N | `ufc_fight_log` end round and method | same | `ufc_prop_history`, as above | Fighter wins in round N -19.7% (17,209); fight ends in round N -13.9% (8,506); by method in round N -22.6% (34,063) | Same three (no full set to de-vig for method in round N) | Nothing positive with an interval off zero | **Nothing clears** (audit §5f) |
+| Inside the distance (by fighter) | KO/TKO or submission | same | `ufc_prop_history`: DraftKings and BetRivers only | Yes -14.1% (3,540), no -2.3% (3,524) | Same three | Anchored -2.9% (528) | **Nothing clears** (audit §5f) |
 | In play | | | none stored | | | | **Parked** |
 | Prediction markets | | | not checked for UFC | | | | **To do** |
 
@@ -98,6 +100,15 @@ cancelled bout never reaches the log. Any new UFC card must go through it.
   Pinnacle from 2020 (2,421 fights at any line) and DraftKings from late
   2023 (1,072: 31 in 2023, 417 in 2024, 430 in 2025, 194 to June 2026); no
   other book a pick may name carries them.
+- **Prop prices, BestFightOdds (stored 2026-11-14, free):**
+  `data/ingestors/ufc_prop_history.py` crawls each UFC card's page (one
+  request each, 3 s apart; robots.txt allows it) into `ufc_prop_history`
+  (563,286 prices: every book's last recorded price on the fight winner and
+  every prop, 2021-06-05 to 2026-11-07), `ufc_prop_history_fights` (3,146
+  fights, 2,823 placed on our fight ids), `ufc_prop_history_ticks` (price
+  histories, asked for per prop) and the ledger `ufc_prop_history_pulls`.
+  DraftKings' columns are empty from late 2025. A last recorded price is
+  the book's last change, not its price at any set time.
 
 ### Mobile
 

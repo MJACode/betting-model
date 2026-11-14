@@ -55,6 +55,12 @@ error.
   +9.76 units. (`docs/ncaaf_market_audit.md` §2, §4)
 - *Failed*: the anchored recipe on pro basketball found nothing; the women's
   college sides off the ratings had β near zero ("the line already holds it").
+  UFC props at five US books, 2021-2026: nothing on KO/TKO, submission,
+  inside the distance, round betting, fight ends in round N or round totals.
+  On a market with many outcomes give the anchor a free slope on the
+  market's own logit and one intercept per outcome type, and fit a two-way
+  market once per pair, on one side: fitted on both sides, the inputs cancel
+  (`docs/ufc_market_audit.md` §5f).
 
 ## 2. The books disagree — with each other, with themselves, with a sharp book
 
@@ -263,9 +269,15 @@ sections above with its result.
   2026-06-13 (`docs/ufc_market_audit.md` §4f).
 - UFC: notice length from the feed's first listing of a pairing, for the
   fight winner (dead on totals); the five-round favourite at per-book
-  prices (null at the worst close, fails the late half); BestFightOdds'
-  per-book prop pages as a price route for method and round props
+  prices (null at the worst close, fails the late half)
   (`docs/ufc_market_audit.md` §8, §9).
+- UFC goes the distance, the market-anchored model: +10.0% on 791 bets at
+  BestFightOdds' last recorded prices 2022-2026, a plateau over cut and
+  penalty, 0 of 50 placebos; but 2026 is -1.0%, about half of it is the
+  market recalibrated (decisions priced too low in 2023-2025), and it loses
+  at DraftKings (-4.0%), the only live prop board read. The experiment:
+  re-grade at the price an hour before the fight, then grade it forward on
+  each card's page at FanDuel and Caesars (`docs/ufc_market_audit.md` §5f).
 - A third live book for live props, turning them into the cross-book
   construction (`docs/nfl_live_prop_assessment.md` §7).
 - Live rushing overs at a low pace ratio; the rushing under out of sample on

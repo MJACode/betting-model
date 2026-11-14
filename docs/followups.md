@@ -63,6 +63,18 @@ no ufcstats record; 71 of the 846 backtest bets had one). Watch the live
 record against the backtest's +12.85% on the whole scored universe, and its
 closing-line value against Pinnacle's.
 
+## [ ] UFC props: grade the goes-the-distance lead forward (2026-11-14)
+The anchored goes-the-distance model is +10.0% on 791 bets at BestFightOdds'
+last recorded prices 2022-2026 and loses at DraftKings
+(`docs/ufc_market_audit.md` §5f). Next: once each card from 2026-11-14 is in
+the fight log, store its page (`python -m data.ingestors.ufc_prop_history
+--spool DIR --stage pages --fetch --store`) and grade the model's bets at
+FanDuel and Caesars, at the price their histories show an hour before each
+fight (`scripts/ufc_study/prop_leads.py`). Betting it live would need the
+upcoming card's page read at decision time, which nothing does yet. The
+full price-history stage (147,356 histories, about five days at 3 s apart)
+would date every last recorded price, not only the leads'.
+
 ## [ ] EuroLeague: finish the two history purchases (2026-11-12)
 mike approved about 4.4M on 2026-11-13 ("Do the 4.4m"; `docs/sports/euroleague.md`,
 "The purchase"): no 2020-21, the full game every snapshot near and during games

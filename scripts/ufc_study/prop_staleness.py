@@ -3,7 +3,8 @@ the chart stage has stored (ufc_prop_history_ticks, a seeded sample of the
 priced method, distance and round props at the five books a pick may name):
 does its last price equal the page's, how long before the fight did it last
 change, and did any change land after the fight started. The start is the
-odds feed's latest commence time for the fight (ufc_odds_history). Run from
+odds feed's latest commence time for the fight (ufc_odds_history, to
+2026-06-13), else the games table's. Run from
 the study folder after prop_load.py; reads the local mirror."""
 import glob
 import os
@@ -23,7 +24,10 @@ T = mirror("ufc_prop_history_ticks")
 P = mirror("ufc_prop_history")
 F = mirror("ufc_prop_history_fights").set_index("matchup_id")
 O = mirror("ufc_odds_history")
-start = O[O.game_id.notna()].groupby("game_id").commence_time.max()
+G = mirror("games")
+G = G[G.sport == "UFC"].set_index("game_id")
+start = pd.to_datetime(O[O.game_id.notna()].groupby("game_id").commence_time.max(), utc=True)
+start = start.combine_first(pd.to_datetime(G.commence_time, utc=True, errors="coerce"))
 
 key = ["matchup_id", "book_id", "prop_type", "team", "side"]
 T = T.sort_values("quoted_at")

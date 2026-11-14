@@ -90,6 +90,11 @@ def tables():
             if name == "Goes the distance":
                 jobs.add((x.book_id, x.src_matchup, x.prop_type, x.src_team, 3 - x.src_side))
         b.assign(lead=name).to_parquet(f"prop_lead_bets_{name.split()[0].lower()}.parquet")
+    # goes the distance down to EV >= 0.02, for the cut neighbourhood at the earlier prices
+    rows, p, b = lead_bets("Goes the distance", cut=0.02)
+    b.to_parquet("prop_lead_bets_goes02.parquet")
+    for x in b.itertuples():
+        jobs.add((x.book_id, x.src_matchup, x.prop_type, x.src_team, x.src_side))
     # the fight-winner-coherent decision bets (mechanism 3), at EV >= 0.02
     name = "Decision by fighter"
     rows = outcome_rows(name).reset_index(drop=True)
