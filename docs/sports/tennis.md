@@ -249,7 +249,10 @@ match, EV below 5% and price -500 or longer:
 
 `python -m scripts.tennis_moneyline_replay`, which runs the live card's own
 decision code (`models/tennis_moneyline_shop.decide`) over the stored
-snapshots. At the live moment:
+snapshots. The card decides only before the listed start; 6 of
+the replay's 355 bets (1.7%) were at a snapshot just after it, and without
+them the rule is 349 bets, +70.60 units, +11.5% (+3.0% to +20.1%). At the
+live moment:
 
 - **Cuts** (EV at least): 0.010 922 bets +3.0%; 0.015 560 +7.2%; **0.020 355
   +11.0%**; 0.025 201 +16.0%; 0.030 120 +11.9%. Banded, every band below 0.02
@@ -404,6 +407,9 @@ cover it on an average quote; any edge is in the quotes that stand apart.
 - Round 1 is above. Running: the serve-and-return model for total games and
   games spreads (mechanisms 3 and 5). Fatigue and the retirement model
   (mechanisms 1 and 4): no bet, above.
+- Closing value is not recorded on tennis picks: the closing-price capture
+  reads the shared `odds` table, and tennis prices live in
+  `tennis_odds_quotes` (#1320).
 - The forward log runs on mike's PC until 2026-11-23; a worker job takes it
   over when the first model ships.
 - The code graph is rebuilt and named once, after the last code change of
