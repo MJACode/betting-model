@@ -2371,9 +2371,14 @@ stored row names its endpoint.
   `player_season_stat_values_ncaab`, `player_h2h_stat_values_ncaab`
   (`add_ncaab_player_game_log_2026_11_03.sql`). No player-prop line column:
   Matt, 2026-11-03, "Don't include those". Season label is the ending year
-  (`boardSeasonET`). Not built yet: the Teams board, the same-position card
+  (`boardSeasonET`). The Teams board is the NBA set (Net Rtg first; no rest
+  splits; no player props). Efficiency is filled by
+  `team_stats_board_college_hoops_2026_11_12.sql`, which is not in
+  `ACTIVE_MIGRATIONS` — apply it by hand, then refresh the board cache,
+  before the numbers are there. A merge does not query a new relation.
+  Not built yet: the same-position card
   on the player page (no college position source), team names abbreviated.
-- **Not in the app yet.** NCAAB team stats. School abbreviations: cards show the
+- **Not a phone read.** `ncaab_teams` itself. School abbreviations: cards show the
   school name, because the app cannot read `ncaab_teams` (anon has no SELECT
   on it, RLS is on and it has no policy; read only, 2026-10-30). Opening it is
   a worker-side change as well as an app one: the code that creates the table

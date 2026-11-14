@@ -18,12 +18,15 @@ import {
   tierFor,
 } from '../src/lib/teamBoard';
 import {
+  TEAM_GROUP_INTRO,
   TEAM_STAT_CATALOG,
   defaultTeamStatFor,
   formatRecord,
   formatTeamStat,
   supportsTeamBoard,
+  teamBoardSeason,
   teamGroupsForSport,
+  teamSeasonLabel,
   teamStatValue,
   teamStatsForSport,
   type TeamStatDef,
@@ -169,7 +172,8 @@ eq('value on the lo cut is bottom third', tierFor(3, cuts, 'high'), 'bad');
 eq('null formats as a dash', formatTeamStat(null, 'dec2'), '—');
 eq('pct3 renders a rate as a percentage', formatTeamStat(0.5432, 'pct3'), '54.3%');
 eq('int rounds', formatTeamStat(103.6, 'int'), '104');
-eq('dec3 keeps three places', formatTeamStat(0.1234, 'dec3'), '0.123');
+eq('dec1 prints a points value as stored', formatTeamStat(55.8, 'dec1'), '55.8');
+eq('dec1 does not scale a 0-1 rate', formatTeamStat(0.558, 'dec1'), '0.6');
 {
   const atsDef = TEAM_STAT_CATALOG.find((s) => s.key === 'ats_pct')!;
   eq('record renders W-L', formatRecord(team({ team: 'A', ats_w: 67, ats_l: 42, ats_p: 0 }), atsDef), '67-42');
@@ -182,7 +186,7 @@ eq('numeric strings coerce', teamStatValue({ ...team({ team: 'A' }), off_rating:
 eq('garbage coerces to null', teamStatValue({ ...team({ team: 'A' }), off_rating: 'n/a' as unknown as number }, def('off_rating', 'high')), null);
 
 // ── catalog wiring ────────────────────────────────────────────────────────
-for (const sport of ['MLB', 'NBA', 'WNBA', 'NHL', 'NFL', 'NCAAF'] as const) {
+for (const sport of ['MLB', 'NBA', 'WNBA', 'NHL', 'NFL', 'NCAAF', 'NCAABW', 'NCAAB'] as const) {
   check(`${sport} has a team board`, supportsTeamBoard(sport));
   const stats = teamStatsForSport(sport);
   check(`${sport} has team stats`, stats.length > 0);
@@ -206,6 +210,33 @@ check(
 check(
   'NBA does offer rest splits',
   teamStatsForSport('NBA').some((s) => s.key === 'short_rest_ats_pct'),
+);
+// College basketball is the NBA board without the rest splits (Matt, 2026-11-12).
+const COLLEGE_EFF = ['net_rating', 'off_rating', 'def_rating', 'pace', 'efg_pct', 'tov_pct'];
+const COLLEGE_REC = ['win_pct', 'point_diff_pg', 'points_for_pg', 'points_against_pg', 'games_played'];
+const COLLEGE_BET = ['ats_pct', 'over_pct', 'ats_home_pct', 'ats_away_pct', 'fav_ats_pct', 'dog_ats_pct'];
+for (const sport of ['NCAABW', 'NCAAB'] as const) {
+  const keys = (group: string) =>
+    teamStatsForSport(sport).filter((s) => s.group === group).map((s) => String(s.key));
+  eq(`${sport} opens on Net Rtg`, defaultTeamStatFor(sport)?.key, 'net_rating');
+  eq(`${sport} efficiency chips`, keys('Efficiency').join(), COLLEGE_EFF.join());
+  eq(`${sport} record chips`, keys('Record').join(), COLLEGE_REC.join());
+  eq(`${sport} betting chips`, keys('Betting').join(), COLLEGE_BET.join());
+  check(
+    `${sport} has no rest splits`,
+    !teamStatsForSport(sport).some((s) => s.key === 'rest_adv_ats_pct' || s.key === 'short_rest_ats_pct'),
+  );
+  eq(`${sport} season label is the ending year`, teamSeasonLabel(sport, 2027), '2026-27');
+  eq(
+    `${sport} asks for 2027 in November 2026`,
+    teamBoardSeason(sport, new Date('2026-11-12T15:00:00Z')),
+    2027,
+  );
+}
+eq(
+  'the betting intro is the NBA sentence',
+  TEAM_GROUP_INTRO.Betting,
+  'How a team did against past lines. It describes, it doesn’t predict.',
 );
 // Dead / proprietary columns must never reach the catalog.
 check('xGF% is not offered (0% populated)', !TEAM_STAT_CATALOG.some((s) => String(s.key).includes('xgf')));

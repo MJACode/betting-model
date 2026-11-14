@@ -8,8 +8,8 @@
  * dropped `sport: 'NCAABW'` from a push, and filed every ncaabw_* model under
  * the MEN'S sport: 'ncaabw_total_blend'.startsWith('ncaab') is true.
  *
- * One pre-game model, `ncaabw_total_blend`, the halftime total, and a Players
- * board with the same chips as NCAAB. No props and no Teams board.
+ * One pre-game model, `ncaabw_total_blend`, the halftime total, a Players
+ * board with the same chips as NCAAB, and a Teams board (Net Rtg). No props.
  */
 
 import { SPORTS, type Sport } from '../src/hooks/useSportFilter';
@@ -185,11 +185,15 @@ check('NCAABW has the NCAAB chips, Points first',
   statKeys.join());
 check('NCAABW has a hit-rate view', supportsHitRate(NCAABW));
 check('NCAABW has a player page', supportsPlayerDetail(NCAABW));
-check('NCAABW has no Teams board', !supportsTeamBoard(NCAABW));
+check('NCAABW has a Teams board, Players | Teams',
+  supportsTeamBoard(NCAABW)
+    && segmentsForSport(NCAABW).join() === 'players,teams'
+    && boardSegmentsFor(NCAABW).join() === 'players,teams');
 check('no NCAABW chip carries a prop market',
   statsForSport(NCAABW).every((d) => propMarketForStat(d) == null));
-check('NCAABW draws no segment row',
-  segmentsForSport(NCAABW).length < 2 && boardSegmentsFor(NCAABW).length < 2, segmentsForSport(NCAABW).join(','));
+check('NCAABW draws a Players | Teams row',
+  segmentsForSport(NCAABW).length === 2 && boardSegmentsFor(NCAABW).length === 2,
+  segmentsForSport(NCAABW).join(','));
 // The halftime total (models/ncaabw_live_ht.py, 2026-11-11) is the women's
 // in-play model: the Live board says when it bets, and the model resolves to
 // the game's total everywhere a price is looked up.

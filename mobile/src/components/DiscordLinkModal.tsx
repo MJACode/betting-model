@@ -96,7 +96,7 @@ export function DiscordLinkModal({
           {alreadyLinked && invite ? (
             <Pressable
               accessibilityLabel="Open the Discord"
-              onPress={() => openLink(invite, 'Discord')}
+              onPress={() => openLink(invite, 'Discord', { revealUrl: false })}
               accessibilityRole="button"
               style={({ pressed }) => [styles.cta, pressed && styles.pressed]}
             >

@@ -32,6 +32,7 @@ import {
   startCheckout,
 } from '@/lib/billing';
 import { accessSourceCopy } from '@/lib/discord';
+import { paywallDiscordBullet } from '@/lib/discordJoin';
 import { EULA_URL, PRIVACY_URL, TERMS_URL, openLink } from '@/lib/socialLinks';
 import { useAuth } from '@/hooks/useAuth';
 import { useEntitlement } from '@/hooks/useEntitlement';
@@ -196,12 +197,7 @@ export function PaywallScreen() {
           <Text style={styles.title}>Unlock every signal</Text>
           <Text style={styles.subtitle}>{paywallSubtitle(plan)}</Text>
 
-          {[
-            ...INCLUDED,
-            plan.trialDays > 0
-              ? 'The subscriber Discord (paid plans, after the trial)'
-              : 'The subscriber Discord, included with this plan',
-          ].map((line) => (
+          {[...INCLUDED, paywallDiscordBullet(plan.trialDays)].map((line) => (
             <View key={line} style={styles.includedRow}>
               <Ionicons name="checkmark-circle" size={16} color={colors.tint} />
               <Text style={styles.includedText}>{line}</Text>
