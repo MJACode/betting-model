@@ -101,14 +101,29 @@ export const LEGAL_TILE_SUMMARY = 'Help line · Terms · Privacy';
 
 /**
  * Unread replies are the live part, so they replace the static list.
- * Discord is named only when that row is actually on the drill-in.
+ * Discord leads the static list, and only when that row is on the drill-in.
+ * Flags-off stays "X · Feedback".
  */
 export function communityTileSummary(showDiscord: boolean, unread: number): string {
   if (unread > 0) {
     const noun = unread === 1 ? 'reply' : 'replies';
     return `X · ${unread} new ${noun}`;
   }
-  return showDiscord ? 'X · Feedback · Discord' : 'X · Feedback';
+  return showDiscord ? 'Discord · X · Feedback' : 'X · Feedback';
+}
+
+/**
+ * Included chip on the Community tile. Paid only, and only when the Discord
+ * row is on the drill-in and the summary still names it. An unread reply
+ * replaces that summary, so the chip would no longer say what is included.
+ * Flags-off has no chip.
+ */
+export function communityIncludedChip(
+  showDiscord: boolean,
+  paid: boolean,
+  unread = 0,
+): boolean {
+  return showDiscord && paid && unread <= 0;
 }
 
 /** Keep a long address from pushing the plan word off a two-line tile. */
