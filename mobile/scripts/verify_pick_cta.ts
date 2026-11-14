@@ -475,13 +475,17 @@ check('the thresholds live only in priceCheck.ts', !/PRICE_CHECK_MAX_(EDGE|CENTS
     staleLineMoveFromScoredBook(pick, { ...dk, snapshot_at: '2026-11-13T10:00:00Z' }, [fan], nowMs) === null);
   check('a DraftKings-decided pick is not this path (its own hero shows the move)',
     staleLineMoveFromScoredBook({ ...pick, decision_book: 'draftkings' }, dk, [fan], nowMs) === null);
-  check('no line change: the line is null, so no "line now" row',
-    staleLineMoveFromScoredBook(pick, { ...dk, total_line: 43.5 }, [fan], nowMs)?.line === null);
+  const priceOnly = staleLineMoveFromScoredBook(pick, { ...dk, total_line: 43.5, under_price: -135 }, [fan], nowMs);
+  check('no line change, DK price −115 → −135 (steam): no line, and no movement row (DK price is not this bet’s)',
+    priceOnly != null && priceOnly.line === null && priceOnly.movement === null, JSON.stringify(priceOnly));
 }
 check('PickCard: an "Old price" card reads the line move at the scored book',
   /onlyStalePrice\(check\) && heroPrice\?\.stale\s*\?\s*staleLineMoveFromScoredBook\(/.test(card) &&
   /: \(staleLineMove\?\.movement \?\? null\)/.test(card) &&
-  /const signalsNow = staleLineMove\s*\?\s*staleNowFor\(bookLabel\(staleLineMove\.book\)\)/.test(card));
+  /const signalsNow = staleLineMove\s*\?\s*staleNowFor\(bookLabel\(staleLineMove\.book\)\)/.test(card) &&
+  /layout === 'signals' && pregame && flagged/.test(card) &&
+  /staleMoveSpoken\]\.filter\(Boolean\)/.test(card) &&
+  card.indexOf('lockedCaptionText(heroPrice))}</Text>\n      ) : null}\n      {signalsNow ?') > 0);
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASS');
 process.exit(failures ? 1 : 0);

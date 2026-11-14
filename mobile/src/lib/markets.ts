@@ -2050,10 +2050,10 @@ export function staleLineMoveFromScoredBook(
   const scoredLine = numOrNull(pick.scored_line);
   return {
     book: lineAt,
-    movement: computeMovement(pick, snap, market, {
-      lineOnly: isNflLineOnly(pick.model_id),
-      scoredPrice,
-    }),
+    // Line only: the reference book's price is not this bet's price, so a
+    // price-only move there would print a number the member never got
+    // (UX review, 2026-11-14).
+    movement: computeMovement(pick, snap, market, { lineOnly: true, scoredPrice }),
     line: currentLine != null && scoredLine != null && currentLine !== scoredLine ? currentLine : null,
     price: priceForSide(snap, pick.pick_side),
   };

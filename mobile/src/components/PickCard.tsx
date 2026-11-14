@@ -280,14 +280,25 @@ export function PickCard({
   // at (staleLineMoveFromScoredBook). Matt, 2026-11-14.
   const pregame = gameStatus(game, liveState).kind === 'pre';
   const staleLineMove =
-    pregame && flagged && onlyStalePrice(check) && heroPrice?.stale
+    layout === 'signals' && pregame && flagged && onlyStalePrice(check) && heroPrice?.stale
       ? staleLineMoveFromScoredBook(pick, item.latestOdds, item.bookRows, priceAge?.now)
       : null;
   const movement =
     pregame && !flagged
       ? movementFromLatest(pick, item.latestOdds, item.bookRows)
       : (staleLineMove?.movement ?? null);
-  const movementSummary = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
+  const movementSummaryRaw = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
+  // The card names two books, so the reference move names its book too.
+  const movementSummary =
+    movementSummaryRaw && staleLineMove
+      ? { ...movementSummaryRaw, label: `${bookLabel(staleLineMove.book)} ${movementSummaryRaw.label.replace(/^Line /, 'line ')}` }
+      : movementSummaryRaw;
+  // Spoken: the icon and red ink say "against the bet"; VoiceOver hears it.
+  const staleMoveSpoken =
+    staleLineMove?.movement?.lineMovedAgainst && staleLineMove.movement.scoredLine != null && staleLineMove.movement.currentLine != null
+      ? `Line moved against this bet, ${formatSideLine(staleLineMove.movement.scoredLine, pick.pick_side, gameMarketForModel(pick.model_id))}` +
+        ` to ${formatSideLine(staleLineMove.movement.currentLine, pick.pick_side, gameMarketForModel(pick.model_id))}`
+      : null;
   const showClv = pick.clv_method === 'standard_v2' && pick.clv_pct != null;
   // Icon and words share one ink (non-text 3:1 ruling), toned from the CLV
   // ROUNDED as formatClv prints it (1 dp): −0.03 reads "0.0%" and stays
@@ -619,7 +630,7 @@ export function PickCard({
           now: signalsNowSpoken,
         })
       : (heroPrice
-        ? [heroPriceSpeech(heroPrice, cta.priceTag), signalsNowSpoken].filter(Boolean).join('. ')
+        ? [heroPriceSpeech(heroPrice, cta.priceTag), signalsNowSpoken, staleMoveSpoken].filter(Boolean).join('. ')
         : null);
   const signalsStakeSpoken = signalsStakeShown
     ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}${stakeReason ? `. ${stakeReason}` : ''}`
@@ -1124,11 +1135,13 @@ export function PickCard({
       {reasonLine ? (
         <Text style={[styles.reasonLine, signalsMuted && styles.betMuted]}>{reasonLine}</Text>
       ) : null}
-      {signalsNow ? (
-        <Text style={styles.nowLine}>{signalsNow}</Text>
-      ) : null}
+      {/* The stale caption explains the hero price, so it sits right under
+          it; another book's line comes after (UX review, 2026-11-14). */}
       {heroPrice?.showLockedCaption && (heroPrice.stale || heroPrice.untracked) ? (
         <Text style={styles.lockedCaption}>{trueMinus(lockedCaptionText(heroPrice))}</Text>
+      ) : null}
+      {signalsNow ? (
+        <Text style={styles.nowLine}>{signalsNow}</Text>
       ) : null}
 
       <View style={styles.metrics}>
