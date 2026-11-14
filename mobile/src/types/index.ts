@@ -1127,7 +1127,7 @@ export interface TeamSeasonStats {
 }
 
 /** Sports with a Teams board — every league sport; UFC has no teams. */
-export type TeamSport = 'MLB' | 'WNBA' | 'NBA' | 'NHL' | 'NFL' | 'NCAAF';
+export type TeamSport = 'MLB' | 'WNBA' | 'NBA' | 'NHL' | 'NFL' | 'NCAAF' | 'NCAABW' | 'NCAAB';
 
 /**
  * One row of `public_betting`: the consensus share of tickets and money on
