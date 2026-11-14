@@ -41,6 +41,10 @@ from datetime import date, datetime, timedelta, timezone
 import requests
 from loguru import logger
 
+# config installs the Odds API call logger on import (monitoring/probe.py);
+# without it this module's paid calls never reach api_call_log
+# (tests/test_odds_call_log_everywhere.py).
+import config  # noqa: F401,E402
 from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 
