@@ -27,8 +27,12 @@ decides").
    return with its 95% interval (bet dates resampled), the chance of a
    positive season (a season's worth of bet dates resampled), and CLV against
    Pinnacle's no-vig close.
-4. If no timing clears out of sample, say so. Never hand the model its
-   best-looking hour.
+4. **Clears** means: the timing chosen on the selection seasons survives
+   Benjamini-Hochberg at q 0.10 there, and on the last season alone makes
+   positive units with a one-sided bootstrap p of 0.10 or less. For the NCAAF
+   moneyline this was written down on 2026-11-14 before its 2024 and 2025
+   hours were read (only a 2023 trial had run). If no timing clears, say so.
+   Never hand the model its best-looking hour.
 
 ## The NCAAF moneyline model (`ncaaf_moneyline_market`)
 
