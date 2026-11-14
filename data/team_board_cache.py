@@ -30,21 +30,23 @@ from typing import Iterable
 from loguru import logger
 
 # Every sport with a Teams board. Mirrors `supportsTeamBoard` in the app's
-# teamStatCatalog (BALL = MLB, NBA, WNBA, NHL, NFL, NCAAF); UFC and golf have
-# no teams.
-TEAM_BOARD_SPORTS: tuple[str, ...] = ("MLB", "WNBA", "NBA", "NHL", "NFL", "NCAAF")
+# teamStatCatalog (BALL). UFC and golf have no teams. NCAABW is named before
+# NCAAB: a prefix check on the men's code would swallow the women's.
+TEAM_BOARD_SPORTS: tuple[str, ...] = (
+    "MLB", "WNBA", "NBA", "NHL", "NFL", "NCAAF", "NCAABW", "NCAAB",
+)
 
 
 def team_board_seasons(today: date | None = None) -> tuple[int, ...]:
     """The seasons the app can ask for, and one more.
 
     The app asks for the sport's own season label (`teamBoardSeason`: the
-    ending year for NBA and NHL from October) and falls back one label
-    (`fetchTeamStats`). NHL, NBA and NCAAF label a season by its ENDING year
-    (CLAUDE.md §4), so a season in progress each autumn carries NEXT year's
-    label — refreshing year+1 too means the board is never empty for those
-    sports the week a season opens. A pair with no finished games writes zero
-    rows, which costs nothing.
+    ending year for NBA, NHL, NCAAB and NCAABW from October) and falls back
+    one label (`fetchTeamStats`). NHL, NBA, NCAAB, NCAABW and NCAAF label a
+    season by its ENDING year (CLAUDE.md §4), so a season in progress each
+    autumn carries NEXT year's label — refreshing year+1 too means the board
+    is never empty for those sports the week a season opens. A pair with no
+    finished games writes zero rows, which costs nothing.
     """
     y = (today or date.today()).year
     return (y - 1, y, y + 1)

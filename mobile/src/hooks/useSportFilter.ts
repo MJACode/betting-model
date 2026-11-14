@@ -21,10 +21,11 @@ export type Sport =
 // The AsyncStorage validation below reverts a stored 'GOLF' to MLB, so a user
 // parked on the golf chip lands on MLB at next cold start with no migration.
 // NCAAB (men's college basketball) sits beside NCAAF. It joined 2026-10-30 for
-// its totals model; it has no player or team stats in the app yet.
+// its totals model. The Stats tab has a Players board and a Teams board
+// (Net Rtg, the NBA set). No player props.
 // NCAABW (women's college basketball) sits right after NCAAB. It joined
 // 2026-11-10 for its totals model. The Stats tab has the same Players board
-// as NCAAB (no props, no Teams board).
+// and the same Teams board as NCAAB. No player props.
 // ATP (men's tennis) and WTA (women's tennis) sit after NHL, before EUROLEAGUE: about one
 // bet a week between them, so the busier sports and their signal badges stay
 // nearer the screen (UX review, 2026-11-14). They joined 2026-11-14 for their match-winner

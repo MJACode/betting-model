@@ -384,7 +384,7 @@ def test_the_stats_players_board_reads_ncaab_own_views():
     Every Stats read routes NCAAB to its own server read
     (add_ncaab_player_game_log_2026_11_03.sql), never another league's that
     shares its column keys, and no stat carries a prop market (Matt: no college
-    player props). There is still no NCAAB Teams board.
+    player props). The Teams board is the NBA set (tests/test_college_team_board.py).
     """
     cat = _read(STAT_CATALOG)
     groups = re.search(r"export const GROUP_ORDER: Record<Sport, StatGroup\[\]> = \{(.*?)\n\};", cat, re.S)
@@ -395,7 +395,8 @@ def test_the_stats_players_board_reads_ncaab_own_views():
     team = _read(TEAM_STAT_CATALOG)
     assert "const TEAM_SPORTS = new Set<Sport>(BALL);" in team
     ball = re.search(r"const BALL: Sport\[\] = \[(.*?)\];", team)
-    assert ball and "'NCAAB'" not in ball.group(1), "an NCAAB Teams board has no rows behind it"
+    assert ball and "'NCAABW'" in ball.group(1) and "'NCAAB'" in ball.group(1)
+    assert ball.group(1).index("'NCAABW'") < ball.group(1).index("'NCAAB'")
     q = _read(QUERIES)
     assert "supabase.from('v_player_season_totals_ncaab')" in _fn(q, "fetchSeasonTotals")
     for name, rpc in (("fetchWindowTotals", "player_window_totals_ncaab"),
@@ -405,13 +406,11 @@ def test_the_stats_players_board_reads_ncaab_own_views():
         assert f"sport === 'NCAAB' ? '{rpc}'" in _fn(q, name), name
     for name in ("fetchSeasonTotals", "fetchWindowTotals"):
         assert "sport === 'NCAAB') return [];" not in _fn(q, name), name
-    # NCAABW joined the line on 2026-11-10: no women's team stats either.
-    # The women's code is named first so a prefix check cannot file it as men's.
-    assert re.search(
-        r"if \(sport === 'UFC' \|\| sport === 'GOLF' \|\| sport === 'NCAABW' \|\| sport === 'NCAAB'\) "
-        r"return \{ season: null, rows: \[\] \};",
-        _fn(q, "fetchTeamStats"),
-    )
+    # NCAABW is named before NCAAB. College is on the board, so neither
+    # sport short-circuits to an empty team list.
+    body = _fn(q, "fetchTeamStats")
+    assert "if (sport === 'UFC' || sport === 'GOLF') return { season: null, rows: [] };" in body
+    assert "sport === 'NCAABW' || sport === 'NCAAB') return" not in body
     for name in ("fetchRecentGames", "fetchSeasonStatValues", "fetchPositionVsOpponent"):
         body = _fn(q, name).rstrip()
         assert re.search(r"return \[\];(?: //[^\n]*)?\n\}$", body), f"{name} no longer ends on return []"
