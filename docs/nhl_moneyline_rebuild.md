@@ -171,3 +171,56 @@ out of sample (log loss 0.66155 against 0.66098) and bets less well: EV 0.02 / 0
 bets with the floor. The grid was fixed before any result was seen and stays; the
 honest size of the edge is a range, roughly +3% to +6% a bet, not the single best
 row.
+
+## Why it keeps betting bad teams (2026-11-13)
+
+mike: *"Why does the nhl model keep betting Canucks ML ... they suck and always
+get killed"*. Five of its 52 bets from 2026-10-16 to 11-13 were VAN ML (+118 to
++185; one win, three losses, tonight's open). No change was made.
+
+**What lifts Vancouver.** The model starts from DraftKings' no-vig price and
+moves it. Three of its inputs raise a team when its number is WORSE: the
+penalty kill (`d_pk_pct`, weight -0.076 a standard deviation), goals against
+(`d_ga_l`, +0.029) and the goal-margin rating (`d_rate`, -0.036). The rating
+lifted VAN in all five bets, special teams in four (the penalty kill was the
+largest single push on 11-09 and 11-13). The rest came from the opponent: a
+back-to-back (`a_b2b`, +0.068: MIN 10-25, PHI 11-09), Anaheim's travel (10-27),
+Winnipeg's goalie workload (11-05). Shots against (`d_sa`, -0.092, the largest
+weight) and the shot group pushed VAN down in 11 of its 12 games since 10-16,
+by less. VAN goes into 11-13 with the league's worst rating (-1.30).
+The input-by-input breakdown reproduces the stored shift away from the market
+to a median of 0.0001 logit on 135 games where both sides' prices are stored.
+
+**What those inputs are worth.** The module's own walk-forward (the shipped
+backtest's `walk()`: 2021-22 to 2025-26, each season fit on the ones before,
+best price in DraftKings' first pre-game snapshot, -200 floor), read from the
+local mirror, reproduces the shipped grade exactly: 1,326 bets, +83.2 units at
+EV 0.06. Re-fit without the input groups:
+
+| EV ≥ 0.06 | bets | units | ROI | 95% interval | beat Pinnacle close |
+|---|---|---|---|---|---|
+| shipped | 1,326 | +83.2 | +6.3% | +1.1..+11.4 | 63.7% |
+| without special teams | 1,141 | +33.6 | +2.9% | -2.5..+8.4 | 65.5% |
+| without form (goals for / against) | 1,312 | +90.5 | +6.9% | +1.7..+12.1 | 64.3% |
+| without rating | 1,329 | +84.0 | +6.3% | +1.2..+11.5 | 63.8% |
+| without all three | 1,062 | +21.3 | +2.0% | -3.6..+7.7 | 66.2% |
+
+Removing all three costs about 62 of the 83 units. Most of it is special teams.
+"Without form" is ahead only at 0.06; it is behind at 0.02 (+115.4 against
++127.0) and 0.04 (+79.0 against +93.5), so it is not a better model.
+
+**The shipped model's bets on worse teams** (EV 0.06, bet team's rating minus
+its opponent's): more than a goal worse, 54 bets +8.2 units (+15.1%,
+-21.7..+51.9); half a goal to a goal worse, 145 bets +17.9 (+12.4%). Bets the
+three groups mostly made: 235, +14.2 units (+6.0%, -8.0..+20.1), but they beat
+Pinnacle's close only 55.8% of the time, against 65.3% for the other 1,091. The
+closing line backs them less. Their profit came from results, which is the
+weaker kind of evidence. Re-check this at the ~250-bet re-sweep (issue
+#1307).
+
+**Vancouver against the market.** At DraftKings' last pre-game price, VAN's 20
+games to 11-09 priced in 6.66 wins; they won 3. The chance of 3 or fewer at those
+prices is 5.9%. The market overrated them too.
+
+Scratch scripts: `%TEMP%/van_ml_why.py` (the breakdown, live artifact, database
+read) and `%TEMP%/van_ml_backtest.py` (the walk-forward, mirror only, no database).
