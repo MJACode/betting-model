@@ -8,6 +8,7 @@ import {
   configureCrashLog,
   flushCrashQueue,
   installGlobalErrorHandler,
+  UPDATES_LOG_WINDOW_MS,
   type CrashContext,
 } from '@/lib/crashLog';
 import { APP_VERSION } from '@/lib/socialLinks';
@@ -57,6 +58,20 @@ export function startCrashLogging(): void {
     deviceId: getDeviceId,
     context,
     now: () => Date.now(),
+    // expo-updates' own log: what ErrorRecovery wrote before it aborted a
+    // launch that never reached JS (docs/app_errors.md, 2026-11-14).
+    async updatesLog() {
+      const entries = await Updates.readLogEntriesAsync(UPDATES_LOG_WINDOW_MS);
+      return entries.map((e) => ({
+        timestamp: e.timestamp,
+        message: e.message,
+        code: String(e.code),
+        level: String(e.level),
+        updateId: e.updateId ?? null,
+        assetId: e.assetId ?? null,
+        stacktrace: e.stacktrace ?? null,
+      }));
+    },
     async send(report, deviceId, ctx) {
       const { error } = await supabase.rpc('log_app_error', {
         p_device_id: deviceId,

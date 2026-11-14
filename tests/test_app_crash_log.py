@@ -48,8 +48,24 @@ def test_the_crash_log_logic_holds():
         "fatal with a hung send: the native handler still runs within FATAL_FLUSH_MS",
         "died while launching: reported as early_exit with that stage",
         "two concurrent enqueues both survive",
+        # expo-updates' own log (2026-11-14: a native abort before JS ran)
+        "updates log: its errors are reported on the next launch",
+        "updates log: an entry is sent once",
+        "updates log: info and warn lines are not reported",
+        "updates log: a failed read throws nothing and sends nothing",
+        "updates log: an offline open (download errors only) is not reported",
+        "updates log: a hung read still lets the launch be marked running",
+        "updates log: a hung read is cut off and the launch finishes",
+        "updates log: a report that could not be stored is not marked sent",
     ):
         assert f"[PASS] {line}" in proc.stdout, line
+
+
+def test_the_app_reads_the_expo_updates_log():
+    """A launch expo-updates aborts natively never runs JS, so the only record
+    of why is expo-updates' own log, read on the next launch."""
+    setup = (MOBILE / "src" / "lib" / "crashLogSetup.ts").read_text(encoding="utf-8")
+    assert "Updates.readLogEntriesAsync(UPDATES_LOG_WINDOW_MS)" in setup
 
 
 def test_crash_log_is_free_of_app_imports():
