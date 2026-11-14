@@ -193,3 +193,33 @@ def test_a_name_ufcstats_orders_or_spells_otherwise_still_meets_it(bfo, log):
 
 def test_name_orders_do_not_make_two_different_fighters_meet():
     assert H.compact(H.slugify("Daniel Rodriguez")) not in H.name_slugs("Pete Rodriguez", None)
+
+
+@pytest.mark.parametrize("error", [ConnectionResetError(10054, "forcibly closed"), TimeoutError("timed out"),
+                                   H.http.client.IncompleteRead(b"")])
+def test_a_dropped_connection_is_one_failed_history_not_the_end_of_the_run(tmp_path, monkeypatch, error):
+    """2026-11-14: a reset connection 1,500 histories in ended the run before it
+    stored anything. A failed request is counted; the rest are still asked."""
+    calls = []
+
+    def fake_get(path, xhr=False):
+        calls.append(path)
+        if len(calls) == 1:
+            raise error
+        return REAL_CHART
+
+    monkeypatch.setattr(H, "_get", fake_get)
+    jobs = [(22, 36053, 8, 1, 1), (22, 36054, 8, 1, 1)]
+    stats = H.fetch_charts(tmp_path, jobs, set(), pause=0)
+    assert stats == {"asked": 2, "spooled": 1, "failed": 1, "already": 0}
+    assert not H.chart_path(tmp_path, H.chart_key(*jobs[0])).exists()
+    assert H.chart_path(tmp_path, H.chart_key(*jobs[1])).exists()
+
+
+def test_a_dropped_connection_on_a_page_is_one_failed_page(tmp_path, monkeypatch):
+    def fake_get(path, xhr=False):
+        raise ConnectionResetError(10054, "forcibly closed")
+
+    monkeypatch.setattr(H, "_get", fake_get)
+    stats = H.fetch_pages(tmp_path, [(2109, "ufc-fight-night-190-2109")], date(2026, 11, 14), set(), pause=0)
+    assert stats["failed"] == 1 and stats["spooled"] == 0

@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import http.client
 import difflib
 import gzip
 import html
@@ -461,6 +462,14 @@ def load_placer(conn) -> FightPlacer:
 
 # ── the spool and the polite fetch ───────────────────────────────────────────
 
+# What one failed request can raise. The site resets connections now and then
+# (ConnectionResetError, 2026-11-14 05:28 UTC, 1,500 histories into a run),
+# and a reset is an OSError, not a URLError: catching only URLError and
+# TimeoutError let one reset end the run before it stored anything. A failed
+# request is counted and asked again on the next run.
+FETCH_ERRORS = (OSError, http.client.HTTPException)
+
+
 def _get(path: str, xhr: bool = False) -> str:
     headers = {"User-Agent": UA}
     if xhr:
@@ -511,7 +520,7 @@ def fetch_pages(spool: Path, events: list[tuple[int, str]], last_day: date,
         stats["asked"] += 1
         try:
             body = _get(f"/events/{slug}")
-        except (urllib.error.URLError, TimeoutError) as e:
+        except FETCH_ERRORS as e:
             stats["failed"] += 1
             logger.warning(f"{slug}: {e}")
             continue
@@ -543,7 +552,7 @@ def fetch_charts(spool: Path, jobs: list[tuple[int, int, int, int, int]], held: 
         stats["asked"] += 1
         try:
             raw = _get(chart_query(*job), xhr=True)
-        except (urllib.error.URLError, TimeoutError) as e:
+        except FETCH_ERRORS as e:
             stats["failed"] += 1
             logger.warning(f"{key}: {e}")
             continue
