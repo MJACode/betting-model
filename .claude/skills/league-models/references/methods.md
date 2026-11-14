@@ -314,6 +314,15 @@ sections above with its result.
   DraftKings, the only live prop board read. The experiment: grade it
   forward on each card's page at FanDuel and Caesars, at the price an hour
   before each fight (`docs/ufc_market_audit.md` §5f).
+- UFC decision by fighter, a decision price that disagrees with the
+  fight-winner price (each fighter's no-vig method prices rescaled to the
+  fight-winner no-vig chance; no fitted part): 56 bets +49.5% [+12.7,
+  +81.7] at the price an hour before, positive at every cut, but 2025 and
+  2026 lose (16 bets, none of 2026's 7 won), and its own chance at that
+  price (0.259) barely differs from the price's (0.258) while the bets won
+  0.375. Too few, and the wins are not its mechanism's. The experiment:
+  grade it forward with the goes-the-distance lead
+  (`docs/ufc_market_audit.md` §5f).
 - A third live book for live props, turning them into the cross-book
   construction (`docs/nfl_live_prop_assessment.md` §7).
 - Live rushing overs at a low pace ratio; the rushing under out of sample on

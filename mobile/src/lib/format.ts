@@ -513,7 +513,7 @@ const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
   // the clock like the men's, and no live feed in the app either.
   NCAABW: 4 * 3_600_000,
   // EuroLeague (2026-11-13): four 10-minute quarters, about two hours on the
-  // clock, and no live feed in the app; its one model bets at halftime.
+  // clock, and no live feed in the app; its in-play model bets at halftime.
   EUROLEAGUE: 4 * 3_600_000,
   // Football, and the reason these two are named rather than left on the
   // default: they are the sports that play late and are NOT covered by the live

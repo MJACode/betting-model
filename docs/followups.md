@@ -21,6 +21,17 @@
 
 ---
 
+## [ ] EuroLeague pre-game rules: the channel, then watch the first slate (2026-11-14)
+The four rules (`docs/sports/euroleague.md`, "The four pre-game rules") post
+nothing to Discord until `DISCORD_CHANNEL_EUROLEAGUE` (or
+`DISCORD_WEBHOOK_EUROLEAGUE`) is set on the worker; the app shows them from the
+first decision. On the first slate: the period feed's first `x-requests-last`
+(about 15 credits a call is derived, not measured), each rule's first
+decision rows and reasons, the first bet on every surface, and the first
+period pick's settlement on `euroleague_period_scores`. The relocated-venue
+lists are the research's (2026-11-12): a relocation after that date is not on
+them.
+
 ## [ ] EuroLeague halftime spread: the live channel, then watch the first slate (2026-11-13)
 `euroleague_live_spread_ht` decides nothing until mike creates the EuroLeague
 live Discord channel and sets `DISCORD_CHANNEL_LIVE_EUROLEAGUE` (or

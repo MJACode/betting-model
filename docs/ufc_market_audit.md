@@ -785,8 +785,46 @@ Two measurements, on price histories (`/api/ggd`, stored in
   neighbourhood is a hump, not a plateau. It goes to the frontier, not to a
   model.
 
-  The decision-by-fighter bets' histories were still being fetched when
-  this was written; that lead had already failed.
+  **Decision by fighter at the price an hour before** (histories stored
+  2026-11-14 07:17 UTC, after a refetch: the first run died on a reset
+  connection, fixed in #1315). Neither of its two rules clears:
+
+| Decision by fighter | Bets | Units | Return | 90% interval | Years positive |
+|---|---|---|---|---|---|
+| Anchored, EV >= 0.08, last recorded price | 1,042 | +24.5 | +8.0% | [-1.2, +16.9] | 3/5 |
+| Anchored, price 1 hour before | 1,042 | +20.5 | +6.6% | [-2.3, +16.1] | 3/5 |
+| Anchored, price 24 hours before | 1,026 | +15.6 | +4.9% | [-4.0, +13.8] | 3/5 |
+| Fight-winner-coherent, EV >= 0.02, last recorded price | 56 | +11.3 | +58.1% | [+19.2, +95.4] | 3/5 |
+| Fight-winner-coherent, price 1 hour before | 56 | +10.5 | +49.5% | [+12.7, +81.7] | 3/5 |
+| Fight-winner-coherent, price 24 hours before | 56 | +10.1 | +45.7% | [+9.4, +79.1] | 3/5 |
+
+  The anchored rule already failed the early/late split and peaks at the
+  edge of the cut grid (above); its interval at the price an hour before
+  reaches -2.3%.
+
+  The **fight-winner-coherent rule** has no fitted part: it rescales each
+  fighter's no-vig method prices to the fight-winner no-vig chance and
+  bets a decision price that disagrees. Taken apart at the price an hour
+  before (`prop_coherent_check.py`):
+
+  - Cut neighbourhood: positive at every cut from 0.02 to 0.20, at the
+    page's price (+68.7% on 60 down to +118.0% on 7; +26.2% on 128 at 0.00)
+    and an hour before (+49.5% on 56, +37.3% on 37, +85.4% on 20, +107.5%
+    on 14, +64.5% on 9, +18.9% on 6, +46.9% on 5).
+  - By year: 2022 +51.2% (11), 2023 +55.5% (14), 2024 +93.4% (15), **2025
+    -8.5% (9), 2026 -100% (7, none won)**. The two latest years lose.
+  - Winners: 21 of 56 won; +7.54 units without the three biggest. Not one
+    long shot.
+  - Prices: median +272, shortest +100, longest +2500.
+  - **Its own chance does not explain its wins.** At the price an hour
+    before, its chance averages 0.259 and the price's 0.258, so it claims
+    almost no edge there; the bets won 0.375. What paid is something the
+    rule does not measure.
+  - It is one of about 27 market and mechanism pairs, each at seven cuts.
+
+  **It does not clear**: 56 bets in five years, both recent years losing,
+  and wins its own numbers do not account for. It is graded forward with
+  the goes-the-distance lead (issue #1319).
 
 **Where it could be bet.** DraftKings' own board (§5a) is the only live prop
 price read today, from mike's PC, and at DraftKings alone the lead loses.

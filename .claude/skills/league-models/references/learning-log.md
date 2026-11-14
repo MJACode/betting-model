@@ -72,6 +72,73 @@ What this build taught the skill: de-vig the sharp pair by the power method
 before any shop grid on a market with longshots, an exchange's first-post
 pair is not a reference, and in a change-only store a reference's age is
 time since it moved.
+## 2026-11-14 — EuroLeague, the big-favourite moneyline removed before it went live
+
+1. **Scope.** mike, 2026-11-14: "odds cutoff for favorites should be -200".
+   `euroleague_heavy_fav_ml` bet only favourites at -500 or shorter, so at a
+   -200 floor it could never bet: removed (PR #1323, unmerged), not shipped as
+   a model that cannot place a bet. The other four pre-game rules unchanged.
+2. **Tried.** Rebuilt the artifact from the research cache
+   (`scripts/euroleague_pregame_build.py --write`). Every read still matches
+   the research bet for bet. The spread, first-half and first-quarter rules'
+   artifact entries are identical. The home moneyline gains the 6 games the
+   conflict rule took: 984 bets, +64.80 units (was 978, +65.80), uplift
+   +0.0520 (was +0.0523), smallest EV +0.0401 (floor 0.04 still under it).
+3. **New.** Nothing new as a method. The same-pass conflict branch was only
+   reachable through the removed rule (the two full-game rules left both bet
+   the home side), so it went with it; a test now pins that no two of the four
+   decided in one pass conflict.
+4. **Corrected.** `shipping.md`'s price-floor line: was "a model that lays
+   shorter by design pins the research's shortest price, EuroLeague's big
+   favourites -4000", now a rule whose every bet lays shorter than -200 is not
+   shipped (mike, 2026-11-14). `porting-traps.md`'s conflict trap gained what
+   a removal does to it.
+5. **The framework.** No step changed.
+
+## 2026-11-14 — EuroLeague, five pre-game rules shipped: `euroleague_home_ml`, `euroleague_heavy_fav_ml`, `euroleague_home_dog_spread`, `euroleague_h1_dog_ml`, `euroleague_q1_club_share_total`
+
+1. **Scope.** mike, 2026-11-14: "I told you to build all the models": the
+   five frozen leads of the full-game, first-half/quarter and round-2 studies
+   shipped live, each knowing what it missed of the bar. Step 7 for five rule
+   cards in one card, plus a live period feed.
+2. **Tried.** One rules module, one card, one build. The build decides every
+   cached game again through the card's own decision code and runs the
+   research's own scripts (r1_/r2_/r3_) on the same cache: all eight reads
+   (the three full-game rules at DraftKings alone and at the best deciding
+   book, the two period rules at the best book) matched bet for bet, game,
+   side, number, price and book, with no tie broken differently.
+3. **New.** In `shipping.md` and `porting-traps.md`:
+   - **The research cache moves under the build.** The cache had gained a
+     game since the research read it (2026-11-13), and that game's full-game
+     "close" was a stale board (the purchase's quotes end at 05:45 UTC that
+     day). Replay on the research's own data state (`RESEARCH_LAST_DATE`) and
+     report later games apart; never compare across the two.
+   - **Two blind rules on one market can bet opposite sides of one game.**
+     The home moneyline at -200 or longer and the favourite at -500 or
+     shorter met on 6 games (the away favourite's game is the home dog's).
+     The brief said they could not conflict; the replay measured that they
+     do. Run every new model's bets through the conflict rule in the build
+     and report what it costs (here -1.00 and -0.69 units).
+   - **A blind rule's probability**: the market's no-vig chance plus the
+     rule's walk-forward uplift (the nba_q1_trend_ml shape), with the EV
+     floor and edge cut set just under the smallest replayed EV and edge,
+     printed by the build, so no gate removes a research bet. A decision
+     fetch that also carries the full game: the hourly refresh window does
+     not reach tip minus 10 for an afternoon-ET league.
+   - **A new period market needs its settlement arm, its period-score route
+     and its closing-line rule** (`h2h_h1` had no arm at all, `totals_q1` was
+     in no totals arm, and every non-NCAAB period read `nba_period_scores`):
+     check `tracking/paper_tracker` before shipping any period market in a new
+     sport.
+4. **Corrected.** `shipping.md`'s "the price floor (default -200)": a model
+   that lays shorter than -200 by design (the big favourites, to -4000) pins
+   its own floor at the research's shortest price and says so. A test fixture
+   that draws with `rnd.choice(PROTECTED_SOURCES)` changes shape with every
+   new protected source (`tests/test_prune_bounded.py` lost its tie groups
+   for seed 11); its source now draws from its own stream.
+5. **The framework.** No step changed. Step 7's "the card replays the research
+   bet for bet" held again: it is what showed the six conflicting games.
+
 ## 2026-11-14 — UFC props graded on BestFightOdds' per-book history
 
 1. **Scope.** mike asked why the markets beside the fight winner were not

@@ -426,7 +426,9 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-11-11 (mike): the NCAABW halftime total; its game-state model's own probability.
          "ncaabw_live_total_ht",
          # 2026-11-13 (mike): the EuroLeague halftime spread; its game-state model's own probability.
-         "euroleague_live_spread_ht"}
+         "euroleague_live_spread_ht",
+         # 2026-11-14 (mike): the four EuroLeague pre-game rules; the market's no-vig chance + the uplift.
+         "euroleague_home_ml", "euroleague_home_dog_spread", "euroleague_h1_dog_ml", "euroleague_q1_club_share_total"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 

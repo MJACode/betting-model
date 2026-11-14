@@ -98,6 +98,16 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         and women's tour match once, 35 minutes or less before its listed
         start, against Pinnacle's price at that moment. Then publishes.
         RUN_TENNIS_MONEYLINE_CARD=0 stops it.)
+  * EuroLeague pre-game   every minute, 24x7    -> run_euroleague_pregame_window
+        (scripts/euroleague_pregame_window.py: one per-event call per
+        EuroLeague game 60, 10 and 2 minutes before tip, the first half, the
+        quarters and the full game at ten books, about 15 credits a call
+        (data/ingestors/euroleague_period_odds.py); then the four EuroLeague
+        pre-game rules (scripts/euroleague_pregame_card.py) decide each game
+        once on its tip-minus-10 fetch, and the job publishes. A tick with
+        nothing due makes no call. RUN_EUROLEAGUE_PREGAME=0 stops it;
+        RUN_EUROLEAGUE_PERIOD_FEED=0 stops the calls alone; each model has
+        its own RUN_EUROLEAGUE_<MODEL> switch.)
   * NCAAB first-post ML   every minute, 24x7    -> run_ncaab_moneyline_first_post
         (scripts/ncaab_moneyline_first_post_card.py: one keyed planning read
         for a bettable book's NEW moneyline on an NCAAB game, stored by the
@@ -1077,6 +1087,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes NCAAB first-half spread and total picks through
                   # their own cards, on its own first-half fetches.
                   "ncaab_first_half_window",
+                  # Writes the four EuroLeague pre-game rules' picks through
+                  # their card, on its own period and full-game fetches.
+                  "euroleague_pregame_window",
                   # Queues the daily BYOM NFL refresh onto job_queue, which
                   # is also a pipeline job.
                   "byom_nfl_refresh"}
@@ -2288,6 +2301,49 @@ def run_ncaab_first_half_window() -> None:
     bad = {k: v for k, v in outcomes.items() if v != "ok"}
     if bad:
         raise RuntimeError(f"NCAAB first-half window step(s) did not finish: {bad}")
+
+
+# The EuroLeague pre-game window: a fetch is one free event list and at most a
+# handful of event calls (a round's games tip on the hour or the half hour);
+# the card reads the games' stored odds and the scored schedule once.
+EUROLEAGUE_PREGAME_TIMEOUT_S = {"fetch": 240, "card": 240}
+
+
+def run_euroleague_pregame_window() -> None:
+    """One EuroLeague pre-game tick (scripts/euroleague_pregame_window.py).
+
+    ONE planning read: the EuroLeague games due a call (60, 10 and 2 minutes
+    before tip) and whether a game 10.5 minutes or less from tip, or tipped in
+    the last 3 hours, has a switched-on model undecided. Most ticks have none
+    and return without a call. Otherwise: the fetch for exactly the due games,
+    the decision call (tip minus 10) first; then the EuroLeague pre-game card,
+    which decides each game once per model on its tip-minus-10 fetch (the
+    full-game rules on the stored board at tip minus 10 when that fetch never
+    landed); then publish what it wrote. A step that fails or is killed raises
+    AFTER publishing, so the heartbeat records "error" and the failure alerter
+    reports it, while a bet that was written still goes out.
+    RUN_EUROLEAGUE_PREGAME=0 makes the plan empty: nothing is read or bought,
+    and the job keeps beating.
+    """
+    from scripts.euroleague_pregame_window import plan_tick
+    plan = plan_tick()
+    if not plan:
+        return
+    t = EUROLEAGUE_PREGAME_TIMEOUT_S
+    outcomes: dict[str, str] = {}
+    if plan.fetch:
+        log.info("EuroLeague pre-game: fetching %s", {g: plan.marks.get(g) for g in plan.fetch})
+        outcomes["euroleague-period-fetch"] = _run(
+            [sys.executable, "-m", "scripts.euroleague_pregame_window", "--fetch", *plan.fetch],
+            "euroleague-period-fetch", timeout=t["fetch"])
+    if plan.card:
+        outcomes["euroleague-pregame-card"] = _run(
+            [sys.executable, "-m", "scripts.euroleague_pregame_card", "--publish"],
+            "euroleague-pregame-card", timeout=t["card"])
+        _publish_new_signals("euroleague-pregame-window")
+    bad = {k: v for k, v in outcomes.items() if v != "ok"}
+    if bad:
+        raise RuntimeError(f"EuroLeague pre-game window step(s) did not finish: {bad}")
 
 
 # The first-post card reads a few games' stored odds and writes a handful of
@@ -3567,6 +3623,20 @@ def build_scheduler() -> BlockingScheduler:
         name="NCAAB first half (every minute, 24x7: first-half calls at 15Z and "
              "180..10 min before tip; the spread card decides at tip minus 10, "
              "the total card at tip minus 60)",
+        max_instances=1, coalesce=True, misfire_grace_time=30,
+    )
+
+    # EuroLeague pre-game -- every minute, 24x7 (run_euroleague_pregame_window).
+    # Every minute because the decision fetch is ten minutes before each tip
+    # and its retries have five minutes to land; misfire_grace_time 30 because
+    # a tick overtaken by the next one has nothing left to add. The kill
+    # switches are in the plan and the card.
+    sched.add_job(
+        run_euroleague_pregame_window,
+        CronTrigger(minute="*", timezone=TIMEZONE),
+        id="euroleague_pregame_window",
+        name="EuroLeague pre-game (every minute, 24x7: calls 60, 10 and 2 min before tip; "
+             "the four rules decide at tip minus 10)",
         max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 
