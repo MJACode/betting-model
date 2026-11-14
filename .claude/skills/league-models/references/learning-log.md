@@ -82,6 +82,45 @@ review as its own entry.
    than `SKILL.md`: a comparison site's prices need dating before a rule
    graded on them is believed.
 
+## 2026-11-13 — Tennis (ATP and WTA), groundwork, settlement and the purchase
+
+1. **Scope.** mike, 2026-11-13: *"Use the model building skill to build
+   professional tennis models"*, then *"mens and womans should be different
+   model groups / discord channels. But not just major tournaments, all pro
+   tennis matches"*. Two new sports: `ATP` (men's singles at every level) and
+   `WTA` (women's). Steps 0 to 2b, the settlement rules,
+   a rating model and the purchase plan; no grid row has a priced result yet
+   (`docs/sports/tennis.md`).
+2. **Tried.** Measured the feed (53 per-tournament keys, history from the 2020
+   US Open, books by year, markets one at a time on a live match), ESPN's free
+   scoreboard, a results archive with serve and return counts (393,131 rows
+   stored), and DraftKings' own tennis rules. A coverage sweep found 129
+   windows for 337 credits; a one-day trial of the purchase cost 1,500 credits
+   for 25 hourly snapshots of both book groups. An Elo trails the market as
+   published (Brier 0.215-0.219 on men's tour matches, 2023-2025). Measured the
+   retirement rate the DraftKings rule turns into an option (1.13% a side).
+   Scout: no published method beats Pinnacle's close on the match winner; no
+   test of total games or games spreads exists at all.
+3. **New.** `market-grid.md`: tennis in the one-against-one shape, and finding
+   a part-year key's windows with three 1-credit event lists. `porting-traps.md`:
+   settlement differs by book (a retirement), a source's format field can be
+   wrong, a per-tournament key can hold two windows a year, a listed start
+   that moves and once came after the real start. `methods.md` §7: a
+   settlement rule that hands the bettor an option, with its measured size;
+   three tennis lines in the frontier. `scouting.md`: seven routes (three
+   refused). A league whose lower levels the feed does not sell: Pinnacle's
+   public site prices every level (collected from day one), and a results
+   site's one price per match measured to be an average near the close (a
+   baseline, never a decidable price).
+4. **Corrected.** Nothing in the skill was contradicted by a measurement.
+   One claim of this build was corrected before it was written down: "the
+   retiring player is almost always the one losing" was too strong (the
+   archive lists the advancing player as winner by definition; the retiring
+   player was ahead on completed sets in 9 of 109 men's retirements of 2025).
+5. **The framework.** Step 2's order held. One addition worth promoting if it
+   recurs: when a price route refuses (a site block), the copy of its data
+   elsewhere is not a route; the permission check refused it, and the feed's
+   own history was the price source that matched the live path anyway.
 ## 2026-11-13 — UFC round totals, run to the end of the ladder
 
 1. **Scope.** mike asked why the markets beside the fight winner were not
