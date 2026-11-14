@@ -148,7 +148,7 @@ book's no-vig number (mechanism 1 below).
 
 | Market | Settles on | Inputs held | Prices | Baseline | Method | Result | Status |
 |---|---|---|---|---|---|---|---|
-| Match winner | the player who advances; retirement and walkover rules per book (above) | results 2000-2026 (archive), 2010-2026 (ESPN); Elo; serve and return counts | DraftKings, FanDuel, BetMGM, Caesars, Fanatics, BetRivers, Hard Rock; Pinnacle and the Betfair exchange as references; from 2020-09 | every quote blind at the close: -3.4% (DraftKings) to -5.0% (BetMGM) | line shop against Pinnacle's power-de-vigged pair at the same moment, with each book's retirement term; fatigue and retirement risk as an anchored adjustment (running) | 355 bets, +68.77 units, +11.0% [+2.5, +19.5] about 30 minutes before the listed start; walk-forward cut +1.2% (below) | **LIVE** 2026-11-14: `atp_moneyline_shop`, `wta_moneyline_shop` (missed the stricter bar, below) |
+| Match winner | the player who advances; retirement and walkover rules per book (above) | results 2000-2026 (archive), 2010-2026 (ESPN); Elo; serve and return counts | DraftKings, FanDuel, BetMGM, Caesars, Fanatics, BetRivers, Hard Rock; Pinnacle and the Betfair exchange as references; from 2020-09 | every quote blind at the close: -3.4% (DraftKings) to -5.0% (BetMGM) | line shop against Pinnacle's power-de-vigged pair at the same moment, with each book's retirement term; fatigue and a modelled retirement chance against the price: no bet | 355 bets, +68.77 units, +11.0% [+2.5, +19.5] about 30 minutes before the listed start; walk-forward cut +1.2% (below) | **LIVE** 2026-11-14: `atp_moneyline_shop`, `wta_moneyline_shop` (missed the stricter bar, below) |
 | Games spread | games won by each player, completed matches | the same | BetRivers and Caesars (decidable); Pinnacle, Bovada, LowVig, BetOnline, Bally, betPARX | blind at the close: every side at every US book negative | a serve-and-return game model against the line (running); line shop | line shop null: decidable books a median 7% below Pinnacle's fair price on the same line | in progress |
 | Total games | both players' games, a tiebreak one game | the same | the same books | blind at the close: every US book negative both sides, the over worse | a serve-and-return game model (hold rates, tiebreak chance) (running); line shop | line shop null (as above); blind: every US book loses both sides, the over worse | in progress |
 | First-set winner | set one | the same | BetMGM and LeoVegas only, per-event endpoint | | | | parked: one decidable book, history only by the per-event endpoint |
@@ -294,6 +294,23 @@ shows the two agree; DraftKings' site prices for the levels below the tour
 (collecting since 2026-11-13); a modelled retirement chance in place of the
 flat rate (the fatigue and retirement study, running).
 
+**Fatigue and a modelled retirement chance: no bet (mechanisms 1 and 4).**
+`scripts/tennis_fatigue_study.py` (branch `claude/tennis-fatigue-study`) on
+8,854 priced matches before 2026-06-01, 98.9% of players matched to the
+archive. Of seven fatigue features against Pinnacle's power price, fitted on
+earlier seasons and scored on each of 2022-2026, one improved the
+out-of-sample log-loss in all five seasons: days since the previous match
+(the better-rested player does slightly worse than the price says, z -1.68;
+one pass in ten tries is about what chance gives). Every bet rule on it lost
+at every cut and decision time (the close at EV 0.02: 2,564 bets, -81.18
+units). The men's best-of-five lead (a long previous match costs the next
+one) shows on the full sample (-0.21 per hour, n 851) and fails out of
+sample. A retirement model (previous-match length, a recent retirement, age,
+best of five, surface, tour; fit on 2015-2019) ranks retirements better than
+the flat rate (AUC 0.58 against 0.54) and, swapped into the live rule,
+gives 276 bets +51.57 units against 273 bets +43.32: 79 bets differ, inside
+the noise, so the live rule keeps the flat rate.
+
 ## The scout's leads (2026-11-13)
 
 | Lead | Claim | Evidence | Test here |
@@ -385,8 +402,8 @@ cover it on an average quote; any edge is in the quotes that stand apart.
 ## Open items
 
 - Round 1 is above. Running: the serve-and-return model for total games and
-  games spreads (mechanisms 3 and 5); fatigue and a modelled retirement
-  chance against the match-winner price (mechanisms 1 and 4).
+  games spreads (mechanisms 3 and 5). Fatigue and the retirement model
+  (mechanisms 1 and 4): no bet, above.
 - The forward log runs on mike's PC until 2026-11-23; a worker job takes it
   over when the first model ships.
 - The code graph is rebuilt and named once, after the last code change of
