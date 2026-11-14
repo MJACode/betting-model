@@ -192,13 +192,13 @@ FIBA league, was found; no lead grades Strong.
 
 ## Open items
 
-1. **DraftKings' board.** `scripts/nbl_dk_probe.py` reads whether DraftKings
+1. **DraftKings' board (#1330).** `scripts/nbl_dk_probe.py` reads whether DraftKings
    lists the NBL and every market it prices, and stores the answers. mike runs
    it from his terminal on a day with NBL games on the board (the permission
    check refuses DraftKings site reads from a session). It decides whether the
    rows beyond the full game have a book a pick may name.
-2. **The purchase**, after this merges and on mike's yes (above).
-3. **Kalshi's and Polymarket's NBL history**, free: store it (a new ingestor;
+2. **The purchase (#1331)**, after this merges and on mike's yes (above).
+3. **Kalshi's and Polymarket's NBL history (#1332)**, free: store it (a new ingestor;
    the repo's Kalshi recorder reads college football only).
 4. **Halftime on the wall clock.** ESPN's plays carry none; the FIBA LiveStats
    files or the in-play quote stamps may place it.

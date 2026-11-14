@@ -168,6 +168,11 @@ class StandIn:
         return json.loads(row[0]) if row else None
 
 
+# The protected sources the fixture draws from: the 25 held on 2026-11-14
+# before the NBL's two were added (build, below).
+FIXTURE_PROTECTED = 25
+
+
 def build(conn: StandIn, seed: int = 7) -> None:
     """Games across every tier, every protected book, prefix and source, NBA,
     in-play, NULL snapshot types, an orphan, a dateless game, a prop row dated
@@ -179,6 +184,12 @@ def build(conn: StandIn, seed: int = 7) -> None:
     # random bits by the list's length, so each new protected source reshaped
     # every later draw and could take away the tie groups the equivalence test
     # needs (the EuroLeague period feed's marker did, for seed 11, 2026-11-14).
+    # The stream alone was not enough: the list it draws from still grew, so a
+    # longer list protected more rows and took the ties away again (the NBL's
+    # two sources, seeds 7 and 11, 2026-11-14). So it draws from the first
+    # FIXTURE_PROTECTED sources only, a fixed list: every protected source is
+    # skipped by one membership test, so a fixed set of them covers the rule,
+    # and the fixture no longer changes when a league adds a source.
     src_rnd = random.Random(seed + 1_000)
     games = [  # (game_id, sport, game_date)
         ("MLB_A", "MLB", "2026-10-10"), ("MLB_B", "MLB", "2026-10-15"),
@@ -190,7 +201,8 @@ def build(conn: StandIn, seed: int = 7) -> None:
     conn.db.executemany(GAMES_INSERT, games)
     books = ["fanduel", "betmgm", "pinnacle", "draftkings", "sbr_consensus",
              "cfbd_bovada", "bovada"]
-    sources = [None, None, None, None, "bovada_direct", *po.PROTECTED_SOURCES]
+    sources = [None, None, None, None, "bovada_direct",
+               *po.PROTECTED_SOURCES[:FIXTURE_PROTECTED]]
     types = ["open", "open", "open", "close", "in_play", "in_play", None]
     oid = 0
     for gid, sport, _ in games + [("ORPHAN", "MLB", None)]:

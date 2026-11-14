@@ -72,7 +72,10 @@ A new writer that skips one of these bets something it should not:
 
 - `data/ingestors/odds_ingestor.py`: `SPORT_KEYS`, the resolver and schedule
   lists, `SPORT_EXTRA_BOOKMAKERS`, name normalisation, the season label, the
-  default sport lists. Pinned in the sport's odds-intake test.
+  default sport lists. Pinned in the sport's odds-intake test, and in
+  `tests/test_ncaab_odds_intake.py` (the DraftKings gate exemption, the
+  schedule-resolved list and the default pass's last sports), which a new
+  resolve-only sport extends (NBL, 2026-11-14).
 - New ingestors: teams and schedule (the whole season, not a two-week window),
   paid history (`--spool DIR --fetch --store`, walking the feed's chain), free
   history imports, box scores, play-by-play, the live score feed, odds capture.
@@ -80,7 +83,10 @@ A new writer that skips one of these bets something it should not:
   `run_daily_pipeline`, the `--step` choices, the step map).
   `scripts/refresh_pass.sh` for intraday steps.
 - `data/prune_odds.py`: `PROTECTED_SOURCES` for bought history,
-  `PATH_KEPT_SPORTS` if the whole price path is kept.
+  `PATH_KEPT_SPORTS` if the whole price path is kept. Both are pinned in
+  `tests/test_prune_keeps_nba_path.py`, and `tests/test_prune_bounded.py`
+  builds its tie fixture from the first `FIXTURE_PROTECTED` sources (a
+  growing list took its ties away twice, EuroLeague and NBL, 2026-11-14).
   `monitoring/probe.py` `_SPORT_TOKENS`.
 - **Tables**: every new table a Python create site makes in `data/anon_readable.py`
   `WORKER_ONLY_TABLES` (a migration-created table cannot be listed there:

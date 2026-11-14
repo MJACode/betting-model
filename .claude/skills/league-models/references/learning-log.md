@@ -60,6 +60,14 @@ review as its own entry.
      And a trap in the EuroLeague purchaser, fixed in the NBL fork only: its
      one-day path (`--only-days`) ignored `--pregame-step-min`, so a trial
      measured every snapshot, not what the thinned purchase would cost.
+   - `shipping.md`: the tests a new resolve-only sport extends (the
+     college basketball odds-intake pins and the price-path pin). And a trap
+     seen twice, so a rule there: the bounded clean-up test's tie fixture drew
+     each row's source from the whole protected list, so each new protected
+     source changed which rows were protected and took its ties away
+     (EuroLeague's period source, seed 11; the NBL's two, seeds 7 and 11). It
+     now draws from a fixed first 25. Found by comparing the full suite's
+     failures on the branch and on master: 6 only on the branch, 17 on both.
    - `scouting.md`: eleven routes dated (ESPN's NBL, Kalshi, Polymarket,
      FIBA LiveStats answered; the league site's API refused by the permission
      check; AusSportsBetting's file refused, its robots.txt naming Claude's
