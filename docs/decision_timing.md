@@ -52,7 +52,141 @@ the research's bets: same game, side, book and price, +14.70 units. Its 23:00
 timing holds 110 of the research's 114 evening bets; the other 4 kick off
 23:00-23:03 UTC, inside the card's five-minute rule.
 
-**Result:** issue #1337 until it is written here.
+**Result (2026-11-14): no timing clears.** The live 14:00 UTC check is the
+timing chosen on 2023-2024 (+13.88 units, one-sided p 0.097), but no timing
+survives Benjamini-Hochberg at q 0.10, and on 2025 alone the 14:00 check made
++0.81 units on 93 bets (+1.4%, interval -21.0% to +23.0%, p 0.46). No other
+hour did better on 2023-2024, so the selection keeps 14:00; and with nothing
+clearing, there is no evidence for any hour over another.
+
+- **14:00 UTC, all three seasons:** 311 bets, +14.70 units, +7.8% (interval
+  -4.9% to +21.7%), prices +110 to +430 (median +146), 294 road teams; early
+  halves +5.29, late halves +9.40 units. These are the research's 311 bets,
+  game for game.
+- **Its neighbours:** 13:00 UTC made +15.81 units over the three seasons
+  (+11.91 on 2023-2024, +3.90 on 2025) on the same number of bets, but
+  laid prices up to +2500; 12:00 made +7.53 and 15:00 +3.67. Two adjacent
+  hours, not a plateau.
+- **Every hour until it bets** (the first BET locks): 951 bets, three times
+  as many as 14:00, +8.32 units, +1.6% (interval -6.1% to +9.7%); 2023
+  -8.28, 2024 +20.11, 2025 -3.52. It lays -194 to +4500 (median +180), and
+  the card's price and EV floors refuse 10 of its bets. The same pattern as
+  the hockey regulation moneyline: checking more often finds more bets, not
+  better ones.
+- **The last read before kickoff:** 356 bets, -1.71 units.
+- **After 20:00 UTC** every fixed hour loses on 2023-2024 (fewer games are
+  still to kick off).
+- **CLV against Pinnacle's no-vig close:** at every fixed hour the bet price
+  averages 3% to 4% below the close (14:00: -3.83%, beating the close on
+  22.9% of bets). The market moves against these bets after the check. Only
+  "every hour until it bets" is near even (-0.35%, 44.6% beat), because it
+  bets earlier and at longer prices.
+- **Fidelity checks:** at 14:00 the replay holds all 311 research bets (same
+  game, side, book and price; largest edge difference 0.0); at 23:00, 110 of
+  the research's 114 evening bets, the other 4 kicking off 23:00-23:03 UTC,
+  inside the card's five-minute rule. Every bought row's own stamp is within
+  a minute of its pull at every UTC hour (median 0.4-0.8 minutes), so no
+  quiet hour is thinned by the card's 60-minute window. One real gap: the
+  replay's check at hour H reads a snapshot taken about a minute before H;
+  the live card at H:05 reads the refresh stored at about H-1:16, some 50
+  minutes older.
+
+**Three replay fixes the first full run found** (each pinned by a test in
+`tests/test_ncaaf_moneyline_timing.py`):
+
+1. A row's stamp is the market's own last update, so a later pull can hold a
+   row stamped before the check. Each check reads only pulls taken by it. On
+   these seasons it changed none of the 458,320 decisions (the stamps sit
+   within a minute of their pull).
+2. The feed listed the 2025-08-23 Iowa State and Kansas State game (Dublin)
+   under one home team until 08-21 and the other after. Keeping one id per
+   game over the whole history lost a research bet; the replay now decides,
+   at each check, the id with more quotes in the hour, as the card does, and
+   either id's first BET locks the game.
+3. The purchase itself had overwritten the stored kickoff of 1,690 rows of
+   2023-2025 games (below). The replay reads kickoffs as they stood before it.
+
+**Every timing** (units are 1 unit to win, risk capped at 3, after the card's
+price and EV floors; intervals resample bet dates; "chance of a positive
+season" resamples a season's worth of the timing's own bet dates):
+
+**Selection seasons, 2023-2024** (the timing is chosen here):
+
+| Timing | Games in scope | Priced | Bets | 2023 units | 2024 units | Units | Return | 95% interval | p (return <= 0) | Chance of a positive season | CLV vs Pinnacle close | Beat the close |
+|-|-|-|-|-|-|-|-|-|-|-|-|-|
+| 00:00 UTC | 1572 | 1526 | 227 | +5.39 | +2.38 | +7.77 | +5.7% | -7.7 to +19.2 | 0.2167 | 0.716 | -3.41% | 0.261 |
+| 01:00 UTC | 1575 | 1528 | 224 | +3.71 | +3.49 | +7.20 | +5.3% | -7.6 to +19.7 | 0.2303 | 0.704 | -3.47% | 0.26 |
+| 02:00 UTC | 1576 | 1529 | 224 | +3.81 | -0.05 | +3.77 | +2.9% | -11.8 to +18.4 | 0.3645 | 0.604 | -3.42% | 0.265 |
+| 03:00 UTC | 1578 | 1531 | 223 | +3.83 | +2.02 | +5.85 | +4.5% | -9.6 to +19.7 | 0.2565 | 0.665 | -3.4% | 0.266 |
+| 04:00 UTC | 1577 | 1531 | 221 | +2.95 | +2.36 | +5.31 | +4.1% | -9.5 to +18.7 | 0.2923 | 0.662 | -3.35% | 0.264 |
+| 05:00 UTC | 1578 | 1531 | 220 | +0.64 | +4.82 | +5.47 | +4.2% | -9.6 to +20.3 | 0.279 | 0.649 | -3.3% | 0.26 |
+| 06:00 UTC | 1579 | 1531 | 219 | +2.61 | +5.08 | +7.70 | +6.0% | -7.2 to +20.9 | 0.2105 | 0.727 | -3.07% | 0.271 |
+| 07:00 UTC | 1579 | 1531 | 218 | +2.14 | +4.23 | +6.37 | +5.0% | -8.5 to +19.5 | 0.2288 | 0.685 | -3.23% | 0.267 |
+| 08:00 UTC | 1579 | 1531 | 212 | +3.72 | +7.01 | +10.72 | +8.6% | -5.4 to +23.9 | 0.1182 | 0.799 | -3.37% | 0.261 |
+| 09:00 UTC | 1579 | 1530 | 213 | +1.62 | +7.95 | +9.57 | +7.7% | -6.4 to +22.9 | 0.1435 | 0.776 | -3.38% | 0.255 |
+| 10:00 UTC | 1578 | 1530 | 215 | +0.00 | +6.93 | +6.93 | +5.5% | -8.7 to +20.6 | 0.2283 | 0.685 | -3.4% | 0.257 |
+| 11:00 UTC | 1579 | 1532 | 215 | +0.14 | +5.42 | +5.56 | +4.4% | -10.6 to +19.8 | 0.2745 | 0.663 | -3.46% | 0.252 |
+| 12:00 UTC | 1578 | 1532 | 213 | +0.75 | +5.56 | +6.30 | +5.0% | -8.8 to +20.7 | 0.245 | 0.685 | -3.49% | 0.259 |
+| 13:00 UTC | 1578 | 1537 | 209 | -0.71 | +12.62 | +11.91 | +9.6% | -6.1 to +28.0 | 0.1298 | 0.776 | -3.51% | 0.255 |
+| 14:00 UTC (live) | 1505 | 1467 | 218 | -2.77 | +16.66 | +13.88 | +10.7% | -5.0 to +27.4 | 0.0968 | 0.827 | -3.75% | 0.253 |
+| 15:00 UTC | 1623 | 1566 | 231 | +0.55 | +6.40 | +6.95 | +5.2% | -7.7 to +19.0 | 0.2233 | 0.712 | -3.78% | 0.243 |
+| 16:00 UTC | 1439 | 1389 | 194 | +4.67 | +4.12 | +8.78 | +7.6% | -7.2 to +22.2 | 0.1588 | 0.765 | -3.37% | 0.223 |
+| 17:00 UTC | 1360 | 1306 | 183 | +1.19 | +3.66 | +4.86 | +4.5% | -9.2 to +18.6 | 0.2687 | 0.688 | -3.32% | 0.198 |
+| 18:00 UTC | 1317 | 1267 | 180 | +2.69 | +3.89 | +6.58 | +6.2% | -9.0 to +21.8 | 0.211 | 0.706 | -3.92% | 0.145 |
+| 19:00 UTC | 1264 | 1205 | 173 | +0.57 | +8.62 | +9.19 | +9.1% | -5.6 to +24.7 | 0.111 | 0.798 | -3.86% | 0.122 |
+| 20:00 UTC | 949 | 904 | 127 | -3.40 | +6.85 | +3.44 | +4.5% | -13.6 to +23.9 | 0.3135 | 0.641 | -3.71% | 0.167 |
+| 21:00 UTC | 801 | 760 | 99 | -5.53 | +4.74 | -0.79 | -1.3% | -20.8 to +20.2 | 0.5437 | 0.471 | -3.68% | 0.112 |
+| 22:00 UTC | 740 | 707 | 94 | -3.05 | +1.44 | -1.62 | -3.0% | -28.1 to +23.7 | 0.5883 | 0.431 | -3.91% | 0.108 |
+| 23:00 UTC | 492 | 487 | 67 | -7.82 | +5.58 | -2.25 | -5.7% | -37.3 to +29.3 | 0.6305 | 0.411 | -4.23% | 0.075 |
+| every hour until it bets | 1664 | 1593 | 642 | -8.28 | +20.11 | +11.83 | +3.5% | -6.1 to +13.3 | 0.2415 | 0.7 | -0.69% | 0.457 |
+| last read before kickoff | 1664 | 1593 | 245 | -5.71 | +8.84 | +3.12 | +2.2% | -10.7 to +15.2 | 0.377 | 0.591 | -3.8% | 0.123 |
+
+**Confirmation season, 2025** (read after the choice):
+
+| Timing | Bets | Units | Return | 95% interval | p (return <= 0) | CLV vs Pinnacle close |
+|-|-|-|-|-|-|-|
+| 00:00 UTC | 106 | +2.44 | +3.7% | -16.2 to +21.3 | 0.3317 | -4.43% |
+| 01:00 UTC | 105 | +2.74 | +4.2% | -17.1 to +23.5 | 0.3417 | -4.19% |
+| 02:00 UTC | 105 | +0.96 | +1.5% | -18.3 to +20.5 | 0.4482 | -4.15% |
+| 03:00 UTC | 105 | -1.04 | -1.6% | -22.3 to +17.3 | 0.5683 | -3.84% |
+| 04:00 UTC | 106 | -1.34 | -2.1% | -22.1 to +17.0 | 0.5805 | -3.95% |
+| 05:00 UTC | 103 | -1.37 | -2.1% | -22.3 to +14.5 | 0.601 | -4.07% |
+| 06:00 UTC | 99 | +1.76 | +2.8% | -19.9 to +22.9 | 0.392 | -3.87% |
+| 07:00 UTC | 104 | -0.99 | -1.5% | -22.2 to +17.9 | 0.574 | -4.02% |
+| 08:00 UTC | 105 | -1.26 | -1.9% | -23.7 to +16.8 | 0.5877 | -3.96% |
+| 09:00 UTC | 102 | -0.08 | -0.1% | -23.0 to +18.9 | 0.5145 | -3.89% |
+| 10:00 UTC | 102 | +1.79 | +2.8% | -19.2 to +22.7 | 0.3947 | -3.79% |
+| 11:00 UTC | 105 | +1.70 | +2.6% | -18.4 to +20.7 | 0.3867 | -3.71% |
+| 12:00 UTC | 101 | +1.22 | +1.9% | -18.4 to +19.2 | 0.421 | -3.9% |
+| 13:00 UTC | 102 | +3.90 | +6.1% | -12.1 to +24.9 | 0.2435 | -3.89% |
+| 14:00 UTC (live) | 93 | +0.81 | +1.4% | -21.0 to +23.0 | 0.4592 | -4.02% |
+| 15:00 UTC | 102 | -3.27 | -5.2% | -30.4 to +22.1 | 0.6585 | -3.78% |
+| 16:00 UTC | 82 | -1.77 | -3.5% | -33.5 to +27.4 | 0.6082 | -3.66% |
+| 17:00 UTC | 70 | -4.42 | -10.2% | -41.3 to +26.7 | 0.7222 | -3.73% |
+| 18:00 UTC | 64 | -1.39 | -3.5% | -37.0 to +33.4 | 0.6012 | -3.2% |
+| 19:00 UTC | 66 | +1.63 | +4.1% | -26.4 to +38.3 | 0.414 | -0.6% |
+| 20:00 UTC | 48 | -1.40 | -4.6% | -40.8 to +37.5 | 0.6048 | -3.71% |
+| 21:00 UTC | 45 | -0.71 | -2.6% | -42.6 to +41.8 | 0.5493 | -3.64% |
+| 22:00 UTC | 48 | -1.94 | -6.3% | -40.2 to +33.0 | 0.6308 | -3.19% |
+| 23:00 UTC | 43 | +0.69 | +2.6% | -39.3 to +45.3 | 0.4582 | -0.1% |
+| every hour until it bets | 309 | -3.52 | -2.0% | -14.0 to +11.3 | 0.632 | 0.34% |
+| last read before kickoff | 111 | -4.83 | -7.1% | -29.5 to +19.8 | 0.706 | -2.48% |
+
+**What the purchase broke, and the repair.** `run_historical_odds_range`
+upserted every snapshot's games, so each snapshot set `commence_time` and
+`data_source`. A backfill's snapshots do not arrive in time order: the fill
+jobs ran last with early-week snapshots that still carried placeholder times
+(Florida at Miami 2025-09-20 went from 23:30 to 16:00 UTC), and post-start
+snapshots list the actual start (most of the changes, a few minutes each).
+1,690 rows of 2023-2025 games changed kickoff, and CFBD's scored rows among
+them had `data_source` set to `live`. The ingestor now lets a history
+snapshot set a stored kickoff only inside the 24 hours before the kickoff it
+lists, before the game starts, and otherwise only insert a missing game
+(`_history_game_rows`). `scripts/restore_ncaaf_kickoffs_20261114.py` put
+the 1,690 rows back from the local copy taken at 05:43 UTC that morning,
+keeping both values in `games_ncaaf_kickoff_restore_20261114` (row security
+on); applied 23:29 UTC, 0 rows still differing. The 116 games the purchase
+added keep the kickoff it wrote.
 
 ## The inventory of every other model (2026-11-14)
 
