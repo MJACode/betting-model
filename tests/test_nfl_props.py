@@ -1700,9 +1700,11 @@ def test_the_soft_book_set_is_the_one_the_sweep_endorses():
     # every ten named books as a region, fourteen had doubled every call, and
     # fliff had decided 3 live bets. A soft book the pull does not request
     # produces no quotes, so it cannot stay named here.
+    # hardrockbet LEFT on 2026-11-13 (mike: it cannot be bet in Massachusetts;
+    # config.STATE_LIMITED_BOOKMAKERS). Bettability again, clause zero: none of
+    # the model's 90 BETs to that day had been decided there.
     assert set(mkt.SOFT_BOOKS) == {
-        "draftkings", "fanduel", "betmgm", "williamhill_us",
-        "betrivers", "hardrockbet",
+        "draftkings", "fanduel", "betmgm", "williamhill_us", "betrivers",
     }, mkt.SOFT_BOOKS
     assert mkt.SHARP_BOOK not in mkt.SOFT_BOOKS
     assert "espnbet" not in mkt.SOFT_BOOKS, (

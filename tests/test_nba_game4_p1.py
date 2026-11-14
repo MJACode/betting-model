@@ -448,7 +448,7 @@ def _rung(book, market, line, pa, pb, tip, gid="G", lead=60):
 
 def _ladder_quotes(tip):
     """BetRivers hangs three team-total numbers in one purchase, its main one
-    (prices closest to even) first in the file; Hard Rock hangs a first-half
+    (prices closest to even) first in the file; BetMGM hangs a first-half
     total 3 points from the deciding books' median."""
     return pd.DataFrame([
         _rung("betrivers", "team_totals_home", 111.5, -112, -108, tip),
@@ -456,7 +456,7 @@ def _ladder_quotes(tip):
         _rung("betrivers", "team_totals_home", 114.5, 150, -190, tip),
         _rung("pinnacle", "team_totals_home", 111.5, -110, -110, tip),
         _rung("fanduel", "team_totals_home", 111.5, -110, -110, tip),
-        _rung("hardrockbet", "totals_h1", 117.5, 135, -165, tip),
+        _rung("betmgm", "totals_h1", 117.5, 135, -165, tip),
         _rung("fanduel", "totals_h1", 114.5, -110, -110, tip),
         _rung("draftkings", "totals_h1", 114.5, -110, -110, tip),
         _rung("pinnacle", "totals_h1", 114.5, -110, -110, tip)])
@@ -476,7 +476,7 @@ def test_a_book_listing_several_numbers_is_offered_at_its_main_number_only(monke
     data = H.Data(games=pd.DataFrame(), quotes=_ladder_quotes(TIP), fetches=pd.DataFrame())
     got = _offered(M.make_point(data, "D", times, {}, pd.DataFrame()).off)
     assert got[("team_totals_home", "betrivers")] == [111.5]
-    assert ("totals_h1", "hardrockbet") not in got
+    assert ("totals_h1", "betmgm") not in got
     assert got[("totals_h1", "fanduel")] == [114.5] and got[("totals_h1", "pinnacle")] == [114.5]
 
 

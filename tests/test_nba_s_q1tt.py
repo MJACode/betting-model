@@ -104,7 +104,7 @@ def test_the_main_number_is_the_rung_closest_to_even_ties_to_the_lower_and_one_s
 def test_the_ladder_rule_drops_a_main_number_far_from_the_deciding_books_median():
     rows = [{"market": "team_totals_h1_away", "bookmaker": b, "total_line": ln,
              "over_price": -110.0, "under_price": -110.0}
-            for b, ln in (("draftkings", 57.5), ("fanduel", 57.5), ("betrivers", 57.5), ("hardrockbet", 60.5))]
+            for b, ln in (("draftkings", 57.5), ("fanduel", 57.5), ("betrivers", 57.5), ("betmgm", 60.5))]
     q = Q.tt_quotes(_raw(rows), _games())
     vis, n = Q.period_numbers(q, H.per_event_times(q, "D"))
     assert set(vis["book"]) == {"draftkings", "fanduel", "betrivers"} and n["ladder_masked"] == 1
