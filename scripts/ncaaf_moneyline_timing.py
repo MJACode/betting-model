@@ -82,16 +82,19 @@ CANDIDATES = [f"h{h:02d}" for h in range(24)] + ["first_bet", "last_read"]
 # after it has no hourly prices, so its "last read" would be weeks early.
 WINDOWS = {2023: ("2023-08-17", "2023-12-09"), 2024: ("2024-08-15", "2024-12-07"),
            2025: ("2025-08-14", "2025-12-06")}
-PANEL_COLS = ["game_id", "season", "instant", "status", "bookmaker", "side", "price", "edge",
-              "prob", "cons", "n_ok", "ml_books"]
+PANEL_COLS = ["game_id", "canon", "season", "instant", "status", "bookmaker", "side", "price",
+              "edge", "prob", "cons", "n_ok", "ml_books"]
 
 
 # ── the rows ──────────────────────────────────────────────────────────────────
 
 def pull_rows(g: pd.DataFrame, o: pd.DataFrame, seasons) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """(h2h rows, spreads rows, games) of every stored historical pull for the
-    scored games of `seasons`, as the card's read takes them, one odds id per
-    real game (the build's choice: the id with more stored quotes)."""
+    scored games of `seasons`, as the card's read takes them. Every odds id is
+    kept, with `canon`, the real game it belongs to (its scored twin, else
+    itself): the feed can list one game under two ids (a neutral-site game
+    whose home team it changed), and the card picks between them at each
+    check by quotes in the hour (panel)."""
     h = o[(o["source"].fillna("").str.split("|").str[0] == build.PULL_SOURCE)
           & (o["snapshot_type"] == "open")].copy()
     h["ts"] = pd.to_datetime(h["snapshot_at"], utc=True, errors="coerce", format="mixed")
@@ -100,11 +103,7 @@ def pull_rows(g: pd.DataFrame, o: pd.DataFrame, seasons) -> tuple[pd.DataFrame, 
     gg = g[g["margin"].notna() & g["season"].isin(list(seasons)) & g["kick"].notna()]
     h = h.merge(gg[["game_id", "kick", "et_date", "season", "twin_of"]], on="game_id", how="inner")
     h = h[h["pull_ts"] < h["kick"] - mm.MIN_LEAD]
-    per = h.drop_duplicates(["game_id", "pull_ts", "bookmaker"])
-    n = per.assign(canon=per["twin_of"].fillna(per["game_id"])).groupby(
-        ["canon", "game_id"]).size().reset_index(name="n")
-    n = n.sort_values(["canon", "n", "game_id"], ascending=[True, False, True], kind="mergesort")
-    h = h[h["game_id"].isin(set(n.drop_duplicates("canon")["game_id"]))]
+    h["canon"] = h["twin_of"].fillna(h["game_id"])
     h = h[h["market"].isin(["h2h", "spreads"]) & h["ts"].notna()]
     # How old each row's own stamp (the market's last_update) is at its pull,
     # by the pull's UTC hour: the card's read keeps a quote only when its
@@ -119,8 +118,8 @@ def pull_rows(g: pd.DataFrame, o: pd.DataFrame, seasons) -> tuple[pd.DataFrame, 
     for c in ("home_price", "away_price", "spread_home"):
         h[c] = pd.to_numeric(h[c], errors="coerce").astype(float)
     h = h.rename(columns={"home_price": "p1", "away_price": "p2", "spread_home": "line"})
-    cols = ["game_id", "bookmaker", "ts", "line", "p1", "p2", "order", "tip"]
-    games = h.drop_duplicates("game_id")[["game_id", "season", "et_date", "kick"]].reset_index(drop=True)
+    cols = ["game_id", "bookmaker", "ts", "line", "p1", "p2", "order", "tip", "pull_ts"]
+    games = h.drop_duplicates("game_id")[["game_id", "canon", "season", "et_date", "kick"]].reset_index(drop=True)
     games.attrs["stamp_ages"] = stamp_ages
     h = h.sort_values("ts", kind="mergesort")
     return (h[h["market"] == "h2h"][cols].reset_index(drop=True),
@@ -150,6 +149,12 @@ def instants(games: pd.DataFrame, ml: pd.DataFrame, hours) -> list[pd.Timestamp]
     return list(pd.date_range(t0, t1, freq="h"))
 
 
+def _observed(rows: pd.DataFrame, t: pd.Timestamp) -> pd.DataFrame:
+    """The rows of pulls taken at or before t (all rows when the frame has
+    no pull_ts)."""
+    return rows[rows["pull_ts"] <= t] if "pull_ts" in rows.columns else rows
+
+
 _W: dict = {}
 
 
@@ -158,13 +163,14 @@ def _init(ml, sp, games, tables, hours):
     _W.update(ml=ml, sp=sp, games=games, tables=tables, hours=hours,
               kick=games.set_index("game_id")["kick"],
               season_of=games.set_index("game_id")["season"],
+              canon_of=games.set_index("game_id")["canon"],
               et_of=games.set_index("game_id")["et_date"].astype(str).str[:10])
 
 
 def _decide_at(season: int, ts_chunk: list, log_every: int = 0) -> list:
     """The card's decisions at each instant of ts_chunk, for one season."""
     ml, sp, games, hours = _W["ml"], _W["sp"], _W["games"], _W["hours"]
-    kick, season_of, et_of = _W["kick"], _W["season_of"], _W["et_of"]
+    kick, season_of, et_of, canon_of = _W["kick"], _W["season_of"], _W["et_of"], _W["canon_of"]
     table, offset, _ = _W["tables"][int(season)]
     ids_s = set(games.loc[games["season"] == season, "game_id"])
     ml_s = ml[ml["game_id"].isin(ids_s)].reset_index(drop=True)
@@ -172,8 +178,11 @@ def _decide_at(season: int, ts_chunk: list, log_every: int = 0) -> list:
     ml_ts, sp_ts = ml_s["ts"].values, sp_s["ts"].values
     out, t0 = [], time.time()
     for i, t in enumerate(ts_chunk):
-        m = _window(ml_s, ml_ts, t)
-        s = _window(sp_s, sp_ts, t)
+        # Only pulls taken by t: a row's stamp is the market's own last
+        # update, so a later pull can hold a row stamped before t, and an
+        # hourly check could not have seen it at t.
+        m = _observed(_window(ml_s, ml_ts, t), t)
+        s = _observed(_window(sp_s, sp_ts, t), t)
         # In scope at t: still to kick off at least five minutes after t,
         # and on t's Eastern date when the panel is the fixed hours only.
         ids = {gid for gid in set(m["game_id"]) | set(s["game_id"])
@@ -183,6 +192,16 @@ def _decide_at(season: int, ts_chunk: list, log_every: int = 0) -> list:
             ids = {gid for gid in ids if et_of[gid] == day}
         if not ids:
             continue
+        # One real game listed under two ids: the card decides the id with
+        # more quotes in the hour, a tie going to the lower id
+        # (scripts/ncaaf_moneyline_card._drop_duplicate_rows).
+        n = pd.concat([m["game_id"], s["game_id"]]).value_counts().to_dict()
+        best: dict = {}
+        for gid in sorted(ids):
+            c = canon_of[gid]
+            if c not in best or (-n.get(gid, 0), gid) < (-n.get(best[c], 0), best[c]):
+                best[c] = gid
+        ids = set(best.values())
         m = m[m["game_id"].isin(ids)].assign(instant=t)
         s = s[s["game_id"].isin(ids)].assign(instant=t)
         q = mm.quotes_at(m, s)
@@ -190,7 +209,8 @@ def _decide_at(season: int, ts_chunk: list, log_every: int = 0) -> list:
                  & q["ml_away"].notna()].groupby("game_id").size())
         for d in mm.decide(sorted(ids), q, table, offset):
             b = d.best or {}
-            out.append((d.game_id, int(season_of[d.game_id]), t, d.status, b.get("bookmaker"),
+            out.append((d.game_id, canon_of[d.game_id], int(season_of[d.game_id]), t, d.status,
+                        b.get("bookmaker"),
                         b.get("side"), b.get("price"), b.get("edge"), b.get("prob"),
                         b.get("cons"), b.get("n_ok"), int(nml.get(d.game_id, 0))))
         if log_every and i % log_every == 0:
@@ -233,34 +253,55 @@ def panel(rows: tuple, tables: dict, hours=None, log_every: int = 200,
 # ── the timings ───────────────────────────────────────────────────────────────
 
 def timing_rows(p: pd.DataFrame, games: pd.DataFrame, name: str) -> pd.DataFrame:
-    """The one decision each game gets under timing `name` (one row a game in
-    that timing's scope)."""
+    """The one decision each real game gets under timing `name` (one row a
+    game in that timing's scope). A game listed under two odds ids is one
+    game (`canon`): the first BET of either locks it."""
+    key = "canon" if "canon" in p.columns else "game_id"
     if name.startswith("h"):
         hour = int(name[1:])
         inst = {r.game_id: pd.Timestamp(str(r.et_date)[:10], tz="UTC") + pd.Timedelta(hours=hour)
                 for r in games.itertuples(index=False)}
         x = p[p["instant"] == p["game_id"].map(inst)]
-        return x.drop_duplicates("game_id")
+        return x.sort_values([key, "instant"], kind="mergesort").drop_duplicates(key)
     if name == "first_bet":
-        b = p[p["status"] == "bets"].sort_values(["game_id", "instant"], kind="mergesort")
-        first = b.drop_duplicates("game_id")
-        rest = p[~p["game_id"].isin(set(first["game_id"]))]
-        last = rest.sort_values(["game_id", "instant"], kind="mergesort").drop_duplicates(
-            "game_id", keep="last")
+        b = p[p["status"] == "bets"].sort_values([key, "instant"], kind="mergesort")
+        first = b.drop_duplicates(key)
+        rest = p[~p[key].isin(set(first[key]))]
+        last = rest.sort_values([key, "instant"], kind="mergesort").drop_duplicates(key, keep="last")
         return pd.concat([first, last], ignore_index=True)
     if name == "last_read":
-        return p.sort_values(["game_id", "instant"], kind="mergesort").drop_duplicates(
-            "game_id", keep="last")
+        return p.sort_values([key, "instant"], kind="mergesort").drop_duplicates(key, keep="last")
     raise ValueError(name)
 
 
-def pinnacle_close(ml: pd.DataFrame) -> pd.DataFrame:
-    """Pinnacle's last stored moneyline stamped before kickoff, per game."""
+def pinnacle_close(ml: pd.DataFrame, games: pd.DataFrame | None = None,
+                   g: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Pinnacle's last stored moneyline stamped before kickoff, per odds id.
+
+    With games (game_id, canon) and g (game_id, home_team): the close is the
+    real game's, the latest across its ids, with home and away swapped for an
+    id that lists the other team at home."""
     x = ml[(ml["bookmaker"] == "pinnacle") & (ml["ts"] <= ml["tip"])
            & ml["p1"].notna() & ml["p2"].notna()]
     x = x.sort_values(["game_id", "ts", "order"], kind="mergesort").drop_duplicates("game_id", keep="last")
-    return x.set_index("game_id")[["p1", "p2", "ts"]].rename(
+    own = x.set_index("game_id")[["p1", "p2", "ts"]].rename(
         columns={"p1": "pin_home", "p2": "pin_away", "ts": "pin_ts"})
+    if games is None or g is None:
+        return own
+    home = g.set_index("game_id")["home_team"]
+    canon = games.set_index("game_id")["canon"]
+    c = own.join(canon, how="inner").reset_index()
+    latest = c.sort_values(["canon", "pin_ts"], kind="mergesort").drop_duplicates("canon", keep="last")
+    latest = latest.set_index("canon")
+    rows = []
+    for gid, cn in canon.items():
+        if cn not in latest.index:
+            continue
+        r = latest.loc[cn]
+        flip = home.get(gid) != home.get(r["game_id"])
+        rows.append({"game_id": gid, "pin_home": r["pin_away"] if flip else r["pin_home"],
+                     "pin_away": r["pin_home"] if flip else r["pin_away"], "pin_ts": r["pin_ts"]})
+    return pd.DataFrame(rows, columns=["game_id", "pin_home", "pin_away", "pin_ts"]).set_index("game_id")
 
 
 def with_clv(b: pd.DataFrame, pin: pd.DataFrame) -> pd.DataFrame:
@@ -401,7 +442,7 @@ def main(argv=None) -> None:
           f"{p['game_id'].nunique()} games ({time.time() - t0:.0f}s)", flush=True)
 
     names = [f"h{h:02d}" for h in hours] if hours else CANDIDATES
-    pin = pinnacle_close(ml)
+    pin = pinnacle_close(ml, games, g)
     rng = np.random.default_rng(7)
     res = {}
     for name in names:

@@ -34,14 +34,17 @@ def art():
     return mm.load_artifact()
 
 
-def _pull(quotes, stamped_at):
+def _pull(quotes, stamped_at, pulled_at=None):
     """Rows as tm.pull_rows hands them to the panel: no instant, sorted by ts."""
     r = _rows(quotes, instant=pd.Timestamp(stamped_at, tz="UTC"), tip=KICK)
-    return r.drop(columns=["instant", "link1", "link2"]).sort_values("ts").reset_index(drop=True)
+    r = r.drop(columns=["instant", "link1", "link2"])
+    r["pull_ts"] = pulled_at if pulled_at is not None else r["ts"].max()
+    return r.sort_values("ts").reset_index(drop=True)
 
 
 def _games():
-    return pd.DataFrame({"game_id": ["g"], "season": [2026], "et_date": [DAY], "kick": [KICK]})
+    return pd.DataFrame({"game_id": ["g"], "canon": ["g"], "season": [2026], "et_date": [DAY],
+                         "kick": [KICK]})
 
 
 def _tables(art):
@@ -148,3 +151,50 @@ def test_the_replay_refuses_what_the_card_refuses_after_deciding():
     b = pd.DataFrame({"price": [150.0, 150.0, -250.0],
                       "prob": [(1 + floor + 0.01) / 2.5, (1 + floor - 0.01) / 2.5, 0.9]})
     assert list(tm.card_gates(b)) == [True, False, False]
+
+
+def test_a_later_pull_is_never_read_at_an_earlier_check(art):
+    """A row's stamp is the market's own last update, so a pull taken at
+    15:00 can hold a row stamped 13:50. A 14:00 check could not have seen
+    that pull: the read takes only pulls taken by the check."""
+    ml, sp = _moneylines(art), _spreads()
+    later = pd.Timestamp(f"{DAY} 14:59", tz="UTC")
+    rows = (_pull(ml, f"{DAY} 14:00", later), _pull(sp, f"{DAY} 14:00", later), _games())
+    assert len(tm.panel(rows, _tables(art), hours=[14], log_every=0)) == 0
+    assert len(tm.panel(rows, _tables(art), hours=[15], log_every=0)) == 0  # stamps too old by 15:00
+    now = (_pull(ml, f"{DAY} 14:00"), _pull(sp, f"{DAY} 14:00"), _games())
+    assert len(tm.panel(now, _tables(art), hours=[14], log_every=0)) == 1
+
+
+def test_one_game_under_two_ids_is_decided_on_the_id_with_more_quotes_in_the_hour(art):
+    """The feed listed a neutral-site game under one home team, then the
+    other. At each check the card decides the id with more quotes in the
+    hour (scripts/ncaaf_moneyline_card._drop_duplicate_rows); the replay too,
+    and the game's first BET under either id locks it."""
+    ml, sp = _moneylines(art), _spreads()
+    one = (_pull(ml, f"{DAY} 14:00"), _pull(sp, f"{DAY} 14:00"))
+    few = (_pull(ml[:2], f"{DAY} 14:00"), _pull(sp[:2], f"{DAY} 14:00"))
+    # The id with more quotes is the HIGHER id, so a replay that ignored the
+    # count and took the lower id would fail here.
+    mls = pd.concat([one[0].assign(game_id="h"), few[0]], ignore_index=True).sort_values("ts", kind="mergesort")
+    sps = pd.concat([one[1].assign(game_id="h"), few[1]], ignore_index=True).sort_values("ts", kind="mergesort")
+    games = pd.DataFrame({"game_id": ["g", "h"], "canon": ["g", "g"], "season": [2026, 2026],
+                          "et_date": [DAY, DAY], "kick": [KICK, KICK]})
+    p = tm.panel((mls.reset_index(drop=True), sps.reset_index(drop=True), games), _tables(art),
+                 hours=[14], log_every=0)
+    assert list(p["game_id"]) == ["h"]
+    assert list(p["canon"]) == ["g"]
+    q = _panel([("g", f"{DAY} 12:00", "bets", 150.0), ("h", f"{DAY} 13:00", "bets", 140.0)])
+    q["canon"] = "g"
+    assert list(tm.timing_rows(q, games, "first_bet")["price"]) == [150.0]
+
+
+def test_the_close_is_the_real_games_with_home_and_away_swapped_for_a_flipped_id():
+    ml = pd.DataFrame({"game_id": ["old", "new"], "bookmaker": ["pinnacle", "pinnacle"],
+                       "ts": [pd.Timestamp(f"{DAY} 10:00", tz="UTC"), pd.Timestamp(f"{DAY} 20:00", tz="UTC")],
+                       "tip": [KICK, KICK], "p1": [120.0, -150.0], "p2": [-140.0, 130.0], "order": [0, 1]})
+    games = pd.DataFrame({"game_id": ["old", "new"], "canon": ["new", "new"]})
+    g = pd.DataFrame({"game_id": ["old", "new"], "home_team": ["Iowa State", "Kansas State"]})
+    pin = tm.pinnacle_close(ml, games, g)
+    assert (pin.loc["new", "pin_home"], pin.loc["new", "pin_away"]) == (-150.0, 130.0)
+    assert (pin.loc["old", "pin_home"], pin.loc["old", "pin_away"]) == (130.0, -150.0)
