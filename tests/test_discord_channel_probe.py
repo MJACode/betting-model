@@ -35,6 +35,9 @@ def test_the_probe_reports_the_channel_behind_each_sport(monkeypatch):
                         {"MLB": "https://discord.com/api/webhooks/1/mlbtoken",
                          "UFC": "https://discord.com/api/webhooks/2/ufctoken"},
                         raising=False)
+    # config names the tennis channels by id with no variable set
+    # (config.DEFAULT_DISCORD_CHANNELS), so the channel map is emptied too.
+    monkeypatch.setattr(config, "DISCORD_CHANNELS", {}, raising=False)
     for attr in ("DISCORD_WEBHOOK_DEFAULT", "DISCORD_WEBHOOK_LIVE",
                  "DISCORD_WEBHOOK_RESULTS", "DISCORD_WEBHOOK_FREE",
                  "DISCORD_WEBHOOK_OPS"):
@@ -66,6 +69,9 @@ def test_two_sports_sharing_a_channel_are_flagged(monkeypatch):
                         {"MLB": "https://discord.com/api/webhooks/1/a",
                          "UFC": "https://discord.com/api/webhooks/2/b"},
                         raising=False)
+    # config names the tennis channels by id with no variable set
+    # (config.DEFAULT_DISCORD_CHANNELS), so the channel map is emptied too.
+    monkeypatch.setattr(config, "DISCORD_CHANNELS", {}, raising=False)
     for attr in ("DISCORD_WEBHOOK_DEFAULT", "DISCORD_WEBHOOK_LIVE",
                  "DISCORD_WEBHOOK_RESULTS", "DISCORD_WEBHOOK_FREE",
                  "DISCORD_WEBHOOK_OPS"):
@@ -87,6 +93,9 @@ def test_the_probe_never_posts_and_never_returns_the_url(monkeypatch):
     monkeypatch.setattr(config, "DISCORD_WEBHOOKS",
                         {"UFC": "https://discord.com/api/webhooks/2/SECRETTOKEN"},
                         raising=False)
+    # config names the tennis channels by id with no variable set
+    # (config.DEFAULT_DISCORD_CHANNELS), so the channel map is emptied too.
+    monkeypatch.setattr(config, "DISCORD_CHANNELS", {}, raising=False)
     for attr in ("DISCORD_WEBHOOK_DEFAULT", "DISCORD_WEBHOOK_LIVE",
                  "DISCORD_WEBHOOK_RESULTS", "DISCORD_WEBHOOK_FREE",
                  "DISCORD_WEBHOOK_OPS"):
@@ -122,6 +131,9 @@ def test_the_probe_covers_the_per_sport_live_channels(monkeypatch):
                         {"NFL": "https://discord.com/api/webhooks/1/nfl"}, raising=False)
     monkeypatch.setattr(config, "DISCORD_WEBHOOKS_LIVE",
                         {"NFL": "https://discord.com/api/webhooks/2/nfllive"}, raising=False)
+    # config names the tennis channels by id with no variable set
+    # (config.DEFAULT_DISCORD_CHANNELS), so the channel map is emptied too.
+    monkeypatch.setattr(config, "DISCORD_CHANNELS", {}, raising=False)
     for attr in ("DISCORD_WEBHOOK_DEFAULT", "DISCORD_WEBHOOK_LIVE",
                  "DISCORD_WEBHOOK_RESULTS", "DISCORD_WEBHOOK_FREE",
                  "DISCORD_WEBHOOK_OPS"):

@@ -427,6 +427,25 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "euroleague_inplay_quotes",
     "euroleague_odds_unmatched",
     "euroleague_period_fetches",
+    # Tennis (2026-11-13). Created on demand by
+    # data/ingestors/tennis_archive.ensure_tables (the match archive),
+    # data/ingestors/tennis_espn.ensure_tables (ESPN's results) and
+    # data/ingestors/tennis_odds_history.ensure_tables (every paid call, and the
+    # change-only quotes). Model input; never read by the app.
+    "tennis_archive_matches",
+    "tennis_espn_matches",
+    "tennis_odds_fetches",
+    "tennis_odds_quotes",
+    # data/ingestors/tennis_pinnacle.ensure_tables: Pinnacle's own tennis
+    # prices at every level, from its public guest API.
+    "tennis_pinnacle_matchups",
+    "tennis_pinnacle_prices",
+    # data/ingestors/tennis_explorer.ensure_tables: every level's results and
+    # one price pair a match, from TennisExplorer's daily pages.
+    "tennis_te_matches",
+    # scripts/tennis_dk_probe.ensure_tables: DraftKings' own tennis board,
+    # every level and market, change-only. Run from mike's terminal.
+    "tennis_dk_selections",
     # UFC price history from two free public archives (2026-11-13), created
     # on demand by data/ingestors/ufc_price_archive.ensure_tables. Research
     # input, never read by the app.
@@ -435,6 +454,13 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/ufc_odds_history.ensure_tables. Research input.
     "ufc_odds_history",
     "ufc_odds_history_pulls",
+    # UFC prop prices from BestFightOdds' event pages and price histories
+    # (2026-11-13), created on demand by
+    # data/ingestors/ufc_prop_history.ensure_tables. Research input.
+    "ufc_prop_history",
+    "ufc_prop_history_fights",
+    "ufc_prop_history_ticks",
+    "ufc_prop_history_pulls",
     # EuroLeague shot charts with wall-clock times (2026-11-13,
     # data/ingestors/euroleague_shots.py); model input, never read by the app.
     "euroleague_shots",
