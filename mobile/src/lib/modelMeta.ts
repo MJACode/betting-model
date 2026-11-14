@@ -792,13 +792,13 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // ── EUROLEAGUE ────────────────────────────────────────────────────────────
   // EuroLeague in play (models/euroleague_live_ht.py, 2026-11-13): the
   // full-game spread, bet once a game during the halftime break. It SETTLES ON
-  // THE FULL GAME, overtime included. The name is mike's ("EuroLeague Halftime
-  // Spread"); the model's page and the pick's timing line say the bet is on
-  // the full game, not the second half. Its picks appear on the Live segment
+  // THE FULL GAME, overtime included. Named like the women's halftime model
+  // ("NCAABW Live Totals"), so it does not read as a second-half bet; the
+  // model's page and the pick's timing line say the bet is on the full game. Its picks appear on the Live segment
   // only. The id starts with 'euroleague', a prefix no other sport's ids share.
   euroleague_live_spread_ht: {
     shortLabel: 'LIVE Spread',
-    longLabel: 'EuroLeague Halftime Spread',
+    longLabel: 'EuroLeague Live Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',

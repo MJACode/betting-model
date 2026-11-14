@@ -47,8 +47,8 @@ check('a sentence says EuroLeague; every other code is its own name',
 
 // ── The model ────────────────────────────────────────────────────────────────
 check('the model belongs to EUROLEAGUE, not the MLB default', sportOfModel(MODEL) === EL);
-check('the model is named as mike named it', modelLong(MODEL) === 'EuroLeague Halftime Spread'
-  && MODEL_META[MODEL]?.longLabel === 'EuroLeague Halftime Spread', modelLong(MODEL));
+check('the model is named as mike named it', modelLong(MODEL) === 'EuroLeague Live Spreads'
+  && MODEL_META[MODEL]?.longLabel === 'EuroLeague Live Spreads', modelLong(MODEL));
 check('its badge is a live spread, cased like the other live badges', modelShort(MODEL) === 'LIVE Spread',
   modelShort(MODEL));
 check('its price is looked up in the spreads rows', gameMarketForModel(MODEL) === 'spreads');

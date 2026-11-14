@@ -55,7 +55,7 @@ def test_the_in_play_sports_name_euroleague_and_its_empty_board_says_when_it_bet
 def test_the_model_has_its_name_and_its_sport():
     meta = _read("lib/modelMeta.ts")
     entry = re.search(r"^  " + MODEL + r": \{\n(.*?)^  \},", meta, re.M | re.S).group(1)
-    assert "longLabel: 'EuroLeague Halftime Spread'" in entry and "type: 'game'" in entry
+    assert "longLabel: 'EuroLeague Live Spreads'" in entry and "type: 'game'" in entry
     assert "shortLabel: 'LIVE Spread'" in entry
     body = _fn(meta, "sportOfModel")
     assert "if (modelId.startsWith('euroleague')) return 'EUROLEAGUE';" in body
