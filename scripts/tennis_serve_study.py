@@ -1036,9 +1036,11 @@ def main(argv=None) -> int:
             print(f"\n  {market} {dec} EV>={cut:.2f}: real {t['units']:+.2f}u on {t['bets']} bets")
             placebo(dq, ev, market, cut, t["units"], rng)
     if a.save and saved:
-        x = pd.concat(saved, ignore_index=True).merge(ev[["event_id", "bo"]].rename(columns={"bo": "best_of_model"}), on="event_id")
+        # best_of is the format the model used (ESPN's, corrected at men's Slam qualifying); best_of_espn is ESPN's own
+        x = pd.concat(saved, ignore_index=True).rename(columns={"best_of": "best_of_espn"})
+        x["best_of"] = x.bo.astype(int)
         keep = ["decision", "market", "event_id", "sport_key", "bookmaker", "side", "price", "point", "p_model",
-                "p_book_novig", "ev", "grade", "units", "risk", "start", "season", "best_of", "best_of_model", "p_push",
+                "p_book_novig", "ev", "grade", "units", "risk", "start", "season", "best_of", "best_of_espn", "p_push",
                 "p_pin_novig", "target", "pa", "pb", "delta", "snapshot_ts", "a_ts", "anchor_age_min"]
         x[keep].to_parquet(a.save, index=False)
         print(f"\nsaved {len(x):,} scored quotes to {a.save}")
