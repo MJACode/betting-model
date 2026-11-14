@@ -70,6 +70,7 @@ import {
   showLivePricesBanner,
   sportChipsAvailable,
   todayHeaderCounts,
+  sportDisplayName,
   sportSpokenName,
 } from '@/lib/loadState';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
@@ -1147,7 +1148,11 @@ function EmptyForView({
   if (view === 'today') {
     return (
       <EmptyState
-        title={`No ${sport} picks today`}
+        title={
+          // EuroLeague has no pre-game model: "today" would read as a board a
+          // later refresh fills (UX review, 2026-11-13).
+          sport === 'EUROLEAGUE' ? 'No pre-game EuroLeague picks' : `No ${sport} picks today`
+        }
         subtitle={
           // The women's totals model posts when DraftKings opens a game's
           // total, not on the refresh cadence, so the refresh times would
@@ -1167,7 +1172,7 @@ function EmptyForView({
   if (view === 'signals') {
     return (
       <EmptyState
-        title="No signal bets right now"
+        title={sport === 'EUROLEAGUE' ? 'No pre-game EuroLeague signals' : 'No signal bets right now'}
         subtitle={
           sport === 'EUROLEAGUE'
             ? 'EuroLeague has no pre-game model. Its one model bets during the halftime break, and those bets post on Live Signals.'
@@ -1187,15 +1192,15 @@ function EmptyForView({
     if (!hasLiveModel(sport)) {
       return (
         <EmptyState
-          title={`No live model for ${sport} yet`}
-          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
+          title={`No live model for ${sportDisplayName(sport)} yet`}
+          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sportDisplayName(sport)}. The All and Signals boards carry ${sportDisplayName(sport)}’s pre-game picks.`}
           subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSentence(sportSpokenName)}, so this board stays empty for ${sportSpokenName(sport)}. The All and Signals boards carry its pre-game picks.`}
         />
       );
     }
     return (
       <EmptyState
-        title={`No ${sport} live signals right now`}
+        title={`No ${sportDisplayName(sport)} live signals right now`}
         subtitle={liveEmptySubtitle(sport)}
       />
     );

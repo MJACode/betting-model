@@ -381,7 +381,9 @@ def test_the_ledger_migration_is_registered_and_locked_down():
     assert "REVOKE ALL ON public.euroleague_live_decisions FROM anon" in sql
     assert "REVOKE ALL ON public.euroleague_live_decisions FROM authenticated" in sql
     assert "WHERE outcome IN ('bet', 'no_bet', 'declined', 'missed')" in sql
-    assert "euroleague_live_decisions" in WORKER_ONLY_TABLES
+    # locked down by the migration itself; like the other in-play ledgers it has no
+    # Python create site, so it is not in WORKER_ONLY_TABLES (tests/test_anon_readable.py)
+    assert "euroleague_live_decisions" not in WORKER_ONLY_TABLES
     from models.euroleague_live_loop import LEDGER_COLS
     for c in LEDGER_COLS:
         assert f"    {c} " in sql, c

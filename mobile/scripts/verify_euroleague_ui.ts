@@ -21,7 +21,7 @@ import { supportsTeamBoard } from '../src/lib/teamStatCatalog';
 import { boardSegmentsFor, segmentsForSport } from '../src/lib/statSegments';
 import { ALL_SPORTS } from '../src/lib/dailyResults';
 import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence } from '../src/lib/liveSports';
-import { sportSpokenName } from '../src/lib/loadState';
+import { sportDisplayName, sportSpokenName } from '../src/lib/loadState';
 import { isGameOver } from '../src/lib/format';
 import { ACTION_THRESHOLDS } from '../src/lib/thresholds.generated';
 
@@ -36,16 +36,21 @@ const MODEL = 'euroleague_live_spread_ht';
 
 // ── The chip and the push ────────────────────────────────────────────────────
 check('EUROLEAGUE is a sport chip, after every other sport', SPORTS[SPORTS.length - 1] === EL, SPORTS.join(','));
-const route = routeForPush({ v: PUSH_ROUTE_VERSION, type: 'new_bets', sport: EL });
-check('a EuroLeague push lands on the EuroLeague board, not dropped', JSON.stringify(route).includes(EL),
-  JSON.stringify(route));
+// Its bets are in-play, so the push it sends is live_signals (tracking/push_notifier
+// leaves in-play picks out of new_bets): that push opens the EuroLeague Live board.
+const route = routeForPush({ v: PUSH_ROUTE_VERSION, type: 'live_signals', sport: EL });
+check('a EuroLeague live push opens the EuroLeague Live board, not dropped',
+  JSON.stringify(route) === JSON.stringify({ kind: 'board', view: 'live', sport: EL }), JSON.stringify(route));
 check('VoiceOver says EuroLeague, not ten capitals', sportSpokenName(EL) === 'EuroLeague');
+check('a sentence says EuroLeague; every other code is its own name',
+  sportDisplayName(EL) === 'EuroLeague' && sportDisplayName('NCAABW') === 'NCAABW');
 
 // ── The model ────────────────────────────────────────────────────────────────
 check('the model belongs to EUROLEAGUE, not the MLB default', sportOfModel(MODEL) === EL);
 check('the model is named as mike named it', modelLong(MODEL) === 'EuroLeague Halftime Spread'
   && MODEL_META[MODEL]?.longLabel === 'EuroLeague Halftime Spread', modelLong(MODEL));
-check('its badge is a live spread', modelShort(MODEL) === 'Live Spread', modelShort(MODEL));
+check('its badge is a live spread, cased like the other live badges', modelShort(MODEL) === 'LIVE Spread',
+  modelShort(MODEL));
 check('its price is looked up in the spreads rows', gameMarketForModel(MODEL) === 'spreads');
 check('it is a game spread for the slip', marketClassForModel(MODEL) === 'game_spread');
 check('its live price is the slot read only', LIVE_PRICE_SLOT_ONLY.has(MODEL));
@@ -63,8 +68,8 @@ check('the empty Live board says when it bets',
   liveEmptySubtitle(EL).includes('during its halftime break') && liveEmptySubtitle(EL).includes('full-game spread'),
   liveEmptySubtitle(EL));
 const sentence = liveModelSportsSentence();
-check('the in-play sentence still ends on the two college basketball codes',
-  sentence.endsWith('NCAAB and NCAABW') && sentence.includes('EUROLEAGUE'), sentence);
+check('the in-play sentence names EuroLeague and still ends on the two college basketball codes',
+  sentence === 'MLB, NBA, NFL, NCAAF, EuroLeague, NCAAB and NCAABW', sentence);
 
 const mkPick = (over: Partial<Pick>): Pick => ({
   pick_id: 1, game_id: 'EUROLEAGUE_E2026_110', game_date: '2026-11-13', sport: EL, model_id: MODEL,

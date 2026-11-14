@@ -6,7 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
 import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
-import { errorSurface, loadPresentation } from '@/lib/loadState';
+import { errorSurface, loadPresentation, sportDisplayName } from '@/lib/loadState';
 import { Skeleton, SkeletonRow } from '@/components/Skeleton';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
@@ -159,8 +159,8 @@ export function ModelsScreen() {
               builtInWithStats.every((m) => m.stats.picks === 0)
             ) ? (
               <EmptyState
-                title={`No settled bets yet for ${sport}`}
-                subtitle={`These models are live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
+                title={`No settled bets yet for ${sportDisplayName(sport)}`}
+                subtitle={`${builtInWithStats.length === 1 ? 'This model is' : 'These models are'} live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
               />
             ) : null
           }
@@ -197,7 +197,7 @@ export function ModelsScreen() {
               <ActivityIndicator style={styles.loading} />
             ) : (
               <EmptyState
-                title={`No models listed for ${sport}`}
+                title={`No models listed for ${sportDisplayName(sport)}`}
                 subtitle={
                   BUILTIN_MODEL_IDS.some(
                     (id) => sportOf(id) === sport && !isModelRetired(id),

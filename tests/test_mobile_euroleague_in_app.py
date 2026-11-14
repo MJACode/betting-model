@@ -44,13 +44,17 @@ def test_the_in_play_sports_name_euroleague_and_its_empty_board_says_when_it_bet
     assert "'EUROLEAGUE'" in live and live.endswith("'NCAAB', 'NCAABW'")
     assert ("'The EuroLeague in-play model checks each game during its halftime break and bets it at most once, ' +"
             in src)
-    assert "EUROLEAGUE: 'EuroLeague'," in _read("lib/loadState.ts")
+    load = _read("lib/loadState.ts")
+    assert load.count("EUROLEAGUE: 'EuroLeague',") == 2           # spoken, and in a sentence
+    assert "export function sportDisplayName(sport: string): string {" in load
+    assert "name: (sport: string) => string = sportDisplayName" in src
 
 
 def test_the_model_has_its_name_and_its_sport():
     meta = _read("lib/modelMeta.ts")
     entry = re.search(r"^  " + MODEL + r": \{\n(.*?)^  \},", meta, re.M | re.S).group(1)
     assert "longLabel: 'EuroLeague Halftime Spread'" in entry and "type: 'game'" in entry
+    assert "shortLabel: 'LIVE Spread'" in entry
     body = _fn(meta, "sportOfModel")
     assert "if (modelId.startsWith('euroleague')) return 'EUROLEAGUE';" in body
     assert "| 'EUROLEAGUE'" in re.search(r"export type BetTypeSport =(.*?);", meta, re.S).group(1)
@@ -84,6 +88,12 @@ def test_the_pre_game_boards_say_there_is_no_pre_game_model():
     copy = ("'EuroLeague has no pre-game model. Its one model bets during the halftime break, and those bets "
             "post on Live Signals.'")
     assert src.count(copy) == 2                      # the All board and the Signals board
+    assert "sport === 'EUROLEAGUE' ? 'No pre-game EuroLeague picks' : `No ${sport} picks today`" in src
+    assert "title={sport === 'EUROLEAGUE' ? 'No pre-game EuroLeague signals' : 'No signal bets right now'}" in src
+    assert "title={`No ${sportDisplayName(sport)} live signals right now`}" in src
+    stats = (SRC / "screens" / "StatsScreen.tsx").read_text(encoding="utf-8")
+    assert 'title="No EuroLeague stats"' in stats
+    assert "The app has no EuroLeague player or team stats." in stats
 
 
 def test_the_recap_and_the_board_clock_know_the_sport():

@@ -431,10 +431,6 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/euroleague_shots.py); model input, never read by the app.
     "euroleague_shots",
     "euroleague_shot_fetches",
-    # The EuroLeague halftime loop's decision ledger (2026-11-13,
-    # data/migrations/euroleague_live_decisions_2026_11_13.sql, written by
-    # models/euroleague_live_loop.py); never read by the app.
-    "euroleague_live_decisions",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and

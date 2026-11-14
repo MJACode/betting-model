@@ -797,7 +797,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // the full game, not the second half. Its picks appear on the Live segment
   // only. The id starts with 'euroleague', a prefix no other sport's ids share.
   euroleague_live_spread_ht: {
-    shortLabel: 'Live Spread',
+    shortLabel: 'LIVE Spread',
     longLabel: 'EuroLeague Halftime Spread',
     type: 'game',
     statKey: null,

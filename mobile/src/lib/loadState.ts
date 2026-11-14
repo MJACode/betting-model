@@ -117,6 +117,21 @@ export function sportSpokenName(sport: string): string {
   return SPOKEN_SPORT[sport] ?? sport;
 }
 
+/**
+ * The sport's name inside a SENTENCE on screen. The chip and the Stats title
+ * button keep the code (every chip is a code, and it is the Discord channel's
+ * name); a title or a line of copy says "EuroLeague", the league's own
+ * spelling, so a title in capitals does not sit over a subtitle in mixed case
+ * (UX review, 2026-11-13). Every other code is its own name.
+ */
+const DISPLAY_SPORT: Record<string, string> = {
+  EUROLEAGUE: 'EuroLeague',
+};
+
+export function sportDisplayName(sport: string): string {
+  return DISPLAY_SPORT[sport] ?? sport;
+}
+
 /** One sport chip's muted state and VoiceOver label (SportToggle). */
 export function sportChipState(o: {
   sport: string;

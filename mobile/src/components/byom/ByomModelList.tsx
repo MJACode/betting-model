@@ -14,6 +14,7 @@ import { useByomLeaderboard } from '@/hooks/useByomLeaderboard';
 import { useByomSeason } from '@/hooks/useByomSeason';
 import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
+import { sportDisplayName } from '@/lib/loadState';
 import { asByomSport, byomEmptyLabel } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Sport } from '@/hooks/useSportFilter';
@@ -114,12 +115,12 @@ export function ByomModelList({ sport }: { sport: Sport }) {
           />
         ) : built ? (
           <EmptyState
-            title={`No ${sport} models yet`}
+            title={`No ${sportDisplayName(sport)} models yet`}
             subtitle="Pick a bet type and a side, then see how it would have done before you save it."
           />
         ) : (
           <EmptyState
-            title={`No ${sport} models yet`}
+            title={`No ${sportDisplayName(sport)} models yet`}
             subtitle="Switch to NFL, NBA or NHL to build a model."
           />
         )
