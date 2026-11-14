@@ -20,7 +20,7 @@ import {
 import { SegmentTabs } from '@/components/GroupTabs';
 import { bookLabelShort } from '@/lib/markets';
 import { fetchGameLineRows, fetchPropLineRows } from '@/lib/queries';
-import { colors, font, radii, spacing, opacity } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity, sectionHeaderText } from '@/lib/theme';
 import { PrimaryButton } from '@/components/PrimaryButton';
 
 /**
@@ -302,13 +302,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingRight: spacing.md,
   },
-  eyebrow: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
+  eyebrow: { ...sectionHeaderText },
   title: {
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,

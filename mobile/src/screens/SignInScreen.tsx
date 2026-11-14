@@ -254,7 +254,7 @@ export function SignInScreen() {
                         key={provider}
                         buttonType={appleButton.AppleAuthenticationButtonType.CONTINUE}
                         buttonStyle={appleButton.AppleAuthenticationButtonStyle.WHITE}
-                        cornerRadius={radii.md}
+                        cornerRadius={25} // half its 50pt height: a capsule, like the stack under it
                         style={[
                           styles.appleNativeBtn,
                           busy != null && busy !== provider && styles.btnDisabled,
@@ -481,7 +481,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 50,
-    borderRadius: radii.md,
+    borderRadius: radii.pill,
   },
   appleBtn: { backgroundColor: colors.textInverse },
   appleNativeBtn: {
@@ -519,8 +519,8 @@ const styles = StyleSheet.create({
   input: {
     alignSelf: 'stretch',
     backgroundColor: colors.brandNavyRaised,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.lg, // clear of the capsule ends
     minHeight: 50,
     fontFamily: font.family,
     fontSize: font.size.callout,

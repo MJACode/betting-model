@@ -1027,7 +1027,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs,
     backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     marginHorizontal: spacing.md,
@@ -1042,7 +1042,7 @@ const styles = StyleSheet.create({
   },
   linesCard: {
     backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.md,
     marginHorizontal: spacing.md,

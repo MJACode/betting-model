@@ -23,7 +23,8 @@ import { colors, font, opacity, radii, spacing } from '@/lib/theme';
  *  - `brand`     amber fill, ink label — the navy chrome ONLY (paywall,
  *                sign-in, the locked-signal card). Amber on white is 1.9:1
  *                (UX_REVIEW §2), so never use it on a light surface.
- *  - `secondary` grey fill, ink label — the quieter action beside a primary.
+ *  - `secondary` white with a hairline, ink label — the quieter action beside
+ *                a primary; visible on both `bg` and a white sheet.
  *
  * Disabled is always the same fill at `opacity.disabled`, so a disabled
  * button still reads as the button it will become.
@@ -87,7 +88,9 @@ export function PrimaryButton({
       ) : (
         <>
           {icon}
-          <Text style={[styles.label, { color: fg }]} numberOfLines={1}>
+          {/* No line cap: at large Dynamic Type the label wraps and the
+              capsule grows (minHeight, not height) rather than truncating. */}
+          <Text style={[styles.label, { color: fg }]}>
             {label}
           </Text>
         </>
@@ -109,12 +112,20 @@ const styles = StyleSheet.create({
   },
   primary: { backgroundColor: colors.tint },
   brand: { backgroundColor: colors.brand },
-  secondary: { backgroundColor: colors.noneSoft },
+  // White with a hairline, not a grey fill: noneSoft on the sheets' `bg` is
+  // 1.03:1 and the button vanished (UX review, 2026-11-14).
+  secondary: {
+    backgroundColor: colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.separatorOpaque,
+  },
   disabled: { opacity: opacity.disabled },
   pressed: { opacity: opacity.pressed },
   label: {
     fontFamily: font.family,
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
+    textAlign: 'center',
+    flexShrink: 1,
   },
 });

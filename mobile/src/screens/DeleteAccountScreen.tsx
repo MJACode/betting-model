@@ -745,7 +745,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   dangerBtnBusy: {
-    opacity: 0.7,
+    opacity: opacity.disabled,
   },
   spinner: {
     marginRight: spacing.sm,

@@ -175,6 +175,7 @@ export function AddLineSheet({
             label={inSlip ? 'Remove from betslip' : 'Add to betslip'}
             onPress={act}
             variant={inSlip ? 'secondary' : 'primary'}
+            style={styles.cta}
             icon={
               <Ionicons
                 name={inSlip ? 'remove-circle-outline' : 'add-circle-outline'}
@@ -198,6 +199,7 @@ export function AddLineSheet({
 }
 
 const styles = StyleSheet.create({
+  cta: { marginTop: spacing.md },
   backdrop: {
     flex: 1,
     backgroundColor: '#00000066',

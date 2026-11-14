@@ -396,9 +396,10 @@ export function ByomEditScreen() {
         {saveMessage ? <Text style={styles.saveMessage}>{saveMessage}</Text> : null}
         <View style={styles.footer}>
           <PrimaryButton
-            label={saving ? 'Saving…' : 'Save model'}
+            label="Save model"
             onPress={() => void save()}
-            disabled={saveDisabled}
+            loading={saving}
+            disabled={saveDisabled && !saving}
             accessibilityLabel="Save model"
             accessibilityHint={sideReason ?? undefined}
           />
@@ -476,6 +477,6 @@ const styles = StyleSheet.create({
   skel: {
     height: 120,
     backgroundColor: colors.noneSoft,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
   },
 });

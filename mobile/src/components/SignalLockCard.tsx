@@ -60,7 +60,7 @@ const styles = StyleSheet.create({
   wrap: { padding: spacing.lg, gap: spacing.md },
   card: {
     backgroundColor: colors.brandNavy,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
     padding: spacing.xl,
     alignItems: 'center',
     gap: spacing.md,

@@ -20,7 +20,7 @@ import {
   type ByomSeasonRow,
 } from '@/lib/byomRecord';
 import { formatSignedUnits } from '@/lib/format';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, spacing, card } from '@/lib/theme';
 
 export function ByomSeasonBreakdown({
   record,
@@ -88,11 +88,9 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   card: {
-    marginTop: spacing.md,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    paddingHorizontal: spacing.lg,
+    ...card,
     paddingVertical: spacing.sm,
+    marginTop: spacing.md,
   },
   head: {
     flexDirection: 'row',

@@ -416,7 +416,7 @@ const styles = StyleSheet.create({
   },
   swipeContainer: {
     marginBottom: spacing.md,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
   },
   card: {
     ...card,
@@ -430,8 +430,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
     width: 92,
-    borderTopRightRadius: radii.lg,
-    borderBottomRightRadius: radii.lg,
+    borderTopRightRadius: radii.md,
+    borderBottomRightRadius: radii.md,
   },
   swipeDeleteText: {
     color: colors.textInverse,

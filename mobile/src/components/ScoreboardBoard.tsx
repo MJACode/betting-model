@@ -882,7 +882,7 @@ const styles = StyleSheet.create({
   lockCard: {
     margin: spacing.lg,
     backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
     padding: spacing.xl,
     alignItems: 'center',
     gap: spacing.sm,

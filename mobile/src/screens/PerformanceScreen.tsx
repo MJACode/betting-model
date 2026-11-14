@@ -243,7 +243,11 @@ export function PerformanceScreen() {
           </View>
         </View>
 
-        {bets.length === 0 ? (
+        {/* One state at a time: loading, failed (the banner above says so),
+            empty, or the rows — never "No synced bets" under a skeleton. */}
+        {loading && bets.length === 0 ? (
+          <SkeletonList label="your synced bets" style={styles.skeleton} />
+        ) : error && bets.length === 0 ? null : bets.length === 0 ? (
           <Text style={styles.empty}>
             No synced bets yet. Place a bet on a linked book — it’ll appear here after the next
             sync.
@@ -251,8 +255,6 @@ export function PerformanceScreen() {
         ) : (
           bets.slice(0, 100).map((b) => <BetRow key={b.bet_id} bet={b} />)
         )}
-
-        {loading && bets.length === 0 ? <SkeletonList label="your synced bets" style={styles.skeleton} /> : null}
 
         {trackedCard}
         {manualCard}

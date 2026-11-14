@@ -412,9 +412,10 @@ export function ByomBuilderScreen() {
           />
         ) : (
           <PrimaryButton
-            label={saving ? 'Saving…' : signedIn || !AUTH_ENABLED ? 'Save model' : 'Sign in to save'}
+            label={signedIn || !AUTH_ENABLED ? 'Save model' : 'Sign in to save'}
             onPress={() => void save()}
-            disabled={saveDisabled}
+            loading={saving}
+            disabled={saveDisabled && !saving}
             accessibilityLabel={signedIn || !AUTH_ENABLED ? 'Save model' : 'Sign in to save'}
             accessibilityHint={sideReason ?? undefined}
           />
