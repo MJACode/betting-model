@@ -612,7 +612,7 @@ def best_per_event(s: pd.DataFrame, cut: float) -> pd.DataFrame:
 
 def line(t: dict) -> str:
     return (f"bets {t['bets']:5,} won {t['won']:5,} void {t['void']:3}  units {t['units']:+8.2f}  "
-            f"roi {t['roi']:+.4f}  ci90 {t['ci90']}")
+            f"roi {t['roi']:+.4f}  ci90 ({float(t['ci90'][0]):+.4f}, {float(t['ci90'][1]):+.4f})")
 
 
 # ── the information test ─────────────────────────────────────────────────────
@@ -808,6 +808,137 @@ def self_test() -> int:
     return 0 if ok else 1
 
 
+# ── diagnostics, added after the round's results (not part of the fixed design) ──
+
+def _cond(s):
+    return (s.p_model / (1 - s.p_push)).clip(1e-6, 1 - 1e-6)
+
+
+def archive_check(arch: pd.DataFrame, avg: dict) -> None:
+    """The game model on the archive's own 2015-2019 tour-level completed matches:
+    fed each match's REALISED serve shares (outcome-contaminated: a bound on the
+    programme's behaviour, not a validation; the simulation in --self-test is
+    that), and fed two average players (no lopsidedness at all)."""
+    a = arch[arch.main & arch.date.dt.year.between(2015, 2019)]
+    a = a[np.array([lv in TOUR_LEVELS[t] for lv, t in zip(a.tourney_level.astype(str), a.tour)]) & _has_stats(a).values]
+    r = a.score.astype(str).map(tc.from_archive_score)
+    ok = np.array([x is not None and x.status == "complete" and not x.super_tb_last for x in r])
+    a, r = a[ok], [x for x, k in zip(r, ok) if k]
+    a = a.assign(total=[x.total_games for x in r])
+    a = a[a.best_of.isin([3, 5])]
+    pw = ((a.w_1stWon + a.w_2ndWon) / a.w_svpt).clip(GUARD_LO, GUARD_HI).values
+    pl = ((a.l_1stWon + a.l_2ndWon) / a.l_svpt).clip(GUARD_LO, GUARD_HI).values
+    t, _ = distributions(pw, pl, a.best_of.values)
+    base = np.array([avg[(tt, sf if sf in ("Hard", "Clay", "Grass") else "Hard")] for tt, sf in zip(a.tour, a.surface)])
+    t0, _ = distributions(base, base, a.best_of.values)
+    a = a.assign(realised=(t * np.arange(NT)).sum(1), even=(t0 * np.arange(NT)).sum(1))
+    print(a.groupby(["tour", "best_of"]).agg(matches=("total", "size"), actual_total=("total", "mean"),
+                                              model_realised_shares=("realised", "mean"),
+                                              model_two_average_players=("even", "mean")).round(3).to_string())
+
+
+def nested(s0: pd.DataFrame, s1: pd.DataFrame, market: str, base_col: str, label: str) -> None:
+    """y ~ logit(base) + dev_nostats + (dev_stats - dev_nostats): the last
+    coefficient is what the players' statistics add to the stats-free model."""
+    import statsmodels.api as sm
+    first = "over" if market == "totals" else "home"
+    k = ["event_id", "bookmaker", "side"]
+    g = s1[(s1.side == first) & s1.grade.isin([tc.WIN, tc.LOSS])].assign(pm1=_cond).merge(
+        s0[s0.side == first].assign(pm0=_cond)[k + ["pm0"]], on=k).dropna(subset=[base_col])
+    y = (g.grade == tc.WIN).astype(float).values
+    lb = _logit(g[base_col].values)
+    d0, d1 = _logit(g.pm0.values) - lb, _logit(g.pm1.values) - lb
+    grp = {"groups": pd.factorize(g.event_id)[0]}
+    r = sm.Logit(y, sm.add_constant(np.column_stack([lb, d0, d1 - d0]))).fit(disp=0, cov_type="cluster", cov_kwds=grp)
+    r0 = sm.Logit(y, sm.add_constant(np.column_stack([lb, d0]))).fit(disp=0, cov_type="cluster", cov_kwds=grp)
+    print(f"    {label}: n {len(g):,}; stats-free model alone: b_dev0 {r0.params[2]:+.4f} se {r0.bse[2]:.4f} "
+          f"(z {r0.params[2] / r0.bse[2]:+.2f}); nested: b_dev0 {r.params[2]:+.4f} se {r.bse[2]:.4f}, "
+          f"b_stats {r.params[3]:+.4f} se {r.bse[3]:.4f} (z {r.params[3] / r.bse[3]:+.2f})  [clustered by event]")
+
+
+def diagnose(arch, avg, q, ev, pm) -> int:
+    print("\nDIAGNOSE (added after the round's results; not part of the fixed design)")
+    print("\n1. RAW QUOTES BY YEAR OF THE LISTED START (every row in the cache, before any filter), the games markets")
+    r = q[q.market.isin(["totals", "spreads"]) & q.bookmaker.isin(list(GAMES_BOOKS) + ["pinnacle"])]
+    print(r.groupby([r.market, r.bookmaker, r.commence_time.dt.year]).size().unstack(fill_value=0).to_string())
+    print("   feed events by year:", q.drop_duplicates("event_id").commence_time.dt.year.value_counts().sort_index().to_dict())
+    pa_raw = ev.avg + ev.h_spw - ev.a_rpw
+    pb_raw = ev.avg + ev.a_spw - ev.h_rpw
+    print(f"   matchup clip [0.40, 0.90] reached: pA {int(((pa_raw < CLIP_LO) | (pa_raw > CLIP_HI)).sum())}, "
+          f"pB {int(((pb_raw < CLIP_LO) | (pb_raw > CLIP_HI)).sum())} of {len(ev):,} events")
+    print("\n2. THE GAME MODEL ON THE ARCHIVE (2015-2019 tour-level completed matches)")
+    archive_check(arch, avg)
+    zero = ev[["event_id"]].assign(h_spw=0.0, h_rpw=0.0, a_spw=0.0, a_rpw=0.0)
+    for market in ("totals", "spreads"):
+        print(f"\n===================== {market.upper()} =====================")
+        for dec in st.DECISIONS:
+            dq = decidable(pm, ev, market, dec)
+            s1, _ = score(dq, ev, market)
+            s0, _ = score(dq, ev, market, stats=zero)
+            s1 = s1.merge(ev[["event_id", "tour"]], on="event_id")
+            print(f"\n--- {market} {dec}")
+            first = "over" if market == "totals" else "home"
+            g = s1[(s1.side == first) & s1.grade.isin([tc.WIN, tc.LOSS])].copy()
+            g["won"] = (g.grade == tc.WIN).astype(float)
+            g["p_cond"] = _cond(g)
+            u = g.drop_duplicates(["event_id", "target"])
+            t, mg = distributions(u.pa.values, u.pb.values, u.bo.values)
+            u = u.assign(m_tot=(t * np.arange(NT)).sum(1), m_mar=(mg * (np.arange(NM) - MOFF)).sum(1))
+            g = g.merge(u[["event_id", "target", "m_tot", "m_mar"]], on=["event_id", "target"])
+            if market == "totals":
+                print("  a. the model's level against the line, by tour and best of (over side, completed, every decidable quote)")
+                print(g.groupby(["tour", "bo"]).agg(quotes=("won", "size"), line=("point", "mean"), actual=("total", "mean"),
+                                                   model_mean_total=("m_tot", "mean"), p_over_model=("p_cond", "mean"),
+                                                   p_over_book=("p_book_novig", "mean"), over_rate=("won", "mean"))
+                      .round(3).to_string())
+            else:
+                g["fav"] = np.where(g.point < 0, "home favourite", np.where(g.point > 0, "home dog", "level"))
+                print("  a. orientation: the home side's cover chance, by whether home gives games (completed, every decidable quote)")
+                print(g.groupby(["fav", "bo"]).agg(quotes=("won", "size"), home_point=("point", "mean"),
+                                                  actual_margin=("margin", "mean"), model_mean_margin=("m_mar", "mean"),
+                                                  p_cover_model=("p_cond", "mean"), p_cover_book=("p_book_novig", "mean"),
+                                                  cover_rate=("won", "mean")).round(3).to_string())
+            print("  b. the stats-free model (all four statistics 0) against the stats model")
+            nested(s0, s1, market, "p_book_novig", "base = the book's own no-vig")
+            nested(s0, s1, market, "p_pin_novig", "base = Pinnacle's same-line no-vig")
+            print("  c. side composition of the bets, by cut")
+            for cut in CUTS:
+                b = best_per_event(s1, cut)
+                comp = {k: int(v) for k, v in b.side.value_counts().items()}
+                if market == "spreads":
+                    comp.update({"favourite": int((b.point < 0).sum()), "dog": int((b.point > 0).sum())})
+                print(f"    EV>={cut:.2f}  bets {len(b):5,}  {comp}")
+            print("  d. bets above EV 0.08, in coarser bands")
+            b = best_per_event(s1, 0.08)
+            for lo, hi in ((0.08, 0.12), (0.12, 0.16), (0.16, 9.0)):
+                x = b[(b.ev >= lo) & (b.ev < hi)]
+                if len(x):
+                    print(f"    EV [{lo:.2f}, {hi:.2f})  {line(table(x))}")
+            print("  e. best of five (the men's Slam main draws) and best of three, every cut")
+            for cut in CUTS:
+                b = best_per_event(s1, cut)
+                parts = [f"bo{k}: {line(table(x))}" for k, x in b.groupby("bo")]
+                print(f"    EV>={cut:.2f}  " + "  ||  ".join(parts))
+            print("  g. BLIND, no model: every decidable quote on each side, by best of (mechanism 5 for spreads: "
+                  "does the favourite cover more at best of five?)")
+            x = s1.assign(kind=s1.side if market == "totals" else
+                          np.where(s1.point < 0, "favourite", np.where(s1.point > 0, "dog", "level")))
+            for (bo, kind), gx in x.groupby(["bo", "kind"]):
+                print(f"    bo{bo} {kind:9s} every quote: {line(table(gx))}")
+            for (bo, kind), gx in x.groupby(["bo", "kind"]):
+                bp = gx.sort_values(["price", "bookmaker"], ascending=[False, True]).drop_duplicates("event_id")
+                print(f"    bo{bo} {kind:9s} one a match, best price of the three books: {line(table(bp))}")
+            if market == "spreads":
+                bp = x[(x.bo == 5) & (x.kind == "favourite")].sort_values(
+                    ["price", "bookmaker"], ascending=[False, True]).drop_duplicates("event_id")
+                print("  h. the best-of-five favourite, blind, one a match at the best price: the kill-test splits")
+                splits(bp, market)
+            b = best_per_event(s1, 0.0)
+            print("  f. bets at EV>=0.00 by season:", {int(k): int(v) for k, v in b.season.value_counts().sort_index().items()},
+                  "; by book:", {k: int(v) for k, v in b.bookmaker.value_counts().items()})
+    return 0
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main(argv=None) -> int:
@@ -817,6 +948,8 @@ def main(argv=None) -> int:
     ap.add_argument("--save", type=Path)
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--no-placebo", action="store_true")
+    ap.add_argument("--diagnose", action="store_true",
+                    help="after the round: why the grid looks as it does (not part of the fixed design)")
     a = ap.parse_args(argv)
     if a.self_test:
         return self_test()
@@ -844,6 +977,8 @@ def main(argv=None) -> int:
     pin_h2h = set(pm[(pm.market == "h2h") & (pm.bookmaker == "pinnacle")].dropna(subset=["home_price", "away_price"]).event_id)
     print(f"  with a pre-match Pinnacle h2h quote: {int(ev.event_id.isin(pin_h2h).sum()):,} of {len(ev):,}")
     print(f"  [{time.time() - t0:.0f}s]")
+    if a.diagnose:
+        return diagnose(arch, avg, q, ev, pm)
 
     rng = np.random.default_rng(SEED)
     saved, cells = [], {}
