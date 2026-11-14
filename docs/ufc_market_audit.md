@@ -13,8 +13,11 @@ and bet at the best price a pick may name (§3d). On the bought feed history,
 +12.85% [+8.0, +17.5], every year positive, EV against Pinnacle's closing
 price +2.2%, a donor-opinion placebo at -1.9%. The three old models are
 retired. Round totals: nothing clears (§4). Method, distance and round
-markets: blind bets lose, no model fitted yet; DraftKings prices them live
-and BestFightOdds holds per-book history to test one on (§5).
+markets, graded on BestFightOdds' per-book history 2021-2026 (§5f): no cut
+clears. One lead, a market-anchored model on goes the distance, was +10.0%
+on 791 bets at the last recorded price; at the price an hour before the
+fight it is +6.8% [-0.9, +14.4] with 2026 losing, so it goes to the
+frontier.
 
 How it got there: on a free archive the model beat the first posted price
 (§3b), but that price is whichever book posts first; on our own 2026 store
@@ -544,6 +547,265 @@ markets yet.
 3. If a model clears, it bets off DraftKings' prop pages, read on mike's
    PC on the day before each card (5a).
 
+Steps 1 and 2 were run on 2026-11-14: §5f.
+
+### 5f. The crawl and the grade (`data/ingestors/ufc_prop_history.py`; `prop_load.py`, `prop_grade.py`, `prop_leads.py`, `prop_staleness.py`)
+
+**Verdict.** No prop market clears. Every blind bet loses except two near
+break-even (goes the distance yes +0.9%, favourite by decision +2.4%; both
+intervals span zero, both positive in 2 of 6 years). One lead passed the
+kill tests at the last recorded price: the market-anchored model on **goes
+the distance**, +10.0% on 791 bets. **At the price an hour before each
+fight it does not hold**: +6.8% on 745 bets [-0.9, +14.4], 2026 -3.6%,
+and its cut neighbourhood is a hump that fades to nothing by 0.20. It goes to the frontier.
+Decision by fighter, the same event seen per fighter, fails the early/late
+split. Method of victory by KO/TKO or submission, inside the distance,
+round betting, fight ends in round N and round totals: nothing clears.
+
+**What was stored** (2026-11-14, one request per page, 3 s apart). 328 UFC
+event pages (325 with fights), cards 2021-06-05 to 2026-11-07 (the June 2021 cards are the
+first with the US books' columns filled). 563,286 prices in
+`ufc_prop_history`, 3,146 fights in `ufc_prop_history_fights`, 328 pages in
+the ledger `ufc_prop_history_pulls` (a price on two pages for one card is
+stored once); the copy on mike's PC holds the same three counts (`local_mirror.py`, which checks each table against the
+server). The raw pages are a cache in
+`betting_local_copies\ufc_prop_history_2026_11_14`.
+
+| Market | DraftKings | FanDuel | BetMGM | Caesars | BetRivers | BetWay, Unibet, prediction markets | Total |
+|---|---|---|---|---|---|---|---|
+| Fighter wins by method in round N | 0 | 34,825 | 0 | 0 | 29,076 | 26,589 | 90,490 |
+| Fighter wins in round N | 5,424 | 17,418 | 0 | 4,401 | 76 | 31,447 | 58,766 |
+| Round totals | 0 | 5,264 | 0 | 2,146 | 10,630 | 19,962 | 38,002 |
+| Decision by fighter | 3,659 | 5,447 | 4,046 | 0 | 6,624 | 17,220 | 36,996 |
+| Fight winner | 3,880 | 5,748 | 4,582 | 5,674 | 5,684 | 11,320 | 36,888 |
+| Fight ends in round N | 2,585 | 8,599 | 0 | 0 | 7,265 | 13,959 | 32,408 |
+| Submission by fighter | 3,583 | 5,445 | 4,046 | 2 | 5,508 | 9,845 | 28,429 |
+| KO/TKO by fighter | 3,583 | 5,446 | 4,040 | 0 | 5,496 | 9,816 | 28,381 |
+| Goes the distance | 3,441 | 5,343 | 0 | 3,706 | 5,407 | 9,058 | 26,955 |
+| Inside the distance by fighter | 7,147 | 0 | 0 | 0 | 2,222 | 16,090 | 25,459 |
+| Other props (starts round N, draw, minute of finish, strikes, ...) | 23,840 | 46,856 | 1,984 | 687 | 52,129 | 35,016 | 160,512 |
+
+Prop prices (fight winner excluded) by year:
+
+| Year | Card dates | Fights | DraftKings | FanDuel | BetMGM | Caesars | BetRivers | Others |
+|---|---|---|---|---|---|---|---|---|
+| 2021 (from June) | 26 | 335 | 10,040 | 11,927 | 1,915 | 1,364 | 9,135 | 18,708 |
+| 2022 | 46 | 598 | 19,967 | 25,096 | 3,145 | 2,254 | 20,633 | 36,560 |
+| 2023 | 58 | 581 | 7,221 | 25,269 | 3,547 | 1,058 | 24,192 | 39,882 |
+| 2024 | 70 | 566 | 11,046 | 25,398 | 3,553 | 1,008 | 24,475 | 25,123 |
+| 2025 | 72 | 542 | 4,988 | 24,493 | 1,774 | 1,764 | 23,541 | 28,454 |
+| 2026 | 52 | 498 | 0 | 22,460 | 182 | 3,494 | 22,457 | 40,275 |
+
+DraftKings' prop prices thin out from 2023 and are absent in 2026: the site
+stopped carrying DraftKings, not DraftKings its props (§5a prices all four
+markets for the 2026-11-14 card). "Card dates" counts dates: the site
+sometimes keeps two pages for one card.
+
+**Placement.** 2,823 of the 3,146 fights are on our fight ids, 2,788
+distinct: the site splits a fight in two when books spell a fighter
+differently, and both halves are folded into one. Of the 323 unplaced, 198
+have neither fighter on that card in our log and 120 one of them: bouts that
+fell through or were rebooked, most with only the fight winner priced. 3 are
+cards the site dates Dec 31 or Jan 1 as placeholders; 2 are a reshuffled
+card. 20 spellings found on the same card under another name were aliased
+(`BFO_NAME_ALIASES`; the site's "Bobby Green" is ufcstats' "King Green").
+
+**Settlement** (`prop_load.py`). A no contest or an overturned result voids
+every prop. A disqualification or a "could not continue" stoppage (20 fights)
+voids the method and round props, because books split on calling it a TKO;
+graded as a TKO instead, KO/TKO by fighter moves from -15.7% to -15.0%. A
+draw voids the fight winner, wins "goes to decision" and loses every
+fighter-method and round prop. Round totals settle on elapsed time; exactly
+2:30 is a push.
+
+**Blind, every price at the best of the five books a pick may name**
+(`prop_grade.py blind`; 1 unit to win, risk capped at 3):
+
+| Market | Side | Bets | Units | Return | 90% interval | Years positive |
+|---|---|---|---|---|---|---|
+| Goes the distance | yes | 2,712 | +27.7 | +0.9% | [-2.4, +4.1] | 2/6 |
+| Goes the distance | no | 2,710 | -381.3 | -9.2% | [-11.7, -6.6] | 0/6 |
+| Decision by fighter | yes | 5,412 | -42.5 | -2.1% | [-5.6, +1.3] | 2/6 |
+| Decision by fighter, the fight's favourite | yes | 2,702 | +33.8 | +2.4% | [-2.1, +7.1] | 2/6 |
+| Decision by fighter, the underdog | yes | 2,710 | -76.2 | -12.6% | [-19.8, -5.8] | 1/6 |
+| Inside the distance by fighter | no | 3,524 | -200.4 | -2.3% | [-3.5, -1.0] | 1/5 |
+| Inside the distance by fighter | yes | 3,540 | -264.7 | -14.1% | [-17.3, -11.0] | 0/5 |
+| Round totals | over | 5,528 | -234.7 | -2.4% | [-4.8, -0.2] | 2/6 |
+| Round totals | under | 5,528 | -534.4 | -9.5% | [-12.3, -6.5] | 0/6 |
+| KO/TKO by fighter | yes | 5,412 | -262.6 | -15.7% | [-19.3, -11.9] | 0/6 |
+| Submission by fighter | yes | 5,412 | -149.5 | -19.3% | [-24.9, -14.1] | 0/6 |
+| Fight ends in round N | yes | 8,506 | -315.0 | -13.9% | [-16.6, -11.3] | 0/6 |
+| Fighter wins in round N | yes | 17,209 | -427.3 | -19.7% | [-22.1, -17.2] | 0/6 |
+| Fighter wins by method in round N | yes | 34,063 | -459.6 | -22.6% | [-25.1, -20.2] | 0/6 |
+
+Goes the distance (yes) by year: 2021 -9.6%, 2022 -3.4%, 2023 +8.6%, 2024
++12.9%, 2025 -0.6%, 2026 -7.9%. The decisions came in 2023-2024 and the
+market priced them as it had before. At each book alone the same markets
+lose more; every book's row, and every market by year, is in the script's
+output.
+
+**Three mechanisms of our own per market** (`prop_grade.py models`; fitted
+on earlier years only, graded 2022-2026 at the best of five, EV against the
+mechanism's own chance):
+
+1. **Price**: the five books' consensus no-vig chance (power method, over
+   the market's full set of outcomes). A bet is a book that strays from the
+   others.
+2. **Anchored**: that chance as a fixed logit offset, plus a free intercept,
+   a free slope on the market's own logit, one intercept per line or round,
+   and ridge-penalised fighter inputs from `models/ufc_ratings` (finish,
+   decision and knockdown rates, strike and takedown rates, fight length,
+   rating, age, reach). **2r** is the same fit with no fighter inputs: the
+   market recalibrated, the control.
+3. **Coherent**: each fighter's method or round prices rescaled to the
+   fight-winner market's no-vig chance; goes the distance from the rescaled
+   decisions.
+
+At EV >= 0.08 (bets, return, interval, years positive of 5):
+
+| Market | Price | Recalibrated (2r) | Anchored | Coherent |
+|---|---|---|---|---|
+| Goes the distance | 3 bets | 612, +4.9% [-6.5, +16.4] | **791, +10.0% [+2.6, +17.3], 3/5** | 14 bets |
+| Decision by fighter | 10 bets | 174, -17.1% | 1,112, +9.7% [+1.1, +18.5], 3/5 | 15 bets |
+| Submission by fighter | 37 bets | 64, +1.2% | 519, +0.6% [-14.0, +15.6] | 47, +13.8% [-68.9, +126.3] |
+| KO/TKO by fighter | 31 bets | 45, +13.8% [-49.4, +80.7] | 690, -16.8% [-28.1, -5.2] | 37, -23.3% |
+| Inside the distance by fighter | 0 | 1 bet | 528, -2.9% [-11.1, +5.2] | 12 bets |
+| Fighter wins in round N | 20 bets | 142, -51.4% | 1,046, -4.9% [-19.0, +9.7] | 32, +14.6% [-54.4, +87.7] |
+| Fight ends in round N | 38, -29.5% | 277, -35.0% | 498, -15.7% | none |
+| Round totals | 5 bets | 395, +4.6% [-4.7, +14.0] | 1,034, +0.5% [-5.2, +6.3]; 45% of placebos at or above | none |
+| Fighter wins by method in round N | no book prices the full set | | | |
+
+The price mechanism makes almost no bets: the five books rarely stray from
+each other by 8%. The coherent rule's bets are a few dozen longshots; its
+decision version at EV >= 0.02 is 60 bets, +68.7% [+29.3, +106.8], too few
+to call, and re-graded below.
+
+**The lead: goes the distance, anchored**, at the last recorded price
+(`prop_leads.py tables`; the price-timing re-grade below undoes it):
+
+| | Bets | Units | Return | 90% interval |
+|---|---|---|---|---|
+| All, EV >= 0.08 | 791 | +50.3 | +10.0% | [+2.5, +17.8] |
+| 2022 | 241 | -3.8 | -2.1% | [-14.4, +9.9] |
+| 2023 | 116 | +14.7 | +21.1% | [+4.3, +38.8] |
+| 2024 | 116 | +27.5 | +37.3% | [+18.4, +57.2] |
+| 2025 | 152 | +12.8 | +13.4% | [-6.2, +32.3] |
+| 2026 to Nov 7 | 166 | -0.8 | -1.0% | [-19.1, +16.1] |
+| The recalibrated market alone, same cut | 612 | +12.9 | +4.9% | [-7.0, +16.2] |
+| Yes side / no side | 600 / 191 | +39.8 / +10.6 | +11.5% / +6.7% | |
+
+- **Cut neighbourhood**: +5.2% at 0.04, +11.0% at 0.06 (5/5 years), +9.0% at
+  0.10, +6.9% at 0.15, +5.9% at 0.20: a plateau on every fight, but a hump
+  on the fights with a start time (below).
+- **Penalty**: ridge 10 +12.1%, 30 +10.0%, 100 +11.1%, 300 +14.2%.
+- **Early/late**: 2022-23 +4.3%, 2024-26 +15.7%.
+- **Placebo** (fighter inputs shuffled within the training years, 50 runs):
+  median +2.3%, 90th percentile +6.1%, none at or above +10.0%.
+- **By book**, the model's bet wherever that book had a price: FanDuel
+  +9.0% [+0.5, +17.6] on 648, Caesars +8.7% on 346, BetRivers +1.5% on 457,
+  **DraftKings -4.0% [-16.2, +8.7] on 288**.
+- **What it is**: the market priced decisions too low in 2023-2025. The
+  recalibrated market alone catches about half of it and the fighter inputs
+  add the rest; the placebo median (+2.3%) is that recalibration. About 10
+  units a year on about 160 bets at these prices, and about 7 at the price
+  an hour before (below).
+
+**Decision by fighter** is the same event per fighter, and fails: 2022
+-0.2%, 2023 -5.5%, 2024 +35.7%, 2025 +7.6%, 2026 +6.2%; early -2.6%, late
++14.4%. Its return climbs to the edge of the cut grid (+6.4% at 0.06 to
++21.6% at 0.20), a peak and not a plateau; the recalibrated market alone
+loses (-17.1%); 3 of 50 placebos reach it. At DraftKings alone -7.2%.
+
+**Is a last recorded price live?** The page shows each book's last change,
+not the price at any given time. A book that stopped moving shows an old
+price, and against a consensus that moved, an old price looks like value.
+Two measurements, on price histories (`/api/ggd`, stored in
+`ufc_prop_history_ticks`):
+
+- **How old a last recorded price is** (`prop_staleness.py`, a seeded
+  random 600 of the 147,356 priced histories at the five books). Every
+  history's last price equals the page's. Of the 498 fights with a start
+  time, the last change came after the start in 3.4%, in the final hour in
+  12.9%, 1-6 hours before in 16.1%, 6-24 hours in 20.1%, 1-3 days in 31.5%
+  and 3-7 days in 15.9%. Median hours before the start, by book: FanDuel
+  9.3, DraftKings 19.0, BetRivers 22.1, Caesars 49.1, BetMGM 49.6. A price
+  that has not moved is not proof the book still offered it; the history
+  cannot tell the two apart.
+- **The lead re-graded at the price standing before the start**
+  (`prop_leads.py retime`). The start is the odds feed's latest start time
+  for the fight; failing that, the games table's; failing that, the odds
+  feed's start for the same two surnames within a day (the feed spells
+  some fighters differently, "Sergey" Pavlovich). 46 of the 791 bets have
+  no start time on any of the three and are left out:
+
+| Goes the distance, anchored, EV >= 0.08 | Bets | Units | Return | 90% interval | Years positive |
+|---|---|---|---|---|---|
+| Last recorded price (the same 745 bets) | 745 | +39.7 | +8.4% | [+0.6, +15.6] | 3/5 |
+| **Price 1 hour before the start** | 745 | +33.1 | **+6.8%** | **[-0.9, +14.4]** | 3/5 |
+| Price 1 hour before, only bets still at EV >= 0.08 there | 666 | +28.0 | +6.6% | [-1.4, +14.6] | 4/5 |
+| Price 24 hours before the start | 729 | +31.9 | +6.4% | [-0.9, +13.9] | 3/5 |
+| Price 24 hours before, only bets still at EV >= 0.08 there | 571 | +25.2 | +7.1% | [-1.6, +16.5] | 4/5 |
+
+  The last recorded price equals the price an hour before on 70% of the
+  bets (DraftKings 89%, BetRivers 89%, Caesars 68%, FanDuel 62%). Where it
+  differs it is usually longer: the hour-before price was shorter on 25%
+  and longer on 5%, so the page's price flatters the bet.
+
+  At the price an hour before, by year: 2022 -3.2% (229), 2023 +14.4%
+  (113), 2024 +31.7% (114), 2025 +7.7% (140), **2026 -3.6% (149)**. By
+  book: FanDuel +9.7% [-1.4, +21.3] on 415, Caesars +16.7% [+1.2, +30.7]
+  on 142, DraftKings -7.7% on 74, BetRivers -5.5% on 114 (a split, not a
+  rule: choosing Caesars after seeing this is selection). By side: yes
+  +7.3% (565), no +5.6% (180). Prices taken: median +174, shortest -280,
+  longest +1200, none shorter than -300.
+
+  The cut neighbourhood, on the 1,311 of the 1,389 bets down to EV 0.02
+  that have a start time:
+
+| Cut | At the page's price | Decided at the page's price, graded an hour before | Decided and graded an hour before |
+|---|---|---|---|
+| 0.02 | -1.0% (1,311) | -2.2% | -2.4% (1,199) |
+| 0.04 | +4.0% (1,086) | +2.6% | +2.3% (984) |
+| 0.06 | +9.4% (914) | +7.8% | +7.8% [+1.3, +14.8] (830) |
+| 0.08 | +8.4% (745) | +6.8% | +6.0% [-2.0, +14.0] (679) |
+| 0.10 | +7.0% (621) | +5.4% | +4.2% (559) |
+| 0.15 | +3.7% (379) | +1.7% | +1.0% (346) |
+| 0.20 | +0.9% (256) | -1.0% | -1.2% (235) |
+
+  On these bets the neighbourhood is a hump at every price, peaking at
+  0.06 and fading to nothing by 0.20. The plateau on the full set (+6.9% at
+  0.15, +5.9% at 0.20) rested on the fights with no start time.
+
+  The placebo (0 of 50 at or above, above) was run at the last recorded
+  price only: the placebo's bets are other props, and their histories were
+  not fetched.
+
+  **The lead does not hold at the price an hour before the fight**: its
+  interval reaches below zero, 2026 and 2022 lose, and the cut
+  neighbourhood is a hump, not a plateau. It goes to the frontier, not to a
+  model.
+
+  The decision-by-fighter bets' histories were still being fetched when
+  this was written; that lead had already failed.
+
+**Where it could be bet.** DraftKings' own board (§5a) is the only live prop
+price read today, from mike's PC, and at DraftKings alone the lead loses.
+The other route is this site's page for the upcoming card: every book's
+current price, allowed by robots.txt, readable from anywhere. A model naming
+FanDuel or Caesars would read that page on the day of the card.
+
+**What would have to change** for goes the distance to ship: a return
+whose interval clears zero at the price an hour before the fight (it is
+[-0.9, +14.4]); 2026 turning positive on the cards still to come (-3.6% at
+that price so far); a cut neighbourhood that holds at that price; and a
+live read of FanDuel's or Caesars' price at decision time. It goes to the
+frontier (`methods.md`) and is graded forward on each card's page.
+
+**Not run.** The full chart stage (147,356 histories at the five books,
+about five days at 3 s apart): only a 600-history sample and the leads' own
+histories were asked for. Fighter wins by method in round N has no full
+outcome set at any book to de-vig, so only its blind row exists.
+
 ## 6. The purchase (mike, 2026-11-13: "yes")
 
 `data/ingestors/ufc_odds_history.py`: fight winner and round totals from the
@@ -578,6 +840,12 @@ the table.
 - Round totals: walk-forward by year, three nested models, the cut
   neighbourhood, side and line splits, early/late, a donor placebo, best
   card dates removed, the hindsight ceiling, a second decision time: §4.
+- Props: blind by market, side, book, year and favourite/underdog; three
+  mechanisms per market walk-forward by year; the recalibrated market alone
+  as the control; cut and penalty neighbourhoods, early/late, side, price
+  band and book splits, a 50-run placebo; DQ and could-not-continue graded
+  both ways; the last recorded price against the price an hour and a day
+  before the fight: §5f.
 
 ## 8. Leads from outside the repo
 
@@ -588,9 +856,9 @@ Scouted 2026-11-13 (web, GitHub, papers; no paid calls).
 | The closing moneyline is efficient | Miller & Nichols, J. Econ. Finance 2026 (doi:10.1007/s12197-026-09757-x); Lam 2025 HEC thesis; Robbins 2023 | No broad bias at the close; calibration error 0.015 | **Agrees** with §3a and §3b at the close |
 | The opening line is soft | github.com/SolvAI/ufcash (self-reported, 226 held-out bets +24.1%) | A stats model beats the BestFightOdds open | **Reproduced** on our data (§3b); **fails** at DraftKings' opener on 2026 (§3c) |
 | Big line moves are under-reacted to, even at the close | ufcalendar.com 14-year study (a vendor; win rates, no prices) | Steamed side wins more than its close implies | **Dead** at the worst closing price (`ml_steam.py`): the side the line moved toward loses in every band of move size, -0.32% (590 bets, 10-15 points) to -8.91% (314, 15+ points) |
-| Favourite by decision is under-priced | Stanhope 2021 (UCSAS poster, SSRN 3906072) | Miscalibrated, p = 0.0028 | **Tested** (§5d): least over-priced, not profitable; DraftKings prices it live (§5a) |
+| Favourite by decision is under-priced | Stanhope 2021 (UCSAS poster, SSRN 3906072) | Miscalibrated, p = 0.0028 | **Tested** (§5d, §5f): least over-priced, not profitable; at the five US books 2021-2026, +2.4% [-2.1, +7.1] blind, 2 of 6 years |
 | Short-notice replacements, missed weight | agentmma, Fightful (win rates only) | Replacements win 37-42% | **Totals: dead** (§4e, M4: fights first listed under 7 days out); fight winner still queued |
-| Totals, goes the distance, round betting | nothing found (searched again 2026-11-13) | No public test | Totals: §4 is the first test, nothing clears. Goes the distance and round betting: priced (§5a, §5b), to grade |
+| Totals, goes the distance, round betting | nothing found (searched again 2026-11-13) | No public test | Totals: §4 is the first test, nothing clears. Goes the distance and round betting: graded (§5f); round betting nothing, goes the distance one lead to the frontier |
 
 Data sources found: fight-canon-db and the Ultimate UFC Dataset (stored);
 nlbair/ufc-data (CC BY 4.0, BestFightOdds open and close range plus judges'
@@ -626,5 +894,11 @@ kill it:
    The mechanism worth keeping (public money on the main event's star
    favourite) goes to the frontier with the per-book prices the purchase
    brings.
+
+4. **Props, three per market** (§5f): a book straying from the other four;
+   the market recalibrated, then moved by fighter inputs; the method and
+   round prices made coherent with the fight winner. The first barely bets
+   (the five books agree within 8%); the third bets a few dozen longshots;
+   the second leaves one lead, goes the distance.
 
 Frontier, written into `.claude/skills/league-models/references/methods.md`.
