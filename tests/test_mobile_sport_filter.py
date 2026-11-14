@@ -59,7 +59,7 @@ def test_sports_holds_the_eleven_live_sports():
 
     NCAAB joined 2026-10-30 for its totals model (tests/test_mobile_ncaab_in_app.py).
     NCAABW joined 2026-11-10 for its own (tests/test_mobile_ncaabw_in_app.py).
-    ATP and WTA (men's and women's tennis) joined 2026-11-14 right after UFC
+    ATP and WTA (men's and women's tennis) joined 2026-11-14, last (after NHL)
     (tests/test_mobile_tennis_in_app.py).
     """
     assert _sports() == [
@@ -71,9 +71,9 @@ def test_sports_holds_the_eleven_live_sports():
         "NCAAB",
         "NCAABW",
         "UFC",
+        "NHL",
         "ATP",
         "WTA",
-        "NHL",
     ]
 
 

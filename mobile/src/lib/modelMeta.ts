@@ -1375,8 +1375,9 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
       body:
         'This model decides each match once, about 30 minutes before its listed start. Tennis start ' +
         'times often slip, so the match may begin later than listed. It bets only some matches, each ' +
-        'at the sportsbook with the best price, which may not be DraftKings. It never lays more than ' +
-        '-500. A posted bet is never re-priced: it stays at the price it posted at.',
+        'at the sportsbook where the bet is worth the most once that book’s rule for a player retiring ' +
+        'mid-match is counted, which may not be DraftKings. It never lays more than -500. A posted bet ' +
+        'is never re-priced: it stays at the price it posted at.',
       empty:
         'This model posts about 30 minutes before each match it bets, and bets only some of them. ' +
         'Nothing has posted yet.',
@@ -1582,9 +1583,9 @@ const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
   'NCAAB',
   'NCAABW',
   'UFC',
+  'NHL',
   'ATP',
   'WTA',
-  'NHL',
   'GOLF',
 ];
 

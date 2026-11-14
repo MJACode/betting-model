@@ -654,6 +654,14 @@ function recordLink(pick: Pick, recordBook: string): string | null {
  * the header and the CLV card name the same book. A book the maps do not know
  * is returned as its raw lowercased key ("fanatics"), never guessed at.
  */
+// The only price the app holds for this pick is the deciding book's own: an
+// in-play pick, or a tennis pick (tennis prices live in a table the worker
+// reads, not in the app's odds views). "Not offered at your books" would claim
+// something the app has not checked, so the pick says where it was found.
+export function onlyDecidingQuote(pick: { is_live?: boolean | null; sport?: string | null }): boolean {
+  return pick.is_live === true || pick.sport === 'ATP' || pick.sport === 'WTA';
+}
+
 export function storedQuoteBook(
   pick: { model_id: string; pick_label?: string | null; decision_book?: string | null },
 ): string {

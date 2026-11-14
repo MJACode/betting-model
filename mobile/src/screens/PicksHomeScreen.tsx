@@ -1158,8 +1158,13 @@ function EmptyForView({
           sport === 'NCAABW'
             ? `No NCAABW picks have posted for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
             : sport === 'ATP' || sport === 'WTA'
-              ? `No ${sport} picks have posted for ${date} yet. Picks post about 30 minutes before each match the model bets.`
+              ? `No ${sport} picks have posted for ${date} yet. Each match shows here about 30 minutes before its listed start, once the model has checked it. It bets only a few; the rest show as no bet.`
               : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+        }
+        subtitleAccessibilityLabel={
+          sport === 'ATP' || sport === 'WTA'
+            ? `No ${sportSpokenName(sport)} picks have posted for ${date} yet. Each match shows here about 30 minutes before its listed start, once the model has checked it. It bets only a few; the rest show as no bet.`
+            : undefined
         }
       />
     );

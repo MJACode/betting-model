@@ -22,15 +22,15 @@ import {
 } from '../src/lib/modelMeta';
 import {
   bookLabel, bookLabelShort, bookName, currentLineQuotes, gameMarketForModel, heroAmericanForPick, isBettableBook,
-  marketClassForModel, pickTimingInfo, priceAgeFor, storedQuoteBook,
+  marketClassForModel, onlyDecidingQuote, pickTimingInfo, priceAgeFor, storedQuoteBook,
 } from '../src/lib/markets';
-import { myBooksView } from '../src/lib/myBooks';
+import { liveNotAtMyBooksText, myBooksView } from '../src/lib/myBooks';
 import { passesActionFilter } from '../src/lib/thresholds';
 import { priceCheckForItem } from '../src/lib/pickPriceCheck';
 import { pickCtaFor } from '../src/lib/pickCta';
 import { boardSeasonET, gameStatus, isGameOver, isVersusSport } from '../src/lib/format';
 import { signalsContextLine, signalsTeamsSpeech } from '../src/lib/signalsCard';
-import { matchupForLeg } from '../src/lib/parlay';
+import { legFromPick, matchupForLeg } from '../src/lib/parlay';
 import { ALL_SPORTS, computeDailyResults } from '../src/lib/dailyResults';
 import { selectableGames } from '../src/lib/gameFilter';
 import { slateTeams } from '../src/lib/statsBoard';
@@ -54,11 +54,11 @@ const MODELS: Record<string, string> = { ATP: 'atp_moneyline_shop', WTA: 'wta_mo
 
 // ── The sports ───────────────────────────────────────────────────────────────
 check('ATP and WTA are sport chips', SPORTS.includes(ATP) && SPORTS.includes(WTA), SPORTS.join(','));
-check('ATP sits right after UFC, WTA right after ATP',
-  SPORTS.indexOf(ATP) === SPORTS.indexOf('UFC' as Sport) + 1 && SPORTS.indexOf(WTA) === SPORTS.indexOf(ATP) + 1,
+check('ATP sits right after NHL, WTA right after ATP',
+  SPORTS.indexOf(ATP) === SPORTS.indexOf('NHL' as Sport) + 1 && SPORTS.indexOf(WTA) === SPORTS.indexOf(ATP) + 1,
   SPORTS.join(','));
-check('both are in the daily recap order, after UFC',
-  ALL_SPORTS.indexOf('ATP') === ALL_SPORTS.indexOf('UFC') + 1 && ALL_SPORTS.indexOf('WTA') === ALL_SPORTS.indexOf('ATP') + 1,
+check('both are in the daily recap order, after NHL',
+  ALL_SPORTS.indexOf('ATP') === ALL_SPORTS.indexOf('NHL') + 1 && ALL_SPORTS.indexOf('WTA') === ALL_SPORTS.indexOf('ATP') + 1,
   ALL_SPORTS.join(','));
 
 // ── A push naming a tour opens that tour's board ─────────────────────────────
@@ -87,8 +87,8 @@ for (const [sport, id] of Object.entries(MODELS)) {
   check(`the custom-model catalog has a ${sport} group holding ${id} only`,
     !!g && g.options.length === 1 && g.options[0].id === id, JSON.stringify(g));
 }
-check('the custom-model groups run UFC, ATP, WTA',
-  groups.findIndex((g) => g.sport === 'ATP') === groups.findIndex((g) => g.sport === 'UFC') + 1
+check('the custom-model groups run NHL, ATP, WTA',
+  groups.findIndex((g) => g.sport === 'ATP') === groups.findIndex((g) => g.sport === 'NHL') + 1
     && groups.findIndex((g) => g.sport === 'WTA') === groups.findIndex((g) => g.sport === 'ATP') + 1,
   groups.map((g) => g.sport).join(','));
 check('the MLB group holds no tennis model',
@@ -224,6 +224,21 @@ check('VoiceOver names each tour in words, with the chip\'s code',
   sportSpokenName('ATP') === 'ATP men’s tennis' && sportSpokenName('WTA') === 'WTA women’s tennis');
 const chip = sportChipState({ sport: 'WTA', active: false, available: new Set(['WTA']), count: 2, live: false });
 check('the chip speaks the name and its count', chip.label.startsWith('WTA women’s tennis, 2 signals'), chip.label);
+
+// -- The betslip and "your books" (UX review, 2026-11-14) --
+// The card leaves DraftKings' column empty when DraftKings has no price, so a
+// leg decided at another book is off DraftKings and priced at that book.
+const offDk = legFromPick({ pick: mkPick({ dk_odds: null } as Partial<Pick>), game, bookRows: [] } as any);
+check('a tennis leg DraftKings did not price is not called a DraftKings price',
+  offDk != null && offDk.dkPriced === false && offDk.pricedAt === 'betrivers', JSON.stringify(offDk && { d: offDk.dkPriced, a: offDk.pricedAt }));
+check('the deciding book prices its own tile on the slip',
+  offDk != null && offDk.bookPrices.some((b) => b.bookmaker === 'betrivers' && b.american === -145),
+  JSON.stringify(offDk?.bookPrices));
+check('the only quote the app holds for a tennis pick is the deciding book',
+  onlyDecidingQuote(pick) && !onlyDecidingQuote({ sport: 'NBA', is_live: false }), String(onlyDecidingQuote(pick)));
+check('the not-at-your-books line says where it was found',
+  liveNotAtMyBooksText('BR', '-145').startsWith('Found at') && liveNotAtMyBooksText('BR', '-145').includes('not one of your books'),
+  liveNotAtMyBooksText('BR', '-145'));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
 if (failures > 0) process.exit(1);

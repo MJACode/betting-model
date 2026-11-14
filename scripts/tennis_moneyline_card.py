@@ -316,15 +316,21 @@ def pick_row(d: dict, bankroll: float) -> tuple[dict | None, str | None]:
     imp = tc.implied(price)
     edge = round(d["p_ref"] - imp, 4)
     kelly, rec = quarter_kelly(d["p_ref"], imp, bankroll) if is_bet else (0.0, 0.0)
-    dk = d["dk_price"] if d["dk_price"] is not None else price
+    # DraftKings' column holds DraftKings' own price on the side, or nothing:
+    # a reader that sees a number there calls it DraftKings' (the app's
+    # betslip does). With no DraftKings price the implied chance and edge
+    # are the deciding price's, as on the other game picks DraftKings does
+    # not price.
+    dk = d["dk_price"]
+    ref_price = dk if dk is not None else price
     return {
         "game_id": d["game_id"], "model_id": model_id, "sport": d["tour"],
         "game_date": d["game_date"], "game_time": d["listed_start"],
         "pick_side": side, "pick_label": label,
         # Pinnacle's power-de-vigged chance that the player advances.
         "model_probability": d["p_ref"], "model_probability_cal": d["p_ref"],
-        "dk_odds": dk, "dk_implied_prob": round(tc.implied(dk), 4),
-        "edge": round(d["p_ref"] - tc.implied(dk), 4), "scored_line": None,
+        "dk_odds": dk, "dk_implied_prob": round(tc.implied(ref_price), 4),
+        "edge": round(d["p_ref"] - tc.implied(ref_price), 4), "scored_line": None,
         "kelly_fraction": kelly, "recommended_bet": rec, "bankroll_at_pick": bankroll,
         "signal_type": "BET" if is_bet else "NONE", "confidence_tier": "MED",
         "decision_book": d["book"], "decision_odds": price,

@@ -27,6 +27,7 @@ import {
   propMarketForPick,
   splitPickTitle,
   staleLineMoveFromScoredBook,
+  onlyDecidingQuote,
   storedQuoteBook,
   todayBoardHandoff,
   type BoardHandoff,
@@ -252,7 +253,7 @@ export function PickCard({
           noEdgeAtMine ? ' · No edge at your books' : ` · ${recordNoteShortFor(pick.model_id)}`
         }`
       : notAtMyBooks
-        ? pick.is_live === true && modelPrice != null
+        ? onlyDecidingQuote(pick) && modelPrice != null
           ? liveNotAtMyBooksText(book, formatAmerican(modelPrice))
           : otherLinesControl != null
             ? NOT_AT_MY_BOOKS_AT_THIS_LINE

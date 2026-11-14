@@ -10,7 +10,7 @@ import {
   fetchUpcomingNhlPicks,
   fetchUpcomingTennisPicks,
 } from '@/lib/queries';
-import { addDays, isGameOver, todayET } from '@/lib/format';
+import { addDays, gameStatus, isGameOver, todayET } from '@/lib/format';
 import { attachDiscordPublish, voidHiddenFromBoard } from '@/lib/discordPublish';
 import { isModelRetired, isPausedForDisplay } from '@/lib/thresholds';
 import { errorText, isAbortError } from '@/lib/errors';
@@ -255,6 +255,12 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
       pick: byId.get(d.pick.pick_id) ?? d.pick,
     })).filter(
       (d) => !isGameOver(d.game, d.pick.sport)
+        // A tennis no-bet row never gets a final score (only a settled BET
+        // writes one), so it leaves once its match is past the badge window
+        // instead of lingering, statusless, until midnight. BETs stay until
+        // they settle (UX review, 2026-11-14).
+        && !((d.pick.sport === 'ATP' || d.pick.sport === 'WTA') && d.pick.signal_type !== 'BET'
+             && gameStatus(d.game).kind === 'ended')
         && !isModelRetired(d.pick.model_id)
         && !voidHiddenFromBoard(d.pick),
     );

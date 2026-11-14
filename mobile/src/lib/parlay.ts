@@ -223,6 +223,16 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
       link: linkForSide(row, p.pick_side),
     });
   }
+  // A tennis pick has no book rows in the app (its prices are worker-only),
+  // so the deciding book's own stored quote is the only price for its tile.
+  // DraftKings' column holds DraftKings' price or nothing
+  // (scripts/tennis_moneyline_card.py), so a tennis leg DraftKings did not
+  // price is already off DraftKings above.
+  const decBook = p.decision_book ?? null;
+  if ((p.sport === 'ATP' || p.sport === 'WTA') && decBook != null && decBook !== MODEL_BOOK
+      && isBettableBook(decBook) && !bookPrices.some((b) => b.bookmaker === decBook)) {
+    bookPrices.push({ bookmaker: decBook, american: decided, decimal: americanToDecimal(decided), link: null });
+  }
   return {
     pickId: p.pick_id,
     slipKey: slipKeyForPick(p),

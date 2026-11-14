@@ -103,7 +103,7 @@ def test_atp_and_wta_are_sport_chips_right_after_ufc():
     sports = _sports()
     for s in TENNIS:
         assert s in sports, f"{s} has no sport chip, so no board can show its picks"
-    assert sports.index("ATP") == sports.index("UFC") + 1, sports
+    assert sports.index("ATP") == sports.index("NHL") + 1, sports
     assert sports.index("WTA") == sports.index("ATP") + 1, sports
     union = re.search(r"export type Sport =([^;]*);", _read(SPORT_FILTER))
     assert union and "'ATP'" in union.group(1) and "'WTA'" in union.group(1)
@@ -157,7 +157,7 @@ def test_tennis_is_in_the_custom_model_catalog_order_after_ufc():
     order = re.search(r"const BET_TYPE_SPORT_ORDER: BetTypeSport\[\] = \[(.*?)\];", src, re.S)
     assert order
     names = re.findall(r"'([A-Z]+)'", order.group(1))
-    assert names.index("ATP") == names.index("UFC") + 1, names
+    assert names.index("ATP") == names.index("NHL") + 1, names
     assert names.index("WTA") == names.index("ATP") + 1, names
 
 
@@ -294,11 +294,11 @@ def test_the_tennis_look_ahead_reads_the_two_tours_and_no_odds_view():
 # -- the rest of the app knows the sport ----------------------------------------
 
 
-def test_the_daily_recap_orders_the_tours_after_ufc():
+def test_the_daily_recap_orders_the_tours_after_nhl():
     order = re.search(r"const SPORT_ORDER: Record<string, number> = \{(.*?)\n\};", _read(DAILY), re.S)
     assert order
     rank = {k: int(v) for k, v in re.findall(r"\n  ([A-Z]+): (\d+),", order.group(1))}
-    assert rank.get("ATP") == rank["UFC"] + 1, rank
+    assert rank.get("ATP") == rank["NHL"] + 1, rank
     assert rank.get("WTA") == rank["ATP"] + 1, rank
     assert len(set(rank.values())) == len(rank), f"two sports share a place in the recap order: {rank}"
 
@@ -342,12 +342,13 @@ def test_the_stats_tab_says_there_are_no_tennis_stats():
 
 
 def test_the_empty_today_board_says_when_tennis_posts():
-    """The default copy names the hourly refresh; the card posts each match
-    about 30 minutes before its listed start."""
+    """The default copy names the hourly refresh; the card shows each match it
+    checks about 30 minutes before its listed start, bet or not, and bets only
+    a few (UX review, 2026-11-14)."""
     picks = _read(PICKS_HOME)
-    assert (": sport === 'ATP' || sport === 'WTA'\n"
-            "              ? `No ${sport} picks have posted for ${date} yet. Picks post about 30 minutes "
-            "before each match the model bets.`") in picks
+    assert ("Each match shows here about 30 minutes before its listed start, once the model has "
+            "checked it. It bets only a few; the rest show as no bet.") in picks
+    assert "Picks post about 30 minutes before each match the model bets" not in picks
 
 
 def test_the_pick_screen_says_posted_once_at_the_price_shown():

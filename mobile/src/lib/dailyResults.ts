@@ -126,10 +126,12 @@ const SPORT_ORDER: Record<string, number> = {
   NCAAB: 5,
   NCAABW: 6,
   UFC: 7,
-  // The tennis tours, after UFC as on the sport chips.
-  ATP: 8,
-  WTA: 9,
-  NHL: 10,
+  NHL: 8,
+  // The tennis tours, last, as on the sport chips: about a bet a week
+  // between them, so the busier sports stay nearer the screen (UX review,
+  // 2026-11-14).
+  ATP: 9,
+  WTA: 10,
   // GOLF retired 2026-09-08 (mike) -- omitted so the recap grows no chip that
   // can only ever report zero. DailyResultsModal appends any sport the lib
   // returns that is missing here, so a golf row could still never be dropped.

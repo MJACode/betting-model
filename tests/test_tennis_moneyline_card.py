@@ -213,3 +213,18 @@ def test_publish_writes_the_game_the_decision_and_the_pick_once(monkeypatch):
     picks = [p for k, p in conn.sql if k == "INSERT INTO picks"]
     assert len(picks) == 1 and picks[0]["model_id"] == "atp_moneyline_shop"
     assert picks[0]["signal_type"] == "BET" and picks[0]["sport"] == "ATP"
+
+
+def test_draftkings_column_is_empty_when_draftkings_has_no_price():
+    # The app's betslip reads a number in dk_odds as DraftKings' price (UX
+    # review, 2026-11-14): another book's price must never land there.
+    s = _stand(pd.Timestamp(NOW) + pd.Timedelta(minutes=30),
+               [("pinnacle", -150, 135), ("fanduel", -160, 150)])
+    d = card.decide_event(s, LINK)
+    row, _ = card.pick_row(d, 1000.0)
+    assert row["dk_odds"] is None and row["decision_odds"] == 150
+    assert row["dk_implied_prob"] == pytest.approx(100 / 250, abs=1e-4)
+    with_dk = _stand(pd.Timestamp(NOW) + pd.Timedelta(minutes=30),
+                     [("pinnacle", -150, 135), ("fanduel", -160, 150), ("draftkings", -165, 130)])
+    row, _ = card.pick_row(card.decide_event(with_dk, LINK), 1000.0)
+    assert row["decision_book"] == "fanduel" and row["dk_odds"] == 130

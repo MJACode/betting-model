@@ -60,6 +60,7 @@ import {
   playerNameFromPickLabel,
   priceAgeFor,
   propMarketForPick,
+  onlyDecidingQuote,
   storedQuoteBook,
   MODEL_BOOK,
 } from '@/lib/markets';
@@ -274,14 +275,14 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // Same wording as the card (PickCard): one of their books has this side at
   // another number, and the "Your books" table below lists it.
   const otherLinesBelow =
-    myView?.status === 'none' && pick.is_live !== true && cta.handoff &&
+    myView?.status === 'none' && !onlyDecidingQuote(pick) && cta.handoff &&
     otherLineQuotesForPick(pick, bookRows, myBooks, priceAge).length > 0;
   const myBooksLine =
     myView?.status === 'mine' && myView.best && myView.edge != null && myView.ev != null
       ? `At your books: ${bookName(myView.best.bookmaker)} ${formatAmerican(myView.best.price)} · edge ${formatPctSigned(myView.edge)} · return ${formatPctSigned(myView.ev)}`
       : myView?.status === 'none'
         ? `${
-            pick.is_live === true && decisionOdds(pick) != null
+            onlyDecidingQuote(pick) && decisionOdds(pick) != null
               ? liveNotAtMyBooksText(bookName(storedQuoteBook(pick)), formatAmerican(Number(decisionOdds(pick))))
               : otherLinesBelow
                 ? `${NOT_AT_MY_BOOKS_AT_THIS_LINE}. Their other lines are under Your books`
