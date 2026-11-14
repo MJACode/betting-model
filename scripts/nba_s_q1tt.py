@@ -865,8 +865,9 @@ def emit_all(prep: dict, n_placebo: int = N_PLACEBO, say=None) -> dict:
 
 def synthetic_tt(world: dict, seed: int = 5, graded=GRADED, noise: float = 1.2) -> pd.DataFrame:
     """Made-up period team-total rows in the pull's shape, for the graded seasons
-    of G5.synthetic_world: draftkings and fanduel one line each, hardrockbet a
-    five-rung ladder whose middle rung is even. Lines sit near the team's period
+    of G5.synthetic_world: draftkings and fanduel one line each, betmgm a
+    five-rung ladder whose middle rung is even (hardrockbet until 2026-11-13,
+    when it left the bettable books). Lines sit near the team's period
     points the world's period lines imply, plus noise, so offers cross every cut."""
     rng = np.random.default_rng(seed)
     pe = world["pe"]
@@ -892,7 +893,7 @@ def synthetic_tt(world: dict, seed: int = 5, graded=GRADED, noise: float = 1.2) 
                 main = half(mu + rng.normal(0.0, noise))
                 for k, (po, pu) in zip((-2, -1, 0, 1, 2), ((-190, 150), (-145, 115), (-110, -110), (115, -145),
                                                            (150, -190))):
-                    rows.append({**base, "bookmaker": "hardrockbet", "total_line": main + k,
+                    rows.append({**base, "bookmaker": "betmgm", "total_line": main + k,
                                  "over_price": float(po), "under_price": float(pu)})
     return pd.DataFrame(rows)[TT_COLS]
 

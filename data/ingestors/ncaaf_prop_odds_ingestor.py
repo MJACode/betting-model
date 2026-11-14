@@ -499,7 +499,7 @@ def backfill_ncaaf_prop_odds(dates: list[str], hours_before: int = 24,
     if books is None:
         import models.nfl_prop_market as _mk
         books = ",".join(dict.fromkeys(
-            [*_mk.SHARP_BOOKS, *_mk.SOFT_BOOKS]))
+            [*_mk.SHARP_BOOKS, *_mk.SOFT_BOOKS, *_mk.FETCHED_NOT_BET]))
 
     conn = get_connection()
     total = {"rows": 0, "events": 0, "skipped": 0, "credits": 0, "dates": 0}

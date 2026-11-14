@@ -480,7 +480,7 @@ silently fails to reach production.
   `base_min_*` (`docs/thresholds.md`).
 - **Sportsbooks → `config.py`, env-overridable.** `LINE_SHOP_BOOKMAKERS` is what
   gets fetched; `BEST_LINE_BOOKMAKERS` is the set a pick may be DECIDED at.
-  **betPARX is fetched, and never the book a pick names** (few states; mike 11-06).
+  **betPARX and Hard Rock are fetched, never the book a pick names** (not in MA).
 
 **The invariants that must not be broken are in
 `.claude/rules/config-topology.md`** (loads on `config.py`, the scorers,

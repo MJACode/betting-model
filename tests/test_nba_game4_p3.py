@@ -414,7 +414,7 @@ def _ladder_quotes(tip):
         _rung("betrivers", "team_totals_home", 114.5, 150, -190, tip),
         _rung("pinnacle", "team_totals_home", 111.5, -110, -110, tip),
         _rung("fanduel", "team_totals_home", 111.5, -110, -110, tip),
-        _rung("hardrockbet", "totals_h1", 117.5, 135, -165, tip),
+        _rung("betmgm", "totals_h1", 117.5, 135, -165, tip),
         _rung("fanduel", "totals_h1", 114.5, -110, -110, tip),
         _rung("draftkings", "totals_h1", 114.5, -110, -110, tip),
         _rung("pinnacle", "totals_h1", 114.5, -110, -110, tip)])
@@ -430,7 +430,7 @@ def test_both_families_see_each_books_main_number_only():
     times = pd.DataFrame({"game_id": ["G"], "T": [TIP3 - pd.Timedelta(minutes=60)]})
     got = _offered(H.offers(Q.decision_quotes(_ladder_quotes(TIP3), times)))
     assert got[("team_totals_home", "betrivers")] == [111.5]
-    assert ("totals_h1", "hardrockbet") not in got
+    assert ("totals_h1", "betmgm") not in got
     assert got[("totals_h1", "fanduel")] == [114.5]
 
 

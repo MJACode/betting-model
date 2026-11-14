@@ -4231,7 +4231,20 @@ SHARP_BOOKMAKERS = [
 # BETTABLE_BOOKS and BEST_LINE_BOOKMAKERS drop these books after any override.
 # Adding a book here is the one edit; tests/test_betparx_never_a_pick_book.py
 # pins every copy of the list (the NFL cards' fallback, the app's mirror).
-STATE_LIMITED_BOOKMAKERS = {"betparx"}
+#
+# HARD ROCK JOINED 2026-11-13 (mike: "Hard rock needs to be removed from the
+# basis of picks as the best line. We can't bet this in Massachusetts"). The
+# test is the bettor's state, not a count of states: Hard Rock Bet is live in
+# ten (AZ, CO, FL, IL, IN, MI, NJ, OH, TN, VA), none of them Massachusetts,
+# whose seven licensed apps are DraftKings, FanDuel, BetMGM, Caesars,
+# Fanatics, theScore Bet and Bally Bet. It was the most-used deciding book by
+# then: 154 of the 685 BETs written in the previous 30 days named it (75 of
+# them nhl_prop_shots_on_goal), and 112 BETs in that window were scored on
+# Hard Rock's own line (picks.line_book). Those have no price to move to
+# unless another bettable book hangs the same number.
+# It stays in LINE_SHOP_BOOKMAKERS for the same reason betPARX does: the NCAAB
+# and NCAAF consensus models were fitted with it in the median.
+STATE_LIMITED_BOOKMAKERS = {"betparx", "hardrockbet"}
 NON_BETTABLE_BOOKMAKERS = {"pinnacle", "bovada", *STATE_LIMITED_BOOKMAKERS}
 BETTABLE_BOOKS = [
     b for b in (
@@ -4395,8 +4408,8 @@ SCORE_OFF_ANY_BOOK_LINE: bool = (
 #
 # Override with BEST_LINE_EXCLUDE_BOOKMAKERS (comma-separated) to add or, with
 # an empty value, to shop every book in LINE_SHOP_BOOKMAKERS -- every book
-# except STATE_LIMITED_BOOKMAKERS (betparx, mike 2026-11-06), which no override
-# puts back.
+# except STATE_LIMITED_BOOKMAKERS (betparx, mike 2026-11-06; hardrockbet, mike
+# 2026-11-13), which no override puts back.
 _BEST_LINE_EXCLUDE_DEFAULT = ",".join(
     ["pinnacle", "bovada", "espnbet", *sorted(STATE_LIMITED_BOOKMAKERS)])
 BEST_LINE_EXCLUDE_BOOKMAKERS = list(dict.fromkeys([

@@ -137,13 +137,13 @@ def test_a_derivative_rung_more_than_a_point_off_the_deciding_median_is_a_ladder
     v = _vis([_q(g, "fanduel", "spreads_h1", 60, -2.0, -110, -110),
               _q(g, "draftkings", "spreads_h1", 60, -2.5, -110, -110),
               _q(g, "betmgm", "spreads_h1", 60, -1.0, -110, -110),      # 1.0 off the median: kept
-              _q(g, "hardrockbet", "spreads_h1", 60, 1.5, -165, 130),   # 3.5 off: a ladder rung
+              _q(g, "williamhill_us", "spreads_h1", 60, 1.5, -165, 130),   # 3.5 off: a ladder rung
               _q(g, "pinnacle", "spreads_h1", 60, 2.0, -110, -110),     # Pinnacle is never dropped
               _q(g, "fanduel", "spreads", 60, 9.0, -110, -110),         # the full game has no ladders
               _q(g, "draftkings", "spreads", 60, -3.0, -110, -110),
               _q(g, "betmgm", "spreads", 60, -3.0, -110, -110)])
     drop = P.ladder_mask(v, v)
-    assert v.loc[drop, "book"].tolist() == ["hardrockbet"]
+    assert v.loc[drop, "book"].tolist() == ["williamhill_us"]
 
 
 # ── the rules: pairing in one fetch, at one number ──────────────────────────
@@ -441,7 +441,7 @@ def test_the_shared_main_number_view_keeps_one_number_per_book_and_no_ladder():
     g = _game("G", 0, 110, 100)
     q = pd.DataFrame(list(reversed(_ladder())) + [
         _q(g, "pinnacle", "team_totals_home", 60, 111.5, -110, -110),
-        _q(g, "hardrockbet", "spreads_h1", 60, 1.5, -165, 130),
+        _q(g, "williamhill_us", "spreads_h1", 60, 1.5, -165, 130),
         _q(g, "fanduel", "spreads_h1", 60, -2.0, -110, -110),
         _q(g, "draftkings", "spreads_h1", 60, -2.0, -110, -110)])
     times = pd.DataFrame({"game_id": ["G"], "T": [g["tip"] - pd.Timedelta(minutes=60)]})
@@ -449,7 +449,7 @@ def test_the_shared_main_number_view_keeps_one_number_per_book_and_no_ladder():
     assert not v.duplicated(["game_id", "market", "book"]).any()
     got = v.set_index(["market", "book"])["line"].to_dict()
     assert got[("team_totals_home", "betrivers")] == 111.5
-    assert ("spreads_h1", "hardrockbet") not in got
+    assert ("spreads_h1", "williamhill_us") not in got
 
 
 def test_full_refuses_without_a_bets_folder(monkeypatch, tmp_path):

@@ -39,15 +39,17 @@ BETTABLE_FALLBACK = ("draftkings,fanduel,betmgm,williamhill_us,"
                      # with the fourteen-to-ten cut (config.LINE_SHOP_BOOKMAKERS).
                      # betparx left 2026-11-06 (mike: only a few states can
                      # bet it -- config.STATE_LIMITED_BOOKMAKERS).
+                     # hardrockbet left 2026-11-13 (mike: not bettable in
+                     # Massachusetts -- the same set).
                      # This list is a COPY of config.BETTABLE_BOOKS for the
                      # standalone path, and a copy that drifts is a copy that
                      # lies -- the test pins them equal.
-                     "fanatics,betrivers,hardrockbet")
+                     "fanatics,betrivers")
 
 # A COPY of config.STATE_LIMITED_BOOKMAKERS for the standalone path: fetched,
 # never a placement venue, and no BETTABLE_BOOKS override puts one back.
 # tests/test_betparx_never_a_pick_book.py pins the two equal.
-STATE_LIMITED = frozenset({"betparx"})
+STATE_LIMITED = frozenset({"betparx", "hardrockbet"})
 
 
 def bettable_books() -> set[str]:
