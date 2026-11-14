@@ -102,6 +102,14 @@ error.
   the purchase overturned. At the close it finds nothing. *Failed* in the
   same sport: betting the side the line moved toward, at the worst close,
   lost in every band of move size (`docs/ufc_market_audit.md` §3, §8).
+  *Failed* on UFC round totals: fighter and bout inputs on top of
+  Pinnacle's total made the price worse at 1.5 and 2.5, and their bets
+  matched a donor-input placebo (-5.34% against -5.30%). A per-line
+  intercept alone corrected the price a little and still lost to
+  DraftKings' 6.2% margin as the cut rose (`docs/ufc_market_audit.md` §4d).
+  **Give an anchored model a free intercept per line**: without one it
+  cannot correct a bias in the anchor, and the UFC version bet the side
+  carrying the margin.
 - **A stale opener.** Bet the side the sharp book favours at a soft book's
   stale opening number. *Passed the placebos* (reversed books null, other
   opens null, CLV 0.694, every season positive) and *failed executability*:
@@ -245,13 +253,18 @@ edge is where the rule misses something the state shows.
 Each line is a hypothesis with its doc. Run it, then move it into the
 sections above with its result.
 
-- UFC: a Pinnacle-anchored finish model for round totals on the bought
-  history (every blind total loses; Pinnacle's over is near fair).
-- UFC: notice length from the feed's first listing of a pairing; a
-  DraftKings total left stale when its moneyline moves; the five-round
-  favourite at per-book prices (null at the worst close, fails the late
-  half); BestFightOdds'
-  per-book prop pages as a round-total price route
+- UFC round totals, the card-day over: Pinnacle's no-vig total plus a
+  per-line intercept fitted on earlier years, decided on fight-day pulls,
+  bet at DraftKings when EV >= 0. It fails the bar: 228 bets +6.92%
+  [-2.5, +15.9], 2025 (its biggest year) -2.97%, three best dates removed
+  +3.2% with a late half of -0.5%, and it was the second decision time
+  tried. Even at its full return the interval needs about 400 bets. Nothing
+  records it forward; the experiment is to grade it on fights after
+  2026-06-13 (`docs/ufc_market_audit.md` §4f).
+- UFC: notice length from the feed's first listing of a pairing, for the
+  fight winner (dead on totals); the five-round favourite at per-book
+  prices (null at the worst close, fails the late half); BestFightOdds'
+  per-book prop pages as a price route for method and round props
   (`docs/ufc_market_audit.md` §8, §9).
 - A third live book for live props, turning them into the cross-book
   construction (`docs/nfl_live_prop_assessment.md` §7).
