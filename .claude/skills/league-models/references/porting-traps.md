@@ -48,6 +48,11 @@ down this list.
 
 ## The odds feed
 
+- **A sport the feed sells per tournament** (tennis) has no fixed key: read the
+  key list from the feed, and find each key's windows (`market-grid.md`, the
+  sweep). One key held a stray listing two months after its real event, so a
+  sweep that finds only a year's last window misses the real one.
+
 - **History depth per sport key.** The women's college key starts 2024-11-12:
   two seasons, so "walk-forward" means one season. Ask the feed at several
   early dates before planning.
@@ -71,6 +76,11 @@ down this list.
   fetch-name label can collide so a pull never decides; a purchase can keep
   the last listed pair per book rather than the main number (ladder rungs
   mistaken for main lines).
+- **A listed start that moves, and one that lies** (tennis, 2026-11-13). In a
+  sport scheduled by order of play the feed's start is an estimate: revised on
+  13 of 16 trial matches, up to 29 hours early for an unscheduled next round,
+  once 10 minutes after the real start. Bound on the earlier of an
+  independent start (ESPN's) and the feed's last listed start, with a margin.
 - **"Open" rows written after the start.** 35% of one league's `open` rows and
   23% of one prop market's were received after tip or first pitch. Bound on
   `snapshot_at <= commence_time` and exclude `in_play`.
@@ -104,6 +114,16 @@ down this list.
   300 seconds, men's college).
 
 ## Scores, periods and settlement
+
+- **Settlement differs by book, not only by sport** (tennis, 2026-11-13).
+  DraftKings voids a moneyline bet on a player who retires after the first
+  set; Pinnacle, FanDuel and BetMGM grade it a loss; Caesars voids any
+  retirement. Read each decidable book's own rules page before grading, and
+  grade each book's bets at its own rule (`models/tennis_common.py`).
+- **A source's format field can be wrong.** ESPN's tennis `format` says five
+  sets for best-of-three events (the women's US Open, Shanghai); best-of comes
+  from the tour and the event. ESPN's men's scoreboard also returns the
+  women's matches of a joint event, so key rows on ESPN's match id.
 
 - **Overtime.** The women's game has four quarters and overtime is ESPN's
   period 5 or later; the men's rule (period 3 or later) would have marked every
