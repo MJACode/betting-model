@@ -330,10 +330,13 @@ priced at the three books that post these markets. 9,779 matches before
 Australian Open and French Open, both tours: 3,582 Pinnacle "totals" rows
 with lines of 2.5 to 4.5 (total sets) and the same events' "spreads" are set
 handicaps. A few rows under 12 games exist at BetOnline, LowVig and
-BetAnySports too. Every reader of tennis totals or spreads drops (book,
-tournament, year) with any totals line under 12 games
-(`scripts/tennis_games_round2.sets_market_keys`); the stored rows are kept
-as the feed sent them.
+BetAnySports too, none at the three US books that post these markets.
+Round 2 drops every (book, tournament, year) with a totals line under 12
+games (`scripts/tennis_games_round2.sets_market_keys`). The earlier games
+studies did not; their same-line comparisons never pair a sets line with a
+US book's games line, so only the blind Pinnacle baseline above moved. A
+games-market model must apply the same drop before it ships. The stored
+rows are kept as the feed sent them.
 
 **Round 2, total games and games spreads centred on the line: null.**
 `scripts/tennis_games_round2.py` (design fixed before any result; the
