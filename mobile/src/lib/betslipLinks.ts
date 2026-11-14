@@ -343,3 +343,105 @@ function combineEspnBet(links: string[]): string | null {
     .join('&');
   return `${originPath(links[0]!)}/?${q}`;
 }
+
+/**
+ * Bet all (Matt, 2026-11-14): "They are all singles and should not be
+ * considered for a parlay." One URL that puts several picks on a book's slip,
+ * built so it never ASKS the book for a parlay. Null when the book has no
+ * measured multi-selection form, so the caller opens one link per pick.
+ *
+ * Differences from `combineBetslipLinks`, which is the parlay hand-off:
+ *   betmgm   `type=Single`, never `type=combo` (combo is BetMGM's parlay)
+ *   caesars  keeps the stored link's other parameters. Stored Caesars links
+ *            now end `&dl=betslip` (measured 2026-11-14), and the parlay
+ *            combiner drops it. Which form a phone opens is not yet measured.
+ *
+ * DraftKings, FanDuel and ESPN BET links name selections only. Whether the
+ * book's slip then opens on Straight or Parlay is the book's choice, which
+ * no link controls; the Bet all sheet tells the member to pick Straight.
+ * `BET_ALL_ONE_LINK_BOOKS` is the switch for a book a phone test shows opens
+ * a parlay: take it out and that book gets one link per pick.
+ */
+export const BET_ALL_ONE_LINK_BOOKS: readonly BetslipCombineKind[] = [
+  'draftkings',
+  'fanduel',
+  'betmgm',
+  'caesars',
+  'espnbet',
+];
+
+export function combineSinglesLinks(
+  links: readonly (string | null | undefined)[],
+  allowed: readonly BetslipCombineKind[] = BET_ALL_ONE_LINK_BOOKS,
+): string | null {
+  const seen = new Set<string>();
+  const cleaned: string[] = [];
+  for (const raw of links) {
+    const link = raw?.trim();
+    if (!link || seen.has(link)) continue;
+    seen.add(link);
+    cleaned.push(link);
+  }
+  if (cleaned.length === 0) return null;
+  if (cleaned.length === 1) return cleaned[0] ?? null;
+  const kind = betslipCombineKind(cleaned[0] ?? '');
+  if (!kind || !allowed.includes(kind)) return null;
+  if (cleaned.some((l) => betslipCombineKind(l) !== kind)) return null;
+  switch (kind) {
+    case 'betmgm':
+      return joinQueryList(cleaned, 'options', { type: 'Single' });
+    case 'caesars':
+      return joinQueryList(cleaned, 'selectionIds');
+    default:
+      return combineBetslipLinks(cleaned);
+  }
+}
+
+/**
+ * The first link with `key`'s comma list replaced by every link's ids, its
+ * other parameters kept (or overridden by `set`). String-level, because a
+ * `{state}` host does not parse as a URL.
+ */
+function joinQueryList(
+  links: string[],
+  key: string,
+  set: Record<string, string> = {},
+): string | null {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const link of links) {
+    const raw = rawQueryValue(link, key);
+    if (!raw) return null;
+    for (const id of raw.split(',')) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  if (ids.length === 0) return null;
+  const first = links[0]!;
+  const q = first.indexOf('?');
+  const hashAt = first.indexOf('#', q);
+  const base = first.slice(0, q);
+  const qs = hashAt >= 0 ? first.slice(q + 1, hashAt) : first.slice(q + 1);
+  const hash = hashAt >= 0 ? first.slice(hashAt) : '';
+  const parts: string[] = [];
+  const done = new Set<string>();
+  for (const part of qs.split('&')) {
+    if (!part) continue;
+    const eq = part.indexOf('=');
+    const k = eq < 0 ? part : part.slice(0, eq);
+    if (k === key) {
+      parts.push(`${key}=${ids.join(',')}`);
+    } else if (k in set) {
+      parts.push(`${k}=${set[k]}`);
+    } else {
+      parts.push(part);
+    }
+    done.add(k);
+  }
+  for (const [k, v] of Object.entries(set)) {
+    if (!done.has(k)) parts.push(`${k}=${v}`);
+  }
+  return `${base}?${parts.join('&')}${hash}`;
+}
