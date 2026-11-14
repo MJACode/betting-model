@@ -42,7 +42,7 @@ BEGIN
 
   IF to_regclass('public.open_picks') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.open_picks'), 'pg_class'), '')
-         = 'open_picks d983eb217d7b'
+         = 'open_picks 9c365b7d0d56'
      AND has_table_privilege('anon', 'public.open_picks', 'SELECT')
      AND has_table_privilege('authenticated', 'public.open_picks', 'SELECT')
   THEN
@@ -176,6 +176,7 @@ BEGIN
              WHEN 'ufc_moneyline' THEN 'UFC Moneyline'
              WHEN 'ufc_total_rounds' THEN 'UFC Totals'
              WHEN 'ufc_method_of_victory' THEN 'UFC Method of Victory'
+             WHEN 'ufc_open_moneyline' THEN 'UFC Moneyline'
              WHEN 'nhl_moneyline' THEN 'NHL Moneyline'
              WHEN 'nhl_moneyline_regulation' THEN 'NHL 3-Way Moneyline'
              WHEN 'nhl_over_under' THEN 'NHL Totals'
@@ -275,7 +276,7 @@ BEGIN
       )
     ORDER BY g.commence_time::timestamptz NULLS LAST, p.created_at, p.pick_id
 $view$;
-  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks d983eb217d7b'$c$;
+  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks 9c365b7d0d56'$c$;
   REVOKE ALL ON public.open_picks FROM anon, authenticated;
   GRANT SELECT ON public.open_picks TO anon, authenticated;
 END $mig$;

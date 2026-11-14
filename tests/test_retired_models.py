@@ -20,6 +20,12 @@ nine generic props -- "build new nba models, remove any previous nba models".
 They never wrote a BET. Their feature engines, their scorer loop and their
 artifacts went with them; the NBA model that replaced them is a rule
 (nba_prop_market) with no feature map and no artifact.
+2026-11-13 (mike): the three UFC models of 2026-06-19 -- moneyline, round
+totals, method of victory -- "Ignore and delete any existing models in the
+repo". They had settled BETs (24 graded, none open), so their picks keep
+settling on their own markets (paper_tracker._RETIRED_MODEL_MARKETS). Their
+feature engine, scorer branches, trainer and backtester branches and artifacts
+went with them; the fighter-name rule they used moved to data/ufc_identity.py.
 """
 
 from __future__ import annotations
@@ -39,9 +45,10 @@ RETIRED_NBA = (
     "nba_prop_player_threes", "nba_prop_player_pra", "nba_prop_player_blocks",
     "nba_prop_player_steals", "nba_prop_player_turnovers", "nba_prop_player_dd",
 )
+RETIRED_UFC = ("ufc_moneyline", "ufc_total_rounds", "ufc_method_of_victory")
 
 
-def test_the_set_holds_exactly_the_twenty_two_retirements():
+def test_the_set_holds_exactly_the_twenty_five_retirements():
     assert set(config.RETIRED_MODELS) == {
         "mlb_live_win_prob", "mlb_live_runline",
         "mlb_prop_batter_hr", "mlb_prop_batter_rbi",
@@ -49,8 +56,9 @@ def test_the_set_holds_exactly_the_twenty_two_retirements():
         "golf_make_cut", "golf_matchup",
         "nfl_live_prop",
         *RETIRED_NBA,
+        *RETIRED_UFC,
     }
-    assert len(config.RETIRED_MODELS) == 22
+    assert len(config.RETIRED_MODELS) == 25
 
 
 @pytest.mark.parametrize("model_id", sorted(config.RETIRED_MODELS))
@@ -116,6 +124,30 @@ def test_the_nba_engines_and_their_scorer_loop_are_gone():
     assert not (set(RETIRED_NBA) & set(FEATURE_MAP))
 
 
+def test_the_ufc_engine_and_its_scorer_branches_are_gone():
+    """The UFC models had their own feature engine and three scorer paths of
+    their own (method of victory, prob-only round totals, the round-line
+    overlay). The FEATURE_MAP sweep above cannot see a module it fails to
+    import, so this names them."""
+    import models.scorer as scorer
+    assert not (ROOT / "features" / "ufc_feature_engine.py").exists()
+    for gone in ("_score_ufc_method", "_score_ufc_totals_prob_only",
+                 "_UFC_METHOD_LABELS"):
+        assert not hasattr(scorer, gone), f"models.scorer.{gone} is back"
+    assert not any(sp == "UFC" for sp, _, _ in config.MODELS.values())
+    assert not (set(RETIRED_UFC) & config.PROB_ONLY_MODELS)
+
+
+def test_retired_ufc_picks_still_settle_on_their_own_market():
+    """24 settled BETs at retirement. A re-settle or a CLV pass over them must
+    read round totals as totals and method as method; without the retired map
+    they would fall to the 'h2h' default."""
+    from tracking.paper_tracker import _market_for_pick
+    assert _market_for_pick("ufc_moneyline") == "h2h"
+    assert _market_for_pick("ufc_total_rounds") == "totals"
+    assert _market_for_pick("ufc_method_of_victory") == "method"
+
+
 def test_a_retired_sport_is_not_still_health_checked():
     """A check for a sport that can no longer produce data can only ever SKIP,
     and a permanently-skipping check is what this whole exercise was about."""
@@ -163,13 +195,13 @@ def test_retired_prop_picks_still_settle_on_their_own_stat():
 
 def test_the_artifacts_are_gone():
     saved = ROOT / "models" / "saved"
-    for m in RETIRED_PROPS + RETIRED_NBA:
+    for m in RETIRED_PROPS + RETIRED_NBA + RETIRED_UFC:
         assert not list(saved.glob(f"{m}_*.pkl")), f"{m} still has an artifact"
     # ...and nothing still asks git to keep one (the .gitignore keep-list and
     # the MANIFEST block, pinned equal by test_model_artifacts_load).
     keep = (ROOT / ".gitignore").read_text(encoding="utf-8")
     manifest = (ROOT / "models" / "saved" / "MANIFEST.md").read_text(encoding="utf-8")
-    for m in RETIRED_NBA:
+    for m in RETIRED_NBA + RETIRED_UFC:
         # "saved/" anchors the id: "wnba_moneyline_" contains "nba_moneyline_".
         assert f"saved/{m}_" not in keep, f"{m} is still on the .gitignore keep-list"
         assert f"saved/{m}_" not in manifest, f"{m} is still in MANIFEST.md"
@@ -275,3 +307,22 @@ def test_paused_nfl_props_still_in_prop_models_and_thresholds():
     for mid in NFL_DISTRIBUTIONAL_PAUSED:
         assert mid in config.PROP_MODELS, mid
         assert mid in config.ACTION_THRESHOLDS, mid
+
+
+def test_the_retired_ufc_models_are_struck_from_the_published_record():
+    """mike, 2026-11-13: "yes" to taking their posted bet off the record.
+    Retiring alone left it in the record views, which exclude only
+    RECORD_EXCLUSIONS, so the three are struck there and in a view patch."""
+    struck = {e["model_id"] for e in config.RECORD_EXCLUSIONS if not e.get("before")}
+    assert set(RETIRED_UFC) <= struck
+    sql = config.record_exclusion_sql("p")
+    for m in RETIRED_UFC:
+        assert f"p.model_id <> '{m}'" in sql
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    mig = "record_strikes_ufc_retired_2026_11_13.sql"
+    assert mig in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index(mig) > ACTIVE_MIGRATIONS.index(
+        "record_strikes_nfl_live_prop_2026_10_04.sql")
+    body = (ROOT / "data" / "migrations" / mig).read_text(encoding="utf-8")
+    for m in RETIRED_UFC:
+        assert f"model_id <> ''{m}''::text" in body

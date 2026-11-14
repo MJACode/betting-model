@@ -396,6 +396,9 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-11-10 (mike): NCAAF moneylines; the margin table's fair chance
          # at the books' consensus spread.
          "ncaaf_moneyline_market",
+         # 2026-11-13 (mike): UFC fight winner; Pinnacle's no-vig chance moved
+         # by the fighter ratings.
+         "ufc_open_moneyline",
          # 2026-11-02 (mike): NCAAB spreads; the margin table's P(win, push left out).
          "ncaab_spread_market",
          # 2026-11-02 (mike): NCAAB moneylines; the margin table's P(side wins).

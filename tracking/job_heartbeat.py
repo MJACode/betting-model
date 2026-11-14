@@ -137,6 +137,9 @@ MAX_SILENCE: dict = {
     # UTC, beating on the idle hours too). It decides only in the 14:00 UTC
     # hour, so a stopped card is also caught by the next run's `missed` failure.
     "ncaaf_moneyline_card": 150,
+    # The UFC opening-price card: hourly at 25 past, 24x7 UTC, beating on the
+    # idle hours too.
+    "ufc_open_moneyline_card": 150,
     # Every minute, 24x7, and it beats on the idle ticks too (one read, then
     # return), so 20 minutes is 20 missed ticks: a stopped job, and every game
     # tipping meanwhile undecided by the NCAAB first-half spread model.

@@ -61,6 +61,14 @@ finding either way.
   (the halftime-total model was checked this way before it shipped).
 - **Grade at the quoted price**, never at -110. Props in particular are
   priced well past -110.
+- **An archive's "opening line" is not a book we can bet.** An archive's
+  open is the first book to post, often offshore and weeks ahead. Grade the
+  same frozen model at each decidable book's own first price, with
+  closing-line value against the sharp close. A UFC moneyline model read
+  +7.8% on 1,531 archive opens and negative closing-line value at
+  DraftKings' first price on 104 bets of our own 2026 store; bought history
+  at the deciding books then read +12.85% on 846 (§3c, §3d). A small forward
+  sample is not the answer either way: buy the history.
 - **Quotes from one moment.** A rule comparing two books needs both quotes
   from the same snapshot. Comparing quotes from different moments manufactured
   edges three times: a best-price-against-the-sharp-book grid, a sharp-against-
@@ -164,6 +172,14 @@ finding either way.
   market (the others were within about 2) was a stat that counted fewer tackles
   than the books grade, and the backtest on it was +22% and fake, because it
   graded against our own undercount.
+- **Check the no-vig split before trusting closing value.** Splitting a
+  two-way margin in proportion assumes the book loads both sides alike. On
+  UFC round totals it loads the under: at the 2.5 line the over won 60.4%
+  against a no-vig 57.9% (1,594 fights), and knowing Pinnacle's close in
+  advance still lost 2.8% at DraftKings. Closing value against that close
+  charges the cheap side about 2.5 points. Compare each side's blind return
+  first; if one is near zero and the other carries the whole margin, say so
+  beside every CLV number (`docs/ufc_market_audit.md` §4b, §4f).
 - **Validate the grading before moving a cut.** Recompute outcomes from raw
   scores and reconcile with stored settlements. A sign error in away-side
   spread grading once turned -20.6% into +15%. `scored_line` is the home

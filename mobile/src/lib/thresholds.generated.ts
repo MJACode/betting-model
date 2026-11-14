@@ -85,9 +85,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nhl_prop_saves: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nhl_prop_shots_on_goal: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nhl_puckline: { min_prob: 0.55, min_edge: 0.05, min_odds: -200 },
-  ufc_method_of_victory: { min_prob: 0.65, min_edge: 0, min_odds: -200 },
-  ufc_moneyline: { min_prob: 0.65, min_edge: 0.08, min_odds: -200 },
-  ufc_total_rounds: { min_prob: 0.62, min_edge: 0.08, min_odds: -200 },
+  ufc_open_moneyline: { min_prob: 0, min_edge: 0, min_odds: -300 },
   wnba_moneyline: { min_prob: 0.5, min_edge: 0.06, min_odds: -200 },
   wnba_over_under: { min_prob: 0.6, min_edge: 0.06, min_odds: -200 },
   wnba_prop_market: { min_prob: 0, min_edge: 0.05, min_odds: -140 },
@@ -100,12 +98,12 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
 };
 
 export const PROB_ONLY_MODELS = new Set<string>([
-  'ufc_method_of_victory',
 ]);
 
 export const RETIRED_PROB_ONLY_MODELS = new Set<string>([
   'mlb_prop_batter_hr',
   'nba_prop_player_dd',
+  'ufc_method_of_victory',
 ]);
 
 export const PAUSED_MODELS = new Set<string>([
@@ -133,7 +131,6 @@ export const PAUSED_MODELS = new Set<string>([
   'nfl_prop_rush_rec_yards',
   'nfl_prop_rush_yards',
   'nfl_prop_sacks',
-  'ufc_total_rounds',
   'wnba_over_under',
   'wnba_prop_player_points',
   'wnba_prop_player_threes',
@@ -163,10 +160,16 @@ export const RETIRED_MODELS = new Set<string>([
   'nba_prop_player_turnovers',
   'nba_spread',
   'nfl_live_prop',
+  'ufc_method_of_victory',
+  'ufc_moneyline',
+  'ufc_total_rounds',
 ]);
 
 export const RECORD_EXCLUDED_MODELS = new Set<string>([
   'nfl_live_prop',
+  'ufc_method_of_victory',
+  'ufc_moneyline',
+  'ufc_total_rounds',
 ]);
 
 export const DUPLICATE_STATUS = 'DUPLICATE';

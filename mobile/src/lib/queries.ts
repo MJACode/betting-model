@@ -1564,9 +1564,10 @@ export async function fetchPicksForDate(
 }
 
 /**
- * Upcoming UFC picks AFTER `afterDate` through `throughDate`. UFC events are
- * weekly and the scorer prices them up to UFC_SCORE_AHEAD_DAYS early, so the
- * UFC tab shows the next card instead of sitting empty until fight day.
+ * Upcoming UFC picks AFTER `afterDate` through `throughDate`. The UFC
+ * opening-price model bets a fight a week or more out, so the window reaches
+ * as far as its card does (useTodayPicks UFC_AHEAD_DAYS) and the UFC tab
+ * shows those bets instead of hiding them until fight week.
  * Same enrichment shape as fetchPicksForDate (UFC has no weather rows).
  */
 export async function fetchUpcomingUfcPicks(
@@ -1588,9 +1589,12 @@ export async function fetchUpcomingUfcPicks(
       .eq('sport', 'UFC')
       .gt('game_date', afterDate)
       .lte('game_date', throughDate),
+    // Scoped by the game_id prefix: the view has no sport column, and a
+    // four-month window spans every other sport's future slate too.
     supabase
       .from('v_latest_dk_odds')
       .select(LATEST_ODDS_COLUMNS)
+      .like('game_id', 'UFC_%')
       .gt('game_date', afterDate)
       .lte('game_date', throughDate),
     // Per-book prices so a non-DraftKings bettor sees their own book's number

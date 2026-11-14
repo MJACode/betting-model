@@ -2,7 +2,7 @@
 
 Measured 2026-09-07 over the 916 distinct fighter names on 2026 UFC cards:
 315 did not match a `fighters` slug exactly, and every one of those costs a
-whole bout — `_resolve_fighter_id` returning None skips the fight, which is a
+whole bout — `resolve_fighter_id` returning None skips the fight, which is a
 third of the reason the UFC board is nearly empty.
 
 Two of those classes are safe to resolve and one is not, which is the whole
@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from features.ufc_feature_engine import resolve_slug, _slug_tokens  # noqa: E402
+from data.ufc_identity import resolve_slug, _slug_tokens  # noqa: E402
 
 KNOWN = [
     "zhang-weili", "xiong-jingnan", "khalil-rountree-jr", "michael-aswell-jr",
@@ -84,8 +84,8 @@ def test_suffixes_and_order_are_dropped_from_the_token_set():
 def test_the_module_ships_no_fuzzy_matcher():
     """A regression guard with teeth: the fix for a missed name is an alias or
     a new safe RULE, never a similarity cutoff."""
-    src = (Path(__file__).parent.parent / "features"
-           / "ufc_feature_engine.py").read_text(encoding="utf-8")
+    src = (Path(__file__).parent.parent / "data"
+           / "ufc_identity.py").read_text(encoding="utf-8")
     for banned in ("get_close_matches", "SequenceMatcher", "levenshtein",
                    "difflib", "rapidfuzz", "fuzzywuzzy"):
         assert banned not in src, f"{banned} would resolve Usman -> Umar"

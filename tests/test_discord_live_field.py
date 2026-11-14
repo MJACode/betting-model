@@ -125,7 +125,8 @@ def test_a_live_price_is_stamped_with_when_it_was_taken():
     does."""
     s = dn._new_live_signals(_FakeConn([_ROW]), "2026-08-29")[0]
     value = dn._signal_field(s)["value"]
-    assert "posted" in value and "12:14:38 PM ET" in value
+    # "signal", and Discord's counting "x seconds ago" beside it (2026-11-13)
+    assert "signal" in value and "12:14:38 PM ET" in value and ":R>)" in value
 
 
 def test_a_pick_with_no_write_time_renders_without_a_stamp():

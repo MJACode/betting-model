@@ -551,6 +551,16 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The live UFC fight-winner model (models/ufc_open_moneyline.py MODEL_ID),
+  // decided a week or more before the fight. It carries the retired
+  // ufc_moneyline's name above; modelLongWithMark marks the retired one.
+  ufc_open_moneyline: {
+    shortLabel: 'ML',
+    longLabel: 'UFC Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   nhl_moneyline: {
     shortLabel: 'ML',
     longLabel: 'NHL Moneyline',
@@ -1074,6 +1084,11 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   ncaaf_moneyline_market:
     'The chance this side wins according to the middle point spread across the sportsbooks we check. ' +
     'Edge is how much higher that is than the chance the moneyline price implies.',
+  // Pinnacle's no-vig chance moved by the fighter ratings
+  // (models/ufc_open_moneyline.py), read a week or more before the fight.
+  ufc_open_moneyline:
+    'The chance this fighter wins, read a week or more before the fight: Pinnacle’s fair price, adjusted ' +
+    'by our fighter ratings. Edge is how much higher that chance is than the one the price we bet implies.',
   // P(cover | no push) at the bet's own number (models/ncaab_first_half_spread.py):
   // on a whole-number first-half line a push is possible and is left out.
   ncaab_first_half_spread:
@@ -1334,6 +1349,24 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         'This model checks each game about an hour before tip-off and bets only some of them. ' +
         'Nothing has posted today so far.',
       note: 'Posted about an hour before tip-off and never re-priced.',
+    };
+  }
+  // The UFC opening-price model (scripts/ufc_open_moneyline_card.py): it
+  // decides on its 12:25 UTC run only (7:25am ET, 8:25am ET in summer time),
+  // for fights a week or more away, at the best price, never shorter than
+  // -300 (UX review, 2026-11-13).
+  if (modelId === 'ufc_open_moneyline') {
+    return {
+      title: 'Decided a week or more out',
+      body:
+        'This model decides each fight once, on its morning run, by 8am ET (9am ET from mid-March to ' +
+        'early November), a week or more before the fight. It bets only some fights, each at the ' +
+        'sportsbook with the best price, which may not be DraftKings. It never lays more than -300. A ' +
+        'posted bet is never re-priced: it stays at the price it posted at.',
+      empty:
+        'This model posts once a day, in the morning, for fights a week or more away, and bets only ' +
+        'some of them. Nothing has posted yet.',
+      note: 'Posted a week or more before the fight and never re-priced.',
     };
   }
   if (HOUR_BEFORE_TIP_MODELS.includes(modelId)) {

@@ -428,15 +428,13 @@ def test_the_best_price_shop_follows_the_same_rule(_clock, monkeypatch):
 
 # ── one fight, one id, in each scoring pass (second review, 2026-10-09) ──────
 #
-# The per-market rule above stops only the ABANDONED copy. An id DraftKings
-# never priced still borrows its twin's price, and for up to 3 hours after a
-# flip both ids hold fresh rows of their own, so both passed the "is this
-# fight real" check and both were decided in one pass. run_scorer now scores
-# a fight present under both ids on ONE of them: the id whose own newest
-# DraftKings row is newer (the first in sort order when neither has one), and
-# a BET on either id locks that model for both. All four tests failed before
-# that, because both ids were scored; the fourth also pins that the chosen id
-# still borrows a market only its twin carries (the 08-29 totals case).
+# The per-market rule above stops only the ABANDONED copy. Until 2026-11-13
+# run_scorer also scored a fight present under both ids on ONE of them (four
+# tests here pinned that). The three UFC game models were retired that day,
+# so run_scorer scores no UFC fight at all and that pass went with them; a UFC
+# model that writes picks de-duplicates the two ids itself. What stays is the
+# read the fallback exists for: an id with no totals row of its own borrows
+# its twin's line (the 2026-08-29 shape).
 
 TWIN_A = "UFC_2099-01-01_aa-fighter_bb-fighter"        # away aa
 TWIN_B = "UFC_2099-01-01_bb-fighter_aa-fighter"        # away bb
@@ -500,8 +498,6 @@ def _score_card(monkeypatch, conn, dry_run=True):
     """run_scorer over `conn`; returns the (game_id, model_id) pairs scored."""
     monkeypatch.setattr(scorer, "get_connection", lambda: conn)
     monkeypatch.setattr(scorer, "_get_postponed_games", lambda _d: set())
-    import features.ufc_feature_engine as ufe
-    monkeypatch.setattr(ufe, "build_ufc_game_features", lambda *a, **k: {"f": 1})
     scored: list[tuple] = []
 
     def _score(conn_, game_id, model_id, *a, **k):
@@ -512,60 +508,28 @@ def _score_card(monkeypatch, conn, dry_run=True):
     return scored
 
 
-def test_a_never_priced_id_is_not_scored_beside_its_priced_twin(_clock, monkeypatch):
-    """TWIN_A has no DraftKings row at all; TWIN_B is current. Before: TWIN_A
-    borrowed TWIN_B's moneyline, passed the real-fight check, and both ids
-    were decided."""
-    conn = _UfcBoardConn(
-        [_ufc_game(TWIN_A), _ufc_game(TWIN_B)],
-        {(TWIN_B, "h2h", "draftkings"): _h2h_row(_ago(10), 125, -150),
-         (TWIN_B, "totals", "draftkings"): _totals_row(_ago(10), line=2.5)})
-    scored = _score_card(monkeypatch, conn)
-    assert {g for g, _ in scored} == {TWIN_B}, scored
-
-
-def test_two_current_ids_of_one_fight_score_only_the_newer(_clock, monkeypatch):
-    """The hours after a flip: both ids hold rows inside the bound."""
+def test_the_game_scorer_scores_no_ufc_fight_once_no_ufc_model_is_registered(
+        _clock, monkeypatch):
+    """Both ids priced and current: before 2026-11-13 one of them was scored
+    for each UFC game model. With none registered, neither is, and nothing is
+    deleted on their behalf."""
     conn = _UfcBoardConn(
         [_ufc_game(TWIN_A), _ufc_game(TWIN_B)],
         {(TWIN_A, "h2h", "draftkings"): _h2h_row(_ago(70), -150, 125),
-         (TWIN_A, "totals", "draftkings"): _totals_row(_ago(70), line=2.5),
-         (TWIN_B, "h2h", "draftkings"): _h2h_row(_ago(5), 125, -150)})
-    scored = _score_card(monkeypatch, conn)
-    assert {g for g, _ in scored} == {TWIN_B}, scored
-
-
-def test_a_bet_on_either_id_locks_the_model_for_both(_clock, monkeypatch):
-    """TWIN_A carried the moneyline BET; the feed flipped, and TWIN_B is now
-    the id scored. Before: TWIN_B could write a second moneyline BET on the
-    same fight."""
-    conn = _UfcBoardConn(
-        [_ufc_game(TWIN_A), _ufc_game(TWIN_B)],
-        {(TWIN_A, "h2h", "draftkings"): _h2h_row(_ago(300), -150, 125),
          (TWIN_B, "h2h", "draftkings"): _h2h_row(_ago(5), 125, -150),
-         (TWIN_B, "totals", "draftkings"): _totals_row(_ago(5), line=2.5)},
-        bets=[(TWIN_A, "ufc_moneyline")])
+         (TWIN_B, "totals", "draftkings"): _totals_row(_ago(5), line=2.5)})
+    assert not any(sp == "UFC" for sp, _, _ in scorer.MODELS.values())
     scored = _score_card(monkeypatch, conn, dry_run=False)
-    assert (TWIN_B, "ufc_moneyline") not in scored, scored
-    assert (TWIN_B, "ufc_total_rounds") in scored
-    assert all(g == TWIN_B for g, _ in scored), scored
-    # The id left out loses its old no-bet rows (BETs are never deleted), the
-    # UFC models' rows only (scorer._pass_rewritten_models, 2026-11-06).
-    left_out = [d for d in conn.deletes if d[:1] == (TWIN_A,)]
-    assert left_out, conn.deletes
-    assert all("ufc_moneyline" in d[1:] for d in left_out), left_out
+    assert scored == [], scored
+    assert not [d for d in conn.deletes if d[:1] in ((TWIN_A,), (TWIN_B,))], conn.deletes
 
 
-def test_the_chosen_id_still_borrows_a_market_only_its_twin_carries(_clock, monkeypatch):
+def test_an_id_with_no_totals_row_still_borrows_its_twins_line(_clock):
     """The 2026-08-29 shape: one id has the moneyline and no totals row ever,
-    the other has both. The id with the newer row is scored, and its totals
-    read still borrows the twin's line, which is what the fallback is for."""
+    the other has both. The totals read still borrows the twin's line, which
+    is what the fallback is for."""
     newest = {(TWIN_A, "h2h", "draftkings"): _h2h_row(_ago(2), -150, 125),
               (TWIN_B, "h2h", "draftkings"): _h2h_row(_ago(40), 125, -150),
               (TWIN_B, "totals", "draftkings"): _totals_row(_ago(40), line=2.5)}
-    conn = _UfcBoardConn([_ufc_game(TWIN_A), _ufc_game(TWIN_B)], newest)
-    scored = _score_card(monkeypatch, conn)
-    assert {g for g, _ in scored} == {TWIN_A}, scored
-    assert (TWIN_A, "ufc_total_rounds") in scored
     totals = scorer._get_dk_odds(_UfcBoardConn([], newest), TWIN_A, "totals")
     assert totals is not None and totals["total_line"] == 2.5

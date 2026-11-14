@@ -29,8 +29,8 @@ def test_models_include_expected_ids():
         # (mike: "build new nba models, remove any previous nba models") and
         # every NBA game market was closed for 2026-27 (docs/nba_models_2026.md
         # 4.1). The NBA model that ships is a prop rule, outside MODELS.
-        # UFC
-        "ufc_moneyline", "ufc_total_rounds", "ufc_method_of_victory",
+        # UFC: none. The three 2026-06-19 models were RETIRED 2026-11-13
+        # (mike: "Ignore and delete any existing models in the repo").
         # GOLF
         # NCAAF (spread + spread_premium are DISJOINT bands of one opener rule)
         "ncaaf_moneyline", "ncaaf_over_under", "ncaaf_spread",
@@ -223,6 +223,9 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          # measured on its own fair chance from the books' consensus spread,
          # and it has no record.
          "ncaaf_moneyline_market",
+         # 2026-11-13 (mike): UFC fight winner; its 0.06 EV cut was measured
+         # on its own Pinnacle-anchored rating probability, and it has no record.
+         "ufc_open_moneyline",
          # 2026-11-02 (mike): NCAAB spreads; its 0.03 cut was measured on its
          # own P(win | no push) at the bet book's line, and it has no record.
          "ncaab_spread_market",
@@ -370,6 +373,7 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "ncaab_total_blend",        # 2026-10-30 (mike): its blend's P(win, push left out)
         "ncaabw_total_blend",       # 2026-11-09 (mike): the women's twin, the same number
         "ncaaf_moneyline_market",   # 2026-11-10 (mike): the margin table's fair chance at the books' consensus spread
+        "ufc_open_moneyline",       # 2026-11-13 (mike): Pinnacle's no-vig chance moved by the fighter ratings
         "ncaab_spread_market",      # 2026-11-02 (mike): the margin table's P(win, push left out)
         "ncaab_moneyline_own_spread",  # 2026-11-02 (mike): the margin table's P(side wins) at the book's own spread
         "ncaab_moneyline_first_post",  # 2026-11-03 (mike): the same, at the book's first moneyline post

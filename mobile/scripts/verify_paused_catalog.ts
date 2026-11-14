@@ -239,8 +239,15 @@ check('an active batter prop is still a bet type you can build on',
     !row('WNBA').some((label) => label.startsWith('Spread')));
   check('NHL line is Spread, with the ±1.5 subtitle',
     row('NHL').join(',') === 'ML|Moneyline,Spread|±1.5,Player props|All player markets');
-  check('UFC is moneyline only',
-    row('UFC').join(',') === 'ML|Moneyline');
+  // UFC's three old models were retired on 2026-11-13 (config
+  // RETIRED_MODELS); the live UFC model that replaced them the same day is
+  // ufc_open_moneyline, a fight winner, so UFC is ML only and its ML row
+  // writes that model alone.
+  check('UFC is ML only — its one live model is the fight winner',
+    row('UFC').join(',') === 'ML|Moneyline', row('UFC').join(','));
+  const ufcMl = betTypePickerGroups().find((g) => g.sport === 'UFC')?.choices.find((c) => c.slot === 'ml');
+  check('UFC ML writes the live opening-price model only, not a retired one',
+    ufcMl?.modelIds.join(',') === 'ufc_open_moneyline', ufcMl?.modelIds.join(','));
   check('golf is not a picker section',
     !betTypePickerGroups().some((g) => g.sport === 'GOLF'));
   check('every rule title is the long name, one shape, with no middle dot to split on',

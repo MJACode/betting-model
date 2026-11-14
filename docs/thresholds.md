@@ -38,7 +38,8 @@ the dashboard or in SQL:
 | `custom` | bets at or above the number given |
 
 "Stronger" is the number the model's own cut is on: edge at the deciding price
-for every model except `ufc_method_of_victory`, which is cut on probability.
+for every model. (`ufc_method_of_victory`, cut on probability, was the one
+exception until it was retired on 2026-11-13.)
 
 **Where a band's number comes from.** The view `model_volume_bands` takes the
 model's own bets at config's cut over its last 120 days of betting. The days
@@ -284,9 +285,16 @@ The per-model OR-block is **generated from `config.py`**, never transcribed —
 with the scorer. The three hand-maintained copies this replaces had drifted by
 2026-08-30: The block pasted into Claude mobile carries 42 model ids; `config.py` yields 41. Three are missing (`nba_over_under`, `nba_spread`, `nfl_prop_market`) and four are stale — paused models still listed, which surfaces picks the scorer has stopped making.
 
+> **All three UFC models below were RETIRED 2026-11-13** (mike: *"Ignore and
+> delete any existing models in the repo"*; `config.RETIRED_MODELS`). The
+> scripts these sections cite were deleted with them; their bytes are in git
+> history (`git show 7dbc0e4a:scripts/ufc_threshold_sweep.py`, and the same for
+> `ufc_model_compare.py` and `ufc_rounds_hazard.py`). The sections are kept as
+> the evidence of what was tried.
+
 ### UFC — the first every-pick evaluation (2026-09-05)
 
-Run it yourself: `python -m scripts.ufc_threshold_sweep`.
+Run it yourself (before 2026-11-13): `python -m scripts.ufc_threshold_sweep`.
 
 **Why it did not exist before.** `mv_scored_pick_outcomes` grades the whole
 scored universe for MLB and WNBA and **does not cover UFC**, and `picks.result`
@@ -1732,6 +1740,41 @@ posted stake), +10.93% [90%: +3.40, +18.48], bet for bet the research's
 list. By season 107 / 61 / 58 / 107 / 31 bets, 2023-24 negative (-1.65%).
 Every cut from 0.02 to 0.12 is positive. Go-live gate standing: 0 settled of
 50. Re-read at 50 settled bets.
+
+## UFC — `ufc_open_moneyline`, fight winner a week out (2026-11-13, mike)
+
+mike, 2026-11-13: *"Use the model building skill to build models for UFC"*,
+then *"yes"* to the 150,360-credit history purchase that tested it. A rating
+model anchored on Pinnacle's no-vig price, bet at the best price at a book in
+`BEST_LINE_BOOKMAKERS`, decided on the noon-UTC run while the fight is at
+least a week out (`models/ufc_open_moneyline.py`,
+`scripts/ufc_open_moneyline_card.py`; evidence `docs/ufc_market_audit.md`
+§3d). The cut is EV, in `MODEL_OWN_EV_FLOOR`; the probability is its own.
+
+| Setting | Value | Where |
+|---|---|---|
+| EV floor (the cut) | 0.06 | `config.MODEL_OWN_EV_FLOOR` |
+| price floor | -300 | `config.MODEL_MIN_ODDS` |
+| action filter | min_prob 0.0, min_edge 0.0 (keeps every bet the card writes) | `config.ACTION_THRESHOLDS` |
+| minimum lead | 168 hours | `models/ufc_open_moneyline.MIN_LEAD_H` |
+| decision run | 12:25 UTC only | `scripts/ufc_open_moneyline_card.DECIDE_HOUR_UTC` |
+
+The bought feed history, 2020-06 to 2026-06, noon pulls, at least 7 days out:
+
+| EV cut | Bets | Units | Return | 90% interval | EV vs Pinnacle's close |
+|---|---|---|---|---|---|
+| 0.00 | 1,545 | +111.4 | +5.25% | +1.6 to +8.7 | |
+| 0.04 | 1,075 | +136.0 | +9.59% | +5.2 to +13.7 | |
+| **0.06** | **846** | **+136.9** | **+12.85%** | **+8.0 to +17.5** | **+2.16%** |
+| 0.08 | 661 | +126.4 | +15.92% | +10.4 to +21.3 | |
+| 0.10 | 484 | +105.4 | +19.61% | +13.4 to +26.1 | +4.25% |
+
+Both halves positive (+11.4 / +14.3), every year positive, a donor-opinion
+placebo at a median -1.9% (best of 50 +3.9%). The bar it cleared: the
+stricter one in `.claude/skills/league-models/references/kill-tests.md`
+(200+ bets with the interval above zero, every season positive, a plateau, a
+placebo). Expect less live: 0.06 is the middle of a plateau chosen after
+the grid was seen. Go-live gate standing: 0 settled picks.
 
 ## NCAAF — `ncaaf_moneyline_market`, full-game moneylines (2026-11-10, mike)
 

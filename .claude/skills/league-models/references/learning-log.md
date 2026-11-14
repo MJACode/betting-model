@@ -61,6 +61,97 @@ review as its own entry.
    there), so the migration locks it down itself, as every in-play ledger does.
 5. **The framework.** Nothing in `SKILL.md` changed.
 
+## 2026-11-13 — UFC round totals, run to the end of the ladder
+
+1. **Scope.** mike asked why the markets beside the fight winner were not
+   tested, and whether the skill was followed. Round totals had been called
+   null without the anchored model on the bought history, without three
+   mechanisms of our own and without the stuck ladder. This entry is that
+   search (`docs/ufc_market_audit.md` §4).
+2. **Tried.** A Pinnacle-anchored finish model in three nested forms,
+   walk-forward by year, at DraftKings (the only book a pick may name with
+   totals in the history); blind sides by line and pull; DraftKings against
+   Pinnacle in the same pull; four mechanisms of our own (stale DraftKings
+   total after a moneyline move, women's and flyweight overs, five-round
+   overs, short-notice unders); every rung of the stuck ladder. Nothing
+   clears. One lead, the card-day over (+6.92% on 228, interval below zero,
+   2025 negative), fails the bar and goes to the frontier.
+3. **New.**
+   - Kill test (`kill-tests.md`, "Is the data right?"): check the no-vig
+     split before trusting closing value; on UFC totals the proportional
+     split charges the over about 2.5 points.
+   - Method note (`methods.md` §1): an anchored model needs a free intercept
+     per line; fighter inputs on a UFC total failed the donor placebo.
+   - Frontier (`methods.md`): the card-day over, graded forward only.
+4. **Corrected.** Was "DraftKings' totals in the bought history from 2025",
+   now "from late 2023, 1,072 fights", because the history was counted by
+   year (`docs/ufc_market_audit.md` §4, `docs/sports/ufc.md`). Was "22 bets
+   of DraftKings against Pinnacle in one pull", now 8,090 comparable pulls,
+   43 with DraftKings above Pinnacle's fair price.
+5. **The framework.** Two failures, one a skipped rule, one a hole in the
+   skill. Both changed in `SKILL.md` and `references/market-grid.md`.
+   - **Skipped.** The first UFC entry called round totals null after one
+     model, before the three mechanisms and the ladder. `SKILL.md` already
+     required both, so the rule was there and was skipped. Now the rule says
+     it binds each market, and a null row names its three mechanisms and
+     the ladder's rungs, so a skipped step shows in the text (step 5).
+   - **A hole.** Step 1 let a row park as "no price source", and
+     the price routes never named a book's own board or a comparison
+     site's per-book history. Parking is not null, so nothing sent the
+     row up the ladder. UFC parked method of victory, goes the distance and
+     round betting that way, because the odds feed refused their keys
+     (HTTP 422). DraftKings' own board priced all three on 2026-11-14,
+     and BestFightOdds holds the US books' prices for them from mid-2021
+     (#1304). **The same park stood in two more leagues**: EuroLeague
+     player props, and women's college basketball's first halves, quarters,
+     team totals, alternates and props. Three leagues meets the promotion
+     bar, so it is now a rule. In step 1, "no price" is never a reason to
+     park until every route has a written result. The route list gains the
+     book's board and the comparison sites (market-grid route 4). The
+     ladder now runs before a market parks for want of a price. The two
+     other leagues' rows are reopened as to-dos.
+
+## 2026-11-13 — UFC, a rebuild from zero
+
+1. **Scope.** mike: *"Use the model building skill to build models for UFC.
+   Ignore and delete any existing models in the repo."* The three old models
+   retired; every market the feed and the free archives price worked to a
+   verdict (`docs/ufc_market_audit.md`, `docs/sports/ufc.md` grid).
+2. **Tried.** Fight winner: blind bets by band, a market-anchored rating
+   model walk-forward at the close and at the first posted price, the same
+   at each US book's first price, Pinnacle-anchored line shopping,
+   five-round fights, big line moves. Round totals: blind by book, a
+   finish-time model. Method of victory: blind by method and side. Then the
+   feed's history was bought (150,240 credits) and the open-anchored model
+   graded at the books a pick may name. **One model ships,
+   `ufc_open_moneyline`**: Pinnacle-anchored at a week out, 846 bets
+   +12.85% [+8.0, +17.5], every year positive, +2.2% against Pinnacle's
+   close. Totals and method: nothing clears.
+3. **New.**
+   - Method (`methods.md` §1): a rating model anchored on the sharp book's
+     price a week or more out, bet at the best deciding book; the edge
+     grows with the lead (7-14 days +7%, 14-30 +20%, inside a week negative).
+   - Kill test (`kill-tests.md`): an archive's open is not a book we can
+     bet; and a small forward sample can say the opposite of the history
+     (104 bets with negative closing value, against 846 positive on 2,457
+     fights), so a purchase settles it, not the sample.
+   - Price routes (`market-grid.md`): the MMA key's coverage; two free
+     archives; the bulk history from 2020-06-06 at 20 credits a market.
+   - Trap (`porting-traps.md`): our UFC ingest stores a fight only once
+     DraftKings lists it, and kept DraftKings alone before 2026-08.
+   - Scout routes (`scouting.md`): six answers and refusals.
+4. **Corrected.** The first entry's open question (is `ufc_total_rounds`
+   paused?) is closed: it was, and it is retired. The fighting shape in
+   `market-grid.md` said method and duration props have no price history:
+   method props have a free one (2012+), round totals the feed's (2021+).
+   A 2026 pilot said round totals carry their margin on the over; 2,403
+   fights say the under (-6.8% blind at Pinnacle).
+5. **The framework.** A free archive was analysed before it was stored;
+   step 2 now stores a free archive like a bought one, before the first
+   table is read from it. The card decides on the same cadence the history
+   was bought at (one noon pull a day), the first-come-lock trap avoided by
+   construction rather than by replay.
+
 ## 2026-11-13 — EuroLeague halftime
 
 1. **Scope.** The EuroLeague build: the halftime break, now that the shot

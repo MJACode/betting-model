@@ -576,8 +576,8 @@ What stays here is what has to be known BEFORE deciding which file to open
 ## 8. Current state — the 30-second version
 
 - **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB, NCAABW,
-  EUROLEAGUE. 83 models carry their own cut in `config.ACTION_THRESHOLDS`;
-  29 are paused.
+  EUROLEAGUE. 81 models carry their own cut in `config.ACTION_THRESHOLDS`;
+  28 are paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no
   games, no odds and no picks, ever. The ingestors, feature engine and pipeline

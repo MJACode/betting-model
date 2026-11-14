@@ -1,106 +1,104 @@
-# UFC — pipeline operations
+# UFC — models, data, pipeline
 
-> Moved out of CLAUDE.md on 2026-08-30 (that file had reached 909 KB and was
-> being re-read in full every session). Content is verbatim unless noted.
-> Session-by-session history: `docs/sessions/`.
+> Moved out of CLAUDE.md on 2026-08-30. Session-by-session history:
+> `docs/sessions/`. The model search of 2026-11-13 and every number below:
+> **`docs/ufc_market_audit.md`**.
 
-## 20. UFC — Pipeline Operations
-### Models (registered, NOT yet trained — session 49)
+## 20. UFC
 
-| Model ID | Type | Market | Odds source | Status |
-|---|---|---|---|---|
-| `ufc_moneyline` | binary XGBoost + Platt | h2h | real DK h2h (bulk feed) | **LIVE** — holdout acc 66.2% / AUC 0.714 / CalErr 5.99% (above gate; provisional) |
-| `ufc_total_rounds` | binary XGBoost + Platt | totals | per-event DK round totals when present; else prob-only vs synthetic 2.5/4.5 line | **LIVE** — acc 63.9% / AUC 0.669 / CalErr 3.84% |
-| `ufc_method_of_victory` | **3-class** XGBoost (`multi:softprob`) + calibrated | method | **prob-only** (in `PROB_ONLY_MODELS` — The Odds API has no method odds) | **LIVE** — acc 56.5% / OvR-AUC 0.673 / CalErr 3.23% |
+### Models
 
-Thresholds (placeholder — tune after 50+ settled picks): ML 65%/8%, rounds 62%/8%, method 65% prob-only.
+mike, 2026-11-13: *"Use the model building skill to build models for UFC.
+Ignore and delete any existing models in the repo."*
+
+| Model | Market | What it does | Status |
+|---|---|---|---|
+| `ufc_open_moneyline` | fight winner | A fight a week or more out, on the noon-UTC run: fighter ratings move Pinnacle's no-vig price, and the best price at a book a pick may name is bet when its EV is 0.06 or more (-300 floor). The first pull that clears locks the fight. `models/ufc_open_moneyline.py`, `scripts/ufc_open_moneyline_card.py`, artifact `models/saved/ufc_open_moneyline.json` (built by `scripts/ufc_open_moneyline_build.py`) | **live on merge** (2026-11-13). Backtest 846 bets +12.85% [+8.0, +17.5], every year 2020-2026 positive, +2.2% against Pinnacle's close (`docs/ufc_market_audit.md` §3d) |
+
+It holds a fight while either fighter has an earlier fight not yet logged,
+and skips a fighter it cannot place on his ufcstats record (debutants, until
+their first fight is logged). The card keys its decisions on the fight, not
+the stored id, because the feed stores each fight under two ids. It skips the
+feed's placeholder dates (December 31 and January 1). A bet on a fight that
+is cancelled or moved settles NO_ACTION once its card is in the fight log
+without either fighter (`tracking/paper_tracker._settle_unfought_ufc_picks`).
+
+The three models of 2026-06-11 (`ufc_moneyline`, `ufc_total_rounds`,
+`ufc_method_of_victory`) are in `config.RETIRED_MODELS`; their feature
+engine, scorer and trainer branches and artifacts are gone. They had been
+graded on probability alone at a synthetic -110, because no UFC price
+history was ever stored, and method of victory was never given a market
+price.
+Their picks stay in `picks`, graded.
+
+The grid below says where every other market stands.
+
+### The market grid
+
+| Market | Settles on | Inputs held | Prices | Baseline | Method tried | Result | Status |
+|---|---|---|---|---|---|---|---|
+| Fight winner | `games.home_win` (draw / no contest = push) | `ufc_fight_log` 2010-2026, `fighters`; ratings built strictly before each fight | Free archive: BestFightOdds open + closing range 2010-2026 (`ufc_price_archive`); feed history 2020-06+ (not bought); `odds` 2026-06+ every pull, 12 books | Blind favourite -0.8% to -3.9%, underdog -2.3% to -8.3% across the closing range, 7,541 fights | Market-anchored rating model at the close; at the first posted price; at each US book's first stored price; Pinnacle-anchored with US line shopping; five-round fights | At the close: nothing holds. At BestFightOdds' open: 1,531 bets +7.8% [+3.9, +11.8], positive against the close every year since 2018. At DraftKings' own first price, 2026: negative against Pinnacle's close (-2.1% to -2.5%); on the bought 2020-2026 history at the deciding books, Pinnacle-anchored: 846 bets +12.85%, 7/7 years | **Live**: `ufc_open_moneyline`, Pinnacle-anchored at a week out (audit §3d) |
+| Total rounds (0.5-4.5) | rounds completed from `ufc_fight_log` end round and time; five-round fights from `scheduled_rounds` | same | `ufc_odds_history` (bought): Pinnacle 2020+ (2,421 fights, 2,384 at 1.5/2.5/4.5), DraftKings late 2023+ (1,072, 1,058 at those lines); `odds` 2026-06+; no free archive | Last pull: 2.5 over +0.1% at Pinnacle, -0.9% at DraftKings; 2.5 under -9.6% and -16.1%; 4.5 over +11.0% (127) and +8.5% (53). DraftKings' margin 6.2% against Pinnacle's 4.1% | Pinnacle-anchored finish model, walk-forward; four mechanisms of our own; the stuck ladder | Fighter inputs add nothing to Pinnacle's total (placebo equal); return falls as the cut rises; the card-day over (+6.9% on 228, interval below zero, 2025 negative) fails the bar and sits in the frontier | **Nothing clears** (audit §4) |
+| Points spread | not known: DraftKings and Bovada list one (Holland +7.5) | | feed, live, 2 books | | | | **Parked**: what it settles on is unknown |
+| Alternate round totals | as total rounds | | Pinnacle only on the feed | | | | **Parked**: no book a pick may name |
+| Method of victory (by fighter) | `ufc_fight_log.method` | same | DraftKings' own board, live, the day before a card (the feed rejects every key); BestFightOdds per-book history, US books from 2021; free archive 2012-2026 near-close prices (audit §5) | Every blind method bet loses: favourite by decision -3.3% (5,821), finishes -20% to -41% | Blind by method and side | No profit blind; no model fitted | **To do**: crawl BestFightOdds, fit and grade at each book's price (audit §5e) |
+| Goes the distance, round betting, exact round, inside the distance | `ufc_fight_log` | same | DraftKings' own board, live; BestFightOdds per-book history (audit §5) | | | | **To do**: as method of victory |
+| In play | | | none stored | | | | **Parked** |
+| Prediction markets | | | not checked for UFC | | | | **To do** |
 
 ### Conventions (load-bearing — don't break)
 
 - **home/away mapping:** The Odds API's `home_team` fighter → our `home_team`. `games.home_team/away_team` store **display names**; `game_id = UFC_{date}_{away_slug}_{home_slug}` (slug = lowercase, accents stripped, hyphenated). Historical backfill rows (no pre-fight odds row) assign home = lexicographically smaller slug — **never winner-first** (label leakage).
-- **Name matching:** Odds API names → `slugify_fighter()` → ufcstats fighters. Mismatches (nicknames, "Jr.", transliteration) go in `config.UFC_NAME_ALIASES` (Odds API name → ufcstats name). The results scraper matches games by slug pair ±1 day. Unknown fighter at score time → fight skipped with a log line naming the fighter.
-- **Scores convention:** `games.home_score/away_score` for UFC are 1/0 win indicators (0.5/0.5 + `home_win NULL` for draw/NC). The generic settle path therefore **excludes `ufc_%`** — `_settle_ufc_picks` in paper_tracker handles ML (draw/NC = PUSH), round totals (fractional rounds completed: O2.5 = fight passes 2:30 of R3), and method (DQ/overturned = NO_ACTION), over a **trailing 14-day window** so late-posted ufcstats results still settle.
-- **Five-round bouts:** unknowable pre-fight from our data; inferred from the DK round-total line (≥3.5 → 5 rounds) else assumed 3. Training uses the true `scheduled_rounds` from ufcstats — known mismatch for main events without DK totals lines (documented, acceptable v1).
-- **Min-history gate:** fighters need ≥3 prior UFC fights (`MIN_UFC_FIGHTS`) or the fight is skipped — debuts are unmodelable (the early-season analog).
+- **Name matching:** Odds API names → `slugify_fighter()` → ufcstats fighters. Mismatches (nicknames, "Jr.", transliteration) go in `config.UFC_NAME_ALIASES` (Odds API name → ufcstats name). The results scraper matches games by slug pair ±1 day.
+- **Scores convention:** `games.home_score/away_score` for UFC are 1/0 win indicators (0.5/0.5 + `home_win NULL` for draw/NC). The generic settle path therefore **excludes `ufc_%`** — `_settle_ufc_picks` in paper_tracker handles fight winner (draw/NC = PUSH), round totals (fractional rounds completed: O2.5 = fight passes 2:30 of R3), and method (DQ/overturned = NO_ACTION).
+- **The feed carries every promotion** under one key. Our ingest keeps a fight only when one fighter is known to the UFC fight log, and stores a fight once DraftKings lists it, so every book's first stored row is DraftKings' (2026-11-13, all 345 stored fights).
 
 ### Pipeline
 
 | Step | Runs where | Frequency | What it does |
 |---|---|---|---|
-| UFC odds (h2h bulk + per-event round totals) | GitHub Actions (`step_odds`) | 6am + hourly to 5pm + every 10 min 6pm–11pm | DK fight-winner lines; round totals attempted per-event (non-fatal when DK doesn't list them) |
-| UFC scoring | GitHub Actions (`step_scoring`) | 6am + every refresh pass | `run_scorer` UFC branch → picks |
-| UFC results (`ufc-results`) | daily pipeline (step 0a, **before settle**) | 6am | Loads completed events **from the CSV mirror** over a **self-healing window** — everything since MAX(`ufc_fight_log.game_date`), capped 365 days (the mirror can lag a card by weeks; a fixed 8-day window missed every 2026 card — see session 103); writes `games` scores (ALL duplicate rows) + `ufc_fight_log` + fighter profiles |
-| Settlement | daily pipeline (`settle`) | 6am | `_settle_ufc_picks` — **no trailing window**: settles any unsettled UFC BET pick whose fight has scores (incl. slug-pair fallback for picks on duplicate/orientation-swapped games rows) |
+| UFC odds (h2h bulk + per-event round totals) | the worker (`step_odds`) | 6am + every refresh pass | Every book's fight-winner lines; round totals per event (non-fatal when absent) |
+| UFC results (`ufc-results`) | daily pipeline (step 0a, **before settle**) | 6am | Loads completed events **from the CSV mirror** over a **self-healing window** — everything since MAX(`ufc_fight_log.game_date`), capped 365 days; writes `games` scores (ALL duplicate rows) + `ufc_fight_log` + fighter profiles |
+| Settlement | daily pipeline (`settle`) | 6am | `_settle_ufc_picks` settles any unsettled UFC BET pick whose fight has scores (incl. the slug-pair fallback for picks on duplicate/orientation-swapped games rows) |
 
-UFC events are ~weekly (Saturdays) — most days all UFC steps no-op cleanly.
+| UFC opening-price card (`ufc_open_moneyline_card`) | the worker (scheduler) | hourly at :25 UTC | Bets only on the 12:25Z run; other runs close fights that reached a week out as NONE rows; publishes. `RUN_UFC_OPEN_MONEYLINE=0` stops it |
 
 ### The schedule gate (2026-10-20)
 
-`run_scorer` holds a fight while either fighter has an earlier fight on a card
-that is not in `ufc_fight_log` yet (`data/schedule_context.py`). The rows are
-written NONE with the reason. A fight counts as done once its CARD is in the
-log, whether or not this fighter is on it, because a cancelled bout never
-reaches the log; every past DraftKings-priced card date since 2026-06-13 is
-there (25 of 25, 2026-10-20). Only rows with a DraftKings moneyline count as
-fights (the scorer's own "this fight is real" rule), and rows within a day of
-each other for one fighter are one fight. Why: 8 of 22 UFC BETs were decided
-with a fighter's latest fight not yet in the log (all before the 2026-07-20
-bulk ingest; nothing enforced it). On today's priced board (19 fights) it holds
-none.
+`data/schedule_context.py` holds a fight while either fighter has an earlier
+fight on a card that is not in `ufc_fight_log` yet. A fight counts as done once
+its CARD is in the log, whether or not this fighter is on it, because a
+cancelled bout never reaches the log. Any new UFC card must go through it.
 
-### Data source — CSV mirror, not live scraping (2026-06-11)
+### Data sources
 
-ufcstats.com moved behind a **browser-level Cloudflare challenge** that plain
-`requests` and `cloudscraper` both fail (HTTPS refused; HTTP returns the
-"Checking your browser..." interstitial → empty HTML → 0 events). Solving it
-live would need a headless browser, which still gets blocked from GitHub
-Actions' datacenter IPs.
-
-So the **primary UFC data path is `data/ingestors/ufc_csv_loader.py`**, which
-reads the [Greco1899/scrape_ufc_stats](https://github.com/Greco1899/scrape_ufc_stats)
-GitHub CSV mirror — a maintained repo whose own scheduled scraper keeps 1:1 CSV
-exports of ufcstats.com current (updated weekly after each card). The CSVs
-preserve ufcstats' fight/fighter ids in their URL columns, so rows are
-**identical** to what the HTML scraper would have produced. The loader reshapes
-CSV rows into the exact dict shapes the pure parsers emit and feeds the shared
-`ufc_stats_ingestor._ingest_event(ev=…, detail_lookup=…)` writer — so
-home/away assignment, idempotency, and the settlement contract are unchanged.
-`ufc_stats_ingestor.py` (the HTML scraper) is kept as a documented plan B.
-
-Config: `UFC_CSV_BASE_URL` (the raw-GitHub base, env-overridable) and
-`UFC_CSV_DIR` (point at a local folder of the same CSVs for offline use).
-Coverage check (2026-06-11): 617 events 2010–2025, 7,231 fights, 99.7% with
-both fighter ids resolved (debut fighters absent from the profile CSV are
-skipped — they fail the 3-fight gate anyway).
-
-### First-time setup — DONE (backfilled + trained 2026-06-11, retrained 2026-06-19)
-
-The 3 models are trained, committed, and active in `model_registry`. To refresh
-(e.g. after new fight cards land in the CSV mirror):
-
-```bash
-# 1. Refresh fight data from the CSV mirror (idempotent — skips already-ingested
-#    fights). Bump the end year for newer events: --backfill 2010 2026
-python -m data.ingestors.ufc_csv_loader --backfill 2010 2025
-
-# 2. Retrain (multiclass branch handles ufc_method_of_victory automatically),
-#    then re-commit the new active artifacts (the prior versions deactivate):
-python -m models.trainer --model ufc_moneyline
-python -m models.trainer --model ufc_total_rounds
-python -m models.trainer --model ufc_method_of_victory
-git add -f models/saved/ufc_*.pkl && git commit -m "Retrain UFC models"
-```
-
-**Open flag:** `ufc_moneyline` holdout CalErr is **5.99%, above the 5% gate** — a
-retrain on the same fight data won't move it (confirmed 2026-06-19). Improving it
-needs feature work (e.g. opponent-adjusted striking/grappling, layoff/age
-interactions) or a real historical-odds backtest, not another retrain. Treat the
-65%/8% ML threshold as provisional and re-check after 50 settled live picks.
-
-**Backtest caveat:** no historical UFC odds exist in our DB, so all UFC backtests are prob-only at synthetic −110 (Kaggle UFC datasets carry real historical odds — a future enhancement for a truer moneyline backtest). Live `ufc_moneyline` scores vs real DK prices from day one.
+- **Results: the CSV mirror, not live scraping (2026-06-11).** ufcstats.com
+  sits behind a browser-level Cloudflare challenge, so the primary path is
+  `data/ingestors/ufc_csv_loader.py`, reading the
+  [Greco1899/scrape_ufc_stats](https://github.com/Greco1899/scrape_ufc_stats)
+  CSV mirror (updated weekly). The CSVs keep ufcstats' fight and fighter ids,
+  so rows are identical to what the HTML scraper
+  (`ufc_stats_ingestor.py`, kept as plan B) would produce. Config:
+  `UFC_CSV_BASE_URL`, `UFC_CSV_DIR`. Refresh:
+  `python -m data.ingestors.ufc_csv_loader --backfill 2010 2026`.
+- **Price history, free (2026-11-13):** `data/ingestors/ufc_price_archive.py`
+  stores two public archives in `ufc_price_archive`: fight-canon-db (MIT;
+  BestFightOdds open and closing range, UFC 2007+) and the Ultimate UFC
+  Dataset (CC BY 4.0; a fight price and three method prices per fighter,
+  2010+). BestFightOdds' robots.txt allows everything but `/cnadm/`;
+  OddsPortal disallows its dated archive; Tapology disallows Claude's
+  crawlers by name.
+- **Price history, the feed (bought 2026-11-13, 150,240 credits):**
+  `data/ingestors/ufc_odds_history.py` stores fight winner and round totals
+  for every book, noon UTC each day 2020-06-06 to 2026-06-13 and six pulls
+  on each card day, in `ufc_odds_history` (552,576 rows, change-only, every
+  promotion, UFC fights placed on our fight ids) and its ledger
+  `ufc_odds_history_pulls`. The feed has nothing before 2020-06-06; the
+  daily pull is the snapshot served at 11:55 UTC. Round totals come from
+  Pinnacle from 2020 (2,421 fights at any line) and DraftKings from late
+  2023 (1,072: 31 in 2023, 417 in 2024, 430 in 2025, 194 to June 2026); no
+  other book a pick may name carries them.
 
 ### Mobile
 
-UFC is the third option in the global sport toggle (MLB | WNBA | UFC). UFC matchups render "A vs B" (not "A @ B"). Stats tab has a UFC fighter leaderboard (Wins/KO Wins/Sub Wins/Sig Strikes/Takedowns/Knockdowns/Sub Attempts) backed by `v_fighter_season_totals_ufc` + `fighter_window_totals_ufc(p_season, p_window)` — the window ranks each fighter's last N fights **career-wide** (fighters fight ~3×/year). UFC rows are display-only (no fighter detail screen yet — WNBA precedent).
-
----
+UFC is an option in the global sport toggle. UFC matchups render "A vs B" (not "A @ B"). Stats tab has a UFC fighter leaderboard (Wins/KO Wins/Sub Wins/Sig Strikes/Takedowns/Knockdowns/Sub Attempts) backed by `v_fighter_season_totals_ufc` + `fighter_window_totals_ufc(p_season, p_window)` — the window ranks each fighter's last N fights **career-wide**. UFC rows are display-only.
