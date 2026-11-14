@@ -392,6 +392,9 @@ jobs:
             tests/test_app_review_sign_in.py \
             tests/test_deploy_drain.py \
             tests/test_scoring_lease.py \
+            tests/test_morning_disk.py \
+            tests/test_overnight_polling.py \
+            tests/test_api_call_rollup.py \
             tests/test_ncaaf_fcs_opponent_alias_migration.py \
             tests/test_ncaaf_game_identity.py \
             tests/test_cfbd_ingestor.py \

@@ -51,15 +51,25 @@ def test_the_overnight_window_exists():
 
 
 def test_every_hour_of_the_day_is_covered():
-    """The three refresh windows plus the 6am pipeline must tile 0-23 with no
-    hole. A gap is invisible: it looks exactly like a quiet market."""
+    """The refresh windows plus the 6am pipeline tile the day except hour 5.
+
+    Hour 5 is the gap on purpose. On 2026-11-12 the 05:17 full refresh was
+    still a candidate to be running at 05:50, when disk IO was already
+    saturated, and the 06:00 daily then started a second full writer. The
+    pregame poller still watches lines that hour; the 04:17 pass is the last
+    full refresh before the daily. Any other missing hour is a quiet market
+    nobody can see."""
     jobs = _jobs()
     covered: set[int] = set()
     for jid in ("overnight_refresh", "hourly_refresh", "evening_refresh"):
         covered |= _hours(jobs[jid])
     # 6am is the daily pipeline's hour — it fetches odds as part of the full run.
     covered |= _hours(jobs["daily_pipeline"])
-    assert covered == set(range(24)), f"unpolled hours: {sorted(set(range(24)) - covered)}"
+    assert covered == set(range(24)) - {5}, (
+        f"unpolled hours: {sorted((set(range(24)) - {5}) - covered)}")
+    assert _hours(jobs["pregame_poller"]) == set(range(24)), (
+        "hour 5 has no full refresh, so the pregame poller has to watch it")
+    assert 5 not in _hours(jobs["overnight_refresh"])
 
 
 def test_the_windows_do_not_overlap():
