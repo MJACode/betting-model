@@ -26,6 +26,7 @@ import {
   priceAgeFor,
   propMarketForPick,
   splitPickTitle,
+  staleLineMoveFromScoredBook,
   storedQuoteBook,
   todayBoardHandoff,
   type BoardHandoff,
@@ -76,6 +77,7 @@ import {
 import {
   heroPriceSpeech,
   lockedCaptionText,
+  onlyStalePrice,
   priceCheckChipText,
   priceCheckSpeech,
 } from '@/lib/heroPriceText';
@@ -273,10 +275,18 @@ export function PickCard({
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
   // A flagged row's movement line is built from the same suspect price, so it
   // is suppressed too.
-  const movement =
-    gameStatus(game, liveState).kind === 'pre' && !flagged
-      ? movementFromLatest(pick, item.latestOdds, item.bookRows)
+  // An "Old price" card (the deciding book stopped updating, nothing else
+  // tripped) still shows the line move, read at the book the line was scored
+  // at (staleLineMoveFromScoredBook). Matt, 2026-11-14.
+  const pregame = gameStatus(game, liveState).kind === 'pre';
+  const staleLineMove =
+    pregame && flagged && onlyStalePrice(check) && heroPrice?.stale
+      ? staleLineMoveFromScoredBook(pick, item.latestOdds, item.bookRows, priceAge?.now)
       : null;
+  const movement =
+    pregame && !flagged
+      ? movementFromLatest(pick, item.latestOdds, item.bookRows)
+      : (staleLineMove?.movement ?? null);
   const movementSummary = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
   const showClv = pick.clv_method === 'standard_v2' && pick.clv_pct != null;
   // Icon and words share one ink (non-text 3:1 ruling), toned from the CLV
@@ -504,7 +514,19 @@ export function PickCard({
   const priceDiffers = Boolean(
     nowPrice && heroPrice && heroPrice.kind === 'now' && heroPrice.price !== heroPrice.lockedPrice,
   );
-  const signalsNow = quoteBookKey
+  // On an "Old price" card: the scored book's line now, named by that book.
+  const staleNowFor = (book: string) =>
+    staleLineMove && staleLineMove.line != null
+      ? signalsNowLine({
+          line: formatSideLine(staleLineMove.line, pick.pick_side, signalsMarket),
+          price: staleLineMove.price == null ? null : formatAmerican(staleLineMove.price),
+          priceDiffers: false,
+          book,
+        })
+      : null;
+  const signalsNow = staleLineMove
+    ? staleNowFor(bookLabel(staleLineMove.book))
+    : quoteBookKey
     ? signalsNowLine({
         line: signalsMovedLineText,
         price: nowPrice,
@@ -513,7 +535,9 @@ export function PickCard({
       })
     : null;
   // Same numbers as the screen. The spoken book is the full name.
-  const signalsNowSpoken = quoteBookKey
+  const signalsNowSpoken = staleLineMove
+    ? staleNowFor(bookName(staleLineMove.book))
+    : quoteBookKey
     ? signalsNowLine({
         line: signalsMovedLineText,
         price: nowPrice,
@@ -594,7 +618,9 @@ export function PickCard({
           book: bookName(quoteBookKey),
           now: signalsNowSpoken,
         })
-      : (heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null);
+      : (heroPrice
+        ? [heroPriceSpeech(heroPrice, cta.priceTag), signalsNowSpoken].filter(Boolean).join('. ')
+        : null);
   const signalsStakeSpoken = signalsStakeShown
     ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}${stakeReason ? `. ${stakeReason}` : ''}`
     : 'Stake unavailable';
