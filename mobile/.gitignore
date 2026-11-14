@@ -7,5 +7,5 @@ yarn-error.*
 .env
 *.log
 .DS_Store
-ios/
-android/
+/ios/
+/android/

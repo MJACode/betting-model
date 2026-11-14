@@ -91,6 +91,12 @@ jobs:
         working-directory: mobile
         run: npx tsx scripts/verify_today_picks_flight.ts
 
+      # Sportsbook hand-off: every opened link is a URL, the app-claimed
+      # link forms, and the open-in-app-or-App-Store order.
+      - name: Sportsbook links
+        working-directory: mobile
+        run: npx tsx scripts/verify_book_links.ts
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
