@@ -82,8 +82,10 @@ A new writer that skips one of these bets something it should not:
 - `data/prune_odds.py`: `PROTECTED_SOURCES` for bought history,
   `PATH_KEPT_SPORTS` if the whole price path is kept.
   `monitoring/probe.py` `_SPORT_TOKENS`.
-- **Tables**: every new table in `data/anon_readable.py`
-  `WORKER_ONLY_TABLES`; write-time `ensure_tables` gated by
+- **Tables**: every new table a Python create site makes in `data/anon_readable.py`
+  `WORKER_ONLY_TABLES` (a migration-created table cannot be listed there:
+  `tests/test_anon_readable.py` needs a Python create site; its migration
+  revokes and enables RLS itself); write-time `ensure_tables` gated by
   `data/ddl_guard.schema_is_current`; a migration-created table is one
   idempotent block registered in `data/view_migrations.py`
   `ACTIVE_MIGRATIONS`, before the two posted-stake migrations that must stay

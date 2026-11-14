@@ -55,9 +55,10 @@ review as its own entry.
    `CASE`. The closing-line recompute filters `p.is_live IS NOT TRUE`
    (`data/migrations/clv_standard_v2_2026_10_14.sql`), and none of the five
    in-play models since 2026-11-04 is in it, so an in-play model is not added
-   there; the line now says so. `shipping.md` also says every new table goes in
-   `WORKER_ONLY_TABLES`, which the women's halftime ledger had skipped; this
-   one is listed.
+   there; the line now says so. `shipping.md` also said every new table goes in
+   `WORKER_ONLY_TABLES`; a table a migration creates cannot
+   (`tests/test_anon_readable.py` requires a Python create site for every name
+   there), so the migration locks it down itself, as every in-play ledger does.
 5. **The framework.** Nothing in `SKILL.md` changed.
 
 ## 2026-11-13 — EuroLeague halftime
