@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Picks filter gets a Status section (Not started / Live / Final) from the cards' own gameStatus() |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, sportsbook hand-off opens the book's app or the App Store: new iOS native module `open-in-app` (`universalLinksOnly`), `appClaimedLink` (BetMGM's betslip query moved under `/sportsapp/`, the only path its app claims), wired into `openBookBetslip`; needs a TestFlight build; not yet seen on a device |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, production timeouts: a 97 GB database on a 1 GB instance whose disk burst runs out; the nightly copy's run grew from 75 minutes to 9 hours and held 35 of 39 failures; timed-out reads contained in savepoints (the NFL injury veto fails closed), three injuries indexes, the first-basket rebuild reads the plays once, the copy pauses on Eastern time (#1328) |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, UFC fight-winner model's first betting run: no bet, Pinnacle has not priced the 2026-11-21 card (and posts later each year); five fighters it could not rate aliased, with the card's fight key grouped through the aliases so one fight cannot be decided twice |

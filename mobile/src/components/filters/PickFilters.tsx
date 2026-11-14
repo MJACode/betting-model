@@ -54,6 +54,12 @@ import { FilterSection, FilterSheet } from './FilterSheet';
 import { GameFilterSection } from './GameFilterSection';
 import { gameFilterSummary, type SelectableGame } from '@/lib/gameFilter';
 import { dateFilterSummary, datesAreNarrowed, type DateOption } from '@/lib/dateFilter';
+import {
+  gameStateSummary,
+  gameStatesAreNarrowed,
+  type GameState,
+  type GameStateOption,
+} from '@/lib/gameStateFilter';
 import { signalDisplayName } from '@/lib/tone';
 import type { SignalType } from '@/types';
 
@@ -69,6 +75,8 @@ export type { ModelCategory, PicksFilterState } from '@/lib/pickFilterState';
 
 const EMPTY_SELECTION: Set<string> = new Set();
 const EMPTY_DATES: DateOption[] = [];
+const EMPTY_STATES: GameStateOption[] = [];
+const EMPTY_STATE_SELECTION: Set<GameState> = new Set();
 
 interface Props {
   state: PicksFilterState;
@@ -113,6 +121,15 @@ interface Props {
   selectedDates?: Set<string>;
   onToggleDate?: (date: string) => void;
   onClearDates?: () => void;
+  /**
+   * Not started / Live / Final, and which the user has picked (Matt,
+   * 2026-11-14). Empty selection = every state. Renders only when the board
+   * holds more than one state.
+   */
+  gameStateOptions?: GameStateOption[];
+  selectedGameStates?: Set<GameState>;
+  onToggleGameState?: (state: GameState) => void;
+  onClearGameStates?: () => void;
   /** Hide the Signal section (Signals are all BET — the chips are noise). */
   showSignals?: boolean;
   /** Noun for counts and the sheet footer, e.g. "pick" / "signal". */
@@ -138,6 +155,10 @@ export function PickFilters({
   selectedDates = EMPTY_SELECTION,
   onToggleDate,
   onClearDates,
+  gameStateOptions = EMPTY_STATES,
+  selectedGameStates = EMPTY_STATE_SELECTION,
+  onToggleGameState,
+  onClearGameStates,
   showSignals = true,
   itemNoun = 'pick',
 }: Props) {
@@ -214,6 +235,12 @@ export function PickFilters({
       accessibilityLabel={`${o.spoken}, ${o.count} ${itemNoun}${o.count === 1 ? '' : 's'}`}
     />
   ));
+  // The Status cut, same shape as Date: in the bar while it narrows, and
+  // hidden when the board holds games in only one state.
+  const statesNarrowed = gameStatesAreNarrowed(selectedGameStates, gameStateOptions);
+  const stateSummary = gameStateSummary(selectedGameStates, gameStateOptions);
+  const stateCutBites =
+    !!onToggleGameState && (gameStateOptions.length > 1 || statesNarrowed);
   const searchActive = search.trim().length > 0;
   const pills = useMemo(() => {
     const out = buildPills(state, onChange, presentCategories);
@@ -226,6 +253,9 @@ export function PickFilters({
     }
     if (datesNarrowed && onClearDates) {
       out.push({ key: 'dates', label: dateSummary, onRemove: onClearDates });
+    }
+    if (statesNarrowed && onClearGameStates) {
+      out.push({ key: 'gameStates', label: stateSummary, onRemove: onClearGameStates });
     }
     if (gamesNarrowed && onClearGames) {
       out.push({
@@ -245,6 +275,9 @@ export function PickFilters({
     datesNarrowed,
     dateSummary,
     onClearDates,
+    statesNarrowed,
+    stateSummary,
+    onClearGameStates,
     gamesNarrowed,
     games,
     selectedGames,
@@ -254,12 +287,14 @@ export function PickFilters({
   const count =
     activeFilterCount(state, presentCategories) +
     (datesNarrowed ? 1 : 0) +
+    (statesNarrowed ? 1 : 0) +
     (gamesNarrowed ? 1 : 0) +
     (searchActive ? 1 : 0);
 
   const clearAll = () => {
     onChange(freshFilter());
     onClearDates?.();
+    onClearGameStates?.();
     onClearGames?.();
     onSearchChange('');
   };
@@ -338,6 +373,31 @@ export function PickFilters({
             onClear={datesNarrowed ? onClearDates : undefined}
           >
             <View style={styles.chipWrap}>{dateChips}</View>
+          </FilterSection>
+        ) : null}
+
+        {/* STATUS between Date and Games: "Not started + Live" is the
+            bettable board, and the Games list below follows it. */}
+        {stateCutBites ? (
+          <FilterSection
+            title="Status"
+            subtitle="Hide games that are over, or show only games in play."
+            summary={stateSummary}
+            defaultOpen={statesNarrowed}
+            onClear={statesNarrowed ? onClearGameStates : undefined}
+          >
+            <View style={styles.chipWrap}>
+              {gameStateOptions.map((o) => (
+                <FilterChip
+                  key={o.state}
+                  label={o.label}
+                  count={o.count}
+                  active={selectedGameStates.has(o.state)}
+                  onPress={() => onToggleGameState!(o.state)}
+                  accessibilityLabel={`${o.label}, ${o.count} ${itemNoun}${o.count === 1 ? '' : 's'}`}
+                />
+              ))}
+            </View>
           </FilterSection>
         ) : null}
 
