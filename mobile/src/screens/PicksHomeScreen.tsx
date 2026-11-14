@@ -70,7 +70,6 @@ import {
   showLivePricesBanner,
   sportChipsAvailable,
   todayHeaderCounts,
-  sportDisplayName,
   sportSpokenName,
 } from '@/lib/loadState';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
@@ -144,7 +143,7 @@ const SUBTAB_REACH_BELOW = 6;
 const subTabsReach = reachFrame(0, SUBTAB_REACH_BELOW);
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
-import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence } from '@/lib/liveSports';
+import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence, sportDisplayName } from '@/lib/liveSports';
 import { errorText, friendlyCause } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ScoreboardBoard } from '@/components/ScoreboardBoard';

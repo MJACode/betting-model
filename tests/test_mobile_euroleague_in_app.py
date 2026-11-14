@@ -44,10 +44,12 @@ def test_the_in_play_sports_name_euroleague_and_its_empty_board_says_when_it_bet
     assert "'EUROLEAGUE'" in live and live.endswith("'NCAAB', 'NCAABW'")
     assert ("'The EuroLeague in-play model checks each game during its halftime break and bets it at most once, ' +"
             in src)
-    load = _read("lib/loadState.ts")
-    assert load.count("EUROLEAGUE: 'EuroLeague',") == 2           # spoken, and in a sentence
-    assert "export function sportDisplayName(sport: string): string {" in load
+    assert "EUROLEAGUE: 'EuroLeague'," in _read("lib/loadState.ts")       # spoken
+    assert "EUROLEAGUE: 'EuroLeague'," in src                             # in a sentence on screen
+    assert "export function sportDisplayName(sport: string): string {" in src
     assert "name: (sport: string) => string = sportDisplayName" in src
+    # tests/test_mobile_live_deciding_book.py runs liveSports.ts on its own under node
+    assert not re.search(r"^import ", src, re.M)
 
 
 def test_the_model_has_its_name_and_its_sport():

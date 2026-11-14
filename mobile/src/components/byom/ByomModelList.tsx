@@ -14,7 +14,7 @@ import { useByomLeaderboard } from '@/hooks/useByomLeaderboard';
 import { useByomSeason } from '@/hooks/useByomSeason';
 import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
-import { sportDisplayName } from '@/lib/loadState';
+import { sportDisplayName } from '@/lib/liveSports';
 import { asByomSport, byomEmptyLabel } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Sport } from '@/hooks/useSportFilter';

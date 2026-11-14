@@ -20,8 +20,8 @@ import { GROUP_ORDER, statsForSport } from '../src/lib/statCatalog';
 import { supportsTeamBoard } from '../src/lib/teamStatCatalog';
 import { boardSegmentsFor, segmentsForSport } from '../src/lib/statSegments';
 import { ALL_SPORTS } from '../src/lib/dailyResults';
-import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence } from '../src/lib/liveSports';
-import { sportDisplayName, sportSpokenName } from '../src/lib/loadState';
+import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence, sportDisplayName } from '../src/lib/liveSports';
+import { sportSpokenName } from '../src/lib/loadState';
 import { isGameOver } from '../src/lib/format';
 import { ACTION_THRESHOLDS } from '../src/lib/thresholds.generated';
 
