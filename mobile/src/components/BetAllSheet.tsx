@@ -265,10 +265,10 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
               <Text style={styles.askTitle} accessibilityRole="header">Stop Bet all?</Text>
               <Text style={styles.askBody}>Bets you placed and haven’t marked won’t be tracked.</Text>
               <View style={styles.askButtons}>
-                <Pressable onPress={() => setConfirmStop(false)} accessibilityRole="button" style={[styles.askBtn, styles.askPrimary]}>
+                <Pressable onPress={() => setConfirmStop(false)} accessibilityRole="button" accessibilityLabel="Keep going" style={[styles.askBtn, styles.askPrimary]}>
                   <Text style={styles.askPrimaryText}>Keep going</Text>
                 </Pressable>
-                <Pressable onPress={onClose} accessibilityRole="button" style={styles.askBtn}>
+                <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Stop Bet all" style={styles.askBtn}>
                   <Text style={styles.askBtnText}>Stop</Text>
                 </Pressable>
               </View>
@@ -289,6 +289,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                 <Pressable
                   onPress={() => setSelected(allSelected ? new Set() : new Set(picks.map((p) => p.key)))}
                   accessibilityRole="button"
+                  accessibilityLabel={allSelected ? 'Select none' : 'Select all'}
                   hitSlop={12}
                   style={styles.selectAll}
                 >
@@ -362,6 +363,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                   onPress={start}
                   disabled={totals.legs === 0}
                   accessibilityRole="button"
+                  accessibilityLabel={ctaLabel}
                   accessibilityState={{ disabled: totals.legs === 0 }}
                   style={({ pressed }) => [styles.cta, totals.legs === 0 && styles.ctaOff, pressed && styles.pressed]}
                 >
@@ -381,13 +383,13 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                     })()}
                   </Text>
                   <View style={styles.askButtons}>
-                    <Pressable onPress={() => answer(askFor, 'placed')} accessibilityRole="button" style={[styles.askBtn, styles.askPrimary]}>
+                    <Pressable onPress={() => answer(askFor, 'placed')} accessibilityRole="button" accessibilityLabel="Placed, track these bets" style={[styles.askBtn, styles.askPrimary]}>
                       <Text style={styles.askPrimaryText}>Placed · track</Text>
                     </Pressable>
-                    <Pressable onPress={() => answer(askFor, 'todo')} accessibilityRole="button" style={styles.askBtn}>
+                    <Pressable onPress={() => answer(askFor, 'todo')} accessibilityRole="button" accessibilityLabel="Not yet" style={styles.askBtn}>
                       <Text style={styles.askBtnText}>Not yet</Text>
                     </Pressable>
-                    <Pressable onPress={() => answer(askFor, 'skipped')} accessibilityRole="button" style={styles.askBtn}>
+                    <Pressable onPress={() => answer(askFor, 'skipped')} accessibilityRole="button" accessibilityLabel="Skip this sportsbook" style={styles.askBtn}>
                       <Text style={styles.askBtnText}>Skip</Text>
                     </Pressable>
                   </View>
@@ -417,6 +419,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                             <Pressable
                               onPress={() => void openStep(step, step.links[0] ?? null)}
                               accessibilityRole="button"
+                              accessibilityLabel={`Open ${step.name}`}
                               accessibilityHint={`Opens ${step.name} with these picks on the slip`}
                               style={({ pressed }) => [styles.open, pressed && styles.pressed]}
                             >
@@ -428,6 +431,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                                 key={link}
                                 onPress={() => void openStep(step, link)}
                                 accessibilityRole="button"
+                                accessibilityLabel={`Add pick ${i + 1} of ${step.links.length} in ${step.name}`}
                                 style={({ pressed }) => [styles.open, pressed && styles.pressed]}
                               >
                                 <Text style={styles.openText}>{`Add pick ${i + 1} of ${step.links.length} in ${step.short}`}</Text>
@@ -443,7 +447,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                             </Text>
                           ) : null}
                           {st === 'opened' ? (
-                            <Pressable onPress={() => setAskFor(step.bookmaker)} accessibilityRole="button" style={styles.markPlaced}>
+                            <Pressable onPress={() => setAskFor(step.bookmaker)} accessibilityRole="button" accessibilityLabel={`Mark ${step.name} bets as placed`} style={styles.markPlaced}>
                               <Text style={styles.link}>Mark as placed</Text>
                             </Pressable>
                           ) : null}
@@ -459,7 +463,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                   <Text style={styles.summary}>
                     {placedLegs === 0 ? 'Nothing was tracked.' : `${placedLegs} ${placedLegs === 1 ? 'bet' : 'bets'} added to tracked bets.`}
                   </Text>
-                  <Pressable onPress={onClose} accessibilityRole="button" style={({ pressed }) => [styles.cta, pressed && styles.pressed]}>
+                  <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" style={({ pressed }) => [styles.cta, pressed && styles.pressed]}>
                     <Text style={styles.ctaText}>Done</Text>
                   </Pressable>
                 </View>
