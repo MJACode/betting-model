@@ -1994,6 +1994,60 @@ def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
         conn.close()
 
 
+# A history snapshot sets a stored game's kickoff only when it was taken in
+# this many hours before that kickoff, before the game started.
+HISTORY_KICKOFF_WINDOW_H = 24
+
+
+def _history_game_rows(game_rows: list[dict], snapshot_at: str) -> tuple[list[dict], list[dict]]:
+    """Split one history snapshot's game rows: (rows that may set the stored
+    kickoff, rows that may only insert a missing game).
+
+    2026-11-14. `_upsert_games` lets every snapshot overwrite `commence_time`,
+    which is right for the live feed (the newest listing is the best) and wrong
+    for a backfill, whose snapshots do not arrive in time order. The hourly
+    NCAAF purchase changed the stored kickoff of 1,590 of 3,911 odds rows of
+    2023-2025 games: most by minutes (a post-start snapshot listing the actual
+    start), 84 by more than an hour, among them Florida at Miami 2025-09-20
+    moved from 23:30 to 16:00 UTC by a fill job's 2025-09-11 snapshot, which
+    still carried the early-week placeholder. So a snapshot sets the kickoff
+    only when it was taken inside the HISTORY_KICKOFF_WINDOW_H hours before
+    the kickoff it lists; any other snapshot only inserts a game not yet
+    stored (`_insert_game_stubs`) and never overwrites one.
+    """
+    t = _parse_utc(snapshot_at)
+    setting, stubs = [], []
+    for r in game_rows:
+        c = _parse_utc(r.get("commence_time"))
+        if t is not None and c is not None and t < c <= t + timedelta(hours=HISTORY_KICKOFF_WINDOW_H):
+            setting.append(r)
+        else:
+            stubs.append(r)
+    return setting, stubs
+
+
+def _parse_utc(v) -> datetime | None:
+    if not v:
+        return None
+    try:
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def _insert_game_stubs(conn: DBConnection, game_rows: list[dict]) -> int:
+    """Insert games not yet stored; a stored game is left exactly as it is."""
+    if not game_rows:
+        return 0
+    conn.executemany("""
+        INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, commence_time, data_source)
+        VALUES (%(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(home_team)s, %(away_team)s, %(commence_time)s, %(data_source)s)
+        ON CONFLICT(game_id) DO NOTHING
+    """, game_rows)
+    return len(game_rows)
+
+
 def run_historical_odds_range(sport: str, start: str, end: str,
                               hours_utc: list[int] | None = None,
                               bookmakers: list[str] | None = None,
@@ -2127,7 +2181,9 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     flipped = _mark_in_play(game_rows, odds_rows)
                     stats["marked_in_play"] += flipped
                     if game_rows:
-                        stats["games"] += _upsert_games(conn, game_rows)
+                        setting, stubs = _history_game_rows(game_rows, snapshot_at)
+                        stats["games"] += _upsert_games(conn, setting) if setting else 0
+                        stats["games"] += _insert_game_stubs(conn, stubs)
                     if odds_rows:
                         stats["odds_rows"] += _insert_odds(conn, odds_rows)
                     conn.execute("""
