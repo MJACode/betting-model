@@ -222,6 +222,22 @@ The meter stops the run at the floor whatever else is spending.
 
     python C:/Users/micha/tennis_research/run_with_db.py data.ingestors.tennis_odds_history         --buy C:/Users/micha/tennis_research/coverage_windows.json --step-min 60 --max-credits 2300000
 
+**The purchase, as run (2026-11-13, mike's yes).** Launched 10:29 ET in six
+shards whose ceilings summed to the plan. Two shards stopped on a database
+connection lost at a commit and were relaunched on code that reconnects and
+replays bought hours from the ledger for 0 credits. All six then stopped at the
+7-day-reserve floor (account about 2,687,300); mike: *"lower the floor it's
+fine"*, and six follow-on jobs continued with no reserve days (floor
+2,099,550). Other jobs drew the account to that floor with three windows left
+(the 2020 men's French Open, the last five days of the 2021 men's Wimbledon,
+the last day of the 2021 women's Australian Open); mike: *"put the odds api
+floor to zero"*, and those three were bought with no floor (32,640 credits).
+**Result: all 129 windows, 74,803 calls, 2,242,680 credits** (the ledger,
+`tennis_odds_fetches` source `odds_api_tennis_history`), **2,996,347
+change-only prices on 17,071 matches** in `tennis_odds_quotes`; account at
+1,989,219 afterwards. The calls are missing from `api_call_log`: the purchaser
+imported `config` too late to install the call logger (fixed for later runs).
+
 **The forward log (from 2026-11-13).** Every active tennis key, both book
 groups, every 20 minutes, through the live endpoint (12 credits a pass),
 stored in `tennis_odds_quotes` beside the history (`tennis_odds_fetches`
@@ -246,9 +262,8 @@ cover it on an average quote; any edge is in the quotes that stand apart.
 
 ## Open items
 
-- The purchase (above) waits on mike's yes (issue #1277). Then: the baselines on every
-  grid row, mechanisms 1 to 6 in that order, the kill tests on anything
-  positive.
+- The research on the bought history: the baselines on every grid row,
+  mechanisms 1 to 6 in that order, the kill tests on anything positive.
 - The forward log runs on mike's PC until 2026-11-23; a worker job takes it
   over when the first model ships.
 - The code graph is rebuilt and named once, after the last code change of
