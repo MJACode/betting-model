@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, why the NHL moneyline model keeps betting Vancouver: its penalty-kill, goals-against and rating inputs raise teams with bad numbers; worth ~62 of 83 backtest units, but those bets beat the close less (55.8% vs 65.3%); no change, live re-check at 250 bets (#1307) |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, live Discord posts show each pick's signal time and Discord's counting "x seconds ago"; the 45 s note retired (#1294); the app's ~45s line is about the card's provider price and stays |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, UFC rebuilt with the league skill: the three old models retired; `ufc_open_moneyline` live on merge (fight winner a week out, Pinnacle-anchored ratings, 846 backtest bets +12.85% on the bought 2020-2026 history); the history bought for 150,240 credits; two free price archives stored |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, #1034 brought up to date with master: a timed-out started-game lookup at insert no longer loses the batch of picks; master's test fixture kept; the offset half changes nothing today (0 of 19,166 games since 09-01 store a non-UTC start) |
