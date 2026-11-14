@@ -14,7 +14,10 @@ its 311 replayed bets are road underdogs.
 A straight port of the research rule (scripts/ncaaf_search/audit_2026_11/
 lab.py: price_ml(x, tabs, "cons"), best(), and sweep()'s two filters). Nothing
 here improves on it. The build replays 2023-2025 through decide() below and
-matches the research's 311 bets game for game.
+matched the research's 311 bets game for game on the research's seven deciding
+books. Hard Rock left them on 2026-11-13 (mike: it cannot be bet in
+Massachusetts), and the six-book rebuild replays 287: 265 identical, 22 moved
+to the next-best book, 24 gone (docs/sports/ncaaf.md).
 
 THE RULE, per game, at 14:00 UTC on its Eastern date:
   1. QUOTES. Each of the ten fetched books' (CONS_BOOKS) standing full-game
@@ -79,14 +82,16 @@ ROOT = Path(__file__).resolve().parent.parent
 ARTIFACT_PATH = "models/saved/ncaaf_moneyline_market_2026.json"
 ARTIFACT_KIND = "ncaaf_moneyline_market"
 
-# The books the research placed a bet at, and the ten it took the consensus
-# over. Pinned here, not read from config: an environment override of
-# BEST_LINE_BOOKMAKERS or LINE_SHOP_BOOKMAKERS must not silently change who is
-# in the consensus. tests/test_ncaaf_moneyline_market.py pins them to config's
+# The books a bet may be placed at, and the ten the consensus is taken over.
+# Hard Rock is consensus-only since 2026-11-13: config.STATE_LIMITED_BOOKMAKERS,
+# so the deciding books are the research's seven less it, and the consensus is
+# the research's ten unchanged. Pinned here, not read from config: an
+# environment override of BEST_LINE_BOOKMAKERS or LINE_SHOP_BOOKMAKERS must not
+# silently change who is in the consensus. tests/test_ncaaf_moneyline_market.py pins them to config's
 # defaults, and the card refuses a best side at a book config no longer lists.
 DECIDING_BOOKS = ("draftkings", "fanduel", "betmgm", "williamhill_us", "fanatics",
-                  "betrivers", "hardrockbet")
-CONS_BOOKS = DECIDING_BOOKS + ("bovada", "pinnacle", "betparx")
+                  "betrivers")
+CONS_BOOKS = DECIDING_BOOKS + ("hardrockbet", "bovada", "pinnacle", "betparx")
 
 CHECK_HOUR_UTC = 14
 WINDOW_MIN = 60

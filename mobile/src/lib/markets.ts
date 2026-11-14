@@ -383,7 +383,9 @@ export function linkForSide(
  *                         betPARX joined them on 2026-11-06 (mike): it is
  *                         licensed in only a few states (one app each for
  *                         MD, PA, NJ), so it is never the book a pick names
- *                         (config.STATE_LIMITED_BOOKMAKERS).
+ *                         (config.STATE_LIMITED_BOOKMAKERS). Hard Rock Bet
+ *                         joined on 2026-11-13 (mike): it cannot be bet in
+ *                         Massachusetts.
  * The picker and the per-pick line chips read BETTABLE_BOOKS; the All-books
  * table on the detail screen is passed the member's own books.
  *
@@ -442,11 +444,12 @@ export const LINE_SHOP_BOOKS: BookKey[] = [
 /** Reference-only books — mirrors config.BEST_LINE_EXCLUDE_BOOKMAKERS, as a
  *  set. ESPN BET is no longer fetched; it stays listed because config keeps
  *  it excluded, so a book re-added to the fetch list stays out of the picker.
- *  betPARX is fetched and reference-only (config.STATE_LIMITED_BOOKMAKERS).
+ *  betPARX and Hard Rock Bet are fetched and reference-only
+ *  (config.STATE_LIMITED_BOOKMAKERS: neither can be bet in Massachusetts).
  *  Bally Bet and Fliff are not here and not in LINE_SHOP_BOOKS: the fetch list
  *  dropped them, and women's college basketball still stores them as reference
  *  prices (config.NCAABW_EXTRA_BOOKMAKERS). They stay out of the picker. */
-export const REFERENCE_ONLY_BOOKS: readonly string[] = ['pinnacle', 'bovada', 'espnbet', 'betparx'];
+export const REFERENCE_ONLY_BOOKS: readonly string[] = ['pinnacle', 'bovada', 'espnbet', 'betparx', 'hardrockbet'];
 
 /** Books a member can be sent to — mirrors config.BEST_LINE_BOOKMAKERS. */
 export const BETTABLE_BOOKS: BookKey[] = LINE_SHOP_BOOKS.filter(

@@ -59,10 +59,10 @@ tuned after the result.
 **What it bets.** A moneyline that is cheaper than the books' spreads say it
 should be. The spreads of the ten fetched books give one middle number for the
 game, and that number gives each team a chance of winning. The model takes the
-best moneyline among the seven books a pick may name, and bets it when the
+best moneyline among the six books a pick may name, and bets it when the
 team's chance is more than **0.02** above the chance its price implies. It
 never lays a price shorter than -200. On the three replayed seasons every bet
-was an underdog, priced +110 to +430 (median +146). The rule itself has no
+was an underdog, priced +110 to +430 (median +145). The rule itself has no
 upper limit on the price.
 
 **How a side is priced, step by step:**
@@ -85,9 +85,10 @@ upper limit on the price.
    winning is the chance of a positive final margin at that expected margin,
    from the final-margin distribution. Football has no ties.
 5. **The edge** of a side is its fair chance minus the implied chance of its
-   price, vig included. Only the seven deciding books' prices are considered
-   (`config.BEST_LINE_BOOKMAKERS`: the ten less Bovada, Pinnacle and betPARX),
-   and every side priced shorter than -200 is removed first.
+   price, vig included. Only the six deciding books' prices are considered
+   (`config.BEST_LINE_BOOKMAKERS`: the ten less Hard Rock, Bovada, Pinnacle
+   and betPARX), and every side priced shorter than -200 is removed first.
+   Hard Rock was a deciding book until 2026-11-13 (below).
 6. **The bet** is the largest edge in the game, over every deciding book and
    both sides, when it is above 0.02 and at least three other books are in
    the consensus. A tie goes to the longer price, then the book's name.
@@ -185,6 +186,34 @@ the late halves +9.40 on 162. Neighbouring cuts on the same replay: 0.01 made
 +13.78 units on 601 bets (+4.1%; it lays prices from -108 to +3500); 0.03
 made +10.27 on 136 (+11.7%); 0.04 made +5.45 on 43 (+19.4%); 0.05 lost 1.96
 on 11.
+
+**Rebuilt on six deciding books, 2026-11-13** (mike: *"Hard rock needs to be
+removed from the basis of picks as the best line. We can't bet this in
+Massachusetts"*). Everything above is the seven-book build the model went live
+on. Hard Rock stays in the ten-book consensus, which is unchanged; it is no
+longer a book the bet can be placed at. Left in as a deciding book, a game
+whose best side was at Hard Rock would have gone unbet (the card does not
+fall back to the next book): 46 of the 311 replayed bets, +5.58 units. Rebuilt
+on six books, 22 of those 46 games bet at the next-best book instead (+1.45
+units) and 24 drop out. The other 265 bets are unchanged: the same game,
+side, book and price as the research. The live artifact is the six-book one.
+
+| Season | Bets | Record | Units | Return | Without the 10 best dates |
+|---|---|---|---|---|---|
+| 2023 | 140 | 49-91 | -2.77 | -3.3% | -13.79 units |
+| 2024 | 72 | 33-39 | +11.94 | +28.3% | -5.82 units |
+| 2025 | 75 | 30-45 | +1.41 | +2.8% | -11.77 units |
+| **2023-2025** | **287** | **112-175** | **+10.57** | **+5.9%** | **-11.15 units** |
+
+177.77 units risked; the build's 95% interval, resampling game dates, is
+-6.8% to +17.7%. Prices laid +110 to +430 (median +145), no favourites, 273 of
+287 road teams; EV +0.0437 to +0.2789, so the 0.04 EV floor still sits under
+every bet. Early halves +1.58 units on 137 bets, late halves +8.99 on 150.
+Neighbouring cuts: 0.01 +14.82 on 559, 0.03 +9.06 on 126, 0.04 +4.37 on 37,
+0.05 -2.34 on 9. Controls: offset zero 180 bets, -14.16 units; every road team
++110 to +430 at the six books 817 bets, +5.92 units. 2023 is identical: none
+of its bets had Hard Rock as the best price (the stored data holds 851 Hard
+Rock NCAAF odds rows dated 2023, against 27,244 in 2024).
 
 **The risks, plainly:**
 

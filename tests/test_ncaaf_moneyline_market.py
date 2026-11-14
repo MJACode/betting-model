@@ -136,7 +136,7 @@ def test_the_pinned_books_are_the_ones_config_fetches_and_decides_at(monkeypatch
     for var in ("LINE_SHOP_BOOKMAKERS", "BEST_LINE_BOOKMAKERS", "BEST_LINE_EXCLUDE_BOOKMAKERS"):
         assert not os.environ.get(var), f"{var} is set in this environment"
     assert set(mm.CONS_BOOKS) == set(config.LINE_SHOP_BOOKMAKERS) and len(mm.CONS_BOOKS) == 10
-    assert set(mm.DECIDING_BOOKS) == set(config.BEST_LINE_BOOKMAKERS) and len(mm.DECIDING_BOOKS) == 7
+    assert set(mm.DECIDING_BOOKS) == set(config.BEST_LINE_BOOKMAKERS) and len(mm.DECIDING_BOOKS) == 6
     assert not set(mm.DECIDING_BOOKS) & set(config.STATE_LIMITED_BOOKMAKERS)
     assert list(mm.CLOSE_PRIORITY) == config.NCAAF_LINE_BOOKMAKER_PRIORITY[:4]
 
@@ -151,21 +151,24 @@ def test_the_artifact_is_for_2026_and_holds_the_replay_that_matched_the_research
     assert art["table_train_games"] == 10123 and art["table_train_seasons"] == [2014, 2025]
     assert round(art["offset"], 3) == -0.138
     assert art["table"]["pmf"].shape == (len(md.GRID), len(md.KK))
+    # Rebuilt 2026-11-13 on six deciding books: Hard Rock left them (mike: it
+    # cannot be bet in Massachusetts). The research chose from seven, so 265
+    # of its 311 bets replay exactly and the rest were games Hard Rock priced
+    # best, which now bet at the next book or not at all.
     chk = art["research_check"]
-    assert chk["research_bets"] == chk["replay_bets"] == chk["same_game_side_book_price"] == 311
-    assert chk["replay_only"] == [] and chk["research_only"] == []
-    assert chk["same_game_other_side_book_or_price"] == [] and chk["max_abs_edge_diff"] == 0.0
+    assert (chk["research_bets"], chk["replay_bets"], chk["same_game_side_book_price"]) == (311, 287, 265)
+    assert chk["replay_only"] == [] and chk["max_abs_edge_diff"] == 0.0
     r = art["replay"]["by_season"]
-    assert (r["2023-2025"]["bets"], r["2023-2025"]["record"], r["2023-2025"]["units"]) == (311, "122-189", 14.7)
+    assert (r["2023-2025"]["bets"], r["2023-2025"]["record"], r["2023-2025"]["units"]) == (287, "112-175", 10.57)
     assert [(r[s]["bets"], r[s]["units"]) for s in ("2023", "2024", "2025")] == \
-        [(140, -2.77), (78, 16.66), (93, 0.81)]
+        [(140, -2.77), (72, 11.94), (75, 1.41)]
     assert (r["2023-2025"]["price_min"], r["2023-2025"]["price_median"], r["2023-2025"]["price_max"]) == \
-        (110.0, 146.0, 430.0)
-    assert r["2023-2025"]["favourites"] == 0 and r["2023-2025"]["road_teams"] == 294
-    assert art["replay"]["control_offset_zero"]["bets"] == 212
-    assert art["replay"]["control_offset_zero"]["units"] == -9.22
-    assert art["replay"]["control_road_teams_in_price_range"]["bets"] == 813
-    assert art["replay"]["control_road_teams_in_price_range"]["units"] == 6.94
+        (110.0, 145.0, 430.0)
+    assert r["2023-2025"]["favourites"] == 0 and r["2023-2025"]["road_teams"] == 273
+    assert art["replay"]["control_offset_zero"]["bets"] == 180
+    assert art["replay"]["control_offset_zero"]["units"] == -14.16
+    assert art["replay"]["control_road_teams_in_price_range"]["bets"] == 817
+    assert art["replay"]["control_road_teams_in_price_range"]["units"] == 5.92
 
 
 def test_an_artifact_built_on_other_books_or_of_another_kind_is_refused(tmp_path):

@@ -165,6 +165,37 @@ It is still fetched, and it is now in `config.STATE_LIMITED_BOOKMAKERS`, which n
 environment override of `BEST_LINE_BOOKMAKERS` or `BETTABLE_BOOKS` can put back.
 Evidence and the volume it cost: `docs/rules_evidence.md`, §6 entry.
 
+**hardrockbet left the offered set on 2026-11-13** (mike: *"Hard rock needs to
+be removed from the basis of picks as the best line. We can't bet this in
+Massachusetts"*). The test is the bettor's state, not a count of states: Hard
+Rock Bet is live in ten (AZ, CO, FL, IL, IN, MI, NJ, OH, TN, VA) and
+Massachusetts is not one of them. Massachusetts licenses seven apps:
+DraftKings, FanDuel, BetMGM, Caesars, Fanatics, theScore Bet and Bally Bet.
+It joined `config.STATE_LIMITED_BOOKMAKERS` and stays fetched. What it cost,
+read from `picks` on 2026-11-13 (BETs created in the 30 days before):
+
+| | BETs |
+|---|---|
+| all BETs | 685 |
+| decided at Hard Rock (`decision_book`) | 154, the most of any book |
+| of which `nhl_prop_shots_on_goal` | 75 of that model's 76 |
+| scored on Hard Rock's own line (`line_book`) | 112 |
+
+A pick on DraftKings' line whose best price was at Hard Rock now takes the
+next-best book's price, and may fall below its cut. A pick on Hard Rock's own
+line has no price to move to unless another bettable book hangs the same
+number. NHL shots on goal keeps DraftKings' and BetMGM's lines: on
+2026-11-12/13 DraftKings listed 306 shots propositions and BetMGM 248, against
+Hard Rock's 315. Two models carried their own copy of the list:
+`nfl_prop_market.SOFT_BOOKS` dropped it (none of its 90 BETs to date was
+decided there), and the NCAAF moneyline model was rebuilt on six deciding books
+(`docs/sports/ncaaf.md`). Settled and posted Hard Rock picks are unchanged
+(CLAUDE.md §1c).
+
+BetRivers fails the same test (live in about fifteen states, not
+Massachusetts) and decided 62 of those 685 BETs. It was left in the offered
+set until mike decides.
+
 ---
 
 ## 3. Stage 1 — shipped in this change (no model behaviour changes)

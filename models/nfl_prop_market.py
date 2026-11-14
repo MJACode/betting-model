@@ -72,8 +72,17 @@ SOFT_BOOKS = (
     # fliff left on 2026-09-20 (mike: "yes drop the 4 books"): the fetch went
     # from fourteen named books to ten to halve the feed bill, and a soft book
     # the pull never requests returns no quotes. It decided 3 live bets.
-    "betrivers", "hardrockbet",
+    # hardrockbet left 2026-11-13 (mike: it cannot be bet in Massachusetts;
+    # config.STATE_LIMITED_BOOKMAKERS). None of this model's 90 BETs to that
+    # day was decided there. Its quotes are still fetched -- the NFL pull
+    # names every LINE_SHOP book and the NCAAF pull adds it back below.
+    "betrivers",
 )
+
+# Books this model's pulls keep FETCHING that it never bets at. A book leaves
+# SOFT_BOOKS when a member cannot bet it, not because its data stopped
+# mattering, and the NCAAF prop pull builds its book list from this module.
+FETCHED_NOT_BET = ("hardrockbet",)
 
 # espnbet was HERE until 2026-09-08 and should not have been. mike, 2026-09-03:
 # "remove william hill and espn bet (shut down last year)". That was applied to

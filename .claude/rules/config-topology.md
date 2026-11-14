@@ -68,11 +68,18 @@ at, and it excludes the books a member cannot bet.
 2026-11-06: *"global rule. remove betparx from sports books for recommeding
 betting lines in picks only niche avaialble in a few states"*.) betPARX is
 licensed in Maryland, Pennsylvania and New Jersey only, so it sits in
-`config.STATE_LIMITED_BOOKMAKERS`. That one set takes it out of
+`config.STATE_LIMITED_BOOKMAKERS`. **Hard Rock joined it on 2026-11-13**
+(mike: *"Hard rock needs to be removed from the basis of picks as the best
+line. We can't bet this in Massachusetts"*): it is live in ten states, none
+of them Massachusetts. The test is the bettor's state, not a count of states.
+That one set takes them out of
 `BEST_LINE_BOOKMAKERS` and `BETTABLE_BOOKS` after any environment override,
-which the espnbet exclusion does not do. It stays in `LINE_SHOP_BOOKMAKERS`,
-because the NCAAB consensus models take a median over every book and were
-fitted with it. The app (`REFERENCE_ONLY_BOOKS` in `mobile/src/lib/markets.ts`),
+which the espnbet exclusion does not do. Both stay in `LINE_SHOP_BOOKMAKERS`,
+because the NCAAB and NCAAF consensus models take a median over every book and
+were fitted with them. A model that pins its own betting books carries the
+change too: `nfl_prop_market.SOFT_BOOKS` dropped Hard Rock (its NCAAF pull
+still fetches it, `FETCHED_NOT_BET`), and the NCAAF moneyline model was
+rebuilt on six deciding books. The app (`REFERENCE_ONLY_BOOKS` in `mobile/src/lib/markets.ts`),
 the NFL cards' standalone fallback (`nfl/data_ingest/books.py`) and the NBA
 in-play fetch (`feed_books`) each carry a copy, and
 `tests/test_betparx_never_a_pick_book.py` pins all of them. A new deciding
