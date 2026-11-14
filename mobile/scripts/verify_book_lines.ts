@@ -87,6 +87,7 @@ check('Pinnacle is not', !isBettableBook('pinnacle'));
 check('Bovada is not', !isBettableBook('bovada'));
 check('ESPN BET is not (mike, 2026-09-03)', !isBettableBook('espnbet'));
 check('betPARX is not: a few states only (mike, 2026-11-06)', !isBettableBook('betparx'));
+check('Hard Rock is not: not licensed in Massachusetts (mike, 2026-11-13)', !isBettableBook('hardrockbet'));
 check('Bally Bet and Fliff are not: women\'s college basketball reference prices (2026-11-10)',
   !isBettableBook('ballybet') && !isBettableBook('fliff'));
 check('the four women\'s-only reference books are named and not bettable',
@@ -169,17 +170,20 @@ const tied = pickLineQuotes(
 check('tied prices are both best', tied.length === 2 && tied.every((x) => x.isBest));
 check('record chip sorts first in a tie', tied[0].bookmaker === MODEL_BOOK);
 
-// Moneyline: no line to match on, so every bettable book prices in.
+// Moneyline: no line to match on, so every bettable book prices in. Hard
+// Rock pays most here and is still left out (mike, 2026-11-13).
 const mlRows: BookPricedRow[] = [
   { bookmaker: 'fanduel', home_price: 105 },
   { bookmaker: 'pinnacle', home_price: 108 },
-  { bookmaker: 'hardrockbet', home_price: 102 },
+  { bookmaker: 'betrivers', home_price: 102 },
+  { bookmaker: 'hardrockbet', home_price: 110 },
 ];
 const ml = pickLineQuotes(
   totalsPick({ pick_side: 'home', model_id: 'mlb_moneyline', scored_line: null, dk_odds: 100 }),
   mlRows,
 );
-check('moneyline needs no line match', books(ml) === 'fanduel,hardrockbet,draftkings', books(ml));
+check('moneyline needs no line match', books(ml) === 'fanduel,betrivers,draftkings', books(ml));
+check('Hard Rock excluded even though it pays most', !ml.some((x) => x.bookmaker === 'hardrockbet'));
 
 // No rows at all: the record chip alone (older picks, pruned odds).
 const alone = pickLineQuotes(totalsPick(), []);
@@ -255,27 +259,28 @@ const many = pickLineQuotes(
     { bookmaker: 'hardrockbet', under_price: -115, total_line: 8.5 },
   ],
 );
-check('fixture: 7 quotes, DK last', many.length === 7 && many[6].bookmaker === MODEL_BOOK);
+// Six bettable books since Hard Rock left them (2026-11-13): its row is dropped.
+check('fixture: 6 quotes, DK last', many.length === 6 && many[5].bookmaker === MODEL_BOOK, books(many));
 
 const fits = selectLineChips(many.slice(0, 3), MODEL_BOOK, 4);
 check('everything fits → nothing hidden', fits.shown.length === 3 && fits.hidden === 0);
 
 const dkUser = selectLineChips(many, MODEL_BOOK, 4);
 check('DK user: record chip kept even though it ranks last', dkUser.shown.some((x) => x.bookmaker === MODEL_BOOK));
-// Top 4 by payout are FD, MGM, CZR, FAN; DK (rank 7) is pinned, so the weakest
+// Top 4 by payout are FD, MGM, CZR, FAN; DK (rank 6) is pinned, so the weakest
 // of those four — Fanatics — gives up its slot.
 check('DK user: the weakest shown chip gave up its slot', !dkUser.shown.some((x) => x.bookmaker === 'fanatics'), books(dkUser.shown));
 check('DK user: best-first order preserved', books(dkUser.shown) === 'fanduel,betmgm,williamhill_us,draftkings', books(dkUser.shown));
-check('DK user: hidden count', dkUser.hidden === 3, `${dkUser.hidden}`);
+check('DK user: hidden count', dkUser.hidden === 2, `${dkUser.hidden}`);
 
-const hrUser = selectLineChips(many, 'hardrockbet', 4);
+const brUser = selectLineChips(many, 'betrivers', 4);
 check(
-  'Hard Rock user: both their book and the record chip are pinned',
-  hrUser.shown.some((x) => x.bookmaker === 'hardrockbet') && hrUser.shown.some((x) => x.bookmaker === MODEL_BOOK),
-  books(hrUser.shown),
+  'BetRivers user: both their book and the record chip are pinned',
+  brUser.shown.some((x) => x.bookmaker === 'betrivers') && brUser.shown.some((x) => x.bookmaker === MODEL_BOOK),
+  books(brUser.shown),
 );
-check('Hard Rock user: the best price is still first', hrUser.shown[0].bookmaker === 'fanduel');
-check('Hard Rock user: still 4 chips', hrUser.shown.length === 4 && hrUser.hidden === 3);
+check('BetRivers user: the best price is still first', brUser.shown[0].bookmaker === 'fanduel');
+check('BetRivers user: still 4 chips', brUser.shown.length === 4 && brUser.hidden === 2, `${brUser.shown.length}/${brUser.hidden}`);
 
 const pinUser = selectLineChips(many, 'pinnacle', 4);
 check('a preferred book with no chip changes nothing', books(pinUser.shown) === books(dkUser.shown));
