@@ -2844,9 +2844,10 @@ def catch_up_refresh_pass(*, source: str = "boot") -> dict:
             return {"status": "skipped", "reason": decision.reason}
         log.info("refresh catch-up [%s]: run — %s", source, decision.reason)
         outcome = run_refresh_pass()
-        # A boot inside 05:40-07:15 ET can decide to re-run a killed pass and
-        # then have that pass stand down because the daily is in its chain.
-        # Logging "run" there would say the hour was recovered when it was not.
+        # "skipped" means another refresh already holds the lock, so this
+        # catch-up did not start a second pass. A refresh that finds the
+        # daily running waits for it and then scores; that path returns
+        # after the pass, not "skipped".
         if outcome == "skipped":
             log.info("refresh catch-up [%s]: the pass stood down — %s",
                      source, decision.reason)
@@ -2902,8 +2903,8 @@ def build_scheduler() -> BlockingScheduler:
                 release = decision.release
                 result = func(*a, **kw)
                 if result == "skipped":
-                    # The job stood down on its own (a refresh in the morning
-                    # window while the daily runs, a daily already running).
+                    # The job returned without doing its work: another refresh
+                    # already holds the lock, or a daily is already running.
                     status, detail = "skipped", "stood down; see the job's log"
                 return result
             except Exception as exc:                          # noqa: BLE001
@@ -3182,9 +3183,9 @@ def build_scheduler() -> BlockingScheduler:
     # Hour 5 is not in this cron, on purpose. On 2026-11-12 the 05:17 pass
     # was still a candidate to be running at 05:50, when disk IO was already
     # saturated, and the 06:00 daily then started a second full writer beside
-    # it. The 04:17 pass is the last full refresh before the daily, and the
-    # daily may wait up to 15 minutes for a refresh still running, only
-    # inside the morning window.
+    # it. The 04:17 pass is the last full refresh before the daily. The daily
+    # waits up to 30 minutes for a refresh that is already scoring, at every
+    # hour, and a refresh waits for the daily and then runs.
     #
     # What hour 5 still does. The pregame poller (24x7) scores a game whose
     # DraftKings line moved and pushes a new BET itself. The card jobs keep
