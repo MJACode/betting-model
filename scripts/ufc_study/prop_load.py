@@ -139,6 +139,7 @@ F["main"] = main.matchup_id.reindex(F.game_id).to_numpy()
 flip = F.f1_is_a.to_numpy() != F.f1_is_a.reindex(F["main"]).to_numpy()
 F["flip"] = flip
 P = P[P.matchup_id.isin(F.index)].copy()
+P["src_matchup"], P["src_team"], P["src_side"] = P.matchup_id, P.team, P.side   # the page's own keys
 pf = F.flip.reindex(P.matchup_id).to_numpy()
 P["is_main"] = P.matchup_id.to_numpy() == F["main"].reindex(P.matchup_id).to_numpy()
 P["matchup_id"] = F["main"].reindex(P.matchup_id).to_numpy()

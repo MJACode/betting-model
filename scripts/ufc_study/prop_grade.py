@@ -209,8 +209,7 @@ def inputs(rows, kind):
     """Pre-fight inputs for each outcome row (matchup_id, team), oriented to
     the fighter the prop is about (x) against his opponent (y), or summed
     over both for a fight prop."""
-    F = D.drop_duplicates("matchup_id").set_index("matchup_id")[["game_id", "f1_is_a"]]
-    r = rows.join(F, on="matchup_id")
+    r = rows
     fx = X.reindex(r.game_id)
     out = {}
     if kind == "f":
@@ -233,44 +232,65 @@ def logit(p):
     return np.log(p / (1 - p))
 
 
-def fit_offset(Z, off, y, ridge=30.0):
-    """Logistic regression on Z with a fixed offset, an unpenalised intercept
-    and a ridge penalty on the slopes (IRLS)."""
-    A = np.column_stack([np.ones(len(Z)), Z])
+def fit_offset(Z, U, off, y, ridge=30.0):
+    """Logistic regression with a fixed offset: unpenalised columns U (an
+    intercept is added; the market's own logit, so its calibration can be
+    corrected; one dummy per line or round) and ridge-penalised slopes on the
+    inputs Z (IRLS)."""
+    A = np.column_stack([np.ones(len(Z)), U, Z])
     w = np.zeros(A.shape[1])
     pen = np.full(A.shape[1], ridge)
-    pen[0] = 0.0
-    for _ in range(50):
+    pen[: 1 + U.shape[1]] = 1e-6
+    for _ in range(100):
         eta = off + A @ w
-        p = 1 / (1 + np.exp(-eta))
+        p = 1 / (1 + np.exp(-np.clip(eta, -30, 30)))
         g = A.T @ (y - p) - pen * w
         H = (A * (p * (1 - p))[:, None]).T @ A + np.diag(pen)
         step = np.linalg.solve(H, g)
         w += step
         if np.abs(step).max() < 1e-8:
             break
-    return w
+    return w, A.shape[1]
 
 
-def walk_forward(rows, kind, placebo=False):
-    """rows: one per outcome (matchup_id, prop_type, team, side, fair, won, year).
-    Returns the anchored probability for each test-year row."""
-    Z = inputs(rows, kind)
-    p_out = pd.Series(np.nan, index=rows.index)
+def walk_forward(rows, kind, two_way, placebo=False, no_inputs=False):
+    """rows: one per priced outcome (matchup_id, prop_type, team, side, fair,
+    won, year). A two-way market is fitted once per pair, on its first side,
+    and the second side's chance is the rest. Returns the anchored chance for
+    every test-year row; each year is fitted on the years before it only."""
+    key = ["matchup_id", "prop_type", "team"]
+    if two_way:
+        base = rows.assign(f1=np.where(rows.side == 1, rows.fair, 1 - rows.fair),
+                           y1=np.where(rows.side == 1, rows.won, 1 - rows.won))
+        base = base.sort_values("side").drop_duplicates(key).reset_index(drop=True)
+    else:
+        base = rows.assign(f1=rows.fair, y1=rows.won).reset_index(drop=True)
+    Z = inputs(base, kind)
+    if no_inputs:
+        Z = Z.iloc[:, :0]
+    lines = sorted(base.prop_type.unique())
+    U = np.column_stack([logit(base.f1.to_numpy())]
+                        + [(base.prop_type == pt).to_numpy(float) for pt in lines[1:]])
+    p1 = pd.Series(np.nan, index=base.index)
     for y in TEST_YEARS:
-        tr = (rows.year < y) & rows.won.notna()
-        te = rows.year == y
+        tr = ((base.year < y) & base.y1.notna()).to_numpy()
+        te = (base.year == y).to_numpy()
         if tr.sum() < 200 or not te.any():
             continue
         mu, sd = Z[tr].mean(), Z[tr].std().replace(0, 1).fillna(1)
         z = ((Z - mu) / sd).fillna(0.0).clip(-4, 4).to_numpy()
-        ztr = z[tr.to_numpy()]
+        ztr = z[tr]
         if placebo:
             ztr = ztr[RNG.permutation(len(ztr))]
-        w = fit_offset(ztr, logit(rows.fair[tr].to_numpy()), rows.won[tr].to_numpy())
-        eta = logit(rows.fair[te].to_numpy()) + w[0] + z[te.to_numpy()] @ w[1:]
-        p_out[te] = 1 / (1 + np.exp(-eta))
-    return p_out
+        off = logit(base.f1.to_numpy())
+        w, _ = fit_offset(ztr, U[tr], off[tr], base.y1.to_numpy()[tr])
+        A = np.column_stack([np.ones(te.sum()), U[te], z[te]])
+        p1[te] = 1 / (1 + np.exp(-(off[te] + A @ w)))
+    if not two_way:
+        return pd.Series(p1.to_numpy(), index=rows.index)
+    m = base.assign(p1=p1).set_index(key).p1
+    got = rows.join(m, on=key).p1
+    return pd.Series(np.where(rows.side == 1, got, 1 - got), index=rows.index)
 
 
 # ── the three mechanisms ─────────────────────────────────────────────────────
@@ -340,7 +360,10 @@ def models():
             print(f"\n== {name}: no full outcome set to take a no-vig price from")
             continue
         rows = rows.reset_index(drop=True)
-        probs = {"1 price": rows.fair, "2 anchor": walk_forward(rows, kind),
+        two_way = name in TWO_WAY
+        probs = {"1 price": rows.fair,
+                 "2r recalibrated": walk_forward(rows, kind, two_way, no_inputs=True),
+                 "2 anchor": walk_forward(rows, kind, two_way),
                  "3 ml": pd.Series(coherent(rows, name), index=rows.index)}
         print(f"\n== {name}: {len(rows):,} outcomes priced, {rows.matchup_id.nunique():,} fights")
         out = []
@@ -354,24 +377,20 @@ def models():
             if p.notna().sum() == 0:
                 continue
             b = bets(rows, p, MAIN_CUT)
-            if len(b) < 30:
+            if len(b) < 30 or summary(b)["ret"] <= 0:
                 continue
             res = summary(b)
-            if res["ret"] <= 0:
-                continue
             print(f"  -- kill tests, mechanism {mech} at EV >= {MAIN_CUT}")
-            early, late = b[b.year <= 2023], b[b.year >= 2024]
-            print("   ", summary(early, "2022-23"), "\n   ", summary(late, "2024-26"))
-            for side in (1, 2):
-                print("   ", summary(b[b.side == side], f"side {side}"))
-            print("   ", summary(b[b.dec >= 3], "price +200 or longer"), "\n   ",
-                  summary(b[b.dec < 3], "shorter than +200"))
+            k = [summary(b[b.year <= 2023], "2022-23"), summary(b[b.year >= 2024], "2024-26")]
+            k += [summary(b[b.side == sd], f"side {sd}") for sd in (1, 2) if (b.side == sd).any()]
+            k += [summary(b[b.dec >= 3], "+200 or longer"), summary(b[b.dec < 3], "shorter than +200")]
+            k += [summary(b[b.bookmaker == bk], f"best at {bk}") for bk in BOOKS if (b.bookmaker == bk).any()]
+            print(pd.DataFrame([x for x in k if x.get("bets")]).to_string(index=False))
             if mech == "2 anchor":
                 pl = []
                 for _ in range(20):
-                    pp = walk_forward(rows, kind, placebo=True)
-                    s = summary(bets(rows, pp, MAIN_CUT))
-                    pl.append(s["ret"])
+                    pp = walk_forward(rows, kind, two_way, placebo=True)
+                    pl.append(summary(bets(rows, pp, MAIN_CUT))["ret"])
                 pl = np.array(pl, float)
                 print(f"    placebo (inputs shuffled within the training years, 20 runs): "
                       f"median return {np.nanmedian(pl):+.1f}%, {np.mean(pl >= res['ret']):.0%} "
