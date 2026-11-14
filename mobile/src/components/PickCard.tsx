@@ -13,17 +13,14 @@ import {
   handoffQuotesForPick,
   bookLabel,
   bookName,
-  currentLineQuotes,
   formatSideLine,
   gameMarketForModel,
-  heroAmericanForPick,
   marketForPick,
   movementFromLatest,
   numOrNull,
   otherLineQuotesForPick,
   pickTimingInfo,
   playerNameFromPickLabel,
-  priceAgeFor,
   propMarketForPick,
   splitPickTitle,
   staleLineMoveFromScoredBook,
@@ -31,7 +28,6 @@ import {
   storedQuoteBook,
   todayBoardHandoff,
   type BoardHandoff,
-  type HeroAmerican,
   type Movement,
 } from '@/lib/markets';
 import { modelHistoryMark, modelLongWithMark, isPropModel } from '@/lib/modelMeta';
@@ -47,7 +43,6 @@ import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import {
   foundAtText,
   liveNotAtMyBooksText,
-  myBooksView,
   NOT_AT_MY_BOOKS,
   NOT_AT_MY_BOOKS_AT_THIS_LINE,
   recordNoteShortFor,
@@ -58,7 +53,7 @@ import { TrackButton } from './TrackButton';
 import { openForAction } from '@/lib/discordPublish';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { gameStatusSpeech, sharpScoreSpeech, unitsSpeech } from '@/lib/a11y';
-import { priceCheckForItem } from '@/lib/pickPriceCheck';
+import { pickPriceView } from '@/lib/pickPriceView';
 import {
   signalsBetHeadline,
   signalsCardSpeech,
@@ -193,48 +188,11 @@ export function PickCard({
   // a readable good/bad (UX review).
   // EV, edge and stake at the price the pick was DECIDED at (2026-09-09).
   const modelEv = expectedValue(pick.model_probability, decisionOdds(pick));
-  // H4 price check (display only, lib/priceCheck.ts): an implausible edge or a
-  // lock far from the book's current price shows "Price check" and "—" for
-  // edge and EV instead of headlining the board. After the start "Now" is the
-  // in-play price, so only the edge rule applies then (Reviewer #847).
-  const check = priceCheckForItem(item, liveState);
-  const flagged = check.flagged;
-  // The scorer's price-age rule (markets.PREGAME_PRICE_MAX_AGE_MIN): before
-  // the start, a deciding price the book stopped updating is no price, so
-  // the card shows "Now —" and offers no hand-off at it. Same start test
-  // as the price check above.
-  const priceAge = priceAgeFor(pick, game, liveState);
-  const modelHero = heroAmericanForPick(pick, item.latestOdds, item.bookRows, priceAge);
-  // At THEIR books. 'mine': the record book is not theirs but one of theirs
-  // has the same bet, so the card shows that price with the edge and return
-  // at it. 'none': none of theirs has it. Only on an open BET with a price;
-  // a settled or non-BET row keeps the pick's own numbers.
-  const myView =
-    myBooksReady && pick.signal_type === 'BET' && hasPricedLine(pick) && openForAction(pick)
-      ? myBooksView({
-          quotes: currentLineQuotes(pick, item.bookRows, modelHero, priceAge),
-          // Live or not, the record is kept at the book that decided it (§6).
-          recordBook: storedQuoteBook(pick),
-          myBooks,
-          modelProbability: pick.model_probability,
-        })
-      : null;
-  const myQuote = myView?.status === 'mine' ? myView.best : null;
-  const notAtMyBooks = myView?.status === 'none';
-  // The price the card shows. On 'mine' it is their best book at the scored
-  // line, drawn as a plain decision price (no Now/Locked pill: there is no
-  // lock at that book to compare against).
-  const heroPrice: HeroAmerican | null = myQuote
-    ? {
-        kind: 'decision',
-        price: myQuote.price,
-        book: myQuote.bookmaker,
-        line: numOrNull(pick.scored_line),
-        link: myQuote.link,
-        lockedPrice: myQuote.price,
-        showLockedCaption: false,
-      }
-    : modelHero;
+  // The price check, price age, the model's price and the member's books
+  // (lib/pickPriceView.ts). Bet all reads the same function, so it offers a
+  // pick exactly when this card offers the bet.
+  const { check, flagged, priceAge, myView, myQuote, notAtMyBooks, heroPrice } =
+    pickPriceView(item, liveState, myBooks, myBooksReady);
   const shownEdge = myView?.status === 'mine' && myView.edge != null ? myView.edge : decisionEdge(pick);
   const ev = myView?.status === 'mine' ? myView.ev : modelEv;
   const edgeText = flagged ? '—' : formatPctSigned(shownEdge);

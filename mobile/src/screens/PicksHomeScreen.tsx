@@ -97,6 +97,9 @@ import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePi
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
+import { BetAllSheet } from '@/components/BetAllSheet';
+import { BET_ALL_LIVE_NOTE, betAllCandidates, betAllMainSkip } from '@/lib/betAll';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
 import { LIVE_PRICE_SLOT_ONLY } from '@/lib/markets';
@@ -177,6 +180,9 @@ export function PicksHomeScreen() {
   const { sport } = useSportFilter();
   const tracked = useTrackedBets();
   const slip = useParlaySlip();
+  // Bet all (Matt, 2026-11-14): the member's books decide what it can send.
+  const { books: myBooks, ready: myBooksReady } = usePreferredBooks();
+  const [betAllOpen, setBetAllOpen] = useState(false);
 
   const [view, setView] = useState<PicksView>('today');
   const [sbSport, setSbSport] = useState<ScoreboardSport>('NFL');
@@ -603,6 +609,15 @@ export function PicksHomeScreen() {
     [datedItems, displayFilter, gamePicker.selected, thresholdsRevision],
   );
   const filtered = useMemo(() => searchPicks(unsearched, search), [unsearched, search]);
+  // Bet all reads the board as filtered, so it sends what the member sees.
+  // Signals only: Live Signals is never part of it (Matt, 2026-11-14).
+  const betAll = useMemo(
+    () =>
+      view === 'signals' && myBooksReady
+        ? betAllCandidates(filtered, (id) => liveStates.get(id) ?? null, myBooks)
+        : null,
+    [view, myBooksReady, filtered, liveStates, myBooks, thresholdsRevision],
+  );
   const publicSortLive = useMemo(() => publicSortAvailable(filtered), [filtered]);
   useEffect(() => {
     if (!publicSortLive && sortKey === 'public') setSortKey('edge');
@@ -1038,6 +1053,37 @@ export function PicksHomeScreen() {
         ListFooterComponent={<BetslipBarSpacer />}
         data={rows}
         keyExtractor={(row) => row.key}
+        ListHeaderComponent={
+          betAll && betAll.picks.length + betAll.skipped.length > 0 ? (
+            <View style={styles.betAllRow}>
+              <View style={styles.betAllText}>
+                <Text style={styles.betAllTitle}>
+                  {`${betAll.picks.length} ready to bet as singles`}
+                </Text>
+                {/* With nothing ready, say the main reason here (UX review):
+                    the sheet still opens and lists every reason. */}
+                <Text style={styles.betAllNote}>
+                  {betAll.picks.length === 0 ? `${betAllMainSkip(betAll.skipped)}. ${BET_ALL_LIVE_NOTE}` : BET_ALL_LIVE_NOTE}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => setBetAllOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  betAll.picks.length === 0
+                    ? 'See why no signals are ready to bet'
+                    : `Bet all ${betAll.picks.length} ${sportDisplayName(sport)} signals as single bets`
+                }
+                style={({ pressed }) => [
+                  styles.betAllButton,
+                  pressed && styles.betAllPressed,
+                ]}
+              >
+                <Text style={styles.betAllButtonText}>{betAll.picks.length === 0 ? 'See why' : `Bet all ${betAll.picks.length}`}</Text>
+              </Pressable>
+            </View>
+          ) : null
+        }
         renderItem={({ item: row, index }) => {
           if (row.kind === 'day') {
             // The first header sits where the first card would (the list's
@@ -1114,6 +1160,16 @@ export function PicksHomeScreen() {
       />
       </>
       )}
+      {betAll ? (
+        <BetAllSheet
+          visible={betAllOpen}
+          sport={sportDisplayName(sport)}
+          candidates={betAll}
+          myBooks={myBooks}
+          onTrack={tracked.track}
+          onClose={() => setBetAllOpen(false)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1364,6 +1420,29 @@ export function partialSentence(p: { whats: string[]; reason: string }): string 
 }
 
 const styles = StyleSheet.create({
+  betAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  betAllText: { flex: 1, minWidth: 0 },
+  betAllTitle: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary },
+  betAllNote: { marginTop: 2, fontSize: font.size.footnote, color: colors.textSecondary },
+  betAllButton: {
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.pill,
+    backgroundColor: colors.tint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  betAllPressed: { opacity: 0.6 },
+  betAllButtonText: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textInverse, fontVariant: ['tabular-nums'] },
   container: {
     flex: 1,
     backgroundColor: colors.bg,
