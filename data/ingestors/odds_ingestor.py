@@ -1714,8 +1714,9 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
             # is the per-event rule measured on F5: one credit per market
             # returned, two when both ladders come back, once per unstarted
             # event per pass. The odds step runs on each refresh
-            # (scheduler.py: :17 for hours 0-5 and 7-17 ET, every 10 minutes
-            # for hours 18-23 ET) plus the 6am daily pipeline. Only games
+            # (scheduler.py: :17 for hours 0-4 and 7-17 ET, every 10 minutes
+            # for hours 18-23 ET) plus the 6am daily pipeline. Hour 5 has no
+            # full refresh. Only games
             # starting inside ALT_GAME_LINES_WINDOW_HOURS (24) are bought
             # (Matt, 2026-10-29, option B); alt_game_lines.py buys the
             # 3-day window at 6am.

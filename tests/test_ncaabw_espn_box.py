@@ -744,7 +744,7 @@ def test_the_step_is_registered_and_dispatchable():
 def test_the_refresh_pass_runs_it_on_hourly_passes_only_after_the_ncaabw_results_step():
     """Sequential, after the results group has finished writing the finals it
     reads, and before the health check that closes the pass. HOURLY passes
-    only (7 am-5 pm and midnight-5 am ET): an evening pass already runs
+    only (7 am-5 pm and midnight-4 am ET): an evening pass already runs
     455-526 s (median and 90th percentile, 7 days to 2026-10-30) against its
     600 s tick, so this step's up-to-150 s there would push the pass past the
     tick and skip the next one."""

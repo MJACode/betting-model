@@ -19,13 +19,21 @@ from monitoring import store
 def test_prune_rolls_up_before_it_deletes():
     """Order is the whole thing. Deleting first would throw away the only copy,
     and the failure would be silent and permanent — nothing else in the system
-    retains per-source API call counts."""
+    retains per-source API call counts.
+
+    The delete moved into batches after the 2026-11-12 morning: one unbounded
+    DELETE held disk IO for about a minute. The rollup is still first, and the
+    batch is still a DELETE of api_call_log."""
     src = inspect.getsource(store.prune)
     roll = src.index("roll_up(conn)")
-    delete = src.index("DELETE FROM api_call_log")
-    assert roll < delete, (
+    batch = src.index("_prune_batch")
+    assert roll < batch, (
         "prune() deletes before rolling up, so the rows are gone before they "
         "are counted:\n" + src)
+    delete = inspect.getsource(store._prune_batch)
+    assert "DELETE FROM api_call_log" in delete
+    assert "LIMIT" in delete
+    assert "statement_timeout" in delete
 
 
 def test_the_rollup_upserts_and_never_zeroes_a_pruned_day():

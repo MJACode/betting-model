@@ -380,7 +380,7 @@ step refresh-outcomes
 # Self-limiting: no ESPN call unless a final of the last 3 ET dates has no
 # ESPN box row; at most 80 games and ~150 s of fetching a pass, and one failed
 # fetch ends its run (about 46 s at worst).
-# HOURLY passes only (7am-5pm and midnight-5am ET). An evening pass already
+# HOURLY passes only (7am-5pm and midnight-4am ET). An evening pass already
 # takes 455-526 s (median, p90, pipeline_runs 7 days to 2026-10-30) of its
 # 10-minute tick; this step's up-to-150 s there would push passes past the
 # tick and skip the next one. The evening's finals are stored from the 12:17am

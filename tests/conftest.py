@@ -93,3 +93,21 @@ def _platform_gates_at_identity(monkeypatch):
     #     monkeypatch.setattr(config, "MODEL_OWN_EV_FLOOR", {})
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", -1.0)
     monkeypatch.setattr(sc, "_CAL_CACHE", {})
+
+
+@pytest.fixture(autouse=True)
+def _morning_disk_clock_outside_the_window(monkeypatch):
+    """Pin the morning-disk clock to 15:00 ET.
+
+    The scheduler wrapper asks tracking.morning_disk.now_et() before a job
+    runs. A test that calls a wrapped job while CI itself is inside
+    05:40-07:15 ET would otherwise be turned away, or beat "skipped", for a
+    reason that has nothing to do with the test. A test of the window sets
+    now_et itself.
+    """
+    from datetime import datetime
+    from tracking import morning_disk
+    monkeypatch.setattr(
+        morning_disk, "now_et",
+        lambda: datetime(2026, 11, 12, 15, 0, tzinfo=morning_disk.ET),
+    )
