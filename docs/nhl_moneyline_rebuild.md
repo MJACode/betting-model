@@ -175,7 +175,7 @@ row.
 ## Why it keeps betting bad teams (2026-11-13)
 
 mike: *"Why does the nhl model keep betting Canucks ML ... they suck and always
-get killed"*. Five of its 52 bets from 2026-10-16 to 11-13 were VAN ML (+165 to
+get killed"*. Five of its 52 bets from 2026-10-16 to 11-13 were VAN ML (+118 to
 +185; one win, three losses, tonight's open). No change was made.
 
 **What lifts Vancouver.** The model starts from DraftKings' no-vig price and
