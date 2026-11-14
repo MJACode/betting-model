@@ -37,8 +37,9 @@ interface Props {
   sport: string;
   candidates: BetAllCandidates;
   myBooks: readonly string[];
-  /** Adds a placed bet to the member's tracked bets (useTrackedBets.track). */
-  onTrack: (pick: Pick) => void;
+  /** Adds placed bets to the member's tracked bets, all in one write
+   *  (useTrackedBets.trackMany). */
+  onTrack: (picks: Pick[]) => void;
   onClose: () => void;
 }
 
@@ -146,7 +147,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
   const answer = (book: string, placed: 'placed' | 'todo' | 'skipped') => {
     if (placed === 'placed') {
       const step = steps.find((s) => s.bookmaker === book);
-      step?.legs.forEach((l) => onTrack(l.pick));
+      if (step) onTrack(step.legs.map((l) => l.pick));
     }
     setStatus((s) => ({ ...s, [book]: placed }));
     setAskFor(null);

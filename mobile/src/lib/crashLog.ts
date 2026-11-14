@@ -72,8 +72,32 @@ export interface KeyValueStore {
   setItem(key: string, value: string): Promise<void>;
 }
 
+/**
+ * One entry of expo-updates' own log (`Updates.readLogEntriesAsync`). The
+ * shape is expo-updates 29's `UpdatesLogEntry`; restated here so this module
+ * keeps importing nothing.
+ */
+export interface UpdatesLogEntry {
+  /** ms epoch the entry was written. */
+  timestamp: number;
+  message: string;
+  code: string;
+  level: string;
+  updateId?: string | null;
+  assetId?: string | null;
+  stacktrace?: string[] | null;
+}
+
 export interface CrashLogDeps {
   storage: KeyValueStore;
+  /**
+   * expo-updates' log on the phone, newest window only. Optional: without it
+   * no updates-log report is made. It is a file expo-updates writes natively,
+   * so it survives a crash that happens before any JS runs (TestFlight
+   * 2026-11-14: ErrorRecovery.crash() 0.24 s after launch, nothing in
+   * app_errors).
+   */
+  updatesLog?: () => Promise<UpdatesLogEntry[]>;
   /** Send one report. Throws on failure, so the report stays queued. */
   send(report: CrashReport, deviceId: string, ctx: CrashContext): Promise<void>;
   deviceId(): Promise<string>;
@@ -89,6 +113,24 @@ export const MAX_QUEUED = 20;
 export const RUNNING_AFTER_MS = 15_000;
 /** How long a fatal error waits for its report before the app is let go. */
 export const FATAL_FLUSH_MS = 1_500;
+/** Newest updates-log timestamp already reported, so an entry is sent once. */
+export const UPDATES_LOG_SEEN_KEY = 'crashlog.updates_log_seen';
+/** How far back to read expo-updates' log. It prunes entries past a day. */
+export const UPDATES_LOG_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** At most this many entries ride on one report, newest kept. */
+export const UPDATES_LOG_MAX_ENTRIES = 15;
+/** The native log read gets this long; past it the launch moves on without. */
+export const UPDATES_LOG_READ_TIMEOUT_MS = 3_000;
+const UPDATES_LOG_BAD_LEVELS = new Set(['error', 'fatal']);
+/**
+ * A report is made only when an entry says a LAUNCH failed. expo-updates also
+ * logs at error level for every failed download (FileDownloader: code Unknown,
+ * AssetsFailedToLoad), so an offline open would otherwise be a row. Those
+ * entries still ride along as context when a launch failure is reported.
+ * ErrorRecovery writes JSRuntimeError (the exception) and UpdateFailedToLoad
+ * ("crashing") before it aborts.
+ */
+const UPDATES_LOG_LAUNCH_CODES = new Set(['UpdateFailedToLoad', 'JSRuntimeError', 'InitializationError']);
 
 let deps: CrashLogDeps | null = null;
 /**
@@ -275,6 +317,84 @@ export function earlyExitFrom(prev: LaunchMarker | null, now: number, updateIdNo
 }
 
 /**
+ * The updates-log entries worth reporting: level error or fatal, newer than
+ * `seenThrough`, oldest first, capped to the newest UPDATES_LOG_MAX_ENTRIES.
+ * Pure.
+ */
+export function newUpdatesLogErrors(entries: UpdatesLogEntry[], seenThrough: number): UpdatesLogEntry[] {
+  const bad = entries
+    .filter((e) => e && typeof e.timestamp === 'number' && e.timestamp > seenThrough
+      && UPDATES_LOG_BAD_LEVELS.has(String(e.level).toLowerCase()))
+    .sort((a, b) => a.timestamp - b.timestamp);
+  return bad.slice(-UPDATES_LOG_MAX_ENTRIES);
+}
+
+function summariseEntry(e: UpdatesLogEntry): Record<string, unknown> {
+  return {
+    at: new Date(e.timestamp).toISOString(),
+    level: e.level,
+    code: e.code,
+    message: clip(e.message, 1000),
+    update_id: e.updateId ?? null,
+    asset_id: e.assetId ?? null,
+    stacktrace: e.stacktrace ? clip(e.stacktrace.slice(0, 15).join('\n'), 1500) : null,
+  };
+}
+
+/** Whether these entries include a failed launch, the only thing reported. */
+export function hasLaunchFailure(entries: UpdatesLogEntry[]): boolean {
+  return entries.some((e) => String(e.level).toLowerCase() === 'fatal'
+    || UPDATES_LOG_LAUNCH_CODES.has(String(e.code)));
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const t = setTimeout(() => resolve(fallback), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, () => { clearTimeout(t); resolve(fallback); });
+  });
+}
+
+/**
+ * Read expo-updates' own log: the error and fatal entries not yet reported,
+ * when they include a failed launch. Does NOT mark them seen; the caller does
+ * that once the report is queued, so a failed enqueue resends rather than
+ * drops. The read is bounded by UPDATES_LOG_READ_TIMEOUT_MS. Never throws.
+ */
+async function updatesLogReport(d: CrashLogDeps): Promise<{
+  entries: Record<string, unknown>[];
+  /** Newest entry read: what gets marked seen. */
+  newest: UpdatesLogEntry;
+  /** Newest launch-failure entry: what the row is named and dated by. */
+  headline: UpdatesLogEntry;
+} | null> {
+  if (!d.updatesLog) return null;
+  try {
+    let seen = 0;
+    try {
+      const raw = await d.storage.getItem(UPDATES_LOG_SEEN_KEY);
+      seen = raw ? Number(raw) || 0 : 0;
+    } catch {
+      seen = 0;
+    }
+    const all = await withTimeout(d.updatesLog(), UPDATES_LOG_READ_TIMEOUT_MS, [] as UpdatesLogEntry[]);
+    const bad = newUpdatesLogErrors(all, seen);
+    if (bad.length === 0 || !hasLaunchFailure(bad)) return null;
+    const headline = [...bad].reverse().find((e) => hasLaunchFailure([e]))!;
+    return { entries: bad.map(summariseEntry), newest: bad[bad.length - 1], headline };
+  } catch {
+    return null;
+  }
+}
+
+async function markUpdatesLogSeen(d: CrashLogDeps, newest: UpdatesLogEntry): Promise<void> {
+  try {
+    await d.storage.setItem(UPDATES_LOG_SEEN_KEY, String(newest.timestamp));
+  } catch {
+    // worst case the same entries are sent again next launch
+  }
+}
+
+/**
  * Call once per JS start, as early as possible. Reads how the last launch
  * ended, records it, writes this launch's marker, and reports an expo-updates
  * rollback if there was one, then marks the launch `running` after 15s.
@@ -299,6 +419,15 @@ export async function beginLaunch(): Promise<void> {
       // ignore
     }
   }
+  // Scheduled before the updates-log read, so a slow native read can never
+  // leave this launch marked `launching` (a false early_exit next time).
+  setTimeout(() => {
+    void writeMarker('running');
+  }, RUNNING_AFTER_MS);
+  // Reported as `emergency_launch`, the expo-updates kind (no new server
+  // kind: one the RPC refuses would stop the queue behind it). On an
+  // emergency launch the entries ride on that row, so one event is one row.
+  const log = await updatesLogReport(d);
   if (ctx.isEmergencyLaunch) {
     try {
       await enqueue({
@@ -307,14 +436,27 @@ export async function beginLaunch(): Promise<void> {
         stage: 'launching',
         screen: null,
         message: ctx.emergencyLaunchReason,
+        extra: log ? { updates_log: log.entries } : null,
       });
+      if (log) await markUpdatesLogSeen(d, log.newest);
+    } catch {
+      // ignore
+    }
+  } else if (log) {
+    try {
+      await enqueue({
+        kind: 'emergency_launch',
+        occurredAt: new Date(log.headline.timestamp).toISOString(),
+        stage: 'launching',
+        screen: null,
+        message: clip(`${log.headline.code}: ${log.headline.message}`, 2000),
+        extra: { source: 'updates_log', updates_log: log.entries },
+      });
+      await markUpdatesLogSeen(d, log.newest);
     } catch {
       // ignore
     }
   }
-  setTimeout(() => {
-    void writeMarker('running');
-  }, RUNNING_AFTER_MS);
 }
 
 interface ErrorUtilsShape {

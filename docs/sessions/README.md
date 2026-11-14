@@ -20,7 +20,9 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, app UI consistency pass (Mobbin audit, Matt approved 1-7): `PrimaryButton` (one 50pt capsule, 27 buttons), `sectionHeaderText`, `opacity` and `card` tokens, `SegmentTabs` for the BYOM and season switches, `SkeletonList` on six detail screens, last hex literals tokenised, Performance now shows sync errors |
+| 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Crash log sends expo-updates' own error log on the next launch (`emergency_launch`, `extra.source = 'updates_log'`), after a TestFlight abort in ErrorRecovery before JS ran |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Discord join screen headline shortened to "Join the Discord" |
+| 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Bet all's Placed tracked one of three picks on the phone: each add wrote from the render's stale list; `trackPicks` reads the latest list, Bet all tracks a book in one call |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Bet all on Signals: every pre-game signal for a sport as single bets, best line (default) or one sportsbook, never a parlay (`combineSinglesLinks`), placed-bet prompt tracks them, live excluded and said so; eligibility shared with the card via `pickPriceView` |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Picks filter gets a Status section (Not started / Live / Final) from the cards' own gameStatus() |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, sportsbook hand-off opens the book's app or the App Store: new iOS native module `open-in-app` (`universalLinksOnly`), `appClaimedLink` (BetMGM's betslip query moved under `/sportsapp/`, the only path its app claims), wired into `openBookBetslip`; needs a TestFlight build; not yet seen on a device |
