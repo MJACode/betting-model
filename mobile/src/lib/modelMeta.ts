@@ -1299,7 +1299,7 @@ const EUROLEAGUE_CHECKED =
 const MINUTES_BEFORE_TIP_BODY: Readonly<Record<string, string>> = {
   euroleague_home_ml:
     EUROLEAGUE_CHECKED +
-    'It bets the home team’s moneyline when it is priced -200 or longer, and never lays more than -200. ' +
+    'It bets the home team’s moneyline at -200 or longer, never shorter. ' +
     'A posted bet is never re-priced: it stays at the price it posted at.',
   euroleague_home_dog_spread:
     EUROLEAGUE_CHECKED +
