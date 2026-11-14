@@ -70,7 +70,16 @@ SELECT = (2023, 2024)
 CONFIRM = (2025,)
 BOOTSTRAP = 4000
 FDR_Q = 0.10
+# What 'clears out of sample' means, fixed 2026-11-14 before the 2024 and 2025
+# hours were read: the chosen timing survives BH-FDR at FDR_Q on 2023-2024,
+# and on 2025 alone makes positive units with a one-sided p at most CONFIRM_P.
+CONFIRM_P = 0.10
 CANDIDATES = [f"h{h:02d}" for h in range(24)] + ["first_bet", "last_read"]
+# The hourly purchase's dates (worker jobs 1316678-1316680). A game is in
+# scope only if its Eastern date is inside its season's window: a bowl game
+# after it has no hourly prices, so its "last read" would be weeks early.
+WINDOWS = {2023: ("2023-08-17", "2023-12-09"), 2024: ("2024-08-15", "2024-12-07"),
+           2025: ("2025-08-14", "2025-12-06")}
 PANEL_COLS = ["game_id", "season", "instant", "status", "bookmaker", "side", "price", "edge",
               "prob", "cons", "n_ok", "ml_books"]
 
@@ -95,16 +104,26 @@ def pull_rows(g: pd.DataFrame, o: pd.DataFrame, seasons) -> tuple[pd.DataFrame, 
     n = n.sort_values(["canon", "n", "game_id"], ascending=[True, False, True], kind="mergesort")
     h = h[h["game_id"].isin(set(n.drop_duplicates("canon")["game_id"]))]
     h = h[h["market"].isin(["h2h", "spreads"]) & h["ts"].notna()]
+    # How old each row's own stamp (the market's last_update) is at its pull,
+    # by the pull's UTC hour: the card's read keeps a quote only when its
+    # stamp is inside the 60 minutes before the check, so an hour whose
+    # stamps run old is a thin hour, not a losing one.
+    age = (h["pull_ts"] - h["ts"]).dt.total_seconds() / 60
+    by_hour = pd.DataFrame({"hour": h["pull_ts"].dt.hour, "age": age}).groupby("hour")["age"]
+    stamp_ages = {int(k): {"rows": int(v.size), "median_min": round(float(v.median()), 1),
+                           "share_within_60": round(float((v <= mm.WINDOW_MIN).mean()), 4)}
+                  for k, v in by_hour}
     h["tip"] = h["kick"]
     for c in ("home_price", "away_price", "spread_home"):
         h[c] = pd.to_numeric(h[c], errors="coerce").astype(float)
     h = h.rename(columns={"home_price": "p1", "away_price": "p2", "spread_home": "line"})
     cols = ["game_id", "bookmaker", "ts", "line", "p1", "p2", "order", "tip"]
-    games = h.drop_duplicates("game_id")[["game_id", "season", "et_date", "kick"]]
+    games = h.drop_duplicates("game_id")[["game_id", "season", "et_date", "kick"]].reset_index(drop=True)
+    games.attrs["stamp_ages"] = stamp_ages
     h = h.sort_values("ts", kind="mergesort")
     return (h[h["market"] == "h2h"][cols].reset_index(drop=True),
             h[h["market"] == "spreads"][cols].reset_index(drop=True),
-            games.reset_index(drop=True))
+            games)
 
 
 def _window(rows: pd.DataFrame, ts: np.ndarray, t: pd.Timestamp) -> pd.DataFrame:
@@ -129,47 +148,83 @@ def instants(games: pd.DataFrame, ml: pd.DataFrame, hours) -> list[pd.Timestamp]
     return list(pd.date_range(t0, t1, freq="h"))
 
 
-def panel(rows: tuple, tables: dict, hours=None, log_every: int = 200) -> pd.DataFrame:
-    """The card's decision for every game at every instant it is in scope."""
+_W: dict = {}
+
+
+def _init(ml, sp, games, tables, hours):
+    """A worker's copy of the season's rows (multiprocessing initializer)."""
+    _W.update(ml=ml, sp=sp, games=games, tables=tables, hours=hours,
+              kick=games.set_index("game_id")["kick"],
+              season_of=games.set_index("game_id")["season"],
+              et_of=games.set_index("game_id")["et_date"].astype(str).str[:10])
+
+
+def _decide_at(season: int, ts_chunk: list, log_every: int = 0) -> list:
+    """The card's decisions at each instant of ts_chunk, for one season."""
+    ml, sp, games, hours = _W["ml"], _W["sp"], _W["games"], _W["hours"]
+    kick, season_of, et_of = _W["kick"], _W["season_of"], _W["et_of"]
+    table, offset, _ = _W["tables"][int(season)]
+    ids_s = set(games.loc[games["season"] == season, "game_id"])
+    ml_s = ml[ml["game_id"].isin(ids_s)].reset_index(drop=True)
+    sp_s = sp[sp["game_id"].isin(ids_s)].reset_index(drop=True)
+    ml_ts, sp_ts = ml_s["ts"].values, sp_s["ts"].values
+    out, t0 = [], time.time()
+    for i, t in enumerate(ts_chunk):
+        m = _window(ml_s, ml_ts, t)
+        s = _window(sp_s, sp_ts, t)
+        # In scope at t: still to kick off at least five minutes after t,
+        # and on t's Eastern date when the panel is the fixed hours only.
+        ids = {gid for gid in set(m["game_id"]) | set(s["game_id"])
+               if not mm.too_close(kick[gid], t)}
+        if hours is not None:
+            day = t.strftime("%Y-%m-%d")
+            ids = {gid for gid in ids if et_of[gid] == day}
+        if not ids:
+            continue
+        m = m[m["game_id"].isin(ids)].assign(instant=t)
+        s = s[s["game_id"].isin(ids)].assign(instant=t)
+        q = mm.quotes_at(m, s)
+        nml = (q[q["bookmaker"].isin(mm.DECIDING_BOOKS) & q["ml_home"].notna()
+                 & q["ml_away"].notna()].groupby("game_id").size())
+        for d in mm.decide(sorted(ids), q, table, offset):
+            b = d.best or {}
+            out.append((d.game_id, int(season_of[d.game_id]), t, d.status, b.get("bookmaker"),
+                        b.get("side"), b.get("price"), b.get("edge"), b.get("prob"),
+                        b.get("cons"), b.get("n_ok"), int(nml.get(d.game_id, 0))))
+        if log_every and i % log_every == 0:
+            print(f"  season {season}: instant {i + 1}/{len(ts_chunk)} {t:%Y-%m-%d %H}Z, "
+                  f"{len(out)} decisions ({time.time() - t0:.0f}s)", flush=True)
+    return out
+
+
+def panel(rows: tuple, tables: dict, hours=None, log_every: int = 200,
+          workers: int = 1) -> pd.DataFrame:
+    """The card's decision for every game at every instant it is in scope.
+
+    workers > 1 splits each season's instants into contiguous slices across
+    processes. Each instant's decision depends only on the rows in its own
+    window, so the panel is the same whatever the split (pinned by
+    tests/test_ncaaf_moneyline_timing.py)."""
     ml, sp, games = rows
-    kick = games.set_index("game_id")["kick"]
-    season_of = games.set_index("game_id")["season"]
-    et_of = games.set_index("game_id")["et_date"].astype(str).str[:10]
-    out = []
-    t0 = time.time()
+    jobs = []
     for season in sorted(games["season"].unique()):
-        table, offset, _ = tables[int(season)]
         gs = games[games["season"] == season]
-        ids_s = set(gs["game_id"])
-        ml_s = ml[ml["game_id"].isin(ids_s)].reset_index(drop=True)
-        sp_s = sp[sp["game_id"].isin(ids_s)].reset_index(drop=True)
-        ml_ts, sp_ts = ml_s["ts"].values, sp_s["ts"].values
-        ts_list = instants(gs, ml_s, hours)
-        for i, t in enumerate(ts_list):
-            m = _window(ml_s, ml_ts, t)
-            s = _window(sp_s, sp_ts, t)
-            # In scope at t: still to kick off at least five minutes after t,
-            # and on t's Eastern date when the panel is the fixed hours only.
-            ids = {gid for gid in set(m["game_id"]) | set(s["game_id"])
-                   if not mm.too_close(kick[gid], t)}
-            if hours is not None:
-                day = t.strftime("%Y-%m-%d")
-                ids = {gid for gid in ids if et_of[gid] == day}
-            if not ids:
-                continue
-            m = m[m["game_id"].isin(ids)].assign(instant=t)
-            s = s[s["game_id"].isin(ids)].assign(instant=t)
-            q = mm.quotes_at(m, s)
-            nml = (q[q["bookmaker"].isin(mm.DECIDING_BOOKS) & q["ml_home"].notna()
-                     & q["ml_away"].notna()].groupby("game_id").size())
-            for d in mm.decide(sorted(ids), q, table, offset):
-                b = d.best or {}
-                out.append((d.game_id, int(season_of[d.game_id]), t, d.status, b.get("bookmaker"),
-                            b.get("side"), b.get("price"), b.get("edge"), b.get("prob"),
-                            b.get("cons"), b.get("n_ok"), int(nml.get(d.game_id, 0))))
-            if log_every and i % log_every == 0:
-                print(f"  season {season}: instant {i + 1}/{len(ts_list)} {t:%Y-%m-%d %H}Z, "
-                      f"{len(out)} decisions ({time.time() - t0:.0f}s)", flush=True)
+        ts_list = instants(gs, ml[ml["game_id"].isin(set(gs["game_id"]))], hours)
+        n = max(1, workers)
+        size = -(-len(ts_list) // n) if ts_list else 0
+        jobs += [(int(season), ts_list[k:k + size]) for k in range(0, len(ts_list), max(size, 1))]
+    if workers <= 1:
+        _init(ml, sp, games, tables, hours)
+        out = [r for s, chunk in jobs for r in _decide_at(s, chunk, log_every)]
+    else:
+        import multiprocessing as mp
+        t0 = time.time()
+        with mp.get_context("spawn").Pool(workers, initializer=_init,
+                                          initargs=(ml, sp, games, tables, hours)) as pool:
+            parts = pool.starmap(_decide_at, jobs)
+        out = [r for part in parts for r in part]
+        print(f"  panel: {len(jobs)} slices over {workers} processes ({time.time() - t0:.0f}s)",
+              flush=True)
     return pd.DataFrame(out, columns=PANEL_COLS)
 
 
@@ -291,22 +346,38 @@ def main(argv=None) -> None:
                     help="comma-separated whole UTC hours: the fixed timings only")
     ap.add_argument("--check-bets", type=str, nargs="*", default=[],
                     help="HOUR=PKL pairs: compare that fixed hour's bets with a research pickle")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="processes for the panel (the result does not depend on it)")
+    ap.add_argument("--seasons", type=str, default=None,
+                    help="comma-separated seasons, a trial run (no selection or confirmation)")
     a = ap.parse_args(argv)
     t0 = time.time()
+    seasons = tuple(int(s) for s in a.seasons.split(",")) if a.seasons else SEASONS
     g, o = build.history(a.cache)
-    tables = {s: build.table_for(g, s) for s in SEASONS}
+    tables = {s: build.table_for(g, s) for s in seasons}
     for s, (_, c, n) in tables.items():
         print(f"season {s}: margin table on {n} games, offset {c:+.3f}", flush=True)
-    rows = pull_rows(g, o, SEASONS)
+    rows = pull_rows(g, o, seasons)
     del o
     ml, sp, games = rows
-    print(f"rows: {len(ml)} moneyline, {len(sp)} spread, {len(games)} games "
-          f"({time.time() - t0:.0f}s)", flush=True)
+    ages = games.attrs["stamp_ages"]
+    lo = games["season"].map(lambda s: WINDOWS[int(s)][0])
+    hi = games["season"].map(lambda s: WINDOWS[int(s)][1])
+    et = games["et_date"].astype(str).str[:10]
+    out_of_window = int((~((et >= lo) & (et <= hi))).sum())
+    games = games[(et >= lo) & (et <= hi)].reset_index(drop=True)
+    games.attrs["stamp_ages"] = ages
+    ids = set(games["game_id"])
+    ml, sp = ml[ml["game_id"].isin(ids)].reset_index(drop=True), sp[sp["game_id"].isin(ids)].reset_index(drop=True)
+    rows = (ml, sp, games)
+    print(f"rows: {len(ml)} moneyline, {len(sp)} spread, {len(games)} games in the purchase's "
+          f"windows ({out_of_window} outside them left out) ({time.time() - t0:.0f}s)", flush=True)
+    print(f"stamp age at the pull, by the pull's UTC hour: {games.attrs['stamp_ages']}", flush=True)
     hours = [int(h) for h in a.hours.split(",")] if a.hours else None
     if a.panel_in:
         p = pd.read_parquet(a.panel_in)
     else:
-        p = panel(rows, tables, hours)
+        p = panel(rows, tables, hours, workers=a.workers)
         if a.panel_out:
             p.to_parquet(a.panel_out)
     print(f"panel: {len(p)} decisions over {p['instant'].nunique()} instants, "
@@ -318,9 +389,10 @@ def main(argv=None) -> None:
     res = {}
     for name in names:
         dec = timing_rows(p, games, name)
-        res[name] = {"all": grade_timing(dec, g, pin, SEASONS, rng),
-                     "select_2023_2024": grade_timing(dec, g, pin, SELECT, rng),
-                     "confirm_2025": grade_timing(dec, g, pin, CONFIRM, rng)}
+        res[name] = {"all": grade_timing(dec, g, pin, seasons, rng)}
+        if seasons == SEASONS:
+            res[name].update({"select_2023_2024": grade_timing(dec, g, pin, SELECT, rng),
+                              "confirm_2025": grade_timing(dec, g, pin, CONFIRM, rng)})
         r = res[name]["all"]
         print(f"{name:>10}: {r['bets']:4d} bets, {r.get('units', 0):+8.2f} units, "
               f"return {r.get('roi_pct')}%, by season {r.get('units_by_season')}", flush=True)
@@ -333,8 +405,9 @@ def main(argv=None) -> None:
         checks[f"h{int(hour):02d}"] = build.check_bets(bets, Path(pkl), mm.CUT)
         print(f"check h{int(hour):02d} against {Path(pkl).name}: {checks[f'h{int(hour):02d}']}", flush=True)
 
-    summary = {"candidates": names, "fdr_q": FDR_Q, "results": res, "checks": checks}
-    if not hours:
+    summary = {"candidates": names, "fdr_q": FDR_Q, "seasons": list(seasons),
+               "stamp_ages": games.attrs["stamp_ages"], "results": res, "checks": checks}
+    if not hours and seasons == SEASONS:
         sel = {n: res[n]["select_2023_2024"] for n in names}
         pvals = {n: (sel[n]["p_le_zero"] if sel[n]["bets"] else 1.0) for n in names}
         passed = bh(pvals, FDR_Q)
@@ -345,6 +418,9 @@ def main(argv=None) -> None:
             "chosen_p_2023_2024": pvals[chosen],
             "bh_fdr_survivors_2023_2024": sorted(passed),
             "chosen_confirm_2025": res[chosen]["confirm_2025"],
+            "clears": bool(chosen in passed
+                           and res[chosen]["confirm_2025"].get("units", 0.0) > 0
+                           and res[chosen]["confirm_2025"].get("p_le_zero", 1.0) <= CONFIRM_P),
             "live_h14": {"select_2023_2024": res["h14"]["select_2023_2024"],
                          "confirm_2025": res["h14"]["confirm_2025"]},
         })
@@ -352,7 +428,9 @@ def main(argv=None) -> None:
               f"p {pvals[chosen]}); BH-FDR survivors at q={FDR_Q}: {sorted(passed) or 'none'}; "
               f"on 2025: {res[chosen]['confirm_2025'].get('units')} units, "
               f"return {res[chosen]['confirm_2025'].get('roi_pct')}% "
-              f"{res[chosen]['confirm_2025'].get('roi_ci95')}", flush=True)
+              f"{res[chosen]['confirm_2025'].get('roi_ci95')}, p "
+              f"{res[chosen]['confirm_2025'].get('p_le_zero')}; clears: {summary['clears']}",
+              flush=True)
     if a.out:
         a.out.write_text(json.dumps(summary, indent=1, default=str), encoding="utf-8")
         print(f"wrote {a.out}", flush=True)

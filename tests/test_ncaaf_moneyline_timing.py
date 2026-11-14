@@ -123,3 +123,18 @@ def test_clv_is_the_bet_price_against_pinnacles_no_vig_close():
                         "pin_ts": [KICK, KICK]}, index=pd.Index(["g", "h"], name="game_id"))
     c = tm.with_clv(b, pin).set_index("game_id")["clv_pct"]
     assert c["g"] > 0 > c["h"]
+
+
+def test_the_panel_is_the_same_split_over_processes(art):
+    """Each instant reads only its own window, so splitting the hours across
+    worker processes cannot change a decision."""
+    ml, sp = _moneylines(art), _spreads()
+    mls = pd.concat([_pull(ml, f"{DAY} {h}:00") for h in ("14", "16", "18")], ignore_index=True)
+    sps = pd.concat([_pull(sp, f"{DAY} {h}:00") for h in ("14", "16", "18")], ignore_index=True)
+    mls = mls.sort_values("ts", kind="mergesort").reset_index(drop=True)
+    sps = sps.sort_values("ts", kind="mergesort").reset_index(drop=True)
+    rows = (mls, sps, _games())
+    one = tm.panel(rows, _tables(art), log_every=0, workers=1)
+    two = tm.panel(rows, _tables(art), log_every=0, workers=2)
+    assert len(one) >= 3
+    pd.testing.assert_frame_equal(one, two)
