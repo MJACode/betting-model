@@ -104,9 +104,15 @@ export function sportChipsAvailable(available: Set<string>, known: boolean): Set
  * beside "NCAAB" is the same run of letters until the last one, and the two
  * sports share school names (UX review, 2026-11-10). The chip still shows the
  * code, which is also the Discord channel's name.
+ *
+ * The tennis tours are spelled out too: "A T P" and "W T A" do not say which
+ * is the men's and which the women's. The code leads, so a Voice Control user
+ * can still say the name printed on the chip.
  */
 const SPOKEN_SPORT: Record<string, string> = {
   NCAABW: 'Women’s college basketball',
+  ATP: 'ATP men’s tennis',
+  WTA: 'WTA women’s tennis',
   // VoiceOver spells an all-capitals code letter by letter.
   EUROLEAGUE: 'EuroLeague',
 };

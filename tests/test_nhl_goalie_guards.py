@@ -577,6 +577,7 @@ ALLOWED = {
     "scripts/ncaaf_moneyline_card.py": "NCAAF full-game moneylines only",
     "scripts/euroleague_pregame_card.py": "EuroLeague games only (sport EUROLEAGUE)",
     "scripts/ufc_open_moneyline_card.py": "UFC fight winners only",
+    "scripts/tennis_moneyline_card.py": "tennis match winners only",
     "scripts/ncaab_first_half_spread_card.py": "NCAAB first-half spreads only",
     "scripts/ncaab_first_half_total_card.py": "NCAAB first-half totals only",
     "scripts/nfl_prop_market_card.py": "NFL player props only",

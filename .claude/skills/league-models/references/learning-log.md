@@ -30,6 +30,48 @@ review as its own entry.
 
 ---
 
+## 2026-11-14 — Tennis round 1: the match winner live (`atp_moneyline_shop`, `wta_moneyline_shop`), the games markets' line shop null
+
+1. **League and scope**: tennis, both tours (mike, 2026-11-13: *"build
+   professional tennis models"*; 2026-11-14: *"Why can't you do it now"* when
+   the research waited on a nightly copy). On the bought history, 53
+   tour-level keys, 2020-09 to 2026-11, read once into a local cache.
+2. **Tried**: baselines on the match winner, total games and games spreads at
+   every decidable book; the line shop against Pinnacle and the Betfair
+   exchange at three decision times, multiplicative and power de-vig, with
+   each book's retirement rule; the reference's calibration, overround and
+   time since last change; a replay of the frozen rule through the live
+   card's own code at the live moment, with two soft-book placebos and a
+   walk-forward cut. Running in parallel: a serve-and-return games model and
+   a fatigue and retirement-risk study.
+3. **New**: three data checks in `kill-tests.md` ("Is the data right?"):
+   power de-vig against a longshot lean, an exchange's first post is not a
+   reference, and age in a change-only store. The tennis result in
+   `methods.md` §2. A decision code shared by replay and card
+   (`models/tennis_moneyline_shop.decide`), so the backtest is the live path.
+4. **Corrected**: round 1's first grid (multiplicative de-vig, a 6-hour
+   reference window) looked best in underdogs at the first post and against
+   the exchange; both were the reference, not an edge. The candidate came
+   only after the power de-vig, and its value moved with each principled fix
+   (+4.0% at 0.01 with DraftKings' term only, +0.9% once Caesars' void-all
+   rule was priced too): a result that moves under correct specification is
+   weaker than its headline. And a feed can store one market under another's
+   key: Pinnacle's total sets and set handicaps sat under tennis "totals" and
+   "spreads" at the 2023 Australian and French Opens, which turned Pinnacle's
+   blind over from -4.59% into an apparent -1.19%. Read each market's line
+   range per book and tournament before the first baseline.
+   Games markets: the serve-and-return model (round 1) and a model centred on
+   the line (round 2) are both null.
+5. **The framework**: the live decision moment was chosen after the close
+   looked best, and the replay at that moment (+11.0%) was run before
+   building; the skill's "the backtest runs what the live path runs" was what
+   caught that the close is not decidable live. Nothing in `SKILL.md`
+   changed.
+
+What this build taught the skill: de-vig the sharp pair by the power method
+before any shop grid on a market with longshots, an exchange's first-post
+pair is not a reference, and in a change-only store a reference's age is
+time since it moved.
 ## 2026-11-14 — EuroLeague, the big-favourite moneyline removed before it went live
 
 1. **Scope.** mike, 2026-11-14: "odds cutoff for favorites should be -200".

@@ -74,7 +74,9 @@ def load_results(conn) -> pd.DataFrame:
 def espn_result(row, a_is_p1: bool) -> tc.Result | None:
     """An ESPN row as a Result from player A's side."""
     status = row.status
-    g1, g2 = list(row.p1_games or []), list(row.p2_games or [])
+    # Lists from the database, numpy arrays from a parquet cache.
+    g1 = [] if row.p1_games is None else list(row.p1_games)
+    g2 = [] if row.p2_games is None else list(row.p2_games)
     if status == "STATUS_WALKOVER":
         return tc.Result([], [], bool(row.p1_winner) == a_is_p1, "walkover", best_of=row.best_of)
     if status not in ("STATUS_FINAL", "STATUS_RETIRED") or not g1 or len(g1) != len(g2):

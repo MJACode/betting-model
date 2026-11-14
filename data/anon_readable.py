@@ -545,6 +545,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # decided, bet or not (scripts/ufc_open_moneyline_card.py, which creates
     # it on demand). Read by the card, never by the app.
     "ufc_open_moneyline_decisions",
+    # The tennis match-winner card's decisions ledger: one row per match it
+    # has decided, bet or not (scripts/tennis_moneyline_card.py, which creates
+    # it on demand). Read by the card and by settlement, never by the app.
+    "tennis_moneyline_decisions",
     # The NCAAB first-post moneyline card's ledger: one row per (game, book)
     # first moneyline post it has decided, bet or not, with every book's
     # moneyline and own spread, and the fill check the capture writes on its

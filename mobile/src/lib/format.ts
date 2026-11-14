@@ -218,6 +218,21 @@ export function boardSeasonET(sport: string): number {
   return year;
 }
 
+/**
+ * The sports whose `games` row holds two competitors in slots, not a home
+ * side and an away side: a UFC bout and a tennis match, men's (ATP) and
+ * women's (WTA). Their matchup reads "A vs B", spoken "A versus B", never
+ * "A @ B", which names a home side that does not exist. Every matchup string
+ * reads this one set (PickCard, PickDetailScreen, parlay, signalsCard,
+ * dailyResults), so a new two-player sport is one entry, not six edits.
+ */
+const VERSUS_SPORTS: ReadonlySet<string> = new Set(['UFC', 'ATP', 'WTA']);
+
+/** True for a sport whose matchup is "A vs B" (see VERSUS_SPORTS). */
+export function isVersusSport(sport: string | null | undefined): boolean {
+  return VERSUS_SPORTS.has(sport ?? '');
+}
+
 /** Calendar month in ET, 1–12. Same clock as `yearET`. */
 export function monthET(): number {
   return Number(todayET().slice(5, 7));
@@ -514,6 +529,14 @@ const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
   NFL: 4 * 3_600_000,
   // A UFC card runs from the first prelim through the main event.
   UFC: 8 * 3_600_000,
+  // Tennis, named so the choice is visible; it is the default. A men's Grand
+  // Slam match is best of five sets, and the listed start can run up to an
+  // hour before the real one (docs/sports/tennis.md, "The listed start is not
+  // the start"). No live feed reaches the app. Settlement writes the sets won
+  // to `games` only when it grades a bet (paper_tracker._settle_tennis_picks),
+  // so for a match with no bet this window is all that ends the LIVE badge.
+  ATP: 6 * 3_600_000,
+  WTA: 6 * 3_600_000,
   // A golf "game" row is a whole tournament (commence_time = the earliest
   // round-1 tee time), so its window is days, not hours.
   GOLF: 5 * 24 * 3_600_000,
@@ -791,6 +814,14 @@ const GAME_DURATION_HOURS: Record<string, number> = {
   // EuroLeague: 40 minutes in four quarters, the same two hours (2026-11-13).
   EUROLEAGUE: 3,
   UFC: 6,
+  // ATP and WTA are left out on purpose, like golf. A bet leaves the board on
+  // its final: settlement writes the sets won to `games` when it grades the
+  // bet (paper_tracker._settle_tennis_picks). A match with no bet never gets
+  // a score and stays for its day. A match can start up to an hour after its
+  // listed time (docs/sports/tennis.md) and a men's Grand Slam match is best
+  // of five sets, so a bound here could take a pick off before its match
+  // ends. Once the listed start passes, the card says the match has started
+  // and offers no hand-off (pickCtaFor).
 };
 
 /**
