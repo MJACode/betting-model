@@ -55,7 +55,13 @@ review as its own entry.
    only after the power de-vig, and its value moved with each principled fix
    (+4.0% at 0.01 with DraftKings' term only, +0.9% once Caesars' void-all
    rule was priced too): a result that moves under correct specification is
-   weaker than its headline.
+   weaker than its headline. And a feed can store one market under another's
+   key: Pinnacle's total sets and set handicaps sat under tennis "totals" and
+   "spreads" at the 2023 Australian and French Opens, which turned Pinnacle's
+   blind over from -4.59% into an apparent -1.19%. Read each market's line
+   range per book and tournament before the first baseline.
+   Games markets: the serve-and-return model (round 1) and a model centred on
+   the line (round 2) are both null.
 5. **The framework**: the live decision moment was chosen after the close
    looked best, and the replay at that moment (+11.0%) was run before
    building; the skill's "the backtest runs what the live path runs" was what
