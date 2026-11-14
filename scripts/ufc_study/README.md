@@ -49,7 +49,8 @@ the working directory, and imports its siblings from this folder.
    `prop_grade.py models` (three mechanisms per market, walk-forward, kill
    tests), `prop_leads.py tables` (the two leads taken apart; writes
    `prop_lead_jobs.txt`, the price histories they need) and, once those are
-   stored and mirrored, `prop_leads.py retime` and `prop_staleness.py` (how
+   stored and mirrored, `prop_leads.py retime`, `prop_coherent_check.py`
+   (the fight-winner-coherent decision rule taken apart) and `prop_staleness.py` (how
    old a last recorded price is).
 
 `feed_probe.py` is PAID (2 credits a market live, 20 in history) and logs every
