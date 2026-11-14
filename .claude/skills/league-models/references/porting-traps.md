@@ -157,6 +157,15 @@ down this list.
 - **Score-feed lag.** Measure it against the book (median 75 seconds behind
   DraftKings in one league; 23 seconds after the snap in another).
 - **Read state from play-by-play time, never from `commence_time`.**
+- **The next period's lineups are logged during the break.** EuroLeague's
+  play-by-play holds the third quarter's substitutions (numbered before its
+  'BP', Begin Period) while the break is still on, so "the third quarter is
+  not empty" ends the break early. The quarter begins at its 'BP' or its first
+  shot (EuroLeague, 2026-11-13, `docs/sports/euroleague.md`, "Halftime spread").
+- **A research stake is not the posted stake.** The EuroLeague research staked
+  an underdog 1 unit to win its price; the platform posts 1 unit to win at
+  every price. Replay on the research's stake to match it bet for bet, then
+  report the posted stake beside it (+45.34 against +45.08 units, 2026-11-13).
 
 ## Leakage
 

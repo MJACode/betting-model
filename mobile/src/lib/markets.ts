@@ -1107,6 +1107,8 @@ export const LIVE_PRICE_SLOT_ONLY: ReadonlySet<string> = new Set([
   // models/ncaabw_live_loop.py reads the books every five minutes, and only
   // while a game is at its halftime break: after the bet no row is current.
   'ncaabw_live_total_ht',
+  // models/euroleague_live_loop.py: the same, on the full-game spread.
+  'euroleague_live_spread_ht',
 ]);
 
 /**
@@ -2244,6 +2246,9 @@ export function ncaabLivePeriod(period: number, modelId: string | null | undefin
 // The women's in-play model: the full-game total, bet during the halftime
 // break (models/ncaabw_live_ht.py).
 const NCAABW_HALFTIME_MODEL = 'ncaabw_live_total_ht';
+// The EuroLeague in-play model: the full-game spread, bet during the halftime
+// break (models/euroleague_live_ht.py).
+const EUROLEAGUE_HALFTIME_MODEL = 'euroleague_live_spread_ht';
 
 export function pickTimingInfo(pick: Pick): PickTiming | null {
   if (!pick.created_at) return null;
@@ -2269,9 +2274,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
           ? ` · inning ${pick.inning_at_pick}`
           : pick.sport === 'NCAAB'
             ? ` · ${ncaabLivePeriod(pick.inning_at_pick, pick.model_id)}`
-            : pick.model_id === NCAABW_HALFTIME_MODEL
-              ? // Bet during the halftime break only
-                // (models/ncaabw_live_loop.build_pick stores quarter 2).
+            : pick.model_id === NCAABW_HALFTIME_MODEL || pick.model_id === EUROLEAGUE_HALFTIME_MODEL
+              ? // Bet during the halftime break only (models/ncaabw_live_loop.build_pick
+                // and models/euroleague_live_loop.build_pick store quarter 2).
                 ' · halftime'
               : ` · Q${pick.inning_at_pick}`
         : '';
@@ -2288,7 +2293,15 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
             'final score, overtime included. Never re-priced: this is the line and price read ' +
             'during the break, shortly before the time above, not the current ones. The total ' +
             'moves once play resumes, so check the book before betting.'
-          : 'Locked the moment this crossed, and never re-priced — this is the line and price that ' +
+          : pick.model_id === EUROLEAGUE_HALFTIME_MODEL
+            ? // The loop reads the price, then EuroLeague's own play-by-play again,
+              // then writes the bet (models/euroleague_live_loop.py), so the stamp
+              // is seconds after the price.
+              'Decided once, during the halftime break, on the full-game spread: it settles on the ' +
+              'final score, overtime included. Never re-priced: this is the line and price read ' +
+              'during the break, shortly before the time above, not the current ones. The spread ' +
+              'moves once play resumes, so check the book before betting.'
+            : 'Locked the moment this crossed, and never re-priced — this is the line and price that ' +
             'were on offer then, not the current ones. In-play numbers move fast, so check the book ' +
             'before betting.',
     };

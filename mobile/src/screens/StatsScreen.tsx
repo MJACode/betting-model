@@ -2669,10 +2669,20 @@ export function StatsScreen() {
           {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
         <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
-        <EmptyState
-          title="No player leaderboard"
-          subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
-        />
+        {sport === 'EUROLEAGUE' ? (
+          // The sport is shared across tabs, so a member who picked EuroLeague
+          // on Picks lands here; nothing is stored for it, so nothing is
+          // promised (UX review, 2026-11-13).
+          <EmptyState
+            title="No EuroLeague stats"
+            subtitle="The app has no EuroLeague player or team stats. Its one model’s bets post on Picks › Live Signals."
+          />
+        ) : (
+          <EmptyState
+            title="No player leaderboard"
+            subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
+          />
+        )}
       </SafeAreaView>
     );
   }

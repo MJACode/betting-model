@@ -372,6 +372,34 @@ halftime total". It beats `job_heartbeats` every 5 minutes while a slate runs
 
 `--dry-run` makes no Odds API call and writes nothing.
 
+### EuroLeague halftime loop (added 2026-11-13)
+
+`models/euroleague_live_loop.py`, job `euroleague_live` on `pollers`, every 10
+minutes 9am-5:58pm ET (minute 8) as a supervisor (one launch runs a whole slate
+and exits after 3 idle ticks with no EuroLeague game in progress). Every stored
+EuroLeague game tipped 14:00-20:00 UTC and its half ended 38-102 minutes after
+the tip (1st-99th percentile), so those hours cover every break in winter
+(14:08-22:58 UTC) and in summer time (13:08-21:58 UTC). The model and its
+evidence: `docs/sports/euroleague.md`, "Halftime spread". It beats
+`job_heartbeats` every 5 minutes while a game is in progress
+(`tracking/job_heartbeat.ACTIVE_HOURS_ET`, 9-17 ET). The decision ledger
+`euroleague_live_decisions` is created by
+`data/migrations/euroleague_live_decisions_2026_11_13.sql` (applied by
+`data.view_migrations`); the loop refuses to start without it.
+
+| Variable (on `pollers`) | Default | What it does |
+|---|---|---|
+| `RUN_EUROLEAGUE_LIVE` | `1` | `0` / `false` / `off` / `no`: the job is not scheduled |
+| `DISCORD_CHANNEL_LIVE_EUROLEAGUE` or `DISCORD_WEBHOOK_LIVE_EUROLEAGUE` | **not set** (2026-11-13: the channel does not exist yet) | Where EuroLeague live picks post. **Required**: no fallback to the shared live channel or any pre-game channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`); with neither set the loop decides nothing and exits 3 while a game is in progress. A channel id resolves through `DISCORD_BOT_TOKEN`, set on pollers |
+| `EUROLEAGUE_LIVE_FETCH_WINDOW_SEC` / `EUROLEAGUE_LIVE_RETRY_GAP_SEC` | `120` / `45` | The books are read at each five-minute mark plus 37 seconds; how long after that a failed read may be tried again, and the seconds between tries |
+| `EUROLEAGUE_LIVE_CALL_CAP` / `EUROLEAGUE_LIVE_CREDIT_CAP` | `300` / `900` | Per-process ceilings (3 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the shared feed stops under 1,000 credits left |
+| `EUROLEAGUE_LIVE_POLL_SEC` / `EUROLEAGUE_LIVE_IDLE_EXIT_TICKS` | `15` / `3` | Schedule tick, and the idle ticks before it exits |
+
+EuroLeague's API (`live.euroleague.net/api`) needs no key and is reached from
+the worker's open egress; it is behind Cloudflare, which refused four calls at
+once (HTTP 429) on 2026-11-13, so the loop asks one at a time, 1.5 s apart.
+`--dry-run` makes no Odds API call and writes nothing.
+
 ### Scoreboard live scores (NFL, NBA, NHL — added 2026-10-29)
 
 `live_scoreboard` job, `pollers` service, every minute 24x7

@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { errorSurface, loadPresentation } from '@/lib/loadState';
+import { sportDisplayName } from '@/lib/liveSports';
 import { Skeleton, SkeletonRow } from '@/components/Skeleton';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
@@ -34,7 +35,7 @@ type Tab = 'builtin' | 'mine';
 const BUILTIN_MODEL_IDS = Object.keys(MODEL_META);
 
 /** Sport a model belongs to, derived from its id prefix. */
-function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' {
+function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' | 'EUROLEAGUE' {
   if (modelId.startsWith('ufc')) return 'UFC';
   if (modelId.startsWith('ncaaf')) return 'NCAAF';
   // The women's prefix first: every ncaabw_ id starts with 'ncaab' too, and
@@ -46,6 +47,7 @@ function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'N
   if (modelId.startsWith('nhl')) return 'NHL';
   if (modelId.startsWith('wnba')) return 'WNBA';
   if (modelId.startsWith('nba')) return 'NBA';
+  if (modelId.startsWith('euroleague')) return 'EUROLEAGUE';
   return 'MLB';
 }
 
@@ -158,8 +160,8 @@ export function ModelsScreen() {
               builtInWithStats.every((m) => m.stats.picks === 0)
             ) ? (
               <EmptyState
-                title={`No settled bets yet for ${sport}`}
-                subtitle={`These models are live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
+                title={`No settled bets yet for ${sportDisplayName(sport)}`}
+                subtitle={`${builtInWithStats.length === 1 ? 'This model is' : 'These models are'} live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
               />
             ) : null
           }
@@ -196,7 +198,7 @@ export function ModelsScreen() {
               <ActivityIndicator style={styles.loading} />
             ) : (
               <EmptyState
-                title={`No models listed for ${sport}`}
+                title={`No models listed for ${sportDisplayName(sport)}`}
                 subtitle={
                   BUILTIN_MODEL_IDS.some(
                     (id) => sportOf(id) === sport && !isModelRetired(id),

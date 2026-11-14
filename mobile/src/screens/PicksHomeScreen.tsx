@@ -143,7 +143,7 @@ const SUBTAB_REACH_BELOW = 6;
 const subTabsReach = reachFrame(0, SUBTAB_REACH_BELOW);
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
-import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence } from '@/lib/liveSports';
+import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence, sportDisplayName } from '@/lib/liveSports';
 import { errorText, friendlyCause } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ScoreboardBoard } from '@/components/ScoreboardBoard';
@@ -1147,14 +1147,23 @@ function EmptyForView({
   if (view === 'today') {
     return (
       <EmptyState
-        title={`No ${sport} picks today`}
+        title={
+          // EuroLeague has no pre-game model: "today" would read as a board a
+          // later refresh fills (UX review, 2026-11-13).
+          sport === 'EUROLEAGUE' ? 'No pre-game EuroLeague picks' : `No ${sport} picks today`
+        }
         subtitle={
           // The women's totals model posts when DraftKings opens a game's
           // total, not on the refresh cadence, so the refresh times would
           // send a member back at the wrong hour (UX review, 2026-11-10).
           sport === 'NCAABW'
             ? `No NCAABW picks have posted for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
-            : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+            : // EuroLeague has no pre-game model: its one model bets during the
+              // halftime break, so the refresh times would promise a list that
+              // never fills (models/euroleague_live_loop.py).
+              sport === 'EUROLEAGUE'
+              ? 'EuroLeague has no pre-game model. Its one model bets during the halftime break, and those bets post on Live Signals.'
+              : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
         }
       />
     );
@@ -1162,8 +1171,12 @@ function EmptyForView({
   if (view === 'signals') {
     return (
       <EmptyState
-        title="No signal bets right now"
-        subtitle="Zero picks is a valid signal — no high-conviction plays right now. Open the All board to see everything the model scored, or check back after the next refresh."
+        title={sport === 'EUROLEAGUE' ? 'No pre-game EuroLeague signals' : 'No signal bets right now'}
+        subtitle={
+          sport === 'EUROLEAGUE'
+            ? 'EuroLeague has no pre-game model. Its one model bets during the halftime break, and those bets post on Live Signals.'
+            : 'Zero picks is a valid signal — no high-conviction plays right now. Open the All board to see everything the model scored, or check back after the next refresh.'
+        }
       />
     );
   }
@@ -1178,15 +1191,15 @@ function EmptyForView({
     if (!hasLiveModel(sport)) {
       return (
         <EmptyState
-          title={`No live model for ${sport} yet`}
-          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
+          title={`No live model for ${sportDisplayName(sport)} yet`}
+          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sportDisplayName(sport)}. The All and Signals boards carry ${sportDisplayName(sport)}’s pre-game picks.`}
           subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSentence(sportSpokenName)}, so this board stays empty for ${sportSpokenName(sport)}. The All and Signals boards carry its pre-game picks.`}
         />
       );
     }
     return (
       <EmptyState
-        title={`No ${sport} live signals right now`}
+        title={`No ${sportDisplayName(sport)} live signals right now`}
         subtitle={liveEmptySubtitle(sport)}
       />
     );

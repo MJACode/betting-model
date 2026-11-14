@@ -107,6 +107,8 @@ export function sportChipsAvailable(available: Set<string>, known: boolean): Set
  */
 const SPOKEN_SPORT: Record<string, string> = {
   NCAABW: 'Women’s college basketball',
+  // VoiceOver spells an all-capitals code letter by letter.
+  EUROLEAGUE: 'EuroLeague',
 };
 
 /** The sport's name for an accessibility label: every control that speaks a

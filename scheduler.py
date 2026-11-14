@@ -276,6 +276,14 @@ RUN_NCAAB_LIVE = (os.environ.get("RUN_NCAAB_LIVE", "1").strip().lower()
 RUN_NCAABW_LIVE = (os.environ.get("RUN_NCAABW_LIVE", "1").strip().lower()
                    not in ("0", "false", "off", "no"))
 
+# EuroLeague halftime loop (models/euroleague_live_loop.py): the full-game
+# spread, bet during the halftime break, LIVE 2026-11-13 (mike: "yes"), so ON by
+# default; RUN_EUROLEAGUE_LIVE=0 stops it without a code change. It decides
+# nothing while neither DISCORD_CHANNEL_LIVE_EUROLEAGUE nor
+# DISCORD_WEBHOOK_LIVE_EUROLEAGUE is set on pollers (exit 3, the job reads failed).
+RUN_EUROLEAGUE_LIVE = (os.environ.get("RUN_EUROLEAGUE_LIVE", "1").strip().lower()
+                       not in ("0", "false", "off", "no"))
+
 # Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
 # matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards
 # do rather than three days later.
@@ -1086,6 +1094,10 @@ _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
                 # The NCAABW halftime loop: the same shape, and pollers holds
                 # its live channel (DISCORD_CHANNEL_LIVE_NCAABW) and the bot token.
                 "ncaabw_live",
+                # The EuroLeague halftime loop: the same shape (free EuroLeague
+                # API reads, one Odds API call per read instant), and pollers
+                # holds its live channel (DISCORD_CHANNEL_LIVE_EUROLEAGUE).
+                "euroleague_live",
                 "dk_direct_feed", "bovada_feed"}
 
 # Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
@@ -1262,6 +1274,25 @@ def run_ncaabw_live() -> None:
     )
     if outcome != "ok":
         raise RuntimeError(f"ncaabw-live loop exited {outcome}")
+
+
+def run_euroleague_live() -> None:
+    # The EuroLeague halftime loop (models/euroleague_live_loop.py), the
+    # run_ncaabw_live shape: free reads of EuroLeague's own live API (one game
+    # at a time, 1.5 s apart) and of the stored schedule every 15 s, exits after
+    # a few idle ticks with no EuroLeague game in progress, relaunched by this
+    # */10 cron (max_instances=1). Odds API credits are spent ONLY at a read
+    # instant (each five-minute mark plus 37 s) while an undecided game is in
+    # its halftime break: one bulk moneyline + spread + total call at the ten
+    # history books (one region), 3 credits, capped per process by
+    # EUROLEAGUE_LIVE_CALL_CAP / EUROLEAGUE_LIVE_CREDIT_CAP and by the shared
+    # LIVE_DAILY_CREDIT_CAP.
+    outcome = _run(
+        [sys.executable, "-m", "models.euroleague_live_loop"],
+        "euroleague-live",
+    )
+    if outcome != "ok":
+        raise RuntimeError(f"euroleague-live loop exited {outcome}")
 
 
 def run_nfl_wind_card(days: int, regions: str = "us",
@@ -3266,6 +3297,23 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NCAABW_LIVE=0 — NCAABW halftime loop NOT scheduled.")
+
+    # EuroLeague halftime loop. Every stored EuroLeague game tipped 14:00-20:00
+    # UTC (2020-21 to 2026-27) and its half ended 38-102 minutes after the tip
+    # (1st-99th percentile), so 9am-5:58pm ET covers every break in winter
+    # (14:08-22:58 UTC) and in summer time (13:08-21:58 UTC); an idle launch
+    # reads the stored schedule and exits. Minute 8 so it never starts in the
+    # same second as the college loops.
+    if RUN_EUROLEAGUE_LIVE:
+        sched.add_job(
+            run_euroleague_live,
+            CronTrigger(hour="9-17", minute="8-59/10", timezone=TIMEZONE),
+            id="euroleague_live",
+            name="EuroLeague halftime loop supervisor (9am-5:58pm ET, every 10 min)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_EUROLEAGUE_LIVE=0 — EuroLeague halftime loop NOT scheduled.")
 
     if RUN_NFL_PROP_CARD:
         sched.add_job(

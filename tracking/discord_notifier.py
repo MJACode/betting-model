@@ -349,6 +349,7 @@ def fmt_units(u: float) -> str:
 _SPORT_EMOJI = {
     "MLB": "\u26be", "NFL": "\U0001f3c8", "NCAAF": "\U0001f3c8",
     "NBA": "\U0001f3c0", "WNBA": "\U0001f3c0", "NCAAB": "\U0001f3c0", "NCAABW": "\U0001f3c0",
+    "EUROLEAGUE": "\U0001f3c0",
     "NHL": "\U0001f3d2",
     "UFC": "\U0001f94a", "GOLF": "\u26f3",
 }
