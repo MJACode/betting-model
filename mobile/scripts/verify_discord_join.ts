@@ -116,7 +116,7 @@ check('neither slide prints an invite', !freeSlide.body.includes('discord.gg') &
 
 const first = discordJoinCopy('firstPaid');
 const converted = discordJoinCopy('converted');
-eq('first paid headline', first.headline, 'Join the subscriber Discord');
+eq('first paid headline', first.headline, 'Join the Discord');
 eq(
   'first paid body',
   first.body,

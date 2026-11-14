@@ -279,7 +279,7 @@ export function discordJoinCopy(variant: DiscordJoinVariant): {
   }
   return {
     ...shared,
-    headline: 'Join the subscriber Discord',
+    headline: 'Join the Discord',
     body: 'Your plan includes a private community, plus extra bets shared beyond the models.',
   };
 }
