@@ -22,7 +22,7 @@
 ---
 
 ## [ ] EuroLeague pre-game rules: the channel, then watch the first slate (2026-11-14)
-The five rules (`docs/sports/euroleague.md`, "The five pre-game rules") post
+The four rules (`docs/sports/euroleague.md`, "The four pre-game rules") post
 nothing to Discord until `DISCORD_CHANNEL_EUROLEAGUE` (or
 `DISCORD_WEBHOOK_EUROLEAGUE`) is set on the worker; the app shows them from the
 first decision. On the first slate: the period feed's first `x-requests-last`

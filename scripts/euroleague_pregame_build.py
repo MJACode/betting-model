@@ -1,11 +1,11 @@
 """Build the EuroLeague pre-game artifact and replay the research bet for bet.
 
-For each of the five rules (models/euroleague_pregame.py) this:
+For each of the four rules (models/euroleague_pregame.py) this:
   1. decides every game of the research's cache again through the CARD'S OWN
      decision code, at the research's decision time (tip minus 10 minutes:
      the last snapshot of the full-game purchase at or before it; the period
      purchase's call made at that mark), at the best deciding-book price and,
-     for the three full-game rules, at DraftKings alone;
+     for the two full-game rules, at DraftKings alone;
   2. runs the research's own code (scripts/euroleague_research r1_/r2_/r3_)
      on the same cache;
   3. compares the two bet for bet (game, side, number, price, book) and
@@ -52,8 +52,6 @@ PERIOD_MARK = "T-10"
 PARAMS = {
     # r3_a_home.a1: home price -200 or longer, 2021-22 on, not neutral.
     R.HOME_ML: {"min_price": -200.0, "min_season": 2022},
-    # r2_kill section 2 / r2_baselines' "<=-500" band.
-    R.HEAVY_FAV_ML: {"max_price": -500.0},
     # r2_leads2 H3: the home number above 0.
     R.HOME_DOG_SPREAD: {"min_home_line": 0.0,
                         "relocated_venues": R.RELOCATED_VENUES},
@@ -63,7 +61,7 @@ PARAMS = {
     # lost): K 40, earlier = tipped 3+ hours before.
     R.Q1_SHARE_TOTAL: {"margin": 1.0, "k_share": 40.0, "prior_gap_hours": 3.0},
 }
-FIRST_READ_SEASON = {R.HOME_ML: 2022, R.HEAVY_FAV_ML: 2022, R.HOME_DOG_SPREAD: 2022,
+FIRST_READ_SEASON = {R.HOME_ML: 2022, R.HOME_DOG_SPREAD: 2022,
                      R.H1_DOG_ML: 2026, R.Q1_SHARE_TOTAL: 2026}
 
 
@@ -114,7 +112,6 @@ def replay(data: dict, played: pd.DataFrame, books=R.DECIDABLE) -> dict[str, lis
     close = close_times(played, data["ledger"])
     board = R.board_at(prepared, close)
     out = {R.HOME_ML: R.decide_home_ml(board, played, art, books),
-           R.HEAVY_FAV_ML: R.decide_heavy_fav(board, played, art, books),
            R.HOME_DOG_SPREAD: R.decide_home_dog(board, played, art, books)}
     if tuple(books) == tuple(R.DECIDABLE):
         rows = data["pq"][(data["pq"].mark == PERIOD_MARK) & data["pq"].game_id.isin(played.game_id)]
@@ -164,7 +161,6 @@ def research_bets() -> dict:
         import r1_lib as L1
         import r2_lib as L2
         import r3_lib as RR
-        import r2_baselines as RB
         import r2_leads2 as LD2
         import r1_baselines as B1
         import r3_d_periods as D
@@ -184,9 +180,6 @@ def research_bets() -> dict:
     home = z[(z.side == "home") & (z.price >= -200)]
     out[R.HOME_ML] = {"dk": keep(L2.grade(home[home.bookmaker == "draftkings"]), np.nan),
                       "best": keep(L2.grade(RR.best_price(home[home.bookmaker.isin(RR.DECIDABLE)])), np.nan)}
-    zd = L2.grade(L2.sides_long(cb[(cb.market == "h2h") & (cb.bookmaker == "draftkings")]))
-    zb = L2.grade(RB.best_decidable(RB.close, "h2h"))
-    out[R.HEAVY_FAV_ML] = {"dk": keep(zd[zd.price <= -500], np.nan), "best": keep(zb[zb.price <= -500], np.nan)}
     out[R.HOME_DOG_SPREAD] = {}
     for key, name in (("DraftKings close", "dk"), ("best decidable close", "best")):
         v = LD2.SETS[key]
@@ -304,29 +297,11 @@ def build(write: bool = False) -> dict:
     print("\n".join(report), flush=True)
     report = []
 
-    # one game never carries two bets that cannot both win
-    every = [d for m in R.MODELS for d in best[m]]
-    before = {id(d): d.status for d in every}
-    R.resolve_conflicts(every, standing=[])
-    flipped = [d for d in every if before[id(d)] == "bet" and d.status != "bet"]
-    report.append(f"\n## Conflicts in one pass: {len(flipped)} bet(s) written NONE instead\n")
-    crow = []
-    for m in R.MODELS:
-        lost = [d.game_id for d in flipped if d.model_id == m]
-        gb = graded_best[m]
-        kept = gb[~gb.game_id.isin(lost)]
-        crow.append({"model": m, "lost to a conflict": len(lost),
-                     "units of those": round(float(gb[gb.game_id.isin(lost)].units.sum()), 2),
-                     **{f"after: {k}": v for k, v in summary(kept).items() if k in ("bets", "units", "ret%")}})
-    report.append(md(crow))
-
     # the probability: the walk-forward uplift, then EV and edge on every replayed bet
     srow = []
     later_dec = replay(data, later_games) if len(later_games) else {}
     for m in R.MODELS:
-        gb = graded_best[m]
-        lost = {d.game_id for d in flipped if d.model_id == m}
-        live = gb[~gb.game_id.isin(lost)].copy()
+        live = graded_best[m].copy()
         by_season = {}
         for s in sorted(set(live.season) | {SEASON}):
             u, n = R.uplift_from(live, int(s))
@@ -350,8 +325,7 @@ def build(write: bool = False) -> dict:
             "uplift": round(up, 6), "uplift_bets": n_up, "uplift_by_season": by_season,
             "ev_min": round(float(live.ev.min()), 6), "edge_min": round(float(live.edge.min()), 6),
             "ev_median": round(float(live.ev.median()), 6),
-            "replay": {"all": s_all, "by_season": seasons,
-                       "lost_to_conflicts": sorted(lost)},
+            "replay": {"all": s_all, "by_season": seasons},
             "price_range": price_range(live),
             "volume": {"per_full_season": per_season,
                        "per_week": round(float(np.mean(per_week)), 2) if per_week else None},
@@ -364,7 +338,7 @@ def build(write: bool = False) -> dict:
                      "price median": price_range(live).get("median"),
                      "shortest": price_range(live).get("shortest"), "longest": price_range(live).get("longest"),
                      "per season": per_season})
-    report.append("\n## The live rules (best deciding book, after the conflict rule), and the probability\n")
+    report.append("\n## The live rules (best deciding book), and the probability\n")
     report.append(md(srow))
     report.append(f"\nGames after the research's state ({len(later_games)}): " + ", ".join(
         f"{m}: {art['models'][m]['after_research_state'].get('bets', 0)} bet(s)" for m in R.MODELS))

@@ -2659,8 +2659,8 @@ _RULE_MODEL_MARKETS = {
     # NULL. The pick sits on the odds feed's row of the game, which takes its
     # final from CFBD's row (cfbd_ingestor.mirror_scores_to_alias_rows).
     "ncaaf_moneyline_market": "h2h",
-    # The five EuroLeague pre-game rules (models/euroleague_pregame.py,
-    # 2026-11-14, mike). The two full-game moneylines settle on games.home_win
+    # The four EuroLeague pre-game rules (models/euroleague_pregame.py,
+    # 2026-11-14, mike). The full-game moneyline settles on games.home_win
     # (overtime included, as books settle it), scored_line NULL; the spread on
     # the final margin against scored_line, the HOME number (section 4); the
     # first-half moneyline on quarters 1-2 of euroleague_period_scores
@@ -2668,7 +2668,6 @@ _RULE_MODEL_MARKETS = {
     # quarter 1 (_first_quarter_points). Overtime never counts in a period.
     # NEVER "h2h" / "totals" for the period two: those grade the full game.
     "euroleague_home_ml": "h2h",
-    "euroleague_heavy_fav_ml": "h2h",
     "euroleague_home_dog_spread": "spreads",
     "euroleague_h1_dog_ml": "h2h_h1",
     "euroleague_q1_club_share_total": "totals_q1",

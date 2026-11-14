@@ -62,24 +62,23 @@ def test_the_floors_sit_just_under_the_replay_not_far_under():
         assert m["edge_min"] - config.MODEL_EDGE_THRESHOLDS[model] < 0.011, model
 
 
-def test_the_big_favourite_floor_admits_minus_4000_and_nothing_shorter():
-    assert ART["models"][R.HEAVY_FAV_ML]["price_range"]["shortest"] == -4000.0
-    assert config.min_odds_for(R.HEAVY_FAV_ML) == -4000
-    assert ART["models"][R.HEAVY_FAV_ML]["price_range"]["longest"] <= -500
+def test_the_big_favourite_moneyline_is_gone_from_the_artifact_and_config():
+    # Removed before it went live (mike, 2026-11-14: "odds cutoff for favorites
+    # should be -200"): every bet it found was -500 or shorter.
+    gone = "euroleague_heavy_fav_ml"
+    assert gone not in ART["models"] and gone not in R.MODELS
+    for table in (config.ACTION_THRESHOLDS, config.MODEL_EDGE_THRESHOLDS, config.MODEL_PROB_THRESHOLDS,
+                  config.MODEL_MIN_ODDS, config.MODEL_OWN_EV_FLOOR, config.SCORING_METHODS):
+        assert gone not in table
+    assert gone not in config.MODELS_ON_OWN_PROBABILITY
 
 
-def test_the_home_moneyline_and_the_big_favourite_lose_their_conflicting_games():
-    a = set(ART["models"][R.HOME_ML]["replay"]["lost_to_conflicts"])
-    b = set(ART["models"][R.HEAVY_FAV_ML]["replay"]["lost_to_conflicts"])
-    assert a == b and len(a) == 6
-    for model in (R.HOME_DOG_SPREAD, R.H1_DOG_ML, R.Q1_SHARE_TOTAL):
-        assert ART["models"][model]["replay"]["lost_to_conflicts"] == []
-
-
-def test_the_replayed_records_are_the_researchs_less_the_conflicts():
+def test_the_replayed_records_are_the_researchs():
+    # With no rule left to conflict with in one pass, each live population is
+    # the research's best-deciding-book read, bet for bet.
     got = {m: (ART["models"][m]["replay"]["all"]["bets"], ART["models"][m]["replay"]["all"]["units"])
            for m in R.MODELS}
-    assert got == {R.HOME_ML: (978, 65.8), R.HEAVY_FAV_ML: (176, 39.43), R.HOME_DOG_SPREAD: (455, 54.54),
+    assert got == {R.HOME_ML: (984, 64.8), R.HOME_DOG_SPREAD: (455, 54.54),
                    R.H1_DOG_ML: (465, 19.14), R.Q1_SHARE_TOTAL: (63, 17.71)}
 
 

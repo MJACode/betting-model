@@ -466,7 +466,7 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "euroleague_shots",
     "euroleague_shot_fetches",
     # The EuroLeague pre-game card's decisions ledger: one row per (game,
-    # model) the five rules have decided, bet or not
+    # model) the four rules have decided, bet or not
     # (scripts/euroleague_pregame_card.py, which creates it on demand), and
     # the live period feed's call ledger (data/ingestors/euroleague_period_odds.py).
     # Read by the card and the window, never by the app.

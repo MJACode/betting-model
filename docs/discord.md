@@ -58,7 +58,7 @@ and posts to #ncaabw-live only. EUROLEAGUE joined `config.DISCORD_SPORTS` and
 (`models/euroleague_live_loop.py`, `pollers`): its picks post to the EuroLeague
 live channel only, through `DISCORD_CHANNEL_LIVE_EUROLEAGUE` (or
 `DISCORD_WEBHOOK_LIVE_EUROLEAGUE`). **Neither the channel nor the variable
-exists yet**; until one is set the loop decides nothing. The five pre-game
+exists yet**; until one is set the loop decides nothing. The four pre-game
 EuroLeague rules (2026-11-14, `scripts/euroleague_pregame_card.py`, on the
 worker) post to the sport's pre-game channel the NCAABW way:
 `DISCORD_CHANNEL_EUROLEAGUE` (or `DISCORD_WEBHOOK_EUROLEAGUE`); with neither set

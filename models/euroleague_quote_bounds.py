@@ -22,13 +22,12 @@ import math
 
 EDGE_CAP: dict[str, float] = {
     "euroleague_live_spread_ht": 0.40,
-    # The five pre-game rules (models/euroleague_pregame.py, 2026-11-14). Their
+    # The four pre-game rules (models/euroleague_pregame.py, 2026-11-14). Their
     # decision edge is the walk-forward uplift less the price's vig, so it sits
     # within a few points of the uplift on every replayed bet
     # (scripts/euroleague_pregame_build.py prints the range). 0.40 is far above
     # every one and far below a price typo's edge.
     "euroleague_home_ml": 0.40,
-    "euroleague_heavy_fav_ml": 0.40,
     "euroleague_home_dog_spread": 0.40,
     "euroleague_h1_dog_ml": 0.40,
     "euroleague_q1_club_share_total": 0.40,

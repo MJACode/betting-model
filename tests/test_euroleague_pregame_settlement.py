@@ -28,7 +28,6 @@ GID = "EUROLEAGUE_E2026_120"
 
 def test_each_rule_settles_on_its_own_market():
     assert pt._market_for_pick("euroleague_home_ml") == "h2h"
-    assert pt._market_for_pick("euroleague_heavy_fav_ml") == "h2h"
     assert pt._market_for_pick("euroleague_home_dog_spread") == "spreads"
     assert pt._market_for_pick("euroleague_h1_dog_ml") == "h2h_h1"
     assert pt._market_for_pick("euroleague_q1_club_share_total") == "totals_q1"

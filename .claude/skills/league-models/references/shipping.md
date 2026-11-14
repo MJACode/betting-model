@@ -55,7 +55,7 @@ A new writer that skips one of these bets something it should not:
 |---|---|---|
 | `ACTION_THRESHOLDS[id]` | `{"min_prob", "min_edge"}` with the evidence in a comment | `test_config::test_every_model_carries_its_own_thresholds` |
 | `MODEL_EDGE_THRESHOLDS[id]`, `MODEL_PROB_THRESHOLDS[id]` | the same cut, with who asked | same |
-| `MODEL_MIN_ODDS[id]` | the price floor, pinned per model (default -200; a model that lays shorter by design pins the research's shortest price, EuroLeague's big favourites -4000) | `test_mobile_threshold_parity::test_the_price_floors_match_config` |
+| `MODEL_MIN_ODDS[id]` | the price floor, pinned per model (default -200; a model that lays shorter by design pins its own floor with who asked, `ufc_open_moneyline` -300; a rule whose every bet lays shorter than -200 is not shipped at all: EuroLeague's big-favourite moneyline was removed, mike 2026-11-14, "odds cutoff for favorites should be -200") | `test_mobile_threshold_parity::test_the_price_floors_match_config` |
 | `MODEL_OWN_EV_FLOOR[id]` | its own EV floor, swept on its own record | `test_config::test_every_own_floor_names_a_live_model`, `test_no_own_floor_tightens_a_model_past_the_global_floor` |
 | `MODELS_ON_OWN_PROBABILITY` | if it decides on its own probability | hand-pinned sets in `test_config` and `test_global_ev_floor` |
 | `SCORING_METHODS[id]` | `"rule"` for a card | `test_dashboard_rule_models.KNOWN_RULES` |

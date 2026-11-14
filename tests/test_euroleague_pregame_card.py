@@ -65,9 +65,9 @@ def test_a_game_every_model_has_decided_is_not_looked_at():
 
 
 def test_each_model_has_its_own_switch(monkeypatch):
-    monkeypatch.setenv("RUN_EUROLEAGUE_HEAVY_FAV_ML", "0")
+    monkeypatch.setenv("RUN_EUROLEAGUE_HOME_DOG_SPREAD", "0")
     monkeypatch.setenv("RUN_EUROLEAGUE_Q1_SHARE_TOTAL", "off")
-    assert card.models_on() == (R.HOME_ML, R.HOME_DOG_SPREAD, R.H1_DOG_ML)
+    assert card.models_on() == (R.HOME_ML, R.H1_DOG_ML)
     monkeypatch.setenv("RUN_EUROLEAGUE_PREGAME", "false")
     assert not card.enabled()
 
@@ -108,7 +108,7 @@ def test_the_period_rules_read_only_the_decision_fetchs_rows_and_the_full_game_t
          "home_price": -150, "away_price": 130},
     ])
     art = {"models": {m: {"params": p, "uplift": 0.05} for m, p in (
-        (R.HOME_ML, {"min_price": -200.0, "min_season": 2022}), (R.HEAVY_FAV_ML, {"max_price": -500.0}),
+        (R.HOME_ML, {"min_price": -200.0, "min_season": 2022}),
         (R.HOME_DOG_SPREAD, {"min_home_line": 0.0}), (R.H1_DOG_ML, {}),
         (R.Q1_SHARE_TOTAL, {"margin": 1.0, "k_share": 40.0, "prior_gap_hours": 3.0}))}}
     out = card.decide(games(), {"G1": (f, f)}, {"G1": (R.HOME_ML, R.H1_DOG_ML)}, fg, per, None,
@@ -186,17 +186,10 @@ def test_an_unscored_decision_writes_no_row():
 
 @pytest.mark.parametrize("model,price,why", [
     (R.HOME_ML, -210.0, "below_price_floor"),
-    (R.HEAVY_FAV_ML, -4500.0, "below_price_floor"),
 ])
 def test_the_price_floor_turns_a_bet_into_a_none_row(model, price, why):
     rows, refused = card.pick_rows([_decided(model, "home", price, p_fair=0.95, uplift=0.03)], games(), 1000.0)
     assert rows[0]["signal_type"] == "NONE" and refused[("G1", model)].startswith(why)
-
-
-def test_the_heavy_favourite_floor_admits_minus_4000():
-    rows, refused = card.pick_rows([_decided(R.HEAVY_FAV_ML, "home", -4000.0, p_fair=0.965, uplift=0.0737)],
-                                   games(), 1000.0)
-    assert rows[0]["signal_type"] == "BET", refused
 
 
 def test_an_ev_under_the_models_own_floor_is_refused():

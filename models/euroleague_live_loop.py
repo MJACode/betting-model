@@ -58,9 +58,9 @@ WHAT IS NOT HERE, AND WHY
   * One game never carries two bets that cannot both win (mike, 2026-10-17):
     a halftime spread is checked against the game's standing full-game
     EuroLeague BETs, its own and the pre-game rules' (the home underdog spread
-    and the two full-game moneylines, models/euroleague_pregame.py; a
-    moneyline is checked as the spread at -0.5 for the home side, +0.5 for the
-    away side, since a full game cannot end level).
+    and the home moneyline, models/euroleague_pregame.py; a moneyline is
+    checked as the spread at -0.5 for the home side, +0.5 for the away side,
+    since a full game cannot end level).
 """
 from __future__ import annotations
 
@@ -113,9 +113,9 @@ BULK_PURPOSE = "euroleague_live_bulk:h2h,spreads,totals"
 # The models that bet a EuroLeague full-game spread: no two of their bets on one
 # game may be unable to win together.
 FULL_GAME_SPREAD_MODELS = (M.MODEL_ID, "euroleague_home_dog_spread")
-# The pre-game full-game moneylines (models/euroleague_pregame.py): read as the
+# The pre-game full-game moneyline (models/euroleague_pregame.py): read as the
 # spread at -0.5 (home) / +0.5 (away).
-FULL_GAME_MONEYLINE_MODELS = ("euroleague_home_ml", "euroleague_heavy_fav_ml")
+FULL_GAME_MONEYLINE_MODELS = ("euroleague_home_ml",)
 
 
 def deciding_books() -> tuple:

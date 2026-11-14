@@ -414,10 +414,10 @@ def test_the_scheduler_runs_it_on_pollers_in_euroleague_hours():
 
 
 def test_the_pre_game_rules_standing_bets_are_read_moneylines_as_half_point_spreads():
-    """The five EuroLeague pre-game rules (models/euroleague_pregame.py, 2026-11-14)
+    """The four EuroLeague pre-game rules (models/euroleague_pregame.py, 2026-11-14)
     can hold a full-game bet before the half: the home-underdog spread as a spread,
-    the two moneylines as the spread at -0.5 home / +0.5 away (a full game cannot end
-    level). A halftime spread that cannot win beside one is declined."""
+    the home moneyline as the spread at -0.5 (a full game cannot end level). A
+    halftime spread that cannot win beside one is declined."""
     from models.ncaab_live_ig import cannot_both_win
 
     class Conn:
@@ -427,7 +427,6 @@ def test_the_pre_game_rules_standing_bets_are_read_moneylines_as_half_point_spre
 
         def fetchall(self):
             return [("euroleague_home_ml", "home", None, "MAD ML"),
-                    ("euroleague_heavy_fav_ml", "away", None, "PAN ML"),
                     ("euroleague_home_dog_spread", "home", 4.5, "MAD +4.5"),
                     ("euroleague_live_spread_ht", "away", 2.5, "PAN -2.5 (live)")]
 
@@ -439,10 +438,10 @@ def test_the_pre_game_rules_standing_bets_are_read_moneylines_as_half_point_spre
 
     c = Conn()
     got = LP.standing_spreads(c, "EUROLEAGUE_E2026_120")
-    assert {"euroleague_home_ml", "euroleague_heavy_fav_ml", "euroleague_home_dog_spread",
+    assert {"euroleague_home_ml", "euroleague_home_dog_spread",
             "euroleague_live_spread_ht"} <= set(c.models)
     assert [(s["model_id"], s["side"], s["line"]) for s in got] == [
-        ("euroleague_home_ml", "home", -0.5), ("euroleague_heavy_fav_ml", "away", 0.5),
+        ("euroleague_home_ml", "home", -0.5),
         ("euroleague_home_dog_spread", "home", 4.5), ("euroleague_live_spread_ht", "away", 2.5)]
     home_ml = got[0]
     # PAN -1 at the half (home number +1): PAN must win by 2+, so MAD cannot win too

@@ -306,9 +306,9 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'nba_q1_trend') return 'game_spread';
   // A moneyline, though its id has no 'moneyline' in it: the first quarter's.
   if (modelId === 'nba_q1_trend_ml') return 'game_ml';
-  // The EuroLeague rules (models/euroleague_pregame.py): three moneylines with
+  // The EuroLeague rules (models/euroleague_pregame.py): two moneylines with
   // no 'moneyline' in their ids, and a first quarter's points.
-  if (modelId === 'euroleague_home_ml' || modelId === 'euroleague_heavy_fav_ml') return 'game_ml';
+  if (modelId === 'euroleague_home_ml') return 'game_ml';
   if (modelId === 'euroleague_h1_dog_ml') return 'game_ml';
   if (modelId === 'euroleague_q1_club_share_total') return 'game_total';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
@@ -2240,9 +2240,8 @@ const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_
 // and the NBA first quarter's (models/nba_q1_trend_ml.py). A moneyline has no
 // line, so their Pick Detail note names only the price.
 const POSTED_MONEYLINE_MODELS: readonly string[] = [
-  // The three EuroLeague moneylines (models/euroleague_pregame.py).
+  // The two EuroLeague moneylines (models/euroleague_pregame.py).
   'euroleague_home_ml',
-  'euroleague_heavy_fav_ml',
   'euroleague_h1_dog_ml',
   'ncaab_moneyline_own_spread',
   'ncaab_moneyline_first_post',
@@ -2381,10 +2380,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'ncaaf_moneyline_market' ||
     pick.model_id === 'ncaab_first_half_spread' ||
     pick.model_id === 'ncaab_first_half_total' ||
-    // The five EuroLeague pre-game rules decide each game once, five to ten
+    // The four EuroLeague pre-game rules decide each game once, five to ten
     // minutes before tip (scripts/euroleague_pregame_card.py).
     pick.model_id === 'euroleague_home_ml' ||
-    pick.model_id === 'euroleague_heavy_fav_ml' ||
     pick.model_id === 'euroleague_home_dog_spread' ||
     pick.model_id === 'euroleague_h1_dog_ml' ||
     pick.model_id === 'euroleague_q1_club_share_total' ||

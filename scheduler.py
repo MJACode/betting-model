@@ -96,7 +96,7 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         (scripts/euroleague_pregame_window.py: one per-event call per
         EuroLeague game 60, 10 and 2 minutes before tip, the first half, the
         quarters and the full game at ten books, about 15 credits a call
-        (data/ingestors/euroleague_period_odds.py); then the five EuroLeague
+        (data/ingestors/euroleague_period_odds.py); then the four EuroLeague
         pre-game rules (scripts/euroleague_pregame_card.py) decide each game
         once on its tip-minus-10 fetch, and the job publishes. A tick with
         nothing due makes no call. RUN_EUROLEAGUE_PREGAME=0 stops it;
@@ -1078,7 +1078,7 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes NCAAB first-half spread and total picks through
                   # their own cards, on its own first-half fetches.
                   "ncaab_first_half_window",
-                  # Writes the five EuroLeague pre-game rules' picks through
+                  # Writes the four EuroLeague pre-game rules' picks through
                   # their card, on its own period and full-game fetches.
                   "euroleague_pregame_window",
                   # Queues the daily BYOM NFL refresh onto job_queue, which
@@ -3592,7 +3592,7 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*", timezone=TIMEZONE),
         id="euroleague_pregame_window",
         name="EuroLeague pre-game (every minute, 24x7: calls 60, 10 and 2 min before tip; "
-             "the five rules decide at tip minus 10)",
+             "the four rules decide at tip minus 10)",
         max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 

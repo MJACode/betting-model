@@ -1,5 +1,5 @@
 """The EuroLeague pre-game window: the period-and-full-game fetches and the
-runs of the EuroLeague pre-game card (five rules, models/euroleague_pregame.py).
+runs of the EuroLeague pre-game card (four rules, models/euroleague_pregame.py).
 
 Planned every minute (scheduler.run_euroleague_pregame_window, 24x7). A tick:
   1. plan(): the EuroLeague games tipping in the next 70 minutes, and, for

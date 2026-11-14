@@ -409,18 +409,18 @@ before tip (`data/ingestors/euroleague_period_odds.py`: the first half, the
 quarters, team totals, the alternate ladders and the full game, at the ten
 books of `config.EUROLEAGUE_PERIOD_BOOKMAKERS`, about 15 credits a call from
 the code's billing model, at most 34; ledger `euroleague_period_live_fetches`),
-then runs the five pre-game rules (`scripts/euroleague_pregame_card.py`, ledger
+then runs the four pre-game rules (`scripts/euroleague_pregame_card.py`, ledger
 `euroleague_pregame_decisions`), which decide each game once on its
 tip-minus-10 call, and publishes what they wrote. Both ledgers are created by
 the code on first write. It beats `job_heartbeats` on every tick (bound 20
 minutes). The models and their evidence: `docs/sports/euroleague.md`, "The
-five pre-game rules".
+four pre-game rules".
 
 | Variable (on the worker) | Default | What it does |
 |---|---|---|
 | `RUN_EUROLEAGUE_PREGAME` | `1` | `0` / `false` / `off` / `no`: nothing is read or bought; the job keeps beating |
 | `RUN_EUROLEAGUE_PERIOD_FEED` | `1` | `0`: the calls stop alone; the full-game rules decide on the stored board at tip minus 10, the period rules record `missed` and the window fails on every game day, so switch the two period models off with it |
-| `RUN_EUROLEAGUE_HOME_ML`, `RUN_EUROLEAGUE_HEAVY_FAV_ML`, `RUN_EUROLEAGUE_HOME_DOG_SPREAD`, `RUN_EUROLEAGUE_H1_DOG_ML`, `RUN_EUROLEAGUE_Q1_SHARE_TOTAL` | `1` | `0`: that model decides nothing and writes no row |
+| `RUN_EUROLEAGUE_HOME_ML`, `RUN_EUROLEAGUE_HOME_DOG_SPREAD`, `RUN_EUROLEAGUE_H1_DOG_ML`, `RUN_EUROLEAGUE_Q1_SHARE_TOTAL` | `1` | `0`: that model decides nothing and writes no row |
 | `EUROLEAGUE_PERIOD_RESERVE_DAYS` | `1` | Under this many days of the platform's measured daily burn the feed buys nothing and the window fails |
 | `DISCORD_CHANNEL_EUROLEAGUE` or `DISCORD_WEBHOOK_EUROLEAGUE` | **not set** (2026-11-14: the channel is being created) | Where the pre-game picks post; with neither set they stay unsent and post once it exists |
 

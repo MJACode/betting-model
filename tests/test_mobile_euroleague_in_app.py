@@ -86,7 +86,7 @@ def test_the_stats_tab_promises_nothing_for_a_sport_with_no_stats():
 
 
 def test_the_pre_game_boards_say_when_euroleague_picks_post():
-    """The five pre-game models (2026-11-14) post game by game, five to ten
+    """The four pre-game models (2026-11-14) post game by game, five to ten
     minutes before each tip: the boards say so instead of the refresh times,
     and no longer say there is no pre-game model."""
     src = _read("screens/PicksHomeScreen.tsx")

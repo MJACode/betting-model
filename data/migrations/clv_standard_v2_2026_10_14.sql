@@ -228,7 +228,6 @@ BEGIN
         WHEN 'ncaaf_moneyline_market' THEN 'h2h'
         WHEN 'ufc_open_moneyline' THEN 'h2h'
         WHEN 'euroleague_home_ml' THEN 'h2h'
-        WHEN 'euroleague_heavy_fav_ml' THEN 'h2h'
         WHEN 'euroleague_home_dog_spread' THEN 'spreads'
         WHEN 'euroleague_h1_dog_ml' THEN 'h2h_h1'
         WHEN 'euroleague_q1_club_share_total' THEN 'totals_q1'

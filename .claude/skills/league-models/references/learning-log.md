@@ -30,6 +30,29 @@ review as its own entry.
 
 ---
 
+## 2026-11-14 — EuroLeague, the big-favourite moneyline removed before it went live
+
+1. **Scope.** mike, 2026-11-14: "odds cutoff for favorites should be -200".
+   `euroleague_heavy_fav_ml` bet only favourites at -500 or shorter, so at a
+   -200 floor it could never bet: removed (PR #1323, unmerged), not shipped as
+   a model that cannot place a bet. The other four pre-game rules unchanged.
+2. **Tried.** Rebuilt the artifact from the research cache
+   (`scripts/euroleague_pregame_build.py --write`). Every read still matches
+   the research bet for bet. The spread, first-half and first-quarter rules'
+   artifact entries are identical. The home moneyline gains the 6 games the
+   conflict rule took: 984 bets, +64.80 units (was 978, +65.80), uplift
+   +0.0520 (was +0.0523), smallest EV +0.0401 (floor 0.04 still under it).
+3. **New.** Nothing new as a method. The same-pass conflict branch was only
+   reachable through the removed rule (the two full-game rules left both bet
+   the home side), so it went with it; a test now pins that no two of the four
+   decided in one pass conflict.
+4. **Corrected.** `shipping.md`'s price-floor line: was "a model that lays
+   shorter by design pins the research's shortest price, EuroLeague's big
+   favourites -4000", now a rule whose every bet lays shorter than -200 is not
+   shipped (mike, 2026-11-14). `porting-traps.md`'s conflict trap gained what
+   a removal does to it.
+5. **The framework.** No step changed.
+
 ## 2026-11-14 — EuroLeague, five pre-game rules shipped: `euroleague_home_ml`, `euroleague_heavy_fav_ml`, `euroleague_home_dog_spread`, `euroleague_h1_dog_ml`, `euroleague_q1_club_share_total`
 
 1. **Scope.** mike, 2026-11-14: "I told you to build all the models": the

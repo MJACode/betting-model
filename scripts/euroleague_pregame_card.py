@@ -1,4 +1,4 @@
-"""EuroLeague pre-game card: write the five EuroLeague rule cards' picks
+"""EuroLeague pre-game card: write the four EuroLeague rule cards' picks
 (models/euroleague_pregame.py).
 
 LIVE, real money (mike, 2026-11-14: "I told you to build all the models"),
@@ -8,15 +8,15 @@ Run by the EuroLeague pre-game window job every minute
 once a game is 10.5 minutes or less from tip; the job then publishes what it
 wrote. RUN_EUROLEAGUE_PREGAME=0 stops the job before anything is read or
 bought. Each model has its own switch, read here before that model decides a
-game: RUN_EUROLEAGUE_HOME_ML, RUN_EUROLEAGUE_HEAVY_FAV_ML,
-RUN_EUROLEAGUE_HOME_DOG_SPREAD, RUN_EUROLEAGUE_H1_DOG_ML,
-RUN_EUROLEAGUE_Q1_SHARE_TOTAL (=0, false, off or no). A switched-off model
+game: RUN_EUROLEAGUE_HOME_ML, RUN_EUROLEAGUE_HOME_DOG_SPREAD,
+RUN_EUROLEAGUE_H1_DOG_ML, RUN_EUROLEAGUE_Q1_SHARE_TOTAL (=0, false, off or
+no). A switched-off model
 writes nothing, not even a decision row.
 
 WHEN A GAME IS DECIDED: on the decision fetch, the per-event call made ten
 minutes before tip (data/ingestors/euroleague_period_odds.DECISION_MARK), when
 it landed 5 to 10.5 minutes before tip (DECISION_LEAD_MIN). The research
-graded that one instant for all five rules: the full-game rules on the board
+graded that one instant for all four rules: the full-game rules on the board
 at the last five-minute snapshot at or before tip minus 10, the period rules on
 the purchase's call made at tip minus 10. The full-game rules read the BOARD
 at the fetch instant (every stored pre-game quote, the fetch's own included,
@@ -39,14 +39,12 @@ with any BET of that model, is never decided again: a moved price writes
 nothing.
 
 ONE GAME NEVER CARRIES TWO BETS THAT CANNOT BOTH WIN
-(.claude/rules/picks-and-publishing.md). The home moneyline (euroleague_home_ml)
-and the favourite at -500 or shorter (euroleague_heavy_fav_ml) can sit on
-opposite sides of one game: when the favourite is the AWAY club, the home club
-is the underdog the first rule bets. Decided in the same pass, both are written
-NONE with the reason. A full-game moneyline or spread that cannot win beside a
-standing EuroLeague full-game BET (the five here, the halftime spread) is
-written NONE; the standing BET keeps the game. A first-half or first-quarter bet
-and a full-game bet can always both win.
+(.claude/rules/picks-and-publishing.md). A full-game moneyline or spread
+that cannot win beside a standing EuroLeague full-game BET (the two here, the
+halftime spread) is written NONE; the standing BET keeps the game. The two
+full-game rules here both bet the home side, so they never conflict with each
+other, and a first-half or first-quarter bet and a full-game bet can always
+both win.
 
 ROWS. A bet is a BET row at the best deciding-book price (CLAUDE.md 6); a game
 a rule priced and did not bet is a NONE row at the side and price it would have
@@ -95,7 +93,6 @@ SPORT = R.SPORT
 MODELS = R.MODELS
 SWITCHES = {
     R.HOME_ML: "RUN_EUROLEAGUE_HOME_ML",
-    R.HEAVY_FAV_ML: "RUN_EUROLEAGUE_HEAVY_FAV_ML",
     R.HOME_DOG_SPREAD: "RUN_EUROLEAGUE_HOME_DOG_SPREAD",
     R.H1_DOG_ML: "RUN_EUROLEAGUE_H1_DOG_ML",
     R.Q1_SHARE_TOTAL: "RUN_EUROLEAGUE_Q1_SHARE_TOTAL",
@@ -343,8 +340,6 @@ def decide(games: dict, due: dict, todo: dict, fg: pd.DataFrame, per: pd.DataFra
         got: list[R.Decision] = []
         if R.HOME_ML in want:
             got += R.decide_home_ml(board, gf, art, books)
-        if R.HEAVY_FAV_ML in want:
-            got += R.decide_heavy_fav(board, gf, art, books)
         if R.HOME_DOG_SPREAD in want:
             got += R.decide_home_dog(board, gf, art, books)
         if fetch_at is None:

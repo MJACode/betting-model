@@ -1165,7 +1165,7 @@ function EmptyForView({
           // send a member back at the wrong hour (UX review, 2026-11-10).
           sport === 'NCAABW'
             ? `No NCAABW picks have posted for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
-            : // The five EuroLeague pre-game models decide each game once, five to
+            : // The four EuroLeague pre-game models decide each game once, five to
               // ten minutes before its tip (scripts/euroleague_pregame_card.py), so
               // the refresh times would send a member back at the wrong hour.
               sport === 'EUROLEAGUE'

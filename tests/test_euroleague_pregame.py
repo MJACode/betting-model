@@ -1,4 +1,4 @@
-"""The five EuroLeague pre-game rules (models/euroleague_pregame.py), on
+"""The four EuroLeague pre-game rules (models/euroleague_pregame.py), on
 hand-built boards whose right answer is known.
 
 Each rule is the research's own (scripts/euroleague_research r1_/r2_/r3_), and
@@ -28,7 +28,6 @@ TIP = pd.Timestamp("2026-11-20T19:00:00Z")
 T = TIP - pd.Timedelta(minutes=10)
 ART = {"models": {
     R.HOME_ML: {"params": {"min_price": -200.0, "min_season": 2022}, "uplift": 0.05},
-    R.HEAVY_FAV_ML: {"params": {"max_price": -500.0}, "uplift": 0.07},
     R.HOME_DOG_SPREAD: {"params": {"min_home_line": 0.0}, "uplift": 0.09},
     R.H1_DOG_ML: {"params": {}, "uplift": 0.05},
     R.Q1_SHARE_TOTAL: {"params": {"margin": 1.0, "k_share": 40.0, "prior_gap_hours": 3.0}, "uplift": 0.15},
@@ -124,21 +123,6 @@ def test_only_the_books_a_pick_may_name_are_read():
 def test_a_tie_in_price_goes_to_the_book_first_in_name_order():
     b = board([("fanduel", "h2h", 30, 140, -160, None), ("betmgm", "h2h", 30, 140, -165, None)])
     assert R.decide_home_ml(b, game(), ART)[0].book == "betmgm"
-
-
-# ── model 2: the big favourite ───────────────────────────────────────────────
-
-def test_the_favourite_at_minus_500_or_shorter_is_bet_on_either_side_neutral_included():
-    b = board([("draftkings", "h2h", 30, 400, -520, None), ("fanduel", "h2h", 30, 380, -500, None)])
-    d = R.decide_heavy_fav(b, game(neutral=True), ART)[0]
-    # the best away price is FanDuel's -500, still at the cutoff
-    assert (d.status, d.side, d.book, d.price) == ("bet", "away", "fanduel", -500.0)
-
-
-def test_a_best_price_longer_than_minus_500_is_a_none_row_on_the_favourite():
-    b = board([("draftkings", "h2h", 30, -520, 400, None), ("betmgm", "h2h", 30, -480, 370, None)])
-    d = R.decide_heavy_fav(b, game(), ART)[0]
-    assert (d.status, d.side, d.price) == ("no_bet", "home", -480.0)
 
 
 # ── model 3: the home underdog spread ────────────────────────────────────────
@@ -316,12 +300,19 @@ def _bet(model, side, line=None, gid="G1"):
     return R.Decision(gid, model, "bet", "x", side=side, price=-110.0, line=line)
 
 
-def test_two_bets_in_one_pass_that_cannot_both_win_are_both_written_none():
-    ds = [_bet(R.HOME_ML, "home"), _bet(R.HEAVY_FAV_ML, "away"), _bet(R.H1_DOG_ML, "home"),
-          _bet(R.HOME_DOG_SPREAD, "home", 9.5)]
+def test_the_rules_decided_in_one_pass_never_conflict_with_each_other():
+    # The two full-game rules both bet the home side: the moneyline, and the
+    # spread only when the home number is above 0. The big-favourite moneyline,
+    # the one rule that bet an away side, was removed before it went live
+    # (mike, 2026-11-14: "odds cutoff for favorites should be -200").
+    assert R.FULL_GAME_MODELS == (R.HOME_ML, R.HOME_DOG_SPREAD)
+    for line in (0.5, 1.0, 3.5, 9.5, 20.5):
+        assert not R.cannot_both_win({"market": "h2h", "side": "home", "line": None},
+                                     {"market": "spreads", "side": "home", "line": line}), line
+    ds = [_bet(R.HOME_ML, "home"), _bet(R.H1_DOG_ML, "away"), _bet(R.HOME_DOG_SPREAD, "home", 9.5),
+          _bet(R.Q1_SHARE_TOTAL, "under", 40.5)]
     R.resolve_conflicts(ds, standing=[])
-    assert [d.status for d in ds] == ["no_bet", "no_bet", "bet", "bet"]
-    assert "same pass" in ds[0].detail
+    assert [d.status for d in ds] == ["bet", "bet", "bet", "bet"]
 
 
 def test_a_standing_bet_keeps_the_game():
@@ -343,7 +334,7 @@ def test_the_uplift_is_the_win_share_less_the_mean_no_vig_before_the_season_push
 
 
 def test_the_probability_is_clipped_and_ev_and_edge_follow_it():
-    d = R.finish(R.Decision("G1", R.HEAVY_FAV_ML, "bet", side="home", price=-4000.0, p_fair=0.97), 0.07)
+    d = R.finish(R.Decision("G1", R.HOME_ML, "bet", side="home", price=-4000.0, p_fair=0.97), 0.07)
     assert d.p_model == 0.99
     assert d.ev == pytest.approx(0.99 * (1 + 100 / 4000) - 1)
     assert d.edge == pytest.approx(0.99 - 4000 / 4100)

@@ -58,9 +58,9 @@ NFL_RULES = ("nfl_opener_spread", "nfl_wind_totals")
 # The NCAAF moneyline card (2026-11-10): a write-once NONE row on a sport the
 # scorer's own loop scores, beside models the pass does clear (ncaaf_spread).
 NCAAF_CARD = "ncaaf_moneyline_market"
-# The EuroLeague pre-game card (2026-11-14): five rules, each a write-once
+# The EuroLeague pre-game card (2026-11-14): four rules, each a write-once
 # NONE row on a sport the scorer's own loop never scores.
-EUROLEAGUE_CARD = ("euroleague_home_ml", "euroleague_heavy_fav_ml", "euroleague_home_dog_spread",
+EUROLEAGUE_CARD = ("euroleague_home_ml", "euroleague_home_dog_spread",
                    "euroleague_h1_dog_ml", "euroleague_q1_club_share_total")
 # A game-market card that writes on MLB games (scripts run by the
 # mlb-game-market step), so a foreign row on a game the loop DOES reach.

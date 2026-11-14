@@ -141,8 +141,6 @@ def test_the_decision_fetch_decides_every_model_once_and_a_rerun_writes_nothing(
     p = _picks(db)
     # the home moneyline at the best fetched price, not the stale hourly one
     assert p[R.HOME_ML][:4] == ("BET", "home", "fanduel", 145.0)
-    # no side is -500 or shorter: a NONE row on the favourite
-    assert p[R.HEAVY_FAV_ML][:2] == ("NONE", "away")
     assert p[R.HOME_DOG_SPREAD][:5] == ("BET", "home", "fanduel", -105.0, 3.5)
     assert p[R.H1_DOG_ML][:4] == ("BET", "home", "fanduel", 130.0)
     assert p[R.H1_DOG_ML][5] == "PAN @ MAD — First Half MAD ML"

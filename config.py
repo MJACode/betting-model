@@ -342,7 +342,7 @@ LINE_CHANGE_NOTIFY_PP: float = float(os.environ.get("LINE_CHANGE_NOTIFY_PP", 4.0
 # NCAABW is women's college basketball (2026-11-03): its channel is
 # DISCORD_CHANNEL_NCAABW, same shape as NCAAB, not a separate model registry.
 # EUROLEAGUE (2026-11-13): its in-play channel is DISCORD_CHANNEL_LIVE_EUROLEAGUE
-# (or DISCORD_WEBHOOK_LIVE_EUROLEAGUE). Its pre-game picks (the five rules of
+# (or DISCORD_WEBHOOK_LIVE_EUROLEAGUE). Its pre-game picks (the four rules of
 # models/euroleague_pregame.py, 2026-11-14) post to DISCORD_CHANNEL_EUROLEAGUE
 # (or DISCORD_WEBHOOK_EUROLEAGUE), the NCAABW shape; with neither set they stay
 # unsent and unledgered, and post once the channel exists.
@@ -1235,7 +1235,7 @@ ACTION_THRESHOLDS: dict = {
     # of the 45.34 units. docs/sports/euroleague.md, "Halftime spread".
     # Go-live gate standing: 0 settled of 50.
     "euroleague_live_spread_ht": {"min_prob": 0.0, "min_edge": 0.0},
-    # ── The five EuroLeague pre-game rules (models/euroleague_pregame.py,
+    # ── The four EuroLeague pre-game rules (models/euroleague_pregame.py,
     # scripts/euroleague_pregame_card.py; 2026-11-14, mike: "I told you to build
     # all the models", knowing each one MISSED part of the research bar). THE
     # CUT IS THE RULE, applied in the card at tip minus 10 minutes at the best
@@ -1245,20 +1245,16 @@ ACTION_THRESHOLDS: dict = {
     # surface agrees with the card. The build replays each research read bet
     # for bet (scripts/euroleague_pregame_build.py). docs/sports/euroleague.md
     # has each model's evidence and what it missed. Go-live gate standing: 0
-    # settled of 50 for each.
+    # settled of 50 for each. A fifth, the favourite at -500 or shorter
+    # (euroleague_heavy_fav_ml), was removed before it went live (mike,
+    # 2026-11-14: "odds cutoff for favorites should be -200"): every bet it
+    # found was -500 or shorter, so at a -200 floor it could never bet.
     # The home moneyline, priced -200 or longer (round 2, A1: 972 bets, +59.64
     # units at DraftKings alone; 984, +64.80 at the best deciding book, both
-    # replayed bet for bet). Live, after 6 games lost to the conflict rule: 978 bets, 512-466, +65.80 units, +5.35% (90% -0.15 to +11.11); prices median -110, shortest -200, longest +390.
+    # replayed bet for bet). Live: 984 bets, 513-471, +64.80 units, +5.24% (90% -0.27 to +11.08); prices median -110, shortest -200, longest +550.
     # MISSED: +0.29% without its 10 best dates, 2026-27 -18.50%, the
     # false-discovery correction (p 0.071), the interval reaches below zero.
     "euroleague_home_ml":         {"min_prob": 0.0, "min_edge": 0.01},
-    # The favourite at -500 or shorter (full game round 1, lead iii: 188 bets,
-    # +34.59 at DraftKings; 182, +38.74 at the best book). Live, after 6 away
-    # favourites lost to the conflict rule with the home moneyline: 176 bets, 166-10, +39.43 units, +7.47% (90% +4.16 to +10.46);
-    # prices median -675, shortest -4000, longest -500. Every bet risks 3 units to win under 1.
-    # MISSED: under 200 bets, 2022-23 negative, a price band read off the table
-    # beside a losing one (-500 to -200: -7.11% on 793).
-    "euroleague_heavy_fav_ml":    {"min_prob": 0.0, "min_edge": 0.01},
     # The home underdog against the spread (full game round 1, H3): 455 bets, 262-189-4, +54.54 units, +11.00% (90% +3.63 to +17.95);
     # prices median -110, shortest -120, longest -102. MISSED: 2025-26 carries most of
     # the units, +5.37% without its 10 best dates (DraftKings), walk-forward
@@ -2502,16 +2498,13 @@ MODEL_MIN_ODDS: dict = {
     # (median -115; none shorter than -300). -200 never binds; pinned so a
     # DEFAULT_MIN_ODDS override cannot move it.
     "euroleague_live_spread_ht": -200,
-    # The five EuroLeague pre-game rules (2026-11-14, mike). Pinned so a
+    # The four EuroLeague pre-game rules (2026-11-14, mike). Pinned so a
     # DEFAULT_MIN_ODDS override cannot move them. The home moneyline's rule IS
-    # -200 or longer (median -110, shortest -200, longest +390 on the replay). The big
-    # favourites lay -500 or shorter, median -675, shortest -4000, longest -500 on the
-    # replay; -4000 admits the shortest the research laid and refuses anything
-    # shorter. The rest never reach -200: the spread median -110, shortest -120, longest -102,
+    # -200 or longer (median -110, shortest -200, longest +550 on the replay).
+    # The rest never reach -200: the spread median -110, shortest -120, longest -102,
     # the first-half underdog median +142, shortest -115, longest +475, the first-quarter
     # total median -122, shortest -145, longest -111.
     "euroleague_home_ml":             -200,
-    "euroleague_heavy_fav_ml":        -4000,
     "euroleague_home_dog_spread":     -200,
     "euroleague_h1_dog_ml":           -200,
     "euroleague_q1_club_share_total": -200,
@@ -2709,13 +2702,12 @@ MODEL_OWN_EV_FLOOR: dict = {
     # rule itself); the row's probability is P(win | no push), the number that
     # EV was graded on. No record yet: re-read at 50.
     "euroleague_live_spread_ht": 0.05,
-    # The five EuroLeague pre-game rules (2026-11-14, mike). The cut is the
+    # The four EuroLeague pre-game rules (2026-11-14, mike). The cut is the
     # rule, in the card, so each floor sits just under the smallest EV its
     # replayed bets reach at the 2026-27 uplift (scripts/euroleague_pregame_build.py):
     # it removes none of them. Each rule's uplift is larger than the vig it
     # pays, so every replayed bet carries a positive EV and so does every floor.
-    "euroleague_home_ml": 0.04,   # replay min EV +0.0405, median +0.0629
-    "euroleague_heavy_fav_ml": 0.01,   # replay min EV +0.0147, median +0.0705
+    "euroleague_home_ml": 0.04,   # replay min EV +0.0401, median +0.0628
     "euroleague_home_dog_spread": 0.11,   # replay min EV +0.1181, median +0.1272
     "euroleague_h1_dog_ml": 0.01,   # replay min EV +0.0106, median +0.0902
     "euroleague_q1_club_share_total": 0.17,   # replay min EV +0.1779, median +0.2240
@@ -3021,11 +3013,10 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # the one its EV cut was graded on. No record, so a promoted map would be
     # borrowed.
     "euroleague_live_spread_ht",
-    # 2026-11-14 (mike). The five EuroLeague pre-game rules: the market's
+    # 2026-11-14 (mike). The four EuroLeague pre-game rules: the market's
     # no-vig chance plus the rule's walk-forward uplift (models/euroleague_pregame.py),
     # which their floors were set on. No record, so a map would be borrowed.
     "euroleague_home_ml",
-    "euroleague_heavy_fav_ml",
     "euroleague_home_dog_spread",
     "euroleague_h1_dog_ml",
     "euroleague_q1_club_share_total",
@@ -3261,13 +3252,12 @@ SCORING_METHODS: dict = {
     # scripts/build_euroleague_live_ht_artifact.py), loaded by its pinned path
     # by models/euroleague_live_loop.py, never registered.
     "euroleague_live_spread_ht": "rule",
-    # The five EuroLeague pre-game rules: their parameters and walk-forward
+    # The four EuroLeague pre-game rules: their parameters and walk-forward
     # uplifts in one JSON artifact committed under models/saved/
     # (euroleague_pregame_2027.json, scripts/euroleague_pregame_build.py),
     # loaded by its pinned path by scripts/euroleague_pregame_card.py, never
     # registered. The card refuses an artifact for another season.
     "euroleague_home_ml":             "rule",
-    "euroleague_heavy_fav_ml":        "rule",
     "euroleague_home_dog_spread":     "rule",
     "euroleague_h1_dog_ml":           "rule",
     "euroleague_q1_club_share_total": "rule",
@@ -3426,7 +3416,6 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaabw_live_total_ht":        0.0,    # 2026-11-11 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
     "euroleague_live_spread_ht":   0.0,    # 2026-11-13 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
     "euroleague_home_ml": 0.01,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
-    "euroleague_heavy_fav_ml": 0.01,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
     "euroleague_home_dog_spread": 0.06,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
     "euroleague_h1_dog_ml": 0.00,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
     "euroleague_q1_club_share_total": 0.10,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
@@ -3551,7 +3540,6 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaabw_live_total_ht":        0.0,    # 2026-11-11 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
     "euroleague_live_spread_ht":   0.0,    # 2026-11-13 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
     "euroleague_home_ml": 0.0,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
-    "euroleague_heavy_fav_ml": 0.0,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
     "euroleague_home_dog_spread": 0.0,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
     "euroleague_h1_dog_ml": 0.0,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
     "euroleague_q1_club_share_total": 0.0,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS

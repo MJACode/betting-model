@@ -1,4 +1,4 @@
-"""EuroLeague pre-game rules: five rule cards, each the research's own rule.
+"""EuroLeague pre-game rules: four rule cards, each the research's own rule.
 
 LIVE, real money (mike, 2026-11-14: "I told you to build all the models"),
 knowing each one MISSED part of the research bar; docs/sports/euroleague.md
@@ -7,16 +7,13 @@ build that replays the research bet for bet is
 scripts/euroleague_pregame_build.py; the artifact is
 models/saved/euroleague_pregame_<season>.json.
 
-THE FIVE RULES (each decided once a game, at the research's decision time,
+THE FOUR RULES (each decided once a game, at the research's decision time,
 tip minus 10 minutes; the books a pick may name are DECIDABLE, less any
 config.BEST_LINE_BOOKMAKERS no longer lists):
 
   euroleague_home_ml            the home moneyline at the close, when the home
                                 price is -200 or longer (round 2, A1). Not at a
                                 neutral site.
-  euroleague_heavy_fav_ml       the moneyline favourite at the close, when its
-                                price is -500 or shorter (full game round 1,
-                                lead iii). Every game, neutral ones included.
   euroleague_home_dog_spread    the home underdog against the spread at the
                                 close: the home number above 0 (full game round
                                 1, H3). Own-country games only: not neutral, not
@@ -49,6 +46,11 @@ chance over the replayed bets of the seasons before the live one (pushes out),
 stored in the artifact. The EV floor and the edge cut (config) sit under every
 replayed bet: the rule is the cut.
 
+A fifth rule, the moneyline favourite at -500 or shorter
+(euroleague_heavy_fav_ml), was removed before it went live (mike, 2026-11-14:
+"odds cutoff for favorites should be -200"): every bet it found was -500 or
+shorter, so at a -200 floor it could never bet (docs/sports/euroleague.md).
+
 Pure: no database, no network. The card reads; this decides.
 """
 from __future__ import annotations
@@ -63,15 +65,14 @@ import pandas as pd
 
 SPORT = "EUROLEAGUE"
 HOME_ML = "euroleague_home_ml"
-HEAVY_FAV_ML = "euroleague_heavy_fav_ml"
 HOME_DOG_SPREAD = "euroleague_home_dog_spread"
 H1_DOG_ML = "euroleague_h1_dog_ml"
 Q1_SHARE_TOTAL = "euroleague_q1_club_share_total"
-MODELS = (HOME_ML, HEAVY_FAV_ML, HOME_DOG_SPREAD, H1_DOG_ML, Q1_SHARE_TOTAL)
-FULL_GAME_MODELS = (HOME_ML, HEAVY_FAV_ML, HOME_DOG_SPREAD)
+MODELS = (HOME_ML, HOME_DOG_SPREAD, H1_DOG_ML, Q1_SHARE_TOTAL)
+FULL_GAME_MODELS = (HOME_ML, HOME_DOG_SPREAD)
 PERIOD_MODELS = (H1_DOG_ML, Q1_SHARE_TOTAL)
 # The market each pick settles on (tracking/paper_tracker._RULE_MODEL_MARKETS).
-MARKET = {HOME_ML: "h2h", HEAVY_FAV_ML: "h2h", HOME_DOG_SPREAD: "spreads",
+MARKET = {HOME_ML: "h2h", HOME_DOG_SPREAD: "spreads",
           H1_DOG_ML: "h2h_h1", Q1_SHARE_TOTAL: "totals_q1"}
 # The research's books a pick may name (r2_lib.DECIDABLE, r1_lib.DECIDABLE).
 DECIDABLE = ("draftkings", "fanduel", "betmgm", "betrivers", "fanatics")
@@ -361,41 +362,6 @@ def decide_home_ml(board: pd.DataFrame, games: pd.DataFrame, art: dict,
                             side="home", book=best.bookmaker, price=float(best.price),
                             p_fair=float(np.nanmean(ok.fair_pow)), dk_price=dk_price,
                             n_books=int(len(ok))))
-    return out
-
-
-def decide_heavy_fav(board: pd.DataFrame, games: pd.DataFrame, art: dict,
-                     books=DECIDABLE) -> list[Decision]:
-    """Model 2 (r2_kill section 2 at DraftKings; r2_baselines.best_decidable's
-    <=-500 band at the best deciding book): the side whose best price is the
-    cutoff or shorter. Neutral sites included, as the research's games were."""
-    p = art["models"][HEAVY_FAV_ML]["params"]
-    cutoff = float(p["max_price"])
-    out = []
-    h2h = _by_game(board[(board.market == "h2h") & board.bookmaker.isin(books)])
-    for gid in games.game_id:
-        b = h2h.get(gid, _NONE)
-        if b.empty:
-            out.append(Decision(gid, HEAVY_FAV_ML, "no_quotes", "no deciding book has a moneyline"))
-            continue
-        z = sides_long(b)
-        best = _best_per_side(z).set_index("side")
-        fair = {s: float(np.nanmean(z[z.side == s].fair_pow)) for s in ("home", "away")}
-        hits = best[best.price <= cutoff]
-        if len(hits):
-            side = hits.index[0]
-            r = hits.iloc[0]
-            status, detail = "bet", f"{side} {r.price:+.0f} at {r.bookmaker}"
-        else:
-            # the favourite by its best price (the shorter one); level: home
-            dz = {s: float(dec(best.loc[s, "price"])) for s in best.index}
-            side = "home" if dz.get("home", math.inf) <= dz.get("away", math.inf) else "away"
-            r = best.loc[side]
-            status, detail = "no_bet", f"favourite {side} {r.price:+.0f}, longer than {cutoff:+.0f}"
-        dk_price, _ = _dk_quote(b, side)
-        out.append(Decision(gid, HEAVY_FAV_ML, status, detail, side=side, book=r.bookmaker,
-                            price=float(r.price), p_fair=fair[side], dk_price=dk_price,
-                            n_books=int((z.side == side).sum())))
     return out
 
 
@@ -707,10 +673,14 @@ def cannot_both_win(a: dict, b: dict) -> bool:
 
 
 def resolve_conflicts(decisions: list[Decision], standing: list[dict]) -> list[Decision]:
-    """Turn each BET that cannot win alongside a standing BET on its game, or
-    alongside another BET decided in this pass, into a NONE row (status
-    no_bet) with the reason. A standing BET keeps the game; two from one pass
-    both go NONE (.claude/rules/picks-and-publishing.md). Mutates and returns."""
+    """Turn each BET that cannot win alongside a standing BET on its game into
+    a NONE row (status no_bet) with the reason: the standing BET keeps the game
+    (.claude/rules/picks-and-publishing.md). Mutates and returns.
+
+    Two of these rules decided in one pass never conflict: the two full-game
+    rules both bet the HOME side (the moneyline, and the spread only when the
+    home number is above 0), and a first-half or first-quarter bet can win
+    beside any full-game bet (tests/test_euroleague_pregame.py pins it)."""
     def mine(d: Decision) -> dict:
         return {"market": MARKET[d.model_id], "side": d.side, "line": d.line, "label": d.model_id}
 
@@ -720,14 +690,6 @@ def resolve_conflicts(decisions: list[Decision], standing: list[dict]) -> list[D
         held = next((s for s in standing if s["game_id"] == d.game_id and cannot_both_win(mine(d), s)), None)
         if held is not None:
             notes[id(d)] = f"cannot both win with {held.get('label') or held.get('model_id')}, already bet"
-    rest = [d for d in bets if id(d) not in notes]
-    for i, a in enumerate(rest):
-        for b in rest[i + 1:]:
-            if a.game_id == b.game_id and cannot_both_win(mine(a), mine(b)):
-                notes.setdefault(id(a), f"cannot both win with {b.model_id} {b.side}, decided in the "
-                                        f"same pass; neither is bet")
-                notes.setdefault(id(b), f"cannot both win with {a.model_id} {a.side}, decided in the "
-                                        f"same pass; neither is bet")
     for d in bets:
         if id(d) in notes:
             d.status = "no_bet"
