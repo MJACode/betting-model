@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
   },
   skel: {
     height: 240,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
     backgroundColor: colors.noneSoft,
   },
 });
