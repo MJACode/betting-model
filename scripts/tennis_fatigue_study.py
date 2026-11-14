@@ -667,7 +667,8 @@ def retirement_test(a: pd.DataFrame, t: pd.DataFrame, c: pd.DataFrame, ev: pd.Da
     pr["model"] = pr.flat
     pr.loc[ok, "model"] = sig(ret_design(pr[ok]) @ beta)
     pr["modelled"] = ok
-    print(f"  scored: 2020-2026 priced sides {len(pr):,} ({int(ok.sum()):,} with a modelled chance), "
+    print(f"  scored: every linked pre-June event with an outcome ({pr.event_id.nunique():,}, with or without a close row); "
+          f"2020-2026 priced sides {len(pr):,} ({int(ok.sum()):,} with a modelled chance), "
           f"retired after a set {int(pr.retired.sum()):,} ({pr.retired.mean():.4f})")
 
     def score(df, label):
@@ -815,6 +816,18 @@ def main(argv=None) -> int:
     res, passed = info_test(x)
     for rec in res.to_dict("records"):
         print("  " + "  ".join(f"{k}: {v}" for k, v in rec.items() if not (isinstance(v, float) and math.isnan(v))))
+
+    # Reporting only (added after the first run): what the market-only fit is.
+    b0, s0 = logit_fit(np.column_stack([np.ones(len(x)), x.L.values]), yv)
+    print(f"  market-only fit, every season: intercept {b0[0]:+.4f} ({s0[0]:.4f}) slope {b0[1]:.4f} ({s0[1]:.4f}); "
+          f"side a realised minus power price {float((x.y - x.p_pow).mean()):+.4f} over {len(x):,}")
+    for S in OOS_SEASONS:
+        tr, te = x[x.season < S], x[x.season == S]
+        bm, sm = logit_fit(np.column_stack([np.ones(len(tr)), tr.L.values]), tr.y.values)
+        pm = sig(bm[0] + bm[1] * te.L.values)
+        dr = ll(te.y.values, te.p_pow.values) - ll(te.y.values, pm)
+        print(f"    held out {S}: train {len(tr):,}  intercept {bm[0]:+.4f} ({sm[0]:.4f})  slope {bm[1]:.4f} ({sm[1]:.4f})  "
+              f"raw - market {dr.mean():+.5f} over {len(te):,}")
 
     any_pass = [k for k, v in passed.items() if v]
     print(f"\n  models that improve out-of-sample log-loss (pooled < 0 and < 0 in >= 4 of 5 seasons): {any_pass or 'none'}")
