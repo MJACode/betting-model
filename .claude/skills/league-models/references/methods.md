@@ -71,6 +71,13 @@ error.
   reference); baseball props, -4.01% on 6,931 ("the edge is specific to a
   market"); baseball totals once quotes had to be within 300 seconds (no bets
   left).
+  *Shipped, missed the stricter bar*: tennis match winner (2026-11-14), the
+  best of seven US books against Pinnacle's POWER-de-vigged pair about 30
+  minutes before the listed start, EV 0.02 to 0.05 with each book's
+  retirement rule, 355 bets +11.0% (+2.5, +19.5); walk-forward cut +1.2%,
+  Bovada placebo +5.2% (`docs/sports/tennis.md`, "Research, round 1"). Same
+  method, same line, on tennis total games and games spreads: null (the
+  three books a median 7% below Pinnacle's fair price).
 - **Line shopping against the books' own median**, priced through an
   empirical final-margin table. "The edge is the off-market number, not a read
   on the game." *Worked*: men's college spreads, 409 bets +9.97% [0.8, 18.4]

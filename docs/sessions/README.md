@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, tennis round 1: the match winner live as `atp_moneyline_shop` and `wta_moneyline_shop` (best US price against Pinnacle's power-de-vigged pair about 30 minutes before the listed start, 355 replayed bets +11.0%, missed the stricter bar); total games and games spreads line shop null; the multiplicative de-vig overstated longshots |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, UFC round totals searched to the end of the league skill: nothing clears (#1305); the skill no longer lets a market park as "no price" until the book's own board and odds-comparison sites are tried; EuroLeague player props and women's college basketball first halves reopened; the app check broken since #1293 fixed (#1306) |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, tennis (ATP and WTA, two sports): the results archive (393,131 rows), ESPN results 2020-2026, settlement per book (DraftKings voids a bet on a player who retires after set one), the odds history purchase running (129 windows, at most 2,292,240 credits), Pinnacle's own prices at every level logged from today, TennisExplorer results at every level from 2020; no bettable price below the top tier yet |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, live Discord posts show each pick's signal time and Discord's counting "x seconds ago"; the 45 s note retired (#1294); the app's ~45s line is about the card's provider price and stays |

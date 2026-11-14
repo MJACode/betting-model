@@ -11,8 +11,22 @@
 > tourney id, ESPN's event id), never from a match date (an event starting
 > 2023-12-31 is the 2024 season).
 >
-> **No model is live yet.** This file holds the groundwork, what each source
-> holds, the settlement rules, the market grid and the purchases.
+> **Live since 2026-11-14: the match winner, `atp_moneyline_shop` (men's tour)
+> and `wta_moneyline_shop` (women's tour)**, one rule against Pinnacle's price
+> about 30 minutes before the listed start ("Research, round 1" below; it
+> missed the stricter bar, and how is written there). The games markets are
+> in research. This file also holds the groundwork, what each source holds,
+> the settlement rules, the market grid and the purchases.
+
+## What runs, and where it lands
+
+| What | Where | When |
+|---|---|---|
+| `scripts/tennis_moneyline_card.py` (`scheduler.run_tennis_moneyline_card`, kill switch `RUN_TENNIS_MONEYLINE_CARD=0`) | the Railway worker | every 10 minutes: one live pass of the feed's tennis prices into `tennis_odds_quotes`, ESPN's scoreboard for three days into `tennis_espn_matches`, then each linked, unstarted tour match decided once, 25 to 35 minutes before its listed start |
+| its decisions | `tennis_moneyline_decisions` (worker-only), one row per match, with the ESPN match it linked | in the same transaction as the pick |
+| its picks | `picks`, `sport` ATP or WTA, BET and NONE rows, published to the ATP and WTA channels | as decided |
+| settlement | `tracking/paper_tracker._settle_tennis_picks`: the ESPN match on the decision row, at the deciding book's own retirement rule | the settle step |
+| the forward log, the Pinnacle-site and DraftKings-site readers, TennisExplorer | mike's PC (the `BettingModel\TennisFeeds` task, `docs/local_ops.md`) | research collection, not the card's inputs |
 
 ## Discord
 
@@ -134,9 +148,9 @@ book's no-vig number (mechanism 1 below).
 
 | Market | Settles on | Inputs held | Prices | Baseline | Method | Result | Status |
 |---|---|---|---|---|---|---|---|
-| Match winner | the player who advances; retirement and walkover rules per book (above) | results 2000-2026 (archive), 2010-2026 (ESPN); Elo; serve and return counts | DraftKings, FanDuel, BetMGM, Caesars, Fanatics, BetRivers, Hard Rock; Pinnacle and the Betfair exchange as references; from 2020-09 | to do | line shop against the sharp reference at one snapshot; DraftKings' retirement option; ratings and fatigue as an anchored adjustment | — | to do (needs the purchase) |
-| Games spread | games won by each player, completed matches | the same | BetRivers and Caesars (decidable); Pinnacle, Bovada, LowVig, BetOnline, Bally, betPARX | to do | a serve-and-return game model against the line; line shop | — | to do (needs the purchase) |
-| Total games | both players' games, a tiebreak one game | the same | the same books | to do | a serve-and-return game model (hold rates, tiebreak chance); line shop | — | to do (needs the purchase) |
+| Match winner | the player who advances; retirement and walkover rules per book (above) | results 2000-2026 (archive), 2010-2026 (ESPN); Elo; serve and return counts | DraftKings, FanDuel, BetMGM, Caesars, Fanatics, BetRivers, Hard Rock; Pinnacle and the Betfair exchange as references; from 2020-09 | every quote blind at the close: -3.4% (DraftKings) to -5.0% (BetMGM) | line shop against Pinnacle's power-de-vigged pair at the same moment, with each book's retirement term; fatigue and retirement risk as an anchored adjustment (running) | 355 bets, +68.77 units, +11.0% [+2.5, +19.5] about 30 minutes before the listed start; walk-forward cut +1.2% (below) | **LIVE** 2026-11-14: `atp_moneyline_shop`, `wta_moneyline_shop` (missed the stricter bar, below) |
+| Games spread | games won by each player, completed matches | the same | BetRivers and Caesars (decidable); Pinnacle, Bovada, LowVig, BetOnline, Bally, betPARX | blind at the close: every side at every US book negative | a serve-and-return game model against the line (running); line shop | line shop null: decidable books a median 7% below Pinnacle's fair price on the same line | in progress |
+| Total games | both players' games, a tiebreak one game | the same | the same books | blind at the close: every US book negative both sides, the over worse | a serve-and-return game model (hold rates, tiebreak chance) (running); line shop | line shop null (as above); blind: every US book loses both sides, the over worse | in progress |
 | First-set winner | set one | the same | BetMGM and LeoVegas only, per-event endpoint | | | | parked: one decidable book, history only by the per-event endpoint |
 | **Below the top tier** (men's 250s, Challengers and ITF; women's 125s and ITF), all three markets | as above; DraftKings voids an ITF moneyline on any retirement | results: ESPN for the 250s and 125s, TennisExplorer for every level from 2020 (collecting), the archive to June 2026 | the odds feed: none (it sells only its 53 keys). Pinnacle direct: every level, from 2026-11-13 (collecting). TennisExplorer: one price pair a match, an average of books near the close (below), from 2020 (collecting). **DraftKings, from 2026-11-13**: the match winner at every level, games spread and total games from the Challenger and 125 level up | to do | ratings, serve and return, fatigue and retirement models against Pinnacle's price at the same moment | — | **collecting**: a backtest at a price we could have bet starts from 2026-11-13; before that, research ranks models against Pinnacle and the average close only |
 | Alternate games spreads and totals | as above | | LeoVegas, Coral, Ladbrokes | | | | parked: no decidable book |
@@ -171,6 +185,114 @@ as the reference.
 6. **The favourite-longshot bias at soft books** (scout: Lahvicka 2014,
    Forrest and McHale 2007): blind favourites and dogs by price band at each
    decidable book's close, against Pinnacle's.
+
+## Research, round 1 (2026-11-14): match winner and the games markets
+
+Every number below is on the bought history (`tennis_odds_quotes`, 53
+tour-level keys, 2020-09 to 2026-11), read through the local cache
+(`python -m scripts.tennis_cache`). 15,785 of the 17,072 feed events link to
+an ESPN result. Units are at the published stake (risk to win 1, risk capped
+at 3), graded at each book's own retirement rule.
+
+**Baselines (`python -m scripts.tennis_shop_study`).** Every decidable quote
+bet blind, both sides, at the close: DraftKings -3.37%, Fanatics -3.97%,
+FanDuel -4.12%, Hard Rock -4.23%, BetRivers -4.36%, Caesars -4.69%, BetMGM
+-4.95%. No price band at DraftKings or FanDuel is positive at the close
+(heavy favourites shorter than -400 at DraftKings -1.42%, dogs longer than
++250 -8.20%). Total games blind at the close (`python -m
+scripts.tennis_games_study`): every US book loses on both sides, the over
+worse than the under at every one (BetRivers over -7.58%, under -3.99%;
+Caesars -8.81%, -5.14%; BetMGM -9.25%, -7.09%); Pinnacle is the one book
+where the over loses less (-1.19% against -6.51%). Games spreads blind: every
+side at every US book negative (-4.5% to -10.3%).
+
+**The reference has to be de-vigged by the power method
+(`python -m scripts.tennis_shop_checks`).** Pinnacle's pair split
+multiplicatively hands the longshot too much: at the close, players it gave
+under 20% won 1.6 points less often than it said and players over 80% won
+1.6 to 1.7 points more often (20,822 pairs, one per match and side). The power
+method (each implied chance raised to the one power that makes the pair sum
+to 1) is within about 1.5 points in every bin, with a lower Brier score and
+log-loss at all three decision times. So every EV against the multiplicative
+price was biased toward underdogs, which is why round 1's first grid found its
+"edge" in dogs and its losses in the biggest dogs.
+
+**The Betfair exchange is not a reference at the first post.** Its pair sums
+to a median 1.034 there, the 95th percentile 1.80 (a thin book's best back
+prices); at the close the median is 1.008. Its round-1 "first post" population
+(4,532 bets) was those wide pairs. Kept to pairs summing 1.00 to 1.06 it is
++1.6% at the first post and -0.8% at the close, nothing.
+
+**Time since the reference last changed is not staleness.** The store keeps a
+row only when a quote changes, so a Pinnacle price unchanged for three hours
+and a Pinnacle price withdrawn three hours ago look the same. On the
+candidate below, the bets whose Pinnacle price had moved within 15 minutes
+returned +4.2% (719 bets) and the rest +2.9% (270), so its result does not
+come from old references.
+
+**Line shop against Pinnacle, total games and games spreads: null.** On the
+same line at the same moment, the three books that post these markets
+(BetMGM, Caesars, BetRivers) were a median 6.8% to 7.3% below Pinnacle's fair
+price at every decision time. At most 51 totals and 297 spreads in eleven
+thousand matches had a positive EV, and their returns zigzag around zero
+across the cut grid. The serve-and-return model for these markets is the next
+test (mechanism 3).
+
+**Line shop against Pinnacle, match winner: the candidate.** With the power
+de-vig and each book's own retirement term (below), at the close, one bet per
+match, EV below 5% and price -500 or longer:
+
+| Decision moment | Bets | Units | Return | 90% interval |
+|---|---|---|---|---|
+| about 30 minutes before the listed start (**the live card's**) | 355 | +68.77 | +11.0% | +2.5% to +19.5% |
+| the last snapshot before the start (not decidable live) | 487 | +85.82 | +10.3% | +2.8% to +17.7% |
+
+`python -m scripts.tennis_moneyline_replay`, which runs the live card's own
+decision code (`models/tennis_moneyline_shop.decide`) over the stored
+snapshots. At the live moment:
+
+- **Cuts** (EV at least): 0.010 922 bets +3.0%; 0.015 560 +7.2%; **0.020 355
+  +11.0%**; 0.025 201 +16.0%; 0.030 120 +11.9%. Banded, every band below 0.02
+  loses and every band from 0.02 to 0.05 wins.
+- **Splits**: halves +5.4% / +16.5%; men +11.8% (188), women +10.1% (167);
+  favourites +8.9% (251), underdogs +30.8% (104); seasons 2020 +0.6% (16),
+  2021 +7.2%, 2022 +26.0%, 2023 -9.1% (42), 2024 +4.4%, 2025 +12.5%, 2026
+  +18.2% (98); price bands -500 to -300 +12.9%, -300 to -150 +7.7%, -150 to
+  +100 -0.9%, +100 to +200 +21.7%, longer +66.8% (39); every book positive
+  (DraftKings 127 bets +5.9%, FanDuel 70 +17.2%, Caesars 50 +19.5%, Hard Rock
+  57 +7.4%, BetRivers 39 +11.0%).
+- **Placebo**: a soft book's price in Pinnacle's place. Bovada's keeps +5.2%
+  on 601 bets at EV 0.02 (half of Pinnacle's result), BetOnline's +1.1% on
+  589. At the close both are near zero (+0.3%, -2.7%) while Pinnacle's is
+  +10.3%.
+- **Walk-forward on the cut**: choosing each season's cut as the one with
+  the most units on the seasons before it, then applying it, returns +1.2% on
+  704 bets (-4.4% to +6.9%). That rule picks the loosest cut (0.005) in three
+  of five years.
+- **Prices**: median -165, shortest -500 (risk 3 units to win 0.6), 23.7% at
+  -300 or shorter, 11.0% at +200 or longer, the longest +1550.
+- **Volume**: 37 to 65 bets a season on the 53 tour-level keys, about one a
+  week, more during the Slams.
+- **The retirement option**: on the earlier grid the bets that cleared
+  without DraftKings' term returned +6.7% and those that needed it +2.5%; it
+  is not shown to help, and it stays in because it is how DraftKings settles.
+
+**The bar** (`.claude/skills/league-models/references/kill-tests.md`): it
+cleared the repo's own bar (25+ bets, a plateau from 0.015 to 0.03, both
+halves positive, both tours and every book positive). It **missed the
+stricter bar**: the cut chosen walk-forward returns +1.2% with an interval
+across zero; one season is negative at each moment (2023 at the live moment,
+2024 at the close), not explained by anything measured; and a soft
+reference keeps half the result at the live moment. **Built live as
+`atp_moneyline_shop` and `wta_moneyline_shop`** (mike: build the tennis
+models), with that written down here and in `config.py`.
+
+**What would make it stronger**: Pinnacle's own site as the reference where
+the feed has no Pinnacle price (the women's Finals this week had none on the
+feed; `tennis_pinnacle_prices` priced every match), once a same-moment check
+shows the two agree; DraftKings' site prices for the levels below the tour
+(collecting since 2026-11-13); a modelled retirement chance in place of the
+flat rate (the fatigue and retirement study, running).
 
 ## The scout's leads (2026-11-13)
 
@@ -262,8 +384,9 @@ cover it on an average quote; any edge is in the quotes that stand apart.
 
 ## Open items
 
-- The research on the bought history: the baselines on every grid row,
-  mechanisms 1 to 6 in that order, the kill tests on anything positive.
+- Round 1 is above. Running: the serve-and-return model for total games and
+  games spreads (mechanisms 3 and 5); fatigue and a modelled retirement
+  chance against the match-winner price (mechanisms 1 and 4).
 - The forward log runs on mike's PC until 2026-11-23; a worker job takes it
   over when the first model ships.
 - The code graph is rebuilt and named once, after the last code change of

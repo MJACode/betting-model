@@ -1717,6 +1717,41 @@ Replayed at 0.05: 2025-26 with a model fitted on 2024-25, 669 bets, 398-271,
 (a second look), 298 bets, 178-119, +42.10 units, +12.35% [+0.6, +23.7].
 Every cut from 0.02 to 0.12 is positive in both seasons, so 0.05 sits on a
 plateau. Go-live gate standing: 0 settled of 50. Re-read at 50 settled bets.
+## Tennis — `atp_moneyline_shop`, `wta_moneyline_shop`, match winner (2026-11-14, mike)
+
+mike, 2026-11-13: *"build professional tennis models"*, men's and women's as
+separate models. One rule, two model ids: the best decidable price both ways
+against Pinnacle's power-de-vigged pair at the same moment, about 30 minutes
+before the listed start, EV including the deciding book's retirement rule
+(`models/tennis_moneyline_shop.py`, `scripts/tennis_moneyline_card.py`;
+evidence `docs/sports/tennis.md`, "Research, round 1"). The cut is EV, in
+`MODEL_OWN_EV_FLOOR`; the probability is Pinnacle's.
+
+| Setting | Value | Where |
+|---|---|---|
+| EV floor (the cut) | 0.02 | `config.MODEL_OWN_EV_FLOOR`, `models/tennis_moneyline_shop.EV_MIN` |
+| EV cap | 0.05 (above it a quote is more often an error) | `models/tennis_moneyline_shop.EV_MAX` |
+| price floor | -500 | `config.MODEL_MIN_ODDS`, `models/tennis_moneyline_shop.PRICE_FLOOR` |
+| action filter | min_prob 0.0, min_edge 0.0 (keeps every bet the card writes) | `config.ACTION_THRESHOLDS` |
+| decision | first run 35 minutes or less before the listed start | `scripts/tennis_moneyline_card.DECISION_LEAD` |
+
+The bought feed history, 2020-09 to 2026-11, 53 tour-level keys, replayed
+through the card's own decision code at the first hourly snapshot within 60
+minutes of the listed start (`python -m scripts.tennis_moneyline_replay`):
+
+| EV cut | Bets | Units | Return | 90% interval |
+|---|---|---|---|---|
+| 0.010 | 922 | +51.97 | +2.96% | -1.8 to +7.7 |
+| 0.015 | 560 | +73.96 | +7.17% | +0.8 to +13.5 |
+| **0.020** | **355** | **+68.77** | **+11.02%** | **+2.5 to +19.5** |
+| 0.025 | 201 | +50.09 | +15.99% | +4.2 to +27.8 |
+| 0.030 | 120 | +22.44 | +11.92% | -3.6 to +27.5 |
+
+Both halves positive (+5.4 / +16.5), both tours, every book. The bar it
+missed: the stricter one. The cut chosen walk-forward returns +1.2% on 704
+bets (-4.4 to +6.9); 2023 is -9.1% on 42; Bovada's price in Pinnacle's place
+keeps +5.2%. Prices: median -165, shortest -500, 23.7% at -300 or shorter.
+
 ## UFC — `ufc_open_moneyline`, fight winner a week out (2026-11-13, mike)
 
 mike, 2026-11-13: *"Use the model building skill to build models for UFC"*,
