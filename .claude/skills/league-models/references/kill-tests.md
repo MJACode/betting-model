@@ -180,6 +180,14 @@ finding either way.
   charges the cheap side about 2.5 points. Compare each side's blind return
   first; if one is near zero and the other carries the whole margin, say so
   beside every CLV number (`docs/ufc_market_audit.md` §4b, §4f).
+- **A last recorded price is not a price at a time.** An odds-comparison
+  page (BestFightOdds) shows each book's last change. A book that stopped
+  moving days early shows an old price, and against a consensus that moved,
+  an old price looks like value that was never on offer. Before grading a
+  rule at such a price, take the bets it picks and look each up in the
+  site's price history at the decision time; report the share whose price
+  then equals the last recorded one, by book (`docs/ufc_market_audit.md`
+  §5f).
 - **Validate the grading before moving a cut.** Recompute outcomes from raw
   scores and reconcile with stored settlements. A sign error in away-side
   spread grading once turned -20.6% into +15%. `scored_line` is the home

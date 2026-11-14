@@ -61,6 +61,59 @@ review as its own entry.
    there), so the migration locks it down itself, as every in-play ledger does.
 5. **The framework.** Nothing in `SKILL.md` changed.
 
+## 2026-11-14 — UFC props graded on BestFightOdds' per-book history
+
+1. **Scope.** mike asked why the markets beside the fight winner were not
+   tested. Method of victory, goes the distance, round betting and inside
+   the distance had been parked for want of a price; #1304 found the route
+   (BestFightOdds per-book pages). This entry is the crawl and the grade
+   (`docs/ufc_market_audit.md` §5f, `docs/sports/ufc.md` grid).
+2. **Tried.** 328 card pages stored (563,286 prices, five US books a pick
+   may name plus three others, 2021-06 to 2026-11). Blind by market, side,
+   book, year and favourite/underdog. Three mechanisms per market, fitted
+   walk-forward by year: a book straying from the other four's power no-vig
+   consensus; the anchored model (the consensus as offset, a free slope and
+   per-outcome intercepts, ridge fighter inputs) with the market merely
+   recalibrated as its control; method and round prices made coherent with
+   the fight-winner price. Kill tests: cut and penalty neighbourhoods,
+   early/late, side, price band, book, a 50-run placebo, DQ graded both
+   ways, and each lead's bets re-graded at the price its history showed an
+   hour and a day before the fight. Nothing clears. One lead (goes the
+   distance, anchored) was +10.0% on 791 at the last recorded price and is
+   +6.8% [-0.9, +14.4] on 745 at the price an hour before, with 2026 losing
+   (-3.6%): to the frontier. It loses at DraftKings, the only live prop
+   board read.
+3. **New.**
+   - Kill test (`kill-tests.md`, "Is the data right?"): a last recorded
+     price is not a price at a time; re-grade the picked bets on the
+     site's own price history.
+   - Price route (`market-grid.md` route 4): how to crawl a comparison site
+     cheaply, pages first, histories only for what a test points at, and
+     the template ingestor.
+   - Method notes (`methods.md` §1): on a many-outcome market the anchor
+     needs a free slope on the market's logit and one intercept per outcome
+     type; a two-way market is fitted once per pair (fitted on both sides,
+     the inputs cancel, which made the first run's anchored rows equal the
+     price rows exactly).
+   - Trap: the comparison site splits one fight into two when books spell a
+     fighter differently; fold both halves before grading, or every prop is
+     counted twice.
+4. **Corrected.** Was "BestFightOdds' per-book prop pages as a price route,
+   to try" on the frontier, now run, with the goes-the-distance lead in its
+   place (`methods.md`). A lead that passed every kill test at the page's
+   last recorded price (+10.0%, a plateau, 0 of 50 placebos) fell from
+   +8.4% to +6.8% on the same 745 bets at the price an hour before, and on
+   those bets the cut neighbourhood is a hump at either price (the plateau
+   rested on fights with no start time): the page's price is longer than the hour-before price on
+   25% of bets and shorter on 5%. Was "DraftKings and BetMGM are missing from the
+   November 2026 pages", now measured: DraftKings' prop prices thin out on
+   the site from 2023 and are absent in 2026, BetMGM's nearly so.
+5. **The framework.** Nothing in `SKILL.md` was wrong for this pass; step 1
+   (no market parks for want of a price until every route has a result)
+   is what sent these markets here. One gap, written into route 4 rather
+   than `SKILL.md`: a comparison site's prices need dating before a rule
+   graded on them is believed.
+
 ## 2026-11-13 — Tennis (ATP and WTA), groundwork, settlement and the purchase
 
 1. **Scope.** mike, 2026-11-13: *"Use the model building skill to build
