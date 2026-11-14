@@ -57,12 +57,28 @@ review as its own entry.
    year (`docs/ufc_market_audit.md` §4, `docs/sports/ufc.md`). Was "22 bets
    of DraftKings against Pinnacle in one pull", now 8,090 comparable pulls,
    43 with DraftKings above Pinnacle's fair price.
-5. **The framework.** The first UFC entry called a market null after one
-   model and before the invention floor and the ladder, which `SKILL.md`
-   already required. The rule was there and was skipped; the gap is that
-   nothing checks it. Proposed for the next review: the doc's verdict line
-   for a null market must name its three mechanisms and the ladder's
-   rungs, so a skipped step shows in the text.
+5. **The framework.** Two failures, one a skipped rule, one a hole in the
+   skill. Both changed in `SKILL.md` and `references/market-grid.md`.
+   - **Skipped.** The first UFC entry called round totals null after one
+     model, before the three mechanisms and the ladder. `SKILL.md` already
+     required both, so the rule was there and was skipped. Now the rule says
+     it binds each market, and a null row names its three mechanisms and
+     the ladder's rungs, so a skipped step shows in the text (step 5).
+   - **A hole.** Step 1 let a row park as "no price source", and
+     the price routes never named a book's own board or a comparison
+     site's per-book history. Parking is not null, so nothing sent the
+     row up the ladder. UFC parked method of victory, goes the distance and
+     round betting that way, because the odds feed refused their keys
+     (HTTP 422). DraftKings' own board priced all three on 2026-11-14,
+     and BestFightOdds holds the US books' prices for them from mid-2021
+     (#1304). **The same park stood in two more leagues**: EuroLeague
+     player props, and women's college basketball's first halves, quarters,
+     team totals, alternates and props. Three leagues meets the promotion
+     bar, so it is now a rule. In step 1, "no price" is never a reason to
+     park until every route has a written result. The route list gains the
+     book's board and the comparison sites (market-grid route 4). The
+     ladder now runs before a market parks for want of a price. The two
+     other leagues' rows are reopened as to-dos.
 
 ## 2026-11-13 — UFC, a rebuild from zero
 
