@@ -124,12 +124,23 @@ def _utc(v) -> datetime | None:
 
 # ── the slate: one entry per fight ───────────────────────────────────────────
 
+def _alias_slugs() -> dict[str, str]:
+    """The feed's slug of each aliased fighter -> his ufcstats slug."""
+    return {R.slugify(k): R.slugify(v) for k, v in config.UFC_NAME_ALIASES.items()}
+
+
 def fight_key(game_id: str) -> tuple[frozenset, date] | None:
+    """A fight's two fighters by their ufcstats slugs, and its date. Through
+    the aliases, because a fight listed before its alias was added keeps its
+    old id ("..._sergey-pavlovich") while the ingest writes new pulls under
+    the aliased one ("..._sergei-pavlovich"): both must be ONE fight, or the
+    card decides it twice (2026-11-14)."""
     from data.schedule_context import ufc_slugs
     s = ufc_slugs(game_id)
     if not s:
         return None
-    return frozenset(s), date.fromisoformat(game_id.split("_")[1])
+    amap = _alias_slugs()
+    return frozenset(amap.get(x, x) for x in s), date.fromisoformat(game_id.split("_")[1])
 
 
 def slate(conn, now: datetime) -> dict[str, dict]:
@@ -366,6 +377,12 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             orient = {i: ratings.orient(r["home"], r["away"]) for i, r in f["rows"].items()}
             if any(o is None for o in orient.values()):
                 stats["unplaced_fighter"] += 1
+                # Name who, so a spelling the feed and ufcstats disagree on is
+                # seen and aliased (config.UFC_NAME_ALIASES), not just counted:
+                # five veterans sat here unseen until 2026-11-14.
+                unrated = sorted({n for r in f["rows"].values() for n in (r["home"], r["away"])
+                                  if not ratings.fighter(n)})
+                logger.info(f"  {key}: unrated {', '.join(unrated)} (a debut, or a spelling to alias)")
                 continue
             hold = book.pending_reason(first["game_id"], first["game_date"], first["home"],
                                        first["away"], f["start"], now)

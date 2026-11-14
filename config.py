@@ -5674,6 +5674,14 @@ UFC_NAME_ALIASES: dict = {
     "Nursultan Ruziboev": "Nursulton Ruziboev",
     "Javier Reyes Rugeles": "Javier Reyes",
     "Steve Garcia Jr.": "Steve Garcia",
+    # 2026-11-14: the live UFC fight-winner model could not rate these five on
+    # the upcoming cards (scripts/ufc_open_moneyline_card.py skips the fight).
+    # Each value is the `fighters` name, confirmed with its UFC fight count.
+    "Sergey Pavlovich": "Sergei Pavlovich",     # 12 fights
+    "Joseph Pyfer": "Joe Pyfer",                # 8
+    "Daniel Hooker": "Dan Hooker",              # 25
+    "Charlie Radtke": "Charles Radtke",         # 7
+    "Heili Alateng": "Alatengheili",            # 10
 }
 
 # Synthetic round-total lines used when DK round-total odds are absent
