@@ -269,6 +269,40 @@ open; game final but the model flipped off that side (no settled pick for it) â†
 
 ---
 
+## The fast way: every in-play model on DraftKings' own board (2026-11-12/13, mike)
+
+mike, 2026-11-12, after Indiana -16.5 (live) posted 4 min 12 s after DraftKings
+set the line: *"This is live betting ... as close to Real time as possible"*;
+2026-11-13: *"Move everything over to the fast way"*.
+
+**What was slow, measured from each model's own bets.** Every model posted 0.7-3.4 s
+after writing its pick; the delay was all before the write. NBA a median 232 s
+from fetch to decision (ESPN waits of 170 s and 60 s), NCAAB 153-194 s, women's
+halftime 151 s; NCAAF and the NFL leader had no ESPN wait but priced on the odds
+provider's copy of DraftKings, a median 31 s and 26 s old when the bet was
+written. A DraftKings live college spread is still up 10 s later 77% of the
+time and 60 s later 26% (scripts/ncaab_live_latency_probe.py, 2026-11-12).
+
+**The source.** DraftKings' own board, read on mike's machine every second per
+live league (`data/ingestors/dk_live_board.py`, scheduled task
+`BettingModel\DkLiveBoard`; DraftKings refuses the worker), into
+`dk_live_reads` (a row when a game's score, period or a line changes; the read
+time is the quote's stamp) and `dk_live_feed` (every read). DraftKings shows a
+score a median 3.7 s after a basket and moves its line in the same read or
+later in 177 of 180 baskets. A loop trusts the rows only while the feed's last
+read is under 8 s old; otherwise it decides the old way.
+
+| Model | The fast way | Unchanged |
+|---|---|---|
+| NCAAB (three) | decided on the board at the window's first read: DraftKings' line, score and clock; no provider call, no ESPN wait; one read's confirmation | the :00/:30 windows, the night's cut and cap |
+| Women's halftime total | judged on ESPN read at once when the half ended 120 s before the read; DraftKings' total from the board | the 5-minute reads, the provider's other books (the rule needs two) |
+| NBA quarters 1-2 spread | DraftKings' spread from the board; decided as soon as ESPN's newest play carries DraftKings' score (re-read every 3 s, at most 60 s) | the hourly windows, the Pinnacle pair from the provider |
+| NCAAF win probability and total | DraftKings' moneyline and total from the board; a game priced only while DraftKings' score equals our state's | the engine, its state feed and guards |
+| NFL late-game leader | DraftKings' moneyline from the board; a score DraftKings shows first waits a tick without spending the slot | the 5-minute grid |
+
+On every fast path DraftKings is the only book a decision bets (the others are
+the provider's ~30 s-old copies), and the ledger or log names the board.
+
 ## NBA in play: the game-state model's quarters 1-2 spread (2026-11-04, mike)
 
 The full story, the evidence and the warning signs are in `docs/sports/nba.md`,
@@ -343,6 +377,34 @@ pick is announced only while its game is in progress.
 
 
 ---
+
+## EuroLeague in play: the full-game spread at halftime (2026-11-13, mike)
+
+The full story and the evidence are in `docs/sports/euroleague.md`, "Halftime
+spread". One model, `euroleague_live_spread_ht`: the full-game spread, bet once
+a game during the halftime break at EV >= 0.05, on a model of the margin still
+to come from Pinnacle's pre-game spread and the first half's surprise (the
+women's halftime method). Replayed on the loop's own code, walk-forward 2022-23
+to 2026-27 to date: 364 bets, +45.34 units, +10.93% (90% +3.40 .. +18.48),
+identical to the research bet for bet; it laid -135 to +105. It misses part of
+the research bar (the false-discovery correction; 2023-24 negative), and mike
+approved it knowing that. The loop (`models/euroleague_live_loop.py`, pollers)
+reads EuroLeague's own live API for the break and the half-time score, and the
+Odds API's ten history books (3 credits a read) every five minutes while a game
+is at the half; it posts to the EuroLeague live channel only.
+
+```
+games + euroleague_events every 60 s (stored schedule)   -> which games are in progress
+at each five-minute mark plus 37 s, for a game 30-120 minutes after its tip:
+   -> EuroLeague API PlayByPlay + Points + Header, one call at a time, 1.5 s apart (free)
+      'EP' in the second quarter, no 'BP' or shot in the third, three scores agree
+   -> Pinnacle's last coherent pre-game spread and total from odds (no number: refused)
+   -> ONE bulk Odds API call: h2h + spreads + totals, the ten history books (3 credits)
+   -> rows of games under way to odds as in_play (source euroleague_live_loop)
+   -> EuroLeague API again: the same half, else skipped
+   -> models.euroleague_live_ht.read_break: decided / carried / missed
+   -> euroleague_live_decisions FIRST, then picks (first-signal lock), then push + Discord
+```
 
 ## NCAABW in play: the full-game total at halftime (2026-11-11, mike)
 

@@ -37,6 +37,7 @@ from config import (
     ODDS_HISTORY_BOOKMAKERS,
     LINE_SHOP_BOOKMAKERS,
     NCAABW_EXTRA_BOOKMAKERS,
+    EUROLEAGUE_EXTRA_BOOKMAKERS,
     SPORTS,
     WNBA_ODDS_API_MAP,
     NBA_ODDS_API_MAP,
@@ -79,6 +80,10 @@ SPORT_KEYS = {
     # (data/ingestors/ncaabw_teams.py). The feed lists a median 7 women's
     # games a game day (2,293 events from 2024-11-12 to 2026-04-05).
     "NCAABW": "basketball_wncaab",
+    # 2026-11-12: EuroLeague, READ-ONLY AGAINST `games` like the college games:
+    # EuroLeague's own API owns the schedule (data/ingestors/euroleague_api.py)
+    # and the feed's events are resolved onto it (euroleague_teams.py).
+    "EUROLEAGUE": "basketball_euroleague",
 }
 
 # The NFL is the one sport here whose games this ingestor MUST NOT create.
@@ -115,12 +120,12 @@ NFL_GAMES_ARE_NOT_OURS = True
 # (the two historical entry points do), and turning that off is its own change
 # with its own backfills to check; NCAAB starts closed.
 NCAAB_GAMES_ARE_NOT_OURS = True
-RESOLVE_ONLY_SPORTS = frozenset({"NCAAB", "NCAABW"})
+RESOLVE_ONLY_SPORTS = frozenset({"NCAAB", "NCAABW", "EUROLEAGUE"})
 
 # The sports whose games come from a schedule another ingestor owns, so every
 # live caller builds a resolver before parsing and skips the sport (never
 # mints) when it cannot build one. See _schedule_resolver.
-SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB", "NCAABW")
+SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB", "NCAABW", "EUROLEAGUE")
 
 # Sports stored even when DraftKings does not list the event yet.
 #
@@ -137,7 +142,10 @@ SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB", "NCAABW")
 # games AFTER the target date only, so a same-day NCAAB game with no
 # DraftKings row reaches the models, and an NCAAB model must refuse to decide
 # without the reference price.
-DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB", "NCAABW"})
+# EuroLeague too (2026-11-12): DraftKings priced 3 of the 10 games listed that
+# day (it first posts a median 45-73 hours before the tip, while other books
+# list a round five days out), and it priced no sampled game in 2020-21.
+DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB", "NCAABW", "EUROLEAGUE"})
 
 # Books stored for ONE sport on top of LINE_SHOP_BOOKMAKERS, and asked for in
 # that sport's bulk call. Women's college basketball only (2026-11-09,
@@ -145,7 +153,8 @@ DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB", "NCAABW"})
 # has no Pinnacle, so the six other books that price it are kept as the
 # consensus and the reference. None is a book a pick may name. Every other
 # sport's call and stored books are unchanged.
-SPORT_EXTRA_BOOKMAKERS: dict = {"NCAABW": tuple(NCAABW_EXTRA_BOOKMAKERS)}
+SPORT_EXTRA_BOOKMAKERS: dict = {"NCAABW": tuple(NCAABW_EXTRA_BOOKMAKERS),
+                                 "EUROLEAGUE": tuple(EUROLEAGUE_EXTRA_BOOKMAKERS)}
 
 
 def sport_bookmakers_param(sport: str) -> str:
@@ -311,8 +320,9 @@ def _commence_passed(ev: dict, now: datetime | None = None) -> bool:
     return ts <= now
 
 # UFC: the bulk endpoint reliably carries only h2h for MMA. Round totals are
-# attempted per-event (like MLB F5) — absent lines are non-fatal and the
-# ufc_total_rounds model falls back to prob-only scoring.
+# attempted per-event (like MLB F5) — absent lines are non-fatal. (The
+# ufc_total_rounds model that scored prob-only without one was retired
+# 2026-11-13; the capture stays for the models that replace it.)
 UFC_BULK_MARKETS = ["h2h"]
 UFC_EVENT_MARKETS = ["totals"]
 
@@ -423,7 +433,7 @@ def _normalize_team(name: str, sport: str) -> str:
         # ncaaf_teams registry and falls back to the input unchanged.
         from data.ingestors.cfbd_ingestor import resolve_odds_api_school
         return resolve_odds_api_school(name)
-    if sport in ("NCAAB", "NCAABW"):
+    if sport in ("NCAAB", "NCAABW", "EUROLEAGUE"):
         # NCAAB never mints an id here (NCAAB_GAMES_ARE_NOT_OURS): the game id
         # comes from ESPN's schedule through the resolver, so this value is
         # never used. Returned untouched and silently, because the 3-letter
@@ -543,6 +553,19 @@ def _ncaabw_resolver(conn, around_date: str):
         return None
 
 
+def _euroleague_resolver(conn, around_date: str):
+    """EuroLeague's twin of _ncaabw_resolver: data/ingestors/euroleague_teams.py
+    owns the matching, and anything that stops the resolver being built returns
+    None, so the caller skips EuroLeague for the pass and never mints an id."""
+    try:
+        from data.ingestors import euroleague_teams
+        euroleague_teams.reset_registry_cache()
+        return euroleague_teams.make_resolver(conn, str(around_date)[:10], days_fwd=30)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(f"EUROLEAGUE: could not build the schedule resolver ({exc}); odds skipped")
+        return None
+
+
 def _schedule_resolver(sport: str, conn, around_date: str):
     """The resolver for a SCHEDULE_RESOLVED_SPORTS sport, or None.
 
@@ -558,6 +581,8 @@ def _schedule_resolver(sport: str, conn, around_date: str):
         return _ncaab_resolver(conn, around_date)
     if sport == "NCAABW":
         return _ncaabw_resolver(conn, around_date)
+    if sport == "EUROLEAGUE":
+        return _euroleague_resolver(conn, around_date)
     return None
 
 
@@ -943,8 +968,7 @@ def _fetch_ufc_totals_per_event(sport_key: str, snapshot_type: str,
     ODDS_API_BOOKMAKERS_PARAM, not DraftKings alone -- measured 2026-09-03, one
     market either way, so this widening costs nothing here. UFC volume is low
     (~13 fights/event, ~1 event/week) so this runs on every odds fetch.
-    Returns [] without raising when the market isn't offered — the
-    ufc_total_rounds model then scores prob-only against a synthetic line.
+    Returns [] without raising when the market isn't offered.
 
     known_slugs (optional): skip non-UFC promotions' events BEFORE spending a
     per-event credit on them (same predicate as the bulk phantom filter).
@@ -1205,6 +1229,10 @@ def _season_label(sport: str, game_date: str) -> int:
         # two seasons — data/season_labels.py.
         from data.season_labels import nhl_season_label
         return nhl_season_label(game_date)
+    if sport == "EUROLEAGUE" and month >= 8:
+        # Labelled by the ENDING year (E2026 is 2027) and it opens in late
+        # September. Never minted here; the stored label is the API's own.
+        return year + 1
     if sport in ("NBA", "NCAAB", "NCAABW") and month >= 10:
         # Oct–Jun (NBA) and Nov–Apr (NCAAB), both labelled by the ENDING year:
         # ESPN calls 2026-27 college basketball season 2027. An NCAAB games
@@ -1573,7 +1601,7 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     # committed (see the commit before the resolver below). NCAABW (2026-11-09)
     # follows it for the same reason, so the two run last, men's then women's.
     sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF", "NFL",
-                                    "NCAAB", "NCAABW"]
+                                    "NCAAB", "NCAABW", "EUROLEAGUE"]
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
@@ -2165,7 +2193,7 @@ def get_latest_odds_for_game(conn: DBConnection,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run odds ingestor")
     parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF",
-                                            "NFL", "NCAAB", "NCAABW"],
+                                            "NFL", "NCAAB", "NCAABW", "EUROLEAGUE"],
                         help="Sport to fetch (default: all)")
     parser.add_argument("--snapshot", default="open",
                         choices=["open", "close", "live"],

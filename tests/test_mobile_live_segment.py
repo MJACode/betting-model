@@ -298,11 +298,11 @@ def test_the_empty_live_board_does_not_blink_to_a_spinner():
     assert re.search(
         r"const liveFirstLoad = liveLoading && prevLiveCount\.current === null;", src
     ), "the live spinner is not restricted to the first load"
-    assert re.search(r"const busy = view === 'live' \? liveFirstLoad : loading;", src), (
-        "the live board's busy flag is back on every poll"
+    assert re.search(r"const busy = view === 'live' \? liveFirstLoad : loading && !loaded;", src), (
+        "the busy flag is back on every poll"
     )
     # ... and pull-to-refresh must still spin, which it can no longer read off `busy`.
-    assert "setPulling(true)" in src and "refreshing={view === 'live' ? pulling : busy}" in src, (
+    assert "setPulling(true)" in src and "refreshing={pulling}" in src, (
         "pull-to-refresh on the live board no longer shows the reader anything"
     )
 
@@ -495,6 +495,22 @@ def test_pruning_is_held_while_the_live_half_is_unknown():
     assert "livePicks.error" in body, "a failed live fetch can prune a live leg"
 
 
+def test_pruning_is_held_on_a_partial_read_and_on_yesterdays_board():
+    """A read with one sport's card missing counts as loaded with no error.
+
+    Design review, 2026-11-13: when this week's NFL card failed, the bar pruned
+    every slip leg on it. And just after midnight ET the bar's board can still be
+    yesterday's, which holds none of today's legs.
+    """
+    src = _read(SLIP)
+    assert "const { data, loading, error, partial } = picks;" in src
+    m = re.search(r"canPruneSlip\(\{(.*?)\}\)", src, re.S)
+    assert m, "canPruneSlip call not found"
+    body = m.group(1)
+    assert "partial: partial != null" in body, "a partial read can prune the legs it is missing"
+    assert "onToday: picks.date === todayET()" in body, "yesterday's board can prune today's legs"
+
+
 # ── 4. the live pricing caveat stays where it is true ─────────────────────────
 
 
@@ -534,3 +550,44 @@ def test_the_caveat_does_not_reintroduce_the_your_sportsbook_contradiction():
     m = re.search(r"styles\.liveNoteWrap\}>(.*?)</View>", src, re.S)
     assert m, "live caveat block not found"
     assert "your sportsbook" not in m.group(1).lower()
+
+
+def test_the_pregame_boards_reload_while_open():
+    """All and Signals reload every TODAY_POLL_MS while the tab is focused, and on return.
+
+    Matt, 2026-11-12: a Signals card said "FD line now 41.5 (-120)" after FanDuel
+    had been 40.5 for hours. The odds table had it; the board had loaded once
+    and never again. A background reload must not swap the rows for a skeleton
+    or spin the pull-to-refresh control, so `busy` is first-load only.
+    """
+    src = _read(PICKS)
+    hook = _read(MOBILE / "src" / "hooks" / "useTodayPicks.ts")
+    assert re.search(r"export const TODAY_POLL_MS = 10 \* 60_000;", hook)
+    focus = src[src.index("useFocusEffect(\n    useCallback(() => {\n      reloadToday("):]
+    focus = focus[: focus.index("[reloadToday]")]
+    assert "setInterval(" in focus and "TODAY_POLL_MS" in focus, "no reload loop on the pre-game boards"
+    assert "AppState.addEventListener('change'" in focus and "clearInterval(id)" in focus
+    assert "loading && !loaded" in src, "a background reload would blank the board"
+    # Since #1249 every mount of one date shares one read (lib/todayPicksFlight.ts),
+    # so the two load rules live there, not in a per-hook sequence counter.
+    flight = _read(MOBILE / "src" / "lib" / "todayPicksFlight.ts")
+    load = flight[flight.index("export async function loadTodayBoard"):flight.index("export function resetTodayBoardForTests")]
+    # Overlapping loads (pull during poll): newest wins. One read per date at a
+    # time; a refresh mid-read runs one follow-up instead of a parallel read,
+    # and the value published is the last read's.
+    assert "if (slot.inFlight) {" in load and "if (force) slot.again = true;" in load
+    assert "if (!slot.again) break;" in load
+    # The error clears on success only, so a failing poll does not re-announce
+    # the banner every 10 minutes: nothing before the read may clear it.
+    before_read = load[: load.index("await read(date)")]
+    assert "error: null" not in before_read, "error is cleared before the load succeeds"
+    ok_at = load.index("if (result.loaded) {")
+    success = load[ok_at:load.index("} else", ok_at)]
+    assert "error: null" in success, "a successful reload no longer clears the error"
+    # Picks' resume rule is the only resume reload: the hook's own return
+    # handler moves the date and does not read.
+    handler = hook[hook.index("AppState.addEventListener"):]
+    handler = handler[: handler.index("return () => sub.remove();")]
+    assert "loadTodayBoard" not in handler, "a second resume reload runs beside Picks' own"
+    # The partial banner hides for a tap's retry, not for every background poll.
+    assert "{!error && !loading && partial ?" not in src

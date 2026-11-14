@@ -132,8 +132,9 @@ def test_a_null_close_is_not_stamped_measured():
     src = (ROOT / "tracking" / "paper_tracker.py").read_text(encoding="utf-8")
     assert "_real_close(" in src
     sql = " ".join(MIGRATION.read_text(encoding="utf-8").split())
-    assert ("p.model_id NOT IN ('ncaab_first_half_total', 'ncaab_first_half_spread')"
-            in sql)
+    # the EuroLeague period rules (2026-11-14) joined the same exclusion
+    assert ("p.model_id NOT IN ('ncaab_first_half_total', 'ncaab_first_half_spread', "
+            "'euroleague_h1_dog_ml', 'euroleague_q1_club_share_total')" in sql)
     assert "o.snapshot_at::timestamptz > s.created_at" in sql
     assert "ncaab_first_half_total" in src.split("def _backfill_clv", 1)[1].split(
         "def _closing_line_for", 1)[0]

@@ -4,7 +4,7 @@ import type { Sport } from '@/hooks/useSportFilter';
 import { isModelPaused, isModelRetired } from './thresholds';
 
 export type StatGroup =
-  | 'Batting' | 'Pitching' | 'WNBA' | 'NBA' | 'NCAAB' | 'UFC' | 'NHL'
+  | 'Batting' | 'Pitching' | 'WNBA' | 'NBA' | 'NCAAB' | 'NCAABW' | 'UFC' | 'NHL'
   | 'Passing' | 'Rushing' | 'Receiving' | 'Defense';
 
 /**
@@ -63,6 +63,16 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'steals', label: 'Steals', sport: 'NCAAB', group: 'NCAAB', defaultLine: 0.5 },
   { key: 'blocks', label: 'Blocks', sport: 'NCAAB', group: 'NCAAB', defaultLine: 0.5 },
   { key: 'minutes', label: 'Minutes', sport: 'NCAAB', group: 'NCAAB', defaultLine: 25.5 },
+  // ── NCAABW (women's college basketball). Same keys and lines as NCAAB.
+  //    No book line sits behind defaultLine (Matt, 2026-11-03: no college props).
+  { key: 'points', label: 'Points', sport: 'NCAABW', group: 'NCAABW', defaultLine: 12.5 },
+  { key: 'rebounds', label: 'Rebounds', sport: 'NCAABW', group: 'NCAABW', defaultLine: 5.5 },
+  { key: 'assists', label: 'Assists', sport: 'NCAABW', group: 'NCAABW', defaultLine: 2.5 },
+  { key: 'threes', label: '3PM', sport: 'NCAABW', group: 'NCAABW', defaultLine: 1.5 },
+  { key: 'pra', label: 'PRA', sport: 'NCAABW', group: 'NCAABW', defaultLine: 20.5 },
+  { key: 'steals', label: 'Steals', sport: 'NCAABW', group: 'NCAABW', defaultLine: 0.5 },
+  { key: 'blocks', label: 'Blocks', sport: 'NCAABW', group: 'NCAABW', defaultLine: 0.5 },
+  { key: 'minutes', label: 'Minutes', sport: 'NCAABW', group: 'NCAABW', defaultLine: 25.5 },
   // ── NBA ──
   { key: 'points', label: 'Points', sport: 'NBA', group: 'NBA', defaultLine: 14.5 },
   { key: 'rebounds', label: 'Rebounds', sport: 'NBA', group: 'NBA', defaultLine: 5.5 },
@@ -184,13 +194,19 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   NFL: ['Passing', 'Rushing', 'Receiving', 'Defense'],
   NCAAF: ['Passing', 'Rushing', 'Receiving', 'Defense'],
   NCAAB: ['NCAAB'],
-  // No NCAABW (women's college basketball) player stats are in the app: the
-  // Stats tab shows its "No player leaderboard" state for NCAABW.
-  NCAABW: [],
+  // Women's college basketball, the same one group as the men's board.
+  NCAABW: ['NCAABW'],
   UFC: ['UFC'],
+  // No tennis player stats are in the app: the Stats tab shows its empty
+  // state for ATP and WTA, and says the picks are on the Picks tab.
+  ATP: [],
+  WTA: [],
   NHL: ['NHL'],
   // Golf has no per-player leaderboard (v1).
   GOLF: [],
+  // EuroLeague (2026-11-13) joined for its in-play model; no player stats are
+  // stored for the app, so its Players board says it has no leaderboard.
+  EUROLEAGUE: [],
 };
 
 export function statsForSport(sport: Sport): StatDef[] {
@@ -200,7 +216,7 @@ export function statsForSport(sport: Sport): StatDef[] {
 /** Sport's default leaderboard stat, or null when the sport has no leaderboard (Golf). */
 export function defaultStatFor(sport: Sport): StatDef | null {
   const wantKey =
-    sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB' ? 'points'
+    sport === 'WNBA' || sport === 'NBA' || sport === 'NCAABW' || sport === 'NCAAB' ? 'points'
     : sport === 'UFC' ? 'wins'
     : sport === 'NFL' || sport === 'NCAAF' ? 'passing_yards'
     : sport === 'NHL' ? 'shots'
@@ -238,7 +254,7 @@ export function defaultThresholdFor(def: StatDef | null): number {
 }
 
 // Sports that support the Hit Rate view (have per-game player logs + RPCs).
-const HIT_RATE_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB']);
+const HIT_RATE_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAABW', 'NCAAB']);
 
 /** Whether a sport can show the Hit Rate mode (UFC/NHL/Golf cannot).
  *  NHL stays out: hit rate, season totals and the player card need the
@@ -438,10 +454,11 @@ export function propModelForStat(def: StatDef | null): string | null {
 export function propMarketForStat(def: StatDef | null): string | null {
   if (!def) return null;
   // College basketball player props are not shown (Matt, 2026-11-03: "Don't
-  // include those"): barely offered, and barred in 13 states. NCAAB shares
-  // WNBA's column keys, so returning early keeps `points` from ever
-  // resolving onto another league's market.
-  if (def.sport === 'NCAAB') return null;
+  // include those"): barely offered, and barred in 13 states. NCAAB and
+  // NCAABW share WNBA's column keys, so returning early keeps `points` from
+  // ever resolving onto another league's market. NCAABW is tested first:
+  // 'NCAAB' is a prefix of 'NCAABW'.
+  if (def.sport === 'NCAABW' || def.sport === 'NCAAB') return null;
   // Neither football league has a prop model to route through — the map above
   // is the whole answer for both, and returning early keeps a shared column
   // key (passing_yards) from ever resolving through some other sport's model.
@@ -477,7 +494,7 @@ function rawPropModelForStat(def: StatDef): string | null {
   // NCAAF shares its column keys with the NFL but has no prop models of its
   // own — returning early keeps a shared key (passing_yards) from resolving to
   // an NFL model on a college player.
-  if (def.sport === 'NCAAF' || def.sport === 'NCAAB') return null;
+  if (def.sport === 'NCAAF' || def.sport === 'NCAABW' || def.sport === 'NCAAB') return null;
   if (def.sport === 'NBA') {
     const suffix = BASKETBALL_STAT_SUFFIX[def.key];
     return suffix ? `nba_${suffix}` : null;

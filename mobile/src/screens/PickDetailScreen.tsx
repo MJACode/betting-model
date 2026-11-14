@@ -41,13 +41,16 @@ import { clvBetQuote } from '@/lib/clvBet';
 import { openForAction } from '@/lib/discordPublish';
 import { betslipPlayerFromPick } from '@/lib/betslipGuard';
 import { slipKeyForPick } from '@/lib/parlay';
-import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus, labelWithoutStake } from '@/lib/format';
+import {
+  basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus, isVersusSport, labelWithoutStake,
+} from '@/lib/format';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, modelLongWithMark, sportOfModel } from '@/lib/modelMeta';
 import {
   bookLabel,
   bookName,
   currentLineQuotes,
+  otherLineQuotesForPick,
   displayQuoteForPick,
   formatSideLine,
   freshBookRows,
@@ -57,13 +60,20 @@ import {
   playerNameFromPickLabel,
   priceAgeFor,
   propMarketForPick,
+  onlyDecidingQuote,
   storedQuoteBook,
   MODEL_BOOK,
 } from '@/lib/markets';
 import { stalePriceNote } from '@/lib/heroPriceText';
 import { teamScoreUnit } from '@/lib/teamForm';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
-import { liveNotAtMyBooksText, myBooksView, NOT_AT_MY_BOOKS, recordNoteFor } from '@/lib/myBooks';
+import {
+  liveNotAtMyBooksText,
+  myBooksView,
+  NOT_AT_MY_BOOKS,
+  NOT_AT_MY_BOOKS_AT_THIS_LINE,
+  recordNoteFor,
+} from '@/lib/myBooks';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
@@ -262,23 +272,36 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   const lineQuotes = currentLineQuotes(pick, bookRows, hero, priceAge, allowedBooks);
   // Their number on its own line at secondary weight (UX review); the record
   // note is a separate caption under it.
+  // Same wording as the card (PickCard): one of their books has this side at
+  // another number, and the "Your books" table below lists it.
+  const otherLinesBelow =
+    myView?.status === 'none' && !onlyDecidingQuote(pick) && cta.handoff &&
+    otherLineQuotesForPick(pick, bookRows, myBooks, priceAge).length > 0;
   const myBooksLine =
     myView?.status === 'mine' && myView.best && myView.edge != null && myView.ev != null
       ? `At your books: ${bookName(myView.best.bookmaker)} ${formatAmerican(myView.best.price)} · edge ${formatPctSigned(myView.edge)} · return ${formatPctSigned(myView.ev)}`
       : myView?.status === 'none'
         ? `${
-            pick.is_live === true && decisionOdds(pick) != null
+            onlyDecidingQuote(pick) && decisionOdds(pick) != null
               ? liveNotAtMyBooksText(bookName(storedQuoteBook(pick)), formatAmerican(Number(decisionOdds(pick))))
-              : NOT_AT_MY_BOOKS
+              : otherLinesBelow
+                ? `${NOT_AT_MY_BOOKS_AT_THIS_LINE}. Their other lines are under Your books`
+                : NOT_AT_MY_BOOKS
           }. Change your books in Settings.`
         : null;
   const myBooksRecordNote = myView?.status === 'mine' ? recordNoteFor(pick.model_id) : null;
   const inSlip = slip.has(slipKeyForPick(pick));
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
-  // don't promise alerts on props or already-started games.
+  // don't promise alerts on props or already-started games. Nor on tennis:
+  // the notifier reads DraftKings' line from the shared odds table
+  // (tracking/push_notifier._line_change_alerts), and tennis prices are
+  // stored in tennis_odds_quotes, never there, so no alert can fire. (The
+  // tennis card fills dk_odds with the deciding price when DraftKings has
+  // none, so dk_odds != null says nothing for tennis.)
   const trackAlertsEligible =
     isGameModel && pick.dk_odds != null && pick.player_id == null &&
+    pick.sport !== 'ATP' && pick.sport !== 'WTA' &&
     gameStatus(game, liveState).kind === 'pre';
   // Who's on base, shown under the matchup while the game is actually in play.
   const liveBases =
@@ -304,10 +327,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // Golf picks are per-player on a one-row tournament (no two teams) — there is
   // no run-based team form to show, so skip the trend strips like UFC.
   const isGolf = game?.sport === 'GOLF' || pick.sport === 'GOLF';
-  const showTeamTrends = isGameModel && !isUfc && !isGolf;
   // The form strips read the pick's own sport: `games` stores the Celtics, the
   // Red Sox and the Bruins all as 'BOS'.
   const teamSport = game?.sport ?? pick.sport ?? null;
+  // A fight or a tennis match is two players, not two teams: no team form
+  // (useTeamTrends would ask the team reads for "Jannik Sinner").
+  const showTeamTrends = isGameModel && !isVersusSport(teamSport) && !isGolf;
 
   const homeTrends = useTeamTrends(
     showTeamTrends ? teamSport : null,
@@ -406,7 +431,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
               <Text style={styles.matchup}>
                 {game.sport === 'GOLF'
                   ? game.home_team
-                  : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`}
+                  : `${game.away_team} ${isVersusSport(game.sport) ? 'vs' : '@'} ${game.home_team}`}
               </Text>
               <GameStatusPill game={game} compact={false} live={liveState} />
             </View>

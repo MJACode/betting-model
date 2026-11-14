@@ -2,6 +2,7 @@ import { nhlSkaterReadMissing } from '@/lib/nhlBoard';
 import { nhlSeasonCandidates } from '@/lib/nhlSkaterTotals';
 import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
+import type { PeriodKey, TeamPeriodRow } from '@/lib/teamPeriodSplits';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
@@ -32,6 +33,7 @@ import {
 } from './scoreboard';
 import {
   gameMarketForModel,
+  gameRowsForPick,
   lineShopForPick,
   liveBookRowsForPick,
   numOrNull,
@@ -219,14 +221,15 @@ const hasTeams = (teams: SlateTeams): teams is readonly string[] =>
  * cap, which returns an arbitrary 1,000 and says nothing.
  */
 export async function fetchSeasonTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
   season: number,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  // No golf leaderboard (v1), and no NCAABW (women's college basketball)
-  // player stats in the app. Named, or the sport falls to the MLB read below.
-  if (sport === 'GOLF' || sport === 'NCAABW') return [];
+  // No golf leaderboard (v1). Named, or the sport falls to the MLB read below.
+  if (sport === 'GOLF') return [];
+  // No tennis stats in the app. Named, or the sport falls to the MLB read below.
+  if (sport === 'ATP' || sport === 'WTA') return [];
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
@@ -260,16 +263,20 @@ export async function fetchSeasonTotals(
       totalsRowKey,
     );
   }
-  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+  // NCAABW before NCAAB: the women's name starts with the men's.
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAABW' || sport === 'NCAAB') {
     return fetchAllPages<SeasonTotalsRow>((from, to) => {
-      // Literal, for the same reason as the football pair above. NCAAB's view
-      // carries WNBA's columns (add_ncaab_player_game_log_2026_11_03.sql).
+      // Literal, for the same reason as the football pair above. Both college
+      // views carry WNBA's columns (add_ncaab_player_game_log_2026_11_03.sql,
+      // add_ncaabw_player_game_log_2026_11_12.sql).
       let q =
         sport === 'WNBA'
           ? supabase.from('v_player_season_totals_wnba').select(WNBA_TOTALS_COLUMNS).eq('season', season)
-          : sport === 'NCAAB'
-            ? supabase.from('v_player_season_totals_ncaab').select(WNBA_TOTALS_COLUMNS).eq('season', season)
-            : supabase.from('v_player_season_totals_nba').select(NBA_TOTALS_COLUMNS).eq('season', season);
+          : sport === 'NCAABW'
+            ? supabase.from('v_player_season_totals_ncaabw').select(WNBA_TOTALS_COLUMNS).eq('season', season)
+            : sport === 'NCAAB'
+              ? supabase.from('v_player_season_totals_ncaab').select(WNBA_TOTALS_COLUMNS).eq('season', season)
+              : supabase.from('v_player_season_totals_nba').select(NBA_TOTALS_COLUMNS).eq('season', season);
       if (hasTeams(teams)) q = q.in('team', teams as string[]);
       return q.order('player_id').range(from, to);
     }, totalsRowKey);
@@ -295,7 +302,7 @@ const totalsRowKey = (r: SeasonTotalsRow): string =>
  * (opponent defense/pace). Other sports return [] (no matchup view yet).
  */
 export async function fetchTonightMatchups(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
 ): Promise<TonightMatchupRow[]> {
   if (sport !== 'MLB' && sport !== 'WNBA') return [];
   const view = sport === 'MLB' ? 'v_mlb_tonight_matchups' : 'v_wnba_tonight_matchups';
@@ -311,16 +318,18 @@ export async function fetchTonightMatchups(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
-  // No golf leaderboard (v1), and no NCAABW player stats in the app. Named,
-  // or the sport falls to the MLB read below.
-  if (sport === 'GOLF' || sport === 'NCAABW') return [];
+  // No golf leaderboard (v1), and no EuroLeague one (2026-11-13). Named, or the
+  // sport falls to the MLB read below.
+  if (sport === 'GOLF' || sport === 'EUROLEAGUE') return [];
+  // No tennis stats in the app. Named, or the sport falls to the MLB read below.
+  if (sport === 'ATP' || sport === 'WTA') return [];
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
     for (const s of footballSeasonCandidates(season)) {
@@ -345,9 +354,10 @@ export async function fetchWindowTotals(
       totalsRowKey,
     );
   }
-  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAABW' || sport === 'NCAAB') {
     const fn =
       sport === 'WNBA' ? 'player_window_totals_wnba'
+      : sport === 'NCAABW' ? 'player_window_totals_ncaabw'
       : sport === 'NCAAB' ? 'player_window_totals_ncaab'
       : 'player_window_totals_nba';
     return pageRpc<SeasonTotalsRow>(fn, { p_season: season, p_window: window }, teams, totalsRowKey);
@@ -401,12 +411,14 @@ function pageRpc<T>(
  * 25 server-side.
  */
 export async function fetchRecentGames(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
   season: number,
   window: number,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<RecentGameRow[]> {
+  // EuroLeague has no player stats in the app (2026-11-13): named, or it falls to the MLB read.
+  if (sport === 'EUROLEAGUE') return [];
   // The heaviest read on the board — N rows per player, league-wide. Every
   // sport is over the 1,000-row cap here (WNBA 2,074, NBA 5,447, MLB 6,216,
   // NFL 12,850, NCAAF 54,687), so it is both paged and narrowed.
@@ -430,9 +442,10 @@ export async function fetchRecentGames(
   // what an app build older than the migration sends.
   const withTeams = (args: Record<string, unknown>) =>
     hasTeams(teams) ? { ...args, p_teams: teams } : args;
-  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAABW' || sport === 'NCAAB') {
     const fn =
       sport === 'WNBA' ? 'player_recent_games_wnba'
+      : sport === 'NCAABW' ? 'player_recent_games_ncaabw'
       : sport === 'NCAAB' ? 'player_recent_games_ncaab'
       : 'player_recent_games_nba';
     return pageRpc<RecentGameRow>(
@@ -484,19 +497,22 @@ const recentGameRowKey = (r: RecentGameRow): string => `${r.player_id}:${r.game_
  * keys in statCatalog); unknown keys return zero rows.
  */
 export async function fetchSeasonStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
   season: number,
   statKey: string,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonStatValuesRow[]> {
+  // EuroLeague has no player stats in the app (2026-11-13): named, or it falls to the MLB read.
+  if (sport === 'EUROLEAGUE') return [];
   // One compact row per player, but still over the cap where the league is
   // big: 1,798 NFL players on a season stat, 12,204 NCAAF.
   const key = (r: SeasonStatValuesRow) =>
     `${r.player_id}:${(r as { player_type?: string }).player_type ?? ''}`;
-  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAABW' || sport === 'NCAAB') {
     const fn =
       sport === 'WNBA' ? 'player_season_stat_values_wnba'
+      : sport === 'NCAABW' ? 'player_season_stat_values_ncaabw'
       : sport === 'NCAAB' ? 'player_season_stat_values_ncaab'
       : 'player_season_stat_values_nba';
     return pageRpc<SeasonStatValuesRow>(fn, { p_season: season, p_stat: statKey }, teams, key);
@@ -605,19 +621,21 @@ function h2hSeasonCandidates(sport: string, season: number): number[] {
  * ask about, and an unnarrowed H2H read is the cross product.
  */
 export async function fetchH2HStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
   season: number,
   statKey: string,
   matchups: H2HMatchups,
   playerType?: 'batter' | 'pitcher',
 ): Promise<H2HStatValuesRow[]> {
-  if (matchups.teams.length === 0) return [];
+  // EuroLeague has no player stats in the app (2026-11-13): named, or it falls to the MLB read.
+  if (sport === 'EUROLEAGUE' || matchups.teams.length === 0) return [];
   // (player, opponent) is the row's identity: a player whose team appears in
   // the slate twice (an MLB doubleheader) still resolves to one opponent, but
   // the key must not collapse two different ones if that ever changes.
   const key = (r: H2HStatValuesRow) => `${r.player_id}:${r.opponent}:${r.player_type ?? ''}`;
   const fn =
-    sport === 'WNBA' ? 'player_h2h_stat_values_wnba'
+    sport === 'NCAABW' ? 'player_h2h_stat_values_ncaabw'
+    : sport === 'WNBA' ? 'player_h2h_stat_values_wnba'
     : sport === 'NBA' ? 'player_h2h_stat_values_nba'
     : sport === 'MLB' ? 'player_h2h_stat_values_mlb'
     : sport === 'NFL' ? 'player_h2h_stat_values_nfl'
@@ -650,7 +668,7 @@ export async function fetchH2HStatValues(
  * `games` is already on the anon read surface.
  */
 export async function fetchSeasonStarted(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAABW' | 'NCAAB',
   season: number,
 ): Promise<boolean> {
   const { data, error } = await supabase
@@ -680,7 +698,7 @@ export async function fetchSeasonStarted(
  * NFL, MLB, NBA, WNBA and NCAAF; other sports return [] without a request.
  */
 export async function fetchPositionVsOpponent(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
   seasons: number[],
   statKey: string,
   posGroup: string,
@@ -744,7 +762,7 @@ export async function fetchPositionVsOpponent(
  * names, never one picked by a variable (tests/test_anon_readable.py).
  */
 export async function fetchPlayerVsDefense(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
   playerId: string,
   statKey: string,
   posGroup: string,
@@ -899,12 +917,75 @@ function bookEnrichment(
 ): { bookRows: BookPricedRow[]; bestOdds: BookPrice | null } {
   const market = gameMarketForModel(pick.model_id);
   const bookRows: BookPricedRow[] = market
-    ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
+    ? gameRowsForPick(pick, market, booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
     : [];
   return {
     bookRows,
     bestOdds: bookRows.length ? lineShopForPick(pick, bookRows) : null,
   };
+}
+
+/**
+ * Adds each spread/total pick's alternate-ladder rungs at the pick's own
+ * number into `booksByGameMarket`, under the MAIN market's key, so
+ * gameRowsForPick can offer a book whose main line sits at another number.
+ *
+ * Narrow on purpose: alt_game_lines held 26,527 rows for 2026-11-14 alone
+ * (measured 2026-11-12), so this asks only for the picks' games and numbers.
+ * The same read for every 2026-11-12 spread/total pick returned 242 rows.
+ * Paged anyway (1,000-row cap). A failure keeps the main lines and says so.
+ */
+async function addSameLineLadder(
+  booksByGameMarket: Map<string, OddsByBookRow[]>,
+  picks: readonly Pick[],
+  onEnrichmentError?: (what: string, error: unknown) => void,
+): Promise<void> {
+  const games = new Set<string>();
+  const points = new Set<number>();
+  const altMarkets = new Set<string>();
+  for (const p of picks) {
+    if (p.is_live === true) continue;
+    const market = gameMarketForModel(p.model_id);
+    const alt = market ? ALT_GAME_MARKET[market as GameLineMarket] : undefined;
+    const line = p.scored_line == null ? NaN : Number(p.scored_line);
+    if (!alt || !Number.isFinite(line)) continue;
+    games.add(p.game_id);
+    points.add(line);
+    altMarkets.add(alt);
+  }
+  if (games.size === 0) return;
+  let rows: OddsByBookRow[];
+  try {
+    rows = await fetchAllPages<OddsByBookRow>(
+      (from, to) =>
+        supabase
+          .from('alt_game_lines')
+          .select(ODDS_BY_BOOK_COLUMNS)
+          .in('game_id', Array.from(games))
+          .in('market', Array.from(altMarkets))
+          .in('point', Array.from(points))
+          .order('game_id')
+          .order('market')
+          .order('bookmaker')
+          .order('point')
+          .range(from, to),
+      (r) => `${r.game_id}|${r.market}|${r.bookmaker}|${r.spread_home ?? r.total_line}`,
+    );
+  } catch (e: unknown) {
+    if (onEnrichmentError) onEnrichmentError('the alternate lines', e);
+    else console.warn('[picks] alternate lines unavailable', e);
+    return;
+  }
+  const mainOf: Record<string, string> = {};
+  for (const [main, alt] of Object.entries(ALT_GAME_MARKET)) if (alt) mainOf[alt] = main;
+  for (const r of rows) {
+    const main = mainOf[r.market];
+    if (!main) continue;
+    const key = `${r.game_id}|${main}`;
+    const list = booksByGameMarket.get(key) ?? [];
+    list.push(r);
+    booksByGameMarket.set(key, list);
+  }
 }
 
 const LIVE_STATE_COLUMNS =
@@ -1082,6 +1163,10 @@ const MAIN_GAME_ODDS_MARKETS = [
   'spreads_q1',
   // The NBA first quarter's moneyline (nba_q1_trend_ml).
   'h2h_q1',
+  // The EuroLeague first half's moneyline and first quarter's total
+  // (models/euroleague_pregame.py).
+  'h2h_h1',
+  'totals_q1',
 ] as const;
 
 /**
@@ -1460,11 +1545,12 @@ export async function fetchPicksForDate(
     if (!seen.has(key)) seen.set(key, p);
   }
 
+  await addSameLineLadder(booksByGameMarket, Array.from(seen.values()), onEnrichmentError);
   return Array.from(seen.values()).map((pick) => {
     const market = gameMarketForModel(pick.model_id);
     // A pick is priced either as a game market or as a prop, never both.
     let bookRows: BookPricedRow[] = market
-      ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
+      ? gameRowsForPick(pick, market, booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
       : [];
     if (bookRows.length === 0) {
       // The row's prop_market for a multi-market rule (propMarketForPick).
@@ -1486,9 +1572,10 @@ export async function fetchPicksForDate(
 }
 
 /**
- * Upcoming UFC picks AFTER `afterDate` through `throughDate`. UFC events are
- * weekly and the scorer prices them up to UFC_SCORE_AHEAD_DAYS early, so the
- * UFC tab shows the next card instead of sitting empty until fight day.
+ * Upcoming UFC picks AFTER `afterDate` through `throughDate`. The UFC
+ * opening-price model bets a fight a week or more out, so the window reaches
+ * as far as its card does (useTodayPicks UFC_AHEAD_DAYS) and the UFC tab
+ * shows those bets instead of hiding them until fight week.
  * Same enrichment shape as fetchPicksForDate (UFC has no weather rows).
  */
 export async function fetchUpcomingUfcPicks(
@@ -1510,9 +1597,12 @@ export async function fetchUpcomingUfcPicks(
       .eq('sport', 'UFC')
       .gt('game_date', afterDate)
       .lte('game_date', throughDate),
+    // Scoped by the game_id prefix: the view has no sport column, and a
+    // four-month window spans every other sport's future slate too.
     supabase
       .from('v_latest_dk_odds')
       .select(LATEST_ODDS_COLUMNS)
+      .like('game_id', 'UFC_%')
       .gt('game_date', afterDate)
       .lte('game_date', throughDate),
     // Per-book prices so a non-DraftKings bettor sees their own book's number
@@ -1567,6 +1657,61 @@ export async function fetchUpcomingUfcPicks(
       ...bookEnrichment(pick, booksByGameMarket),
     };
   });
+}
+
+/**
+ * Upcoming tennis picks, both tours (ATP men's, WTA women's), AFTER
+ * `afterDate` through `throughDate`.
+ *
+ * The tennis card (scripts/tennis_moneyline_card.py) decides a match at most
+ * 35 minutes before its listed start and files the pick under the listed
+ * start's Eastern date. A match listed between 00:00 and 00:35 ET is therefore
+ * posted the evening before, under tomorrow's date, and a same-day board would
+ * hide it until midnight while Discord carries it (useTodayPicks
+ * TENNIS_AHEAD_DAYS). The card writes a games row only for the matches it
+ * decides, so the window holds a handful of rows.
+ *
+ * Picks and their games only. Tennis prices are stored in tennis_odds_quotes,
+ * which the app does not read (data/anon_readable.py), so the shared odds
+ * views hold nothing for a match and are not asked. Matched on the `sport`
+ * column, never on a game-id prefix.
+ */
+export async function fetchUpcomingTennisPicks(
+  afterDate: string,
+  throughDate: string,
+): Promise<EnrichedPick[]> {
+  const [picksRes, gamesRes] = await Promise.all([
+    supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .in('sport', ['ATP', 'WTA'])
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate)
+      .order('signal_type', { ascending: true })
+      .order('pick_id', { ascending: true })
+      .limit(1000),
+    supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .in('sport', ['ATP', 'WTA'])
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+  ]);
+
+  if (picksRes.error) throw picksRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+
+  const gameById = new Map<string, GameRow>();
+  for (const g of (gamesRes.data ?? []) as unknown as GameRow[]) gameById.set(g.game_id, g);
+
+  return ((picksRes.data ?? []) as unknown as Pick[]).map((pick) => ({
+    pick,
+    game: gameById.get(pick.game_id) ?? null,
+    weather: null,
+    latestOdds: null,
+    bookRows: [],
+    bestOdds: null,
+  }));
 }
 
 /**
@@ -1714,6 +1859,7 @@ export async function fetchUpcomingNflPicks(
     if (!seen.has(key)) seen.set(key, p);
   }
 
+  await addSameLineLadder(booksByGameMarket, Array.from(seen.values()));
   return Array.from(seen.values()).map((pick) => {
     const market = gameMarketForModel(pick.model_id);
     return {
@@ -1822,6 +1968,7 @@ export async function fetchUpcomingNcaafPicks(
     if (!seen.has(key)) seen.set(key, p);
   }
 
+  await addSameLineLadder(booksByGameMarket, Array.from(seen.values()));
   return Array.from(seen.values()).map((pick) => {
     const market = gameMarketForModel(pick.model_id);
     return {
@@ -1957,6 +2104,7 @@ export async function fetchUpcomingCollegeBasketballPicks(
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
   const booksByGameMarket = groupBooksByGameMarket(allBooks);
 
+  await addSameLineLadder(booksByGameMarket, picks, onEnrichmentError);
   return picks.map((pick) => {
     const market = gameMarketForModel(pick.model_id);
     return {
@@ -2068,6 +2216,7 @@ export async function fetchUpcomingNhlPicks(
     if (!seen.has(key)) seen.set(key, p);
   }
 
+  await addSameLineLadder(booksByGameMarket, Array.from(seen.values()));
   return Array.from(seen.values()).map((pick) => {
     const market = gameMarketForModel(pick.model_id);
     return {
@@ -2353,12 +2502,21 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
         : Promise.resolve({ data: [], error: null }),
   ]);
 
+  // Enrichment only — never let a line-shop failure break the detail screen.
+  let bookRows = (bookRes.error ? [] : (bookRes.data ?? [])) as unknown as OddsByBookRow[];
+  // The same ladder rung the card reads (addSameLineLadder), so the detail
+  // screen never says "Not offered" one tap after the card showed a price.
+  if (market && pick.is_live !== true) {
+    const byMarket = new Map<string, OddsByBookRow[]>([[`${pick.game_id}|${market}`, bookRows]]);
+    await addSameLineLadder(byMarket, [pick]);
+    bookRows = gameRowsForPick(pick, market, byMarket.get(`${pick.game_id}|${market}`) ?? []);
+  }
+
   return {
     pick,
     game: (gameRes.data as GameRow | null) ?? null,
     weather: (weatherRes.data as GameWeather | null) ?? null,
-    // Enrichment only — never let a line-shop failure break the detail screen.
-    bookRows: (bookRes.error ? [] : (bookRes.data ?? [])) as unknown as BookPricedRow[],
+    bookRows: bookRows as unknown as BookPricedRow[],
   };
 }
 
@@ -2773,7 +2931,7 @@ export async function fetchPlayerGameLog(
   // NBA did-not-play rows live in nba_player_dnp, not the game log. Merged
   // here so the chart and the recent-games list can draw them. A failure
   // (the read grant is a migration that is not applied until Matt says so)
-  // leaves the played log on screen. WNBA and NCAAB have no such table.
+  // leaves the played log on screen. WNBA, NCAAB and NCAABW have no such table.
   if (sport === 'NBA') {
     const id = playerId || rows[0]?.player_id;
     if (id) {
@@ -3341,12 +3499,16 @@ export async function untrackBet(deviceId: string, pickId: number): Promise<void
  * Returns [] for sports with no teams (UFC, golf) rather than erroring.
  */
 export async function fetchTeamStats(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL' | 'EUROLEAGUE',
   season: number,
 ): Promise<TeamSeasonStats> {
-  // NCAAB has no Teams board yet (teamStatCatalog BALL), and NCAABW has no
-  // team stats in the app at all.
-  if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAAB' || sport === 'NCAABW') return { season: null, rows: [] };
+  // No tennis team stats: two players, no teams (teamStatCatalog BALL).
+  if (sport === 'ATP' || sport === 'WTA') return { season: null, rows: [] };
+  // Neither college basketball sport has a Teams board (teamStatCatalog BALL).
+  // NCAABW is named before NCAAB.
+  if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAABW' || sport === 'NCAAB') return { season: null, rows: [] };
+  // EuroLeague has no stats in the app (2026-11-13).
+  if (sport === 'EUROLEAGUE') return { season: null, rows: [] };
   // RETURNS THE SEASON IT ACTUALLY USED, and that is not decoration. The Teams
   // board prints "TEAM · {season}" over these numbers and used to run the
   // fallback itself, one call per candidate; moving the loop in here without
@@ -3376,6 +3538,33 @@ export async function fetchTeamStats(
     }
   }
   return { season: null, rows: [] };
+}
+
+/**
+ * The Betting tab's period rows (lib/teamPeriodSplits): one per team and game
+ * for ONE period, this season and last (last N reaches back early on).
+ * SIZED ON PRODUCTION 2026-11-13: 340 NBA rows per period for 2026-27 so far;
+ * a full season is 2,460 per period, so two seasons reach ~4,900 by April —
+ * past the 1,000-row cap, hence fetchAllPages with a deterministic order.
+ */
+export async function fetchTeamPeriodRows(
+  sport: string,
+  period: PeriodKey,
+  season: number,
+): Promise<TeamPeriodRow[]> {
+  return fetchAllPages<TeamPeriodRow>(
+    (from, to) =>
+      supabase
+        .from('team_period_results')
+        .select('team,season,game_id,game_date,is_home,spread,total_line,ats,ou,rest_days,opp_rest_days')
+        .eq('sport', sport)
+        .eq('period', period)
+        .in('season', [season - 1, season])
+        .order('game_id')
+        .order('team')
+        .range(from, to),
+    (r) => `${r.game_id}|${r.team}`,
+  );
 }
 
 // ── Team detail (screens/TeamStatsScreen) ───────────────────────────────────
@@ -4005,6 +4194,10 @@ export interface SgpPriceEntry {
   bookAmerican: number;
   multipliedDecimal: number;
   sgpGroups: number;
+  /** Legs past the first in each same-game group (lib/sgpPricing.ts). */
+  extraLegs: number;
+  /** The leg-correlation lift the app divided the price by. */
+  corrLift: number;
   legCount: number;
   legs: { label: string; gameId: string | null }[];
   appVersion: string | null;
@@ -4021,6 +4214,8 @@ export async function logSgpPrice(e: SgpPriceEntry): Promise<void> {
     p_leg_count: e.legCount,
     p_legs: e.legs,
     p_app_version: e.appVersion,
+    p_extra_legs: e.extraLegs,
+    p_corr_lift: e.corrLift,
   });
   if (error) throw error;
 }

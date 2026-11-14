@@ -121,6 +121,14 @@ def _function_signature(conn, name: str) -> str | None:
 MAY_BE_UNAPPLIED = (
     "byom_game_facts",
     "byom_prop_facts",
+    # The women's Stats view. Its migration is not in ACTIVE_MIGRATIONS, so
+    # the relation is absent until someone applies it by hand. _table_exists
+    # only matches base tables, and a view therefore stays in the skip path
+    # even after it exists; the migration's own GRANT is the one that opens
+    # it. Leaving it here keeps a grant sweep from raising on a missing name
+    # and from failing its read-back on a view (has_table_privilege is never
+    # asked of a non-table).
+    "v_player_season_totals_ncaabw",
 )
 
 

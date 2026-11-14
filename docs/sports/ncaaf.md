@@ -260,7 +260,15 @@ more verdicts, harnesses in `scripts/ncaaf_search/audit_2026_11/`:
 |---|---|---|
 | **Line shopping against the consensus** (the NCAAB spread, total and moneyline rules, unchanged; 2023-2025 stored pulls, 2,314 games, walk-forward tables) | `lab.py`, `spread_dd.py`, `sym.py` | NULL. The spread rule as built for NCAAB reads +8.2% on 338 bets [-1.2, +16.7] at the game-day morning pull, and 337 of the 338 are road teams: the fitted table's home/away tilt, not an off-market number. Every road team at the consensus lost 4.4%. Tilt removed: 22 bets at a 0.02 cut. A number 1.0+ points better than the consensus exists in 13.2% of games and lost 8.8% (269 bets). Totals: 48 bets at 0.02. Moneyline against the book's own spread: -0.5% on 386. Moneyline against the consensus spread: +7.8% on 311 at one read, negative at six of the other seven (the audit's `lab_results.csv`; this said five until 2026-11-10), -9.3 units without its 10 best dates. Built live anyway on mike's call, as `ncaaf_moneyline_market` (its section above) |
 | **College props, the second season** (the market-relative rule on 2026's three pulls a game day, and 2025 again; every book as a placebo) | `props/main.py` (`docs/ncaaf_market_audit_props.md`) | NULL. Pinnacle 2026 at 0.02: 42 bets -32.4%; consensus 2026 64 bets +2.3%; nothing reaches 150 bets in a season. The placebo fails again (FanDuel as the reference +13.5% on 111 in 2025). From the week of 2026-09-29 FanDuel and Hard Rock, the only two-way books in volume, stopped disagreeing at an equal line |
-| **The totals fit's random seed** (11 seeds, same data and settings) | `totals_seeds.py`, `totals_seeds_fc.py` | A FINDING, not a verdict. One game's prediction moves 1.49 points (sd) with the seed; 3 in 10 games at the 8-point gate change with it. At the stored close the walk-forward is 51.5% to 56.4% by seed (the published 55.9% was one draw). In the live shape (first morning DraftKings read that crosses, 2023-2025) every seed is positive, +4.1% to +10.6%, and the 11-seed average is 346 bets +35.06 units (+9.35%). 2026 does not separate the average from a single fit. Acted on 2026-11-10 (mike): the fit is now the mean of the eleven, fitted and not yet registered (the 2026-11-10 section at the end of this file) |
+| **The totals fit's random seed** (11 seeds, same data and settings) | `totals_seeds.py`, `totals_seeds_fc.py` | A FINDING, not a verdict. One game's prediction moves 1.49 points (sd) with the seed; 3 in 10 games at the 8-point gate change with it. At the stored close the walk-forward is 51.5% to 56.4% by seed (the published 55.9% was one draw). In the live shape (first morning DraftKings read that crosses, 2023-2025) every seed is positive, +4.1% to +10.6%, and the 11-seed average is 346 bets +35.06 units (+9.35%). 2026 does not separate the average from a single fit. Acted on 2026-11-10 (mike): the fit is now the mean of the eleven, the active file since 2026-11-11 (the 2026-11-10 section at the end of this file) |
+
+**Added 2026-11-11 (the bought first-half and team-total prices,
+`docs/ncaaf_first_half_team_totals.md`).** Harness in
+`scripts/ncaaf_search/audit_2026_11/deriv/`:
+
+| Lever | Harness | Verdict |
+|---|---|---|
+| **First-half moneyline, spread and total, and team totals** (153,286 bought quotes, 2023-2025, eight books, the game-day morning and the evening before; half-time scores built from play-by-play and checked against ESPN, 99.1%) | `deriv_rules.py`, `deriv_r4.py`, `deriv_r4b.py` | NULL. Every quote on both sides loses the books' margin (-3.7% to -6.6%). A better price at the same line (against the other books' middle, and against Pinnacle alone) finds at most 61 bets a market in three seasons, flat. A line 1 point better than the other books loses 2.7% to 8.3%. Team totals sit on (total -/+ spread)/2 of the full game and lose 1% to 8% where they stray. First half priced from the full game, walk-forward on a table fitted back to 2015 (play-by-play for 2015-2024 pulled that day): moneyline -1.1%, spread -5.6%, total -0.4%. On a table fitted on the two bought seasons alone the spread read +6.7% on 301 bets [-6.1, +18.6]; the longer table erased it. Where the table gives a quote 52% to 55%, it won 49.8%: the first-half line already holds what the full-game line holds |
 
 **What this means:** the two live rules ARE the survivors. Do not re-mine
 features on this data; new edge requires new INFORMATION (an injury/news feed,
@@ -465,7 +473,9 @@ and models."* Three changes, all reading the stored schedule through one module
   population — not this rule.
 - Canonical team id = CFBD SCHOOL NAME (accents folded via `_fold`); game_id
   slugs. Odds API names no fold / "school mascot" / prefix rule can bridge
-  (Southern Miss, App State, UMass, SE Louisiana, The Citadel) live in
+  (Southern Miss, App State, UMass, SE Louisiana, The Citadel, William &
+  Mary, Long Island University, and the Houston Baptist → Houston Christian
+  rename) live in
   `config.NCAAF_ODDS_API_MAP`; without an entry the odds ingest mints a
   second `games` row and `ncaaf_game_identity` goes CRIT. Historical lines
   under `cfbd_*` bookmakers (provider priority

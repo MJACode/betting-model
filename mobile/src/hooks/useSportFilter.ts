@@ -9,7 +9,9 @@ import { useCallback, useEffect, useState } from 'react';
  * behavior is unchanged. Persisted to AsyncStorage and shared across screens via
  * a module-level store + listeners (same pattern as useOnboarding).
  */
-export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL';
+export type Sport =
+  | 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL'
+  | 'EUROLEAGUE';
 
 // GOLF is deliberately ABSENT: the sport was retired 2026-09-08 (mike). It stays
 // in the `Sport` union above so existing signatures still compile and old rows
@@ -21,9 +23,17 @@ export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW
 // NCAAB (men's college basketball) sits beside NCAAF. It joined 2026-10-30 for
 // its totals model; it has no player or team stats in the app yet.
 // NCAABW (women's college basketball) sits right after NCAAB. It joined
-// 2026-11-10 for its totals model, the one women's model; it has no player
-// stats, team stats or in-play model in the app.
-export const SPORTS: Sport[] = ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW', 'UFC', 'NHL'];
+// 2026-11-10 for its totals model. The Stats tab has the same Players board
+// as NCAAB (no props, no Teams board).
+// ATP (men's tennis) and WTA (women's tennis) sit after NHL, before EUROLEAGUE: about one
+// bet a week between them, so the busier sports and their signal badges stay
+// nearer the screen (UX review, 2026-11-14). They joined 2026-11-14 for their match-winner
+// models, one each, with a Discord channel each; neither has player stats,
+// team stats or an in-play model in the app.
+// EUROLEAGUE joined 2026-11-13 for its in-play model, the halftime spread, and
+// gained four pre-game models 2026-11-14; it is last because it has no stats in
+// the app yet (its Stats tab says so). The code is also its Discord channel's name.
+export const SPORTS: Sport[] = ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW', 'UFC', 'NHL', 'ATP', 'WTA', 'EUROLEAGUE'];
 
 const STORAGE_KEY = 'sportFilter.selected';
 const DEFAULT_SPORT: Sport = 'MLB';

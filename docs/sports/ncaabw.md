@@ -46,7 +46,7 @@ purchase below walks the feed's own chain (`next_timestamp`) for that reason.
 | Halftime spread | final margin | the same | the same | **does not clear**: the walk-forward interval reaches zero, and 2026-27 to date is 11-17 (below) |
 | In play outside the break | the final | ESPN play-by-play with wallclock | the same | first-half total loses, first-half spread is flat (below) |
 | First-half moneyline | the first two quarters | none | BetMGM alone, tournament games | parked: one book, a handful of games |
-| First-half spread and total, quarters, team totals, alternates, player props | | | none in the feed | parked: no price source. The men's two first-half models have no women's twin. |
+| First-half spread and total, quarters, team totals, alternates, player props | | | none in the feed | **to do** (reopened 2026-11-14): only the odds feed was asked; DraftKings' own board (league 36647, already read in play by `data/ingestors/dk_live_board.py`) and the odds-comparison sites are untried (the league-models skill, market-grid route 4). The men's two first-half models have no women's twin. |
 
 ## What differs from the men's game
 
@@ -322,11 +322,30 @@ those games is 15.95 points and the model's 15.95.
 NCAABW is a sport chip right after NCAAB on the Picks, Models and Stats tabs,
 and the model is "NCAABW Totals" (badge O/U). The Today board reads its picks
 7 days ahead, because DraftKings' first total came up to 6 dates before the
-game. There are no women's stats and no in-play model; the Stats, Live and
-Today boards each say so in words and point at where the picks are. VoiceOver
-says "Women's college basketball" wherever a control speaks the sport, so the
-men's and women's chips do not sound alike.
+game. The Stats tab has a Players board (the same chips as the men's, no
+props and no Teams board). The in-play model is in its own section below.
+VoiceOver says "Women's college basketball" wherever a control speaks the sport,
+so the men's and women's chips do not sound alike.
 
+- **Stats tab, Players board.** Points, Rebounds, Assists, 3PM, PRA, Steals,
+  Blocks, Minutes, with Hit Rates and Averages, the men's set. Source
+  `ncaabw_player_game_log`, one row per player per game from sportsdataverse's
+  `ncaa_wbb_player_box` (`data/ingestors/ncaabw_sdv_import.py`). ESPN's women's
+  player box is not ingested. The school name is the one on the games row.
+  The player id is the team ESPN id plus the folded name, because NCAA's own
+  player id changes every season. Reads: `v_player_season_totals_ncaabw`,
+  `player_window_totals_ncaabw`, `player_recent_games_ncaabw`,
+  `player_season_stat_values_ncaabw`, `player_h2h_stat_values_ncaabw`
+  (`add_ncaabw_player_game_log_2026_11_12.sql`). That file is not in
+  `ACTIVE_MIGRATIONS`. Apply it by hand once Matt says so, and before the
+  app build reaches users: a master merge ships the Stats tab, and an empty
+  table in November shows the tip-off sentence. The worker does not have to
+  be updated first. The daily box step then fills the current season. Earlier
+  seasons (the second year head-to-head reads) stay empty until
+  `python -m data.ingestors.ncaabw_sdv_import --log --seasons 2026 2027`,
+  which writes the log only and does not rewrite stored team rows.
+  No player-prop line. No Teams board. No starter flag: the file
+  does not carry one, so the player page has no Starting / Off bench split.
 - **The prefix trap.** `modelId.startsWith('ncaab')` is true for
   `ncaabw_total_blend`, so both places that file a model under a sport test
   the women's prefix first (`modelMeta.sportOfModel`, `ModelsScreen.sportOf`).
@@ -524,6 +543,33 @@ decision edge above 0.40 (the largest replayed edge is 0.371; the wrong-score
 bets reached 0.48). And a bet that cannot win together with the game's
 standing pre-game total bet (mike, 2026-10-17: *"It can't be both"*): in the
 replay that is 24 of the 967 bets, and those 24 lost 5.75 units.
+
+### An under beside a big favourite (2026-11-11, mike)
+
+mike asked that an under never sits beside a big favourite's spread bet, in
+the men's and the women's models (`docs/sports/ncaab.md`, the section of the
+same name, has what he saw and the measurement). For the women's models:
+
+- **The check is in both writers** (`models/cbb_pairs.py`): the totals card
+  and the halftime loop each ask whether the game holds a spread bet on a
+  favourite laying 20 or more (12 or more on a first-half spread) before
+  they bet an under. There is no women's spread model, so nothing can trip
+  it today.
+- **No rule by the size of the favourite was added**, because the women's
+  halftime unders are at their best there. The replayed halftime bets of
+  both seasons by the points the pre-game favourite lays:
+
+| Pre-game favourite lays | Unders | Overs |
+|---|---|---|
+| under 10 | 197 bets, -13.96 units | 247, +32.35 |
+| 10 to 20 | 123, +6.60 | 154, +42.75 |
+| 20 or more | 101, 70-31, +35.23, +30.88% [+13.2, +47.9] | 145, +29.09, +17.66% |
+
+  Unders with the favourite laying 20 or more made +20.44 units in 2024-25
+  and +14.79 in 2025-26. With no model, the full-game relation on the
+  women's closing lines is the men's: the favourite's cover and the under
+  come in together in 22.9% of games where it lays 30 or more, against
+  25.5% if unrelated (341 games).
 
 ### In the app (2026-11-11)
 

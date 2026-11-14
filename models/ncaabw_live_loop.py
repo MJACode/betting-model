@@ -75,6 +75,7 @@ if str(ROOT) not in sys.path:
 
 import pandas as pd  # noqa: E402
 
+from models import cbb_pairs  # noqa: E402
 from models import ncaabw_live_ht as M  # noqa: E402
 from models.ncaab_live_ig import cannot_both_win  # noqa: E402
 from models.ncaab_live_loop import (Slots, SlotState, _num, _recycle, platform_gates,  # noqa: E402
@@ -101,6 +102,19 @@ CALL_CREDITS = 6
 LEDGER = "ncaabw_live_decisions"
 FINAL = ("bet", "no_bet", "declined", "missed")
 BULK_PURPOSE = "ncaabw_live_bulk:h2h,spreads,totals"
+# THE FAST WAY (mike, 2026-11-13: "Move everything over to the fast way"). The
+# break's score is frozen, so ESPN's two waits buy nothing once every play of
+# the first half is published and the break is still on: a read at least
+# HT_SETTLED_SEC after the half's last play, of a game DraftKings' board shows
+# at halftime now, is judged on ESPN's summary read at once (ESPN published a college
+# play at most 92 s after its wallclock, 2026-11-12/13). And DraftKings' total
+# in the read is DraftKings' own board's (models/ncaab_live_dk.py), stamped
+# where the board first showed it, while that feed is seconds old; the other
+# books stay the provider's (the rule needs two of them beside the decider).
+HT_SETTLED_SEC = float(os.environ.get("NCAABW_LIVE_HT_SETTLED_SEC", "120"))
+DK_ON = os.environ.get("NCAABW_LIVE_DK", "1") != "0"
+SUMMARY_THREADS = 16
+
 # The models that bet a women's full-game total: no two of their bets on one
 # game may be unable to win together.
 FULL_GAME_TOTAL_MODELS = ("ncaabw_total_blend", M.MODEL_ID)
@@ -263,6 +277,17 @@ def standing_totals(conn, game_id: str) -> list[dict]:
             for m, s, ln, lb in rows if s in ("over", "under")]
 
 
+def paired_bet(conn, game_id: str, model_id: str, side: str, line: float) -> str | None:
+    """Why this bet would sit beside its opposite number on the game (an under
+    beside a big favourite's spread bet, either order; models.cbb_pairs), or
+    None. One read of `picks`, released."""
+    from data.db import release_read
+    try:
+        return cbb_pairs.clash(conn, game_id, model_id, side, line)
+    finally:
+        release_read(conn)
+
+
 def build_pick(ctx: GameCtx, best: dict, offers: pd.DataFrame, state: dict, links: dict,
                bankroll: float) -> dict:
     """One `picks` row from one BET. model_probability is P(win | no push); the
@@ -392,6 +417,36 @@ def evaluate_game(ctx: GameCtx, art: M.Artifact, q_totals: pd.DataFrame, summary
     return M.read_break(q, st, served, ctx.prior[1], art.total, deciding_books()), notes
 
 
+def half_settled(summary: dict, ctx: GameCtx, served) -> bool:
+    """True when ESPN's play list reached halftime (game seconds at the half)
+    at least HT_SETTLED_SEC before the read and has not gone past it: every
+    play of the first half has been published, and the break's score is frozen."""
+    from data.ingestors.ncaabw_pbp import summary_rows
+    rows = summary_rows(summary, espn_game_id=ctx.espn_event_id, game_id=ctx.game_id, season=ctx.season,
+                        home_espn_id=ctx.home_espn_id, away_espn_id=ctx.away_espn_id)
+    st = M.states_from_rows(rows)
+    if st is None or not len(st.gs):
+        return False
+    at_half = [k for k, g in enumerate(st.gs) if g >= M.HALF_S]
+    if not at_half or float(st.gs[-1]) > M.HALF_S:
+        return False
+    reached = pd.Timestamp(int(st.wall[at_half[0]]), tz="UTC")
+    return (pd.Timestamp(served) - reached).total_seconds() >= HT_SETTLED_SEC
+
+
+def overlay_dk(q_tot: pd.DataFrame, dk: pd.DataFrame, served) -> pd.DataFrame:
+    """The read's totals with DraftKings' row replaced by DraftKings' own
+    board's (a game the board does not carry keeps the provider's)."""
+    dk = dk[(dk["market"] == M.MARKET) & dk["game_id"].isin(set(q_tot["game_id"]))]
+    if not len(dk):
+        return q_tot
+    games = set(dk["game_id"])
+    keep = q_tot[~((q_tot["book"] == "draftkings") & q_tot["game_id"].isin(games))]
+    add = dk.assign(fetch_at=pd.Timestamp(served))[[c for c in q_tot.columns if c in dk.columns or c == "fetch_at"]]
+    out = pd.concat([keep, add.reindex(columns=q_tot.columns)], ignore_index=True)
+    return out
+
+
 # ─── the loop ─────────────────────────────────────────────────────────────────
 
 class Loop:
@@ -400,8 +455,11 @@ class Loop:
 
     def __init__(self, art: M.Artifact, espn, feed, connect, *, dry_run: bool = False,
                  wait: float = PBP_WAIT_SEC, recheck: float = PBP_RECHECK_SEC, sleep=time.sleep,
-                 clock=None, slate_dates=None, read_slots: Slots | None = None, resolver_factory=None):
+                 clock=None, slate_dates=None, read_slots: Slots | None = None, resolver_factory=None,
+                 dk=None):
         self.art, self.espn, self.feed, self.connect = art, espn, feed, connect
+        self.dk = dk                           # DraftKings' own board (models/ncaab_live_dk.DbSource)
+        self.dk_break: set = set()             # games DraftKings' board shows at halftime at this read
         self.dry_run, self.wait, self.recheck, self.sleep = dry_run, float(wait), float(recheck), sleep
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.slate_dates = slate_dates
@@ -472,6 +530,38 @@ class Loop:
             if k + 1 < tries:
                 self.sleep(gap_s)
         return None
+
+    def summaries(self, ctxs: list) -> dict:
+        """{game_id: summary or None}, every game read at the same time."""
+        if len(ctxs) <= 1:
+            return {c.game_id: self.summary(c.espn_event_id) for c in ctxs}
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(SUMMARY_THREADS, len(ctxs))) as ex:
+            got = list(ex.map(lambda c: self.summary(c.espn_event_id), ctxs))
+        return {c.game_id: x for c, x in zip(ctxs, got)}
+
+    def dk_totals(self, game_ids: set, served) -> pd.DataFrame | None:
+        """DraftKings' own current totals for these games, or None while the
+        feed is not live (mike's machine off): the read then stays the provider's.
+        Also leaves self.dk_break: the games DraftKings' board shows at halftime now."""
+        self.dk_break = set()
+        if self.dk is None:
+            return None
+        from models import ncaab_live_dk as DK
+        try:
+            last = self.dk.last_read()
+            if not DK.feed_is_live(last, self.clock()):
+                return None
+            reads = self.dk.reads(game_ids)
+        except Exception as exc:                      # noqa: BLE001
+            log.warning("DraftKings board read failed (the provider's DraftKings quote stands): %s", exc)
+            self.recycle()
+            return None
+        if not len(reads):
+            return None
+        newest = reads.sort_values("read_at").groupby("game_id").tail(1)
+        self.dk_break = set(newest.loc[newest["period_label"] == "Halftime", "game_id"])
+        return DK.current_quotes(reads, max(pd.Timestamp(last[0]), pd.Timestamp(served)), markets=("totals",))
 
     def note(self, c: GameCtx, outcome: str, reason: str, fetch_at=None, state: dict | None = None,
              offers=None, lag=None) -> str:
@@ -601,6 +691,9 @@ class Loop:
         served = fetch.fetched_at
         q_all = quotes_frame(rows, served)
         q_tot = q_all[q_all["market"] == M.MARKET]
+        dk = self.dk_totals({c.game_id for c, _g in todo}, served)
+        if dk is not None and len(dk):
+            q_tot = overlay_dk(q_tot, dk, served)
         links: dict = {}
         for r_ in rows:
             if r_.get("market") != M.MARKET:
@@ -608,16 +701,34 @@ class Loop:
             for side in ("over", "under"):
                 if r_.get(f"{side}_link"):
                     links.setdefault((r_["game_id"], r_.get("bookmaker"), side), r_.get(f"{side}_link"))
-        left = self.wait - (self.clock() - served).total_seconds()
-        if left > 0:
-            self.sleep(left)
-        first = {c.game_id: self.summary(c.espn_event_id) for c, _g in todo}
-        if self.recheck > 0:
-            self.sleep(self.recheck)
+        # A game whose half ended HT_SETTLED_SEC before the read is judged on
+        # ESPN's summary read now; the rest wait as graded.
+        now_read = self.summaries([c for c, _g in todo])
+        # SETTLED needs a second, independent witness that the break is still on:
+        # DraftKings' board, which shows the game's state seconds after it changes.
+        # ESPN alone cannot say it: running 100 s behind, its list and header can
+        # still show the break after the third quarter has begun (2026-11-13; the
+        # stored breaks are a median 15-17 minutes, but 6% of games show the third
+        # quarter's first play under 8 minutes after the second's last). A game
+        # DraftKings does not list, or shows in any other period, waits as graded.
+        settled = {c.game_id for c, _g in todo
+                   if c.game_id in getattr(self, "dk_break", set())
+                   and now_read.get(c.game_id) is not None and half_settled(now_read[c.game_id], c, served)}
+        slow = [(c, g) for c, g in todo if c.game_id not in settled]
+        first = {gid: now_read[gid] for gid in settled}
+        second_of = {gid: now_read[gid] for gid in settled}
+        if slow:
+            left = self.wait - (self.clock() - served).total_seconds()
+            if left > 0:
+                self.sleep(left)
+            first.update(self.summaries([c for c, _g in slow]))
+            if self.recheck > 0:
+                self.sleep(self.recheck)
+            second_of.update(self.summaries([c for c, _g in slow]))
         decisions = []                                 # (ctx, Read, lag, links)
         for c, _g in todo:
             try:
-                second = self.summary(c.espn_event_id)
+                second = second_of.get(c.game_id)
                 if first.get(c.game_id) is None or second is None:
                     out[c.game_id] = self.note(c, "skipped", "ESPN summary unreadable", served)
                     continue
@@ -682,8 +793,15 @@ class Loop:
                 # a failed read here raises: the game stays undecided and the next read tries again
                 held = None if self.dry_run else next(
                     (s for s in standing_totals(self.c(), c.game_id) if cannot_both_win(mine, s)), None)
+                # An under beside a big favourite's spread bet on the same game
+                # (models/cbb_pairs.py; mike, 2026-11-11). No women's spread model
+                # exists today, so this reads `picks` and finds nothing.
+                paired = None if (held is not None or self.dry_run) else paired_bet(
+                    self.c(), c.game_id, M.MODEL_ID, b["side"], float(b["line"]))
                 if held is not None:
                     outcome, reason = "declined", f"cannot both win with {held.get('label') or held['model_id']}"
+                elif paired:
+                    outcome, reason = "declined", paired
                 else:
                     if self.bankroll is None and not self.dry_run:
                         try:
@@ -754,6 +872,11 @@ def main(argv=None) -> int:
     use_poller_session()
     loop = Loop(art, Espn(), odds_feed(CALL_CAP, CREDIT_CAP), get_connection,
                 dry_run=a.dry_run, wait=a.wait, recheck=a.recheck)
+    if DK_ON:
+        from models.ncaab_live_dk import DbSource
+        loop.dk = DbSource(loop.c, sport=SPORT)
+        log.info("fast path on: a read %.0f s after the half's last play is judged at once; DraftKings' total "
+                 "from its own board while that feed is live", HT_SETTLED_SEC)
     if not a.dry_run:
         try:
             if not ledger_ready(loop.c()):

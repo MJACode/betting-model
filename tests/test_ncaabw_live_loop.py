@@ -113,6 +113,13 @@ class Db:
         self.credits: list = []
         self.prices: list = []
         self.standing = standing or []
+        self.spread_bet = None                 # a standing spread bet's label, when the game holds one
+
+    def paired(self, side):
+        """What models.cbb_pairs.clash says: an under beside a big favourite's spread bet."""
+        if self.spread_bet and side == "under":
+            return f"paired_with:{self.spread_bet} (a big favourite's spread on the same game)"
+        return None
 
     def outcomes(self, kind):
         return [r for r in self.notes if r["outcome"] == kind]
@@ -146,6 +153,7 @@ class Db:
         monkeypatch.setattr(LP, "insert_ledger", insert_ledger)
         monkeypatch.setattr(LP, "write_bet", write_bet)
         monkeypatch.setattr(LP, "standing_totals", lambda conn, gid: list(db.standing))
+        monkeypatch.setattr(LP, "paired_bet", lambda conn, gid, mid, side, line: db.paired(side))
         monkeypatch.setattr(LP, "under_daily_cap", lambda conn, cost: True)
         monkeypatch.setattr(LP, "record_credits", lambda conn, c: db.credits.append(c))
         import data.ingestors.live_price_log as lpl
@@ -381,3 +389,51 @@ def test_dry_run_makes_no_paid_call_and_writes_nothing(art, monkeypatch):
     loop, db, clock, half, slot = standard(art, monkeypatch, dry_run=True)
     res = loop.tick()
     assert loop.feed.calls == 0 and db.final == {} and db.notes == [] and db.picks == [] and res["decisions"] == 0
+
+
+# ─── the fast way: DraftKings' board confirms the break (mike, 2026-11-13) ────
+
+class FakeDkBoard:
+    """DraftKings' board for the game: its newest row's period and total."""
+
+    def __init__(self, clock, label, total=(131.5, -110.0, -110.0), at=None):
+        self.clock, self.label, self.total, self.at = clock, label, total, at
+
+    def last_read(self):
+        import pandas as pd
+        return pd.Timestamp(self.clock.now) - pd.Timedelta(seconds=1), True
+
+    def reads(self, ids):
+        import pandas as pd
+        at = self.at or (self.clock.now - timedelta(seconds=30))
+        return pd.DataFrame([{"game_id": S.GAME_ID, "read_at": pd.Timestamp(at), "period_label": self.label,
+                              "period": 2, "clock_s": 0.0, "home_score": 40, "away_score": 30, "spread_home": None,
+                              "spread_home_price": None, "spread_away_price": None, "total_line": self.total[0],
+                              "over_price": self.total[1], "under_price": self.total[2]}])
+
+
+def test_draftkings_showing_the_break_decides_at_once_with_no_espn_wait(art, monkeypatch):
+    half = S.half_end(S.build_plays())
+    loop, db, clock, half, slot = standard(
+        art, monkeypatch, books_at=lambda now: books(half + timedelta(seconds=120), fd=(131.5, -105, -115)))
+    loop.dk = FakeDkBoard(clock, "Halftime", at=half + timedelta(seconds=120))
+    loop.tick()
+    assert clock.now == slot                                     # no 90 s + 60 s waits
+    assert db.final[S.GAME_ID]["outcome"] == "bet"
+
+
+def test_draftkings_showing_the_third_quarter_takes_the_graded_waits(art, monkeypatch):
+    """ESPN still shows the break, DraftKings has the third quarter under way:
+    the read is not settled, and the loop waits as graded."""
+    half = S.half_end(S.build_plays())
+    loop, db, clock, half, slot = standard(
+        art, monkeypatch, books_at=lambda now: books(half + timedelta(seconds=120), fd=(131.5, -105, -115)))
+    loop.dk = FakeDkBoard(clock, "3rd Quarter", at=half + timedelta(seconds=150))
+    loop.tick()
+    assert (clock.now - slot).total_seconds() >= 90.0 + 60.0
+
+
+def test_no_draftkings_board_for_the_game_takes_the_graded_waits(art, monkeypatch):
+    loop, db, clock, half, slot = standard(art, monkeypatch)
+    loop.tick()
+    assert (clock.now - slot).total_seconds() >= 90.0 + 60.0

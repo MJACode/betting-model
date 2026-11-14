@@ -27,6 +27,17 @@
           {
             "type": "command",
             "command": "cat .claude/hooks/connector_reminder.json 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/outstanding.py\" --session-start 2>/dev/null || true",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/outstanding.py\" --refresh-cache >/dev/null 2>&1 || true",
+            "timeout": 120,
+            "async": true
           }
         ]
       }
@@ -49,6 +60,17 @@
             "type": "command",
             "command": "graphify hook-guard read",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/league_models_writeback.py\" 2>/dev/null || true",
+            "timeout": 15
           }
         ]
       }

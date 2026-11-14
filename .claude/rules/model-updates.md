@@ -52,6 +52,14 @@ whether it fires:
 **Not** a model update: cadence, plumbing, notifications, mobile UI, docs. Those
 do not need the trailer.
 
+**A volume setting is stamped in the database, not in git.** (mike,
+2026-11-11.) It posts fewer of a pre-game model's bets and leaves the model
+and its cut in `config.py` alone, so no commit carries it. Its stamp is
+`model_volume_settings.set_by`, and every set, change and removal is a row in
+`model_volume_settings_log`. Set one only through `set_model_volume` (the
+dashboard calls it), with the name of the person who asked. Nothing in the
+code sets one by itself. `docs/thresholds.md`, "Volume settings".
+
 **If you do not know whose call it is, ASK before committing.** Guessing an
 attribution is worse than none — it puts a decision in someone's mouth. Where a
 session's own user is the one directing, that is the name; where they are

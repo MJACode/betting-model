@@ -303,8 +303,8 @@ class TestFeatureMap:
             "wnba_moneyline", "wnba_over_under", "wnba_spread",
             # NBA: none since 2026-10-15. The three game models were retired
             # (config.RETIRED_MODELS) and features/nba_feature_engine.py deleted.
-            # UFC
-            "ufc_moneyline", "ufc_total_rounds", "ufc_method_of_victory",
+            # UFC: none since 2026-11-13. The three models were retired
+            # (config.RETIRED_MODELS) and features/ufc_feature_engine.py deleted.
             # NCAAF. The premium tier is the same cross-book opener rule on a
             # disjoint |dev| band and shares the spread features. This list is
             # hand-maintained, so it guards against a STRAY key — it did not

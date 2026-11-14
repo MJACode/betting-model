@@ -38,7 +38,8 @@ _IDENT = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 # Nothing here is user-scoped; anon is how the app reads before sign-in.
 ANON_READABLE: tuple[str, ...] = (
     # ── tables ──────────────────────────────────────────────────────────────
-    "device_push_tokens",
+    # device_push_tokens is not here. The app does not .from() it. The write
+    # is save_device_push_token(), and there is no SELECT policy on purpose.
     "fighters",
     "game_weather",
     "games",
@@ -135,6 +136,14 @@ ANON_READABLE: tuple[str, ...] = (
     # through playerLog.LOG_TABLE, like the WNBA and NBA logs, so the log is
     # not a literal .from() and is not listed here.
     "v_player_season_totals_ncaab",
+    # Women's college basketball Stats tab. security_invoker over
+    # ncaabw_player_game_log. The table, the view and the four functions are
+    # created by add_ncaabw_player_game_log_2026_11_12.sql, which is NOT in
+    # ACTIVE_MIGRATIONS: apply it by hand. The player page reads the log
+    # through playerLog.LOG_TABLE, so the log is not a literal .from().
+    # MAY_BE_UNAPPLIED until that apply, so a grant sweep does not GRANT a
+    # view that is not in the catalog yet.
+    "v_player_season_totals_ncaabw",
     # NHL Stats tab, ahead of the screen (2026-10-16). The app does not
     # .from() these yet; tests/test_anon_readable.py keeps them on an
     # explicit ahead-of-the-app list so the stale-entry check stays strict
@@ -152,6 +161,10 @@ ANON_READABLE: tuple[str, ...] = (
     # (add_nba_first_basket_2026_11_08.sql).
     "v_nba_first_basket_team_season",
     "v_nba_first_basket_player_season",
+    # Stats tab, Betting filters (Matt, 2026-11-13): one row per team, game
+    # and period, written by data/ingestors/team_period_results.py; RLS on
+    # with a SELECT policy (add_team_period_results_2026_11_13.sql).
+    "team_period_results",
     # Betslip game-line edit (Matt, 2026-10-29): the current alternate
     # spread/total ladder per game, written by data/ingestors/alt_game_lines.py
     # (add_alt_game_lines_2026_10_29.sql: RLS on, SELECT policy).
@@ -210,11 +223,12 @@ AUTHENTICATED_ONLY: tuple[str, ...] = (
 # over. Revoked anyway, because a view that is later simplified can silently
 # become updatable and nothing would flag it.
 ANON_WRITABLE: dict[str, tuple[str, ...]] = {
-    # `.upsert(..., { onConflict: 'token' })` in
-    # mobile/src/hooks/usePushNotifications.ts. An upsert is INSERT ... ON
-    # CONFLICT DO UPDATE, so it needs both verbs and only those. Nothing deletes
-    # a push token -- that hook is the only reference to the table in the app.
-    "device_push_tokens": ("INSERT", "UPDATE"),
+    # device_push_tokens is DELIBERATELY ABSENT. The hook calls
+    # rpc('save_device_push_token') (mobile/src/hooks/usePushNotifications.ts).
+    # That function is SECURITY DEFINER, so it writes as the owner and needs
+    # no anon grant on the table. A direct upsert is INSERT ... ON CONFLICT
+    # DO UPDATE, which Postgres rejects under these RLS policies (no SELECT
+    # policy). Do not put the table back here to "match" the old policies.
     # `.insert()` and `.delete()` in mobile/src/lib/queries.ts. A tracked bet is
     # added and removed, never edited, so UPDATE is not needed.
     "tracked_bets": ("INSERT", "DELETE"),
@@ -228,9 +242,12 @@ ANON_WRITABLE: dict[str, tuple[str, ...]] = {
 
 # HOW THESE WERE DERIVED, because the difference is the whole point: each entry
 # is the set of verbs the APP DEMONSTRABLY USES, read off the call sites -- not
-# the set it happened to hold. The two agree with the RLS policies exactly:
+# the set it happened to hold. tracked_bets agrees with its policies. The other
+# two app writes do not go through the table:
 #
-#     device_push_tokens   policies a,w   ->  INSERT, UPDATE
+#     device_push_tokens   policies a,w   ->  nothing; save_device_push_token
+#                                            is SECURITY DEFINER. The policies
+#                                            do not make an upsert succeed.
 #     tracked_bets         policies a,d   ->  INSERT, DELETE
 #     feedback             policy   a     ->  nothing; the RPC is SECURITY DEFINER
 #
@@ -395,6 +412,66 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/ncaabw_pbp.py; model input, never read by the app.
     "ncaabw_pbp",
     "ncaabw_pbp_games",
+    # EuroLeague (2026-11-12). Created on demand by
+    # data/ingestors/euroleague_teams.ensure_tables and
+    # data/ingestors/euroleague_api.ensure_tables (identity, schedule, quarter
+    # scores, the raw API answers); data/ingestors/euroleague_odds_history.py
+    # (the purchase ledger, in-play quotes, unplaced events); and
+    # data/ingestors/euroleague_period_history.py (its ledger). Never read by
+    # the app.
+    "euroleague_teams",
+    "euroleague_events",
+    "euroleague_api_raw",
+    "euroleague_period_scores",
+    "euroleague_odds_snapshots",
+    "euroleague_inplay_quotes",
+    "euroleague_odds_unmatched",
+    "euroleague_period_fetches",
+    # Tennis (2026-11-13). Created on demand by
+    # data/ingestors/tennis_archive.ensure_tables (the match archive),
+    # data/ingestors/tennis_espn.ensure_tables (ESPN's results) and
+    # data/ingestors/tennis_odds_history.ensure_tables (every paid call, and the
+    # change-only quotes). Model input; never read by the app.
+    "tennis_archive_matches",
+    "tennis_espn_matches",
+    "tennis_odds_fetches",
+    "tennis_odds_quotes",
+    # data/ingestors/tennis_pinnacle.ensure_tables: Pinnacle's own tennis
+    # prices at every level, from its public guest API.
+    "tennis_pinnacle_matchups",
+    "tennis_pinnacle_prices",
+    # data/ingestors/tennis_explorer.ensure_tables: every level's results and
+    # one price pair a match, from TennisExplorer's daily pages.
+    "tennis_te_matches",
+    # scripts/tennis_dk_probe.ensure_tables: DraftKings' own tennis board,
+    # every level and market, change-only. Run from mike's terminal.
+    "tennis_dk_selections",
+    # UFC price history from two free public archives (2026-11-13), created
+    # on demand by data/ingestors/ufc_price_archive.ensure_tables. Research
+    # input, never read by the app.
+    "ufc_price_archive",
+    # UFC odds history bought 2026-11-13 and its ledger, created on demand by
+    # data/ingestors/ufc_odds_history.ensure_tables. Research input.
+    "ufc_odds_history",
+    "ufc_odds_history_pulls",
+    # UFC prop prices from BestFightOdds' event pages and price histories
+    # (2026-11-13), created on demand by
+    # data/ingestors/ufc_prop_history.ensure_tables. Research input.
+    "ufc_prop_history",
+    "ufc_prop_history_fights",
+    "ufc_prop_history_ticks",
+    "ufc_prop_history_pulls",
+    # EuroLeague shot charts with wall-clock times (2026-11-13,
+    # data/ingestors/euroleague_shots.py); model input, never read by the app.
+    "euroleague_shots",
+    "euroleague_shot_fetches",
+    # The EuroLeague pre-game card's decisions ledger: one row per (game,
+    # model) the four rules have decided, bet or not
+    # (scripts/euroleague_pregame_card.py, which creates it on demand), and
+    # the live period feed's call ledger (data/ingestors/euroleague_period_odds.py).
+    # Read by the card and the window, never by the app.
+    "euroleague_pregame_decisions",
+    "euroleague_period_live_fetches",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and
@@ -464,6 +541,14 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # and their flags (scripts/ncaaf_moneyline_card.py, which creates it on
     # demand). Read by the card, never by the app.
     "ncaaf_moneyline_decisions",
+    # The UFC opening-price card's decisions ledger: one row per fight it has
+    # decided, bet or not (scripts/ufc_open_moneyline_card.py, which creates
+    # it on demand). Read by the card, never by the app.
+    "ufc_open_moneyline_decisions",
+    # The tennis match-winner card's decisions ledger: one row per match it
+    # has decided, bet or not (scripts/tennis_moneyline_card.py, which creates
+    # it on demand). Read by the card and by settlement, never by the app.
+    "tennis_moneyline_decisions",
     # The NCAAB first-post moneyline card's ledger: one row per (game, book)
     # first moneyline post it has decided, bet or not, with every book's
     # moneyline and own spread, and the fill check the capture writes on its
@@ -658,12 +743,14 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_recent_games_mlb",
     "player_recent_games_nba",
     "player_recent_games_ncaaf",
+    "player_recent_games_ncaabw",
     "player_recent_games_ncaab",
     "player_recent_games_nfl",
     "player_recent_games_wnba",
     "player_season_stat_values_mlb",
     "player_season_stat_values_nba",
     "player_season_stat_values_ncaaf",
+    "player_season_stat_values_ncaabw",
     "player_season_stat_values_ncaab",
     "player_season_stat_values_nfl",
     "player_season_stat_values_wnba",
@@ -676,6 +763,7 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_h2h_stat_values_mlb",
     "player_h2h_stat_values_nba",
     "player_h2h_stat_values_ncaaf",
+    "player_h2h_stat_values_ncaabw",
     "player_h2h_stat_values_ncaab",
     "player_h2h_stat_values_nfl",
     "player_h2h_stat_values_wnba",
@@ -697,6 +785,7 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",
+    "player_window_totals_ncaabw",
     "player_window_totals_ncaab",
     "player_window_totals_nfl",
     "player_window_totals_wnba",
@@ -720,6 +809,11 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # carries its own GRANT). SECURITY INVOKER over the BYOM facts tables.
     "byom_record",
     "byom_bets",
+    # push registration -- SECURITY DEFINER, returns nothing. The migration
+    # (data/migrations/save_device_push_token_2026_11_11.sql) is hand-applied
+    # and not in ACTIVE_MIGRATIONS. apply_anon_grants skips the GRANT until
+    # pg_proc has the function; the migration grants EXECUTE itself.
+    "save_device_push_token",
     # in-app feedback -- SECURITY DEFINER, device-keyed, so callable pre-sign-in
     "feedback_mark_read",
     "feedback_messages_for_thread",

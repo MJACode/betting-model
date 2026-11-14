@@ -94,10 +94,10 @@ const statOf = (sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF', label: string, 
   chipsForPlayer(sport, playerType).find((s) => s.label === label)!;
 
 // ── Which sports get a detail screen ────────────────────────────────────────
-for (const s of ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB'] as const) {
+for (const s of ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAABW', 'NCAAB'] as const) {
   check(`${s} has a player detail screen`, supportsPlayerDetail(s));
 }
-for (const s of ['UFC', 'NHL', 'GOLF'] as const) {
+for (const s of ['UFC', 'NHL', 'GOLF', 'ATP', 'WTA'] as const) {
   check(`${s} has NO player detail screen (no per-game player log)`, !supportsPlayerDetail(s));
 }
 
@@ -701,6 +701,14 @@ check('the same-position card excludes the player by the resolved id',
     check('an NCAAB game line leads with minutes and names its school only when it differs',
       gameContextLine('NCAAB', row, 'Duke') === '31 min · @Mississippi Valley State'
         && gameContextLine('NCAAB', row, 'Kentucky') === '31 min · @Mississippi Valley State · Duke');
+    const women = normalizeLogRow('NCAABW', {
+      player_id: 'p', player_name: 'A', team: 'UConn', game_id: 'g', game_date: '2026-11-04',
+      season: 2027, minutes: 28, points: 18, rebounds: 6, assists: 4, fg3_made: 2,
+      opponent: 'South Carolina', venue: 'home',
+    });
+    check('an NCAABW row derives threes and PRA, and the line leads with minutes',
+      women.threes === 2 && women.pra === 28
+        && gameContextLine('NCAABW', women, 'UConn') === '28 min · vs South Carolina');
   }
   check('the chart values are the labelled games\' values',
     /const windowed = useMemo\(\(\) => windowedGames\.map\(\(g\) => g\.value\)/.test(playerScreen));
@@ -745,7 +753,7 @@ check('low-minutes cut is 70% of the window average', LOW_MINUTES_RATIO === 0.7)
   check('zero minutes is low, and a missing average flags nothing',
     isLowMinutes(0, avgMin) && !isLowMinutes(12, null) && !isLowMinutes(null, avgMin));
 }
-for (const s of ['NBA', 'WNBA', 'NCAAB'] as const) {
+for (const s of ['NBA', 'WNBA', 'NCAABW', 'NCAAB'] as const) {
   check(`${s} tracks minutes`, sportTracksMinutes(s));
   const chips = chipsForPlayer(s);
   const pra = chips.findIndex((c) => c.key === 'pra');

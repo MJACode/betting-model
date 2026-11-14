@@ -36,6 +36,8 @@ crons had).
 | NCAABW totals card (live, real money) | every 5 minutes at :04/:09/.., 24x7, UTC | `run_ncaabw_total_card()` → `python -m scripts.ncaabw_total_card --publish`, then publish. The women's twin of the NCAAB totals card: decides each game once at DraftKings' first posted total, three minutes after each NCAABW capture tick, only while that number still stands. Exits 1 (heartbeat "error") when a due game cannot be decided: an artifact for another season, a season schedule not stored whole, a team missing two box scores, a missing blend, an edge above the data-error cap. `RUN_NCAABW_TOTAL_CARD=0` stops it. |
 | NCAAB spread card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_spread_card()` → `python -m scripts.ncaab_spread_card --publish`, then publish. Decides each game once, in the 15:00 UTC hour on its date, on every bettable book's spread stamped 14:00-15:00 UTC; every other hour reads the slate and the ledger only. A later run that finds one of the day's games undecided writes it as `missed` (no bet) and exits 1, as does a run where no due game has any quote, or the best quote is at a book no longer in `BEST_LINE_BOOKMAKERS`. Kill switch: `RUN_NCAAB_SPREAD_CARD=0` (the job still beats; switched back on, that day's undecided games are written as `missed` and the run fails once). Added 2026-11-02; `docs/sports/ncaab.md` |
 | NCAAB moneyline card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_moneyline_card()` → `python -m scripts.ncaab_moneyline_card --publish`, then publish. Its own job beside the spread card's, so each model keeps its own kill switch and failure. Decides each game once, in the 15:00 UTC hour on its date, on every bettable book's moneyline and the same book's spread stamped 14:00-15:00 UTC (Pinnacle's and Bovada's moneylines read for the favourite check only); every other hour reads the slate and the ledger only. Fails the run in the same three cases as the spread card. Kill switch: `RUN_NCAAB_MONEYLINE_CARD=0`. Added 2026-11-02; `docs/sports/ncaab.md` |
+| Tennis match-winner card (live, real money) | every 10 minutes (:03, :13, ...), 24x7, UTC | `run_tennis_moneyline_card()` → `python -m scripts.tennis_moneyline_card --publish`, then publish. Buys one live pass of the feed's active tennis keys (both book groups) into `tennis_odds_quotes`, stores ESPN's tennis scoreboard for three days, and decides each linked, unstarted men's and women's tour match once, 35 minutes or less before its listed start: `atp_moneyline_shop` / `wta_moneyline_shop`. Credit floor 0 (mike, 2026-11-14). Kill switch: `RUN_TENNIS_MONEYLINE_CARD=0`. Added 2026-11-14; `docs/sports/tennis.md` |
+| UFC opening-price card (live, real money) | every hour at :25, 24x7, UTC | `run_ufc_open_moneyline_card()` → `python -m scripts.ufc_open_moneyline_card --publish`, then publish. Bets only on the 12:25 UTC run, on UFC fights at least a week out, at the latest pull where Pinnacle and a deciding book both quote the fight within ten minutes; the first pull that clears locks the fight. Every other run closes fights that reached a week out without a bet as NONE rows. No Odds API call of its own. Kill switch: `RUN_UFC_OPEN_MONEYLINE=0`. Added 2026-11-13; `docs/sports/ufc.md` |
 | NCAAF moneyline card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaaf_moneyline_card()` → `python -m scripts.ncaaf_moneyline_card --publish`, then publish. Decides each game once, in the 14:00 UTC hour on its Eastern date (9 a.m. ET in winter, 10 a.m. ET in summer time), on the ten fetched books' moneylines and spreads stamped 13:00-14:00 UTC; every other hour reads the slate and the ledger only. No Odds API call of its own: it reads what the hourly refresh stored. A later run that finds one of the day's priced games undecided writes it as `missed` (no bet) and exits 1, as does a run where no due game has a deciding book's moneyline in the hour, an artifact for another season, or a best side at a book no longer in `BEST_LINE_BOOKMAKERS`. A game the NCAAF spread model already holds a bet on is recorded and not bet. Kill switch: `RUN_NCAAF_MONEYLINE_CARD=0` (the job still beats; switched back on, that day's undecided games are written as `missed` and the run fails once). Added 2026-11-10; `docs/sports/ncaaf.md` |
 | NCAAB opening moneyline card (live, real money) | every minute, 24x7 | `run_ncaab_moneyline_first_post()` → one planning read in the scheduler (the bettable (game, book) pairs with a moneyline in `latest_odds` that the card's ledger has never seen, for NCAAB games tipping in the next seven days); only when there is one, `python -m scripts.ncaab_moneyline_first_post_card --publish`, then publish. Decides each book's FIRST moneyline post once, within the minute after the capture or a refresh pass stored it, priced off the same book's spread at that moment; one bet a game across this model and the 15:00 UTC moneyline card. A first post the card first sees more than 15 minutes after it was stored is written `missed` (no bet) and the run exits 1, as does a pick at a book no longer in `BEST_LINE_BOOKMAKERS`. Its first run writes every post already up as `pre_model`. The capture's next poll after each bet writes the fill check on the bet's ledger row. No Odds API call of its own. Kill switch: `RUN_NCAAB_MONEYLINE_FIRST_POST=0` (the job still beats; posts stored while it is off are written `missed` when it is back on, and that run fails once). Added 2026-11-03; `docs/sports/ncaab.md` |
 | NCAAB first half (live, real money) | every minute, 24x7 | `run_ncaab_first_half_window()` → one planning read; for the due games `python -m scripts.ncaab_first_half_window --fetch G...` (one Odds API event call per game for its first-half moneyline, spread, total and team totals, at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip; at most 4 credits a call, 36 a game), then `python -m scripts.ncaab_first_half_spread_card --publish` once a game is ten minutes or less from tip and `python -m scripts.ncaab_first_half_total_card --publish` once a game is sixty minutes or less from tip, then publish. The spread card decides each game once on its tip-minus-10 fetch, the total card on its tip-minus-60 fetch (both calls retried every minute when they fail). Only games with a bettable book's full-game spread stored are fetched. The fetch buys nothing when the balance is under one day of the measured burn (`NCAAB_FIRST_HALF_RESERVE_DAYS`). Kill switch: `RUN_NCAAB_FIRST_HALF=0` (the job still beats). A failed call, or a game with no decision fetch by five minutes before tip (55 minutes for the total), fails the tick after publishing; the failure alerter also names any listed game that tipped undecided. Added 2026-11-02; `docs/sports/ncaab.md` |
@@ -104,9 +106,28 @@ by 13:29Z and the day was skipped. Deploy-kills relaunch until 12
 fails before the MLB freshness steps for a reason other than aborted gets one
 retry, then stops, so an upstream outage does not buy odds on every boot. The
 in-process lock is the double-run guard. A successful daily already today is a
-no-op. Kill switch: `RUN_DAILY_RETRY=0`. A `worker_jobs` row with
+no-op. Kill switch: `RUN_DAILY_RETRY=0`. A fresh `worker_jobs` row with
 `job_type = 'daily_pipeline'` (no args) runs the full daily once under that
-same lock; it is not in `jobs/declared_jobs.json`. See `tracking/daily_retry.py`.
+same lock; it is not in `jobs/declared_jobs.json`. The runner holds the queue
+lock for that whole daily, so other `worker_jobs` ticks wait until it
+finishes. A row left `running` by a deploy is reclaimed only when the
+catch-up would start one (`RUN_DAILY_RETRY`, the 12 deploy-kill cap, the
+22:00 ET cutoff). The first claim of a pending row is still the kick after
+those bounds.
+
+The daily (the 6am run, a relaunch, or the manual job) and a refresh (boot
+catch-up at 60s, and the :17 cron) do not score at the same time. Both delete
+and rewrite pick rows across the look-ahead window; the unique index only
+drops a second insert. The refresh waits while the daily lock is held, and the
+daily waits while a refresh is already scoring. A second refresh skips at once
+while the first is scoring; while the first is still waiting, the second waits
+too and only one of them runs. Past the wait (the daily max plus one minute,
+76 minutes, or 30 minutes the other way) the waiting pass scores anyway, so a
+stuck lock cannot silence the rest of the day. See `tracking/daily_retry.py`.
+This covers the 6am run too: the 7:17 ET hourly waits whenever the 6am daily
+is still going. On 2026-11-12 and 2026-11-13 the daily ran 113 and 101
+minutes and the 7:17 hourly ran beside it for 36 and 24 minutes; with this
+wait it starts that much later.
 
 **The :17 refresh pass has the same catch-up (2026-09-21).** A merge to master
 stops the container whatever it is doing; 11 refresh passes ended `aborted`
@@ -351,6 +372,58 @@ halftime total". It beats `job_heartbeats` every 5 minutes while a slate runs
 | `NCAABW_LIVE_POLL_SEC` / `NCAABW_LIVE_IDLE_EXIT_TICKS` | `15` / `3` | Scoreboard tick, and the idle ticks before it exits |
 
 `--dry-run` makes no Odds API call and writes nothing.
+
+### EuroLeague halftime loop (added 2026-11-13)
+
+`models/euroleague_live_loop.py`, job `euroleague_live` on `pollers`, every 10
+minutes 9am-5:58pm ET (minute 8) as a supervisor (one launch runs a whole slate
+and exits after 3 idle ticks with no EuroLeague game in progress). Every stored
+EuroLeague game tipped 14:00-20:00 UTC and its half ended 38-102 minutes after
+the tip (1st-99th percentile), so those hours cover every break in winter
+(14:08-22:58 UTC) and in summer time (13:08-21:58 UTC). The model and its
+evidence: `docs/sports/euroleague.md`, "Halftime spread". It beats
+`job_heartbeats` every 5 minutes while a game is in progress
+(`tracking/job_heartbeat.ACTIVE_HOURS_ET`, 9-17 ET). The decision ledger
+`euroleague_live_decisions` is created by
+`data/migrations/euroleague_live_decisions_2026_11_13.sql` (applied by
+`data.view_migrations`); the loop refuses to start without it.
+
+| Variable (on `pollers`) | Default | What it does |
+|---|---|---|
+| `RUN_EUROLEAGUE_LIVE` | `1` | `0` / `false` / `off` / `no`: the job is not scheduled |
+| `DISCORD_CHANNEL_LIVE_EUROLEAGUE` or `DISCORD_WEBHOOK_LIVE_EUROLEAGUE` | **not set** (2026-11-13: the channel does not exist yet) | Where EuroLeague live picks post. **Required**: no fallback to the shared live channel or any pre-game channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`); with neither set the loop decides nothing and exits 3 while a game is in progress. A channel id resolves through `DISCORD_BOT_TOKEN`, set on pollers |
+| `EUROLEAGUE_LIVE_FETCH_WINDOW_SEC` / `EUROLEAGUE_LIVE_RETRY_GAP_SEC` | `120` / `45` | The books are read at each five-minute mark plus 37 seconds; how long after that a failed read may be tried again, and the seconds between tries |
+| `EUROLEAGUE_LIVE_CALL_CAP` / `EUROLEAGUE_LIVE_CREDIT_CAP` | `300` / `900` | Per-process ceilings (3 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the shared feed stops under 1,000 credits left |
+| `EUROLEAGUE_LIVE_POLL_SEC` / `EUROLEAGUE_LIVE_IDLE_EXIT_TICKS` | `15` / `3` | Schedule tick, and the idle ticks before it exits |
+
+EuroLeague's API (`live.euroleague.net/api`) needs no key and is reached from
+the worker's open egress; it is behind Cloudflare, which refused four calls at
+once (HTTP 429) on 2026-11-13, so the loop asks one at a time, 1.5 s apart.
+`--dry-run` makes no Odds API call and writes nothing.
+
+### EuroLeague pre-game window (added 2026-11-14)
+
+`scripts/euroleague_pregame_window.py`, job `euroleague_pregame_window` on the
+worker (a pipeline-role job), every minute 24x7. A tick with nothing due makes
+no call. It buys one per-event call per EuroLeague game 60, 10 and 2 minutes
+before tip (`data/ingestors/euroleague_period_odds.py`: the first half, the
+quarters, team totals, the alternate ladders and the full game, at the ten
+books of `config.EUROLEAGUE_PERIOD_BOOKMAKERS`, about 15 credits a call from
+the code's billing model, at most 34; ledger `euroleague_period_live_fetches`),
+then runs the four pre-game rules (`scripts/euroleague_pregame_card.py`, ledger
+`euroleague_pregame_decisions`), which decide each game once on its
+tip-minus-10 call, and publishes what they wrote. Both ledgers are created by
+the code on first write. It beats `job_heartbeats` on every tick (bound 20
+minutes). The models and their evidence: `docs/sports/euroleague.md`, "The
+four pre-game rules".
+
+| Variable (on the worker) | Default | What it does |
+|---|---|---|
+| `RUN_EUROLEAGUE_PREGAME` | `1` | `0` / `false` / `off` / `no`: nothing is read or bought; the job keeps beating |
+| `RUN_EUROLEAGUE_PERIOD_FEED` | `1` | `0`: the calls stop alone; the full-game rules decide on the stored board at tip minus 10, the period rules record `missed` and the window fails on every game day, so switch the two period models off with it |
+| `RUN_EUROLEAGUE_HOME_ML`, `RUN_EUROLEAGUE_HOME_DOG_SPREAD`, `RUN_EUROLEAGUE_H1_DOG_ML`, `RUN_EUROLEAGUE_Q1_SHARE_TOTAL` | `1` | `0`: that model decides nothing and writes no row |
+| `EUROLEAGUE_PERIOD_RESERVE_DAYS` | `1` | Under this many days of the platform's measured daily burn the feed buys nothing and the window fails |
+| `DISCORD_CHANNEL_EUROLEAGUE` or `DISCORD_WEBHOOK_EUROLEAGUE` | **not set** (2026-11-14: the channel is being created) | Where the pre-game picks post; with neither set they stay unsent and post once it exists |
 
 ### Scoreboard live scores (NFL, NBA, NHL — added 2026-10-29)
 

@@ -840,6 +840,22 @@ def _job_splits_source_probe(**kw):
     return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
 
 
+def _job_book_app_links_probe(**kw):
+    """Each sportsbook's apple-app-site-association file, and whether the
+    betslip links we store are claimed by its app. Writes nothing, no Odds API
+    call (scripts/book_app_links_probe.py)."""
+    from scripts.book_app_links_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.book_app_links_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _validate_book_app_links_probe(args: dict) -> dict:
+    if args:
+        raise ValueError(f"unknown args {sorted(args)}; this job takes none")
+    return {}
+
+
 def _validate_splits_source_probe(args: dict) -> dict:
     if args:
         raise ValueError(f"unknown args {sorted(args)}; this job takes none")
@@ -1930,9 +1946,13 @@ def _job_nba_quarters(**kw):
     """Run the daily nba_quarters step ON THE WORKER, on demand.
 
     mike, 2026-10-30: "Run it now instead of waiting for 6am tomorrow", after
-    #1097 fixed fill_gaps. The step only reads free ESPN endpoints and writes
+    #1097 fixed fill_gaps. The step reads free ESPN endpoints and writes
     the NBA stats tables (quarter scores, nba_pbp_games, nba_stints,
-    nba_team_q1_games): no model, pick, stake or threshold is touched. It goes
+    nba_team_q1_games, team_period_results): no model, pick, stake or
+    threshold is touched. Since 2026-11-13 it also buys the half and quarter
+    closing lines of finished games that lack them (Matt approved the
+    backfill and the daily buy), under nba_odds_history.buy_period_lines_daily's
+    own plan-derived ceiling and measured floor. It goes
     through run_pipeline._timed_step, the same dispatch the daily run uses, so
     pipeline_log gets the usual dispatch:nba-quarters row with its error_msg.
 
@@ -2711,6 +2731,13 @@ def _job_daily_pipeline(**kw):
     skipped and a second pipeline is not started. That result is not a
     failure: raising would retry the job, up to MAX_ATTEMPTS, and could
     start the daily again after the first one ends.
+
+    The runner holds the queue's advisory lock for the whole daily (about
+    40 minutes). Other worker_jobs ticks in that window find the lock
+    taken and wait for a later tick. A row this job left ``running``
+    because a deploy killed it is not kicked again past the catch-up
+    bounds: ``_reclaim_stale`` refuses it. The first claim of a pending
+    row is still the kick, including after those bounds.
     """
     import scheduler
     from zoneinfo import ZoneInfo
@@ -2743,6 +2770,7 @@ def _job_daily_pipeline(**kw):
         return {
             "status": "skipped",
             "reason": "daily already running in this process",
+            "start_number": start_number,
         }
     return {"status": status or "unknown", "start_number": start_number}
 
@@ -2884,6 +2912,7 @@ JOBS = {
     "ncaab_injury_probe": (_job_ncaab_injury_probe, _validate_ncaab_injury_probe),
     # Where the Scoreboard splits can come from: DK Network + AN book ids. Free, writes nothing.
     "splits_source_probe": (_job_splits_source_probe, _validate_splits_source_probe),
+    "book_app_links_probe": (_job_book_app_links_probe, _validate_book_app_links_probe),
     # ESPN NCAAB schedule and results backfill. Free, idempotent.
     "ncaab_history_import": (_job_ncaab_history_import,
                              _validate_ncaab_history_import),
@@ -3031,6 +3060,40 @@ def sync_declared_jobs(conn, path: Path | None = None) -> list[int]:
 
 # ── running ──────────────────────────────────────────────────────────────────
 
+def _refuse_stale_daily_pipeline(conn, now: datetime) -> bool:
+    """Fail a deploy-killed manual daily instead of queueing it again.
+
+    True when at least one ``running`` ``daily_pipeline`` row was refused.
+    Those rows are no longer ``running``, so the general reclaim below
+    does not give them their attempt back and ``claim_one`` cannot start
+    them. No such row: False, and the ledger is not read.
+
+    The bounds are ``decide_daily_retry``: ``RUN_DAILY_RETRY``, the
+    deploy-kill cap, and the 22:00 ET cutoff, plus every other reason
+    that function skips. A fresh pending row does not come through here.
+    """
+    rows = conn.execute(
+        "SELECT job_id FROM worker_jobs "
+        "WHERE status = 'running' AND job_type = 'daily_pipeline'"
+    ).fetchall()
+    if not rows:
+        return False
+    from tracking.daily_retry import daily_pipeline_reclaim_decision
+    decision = daily_pipeline_reclaim_decision(conn, now)
+    if decision.action == "run":
+        return False
+    conn.execute(
+        "UPDATE worker_jobs SET status = 'failed', finished_at = NOW(), "
+        "claimed_at = NULL, error = %s "
+        "WHERE status = 'running' AND job_type = 'daily_pipeline'",
+        (f"not reclaimed: {decision.reason}",),
+    )
+    logger.warning(
+        f"job queue: not reclaiming daily_pipeline ({decision.reason})"
+    )
+    return True
+
+
 def _reclaim_stale(conn, now: datetime) -> int:
     """Return orphaned jobs to the queue. MUST be called holding the lock.
 
@@ -3042,8 +3105,17 @@ def _reclaim_stale(conn, now: datetime) -> int:
 
     The attempt cap stays: without it a job that kills the container comes
     back, kills it again, and the queue never drains.
+
+    A ``daily_pipeline`` row is refused, not requeued, when the same-day
+    catch-up would not start another daily. Giving the attempt back with
+    no cap relaunched a full daily on every boot, including after 22:00 ET.
     """
-    cur = conn.execute("""
+    exclude_daily = ""
+    if _refuse_stale_daily_pipeline(conn, now):
+        # Already failed above. Keep the general update from flipping one
+        # back to pending if it is still visible as running.
+        exclude_daily = " AND job_type <> 'daily_pipeline'"
+    cur = conn.execute(f"""
         UPDATE worker_jobs SET status = CASE WHEN attempts >= %s THEN 'failed'
                                              ELSE 'pending' END,
                                error  = CASE WHEN attempts >= %s
@@ -3061,7 +3133,7 @@ def _reclaim_stale(conn, now: datetime) -> int:
                                -- death that was not the job's fault.
                                attempts = GREATEST(attempts - 1, 0),
                                claimed_at = NULL
-        WHERE status = 'running'
+        WHERE status = 'running'{exclude_daily}
         RETURNING job_id
     """, (MAX_ATTEMPTS, MAX_ATTEMPTS)).fetchall()
     conn.commit()

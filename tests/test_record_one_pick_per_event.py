@@ -73,6 +73,10 @@ def test_the_discord_recap_counts_each_event_once():
 def test_the_recap_query_counts_the_kept_copy_and_not_the_marked_one():
     """Behavioural, on SQLite: the recap's own SQL over the June pair, plus a
     VOID and an NCAAF 'GONE' row (a live state on a real pick, which counts)."""
+    # The fixture's model is nhl_over_under, not the real ufc_total_rounds
+    # copies: the retired UFC models are struck from the record
+    # (config.RECORD_EXCLUSIONS, 2026-11-13), so their kept copy no longer
+    # counts, and this test is about the marker, not about UFC.
     import sqlite3
     from tracking.discord_notifier import _SETTLED_SQL
     if sqlite3.sqlite_version_info < (3, 39):
@@ -86,9 +90,9 @@ def test_the_recap_query_counts_the_kept_copy_and_not_the_marked_one():
                   pick_side, player_id, player_key, prop_market, clv_method, stake_units)""")
     db.execute("""CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT)""")
     rows = [
-        (332605, "UFC", "ufc_total_rounds", "WIN", 0.02, -166, None, None, 0, "2026-06-20", "BET", None, None, "g605"),
-        (332615, "UFC", "ufc_total_rounds", "WIN", 0.02, -130, None, None, 0, "2026-06-20", "BET", None, "DUPLICATE", "g615"),
-        (9, "UFC", "ufc_total_rounds", "NO_ACTION", 0.02, -110, None, None, 0, "2026-06-20", "BET", None, "VOID", "g9"),
+        (332605, "NHL", "nhl_over_under", "WIN", 0.02, -166, None, None, 0, "2026-06-20", "BET", None, None, "g605"),
+        (332615, "NHL", "nhl_over_under", "WIN", 0.02, -130, None, None, 0, "2026-06-20", "BET", None, "DUPLICATE", "g615"),
+        (9, "NHL", "nhl_over_under", "NO_ACTION", 0.02, -110, None, None, 0, "2026-06-20", "BET", None, "VOID", "g9"),
         (10, "NCAAF", "ncaaf_spread", "LOSS", 0.02, -110, None, None, 0, "2026-06-20", "BET", None, "GONE", "g10"),
     ]
     db.executemany(
@@ -98,11 +102,11 @@ def test_the_recap_query_counts_the_kept_copy_and_not_the_marked_one():
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     db.executemany(
         "INSERT INTO push_sent VALUES (?, 'discord_signal', '2026-06-20T12:00:00')",
-        [("g605:ufc_total_rounds",), ("g615:ufc_total_rounds",),
-         ("g9:ufc_total_rounds",), ("g10:ncaaf_spread",)])
+        [("g605:nhl_over_under",), ("g615:nhl_over_under",),
+         ("g9:nhl_over_under",), ("g10:ncaaf_spread",)])
     sql = _SETTLED_SQL.format(window="= ?").replace("%%", "%")
     got = sorted((r[1], r[4]) for r in db.execute(sql, ("2026-06-20",)).fetchall())
-    assert got == [("ncaaf_spread", -110), ("ufc_total_rounds", -166)]
+    assert got == [("ncaaf_spread", -110), ("nhl_over_under", -166)]
 
 
 def test_model_quality_counts_each_event_once():
@@ -431,13 +435,17 @@ def _node_strips_types() -> bool:
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
 def test_the_app_record_filter_behaves(tmp_path: Path):
     """Run the real passesRecordFilter under node's type stripping."""
+    # The fixture's model is nhl_over_under, not the real ufc_total_rounds
+    # copies: the retired UFC models are struck from the record
+    # (config.RECORD_EXCLUSIONS, 2026-11-13), so their kept copy no longer
+    # counts, and this test is about the marker, not about UFC.
     for name in ("thresholds.ts", "thresholds.generated.ts", "decisionPrice.ts",
                  "discordPublish.ts", "format.ts"):
         src = re.sub(r"from '\./([\w.]+)';", r"from './\1.ts';", _read(LIB / name))
         (tmp_path / name).write_text(src, encoding="utf-8")
     script = """
 import { passesRecordFilter, isDuplicateCopy } from './thresholds.ts';
-const bet = { model_id: 'ufc_total_rounds', signal_type: 'BET', is_live: false,
+const bet = { model_id: 'nhl_over_under', signal_type: 'BET', is_live: false,
               downgrade_reason: null, condition_status: null };
 const out = {
   plain: passesRecordFilter(bet),
@@ -535,6 +543,10 @@ def test_a_marker_set_after_caching_reaches_the_cached_row(tmp_path: Path):
     does. A copy cached unmarked on 09-05, more than 21 days before the newest
     cached day, is marked on the server later. Without the marker read the
     merge keeps it unmarked and the record counts it; with it, it is out."""
+    # The fixture's model is nhl_over_under, not the real ufc_total_rounds
+    # copies: the retired UFC models are struck from the record
+    # (config.RECORD_EXCLUSIONS, 2026-11-13), so their kept copy no longer
+    # counts, and this test is about the marker, not about UFC.
     _copy_for_node(tmp_path, ("settledPickCache.ts", "settledPickMarkers.ts", "recordStart.ts",
                               "format.ts", "decisionPrice.ts", "thresholds.ts",
                               "thresholds.generated.ts", "discordPublish.ts"))
@@ -550,7 +562,7 @@ import { mergeSettled, refreshFrom } from './settledPickCache.ts';
 import { applySettledMarkers } from './settledPickMarkers.ts';
 import { passesRecordFilter } from './thresholds.ts';
 const bet = (id, date, cs = null) => ({ pick_id: id, game_date: date, result: 'WIN',
-  model_id: 'ufc_total_rounds', signal_type: 'BET', is_live: false,
+  model_id: 'nhl_over_under', signal_type: 'BET', is_live: false,
   downgrade_reason: null, condition_status: cs });
 // Cached on an earlier load: the kept copy, the extra copy (not yet marked),
 // a copy marked once and since rolled back, and the newest row.
@@ -592,22 +604,26 @@ def test_the_rule_is_in_claude_md():
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
 def test_a_custom_model_counts_the_kept_copy_once(tmp_path: Path):
     """The labelled copy keeps its real WIN, so a custom model's own W/L/P
-    tally counted it until it learned the label (UX review, 2026-10-09)."""
+    tally counted it until it learned the label (UX review, 2026-10-09).
+
+    The fixture was the June ufc_total_rounds pair until that model was retired
+    (2026-11-13): a custom model no longer counts a retired model at all, so a
+    live model stands in. NCAAF writes the same twin (an ET and a UTC date)."""
     _copy_for_node(tmp_path, ("customModelBacktest.ts", "customModelFilters.ts",
                               "modelMeta.ts", "thresholds.ts", "thresholds.generated.ts",
                               "decisionPrice.ts", "discordPublish.ts", "format.ts"))
     script = """
 import { computeCustomModelStats } from './customModelBacktest.ts';
-const bet = { model_id: 'ufc_total_rounds', sport: 'UFC', signal_type: 'BET', result: 'WIN',
-              pick_side: 'over', model_probability: 0.6, edge: 0.05, dk_odds: -130,
+const bet = { model_id: 'ncaaf_over_under', sport: 'NCAAF', signal_type: 'BET', result: 'WIN',
+              pick_side: 'over', model_probability: 0.7, edge: 0.05, dk_odds: -130,
               decision_odds: -130, profit_flat: 76.92, is_live: false, downgrade_reason: null,
-              condition_status: null, game_date: '2026-06-20' };
+              condition_status: null, game_date: '2026-09-20' };
 const settled = [
-  { ...bet, pick_id: 332605, game_id: 'UFC_2026-06-20_kevin-borjas_andre-lima' },
-  { ...bet, pick_id: 332615, game_id: 'UFC_2026-06-20_andre-lima_kevin-borjas',
+  { ...bet, pick_id: 332605, game_id: 'NCAAF_2026-09-20_usc_wisconsin' },
+  { ...bet, pick_id: 332615, game_id: 'NCAAF_2026-09-21_usc_wisconsin',
     condition_status: 'DUPLICATE' },
 ];
-const model = { id: 'm', name: 'm', rules: [{ model_id: 'ufc_total_rounds' }], filters: {} };
+const model = { id: 'm', name: 'm', rules: [{ model_id: 'ncaaf_over_under' }], filters: {} };
 const s = computeCustomModelStats(model, settled);
 console.log(JSON.stringify({ picks: s.picks, wins: s.wins }));
 """

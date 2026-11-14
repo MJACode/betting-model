@@ -377,17 +377,30 @@ window, which the run waits through if it is still going. It ran every night
 from 2026-11-04 to 2026-11-10, about 75 minutes a night
 (`logs\supabase_*.log`).
 
-**It runs only while mike is signed in to Windows, and nothing starts a
-night it missed.** On 2026-11-10 Windows Update restarted the PC at 10:29pm
-and again at 10:35pm ET; nobody was signed in from 10:29pm until 8:17am
-(System log, Winlogon events 7002 and 7001), so the 00:30 run of 2026-11-11
-never started, and signing in did not start it either. It was started by
-hand at 8:39am (`schtasks /Run`). The task has no sign-in trigger and does
-not wake the PC. Adding a sign-in trigger is mike's call (asked 2026-11-11).
+**It runs only while mike is signed in to Windows.** On 2026-11-10 Windows
+Update restarted the PC at 10:29pm and again at 10:35pm ET; nobody was
+signed in from 10:29pm until 8:17am (System log, Winlogon events 7002 and
+7001), so the 00:30 run of 2026-11-11 never started, and signing in did not
+start it either. It was started by hand at 8:39am (`schtasks /Run`) and
+finished at 11:41am ET with no table failed.
+
+**Since 2026-11-11 it also starts two minutes after mike signs in** (mike:
+"yes on backup"). The task holds two triggers, the daily one and a sign-in
+one for `MAHOME\micha`; a start while a run is going is ignored
+(`MultipleInstances = IgnoreNew`), and a second run would exit on the lock
+file anyway. The sign-in trigger had not fired yet when this was written:
+the first sign-in after a restart is where to look for a new
+`logs\supabase_*.log`. It still does not wake a sleeping PC, and a restart
+with nobody signing in for days still skips those nights.
 
 ```bat
 :: Register (runs as you, only while you are logged on):
 schtasks /Create /TN "BettingModel\LocalMirror" /SC DAILY /ST 00:30 /RL LIMITED /F /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Users\micha\Documents\betting_local_copies\bin\local_mirror_run.ps1"
+
+:: The sign-in trigger was added in PowerShell, not by the line above:
+:: New-ScheduledTaskTrigger -AtLogOn -User MAHOME\micha, Delay PT2M, then
+:: Set-ScheduledTask -Trigger with both triggers. Running the /Create line
+:: again with /F replaces the task, so add the sign-in trigger again after it.
 
 :: View it, and when it last ran:
 schtasks /Query /TN "BettingModel\LocalMirror" /V /FO LIST
@@ -513,6 +526,105 @@ stamp, so for these rows it is OUR clock at read time. At a 5s cadence that
 clears the 30s freshness gate by observation rather than by the book's
 assertion. The bovada feed does not have this caveat — it publishes
 `lastModified` and uses it.
+
+### Every in-play model: DraftKings' own board (`dk_live_board`)
+
+**Since 2026-11-13 (mike: *"Move everything over to the fast way"*) the feed
+reads every league with an in-play model in one process**: NCAAB, women's
+college basketball, NBA, NCAAF and NFL, a live league every second, an idle one
+every 30 s, never two requests closer than half a second. The scheduled task
+runs from 9am (an NFL game can kick off at 9:30am ET) to 3am, and runs the
+launcher from its own worktree, `bm-live-feed\scripts\dk_live_board_run.ps1`,
+so the launcher and the feed always come from the same master. The feed's log
+is `betting_local_copies\logs\dk_live_board_feed_<date>.log` (UTF-8).
+
+**A merge reaches this machine by itself.** Every 5 minutes the feed fetches
+origin/master; when a merge changed one of its own files it exits (code 3) and
+the launcher checks the new master out and starts it again at once. A merge
+that does not touch the feed is ignored. The all-sports feed holds
+127.0.0.1:47232; the NCAAB-only feed it replaces held 47231, so on the day of
+the change the two can run side by side until the old one's last game ends.
+
+#### NCAAB, the first one (2026-11-12)
+
+mike, 2026-11-12: *"This is live betting ... This needs to be as close to Real
+time as possible."* The three NCAAB in-play models decide on DraftKings' own
+board, read from here every second: the line, and DraftKings' score and clock
+from the same read. The worker's NCAAB loop reads what this writes and decides
+and posts within seconds; without it the loop falls back to the odds provider
+and ESPN (minutes).
+
+```bash
+# From the repo root, with .env present (it needs DATABASE_URL).
+python -m data.ingestors.dk_live_board            # runs while games are live, exits 45 min after the last
+python -m data.ingestors.dk_live_board --dry-run  # read and print, write nothing
+```
+
+It writes `dk_live_reads` (a row per game each time its score or a line
+changes) and `dk_live_feed` (every read). The worker trusts the rows only while
+`dk_live_feed.last_read_at` is under 8 s old, so this machine off, asleep or
+refused means the slow path, never a bet on an old line.
+
+```sql
+-- is it reading?
+SELECT sport, last_read_at, ok, live_events, matched, detail FROM dk_live_feed;
+```
+
+`matched` below `live_events` means a DraftKings game did not resolve onto our
+schedule; the log names it. It reads every second while a game is live (mike:
+*"can it run even faster"*); a refusal doubles the gap, up to 5 s, and a quiet
+minute halves it back. Five refusals in a row back the feed off two minutes
+(this address is the one DraftKings would block).
+
+**The schedule: every minute 11am-3am ET, registered 2026-11-12** (mike:
+*"yes"*). The task `BettingModel\DkLiveBoard` runs
+`betting_local_copies\bin\dk_live_board_run.ps1` (in the repo as
+`scripts/dk_live_board_run.ps1`) every minute from 11:00 for 16 hours, and two
+minutes after sign-in. A start while a run is going is ignored
+(`MultipleInstances = IgnoreNew`), and a feed already running holds
+127.0.0.1:47231, so a second one exits at once. The launcher puts its own
+worktree, `C:\Users\micha\Documents\bm-live-feed`, on origin/master before
+each start, so what runs is always master and never another session's branch.
+Until the feed is merged and its tables exist it logs one line and exits. Like
+the backup task, it runs only while mike is signed in to Windows. Log:
+`betting_local_copies\logs\dk_live_board_<date>.log`.
+
+```bat
+schtasks /Query /TN "BettingModel\DkLiveBoard" /V /FO LIST
+schtasks /Run /TN "BettingModel\DkLiveBoard"
+schtasks /Delete /TN "BettingModel\DkLiveBoard" /F
+```
+
+## Tennis feeds — DraftKings, Pinnacle and TennisExplorer, from HERE
+
+Tennis below the odds feed's 53 top-tier tournaments (men's 250s, Challengers
+and ITF; women's 125s and ITF) has no price on the feed, so three collectors
+run from this machine (`docs/sports/tennis.md`):
+
+| Collector | What it stores | Why here |
+|---|---|---|
+| `scripts/tennis_dk_probe.py` | DraftKings' own tennis board: every singles league, every market page, change-only (`tennis_dk_selections`) | DraftKings refuses the worker; reading it needs a browser-style session, which the permission check refuses from a Claude session, so it is launched by this task, never by a session |
+| `data/ingestors/tennis_pinnacle.py` | Pinnacle's own tennis prices at every level (`tennis_pinnacle_matchups`, `tennis_pinnacle_prices`) | not yet tried from the worker (#1281) |
+| `data/ingestors/tennis_explorer.py` | every level's results and one price pair a match, the last three days (`tennis_te_matches`) | the only results source for Challenger and ITF matches after the archive's June 2026 snapshot |
+
+**The schedule: every 30 minutes, registered 2026-11-13** (mike: *"yes"*).
+The task `BettingModel\TennisFeeds` runs
+`betting_local_copies\bin\tennis_feeds_run.ps1` (in the repo as
+`scripts/tennis_feeds_run.ps1`): one pass of each collector, each with a
+20-minute limit. The launcher puts its own worktree,
+`C:\Users\micha\Documents\bm-tennis-feed`, on origin/master before each run,
+and reads `DATABASE_URL` from the main checkout's `.env` for these processes
+only. Until tennis is merged it logs one line and exits. Each collector exits
+at once when another copy of itself is running, so a long-running loop
+started by hand and this task never both poll a site. It runs only while mike
+is signed in to Windows. Logs: `betting_local_copies\logs\tennis_feeds_<date>.log`
+and one `tennis_feeds_<collector>_<date>.log` each.
+
+```bat
+schtasks /Query /TN "BettingModel\TennisFeeds" /V /FO LIST
+schtasks /Run /TN "BettingModel\TennisFeeds"
+schtasks /Delete /TN "BettingModel\TennisFeeds" /F
+```
 
 ## Diagnosing a DATABASE_URL that will not authenticate
 

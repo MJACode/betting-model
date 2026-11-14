@@ -16,6 +16,123 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
+## Volume settings: fewer, stronger bets by one input (2026-11-11, mike)
+
+mike: *"give me bands or thresholds or easy ways to tune every model for volume
+based on a simple input, maybe through the retool dash"*.
+
+**What it does.** A pre-game model can carry a volume setting. With one, only
+its stronger bets are posted to the app, Discord and push. The model is
+unchanged: it still decides at its cut in `config.py`, still writes every bet
+it finds to `picks`, and those bets are still graded.
+
+**The input.** `set_model_volume(model, level, who, number, note)`, called by
+the dashboard or in SQL:
+
+| Level | Posts |
+|---|---|
+| `all` | every bet (removes the setting) |
+| `top_75` | the stronger three quarters |
+| `top_half` | the stronger half |
+| `top_quarter` | the strongest quarter |
+| `custom` | bets at or above the number given |
+
+"Stronger" is the number the model's own cut is on: edge at the deciding price
+for every model. (`ufc_method_of_victory`, cut on probability, was the one
+exception until it was retired on 2026-11-13.)
+
+**Where a band's number comes from.** The view `model_volume_bands` takes the
+model's own bets at config's cut over its last 120 days of betting. The days
+are counted back from its newest bet, so a sport out of season keeps the bands
+of the season it last played. The bands are the quartiles of that set, cut
+down to four places. A model needs 20 such bets to have bands. With fewer,
+only `custom` works. Beside each band the view shows the bets and bets a day
+it would have posted over those days, and the record of every bet the model
+has written at or above it, in units at the posted stake.
+
+**The rules it keeps.**
+
+- **A setting only tightens.** The cut in force is the tighter of config's and
+  the setting's, and a number under config's cut is refused. More volume than
+  config's cut gives is a change to the model's own cut: measured on its own
+  record and stamped in git (CLAUDE.md §7, `.claude/rules/model-updates.md`).
+- **It changes what is posted, not what is recorded.** A bet under the setting
+  stays in `picks` as a BET, unposted. That is also why the bands do not
+  drift: they are cut from every bet at config's cut, posted or not.
+- **A posted bet stays posted.** Tightening takes nothing off the board (the
+  app's `passesActionFilter` keeps the cuts a posted bet was written under).
+  Removing a setting posts the held-back bets of games that have not started,
+  on the next pass.
+- **In-play models are listed and not moved.** Their posting does not read the
+  edge cut, and the first bet a loop writes locks its game, so a posting cut
+  would hide that bet without freeing the game for a stronger one. The input
+  refuses them. Moving them means a bar inside each loop's own decision.
+- **A band's record is a description, not a tested cut.** It is small and
+  in-sample (the table below). A setting is a volume choice.
+- **Who set it is in the database.** `model_volume_settings.set_by`, and every
+  set, change and removal in `model_volume_settings_log`, written by a trigger.
+
+**How it holds.** `model_action_thresholds` keeps two cuts per model.
+`base_min_prob` / `base_min_edge` are config's. `min_prob` / `min_edge` are
+the cut in force, which every surface already read. `data.threshold_sync`
+writes config's cut into both and calls `apply_model_volume_settings()` before
+it commits, so a setting outlives every pass. If that call fails, the sync
+still lands config's cuts and any pause, logs an error, and the settings are
+out of force until the next pass.
+
+**What else reads the cut in force, and so moves with a setting.** Discord's
+"good to" price (the worst price at which the bet would still be posted); the
+sweep views `v_model_full_record` and `v_model_full_outcome_*`; the ops
+roster. The published record does not move: it counts what was posted.
+
+**Two side effects, known and left.** An unposted bet still counts for three
+readers of BET rows: the check that stops two bets on one game that cannot
+both win, the college basketball check that an under is not held beside a big
+favourite's spread bet, and NCAAB agreement sizing. So a held-back bet can
+still stop its game's other bet. That is to be fixed before a setting is used
+on a model that shares games with another (`docs/followups.md`). And a sync
+run from a checkout older than this change writes config's cut without the
+settings; the worker's next pass, and its sync before every Discord post, put
+them back.
+
+**Measured 2026-11-11** on the stored picks (`python -m
+scripts.model_volume_rehearsal --out DIR`, which runs the migration, the input
+and the sync in one transaction and rolls it back: 41 checks). Of 73 pre-game
+models, 31 have bands; of the 44 that are not paused, 24. Each cell is the
+band's threshold, the bets a day it would have posted over the days shown, and
+the record and units of every bet the model has written at or above it. The
+top half made fewer units than all bets in 9 of the 24.
+
+| Model | Days | All bets | Top 75% | Top half | Top quarter |
+|---|---|---|---|---|---|
+| `mlb_total_public_fade` | 09-16 to 09-18 | 0.0000: 11.0 a day, 14-18, -5.28u | 0.2600: 8.3 a day, 11-13, -2.95u | 0.3200: 5.7 a day, 6-10, -4.80u | 0.4000: 3.0 a day, 3-5, -2.26u |
+| `ncaab_first_half_total` | 11-03 to 11-10 | 0.0250: 8.0 a day, 35-29, -0.48u | 0.0303: 6.1 a day, 29-20, +4.58u | 0.0386: 4.0 a day, 23-9, +11.19u | 0.0479: 2.0 a day, 11-5, +4.89u |
+| `nfl_prop_market` | 09-09 to 09-17 | 0.0500: 8.0 a day, 19-21, -5.42u | 0.0518: 6.0 a day, 16-14, +0.33u | 0.0544: 4.0 a day, 12-8, +3.45u | 0.0602: 2.0 a day, 7-3, +4.16u |
+| `mlb_spread_market` | 09-17 to 09-19 | 0.0180: 7.7 a day, 12-11, -1.37u | 0.0190: 5.7 a day, 9-8, -0.30u | 0.0201: 4.0 a day, 6-6, -0.30u | 0.0216: 2.7 a day, 4-4, -0.74u |
+| `ncaaf_over_under` | 09-06 to 11-14 | 0.0000: 4.3 a day, 54-40, +9.76u | 0.1801: 3.5 a day, 41-33, +4.61u | 0.1901: 2.2 a day, 25-21, +2.24u | 0.1938: 1.3 a day, 15-12, +2.12u |
+| `nba_prop_projection` | 10-20 to 11-10 | 0.0000: 3.6 a day, 31-44, -1.64u | 0.0681: 2.7 a day, 24-32, +0.67u | 0.1096: 1.8 a day, 16-21, -0.05u | 0.1367: 0.9 a day, 8-11, -0.62u |
+| `nhl_prop_shots_on_goal` | 10-01 to 11-11 | 0.0000: 3.5 a day, 74-57, +14.42u | 0.0994: 2.6 a day, 55-42, +10.74u | 0.1222: 1.8 a day, 38-27, +8.54u | 0.1446: 0.9 a day, 18-15, +2.02u |
+| `ncaab_first_half_spread` | 11-03 to 11-11 | 0.0250: 3.4 a day, 14-10, +4.09u | 0.0340: 2.6 a day, 10-8, +1.24u | 0.0410: 1.9 a day, 6-7, -1.66u | 0.0593: 0.9 a day, 4-2, +1.93u |
+| `wnba_prop_market` | 09-17 to 10-21 | 0.0500: 3.2 a day, 13-16, -1.43u | 0.0535: 2.4 a day, 8-14, -4.63u | 0.0569: 1.7 a day, 7-8, +0.15u | 0.0613: 0.9 a day, 3-5, -1.24u |
+| `nba_team_total_luck` | 11-02 to 11-10 | 0.0000: 3.0 a day, 12-12, -1.35u | 0.0803: 2.3 a day, 8-10, -3.11u | 0.0887: 1.5 a day, 6-6, -0.70u | 0.1017: 0.8 a day, 4-2, +1.84u |
+| `nfl_wind_totals` | 09-14 to 11-12 | 0.0300: 3.0 a day, 19-15, +2.70u | 0.0612: 2.3 a day, 13-13, -1.03u | 0.0696: 1.5 a day, 8-9, -1.60u | 0.0743: 0.8 a day, 4-5, -1.31u |
+| `nba_total_luck` | 11-02 to 11-10 | 0.0000: 2.9 a day, 7-13, -7.21u | 0.0444: 2.3 a day, 7-9, -2.82u | 0.0511: 1.4 a day, 5-5, -0.52u | 0.0587: 0.7 a day, 2-3, -1.27u |
+| `nfl_opener_spread` | 09-13 to 11-16 | 0.0000: 2.5 a day, 10-5, +4.13u | 0.0208: 2.3 a day, 8-5, +2.13u | 0.0274: 1.5 a day, 5-4, +0.38u | 0.0319: 0.9 a day, 3-2, +0.72u |
+| `wnba_prop_player_pra` | 06-03 to 07-10 | 0.1600: 2.2 a day, 26-25, -3.15u | 0.1680: 1.6 a day, 21-17, +1.38u | 0.1756: 1.1 a day, 15-11, +2.26u | 0.1857: 0.5 a day, 8-6, +1.11u |
+| `nhl_moneyline` | 09-29 to 11-10 | 0.0000: 2.0 a day, 27-27, +0.99u | 0.0383: 1.5 a day, 21-20, +0.69u | 0.0495: 1.0 a day, 14-13, +1.72u | 0.0696: 0.5 a day, 5-9, -3.44u |
+| `mlb_f5_moneyline` | 06-26 to 10-24 | 0.0200: 1.9 a day, 122-96, -11.29u | 0.0829: 1.4 a day, 93-79, -14.04u | 0.0992: 0.9 a day, 78-62, -3.29u | 0.1244: 0.5 a day, 48-43, -7.49u |
+| `wnba_prop_player_rebounds` | 06-23 to 10-21 | 0.0000: 1.9 a day, 51-44, -0.37u | 0.1387: 1.4 a day, 37-28, +5.69u | 0.1635: 1.0 a day, 28-16, +10.41u | 0.1901: 0.5 a day, 13-6, +6.47u |
+| `nhl_over_under` | 10-13 to 11-10 | 0.0000: 1.6 a day, 14-7, +7.35u | 0.0061: 1.3 a day, 13-4, +9.20u | 0.0076: 0.8 a day, 8-3, +5.26u | 0.0099: 0.5 a day, 3-3, +0.26u |
+| `nhl_prop_saves` | 10-01 to 11-08 | 0.0000: 1.6 a day, 24-11, +11.75u | 0.1401: 1.2 a day, 16-10, +4.85u | 0.1618: 0.8 a day, 9-9, -1.05u | 0.2047: 0.4 a day, 2-7, -5.75u |
+| `wnba_prop_player_assists` | 06-23 to 10-21 | 0.1000: 1.5 a day, 36-31, +2.16u | 0.1341: 1.1 a day, 25-17, +6.59u | 0.1512: 0.8 a day, 18-11, +6.86u | 0.1868: 0.4 a day, 8-6, +1.27u |
+| `mlb_prop_batter_runs` | 05-27 to 09-24 | 0.1000: 1.4 a day, 36-25, +6.18u | 0.1176: 1.0 a day, 32-17, +11.80u | 0.1575: 0.7 a day, 19-7, +10.80u | 0.1766: 0.4 a day, 7-4, +2.55u |
+| `mlb_prop_batter_walks` | 07-04 to 09-25 | 0.1400: 1.1 a day, 15-11, +2.75u | 0.1487: 0.8 a day, 10-9, +0.38u | 0.1524: 0.6 a day, 7-7, -0.56u | 0.1654: 0.3 a day, 3-4, -1.03u |
+| `wnba_moneyline` | 07-06 to 10-29 | 0.0600: 1.1 a day, 19-12, +2.26u | 0.0871: 0.8 a day, 15-9, +2.70u | 0.1048: 0.6 a day, 11-6, +2.89u | 0.1334: 0.3 a day, 5-5, -1.51u |
+| `mlb_moneyline` | 05-02 to 08-28 | 0.1100: 1.0 a day, 23-8, +11.48u | 0.1276: 0.8 a day, 17-6, +8.81u | 0.1419: 0.5 a day, 11-5, +4.30u | 0.1581: 0.3 a day, 6-3, +2.27u |
+
+The 20 unpaused pre-game models without bands have under 20 bets in their
+last 120 days of betting (six have none yet). They take a `custom` number.
+
 ## The pre-registered forward test (2026-08-31)
 
 Every cut shipped on 2026-08-31 was chosen by sweeping live picks on calibrated
@@ -168,9 +285,16 @@ The per-model OR-block is **generated from `config.py`**, never transcribed —
 with the scorer. The three hand-maintained copies this replaces had drifted by
 2026-08-30: The block pasted into Claude mobile carries 42 model ids; `config.py` yields 41. Three are missing (`nba_over_under`, `nba_spread`, `nfl_prop_market`) and four are stale — paused models still listed, which surfaces picks the scorer has stopped making.
 
+> **All three UFC models below were RETIRED 2026-11-13** (mike: *"Ignore and
+> delete any existing models in the repo"*; `config.RETIRED_MODELS`). The
+> scripts these sections cite were deleted with them; their bytes are in git
+> history (`git show 7dbc0e4a:scripts/ufc_threshold_sweep.py`, and the same for
+> `ufc_model_compare.py` and `ufc_rounds_hazard.py`). The sections are kept as
+> the evidence of what was tried.
+
 ### UFC — the first every-pick evaluation (2026-09-05)
 
-Run it yourself: `python -m scripts.ufc_threshold_sweep`.
+Run it yourself (before 2026-11-13): `python -m scripts.ufc_threshold_sweep`.
 
 **Why it did not exist before.** `mv_scored_pick_outcomes` grades the whole
 scored universe for MLB and WNBA and **does not cover UFC**, and `picks.result`
@@ -1470,6 +1594,7 @@ It cleared the research bar, narrowly: the pooled lower bound is +0.57%.
 | EV floor | 0.037 (0.03 until 2026-11-06), on its own probability. An edge above 0.025 at -200 or longer is EV above 0.0375, so the floor removes nothing the cut takes; the smallest EV the 0.025 cut admitted in the replay with the -200 limit was +0.0426 (median +0.068, 1,887 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price limit | -200, applied before the best book is chosen (2,527 of the research's 2,529 bets; prices -160 to +155), and pinned | `models/ncaab_first_half_total.best_offer`, `MODEL_MIN_ODDS` |
 | early season | no wait (mike, 2026-11-02). November alone made +35.91 units on 690 bets | the card |
+| big favourite | no UNDER when the favourite lays 12 or more in the first half (mike, 2026-11-11): 331 replayed bets, 171-159, -8.50 units; the game is recorded `big_favourite` and written as a NONE row. `docs/sports/ncaab.md`, "An under beside a big favourite" | `models/ncaab_first_half_total.UNDER_BIG_FAVOURITE` |
 | decided once | on the tip-minus-60 first-half fetch (or its retries, 55 to 60.5 minutes before tip); a row in `ncaab_first_half_total_decisions`, bet or not | `scripts/ncaab_first_half_total_card.py`, `scheduler.run_ncaab_first_half_window` |
 
 **The neighbourhood** (the research's round 5 grid, every game, 2023-24..2025-26,
@@ -1592,6 +1717,128 @@ Replayed at 0.05: 2025-26 with a model fitted on 2024-25, 669 bets, 398-271,
 (a second look), 298 bets, 178-119, +42.10 units, +12.35% [+0.6, +23.7].
 Every cut from 0.02 to 0.12 is positive in both seasons, so 0.05 sits on a
 plateau. Go-live gate standing: 0 settled of 50. Re-read at 50 settled bets.
+## Tennis — `atp_moneyline_shop`, `wta_moneyline_shop`, match winner (2026-11-14, mike)
+
+mike, 2026-11-13: *"build professional tennis models"*, men's and women's as
+separate models. One rule, two model ids: the best decidable price both ways
+against Pinnacle's power-de-vigged pair at the same moment, about 30 minutes
+before the listed start, EV including the deciding book's retirement rule
+(`models/tennis_moneyline_shop.py`, `scripts/tennis_moneyline_card.py`;
+evidence `docs/sports/tennis.md`, "Research, round 1"). The cut is EV, in
+`MODEL_OWN_EV_FLOOR`; the probability is Pinnacle's.
+
+| Setting | Value | Where |
+|---|---|---|
+| EV floor (the cut) | 0.02 | `config.MODEL_OWN_EV_FLOOR`, `models/tennis_moneyline_shop.EV_MIN` |
+| EV cap | 0.05 (above it a quote is more often an error) | `models/tennis_moneyline_shop.EV_MAX` |
+| price floor | -500 | `config.MODEL_MIN_ODDS`, `models/tennis_moneyline_shop.PRICE_FLOOR` |
+| action filter | min_prob 0.0, min_edge 0.0 (keeps every bet the card writes) | `config.ACTION_THRESHOLDS` |
+| decision | first run 35 minutes or less before the listed start | `scripts/tennis_moneyline_card.DECISION_LEAD` |
+
+The bought feed history, 2020-09 to 2026-11, 53 tour-level keys, replayed
+through the card's own decision code at the first hourly snapshot within 60
+minutes of the listed start (`python -m scripts.tennis_moneyline_replay`):
+
+| EV cut | Bets | Units | Return | 90% interval |
+|---|---|---|---|---|
+| 0.010 | 922 | +51.97 | +2.96% | -1.8 to +7.7 |
+| 0.015 | 560 | +73.96 | +7.17% | +0.8 to +13.5 |
+| **0.020** | **355** | **+68.77** | **+11.02%** | **+2.5 to +19.5** |
+| 0.025 | 201 | +50.09 | +15.99% | +4.2 to +27.8 |
+| 0.030 | 120 | +22.44 | +11.92% | -3.6 to +27.5 |
+
+Both halves positive (+5.4 / +16.5), both tours, every book. The bar it
+missed: the stricter one. The cut chosen walk-forward returns +1.2% on 704
+bets (-4.4 to +6.9); 2023 is -9.1% on 42; Bovada's price in Pinnacle's place
+keeps +5.2%. Prices: median -165, shortest -500, 23.7% at -300 or shorter.
+## EUROLEAGUE — `euroleague_live_spread_ht`, the full-game spread at halftime (2026-11-13, mike)
+
+The whole story is `docs/sports/euroleague.md`, "Halftime spread". mike
+approved it ("yes") knowing it misses part of the research bar: the
+false-discovery correction across 183 cells, a negative 2023-24, a negative
+2021-22 second look.
+
+| Setting | Value | Where |
+|---|---|---|
+| cut | EV >= 0.05 at the deciding price, on P(win, push left out) | the model file's `cut` (`models/saved/euroleague_live_ht_2027.json`), read by `models/euroleague_live_loop.py` |
+| EV floor | 0.05, the cut itself | `config.MODEL_OWN_EV_FLOOR` |
+| price floor | -200 (it laid -135 to +105 on 364 replayed bets; never binds) | `config.MODEL_MIN_ODDS` |
+| edge cap | 0.40: a larger decision edge is declined as a data error (largest replayed 0.166) | `models/euroleague_quote_bounds.EDGE_CAP` |
+| probability | its own; no calibration map (no record) | `config.MODELS_ON_OWN_PROBABILITY` |
+| a day's count | no limit | |
+| stake | one unit to win, risk capped at 3 | `stake_for` |
+
+Replayed at 0.05 on the loop's own code, walk-forward 2022-23 to 2026-27 to
+11-12: 364 bets, 215-149, +45.34 units on the research's stake (+45.08 on the
+posted stake), +10.93% [90%: +3.40, +18.48], bet for bet the research's
+list. By season 107 / 61 / 58 / 107 / 31 bets, 2023-24 negative (-1.65%).
+Every cut from 0.02 to 0.12 is positive. Go-live gate standing: 0 settled of
+50. Re-read at 50 settled bets.
+
+## EUROLEAGUE — the four pre-game rules (2026-11-14, mike)
+
+The whole story is `docs/sports/euroleague.md`, "The four pre-game rules".
+mike: "I told you to build all the models", knowing each misses part of the
+research bar. THE CUT IS EACH RULE, applied in `scripts/euroleague_pregame_card.py`
+at tip minus 10 at the best deciding-book price. The probability is the
+market's no-vig chance plus the rule's walk-forward uplift
+(`models/saved/euroleague_pregame_2027.json`); the EV floor and the edge cut
+sit just under the smallest EV and edge on the replayed bets, so neither
+removes one. Probability on its own (`config.MODELS_ON_OWN_PROBABILITY`); the
+edge cap is 0.40 (`models/euroleague_quote_bounds.EDGE_CAP`); stake one unit
+to win, risk capped at 3 (`stake_for`).
+
+| Model | The rule | Edge cut | EV floor | Price floor | Replay, live population | Prices laid |
+|---|---|---|---|---|---|---|
+| `euroleague_home_ml` | home moneyline, -200 or longer, not neutral | 0.01 | 0.04 | -200 (the rule) | 984 bets, +64.80 units, +5.24% [-0.27, +11.08] | -200 to +550, median -110 |
+| `euroleague_home_dog_spread` | home underdog ATS, own-country games | 0.06 | 0.11 | -200 | 455 bets, +54.54, +11.00% [+3.63, +17.95] | -120 to -102 |
+| `euroleague_h1_dog_ml` | first-half moneyline underdog; a tied half pushes | 0.00 | 0.01 | -200 | 465 bets, +19.14, +4.22% [-4.64, +12.35] | -115 to +475, median +142 |
+| `euroleague_q1_club_share_total` | first-quarter total vs club shares, margin 1.0 | 0.10 | 0.17 | -200 | 63 bets, +17.71, +22.23% [+4.08, +39.66] | -145 to -111 |
+
+The replay matches the research's own code bet for bet on every read (the
+DraftKings reads too: 972 / +59.64, 454 / +48.34). No two of the four decided
+in one pass can conflict, so each live population is the research's best-book
+read. A fifth rule, the favourite at -500 or shorter (`euroleague_heavy_fav_ml`),
+was removed before it went live (mike, 2026-11-14: "odds cutoff for favorites
+should be -200"): every bet it found was -500 or shorter (188 bets +34.59 units
++6.13% at DraftKings' close), so at a -200 floor it could never bet. Go-live
+gate standing, all four: 0 settled of 50. Re-read each at 50 settled bets.
+
+## UFC — `ufc_open_moneyline`, fight winner a week out (2026-11-13, mike)
+
+mike, 2026-11-13: *"Use the model building skill to build models for UFC"*,
+then *"yes"* to the 150,360-credit history purchase that tested it. A rating
+model anchored on Pinnacle's no-vig price, bet at the best price at a book in
+`BEST_LINE_BOOKMAKERS`, decided on the noon-UTC run while the fight is at
+least a week out (`models/ufc_open_moneyline.py`,
+`scripts/ufc_open_moneyline_card.py`; evidence `docs/ufc_market_audit.md`
+§3d). The cut is EV, in `MODEL_OWN_EV_FLOOR`; the probability is its own.
+
+| Setting | Value | Where |
+|---|---|---|
+| EV floor (the cut) | 0.06 | `config.MODEL_OWN_EV_FLOOR` |
+| price floor | -300 | `config.MODEL_MIN_ODDS` |
+| action filter | min_prob 0.0, min_edge 0.0 (keeps every bet the card writes) | `config.ACTION_THRESHOLDS` |
+| minimum lead | 168 hours | `models/ufc_open_moneyline.MIN_LEAD_H` |
+| decision run | 12:25 UTC only | `scripts/ufc_open_moneyline_card.DECIDE_HOUR_UTC` |
+
+The bought feed history, 2020-06 to 2026-06, noon pulls, at least 7 days out:
+
+| EV cut | Bets | Units | Return | 90% interval | EV vs Pinnacle's close |
+|---|---|---|---|---|---|
+| 0.00 | 1,545 | +111.4 | +5.25% | +1.6 to +8.7 | |
+| 0.04 | 1,075 | +136.0 | +9.59% | +5.2 to +13.7 | |
+| **0.06** | **846** | **+136.9** | **+12.85%** | **+8.0 to +17.5** | **+2.16%** |
+| 0.08 | 661 | +126.4 | +15.92% | +10.4 to +21.3 | |
+| 0.10 | 484 | +105.4 | +19.61% | +13.4 to +26.1 | +4.25% |
+
+Both halves positive (+11.4 / +14.3), every year positive, a donor-opinion
+placebo at a median -1.9% (best of 50 +3.9%). The bar it cleared: the
+stricter one in `.claude/skills/league-models/references/kill-tests.md`
+(200+ bets with the interval above zero, every season positive, a plateau, a
+placebo). Expect less live: 0.06 is the middle of a plateau chosen after
+the grid was seen. Go-live gate standing: 0 settled picks.
+
 ## NCAAF — `ncaaf_moneyline_market`, full-game moneylines (2026-11-10, mike)
 
 mike, 2026-11-10, asked after the NCAAF market audit whether he wanted a

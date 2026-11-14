@@ -552,7 +552,7 @@ def settle_pass(monkeypatch):
                  "_backfill_clv", "_capture_clv"):
         monkeypatch.setattr(pt, name, lambda *a, **k: None)
     for name in ("_settle_game_picks_window", "_settle_prop_picks_window", "_settle_ufc_picks",
-                 "_settle_golf_picks"):
+                 "_settle_tennis_picks", "_settle_golf_picks"):
         monkeypatch.setattr(pt, name, lambda *a, _n=name, **k: calls.append(_n) or zero)
     monkeypatch.setattr(cfbd, "mirror_stored_finals", lambda *a, **k: None)
     monkeypatch.setattr(box, "ensure_prop_box_scores", lambda *a, **k: {})
@@ -585,7 +585,7 @@ def test_a_failed_quarter_pull_leaves_every_other_pick_grading(settle_pass, monk
     pt.settle_picks("2026-04-04")
     assert calls[0] == "quarters"
     assert {"_settle_game_picks_window", "_settle_prop_picks_window", "_settle_ufc_picks",
-            "_settle_golf_picks"} <= set(calls)
+            "_settle_tennis_picks", "_settle_golf_picks"} <= set(calls)
 
 
 def test_the_6am_order_is_what_the_comment_says():

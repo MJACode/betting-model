@@ -251,13 +251,14 @@ const hitRateSports = (catalog.match(/HIT_RATE_SPORTS = new Set<Sport>\(\[(.*?)\
   .split(',')
   .map((x) => x.trim().replace(/'/g, ''))
   .filter(Boolean);
-check('the hit-rate sport list was found', hitRateSports.length === 5, hitRateSports.join());
+check('the hit-rate sport list was found', hitRateSports.length === 7, hitRateSports.join());
 const h2hFn = queries.slice(queries.indexOf('export async function fetchH2HStatValues'));
 const h2hBody = h2hFn.slice(0, h2hFn.indexOf('\nconst PICK_COLUMNS'));
 for (const sport of hitRateSports) {
   check(
     `${sport} has a player_h2h_stat_values_ branch`,
-    h2hBody.includes(`player_h2h_stat_values_${sport.toLowerCase()}`),
+    // The closing quote, so player_h2h_stat_values_ncaabw does not satisfy ncaab.
+    h2hBody.includes(`player_h2h_stat_values_${sport.toLowerCase()}'`),
   );
 }
 

@@ -1306,6 +1306,91 @@ share and the book mix beside the ROI.
 scripts.ncaab_first_half_total_build --cache <copy of the three reads>
 --last-season 2027` fits them; add `--quotes` and `--asof-fg` to replay too.
 
+### An under beside a big favourite (2026-11-11, mike)
+
+mike, 2026-11-11: *"half time unders should not be taken along with big
+favorite spreads, like I have seen some men picks where you pick half time
+under and a -14, these have a low chance of hitting together, ensure we
+account for that in mens and womens models."*
+
+**What he saw.** From 2026-11-03 to 11-10 ten games carried a first-half
+under and a first-half spread bet on a favourite laying 13.5 to 19.5. Both
+won in 2 of the 10: the under went 2-8, the favourite 8-2.
+
+**What the history says, with no model.** Every game of 2023-24 to 2026-27
+with a pre-game first-half spread, a first-half total and a first-half score
+(17,117, from the local copy of the database):
+
+| Favourite lays, first half | Games | Favourite covers | Under | Both | If unrelated | Under when it covers | Under when it fails |
+|---|---|---|---|---|---|---|---|
+| under 3 | 7,440 | 49.1% | 51.5% | 25.0% | 25.3% | 50.9% | 52.1% |
+| 3 to 6 | 5,110 | 49.8% | 51.1% | 24.3% | 25.4% | 48.8% | 53.4% |
+| 6 to 9 | 2,253 | 47.6% | 50.2% | 22.2% | 23.9% | 46.6% | 53.3% |
+| 9 to 12 | 1,045 | 47.7% | 47.4% | 21.1% | 22.6% | 44.4% | 50.1% |
+| 12 to 15 | 636 | 47.5% | 50.0% | 21.1% | 23.7% | 44.4% | 55.1% |
+| 15 and up | 633 | 47.4% | 46.9% | 22.1% | 22.2% | 46.7% | 47.1% |
+
+He is right about the direction: from 6 to 15 points the two come in together
+about 2 games in 100 less often than unrelated bets would, and the under hits
+44 to 47% of the time the favourite covers. It is not a large effect, it is
+absent at 15 and up, and it is not there every season (laying 12 or more:
+22.9% against 24.8% in 2023-24, 18.5% against 21.4% in 2024-25, 21.2%
+against 21.4% in 2025-26). On the full game the same shows from 20 points up
+(20 to 30: 22.1% against 24.1%; 30 and up: 21.8% against 23.9%).
+
+**What the two models' own replays say** (2023-24 to 2025-26). The pair he
+saw is rare there: 24 games in three seasons where the total model bet an
+under and the spread model bet the favourite (the replay files' cut of 0.02),
+and both won in 8 of them, exactly what unrelated bets would give. The larger
+finding is about the under on its own, here at the model's cut of today,
+0.025:
+
+| First-half unders, by the points the favourite lays in the half | Bets | Record | Units | Return | By season |
+|---|---|---|---|---|---|
+| under 6 | 731 | 425-303 | +83.63 | +10.13% [+3.3, +16.6] | +26.56, +24.54, +32.54 |
+| 6 to 12 | 379 | 198-180 | -5.64 | -1.31% [-9.3, +7.5] | -7.20, -3.12, +4.67 |
+| 12 or more | 331 | 171-159 | -8.50 | -2.26% [-12.9, +8.3] | +6.62, -4.09, -11.03 |
+
+The first-half under has had no edge once the favourite lays 6 or more in the
+half, whoever else bets the game. Every bar from 9 to 15 gives the same
+answer (9 or more: -9.71 units on 489; 10: -13.90 on 426; 14: -8.64 on 248;
+15: -2.93 on 205).
+
+**What changed.**
+
+1. **The first-half total model bets no under when the favourite lays 12 or
+   more in the half** (`models/ncaab_first_half_total.UNDER_BIG_FAVOURITE`).
+   It decides at tip minus 60, fifty minutes before the first-half spread
+   model, so a check of the pair alone would have kept the under and stopped
+   the favourite, the leg that pays (the spread model's favourite bets:
+   86-57, +22.87 units on 143 in the replay; 11-4 this season). The number is
+   the median over the books of the first-half spreads in the total's own
+   decision fetch. The game is recorded as `big_favourite` and written as a
+   priced NONE row, so these unders can still be graded. With the rule on,
+   the replay is 1,513 bets, 855-644, +131.96 units, +7.73% [+3.1, +12.2]
+   (+46.20, +48.38, +37.38 by season) against 1,844 bets, +123.46, +5.93%
+   without it. The 12 is mike's "big favourite"; the 6 to 12 band is flat
+   too and is still bet.
+2. **No college basketball game holds an under and a big favourite's spread
+   bet together** (`models/cbb_pairs.py`): 12 or more on a first-half spread,
+   20 or more on a full-game one. The later of the two is not bet: a card
+   writes it as a NONE row with `paired_with:` in its decision, an in-play
+   loop records `declined`. All five cards and both in-play loops ask.
+
+**Measured with the tip-minus-10 number.** The replay files hold each game's
+first-half spread at the spread model's decision, ten minutes before tip; the
+rule reads it fifty minutes earlier. The two differ by line movement only.
+
+**Not explained yet: the first-half spread model bets big favourites far more
+this season than in its replay.** In games where the favourite lays 12 or
+more in the half the replay bet the favourite 37 times in three seasons (and
+the underdog 485 times); from 2026-11-03 to 11-10 it bet the favourite 15
+times and the underdog 10. The books' first-half number for a 25-point-or-more
+favourite was a median 0.59 of the full-game number in the replay seasons and
+is 0.55 to 0.56 this season, so the model's own number now sits at or above
+the book's instead of 0.7 to 0.8 below it. Those 15 bets are 11-4. Nothing
+was changed; it is in `docs/followups.md`.
+
 ### In play: three game-state models, the best few a night (2026-11-07, mike)
 
 mike, 2026-11-07, on how many: *"3-5 best per night"*. Three models are live:
@@ -1437,11 +1522,44 @@ live picks are announced only while the game is under way). A decision whose
 edge is above 0.50 is a data error and declined (`EDGE_CAP`; the largest graded
 edge was 0.453).
 
+**The fast path: DraftKings' own board** (mike, 2026-11-12: *"This is live
+betting ... as close to Real time as possible"*; `models/ncaab_live_dk.py`, the
+feed `data/ingestors/dk_live_board.py` on mike's machine, `docs/local_ops.md`).
+In every window the loop first reads `dk_live_feed` / `dk_live_reads`; while the
+feed's last read is under 8 s old, each game DraftKings lists is decided on
+DraftKings' board at once: no odds-provider call, no ESPN wait, and the loop
+ticks every second until the window's DraftKings games are settled. The grade's
+rule holds on the faster source: a quote's stamp is the read where DraftKings
+first showed the number, its state is DraftKings' score and clock in that read,
+and a basket since the stamp makes it ineligible. Team fouls come from ESPN's
+newest summary at or before the stamp (ESPN runs about 40 s behind, so a foul
+in the last minute can be missing from the bonus terms). Two waits of one read
+each: a quote first seen on the newest read, and a basket DraftKings has not
+repriced yet (at most 20 s, then the game is skipped for the window). The feed
+reads every second; the loop wakes at the window's first second, and push and
+Discord go out together. The
+deciding book is DraftKings alone on this path (the graded selection at
+DraftKings alone: +9.0% on 658); games DraftKings does not list, and every game
+while the feed is off, go the slow way above. Ledger rows it decides read
+"(DraftKings board)".
+
 **Read before trusting it:**
 
-- **The price is the snapshot's.** The loop posts about 2.5 minutes after the
-  snapshot (the ESPN waits); in-play lines move every possession. The record is
-  graded at the posted price, as the NBA in-play model's is.
+- **The price is the snapshot's, and it is gone by the post** (measured
+  2026-11-12, `scripts/ncaab_live_latency_probe.py`, run `2026-11-12-ncaab`).
+  Indiana -16.5 (live): DraftKings set -16.5 at 23:54:58Z, the provider served
+  it to our fetch at 23:55:54.8 (57 s later), the decision came at 23:59:07.9
+  (the 150 s of ESPN waits, then two other games' 20 s header re-reads and
+  every game's reads one after another; from 2026-11-12 they run together,
+  about 22 s sooner) and Discord received it at 23:59:09.7. A DraftKings live
+  college spread is still up (number and price) 10 s later 77% of the time,
+  60 s 26%, 240 s 4%; the provider's DraftKings number differed from
+  DraftKings' own board at the moment it served it 28% of the time (792
+  pairs). ESPN's scoreboard showed a basket a median 20 s after it (max 33 s),
+  its play-by-play a median 42 s; DraftKings' own board showed the score a
+  median 3.7 s after it and moved its line in the same read or later in 177
+  of 180 baskets. The record is graded at the posted price, as the NBA
+  in-play model's is.
 - **The high-EV tail is where the selection lives, and it climbs**: +4% at EV
   0.08-0.10, +20% at 0.25-0.35, +28% above 0.35 (303 bets). That is the shape a
   real edge has, and it is also the shape of stale quotes. The checks against

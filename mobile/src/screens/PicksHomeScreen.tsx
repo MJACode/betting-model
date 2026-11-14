@@ -46,6 +46,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   FlatList,
   type LayoutChangeEvent,
   Pressable,
@@ -59,7 +60,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
@@ -91,7 +92,7 @@ import { useMembership } from '@/hooks/useMembership';
 import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useThresholdsRevision } from '@/hooks/useActionThresholds';
-import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { useTodayPicks, TODAY_POLL_MS, TODAY_RESUME_MIN_AGE_MS } from '@/hooks/useTodayPicks';
 import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
@@ -142,7 +143,7 @@ const SUBTAB_REACH_BELOW = 6;
 const subTabsReach = reachFrame(0, SUBTAB_REACH_BELOW);
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
-import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence } from '@/lib/liveSports';
+import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence, sportDisplayName } from '@/lib/liveSports';
 import { errorText, friendlyCause } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ScoreboardBoard } from '@/components/ScoreboardBoard';
@@ -180,6 +181,37 @@ export function PicksHomeScreen() {
   const [filter, setFilter] = useState<PicksFilterState>(freshFilter);
   const [sortKey, setSortKey] = useState<SortKey>('edge');
   const [search, setSearch] = useState('');
+
+  // The pre-game boards reload while they are open, so "line now" is the
+  // book's line now and not the one from when the screen first loaded (Matt,
+  // 2026-11-12: the card said FD 41.5 hours after FanDuel moved to 40.5).
+  // Every 10 minutes while this tab is focused and the app is in front, and once on coming back to the app or
+  // the tab, if the last load is older than a minute. A screen, inside the
+  // navigator, so useFocusEffect is safe here (.claude/rules/frontend.md).
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const lastTodayLoad = useRef(Date.now());
+  const reloadToday = useCallback((minAgeMs: number) => {
+    if (Date.now() - lastTodayLoad.current < minAgeMs) return;
+    lastTodayLoad.current = Date.now();
+    void refreshRef.current();
+  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      reloadToday(TODAY_RESUME_MIN_AGE_MS);
+      const id = setInterval(() => {
+        // Skipped when a pull or a resume reloaded in the last few minutes.
+        if (AppState.currentState === 'active') reloadToday(TODAY_POLL_MS - 30_000);
+      }, TODAY_POLL_MS);
+      const sub = AppState.addEventListener('change', (state) => {
+        if (state === 'active') reloadToday(TODAY_RESUME_MIN_AGE_MS);
+      });
+      return () => {
+        clearInterval(id);
+        sub.remove();
+      };
+    }, [reloadToday]),
+  );
 
   // In-play picks, across every sport (the sport cut happens below, so the
   // toggle can mark the sports that are live). Polled fast only while the user
@@ -599,7 +631,9 @@ export function PicksHomeScreen() {
   // blink out to a spinner twice a minute (UX review, 2026-09-12). prevLiveCount
   // is null until the first settled fetch, which is exactly "never loaded".
   const liveFirstLoad = liveLoading && prevLiveCount.current === null;
-  const busy = view === 'live' ? liveFirstLoad : loading;
+  // Same for today's boards since they reload every 10 minutes: the skeleton
+  // is for a board never loaded, not for a background reload of one on screen.
+  const busy = view === 'live' ? liveFirstLoad : loading && !loaded;
   // A FAILED load with nothing to show for this view. It replaces the empty
   // state rather than sitting above it: "No MLB picks today" under a timeout
   // told the user the opposite of what happened (usability audit H3). With
@@ -621,8 +655,10 @@ export function PicksHomeScreen() {
     knownCount(0, { loaded, error, hasData: allData.length > 0 || pausedData.length > 0 }) === null;
   const liveUnknown = knownCount(0, { loaded: liveLoaded, error: liveError, hasData: allLiveData.length > 0 }) === null;
   // Pull-to-refresh still has to spin, and it cannot read `busy` any more for the
-  // same reason. Local, because the hook cannot tell a poll from a pull.
+  // same reason, on either board: both now reload in the background. Local,
+  // because the hooks cannot tell a poll from a pull.
   const [pulling, setPulling] = useState(false);
+  const [partialRetrying, setPartialRetrying] = useState(false);
   const stakedSuffix = signalExposure > 0 ? ` · ${formatUnits(signalExposure)} staked` : '';
   const subtitle = view === 'scoreboard'
     ? ''
@@ -871,12 +907,17 @@ export function PicksHomeScreen() {
       {/* The picks loaded but something behind them did not — the odds views
           the line pills read, or one sport's look-ahead card. Say so and
           offer the retry; an empty pill and silence is how the 2026-09-04
-          timeouts went unseen here. Hidden while reloading, so a tap on Retry
+          timeouts went unseen here. Hidden while a TAP's reload runs, so Retry
           answers at once and the banner only returns if the reload fails
-          again (UX review). */}
-      {!error && !loading && partial ? (
+          again (UX review). Not hidden for a background reload: that made it
+          blink, and the list jump, every 10 minutes (UX review 2026-11-12). */}
+      {!error && !partialRetrying && !pulling && partial ? (
         <Pressable
-          onPress={() => void refresh()}
+          onPress={() => {
+            setPartialRetrying(true);
+            lastTodayLoad.current = Date.now();
+            void refresh().finally(() => setPartialRetrying(false));
+          }}
           accessibilityRole="button"
           accessibilityLabel={partialSentence(partial)}
           accessibilityHint="Reloads today’s picks"
@@ -1004,15 +1045,16 @@ export function PicksHomeScreen() {
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl
-            refreshing={view === 'live' ? pulling : busy}
+            refreshing={pulling}
             onRefresh={() => {
               // Pull-to-refresh on the live segment must hit the live fetch —
               // refreshing today's board there would spin and change nothing.
+              setPulling(true);
               if (view !== 'live') {
-                void refresh();
+                lastTodayLoad.current = Date.now();
+                void refresh().finally(() => setPulling(false));
                 return;
               }
-              setPulling(true);
               void refreshLive().finally(() => setPulling(false));
             }}
           />
@@ -1023,6 +1065,13 @@ export function PicksHomeScreen() {
     </SafeAreaView>
   );
 }
+
+// The EuroLeague boards' empty copy (2026-11-14): its pre-game models post game
+// by game, five to ten minutes before each tip-off; its halftime model posts on
+// Live Signals.
+const EUROLEAGUE_PREGAME_EMPTY =
+  'EuroLeague pre-game picks post five to ten minutes before each tip-off, when that game is checked. Bets ' +
+  'made at halftime post on Live Signals.';
 
 function boardLabel(view: PicksView): string {
   if (view === 'today') return 'All';
@@ -1105,14 +1154,33 @@ function EmptyForView({
   if (view === 'today') {
     return (
       <EmptyState
-        title={`No ${sport} picks today`}
+        title={
+          // EuroLeague's pre-game models post game by game, minutes before
+          // each tip, not on the refresh cadence (2026-11-14).
+          sport === 'EUROLEAGUE' ? 'No EuroLeague picks yet today' : `No ${sport} picks today`
+        }
         subtitle={
           // The women's totals model posts when DraftKings opens a game's
           // total, not on the refresh cadence, so the refresh times would
           // send a member back at the wrong hour (UX review, 2026-11-10).
+          // The tennis card is the same: it runs every ten minutes, around
+          // the clock, and decides each match about 30 minutes before its
+          // listed start (scripts/tennis_moneyline_card.py).
           sport === 'NCAABW'
             ? `No NCAABW picks have posted for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
-            : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+            : sport === 'ATP' || sport === 'WTA'
+              ? `No ${sport} picks have posted for ${date} yet. Each match shows here about 30 minutes before its listed start, once the model has checked it. It bets only a few; the rest show as no bet.`
+              : // The five EuroLeague pre-game models decide each game once, five to
+                // ten minutes before its tip (scripts/euroleague_pregame_card.py), so
+                // the refresh times would send a member back at the wrong hour.
+                sport === 'EUROLEAGUE'
+                ? EUROLEAGUE_PREGAME_EMPTY
+                : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+        }
+        subtitleAccessibilityLabel={
+          sport === 'ATP' || sport === 'WTA'
+            ? `No ${sportSpokenName(sport)} picks have posted for ${date} yet. Each match shows here about 30 minutes before its listed start, once the model has checked it. It bets only a few; the rest show as no bet.`
+            : undefined
         }
       />
     );
@@ -1120,8 +1188,12 @@ function EmptyForView({
   if (view === 'signals') {
     return (
       <EmptyState
-        title="No signal bets right now"
-        subtitle="Zero picks is a valid signal — no high-conviction plays right now. Open the All board to see everything the model scored, or check back after the next refresh."
+        title={sport === 'EUROLEAGUE' ? 'No EuroLeague signals right now' : 'No signal bets right now'}
+        subtitle={
+          sport === 'EUROLEAGUE'
+            ? EUROLEAGUE_PREGAME_EMPTY
+            : 'Zero picks is a valid signal — no high-conviction plays right now. Open the All board to see everything the model scored, or check back after the next refresh.'
+        }
       />
     );
   }
@@ -1136,15 +1208,15 @@ function EmptyForView({
     if (!hasLiveModel(sport)) {
       return (
         <EmptyState
-          title={`No live model for ${sport} yet`}
-          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
+          title={`No live model for ${sportDisplayName(sport)} yet`}
+          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sportDisplayName(sport)}. The All and Signals boards carry ${sportDisplayName(sport)}’s pre-game picks.`}
           subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSentence(sportSpokenName)}, so this board stays empty for ${sportSpokenName(sport)}. The All and Signals boards carry its pre-game picks.`}
         />
       );
     }
     return (
       <EmptyState
-        title={`No ${sport} live signals right now`}
+        title={`No ${sportDisplayName(sport)} live signals right now`}
         subtitle={liveEmptySubtitle(sport)}
       />
     );

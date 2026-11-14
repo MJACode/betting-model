@@ -272,6 +272,10 @@ stored kickoff times, not bought or dry-run). It is only worth buying with
 play-by-play whose clock times are real: CFBD's 2025 wallclocks are
 last-edited stamps (§6 report), and no other source has been probed.
 
+**Bought 2026-11-10 and graded 2026-11-11: nothing clears.** Both reads of
+the first-half and team-total history, 153,286 rows; the write-up is
+`docs/ncaaf_first_half_team_totals.md`.
+
 Balance on 2026-11-10 16:11 UTC: 11,932,481 credits (`odds_api_quota`).
 Half and quarter scores come free from CFBD's game records through a worker
 job. Nothing is bought until mike says so.

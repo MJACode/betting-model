@@ -272,6 +272,19 @@ def _build_pick_label(pick_side: str, home_team: str, away_team: str,
         # tracking/pick_integrity refuses a first-quarter label that does not say so.
         team = home_team if pick_side == "home" else away_team
         return f"{away_team} @ {home_team} — First Quarter {team} ML"
+    elif market == "h2h_h1":
+        # The first half's moneyline: "MAD @ PAN — First Half MAD ML" (models/euroleague_pregame.py, the first-half
+        # underdog). The matchup leads, as the first-quarter moneyline's does, so the label cannot be read as the
+        # full-game moneyline. tracking/pick_integrity refuses a first-half label that does not say so.
+        team = home_team if pick_side == "home" else away_team
+        return f"{away_team} @ {home_team} — First Half {team} ML"
+    elif market == "totals_q1":
+        # The first quarter's points: "MAD @ PAN — First Quarter Over 41.5" (models/euroleague_pregame.py, the
+        # club first-quarter share). The matchup leads, as the first-half total's does, so the label cannot be read
+        # as the full-game total. tracking/pick_integrity refuses a first-quarter label that does not say so.
+        direction = "Over" if pick_side == "over" else "Under"
+        line_str = f" {line}" if line is not None else ""
+        return f"{away_team} @ {home_team} — First Quarter {direction}{line_str}"
     elif market in ("spreads", "spreads_1st_5_innings"):
         team = home_team if pick_side == "home" else away_team
         if line is not None:
@@ -366,10 +379,9 @@ def score_game(conn: DBConnection,
     # spread_home = NaN — while training always has them populated (top-6
     # feature for O/U). That train/serve skew shifted live O/U probabilities
     # ~5pp under vs the validated backtest path (found 2026-07-05). Applies
-    # to full-game totals/spreads AND the F5 variants; UFC totals has its own
-    # override below (it also derives is_five_rounds from the line).
+    # to full-game totals/spreads AND the F5 variants.
     feat = features
-    if (market in ("totals", "spreads") and sport != "UFC") or "1st_5_innings" in market:
+    if market in ("totals", "spreads") or "1st_5_innings" in market:
         mkt_odds = _get_scoring_odds(conn, game_id, market)
         if mkt_odds:
             feat = dict(features)  # shallow copy to avoid mutating shared dict
@@ -377,15 +389,6 @@ def score_game(conn: DBConnection,
                 feat["total_line"] = mkt_odds["total_line"]
             if mkt_odds.get("spread_home") is not None:
                 feat["spread_home"] = mkt_odds["spread_home"]
-
-    # For UFC totals/method, the round-total line (when DK carries it) also
-    # tells us the bout length: a line ≥ 3.5 only exists for 5-round fights.
-    if sport == "UFC" and market in ("totals", "method"):
-        ufc_t_odds = _get_dk_odds(conn, game_id, "totals")
-        if ufc_t_odds and ufc_t_odds.get("total_line") is not None:
-            feat = dict(features)
-            feat["total_line"] = ufc_t_odds["total_line"]
-            feat["is_five_rounds"] = int(float(ufc_t_odds["total_line"]) >= 3.5)
 
     # Build feature vector. Pass genuinely-missing features as NaN (XGBoost
     # handles NaN natively, and training drops null-feature rows so NaN is the
@@ -411,14 +414,6 @@ def score_game(conn: DBConnection,
     home_team = features.get("home_team", "")
     away_team = features.get("away_team", "")
     game_date = features.get("game_date", "")
-
-    # UFC method of victory — 3-class, prob-only (no DK odds via The Odds API).
-    # Handled before the binary predict below (probs has 3 entries).
-    if market == "method":
-        return _score_ufc_method(conn, game_id, model_id, sport, game_date,
-                                 home_team, away_team, clf, x, features,
-                                 bankroll, dry_run, commence_time,
-                                 schedule_hold=schedule_hold)
 
     # NHL regulation 3-way — 3-class (away reg win / draw / home reg win),
     # priced against DK's h2h_3way market. Also handled before the binary
@@ -565,15 +560,6 @@ def score_game(conn: DBConnection,
     if "1st_5_innings" in market and not _has_real_game_price(odds, market):
         logger.debug(f"  {game_id}/{model_id}: no real F5 book price — skipping")
         return []
-
-    # UFC round totals without DK lines — prob-only vs the synthetic line the
-    # feature row carries (2.5 / 4.5). Same convention as the old F5 prob-only
-    # path: edge = model_prob − 0.50, dk_odds NULL, settled at −110 flat.
-    if not odds and sport == "UFC" and market == "totals":
-        return _score_ufc_totals_prob_only(
-            conn, game_id, model_id, sport, game_date, home_team, away_team,
-            home_prob, away_prob, feat, features, bankroll, dry_run, commence_time,
-            schedule_hold=schedule_hold)
 
     if not odds:
         logger.debug(f"  No DK odds for {game_id}/{model_id}")
@@ -928,9 +914,6 @@ def _score_f5_prob_only(
         _insert_picks(conn, picks)
 
     return picks
-
-
-_UFC_METHOD_LABELS = {"decision": "Decision", "ko_tko": "KO/TKO", "submission": "Submission"}
 
 
 def _anchored_probability(conn, game_id: str, game_date: str, home_team: str,
@@ -1330,173 +1313,6 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
             )
 
     if picks and not dry_run and write:
-        _insert_picks(conn, picks)
-    return picks
-
-
-def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
-                      game_date: str, home_team: str, away_team: str,
-                      clf, x, features: dict, bankroll: float,
-                      dry_run: bool, commence_time: str | None,
-                      schedule_hold: str | None = None) -> list[dict]:
-    """
-    UFC method-of-victory scoring — 3-class (decision / ko_tko / submission),
-    prob-only (model_id is in PROB_ONLY_MODELS; The Odds API carries no method
-    odds). Emits one pick for the argmax class: BET when its calibrated prob
-    clears the threshold, NONE otherwise (no AVOID — there is no priced side
-    to fade). Fair prob for record-keeping edge = 1/3.
-    """
-    from features.ufc_feature_engine import METHOD_CLASSES
-
-    try:
-        probs = clf.predict_proba(x)[0]
-    except Exception as exc:
-        logger.error(f"  Prediction error for {game_id}/{model_id}: {exc}")
-        return []
-    if len(probs) < 3:
-        logger.error(f"  {game_id}/{model_id}: expected 3-class probs, got {len(probs)}")
-        return []
-
-    idx = int(np.argmax(probs))
-    model_prob = float(probs[idx])
-    pick_side = METHOD_CLASSES[idx]
-    fair = 1.0 / 3.0
-    edge = model_prob - fair
-
-    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
-    # VERIFIED 2026-08-28 (scripts/probe_ufc_markets.py, run against the live
-    # feed with the production key): The Odds API returns HTTP 422 "unsupported
-    # market" for every method/round key — method_of_victory, win_method,
-    # method, fight_outcome, outcome_method, to_win_by_ko/submission/decision,
-    # round_betting, exact_rounds, winning_round, go_the_distance. Only h2h,
-    # totals, spreads and h2h_3_way are valid keys for MMA.
-    #
-    # A 422 rejects the KEY NAME, so this is independent of which fight is
-    # queried. DraftKings does price method of victory on its own product; our
-    # data provider simply does not expose it. Re-run the probe if the provider
-    # ever adds it, then put the key in UFC_EVENT_MARKETS and this model prices
-    # against a real line instead of a prior.
-    #
-    # Until then config.REQUIRE_DK_PRICE keeps it from firing, and the row is
-    # written as NONE so the model keeps a tracked record. NOTE the `edge` here
-    # is model_prob - 1/3 (a uniform prior over the three classes), NOT an edge
-    # over a market — it is not comparable to the edge on a priced pick and must
-    # never be presented as if it were.
-    signal_type = ("NONE" if REQUIRE_DK_PRICE
-                   else ("BET" if model_prob >= prob_thresh else "NONE"))
-    # Paused keeps the real verdict and stamps the note -- see _paused_signal.
-    signal_type, _ = _paused_signal(model_id, signal_type)
-
-    if signal_type == "BET":
-        kelly_frac, rec_bet = quarter_kelly(model_prob, fair, bankroll)
-    else:
-        kelly_frac, rec_bet = 0.0, 0.0
-
-    pick = {
-        "game_id":           game_id,
-        "model_id":          model_id,
-        "sport":             sport,
-        "game_date":         game_date,
-        "pick_side":         pick_side,
-        "pick_label":        f"{away_team} vs {home_team} — {_UFC_METHOD_LABELS[pick_side]}",
-        "model_probability": round(model_prob, 4),
-        "dk_implied_prob":   round(fair, 4),
-        "edge":              round(edge, 4),
-        "dk_odds":           None,
-        "scored_line":       None,
-        "kelly_fraction":    kelly_frac,
-        "recommended_bet":   rec_bet,
-        "bankroll_at_pick":  bankroll,
-        "injury_flag":       None,
-        "injury_detail":     None,
-        "signal_type":       signal_type,
-        "confidence_tier":   _confidence_tier(edge),
-        "game_time":         commence_time,
-        "downgrade_reason":  _pause_note(model_id),
-    }
-    if schedule_hold:
-        _apply_schedule_hold([pick], schedule_hold)
-
-    if pick["signal_type"] == "BET":
-        logger.info(
-            f"  [BET] {pick['pick_label']} | DK=N/A (prob-only) | "
-            f"model={model_prob:.3f} | edge={edge*100:+.1f}% (vs fair 1/3) | "
-            f"bet=${rec_bet:.0f} | [{pick['confidence_tier']}]"
-        )
-    if not dry_run:
-        _insert_picks(conn, [pick])
-    return [pick]
-
-
-def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
-                                game_date: str, home_team: str, away_team: str,
-                                over_prob: float, under_prob: float,
-                                feat: dict, features: dict, bankroll: float,
-                                dry_run: bool, commence_time: str | None,
-                                schedule_hold: str | None = None) -> list[dict]:
-    """
-    UFC round totals without DK lines: prob-only against the synthetic line
-    carried by the feature row (2.5 for 3-round bouts, 4.5 for 5-round).
-    Same convention as the F5 prob-only path — BET rows only, dk_odds NULL,
-    edge = model_prob − 0.50, settled at −110 flat.
-    """
-    # A synthetic 2.5/4.5 line is not a market. With config.REQUIRE_DK_PRICE on
-    # there is nothing placeable here, so skip rather than emit an unbettable
-    # BET — the same "no line, no pick" convention NCAAF and NFL already use.
-    # Since the sibling-orientation fallback in _get_dk_odds landed, reaching
-    # this path at all means no book has posted the fight's round total yet.
-    if REQUIRE_DK_PRICE:
-        logger.debug(f"  {game_id}/{model_id}: no DK round-total line — skipped "
-                     f"(REQUIRE_DK_PRICE)")
-        return []
-
-    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
-    edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
-    line = feat.get("total_line")
-    if line is None:
-        return []
-
-    picks = []
-    for pick_side, model_prob in (("over", over_prob), ("under", under_prob)):
-        if model_prob < prob_thresh:
-            continue
-        synthetic_edge = model_prob - 0.50
-        if synthetic_edge < edge_thresh:
-            continue
-
-        kelly_frac, rec_bet = quarter_kelly(model_prob, 0.5, bankroll)
-        pick = {
-            "game_id":           game_id,
-            "model_id":          model_id,
-            "sport":             sport,
-            "game_date":         game_date,
-            "pick_side":         pick_side,
-            "pick_label":        f"{away_team} vs {home_team} "
-                                 f"{pick_side.title()} {line} Rounds",
-            "model_probability": round(model_prob, 4),
-            "dk_implied_prob":   0.5,
-            "edge":              round(synthetic_edge, 4),
-            "dk_odds":           None,
-            "scored_line":       line,
-            "kelly_fraction":    kelly_frac,
-            "recommended_bet":   rec_bet,
-            "bankroll_at_pick":  bankroll,
-            "injury_flag":       None,
-            "injury_detail":     None,
-            "signal_type":       "BET",
-            "confidence_tier":   _confidence_tier(synthetic_edge),
-            "game_time":         commence_time,
-        }
-        picks.append(pick)
-        logger.info(
-            f"  [BET] {pick['pick_label']} | DK=N/A (prob-only) | "
-            f"model={model_prob:.3f} | edge={synthetic_edge*100:+.1f}% (vs fair) | "
-            f"bet=${rec_bet:.0f} | [{pick['confidence_tier']}]"
-        )
-
-    if schedule_hold:
-        _apply_schedule_hold(picks, schedule_hold)
-    if picks and not dry_run:
         _insert_picks(conn, picks)
     return picks
 
@@ -2417,8 +2233,7 @@ def _best_game_price(conn: DBConnection, game_id: str, market: str,
     Only quotes at the SAME line count (totals/spreads), and only pre-game
     snapshots — an in-play price is a different proposition entirely.
 
-    BOUNDED AT THE PRE-GAME CUTOFF when `cutoff` (the 19-char UTC prefix
-    _pregame_cutoff returns) is given, exactly as _get_dk_odds bounds the
+    BOUNDED AT THE PRE-GAME CUTOFF when `cutoff` is given, exactly as _get_dk_odds bounds the
     DraftKings read: since 2026-09-09 this price DECIDES the pick, and the
     evening refresh keeps writing `open` rows after first pitch, so an
     unbounded "newest per book" would hand a pre-game model an in-play price
@@ -2450,6 +2265,24 @@ def _best_game_price(conn: DBConnection, game_id: str, market: str,
     return _best_game_price_one(conn, sibling, market, side, scored_line, cutoff)
 
 
+def _odds_snapshot_prefix(cutoff: str | None) -> str | None:
+    """19-char UTC prefix for `substr(snapshot_at, 1, 19)`.
+
+    `odds.snapshot_at` is ISO with a `T` and UTC (`Z` or `+00:00`); the
+    prefix drops that offset so the two shapes compare (`_get_dk_odds`).
+    The cutoff may carry a different offset. Truncating the string would
+    compare the local clock to UTC rows, so this parses first and formats
+    the UTC instant. A value that will not parse is prefixed as text.
+    """
+    if not cutoff:
+        return None
+    dt = _parse_cutoff(cutoff)
+    if dt is None:
+        text = str(cutoff).strip()
+        return text[:19] or None
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def _best_game_price_one(conn: DBConnection, game_id: str, market: str,
                          pick_side: str, scored_line: float | None,
                          cutoff: str | None = None) -> dict | None:
@@ -2463,9 +2296,11 @@ def _best_game_price_one(conn: DBConnection, game_id: str, market: str,
 
     placeholders = ",".join("?" for _ in BEST_LINE_BOOKMAKERS)
     # The same 19-character-prefix bound _get_dk_odds uses (its docstring
-    # carries the measurement that makes the prefix compare safe).
-    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
-    params = (game_id, market, *BEST_LINE_BOOKMAKERS) + ((cutoff,) if cutoff else ())
+    # carries the measurement that makes the prefix compare safe). The
+    # prefix is the UTC instant: a `-04:00` cutoff must not be sliced raw.
+    bound = _odds_snapshot_prefix(cutoff)
+    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if bound else ""
+    params = (game_id, market, *BEST_LINE_BOOKMAKERS) + ((bound,) if bound else ())
     rows = conn.execute(f"""
         SELECT bookmaker, {price_col}, {link_col}, total_line, spread_home, snapshot_at
         FROM odds
@@ -2777,11 +2612,18 @@ def _tag_prop(pick: dict, ctx: tuple, conn: DBConnection | None = None) -> dict:
 
 
 def _pregame_cutoff(conn: DBConnection, game_id: str) -> str | None:
-    """The 19-char UTC prefix of this game's first pitch, or None.
+    """This game's pregame cutoff, offset included, or None.
 
     None means "do not bound" — a game with no commence_time keeps the old
     behaviour rather than losing every price, which is the fail-open direction
     the WNBA leak taught us (.claude/rules/data-integrity.md).
+
+    The return is the cutoff as stored, including its offset. A 19-character
+    prefix drops `-04:00`, and `_parse_cutoff` then reads that clock as UTC,
+    so the started-game skip treats the game as started about four hours
+    early. The odds text comparison still wants a 19-character UTC prefix
+    (`_odds_snapshot_prefix`); that slice is taken from the UTC instant at
+    the comparison, not here.
 
     ACTUAL first pitch, not the scheduled start. This shipped in #606 reading
     `commence_time` alone, which is the permissive direction and therefore the
@@ -2802,7 +2644,14 @@ def _pregame_cutoff(conn: DBConnection, game_id: str) -> str | None:
         (game_id,),
     ).fetchone()
     ct = row[0] if row else None
-    return str(ct)[:19] if ct else None
+    if ct is None or ct == "":
+        return None
+    if isinstance(ct, datetime):
+        if ct.tzinfo is None:
+            ct = ct.replace(tzinfo=timezone.utc)
+        return ct.isoformat()
+    text = str(ct).strip()
+    return text or None
 
 
 # F5 totals/spreads DraftKings' Odds API feed does not list. Other books do
@@ -2873,7 +2722,8 @@ def _newest_book_game_row(conn: DBConnection, game_id: str, market: str,
     are all older than the bound: no price, never the other id's).
     """
     spread_filter = _game_spread_filter_sql(game_id, market)
-    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
+    bound = _odds_snapshot_prefix(cutoff)
+    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if bound else ""
     row = conn.execute(f"""
             SELECT home_price, away_price, draw_price,
                    spread_home, total_line, over_price, under_price,
@@ -2888,7 +2738,7 @@ def _newest_book_game_row(conn: DBConnection, game_id: str, market: str,
               {pregame_filter}
             ORDER BY snapshot_at DESC
             LIMIT 1
-        """, (game_id, market, bookmaker) + ((cutoff,) if cutoff else ())
+        """, (game_id, market, bookmaker) + ((bound,) if bound else ())
         ).fetchone()
     if not row:
         return None
@@ -2905,8 +2755,9 @@ def _ufc_id_never_priced(conn: DBConnection, game_id: str, market: str,
     price, so the "is this fight real" check skips it. (That alone does not
     make one id per fight: a never-priced id still borrows, and for up to 3
     hours after a flip both ids hold fresh rows of their own. run_scorer
-    scores a fight present under both ids on one of them,
-    _ufc_one_id_per_fight.) Before the age bound its own stale row answered,
+    scored a fight present under both ids on one of them until the UFC game
+    models were retired on 2026-11-13; a UFC model that writes picks now
+    de-duplicates the two ids itself.) Before the age bound its own stale row answered,
     which was wrong too; with the bound and without this check, the read fell
     through to the live copy's fresh price and BOTH ids decided the same fight
     (2026-10-09:
@@ -2919,85 +2770,6 @@ def _ufc_id_never_priced(conn: DBConnection, game_id: str, market: str,
     """
     return _newest_book_game_row(conn, game_id, market, "draftkings",
                                  cutoff) is None
-
-
-def _ufc_own_newest_dk(conn: DBConnection, game_id: str,
-                       markets: tuple) -> datetime | None:
-    """The newest pre-game DraftKings row stored under THIS id, any of
-    `markets`, whatever its age; None when it has none. One LIMIT 1 read per
-    market on idx_odds_book_snap (the same read _ufc_id_never_priced makes;
-    5.9 ms on production, 2026-10-09). Only ids whose twin is also on the
-    board are read: 2 fights on the 10-10 card."""
-    cutoff = _pregame_cutoff(conn, game_id)
-    best = None
-    for market in markets:
-        row = _newest_book_game_row(conn, game_id, market, ODDS_API_BOOKMAKER,
-                                    cutoff)
-        ts = _parse_snapshot(row.get("snapshot_at")) if row else None
-        if ts is not None and (best is None or ts > best):
-            best = ts
-    return best
-
-
-def _ufc_one_id_per_fight(conn: DBConnection, games) -> dict:
-    """{id left out: id scored} for every UFC fight in `games` under both
-    orientations (second review, 2026-10-09).
-
-    The per-market rule (_ufc_id_never_priced) stops only the abandoned copy.
-    An id DraftKings never priced still borrows its twin's price, and for up to
-    3 hours after the feed flips home and away both ids hold fresh rows of
-    their own, so both passed the "is this fight real" check and the fight was
-    decided twice in one pass, and could be bet twice (picks 332605 and
-    332615 are one fight, BET and graded under both orientations on
-    2026-06-20; that cause was never established).
-
-    The id scored is the one whose own newest DraftKings row is newer: the
-    feed's current orientation. When neither has a row of its own, the first
-    in sort order (neither can pass the real-fight check then anyway). Only
-    the scoring pass is affected: the chosen id still borrows a market only
-    its twin carries (_get_dk_odds), which is the 2026-08-29 totals case the
-    fallback exists for.
-    """
-    markets = tuple(sorted({mk for sp, mk, _ in MODELS.values() if sp == "UFC"}))
-    ids = {g[0] for g in games if g[1] == "UFC"}
-    out: dict = {}
-    for a in sorted(ids):
-        b = _sibling_ufc_game_id(a)
-        if not b or b not in ids or b < a:
-            continue
-        ta = _ufc_own_newest_dk(conn, a, markets)
-        tb = _ufc_own_newest_dk(conn, b, markets)
-        keep = b if tb is not None and (ta is None or tb > ta) else a
-        out[a if keep == b else b] = keep
-    return out
-
-
-def _clear_left_out_ufc_id(conn: DBConnection, game_id: str) -> None:
-    """Clear the unsettled no-bet and avoid rows of a UFC id run_scorer leaves
-    out (_ufc_one_id_per_fight), so they leave the board this pass. The same
-    statement as the per-game clear in run_scorer: BETs, in-play rows and NFL
-    props are never touched. The sweep after the loop would also catch these
-    rows, but it yields when it cannot get its locks within 10 s. Housekeeping
-    only, so a failure is logged and never fails the pass. Like the per-game
-    clear, only the models a full pass re-writes (_pass_rewritten_models)."""
-    _mf, _mp = _model_id_filter(_pass_rewritten_models(False))
-    try:
-        conn.execute("""
-            DELETE FROM picks
-            WHERE game_id = %s
-              AND result IS NULL
-              AND signal_type != 'BET'
-              AND is_live IS NOT TRUE
-              AND model_id NOT LIKE 'nfl_prop_%%'
-        """ + _mf, (game_id,) + _mp)
-        conn.commit()
-    except Exception as exc:                                  # noqa: BLE001
-        try:
-            conn.rollback()
-        except Exception:                                     # noqa: BLE001
-            pass
-        logger.warning(f"  {game_id}: clearing the left-out id's rows failed "
-                       f"({exc!r}); the sweep after the loop retries")
 
 
 def _fallback_game_line_quote(conn: DBConnection, game_id: str, market: str,
@@ -3377,19 +3149,28 @@ def _cutoff_by_game(conn: DBConnection, game_ids: list[str]) -> dict | None:
     The value is `pregame_cutoff_sql` — actual first pitch, clamped — not
     the scheduled start. A game with no row, or a NULL cutoff, is unknown.
     None means the read failed; the caller keeps the rows.
+
+    The read is in a savepoint. A statement_timeout aborts the Postgres
+    transaction, and catching it without rolling back makes the following
+    INSERT raise InFailedSqlTransaction and drops the whole batch (the
+    VAN@EDM best-price failure, daily run
+    51e965f8023c4b0e86e03fe075af1f9c). ConnectionLost is re-raised: that
+    transaction is gone.
     """
     if not game_ids:
         return {}
-    try:
-        rows = conn.execute(
+
+    def _read():
+        return conn.execute(
             f"SELECT game_id, {pregame_cutoff_sql('games')} "
             "FROM games WHERE game_id = ANY(?)",
             (list(game_ids),),
         ).fetchall()
-    except Exception as exc:  # noqa: BLE001 — unknown start is kept
-        logger.warning(
-            f"pregame cutoff lookup failed ({exc!r}); keeping the rows"
-        )
+
+    rows = _fail_open(
+        conn, "sp_insert_cutoff", _read, None, "pregame cutoff lookup",
+    )
+    if rows is None:
         return None
     return {r[0]: r[1] for r in rows}
 
@@ -3634,9 +3415,14 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               WHEN p.model_id = 'nba_q1_trend_ml' THEN 'h2h_q1'
               -- The NCAAB first half's points, not the game total.
               WHEN p.model_id = 'ncaab_first_half_total' THEN 'totals_h1'
+              -- The EuroLeague first half's moneyline and first quarter's
+              -- points (models/euroleague_pregame.py), not the game's.
+              WHEN p.model_id = 'euroleague_h1_dog_ml' THEN 'h2h_h1'
+              WHEN p.model_id = 'euroleague_q1_club_share_total' THEN 'totals_q1'
               WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'
                 OR p.model_id = 'mlb_spread_market' OR p.model_id = 'nfl_opener_spread'
                 OR p.model_id = 'ncaab_spread_market'
+                OR p.model_id = 'euroleague_home_dog_spread'
                 THEN 'spreads'
               -- ncaab_moneyline_own_spread has 'spread' in its id but bets
               -- moneylines: it falls to h2h here, and no pattern above may
@@ -4149,18 +3935,6 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                     + traceback.format_exc())
                 ahead_unpriced = set()
 
-        # ONE ID PER UFC FIGHT (second review, 2026-10-09). A fight the feed
-        # holds under both home/away orientations is scored on the id
-        # _ufc_one_id_per_fight picks; the other is skipped in the loop below.
-        # Fails OPEN like the filters above: if the read breaks, both ids are
-        # scored, which is the behaviour before this change.
-        ufc_left_out: dict = {}
-        if sum(1 for g in games if g[1] == "UFC") > 1:
-            ufc_left_out = _fail_open(
-                conn, "sp_ufc_one_id",
-                lambda: _ufc_one_id_per_fight(conn, games),
-                {}, "UFC one-id-per-fight read")
-
         # Check for postponed MLB games via the official schedule API
         postponed_ids = _get_postponed_games(target_date)
         if postponed_ids:
@@ -4362,7 +4136,6 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         skipped_started = 0
         skipped_postponed = 0
         skipped_locked = 0
-        skipped_twin = 0
         side_models = side_checked_models()
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
@@ -4407,38 +4180,17 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 skipped_started += 1
                 continue
 
-            # The same fight under its other orientation is the id scored.
-            # This id's old no-bet and avoid rows leave the board now; the
-            # sweep after the loop would also clear them, but it yields when
-            # it cannot get its locks. BETs are never deleted.
-            if game_id in ufc_left_out:
-                skipped_twin += 1
-                logger.info(f"  [SKIP] {away_team} vs {home_team} — the same "
-                            f"fight is scored as {ufc_left_out[game_id]} "
-                            f"(_ufc_one_id_per_fight)")
-                if not dry_run:
-                    _clear_left_out_ufc_id(conn, game_id)
-                continue
-
             # Build features once per game, reuse across all models for that sport
             odds_mlb_h2h  = _get_dk_odds(conn, game_id, "h2h")
-
-            # UFC: only score fights DK actually prices. The Odds API sometimes
-            # lists speculative/rumored matchups from other books (e.g. the same
-            # fighter against three different opponents on one date) and the
-            # odds ingestor creates games rows for them. Moneyline already skips
-            # without odds, but round totals and method are prob-only and would
-            # fire picks on fights that don't exist. A DK h2h row is the
-            # "this fight is real" signal — DK prices every real UFC bout.
-            if sport == "UFC" and not odds_mlb_h2h:
-                logger.info(f"  [SKIP] {away_team} vs {home_team} — no DK h2h "
-                            f"odds (unconfirmed/speculative bout)")
-                continue
 
             # A sport with no game model in config.MODELS has nothing to score
             # here. NBA since 2026-10-15: its models are cards (docs/
             # nba_models_2026.md), and building features for a game no model
-            # reads only spends database time.
+            # reads only spends database time. UFC since 2026-11-13, when its
+            # three trained models were retired; the one-id-per-fight pass
+            # that guarded them (one fight under both home/away orientations
+            # scored once) went with them, so a UFC model that writes picks
+            # must de-duplicate the two ids of one fight itself.
             if not any(sp == sport for sp, _, _ in MODELS.values()):
                 continue
 
@@ -4450,12 +4202,6 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             elif sport == "WNBA":
                 from features.wnba_feature_engine import build_wnba_game_features
                 features = build_wnba_game_features(
-                    conn, game_id, game_date, home_team, away_team, season,
-                    odds_row=odds_mlb_h2h
-                )
-            elif sport == "UFC":
-                from features.ufc_feature_engine import build_ufc_game_features
-                features = build_ufc_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
@@ -4798,8 +4544,6 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             logger.info(f"Skipped {skipped_started} games already started (picks locked)")
         if skipped_locked:
             logger.info(f"Skipped {skipped_locked} game-model pick(s) locked from an earlier run today")
-        if skipped_twin:
-            logger.info(f"Skipped {skipped_twin} UFC id(s) whose fight is scored under its other id")
 
         if not dry_run:
             conn.commit()
