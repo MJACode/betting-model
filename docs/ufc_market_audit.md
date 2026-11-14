@@ -229,15 +229,16 @@ the noon run 7 to 30 days before the card.
 ## 4. Round totals (`totals_search.py`; the 2026 pilot `totals_model.py`)
 
 **Verdict: does not clear.** No rule decided at a fixed time beats
-DraftKings' margin on the bought history. One lead survives as a forward
-test (§4f, rung 4), and it is written down before it is watched.
+DraftKings' margin on the bought history. One lead came out of the ladder
+(§4f, rung 4); it fails the bar and is written into the frontier.
 
 **Corrected 2026-11-13.** This section said the bought history holds
 DraftKings' totals only from 2025, and that DraftKings against Pinnacle at
 the same line in the same pull gave 22 bets. Measured: DraftKings carries
-totals on 31 fights in 2023, 417 in 2024, 430 in 2025 and 194 in 2026
-(1,058 fights at the lines bet here); Pinnacle on 2,384 fights from 2020;
-no other book a pick may name carries totals in the history. The 22 was a
+totals on 1,072 fights at any line (31 in 2023, 417 in 2024, 430 in 2025,
+194 to June 2026), 1,058 at the lines bet here; Pinnacle on 2,421 from 2020,
+2,384 at the lines bet here. No other book a pick may name carries totals
+in the history. The 22 was a
 count of bets, not of comparable pulls (there are 8,090).
 
 **Fixed before looking.** Decided on the noon pull (served 11:55 UTC; the
@@ -353,8 +354,8 @@ At DraftKings, first clearing noon pull, either side:
 **The 4.5 over as its own rule** (the line-4.5 intercept from earlier years
 only, over side only, DraftKings): 47 bets +5.12% [−13.5, +23.2], 3/4 years,
 early half +24.4%, late half −15.6%. At that return the interval clears zero
-at about 606 bets; DraftKings posts about 20 of these a year (53 in the
-history). At Pinnacle's own price: 95 bets +7.2% [−5.4, +20.2], 4/5 years.
+at about 606 bets; DraftKings posted 22 of these in 2024 and 23 in 2025
+(53 in the history). At Pinnacle's own price: 95 bets +7.2% [−5.4, +20.2], 4/5 years.
 
 ### 4e. Mechanisms of this study's own
 
@@ -394,8 +395,9 @@ Each was written with its prediction before it ran.
    returned −2.97%; with the three best card dates removed it is +3.21%
    [−6.7, +13.0] with a late half of −0.5%; closing value is −4.4%; and it
    is the second decision time tried, after the one fixed in advance
-   failed. It does not clear. At its return the interval clears zero at
-   about 400 bets, roughly two more years of cards.
+   failed. It does not clear. Even at its full history return the interval
+   would need about 400 bets to clear zero; it has 228. Nothing records it
+   forward today.
    Another market: alternate totals are Pinnacle only. Another book: none
    a pick may name carries totals in the history.
 5. **Invert the question.** The hindsight ceiling: DraftKings' noon price
@@ -419,10 +421,11 @@ Each was written with its prediction before it ran.
 **What would have to change.** One of: (1) a second book a pick may name,
 with a smaller margin than DraftKings', posting totals (DraftKings' price
 sits a median 5.2 points under Pinnacle's fair one; a Pinnacle-sized margin
-would cost about 2); (2) the card-day over, decided at
-fight-day pulls, holding on about 170 more bets forward, written now as a
-frontier test so the forward record is not chosen after the fact; (3) about
-600 bets of the 4.5 over, which DraftKings offers about 20 times a year.
+would cost about 2); (2) the card-day over passing on fights
+it has not seen: its return holding with 2025 and the three best dates in,
+on enough bets for the interval to clear zero (about 400 at the history's
+return); (3) about 600 bets of the 4.5 over, which DraftKings posts about
+22 times a year.
 
 ## 5. Method of victory, goes the distance, round betting (`method_study.py`)
 

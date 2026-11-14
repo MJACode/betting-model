@@ -43,8 +43,8 @@ review as its own entry.
    Pinnacle in the same pull; four mechanisms of our own (stale DraftKings
    total after a moneyline move, women's and flyweight overs, five-round
    overs, short-notice unders); every rung of the stuck ladder. Nothing
-   clears. One lead, the card-day over (+6.92% on 228, interval below zero),
-   goes to the frontier as a forward-only test.
+   clears. One lead, the card-day over (+6.92% on 228, interval below zero,
+   2025 negative), fails the bar and goes to the frontier.
 3. **New.**
    - Kill test (`kill-tests.md`, "Is the data right?"): check the no-vig
      split before trusting closing value; on UFC totals the proportional
@@ -53,7 +53,7 @@ review as its own entry.
      per line; fighter inputs on a UFC total failed the donor placebo.
    - Frontier (`methods.md`): the card-day over, graded forward only.
 4. **Corrected.** Was "DraftKings' totals in the bought history from 2025",
-   now "from late 2023, 1,058 fights", because the history was counted by
+   now "from late 2023, 1,072 fights", because the history was counted by
    year (`docs/ufc_market_audit.md` §4, `docs/sports/ufc.md`). Was "22 bets
    of DraftKings against Pinnacle in one pull", now 8,090 comparable pulls,
    43 with DraftKings above Pinnacle's fair price.

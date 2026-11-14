@@ -37,7 +37,7 @@ The grid below says where every other market stands.
 | Market | Settles on | Inputs held | Prices | Baseline | Method tried | Result | Status |
 |---|---|---|---|---|---|---|---|
 | Fight winner | `games.home_win` (draw / no contest = push) | `ufc_fight_log` 2010-2026, `fighters`; ratings built strictly before each fight | Free archive: BestFightOdds open + closing range 2010-2026 (`ufc_price_archive`); feed history 2020-06+ (not bought); `odds` 2026-06+ every pull, 12 books | Blind favourite -0.8% to -3.9%, underdog -2.3% to -8.3% across the closing range, 7,541 fights | Market-anchored rating model at the close; at the first posted price; at each US book's first stored price; Pinnacle-anchored with US line shopping; five-round fights | At the close: nothing holds. At BestFightOdds' open: 1,531 bets +7.8% [+3.9, +11.8], positive against the close every year since 2018. At DraftKings' own first price, 2026: negative against Pinnacle's close (-2.1% to -2.5%); on the bought 2020-2026 history at the deciding books, Pinnacle-anchored: 846 bets +12.85%, 7/7 years | **Live**: `ufc_open_moneyline`, Pinnacle-anchored at a week out (audit §3d) |
-| Total rounds (0.5-4.5) | rounds completed from `ufc_fight_log` end round and time; five-round fights from `scheduled_rounds` | same | `ufc_odds_history` (bought): Pinnacle 2020+ (2,384 fights), DraftKings late 2023+ (1,058); `odds` 2026-06+; no free archive | Last pull: 2.5 over +0.1% at Pinnacle, -0.9% at DraftKings; 2.5 under -9.6% and -16.1%; 4.5 over +11.0% (127) and +8.5% (53). DraftKings' margin 6.2% against Pinnacle's 4.1% | Pinnacle-anchored finish model, walk-forward; four mechanisms of our own; the stuck ladder | Fighter inputs add nothing to Pinnacle's total (placebo equal); return falls as the cut rises; the card-day over (+6.9% on 228, interval below zero, 2025 negative) is a forward test | **Nothing clears** (audit §4) |
+| Total rounds (0.5-4.5) | rounds completed from `ufc_fight_log` end round and time; five-round fights from `scheduled_rounds` | same | `ufc_odds_history` (bought): Pinnacle 2020+ (2,421 fights, 2,384 at 1.5/2.5/4.5), DraftKings late 2023+ (1,072, 1,058 at those lines); `odds` 2026-06+; no free archive | Last pull: 2.5 over +0.1% at Pinnacle, -0.9% at DraftKings; 2.5 under -9.6% and -16.1%; 4.5 over +11.0% (127) and +8.5% (53). DraftKings' margin 6.2% against Pinnacle's 4.1% | Pinnacle-anchored finish model, walk-forward; four mechanisms of our own; the stuck ladder | Fighter inputs add nothing to Pinnacle's total (placebo equal); return falls as the cut rises; the card-day over (+6.9% on 228, interval below zero, 2025 negative) fails the bar and sits in the frontier | **Nothing clears** (audit §4) |
 | Points spread | not known: DraftKings and Bovada list one (Holland +7.5) | | feed, live, 2 books | | | | **Parked**: what it settles on is unknown |
 | Alternate round totals | as total rounds | | Pinnacle only on the feed | | | | **Parked**: no book a pick may name |
 | Method of victory (by fighter) | `ufc_fight_log.method` | same | **no live price**: the feed rejects every key (HTTP 422, 2026-11-13); free archive 2012-2026 near-close prices | Every blind method bet loses: favourite by decision -3.3% (5,821), finishes -20% to -41% | Blind by method and side | No profit anywhere | **Parked**: no live price |
@@ -94,9 +94,9 @@ cancelled bout never reaches the log. Any new UFC card must go through it.
   promotion, UFC fights placed on our fight ids) and its ledger
   `ufc_odds_history_pulls`. The feed has nothing before 2020-06-06; the
   daily pull is the snapshot served at 11:55 UTC. Round totals come from
-  Pinnacle from 2020 (2,384 fights) and DraftKings from late 2023 (31 fights
-  in 2023, 417 in 2024, 430 in 2025, 194 to June 2026); no other book a
-  pick may name carries them.
+  Pinnacle from 2020 (2,421 fights at any line) and DraftKings from late
+  2023 (1,072: 31 in 2023, 417 in 2024, 430 in 2025, 194 to June 2026); no
+  other book a pick may name carries them.
 
 ### Mobile
 

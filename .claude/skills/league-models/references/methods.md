@@ -255,11 +255,12 @@ sections above with its result.
 
 - UFC round totals, the card-day over: Pinnacle's no-vig total plus a
   per-line intercept fitted on earlier years, decided on fight-day pulls,
-  bet at DraftKings when EV >= 0. History: 228 bets +6.92% [-2.5, +15.9],
-  2025 negative, three best dates removed +3.2%. It was the second decision
-  time tried, so it is graded forward only, from its first fight-day pull
-  after 2026-11-13; it clears at about 400 bets (`docs/ufc_market_audit.md`
-  §4f).
+  bet at DraftKings when EV >= 0. It fails the bar: 228 bets +6.92%
+  [-2.5, +15.9], 2025 (its biggest year) -2.97%, three best dates removed
+  +3.2% with a late half of -0.5%, and it was the second decision time
+  tried. Even at its full return the interval needs about 400 bets. Nothing
+  records it forward; the experiment is to grade it on fights after
+  2026-06-13 (`docs/ufc_market_audit.md` §4f).
 - UFC: notice length from the feed's first listing of a pairing, for the
   fight winner (dead on totals); the five-round favourite at per-book
   prices (null at the worst close, fails the late half); BestFightOdds'
