@@ -23,6 +23,14 @@ down this list.
   never from played games (`shift(1)` over game logs is the bug). A pre-game
   model never decides while a team still has an earlier game to play or log.
   Doubleheaders that share one `game_id` hide the second game from that gate.
+- **ESPN labels a preseason game regular season**, and keeps stale events
+  for years. NBL 2024-25: Cairns v Sydney on 2024-09-09, ten days before the
+  season, made those two clubs 30 games and the rest 29; 2022-23 holds two
+  games still "end of period" with no score and one still "scheduled". Count
+  every club's regular-season games per season (they must agree), and keep a
+  past event that is not final out of `games` (`data/ingestors/nbl_espn.py`).
+  ESPN's ranged `dates=` form answered 400 for the NBL; one call per calendar
+  year works. Its NBL venue is blank for whole seasons.
 - **Two start times.** The feed's start can differ from the league's (about 10
   minutes later in pro basketball; ESPN was 5 hours early on some games). A
   start the feed revises lets an in-play quote count as the close.
@@ -63,6 +71,10 @@ down this list.
 - **A purchase runs only once its source is protected in production.** The
   odds clean-up thins every unprotected row to an opener and a close, and
   `PROTECTED_SOURCES` is code, so merge the groundwork before buying at scale.
+- **A one-day trial must run the cadence the purchase will run.** The
+  EuroLeague purchaser's `--only-days` path ignored `--pregame-step-min`, so a
+  trial day there buys every snapshot and overstates the thinned purchase.
+  The NBL fork passes the step on that path too (2026-11-14).
 - **The credit planner refuses a whole-history plan at its worst case** (every
   5-minute slot of every day), even when the measured cost fits; feed it
   chunks, newest season first, and let the live meter stop at the floor.

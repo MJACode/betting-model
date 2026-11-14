@@ -50,6 +50,13 @@ not a refusal forever, and a route that failed one way may answer another
 | Pinnacle's public site API (`guest.api.arcadia.pinnacle.com/0.1/sports/<id>/matchups` and `/markets/straight`) | a plain request | yes (2026-11-13): every tennis level, prices with versions and stake limits |
 | TennisExplorer results pages (every tennis level, one price pair a match) | a plain request, two seconds apart | yes (2026-11-13); robots allow results pages, the terms page is closed to crawlers. Its prices are an average of books near the close (`docs/sports/tennis.md`) |
 | DraftKings' own site API, read for a new sport | a browser-style session | **refused by the permission check (2026-11-13)** although the repo's in-play reader uses it on mike's recorded call: a new use needs his permission rule |
+| ESPN's NBL (`site.api.espn.com/apis/site/v2/sports/basketball/nbl`, scoreboard `?dates=<YYYY>&limit=1000` and summary) | a plain fetch | yes (200, 2026-11-14): from 2022-23; box scores and plays, no wall clock, no referees |
+| The NBL's own stats API (`apicdn.nbl.com.au`, `prod.services.nbl.com.au`) | a request carrying the league site's Origin and Referer headers | **refused by the permission check (2026-11-14)**, not retried; nbl.com.au's robots.txt allows all but tipping and test pages |
+| FIBA LiveStats per-match files (`fibalivestats.dcd.shared.geniussports.com/data/<id>/data.json`) | a plain fetch | yes (200, 2026-11-14, on a non-NBL match): referees and attendance keys |
+| Kalshi's public API (`api.elections.kalshi.com/trade-api/v2`: events, markets, series, candlesticks) | a plain request | yes (200, 2026-11-14): NBL game, spread, total and champion series, hourly bid/ask |
+| Polymarket (`gamma-api.polymarket.com/events`, `clob.polymarket.com/prices-history`) | a plain request; the events list needs `--compressed` (406 "gzip_required" without) | yes (200, 2026-11-14): 135 NBL events, hourly prices |
+| aussportsbetting.com (free NBL closing odds from 2009) | a plain fetch, and the web-fetch agent | **no (Cloudflare 403, 2026-11-14)**; its robots.txt names Claude's crawlers, so not fetched again |
+| hoops.com.au forum | a plain fetch | **no (403, 2026-11-14)** |
 | A book's house rules as a PDF (massgaming.com hosts DraftKings') | the web-fetch agent saves the PDF; WebFetch extracts no text, `pypdf` does | yes (2026-11-13) |
 
 **The weekly cloud review cannot re-probe this table.** Its network refused

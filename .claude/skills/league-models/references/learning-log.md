@@ -30,6 +30,57 @@ review as its own entry.
 
 ---
 
+## 2026-11-14 — NBL (Australia), groundwork: one book a pick may name, and a purchase the balance cannot hold this cycle
+
+1. **League and scope**: the NBL, mike, 2026-11-14: *"Invoke model skill and
+   build Australia nbl models"*. A new sport, `NBL`. Steps 0 to 2b and the
+   groundwork; no grid row has a priced result yet (`docs/sports/nbl.md`).
+2. **Tried**: the feed's history depth (five empty event lists, first snapshot
+   2024-09-24), its books at every region on two history days and at the
+   line-shop ten on four, its per-event markets today, and the per-event
+   history of BetRivers and Pinnacle on six past games for every period,
+   team-total and alternate key (free when empty); ESPN's NBL scoreboard and
+   summaries by season; the league's own stats API (refused, below); a scout;
+   three trial days of the purchase (0, 1 and 2 games); a projection of the
+   whole history from the stored schedule and the three measured day costs.
+3. **New**:
+   - `market-grid.md`: an NBL line in the basketball shape. **One book a pick
+     may name** (BetRivers, full game only) and a sharp book that enters the
+     feed mid-history (Pinnacle from 2026-27, so two seasons measure value
+     against the exchange and the local consensus). Price route 2: measure a
+     no-game day as well as a game day before projecting a purchase (here a
+     no-game day held a snapshot every five minutes and cost 70% of a game
+     day). Route 3: prediction-market history as a free second price (Kalshi's
+     NBL game markets from 2025-12-04, liquid; Polymarket from 2026-01-09).
+   - `porting-traps.md`: ESPN labels a preseason game regular-season
+     (401707730), caught by every club's regular-season count; stale ESPN
+     events years old ("end of period" with no score, "scheduled"), kept out
+     of `games` by a 36-hour rule; ESPN's ranged `dates=` form answers 400 for
+     this league; venue blank for whole seasons; plays with no wall clock.
+     And a trap in the EuroLeague purchaser, fixed in the NBL fork only: its
+     one-day path (`--only-days`) ignored `--pregame-step-min`, so a trial
+     measured every snapshot, not what the thinned purchase would cost.
+   - `scouting.md`: eleven routes dated (ESPN's NBL, Kalshi, Polymarket,
+     FIBA LiveStats answered; the league site's API refused by the permission
+     check; AusSportsBetting's file refused, its robots.txt naming Claude's
+     crawlers; hoops.com.au 403).
+4. **Corrected**: nothing in the skill was contradicted by a measurement.
+5. **The framework**: one promotion, one gap.
+   - **Promoted.** The skill did not load because the session's checkout was
+     on a branch without it: the Skill tool answered "Unknown skill", the
+     second time (the first is the 2026-11-13 entry, "the skill never
+     loaded"). Step 0 now says what to do: a worktree from `origin/master`,
+     read `SKILL.md` there, build there.
+   - **A gap, written into step 0.** The purchase is sized against the credit
+     balance and the days to the plan's refill before it is put to mike: here
+     the whole history (at most 1.70M) does not fit beside the platform's
+     burn to a 12-08 refill, which turns the purchase decision into a top-up
+     decision.
+
+What this build taught the skill: price a purchase on a no-game day as well
+as a game day, size it against the balance and the refill before asking, and
+when the skill does not load, build from a worktree off master.
+
 ## 2026-11-14 — Tennis round 1: the match winner live (`atp_moneyline_shop`, `wta_moneyline_shop`), the games markets' line shop null
 
 1. **League and scope**: tennis, both tours (mike, 2026-11-13: *"build
