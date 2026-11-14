@@ -138,6 +138,7 @@ out-of-sample read do. Default off, so the committed design run reproduces.
     python -m scripts.tennis_games_round2 --cache C:/Users/micha/tennis_research/cache \\
         --spool C:/Users/micha/tennis_research/spool --drop-sets-markets \\
         --save C:/Users/micha/tennis_research/cache/games_round2_quotes_clean.parquet
+    python -m scripts.tennis_games_round2 --cache C:/Users/micha/tennis_research/cache --round1-baseline
     python -m scripts.tennis_games_round2 --self-test
 """
 from __future__ import annotations
@@ -727,6 +728,30 @@ def self_test() -> int:
     return 0 if ok else 1
 
 
+# ── after the results: round 1's Pinnacle baseline without the sets markets ──
+
+def round1_baseline(q, lk, res) -> int:
+    """Round 1's blind baseline at the close (scripts/tennis_games_study), Pinnacle
+    only, every linked event with a result, with and without the (book, key,
+    year) holding a totals line below 12 games. Added after the results."""
+    from scripts.tennis_games_study import sides
+    oc = outcomes(lk, res)
+    pm = st.pre_match(q, lk, res)
+    bad = sets_market_keys(q)
+    bad_k = pd.MultiIndex.from_frame(bad[["bookmaker", "sport_key", "yr"]])
+    for market, cols in (("totals", ["total_point", "over_price", "under_price"]),
+                         ("spreads", ["home_point", "home_price", "away_price"])):
+        h = pm[pm.market == market].dropna(subset=cols)
+        pin = st.decision_quotes(h, "close").merge(oc, on="event_id")
+        pin = pin[pin.bookmaker == "pinnacle"]
+        hit = pd.MultiIndex.from_arrays([pin.bookmaker, pin.sport_key, pin.commence_time.dt.year]).isin(bad_k)
+        for label, g in (("as in round 1", pin), ("without the sets markets", pin[~hit])):
+            x = sides(g.assign(r_a=np.nan, r_b=np.nan), market)
+            parts = [f"{sd} {table(gs)['bets']:,} quotes roi {table(gs)['roi']:+.4f}" for sd, gs in x.groupby("side")]
+            print(f"  Pinnacle close, {market}, {label}: " + "; ".join(parts))
+    return 0
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main(argv=None) -> int:
@@ -736,6 +761,8 @@ def main(argv=None) -> int:
     ap.add_argument("--save", type=Path)
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--no-placebo", action="store_true")
+    ap.add_argument("--round1-baseline", action="store_true",
+                    help="after the results: round 1's Pinnacle blind baseline with and without the sets markets")
     ap.add_argument("--drop-sets-markets", action="store_true",
                     help="after the results, a data correction: drop the sets markets stored as games (see the docstring)")
     a = ap.parse_args(argv)
@@ -743,10 +770,12 @@ def main(argv=None) -> int:
         return self_test()
     pd.set_option("display.width", 220)
     t0 = time.time()
-    arch = ss.load_archive(a.spool)
-    avg = ss.averages(arch)
     q, res = load(a.cache)
     lk = st.link(q, res)
+    if a.round1_baseline:
+        return round1_baseline(q, lk, res)
+    arch = ss.load_archive(a.spool)
+    avg = ss.averages(arch)
     oc = outcomes(lk, res)
     ev, info = ss.events_table(q, lk, res, oc, arch, avg)
     print("POPULATION (round 1's events_table)")
