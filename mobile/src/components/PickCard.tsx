@@ -33,7 +33,7 @@ import {
 import { modelHistoryMark, modelLongWithMark, isPropModel } from '@/lib/modelMeta';
 import { stakeFor, stakeReasonLine, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
-import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
+import { colors, font, inkFor, radii, spacing, opacity } from '@/lib/theme';
 import { pnlTone, roundedAt, signalDisplayName } from '@/lib/tone';
 import { decisionEdge, decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
@@ -1453,7 +1453,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   pressed: {
-    opacity: 0.7,
+    opacity: opacity.pressed,
   },
   headerRow: {
     flexDirection: 'row',

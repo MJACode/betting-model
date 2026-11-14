@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Modal } from '@/components/TrackedModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 /**
  * Bottom sheet for the Record card's info buttons. The backdrop is a sibling
@@ -40,14 +41,7 @@ export function RecordInfoSheet({
           <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} bounces={false}>
             <Text style={styles.body}>{body}</Text>
           </ScrollView>
-          <Pressable
-            onPress={onClose}
-            accessibilityRole="button"
-            accessibilityLabel="Got it"
-            style={({ pressed }) => [styles.dismissBtn, pressed && styles.pressed]}
-          >
-            <Text style={styles.dismissText}>Got it</Text>
-          </Pressable>
+          <PrimaryButton label="Got it" onPress={onClose} style={styles.dismissBtn} />
         </Pressable>
       </View>
     </Modal>
@@ -81,18 +75,5 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: colors.textSecondary,
   },
-  dismissBtn: {
-    marginTop: spacing.lg,
-    alignItems: 'center',
-    minHeight: 44,
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-    backgroundColor: colors.tint,
-  },
-  dismissText: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.textInverse,
-  },
-  pressed: { opacity: 0.65 },
+  dismissBtn: { marginTop: spacing.lg },
 });

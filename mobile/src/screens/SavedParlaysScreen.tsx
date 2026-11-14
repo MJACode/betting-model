@@ -21,9 +21,10 @@ import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { betOnBookLabel, bookButtonColors } from '@/lib/sportsbookLinks';
 import { modelShort } from '@/lib/modelMeta';
 import { formatAmerican, formatPct, formatPctSigned, labelWithoutStake } from '@/lib/format';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, opacity, card } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'SavedParlays'>;
 
@@ -138,15 +139,12 @@ export function SavedParlaysScreen() {
         contentContainerStyle={styles.scroll}
         ListHeaderComponent={
           <View style={styles.headerRow}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="New parlay"
+            <PrimaryButton
+              label="New parlay"
               onPress={newParlay}
-              style={({ pressed }) => [styles.newBtn, pressed && styles.pressed]}
-            >
-              <Ionicons name="add" size={18} color={colors.textInverse} />
-              <Text style={styles.newBtnText}>New parlay</Text>
-            </Pressable>
+              icon={<Ionicons name="add" size={18} color={colors.textInverse} />}
+              style={styles.newBtn}
+            />
             {items.length > 0 ? (
               <Pressable
                 accessibilityRole="button"
@@ -380,21 +378,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginBottom: spacing.md,
   },
-  newBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.tint,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-  },
-  newBtnText: {
-    color: colors.textInverse,
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-  },
+  newBtn: { flex: 1 },
   clearAllBtn: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
@@ -432,12 +416,10 @@ const styles = StyleSheet.create({
   },
   swipeContainer: {
     marginBottom: spacing.md,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
   },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
+    ...card,
   },
   swipeDelete: {
     // Declared tap floor (verify_a11y); the action (full card height) is already ~120pt, so this
@@ -448,8 +430,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
     width: 92,
-    borderTopRightRadius: radii.lg,
-    borderBottomRightRadius: radii.lg,
+    borderTopRightRadius: radii.md,
+    borderBottomRightRadius: radii.md,
   },
   swipeDeleteText: {
     color: colors.textInverse,
@@ -594,6 +576,6 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
 });

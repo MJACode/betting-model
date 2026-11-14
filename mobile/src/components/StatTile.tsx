@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, cardDense } from '@/lib/theme';
 import { unitsSpeech } from '@/lib/a11y';
 
 interface Props {
@@ -28,10 +28,8 @@ export function StatTile({ label, value, caption, tint }: Props) {
 
 const styles = StyleSheet.create({
   tile: {
+    ...cardDense,
     flex: 1,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
     minHeight: 80,
     justifyContent: 'center',
   },

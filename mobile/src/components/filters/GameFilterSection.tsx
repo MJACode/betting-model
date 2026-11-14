@@ -21,7 +21,7 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import type { SelectableGame } from '@/lib/gameFilter';
 import { dayLabelET } from '@/lib/format';
 
@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
   },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: opacity.pressed },
   matchup: {
     flex: 1,
     fontSize: font.size.body,

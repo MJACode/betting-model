@@ -40,7 +40,7 @@ import {
   type PriceAgeContext,
 } from '@/lib/markets';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, sectionHeaderText, opacity } from '@/lib/theme';
 import type { BookPricedRow, Pick } from '@/types';
 
 interface Props {
@@ -182,11 +182,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs + 2,
   },
   title: {
-    fontSize: font.size.caption,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    ...sectionHeaderText,
   },
   hint: {
     flexShrink: 1,
@@ -251,6 +247,6 @@ const styles = StyleSheet.create({
     color: colors.tint,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
 });

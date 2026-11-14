@@ -13,6 +13,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import { addBetHint } from '@/lib/a11y';
 import type { ManualBetInput } from '@/hooks/useManualBets';
 import { FLAT_UNIT } from '@/lib/format';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 /** Add-a-bet form for the manual fallback (sync gaps / unsupported books). */
 export function ManualBetModal({
@@ -123,21 +124,7 @@ export function ManualBetModal({
             </Field>
           </View>
 
-          <Pressable
-            onPress={submit}
-            disabled={!valid}
-            accessibilityRole="button"
-            accessibilityLabel="Add bet"
-            accessibilityState={{ disabled: !valid }}
-            accessibilityHint={addHint}
-            style={({ pressed }) => [
-              styles.addBtn,
-              !valid && styles.addBtnDisabled,
-              pressed && valid && styles.pressed,
-            ]}
-          >
-            <Text style={styles.addBtnText}>Add bet</Text>
-          </Pressable>
+          <PrimaryButton label="Add bet" onPress={submit} disabled={!valid} accessibilityHint={addHint} style={styles.addBtn} />
           <Pressable
             onPress={onClose}
             accessibilityRole="button"
@@ -197,16 +184,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     color: colors.textPrimary,
   },
-  addBtn: {
-    backgroundColor: colors.tint,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    marginTop: spacing.sm,
-  },
-  addBtnDisabled: { opacity: 0.4 },
-  addBtnText: { color: colors.textInverse, fontSize: font.size.headline, fontWeight: font.weight.semibold },
+  addBtn: { marginTop: spacing.sm },
   cancelBtn: { paddingVertical: spacing.md, alignItems: 'center' },
   cancelText: { color: colors.textSecondary, fontSize: font.size.body },
-  pressed: { opacity: 0.8 },
 });

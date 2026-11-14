@@ -33,7 +33,7 @@ import {
   type NbaQ1WindowRow,
 } from '@/lib/nbaQ1';
 import { ordinal } from '@/lib/teamDetail';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, card } from '@/lib/theme';
 
 /** Stack from 1.5x, not the Lines board's 2x: "112.4" outgrows a 48pt column first (UX review, second pass). */
 const Q1_STACK_SCALE = 1.5;
@@ -204,9 +204,7 @@ function marginTint(m: number | null) {
 // paddingTop is smaller because the tab row carries its own top space.
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     paddingTop: spacing.sm,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,

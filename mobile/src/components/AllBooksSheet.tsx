@@ -17,7 +17,7 @@ import {
   type LinesSheetRow,
 } from '@/lib/linesBoard';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 
 /**
  * Every bettable book's price for one market. Green is a price that wins
@@ -329,6 +329,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
 });

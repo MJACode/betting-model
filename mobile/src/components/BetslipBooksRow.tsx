@@ -10,7 +10,7 @@ import { bookLabel, bookName, BETTABLE_BOOKS } from '@/lib/markets';
 import { handoffAtBook, matchupForLeg, priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { NO_SGP_FITS, type SgpHaircuts } from '@/lib/sgpPricing';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, sectionHeaderText, opacity } from '@/lib/theme';
 
 /**
  * "Open with" — this slip priced at every book a member can bet at
@@ -229,11 +229,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   title: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    ...sectionHeaderText,
   },
   headerHint: {
     fontSize: font.size.caption,
@@ -297,6 +293,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
 });

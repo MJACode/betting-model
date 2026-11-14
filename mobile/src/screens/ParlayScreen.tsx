@@ -72,8 +72,9 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, sectionHeaderText, opacity, card } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 type ParlayNav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -533,21 +534,13 @@ function ParlayScreenBody() {
                 : 'Win probability comes from the odds you enter.'}
             </Text>
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={editingCustomId != null ? 'Update leg' : 'Add leg'}
-              accessibilityState={{ disabled: !customValid }}
+            <PrimaryButton
+              label={editingCustomId != null ? 'Update leg' : 'Add leg'}
               onPress={handleSaveCustom}
               disabled={!customValid}
-              style={({ pressed }) => [
-                styles.buildBtn,
-                !customValid && styles.buildBtnDisabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Ionicons name="checkmark" size={18} color={colors.textInverse} />
-              <Text style={styles.buildBtnText}>{editingCustomId != null ? 'Update leg' : 'Add leg'}</Text>
-            </Pressable>
+              icon={<Ionicons name="checkmark" size={18} color={colors.textInverse} />}
+              style={styles.buildBtn}
+            />
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -984,15 +977,12 @@ function SlipBody({
           title="Your betslip is empty"
           subtitle={'Find a player you want to bet and tap "Add to betslip" — you\'ll come right back here. Picks from the Picks tab work too, or enter a custom leg.'}
         />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Find players to add"
+        <PrimaryButton
+          label="Find players to add"
           onPress={onFindPlayers}
-          style={({ pressed }) => [styles.buildBtn, styles.manualBtn, pressed && styles.pressed]}
-        >
-          <Ionicons name="search" size={18} color={colors.textInverse} />
-          <Text style={styles.buildBtnText}>Find players to add</Text>
-        </Pressable>
+          icon={<Ionicons name="search" size={18} color={colors.textInverse} />}
+          style={styles.manualBtn}
+        />
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Add a custom leg"
@@ -1363,32 +1353,11 @@ const styles = StyleSheet.create({
   // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
   errorBannerInset: { marginTop: spacing.md, marginBottom: spacing.sm },
   panelTitle: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    ...sectionHeaderText,
     marginBottom: spacing.sm,
     marginTop: spacing.sm,
   },
-  buildBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.tint,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    marginTop: spacing.lg,
-  },
-  buildBtnDisabled: {
-    opacity: 0.4,
-  },
-  buildBtnText: {
-    color: colors.textInverse,
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-  },
+  buildBtn: { marginTop: spacing.lg },
   addCustomBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1396,8 +1365,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.tint,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
+    // Capsule, 50pt: the outlined partner of the PrimaryButton above it.
+    borderRadius: radii.pill,
+    minHeight: 50,
     marginTop: spacing.sm,
   },
   addCustomBtnText: {
@@ -1532,9 +1502,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   resultCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     marginTop: spacing.md,
   },
@@ -1616,11 +1584,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   lineShopTitle: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.betInk,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    ...sectionHeaderText,
   },
   statsRow: {
     flexDirection: 'row',
@@ -1683,7 +1647,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
   modalBackdrop: {
     flex: 1,

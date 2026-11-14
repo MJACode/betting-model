@@ -40,7 +40,7 @@ import type { HitDirection } from '@/lib/hitRate';
 import { bookName, booksNoneName, sideNotPostedNote } from '@/lib/markets';
 import { matchupForLeg } from '@/lib/parlay';
 import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
 import type { StatsOddsQuote } from '@/lib/statsOdds';
 import type { GameRow } from '@/types';
@@ -319,5 +319,5 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: opacity.pressed },
 });

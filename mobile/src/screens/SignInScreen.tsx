@@ -40,8 +40,9 @@ import { fetchAccess } from '@/lib/discord';
 import { signalsEntitled } from '@/lib/iap';
 import { isAppPremium } from '@/lib/membership';
 import { PRIVACY_URL, TERMS_URL, openLink } from '@/lib/socialLinks';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -253,7 +254,7 @@ export function SignInScreen() {
                         key={provider}
                         buttonType={appleButton.AppleAuthenticationButtonType.CONTINUE}
                         buttonStyle={appleButton.AppleAuthenticationButtonStyle.WHITE}
-                        cornerRadius={radii.md}
+                        cornerRadius={25} // half its 50pt height: a capsule, like the stack under it
                         style={[
                           styles.appleNativeBtn,
                           busy != null && busy !== provider && styles.btnDisabled,
@@ -324,24 +325,13 @@ export function SignInScreen() {
                       onSubmitEditing={onSendCode}
                       returnKeyType="go"
                     />
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Email me a code"
-                      accessibilityState={{ busy: busy === 'email', disabled: busy != null }}
+                    <PrimaryButton
+                      label="Email me a code"
                       onPress={onSendCode}
-                      disabled={busy != null}
-                      style={({ pressed }) => [
-                        styles.primaryBtn,
-                        pressed && styles.btnPressed,
-                        busy != null && styles.btnDisabled,
-                      ]}
-                    >
-                      {busy === 'email' ? (
-                        <ActivityIndicator color={colors.brandInk} />
-                      ) : (
-                        <Text style={styles.primaryBtnText}>Email me a code</Text>
-                      )}
-                    </Pressable>
+                      variant="brand"
+                      loading={busy === 'email'}
+                      disabled={busy != null && busy !== 'email'}
+                    />
                   </>
                 ) : null}
               </>
@@ -374,27 +364,13 @@ export function SignInScreen() {
                   onSubmitEditing={onVerify}
                   returnKeyType="go"
                 />
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Verify and sign in"
-                  accessibilityState={{
-                    busy: busy === 'email',
-                    disabled: busy != null || !isCompleteOtp(code),
-                  }}
+                <PrimaryButton
+                  label="Verify and sign in"
                   onPress={onVerify}
-                  disabled={busy != null || !isCompleteOtp(code)}
-                  style={({ pressed }) => [
-                    styles.primaryBtn,
-                    pressed && styles.btnPressed,
-                    (busy != null || !isCompleteOtp(code)) && styles.btnDisabled,
-                  ]}
-                >
-                  {busy === 'email' ? (
-                    <ActivityIndicator color={colors.brandInk} />
-                  ) : (
-                    <Text style={styles.primaryBtnText}>Verify and sign in</Text>
-                  )}
-                </Pressable>
+                  variant="brand"
+                  loading={busy === 'email'}
+                  disabled={(busy != null && busy !== 'email') || !isCompleteOtp(code)}
+                />
 
                 {isAppReviewDemoEmail(email) ? null : (
                   <Pressable
@@ -505,7 +481,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 50,
-    borderRadius: radii.md,
+    borderRadius: radii.pill,
   },
   appleBtn: { backgroundColor: colors.textInverse },
   appleNativeBtn: {
@@ -543,8 +519,8 @@ const styles = StyleSheet.create({
   input: {
     alignSelf: 'stretch',
     backgroundColor: colors.brandNavyRaised,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.lg, // clear of the capsule ends
     minHeight: 50,
     fontFamily: font.family,
     fontSize: font.size.callout,
@@ -556,22 +532,8 @@ const styles = StyleSheet.create({
     letterSpacing: 8,
     fontWeight: font.weight.semibold,
   },
-  primaryBtn: {
-    alignSelf: 'stretch',
-    minHeight: 50,
-    borderRadius: radii.md,
-    backgroundColor: colors.brand,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryBtnText: {
-    fontFamily: font.family,
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.brandInk,
-  },
-  btnPressed: { opacity: 0.6 },
-  btnDisabled: { opacity: 0.4 },
+  btnPressed: { opacity: opacity.pressed },
+  btnDisabled: { opacity: opacity.disabled },
   linkText: {
     fontFamily: font.family,
     fontSize: font.size.footnote,

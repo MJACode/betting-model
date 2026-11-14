@@ -64,11 +64,12 @@ import {
   type TeamMarket,
 } from '@/lib/teamDetail';
 import { formatTeamStat, spreadWord, teamSeasonLabel, teamStatFor, type TeamStatDef } from '@/lib/teamStatCatalog';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, card } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { friendlyCause } from '@/lib/errors';
 import type { RootStackParamList, TeamSport, TeamStatsRow } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { SkeletonList } from '@/components/Skeleton';
 
 type Route = RouteProp<RootStackParamList, 'TeamStats'>;
 
@@ -181,7 +182,7 @@ export function TeamStatsScreen() {
         {/* ── 2. Form ────────────────────────────────────────────────────── */}
         <SectionTitle title={`Last ${form.length || FORM_GAMES}`} />
         {d.recent.loading && form.length === 0 ? (
-          <ActivityIndicator style={styles.loading} />
+          <SkeletonList label="recent games" style={styles.skeleton} />
         ) : form.length === 0 ? (
           <Card>
             <Text style={styles.muted}>
@@ -291,7 +292,7 @@ export function TeamStatsScreen() {
           <>
             <SectionTitle title={`vs ${d.h2h.opponent}`} />
             {d.h2hLoading && d.h2h.meetings.length === 0 ? (
-              <ActivityIndicator style={styles.loading} />
+              <SkeletonList label="the meetings" rows={2} style={styles.skeleton} />
             ) : d.h2h.meetings.length === 0 ? (
               <Card>
                 <Text style={styles.muted}>No stored meetings between {team} and {d.h2h.opponent}.</Text>
@@ -337,7 +338,7 @@ export function TeamStatsScreen() {
           }}
         />
         {d.picksLoading && d.pickRecords.settled === 0 ? (
-          <ActivityIndicator style={styles.loading} />
+          <SkeletonList label="the pick record" rows={2} style={styles.skeleton} />
         ) : d.pickRecords.settled === 0 ? (
           <Card>
             <Text style={styles.muted}>
@@ -398,7 +399,7 @@ export function TeamStatsScreen() {
             ))}
           </Card>
         ) : d.board.loading ? (
-          <ActivityIndicator style={styles.loading} />
+          <SkeletonList label="efficiency metrics" style={styles.skeleton} />
         ) : (
           <Card>
             <Text style={styles.muted}>No efficiency metrics stored for {team} yet.</Text>
@@ -904,15 +905,14 @@ function unitsTint(units: number | null): string | undefined {
 }
 
 const styles = StyleSheet.create({
+  skeleton: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
   container: { flex: 1, backgroundColor: colors.bg },
   list: { paddingBottom: spacing.xxl },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
   teamName: { fontSize: font.size.title2, fontWeight: font.weight.bold, color: colors.textPrimary },
   meta: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2 },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
   },
@@ -922,7 +922,6 @@ const styles = StyleSheet.create({
   // textSecondary inside a card: textTertiary is ~3.4:1 on bgCard at this size (UX_REVIEW §5).
   legend: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 16 },
   source: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 16 },
-  loading: { marginVertical: spacing.xl },
   loadingInline: { marginTop: spacing.sm },
   // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
   errorBannerInset: { marginTop: spacing.sm },

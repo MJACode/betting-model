@@ -55,7 +55,8 @@ import {
   type LineScale,
 } from '@/lib/byomPropFilters';
 import { filterTeams, teamsForSport } from '@/lib/byomTeams';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity, cardDense } from '@/lib/theme';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 export function ByomFilterSheet({
   tab,
@@ -231,14 +232,7 @@ export function ByomFilterSheet({
           showsUnits={showsUnits}
           blocked={blocked}
         />
-        <Pressable
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel={showLabel}
-          style={styles.show}
-        >
-          <Text style={styles.showText}>{showLabel}</Text>
-        </Pressable>
+        <PrimaryButton label={showLabel} onPress={onClose} style={styles.show} />
       </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
@@ -945,9 +939,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
+    ...cardDense,
     marginBottom: spacing.md,
   },
   cardTitle: {
@@ -1005,7 +997,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stepBtnOff: {
-    opacity: 0.4,
+    opacity: opacity.disabled,
   },
   stepBtnText: {
     fontSize: font.size.title3,
@@ -1054,17 +1046,5 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     color: colors.tint,
   },
-  show: {
-    minHeight: 50,
-    borderRadius: radii.md,
-    backgroundColor: colors.tint,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.sm,
-  },
-  showText: {
-    color: colors.textInverse,
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-  },
+  show: { marginBottom: spacing.sm },
 });

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, app UI consistency pass (Mobbin audit, Matt approved 1-7): `PrimaryButton` (one 50pt capsule, 27 buttons), `sectionHeaderText`, `opacity` and `card` tokens, `SegmentTabs` for the BYOM and season switches, `SkeletonList` on six detail screens, last hex literals tokenised, Performance now shows sync errors |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Crash log sends expo-updates' own error log on the next launch (`emergency_launch`, `extra.source = 'updates_log'`), after a TestFlight abort in ErrorRecovery before JS ran |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Discord join screen headline shortened to "Join the Discord" |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, Bet all's Placed tracked one of three picks on the phone: each add wrote from the render's stale list; `trackPicks` reads the latest list, Bet all tracks a book in one call |

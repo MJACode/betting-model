@@ -37,7 +37,7 @@ import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
 import { formatPctSigned } from '@/lib/format';
 import { ROW_SLOP_PAD } from '@/lib/a11y';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, opacity, card } from '@/lib/theme';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
@@ -171,7 +171,7 @@ export function TrackRecordScreen() {
               hitSlop={8}
               accessibilityLabel="Daily results"
               accessibilityRole="button"
-              style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
+              style={({ pressed }) => [styles.iconBtn, pressed && { opacity: opacity.pressed }]}
             >
               <Ionicons name="calendar-outline" size={22} color={colors.tint} />
             </Pressable>
@@ -181,7 +181,7 @@ export function TrackRecordScreen() {
                 hitSlop={8}
                 accessibilityLabel="Share record"
                 accessibilityRole="button"
-                style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
+                style={({ pressed }) => [styles.iconBtn, pressed && { opacity: opacity.pressed }]}
               >
                 <Ionicons name="share-outline" size={22} color={colors.tint} />
               </Pressable>
@@ -221,7 +221,7 @@ export function TrackRecordScreen() {
                   style={({ pressed }) => [
                     styles.sportTab,
                     active && styles.sportTabActive,
-                    pressed && { opacity: 0.7 },
+                    pressed && { opacity: opacity.pressed },
                   ]}
                 >
                   <Text style={[styles.sportTabText, active && styles.sportTabTextActive]}>{s}</Text>
@@ -437,15 +437,11 @@ const styles = StyleSheet.create({
   skelTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   skelGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   heroCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   noteCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   noteTitle: {
@@ -481,9 +477,7 @@ const styles = StyleSheet.create({
   },
   sportTabTextActive: { color: colors.tint, fontWeight: font.weight.semibold },
   sportCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   sportHeader: {

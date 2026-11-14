@@ -23,7 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { usePreferredBooks, type BookKey } from '@/hooks/usePreferredBooks';
 import { booksName, MODEL_BOOK } from '@/lib/markets';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 
 export function SportsbookIndicator({
   coverageNote,
@@ -58,7 +58,7 @@ export function SportsbookIndicator({
         // minHeight is the target. Vertical slop reached the sport pill and
         // Clear all (UX review, 2026-10-26).
         hitSlop={{ top: 0, bottom: 0, left: 8, right: 8 }}
-        style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
+        style={({ pressed }) => [styles.row, pressed && { opacity: opacity.pressed }]}
       >
         <Ionicons name="wallet-outline" size={13} color={colors.textTertiary} />
         <Text style={styles.text} numberOfLines={2}>

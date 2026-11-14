@@ -167,10 +167,12 @@ def test_no_short_white_literal_and_h6_sites():
                 hits.append(f"{path.relative_to(ROOT)}:{i}")
     assert not hits, hits
     sheet = _read(SRC / "components" / "SportsbookPickerSheet.tsx")
-    apply_btn = re.search(r"applyBtn: \{.*?\}", sheet, re.S).group(0)
-    apply_text = re.search(r"applyText: \{.*?\}", sheet, re.S).group(0)
-    assert "backgroundColor: colors.tint" in apply_btn
-    assert "color: colors.textInverse" in apply_text
+    # Apply is a PrimaryButton (default primary variant): tint fill, textInverse label.
+    apply_tag = re.search(r'<PrimaryButton\s+label="Apply".*?/>', sheet, re.S).group(0)
+    assert "variant=" not in apply_tag
+    button = _read(SRC / "components" / "PrimaryButton.tsx")
+    assert "primary: { backgroundColor: colors.tint }" in button
+    assert "const fg = variant === 'primary' ? colors.textInverse" in button
     toggle = _read(SRC / "components" / "SportToggle.tsx")
     assert "color: colors.textPrimary" in re.search(r"badgeText: \{.*?\}", toggle, re.S).group(0)
     assert "opacity" not in re.search(r"labelMuted: \{.*?\}", toggle, re.S).group(0)  # M17

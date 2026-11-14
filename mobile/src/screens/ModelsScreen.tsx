@@ -23,7 +23,7 @@ import { returnOnBetsSpeech } from '@/lib/recordHero';
 import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, opacity } from '@/lib/theme';
 import { LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import type { RootStackParamList } from '@/types';
 import type { CustomModelStats } from '@/lib/customModelBacktest';
@@ -394,7 +394,7 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
     fontWeight: font.weight.semibold,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: opacity.pressed },
   list: {
     paddingTop: spacing.sm,
     paddingBottom: spacing.xl,

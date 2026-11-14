@@ -35,7 +35,8 @@ import {
 } from 'react-native';
 import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 interface Props {
   visible: boolean;
@@ -149,25 +150,21 @@ export function FilterSheet({
                   trapping the user behind a spinner to protect a label is the
                   worse trade. It is announced busy rather than disabled, the
                   same call the slate chip made on the board (UX_REVIEW §5). */}
-              <Pressable
-                accessibilityLabel={busy ? 'Updating results' : resultCount === 0 ? (emptyLabel ?? 'No matches. Adjust filters') : `Show ${resultCount} ${itemNoun}${resultCount === 1 ? '' : 's'}`}
-                onPress={onClose}
-                accessibilityRole="button"
-                accessibilityState={{ busy }}
-                style={({ pressed }) => [
-                  styles.showBtn,
-                  !busy && resultCount === 0 && styles.showBtnEmpty,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={styles.showBtnText}>
-                  {busy
+              <PrimaryButton
+                label={
+                  busy
                     ? 'Updating…'
                     : resultCount === 0
                       ? (emptyLabel ?? 'No matches — adjust filters')
-                      : `Show ${resultCount} ${itemNoun}${resultCount === 1 ? '' : 's'}`}
-                </Text>
-              </Pressable>
+                      : `Show ${resultCount} ${itemNoun}${resultCount === 1 ? '' : 's'}`
+                }
+                accessibilityLabel={busy ? 'Updating results' : resultCount === 0 ? (emptyLabel ?? 'No matches. Adjust filters') : `Show ${resultCount} ${itemNoun}${resultCount === 1 ? '' : 's'}`}
+                onPress={onClose}
+                busy={busy}
+                // No matches: the quieter grey button, ink on grey. It was white
+                // on `none` (#8E8E93), 3.3:1 — under AA for the label.
+                variant={!busy && resultCount === 0 ? 'secondary' : 'primary'}
+              />
             </View>
           </Pressable>
         </View>
@@ -380,19 +377,5 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     backgroundColor: colors.bg,
   },
-  showBtn: {
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
-    backgroundColor: colors.tint,
-  },
-  showBtnEmpty: {
-    backgroundColor: colors.none,
-  },
-  showBtnText: {
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.textInverse,
-  },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: opacity.pressed },
 });

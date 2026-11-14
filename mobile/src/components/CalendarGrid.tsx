@@ -10,7 +10,7 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import { spokenDate } from '@/lib/a11y';
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -78,7 +78,7 @@ export function CalendarGrid({
           disabled={!canPrev}
           hitSlop={8}
           accessibilityLabel="Previous month"
-          style={({ pressed }) => [styles.monthBtn, pressed && { opacity: 0.6 }]}
+          style={({ pressed }) => [styles.monthBtn, pressed && { opacity: opacity.pressed }]}
         >
           <Ionicons
             name="chevron-back"
@@ -94,7 +94,7 @@ export function CalendarGrid({
           disabled={!canNext}
           hitSlop={8}
           accessibilityLabel="Next month"
-          style={({ pressed }) => [styles.monthBtn, pressed && { opacity: 0.6 }]}
+          style={({ pressed }) => [styles.monthBtn, pressed && { opacity: opacity.pressed }]}
         >
           <Ionicons
             name="chevron-forward"
@@ -131,7 +131,7 @@ export function CalendarGrid({
                 style={({ pressed }) => [
                   styles.day,
                   isSelected && styles.daySelected,
-                  pressed && !disabled && { opacity: 0.6 },
+                  pressed && !disabled && { opacity: opacity.pressed },
                 ]}
               >
                 <Text

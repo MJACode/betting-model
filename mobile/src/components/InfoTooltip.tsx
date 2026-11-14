@@ -3,7 +3,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Modal } from '@/components/TrackedModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 /** A headed paragraph in the sheet ("What it is" / "How to use it"). */
 export interface InfoSection {
@@ -114,15 +115,7 @@ export function InfoSheet({
               <Text style={styles.actionText}>{action.label} ›</Text>
             </Pressable>
           ) : null}
-          <Pressable
-            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
-            onPress={onClose}
-            accessibilityRole="button"
-            accessibilityLabel="Got it"
-            style={({ pressed }) => [styles.dismissBtn, pressed && styles.pressed]}
-          >
-            <Text style={styles.dismissText}>Got it</Text>
-          </Pressable>
+          <PrimaryButton label="Got it" onPress={onClose} style={styles.dismissBtn} />
         </Pressable>
       </View>
     </Modal>
@@ -248,7 +241,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
   },
-  pressed: { opacity: 0.65 },
+  pressed: { opacity: opacity.pressed },
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
@@ -301,16 +294,5 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
-  dismissBtn: {
-    marginTop: spacing.lg,
-    alignItems: 'center',
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radii.sm,
-    backgroundColor: colors.tint,
-  },
-  dismissText: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.textInverse,
-  },
+  dismissBtn: { marginTop: spacing.lg },
 });

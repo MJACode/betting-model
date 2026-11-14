@@ -4,7 +4,7 @@ import { gameStartAt, historyFrom, sincePick, type PickWindow } from '@/lib/line
 import { lineMovementView, type Snap } from '@/lib/lineMovementView';
 import { canShowLineMovementHistory, gameMarketForModel, historyBookForPick, propMarketForPick } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, sectionHeaderText, cardDense } from '@/lib/theme';
 import type { Pick } from '@/types';
 
 interface Props {
@@ -123,18 +123,12 @@ export function LineMovementCard({ pick, playerName, commenceTime }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
+    ...cardDense,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },
   heading: {
-    fontSize: font.size.footnote,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
     marginBottom: 4,
   },
   headRow: {

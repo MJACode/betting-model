@@ -42,7 +42,7 @@ import {
   type ScoreboardSport,
   type SideSplit,
 } from '@/lib/scoreboard';
-import { colors, font, radii, spacing, teamDisc } from '@/lib/theme';
+import { colors, font, radii, spacing, teamDisc, sectionHeaderText, opacity, card, cardDense } from '@/lib/theme';
 import type { GameRow } from '@/types';
 
 const PHASE_LABEL: Record<ScoreboardPhase, string> = {
@@ -632,12 +632,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   group: {
-    fontFamily: font.family,
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    ...sectionHeaderText,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.xs,
   },
@@ -676,9 +671,7 @@ const styles = StyleSheet.create({
   },
   list: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.md,
+    ...cardDense,
     marginBottom: spacing.md,
     gap: spacing.sm,
     minHeight: 44,
@@ -881,9 +874,7 @@ const styles = StyleSheet.create({
   lockWrap: { flex: 1, justifyContent: 'flex-end' },
   lockFade: { paddingHorizontal: spacing.lg, gap: spacing.md, opacity: 0.35 },
   ghost: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
+    ...card,
     gap: spacing.sm,
   },
   ghostBar: { height: 14, borderRadius: radii.xs, backgroundColor: colors.noneSoft },
@@ -891,7 +882,7 @@ const styles = StyleSheet.create({
   lockCard: {
     margin: spacing.lg,
     backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
     padding: spacing.xl,
     alignItems: 'center',
     gap: spacing.sm,
@@ -937,11 +928,9 @@ const styles = StyleSheet.create({
   lockLinks: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   lockLinkBtn: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.sm },
   recordRow: {
+    ...card,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.lg,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
@@ -967,10 +956,8 @@ const styles = StyleSheet.create({
   lockDot: { color: colors.textTertiary, fontSize: font.size.footnote },
   skeletonWrap: { padding: spacing.lg, gap: spacing.md },
   skeletonCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
+    ...card,
     gap: spacing.sm,
   },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: opacity.pressed },
 });

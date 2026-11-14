@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, cardDense } from '@/lib/theme';
 
 interface Props {
   values: number[]; // most recent first
@@ -75,9 +75,7 @@ export function TrendSparkline({ values, line, width = 280, height = 80, label }
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
+    ...cardDense,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
     alignItems: 'center',

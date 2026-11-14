@@ -206,6 +206,6 @@ const styles = StyleSheet.create({
   skel: {
     height: 120,
     backgroundColor: colors.noneSoft,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
   },
 });

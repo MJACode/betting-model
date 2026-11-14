@@ -20,7 +20,7 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 
 export interface ActivePill {
   key: string;
@@ -276,5 +276,5 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
-  pressed: { opacity: 0.65 },
+  pressed: { opacity: opacity.pressed },
 });

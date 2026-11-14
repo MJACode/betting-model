@@ -88,12 +88,13 @@ import {
   selectionFor,
   type HitMode,
 } from '@/lib/hitMode';
+import { SkeletonList } from '@/components/Skeleton';
 import { propLineSheetInput, type LineSheetInput } from '@/lib/lineLegs';
 import { computeHitRate, isHit, type HitDirection } from '@/lib/hitRate';
 import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, sectionHeaderText, opacity, card, cardDense } from '@/lib/theme';
 import { reachFrame, unitsSpeech } from '@/lib/a11y';
 import { ErrorBanner } from '@/components/ErrorState';
 import { MatchupStrengthBar } from '@/components/MatchupStrengthBar';
@@ -1044,15 +1045,10 @@ export function PlayerStatsScreen() {
         {(loading && games.length === 0)
           || (!isH2H && defensePicked == null && detail.defensePending)
           || (isH2H && windowed.length === 0 && (detail.h2hLoading || h2hOpponent == null || !logSettled)) ? (
-          <ActivityIndicator
-            style={styles.loading}
-            accessibilityLabel={
-              isH2H
-                ? h2hOpponent
-                  ? `Loading games against ${h2hOpponent}`
-                  : 'Loading head to head'
-                : 'Loading recent games'
-            }
+          <SkeletonList
+            label={isH2H ? (h2hOpponent ? `games against ${h2hOpponent}` : 'head to head') : 'recent games'}
+            rows={4}
+            style={styles.skeleton}
           />
         ) : isH2H && windowed.length === 0 && detail.h2hError ? (
           <ErrorBanner
@@ -1162,7 +1158,7 @@ export function PlayerStatsScreen() {
                     style={({ pressed }) => [
                       styles.modeBtn,
                       cardLayout === 'split' && styles.modeBtnSplit,
-                      pressed && { opacity: 0.7 },
+                      pressed && { opacity: opacity.pressed },
                     ]}
                   >
                     <Text style={styles.stepperLabel}>{hitModeLabel(mode)}</Text>
@@ -1308,7 +1304,7 @@ export function PlayerStatsScreen() {
                   style={({ pressed }) => [
                     styles.slipBtn,
                     inSlip && styles.slipBtnIn,
-                    pressed && { opacity: 0.7 },
+                    pressed && { opacity: opacity.pressed },
                   ]}
                 >
                   <Ionicons
@@ -1499,7 +1495,7 @@ export function PlayerStatsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Done"
               hitSlop={8}
-              style={({ pressed }) => [styles.doneBtn, pressed && { opacity: 0.7 }]}
+              style={({ pressed }) => [styles.doneBtn, pressed && { opacity: opacity.pressed }]}
             >
               <Text style={styles.doneText}>Done</Text>
             </Pressable>
@@ -1630,9 +1626,7 @@ function HeadToHeadCard({
         }}
       />
       {loading && b.games === 0 ? (
-        <View style={styles.card}>
-          <ActivityIndicator style={styles.loadingInline} />
-        </View>
+        <SkeletonList label="games against this opponent" rows={2} style={styles.skeleton} />
       ) : error ? (
         <ErrorBanner
           what={`games against ${h2h.opponent}`}
@@ -1706,7 +1700,7 @@ function HeadToHeadCard({
                   ? 'Show fewer meetings'
                   : `Show all ${h2h.meetings.length} meetings with ${h2h.opponent}`
               }
-              style={({ pressed }) => [styles.gameRow, pressed && { opacity: 0.7 }]}
+              style={({ pressed }) => [styles.gameRow, pressed && { opacity: opacity.pressed }]}
             >
               <Text style={styles.h2hMore}>
                 {showAll ? 'Show fewer' : `Show all ${h2h.meetings.length} meetings`}
@@ -1958,9 +1952,7 @@ function SplitsCard({
         }}
       />
       {loading && buckets.every((b) => b.games === 0) ? (
-        <View style={styles.card}>
-          <ActivityIndicator style={styles.loadingInline} />
-        </View>
+        <SkeletonList label="the splits" rows={2} style={styles.skeleton} />
       ) : (
         rows.map((r, i) => (
           <View key={i} style={styles.tileRow}>
@@ -2059,9 +2051,7 @@ function PickRecordCard({
         }}
       />
       {loading && record.settled === 0 ? (
-        <View style={styles.card}>
-          <ActivityIndicator style={styles.loadingInline} />
-        </View>
+        <SkeletonList label="the pick record" rows={2} style={styles.skeleton} />
       ) : record.settled === 0 ? (
         <View style={styles.card}>
           <Text style={styles.muted}>
@@ -2107,13 +2097,12 @@ function PickRecordCard({
 }
 
 const styles = StyleSheet.create({
+  skeleton: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
   // ── Added sections (2026-09-20) ──
   // spacing.md, as the hitCard beside these; a second card padding on one
   // page reads as a second app (UX review).
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
+    ...cardDense,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
   },
@@ -2302,12 +2291,10 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
   },
   hitCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
+    ...cardDense,
     marginHorizontal: spacing.lg,
     marginTop: spacing.sm,
     marginBottom: spacing.md,
-    padding: spacing.md,
   },
   hitTop: {
     flexDirection: 'row',
@@ -2474,11 +2461,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   sectionHeader: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: spacing.sm,
@@ -2568,9 +2551,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.noneSoft,
   },
   emptyCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     alignItems: 'center',
   },
@@ -2578,7 +2559,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     color: colors.textSecondary,
   },
-  loading: { marginVertical: spacing.xxl },
   // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
   errorBannerInset: { marginTop: 0, marginBottom: spacing.sm },
 });
