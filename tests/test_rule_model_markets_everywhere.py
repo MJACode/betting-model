@@ -181,8 +181,9 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
 # production never re-created the function: the guard above could not see it, because it reads only the comment.
 # Editing clv_game_market now fails here until the comment is bumped AND this hash is set to the new body's.
 # The hash is the merged body: nba_q1_trend_ml from #1218 and ncaaf_moneyline_market from this branch.
-# The euroleague-pregame comment's body changed once before it merged (2026-11-14: the big-favourite
-# moneyline removed before it went live), so its hash moved under the same comment: production never held it.
+# The euroleague-pregame comment's body changed once while its branch (#1323) was unmerged (2026-11-14: the
+# big-favourite moneyline removed before it went live), so its hash moved under the same comment: the comment
+# first ships with that branch's merge.
 GAME_MARKET_BODY = {"clv-standard-v2-power-80-0.05-12-euroleague-pregame": "8b753b87be870152"}
 
 
