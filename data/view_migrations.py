@@ -664,6 +664,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Returns on a catalog read once it exists. The loop refuses to decide
     # until it does.
     "euroleague_live_decisions_2026_11_13.sql",
+    # 2026-11-14 (Matt): the in-app notifications inbox. Three new tables
+    # (RLS on, anon and authenticated revoked) and four device-keyed
+    # SECURITY DEFINER functions the app calls. tracking/push_notifier.py
+    # writes each push here word for word, and skips that write until the
+    # table exists. Touches no view, pick, cut or record. Returns on a
+    # catalog read once everything exists with its grants.
+    "notification_inbox_2026_11_14.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT

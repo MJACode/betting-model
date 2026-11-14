@@ -154,7 +154,9 @@ def test_the_line_change_glyph_matches_its_direction():
 def test_the_line_change_push_carries_the_pick_it_is_about():
     """It is always one tracked bet, so it can always open that bet."""
     src = _read(NOTIFIER)
-    m = re.search(r"\"title\": f\"\{'📉'.*?\}\)", src, re.S)
+    # The title, body and data became locals on 2026-11-14 so the same words
+    # are saved to the notifications inbox; the span is title -> data.
+    m = re.search(r"title = f\"\{'📉'.*?\"pickId\": a\[\"pick_id\"\]\}", src, re.S)
     assert m, "the line-change message literal moved"
     assert '"pickId": a["pick_id"]' in m.group(0)
     # ...and the alert dict must actually carry it, or that is a KeyError in

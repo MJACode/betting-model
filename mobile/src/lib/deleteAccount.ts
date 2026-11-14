@@ -19,6 +19,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { clearBankrollForAccountDeletion } from '@/hooks/useBankroll';
 import { clearCustomModelsForAccountDeletion } from '@/hooks/useCustomModels';
 import { clearFeedbackForAccountDeletion } from '@/hooks/useFeedback';
+import { clearInboxForAccountDeletion } from '@/hooks/useNotificationInbox';
 import { clearLineLegsForAccountDeletion } from '@/hooks/useLineLegs';
 import { clearManualBetsForAccountDeletion } from '@/hooks/useManualBets';
 import { clearParlaySlipForAccountDeletion } from '@/hooks/useParlaySlip';
@@ -62,6 +63,7 @@ export async function clearQueryCache(): Promise<void> {
   setServerThresholds(null);
   setModelClv(null);
   clearFeedbackForAccountDeletion();
+  clearInboxForAccountDeletion();
   await clearSettledCache();
   await AsyncStorage.multiRemove([...QUERY_CACHE_KEYS]);
 }

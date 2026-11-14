@@ -43,6 +43,7 @@ import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { ScoreboardGameScreen } from '@/screens/ScoreboardGameScreen';
 import { FeedbackScreen } from '@/screens/FeedbackScreen';
 import { FeedbackThreadScreen } from '@/screens/FeedbackThreadScreen';
+import { NotificationsScreen } from '@/screens/NotificationsScreen';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useDiscordJoin } from '@/hooks/useDiscordJoin';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
@@ -559,6 +560,11 @@ function App() {
             name="FeedbackThread"
             component={FeedbackThreadScreen}
             options={{ title: 'Conversation' }}
+          />
+          <Stack.Screen
+            name="Notifications"
+            component={NotificationsScreen}
+            options={{ title: 'Notifications' }}
           />
           {/* Auth is behind AUTH_ENABLED (lib/authConfig.ts). Registering the
               route costs nothing while the flag is off — no UI navigates to it

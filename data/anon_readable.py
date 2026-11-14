@@ -820,6 +820,13 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "feedback_submit",
     "feedback_threads_for_device",
     "feedback_unread_count",
+    # notifications inbox -- SECURITY DEFINER, device-keyed
+    # (data/migrations/notification_inbox_2026_11_14.sql, which carries its
+    # own GRANT; apply_anon_grants skips them until the worker has applied it)
+    "notification_inbox_for_device",
+    "notification_mark_all_read",
+    "notification_mark_read",
+    "notification_unread_count",
     # the member's own sportsbooks -- SECURITY DEFINER, device/user-scoped
     # (data/migrations/member_sportsbooks_2026_10_19.sql, which carries its own
     # GRANT; apply_anon_grants skips them until the worker has applied it)

@@ -3,6 +3,8 @@ import * as Notifications from 'expo-notifications';
 import type { NavigationContainerRef } from '@react-navigation/native';
 
 import { routeForPush, type PushRoute } from '@/lib/pushRoute';
+import { inboxIdFromPush } from '@/lib/notificationInboxHelpers';
+import { markNotificationRead } from '@/hooks/useNotificationInbox';
 import { setSportForVisit } from '@/hooks/useSportFilter';
 import { readAuthStatus, useAuth } from '@/hooks/useAuth';
 import { AUTH_ENABLED } from '@/lib/authConfig';
@@ -50,8 +52,12 @@ function shellOpen(): boolean {
   return status === 'signedIn' || status === 'disabled';
 }
 
-/** Perform a resolved route. One place, so the two callers cannot drift. */
-function navigateTo(navRef: NavRef, route: PushRoute): boolean {
+/**
+ * Perform a resolved route. One place, so the callers cannot drift: a tap on
+ * the push, and a tap on the same notification in the inbox
+ * (screens/NotificationsScreen.tsx).
+ */
+export function navigateTo(navRef: Pick<NavRef, 'navigate'>, route: PushRoute): boolean {
   if (AUTH_ENABLED && readAuthStatus() === 'signedOut') return false;
   switch (route.kind) {
     case 'pick':
@@ -132,7 +138,11 @@ export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
         handledResponseIds.add(id);
       }
       clearNativeLastResponse();
-      const route = routeForPush(response.notification.request.content.data);
+      const pushData = response.notification.request.content.data;
+      // Opening the push clears the same item in the inbox.
+      const inboxId = inboxIdFromPush(pushData);
+      if (inboxId != null) void markNotificationRead(inboxId);
+      const route = routeForPush(pushData);
       // null is the deliberate outcome for a payload this build cannot read:
       // the app simply opens, which is what tapping a notification did before
       // any of this existed.

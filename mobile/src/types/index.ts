@@ -643,6 +643,8 @@ export type RootStackParamList = {
   // In-app feedback: the composer + your past conversations, and one thread.
   Feedback: undefined;
   FeedbackThread: { threadId: number };
+  // The notifications inbox, opened from the header bell (2026-11-14).
+  Notifications: undefined;
 };
 
 /** One row from v_opening_vs_live — game-level settled record per track. */

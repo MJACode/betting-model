@@ -220,13 +220,14 @@ def _summary_body(labels: list[str]) -> str:
     return body
 
 
-def _build_messages(tokens: list[str], new_bets: list[dict], dropped: list[dict]) -> list[dict]:
-    """One message per (token × non-empty event type)."""
-    messages: list[dict] = []
-    events: list[tuple[str, str, dict]] = []
+def _signal_events(new_bets: list[dict], dropped: list[dict]) -> list[tuple[str, str, str, dict]]:
+    """(kind, title, body, data) for each non-empty event type: the words every
+    device is sent, and the words the inbox keeps."""
+    events: list[tuple[str, str, str, dict]] = []
     if new_bets:
         title = f"🟢 {len(new_bets)} new BET signal{'s' if len(new_bets) != 1 else ''}"
-        events.append((title, _summary_body([s["label"] for s in new_bets]),
+        events.append(("new_bets", title,
+                       _summary_body([s["label"] for s in new_bets]),
                        _route("new_bets", new_bets)))
     if dropped:
         # LINE MOVEMENT, not a retraction. "flipped to AVOID" told the reader
@@ -240,11 +241,20 @@ def _build_messages(tokens: list[str], new_bets: list[dict], dropped: list[dict]
         # Lands on Today, not Signals: once the line has moved past the cut the
         # pick is no longer a signal, so Signals is the one board it is
         # guaranteed NOT to be on.
-        events.append((title, _summary_body([s["label"] for s in dropped]),
+        events.append(("dropped", title,
+                       _summary_body([s["label"] for s in dropped]),
                        _route("dropped", dropped)))
+    return events
 
+
+def _build_messages(tokens: list[str], new_bets: list[dict], dropped: list[dict],
+                    events: list[tuple[str, str, str, dict]] | None = None) -> list[dict]:
+    """One message per (token × non-empty event type)."""
+    if events is None:
+        events = _signal_events(new_bets, dropped)
+    messages: list[dict] = []
     for token in tokens:
-        for title, body, data in events:
+        for _kind, title, body, data in events:
             messages.append({
                 "to": token,
                 "title": title,
@@ -254,6 +264,58 @@ def _build_messages(tokens: list[str], new_bets: list[dict], dropped: list[dict]
                 "priority": "high",
             })
     return messages
+
+
+# ── The in-app inbox ─────────────────────────────────────────────────────────
+#
+# Every push is also saved to notification_inbox, word for word (Matt,
+# 2026-11-14; data/migrations/notification_inbox_2026_11_14.sql). It is
+# written whether or not any device has push on, so an install with push off
+# still sees what it would have been told. device_id None means every device.
+#
+# The row's id rides in the push as `inboxId` (an optional key, so
+# PUSH_ROUTE_VERSION is unchanged), and the app marks that item read when the
+# push itself is tapped.
+#
+# Until the worker has applied the migration the table does not exist, and the
+# write is skipped. It runs inside a SAVEPOINT, so a failed write can never
+# abort the transaction that holds the push_sent ledger.
+
+def _save_to_inbox(conn, kind: str, title: str, body: str, data: dict,
+                   device_id: str | None = None) -> int | None:
+    """Store one notification for the inbox. Returns its id, or None when the
+    table is not there yet or the write failed (logged, never raised)."""
+    import json
+
+    try:
+        ready = conn.execute(
+            "SELECT to_regclass('public.notification_inbox') IS NOT NULL"
+        ).fetchone()
+    except Exception as exc:  # noqa: BLE001 — the inbox never blocks a push
+        logger.warning(f"Inbox: could not check for the table: {exc}")
+        return None
+    if not ready or not ready[0]:
+        return None
+    try:
+        conn.execute("SAVEPOINT notification_inbox")
+        row = conn.execute(
+            "INSERT INTO notification_inbox (device_id, kind, title, body, data) "
+            "VALUES (%s, %s, %s, %s, %s::jsonb) RETURNING id",
+            (device_id, kind, title, body or "", json.dumps(data)),
+        ).fetchone()
+        conn.execute("RELEASE SAVEPOINT notification_inbox")
+        return int(row[0]) if row else None
+    except Exception as exc:  # noqa: BLE001 — the inbox never blocks a push
+        logger.error(f"Inbox: could not save '{title}': {exc}")
+        try:
+            conn.execute("ROLLBACK TO SAVEPOINT notification_inbox")
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+
+def _with_inbox_id(data: dict, inbox_id: int | None) -> dict:
+    return dict(data, inboxId=inbox_id) if inbox_id is not None else data
 
 
 # Expo ticket codes that mean the whole APNs/FCM setup is wrong rather than
@@ -428,7 +490,12 @@ def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
     # Ledger regardless of token count, so a signal with zero devices online
     # isn't re-detected forever (it would spam once a device registers late).
     sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
-    messages = _build_messages(tokens, new_bets, dropped) if tokens else []
+    # Saved to the inbox regardless of token count too: that is how a phone
+    # with push off still sees what it missed.
+    events = [(kind, title, body,
+               _with_inbox_id(data, _save_to_inbox(conn, kind, title, body, data)))
+              for kind, title, body, data in _signal_events(new_bets, dropped)]
+    messages = _build_messages(tokens, new_bets, dropped, events) if tokens else []
     sent = _expo_send(messages, conn) if messages else 0
 
     for s in new_bets:
@@ -554,25 +621,26 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
         sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
         messages = []
         for a in alerts:
+            arrow = "moved against you" if a["against"] else "moved in your favor"
+            # The GLYPH is read before the sentence on a lock screen, so a
+            # rising green chart on "moved against you" says the opposite of
+            # the alert, on the shortest reaction window we have (UX review).
+            title = f"{'📉' if a['against'] else '📈'} Line {arrow}"
+            body = (f"{label_without_stake(a['label'])}: "
+                    f"{a['locked']:+d} → {a['current']:+d}")
+            # Always one pick, so this is the one push that can always open
+            # the bet itself — which is the whole point when the line the
+            # user locked has moved.
+            data = {"v": PUSH_ROUTE_VERSION, "type": "line_change",
+                    "pickId": a["pick_id"]}
+            # The tracking device's inbox gets it whether or not push is on.
+            data = _with_inbox_id(data, _save_to_inbox(
+                conn, "line_change", title, body, data, device_id=a["device_id"]))
             token = token_by_device.get(a["device_id"])
             if token:
-                arrow = "moved against you" if a["against"] else "moved in your favor"
                 messages.append({
-                    "to": token,
-                    # The GLYPH is read before the sentence on a lock screen, so
-                    # a rising green chart on "moved against you" says the
-                    # opposite of the alert, on the shortest reaction window we
-                    # have (UX review).
-                    "title": f"{'📉' if a['against'] else '📈'} Line {arrow}",
-                    "body": (f"{label_without_stake(a['label'])}: "
-                             f"{a['locked']:+d} → {a['current']:+d}"),
-                    # Always one pick, so this is the one push that can always
-                    # open the bet itself — which is the whole point when the
-                    # line the user locked has moved.
-                    "data": {"v": PUSH_ROUTE_VERSION, "type": "line_change",
-                             "pickId": a["pick_id"]},
-                    "sound": "default",
-                    "priority": "high",
+                    "to": token, "title": title, "body": body, "data": data,
+                    "sound": "default", "priority": "high",
                 })
         sent = _expo_send(messages, conn) if messages else 0
 
@@ -658,6 +726,7 @@ def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -
         title = f"🔴 {len(new)} live pick{'s' if len(new) != 1 else ''}"
         body = _summary_body([s["label"] for s in new])
         data = _route("live_signals", new)
+        data = _with_inbox_id(data, _save_to_inbox(conn, "live_signals", title, body, data))
         messages = [{
             "to": token, "title": title, "body": body, "data": data,
             "sound": "default", "priority": "high",
@@ -728,15 +797,18 @@ def notify_feedback_replies(dry_run: bool = False) -> int:
             return 0
 
         sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
-        messages = [{
-            "to": r["token"],
-            "title": "💬 We replied to your feedback",
-            "body": (r["body"] or "")[:140],
-            "data": {"v": PUSH_ROUTE_VERSION, "type": "feedback_reply",
-                     "threadId": r["thread_id"]},
-            "sound": "default",
-            "priority": "high",
-        } for r in replies]
+        messages = []
+        for r in replies:
+            title = "💬 We replied to your feedback"
+            body = (r["body"] or "")[:140]
+            data = {"v": PUSH_ROUTE_VERSION, "type": "feedback_reply",
+                    "threadId": r["thread_id"]}
+            data = _with_inbox_id(data, _save_to_inbox(
+                conn, "feedback_reply", title, body, data, device_id=r["device_id"]))
+            messages.append({
+                "to": r["token"], "title": title, "body": body, "data": data,
+                "sound": "default", "priority": "high",
+            })
         sent = _expo_send(messages, conn)
 
         # Ledger every reply, delivered or not — mirrors the other producers, so

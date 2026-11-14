@@ -151,6 +151,45 @@ Guards: `tests/test_push_tickets.py` (12, watched failing under three
 mutations) and `mobile/scripts/verify_push.ts` (37, watched failing under
 four).
 
+## The in-app inbox (added 2026-11-14, Matt)
+
+A bell beside the settings gear on every tab opens **Notifications**: every push
+from the last 30 days, **word for word**, newest first, grouped Today /
+Yesterday / Earlier by ET day. Unread rows are bold with a dot; a tap clears
+that one and opens the same place the push opens; **Read all** clears the rest.
+Matt's calls: bell in the header, start fresh (no rebuilt history), log alerts
+even while push is off, 30 days.
+
+- **`notification_inbox`** (`data/migrations/notification_inbox_2026_11_14.sql`,
+  in `ACTIVE_MIGRATIONS`). Each producer in `tracking/push_notifier.py` saves
+  the exact title, body and `data` it builds, **whether or not any token is
+  enabled** (`_save_to_inbox`). `device_id` NULL = every device (new bets,
+  moved past the bet line, live picks); a line-change alert or feedback reply
+  names its device. Rows are never deleted; the 30-day window is in the read
+  functions.
+- **Read state is per device**: `notification_reads` (one opened item) and
+  `notification_read_marks.read_all_at` (Read all). A device's first inbox
+  fetch sets its mark to that moment, so a fresh install starts at 0 unread.
+- **The push carries `inboxId`** (optional key, `PUSH_ROUTE_VERSION`
+  unchanged). Tapping the push on the lock screen clears the inbox row too
+  (`usePushDeepLink`).
+- **Fail-safe**: the write checks `to_regclass` and runs inside a SAVEPOINT,
+  so before the migration lands, or if the insert fails, the push still sends
+  and `push_sent` still ledgers.
+- **Before 2026-11-14 nothing was saved** — `push_sent` holds keys, never
+  words — so history starts at the first push after the worker applies the
+  migration.
+- **Not covered:** a feedback reply to a device with push OFF. That producer
+  only selects threads whose device has an enabled token (so a reply is pushed
+  once the device opts in); the reply is still on the Feedback screen.
+
+Check it with one query:
+
+```sql
+select kind, device_id is null as broadcast, count(*), max(created_at)
+from notification_inbox group by 1, 2 order by 4 desc;
+```
+
 ## Where a tap LANDS (added 2026-09-06)
 
 Every message now carries a versioned `data` payload and the app routes on it —
