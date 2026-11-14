@@ -117,9 +117,27 @@ FIXED BEFORE ANY RESULT WAS READ (none is changed after):
                without the best price band; the placebo share at or above the real
                units under 0.05; BH q < 0.10; 25+ graded bets
 
+ADDED AFTER THE RESULTS: a data correction only, no design change. The
+as-designed run (commit 3c189ae0) read a 2023 over rate of 0.77 on Pinnacle's
+half lines against a mean line chance of 0.47. The cause: at the 2023
+Australian Open and 2023 French Open (both tours) the feed stores Pinnacle's
+TOTAL SETS market (lines 2.5, 3.5, 4.5) under "totals" and its SET HANDICAP
+(+-1.5, +-2.5; every Pinnacle spread at the 2023 Australian Open was within
+2.5, against about a quarter in every other year) under "spreads". With
+--drop-sets-markets, a book's totals AND spreads rows are dropped for every
+(book, sport key, year of the listed start) in which any of that book's totals
+lines is below 12 games (no completed best-of-three has fewer); among the books
+this study uses (Pinnacle and the three decidable books) that is exactly
+Pinnacle at those four editions. The 2023 bets do not move (they use fits on
+2020-2022, which hold no such row); every 2024-2026 fit and the 2023
+out-of-sample read do. Default off, so the committed design run reproduces.
+
     python -m scripts.tennis_games_round2 --cache C:/Users/micha/tennis_research/cache \\
         --spool C:/Users/micha/tennis_research/spool \\
         --save C:/Users/micha/tennis_research/cache/games_round2_quotes.parquet
+    python -m scripts.tennis_games_round2 --cache C:/Users/micha/tennis_research/cache \\
+        --spool C:/Users/micha/tennis_research/spool --drop-sets-markets \\
+        --save C:/Users/micha/tennis_research/cache/games_round2_quotes_clean.parquet
     python -m scripts.tennis_games_round2 --self-test
 """
 from __future__ import annotations
@@ -203,6 +221,7 @@ def fit_offset(y, off, x, groups=None) -> dict:
     out.update(b=b, se=1 / math.sqrt(H))
     if groups is not None:
         out["se_cl"] = math.sqrt(cluster_var(x * (y - p), groups)) / H
+        out["G"] = int(pd.Series(groups).nunique())
     return out
 
 
@@ -283,9 +302,30 @@ def market_rows(q: pd.DataFrame, fe: pd.DataFrame, pin_h2h: pd.DataFrame, market
     return out.merge(fe[["event_id", "season", "start", "tour", "bo", "status", "cl", "eidx"]], on="event_id")
 
 
-def build(q, lk, res, ev) -> dict:
+def sets_market_keys(q: pd.DataFrame) -> pd.DataFrame:
+    """(book, sport key, year of the listed start) where any totals line is
+    below 12 games: a sets market stored under totals (and spreads)."""
+    t = q[(q.market == "totals") & (q.total_point < 12)]
+    return (t.assign(yr=t.commence_time.dt.year).groupby(["bookmaker", "sport_key", "yr"]).size()
+            .rename("sub12_rows").reset_index())
+
+
+def build(q, lk, res, ev, drop_sets: bool = False) -> dict:
     pm = st.pre_match(q, lk, res)
     pm = pm[pm.event_id.isin(ev.event_id)]
+    if drop_sets:
+        bad = sets_market_keys(q)
+        print("  DROP SETS MARKETS (added after the results): (book, key, year) with a totals line below 12 games:")
+        print("    " + bad.to_string(index=False).replace("\n", "\n    "))
+        yr = pm.commence_time.dt.year
+        k = pd.MultiIndex.from_arrays([pm.bookmaker, pm.sport_key, yr])
+        hit = k.isin(pd.MultiIndex.from_frame(bad[["bookmaker", "sport_key", "yr"]])) & pm.market.isin(["totals", "spreads"]).values
+        used = pm.bookmaker.isin(list(GAMES_BOOKS) + ["pinnacle"]).values
+        d = pm[hit & used].merge(ev[["event_id", "season"]], on="event_id")
+        print("    pre-match rows dropped among the books used, by book, market, season: "
+              f"{d.groupby(['bookmaker', 'market', 'season']).size().to_dict()}; their events "
+              f"{d.groupby(['market', 'season']).event_id.nunique().to_dict()}")
+        pm = pm[~hit]
     fe = ev.copy()
     h2 = pm[(pm.market == "h2h") & (pm.bookmaker == "pinnacle")].dropna(subset=["home_price", "away_price"])
     h2 = h2.sort_values("snapshot_ts").assign(p_home=lambda f: p_power(f.home_price.values, f.away_price.values))
@@ -479,9 +519,9 @@ def info_report(data: dict, market: str, feats: dict, fits: dict, cells: dict) -
             ic = f"with an intercept (season {S} alone): a {ri.params[0]:+.4f} ({ri.bse[0]:.4f}) b {ri.params[1]:+.3f} ({ri.bse[1]:.3f})"
         except Exception as exc:        # a failed diagnostic is reported, not hidden
             ic = f"intercept fit failed: {exc}"
-        print(f"    {S}: fit on <{S} n {f['n']:,}: {name} {b:+.3f} se {f['se']:.3f} se_cl(edition) {f['se_cl']:.3f} "
+        print(f"    {S}: fit on <{S} n {f['n']:,} editions {f.get('G', 0)}: {name} {b:+.3f} se {f['se']:.3f} se_cl(edition) {f['se_cl']:.3f} "
               f"z {b / f['se_cl']:+.2f} | on {S} alone n {own['n']:,}: {own['b']:+.3f} se {own['se']:.3f} "
-              f"se_cl {own['se_cl']:.3f} z {own['b'] / own['se_cl']:+.2f}")
+              f"se_cl {own['se_cl']:.3f} (editions {own.get('G', 0)}) z {own['b'] / own['se_cl']:+.2f}")
         print(f"          OOS on {S}: d_logloss {dll.mean():+.6f} (se_cl {mean_diff_se(dll, rs.cl.values):.6f}) "
               f"d_brier {dbr.mean():+.6f} (se_cl {mean_diff_se(dbr, rs.cl.values):.6f}); "
               f"line calibration: mean y {y.mean():.4f} mean p_line {p0.mean():.4f}; feature mean {x.mean():+.4f} "
@@ -696,6 +736,8 @@ def main(argv=None) -> int:
     ap.add_argument("--save", type=Path)
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--no-placebo", action="store_true")
+    ap.add_argument("--drop-sets-markets", action="store_true",
+                    help="after the results, a data correction: drop the sets markets stored as games (see the docstring)")
     a = ap.parse_args(argv)
     if a.self_test:
         return self_test()
@@ -711,7 +753,7 @@ def main(argv=None) -> int:
     for k in ("linked_with_result", "before_cutoff", "both_matched", "player_slots", "player_slots_matched"):
         print(f"  {k}: {info[k]}")
     ev["cl"] = ev.sport_key + ":" + ev.edition.astype(str)
-    data = build(q, lk, res, ev)
+    data = build(q, lk, res, ev, drop_sets=a.drop_sets_markets)
     fe = data["fe"]
     feats = per_event_features(fe, (fe.h_spw - fe.h_rpw + fe.a_spw - fe.a_rpw).values,
                                ((fe.h_spw + fe.h_rpw) - (fe.a_spw + fe.a_rpw)).values)
