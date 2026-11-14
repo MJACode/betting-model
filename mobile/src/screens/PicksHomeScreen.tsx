@@ -108,6 +108,13 @@ import {
   rowsByDay,
   type DayRow,
 } from '@/lib/dateFilter';
+import {
+  effectiveGameStateSelection,
+  gameStateOf,
+  gameStateOptionsFor,
+  isGameStateSelected,
+  type GameState,
+} from '@/lib/gameStateFilter';
 import { betslipPlayerFromPick } from '@/lib/betslipGuard';
 import { slipKeyForPick } from '@/lib/parlay';
 import {
@@ -484,9 +491,49 @@ export function PicksHomeScreen() {
     });
   }, []);
   const clearDates = useCallback(() => setPickedDates(new Set()), []);
+  // ── The GAME STATUS cut (Matt, 2026-11-14: "filter on games that are live
+  // or not played yet") ───────────────────────────────────────────────────
+  // Each pick's state comes from gameStatus() — the function its card uses to
+  // draw LIVE / FINAL — read against the same live-state poll, so a chip can
+  // never disagree with the card it keeps. Empty = every state; unpersisted
+  // and dropped on a sport switch, like Date (lib/gameStateFilter).
+  const [pickedStates, setPickedStates] = useState<Set<GameState>>(() => new Set());
+  useEffect(() => {
+    setPickedStates(new Set());
+  }, [sport]);
+  const stateByItem = useMemo(() => {
+    const out = new Map<EnrichedPick, GameState>();
+    for (const d of activeItems) {
+      out.set(d, gameStateOf(gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null)));
+    }
+    return out;
+  }, [activeItems, liveStates]);
+  const gameStateOptions = useMemo(
+    () => gameStateOptionsFor(stateByItem.values()),
+    [stateByItem],
+  );
+  const selectedStates = useMemo(
+    () => effectiveGameStateSelection(pickedStates, gameStateOptions),
+    [pickedStates, gameStateOptions],
+  );
+  const toggleState = useCallback((state: GameState) => {
+    setPickedStates((prev) => {
+      const next = new Set(prev);
+      if (next.has(state)) next.delete(state);
+      else next.add(state);
+      return next;
+    });
+  }, []);
+  const clearStates = useCallback(() => setPickedStates(new Set()), []);
+  const statusOk = useCallback(
+    (d: EnrichedPick) => isGameStateSelected(stateByItem.get(d) ?? 'upcoming', selectedStates),
+    [stateByItem, selectedStates],
+  );
+
   const datedItems = useMemo(
-    () => activeItems.filter((d) => isDateSelected(d.pick.game_date, selectedDates)),
-    [activeItems, selectedDates],
+    () =>
+      activeItems.filter((d) => isDateSelected(d.pick.game_date, selectedDates) && statusOk(d)),
+    [activeItems, selectedDates, statusOk],
   );
 
   // The Games list follows the Date cut, so picking Saturday lists Saturday's
@@ -500,11 +547,12 @@ export function PicksHomeScreen() {
     for (const d of activeItems) {
       if (!d.game) continue;
       const keep =
-        isDateSelected(d.pick.game_date, selectedDates) || gamePicker.selected.has(d.game.game_id);
+        (isDateSelected(d.pick.game_date, selectedDates) && statusOk(d)) ||
+        gamePicker.selected.has(d.game.game_id);
       if (keep) byId.set(d.game.game_id, d.game);
     }
     return selectableGames(Array.from(byId.values()), sport, todayET());
-  }, [activeItems, selectedDates, gamePicker.selected, sport]);
+  }, [activeItems, selectedDates, statusOk, gamePicker.selected, sport]);
   // THIS SCREEN DOES NOT PRUNE, AND MUST NOT. Pruning belongs to the one read
   // that sees the whole forward window — the Stats tab's slate read. The list
   // here is only the games with picks IN THIS VIEW (`activeItems` swaps with
@@ -977,6 +1025,10 @@ export function PicksHomeScreen() {
           selectedDates={selectedDates}
           onToggleDate={toggleDate}
           onClearDates={clearDates}
+          gameStateOptions={gameStateOptions}
+          selectedGameStates={selectedStates}
+          onToggleGameState={toggleState}
+          onClearGameStates={clearStates}
           showSignals={view === 'today'}
           itemNoun={view === 'today' ? 'pick' : view === 'live' ? 'live pick' : 'signal'}
         />
@@ -1147,7 +1199,7 @@ function EmptyForView({
     return (
       <EmptyState
         title="No picks match your filter"
-        subtitle="Try widening signals, categories, or lowering the thresholds. Search, Date and Games also narrow this list — they show as pills above."
+        subtitle="Try widening signals, categories, or lowering the thresholds. Search, Date, Status and Games also narrow this list — they show as pills above."
       />
     );
   }
