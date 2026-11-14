@@ -1,17 +1,17 @@
 # Graph Report - bm-euroleague-live  (2026-11-13)
 
 ## Corpus Check
-- 2206 files · ~4,427,818 words
+- 2206 files · ~4,427,853 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 16 file(s) not represented in the graph (top: (none) 8, .example 3, .mdc 1)
 
 ## Summary
-- 51182 nodes · 124535 edges · 1415 communities (1101 shown, 314 thin omitted)
+- 51182 nodes · 124534 edges · 1416 communities (1102 shown, 314 thin omitted)
 - Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 3482 edges (avg confidence: 0.87)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `16116720`
+- Built from commit: `60582686`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -125,6 +125,7 @@
 - Umpire refresh pass tests
 - Social post queue tests
 - Mobile team stats and detail
+- Mobile matchup and book checks
 - DDL guard and run ledger
 - Failure alerter clean pass rate
 - NCAAB ESPN ingestor and tests
@@ -1339,7 +1340,7 @@
 - **The team-stats leak: discovery, rebuild, freeze gate and the honest retrain** — docs_team_stats_leak_season_final_snapshot_leak, docs_team_stats_leak_pitcher_stats_rebuild, docs_team_stats_rebuild_scope_phased_sequencing, docs_team_stats_leak_assert_retrain_allowed, docs_team_stats_leak_team_stats_asof_verify, docs_sports_mlb_leak_repair_2026_09_03, docs_sports_mlb_f5_moneyline_v4 [INFERRED 0.85]
 - **From DK-decides to deciding, settling and grading CLV at the price actually taken** — docs_config_topology_models_only_decide_on_draftkings, docs_best_line_decision_columns_stage_2, docs_best_line_live_lanes_join_best_price, docs_live_betting_live_pick_decided_at_best_in_play_price, docs_clv_which_price_is_the_bet, docs_followups_clv_at_price_taken_decided [INFERRED 0.95]
 
-## Communities (1415 total, 314 thin omitted)
+## Communities (1416 total, 314 thin omitted)
 
 ### Community 396 - "Mobile app shell and push"
 Cohesion: 0.01
@@ -1347,7 +1348,7 @@ Nodes (227): AppErrorBoundary, IoniconName, Calls, DeviceIdFile, NavRef, PushSta
 
 ### Community 1 - "Mobile player stats page"
 Cohesion: 0.01
-Nodes (370): Props, PlayerNextGame, Section, Args, PlayerStatKey, reachFrame, DefenseFilter, DefenseTier (+362 more)
+Nodes (335): Props, PlayerNextGame, Section, Args, PlayerStatKey, reachFrame, DefenseFilter, DefenseTier (+327 more)
 
 ### Community 10 - "NCAAB odds history purchase tests"
 Cohesion: 0.06
@@ -1387,7 +1388,7 @@ Nodes (19): TestDkLineRows, TestPublishLineSnapshots, TestSnapshotRowParams, app
 
 ### Community 105 - "Mobile model catalog, daily results"
 Cohesion: 0.01
-Nodes (450): Case, Bucket, FixturePick, RowDef, clvOutcome, CustomBacktestPickRow, CustomBacktestSummary, CustomModelStats (+442 more)
+Nodes (380): Case, Bucket, FixturePick, RowDef, Props, clvOutcome, BacktestPickRow, CustomBacktestPickRow (+372 more)
 
 ### Community 107 - "Probability calibration tests"
 Cohesion: 0.03
@@ -1482,8 +1483,8 @@ Cohesion: 0.06
 Nodes (31): FakeConn, TwoOrientationConn, _best_game_price(), _best_of(), _source(), test_a_better_price_at_a_different_total_is_not_the_same_bet(), test_a_better_price_at_the_same_total_wins(), test_a_book_can_only_be_offered_if_it_is_also_fetched() (+23 more)
 
 ### Community 12 - "Mobile parlay builder and betslip"
-Cohesion: 0.04
-Nodes (108): ResolvedSlip, BetslipPlayer, InjuryIndex, injuryTag, InjuryTone, EditChoice, EditMenu, GameLineLegSpec (+100 more)
+Cohesion: 0.03
+Nodes (113): ResolvedSlip, BetslipPlayer, InjuryIndex, injuryTag, InjuryTone, EditChoice, EditMenu, GameLineLegSpec (+105 more)
 
 ### Community 120 - "NCAAF alias score mirroring tests"
 Cohesion: 0.10
@@ -1615,7 +1616,11 @@ Nodes (51): _Fetcher, Poster, QueueConn, _Rows, _Uploader, ImageFetch, MediaUplo
 
 ### Community 141 - "Mobile team stats and detail"
 Cohesion: 0.02
-Nodes (227): PlayerPropQuote, Sport, NextGame, Section, PropLineLike, BookSideCoverage, StatsOddsQuote, StatsOddsSide (+219 more)
+Nodes (228): Props, PlayerPropQuote, Sport, NextGame, Section, PropLineLike, BookSideCoverage, StatsOddsQuote (+220 more)
+
+### Community 1415 - "Mobile matchup and book checks"
+Cohesion: 0.03
+Nodes (61): ConfigBooks, readConfigBooks(), sameList(), sameSet(), check(), OVERRIDES, SNIPPET, alone (+53 more)
 
 ### Community 143 - "DDL guard and run ledger"
 Cohesion: 0.05
@@ -1743,7 +1748,7 @@ Nodes (28): StandIn, test_ties_keep_the_lowest_id_as_the_opener(), test_the_two_
 
 ### Community 19 - "Mobile model metadata and screens"
 Cohesion: 0.01
-Nodes (405): Props, Props, State, Nav, Props, Nav, Props, FilterChipProps (+397 more)
+Nodes (408): Props, Props, State, Nav, Props, Nav, Props, FilterChipProps (+400 more)
 
 ### Community 190 - "Mobile betslip link verifiers"
 Cohesion: 0.06
@@ -1767,11 +1772,11 @@ Nodes (52): Listing, ParseError, PollState, TickResult, _aware(), backoff_after(
 
 ### Community 2 - "Mobile pick cards, market formatting"
 Cohesion: 0.01
-Nodes (420): Row, Row, Props, Props, IoniconName, Props, Props, clvBetQuote (+412 more)
+Nodes (426): Row, Row, Props, Props, IoniconName, Props, Props, Props (+418 more)
 
 ### Community 20 - "Mobile stats board"
 Cohesion: 0.01
-Nodes (456): ConfigBooks, P, TouchSet, AnytimeMatchupView, AnytimeSortRow, DefenseRank, gapReason, MatchupPlacement (+448 more)
+Nodes (431): P, TouchSet, AnytimeMatchupView, AnytimeSortRow, DefenseRank, gapReason, MatchupPlacement, MatchupSort (+423 more)
 
 ### Community 202 - "NCAAB ESPN box score tests"
 Cohesion: 0.06
@@ -1798,8 +1803,8 @@ Cohesion: 0.05
 Nodes (48): Group, PinnacleQuotes, Prep, Reading, _american(), an_groups(), anchored_offers(), anchored_table() (+40 more)
 
 ### Community 21 - "Mobile thresholds, custom model filters"
-Cohesion: 0.02
-Nodes (143): Props, Props, Props, ManualBet, ManualBetInput, ManualBetResult, StakeMode, StakeState (+135 more)
+Cohesion: 0.03
+Nodes (96): StakeMode, StakeState, LiveTrackSnapshot, TrackedBetRow, trackedBetStatus, TrackedBetSummary, TrackedStake, TrackedStakeFor (+88 more)
 
 ### Community 210 - "Basketball in-play loops and feeds"
 Cohesion: 0.06
@@ -2426,8 +2431,8 @@ Cohesion: 0.03
 Nodes (42): _Conn, _Conn, _DedupeConn, test_a_declared_job_carries_its_run_after(), test_a_failing_check_raises_so_the_queue_announces_it(), test_a_job_can_only_name_a_registered_check(), test_enqueue_rejects_a_naive_run_after(), test_enqueue_stores_run_after() (+34 more)
 
 ### Community 52 - "Mobile picks home and filters"
-Cohesion: 0.02
-Nodes (203): P, ActivePill, Props, Props, LivePicksState, BacktestPickRow, DateOption, DayRow (+195 more)
+Cohesion: 0.01
+Nodes (229): P, ActivePill, Props, LivePicksState, DateOption, DayRow, SelectableGame, CountInput (+221 more)
 
 ### Community 522 - "NBA first basket rebuild tests"
 Cohesion: 0.14
@@ -2646,8 +2651,8 @@ Cohesion: 0.04
 Nodes (20): _CatalogConn, _Result, TestFetchPregameRows, TestHistoricalBackfill, TestNcaabResolvesOntoEspn, TestRunOddsIngestor, TestTheDraftKingsGate, TestTheRealResolver (+12 more)
 
 ### Community 64 - "Mobile record hero, equity curve"
-Cohesion: 0.05
-Nodes (79): Slop, StatusForSpeech, EquityPoint, plotLayout, PlotPad, addMonths(), CalendarGrid(), monthLabel() (+71 more)
+Cohesion: 0.03
+Nodes (128): Slop, StatusForSpeech, EquityPoint, plotLayout, PlotPad, ParlaySummary, SportGroup, TrackRecordSummary (+120 more)
 
 ### Community 643 - "Research and ingest script imports"
 Cohesion: 0.11
@@ -3038,8 +3043,8 @@ Cohesion: 0.16
 Nodes (5): TestTheResolverFailsClosed, TestResolveGameId, resolve_nfl_game_id(), _nfl_resolver(), resolve()
 
 ### Community 9 - "Mobile scoreboard and data queries"
-Cohesion: 0.01
-Nodes (252): Props, FighterSide, Props, Args, PlayerNewsState, PropContext, DiscordPublish, LockPick (+244 more)
+Cohesion: 0.02
+Nodes (242): Props, FighterSide, Props, Args, PlayerNewsState, PropContext, DiscordPublish, LockPick (+234 more)
 
 ### Community 90 - "NBA totals luck decision tests"
 Cohesion: 0.03
@@ -3091,7 +3096,7 @@ Nodes (25): FakeConn, eligibility_clause(), maps_materially_differ(), promote(),
 
 ### Community 940 - "Mobile screens and build-your-own models"
 Cohesion: 0.02
-Nodes (279): Nav, ByomSheetTab, Props, useAuth, ByomLeaderboardRow, NbaGameFactsStatus, ByomBacktestRow, ByomBet (+271 more)
+Nodes (315): Nav, ByomSheetTab, Props, useAuth, ByomLeaderboardRow, NbaGameFactsStatus, ByomBacktestRow, ByomBet (+307 more)
 
 ### Community 95 - "NCAAF play-by-play store tests"
 Cohesion: 0.09
@@ -5758,17 +5763,17 @@ Nodes (6): Nickname-aware settlement join, nfl_prop_market EV floor 0.20 -> 0.07
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Official pick and the bet list` connect `NBA props model, lab, verify` to `Record units and stake tests`, `Mobile screens and build-your-own models`, `NFL edge luck gap study`, `Build-your-own NFL, NBA docs`?**
-  _High betweenness centrality (0.076) - this node is a cross-community bridge._
+  _High betweenness centrality (0.074) - this node is a cross-community bridge._
 - **Are the 5 inferred relationships involving `get_connection()` (e.g. with `main()` and `main()`) actually correct?**
   _`get_connection()` has 5 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `RFC-4122`, `@babel/core`, `babel-plugin-module-resolver` to the rest of the system?**
   _107 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Mobile app shell and push` be split into smaller, more focused modules?**
   _Cohesion score 0.014022140221402213 - nodes in this community are weakly interconnected._
-- **Why does `ByomBetsScreen()` connect `Mobile screens and build-your-own models` to `Mobile model catalog, daily results`, `Mobile pick cards, market formatting`, `Mobile app shell and push`, `NBA props model, lab, verify`?**
-  _High betweenness centrality (0.076) - this node is a cross-community bridge._
+- **Why does `ByomBetsScreen()` connect `Mobile screens and build-your-own models` to `Mobile pick cards, market formatting`, `Mobile app shell and push`, `NBA props model, lab, verify`?**
+  _High betweenness centrality (0.074) - this node is a cross-community bridge._
 - **Should `Mobile player stats page` be split into smaller, more focused modules?**
-  _Cohesion score 0.011746730228578414 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.013653757388960856 - nodes in this community are weakly interconnected._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._
