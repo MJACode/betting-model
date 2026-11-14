@@ -1741,6 +1741,33 @@ list. By season 107 / 61 / 58 / 107 / 31 bets, 2023-24 negative (-1.65%).
 Every cut from 0.02 to 0.12 is positive. Go-live gate standing: 0 settled of
 50. Re-read at 50 settled bets.
 
+## EUROLEAGUE — the five pre-game rules (2026-11-14, mike)
+
+The whole story is `docs/sports/euroleague.md`, "The five pre-game rules".
+mike: "I told you to build all the models", knowing each misses part of the
+research bar. THE CUT IS EACH RULE, applied in `scripts/euroleague_pregame_card.py`
+at tip minus 10 at the best deciding-book price. The probability is the
+market's no-vig chance plus the rule's walk-forward uplift
+(`models/saved/euroleague_pregame_2027.json`); the EV floor and the edge cut
+sit just under the smallest EV and edge on the replayed bets, so neither
+removes one. Probability on its own (`config.MODELS_ON_OWN_PROBABILITY`); the
+edge cap is 0.40 (`models/euroleague_quote_bounds.EDGE_CAP`); stake one unit
+to win, risk capped at 3 (`stake_for`).
+
+| Model | The rule | Edge cut | EV floor | Price floor | Replay, live population | Prices laid |
+|---|---|---|---|---|---|---|
+| `euroleague_home_ml` | home moneyline, -200 or longer, not neutral | 0.01 | 0.04 | -200 (the rule) | 978 bets, +65.80 units, +5.35% [-0.15, +11.11] | -200 to +390, median -110 |
+| `euroleague_heavy_fav_ml` | the favourite at -500 or shorter | 0.01 | 0.01 | -4000 (the research's shortest) | 176 bets, +39.43, +7.47% [+4.16, +10.46] | -4000 to -500, median -675; almost every bet risks 3 to win under 1 |
+| `euroleague_home_dog_spread` | home underdog ATS, own-country games | 0.06 | 0.11 | -200 | 455 bets, +54.54, +11.00% [+3.63, +17.95] | -120 to -102 |
+| `euroleague_h1_dog_ml` | first-half moneyline underdog; a tied half pushes | 0.00 | 0.01 | -200 | 465 bets, +19.14, +4.22% [-4.64, +12.35] | -115 to +475, median +142 |
+| `euroleague_q1_club_share_total` | first-quarter total vs club shares, margin 1.0 | 0.10 | 0.17 | -200 | 63 bets, +17.71, +22.23% [+4.08, +39.66] | -145 to -111 |
+
+The replay matches the research's own code bet for bet on every read (the
+DraftKings reads too: 972 / +59.64, 188 / +34.59, 454 / +48.34). The home
+moneyline and the big favourite each lose 6 games to the conflict rule (both
+NONE when they would bet opposite sides of one game). Go-live gate standing,
+all five: 0 settled of 50. Re-read each at 50 settled bets.
+
 ## UFC — `ufc_open_moneyline`, fight winner a week out (2026-11-13, mike)
 
 mike, 2026-11-13: *"Use the model building skill to build models for UFC"*,

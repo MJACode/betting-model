@@ -54,6 +54,11 @@ export function gameMarketForModel(modelId: string): string | null {
   // under its own market, never the game's 'h2h' rows, which price the whole
   // game's winner.
   if (modelId === 'nba_q1_trend_ml') return 'h2h_q1';
+  // The EuroLeague first half's moneyline and first quarter's total
+  // (models/euroleague_pregame.py): stored under their own markets, never the
+  // game's 'h2h' and 'totals' rows.
+  if (modelId === 'euroleague_h1_dog_ml') return 'h2h_h1';
+  if (modelId === 'euroleague_q1_club_share_total') return 'totals_q1';
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'spreads';
@@ -301,6 +306,11 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'nba_q1_trend') return 'game_spread';
   // A moneyline, though its id has no 'moneyline' in it: the first quarter's.
   if (modelId === 'nba_q1_trend_ml') return 'game_ml';
+  // The EuroLeague rules (models/euroleague_pregame.py): three moneylines with
+  // no 'moneyline' in their ids, and a first quarter's points.
+  if (modelId === 'euroleague_home_ml' || modelId === 'euroleague_heavy_fav_ml') return 'game_ml';
+  if (modelId === 'euroleague_h1_dog_ml') return 'game_ml';
+  if (modelId === 'euroleague_q1_club_share_total') return 'game_total';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -1942,6 +1952,11 @@ export function computeMovement(
  * card (scripts/nba_q1_trend_card.py).
  */
 const BET_BOOK_LINE_MODELS: readonly string[] = [
+  // The EuroLeague home-underdog spread and first-quarter total
+  // (scripts/euroleague_pregame_card.py): the same row, the deciding book's
+  // own number, line_book empty when DraftKings hung it.
+  'euroleague_home_dog_spread',
+  'euroleague_q1_club_share_total',
   'nba_first_half_total_luck',
   'nba_q1_trend',
   'ncaab_first_half_spread',
@@ -2225,6 +2240,10 @@ const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_
 // and the NBA first quarter's (models/nba_q1_trend_ml.py). A moneyline has no
 // line, so their Pick Detail note names only the price.
 const POSTED_MONEYLINE_MODELS: readonly string[] = [
+  // The three EuroLeague moneylines (models/euroleague_pregame.py).
+  'euroleague_home_ml',
+  'euroleague_heavy_fav_ml',
+  'euroleague_h1_dog_ml',
   'ncaab_moneyline_own_spread',
   'ncaab_moneyline_first_post',
   'ncaaf_moneyline_market',
@@ -2362,6 +2381,13 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'ncaaf_moneyline_market' ||
     pick.model_id === 'ncaab_first_half_spread' ||
     pick.model_id === 'ncaab_first_half_total' ||
+    // The five EuroLeague pre-game rules decide each game once, five to ten
+    // minutes before tip (scripts/euroleague_pregame_card.py).
+    pick.model_id === 'euroleague_home_ml' ||
+    pick.model_id === 'euroleague_heavy_fav_ml' ||
+    pick.model_id === 'euroleague_home_dog_spread' ||
+    pick.model_id === 'euroleague_h1_dog_ml' ||
+    pick.model_id === 'euroleague_q1_club_share_total' ||
     nbaPosted
   ) {
     return {

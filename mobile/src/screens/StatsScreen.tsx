@@ -2675,7 +2675,7 @@ export function StatsScreen() {
           // promised (UX review, 2026-11-13).
           <EmptyState
             title="No EuroLeague stats"
-            subtitle="The app has no EuroLeague player or team stats. Its one model’s bets post on Picks › Live Signals."
+            subtitle="The app has no EuroLeague player or team stats. Its pre-game picks post on Picks › All, and its halftime bets on Picks › Live Signals."
           />
         ) : (
           <EmptyState

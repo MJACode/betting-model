@@ -293,6 +293,11 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      # record, and every later game's cover-record number.
                      "odds_api_nba_first_quarter_live",
                      "odds_api_ncaab_first_half_live",
+                     # The EuroLeague pre-game rules' decision fetches and closes
+                     # (2026-11-14, data/ingestors/euroleague_period_odds.py): the
+                     # first half, quarters and full game 60, 10 and 2 minutes
+                     # before tip; the period rules decide on the tip-minus-10 rows.
+                     "odds_api_euroleague_period_live",
                      # Alternate spread/total ladders (2026-10-29): many rungs per
                      # (game, market, book), which the keepers would thin.
                      "odds_api_alt_game_lines_live",

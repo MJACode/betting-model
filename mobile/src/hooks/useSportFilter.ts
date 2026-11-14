@@ -23,9 +23,9 @@ export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW
 // NCAABW (women's college basketball) sits right after NCAAB. It joined
 // 2026-11-10 for its totals model. The Stats tab has the same Players board
 // as NCAAB (no props, no Teams board).
-// EUROLEAGUE joined 2026-11-13 for its in-play model, the halftime spread; it is
-// last because it is the one sport with no pre-game model and no stats in the
-// app yet (its Stats tab says so). The code is also its Discord channel's name.
+// EUROLEAGUE joined 2026-11-13 for its in-play model, the halftime spread, and
+// gained five pre-game models 2026-11-14; it is last because it has no stats in
+// the app yet (its Stats tab says so). The code is also its Discord channel's name.
 export const SPORTS: Sport[] = ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW', 'UFC', 'NHL', 'EUROLEAGUE'];
 
 const STORAGE_KEY = 'sportFilter.selected';

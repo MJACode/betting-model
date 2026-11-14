@@ -55,7 +55,7 @@ A new writer that skips one of these bets something it should not:
 |---|---|---|
 | `ACTION_THRESHOLDS[id]` | `{"min_prob", "min_edge"}` with the evidence in a comment | `test_config::test_every_model_carries_its_own_thresholds` |
 | `MODEL_EDGE_THRESHOLDS[id]`, `MODEL_PROB_THRESHOLDS[id]` | the same cut, with who asked | same |
-| `MODEL_MIN_ODDS[id]` | the price floor, pinned per model (default -200) | `test_mobile_threshold_parity::test_the_price_floors_match_config` |
+| `MODEL_MIN_ODDS[id]` | the price floor, pinned per model (default -200; a model that lays shorter by design pins the research's shortest price, EuroLeague's big favourites -4000) | `test_mobile_threshold_parity::test_the_price_floors_match_config` |
 | `MODEL_OWN_EV_FLOOR[id]` | its own EV floor, swept on its own record | `test_config::test_every_own_floor_names_a_live_model`, `test_no_own_floor_tightens_a_model_past_the_global_floor` |
 | `MODELS_ON_OWN_PROBABILITY` | if it decides on its own probability | hand-pinned sets in `test_config` and `test_global_ev_floor` |
 | `SCORING_METHODS[id]` | `"rule"` for a card | `test_dashboard_rule_models.KNOWN_RULES` |
@@ -131,6 +131,22 @@ A new writer that skips one of these bets something it should not:
   (`docs/discord.md`, `docs/cloud_worker.md`). Creating a channel is a worker
   job that has been refused in auto mode; ask mike once for the channel and its
   variable together.
+
+## Replaying the research
+
+- Replay on the research's own data state (its last game date): a cache that
+  has gained games since compares two different populations, and a game
+  bought after the purchase stopped can carry a stale "close" (EuroLeague,
+  2026-11-14).
+- Run the new models' replayed bets through the conflict rule in the build,
+  and report the bets and units it costs each: two blind rules on one market
+  can meet on opposite sides of one game.
+- A blind rule's probability is the market's no-vig chance plus its
+  walk-forward uplift; its EV floor and edge cut sit just under the smallest
+  replayed EV and edge, which the build prints.
+- A period market in a new sport: its `_compute_result` arm, its period-score
+  route in `tracking/paper_tracker`, and its closing-line rule (a feed that
+  files every pull 'open' needs a close pulled after the pick).
 
 ## Tests and docs
 

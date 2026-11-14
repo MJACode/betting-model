@@ -520,7 +520,7 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
     // half's spread (ncaab_first_half_spread) too: a different number from the
     // game's spread, on half of it.
     const h1 = gameMarketForModel(p.model_id ?? '');
-    if (h1 === 'totals_h1' || h1 === 'spreads_h1') {
+    if (h1 === 'totals_h1' || h1 === 'spreads_h1' || h1 === 'h2h_h1') {
       if (p.discordPublish === 'unknown') out.ledgerUnread = true;
       out.firstHalves += 1;
       out.settled += 1;
@@ -529,7 +529,7 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
     // A first quarter's spread (nba_q1_trend): a different number from the
     // game's spread, on a quarter of it. A first quarter's moneyline
     // (nba_q1_trend_ml) is the same: a different bet from the game's winner.
-    if (h1 === 'spreads_q1' || h1 === 'h2h_q1') {
+    if (h1 === 'spreads_q1' || h1 === 'h2h_q1' || h1 === 'totals_q1') {
       if (p.discordPublish === 'unknown') out.ledgerUnread = true;
       out.firstQuarters += 1;
       out.settled += 1;

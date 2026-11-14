@@ -1159,6 +1159,10 @@ const MAIN_GAME_ODDS_MARKETS = [
   'spreads_q1',
   // The NBA first quarter's moneyline (nba_q1_trend_ml).
   'h2h_q1',
+  // The EuroLeague first half's moneyline and first quarter's total
+  // (models/euroleague_pregame.py).
+  'h2h_h1',
+  'totals_q1',
 ] as const;
 
 /**

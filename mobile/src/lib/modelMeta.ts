@@ -813,6 +813,54 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The five EuroLeague pre-game rules (models/euroleague_pregame.py,
+  // 2026-11-14). Each decides a game once, five to ten minutes before tip, at
+  // the best price at the sportsbooks a pick may name. Every id starts with
+  // 'euroleague', a prefix no other sport's ids share.
+  // The home side's moneyline, priced -200 or longer.
+  euroleague_home_ml: {
+    shortLabel: 'ML',
+    longLabel: 'EuroLeague Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // The favourite's moneyline, priced -500 or shorter (as short as -4000):
+  // each bet risks 3 units to win well under 1.
+  // Its own badge (UX review, 2026-11-14): Daily Results and parlay legs show
+  // only the badge, so it must not read as the home moneyline's 'ML'.
+  euroleague_heavy_fav_ml: {
+    shortLabel: 'Fav ML',
+    longLabel: 'EuroLeague Big Favorite Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // The home underdog against the full-game spread.
+  euroleague_home_dog_spread: {
+    shortLabel: 'Spread',
+    longLabel: 'EuroLeague Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // The first half's moneyline, the underdog. A tied half returns the stake.
+  euroleague_h1_dog_ml: {
+    shortLabel: '1H ML',
+    longLabel: 'EuroLeague First Half Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // The first quarter's total, from each club's share of its games' points
+  // scored in the first quarter.
+  euroleague_q1_club_share_total: {
+    shortLabel: '1Q O/U',
+    longLabel: 'EuroLeague First Quarter Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Matt, 2026-10-24: "NFL Totals", badge O/U, same as the other totals.
   // No other NFL model uses this name.
   nfl_wind_totals: {
@@ -1099,6 +1147,31 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   ncaab_first_half_total:
     'What our model says is the chance this side hits, on the first half’s points alone. On a ' +
     'whole-number line it leaves out a push, which returns the stake.',
+  // The five EuroLeague rules (models/euroleague_pregame.py): the market's
+  // no-vig chance plus the rule's walk-forward uplift, the extra its bets won
+  // over the earlier seasons. The rule is the cut, so the note says the number
+  // is an estimate, not the reason for the bet.
+  euroleague_home_ml:
+    'The market’s fair chance that the home team wins, plus about 5 percentage points, the extra this ' +
+    'rule’s bets won in earlier EuroLeague seasons. The rule picks the side; this number is our estimate ' +
+    'of its chance. Read it as an upper bound.',
+  euroleague_heavy_fav_ml:
+    'The market’s fair chance that this favorite wins, plus about 7 percentage points, the extra this ' +
+    'rule’s bets won in earlier EuroLeague seasons. It never shows more than 99%. The rule picks the ' +
+    'side; this number is our estimate of its chance. Read it as an upper bound.',
+  euroleague_home_dog_spread:
+    'The market’s fair chance that the home underdog covers, plus about 9 percentage points, the extra ' +
+    'this rule’s bets won in earlier EuroLeague seasons. The rule picks the side; this number is our ' +
+    'estimate of its chance. Read it as an upper bound.',
+  euroleague_h1_dog_ml:
+    'The market’s fair chance that this underdog leads at halftime, leaving out a tied half, which ' +
+    'returns the stake, plus about 5 percentage points, the extra this rule’s bets won last season ' +
+    '(347 bets). The rule picks the side; this number is our estimate of its chance. Read it as an ' +
+    'upper bound.',
+  euroleague_q1_club_share_total:
+    'The market’s fair chance this side hits, on the first quarter’s points alone, plus about 16 ' +
+    'percentage points, the extra this rule’s bets won last season. That is only 53 bets, so the real ' +
+    'extra could be much smaller. Read it as an upper bound.',
 };
 
 export function modelProbabilityNote(modelId: string): string {
@@ -1224,7 +1297,46 @@ const OPENING_LINE_MODELS: readonly string[] = [
 // page fills game by game through the evening, minutes before each tip.
 const MINUTES_BEFORE_TIP_MODELS: readonly string[] = [
   'ncaab_first_half_spread',
+  // The five EuroLeague pre-game rules (scripts/euroleague_pregame_card.py),
+  // on the lines fetched ten minutes before each tip, or a retry up to five
+  // minutes before it.
+  'euroleague_home_ml',
+  'euroleague_heavy_fav_ml',
+  'euroleague_home_dog_spread',
+  'euroleague_h1_dog_ml',
+  'euroleague_q1_club_share_total',
 ];
+
+// The five EuroLeague pre-game rules' page text (UX review, 2026-11-14): what
+// each bets and the prices it lays, and no "line" for the three moneylines.
+// The big favorites say what one loss costs: every bet lays 3 units to win
+// under 1 (0.6 at -500, under 0.1 at -4000).
+const EUROLEAGUE_CHECKED =
+  'This model checks each game once, five to ten minutes before tip-off, at the sportsbook with the best ' +
+  'price, which may not be DraftKings. ';
+const MINUTES_BEFORE_TIP_BODY: Readonly<Record<string, string>> = {
+  euroleague_home_ml:
+    EUROLEAGUE_CHECKED +
+    'It bets the home team’s moneyline when it is priced -200 or longer, and never lays more than -200. ' +
+    'A posted bet is never re-priced: it stays at the price it posted at.',
+  euroleague_heavy_fav_ml:
+    EUROLEAGUE_CHECKED +
+    'It bets the favorite’s moneyline only when it is priced -500 or shorter, as short as -4000. Every bet ' +
+    'lays 3 units to win under 1 (0.6 at -500, under 0.1 at -4000), so one loss costs what 5 to 40 wins ' +
+    'return. A posted bet is never re-priced: it stays at the price it posted at.',
+  euroleague_home_dog_spread:
+    EUROLEAGUE_CHECKED +
+    'It bets the home team against the full-game spread when the home team is the underdog. A posted bet ' +
+    'is never re-priced: it stays at the line and price it posted at.',
+  euroleague_h1_dog_ml:
+    EUROLEAGUE_CHECKED +
+    'It bets the first-half moneyline underdog. The bet settles on the first half’s score alone, and a ' +
+    'tied first half returns the stake. A posted bet is never re-priced: it stays at the price it posted at.',
+  euroleague_q1_club_share_total:
+    EUROLEAGUE_CHECKED +
+    'It bets the first-quarter total, over or under, and settles on the first quarter’s points alone. A ' +
+    'posted bet is never re-priced: it stays at the line and price it posted at.',
+};
 
 export interface ModelPageTiming {
   /** The tooltip beside "Today's potential picks". */
@@ -1385,6 +1497,7 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
     return {
       title: 'Checked once per game',
       body:
+        MINUTES_BEFORE_TIP_BODY[modelId] ??
         'This model checks each game once, five to ten minutes before tip-off, and posts a bet only ' +
         'when it finds one. A posted bet is never re-priced: it stays at the line and price it posted at.',
       empty:
@@ -1638,6 +1751,13 @@ export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | 
   if (id === 'nba_q1_trend') return null;
   // The NBA first quarter's moneyline, the same: not the game's moneyline.
   if (id === 'nba_q1_trend_ml') return null;
+  // The EuroLeague first half's moneyline and first quarter's total, the same.
+  if (id === 'euroleague_h1_dog_ml' || id === 'euroleague_q1_club_share_total') return null;
+  // The EuroLeague big favorites lay as short as -4000, 3 units to win under 0.1: not offered under
+  // the moneyline choice, where a member following "ML" would not expect them (UX review, 2026-11-14).
+  if (id === 'euroleague_heavy_fav_ml') return null;
+  // The EuroLeague home moneyline has no 'moneyline' in its id.
+  if (id === 'euroleague_home_ml') return type === 'game' ? 'ml' : null;
   if (type !== 'game') return 'props';
   if (id.includes('moneyline') && !id.includes('regulation')) return 'ml';
   if (id.includes('runline') || id.includes('puckline') || id.includes('_spread')) return 'line';

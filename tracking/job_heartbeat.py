@@ -144,6 +144,11 @@ MAX_SILENCE: dict = {
     # return), so 20 minutes is 20 missed ticks: a stopped job, and every game
     # tipping meanwhile undecided by the NCAAB first-half spread model.
     "ncaab_first_half_window": 20,
+    # The EuroLeague pre-game window: the same shape (every minute, 24x7,
+    # beating on the idle ticks too). 20 minutes is 20 missed ticks: a stopped
+    # job, and every EuroLeague game tipping meanwhile undecided by the five
+    # pre-game rules (scripts/euroleague_pregame_card.py).
+    "euroleague_pregame_window": 20,
     # The NCAAB first-post moneyline job: every minute, 24x7, beating on the
     # idle ticks too (one planning read, then return). 20 minutes is 20 missed
     # ticks, and every first post stored meanwhile goes past the card's

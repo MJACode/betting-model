@@ -85,13 +85,18 @@ def test_the_stats_tab_promises_nothing_for_a_sport_with_no_stats():
     assert "if (sport === 'EUROLEAGUE') return { season: null, rows: [] };" in _fn(q, "fetchTeamStats")
 
 
-def test_the_pre_game_boards_say_there_is_no_pre_game_model():
+def test_the_pre_game_boards_say_when_euroleague_picks_post():
+    """The five pre-game models (2026-11-14) post game by game, five to ten
+    minutes before each tip: the boards say so instead of the refresh times,
+    and no longer say there is no pre-game model."""
     src = _read("screens/PicksHomeScreen.tsx")
-    copy = ("'EuroLeague has no pre-game model. Its one model bets during the halftime break, and those bets "
-            "post on Live Signals.'")
-    assert src.count(copy) == 2                      # the All board and the Signals board
-    assert "sport === 'EUROLEAGUE' ? 'No pre-game EuroLeague picks' : `No ${sport} picks today`" in src
-    assert "title={sport === 'EUROLEAGUE' ? 'No pre-game EuroLeague signals' : 'No signal bets right now'}" in src
+    assert "EuroLeague has no pre-game model" not in src
+    copy = ("'EuroLeague pre-game picks post five to ten minutes before each tip-off, when that game is checked. Bets ' +\n"
+            "  'made at halftime post on Live Signals.'")
+    assert copy in src
+    assert src.count("? EUROLEAGUE_PREGAME_EMPTY") == 2      # the All board and the Signals board
+    assert "sport === 'EUROLEAGUE' ? 'No EuroLeague picks yet today' : `No ${sport} picks today`" in src
+    assert "title={sport === 'EUROLEAGUE' ? 'No EuroLeague signals right now' : 'No signal bets right now'}" in src
     assert "title={`No ${sportDisplayName(sport)} live signals right now`}" in src
     stats = (SRC / "screens" / "StatsScreen.tsx").read_text(encoding="utf-8")
     assert 'title="No EuroLeague stats"' in stats

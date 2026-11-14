@@ -260,7 +260,10 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          "ncaabw_live_total_ht",
          # 2026-11-13 (mike): the EuroLeague halftime spread; its game-state model's
          # own P(win | no push), which its EV >= 0.05 cut was graded on; no record.
-         "euroleague_live_spread_ht"}
+         "euroleague_live_spread_ht",
+         # 2026-11-14 (mike): the five EuroLeague pre-game rules; the market's no-vig chance
+         # plus the rule's walk-forward uplift, which their floors were set on; no record.
+         "euroleague_home_ml", "euroleague_heavy_fav_ml", "euroleague_home_dog_spread", "euroleague_h1_dog_ml", "euroleague_q1_club_share_total"}
     )
 
 
@@ -391,5 +394,7 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "ncaabw_live_total_ht",
         # 2026-11-13 (mike): the EuroLeague halftime spread; its game-state model's own probability.
         "euroleague_live_spread_ht",
+        # 2026-11-14 (mike): the five EuroLeague pre-game rules; the market's no-vig chance + the uplift.
+        "euroleague_home_ml", "euroleague_heavy_fav_ml", "euroleague_home_dog_spread", "euroleague_h1_dog_ml", "euroleague_q1_club_share_total",
     }
     assert not not_named_here

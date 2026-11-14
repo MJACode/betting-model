@@ -55,8 +55,12 @@ WHAT IS NOT HERE, AND WHY
     could not be read. The graded population is the odds feed's anyway
     (docs/sports/euroleague.md, "Halftime spread").
   * No nightly count: every decision at or above the cut is bet.
-  * One game never carries two spread bets that cannot both win (mike,
-    2026-10-17); no other EuroLeague model bets a spread today.
+  * One game never carries two bets that cannot both win (mike, 2026-10-17):
+    a halftime spread is checked against the game's standing full-game
+    EuroLeague BETs, its own and the pre-game rules' (the home underdog spread
+    and the two full-game moneylines, models/euroleague_pregame.py; a
+    moneyline is checked as the spread at -0.5 for the home side, +0.5 for the
+    away side, since a full game cannot end level).
 """
 from __future__ import annotations
 
@@ -108,7 +112,10 @@ FINAL = ("bet", "no_bet", "declined", "missed")
 BULK_PURPOSE = "euroleague_live_bulk:h2h,spreads,totals"
 # The models that bet a EuroLeague full-game spread: no two of their bets on one
 # game may be unable to win together.
-FULL_GAME_SPREAD_MODELS = (M.MODEL_ID,)
+FULL_GAME_SPREAD_MODELS = (M.MODEL_ID, "euroleague_home_dog_spread")
+# The pre-game full-game moneylines (models/euroleague_pregame.py): read as the
+# spread at -0.5 (home) / +0.5 (away).
+FULL_GAME_MONEYLINE_MODELS = ("euroleague_home_ml", "euroleague_heavy_fav_ml")
 
 
 def deciding_books() -> tuple:
@@ -267,18 +274,27 @@ def live_destination() -> str | None:
 
 
 def standing_spreads(conn, game_id: str) -> list[dict]:
-    """The game's standing full-game spread bets, pre-game and live."""
+    """The game's standing full-game spread and moneyline bets, pre-game and
+    live, each as a spread (a moneyline at -0.5 home / +0.5 away)."""
     from data.db import release_read
     try:
         rows = conn.execute("""
             SELECT model_id, pick_side, scored_line, pick_label FROM picks
              WHERE game_id = %s AND signal_type = 'BET' AND model_id = ANY(%s)
-               AND condition_status IS DISTINCT FROM 'VOID' AND scored_line IS NOT NULL
-        """, (game_id, list(FULL_GAME_SPREAD_MODELS))).fetchall()
+               AND condition_status IS DISTINCT FROM 'VOID'
+        """, (game_id, list(FULL_GAME_SPREAD_MODELS + FULL_GAME_MONEYLINE_MODELS))).fetchall()
     finally:
         release_read(conn)
-    return [{"model_id": m, "market": M.MARKET, "side": s, "line": float(ln), "label": lb}
-            for m, s, ln, lb in rows if s in ("home", "away")]
+    out = []
+    for m, s, ln, lb in rows:
+        if s not in ("home", "away"):
+            continue
+        if m in FULL_GAME_MONEYLINE_MODELS:
+            out.append({"model_id": m, "market": M.MARKET, "side": s,
+                        "line": -0.5 if s == "home" else 0.5, "label": lb})
+        elif ln is not None:
+            out.append({"model_id": m, "market": M.MARKET, "side": s, "line": float(ln), "label": lb})
+    return out
 
 
 def build_pick(ctx: GameCtx, best: dict, offers: pd.DataFrame, half, links: dict, bankroll: float) -> dict:

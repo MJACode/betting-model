@@ -57,6 +57,14 @@ KNOWN_RULES = {
     # (models/ncaaf_moneyline_market.py); its artifact holds the fitted offset
     # and the final-margin table.
     "ncaaf_moneyline_market",
+    # 2026-11-14 (mike): the five EuroLeague pre-game rules
+    # (models/euroleague_pregame.py); their artifact holds the walk-forward
+    # uplifts and the rules' parameters.
+    "euroleague_home_ml",
+    "euroleague_heavy_fav_ml",
+    "euroleague_home_dog_spread",
+    "euroleague_h1_dog_ml",
+    "euroleague_q1_club_share_total",
     # 2026-11-02 (mike): NCAAB spreads, every bettable book priced at 15:00 UTC
     # against the books' median line (models/ncaab_spread_market.py); its
     # artifact holds the mean offset and the final-margin table.
