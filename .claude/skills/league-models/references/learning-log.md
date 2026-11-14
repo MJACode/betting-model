@@ -30,37 +30,6 @@ review as its own entry.
 
 ---
 
-## 2026-11-13 — EuroLeague halftime spread shipped: `euroleague_live_spread_ht`
-
-1. **Scope.** mike, 2026-11-13: "yes" to shipping the halftime spread lead
-   (the women's halftime method with Pinnacle's close as the pre-game number,
-   cut 0.05) knowing it missed the false-discovery correction and had a
-   negative 2023-24. Step 7 for an in-play model in a new sport.
-2. **Tried.** The replay on the loop's own decision code against the
-   research's own code on the same cache: 364 identical bets, +45.34 units,
-   every cut matching. The live inputs: EuroLeague's free live API for the
-   break and the half-time score, stored Pinnacle closes for the pre-game
-   number, the Odds API live endpoint at the ten history books for the read;
-   DraftKings' own board checked and not usable yet.
-3. **New.** Two traps in `porting-traps.md`: the next period's lineups are
-   logged during the break (EuroLeague's third-quarter substitutions sit
-   before its 'BP'), so "the next quarter is not empty" is not "it has begun";
-   and a research stake is not the posted stake (replay on the research's to
-   match bet for bet, report the posted one beside it). A check for any new
-   in-play league: DraftKings lists a league in its navigation only while it
-   has offers, so its league id is read on a day with a posted round (none
-   listed for EuroLeague in Ohio, New Jersey or Massachusetts 89 hours before
-   a game).
-4. **Corrected.** `shipping.md` said every new model goes into the CLV market
-   `CASE`. The closing-line recompute filters `p.is_live IS NOT TRUE`
-   (`data/migrations/clv_standard_v2_2026_10_14.sql`), and none of the five
-   in-play models since 2026-11-04 is in it, so an in-play model is not added
-   there; the line now says so. `shipping.md` also said every new table goes in
-   `WORKER_ONLY_TABLES`; a table a migration creates cannot
-   (`tests/test_anon_readable.py` requires a Python create site for every name
-   there), so the migration locks it down itself, as every in-play ledger does.
-5. **The framework.** Nothing in `SKILL.md` changed.
-
 ## 2026-11-14 — UFC props graded on BestFightOdds' per-book history
 
 1. **Scope.** mike asked why the markets beside the fight winner were not
@@ -114,6 +83,37 @@ review as its own entry.
    than `SKILL.md`: a comparison site's prices need dating before a rule
    graded on them is believed.
 
+## 2026-11-13 — EuroLeague halftime spread shipped: `euroleague_live_spread_ht`
+
+1. **Scope.** mike, 2026-11-13: "yes" to shipping the halftime spread lead
+   (the women's halftime method with Pinnacle's close as the pre-game number,
+   cut 0.05) knowing it missed the false-discovery correction and had a
+   negative 2023-24. Step 7 for an in-play model in a new sport.
+2. **Tried.** The replay on the loop's own decision code against the
+   research's own code on the same cache: 364 identical bets, +45.34 units,
+   every cut matching. The live inputs: EuroLeague's free live API for the
+   break and the half-time score, stored Pinnacle closes for the pre-game
+   number, the Odds API live endpoint at the ten history books for the read;
+   DraftKings' own board checked and not usable yet.
+3. **New.** Two traps in `porting-traps.md`: the next period's lineups are
+   logged during the break (EuroLeague's third-quarter substitutions sit
+   before its 'BP'), so "the next quarter is not empty" is not "it has begun";
+   and a research stake is not the posted stake (replay on the research's to
+   match bet for bet, report the posted one beside it). A check for any new
+   in-play league: DraftKings lists a league in its navigation only while it
+   has offers, so its league id is read on a day with a posted round (none
+   listed for EuroLeague in Ohio, New Jersey or Massachusetts 89 hours before
+   a game).
+4. **Corrected.** `shipping.md` said every new model goes into the CLV market
+   `CASE`. The closing-line recompute filters `p.is_live IS NOT TRUE`
+   (`data/migrations/clv_standard_v2_2026_10_14.sql`), and none of the five
+   in-play models since 2026-11-04 is in it, so an in-play model is not added
+   there; the line now says so. `shipping.md` also said every new table goes in
+   `WORKER_ONLY_TABLES`; a table a migration creates cannot
+   (`tests/test_anon_readable.py` requires a Python create site for every name
+   there), so the migration locks it down itself, as every in-play ledger does.
+5. **The framework.** Nothing in `SKILL.md` changed.
+
 ## 2026-11-13 — Tennis (ATP and WTA), groundwork, settlement and the purchase
 
 1. **Scope.** mike, 2026-11-13: *"Use the model building skill to build
@@ -153,6 +153,7 @@ review as its own entry.
    recurs: when a price route refuses (a site block), the copy of its data
    elsewhere is not a route; the permission check refused it, and the feed's
    own history was the price source that matched the live path anyway.
+
 ## 2026-11-13 — UFC round totals, run to the end of the ladder
 
 1. **Scope.** mike asked why the markets beside the fight winner were not
