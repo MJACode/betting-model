@@ -142,7 +142,7 @@ check('Bet all is offered on Signals only', home.includes("view === 'signals' &&
 check('the board shows the live call-out beside the button', home.includes('{BET_ALL_LIVE_NOTE}'));
 check('the sheet defaults to Best line', sheet.includes("useState<BetAllMode>('best')"));
 check('the sheet never builds a parlay', !/parlay|combineBetslipLinks|useParlaySlip/i.test(sheet.replace(/not Parlay|Parlay\)|parlay\./g, '')));
-check('Placed tracks every leg of that book', sheet.includes('step?.legs.forEach((l) => onTrack(l.pick))'));
+check('Placed tracks every leg of that book', sheet.includes('if (step) onTrack(step.legs.map((l) => l.pick));'));
 
 // ── UX review fixes ──────────────────────────────────────────────────────
 check('the board names the main reason nothing is ready',

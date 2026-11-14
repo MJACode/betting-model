@@ -150,6 +150,58 @@ async function persistLive(snaps: LiveTrackSnapshot[]) {
   }
 }
 
+/**
+ * Track these picks. Every add starts from the module's LATEST list, never a
+ * render's copy: Bet all tracks several picks in one tap, and with the
+ * render's `ids` each write replaced the one before it, so only the last
+ * pick stayed tracked on the phone (Matt, 2026-11-14: three placed and
+ * tracked, one showed — tracked_bets held all three, 21:16:23 UTC). The
+ * load is awaited first so an add never writes over a list not yet read.
+ */
+export async function trackPicks(picks: readonly Pick[]): Promise<void> {
+  await Promise.all([loadIds(), loadLive()]);
+  // Read after the await, then compute and persist with no await between:
+  // persistIds/persistLive set the cache synchronously, so a second call
+  // sees this one's additions.
+  const ids = idCache ?? [];
+  const live = liveCache ?? [];
+  const addIds: number[] = [];
+  const addLive: LiveTrackSnapshot[] = [];
+  for (const pick of picks) {
+    if (pick.is_live) {
+      const key = liveTrackKey(pick);
+      if (live.some((s) => s.key === key) || addLive.some((s) => s.key === key)) continue;
+      addLive.push(snapshotFromPick(pick));
+      continue;
+    }
+    if (ids.includes(pick.pick_id) || addIds.includes(pick.pick_id)) continue;
+    addIds.push(pick.pick_id);
+    void getDeviceId()
+      .then((deviceId) => trackBet(deviceId, pick))
+      .catch((err) => console.warn('[trackedBets] trackBet failed', err));
+  }
+  if (addIds.length > 0) void persistIds([...ids, ...addIds]);
+  if (addLive.length > 0) void persistLive([...live, ...addLive]);
+}
+
+/** Stop tracking, from the module's latest lists (see trackPicks). */
+export async function untrackPicks(picks: readonly Pick[]): Promise<void> {
+  await Promise.all([loadIds(), loadLive()]);
+  const ids = idCache ?? [];
+  const live = liveCache ?? [];
+  const dropIds = new Set(picks.filter((p) => !p.is_live && ids.includes(p.pick_id)).map((p) => p.pick_id));
+  const dropKeys = new Set(picks.filter((p) => p.is_live).map(liveTrackKey));
+  if (dropIds.size > 0) {
+    void persistIds(ids.filter((id) => !dropIds.has(id)));
+    for (const pickId of dropIds) {
+      void getDeviceId()
+        .then((deviceId) => untrackBet(deviceId, pickId))
+        .catch((err) => console.warn('[trackedBets] untrackBet failed', err));
+    }
+  }
+  if (live.some((s) => dropKeys.has(s.key))) void persistLive(live.filter((s) => !dropKeys.has(s.key)));
+}
+
 /** Account deletion. Clears both on-device track stores. The server rows for
  *  this install are removed by lib/deleteAccount.ts (they are keyed by device). */
 export async function clearTrackedBetsForAccountDeletion(): Promise<void> {
@@ -191,38 +243,24 @@ export function useTrackedBets() {
       : ids.includes(pick.pick_id);
 
   /** Start tracking. Live → local snapshot only; else → local + DB row. */
-  const track = (pick: Pick) => {
-    if (pick.is_live) {
-      const key = liveTrackKey(pick);
-      if (liveSnapshots.some((s) => s.key === key)) return;
-      void persistLive([...liveSnapshots, snapshotFromPick(pick)]);
-      return;
-    }
-    if (ids.includes(pick.pick_id)) return;
-    void persistIds([...ids, pick.pick_id]);
-    void getDeviceId()
-      .then((deviceId) => trackBet(deviceId, pick))
-      .catch((err) => console.warn('[trackedBets] trackBet failed', err));
-  };
+  const track = (pick: Pick) => void trackPicks([pick]);
+  /** Several at once (Bet all's Placed). */
+  const trackMany = (picks: readonly Pick[]) => void trackPicks(picks);
 
   const untrack = (pickId: number) => {
-    if (!ids.includes(pickId)) return;
-    void persistIds(ids.filter((id) => id !== pickId));
-    void getDeviceId()
-      .then((deviceId) => untrackBet(deviceId, pickId))
-      .catch((err) => console.warn('[trackedBets] untrackBet failed', err));
+    void untrackPicks([{ pick_id: pickId, is_live: false } as Pick]);
   };
 
   const untrackLiveKey = (key: string) => {
-    if (!liveSnapshots.some((s) => s.key === key)) return;
-    void persistLive(liveSnapshots.filter((s) => s.key !== key));
+    // A live key is not a pick: drop it from the latest list directly.
+    void loadLive().then(() => {
+      const live = liveCache ?? [];
+      if (live.some((s) => s.key === key)) void persistLive(live.filter((s) => s.key !== key));
+    });
   };
 
   /** Untrack from a pick object (branches live vs pick_id). */
-  const untrackPick = (pick: Pick) => {
-    if (pick.is_live) untrackLiveKey(liveTrackKey(pick));
-    else untrack(pick.pick_id);
-  };
+  const untrackPick = (pick: Pick) => void untrackPicks([pick]);
 
   const toggle = (pick: Pick) => (isTracked(pick) ? untrackPick(pick) : track(pick));
 
@@ -232,6 +270,7 @@ export function useTrackedBets() {
     count: ids.length + liveSnapshots.length,
     isTracked,
     track,
+    trackMany,
     untrack,
     untrackLiveKey,
     untrackPick,
