@@ -12,7 +12,7 @@ crash reporting and no error boundary.
 | `js_error` | uncaught JS error the app survived | message + stack |
 | `render` | a screen threw while rendering | message, stack and React's component stack. The member sees "Something went wrong / Retry" instead of the app closing (`AppErrorBoundary`) |
 | `early_exit` | the PREVIOUS launch never lived 15 s | JS cannot see a native crash, but it can see the last launch died young and at which `stage`. **Not every row is a crash**: a member closing the app inside 15 s also lands here. `extra.gap_ms` is the marker → next launch gap |
-| `emergency_launch` | expo-updates rolled back to the built-in bundle because the downloaded one crashed, OR (from 2026-11-14) expo-updates' own log holds an `error`/`fatal` entry not yet reported (`extra.source = 'updates_log'`) | `message` is expo-updates' own reason, or the newest log entry as `code: message`. `extra.updates_log` lists up to 15 entries (`at`, `level`, `code`, `message`, `update_id`, `asset_id`, `stacktrace`). See "Native aborts before JS" below |
+| `emergency_launch` | expo-updates rolled back to the built-in bundle because the downloaded one crashed, OR (from 2026-11-14) expo-updates' own log records a failed launch not yet reported (`extra.source = 'updates_log'`) | `message` is expo-updates' own reason, or the newest launch-failure log entry as `code: message`. `extra.updates_log` lists up to 15 entries (`at`, `level`, `code`, `message`, `update_id`, `asset_id`, `stacktrace`). See "Native aborts before JS" below |
 
 `stage` is `launching` (first 15 s) or `running`. Rows from 2026-10-19 may
 carry `ota_reload`, written just before `Updates.reloadAsync()` while the app
@@ -38,11 +38,16 @@ deleting old update files on another thread. No JS ran, so nothing reached
 expo-updates writes that text to its own log file on the phone before it
 aborts (`ErrorRecovery.writeErrorOrExceptionToLog`, code `JSRuntimeError`,
 then `UpdateFailedToLoad` "crashing"). `beginLaunch` now reads that log
-(`Updates.readLogEntriesAsync`, last 24 h) and sends each new `error`/`fatal`
-entry once, as `emergency_launch` with `extra.source = 'updates_log'`. The
-newest timestamp sent is kept in AsyncStorage (`crashlog.updates_log_seen`).
-No new server kind: an unknown kind fails its send and stops the queue behind
-it.
+(`Updates.readLogEntriesAsync`, last 24 h, the read cut off at 3 s). When the
+`error`/`fatal` entries not yet sent include a failed LAUNCH (code
+`UpdateFailedToLoad`, `JSRuntimeError`, `InitializationError`, or level
+`fatal`), one `emergency_launch` row goes, with `extra.source = 'updates_log'`,
+named and dated by the newest launch-failure entry. Download errors, which
+expo-updates also logs at error level when the phone is offline (code `Unknown`,
+`AssetsFailedToLoad`, `UpdateServerUnreachable`), are never a row on their own,
+and ride along as context. The newest timestamp sent is kept in AsyncStorage
+(`crashlog.updates_log_seen`), written only once the row is stored. No new
+server kind: an unknown kind fails its send and stops the queue behind it.
 
 **Limit, unverified on a device:** the exception's log write is dispatched to
 a background queue (`DispatchQueue.global().async`), so the abort can beat it.
