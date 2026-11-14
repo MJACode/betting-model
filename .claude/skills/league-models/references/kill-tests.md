@@ -172,6 +172,39 @@ finding either way.
   market (the others were within about 2) was a stat that counted fewer tackles
   than the books grade, and the backtest on it was +22% and fake, because it
   graded against our own undercount.
+- **Check the no-vig split before trusting closing value.** Splitting a
+  two-way margin in proportion assumes the book loads both sides alike. On
+  UFC round totals it loads the under: at the 2.5 line the over won 60.4%
+  against a no-vig 57.9% (1,594 fights), and knowing Pinnacle's close in
+  advance still lost 2.8% at DraftKings. Closing value against that close
+  charges the cheap side about 2.5 points. Compare each side's blind return
+  first; if one is near zero and the other carries the whole margin, say so
+  beside every CLV number (`docs/ufc_market_audit.md` §4b, §4f).
+- **De-vig the sharp pair by the power method, not in proportion, when the
+  bets lean to longshots.** Tennis match winners at Pinnacle's close: split in
+  proportion, players priced under 20% won 1.6 points less often than said
+  and players over 80% 1.6 to 1.7 points more (20,822 pairs). Every EV
+  against that split leans to underdogs, and the first tennis grid found its
+  "edge" in dogs and its losses in the longest dogs. The power method
+  (each implied chance to the one power that makes the pair sum to 1) is
+  within 1.5 points in every bin. Bin the reference's own chance against the
+  realised rate before reading a shop grid (`scripts/tennis_shop_checks.py`).
+- **An exchange's first-post pair is not a reference.** The Betfair
+  exchange's tennis pair at the first post summed to a median 1.034 and a
+  95th percentile 1.80 (thin books' best backs); its "first post" edge was
+  those pairs. Keep pairs summing near the sharp book's margin, or drop it.
+- **In a change-only store, time since the reference's last row is time
+  since it last moved, not staleness.** A price unchanged for hours and a
+  price withdrawn hours ago look the same; read a quote's age as "last moved"
+  and test the result on recently moved references separately.
+- **A last recorded price is not a price at a time.** An odds-comparison
+  page (BestFightOdds) shows each book's last change. A book that stopped
+  moving days early shows an old price, and against a consensus that moved,
+  an old price looks like value that was never on offer. Before grading a
+  rule at such a price, take the bets it picks and look each up in the
+  site's price history at the decision time; report the share whose price
+  then equals the last recorded one, by book (`docs/ufc_market_audit.md`
+  §5f).
 - **Validate the grading before moving a cut.** Recompute outcomes from raw
   scores and reconcile with stored settlements. A sign error in away-side
   spread grading once turned -20.6% into +15%. `scored_line` is the home

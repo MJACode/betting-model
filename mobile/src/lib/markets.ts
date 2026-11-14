@@ -54,6 +54,11 @@ export function gameMarketForModel(modelId: string): string | null {
   // under its own market, never the game's 'h2h' rows, which price the whole
   // game's winner.
   if (modelId === 'nba_q1_trend_ml') return 'h2h_q1';
+  // The EuroLeague first half's moneyline and first quarter's total
+  // (models/euroleague_pregame.py): stored under their own markets, never the
+  // game's 'h2h' and 'totals' rows.
+  if (modelId === 'euroleague_h1_dog_ml') return 'h2h_h1';
+  if (modelId === 'euroleague_q1_club_share_total') return 'totals_q1';
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'spreads';
@@ -278,8 +283,14 @@ export type MarketClass =
   | 'other';
 
 export function marketClassForModel(modelId: string): MarketClass {
-  // UFC / golf have no same-game offensive structure we model — treat as independent.
-  if (modelId.startsWith('ufc_') || modelId.startsWith('golf_')) return 'other';
+  // UFC / golf have no same-game offensive structure we model — treat as
+  // independent. Nor does a tennis match: the match winner is its one market.
+  if (
+    modelId.startsWith('ufc_') || modelId.startsWith('golf_') ||
+    modelId.startsWith('atp_') || modelId.startsWith('wta_')
+  ) {
+    return 'other';
+  }
   if (modelId.startsWith('mlb_prop_pitcher_')) return 'pitching_prop';
   if (modelId.includes('prop')) return 'off_prop'; // batter / player scoring props
   if (modelId.includes('over_under') || modelId.includes('total_runs')) return 'game_total';
@@ -301,6 +312,11 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'nba_q1_trend') return 'game_spread';
   // A moneyline, though its id has no 'moneyline' in it: the first quarter's.
   if (modelId === 'nba_q1_trend_ml') return 'game_ml';
+  // The EuroLeague rules (models/euroleague_pregame.py): two moneylines with
+  // no 'moneyline' in their ids, and a first quarter's points.
+  if (modelId === 'euroleague_home_ml') return 'game_ml';
+  if (modelId === 'euroleague_h1_dog_ml') return 'game_ml';
+  if (modelId === 'euroleague_q1_club_share_total') return 'game_total';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -648,6 +664,14 @@ function recordLink(pick: Pick, recordBook: string): string | null {
  * the header and the CLV card name the same book. A book the maps do not know
  * is returned as its raw lowercased key ("fanatics"), never guessed at.
  */
+// The only price the app holds for this pick is the deciding book's own: an
+// in-play pick, or a tennis pick (tennis prices live in a table the worker
+// reads, not in the app's odds views). "Not offered at your books" would claim
+// something the app has not checked, so the pick says where it was found.
+export function onlyDecidingQuote(pick: { is_live?: boolean | null; sport?: string | null }): boolean {
+  return pick.is_live === true || pick.sport === 'ATP' || pick.sport === 'WTA';
+}
+
 export function storedQuoteBook(
   pick: { model_id: string; pick_label?: string | null; decision_book?: string | null },
 ): string {
@@ -1107,6 +1131,8 @@ export const LIVE_PRICE_SLOT_ONLY: ReadonlySet<string> = new Set([
   // models/ncaabw_live_loop.py reads the books every five minutes, and only
   // while a game is at its halftime break: after the bet no row is current.
   'ncaabw_live_total_ht',
+  // models/euroleague_live_loop.py: the same, on the full-game spread.
+  'euroleague_live_spread_ht',
 ]);
 
 /**
@@ -1940,6 +1966,11 @@ export function computeMovement(
  * card (scripts/nba_q1_trend_card.py).
  */
 const BET_BOOK_LINE_MODELS: readonly string[] = [
+  // The EuroLeague home-underdog spread and first-quarter total
+  // (scripts/euroleague_pregame_card.py): the same row, the deciding book's
+  // own number, line_book empty when DraftKings hung it.
+  'euroleague_home_dog_spread',
+  'euroleague_q1_club_share_total',
   'nba_first_half_total_luck',
   'nba_q1_trend',
   'ncaab_first_half_spread',
@@ -2220,13 +2251,19 @@ const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_
  *     game day.
  */
 // The posted-once moneyline models: two NCAAB, the NCAAF full-game moneyline,
-// and the NBA first quarter's (models/nba_q1_trend_ml.py). A moneyline has no
-// line, so their Pick Detail note names only the price.
+// the NBA first quarter's (models/nba_q1_trend_ml.py) and the two tennis match
+// winners. A moneyline has no line, so their Pick Detail note names only the
+// price.
 const POSTED_MONEYLINE_MODELS: readonly string[] = [
+  // The two EuroLeague moneylines (models/euroleague_pregame.py).
+  'euroleague_home_ml',
+  'euroleague_h1_dog_ml',
   'ncaab_moneyline_own_spread',
   'ncaab_moneyline_first_post',
   'ncaaf_moneyline_market',
   'nba_q1_trend_ml',
+  'atp_moneyline_shop',
+  'wta_moneyline_shop',
 ];
 
 /**
@@ -2244,6 +2281,9 @@ export function ncaabLivePeriod(period: number, modelId: string | null | undefin
 // The women's in-play model: the full-game total, bet during the halftime
 // break (models/ncaabw_live_ht.py).
 const NCAABW_HALFTIME_MODEL = 'ncaabw_live_total_ht';
+// The EuroLeague in-play model: the full-game spread, bet during the halftime
+// break (models/euroleague_live_ht.py).
+const EUROLEAGUE_HALFTIME_MODEL = 'euroleague_live_spread_ht';
 
 export function pickTimingInfo(pick: Pick): PickTiming | null {
   if (!pick.created_at) return null;
@@ -2269,9 +2309,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
           ? ` · inning ${pick.inning_at_pick}`
           : pick.sport === 'NCAAB'
             ? ` · ${ncaabLivePeriod(pick.inning_at_pick, pick.model_id)}`
-            : pick.model_id === NCAABW_HALFTIME_MODEL
-              ? // Bet during the halftime break only
-                // (models/ncaabw_live_loop.build_pick stores quarter 2).
+            : pick.model_id === NCAABW_HALFTIME_MODEL || pick.model_id === EUROLEAGUE_HALFTIME_MODEL
+              ? // Bet during the halftime break only (models/ncaabw_live_loop.build_pick
+                // and models/euroleague_live_loop.build_pick store quarter 2).
                 ' · halftime'
               : ` · Q${pick.inning_at_pick}`
         : '';
@@ -2288,7 +2328,15 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
             'final score, overtime included. Never re-priced: this is the line and price read ' +
             'during the break, shortly before the time above, not the current ones. The total ' +
             'moves once play resumes, so check the book before betting.'
-          : 'Locked the moment this crossed, and never re-priced — this is the line and price that ' +
+          : pick.model_id === EUROLEAGUE_HALFTIME_MODEL
+            ? // The loop reads the price, then EuroLeague's own play-by-play again,
+              // then writes the bet (models/euroleague_live_loop.py), so the stamp
+              // is seconds after the price.
+              'Decided once, during the halftime break, on the full-game spread: it settles on the ' +
+              'final score, overtime included. Never re-priced: this is the line and price read ' +
+              'during the break, shortly before the time above, not the current ones. The spread ' +
+              'moves once play resumes, so check the book before betting.'
+            : 'Locked the moment this crossed, and never re-priced — this is the line and price that ' +
             'were on offer then, not the current ones. In-play numbers move fast, so check the book ' +
             'before betting.',
     };
@@ -2332,6 +2380,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // 2024-25 and 85 in 2025-26 (docs/sports/ncaabw.md), and one in ten changed
   // within 10 minutes (the card's own header), so its note says "can change
   // within minutes", not the men's "often changes within half an hour".
+  // The tennis card (scripts/tennis_moneyline_card.py) decides each match
+  // once, 25 to 35 minutes before its listed start, at the best price, and
+  // never re-prices: not "the first scoring run of the day" either.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
@@ -2349,6 +2400,14 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'ncaaf_moneyline_market' ||
     pick.model_id === 'ncaab_first_half_spread' ||
     pick.model_id === 'ncaab_first_half_total' ||
+    pick.model_id === 'atp_moneyline_shop' ||
+    pick.model_id === 'wta_moneyline_shop' ||
+    // The four EuroLeague pre-game rules decide each game once, five to ten
+    // minutes before tip (scripts/euroleague_pregame_card.py).
+    pick.model_id === 'euroleague_home_ml' ||
+    pick.model_id === 'euroleague_home_dog_spread' ||
+    pick.model_id === 'euroleague_h1_dog_ml' ||
+    pick.model_id === 'euroleague_q1_club_share_total' ||
     nbaPosted
   ) {
     return {

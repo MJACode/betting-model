@@ -239,8 +239,8 @@ def test_settlement_reads_the_deciding_price():
     price since the flip, DraftKings (decision_odds NULL) before it. CLV grades
     the bet book's own raw close (docs/clv.md)."""
     src = _source("tracking/paper_tracker.py")
-    assert src.count("COALESCE(p.decision_odds, p.dk_odds)") == 4, (
-        "every settle path (props, UFC, golf, game) grades at the decision price")
+    assert src.count("COALESCE(p.decision_odds, p.dk_odds)") == 5, (
+        "every settle path (props, UFC, tennis, golf, game) grades at the decision price")
     assert "best_odds" not in src, "the settlement price is decision_odds, not the display stamp"
     assert "closing_dk_odds" in src
 

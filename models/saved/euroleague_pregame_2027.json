@@ -1,0 +1,489 @@
+{
+ "built_at": "2026-11-14T11:44:33+00:00",
+ "deciding_books": [
+  "draftkings",
+  "fanduel",
+  "betmgm",
+  "betrivers",
+  "fanatics"
+ ],
+ "decision_lead_min": 10,
+ "models": {
+  "euroleague_h1_dog_ml": {
+   "after_research_state": {
+    "bets": 0,
+    "games": 1
+   },
+   "edge_min": 0.005528,
+   "ev_median": 0.090157,
+   "ev_min": 0.010553,
+   "market": "h2h_h1",
+   "params": {},
+   "price_range": {
+    "longest": 475.0,
+    "median": 142.0,
+    "risked": 453.04,
+    "share_shorter_than_-300": 0.0,
+    "share_shorter_than_-500": 0.0,
+    "shortest": -115.0
+   },
+   "replay": {
+    "all": {
+     "L": 258,
+     "P": 15,
+     "W": 192,
+     "bets": 465,
+     "hi%": 12.35,
+     "lo%": -4.64,
+     "ret%": 4.22,
+     "risked": 453.04,
+     "units": 19.14
+    },
+    "by_season": {
+     "2026": {
+      "L": 194,
+      "P": 11,
+      "W": 153,
+      "bets": 358,
+      "hi%": 19.57,
+      "lo%": -1.85,
+      "ret%": 8.38,
+      "risked": 349.3,
+      "units": 29.27
+     },
+     "2027": {
+      "L": 64,
+      "P": 4,
+      "W": 39,
+      "bets": 107,
+      "hi%": 3.24,
+      "lo%": -22.81,
+      "ret%": -9.76,
+      "risked": 103.74,
+      "units": -10.13
+     }
+    }
+   },
+   "uplift": 0.0524,
+   "uplift_bets": 347,
+   "uplift_by_season": {
+    "2027": {
+     "bets": 347,
+     "uplift": 0.0524
+    }
+   },
+   "volume": {
+    "per_full_season": 358.0,
+    "per_week": 10.99
+   }
+  },
+  "euroleague_home_dog_spread": {
+   "after_research_state": {
+    "bets": 0,
+    "games": 1
+   },
+   "edge_min": 0.063164,
+   "ev_median": 0.127203,
+   "ev_min": 0.11809,
+   "market": "spreads",
+   "params": {
+    "min_home_line": 0.0,
+    "relocated_venues": {
+     "R1": [
+      [
+       "TEL",
+       "ALEKSANDAR NIKOLIC HALL"
+      ],
+      [
+       "TEL",
+       "BELGRADE ARENA"
+      ],
+      [
+       "TEL",
+       "SPYROS KYPRIANOU ATHLETIC CENTER"
+      ],
+      [
+       "HTA",
+       "ARENA 8888 SOFIA"
+      ],
+      [
+       "HTA",
+       "ARENA BOTEVGRAD"
+      ],
+      [
+       "DUB",
+       "ZETRA ARENA"
+      ],
+      [
+       "DUB",
+       "ARENA HUSEJIN SMAJLOVIC ZENICA"
+      ]
+     ],
+     "R2": [
+      [
+       "IST",
+       "MORACA"
+      ],
+      [
+       "IST",
+       "ARENA RIGA"
+      ],
+      [
+       "ULK",
+       "SAP GARDEN"
+      ],
+      [
+       "ULK",
+       "KALNAPILIO ARENA"
+      ],
+      [
+       "ULK",
+       "ZALGIRIO ARENA"
+      ],
+      [
+       "PAR",
+       "BMW PARK"
+      ]
+     ],
+     "excluded": [
+      [
+       "IST",
+       "XIAOMI ARENA"
+      ]
+     ]
+    }
+   },
+   "price_range": {
+    "longest": -102.0,
+    "median": -110.0,
+    "risked": 495.84,
+    "share_shorter_than_-300": 0.0,
+    "share_shorter_than_-500": 0.0,
+    "shortest": -120.0
+   },
+   "replay": {
+    "all": {
+     "L": 189,
+     "P": 4,
+     "W": 262,
+     "bets": 455,
+     "hi%": 17.95,
+     "lo%": 3.63,
+     "ret%": 11.0,
+     "risked": 495.84,
+     "units": 54.54
+    },
+    "by_season": {
+     "2022": {
+      "L": 37,
+      "P": 1,
+      "W": 55,
+      "bets": 93,
+      "hi%": 30.41,
+      "lo%": -1.83,
+      "ret%": 14.33,
+      "risked": 100.85,
+      "units": 14.45
+     },
+     "2023": {
+      "L": 33,
+      "P": 0,
+      "W": 44,
+      "bets": 77,
+      "hi%": 24.68,
+      "lo%": -7.03,
+      "ret%": 8.95,
+      "risked": 84.9,
+      "units": 7.6
+     },
+     "2024": {
+      "L": 40,
+      "P": 2,
+      "W": 39,
+      "bets": 81,
+      "hi%": 12.32,
+      "lo%": -26.14,
+      "ret%": -6.12,
+      "risked": 87.3,
+      "units": -5.34
+     },
+     "2025": {
+      "L": 33,
+      "P": 1,
+      "W": 45,
+      "bets": 79,
+      "hi%": 29.2,
+      "lo%": -8.76,
+      "ret%": 10.06,
+      "risked": 85.9,
+      "units": 8.64
+     },
+     "2026": {
+      "L": 29,
+      "P": 0,
+      "W": 66,
+      "bets": 95,
+      "hi%": 47.21,
+      "lo%": 19.72,
+      "ret%": 33.32,
+      "risked": 104.04,
+      "units": 34.67
+     },
+     "2027": {
+      "L": 17,
+      "P": 0,
+      "W": 13,
+      "bets": 30,
+      "hi%": 9.79,
+      "lo%": -43.96,
+      "ret%": -16.68,
+      "risked": 32.85,
+      "units": -5.48
+     }
+    }
+   },
+   "uplift": 0.09044,
+   "uplift_bets": 421,
+   "uplift_by_season": {
+    "2023": {
+     "bets": 92,
+     "uplift": 0.09865
+    },
+    "2024": {
+     "bets": 169,
+     "uplift": 0.085991
+    },
+    "2025": {
+     "bets": 248,
+     "uplift": 0.056233
+    },
+    "2026": {
+     "bets": 326,
+     "uplift": 0.061117
+    },
+    "2027": {
+     "bets": 421,
+     "uplift": 0.09044
+    }
+   },
+   "volume": {
+    "per_full_season": 85.0,
+    "per_week": 2.73
+   }
+  },
+  "euroleague_home_ml": {
+   "after_research_state": {
+    "L": 0,
+    "P": 0,
+    "W": 1,
+    "bets": 1,
+    "games": 1,
+    "hi%": 50.0,
+    "lo%": 50.0,
+    "ret%": 50.0,
+    "risked": 2.0,
+    "units": 1.0
+   },
+   "edge_min": 0.019696,
+   "ev_median": 0.062772,
+   "ev_min": 0.040112,
+   "market": "h2h",
+   "params": {
+    "min_price": -200.0,
+    "min_season": 2022
+   },
+   "price_range": {
+    "longest": 550.0,
+    "median": -110.0,
+    "risked": 1235.47,
+    "share_shorter_than_-300": 0.0,
+    "share_shorter_than_-500": 0.0,
+    "shortest": -200.0
+   },
+   "replay": {
+    "all": {
+     "L": 471,
+     "P": 0,
+     "W": 513,
+     "bets": 984,
+     "hi%": 11.08,
+     "lo%": -0.27,
+     "ret%": 5.24,
+     "risked": 1235.47,
+     "units": 64.8
+    },
+    "by_season": {
+     "2022": {
+      "L": 75,
+      "P": 0,
+      "W": 90,
+      "bets": 165,
+      "hi%": 33.59,
+      "lo%": 2.56,
+      "ret%": 18.28,
+      "risked": 202.53,
+      "units": 37.02
+     },
+     "2023": {
+      "L": 80,
+      "P": 0,
+      "W": 92,
+      "bets": 172,
+      "hi%": 16.66,
+      "lo%": -8.21,
+      "ret%": 4.11,
+      "risked": 220.1,
+      "units": 9.05
+     },
+     "2024": {
+      "L": 86,
+      "P": 0,
+      "W": 90,
+      "bets": 176,
+      "hi%": 13.67,
+      "lo%": -12.02,
+      "ret%": 0.74,
+      "risked": 225.48,
+      "units": 1.66
+     },
+     "2025": {
+      "L": 88,
+      "P": 0,
+      "W": 90,
+      "bets": 178,
+      "hi%": 15.66,
+      "lo%": -10.95,
+      "ret%": 3.36,
+      "risked": 219.11,
+      "units": 7.36
+     },
+     "2026": {
+      "L": 105,
+      "P": 0,
+      "W": 125,
+      "bets": 230,
+      "hi%": 15.83,
+      "lo%": -2.92,
+      "ret%": 6.79,
+      "risked": 289.74,
+      "units": 19.68
+     },
+     "2027": {
+      "L": 37,
+      "P": 0,
+      "W": 26,
+      "bets": 63,
+      "hi%": 13.89,
+      "lo%": -38.85,
+      "ret%": -12.7,
+      "risked": 78.51,
+      "units": -9.97
+     }
+    }
+   },
+   "uplift": 0.052048,
+   "uplift_bets": 921,
+   "uplift_by_season": {
+    "2023": {
+     "bets": 165,
+     "uplift": 0.09385
+    },
+    "2024": {
+     "bets": 337,
+     "uplift": 0.070126
+    },
+    "2025": {
+     "bets": 513,
+     "uplift": 0.055803
+    },
+    "2026": {
+     "bets": 691,
+     "uplift": 0.05063
+    },
+    "2027": {
+     "bets": 921,
+     "uplift": 0.052048
+    }
+   },
+   "volume": {
+    "per_full_season": 184.2,
+    "per_week": 5.78
+   }
+  },
+  "euroleague_q1_club_share_total": {
+   "after_research_state": {
+    "bets": 0,
+    "games": 1
+   },
+   "edge_min": 0.105262,
+   "ev_median": 0.223952,
+   "ev_min": 0.177856,
+   "market": "totals_q1",
+   "params": {
+    "k_share": 40.0,
+    "margin": 1.0,
+    "prior_gap_hours": 3.0
+   },
+   "price_range": {
+    "longest": -111.0,
+    "median": -122.0,
+    "risked": 79.68,
+    "share_shorter_than_-300": 0.0,
+    "share_shorter_than_-500": 0.0,
+    "shortest": -145.0
+   },
+   "replay": {
+    "all": {
+     "L": 20,
+     "P": 0,
+     "W": 43,
+     "bets": 63,
+     "hi%": 39.66,
+     "lo%": 4.08,
+     "ret%": 22.23,
+     "risked": 79.68,
+     "units": 17.71
+    },
+    "by_season": {
+     "2026": {
+      "L": 17,
+      "P": 0,
+      "W": 36,
+      "bets": 53,
+      "hi%": 40.39,
+      "lo%": 2.45,
+      "ret%": 21.38,
+      "risked": 67.48,
+      "units": 14.43
+     },
+     "2027": {
+      "L": 3,
+      "P": 0,
+      "W": 7,
+      "bets": 10,
+      "hi%": 82.73,
+      "lo%": -9.96,
+      "ret%": 26.89,
+      "risked": 12.2,
+      "units": 3.28
+     }
+    }
+   },
+   "uplift": 0.157489,
+   "uplift_bets": 53,
+   "uplift_by_season": {
+    "2027": {
+     "bets": 53,
+     "uplift": 0.157489
+    }
+   },
+   "volume": {
+    "per_full_season": 53.0,
+    "per_week": 1.99
+   }
+  }
+ },
+ "replay_matches_research": true,
+ "research_last_date": "2026-11-12",
+ "season": 2027
+}

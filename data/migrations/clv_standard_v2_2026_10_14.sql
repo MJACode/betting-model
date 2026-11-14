@@ -24,11 +24,15 @@
 -- files every pull 'open'. Its close is the bet book's newest pre-tip row on
 -- the same line pulled strictly after the pick was created. No such row leaves
 -- the pick unmeasured. A null close is not stamped standard_v2 for that market.
+-- A EuroLeague first-half moneyline or first-quarter total (h2h_h1, totals_q1;
+-- models/euroleague_pregame.py) is the same: data/ingestors/euroleague_period_odds.py
+-- files every pull 'open', the pick is the tip-minus-10 pull and the close is a
+-- pull made after it (the tip-minus-2 one).
 -- results_snapshots is not touched.
 
 DO $mig$
 DECLARE
-  fn_comment text := 'clv-standard-v2-power-80-0.05-12-ufc-open-moneyline';
+  fn_comment text := 'clv-standard-v2-power-80-0.05-12-tennis-euroleague-pregame';
   work_left boolean;
   def text;
   new_def text;
@@ -223,6 +227,12 @@ BEGIN
         WHEN 'ncaabw_total_blend' THEN 'totals'
         WHEN 'ncaaf_moneyline_market' THEN 'h2h'
         WHEN 'ufc_open_moneyline' THEN 'h2h'
+        WHEN 'atp_moneyline_shop' THEN 'h2h'
+        WHEN 'wta_moneyline_shop' THEN 'h2h'
+        WHEN 'euroleague_home_ml' THEN 'h2h'
+        WHEN 'euroleague_home_dog_spread' THEN 'spreads'
+        WHEN 'euroleague_h1_dog_ml' THEN 'h2h_h1'
+        WHEN 'euroleague_q1_club_share_total' THEN 'totals_q1'
         ELSE 'h2h'
       END
     $body$;
@@ -374,7 +384,7 @@ BEGIN
     $body$;
 
     COMMENT ON FUNCTION public.clv_power_fair(double precision[]) IS
-      'clv-standard-v2-power-80-0.05-12-ufc-open-moneyline';
+      'clv-standard-v2-power-80-0.05-12-tennis-euroleague-pregame';
   END IF;
 
   SELECT EXISTS (
@@ -400,6 +410,26 @@ BEGIN
             AND ns.commence_time IS NOT NULL
             AND (ns.game_type NOT IN ('playin', 'playoff', 'cup_final')
                  OR g.commence_time::timestamptz <= ns.commence_time::timestamptz + interval '30 minutes')
+        )
+      )
+      -- A EuroLeague period pick (h2h_h1, totals_q1) the same way.
+      AND NOT (
+        p.model_id IN ('euroleague_h1_dog_ml', 'euroleague_q1_club_share_total')
+        AND g.commence_time::timestamptz <= now()
+        AND NOT EXISTS (
+          SELECT 1 FROM public.odds o
+          WHERE o.game_id = p.game_id
+            AND o.market = CASE p.model_id
+                  WHEN 'euroleague_q1_club_share_total' THEN 'totals_q1'
+                  ELSE 'h2h_h1' END
+            AND o.bookmaker = lower(btrim(CASE
+                  WHEN p.decision_odds IS NOT NULL
+                   AND btrim(COALESCE(p.decision_book, '')) <> ''
+                  THEN p.decision_book ELSE 'draftkings' END))
+            AND o.snapshot_type <> 'in_play'
+            AND o.snapshot_at::timestamptz > p.created_at::timestamptz
+            AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
+            AND (p.model_id <> 'euroleague_q1_club_share_total' OR o.total_line = p.scored_line)
         )
       )
       -- NCAAB first half with no post-creation pre-tip row stays unmeasured.
@@ -555,8 +585,12 @@ BEGIN
             OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'
                 AND o.snapshot_at::timestamptz > s.created_at)
+            OR (s.sport_prefix = 'EUROLEAGUE' AND s.game_market IN ('h2h_h1', 'totals_q1')
+                AND o.snapshot_type <> 'in_play'
+                AND o.snapshot_at::timestamptz > s.created_at)
             OR (s.game_market NOT LIKE 'team_totals%'
                 AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')
+                AND NOT (s.sport_prefix = 'EUROLEAGUE' AND s.game_market IN ('h2h_h1', 'totals_q1'))
                 AND o.snapshot_type <> 'in_play')
           )
           AND o.snapshot_at::timestamptz <= s.close_bound
@@ -585,8 +619,12 @@ BEGIN
             OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'
                 AND o.snapshot_at::timestamptz > s.created_at)
+            OR (s.sport_prefix = 'EUROLEAGUE' AND s.game_market IN ('h2h_h1', 'totals_q1')
+                AND o.snapshot_type <> 'in_play'
+                AND o.snapshot_at::timestamptz > s.created_at)
             OR (s.game_market NOT LIKE 'team_totals%'
                 AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')
+                AND NOT (s.sport_prefix = 'EUROLEAGUE' AND s.game_market IN ('h2h_h1', 'totals_q1'))
                 AND o.snapshot_type <> 'in_play')
           )
           AND o.snapshot_at::timestamptz <= s.close_bound
@@ -627,8 +665,12 @@ BEGIN
             OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'
                 AND o.snapshot_at::timestamptz > s.created_at)
+            OR (s.sport_prefix = 'EUROLEAGUE' AND s.game_market IN ('h2h_h1', 'totals_q1')
+                AND o.snapshot_type <> 'in_play'
+                AND o.snapshot_at::timestamptz > s.created_at)
             OR (s.game_market NOT LIKE 'team_totals%'
                 AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')
+                AND NOT (s.sport_prefix = 'EUROLEAGUE' AND s.game_market IN ('h2h_h1', 'totals_q1'))
                 AND o.snapshot_type <> 'in_play')
           )
           AND o.snapshot_at::timestamptz <= s.close_bound
@@ -946,7 +988,8 @@ BEGIN
        -- A null close is not a measurement. NCAAB first half stays unmeasured
        -- so a later pre-tip pull can still be read. Other markets keep the
        -- empty stamp so a row that cannot be measured leaves the queue.
-       AND p.model_id NOT IN ('ncaab_first_half_total', 'ncaab_first_half_spread')
+       AND p.model_id NOT IN ('ncaab_first_half_total', 'ncaab_first_half_spread',
+                              'euroleague_h1_dog_ml', 'euroleague_q1_club_share_total')
        AND (
          o.old_method IS NOT NULL
          OR o.commence_ts < now() - interval '6 hours'

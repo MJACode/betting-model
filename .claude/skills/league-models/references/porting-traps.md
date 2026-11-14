@@ -48,6 +48,11 @@ down this list.
 
 ## The odds feed
 
+- **A sport the feed sells per tournament** (tennis) has no fixed key: read the
+  key list from the feed, and find each key's windows (`market-grid.md`, the
+  sweep). One key held a stray listing two months after its real event, so a
+  sweep that finds only a year's last window misses the real one.
+
 - **History depth per sport key.** The women's college key starts 2024-11-12:
   two seasons, so "walk-forward" means one season. Ask the feed at several
   early dates before planning.
@@ -71,6 +76,11 @@ down this list.
   fetch-name label can collide so a pull never decides; a purchase can keep
   the last listed pair per book rather than the main number (ladder rungs
   mistaken for main lines).
+- **A listed start that moves, and one that lies** (tennis, 2026-11-13). In a
+  sport scheduled by order of play the feed's start is an estimate: revised on
+  13 of 16 trial matches, up to 29 hours early for an unscheduled next round,
+  once 10 minutes after the real start. Bound on the earlier of an
+  independent start (ESPN's) and the feed's last listed start, with a margin.
 - **"Open" rows written after the start.** 35% of one league's `open` rows and
   23% of one prop market's were received after tip or first pitch. Bound on
   `snapshot_at <= commence_time` and exclude `in_play`.
@@ -105,6 +115,16 @@ down this list.
 
 ## Scores, periods and settlement
 
+- **Settlement differs by book, not only by sport** (tennis, 2026-11-13).
+  DraftKings voids a moneyline bet on a player who retires after the first
+  set; Pinnacle, FanDuel and BetMGM grade it a loss; Caesars voids any
+  retirement. Read each decidable book's own rules page before grading, and
+  grade each book's bets at its own rule (`models/tennis_common.py`).
+- **A source's format field can be wrong.** ESPN's tennis `format` says five
+  sets for best-of-three events (the women's US Open, Shanghai); best-of comes
+  from the tour and the event. ESPN's men's scoreboard also returns the
+  women's matches of a joint event, so key rows on ESPN's match id.
+
 - **Overtime.** The women's game has four quarters and overtime is ESPN's
   period 5 or later; the men's rule (period 3 or later) would have marked every
   women's game as overtime. Hockey's 3-way: a draw wins if the game went to
@@ -137,6 +157,15 @@ down this list.
 - **Score-feed lag.** Measure it against the book (median 75 seconds behind
   DraftKings in one league; 23 seconds after the snap in another).
 - **Read state from play-by-play time, never from `commence_time`.**
+- **The next period's lineups are logged during the break.** EuroLeague's
+  play-by-play holds the third quarter's substitutions (numbered before its
+  'BP', Begin Period) while the break is still on, so "the third quarter is
+  not empty" ends the break early. The quarter begins at its 'BP' or its first
+  shot (EuroLeague, 2026-11-13, `docs/sports/euroleague.md`, "Halftime spread").
+- **A research stake is not the posted stake.** The EuroLeague research staked
+  an underdog 1 unit to win its price; the platform posts 1 unit to win at
+  every price. Replay on the research's stake to match it bet for bet, then
+  report the posted stake beside it (+45.34 against +45.08 units, 2026-11-13).
 
 ## Leakage
 
@@ -179,3 +208,21 @@ down this list.
   settles a pick; take the market from the model, never hardcode it.
 - **A scorer's clear can delete other writers' rows** (dead-zone rows of
   another model on the same game).
+
+## Replaying the research (EuroLeague, 2026-11-14)
+
+- **The research cache moves under the build.** It had gained a game after the
+  research read it, and that game's full-game "close" was a stale board (the
+  purchase's quotes ended at 05:45 UTC that day). Replay on the research's own
+  data state and report later games apart (`docs/sports/euroleague.md`, "The
+  four pre-game rules").
+- **Two blind rules on one market can bet opposite sides of one game.** The
+  home moneyline at -200 or longer and the favourite at -500 or shorter met on
+  6 games, where the favourite was the away club. The brief said they could
+  not; the build's conflict pass measured that they do. (The favourite rule
+  was removed before it went live, 2026-11-14, so the home moneyline keeps
+  those 6 games: re-measure what a conflict rule costs whenever a rule leaves.)
+- **A period market can be missing from settlement in a new sport**: no
+  `h2h_h1` result arm, `totals_q1` in no totals arm, and every non-NCAAB period
+  read off `nba_period_scores`, so EuroLeague period picks would have stayed
+  pending forever.

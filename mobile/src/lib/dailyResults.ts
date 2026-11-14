@@ -8,7 +8,7 @@
  * won or lost divided by units risked. The Models tab and the model pages
  * book the same stake (one unit basis, 2026-11-03).
  */
-import { formatPctSigned, formatSigned } from '@/lib/format';
+import { formatPctSigned, formatSigned, isVersusSport } from '@/lib/format';
 import {
   isContaminatedPregamePick,
   isModelRetired,
@@ -67,7 +67,7 @@ export interface SportDayBreakdown {
 export interface DayGameSummary {
   gameId: string;
   sport: string;
-  /** "AWY @ HOM" (UFC: "A vs B"; golf: the event name). */
+  /** "AWY @ HOM" (UFC and tennis: "A vs B"; golf: the event name). */
   matchup: string;
   homeScore: number | null;
   awayScore: number | null;
@@ -127,6 +127,13 @@ const SPORT_ORDER: Record<string, number> = {
   NCAABW: 6,
   UFC: 7,
   NHL: 8,
+  // The tennis tours, after NHL as on the sport chips: about a bet a week
+  // between them, so the busier sports stay nearer the screen (UX review,
+  // 2026-11-14).
+  ATP: 9,
+  WTA: 10,
+  // EUROLEAGUE joined 2026-11-13 (its in-play model), last as on the sport chips.
+  EUROLEAGUE: 11,
   // GOLF retired 2026-09-08 (mike) -- omitted so the recap grows no chip that
   // can only ever report zero. DailyResultsModal appends any sport the lib
   // returns that is missing here, so a golf row could still never be dropped.
@@ -260,7 +267,7 @@ function bySportOrder(a: string, b: string): number {
 
 function gameMatchup(g: GameRow): string {
   if (g.sport === 'GOLF') return g.home_team; // event name; away is 'FIELD'
-  if (g.sport === 'UFC') return `${g.away_team} vs ${g.home_team}`;
+  if (isVersusSport(g.sport)) return `${g.away_team} vs ${g.home_team}`;
   return `${g.away_team} @ ${g.home_team}`;
 }
 

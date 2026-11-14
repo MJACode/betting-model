@@ -271,3 +271,33 @@ def test_a_card_not_logged_yet_or_a_fighter_on_it_settles_nothing():
     # to the normal path (the anchor rule)
     conn = _SettleConn([PICK], ["Gaethje Justin", "Max Holloway"])
     assert _settle_unfought_ufc_picks(conn, "2026-11-17", "x") == 0 and conn.updates == []
+
+
+@pytest.mark.parametrize("feed, ufcstats", [
+    ("Sergey Pavlovich", "Sergei Pavlovich"), ("Joseph Pyfer", "Joe Pyfer"),
+    ("Daniel Hooker", "Dan Hooker"), ("Charlie Radtke", "Charles Radtke"),
+    ("Heili Alateng", "Alatengheili")])
+def test_the_feed_spellings_the_card_could_not_rate_build_the_ufcstats_fight(feed, ufcstats):
+    """2026-11-14: the card skipped these five veterans' fights as unrated,
+    because the odds feed spells them otherwise. The odds ingest stores the
+    alias as the fighter's name and builds the fight id from it, so the card
+    rates him and the results ingest scores the same row."""
+    from data.ingestors.odds_ingestor import _normalize_team
+    from models.ufc_ratings import slugify
+    assert _normalize_team(feed, "UFC") == ufcstats
+    assert slugify(_normalize_team(feed, "UFC")) == slugify(ufcstats)
+
+
+def test_a_fight_listed_before_its_alias_and_after_it_is_one_slate_entry():
+    """The feed's spelling built the first id; once the alias exists the ingest
+    writes new pulls under the ufcstats spelling. One fight, one decision."""
+    assert config.UFC_NAME_ALIASES["Daniel Hooker"] == "Dan Hooker"
+    start = "2026-11-22T03:00:00+00:00"
+    conn = _Conn([
+        ("UFC_2026-11-21_brian-ortega_daniel-hooker", "2026-11-21", "Daniel Hooker", "Brian Ortega", start),
+        ("UFC_2026-11-21_brian-ortega_dan-hooker", "2026-11-21", "Dan Hooker", "Brian Ortega", start),
+    ])
+    s = card.slate(conn, NOW)
+    assert list(s) == ["brian-ortega|dan-hooker|2026-11-21"]
+    assert set(s["brian-ortega|dan-hooker|2026-11-21"]["rows"]) == {
+        "UFC_2026-11-21_brian-ortega_daniel-hooker", "UFC_2026-11-21_brian-ortega_dan-hooker"}

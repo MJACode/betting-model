@@ -92,6 +92,22 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         pull where Pinnacle and a deciding book both quote it; every other
         run closes the fights that reached the week-out mark. Then publishes.
         RUN_UFC_OPEN_MONEYLINE=0 stops it.)
+  * Tennis match winner   every 10 min, 24x7    -> run_tennis_moneyline_card
+        (scripts/tennis_moneyline_card.py: buys one live pass of the tennis
+        prices, refreshes ESPN's tennis scoreboard, and decides each men's
+        and women's tour match once, 35 minutes or less before its listed
+        start, against Pinnacle's price at that moment. Then publishes.
+        RUN_TENNIS_MONEYLINE_CARD=0 stops it.)
+  * EuroLeague pre-game   every minute, 24x7    -> run_euroleague_pregame_window
+        (scripts/euroleague_pregame_window.py: one per-event call per
+        EuroLeague game 60, 10 and 2 minutes before tip, the first half, the
+        quarters and the full game at ten books, about 15 credits a call
+        (data/ingestors/euroleague_period_odds.py); then the four EuroLeague
+        pre-game rules (scripts/euroleague_pregame_card.py) decide each game
+        once on its tip-minus-10 fetch, and the job publishes. A tick with
+        nothing due makes no call. RUN_EUROLEAGUE_PREGAME=0 stops it;
+        RUN_EUROLEAGUE_PERIOD_FEED=0 stops the calls alone; each model has
+        its own RUN_EUROLEAGUE_<MODEL> switch.)
   * NCAAB first-post ML   every minute, 24x7    -> run_ncaab_moneyline_first_post
         (scripts/ncaab_moneyline_first_post_card.py: one keyed planning read
         for a bettable book's NEW moneyline on an NCAAB game, stored by the
@@ -275,6 +291,14 @@ RUN_NCAAB_LIVE = (os.environ.get("RUN_NCAAB_LIVE", "1").strip().lower()
 # RUN_NCAABW_LIVE=0 stops it without a code change.
 RUN_NCAABW_LIVE = (os.environ.get("RUN_NCAABW_LIVE", "1").strip().lower()
                    not in ("0", "false", "off", "no"))
+
+# EuroLeague halftime loop (models/euroleague_live_loop.py): the full-game
+# spread, bet during the halftime break, LIVE 2026-11-13 (mike: "yes"), so ON by
+# default; RUN_EUROLEAGUE_LIVE=0 stops it without a code change. It decides
+# nothing while neither DISCORD_CHANNEL_LIVE_EUROLEAGUE nor
+# DISCORD_WEBHOOK_LIVE_EUROLEAGUE is set on pollers (exit 3, the job reads failed).
+RUN_EUROLEAGUE_LIVE = (os.environ.get("RUN_EUROLEAGUE_LIVE", "1").strip().lower()
+                       not in ("0", "false", "off", "no"))
 
 # Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
 # matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards
@@ -1054,12 +1078,18 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes UFC fight-winner picks through its own card, reading
                   # the UFC odds the refresh passes stored.
                   "ufc_open_moneyline_card",
+                  # Writes tennis match-winner picks through its own card,
+                  # buying its own pass of the feed's live tennis prices.
+                  "tennis_moneyline_card",
                   # Writes NCAAB first-post moneyline picks through its own
                   # card, reading the odds the capture and the passes store.
                   "ncaab_moneyline_first_post",
                   # Writes NCAAB first-half spread and total picks through
                   # their own cards, on its own first-half fetches.
                   "ncaab_first_half_window",
+                  # Writes the four EuroLeague pre-game rules' picks through
+                  # their card, on its own period and full-game fetches.
+                  "euroleague_pregame_window",
                   # Queues the daily BYOM NFL refresh onto job_queue, which
                   # is also a pipeline job.
                   "byom_nfl_refresh"}
@@ -1086,6 +1116,10 @@ _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
                 # The NCAABW halftime loop: the same shape, and pollers holds
                 # its live channel (DISCORD_CHANNEL_LIVE_NCAABW) and the bot token.
                 "ncaabw_live",
+                # The EuroLeague halftime loop: the same shape (free EuroLeague
+                # API reads, one Odds API call per read instant), and pollers
+                # holds its live channel (DISCORD_CHANNEL_LIVE_EUROLEAGUE).
+                "euroleague_live",
                 "dk_direct_feed", "bovada_feed"}
 
 # Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
@@ -1262,6 +1296,25 @@ def run_ncaabw_live() -> None:
     )
     if outcome != "ok":
         raise RuntimeError(f"ncaabw-live loop exited {outcome}")
+
+
+def run_euroleague_live() -> None:
+    # The EuroLeague halftime loop (models/euroleague_live_loop.py), the
+    # run_ncaabw_live shape: free reads of EuroLeague's own live API (one game
+    # at a time, 1.5 s apart) and of the stored schedule every 15 s, exits after
+    # a few idle ticks with no EuroLeague game in progress, relaunched by this
+    # */10 cron (max_instances=1). Odds API credits are spent ONLY at a read
+    # instant (each five-minute mark plus 37 s) while an undecided game is in
+    # its halftime break: one bulk moneyline + spread + total call at the ten
+    # history books (one region), 3 credits, capped per process by
+    # EUROLEAGUE_LIVE_CALL_CAP / EUROLEAGUE_LIVE_CREDIT_CAP and by the shared
+    # LIVE_DAILY_CREDIT_CAP.
+    outcome = _run(
+        [sys.executable, "-m", "models.euroleague_live_loop"],
+        "euroleague-live",
+    )
+    if outcome != "ok":
+        raise RuntimeError(f"euroleague-live loop exited {outcome}")
 
 
 def run_nfl_wind_card(days: int, regions: str = "us",
@@ -2173,6 +2226,28 @@ def run_ufc_open_moneyline_card() -> None:
         raise RuntimeError(f"UFC opening-price card did not finish: {outcome}")
 
 
+# The tennis match-winner card buys one live pass over the active tennis keys
+# (two calls a key), refreshes three days of ESPN's scoreboard and decides a
+# handful of matches; a minute or two.
+TENNIS_MONEYLINE_CARD_TIMEOUT_S = 480
+
+
+def run_tennis_moneyline_card() -> None:
+    """One tennis match-winner card run (scripts/tennis_moneyline_card.py),
+    then publish.
+
+    Every ten minutes, 24x7: each match is decided once, at the first run 35
+    minutes or less before its listed start. The script returns at once when
+    RUN_TENNIS_MONEYLINE_CARD=0; the job still beats. A run that fails or is
+    killed raises AFTER publishing, so the heartbeat records "error", while a
+    bet that was written still goes out.
+    """
+    outcome = _run([sys.executable, "-m", "scripts.tennis_moneyline_card", "--publish"],
+                   "tennis-moneyline-card", timeout=TENNIS_MONEYLINE_CARD_TIMEOUT_S)
+    _publish_new_signals("tennis-moneyline-card")
+    if outcome != "ok":
+        raise RuntimeError(f"tennis match-winner card did not finish: {outcome}")
+
 # The NCAAB first-half window's steps, bounded so a stuck one cannot hold the
 # job past the ticks that follow it (max_instances=1). The fetch is one event
 # list plus one event call per due game (15 s each at most,
@@ -2226,6 +2301,49 @@ def run_ncaab_first_half_window() -> None:
     bad = {k: v for k, v in outcomes.items() if v != "ok"}
     if bad:
         raise RuntimeError(f"NCAAB first-half window step(s) did not finish: {bad}")
+
+
+# The EuroLeague pre-game window: a fetch is one free event list and at most a
+# handful of event calls (a round's games tip on the hour or the half hour);
+# the card reads the games' stored odds and the scored schedule once.
+EUROLEAGUE_PREGAME_TIMEOUT_S = {"fetch": 240, "card": 240}
+
+
+def run_euroleague_pregame_window() -> None:
+    """One EuroLeague pre-game tick (scripts/euroleague_pregame_window.py).
+
+    ONE planning read: the EuroLeague games due a call (60, 10 and 2 minutes
+    before tip) and whether a game 10.5 minutes or less from tip, or tipped in
+    the last 3 hours, has a switched-on model undecided. Most ticks have none
+    and return without a call. Otherwise: the fetch for exactly the due games,
+    the decision call (tip minus 10) first; then the EuroLeague pre-game card,
+    which decides each game once per model on its tip-minus-10 fetch (the
+    full-game rules on the stored board at tip minus 10 when that fetch never
+    landed); then publish what it wrote. A step that fails or is killed raises
+    AFTER publishing, so the heartbeat records "error" and the failure alerter
+    reports it, while a bet that was written still goes out.
+    RUN_EUROLEAGUE_PREGAME=0 makes the plan empty: nothing is read or bought,
+    and the job keeps beating.
+    """
+    from scripts.euroleague_pregame_window import plan_tick
+    plan = plan_tick()
+    if not plan:
+        return
+    t = EUROLEAGUE_PREGAME_TIMEOUT_S
+    outcomes: dict[str, str] = {}
+    if plan.fetch:
+        log.info("EuroLeague pre-game: fetching %s", {g: plan.marks.get(g) for g in plan.fetch})
+        outcomes["euroleague-period-fetch"] = _run(
+            [sys.executable, "-m", "scripts.euroleague_pregame_window", "--fetch", *plan.fetch],
+            "euroleague-period-fetch", timeout=t["fetch"])
+    if plan.card:
+        outcomes["euroleague-pregame-card"] = _run(
+            [sys.executable, "-m", "scripts.euroleague_pregame_card", "--publish"],
+            "euroleague-pregame-card", timeout=t["card"])
+        _publish_new_signals("euroleague-pregame-window")
+    bad = {k: v for k, v in outcomes.items() if v != "ok"}
+    if bad:
+        raise RuntimeError(f"EuroLeague pre-game window step(s) did not finish: {bad}")
 
 
 # The first-post card reads a few games' stored odds and writes a handful of
@@ -3267,6 +3385,23 @@ def build_scheduler() -> BlockingScheduler:
     else:
         log.info("RUN_NCAABW_LIVE=0 — NCAABW halftime loop NOT scheduled.")
 
+    # EuroLeague halftime loop. Every stored EuroLeague game tipped 14:00-20:00
+    # UTC (2020-21 to 2026-27) and its half ended 38-102 minutes after the tip
+    # (1st-99th percentile), so 9am-5:58pm ET covers every break in winter
+    # (14:08-22:58 UTC) and in summer time (13:08-21:58 UTC); an idle launch
+    # reads the stored schedule and exits. Minute 8 so it never starts in the
+    # same second as the college loops.
+    if RUN_EUROLEAGUE_LIVE:
+        sched.add_job(
+            run_euroleague_live,
+            CronTrigger(hour="9-17", minute="8-59/10", timezone=TIMEZONE),
+            id="euroleague_live",
+            name="EuroLeague halftime loop supervisor (9am-5:58pm ET, every 10 min)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_EUROLEAGUE_LIVE=0 — EuroLeague halftime loop NOT scheduled.")
+
     if RUN_NFL_PROP_CARD:
         sched.add_job(
             run_nfl_prop_card,
@@ -3445,6 +3580,19 @@ def build_scheduler() -> BlockingScheduler:
         max_instances=1, coalesce=True, misfire_grace_time=600,
     )
 
+    # Tennis match-winner card -- every ten minutes, 24x7
+    # (run_tennis_moneyline_card): a match is decided at the first run 35
+    # minutes or less before its listed start, so ten minutes keeps the
+    # decision 25 to 35 minutes out, 30 on average, as the replay decided.
+    # Unconditional; the kill switch is in the script.
+    sched.add_job(
+        run_tennis_moneyline_card,
+        CronTrigger(minute="3-59/10", timezone="UTC"),
+        id="tennis_moneyline_card",
+        name="Tennis match-winner card (every 10 minutes: decide 35 minutes or less before the listed start)",
+        max_instances=1, coalesce=True, misfire_grace_time=300,
+    )
+
     # NCAAB first-post moneyline -- every minute, 24x7
     # (run_ncaab_moneyline_first_post). Every minute because the rule bets a
     # book's moneyline at its first post, and half of those move within about
@@ -3475,6 +3623,20 @@ def build_scheduler() -> BlockingScheduler:
         name="NCAAB first half (every minute, 24x7: first-half calls at 15Z and "
              "180..10 min before tip; the spread card decides at tip minus 10, "
              "the total card at tip minus 60)",
+        max_instances=1, coalesce=True, misfire_grace_time=30,
+    )
+
+    # EuroLeague pre-game -- every minute, 24x7 (run_euroleague_pregame_window).
+    # Every minute because the decision fetch is ten minutes before each tip
+    # and its retries have five minutes to land; misfire_grace_time 30 because
+    # a tick overtaken by the next one has nothing left to add. The kill
+    # switches are in the plan and the card.
+    sched.add_job(
+        run_euroleague_pregame_window,
+        CronTrigger(minute="*", timezone=TIMEZONE),
+        id="euroleague_pregame_window",
+        name="EuroLeague pre-game (every minute, 24x7: calls 60, 10 and 2 min before tip; "
+             "the four rules decide at tip minus 10)",
         max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 

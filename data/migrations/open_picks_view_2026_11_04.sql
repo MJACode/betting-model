@@ -42,7 +42,7 @@ BEGIN
 
   IF to_regclass('public.open_picks') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.open_picks'), 'pg_class'), '')
-         = 'open_picks 9234982b7edd'
+         = 'open_picks 1605a3f8d18f'
      AND has_table_privilege('anon', 'public.open_picks', 'SELECT')
      AND has_table_privilege('authenticated', 'public.open_picks', 'SELECT')
   THEN
@@ -177,6 +177,8 @@ BEGIN
              WHEN 'ufc_total_rounds' THEN 'UFC Totals'
              WHEN 'ufc_method_of_victory' THEN 'UFC Method of Victory'
              WHEN 'ufc_open_moneyline' THEN 'UFC Moneyline'
+             WHEN 'atp_moneyline_shop' THEN 'ATP Match Winner'
+             WHEN 'wta_moneyline_shop' THEN 'WTA Match Winner'
              WHEN 'nhl_moneyline' THEN 'NHL Moneyline'
              WHEN 'nhl_moneyline_regulation' THEN 'NHL 3-Way Moneyline'
              WHEN 'nhl_over_under' THEN 'NHL Totals'
@@ -200,6 +202,11 @@ BEGIN
              WHEN 'ncaab_first_half_total' THEN 'NCAAB First Half Totals'
              WHEN 'ncaabw_total_blend' THEN 'NCAABW Totals'
              WHEN 'ncaabw_live_total_ht' THEN 'NCAABW Live Totals'
+             WHEN 'euroleague_live_spread_ht' THEN 'EuroLeague Live Spreads'
+             WHEN 'euroleague_home_ml' THEN 'EuroLeague Moneyline'
+             WHEN 'euroleague_home_dog_spread' THEN 'EuroLeague Spreads'
+             WHEN 'euroleague_h1_dog_ml' THEN 'EuroLeague First Half Moneyline'
+             WHEN 'euroleague_q1_club_share_total' THEN 'EuroLeague First Quarter Totals'
              WHEN 'nfl_wind_totals' THEN 'NFL Totals'
              WHEN 'nfl_opener_spread' THEN 'NFL Spreads'
              WHEN 'nfl_prop_market' THEN 'NFL Props'
@@ -275,7 +282,7 @@ BEGIN
       )
     ORDER BY g.commence_time::timestamptz NULLS LAST, p.created_at, p.pick_id
 $view$;
-  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks 9234982b7edd'$c$;
+  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks 1605a3f8d18f'$c$;
   REVOKE ALL ON public.open_picks FROM anon, authenticated;
   GRANT SELECT ON public.open_picks TO anon, authenticated;
 END $mig$;

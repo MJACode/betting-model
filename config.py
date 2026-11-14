@@ -341,8 +341,17 @@ LINE_CHANGE_NOTIFY_PP: float = float(os.environ.get("LINE_CHANGE_NOTIFY_PP", 4.0
 # further down this file, and a webhook name is a stable, user-facing env var.)
 # NCAABW is women's college basketball (2026-11-03): its channel is
 # DISCORD_CHANNEL_NCAABW, same shape as NCAAB, not a separate model registry.
+# EUROLEAGUE (2026-11-13): its in-play channel is DISCORD_CHANNEL_LIVE_EUROLEAGUE
+# (or DISCORD_WEBHOOK_LIVE_EUROLEAGUE). Its pre-game picks (the four rules of
+# models/euroleague_pregame.py, 2026-11-14) post to DISCORD_CHANNEL_EUROLEAGUE
+# (or DISCORD_WEBHOOK_EUROLEAGUE), the NCAABW shape; with neither set they stay
+# unsent and unledgered, and post once the channel exists.
+# ATP and WTA are men's and women's professional tennis at every level
+# (2026-11-13, mike: "mens and womans should be different model groups /
+# discord channels"); docs/sports/tennis.md.
 DISCORD_SPORTS: tuple = (
     "MLB", "NHL", "WNBA", "NBA", "UFC", "GOLF", "NCAAF", "NFL", "NCAAB", "NCAABW",
+    "EUROLEAGUE", "ATP", "WTA",
 )
 DISCORD_WEBHOOKS: dict = {
     sport: url for sport in DISCORD_SPORTS
@@ -355,9 +364,18 @@ DISCORD_WEBHOOKS: dict = {
 # (tracking/discord_notifier._channel_webhook). Added for NCAAB (2026-10-30),
 # whose channel is created by scripts/discord_create_sport_channel.py; a
 # webhook variable, when set, still wins.
+# The tennis channels were created by the worker's discord_create_channel job
+# on 2026-11-13 (worker_jobs 1282265 and 1282266, mike's yes), as copies of
+# #🏀-ncaabw. A channel id is not a secret, so it is the default here, and a
+# DISCORD_CHANNEL_<SPORT> variable on the worker still wins.
+DEFAULT_DISCORD_CHANNELS: dict = {
+    "ATP": "1570859599299354677",   # #atp-tennis
+    "WTA": "1570860861705166878",   # #wta-tennis
+}
 DISCORD_CHANNELS: dict = {
     sport: cid for sport in DISCORD_SPORTS
-    if (cid := os.environ.get(f"DISCORD_CHANNEL_{sport}", "").strip())
+    if (cid := (os.environ.get(f"DISCORD_CHANNEL_{sport}", "").strip()
+                or DEFAULT_DISCORD_CHANNELS.get(sport, "")))
 }
 # In-play channel ids. A sport with no DISCORD_WEBHOOK_LIVE_<SPORT> may set
 # DISCORD_CHANNEL_LIVE_<SPORT> (a channel id, not a secret). The notifier
@@ -420,7 +438,9 @@ DISCORD_WEBHOOK_LIVE: str = os.environ.get("DISCORD_WEBHOOK_LIVE", "").strip()
 # (DISCORD_CHANNEL_LIVE_NCAAB on pollers) and nowhere else.
 # NCAABW (2026-11-11): the halftime total posts to #ncaabw-live
 # (DISCORD_CHANNEL_LIVE_NCAABW on pollers) and nowhere else.
-DISCORD_LIVE_CHANNEL_REQUIRED: frozenset = frozenset({"NBA", "NCAAB", "NCAABW"})
+# EUROLEAGUE (2026-11-13): the halftime spread posts to the EuroLeague live
+# channel (DISCORD_CHANNEL_LIVE_EUROLEAGUE on pollers) and nowhere else.
+DISCORD_LIVE_CHANNEL_REQUIRED: frozenset = frozenset({"NBA", "NCAAB", "NCAABW", "EUROLEAGUE"})
 
 # Sports whose in-play picks are announced only while the game has no final
 # score in `games` (tracking/publish_filters.live_publishable_sql). Only a
@@ -428,8 +448,10 @@ DISCORD_LIVE_CHANNEL_REQUIRED: frozenset = frozenset({"NBA", "NCAAB", "NCAABW"})
 # belongs here; NBA's is written by data/ingestors/nba_results_ingestor.
 # NCAAB's is written by data/ingestors/ncaab_espn_ingestor only for a
 # completed event (2026-11-07). NCAABW's is written by
-# data/ingestors/ncaabw_espn_ingestor, the same rule (2026-11-11).
-LIVE_ANNOUNCE_WHILE_IN_PROGRESS: frozenset = frozenset({"NBA", "NCAAB", "NCAABW"})
+# data/ingestors/ncaabw_espn_ingestor, the same rule (2026-11-11). EUROLEAGUE's
+# is written by data/ingestors/euroleague_api only for a game EuroLeague's
+# API marks played, and never overwritten (2026-11-13).
+LIVE_ANNOUNCE_WHILE_IN_PROGRESS: frozenset = frozenset({"NBA", "NCAAB", "NCAABW", "EUROLEAGUE"})
 
 # Channel for the morning results recap (cross-sport, so it needs its own home).
 # Falls back to DISCORD_WEBHOOK_DEFAULT.
@@ -1059,6 +1081,27 @@ ACTION_THRESHOLDS: dict = {
     # EV against Pinnacle's close +1.4%, donor-opinion placebo -1.9% (best
     # of 50: +6.1%).
     "ufc_open_moneyline":     {"min_prob": 0.0, "min_edge": 0.0},
+    # 2026-11-14 (mike: "build professional tennis models", men's and women's
+    # as separate models). Tennis match winner, decided once about 30 minutes
+    # before the listed start: the best decidable price both ways against
+    # Pinnacle's power-de-vigged pair at the same moment, EV including the
+    # deciding book's retirement rule (models/tennis_moneyline_shop.py,
+    # scripts/tennis_moneyline_card.py). The cut is EV, in MODEL_OWN_EV_FLOOR
+    # (0.02, with a 0.05 cap in the model); these keep every bet it writes.
+    # Bought feed history 2020-09 to 2026-11, 53 tour-level keys, replayed at
+    # the first hourly snapshot within 60 minutes of the listed start
+    # (scripts/tennis_moneyline_replay.py), both tours, -500 floor:
+    #     EV >= 0.010   922 bets   +2.96% [-1.8, +7.7]
+    #          0.015    560        +7.17% [+0.8, +13.5]
+    #          0.020    355       +11.02% [+2.5, +19.5]  <- live
+    #          0.025    201       +15.99% [+4.2, +27.8]
+    #          0.030    120       +11.92% [-3.6, +27.5]
+    # Both halves positive (+5.4 / +16.5), men +11.8% on 188, women +10.1% on
+    # 167, six of seven seasons positive (2023 -9.1% on 42). MISSED the
+    # stricter bar: the cut chosen on earlier seasons each year returns +1.2%
+    # on 704 bets [-4.4, +6.9]; Bovada's price in Pinnacle's place keeps +5.2%.
+    "atp_moneyline_shop":     {"min_prob": 0.0, "min_edge": 0.0},
+    "wta_moneyline_shop":     {"min_prob": 0.0, "min_edge": 0.0},
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -1197,6 +1240,57 @@ ACTION_THRESHOLDS: dict = {
     # clears). docs/sports/ncaabw.md, "In play". Go-live gate standing: 0
     # settled of 50.
     "ncaabw_live_total_ht": {"min_prob": 0.0, "min_edge": 0.0},
+    # EuroLeague halftime spread (models/euroleague_live_loop.py; 2026-11-13,
+    # mike: "yes", knowing it misses part of the bar). The full-game spread,
+    # bet during the halftime break: the women's college halftime method with
+    # Pinnacle's pre-game close as the pre-game number, at EV >= 0.05 (the
+    # artifact's cut; MODEL_OWN_EV_FLOOR), one decision a game. Walk-forward
+    # 2022-23 to 2026-27 to 11-12 (each season on a model fitted on every
+    # earlier one): 364 bets, 215-149, +45.34 units, +10.93% (90% +3.40 to
+    # +18.48); +45.08 units on the posted stake. Every cut from 0.02 to 0.12
+    # is positive; the placebo (200 shuffles of the half-time score) never
+    # reached it; blind bets on the same kind of side lose. IT MISSED THE BAR:
+    # the false-discovery correction across all 183 cells (best p 0.0096
+    # against 0.00055), 2023-24 negative (61 bets, -1.65%), the 2021-22 second
+    # look negative, 78% halftime underdogs, and 2026-27's 31 bets carry 11.85
+    # of the 45.34 units. docs/sports/euroleague.md, "Halftime spread".
+    # Go-live gate standing: 0 settled of 50.
+    "euroleague_live_spread_ht": {"min_prob": 0.0, "min_edge": 0.0},
+    # ── The four EuroLeague pre-game rules (models/euroleague_pregame.py,
+    # scripts/euroleague_pregame_card.py; 2026-11-14, mike: "I told you to build
+    # all the models", knowing each one MISSED part of the research bar). THE
+    # CUT IS THE RULE, applied in the card at tip minus 10 minutes at the best
+    # deciding-book price. The probability is the market's no-vig chance plus
+    # the rule's walk-forward uplift (the artifact), so min_edge sits just under
+    # the smallest edge on the replayed bets: it never removes one, and every
+    # surface agrees with the card. The build replays each research read bet
+    # for bet (scripts/euroleague_pregame_build.py). docs/sports/euroleague.md
+    # has each model's evidence and what it missed. Go-live gate standing: 0
+    # settled of 50 for each. A fifth, the favourite at -500 or shorter
+    # (euroleague_heavy_fav_ml), was removed before it went live (mike,
+    # 2026-11-14: "odds cutoff for favorites should be -200"): every bet it
+    # found was -500 or shorter, so at a -200 floor it could never bet.
+    # The home moneyline, priced -200 or longer (round 2, A1: 972 bets, +59.64
+    # units at DraftKings alone; 984, +64.80 at the best deciding book, both
+    # replayed bet for bet). Live: 984 bets, 513-471, +64.80 units, +5.24% (90% -0.27 to +11.08); prices median -110, shortest -200, longest +550.
+    # MISSED: +0.29% without its 10 best dates, 2026-27 -18.50%, the
+    # false-discovery correction (p 0.071), the interval reaches below zero.
+    "euroleague_home_ml":         {"min_prob": 0.0, "min_edge": 0.01},
+    # The home underdog against the spread (full game round 1, H3): 455 bets, 262-189-4, +54.54 units, +11.00% (90% +3.63 to +17.95);
+    # prices median -110, shortest -120, longest -102. MISSED: 2025-26 carries most of
+    # the units, +5.37% without its 10 best dates (DraftKings), walk-forward
+    # +3.16%, 2026-27 -24.06% on 30.
+    "euroleague_home_dog_spread": {"min_prob": 0.0, "min_edge": 0.06},
+    # The first-half moneyline underdog (first half round 1): 465 bets, 192-258-15, +19.14 units, +4.22% (90% -4.64 to +12.35);
+    # prices median +142, shortest -115, longest +475. A tied half pushes. MISSED: the
+    # interval runs through zero, 2026-27 negative.
+    "euroleague_h1_dog_ml":       {"min_prob": 0.0, "min_edge": 0.00},
+    # The first-quarter total from each club's prior first-quarter share (round
+    # 2, Q1-i at margin 1.0): 63 bets, 43-20, +17.71 units, +22.23% (90% +4.08 to +39.66); prices
+    # median -122, shortest -145, longest -111. MISSED: 63 bets against the 200 bar,
+    # the false-discovery correction (p 0.0188), no plateau (0.75 +4.44%, 0.5
+    # -3.68%), and 1.0 was the grid's best cell, not the pre-registered 0.5.
+    "euroleague_q1_club_share_total": {"min_prob": 0.0, "min_edge": 0.10},
     # MLB run-line market-relative rule (models/mlb_game_market). Replaces
     # the paused mlb_runline *publish path* — mlb_runline stays paused
     # until mike unpauses it. 1.8pp is the 2026 BETTABLE-book plateau
@@ -2329,6 +2423,11 @@ MODEL_MIN_ODDS: dict = {
     # the 846 bets were shorter than -200, none shorter than -300 (risk 3u
     # to win 1u there). docs/ufc_market_audit.md 3d.
     "ufc_open_moneyline":        -300,
+    # 2026-11-14 (mike): the research's floor. On the 355 replayed bets the
+    # median price was -165, 23.7% were -300 or shorter (risk 3u to win 0.6u
+    # at -500), 11.0% +200 or longer, the longest +1550.
+    "atp_moneyline_shop":        -500,
+    "wta_moneyline_shop":        -500,
     # NHL totals rule (2026-10-08, mike): -200 is the price floor its evidence
     # was graded at (scripts/nhl_totals_lab.py, `price >= -200`). Pinned here
     # so a Railway DEFAULT_MIN_ODDS override cannot move it off its evidence.
@@ -2420,6 +2519,21 @@ MODEL_MIN_ODDS: dict = {
     # (median -115; none shorter than -150, 8 at plus money). -200 has never
     # bound; pinned so a DEFAULT_MIN_ODDS override cannot move it.
     "ncaabw_live_total_ht":      -200,
+    # EuroLeague halftime spread (2026-11-13, mike): the rule takes no price
+    # beyond -250 or +250, and its 364 replayed bets were laid at -135 to +105
+    # (median -115; none shorter than -300). -200 never binds; pinned so a
+    # DEFAULT_MIN_ODDS override cannot move it.
+    "euroleague_live_spread_ht": -200,
+    # The four EuroLeague pre-game rules (2026-11-14, mike). Pinned so a
+    # DEFAULT_MIN_ODDS override cannot move them. The home moneyline's rule IS
+    # -200 or longer (median -110, shortest -200, longest +550 on the replay).
+    # The rest never reach -200: the spread median -110, shortest -120, longest -102,
+    # the first-half underdog median +142, shortest -115, longest +475, the first-quarter
+    # total median -122, shortest -145, longest -111.
+    "euroleague_home_ml":             -200,
+    "euroleague_home_dog_spread":     -200,
+    "euroleague_h1_dog_ml":           -200,
+    "euroleague_q1_club_share_total": -200,
 }
 
 
@@ -2609,6 +2723,20 @@ MODEL_OWN_EV_FLOOR: dict = {
     # itself); the row's probability is P(win | no push), the number that EV
     # was graded on. No record yet: re-read at 50.
     "ncaabw_live_total_ht":      0.05,
+    # The EuroLeague halftime spread (2026-11-13, mike). 0.05 IS its graded
+    # cut (the artifact's `cut`, read by models/euroleague_live_loop.py for the
+    # rule itself); the row's probability is P(win | no push), the number that
+    # EV was graded on. No record yet: re-read at 50.
+    "euroleague_live_spread_ht": 0.05,
+    # The four EuroLeague pre-game rules (2026-11-14, mike). The cut is the
+    # rule, in the card, so each floor sits just under the smallest EV its
+    # replayed bets reach at the 2026-27 uplift (scripts/euroleague_pregame_build.py):
+    # it removes none of them. Each rule's uplift is larger than the vig it
+    # pays, so every replayed bet carries a positive EV and so does every floor.
+    "euroleague_home_ml": 0.04,   # replay min EV +0.0401, median +0.0628
+    "euroleague_home_dog_spread": 0.11,   # replay min EV +0.1181, median +0.1272
+    "euroleague_h1_dog_ml": 0.01,   # replay min EV +0.0106, median +0.0902
+    "euroleague_q1_club_share_total": 0.17,   # replay min EV +0.1779, median +0.2240
     "nfl_prop_pass_completions": 0.20,   # n=1, min +0.329, never bet under 0.20
     "nfl_prop_rec_yards":        0.20,   # n=3, min +0.302, never bet under 0.20
     "nfl_prop_receptions":       0.20,   # n=3, min +0.290, never bet under 0.20
@@ -2777,6 +2905,12 @@ MODEL_OWN_EV_FLOOR: dict = {
     # of a plateau from 0.00 to 0.15 (every cell's interval above zero);
     # the table is beside its ACTION_THRESHOLDS entry.
     "ufc_open_moneyline":       0.06,
+    # 2026-11-14 (mike): THE cut of the tennis match-winner models, EV with
+    # the deciding book's retirement term, the middle of the 0.015-0.03
+    # plateau; the table is beside its ACTION_THRESHOLDS entry. The card
+    # hands the gate (1 + EV) / decimal so the gate checks the same EV.
+    "atp_moneyline_shop":       0.02,
+    "wta_moneyline_shop":       0.02,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2906,6 +3040,18 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # cut was graded on, and it tracked the result up to a claimed 0.70 on
     # the two replayed seasons. No record, so a promoted map would be borrowed.
     "ncaabw_live_total_ht",
+    # 2026-11-13 (mike). The EuroLeague halftime spread's number is its
+    # game-state model's own P(win | no push) (models/euroleague_live_ht.py),
+    # the one its EV cut was graded on. No record, so a promoted map would be
+    # borrowed.
+    "euroleague_live_spread_ht",
+    # 2026-11-14 (mike). The four EuroLeague pre-game rules: the market's
+    # no-vig chance plus the rule's walk-forward uplift (models/euroleague_pregame.py),
+    # which their floors were set on. No record, so a map would be borrowed.
+    "euroleague_home_ml",
+    "euroleague_home_dog_spread",
+    "euroleague_h1_dog_ml",
+    "euroleague_q1_club_share_total",
     # 2026-10-15 (mike: "use what you've learned in this repo"). The NBA prop
     # rule's probability IS Pinnacle's proportional no-vig under at the same
     # line in the same fetch, which its EV >= 0.00 cut was measured on. It has
@@ -2972,6 +3118,10 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # the rating model on Pinnacle's no-vig price, which its EV cut was
     # measured on. No record, so a promoted map would be borrowed.
     "ufc_open_moneyline",
+    # 2026-11-14 (mike): tennis match winners; they decide on Pinnacle's
+    # power-de-vigged chance, which their EV cut was measured on. No record.
+    "atp_moneyline_shop",
+    "wta_moneyline_shop",
 })
 
 
@@ -3133,6 +3283,20 @@ SCORING_METHODS: dict = {
     # scripts/build_ncaabw_live_ht_artifact.py), loaded by its pinned path by
     # models/ncaabw_live_loop.py, never registered.
     "ncaabw_live_total_ht": "rule",
+    # The EuroLeague halftime spread: its margin model in one JSON artifact
+    # committed under models/saved/ (euroleague_live_ht_2027.json,
+    # scripts/build_euroleague_live_ht_artifact.py), loaded by its pinned path
+    # by models/euroleague_live_loop.py, never registered.
+    "euroleague_live_spread_ht": "rule",
+    # The four EuroLeague pre-game rules: their parameters and walk-forward
+    # uplifts in one JSON artifact committed under models/saved/
+    # (euroleague_pregame_2027.json, scripts/euroleague_pregame_build.py),
+    # loaded by its pinned path by scripts/euroleague_pregame_card.py, never
+    # registered. The card refuses an artifact for another season.
+    "euroleague_home_ml":             "rule",
+    "euroleague_home_dog_spread":     "rule",
+    "euroleague_h1_dog_ml":           "rule",
+    "euroleague_q1_club_share_total": "rule",
     # A rule with a parameter artifact committed under models/saved/ (the
     # residual sample and the bucket counts, models/nba_total_luck.py), never
     # registered: the card loads it by its pinned path.
@@ -3186,6 +3350,10 @@ SCORING_METHODS: dict = {
     # 2026-11-13 (mike): UFC fight winner a week out, Pinnacle-anchored rating
     # model (models/ufc_open_moneyline.py); its artifact holds the ridge fit.
     "ufc_open_moneyline":     "rule",
+    # 2026-11-14 (mike): tennis match winners, no artifact: the rule's
+    # constants are in models/tennis_moneyline_shop.py.
+    "atp_moneyline_shop":     "rule",
+    "wta_moneyline_shop":     "rule",
 }
 
 
@@ -3270,6 +3438,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaaf_moneyline":  0.08,
     "ncaaf_moneyline_market": 0.02,  # 2026-11-10 mike: THE cut, the bet side's fair chance minus the bet price's implied; see ACTION_THRESHOLDS
     "ufc_open_moneyline":     0.0,   # 2026-11-13 mike: the cut is EV (0.06), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "atp_moneyline_shop":     0.0,   # 2026-11-14 mike: the cut is EV (0.02), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "wta_moneyline_shop":     0.0,   # 2026-11-14 mike: the cut is EV (0.02), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -3286,6 +3456,11 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaab_live_spread_h2":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
     "ncaab_live_total_h2":         0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
     "ncaabw_live_total_ht":        0.0,    # 2026-11-11 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
+    "euroleague_live_spread_ht":   0.0,    # 2026-11-13 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
+    "euroleague_home_ml": 0.01,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
+    "euroleague_home_dog_spread": 0.06,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
+    "euroleague_h1_dog_ml": 0.00,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
+    "euroleague_q1_club_share_total": 0.10,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
     "mlb_spread_market":           0.018,  # see ACTION_THRESHOLDS
     "mlb_total_market":            0.02,   # see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -3389,6 +3564,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaaf_moneyline":  0.62,
     "ncaaf_moneyline_market": 0.0,  # 2026-11-10 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ufc_open_moneyline":     0.0,  # 2026-11-13 mike: the cut is EV; see ACTION_THRESHOLDS
+    "atp_moneyline_shop":     0.0,  # 2026-11-14 mike: the cut is EV; see ACTION_THRESHOLDS
+    "wta_moneyline_shop":     0.0,  # 2026-11-14 mike: the cut is EV; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -3405,6 +3582,11 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaab_live_spread_h2":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
     "ncaab_live_total_h2":         0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
     "ncaabw_live_total_ht":        0.0,    # 2026-11-11 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
+    "euroleague_live_spread_ht":   0.0,    # 2026-11-13 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
+    "euroleague_home_ml": 0.0,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
+    "euroleague_home_dog_spread": 0.0,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
+    "euroleague_h1_dog_ml": 0.0,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
+    "euroleague_q1_club_share_total": 0.0,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
     "mlb_spread_market":           0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -3708,6 +3890,13 @@ LIVE_MODELS = {
     "ncaabw_live_total_ht": ("NCAABW", "totals", "engine",
                              "Full-game total at the halftime break: game-state model, EV >= 0.05 at the first "
                              "read holding an eligible quote"),
+    # EuroLeague halftime spread (models/euroleague_live_loop.py, 2026-11-13,
+    # mike). Settled on the FULL GAME, overtime included, against scored_line,
+    # the HOME number taken at the break (CLAUDE.md section 4).
+    # docs/sports/euroleague.md, "Halftime spread".
+    "euroleague_live_spread_ht": ("EUROLEAGUE", "spreads", "engine",
+                                  "Full-game spread at the halftime break: game-state model on Pinnacle's "
+                                  "pre-game close, EV >= 0.05 at the first read holding an eligible quote"),
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────
@@ -5529,6 +5718,14 @@ UFC_NAME_ALIASES: dict = {
     "Nursultan Ruziboev": "Nursulton Ruziboev",
     "Javier Reyes Rugeles": "Javier Reyes",
     "Steve Garcia Jr.": "Steve Garcia",
+    # 2026-11-14: the live UFC fight-winner model could not rate these five on
+    # the upcoming cards (scripts/ufc_open_moneyline_card.py skips the fight).
+    # Each value is the `fighters` name, confirmed with its UFC fight count.
+    "Sergey Pavlovich": "Sergei Pavlovich",     # 12 fights
+    "Joseph Pyfer": "Joe Pyfer",                # 8
+    "Daniel Hooker": "Dan Hooker",              # 25
+    "Charlie Radtke": "Charles Radtke",         # 7
+    "Heili Alateng": "Alatengheili",            # 10
 }
 
 # Synthetic round-total lines used when DK round-total odds are absent

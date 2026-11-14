@@ -19,7 +19,7 @@
  * recomputes everything synchronously.
  */
 
-import { americanToDecimal, labelWithoutStake } from '@/lib/format';
+import { americanToDecimal, isVersusSport, labelWithoutStake } from '@/lib/format';
 import { stakeFor, KELLY_MULTIPLIER, type UnitStake } from '@/lib/thresholds';
 import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
@@ -222,6 +222,16 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
       decimal: americanToDecimal(price),
       link: linkForSide(row, p.pick_side),
     });
+  }
+  // A tennis pick has no book rows in the app (its prices are worker-only),
+  // so the deciding book's own stored quote is the only price for its tile.
+  // DraftKings' column holds DraftKings' price or nothing
+  // (scripts/tennis_moneyline_card.py), so a tennis leg DraftKings did not
+  // price is already off DraftKings above.
+  const decBook = p.decision_book ?? null;
+  if ((p.sport === 'ATP' || p.sport === 'WTA') && decBook != null && decBook !== MODEL_BOOK
+      && isBettableBook(decBook) && !bookPrices.some((b) => b.bookmaker === decBook)) {
+    bookPrices.push({ bookmaker: decBook, american: decided, decimal: americanToDecimal(decided), link: null });
   }
   return {
     pickId: p.pick_id,
@@ -849,7 +859,7 @@ export function handoffBookFor(
 export function matchupForLeg(game: GameRow | null): string | null {
   if (!game) return null;
   if (game.sport === 'GOLF') return game.home_team;
-  const sep = game.sport === 'UFC' ? 'vs' : '@';
+  const sep = isVersusSport(game.sport) ? 'vs' : '@';
   return `${game.away_team} ${sep} ${game.home_team}`;
 }
 

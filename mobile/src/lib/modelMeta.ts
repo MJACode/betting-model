@@ -561,6 +561,23 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The tennis match-winner models (models/tennis_moneyline_shop.py
+  // MODEL_IDS), men's and women's tour, decided about 30 minutes before the
+  // listed start at the best price against Pinnacle's.
+  atp_moneyline_shop: {
+    shortLabel: 'ML',
+    longLabel: 'ATP Match Winner',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  wta_moneyline_shop: {
+    shortLabel: 'ML',
+    longLabel: 'WTA Match Winner',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   nhl_moneyline: {
     shortLabel: 'ML',
     longLabel: 'NHL Moneyline',
@@ -795,6 +812,57 @@ export const MODEL_META: Record<string, ModelMeta> = {
   ncaabw_live_total_ht: {
     shortLabel: 'LIVE O/U',
     longLabel: 'NCAABW Live Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // ── EUROLEAGUE ────────────────────────────────────────────────────────────
+  // EuroLeague in play (models/euroleague_live_ht.py, 2026-11-13): the
+  // full-game spread, bet once a game during the halftime break. It SETTLES ON
+  // THE FULL GAME, overtime included. Named like the women's halftime model
+  // ("NCAABW Live Totals"), so it does not read as a second-half bet; the
+  // model's page and the pick's timing line say the bet is on the full game. Its picks appear on the Live segment
+  // only. The id starts with 'euroleague', a prefix no other sport's ids share.
+  euroleague_live_spread_ht: {
+    shortLabel: 'LIVE Spread',
+    longLabel: 'EuroLeague Live Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // The four EuroLeague pre-game rules (models/euroleague_pregame.py,
+  // 2026-11-14). Each decides a game once, five to ten minutes before tip, at
+  // the best price at the sportsbooks a pick may name. Every id starts with
+  // 'euroleague', a prefix no other sport's ids share.
+  // The home side's moneyline, priced -200 or longer.
+  euroleague_home_ml: {
+    shortLabel: 'ML',
+    longLabel: 'EuroLeague Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // The home underdog against the full-game spread.
+  euroleague_home_dog_spread: {
+    shortLabel: 'Spread',
+    longLabel: 'EuroLeague Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // The first half's moneyline, the underdog. A tied half returns the stake.
+  euroleague_h1_dog_ml: {
+    shortLabel: '1H ML',
+    longLabel: 'EuroLeague First Half Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // The first quarter's total, from each club's share of its games' points
+  // scored in the first quarter.
+  euroleague_q1_club_share_total: {
+    shortLabel: '1Q O/U',
+    longLabel: 'EuroLeague First Quarter Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -1075,6 +1143,14 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   ufc_open_moneyline:
     'The chance this fighter wins, read a week or more before the fight: Pinnacle’s fair price, adjusted ' +
     'by our fighter ratings. Edge is how much higher that chance is than the one the price we bet implies.',
+  // Pinnacle's chance with its margin removed (models/tennis_moneyline_shop.py),
+  // read about 30 minutes before the listed start.
+  atp_moneyline_shop:
+    'The chance this player wins the match: Pinnacle’s price with its margin removed, about 30 minutes ' +
+    'before the listed start. Edge is how much higher that is than the chance the price we bet implies.',
+  wta_moneyline_shop:
+    'The chance this player wins the match: Pinnacle’s price with its margin removed, about 30 minutes ' +
+    'before the listed start. Edge is how much higher that is than the chance the price we bet implies.',
   // P(cover | no push) at the bet's own number (models/ncaab_first_half_spread.py):
   // on a whole-number first-half line a push is possible and is left out.
   ncaab_first_half_spread:
@@ -1085,6 +1161,27 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   ncaab_first_half_total:
     'What our model says is the chance this side hits, on the first half’s points alone. On a ' +
     'whole-number line it leaves out a push, which returns the stake.',
+  // The four EuroLeague rules (models/euroleague_pregame.py): the market's
+  // no-vig chance plus the rule's walk-forward uplift, the extra its bets won
+  // over the earlier seasons. The rule is the cut, so the note says the number
+  // is an estimate, not the reason for the bet.
+  euroleague_home_ml:
+    'The market’s fair chance that the home team wins, plus about 5 percentage points, the extra this ' +
+    'rule’s bets won in earlier EuroLeague seasons. The rule picks the side; this number is our estimate ' +
+    'of its chance. Read it as an upper bound.',
+  euroleague_home_dog_spread:
+    'The market’s fair chance that the home underdog covers, plus about 9 percentage points, the extra ' +
+    'this rule’s bets won in earlier EuroLeague seasons. The rule picks the side; this number is our ' +
+    'estimate of its chance. Read it as an upper bound.',
+  euroleague_h1_dog_ml:
+    'The market’s fair chance that this underdog leads at halftime, leaving out a tied half, which ' +
+    'returns the stake, plus about 5 percentage points, the extra this rule’s bets won last season ' +
+    '(347 bets). The rule picks the side; this number is our estimate of its chance. Read it as an ' +
+    'upper bound.',
+  euroleague_q1_club_share_total:
+    'The market’s fair chance this side hits, on the first quarter’s points alone, plus about 16 ' +
+    'percentage points, the extra this rule’s bets won last season. That is only 53 bets, so the real ' +
+    'extra could be much smaller. Read it as an upper bound.',
 };
 
 export function modelProbabilityNote(modelId: string): string {
@@ -1210,7 +1307,38 @@ const OPENING_LINE_MODELS: readonly string[] = [
 // page fills game by game through the evening, minutes before each tip.
 const MINUTES_BEFORE_TIP_MODELS: readonly string[] = [
   'ncaab_first_half_spread',
+  // The four EuroLeague pre-game rules (scripts/euroleague_pregame_card.py),
+  // on the lines fetched ten minutes before each tip, or a retry up to five
+  // minutes before it.
+  'euroleague_home_ml',
+  'euroleague_home_dog_spread',
+  'euroleague_h1_dog_ml',
+  'euroleague_q1_club_share_total',
 ];
+
+// The four EuroLeague pre-game rules' page text (UX review, 2026-11-14): what
+// each bets and the prices it lays, and no "line" for the two moneylines.
+const EUROLEAGUE_CHECKED =
+  'This model checks each game once, five to ten minutes before tip-off, at the sportsbook with the best ' +
+  'price, which may not be DraftKings. ';
+const MINUTES_BEFORE_TIP_BODY: Readonly<Record<string, string>> = {
+  euroleague_home_ml:
+    EUROLEAGUE_CHECKED +
+    'It bets the home team’s moneyline at -200 or longer, never shorter. ' +
+    'A posted bet is never re-priced: it stays at the price it posted at.',
+  euroleague_home_dog_spread:
+    EUROLEAGUE_CHECKED +
+    'It bets the home team against the full-game spread when the home team is the underdog. A posted bet ' +
+    'is never re-priced: it stays at the line and price it posted at.',
+  euroleague_h1_dog_ml:
+    EUROLEAGUE_CHECKED +
+    'It bets the first-half moneyline underdog. The bet settles on the first half’s score alone, and a ' +
+    'tied first half returns the stake. A posted bet is never re-priced: it stays at the price it posted at.',
+  euroleague_q1_club_share_total:
+    EUROLEAGUE_CHECKED +
+    'It bets the first-quarter total, over or under, and settles on the first quarter’s points alone. A ' +
+    'posted bet is never re-priced: it stays at the line and price it posted at.',
+};
 
 export interface ModelPageTiming {
   /** The tooltip beside "Today's potential picks". */
@@ -1246,6 +1374,9 @@ const NCAAB_LIVE_TIMING: Readonly<Record<string, { when: string; market: string 
 // decided during the halftime break (models/ncaabw_live_loop.py reads the
 // books every five minutes while a game is at the half).
 const NCAABW_HALFTIME_MODEL = 'ncaabw_live_total_ht';
+// The EuroLeague in-play model (models/euroleague_live_ht.py): the same shape,
+// on the full-game spread (models/euroleague_live_loop.py).
+const EUROLEAGUE_HALFTIME_MODEL = 'euroleague_live_spread_ht';
 
 const LIVE_NOT_IN_LIST = 'Its bets appear on the Live Signals board while the game is in play, not in this list.';
 const NEVER_REPRICED = 'A posted bet is never re-priced: it stays at the line and price it posted at.';
@@ -1279,6 +1410,17 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
           'sportsbook with the best offer. The bet is on the full-game total: it settles on the final ' +
           `score, overtime included, not on a half. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
         empty: `This model checks each NCAABW game during its halftime break. ${LIVE_NOT_IN_LIST}`,
+        note: 'In-play bets appear on Live Signals, not in this list.',
+      };
+    }
+    if (modelId === EUROLEAGUE_HALFTIME_MODEL) {
+      return {
+        title: 'Bets at halftime',
+        body:
+          'This model checks each EuroLeague game during its halftime break and bets it at most once, at the ' +
+          'sportsbook with the best offer. The bet is on the full-game spread: it settles on the final ' +
+          `score, overtime included, not on the second half. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
+        empty: `This model checks each EuroLeague game during its halftime break. ${LIVE_NOT_IN_LIST}`,
         note: 'In-play bets appear on Live Signals, not in this list.',
       };
     }
@@ -1341,6 +1483,24 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
       note: 'Posted a week or more before the fight and never re-priced.',
     };
   }
+  // The tennis match-winner models (scripts/tennis_moneyline_card.py): each
+  // match is decided once, 25 to 35 minutes before its listed start, at the
+  // best price, never shorter than -500.
+  if (modelId === 'atp_moneyline_shop' || modelId === 'wta_moneyline_shop') {
+    return {
+      title: 'Decided about 30 minutes before the match',
+      body:
+        'This model decides each match once, about 30 minutes before its listed start. Tennis start ' +
+        'times often slip, so the match may begin later than listed. It bets only some matches, each ' +
+        'at the sportsbook where the bet is worth the most once that book’s rule for a player retiring ' +
+        'mid-match is counted, which may not be DraftKings. It never lays more than -500. A posted bet ' +
+        'is never re-priced: it stays at the price it posted at.',
+      empty:
+        'This model posts about 30 minutes before each match it bets, and bets only some of them. ' +
+        'Nothing has posted yet.',
+      note: 'Posted about 30 minutes before the listed start and never re-priced.',
+    };
+  }
   if (HOUR_BEFORE_TIP_MODELS.includes(modelId)) {
     return {
       title: 'Checked once per game',
@@ -1357,6 +1517,7 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
     return {
       title: 'Checked once per game',
       body:
+        MINUTES_BEFORE_TIP_BODY[modelId] ??
         'This model checks each game once, five to ten minutes before tip-off, and posts a bet only ' +
         'when it finds one. A posted bet is never re-priced: it stays at the line and price it posted at.',
       empty:
@@ -1474,7 +1635,9 @@ export function isPropModel(modelId: string): boolean {
 // Bet-type catalog — what the custom-model builder offers
 // ---------------------------------------------------------------------------
 
-export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'NHL' | 'GOLF';
+export type BetTypeSport =
+  | 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'NHL' | 'GOLF'
+  | 'EUROLEAGUE';
 
 /**
  * The on-screen title. "Double-Double" is one word to the wrapper; a
@@ -1495,8 +1658,15 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('ncaab')) return 'NCAAB';
   if (modelId.startsWith('nfl')) return 'NFL';
   if (modelId.startsWith('ufc')) return 'UFC';
+  // The tennis tours (models/tennis_moneyline_shop.py MODEL_IDS). Without
+  // them both models fell to the MLB line below, onto the MLB tab and into
+  // the custom-model builder's MLB moneyline row. 'wta' shares only its first
+  // letter with 'wnba'.
+  if (modelId.startsWith('atp')) return 'ATP';
+  if (modelId.startsWith('wta')) return 'WTA';
   if (modelId.startsWith('nhl')) return 'NHL';
   if (modelId.startsWith('golf')) return 'GOLF';
+  if (modelId.startsWith('euroleague')) return 'EUROLEAGUE';
   return 'MLB';
 }
 
@@ -1534,7 +1704,10 @@ const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
   'NCAABW',
   'UFC',
   'NHL',
+  'ATP',
+  'WTA',
   'GOLF',
+  'EUROLEAGUE',
 ];
 
 /**
@@ -1608,6 +1781,10 @@ export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | 
   if (id === 'nba_q1_trend') return null;
   // The NBA first quarter's moneyline, the same: not the game's moneyline.
   if (id === 'nba_q1_trend_ml') return null;
+  // The EuroLeague first half's moneyline and first quarter's total, the same.
+  if (id === 'euroleague_h1_dog_ml' || id === 'euroleague_q1_club_share_total') return null;
+  // The EuroLeague home moneyline has no 'moneyline' in its id.
+  if (id === 'euroleague_home_ml') return type === 'game' ? 'ml' : null;
   if (type !== 'game') return 'props';
   if (id.includes('moneyline') && !id.includes('regulation')) return 'ml';
   if (id.includes('runline') || id.includes('puckline') || id.includes('_spread')) return 'line';

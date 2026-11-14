@@ -30,6 +30,289 @@ review as its own entry.
 
 ---
 
+## 2026-11-14 — Tennis round 1: the match winner live (`atp_moneyline_shop`, `wta_moneyline_shop`), the games markets' line shop null
+
+1. **League and scope**: tennis, both tours (mike, 2026-11-13: *"build
+   professional tennis models"*; 2026-11-14: *"Why can't you do it now"* when
+   the research waited on a nightly copy). On the bought history, 53
+   tour-level keys, 2020-09 to 2026-11, read once into a local cache.
+2. **Tried**: baselines on the match winner, total games and games spreads at
+   every decidable book; the line shop against Pinnacle and the Betfair
+   exchange at three decision times, multiplicative and power de-vig, with
+   each book's retirement rule; the reference's calibration, overround and
+   time since last change; a replay of the frozen rule through the live
+   card's own code at the live moment, with two soft-book placebos and a
+   walk-forward cut. Running in parallel: a serve-and-return games model and
+   a fatigue and retirement-risk study.
+3. **New**: three data checks in `kill-tests.md` ("Is the data right?"):
+   power de-vig against a longshot lean, an exchange's first post is not a
+   reference, and age in a change-only store. The tennis result in
+   `methods.md` §2. A decision code shared by replay and card
+   (`models/tennis_moneyline_shop.decide`), so the backtest is the live path.
+4. **Corrected**: round 1's first grid (multiplicative de-vig, a 6-hour
+   reference window) looked best in underdogs at the first post and against
+   the exchange; both were the reference, not an edge. The candidate came
+   only after the power de-vig, and its value moved with each principled fix
+   (+4.0% at 0.01 with DraftKings' term only, +0.9% once Caesars' void-all
+   rule was priced too): a result that moves under correct specification is
+   weaker than its headline. And a feed can store one market under another's
+   key: Pinnacle's total sets and set handicaps sat under tennis "totals" and
+   "spreads" at the 2023 Australian and French Opens, which turned Pinnacle's
+   blind over from -4.59% into an apparent -1.19%. Read each market's line
+   range per book and tournament before the first baseline.
+   Games markets: the serve-and-return model (round 1) and a model centred on
+   the line (round 2) are both null.
+5. **The framework**: the live decision moment was chosen after the close
+   looked best, and the replay at that moment (+11.0%) was run before
+   building; the skill's "the backtest runs what the live path runs" was what
+   caught that the close is not decidable live. Nothing in `SKILL.md`
+   changed.
+
+What this build taught the skill: de-vig the sharp pair by the power method
+before any shop grid on a market with longshots, an exchange's first-post
+pair is not a reference, and in a change-only store a reference's age is
+time since it moved.
+## 2026-11-14 — EuroLeague, the big-favourite moneyline removed before it went live
+
+1. **Scope.** mike, 2026-11-14: "odds cutoff for favorites should be -200".
+   `euroleague_heavy_fav_ml` bet only favourites at -500 or shorter, so at a
+   -200 floor it could never bet: removed (PR #1323, unmerged), not shipped as
+   a model that cannot place a bet. The other four pre-game rules unchanged.
+2. **Tried.** Rebuilt the artifact from the research cache
+   (`scripts/euroleague_pregame_build.py --write`). Every read still matches
+   the research bet for bet. The spread, first-half and first-quarter rules'
+   artifact entries are identical. The home moneyline gains the 6 games the
+   conflict rule took: 984 bets, +64.80 units (was 978, +65.80), uplift
+   +0.0520 (was +0.0523), smallest EV +0.0401 (floor 0.04 still under it).
+3. **New.** Nothing new as a method. The same-pass conflict branch was only
+   reachable through the removed rule (the two full-game rules left both bet
+   the home side), so it went with it; a test now pins that no two of the four
+   decided in one pass conflict.
+4. **Corrected.** `shipping.md`'s price-floor line: was "a model that lays
+   shorter by design pins the research's shortest price, EuroLeague's big
+   favourites -4000", now a rule whose every bet lays shorter than -200 is not
+   shipped (mike, 2026-11-14). `porting-traps.md`'s conflict trap gained what
+   a removal does to it.
+5. **The framework.** No step changed.
+
+## 2026-11-14 — EuroLeague, five pre-game rules shipped: `euroleague_home_ml`, `euroleague_heavy_fav_ml`, `euroleague_home_dog_spread`, `euroleague_h1_dog_ml`, `euroleague_q1_club_share_total`
+
+1. **Scope.** mike, 2026-11-14: "I told you to build all the models": the
+   five frozen leads of the full-game, first-half/quarter and round-2 studies
+   shipped live, each knowing what it missed of the bar. Step 7 for five rule
+   cards in one card, plus a live period feed.
+2. **Tried.** One rules module, one card, one build. The build decides every
+   cached game again through the card's own decision code and runs the
+   research's own scripts (r1_/r2_/r3_) on the same cache: all eight reads
+   (the three full-game rules at DraftKings alone and at the best deciding
+   book, the two period rules at the best book) matched bet for bet, game,
+   side, number, price and book, with no tie broken differently.
+3. **New.** In `shipping.md` and `porting-traps.md`:
+   - **The research cache moves under the build.** The cache had gained a
+     game since the research read it (2026-11-13), and that game's full-game
+     "close" was a stale board (the purchase's quotes end at 05:45 UTC that
+     day). Replay on the research's own data state (`RESEARCH_LAST_DATE`) and
+     report later games apart; never compare across the two.
+   - **Two blind rules on one market can bet opposite sides of one game.**
+     The home moneyline at -200 or longer and the favourite at -500 or
+     shorter met on 6 games (the away favourite's game is the home dog's).
+     The brief said they could not conflict; the replay measured that they
+     do. Run every new model's bets through the conflict rule in the build
+     and report what it costs (here -1.00 and -0.69 units).
+   - **A blind rule's probability**: the market's no-vig chance plus the
+     rule's walk-forward uplift (the nba_q1_trend_ml shape), with the EV
+     floor and edge cut set just under the smallest replayed EV and edge,
+     printed by the build, so no gate removes a research bet. A decision
+     fetch that also carries the full game: the hourly refresh window does
+     not reach tip minus 10 for an afternoon-ET league.
+   - **A new period market needs its settlement arm, its period-score route
+     and its closing-line rule** (`h2h_h1` had no arm at all, `totals_q1` was
+     in no totals arm, and every non-NCAAB period read `nba_period_scores`):
+     check `tracking/paper_tracker` before shipping any period market in a new
+     sport.
+4. **Corrected.** `shipping.md`'s "the price floor (default -200)": a model
+   that lays shorter than -200 by design (the big favourites, to -4000) pins
+   its own floor at the research's shortest price and says so. A test fixture
+   that draws with `rnd.choice(PROTECTED_SOURCES)` changes shape with every
+   new protected source (`tests/test_prune_bounded.py` lost its tie groups
+   for seed 11); its source now draws from its own stream.
+5. **The framework.** No step changed. Step 7's "the card replays the research
+   bet for bet" held again: it is what showed the six conflicting games.
+
+## 2026-11-14 — UFC props graded on BestFightOdds' per-book history
+
+1. **Scope.** mike asked why the markets beside the fight winner were not
+   tested. Method of victory, goes the distance, round betting and inside
+   the distance had been parked for want of a price; #1304 found the route
+   (BestFightOdds per-book pages). This entry is the crawl and the grade
+   (`docs/ufc_market_audit.md` §5f, `docs/sports/ufc.md` grid).
+2. **Tried.** 328 card pages stored (563,286 prices, five US books a pick
+   may name plus three others, 2021-06 to 2026-11). Blind by market, side,
+   book, year and favourite/underdog. Three mechanisms per market, fitted
+   walk-forward by year: a book straying from the other four's power no-vig
+   consensus; the anchored model (the consensus as offset, a free slope and
+   per-outcome intercepts, ridge fighter inputs) with the market merely
+   recalibrated as its control; method and round prices made coherent with
+   the fight-winner price. Kill tests: cut and penalty neighbourhoods,
+   early/late, side, price band, book, a 50-run placebo, DQ graded both
+   ways, and each lead's bets re-graded at the price its history showed an
+   hour and a day before the fight. Nothing clears. One lead (goes the
+   distance, anchored) was +10.0% on 791 at the last recorded price and is
+   +6.8% [-0.9, +14.4] on 745 at the price an hour before, with 2026 losing
+   (-3.6%): to the frontier. It loses at DraftKings, the only live prop
+   board read.
+3. **New.**
+   - Kill test (`kill-tests.md`, "Is the data right?"): a last recorded
+     price is not a price at a time; re-grade the picked bets on the
+     site's own price history.
+   - Price route (`market-grid.md` route 4): how to crawl a comparison site
+     cheaply, pages first, histories only for what a test points at, and
+     the template ingestor.
+   - Method notes (`methods.md` §1): on a many-outcome market the anchor
+     needs a free slope on the market's logit and one intercept per outcome
+     type; a two-way market is fitted once per pair (fitted on both sides,
+     the inputs cancel, which made the first run's anchored rows equal the
+     price rows exactly).
+   - Trap: the comparison site splits one fight into two when books spell a
+     fighter differently; fold both halves before grading, or every prop is
+     counted twice.
+4. **Corrected.** Was "BestFightOdds' per-book prop pages as a price route,
+   to try" on the frontier, now run, with the goes-the-distance lead in its
+   place (`methods.md`). A lead that passed every kill test at the page's
+   last recorded price (+10.0%, a plateau, 0 of 50 placebos) fell from
+   +8.4% to +6.8% on the same 745 bets at the price an hour before, and on
+   those bets the cut neighbourhood is a hump at either price (the plateau
+   rested on fights with no start time): the page's price is longer than the hour-before price on
+   25% of bets and shorter on 5%. Was "DraftKings and BetMGM are missing from the
+   November 2026 pages", now measured: DraftKings' prop prices thin out on
+   the site from 2023 and are absent in 2026, BetMGM's nearly so.
+5. **The framework.** Nothing in `SKILL.md` was wrong for this pass; step 1
+   (no market parks for want of a price until every route has a result)
+   is what sent these markets here. One gap, written into route 4 rather
+   than `SKILL.md`: a comparison site's prices need dating before a rule
+   graded on them is believed.
+
+## 2026-11-13 — EuroLeague halftime spread shipped: `euroleague_live_spread_ht`
+
+1. **Scope.** mike, 2026-11-13: "yes" to shipping the halftime spread lead
+   (the women's halftime method with Pinnacle's close as the pre-game number,
+   cut 0.05) knowing it missed the false-discovery correction and had a
+   negative 2023-24. Step 7 for an in-play model in a new sport.
+2. **Tried.** The replay on the loop's own decision code against the
+   research's own code on the same cache: 364 identical bets, +45.34 units,
+   every cut matching. The live inputs: EuroLeague's free live API for the
+   break and the half-time score, stored Pinnacle closes for the pre-game
+   number, the Odds API live endpoint at the ten history books for the read;
+   DraftKings' own board checked and not usable yet.
+3. **New.** Two traps in `porting-traps.md`: the next period's lineups are
+   logged during the break (EuroLeague's third-quarter substitutions sit
+   before its 'BP'), so "the next quarter is not empty" is not "it has begun";
+   and a research stake is not the posted stake (replay on the research's to
+   match bet for bet, report the posted one beside it). A check for any new
+   in-play league: DraftKings lists a league in its navigation only while it
+   has offers, so its league id is read on a day with a posted round (none
+   listed for EuroLeague in Ohio, New Jersey or Massachusetts 89 hours before
+   a game).
+4. **Corrected.** `shipping.md` said every new model goes into the CLV market
+   `CASE`. The closing-line recompute filters `p.is_live IS NOT TRUE`
+   (`data/migrations/clv_standard_v2_2026_10_14.sql`), and none of the five
+   in-play models since 2026-11-04 is in it, so an in-play model is not added
+   there; the line now says so. `shipping.md` also said every new table goes in
+   `WORKER_ONLY_TABLES`; a table a migration creates cannot
+   (`tests/test_anon_readable.py` requires a Python create site for every name
+   there), so the migration locks it down itself, as every in-play ledger does.
+5. **The framework.** Nothing in `SKILL.md` changed.
+
+## 2026-11-13 — Tennis (ATP and WTA), groundwork, settlement and the purchase
+
+1. **Scope.** mike, 2026-11-13: *"Use the model building skill to build
+   professional tennis models"*, then *"mens and womans should be different
+   model groups / discord channels. But not just major tournaments, all pro
+   tennis matches"*. Two new sports: `ATP` (men's singles at every level) and
+   `WTA` (women's). Steps 0 to 2b, the settlement rules,
+   a rating model and the purchase plan; no grid row has a priced result yet
+   (`docs/sports/tennis.md`).
+2. **Tried.** Measured the feed (53 per-tournament keys, history from the 2020
+   US Open, books by year, markets one at a time on a live match), ESPN's free
+   scoreboard, a results archive with serve and return counts (393,131 rows
+   stored), and DraftKings' own tennis rules. A coverage sweep found 129
+   windows for 337 credits; a one-day trial of the purchase cost 1,500 credits
+   for 25 hourly snapshots of both book groups. An Elo trails the market as
+   published (Brier 0.215-0.219 on men's tour matches, 2023-2025). Measured the
+   retirement rate the DraftKings rule turns into an option (1.13% a side).
+   Scout: no published method beats Pinnacle's close on the match winner; no
+   test of total games or games spreads exists at all.
+3. **New.** `market-grid.md`: tennis in the one-against-one shape, and finding
+   a part-year key's windows with three 1-credit event lists. `porting-traps.md`:
+   settlement differs by book (a retirement), a source's format field can be
+   wrong, a per-tournament key can hold two windows a year, a listed start
+   that moves and once came after the real start. `methods.md` §7: a
+   settlement rule that hands the bettor an option, with its measured size;
+   three tennis lines in the frontier. `scouting.md`: seven routes (three
+   refused). A league whose lower levels the feed does not sell: Pinnacle's
+   public site prices every level (collected from day one), and a results
+   site's one price per match measured to be an average near the close (a
+   baseline, never a decidable price).
+4. **Corrected.** Nothing in the skill was contradicted by a measurement.
+   One claim of this build was corrected before it was written down: "the
+   retiring player is almost always the one losing" was too strong (the
+   archive lists the advancing player as winner by definition; the retiring
+   player was ahead on completed sets in 9 of 109 men's retirements of 2025).
+5. **The framework.** Step 2's order held. One addition worth promoting if it
+   recurs: when a price route refuses (a site block), the copy of its data
+   elsewhere is not a route; the permission check refused it, and the feed's
+   own history was the price source that matched the live path anyway.
+
+## 2026-11-13 — UFC round totals, run to the end of the ladder
+
+1. **Scope.** mike asked why the markets beside the fight winner were not
+   tested, and whether the skill was followed. Round totals had been called
+   null without the anchored model on the bought history, without three
+   mechanisms of our own and without the stuck ladder. This entry is that
+   search (`docs/ufc_market_audit.md` §4).
+2. **Tried.** A Pinnacle-anchored finish model in three nested forms,
+   walk-forward by year, at DraftKings (the only book a pick may name with
+   totals in the history); blind sides by line and pull; DraftKings against
+   Pinnacle in the same pull; four mechanisms of our own (stale DraftKings
+   total after a moneyline move, women's and flyweight overs, five-round
+   overs, short-notice unders); every rung of the stuck ladder. Nothing
+   clears. One lead, the card-day over (+6.92% on 228, interval below zero,
+   2025 negative), fails the bar and goes to the frontier.
+3. **New.**
+   - Kill test (`kill-tests.md`, "Is the data right?"): check the no-vig
+     split before trusting closing value; on UFC totals the proportional
+     split charges the over about 2.5 points.
+   - Method note (`methods.md` §1): an anchored model needs a free intercept
+     per line; fighter inputs on a UFC total failed the donor placebo.
+   - Frontier (`methods.md`): the card-day over, graded forward only.
+4. **Corrected.** Was "DraftKings' totals in the bought history from 2025",
+   now "from late 2023, 1,072 fights", because the history was counted by
+   year (`docs/ufc_market_audit.md` §4, `docs/sports/ufc.md`). Was "22 bets
+   of DraftKings against Pinnacle in one pull", now 8,090 comparable pulls,
+   43 with DraftKings above Pinnacle's fair price.
+5. **The framework.** Two failures, one a skipped rule, one a hole in the
+   skill. Both changed in `SKILL.md` and `references/market-grid.md`.
+   - **Skipped.** The first UFC entry called round totals null after one
+     model, before the three mechanisms and the ladder. `SKILL.md` already
+     required both, so the rule was there and was skipped. Now the rule says
+     it binds each market, and a null row names its three mechanisms and
+     the ladder's rungs, so a skipped step shows in the text (step 5).
+   - **A hole.** Step 1 let a row park as "no price source", and
+     the price routes never named a book's own board or a comparison
+     site's per-book history. Parking is not null, so nothing sent the
+     row up the ladder. UFC parked method of victory, goes the distance and
+     round betting that way, because the odds feed refused their keys
+     (HTTP 422). DraftKings' own board priced all three on 2026-11-14,
+     and BestFightOdds holds the US books' prices for them from mid-2021
+     (#1304). **The same park stood in two more leagues**: EuroLeague
+     player props, and women's college basketball's first halves, quarters,
+     team totals, alternates and props. Three leagues meets the promotion
+     bar, so it is now a rule. In step 1, "no price" is never a reason to
+     park until every route has a written result. The route list gains the
+     book's board and the comparison sites (market-grid route 4). The
+     ladder now runs before a market parks for want of a price. The two
+     other leagues' rows are reopened as to-dos.
+
 ## 2026-11-13 — UFC, a rebuild from zero
 
 1. **Scope.** mike: *"Use the model building skill to build models for UFC.

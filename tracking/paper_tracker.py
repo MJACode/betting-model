@@ -30,6 +30,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
+from types import SimpleNamespace
 import sys
 
 import requests
@@ -1312,6 +1313,101 @@ def _settle_ufc_picks(
     return wins, losses, pushes, no_actions, total_flat, total_kelly
 
 
+# ── Tennis settlement ─────────────────────────────────────────────────────────
+
+_TENNIS_MODELS = ("atp_moneyline_shop", "wta_moneyline_shop")
+_TENNIS_DONE = ("STATUS_FINAL", "STATUS_RETIRED", "STATUS_WALKOVER", "STATUS_DEFAULTED",
+                "STATUS_CANCELED")
+
+
+def _settle_tennis_picks(
+    conn: DBConnection,
+    game_date: str,
+    settled_at: str,
+) -> tuple[int, int, int, int, float, float]:
+    """Settle unsettled tennis match-winner BETs whose ESPN match is over, for
+    game_date and any earlier date.
+
+    The card stores the ESPN match it linked on its decision row
+    (tennis_moneyline_decisions.comp_id, home_is_p1), so settlement reads that
+    match and nothing else. The grade is the deciding book's own rule
+    (models/tennis_common.grade_moneyline): a walkover, or a retirement
+    before the first set is complete, is void everywhere; after it,
+    DraftKings voids a bet on the retiring player and pays the one who
+    advances, FanDuel and BetMGM grade the retiring player a loss, and
+    Caesars and the books whose rule we have not read void every bet. ESPN's
+    "defaulted" (a disqualification) is graded as a retirement, as
+    DraftKings' rule reads ("the retiring or disqualified player"). A
+    cancelled match is NO_ACTION. Returns (wins, losses, pushes, no_actions,
+    total_flat, total_kelly)."""
+    from models import tennis_common as tc
+    from scripts.tennis_market_study import espn_result
+
+    if not conn.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' "
+                        "AND table_name = 'tennis_moneyline_decisions'").fetchone():
+        return 0, 0, 0, 0, 0.0, 0.0
+    picks = conn.execute("""
+        SELECT p.pick_id, p.pick_side, p.pick_label, p.decision_book,
+               COALESCE(p.decision_odds, p.dk_odds), p.recommended_bet, d.home_is_p1,
+               e.status, e.best_of, e.p1_winner, e.p2_winner, e.p1_games, e.p2_games,
+               p.game_id
+        FROM picks p
+        JOIN tennis_moneyline_decisions d ON d.game_id = p.game_id
+        JOIN tennis_espn_matches e ON e.comp_id = d.comp_id
+        WHERE p.game_date <= %s
+          AND p.result IS NULL
+          AND p.signal_type = 'BET'
+          AND p.model_id = ANY(%s)
+          AND e.status = ANY(%s)
+    """, (game_date, list(_TENNIS_MODELS), list(_TENNIS_DONE))).fetchall()
+    wins = losses = pushes = no_actions = 0
+    total_flat = total_kelly = 0.0
+    for (pick_id, side, label, book, odds, rec_bet, home_is_p1, status, best_of,
+         p1w, p2w, g1, g2, game_id) in picks:
+        if status == "STATUS_CANCELED":
+            res = None
+        else:
+            row = SimpleNamespace(status="STATUS_RETIRED" if status == "STATUS_DEFAULTED" else status,
+                                  best_of=best_of, p1_winner=p1w, p2_winner=p2w,
+                                  p1_games=g1, p2_games=g2)
+            res = espn_result(row, a_is_p1=bool(home_is_p1))
+            if res is None:
+                logger.warning(f"  tennis: {label}: ESPN {status} but no readable score; waits")
+                continue
+        grade = tc.VOID if res is None else tc.grade_moneyline(res, "a" if side == "home" else "b", book)
+        profit_flat = profit_kelly = 0.0
+        decimal = american_to_decimal(odds)
+        if grade == tc.WIN:
+            result = "WIN"
+            profit_flat = round(100.0 * (decimal - 1), 2)
+            profit_kelly = round((rec_bet or 0.0) * (decimal - 1), 2)
+            wins += 1
+        elif grade == tc.LOSS:
+            result = "LOSS"
+            profit_flat = -100.0
+            profit_kelly = round(-(rec_bet or 0.0), 2)
+            losses += 1
+        else:
+            result = "NO_ACTION"
+            no_actions += 1
+        total_flat += profit_flat
+        total_kelly += profit_kelly
+        conn.execute("""
+            UPDATE picks SET result = %s, profit_flat = %s, profit_kelly = %s, settled_at = %s
+            WHERE pick_id = %s
+        """, (result, profit_flat, profit_kelly, settled_at, pick_id))
+        if res is not None and res.status != "walkover":
+            sets_a = sum(1 for a, b in zip(res.a_games, res.b_games) if a > b)
+            sets_b = sum(1 for a, b in zip(res.a_games, res.b_games) if b > a)
+            conn.execute("""
+                UPDATE games SET home_score = %s, away_score = %s, home_win = %s,
+                                 updated_at = NOW()::TEXT
+                WHERE game_id = %s AND home_score IS NULL
+            """, (sets_a, sets_b, 1 if res.a_advanced else 0, game_id))
+        logger.info(f"  tennis: {label} at {book}: {result} (ESPN {status})")
+    return wins, losses, pushes, no_actions, total_flat, total_kelly
+
+
 # ── Golf settlement ───────────────────────────────────────────────────────────
 
 _GOLF_SETTLE_WINDOW_DAYS = 14
@@ -1477,9 +1573,20 @@ _SIDE_PRICE_COL = {
 _NCAAB_HALF_MARKETS = ("totals_h1", "spreads_h1")
 
 
+# The EuroLeague period markets the pre-game rules bet. Their live feed
+# (data/ingestors/euroleague_period_odds.py) files every pull 'open', as the
+# NCAAB first-half feed does, and the rules decide on its tip-minus-10 pull; the
+# close is its tip-minus-2 pull, so a close must be a pull made after the pick.
+_EUROLEAGUE_PERIOD_MARKETS = ("h2h_h1", "totals_q1")
+
+
 def _ncaab_first_half_market(game_id: str, market: str) -> bool:
-    """NCAAB first-half total or spread. The live feed files every pull 'open'."""
-    return str(game_id).split("_", 1)[0] == "NCAAB" and market in _NCAAB_HALF_MARKETS
+    """A period market whose close must be pulled after the pick: an NCAAB
+    first-half total or spread, or a EuroLeague first-half moneyline or
+    first-quarter total. Both live feeds file every pull 'open'."""
+    prefix = str(game_id).split("_", 1)[0]
+    return ((prefix == "NCAAB" and market in _NCAAB_HALF_MARKETS)
+            or (prefix == "EUROLEAGUE" and market in _EUROLEAGUE_PERIOD_MARKETS))
 
 
 def _close_rows_only(game_id: str, market: str) -> bool:
@@ -2490,7 +2597,10 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "away":
             won = (home_win == 0)
 
-    elif market == "h2h_q1":
+    elif market in ("h2h_q1", "h2h_h1"):
+        # h2h_h1: the EuroLeague first half's moneyline (models/euroleague_pregame.py): the caller passes the FIRST
+        # HALF's points (first_half_points, euroleague_period_scores), and a level half is a PUSH, as the research
+        # graded it (docs/euroleague_1h1q_round1.md: the two-way price de-vigged equals the three-way draw-no-bet).
         # The first quarter's moneyline (models/nba_q1_trend_ml.py): the caller passes the FIRST QUARTER's points as
         # the two scores (_first_quarter_points). A level quarter is a PUSH: a two-way first-quarter moneyline voids
         # a tie at every book, and the graded record counts it so (46-35-6). Never NO_ACTION, which the full-game
@@ -2514,10 +2624,12 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "draw":
             won = (went_to_ot == 1)
 
-    elif market in ("totals", "totals_1st_5_innings", "totals_h1"):
+    elif market in ("totals", "totals_1st_5_innings", "totals_h1", "totals_q1"):
         # totals_h1: the caller passes the FIRST HALF's points as the two scores
         # (_first_half_points), as it passes the first five innings' for an F5
-        # market. Never reach this with the full-game final.
+        # market. Never reach this with the full-game final. totals_q1: the
+        # FIRST QUARTER's (_first_quarter_points; the EuroLeague first-quarter
+        # total, models/euroleague_pregame.py).
         if total_line is None:
             return "NO_ACTION", 0.0, 0.0
         if total == total_line:
@@ -2643,11 +2755,28 @@ _RULE_MODEL_MARKETS = {
     # NULL. The pick sits on the odds feed's row of the game, which takes its
     # final from CFBD's row (cfbd_ingestor.mirror_scores_to_alias_rows).
     "ncaaf_moneyline_market": "h2h",
+    # The four EuroLeague pre-game rules (models/euroleague_pregame.py,
+    # 2026-11-14, mike). The full-game moneyline settles on games.home_win
+    # (overtime included, as books settle it), scored_line NULL; the spread on
+    # the final margin against scored_line, the HOME number (section 4); the
+    # first-half moneyline on quarters 1-2 of euroleague_period_scores
+    # (first_half_points), a level half a PUSH; the first-quarter total on
+    # quarter 1 (_first_quarter_points). Overtime never counts in a period.
+    # NEVER "h2h" / "totals" for the period two: those grade the full game.
+    "euroleague_home_ml": "h2h",
+    "euroleague_home_dog_spread": "spreads",
+    "euroleague_h1_dog_ml": "h2h_h1",
+    "euroleague_q1_club_share_total": "totals_q1",
     # UFC fight winner a week out (models/ufc_open_moneyline.py, 2026-11-13,
     # mike). Settled by _settle_ufc_picks like every ufc_* pick: home_win,
     # a draw or no contest a push. Named here so its market is never the
     # default's guess.
     "ufc_open_moneyline": "h2h",
+    # Tennis match winners (models/tennis_moneyline_shop.py, 2026-11-14,
+    # mike). Settled by _settle_tennis_picks: the ESPN match on the card's
+    # decision row, at the deciding book's own retirement rule.
+    "atp_moneyline_shop": "h2h",
+    "wta_moneyline_shop": "h2h",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).
@@ -2762,11 +2891,40 @@ def _first_half_points(conn: DBConnection, game_id: str,
     return points
 
 
+def _euroleague_period_points(conn: DBConnection, game_id: str, home_score, away_score,
+                              periods: tuple[int, ...]) -> tuple[int, int] | None:
+    """(home, away) points over `periods` of a EuroLeague game (euroleague_period_scores: quarters 1-4, each
+    overtime 5, 6 ...), or None when the game's periods cannot be trusted: numbered 1..n with n >= 4, every value
+    present, adding up to the stored final. Then the pick stays PENDING: no result, never the full-game score. The
+    first half is quarters 1 and 2 and the first quarter is quarter 1; overtime never counts in either
+    (models/euroleague_pregame.py; the research's settlement, scripts/euroleague_research/r1_lib.py)."""
+    rows = conn.execute(
+        "SELECT period, home_points, away_points FROM euroleague_period_scores WHERE game_id = %s",
+        (game_id,)).fetchall()
+    if not rows:
+        return None
+    per = {int(p): (h, a) for p, h, a in rows}
+    n = max(per)
+    if (n < 4 or set(per) != set(range(1, n + 1)) or len(rows) != n
+            or any(v is None for pts in per.values() for v in pts)
+            or home_score is None or away_score is None
+            or sum(float(v[0]) for v in per.values()) != float(home_score)
+            or sum(float(v[1]) for v in per.values()) != float(away_score)):
+        logger.warning(f"{game_id}: its EuroLeague period scores do not add up to the final "
+                       f"({away_score}-{home_score}) or a period is missing: "
+                       f"{sorted(tuple(r) for r in rows)}. Its period picks stay pending.")
+        return None
+    return (int(sum(per[p][0] for p in periods)), int(sum(per[p][1] for p in periods)))
+
+
 def _first_quarter_points(conn: DBConnection, game_id: str,
                           home_score, away_score) -> tuple[int, int] | None:
     """(home, away) points in an NBA first quarter, or None when the game has no period rows this settlement can
     trust (data/ingestors/nba_period_scores.first_quarter_from_periods: the first search's check, the one the graded
-    bets were settled on). Then the pick stays PENDING: no result, never the full-game score."""
+    bets were settled on). Then the pick stays PENDING: no result, never the full-game score. A EuroLeague game's
+    is quarter 1 of euroleague_period_scores (_euroleague_period_points)."""
+    if str(game_id).startswith("EUROLEAGUE_"):
+        return _euroleague_period_points(conn, game_id, home_score, away_score, (1,))
     from data.ingestors.nba_period_scores import first_quarter_from_periods
     rows = conn.execute(
         "SELECT period, home_points, away_points FROM nba_period_scores WHERE game_id = %s",
@@ -2813,10 +2971,13 @@ def _ncaab_first_half_points(conn: DBConnection, game_id: str,
 def first_half_points(conn: DBConnection, game_id: str,
                       home_score, away_score) -> tuple[int, int] | None:
     """A first half's (home, away) points for any sport that has one stored:
-    an NCAAB game's period 1 (ncaab_period_scores, two halves), an NBA game's
-    Q1 + Q2 (nba_period_scores). None keeps the pick pending."""
+    an NCAAB game's period 1 (ncaab_period_scores, two halves), a EuroLeague
+    game's quarters 1 and 2 (euroleague_period_scores), an NBA game's Q1 + Q2
+    (nba_period_scores). None keeps the pick pending."""
     if str(game_id).startswith("NCAAB_"):
         return _ncaab_first_half_points(conn, game_id, home_score, away_score)
+    if str(game_id).startswith("EUROLEAGUE_"):
+        return _euroleague_period_points(conn, game_id, home_score, away_score, (1, 2))
     return _first_half_points(conn, game_id, home_score, away_score)
 
 
@@ -3106,13 +3267,13 @@ def _settle_game_picks(
             settle_home = home_score_f5
             settle_away = away_score_f5
             settle_home_win = int(home_score_f5 > away_score_f5) if home_score_f5 != away_score_f5 else None
-        elif market in ("totals_h1", "spreads_h1"):
+        elif market in ("totals_h1", "spreads_h1", "h2h_h1"):
             first_half = first_half_points(conn, game_id, home_score, away_score)
             if first_half is None:
                 continue  # stays pending: no period rows, no result
             settle_home, settle_away = first_half
             settle_home_win = None
-        elif market in ("spreads_q1", "h2h_q1"):
+        elif market in ("spreads_q1", "h2h_q1", "totals_q1"):
             first_quarter = _first_quarter_points(conn, game_id, home_score, away_score)
             if first_quarter is None:
                 continue  # stays pending: no period rows, no result
@@ -3346,6 +3507,17 @@ def settle_picks(game_date: str = None) -> dict:
         no_actions += u_no_actions
         total_profit_flat  += u_flat
         total_profit_kelly += u_kelly
+
+        # ── Tennis match winners (the ESPN match on the decision row) ─────
+        t_wins, t_losses, t_pushes, t_no_actions, t_flat, t_kelly = (
+            _settle_tennis_picks(conn, game_date, settled_at)
+        )
+        wins       += t_wins
+        losses     += t_losses
+        pushes     += t_pushes
+        no_actions += t_no_actions
+        total_profit_flat  += t_flat
+        total_profit_kelly += t_kelly
 
         # ── Golf picks (outright / top-N / make-cut / matchup) ────────────
         # Trailing window — DataGolf results post a day or two after Sunday.
