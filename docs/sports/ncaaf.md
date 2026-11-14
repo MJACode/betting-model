@@ -100,7 +100,7 @@ upper limit on the price.
 9 a.m. ET in winter and 10 a.m. ET in summer time. The card runs hourly at
 five past (UTC) and only the run in the 14:00 hour decides. The decision goes
 into `ncaaf_moneyline_decisions` with every book's moneyline and spread and
-its flags, bet or not, and the game is never decided again (CLAUDE.md §1c). A
+its flags, bet or not, and the game is never decided again (a timing choice, not the pick rule: mike, 2026-11-14, CLAUDE.md §1c). A
 game kicking off less than five minutes after 14:00 UTC, or already under way,
 is not bet. A missed 14:00 is recorded as `missed` with no bet and fails the
 run; every due game with no deciding book's moneyline in the hour, an artifact

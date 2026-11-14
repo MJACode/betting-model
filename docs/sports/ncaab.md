@@ -92,8 +92,8 @@ below). About half of DraftKings' first totals change by the next half-hourly
 snapshot (median 31 minutes), 71% within 2 hours.
 
 The decision, bet or not, goes into `ncaab_total_decisions` with the quote,
-the cutoff and the reason, and the game is never decided again (CLAUDE.md
-§1c). `check_hour` holds the run's instant, so `decided_at` minus `quote_at` is
+the cutoff and the reason, and the game is never decided again
+(a timing choice, not the pick rule: mike, 2026-11-14, CLAUDE.md §1c). `check_hour` holds the run's instant, so `decided_at` minus `quote_at` is
 the lag from the first post. A bet goes into `picks` as BET, and a game priced
 below the cut as NONE (no stake; see "Every scored game is a row" below). Games decided under
 the 22:00 / 15:00 UTC rule before 2026-11-03 stay decided.
@@ -659,7 +659,7 @@ spread. It bets the single best side of the game when its edge is above
 spread model (above): the card runs hourly at five past (UTC), only the run in
 the 15:00 hour decides, the decision goes into `ncaab_moneyline_decisions`
 with every book's moneyline, its own spread and its flags, and the game is
-never decided again (CLAUDE.md §1c). A missed 15:00 is recorded as `missed`
+never decided again (a timing choice, not the pick rule: mike, 2026-11-14, CLAUDE.md §1c). A missed 15:00 is recorded as `missed`
 with no bet and fails the run; every due game with no moneyline at all, an
 artifact for another season, and a best side at a book
 `config.BEST_LINE_BOOKMAKERS` no longer lists fail it too. It is its own job,
@@ -1006,7 +1006,7 @@ still decides. With none by 5 minutes out, the game is not decided: the
 ten-minute snapshot. The card then fails its run, and the failure alerter names
 the game once it tips (`undecided:ncaab_first_half_spread`). Each decision, bet
 or not, goes into `ncaab_first_half_spread_decisions` with every book's priced
-quote, and the game is never decided again (CLAUDE.md §1c).
+quote, and the game is never decided again (a timing choice, not the pick rule: mike, 2026-11-14, CLAUDE.md §1c).
 
 **The evidence** (the research's `grid.csv`, every game, quotes bought ten
 minutes before tip, graded at their own prices to win one unit; 95% interval

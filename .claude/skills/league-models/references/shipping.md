@@ -40,9 +40,11 @@ A new writer that skips one of these bets something it should not:
   feature drops the row, never becomes 0.0.
 - **`tracking/pick_integrity.pick_problems`**: the label and the fields agree.
 - **The lock** (`scripts.nfl_wind_publisher._lock_model` for cards; the
-  first-signal live lock for in-play): a game is decided once and the row is
-  never overwritten. Write NONE rows for every scored game so the whole
-  universe can be graded.
+  first-signal live lock for in-play): a BET row is never overwritten or
+  deleted. The lock is on the BET, not the game: when the card checks, and how
+  often, is the model's own measured timing (`porting-traps.md`, "When the
+  model decides"; mike, 2026-11-14). Write NONE rows for every scored game so
+  the whole universe can be graded.
 - **Side conflicts**: no two picks on one game that cannot both win; in college
   basketball, `models/cbb_pairs.hold_back`.
 - **Starter gates** where the sport has one (`models/nhl_goalie_gate.py`).

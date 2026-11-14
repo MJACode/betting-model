@@ -490,6 +490,12 @@ route; tests that fail without the change; the league doc and the session log.
 **The card replays the research bet for bet before it ships.** That replay is
 what found every copy error in the last new league.
 
+**When the card decides is measured, not assumed** (mike, 2026-11-14). Fixed
+hours, "every check until it bets" and "the last read before the start" are
+all candidates, replayed on the card's own path at the live check rate and
+chosen on out-of-sample units. The pick rule locks a BET, never a game that
+did not bet (`references/porting-traps.md`, "When the model decides").
+
 The commit carries `Updated-By:`. The reply that ships it states the price
 range, the bar it cleared (or plainly that it did not), the expected volume,
 and the go-live gate standing as a fact. The branch waits for mike's "merge";

@@ -299,9 +299,10 @@ that was given, and **must never delete or overwrite the row**. The published
 record (Discord, X, `results_snapshots`, the two app views) counts a settled
 BET only while Discord still holds its lock (`v_discord_published`). An
 unposted row stays in `picks`. Every model locks
-its pick — game-level at the first scoring run, props at the first signal on a
-confirmed lineup, live at the first BET per lane, NFL wind/opener by
-construction. **Timing is data, not metadata:** `created_at` is when the number
+its pick at its first BET. **The lock is on a BET, not a game:** a game that did
+not bet is not frozen. When, and how often, a model decides is its own
+parameter, chosen by out-of-sample expected units replayed at the live check
+rate (mike, 2026-11-14; the league-models skill's porting traps). **Timing is data, not metadata:** `created_at` is when the number
 was available and is part of the pick's meaning.
 
 - **A SETTLED PICK LEAVES THE RECORD ONLY TWO WAYS, AND A PAUSE IS NEITHER.**
@@ -563,10 +564,8 @@ What stays here is what has to be known BEFORE deciding which file to open
   claim to make is "byte-identical to master, 0 in touched files".
 - **Read source with an explicit encoding.** `read_text()` with no encoding uses
   the PLATFORM default — cp1252 on Windows, where this repo actually runs — and
-  this repo's source is full of box-drawing characters. One such read raised
-  `UnicodeDecodeError` at COLLECTION time and aborted the entire suite, leaving
-  the only quality gate unrunnable on the only machine that runs it. Keep
-  `encoding="utf-8"` on every source read.
+  one such read aborted the whole suite at collection (`docs/rules_evidence.md`).
+  Keep `encoding="utf-8"` on every source read.
 - **Check whether deps actually install before hand-waving.** PyPI is often
   reachable from these sandboxes — a real suite run beats "run it on your
   machine". Equally, the sandbox egress limits are not the system limits (§1b).
