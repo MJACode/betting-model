@@ -413,18 +413,27 @@ check(
 // read as selected, and the bar sat there forever advertising them.
 
 check('a loaded, non-empty board can prune',
-  canPruneSlip({ slipReady: true, loading: false, error: null, boardSize: 12 }));
+  canPruneSlip({ slipReady: true, loading: false, error: null, partial: false, onToday: true, boardSize: 12 }));
 
 // Each guard alone must block a prune — every one of these looks exactly like
 // "all your selections are gone" from the resolver's point of view.
 check('never prune while the board is still loading',
-  !canPruneSlip({ slipReady: true, loading: true, error: null, boardSize: 12 }));
+  !canPruneSlip({ slipReady: true, loading: true, error: null, partial: false, onToday: true, boardSize: 12 }));
 check('never prune on a failed fetch',
-  !canPruneSlip({ slipReady: true, loading: false, error: 'network down', boardSize: 0 }));
+  !canPruneSlip({ slipReady: true, loading: false, error: 'network down', partial: false, onToday: true, boardSize: 0 }));
 check('never prune against an empty board',
-  !canPruneSlip({ slipReady: true, loading: false, error: null, boardSize: 0 }));
+  !canPruneSlip({ slipReady: true, loading: false, error: null, partial: false, onToday: true, boardSize: 0 }));
 check('never prune before the slip is read from storage',
-  !canPruneSlip({ slipReady: false, loading: false, error: null, boardSize: 12 }));
+  !canPruneSlip({ slipReady: false, loading: false, error: null, partial: false, onToday: true, boardSize: 12 }));
+// A read that finished with part of the board missing (this week's NFL card
+// failed) counts as loaded with no error, and the legs on the missing card
+// look exactly like legs that went away (design review, 2026-11-13).
+check('never prune while part of the board failed to load',
+  !canPruneSlip({ slipReady: true, loading: false, error: null, partial: true, onToday: true, boardSize: 12 }));
+// Just after midnight ET the board can still be yesterday's; today's legs are
+// not on it.
+check("never prune against a board that is not on today's date",
+  !canPruneSlip({ slipReady: true, loading: false, error: null, partial: false, onToday: false, boardSize: 12 }));
 
 // ── Bar visibility ─────────────────────────────────────────────────────────
 
@@ -446,7 +455,7 @@ const ghost = resolveSlipLegs(barPicks, ghostKeys);
 const ghostSummary = betslipSummary(ghost.legs, ghostKeys.length);
 check('3 ghost selections: all prunable, bar hidden',
   ghost.legs.length === 0 && ghost.missingKeys.length === 3 &&
-    canPruneSlip({ slipReady: true, loading: false, error: null, boardSize: barPicks.length }) &&
+    canPruneSlip({ slipReady: true, loading: false, error: null, partial: false, onToday: true, boardSize: barPicks.length }) &&
     !shouldShowBetslipBar(ghostSummary, false));
 
 // ...but a live selection alongside them survives the prune.

@@ -2,7 +2,7 @@
  * WHICH SPORTS HAVE AN IN-PLAY MODEL AT ALL.
  *
  * Mirror of the in-play models in the Python registry: `config.LIVE_MODELS`
- * (MLB, NBA, NCAAB, NCAABW and NCAAF) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
+ * (MLB, NBA, NCAAB, NCAABW, NCAAF and EUROLEAGUE) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
  * in `nfl/live_model/config.MODEL_IDS`). PINNED BY
  * tests/test_mobile_live_segment.py, which fails until this set equals those
  * two sources — the same mechanism lib/thresholds.ts uses, for the same reason:
@@ -18,21 +18,39 @@
  * ADD A SPORT HERE WHEN ITS IN-PLAY MODEL SHIPS — the test will tell you.
  */
 
+/**
+ * The sport's name inside a SENTENCE on screen. The chip and the Stats title
+ * button keep the code (every chip is a code, and it is the Discord channel's
+ * name); a title or a line of copy says "EuroLeague", the league's own
+ * spelling, so a title in capitals does not sit over a subtitle in mixed case
+ * (UX review, 2026-11-13). Every other code is its own name. Here, not in
+ * lib/loadState, because this file imports nothing: the tests run it on its own.
+ */
+const DISPLAY_SPORT: Record<string, string> = {
+  EUROLEAGUE: 'EuroLeague',
+};
+
+export function sportDisplayName(sport: string): string {
+  return DISPLAY_SPORT[sport] ?? sport;
+}
+
 /** Sports with at least one in-play model writing `is_live` picks. */
 // Ordered so the two college basketball codes close the sentence ("... NCAAB
 // and NCAABW"): side by side in the middle of a list they read as one word
-// typed twice (UX review, 2026-11-11).
-export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW']);
+// typed twice (UX review, 2026-11-11). EUROLEAGUE (2026-11-13) sits before them
+// for the same reason.
+export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NBA', 'NFL', 'NCAAF', 'EUROLEAGUE', 'NCAAB', 'NCAABW']);
 
 /** Does this sport have an in-play model at all? */
 export function hasLiveModel(sport: string): boolean {
   return LIVE_MODEL_SPORTS.has(sport);
 }
 
-/** "MLB, NBA, NFL, NCAAF, NCAAB and NCAABW" — for copy that names the sports
- *  with an in-play model. Pass `name` to say each sport another way: VoiceOver
- *  reads them through sportSpokenName, so it never spells "NCAAB" then "NCAABW". */
-export function liveModelSportsSentence(name: (sport: string) => string = (sport) => sport): string {
+/** "MLB, NBA, NFL, NCAAF, EuroLeague, NCAAB and NCAABW" — for copy that names
+ *  the sports with an in-play model, each by its display name. Pass `name` to
+ *  say each sport another way: VoiceOver reads them through sportSpokenName, so
+ *  it never spells "NCAAB" then "NCAABW". */
+export function liveModelSportsSentence(name: (sport: string) => string = sportDisplayName): string {
   const s = [...LIVE_MODEL_SPORTS].map(name);
   if (s.length <= 1) return s.join('');
   return `${s.slice(0, -1).join(', ')} and ${s[s.length - 1]}`;
@@ -74,6 +92,15 @@ export function liveEmptySubtitle(sport: string): string {
     return (
       'The NCAABW in-play model checks each game during its halftime break and bets it at most once, ' +
       'on the full-game total. ' +
+      LIVE_EMPTY_VALID
+    );
+  }
+  if (sport === 'EUROLEAGUE') {
+    // models/euroleague_live_loop.py: one decision a game, during the halftime
+    // break, on the full-game spread.
+    return (
+      'The EuroLeague in-play model checks each game during its halftime break and bets it at most once, ' +
+      'on the full-game spread. ' +
       LIVE_EMPTY_VALID
     );
   }

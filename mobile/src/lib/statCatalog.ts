@@ -197,9 +197,16 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   // Women's college basketball, the same one group as the men's board.
   NCAABW: ['NCAABW'],
   UFC: ['UFC'],
+  // No tennis player stats are in the app: the Stats tab shows its empty
+  // state for ATP and WTA, and says the picks are on the Picks tab.
+  ATP: [],
+  WTA: [],
   NHL: ['NHL'],
   // Golf has no per-player leaderboard (v1).
   GOLF: [],
+  // EuroLeague (2026-11-13) joined for its in-play model; no player stats are
+  // stored for the app, so its Players board says it has no leaderboard.
+  EUROLEAGUE: [],
 };
 
 export function statsForSport(sport: Sport): StatDef[] {

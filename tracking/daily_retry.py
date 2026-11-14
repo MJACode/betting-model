@@ -89,9 +89,12 @@ MAX_NON_ABORTED_FAILURES = 2
 MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY = 12
 
 # Automatic catch-up does not start a daily at or after this ET clock.
-# A crash loop must not run overnight. The 6:00am cron is not this path,
-# and neither is the manual worker_jobs daily_pipeline job. 22:00 still
-# covers a fix that deploys in the evening of the day the daily was killed.
+# A crash loop must not run overnight. The 6:00am cron is not this path.
+# A fresh worker_jobs daily_pipeline row is the manual kick and is not
+# this path either. A row that deploy left `running` is: reclaim uses
+# decide_daily_retry, so this cutoff, the deploy-kill cap, and
+# RUN_DAILY_RETRY apply to that reclaim. 22:00 still covers a fix that
+# deploys in the evening of the day the daily was killed.
 DAILY_RETRY_CUTOFF_HOUR = 22
 DAILY_RETRY_CUTOFF_MINUTE = 0
 
@@ -223,11 +226,27 @@ def today_counts(runs: list[DailyRun]) -> tuple[int, int]:
     return kills, failures
 
 
+def _started_at(run: DailyRun) -> datetime:
+    """Sort key. A missing start sorts first so it cannot hide a later row."""
+    started = run.started_at
+    if started is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if started.tzinfo is None:
+        return started.replace(tzinfo=timezone.utc)
+    return started
+
+
 def classify_relaunch(runs: list[DailyRun]) -> str:
-    """Why the next start would be a relaunch: missing, deploy-kill, or real-failure."""
+    """Why the next start would be a relaunch: missing, deploy-kill, or real-failure.
+
+    The latest ``started_at`` wins. Callers that pass the loader's rows
+    already have them in that order; a list that is not sorted still
+    classifies the latest start, not whichever row happens to be last.
+    """
     if not runs:
         return "missing"
-    if _deploy_killed(runs[-1]):
+    latest = max(runs, key=_started_at)
+    if _deploy_killed(latest):
         return "deploy-kill"
     return "real-failure"
 
@@ -311,7 +330,7 @@ def decide_daily_retry(
             f"no daily run ledgered for {today.isoformat()} after 6:00am ET",
         )
 
-    latest = todays[-1]
+    latest = max(todays, key=_started_at)
     if latest.finished_at is None:
         return Decision(
             "run",
@@ -323,6 +342,22 @@ def decide_daily_retry(
         f"today's daily did not complete MLB freshness steps "
         f"(failed_steps={failed})",
     )
+
+
+def daily_pipeline_reclaim_decision(conn, now: datetime) -> Decision:
+    """Whether a deploy-killed manual ``daily_pipeline`` row may be queued again.
+
+    A fresh ``pending`` row is the manual kick and does not come through
+    here, so it can still run after the catch-up has stopped. A row left
+    ``running`` because the worker was replaced is the same start the boot
+    catch-up would consider. The kill switch, the deploy-kill cap, the
+    22:00 ET cutoff, and every other ``decide_daily_retry`` skip apply.
+    An unreadable ledger skips: reclaim must not start a full daily blind.
+    """
+    runs = load_today_dailies(conn, now)
+    if runs is None:
+        return Decision("skip", "ledger unreadable — not reclaiming a daily")
+    return decide_daily_retry(now=now, runs=runs, in_process_running=False)
 
 
 def load_today_dailies(conn, now: datetime) -> list[DailyRun] | None:

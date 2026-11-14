@@ -122,7 +122,9 @@ _EXPECTED_POLLERS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
                      # 2026-11-07 (mike): the NCAAB in-play loop, the same shape.
                      "ncaab_live",
                      # 2026-11-11 (mike): the NCAABW halftime loop, the same shape.
-                     "ncaabw_live"}
+                     "ncaabw_live",
+                     # 2026-11-13 (mike): the EuroLeague halftime loop, the same shape.
+                     "euroleague_live"}
 
 
 def test_the_poller_service_owns_exactly_the_long_running_supervisors(monkeypatch):

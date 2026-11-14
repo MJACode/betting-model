@@ -231,10 +231,22 @@ families: `references/market-grid.md`. Every row fills these columns:
 | Market | Settles on | Inputs held | Prices: source, books, seasons, pulls a day | Baseline | Method tried | Result | Status |
 
 A row with an empty cell is a to-do. A row that cannot be worked yet is
-**parked with its reason in the table** ("one book, a handful of games", "no
-price source", "one-way market, cannot be de-vigged"). The grid lives in the
-league doc (`docs/sports/<league>.md`, "The market grid") and is updated in
-place as rows resolve.
+**parked with its reason in the table** ("one book, a handful of games",
+"one-way market, cannot be de-vigged", "what it settles on is unknown", "no
+book a pick may name"). The grid lives in the league doc
+(`docs/sports/<league>.md`, "The market grid") and is updated in place as
+rows resolve.
+
+**"No price" is never a reason to park.** A row with no price found yet is
+a step-2 to-do. It may park for price only when its Prices cell gives every
+route in `references/market-grid.md` and what each returned. That includes
+the book's own board and the sport's odds-comparison sites. The odds feed
+refusing a market key says only that the feed does not carry it. In UFC,
+method of victory, goes the distance and round betting were parked as "no
+price source" on that basis. DraftKings' own board priced all three, and an
+odds-comparison site held each book's history from 2021 (learning log,
+2026-11-13). EuroLeague's player props and women's college basketball's
+first halves had been parked the same way.
 
 ### 2. Prices before models
 
@@ -243,9 +255,11 @@ write what each route returned (routes in `references/market-grid.md`):
 stored rows; what the odds feed sells for this sport key (the event list is
 free; one historical call shows the depth and the cost); free archives (ESPN's
 odds, closing lines in a stats API, exchange or prediction-market history);
+each book's own board and the sport's odds-comparison sites; paid providers;
 the prior season's close. **A price source found here is an input to use
 today, not a finding to report.** Buy history once approved, store it the same
-run, mirror it, and verify both copies by row count.
+run, mirror it, and verify both copies by row count. A free archive is stored the
+same way, before the first table is read from it.
 
 Start the forward collection at the same time. A market with no history still
 gets its prices stored from today, at the pull times the model would decide
@@ -370,6 +384,14 @@ falsifiable prediction and its cheapest experiment. Run the cheapest. The rest
 go into the frontier list in `references/methods.md` with the experiment
 written out, so the next session can run them without re-deriving them.
 
+**This holds for every market, one at a time, not once per league.** A null
+market's grid row, or the results table it links to, names its three
+mechanisms and the ladder's rungs below, each with its result. A verdict that
+cannot name them is a to-do. UFC round totals were first called null after
+one model, with neither the mechanisms nor the ladder. The full search found
+nothing either, but the first verdict had no right to say so (learning log,
+2026-11-13).
+
 Sources of new ideas worth searching (WebSearch, papers, practitioners'
 write-ups — orientation, timeboxed): how professionals price this sport, how
 its markets are known to be set, which derivative markets are priced off
@@ -390,7 +412,9 @@ tests, the decision time and the rules above in writing, and merge the tables.
 - a blocker: no data, no price, no access;
 - you notice you are sweeping cuts or adding features on the same data.
 
-**Then climb this ladder. Every rung is done before a market is called null.**
+**Then climb this ladder. Every rung is done before a market is called null,
+or parked for want of a price or data.** A market with no price is stuck,
+not parked: rungs 3 and 4 (another source, another book) run first.
 
 1. **Stop tuning.** Another cut, seed or feature on the same data is not a
    new idea. The searches here that kept re-mining the same data found

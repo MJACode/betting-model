@@ -251,7 +251,12 @@ def test_insert_once_under_the_model_lock(monkeypatch):
     rows = card.pick_rows([_bet()], GAMES, bankroll=10_000)
     conn = _LockConn()
     assert card.publish(conn, [dict(r) for r in rows]) == 1
-    sqls = [s for s, _ in conn.statements]
+    raw = [s for s, _ in conn.statements]
+    # #1034 wraps the started-game read in a savepoint so a failed read keeps
+    # the batch; the order below is read with those statements set aside.
+    sp = [i for i, s in enumerate(raw) if s.startswith("SAVEPOINT")]
+    assert sp and raw[sp[0] + 1].startswith("SELECT game_id")
+    sqls = [s for s in raw if not s.startswith(("SAVEPOINT", "RELEASE SAVEPOINT", "ROLLBACK TO SAVEPOINT"))]
     assert sqls[0].startswith("SET LOCAL lock_timeout")
     assert "pg_advisory_xact_lock" in sqls[1]
     assert conn.statements[1][1] == (_model_lock_key("nhl_over_under"),)

@@ -124,19 +124,19 @@ export function registerForPush(): Promise<PushState> {
 
       const deviceId = await getDeviceId();
       const registeredAt = new Date().toISOString();
-      // READ THE ERROR. supabase-js resolves rather than throwing, so the old
-      // bare `await supabase.from(...).upsert(...)` swallowed an RLS refusal,
-      // a schema mismatch and a network failure alike.
-      const { error } = await supabase.from('device_push_tokens').upsert(
-        {
-          token,
-          device_id: deviceId,
-          platform: Platform.OS,
-          enabled: true,
-          last_seen: registeredAt,
-        },
-        { onConflict: 'token' },
-      );
+      // READ THE ERROR. supabase-js resolves rather than throwing.
+      // The write is an RPC, not a table upsert. INSERT ... ON CONFLICT DO
+      // UPDATE is rejected (42501) for anon and authenticated while the table
+      // has no SELECT policy, including when the row does not exist yet. A
+      // SELECT policy would let the anon key list every Expo token. The
+      // function runs as the table owner and returns nothing.
+      const { error } = await supabase.rpc('save_device_push_token', {
+        p_token: token,
+        p_device_id: deviceId,
+        p_platform: Platform.OS,
+        p_enabled: true,
+        p_last_seen: registeredAt,
+      });
       if (error) {
         return setState({
           status: 'failed',
@@ -176,10 +176,17 @@ export async function unregisterForPush(): Promise<boolean> {
   // Nothing was ever registered from this install, so there is no row to flip
   // — and no write on every cold start of a device that has never opted in.
   if (!token) return true;
-  const { error } = await supabase
-    .from('device_push_tokens')
-    .update({ enabled: false, last_seen: new Date().toISOString() })
-    .eq('token', token);
+  // Same function as registration. A direct UPDATE matches 0 rows and reports
+  // success, because the row is not visible without a SELECT policy, so the
+  // toggle would say notifications are off while the worker still sends.
+  const deviceId = await getDeviceId();
+  const { error } = await supabase.rpc('save_device_push_token', {
+    p_token: token,
+    p_device_id: deviceId,
+    p_platform: Platform.OS,
+    p_enabled: false,
+    p_last_seen: new Date().toISOString(),
+  });
   if (error) {
     // Surfaced, not swallowed: the reader has turned notifications off and is
     // entitled to know the server did not hear it. NotificationsCard renders a

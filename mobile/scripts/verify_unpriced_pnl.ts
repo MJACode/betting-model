@@ -17,7 +17,7 @@
  */
 import { computeDailyResults } from '../src/lib/dailyResults';
 import { computeBuiltInModelStats, computeCustomModelStats } from '../src/lib/customModelBacktest';
-import { flatPnl, isModelPaused, setServerThresholds } from '../src/lib/thresholds';
+import { RECORD_EXCLUDED_MODELS, RETIRED_MODELS, flatPnl, isModelPaused, isModelRetired, setServerThresholds } from '../src/lib/thresholds';
 import type { CustomModel, Pick } from '../src/types';
 
 let failures = 0;
@@ -141,8 +141,21 @@ setServerThresholds({
   ufc_moneyline: { min_prob: 0.65, min_edge: 0.08, min_odds: -200, prob_only: false, paused: false },
   ufc_method_of_victory: { min_prob: 0.65, min_edge: 0, min_odds: -200, prob_only: true, paused: false },
 });
+// The same holds for retirement: the three models were RETIRED 2026-11-13,
+// and the custom-model and daily-recap readers drop a retired model's picks.
+// That is right for the app and beside the point here, so this world takes
+// them out of the retired set for the length of the script. Their record
+// was struck the same day (config RECORD_EXCLUSIONS, mike), and the Models
+// tab and the daily recap drop a struck model's picks too, so this world
+// lifts the strike as well.
+for (const m of ['ufc_total_rounds', 'ufc_method_of_victory', 'ufc_moneyline']) {
+  RETIRED_MODELS.delete(m);
+  RECORD_EXCLUDED_MODELS.delete(m);
+}
 for (const m of ['ufc_total_rounds', 'ufc_method_of_victory', 'ufc_moneyline']) {
   check(`fixture precondition: ${m} is not paused`, !isModelPaused(m));
+  check(`fixture precondition: ${m} is not retired in this world`, !isModelRetired(m));
+  check(`fixture precondition: ${m} is not struck from the record in this world`, !RECORD_EXCLUDED_MODELS.has(m));
 }
 
 // ── The rule itself ────────────────────────────────────────────────────────

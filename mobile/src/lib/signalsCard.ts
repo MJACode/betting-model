@@ -16,7 +16,7 @@
  * weather row has no number.
  */
 
-import { labelWithoutStake, MINUS } from './format';
+import { isVersusSport, labelWithoutStake, MINUS } from './format';
 
 /** ASCII hyphen used as a minus sign → U+2212. Names with hyphens are left. */
 export function trueMinus(text: string): string {
@@ -74,7 +74,7 @@ export interface SignalsBetFields {
    * name (golf `yes`, a UFC method class). Anything else uses `label`. */
   side: string;
   line: number | string | null;
-  /** Odds market (`totals`, `spreads`, `h2h`, `team_totals_home`, `totals_h1`, `spreads_q1`, `h2h_q1`, a prop key). */
+  /** Odds market (`totals`, `spreads`, `h2h`, `team_totals_home`, `totals_h1`, `spreads_q1`, `h2h_q1`, `h2h_h1`, `totals_q1`, a prop key). */
   market: string | null;
   homeTeam?: string | null;
   awayTeam?: string | null;
@@ -209,6 +209,12 @@ export function signalsBetHeadline(fields: SignalsBetFields): string {
     const word = side === 'over' ? 'Over' : side === 'under' ? 'Under' : '';
     const num = line == null ? '' : totalNumber(line);
     bet = ['First Half', word, num].filter((part) => part.length > 0).join(' ');
+  } else if (market === 'totals_q1') {
+    // A first quarter's total says so (models/euroleague_pregame.py): a bare
+    // "Over 41.5" reads as the game total.
+    const word = side === 'over' ? 'Over' : side === 'under' ? 'Under' : '';
+    const num = line == null ? '' : totalNumber(line);
+    bet = ['First Quarter', word, num].filter((part) => part.length > 0).join(' ');
   } else if (market === 'spreads_h1') {
     // A first half's spread says so: a bare "Duke +3.5" reads as the game's.
     const num = line == null ? '' : spreadNumber(line, side, market);
@@ -228,6 +234,9 @@ export function signalsBetHeadline(fields: SignalsBetFields): string {
     // A first quarter's moneyline says so (models/nba_q1_trend_ml.py): a bare
     // "DEN ML" reads as the game's.
     bet = team ? `First Quarter ${team} ML` : 'First Quarter ML';
+  } else if (market === 'h2h_h1') {
+    // A first half's moneyline, the same (models/euroleague_pregame.py).
+    bet = team ? `First Half ${team} ML` : 'First Half ML';
   } else if (
     market != null && market.startsWith('h2h')
     || (market == null && (side === 'home' || side === 'away') && !player)
@@ -448,7 +457,7 @@ export function compactTeam(
   return hit ? hit : name;
 }
 
-/** "WKU @ SHSU · NCAAF · 8:00 PM ET". Golf is the event. UFC uses "vs". */
+/** "WKU @ SHSU · NCAAF · 8:00 PM ET". Golf is the event. UFC and tennis use "vs". */
 export function signalsContextLine(input: {
   sport: string;
   away: string;
@@ -462,7 +471,7 @@ export function signalsContextLine(input: {
   let matchup = '';
   if (sport === 'GOLF' || !away || away === 'FIELD') matchup = home;
   else if (!home) matchup = away;
-  else matchup = `${away} ${sport === 'UFC' ? 'vs' : '@'} ${home}`;
+  else matchup = `${away} ${isVersusSport(sport) ? 'vs' : '@'} ${home}`;
   return [matchup, sport, input.timeLabel].filter((part) => part.length > 0).join(' · ');
 }
 
@@ -470,7 +479,7 @@ export function signalsContextLine(input: {
 export function signalsTeamsSpeech(sport: string, away: string, home: string): string | null {
   if (sport === 'GOLF' || !away || away === 'FIELD') return home || null;
   if (!home) return away || null;
-  return `${away} ${sport === 'UFC' ? 'versus' : 'at'} ${home}`;
+  return `${away} ${isVersusSport(sport) ? 'versus' : 'at'} ${home}`;
 }
 
 export type SignalsStakeForm = 'bet-win' | 'risk-win';

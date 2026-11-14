@@ -97,20 +97,22 @@ for (const sport of ['UFC', 'GOLF', 'NFL', 'MLB'] as const) {
     !isUnlockedPreview({ sport, game_date: today }));
 }
 
-// A UFC card priced days out and the same card on fight day are BOTH signals.
-const ufcBoard: EnrichedPick[] = [
-  ep({ sport: 'UFC', model_id: 'ufc_moneyline', model_probability: 0.70,
+// A game priced days out and the same game on game day are BOTH signals.
+// The fixture was a UFC card until the UFC models were retired (2026-11-13);
+// NCAAF prices days ahead and locks at the first cross the same way.
+const aheadBoard: EnrichedPick[] = [
+  ep({ sport: 'NCAAF', model_id: 'ncaaf_moneyline_market', model_probability: 0.70,
        edge: 0.15, game_date: future }),   // locked at first cross — still a signal
-  ep({ sport: 'UFC', model_id: 'ufc_moneyline', model_probability: 0.70,
-       edge: 0.15, game_date: today }),    // fight day
+  ep({ sport: 'NCAAF', model_id: 'ncaaf_moneyline_market', model_probability: 0.70,
+       edge: 0.15, game_date: today }),    // game day
 ];
-const ufcCounts = signalCountsBySport(ufcBoard);
-check('UFC badge counts the look-ahead signal as well as the fight-day one',
-  ufcCounts.UFC === 2, JSON.stringify(ufcCounts));
+const aheadCounts = signalCountsBySport(aheadBoard);
+check('NCAAF badge counts the look-ahead signal as well as the game-day one',
+  aheadCounts.NCAAF === 2, JSON.stringify(aheadCounts));
 
-const lookaheadOnly = signalCountsBySport([ufcBoard[0]]);
-check('a board of only look-ahead UFC signals still badges',
-  lookaheadOnly.UFC === 1, JSON.stringify(lookaheadOnly));
+const lookaheadOnly = signalCountsBySport([aheadBoard[0]]);
+check('a board of only look-ahead NCAAF signals still badges',
+  lookaheadOnly.NCAAF === 1, JSON.stringify(lookaheadOnly));
 
 check('empty board yields no badges', Object.keys(signalCountsBySport([])).length === 0);
 

@@ -595,6 +595,37 @@ schtasks /Run /TN "BettingModel\DkLiveBoard"
 schtasks /Delete /TN "BettingModel\DkLiveBoard" /F
 ```
 
+## Tennis feeds — DraftKings, Pinnacle and TennisExplorer, from HERE
+
+Tennis below the odds feed's 53 top-tier tournaments (men's 250s, Challengers
+and ITF; women's 125s and ITF) has no price on the feed, so three collectors
+run from this machine (`docs/sports/tennis.md`):
+
+| Collector | What it stores | Why here |
+|---|---|---|
+| `scripts/tennis_dk_probe.py` | DraftKings' own tennis board: every singles league, every market page, change-only (`tennis_dk_selections`) | DraftKings refuses the worker; reading it needs a browser-style session, which the permission check refuses from a Claude session, so it is launched by this task, never by a session |
+| `data/ingestors/tennis_pinnacle.py` | Pinnacle's own tennis prices at every level (`tennis_pinnacle_matchups`, `tennis_pinnacle_prices`) | not yet tried from the worker (#1281) |
+| `data/ingestors/tennis_explorer.py` | every level's results and one price pair a match, the last three days (`tennis_te_matches`) | the only results source for Challenger and ITF matches after the archive's June 2026 snapshot |
+
+**The schedule: every 30 minutes, registered 2026-11-13** (mike: *"yes"*).
+The task `BettingModel\TennisFeeds` runs
+`betting_local_copies\bin\tennis_feeds_run.ps1` (in the repo as
+`scripts/tennis_feeds_run.ps1`): one pass of each collector, each with a
+20-minute limit. The launcher puts its own worktree,
+`C:\Users\micha\Documents\bm-tennis-feed`, on origin/master before each run,
+and reads `DATABASE_URL` from the main checkout's `.env` for these processes
+only. Until tennis is merged it logs one line and exits. Each collector exits
+at once when another copy of itself is running, so a long-running loop
+started by hand and this task never both poll a site. It runs only while mike
+is signed in to Windows. Logs: `betting_local_copies\logs\tennis_feeds_<date>.log`
+and one `tennis_feeds_<collector>_<date>.log` each.
+
+```bat
+schtasks /Query /TN "BettingModel\TennisFeeds" /V /FO LIST
+schtasks /Run /TN "BettingModel\TennisFeeds"
+schtasks /Delete /TN "BettingModel\TennisFeeds" /F
+```
+
 ## Diagnosing a DATABASE_URL that will not authenticate
 
 `python -m scripts.db_url_doctor` — reports the SHAPE of the string and never

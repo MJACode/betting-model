@@ -220,7 +220,7 @@ def test_a_clv_failure_does_not_stop_settlement(monkeypatch):
         monkeypatch.setattr(pt, name, lambda *a, **k: None)
     monkeypatch.setattr(pt, "_capture_clv", boom)
     for name in ("_settle_game_picks_window", "_settle_prop_picks_window", "_settle_ufc_picks",
-                 "_settle_golf_picks"):
+                 "_settle_tennis_picks", "_settle_golf_picks"):
         monkeypatch.setattr(pt, name, lambda *a, _n=name, **k: calls.append(_n) or zero)
     import data.ingestors.cfbd_ingestor as cfbd
     import data.ingestors.nba_period_scores as periods
@@ -235,7 +235,7 @@ def test_a_clv_failure_does_not_stop_settlement(monkeypatch):
     monkeypatch.setattr(parlay, "settle_parlay_track_record", lambda *a, **k: None)
     pt.settle_picks("2026-10-10")
     assert {"_settle_game_picks_window", "_settle_prop_picks_window", "_settle_ufc_picks",
-            "_settle_golf_picks"} <= set(calls)
+            "_settle_tennis_picks", "_settle_golf_picks"} <= set(calls)
     before = calls[:calls.index("_settle_game_picks_window")]
     assert "capture" in before
     assert "ROLLBACK TO SAVEPOINT" in before[before.index("capture"):]
@@ -253,7 +253,8 @@ def test_the_sql_recompute_reads_a_team_total_close_from_close_rows_only(alias):
     """The migration's recompute (run on every apply) reads the bet book's
     close at the number (bs), its latest main number (bm) and Pinnacle's
     close (ps): each takes only 'close' rows for a team total and for an NBA
-    first half. An NCAAB first half reads its newest pre-tip row after the
+    first half. An NCAAB first half, and a EuroLeague first-half moneyline or
+    first-quarter total (2026-11-14), reads its newest pre-tip row after the
     pick was created. Every other market keeps its pre-game rows. Text,
     because the recompute runs only in Postgres; checked there with EXPLAIN."""
     body = _lateral(MIGRATION.read_text(encoding="utf-8"), alias)
@@ -261,5 +262,9 @@ def test_the_sql_recompute_reads_a_team_total_close_from_close_rows_only(alias):
             "AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1'))) AND o.snapshot_type = 'close') "
             "OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1') "
             "AND o.snapshot_type <> 'in_play' AND o.snapshot_at::timestamptz > s.created_at) "
+            "OR (s.sport_prefix = 'EUROLEAGUE' AND s.game_market IN ('h2h_h1', 'totals_q1') "
+            "AND o.snapshot_type <> 'in_play' AND o.snapshot_at::timestamptz > s.created_at) "
             "OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN "
-            "('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1') AND o.snapshot_type <> 'in_play')") in body
+            "('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1') "
+            "AND NOT (s.sport_prefix = 'EUROLEAGUE' AND s.game_market IN ('h2h_h1', 'totals_q1')) "
+            "AND o.snapshot_type <> 'in_play')") in body

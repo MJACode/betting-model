@@ -349,6 +349,7 @@ def fmt_units(u: float) -> str:
 _SPORT_EMOJI = {
     "MLB": "\u26be", "NFL": "\U0001f3c8", "NCAAF": "\U0001f3c8",
     "NBA": "\U0001f3c0", "WNBA": "\U0001f3c0", "NCAAB": "\U0001f3c0", "NCAABW": "\U0001f3c0",
+    "EUROLEAGUE": "\U0001f3c0",
     "NHL": "\U0001f3d2",
     "UFC": "\U0001f94a", "GOLF": "\u26f3",
 }
@@ -609,12 +610,36 @@ def price_bound(prob, model_id: str, min_edge, min_odds, posted_odds,
     return bound
 
 
+# The 45 s it named was the odds provider's in-play cache (2026-08-29). Since
+# 2026-11-12/13 the in-play models decide on DraftKings' own board, read every
+# second or two from mike's machine, and post a few seconds after the read
+# (docs/live_betting.md, "The fast way"), so a fixed number would now be wrong
+# both ways: too slow for a pick off the board, too fast for one off the
+# provider while that feed is down. Each pick carries its own signal time and
+# a Discord timestamp that counts up in the reader's app, so the note points
+# at that instead (mike, 2026-11-13: "can we time stamp the signal into the
+# discord message").
 LIVE_STALENESS_NOTE = (
-    "\u26a0\ufe0f Live line \u2014 our odds feed refreshes about every 45s, so the "
-    "book may already have moved. **Check DraftKings' current price against the "
+    "\u26a0\ufe0f Live line \u2014 prices move within seconds. Each pick shows when "
+    "its signal fired and how long ago. **Check DraftKings' current price against the "
     "\u201cgood to\u201d number on each pick**: at or better than it, the bet still "
     "holds; past it, pass."
 )
+
+
+def _discord_relative(ts_raw) -> str:
+    """Discord's own timestamp markup, <t:EPOCH:R>: each reader's app renders it
+    as "5 seconds ago" and keeps counting, so the age of a live signal is read
+    off the post at the moment it is read. '' when the time cannot be read."""
+    if not ts_raw:
+        return ""
+    try:
+        ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return ""
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=ZoneInfo("UTC"))
+    return f"<t:{int(ts.timestamp())}:R>"
 
 
 def _post_picks(url: str, sport: str, signals: list[dict], game_date: str,
@@ -1384,7 +1409,12 @@ def _signal_field(s: dict) -> dict:
     # is the first moment the bet existed -- which is the reader's answer to
     # "how stale is this number?".
     posted = _posted_et(s.get("posted_at"), seconds=bool(s.get("live")))
-    if posted:
+    if posted and s.get("live"):
+        # In play the age is the whole question: the second the signal fired,
+        # and Discord's counting "x seconds ago" beside it.
+        rel = _discord_relative(s.get("posted_at"))
+        line += f" · signal {posted}" + (f" ({rel})" if rel else "")
+    elif posted:
         line += f" · posted {posted}"
     # A pick staked above 1u says why, once, on its own line (picks.stake_reason;
     # NCAAB agreement sizing, mike 2026-11-06). A flat pick adds nothing.

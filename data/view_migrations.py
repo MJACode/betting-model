@@ -326,6 +326,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # (config.RECORD_EXCLUSIONS). Patches the LIVE view text with one clause,
     # so it must run after every migration that owns the two record views.
     "record_strikes_nfl_live_prop_2026_10_04.sql",
+    # 2026-11-13 (mike): the three retired UFC models struck from the record
+    # (config.RECORD_EXCLUSIONS); the same one-clause patch of the live views.
+    "record_strikes_ufc_retired_2026_11_13.sql",
     # 2026-10-09 (mike, "Count each fight once"): two UFC fights were bet
     # twice by ufc_total_rounds under two game ids each. The extra copies are
     # marked condition_status='DUPLICATE' (result untouched; no-ops after
@@ -386,6 +389,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # is the market-edge column. Recomputes rows not yet standard_v2 and
     # patches v_public_track_record. Reads the live view, so it runs after
     # every migration that owns that view. Does not touch units or pauses.
+    # Since 2026-11-13 its Pinnacle read is the latest main line (MLB and
+    # NHL spreads on ±1.5), the same read as tracking/paper_tracker; it
+    # stamps most new captures, so the two must not differ.
     "clv_standard_v2_2026_10_14.sql",
     # 2026-10-16: Build Your Own Model facts. Empty tables, anon SELECT,
     # catalog return on the second pass. Win, loss, or push. The line
@@ -647,6 +653,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # with an in-play model. Adds columns only; touches no view, pick, cut or
     # record. Returns on a catalog read once all six exist.
     "dk_live_reads_all_sports_2026_11_13.sql",
+    # 2026-11-13 (mike): the EuroLeague halftime loop's decision ledger, one
+    # final row per game (models/euroleague_live_loop.py). A new table, RLS
+    # on, anon and authenticated revoked; touches no view, pick or function.
+    # Returns on a catalog read once it exists. The loop refuses to decide
+    # until it does.
+    "euroleague_live_decisions_2026_11_13.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT
@@ -662,6 +674,28 @@ ACTIVE_MIGRATIONS: list[str] = [
     # before the pair below, whose view patch calls the three-argument
     # functions. A NULL row grades exactly as before.
     "pick_stake_units_2026_11_06.sql",
+    # 2026-11-13 (mike, finishing #818): three 2026-09-26 NCAAF games each
+    # have a second games row under the Odds API's nickname for the FCS
+    # visitor (William and Mary Tribe, LIU Sharks, Houston Baptist Huskies).
+    # The nickname rows hold the odds; the CFBD rows hold the finals.
+    # Moves the odds onto the CFBD ids, drops the nickname rows' copies of
+    # latest_odds and weather, then deletes the empty nickname rows. Keyed
+    # by the six explicit game ids; a pass after the nickname rows are gone
+    # is a no-op. Never deletes or regrades a pick (none exist on them).
+    # Does not rewrite the record views. Sits before the posted-stake pair
+    # so those two stay adjacent and the view patch stays last.
+    "ncaaf_fcs_opponent_alias_2026_10_21.sql",
+    # 2026-10-14, slotted 2026-10-21, re-slotted 2026-11-13: game spread and
+    # total market edge was Pinnacle's last quote still on our number, not
+    # its latest main line. Both writers read the main line from this merge
+    # on (tracking/paper_tracker and the recompute in clv_standard_v2 above,
+    # whose Pinnacle read changed with it). This file fixes the rows written
+    # before: copies the affected picks, then nulls market_clv_pct,
+    # market_clv_pp, market_clv_method and pinnacle_close_odds. Does not
+    # rewrite clv_pct, the grade, the stake, or any view. Once
+    # (clv_pinnacle_mainline_once_2026_10_14). Sits immediately before the
+    # posted-stake pair, which stays adjacent with the view patch last.
+    "clv_pinnacle_mainline_2026_10_14.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

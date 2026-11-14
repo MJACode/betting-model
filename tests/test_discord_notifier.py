@@ -1256,17 +1256,32 @@ def test_the_mobile_push_carries_the_same_guard():
 # ── the live staleness disclosure ────────────────────────────────────────────
 
 def test_every_live_post_carries_the_staleness_note(monkeypatch):
-    """The feed's floor is a measured property, not a disclaimer: The Odds API
-    serves one cached in-play snapshot for ~45s and its bulk and per-event
-    endpoints return that SAME cache. A reader who opens DraftKings and sees a
-    different total is seeing the floor, so the post has to say so."""
+    """Every live post says the price can already have moved. Since the in-play
+    models moved to DraftKings' own board (2026-11-13) no fixed number is true
+    for every pick, so the note points at each pick's own signal time and
+    must not claim the old provider's 45 s."""
     posts = []
     monkeypatch.setattr(dn, "_post", lambda url, p: posts.append((url, p)) or "1")
     dn._post_picks("http://x", "MLB", [_signal()], "2026-08-23", live=True,
                    note=dn.LIVE_STALENESS_NOTE)
     desc = posts[0][1]["embeds"][0]["description"]
-    assert "45s" in desc, "the note must name the measured number, not hand-wave"
+    assert "45s" not in desc and "45 s" not in desc, "the note must not claim the provider's old floor"
+    assert "when its signal fired" in desc and "how long ago" in desc
     assert "DraftKings" in desc
+
+
+def test_a_live_pick_shows_its_signal_second_and_a_counting_discord_timestamp(monkeypatch):
+    """mike, 2026-11-13: "can we time stamp the signal into the discord message".
+    A live pick carries the second its signal fired (picks.created_at) and
+    Discord's <t:EPOCH:R>, which each reader's app shows as "x seconds ago"."""
+    _freeze_now(monkeypatch, datetime(2026, 11, 13, 19, 0, 30, tzinfo=dn.ET))        # the same ET day
+    sig = {**_signal(), "live": True, "posted_at": "2026-11-13T23:59:07.901038+00:00"}
+    value = dn._signal_field(sig)["value"]
+    assert "signal 6:59:07 PM ET" in value, value
+    assert "(<t:1794614347:R>)" in value, value
+    assert "posted " not in value
+    pre = {**_signal(), "posted_at": "2026-11-13T23:59:07+00:00"}
+    assert "<t:" not in dn._signal_field(pre)["value"]               # pre-game: the minute, no counter
 
 
 def test_the_note_tells_the_reader_what_to_do():
