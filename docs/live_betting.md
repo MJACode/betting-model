@@ -378,6 +378,34 @@ pick is announced only while its game is in progress.
 
 ---
 
+## EuroLeague in play: the full-game spread at halftime (2026-11-13, mike)
+
+The full story and the evidence are in `docs/sports/euroleague.md`, "Halftime
+spread". One model, `euroleague_live_spread_ht`: the full-game spread, bet once
+a game during the halftime break at EV >= 0.05, on a model of the margin still
+to come from Pinnacle's pre-game spread and the first half's surprise (the
+women's halftime method). Replayed on the loop's own code, walk-forward 2022-23
+to 2026-27 to date: 364 bets, +45.34 units, +10.93% (90% +3.40 .. +18.48),
+identical to the research bet for bet; it laid -135 to +105. It misses part of
+the research bar (the false-discovery correction; 2023-24 negative), and mike
+approved it knowing that. The loop (`models/euroleague_live_loop.py`, pollers)
+reads EuroLeague's own live API for the break and the half-time score, and the
+Odds API's ten history books (3 credits a read) every five minutes while a game
+is at the half; it posts to the EuroLeague live channel only.
+
+```
+games + euroleague_events every 60 s (stored schedule)   -> which games are in progress
+at each five-minute mark plus 37 s, for a game 30-120 minutes after its tip:
+   -> EuroLeague API PlayByPlay + Points + Header, one call at a time, 1.5 s apart (free)
+      'EP' in the second quarter, no 'BP' or shot in the third, three scores agree
+   -> Pinnacle's last coherent pre-game spread and total from odds (no number: refused)
+   -> ONE bulk Odds API call: h2h + spreads + totals, the ten history books (3 credits)
+   -> rows of games under way to odds as in_play (source euroleague_live_loop)
+   -> EuroLeague API again: the same half, else skipped
+   -> models.euroleague_live_ht.read_break: decided / carried / missed
+   -> euroleague_live_decisions FIRST, then picks (first-signal lock), then push + Discord
+```
+
 ## NCAABW in play: the full-game total at halftime (2026-11-11, mike)
 
 The full story and the evidence are in `docs/sports/ncaabw.md`, "In play: the

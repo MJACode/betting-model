@@ -82,6 +82,9 @@ MAX_SILENCE: dict = {
     "ncaab_live": 700,
     # The NCAABW halftime loop: 11am to 2:55am ET, every 10 minutes.
     "ncaabw_live": 700,
+    # The EuroLeague halftime loop: 9am to 5:58pm ET, every 10 minutes; off
+    # 6pm-9am, ~15h of legitimate silence.
+    "euroleague_live": 960,
     # The watcher. 10-minute cadence; 45 minutes of silence means the thing
     # that reports everything else has stopped reporting.
     "failure_alerter": 45,
@@ -134,10 +137,21 @@ MAX_SILENCE: dict = {
     # UTC, beating on the idle hours too). It decides only in the 14:00 UTC
     # hour, so a stopped card is also caught by the next run's `missed` failure.
     "ncaaf_moneyline_card": 150,
+    # The UFC opening-price card: hourly at 25 past, 24x7 UTC, beating on the
+    # idle hours too.
+    "ufc_open_moneyline_card": 150,
+    # The tennis match-winner card: every ten minutes, 24x7, beating on the
+    # idle runs too, so 40 minutes is four missed runs.
+    "tennis_moneyline_card": 40,
     # Every minute, 24x7, and it beats on the idle ticks too (one read, then
     # return), so 20 minutes is 20 missed ticks: a stopped job, and every game
     # tipping meanwhile undecided by the NCAAB first-half spread model.
     "ncaab_first_half_window": 20,
+    # The EuroLeague pre-game window: the same shape (every minute, 24x7,
+    # beating on the idle ticks too). 20 minutes is 20 missed ticks: a stopped
+    # job, and every EuroLeague game tipping meanwhile undecided by the five
+    # pre-game rules (scripts/euroleague_pregame_card.py).
+    "euroleague_pregame_window": 20,
     # The NCAAB first-post moneyline job: every minute, 24x7, beating on the
     # idle ticks too (one planning read, then return). 20 minutes is 20 missed
     # ticks, and every first post stored meanwhile goes past the card's
@@ -160,6 +174,8 @@ ACTIVE_HOURS_ET: dict = {
     "ncaab_live": (11, 23, 30),
     # The NCAABW halftime loop beats the same way (models/ncaabw_live_loop.Loop.heartbeat).
     "ncaabw_live": (11, 23, 30),
+    # The EuroLeague halftime loop beats the same way (models/euroleague_live_loop.Loop.heartbeat).
+    "euroleague_live": (9, 17, 30),
 }
 _ET = ZoneInfo("America/New_York")
 

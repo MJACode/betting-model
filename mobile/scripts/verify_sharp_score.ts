@@ -21,7 +21,7 @@ import {
   type ModelClv,
 } from '../src/lib/sharpScore';
 import { publicSortAvailable, publicSplitCount, sortPicks } from '../src/lib/pickSort';
-import { ACTION_THRESHOLDS } from '../src/lib/thresholds';
+import { setServerThresholds, thresholdFor } from '../src/lib/thresholds';
 import type { Pick } from '../src/types';
 
 let failures = 0;
@@ -140,24 +140,30 @@ setModelClv({ mlb_moneyline: { beatRate: 0.9, avgClvPct: 3, settled: 5 } });
 const unproven = sharpScore(mkPick({ edge: 0.33 }))!;
 check('tiny sample → pedigree neutral 20, not trusted', Math.round(unproven.parts.pedigree) === 20 && !unproven.parts.pedigreeKnown);
 
-// 5. Prob-only model scores off probability. The bar is read from
-// ACTION_THRESHOLDS, not hardcoded: mlb_prop_batter_hr's min_prob moved 0.20 ->
+// 5. Prob-only model scores off probability. The bar is read from the
+// model's threshold row, not hardcoded: mlb_prop_batter_hr's min_prob moved 0.20 ->
 // 0.225 (session 60) and this assertion, which pinned the resulting 20, went
 // red and stayed red. Assert the SHAPE (prob above the bar earns a positive,
 // bounded edge part) so a future threshold change cannot make it a false alarm.
-// Fixture is ufc_method_of_victory, the one live prob-only model: HR was
-// RETIRED 2026-09-02 and nba_prop_player_dd with the NBA rebuild, and a
-// retired model has no ACTION_THRESHOLDS entry to read the bar from. The "at
-// the bar" probe sits just above its cut.
+// No live prob-only model is left: HR was RETIRED 2026-09-02,
+// nba_prop_player_dd with the NBA rebuild and ufc_method_of_victory with the
+// UFC rebuild (2026-11-13), and a retired pick scores null. So the fixture
+// declares a stand-in through the server-threshold seam, the same row shape
+// the app reads from model_action_thresholds. The "at the bar" probe sits
+// just above its cut.
 setModelClv(null);
-const PROB_ONLY_ID = 'ufc_method_of_victory';
-const probOnlyBar = ACTION_THRESHOLDS[PROB_ONLY_ID]!.min_prob;
+const PROB_ONLY_ID = 'x_prob_only_fixture';
+setServerThresholds({
+  [PROB_ONLY_ID]: { min_prob: 0.65, min_edge: 0, min_odds: -200, prob_only: true, paused: false },
+});
+const probOnlyBar = thresholdFor(PROB_ONLY_ID)!.min_prob;
 const probOnly = sharpScore(mkPick({ model_id: PROB_ONLY_ID, edge: 0, model_probability: 0.7 }))!;
 check('prob-only → edge part derived from prob, not from edge',
   probOnly.parts.edge > 0 && probOnly.parts.edge <= 40, `edge=${probOnly.parts.edge}`);
 const probOnlyAtBar = sharpScore(mkPick({ model_id: PROB_ONLY_ID, edge: 0, model_probability: probOnlyBar + 0.0001 }))!;
 check('prob-only at the bar → ~0 edge part',
   Math.round(probOnlyAtBar.parts.edge) === 0, `edge=${probOnlyAtBar.parts.edge}`);
+setServerThresholds(null);
 
 // 6. The 'sharp' sort orders by score desc; non-BET sinks below scored BETs.
 const lo = { pick: mkPick({ pick_id: 2, edge: 0.115 }) };          // just over bar → low

@@ -476,6 +476,29 @@ def single_instance(port: int = LOCK_PORT):
     return s
 
 
+def raise_priority() -> str:
+    """The feed is the one latency-critical job on mike's machine: Windows'
+    HIGH_PRIORITY_CLASS for this process, so other work cannot starve it.
+    On 2026-11-13 the machine sat at 100% CPU (a history purchase, eight
+    research processes, four test runs) and the feed fell from a read every
+    1.5 s to one every few minutes; at high priority it read every 1.5 s again
+    on the same load. Returns what it did; never raises."""
+    if os.name != "nt":
+        return "not Windows: priority unchanged"
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        # the handle is pointer-sized; left to ctypes' int default it is cut to
+        # 32 bits and the call is refused
+        k.GetCurrentProcess.restype = ctypes.c_void_p
+        k.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        k.SetPriorityClass.restype = ctypes.c_int
+        ok = k.SetPriorityClass(k.GetCurrentProcess(), 0x00000080)      # HIGH_PRIORITY_CLASS
+        return "priority high" if ok else "priority unchanged (SetPriorityClass refused)"
+    except Exception as exc:              # noqa: BLE001
+        return f"priority unchanged ({type(exc).__name__})"
+
+
 def feed_changed_on_master(root: Path = ROOT) -> bool:
     """True when origin/master changes one of FEED_FILES against this
     checkout's HEAD. Any git failure is False: never restart on a doubt."""
@@ -680,6 +703,8 @@ def main(argv=None) -> int:
     if lock is None:
         log.info("a DraftKings board feed is already running on this machine - exiting")
         return 0
+    if not a.dry_run:
+        log.info("%s", raise_priority())
     boards = {sp: Board(sp, get_connection, dk_session, RESOLVERS[sp], dry_run=a.dry_run) for sp in a.sports}
     first = next(iter(boards.values()))
     if not a.dry_run and not tables_ready(first.c()):

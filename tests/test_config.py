@@ -29,8 +29,8 @@ def test_models_include_expected_ids():
         # (mike: "build new nba models, remove any previous nba models") and
         # every NBA game market was closed for 2026-27 (docs/nba_models_2026.md
         # 4.1). The NBA model that ships is a prop rule, outside MODELS.
-        # UFC
-        "ufc_moneyline", "ufc_total_rounds", "ufc_method_of_victory",
+        # UFC: none. The three 2026-06-19 models were RETIRED 2026-11-13
+        # (mike: "Ignore and delete any existing models in the repo").
         # GOLF
         # NCAAF (spread + spread_premium are DISJOINT bands of one opener rule)
         "ncaaf_moneyline", "ncaaf_over_under", "ncaaf_spread",
@@ -223,6 +223,13 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          # measured on its own fair chance from the books' consensus spread,
          # and it has no record.
          "ncaaf_moneyline_market",
+         # 2026-11-13 (mike): UFC fight winner; its 0.06 EV cut was measured
+         # on its own Pinnacle-anchored rating probability, and it has no record.
+         "ufc_open_moneyline",
+         # 2026-11-14 (mike): tennis match winners; their 0.02 EV cut was
+         # measured on Pinnacle's power-de-vigged chance, and they have no record.
+         "atp_moneyline_shop",
+         "wta_moneyline_shop",
          # 2026-11-02 (mike): NCAAB spreads; its 0.03 cut was measured on its
          # own P(win | no push) at the bet book's line, and it has no record.
          "ncaab_spread_market",
@@ -254,7 +261,13 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          "ncaab_live_spread_h1", "ncaab_live_spread_h2", "ncaab_live_total_h2",
          # 2026-11-11 (mike): the NCAABW halftime total; its game-state model's
          # own P(win | no push), which its EV >= 0.05 cut was graded on; no record.
-         "ncaabw_live_total_ht"}
+         "ncaabw_live_total_ht",
+         # 2026-11-13 (mike): the EuroLeague halftime spread; its game-state model's
+         # own P(win | no push), which its EV >= 0.05 cut was graded on; no record.
+         "euroleague_live_spread_ht",
+         # 2026-11-14 (mike): the four EuroLeague pre-game rules; the market's no-vig chance
+         # plus the rule's walk-forward uplift, which their floors were set on; no record.
+         "euroleague_home_ml", "euroleague_home_dog_spread", "euroleague_h1_dog_ml", "euroleague_q1_club_share_total"}
     )
 
 
@@ -367,6 +380,9 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "ncaab_total_blend",        # 2026-10-30 (mike): its blend's P(win, push left out)
         "ncaabw_total_blend",       # 2026-11-09 (mike): the women's twin, the same number
         "ncaaf_moneyline_market",   # 2026-11-10 (mike): the margin table's fair chance at the books' consensus spread
+        "ufc_open_moneyline",       # 2026-11-13 (mike): Pinnacle's no-vig chance moved by the fighter ratings
+        "atp_moneyline_shop",       # 2026-11-14 (mike): Pinnacle's power-de-vigged chance
+        "wta_moneyline_shop",       # 2026-11-14 (mike): the same, women's tour
         "ncaab_spread_market",      # 2026-11-02 (mike): the margin table's P(win, push left out)
         "ncaab_moneyline_own_spread",  # 2026-11-02 (mike): the margin table's P(side wins) at the book's own spread
         "ncaab_moneyline_first_post",  # 2026-11-03 (mike): the same, at the book's first moneyline post
@@ -382,5 +398,9 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "ncaab_live_spread_h1", "ncaab_live_spread_h2", "ncaab_live_total_h2",
         # 2026-11-11 (mike): the NCAABW halftime total; its game-state model's own probability.
         "ncaabw_live_total_ht",
+        # 2026-11-13 (mike): the EuroLeague halftime spread; its game-state model's own probability.
+        "euroleague_live_spread_ht",
+        # 2026-11-14 (mike): the four EuroLeague pre-game rules; the market's no-vig chance + the uplift.
+        "euroleague_home_ml", "euroleague_home_dog_spread", "euroleague_h1_dog_ml", "euroleague_q1_club_share_total",
     }
     assert not not_named_here

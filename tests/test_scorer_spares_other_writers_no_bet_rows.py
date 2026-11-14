@@ -58,6 +58,10 @@ NFL_RULES = ("nfl_opener_spread", "nfl_wind_totals")
 # The NCAAF moneyline card (2026-11-10): a write-once NONE row on a sport the
 # scorer's own loop scores, beside models the pass does clear (ncaaf_spread).
 NCAAF_CARD = "ncaaf_moneyline_market"
+# The EuroLeague pre-game card (2026-11-14): four rules, each a write-once
+# NONE row on a sport the scorer's own loop never scores.
+EUROLEAGUE_CARD = ("euroleague_home_ml", "euroleague_home_dog_spread",
+                   "euroleague_h1_dog_ml", "euroleague_q1_club_share_total")
 # A game-market card that writes on MLB games (scripts run by the
 # mlb-game-market step), so a foreign row on a game the loop DOES reach.
 MLB_CARD = "mlb_total_public_fade"
@@ -95,7 +99,9 @@ def board_and_ids(monkeypatch):
     mlb_scored = f"MLB_{TARGET}_CCC_DDD"
     mlb_unscored = f"MLB_{TARGET}_EEE_FFF"
     ncaaf = f"NCAAF_{TARGET}_GGG_HHH"
+    euro = "EUROLEAGUE_E2026_120"
     games = [_game(ncaab, "NCAAB", TARGET, later),
+             _game(euro, "EUROLEAGUE", TARGET, later),
              _game(ncaaf, "NCAAF", TARGET, later),
              _game(nfl, "NFL", nfl_day, T0 + timedelta(days=4)),
              _game(mlb_scored, "MLB", TARGET, later),
@@ -108,6 +114,9 @@ def board_and_ids(monkeypatch):
     _seed_none(board, ncaaf, NCAAF_CARD, TARGET)
     _seed_none(board, ncaaf, "ncaaf_spread", TARGET)
     board.ncaaf = ncaaf
+    for mid in EUROLEAGUE_CARD:
+        _seed_none(board, euro, mid, TARGET)
+    board.euro = euro
     for g in (mlb_scored, mlb_unscored):
         board.seed(g, "mlb_moneyline", "mlb_prop_batter_hits")
         _seed_none(board, g, MLB_CARD, TARGET)
@@ -138,6 +147,10 @@ def test_a_full_pass_leaves_every_other_writers_no_bet_rows(board_and_ids):
         "the scorer's sweep deleted the NCAAF moneyline card's NONE row; "
         "the card decides a game once and never writes it again")
     assert _held(board, board.ncaaf, "ncaaf_spread") != KEPT
+    for mid in EUROLEAGUE_CARD:
+        assert _held(board, board.euro, mid) == KEPT, (
+            f"{mid}: the scorer's sweep deleted a EuroLeague pre-game rule's NONE row; "
+            "the card decides a game once and never writes it again")
 
 
 def test_a_full_pass_still_clears_what_it_rewrites(board_and_ids):
@@ -159,7 +172,7 @@ def test_the_poller_leaves_them_too(board_and_ids):
     board, ncaab, nfl, mlb_scored, mlb_unscored = board_and_ids
 
     scorer.run_scorer(target_date=TARGET,
-                      only_games={ncaab, nfl, mlb_scored, mlb_unscored, board.ncaaf},
+                      only_games={ncaab, nfl, mlb_scored, mlb_unscored, board.ncaaf, board.euro},
                       game_models_only=True)
 
     for mid in NCAAB_CARDS:
@@ -169,6 +182,8 @@ def test_the_poller_leaves_them_too(board_and_ids):
     assert _held(board, mlb_scored, MLB_CARD) == KEPT
     assert _held(board, mlb_unscored, MLB_CARD) == KEPT
     assert _held(board, board.ncaaf, NCAAF_CARD) == KEPT
+    for mid in EUROLEAGUE_CARD:
+        assert _held(board, board.euro, mid) == KEPT, mid
 
 
 def test_every_prop_scorer_in_the_pass_is_in_the_cleared_set():
@@ -189,4 +204,5 @@ def test_every_prop_scorer_in_the_pass_is_in_the_cleared_set():
     assert set(scorer.MODELS) <= cleared
     assert not any(m.startswith(("ncaab_", "nfl_")) for m in cleared)
     assert NCAAF_CARD not in cleared and "ncaaf_spread" in cleared
+    assert not set(EUROLEAGUE_CARD) & cleared
     assert scorer._pass_rewritten_models(game_models_only=True) == set(scorer.MODELS)

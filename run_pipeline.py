@@ -1137,14 +1137,20 @@ def step_euroleague_games(run_date: str) -> bool:
     returns every game of the season, played or scheduled, and the store
     upserts the events and games rows, fills each new final once, and adds its
     quarter scores. EuroLeague owns every EUROLEAGUE games row; the odds feed
-    only resolves onto them, so this runs BEFORE the odds step. False on any
-    failure.
+    only resolves onto them, so this runs BEFORE the odds step. Then the shot
+    charts of the season's played games not yet fetched
+    (data/ingestors/euroleague_shots.py: every shot with its wall-clock time,
+    which places halftime against the in-play prices), one call at a time.
+    False on any failure.
     """
     try:
         from data.ingestors.euroleague_api import current_season_label, run
-        stats = run([current_season_label()], apply=True)
-        logger.success(f"✓ EuroLeague games: {stats}")
-        return True
+        from data.ingestors import euroleague_shots
+        season = current_season_label()
+        stats = run([season], apply=True)
+        shots = euroleague_shots.run(season, season, apply=True)
+        logger.success(f"✓ EuroLeague games: {stats}; shots: {shots}")
+        return not (shots.get("errors") or shots.get("stopped"))
     except Exception as exc:
         logger.error(f"✗ EuroLeague games failed: {exc}")
         return False

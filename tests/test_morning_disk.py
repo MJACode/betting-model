@@ -340,27 +340,32 @@ def test_the_wrapper_asks_the_gate_before_the_job():
     assert src.index("admit(") < src.index("result = func(")
 
 
-def test_a_refresh_does_not_start_while_the_daily_holds_its_lock(monkeypatch):
-    """Inside the morning window only (the next test is the evening)."""
+def test_a_refresh_does_not_score_while_the_daily_holds_its_lock(monkeypatch):
+    """The daily and the refresh delete the same unlocked pick rows. The
+    refresh waits, at every hour, and scores once the daily lets go."""
     calls = []
     monkeypatch.setattr(scheduler, "_run", lambda *a, **k: calls.append(a) or "ok")
-    monkeypatch.setattr(morning_disk, "now_et",
-                        lambda: datetime(2026, 11, 12, 6, 17, tzinfo=ET))
+    monkeypatch.setattr(scheduler, "_wait_for_nhl_window", lambda label: True)
+    monkeypatch.setattr(scheduler, "_WRITER_POLL_S", 0.01)
+    monkeypatch.setattr(scheduler, "_refresh_wait_for_daily_s", lambda: 30)
     assert scheduler._DAILY_LOCK.acquire(blocking=False)
+    thread = threading.Thread(target=scheduler.run_refresh_pass)
+    thread.start()
     try:
-        scheduler.run_refresh_pass()
+        time.sleep(0.05)
         assert calls == []
-        assert scheduler._REFRESH_LOCK.acquire(blocking=False)
-        scheduler._REFRESH_LOCK.release()
     finally:
         scheduler._DAILY_LOCK.release()
+    thread.join(2)
+    assert not thread.is_alive()
+    assert len(calls) == 1
+    assert calls[0][0][1] == "scripts/refresh_pass.sh"
 
 
 def test_the_daily_waits_for_an_in_flight_refresh_then_runs(monkeypatch):
-    monkeypatch.setattr(scheduler, "DAILY_REFRESH_WAIT_S", 2)
     monkeypatch.setattr(scheduler, "_wait_for_nhl_window", lambda label: True)
-    monkeypatch.setattr(morning_disk, "now_et",
-                        lambda: datetime(2026, 11, 12, 6, 0, tzinfo=ET))
+    monkeypatch.setattr(scheduler, "_WRITER_POLL_S", 0.01)
+    monkeypatch.setattr(scheduler, "_DAILY_WAIT_FOR_REFRESH_S", 5)
     ran = []
     monkeypatch.setattr(scheduler, "_run", lambda *a, **k: ran.append(a) or "ok")
     assert scheduler._REFRESH_LOCK.acquire(blocking=False)
@@ -383,39 +388,22 @@ def test_the_daily_waits_for_an_in_flight_refresh_then_runs(monkeypatch):
 # ── finished 2026-11-13: the gate stays in the morning ───────────────────────
 
 
-@pytest.mark.parametrize("hh,mm", [(18, 17), (19, 17), (21, 47), (22, 7)])
-def test_an_evening_refresh_runs_while_a_catch_up_daily_holds_its_lock(
-        monkeypatch, hh, mm):
-    """A catch-up daily may run until 22:00 ET (DAILY_RETRY_CUTOFF_HOUR). The
-    18:00-23:00 refreshes carry odds, scoring and push during live games, so
-    a daily holding its lock in the evening must not stop them."""
+def test_an_evening_refresh_still_runs_if_the_daily_never_lets_go(monkeypatch):
+    """A stuck daily must not silence the 18:00-23:00 passes. Past the wait
+    the refresh scores. It does not score while the lock is still held."""
     calls = []
     monkeypatch.setattr(scheduler, "_run", lambda *a, **k: calls.append(a) or "ok")
     monkeypatch.setattr(scheduler, "_wait_for_nhl_window", lambda label: True)
+    monkeypatch.setattr(scheduler, "_refresh_wait_for_daily_s", lambda: 0)
     monkeypatch.setattr(morning_disk, "now_et",
-                        lambda: datetime(2026, 11, 12, hh, mm, tzinfo=ET))
+                        lambda: datetime(2026, 11, 12, 19, 17, tzinfo=ET))
     assert scheduler._DAILY_LOCK.acquire(blocking=False)
     try:
         assert scheduler.run_refresh_pass("evening") != "skipped"
         assert len(calls) == 1
         assert calls[0][0][:2] == ["bash", "scripts/refresh_pass.sh"]
-        assert not scheduler._REFRESH_LOCK.locked()
     finally:
         scheduler._DAILY_LOCK.release()
-
-
-def test_the_refresh_skip_is_bounded_by_the_morning_window():
-    busy = True
-    assert morning_disk.refresh_yields_to_daily(
-        datetime(2026, 11, 12, 5, 40, tzinfo=ET), busy)
-    assert morning_disk.refresh_yields_to_daily(
-        datetime(2026, 11, 12, 7, 14, tzinfo=ET), busy)
-    assert not morning_disk.refresh_yields_to_daily(
-        datetime(2026, 11, 12, 7, 17, tzinfo=ET), busy)
-    assert not morning_disk.refresh_yields_to_daily(
-        datetime(2026, 11, 12, 5, 17, tzinfo=ET), busy)
-    assert not morning_disk.refresh_yields_to_daily(
-        datetime(2026, 11, 12, 6, 17, tzinfo=ET), False)
 
 
 def test_the_jobs_that_decided_in_the_window_are_not_in_the_lane():
@@ -474,37 +462,27 @@ def test_a_tick_the_gate_turns_away_beats_skipped_not_ok(monkeypatch):
                       "deferred — morning disk window")]
 
 
-def test_a_morning_refresh_that_stands_down_beats_skipped(monkeypatch):
-    calls = []
-    monkeypatch.setattr(scheduler, "_run", lambda *a, **k: calls.append(a) or "ok")
-    func, beats = _wrapped_job(monkeypatch, "hourly_refresh")
-    monkeypatch.setattr(morning_disk, "now_et",
-                        lambda: datetime(2026, 11, 12, 7, 10, tzinfo=ET))
-    assert scheduler._DAILY_LOCK.acquire(blocking=False)
-    try:
-        func()
-    finally:
-        scheduler._DAILY_LOCK.release()
-    assert calls == []
-    assert [b[:2] for b in beats] == [("hourly_refresh", "skipped")]
-
-
-def test_an_evening_daily_does_not_wait_for_a_refresh(monkeypatch):
-    """Outside the window the refresh does not stand down, so the daily must
-    not sit behind a pass it is allowed to overlap."""
-    monkeypatch.setattr(scheduler, "DAILY_REFRESH_WAIT_S", 2)
+def test_an_evening_daily_waits_for_a_refresh_then_runs(monkeypatch):
+    """The wait is every hour, not only the morning window. A refresh that
+    is already scoring and an evening catch-up daily must not delete each
+    other's picks."""
     monkeypatch.setattr(scheduler, "_wait_for_nhl_window", lambda label: True)
+    monkeypatch.setattr(scheduler, "_WRITER_POLL_S", 0.01)
+    monkeypatch.setattr(scheduler, "_DAILY_WAIT_FOR_REFRESH_S", 5)
     monkeypatch.setattr(morning_disk, "now_et",
                         lambda: datetime(2026, 11, 12, 19, 0, tzinfo=ET))
     ran = []
     monkeypatch.setattr(scheduler, "_run", lambda *a, **k: ran.append(a) or "ok")
     assert scheduler._REFRESH_LOCK.acquire(blocking=False)
-    started = time.monotonic()
+
+    def drop():
+        time.sleep(0.05)
+        scheduler._REFRESH_LOCK.release()
+
+    threading.Thread(target=drop).start()
     try:
         assert scheduler.run_daily_pipeline() == "ok"
-        assert time.monotonic() - started < 0.5
-        assert ran
-        assert scheduler._REFRESH_LOCK.locked()
+        assert ran and ran[0][0][-1] == "run_pipeline.py"
     finally:
         if scheduler._DAILY_LOCK.locked():
             scheduler._DAILY_LOCK.release()

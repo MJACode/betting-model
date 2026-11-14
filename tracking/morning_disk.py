@@ -16,12 +16,13 @@ the pollers and prop-probe were up. The overlap on the pipeline scheduler:
 - NCAAB/NCAABW odds capture, the NCAAF and NCAAB cards, and the NFL polls
   that read `games` and write `nfl_odds_history`, all free to start together
 
-The daily still runs at 06:00. It is the morning's one full writer. From
-05:40 to 07:15 ET a refresh does not start while it holds its lock (outside
-that window a refresh runs beside a daily as before), and the daily waits for
-a refresh already inside its chain. In the same window the other heavy ticks
-share one lane, so they run one at a time instead of as a pile; the jobs that
-decide real-money picks in that window (DECIDING_JOBS) are not in the lane.
+The daily still runs at 06:00. It is the morning's one full writer. The daily
+and a refresh wait for each other at every hour (scheduler.py): they delete
+and rewrite the same pick rows, so they must not score together, and the
+evening refresh still runs after that wait. In the morning window the other
+heavy ticks share one lane, so they run one at a time instead of as a pile;
+the jobs that decide real-money picks in that window (DECIDING_JOBS) are not
+in the lane.
 Kalshi snapshots and the api_call_log prune do not start in that window;
 Kalshi has a 07:20 and 07:25 catch-up so the hour is still recorded, and the
 prune runs on the next flush after the window, one session at a time. A tick
@@ -141,16 +142,6 @@ def _minutes_et(now: datetime) -> int:
         now = now.replace(tzinfo=ET)
     local = now.astimezone(ET)
     return local.hour * 60 + local.minute
-
-
-def refresh_yields_to_daily(now: datetime, daily_busy: bool) -> bool:
-    """True when a refresh pass should stand down for the daily.
-
-    Only inside the morning window. Outside it a refresh runs beside a
-    daily as it always did: a catch-up daily can run until 22:00 ET, and the
-    18:00-23:00 passes carry the odds, scoring and push for live games.
-    """
-    return daily_busy and in_morning_window(now)
 
 
 def _defer_for_daily(now: datetime, daily_busy: bool) -> bool:

@@ -21,6 +21,88 @@
 
 ---
 
+## [ ] EuroLeague pre-game rules: the channel, then watch the first slate (2026-11-14)
+The four rules (`docs/sports/euroleague.md`, "The four pre-game rules") post
+nothing to Discord until `DISCORD_CHANNEL_EUROLEAGUE` (or
+`DISCORD_WEBHOOK_EUROLEAGUE`) is set on the worker; the app shows them from the
+first decision. On the first slate: the period feed's first `x-requests-last`
+(about 15 credits a call is derived, not measured), each rule's first
+decision rows and reasons, the first bet on every surface, and the first
+period pick's settlement on `euroleague_period_scores`. The relocated-venue
+lists are the research's (2026-11-12): a relocation after that date is not on
+them.
+
+## [ ] EuroLeague halftime spread: the live channel, then watch the first slate (2026-11-13)
+`euroleague_live_spread_ht` decides nothing until mike creates the EuroLeague
+live Discord channel and sets `DISCORD_CHANNEL_LIVE_EUROLEAGUE` (or
+`DISCORD_WEBHOOK_LIVE_EUROLEAGUE`) on pollers. Then, on the first slate
+(2026-11-17): EuroLeague's API timing at the break (when 'EP', 'BP' and each
+shot appear), the first call's `x-requests-last` (3 credits derived, not
+measured), the decision rows' reasons, and whether `games` ever holds a
+mid-game score before the final (`docs/sports/euroleague.md`, "Halftime spread").
+
+## [ ] EuroLeague: DraftKings' own live board (2026-11-13)
+DraftKings' navigation listed no EuroLeague league for Ohio, New Jersey or
+Massachusetts on 2026-11-13 at about 23:15 UTC, 89 hours before the next game.
+Read it again while a round is posted; if listed, add the id and a club-name
+resolver to `data/ingestors/dk_live_board.py` and re-measure which quote the
+halftime spread should read.
+
+## [x] UFC: buy the fight-winner and round-total history (2026-11-13; bought the same day, 150,240 credits)
+No UFC model is live; the 2026-11-13 search (`docs/ufc_market_audit.md`)
+found one real mechanism, a rating model anchored on the first posted price,
+that is not yet shown at a book a pick may name. The purchase that tests it,
+and that makes round totals researchable: one pull a day 2020-06-06 to
+2026-06-13 plus six on each card day, fight winner and round totals, 150,360
+credits measured at 40 a pull (audit §6). It needs a raw table keyed on the
+feed's event id first. Then: the open-anchored model at DraftKings',
+FanDuel's and Pinnacle's first daily price; DraftKings' totals against
+Pinnacle's; the three inventions in audit §9. Any new UFC card must also
+clear the two twin-id items below.
+
+## [ ] [needs-decision] Architecture: stop code merges restarting the in-play service (2026-11-13)
+mike, 2026-11-13, after merging #1293 during a live college basketball
+slate: *"do we need in-play only workers then? future consideration for
+architecture discussion"*. The in-play loops already run on their own
+service (`pollers`, `SERVICE_ROLE=poller`: 9 jobs) apart from the pipeline
+(`worker`: 39 jobs), measured by building each role's job list on
+8ea9f2cf. What couples them is the deploy trigger: both build from the one
+`railway.json`, whose `watchPatterns` include `**/*.py`, so every code
+merge rebuilds and restarts both. Railway starts the new container before
+stopping the old (`drainingSeconds` 600), so a working deploy leaves a short
+gap; a failed one leaves the old container running (2026-11-13: Railway's
+"Builds failing in US West" incident failed both services' deploys of
+8ea9f2cf and dc570704, and every in-play job kept beating on the old
+containers). Options to weigh: (1) a separate config for `pollers` with
+watch patterns limited to the in-play code and what it imports (most merges
+touch shared modules such as `config.py`, `data/`, `tracking/`, so the
+import surface would need narrowing first); (2) a merge gate that holds a
+code merge while in-play games are live, beside the daily-pipeline gate
+(`.github/workflows/daily-merge-gate.yml`).
+
+## [ ] UFC: next experiments on the bought history (2026-11-13)
+`ufc_open_moneyline` is live on merge (`docs/ufc_market_audit.md` §3d).
+Next, each on `ufc_odds_history`: a Pinnacle-anchored finish model for round
+totals (every blind total loses, Pinnacle's over is near fair); notice length
+from a pairing's first listing; a DraftKings total left stale when its
+moneyline moves; placing a debutant's fights (the card skips a fighter with
+no ufcstats record; 71 of the 846 backtest bets had one). Watch the live
+record against the backtest's +12.85% on the whole scored universe, and its
+closing-line value against Pinnacle's.
+
+## [ ] UFC props: grade the goes-the-distance lead forward (2026-11-14)
+The anchored goes-the-distance model is +10.0% on 791 bets at BestFightOdds'
+last recorded prices 2022-2026, +6.8% [-0.9, +14.4] on 745 at the price an
+hour before each fight (2026 -3.6%), and loses at DraftKings
+(`docs/ufc_market_audit.md` §5f). Next: once each card from 2026-11-14 is in
+the fight log, store its page (`python -m data.ingestors.ufc_prop_history
+--spool DIR --stage pages --fetch --store`) and grade the model's bets at
+FanDuel and Caesars, at the price their histories show an hour before each
+fight (`scripts/ufc_study/prop_leads.py`). Betting it live would need the
+upcoming card's page read at decision time, which nothing does yet. The
+full price-history stage (147,356 histories, about five days at 3 s apart)
+would date every last recorded price, not only the leads'.
+
 ## [ ] EuroLeague: finish the two history purchases (2026-11-12)
 mike approved about 4.4M on 2026-11-13 ("Do the 4.4m"; `docs/sports/euroleague.md`,
 "The purchase"): no 2020-21, the full game every snapshot near and during games

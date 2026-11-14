@@ -259,3 +259,23 @@ def test_a_walk_with_the_step_asks_fewer_times_and_keeps_the_close(tmp_path):
         if t.minute % 5 == 0:
             assert t in kept, t
         t += timedelta(minutes=5)
+
+
+def test_the_shot_chart_parser_reads_the_wall_clock_and_the_home_score():
+    from datetime import datetime, timezone
+    from data.ingestors import euroleague_shots as es
+    body = {"Rows": [
+        {"NUM_ANOT": 89, "TEAM": "ASV       ", "ID_PLAYER": "P002100   ", "PLAYER": "DE COLO, NANDO",
+         "ID_ACTION": "2FGM", "POINTS": 2, "COORD_X": -294, "COORD_Y": 313, "ZONE": "D",
+         "FASTBREAK": "0", "SECOND_CHANCE": "1", "POINTS_OFF_TURNOVER": "0", "MINUTE": 1,
+         "CONSOLE": "09:39", "POINTS_A": 0, "POINTS_B": 2, "UTC": "20251211190842"},
+        {"NUM_ANOT": None, "UTC": "x"},
+        {"NUM_ANOT": 90, "ID_ACTION": "3FGA", "POINTS": 0, "UTC": "bad"}]}
+    rows = es.parse("EUROLEAGUE_E2025_141", body)
+    assert len(rows) == 2
+    r = dict(zip(es.COLS, rows[0]))
+    assert r["shot_utc"] == datetime(2025, 12, 11, 19, 8, 42, tzinfo=timezone.utc)
+    assert r["team"] == "ASV" and r["player_id"] == "P002100"
+    assert (r["points_home"], r["points_away"]) == (0, 2)       # A is EuroLeague's home club
+    assert r["second_chance"] is True and r["fastbreak"] is False
+    assert dict(zip(es.COLS, rows[1]))["shot_utc"] is None      # an unreadable stamp is None

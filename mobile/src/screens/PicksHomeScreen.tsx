@@ -143,7 +143,7 @@ const SUBTAB_REACH_BELOW = 6;
 const subTabsReach = reachFrame(0, SUBTAB_REACH_BELOW);
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
-import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence } from '@/lib/liveSports';
+import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence, sportDisplayName } from '@/lib/liveSports';
 import { errorText, friendlyCause } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ScoreboardBoard } from '@/components/ScoreboardBoard';
@@ -1066,6 +1066,13 @@ export function PicksHomeScreen() {
   );
 }
 
+// The EuroLeague boards' empty copy (2026-11-14): its pre-game models post game
+// by game, five to ten minutes before each tip-off; its halftime model posts on
+// Live Signals.
+const EUROLEAGUE_PREGAME_EMPTY =
+  'EuroLeague pre-game picks post five to ten minutes before each tip-off, when that game is checked. Bets ' +
+  'made at halftime post on Live Signals.';
+
 function boardLabel(view: PicksView): string {
   if (view === 'today') return 'All';
   if (view === 'signals') return 'Signals';
@@ -1147,14 +1154,33 @@ function EmptyForView({
   if (view === 'today') {
     return (
       <EmptyState
-        title={`No ${sport} picks today`}
+        title={
+          // EuroLeague's pre-game models post game by game, minutes before
+          // each tip, not on the refresh cadence (2026-11-14).
+          sport === 'EUROLEAGUE' ? 'No EuroLeague picks yet today' : `No ${sport} picks today`
+        }
         subtitle={
           // The women's totals model posts when DraftKings opens a game's
           // total, not on the refresh cadence, so the refresh times would
           // send a member back at the wrong hour (UX review, 2026-11-10).
+          // The tennis card is the same: it runs every ten minutes, around
+          // the clock, and decides each match about 30 minutes before its
+          // listed start (scripts/tennis_moneyline_card.py).
           sport === 'NCAABW'
             ? `No NCAABW picks have posted for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
-            : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+            : sport === 'ATP' || sport === 'WTA'
+              ? `No ${sport} picks have posted for ${date} yet. Each match shows here about 30 minutes before its listed start, once the model has checked it. It bets only a few; the rest show as no bet.`
+              : // The five EuroLeague pre-game models decide each game once, five to
+                // ten minutes before its tip (scripts/euroleague_pregame_card.py), so
+                // the refresh times would send a member back at the wrong hour.
+                sport === 'EUROLEAGUE'
+                ? EUROLEAGUE_PREGAME_EMPTY
+                : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+        }
+        subtitleAccessibilityLabel={
+          sport === 'ATP' || sport === 'WTA'
+            ? `No ${sportSpokenName(sport)} picks have posted for ${date} yet. Each match shows here about 30 minutes before its listed start, once the model has checked it. It bets only a few; the rest show as no bet.`
+            : undefined
         }
       />
     );
@@ -1162,8 +1188,12 @@ function EmptyForView({
   if (view === 'signals') {
     return (
       <EmptyState
-        title="No signal bets right now"
-        subtitle="Zero picks is a valid signal — no high-conviction plays right now. Open the All board to see everything the model scored, or check back after the next refresh."
+        title={sport === 'EUROLEAGUE' ? 'No EuroLeague signals right now' : 'No signal bets right now'}
+        subtitle={
+          sport === 'EUROLEAGUE'
+            ? EUROLEAGUE_PREGAME_EMPTY
+            : 'Zero picks is a valid signal — no high-conviction plays right now. Open the All board to see everything the model scored, or check back after the next refresh.'
+        }
       />
     );
   }
@@ -1178,15 +1208,15 @@ function EmptyForView({
     if (!hasLiveModel(sport)) {
       return (
         <EmptyState
-          title={`No live model for ${sport} yet`}
-          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
+          title={`No live model for ${sportDisplayName(sport)} yet`}
+          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sportDisplayName(sport)}. The All and Signals boards carry ${sportDisplayName(sport)}’s pre-game picks.`}
           subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSentence(sportSpokenName)}, so this board stays empty for ${sportSpokenName(sport)}. The All and Signals boards carry its pre-game picks.`}
         />
       );
     }
     return (
       <EmptyState
-        title={`No ${sport} live signals right now`}
+        title={`No ${sportDisplayName(sport)} live signals right now`}
         subtitle={liveEmptySubtitle(sport)}
       />
     );

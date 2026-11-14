@@ -19,23 +19,38 @@ Timeboxed every time. The output is a leads table, never an essay.
 
 ## Where to look, and what answered from mike's PC
 
-Measured 2026-11-12. Re-measure before relying on a "no": a refusal today is
+Measured 2026-11-12; re-probed from mike's PC 2026-11-13 (answers marked below). Re-measure before relying on a "no": a refusal today is
 not a refusal forever, and a route that failed one way may answer another
 (`~/.claude/CLAUDE.md` §0).
 
 | Route | How | Answered 2026-11-12 |
 |---|---|---|
-| Web search | the `WebSearch` tool (load it with ToolSearch, `select:WebSearch`) | yes |
+| Web search | the `WebSearch` tool (load it with ToolSearch, `select:WebSearch`) | yes (still yes 2026-11-13: NBA totals papers returned, not pick sites) |
 | GitHub repositories and code | `gh search repos "<league> betting model" --sort stars`, `gh search code "<term>"` | yes |
-| Covers and Sportsbook Review forums | a plain fetch of the forum pages | yes (200) |
-| Reddit (r/sportsbook and the sport's own) | a plain fetch of reddit.com and old.reddit.com | **no (403 both)** — reach threads through web search results, or try the web-fetch agent and record what it returns |
-| arXiv | `https://export.arxiv.org/api/query?search_query=...` | yes (200; plain http redirects) |
+| Covers and Sportsbook Review forums | a plain fetch of the forum pages | yes (200); 2026-11-13: covers.com/forum 200, `forum.sportsbookreview.com` no answer (curl 000), `sportsbookreview.com/forum/` 200 |
+| Reddit (r/sportsbook and the sport's own) | a plain fetch of reddit.com and old.reddit.com | **no (403 both, again 2026-11-13)** — reach threads through web search results, or try the web-fetch agent and record what it returns |
+| arXiv | `https://export.arxiv.org/api/query?search_query=...` | yes (200; plain http redirects; 200 again 2026-11-13) |
 | Kaggle datasets | the dataset search page | yes (200) |
-| Pinnacle's betting articles | `pinnacle.com/betting-resources` | yes (200) |
-| eurohoops.net, basketnews.com, jhse.es, econpapers.repec.org, oddspapi.io | a plain fetch | yes (200, 2026-11-12, EuroLeague scout) |
-| euroleaguebasketball.net (injury reports) | a plain fetch, and curl | **no (429, a Vercel security checkpoint)**; Eurohoops reposts the reports |
-| University repositories (cris.unibo.it, iris.uniroma4.it), bettingexpert.com | a plain fetch | **no (403)**; centaur.reading.ac.uk serves a bot-check page; read abstracts through search results |
-| OddsPortal, BetExplorer, Flashscore odds archives | robots.txt | **read, and they disallow the archives**: OddsPortal bars every past-season path (`-1998` to `-2024`). Not scraped. |
+| Pinnacle's betting articles | `pinnacle.com/betting-resources` | yes (200); 2026-11-13: 301 to the articles page, `/en/betting-articles/` 200 |
+| eurohoops.net, basketnews.com, jhse.es, econpapers.repec.org, oddspapi.io | a plain fetch | yes (200, 2026-11-12, EuroLeague scout); 2026-11-13: econpapers 200, eurohoops/basketnews/jhse/oddspapi redirect (301/302), not followed |
+| euroleaguebasketball.net (injury reports) | a plain fetch, and curl | **no (429, a Vercel security checkpoint; 429 again 2026-11-13)**; Eurohoops reposts the reports |
+| University repositories (cris.unibo.it, iris.uniroma4.it), bettingexpert.com | a plain fetch | **no (403 both, again 2026-11-13)**; centaur.reading.ac.uk 200 on 2026-11-13 (bot-check page on 2026-11-12); bettingexpert.com 200 on 2026-11-13; read abstracts through search results |
+| OddsPortal, BetExplorer, Flashscore odds archives | robots.txt | **read (robots.txt answered 200 on all three again 2026-11-13), and they disallow the archives**: OddsPortal bars every past-season path (`-1998` to `-2024`). Not scraped. |
+| GitHub release assets and raw files (fight-canon-db, ultimate_ufc_dataset, nlbair/ufc-data) | a plain download | yes (200, 2026-11-13, UFC scout) |
+| bestfightodds.com robots.txt | a plain fetch | **allows everything but `/cnadm/`** (2026-11-13) |
+| bestfightodds.com event pages and price charts | a plain fetch with a browser user agent, 3 s apart: `/events/<slug>` (each book's last price, every prop), `/api/ggd?b=&m=&p=&pt=&tn=` (one book's price history; base64, then ROT47, then JSON); `scripts/ufc_study/bfo_probe.py` | yes (200 on 8 pages, 9 charts and the event sitemap, 2026-11-13); US books' prop prices from 2021, older books by chart only (UFC study, `docs/ufc_market_audit.md` §5b) |
+| DraftKings' own board, per sub-page | curl_cffi as Chrome from mike's PC: `sportsbook-nash.draftkings.com/api/sportscontent/dkusoh/v1/leagues/<id>` lists the categories and sub-pages, `.../categories/<c>/subcategories/<s>` prices one; `scripts/ufc_study/dk_props_probe.py` | yes (200, 2026-11-14, UFC league 9034: method, distance and round props priced); refused from the Railway worker (`docs/live_odds_freshness.md`, 2026-08-31). DraftKings' terms forbid automated access; mike's call is recorded in `data/ingestors/dk_direct_feed.py` |
+| Paid odds providers' own pages (SportsGameOdds, SportsData.io, odds-api.io) | web search | yes (2026-11-13): coverage claims read, no provider called |
+| tapology.com robots.txt | a plain fetch | **disallows Claude's crawlers by name** (2026-11-13). Not fetched. |
+| Springer article pages (J. Econ. Finance) | a plain fetch | **redirects to a login**; Crossref gives the title and date |
+| biblos.hec.ca, statds.org, thescholarship.ecu.edu (thesis and poster PDFs) | a plain fetch | yes (200, 2026-11-13) |
+| tennis-data.co.uk (one price per tennis match: Bet365, Pinnacle, best, average) | a plain fetch, and the web-fetch agent | **no (Cloudflare "Sorry, you have been blocked", 2026-11-13)**. Copies of its files on GitHub exist and are not used: the permission check refused fetching them as a way round the block |
+| Jeff Sackmann's tennis repositories (`JeffSackmann/tennis_atp`, `tennis_wta`) | `gh api repos/...` | **no (404, 2026-11-13)**; the public archive `Aneeshers/tennis-sackmann-archive` answered (June 2026 snapshot, CC BY-NC-SA 4.0) |
+| ESPN's tennis scoreboard (`site.api.espn.com/apis/site/v2/sports/tennis/{atp,wta}/scoreboard`) | a plain fetch | yes (200, 2026-11-13); its core odds endpoint holds nothing for tennis |
+| Pinnacle's public site API (`guest.api.arcadia.pinnacle.com/0.1/sports/<id>/matchups` and `/markets/straight`) | a plain request | yes (2026-11-13): every tennis level, prices with versions and stake limits |
+| TennisExplorer results pages (every tennis level, one price pair a match) | a plain request, two seconds apart | yes (2026-11-13); robots allow results pages, the terms page is closed to crawlers. Its prices are an average of books near the close (`docs/sports/tennis.md`) |
+| DraftKings' own site API, read for a new sport | a browser-style session | **refused by the permission check (2026-11-13)** although the repo's in-play reader uses it on mike's recorded call: a new use needs his permission rule |
+| A book's house rules as a PDF (massgaming.com hosts DraftKings') | the web-fetch agent saves the PDF; WebFetch extracts no text, `pypdf` does | yes (2026-11-13) |
 
 **The weekly cloud review cannot re-probe this table.** Its network refused
 17 of 18 sites on 2026-11-13 (only `api.github.com` answered; the egress

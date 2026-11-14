@@ -294,7 +294,8 @@ def test_the_settler_routes_a_first_half_total_through_the_first_half():
     src = (ROOT / "tracking" / "paper_tracker.py").read_text(encoding="utf-8")
     i = src.index("def _settle_game_picks(")
     body = src[i:src.index("def _settle_game_picks_window", i)]
-    assert 'elif market in ("totals_h1", "spreads_h1"):' in body
+    # h2h_h1 joined the first-half arm for the EuroLeague first-half moneyline (2026-11-14)
+    assert 'elif market in ("totals_h1", "spreads_h1", "h2h_h1"):' in body
     assert "first_half_points(conn, game_id, home_score, away_score)" in body
 
 

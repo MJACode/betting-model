@@ -55,6 +55,12 @@ error.
   +9.76 units. (`docs/ncaaf_market_audit.md` §2, §4)
 - *Failed*: the anchored recipe on pro basketball found nothing; the women's
   college sides off the ratings had β near zero ("the line already holds it").
+  UFC props at five US books, 2021-2026: nothing on KO/TKO, submission,
+  inside the distance, round betting, fight ends in round N or round totals.
+  On a market with many outcomes give the anchor a free slope on the
+  market's own logit and one intercept per outcome type, and fit a two-way
+  market once per pair, on one side: fitted on both sides, the inputs cancel
+  (`docs/ufc_market_audit.md` §5f).
 
 ## 2. The books disagree — with each other, with themselves, with a sharp book
 
@@ -71,6 +77,13 @@ error.
   reference); baseball props, -4.01% on 6,931 ("the edge is specific to a
   market"); baseball totals once quotes had to be within 300 seconds (no bets
   left).
+  *Shipped, missed the stricter bar*: tennis match winner (2026-11-14), the
+  best of seven US books against Pinnacle's POWER-de-vigged pair about 30
+  minutes before the listed start, EV 0.02 to 0.05 with each book's
+  retirement rule, 355 bets +11.0% (+2.5, +19.5); walk-forward cut +1.2%,
+  Bovada placebo +5.2% (`docs/sports/tennis.md`, "Research, round 1"). Same
+  method, same line, on tennis total games and games spreads: null (the
+  three books a median 7% below Pinnacle's fair price).
 - **Line shopping against the books' own median**, priced through an
   empirical final-margin table. "The edge is the off-market number, not a read
   on the game." *Worked*: men's college spreads, 409 bets +9.97% [0.8, 18.4]
@@ -90,6 +103,26 @@ error.
   where the sharp book was up at only 103 of DraftKings' first posts in three
   seasons; check that the reference is up at the soft book's first post
   before planning this rule.
+- **A rating model anchored on the first posted price.** The open is one
+  book's first guess; ratings built before the fight say which way it will
+  be corrected. *Worked*: UFC fight winner, anchored on Pinnacle's no-vig
+  price at least a week out and bet at the best deciding book, on the
+  bought 2020-2026 history: 846 bets +12.85% [+8.0, +17.5], every year
+  positive, +2.2% against Pinnacle's close, placebo -1.9%; live as
+  `ufc_open_moneyline`. The edge grows with the lead and is negative inside
+  a week. On an archive's open (whichever book posted first) it read +7.8%
+  on 1,531; on our 2026 store's 104 DraftKings openers it looked dead, which
+  the purchase overturned. At the close it finds nothing. *Failed* in the
+  same sport: betting the side the line moved toward, at the worst close,
+  lost in every band of move size (`docs/ufc_market_audit.md` §3, §8).
+  *Failed* on UFC round totals: fighter and bout inputs on top of
+  Pinnacle's total made the price worse at 1.5 and 2.5, and their bets
+  matched a donor-input placebo (-5.34% against -5.30%). A per-line
+  intercept alone corrected the price a little and still lost to
+  DraftKings' 6.2% margin as the cut rose (`docs/ufc_market_audit.md` §4d).
+  **Give an anchored model a free intercept per line**: without one it
+  cannot correct a bias in the anchor, and the UFC version bet the side
+  carrying the margin.
 - **A stale opener.** Bet the side the sharp book favours at a soft book's
   stale opening number. *Passed the placebos* (reversed books null, other
   opens null, CLV 0.694, every season positive) and *failed executability*:
@@ -125,6 +158,12 @@ edge is where the rule misses something the state shows.
 - **The halftime break as the decision point.** The state is fixed and "a
   bettor has minutes, not seconds". *Worked*: women's college halftime total,
   669 bets +11.84% [+5.1, +18.1], replayed on the loop's own code.
+  *EuroLeague*: the total, ported unchanged, failed (574 bets -1.93%: it
+  expected too many second-half points); the spread is a lead that misses the
+  bar (364 bets +10.93% [+3.40, +18.48], placebo passed, the false-discovery
+  correction failed), with a measured mechanism: the books carry 50% of the
+  pre-game margin into the second half where the games carried 40%
+  (`docs/euroleague_market_audit.md`, Halftime).
 - **Live re-anchoring off the pre-game number and the clock.** The book's live
   prop line is re-hung from the opener and time elapsed; it under-adjusts for
   the game script. *Measured, in sample*: pro football rushing-attempt unders
@@ -189,13 +228,25 @@ edge is where the rule misses something the state shows.
   bets +15.6% (`docs/nfl_prop_profitability_search.md` §4). Settlement rules
   (overtime, regulation-only second halves, whole-number pushes) produce
   phantom edges the same way.
+- **A settlement rule that hands the bettor an option.** DraftKings voids a
+  tennis moneyline bet on a player who retires after the first set, where the
+  sharp book grades it a loss (DraftKings house rules, p. 47). Priced off the
+  sharp book, every DraftKings tennis price is worth the side's chance of
+  retiring more than it says: 1.13% a side on average, 3.0% after a previous
+  match over 3½ hours, 1.7% within 30 days of a retirement
+  (`scripts/tennis_retirement_rates.py`, 86,797 tour matches 2015-2026). About
+  half DraftKings' 2.4-point margin a side on average, so not an edge alone;
+  a term to add when a DraftKings price is compared with the sharp no-vig
+  number. *Not yet graded against prices* (`docs/sports/tennis.md`). Look for
+  the same shape elsewhere: any market where one book voids what another
+  settles.
 
 ## 8. Stat projections — the default that usually fails
 
 - Pro football: 11 of 11 stat-projection props lost (2,133 bets -1.90%); the
   book prices its main line flat and the information test found nothing the
   line lacked. Pro basketball: a minutes × rate projection is live (66,588 bets
-  +3.60%). Hockey: count models on their own probability worked on unders.
+  +3.60% in the backtest; live `nba_prop_projection`, all settled to 2026-11-13: 84 bets 36-48, -0.42 units, -0.6%, too few to overturn the backtest, reviewed 2026-11-13). Hockey: count models on their own probability worked on unders.
 - **The architecture is a decision before code**
   (`docs/nfl_props_build_prompt.md`): one model across prop markets, one per
   market, or a shared usage core feeding per-market heads. Decide from the
@@ -227,6 +278,51 @@ edge is where the rule misses something the state shows.
 Each line is a hypothesis with its doc. Run it, then move it into the
 sections above with its result.
 
+- Tennis total games and games spreads priced from each player's hold and
+  break rates; the scout found no published test of these markets anywhere
+  (`docs/sports/tennis.md`, mechanism 3).
+- Tennis fatigue (the previous match's length) against the market's own
+  number, decided at the next match's first post (mechanism 4).
+- Men's Grand Slam games spreads: does the book price best of five like best
+  of three (mechanism 5)?
+
+- UFC: a Pinnacle-anchored finish model for round totals on the bought
+  history (every blind total loses; Pinnacle's over is near fair).
+- UFC: notice length from the feed's first listing of a pairing; a
+  DraftKings total left stale when its moneyline moves; the five-round
+  favourite at per-book prices (null at the worst close, fails the late
+  half); BestFightOdds'
+  per-book prop pages as a round-total price route
+- UFC round totals, the card-day over: Pinnacle's no-vig total plus a
+  per-line intercept fitted on earlier years, decided on fight-day pulls,
+  bet at DraftKings when EV >= 0. It fails the bar: 228 bets +6.92%
+  [-2.5, +15.9], 2025 (its biggest year) -2.97%, three best dates removed
+  +3.2% with a late half of -0.5%, and it was the second decision time
+  tried. Even at its full return the interval needs about 400 bets. Nothing
+  records it forward; the experiment is to grade it on fights after
+  2026-06-13 (`docs/ufc_market_audit.md` §4f).
+- UFC: notice length from the feed's first listing of a pairing, for the
+  fight winner (dead on totals); the five-round favourite at per-book
+  prices (null at the worst close, fails the late half)
+  (`docs/ufc_market_audit.md` §8, §9).
+- UFC goes the distance, the market-anchored model: +10.0% on 791 bets at
+  BestFightOdds' last recorded prices 2022-2026, a plateau over cut and
+  penalty, 0 of 50 placebos. **Re-graded at the price an hour before the
+  fight it does not hold**: +6.8% on 745 [-0.9, +14.4], 2026 -3.6%, the cut
+  neighbourhood a hump; about half of it was the market
+  recalibrated (decisions priced too low in 2023-2025), and it loses at
+  DraftKings, the only live prop board read. The experiment: grade it
+  forward on each card's page at FanDuel and Caesars, at the price an hour
+  before each fight (`docs/ufc_market_audit.md` §5f).
+- UFC decision by fighter, a decision price that disagrees with the
+  fight-winner price (each fighter's no-vig method prices rescaled to the
+  fight-winner no-vig chance; no fitted part): 56 bets +49.5% [+12.7,
+  +81.7] at the price an hour before, positive at every cut, but 2025 and
+  2026 lose (16 bets, none of 2026's 7 won), and its own chance at that
+  price (0.259) barely differs from the price's (0.258) while the bets won
+  0.375. Too few, and the wins are not its mechanism's. The experiment:
+  grade it forward with the goes-the-distance lead
+  (`docs/ufc_market_audit.md` §5f).
 - A third live book for live props, turning them into the cross-book
   construction (`docs/nfl_live_prop_assessment.md` §7).
 - Live rushing overs at a low pace ratio; the rushing under out of sample on

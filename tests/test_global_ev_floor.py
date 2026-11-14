@@ -396,6 +396,13 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-11-10 (mike): NCAAF moneylines; the margin table's fair chance
          # at the books' consensus spread.
          "ncaaf_moneyline_market",
+         # 2026-11-13 (mike): UFC fight winner; Pinnacle's no-vig chance moved
+         # by the fighter ratings.
+         "ufc_open_moneyline",
+         # 2026-11-14 (mike): tennis match winners; Pinnacle's
+         # power-de-vigged chance.
+         "atp_moneyline_shop",
+         "wta_moneyline_shop",
          # 2026-11-02 (mike): NCAAB spreads; the margin table's P(win, push left out).
          "ncaab_spread_market",
          # 2026-11-02 (mike): NCAAB moneylines; the margin table's P(side wins).
@@ -417,7 +424,11 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-11-07 (mike): the NCAAB in-play rules; their game-state model's own probability.
          "ncaab_live_spread_h1", "ncaab_live_spread_h2", "ncaab_live_total_h2",
          # 2026-11-11 (mike): the NCAABW halftime total; its game-state model's own probability.
-         "ncaabw_live_total_ht"}
+         "ncaabw_live_total_ht",
+         # 2026-11-13 (mike): the EuroLeague halftime spread; its game-state model's own probability.
+         "euroleague_live_spread_ht",
+         # 2026-11-14 (mike): the four EuroLeague pre-game rules; the market's no-vig chance + the uplift.
+         "euroleague_home_ml", "euroleague_home_dog_spread", "euroleague_h1_dog_ml", "euroleague_q1_club_share_total"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 

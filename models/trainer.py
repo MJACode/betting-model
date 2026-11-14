@@ -157,8 +157,9 @@ def _xgb_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
 def _xgb_multiclass_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
                               n_classes: int) -> float:
     """
-    Optuna objective for multiclass models (UFC method of victory):
-    minimize mean multiclass log-loss across stratified CV folds.
+    Optuna objective for multiclass models (NHL regulation 3-way; UFC method
+    of victory until its retirement on 2026-11-13): minimize mean multiclass
+    log-loss across stratified CV folds.
     """
     params = {
         "n_estimators":     trial.suggest_int("n_estimators", 100, 800),
@@ -229,10 +230,10 @@ def train_model(model_id: str,
     assert_retrain_allowed(sport, what="retrain")
     sport_cfg  = SPORTS[sport]
 
-    # 3-class problems: 'method' (UFC method of victory: 0=decision, 1=ko_tko,
-    # 2=submission) and 'h2h_3way' (NHL regulation result: 0=away reg win,
-    # 1=draw/OT, 2=home reg win). Everything else is binary.
-    is_multiclass = market in ("method", "h2h_3way")
+    # 3-class problems: 'h2h_3way' (NHL regulation result: 0=away reg win,
+    # 1=draw/OT, 2=home reg win). Everything else is binary. ('method', UFC
+    # method of victory, left with that model on 2026-11-13.)
+    is_multiclass = market == "h2h_3way"
     n_classes = 3 if is_multiclass else 2
 
     train_seasons  = train_seasons  or sport_cfg["train_seasons"]
