@@ -46,7 +46,7 @@ purchase below walks the feed's own chain (`next_timestamp`) for that reason.
 | Halftime spread | final margin | the same | the same | **does not clear**: the walk-forward interval reaches zero, and 2026-27 to date is 11-17 (below) |
 | In play outside the break | the final | ESPN play-by-play with wallclock | the same | first-half total loses, first-half spread is flat (below) |
 | First-half moneyline | the first two quarters | none | BetMGM alone, tournament games | parked: one book, a handful of games |
-| First-half spread and total, quarters, team totals, alternates, player props | | | none in the feed | parked: no price source. The men's two first-half models have no women's twin. |
+| First-half spread and total, quarters, team totals, alternates, player props | | | none in the feed | **to do** (reopened 2026-11-14): only the odds feed was asked; DraftKings' own board (league 36647, already read in play by `data/ingestors/dk_live_board.py`) and the odds-comparison sites are untried (the league-models skill, market-grid route 4). The men's two first-half models have no women's twin. |
 
 ## What differs from the men's game
 

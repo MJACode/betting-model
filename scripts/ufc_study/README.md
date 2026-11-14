@@ -26,10 +26,20 @@ the working directory, and imports its siblings from this folder.
    `feed_quotes.py <spool>` builds `feed_quotes.parquet`; then `feed_open.py`
    (each book's first price, the Pinnacle-anchored rule, round totals),
    `feed_kill.py <min lead hours>` (the shipped rule's kill tests),
-   `feed_debut.py`, and `card_replay.py` (the card's own code against the
+   `totals_search.py` (round totals: the anchored model, market structure,
+   the mechanisms and the stuck ladder; audit §4),
+   `feed_debut.py`, `expected_value.py` (the shipped rule's units and return
+   by year, against its own EV and Pinnacle's close), `example_bets.py` (its
+   2026 backtest bets, as picks), and `card_replay.py` (the card's own code against the
    research, bet for bet; needs DATABASE_URL). `live_replay.py` replays the
    rule on our own 2026 store; `non_ufc_events.py <spool>` counts the fights
    listed but not fought on their card.
+
+6. Price routes for the method, distance and round props (audit §5):
+   `dk_props_probe.py` reads DraftKings' own UFC board (run on mike's PC;
+   saves to `dk_probe\`), `bfo_probe.py` reads BestFightOdds' event pages,
+   price charts and event sitemap (saves to `bfo\`). Both read only, and
+   both re-read their saved answers with `--offline`.
 
 `feed_probe.py` is PAID (2 credits a market live, 20 in history) and logs every
 call to `api_call_log` through `config`.
