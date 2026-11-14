@@ -561,6 +561,23 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The tennis match-winner models (models/tennis_moneyline_shop.py
+  // MODEL_IDS), men's and women's tour, decided about 30 minutes before the
+  // listed start at the best price against Pinnacle's.
+  atp_moneyline_shop: {
+    shortLabel: 'ML',
+    longLabel: 'ATP Match Winner',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  wta_moneyline_shop: {
+    shortLabel: 'ML',
+    longLabel: 'WTA Match Winner',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   nhl_moneyline: {
     shortLabel: 'ML',
     longLabel: 'NHL Moneyline',
@@ -1075,6 +1092,14 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   ufc_open_moneyline:
     'The chance this fighter wins, read a week or more before the fight: Pinnacle’s fair price, adjusted ' +
     'by our fighter ratings. Edge is how much higher that chance is than the one the price we bet implies.',
+  // Pinnacle's chance with its margin removed (models/tennis_moneyline_shop.py),
+  // read about 30 minutes before the listed start.
+  atp_moneyline_shop:
+    'The chance this player wins the match: Pinnacle’s price with its margin removed, about 30 minutes ' +
+    'before the listed start. Edge is how much higher that is than the chance the price we bet implies.',
+  wta_moneyline_shop:
+    'The chance this player wins the match: Pinnacle’s price with its margin removed, about 30 minutes ' +
+    'before the listed start. Edge is how much higher that is than the chance the price we bet implies.',
   // P(cover | no push) at the bet's own number (models/ncaab_first_half_spread.py):
   // on a whole-number first-half line a push is possible and is left out.
   ncaab_first_half_spread:
@@ -1339,6 +1364,23 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         'This model posts once a day, in the morning, for fights a week or more away, and bets only ' +
         'some of them. Nothing has posted yet.',
       note: 'Posted a week or more before the fight and never re-priced.',
+    };
+  }
+  // The tennis match-winner models (scripts/tennis_moneyline_card.py): each
+  // match is decided once, 25 to 35 minutes before its listed start, at the
+  // best price, never shorter than -500.
+  if (modelId === 'atp_moneyline_shop' || modelId === 'wta_moneyline_shop') {
+    return {
+      title: 'Decided about 30 minutes before the match',
+      body:
+        'This model decides each match once, about 30 minutes before its listed start. Tennis start ' +
+        'times often slip, so the match may begin later than listed. It bets only some matches, each ' +
+        'at the sportsbook with the best price, which may not be DraftKings. It never lays more than ' +
+        '-500. A posted bet is never re-priced: it stays at the price it posted at.',
+      empty:
+        'This model posts about 30 minutes before each match it bets, and bets only some of them. ' +
+        'Nothing has posted yet.',
+      note: 'Posted about 30 minutes before the listed start and never re-priced.',
     };
   }
   if (HOUR_BEFORE_TIP_MODELS.includes(modelId)) {

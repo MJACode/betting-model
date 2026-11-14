@@ -1072,6 +1072,27 @@ ACTION_THRESHOLDS: dict = {
     # EV against Pinnacle's close +1.4%, donor-opinion placebo -1.9% (best
     # of 50: +6.1%).
     "ufc_open_moneyline":     {"min_prob": 0.0, "min_edge": 0.0},
+    # 2026-11-14 (mike: "build professional tennis models", men's and women's
+    # as separate models). Tennis match winner, decided once about 30 minutes
+    # before the listed start: the best decidable price both ways against
+    # Pinnacle's power-de-vigged pair at the same moment, EV including the
+    # deciding book's retirement rule (models/tennis_moneyline_shop.py,
+    # scripts/tennis_moneyline_card.py). The cut is EV, in MODEL_OWN_EV_FLOOR
+    # (0.02, with a 0.05 cap in the model); these keep every bet it writes.
+    # Bought feed history 2020-09 to 2026-11, 53 tour-level keys, replayed at
+    # the first hourly snapshot within 60 minutes of the listed start
+    # (scripts/tennis_moneyline_replay.py), both tours, -500 floor:
+    #     EV >= 0.010   922 bets   +2.96% [-1.8, +7.7]
+    #          0.015    560        +7.17% [+0.8, +13.5]
+    #          0.020    355       +11.02% [+2.5, +19.5]  <- live
+    #          0.025    201       +15.99% [+4.2, +27.8]
+    #          0.030    120       +11.92% [-3.6, +27.5]
+    # Both halves positive (+5.4 / +16.5), men +11.8% on 188, women +10.1% on
+    # 167, six of seven seasons positive (2023 -9.1% on 42). MISSED the
+    # stricter bar: the cut chosen on earlier seasons each year returns +1.2%
+    # on 704 bets [-4.4, +6.9]; Bovada's price in Pinnacle's place keeps +5.2%.
+    "atp_moneyline_shop":     {"min_prob": 0.0, "min_edge": 0.0},
+    "wta_moneyline_shop":     {"min_prob": 0.0, "min_edge": 0.0},
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -2342,6 +2363,11 @@ MODEL_MIN_ODDS: dict = {
     # the 846 bets were shorter than -200, none shorter than -300 (risk 3u
     # to win 1u there). docs/ufc_market_audit.md 3d.
     "ufc_open_moneyline":        -300,
+    # 2026-11-14 (mike): the research's floor. On the 355 replayed bets the
+    # median price was -165, 23.7% were -300 or shorter (risk 3u to win 0.6u
+    # at -500), 11.0% +200 or longer, the longest +1550.
+    "atp_moneyline_shop":        -500,
+    "wta_moneyline_shop":        -500,
     # NHL totals rule (2026-10-08, mike): -200 is the price floor its evidence
     # was graded at (scripts/nhl_totals_lab.py, `price >= -200`). Pinned here
     # so a Railway DEFAULT_MIN_ODDS override cannot move it off its evidence.
@@ -2790,6 +2816,12 @@ MODEL_OWN_EV_FLOOR: dict = {
     # of a plateau from 0.00 to 0.15 (every cell's interval above zero);
     # the table is beside its ACTION_THRESHOLDS entry.
     "ufc_open_moneyline":       0.06,
+    # 2026-11-14 (mike): THE cut of the tennis match-winner models, EV with
+    # the deciding book's retirement term, the middle of the 0.015-0.03
+    # plateau; the table is beside its ACTION_THRESHOLDS entry. The card
+    # hands the gate (1 + EV) / decimal so the gate checks the same EV.
+    "atp_moneyline_shop":       0.02,
+    "wta_moneyline_shop":       0.02,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2985,6 +3017,10 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # the rating model on Pinnacle's no-vig price, which its EV cut was
     # measured on. No record, so a promoted map would be borrowed.
     "ufc_open_moneyline",
+    # 2026-11-14 (mike): tennis match winners; they decide on Pinnacle's
+    # power-de-vigged chance, which their EV cut was measured on. No record.
+    "atp_moneyline_shop",
+    "wta_moneyline_shop",
 })
 
 
@@ -3199,6 +3235,10 @@ SCORING_METHODS: dict = {
     # 2026-11-13 (mike): UFC fight winner a week out, Pinnacle-anchored rating
     # model (models/ufc_open_moneyline.py); its artifact holds the ridge fit.
     "ufc_open_moneyline":     "rule",
+    # 2026-11-14 (mike): tennis match winners, no artifact: the rule's
+    # constants are in models/tennis_moneyline_shop.py.
+    "atp_moneyline_shop":     "rule",
+    "wta_moneyline_shop":     "rule",
 }
 
 
@@ -3283,6 +3323,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaaf_moneyline":  0.08,
     "ncaaf_moneyline_market": 0.02,  # 2026-11-10 mike: THE cut, the bet side's fair chance minus the bet price's implied; see ACTION_THRESHOLDS
     "ufc_open_moneyline":     0.0,   # 2026-11-13 mike: the cut is EV (0.06), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "atp_moneyline_shop":     0.0,   # 2026-11-14 mike: the cut is EV (0.02), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "wta_moneyline_shop":     0.0,   # 2026-11-14 mike: the cut is EV (0.02), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -3402,6 +3444,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaaf_moneyline":  0.62,
     "ncaaf_moneyline_market": 0.0,  # 2026-11-10 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ufc_open_moneyline":     0.0,  # 2026-11-13 mike: the cut is EV; see ACTION_THRESHOLDS
+    "atp_moneyline_shop":     0.0,  # 2026-11-14 mike: the cut is EV; see ACTION_THRESHOLDS
+    "wta_moneyline_shop":     0.0,  # 2026-11-14 mike: the cut is EV; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)

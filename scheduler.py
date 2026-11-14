@@ -92,6 +92,12 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         pull where Pinnacle and a deciding book both quote it; every other
         run closes the fights that reached the week-out mark. Then publishes.
         RUN_UFC_OPEN_MONEYLINE=0 stops it.)
+  * Tennis match winner   every 10 min, 24x7    -> run_tennis_moneyline_card
+        (scripts/tennis_moneyline_card.py: buys one live pass of the tennis
+        prices, refreshes ESPN's tennis scoreboard, and decides each men's
+        and women's tour match once, 35 minutes or less before its listed
+        start, against Pinnacle's price at that moment. Then publishes.
+        RUN_TENNIS_MONEYLINE_CARD=0 stops it.)
   * NCAAB first-post ML   every minute, 24x7    -> run_ncaab_moneyline_first_post
         (scripts/ncaab_moneyline_first_post_card.py: one keyed planning read
         for a bettable book's NEW moneyline on an NCAAB game, stored by the
@@ -1054,6 +1060,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes UFC fight-winner picks through its own card, reading
                   # the UFC odds the refresh passes stored.
                   "ufc_open_moneyline_card",
+                  # Writes tennis match-winner picks through its own card,
+                  # buying its own pass of the feed's live tennis prices.
+                  "tennis_moneyline_card",
                   # Writes NCAAB first-post moneyline picks through its own
                   # card, reading the odds the capture and the passes store.
                   "ncaab_moneyline_first_post",
@@ -2172,6 +2181,28 @@ def run_ufc_open_moneyline_card() -> None:
     if outcome != "ok":
         raise RuntimeError(f"UFC opening-price card did not finish: {outcome}")
 
+
+# The tennis match-winner card buys one live pass over the active tennis keys
+# (two calls a key), refreshes three days of ESPN's scoreboard and decides a
+# handful of matches; a minute or two.
+TENNIS_MONEYLINE_CARD_TIMEOUT_S = 480
+
+
+def run_tennis_moneyline_card() -> None:
+    """One tennis match-winner card run (scripts/tennis_moneyline_card.py),
+    then publish.
+
+    Every ten minutes, 24x7: each match is decided once, at the first run 35
+    minutes or less before its listed start. The script returns at once when
+    RUN_TENNIS_MONEYLINE_CARD=0; the job still beats. A run that fails or is
+    killed raises AFTER publishing, so the heartbeat records "error", while a
+    bet that was written still goes out.
+    """
+    outcome = _run([sys.executable, "-m", "scripts.tennis_moneyline_card", "--publish"],
+                   "tennis-moneyline-card", timeout=TENNIS_MONEYLINE_CARD_TIMEOUT_S)
+    _publish_new_signals("tennis-moneyline-card")
+    if outcome != "ok":
+        raise RuntimeError(f"tennis match-winner card did not finish: {outcome}")
 
 # The NCAAB first-half window's steps, bounded so a stuck one cannot hold the
 # job past the ticks that follow it (max_instances=1). The fetch is one event
@@ -3443,6 +3474,19 @@ def build_scheduler() -> BlockingScheduler:
         id="ufc_open_moneyline_card",
         name="UFC opening-price card (hourly at :25 UTC: bet on the 12:25Z run, a week or more out)",
         max_instances=1, coalesce=True, misfire_grace_time=600,
+    )
+
+    # Tennis match-winner card -- every ten minutes, 24x7
+    # (run_tennis_moneyline_card): a match is decided at the first run 35
+    # minutes or less before its listed start, so ten minutes keeps the
+    # decision 25 to 35 minutes out, 30 on average, as the replay decided.
+    # Unconditional; the kill switch is in the script.
+    sched.add_job(
+        run_tennis_moneyline_card,
+        CronTrigger(minute="3-59/10", timezone="UTC"),
+        id="tennis_moneyline_card",
+        name="Tennis match-winner card (every 10 minutes: decide 35 minutes or less before the listed start)",
+        max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
     # NCAAB first-post moneyline -- every minute, 24x7

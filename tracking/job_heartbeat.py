@@ -137,6 +137,9 @@ MAX_SILENCE: dict = {
     # The UFC opening-price card: hourly at 25 past, 24x7 UTC, beating on the
     # idle hours too.
     "ufc_open_moneyline_card": 150,
+    # The tennis match-winner card: every ten minutes, 24x7, beating on the
+    # idle runs too, so 40 minutes is four missed runs.
+    "tennis_moneyline_card": 40,
     # Every minute, 24x7, and it beats on the idle ticks too (one read, then
     # return), so 20 minutes is 20 missed ticks: a stopped job, and every game
     # tipping meanwhile undecided by the NCAAB first-half spread model.

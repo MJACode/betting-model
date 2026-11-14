@@ -30,6 +30,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
+from types import SimpleNamespace
 import sys
 
 import requests
@@ -1309,6 +1310,101 @@ def _settle_ufc_picks(
 
         logger.debug(f"  {pick_label}: {result}")
 
+    return wins, losses, pushes, no_actions, total_flat, total_kelly
+
+
+# ── Tennis settlement ─────────────────────────────────────────────────────────
+
+_TENNIS_MODELS = ("atp_moneyline_shop", "wta_moneyline_shop")
+_TENNIS_DONE = ("STATUS_FINAL", "STATUS_RETIRED", "STATUS_WALKOVER", "STATUS_DEFAULTED",
+                "STATUS_CANCELED")
+
+
+def _settle_tennis_picks(
+    conn: DBConnection,
+    game_date: str,
+    settled_at: str,
+) -> tuple[int, int, int, int, float, float]:
+    """Settle unsettled tennis match-winner BETs whose ESPN match is over, for
+    game_date and any earlier date.
+
+    The card stores the ESPN match it linked on its decision row
+    (tennis_moneyline_decisions.comp_id, home_is_p1), so settlement reads that
+    match and nothing else. The grade is the deciding book's own rule
+    (models/tennis_common.grade_moneyline): a walkover, or a retirement
+    before the first set is complete, is void everywhere; after it,
+    DraftKings voids a bet on the retiring player and pays the one who
+    advances, FanDuel and BetMGM grade the retiring player a loss, and
+    Caesars and the books whose rule we have not read void every bet. ESPN's
+    "defaulted" (a disqualification) is graded as a retirement, as
+    DraftKings' rule reads ("the retiring or disqualified player"). A
+    cancelled match is NO_ACTION. Returns (wins, losses, pushes, no_actions,
+    total_flat, total_kelly)."""
+    from models import tennis_common as tc
+    from scripts.tennis_market_study import espn_result
+
+    if not conn.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' "
+                        "AND table_name = 'tennis_moneyline_decisions'").fetchone():
+        return 0, 0, 0, 0, 0.0, 0.0
+    picks = conn.execute("""
+        SELECT p.pick_id, p.pick_side, p.pick_label, p.decision_book,
+               COALESCE(p.decision_odds, p.dk_odds), p.recommended_bet, d.home_is_p1,
+               e.status, e.best_of, e.p1_winner, e.p2_winner, e.p1_games, e.p2_games,
+               p.game_id
+        FROM picks p
+        JOIN tennis_moneyline_decisions d ON d.game_id = p.game_id
+        JOIN tennis_espn_matches e ON e.comp_id = d.comp_id
+        WHERE p.game_date <= %s
+          AND p.result IS NULL
+          AND p.signal_type = 'BET'
+          AND p.model_id = ANY(%s)
+          AND e.status = ANY(%s)
+    """, (game_date, list(_TENNIS_MODELS), list(_TENNIS_DONE))).fetchall()
+    wins = losses = pushes = no_actions = 0
+    total_flat = total_kelly = 0.0
+    for (pick_id, side, label, book, odds, rec_bet, home_is_p1, status, best_of,
+         p1w, p2w, g1, g2, game_id) in picks:
+        if status == "STATUS_CANCELED":
+            res = None
+        else:
+            row = SimpleNamespace(status="STATUS_RETIRED" if status == "STATUS_DEFAULTED" else status,
+                                  best_of=best_of, p1_winner=p1w, p2_winner=p2w,
+                                  p1_games=g1, p2_games=g2)
+            res = espn_result(row, a_is_p1=bool(home_is_p1))
+            if res is None:
+                logger.warning(f"  tennis: {label}: ESPN {status} but no readable score; waits")
+                continue
+        grade = tc.VOID if res is None else tc.grade_moneyline(res, "a" if side == "home" else "b", book)
+        profit_flat = profit_kelly = 0.0
+        decimal = american_to_decimal(odds)
+        if grade == tc.WIN:
+            result = "WIN"
+            profit_flat = round(100.0 * (decimal - 1), 2)
+            profit_kelly = round((rec_bet or 0.0) * (decimal - 1), 2)
+            wins += 1
+        elif grade == tc.LOSS:
+            result = "LOSS"
+            profit_flat = -100.0
+            profit_kelly = round(-(rec_bet or 0.0), 2)
+            losses += 1
+        else:
+            result = "NO_ACTION"
+            no_actions += 1
+        total_flat += profit_flat
+        total_kelly += profit_kelly
+        conn.execute("""
+            UPDATE picks SET result = %s, profit_flat = %s, profit_kelly = %s, settled_at = %s
+            WHERE pick_id = %s
+        """, (result, profit_flat, profit_kelly, settled_at, pick_id))
+        if res is not None and res.status != "walkover":
+            sets_a = sum(1 for a, b in zip(res.a_games, res.b_games) if a > b)
+            sets_b = sum(1 for a, b in zip(res.a_games, res.b_games) if b > a)
+            conn.execute("""
+                UPDATE games SET home_score = %s, away_score = %s, home_win = %s,
+                                 updated_at = NOW()::TEXT
+                WHERE game_id = %s AND home_score IS NULL
+            """, (sets_a, sets_b, 1 if res.a_advanced else 0, game_id))
+        logger.info(f"  tennis: {label} at {book}: {result} (ESPN {status})")
     return wins, losses, pushes, no_actions, total_flat, total_kelly
 
 
@@ -2648,6 +2744,11 @@ _RULE_MODEL_MARKETS = {
     # a draw or no contest a push. Named here so its market is never the
     # default's guess.
     "ufc_open_moneyline": "h2h",
+    # Tennis match winners (models/tennis_moneyline_shop.py, 2026-11-14,
+    # mike). Settled by _settle_tennis_picks: the ESPN match on the card's
+    # decision row, at the deciding book's own retirement rule.
+    "atp_moneyline_shop": "h2h",
+    "wta_moneyline_shop": "h2h",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).
@@ -3346,6 +3447,17 @@ def settle_picks(game_date: str = None) -> dict:
         no_actions += u_no_actions
         total_profit_flat  += u_flat
         total_profit_kelly += u_kelly
+
+        # ── Tennis match winners (the ESPN match on the decision row) ─────
+        t_wins, t_losses, t_pushes, t_no_actions, t_flat, t_kelly = (
+            _settle_tennis_picks(conn, game_date, settled_at)
+        )
+        wins       += t_wins
+        losses     += t_losses
+        pushes     += t_pushes
+        no_actions += t_no_actions
+        total_profit_flat  += t_flat
+        total_profit_kelly += t_kelly
 
         # ── Golf picks (outright / top-N / make-cut / matchup) ────────────
         # Trailing window — DataGolf results post a day or two after Sunday.

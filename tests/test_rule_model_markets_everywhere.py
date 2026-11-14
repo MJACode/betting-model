@@ -167,9 +167,12 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
         # ufc_open_moneyline (the UFC fight-winner model, 2026-11-13) names
         # itself as h2h.
         "clv-standard-v2-power-80-0.05-12-ncaaf-moneyline-market",
+        # ufc_open_moneyline's, which production may hold before the tennis
+        # match-winner models (2026-11-14) name themselves as h2h.
+        "clv-standard-v2-power-80-0.05-12-ufc-open-moneyline",
     }
     assert declared not in stamped_before, (
-        "clv_game_market changed (ufc_open_moneyline) after production may have "
+        "clv_game_market changed (atp_moneyline_shop, wta_moneyline_shop) after production may have "
         "stamped this comment; without a new comment the guard never re-creates it")
 
 
@@ -177,7 +180,7 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
 # production never re-created the function: the guard above could not see it, because it reads only the comment.
 # Editing clv_game_market now fails here until the comment is bumped AND this hash is set to the new body's.
 # The hash is the merged body: nba_q1_trend_ml from #1218 and ncaaf_moneyline_market from this branch.
-GAME_MARKET_BODY = {"clv-standard-v2-power-80-0.05-12-ufc-open-moneyline": "17c87ab5e096a7f2"}
+GAME_MARKET_BODY = {"clv-standard-v2-power-80-0.05-12-tennis-moneyline-shop": "27d5cd89252cb4b9"}
 
 
 def test_an_edit_to_the_market_map_bumps_the_comment():
