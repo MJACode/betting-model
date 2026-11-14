@@ -49,6 +49,57 @@ export function fillBetslipLink(link: string, state: string | null): string | nu
 }
 
 /**
+ * The link a book's iPhone app CLAIMS, so iOS can be asked to open it in the
+ * app and nowhere else (lib/openInApp.ts).
+ *
+ * Measured 2026-11-12 from each host's apple-app-site-association file as
+ * Apple's CDN serves it (worker job 1224851, scripts/book_app_links_probe.py):
+ *
+ *   draftkings      sportsbook.draftkings.com   every path
+ *   fanduel         sportsbook.fanduel.com      every path
+ *   williamhill_us  sportsbook.caesars.com      /us/<state>/bet/*
+ *   betmgm          sports.<state>.betmgm.com   /<lang>/sportsapp/* ONLY
+ *
+ * BetMGM's stored betslip link is `/en/sports?options=…`, which its app does
+ * not claim, so it always opened Safari (Matt, 2026-11-12: "MGM link took me
+ * to the website"). The same query under `/en/sportsapp/sports` is claimed.
+ * Whether the app then puts the selection on the slip is not documented and
+ * has not been seen on a device.
+ *
+ * With no betslip link, the book's claimed root stands in, so the app still
+ * opens. Null for a book whose app claims nothing we hold (BetRivers outside
+ * NJ, Hard Rock, Fanatics, Bally, betPARX, Rebet), and when a state is needed
+ * and not set.
+ */
+export function appClaimedLink(
+  book: string,
+  link: string | null | undefined,
+  state: string | null,
+): string | null {
+  const filled = link && link.trim() ? fillBetslipLink(link, state) : null;
+  if (link && link.trim() && !filled) return null; // a template we cannot fill
+  const st = state ? state.toLowerCase() : null;
+  switch (book) {
+    case 'draftkings':
+      return filled ?? 'https://sportsbook.draftkings.com/';
+    case 'fanduel':
+      return filled ?? 'https://sportsbook.fanduel.com/';
+    case 'williamhill_us':
+      if (filled) return /^https:\/\/sportsbook\.caesars\.com\/us\/[a-z]{2}\/bet\//.test(filled) ? filled : null;
+      return st ? `https://sportsbook.caesars.com/us/${st}/bet/` : null;
+    case 'betmgm': {
+      if (filled) {
+        const m = /^(https:\/\/sports\.[a-z]{2}\.betmgm\.com\/[a-z]{2})\/sports(\?.*)?$/.exec(filled);
+        return m ? `${m[1]}/sportsapp/sports${m[2] ?? ''}` : null;
+      }
+      return st ? `https://sports.${st}.betmgm.com/en/sportsapp/sports` : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
  * Join several single-selection betslip links into ONE URL that puts every
  * linked pick on the book's slip.
  *
