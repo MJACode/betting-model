@@ -39,7 +39,7 @@ on (2,398 games); referees, venue and attendance per game.
 | Regulation 3-way (a draw after 40 minutes) | quarters 1-4 | `h2h_3_way` at two books on today's board | to do; check depth |
 | In play: full game | final | the full path's in-play snapshots (5 minutes) | to do |
 | In play: full game at halftime | final, overtime included | the full path's in-play snapshots (every 5 minutes during games), halftime placed by the shot chart | **total and moneyline null; the halftime spread a lead that misses the bar** (364 bets +10.93% [+3.40, +18.48]; `docs/euroleague_market_audit.md`, Halftime) |
-| Player props | | no player key answered | parked: no price source |
+| Player props | | the feed: no player key answered | **to do** (reopened 2026-11-14): only the odds feed was asked; DraftKings' own board and the odds-comparison sites are untried (the league-models skill, market-grid route 4) |
 | Futures (champion) | | not checked | parked |
 
 ## What differs from the games we already bet

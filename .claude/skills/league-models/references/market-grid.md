@@ -68,22 +68,37 @@ after all of them (CLAUDE.md §1b).
    --sport <SPORT> [--markets <key>]` asks one market per call against a live
    event. Stored data cannot tell apart "the key is unsupported", "supported
    but no book prices it" and "served, but we never asked" — all three are an
-   empty table (`docs/market_coverage.md`).
+   empty table (`docs/market_coverage.md`). **A market key the feed refuses
+   (HTTP 422) is a market the feed does not carry, not one no book prices.**
+   UFC's method, distance and round markets were refused by the feed and
+   priced on DraftKings' own board (route 4).
 3. **Free archives.** ESPN's core API odds (one provider a game, opening and
    closing numbers, coverage varies by season), closing lines in a stats API
    (the college football stats API carries closes), sportsdataverse season
    files, a prediction market's history.
-4. **The prior season's close**, as a last resort for a baseline.
-   Before it: **free public archives** a sport's own community keeps.
+   Also the **free public archives** a sport's own community keeps.
    UFC has two (2026-11-13): fight-canon-db (GitHub releases, MIT;
    BestFightOdds open and closing range, 2007+) and the Ultimate UFC
    Dataset (CC BY 4.0; a near-close fight price and method prices by
    fighter, 2012+). Store one in Supabase like a bought one, keyed on
    `source`, before the first table is read from it
    (`data/ingestors/ufc_price_archive.py`).
+4. **Each book's own board, and the sport's odds-comparison sites.** Two
+   checks, both before any row parks for price:
+   - **The book's own board, sub-page by sub-page.** A book prices far more
+     than the feed resells. DraftKings' board answers from mike's PC and
+     refuses the Railway worker. `data/ingestors/dk_live_board.py` holds the
+     client, the board address and the league ids. The board lists its
+     categories and sub-pages; read the ones the grid row needs.
+   - **Odds-comparison sites that keep each book's history.** BestFightOdds
+     keeps the US books' MMA prop prices, with their history, from mid-2021
+     (`docs/ufc_market_audit.md`). Read the site's robots.txt first.
+     `references/scouting.md` records which sites answered and how.
+   Store what is read in Supabase the same run, as for any archive.
 5. **Paid providers** other than the feed: `docs/odds_sources.md` prices them.
    More thin books add rejections, not edge; the case for a new provider is a
    book or market we cannot get (a sharp prop book, for example).
+6. **The prior season's close**, as a last resort for a baseline.
 
 **Finding a key's windows for a few credits.** When a sport key is only
 active part of the year (tennis: one key per tournament), three history event
@@ -95,8 +110,8 @@ window is in the same year, repeat from it: a key can hold two windows a
 year. The whole tennis sweep cost 337 credits for 129 windows
 (`data/ingestors/tennis_odds_history.sweep_key_year`, 2026-11-13).
 
-**Period, team-total and alternate history** comes only from the per-event
-endpoint, one call per game per time, billed 10 credits per market a book
+**Period, team-total and alternate history** on the feed comes only from the
+per-event endpoint, one call per game per time, billed 10 credits per market a book
 actually returns (an empty answer is free). How far back it goes differs by
 league: EuroLeague's answers from 2023 (HTTP 422 on a 2022-12 game), with
 DraftKings in none of it (`docs/sports/euroleague.md`). Ask every market key

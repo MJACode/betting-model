@@ -69,6 +69,56 @@ review as its own entry.
    recurs: when a price route refuses (a site block), the copy of its data
    elsewhere is not a route; the permission check refused it, and the feed's
    own history was the price source that matched the live path anyway.
+## 2026-11-13 — UFC round totals, run to the end of the ladder
+
+1. **Scope.** mike asked why the markets beside the fight winner were not
+   tested, and whether the skill was followed. Round totals had been called
+   null without the anchored model on the bought history, without three
+   mechanisms of our own and without the stuck ladder. This entry is that
+   search (`docs/ufc_market_audit.md` §4).
+2. **Tried.** A Pinnacle-anchored finish model in three nested forms,
+   walk-forward by year, at DraftKings (the only book a pick may name with
+   totals in the history); blind sides by line and pull; DraftKings against
+   Pinnacle in the same pull; four mechanisms of our own (stale DraftKings
+   total after a moneyline move, women's and flyweight overs, five-round
+   overs, short-notice unders); every rung of the stuck ladder. Nothing
+   clears. One lead, the card-day over (+6.92% on 228, interval below zero,
+   2025 negative), fails the bar and goes to the frontier.
+3. **New.**
+   - Kill test (`kill-tests.md`, "Is the data right?"): check the no-vig
+     split before trusting closing value; on UFC totals the proportional
+     split charges the over about 2.5 points.
+   - Method note (`methods.md` §1): an anchored model needs a free intercept
+     per line; fighter inputs on a UFC total failed the donor placebo.
+   - Frontier (`methods.md`): the card-day over, graded forward only.
+4. **Corrected.** Was "DraftKings' totals in the bought history from 2025",
+   now "from late 2023, 1,072 fights", because the history was counted by
+   year (`docs/ufc_market_audit.md` §4, `docs/sports/ufc.md`). Was "22 bets
+   of DraftKings against Pinnacle in one pull", now 8,090 comparable pulls,
+   43 with DraftKings above Pinnacle's fair price.
+5. **The framework.** Two failures, one a skipped rule, one a hole in the
+   skill. Both changed in `SKILL.md` and `references/market-grid.md`.
+   - **Skipped.** The first UFC entry called round totals null after one
+     model, before the three mechanisms and the ladder. `SKILL.md` already
+     required both, so the rule was there and was skipped. Now the rule says
+     it binds each market, and a null row names its three mechanisms and
+     the ladder's rungs, so a skipped step shows in the text (step 5).
+   - **A hole.** Step 1 let a row park as "no price source", and
+     the price routes never named a book's own board or a comparison
+     site's per-book history. Parking is not null, so nothing sent the
+     row up the ladder. UFC parked method of victory, goes the distance and
+     round betting that way, because the odds feed refused their keys
+     (HTTP 422). DraftKings' own board priced all three on 2026-11-14,
+     and BestFightOdds holds the US books' prices for them from mid-2021
+     (#1304). **The same park stood in two more leagues**: EuroLeague
+     player props, and women's college basketball's first halves, quarters,
+     team totals, alternates and props. Three leagues meets the promotion
+     bar, so it is now a rule. In step 1, "no price" is never a reason to
+     park until every route has a written result. The route list gains the
+     book's board and the comparison sites (market-grid route 4). The
+     ladder now runs before a market parks for want of a price. The two
+     other leagues' rows are reopened as to-dos.
+
 ## 2026-11-13 — UFC, a rebuild from zero
 
 1. **Scope.** mike: *"Use the model building skill to build models for UFC.
