@@ -63,3 +63,26 @@ def test_the_behavioural_checks_pass():
         timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_tracking_reads_the_latest_list_not_a_render_copy():
+    """Matt, 2026-11-14: three placed via Bet all, one showed tracked."""
+    src = _read(MOBILE / "src" / "hooks" / "useTrackedBets.ts")
+    track = src.split("export async function trackPicks(")[1].split("\n}\n")[0]
+    assert "const ids = idCache ?? [];" in track
+    sheet = _read(MOBILE / "src" / "components" / "BetAllSheet.tsx")
+    assert "onTrack(step.legs.map((l) => l.pick))" in sheet
+    home = _read(MOBILE / "src" / "screens" / "PicksHomeScreen.tsx")
+    assert "onTrack={tracked.trackMany}" in home
+
+
+@pytest.mark.skipif(tsx_cmd(MOBILE) is None, reason="mobile node modules not installed")
+def test_batch_tracking_keeps_every_pick():
+    proc = subprocess.run(
+        [*tsx_cmd(MOBILE), "scripts/verify_tracked_batch.ts"],
+        cwd=MOBILE,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
