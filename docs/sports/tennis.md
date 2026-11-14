@@ -149,8 +149,8 @@ book's no-vig number (mechanism 1 below).
 | Market | Settles on | Inputs held | Prices | Baseline | Method | Result | Status |
 |---|---|---|---|---|---|---|---|
 | Match winner | the player who advances; retirement and walkover rules per book (above) | results 2000-2026 (archive), 2010-2026 (ESPN); Elo; serve and return counts | DraftKings, FanDuel, BetMGM, Caesars, Fanatics, BetRivers, Hard Rock; Pinnacle and the Betfair exchange as references; from 2020-09 | every quote blind at the close: -3.4% (DraftKings) to -5.0% (BetMGM) | line shop against Pinnacle's power-de-vigged pair at the same moment, with each book's retirement term; fatigue and a modelled retirement chance against the price: no bet | 355 bets, +68.77 units, +11.0% [+2.5, +19.5] about 30 minutes before the listed start; walk-forward cut +1.2% (below) | **LIVE** 2026-11-14: `atp_moneyline_shop`, `wta_moneyline_shop` (missed the stricter bar, below) |
-| Games spread | games won by each player, completed matches | the same | BetRivers and Caesars (decidable); Pinnacle, Bovada, LowVig, BetOnline, Bally, betPARX | blind at the close: every side at every US book negative | a serve-and-return game model against the line (running); line shop | line shop null: decidable books a median 7% below Pinnacle's fair price on the same line | in progress |
-| Total games | both players' games, a tiebreak one game | the same | the same books | blind at the close: every US book negative both sides, the over worse | a serve-and-return game model (hold rates, tiebreak chance) (running); line shop | line shop null (as above); blind: every US book loses both sides, the over worse | in progress |
+| Games spread | games won by each player, completed matches | the same | BetRivers and Caesars (decidable); Pinnacle, Bovada, LowVig, BetOnline, Bally, betPARX | blind at the close: every side at every US book negative | a serve-and-return game model anchored to Pinnacle's match price; line shop | both null (below); the serve statistics' added coefficient over the line is the lead | round 2: a model centred on the line |
+| Total games | both players' games, a tiebreak one game | the same | the same books | blind at the close: every US book negative both sides, the over worse | a serve-and-return game model (hold rates, tiebreak chance) anchored to the match price; line shop | both null: the model sits 2.6 to 3.6 games over the line and bets overs into the dearer side | round 2: a model centred on the line |
 | First-set winner | set one | the same | BetMGM and LeoVegas only, per-event endpoint | | | | parked: one decidable book, history only by the per-event endpoint |
 | **Below the top tier** (men's 250s, Challengers and ITF; women's 125s and ITF), all three markets | as above; DraftKings voids an ITF moneyline on any retirement | results: ESPN for the 250s and 125s, TennisExplorer for every level from 2020 (collecting), the archive to June 2026 | the odds feed: none (it sells only its 53 keys). Pinnacle direct: every level, from 2026-11-13 (collecting). TennisExplorer: one price pair a match, an average of books near the close (below), from 2020 (collecting). **DraftKings, from 2026-11-13**: the match winner at every level, games spread and total games from the Challenger and 125 level up | to do | ratings, serve and return, fatigue and retirement models against Pinnacle's price at the same moment | — | **collecting**: a backtest at a price we could have bet starts from 2026-11-13; before that, research ranks models against Pinnacle and the average close only |
 | Alternate games spreads and totals | as above | | LeoVegas, Coral, Ladbrokes | | | | parked: no decidable book |
@@ -297,6 +297,33 @@ shows the two agree; DraftKings' site prices for the levels below the tour
 (collecting since 2026-11-13); a modelled retirement chance in place of the
 flat rate (the fatigue and retirement study, running).
 
+**Serve and return, total games and games spreads: null (mechanisms 3 and
+5).** `scripts/tennis_serve_study.py` (design fixed in its docstring before
+any result): each player's serve and return points won over the previous 52
+weeks against the tour-and-surface average, a hold-and-tiebreak model of the
+match, shifted until its match-win chance equals Pinnacle's power price,
+priced at the three books that post these markets. 9,779 matches before
+2026-06-01 with both players matched (99.2% of player slots).
+- **Totals**: every cut loses with its interval below zero (the close at EV 0
+  or more: 5,840 bets, -547.07 units, -8.2%), almost every bet an over. The
+  model's average total sits 2.6 to 3.6 games above the line, because a
+  fixed serve gap that reproduces the match price is never as lopsided as
+  real matches are. The maths matches a 120,000-match point-by-point
+  simulation, so this is the model's shape, not a bug.
+- **Spreads**: every cut loses (the close at EV 0 or more: 4,241 bets,
+  -376.77 units), almost every bet on the underdog; the model under-predicts
+  the favourite's margin by 0.3 games (best of three) and 0.9 (best of five).
+- **Best of five priced like best of three** (mechanism 5): the best price on
+  the best-of-five favourite's games spread, blind, at the close, is +1.35%
+  on 1,457 bets (-2.7% to +5.4%), negative in two seasons and carried by the
+  home side and five days. Not an edge.
+- **The one lead**: what the players' serve statistics add on top of the
+  book's own line, as a coefficient, is positive in every cell (z 2.0 to 2.7
+  on totals, 1.9 to 2.2 on spreads). One observation, not six (the three
+  decision times are the same matches), and the size a multiple-testing
+  correction usually removes. It needs a model centred on the line (round 2,
+  below), not one that sets its own level.
+
 **Fatigue and a modelled retirement chance: no bet (mechanisms 1 and 4).**
 `scripts/tennis_fatigue_study.py` (branch `claude/tennis-fatigue-study`) on
 8,854 priced matches before 2026-06-01, 98.9% of players matched to the
@@ -404,9 +431,11 @@ cover it on an average quote; any edge is in the quotes that stand apart.
 
 ## Open items
 
-- Round 1 is above. Running: the serve-and-return model for total games and
-  games spreads (mechanisms 3 and 5). Fatigue and the retirement model
-  (mechanisms 1 and 4): no bet, above.
+- Round 1 is above. Round 2 for the games markets: centre on the book's line
+  and bet only where the two players' serve dominance departs from their
+  tour-and-surface average, with a multiple-testing correction; or add a
+  day-to-day form shift fitted on 2015-2019 so the model's level matches real
+  totals before any priced season.
 - Closing value is not recorded on tennis picks: the closing-price capture
   reads the shared `odds` table, and tennis prices live in
   `tennis_odds_quotes` (#1320).
