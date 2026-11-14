@@ -377,19 +377,21 @@ def at(h, m, s=0):
     return dt.datetime(2026, 11, 3, h, m, s, tzinfo=UTC)
 
 
+# 2026-11-03 is Eastern standard time (UTC-5): 06:00 ET is 11:00 UTC. The
+# windows are Eastern: 05:40-07:15 ET (10:40-12:15 UTC here), and :15-:27 of
+# every hour, overnight included.
 @pytest.mark.parametrize("now,wait_until", [
-    (at(9, 58), None),             # window opens in 120 s, more than the margin
-    (at(9, 59), at(10, 51)),       # opens in 60 s: a batch could run into it
-    (at(10, 0), at(10, 51)),
-    (at(10, 50, 59), at(10, 51)),  # 10:50 itself is closed
-    (at(10, 51), None),
-    (at(11, 15), at(11, 28)),
-    (at(11, 27, 59), at(11, 28)),  # :27 itself is closed
-    (at(11, 28), None),
+    (at(10, 38), None),            # morning window opens in 120 s, more than the margin
+    (at(10, 39), at(12, 28)),      # opens in 60 s; it ends 07:16 ET and 07:15-07:27 follows
+    (at(11, 0), at(12, 28)),       # the 6am ET daily: closed (the old UTC window missed it)
+    (at(12, 27, 59), at(12, 28)),
+    (at(12, 28), None),
+    (at(14, 15), at(14, 28)),      # 09:15 ET, a refresh pass
     (at(14, 13, 50), at(14, 28)),  # :15 opens in 70 s
-    (at(22, 20), at(22, 28)),
-    (at(23, 15), None),            # the hourly refresh window ends with hour 22
-    (at(3, 15), None),
+    (at(8, 20), at(8, 28)),        # 03:20 ET: the overnight passes are covered now
+    (at(4, 15), at(4, 28)),        # 23:15 ET
+    (at(8, 30), None),
+    (at(10, 0), None),             # 05:00 ET is open: the old summer window is gone
 ])
 def test_reads_wait_for_the_pipeline_and_refresh_windows(now, wait_until):
     wait = lm.seconds_until_reads_allowed(now, margin_s=75)
@@ -397,9 +399,17 @@ def test_reads_wait_for_the_pipeline_and_refresh_windows(now, wait_until):
     assert wait == expected
 
 
+def test_the_windows_follow_eastern_time_through_the_clock_change():
+    """In summer (EDT, UTC-4) the same Eastern windows sit an hour earlier in UTC."""
+    summer = dt.datetime(2026, 7, 1, 9, 45, tzinfo=UTC)          # 05:45 EDT
+    assert lm.seconds_until_reads_allowed(summer, margin_s=0) == (
+        dt.datetime(2026, 7, 1, 11, 28, tzinfo=UTC) - summer).total_seconds()
+    assert lm.seconds_until_reads_allowed(dt.datetime(2026, 7, 1, 9, 39, tzinfo=UTC), margin_s=0) == 0
+
+
 def test_no_margin_means_the_last_second_before_a_window_is_open():
-    assert lm.seconds_until_reads_allowed(at(9, 59, 59), margin_s=0) == 0
-    assert lm.seconds_until_reads_allowed(at(10, 0, 0), margin_s=0) == 51 * 60
+    assert lm.seconds_until_reads_allowed(at(10, 39, 59), margin_s=0) == 0
+    assert lm.seconds_until_reads_allowed(at(10, 40, 0), margin_s=0) == 108 * 60
 
 
 def _throttle(probe_values, start):
@@ -424,10 +434,12 @@ def test_reads_pause_while_more_than_six_other_sessions_are_active():
 
 
 def test_reads_pause_through_the_6am_pipeline_window():
-    th, slept, clock = _throttle([0], at(10, 30))
+    # 05:50 ET in winter: closed until 07:28 ET (the morning window, then the
+    # 07:15-07:27 refresh window), which is 12:28 UTC.
+    th, slept, clock = _throttle([0], at(10, 50))
     th.wait()
-    assert clock() == at(10, 51)
-    assert th.paused_s == 21 * 60
+    assert clock() == at(12, 28)
+    assert th.paused_s == 98 * 60
 
 
 # ------------------------------------------------------------- secrets

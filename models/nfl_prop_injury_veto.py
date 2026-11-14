@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from data.db import rollback_savepoint, statement_timeout
 from data.ingestors.nfl_props_data_ingestor import norm_player_name
 
 # Canonical statuses that mean the player will not play. Lowercased so a
@@ -107,8 +108,20 @@ def load_nfl_injury_index(conn, as_of_date: str | None = None) -> dict:
 
     Fail-open: a missing column, a dead connection, or no rows returns {}.
     The card then bets as it did before this gate existed.
+
+    A statement timeout is NOT failed open (2026-11-14). The injuries exist;
+    they could not be read in time, and an empty index would let the card bet
+    a player who is Out. The read runs in a savepoint, so a timeout leaves the
+    caller's transaction usable, and it is re-raised: that date fails this
+    pass and the next pass retries it. Swallowing it without a rollback, as
+    before, left the transaction aborted, and the scorer's next statement
+    failed "current transaction is aborted" for the whole date.
     """
     if conn is None:
+        return {}
+    try:
+        conn.execute("SAVEPOINT nfl_injury_index")
+    except Exception:  # noqa: BLE001 -- a dead or fake connection: fail open
         return {}
     try:
         if as_of_date:
@@ -134,8 +147,15 @@ def load_nfl_injury_index(conn, as_of_date: str | None = None) -> dict:
             """,
             (report_date,),
         ).fetchall()
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        rollback_savepoint(conn, "nfl_injury_index")
+        if statement_timeout(exc):
+            raise
         return {}
+    try:
+        conn.execute("RELEASE SAVEPOINT nfl_injury_index")
+    except Exception:  # noqa: BLE001
+        rollback_savepoint(conn, "nfl_injury_index")
 
     out: dict[str, list] = {}
     for player_name, status, status_ts in rows or ():

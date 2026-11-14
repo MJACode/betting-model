@@ -47,9 +47,10 @@ one connection on the transaction pooler; every batch is its own
 SET SESSION on the transaction pooler would stay on a shared server connection
 and could land on a live scorer's session). Batches are at most 50k rows and at
 most ~32 MB, read by primary-key index, with a sleep between them. It pauses
-while more than 6 other sessions are active, and does not read at 10:00-10:50
-UTC (the 6am ET pipeline) or at minutes :15-:27 of hours 11-22 UTC (the hourly
-refresh). It never writes to the database.
+while more than 6 other sessions are active, and does not read at 05:40-07:15
+ET (the 6am pipeline) or at minutes :15-:27 of every hour ET (the refresh
+pass). Eastern time, so a clock change cannot move them. It never writes to
+the database.
 
 RESUMABLE. Each table's manifest is rewritten after every chunk; a killed run
 picks up where it stopped. Files no manifest references are deleted on the
@@ -90,6 +91,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
+from zoneinfo import ZoneInfo
 
 UTC = dt.timezone.utc
 
@@ -160,11 +162,23 @@ def read_env_value(name: str, env_file: Path | None) -> str | None:
 
 # --------------------------------------------------------------- read windows
 
-# (start minute of the UTC day, end minute, exclusive). The end minute named in
-# the rule is included: "10:00-10:50" closes at 10:51, ":15-:27" at :28.
+# (start minute of the EASTERN day, end minute, exclusive). The end minute named
+# in the rule is included: "05:40-07:15" closes at 07:16, ":15-:27" at :28.
+#
+# Eastern, not UTC (2026-11-14). The pipeline runs on Eastern time: the daily at
+# 06:00 ET, a refresh pass at :17 every hour, overnight included. These windows
+# were fixed in UTC at 10:00-10:50, which is 06:00 ET only in summer; from the
+# clock change on 2026-11-01 the copy read straight through the 6am run, and it
+# never paused for the overnight passes. Timeouts on 11-12 to 11-14 fell inside
+# the copy's runs (35 of 39; issue #1328).
+#   05:40-07:15 ET  the morning window (the daily, and the overnight refresh it
+#                   can overlap; the same window tracking/morning_disk.py uses)
+#   :15-:27         every hour, around the :17 refresh pass
 CLOSED_WINDOWS: tuple[tuple[int, int], ...] = (
-    (10 * 60, 10 * 60 + 51),
-) + tuple((h * 60 + 15, h * 60 + 28) for h in range(11, 23))
+    (5 * 60 + 40, 7 * 60 + 16),
+) + tuple((h * 60 + 15, h * 60 + 28) for h in range(24))
+
+ET = ZoneInfo("America/New_York")
 
 
 def _day_start(t: dt.datetime) -> dt.datetime:
@@ -173,7 +187,7 @@ def _day_start(t: dt.datetime) -> dt.datetime:
 
 def closed_until(now: dt.datetime) -> dt.datetime | None:
     """End of the closed window containing `now`, or None when reads are open."""
-    now = now.astimezone(UTC)
+    now = now.astimezone(ET)
     day = _day_start(now)
     for start, end in CLOSED_WINDOWS:
         s = day + dt.timedelta(minutes=start)
@@ -185,7 +199,7 @@ def closed_until(now: dt.datetime) -> dt.datetime | None:
 
 def next_window(now: dt.datetime) -> tuple[dt.datetime, dt.datetime]:
     """(start, end) of the first closed window that starts after `now`."""
-    now = now.astimezone(UTC)
+    now = now.astimezone(ET)
     for day_offset in (0, 1):
         day = _day_start(now) + dt.timedelta(days=day_offset)
         for start, end in CLOSED_WINDOWS:

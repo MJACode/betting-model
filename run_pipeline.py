@@ -1003,7 +1003,8 @@ def step_nba_quarters(run_date: str) -> bool:
             # The Stats tab's 1st Basket board (Matt, 2026-11-08), from the
             # same play-by-play: tips, first shots and first scores.
             from data.ingestors.nba_first_basket import rebuild as fb_rebuild
-            logger.success(f"✓ NBA first-basket stats: {fb_rebuild(conn, [season - 1, season])}")
+            from data.ingestors.nba_first_basket import seasons_to_build as fb_seasons
+            logger.success(f"✓ NBA first-basket stats: {fb_rebuild(conn, fb_seasons(conn, season))}")
         except Exception as exc:
             conn.rollback()
             logger.error(f"✗ NBA first-basket stats failed: {exc}")

@@ -315,10 +315,12 @@ There is one database, and it serves live scoring. The copy reads through one
 connection, and every read is its own read-only transaction with a 60-second
 limit. A read is at most 50,000 rows and about 32 MB, taken in primary-key
 order, with a short pause between reads. The copy waits while more than 6
-other queries are running. It does not read at 10:00-10:50 UTC (the 6am ET
-pipeline) or at minutes :15-:27 of each hour from 11:00 to 22:00 UTC (the
-hourly refresh). It never writes to the database. An interrupted run picks up
-where it stopped.
+other queries are running. It does not read at 05:40-07:15 ET (the 6am
+pipeline) or at minutes :15-:27 of every hour ET, overnight included (the
+refresh pass). The windows are in Eastern time so a clock change cannot move
+them: they were in UTC until 2026-11-14, and from the November clock change
+the copy read straight through the 6am run (issue #1328). It never writes to
+the database. An interrupted run picks up where it stopped.
 
 ### Running it by hand
 

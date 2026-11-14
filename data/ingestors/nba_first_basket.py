@@ -35,6 +35,22 @@ from data.db import get_connection
 GAMES_TABLE = "nba_first_basket_games"
 PLAYERS_TABLE = "nba_first_basket_players"
 
+# The seasons' period-1 plays, read from nba_pbp ONCE per rebuild. The four
+# statements below used to read them twice each (the plays and the tip):
+# eight passes over the 1.2 GB table, every play of every game fetched to keep
+# the period-1 ones. On 2026-11-13/14 the step timed out four times in six
+# runs. A session temp table, dropped at the end, so it works on a pooled or
+# an autocommit connection alike.
+PERIOD1_SQL = """
+CREATE TEMP TABLE fb_period1 AS
+SELECT p.espn_game_id, p.play_no, p.team_side, p.athlete_id_1, p.athlete_id_2,
+       p.type_text, p.shooting_play, p.scoring_play, p.points
+  FROM nba_pbp p
+  JOIN nba_pbp_games g USING (espn_game_id)
+ WHERE g.season = ANY(%(seasons)s) AND g.season_type = 2 AND g.game_id IS NOT NULL
+   AND p.period = 1
+"""
+
 # Shared CTEs: the games, their period-1 plays, the opening tip, the game's
 # first score, and each team's first shot and first score.
 _BASE = """
@@ -46,17 +62,15 @@ WITH g AS (
 p AS (
   SELECT p.espn_game_id, p.play_no, p.team_side, p.athlete_id_1, p.type_text,
          p.shooting_play, p.scoring_play, p.points
-    FROM nba_pbp p
-    JOIN g USING (espn_game_id)
-   WHERE p.period = 1 AND p.team_side IN ('H', 'A')
+    FROM fb_period1 p
+   WHERE p.team_side IN ('H', 'A')
 ),
 tip AS (
   SELECT DISTINCT ON (pp.espn_game_id)
          pp.espn_game_id, pp.team_side AS tip_side,
          pp.athlete_id_1 AS j1, pp.athlete_id_2 AS j2
-    FROM nba_pbp pp
-    JOIN g USING (espn_game_id)
-   WHERE pp.period = 1 AND pp.type_text = 'Jumpball'
+    FROM fb_period1 pp
+   WHERE pp.type_text = 'Jumpball'
    ORDER BY pp.espn_game_id, pp.play_no
 ),
 fs AS (
@@ -211,6 +225,19 @@ DELETE FROM nba_first_basket_players t
 """
 
 
+def seasons_to_build(conn, season: int) -> list[int]:
+    """This season always; last season only while it has no rows. A finished
+    season's play-by-play does not change, and rebuilding it every day doubled
+    the work of a step that was timing out (2026-11-14)."""
+    out = [season]
+    if tables_exist(conn):
+        row = conn.execute(f"SELECT 1 FROM {GAMES_TABLE} WHERE season = %s LIMIT 1",
+                           (season - 1,)).fetchone()
+        if not row:
+            out.insert(0, season - 1)
+    return out
+
+
 def tables_exist(conn) -> bool:
     row = conn.execute(
         "SELECT to_regclass('public.nba_first_basket_games') IS NOT NULL "
@@ -229,6 +256,9 @@ def rebuild(conn, seasons: list[int]) -> dict:
                        "(add_nba_first_basket_2026_11_08.sql); skipped")
         return {"seasons": seasons, "games": 0, "players": 0, "skipped": "no table"}
     params = {"seasons": seasons}
+    conn.execute("DROP TABLE IF EXISTS fb_period1")
+    conn.execute(PERIOD1_SQL, params)
+    conn.execute("ANALYZE fb_period1")
     cur = conn.execute(GAMES_SQL, params)
     n_games = cur.rowcount if cur.rowcount is not None else 0
     cur = conn.execute(PLAYERS_SQL, params)
@@ -237,6 +267,7 @@ def rebuild(conn, seasons: list[int]) -> dict:
     d_games = cur.rowcount if cur.rowcount is not None else 0
     cur = conn.execute(PLAYERS_DELETE_SQL, params)
     d_players = cur.rowcount if cur.rowcount is not None else 0
+    conn.execute("DROP TABLE IF EXISTS fb_period1")
     conn.commit()
     return {"seasons": seasons, "games": n_games, "players": n_players,
             "deleted_games": d_games, "deleted_players": d_players}
