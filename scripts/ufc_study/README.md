@@ -31,5 +31,11 @@ the working directory, and imports its siblings from this folder.
    rule on our own 2026 store; `non_ufc_events.py <spool>` counts the fights
    listed but not fought on their card.
 
+6. Price routes for the method, distance and round props (audit §5):
+   `dk_props_probe.py` reads DraftKings' own UFC board (run on mike's PC;
+   saves to `dk_probe\`), `bfo_probe.py` reads BestFightOdds' event pages,
+   price charts and event sitemap (saves to `bfo\`). Both read only, and
+   both re-read their saved answers with `--offline`.
+
 `feed_probe.py` is PAID (2 credits a market live, 20 in history) and logs every
 call to `api_call_log` through `config`.
