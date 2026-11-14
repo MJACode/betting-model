@@ -302,7 +302,7 @@ unposted row stays in `picks`. Every model locks
 its pick at its first BET. **The lock is on a BET, not a game:** a game that did
 not bet is not frozen. When, and how often, a model decides is its own
 parameter, chosen by out-of-sample expected units replayed at the live check
-rate (mike, 2026-11-14; the league-models skill's porting traps). **Timing is data, not metadata:** `created_at` is when the number
+rate (mike, 2026-11-14; `docs/decision_timing.md`). **Timing is data, not metadata:** `created_at` is when the number
 was available and is part of the pick's meaning.
 
 - **A SETTLED PICK LEAVES THE RECORD ONLY TWO WAYS, AND A PAUSE IS NEITHER.**
@@ -619,8 +619,7 @@ What stays here is what has to be known BEFORE deciding which file to open
 | Front-end UX review checklist (the `frontend-ux-designer` agent's contract) | `mobile/docs/UX_REVIEW.md` |
 | Player news feed + the "Recent News" sheet | `docs/player_news.md` |
 | Sportsbook logos in the line pills (and why a label ships first) | `docs/book_logos.md` |
-| **Can a paused model be profitable? The standing assessment** | `docs/paused_model_assessment.md` |
-| **Evidence behind the §1b and §7 rules** | `docs/rules_evidence.md` |
+| **Can a paused model be profitable? The standing assessment** | `docs/paused_model_assessment.md` || **Evidence behind the §1b and §7 rules** | `docs/rules_evidence.md` |
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
 | **Model artifacts: present, tracked, and loadable** | `docs/artifact_integrity.md` |
 | **NFL wind: how far out it may fire, and the lead evidence** | `docs/nfl_wind_lead_evidence.md` |
