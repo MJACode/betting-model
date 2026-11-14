@@ -30,6 +30,40 @@ review as its own entry.
 
 ---
 
+## 2026-11-13 — UFC round totals, run to the end of the ladder
+
+1. **Scope.** mike asked why the markets beside the fight winner were not
+   tested, and whether the skill was followed. Round totals had been called
+   null without the anchored model on the bought history, without three
+   mechanisms of our own and without the stuck ladder. This entry is that
+   search (`docs/ufc_market_audit.md` §4).
+2. **Tried.** A Pinnacle-anchored finish model in three nested forms,
+   walk-forward by year, at DraftKings (the only book a pick may name with
+   totals in the history); blind sides by line and pull; DraftKings against
+   Pinnacle in the same pull; four mechanisms of our own (stale DraftKings
+   total after a moneyline move, women's and flyweight overs, five-round
+   overs, short-notice unders); every rung of the stuck ladder. Nothing
+   clears. One lead, the card-day over (+6.92% on 228, interval below zero),
+   goes to the frontier as a forward-only test.
+3. **New.**
+   - Kill test (`kill-tests.md`, "Is the data right?"): check the no-vig
+     split before trusting closing value; on UFC totals the proportional
+     split charges the over about 2.5 points.
+   - Method note (`methods.md` §1): an anchored model needs a free intercept
+     per line; fighter inputs on a UFC total failed the donor placebo.
+   - Frontier (`methods.md`): the card-day over, graded forward only.
+4. **Corrected.** Was "DraftKings' totals in the bought history from 2025",
+   now "from late 2023, 1,058 fights", because the history was counted by
+   year (`docs/ufc_market_audit.md` §4, `docs/sports/ufc.md`). Was "22 bets
+   of DraftKings against Pinnacle in one pull", now 8,090 comparable pulls,
+   43 with DraftKings above Pinnacle's fair price.
+5. **The framework.** The first UFC entry called a market null after one
+   model and before the invention floor and the ladder, which `SKILL.md`
+   already required. The rule was there and was skipped; the gap is that
+   nothing checks it. Proposed for the next review: the doc's verdict line
+   for a null market must name its three mechanisms and the ladder's
+   rungs, so a skipped step shows in the text.
+
 ## 2026-11-13 — UFC, a rebuild from zero
 
 1. **Scope.** mike: *"Use the model building skill to build models for UFC.

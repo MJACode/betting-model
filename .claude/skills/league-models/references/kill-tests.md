@@ -172,6 +172,14 @@ finding either way.
   market (the others were within about 2) was a stat that counted fewer tackles
   than the books grade, and the backtest on it was +22% and fake, because it
   graded against our own undercount.
+- **Check the no-vig split before trusting closing value.** Splitting a
+  two-way margin in proportion assumes the book loads both sides alike. On
+  UFC round totals it loads the under: at the 2.5 line the over won 60.4%
+  against a no-vig 57.9% (1,594 fights), and knowing Pinnacle's close in
+  advance still lost 2.8% at DraftKings. Closing value against that close
+  charges the cheap side about 2.5 points. Compare each side's blind return
+  first; if one is near zero and the other carries the whole margin, say so
+  beside every CLV number (`docs/ufc_market_audit.md` §4b, §4f).
 - **Validate the grading before moving a cut.** Recompute outcomes from raw
   scores and reconcile with stored settlements. A sign error in away-side
   spread grading once turned -20.6% into +15%. `scored_line` is the home
