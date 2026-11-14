@@ -14,19 +14,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { NotificationsButton } from '@/components/NotificationsButton';
-import { colors, opacity, spacing } from '@/lib/theme';
+import { colors, opacity } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-export function SettingsButton() {
+/** `showBell={false}` only where the gear is not a tab header (the Betslip modal). */
+export function SettingsButton({ showBell = true }: { showBell?: boolean } = {}) {
   const navigation = useNavigation<Nav>();
   return (
     <View style={styles.row}>
-    <NotificationsButton />
+    {showBell ? <NotificationsButton /> : null}
     <Pressable
       onPress={() => navigation.navigate('Settings')}
-      hitSlop={8}
       accessibilityLabel="Open settings"
       accessibilityRole="button"
       style={({ pressed }) => [styles.btn, pressed && { opacity: opacity.pressed }]}
@@ -38,6 +38,8 @@ export function SettingsButton() {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  btn: { padding: 4 },
+  row: { flexDirection: 'row', alignItems: 'center' },
+  // 44pt boxes that abut, no hitSlop, so the bell and gear never share a
+  // touch area (UX review, 2026-11-14).
+  btn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -14,7 +14,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useNotificationInbox } from '@/hooks/useNotificationInbox';
 import { navigateTo } from '@/hooks/usePushDeepLink';
-import { routeForPush } from '@/lib/pushRoute';
+import { routeForPush, type PushRoute } from '@/lib/pushRoute';
 import {
   inboxRowSpeech,
   inboxSections,
@@ -22,11 +22,25 @@ import {
   type InboxItem,
 } from '@/lib/notificationInboxHelpers';
 import { showToast } from '@/components/Toast';
+import { EmptyState } from '@/components/EmptyState';
+import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { colors, font, opacity, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+function hintFor(route: PushRoute | null): string | undefined {
+  if (!route) return undefined;
+  switch (route.kind) {
+    case 'pick':
+      return 'Opens the pick';
+    case 'feedbackThread':
+      return 'Opens the conversation';
+    case 'board':
+      return 'Opens the Picks board';
+  }
+}
 
 /**
  * The notifications inbox (Matt, 2026-11-14): every push from the last 30
@@ -49,6 +63,14 @@ export function NotificationsScreen() {
 
   const sections = useMemo(() => inboxSections(items), [items]);
 
+  // The spinner shows for a pull only, not for the refresh on every return.
+  const [pulling, setPulling] = useState(false);
+  const pull = useCallback(async () => {
+    setPulling(true);
+    await refresh();
+    setPulling(false);
+  }, [refresh]);
+
   const open = useCallback(
     (item: InboxItem) => {
       if (!item.is_read) void markRead(item.id);
@@ -65,25 +87,38 @@ export function NotificationsScreen() {
     if (!ok) showToast('Couldn’t mark them read. Try again.', { announce: true });
   }, [markAllRead]);
 
-  const header = (
-    <View style={styles.toolbar}>
-      <Text style={styles.toolbarText} accessibilityRole="header">
-        {unread > 0 ? `${unread} unread` : 'All caught up'}
-      </Text>
-      {unread > 0 ? (
-        <Pressable
-          onPress={() => void readAll()}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel={`Mark all ${unread} as read`}
-          style={({ pressed }) => [styles.readAll, pressed && { opacity: opacity.pressed }]}
-        >
-          <Ionicons name="checkmark-done" size={16} color={colors.tint} />
-          <Text style={styles.readAllText}>Read all</Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
+  // Read all lives in the navigation bar, so it is still there after the list
+  // has scrolled (UX review, 2026-11-14). Shown only while something is unread.
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight:
+        unread > 0
+          ? () => (
+              <Pressable
+                onPress={() => void readAll()}
+                accessibilityRole="button"
+                accessibilityLabel={`Mark all ${unread} as read`}
+                style={({ pressed }) => [styles.readAll, pressed && { opacity: opacity.pressed }]}
+              >
+                <Ionicons name="checkmark-done" size={16} color={colors.tint} />
+                <Text style={styles.readAllText}>Read all</Text>
+              </Pressable>
+            )
+          : undefined,
+    });
+  }, [navigation, unread, readAll]);
+
+  const header =
+    items.length > 0 ? (
+      <View>
+        {error ? (
+          <ErrorBanner what="your notifications" error={error} onRetry={() => void refresh()} retrying={loading} />
+        ) : null}
+        <Text style={styles.toolbarText} accessibilityRole="header">
+          {unread > 0 ? `${unread} unread` : 'All caught up'}
+        </Text>
+      </View>
+    ) : null;
 
   if (!loaded && loading) {
     return (
@@ -100,8 +135,8 @@ export function NotificationsScreen() {
       sections={sections}
       keyExtractor={(item) => String(item.id)}
       stickySectionHeadersEnabled={false}
-      refreshControl={<RefreshControl refreshing={loaded && loading} onRefresh={() => void refresh()} />}
-      ListHeaderComponent={items.length > 0 ? header : null}
+      refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => void pull()} />}
+      ListHeaderComponent={header}
       renderSectionHeader={({ section }) => (
         <Text style={styles.sectionTitle} accessibilityRole="header">
           {section.title}
@@ -112,7 +147,7 @@ export function NotificationsScreen() {
           onPress={() => open(item)}
           accessibilityRole="button"
           accessibilityLabel={inboxRowSpeech(item)}
-          accessibilityHint={routeForPush(item.data) ? 'Opens it' : undefined}
+          accessibilityHint={hintFor(routeForPush(item.data))}
           style={({ pressed }) => [
             styles.row,
             index === 0 && styles.rowFirst,
@@ -127,14 +162,14 @@ export function NotificationsScreen() {
             <View style={styles.rowTop}>
               <Text
                 style={[styles.title, !item.is_read && styles.titleUnread]}
-                numberOfLines={2}
+                numberOfLines={3}
               >
                 {item.title}
               </Text>
               <Text style={styles.time}>{inboxTimeLabel(item.created_at)}</Text>
             </View>
             {item.body ? (
-              <Text style={styles.body} numberOfLines={3}>
+              <Text style={styles.body}>
                 {item.body}
               </Text>
             ) : null}
@@ -147,14 +182,14 @@ export function NotificationsScreen() {
         </View>
       )}
       ListEmptyComponent={
-        <View style={styles.empty}>
-          <Ionicons name="notifications-outline" size={36} color={colors.textTertiary} />
-          <Text style={styles.emptyTitle}>{error ? 'Couldn’t load' : 'No notifications yet'}</Text>
-          <Text style={styles.emptyBody}>
-            {error ??
-              'New bets, live picks, line moves on bets you track, and replies to your feedback land here, even when push is off. They stay for 30 days.'}
-          </Text>
-        </View>
+        error ? (
+          <ErrorState what="your notifications" error={error} onRetry={() => void refresh()} retrying={loading} />
+        ) : (
+          <EmptyState
+            title="No notifications yet"
+            subtitle="New bets, live picks, line moves on bets you track, and replies to your feedback land here, even when push is off. They stay for 30 days."
+          />
+        )
       }
       ListFooterComponent={<BetslipBarSpacer />}
     />
@@ -165,24 +200,18 @@ const styles = StyleSheet.create({
   list: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, paddingBottom: spacing.xl },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-  toolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
-    minHeight: 44,
-  },
   toolbarText: {
     fontSize: font.size.footnote,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     fontWeight: font.weight.semibold,
+    marginBottom: spacing.xs,
   },
   readAll: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
     minHeight: 44,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.xs,
   },
   readAllText: {
     fontSize: font.size.body,
@@ -191,7 +220,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: font.size.footnote,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     fontWeight: font.weight.semibold,
     textTransform: 'uppercase',
     marginTop: spacing.md,

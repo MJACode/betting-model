@@ -22,7 +22,6 @@ export function NotificationsButton() {
   return (
     <Pressable
       onPress={() => navigation.navigate('Notifications')}
-      hitSlop={8}
       accessibilityRole="button"
       accessibilityLabel={
         badge ? `Notifications, ${unread} unread` : 'Notifications'
@@ -46,16 +45,20 @@ export function NotificationsButton() {
 }
 
 const styles = StyleSheet.create({
-  btn: { padding: 4 },
+  // A full 44pt box, no hitSlop: the gear beside it is the same box, so the
+  // two targets abut instead of overlapping (UX review, 2026-11-14).
+  btn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   badge: {
     position: 'absolute',
-    top: 0,
-    right: -2,
+    top: 5,
+    right: 3,
     minWidth: 18,
-    height: 18,
+    minHeight: 18,
     paddingHorizontal: 4,
     borderRadius: 9,
-    backgroundColor: colors.avoid,
+    // tint, like the Stats filter badge and the Betslip count. Not avoid: that
+    // red is the AVOID signal and is 3.55:1 under white text.
+    backgroundColor: colors.tint,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
@@ -63,7 +66,7 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     color: colors.textInverse,
-    fontSize: font.size.nano + 1,
+    fontSize: font.size.micro,
     fontWeight: font.weight.bold,
   },
 });

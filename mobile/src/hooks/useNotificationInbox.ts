@@ -93,13 +93,17 @@ function useStore() {
 }
 
 /**
- * The bell's count. Refreshes on mount, whenever the app comes to the
- * foreground, and when a push arrives while the app is open, so a missed
- * notification shows on the badge without a pull-to-refresh.
+ * One set of refresh triggers for the whole app, however many bells are
+ * mounted (every tab header has one): a refresh when the app comes to the
+ * foreground, and when a push arrives while it is open. Reference-counted, so
+ * the last bell to unmount removes them.
  */
-export function useInboxUnread(): number {
-  useStore();
-  useEffect(() => {
+let triggerUsers = 0;
+let removeTriggers: (() => void) | null = null;
+
+function retainTriggers(): () => void {
+  triggerUsers += 1;
+  if (triggerUsers === 1) {
     void refreshInboxUnread();
     const appSub = AppState.addEventListener('change', (s) => {
       if (s === 'active') void refreshInboxUnread();
@@ -114,18 +118,32 @@ export function useInboxUnread(): number {
     } catch {
       // A build without expo-notifications: the badge still refreshes on focus.
     }
-    return () => {
+    removeTriggers = () => {
       appSub.remove();
       pushSub?.remove();
     };
-  }, []);
+  }
+  return () => {
+    triggerUsers -= 1;
+    if (triggerUsers === 0 && removeTriggers) {
+      removeTriggers();
+      removeTriggers = null;
+    }
+  };
+}
+
+/** The bell's count, kept fresh by the shared triggers above. */
+export function useInboxUnread(): number {
+  useStore();
+  useEffect(() => retainTriggers(), []);
   return unread;
 }
 
 export function useNotificationInbox() {
   useStore();
   const [loading, setLoading] = useState(!loaded);
-  const [error, setError] = useState<string | null>(null);
+  // The raw error, so ErrorState / ErrorBanner can word it (friendlyError).
+  const [error, setError] = useState<unknown>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -134,7 +152,7 @@ export function useNotificationInbox() {
       setError(null);
     } catch (err) {
       console.warn('[inbox] load failed', err);
-      setError('Couldn’t load your notifications. Pull to try again.');
+      setError(err);
     } finally {
       setLoading(false);
     }

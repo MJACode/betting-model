@@ -420,7 +420,8 @@ function ParlayScreenBody() {
                 Saved{savedParlays.count > 0 ? ` (${savedParlays.count})` : ''}
               </Text>
             </Pressable>
-            <SettingsButton />
+            {/* The Betslip is a modal task, not a tab: no inbox bell over the slip. */}
+            <SettingsButton showBell={false} />
           </View>
         </View>
       </View>
