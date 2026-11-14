@@ -6,9 +6,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { BookChecklist, toggleBook } from '@/components/BookChecklist';
 import { BrandMark } from '@/components/BrandMark';
 import { BOOKS, usePreferredBooks, type BookKey } from '@/hooks/usePreferredBooks';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing } from '@/lib/theme';
 import { pageLabel } from '@/lib/a11y';
 import { discordOnboardingSlide } from '@/lib/discordJoin';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -186,18 +187,15 @@ export function OnboardingModal({
               ))}
             </View>
           )}
-          <Pressable
+          <PrimaryButton
+            label={onBooks ? (booksOnly ? 'Save' : 'Save and get started') : 'Next'}
             onPress={next}
-            accessibilityRole="button"
             accessibilityLabel={
               onBooks
                 ? `Save ${selected.length} sportsbook${selected.length === 1 ? '' : 's'}${booksOnly ? '' : ' and get started'}`
                 : `Next, ${pageLabel(step + 1, total).toLowerCase()}`
             }
-            style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
-          >
-            <Text style={styles.btnText}>{onBooks ? (booksOnly ? 'Save' : 'Save and get started') : 'Next'}</Text>
-          </Pressable>
+          />
         </View>
       </SafeAreaView>
     </Modal>
@@ -267,16 +265,4 @@ const styles = StyleSheet.create({
     backgroundColor: colors.separatorOpaque,
   },
   dotActive: { backgroundColor: colors.tint, width: 22 },
-  btn: {
-    backgroundColor: colors.tint,
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
-    alignItems: 'center',
-  },
-  btnPressed: { opacity: 0.8 },
-  btnText: {
-    color: colors.textInverse,
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-  },
 });

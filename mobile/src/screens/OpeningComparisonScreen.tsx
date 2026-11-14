@@ -11,7 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { fetchOpeningVsLive, fetchOpeningSlices } from '@/lib/queries';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { formatPct, formatPctSigned } from '@/lib/format';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, spacing, card } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { OpeningVsLiveRow, OpeningSliceRow } from '@/types';
@@ -267,10 +267,8 @@ const styles = StyleSheet.create({
   loading: { marginVertical: spacing.lg },
   row: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.md },
   trackCard: {
+    ...card,
     flex: 1,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
     alignItems: 'center',
   },
   trackLabel: { fontSize: font.size.footnote, color: colors.textTertiary, marginBottom: 4 },
@@ -291,9 +289,7 @@ const styles = StyleSheet.create({
   },
   trackStat: { fontSize: font.size.caption, color: colors.textTertiary, textAlign: 'center' },
   noteCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   noteTitle: {
@@ -304,9 +300,7 @@ const styles = StyleSheet.create({
   },
   noteBody: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 19 },
   sliceCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   sliceHeader: {

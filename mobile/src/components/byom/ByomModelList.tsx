@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -16,9 +16,11 @@ import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { sportDisplayName } from '@/lib/liveSports';
 import { asByomSport, byomEmptyLabel } from '@/lib/byomRecord';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Sport } from '@/hooks/useSportFilter';
 import type { RootStackParamList } from '@/types';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -133,14 +135,12 @@ export function ByomModelList({ sport }: { sport: Sport }) {
             </View>
           ) : null}
           {built ? (
-            <Pressable
+            <PrimaryButton
+              label={`Build an ${sport} model`}
               onPress={openBuilder}
-              accessibilityRole="button"
-              accessibilityLabel={`Build an ${sport} model`}
-              style={({ pressed }) => [styles.build, pressed && styles.pressed]}
-            >
-              <Text style={styles.buildText}>+ Build an {sport} model</Text>
-            </Pressable>
+              icon={<Ionicons name="add" size={18} color={colors.textInverse} />}
+              style={styles.build}
+            />
           ) : null}
           <BetslipBarSpacer />
         </>
@@ -186,20 +186,5 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
   },
-  build: {
-    minHeight: 44,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.lg,
-    borderRadius: radii.md,
-    backgroundColor: colors.tint,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  buildText: {
-    color: colors.textInverse,
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-  },
-  pressed: { opacity: 0.7 },
+  build: { marginHorizontal: spacing.lg, marginTop: spacing.lg },
 });

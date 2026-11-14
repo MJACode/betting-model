@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
 import { sportSpokenName } from '@/lib/loadState';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 
 export function StatsSportButton() {
   const { sport, setSport } = useSportFilter();
@@ -106,7 +106,7 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: opacity.pressed },
   backdrop: { flex: 1, backgroundColor: '#00000066', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: colors.bg,

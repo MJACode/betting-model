@@ -23,7 +23,7 @@ import {
   type FeedbackCategory,
   type FeedbackMessage,
 } from '@/lib/feedbackHelpers';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
@@ -210,7 +210,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
   },
-  whenMine: { color: '#FFFFFFB0' },
+  whenMine: { color: colors.textInverseSecondary },
   awaiting: {
     fontFamily: font.family,
     fontSize: font.size.caption,
@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
     minWidth: 72,
     alignItems: 'center',
   },
-  sendBtnDisabled: { opacity: 0.4 },
+  sendBtnDisabled: { opacity: opacity.disabled },
   sendText: {
     fontFamily: font.family,
     fontSize: font.size.body,

@@ -2,7 +2,8 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity, card } from '@/lib/theme';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 /**
  * Soft lock for a free member. Same card on Picks, Signals, Live,
@@ -32,14 +33,7 @@ export function SignalLockCard({
         </View>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.body}>{body}</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Unlock with Premium"
-          onPress={onPress}
-          style={({ pressed }) => [styles.cta, pressed && styles.pressed]}
-        >
-          <Text style={styles.ctaText}>Unlock with Premium</Text>
-        </Pressable>
+        <PrimaryButton label="Unlock with Premium" onPress={onPress} variant="brand" />
       </View>
 
       {onRecord ? (
@@ -93,25 +87,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 21,
   },
-  cta: {
-    minHeight: 48,
-    alignSelf: 'stretch',
-    borderRadius: radii.md,
-    backgroundColor: colors.brand,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  ctaText: {
-    fontFamily: font.family,
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.brandInk,
-  },
   record: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
+    ...card,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
@@ -129,5 +106,5 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: opacity.pressed },
 });

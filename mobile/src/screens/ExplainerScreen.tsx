@@ -1,7 +1,7 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, card } from '@/lib/theme';
 import { BYOM_UNITS_COPY } from '@/lib/byomRecord';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
@@ -398,9 +398,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   section: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   heading: {

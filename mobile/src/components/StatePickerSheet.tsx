@@ -4,7 +4,7 @@ import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { BETTING_STATES, useBettingState } from '@/hooks/useBettingState';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 
 /**
  * "Your state" — the US state the member's sportsbook accounts are licensed
@@ -124,5 +124,5 @@ const styles = StyleSheet.create({
   },
   rowName: { flex: 1, fontSize: font.size.body, color: colors.textPrimary },
   emptyCircle: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: colors.separatorOpaque },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: opacity.pressed },
 });

@@ -37,8 +37,9 @@ import {
   type SeasonChoice,
 } from '@/lib/positionVsOpponent';
 import { ordinal } from '@/lib/teamDetail';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity, cardDense } from '@/lib/theme';
 import type { PositionVsOpponentRow } from '@/types';
+import { SegmentTabs } from '@/components/GroupTabs';
 
 /** Rows before the first "Show more". */
 const ROWS_SHOWN = 6;
@@ -196,25 +197,16 @@ export function PositionVsOpponentCard({
         }}
       />
 
-      <View style={styles.segment} accessibilityRole="tablist">
-        {(['this', 'last'] as const).map((c) => {
-          const active = c === choice;
-          return (
-            <Pressable
-              key={c}
-              onPress={() => pick(c)}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel={c === 'this' ? 'This season' : 'Last season'}
-              hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
-              style={[styles.chip, active && styles.chipActive]}
-            >
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                {c === 'this' ? 'This season' : 'Last season'}
-              </Text>
-            </Pressable>
-          );
-        })}
+      {/* The app's segmented control (SegmentTabs, compact) — it was a pair
+          of filled pills here, a third segmented style (UI pass 2026-11-14). */}
+      <View style={styles.segment}>
+        <SegmentTabs
+          items={['this', 'last'] as const}
+          active={choice}
+          onChange={pick}
+          labelFor={(c) => (c === 'this' ? 'This season' : 'Last season')}
+          compact
+        />
       </View>
 
       {loading && rows.length === 0 ? (
@@ -236,7 +228,7 @@ export function PositionVsOpponentCard({
               accessibilityRole="button"
               accessibilityLabel="Show last season"
               hitSlop={{ top: 15, bottom: 15, left: 0, right: 0 }}
-              style={({ pressed }) => [styles.emptyAction, pressed && { opacity: 0.7 }]}
+              style={({ pressed }) => [styles.emptyAction, pressed && { opacity: opacity.pressed }]}
             >
               <Text style={styles.more}>Show last season</Text>
             </Pressable>
@@ -334,7 +326,7 @@ export function PositionVsOpponentCard({
                   onPress={() => setVisible((v) => v + ROWS_STEP)}
                   accessibilityRole="button"
                   accessibilityLabel={`Show ${Math.min(ROWS_STEP, left)} more ${unit}, ${left} left`}
-                  style={({ pressed }) => [styles.moreButton, pressed && { opacity: 0.7 }]}
+                  style={({ pressed }) => [styles.moreButton, pressed && { opacity: opacity.pressed }]}
                 >
                   <Text style={styles.moreText}>
                     Show {Math.min(ROWS_STEP, left)} more · {left} left
@@ -346,7 +338,7 @@ export function PositionVsOpponentCard({
                   onPress={() => setVisible(ROWS_SHOWN)}
                   accessibilityRole="button"
                   accessibilityLabel={`Show fewer ${unit}`}
-                  style={({ pressed }) => [styles.moreButton, pressed && { opacity: 0.7 }]}
+                  style={({ pressed }) => [styles.moreButton, pressed && { opacity: opacity.pressed }]}
                 >
                   <Text style={styles.moreText}>Show fewer</Text>
                 </Pressable>
@@ -405,21 +397,8 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
   },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: radii.pill,
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.separator,
-  },
-  chipActive: { backgroundColor: colors.tint, borderColor: colors.tint },
-  chipText: { fontSize: font.size.footnote, color: colors.textSecondary, fontWeight: font.weight.semibold },
-  chipTextActive: { color: colors.textInverse },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
+    ...cardDense,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
   },

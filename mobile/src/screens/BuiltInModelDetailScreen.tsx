@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -29,7 +29,7 @@ import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelDetailTitle, modelLong, modelPageTiming, modelShort, sportOfModel } from '@/lib/modelMeta';
 import { navShowsSportOnly } from '@/lib/modelBadgeLayout';
 import { signalsContextTime } from '@/lib/signalsCard';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, sectionHeaderText, card } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, postedPickUnits, publishedRecordKeeps } from '@/lib/thresholds';
@@ -40,6 +40,7 @@ import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { PickRowTitle } from '@/components/PickRowTitle';
 import { unitsSpeech } from '@/lib/a11y';
+import { SkeletonList } from '@/components/Skeleton';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -227,7 +228,7 @@ export function BuiltInModelDetailScreen() {
         )}
         ListEmptyComponent={
           todayLoading ? (
-            <ActivityIndicator style={styles.loading} />
+            <SkeletonList label="live picks" rows={2} style={styles.skeleton} />
           ) : (
             <EmptyState
               title="No live BET picks right now"
@@ -335,7 +336,7 @@ export function BuiltInModelDetailScreen() {
                 ) : null}
               </>
             ) : settledLoading ? (
-              <ActivityIndicator style={styles.loading} />
+              <SkeletonList label="the record" rows={4} style={styles.skeleton} />
             ) : settledError ? null : (
               <Text style={styles.sectionNote}>No posted picks in this record.</Text>
             )}
@@ -429,7 +430,7 @@ export function BuiltInModelDetailScreen() {
               />
             ) : null}
             {settledLoading && stats.picks === 0 && history.length > 0 ? (
-              <ActivityIndicator style={styles.loading} />
+              <SkeletonList label="the record" rows={2} style={styles.skeleton} />
             ) : null}
             <BetslipBarSpacer />
           </>
@@ -570,9 +571,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   list: { paddingBottom: spacing.xl },
   headerCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     marginTop: spacing.md,
     marginBottom: spacing.md,
@@ -592,11 +591,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   sectionHeader: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
@@ -710,7 +705,7 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
     fontWeight: font.weight.semibold,
   },
-  loading: { marginVertical: spacing.xl },
+  skeleton: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
   // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
   errorBannerInset: { marginTop: 0, marginBottom: spacing.sm },
 });

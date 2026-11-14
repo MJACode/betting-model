@@ -11,7 +11,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 
 export interface FilterChipProps {
   label: string;
@@ -133,7 +133,7 @@ const styles = StyleSheet.create({
     borderColor: colors.tint,
   },
   chipDisabled: {
-    opacity: 0.45,
+    opacity: opacity.disabled,
   },
   text: {
     fontSize: font.size.footnote,
@@ -151,7 +151,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   countWrapActive: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: colors.inverseWash,
   },
   countText: {
     fontSize: font.size.nano,
@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
   countTextActive: {
     color: colors.textInverse,
   },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: opacity.pressed },
 });
 
 /** Horizontal scroller spacing for a row of chips. Exported so every caller

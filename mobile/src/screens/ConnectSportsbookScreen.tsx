@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -10,9 +10,10 @@ import {
 } from '@/hooks/useSportsbookConnection';
 import { useSportsbookSync } from '@/hooks/useSportsbookSync';
 import type { LinkedAccount } from '@/lib/sharpsports';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity, card } from '@/lib/theme';
 import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 /** Books we don't yet support connecting — shown as "Coming soon". */
 const COMING_SOON: { abbrev: string; name: string }[] = [
@@ -124,26 +125,11 @@ export function ConnectSportsbookScreen() {
                   <Text style={styles.btnSecondaryText}>Disconnect</Text>
                 </Pressable>
               ) : (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={unverified ? `Reconnect ${book.name}` : `Connect ${book.name}`}
-                  accessibilityState={{ busy: isPending, disabled: isPending }}
+                <PrimaryButton
+                  label={unverified ? `Reconnect ${book.name}` : `Connect ${book.name}`}
                   onPress={() => onConnect(book)}
-                  disabled={isPending}
-                  style={({ pressed }) => [
-                    styles.btnPrimary,
-                    pressed && styles.btnPressed,
-                    isPending && styles.btnDisabled,
-                  ]}
-                >
-                  {isPending ? (
-                    <ActivityIndicator color={colors.textInverse} />
-                  ) : (
-                    <Text style={styles.btnPrimaryText}>
-                      {unverified ? `Reconnect ${book.name}` : `Connect ${book.name}`}
-                    </Text>
-                  )}
-                </Pressable>
+                  loading={isPending}
+                />
               )}
             </View>
           );
@@ -224,9 +210,7 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
   },
   bookCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   bookHeader: {
@@ -239,7 +223,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: radii.sm,
-    backgroundColor: '#000000',
+    backgroundColor: colors.bookDraftKingsGround,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -249,7 +233,7 @@ const styles = StyleSheet.create({
     height: 36,
   },
   bookLogoText: {
-    color: '#53D337',
+    color: colors.bookDraftKings,
     fontWeight: font.weight.bold,
     fontSize: font.size.headline,
   },
@@ -309,17 +293,6 @@ const styles = StyleSheet.create({
     color: colors.medInk,
     fontWeight: font.weight.semibold,
   },
-  btnPrimary: {
-    backgroundColor: colors.tint,
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
-    alignItems: 'center',
-  },
-  btnPrimaryText: {
-    color: colors.textInverse,
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-  },
   btnSecondary: {
     backgroundColor: colors.bg,
     paddingVertical: spacing.md,
@@ -332,15 +305,10 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
   },
   btnPressed: {
-    opacity: 0.7,
-  },
-  btnDisabled: {
-    opacity: 0.5,
+    opacity: opacity.pressed,
   },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   cardTitle: {

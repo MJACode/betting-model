@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, font, spacing } from '@/lib/theme';
+import { colors, font, spacing, opacity } from '@/lib/theme';
 
 interface Props {
   title: string;
@@ -67,5 +67,5 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
-  pressed: { opacity: 0.65 },
+  pressed: { opacity: opacity.pressed },
 });

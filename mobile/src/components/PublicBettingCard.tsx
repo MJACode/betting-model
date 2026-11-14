@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, card } from '@/lib/theme';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import type { Pick } from '@/types';
 
@@ -90,9 +90,7 @@ function numOrNull(v: number | string | null): number | null {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },

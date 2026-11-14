@@ -44,7 +44,17 @@ under a second?**
   `SignalBadge`, never an ad-hoc pill.
 - Grouped-list iOS: cards on `bg`, `radii.md`, `spacing.lg` gutters, headers as
   uppercase footnote in `textSecondary`. A new screen that invents its own
-  rhythm reads as a different app.
+  rhythm reads as a different app. Since 2026-11-14 these are tokens, not a
+  description: a card spreads `card` (or `cardDense` for a dense row), a
+  section header spreads `sectionHeaderText` or is a `SectionTitle`. A
+  hand-written `backgroundColor: colors.bgCard, borderRadius, padding` triple
+  or an uppercase header with its own size and grey is a Should-fix.
+- **One primary button: `PrimaryButton`.** A full-width capsule, 50pt,
+  headline semibold — `primary` (tint) on light surfaces, `brand` (amber) on
+  the navy chrome only, `secondary` (grey) for the quieter action beside it
+  (Matt, 2026-11-14, after a Mobbin pass: one capsule shape app-wide). A new
+  hand-rolled full-width CTA is a Should-fix. Compact inline actions inside a
+  row (a betslip chip, a "Bet" pill on a book row) are not primary buttons.
 - Sort and filter controls live in the existing `FilterBar` / `FilterChip` /
   `FilterSheet` family. A new screen with its own chip style is a duplicate.
 - Density: a list row taller than ~96pt on a scanning screen needs a reason.
@@ -62,6 +72,9 @@ first when that changes.
 - `fontSize` from `font.size.*`, weights from `font.weight.*`, radii from
   `radii.*`, gaps from `spacing.*`. A literal `fontSize: 14` is a new type
   scale nobody agreed to.
+- Pressed and disabled feedback from `opacity.pressed` (0.6) and
+  `opacity.disabled` (0.4). Before 2026-11-14 the app faded on 12 different
+  values; a new literal is a Should-fix.
 - Semantic colours mean what they say: `bet` / `avoid` / `none` for signals,
   `positive` / `negative` for P&L, `high` / `med` / `low` for confidence.
   Green for anything that is not "good for the user" is a finding.
@@ -169,7 +182,10 @@ which is exactly when users open it.
 ## 8. Reuse before invention
 
 Before a finding says "add a component", check whether one of these already
-does it: `EmptyState`, `StatTile`, `SignalBadge`, `GameStatusPill`,
+does it: `PrimaryButton`, `SectionTitle`, `SegmentTabs` (the one segmented
+control; `compact` for an inline two-way switch), `SkeletonList` (a section
+still loading — never a bare spinner on a screen that has content below it),
+`ErrorBanner`, `EmptyState`, `StatTile`, `SignalBadge`, `GameStatusPill`,
 `SharpScorePill`, `InfoTooltip`, `Toast`/`showToast`, `TrendSparkline`,
 `TrendStrip`, `CalendarGrid`, the `filters/` family, the `*Sheet` family,
 the `*Card` family on `PickDetailScreen`. A change that adds a second version

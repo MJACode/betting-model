@@ -100,7 +100,7 @@ import {
   type PeriodKey,
   type TeamPeriodRow,
 } from '@/lib/teamPeriodSplits';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
 import { ErrorBanner } from '@/components/ErrorState';
 import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
@@ -1144,6 +1144,6 @@ const styles = StyleSheet.create({
   valueLabel: { fontSize: font.size.nano, color: colors.textSecondary, textAlign: 'right' },
   thinLabel: { fontSize: font.size.nano, color: colors.textSecondary, fontStyle: 'italic', textAlign: 'right' },
   thinValue: { fontWeight: font.weight.regular, color: colors.textSecondary },
-  pressed: { opacity: 0.65 },
+  pressed: { opacity: opacity.pressed },
   loading: { marginVertical: spacing.xxl },
 });

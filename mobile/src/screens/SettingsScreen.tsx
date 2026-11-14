@@ -85,7 +85,7 @@ import {
   sportsbooksTileSummary,
   type SettingsSectionId,
 } from '@/lib/settingsHome';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity, card } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
@@ -480,7 +480,7 @@ function SportsbooksSection() {
             onPress={() => setBookPickerOpen(true)}
             accessibilityRole="button"
             accessibilityLabel={`Your sportsbooks: ${booksName(books)}. Tap to change.`}
-            style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
+            style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: opacity.pressed }]}
           >
             <View
               style={[
@@ -526,7 +526,7 @@ function SportsbooksSection() {
             onPress={() => setStatePickerOpen(true)}
             accessibilityRole="button"
             accessibilityLabel={`Your state: ${stateName ?? 'not set'}. Tap to change.`}
-            style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
+            style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: opacity.pressed }]}
           >
             <Text style={[styles.bookRowName, !stateName && { color: colors.textTertiary }]}>
               {stateName ?? 'Not set'}
@@ -1264,19 +1264,15 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
   },
   tile: {
+    ...card,
     flex: 1,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
     minHeight: 44,
   },
   tileWide: {
+    ...card,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
     marginBottom: spacing.md,
     minHeight: 44,
   },
@@ -1343,22 +1339,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   linkCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
   // A long email must truncate rather than shove the "Signed in" pill off-row.
   flexShrink: {

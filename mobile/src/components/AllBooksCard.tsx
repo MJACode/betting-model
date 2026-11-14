@@ -11,7 +11,7 @@ import {
 } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, sectionHeaderText, cardDense } from '@/lib/theme';
 import type { BookPricedRow, Pick } from '@/types';
 
 /**
@@ -138,9 +138,7 @@ export function AllBooksCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.md,
+    ...cardDense,
     marginHorizontal: spacing.md,
     marginBottom: spacing.md,
   },
@@ -163,10 +161,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.separator,
   },
   h: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    fontWeight: '600',
-    textTransform: 'uppercase',
+    ...sectionHeaderText,
   },
   row: {
     flexDirection: 'row',

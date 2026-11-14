@@ -11,8 +11,9 @@ import { isGameSpec, lineLegKey, lineLegLabel, type LineSheetInput } from '@/lib
 import { bookLabelShort, bookName, MODEL_BOOK } from '@/lib/markets';
 import { matchupForLeg } from '@/lib/parlay';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, sectionHeaderText, opacity } from '@/lib/theme';
 import type { GameRow } from '@/types';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 /**
  * "Add to betslip?" — what a tap on a Stats line pill opens.
@@ -170,25 +171,18 @@ export function AddLineSheet({
             </View>
           </ScrollView>
 
-          <Pressable
+          <PrimaryButton
+            label={inSlip ? 'Remove from betslip' : 'Add to betslip'}
             onPress={act}
-            accessibilityRole="button"
-            accessibilityLabel={inSlip ? 'Remove from betslip' : 'Add to betslip'}
-            style={({ pressed }) => [
-              styles.primary,
-              inSlip && styles.primaryRemove,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Ionicons
-              name={inSlip ? 'remove-circle-outline' : 'add-circle-outline'}
-              size={20}
-              color={inSlip ? colors.textPrimary : colors.textInverse}
-            />
-            <Text style={[styles.primaryText, inSlip && styles.primaryTextRemove]}>
-              {inSlip ? 'Remove from betslip' : 'Add to betslip'}
-            </Text>
-          </Pressable>
+            variant={inSlip ? 'secondary' : 'primary'}
+            icon={
+              <Ionicons
+                name={inSlip ? 'remove-circle-outline' : 'add-circle-outline'}
+                size={20}
+                color={inSlip ? colors.textPrimary : colors.textInverse}
+              />
+            }
+          />
           <Pressable
             onPress={onClose}
             accessibilityRole="button"
@@ -253,11 +247,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   sectionTitle: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
     marginBottom: spacing.xs,
   },
   list: {
@@ -318,30 +308,6 @@ const styles = StyleSheet.create({
   starGap: {
     width: 14,
   },
-  primary: {
-    marginTop: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.tint,
-    borderRadius: radii.pill,
-    minHeight: 48,
-    paddingHorizontal: spacing.lg,
-  },
-  primaryRemove: {
-    backgroundColor: colors.bgCard,
-    borderWidth: 1.5,
-    borderColor: colors.separatorOpaque,
-  },
-  primaryText: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.bold,
-    color: colors.textInverse,
-  },
-  primaryTextRemove: {
-    color: colors.textPrimary,
-  },
   secondary: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -354,6 +320,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   pressed: {
-    opacity: 0.7,
+    opacity: opacity.pressed,
   },
 });

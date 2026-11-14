@@ -19,7 +19,7 @@ import {
   withPrime,
   type ByomPropFilterState,
 } from '@/lib/byomPropFilters';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, sectionHeaderText } from '@/lib/theme';
 
 export type ByomSheetTab = 'odds' | 'time' | 'matchup' | 'trends';
 
@@ -204,10 +204,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   sectionLabel: {
-    fontSize: font.size.caption,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
+    ...sectionHeaderText,
     marginBottom: spacing.sm,
   },
   yes: {

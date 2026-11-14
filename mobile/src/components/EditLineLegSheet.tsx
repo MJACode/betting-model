@@ -20,7 +20,8 @@ import {
 import { SegmentTabs } from '@/components/GroupTabs';
 import { bookLabelShort } from '@/lib/markets';
 import { fetchGameLineRows, fetchPropLineRows } from '@/lib/queries';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 /**
  * Edit a betslip leg — the pencil on a "Your line" leg.
@@ -247,17 +248,13 @@ export function EditLineLegSheet({
 
           {note ? <Text style={styles.note}>{note}</Text> : null}
 
-          <Pressable
+          <PrimaryButton
+            label="Update leg"
             onPress={save}
             disabled={!canSave}
-            accessibilityRole="button"
-            accessibilityLabel="Update leg"
-            accessibilityState={{ disabled: !canSave }}
-            style={({ pressed }) => [styles.primary, !canSave && styles.primaryDisabled, pressed && styles.pressed]}
-          >
-            <Ionicons name="checkmark" size={20} color={colors.textInverse} />
-            <Text style={styles.primaryText}>Update leg</Text>
-          </Pressable>
+            icon={<Ionicons name="checkmark" size={20} color={colors.textInverse} />}
+            style={styles.primary}
+          />
           <Pressable
             onPress={onClose}
             accessibilityRole="button"
@@ -409,25 +406,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.avoidInk,
   },
-  primary: {
-    marginTop: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.tint,
-    borderRadius: radii.pill,
-    minHeight: 48,
-    paddingHorizontal: spacing.lg,
-  },
-  primaryDisabled: {
-    opacity: 0.4,
-  },
-  primaryText: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.bold,
-    color: colors.textInverse,
-  },
+  primary: { marginTop: spacing.md },
   secondary: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -440,6 +419,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
 });

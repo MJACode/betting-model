@@ -75,7 +75,7 @@ import {
   recordNoteFor,
 } from '@/lib/myBooks';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, sectionHeaderText, opacity, cardDense } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
 import { errorText, isAbortError, isNotFoundError } from '@/lib/errors';
 import { detailPresentation } from '@/lib/loadState';
@@ -985,18 +985,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   infoCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
+    ...cardDense,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },
   infoHeading: {
-    fontSize: font.size.footnote,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
     marginBottom: 4,
   },
   infoBody: {
@@ -1022,7 +1016,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   viewStatsBtnPressed: {
-    opacity: 0.7,
+    opacity: opacity.pressed,
   },
   // The Betting lines row (BookLinesRow) on its own card — the row carries
   // its own top margin, so the card only pads the sides and bottom.

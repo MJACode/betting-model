@@ -3,7 +3,6 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -62,6 +61,7 @@ import {
 import { EMPTY_PROP_FILTERS, type ByomPropFilterState } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 type Route = RouteProp<RootStackParamList, 'ByomEdit'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -395,19 +395,13 @@ export function ByomEditScreen() {
         ) : null}
         {saveMessage ? <Text style={styles.saveMessage}>{saveMessage}</Text> : null}
         <View style={styles.footer}>
-          <Pressable
+          <PrimaryButton
+            label={saving ? 'Saving…' : 'Save model'}
             onPress={() => void save()}
             disabled={saveDisabled}
-            accessibilityRole="button"
             accessibilityLabel="Save model"
             accessibilityHint={sideReason ?? undefined}
-            accessibilityState={{ disabled: saveDisabled }}
-            style={[styles.primary, saveDisabled && styles.primaryDisabled]}
-          >
-            <Text style={[styles.primaryText, saveDisabled && styles.primaryTextDisabled]}>
-              {saving ? 'Saving…' : 'Save model'}
-            </Text>
-          </Pressable>
+          />
         </View>
       </>
     ) : null}
@@ -479,21 +473,6 @@ const styles = StyleSheet.create({
     borderTopColor: colors.separatorOpaque,
     backgroundColor: colors.bg,
   },
-  primary: {
-    minHeight: 44,
-    borderRadius: radii.md,
-    backgroundColor: colors.tint,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  primaryDisabled: { backgroundColor: colors.noneSoft },
-  primaryText: {
-    color: colors.textInverse,
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-  },
-  primaryTextDisabled: { color: colors.textSecondary },
   skel: {
     height: 120,
     backgroundColor: colors.noneSoft,

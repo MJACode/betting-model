@@ -53,9 +53,10 @@ import {
   type BetTypeChoice,
 } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, sectionHeaderText, opacity, card } from '@/lib/theme';
 import type { CustomModel, CustomModelFilters, CustomModelRule, RootStackParamList } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 type Route = RouteProp<RootStackParamList, 'ModelEdit'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -465,20 +466,7 @@ function PreviewFooter({
       {loading && hasRules ? (
         <ActivityIndicator style={styles.previewLoading} size="small" />
       ) : null}
-      <Pressable
-        accessibilityLabel={saveLabel}
-        onPress={onSave}
-        disabled={!canSave}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: !canSave }}
-        style={({ pressed }) => [
-          styles.saveBtn,
-          !canSave && styles.saveBtnDisabled,
-          pressed && styles.pressed,
-        ]}
-      >
-        <Text style={styles.saveBtnText}>{saveLabel}</Text>
-      </Pressable>
+      <PrimaryButton label={saveLabel} onPress={onSave} disabled={!canSave} />
     </View>
   );
 }
@@ -886,9 +874,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   list: { padding: spacing.lg, paddingBottom: spacing.xl },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   label: {
@@ -1104,20 +1090,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   previewLoading: { marginBottom: spacing.sm },
-  saveBtn: {
-    backgroundColor: colors.tint,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  saveBtnDisabled: {
-    opacity: 0.4,
-  },
-  saveBtnText: {
-    color: colors.textInverse,
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-  },
   deleteBtn: {
     alignItems: 'center',
     paddingVertical: spacing.md,
@@ -1128,7 +1100,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     fontWeight: font.weight.medium,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: opacity.pressed },
   modalContainer: { flex: 1, backgroundColor: colors.bg },
   modalHeader: {
     minHeight: 52,
@@ -1163,11 +1135,7 @@ const styles = StyleSheet.create({
   modalSection: { marginBottom: spacing.lg },
   modalList: { padding: spacing.lg },
   modalSectionTitle: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
     marginBottom: spacing.sm,
   },
   modalRow: {
@@ -1179,7 +1147,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     marginBottom: spacing.xs,
   },
-  modalRowDisabled: { opacity: 0.45 },
+  modalRowDisabled: { opacity: opacity.disabled },
   modalRowBody: { flex: 1 },
   modalRowText: {
     fontSize: font.size.body,

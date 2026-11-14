@@ -1,6 +1,5 @@
 import React, { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Pressable,
   StyleSheet,
@@ -15,6 +14,7 @@ import { openLink } from '@/lib/socialLinks';
 import { useAccess } from '@/hooks/useAccess';
 import { useMembership } from '@/hooks/useMembership';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 /**
  * Connect Discord. Free and trial are linking a Whop account, not joining.
@@ -94,33 +94,9 @@ export function DiscordLinkModal({
           </View>
 
           {alreadyLinked && invite ? (
-            <Pressable
-              accessibilityLabel="Open the Discord"
-              onPress={() => openLink(invite, 'Discord', { revealUrl: false })}
-              accessibilityRole="button"
-              style={({ pressed }) => [styles.cta, pressed && styles.pressed]}
-            >
-              <Text style={styles.ctaText}>Open the Discord</Text>
-            </Pressable>
+            <PrimaryButton label="Open the Discord" onPress={() => openLink(invite, 'Discord', { revealUrl: false })} />
           ) : alreadyLinked ? null : (
-            <Pressable
-              accessibilityLabel="Connect Discord"
-              accessibilityState={{ busy: pending, disabled: pending }}
-              onPress={onConnect}
-              disabled={pending}
-              accessibilityRole="button"
-              style={({ pressed }) => [
-                styles.cta,
-                pressed && styles.pressed,
-                pending && styles.disabled,
-              ]}
-            >
-              {pending ? (
-                <ActivityIndicator color={colors.textInverse} />
-              ) : (
-                <Text style={styles.ctaText}>Connect Discord</Text>
-              )}
-            </Pressable>
+            <PrimaryButton label="Connect Discord" onPress={onConnect} loading={pending} />
           )}
 
           {/* No invite fallback. The URL is Apple-paid only, and this sheet
@@ -175,20 +151,6 @@ const styles = StyleSheet.create({
   },
   discordTile: { backgroundColor: colors.discord },
   appTile: { backgroundColor: colors.textPrimary },
-  cta: {
-    alignSelf: 'stretch',
-    height: 50,
-    borderRadius: radii.pill,
-    backgroundColor: colors.tint,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ctaText: {
-    fontFamily: font.family,
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.textInverse,
-  },
   altLink: {
     fontFamily: font.family,
     fontSize: font.size.footnote,
@@ -196,6 +158,4 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
     paddingTop: spacing.xs,
   },
-  pressed: { opacity: 0.6 },
-  disabled: { opacity: 0.4 },
 });

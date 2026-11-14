@@ -127,7 +127,7 @@ import {
 } from '@/lib/pickFilterState';
 import { publicSortAvailable, searchPicks, sortPicks, type SortKey } from '@/lib/pickSort';
 import { priceCheckForItem } from '@/lib/pickPriceCheck';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import {
   isModelPaused,
   isPausedForDisplay,
@@ -1441,7 +1441,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  betAllPressed: { opacity: 0.6 },
+  betAllPressed: { opacity: opacity.pressed },
   betAllButtonText: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textInverse, fontVariant: ['tabular-nums'] },
   container: {
     flex: 1,
@@ -1523,7 +1523,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
   subTabText: {
     fontSize: font.size.footnote,
@@ -1562,7 +1562,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   partialPressed: {
-    opacity: 0.7,
+    opacity: opacity.pressed,
   },
   partialText: {
     flex: 1,

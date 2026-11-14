@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { formatDayTimeET } from '@/lib/format';
 import { pickTimingInfo } from '@/lib/markets';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, sectionHeaderText, cardDense } from '@/lib/theme';
 import type { Pick } from '@/types';
 
 /**
@@ -34,18 +34,12 @@ export function PickTimingCard({ pick }: { pick: Pick }) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
+    ...cardDense,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },
   heading: {
-    fontSize: font.size.footnote,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
     marginBottom: 4,
   },
   headline: {

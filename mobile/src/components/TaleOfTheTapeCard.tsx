@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { fetchFighterByName, fetchFighterRecentFights } from '@/lib/queries';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, sectionHeaderText, cardDense } from '@/lib/theme';
 import type { FighterRow, FightLogRow } from '@/types';
 
 interface Props {
@@ -122,18 +122,12 @@ function fmtFinishes(fights: FightLogRow[]): string {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
+    ...cardDense,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },
   heading: {
-    fontSize: font.size.footnote,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
     marginBottom: spacing.sm,
   },
   namesRow: {

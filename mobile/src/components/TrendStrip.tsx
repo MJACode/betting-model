@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, sectionHeaderText } from '@/lib/theme';
 import type { TrendBuckets } from '@/types';
 
 interface Props {
@@ -66,12 +66,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   title: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
+    ...sectionHeaderText,
     marginBottom: spacing.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
   },
   row: {
     flexDirection: 'row',
