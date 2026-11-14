@@ -25,6 +25,7 @@ import { combineBetslipLinks, combineSinglesLinks } from '../src/lib/betslipLink
 import {
   BET_ALL_LIVE_NOTE,
   betAllCandidates,
+  betAllMainSkip,
   bestLinePlan,
   bookCoverage,
   oneBookPlan,
@@ -142,6 +143,15 @@ check('the board shows the live call-out beside the button', home.includes('{BET
 check('the sheet defaults to Best line', sheet.includes("useState<BetAllMode>('best')"));
 check('the sheet never builds a parlay', !/parlay|combineBetslipLinks|useParlaySlip/i.test(sheet.replace(/not Parlay|Parlay\)|parlay\./g, '')));
 check('Placed tracks every leg of that book', sheet.includes('step?.legs.forEach((l) => onTrack(l.pick))'));
+
+// ── UX review fixes ──────────────────────────────────────────────────────
+check('the board names the main reason nothing is ready',
+  betAllMainSkip([{ reason: 'started' }, { reason: 'notAtMyBooks' }, { reason: 'notAtMyBooks' }]) === '2 not at your books');
+check('another book’s price says where the model found it', sheet.includes('foundAtText(bookLabel(record), formatAmerican(modelPrice))'));
+check('mid-send the backdrop does not close the sheet', sheet.includes("onPress={phase === 'send' ? undefined : onClose}"));
+check('the X asks before dropping an unanswered book', sheet.includes('if (pendingAnswer) setConfirmStop(true);'));
+check('VoiceOver hears the placed question', sheet.includes('AccessibilityInfo.announceForAccessibility('));
+check('the app’s own segmented control', sheet.includes('<SegmentTabs'));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

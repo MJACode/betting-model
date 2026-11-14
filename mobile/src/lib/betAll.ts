@@ -54,6 +54,15 @@ export const BET_ALL_LIVE_NOTE = 'Pre-game signals only. Live bets aren’t incl
 export const BET_ALL_SINGLES_NOTE =
   'Each pick is a single bet. In the slip, choose Straight (or Singles), not Parlay, and enter each stake.';
 
+/** "3 not at your books": the most common reason, for the board's row. */
+export function betAllMainSkip(skipped: readonly { reason: BetAllSkipReason }[]): string {
+  const n = new Map<BetAllSkipReason, number>();
+  for (const s of skipped) n.set(s.reason, (n.get(s.reason) ?? 0) + 1);
+  const top = [...n.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (!top) return 'None ready';
+  return `${top[1]} ${BET_ALL_SKIP_TEXT[top[0]].toLowerCase()}`;
+}
+
 export interface BetAllQuote {
   bookmaker: string;
   price: number;

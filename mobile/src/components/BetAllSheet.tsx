@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Modal } from '@/components/TrackedModal';
+import { SegmentTabs } from '@/components/GroupTabs';
 import {
   BET_ALL_LIVE_NOTE,
   BET_ALL_SINGLES_NOTE,
@@ -17,10 +18,12 @@ import {
   type BetAllPick,
   type BetAllStep,
 } from '@/lib/betAll';
-import { bookLabel, bookName } from '@/lib/markets';
+import { bookLabel, bookName, storedQuoteBook } from '@/lib/markets';
+import { foundAtText } from '@/lib/myBooks';
+import { decisionOdds } from '@/lib/decisionPrice';
 import { linesPriceText } from '@/lib/linesBoard';
 import { trueMinus } from '@/lib/signalsCard';
-import { formatUnits } from '@/lib/format';
+import { formatAmerican, formatUnits } from '@/lib/format';
 import { stakeFor } from '@/lib/thresholds';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -63,6 +66,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
   const [status, setStatus] = useState<Record<string, StepStatus>>({});
   const [askFor, setAskFor] = useState<string | null>(null);
   const awaiting = useRef<string | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
 
   // A fresh sheet every time it opens: every pick ticked, Best line.
   const pickKeys = picks.map((p) => p.key).join(',');
@@ -75,6 +79,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
     setSteps([]);
     setStatus({});
     setAskFor(null);
+    setConfirmStop(false);
     awaiting.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -94,6 +99,14 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
     });
     return () => sub.remove();
   }, []);
+
+  // iOS has no live regions: say the question out loud when it appears
+  // (UX review), so a VoiceOver user is asked about the bets they placed.
+  useEffect(() => {
+    if (askFor) {
+      AccessibilityInfo.announceForAccessibility(`Back from ${bookName(askFor)}. Did you place these bets as singles?`);
+    }
+  }, [askFor]);
 
   const coverage = useMemo(() => bookCoverage(picks, selected, myBooks), [picks, selected, myBooks]);
   const chosenBook = book && coverage.some((c) => c.bookmaker === book) ? book : coverage[0]?.bookmaker ?? null;
@@ -153,11 +166,17 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
     const best = p.quotes[0]!;
     const notBest = inBookMode && q != null && q.price !== best.price && q.bookmaker !== best.bookmaker;
     const stake = q ? stakeFor(p.pick.kelly_fraction, q.price, p.pick.stake_units) : null;
+    // Where the model found it, whenever the price shown is another book's
+    // (UX_REVIEW §0, the card's "Found at HRB +110"). The record stays there.
+    const record = storedQuoteBook(p.pick);
+    const modelPrice = decisionOdds(p.pick);
+    const foundAt =
+      q && q.bookmaker !== record && modelPrice != null ? ` · ${foundAtText(bookLabel(record), formatAmerican(modelPrice))}` : '';
     const sub = !available
       ? `Not at ${bookName(chosenBook!)}`
       : notBest
-        ? `${stakeText(stake!.risk, stake!.win)} · ${bookLabel(best.bookmaker)} ${linesPriceText(best.price)} is better`
-        : stakeText(stake!.risk, stake!.win);
+        ? `${stakeText(stake!.risk, stake!.win)} · ${bookLabel(best.bookmaker)} ${linesPriceText(best.price)} is better${foundAt}`
+        : `${stakeText(stake!.risk, stake!.win)}${foundAt}`;
     return (
       <Pressable
         key={p.key}
@@ -196,6 +215,15 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
     return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [picks]);
 
+  // Mid-send, a stray tap must not throw away a book that is waiting for
+  // its Placed answer (UX review): the backdrop does nothing, and the X asks.
+  const pendingAnswer = phase === 'send' && !allDone && steps.some((s) => status[s.bookmaker] === 'opened');
+  const requestClose = () => {
+    if (pendingAnswer) setConfirmStop(true);
+    else onClose();
+  };
+  const allSelected = picks.length > 0 && picks.every((p) => selected.has(p.key));
+
   const ctaLabel =
     totals.legs === 0
       ? 'Select a pick'
@@ -206,7 +234,13 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
   return (
     <Modal trackName="BetAllSheet" visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close Bet all" />
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={phase === 'send' ? undefined : onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close Bet all"
+          accessible={phase !== 'send'}
+        />
         <Pressable
           style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}
           onPress={() => {}}
@@ -221,28 +255,46 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
               </Text>
               <Text style={styles.subtitle}>{BET_ALL_LIVE_NOTE}</Text>
             </View>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close Bet all">
+            <Pressable onPress={requestClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close Bet all">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
 
+          {confirmStop ? (
+            <View style={styles.ask}>
+              <Text style={styles.askTitle} accessibilityRole="header">Stop Bet all?</Text>
+              <Text style={styles.askBody}>Bets you placed and haven’t marked won’t be tracked.</Text>
+              <View style={styles.askButtons}>
+                <Pressable onPress={() => setConfirmStop(false)} accessibilityRole="button" style={[styles.askBtn, styles.askPrimary]}>
+                  <Text style={styles.askPrimaryText}>Keep going</Text>
+                </Pressable>
+                <Pressable onPress={onClose} accessibilityRole="button" style={styles.askBtn}>
+                  <Text style={styles.askBtnText}>Stop</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
           {phase === 'choose' ? (
             <>
-              <View style={styles.segment} accessibilityRole="tablist">
-                {(['best', 'book'] as const).map((m) => (
-                  <Pressable
-                    key={m}
-                    onPress={() => setMode(m)}
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected: mode === m }}
-                    style={[styles.segmentItem, mode === m && styles.segmentOn]}
-                  >
-                    <Text style={[styles.segmentText, mode === m && styles.segmentTextOn]}>
-                      {m === 'best' ? 'Best line' : 'One sportsbook'}
-                    </Text>
-                  </Pressable>
-                ))}
+              <View style={styles.segment}>
+                <SegmentTabs
+                  items={['best', 'book'] as const}
+                  active={mode}
+                  onChange={setMode}
+                  labelFor={(m) => (m === 'best' ? 'Best line' : 'One sportsbook')}
+                />
               </View>
+              {picks.length > 1 ? (
+                <Pressable
+                  onPress={() => setSelected(allSelected ? new Set() : new Set(picks.map((p) => p.key)))}
+                  accessibilityRole="button"
+                  hitSlop={12}
+                  style={styles.selectAll}
+                >
+                  <Text style={styles.link}>{allSelected ? 'Select none' : 'Select all'}</Text>
+                </Pressable>
+              ) : null}
 
               {mode === 'book' && coverage.length > 0 ? (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips} contentContainerStyle={styles.chipsRow}>
@@ -391,7 +443,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                             </Text>
                           ) : null}
                           {st === 'opened' ? (
-                            <Pressable onPress={() => setAskFor(step.bookmaker)} accessibilityRole="button" hitSlop={8}>
+                            <Pressable onPress={() => setAskFor(step.bookmaker)} accessibilityRole="button" style={styles.markPlaced}>
                               <Text style={styles.link}>Mark as placed</Text>
                             </Pressable>
                           ) : null}
@@ -421,7 +473,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: '#00000066', justifyContent: 'flex-end' },
+  backdrop: { flex: 1, backgroundColor: colors.scrim, justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: colors.bg,
     borderTopLeftRadius: radii.lg,
@@ -443,17 +495,9 @@ const styles = StyleSheet.create({
   headerBody: { flex: 1, paddingRight: spacing.md },
   title: { fontSize: font.size.title3, fontWeight: font.weight.bold, color: colors.textPrimary },
   subtitle: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2 },
-  segment: {
-    flexDirection: 'row',
-    backgroundColor: colors.tintSoft,
-    borderRadius: radii.sm,
-    padding: 2,
-    marginBottom: spacing.md,
-  },
-  segmentItem: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center', borderRadius: radii.sm - 2 },
-  segmentOn: { backgroundColor: colors.bgCard },
-  segmentText: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textSecondary },
-  segmentTextOn: { color: colors.textPrimary },
+  segment: { marginBottom: spacing.sm },
+  selectAll: { alignSelf: 'flex-end', minHeight: 44, justifyContent: 'center' },
+  markPlaced: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   chips: { flexGrow: 0, marginBottom: spacing.md },
   chipsRow: { gap: spacing.sm },
   chip: {

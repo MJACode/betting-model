@@ -99,7 +99,7 @@ import { useLiveGameStates } from '@/hooks/useLiveGameStates';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { BetAllSheet } from '@/components/BetAllSheet';
-import { BET_ALL_LIVE_NOTE, betAllCandidates } from '@/lib/betAll';
+import { BET_ALL_LIVE_NOTE, betAllCandidates, betAllMainSkip } from '@/lib/betAll';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
 import { LIVE_PRICE_SLOT_ONLY } from '@/lib/markets';
@@ -1060,21 +1060,26 @@ export function PicksHomeScreen() {
                 <Text style={styles.betAllTitle}>
                   {`${betAll.picks.length} ready to bet as singles`}
                 </Text>
-                <Text style={styles.betAllNote}>{BET_ALL_LIVE_NOTE}</Text>
+                {/* With nothing ready, say the main reason here (UX review):
+                    the sheet still opens and lists every reason. */}
+                <Text style={styles.betAllNote}>
+                  {betAll.picks.length === 0 ? `${betAllMainSkip(betAll.skipped)}. ${BET_ALL_LIVE_NOTE}` : BET_ALL_LIVE_NOTE}
+                </Text>
               </View>
               <Pressable
                 onPress={() => setBetAllOpen(true)}
-                disabled={betAll.picks.length === 0}
                 accessibilityRole="button"
-                accessibilityState={{ disabled: betAll.picks.length === 0 }}
-                accessibilityLabel={`Bet all ${betAll.picks.length} ${sportDisplayName(sport)} signals as single bets`}
+                accessibilityLabel={
+                  betAll.picks.length === 0
+                    ? 'See why no signals are ready to bet'
+                    : `Bet all ${betAll.picks.length} ${sportDisplayName(sport)} signals as single bets`
+                }
                 style={({ pressed }) => [
                   styles.betAllButton,
-                  betAll.picks.length === 0 && styles.betAllButtonOff,
                   pressed && styles.betAllPressed,
                 ]}
               >
-                <Text style={styles.betAllButtonText}>{`Bet all ${betAll.picks.length}`}</Text>
+                <Text style={styles.betAllButtonText}>{betAll.picks.length === 0 ? 'See why' : `Bet all ${betAll.picks.length}`}</Text>
               </Pressable>
             </View>
           ) : null
@@ -1436,7 +1441,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  betAllButtonOff: { opacity: 0.4 },
   betAllPressed: { opacity: 0.6 },
   betAllButtonText: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textInverse, fontVariant: ['tabular-nums'] },
   container: {
