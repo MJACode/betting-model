@@ -512,6 +512,9 @@ const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
   // Women's college basketball: four 10-minute quarters, about two hours on
   // the clock like the men's, and no live feed in the app either.
   NCAABW: 4 * 3_600_000,
+  // EuroLeague (2026-11-13): four 10-minute quarters, about two hours on the
+  // clock, and no live feed in the app; its one model bets at halftime.
+  EUROLEAGUE: 4 * 3_600_000,
   // Football, and the reason these two are named rather than left on the
   // default: they are the sports that play late and are NOT covered by the live
   // poller, so the blind window is all they have. Once the app's live board
@@ -808,6 +811,8 @@ const GAME_DURATION_HOURS: Record<string, number> = {
   NCAAB: 3,
   // Women's: 40 minutes of play in four quarters, the same two hours.
   NCAABW: 3,
+  // EuroLeague: 40 minutes in four quarters, the same two hours (2026-11-13).
+  EUROLEAGUE: 3,
   UFC: 6,
   // ATP and WTA are left out on purpose, like golf. A bet leaves the board on
   // its final: settlement writes the sets won to `games` when it grades the

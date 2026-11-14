@@ -82,6 +82,9 @@ MAX_SILENCE: dict = {
     "ncaab_live": 700,
     # The NCAABW halftime loop: 11am to 2:55am ET, every 10 minutes.
     "ncaabw_live": 700,
+    # The EuroLeague halftime loop: 9am to 5:58pm ET, every 10 minutes; off
+    # 6pm-9am, ~15h of legitimate silence.
+    "euroleague_live": 960,
     # The watcher. 10-minute cadence; 45 minutes of silence means the thing
     # that reports everything else has stopped reporting.
     "failure_alerter": 45,
@@ -166,6 +169,8 @@ ACTIVE_HOURS_ET: dict = {
     "ncaab_live": (11, 23, 30),
     # The NCAABW halftime loop beats the same way (models/ncaabw_live_loop.Loop.heartbeat).
     "ncaabw_live": (11, 23, 30),
+    # The EuroLeague halftime loop beats the same way (models/euroleague_live_loop.Loop.heartbeat).
+    "euroleague_live": (9, 17, 30),
 }
 _ET = ZoneInfo("America/New_York")
 

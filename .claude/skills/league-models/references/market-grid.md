@@ -93,7 +93,12 @@ after all of them (CLAUDE.md §1b).
    - **Odds-comparison sites that keep each book's history.** BestFightOdds
      keeps the US books' MMA prop prices, with their history, from mid-2021
      (`docs/ufc_market_audit.md`). Read the site's robots.txt first.
-     `references/scouting.md` records which sites answered and how.
+     `references/scouting.md` records which sites answered and how. Such a
+     page shows each book's last change, not its price at a time: grade at
+     it, then re-grade the bets a rule picks at the price its history shows
+     for the decision time (`kill-tests.md`, "Is the data right?").
+     `data/ingestors/ufc_prop_history.py` is the template: the pages one
+     request each, the histories only for the props a test points at.
    Store what is read in Supabase the same run, as for any archive.
 5. **Paid providers** other than the feed: `docs/odds_sources.md` prices them.
    More thin books add rejections, not edge; the case for a new provider is a

@@ -454,6 +454,13 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/ufc_odds_history.ensure_tables. Research input.
     "ufc_odds_history",
     "ufc_odds_history_pulls",
+    # UFC prop prices from BestFightOdds' event pages and price histories
+    # (2026-11-13), created on demand by
+    # data/ingestors/ufc_prop_history.ensure_tables. Research input.
+    "ufc_prop_history",
+    "ufc_prop_history_fights",
+    "ufc_prop_history_ticks",
+    "ufc_prop_history_pulls",
     # EuroLeague shot charts with wall-clock times (2026-11-13,
     # data/ingestors/euroleague_shots.py); model input, never read by the app.
     "euroleague_shots",

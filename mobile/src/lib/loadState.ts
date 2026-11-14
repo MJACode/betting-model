@@ -113,6 +113,8 @@ const SPOKEN_SPORT: Record<string, string> = {
   NCAABW: 'Women’s college basketball',
   ATP: 'ATP men’s tennis',
   WTA: 'WTA women’s tennis',
+  // VoiceOver spells an all-capitals code letter by letter.
+  EUROLEAGUE: 'EuroLeague',
 };
 
 /** The sport's name for an accessibility label: every control that speaks a

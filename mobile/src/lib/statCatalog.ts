@@ -204,6 +204,9 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   NHL: ['NHL'],
   // Golf has no per-player leaderboard (v1).
   GOLF: [],
+  // EuroLeague (2026-11-13) joined for its in-play model; no player stats are
+  // stored for the app, so its Players board says it has no leaderboard.
+  EUROLEAGUE: [],
 };
 
 export function statsForSport(sport: Sport): StatDef[] {

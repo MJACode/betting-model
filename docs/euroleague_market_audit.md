@@ -21,6 +21,11 @@ Evidence grades: **Strong** = out-of-sample, real prices, bet count, interval or
 
 ## Halftime (2026-11-13)
 
+**Shipped 2026-11-13** (mike: "yes", knowing it misses the bar): the
+Pinnacle-anchored halftime spread is live as `euroleague_live_spread_ht`
+(`docs/sports/euroleague.md`, "Halftime spread"). Its build replays this
+section's 364 bets one for one.
+
 Run by a read-only research agent on the local cache, with the decision time,
 inputs and cut grid written down before any result: every table in
 `docs/euroleague_halftime.md`; the scripts are

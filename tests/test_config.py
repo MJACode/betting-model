@@ -261,7 +261,10 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          "ncaab_live_spread_h1", "ncaab_live_spread_h2", "ncaab_live_total_h2",
          # 2026-11-11 (mike): the NCAABW halftime total; its game-state model's
          # own P(win | no push), which its EV >= 0.05 cut was graded on; no record.
-         "ncaabw_live_total_ht"}
+         "ncaabw_live_total_ht",
+         # 2026-11-13 (mike): the EuroLeague halftime spread; its game-state model's
+         # own P(win | no push), which its EV >= 0.05 cut was graded on; no record.
+         "euroleague_live_spread_ht"}
     )
 
 
@@ -392,5 +395,7 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "ncaab_live_spread_h1", "ncaab_live_spread_h2", "ncaab_live_total_h2",
         # 2026-11-11 (mike): the NCAABW halftime total; its game-state model's own probability.
         "ncaabw_live_total_ht",
+        # 2026-11-13 (mike): the EuroLeague halftime spread; its game-state model's own probability.
+        "euroleague_live_spread_ht",
     }
     assert not not_named_here

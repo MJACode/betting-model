@@ -4,8 +4,10 @@
 > including 1h and 1q"*), built with the league-models skill. The sport code is
 > `EUROLEAGUE`. Season label: the ENDING year (2026-27 is 2027); EuroLeague's
 > own code is the starting year (E2026), and the label is threaded from that
-> code, never from a date. **No model is live yet**: this file is the
-> groundwork, the market grid and the purchase plan.
+> code, never from a date. **One model is live: the halftime spread,
+> `euroleague_live_spread_ht` (2026-11-13, mike: "yes", knowing it misses part
+> of the research bar; "Halftime spread" below).** The rest of this file is the
+> groundwork, the market grid and the purchase.
 
 ## What the sources hold (measured 2026-11-12)
 
@@ -41,6 +43,155 @@ on (2,398 games); referees, venue and attendance per game.
 | In play: full game at halftime | final, overtime included | the full path's in-play snapshots (every 5 minutes during games), halftime placed by the shot chart | **total and moneyline null; the halftime spread a lead that misses the bar** (364 bets +10.93% [+3.40, +18.48]; `docs/euroleague_market_audit.md`, Halftime) |
 | Player props | | the feed: no player key answered | **to do** (reopened 2026-11-14): only the odds feed was asked; DraftKings' own board and the odds-comparison sites are untried (the league-models skill, market-grid route 4) |
 | Futures (champion) | | not checked | parked |
+
+## What runs, and where it lands
+
+| What | Where | When |
+|---|---|---|
+| The schedule, finals and quarter scores | `euroleague-games` step (`data/ingestors/euroleague_api.py --current`) | the 6am pipeline and every hourly refresh pass |
+| The pre-game board (thirteen books, Pinnacle among them) | the worker's odds passes (`odds_ingestor.SPORT_KEYS`) | every odds pass |
+| The halftime spread | `models/euroleague_live_loop.py`, job `euroleague_live` on pollers | every 10 minutes, 9am-5:58pm ET; reads at each five-minute mark plus 37 s while a game is at its break |
+| Its decisions, bet or not | `euroleague_live_decisions` (one final row a game) | at the deciding read |
+| Its bets | `picks` (`is_live`), the app's Live board, push, the EuroLeague live Discord channel only | at the deciding read |
+| Settlement | `tracking/paper_tracker` through `config.LIVE_MODELS` (a full-game spread against `scored_line`, the home number) | the next settle pass after `games` holds the final |
+
+## Halftime spread: `euroleague_live_spread_ht` (live 2026-11-13, mike)
+
+**The rule.** The full-game spread, home or away, bet once a game during the
+halftime break. The first five-minute price read inside the break that holds
+an eligible quote decides the game: its best-EV quote is bet when EV >= 0.05,
+and the game is spent either way. It is the women's college halftime method
+ported (`models/ncaabw_live_ht.py`), with Pinnacle's pre-game close as the
+pre-game number:
+
+- **The margin still to come** (final margin minus the half-time margin, home
+  minus away, overtime included) is normal. Its mean is
+  `f*prior_m*b0 + f*sur*b1 + f^2*sur*b2`, with f = 0.5 at the break,
+  `prior_m` = minus Pinnacle's last pre-game home spread, and
+  `sur` = the half-time margin minus half of `prior_m`. Its variance is
+  `s0 + s1*f + s2*f^2`. Fitted by weighted least squares, three passes, on the
+  score every 30 seconds of regulation of every qualifying game of 2021-22 to
+  2025-26 (114,014 states). At the half the fit keeps 44.6% of Pinnacle's
+  margin to come and gives back 26.6% of the first half's surprise; sd 9.19.
+- **Pricing.** For a home spread `s` with the home side up `m` at the half:
+  `k = -s - m`, P(home covers) = P(margin to come > k) with pushes removed on a
+  whole number; EV = p x decimal - 1 for each side; the higher EV is the side.
+- **Eligible quotes** (the research's rule, unchanged): a book a pick may name
+  (DraftKings, FanDuel, BetMGM, BetRivers, Fanatics); stamped at or after the
+  game's first shot and after the half's last shot; both prices real; the
+  side's price within -250 to +250; at least two other in-play books quoting
+  the game's spread in the read (Pinnacle, Bovada, Marathonbet, Unibet and
+  Paddy Power count but are never bet); within 6 points of the read's median;
+  |line| <= 70. The read must fall more than a minute after the half's last
+  shot and more than a minute before the third quarter's first.
+- **The pre-game number** is Pinnacle's last coherent spread and total stamped
+  at or before min(tip, the first shot). A game without both is not priced.
+
+**The evidence** (`docs/euroleague_halftime.md`, section 3b, "B spread, V2
+Pinnacle prior"; walk-forward, each season on a model fitted on every earlier
+one):
+
+| Season | Bets | W-L | Units (research stake) | Return | Units (posted stake) |
+|---|---|---|---|---|---|
+| 2022-23 | 107 | 60-47 | +6.05 | +4.94% | +5.95 |
+| 2023-24 | 61 | 32-29 | -1.15 | -1.65% | -1.35 |
+| 2024-25 | 58 | 39-19 | +17.90 | +27.18% | +17.94 |
+| 2025-26 | 107 | 62-45 | +10.69 | +8.73% | +10.69 |
+| 2026-27 to 11-12 | 31 | 22-9 | +11.85 | +34.09% | +11.85 |
+| **All** | **364** | **215-149** | **+45.34** | **+10.93% [90%: +3.40, +18.48]** | **+45.08** |
+
+The research staked an underdog 1 unit to win its price; the app posts every
+bet as 1 unit to win (risk capped at 3), which is the "posted stake" column
+(the build prints both). Every cut from 0.02 to 0.12 is positive (+4.45%,
++7.31%, +10.93%, +11.98%, +17.59%); 200 shuffles of the half-time score never
+reached it (95th percentile -1.09%); the blind bets on the same kind of side
+lose (-2.2% to -8.6%); the bets turned round lose 23.91%.
+
+**What it missed, plainly.** It failed the false-discovery correction across
+all 183 cells of the halftime study (its p 0.0096 against a first-rank
+threshold of 0.00055). 2023-24 was negative. The 2021-22 second look was
+negative (-3.55% on 33). 78% of its bets are halftime underdogs. 2026-27's 31
+bets carry 11.85 of the 45.34 units. It was the best of five spread rules, not
+the one written down first. mike approved it knowing this.
+
+**The replay.** `scripts/build_euroleague_live_ht_artifact.py` decides every
+walk-forward game again through `models/euroleague_live_ht.read_break`, the
+code the loop runs, then runs the research's own code on the same cache:
+**364 identical bets (game, book, side, line, price, read), +45.34 units, no
+difference in either direction**, and the same count at every cut. The
+artifact (`models/saved/euroleague_live_ht_2027.json`) is the 2026-27 fold,
+the model the research graded 2026-27 to date on; the loop refuses an
+artifact for another season.
+
+**Prices.** Median -115, shortest -135, longest +105; none shorter than -300.
+The platform's -200 floor (`config.MODEL_MIN_ODDS`) never binds; it is pinned
+so a default change cannot move it. The edge cap (`models/euroleague_quote_bounds.py`)
+is 0.40 against a largest replayed decision edge of 0.166.
+
+**Volume.** 58 to 107 bets a full season (2022-23 to 2025-26), 31 in the first
+105 games of 2026-27: about one bet every three or four games, roughly 5 a
+week in a two-round week. 2025-26, the one season with all five bookable
+books, made 107.
+
+**Go-live gate standing:** 0 settled of 50. Reported, never a hold.
+
+### The live path, and why
+
+- **Halftime and the half-time score: EuroLeague's own live API**
+  (`data/ingestors/euroleague_live_feed.py`, free, no key), one game at a
+  time, 1.5 s between calls, a 30-second back-off on Cloudflare's HTTP 429.
+  `PlayByPlay`: the half is over at the second quarter's 'EP' (End Period);
+  the third has begun at its 'BP' (Begin Period) or its first shot. Read off a
+  finished game (E2026 game 110): the third quarter's substitutions are
+  numbered before its 'BP', so they are logged during the break, and "the
+  third quarter is not empty" would have ended the break early. `Points`: the
+  half's last shot and the game's first, in UTC, and the half-time score as the
+  running maximum over the first 20 minutes (equal to the quarter scores on
+  1,798 of 1,798 stored games). `Header`: the score after two quarters, a
+  second witness; any disagreement skips the read. The API is read before the
+  odds call and again after it; a half that changed between the two is skipped.
+- **The pre-game number: stored `odds`.** Pinnacle is in the forward pull.
+  Measured 2026-11-13 (read-only): on the three games of that day, Pinnacle's
+  last pre-game spread and total were stamped 0, 11 and 11 minutes before the
+  tip (`source` NULL, the forward pull). The research's own close came from
+  the five-minute history; a game whose last Pinnacle quote is older is still
+  priced on it.
+- **The books: the Odds API live endpoint**, one bulk call a read at the ten
+  books the history was bought at (`config.EUROLEAGUE_HISTORY_BOOKMAKERS`):
+  the five that may be bet and the five reference books, so the read's median
+  and its count of other books are over the books the grade had. Ten named
+  books bill as one region: **3 credits a call** for moneylines, spreads and
+  totals. That number is derived, not measured live: the history billed 30
+  credits a snapshot for the same ten books and three markets, and the
+  historical endpoint bills ten times the live one. The loop logs the first
+  call's `x-requests-last`. A game gets two or three reads, about 6-9 credits.
+- **DraftKings' own live board is not used.** On 2026-11-13 at about 23:15
+  UTC, DraftKings' basketball navigation for Ohio (the state the board feed
+  reads), New Jersey and Massachusetts listed no EuroLeague league; the next
+  EuroLeague game was 89 hours away, and DraftKings lists a league only while
+  it has offers. So its league id could not be read. The rule also needs two
+  other books beside the decider, which only the odds feed carries, and the
+  graded population is the odds feed's DraftKings quote. The next step: read
+  the navigation again while a EuroLeague round is on the board, and if
+  DraftKings lists it, add the id and a club-name resolver to
+  `data/ingestors/dk_live_board.py`.
+
+### Differences from the research a live loop cannot avoid
+
+- **Breaks longer than 25 minutes or shorter than 10** were left out of the
+  grade; a live loop cannot know a break's length in advance. A read more
+  than 25 minutes after the half's last shot is treated as past.
+- **The end of the break.** The grade's window closed a minute before the third
+  quarter's first shot. Live, a read is past once the third quarter's 'BP' or
+  first shot is on the API; a read in the last minute before a first shot that
+  has not happened yet cannot be told apart.
+- **The read time** is when the bulk call returned, a few seconds after the
+  five-minute mark plus 37 s once EuroLeague's API has been read (the
+  history's snapshots were stamped 36-40 s after the mark). Every decision row
+  records it.
+- **EuroLeague's live API timing is not yet measured on a live game**: how
+  soon 'EP', 'BP' and each shot appear. The first live slate (2026-11-17) is
+  the measurement; every read's state is in `euroleague_live_decisions`.
 
 ## What differs from the games we already bet
 
@@ -204,6 +355,12 @@ before the odds step, and on every hourly refresh pass. Not yet built: a live
 first-half and quarter fetch at the decision times.
 
 ## Open items
+
+- The halftime spread's first live slate: EuroLeague's API timing at the
+  break, whether `games` ever holds a mid-game score (the `euroleague-games`
+  step writes a game EuroLeague's API marks played; not yet watched during a
+  game), and the decision rows' reasons.
+- DraftKings' EuroLeague board: read the navigation while a round is posted.
 
 - A forward first-half and quarter fetch (the per-event endpoint, live).
 - Relocated "home" games: a club-arena table, so a home game away from the

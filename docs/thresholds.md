@@ -1751,6 +1751,29 @@ Both halves positive (+5.4 / +16.5), both tours, every book. The bar it
 missed: the stricter one. The cut chosen walk-forward returns +1.2% on 704
 bets (-4.4 to +6.9); 2023 is -9.1% on 42; Bovada's price in Pinnacle's place
 keeps +5.2%. Prices: median -165, shortest -500, 23.7% at -300 or shorter.
+## EUROLEAGUE — `euroleague_live_spread_ht`, the full-game spread at halftime (2026-11-13, mike)
+
+The whole story is `docs/sports/euroleague.md`, "Halftime spread". mike
+approved it ("yes") knowing it misses part of the research bar: the
+false-discovery correction across 183 cells, a negative 2023-24, a negative
+2021-22 second look.
+
+| Setting | Value | Where |
+|---|---|---|
+| cut | EV >= 0.05 at the deciding price, on P(win, push left out) | the model file's `cut` (`models/saved/euroleague_live_ht_2027.json`), read by `models/euroleague_live_loop.py` |
+| EV floor | 0.05, the cut itself | `config.MODEL_OWN_EV_FLOOR` |
+| price floor | -200 (it laid -135 to +105 on 364 replayed bets; never binds) | `config.MODEL_MIN_ODDS` |
+| edge cap | 0.40: a larger decision edge is declined as a data error (largest replayed 0.166) | `models/euroleague_quote_bounds.EDGE_CAP` |
+| probability | its own; no calibration map (no record) | `config.MODELS_ON_OWN_PROBABILITY` |
+| a day's count | no limit | |
+| stake | one unit to win, risk capped at 3 | `stake_for` |
+
+Replayed at 0.05 on the loop's own code, walk-forward 2022-23 to 2026-27 to
+11-12: 364 bets, 215-149, +45.34 units on the research's stake (+45.08 on the
+posted stake), +10.93% [90%: +3.40, +18.48], bet for bet the research's
+list. By season 107 / 61 / 58 / 107 / 31 bets, 2023-24 negative (-1.65%).
+Every cut from 0.02 to 0.12 is positive. Go-live gate standing: 0 settled of
+50. Re-read at 50 settled bets.
 
 ## UFC — `ufc_open_moneyline`, fight winner a week out (2026-11-13, mike)
 

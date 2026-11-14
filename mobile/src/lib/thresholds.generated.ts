@@ -15,6 +15,7 @@ export interface ModelThreshold {
 
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   atp_moneyline_shop: { min_prob: 0, min_edge: 0, min_odds: -500 },
+  euroleague_live_spread_ht: { min_prob: 0, min_edge: 0, min_odds: -200 },
   mlb_f5_moneyline: { min_prob: 0.58, min_edge: 0.02, min_odds: -200 },
   mlb_f5_over_under: { min_prob: 0.65, min_edge: 0.15, min_odds: -200 },
   mlb_f5_runline: { min_prob: 0.65, min_edge: 0.15, min_odds: -200 },

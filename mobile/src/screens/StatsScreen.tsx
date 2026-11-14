@@ -2671,17 +2671,27 @@ export function StatsScreen() {
           {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
         <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
-        <EmptyState
-          title={sport === 'ATP' || sport === 'WTA' ? `No stats for ${sport}` : 'No player leaderboard'}
-          subtitle={
-            // Tennis has no stats in the app. The copy says where its picks
-            // are rather than promising a board with "yet" (the NCAABW copy
-            // of 2026-11-10, before that sport had a board).
-            sport === 'ATP' || sport === 'WTA'
-              ? `There are no player stats for ${sport === 'ATP' ? 'men’s' : 'women’s'} tennis. Its match-winner picks are on the Picks tab.`
-              : `Player stat leaderboards aren't available for ${sport} yet.`
-          }
-        />
+        {sport === 'EUROLEAGUE' ? (
+          // The sport is shared across tabs, so a member who picked EuroLeague
+          // on Picks lands here; nothing is stored for it, so nothing is
+          // promised (UX review, 2026-11-13).
+          <EmptyState
+            title="No EuroLeague stats"
+            subtitle="The app has no EuroLeague player or team stats. Its one model’s bets post on Picks › Live Signals."
+          />
+        ) : (
+          <EmptyState
+            title={sport === 'ATP' || sport === 'WTA' ? `No stats for ${sport}` : 'No player leaderboard'}
+            subtitle={
+              // Tennis has no stats in the app. The copy says where its picks
+              // are rather than promising a board with "yet" (the NCAABW copy
+              // of 2026-11-10, before that sport had a board).
+              sport === 'ATP' || sport === 'WTA'
+                ? `There are no player stats for ${sport === 'ATP' ? 'men’s' : 'women’s'} tennis. Its match-winner picks are on the Picks tab.`
+                : `Player stat leaderboards aren't available for ${sport} yet.`
+            }
+          />
+        )}
       </SafeAreaView>
     );
   }

@@ -1,0 +1,145 @@
+{
+  "kind": "euroleague_live_ht",
+  "model_id": "euroleague_live_spread_ht",
+  "season": 2027,
+  "version": "euroleague_live_ht_2027_20261113",
+  "cut": 0.05,
+  "margin": {
+    "b": [
+      0.8917761456560455,
+      -0.7386358157429304,
+      0.41209858935939175
+    ],
+    "s": [
+      6.90953691030481,
+      188.9999079249632,
+      -67.90564014299768
+    ]
+  },
+  "fitted_on_seasons": [
+    2022,
+    2023,
+    2024,
+    2025,
+    2026
+  ],
+  "fitted_states": 114014,
+  "prior": "pinnacle's last coherent pre-game spread and total, at or before min(tip, first shot)",
+  "built_at": "2026-11-13T23:29:31+00:00",
+  "replay": {
+    "cut_0.05": {
+      "bets": 364,
+      "W": 215,
+      "L": 149,
+      "P": 0,
+      "units": 45.34,
+      "return_pct": 10.93
+    },
+    "posted_stake": {
+      "bets": 364,
+      "W": 215,
+      "L": 149,
+      "P": 0,
+      "units": 45.08,
+      "return_pct": 10.88
+    },
+    "by_season": {
+      "2023": {
+        "bets": 107,
+        "W": 60,
+        "L": 47,
+        "P": 0,
+        "units": 6.05,
+        "return_pct": 4.94,
+        "posted_units": 5.95
+      },
+      "2024": {
+        "bets": 61,
+        "W": 32,
+        "L": 29,
+        "P": 0,
+        "units": -1.15,
+        "return_pct": -1.65,
+        "posted_units": -1.35
+      },
+      "2025": {
+        "bets": 58,
+        "W": 39,
+        "L": 19,
+        "P": 0,
+        "units": 17.9,
+        "return_pct": 27.18,
+        "posted_units": 17.94
+      },
+      "2026": {
+        "bets": 107,
+        "W": 62,
+        "L": 45,
+        "P": 0,
+        "units": 10.69,
+        "return_pct": 8.73,
+        "posted_units": 10.69
+      },
+      "2027": {
+        "bets": 31,
+        "W": 22,
+        "L": 9,
+        "P": 0,
+        "units": 11.85,
+        "return_pct": 34.09,
+        "posted_units": 11.85
+      }
+    },
+    "cut_grid": {
+      "0.02": {
+        "bets": 552,
+        "W": 307,
+        "L": 245,
+        "P": 0,
+        "units": 28.03,
+        "return_pct": 4.45
+      },
+      "0.03": {
+        "bets": 476,
+        "W": 272,
+        "L": 204,
+        "P": 0,
+        "units": 39.68,
+        "return_pct": 7.31
+      },
+      "0.05": {
+        "bets": 364,
+        "W": 215,
+        "L": 149,
+        "P": 0,
+        "units": 45.34,
+        "return_pct": 10.93
+      },
+      "0.08": {
+        "bets": 227,
+        "W": 135,
+        "L": 92,
+        "P": 0,
+        "units": 30.93,
+        "return_pct": 11.98
+      },
+      "0.12": {
+        "bets": 117,
+        "W": 73,
+        "L": 44,
+        "P": 0,
+        "units": 23.36,
+        "return_pct": 17.59
+      }
+    },
+    "prices": {
+      "median": -115.0,
+      "shortest": -135.0,
+      "longest": 105.0,
+      "share_shorter_than_-300": 0.0,
+      "share_shorter_than_-500": 0.0
+    },
+    "decision_edge_max": 0.1656,
+    "matches_research": true
+  }
+}

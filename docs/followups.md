@@ -21,6 +21,22 @@
 
 ---
 
+## [ ] EuroLeague halftime spread: the live channel, then watch the first slate (2026-11-13)
+`euroleague_live_spread_ht` decides nothing until mike creates the EuroLeague
+live Discord channel and sets `DISCORD_CHANNEL_LIVE_EUROLEAGUE` (or
+`DISCORD_WEBHOOK_LIVE_EUROLEAGUE`) on pollers. Then, on the first slate
+(2026-11-17): EuroLeague's API timing at the break (when 'EP', 'BP' and each
+shot appear), the first call's `x-requests-last` (3 credits derived, not
+measured), the decision rows' reasons, and whether `games` ever holds a
+mid-game score before the final (`docs/sports/euroleague.md`, "Halftime spread").
+
+## [ ] EuroLeague: DraftKings' own live board (2026-11-13)
+DraftKings' navigation listed no EuroLeague league for Ohio, New Jersey or
+Massachusetts on 2026-11-13 at about 23:15 UTC, 89 hours before the next game.
+Read it again while a round is posted; if listed, add the id and a club-name
+resolver to `data/ingestors/dk_live_board.py` and re-measure which quote the
+halftime spread should read.
+
 ## [x] UFC: buy the fight-winner and round-total history (2026-11-13; bought the same day, 150,240 credits)
 No UFC model is live; the 2026-11-13 search (`docs/ufc_market_audit.md`)
 found one real mechanism, a rating model anchored on the first posted price,
@@ -62,6 +78,19 @@ moneyline moves; placing a debutant's fights (the card skips a fighter with
 no ufcstats record; 71 of the 846 backtest bets had one). Watch the live
 record against the backtest's +12.85% on the whole scored universe, and its
 closing-line value against Pinnacle's.
+
+## [ ] UFC props: grade the goes-the-distance lead forward (2026-11-14)
+The anchored goes-the-distance model is +10.0% on 791 bets at BestFightOdds'
+last recorded prices 2022-2026, +6.8% [-0.9, +14.4] on 745 at the price an
+hour before each fight (2026 -3.6%), and loses at DraftKings
+(`docs/ufc_market_audit.md` §5f). Next: once each card from 2026-11-14 is in
+the fight log, store its page (`python -m data.ingestors.ufc_prop_history
+--spool DIR --stage pages --fetch --store`) and grade the model's bets at
+FanDuel and Caesars, at the price their histories show an hour before each
+fight (`scripts/ufc_study/prop_leads.py`). Betting it live would need the
+upcoming card's page read at decision time, which nothing does yet. The
+full price-history stage (147,356 histories, about five days at 3 s apart)
+would date every last recorded price, not only the leads'.
 
 ## [ ] EuroLeague: finish the two history purchases (2026-11-12)
 mike approved about 4.4M on 2026-11-13 ("Do the 4.4m"; `docs/sports/euroleague.md`,

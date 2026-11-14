@@ -49,7 +49,7 @@ def _load_body() -> str:
     return m.group(0)
 
 
-def test_sports_holds_the_eleven_live_sports():
+def test_sports_holds_the_twelve_live_sports():
     """GOLF was retired 2026-09-08 (mike) and must NOT be a chip.
 
     The `Sport` union still carries it so existing signatures compile and old
@@ -61,6 +61,7 @@ def test_sports_holds_the_eleven_live_sports():
     NCAABW joined 2026-11-10 for its own (tests/test_mobile_ncaabw_in_app.py).
     ATP and WTA (men's and women's tennis) joined 2026-11-14, last (after NHL)
     (tests/test_mobile_tennis_in_app.py).
+    EUROLEAGUE joined 2026-11-13 for its in-play model (tests/test_mobile_euroleague_in_app.py).
     """
     assert _sports() == [
         "MLB",
@@ -74,6 +75,7 @@ def test_sports_holds_the_eleven_live_sports():
         "NHL",
         "ATP",
         "WTA",
+        "EUROLEAGUE",
     ]
 
 
