@@ -17,11 +17,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import pytest
+
 import config
 from data.ingestors import player_news_ingestor as pni
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _deletion_approved_for_the_mechanism_tests(monkeypatch):
+    """The prune test here exercises the delete machinery itself. Production runs
+    it only with mike's approval (config.DATA_DELETION_APPROVALS, CLAUDE.md §1b);
+    tests/test_no_data_deleted.py pins that it refuses without one."""
+    monkeypatch.setitem(config.DATA_DELETION_APPROVALS, "player_news", "test")
 
 def _article(item_id="1", headline="Labors in no-decision Sunday", athletes=("Shota Imanaga",),
              published="2026-08-23T21:14:00Z", description="Allowed two runs over two-plus innings."):

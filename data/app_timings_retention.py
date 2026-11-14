@@ -38,6 +38,10 @@ def prune_app_timings(conn=None, *, days: int | None = None, batch: int = _BATCH
         raise ValueError(f"retention days must be >= 1, got {days}")
     if batch < 1:
         raise ValueError(f"batch must be >= 1, got {batch}")
+    # NO DATA IS EVER DELETED (CLAUDE.md §1b, mike 2026-11-14).
+    import config as _config
+    if not _config.data_deletion_approved("app_timings"):
+        return 0
     own = conn is None
     if own:
         from data.db import get_connection

@@ -204,13 +204,18 @@ Supabase or it is a bug** (`data/local_store.py` is the sanctioned shape:
 opt-in, gitignored, regenerable, every row already in the database); a Railway
 volume is ONE COPY, not a backup; and an ingestor that buys data writes it in
 the same run, keyed on a `source` marker so a re-run imports nothing already
-stored. The old version of this rule carried exceptions "worth fixing when
-touched" and nobody touched them: 655 MB of PAID NFL odds history sat on one
-laptop for a fortnight. `tests/test_everything_in_supabase.py` fails on any
-undeclared store on disk, and the fix is an importer, not an allowlist entry.
+stored. `tests/test_everything_in_supabase.py` fails on any undeclared store on
+disk, and the fix is an importer, not an allowlist entry.
 **Everything is also carbon-copied to mike's PC** (mike, 2026-11-03): database,
 storage and GitHub, outside the repo, by `scripts/local_mirror*.py`. A backup,
 never a second store: `docs/local_ops.md`.
+
+**NO DATA IS EVER DELETED; ONLY MIKE CAN OVERRIDE IT, IN CHAT.** (mike,
+2026-11-14.) No prune, retention, cleanup or hand-run DELETE destroys a stored
+row. A row leaves the live database only by ARCHIVING: copied, verified (count,
+hash), then removed; the archive and the PC copy never delete. A cache rebuilt
+from a stored table (`latest_*`) is not a record. Overrides carry
+`Updated-By: mike`. What still deletes, and the plan: `docs/data_archive.md`.
 
 **A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND "SHOULD WE
 UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A pause banks the
@@ -537,8 +542,7 @@ your case; the rules below are complete as stated, the evidence is why.
 **These moved to `.claude/rules/` on 2026-09-03** and load automatically when
 Claude opens a file they apply to — `data-integrity.md` for `data/`, `models/`,
 `tracking/`, `monitoring/`; `operations.md` for the pipeline, the scheduler and
-the scripts. Twenty-one rules, none rewritten, costing nothing on a session that
-never touches those directories.
+the scripts.
 
 What stays here is what has to be known BEFORE deciding which file to open
 (§10: a path-scoped rule is not a demoted one).
@@ -563,13 +567,11 @@ What stays here is what has to be known BEFORE deciding which file to open
   claim to make is "byte-identical to master, 0 in touched files".
 - **Read source with an explicit encoding.** `read_text()` with no encoding uses
   the PLATFORM default — cp1252 on Windows, where this repo actually runs — and
-  this repo's source is full of box-drawing characters. One such read raised
-  `UnicodeDecodeError` at COLLECTION time and aborted the entire suite, leaving
-  the only quality gate unrunnable on the only machine that runs it. Keep
-  `encoding="utf-8"` on every source read.
+  this repo's source is full of box-drawing characters; one such read aborted
+  the whole suite at collection. Keep `encoding="utf-8"` on every source read.
 - **Check whether deps actually install before hand-waving.** PyPI is often
   reachable from these sandboxes — a real suite run beats "run it on your
-  machine". Equally, the sandbox egress limits are not the system limits (§1b).
+  machine".
 
 ---
 

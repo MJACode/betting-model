@@ -30,6 +30,16 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _deletion_approved_for_the_mechanism_tests(monkeypatch):
+    """The prune tests here exercise the delete machinery itself. Production runs
+    it only with mike's approval (config.DATA_DELETION_APPROVALS, CLAUDE.md §1b);
+    tests/test_no_data_deleted.py pins that it refuses without one."""
+    import config
+    monkeypatch.setitem(config.DATA_DELETION_APPROVALS, "app_timings", "test")
+
+
 ROOT = Path(__file__).parent.parent
 MOBILE = ROOT / "mobile"
 MIGRATION = ROOT / "data" / "migrations" / "add_app_timings.sql"

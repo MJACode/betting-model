@@ -26,6 +26,15 @@ import scheduler  # noqa: E402
 from monitoring import store  # noqa: E402
 from tracking.job_queue import QUEUE_LOCK_KEY  # noqa: E402
 from tracking import morning_disk  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _deletion_approved_for_the_mechanism_tests(monkeypatch):
+    """The prune tests here exercise the delete machinery itself. Production runs
+    it only with mike's approval (config.DATA_DELETION_APPROVALS, CLAUDE.md §1b);
+    tests/test_no_data_deleted.py pins that it refuses without one."""
+    import config
+    monkeypatch.setitem(config.DATA_DELETION_APPROVALS, "api_call_log", "test")
 from tracking.morning_disk import (  # noqa: E402
     API_LOG_PRUNE_LOCK,
     DECIDING_JOBS,
