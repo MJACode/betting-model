@@ -49,8 +49,8 @@ review as its own entry.
    ways, and each lead's bets re-graded at the price its history showed an
    hour and a day before the fight. Nothing clears. One lead (goes the
    distance, anchored) was +10.0% on 791 at the last recorded price and is
-   +6.5% [-1.6, +14.8] on 674 at the price an hour before, with 2026 losing
-   (-2.9%): to the frontier. It loses at DraftKings, the only live prop
+   +6.8% [-0.9, +14.4] on 745 at the price an hour before, with 2026 losing
+   (-3.6%): to the frontier. It loses at DraftKings, the only live prop
    board read.
 3. **New.**
    - Kill test (`kill-tests.md`, "Is the data right?"): a last recorded
@@ -71,8 +71,9 @@ review as its own entry.
    to try" on the frontier, now run, with the goes-the-distance lead in its
    place (`methods.md`). A lead that passed every kill test at the page's
    last recorded price (+10.0%, a plateau, 0 of 50 placebos) fell from
-   +7.9% to +6.5% on the same 674 bets at the price an hour before, and its
-   plateau went: the page's price is longer than the hour-before price on
+   +8.4% to +6.8% on the same 745 bets at the price an hour before, and on
+   those bets the cut neighbourhood is a hump at either price (the plateau
+   rested on fights with no start time): the page's price is longer than the hour-before price on
    25% of bets and shorter on 5%. Was "DraftKings and BetMGM are missing from the
    November 2026 pages", now measured: DraftKings' prop prices thin out on
    the site from 2023 and are absent in 2026, BetMGM's nearly so.

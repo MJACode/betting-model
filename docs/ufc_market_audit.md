@@ -16,7 +16,7 @@ retired. Round totals: nothing clears (§4). Method, distance and round
 markets, graded on BestFightOdds' per-book history 2021-2026 (§5f): no cut
 clears. One lead, a market-anchored model on goes the distance, was +10.0%
 on 791 bets at the last recorded price; at the price an hour before the
-fight it is +6.5% [-1.6, +14.8] with 2026 losing, so it goes to the
+fight it is +6.8% [-0.9, +14.4] with 2026 losing, so it goes to the
 frontier.
 
 How it got there: on a free archive the model beat the first posted price
@@ -556,8 +556,8 @@ break-even (goes the distance yes +0.9%, favourite by decision +2.4%; both
 intervals span zero, both positive in 2 of 6 years). One lead passed the
 kill tests at the last recorded price: the market-anchored model on **goes
 the distance**, +10.0% on 791 bets. **At the price an hour before each
-fight it does not hold**: +6.5% on 674 bets [-1.6, +14.8], 2026 -2.9%, and
-its cut neighbourhood turns negative from 0.15. It goes to the frontier.
+fight it does not hold**: +6.8% on 745 bets [-0.9, +14.4], 2026 -3.6%,
+and its cut neighbourhood is a hump that fades to nothing by 0.20. It goes to the frontier.
 Decision by fighter, the same event seen per fighter, fails the early/late
 split. Method of victory by KO/TKO or submission, inside the distance,
 round betting, fight ends in round N and round totals: nothing clears.
@@ -695,7 +695,8 @@ to call, and re-graded below.
 | Yes side / no side | 600 / 191 | +39.8 / +10.6 | +11.5% / +6.7% | |
 
 - **Cut neighbourhood**: +5.2% at 0.04, +11.0% at 0.06 (5/5 years), +9.0% at
-  0.10, +6.9% at 0.15, +5.9% at 0.20. A plateau, not a peak.
+  0.10, +6.9% at 0.15, +5.9% at 0.20: a plateau on every fight, but a hump
+  on the fights with a start time (below).
 - **Penalty**: ridge 10 +12.1%, 30 +10.0%, 100 +11.1%, 300 +14.2%.
 - **Early/late**: 2022-23 +4.3%, 2024-26 +15.7%.
 - **Placebo** (fighter inputs shuffled within the training years, 50 runs):
@@ -706,7 +707,7 @@ to call, and re-graded below.
 - **What it is**: the market priced decisions too low in 2023-2025. The
   recalibrated market alone catches about half of it and the fighter inputs
   add the rest; the placebo median (+2.3%) is that recalibration. About 10
-  units a year on about 160 bets at these prices, and about 6 at the price
+  units a year on about 160 bets at these prices, and about 7 at the price
   an hour before (below).
 
 **Decision by fighter** is the same event per fighter, and fails: 2022
@@ -731,46 +732,61 @@ Two measurements, on price histories (`/api/ggd`, stored in
   that has not moved is not proof the book still offered it; the history
   cannot tell the two apart.
 - **The lead re-graded at the price standing before the start**
-  (`prop_leads.py retime`; the start is the odds feed's latest start time
-  for the fight, else the games table's; 117 of the 791 bets have neither
-  and are left out):
+  (`prop_leads.py retime`). The start is the odds feed's latest start time
+  for the fight; failing that, the games table's; failing that, the odds
+  feed's start for the same two surnames within a day (the feed spells
+  some fighters differently, "Sergey" Pavlovich). 46 of the 791 bets have
+  no start time on any of the three and are left out:
 
 | Goes the distance, anchored, EV >= 0.08 | Bets | Units | Return | 90% interval | Years positive |
 |---|---|---|---|---|---|
-| Last recorded price (the same 674 bets) | 674 | +34.0 | +7.9% | [-0.4, +16.0] | 3/5 |
-| **Price 1 hour before the start** | 674 | +28.6 | **+6.5%** | **[-1.6, +14.8]** | 3/5 |
-| Price 1 hour before, only bets still at EV >= 0.08 there | 604 | +20.7 | +5.4% | [-3.0, +13.9] | 4/5 |
-| Price 24 hours before the start | 660 | +27.9 | +6.2% | [-2.0, +14.6] | 3/5 |
-| Price 24 hours before, only bets still at EV >= 0.08 there | 519 | +15.5 | +4.9% | [-4.9, +14.2] | 4/5 |
+| Last recorded price (the same 745 bets) | 745 | +39.7 | +8.4% | [+0.6, +15.6] | 3/5 |
+| **Price 1 hour before the start** | 745 | +33.1 | **+6.8%** | **[-0.9, +14.4]** | 3/5 |
+| Price 1 hour before, only bets still at EV >= 0.08 there | 666 | +28.0 | +6.6% | [-1.4, +14.6] | 4/5 |
+| Price 24 hours before the start | 729 | +31.9 | +6.4% | [-0.9, +13.9] | 3/5 |
+| Price 24 hours before, only bets still at EV >= 0.08 there | 571 | +25.2 | +7.1% | [-1.6, +16.5] | 4/5 |
 
   The last recorded price equals the price an hour before on 70% of the
-  bets (DraftKings 91%, BetRivers 89%, Caesars 67%, FanDuel 62%). Where it
+  bets (DraftKings 89%, BetRivers 89%, Caesars 68%, FanDuel 62%). Where it
   differs it is usually longer: the hour-before price was shorter on 25%
   and longer on 5%, so the page's price flatters the bet.
 
-  At the price an hour before, by year: 2022 -2.5% (207), 2023 +16.0%
-  (101), 2024 +31.2% (102), 2025 +3.8% (120), **2026 -2.9% (144)**. By
-  book: FanDuel +8.7% [-2.6, +19.9] on 380, Caesars +12.8% [-2.9, +27.8]
-  on 129, DraftKings -2.1% on 64, BetRivers -4.2% on 101. By side: yes
-  +7.4% (512), no +4.4% (162). Prices taken: median +174, shortest -280,
+  At the price an hour before, by year: 2022 -3.2% (229), 2023 +14.4%
+  (113), 2024 +31.7% (114), 2025 +7.7% (140), **2026 -3.6% (149)**. By
+  book: FanDuel +9.7% [-1.4, +21.3] on 415, Caesars +16.7% [+1.2, +30.7]
+  on 142, DraftKings -7.7% on 74, BetRivers -5.5% on 114 (a split, not a
+  rule: choosing Caesars after seeing this is selection). By side: yes
+  +7.3% (565), no +5.6% (180). Prices taken: median +174, shortest -280,
   longest +1200, none shorter than -300.
 
-  The cut neighbourhood, decided at the price an hour before (1,185 of the
-  1,389 bets down to EV 0.02 have one): 0.02 -3.4%, 0.04 +2.4%, 0.06 +7.9%
-  [+0.5, +15.0], 0.08 +5.3%, 0.10 +3.6%, 0.15 -4.2%, 0.20 -3.4%. At the
-  last recorded price it was a plateau from 0.04 to 0.20; an hour before it
-  is a hump that turns negative from 0.15.
+  The cut neighbourhood, on the 1,311 of the 1,389 bets down to EV 0.02
+  that have a start time:
 
-  The placebo (0 of 50 at or above, §5f above) was run at the last
-  recorded price only: the placebo's bets are other props, and their
-  histories were not fetched.
+| Cut | At the page's price | Decided at the page's price, graded an hour before | Decided and graded an hour before |
+|---|---|---|---|
+| 0.02 | -1.0% (1,311) | -2.2% | -2.4% (1,199) |
+| 0.04 | +4.0% (1,086) | +2.6% | +2.3% (984) |
+| 0.06 | +9.4% (914) | +7.8% | +7.8% [+1.3, +14.8] (830) |
+| 0.08 | +8.4% (745) | +6.8% | +6.0% [-2.0, +14.0] (679) |
+| 0.10 | +7.0% (621) | +5.4% | +4.2% (559) |
+| 0.15 | +3.7% (379) | +1.7% | +1.0% (346) |
+| 0.20 | +0.9% (256) | -1.0% | -1.2% (235) |
 
-  **The lead does not hold at the price an hour before the fight**: the
-  interval reaches below zero, 2026 loses, and the cut neighbourhood is no
-  longer a plateau. It goes to the frontier, not to a model.
+  On these bets the neighbourhood is a hump at every price, peaking at
+  0.06 and fading to nothing by 0.20. The plateau on the full set (+6.9% at
+  0.15, +5.9% at 0.20) rested on the fights with no start time.
+
+  The placebo (0 of 50 at or above, above) was run at the last recorded
+  price only: the placebo's bets are other props, and their histories were
+  not fetched.
+
+  **The lead does not hold at the price an hour before the fight**: its
+  interval reaches below zero, 2026 and 2022 lose, and the cut
+  neighbourhood is a hump, not a plateau. It goes to the frontier, not to a
+  model.
 
   The decision-by-fighter bets' histories were still being fetched when
-  this was written (5 of 1,112 stored); that lead had already failed.
+  this was written; that lead had already failed.
 
 **Where it could be bet.** DraftKings' own board (§5a) is the only live prop
 price read today, from mike's PC, and at DraftKings alone the lead loses.
@@ -780,7 +796,7 @@ FanDuel or Caesars would read that page on the day of the card.
 
 **What would have to change** for goes the distance to ship: a return
 whose interval clears zero at the price an hour before the fight (it is
-[-1.6, +14.8]); 2026 turning positive on the cards still to come (-2.9% at
+[-0.9, +14.4]); 2026 turning positive on the cards still to come (-3.6% at
 that price so far); a cut neighbourhood that holds at that price; and a
 live read of FanDuel's or Caesars' price at decision time. It goes to the
 frontier (`methods.md`) and is graded forward on each card's page.

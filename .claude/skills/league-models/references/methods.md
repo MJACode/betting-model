@@ -301,8 +301,8 @@ sections above with its result.
 - UFC goes the distance, the market-anchored model: +10.0% on 791 bets at
   BestFightOdds' last recorded prices 2022-2026, a plateau over cut and
   penalty, 0 of 50 placebos. **Re-graded at the price an hour before the
-  fight it does not hold**: +6.5% on 674 [-1.6, +14.8], 2026 -2.9%, the cut
-  neighbourhood negative from 0.15; about half of it was the market
+  fight it does not hold**: +6.8% on 745 [-0.9, +14.4], 2026 -3.6%, the cut
+  neighbourhood a hump; about half of it was the market
   recalibrated (decisions priced too low in 2023-2025), and it loses at
   DraftKings, the only live prop board read. The experiment: grade it
   forward on each card's page at FanDuel and Caesars, at the price an hour

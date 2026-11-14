@@ -16,7 +16,9 @@ study folder after prop_load.py.
 """
 import glob
 import os
+import re
 import sys
+import unicodedata
 from pathlib import Path
 
 import numpy as np
@@ -134,6 +136,25 @@ def retime():
     G = G[G.sport == "UFC"]
     start = pd.to_datetime(O[O.game_id.notna()].groupby("game_id").commence_time.max(), utc=True)
     start = start.combine_first(pd.to_datetime(G.set_index("game_id").commence_time, utc=True, errors="coerce"))
+    # A fight the odds history did not place on our id (the feed spells a
+    # fighter differently: "Sergey" Pavlovich) is found there by the two
+    # surnames within a day of the fight.
+    last = lambda n: re.sub(r"[^a-z]+", " ", unicodedata.normalize("NFKD", str(n)).encode("ascii", "ignore")
+                            .decode().lower()).split()[-1:] or [""]
+    O["ct"] = pd.to_datetime(O.commence_time, utc=True)
+    by_names = {}
+    for h, w, ct in zip(O.home_name, O.away_name, O.ct):
+        if pd.notna(ct):
+            k = (ct.date(), frozenset(last(h) + last(w)))
+            by_names[k] = max(by_names.get(k, ct), ct)
+    from datetime import timedelta
+    for gid in set(X.index) - set(start.dropna().index):
+        d = pd.Timestamp(X.loc[gid, "date"]).date()
+        names = frozenset(last(X.loc[gid, "a_name"]) + last(X.loc[gid, "b_name"]))
+        hits = [by_names[(d + timedelta(days=k), names)] for k in (0, 1, -1)
+                if (d + timedelta(days=k), names) in by_names]
+        if hits:
+            start[gid] = max(hits)
     by = {k: g for k, g in T.groupby(["book_id", "matchup_id", "prop_type", "team", "side"])}
 
     def at(b, hrs):
@@ -191,12 +212,14 @@ def retime():
         q1 = at(pool, 1)
         m = np.isfinite(q1)
         pool = pool[m].assign(dec_last=pool.dec[m], dec=q1[m])
-        print(f"  cut neighbourhood, {m.sum()} of {len(m)} pool bets with an hour-before price "
-              "(decided at the last recorded price, graded an hour before; and decided an hour before):")
+        print(f"  cut neighbourhood, on the {m.sum()} of {len(m)} bets down to EV 0.02 with an hour-before price:")
         nb = []
         for c in CUTS:
-            nb.append({"cut": c, "rule": "decided at last price", **summary(pool[pool.p * pool.dec_last - 1 >= c])})
-            nb.append({"cut": c, "rule": "decided an hour before", **summary(pool[pool.p * pool.dec - 1 >= c])})
+            at_page = pool[pool.p * pool.dec_last - 1 >= c]
+            nb.append({"cut": c, "rule": "decided and graded at the page's price",
+                       **summary(at_page.assign(dec=at_page.dec_last))})
+            nb.append({"cut": c, "rule": "decided at the page's price, graded an hour before", **summary(at_page)})
+            nb.append({"cut": c, "rule": "decided and graded an hour before", **summary(pool[pool.p * pool.dec - 1 >= c])})
         print(pd.DataFrame(nb).to_string(index=False))
 
 
