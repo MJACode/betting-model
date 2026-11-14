@@ -166,12 +166,16 @@ def _first_half_problem(label: str, model_id: str | None) -> str | None:
     """A first-half pick whose label reads as the full game. None for every
     model whose market is not a first-half one."""
     market = _market(model_id)
-    if market not in ("totals_h1", "spreads_h1"):
+    if market not in ("totals_h1", "spreads_h1", "h2h_h1"):
         return None
     if not _FIRST_HALF.search(label):
         if market == "spreads_h1":
             return ("the label does not say First Half, so it reads as the "
                     "full-game spread; the pick settles on the first half's margin")
+        if market == "h2h_h1":
+            # The EuroLeague first-half moneyline (models/euroleague_pregame.py).
+            return ("the label does not say First Half, so it reads as the "
+                    "full-game moneyline; the pick settles on the first half's winner")
         return ("the label does not say First Half, so it reads as the "
                 "full-game total; the pick settles on the first half's points")
     return None
@@ -186,12 +190,16 @@ def _first_quarter_problem(label: str, model_id: str | None) -> str | None:
     """A first-quarter pick whose label reads as the full game. None for every model whose market is not a
     first-quarter one."""
     market = _market(model_id)
-    if market not in ("spreads_q1", "h2h_q1"):
+    if market not in ("spreads_q1", "h2h_q1", "totals_q1"):
         return None
     if not _FIRST_QUARTER.search(label):
         if market == "h2h_q1":
             return ("the label does not say First Quarter, so it reads as the full-game moneyline; the pick settles "
                     "on the first quarter's winner")
+        if market == "totals_q1":
+            # The EuroLeague first-quarter total (models/euroleague_pregame.py).
+            return ("the label does not say First Quarter, so it reads as the full-game total; the pick settles on "
+                    "the first quarter's points")
         return ("the label does not say First Quarter, so it reads as the full-game spread; the pick settles on "
                 "the first quarter's margin")
     return None

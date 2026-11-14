@@ -1477,9 +1477,20 @@ _SIDE_PRICE_COL = {
 _NCAAB_HALF_MARKETS = ("totals_h1", "spreads_h1")
 
 
+# The EuroLeague period markets the pre-game rules bet. Their live feed
+# (data/ingestors/euroleague_period_odds.py) files every pull 'open', as the
+# NCAAB first-half feed does, and the rules decide on its tip-minus-10 pull; the
+# close is its tip-minus-2 pull, so a close must be a pull made after the pick.
+_EUROLEAGUE_PERIOD_MARKETS = ("h2h_h1", "totals_q1")
+
+
 def _ncaab_first_half_market(game_id: str, market: str) -> bool:
-    """NCAAB first-half total or spread. The live feed files every pull 'open'."""
-    return str(game_id).split("_", 1)[0] == "NCAAB" and market in _NCAAB_HALF_MARKETS
+    """A period market whose close must be pulled after the pick: an NCAAB
+    first-half total or spread, or a EuroLeague first-half moneyline or
+    first-quarter total. Both live feeds file every pull 'open'."""
+    prefix = str(game_id).split("_", 1)[0]
+    return ((prefix == "NCAAB" and market in _NCAAB_HALF_MARKETS)
+            or (prefix == "EUROLEAGUE" and market in _EUROLEAGUE_PERIOD_MARKETS))
 
 
 def _close_rows_only(game_id: str, market: str) -> bool:
@@ -2490,7 +2501,10 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "away":
             won = (home_win == 0)
 
-    elif market == "h2h_q1":
+    elif market in ("h2h_q1", "h2h_h1"):
+        # h2h_h1: the EuroLeague first half's moneyline (models/euroleague_pregame.py): the caller passes the FIRST
+        # HALF's points (first_half_points, euroleague_period_scores), and a level half is a PUSH, as the research
+        # graded it (docs/euroleague_1h1q_round1.md: the two-way price de-vigged equals the three-way draw-no-bet).
         # The first quarter's moneyline (models/nba_q1_trend_ml.py): the caller passes the FIRST QUARTER's points as
         # the two scores (_first_quarter_points). A level quarter is a PUSH: a two-way first-quarter moneyline voids
         # a tie at every book, and the graded record counts it so (46-35-6). Never NO_ACTION, which the full-game
@@ -2514,10 +2528,12 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "draw":
             won = (went_to_ot == 1)
 
-    elif market in ("totals", "totals_1st_5_innings", "totals_h1"):
+    elif market in ("totals", "totals_1st_5_innings", "totals_h1", "totals_q1"):
         # totals_h1: the caller passes the FIRST HALF's points as the two scores
         # (_first_half_points), as it passes the first five innings' for an F5
-        # market. Never reach this with the full-game final.
+        # market. Never reach this with the full-game final. totals_q1: the
+        # FIRST QUARTER's (_first_quarter_points; the EuroLeague first-quarter
+        # total, models/euroleague_pregame.py).
         if total_line is None:
             return "NO_ACTION", 0.0, 0.0
         if total == total_line:
@@ -2643,6 +2659,18 @@ _RULE_MODEL_MARKETS = {
     # NULL. The pick sits on the odds feed's row of the game, which takes its
     # final from CFBD's row (cfbd_ingestor.mirror_scores_to_alias_rows).
     "ncaaf_moneyline_market": "h2h",
+    # The four EuroLeague pre-game rules (models/euroleague_pregame.py,
+    # 2026-11-14, mike). The full-game moneyline settles on games.home_win
+    # (overtime included, as books settle it), scored_line NULL; the spread on
+    # the final margin against scored_line, the HOME number (section 4); the
+    # first-half moneyline on quarters 1-2 of euroleague_period_scores
+    # (first_half_points), a level half a PUSH; the first-quarter total on
+    # quarter 1 (_first_quarter_points). Overtime never counts in a period.
+    # NEVER "h2h" / "totals" for the period two: those grade the full game.
+    "euroleague_home_ml": "h2h",
+    "euroleague_home_dog_spread": "spreads",
+    "euroleague_h1_dog_ml": "h2h_h1",
+    "euroleague_q1_club_share_total": "totals_q1",
     # UFC fight winner a week out (models/ufc_open_moneyline.py, 2026-11-13,
     # mike). Settled by _settle_ufc_picks like every ufc_* pick: home_win,
     # a draw or no contest a push. Named here so its market is never the
@@ -2762,11 +2790,40 @@ def _first_half_points(conn: DBConnection, game_id: str,
     return points
 
 
+def _euroleague_period_points(conn: DBConnection, game_id: str, home_score, away_score,
+                              periods: tuple[int, ...]) -> tuple[int, int] | None:
+    """(home, away) points over `periods` of a EuroLeague game (euroleague_period_scores: quarters 1-4, each
+    overtime 5, 6 ...), or None when the game's periods cannot be trusted: numbered 1..n with n >= 4, every value
+    present, adding up to the stored final. Then the pick stays PENDING: no result, never the full-game score. The
+    first half is quarters 1 and 2 and the first quarter is quarter 1; overtime never counts in either
+    (models/euroleague_pregame.py; the research's settlement, scripts/euroleague_research/r1_lib.py)."""
+    rows = conn.execute(
+        "SELECT period, home_points, away_points FROM euroleague_period_scores WHERE game_id = %s",
+        (game_id,)).fetchall()
+    if not rows:
+        return None
+    per = {int(p): (h, a) for p, h, a in rows}
+    n = max(per)
+    if (n < 4 or set(per) != set(range(1, n + 1)) or len(rows) != n
+            or any(v is None for pts in per.values() for v in pts)
+            or home_score is None or away_score is None
+            or sum(float(v[0]) for v in per.values()) != float(home_score)
+            or sum(float(v[1]) for v in per.values()) != float(away_score)):
+        logger.warning(f"{game_id}: its EuroLeague period scores do not add up to the final "
+                       f"({away_score}-{home_score}) or a period is missing: "
+                       f"{sorted(tuple(r) for r in rows)}. Its period picks stay pending.")
+        return None
+    return (int(sum(per[p][0] for p in periods)), int(sum(per[p][1] for p in periods)))
+
+
 def _first_quarter_points(conn: DBConnection, game_id: str,
                           home_score, away_score) -> tuple[int, int] | None:
     """(home, away) points in an NBA first quarter, or None when the game has no period rows this settlement can
     trust (data/ingestors/nba_period_scores.first_quarter_from_periods: the first search's check, the one the graded
-    bets were settled on). Then the pick stays PENDING: no result, never the full-game score."""
+    bets were settled on). Then the pick stays PENDING: no result, never the full-game score. A EuroLeague game's
+    is quarter 1 of euroleague_period_scores (_euroleague_period_points)."""
+    if str(game_id).startswith("EUROLEAGUE_"):
+        return _euroleague_period_points(conn, game_id, home_score, away_score, (1,))
     from data.ingestors.nba_period_scores import first_quarter_from_periods
     rows = conn.execute(
         "SELECT period, home_points, away_points FROM nba_period_scores WHERE game_id = %s",
@@ -2813,10 +2870,13 @@ def _ncaab_first_half_points(conn: DBConnection, game_id: str,
 def first_half_points(conn: DBConnection, game_id: str,
                       home_score, away_score) -> tuple[int, int] | None:
     """A first half's (home, away) points for any sport that has one stored:
-    an NCAAB game's period 1 (ncaab_period_scores, two halves), an NBA game's
-    Q1 + Q2 (nba_period_scores). None keeps the pick pending."""
+    an NCAAB game's period 1 (ncaab_period_scores, two halves), a EuroLeague
+    game's quarters 1 and 2 (euroleague_period_scores), an NBA game's Q1 + Q2
+    (nba_period_scores). None keeps the pick pending."""
     if str(game_id).startswith("NCAAB_"):
         return _ncaab_first_half_points(conn, game_id, home_score, away_score)
+    if str(game_id).startswith("EUROLEAGUE_"):
+        return _euroleague_period_points(conn, game_id, home_score, away_score, (1, 2))
     return _first_half_points(conn, game_id, home_score, away_score)
 
 
@@ -3106,13 +3166,13 @@ def _settle_game_picks(
             settle_home = home_score_f5
             settle_away = away_score_f5
             settle_home_win = int(home_score_f5 > away_score_f5) if home_score_f5 != away_score_f5 else None
-        elif market in ("totals_h1", "spreads_h1"):
+        elif market in ("totals_h1", "spreads_h1", "h2h_h1"):
             first_half = first_half_points(conn, game_id, home_score, away_score)
             if first_half is None:
                 continue  # stays pending: no period rows, no result
             settle_home, settle_away = first_half
             settle_home_win = None
-        elif market in ("spreads_q1", "h2h_q1"):
+        elif market in ("spreads_q1", "h2h_q1", "totals_q1"):
             first_quarter = _first_quarter_points(conn, game_id, home_score, away_score)
             if first_quarter is None:
                 continue  # stays pending: no period rows, no result

@@ -1741,6 +1741,35 @@ list. By season 107 / 61 / 58 / 107 / 31 bets, 2023-24 negative (-1.65%).
 Every cut from 0.02 to 0.12 is positive. Go-live gate standing: 0 settled of
 50. Re-read at 50 settled bets.
 
+## EUROLEAGUE — the four pre-game rules (2026-11-14, mike)
+
+The whole story is `docs/sports/euroleague.md`, "The four pre-game rules".
+mike: "I told you to build all the models", knowing each misses part of the
+research bar. THE CUT IS EACH RULE, applied in `scripts/euroleague_pregame_card.py`
+at tip minus 10 at the best deciding-book price. The probability is the
+market's no-vig chance plus the rule's walk-forward uplift
+(`models/saved/euroleague_pregame_2027.json`); the EV floor and the edge cut
+sit just under the smallest EV and edge on the replayed bets, so neither
+removes one. Probability on its own (`config.MODELS_ON_OWN_PROBABILITY`); the
+edge cap is 0.40 (`models/euroleague_quote_bounds.EDGE_CAP`); stake one unit
+to win, risk capped at 3 (`stake_for`).
+
+| Model | The rule | Edge cut | EV floor | Price floor | Replay, live population | Prices laid |
+|---|---|---|---|---|---|---|
+| `euroleague_home_ml` | home moneyline, -200 or longer, not neutral | 0.01 | 0.04 | -200 (the rule) | 984 bets, +64.80 units, +5.24% [-0.27, +11.08] | -200 to +550, median -110 |
+| `euroleague_home_dog_spread` | home underdog ATS, own-country games | 0.06 | 0.11 | -200 | 455 bets, +54.54, +11.00% [+3.63, +17.95] | -120 to -102 |
+| `euroleague_h1_dog_ml` | first-half moneyline underdog; a tied half pushes | 0.00 | 0.01 | -200 | 465 bets, +19.14, +4.22% [-4.64, +12.35] | -115 to +475, median +142 |
+| `euroleague_q1_club_share_total` | first-quarter total vs club shares, margin 1.0 | 0.10 | 0.17 | -200 | 63 bets, +17.71, +22.23% [+4.08, +39.66] | -145 to -111 |
+
+The replay matches the research's own code bet for bet on every read (the
+DraftKings reads too: 972 / +59.64, 454 / +48.34). No two of the four decided
+in one pass can conflict, so each live population is the research's best-book
+read. A fifth rule, the favourite at -500 or shorter (`euroleague_heavy_fav_ml`),
+was removed before it went live (mike, 2026-11-14: "odds cutoff for favorites
+should be -200"): every bet it found was -500 or shorter (188 bets +34.59 units
++6.13% at DraftKings' close), so at a -200 floor it could never bet. Go-live
+gate standing, all four: 0 settled of 50. Re-read each at 50 settled bets.
+
 ## UFC — `ufc_open_moneyline`, fight winner a week out (2026-11-13, mike)
 
 mike, 2026-11-13: *"Use the model building skill to build models for UFC"*,

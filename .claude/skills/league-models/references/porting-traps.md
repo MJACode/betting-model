@@ -208,3 +208,21 @@ down this list.
   settles a pick; take the market from the model, never hardcode it.
 - **A scorer's clear can delete other writers' rows** (dead-zone rows of
   another model on the same game).
+
+## Replaying the research (EuroLeague, 2026-11-14)
+
+- **The research cache moves under the build.** It had gained a game after the
+  research read it, and that game's full-game "close" was a stale board (the
+  purchase's quotes ended at 05:45 UTC that day). Replay on the research's own
+  data state and report later games apart (`docs/sports/euroleague.md`, "The
+  four pre-game rules").
+- **Two blind rules on one market can bet opposite sides of one game.** The
+  home moneyline at -200 or longer and the favourite at -500 or shorter met on
+  6 games, where the favourite was the away club. The brief said they could
+  not; the build's conflict pass measured that they do. (The favourite rule
+  was removed before it went live, 2026-11-14, so the home moneyline keeps
+  those 6 games: re-measure what a conflict rule costs whenever a rule leaves.)
+- **A period market can be missing from settlement in a new sport**: no
+  `h2h_h1` result arm, `totals_q1` in no totals arm, and every non-NCAAB period
+  read off `nba_period_scores`, so EuroLeague period picks would have stayed
+  pending forever.

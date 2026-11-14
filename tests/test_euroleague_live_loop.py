@@ -411,3 +411,40 @@ def test_the_scheduler_runs_it_on_pollers_in_euroleague_hours():
     assert 'os.environ.get("RUN_EUROLEAGUE_LIVE", "1")' in src
     from tracking.job_heartbeat import ACTIVE_HOURS_ET, MAX_SILENCE
     assert ACTIVE_HOURS_ET["euroleague_live"] == (9, 17, 30) and MAX_SILENCE["euroleague_live"] >= 910
+
+
+def test_the_pre_game_rules_standing_bets_are_read_moneylines_as_half_point_spreads():
+    """The four EuroLeague pre-game rules (models/euroleague_pregame.py, 2026-11-14)
+    can hold a full-game bet before the half: the home-underdog spread as a spread,
+    the home moneyline as the spread at -0.5 (a full game cannot end level). A
+    halftime spread that cannot win beside one is declined."""
+    from models.ncaab_live_ig import cannot_both_win
+
+    class Conn:
+        def execute(self, sql, params):
+            self.models = params[1]
+            return self
+
+        def fetchall(self):
+            return [("euroleague_home_ml", "home", None, "MAD ML"),
+                    ("euroleague_home_dog_spread", "home", 4.5, "MAD +4.5"),
+                    ("euroleague_live_spread_ht", "away", 2.5, "PAN -2.5 (live)")]
+
+        def rollback(self):
+            pass
+
+        def commit(self):
+            pass
+
+    c = Conn()
+    got = LP.standing_spreads(c, "EUROLEAGUE_E2026_120")
+    assert {"euroleague_home_ml", "euroleague_home_dog_spread",
+            "euroleague_live_spread_ht"} <= set(c.models)
+    assert [(s["model_id"], s["side"], s["line"]) for s in got] == [
+        ("euroleague_home_ml", "home", -0.5),
+        ("euroleague_home_dog_spread", "home", 4.5), ("euroleague_live_spread_ht", "away", 2.5)]
+    home_ml = got[0]
+    # PAN -1 at the half (home number +1): PAN must win by 2+, so MAD cannot win too
+    assert cannot_both_win({"market": "spreads", "side": "away", "line": 1.0}, home_ml)
+    # MAD -3.5 at the half beside the home moneyline: both win when MAD wins by 4+
+    assert not cannot_both_win({"market": "spreads", "side": "home", "line": -3.5}, home_ml)

@@ -59,8 +59,12 @@ const page = modelPageTiming(MODEL);
 check('its page says it bets at halftime, on the full game', page.title === 'Bets at halftime'
   && page.body.includes('during its halftime break') && page.body.includes('full-game spread')
   && page.body.includes('not on the second half'), page.body);
-check('the custom-model builder offers no EuroLeague market (live markets are excluded)',
-  !betTypeGroups().some((g) => g.sport === EL && g.options.length > 0));
+// The four pre-game models (2026-11-14) are in the builder's EuroLeague group;
+// the halftime model never is (live markets are excluded).
+const elGroup = betTypeGroups().find((g) => g.sport === EL);
+check('the custom-model builder offers the four EuroLeague pre-game models and not the live one',
+  !!elGroup && elGroup.options.length === 4 && !elGroup.options.some((o) => o.id === MODEL),
+  JSON.stringify(elGroup?.options.map((o) => o.id)));
 
 // ── The Live board ───────────────────────────────────────────────────────────
 check('EUROLEAGUE has an in-play model', hasLiveModel(EL));

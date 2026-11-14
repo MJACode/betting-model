@@ -4,10 +4,13 @@
 > including 1h and 1q"*), built with the league-models skill. The sport code is
 > `EUROLEAGUE`. Season label: the ENDING year (2026-27 is 2027); EuroLeague's
 > own code is the starting year (E2026), and the label is threaded from that
-> code, never from a date. **One model is live: the halftime spread,
+> code, never from a date. **Five models are live: the halftime spread,
 > `euroleague_live_spread_ht` (2026-11-13, mike: "yes", knowing it misses part
-> of the research bar; "Halftime spread" below).** The rest of this file is the
-> groundwork, the market grid and the purchase.
+> of the research bar; "Halftime spread" below), and four pre-game rules
+> (2026-11-14, mike: "I told you to build all the models", knowing each misses
+> part of the bar; "The four pre-game rules" below).** A fifth pre-game rule,
+> the big-favourite moneyline, was removed before it went live (below). The
+> rest of this file is the groundwork, the market grid and the purchase.
 
 ## What the sources hold (measured 2026-11-12)
 
@@ -30,11 +33,11 @@ on (2,398 games); referees, venue and attendance per game.
 
 | Market | Settles on | Prices | Status |
 |---|---|---|---|
-| Full-game moneyline | final, overtime included | bought: 2021-22 on, 10 books | **rounds 1-2: nothing clears**; favourites at -500 or shorter are a lead whose price range is mike's call; the home moneyline within -200 fails its kill tests (`docs/euroleague_market_audit.md`) |
-| Full-game spread | final margin, overtime included | the same | **rounds 1-2: nothing clears**; home underdogs frozen; a market-anchored spread model dies on 2026-27 |
+| Full-game moneyline | final, overtime included | bought: 2021-22 on, 10 books | **rounds 1-2: nothing clears**; **live 2026-11-14 anyway** (mike): the home moneyline at -200 or longer (`euroleague_home_ml`), missing part of the bar (below); favourites at -500 or shorter (`euroleague_heavy_fav_ml`) removed before going live, as a -200 floor leaves them no bet |
+| Full-game spread | final margin, overtime included | the same | **rounds 1-2: nothing clears**; **live 2026-11-14 anyway**: home underdogs (`euroleague_home_dog_spread`); a market-anchored spread model dies on 2026-27 |
 | Full-game total | both scores, overtime included | the same | **rounds 1-2: nothing clears**; referee crews null, the opening total and its movement null |
-| First-half moneyline, spread, total | quarters 1-2; a tied half pushes the two-way moneyline | bought, 2023-24 on; a book a pick may name only from 2025-26 (2023-24 BetUS alone, 2024-25 BetUS and GTbets) | **rounds 1-2: nothing clears**, three mechanisms run (`docs/euroleague_market_audit.md`); halftime next |
-| First-quarter moneyline, spread, total | quarter 1; a tied quarter (6.31% of games) pushes the two-way moneyline | bought with the first half | **rounds 1-2: nothing clears**; two frozen leads (unders off a full-game anchor; a club first-quarter share, 63 bets +22.23%) await games after 2026-11-12 |
+| First-half moneyline, spread, total | quarters 1-2; a tied half pushes the two-way moneyline | bought, 2023-24 on; a book a pick may name only from 2025-26 (2023-24 BetUS alone, 2024-25 BetUS and GTbets); live from the period feed 2026-11-14 | **rounds 1-2: nothing clears**, three mechanisms run (`docs/euroleague_market_audit.md`); **live 2026-11-14 anyway**: the first-half moneyline underdog (`euroleague_h1_dog_ml`) |
+| First-quarter moneyline, spread, total | quarter 1; a tied quarter (6.31% of games) pushes the two-way moneyline | bought with the first half; live from the period feed 2026-11-14 | **rounds 1-2: nothing clears**; **live 2026-11-14 anyway**: the club first-quarter share total (`euroleague_q1_club_share_total`, 63 bets +22.23%); the unders lead stays frozen |
 | Second-quarter spread and total | quarter 2 | FanDuel only | to do; likely parked (one book) |
 | Team totals, full game and first half | one club's points | BetMGM, BetRivers, Fanatics (first half: BetRivers) | to do |
 | Alternate spreads and totals | final | BetMGM, BetRivers, Fanatics, Pinnacle | to do |
@@ -54,6 +57,11 @@ on (2,398 games); referees, venue and attendance per game.
 | Its decisions, bet or not | `euroleague_live_decisions` (one final row a game) | at the deciding read |
 | Its bets | `picks` (`is_live`), the app's Live board, push, the EuroLeague live Discord channel only | at the deciding read |
 | Settlement | `tracking/paper_tracker` through `config.LIVE_MODELS` (a full-game spread against `scored_line`, the home number) | the next settle pass after `games` holds the final |
+| The period and full-game lines at the decision times | `scripts/euroleague_pregame_window.py`, job `euroleague_pregame_window` on the worker (`data/ingestors/euroleague_period_odds.py`) | every minute; one call per game 60, 10 and 2 minutes before tip |
+| The four pre-game rules | `scripts/euroleague_pregame_card.py` in the same job | each game once, on its tip-minus-10 call |
+| Their decisions, bet or not | `euroleague_pregame_decisions` (one row a game and model) | at the decision |
+| Their bets and NONE rows | `picks`, the app, push, the EuroLeague pre-game Discord channel (`DISCORD_CHANNEL_EUROLEAGUE` / `DISCORD_WEBHOOK_EUROLEAGUE`; unset, nothing posts) | at the decision |
+| Their settlement | `tracking/paper_tracker._RULE_MODEL_MARKETS`: the moneylines on `home_win`, the spread on the final margin against the home number, the first half on quarters 1-2 and the first quarter on quarter 1 of `euroleague_period_scores` (overtime never counts; a tied half pushes) | the next settle pass after the final and its quarters are stored |
 
 ## Halftime spread: `euroleague_live_spread_ht` (live 2026-11-13, mike)
 
@@ -192,6 +200,196 @@ books, made 107.
 - **EuroLeague's live API timing is not yet measured on a live game**: how
   soon 'EP', 'BP' and each shot appear. The first live slate (2026-11-17) is
   the measurement; every read's state is in `euroleague_live_decisions`.
+
+## The four pre-game rules (live 2026-11-14, mike)
+
+mike, 2026-11-14: *"I told you to build all the models"*, knowing each one
+MISSED part of the research bar. Each is a rule card
+(`models/euroleague_pregame.py`, one card for all four,
+`scripts/euroleague_pregame_card.py`), decided once a game ten minutes before
+the tip, at the best price among the five books a pick may name (DraftKings,
+FanDuel, BetMGM, BetRivers, Fanatics). Each has its own switch
+(`RUN_EUROLEAGUE_HOME_ML`, `RUN_EUROLEAGUE_HOME_DOG_SPREAD`,
+`RUN_EUROLEAGUE_H1_DOG_ML`, `RUN_EUROLEAGUE_Q1_SHARE_TOTAL`);
+`RUN_EUROLEAGUE_PREGAME=0` stops all four and their feed.
+
+**The replay.** `scripts/euroleague_pregame_build.py` decides every game of the
+research cache again through the card's own decision code, runs the research's
+own scripts on the same cache, and compares them bet for bet (game, side,
+number, price, book). On the research's data state (games through 2026-11-12)
+every read matched with no difference in either direction:
+
+| Model | Research read | Bets | Units | Card's replay |
+|---|---|---|---|---|
+| euroleague_home_ml | DraftKings close | 972 | +59.64 | 972, +59.64 |
+| | best deciding-book close | 984 | +64.80 | 984, +64.80 |
+| euroleague_home_dog_spread | DraftKings close | 454 | +48.34 | 454, +48.34 |
+| | best deciding-book close | 455 | +54.54 | 455, +54.54 |
+| euroleague_h1_dog_ml | best deciding book at tip minus 10 | 465 | +19.14 | 465, +19.14 |
+| euroleague_q1_club_share_total | best deciding book at tip minus 10 | 63 | +17.71 | 63, +17.71 |
+
+The card bets the best deciding-book price (CLAUDE.md 6), so the "best" rows
+are the live populations. The cache has gained one game since (2026-11-13):
+the full-game purchase's quotes end at 05:45 UTC that day, so its "close" is a
+stale board and it is not read.
+
+**One game never carries two bets that cannot both win.** The two full-game
+rules both bet the home side (the moneyline, and the spread only when the home
+number is above 0), so they can always win together, and a first-half or
+first-quarter bet can win beside any full-game bet: no two of the four decided
+in one pass conflict, and the replay loses no game to the rule. A full-game
+moneyline or spread that cannot win beside a standing EuroLeague full-game BET
+(the halftime spread) is written NONE; the standing BET keeps the game. The
+halftime loop checks its spread against the pre-game rules' standing bets the
+same way (`models/euroleague_live_loop.standing_spreads`: the moneyline is the
+spread at -0.5 home). Until the big-favourite rule was removed, it and the home
+moneyline sat on opposite sides of 6 replayed games, and both were written
+NONE there; with it gone, the home moneyline keeps those 6 (net -1.00 units).
+
+**The probability.** A blind rule has no probability of its own. Each pick
+carries the market's no-vig chance of the bet side (power de-vig for the
+full-game moneylines, multiplicative otherwise, as the research priced them)
+plus the rule's walk-forward uplift: its replayed bets' win share minus that
+mean no-vig chance over the seasons before 2026-27, pushes out. Every uplift is
+larger than the vig, so every replayed bet carries a positive EV. The EV floor
+and the edge cut (`config.py`) sit just under the smallest replayed EV and
+edge: they remove none of the replayed bets. The rule is the cut.
+
+| Model | Uplift (bets) | Smallest EV / median | Smallest edge | EV floor | Edge cut |
+|---|---|---|---|---|---|
+| euroleague_home_ml | +0.0520 (921) | +0.0401 / +0.0628 | +0.0197 | 0.04 | 0.01 |
+| euroleague_home_dog_spread | +0.0904 (421) | +0.1181 / +0.1272 | +0.0632 | 0.11 | 0.06 |
+| euroleague_h1_dog_ml | +0.0524 (347, 2025-26) | +0.0106 / +0.0902 | +0.0055 | 0.01 | 0.00 |
+| euroleague_q1_club_share_total | +0.1575 (53, 2025-26) | +0.1779 / +0.2240 | +0.1053 | 0.17 | 0.10 |
+
+Read every model probability as an upper bound: each uplift is the extra the
+rule's own bets won, in sample.
+
+### euroleague_home_ml — "EuroLeague Moneyline"
+
+- **The rule** (round 2, A1, `r3_a_home.py`): the home side's moneyline at the
+  close when its price is -200 or longer, not at a neutral site; every quote
+  shorter than -200 is removed BEFORE the best price is picked.
+- **The evidence:** 972 bets, 506-466, +59.64 units, +4.89% [90%: -0.68,
+  +10.39] at DraftKings' close; 984, 513-471, +64.80, +5.24% [-0.27, +11.08]
+  at the best deciding book, which is the live population. By season (best
+  book): 2021-22 +18.28% (165), 2022-23 +4.11% (172), 2023-24 +0.74% (176),
+  2024-25 +3.36% (178), 2025-26 +6.79% (230), 2026-27 to 11-12 -12.70% (63).
+- **What it missed:** the interval reaches below zero; +0.29% without its 10
+  best dates; 2026-27 -18.50% at DraftKings; the false-discovery correction (p
+  0.071); the price bands do not rise in order (-200 to -151 lost -5.55%);
+  one side by construction (the away side under the same floor lost -13.84% on
+  1,572).
+- **Prices:** median -110, shortest -200, longest +550; none shorter than
+  -300. The -200 floor is the rule itself.
+- **Volume:** about 184 bets a full season, about 6 a week.
+
+### euroleague_heavy_fav_ml — removed
+
+Removed before going live (mike, 2026-11-14: "odds cutoff for favorites should
+be -200"): every bet the rule found was -500 or shorter (188 bets +34.59 units
++6.13% at DraftKings' close), so at a -200 floor it could never bet.
+
+### euroleague_home_dog_spread — "EuroLeague Spreads"
+
+- **The rule** (full game round 1, H3, `r2_leads2.py`): the home side against
+  the full-game spread when the modal deciding-book home number is above 0, at
+  its best price on that number. Own-country games only: not neutral, and not at
+  one of the research's relocated venues (`RELOCATED_VENUES`, `r2_leads.py`'s
+  lists: Maccabi in Belgrade and Limassol, Hapoel in Sofia and Botevgrad, Dubai
+  in Sarajevo and Zenica, and six one-off venues abroad).
+- **The evidence:** 454 bets, +48.34 units, +9.72% [+2.44, +16.89] at
+  DraftKings' close; 455, 262-189-4, +54.54 units, +11.00% [+3.63, +17.95] at
+  the best deciding book. By season: 2021-22 +14.33% (93), 2022-23 +8.95% (77),
+  2023-24 -6.12% (81), 2024-25 +10.06% (79), 2025-26 +33.32% (95), 2026-27
+  -16.68% (30).
+- **What it missed:** 2025-26 carries 64% of the units (DraftKings); +5.37%
+  without its 10 best dates; the walk-forward version (buckets chosen from
+  earlier seasons) +3.16%; 2026-27 -24.06% on 30 at DraftKings; the
+  multiplicity bar; it was chosen with the residual table in view.
+- **Prices:** median -110, shortest -120, longest -102.
+- **Volume:** about 85 bets a full season, about 3 a week.
+
+### euroleague_h1_dog_ml — "EuroLeague First Half Moneyline"
+
+- **The rule** (first half round 1, `r1_baselines.py`, the best baseline): the
+  first-half moneyline side whose mean deciding-book no-vig chance is under
+  one half, at its best deciding-book price, on the tip-minus-10 fetch. A level
+  mean (a pick'em) is not bet. **A tied half pushes**: the two-way first-half
+  moneyline voids a tie (the research measured it: BetRivers' two-way price
+  de-vigged equals its three-way draw-no-bet price); Fanatics posts only the
+  three-way, which is a different market and is not read.
+- **The evidence:** 465 bets, 192-258-15, +19.14 units, +4.22% [-4.64,
+  +12.35]: 2025-26 +8.38% (358), 2026-27 -9.76% (107).
+- **What it missed:** the interval runs through zero; 2026-27 negative; one
+  priced season before the live one.
+- **Prices:** median +142, shortest -115, longest +475.
+- **Volume:** about 358 bets a full season (2025-26), about 11 a week: the
+  rule bets nearly every game a deciding book prices.
+
+### euroleague_q1_club_share_total — "EuroLeague First Quarter Totals"
+
+- **The rule** (round 2, Q1-i at margin 1.0, `r3_d_periods.py`): each club's
+  share of its games' points scored in the first quarter, from every earlier
+  game (tipped 3+ hours before) since 2020-21, shrunk n / (n + 40) toward the
+  league mean; the pair's share times the full-game total (Pinnacle's
+  alternate ladder in the same fetch, interpolated where its no-vig over chance
+  crosses one half; else Pinnacle's main total; else DraftKings') against the
+  modal deciding-book first-quarter total, rungs set aside (a main number whose
+  no-vig side chance is outside 0.35-0.65, or 2+ points from every other book's
+  main number). Over when the implied number is a point or more above the
+  book's, under when a point or more below.
+- **The evidence:** 63 bets, 43-20, +17.71 units, +22.23% [+4.08, +39.66]:
+  2025-26 +21.38% (53), 2026-27 +26.89% (10). Placebo: 1% of 200 shuffles at
+  or above it.
+- **What it missed:** 63 bets against the 200-bet bar; one season with 30+
+  bets; the false-discovery correction (p 0.0188); no plateau (margin 0.75
+  +4.44%, 0.5 -3.68%); and 1.0 was the grid's best cell, not the pre-registered
+  0.5, which lost.
+- **Prices:** median -122, shortest -145, longest -111.
+- **Volume:** about 53 bets a full season (2025-26), about 2 a week.
+
+**Go-live gate standing, all four:** 0 settled of 50. Reported, never a hold.
+
+**In the app** (UX review, 2026-11-14): the names above; each model page says
+what it bets and the prices it lays.
+
+### When they decide, and on what
+
+- **The decision fetch.** The live feed
+  (`data/ingestors/euroleague_period_odds.py`) makes one per-event call per
+  game at 60, 10 and 2 minutes before the tip: every first-half, quarter,
+  team-total and alternate key the purchase asked, plus the full game's
+  moneyline, spread and total, at the ten books of
+  `config.EUROLEAGUE_PERIOD_BOOKMAKERS`, stored in `odds` under source
+  `odds_api_euroleague_period_live` (protected from the odds clean-up), with
+  one ledger row a call in `euroleague_period_live_fetches`. The rows are
+  parsed by the purchase's own code, so each book's main number is chosen
+  exactly as the research's rows were.
+- **The card** decides each game on the call made for tip minus 10 that landed
+  5 to 10.5 minutes before the tip: the full-game rules on the board at that
+  instant (every stored pre-game quote stamped at or before it, the call's own
+  included), the period rules on the call's own rows. Why the call carries the
+  full game too: EuroLeague tips at 17:00-20:30 UTC, inside the hourly refresh
+  window, so a stored full-game quote can be nearly an hour old at tip minus
+  10, where the research read a five-minute snapshot.
+- **With no decision call by 5 minutes before tip** the full-game rules decide
+  on the stored board as of tip minus 10 (the row says so) and the period rules
+  record `missed`; a game that tips with a model undecided is `missed` too. A
+  miss fails the run after every other write.
+- **The cost, from the code's billing model, not measured live.** The
+  per-event endpoint bills about 1 credit per market a book returns, per
+  region (the history bills ten times that: the period trial's 2,821 credits on
+  24 answers, 11 to 13 markets each), and ten named books are one region. So a
+  call costs about 14-16 credits (11-13 period markets and the 3 full-game
+  ones), at most 34; a game about 45 (three calls), at most 102; a 380-game
+  regular season about 17,000, at most about 39,000. The ledger records each
+  call's `x-requests-last`: the first live call measures it. The feed buys
+  nothing under one day of the platform's measured burn
+  (`EUROLEAGUE_PERIOD_RESERVE_DAYS`).
+- **Closing-line value** for the two period rules is read from a call made
+  after the pick (the tip-minus-2 call), as the NCAAB first half's is: the
+  decision call is the price taken, so it is never its own close.
 
 ## What differs from the games we already bet
 
@@ -351,8 +549,10 @@ sport (`odds_ingestor.SPORT_KEYS`), at the line-shop ten plus
 pass), resolved onto the stored schedule and kept even when DraftKings has not
 posted (`DK_GATE_EXEMPT_SPORTS`). The schedule and finals come from the
 `euroleague-games` step (`euroleague_api --current`): in the 6am pipeline
-before the odds step, and on every hourly refresh pass. Not yet built: a live
-first-half and quarter fetch at the decision times.
+before the odds step, and on every hourly refresh pass. The live first-half,
+quarter and full-game fetch at the decision times is the pre-game window's
+(`data/ingestors/euroleague_period_odds.py`, "When they decide, and on what"
+above), from 2026-11-14.
 
 ## Open items
 
@@ -362,7 +562,12 @@ first-half and quarter fetch at the decision times.
   game), and the decision rows' reasons.
 - DraftKings' EuroLeague board: read the navigation while a round is posted.
 
-- A forward first-half and quarter fetch (the per-event endpoint, live).
+- The four pre-game rules' first live slate: the first call's
+  `x-requests-last` (the cost above is derived), each rule's first decision
+  rows and reasons, and the first bet on every surface.
+- The relocated-venue lists the home-underdog spread reads are the research's
+  (2026-11-12). A relocation after that date is not on them: a club-arena
+  table would replace the hand-typed lists.
 - Relocated "home" games: a club-arena table, so a home game away from the
   club's own city is known before a model reads home advantage.
 - The research: baselines on every grid row, the leads in

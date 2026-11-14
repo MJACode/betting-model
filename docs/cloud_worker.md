@@ -400,6 +400,30 @@ the worker's open egress; it is behind Cloudflare, which refused four calls at
 once (HTTP 429) on 2026-11-13, so the loop asks one at a time, 1.5 s apart.
 `--dry-run` makes no Odds API call and writes nothing.
 
+### EuroLeague pre-game window (added 2026-11-14)
+
+`scripts/euroleague_pregame_window.py`, job `euroleague_pregame_window` on the
+worker (a pipeline-role job), every minute 24x7. A tick with nothing due makes
+no call. It buys one per-event call per EuroLeague game 60, 10 and 2 minutes
+before tip (`data/ingestors/euroleague_period_odds.py`: the first half, the
+quarters, team totals, the alternate ladders and the full game, at the ten
+books of `config.EUROLEAGUE_PERIOD_BOOKMAKERS`, about 15 credits a call from
+the code's billing model, at most 34; ledger `euroleague_period_live_fetches`),
+then runs the four pre-game rules (`scripts/euroleague_pregame_card.py`, ledger
+`euroleague_pregame_decisions`), which decide each game once on its
+tip-minus-10 call, and publishes what they wrote. Both ledgers are created by
+the code on first write. It beats `job_heartbeats` on every tick (bound 20
+minutes). The models and their evidence: `docs/sports/euroleague.md`, "The
+four pre-game rules".
+
+| Variable (on the worker) | Default | What it does |
+|---|---|---|
+| `RUN_EUROLEAGUE_PREGAME` | `1` | `0` / `false` / `off` / `no`: nothing is read or bought; the job keeps beating |
+| `RUN_EUROLEAGUE_PERIOD_FEED` | `1` | `0`: the calls stop alone; the full-game rules decide on the stored board at tip minus 10, the period rules record `missed` and the window fails on every game day, so switch the two period models off with it |
+| `RUN_EUROLEAGUE_HOME_ML`, `RUN_EUROLEAGUE_HOME_DOG_SPREAD`, `RUN_EUROLEAGUE_H1_DOG_ML`, `RUN_EUROLEAGUE_Q1_SHARE_TOTAL` | `1` | `0`: that model decides nothing and writes no row |
+| `EUROLEAGUE_PERIOD_RESERVE_DAYS` | `1` | Under this many days of the platform's measured daily burn the feed buys nothing and the window fails |
+| `DISCORD_CHANNEL_EUROLEAGUE` or `DISCORD_WEBHOOK_EUROLEAGUE` | **not set** (2026-11-14: the channel is being created) | Where the pre-game picks post; with neither set they stay unsent and post once it exists |
+
 ### Scoreboard live scores (NFL, NBA, NHL — added 2026-10-29)
 
 `live_scoreboard` job, `pollers` service, every minute 24x7

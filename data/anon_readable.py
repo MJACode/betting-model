@@ -465,6 +465,13 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/euroleague_shots.py); model input, never read by the app.
     "euroleague_shots",
     "euroleague_shot_fetches",
+    # The EuroLeague pre-game card's decisions ledger: one row per (game,
+    # model) the four rules have decided, bet or not
+    # (scripts/euroleague_pregame_card.py, which creates it on demand), and
+    # the live period feed's call ledger (data/ingestors/euroleague_period_odds.py).
+    # Read by the card and the window, never by the app.
+    "euroleague_pregame_decisions",
+    "euroleague_period_live_fetches",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and

@@ -272,6 +272,19 @@ def _build_pick_label(pick_side: str, home_team: str, away_team: str,
         # tracking/pick_integrity refuses a first-quarter label that does not say so.
         team = home_team if pick_side == "home" else away_team
         return f"{away_team} @ {home_team} — First Quarter {team} ML"
+    elif market == "h2h_h1":
+        # The first half's moneyline: "MAD @ PAN — First Half MAD ML" (models/euroleague_pregame.py, the first-half
+        # underdog). The matchup leads, as the first-quarter moneyline's does, so the label cannot be read as the
+        # full-game moneyline. tracking/pick_integrity refuses a first-half label that does not say so.
+        team = home_team if pick_side == "home" else away_team
+        return f"{away_team} @ {home_team} — First Half {team} ML"
+    elif market == "totals_q1":
+        # The first quarter's points: "MAD @ PAN — First Quarter Over 41.5" (models/euroleague_pregame.py, the
+        # club first-quarter share). The matchup leads, as the first-half total's does, so the label cannot be read
+        # as the full-game total. tracking/pick_integrity refuses a first-quarter label that does not say so.
+        direction = "Over" if pick_side == "over" else "Under"
+        line_str = f" {line}" if line is not None else ""
+        return f"{away_team} @ {home_team} — First Quarter {direction}{line_str}"
     elif market in ("spreads", "spreads_1st_5_innings"):
         team = home_team if pick_side == "home" else away_team
         if line is not None:
@@ -3402,9 +3415,14 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               WHEN p.model_id = 'nba_q1_trend_ml' THEN 'h2h_q1'
               -- The NCAAB first half's points, not the game total.
               WHEN p.model_id = 'ncaab_first_half_total' THEN 'totals_h1'
+              -- The EuroLeague first half's moneyline and first quarter's
+              -- points (models/euroleague_pregame.py), not the game's.
+              WHEN p.model_id = 'euroleague_h1_dog_ml' THEN 'h2h_h1'
+              WHEN p.model_id = 'euroleague_q1_club_share_total' THEN 'totals_q1'
               WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'
                 OR p.model_id = 'mlb_spread_market' OR p.model_id = 'nfl_opener_spread'
                 OR p.model_id = 'ncaab_spread_market'
+                OR p.model_id = 'euroleague_home_dog_spread'
                 THEN 'spreads'
               -- ncaab_moneyline_own_spread has 'spread' in its id but bets
               -- moneylines: it falls to h2h here, and no pattern above may

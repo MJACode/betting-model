@@ -175,6 +175,11 @@ def build(conn: StandIn, seed: int = 7) -> None:
     book at one snapshot_at (a ladder market does), so which tied row is the
     opener, the close or the newest is decided by the primary key alone."""
     rnd = random.Random(seed)
+    # The source is drawn from its own stream: rnd.choice over a list consumes
+    # random bits by the list's length, so each new protected source reshaped
+    # every later draw and could take away the tie groups the equivalence test
+    # needs (the EuroLeague period feed's marker did, for seed 11, 2026-11-14).
+    src_rnd = random.Random(seed + 1_000)
     games = [  # (game_id, sport, game_date)
         ("MLB_A", "MLB", "2026-10-10"), ("MLB_B", "MLB", "2026-10-15"),
         ("NFL_C", "NFL", "2026-10-17"), ("MLB_D", "MLB", "2026-10-18"),
@@ -201,7 +206,7 @@ def build(conn: StandIn, seed: int = 7) -> None:
                             f"({', '.join('?' * len(ODDS_COLS))})",
                             (oid, gid, sport, market, book, rnd.choice(types), at,
                              -110 + rnd.randint(-5, 5), 100, None, None, None, None,
-                             None, rnd.choice(sources)))
+                             None, src_rnd.choice(sources)))
     pid = 0
     moved = [("NFL_POST", "NFL", "2026-10-19"), ("NFL_SWAP", "NFL", "2026-10-19")]
     prop_games = [(g, s, d) for g, s, d in games if d] + moved
