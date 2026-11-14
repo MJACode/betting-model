@@ -220,7 +220,7 @@ def test_a_clv_failure_does_not_stop_settlement(monkeypatch):
         monkeypatch.setattr(pt, name, lambda *a, **k: None)
     monkeypatch.setattr(pt, "_capture_clv", boom)
     for name in ("_settle_game_picks_window", "_settle_prop_picks_window", "_settle_ufc_picks",
-                 "_settle_golf_picks"):
+                 "_settle_tennis_picks", "_settle_golf_picks"):
         monkeypatch.setattr(pt, name, lambda *a, _n=name, **k: calls.append(_n) or zero)
     import data.ingestors.cfbd_ingestor as cfbd
     import data.ingestors.nba_period_scores as periods
@@ -235,7 +235,7 @@ def test_a_clv_failure_does_not_stop_settlement(monkeypatch):
     monkeypatch.setattr(parlay, "settle_parlay_track_record", lambda *a, **k: None)
     pt.settle_picks("2026-10-10")
     assert {"_settle_game_picks_window", "_settle_prop_picks_window", "_settle_ufc_picks",
-            "_settle_golf_picks"} <= set(calls)
+            "_settle_tennis_picks", "_settle_golf_picks"} <= set(calls)
     before = calls[:calls.index("_settle_game_picks_window")]
     assert "capture" in before
     assert "ROLLBACK TO SAVEPOINT" in before[before.index("capture"):]

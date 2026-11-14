@@ -104,7 +104,7 @@ def test_the_pre_game_boards_say_when_euroleague_picks_post():
 
 
 def test_the_recap_and_the_board_clock_know_the_sport():
-    assert "EUROLEAGUE: 9," in _read("lib/dailyResults.ts")
+    assert "EUROLEAGUE: 11," in _read("lib/dailyResults.ts")
     fmt = _read("lib/format.ts")
     assert "EUROLEAGUE: 4 * 3_600_000," in fmt and "EUROLEAGUE: 3,\n" in fmt
     assert f"  {MODEL}: {{ min_prob: 0, min_edge: 0, min_odds: -200 }}," in _read("lib/thresholds.generated.ts")

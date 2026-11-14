@@ -14,6 +14,7 @@ export interface ModelThreshold {
 }
 
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
+  atp_moneyline_shop: { min_prob: 0, min_edge: 0, min_odds: -500 },
   euroleague_h1_dog_ml: { min_prob: 0, min_edge: 0, min_odds: -200 },
   euroleague_home_dog_spread: { min_prob: 0, min_edge: 0.06, min_odds: -200 },
   euroleague_home_ml: { min_prob: 0, min_edge: 0.01, min_odds: -200 },
@@ -99,6 +100,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   wnba_prop_player_rebounds: { min_prob: 0.62, min_edge: 0, min_odds: -140 },
   wnba_prop_player_threes: { min_prob: 0.706, min_edge: 0.026, min_odds: -140 },
   wnba_spread: { min_prob: 0.6, min_edge: 0.1, min_odds: -200 },
+  wta_moneyline_shop: { min_prob: 0, min_edge: 0, min_odds: -500 },
 };
 
 export const PROB_ONLY_MODELS = new Set<string>([
