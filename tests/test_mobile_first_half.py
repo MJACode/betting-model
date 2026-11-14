@@ -176,10 +176,11 @@ def test_the_mobile_threshold_is_generated_from_config():
                                   "scripts/nba_first_half_total_luck_card.py"])
 def test_nothing_of_this_model_writes_a_first_quarter(path):
     """Its copy says first half; a first-quarter label would be another bet. The first-quarter spread and
-    moneyline models (nba_q1_trend and nba_q1_trend_ml, 2026-11-07) have their own entries, which are cut out
-    before the check: only they may say 1Q."""
+    moneyline models (nba_q1_trend and nba_q1_trend_ml, 2026-11-07) and the EuroLeague first-quarter total
+    (euroleague_q1_club_share_total, 2026-11-14) have their own entries, which are cut out before the check:
+    only they may say 1Q."""
     src = (ROOT / path).read_text(encoding="utf-8")
-    for entry in ("  nba_q1_trend: {", "  nba_q1_trend_ml: {"):
+    for entry in ("  nba_q1_trend: {", "  nba_q1_trend_ml: {", "  euroleague_q1_club_share_total: {"):
         if entry in src:
             i = src.index(entry)
             src = src[:i] + src[src.index("  },", i):]
