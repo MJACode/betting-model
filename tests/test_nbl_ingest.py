@@ -192,6 +192,15 @@ def test_only_league_games_that_are_final_live_or_ahead_reach_games():
     assert not ne.is_league_game(mislabelled, NOW)
 
 
+def test_one_bad_event_is_refused_and_the_rest_are_kept():
+    # a game ESPN marks final before its line scores are in
+    bad = _event(id="401875311")
+    bad["competitions"][0]["competitors"][0]["linescores"] = []
+    rows, refused = ne.parse_events([_event(), bad])
+    assert [r["espn_id"] for r in rows] == [401875310]
+    assert [eid for eid, _ in refused] == ["401875311"]
+
+
 def test_a_club_from_outside_the_league_never_reaches_games():
     e = _event(season={"year": 2027, "slug": "regular-season"})
     e["competitions"][0]["competitors"][1]["team"] = {"id": "110305",

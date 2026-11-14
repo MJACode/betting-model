@@ -271,6 +271,20 @@ def parse_event(e: dict, known_codes: dict[int, str] | None = None) -> dict:
     return row
 
 
+def parse_events(events: list[dict]) -> tuple[list[dict], list[tuple[str, str]]]:
+    """(the rows, [(ESPN id, why)] for events refused). An event ESPN shows
+    final before its line scores are filled in, or with a label that does not
+    match its date, is refused and left for the next pass, so one bad event
+    never stops the season's other games from being stored."""
+    rows, refused = [], []
+    for e in events:
+        try:
+            rows.append(parse_event(e))
+        except (ValueError, KeyError, TypeError) as exc:
+            refused.append((str(e.get("id")), str(exc)))
+    return rows, refused
+
+
 def results(row: dict) -> tuple | None:
     """(home_win, went_to_ot, regulation_tie) for a final game, else None."""
     if row["home_score"] is None:
@@ -311,9 +325,11 @@ def store_year(conn, body: dict, now: datetime | None = None) -> dict:
     """One calendar year's answer into the database, one transaction."""
     now = now or datetime.now(timezone.utc)
     events = body["events"]
-    rows = [parse_event(e) for e in events]
+    rows, refused = parse_events(events)
+    for eid, why in refused:
+        logger.warning(f"NBL ESPN event {eid} refused this pass: {why}")
     stats = {"events": len(rows), "league_games": 0, "final": 0, "period_rows": 0,
-             "stale_or_dead": 0}
+             "stale_or_dead": 0, "refused": len(refused)}
     if not rows:
         return stats
     clubs: dict[str, dict] = {}
@@ -445,12 +461,12 @@ def run(seasons: list[int], apply: bool, summaries: bool = False) -> list[dict]:
     out = []
     with requests.Session() as s:
         bodies = [(y, fetch_year(y, s)) for y in years_for(seasons)]
-    every = [parse_event(e) for _, b in bodies for e in b["events"]]
+    every = parse_events([e for _, b in bodies for e in b["events"]])[0]
     for season, d in sorted(club_counts([r for r in every if r["season"] in seasons]).items()):
         if len(set(d.values())) > 1:
             logger.warning(f"NBL {season}: clubs' regular-season counts differ {sorted(d.items())}")
     for year, body in bodies:
-        rows = [parse_event(e) for e in body["events"]]
+        rows = parse_events(body["events"])[0]
         rows = [r for r in rows if r["season"] in seasons]
         body = {**body, "events": [e for e in body["events"]
                                    if int(e["season"]["year"]) in seasons]}
