@@ -61,7 +61,9 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import config  # noqa: E402
 import models.ncaaf_moneyline_market as mm  # noqa: E402
+from models.honest_ev import gate  # noqa: E402
 import scripts.ncaaf_moneyline_market_build as build  # noqa: E402
 from tracking.clv_math import market_edge_clv  # noqa: E402
 
@@ -292,14 +294,28 @@ def _boot(b: pd.DataFrame, rng) -> dict:
             "p_positive_season": round(float((u[k].sum(1) > 0).mean()), 3)}
 
 
+def card_gates(bets: pd.DataFrame) -> np.ndarray:
+    """True where the card would write the decided bet as a BET: its price
+    floor (config.min_odds_for) and its EV floor (models.honest_ev.gate), the
+    two refusals scripts/ncaaf_moneyline_card.py applies after decide()."""
+    floor = config.min_odds_for(mm.MODEL_ID)
+    return np.array([(floor is None or float(r.price) >= floor)
+                     and gate(mm.MODEL_ID, float(r.prob), float(r.price)).clears
+                     for r in bets.itertuples(index=False)], dtype=bool)
+
+
 def grade_timing(dec: pd.DataFrame, g: pd.DataFrame, pin: pd.DataFrame, seasons, rng) -> dict:
     x = dec[dec["season"].isin(list(seasons))]
-    bets = x[x["status"] == "bets"].merge(g[["game_id", "margin", "et_date"]], on="game_id", how="left")
+    bets = x[x["status"] == "bets"]
+    keep = card_gates(bets) if len(bets) else np.zeros(0, dtype=bool)
+    refused = int((~keep).sum())
+    bets = bets[keep].merge(g[["game_id", "margin", "et_date"]], on="game_id", how="left")
     bets = build.grade(bets.copy())
     bets = with_clv(bets, pin) if len(bets) else bets
     out = {"games_in_scope": int(len(x)),
            "with_consensus": int((x["n_ok"].fillna(0) > 0).sum()),
            "priced": int(x["edge"].notna().sum()),
+           "refused_by_card_gates": refused,
            "bets": int(len(bets))}
     if not len(bets):
         return {**out, "units": 0.0, "roi_pct": None, "units_by_season": {}}
@@ -321,6 +337,7 @@ def grade_timing(dec: pd.DataFrame, g: pd.DataFrame, pin: pd.DataFrame, seasons,
                            if bets["clv_pct"].notna().any() else None),
     })
     out.update(_boot(bets, rng))
+    out["halves"] = build.halves(bets)
     return out
 
 

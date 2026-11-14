@@ -138,3 +138,13 @@ def test_the_panel_is_the_same_split_over_processes(art):
     two = tm.panel(rows, _tables(art), log_every=0, workers=2)
     assert len(one) >= 3
     pd.testing.assert_frame_equal(one, two)
+
+
+def test_the_replay_refuses_what_the_card_refuses_after_deciding():
+    """The card writes a decided bet as a BET only above its price floor and
+    its EV floor (scripts/ncaaf_moneyline_card.py); so does the replay."""
+    import config
+    floor = config.min_ev_for(mm.MODEL_ID)
+    b = pd.DataFrame({"price": [150.0, 150.0, -250.0],
+                      "prob": [(1 + floor + 0.01) / 2.5, (1 + floor - 0.01) / 2.5, 0.9]})
+    assert list(tm.card_gates(b)) == [True, False, False]
