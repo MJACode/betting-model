@@ -141,7 +141,7 @@ check('legend: free throws count', /free throws included/.test(NBA_FB_LEGEND));
 
 console.log('segments');
 check('NBA top row ends with 1st Basket', boardSegmentsFor('NBA').join('|') === 'players|teams|firstBasket', boardSegmentsFor('NBA'));
-for (const s of ['MLB', 'WNBA', 'NHL', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW', 'UFC'] as const) {
+for (const s of ['MLB', 'WNBA', 'NHL', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW', 'UFC', 'ATP', 'WTA'] as const) {
   check(`${s} has no 1st Basket`, !boardSegmentsFor(s).includes('firstBasket'));
 }
 check('1st Basket is not a position chip', !positionSegmentsFor('NBA').includes('firstBasket'));

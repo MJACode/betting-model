@@ -1152,9 +1152,14 @@ function EmptyForView({
           // The women's totals model posts when DraftKings opens a game's
           // total, not on the refresh cadence, so the refresh times would
           // send a member back at the wrong hour (UX review, 2026-11-10).
+          // The tennis card is the same: it runs every ten minutes, around
+          // the clock, and decides each match about 30 minutes before its
+          // listed start (scripts/tennis_moneyline_card.py).
           sport === 'NCAABW'
             ? `No NCAABW picks have posted for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
-            : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+            : sport === 'ATP' || sport === 'WTA'
+              ? `No ${sport} picks have posted for ${date} yet. Picks post about 30 minutes before each match the model bets.`
+              : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
         }
       />
     );

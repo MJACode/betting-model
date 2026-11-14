@@ -197,6 +197,10 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   // Women's college basketball, the same one group as the men's board.
   NCAABW: ['NCAABW'],
   UFC: ['UFC'],
+  // No tennis player stats are in the app: the Stats tab shows its empty
+  // state for ATP and WTA, and says the picks are on the Picks tab.
+  ATP: [],
+  WTA: [],
   NHL: ['NHL'],
   // Golf has no per-player leaderboard (v1).
   GOLF: [],

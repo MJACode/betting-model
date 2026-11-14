@@ -16,7 +16,7 @@
  * weather row has no number.
  */
 
-import { labelWithoutStake, MINUS } from './format';
+import { isVersusSport, labelWithoutStake, MINUS } from './format';
 
 /** ASCII hyphen used as a minus sign → U+2212. Names with hyphens are left. */
 export function trueMinus(text: string): string {
@@ -448,7 +448,7 @@ export function compactTeam(
   return hit ? hit : name;
 }
 
-/** "WKU @ SHSU · NCAAF · 8:00 PM ET". Golf is the event. UFC uses "vs". */
+/** "WKU @ SHSU · NCAAF · 8:00 PM ET". Golf is the event. UFC and tennis use "vs". */
 export function signalsContextLine(input: {
   sport: string;
   away: string;
@@ -462,7 +462,7 @@ export function signalsContextLine(input: {
   let matchup = '';
   if (sport === 'GOLF' || !away || away === 'FIELD') matchup = home;
   else if (!home) matchup = away;
-  else matchup = `${away} ${sport === 'UFC' ? 'vs' : '@'} ${home}`;
+  else matchup = `${away} ${isVersusSport(sport) ? 'vs' : '@'} ${home}`;
   return [matchup, sport, input.timeLabel].filter((part) => part.length > 0).join(' · ');
 }
 
@@ -470,7 +470,7 @@ export function signalsContextLine(input: {
 export function signalsTeamsSpeech(sport: string, away: string, home: string): string | null {
   if (sport === 'GOLF' || !away || away === 'FIELD') return home || null;
   if (!home) return away || null;
-  return `${away} ${sport === 'UFC' ? 'versus' : 'at'} ${home}`;
+  return `${away} ${isVersusSport(sport) ? 'versus' : 'at'} ${home}`;
 }
 
 export type SignalsStakeForm = 'bet-win' | 'risk-win';

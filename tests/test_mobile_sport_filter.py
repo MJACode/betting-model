@@ -49,7 +49,7 @@ def _load_body() -> str:
     return m.group(0)
 
 
-def test_sports_holds_the_nine_live_sports():
+def test_sports_holds_the_eleven_live_sports():
     """GOLF was retired 2026-09-08 (mike) and must NOT be a chip.
 
     The `Sport` union still carries it so existing signatures compile and old
@@ -59,6 +59,8 @@ def test_sports_holds_the_nine_live_sports():
 
     NCAAB joined 2026-10-30 for its totals model (tests/test_mobile_ncaab_in_app.py).
     NCAABW joined 2026-11-10 for its own (tests/test_mobile_ncaabw_in_app.py).
+    ATP and WTA (men's and women's tennis) joined 2026-11-14 right after UFC
+    (tests/test_mobile_tennis_in_app.py).
     """
     assert _sports() == [
         "MLB",
@@ -69,6 +71,8 @@ def test_sports_holds_the_nine_live_sports():
         "NCAAB",
         "NCAABW",
         "UFC",
+        "ATP",
+        "WTA",
         "NHL",
     ]
 
@@ -169,7 +173,7 @@ def test_no_second_hand_written_sport_list_in_the_hook():
     # A lone reference (DEFAULT_SPORT = 'MLB') is fine; a RUN of three or more
     # sport literals on one line is a list being re-typed.
     runs = re.findall(
-        r"(?:'(?:MLB|WNBA|NBA|NFL|NCAAF|NCAAB|NCAABW|UFC|GOLF|NHL)'[^\n]{0,40}){3,}", src_without_sports
+        r"(?:'(?:MLB|WNBA|NBA|NFL|NCAAF|NCAAB|NCAABW|UFC|ATP|WTA|GOLF|NHL)'[^\n]{0,40}){3,}", src_without_sports
     )
     assert not runs, (
         f"a second sport list appears in useSportFilter.ts: {runs}. SPORTS is the "

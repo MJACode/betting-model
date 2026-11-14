@@ -47,9 +47,10 @@ export interface SelectableGame {
  * FIGHTERS (or `FIELD`) in home_team/away_team — they are slots, not venues —
  * so "NE @ SEA" would render as "Jon Jones @ Tom Aspinall" for one bout and
  * the reverse for the other side of it. The same reason `SlateGame.isHome` is
- * nullable for those two sports.
+ * nullable for those two sports. A tennis match (ATP, WTA) is the same shape:
+ * two players in the two slots, and no venue either of them is "at".
  */
-const NO_FIXTURE_SPORTS = new Set(['UFC', 'GOLF']);
+const NO_FIXTURE_SPORTS = new Set(['UFC', 'GOLF', 'ATP', 'WTA']);
 
 export function selectableGames(
   games: GameRow[],

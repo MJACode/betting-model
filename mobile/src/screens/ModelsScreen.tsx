@@ -34,8 +34,13 @@ type Tab = 'builtin' | 'mine';
 const BUILTIN_MODEL_IDS = Object.keys(MODEL_META);
 
 /** Sport a model belongs to, derived from its id prefix. */
-function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' {
+function sportOf(modelId: string):
+  'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL' {
   if (modelId.startsWith('ufc')) return 'UFC';
+  // The tennis tours: without them both models fell to MLB below and were
+  // listed on the MLB tab (modelMeta sportOfModel, the same lines).
+  if (modelId.startsWith('atp')) return 'ATP';
+  if (modelId.startsWith('wta')) return 'WTA';
   if (modelId.startsWith('ncaaf')) return 'NCAAF';
   // The women's prefix first: every ncaabw_ id starts with 'ncaab' too, and
   // would be listed on the men's tab (modelMeta sportOfModel, the same order).

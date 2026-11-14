@@ -221,13 +221,15 @@ const hasTeams = (teams: SlateTeams): teams is readonly string[] =>
  * cap, which returns an arbitrary 1,000 and says nothing.
  */
 export async function fetchSeasonTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
   season: number,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   // No golf leaderboard (v1). Named, or the sport falls to the MLB read below.
   if (sport === 'GOLF') return [];
+  // No tennis stats in the app. Named, or the sport falls to the MLB read below.
+  if (sport === 'ATP' || sport === 'WTA') return [];
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
@@ -300,7 +302,7 @@ const totalsRowKey = (r: SeasonTotalsRow): string =>
  * (opponent defense/pace). Other sports return [] (no matchup view yet).
  */
 export async function fetchTonightMatchups(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
 ): Promise<TonightMatchupRow[]> {
   if (sport !== 'MLB' && sport !== 'WNBA') return [];
   const view = sport === 'MLB' ? 'v_mlb_tonight_matchups' : 'v_wnba_tonight_matchups';
@@ -316,7 +318,7 @@ export async function fetchTonightMatchups(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
@@ -325,6 +327,8 @@ export async function fetchWindowTotals(
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
   // No golf leaderboard (v1). Named, or the sport falls to the MLB read below.
   if (sport === 'GOLF') return [];
+  // No tennis stats in the app. Named, or the sport falls to the MLB read below.
+  if (sport === 'ATP' || sport === 'WTA') return [];
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
     for (const s of footballSeasonCandidates(season)) {
@@ -406,7 +410,7 @@ function pageRpc<T>(
  * 25 server-side.
  */
 export async function fetchRecentGames(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
   season: number,
   window: number,
   playerType?: 'batter' | 'pitcher',
@@ -490,7 +494,7 @@ const recentGameRowKey = (r: RecentGameRow): string => `${r.player_id}:${r.game_
  * keys in statCatalog); unknown keys return zero rows.
  */
 export async function fetchSeasonStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
   season: number,
   statKey: string,
   playerType?: 'batter' | 'pitcher',
@@ -612,7 +616,7 @@ function h2hSeasonCandidates(sport: string, season: number): number[] {
  * ask about, and an unnarrowed H2H read is the cross product.
  */
 export async function fetchH2HStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
   season: number,
   statKey: string,
   matchups: H2HMatchups,
@@ -688,7 +692,7 @@ export async function fetchSeasonStarted(
  * NFL, MLB, NBA, WNBA and NCAAF; other sports return [] without a request.
  */
 export async function fetchPositionVsOpponent(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
   seasons: number[],
   statKey: string,
   posGroup: string,
@@ -752,7 +756,7 @@ export async function fetchPositionVsOpponent(
  * names, never one picked by a variable (tests/test_anon_readable.py).
  */
 export async function fetchPlayerVsDefense(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
   playerId: string,
   statKey: string,
   posGroup: string,
@@ -1643,6 +1647,61 @@ export async function fetchUpcomingUfcPicks(
       ...bookEnrichment(pick, booksByGameMarket),
     };
   });
+}
+
+/**
+ * Upcoming tennis picks, both tours (ATP men's, WTA women's), AFTER
+ * `afterDate` through `throughDate`.
+ *
+ * The tennis card (scripts/tennis_moneyline_card.py) decides a match at most
+ * 35 minutes before its listed start and files the pick under the listed
+ * start's Eastern date. A match listed between 00:00 and 00:35 ET is therefore
+ * posted the evening before, under tomorrow's date, and a same-day board would
+ * hide it until midnight while Discord carries it (useTodayPicks
+ * TENNIS_AHEAD_DAYS). The card writes a games row only for the matches it
+ * decides, so the window holds a handful of rows.
+ *
+ * Picks and their games only. Tennis prices are stored in tennis_odds_quotes,
+ * which the app does not read (data/anon_readable.py), so the shared odds
+ * views hold nothing for a match and are not asked. Matched on the `sport`
+ * column, never on a game-id prefix.
+ */
+export async function fetchUpcomingTennisPicks(
+  afterDate: string,
+  throughDate: string,
+): Promise<EnrichedPick[]> {
+  const [picksRes, gamesRes] = await Promise.all([
+    supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .in('sport', ['ATP', 'WTA'])
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate)
+      .order('signal_type', { ascending: true })
+      .order('pick_id', { ascending: true })
+      .limit(1000),
+    supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .in('sport', ['ATP', 'WTA'])
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+  ]);
+
+  if (picksRes.error) throw picksRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+
+  const gameById = new Map<string, GameRow>();
+  for (const g of (gamesRes.data ?? []) as unknown as GameRow[]) gameById.set(g.game_id, g);
+
+  return ((picksRes.data ?? []) as unknown as Pick[]).map((pick) => ({
+    pick,
+    game: gameById.get(pick.game_id) ?? null,
+    weather: null,
+    latestOdds: null,
+    bookRows: [],
+    bestOdds: null,
+  }));
 }
 
 /**
@@ -3430,9 +3489,11 @@ export async function untrackBet(deviceId: string, pickId: number): Promise<void
  * Returns [] for sports with no teams (UFC, golf) rather than erroring.
  */
 export async function fetchTeamStats(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL',
   season: number,
 ): Promise<TeamSeasonStats> {
+  // No tennis team stats: two players, no teams (teamStatCatalog BALL).
+  if (sport === 'ATP' || sport === 'WTA') return { season: null, rows: [] };
   // Neither college basketball sport has a Teams board (teamStatCatalog BALL).
   // NCAABW is named before NCAAB.
   if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAABW' || sport === 'NCAAB') return { season: null, rows: [] };

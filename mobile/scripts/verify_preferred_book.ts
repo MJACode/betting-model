@@ -462,6 +462,12 @@ check('ncaabw_total_blend resolves to totals (id has no over_under)', gameMarket
 check('ncaabw_live_total_ht resolves to totals (id has no over_under)', gameMarketForModel('ncaabw_live_total_ht') === 'totals');
 check('ncaabw_live_total_ht is a game_total for parlay correlation', marketClassForModel('ncaabw_live_total_ht') === 'game_total');
 check('ncaabw_total_blend is a game_total for parlay correlation', marketClassForModel('ncaabw_total_blend') === 'game_total');
+// The tennis match winners (atp_/wta_moneyline_shop) read the moneyline rows, and a
+// parlay treats them as independent, like a UFC fight: a match has no other market.
+for (const id of ['atp_moneyline_shop', 'wta_moneyline_shop']) {
+  check(`${id} resolves to h2h`, gameMarketForModel(id) === 'h2h', String(gameMarketForModel(id)));
+  check(`${id} is 'other' for parlay correlation, like UFC`, marketClassForModel(id) === 'other', marketClassForModel(id));
+}
 // ncaab_first_half_spread HAS 'spread' in it, and must still read the first half's rows, not the game's.
 check('ncaab_first_half_spread resolves to spreads_h1, not spreads', gameMarketForModel('ncaab_first_half_spread') === 'spreads_h1');
 check('ncaab_first_half_spread is a game_spread for parlay correlation', marketClassForModel('ncaab_first_half_spread') === 'game_spread');

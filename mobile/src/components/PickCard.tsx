@@ -7,7 +7,7 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus, labelWithoutStake } from '@/lib/format';
+import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus, isVersusSport, labelWithoutStake } from '@/lib/format';
 import {
   bestHandoffForPick,
   handoffQuotesForPick,
@@ -175,11 +175,12 @@ export function PickCard({
     setBooksOpen(false);
   }, [pick.pick_id]);
   // Golf picks are per-player on one tournament row (home_team = event name,
-  // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
+  // away_team = 'FIELD') — show just the event. UFC fights and tennis
+  // matches are "A vs B" (isVersusSport).
   const matchup = game
     ? game.sport === 'GOLF'
       ? game.home_team
-      : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`
+      : `${game.away_team} ${isVersusSport(game.sport) ? 'vs' : '@'} ${game.home_team}`
     : '';
 
   // Edge reads green only when the pick actually clears its model-specific action

@@ -9,7 +9,8 @@ import { useCallback, useEffect, useState } from 'react';
  * behavior is unchanged. Persisted to AsyncStorage and shared across screens via
  * a module-level store + listeners (same pattern as useOnboarding).
  */
-export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL';
+export type Sport =
+  | 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'ATP' | 'WTA' | 'GOLF' | 'NHL';
 
 // GOLF is deliberately ABSENT: the sport was retired 2026-09-08 (mike). It stays
 // in the `Sport` union above so existing signatures still compile and old rows
@@ -23,7 +24,11 @@ export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW
 // NCAABW (women's college basketball) sits right after NCAAB. It joined
 // 2026-11-10 for its totals model. The Stats tab has the same Players board
 // as NCAAB (no props, no Teams board).
-export const SPORTS: Sport[] = ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW', 'UFC', 'NHL'];
+// ATP (men's tennis) and WTA (women's tennis) sit right after UFC, the other
+// sport where two players meet. They joined 2026-11-14 for their match-winner
+// models, one each, with a Discord channel each; neither has player stats,
+// team stats or an in-play model in the app.
+export const SPORTS: Sport[] = ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW', 'UFC', 'ATP', 'WTA', 'NHL'];
 
 const STORAGE_KEY = 'sportFilter.selected';
 const DEFAULT_SPORT: Sport = 'MLB';

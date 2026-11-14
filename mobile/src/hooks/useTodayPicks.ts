@@ -8,6 +8,7 @@ import {
   fetchUpcomingNcaabPicks,
   fetchUpcomingNcaabwPicks,
   fetchUpcomingNhlPicks,
+  fetchUpcomingTennisPicks,
 } from '@/lib/queries';
 import { addDays, isGameOver, todayET } from '@/lib/format';
 import { attachDiscordPublish, voidHiddenFromBoard } from '@/lib/discordPublish';
@@ -99,6 +100,16 @@ const NCAAB_AHEAD_DAYS = 7;
  * little.
  */
 const NCAABW_AHEAD_DAYS = 7;
+/**
+ * How far ahead the tennis boards (ATP, WTA) look. The tennis card decides a
+ * match at most 35 minutes before its listed start (scripts/
+ * tennis_moneyline_card.py DECISION_LEAD) and files the pick under that
+ * start's Eastern date, so a match listed between 00:00 and 00:35 ET is
+ * posted the evening before under tomorrow's date. One day reaches it; the
+ * card writes nothing further ahead. Raise this if DECISION_LEAD ever passes
+ * a day.
+ */
+const TENNIS_AHEAD_DAYS = 1;
 
 /** How often the Picks tab reloads today's boards while it is open. The app's
  *  own help text says lines refresh every 10 minutes at the busiest; a reload
@@ -201,9 +212,11 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
     // slate dated inside that window never reached the chip or the board.
     // NCAAB joined with its totals model, which usually decides the day before.
     // NCAABW joined with its own (2026-11-10), which decides up to six days before.
+    // Tennis joined 2026-11-14: a match listed just after midnight is posted
+    // the evening before.
     // The look-ahead fetches are enrichment — don't fail the whole feed on
     // them, but record each failure in `partial`.
-    const [rows, ufcRows, nflRows, ncaafRows, ncaabRows, ncaabwRows, nhlRows] = await Promise.all([
+    const [rows, ufcRows, nflRows, ncaafRows, ncaabRows, ncaabwRows, nhlRows, tennisRows] = await Promise.all([
       fetchPicksForDate(target, (what, e) => note(what)(e)),
       fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(swallow('the upcoming UFC card')),
       fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(swallow('this week’s NFL card')),
@@ -215,6 +228,7 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
         note(what)(e),
       ).catch(swallow('the upcoming NCAABW card')),
       fetchUpcomingNhlPicks(target, addDays(target, NHL_AHEAD_DAYS)).catch(swallow('the upcoming NHL card')),
+      fetchUpcomingTennisPicks(target, addDays(target, TENNIS_AHEAD_DAYS)).catch(swallow('the upcoming tennis matches')),
     ]);
     // Drop games that have already finished — once a game ends it shouldn't
     // linger on the board for the rest of the day. A retired or paused
@@ -233,7 +247,7 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
     // pill and the betslip hand-off. A VOID Discord already posted stays:
     // the message is the bet (Matt, 2026-09-23). voidHiddenFromBoard is
     // that split. passesActionFilter is the Signals / green-bet half.
-    const merged = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...ncaabRows, ...ncaabwRows, ...nhlRows];
+    const merged = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...ncaabRows, ...ncaabwRows, ...nhlRows, ...tennisRows];
     const stamped = await attachDiscordPublish(merged.map((d) => d.pick));
     const byId = new Map(stamped.map((p) => [p.pick_id, p]));
     const all = merged.map((d) => ({

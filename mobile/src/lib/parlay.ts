@@ -19,7 +19,7 @@
  * recomputes everything synchronously.
  */
 
-import { americanToDecimal, labelWithoutStake } from '@/lib/format';
+import { americanToDecimal, isVersusSport, labelWithoutStake } from '@/lib/format';
 import { stakeFor, KELLY_MULTIPLIER, type UnitStake } from '@/lib/thresholds';
 import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
@@ -849,7 +849,7 @@ export function handoffBookFor(
 export function matchupForLeg(game: GameRow | null): string | null {
   if (!game) return null;
   if (game.sport === 'GOLF') return game.home_team;
-  const sep = game.sport === 'UFC' ? 'vs' : '@';
+  const sep = isVersusSport(game.sport) ? 'vs' : '@';
   return `${game.away_team} ${sep} ${game.home_team}`;
 }
 
