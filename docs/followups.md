@@ -65,7 +65,8 @@ closing-line value against Pinnacle's.
 
 ## [ ] UFC props: grade the goes-the-distance lead forward (2026-11-14)
 The anchored goes-the-distance model is +10.0% on 791 bets at BestFightOdds'
-last recorded prices 2022-2026 and loses at DraftKings
+last recorded prices 2022-2026, +6.5% [-1.6, +14.8] on 674 at the price an
+hour before each fight (2026 -2.9%), and loses at DraftKings
 (`docs/ufc_market_audit.md` §5f). Next: once each card from 2026-11-14 is in
 the fight log, store its page (`python -m data.ingestors.ufc_prop_history
 --spool DIR --stage pages --fetch --store`) and grade the model's bets at

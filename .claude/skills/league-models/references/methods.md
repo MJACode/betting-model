@@ -273,11 +273,13 @@ sections above with its result.
   (`docs/ufc_market_audit.md` §8, §9).
 - UFC goes the distance, the market-anchored model: +10.0% on 791 bets at
   BestFightOdds' last recorded prices 2022-2026, a plateau over cut and
-  penalty, 0 of 50 placebos; but 2026 is -1.0%, about half of it is the
-  market recalibrated (decisions priced too low in 2023-2025), and it loses
-  at DraftKings (-4.0%), the only live prop board read. The experiment:
-  re-grade at the price an hour before the fight, then grade it forward on
-  each card's page at FanDuel and Caesars (`docs/ufc_market_audit.md` §5f).
+  penalty, 0 of 50 placebos. **Re-graded at the price an hour before the
+  fight it does not hold**: +6.5% on 674 [-1.6, +14.8], 2026 -2.9%, the cut
+  neighbourhood negative from 0.15; about half of it was the market
+  recalibrated (decisions priced too low in 2023-2025), and it loses at
+  DraftKings, the only live prop board read. The experiment: grade it
+  forward on each card's page at FanDuel and Caesars, at the price an hour
+  before each fight (`docs/ufc_market_audit.md` §5f).
 - A third live book for live props, turning them into the cross-book
   construction (`docs/nfl_live_prop_assessment.md` §7).
 - Live rushing overs at a low pace ratio; the rushing under out of sample on
