@@ -12,8 +12,9 @@ and bet at the best price a pick may name (§3d). On the bought feed history,
 2020-06 to 2026-06, decided as the live card decides: 846 bets, +136.9 units,
 +12.85% [+8.0, +17.5], every year positive, EV against Pinnacle's closing
 price +2.2%, a donor-opinion placebo at -1.9%. The three old models are
-retired. Round totals and every method, distance and round market: nothing
-clears (§4, §5).
+retired. Round totals: nothing clears (§4). Method, distance and round
+markets: blind bets lose, no model fitted yet; DraftKings prices them live
+and BestFightOdds holds per-book history to test one on (§5).
 
 How it got there: on a free archive the model beat the first posted price
 (§3b), but that price is whichever book posts first; on our own 2026 store
@@ -258,10 +259,90 @@ totals from 2021 and DraftKings' from 2025; with them, the DraftKings-only
 over/under lean can be measured on about 1,500 fights, and a same-snapshot
 rule (DraftKings' under against Pinnacle's no-vig) becomes testable.
 
-## 5. Method of victory, goes the distance, round betting (`method_study.py`)
+## 5. Method of victory, goes the distance, round betting (`method_study.py`, `dk_props_probe.py`, `bfo_probe.py`)
 
-No live price: the odds feed rejects every key for these markets. The free
-archive's near-close method prices, 2012-2026:
+### 5a. A live price exists: DraftKings' own board (`dk_props_probe.py`, 2026-11-14 01:00-01:50 UTC)
+
+The odds feed rejects every key for these markets (§2), and that was the
+only route checked when they were parked. DraftKings' own board prices all
+four. Read from mike's PC with the client `data/ingestors/dk_live_board.py`
+uses; UFC is DraftKings league 9034. One example fight, Alateng vs Diaz:
+
+| Market | DraftKings page | Fights priced | Alateng vs Diaz |
+|---|---|---|---|
+| Method of victory, by fighter | Method of Victory | 13 | KO/TKO/DQ Alateng +1200, Diaz +330; submission +3500, +500; decision +500, −120 |
+| Goes the distance | Fight to go the Distance | 13 | Yes −185, No +140 |
+| Round betting | Winning Round | 13 | Round 1 +425, Round 2 +500, Round 3 +750, Draw +5000, By Decision −185 |
+| Inside the distance | To Win by Finish | 13 | Diaz Yes +185, No −250; Alateng Yes +1000, No −4000 |
+
+The board also lists, not fetched: Exact Method of Victory, Method of
+Victory Double Chance, Round of Finish, Round and Method of Victory, Round
+and Exact Method of Victory, moneylines for a finish, decision, first-round,
+submission or KO/TKO/DQ win only, Alternative Total Rounds, To Start Round
+X, First Minute Finish, Last Second Finish, and strike and takedown props.
+
+- **Lead time.** The board's main page listed 28 fights: 13 dated Nov 14-15
+  (UTC), 8 dated Nov 21, 7 later, with the fight winner, a points spread and
+  round totals. The four prop pages listed only the 13 Nov 14-15 fights. So
+  at the read, the evening before that card, its props were up and the
+  card eight days out had none. When DraftKings first posts them is not
+  measured.
+- **Where it runs.** mike's PC. DraftKings refuses the Railway worker
+  (`docs/live_odds_freshness.md`, measured 2026-08-31, as
+  `dk_live_board.py` records). DraftKings' terms forbid
+  automated access; mike's call on that is recorded in
+  `data/ingestors/dk_direct_feed.py`.
+- **Not stored.** Nothing reads these pages on a schedule, and none of these
+  prices is in Supabase yet.
+
+### 5b. History to backtest: BestFightOdds, per book (`bfo_probe.py`, 2026-11-13)
+
+Each event page shows every book's last price for every prop. The site's
+chart endpoint (`/api/ggd`) gives one book's price history for one prop: a
+price with a timestamp each time it changed. Prop rows on every page
+probed cover every market asked for: by fighter by KO/TKO, by submission,
+by decision, inside the distance, in round N, by KO/TKO or submission in
+round N; and for the fight: goes to decision, ends in round N, over or
+under N.5 rounds, starts round N, draw.
+
+| Card | Prop rows | Books with prop prices on the page (priced prop cells) |
+|---|---|---|
+| UFC 198, 2016-05-14 | 248 | none of today's columns; the chart's mean of books: 11 prices, 2016-03-21 to 05-14, for one prop |
+| UFC 227, 2018-08-04 | 204 | none of today's columns; the chart for 5Dimes (book id 1): 10 prices, 08-02 to 08-05, for one prop |
+| UFC 256, 2020-12-12 | 190 | none |
+| UFC Fight Night 190, 2021-06-26 | 167 | BetWay 407, BetRivers 398, Unibet 385, DraftKings 190, BetMGM 91, Caesars 82; no FanDuel |
+| UFC 281, 2022-11-12 | 165 | FanDuel 594, Unibet 580, BetRivers 577, DraftKings 445, BetWay 395, BetMGM 80, Caesars 50 |
+| 2024-09-28 card | 144 | FanDuel 690, BetRivers 669, BetWay 447, DraftKings 300, BetMGM 98, Caesars 28 |
+| UFC Vegas 123, 2026-11-01 | 163 | Unibet 649, BetRivers 577, FanDuel 512, BetWay 397, Caesars 84 |
+| UFC 334, 2026-11-14 | 92 | FanDuel 382, Unibet 380, BetRivers 336, BetWay 224, Caesars 49 |
+
+- **Movement is there.** One prop (a fighter by KO/TKO) per probe: BetRivers
+  2026, 3 prices from Oct 27 to Nov 1, the last one equal to the page's price;
+  DraftKings 2024, 3 prices over 3 days; DraftKings 2022 and FanDuel 2024,
+  1 price each (never moved).
+- **Bettable books.** DraftKings, FanDuel, BetMGM, Caesars and BetRivers are
+  books a pick may name (`config.BEST_LINE_BOOKMAKERS`; Caesars is
+  `williamhill_us`). Pinnacle has no column on any page probed.
+- **DraftKings and BetMGM are missing from both November 2026 pages,**
+  fight winner included, while DraftKings prices those fights on its own
+  board (5a). Why is not known.
+- **Size.** The event sitemap lists 819 UFC event pages (ids 1 to 4453;
+  the lowest are UFC 72, UFC 73 and the TUF 5 finale). How many fights
+  carry prop prices per book is not counted; that is the crawl below.
+- **robots.txt** allows everything but `/cnadm/`.
+
+### 5c. Paid providers (their own pages, read 2026-11-13; none called)
+
+SportsGameOdds' UFC page lists round betting, distance markets and fighter
+props; it does not name method of victory or say how far its history goes
+(free tier: 2,500 objects a month). SportsData.io's MMA page says its
+pre-fight props include method of victory and win by type; price on
+request. odds-api.io lists method of victory, round betting and historical
+odds, with no depth stated. None of these is needed for the next test.
+
+### 5d. Blind bets at the free archive's near-close price
+
+The Ultimate UFC Dataset's near-close method prices, 2012-2026:
 
 | Blind bet | Bets | Return | 90% interval | Years positive |
 |---|---|---|---|---|
@@ -274,8 +355,25 @@ archive's near-close method prices, 2012-2026:
 
 The published lead (favourite by decision is under-priced) is right in
 direction: it is the cheapest method price by far. It is not a profit, and
-the market carries 20-40% margin on finishes. Parked until a live price
-exists.
+the market carries 20-40% margin on finishes. That is one near-close price
+per fighter-method, with no book named. No model has been fitted to these
+markets yet.
+
+### 5e. Next test
+
+1. Crawl the BestFightOdds UFC event pages from 2021 for each book's last
+   price on every method, distance and round prop. The US books' columns
+   are empty on the December 2020 card probed and filled on the June 2021
+   one; the first card with them is found by the crawl. One request per
+   card. Store it in
+   Supabase first, keyed on `source`.
+2. Re-grade 5d at each bettable book's own last price, then fit a method
+   and round model (finish rates from `ufc_fight_log`, anchored on the
+   fight-winner price) and grade it there. Opening prices take one chart
+   request per prop per book, so fetch them only for the props the
+   last-price test points at.
+3. If a model clears, it bets off DraftKings' prop pages, read on mike's
+   PC on the day before each card (5a).
 
 ## 6. The purchase (mike, 2026-11-13: "yes")
 
@@ -318,15 +416,14 @@ Scouted 2026-11-13 (web, GitHub, papers; no paid calls).
 | The closing moneyline is efficient | Miller & Nichols, J. Econ. Finance 2026 (doi:10.1007/s12197-026-09757-x); Lam 2025 HEC thesis; Robbins 2023 | No broad bias at the close; calibration error 0.015 | **Agrees** with §3a and §3b at the close |
 | The opening line is soft | github.com/SolvAI/ufcash (self-reported, 226 held-out bets +24.1%) | A stats model beats the BestFightOdds open | **Reproduced** on our data (§3b); **fails** at DraftKings' opener on 2026 (§3c) |
 | Big line moves are under-reacted to, even at the close | ufcalendar.com 14-year study (a vendor; win rates, no prices) | Steamed side wins more than its close implies | **Dead** at the worst closing price (`ml_steam.py`): the side the line moved toward loses in every band of move size, -0.32% (590 bets, 10-15 points) to -8.91% (314, 15+ points) |
-| Favourite by decision is under-priced | Stanhope 2021 (UCSAS poster, SSRN 3906072) | Miscalibrated, p = 0.0028 | **Tested** (§5): least over-priced, not profitable, no live price |
+| Favourite by decision is under-priced | Stanhope 2021 (UCSAS poster, SSRN 3906072) | Miscalibrated, p = 0.0028 | **Tested** (§5d): least over-priced, not profitable; DraftKings prices it live (§5a) |
 | Short-notice replacements, missed weight | agentmma, Fightful (win rates only) | Replacements win 37-42% | **Queued**: the feed's first listing date of a pairing measures notice |
 | Totals, goes the distance, round betting | nothing found | No public test | **Gap** (§4) |
 
 Data sources found: fight-canon-db and the Ultimate UFC Dataset (stored);
 nlbair/ufc-data (CC BY 4.0, BestFightOdds open and close range plus judges'
 scorecards; not imported, it duplicates fight-canon-db's prices).
-BestFightOdds' robots.txt allows everything but `/cnadm/`; its pages carry
-per-book history for totals and props, a route not yet tried. OddsPortal
+BestFightOdds' per-book prop history is read in §5b. OddsPortal
 disallows its dated archive; Tapology disallows Claude's crawlers by name.
 
 ## 9. Inventions, and the frontier

@@ -27,7 +27,8 @@ The three models of 2026-06-11 (`ufc_moneyline`, `ufc_total_rounds`,
 `ufc_method_of_victory`) are in `config.RETIRED_MODELS`; their feature
 engine, scorer and trainer branches and artifacts are gone. They had been
 graded on probability alone at a synthetic -110, because no UFC price
-history was ever stored, and method of victory never had a market price.
+history was ever stored, and method of victory was never given a market
+price.
 Their picks stay in `picks`, graded.
 
 The grid below says where every other market stands.
@@ -40,8 +41,8 @@ The grid below says where every other market stands.
 | Total rounds (0.5-4.5) | rounds completed from `ufc_fight_log` end round and time; five-round fights from `scheduled_rounds` | same | `ufc_odds_history` (bought): Pinnacle 2021+, DraftKings 2025+; `odds` 2026-06+; no free archive | 2020-2026: blind under -10.8% (DraftKings, 1,066) and -6.8% (Pinnacle, 2,403); blind over -3.4% and -1.6% | Finish-time model (one logistic per line) | Log loss 0.684 against the price's 0.649: the model knows less than the line | **Nothing clears** (audit §4); next: a Pinnacle-anchored finish model |
 | Points spread | not known: DraftKings and Bovada list one (Holland +7.5) | | feed, live, 2 books | | | | **Parked**: what it settles on is unknown |
 | Alternate round totals | as total rounds | | Pinnacle only on the feed | | | | **Parked**: no book a pick may name |
-| Method of victory (by fighter) | `ufc_fight_log.method` | same | **no live price**: the feed rejects every key (HTTP 422, 2026-11-13); free archive 2012-2026 near-close prices | Every blind method bet loses: favourite by decision -3.3% (5,821), finishes -20% to -41% | Blind by method and side | No profit anywhere | **Parked**: no live price |
-| Goes the distance, round betting, exact round | `ufc_fight_log` | same | none: rejected by the feed, no free archive | | | | **Parked**: no price source |
+| Method of victory (by fighter) | `ufc_fight_log.method` | same | DraftKings' own board, live, the day before a card (the feed rejects every key); BestFightOdds per-book history, US books from 2021; free archive 2012-2026 near-close prices (audit §5) | Every blind method bet loses: favourite by decision -3.3% (5,821), finishes -20% to -41% | Blind by method and side | No profit blind; no model fitted | **To do**: crawl BestFightOdds, fit and grade at each book's price (audit §5e) |
+| Goes the distance, round betting, exact round, inside the distance | `ufc_fight_log` | same | DraftKings' own board, live; BestFightOdds per-book history (audit §5) | | | | **To do**: as method of victory |
 | In play | | | none stored | | | | **Parked** |
 | Prediction markets | | | not checked for UFC | | | | **To do** |
 
