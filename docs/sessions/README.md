@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, production timeouts: a 97 GB database on a 1 GB instance whose disk burst runs out; the nightly copy's run grew from 75 minutes to 9 hours and held 35 of 39 failures; timed-out reads contained in savepoints (the NFL injury veto fails closed), three injuries indexes, the first-basket rebuild reads the plays once, the copy pauses on Eastern time (#1328) |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, UFC fight-winner model's first betting run: no bet, Pinnacle has not priced the 2026-11-21 card (and posts later each year); five fighters it could not rate aliased, with the card's fight key grouped through the aliases so one fight cannot be decided twice |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, tennis round 1: the match winner live as `atp_moneyline_shop` and `wta_moneyline_shop` (best US price against Pinnacle's power-de-vigged pair about 30 minutes before the listed start, 355 replayed bets +11.0%, missed the stricter bar); total games and games spreads line shop null; the multiplicative de-vig overstated longshots |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, EuroLeague: the big-favourite moneyline removed before it went live (mike, "odds cutoff for favorites should be -200": every bet it found was -500 or shorter); four pre-game rules remain, the home moneyline now 984 bets +64.80 units with no conflict games |

@@ -45,7 +45,7 @@ from config import (
     NBA_ODDS_API_MAP,
     NFL_ODDS_API_MAP,
 )
-from data.db import get_connection, DBConnection
+from data.db import call_in_savepoint, get_connection, DBConnection
 from data.name_match import normalize_player_name
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -1015,8 +1015,15 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
                     logger.error(f"MLB Stats API transactions error: {exc}")
 
             # ── Scenario B: return ramp ───────────────────────────────────────
+            # In a savepoint: these reads run inside the one transaction that
+            # holds every sport's inserts, and a statement timeout here aborts
+            # it. Without the rollback to the savepoint, the next insert
+            # failed with "current transaction is aborted" and the whole run
+            # was lost, every sport's rows with it (9 runs, 2026-11-12/14).
             try:
-                ramp_rows = fetch_return_ramp_players(conn, sp, report_date)
+                ramp_rows = call_in_savepoint(
+                    conn, "injury_return_ramp",
+                    lambda: fetch_return_ramp_players(conn, sp, report_date))
                 all_injuries.extend(ramp_rows)
             except Exception as exc:
                 logger.error(f"{sp} return ramp computation error: {exc}")

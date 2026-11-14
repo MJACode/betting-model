@@ -191,6 +191,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # seq-scanned 137k open non-BET rows every pass. Created on production
     # CONCURRENTLY the same night; this is the recoverable copy (IF NOT EXISTS).
     "picks_open_nonbet_index_2026_09_08.sql",
+    # 2026-11-14: three injuries indexes for the reads that crossed the
+    # statement timeout (the NFL prop injury veto's latest report, the refresh
+    # freshness gate, the return ramp). Built on production CONCURRENTLY first;
+    # this is the recoverable copy, checked in the catalog before any lock.
+    "injuries_read_indexes_2026_11_14.sql",
     # 2026-09-09: player_recent_games_* gain p_teams so the Stats board can ask
     # for one slate's players instead of the league (54,687 NCAAF rows against a
     # 1,000-row cap). Filters on the rn=1 team, which is what the board groups

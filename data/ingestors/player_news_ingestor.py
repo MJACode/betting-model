@@ -56,7 +56,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import config
-from data.db import get_connection
+from data.db import call_in_savepoint, get_connection
 from data.name_match import normalize_player_name
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -293,10 +293,12 @@ def build_name_index(conn, sport: str, lookback_days: int = 400) -> dict[str, st
         return {}
     cutoff = (date.today() - timedelta(days=lookback_days)).isoformat()
     try:
-        rows = conn.execute(
+        # In a savepoint: a timeout here must not leave the run's transaction
+        # aborted, or every later statement fails with it (2026-11-14 04:36).
+        rows = call_in_savepoint(conn, "news_name_index", lambda: conn.execute(
             f"SELECT DISTINCT player_id, player_name FROM {table} WHERE game_date >= %s",
             (cutoff,),
-        ).fetchall()
+        ).fetchall())
     except Exception as exc:
         logger.warning(f"{sport}: could not read {table} for name resolution: {exc}")
         return {}
@@ -326,7 +328,7 @@ def teams_with_props_today(conn, sport: str, run_date: str | None = None) -> lis
     ESPN call is worth spending."""
     day = run_date or date.today().isoformat()
     try:
-        rows = conn.execute(
+        rows = call_in_savepoint(conn, "news_prop_teams", lambda: conn.execute(
             """
             SELECT DISTINCT g.home_team, g.away_team
             FROM picks p
@@ -334,7 +336,7 @@ def teams_with_props_today(conn, sport: str, run_date: str | None = None) -> lis
             WHERE p.game_date = %s AND p.sport = %s AND p.player_id IS NOT NULL
             """,
             (day, sport),
-        ).fetchall()
+        ).fetchall())
     except Exception as exc:
         logger.warning(f"{sport}: could not read today's prop teams: {exc}")
         return []
@@ -409,7 +411,8 @@ def _minutes_since_last_ingest(conn) -> float | None:
     """Age of the freshest row, in minutes. None when the table is empty or
     unreadable — which must read as "stale", never as "fresh"."""
     try:
-        row = conn.execute("SELECT MAX(ingested_at) FROM player_news").fetchone()
+        row = call_in_savepoint(conn, "news_freshness", lambda: conn.execute(
+            "SELECT MAX(ingested_at) FROM player_news").fetchone())
     except Exception:
         return None
     if not row or row[0] is None:
