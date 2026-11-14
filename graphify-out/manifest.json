@@ -5574,9 +5574,9 @@
     "semantic_hash": ""
   },
   "tests/test_free_pick_names_the_cheaper_book.py": {
-    "mtime": 1794618737.0636647,
-    "seen": 1794622133.3411348,
-    "ast_hash": "b728680402f53d4c6e573896520f5a72",
+    "mtime": 1794626580.5140939,
+    "seen": 1794627602.1240482,
+    "ast_hash": "3dad832cda15be88d565390230ea056e",
     "semantic_hash": ""
   },
   "tests/test_full_record_post.py": {
@@ -6498,9 +6498,9 @@
     "semantic_hash": ""
   },
   "tests/test_nfl_props.py": {
-    "mtime": 1794618737.6431203,
-    "seen": 1794622133.34343,
-    "ast_hash": "964fcbd831e3587dcb55acf636272909",
+    "mtime": 1794627213.4986484,
+    "seen": 1794627602.1253748,
+    "ast_hash": "8f913fc28722d071f76181be15994614",
     "semantic_hash": ""
   },
   "tests/test_nfl_results_ingestor.py": {
@@ -9474,21 +9474,21 @@
     "semantic_hash": ""
   },
   "tests/test_nba_game4_p1.py": {
-    "mtime": 1794618737.292503,
-    "seen": 1794622133.3422582,
-    "ast_hash": "ce902ab4eb2b12ebfab67e39a2eb2c0d",
+    "mtime": 1794626580.5083525,
+    "seen": 1794627602.1246924,
+    "ast_hash": "2e41791311214efdab165fcf71bacd8e",
     "semantic_hash": ""
   },
   "tests/test_nba_game4_p2.py": {
-    "mtime": 1794618737.2945194,
-    "seen": 1794622133.3422635,
-    "ast_hash": "fe54e60df4025e890f040b7636aa1b25",
+    "mtime": 1794626580.5120678,
+    "seen": 1794627602.1246965,
+    "ast_hash": "c6862a0380f520aedfc41050cc244981",
     "semantic_hash": ""
   },
   "tests/test_nba_game4_p3.py": {
-    "mtime": 1794618737.2945194,
-    "seen": 1794622133.3422692,
-    "ast_hash": "3938c15bc960af97498b0b6cc1129199",
+    "mtime": 1794626580.5103686,
+    "seen": 1794627602.1247008,
+    "ast_hash": "ac3ee07494aa7675680ff5b63fd64338",
     "semantic_hash": ""
   },
   "tests/test_nba_game_harness_derivatives.py": {
@@ -11838,9 +11838,9 @@
     "semantic_hash": ""
   },
   "scripts/nba_s_q1tt.py": {
-    "mtime": 1794618736.3349004,
-    "seen": 1794622133.3384526,
-    "ast_hash": "acddeedc30f1a509460af461a23fc325",
+    "mtime": 1794626580.5042598,
+    "seen": 1794627602.1226997,
+    "ast_hash": "af483b8fb58983da8dc6444fd7ea8ecb",
     "semantic_hash": ""
   },
   "scripts/recompute_empty_clv.py": {
@@ -11904,9 +11904,9 @@
     "semantic_hash": ""
   },
   "tests/test_nba_s_q1tt.py": {
-    "mtime": 1794618737.3801575,
-    "seen": 1794622133.3425536,
-    "ast_hash": "0bb1dd9ff36dbf290d64ab5eefae987e",
+    "mtime": 1794626580.5052903,
+    "seen": 1794627602.1249135,
+    "ast_hash": "3acde8fdb3fd5f44ace78484ac59df41",
     "semantic_hash": ""
   },
   "tests/test_ncaab_first_half_clv.py": {
