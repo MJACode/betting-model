@@ -242,6 +242,8 @@ export async function openBookBetslip(
     const store = bookStoreUrl(book);
     if (store && (await tryOpen(store))) return true;
   }
+  // A `false` while a candidate scheme says the app IS installed falls
+  // through to the stored link below, as before this ask existed.
 
   if (link && link.trim()) {
     const filled = fillBetslipLink(link, getBettingState());

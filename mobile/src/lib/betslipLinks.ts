@@ -80,10 +80,15 @@ export function appClaimedLink(
   if (link && link.trim() && !filled) return null; // a template we cannot fill
   const st = state ? state.toLowerCase() : null;
   switch (book) {
+    // Only the host the probe measured. A link on any other host is not
+    // known to be claimed, and a "no" from iOS sends the member to the App
+    // Store, so it is not asked about (null keeps the old route).
     case 'draftkings':
-      return filled ?? 'https://sportsbook.draftkings.com/';
+      if (filled) return filled.startsWith('https://sportsbook.draftkings.com/') ? filled : null;
+      return 'https://sportsbook.draftkings.com/';
     case 'fanduel':
-      return filled ?? 'https://sportsbook.fanduel.com/';
+      if (filled) return filled.startsWith('https://sportsbook.fanduel.com/') ? filled : null;
+      return 'https://sportsbook.fanduel.com/';
     case 'williamhill_us':
       if (filled) return /^https:\/\/sportsbook\.caesars\.com\/us\/[a-z]{2}\/bet\//.test(filled) ? filled : null;
       return st ? `https://sportsbook.caesars.com/us/${st}/bet/` : null;

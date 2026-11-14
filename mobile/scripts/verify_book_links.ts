@@ -133,6 +133,9 @@ check('BetMGM: a link of a shape we have not seen is not rewritten', appClaimedL
 check('FanDuel and DraftKings: the stored link as it is, else the claimed root',
   appClaimedLink('fanduel', STORED.fanduel!, null) === STORED.fanduel && appClaimedLink('fanduel', null, null) === 'https://sportsbook.fanduel.com/'
   && appClaimedLink('draftkings', null, null) === 'https://sportsbook.draftkings.com/');
+check('FanDuel and DraftKings: a link on any other host is not asked about',
+  appClaimedLink('fanduel', 'https://account.fanduel.com/x?y=1', null) === null && appClaimedLink('fanduel', 'https://nj.sportsbook.fanduel.com/addToBetslip?marketId=1', null) === null
+  && appClaimedLink('draftkings', 'https://www.draftkings.com/x', null) === null && appClaimedLink('draftkings', STORED.draftkings!, null) === STORED.draftkings);
 check('Caesars: the filled /us/<state>/bet/ link, else that root for the state',
   appClaimedLink('williamhill_us', STORED.williamhill_us!, 'NJ') === fillBetslipLink(STORED.williamhill_us!, 'nj')
   && appClaimedLink('williamhill_us', null, 'mi') === 'https://sportsbook.caesars.com/us/mi/bet/' && appClaimedLink('williamhill_us', null, null) === null);
