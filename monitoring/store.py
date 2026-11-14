@@ -15,19 +15,28 @@ no-op (the lesson from feedback_reply, session 126c).
 
 Retention is deliberate: this table is append-only at roughly 25k rows/day, so
 without pruning it is the fastest-growing table in the database. Rows older than
-API_LOG_RETENTION_DAYS (7) are dropped by the writer, at most once an hour per
-process.
+API_LOG_RETENTION_DAYS (7) are dropped by the writer, at most once an hour, and
+only one session deletes at a time. The morning disk window
+(tracking/morning_disk.py) holds that delete until after 07:15 ET.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import time
 
 from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 
 RETENTION_DAYS = int(os.environ.get("API_LOG_RETENTION_DAYS", "7"))
+# One unbounded DELETE of the aged-out rows ran about 67s on 2026-11-12 and
+# was in the disk pile that stalled Picks. A batch is a few thousand oldest
+# rows under its own statement timeout, and the call stops at the budget.
+# What is left ages out on a later call. Nothing is dropped; it is spread out.
+PRUNE_BATCH = 2000
+PRUNE_BUDGET_S = 5.0
+PRUNE_STATEMENT_MS = 4000
 
 DDL = """
 CREATE TABLE IF NOT EXISTS api_call_log (
@@ -222,13 +231,42 @@ def prune(conn, days: int = RETENTION_DAYS) -> int:
     before folding would throw away the only copy. roll_up() swallows its own
     failures and returns 0, so a broken rollup cannot block the prune -- but the
     ORDER is not optional, and tests/test_api_call_rollup.py pins it.
+
+    The delete itself is batched. A single DELETE ... RETURNING of every aged
+    row pulled the whole result back to the client and held disk IO for about
+    a minute. Each batch is the oldest PRUNE_BATCH rows, with statement_timeout
+    set for that transaction only, and the loop stops at PRUNE_BUDGET_S.
     """
     roll_up(conn)
+    deleted = 0
+    started = time.monotonic()
+    while time.monotonic() - started < PRUNE_BUDGET_S:
+        n = _prune_batch(conn, days)
+        if n < 0 or n < PRUNE_BATCH:
+            if n > 0:
+                deleted += n
+            break
+        deleted += n
+    return deleted
+
+
+def _prune_batch(conn, days: int) -> int:
+    """Delete one batch. Returns the row count, or -1 when the statement failed
+    (timeout included). The caller stops on -1 and on a short batch."""
     try:
+        # true = SET LOCAL. The writer's connection is reused for inserts, and
+        # a session-level timeout would start failing those.
+        conn.execute(
+            "SELECT set_config('statement_timeout', ?, true)",
+            (str(PRUNE_STATEMENT_MS),),
+        )
         row = conn.execute(
-            "DELETE FROM api_call_log WHERE ts < NOW() - (? || ' days')::interval "
+            "DELETE FROM api_call_log WHERE ctid IN ("
+            "SELECT ctid FROM api_call_log "
+            "WHERE ts < NOW() - (? || ' days')::interval "
+            "ORDER BY ts LIMIT ?) "
             "RETURNING 1",
-            (str(days),),
+            (str(days), PRUNE_BATCH),
         ).fetchall()
         conn.commit()
         return len(row or [])
@@ -237,7 +275,7 @@ def prune(conn, days: int = RETENTION_DAYS) -> int:
             conn.rollback()
         except Exception:
             pass
-        return 0
+        return -1
 
 
 # ── reads (the dashboard's whole data layer) ─────────────────────────────────
