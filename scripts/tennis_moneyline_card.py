@@ -186,12 +186,18 @@ def load_espn(conn, now: datetime) -> pd.DataFrame:
 
 
 def refresh_espn(conn, now: datetime) -> int:
+    """ESPN's scoreboard for yesterday, today and tomorrow (UTC), both tours.
+    ESPN's path takes the tour in lower case ("ATP" answers HTTP 400)."""
     from data.ingestors import tennis_espn as te
     days = sorted({(now + timedelta(days=k)).date() for k in (-1, 0, 1)})
     n = 0
-    for tour in ("ATP", "WTA"):
-        n += te.store(conn, list(te.collect(tour, days).values()))
+    for tour in ("atp", "wta"):
+        n += te.store(conn, list(te.collect(tour, days, rounds=1).values()))
     return n
+
+
+class CardIncomplete(RuntimeError):
+    """A step failed; raised after every match that could be decided was."""
 
 
 def buy_pass(conn) -> tuple[list[str], int]:
@@ -391,9 +397,14 @@ def run_card(do_publish: bool = False, now: datetime | None = None, buy: bool = 
         return {"due": 0, "bets": 0, "decided": 0, "off": True}
     conn = get_connection()
     try:
+        problems: list[str] = []
         if do_publish and buy:
             keys, _ = buy_pass(conn)
-            refresh_espn(conn, now)
+            try:
+                refresh_espn(conn, now)
+            except Exception as exc:  # noqa: BLE001 -- decide on the stored schedule, then fail
+                problems.append(f"ESPN scoreboard refresh failed: {exc}")
+                logger.error(f"tennis card: {problems[-1]}; deciding on the stored schedule")
         else:
             from data.ingestors.tennis_odds_history import active_keys
             keys = active_keys()
@@ -410,6 +421,8 @@ def run_card(do_publish: bool = False, now: datetime | None = None, buy: bool = 
             from models.scorer import _get_current_bankroll
             bets, decided = publish(conn, decisions, _get_current_bankroll(conn))
         logger.info("\n" + render(decisions))
+        if problems:
+            raise CardIncomplete("; ".join(problems)[:1500])
         return {"due": len(due), "bets": bets, "decided": decided,
                 "signals": sum(d["signal"] == "BET" for d in decisions)}
     finally:
@@ -420,7 +433,13 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--publish", action="store_true")
     a = ap.parse_args(argv)
-    print(run_card(do_publish=a.publish))
+    try:
+        print(run_card(do_publish=a.publish))
+    except CardIncomplete as exc:
+        # exit 1: scheduler.run_tennis_moneyline_card then raises, so the
+        # job's heartbeat records "error" and the failure alerter reports it.
+        logger.error(f"tennis card: {exc}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

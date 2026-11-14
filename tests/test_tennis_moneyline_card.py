@@ -164,3 +164,52 @@ def test_a_retirement_before_the_first_set_is_complete_is_void_everywhere():
         conn = _SettleConn([_pick(book, g1=(3,), g2=(2,))])
         _settle_tennis_picks(conn, "2026-11-14", "t")
         assert conn.updates[0][0] == "NO_ACTION", book
+
+
+def test_the_espn_refresh_asks_for_each_tour_in_lower_case(monkeypatch):
+    # ESPN's tennis path answers HTTP 400 for "ATP"; the first live check of
+    # the card (2026-11-14) failed on exactly that.
+    from data.ingestors import tennis_espn as te
+    asked = []
+    monkeypatch.setattr(te, "collect", lambda tour, days, rounds=3: asked.append(tour) or {})
+    monkeypatch.setattr(te, "store", lambda conn, rows: len(rows))
+    card.refresh_espn(object(), NOW)
+    assert asked == ["atp", "wta"]
+
+
+class _PublishConn:
+    """Records publish()'s writes; the ledger holds nothing yet."""
+
+    def __init__(self):
+        self.sql = []
+
+    def execute(self, sql, params=None):
+        s = " ".join(sql.split())
+        self.sql.append((s.split(" (")[0][:40], params))
+        if s.startswith("SELECT 1 FROM information_schema.tables"):
+            return _Rows([])
+        if s.startswith("INSERT INTO tennis_moneyline_decisions"):
+            return _Rows([("e1",)])
+        if s.startswith("INSERT INTO picks"):
+            return _Rows([(1,)])
+        return _Rows([])
+
+    def commit(self):
+        self.sql.append(("COMMIT", None))
+
+
+def test_publish_writes_the_game_the_decision_and_the_pick_once(monkeypatch):
+    import scripts.nfl_wind_publisher as wp
+    monkeypatch.setattr(wp, "_lock_model", lambda conn, model_id: None)
+    s = _stand(pd.Timestamp(NOW) + pd.Timedelta(minutes=30),
+               [("pinnacle", -150, 135), ("fanduel", -160, 150)])
+    d = card.decide_event(s, LINK)
+    skip = card.decide_event(s, None)
+    conn = _PublishConn()
+    assert card.publish(conn, [d, skip], 1000.0) == (1, 1)
+    kinds = [k for k, _ in conn.sql]
+    assert kinds.count("INSERT INTO games") == 1
+    assert kinds.count("INSERT INTO tennis_moneyline_decisions") == 1
+    picks = [p for k, p in conn.sql if k == "INSERT INTO picks"]
+    assert len(picks) == 1 and picks[0]["model_id"] == "atp_moneyline_shop"
+    assert picks[0]["signal_type"] == "BET" and picks[0]["sport"] == "ATP"
