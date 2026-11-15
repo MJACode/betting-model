@@ -44,6 +44,7 @@ import {
   type BookPrice,
 } from './markets';
 import { normalizePlayerName } from './playerNews';
+import { fillMissingGames as fillMissingGamesById } from './pickGames';
 import { NBA_Q1_FETCH_GAMES, NBA_Q1_SEASON_COLUMNS, type NbaQ1Game, type NbaQ1SeasonRow } from './nbaQ1';
 import {
   NBA_FB_PLAYER_COLUMNS,
@@ -1522,6 +1523,7 @@ export async function fetchPicksForDate(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  await fillMissingGames(picks, gameById);
   const weatherByGame = new Map<string, GameWeather>();
   for (const w of weather) weatherByGame.set(w.game_id, w);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
@@ -1578,6 +1580,21 @@ export async function fetchPicksForDate(
  * shows those bets instead of hiding them until fight week.
  * Same enrichment shape as fetchPicksForDate (UFC has no weather rows).
  */
+/**
+ * Adds to `gameById` the games the picks name that a by-date read did not
+ * return: a game whose row moved date after its pick was written (a
+ * postponement). Without it the card loses its team and matchup. See
+ * lib/pickGames.ts.
+ */
+function fillMissingGames(
+  picks: readonly Pick[],
+  gameById: Map<string, GameRow>,
+): Promise<void> {
+  return fillMissingGamesById(picks, gameById, (ids) =>
+    supabase.from('games').select(GAME_COLUMNS).in('game_id', ids),
+  );
+}
+
 export async function fetchUpcomingUfcPicks(
   afterDate: string,
   throughDate: string,
@@ -1638,6 +1655,7 @@ export async function fetchUpcomingUfcPicks(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  await fillMissingGames(picks, gameById);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
 
@@ -1703,6 +1721,7 @@ export async function fetchUpcomingTennisPicks(
 
   const gameById = new Map<string, GameRow>();
   for (const g of (gamesRes.data ?? []) as unknown as GameRow[]) gameById.set(g.game_id, g);
+  await fillMissingGames((picksRes.data ?? []) as unknown as Pick[], gameById);
 
   return ((picksRes.data ?? []) as unknown as Pick[]).map((pick) => ({
     pick,
@@ -1850,6 +1869,7 @@ export async function fetchUpcomingNflPicks(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  await fillMissingGames(picks, gameById);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
 
@@ -1959,6 +1979,7 @@ export async function fetchUpcomingNcaafPicks(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  await fillMissingGames(picks, gameById);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
 
@@ -2207,6 +2228,7 @@ export async function fetchUpcomingNhlPicks(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  await fillMissingGames(picks, gameById);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
 

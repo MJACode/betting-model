@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, A postponed game's row moved date and its pick lost its team ("ML"): boards now read the missed games by id |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Fanatics: app (com.fbg.sportsbook) claims only payment-return links, site opens it at /discover; probe now follows Fanatics' public share-a-bet OneLinks to see what the app is given |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, BetMGM bet lands on the slip via www.<st>.betmgm.com (alt_host); Fanatics opens by fanaticssportsbook:// but the feed has 0 Fanatics links, only selection ids; worker probe for a Fanatics betslip format |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, BetMGM: every host's AASA claims /*/sportsapp/* for the App Store app; after iOS refuses sports.<st>, ask www.<st> and <st> (logged as alt_host) |
