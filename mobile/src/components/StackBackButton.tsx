@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import { noteBack } from '@/lib/freezeLog';
 import {
   PLAYER_DETAIL_PARENT,
   playerTitleMaxWidth,
@@ -74,7 +75,10 @@ function BackPill({ onPress }: { onPress: () => void }) {
   const icon = Math.round(22 * Math.min(Math.max(fontScale, 1), 2));
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        noteBack('press');
+        onPress();
+      }}
       accessibilityRole="button"
       accessibilityLabel="Back"
       hitSlop={{ top: 12, bottom: 0, left: 8, right: 8 }}

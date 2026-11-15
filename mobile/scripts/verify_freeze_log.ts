@@ -6,6 +6,7 @@ import {
   beginFreezeLog,
   configureFreezeLog,
   noteAppState,
+  noteBack,
   noteModalDismissed,
   noteModalShown,
   noteModalVisible,
@@ -174,6 +175,9 @@ function session(over: Partial<SessionRecord>): SessionRecord {
   const last = t[t.length - 1];
   check('a run of taps is one crumb with the count', last?.[1] === 'touch' && last?.[2] === '3');
   check('taps since navigation counted', sessionSummary()?.touches_since_nav === 3);
+  noteBack('press');
+  const b = (trailForReport() ?? []).at(-1);
+  check('a Back tap is a crumb of its own', b?.[1] === 'back' && b?.[2] === 'press');
   noteScreen('Settings');
   check('a screen change resets the tap count', sessionSummary()?.touches_since_nav === 0);
   for (let i = 0; i < 200; i += 1) { noteScreen(`S${i}`); }

@@ -30,6 +30,7 @@ export type CrumbKind =
   | 'modal_shown'
   | 'modal_close'
   | 'modal_dismissed'
+  | 'back'
   | 'stall';
 
 export interface Crumb {
@@ -383,6 +384,20 @@ export function noteModalVisible(name: string, visible: boolean, confirmsDismiss
       if (confirmsDismiss) watchModal(name, 'dismiss');
       else clearModalWatch(name);
     }
+    save(true);
+  });
+}
+
+/**
+ * A tap on the React Back pill reached JS. In the trail, a `back` crumb with
+ * no `screen` after it means the pop itself failed; taps with no `back` crumb
+ * mean the tap never reached the pill (2026-11-15, the dead-Back reports).
+ * Saved at once: a frozen Back ends in a force-quit.
+ */
+export function noteBack(decision: string): void {
+  safe(() => {
+    if (!ensureSession()) return;
+    crumb('back', decision);
     save(true);
   });
 }
