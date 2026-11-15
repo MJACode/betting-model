@@ -132,6 +132,11 @@ message `handoff: <book> -> <route> (inst= via= mod= claimed= build=)`.
 `mobile/src/lib/handoffLog.ts`; every book with an app entry (BOOK_APPS),
 iOS only, one row per book and route per app session.
 
+An `alt_host` row is NOT a miss: the BetMGM app opened through the same link
+on another state host (`www.<st>` or `<st>.betmgm.com`) after iOS refused
+`sports.<st>`. Exclude it when counting misses
+(`AND message NOT LIKE 'handoff: % -> alt_host%'`).
+
 A `link` row is not proof of Safari: iOS decides where the stored link opens,
 and the app cannot see which. `scheme`, `store`, `web` and `failed` are exact.
 

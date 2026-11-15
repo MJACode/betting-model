@@ -33,16 +33,18 @@ export function linkNeedsState(link: string | null | undefined): boolean {
   return !!link && link.includes(STATE_PLACEHOLDER);
 }
 
-/**
- * Fill a betslip link's placeholders. Returns null when a placeholder cannot
- * be filled (no state set), so the caller never opens a template.
- */
 /** A betslip link that can be opened at all: a web link. The odds feed has
- *  stored the literal "NaN" for Fanatics and betPARX. */
+ *  stored the literal "NaN" for Fanatics and betPARX. Every betslip link the
+ *  feed sends is https today; a custom-scheme betslip link would be dropped
+ *  here, so allow it explicitly if one ever arrives. */
 export function isUsableBetslipLink(link: string | null | undefined): link is string {
   return !!link && /^https?:\/\//i.test(link.trim());
 }
 
+/**
+ * Fill a betslip link's placeholders. Returns null when a placeholder cannot
+ * be filled (no state set), so the caller never opens a template.
+ */
 export function fillBetslipLink(link: string, state: string | null): string | null {
   let out = link.trim();
   // Not a web link at all: the odds feed has stored the literal "NaN" for
@@ -64,9 +66,34 @@ export function linkShape(url: string | null): string | null {
   if (!url) return null;
   const m = /^https?:\/\/([^/?#]+)([^?#]*)/.exec(url);
   if (!m) return null;
-  const host = m[1]!.replace(/^sports\.[a-z]{2}\.betmgm\.com$/i, 'sports.<st>.betmgm.com').replace(/^[a-z]{2}\.betrivers\.com$/i, '<st>.betrivers.com');
+  const host = m[1]!
+    .replace(/^(sports\.|www\.)?[a-z]{2}\.betmgm\.com$/i, (_, p: string | undefined) => `${p ?? ''}<st>.betmgm.com`)
+    .replace(/^[a-z]{2}\.betrivers\.com$/i, '<st>.betrivers.com');
   const path = m[2]!.replace(/^\/us\/[a-z]{2}\//i, '/us/<st>/');
   return `${host}${path}`;
+}
+
+/**
+ * The same claimed link on the book's other hosts, to ask iOS about when it
+ * refuses the first. Empty for every book but BetMGM.
+ *
+ * Measured 2026-11-15 (worker job 1343418): www.<state>, sports.<state> and
+ * the bare <state> host of betmgm.com each serve an apple-app-site-association
+ * file (Apple's CDN copy) claiming `/*\/sportsapp/*` for the App Store's
+ * BetMGM app (com.playmgm.nj.sports2, job 1343046), and sports.ma.betmgm.com
+ * redirects to www.ma.betmgm.com. Yet iOS refused
+ * sports.ma.betmgm.com/en/sportsapp/sports on Matt's phone (app_errors
+ * 17:14Z, 17:27Z). Whether the app's entitlement lists each host is not
+ * known; iOS's answer is the test, and a refusal opens nothing. Only hosts
+ * that carry the member's state: www.betmgm.com and sports.betmgm.com also
+ * serve the file, but how the app picks a state from them is not known.
+ */
+export function appClaimedAlternates(book: string, claimed: string | null): string[] {
+  if (book !== 'betmgm' || !claimed) return [];
+  const m = /^https:\/\/sports\.([a-z]{2})\.betmgm\.com(\/.*)$/.exec(claimed);
+  if (!m) return [];
+  const [, st, rest] = m;
+  return [`www.${st}.betmgm.com`, `${st}.betmgm.com`].map((host) => `https://${host}${rest}`);
 }
 
 /** The books whose app claims a link (the cases below). */

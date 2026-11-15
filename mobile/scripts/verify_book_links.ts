@@ -19,7 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { APP_CLAIMING_BOOKS, appClaimedLink, fillBetslipLink, linkNeedsState, linkShape } from '../src/lib/betslipLinks';
+import { APP_CLAIMING_BOOKS, appClaimedAlternates, appClaimedLink, fillBetslipLink, linkNeedsState, linkShape } from '../src/lib/betslipLinks';
 import { BETTABLE_BOOKS } from '../src/lib/markets';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -160,14 +160,27 @@ for (const b of ['betrivers', 'hardrockbet', 'fanatics', 'ballybet', 'betparx', 
 }
 const viaApp = chain.slice(at('viaApp = claimed ?'), at('if (link && link.trim())'));
 check('iOS is asked to open the claimed link in the app only, after the not-installed exit and before anything else opens',
-  at('viaApp = claimed ?') > at('installed === false') && chain.includes('const claimed = appClaimedLink(book, link, state);') && viaApp.includes('openUniversalLinkOnly(claimed)'));
+  at('viaApp = claimed ?') > at('installed === false') && chain.includes('let claimed = appClaimedLink(book, link, state);') && viaApp.includes('openUniversalLinkOnly(claimed)'));
 check('...yes is done; no is the App Store only when nothing says the app is installed; cannot-ask falls through to the old chain',
   viaApp.includes('if (viaApp === true) return true;') && /if \(viaApp === false && installed === null\) \{\s*const store = bookStoreUrl\(book, state\);/.test(viaApp) && !viaApp.includes('tryOpen(app.web)'));
 // Matt, 2026-11-15: "Which state do you bet in?" on the first tap with
 // Massachusetts set. getBettingState() is null until storage answers.
 check('the hand-off waits for the saved state; it never reads it before storage answers',
-  at('const state = await loadBettingState();') >= 0 && at('const state = await loadBettingState();') < at('const claimed = appClaimedLink')
+  at('const state = await loadBettingState();') >= 0 && at('const state = await loadBettingState();') < at('let claimed = appClaimedLink')
   && !chain.includes('getBettingState()') && !chain.includes('bookStoreUrl(book)') && !src.slice(src.indexOf('async function openThisBooksLinkOnly')).includes('getBettingState()'));
+// 2026-11-15 (job 1343418): every BetMGM host claims /*/sportsapp/*, and iOS
+// refused sports.ma on Matt's phone. The other hosts are asked in turn.
+const mgmClaimed = appClaimedLink('betmgm', STORED.betmgm!, 'MA')!;
+check('BetMGM: refused on sports.<st>, the same link is asked on www.<st> then <st>; never a host without the state',
+  JSON.stringify(appClaimedAlternates('betmgm', mgmClaimed).map((u) => new URL(u).host)) === JSON.stringify(['www.ma.betmgm.com', 'ma.betmgm.com'])
+  && appClaimedAlternates('betmgm', mgmClaimed).every((u) => u.endsWith(mgmClaimed.slice(mgmClaimed.indexOf('/en/sportsapp/'))))
+  && appClaimedAlternates('fanduel', 'https://sportsbook.fanduel.com/x').length === 0 && appClaimedAlternates('betmgm', null).length === 0);
+const alts = chain.slice(at('if (viaApp === false) {'), at('if (viaApp === false && installed === null)'));
+check('...only after a refusal, in the app only, before the App Store, and a success is logged as alt_host',
+  at('if (viaApp === false) {') > at('if (viaApp === true) return true;') && at('if (viaApp === false) {') < at('if (viaApp === false && installed === null)')
+  && alts.includes('openUniversalLinkOnly(alt)') && alts.includes("return went('alt_host', true);") && !alts.includes('tryOpen('));
+check('the logged BetMGM host hides the state on every host shape', linkShape('https://www.ma.betmgm.com/en/sportsapp/sports?options=1') === 'www.<st>.betmgm.com/en/sportsapp/sports'
+  && linkShape('https://ma.betmgm.com/en/sportsapp/sports') === '<st>.betmgm.com/en/sportsapp/sports' && linkShape('https://sports.betmgm.com/en/sportsapp/sports') === 'sports.betmgm.com/en/sportsapp/sports');
 // ── a hand-off that misses the app is written down ──────────────────────────
 // The function body only: the helpers after it have comments of their own.
 const exits = chain.slice(at('const went = '), at("/**\n * The book's app was opened by its scheme"));
