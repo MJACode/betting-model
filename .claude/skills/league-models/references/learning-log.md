@@ -30,6 +30,21 @@ review as its own entry.
 
 ---
 
+## 2026-11-15 — Horse racing public files, still no model
+
+1. **League and scope**: same planning request. Mike asked for the research
+   notes and the public datasets on the scope branch. No model was fit.
+2. **Tried**: no prices were graded. The Betfair Australia listing page was
+   fetched and its thoroughbred filenames were copied into
+   `scripts/horse/manifest.json`.
+3. **New**: `docs/horse_racing_sources.md` and
+   `scripts/horse/fetch_datasets.py`. The download directory is gitignored.
+   Nothing was added to `methods.md`.
+4. **Corrected**: the scope's Punting Form row had no dollar amount. The
+   14 Nov note prints Starter $59.00/Month and Professional $297.00/Month.
+   New Zealand is in the free Betfair CSVs, not a missing card.
+5. **The framework**: unchanged. The files are not a build.
+
 ## 2026-11-15 — Horse racing scoped, not built
 
 1. **League and scope**: thoroughbred racing, US and international (a

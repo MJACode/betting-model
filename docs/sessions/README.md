@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, horse racing sources and `scripts/horse/fetch_datasets.py`: research note in `docs/horse_racing_sources.md`, Punting Form $59/$297, free Betfair AU/NZ CSVs, Equibase 2023 manual and never committed |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, horse racing scope only (`docs/horse_racing_scope.md`): HDW or TrackMaster for US files, Racing API core for UK/IRE/HK with the US and Australia add-ons closed, Betfair Advanced as the pre-off price, `racing_v1` CLV, dead heat before the first graded bet; no module |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Signals board zero-ready button "See why" → "Bet all 0"; board note pluralised ("5 games started") |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Picks filter review: with Final on, the Signals stake and Bet all stay on open games; a Final tap starts from the chips that are lit |

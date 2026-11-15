@@ -71,13 +71,13 @@ Arabian; an ingestor has to keep them apart.
 | [JCapper Flex / HDW](http://www.jcapper.com/horseracingdata/) | North American thoroughbred past performances (`.JCP`) and chart files. The search snippet of that page: Silver $5.95 per download day, cap $89/month; Platinum $7.95 per download day, cap $119/month, after 15 download days. The JCapper FAQ on the same site still describes a $119/month unlimited HDW plan. | Those two figures, from the page text returned by search. A direct fetch of the Flex page returned HTTP 500. | No API. Files. The 2026-11-14 note says the server keeps 45 days: not re-checked on the 500 page. Store the file in Supabase the day it is downloaded. |
 | [TrackMaster Plus Pro XML](https://www.trackmaster.com/products/thoroughbred/trackmaster_plus_pro) | North American thoroughbred XML, including the fields the software shows. | $5 a card; 20 downloads $49.95/month; unlimited $149.95/month. | Notice on that page, updated 2025-06-09: the TrackMaster copy of the Plus Pro *software* no longer works. Standalone data files on that site still do. One US file vendor, not HDW and TrackMaster together. |
 | [Equibase downloadable full charts](https://www.equibase.com/premium/eqpViewSubscription.cfm?Incltxt=eqpViewDownloadableChartsDisplay.cfm) | Chart results, speed figures, final odds. | $219.95 for one month (the page's 1-month row, expiry shown as 2026-12-15). | Results and final odds. Not a live tote and not a past-performance file. |
-| Equibase 2023 complimentary set | Full-year 2023 past performances and charts. Registration at `equibase.com/handicappersdata.cfm`. Press release 2024-03-11. | $0 | DRF (2024-03-11) reported the clickwrap: internal, non-commercial testing only, and no public display or dissemination of the data or of analyses or derivatives. That forbids training a model here and then posting its picks. Usable for a private method check only after the agreement Mike signs is read. Not the production store. |
+| Equibase 2023 complimentary set | Full-year 2023 past performances and charts. Registration at `equibase.com/handicappersdata.cfm`. The file arrives by email. | $0 | Manual. Sent to `signalbaseskinny@gmail.com`, 5–7 business days. Internal non-commercial testing only. Not for wagering use and not for redistribution. The fetch script does not download it, and it is never committed. DRF (2024-03-11) reported the same limit on displaying derivatives. |
 | Equibase industry feed | Official PP, simulcast, tote. | Quote only. Not priced in public. | This is the license if a personal file plan does not allow a published model. |
 | [The Racing API coverage](https://www.theracingapi.com/data-coverage) | Three datasets on one page. Core: "UK, Ireland, Hong Kong and global group level thoroughbred races and selected handicaps." North America add-on. Australia add-on. | Pound prices were **not** on the pages fetched 2026-11-15. `/pricing` returned 404. The homepage FAQ says today's cards, odds, and results update every 3 minutes, tomorrow every 15 minutes, and the paid rate limit is 5 requests/second. | Terms (fetched that day): resale forbidden; not for a betting operator or a sportsbook; accounts are individual. The FAQ also lists "betting models, strategies and automated trading programs" as an allowed use. Those two sentences are the license question in §9. |
-| [Betfair historical data bulk prices](https://support.developer.betfair.com/hc/en-us/articles/360019984158-Are-bulk-purchase-discounts-available) | Horse racing exchange history. The article was updated 2026-09-24. | Advanced £69/month or £699/year. Pro £230/month or £2,299/year. | A developer-support example of the download API lists GB, IE, and US among countries in one response. That example is not a current coverage count. Australian and New Zealand customers are told, on the Betfair data-science guide, to email before buying from the UK historic site. Pro is 50 ms; Advanced is 1 second. Basic (1-minute, no volume, described as free on that guide) was not on the 2026-09-24 price table. Confirm Basic before treating it as free. |
+| [Betfair historical data bulk prices](https://support.developer.betfair.com/hc/en-us/articles/360019984158-Are-bulk-purchase-discounts-available) | Paid UK historic site. Time-stamped exchange prices. A developer-support example lists GB, IE, and US in one response; that example is not a current coverage count. | Advanced £69/month or £699/year. Pro £230/month or £2,299/year. Basic, per the 14 Nov research note: free, 1-minute odds, no volume. The 24 Sep 2026 bulk-discount table lists Advanced and Pro only. | Needs a Betfair account. Australian and New Zealand customers are told to email `automation@betfair.com.au` before buying from this site. The research note says US residents generally cannot register. The free AU/NZ thoroughbred CSVs are a different path and need no login. |
 | [JRA-VAN Data Lab](https://jra-van.jp/buy/) | JRA races, including odds, back to the mid-1980s. A 2026-08 write-up counted 21.6 million records from 1986. | ¥2,090/month, tax included, for the data lab software alone. | Staff post 2025-11-05: JV-Link is a Windows COM component, not a REST API. The Railway worker cannot call it. A Windows machine would have to pull and write Supabase. |
 | [Krok Odds API](https://krokodds.com.au/api-access) and [terms](https://krokodds.com.au/terms) | Australian thoroughbred, harness, and greyhound. Fixed odds, tote, Betfair back/lay and BSP, results, form, sectionals. | API plan A$49/month: 50,000 credits, 500 requests/minute, 60-second cache. Free tier 50 credits and 5 requests/minute. Overage A$0.005/credit, opt-in. | Personal, non-transferable. Display inside one's own product is allowed with the attribution line on the same screen. Redistributing the data through Discord, or selling odds, arbitrage, or EV analytics to the public or for a fee, is outside that grant. A private tool that is not offered to the public and is not charged for is permitted. Harness and greyhounds come along; do not score them as thoroughbreds. |
-| [Punting Form pricing](https://puntingform.com.au/pricing) | Australian, Hong Kong, and Singapore form. Modeller adds an API, historical Betfair prices, and point-in-time modelling data. | No dollar amount on that page. Modeller is `sales@puntingform.com.au`. | Modeller is personal use. Commercial use is a separate quote. Singapore racing is historical (the club's last meeting was not re-checked here). |
+| [Punting Form pricing](https://puntingform.com.au/pricing) | Australia, Hong Kong, and Singapore form, results, ratings, official SP / TAB / Betfair starting prices. New Zealand is not listed. North American sectionals are described as not yet launched. | Printed with no currency code (the operator is ABettorEdge Pty Limited, Australia): Free; Starter $59.00/Month (form and results API/CSV); Professional $297.00/Month (sectionals for viewing); Modeller price unknown (`sales@puntingform.com.au`). | Personal use. Commercial use needs written consent. The catalogue is `docs/horse_racing_sources.md`. |
 | [turf.bzh API licence](https://www.turf.bzh/api-licence.php) | French programme, runners, live PMU odds, results. The docs say the history starts 2025-02-01 (32,954 races and 376,873 runners as of 2026-10-31). | €49.90 once, and only while a Premium subscription is active. The Premium price was not on the pages read. | 120 requests/minute and 20,000/day. Personal. Not an official PMU feed. |
 | PMU official feed | The AGEBAN affiliate charter fetched that day is a sportsbook XML feed, not a racing-results license. [boturfers.fr](https://www.boturfers.fr/blog/comment-recuperer-les-donnees-du-pmu) says the PMU infocentre quotes professionals at tens of thousands of euros a year and that scraping the site is forbidden. | No public price. | Do not scrape PMU. |
 | [Emirates Racing Authority](https://emiratesracing.com/) | UAE cards and results (Meydan, Abu Dhabi, Jebel Ali, and the other ERA tracks), thoroughbred and Arabian. | No public API price found. | HTML results. Not a feed. |
@@ -134,11 +134,15 @@ closed matches the FAQ.
 | France, full card | Official PMU feed is quote-only. turf.bzh is cheap, short (from 2025-02-01), and personal. Racing API core holds 2,723 France results in 2026. France Galop's public page that was fetched is a calendar subscription, not a database. | No licensed full-card price path with a history long enough for the backtest in §3. |
 | Dubai / UAE | ERA publishes cards and results. Racing API core: 150 results in 2026. | No priced feed found. Seasonal, and Arabian races must not be mixed into a thoroughbred model. |
 | Germany, Scandinavia, South Africa | Core "other" and Germany rows above. Goalserve advertises a $200/month horse-racing package covering UK, USA, South Africa, France, and Sweden; the price page still carries a discount "until 30/06/2025". | A reseller page with a stale sale date is not a source of record. |
-| South Korea, New Zealand as its own card | Not found as a priced English API this session. NZ may appear inside a Betfair AU file; that was not counted. | Parked. |
+| New Zealand | No public bulk API on NZTR or LoveRacing. The old TAB NZ XML index returned 404 on the 14 Nov check. | Not a separate feed. NZ thoroughbred odds and results are in the free Betfair Australia/NZ CSVs (`scripts/horse/fetch_datasets.py`). |
 | Brisnet | A 2016 Brisnet article lists a Data Plan at $125/month. | That is not a 2026 price. Left unpriced. |
 | Horse Racing Nation data files | $299/month in the 2026-11-14 note. | Not re-fetched. |
 | Timeform API | "from £500/month" in the 2026-11-14 note, GB/IE. | Not re-fetched. A ratings vendor, not required for the first model. |
 | Goalserve, BettorServe, FormFav, horseracedatabase.com | Each claims a wide country list. horseracedatabase.com lists HK from €19.90/month and UK from €29.90/month. | Terms not read, except where a page was fetched. Not the recommendation. |
+
+The full vendor notes, including Racing Australia's five wholesalers and the
+Kaggle row counts, are in `docs/horse_racing_sources.md`. The public files
+are fetched by `scripts/horse/fetch_datasets.py` into gitignored `data/horse/`.
 
 ### Recommendation
 
@@ -155,9 +159,22 @@ Monthly, in the currencies on the invoices: **$119 + £128.99**. The pound
 half depends on the Racing API dashboard still showing £59.99. No FX
 conversion is stated here because none was looked up.
 
-Equibase's free 2023 year is a method check under whatever agreement is
-signed. It is not loaded into the production tables and it does not train a
-model whose picks are posted.
+**Australia and New Zealand, cheap start** (14 Nov research): Punting Form
+Starter at $59.00/Month as printed, plus the free Betfair Australia/NZ
+thoroughbred CSVs (annual 2020–2025 and monthly through 2026-10, no login).
+That is form and results for Australia (and Hong Kong and Singapore on the
+Starter plan) and exchange snapshots for Australia and New Zealand. It is
+not a US past-performance file and it is not the Racing API card. Krok at
+A$49/month remains the live Australian odds API, under the licence limit
+already in the table. Racing Australia's own materials are wholesale-quote
+only (BettorData, BetMakers, Mediality Racing, News Perform, Racing and
+Sports).
+
+**Public files, $0.** Kaggle sets and the Betfair CSVs above. They land in
+`data/horse/` and are not committed. Equibase's 2023 year is a separate
+manual drop under the terms in the table: internal testing only, not for
+wagering use, not redistributed, never committed, and not loaded into the
+production tables.
 
 **Serious tier**, still one US file vendor:
 
@@ -168,7 +185,8 @@ model whose picks are posted.
 | Equibase charts | Only if the chosen PP file lacks final odds and figures the model needs | $219.95/month, otherwise skip |
 | The Racing API Pro, plus the £499 history add-on if more than 12 months is required | Odds history for UK, Ireland, Hong Kong | £99.99/month + £499 once, both unconfirmed this session |
 | Betfair Advanced, or Pro if a 1-second grid is too coarse to measure the close | The price path and the BSP | £69 or £230/month |
-| Krok API | Australia, only after a commercial reading of §6.1 of their terms against the paid app | A$49/month |
+| Punting Form Professional, or Modeller once sales quotes it | Australia / HK / SG sectionals. Starter ($59.00/Month) is the cheap tier above | $297.00/Month for Professional; Modeller unknown |
+| Krok API | Australia live odds, only after a commercial reading of §6.1 of their terms against the paid app | A$49/month |
 | JRA-VAN | Japan, only with a Windows puller that writes Supabase | ¥2,090/month |
 
 Do not buy the North America or Australia Racing API add-ons until the
@@ -604,10 +622,13 @@ groundwork commit: the sport exists as tables and is dark.
 
 **Phase 2 — the backtest, off to the side.** A script that fits stage 1 and
 stage 2, prints the baseline, the neighbourhood, the early/late split, the
-units, and the leakage checks. Output is a doc under `docs/`, the way the
-UFC audit is a doc. It does not register a model and does not write `picks`.
-If `b` is indistinguishable from 0, or no cut beats the public after
-takeout, the written result is a null and phase 3 does not start.
+units, and the leakage checks. The public inputs it can use today are the
+files `scripts/horse/fetch_datasets.py` downloads (Hong Kong and UK/Ireland
+results, Betfair Australia/NZ snapshots). Output is a doc under `docs/`,
+the way the UFC audit is a doc. It does not register a model and does not
+write `picks`. If `b` is indistinguishable from 0, or no cut beats the
+public after takeout, the written result is a null and phase 3 does not
+start.
 
 **Phase 3 — one live win model, one region.** Whichever region phase 2
 cleared, with a timestamped price. Config entries (`ACTION_THRESHOLDS`,
@@ -655,24 +676,29 @@ These block phase 1 or phase 3. Defaults are not assumed.
 
 1. **Budget.** The cheap stack is $119/month (HDW Platinum) plus £59.99
    (Racing API Standard, confirm on the dashboard) plus £69 (Betfair
-   Advanced). Serious tier adds a possible Equibase industry quote, Krok at
-   A$49, and JRA-VAN at ¥2,090, and swaps Betfair to £230 if the 1-second
-   file is too coarse.
+   Advanced). Australia adds Punting Form Starter at $59.00/Month as
+   printed, on top of the free Betfair AU/NZ CSVs. Serious tier adds a
+   possible Equibase industry quote, Punting Form Professional at
+   $297.00/Month, Krok at A$49, and JRA-VAN at ¥2,090, and swaps Betfair to
+   £230 if the 1-second file is too coarse.
 2. **Which region first.** US on HDW + Betfair, or UK/Ireland/Hong Kong on
-   The Racing API + Betfair. Australia, Japan, France, and Dubai wait on a
-   feed and a license. The recommendation is UK/Ireland/Hong Kong first if
-   the Racing API terms in question 3 are acceptable, because the core
-   entitlement is actually for sale and the card, the odds, and the results
-   are one API. US first if the priority is North American racing and HDW's
-   license covers publishing.
+   The Racing API + Betfair. Japan, France, and Dubai still wait on a feed.
+   Australia and New Zealand already have the free Betfair CSVs, and
+   Punting Form Starter if its personal-use terms allow a published model.
+   The recommendation is UK/Ireland/Hong Kong first if the Racing API terms
+   in question 3 are acceptable, because the core entitlement is actually
+   for sale and the card, the odds, and the results are one API. US first
+   if the priority is North American racing and HDW's license covers
+   publishing.
 3. **Licenses, in writing, before any file is stored or any pick is posted.**
    - HDW / JCapper and TrackMaster: does a personal data plan allow storing
      the files in our database and publishing model picks to a paid app?
    - The Racing API: the FAQ allows betting models; the terms forbid use by
      a betting operator or a sportsbook. Does the paid app fall on the
      allowed side?
-   - Equibase 2023: read the clickwrap. If it matches what DRF reported, that
-     year stays off the published model.
+   - Equibase 2023: internal non-commercial testing only, not for wagering
+     use, not redistributed, never committed. It stays off the published
+     model.
    - Krok §6.1: EV analytics offered to the public or for a fee is outside
      the A$49 grant. Australia in the app needs a commercial license or it
      stays out.
