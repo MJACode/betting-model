@@ -142,7 +142,12 @@ check(
 );
 
 const pill = read('src/components/StackBackButton.tsx');
-check('settings and player stats share the pill', (pill.match(/<BackPill /g) ?? []).length === 2);
+check(
+  'settings, player stats and the navigator default share the pill',
+  ['PlayerStatsBackButton', 'SettingsSectionBackButton', 'StackBackButton'].every((name) =>
+    new RegExp(`export function ${name}\\(\\)[\\s\\S]*?return <BackPill `).test(pill),
+  ),
+);
 check(
   'an empty settings stack resets to the tabs under Settings',
   /navigation\.reset\(\{ index: 1, routes: \[\{ name: 'Tabs' \}, \{ name: 'Settings' \}\] \}\)/.test(pill),

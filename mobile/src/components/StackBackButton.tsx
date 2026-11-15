@@ -98,6 +98,24 @@ export function PlayerStatsBackButton() {
 }
 
 /**
+ * The same pill on every other pushed screen (the navigator's default).
+ *
+ * The arrow-only system Back (2026-11-08) went dead again on 2026-11-15, on
+ * Pick Detail opened from a push notification, iOS 27.3. UIKit's Back has now
+ * failed on three screens, and the React pill has not failed on either screen
+ * that carries it, so no pushed screen uses UIKit's Back. An empty stack (a
+ * reset, or a deep link that landed alone) goes to the tabs.
+ */
+export function StackBackButton() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const onPress = () => {
+    if (stackBackDecision(navigation.canGoBack()) === 'pop') navigation.goBack();
+    else navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
+  };
+  return <BackPill onPress={onPress} />;
+}
+
+/**
  * The same pill on a Settings section. An empty stack returns to Settings.
  * The player screen's empty-stack parent stays the Stats tab.
  */
