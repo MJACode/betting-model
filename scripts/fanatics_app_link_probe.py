@@ -49,8 +49,46 @@ NEEDLES = ("fanaticssportsbook", "betslip", "bet-slip", "selectionid", "selectio
            "onelink", "app-argument", "apple-itunes-app", "universal")
 MAX_SCRIPTS = 15
 
+# Fanatics' own "share a bet" links, as posted publicly (web search,
+# 2026-11-15): "A friend shared a bet with you on Fanatics Sportsbook. Tap the
+# link to view and copy their bet." They are AppsFlyer OneLink short links.
+# Where one resolves to shows what the app is given: selection ids (a link we
+# could build from odds.*_sid) or a server-side share id (one we could not).
+SHARE_LINKS = (
+    "https://fanatics.onelink.me/5kut/mgsfxrr2",
+    "https://fanatics.onelink.me/5kut/xrww7t5e",
+    "https://fanatics.onelink.me/5kut/og2j49ri",
+)
+SHARE_NEEDLES = ("deep_link_value", "af_dp", "deep_link_sub", "fanaticssportsbook",
+                 "betslip", "share", "selection", "af_web_dp", "af_ios_url")
 
-def probe(get=_get) -> int:
+
+def _hop(url: str):
+    """One request, redirects off: (status, Location, body, error)."""
+    import requests
+    from scripts.betmgm_app_link_probe import TIMEOUT, _UA
+    try:
+        r = requests.get(url, timeout=TIMEOUT, allow_redirects=False, headers={"User-Agent": _UA})
+        return r.status_code, r.headers.get("Location"), r.text, None
+    except requests.RequestException as exc:
+        return None, None, "", f"{type(exc).__name__}: {exc}"
+
+
+def share_link_trail(url: str, hop=_hop, max_hops: int = 6) -> list[dict]:
+    """Follow a share link hop by hop, keeping each Location. Pure given `hop`."""
+    from urllib.parse import urljoin
+    trail = []
+    for _ in range(max_hops):
+        status, location, body, err = hop(url)
+        trail.append({"url": url, "status": status, "location": location, "error": err,
+                      "hits": snippets(body or "", needles=SHARE_NEEDLES, width=220, cap=12)})
+        if err or not location:
+            break
+        url = urljoin(url, location)
+    return trail
+
+
+def probe(get=_get, hop=_hop) -> int:
     summary: list[str] = []
     reached = False
 
@@ -116,6 +154,26 @@ def probe(get=_get) -> int:
                 for sch in schemes:
                     if "fanatics" in sch.lower():
                         summary.append(f"scheme in {urlsplit(src).path[-60:]}: {sch[:160]}")
+
+    print("\n=== 4. Fanatics' own share-a-bet links: where they lead")
+    from urllib.parse import unquote
+    for url in SHARE_LINKS:
+        print(f"--- {url}")
+        for step in share_link_trail(url, hop=hop):
+            if step["error"]:
+                print(f"  {step['url']}: {step['error']}")
+                summary.append(f"share {url[-8:]}: not read ({step['error'][:80]})")
+                break
+            reached = True
+            loc = unquote(step["location"] or "")
+            print(f"  HTTP {step['status']} {step['url'][:200]}")
+            if loc:
+                print(f"    -> {loc[:1500]}")
+                summary.append(f"share {url[-8:]} -> {loc[:400]}")
+            for h in step["hits"]:
+                print(f"    body: {unquote(h)[:500]}")
+            if step["hits"] and not loc:
+                summary.append(f"share {url[-8:]} body: {unquote(step['hits'][0])[:300]}")
 
     print(SUMMARY_MARK)
     for line in summary:
