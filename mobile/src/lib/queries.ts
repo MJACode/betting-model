@@ -1523,7 +1523,8 @@ export async function fetchPicksForDate(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
-  await fillMissingGames(picks, gameById);
+  const missedGamesError = await fillMissingGames(picks, gameById);
+  if (missedGamesError) onEnrichmentError?.('postponed games', missedGamesError);
   const weatherByGame = new Map<string, GameWeather>();
   for (const w of weather) weatherByGame.set(w.game_id, w);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
@@ -1589,7 +1590,7 @@ export async function fetchPicksForDate(
 function fillMissingGames(
   picks: readonly Pick[],
   gameById: Map<string, GameRow>,
-): Promise<void> {
+): Promise<unknown> {
   return fillMissingGamesById(picks, gameById, (ids) =>
     supabase.from('games').select(GAME_COLUMNS).in('game_id', ids),
   );

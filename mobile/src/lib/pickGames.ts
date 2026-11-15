@@ -27,23 +27,27 @@ export function missingGameIds(
 
 /**
  * Adds the missing games to `gameById`, asked for by id through `readByIds`.
- * Enrichment only: a failed read leaves those cards as they were.
+ * Enrichment only: a failed read leaves those cards as they were and is
+ * returned, so the caller can report it (fetchPicksForDate's
+ * onEnrichmentError); null when nothing failed.
  */
 export async function fillMissingGames(
   picks: readonly { game_id: string | null | undefined }[],
   gameById: Map<string, GameRow>,
   readByIds: (ids: string[]) => PromiseLike<{ data: unknown; error: unknown }>,
-): Promise<void> {
+): Promise<unknown> {
   const missing = missingGameIds(picks, gameById);
-  if (missing.length === 0) return;
+  if (missing.length === 0) return null;
   let res: { data: unknown; error: unknown };
   try {
     res = await readByIds(missing);
-  } catch {
-    return;
+  } catch (e) {
+    return e ?? new Error('games read failed');
   }
-  if (res.error || !Array.isArray(res.data)) return;
+  if (res.error) return res.error;
+  if (!Array.isArray(res.data)) return null;
   for (const g of res.data as GameRow[]) {
     if (g && typeof g.game_id === 'string') gameById.set(g.game_id, g);
   }
+  return null;
 }
