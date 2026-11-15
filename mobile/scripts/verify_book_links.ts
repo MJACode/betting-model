@@ -56,7 +56,7 @@ check('whitespace is trimmed', fillBetslipLink('  https://sportsbook.draftkings.
 
 // ── the fallback chain and the store ─────────────────────────────────────────
 const src = read('src/lib/sportsbookLinks.ts');
-check('a template is filled before it is opened', src.includes('fillBetslipLink(link, getBettingState())'));
+check('a template is filled before it is opened', src.includes('fillBetslipLink(link, state)') && src.includes('fillBetslipLink(link, await loadBettingState())'));
 check('a template with no state tells the member what to set', src.includes('Which state do you bet in?') && src.includes('Settings → Your state'));
 check('...and the alert is the whole answer — no fall-through to the store or the site', /Settings → Your state\.`,\n\s*\);\n\s*return false;/.test(src));
 const states = read('src/hooks/useBettingState.ts');
@@ -97,7 +97,7 @@ check('the declaration is a native change, so the app version moved off 1.0.0 (O
 check('installed? is asked only on iOS and only for a book with something to ask; otherwise null', src.includes("if (!app || Platform.OS !== 'ios') return null;") && src.includes('if (verified.length === 0 && candidates.length === 0) return null;'));
 check('the question is asked before anything opens', at('isBookAppInstalled(book)') >= 0 && at('isBookAppInstalled(book)') < at('fillBetslipLink'));
 const notInstalled = chain.slice(at('installed === false'), at('if (link && link.trim())'));
-check('not installed → the App Store, whatever link we hold, then the site — never the app', notInstalled.includes('bookStoreUrl(book)') && notInstalled.includes('tryOpen(app.web)') && !notInstalled.includes('fillBetslipLink') && !notInstalled.includes('app.scheme'));
+check('not installed → the App Store, whatever link we hold, then the site — never the app', notInstalled.includes('bookStoreUrl(book, state)') && notInstalled.includes('tryOpen(app.web)') && !notInstalled.includes('fillBetslipLink') && !notInstalled.includes('app.scheme'));
 const isInstalled = chain.slice(at('if (installed === true) {'), at('// Unknown'));
 check('installed → the link first, then the app by its scheme, then the site — never the App Store', at('fillBetslipLink') < at('if (installed === true) {') && isInstalled.includes('app.scheme') && isInstalled.includes('tryOpen(app.web)') && !isInstalled.includes('bookStoreUrl'));
 // 2026-11-15 (Matt, BetMGM on build 14301: Safari). A scheme is opened from
@@ -111,7 +111,7 @@ check('a candidate scheme is opened nowhere else', (chain.match(/installedBookSc
 const pick = src.slice(src.indexOf('async function installedBookScheme'), src.indexOf('/**\n * Open a pre-filled betslip'));
 check('...and only one that answered yes is opened', pick.includes('answers.findIndex((a) => a === true)') && pick.includes('.catch(() => false)') && pick.includes('return i >= 0 ? schemes[i]! : null;'));
 const unknown = chain.slice(at('// Unknown'));
-check('unknown → link → store → site (the scheme is not tried: it cannot be queried)', unknown.includes('bookStoreUrl(book)') && unknown.indexOf('bookStoreUrl(book)') < unknown.indexOf('tryOpen(app.web)') && !unknown.includes('app.scheme'));
+check('unknown → link → store → site (the scheme is not tried: it cannot be queried)', unknown.includes('bookStoreUrl(book, state)') && unknown.indexOf('bookStoreUrl(book, state)') < unknown.indexOf('tryOpen(app.web)') && !unknown.includes('app.scheme'));
 check('the hook exists for surfaces that offer the store', read('src/hooks/useBookAppInstalled.ts').includes('isBookAppInstalled(book)'));
 for (const b of BETTABLE_BOOKS) {
   // The entry: from `  book: {` to its closing `},` (DraftKings spans lines).
@@ -153,9 +153,14 @@ for (const b of ['betrivers', 'hardrockbet', 'fanatics', 'ballybet', 'betparx', 
 }
 const viaApp = chain.slice(at('viaApp = claimed ?'), at('if (link && link.trim())'));
 check('iOS is asked to open the claimed link in the app only, after the not-installed exit and before anything else opens',
-  at('viaApp = claimed ?') > at('installed === false') && chain.includes('const claimed = appClaimedLink(book, link, getBettingState());') && viaApp.includes('openUniversalLinkOnly(claimed)'));
+  at('viaApp = claimed ?') > at('installed === false') && chain.includes('const claimed = appClaimedLink(book, link, state);') && viaApp.includes('openUniversalLinkOnly(claimed)'));
 check('...yes is done; no is the App Store only when nothing says the app is installed; cannot-ask falls through to the old chain',
-  viaApp.includes('if (viaApp === true) return true;') && /if \(viaApp === false && installed === null\) \{\s*const store = bookStoreUrl\(book\);/.test(viaApp) && !viaApp.includes('tryOpen(app.web)'));
+  viaApp.includes('if (viaApp === true) return true;') && /if \(viaApp === false && installed === null\) \{\s*const store = bookStoreUrl\(book, state\);/.test(viaApp) && !viaApp.includes('tryOpen(app.web)'));
+// Matt, 2026-11-15: "Which state do you bet in?" on the first tap with
+// Massachusetts set. getBettingState() is null until storage answers.
+check('the hand-off waits for the saved state; it never reads it before storage answers',
+  at('const state = await loadBettingState();') >= 0 && at('const state = await loadBettingState();') < at('const claimed = appClaimedLink')
+  && !chain.includes('getBettingState()') && !chain.includes('bookStoreUrl(book)') && !src.slice(src.indexOf('async function openThisBooksLinkOnly')).includes('getBettingState()'));
 // ── a hand-off that misses the app is written down ──────────────────────────
 // The function body only: the helpers after it have comments of their own.
 const exits = chain.slice(at('const went = '), at("/**\n * The book's app was opened by its scheme"));

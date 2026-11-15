@@ -133,12 +133,41 @@ jobs:
           if [ -z "$EXPO_TOKEN" ]; then
             echo "::error::EXPO_TOKEN secret is not set"; exit 1
           fi
+          # The app's settings (EXPO_PUBLIC_SUPABASE_URL and the rest) live in
+          # the EAS "production" environment, not in this repo. `eas build`
+          # loads them; a local `expo export` does not. From #1202 (2026-11-06)
+          # until 2026-11-15 every OTA was bundled without them, crashed at
+          # launch ("supabaseUrl is required"), and expo-updates rolled every
+          # phone back to the bundle inside its TestFlight build, silently: no
+          # OTA reached a phone in that time. So pull them first, and refuse to
+          # publish a bundle that does not carry them.
+          eas env:pull --environment production --non-interactive --path .env.local
+          SUPABASE_URL=$(sed -n 's/^EXPO_PUBLIC_SUPABASE_URL=//p' .env.local | tr -d "\"'" | tr -d '\r')
+          ANON_KEY=$(sed -n 's/^EXPO_PUBLIC_SUPABASE_ANON_KEY=//p' .env.local | tr -d "\"'" | tr -d '\r')
+          if [ -z "$SUPABASE_URL" ] || [ -z "$ANON_KEY" ]; then
+            echo "::error::EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY is missing from the EAS production environment. Nothing was published."
+            exit 1
+          fi
+          echo "::add-mask::$ANON_KEY"
+
           # Export first, then publish that directory. eas update's own bundling
           # does not leave the bundle and its source maps in dist/, so an upload
           # aimed at dist/ after a plain eas update warns and ships the update
           # unmapped (review on #1199). --skip-bundler publishes these files.
           npx expo export --source-maps --dump-assetmap --output-dir dist \
             --platform ios --platform android
+
+          # The bundle the phone will run must hold the Supabase URL. Hermes
+          # keeps string literals readable, so a byte search finds it.
+          for plat in ios android; do
+            BUNDLE=$(ls dist/_expo/static/js/$plat/*.hbc 2>/dev/null | head -1)
+            if [ -z "$BUNDLE" ] || ! grep -aqF "$SUPABASE_URL" "$BUNDLE"; then
+              echo "::error::The $plat bundle does not contain EXPO_PUBLIC_SUPABASE_URL, so it would crash at launch. Nothing was published."
+              exit 1
+            fi
+          done
+          echo "Both bundles carry the app's settings."
+
           eas update --skip-bundler --input-dir dist --channel production \
             --message "${{ inputs.message || format('master {0}', github.sha) }}" \
             --non-interactive

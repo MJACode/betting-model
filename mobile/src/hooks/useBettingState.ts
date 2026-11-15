@@ -100,6 +100,14 @@ async function save(v: string | null) {
   }
 }
 
+/** The state once storage has answered. A hand-off awaits this: the
+ *  synchronous read below is null on the first call after launch, which
+ *  told a member with Massachusetts set "Which state do you bet in?" on
+ *  their first tap (Matt, 2026-11-15). */
+export function loadBettingState(): Promise<string | null> {
+  return load();
+}
+
 /** Synchronous read for lib code. Null until storage has answered or when
  *  nothing is set — callers must treat both the same: "not set". */
 export function getBettingState(): string | null {
