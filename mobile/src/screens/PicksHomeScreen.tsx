@@ -1110,15 +1110,16 @@ export function PicksHomeScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={
                   betAll.picks.length === 0
-                    ? 'See why no signals are ready to bet'
+                    ? 'Bet all 0, none ready'
                     : `Bet all ${betAll.picks.length} ${sportDisplayName(sport)} signals as single bets`
                 }
+                accessibilityHint={betAll.picks.length === 0 ? 'Shows the skipped signals and why' : undefined}
                 style={({ pressed }) => [
                   styles.betAllButton,
                   pressed && styles.betAllPressed,
                 ]}
               >
-                <Text style={styles.betAllButtonText}>{betAll.picks.length === 0 ? 'See why' : `Bet all ${betAll.picks.length}`}</Text>
+                <Text style={styles.betAllButtonText}>{`Bet all ${betAll.picks.length}`}</Text>
               </Pressable>
             </View>
           ) : null
