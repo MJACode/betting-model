@@ -60,6 +60,15 @@ SITE_PAGES = (
 NEEDLES = ("betmgmsports", "sportsapp", "app-argument", "universal", "deeplink",
            "deep_link", "openApp", "open-app", "itms-apps", "apple-itunes-app")
 MAX_SCRIPTS = 12
+
+# 2026-11-15, job 1343046: sports.ma.betmgm.com redirects to www.ma.betmgm.com,
+# and /sportsapp/ is rewritten to /en/sports. iOS decides a universal link on
+# the host IN the link, so the canonical host's AASA file is the one to read.
+AASA_HOSTS = ("www.ma.betmgm.com", "www.nj.betmgm.com", "sports.ma.betmgm.com",
+              "www.betmgm.com", "sports.betmgm.com", "ma.betmgm.com")
+SELECTION = "options=6:49561-4449666-7262097&type=Single"
+AASA_PATHS = ("/en/sports?" + SELECTION, "/en/sportsapp/sports?" + SELECTION,
+              "/en/sports/events/1?" + SELECTION, "/en/sportsapp?" + SELECTION)
 SNIPPET = 140
 
 
@@ -230,6 +239,27 @@ def probe(get=_get) -> int:
                 for sch in schemes:
                     if "betmgm" in sch.lower():
                         summary.append(f"scheme in {urlsplit(src).path[-60:]}: {sch[:160]}")
+
+    print("\n=== 4. apple-app-site-association on the hosts BetMGM redirects to")
+    from scripts.book_app_links_probe import _fetch_aasa, link_verdict
+    aasa_get = lambda url: get(url)[:3]  # noqa: E731 - the AASA reader takes (status, body, err)
+    for host in AASA_HOSTS:
+        src, aasa, why = _fetch_aasa(aasa_get, host)
+        print(f"--- {host}")
+        if aasa is None:
+            print(f"no AASA: {why}")
+            summary.append(f"aasa {host}: none ({why[:120]})")
+            continue
+        reached = True
+        print(f"from {src}")
+        print(json.dumps(aasa.get("applinks"), indent=1)[:5000])
+        for path in AASA_PATHS:
+            url = f"https://{host}{path}"
+            claimed = [v for v in link_verdict(aasa, url) if v["claimed"]]
+            verdict = (f"CLAIMED by {claimed[0]['app_ids']} rule={json.dumps(claimed[0]['rule'])[:100]}"
+                       if claimed else "not claimed")
+            print(f"  {path.split('?')[0]}: {verdict}")
+            summary.append(f"aasa {host}{path.split('?')[0]}: {verdict}")
 
     print(SUMMARY_MARK)
     for line in summary:

@@ -3,7 +3,7 @@ import { Alert, AppState, Linking, Platform } from 'react-native';
 import { showToast } from '@/components/Toast';
 
 import { getBettingState, loadBettingState } from '@/hooks/useBettingState';
-import { APP_CLAIMING_BOOKS, appClaimedLink, fillBetslipLink, linkNeedsState } from '@/lib/betslipLinks';
+import { appClaimedLink, fillBetslipLink, linkNeedsState } from '@/lib/betslipLinks';
 import { noteHandoffMiss, type HandoffRoute } from '@/lib/handoffLog';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { openInAppAvailable, openUniversalLinkOnly } from '@/lib/openInApp';
@@ -250,10 +250,10 @@ export async function openBookBetslip(
   const claimed = appClaimedLink(book, link, state);
   let viaApp: boolean | null = null;
   // Every exit that is not "iOS opened the claimed link in the app" is
-  // written down (lib/handoffLog.ts), for a book whose app claims links.
+  // written down (lib/handoffLog.ts), for every book with an app entry.
   // `claimed` null is itself one of the causes, so it is logged too.
   const went = (route: HandoffRoute, ok: boolean, scheme?: string): boolean => {
-    if (APP_CLAIMING_BOOKS.includes(book) && Platform.OS === 'ios') {
+    if (BOOK_APPS[book] && Platform.OS === 'ios') {
       noteHandoffMiss({ book, route, installed, claimed, viaApp, moduleInBinary: openInAppAvailable, scheme });
     }
     // The app is open with nothing on its slip, and the button said the bet
@@ -310,8 +310,16 @@ export async function openBookBetslip(
     }
   }
 
+  // The app is installed and nothing above put the bet in it: open the app.
+  // Fanatics sends no betslip link at all, and this branch used to end on the
+  // book's website (Matt, 2026-11-15: "It opens the website. It should be App
+  // Store to download or the actual app if the user has it"). The verified
+  // scheme first, then the one that said the app is installed; the site only
+  // when neither opens.
   if (installed === true) {
     if (app.scheme && (await tryOpen(app.scheme, true))) return went('scheme', true, app.scheme);
+    const scheme = await installedBookScheme(book);
+    if (scheme && (await tryOpen(scheme, true))) return went('scheme', true, scheme);
     if (await tryOpen(app.web)) return went('web', true);
     return went('failed', couldNotOpen(book));
   }

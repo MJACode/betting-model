@@ -37,8 +37,18 @@ export function linkNeedsState(link: string | null | undefined): boolean {
  * Fill a betslip link's placeholders. Returns null when a placeholder cannot
  * be filled (no state set), so the caller never opens a template.
  */
+/** A betslip link that can be opened at all: a web link. The odds feed has
+ *  stored the literal "NaN" for Fanatics and betPARX. */
+export function isUsableBetslipLink(link: string | null | undefined): link is string {
+  return !!link && /^https?:\/\//i.test(link.trim());
+}
+
 export function fillBetslipLink(link: string, state: string | null): string | null {
   let out = link.trim();
+  // Not a web link at all: the odds feed has stored the literal "NaN" for
+  // Fanatics and betPARX. Treated as no link, so the chain goes on to the app
+  // or the App Store instead of trying to open it.
+  if (!isUsableBetslipLink(out)) return null;
   if (out.includes(STATE_PLACEHOLDER)) {
     if (!state) return null;
     out = out.split(STATE_PLACEHOLDER).join(state.toLowerCase());
