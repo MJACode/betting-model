@@ -49,3 +49,16 @@ def test_the_job_type_is_registered_and_takes_no_args():
     fn, validate = jq.JOBS["betmgm_app_link_probe"]
     assert fn is jq._job_betmgm_app_link_probe
     assert validate({}) == {}
+
+
+def test_the_redirect_hosts_aasa_is_read_and_judged(capsys):
+    aasa = {"applinks": {"details": [{"appIDs": ["CB3Y69STL7.com.playmgm.nj.sports2"],
+                                      "components": [{"/": "/en/sports"}]}]}}
+    def get(url):
+        if "app-site-association.cdn-apple.com/a/v1/www.ma.betmgm.com" in url:
+            return 200, json.dumps(aasa), None, url
+        return None, "", "ConnectionError: refused", url
+    assert probe.probe(get=get) == 0
+    out = capsys.readouterr().out
+    assert "aasa www.ma.betmgm.com/en/sports: CLAIMED by ['CB3Y69STL7.com.playmgm.nj.sports2']" in out
+    assert "aasa www.ma.betmgm.com/en/sportsapp/sports: not claimed" in out

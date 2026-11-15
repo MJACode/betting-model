@@ -1696,6 +1696,13 @@
     "args": {}
   },
   {
+    "key": "betmgm-app-link-probe-2026-11-15-www",
+    "job_type": "betmgm_app_link_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-15, 'Figure it out': job 1343046 showed sports.ma.betmgm.com redirects to www.ma.betmgm.com. Re-runs the probe with the AASA files of the www and bare hosts, to find the host and path the BetMGM app claims. Writes nothing, no Odds API credits.",
+    "args": {}
+  },
+  {
     "key": "betmgm-app-link-probe-2026-11-15",
     "job_type": "betmgm_app_link_probe",
     "requested_by": "matt",
