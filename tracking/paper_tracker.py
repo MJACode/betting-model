@@ -3155,6 +3155,89 @@ def _void_postponed_mlb_picks(conn: DBConnection, game_date: str,
     return voided
 
 
+# A BET is written for one start time (picks.game_time, never rewritten). When
+# the game's own start moves past this many hours from it, the game was
+# postponed and rescheduled under the SAME game_id -- ESPN keeps an NCAAB
+# event's id across a reschedule and so does its games row -- and the books
+# have voided the bet: Fanatics (house rules MA v.10) voids a postponed event
+# "unless the event is scheduled to start within 48 hours", and BetMGM (MGM
+# Springfield house rules, 2026-02-26) cancels basketball "not continued within
+# 48 hours after initial start date". Without this the pick grades on the
+# make-up game: Washington @ Utah, bet 2026-11-15 for that day, played
+# 2026-12-05 (pick 4498275). Inside 48 hours the books differ (Fanatics
+# basketball also needs a start "before midnight local time"), so a shorter
+# move is left to grade on the rescheduled game.
+_RESCHEDULED_VOID_HOURS = 48
+
+
+def _moved_hours(pick_time, pick_date, game_time, game_date) -> float | None:
+    """Hours between the start a pick was written for and its game's start
+    now, or None when neither pair can be compared. With no tip time on one
+    side the two ET dates stand in, counted as whole days less one, so a
+    date-only move counts only when it is certainly that far."""
+    def _parse(v):
+        s = str(v or "").strip()
+        if "T" not in s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    a, b = _parse(pick_time), _parse(game_time)
+    if a is not None and b is not None:
+        return abs((b - a).total_seconds()) / 3600.0
+    try:
+        days = abs((datetime.strptime(str(game_date)[:10], "%Y-%m-%d")
+                    - datetime.strptime(str(pick_date)[:10], "%Y-%m-%d")).days)
+    except (TypeError, ValueError):
+        return None
+    return max(days - 1, 0) * 24.0
+
+
+def _void_rescheduled_picks(conn: DBConnection, settled_at: str) -> int:
+    """
+    Settle NO_ACTION every unsettled BET whose game now starts more than
+    _RESCHEDULED_VOID_HOURS from the start the pick was written for. Any sport:
+    the rule is the books' and it reads only the pick and its games row. Runs
+    before the graders, so a rescheduled game's final never reaches the pick.
+    created_at, line, price and the publish lock are untouched. Returns the
+    number of picks settled.
+    """
+    rows = conn.execute("""
+        SELECT p.pick_id, p.game_time, p.game_date, g.commence_time, g.game_date
+          FROM picks p
+          JOIN games g ON g.game_id = p.game_id
+         WHERE p.signal_type = 'BET'
+           AND p.result IS NULL
+    """).fetchall()
+    voided = 0
+    for pick_id, pick_time, pick_date, game_time, game_date in rows:
+        hours = _moved_hours(pick_time, pick_date, game_time, game_date)
+        if hours is None or hours <= _RESCHEDULED_VOID_HOURS:
+            continue
+        was = pick_time or pick_date
+        now = game_time or game_date
+        conn.execute("""
+            UPDATE picks
+            SET result         = 'NO_ACTION',
+                profit_flat    = 0,
+                profit_kelly   = 0,
+                settled_at     = %s,
+                condition_note = COALESCE(condition_note || ' | ', '')
+                                 || %s
+            WHERE pick_id = %s
+              AND result IS NULL
+        """, (settled_at,
+              f"rescheduled: bet for {was}, game now {now} "
+              f"(over {_RESCHEDULED_VOID_HOURS}h) - the books void it",
+              pick_id))
+        voided += 1
+        logger.info(f"  pick {pick_id}: game moved {was} -> {now} → NO_ACTION")
+    return voided
+
+
 def _heal_stranded_mlb(conn: DBConnection, game_date: str,
                        settled_at: str) -> dict:
     """
@@ -3397,6 +3480,15 @@ def settle_picks(game_date: str = None) -> dict:
             except Exception as _exc:
                 logger.warning(f"postponed check {_d} failed: {_exc}")
         conn.commit()
+
+        # A game rescheduled under its own game_id (NCAAB keeps ESPN's event
+        # id) would otherwise grade on the make-up game. Before every grader.
+        try:
+            _void_rescheduled_picks(conn, settled_at)
+            conn.commit()
+        except Exception as _exc:
+            logger.warning(f"rescheduled-game check failed: {_exc}")
+            conn.rollback()
 
         # Reach past the fixed windows: old unscored dates that still carry a
         # BET, and scored games whose prop BETs have no box score to grade on.
