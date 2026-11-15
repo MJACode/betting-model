@@ -115,6 +115,7 @@ import {
   effectiveGameStateSelection,
   gameStateOf,
   gameStateOptionsFor,
+  toggleGameState,
   isGameStateSelected,
   type GameState,
 } from '@/lib/gameStateFilter';
@@ -548,12 +549,7 @@ export function PicksHomeScreen() {
     [pickedStates, gameStateOptions],
   );
   const toggleState = useCallback((state: GameState) => {
-    setPickedStates((prev) => {
-      const next = new Set(prev);
-      if (next.has(state)) next.delete(state);
-      else next.add(state);
-      return next;
-    });
+    setPickedStates((prev) => toggleGameState(prev, state));
   }, []);
   const clearStates = useCallback(() => setPickedStates(new Set()), []);
   // The "N/M" count's M: what the Status cut lets onto the board, so the
@@ -1170,6 +1166,8 @@ export function PicksHomeScreen() {
               emptiedByGames={emptiedByGames}
               gameSummary={gameFilterSummary(pickableGames, gamePicker.selected)}
               onClearGames={gamePicker.clear}
+              finishedHidden={activeItems.length === 0 && !selectedStates.has('final') ? finishedItems.length : 0}
+              onShowFinal={() => toggleState('final')}
             />
           )
         }
@@ -1253,6 +1251,8 @@ function EmptyForView({
   emptiedByGames,
   gameSummary,
   onClearGames,
+  finishedHidden,
+  onShowFinal,
 }: {
   view: PicksView;
   sport: string;
@@ -1264,7 +1264,22 @@ function EmptyForView({
   emptiedByGames: boolean;
   gameSummary: string;
   onClearGames: () => void;
+  /** Today's finished picks the default Status cut is hiding, when nothing
+   *  else is on the board. An empty board that is really "every game is
+   *  over" must say so, not "no picks yet" (UX review, 2026-11-15). */
+  finishedHidden: number;
+  onShowFinal: () => void;
 }) {
+  if (!hasAny && finishedHidden > 0) {
+    return (
+      <EmptyState
+        title={`Today’s ${sport} games are over`}
+        subtitle={`${finishedHidden} finished ${finishedHidden === 1 ? 'pick is' : 'picks are'} hidden. Show them to see how they did.`}
+        actionLabel="Show Final"
+        onAction={onShowFinal}
+      />
+    );
+  }
   if (hasAny && search) {
     return (
       <EmptyState

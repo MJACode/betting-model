@@ -58,8 +58,12 @@ export function gameStateOptionsFor(states: Iterable<GameState>): GameStateOptio
   }));
 }
 
+/** The board before any tap: everything still to play or in play. */
+export const DEFAULT_GAME_STATES: GameState[] = ['upcoming', 'live'];
+
 /** Is a pick in this state in the selection? Empty selection = every state
- *  except Final, which shows only when picked. */
+ *  except Final, which shows only when picked. The chips draw lit from this
+ *  too, so Not started and Live read as on by default (UX review). */
 export function isGameStateSelected(state: GameState, selected: Set<GameState>): boolean {
   if (selected.size === 0) return state !== 'final';
   return selected.has(state);
@@ -105,6 +109,20 @@ export function gameStateSummary(selected: Set<GameState>, options: GameStateOpt
   const shown = options.filter((o) => selected.has(o.state));
   const hasFinal = options.some((o) => o.state === 'final');
   if (selected.size === 0 || shown.length === 0) return hasFinal ? 'Final hidden' : 'All';
-  if (shown.length === options.length) return 'All';
+  // "All" only when nothing is held back. With Final picked the pill names
+  // every state, so removing it visibly takes the finished games away.
+  if (shown.length === options.length && !hasFinal) return 'All';
   return shown.map((o) => o.label).join(', ');
+}
+
+/**
+ * One chip tapped. From the default (empty) the tap starts from Not started +
+ * Live, so tapping Final ADDS today's finished games to the open board
+ * instead of replacing it, and tapping a lit Live chip takes Live away.
+ */
+export function toggleGameState(prev: Set<GameState>, state: GameState): Set<GameState> {
+  const next = new Set<GameState>(prev.size === 0 ? DEFAULT_GAME_STATES : prev);
+  if (next.has(state)) next.delete(state);
+  else next.add(state);
+  return next;
 }

@@ -57,6 +57,7 @@ import { dateFilterSummary, datesAreNarrowed, type DateOption } from '@/lib/date
 import {
   gameStateSummary,
   gameStatesAreNarrowed,
+  isGameStateSelected,
   type GameState,
   type GameStateOption,
 } from '@/lib/gameStateFilter';
@@ -397,7 +398,7 @@ export function PickFilters({
                   key={o.state}
                   label={o.label}
                   count={o.count}
-                  active={selectedGameStates.has(o.state)}
+                  active={isGameStateSelected(o.state, selectedGameStates)}
                   onPress={() => onToggleGameState!(o.state)}
                   accessibilityLabel={`${o.label}, ${o.count} ${itemNoun}${o.count === 1 ? '' : 's'}`}
                 />

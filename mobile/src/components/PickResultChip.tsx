@@ -1,23 +1,28 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { colors, font, radii } from '@/lib/theme';
+import { colors, font, radii, spacing } from '@/lib/theme';
 import type { PickResultView } from '@/lib/pickResult';
 
 /**
- * "W +0.91u" beside the FINAL pill on a graded BET. The wash and ink are the
- * results recap's (DailyResultsModal RESULT_STYLE, audit H2 contrast), so a W
- * here reads exactly like a W there. Spoken through the card's own label, so
- * this is hidden from VoiceOver.
+ * The W/L/P badge's ink and wash — one table for the results recap and the
+ * pick card, so the two can never drift (contrast, audit H2: 4.61 / 5.01 /
+ * above 9:1 on their washes).
  */
-const TONE = {
-  WIN: { color: colors.betInk, bg: colors.betSoft },
-  LOSS: { color: colors.avoidInk, bg: colors.avoidSoft },
-  PUSH: { color: colors.textSecondary, bg: colors.noneSoft },
-} as const;
+export const RESULT_TONE: Record<'WIN' | 'LOSS' | 'PUSH', { label: string; color: string; bg: string }> = {
+  WIN: { label: 'W', color: colors.betInk, bg: colors.betSoft },
+  LOSS: { label: 'L', color: colors.avoidInk, bg: colors.avoidSoft },
+  PUSH: { label: 'P', color: colors.textSecondary, bg: colors.noneSoft },
+};
 
+/**
+ * "W +0.91u" beside the FINAL pill on a graded BET. The wash and ink are the
+ * results recap's (RESULT_TONE, shared), and the size matches the status pill
+ * beside it: on a finished card the result is the point. Spoken through the
+ * card's own label, so this is hidden from VoiceOver.
+ */
 export function PickResultChip({ view }: { view: PickResultView }) {
-  const tone = TONE[view.result];
+  const tone = RESULT_TONE[view.result];
   return (
     <View
       style={[styles.chip, { backgroundColor: tone.bg }]}
@@ -33,13 +38,13 @@ export function PickResultChip({ view }: { view: PickResultView }) {
 
 const styles = StyleSheet.create({
   chip: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
     borderRadius: radii.pill,
     alignSelf: 'center',
   },
   text: {
-    fontSize: font.size.nano,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     fontVariant: ['tabular-nums'],
   },

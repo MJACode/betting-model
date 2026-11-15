@@ -613,6 +613,7 @@ export function PickCard({
   const cardLabel = signals
     ? signalsCardSpeech({
         verdict: signalsVerdict,
+        result: resultView?.spoken ?? null,
         bet: betHeadline,
         price: signalsPriceSpoken,
         reason: reasonLine,
@@ -625,7 +626,7 @@ export function PickCard({
         modelName: `${markedModel} model`,
         posted: timing?.label ?? null,
         paused: null,
-        gameStatus: gameStatus(game, liveState).kind !== 'pre' ? statusSpeech : null,
+        gameStatus: gameStatus(game, liveState).kind !== 'pre' ? baseStatusSpeech : null,
         sharp: sharp && !signalsMuted ? sharpScoreSpeech(sharp.score, sharp.band) : null,
         started: startedSpoken,
       })
@@ -1477,7 +1478,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    flexShrink: 0,
   },
   matchup: {
     // flex + truncation so a long matchup can never push the live score /

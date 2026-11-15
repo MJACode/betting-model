@@ -20,6 +20,7 @@ import { addDays, formatAmerican, labelWithoutStake } from '@/lib/format';
 import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { modelHistoryMark, modelLong, modelShort } from '@/lib/modelMeta';
 import { postedPickUnits } from '@/lib/thresholds';
+import { RESULT_TONE } from './PickResultChip';
 import { CalendarGrid } from '@/components/CalendarGrid';
 import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import {
@@ -558,13 +559,8 @@ function ModelRow({ model }: { model: ModelDayStats }) {
   );
 }
 
-const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }> = {
-  // The letter carries the result; the ink makes it readable on its wash
-  // (4.61 / 5.01 / 9.55:1 — the bright hues were 2.0–3.1:1; audit H2).
-  WIN: { label: 'W', color: colors.betInk, bg: colors.betSoft },
-  LOSS: { label: 'L', color: colors.avoidInk, bg: colors.avoidSoft },
-  PUSH: { label: 'P', color: colors.textSecondary, bg: colors.noneSoft },
-};
+// One W/L/P table, shared with the pick card's result chip.
+const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }> = RESULT_TONE;
 
 function PickRow({ pick }: { pick: Pick }) {
   const res = RESULT_STYLE[pick.result ?? ''] ?? RESULT_STYLE.PUSH!;

@@ -27,6 +27,7 @@ import {
   gameStateSummary,
   gameStatesAreNarrowed,
   isGameStateSelected,
+  toggleGameState,
   type GameState,
 } from '../src/lib/gameStateFilter';
 import { gameStatus } from '../src/lib/format';
@@ -95,8 +96,18 @@ check('default summary is All with no finished games',
 const finalOnly = new Set<GameState>(['final']);
 check('Final picked is narrowed, named', gameStatesAreNarrowed(finalOnly, three) && gameStateSummary(finalOnly, three) === 'Final');
 const everything = new Set<GameState>(['upcoming', 'live', 'final']);
-check('all three picked reads All and is a change from the default',
-  gameStateSummary(everything, three) === 'All' && gameStatesAreNarrowed(everything, three));
+check('all three picked names every state (never a bare "All" pill) and is a change',
+  gameStateSummary(everything, three) === 'Not started, Live, Final' && gameStatesAreNarrowed(everything, three),
+  gameStateSummary(everything, three));
+
+// 4c. Tapping from the default: Final ADDS to the open board, it does not
+// replace it; a lit Live chip tapped takes Live away (UX review, 2026-11-15).
+const addFinal = toggleGameState(none, 'final');
+check('Final from the default adds to Not started + Live',
+  addFinal.has('upcoming') && addFinal.has('live') && addFinal.has('final'), JSON.stringify([...addFinal]));
+const dropLive = toggleGameState(none, 'live');
+check('Live from the default removes Live', dropLive.has('upcoming') && !dropLive.has('live') && !dropLive.has('final'));
+check('the toggle never mutates its input', none.size === 0);
 check('Final picked when only finished games exist is still a change',
   gameStatesAreNarrowed(finalOnly, gameStateOptionsFor(['final'] as GameState[])));
 
@@ -117,6 +128,9 @@ const screen = read('src/screens/PicksHomeScreen.tsx');
 const filters = read('src/components/filters/PickFilters.tsx');
 check('screen applies the cut to the board', /isDateSelected\(d\.pick\.game_date, selectedDates\) && statusOk\(d\)/.test(screen));
 check('screen passes the cut to the sheet', screen.includes('onToggleGameState={toggleState}'));
+check('screen toggles through toggleGameState', screen.includes('toggleGameState(prev, state)'));
+check('chips draw lit from the effective selection', filters.includes('active={isGameStateSelected(o.state, selectedGameStates)}'));
+check('an all-over board offers Final, not "no picks yet"', screen.includes('actionLabel="Show Final"'));
 check('screen drops the cut on a sport switch', /setPickedStates\(new Set\(\)\);\s*\}, \[sport\]\)/.test(screen));
 check('sheet shows a pill and counts it', filters.includes("key: 'gameStates'") && filters.includes('(statesNarrowed ? 1 : 0)'));
 check('Clear all clears it', /onClearGameStates\?\.\(\);/.test(filters));
