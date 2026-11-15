@@ -11,10 +11,13 @@
  * keeps: `pre` is Not started, `live` is Live, and `final` / `ended` are both
  * Final (`ended` is a game whose clock window has run out with no score yet).
  *
- * EMPTY MEANS EVERY STATE, the Date and Games contract: a filter that starts
- * by hiding the board is a broken screen. NOT PERSISTED for the same reason:
- * the cut is part of the session's slate, and a stored selection would
- * silently filter tomorrow's board.
+ * EMPTY MEANS EVERY GAME STILL TO PLAY OR IN PLAY — Final is opt-in. Matt,
+ * 2026-11-15: *"it would be great to filter on completed games from the
+ * day"*, with finished games kept off the board unless Final is picked. So the
+ * default board is the one it has always been (finished games leave it), and
+ * the Final chip is how a reader brings today's finished picks back to see how
+ * they did. NOT PERSISTED: the cut is part of the session's slate, and a
+ * stored selection would silently filter tomorrow's board.
  */
 
 import type { GameStatus } from './format';
@@ -55,9 +58,11 @@ export function gameStateOptionsFor(states: Iterable<GameState>): GameStateOptio
   }));
 }
 
-/** Is a pick in this state in the selection? Empty selection = every state. */
+/** Is a pick in this state in the selection? Empty selection = every state
+ *  except Final, which shows only when picked. */
 export function isGameStateSelected(state: GameState, selected: Set<GameState>): boolean {
-  return selected.size === 0 || selected.has(state);
+  if (selected.size === 0) return state !== 'final';
+  return selected.has(state);
 }
 
 /**
@@ -76,19 +81,30 @@ export function effectiveGameStateSelection(
   return new Set<GameState>();
 }
 
-/** Is the cut narrowing THIS board? */
+/**
+ * Does the selection differ from the default on THIS board? The default is
+ * "everything but Final", so picking Final is a change (it adds cards), and so
+ * is dropping Not started or Live.
+ */
 export function gameStatesAreNarrowed(
   selected: Set<GameState>,
   options: GameStateOption[],
 ): boolean {
   if (selected.size === 0) return false;
-  const shown = options.filter((o) => selected.has(o.state)).length;
-  return shown > 0 && shown < options.length;
+  const shown = options.filter((o) => selected.has(o.state));
+  if (shown.length === 0) return false;
+  if (shown.some((o) => o.state === 'final')) return true;
+  const open = options.filter((o) => o.state !== 'final').length;
+  return shown.length < open;
 }
 
-/** "All" / "Live" / "Not started, Live" — summary and pill label. */
+/** "All" / "Live" / "Not started, Live" / "Final hidden" — summary and pill
+ *  label. The default names what it hides when the board has finished games,
+ *  so "All" never sits over a board that is leaving cards out. */
 export function gameStateSummary(selected: Set<GameState>, options: GameStateOption[]): string {
   const shown = options.filter((o) => selected.has(o.state));
-  if (selected.size === 0 || shown.length === 0 || shown.length === options.length) return 'All';
+  const hasFinal = options.some((o) => o.state === 'final');
+  if (selected.size === 0 || shown.length === 0) return hasFinal ? 'Final hidden' : 'All';
+  if (shown.length === options.length) return 'All';
   return shown.map((o) => o.label).join(', ');
 }

@@ -45,6 +45,8 @@ export interface TodayBoardPartial {
 export interface TodayBoardSnapshot<Row> {
   data: Row[];
   pausedData: Row[];
+  /** Today's finished games — the Status filter's Final chip only. */
+  finishedData: Row[];
   loading: boolean;
   /** At least one read has succeeded. A failure does not clear it. */
   loaded: boolean;
@@ -55,6 +57,7 @@ export interface TodayBoardSnapshot<Row> {
 export interface TodayBoardRead<Row> {
   data: Row[];
   pausedData: Row[];
+  finishedData: Row[];
   /** True only when the read succeeded. A failure must not replace the rows. */
   loaded: boolean;
   error: string | null;
@@ -161,6 +164,7 @@ export function emptyTodayBoard<Row>(): TodayBoardSnapshot<Row> {
   return {
     data: [],
     pausedData: [],
+    finishedData: [],
     loading: true,
     loaded: false,
     error: null,
@@ -263,6 +267,7 @@ export async function loadTodayBoard(date: string, force = false): Promise<void>
         result = {
           data: [],
           pausedData: [],
+          finishedData: [],
           loaded: false,
           error: isAbortError(e) ? null : errorText(e),
           partial: null,
@@ -273,6 +278,7 @@ export async function loadTodayBoard(date: string, force = false): Promise<void>
         slot.value = {
           data: result.data,
           pausedData: result.pausedData,
+          finishedData: result.finishedData,
           partial: result.partial,
           loaded: true,
           error: null,

@@ -135,6 +135,7 @@ import {
   isModelRetired,
   isUnlockedPreview,
   passesActionFilter,
+  passesRecordFilter,
   unitsFor,
   formatUnits,
 } from '@/lib/thresholds';
@@ -173,7 +174,7 @@ const PICKS_REASSURANCE = 'Nothing is wrong with your picks.';
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteProp<TabParamList, 'Picks'>>();
-  const { data: allData, pausedData, loading, loaded, error, partial, refresh, date } = useTodayPicks();
+  const { data: allData, pausedData, finishedData, loading, loaded, error, partial, refresh, date } = useTodayPicks();
   // The threshold store is a module. The fetch does not set React state.
   // This revision is what makes Signals re-run passesActionFilter when it lands.
   const thresholdsRevision = useThresholdsRevision();
@@ -447,6 +448,30 @@ export function PicksHomeScreen() {
   const activeItems: EnrichedPick[] =
     view === 'today' ? todayData : view === 'live' ? liveData : view === 'scoreboard' ? [] : live;
 
+  // Today's FINISHED games for this view (Matt, 2026-11-15: "filter on
+  // completed games from the day"). They join the board only through the
+  // Status filter's Final chip — the default selection leaves Final out — and
+  // never reach the header counts, the sport badges or Bet all, which read
+  // `live` / `allData` above. On Signals a graded pick is history, so it is
+  // cut by passesRecordFilter (the Record tab's test); an ungraded one by
+  // passesActionFilter, as on the open board. Live and Scores have none.
+  const finishedItems: EnrichedPick[] = useMemo(() => {
+    if (view !== 'today' && view !== 'signals') return [];
+    const mine = finishedData.filter((d) => d.pick.sport === sport);
+    if (view === 'today') return mine;
+    return mine.filter((d) => {
+      const graded = d.pick.result === 'WIN' || d.pick.result === 'LOSS' || d.pick.result === 'PUSH';
+      return (graded ? passesRecordFilter(d.pick) : passesActionFilter(d.pick)) && !isUnlockedPreview(d.pick);
+    });
+  }, [view, finishedData, sport, thresholdsRevision]);
+  // Everything the board can show on this view: the open board plus today's
+  // finished games. Every cut below runs on this; the Status cut decides
+  // whether the finished half is on screen.
+  const boardItems: EnrichedPick[] = useMemo(
+    () => (finishedItems.length > 0 ? [...activeItems, ...finishedItems] : activeItems),
+    [activeItems, finishedItems],
+  );
+
   // Restrict the filter's Market options to what is on screen — on EVERY view,
   // not just the signal ones. Today passed `undefined` here until 2026-09-09,
   // which PickFilters read as "offer all four categories", so the NFL board
@@ -455,8 +480,8 @@ export function PicksHomeScreen() {
   // NOT deduplicated: the filter counts picks per market to put a number on
   // each facet chip, and a Set of model ids counts models instead.
   const availableModelIds = useMemo(
-    () => activeItems.map((d) => d.pick.model_id),
-    [activeItems],
+    () => boardItems.map((d) => d.pick.model_id),
+    [boardItems],
   );
 
   // ── The GAMES cut, shared with the Stats tab ───────────────────────────────
@@ -477,8 +502,8 @@ export function PicksHomeScreen() {
     setPickedDates(new Set());
   }, [sport]);
   const dateOptions = useMemo(
-    () => dateOptionsFor(activeItems.map((d) => d.pick.game_date)),
-    [activeItems],
+    () => dateOptionsFor(boardItems.map((d) => d.pick.game_date)),
+    [boardItems],
   );
   // Resolved against THIS board, for display only: a day picked on Today that
   // Signals does not hold reads as all dates there rather than emptying Signals
@@ -509,11 +534,11 @@ export function PicksHomeScreen() {
   }, [sport]);
   const stateByItem = useMemo(() => {
     const out = new Map<EnrichedPick, GameState>();
-    for (const d of activeItems) {
+    for (const d of boardItems) {
       out.set(d, gameStateOf(gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null)));
     }
     return out;
-  }, [activeItems, liveStates]);
+  }, [boardItems, liveStates]);
   const gameStateOptions = useMemo(
     () => gameStateOptionsFor(stateByItem.values()),
     [stateByItem],
@@ -531,6 +556,14 @@ export function PicksHomeScreen() {
     });
   }, []);
   const clearStates = useCallback(() => setPickedStates(new Set()), []);
+  // The "N/M" count's M: what the Status cut lets onto the board, so the
+  // finished games the default hides do not read as filtered out.
+  const statusPoolSize = useMemo(() => {
+    const finalShown = selectedStates.has('final');
+    let n = 0;
+    for (const st of stateByItem.values()) if (finalShown || st !== 'final') n += 1;
+    return n;
+  }, [stateByItem, selectedStates]);
   const statusOk = useCallback(
     (d: EnrichedPick) => isGameStateSelected(stateByItem.get(d) ?? 'upcoming', selectedStates),
     [stateByItem, selectedStates],
@@ -538,8 +571,8 @@ export function PicksHomeScreen() {
 
   const datedItems = useMemo(
     () =>
-      activeItems.filter((d) => isDateSelected(d.pick.game_date, selectedDates) && statusOk(d)),
-    [activeItems, selectedDates, statusOk],
+      boardItems.filter((d) => isDateSelected(d.pick.game_date, selectedDates) && statusOk(d)),
+    [boardItems, selectedDates, statusOk],
   );
 
   // The Games list follows the Date cut, so picking Saturday lists Saturday's
@@ -550,7 +583,7 @@ export function PicksHomeScreen() {
   // stays listed, under its own day header.
   const pickableGames = useMemo(() => {
     const byId = new Map<string, NonNullable<EnrichedPick['game']>>();
-    for (const d of activeItems) {
+    for (const d of boardItems) {
       if (!d.game) continue;
       const keep =
         (isDateSelected(d.pick.game_date, selectedDates) && statusOk(d)) ||
@@ -558,7 +591,7 @@ export function PicksHomeScreen() {
       if (keep) byId.set(d.game.game_id, d.game);
     }
     return selectableGames(Array.from(byId.values()), sport, todayET());
-  }, [activeItems, selectedDates, statusOk, gamePicker.selected, sport]);
+  }, [boardItems, selectedDates, statusOk, gamePicker.selected, sport]);
   // THIS SCREEN DOES NOT PRUNE, AND MUST NOT. Pruning belongs to the one read
   // that sees the whole forward window — the Stats tab's slate read. The list
   // here is only the games with picks IN THIS VIEW (`activeItems` swaps with
@@ -659,11 +692,11 @@ export function PicksHomeScreen() {
   // board while Today still has picks — the generic "widen signals / thresholds"
   // empty state never named the shared cut, so the board read as broken.
   const emptiedByGames = useMemo(() => {
-    if (activeItems.length === 0 || filtered.length > 0 || gamePicker.selected.size === 0) {
+    if (boardItems.length === 0 || filtered.length > 0 || gamePicker.selected.size === 0) {
       return false;
     }
     return searchPicks(applyFilter(datedItems, displayFilter), search).length > 0;
-  }, [activeItems, datedItems, filtered.length, displayFilter, search, gamePicker.selected]);
+  }, [boardItems, datedItems, filtered.length, displayFilter, search, gamePicker.selected]);
 
   // Search alone emptied the board: the filters and Games still leave picks,
   // the query matched none of them. The generic "widen signals / thresholds"
@@ -708,7 +741,7 @@ export function PicksHomeScreen() {
     loadPresentation({
       loading: false,
       error: viewError,
-      hasData: view === 'live' ? liveData.length > 0 : activeItems.length > 0,
+      hasData: view === 'live' ? liveData.length > 0 : boardItems.length > 0,
     }).body === 'error';
   // Counts that were never loaded are unknown, not zero ("—", PATTERNS §F5):
   // a failed first load, and also everything BEFORE the first successful one
@@ -1020,7 +1053,7 @@ export function PicksHomeScreen() {
         </Pressable>
       ) : null}
 
-      {activeItems.length > 0 ? (
+      {boardItems.length > 0 ? (
         <PickFilters
           state={displayFilter}
           onChange={setFilter}
@@ -1030,7 +1063,7 @@ export function PicksHomeScreen() {
           search={search}
           onSearchChange={setSearch}
           totalShown={filtered.length}
-          totalAll={activeItems.length}
+          totalAll={statusPoolSize}
           availableModelIds={availableModelIds}
           games={pickableGames}
           selectedGames={gamePicker.selected}
