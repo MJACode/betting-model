@@ -1696,6 +1696,13 @@
     "args": {}
   },
   {
+    "key": "betmgm-app-link-probe-2026-11-15",
+    "job_type": "betmgm_app_link_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-15: the hand-off opens the BetMGM app but the bet is not on the slip; 'Figure it out'. Reads the App Store bundle ids for BetMGM, BetMGM's deep-link docs and its website's app handoff, from the worker (the sandbox cannot reach betmgm.com). Writes nothing, no Odds API credits.",
+    "args": {}
+  },
+  {
     "key": "nba-period-lines-and-results-2026-11-13",
     "job_type": "nba_quarters",
     "requested_by": "matt",

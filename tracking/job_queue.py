@@ -850,6 +850,16 @@ def _job_book_app_links_probe(**kw):
     return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
 
 
+def _job_betmgm_app_link_probe(**kw):
+    """BetMGM's App Store bundle ids, deep-link docs and website app handoff:
+    which link puts a bet on the app's slip. Writes nothing, no Odds API call
+    (scripts/betmgm_app_link_probe.py)."""
+    from scripts.betmgm_app_link_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.betmgm_app_link_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:3000] or "(no output)", "stdout": text[-60_000:]}
+
+
 def _validate_book_app_links_probe(args: dict) -> dict:
     if args:
         raise ValueError(f"unknown args {sorted(args)}; this job takes none")
@@ -2913,6 +2923,8 @@ JOBS = {
     # Where the Scoreboard splits can come from: DK Network + AN book ids. Free, writes nothing.
     "splits_source_probe": (_job_splits_source_probe, _validate_splits_source_probe),
     "book_app_links_probe": (_job_book_app_links_probe, _validate_book_app_links_probe),
+    # BetMGM: which link puts the bet on the app's slip. Free, writes nothing.
+    "betmgm_app_link_probe": (_job_betmgm_app_link_probe, _validate_book_app_links_probe),
     # ESPN NCAAB schedule and results backfill. Free, idempotent.
     "ncaab_history_import": (_job_ncaab_history_import,
                              _validate_ncaab_history_import),
