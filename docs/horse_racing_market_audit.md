@@ -68,9 +68,11 @@ A winner's odds × 10 over its HK$10 dividend has a median of 0.992: the odds
 are the dividend, rounded down.
 
 **Calibration.** The pool share against the win rate, by band: within 0.4
-points everywhere a sample is large (0.36 points under at 10–20%, 0.79 at
-20–30%, 2.08 at 40–50% on 623 runners). Longshots under 2% won 0.88% against
-1.16% said. A slight favourite-longshot lean, far smaller than the take.
+points in every band of 14,000+ runners. Shorter horses win a little more
+often than their pool share says (+0.36 points at 10–20%, +0.79 at 20–30%
+on 4,370 runners, +2.08 at 40–50% on 623), and longshots under 2% a little
+less (0.88% won against 1.16% said). A slight favourite-longshot lean, far
+smaller than the take.
 
 **Blind win bets at final odds** (each runner in the band, one unit to win):
 
