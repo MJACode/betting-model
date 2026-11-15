@@ -46,6 +46,9 @@ class _Conn:
         self.schools = set(schools)
 
     def execute(self, sql, params=None):
+        head = sql.strip().upper()
+        if head.startswith(("SAVEPOINT", "RELEASE SAVEPOINT", "ROLLBACK TO SAVEPOINT")):
+            return _Rows([])
         if "FROM ncaaf_teams" in sql:
             wanted = set(params[0])
             return _Rows([(s,) for s in sorted(self.schools & wanted)])
@@ -58,8 +61,28 @@ class _Conn:
         raise AssertionError(sql)
 
 
-class _Boom:
-    def execute(self, *args, **kwargs):
+class _Aborting:
+    """A SELECT failure aborts the transaction until ROLLBACK TO SAVEPOINT."""
+
+    def __init__(self):
+        self.aborted = False
+        self.rolled_back = False
+
+    def execute(self, sql, params=None):
+        head = sql.strip().upper()
+        if head.startswith("ROLLBACK TO SAVEPOINT"):
+            self.aborted = False
+            self.rolled_back = True
+            return _Rows([])
+        if head.startswith(("SAVEPOINT", "RELEASE SAVEPOINT")):
+            return _Rows([])
+        if sql.strip() == "SELECT 1":
+            if self.aborted:
+                raise RuntimeError("current transaction is aborted")
+            return _Rows([])
+        if self.aborted:
+            raise RuntimeError("current transaction is aborted")
+        self.aborted = True
         raise RuntimeError("schedule unreadable")
 
 
@@ -77,8 +100,8 @@ def _odds(gid, market="h2h"):
 def _schedule():
     return _Conn(
         games=[
-            (WOFFORD, "2026-11-21", "Ole Miss", "Wofford"),
-            (TENNESSEE, "2026-11-21", "Tennessee", "LSU"),
+            (WOFFORD, "2026-11-21", "Ole Miss", "Wofford", 12),
+            (TENNESSEE, "2026-11-21", "Tennessee", "LSU", 12),
         ],
         schools={"Ole Miss", "Wofford", "LSU", "Tennessee", "The Citadel",
                  "Texas A&M"},
@@ -99,10 +122,12 @@ def test_the_measured_lsu_mint_is_dropped_and_its_odds_with_it():
 
 def test_a_year_ahead_event_is_dropped_from_the_snapshot_that_carried_it():
     """355 days from 2025-12-01 to 2026-11-21. No schedule read required."""
+    conn = _Aborting()
     games = [_game(PHANTOM, "2026-11-21", "Ole Miss", "LSU")]
-    kept, odds = drop_ncaaf_unscheduled_opponents(
-        _Boom(), games, [_odds(PHANTOM)], observed_on="2025-12-01")
-    assert kept == [] and odds == []
+    kept, kept_odds = drop_ncaaf_unscheduled_opponents(
+        conn, games, [_odds(PHANTOM)], observed_on="2025-12-01")
+    assert kept == [] and kept_odds == []
+    assert not conn.aborted and not conn.rolled_back
     assert NCAAF_ODDS_MAX_LEAD_DAYS < 355
 
 
@@ -122,7 +147,7 @@ def test_an_unresolved_alias_still_mints():
     alias = "NCAAF_2026-10-17_citadel-bulldogs_texas-a-m"
     canon = "NCAAF_2026-10-17_the-citadel_texas-a-m"
     conn = _Conn(
-        [(canon, "2026-10-17", "Texas A&M", "The Citadel")],
+        [(canon, "2026-10-17", "Texas A&M", "The Citadel", 8)],
         {"The Citadel", "Texas A&M"},
     )
     games = [_game(alias, "2026-10-17", "Texas A&M", "Citadel Bulldogs")]
@@ -134,7 +159,7 @@ def test_an_unresolved_alias_still_mints():
 
 def test_the_same_game_id_is_an_update_not_a_second_row():
     conn = _Conn(
-        [(WOFFORD, "2026-11-21", "Ole Miss", "Wofford")],
+        [(WOFFORD, "2026-11-21", "Ole Miss", "Wofford", 12)],
         {"Ole Miss", "Wofford"},
     )
     games = [_game(WOFFORD, "2026-11-21", "Ole Miss", "Wofford")]
@@ -143,21 +168,76 @@ def test_the_same_game_id_is_an_update_not_a_second_row():
     assert [g["game_id"] for g in kept] == [WOFFORD]
 
 
-def test_a_schedule_read_failure_keeps_a_near_term_row():
+def test_a_stored_live_mint_does_not_block_the_schedule_game():
+    """week NULL is a mint. The odds upsert rewrites data_source to live
+    and leaves week, so week is what marks the schedule. While the LSU
+    mint is stored, the Wofford event must still be written."""
+    conn = _Conn(
+        [
+            (PHANTOM, "2026-11-21", "Ole Miss", "LSU", None),
+            (WOFFORD, "2026-11-21", "Ole Miss", "Wofford", 12),
+        ],
+        {"Ole Miss", "Wofford", "LSU"},
+    )
+    games = [
+        _game(WOFFORD, "2026-11-21", "Ole Miss", "Wofford"),
+        _game(PHANTOM, "2026-11-21", "Ole Miss", "LSU"),
+    ]
+    kept, odds = drop_ncaaf_unscheduled_opponents(
+        conn, games, [_odds(WOFFORD), _odds(PHANTOM)], observed_on="2026-11-15")
+    assert [g["game_id"] for g in kept] == [WOFFORD]
+    assert [o["game_id"] for o in odds] == [WOFFORD]
+
+
+def test_a_week_null_mint_alone_is_not_the_schedule():
+    conn = _Conn(
+        [(PHANTOM, "2026-11-21", "Ole Miss", "LSU", None)],
+        {"Ole Miss", "Wofford", "LSU"},
+    )
+    games = [_game(WOFFORD, "2026-11-21", "Ole Miss", "Wofford")]
+    kept, _odds = drop_ncaaf_unscheduled_opponents(
+        conn, games, [], observed_on="2026-11-15")
+    assert [g["game_id"] for g in kept] == [WOFFORD]
+
+
+def test_a_schedule_read_failure_keeps_a_near_term_row_and_clears_the_abort():
+    conn = _Aborting()
     games = [_game(PHANTOM, "2026-11-21", "Ole Miss", "LSU")]
     kept, _odds = drop_ncaaf_unscheduled_opponents(
-        _Boom(), games, [], observed_on="2026-11-15")
+        conn, games, [], observed_on="2026-11-15")
     assert kept == games
+    assert conn.rolled_back and not conn.aborted
+    conn.execute("SELECT 1")
+
+
+def test_the_lead_window_is_off_when_no_snapshot_date_is_passed():
+    """The live pass omits observed_on, so a line posted for next August
+    is not dropped on the way in."""
+    gid = "NCAAF_2027-08-30_wofford_ole-miss"
+    games = [_game(gid, "2027-08-30", "Ole Miss", "Wofford")]
+    kept, _odds = drop_ncaaf_unscheduled_opponents(
+        _Conn([], {"Ole Miss", "Wofford"}), games, [])
+    assert [g["game_id"] for g in kept] == [gid]
 
 
 def test_other_sports_are_not_filtered():
     games = [_game("MLB_2027-08-01_NYM_LAD", "2027-08-01", "LAD", "NYM", sport="MLB")]
     kept, _odds = drop_ncaaf_unscheduled_opponents(
-        _Boom(), games, [], observed_on="2026-11-15")
+        None, games, [], observed_on="2026-11-15")
     assert kept == games
 
 
-def test_every_games_writer_filters_before_the_upsert():
+def test_the_lead_window_is_historical_only():
+    hist = inspect.getsource(oi.run_historical_odds)
+    rng = inspect.getsource(oi.run_historical_odds_range)
+    live = inspect.getsource(oi.run_odds_ingestor)
+    pre = inspect.getsource(oi.fetch_pregame_rows)
+    assert "observed_on=snapshot_date" in hist
+    assert "observed_on=day.isoformat()" in rng
+    assert "observed_on" not in live
+    assert "observed_on" not in pre
+    script = Path("scripts/ncaaf_search/book_timing_snapshot.py").read_text(encoding="utf-8")
+    assert "observed_on=args.date" in script
     for fn in (oi.fetch_pregame_rows, oi.run_odds_ingestor,
                oi.run_historical_odds, oi.run_historical_odds_range):
         body = inspect.getsource(fn)

@@ -64,6 +64,14 @@ BEGIN
         IF to_regclass('public.' || tbl) IS NULL THEN
             CONTINUE;
         END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public'
+               AND table_name = tbl
+               AND column_name = 'game_id'
+        ) THEN
+            CONTINUE;
+        END IF;
         EXECUTE format('SELECT count(*) FROM %I WHERE game_id = $1', tbl)
             INTO n USING phantom;
         IF n > 0 THEN

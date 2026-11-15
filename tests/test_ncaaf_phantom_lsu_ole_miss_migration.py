@@ -50,6 +50,8 @@ def test_a_child_row_blocks_the_delete():
     keep its games row. Re-pointing LSU prices onto Wofford would price the
     wrong game. The pass then returns without deleting."""
     assert "SELECT count(*) FROM %I WHERE game_id = $1" in CODE
+    assert "information_schema.columns" in CODE
+    assert "column_name = 'game_id'" in CODE
     assert "'picks'" in CODE
     assert "'odds'" in CODE
     delete_at = CODE.index("DELETE FROM games")
