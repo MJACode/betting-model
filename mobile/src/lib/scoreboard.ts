@@ -20,6 +20,7 @@ import {
   isVersusSport,
   parseStamp,
 } from '@/lib/format';
+import { sportDisplayName } from '@/lib/liveSports';
 import { compactTeam, trueMinus } from '@/lib/signalsCard';
 
 /**
@@ -43,6 +44,23 @@ export const ESPN_LIVE_SPORTS: readonly string[] = ['NFL', 'NBA', 'NHL', 'NCAAB'
 
 /** Sports whose `games` row names a school, not a code. */
 const SCHOOL_SPORTS: ReadonlySet<string> = new Set(['NCAAB', 'NCAABW']);
+
+/** A school or a person: the disc is initials, so the name must stay on the row. */
+export function isNameSport(sport: string): boolean {
+  return SCHOOL_SPORTS.has(sport) || isVersusSport(sport);
+}
+
+/** Sports with a stored live feed. The rest go from Upcoming to Final. */
+function hasLiveFeed(sport: string): boolean {
+  return sport === 'MLB' || sport === 'NCAAF' || ESPN_LIVE_SPORTS.includes(sport);
+}
+
+/** "games", "fights", "matches" — one noun for the title and the nudge. */
+export function eventNoun(sport: string, n: number): string {
+  const one = sport === 'UFC' ? 'fight' : sport === 'ATP' || sport === 'WTA' ? 'match' : 'game';
+  if (n === 1) return one;
+  return one === 'match' ? 'matches' : `${one}s`;
+}
 
 /**
  * The chips to draw: sports with a game on the day, in SCOREBOARD_SPORTS
@@ -191,12 +209,30 @@ function plain(n: number | null): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
-/** "Florida Gulf Coast" → "FGC", "Kentucky" → "KENT". At most four letters. */
+/**
+ * "Florida Gulf Coast" → "FGC", "Kentucky" → "KENT", "St. John's" → "SJ",
+ * "UC Santa Barbara" → "UCSB" (a word already in capitals is kept whole).
+ * At most four letters.
+ */
 function initialsLabel(name: string): string {
-  const words = name.replace(/[^A-Za-z\s]/g, ' ').split(/\s+/).filter((w) => w.length > 0);
+  const words = name
+    .replace(/['’.]/g, '')
+    .replace(/[^A-Za-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
   if (words.length === 0) return name.slice(0, 4).toUpperCase();
   if (words.length === 1) return words[0].slice(0, 4).toUpperCase();
-  return words.map((w) => w[0]).join('').slice(0, 4).toUpperCase();
+  return words
+    .map((w) => (w.length > 1 && w.length <= 3 && w === w.toUpperCase() ? w : w[0]))
+    .join('')
+    .slice(0, 4)
+    .toUpperCase();
+}
+
+/** Two sides with the same initials: the first four letters of each last word. */
+function lastWordLabel(name: string): string {
+  const words = name.replace(/['’.]/g, '').replace(/[^A-Za-z\s]/g, ' ').split(/\s+/).filter((w) => w.length > 0);
+  return (words[words.length - 1] ?? name).slice(0, 4).toUpperCase();
 }
 
 export function discLabel(
@@ -217,8 +253,9 @@ export function discLabel(
 
 /**
  * The name beside the disc. A code sport repeats its code; a school keeps
- * its name; a fighter or tennis player is their last name ("Kayla
- * Harrison" → "Harrison").
+ * its name; a fighter or tennis player is "F. Lastname", everything after
+ * the first name kept ("Benoit Saint Denis" → "B. Saint Denis"), a
+ * Jr./Sr./II/III dropped ("Rodolfo Vieira Jr." → "R. Vieira").
  */
 export function sideName(
   name: string,
@@ -227,8 +264,10 @@ export function sideName(
 ): string {
   if (SCHOOL_SPORTS.has(sport)) return name;
   if (isVersusSport(sport)) {
-    const words = name.trim().split(/\s+/);
-    return words[words.length - 1] || name;
+    const words = name.trim().split(/\s+/).filter((w) => w.length > 0);
+    while (words.length > 2 && /^(jr|sr|ii|iii|iv)\.?$/i.test(words[words.length - 1])) words.pop();
+    if (words.length < 2) return name.trim();
+    return `${words[0][0].toUpperCase()}. ${words.slice(1).join(' ')}`;
   }
   return discLabel(name, sport, abbrevs);
 }
@@ -579,9 +618,17 @@ export function presentScoreboard(input: {
   const awayName = sideName(game.away_team, game.sport, input.abbrevs);
   const homeName = sideName(game.home_team, game.sport, input.abbrevs);
 
+  let awayDisc = discLabel(game.away_team, game.sport, input.abbrevs);
+  let homeDisc = discLabel(game.home_team, game.sport, input.abbrevs);
+  if (awayDisc === homeDisc && isNameSport(game.sport)) {
+    // "North Carolina" and "Northern Colorado" are both NC.
+    awayDisc = lastWordLabel(game.away_team);
+    homeDisc = lastWordLabel(game.home_team);
+  }
+
   const away: ScoreboardSide = {
     name: awayName,
-    disc: discLabel(game.away_team, game.sport, input.abbrevs),
+    disc: awayDisc,
     possession: poss === 'away',
     score: awayScoreText,
     scoreMuted: awayMuted,
@@ -593,7 +640,7 @@ export function presentScoreboard(input: {
   };
   const home: ScoreboardSide = {
     name: homeName,
-    disc: discLabel(game.home_team, game.sport, input.abbrevs),
+    disc: homeDisc,
     possession: poss === 'home',
     score: homeScoreText,
     scoreMuted: homeMuted,
@@ -614,7 +661,10 @@ export function presentScoreboard(input: {
     footerBadge = 'F';
     footerText = ot ? 'Final/OT' : 'Final';
   } else {
-    footerText = startedNoScore ? 'Started · no live score yet' : formatGameTimeET(game.commence_time);
+    // A sport with no live feed will never show one: say so, not "yet".
+    footerText = startedNoScore
+      ? hasLiveFeed(game.sport) ? 'Started · no live score yet' : 'Started · live scores not tracked'
+      : formatGameTimeET(game.commence_time);
   }
 
   const situation = phase === 'live' ? feed?.situation ?? null : null;
@@ -681,6 +731,7 @@ export function nextSlateText(
 export function scoreboardSwitchLine(
   counts: Readonly<Record<string, number>>,
   sport: string,
+  dayPhrase = 'today',
 ): string | null {
   let best: string | null = null;
   let n = 0;
@@ -690,8 +741,7 @@ export function scoreboardSwitchLine(
     n = count;
   }
   if (!best || n === 0) return null;
-  const games = n === 1 ? 'game' : 'games';
-  return `Or switch sport above — ${best} has ${n} ${games} today.`;
+  return `Or switch sport above — ${sportDisplayName(best)} has ${n} ${eventNoun(best, n)} ${dayPhrase}.`;
 }
 
 export function movementText(

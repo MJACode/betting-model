@@ -22,6 +22,7 @@ import {
   SCOREBOARD_SPORTS,
   nextSlateText,
   scoreboardChipSports,
+  scoreboardSwitchLine,
   scoreboardMarketsFor,
   type ScoreboardGame,
 } from '../src/lib/scoreboard';
@@ -337,8 +338,8 @@ const fight = presentScoreboard({
 check('a UFC final reads W and L, not 1 and 0',
   fight.phase === 'final' && fight.home.score === 'W' && fight.away.score === 'L'
   && fight.away.scoreMuted && !fight.home.scoreMuted);
-check('a fighter is initials in the disc and a last name beside it',
-  fight.home.disc === 'KH' && fight.home.name === 'Harrison');
+check('a fighter is initials in the disc and "F. Lastname" beside it',
+  fight.home.disc === 'KH' && fight.home.name === 'K. Harrison');
 check('a UFC matchup is spoken as versus, and the winner is named',
   fight.accessibilityLabel.startsWith('Amanda Nunes versus Kayla Harrison, final, Kayla Harrison won'));
 const draw = presentScoreboard({
@@ -351,9 +352,33 @@ check('UFC has no Spread tab and opens on the moneyline',
   && scoreboardMarketsFor('NCAAB').join(',') === 'spreads,totals,h2h');
 check('tennis next-slate text says vs with last names',
   (nextSlateText({ sport: 'WTA', away_team: 'Mirra Andreeva', home_team: 'Elina Svitolina', commence_time: null }) ?? '')
-    === 'Andreeva vs Svitolina');
+    === 'M. Andreeva vs E. Svitolina');
 check('a code sport is unchanged',
   presentScoreboard({ game: game(), pregame: [], inplay: [], feed: null }).home.disc === 'ATL');
+
+const ufcName = (n: string) => presentScoreboard({
+  game: game({ sport: 'UFC', away_team: n, home_team: 'Ciryl Gane' }), pregame: [], inplay: [], feed: null,
+}).away.name;
+check('a suffix is not the last name', ufcName('Rodolfo Vieira Jr.') === 'R. Vieira');
+check('a compound surname is kept whole', ufcName('Benoit Saint Denis') === 'B. Saint Denis');
+const ncaab = (away: string, home: string) => presentScoreboard({
+  game: game({ sport: 'NCAAB', away_team: away, home_team: home }), pregame: [], inplay: [], feed: null,
+});
+check('an apostrophe is not a word break', ncaab("St. John's", 'Kentucky').away.disc === 'SJ');
+check('a short capitals word is kept whole', ncaab('UC Santa Barbara', 'Kentucky').away.disc === 'UCSB');
+const clash = ncaab('North Carolina', 'Northern Colorado');
+check('two sides with the same initials fall back to their last word',
+  clash.away.disc === 'CARO' && clash.home.disc === 'COLO');
+const tennisStarted = presentScoreboard({
+  game: game({ sport: 'ATP', away_team: 'Arthur Fils', home_team: 'Ben Shelton' }),
+  pregame: [], inplay: [], feed: null, now: Date.parse('2026-01-01T00:00:00Z'),
+});
+check('a sport with no live feed does not promise a score "yet"',
+  tennisStarted.footerText === 'Started · live scores not tracked');
+check('the nudge names the day, the league and its noun',
+  scoreboardSwitchLine({ EUROLEAGUE: 5, UFC: 3 }, 'NFL', 'tomorrow')
+    === 'Or switch sport above — EuroLeague has 5 games tomorrow.'
+  && scoreboardSwitchLine({ UFC: 1 }, 'NFL') === 'Or switch sport above — UFC has 1 fight today.');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -28,6 +28,8 @@ import {
   orderScoreboard,
   pctText,
   presentScoreboard,
+  eventNoun,
+  isNameSport,
   scoreboardChipSports,
   scoreboardMarketLabel,
   scoreboardMarketsFor,
@@ -148,7 +150,15 @@ export function ScoreboardBoard({
     return out;
   }, [dayGames]);
   // Only sports with a game on the day, plus the open one (Matt, 2026-11-15).
-  const chipSports = useMemo(() => scoreboardChipSports(counts, sport), [counts, sport]);
+  // While a new day loads, `counts` is empty: keep the last row of chips
+  // rather than collapse it to the open sport and expand again.
+  const lastChips = useRef<ScoreboardSport[]>([]);
+  const chipSports = useMemo(() => {
+    const next = scoreboardChipSports(counts, sport);
+    if (loading && next.length <= 1 && lastChips.current.includes(sport)) return lastChips.current;
+    lastChips.current = next;
+    return next;
+  }, [counts, sport, loading]);
   // The board opens on NFL. On a day with no game in the open sport, move
   // to the first sport that has one, until the user picks a chip themselves.
   const userPicked = useRef(false);
@@ -193,7 +203,8 @@ export function ScoreboardBoard({
   // A narrow phone or a large text size leaves no room for the name beside
   // the disc; the disc already carries the team (UX review, 2026-10-29).
   const { width: screenWidth, fontScale } = useWindowDimensions();
-  const showName = !showSplits || (screenWidth >= 360 && fontScale <= 1.3);
+  // A school or a person's disc is initials only: keep the name, truncated.
+  const showName = isNameSport(sport) || !showSplits || (screenWidth >= 360 && fontScale <= 1.3);
 
   const refresh = () => {
     setPulling(true);
@@ -204,18 +215,20 @@ export function ScoreboardBoard({
     ? dayWord.toLowerCase()
     : `on ${dayWord}`;
   const sportName = sportDisplayName(sport);
-  const emptyTitle = `No ${sportName} ${sport === 'UFC' ? 'fights' : sport === 'ATP' || sport === 'WTA' ? 'matches' : 'games'} ${dayPhrase}`;
+  const emptyTitle = `No ${sportName} ${eventNoun(sport, 0)} ${dayPhrase}`;
   const next = nextSlateText(nextGame, abbrevs);
   const emptyBody = next ? `Next slate: ${next}` : 'Games show up here once they’re on the board.';
   const emptyAction = nextGame && nextGame.game_date !== date
     ? `See ${dayLabelET(nextGame.game_date, today)}`
     : null;
-  const nudge = (counts[sport] ?? 0) === 0 ? scoreboardSwitchLine(counts, sport) : null;
+  const nudge = (counts[sport] ?? 0) === 0 ? scoreboardSwitchLine(counts, sport, dayPhrase) : null;
   const ncaafNote = sport === 'NCAAF' && ncaafUnavailable
     ? 'Live NCAAF scores aren’t available in this build yet.'
     : ESPN_LIVE_SPORTS.includes(sport) && liveScoresUnavailable
       ? `Live ${sportName} scores aren’t available yet. Finals show once stored.`
-      : null;
+      : sport === 'ATP' || sport === 'WTA'
+        ? 'Tennis scores and DraftKings lines aren’t stored yet.'
+        : null;
 
   return (
     <View style={styles.fill}>
@@ -503,8 +516,8 @@ function GameCard({
       <SideRow card={card} side="away" ink={ink} market={market} split={split.away} showSplits={showSplits} showName={showName} />
       <SideRow card={card} side="home" ink={ink} market={market} split={split.home} showSplits={showSplits} showName={showName} />
       {card.showMl && market !== 'h2h' ? (
-        <Text style={styles.mlLine}>
-          ML  {card.away.name} {card.away.ml} · {card.home.name} {card.home.ml}
+        <Text style={styles.mlLine} numberOfLines={1}>
+          ML  {isNameSport(card.sport) ? card.away.disc : card.away.name} {card.away.ml} · {isNameSport(card.sport) ? card.home.disc : card.home.name} {card.home.ml}
         </Text>
       ) : null}
       {card.situation ? <Text style={styles.situation}>{card.situation}</Text> : null}
