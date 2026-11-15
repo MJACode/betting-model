@@ -247,6 +247,81 @@ def test_no_statsapi_means_no_void(raw, conn, monkeypatch):
     assert pt._void_postponed_mlb_picks(conn, "2026-04-16", "TS", today="2026-09-07") == 0
 
 
+# ── a game rescheduled under its own game_id ─────────────────────────────────
+# Washington @ Utah (NCAAB): Utah ML was bet at 10:05 ET on 2026-11-15 for a
+# noon MT tip that day; the game was moved to 2026-12-05 and keeps its game_id.
+# Before the fix its final on 12-05 would have graded the pick, which every
+# book voided.
+
+WU = "NCAAB_2026-11-14_washington_utah"
+
+
+def _moved_bet(raw, *, bet_for="2026-11-15T19:00:00Z", bet_date="2026-11-15",
+               now="2026-12-06T00:00:00Z", now_date="2026-12-05", signal="BET",
+               result=None):
+    raw.execute("""INSERT INTO games (game_id, sport, season, game_date, home_team,
+                   away_team, commence_time) VALUES (?,?,?,?,?,?,?)""",
+                (WU, "NCAAB", 2027, now_date, "Utah", "Washington", now))
+    pid = _pick(raw, WU, bet_date, "ncaab_moneyline_own_spread", sport="NCAAB",
+                signal=signal, result=result, odds=-135.0)
+    raw.execute("UPDATE picks SET game_time = ? WHERE pick_id = ?", (bet_for, pid))
+    return pid
+
+
+def test_a_bet_whose_game_moved_weeks_settles_no_action(raw, conn):
+    pid = _moved_bet(raw)
+    assert pt._void_rescheduled_picks(conn, "TS") == 1
+    result, flat, kelly, at, note = raw.execute(
+        "SELECT result, profit_flat, profit_kelly, settled_at, condition_note "
+        "FROM picks WHERE pick_id = ?", (pid,)).fetchone()
+    assert (result, flat, kelly, at) == ("NO_ACTION", 0, 0, "TS")
+    assert "rescheduled" in note and "2026-11-15T19:00:00Z" in note
+    # and the make-up game's final can no longer reach it
+    raw.execute("UPDATE games SET home_score = 80, away_score = 70, home_win = 1 "
+                "WHERE game_id = ?", (WU,))
+    pt._settle_game_picks(conn, "2026-11-15", "LATER")
+    assert raw.execute("SELECT result, settled_at FROM picks WHERE pick_id = ?",
+                       (pid,)).fetchone() == ("NO_ACTION", "TS")
+    assert pt._void_rescheduled_picks(conn, "AGAIN") == 0      # idempotent
+
+
+def test_a_move_inside_48_hours_still_grades(raw, conn):
+    """The first move, Saturday 5pm MT to Sunday noon MT, is 19 hours: both
+    books' 48-hour rules keep the bet in action."""
+    pid = _moved_bet(raw, bet_for="2026-11-15T00:00:00Z", bet_date="2026-11-14",
+                     now="2026-11-15T19:00:00Z", now_date="2026-11-15")
+    assert pt._void_rescheduled_picks(conn, "TS") == 0
+    assert raw.execute("SELECT result FROM picks WHERE pick_id = ?", (pid,)).fetchone()[0] is None
+
+
+def test_with_no_tip_time_the_dates_decide_and_only_past_doubt(raw, conn):
+    assert pt._moved_hours(None, "2026-11-15", "2026-12-06T00:00:00Z", "2026-12-05") > 48
+    assert pt._moved_hours("2026-11-15T19:00:00Z", "2026-11-15", None, "2026-11-17") == 24.0
+    assert pt._moved_hours("2026-11-15T19:00:00Z", "2026-11-15", None, "2026-11-18") == 48.0
+    assert pt._moved_hours(None, "2026-11-15", None, "2026-11-19") == 72.0
+    assert pt._moved_hours(None, None, None, None) is None
+    pid = _moved_bet(raw, now=None, now_date="2026-11-17")
+    assert pt._void_rescheduled_picks(conn, "TS") == 0
+    assert raw.execute("SELECT result FROM picks WHERE pick_id = ?", (pid,)).fetchone()[0] is None
+
+
+def test_only_unsettled_bets_are_touched(raw, conn):
+    pid = _moved_bet(raw, signal="NONE")
+    other = _pick(raw, WU, "2026-11-15", "ncaab_spread_market", sport="NCAAB", result="WIN")
+    raw.execute("UPDATE picks SET game_time = '2026-11-15T19:00:00Z' WHERE pick_id = ?", (other,))
+    assert pt._void_rescheduled_picks(conn, "TS") == 0
+    assert raw.execute("SELECT result FROM picks WHERE pick_id IN (?, ?) ORDER BY pick_id",
+                       (pid, other)).fetchall() == [(None,), ("WIN",)]
+
+
+def test_the_rescheduled_check_runs_before_every_grader():
+    src = Path(pt.__file__).read_text(encoding="utf-8")
+    body = src[src.index("def settle_picks("):src.index("def print_performance_summary(")]
+    at = body.index("_void_rescheduled_picks(conn, settled_at)")
+    assert at < body.index("_settle_game_picks_window(conn, game_date, settled_at)")
+    assert at < body.index("_settle_prop_picks_window(conn, game_date, settled_at)")
+
+
 # ── the heal is wired into settle_picks ──────────────────────────────────────
 
 def test_settle_picks_calls_the_heal_and_the_ncaaf_mirror():

@@ -80,6 +80,17 @@ ET also fetches the previous date, the board ESPN files it on
 ESPN changed something. The daily run_schedule_refresh makes 2 team calls and
 one call per day for today and the next SCHEDULE_DAYS days.
 
+A GAME THAT LEAVES ITS DATE'S BOARD. A stored, unscored event a date's board
+no longer lists has been moved, and ESPN's board for the new date may be past
+any window here: Washington @ Utah (event 401921760) was moved on 2026-11-14
+from that night to 2026-11-15, then to 2026-12-05, 20 days out. The 15th's
+board dropped it, the schedule refresh reached only the 29th, so the row sat on
+the 15th, started and unscored, and a moneyline BET was written and posted for
+a game that was not played. So every board read also asks ESPN's summary for
+each such event by id (one call per moved game, none on a normal day) and
+applies what it says: the new date, the new tip, the new status. A tip before
+EARLY_TIP_HOUR_ET is filed on the previous board and is not looked up.
+
 Usage:
     python -m data.ingestors.ncaab_espn_ingestor --teams
     python -m data.ingestors.ncaab_espn_ingestor --schedule [--date D] [--days 14]
@@ -102,6 +113,7 @@ from data.ingestors import ncaab_teams as nt
 
 _BASE = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball"
 SCOREBOARD_URL = f"{_BASE}/scoreboard"
+SUMMARY_URL = f"{_BASE}/summary"
 TEAMS_URL = f"{_BASE}/teams"
 GROUPS_URL = f"{_BASE}/groups"
 D1_GROUP = "50"
@@ -159,6 +171,28 @@ def fetch_scoreboard(day: str, get_json=None) -> dict:
     get_json = get_json or _http_get_json
     return get_json(SCOREBOARD_URL, {"dates": day.replace("-", ""),
                                      "groups": D1_GROUP, "limit": SCOREBOARD_LIMIT})
+
+
+def fetch_event(event_id: int, get_json=None) -> dict:
+    """ESPN's summary for one event: where it is now, whatever date that is."""
+    get_json = get_json or _http_get_json
+    return get_json(SUMMARY_URL, {"event": str(event_id)})
+
+
+def event_from_summary(doc: dict) -> dict | None:
+    """A summary's header in the scoreboard event shape parse_event reads.
+
+    The venue is left out: the summary's carries no `indoor`, and a moved game
+    keeps the venue already stored (_one_event falls back to it)."""
+    head = doc.get("header") or {}
+    comp = dict(((head.get("competitions") or [{}])[0]) or {})
+    if not comp or head.get("id") is None:
+        return None
+    if "timeValid" not in comp and head.get("timeValid") is not None:
+        comp["timeValid"] = head["timeValid"]
+    comp.pop("venue", None)
+    return {"id": head.get("id"), "date": comp.get("date"),
+            "season": head.get("season") or {}, "competitions": [comp]}
 
 
 # ── parsing ──────────────────────────────────────────────────────────────────
@@ -466,7 +500,8 @@ def new_totals() -> dict:
             "games_inserted": 0, "games_updated": 0, "unchanged": 0, "moved": 0,
             "scores_filled": 0, "score_conflicts": 0, "postponed": 0,
             "postponed_unseen": 0, "teams_changed": 0, "id_collisions": 0,
-            "teams_added": 0, "venues_written": 0, "errors": 0, "failed": []}
+            "teams_added": 0, "venues_written": 0, "off_board": 0,
+            "off_board_unresolved": 0, "errors": 0, "failed": []}
 
 
 def _merge(into: dict, day: dict) -> None:
@@ -552,6 +587,7 @@ def ingest_day(conn, day: str, *, get_json=None, ensure: bool = True,
             totals["no_teams"] += 1
             continue
         parsed.append(p)
+    parsed.extend(_moved_off_board(conn, day, parsed, get_json, totals))
     totals["events"] = len(parsed)
     if not parsed:
         return totals
@@ -597,6 +633,54 @@ def ingest_day(conn, day: str, *, get_json=None, ensure: bool = True,
         if registry is not None:
             registry.update(added)
     return totals
+
+
+def _off_board_ids(conn, day: str, on_board: set[int]) -> list[int]:
+    """Stored events dated `day`, games row unscored, that the board did not
+    list. A tip before EARLY_TIP_HOUR_ET ET is on the previous board, so it is
+    not missing from this one."""
+    rows = conn.execute(
+        "SELECT e.espn_event_id, g.commence_time FROM ncaab_events e "
+        "JOIN games g ON g.game_id = e.game_id "
+        "WHERE e.game_date = %s AND (g.home_score IS NULL OR g.away_score IS NULL)",
+        (day,)).fetchall()
+    out = []
+    for eid, commence in rows:
+        if int(eid) in on_board:
+            continue
+        start = _ts(commence)
+        if start is not None and start.astimezone(_ET).hour < EARLY_TIP_HOUR_ET:
+            continue
+        out.append(int(eid))
+    return sorted(out)
+
+
+def _moved_off_board(conn, day: str, parsed: list[dict], get_json, totals: dict) -> list[dict]:
+    """Each stored event this board dropped, as its summary says it is now
+    (module docstring, A GAME THAT LEAVES ITS DATE'S BOARD). One that cannot
+    be read is logged and counted, and the rest of the day still runs."""
+    ids = _off_board_ids(conn, day, {p["espn_event_id"] for p in parsed})
+    conn.rollback()                      # no read snapshot held while ESPN answers
+    found = []
+    for eid in ids:
+        totals["off_board"] += 1
+        try:
+            ev = event_from_summary(fetch_event(eid, get_json))
+        except Exception as exc:                          # noqa: BLE001
+            totals["off_board_unresolved"] += 1
+            logger.warning(f"NCAAB ESPN: event {eid} is off the {day} board and its "
+                           f"summary failed: {exc}")
+            continue
+        p = parse_event(ev) if ev else None
+        if p is None or p["espn_event_id"] != eid:
+            totals["off_board_unresolved"] += 1
+            logger.warning(f"NCAAB ESPN: event {eid} is off the {day} board and its "
+                           f"summary has no usable event")
+            continue
+        logger.info(f"NCAAB ESPN: event {eid} is off the {day} board; ESPN now has it "
+                    f"on {p['game_date']} ({p['status']})")
+        found.append(p)
+    return found
 
 
 def _write_venues(conn, venues: dict[int, dict]) -> int:
