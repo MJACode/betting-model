@@ -247,7 +247,11 @@ Bacon-Shone discount (exponent 0.76) moves the bands and not the result
 **A decidable place rule**: Harville calibrated on 2020–2022 (a logistic on
 its log-odds, the field size and the number of places), times a place BSP
 predicted from the same scheduled-start prices on the same years, graded on
-2023–2026 at the place BSP, net:
+2023–2026 at the place BSP, net. One input is not from the decision moment:
+the number of places is read from the count of place winners, and only races
+with 2 or 3 are kept, so a race with a dead heat for the last place drops
+out. The place terms are set before the race, so this changes which races
+are graded, not what the rule could know.
 
 | Predicted EV | Bets | Units | Return [95%] | Years positive |
 |---|---:|---:|---|---|
@@ -299,8 +303,9 @@ not in the snapshot. **Null.**
 ## 5. Mechanisms, and the stuck ladder
 
 The skill asks for three mechanisms of our own per market before a null, and
-every rung of its stuck ladder. Each mechanism below was written before its
-result was read.
+every rung of its stuck ladder. Several of the mechanisms below were named
+after the baseline tables were on screen, so they are the search's record,
+not pre-registered hypotheses.
 
 **Win, Hong Kong pools.**
 1. *Happy Valley's smaller night pools carry more longshot bias.* Venue
@@ -319,8 +324,11 @@ result was read.
 2. *Short horses are over-bet to place* (the Harville bias, inverted). The
    place pool already pays them less: the calibrated rule's bets lose most
    where Harville over-rates them. Null.
-3. *The place pool at the 7-runner boundary* (3 places paid from 7). Not run
-   in Hong Kong; on the exchange the field-size split is null. Frontier.
+3. *The place pool at the 7-runner boundary* (3 places paid from 7 runners,
+   2 below, so a 7-runner field is the most generous contract). Blind place
+   bets at final place odds by field size: every size loses −16% to −26%;
+   7 runners −19.0% [−24.7, −13.4] on 173 bets (`hk_study.py`, "by field
+   size"). Hong Kong runs few small fields (most are 12 or 14). Null.
 
 **Win, the exchange.**
 1. *The favourite is cheap at small tracks*, where fewer informed bettors

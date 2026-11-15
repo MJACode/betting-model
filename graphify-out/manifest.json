@@ -1230,9 +1230,9 @@
     "semantic_hash": ""
   },
   "jobs/declared_jobs.json": {
-    "mtime": 1794773954.6572337,
-    "seen": 1794777127.681483,
-    "ast_hash": "19d562bf72470d5be68f677d32516f0c",
+    "mtime": 1794777347.2477334,
+    "seen": 1794777869.2057266,
+    "ast_hash": "55eeca6a6c420a0d2f50ff9037d6a37a",
     "semantic_hash": ""
   },
   "mobile/App.tsx": {
@@ -7434,9 +7434,9 @@
     "semantic_hash": ""
   },
   "tracking/job_queue.py": {
-    "mtime": 1794773954.822721,
-    "seen": 1794777127.6923378,
-    "ast_hash": "c4021ba81b2b264b6e3661681bd199de",
+    "mtime": 1794777347.2579799,
+    "seen": 1794777869.2165313,
+    "ast_hash": "589b007f839adaced10ff778862503d2",
     "semantic_hash": ""
   },
   "tracking/live_calibration.py": {
@@ -14286,9 +14286,9 @@
     "semantic_hash": ""
   },
   ".claude/skills/league-models/references/learning-log.md": {
-    "mtime": 1794776812.478554,
-    "seen": 1794777127.6924424,
-    "ast_hash": "5f913e9e1ca15233b2b0621295e0a40a",
+    "mtime": 1794777406.874893,
+    "seen": 1794777869.2166395,
+    "ast_hash": "5744ad6c6a4892f66587b56d3eb3d8da",
     "semantic_hash": ""
   },
   ".claude/skills/league-models/references/market-grid.md": {
@@ -14298,9 +14298,9 @@
     "semantic_hash": ""
   },
   ".claude/skills/league-models/references/methods.md": {
-    "mtime": 1794776782.313834,
-    "seen": 1794777127.6924462,
-    "ast_hash": "70d7bfc3a05f262eecc5525114980548",
+    "mtime": 1794777539.8080728,
+    "seen": 1794777869.2166436,
+    "ast_hash": "4a17fb82ecedf3ef037f6a0e4075ed44",
     "semantic_hash": ""
   },
   ".claude/skills/league-models/references/porting-traps.md": {
@@ -15102,9 +15102,9 @@
     "semantic_hash": ""
   },
   "scripts/horse/hk_study.py": {
-    "mtime": 1794776004.0315163,
-    "seen": 1794777127.6828802,
-    "ast_hash": "736f470dee29099475404da423ca66a7",
+    "mtime": 1794777491.3688135,
+    "seen": 1794777869.2073097,
+    "ast_hash": "ec6d6223a25b38528d7aabb038ab0097",
     "semantic_hash": ""
   },
   "scripts/horse/manifest.json": {
@@ -15156,9 +15156,9 @@
     "semantic_hash": ""
   },
   "docs/horse_racing_market_audit.md": {
-    "mtime": 1794776770.526971,
-    "seen": 1794777127.6925383,
-    "ast_hash": "8e81ad2a1628631e0cc8b907120f2f30",
+    "mtime": 1794777536.2451031,
+    "seen": 1794777869.2167392,
+    "ast_hash": "d19f1fd25ebb391891d10eb2dc16fb20",
     "semantic_hash": ""
   },
   "docs/horse_racing_scope.md": {
@@ -15174,9 +15174,9 @@
     "semantic_hash": ""
   },
   "docs/sports/racing.md": {
-    "mtime": 1794776779.7098203,
-    "seen": 1794777127.6927483,
-    "ast_hash": "9e2f4c2ec6fd5a1d03225768ed2db944",
+    "mtime": 1794777584.0688322,
+    "seen": 1794777869.2169363,
+    "ast_hash": "3b769fdb8484506a55e4ced44093f837",
     "semantic_hash": ""
   },
   "scripts/horse/README.md": {
@@ -15189,6 +15189,30 @@
     "mtime": 1794773954.8017833,
     "seen": 1794777127.6928167,
     "ast_hash": "00f0b9576179e94d48799da44474d458",
+    "semantic_hash": ""
+  },
+  "scripts/fanatics_app_link_probe.py": {
+    "mtime": 1794777347.2496235,
+    "seen": 1794777869.2072897,
+    "ast_hash": "ceada621e27008551b89102e8d589f6f",
+    "semantic_hash": ""
+  },
+  "tests/test_fanatics_app_link_probe.py": {
+    "mtime": 1794777347.251783,
+    "seen": 1794777869.2084723,
+    "ast_hash": "f9c307f42bcf3d1ed5d4f012f7550282",
+    "semantic_hash": ""
+  },
+  "docs/horse_racing_scout_leads.md": {
+    "mtime": 1794777426.3870006,
+    "seen": 1794777869.216744,
+    "ast_hash": "cf63973f68de9da582eabda048041d91",
+    "semantic_hash": ""
+  },
+  "docs/horse_racing_scout_us_outlets.md": {
+    "mtime": 1794777464.7303858,
+    "seen": 1794777869.216746,
+    "ast_hash": "8094e5d4fe8afd806caa32e9a18d0742",
     "semantic_hash": ""
   }
 }

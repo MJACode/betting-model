@@ -62,8 +62,9 @@ review as its own entry.
 5. **The framework**: unchanged steps. One addition in practice: when the
    users' only bettable price is a pool, the "book a pick may name" question
    decides which free file is a test and which is a reference, so it was
-   scouted first (Hong Kong's pools are bettable from the US through
-   commingling; the Betfair exchange is not).
+   scouted first (US outlets offer Hong Kong, commingled with its pools as
+   of 2014, 2026 not confirmed; the Betfair exchange is not open to US
+   residents).
 
 What this build taught the skill: in a field market, calibrate the place
 model before any place test (Harville's bias is priced in both markets),

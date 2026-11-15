@@ -154,7 +154,7 @@ error.
   calibrate the place model before any ROI test, or the "edge" is Harville's
   bias (`docs/horse_racing_market_audit.md` §3a, §4a).
 - **Untested in racing, and the shape that has worked elsewhere**: the
-  sharp exchange's price on a race against the pool a US bettor joins, both
+  sharp exchange's price on a race against the pool a US outlet sells, both
   at a moment before the off. Needs a price path for both, which nothing
   free holds (`docs/sports/racing.md`, "What would have to change").
 
@@ -324,9 +324,6 @@ sections above with its result.
 - Horse racing, a Betfair back book under 100% at the scheduled start (818
   of 115,296 races, median 0.99): an arbitrage only if the backs fill, and
   the free files carry no sizes.
-- Horse racing, Hong Kong's place pool at the 7-runner boundary (3 places
-  paid from 7 runners), on the 1997–2005 set; null on the exchange's split
-  by field size.
 - Horse racing, the UK/Ireland starting-price set (5.1 million runners,
   1988–2026, free, 1.12 GB): blind bets by price band at SP, for a third
   market's favourite-longshot table.

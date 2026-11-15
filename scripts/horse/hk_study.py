@@ -316,6 +316,19 @@ def main(argv: list[str] | None = None) -> int:
     out["place_book_median"] = float(pbook.median())
     print(f"  place pool: median sum(1/place_odds)/places = {pbook.median():.4f}")
 
+    # The 7-runner boundary: three places are paid from 7 runners, two below,
+    # so a 7-runner field is the most generous place contract on the card.
+    # Every runner, at final place odds, by field size (both terms).
+    pf = c[c.place_odds.notna() & (c.place_odds > 1.0) & (c.field >= 4)]
+    out["place_by_field"] = {}
+    print("  blind place bets at final place odds, by field size")
+    for n, g in pf.groupby(pf.field.clip(upper=14)):
+        rr = summarise(g, "place_odds", "placed")
+        short = summarise(g[g.win_odds <= 5], "place_odds", "placed")
+        out["place_by_field"][int(n)] = {"all": rr, "win_odds_5_or_shorter": short}
+        print(f"  {int(n):>2} runners  all {fmt(rr)}")
+        print(f"  {'':11} win odds <= 5 {fmt(short)}")
+
     print("\n== Bolton-Chapman (fundamentals) + Benter blend, walk-forward by season")
     f = features(c)
     cols = [x for gs in GROUPS.values() for x in gs]

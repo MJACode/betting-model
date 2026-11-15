@@ -59,14 +59,14 @@ Hong Kong's checks are in the study doc, §3.
 ## Where a bettor in the United States can bet a race (scouted 2026-11-15)
 
 Read from operator, regulator and trade pages on 2026-11-15. The facts that
-decide the grid are here; a fact that rests only on a search engine's excerpt
-(the page would not open) says so.
+decide the grid are here; every source URL, and which facts rest only on a
+search engine's excerpt, are in `docs/horse_racing_scout_us_outlets.md`.
 
 | Outlet | Price | What it offers outside the US |
 |---|---|---|
-| DraftKings Racing (DK Horse) | pool (pari-mutuel), host pool | UK, Ireland, Japan, Dubai, Australia, Sweden, Korea; **Hong Kong disputed** (one page lists it, one does not) |
-| FanDuel Racing (formerly TVG) | pool | Australia (~120 tracks), France (~90), UK (~75), Hong Kong (Sha Tin), Japan (local-government tracks; JRA not confirmed), New Zealand and more. Bets into **commingled Hong Kong Jockey Club pools** since 2014-03-31 (2026 status not restated) |
-| Xpressbet (1/ST BET) | pool | Hong Kong (both tracks; commingled HKJC pools since 2014-07-01), Japan (local-government only), Australia, New Zealand, UK, Ireland, France and more |
+| DraftKings Racing (DK Horse) | pool (pari-mutuel); joining the host track's pool rests on a search excerpt only | UK, Ireland, Japan, Dubai, Australia, Sweden, Korea; **Hong Kong disputed** (one page lists it, one does not) |
+| FanDuel Racing (formerly TVG) | pool | Australia (~120 tracks), France (~90), UK (~75), Hong Kong (Sha Tin), Japan (local-government tracks; JRA not confirmed), New Zealand and more. Began betting into **commingled Hong Kong Jockey Club pools** on 2014-03-31 (DRF); whether it still commingles in 2026 was not confirmed |
+| Xpressbet (1/ST BET) | pool | Hong Kong (both tracks; commingled HKJC pools from 2014-07-01, per a 2014 announcement; 2026 not confirmed), Japan (local-government only), Australia, New Zealand, UK, Ireland, France and more |
 | TwinSpires, NYRA Bets, AmWager, BetMGM Racing, Caesars Racebook | pool | wide lists; TwinSpires' own pages did not open (search excerpts only) |
 | bet365 (Colorado, New Jersey) | **fixed odds** | about 140 tracks in Colorado, mostly Australian, UK and Irish |
 | MonmouthBets (New Jersey) | fixed odds | five US tracks (2023 list) |
@@ -93,21 +93,22 @@ decide the grid are here; a fact that rests only on a search engine's excerpt
 **What this means for the grid.** For our users the price is a pool almost
 everywhere: unknown when the pick is made, paid at the final odds, after
 15–18% has been taken. The Betfair exchange is a reference here, not a book a
-pick could name. Hong Kong is the one place the free files hold the very pool
-a US bettor joins.
+pick could name. Hong Kong is the one jurisdiction where the free files hold
+the pool a US outlet offered in 2026 and was commingled into as of 2014
+(2026 commingling not confirmed).
 
 ## The market grid
 
 | Market | Settles on | Inputs held | Prices | Baseline | Methods tried | Result | Status |
 |---|---|---|---|---|---|---|---|
-| Win, Hong Kong pools (bettable from the US through commingling) | official first; a dead heat splits | runner facts 1997–2005 | final pool odds 1997–2005 and 2014–2017; no pre-off path | every band −13% to −28%, longshots −48% to −54%; favourite −16.7% and −14.2% | pool calibration; Bolton–Chapman fundamentals; Benter blend; removal of each feature group; split by meeting | the blend holds nothing the pool lacks (`b` ≈ 0 every season); a leak check shows the harness can see an edge | **nothing clears** (audit §3, §3b) |
+| Win, Hong Kong pools (offered by US outlets in 2026; commingled as of 2014, 2026 not confirmed) | official first; a dead heat splits | runner facts 1997–2005 | final pool odds 1997–2005 and 2014–2017; no pre-off path | every band −13% to −28%, longshots −48% to −54%; favourite −16.7% and −14.2% | pool calibration; Bolton–Chapman fundamentals; Benter blend; removal of each feature group; split by meeting | the blend holds nothing the pool lacks (`b` ≈ 0 every season); a leak check shows the harness can see an edge | **nothing clears** (audit §3, §3b) |
 | Place, Hong Kong pools | first three (7+ runners) | the same | final place odds | −18.4% betting every runner | Harville against the win pool (the "Dr Z" test), raw and calibrated on early seasons | the calibrated rule is negative at every cut, and it read both final pools, so it is an upper bound | **nothing clears** (audit §3a) |
 | Win, Australia and New Zealand (Betfair exchange; not bettable from the US) | Betfair's result; a dead heat splits | prices only, no form | scheduled-start back and lay, BSP, 2020-01 to 2026-10 | every band negative net of commission (−0.70% to −12.6% at BSP); the favourite negative every year | price bands at two prices; favourites by year and by track size; BSP against the back; a logit on the scheduled-start prices | audit §4, §4b | **nothing clears** |
 | Place, Australia and New Zealand (Betfair) | Betfair's place market (2 or 3 places) | the same | place BSP | negative in every Harville band net | Harville raw and discounted; a calibrated rule with a predicted place BSP; split by field size | every year negative net; the best gross cut −0.09% | **nothing clears** (audit §4a) |
 | Win and place, US pools | official order after any DQ | none | none free: Equibase charts $219.95/month, HDW $119/month; the free 2023 Equibase year is "not for wagering use" | not measured | none | | **parked: no price.** Routes tried: the free files (none US), Kaggle (NYRA's 2022 set needs a login), Equibase (paid, or free with a no-wagering licence), the odds feed (no racing) |
 | Show (US) | first three | none | none | | | | parked, as US win |
 | Win and place, UK and Ireland | official result | 5.1 million runners with starting prices (not downloaded) | starting price only | not measured | none | | **to do**: the free 1.12 GB set; a starting price is bettable at UK books, not from the US |
-| Win, Australia (TAB pool; bettable from the US through FanDuel Racing) | TAB result | none | none free (Punting Form Starter, $59.00/Month as printed, carries TAB starting prices) | | | | parked: no price held |
+| Win, Australian pools (FanDuel Racing and others offer Australian tracks; whether into the TAB's pool was not established) | TAB result | none | none free (Punting Form Starter, $59.00/Month as printed, carries TAB starting prices) | | | | parked: no price held |
 | Each-way | two bets, win and place terms | | | | | | parked: the unit function grades one result a row (scope §5) |
 | Exacta, trifecta, quinella, multi-race | dividends | | Hong Kong win and place dividends only | | | | parked: no exotic dividends held |
 | Fixed odds (bet365 Colorado and New Jersey) | the book's rules | | none found | | | | parked: no price history found |
@@ -130,14 +131,14 @@ the audit, §5.
 2. **A sharp price against the pool**, the mechanism that has worked most
    often in this repo (a sharp reference against a softer price on the same
    event, `methods.md` §2): Betfair's price on a Hong Kong or US race against
-   the pool a US bettor joins, both at a moment before the off. Nothing free
+   the pool a US outlet sells, both at a moment before the off. Nothing free
    holds both series.
 3. **A book a pick may name**, with a licence that covers the app, Discord
    and push (scope §8, unchanged).
 
 ## Leads found outside the repo (scouted 2026-11-15)
 
-28 leads were read; these decided an experiment:
+28 leads were read (all of them, with sources: `docs/horse_racing_scout_leads.md`); these decided an experiment:
 
 | Lead | Source | Claim | Here |
 |---|---|---|---|
@@ -158,6 +159,8 @@ set.
 ## Open items
 
 - The UK/Ireland starting-price set: download (1.12 GB), store, grade the
-  blind bets by price band (issue below, in the session's reply).
+  blind bets by price band (issue #1370).
+- Store each new Betfair ANZ monthly file as it is published, from the
+  2026-11 file onward (issue #1371).
 - A pre-off price path and a US pool series, both behind a purchase or an
   account: decisions for mike.
