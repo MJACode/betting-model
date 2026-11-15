@@ -157,14 +157,18 @@ check('iOS is asked to open the claimed link in the app only, after the not-inst
 check('...yes is done; no is the App Store only when nothing says the app is installed; cannot-ask falls through to the old chain',
   viaApp.includes('if (viaApp === true) return true;') && /if \(viaApp === false && installed === null\) \{\s*const store = bookStoreUrl\(book\);/.test(viaApp) && !viaApp.includes('tryOpen(app.web)'));
 // ── a hand-off that misses the app is written down ──────────────────────────
-const exits = chain.slice(at('const went = '));
+// The function body only: the helpers after it have comments of their own.
+const exits = chain.slice(at('const went = '), at("/**\n * The book's app was opened by its scheme"));
 const returns = exits.match(/return [^;]+;/g) ?? [];
 const unlogged = returns.filter((r) => !r.includes('went(') && r !== 'return true;' && r !== 'return false;' && r !== 'return ok;');
 check('every exit but "iOS opened it in the app" and the state alert goes through the log', unlogged.length === 0 && returns.filter((r) => r.includes('went(')).length >= 9, unlogged.join(' | '));
 check('...for the books whose app claims links, on iOS, a null claimed link included', exits.includes("if (APP_CLAIMING_BOOKS.includes(book) && Platform.OS === 'ios') {")
   && APP_CLAIMING_BOOKS.every((b) => appClaimedLink(b, null, 'nj') !== null) && BETTABLE_BOOKS.filter((b) => !APP_CLAIMING_BOOKS.includes(b)).every((b) => appClaimedLink(b, 'https://x.example/bet', 'nj') === null));
 check('a scheme open says the bet is not on the slip, when the member comes back', exits.includes("if (route === 'scheme' && ok) sayBetNotOnSlip(book);")
-  && src.includes("if (state !== 'active') return;") && src.includes('showToast(`${bookName(note.book)} opened without your bet. Add it there.`, { announce: true'));
+  && /if \(state !== 'active'\) return;[\s\S]{0,260}sub\.remove\(\);[\s\S]{0,260}showToast\(`\$\{bookName\(note\.book\)\} opened without your bet\. Add it there\.`, \{ announce: true/.test(src));
+check('...and only after a real trip to the background, not iOS\'s own "Open in ...?" prompt', src.includes("let left = AppState.currentState === 'background';") && src.includes("if (state === 'background') left = true;"));
+check('...and a hand-off that never left the app drops its note', /if \(!left\) \{\s*if \(slipNote && Date\.now\(\) - slipNote\.at <= SLIP_NOTE_PROMPT_MS\) return;\s*sub\.remove\(\);\s*slipNoteListening = false;\s*slipNote = null;\s*return;/.test(src));
+check('the exit check found the end of the function body', at("/**\n * The book's app was opened by its scheme") > at('const went = '));
 check('...one listener however many taps, and not after five minutes away', src.includes('if (slipNoteListening) return;') && src.includes('if (!note || Date.now() - note.at > SLIP_NOTE_MAX_AGE_MS) return;'));
 const hlog = read('src/lib/handoffLog.ts');
 check('the log uses a kind the RPC accepts (a refused kind stops the crash queue)', hlog.includes("kind: 'js_error'") && read('../data/migrations/app_errors_freeze_kinds_2026_11_06.sql').includes("'js_error'"));
