@@ -1595,6 +1595,21 @@ function sameLineRowAtBook(
   return null;
 }
 
+/**
+ * The deciding book's line has moved and it has nothing at the pick's number,
+ * so a hand-off to it is a bet at its line now. False when it still has the
+ * pick's number on its ladder (that hand-off is the pick's own bet).
+ */
+export function decidingBookOnlyAtMovedLine(
+  pick: Pick,
+  bookRows: BookPricedRow[] | undefined,
+  hero: HeroAmerican | null | undefined,
+  priceAge?: PriceAgeContext,
+): boolean {
+  return hero != null && hero.movedLine != null &&
+    sameLineRowAtBook(pick, bookRows, hero.book, priceAge) == null;
+}
+
 /** One book hand-off for the list card. Full shop stays on Pick Detail. */
 export interface BoardHandoff {
   bookmaker: string;
@@ -1734,7 +1749,15 @@ function resolveBoardHandoff(
   }
   // Another book is best and the lock chip is still listed: it comes out.
   // (A lock chip tied for best ranks first, so it was handled above.)
-  if (heroLineMoved && sheetQuotes.some(isLockChip)) {
+  // Only when we hold a priced row for that book: that row is what lists it
+  // at its line now (otherLineQuotesForPick reads the same rows). With none,
+  // dropping the chip would leave a dash beside a card that names its line.
+  if (
+    hero != null && heroLineMoved && sheetQuotes.some(isLockChip) &&
+    freshBookRows(pick, bookRows, priceAge).some(
+      (r) => r.bookmaker === hero.book && priceForSide(r, pick.pick_side) != null,
+    )
+  ) {
     sheetQuotes = sheetQuotes.filter((q) => !isLockChip(q));
   }
   const verb: 'Best' | 'Bet' =

@@ -10,6 +10,7 @@ import {
 import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus, isVersusSport, labelWithoutStake } from '@/lib/format';
 import {
   bestHandoffForPick,
+  decidingBookOnlyAtMovedLine,
   handoffQuotesForPick,
   bookLabel,
   bookName,
@@ -1410,7 +1411,7 @@ export function PickCard({
             // Only when the sheet's Bet IS that moved line. The deciding
             // book leading at its rung is a bet at the pick's own number.
             heroPrice?.movedLine != null && leadRow?.bookmaker === heroPrice.book &&
-            leadRow.price === heroPrice.price
+            decidingBookOnlyAtMovedLine(pick, item.bookRows, heroPrice, priceAge)
               ? signalsNow
               : null
           }

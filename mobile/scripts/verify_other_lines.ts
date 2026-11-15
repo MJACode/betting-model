@@ -25,6 +25,7 @@
 
 import {
   bestHandoffForPick,
+  decidingBookOnlyAtMovedLine,
   currentLineQuotes,
   gameRowsForPick,
   handoffQuotesForPick,
@@ -230,6 +231,24 @@ check('no book listed twice', new Set(sheet.map((r) => r.bookmaker)).size === sh
     fdBest.handoff?.bookmaker === 'fanduel' && fdBest.handoff.price === 125 && fdBest.handoff.link === 'fd://a35',
     JSON.stringify(fdBest.handoff),
   );
+
+  check('rung: a FanDuel hand-off is the pick\'s own bet', !decidingBookOnlyAtMovedLine(gb, gameRowsForPick(gb, 'spreads', [...gbMain, ...gbLadder]), withRung.hero));
+  check('no rung: a FanDuel hand-off is its moved line', decidingBookOnlyAtMovedLine(gb, gameRowsForPick(gb, 'spreads', gbMain), noRung.hero));
+
+  // DraftKings decided it, its line moved on the latest-DK row, and the
+  // all-books rows hold no DraftKings row: the lock chip stays (no dash).
+  {
+    const dkPick = { ...gb, decision_book: 'draftkings' } as Pick;
+    const rows = gameRowsForPick(dkPick, 'spreads', [...gbMain, ...gbLadder].filter((r) => r.bookmaker !== 'draftkings'));
+    const latest = { market: 'spreads', bookmaker: 'draftkings', spread_home: -2.5, home_price: -120 } as never;
+    const hero = heroAmericanForPick(dkPick, latest, rows);
+    const sheet = pickSportsbookRows(
+      handoffQuotesForPick(dkPick, rows, hero, undefined, myBooks), myBooks,
+      otherLineQuotesForPick(dkPick, rows, myBooks).map((q) => ({ ...q, lineText: `GB ${q.line}` })),
+    );
+    const dk = sheet.find((r) => r.bookmaker === 'draftkings');
+    check('moved on the latest row only: DraftKings is not a dash', hero?.movedLine === -2.5 && dk?.price != null, `${hero?.movedLine} ${dk?.price}`);
+  }
 
   // A deciding book we hold no row for keeps its lock chip (missing ≠ moved).
   const noFd = gameRowsForPick(gb, 'spreads', [...gbMain, ...gbLadder].filter((r) => r.bookmaker !== 'fanduel'));
