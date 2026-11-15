@@ -175,9 +175,16 @@ function session(over: Partial<SessionRecord>): SessionRecord {
   const last = t[t.length - 1];
   check('a run of taps is one crumb with the count', last?.[1] === 'touch' && last?.[2] === '3');
   check('taps since navigation counted', sessionSummary()?.touches_since_nav === 3);
-  noteBack('press');
+  noteTouch(); noteBack('pop');
   const b = (trailForReport() ?? []).at(-1);
-  check('a Back tap is a crumb of its own', b?.[1] === 'back' && b?.[2] === 'press');
+  check('a Back tap is a crumb of its own, naming its path', b?.[1] === 'back' && b?.[2] === 'pop');
+  const before = (trailForReport() ?? []).length;
+  for (let i = 0; i < 20; i += 1) { noteTouch(); noteBack('pop'); }
+  const after = trailForReport() ?? [];
+  check('twenty taps on a dead Back are one crumb with the count',
+    after.length === before && after.at(-1)?.[2] === 'pop x21', JSON.stringify(after.slice(-3)));
+  check('the taps before the dead Back are still in the trail',
+    after.some((c) => c[1] === 'screen' && c[2] === 'Picks'));
   noteScreen('Settings');
   check('a screen change resets the tap count', sessionSummary()?.touches_since_nav === 0);
   for (let i = 0; i < 200; i += 1) { noteScreen(`S${i}`); }

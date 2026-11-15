@@ -70,15 +70,12 @@ export function PlayerStatsHeaderTitle({
  * a React zIndex does not paint over that.
  */
 /** The #1239 pill: 22pt chevron, "Back" at 17pt, 44pt target, hitSlop inside the bar. */
-function BackPill({ onPress }: { onPress: () => void }) {
+function BackPill({ onPress }: { onPress: () => 'pop' | 'replace' | 'reset' }) {
   const { fontScale } = useWindowDimensions();
   const icon = Math.round(22 * Math.min(Math.max(fontScale, 1), 2));
   return (
     <Pressable
-      onPress={() => {
-        noteBack('press');
-        onPress();
-      }}
+      onPress={() => noteBack(onPress())}
       accessibilityRole="button"
       accessibilityLabel="Back"
       hitSlop={{ top: 12, bottom: 0, left: 8, right: 8 }}
@@ -95,8 +92,12 @@ function BackPill({ onPress }: { onPress: () => void }) {
 export function PlayerStatsBackButton() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const onPress = () => {
-    if (stackBackDecision(navigation.canGoBack()) === 'pop') navigation.goBack();
-    else navigation.replace(PLAYER_DETAIL_PARENT.name, { screen: PLAYER_DETAIL_PARENT.screen });
+    if (stackBackDecision(navigation.canGoBack()) === 'pop') {
+      navigation.goBack();
+      return 'pop' as const;
+    }
+    navigation.replace(PLAYER_DETAIL_PARENT.name, { screen: PLAYER_DETAIL_PARENT.screen });
+    return 'replace' as const;
   };
   return <BackPill onPress={onPress} />;
 }
@@ -113,8 +114,12 @@ export function PlayerStatsBackButton() {
 export function StackBackButton() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const onPress = () => {
-    if (stackBackDecision(navigation.canGoBack()) === 'pop') navigation.goBack();
-    else navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
+    if (stackBackDecision(navigation.canGoBack()) === 'pop') {
+      navigation.goBack();
+      return 'pop' as const;
+    }
+    navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
+    return 'reset' as const;
   };
   return <BackPill onPress={onPress} />;
 }
@@ -126,12 +131,14 @@ export function StackBackButton() {
 export function SettingsSectionBackButton() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const onPress = () => {
-    if (stackBackDecision(navigation.canGoBack()) === 'pop') navigation.goBack();
-    else {
-      // Settings alone has no back and no tabs, so Android back would leave
-      // the app. Put the tabs under it.
-      navigation.reset({ index: 1, routes: [{ name: 'Tabs' }, { name: 'Settings' }] });
+    if (stackBackDecision(navigation.canGoBack()) === 'pop') {
+      navigation.goBack();
+      return 'pop' as const;
     }
+    // Settings alone has no back and no tabs, so Android back would leave
+    // the app. Put the tabs under it.
+    navigation.reset({ index: 1, routes: [{ name: 'Tabs' }, { name: 'Settings' }] });
+    return 'reset' as const;
   };
   return <BackPill onPress={onPress} />;
 }
