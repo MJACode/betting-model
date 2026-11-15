@@ -64,6 +64,8 @@ import {
   signalsHeroSpeech,
   signalsModelCaption,
   signalsNowLine,
+  nowLineTone,
+  nowLineToneSpeech,
   signalsReasonLine,
   signalsStakeLine,
   signalsStakeSpeech,
@@ -507,8 +509,30 @@ export function PickCard({
         book: bookLabel(quoteBookKey),
       })
     : null;
+  // Green when the number on the board now is better for a new bettor than
+  // the pick's, red when worse (Matt, 2026-11-15). The line decides; the
+  // price only when the line is unchanged. Neutral when nothing is shown.
+  const signalsNowTone = !signalsNow
+    ? null
+    : staleLineMove
+    ? nowLineTone({
+        market: signalsMarket,
+        side: pick.pick_side,
+        lockedLine: numOrNull(pick.scored_line),
+        nowLine: staleLineMove.line,
+        lockedPrice: decisionPrice,
+        nowPrice: staleLineMove.price,
+      })
+    : nowLineTone({
+        market: signalsMarket,
+        side: pick.pick_side,
+        lockedLine: numOrNull(pick.scored_line),
+        nowLine: heroPrice?.movedLine ?? null,
+        lockedPrice: heroPrice?.lockedPrice ?? null,
+        nowPrice: priceDiffers ? (heroPrice?.price ?? null) : null,
+      });
   // Same numbers as the screen. The spoken book is the full name.
-  const signalsNowSpoken = staleLineMove
+  const signalsNowSpokenRaw = staleLineMove
     ? staleNowFor(bookName(staleLineMove.book))
     : quoteBookKey
     ? signalsNowLine({
@@ -517,6 +541,9 @@ export function PickCard({
         priceDiffers,
         book: bookName(quoteBookKey),
       })
+    : null;
+  const signalsNowSpoken = signalsNowSpokenRaw
+    ? [signalsNowSpokenRaw, nowLineToneSpeech(signalsNowTone)].filter(Boolean).join(', ')
     : null;
   // Several bettable books: "Best DK −115". One: "Bet FD −105".
   // No "now", and no line — the hero already shows the line.
@@ -1113,7 +1140,28 @@ export function PickCard({
         <Text style={styles.lockedCaption}>{trueMinus(lockedCaptionText(heroPrice))}</Text>
       ) : null}
       {signalsNow ? (
-        <Text style={styles.nowLine}>{signalsNow}</Text>
+        // An arrow beside the colour, so the direction is not carried by
+        // green-vs-red alone (UX_REVIEW §5). Inks, not the bright hues.
+        <View style={styles.nowRow}>
+          {signalsNowTone ? (
+            <Ionicons
+              name={signalsNowTone === 'better' ? 'arrow-up' : 'arrow-down'}
+              size={13}
+              color={signalsNowTone === 'better' ? colors.betInk : colors.avoidInk}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            />
+          ) : null}
+          <Text
+            style={[
+              styles.nowLine,
+              signalsNowTone === 'better' && styles.nowLineBetter,
+              signalsNowTone === 'worse' && styles.nowLineWorse,
+            ]}
+          >
+            {signalsNow}
+          </Text>
+        </View>
       ) : null}
 
       <View style={styles.metrics}>
@@ -1842,9 +1890,17 @@ const styles = StyleSheet.create({
   },
   // The book's current line or price, when it is not the lock. Same "Now"
   // ink as the board's tag (textSecondary, above 4.5:1). Wraps at large text.
-  nowLine: {
+  nowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
     marginTop: 2,
     marginBottom: spacing.xs,
+  },
+  nowLineBetter: { color: colors.betInk },
+  nowLineWorse: { color: colors.avoidInk },
+  nowLine: {
+    flexShrink: 1,
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textSecondary,

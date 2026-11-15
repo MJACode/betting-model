@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Signals Now line coloured by direction for a new bettor (green better, red worse, arrow + spoken words; line decides over price), `nowLineTone` |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, all-time Average odds is the mean implied probability converted back to American (mike, yes); a +2500 among fifty -110s stays -106, the decimal mean of that set is +138 |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, ncaaf_game_identity: the 2025-12-01 odds snapshot minted LSU @ Ole Miss on 2026-11-21 beside CFBD's Wofford row; ingest now refuses that mint and a worker migration deletes the empty phantom |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, horse racing sources and `scripts/horse/fetch_datasets.py`: research note in `docs/horse_racing_sources.md`, Punting Form $59/$297, free Betfair AU/NZ CSVs, Equibase 2023 manual and never committed |

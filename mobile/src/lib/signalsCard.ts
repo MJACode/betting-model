@@ -429,6 +429,64 @@ export function signalsNowLine(input: {
 }
 
 /**
+ * Is the number on the board NOW better or worse for someone betting it than
+ * the number the pick was written at? Matt, 2026-11-15: a line that moved
+ * against you shows red, one that improved in your favour shows green.
+ *
+ * The bettor's view, the same rule `movementFromLatest` uses for
+ * "lineMovedAgainst": a spread is better when the picked side gets more
+ * points (home number rises / away number falls); an Over is better when the
+ * total falls, an Under when it rises. Lines are HOME-relative (`scored_line`
+ * convention). A moved line decides; when the line is unchanged the price
+ * decides (a longer payout is better). Null when nothing moved or it cannot
+ * be read — the Now line then stays neutral grey.
+ */
+export type NowLineTone = 'better' | 'worse';
+
+function americanPayout(a: number): number {
+  return a > 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a);
+}
+
+export function nowLineTone(input: {
+  market: string | null;
+  side: string;
+  lockedLine: number | null;
+  nowLine: number | null;
+  lockedPrice: number | null;
+  nowPrice: number | null;
+}): NowLineTone | null {
+  const { market, side, lockedLine, nowLine } = input;
+  if (market != null && !market.startsWith('h2h') && lockedLine != null && nowLine != null) {
+    const delta = nowLine - lockedLine;
+    if (delta !== 0) {
+      if (market.startsWith('spreads')) {
+        if (side === 'home') return delta > 0 ? 'better' : 'worse';
+        if (side === 'away') return delta < 0 ? 'better' : 'worse';
+      } else {
+        if (side === 'over') return delta < 0 ? 'better' : 'worse';
+        if (side === 'under') return delta > 0 ? 'better' : 'worse';
+      }
+      return null;
+    }
+  }
+  const { lockedPrice, nowPrice } = input;
+  if (lockedPrice == null || nowPrice == null || lockedPrice === nowPrice) return null;
+  if (lockedPrice === 0 || nowPrice === 0) return null;
+  const now = americanPayout(nowPrice);
+  const locked = americanPayout(lockedPrice);
+  // +100 and -100 are the same even-money payout.
+  if (now === locked) return null;
+  return now > locked ? 'better' : 'worse';
+}
+
+/** The words VoiceOver adds after the Now line, so colour is not the only carrier. */
+export function nowLineToneSpeech(tone: NowLineTone | null): string {
+  if (tone === 'better') return 'better than the pick';
+  if (tone === 'worse') return 'worse than the pick';
+  return '';
+}
+
+/**
  * VoiceOver for the Signals hero. The 22pt number is the decision price, so
  * that is what is spoken, with the full book name — the same `signalsPriceText`
  * the screen uses, so the two cannot format the price differently. `now` is
