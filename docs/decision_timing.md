@@ -186,7 +186,13 @@ lists, before the game starts, and otherwise only insert a missing game
 the 1,690 rows back from the local copy taken at 05:43 UTC that morning,
 keeping both values in `games_ncaaf_kickoff_restore_20261114` (row security
 on); applied 23:29 UTC, 0 rows still differing. The 116 games the purchase
-added keep the kickoff it wrote.
+added keep the kickoff it wrote; none carries a 14:00 bet, and 3 carry a bet
+under "every hour until it bets" and 3 under "the last read". The same
+purchase labels a row in play when its snapshot is after the kickoff that
+snapshot lists: 74 of its 90,930 in-play rows, on 4 games, are stamped more
+than 5 minutes before the stored kickoff. Which side is wrong is not measured
+(issue #1352); the replay reads only pre-game rows, so those games read
+slightly thin at the late hours, which cannot change the verdict.
 
 ## The inventory of every other model (2026-11-14)
 
