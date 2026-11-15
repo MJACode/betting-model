@@ -1197,6 +1197,29 @@ def test_the_recap_carries_no_methodology_footer():
     assert '"footer"' not in src, "the results recap must not carry a footer"
 
 
+def test_the_morning_recap_renders_the_all_time_lines():
+    """The 6:00am ET job is scheduler.run_daily_pipeline, which runs
+    run_pipeline.py. That calls step_settle, which posts
+    notify_discord_results. That embed's all-time block is
+    render_all_time_fields, so the win rate, average odds, and average
+    CLV lines are on the morning post."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    scheduler = (root / "scheduler.py").read_text(encoding="utf-8")
+    pipeline = (root / "run_pipeline.py").read_text(encoding="utf-8")
+    assert "CronTrigger(hour=6, minute=0, timezone=TIMEZONE)" in scheduler
+    assert "run_daily_pipeline" in scheduler
+    assert 'results["settle"] = step_settle(yesterday)' in pipeline
+    assert "notify_discord_results(game_date=settle_date)" in pipeline
+    import inspect
+    assert "all_time_fields(" in inspect.getsource(dn.notify_discord_results)
+    assert "render_all_time_fields(" in inspect.getsource(dn.all_time_fields)
+    rendered = inspect.getsource(dn.render_all_time_fields)
+    assert "_win_rate_line" in rendered
+    assert "_average_odds_line" in rendered
+    assert "_avg_clv_line" in rendered
+
+
 def _units_row(sport, units, odds=-110, result="WIN"):
     """A settled row whose units are the stored profit, not stake_for."""
     return (sport, "m", result, 0.02, odds, None, False, float(units), 1.0)
