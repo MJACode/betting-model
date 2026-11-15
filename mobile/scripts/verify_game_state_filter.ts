@@ -108,6 +108,13 @@ check('Final from the default adds to Not started + Live',
 const dropLive = toggleGameState(none, 'live');
 check('Live from the default removes Live', dropLive.has('upcoming') && !dropLive.has('live') && !dropLive.has('final'));
 check('the toggle never mutates its input', none.size === 0);
+// The review's repro: Not started dropped ({live}), then every Live game
+// ends. The chips draw the default; tapping Final must keep Not started.
+const ghost = new Set<GameState>(['live']);
+const noLive = gameStateOptionsFor(['upcoming', 'final'] as GameState[]);
+const afterTap = toggleGameState(effectiveGameStateSelection(ghost, noLive), 'final');
+check('a stale pick does not switch Not started off when Final is tapped',
+  afterTap.has('upcoming') && afterTap.has('final'), JSON.stringify([...afterTap]));
 check('Final picked when only finished games exist is still a change',
   gameStatesAreNarrowed(finalOnly, gameStateOptionsFor(['final'] as GameState[])));
 
@@ -128,7 +135,6 @@ const screen = read('src/screens/PicksHomeScreen.tsx');
 const filters = read('src/components/filters/PickFilters.tsx');
 check('screen applies the cut to the board', /isDateSelected\(d\.pick\.game_date, selectedDates\) && statusOk\(d\)/.test(screen));
 check('screen passes the cut to the sheet', screen.includes('onToggleGameState={toggleState}'));
-check('screen toggles through toggleGameState', screen.includes('toggleGameState(prev, state)'));
 check('chips draw lit from the effective selection', filters.includes('active={isGameStateSelected(o.state, selectedGameStates)}'));
 check('an all-over board offers Final, not "no picks yet"', screen.includes('actionLabel="Show Final"'));
 check('screen drops the cut on a sport switch', /setPickedStates\(new Set\(\)\);\s*\}, \[sport\]\)/.test(screen));
@@ -142,8 +148,14 @@ check('the open board other surfaces read excludes finished games',
 check('finished games are returned apart', hook.includes('finishedData: board.finishedData'));
 check('the board merges them, and the status cut gates them',
   screen.includes('[...activeItems, ...finishedItems]') && /boardItems\.filter\(\(d\) => isDateSelected/.test(screen));
-check('header counts and Bet all do not read the finished half',
-  !/signalCountsBySport\([^)]*finished/.test(screen) && !/todayStats[\s\S]{0,200}finished/.test(screen));
+check('Bet all reads the open subset, never a finished game',
+  screen.includes('betAllCandidates(openFiltered,') && !screen.includes('betAllCandidates(filtered,'));
+check('the staked total reads the open subset',
+  screen.includes('return openFiltered.reduce(') && !screen.includes('return filtered.reduce('));
+check('the open subset drops Final',
+  screen.includes("filtered.filter((d) => stateByItem.get(d) !== 'final')"));
+check('a tap toggles from the drawn selection',
+  screen.includes('toggleGameState(effectiveGameStateSelection(prev, gameStateOptions), state)'));
 check('the section shows whenever a finished game is on the board',
   filters.includes("gameStateOptions.some((o) => o.state === 'final')"));
 

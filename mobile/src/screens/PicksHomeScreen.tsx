@@ -549,8 +549,11 @@ export function PicksHomeScreen() {
     [pickedStates, gameStateOptions],
   );
   const toggleState = useCallback((state: GameState) => {
-    setPickedStates((prev) => toggleGameState(prev, state));
-  }, []);
+    // From the selection the chips DRAW, not the raw one: a stale pick for a
+    // state no longer on the board must not come back to life on the next
+    // tap and switch Not started off (PR review, 2026-11-15).
+    setPickedStates((prev) => toggleGameState(effectiveGameStateSelection(prev, gameStateOptions), state));
+  }, [gameStateOptions]);
   const clearStates = useCallback(() => setPickedStates(new Set()), []);
   // The "N/M" count's M: what the Status cut lets onto the board, so the
   // finished games the default hides do not read as filtered out.
@@ -638,14 +641,21 @@ export function PicksHomeScreen() {
     [datedItems, displayFilter, gamePicker.selected, thresholdsRevision],
   );
   const filtered = useMemo(() => searchPicks(unsearched, search), [unsearched, search]);
+  // The board as filtered, minus any game that is over. Bet all and the
+  // header's "staked" read this, so picking Final never adds a finished game
+  // to the money or to Bet all's skip list (PR review, 2026-11-15).
+  const openFiltered = useMemo(
+    () => filtered.filter((d) => stateByItem.get(d) !== 'final'),
+    [filtered, stateByItem],
+  );
   // Bet all reads the board as filtered, so it sends what the member sees.
   // Signals only: Live Signals is never part of it (Matt, 2026-11-14).
   const betAll = useMemo(
     () =>
       view === 'signals' && myBooksReady
-        ? betAllCandidates(filtered, (id) => liveStates.get(id) ?? null, myBooks)
+        ? betAllCandidates(openFiltered, (id) => liveStates.get(id) ?? null, myBooks)
         : null,
-    [view, myBooksReady, filtered, liveStates, myBooks, thresholdsRevision],
+    [view, myBooksReady, openFiltered, liveStates, myBooks, thresholdsRevision],
   );
   const publicSortLive = useMemo(() => publicSortAvailable(filtered), [filtered]);
   useEffect(() => {
@@ -713,8 +723,8 @@ export function PicksHomeScreen() {
   // at the pick's own stake_units when it carries one (the card's stake).
   const signalExposure = useMemo(() => {
     if (view === 'today') return 0;
-    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick), d.pick.stake_units), 0);
-  }, [filtered, view]);
+    return openFiltered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick), d.pick.stake_units), 0);
+  }, [openFiltered, view]);
 
   // FIRST LOAD ONLY on the live board. `refresh()` sets loading on every poll,
   // and the poll is 30s while this segment is open — so while the board was

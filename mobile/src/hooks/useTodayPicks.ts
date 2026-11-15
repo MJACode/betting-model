@@ -261,14 +261,14 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
     })).filter(
       (d) => !isModelRetired(d.pick.model_id) && !voidHiddenFromBoard(d.pick),
     );
+    // A tennis no-bet row never gets a final score (only a settled BET
+    // writes one), so it leaves once its match is past the badge window
+    // instead of lingering, statusless, until midnight. BETs stay until
+    // they settle (UX review, 2026-11-14).
+    const tennisNoBet = (d: EnrichedPick) =>
+      (d.pick.sport === 'ATP' || d.pick.sport === 'WTA') && d.pick.signal_type !== 'BET';
     const over = (d: EnrichedPick) =>
-      isGameOver(d.game, d.pick.sport)
-      // A tennis no-bet row never gets a final score (only a settled BET
-      // writes one), so it leaves once its match is past the badge window
-      // instead of lingering, statusless, until midnight. BETs stay until
-      // they settle (UX review, 2026-11-14).
-      || ((d.pick.sport === 'ATP' || d.pick.sport === 'WTA') && d.pick.signal_type !== 'BET'
-          && gameStatus(d.game).kind === 'ended');
+      isGameOver(d.game, d.pick.sport) || (tennisNoBet(d) && gameStatus(d.game).kind === 'ended');
     const open = all.filter((d) => !over(d));
     setData(open.filter((d) => !isPausedForDisplay(d.pick)));
     setPausedData(open.filter((d) => isPausedForDisplay(d.pick)));
@@ -278,8 +278,7 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
     // consumer still sees the open board above, so no count, badge, betslip
     // or Bet all ever includes a game that is over. A tennis no-bet row
     // whose match ran out with no score has nothing to show and stays out.
-    setFinishedData(all.filter((d) =>
-      over(d) && !((d.pick.sport === 'ATP' || d.pick.sport === 'WTA') && d.pick.signal_type !== 'BET')));
+    setFinishedData(all.filter((d) => over(d) && !tennisNoBet(d)));
     setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);
     setLoaded(true);
   } catch (e: unknown) {
