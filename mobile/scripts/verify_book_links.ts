@@ -19,7 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { appClaimedLink, fillBetslipLink, linkNeedsState } from '../src/lib/betslipLinks';
+import { APP_CLAIMING_BOOKS, appClaimedLink, fillBetslipLink, linkNeedsState, linkShape } from '../src/lib/betslipLinks';
 import { BETTABLE_BOOKS } from '../src/lib/markets';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -98,9 +98,18 @@ check('installed? is asked only on iOS and only for a book with something to ask
 check('the question is asked before anything opens', at('isBookAppInstalled(book)') >= 0 && at('isBookAppInstalled(book)') < at('fillBetslipLink'));
 const notInstalled = chain.slice(at('installed === false'), at('if (link && link.trim())'));
 check('not installed → the App Store, whatever link we hold, then the site — never the app', notInstalled.includes('bookStoreUrl(book)') && notInstalled.includes('tryOpen(app.web)') && !notInstalled.includes('fillBetslipLink') && !notInstalled.includes('app.scheme'));
-const isInstalled = chain.slice(at('installed === true'), at('// Unknown'));
-check('installed → the link first, then the app by its scheme, then the site — never the App Store', at('fillBetslipLink') < at('installed === true') && isInstalled.includes('app.scheme') && isInstalled.includes('tryOpen(app.web)') && !isInstalled.includes('bookStoreUrl'));
-check('a candidate scheme is asked about, never opened (it might be another app\'s)', !chain.includes('candidateSchemes'));
+const isInstalled = chain.slice(at('if (installed === true) {'), at('// Unknown'));
+check('installed → the link first, then the app by its scheme, then the site — never the App Store', at('fillBetslipLink') < at('if (installed === true) {') && isInstalled.includes('app.scheme') && isInstalled.includes('tryOpen(app.web)') && !isInstalled.includes('bookStoreUrl'));
+// 2026-11-15 (Matt, BetMGM on build 14301: Safari). A scheme is opened from
+// two places only: the verified one in the installed branch, and whichever
+// said yes, straight after iOS refused the claimed link.
+const refused = chain.slice(at('if (viaApp === false && installed === true)'), at('if (link && link.trim())'));
+check('iOS refused the claimed link and a scheme says installed → the app by that scheme, before the stored link (Safari)',
+  at('if (viaApp === false && installed === true)') > at('viaApp = claimed ? await openUniversalLinkOnly(claimed)')
+  && refused.includes('const scheme = await installedBookScheme(book);') && refused.includes('tryOpen(scheme, true)'));
+check('a candidate scheme is opened nowhere else', (chain.match(/installedBookScheme\(/g) ?? []).length === 1 && (src.match(/installedBookScheme\(/g) ?? []).length === 2);
+const pick = src.slice(src.indexOf('async function installedBookScheme'), src.indexOf('/**\n * Open a pre-filled betslip'));
+check('...and only one that answered yes is opened', pick.includes('answers.findIndex((a) => a === true)') && pick.includes('.catch(() => false)') && pick.includes('return i >= 0 ? schemes[i]! : null;'));
 const unknown = chain.slice(at('// Unknown'));
 check('unknown → link → store → site (the scheme is not tried: it cannot be queried)', unknown.includes('bookStoreUrl(book)') && unknown.indexOf('bookStoreUrl(book)') < unknown.indexOf('tryOpen(app.web)') && !unknown.includes('app.scheme'));
 check('the hook exists for surfaces that offer the store', read('src/hooks/useBookAppInstalled.ts').includes('isBookAppInstalled(book)'));
@@ -142,11 +151,28 @@ check('Caesars: the filled /us/<state>/bet/ link, else that root for the state',
 for (const b of ['betrivers', 'hardrockbet', 'fanatics', 'ballybet', 'betparx', 'rebet', 'fliff'] as const) {
   check(`${b}: its app claims no link we hold, so iOS is not asked`, appClaimedLink(b, 'https://x.example/bet', 'nj') === null);
 }
-const viaApp = chain.slice(at('const claimed = appClaimedLink'), at('if (link && link.trim())'));
+const viaApp = chain.slice(at('viaApp = claimed ?'), at('if (link && link.trim())'));
 check('iOS is asked to open the claimed link in the app only, after the not-installed exit and before anything else opens',
-  at('const claimed = appClaimedLink') > at('installed === false') && viaApp.includes('appClaimedLink(book, link, getBettingState())') && viaApp.includes('openUniversalLinkOnly(claimed)'));
+  at('viaApp = claimed ?') > at('installed === false') && chain.includes('const claimed = appClaimedLink(book, link, getBettingState());') && viaApp.includes('openUniversalLinkOnly(claimed)'));
 check('...yes is done; no is the App Store only when nothing says the app is installed; cannot-ask falls through to the old chain',
   viaApp.includes('if (viaApp === true) return true;') && /if \(viaApp === false && installed === null\) \{\s*const store = bookStoreUrl\(book\);/.test(viaApp) && !viaApp.includes('tryOpen(app.web)'));
+// ── a hand-off that misses the app is written down ──────────────────────────
+const exits = chain.slice(at('const went = '));
+const returns = exits.match(/return [^;]+;/g) ?? [];
+const unlogged = returns.filter((r) => !r.includes('went(') && r !== 'return true;' && r !== 'return false;' && r !== 'return ok;');
+check('every exit but "iOS opened it in the app" and the state alert goes through the log', unlogged.length === 0 && returns.filter((r) => r.includes('went(')).length >= 9, unlogged.join(' | '));
+check('...for the books whose app claims links, on iOS, a null claimed link included', exits.includes("if (APP_CLAIMING_BOOKS.includes(book) && Platform.OS === 'ios') {")
+  && APP_CLAIMING_BOOKS.every((b) => appClaimedLink(b, null, 'nj') !== null) && BETTABLE_BOOKS.filter((b) => !APP_CLAIMING_BOOKS.includes(b)).every((b) => appClaimedLink(b, 'https://x.example/bet', 'nj') === null));
+check('a scheme open says the bet is not on the slip, when the member comes back', exits.includes("if (route === 'scheme' && ok) sayBetNotOnSlip(book);")
+  && src.includes("if (state !== 'active') return;") && src.includes('showToast(`${bookName(note.book)} opened without your bet. Add it there.`, { announce: true'));
+check('...one listener however many taps, and not after five minutes away', src.includes('if (slipNoteListening) return;') && src.includes('if (!note || Date.now() - note.at > SLIP_NOTE_MAX_AGE_MS) return;'));
+const hlog = read('src/lib/handoffLog.ts');
+check('the log uses a kind the RPC accepts (a refused kind stops the crash queue)', hlog.includes("kind: 'js_error'") && read('../data/migrations/app_errors_freeze_kinds_2026_11_06.sql').includes("'js_error'"));
+check('one row per book and route per session, the build number and the opened scheme on it', hlog.includes('const key = `${miss.book}:${miss.route}`;') && hlog.includes('if (logged.has(key)) return;') && hlog.includes('nativeBuild: nativeBuild()') && hlog.includes('scheme: miss.scheme ?? null') && hlog.includes('claimed: linkShape(miss.claimed)') && !hlog.includes('miss.claimed,'));
+check('the logged link carries no query and no state (the picker says "Stored on this device only")',
+  linkShape(appClaimedLink('betmgm', STORED.betmgm!, 'NJ')) === 'sports.<st>.betmgm.com/en/sportsapp/sports'
+  && linkShape(appClaimedLink('williamhill_us', null, 'mi')) === 'sportsbook.caesars.com/us/<st>/bet/'
+  && linkShape('https://sportsbook.draftkings.com/event/1?outcomes=2') === 'sportsbook.draftkings.com/event/1' && linkShape(null) === null);
 const openInApp = read('src/lib/openInApp.ts');
 check('the native module is optional: a binary without it answers null, never throws',
   openInApp.includes("requireOptionalNativeModule<OpenInAppNative>('OpenInApp')") && openInApp.includes('if (!native) return null;') && openInApp.includes("Platform.OS === 'ios'"));

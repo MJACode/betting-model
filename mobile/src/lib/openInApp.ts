@@ -23,6 +23,11 @@ interface OpenInAppNative {
 const native: OpenInAppNative | null =
   Platform.OS === 'ios' ? requireOptionalNativeModule<OpenInAppNative>('OpenInApp') : null;
 
+/** Is the native module in this binary? False on Android and on a binary
+ *  built before it existed. A `null` from the call below with this `true`
+ *  means iOS was asked and the call threw. */
+export const openInAppAvailable = native != null;
+
 export async function openUniversalLinkOnly(url: string): Promise<boolean | null> {
   if (!native) return null;
   try {

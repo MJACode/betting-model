@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, BetMGM still opened Safari on build 14301: when iOS refuses the claimed link and a scheme says installed, open the app by that scheme (toast: bet not on slip); `handoffLog.ts` writes every missed hand-off to `app_errors` as `handoff:` rows with the build number |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, sportsbook sheet: the deciding book whose line moved is listed at its rung's price today or at its line now, never at the lock (GB −3.5, FanDuel −110) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Signals Now line coloured by direction for a new bettor (green better, red worse, arrow + spoken words; line decides over price), `nowLineTone` |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, all-time Average odds is the mean implied probability converted back to American (mike, yes); a +2500 among fifty -110s stays -106, the decimal mean of that set is +138 |

@@ -1,9 +1,12 @@
-import { Alert, Linking, Platform } from 'react-native';
+import { Alert, AppState, Linking, Platform } from 'react-native';
+
+import { showToast } from '@/components/Toast';
 
 import { getBettingState } from '@/hooks/useBettingState';
-import { appClaimedLink, fillBetslipLink, linkNeedsState } from '@/lib/betslipLinks';
+import { APP_CLAIMING_BOOKS, appClaimedLink, fillBetslipLink, linkNeedsState } from '@/lib/betslipLinks';
+import { noteHandoffMiss, type HandoffRoute } from '@/lib/handoffLog';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
-import { openUniversalLinkOnly } from '@/lib/openInApp';
+import { openInAppAvailable, openUniversalLinkOnly } from '@/lib/openInApp';
 import { colors } from '@/lib/theme';
 
 /**
@@ -28,8 +31,9 @@ interface BookApp {
   scheme: string | null;
   /** UNVERIFIED schemes the book's app may register (Matt, 2026-09-05: "This
    *  should be the same for all the Sportsbook apps" — and no public source
-   *  names any book's scheme but DraftKings'). Used to ASK only, never to
-   *  open: a `true` from any of them proves the app is installed, since iOS
+   *  names any book's scheme but DraftKings'). Used to ASK, and opened in one case only
+   *  (`installedBookScheme`: iOS has just refused the link the app claims):
+   *  a `true` from any of them proves the app is installed, since iOS
    *  answers `true` only for a scheme some installed app registered; a `false`
    *  proves nothing — the guess may simply be wrong — and leaves the answer
    *  unknown, which is today's behaviour. So a wrong guess costs nothing and
@@ -180,16 +184,35 @@ export async function isBookAppInstalled(book: string): Promise<boolean | null> 
 }
 
 /**
+ * The scheme that says this book's app is installed, to OPEN the app with.
+ * Null when none says yes.
+ *
+ * A candidate is a guess at the book's scheme, so it is opened in one case
+ * only: iOS has just refused the link the book's app claims
+ * (`openBookBetslip`), and this scheme answered yes, which iOS does only for
+ * a scheme an installed app registered. Every candidate names the sportsbook
+ * product, never the bare brand (BookApp), so that app is the book's.
+ */
+async function installedBookScheme(book: string): Promise<string | null> {
+  const app = BOOK_APPS[book];
+  if (!app || Platform.OS !== 'ios') return null;
+  const schemes = [...(app.scheme ? [app.scheme] : []), ...(app.candidateSchemes ?? []).map((c) => `${c}://`)];
+  const answers = await Promise.all(schemes.map((u) => Linking.canOpenURL(u).catch(() => false)));
+  const i = answers.findIndex((a) => a === true);
+  return i >= 0 ? schemes[i]! : null;
+}
+
+/**
  * Open a pre-filled betslip at `book`.
  *
  * Whether the book's app is installed decides the route when the build can
  * tell (`isBookAppInstalled`):
  *
  *   installed  → the betslip link (a universal link iOS routes to the app,
- *                with the bet on the slip), else the app itself by its
- *                VERIFIED scheme (a candidate is never opened — it might be
- *                another app's), else the book's site, itself a universal
- *                link iOS routes to the app. Never the App Store: a member
+ *                with the bet on the slip). If iOS refuses that link, the
+ *                app itself by the scheme that said it is installed
+ *                (`installedBookScheme`). Else the stored link, the app by
+ *                its VERIFIED scheme, the book's site. Never the App Store: a member
  *                who has the app is sent to a page whose only button is
  *                "Open" (Matt, 2026-09-05, with that page on screen).
  *   not        → the App Store, whatever link we hold — the bet is not
@@ -221,12 +244,26 @@ export async function openBookBetslip(
   }
   const app = BOOK_APPS[book] ?? BOOK_APPS[MODEL_BOOK];
   const installed = await isBookAppInstalled(book);
+  const claimed = appClaimedLink(book, link, getBettingState());
+  let viaApp: boolean | null = null;
+  // Every exit that is not "iOS opened the claimed link in the app" is
+  // written down (lib/handoffLog.ts), for a book whose app claims links.
+  // `claimed` null is itself one of the causes, so it is logged too.
+  const went = (route: HandoffRoute, ok: boolean, scheme?: string): boolean => {
+    if (APP_CLAIMING_BOOKS.includes(book) && Platform.OS === 'ios') {
+      noteHandoffMiss({ book, route, installed, claimed, viaApp, moduleInBinary: openInAppAvailable, scheme });
+    }
+    // The app is open with nothing on its slip, and the button said the bet
+    // would be there (UX review).
+    if (route === 'scheme' && ok) sayBetNotOnSlip(book);
+    return ok;
+  };
 
   if (installed === false) {
     const store = bookStoreUrl(book);
-    if (store && (await tryOpen(store))) return true;
-    if (await tryOpen(app.web)) return true;
-    return couldNotOpen(book);
+    if (store && (await tryOpen(store))) return went('store', true);
+    if (await tryOpen(app.web)) return went('web', true);
+    return went('failed', couldNotOpen(book));
   }
 
   // Ask iOS itself: open the link this book's app claims, in the app or not
@@ -235,20 +272,28 @@ export async function openBookBetslip(
   // installed app took it. With no verified scheme to say otherwise
   // (`installed === null`) that is the "not installed" answer, so the App
   // Store. `null` means this build cannot ask.
-  const claimed = appClaimedLink(book, link, getBettingState());
-  const viaApp = claimed ? await openUniversalLinkOnly(claimed) : null;
+  viaApp = claimed ? await openUniversalLinkOnly(claimed) : null;
   if (viaApp === true) return true;
   if (viaApp === false && installed === null) {
     const store = bookStoreUrl(book);
-    if (store && (await tryOpen(store))) return true;
+    if (store && (await tryOpen(store))) return went('store', true);
   }
-  // A `false` while a candidate scheme says the app IS installed falls
-  // through to the stored link below, as before this ask existed.
+  // iOS refused the link while a scheme says the app IS installed (Matt,
+  // 2026-11-15, BetMGM on build 14301: Safari). Either the app does not take
+  // the link we hold, or the member once chose "open in Safari" for that
+  // site, which iOS remembers. The stored link goes to Safari either way
+  // (BetMGM's is a path its app does not claim), where the bet may be on
+  // the slip. The app is opened instead, with no bet on the slip: a
+  // deliberate trade ("open the app if I have it", Matt, 2026-11-14).
+  if (viaApp === false && installed === true) {
+    const scheme = await installedBookScheme(book);
+    if (scheme && (await tryOpen(scheme, true))) return went('scheme', true, scheme);
+  }
 
   if (link && link.trim()) {
     const filled = fillBetslipLink(link, getBettingState());
     if (filled) {
-      if (await tryOpen(filled)) return true;
+      if (await tryOpen(filled)) return went('link', true);
     } else if (linkNeedsState(link)) {
       // The link is a template and the member has not said which state their
       // account is in. The alert is the WHOLE answer: falling through to the
@@ -263,9 +308,9 @@ export async function openBookBetslip(
   }
 
   if (installed === true) {
-    if (app.scheme && (await tryOpen(app.scheme, true))) return true;
-    if (await tryOpen(app.web)) return true;
-    return couldNotOpen(book);
+    if (app.scheme && (await tryOpen(app.scheme, true))) return went('scheme', true, app.scheme);
+    if (await tryOpen(app.web)) return went('web', true);
+    return went('failed', couldNotOpen(book));
   }
 
   // Unknown: the scheme cannot be queried on this build, so it is not tried.
@@ -274,9 +319,35 @@ export async function openBookBetslip(
   // 2026-09-04) — the book's web root helps neither, since the bet is not on
   // it.
   const store = bookStoreUrl(book);
-  if (store && (await tryOpen(store))) return true;
-  if (await tryOpen(app.web)) return true;
-  return couldNotOpen(book);
+  if (store && (await tryOpen(store))) return went('store', true);
+  if (await tryOpen(app.web)) return went('web', true);
+  return went('failed', couldNotOpen(book));
+}
+
+/**
+ * The book's app was opened by its scheme, so nothing is on its slip. Said
+ * once, when the member comes back: a toast shown before the open would run
+ * out while this app is in the background.
+ */
+const SLIP_NOTE_MAX_AGE_MS = 5 * 60_000;
+let slipNote: { book: string; at: number } | null = null;
+let slipNoteListening = false;
+
+function sayBetNotOnSlip(book: string): void {
+  // One pending note and one listener, however many taps: the latest book
+  // wins. Coming back after five minutes is not about this hand-off any more.
+  slipNote = { book, at: Date.now() };
+  if (slipNoteListening) return;
+  slipNoteListening = true;
+  const sub = AppState.addEventListener('change', (state) => {
+    if (state !== 'active') return;
+    sub.remove();
+    slipNoteListening = false;
+    const note = slipNote;
+    slipNote = null;
+    if (!note || Date.now() - note.at > SLIP_NOTE_MAX_AGE_MS) return;
+    showToast(`${bookName(note.book)} opened without your bet. Add it there.`, { announce: true, durationMs: 4000 });
+  });
 }
 
 function couldNotOpen(book: string): false {

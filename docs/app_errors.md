@@ -9,7 +9,7 @@ crash reporting and no error boundary.
 | kind | when | what it can and cannot tell you |
 |---|---|---|
 | `js_fatal` | uncaught JS error that closes the app | message + stack. The native handler waits up to 1.5 s for the send, then the report is kept on the phone and sent next launch |
-| `js_error` | uncaught JS error the app survived | message + stack |
+| `js_error` | uncaught JS error the app survived | message + stack. A message starting `handoff:` is not an error: see "Hand-offs that missed the app" |
 | `render` | a screen threw while rendering | message, stack and React's component stack. The member sees "Something went wrong / Retry" instead of the app closing (`AppErrorBoundary`) |
 | `early_exit` | the PREVIOUS launch never lived 15 s | JS cannot see a native crash, but it can see the last launch died young and at which `stage`. **Not every row is a crash**: a member closing the app inside 15 s also lands here. `extra.gap_ms` is the marker → next launch gap |
 | `emergency_launch` | expo-updates rolled back to the built-in bundle because the downloaded one crashed, OR (from 2026-11-14) expo-updates' own log records a failed launch not yet reported (`extra.source = 'updates_log'`) | `message` is expo-updates' own reason, or the newest launch-failure log entry as `code: message`. `extra.updates_log` lists up to 15 entries (`at`, `level`, `code`, `message`, `update_id`, `asset_id`, `stacktrace`). See "Native aborts before JS" below |
@@ -123,6 +123,34 @@ Migration: `data/migrations/app_errors_freeze_kinds_2026_11_06.sql` (hand-applie
 widens the kind CHECK and the RPC, raises the `extra` cap to 16,000 chars).
 
 **Native crashes and iOS app hangs** are in Sentry, copied to `sentry_events`: `docs/sentry.md`.
+
+## Hand-offs that missed the app (added 2026-11-15)
+
+Not a crash. A tap on a book button that did not end with iOS opening the
+book's app through the link that app claims writes one row, kind `js_error`,
+message `handoff: <book> -> <route> (inst= via= mod= claimed= build=)`.
+`mobile/src/lib/handoffLog.ts`; only DraftKings, FanDuel, Caesars and BetMGM,
+iOS only, one row per book and route per app session.
+
+A `link` row is not proof of Safari: iOS decides where the stored link opens,
+and the app cannot see which. `scheme`, `store`, `web` and `failed` are exact.
+
+| field (`extra.handoff`) | meaning |
+|---|---|
+| `route` | what opened: `scheme` (the app, by URL scheme, no bet on the slip), `store`, `link` (the stored link: the app or Safari, iOS decides), `web`, `failed` |
+| `installed` | a declared scheme said the app is installed (`true`), the verified one said no (`false`), or cannot tell (`null`) |
+| `viaApp` | iOS's answer to "open the claimed link in the app only": `false` = refused, `null` = not asked or the call failed |
+| `moduleInBinary` | the `OpenInApp` native module is in this binary. `false` on a build before 14201 |
+| `claimed` | host and path iOS was asked about, state masked; `null` = no claimed link was built |
+| `scheme` | the scheme opened on the `scheme` route. A candidate that appears here is a real scheme of that book's app |
+| `nativeBuild` | CFBundleVersion, e.g. `14301`; `null` if the binary cannot say |
+
+```sql
+SELECT received_at, device_id, message, extra->'handoff' AS handoff
+FROM app_errors
+WHERE kind = 'js_error' AND message LIKE 'handoff:%'
+ORDER BY received_at DESC LIMIT 50;
+```
 
 ## Where it lives
 

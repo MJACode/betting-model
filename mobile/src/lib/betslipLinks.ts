@@ -48,6 +48,20 @@ export function fillBetslipLink(link: string, state: string | null): string | nu
   return /\{[a-zA-Z]+\}/.test(out) ? null : out;
 }
 
+/** A link's host and path only, with the member's state masked: what the
+ *  hand-off log may keep (lib/handoffLog.ts). */
+export function linkShape(url: string | null): string | null {
+  if (!url) return null;
+  const m = /^https?:\/\/([^/?#]+)([^?#]*)/.exec(url);
+  if (!m) return null;
+  const host = m[1]!.replace(/^sports\.[a-z]{2}\.betmgm\.com$/i, 'sports.<st>.betmgm.com').replace(/^[a-z]{2}\.betrivers\.com$/i, '<st>.betrivers.com');
+  const path = m[2]!.replace(/^\/us\/[a-z]{2}\//i, '/us/<st>/');
+  return `${host}${path}`;
+}
+
+/** The books whose app claims a link (the cases below). */
+export const APP_CLAIMING_BOOKS: readonly string[] = ['draftkings', 'fanduel', 'williamhill_us', 'betmgm'];
+
 /**
  * The link a book's iPhone app CLAIMS, so iOS can be asked to open it in the
  * app and nowhere else (lib/openInApp.ts).
