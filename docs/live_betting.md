@@ -18,7 +18,8 @@ live_game_state_poller (15s, free MLB API)
 
 One process runs the whole loop: `python -m data.ingestors.live_trigger_orchestrator --loop`.
 **GitHub Actions cannot host this** (long-lived 15s loop). **As of 2026-07-21 it runs on the
-Railway worker**: `scheduler.py` has a `live_loop` supervisor job (`*/10`, 11am–midnight ET)
+Railway worker**: `scheduler.py` has a `live_loop` supervisor job (`*/10`, 11am–midnight ET,
+and once 60-100 s after every boot, as every in-play supervisor does since #1359)
 that relaunches the loop whenever it isn't running — the loop itself exits after ~1 min with
 no active games, so idle ticks are cheap no-ops and during a slate one invocation runs for
 hours (skipped-tick `max_instances` warnings in the worker log are the heartbeat). Kill
