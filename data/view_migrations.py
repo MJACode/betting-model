@@ -183,6 +183,14 @@ ACTIVE_MIGRATIONS: list[str] = [
     # in config.py in the same PR. Guards on the measured names; no-ops after
     # once. Never deletes a pick.
     "ncaaf_citadel_alias_2026_10_16.sql",
+    # 2026-11-15: the 2025-12-01 17:00Z odds snapshot carried LSU @ Ole Miss
+    # at 2026-11-21T17:00Z. CFBD and ESPN both have Wofford at that kickoff.
+    # The historical writer minted NCAAF_2026-11-21_lsu_ole-miss beside the
+    # schedule row and ncaaf_game_identity went STALE. Deletes that one
+    # unscored row when nothing references it. The ingest filter that
+    # refuses the next mint is in odds_ingestor.py in the same change.
+    # No-ops once the row is gone. Never deletes the Wofford row or a pick.
+    "ncaaf_drop_phantom_lsu_ole_miss_2026_11_21.sql",
     # 2026-09-07: three MLB games rows that are the previous night's game filed
     # again under its UTC date. Relabelled data_source='duplicate_utc', never
     # deleted or scored (five voided picks point at them). No-ops after once.

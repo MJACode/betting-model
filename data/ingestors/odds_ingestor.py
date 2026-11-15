@@ -959,6 +959,136 @@ def _filter_ufc_phantom(game_rows: list[dict], odds_rows: list[dict],
     return kept_games, kept_odds, len(game_rows) - len(kept_games)
 
 
+# A historical snapshot's board reaches the bowl games. It does not reach
+# next November. The measured bad event was 355 days out: the 2025-12-01
+# 17:00Z snapshot carried LSU @ Ole Miss at 2026-11-21T17:00Z.
+NCAAF_ODDS_MAX_LEAD_DAYS = 120
+
+
+def _without_game_ids(game_rows: list[dict], odds_rows: list[dict],
+                      dropped: set[str]) -> tuple[list[dict], list[dict]]:
+    if not dropped:
+        return game_rows, odds_rows
+    return (
+        [r for r in game_rows if r.get("game_id") not in dropped],
+        [r for r in odds_rows if r.get("game_id") not in dropped],
+    )
+
+
+def _drop_ncaaf_far_lead(game_rows: list[dict], odds_rows: list[dict],
+                         observed_on: str | None) -> tuple[list[dict], list[dict], list[str]]:
+    """Mint nothing whose kickoff is more than NCAAF_ODDS_MAX_LEAD_DAYS
+    after the day the price was observed. Pure: no database."""
+    if not observed_on:
+        return game_rows, odds_rows, []
+    try:
+        obs = date.fromisoformat(str(observed_on)[:10])
+    except ValueError:
+        return game_rows, odds_rows, []
+    dropped: set[str] = set()
+    notes: list[str] = []
+    for row in game_rows:
+        if row.get("sport") != "NCAAF":
+            continue
+        gid = row.get("game_id")
+        try:
+            kick = date.fromisoformat(str(row.get("game_date") or "")[:10])
+        except ValueError:
+            continue
+        lead = (kick - obs).days
+        if lead > NCAAF_ODDS_MAX_LEAD_DAYS and gid:
+            dropped.add(gid)
+            notes.append(
+                f"{gid} kickoff {kick.isoformat()} is {lead} days after "
+                f"{obs.isoformat()} (max {NCAAF_ODDS_MAX_LEAD_DAYS})")
+    kept_games, kept_odds = _without_game_ids(game_rows, odds_rows, dropped)
+    return kept_games, kept_odds, notes
+
+
+def _drop_ncaaf_opponent_conflicts(conn, game_rows: list[dict],
+                                   odds_rows: list[dict]) -> tuple[list[dict], list[dict], list[str]]:
+    """Drop an NCAAF mint when the schedule already has that home team on
+    that date against a different canonical school.
+
+    Both away names have to be ncaaf_teams.school values. An unresolved
+    Odds API spelling ("Citadel Bulldogs" against the stored "The Citadel")
+    is the alias path: those odds have to land on a row until the map
+    entry exists, and this filter must not eat them.
+    """
+    incoming = [r for r in game_rows if r.get("sport") == "NCAAF" and r.get("game_id")]
+    if not incoming or conn is None:
+        return game_rows, odds_rows, []
+    dates = list({r.get("game_date") for r in incoming if r.get("game_date")})
+    homes = list({r.get("home_team") for r in incoming if r.get("home_team")})
+    if not dates or not homes:
+        return game_rows, odds_rows, []
+    stored = conn.execute(
+        """
+        SELECT game_id, game_date, home_team, away_team
+        FROM games
+        WHERE sport = 'NCAAF'
+          AND game_date = ANY(%s)
+          AND home_team = ANY(%s)
+        """,
+        (dates, homes),
+    ).fetchall()
+    if not stored:
+        return game_rows, odds_rows, []
+    names = {r.get("away_team") for r in incoming} | {row[3] for row in stored}
+    names.discard(None)
+    canonical = {
+        row[0] for row in conn.execute(
+            "SELECT school FROM ncaaf_teams WHERE school = ANY(%s)",
+            (list(names),),
+        ).fetchall()
+    }
+    by_slot: dict[tuple, list] = {}
+    for gid, gdate, home, away in stored:
+        by_slot.setdefault((gdate, home), []).append((gid, away))
+    dropped: set[str] = set()
+    notes: list[str] = []
+    for row in incoming:
+        slot = by_slot.get((row.get("game_date"), row.get("home_team")), [])
+        away = row.get("away_team")
+        if away not in canonical:
+            continue
+        for gid, stored_away in slot:
+            if gid == row["game_id"] or stored_away == away:
+                continue
+            if stored_away not in canonical:
+                continue
+            dropped.add(row["game_id"])
+            notes.append(
+                f"{row['game_id']} ({away}) conflicts with {gid} "
+                f"({stored_away}) on {row.get('game_date')} "
+                f"{row.get('home_team')}")
+            break
+    kept_games, kept_odds = _without_game_ids(game_rows, odds_rows, dropped)
+    return kept_games, kept_odds, notes
+
+
+def drop_ncaaf_unscheduled_opponents(conn, game_rows: list[dict], odds_rows: list[dict],
+                                     *, observed_on: str | None = None
+                                     ) -> tuple[list[dict], list[dict]]:
+    """The games rows this ingestor is allowed to mint for NCAAF.
+
+    The schedule row stays. A conflicting odds event is not written onto
+    it and is not written beside it. See _drop_ncaaf_opponent_conflicts
+    for the 2026-11-21 Ole Miss measurement.
+    """
+    game_rows, odds_rows, notes = _drop_ncaaf_far_lead(game_rows, odds_rows, observed_on)
+    try:
+        game_rows, odds_rows, more = _drop_ncaaf_opponent_conflicts(conn, game_rows, odds_rows)
+        notes.extend(more)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(
+            f"NCAAF opponent filter failed ({exc}); "
+            f"keeping the rows the lead window left")
+    for note in notes:
+        logger.warning(f"NCAAF odds event not minted: {note}")
+    return game_rows, odds_rows
+
+
 def _fetch_ufc_totals_per_event(sport_key: str, snapshot_type: str,
                                 snapshot_at: str,
                                 known_slugs: set = None) -> list[dict]:
@@ -1553,6 +1683,13 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
                     game_rows, odds_rows, _known_fighter_slugs(conn))
             except Exception as exc:                          # noqa: BLE001
                 logger.warning(f"pregame fetch: UFC phantom filter skipped ({exc})")
+        if sp == "NCAAF" and game_rows:
+            try:
+                conn = conn or get_connection()
+                game_rows, odds_rows = drop_ncaaf_unscheduled_opponents(
+                    conn, game_rows, odds_rows, observed_on=snapshot_at[:10])
+            except Exception as exc:                          # noqa: BLE001
+                logger.warning(f"pregame fetch: NCAAF opponent filter skipped ({exc})")
         if game_rows:
             try:
                 conn = conn or get_connection()
@@ -1686,6 +1823,10 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 n_live = _mark_in_play(game_rows, odds_rows)
                 if n_live:
                     logger.info(f"{sp}: {n_live} row(s) stamped after the start stored as in_play")
+            kept_ids = {r["game_id"] for r in game_rows}
+            game_rows, odds_rows = drop_ncaaf_unscheduled_opponents(
+                conn, game_rows, odds_rows, observed_on=target_date)
+            blocked_ids = kept_ids - {r["game_id"] for r in game_rows}
             n_games = _upsert_games(conn, game_rows)
             n_odds  = _insert_odds(conn, odds_rows)
             total_games += n_games
@@ -1738,6 +1879,8 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                         meter["error"] = repr(fetch_exc)[:200]
                         alt_rows = []
                         logger.warning(f"{sp} alternate game lines fetch failed: {fetch_exc}")
+                    if blocked_ids and alt_rows:
+                        alt_rows = [r for r in alt_rows if r.get("game_id") not in blocked_ids]
                     if alt_rows:
                         n_alt = _insert_odds(conn, alt_rows)
                         total_odds += n_alt
@@ -1873,6 +2016,8 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
 
     conn = get_connection()
     try:
+        game_rows, odds_rows = drop_ncaaf_unscheduled_opponents(
+            conn, game_rows, odds_rows, observed_on=snapshot_date)
         n_games = _upsert_games(conn, game_rows)
         n_odds  = _insert_odds(conn, odds_rows)
         conn.commit()
@@ -2124,6 +2269,8 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                         events, sport, "open", snapshot_at)
                     for r in odds_rows:
                         r["source"] = HISTORICAL_ODDS_SOURCE
+                    game_rows, odds_rows = drop_ncaaf_unscheduled_opponents(
+                        conn, game_rows, odds_rows, observed_on=day.isoformat())
                     flipped = _mark_in_play(game_rows, odds_rows)
                     stats["marked_in_play"] += flipped
                     if game_rows:
