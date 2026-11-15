@@ -28,7 +28,7 @@ import {
   type FeedbackCategory,
   type FeedbackThread,
 } from '@/lib/feedbackHelpers';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, sectionHeaderText, opacity, card, cardDense } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
@@ -245,9 +245,7 @@ const styles = StyleSheet.create({
     marginTop: -spacing.xs,
   },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.md,
+    ...cardDense,
     gap: spacing.sm,
   },
   cardLabel: {
@@ -299,7 +297,7 @@ const styles = StyleSheet.create({
     minWidth: 84,
     alignItems: 'center',
   },
-  sendBtnDisabled: { opacity: 0.4 },
+  sendBtnDisabled: { opacity: opacity.disabled },
   sendText: {
     fontFamily: font.family,
     fontSize: font.size.body,
@@ -307,22 +305,15 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
   },
   sectionHeader: {
-    fontFamily: font.family,
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    ...sectionHeaderText,
     marginTop: spacing.sm,
     marginLeft: 2,
   },
   threadCard: {
+    ...cardDense,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.md,
   },
   threadTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.tint },
@@ -346,9 +337,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   emptyCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
+    ...card,
     alignItems: 'center',
     gap: spacing.xs,
   },
@@ -376,5 +365,5 @@ const styles = StyleSheet.create({
     color: colors.tint,
     textDecorationLine: 'underline',
   },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: opacity.pressed },
 });

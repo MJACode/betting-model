@@ -59,6 +59,7 @@ import {
 import { EMPTY_PROP_FILTERS, type ByomPropFilterState } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = RouteProp<RootStackParamList, 'ByomBuilder'>;
@@ -403,31 +404,21 @@ export function ByomBuilderScreen() {
           </Pressable>
         ) : null}
         {step < 3 ? (
-          <Pressable
+          <PrimaryButton
+            label={nextLabel}
             onPress={goNext}
             disabled={nextDisabled}
-            accessibilityRole="button"
-            accessibilityLabel={nextLabel}
             accessibilityHint={sideReason ?? undefined}
-            accessibilityState={{ disabled: nextDisabled }}
-            style={[styles.primary, nextDisabled && styles.primaryDisabled]}
-          >
-            <Text style={[styles.primaryText, nextDisabled && styles.primaryTextDisabled]}>{nextLabel}</Text>
-          </Pressable>
+          />
         ) : (
-          <Pressable
+          <PrimaryButton
+            label={signedIn || !AUTH_ENABLED ? 'Save model' : 'Sign in to save'}
             onPress={() => void save()}
-            disabled={saveDisabled}
-            accessibilityRole="button"
+            loading={saving}
+            disabled={saveDisabled && !saving}
             accessibilityLabel={signedIn || !AUTH_ENABLED ? 'Save model' : 'Sign in to save'}
             accessibilityHint={sideReason ?? undefined}
-            accessibilityState={{ disabled: saveDisabled }}
-            style={[styles.primary, saveDisabled && styles.primaryDisabled]}
-          >
-            <Text style={[styles.primaryText, saveDisabled && styles.primaryTextDisabled]}>
-              {saving ? 'Saving…' : signedIn || !AUTH_ENABLED ? 'Save model' : 'Sign in to save'}
-            </Text>
-          </Pressable>
+          />
         )}
       </View>
       <BetslipBarSpacer />
@@ -531,25 +522,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separatorOpaque,
     backgroundColor: colors.bg,
-  },
-  primary: {
-    minHeight: 44,
-    borderRadius: radii.md,
-    backgroundColor: colors.tint,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  primaryDisabled: {
-    backgroundColor: colors.noneSoft,
-  },
-  primaryText: {
-    color: colors.textInverse,
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-  },
-  primaryTextDisabled: {
-    color: colors.textSecondary,
   },
   back: {
     minHeight: 44,

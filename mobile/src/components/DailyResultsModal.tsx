@@ -12,7 +12,7 @@ import { Modal } from '@/components/TrackedModal';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, opacity, card, cardDense } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
 import { sportSpokenName } from '@/lib/loadState';
 import { unitsSpeech } from '@/lib/a11y';
@@ -20,6 +20,7 @@ import { addDays, formatAmerican, labelWithoutStake } from '@/lib/format';
 import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { modelHistoryMark, modelLong, modelShort } from '@/lib/modelMeta';
 import { postedPickUnits } from '@/lib/thresholds';
+import { RESULT_TONE } from './PickResultChip';
 import { CalendarGrid } from '@/components/CalendarGrid';
 import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import {
@@ -183,7 +184,7 @@ export function DailyResultsModal({
             disabled={!canPrev}
             hitSlop={10}
             accessibilityLabel="Previous day"
-            style={({ pressed }) => [styles.navBtn, pressed && { opacity: 0.6 }]}
+            style={({ pressed }) => [styles.navBtn, pressed && { opacity: opacity.pressed }]}
           >
             <Ionicons
               name="chevron-back"
@@ -197,7 +198,7 @@ export function DailyResultsModal({
             onPress={() => setCalendarOpen((open) => !open)}
             hitSlop={8}
             accessibilityLabel="Pick a date"
-            style={({ pressed }) => [styles.dateChip, pressed && { opacity: 0.6 }]}
+            style={({ pressed }) => [styles.dateChip, pressed && { opacity: opacity.pressed }]}
           >
             <Ionicons name="calendar-outline" size={15} color={colors.tint} />
             <Text style={styles.dateChipText}>{shortDate(date)}</Text>
@@ -213,7 +214,7 @@ export function DailyResultsModal({
             disabled={!canNext}
             hitSlop={10}
             accessibilityLabel="Next day"
-            style={({ pressed }) => [styles.navBtn, pressed && { opacity: 0.6 }]}
+            style={({ pressed }) => [styles.navBtn, pressed && { opacity: opacity.pressed }]}
           >
             <Ionicons
               name="chevron-forward"
@@ -502,7 +503,7 @@ function SportCard({
                 : ', return unavailable'
           }`}
           accessibilityHint={open ? 'Hides the models' : 'Shows the models'}
-          style={({ pressed }) => [styles.sportToggle, pressed && { opacity: 0.6 }]}
+          style={({ pressed }) => [styles.sportToggle, pressed && { opacity: opacity.pressed }]}
         >
           {header}
         </Pressable>
@@ -558,13 +559,8 @@ function ModelRow({ model }: { model: ModelDayStats }) {
   );
 }
 
-const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }> = {
-  // The letter carries the result; the ink makes it readable on its wash
-  // (4.61 / 5.01 / 9.55:1 — the bright hues were 2.0–3.1:1; audit H2).
-  WIN: { label: 'W', color: colors.betInk, bg: colors.betSoft },
-  LOSS: { label: 'L', color: colors.avoidInk, bg: colors.avoidSoft },
-  PUSH: { label: 'P', color: colors.textSecondary, bg: colors.noneSoft },
-};
+// One W/L/P table, shared with the pick card's result chip.
+const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }> = RESULT_TONE;
 
 function PickRow({ pick }: { pick: Pick }) {
   const res = RESULT_STYLE[pick.result ?? ''] ?? RESULT_STYLE.PUSH!;
@@ -801,9 +797,7 @@ const styles = StyleSheet.create({
   sportChipTextActive: { color: colors.bg },
 
   hero: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
+    ...card,
     alignItems: 'center',
   },
   heroLabel: { fontSize: font.size.footnote, color: colors.textSecondary },
@@ -853,9 +847,7 @@ const styles = StyleSheet.create({
   heroStatLabel: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 2 },
 
   sportCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.md,
+    ...cardDense,
   },
   sportHeader: {
     flexDirection: 'row',

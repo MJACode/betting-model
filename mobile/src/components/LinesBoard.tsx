@@ -40,7 +40,7 @@ import {
   type LinesPickRef,
   type LinesSportFilter,
 } from '@/lib/linesBoard';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import type { GameRow } from '@/types';
 
 /**
@@ -479,6 +479,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
 });

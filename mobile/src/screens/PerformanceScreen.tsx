@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Pressable,
   RefreshControl,
@@ -17,6 +16,7 @@ import { SettingsButton } from '@/components/SettingsButton';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { useSportsbookSync } from '@/hooks/useSportsbookSync';
+import { ErrorBanner } from '@/components/ErrorState';
 import { useManualBets, type ManualBet, type ManualBetResult } from '@/hooks/useManualBets';
 import { useTrackedBetResults, type StakeMode } from '@/hooks/useTrackedBetResults';
 import { ManualBetModal } from '@/components/ManualBetModal';
@@ -25,18 +25,20 @@ import { unitsSpeech } from '@/lib/a11y';
 import type { SyncedBet } from '@/lib/sharpsports';
 import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance';
 import { postedTrackedStake } from '@/lib/trackedStake';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, opacity, card, cardDense } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { PickRowTitle } from '@/components/PickRowTitle';
+import { PrimaryButton } from '@/components/PrimaryButton';
+import { SkeletonList } from '@/components/Skeleton';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export function PerformanceScreen() {
   const navigation = useNavigation<Nav>();
-  const { accounts, bets, summary, linked, needsReconnect, loading, refresh } =
+  const { accounts, bets, summary, linked, needsReconnect, loading, error, refresh } =
     useSportsbookSync();
   const manual = useManualBets();
   const tracked = useTrackedBetResults();
@@ -118,6 +120,13 @@ export function PerformanceScreen() {
             <Text style={styles.subtitle}>Your bets, tracked by you</Text>
           </View>
 
+          {/* A failed sync used to leave this screen silent: the hook kept the
+              error and nothing read it, so a linked member saw "coming soon"
+              or an empty list (UI consistency pass, 2026-11-14). */}
+          {error ? (
+            <ErrorBanner what="your synced bets" error={error} onRetry={() => void refresh(true)} retrying={loading} />
+          ) : null}
+
           <View style={styles.soon}>
             <Ionicons name="link-outline" size={15} color={colors.textTertiary} />
             <View style={styles.soonText}>
@@ -181,6 +190,13 @@ export function PerformanceScreen() {
           <Text style={styles.subtitle}>{bookLabel || 'Sportsbook'} · pull to refresh</Text>
         </View>
 
+        {/* A failed sync used to leave this screen silent: the hook kept the
+            error and nothing read it, so a linked member saw "coming soon"
+            or an empty list (UI consistency pass, 2026-11-14). */}
+        {error ? (
+          <ErrorBanner what="your synced bets" error={error} onRetry={() => void refresh(true)} retrying={loading} />
+        ) : null}
+
         <Pressable
           onPress={() => navigation.navigate('TrackRecord')}
           accessibilityRole="button"
@@ -227,7 +243,11 @@ export function PerformanceScreen() {
           </View>
         </View>
 
-        {bets.length === 0 ? (
+        {/* One state at a time: loading, failed (the banner above says so),
+            empty, or the rows — never "No synced bets" under a skeleton. */}
+        {loading && bets.length === 0 ? (
+          <SkeletonList label="your synced bets" style={styles.skeleton} />
+        ) : error && bets.length === 0 ? null : bets.length === 0 ? (
           <Text style={styles.empty}>
             No synced bets yet. Place a bet on a linked book — it’ll appear here after the next
             sync.
@@ -236,19 +256,15 @@ export function PerformanceScreen() {
           bets.slice(0, 100).map((b) => <BetRow key={b.bet_id} bet={b} />)
         )}
 
-        {loading && bets.length === 0 ? <ActivityIndicator style={styles.loading} /> : null}
-
         {trackedCard}
         {manualCard}
 
-        <Pressable
+        <PrimaryButton
+          label="Manage connections"
           onPress={() => navigation.navigate('ConnectSportsbook')}
-          accessibilityRole="button"
-          accessibilityLabel="Manage connections"
-          style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
-        >
-          <Text style={styles.secondaryBtnText}>Manage connections</Text>
-        </Pressable>
+          variant="secondary"
+          style={styles.secondaryBtn}
+        />
         <BetslipBarSpacer />
       </ScrollView>
       {addModal}
@@ -295,14 +311,7 @@ function ManualBetsCard({
             Record the bets you place — any book, any sport — and your record builds here. Stored on
             this device.
           </Text>
-          <Pressable
-            onPress={onAdd}
-            accessibilityRole="button"
-            accessibilityLabel="Add a bet"
-            style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
-          >
-            <Text style={styles.primaryBtnText}>Add a bet</Text>
-          </Pressable>
+          <PrimaryButton label="Add a bet" onPress={onAdd} />
         </>
       ) : (
         <>
@@ -735,9 +744,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   summaryCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },
@@ -833,11 +840,9 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.medium,
   },
   betRow: {
+    ...cardDense,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
   },
@@ -867,9 +872,7 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   manualCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     marginTop: spacing.md,
   },
@@ -973,10 +976,8 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
   },
   stakeModalCard: {
+    ...card,
     alignSelf: 'stretch',
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
   },
   stakeModalTitle: {
     fontSize: font.size.headline,
@@ -1028,37 +1029,9 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     color: colors.tint,
   },
-  primaryBtn: {
-    backgroundColor: colors.tint,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xl,
-    borderRadius: radii.md,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-  },
-  primaryBtnText: {
-    color: colors.textInverse,
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-  },
-  secondaryBtn: {
-    backgroundColor: colors.bgCard,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xl,
-    borderRadius: radii.md,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    alignItems: 'center',
-  },
-  secondaryBtnText: {
-    color: colors.tint,
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-  },
+  secondaryBtn: { marginHorizontal: spacing.lg, marginTop: spacing.md },
   btnPressed: {
-    opacity: 0.7,
+    opacity: opacity.pressed,
   },
-  loading: {
-    marginTop: spacing.lg,
-  },
+  skeleton: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
 });

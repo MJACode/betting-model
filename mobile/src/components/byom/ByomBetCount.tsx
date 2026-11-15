@@ -5,7 +5,7 @@ import { ErrorBanner } from '@/components/ErrorState';
 import { Skeleton } from '@/components/Skeleton';
 import { formatSignedUnits } from '@/lib/format';
 import { formatByomRecord, type ByomRecord } from '@/lib/byomRecord';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity, card } from '@/lib/theme';
 
 /**
  * Navy bet-count bar. A zero count is the existing empty line, not a
@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: opacity.pressed },
   showBetsText: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
@@ -196,9 +196,7 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
   },
   empty: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   emptyText: {

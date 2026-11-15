@@ -47,6 +47,15 @@ export const BET_ALL_SKIP_TEXT: Record<BetAllSkipReason, string> = {
   noPrice: 'No price at your books',
 };
 
+/** The board row's count form: "5 games started", not "5 game started". */
+const BET_ALL_SKIP_PLURAL: Record<BetAllSkipReason, string> = {
+  started: 'games started',
+  priceCheck: 'price checks',
+  oldPrice: 'old prices',
+  notAtMyBooks: 'not at your books',
+  noPrice: 'no price at your books',
+};
+
 /** Said wherever Bet all is offered (Matt, 2026-11-14). */
 export const BET_ALL_LIVE_NOTE = 'Pre-game signals only. Live bets aren’t included.';
 
@@ -60,7 +69,8 @@ export function betAllMainSkip(skipped: readonly { reason: BetAllSkipReason }[])
   for (const s of skipped) n.set(s.reason, (n.get(s.reason) ?? 0) + 1);
   const top = [...n.entries()].sort((a, b) => b[1] - a[1])[0];
   if (!top) return 'None ready';
-  return `${top[1]} ${BET_ALL_SKIP_TEXT[top[0]].toLowerCase()}`;
+  const text = top[1] === 1 ? BET_ALL_SKIP_TEXT[top[0]].toLowerCase() : BET_ALL_SKIP_PLURAL[top[0]];
+  return `${top[1]} ${text}`;
 }
 
 export interface BetAllQuote {

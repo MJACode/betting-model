@@ -1,0 +1,100 @@
+{
+  "dest": "data/horse",
+  "checked": "2026-11-14",
+  "betfair_listing_checked": "2026-11-15",
+  "kaggle": [
+    {
+      "id": "gdaley-hkracing",
+      "owner": "gdaley",
+      "slug": "hkracing",
+      "title": "Horse Racing in HK",
+      "licence": "CC0: Public Domain",
+      "version": 2,
+      "updated": "2019-11-17",
+      "zip_bytes": 3584412,
+      "large": false,
+      "files": {
+        "races.csv": {"bytes": 896095, "rows": 6349, "columns": 37},
+        "runs.csv": {"bytes": 10564287, "rows": 79447, "columns": 37}
+      },
+      "date_range": "1997-06-02 to 2005-08-28",
+      "note": "The dataset card says these dates have been obscured and are not the real race dates. Gaps between races should still be right. Horse and jockey names are not included. 6348 distinct race_id values in runs.csv; one race in races.csv has no runs."
+    },
+    {
+      "id": "lantanacamara-hong-kong-horse-racing",
+      "owner": "lantanacamara",
+      "slug": "hong-kong-horse-racing",
+      "title": "Hong Kong Horse Racing Results 2014-17 Seasons",
+      "licence": "Unknown",
+      "version": 5,
+      "updated": "2017-08-18",
+      "zip_bytes": 2245030,
+      "large": false,
+      "files": {
+        "race-result-race.csv": {"bytes": 6048396, "rows": 2367},
+        "race-result-horse.csv": {"bytes": 2788615, "rows": 30189, "horses": 2162}
+      },
+      "date_range": "2014-09-14 to 2017-07-16",
+      "note": "Kaggle lists the licence as Unknown. The card says the rows were extracted from the Hong Kong Jockey Club website. 254 race dates, Sha Tin and Happy Valley. Do not commit a sample."
+    },
+    {
+      "id": "deltaromeo-uk-ireland-1988-2026",
+      "owner": "deltaromeo",
+      "slug": "horse-racing-results-ukireland-2015-2025",
+      "title": "Horse Racing results - UK/Ireland 1988-2026",
+      "licence": "Community Data License Agreement - Sharing - Version 1.0 (https://cdla.io/sharing-1-0/)",
+      "version": 129,
+      "updated": "2026-10-27",
+      "zip_bytes": 1120674866,
+      "unzipped_bytes": 3947445590,
+      "large": true,
+      "rows": {
+        "raceform.csv": {"rows": 1904737, "races": 194125, "dates": "2015-01-01 to 2026-10-23"},
+        "1988-2004.csv": {"valid_rows": 1653834, "races": 157900, "dates": "1988-01-01 to 2004-12-31"},
+        "2005-2014.csv": {"rows": 1555126, "races": 153300, "dates": "2005-01-01 to 2014-12-31"}
+      },
+      "combined_valid_runner_rows": 5113697,
+      "note": "Results and starting prices from a Sporting Life scraper (tastethewhip/Sporting-Life-Results-Scraper). Flat, Hurdle, Chase, and NH Flat. Not a live odds feed. The zip is 1.12 GB and the listing is about 3.95 GB uncompressed. --all skips it unless --include-large is set."
+    },
+    {
+      "id": "sheikhbarabas-uk-ireland-2005-2019",
+      "owner": "sheikhbarabas",
+      "slug": "horse-racing-results-uk-ireland-2005-to-2019",
+      "title": "Horse Racing Results - UK & Ireland 2005 to 2019",
+      "licence": "Unknown",
+      "version": 1,
+      "updated": "2020-06-02",
+      "zip_bytes": 78948203,
+      "large": false,
+      "files": {
+        "all_races05_19.csv": {"bytes": 332987202, "rows": 744347, "columns": 42, "races": 72896}
+      },
+      "date_range": "2005-04-24 to 2019-12-29",
+      "note": "National Hunt only (Bumper, Chase, Hurdle, Unknown). 30573 rows have date=NA. Kaggle lists the licence as Unknown. Do not commit a sample. Flat racing is not in this file."
+    }
+  ],
+  "betfair_anz_thoroughbreds": {
+    "base": "https://betfair-datascientists.github.io/data/assets/",
+    "listing": "https://betfair-datascientists.github.io/data/dataListing/",
+    "licence": "Published free by Betfair Australia on the Automation Hub. No login. CSV market snapshots for Australia and New Zealand thoroughbreds: max and min matched prices and volume, weighted average price, BSP, winner, and on the monthly files the best available prices and overrounds at the scheduled start, plus win and place results. Not a form or sectional feed. Harness and greyhound files on the same listing are not fetched.",
+    "annual_zip_years": [2020, 2021, 2022, 2023, 2024, 2025],
+    "monthly_csv": ["2026_01", "2026_02", "2026_03", "2026_04", "2026_05", "2026_06", "2026_07", "2026_08", "2026_09", "2026_10"]
+  },
+  "manual": [
+    {
+      "id": "equibase-2023",
+      "licence": "Internal, non-commercial testing only. Not for wagering use. Not for redistribution. Never commit the files.",
+      "registration": "https://www.equibase.com/handicappersdata.cfm",
+      "email": "signalbaseskinny@gmail.com",
+      "wait": "5-7 business days",
+      "note": "Full-year 2023 past performances and matching result charts. Equibase emails the drop. The fetch script prints these instructions and does not download or write the file."
+    }
+  ],
+  "not_downloaded": [
+    {
+      "id": "nyra-big-data-derby-2022",
+      "url": "https://www.kaggle.com/competitions/big-data-derby-2022/data",
+      "note": "The competition data list returned HTTP 401 without a Kaggle login on 14 Nov 2026. A download attempt returned HTTP 404. No account was created. Community re-uploads were left alone because the licence is not a clear open licence."
+    }
+  ]
+}

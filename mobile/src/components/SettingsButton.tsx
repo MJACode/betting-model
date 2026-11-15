@@ -9,7 +9,7 @@ import { Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { colors } from '@/lib/theme';
+import { colors, opacity } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -22,7 +22,7 @@ export function SettingsButton() {
       hitSlop={8}
       accessibilityLabel="Open settings"
       accessibilityRole="button"
-      style={({ pressed }) => [styles.btn, pressed && { opacity: 0.6 }]}
+      style={({ pressed }) => [styles.btn, pressed && { opacity: opacity.pressed }]}
     >
       <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
     </Pressable>

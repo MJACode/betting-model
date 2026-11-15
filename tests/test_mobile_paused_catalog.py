@@ -201,8 +201,11 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
       Score, book hand-off, betslip) when `paused`.
     """
     hook = _read(MOBILE / "src" / "hooks" / "useTodayPicks.ts")
-    assert "setData(all.filter((d) => !isPausedForDisplay(d.pick)))" in hook
-    assert "setPausedData(all.filter((d) => isPausedForDisplay(d.pick)))" in hook
+    # `open` is the board minus today's finished games (2026-11-15: those
+    # reach only the Picks screen, as `finishedData`, behind the Final chip).
+    assert "setData(open.filter((d) => !isPausedForDisplay(d.pick)))" in hook
+    assert "setPausedData(open.filter((d) => isPausedForDisplay(d.pick)))" in hook
+    assert "const open = all.filter((d) => !over(d));" in hook
 
     screen = _read(MOBILE / "src" / "screens" / "PicksHomeScreen.tsx")
     assert "[...allData, ...pausedData].filter((d) => d.pick.sport === sport)" in screen

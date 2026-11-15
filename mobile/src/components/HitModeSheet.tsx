@@ -4,7 +4,7 @@ import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { HIT_MODES, hitModeHeadline, rulerValueLabel, type HitMode } from '@/lib/hitMode';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 
 /**
  * At Least / Over / Under — which side of the ruler's number the board is
@@ -198,12 +198,12 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.separatorOpaque,
   },
-  rowDisabled: { opacity: 0.45 },
+  rowDisabled: { opacity: opacity.disabled },
   textDisabled: { color: colors.textTertiary },
   note: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: spacing.sm,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: opacity.pressed },
 });

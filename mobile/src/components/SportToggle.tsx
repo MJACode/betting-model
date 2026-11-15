@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LiveDot } from '@/components/LiveDot';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
 import { sportChipState } from '@/lib/loadState';
 import { reachFrame } from '@/lib/a11y';
@@ -191,7 +191,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgCard,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
   label: {
     fontSize: font.size.footnote,

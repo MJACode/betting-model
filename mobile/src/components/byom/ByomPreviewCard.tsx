@@ -10,7 +10,7 @@ import {
   formatByomRecord,
   type ByomRecord,
 } from '@/lib/byomRecord';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, opacity, card } from '@/lib/theme';
 
 export function ByomPreviewCard({
   record,
@@ -141,9 +141,7 @@ export function ByomPreviewCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   empty: {
@@ -201,7 +199,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: opacity.pressed },
   showBetsText: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
@@ -213,7 +211,7 @@ const styles = StyleSheet.create({
   },
   skel: {
     height: 96,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
     backgroundColor: colors.noneSoft,
     marginBottom: spacing.md,
   },

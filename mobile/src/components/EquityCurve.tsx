@@ -22,7 +22,7 @@ export type { EquityPoint };
 import { formatSigned } from '@/lib/format';
 import { equityStrokeToken } from '@/lib/recordHero';
 import { unitsSpeech } from '@/lib/a11y';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, card } from '@/lib/theme';
 
 /**
  * Cumulative posted-stake equity curve. The line is betInk when the hero
@@ -232,9 +232,7 @@ export function EquityCurve({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   label: {

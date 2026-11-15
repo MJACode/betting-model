@@ -26,8 +26,9 @@ import { trueMinus } from '@/lib/signalsCard';
 import { formatAmerican, formatUnits } from '@/lib/format';
 import { stakeFor } from '@/lib/thresholds';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, sectionHeaderText, opacity, cardDense } from '@/lib/theme';
 import type { Pick } from '@/types';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 type StepStatus = 'todo' | 'opened' | 'placed' | 'skipped';
 
@@ -36,8 +37,9 @@ interface Props {
   sport: string;
   candidates: BetAllCandidates;
   myBooks: readonly string[];
-  /** Adds a placed bet to the member's tracked bets (useTrackedBets.track). */
-  onTrack: (pick: Pick) => void;
+  /** Adds placed bets to the member's tracked bets, all in one write
+   *  (useTrackedBets.trackMany). */
+  onTrack: (picks: Pick[]) => void;
   onClose: () => void;
 }
 
@@ -145,7 +147,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
   const answer = (book: string, placed: 'placed' | 'todo' | 'skipped') => {
     if (placed === 'placed') {
       const step = steps.find((s) => s.bookmaker === book);
-      step?.legs.forEach((l) => onTrack(l.pick));
+      if (step) onTrack(step.legs.map((l) => l.pick));
     }
     setStatus((s) => ({ ...s, [book]: placed }));
     setAskFor(null);
@@ -359,16 +361,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                     ? 'No picks selected'
                     : `${totals.legs} single ${totals.legs === 1 ? 'bet' : 'bets'} · ${planSteps.length} ${planSteps.length === 1 ? 'sportsbook' : 'sportsbooks'} · ${stakeText(totals.risk, totals.win)}`}
                 </Text>
-                <Pressable
-                  onPress={start}
-                  disabled={totals.legs === 0}
-                  accessibilityRole="button"
-                  accessibilityLabel={ctaLabel}
-                  accessibilityState={{ disabled: totals.legs === 0 }}
-                  style={({ pressed }) => [styles.cta, totals.legs === 0 && styles.ctaOff, pressed && styles.pressed]}
-                >
-                  <Text style={styles.ctaText}>{ctaLabel}</Text>
-                </Pressable>
+                <PrimaryButton label={ctaLabel} onPress={start} disabled={totals.legs === 0} />
               </View>
             </>
           ) : (
@@ -463,9 +456,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                   <Text style={styles.summary}>
                     {placedLegs === 0 ? 'Nothing was tracked.' : `${placedLegs} ${placedLegs === 1 ? 'bet' : 'bets'} added to tracked bets.`}
                   </Text>
-                  <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" style={({ pressed }) => [styles.cta, pressed && styles.pressed]}>
-                    <Text style={styles.ctaText}>Done</Text>
-                  </Pressable>
+                  <PrimaryButton label="Done" onPress={onClose} />
                 </View>
               ) : null}
             </>
@@ -523,11 +514,7 @@ const styles = StyleSheet.create({
   list: { flexGrow: 0, flexShrink: 1 },
   group: { marginBottom: spacing.md },
   groupTitle: {
-    fontSize: font.size.caption,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
     marginBottom: spacing.xs,
     marginLeft: spacing.xs,
   },
@@ -557,20 +544,8 @@ const styles = StyleSheet.create({
   },
   footer: { paddingTop: spacing.sm, gap: spacing.sm },
   summary: { fontSize: font.size.footnote, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
-  cta: {
-    minHeight: 48,
-    borderRadius: radii.pill,
-    backgroundColor: colors.tint,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  ctaOff: { opacity: 0.4 },
-  ctaText: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textInverse },
   ask: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
+    ...cardDense,
     marginBottom: spacing.md,
     gap: spacing.xs,
     borderWidth: 1.5,
@@ -590,7 +565,7 @@ const styles = StyleSheet.create({
   askPrimary: { backgroundColor: colors.tint },
   askBtnText: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textPrimary },
   askPrimaryText: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textInverse },
-  step: { backgroundColor: colors.bgCard, borderRadius: radii.md, padding: spacing.md, marginBottom: spacing.sm, gap: spacing.sm },
+  step: { ...cardDense, marginBottom: spacing.sm, gap: spacing.sm },
   stepNext: { borderWidth: 1.5, borderColor: colors.tint },
   stepTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm },
   stepTitle: { flex: 1, fontSize: font.size.body, fontWeight: font.weight.bold, color: colors.textPrimary },
@@ -609,5 +584,5 @@ const styles = StyleSheet.create({
   openText: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textInverse },
   link: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.tint },
   note: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 18, marginBottom: spacing.sm },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: opacity.pressed },
 });

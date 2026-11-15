@@ -12,7 +12,7 @@ import { MODEL_BOOK } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
 import { useEnteredSgpPrices, useSgpHaircuts } from '@/hooks/useSgpHaircuts';
 import { formatUnits } from '@/lib/thresholds';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 
 /**
  * The persistent betslip bar — one line above the tab bar, on every page, but
@@ -210,7 +210,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   pressed: {
-    opacity: 0.85,
+    opacity: opacity.pressed,
   },
   left: {
     flexDirection: 'row',
@@ -247,7 +247,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   priceLabel: {
-    color: '#FFFFFFB8',
+    color: colors.textInverseSecondary,
     fontSize: font.size.footnote,
   },
   priceValue: {
@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
   },
   payLabel: {
-    color: '#FFFFFFB8',
+    color: colors.textInverseSecondary,
     fontSize: font.size.caption,
   },
   payValue: {

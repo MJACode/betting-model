@@ -21,7 +21,7 @@ import {
   winRateText,
 } from '@/lib/recordHero';
 import type { TrackRecordSummary } from '@/lib/trackRecord';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, spacing, card } from '@/lib/theme';
 
 const SPARK_W = 104;
 const SPARK_H = 56;
@@ -203,9 +203,7 @@ function GridCell({
 
 const styles = StyleSheet.create({
   heroCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   top: {

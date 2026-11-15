@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View, type DimensionValue, type StyleProp, type ViewStyle } from 'react-native';
-import { colors, radii, spacing } from '@/lib/theme';
+import { card, colors, radii, spacing } from '@/lib/theme';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 
 /**
@@ -76,7 +76,38 @@ export function SkeletonRow() {
   );
 }
 
+/**
+ * A section still loading: a standard card holding `rows` SkeletonRows. The
+ * drop-in for a bare spinner under a section header, so a detail screen
+ * loads the way the main tabs do (UI consistency pass, 2026-11-14: Player
+ * Stats, Team Stats, Scoreboard game, Performance and both model pages used
+ * a spinner where Picks, Stats, Models and Record show placeholders).
+ */
+export function SkeletonList({
+  label,
+  rows = 3,
+  style,
+}: {
+  /** What is loading, read as "Loading {label}". */
+  label: string;
+  rows?: number;
+  /** Outer margins, to sit on the screen's own gutter. */
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <Skeleton label={label} style={[styles.list, style]}>
+      {Array.from({ length: rows }, (_, i) => (
+        <SkeletonRow key={i} />
+      ))}
+    </Skeleton>
+  );
+}
+
 const styles = StyleSheet.create({
+  list: {
+    ...card,
+    paddingVertical: spacing.xs,
+  },
   block: {
     borderRadius: radii.sm,
     backgroundColor: colors.noneSoft,

@@ -10,7 +10,7 @@ import {
   settingsTitleMaxWidth,
   stackBackDecision,
 } from '@/lib/stackBack';
-import { colors, font } from '@/lib/theme';
+import { colors, font, opacity } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 /** Same type as the player title, sized for a short section name such as "Legal & support". */
@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
     zIndex: 20,
     elevation: 20,
   },
-  pressed: { opacity: 0.5 },
+  pressed: { opacity: opacity.pressed },
   label: {
     fontSize: font.size.headline,
     color: colors.tint,

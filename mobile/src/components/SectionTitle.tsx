@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { InfoTooltip } from '@/components/InfoTooltip';
-import { colors, font, spacing } from '@/lib/theme';
+import { spacing, sectionHeaderText } from '@/lib/theme';
 
 /**
  * A grouped-list section header — uppercase footnote in textSecondary, the
@@ -46,9 +46,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   title: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
   },
 });

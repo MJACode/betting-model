@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { newsDateLabel, sourceLabel } from '@/lib/playerNews';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { PlayerNewsRow } from '@/types';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 /**
  * Recent News — the sheet behind the newspaper icon on the prop screens.
@@ -120,14 +121,7 @@ export function PlayerNewsSheet({
             )}
           </ScrollView>
 
-          <Pressable
-            accessibilityLabel="Close player news"
-            style={styles.closeButton}
-            onPress={onClose}
-            accessibilityRole="button"
-          >
-            <Text style={styles.closeText}>Close</Text>
-          </Pressable>
+          <PrimaryButton label="Close" onPress={onClose} accessibilityLabel="Close player news" style={styles.closeButton} />
         </Pressable>
       </View>
     </Modal>
@@ -216,13 +210,5 @@ const styles = StyleSheet.create({
   analysisBody: { fontSize: font.size.callout, color: colors.textSecondary, lineHeight: 20 },
   readMore: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingTop: spacing.xs },
   readMoreText: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.tint },
-  closeButton: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    backgroundColor: colors.tint,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  closeText: { fontSize: font.size.headline, fontWeight: font.weight.semibold, color: colors.textInverse },
+  closeButton: { marginHorizontal: spacing.lg, marginTop: spacing.sm },
 });

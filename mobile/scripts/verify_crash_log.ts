@@ -29,6 +29,10 @@ import {
   type CrashContext,
   type CrashReport,
   type KeyValueStore,
+  type UpdatesLogEntry,
+  UPDATES_LOG_MAX_ENTRIES,
+  UPDATES_LOG_READ_TIMEOUT_MS,
+  RUNNING_AFTER_MS,
 } from '../src/lib/crashLog';
 
 let failures = 0;
@@ -51,7 +55,10 @@ const CTX: CrashContext = {
   platform: 'ios 18', isEmergencyLaunch: false, emergencyLaunchReason: null,
 };
 
-function setup(opts: { sendFails?: () => boolean; ctx?: Partial<CrashContext>; now?: () => number } = {}) {
+function setup(opts: {
+  sendFails?: () => boolean; ctx?: Partial<CrashContext>; now?: () => number;
+  updatesLog?: () => Promise<UpdatesLogEntry[]>;
+} = {}) {
   resetCrashLogForTests();
   const store = memStore();
   const sent: CrashReport[] = [];
@@ -61,6 +68,7 @@ function setup(opts: { sendFails?: () => boolean; ctx?: Partial<CrashContext>; n
     deviceId: async () => 'device-1234',
     context: () => ({ ...CTX, ...opts.ctx }),
     now: opts.now ?? (() => 1_000_000),
+    updatesLog: opts.updatesLog,
     async send(r) {
       queuedAtSend.push(JSON.parse(store.data.get(QUEUE_KEY) ?? '[]').length);
       if (opts.sendFails?.()) throw new Error('offline');
@@ -188,6 +196,136 @@ async function main() {
     await beginLaunch();
     await flushCrashQueue();
     check('an expo-updates rollback is reported', sent.some((r) => r.kind === 'emergency_launch' && r.message === 'update crashed'));
+  }
+
+  // ── expo-updates' own log (2026-11-14: a native abort before JS ran) ──
+  {
+    // What ErrorRecovery writes before it aborts: the JS-runtime error, then
+    // the "crashing" line. Info lines and an old error must not be sent.
+    const LOG: UpdatesLogEntry[] = [
+      { timestamp: 500, level: 'error', code: 'UpdateFailedToLoad', message: 'old, already reported' },
+      { timestamp: 900_000, level: 'info', code: 'None', message: 'ErrorRecovery: launching a cached update' },
+      { timestamp: 900_100, level: 'error', code: 'JSRuntimeError', message: 'Fatal exception: asset missing', updateId: 'upd-C' },
+      { timestamp: 900_200, level: 'fatal', code: 'UpdateFailedToLoad', message: 'ErrorRecovery: could not recover from error, crashing' },
+    ];
+    const { sent, store } = setup({ updatesLog: async () => LOG });
+    store.data.set('crashlog.updates_log_seen', '500');
+    await beginLaunch();
+    await flushCrashQueue();
+    const r = sent.find((x) => x.kind === 'emergency_launch');
+    const entries = (r?.extra?.updates_log ?? []) as Array<Record<string, unknown>>;
+    check('updates log: its errors are reported on the next launch',
+      !!r && r.extra?.source === 'updates_log' && entries.length === 2, JSON.stringify(r));
+    check('updates log: the message is the newest error, with its code',
+      r?.message === 'UpdateFailedToLoad: ErrorRecovery: could not recover from error, crashing', String(r?.message));
+    check('updates log: the entry naming the failed bundle is kept',
+      entries[0]?.update_id === 'upd-C' && entries[0]?.message === 'Fatal exception: asset missing');
+    check('updates log: dated when expo-updates wrote it, not now',
+      r?.occurredAt === new Date(900_200).toISOString(), String(r?.occurredAt));
+
+    // A second launch with the same log sends nothing new.
+    const before = sent.length;
+    await beginLaunch();
+    await flushCrashQueue();
+    check('updates log: an entry is sent once', !sent.slice(before).some((x) => x.kind === 'emergency_launch'));
+  }
+  {
+    const { sent } = setup({ updatesLog: async () => [
+      { timestamp: 10, level: 'info', code: 'None', message: 'fine' },
+      { timestamp: 20, level: 'warn', code: 'None', message: 'meh' },
+    ] });
+    await beginLaunch();
+    await flushCrashQueue();
+    check('updates log: info and warn lines are not reported', !sent.some((x) => x.kind === 'emergency_launch'));
+  }
+  {
+    const many: UpdatesLogEntry[] = Array.from({ length: 40 }, (_, i) =>
+      ({ timestamp: 1000 + i, level: 'error', code: 'UpdateFailedToLoad', message: `e${i}` }));
+    const { sent } = setup({ updatesLog: async () => many });
+    await beginLaunch();
+    await flushCrashQueue();
+    const entries = (sent.find((x) => x.kind === 'emergency_launch')?.extra?.updates_log ?? []) as Array<Record<string, unknown>>;
+    check('updates log: capped to the newest entries',
+      entries.length === UPDATES_LOG_MAX_ENTRIES && entries[entries.length - 1]?.message === 'e39', String(entries.length));
+  }
+  {
+    const { sent } = setup({
+      ctx: { isEmergencyLaunch: true, emergencyLaunchReason: 'update crashed' },
+      updatesLog: async () => [{ timestamp: 5, level: 'error', code: 'JSRuntimeError', message: 'boom' }],
+    });
+    await beginLaunch();
+    await flushCrashQueue();
+    const rows = sent.filter((x) => x.kind === 'emergency_launch');
+    check('updates log: an emergency launch carries the entries on its own row',
+      rows.length === 1 && rows[0].message === 'update crashed'
+        && (rows[0].extra?.updates_log as unknown[] | undefined)?.length === 1, JSON.stringify(rows));
+  }
+  {
+    // An offline open: expo-updates logs failed downloads at error level.
+    // No launch failed, so no row.
+    const { sent } = setup({ updatesLog: async () => [
+      { timestamp: 10, level: 'error', code: 'Unknown', message: 'The Internet connection appears to be offline.' },
+      { timestamp: 20, level: 'error', code: 'AssetsFailedToLoad', message: 'download failed' },
+      { timestamp: 30, level: 'error', code: 'UpdateServerUnreachable', message: 'unreachable' },
+    ] });
+    await beginLaunch();
+    await flushCrashQueue();
+    check('updates log: an offline open (download errors only) is not reported',
+      !sent.some((x) => x.kind === 'emergency_launch'));
+  }
+  {
+    // A launch failure followed by a later download error: named by the failure.
+    const { sent } = setup({ updatesLog: async () => [
+      { timestamp: 10, level: 'error', code: 'JSRuntimeError', message: 'Fatal exception: x' },
+      { timestamp: 20, level: 'error', code: 'Unknown', message: 'offline' },
+    ] });
+    await beginLaunch();
+    await flushCrashQueue();
+    const r = sent.find((x) => x.kind === 'emergency_launch');
+    check('updates log: the row is named by the launch failure, not a later download error',
+      r?.message === 'JSRuntimeError: Fatal exception: x'
+        && (r?.extra?.updates_log as unknown[] | undefined)?.length === 2, String(r?.message));
+  }
+  {
+    // A native read that never returns must not hold the launch marker.
+    const realSetTimeout = globalThis.setTimeout;
+    const timers: Array<{ fn: () => void; ms: number }> = [];
+    (globalThis as { setTimeout: unknown }).setTimeout = ((fn: () => void, ms: number) => {
+      timers.push({ fn, ms }); return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown;
+    const { store } = setup({ updatesLog: () => new Promise<UpdatesLogEntry[]>(() => {}) });
+    const launched = beginLaunch();
+    await new Promise<void>((res) => realSetTimeout(res, 20));
+    const marker = timers.find((t) => t.ms === RUNNING_AFTER_MS);
+    marker?.fn();
+    await new Promise<void>((res) => realSetTimeout(res, 20));
+    const m = JSON.parse(store.data.get(MARKER_KEY) ?? '{}');
+    check('updates log: a hung read still lets the launch be marked running', m.stage === 'running', JSON.stringify(m));
+    const cut = timers.find((t) => t.ms === UPDATES_LOG_READ_TIMEOUT_MS);
+    cut?.fn();
+    let done = false;
+    void launched.then(() => { done = true; });
+    await new Promise<void>((res) => realSetTimeout(res, 20));
+    (globalThis as { setTimeout: unknown }).setTimeout = realSetTimeout;
+    check('updates log: a hung read is cut off and the launch finishes', !!cut && done);
+  }
+  {
+    // The seen mark is written only once the report is stored.
+    const { store } = setup({ updatesLog: async () => [
+      { timestamp: 77, level: 'fatal', code: 'UpdateFailedToLoad', message: 'crashing' },
+    ] });
+    const realSet = store.setItem.bind(store);
+    store.setItem = async (k, v) => { if (k === QUEUE_KEY) throw new Error('disk full'); return realSet(k, v); };
+    await beginLaunch();
+    check('updates log: a report that could not be stored is not marked sent',
+      !store.data.has('crashlog.updates_log_seen'), String(store.data.get('crashlog.updates_log_seen')));
+  }
+  {
+    const { sent } = setup({ updatesLog: async () => { throw new Error('ERR_UPDATES_READ_LOGS'); } });
+    let threw = false;
+    try { await beginLaunch(); await flushCrashQueue(); } catch { threw = true; }
+    check('updates log: a failed read throws nothing and sends nothing',
+      !threw && !sent.some((x) => x.kind === 'emergency_launch'));
   }
 
   // ── nothing configured: nothing throws ──

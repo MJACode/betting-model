@@ -7,7 +7,8 @@ import { Modal } from '@/components/TrackedModal';
 import { discordInviteIfPaid } from '@/lib/discord';
 import { discordJoinCopy, type DiscordJoinChoice, type DiscordJoinVariant } from '@/lib/discordJoin';
 import { openLink } from '@/lib/socialLinks';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, opacity } from '@/lib/theme';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 /**
  * Paid members, once, after onboarding. The invite is opened, never printed.
@@ -72,14 +73,7 @@ export function DiscordJoinModal({
             </View>
           </ScrollView>
           <View style={styles.footer}>
-            <Pressable
-              onPress={onJoin}
-              accessibilityRole="button"
-              accessibilityLabel="Join Discord"
-              style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
-            >
-              <Text style={styles.btnText}>{copy.primary}</Text>
-            </Pressable>
+            <PrimaryButton label={copy.primary} onPress={onJoin} accessibilityLabel="Join Discord" />
             <Pressable
               onPress={() => onChoose('later')}
               accessibilityRole="button"
@@ -146,20 +140,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.lg,
   },
-  btn: {
-    backgroundColor: colors.tint,
-    minHeight: 44,
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  btnPressed: { opacity: 0.8 },
-  btnText: {
-    color: colors.textInverse,
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-  },
+  btnPressed: { opacity: opacity.pressed },
   later: {
     minHeight: 44,
     alignItems: 'center',

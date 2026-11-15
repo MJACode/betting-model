@@ -269,7 +269,7 @@ import {
   reducePickerHandoff,
   type PickerHandoffPhase,
 } from '@/lib/statsBoardA11y';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import { errorText, errorKind, friendlyCause, isAbortError, type ErrorKind } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import type {
@@ -6520,7 +6520,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
-  pressed: { opacity: 0.65 },
+  pressed: { opacity: opacity.pressed },
   loading: { marginVertical: spacing.xxl },
   skeletonWrap: { paddingTop: spacing.xs },
   skeletonRow: {

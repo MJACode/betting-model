@@ -6,7 +6,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { BookChecklist, toggleBook } from '@/components/BookChecklist';
 import { usePreferredBooks, BOOKS, type BookKey } from '@/hooks/usePreferredBooks';
 import { MODEL_BOOK } from '@/lib/markets';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 /**
  * "Your sportsbooks" bottom sheet — the books the member can bet at, MULTI-
@@ -140,14 +141,12 @@ export function SportsbookPickerSheet({
           {/* One sentence, not a paragraph: Settings states the scope above
               this sheet and the Explainer carries the long version, so a third
               copy here reads as the app being defensive (UX review). */}
-          <Pressable
+          <PrimaryButton
+            label="Apply"
             onPress={apply}
-            accessibilityRole="button"
             accessibilityLabel={`Apply. ${selected.length} sportsbook${selected.length === 1 ? '' : 's'} selected.`}
-            style={({ pressed }) => [styles.applyBtn, pressed && styles.applyBtnPressed]}
-          >
-            <Text style={styles.applyText}>Apply</Text>
-          </Pressable>
+            style={styles.applyBtn}
+          />
         </Pressable>
       </View>
     </Modal>
@@ -215,24 +214,10 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
-  // tint + textInverse, as FilterSheet's "Show N picks" (18.6:1). Selected
-  // and confirm are tint, never green; white on `bet` was 2.22:1 (audit H6).
-  applyBtn: {
-    marginTop: spacing.md,
-    backgroundColor: colors.tint,
-    borderRadius: radii.pill,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  applyBtnPressed: {
-    opacity: 0.8,
-  },
-  applyText: {
-    fontSize: font.size.headline,
-    fontWeight: font.weight.bold,
-    color: colors.textInverse,
-  },
+  // PrimaryButton: tint + textInverse (18.6:1), as FilterSheet's "Show N picks".
+  // Selected and confirm are tint, never green; white on `bet` was 2.22:1 (audit H6).
+  applyBtn: { marginTop: spacing.md },
   pressed: {
-    opacity: 0.7,
+    opacity: opacity.pressed,
   },
 });

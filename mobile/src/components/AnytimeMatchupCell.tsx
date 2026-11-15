@@ -13,7 +13,7 @@ import {
   ATD_MATCHUP_W,
   type AnytimeMatchupView,
 } from '@/lib/anytimeMatchup';
-import { colors, font } from '@/lib/theme';
+import { colors, font, opacity } from '@/lib/theme';
 
 function statusText(view: Exclude<AnytimeMatchupView, { kind: 'rank' }>): string {
   if (view.kind === 'loading') return ATD_COPY.loadingLabel;
@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     paddingBottom: 0,
   },
-  pressed: { opacity: 0.65 },
+  pressed: { opacity: opacity.pressed },
   status: {
     maxWidth: '100%',
     fontSize: font.size.caption,

@@ -140,13 +140,18 @@ check('PickCard reads the shared price view', card.includes('pickPriceView(item,
 check('Bet all reads the same price view', lib.includes('pickPriceView(item, liveState, myBooks, true)'));
 check('Bet all is offered on Signals only', home.includes("view === 'signals' && myBooksReady"));
 check('the board shows the live call-out beside the button', home.includes('{BET_ALL_LIVE_NOTE}'));
+check('the button keeps the "Bet all N" form at zero, never "See why" (Matt, 2026-11-15)',
+  home.includes('{`Bet all ${betAll.picks.length}`}') && !home.includes("'See why'"));
 check('the sheet defaults to Best line', sheet.includes("useState<BetAllMode>('best')"));
 check('the sheet never builds a parlay', !/parlay|combineBetslipLinks|useParlaySlip/i.test(sheet.replace(/not Parlay|Parlay\)|parlay\./g, '')));
-check('Placed tracks every leg of that book', sheet.includes('step?.legs.forEach((l) => onTrack(l.pick))'));
+check('Placed tracks every leg of that book', sheet.includes('if (step) onTrack(step.legs.map((l) => l.pick));'));
 
 // ── UX review fixes ──────────────────────────────────────────────────────
 check('the board names the main reason nothing is ready',
   betAllMainSkip([{ reason: 'started' }, { reason: 'notAtMyBooks' }, { reason: 'notAtMyBooks' }]) === '2 not at your books');
+check('the main reason is plural for a count over one (\'5 games started\', not \'5 game started\')',
+  betAllMainSkip([{ reason: 'started' }, { reason: 'started' }]) === '2 games started'
+  && betAllMainSkip([{ reason: 'started' }]) === '1 game started');
 check('another book’s price says where the model found it', sheet.includes('foundAtText(bookLabel(record), formatAmerican(modelPrice))'));
 check('mid-send the backdrop does not close the sheet', sheet.includes("onPress={phase === 'send' ? undefined : onClose}"));
 check('the X asks before dropping an unanswered book', sheet.includes('if (pendingAnswer) setConfirmStop(true);'));

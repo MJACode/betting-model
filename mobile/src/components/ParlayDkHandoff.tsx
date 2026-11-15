@@ -9,7 +9,7 @@ import { combineBetslipLinks } from '@/lib/betslipLinks';
 import { bookButtonColors, bookStoreUrl, openBookBetslip, openBookStore } from '@/lib/sportsbookLinks';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity, cardDense } from '@/lib/theme';
 
 /** Lightweight leg shape — works for both live ParlayLeg and SavedParlayLeg.
  * `betLink` is the leg's betslip deep link AT THE BOOK BEING HANDED OFF TO
@@ -259,11 +259,9 @@ const styles = StyleSheet.create({
     flexGrow: 0,
   },
   row: {
+    ...cardDense,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
     marginBottom: spacing.sm,
   },
   rowBody: {
@@ -308,6 +306,6 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
 });

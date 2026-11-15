@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { retryAccessibilityLabel } from '@/lib/a11y';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import { errorAnnouncement, friendlyError, isAbortError, type FriendlyError } from '@/lib/errors';
 import { repeatFailureAnnounce } from '@/lib/loadState';
 
@@ -246,5 +246,5 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: opacity.pressed },
 });

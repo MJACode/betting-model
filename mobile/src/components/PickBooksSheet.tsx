@@ -11,7 +11,7 @@ import {
   type PickSportsbookRow,
 } from '@/lib/pickBooks';
 import { trueMinus } from '@/lib/signalsCard';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 
 /**
  * Selected sportsbooks for one pick, best price first. Same sheet chrome as
@@ -310,6 +310,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
 });

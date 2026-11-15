@@ -46,7 +46,7 @@ import {
   type NbaFbTeamRow,
 } from '@/lib/nbaFirstBasket';
 import { fetchNbaFirstBasketPlayers, fetchNbaFirstBasketTeams } from '@/lib/queries';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, card } from '@/lib/theme';
 import type { GameRow } from '@/types';
 
 /** Same stacking point as the first-quarter card. */
@@ -398,9 +398,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },

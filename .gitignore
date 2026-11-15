@@ -74,6 +74,9 @@ data/local/prop_dump/
 data/local/nba/
 data/local/*.csv
 data/local/over_lean*.csv
+# Horse racing research downloads (scripts/horse/fetch_datasets.py).
+# Regenerable public files and the Equibase drop. Not committed.
+data/horse/
 
 # ── Repo diet (2026-09-14): inactive versioned model artifacts ───────────────
 # Keep the LIVE scoring .pkl (model_registry.is_active = 1), not merely the

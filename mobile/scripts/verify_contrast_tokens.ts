@@ -430,10 +430,13 @@ check("no literal '#fff' / 'white' left in the app (H6)", whiteLits.length === 0
 check('no bright bet/avoid/med/positive/negative hue used as a text colour', hueText.length === 0, hueText.join(', '));
 
 const sheet = read('src/components/SportsbookPickerSheet.tsx');
-const applyBtn = /applyBtn: \{[\s\S]*?\}/.exec(sheet)?.[0] ?? '';
-const applyText = /applyText: \{[\s\S]*?\}/.exec(sheet)?.[0] ?? '';
-check('Apply fill is tint, not bet green (H6)', /backgroundColor: colors\.tint/.test(applyBtn), applyBtn.replace(/\s+/g, ' '));
-check('Apply label is textInverse (H6)', /color: colors\.textInverse/.test(applyText));
+// Apply is a PrimaryButton in its default (primary) variant since the UI pass
+// of 2026-11-14, so the fill and label are PrimaryButton's own.
+const primaryBtn = read('src/components/PrimaryButton.tsx');
+const applyTag = /<PrimaryButton\s+label="Apply"[\s\S]*?\/>/.exec(sheet)?.[0] ?? '';
+check('Apply fill is tint, not bet green (H6)',
+  applyTag !== '' && !/variant=/.test(applyTag) && /primary: \{ backgroundColor: colors\.tint \}/.test(primaryBtn), applyTag.replace(/\s+/g, ' '));
+check('Apply label is textInverse (H6)', /const fg = variant === 'primary' \? colors\.textInverse/.test(primaryBtn));
 const toggle = read('src/components/SportToggle.tsx');
 const badge = /\n  badge: \{[\s\S]*?\}/.exec(toggle)?.[0] ?? '';
 const badgeText = /badgeText: \{[\s\S]*?\}/.exec(toggle)?.[0] ?? '';

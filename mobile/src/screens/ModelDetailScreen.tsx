@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
@@ -24,7 +24,7 @@ import {
 } from '@/lib/format';
 import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION, PAUSED_RULE_CAPTION, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelRetired, isModelPaused } from '@/lib/thresholds';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, sectionHeaderText, card } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import type { CustomModelRule, RootStackParamList } from '@/types';
 import { BACKTEST_START } from '@/lib/recordStart';
@@ -33,6 +33,7 @@ import { unitsSpeech } from '@/lib/a11y';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { signalDisplayName } from '@/lib/tone';
+import { SkeletonList } from '@/components/Skeleton';
 
 /**
  * The minimums a rule actually carries. Every floor is optional — a rule with
@@ -184,7 +185,7 @@ export function ModelDetailScreen() {
               Live picks{upcoming.length > 0 ? ` · ${upcoming.length}` : ''}
             </Text>
             {todayLoading && upcoming.length === 0 ? (
-              <ActivityIndicator style={styles.upcomingLoading} />
+              <SkeletonList label="live picks" rows={2} style={styles.skeleton} />
             ) : upcoming.length === 0 ? (
               <Text style={styles.upcomingEmpty}>
                 {withdrawnEmpty
@@ -255,7 +256,7 @@ export function ModelDetailScreen() {
         )}
         ListEmptyComponent={
           loading ? (
-            <ActivityIndicator style={styles.loading} />
+            <SkeletonList label="this model's picks" rows={4} style={styles.skeleton} />
           ) : (
             allRetired ? (
               <EmptyState
@@ -280,9 +281,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   list: { paddingBottom: spacing.xl },
   headerCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     marginTop: spacing.md,
     marginBottom: spacing.md,
@@ -300,11 +299,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   ruleHeader: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
     marginBottom: spacing.xs,
   },
   ruleRow: {
@@ -348,11 +343,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   sectionHeader: {
-    fontSize: font.size.footnote,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    ...sectionHeaderText,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
@@ -389,7 +380,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
   },
-  upcomingLoading: { marginVertical: spacing.lg },
+  skeleton: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
   upcomingEmpty: {
     fontSize: font.size.footnote,
     color: colors.textTertiary,
@@ -401,7 +392,6 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textSecondary,
   },
-  loading: { marginVertical: spacing.xxl },
   // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
   errorBannerInset: { marginTop: 0, marginBottom: spacing.sm },
   error: { color: colors.avoidInk, padding: spacing.lg, fontSize: font.size.body },
