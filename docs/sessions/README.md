@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Scoreboard covers every sport with games (12, chips only for sports with a game that day); NCAAB/NCAABW live scores via ESPN matched by event id; UFC finals W/L/D |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, BetMGM: every host's AASA claims /*/sportsapp/* for the App Store app; after iOS refuses sports.<st>, ask www.<st> and <st> (logged as alt_host) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, BetMGM opens its app (betmgmsports://, real) but iOS refuses the /sportsapp/ link; Fanatics has no betslip link (\"NaN\"), installed app now opens instead of the website; hand-off log covers every book |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, no OTA reached a phone since #1202 (11-06): local `expo export` bundled without the EAS environment, crashed on `supabaseUrl is required` and rolled back; workflow now pulls it and refuses a bundle without the URL. First-tap \"Which state?\" fixed by awaiting the saved state |

@@ -223,7 +223,8 @@ RUN_DK_DIRECT_FEED = os.environ.get("RUN_DK_DIRECT_FEED", "0") != "0"
 RUN_BOVADA_FEED = os.environ.get("RUN_BOVADA_FEED", "0") != "0"
 # NCAAF live gameday loop (ncaaf_live/) — set RUN_NCAAF_LIVE=0 to disable
 RUN_NCAAF_LIVE = os.environ.get("RUN_NCAAF_LIVE", "1") != "0"
-# Scoreboard live scores for NFL, NBA and NHL (data/ingestors/live_scoreboard.py).
+# Scoreboard live scores for NFL, NBA, NHL, NCAAB and NCAABW
+# (data/ingestors/live_scoreboard.py).
 # Free ESPN reads, no Odds API credits. RUN_LIVE_SCOREBOARD=0 stops it
 # without a deploy.
 RUN_LIVE_SCOREBOARD = os.environ.get("RUN_LIVE_SCOREBOARD", "1") != "0"
@@ -1220,7 +1221,8 @@ def run_ncaaf_live_loop() -> None:
 
 
 def run_live_scoreboard() -> None:
-    # One tick of the Scoreboard's live scores for NFL, NBA and NHL (Matt,
+    # One tick of the Scoreboard's live scores for NFL, NBA, NHL, NCAAB and
+    # NCAABW (Matt,
     # 2026-10-29). In process, not a subprocess: an idle tick is one
     # database read, and a tick with live games is one ESPN call per live
     # sport. Raises on a database error so the heartbeat marks it failed.

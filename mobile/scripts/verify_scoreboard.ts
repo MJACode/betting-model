@@ -18,6 +18,11 @@ import {
   splitsFor,
   splitsSpeech,
   scoreboardPhase,
+  ESPN_LIVE_SPORTS,
+  SCOREBOARD_SPORTS,
+  nextSlateText,
+  scoreboardChipSports,
+  scoreboardMarketsFor,
   type ScoreboardGame,
 } from '../src/lib/scoreboard';
 
@@ -294,6 +299,61 @@ check('line movement names open and now', movementText(
   { market: 'spreads', spread_home: -2.5, home_price: -106 },
   'spreads',
 ) === `Opened ${SCOREBOARD_MINUS}3 ${SCOREBOARD_MINUS}110 · Now ${SCOREBOARD_MINUS}2.5 ${SCOREBOARD_MINUS}106`);
+
+// Every sport with games (Matt, 2026-11-15).
+for (const id of ['NCAAB', 'NCAABW', 'EUROLEAGUE', 'WNBA', 'UFC', 'ATP', 'WTA']) {
+  check(`${id} is a Scoreboard sport`, (SCOREBOARD_SPORTS as readonly string[]).includes(id));
+}
+check('men\'s and women\'s college basketball read live_scoreboard',
+  ESPN_LIVE_SPORTS.includes('NCAAB') && ESPN_LIVE_SPORTS.includes('NCAABW'));
+
+const chips = scoreboardChipSports({ NCAAB: 96, NHL: 10, UFC: 0 }, 'NFL');
+check('chips are the sports with games plus the open one, in board order',
+  chips.join(',') === 'NFL,NHL,NCAAB');
+check('the open sport keeps its chip on an empty day',
+  scoreboardChipSports({}, 'MLB').join(',') === 'MLB');
+
+const school = presentScoreboard({
+  game: game({ sport: 'NCAAB', away_team: 'Quinnipiac', home_team: 'Central Connecticut' }),
+  pregame: [], inplay: [], feed: null,
+});
+check('a school gets initials in the disc and its name beside it',
+  school.home.disc === 'CC' && school.home.name === 'Central Connecticut'
+  && school.away.disc === 'QUIN' && school.away.name === 'Quinnipiac');
+
+const collegeLive = presentScoreboard({
+  game: game({ sport: 'NCAAB', away_team: 'Quinnipiac', home_team: 'Central Connecticut' }),
+  pregame: [], inplay: [],
+  feed: feedFromEspn({ snapshot_at: '2026-10-30T00:59:10Z', state: 'in', home_score: 40, away_score: 38,
+    clock_label: '2H 11:02' }, espnNow),
+});
+check('a college basketball live row makes the card live',
+  collegeLive.phase === 'live' && collegeLive.home.score === '40' && collegeLive.footerText === '2H 11:02');
+
+const fightGame = game({ sport: 'UFC', away_team: 'Amanda Nunes', home_team: 'Kayla Harrison' });
+const fight = presentScoreboard({
+  game: { ...fightGame, home_score: '1', away_score: '0' }, pregame: [], inplay: [], feed: null,
+});
+check('a UFC final reads W and L, not 1 and 0',
+  fight.phase === 'final' && fight.home.score === 'W' && fight.away.score === 'L'
+  && fight.away.scoreMuted && !fight.home.scoreMuted);
+check('a fighter is initials in the disc and a last name beside it',
+  fight.home.disc === 'KH' && fight.home.name === 'Harrison');
+check('a UFC matchup is spoken as versus, and the winner is named',
+  fight.accessibilityLabel.startsWith('Amanda Nunes versus Kayla Harrison, final, Kayla Harrison won'));
+const draw = presentScoreboard({
+  game: { ...fightGame, home_score: '0.5', away_score: '0.5' }, pregame: [], inplay: [], feed: null,
+});
+check('a UFC draw (0.5 / 0.5) reads D, not a rounded 1-1',
+  draw.home.score === 'D' && draw.away.score === 'D' && !draw.home.scoreMuted && !draw.away.scoreMuted);
+check('UFC has no Spread tab and opens on the moneyline',
+  scoreboardMarketsFor('UFC').join(',') === 'h2h,totals'
+  && scoreboardMarketsFor('NCAAB').join(',') === 'spreads,totals,h2h');
+check('tennis next-slate text says vs with last names',
+  (nextSlateText({ sport: 'WTA', away_team: 'Mirra Andreeva', home_team: 'Elina Svitolina', commence_time: null }) ?? '')
+    === 'Andreeva vs Svitolina');
+check('a code sport is unchanged',
+  presentScoreboard({ game: game(), pregame: [], inplay: [], feed: null }).home.disc === 'ATL');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

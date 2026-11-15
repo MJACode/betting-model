@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -19,16 +19,18 @@ import { SegmentTabs } from '@/components/GroupTabs';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { addDays, dayLabelET } from '@/lib/format';
+import { sportDisplayName } from '@/lib/liveSports';
 import {
+  ESPN_LIVE_SPORTS,
   SCOREBOARD_BOOK_NOTE,
-  SCOREBOARD_MARKET_ORDER,
-  SCOREBOARD_SPORTS,
   marketCell,
   nextSlateText,
   orderScoreboard,
   pctText,
   presentScoreboard,
+  scoreboardChipSports,
   scoreboardMarketLabel,
+  scoreboardMarketsFor,
   scoreboardSwitchLine,
   shownSplitLine,
   splitsFor,
@@ -60,7 +62,11 @@ function discColor(label: string): string {
 function sportIcon(sport: string): React.ComponentProps<typeof Ionicons>['name'] | null {
   if (sport === 'NFL' || sport === 'NCAAF') return 'american-football';
   if (sport === 'MLB') return 'baseball';
-  if (sport === 'NBA') return 'basketball';
+  if (sport === 'NBA' || sport === 'NCAAB' || sport === 'NCAABW' || sport === 'EUROLEAGUE' || sport === 'WNBA') {
+    return 'basketball';
+  }
+  if (sport === 'ATP' || sport === 'WTA') return 'tennisball';
+  if (sport === 'UFC') return 'fitness';
   return null;
 }
 
@@ -126,7 +132,10 @@ export function ScoreboardBoard({
   const [pulling, setPulling] = useState(false);
   const [datesOpen, setDatesOpen] = useState(false);
   // One market at a time: Odds, % Bets, % Money (Matt, 2026-10-29).
-  const [market, setMarket] = useState<ScoreboardMarket>('spreads');
+  const [picked, setMarket] = useState<ScoreboardMarket>('spreads');
+  // UFC has no Spread tab; a tab the sport does not have falls to its first.
+  const markets = scoreboardMarketsFor(sport);
+  const market: ScoreboardMarket = markets.includes(picked) ? picked : markets[0];
   const dayWord = dayLabelET(date, today);
 
   const dayGames = useMemo(
@@ -138,6 +147,16 @@ export function ScoreboardBoard({
     for (const g of dayGames) out[g.sport] = (out[g.sport] ?? 0) + 1;
     return out;
   }, [dayGames]);
+  // Only sports with a game on the day, plus the open one (Matt, 2026-11-15).
+  const chipSports = useMemo(() => scoreboardChipSports(counts, sport), [counts, sport]);
+  // The board opens on NFL. On a day with no game in the open sport, move
+  // to the first sport that has one, until the user picks a chip themselves.
+  const userPicked = useRef(false);
+  useEffect(() => {
+    if (!loaded || locked || userPicked.current || (counts[sport] ?? 0) > 0) return;
+    const first = chipSports.find((id) => (counts[id] ?? 0) > 0);
+    if (first && first !== sport) onSport(first);
+  }, [loaded, locked, counts, chipSports, sport, onSport]);
 
   const sportCards = useMemo(() => {
     if (locked) return [] as ScoreboardCard[];
@@ -184,7 +203,8 @@ export function ScoreboardBoard({
   const dayPhrase = dayWord === 'Today' || dayWord === 'Tomorrow' || dayWord === 'Yesterday'
     ? dayWord.toLowerCase()
     : `on ${dayWord}`;
-  const emptyTitle = `No ${sport} games ${dayPhrase}`;
+  const sportName = sportDisplayName(sport);
+  const emptyTitle = `No ${sportName} ${sport === 'UFC' ? 'fights' : sport === 'ATP' || sport === 'WTA' ? 'matches' : 'games'} ${dayPhrase}`;
   const next = nextSlateText(nextGame, abbrevs);
   const emptyBody = next ? `Next slate: ${next}` : 'Games show up here once they’re on the board.';
   const emptyAction = nextGame && nextGame.game_date !== date
@@ -193,8 +213,8 @@ export function ScoreboardBoard({
   const nudge = (counts[sport] ?? 0) === 0 ? scoreboardSwitchLine(counts, sport) : null;
   const ncaafNote = sport === 'NCAAF' && ncaafUnavailable
     ? 'Live NCAAF scores aren’t available in this build yet.'
-    : (sport === 'NFL' || sport === 'NBA' || sport === 'NHL') && liveScoresUnavailable
-      ? `Live ${sport} scores aren’t available yet. Finals show once stored.`
+    : ESPN_LIVE_SPORTS.includes(sport) && liveScoresUnavailable
+      ? `Live ${sportName} scores aren’t available yet. Finals show once stored.`
       : null;
 
   return (
@@ -205,13 +225,16 @@ export function ScoreboardBoard({
         style={styles.sportScroll}
         contentContainerStyle={styles.sports}
       >
-        {SCOREBOARD_SPORTS.map((id) => (
+        {chipSports.map((id) => (
           <FilterChip
             key={id}
             label={id}
             active={sport === id}
-            onPress={() => onSport(id)}
-            accessibilityLabel={id}
+            onPress={() => {
+              userPicked.current = true;
+              onSport(id);
+            }}
+            accessibilityLabel={sportDisplayName(id)}
           />
         ))}
       </ScrollView>
@@ -220,7 +243,7 @@ export function ScoreboardBoard({
         <View style={styles.markets}>
           <SegmentTabs
             compact
-            items={SCOREBOARD_MARKET_ORDER}
+            items={markets}
             active={market}
             onChange={setMarket}
             labelFor={(m) => scoreboardMarketLabel(m, sport)}
@@ -267,7 +290,7 @@ export function ScoreboardBoard({
       ) : null}
       {liveError && loaded ? (
         <ErrorBanner
-          what={`${sport} live scores`}
+          what={`${sportName} live scores`}
           error={liveError}
           onRetry={() => void onRefresh()}
           retrying={retrying}
