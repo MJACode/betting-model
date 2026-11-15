@@ -107,7 +107,14 @@ const refused = chain.slice(at('if (viaApp === false && installed === true)'), a
 check('iOS refused the claimed link and a scheme says installed → the app by that scheme, before the stored link (Safari)',
   at('if (viaApp === false && installed === true)') > at('viaApp = claimed ? await openUniversalLinkOnly(claimed)')
   && refused.includes('const scheme = await installedBookScheme(book);') && refused.includes('tryOpen(scheme, true)'));
-check('a candidate scheme is opened nowhere else', (chain.match(/installedBookScheme\(/g) ?? []).length === 1 && (src.match(/installedBookScheme\(/g) ?? []).length === 2);
+// 2026-11-15 (Matt, Fanatics opened the website): a scheme that said yes is
+// also opened when the app is installed and nothing put the bet in it.
+check('a candidate scheme is opened in those two places only', (chain.match(/installedBookScheme\(/g) ?? []).length === 2 && (src.match(/installedBookScheme\(/g) ?? []).length === 3);
+const isInst = chain.slice(at('if (installed === true) {'), at('// Unknown'));
+check('installed and no bet placed → the app (verified scheme, then the one that said yes) before the site',
+  isInst.indexOf('installedBookScheme(book)') > isInst.indexOf('app.scheme') && isInst.indexOf('installedBookScheme(book)') < isInst.indexOf('tryOpen(app.web)'));
+check('the parlay sheet does not count or offer a "NaN" leg as a link', read('src/components/ParlayDkHandoff.tsx').includes('.filter(isUsableBetslipLink)') && read('src/components/ParlayDkHandoff.tsx').includes('{isUsableBetslipLink(item.betLink) ? ('));
+check('a stored "NaN" (Fanatics, betPARX) is no link: nothing tries to open it', fillBetslipLink('NaN', 'nj') === null && fillBetslipLink(' NaN ', null) === null && !linkNeedsState('NaN'));
 const pick = src.slice(src.indexOf('async function installedBookScheme'), src.indexOf('/**\n * Open a pre-filled betslip'));
 check('...and only one that answered yes is opened', pick.includes('answers.findIndex((a) => a === true)') && pick.includes('.catch(() => false)') && pick.includes('return i >= 0 ? schemes[i]! : null;'));
 const unknown = chain.slice(at('// Unknown'));
@@ -167,7 +174,7 @@ const exits = chain.slice(at('const went = '), at("/**\n * The book's app was op
 const returns = exits.match(/return [^;]+;/g) ?? [];
 const unlogged = returns.filter((r) => !r.includes('went(') && r !== 'return true;' && r !== 'return false;' && r !== 'return ok;');
 check('every exit but "iOS opened it in the app" and the state alert goes through the log', unlogged.length === 0 && returns.filter((r) => r.includes('went(')).length >= 9, unlogged.join(' | '));
-check('...for the books whose app claims links, on iOS, a null claimed link included', exits.includes("if (APP_CLAIMING_BOOKS.includes(book) && Platform.OS === 'ios') {")
+check('...for every book we know, on iOS (the Fanatics miss was not logged), a null claimed link included', exits.includes("if (BOOK_APPS[book] && Platform.OS === 'ios') {")
   && APP_CLAIMING_BOOKS.every((b) => appClaimedLink(b, null, 'nj') !== null) && BETTABLE_BOOKS.filter((b) => !APP_CLAIMING_BOOKS.includes(b)).every((b) => appClaimedLink(b, 'https://x.example/bet', 'nj') === null));
 check('a scheme open says the bet is not on the slip, when the member comes back', exits.includes("if (route === 'scheme' && ok) sayBetNotOnSlip(book);")
   && /if \(state !== 'active'\) return;[\s\S]{0,260}sub\.remove\(\);[\s\S]{0,260}showToast\(`\$\{bookName\(note\.book\)\} opened without your bet\. Add it there\.`, \{ announce: true/.test(src));

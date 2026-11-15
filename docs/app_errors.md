@@ -129,7 +129,7 @@ widens the kind CHECK and the RPC, raises the `extra` cap to 16,000 chars).
 Not a crash. A tap on a book button that did not end with iOS opening the
 book's app through the link that app claims writes one row, kind `js_error`,
 message `handoff: <book> -> <route> (inst= via= mod= claimed= build=)`.
-`mobile/src/lib/handoffLog.ts`; only DraftKings, FanDuel, Caesars and BetMGM,
+`mobile/src/lib/handoffLog.ts`; every book with an app entry (BOOK_APPS),
 iOS only, one row per book and route per app session.
 
 A `link` row is not proof of Safari: iOS decides where the stored link opens,

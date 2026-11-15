@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useBettingState } from '@/hooks/useBettingState';
 import { useBookAppInstalled } from '@/hooks/useBookAppInstalled';
-import { combineBetslipLinks } from '@/lib/betslipLinks';
+import { combineBetslipLinks, isUsableBetslipLink } from '@/lib/betslipLinks';
 import { bookButtonColors, bookStoreUrl, openBookBetslip, openBookStore } from '@/lib/sportsbookLinks';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
@@ -49,7 +49,9 @@ interface Props {
  * first linked leg; the per-leg "Add to slip" row is how the rest get there.
  */
 export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose, priceEntry }: Props) {
-  const linked = legs.map((l) => l.betLink).filter((u): u is string => !!u && !!u.trim());
+  // A leg whose stored link is "NaN" (Fanatics, betPARX) has no link: the
+  // sheet must not promise it on the slip (UX review, 2026-11-15).
+  const linked = legs.map((l) => l.betLink).filter(isUsableBetslipLink);
   const combined = combineBetslipLinks(linked);
   // A book we cannot join still opens the first linked leg — same as before
   // this fix — so Hard Rock / BetRivers do not lose the one-pick hand-off.
@@ -167,7 +169,7 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose, pri
                   </Text>
                   <Text style={styles.rowOdds}>{formatAmerican(item.americanOdds)}</Text>
                 </View>
-                {item.betLink ? (
+                {isUsableBetslipLink(item.betLink) ? (
                   <Pressable
                     onPress={() => {
                       void openBookBetslip(book, item.betLink);
