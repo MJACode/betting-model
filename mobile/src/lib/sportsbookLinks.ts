@@ -330,6 +330,7 @@ export async function openBookBetslip(
  * out while this app is in the background.
  */
 const SLIP_NOTE_MAX_AGE_MS = 5 * 60_000;
+const SLIP_NOTE_PROMPT_MS = 10_000;
 let slipNote: { book: string; at: number } | null = null;
 let slipNoteListening = false;
 
@@ -339,8 +340,23 @@ function sayBetNotOnSlip(book: string): void {
   slipNote = { book, at: Date.now() };
   if (slipNoteListening) return;
   slipNoteListening = true;
+  // Only coming back from the background counts. A system prompt ("Open in
+  // ...?", not seen on a device here) takes an app inactive and back to
+  // active without leaving it, and a note shown then is gone before the
+  // member reaches the book. Active again with no trip out, past the time
+  // a prompt takes to answer: the hand-off never left, so the note is
+  // dropped, not kept for whatever the member leaves for next.
+  let left = AppState.currentState === 'background';
   const sub = AppState.addEventListener('change', (state) => {
+    if (state === 'background') left = true;
     if (state !== 'active') return;
+    if (!left) {
+      if (slipNote && Date.now() - slipNote.at <= SLIP_NOTE_PROMPT_MS) return;
+      sub.remove();
+      slipNoteListening = false;
+      slipNote = null;
+      return;
+    }
     sub.remove();
     slipNoteListening = false;
     const note = slipNote;
