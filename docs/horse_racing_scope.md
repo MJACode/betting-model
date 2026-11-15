@@ -688,5 +688,5 @@ These block phase 1 or phase 3. Defaults are not assumed.
 ## What was deliberately not designed
 
 Bet placement, ADW logins, sportsbook logins, harness, quarter horses,
-Arabians, greyhounds, exotics, each-way, show, and a paper or record-only
-mode. A model that clears is live, and its graded bets are the units.
+Arabians, greyhounds, exotics, each-way, and show. A model that clears is
+live. Its graded bets are the units, and the win-loss record is that same set.
