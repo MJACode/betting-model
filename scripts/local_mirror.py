@@ -731,10 +731,82 @@ def _atomic_write_text(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+# NO DATA IS EVER DELETED (CLAUDE.md §1b, mike 2026-11-14): "the archive and the
+# PC copy never delete". The chunk files still converge to Supabase, so the copy
+# stays a faithful image of what the database holds now. But before a chunk is
+# replaced, every row whose key is in none of its replacements is written to
+# <table>/vanished/, which cleanup_orphans never reads (it lists files, and this
+# is a folder) and nothing else deletes. A table with no primary key compares
+# whole rows. A comparison that cannot be made keeps every old row.
+VANISHED_DIR = "vanished"
+
+
+def _row_keys(table, cols: Sequence[str]):
+    """One string per row: the key columns, nulls filled, joined."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    parts = []
+    for c in cols:
+        col = table[c]
+        if not (pa.types.is_string(col.type) or pa.types.is_large_string(col.type)):
+            col = pc.cast(col, pa.string())
+        parts.append(pc.fill_null(col, "\x00"))
+    if len(parts) == 1:
+        return parts[0]
+    return pc.binary_join_element_wise(*parts, "\x1f")
+
+
+def vanished_rows(old, new, key_cols: Sequence[str]):
+    """The rows of `old` whose key (or, with no key, whole row) is not in `new`."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    if old is None or old.num_rows == 0:
+        return None
+    if new is None or new.num_rows == 0:
+        return old
+    # Whole-row comparison skips binary columns: they cannot be cast to text,
+    # and a failed cast would keep the whole old copy every night.
+    cols = list(key_cols) or [f.name for f in old.schema
+                              if not (pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type))]
+    if not cols or any(c not in old.column_names or c not in new.column_names for c in cols):
+        return old
+    try:
+        present = pc.is_in(_row_keys(old, cols), value_set=_row_keys(new, cols))
+        return old.filter(pc.invert(present))
+    except Exception:                                   # noqa: BLE001
+        return old
+
+
 class TableDir:
     def __init__(self, root: Path, fq: str):
         self.dir = Path(root) / "tables" / fq
         self.manifest_path = self.dir / "manifest.json"
+
+    def keep_vanished(self, old_files: Sequence[str | None], new_files: Sequence[str | None],
+                      key_cols: Sequence[str], stamp: str) -> int:
+        """Write the rows of `old_files` that are in none of `new_files` to
+        vanished/. Returns how many rows were kept."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        def read(files):
+            tables = [pq.read_table(self.dir / f) for f in files
+                      if f and (self.dir / f).exists()]
+            return pa.concat_tables(tables, promote_options="default") if tables else None
+
+        old_present = [f for f in old_files if f and (self.dir / f).exists()]
+        if not old_present:
+            return 0
+        gone = vanished_rows(read(old_present), read(new_files), key_cols)
+        if gone is None or gone.num_rows == 0:
+            return 0
+        out = self.dir / VANISHED_DIR
+        out.mkdir(parents=True, exist_ok=True)
+        name = f"vanished_{stamp}_{Path(old_present[0]).stem}.parquet"
+        tmp = out / (name + ".tmp")
+        pq.write_table(gone, tmp, compression="zstd")
+        os.replace(tmp, out / name)
+        return gone.num_rows
 
     def load(self) -> dict | None:
         if not self.manifest_path.exists():
@@ -801,6 +873,7 @@ class TableResult:
     mismatched: int = 0
     unchecked: int = 0  # ranges whose count hit the statement timeout
     pulled_rows: int = 0
+    vanished: int = 0   # rows that left Supabase, kept in vanished/
     error: str | None = None
     seconds: float = 0.0
 
@@ -916,11 +989,24 @@ class Mirror:
         for k in ("last_verify",):
             if old and old.get(k):
                 m[k] = old[k]
+        # Before the old copy goes: keep the rows Supabase no longer has. The
+        # latest-line caches are rebuilt from the odds tables, so they are not
+        # records (CLAUDE.md §1b) and their churn is not kept.
+        if old and info.fq not in self.always_full:
+            res.vanished = store.keep_vanished(
+                [c.get("file") for c in old.get("chunks", [])],
+                [c.get("file") for c in new_chunks], info.pk, self._stamp())
+            if res.vanished:
+                self.log(f"{info.fq}: kept {res.vanished:,} row(s) no longer in "
+                         f"Supabase in {VANISHED_DIR}/")
         store.save(m)
         for c in (old or {}).get("chunks", []):
             store.remove(c.get("file"))
         res.local_rows = m["rows"]
         return res
+
+    def _stamp(self) -> str:
+        return self.clock().astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     def _full_copy_ctid(self, store: TableDir, m: dict, info: TableInfo, keep) -> int:
         """No primary key: page through the heap by ctid block ranges."""
@@ -999,7 +1085,8 @@ class Mirror:
             i = j
         return bad, n_checked_hash
 
-    def _repull(self, store: TableDir, m: dict, info: TableInfo, chunk_id: int) -> int:
+    def _repull(self, store: TableDir, m: dict, info: TableInfo, chunk_id: int,
+                res: TableResult | None = None) -> int:
         chunks = m["chunks"]
         idx = next(k for k, c in enumerate(chunks) if c["id"] == chunk_id)
         lo, hi = self._bounds(chunks, idx)
@@ -1010,6 +1097,14 @@ class Mirror:
             if not fresh or fresh[-1]["id"] != chunk["id"]:
                 fresh.append(chunk)
         pulled = self._pull_range(store, m, info, lo, hi, keep)
+        # Before the old chunk goes: keep the rows of it Supabase no longer has.
+        kept = store.keep_vanished([old.get("file")], [c.get("file") for c in fresh],
+                                   m.get("key_columns") or info.pk, self._stamp())
+        if kept:
+            if res is not None:
+                res.vanished += kept
+            self.log(f"{info.fq}: kept {kept:,} row(s) no longer in Supabase "
+                     f"in {VANISHED_DIR}/")
         m["chunks"] = chunks[:idx] + fresh + chunks[idx + 1:]
         store.save(m)
         store.remove(old.get("file"))
@@ -1039,7 +1134,7 @@ class Mirror:
         hashed = self._choose_hashed(m)
         bad, n_hashed = self._compare(info, m, hashed)
         for cid in bad:
-            res.pulled_rows += self._repull(store, m, info, cid)
+            res.pulled_rows += self._repull(store, m, info, cid, res)
         res.repulled = len(bad)
         checked = [_parse_iso(c.get("hash_checked_at")) for c in m["chunks"]]
         if checked and all(checked):
@@ -1470,12 +1565,22 @@ def mirror_storage(src: PgSource, dest: Path, base_url: str | None, service_key:
         b["downloaded"] += 1
         b["bytes"] += len(data)
         report["objects"].append(entry)
+    # An object no longer in its bucket is MOVED to storage_vanished/, outside
+    # this folder's walk, never deleted (CLAUDE.md §1b: the PC copy never
+    # deletes). Only a half-written .tmp from a killed download is removed.
     removed = 0
-    for p in root.rglob("*"):
+    gone_root = dest / "storage_vanished" / dt.datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    for p in list(root.rglob("*")):
         if p.is_file() and p != manifest_path and p not in keep_paths:
-            p.unlink()
+            if p.name.endswith(".tmp"):
+                p.unlink()
+            else:
+                target = gone_root / p.relative_to(root)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(p, target)
             removed += 1
     report["removed_local_files"] = removed
+    report["kept_removed_objects_in"] = str(gone_root.relative_to(dest)) if removed else None
     report["at"] = _iso()
     _atomic_write_text(manifest_path, json.dumps(report, indent=1, default=str))
     for bucket, b in report["buckets"].items():

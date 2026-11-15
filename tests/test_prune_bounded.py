@@ -21,6 +21,15 @@ import pytest
 
 from data import prune_odds as po
 
+
+@pytest.fixture(autouse=True)
+def _deletion_approved_for_the_mechanism_tests(monkeypatch):
+    """These tests exercise the delete machinery itself. Production runs it only
+    with mike's approval (config.DATA_DELETION_APPROVALS, CLAUDE.md §1b);
+    tests/test_no_data_deleted.py pins that it refuses without one."""
+    import config
+    monkeypatch.setitem(config.DATA_DELETION_APPROVALS, "prune_odds", "test")
+
 TODAY = "2026-10-20"
 KEEP = 2                                   # cutoff 2026-10-18
 ODDS_COLS = ("odds_id", "game_id", "sport", "market", "bookmaker", "snapshot_type",

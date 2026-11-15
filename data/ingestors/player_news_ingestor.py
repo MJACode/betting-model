@@ -399,8 +399,13 @@ def store_items(conn, sport: str, items: list[NewsItem], index: dict[str, str | 
 
 
 def prune_old(conn, retention_days: int | None = None) -> int:
-    """Drop notes past the retention window. This table is a cache of a feed we
-    can re-read — nothing here is irreplaceable."""
+    """Drop notes past the retention window, only with mike's approval.
+
+    NO DATA IS EVER DELETED (CLAUDE.md §1b, mike 2026-11-14). A stored note is
+    kept whether or not the feed would serve it again; the sheet still shows
+    only the recent ones."""
+    if not config.data_deletion_approved("player_news"):
+        return 0
     days = retention_days if retention_days is not None else config.PLAYER_NEWS_RETENTION_DAYS
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     result = conn.execute("DELETE FROM player_news WHERE published_at < %s", (cutoff,))

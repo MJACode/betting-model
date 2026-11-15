@@ -212,6 +212,23 @@ def require_record_restatement_approval(key: str) -> None:
             f"approval in config.RECORD_RESTATEMENT_APPROVALS.")
 
 
+# NO DATA IS EVER DELETED (CLAUDE.md §1b; mike, 2026-11-14: "We should not be
+# deleting any data, that needs to be a hard rule that only mike can override").
+# Every job that deletes stored rows asks data_deletion_approved(<job>) first and
+# deletes nothing when the answer is no: "prune_odds" (data/prune_odds.py),
+# "api_call_log" (monitoring/store.prune), "app_timings"
+# (data/app_timings_retention.py), "player_news" (player_news_ingestor.prune_old).
+# An entry is added only on mike's word in chat, its value quoting him with the
+# date, on a commit carrying `Updated-By: mike`. tests/test_no_data_deleted.py
+# pins this empty, so an entry changes that test in the same commit. What still
+# deletes and the archive plan: docs/data_archive.md.
+DATA_DELETION_APPROVALS: dict[str, str] = {}
+
+
+def data_deletion_approved(job: str) -> bool:
+    return str(job) in DATA_DELETION_APPROVALS
+
+
 def record_exclusion_sql(alias: str = "p") -> str:
     """RECORD_EXCLUSIONS as a SQL predicate, ANDed into a record query.
 
