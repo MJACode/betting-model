@@ -1,0 +1,4 @@
+gdaley_races_sample.csv is four lines (header plus three races) from
+gdaley/hkracing, licence CC0: Public Domain.
+https://www.kaggle.com/datasets/gdaley/hkracing
+The dates in the file are the ones the dataset card says were obscured.
