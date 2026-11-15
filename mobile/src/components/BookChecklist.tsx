@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BOOKS, type BookKey } from '@/hooks/usePreferredBooks';
 import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity, cardDense } from '@/lib/theme';
 
 /**
  * Checks or unchecks one book. The last one stays on: an empty set would
@@ -89,14 +89,12 @@ export function BookChecklist({
 
 const styles = StyleSheet.create({
   row: {
+    ...cardDense,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
     borderWidth: 1.5,
     borderColor: 'transparent',
-    padding: spacing.md,
     marginBottom: spacing.sm,
   },
   rowActive: {
@@ -147,6 +145,6 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   pressed: {
-    opacity: 0.7,
+    opacity: opacity.pressed,
   },
 });

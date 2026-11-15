@@ -31,6 +31,13 @@ export const colors = {
   // than textSecondary (9.55:1), so the chip stays quieter than a Pick chip.
   pausedInk: '#5C5C62',
   textInverse: '#FFFFFF',
+  // Secondary text on the navy chrome (the betslip bar's "Price" / "Pays"
+  // labels, the time under your own feedback bubble). White at 72%, so it
+  // stays quieter than textInverse beside it. Was a literal in three places.
+  textInverseSecondary: '#FFFFFFB8',
+  // A light wash on a dark or tint fill — the count bubble inside an
+  // active filter chip. White at 25%.
+  inverseWash: '#FFFFFF40',
 
   // Separators
   separator: '#3C3C4349',
@@ -63,6 +70,8 @@ export const colors = {
   // Selected Signals Slip / Track. A light wash of tint, so the ON state
   // reads as selected and the label stays tint (measured on this wash).
   tintSoft: '#E6E8EC',
+  // The dimmed backdrop behind a bottom sheet (UX_REVIEW: #00000055).
+  scrim: '#00000055',
   // A STATUS colour, never a control: the old system blue kept for the one
   // grade/pill/fill that means "good / in progress" and must not look like a
   // button now that tint is near-black (UX review 2026-09-03).
@@ -143,6 +152,10 @@ export const colors = {
   // it is textPrimary (~10.7:1). Lives here so a dark-surface variant has one
   // home when the app gets a dark theme.
   bookDraftKings: '#53D337',
+  // The DraftKings mark's ground (green on black) and FanDuel's blue, for
+  // the Connect Sportsbook tiles. Brand colours of the books, not ours.
+  bookDraftKingsGround: '#000000',
+  bookFanDuel: '#1493FF',
 
   // Performance heat map
   positive: '#34C759',
@@ -174,6 +187,16 @@ export const radii = {
   pill: 999,
 };
 
+/**
+ * Press and disabled feedback. Before 2026-11-14 a pressed control faded to
+ * one of 12 different opacities (0.2–0.85) depending on which file drew it;
+ * 0.6 was already the most common (43 sites), 0.4 the most common disabled.
+ */
+export const opacity = {
+  pressed: 0.6,
+  disabled: 0.4,
+};
+
 export const spacing = {
   xs: 4,
   sm: 8,
@@ -182,6 +205,23 @@ export const spacing = {
   xl: 24,
   xxl: 32,
 };
+
+/**
+ * The standard card: white on the grouped background, 12pt corners, 16pt
+ * inside. Spread it into a StyleSheet entry (`card: { ...card, marginBottom }`)
+ * so every card on every screen shares one shape. A dense list row may use
+ * `cardDense` (12pt inside) — that is the only other padding.
+ */
+export const card = {
+  backgroundColor: colors.bgCard,
+  borderRadius: radii.md,
+  padding: spacing.lg,
+} as const;
+
+export const cardDense = {
+  ...card,
+  padding: spacing.md,
+} as const;
 
 export const font = {
   family: Platform.select({
@@ -213,6 +253,23 @@ export const font = {
     bold: '700' as const,
   },
 };
+
+/**
+ * The one section-header text style: uppercase footnote, semibold,
+ * textSecondary (UX_REVIEW §1). Before 2026-11-14, 33 headers were hand-rolled
+ * at two sizes (caption / footnote), two greys and letter-spacing anywhere
+ * from 0.3 to 0.6. Spread it into a StyleSheet entry and add only layout
+ * (margins, padding) beside it: `heading: { ...sectionHeaderText, marginBottom: spacing.xs }`.
+ * `SectionTitle` is the component form, with the standard gutter and an ⓘ.
+ */
+export const sectionHeaderText = {
+  fontFamily: font.family,
+  fontSize: font.size.footnote,
+  fontWeight: font.weight.semibold,
+  color: colors.textSecondary,
+  letterSpacing: 0.4,
+  textTransform: 'uppercase',
+} as const;
 
 /**
  * The text colour for a signed result — P&L, ROI, EV, CLV, a line move. Gain

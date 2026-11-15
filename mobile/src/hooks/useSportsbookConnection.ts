@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
+import { colors } from '@/lib/theme';
 
 /**
  * Beta scaffold: tracks which sportsbooks the user has "connected".
@@ -29,8 +30,8 @@ export interface ProviderMeta {
 
 /** Order here is the order books render in the Connect screen. */
 export const SPORTSBOOK_PROVIDERS: ProviderMeta[] = [
-  { id: 'draftkings', name: 'DraftKings', abbrev: 'DK', logoBg: '#000000', logoFg: '#53D337' },
-  { id: 'fanduel', name: 'FanDuel', abbrev: 'FD', logoBg: '#1493FF', logoFg: '#FFFFFF' },
+  { id: 'draftkings', name: 'DraftKings', abbrev: 'DK', logoBg: colors.bookDraftKingsGround, logoFg: colors.bookDraftKings },
+  { id: 'fanduel', name: 'FanDuel', abbrev: 'FD', logoBg: colors.bookFanDuel, logoFg: colors.textInverse },
 ];
 
 export function providerMeta(id: SportsbookProvider): ProviderMeta {

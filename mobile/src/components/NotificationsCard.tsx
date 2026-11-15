@@ -9,7 +9,7 @@ import {
   unregisterForPush,
   usePushState,
 } from '@/hooks/usePushNotifications';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity, card } from '@/lib/theme';
 import { sendTestPush, type TestPushResult } from '@/lib/pushTest';
 
 /**
@@ -258,9 +258,7 @@ function timeLabel(iso: string): string {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   header: {
@@ -317,7 +315,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   buttonPressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
   buttonText: {
     fontSize: font.size.footnote,

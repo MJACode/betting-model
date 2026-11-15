@@ -50,7 +50,11 @@ def test_new_members_start_with_every_book_and_are_asked():
 
 def test_the_pick_surfaces_read_the_set():
     card = _read(SRC / "components" / "PickCard.tsx")
-    assert "usePreferredBooks()" in card and "myBooksView(" in card
+    # The myBooksView call moved to lib/pickPriceView.ts (2026-11-14), which
+    # PickCard and Bet all both read.
+    view = _read(SRC / "lib" / "pickPriceView.ts")
+    assert "usePreferredBooks()" in card and "pickPriceView(item, liveState, myBooks, myBooksReady)" in card
+    assert "myBooksView(" in view
     assert "bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge, myBooksReady ? myBooks : undefined)" in card
     detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
     assert "allowedBooks={allowedBooks}" in detail

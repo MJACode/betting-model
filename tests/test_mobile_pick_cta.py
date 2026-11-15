@@ -510,8 +510,12 @@ def test_the_card_applies_the_price_age_rule():
     shop = shop[:shop.index("\nexport function ")]
     assert "freshBookRows(pick, bookRows, priceAge)" in shop and "hero?.stale" in shop
     card = _read(SRC / "components" / "PickCard.tsx")
-    assert "const priceAge = priceAgeFor(pick, game, liveState);" in card
-    assert "heroAmericanForPick(pick, item.latestOdds, item.bookRows, priceAge)" in card
+    # The price view moved to lib/pickPriceView.ts (2026-11-14): PickCard and
+    # Bet all both read it, so the rule is pinned where it now lives.
+    view = _read(SRC / "lib" / "pickPriceView.ts")
+    assert "pickPriceView(item, liveState, myBooks, myBooksReady)" in card
+    assert "const priceAge = priceAgeFor(pick, game, liveState ?? null);" in view
+    assert "heroAmericanForPick(pick, item.latestOdds, item.bookRows, priceAge)" in view
     pc = _read(LIB / "priceCheck.ts")
     assert "if (!started && stale) reasons.push('stale');" in pc
     ppc = _read(LIB / "pickPriceCheck.ts")
@@ -535,7 +539,8 @@ def test_best_handoff_rerank_is_wired():
 def test_pick_card_wiring():
     card = _read(SRC / "components" / "PickCard.tsx")
     assert "const cta = pickCtaFor(pick, game, liveState);" in card
-    assert "priceCheckForItem(item, liveState)" in card
+    assert "pickPriceView(item, liveState, myBooks, myBooksReady)" in card
+    assert "priceCheckForItem(item, liveState ?? null)" in _read(SRC / "lib" / "pickPriceView.ts")
     assert re.search(
         r"offersBook && cta\.handoff && \(myBooksReady \|\| pick\.is_live === true\)\s*\?\s*bestHandoffForPick",
         card,

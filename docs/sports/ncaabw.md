@@ -322,8 +322,8 @@ those games is 15.95 points and the model's 15.95.
 NCAABW is a sport chip right after NCAAB on the Picks, Models and Stats tabs,
 and the model is "NCAABW Totals" (badge O/U). The Today board reads its picks
 7 days ahead, because DraftKings' first total came up to 6 dates before the
-game. The Stats tab has a Players board (the same chips as the men's, no
-props and no Teams board). The in-play model is in its own section below.
+game. The Stats tab has a Players board and a Teams board (the same chips
+as the men's, no props). The in-play model is in its own section below.
 VoiceOver says "Women's college basketball" wherever a control speaks the sport,
 so the men's and women's chips do not sound alike.
 
@@ -344,7 +344,10 @@ so the men's and women's chips do not sound alike.
   seasons (the second year head-to-head reads) stay empty until
   `python -m data.ingestors.ncaabw_sdv_import --log --seasons 2026 2027`,
   which writes the log only and does not rewrite stored team rows.
-  No player-prop line. No Teams board. No starter flag: the file
+  No player-prop line. The Teams board is the men's set. Its efficiency
+  numbers wait on `team_stats_board_college_hoops_2026_11_12.sql`, which is
+  not in `ACTIVE_MIGRATIONS`: apply it by hand, then refresh the cache.
+  No starter flag: the file
   does not carry one, so the player page has no Starting / Off bench split.
 - **The prefix trap.** `modelId.startsWith('ncaab')` is true for
   `ncaabw_total_blend`, so both places that file a model under a sport test

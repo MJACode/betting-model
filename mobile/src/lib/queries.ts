@@ -3504,9 +3504,11 @@ export async function fetchTeamStats(
 ): Promise<TeamSeasonStats> {
   // No tennis team stats: two players, no teams (teamStatCatalog BALL).
   if (sport === 'ATP' || sport === 'WTA') return { season: null, rows: [] };
-  // Neither college basketball sport has a Teams board (teamStatCatalog BALL).
-  // NCAABW is named before NCAAB.
-  if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAABW' || sport === 'NCAAB') return { season: null, rows: [] };
+  // UFC and golf have no teams. College basketball is on the board
+  // (teamStatCatalog BALL). An empty asked season falls through to the
+  // previous ending-year label below, the same loop NBA uses.
+  // NCAABW is named before NCAAB wherever both are checked.
+  if (sport === 'UFC' || sport === 'GOLF') return { season: null, rows: [] };
   // EuroLeague has no stats in the app (2026-11-13).
   if (sport === 'EUROLEAGUE') return { season: null, rows: [] };
   // RETURNS THE SEASON IT ACTUALLY USED, and that is not decoration. The Teams

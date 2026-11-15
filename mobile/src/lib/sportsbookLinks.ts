@@ -1,8 +1,9 @@
 import { Alert, Linking, Platform } from 'react-native';
 
 import { getBettingState } from '@/hooks/useBettingState';
-import { fillBetslipLink, linkNeedsState } from '@/lib/betslipLinks';
+import { appClaimedLink, fillBetslipLink, linkNeedsState } from '@/lib/betslipLinks';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
+import { openUniversalLinkOnly } from '@/lib/openInApp';
 import { colors } from '@/lib/theme';
 
 /**
@@ -193,11 +194,15 @@ export async function isBookAppInstalled(book: string): Promise<boolean | null> 
  *                "Open" (Matt, 2026-09-05, with that page on screen).
  *   not        → the App Store, whatever link we hold — the bet is not
  *                placeable without the app (Matt, 2026-09-04) — else the site.
- *   unknown    → link → store → site, the pre-detection chain: a filled
- *                universal link opens the app when it is there and Safari
- *                when it is not, and with no link the store is where a member
- *                without the app needs to be. The hand-off sheet also offers
- *                the store outright in this case (ParlayDkHandoff).
+ *   unknown    → first, iOS is asked to open the link the book's app
+ *                CLAIMS, in the app only (`appClaimedLink`, lib/openInApp.ts;
+ *                Matt, 2026-11-14: "Make it open the App Store if I dont have
+ *                the app or open the app if I have it"). Yes: the app is
+ *                open. No: no installed app took it, so the App Store. A
+ *                build that cannot ask (Android, or a binary older than the
+ *                native module), or a book whose app claims no link we hold,
+ *                keeps the old chain: link → store → site. The hand-off
+ *                sheet also offers the store outright (ParlayDkHandoff).
  *
  * Returns true once something opened.
  */
@@ -223,6 +228,22 @@ export async function openBookBetslip(
     if (await tryOpen(app.web)) return true;
     return couldNotOpen(book);
   }
+
+  // Ask iOS itself: open the link this book's app claims, in the app or not
+  // at all. For BetMGM that is a different link from the stored one, so it is
+  // tried whenever the app is not known to be missing. `false` means no
+  // installed app took it. With no verified scheme to say otherwise
+  // (`installed === null`) that is the "not installed" answer, so the App
+  // Store. `null` means this build cannot ask.
+  const claimed = appClaimedLink(book, link, getBettingState());
+  const viaApp = claimed ? await openUniversalLinkOnly(claimed) : null;
+  if (viaApp === true) return true;
+  if (viaApp === false && installed === null) {
+    const store = bookStoreUrl(book);
+    if (store && (await tryOpen(store))) return true;
+  }
+  // A `false` while a candidate scheme says the app IS installed falls
+  // through to the stored link below, as before this ask existed.
 
   if (link && link.trim()) {
     const filled = fillBetslipLink(link, getBettingState());

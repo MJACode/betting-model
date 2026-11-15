@@ -56,6 +56,7 @@ import { useMembership } from '@/hooks/useMembership';
 import { billingReady, planFor } from '@/lib/billingConfig';
 import { discordLinkReady } from '@/lib/discordConfig';
 import { describeDiscordLink, discordErrorMessage, discordInviteIfPaid } from '@/lib/discord';
+import { DISCORD_CARD_BODY, DISCORD_CARD_TITLE } from '@/lib/discordJoin';
 import { DiscordLinkModal } from '@/components/DiscordLinkModal';
 import { billingErrorMessage, endTrialEarly, openManageSubscription, restorePurchases } from '@/lib/billing';
 import { earlyUnlockLine, isPlanKey, planStatusCopy } from '@/lib/billingHelpers';
@@ -76,6 +77,7 @@ import {
   SETTINGS_SECTION_TITLE,
   accountTileSummary,
   bankrollTileSummary,
+  communityIncludedChip,
   communityTileSummary,
   isSettingsSectionId,
   notificationsTileSummary,
@@ -83,7 +85,7 @@ import {
   sportsbooksTileSummary,
   type SettingsSectionId,
 } from '@/lib/settingsHome';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity, card } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
@@ -145,7 +147,7 @@ function LinkRow({
 export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
   const { fontScale, width } = useWindowDimensions();
-  const { summaries, accountSpoken, showAccountSection } = useSettingsHomeModel();
+  const { summaries, accountSpoken, showAccountSection, communityIncluded } = useSettingsHomeModel();
   const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
   // A newer bundle is downloaded and runs at the next start (src/lib/updateReady.ts).
   const updateReady = useSyncExternalStore(subscribeUpdateReady, isUpdateReady);
@@ -168,6 +170,7 @@ export function SettingsScreen() {
                 summary={summaries[id]}
                 spoken={id === 'account' ? accountSpoken : summaries[id]}
                 icon={SECTION_ICON[id]}
+                included={id === 'community' && communityIncluded}
                 onPress={() => open(id)}
               />
             </View>
@@ -182,6 +185,7 @@ export function SettingsScreen() {
           summary={summaries[id]}
           spoken={id === 'account' ? accountSpoken : summaries[id]}
           icon={SECTION_ICON[id]}
+          included={id === 'community' && communityIncluded}
           onPress={() => open(id)}
         />
       ))}
@@ -268,6 +272,19 @@ function SettingsScroll({
   );
 }
 
+function IncludedChip() {
+  return (
+    <View
+      style={styles.tileIncluded}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <View style={styles.bookDot} />
+      <Text style={styles.bookPillText}>Included</Text>
+    </View>
+  );
+}
+
 function SettingsTile({
   title,
   summary,
@@ -275,6 +292,7 @@ function SettingsTile({
   icon,
   onPress,
   wide = false,
+  included = false,
 }: {
   title: string;
   summary: string;
@@ -283,6 +301,8 @@ function SettingsTile({
   icon: React.ComponentProps<typeof Ionicons>['name'];
   onPress: () => void;
   wide?: boolean;
+  /** Paid Community tile. The word is in the button label; the chip is visual. */
+  included?: boolean;
 }) {
   const glyph = (
     <View
@@ -294,10 +314,11 @@ function SettingsTile({
     </View>
   );
   const chevron = <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />;
+  const chip = included ? <IncludedChip /> : null;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${title}. ${spoken ?? summary}`}
+      accessibilityLabel={`${title}. ${spoken ?? summary}${included ? '. Included' : ''}`}
       onPress={onPress}
       style={({ pressed }) => [wide ? styles.tileWide : styles.tile, pressed && styles.pressed]}
     >
@@ -307,6 +328,7 @@ function SettingsTile({
           <View style={styles.tileWideText}>
             <Text style={[styles.tileTitle, styles.tileTitleInline]}>{title}</Text>
             <Text style={styles.tileSummary} numberOfLines={2}>{summary}</Text>
+            {chip}
           </View>
           {chevron}
         </>
@@ -318,6 +340,7 @@ function SettingsTile({
           </View>
           <Text style={styles.tileTitle}>{title}</Text>
           <Text style={styles.tileSummary} numberOfLines={2}>{summary}</Text>
+          {chip}
         </>
       )}
     </Pressable>
@@ -420,7 +443,12 @@ function useSettingsHomeModel() {
     account: accountTileSummary(plan.signedIn, plan.authEmail, plan.planLabel, true),
     legal: LEGAL_TILE_SUMMARY,
   };
-  return { summaries, accountSpoken, showAccountSection: plan.showAccountSection };
+  return {
+    summaries,
+    accountSpoken,
+    showAccountSection: plan.showAccountSection,
+    communityIncluded: communityIncludedChip(plan.showDiscord, plan.storePaid, feedbackUnread),
+  };
 }
 
 function SportsbooksSection() {
@@ -452,7 +480,7 @@ function SportsbooksSection() {
             onPress={() => setBookPickerOpen(true)}
             accessibilityRole="button"
             accessibilityLabel={`Your sportsbooks: ${booksName(books)}. Tap to change.`}
-            style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
+            style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: opacity.pressed }]}
           >
             <View
               style={[
@@ -498,7 +526,7 @@ function SportsbooksSection() {
             onPress={() => setStatePickerOpen(true)}
             accessibilityRole="button"
             accessibilityLabel={`Your state: ${stateName ?? 'not set'}. Tap to change.`}
-            style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
+            style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: opacity.pressed }]}
           >
             <Text style={[styles.bookRowName, !stateName && { color: colors.textTertiary }]}>
               {stateName ?? 'Not set'}
@@ -642,25 +670,19 @@ function CommunitySection() {
     <SettingsScroll
       overlay={<DiscordLinkModal visible={discordSheet} onClose={() => setDiscordSheet(false)} />}
     >
-        <LinkRow
-          label="Follow us on X"
-          sub="Model notes, daily results and release news."
-          onPress={() => openLink(TWITTER_URL, 'X')}
-          icon="logo-x"
-        />
-
-        {/* No public invite. Join Discord is inside the paid card only. */}
+        {/* No public invite. Join Discord is inside the paid card only.
+            Discord leads this screen; X and feedback stay under it. */}
         {billingReady() ? (
           !signedIn ? null : planHold ? (
           <View style={styles.card}>
-            <Text style={styles.cardLabel}>Discord for members</Text>
+            <Text style={styles.cardLabel}>{DISCORD_CARD_TITLE}</Text>
             <Text style={styles.sub}>Checking your plan…</Text>
           </View>
           ) : (
           <>
           <View style={styles.card}>
             <View style={styles.bookRow}>
-              <Text style={styles.cardLabel}>Discord for members</Text>
+              <Text style={styles.cardLabel}>{DISCORD_CARD_TITLE}</Text>
               {storePaid ? (
                 <View style={styles.bookPill}>
                   <View style={styles.bookDot} />
@@ -672,7 +694,7 @@ function CommunitySection() {
             </View>
             <Text style={styles.sub}>
               {storePaid
-                ? 'Talk picks with other subscribers.'
+                ? DISCORD_CARD_BODY
                 : planStatus.badge === 'Trial'
                   ? 'Unlocks when your paid plan starts, after the free trial. No invite is shown until then.'
                   : 'Included with a paid plan. No invite is shown until then.'}
@@ -684,7 +706,7 @@ function CommunitySection() {
               <Pressable
                 onPress={() => {
                   const invite = discordInviteIfPaid(true);
-                  if (invite) void openLink(invite, 'Discord');
+                  if (invite) void openLink(invite, 'Discord', { revealUrl: false });
                 }}
                 accessibilityRole="button"
                 accessibilityLabel="Join Discord"
@@ -806,6 +828,13 @@ function CommunitySection() {
             }
           />
         ) : null}
+
+        <LinkRow
+          label="Follow us on X"
+          sub="Model notes, daily results and release news."
+          onPress={() => openLink(TWITTER_URL, 'X')}
+          icon="logo-x"
+        />
 
         <LinkRow
           label="Send feedback"
@@ -1235,19 +1264,15 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
   },
   tile: {
+    ...card,
     flex: 1,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
     minHeight: 44,
   },
   tileWide: {
+    ...card,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
     marginBottom: spacing.md,
     minHeight: 44,
   },
@@ -1282,6 +1307,17 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     lineHeight: 18,
   },
+  tileIncluded: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    backgroundColor: colors.betSoft,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radii.pill,
+    marginTop: spacing.sm,
+  },
   groupCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
@@ -1303,22 +1339,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
   },
   linkCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginBottom: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
   // A long email must truncate rather than shove the "Signed in" pill off-row.
   flexShrink: {

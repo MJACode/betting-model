@@ -49,6 +49,62 @@ export function fillBetslipLink(link: string, state: string | null): string | nu
 }
 
 /**
+ * The link a book's iPhone app CLAIMS, so iOS can be asked to open it in the
+ * app and nowhere else (lib/openInApp.ts).
+ *
+ * Measured 2026-11-12 from each host's apple-app-site-association file as
+ * Apple's CDN serves it (worker job 1224851, scripts/book_app_links_probe.py):
+ *
+ *   draftkings      sportsbook.draftkings.com   every path
+ *   fanduel         sportsbook.fanduel.com      every path
+ *   williamhill_us  sportsbook.caesars.com      /us/<state>/bet/*
+ *   betmgm          sports.<state>.betmgm.com   /<lang>/sportsapp/* ONLY
+ *
+ * BetMGM's stored betslip link is `/en/sports?options=…`, which its app does
+ * not claim, so it always opened Safari (Matt, 2026-11-12: "MGM link took me
+ * to the website"). The same query under `/en/sportsapp/sports` is claimed.
+ * Whether the app then puts the selection on the slip is not documented and
+ * has not been seen on a device.
+ *
+ * With no betslip link, the book's claimed root stands in, so the app still
+ * opens. Null for a book whose app claims nothing we hold (BetRivers outside
+ * NJ, Hard Rock, Fanatics, Bally, betPARX, Rebet), and when a state is needed
+ * and not set.
+ */
+export function appClaimedLink(
+  book: string,
+  link: string | null | undefined,
+  state: string | null,
+): string | null {
+  const filled = link && link.trim() ? fillBetslipLink(link, state) : null;
+  if (link && link.trim() && !filled) return null; // a template we cannot fill
+  const st = state ? state.toLowerCase() : null;
+  switch (book) {
+    // Only the host the probe measured. A link on any other host is not
+    // known to be claimed, and a "no" from iOS sends the member to the App
+    // Store, so it is not asked about (null keeps the old route).
+    case 'draftkings':
+      if (filled) return filled.startsWith('https://sportsbook.draftkings.com/') ? filled : null;
+      return 'https://sportsbook.draftkings.com/';
+    case 'fanduel':
+      if (filled) return filled.startsWith('https://sportsbook.fanduel.com/') ? filled : null;
+      return 'https://sportsbook.fanduel.com/';
+    case 'williamhill_us':
+      if (filled) return /^https:\/\/sportsbook\.caesars\.com\/us\/[a-z]{2}\/bet\//.test(filled) ? filled : null;
+      return st ? `https://sportsbook.caesars.com/us/${st}/bet/` : null;
+    case 'betmgm': {
+      if (filled) {
+        const m = /^(https:\/\/sports\.[a-z]{2}\.betmgm\.com\/[a-z]{2})\/sports(\?.*)?$/.exec(filled);
+        return m ? `${m[1]}/sportsapp/sports${m[2] ?? ''}` : null;
+      }
+      return st ? `https://sports.${st}.betmgm.com/en/sportsapp/sports` : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
  * Join several single-selection betslip links into ONE URL that puts every
  * linked pick on the book's slip.
  *
@@ -286,4 +342,106 @@ function combineEspnBet(links: string[]): string | null {
     })
     .join('&');
   return `${originPath(links[0]!)}/?${q}`;
+}
+
+/**
+ * Bet all (Matt, 2026-11-14): "They are all singles and should not be
+ * considered for a parlay." One URL that puts several picks on a book's slip,
+ * built so it never ASKS the book for a parlay. Null when the book has no
+ * measured multi-selection form, so the caller opens one link per pick.
+ *
+ * Differences from `combineBetslipLinks`, which is the parlay hand-off:
+ *   betmgm   `type=Single`, never `type=combo` (combo is BetMGM's parlay)
+ *   caesars  keeps the stored link's other parameters. Stored Caesars links
+ *            now end `&dl=betslip` (measured 2026-11-14), and the parlay
+ *            combiner drops it. Which form a phone opens is not yet measured.
+ *
+ * DraftKings, FanDuel and ESPN BET links name selections only. Whether the
+ * book's slip then opens on Straight or Parlay is the book's choice, which
+ * no link controls; the Bet all sheet tells the member to pick Straight.
+ * `BET_ALL_ONE_LINK_BOOKS` is the switch for a book a phone test shows opens
+ * a parlay: take it out and that book gets one link per pick.
+ */
+export const BET_ALL_ONE_LINK_BOOKS: readonly BetslipCombineKind[] = [
+  'draftkings',
+  'fanduel',
+  'betmgm',
+  'caesars',
+  'espnbet',
+];
+
+export function combineSinglesLinks(
+  links: readonly (string | null | undefined)[],
+  allowed: readonly BetslipCombineKind[] = BET_ALL_ONE_LINK_BOOKS,
+): string | null {
+  const seen = new Set<string>();
+  const cleaned: string[] = [];
+  for (const raw of links) {
+    const link = raw?.trim();
+    if (!link || seen.has(link)) continue;
+    seen.add(link);
+    cleaned.push(link);
+  }
+  if (cleaned.length === 0) return null;
+  if (cleaned.length === 1) return cleaned[0] ?? null;
+  const kind = betslipCombineKind(cleaned[0] ?? '');
+  if (!kind || !allowed.includes(kind)) return null;
+  if (cleaned.some((l) => betslipCombineKind(l) !== kind)) return null;
+  switch (kind) {
+    case 'betmgm':
+      return joinQueryList(cleaned, 'options', { type: 'Single' });
+    case 'caesars':
+      return joinQueryList(cleaned, 'selectionIds');
+    default:
+      return combineBetslipLinks(cleaned);
+  }
+}
+
+/**
+ * The first link with `key`'s comma list replaced by every link's ids, its
+ * other parameters kept (or overridden by `set`). String-level, because a
+ * `{state}` host does not parse as a URL.
+ */
+function joinQueryList(
+  links: string[],
+  key: string,
+  set: Record<string, string> = {},
+): string | null {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const link of links) {
+    const raw = rawQueryValue(link, key);
+    if (!raw) return null;
+    for (const id of raw.split(',')) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  if (ids.length === 0) return null;
+  const first = links[0]!;
+  const q = first.indexOf('?');
+  const hashAt = first.indexOf('#', q);
+  const base = first.slice(0, q);
+  const qs = hashAt >= 0 ? first.slice(q + 1, hashAt) : first.slice(q + 1);
+  const hash = hashAt >= 0 ? first.slice(hashAt) : '';
+  const parts: string[] = [];
+  const done = new Set<string>();
+  for (const part of qs.split('&')) {
+    if (!part) continue;
+    const eq = part.indexOf('=');
+    const k = eq < 0 ? part : part.slice(0, eq);
+    if (k === key) {
+      parts.push(`${key}=${ids.join(',')}`);
+    } else if (k in set) {
+      parts.push(`${k}=${set[k]}`);
+    } else {
+      parts.push(part);
+    }
+    done.add(k);
+  }
+  for (const [k, v] of Object.entries(set)) {
+    if (!done.has(k)) parts.push(`${k}=${v}`);
+  }
+  return `${base}?${parts.join('&')}${hash}`;
 }

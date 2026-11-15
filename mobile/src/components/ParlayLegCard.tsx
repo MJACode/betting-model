@@ -6,7 +6,7 @@ import { bookLabel } from '@/lib/markets';
 import { isLineLeg, PREGAME_ALT_NOTE } from '@/lib/lineLegs';
 import { modelShort } from '@/lib/modelMeta';
 import { LiveDot } from '@/components/LiveDot';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import { matchupForLeg, type ParlayLeg } from '@/lib/parlay';
 
 interface Props {
@@ -229,6 +229,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pressed: {
-    opacity: 0.5,
+    opacity: opacity.pressed,
   },
 });

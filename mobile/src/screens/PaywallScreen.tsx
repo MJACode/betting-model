@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Platform,
   Pressable,
@@ -32,12 +31,14 @@ import {
   startCheckout,
 } from '@/lib/billing';
 import { accessSourceCopy } from '@/lib/discord';
+import { paywallDiscordBullet } from '@/lib/discordJoin';
 import { EULA_URL, PRIVACY_URL, TERMS_URL, openLink } from '@/lib/socialLinks';
 import { useAuth } from '@/hooks/useAuth';
 import { useEntitlement } from '@/hooks/useEntitlement';
 import { useMembership } from '@/hooks/useMembership';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+import { PrimaryButton } from '@/components/PrimaryButton';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type PaywallRoute = RouteProp<RootStackParamList, 'Paywall'>;
@@ -196,12 +197,7 @@ export function PaywallScreen() {
           <Text style={styles.title}>Unlock every signal</Text>
           <Text style={styles.subtitle}>{paywallSubtitle(plan)}</Text>
 
-          {[
-            ...INCLUDED,
-            plan.trialDays > 0
-              ? 'The subscriber Discord (paid plans, after the trial)'
-              : 'The subscriber Discord, included with this plan',
-          ].map((line) => (
+          {[...INCLUDED, paywallDiscordBullet(plan.trialDays)].map((line) => (
             <View key={line} style={styles.includedRow}>
               <Ionicons name="checkmark-circle" size={16} color={colors.tint} />
               <Text style={styles.includedText}>{line}</Text>
@@ -245,20 +241,7 @@ export function PaywallScreen() {
             );
           })}
 
-          <Pressable
-            accessibilityLabel={cta}
-            accessibilityState={{ busy, disabled: busy }}
-            onPress={onSubscribe}
-            disabled={busy}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.cta, pressed && styles.pressed, busy && styles.disabled]}
-          >
-            {busy ? (
-              <ActivityIndicator color={colors.brandInk} />
-            ) : (
-              <Text style={styles.ctaText}>{cta}</Text>
-            )}
-          </Pressable>
+          <PrimaryButton label={cta} onPress={onSubscribe} variant="brand" loading={busy} style={styles.cta} />
 
           <Text style={styles.legal}>
             {BILLING_RAIL === 'iap'
@@ -424,22 +407,7 @@ const styles = StyleSheet.create({
     color: colors.brandMuted,
     textAlign: 'right',
   },
-  cta: {
-    minHeight: 52,
-    borderRadius: radii.md,
-    backgroundColor: colors.brand,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.sm,
-  },
-  ctaText: {
-    fontFamily: font.family,
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.brandInk,
-  },
-  pressed: { opacity: 0.6 },
-  disabled: { opacity: 0.4 },
+  cta: { marginTop: spacing.sm },
   legal: {
     fontFamily: font.family,
     fontSize: font.size.caption,

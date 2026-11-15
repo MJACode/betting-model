@@ -136,7 +136,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/components/filters/FilterBar.tsx', 'pill,pressed', 1], // 38.3pt
   ['src/components/filters/FilterSheet.tsx', '', 1], // 41.8pt
   ['src/components/filters/FilterSheet.tsx', 'pressed', 1], // 31.5pt
-  ['src/components/filters/FilterSheet.tsx', 'showBtn,showBtnEmpty,pressed', 1], // 43.0pt
   ['src/components/filters/GameFilterSection.tsx', '', 1], // 32.0pt
   ['src/screens/BuiltInModelDetailScreen.tsx', 'pickRow', 2], // 41.8, 41.8pt — the sweep row is gone
   ['src/screens/FeedbackScreen.tsx', 'chip,chipActive', 1], // 41.5pt
@@ -153,9 +152,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/ModelEditScreen.tsx', 'deleteBtn', 1], // 41.8pt
   ['src/screens/ModelEditScreen.tsx', 'modalRow,pressed', 1], // 41.8pt
   ['src/screens/ParlayScreen.tsx', '', 1], // 40.0pt
-  ['src/screens/ParlayScreen.tsx', 'addCustomBtn,manualBtn,pressed', 1], // 43.0pt
-  ['src/screens/ParlayScreen.tsx', 'buildBtn,buildBtnDisabled,pressed', 1], // 43.0pt
-  ['src/screens/ParlayScreen.tsx', 'buildBtn,manualBtn,pressed', 1], // 43.0pt
   ['src/screens/ParlayScreen.tsx', 'clearBtn,pressed', 1], // 43.0pt
   ['src/screens/ParlayScreen.tsx', 'missingNote,pressed', 1], // 39.5pt
   ['src/screens/PaywallScreen.tsx', '', 5], // 38.3, 38.3, 38.3, 39.5, 39.5pt — close is 44pt
@@ -171,7 +167,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/SavedParlaysScreen.tsx', 'clearAllBtn,pressed', 1], // 39.5pt
   ['src/screens/SavedParlaysScreen.tsx', 'deleteBtn,pressed', 1], // 40.0pt
   ['src/screens/SavedParlaysScreen.tsx', 'editBtn,pressed', 1], // 40.0pt
-  ['src/screens/SavedParlaysScreen.tsx', 'newBtn,pressed', 1], // 43.0pt
   ['src/screens/SettingsScreen.tsx', 'bookPickRow', 2], // 41.8, 41.8pt
   ['src/screens/SettingsScreen.tsx', 'pressed', 1], // 38.3pt
   ['src/screens/SettingsScreen.tsx', 'doneBtn,pressed', 1], // 41.8pt — #831's keyboard Done (landed on master after this rule); follow-up with the rest
@@ -240,7 +235,22 @@ function styleBlock(src: string, name: string): string {
     if (src[i] === '{') d++;
     else if (src[i] === '}') d--;
   }
-  return src.slice(base, i);
+  return expandThemeSpreads(src.slice(base, i));
+}
+
+/**
+ * The shared style objects in theme.ts, spread into a StyleSheet entry
+ * (`...card`). Expanded to the props they carry so a card row is measured
+ * from its real padding rather than read as unpadded (UI pass 2026-11-14).
+ * Pinned against theme.ts below, so the two cannot drift.
+ */
+const THEME_SPREADS: Record<string, string> = {
+  card: 'padding: spacing.lg,',
+  cardDense: 'padding: spacing.md,',
+  sectionHeaderText: 'fontSize: font.size.footnote,',
+};
+function expandThemeSpreads(block: string): string {
+  return block.replace(/\.\.\.(card|cardDense|sectionHeaderText)\b,?/g, (_m, k: string) => THEME_SPREADS[k]);
 }
 
 const a11ySrc = read('src/lib/a11y.ts');
@@ -437,6 +447,14 @@ console.log('\nRules 1–4: Pressables');
   check('rule: hitSlop={x} with x unreadable is unknown (null), hitSlop={SLOP} with const SLOP = spacing.sm reads 16',
     verticalSlop('<Pressable hitSlop={x}>', {}) === null && verticalSlop('<Pressable hitSlop={SLOP}>', { SLOP: 'spacing.sm' }) === 16);
   check('rule: minHeight 44 reads 44; absoluteFill is a full-screen backdrop', visualHeight('minHeight: 44', null, '', {}) === 44 && visualHeight('StyleSheet.absoluteFill', null, '', {}) === Infinity);
+  {
+    const theme = read('src/lib/theme.ts');
+    const body = (name: string) => new RegExp(`export const ${name} = \\{([\\s\\S]*?)\\} as const;`).exec(theme)?.[1] ?? '';
+    check('rule: the card spreads match theme.ts (card padding lg, cardDense md, section header footnote)',
+      /padding: spacing\.lg/.test(body('card')) && /padding: spacing\.md/.test(body('cardDense'))
+        && /fontSize: font\.size\.footnote/.test(body('sectionHeaderText'))
+        && visualHeight(expandThemeSpreads('...cardDense,'), null, '', {}) === 24);
+  }
 }
 check(`every Pressable has accessibilityRole + accessibilityLabel (${missing.length} missing)`, missing.length === 0, missing.join('; '));
 check(`every Pressable is ≥ 44pt tall, visual + slop (${small.length} short)`, small.length === 0, small.join('; '));
@@ -677,7 +695,9 @@ const onboarding = read('src/components/OnboardingModal.tsx');
 check('M19: Skip and Next have roles; dots read "Page N of 5"', /accessibilityLabel="Skip intro"/.test(onboarding) && /const total = SLIDES\.length \+ 1;/.test(onboarding) && /accessibilityLabel=\{pageLabel\(step, total\)\}/.test(onboarding) && /\? `Save \$\{selected\.length\} sportsbook/.test(onboarding) && /: `Next, \$\{pageLabel\(step \+ 1, total\)/.test(onboarding));
 const manual = read('src/components/ManualBetModal.tsx');
 check('M25: disabled "Add bet" says why (accessibilityHint = addBetHint) and exposes disabled',
-  /const addHint = valid \? undefined : addBetHint\(\{ bet: desc, stake \}\);/.test(manual) && /accessibilityHint=\{addHint\}/.test(manual) && /accessibilityState=\{\{ disabled: !valid \}\}/.test(manual) && /disabled=\{!valid\}/.test(manual));
+  /const addHint = valid \? undefined : addBetHint\(\{ bet: desc, stake \}\);/.test(manual) && /accessibilityHint=\{addHint\}/.test(manual) && /<PrimaryButton label="Add bet"[^>]*disabled=\{!valid\}/.test(manual)
+    // The disabled state is exposed by PrimaryButton itself (UI pass 2026-11-14).
+    && /accessibilityState=\{\{ disabled: inactive,/.test(read('src/components/PrimaryButton.tsx')));
 check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '"Stake in units"', '"Odds, American"'].every((l) => manual.includes(`accessibilityLabel=${l}`)));
 const settings = read('src/screens/SettingsScreen.tsx');
 check(

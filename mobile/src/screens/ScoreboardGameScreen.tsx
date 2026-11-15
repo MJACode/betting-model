@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { RouteProp } from '@react-navigation/native';
 import { useFocusEffect, useRoute } from '@react-navigation/native';
 
@@ -26,8 +26,9 @@ import {
   presentScoreboard,
   type ScoreboardQuote,
 } from '@/lib/scoreboard';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, sectionHeaderText, card } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+import { SkeletonList } from '@/components/Skeleton';
 
 type Route = RouteProp<RootStackParamList, 'ScoreboardGame'>;
 
@@ -127,8 +128,8 @@ export function ScoreboardGameScreen() {
 
   if (loading && !card) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color={colors.tint} />
+      <View style={styles.skeletonScreen}>
+        <SkeletonList label="this game" rows={5} />
       </View>
     );
   }
@@ -228,7 +229,7 @@ function MarketLines({
 
 const styles = StyleSheet.create({
   page: { padding: spacing.lg, gap: spacing.md },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
+  skeletonScreen: { flex: 1, padding: spacing.lg, backgroundColor: colors.bg },
   matchup: {
     fontFamily: font.family,
     fontSize: font.size.title3,
@@ -258,17 +259,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   block: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
+    ...card,
     gap: spacing.sm,
   },
   blockTitle: {
-    fontFamily: font.family,
-    fontSize: font.size.caption,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
+    ...sectionHeaderText,
   },
   lines: { gap: spacing.xs },
   line: {

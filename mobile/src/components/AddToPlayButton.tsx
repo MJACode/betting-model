@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 
 interface Props {
   inPlay: boolean;
@@ -122,6 +122,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
 });

@@ -100,7 +100,7 @@ import {
   type PeriodKey,
   type TeamPeriodRow,
 } from '@/lib/teamPeriodSplits';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
 import { ErrorBanner } from '@/components/ErrorState';
 import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
@@ -438,11 +438,15 @@ export function TeamsBoard({
       }),
     [gameLines, slate.games, lineMarket, books, unstarted],
   );
-  // Gated on the DAY and the BOOKS, never on which stat is selected — the
-  // column must not come and go as the user taps through chips.
+  // Gated on the DAY and the BOOKS, never on which stat is selected and
+  // never on the sport — the column must not come and go as the user taps
+  // through chips. College basketball shows the same moneyline, spread and
+  // total pills on a game day as NBA (Matt, 2026-11-12).
   const mine = useMemo(() => new Set<string>(books), [books]);
   // The LINE pill is the full-game market; beside a 1Q or 1H record it would
   // read as that period's line and add a full-game leg (UX review, 2026-11-13).
+  // Only NBA has period filters (lib/teamPeriodSplits), so on a college board
+  // this first condition is always true and the pills follow the day and books.
   const showLines =
     !(periodsOn && periodFilter.period !== 'FG') &&
     booksReady &&
@@ -1029,7 +1033,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.separator,
   },
   colHeaderRank: {
-    width: 20,
+    width: 28,
     fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
@@ -1068,7 +1072,7 @@ const styles = StyleSheet.create({
   rowWithGame: { minHeight: 54 },
   rowMain: { flex: 1, minWidth: 0 },
   rank: {
-    width: 20,
+    width: 28,
     textAlign: 'center',
     fontSize: font.size.caption,
     fontWeight: font.weight.bold,
@@ -1140,6 +1144,6 @@ const styles = StyleSheet.create({
   valueLabel: { fontSize: font.size.nano, color: colors.textSecondary, textAlign: 'right' },
   thinLabel: { fontSize: font.size.nano, color: colors.textSecondary, fontStyle: 'italic', textAlign: 'right' },
   thinValue: { fontWeight: font.weight.regular, color: colors.textSecondary },
-  pressed: { opacity: 0.65 },
+  pressed: { opacity: opacity.pressed },
   loading: { marginVertical: spacing.xxl },
 });

@@ -407,7 +407,10 @@ check('a paused or preview BET is not called a bet', reasoningHeading('BET', { p
 const card = read('src/components/PickCard.tsx');
 check('PickCard: cta = pickCtaFor(pick, game, liveState) (game_time fallback, postponed, in-play tag)',
   /const cta = pickCtaFor\(pick, game, liveState\);/.test(card) && !/gameHasStarted\(game, liveState\)\s*;/.test(card));
-check('PickCard: the price check reads the live snapshot', /priceCheckForItem\(item, liveState\)/.test(card));
+// The price view moved to lib/pickPriceView.ts (2026-11-14, Bet all reads it too).
+const priceView = read('src/lib/pickPriceView.ts');
+check('PickCard: the price check reads the live snapshot',
+  /pickPriceView\(item, liveState, myBooks, myBooksReady\)/.test(card) && /priceCheckForItem\(item, liveState \?\? null\)/.test(priceView));
 check('LineMovementCard: footer is changesFooter (no "Last 8 of 8")', /changesFooter\(recent, \{ fromPick: hist\.fromPick, gap: hist\.gap \}\)/.test(read('src/lib/lineMovementView.ts')));
 check(
   'PickCard: hand-off only while cta.handoff, and a pre-game card waits for the member\'s books',

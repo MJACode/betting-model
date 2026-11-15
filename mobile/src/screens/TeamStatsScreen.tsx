@@ -13,8 +13,9 @@
  *     any weight to; the descriptive splits come after.
  *  2. FORM — last ten, from the team's side, with cover / over marks where
  *     the sport stores a closing number per game (NFL today).
- *  3. SPLITS — home / away, favourite / dog, rest, over rate, from the board's
- *     row, captioned as description rather than edge, as the board does.
+ *  3. SPLITS — home / away, favourite / dog, and rest where this sport shows
+ *     it, plus the over rate, from the board's row, captioned as description
+ *     rather than edge, as the board does.
  *     NBA adds a FIRST-QUARTER card here: last 5 / 10 / season, home and away,
  *     and points per 100 possessions (components/NbaFirstQuarterCard).
  *  4. HEAD-TO-HEAD with the next opponent.
@@ -63,11 +64,12 @@ import {
   type TeamMarket,
 } from '@/lib/teamDetail';
 import { formatTeamStat, spreadWord, teamSeasonLabel, teamStatFor, type TeamStatDef } from '@/lib/teamStatCatalog';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, card } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { friendlyCause } from '@/lib/errors';
 import type { RootStackParamList, TeamSport, TeamStatsRow } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { SkeletonList } from '@/components/Skeleton';
 
 type Route = RouteProp<RootStackParamList, 'TeamStats'>;
 
@@ -137,7 +139,7 @@ export function TeamStatsScreen() {
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <View style={styles.header}>
-          <Text style={styles.teamName} numberOfLines={1}>
+          <Text style={styles.teamName} numberOfLines={2}>
             {team}
           </Text>
           <Text style={styles.meta}>
@@ -180,7 +182,7 @@ export function TeamStatsScreen() {
         {/* ── 2. Form ────────────────────────────────────────────────────── */}
         <SectionTitle title={`Last ${form.length || FORM_GAMES}`} />
         {d.recent.loading && form.length === 0 ? (
-          <ActivityIndicator style={styles.loading} />
+          <SkeletonList label="recent games" style={styles.skeleton} />
         ) : form.length === 0 ? (
           <Card>
             <Text style={styles.muted}>
@@ -193,8 +195,10 @@ export function TeamStatsScreen() {
           <>
             <Card>
               {/* College names do not fit a 10-cell strip ("Northwestern State"
-                  at 32pt a cell is "Nor…"), so NCAAF gets one row per game. */}
-              {sport === 'NCAAF' ? (
+                  at 32pt a cell is "Nor…"). NCAAF, NCAAB and NCAABW get one
+                  row per game (Matt, 2026-11-12, for the two basketball
+                  sports). NCAABW is named before NCAAB. */}
+              {sport === 'NCAABW' || sport === 'NCAAB' || sport === 'NCAAF' ? (
                 form.map((g) => <MeetingRow key={g.gameId} game={g} team={team} />)
               ) : (
                 <FormStrip games={form} />
@@ -242,10 +246,13 @@ export function TeamStatsScreen() {
           title="Situational splits"
           tooltip={{
             title: 'Description, not edge',
-            body:
-              'Home/away, favourite/dog and rest splits describe what already happened this season. ' +
-              'They regress toward .500 once the market prices a trend in — read them as context for the ' +
-              'number, not as a reason to bet against it. Rest is the one split with a documented, repeatable effect.',
+            body: teamStatFor(sport, 'rest_adv_ats_pct')
+              ? 'Home/away, favourite/dog and rest splits describe what already happened this season. ' +
+                'They regress toward .500 once the market prices a trend in — read them as context for the ' +
+                'number, not as a reason to bet against it. Rest is the one split with a documented, repeatable effect.'
+              : 'Home/away and favourite/dog splits describe what already happened this season. ' +
+                'They regress toward .500 once the market prices a trend in — read them as context for the ' +
+                'number, not as a reason to bet against it.',
           }}
         />
         {row ? <SplitsTiles row={row} sport={sport} /> : boardEmpty ? (
@@ -285,7 +292,7 @@ export function TeamStatsScreen() {
           <>
             <SectionTitle title={`vs ${d.h2h.opponent}`} />
             {d.h2hLoading && d.h2h.meetings.length === 0 ? (
-              <ActivityIndicator style={styles.loading} />
+              <SkeletonList label="the meetings" rows={2} style={styles.skeleton} />
             ) : d.h2h.meetings.length === 0 ? (
               <Card>
                 <Text style={styles.muted}>No stored meetings between {team} and {d.h2h.opponent}.</Text>
@@ -331,7 +338,7 @@ export function TeamStatsScreen() {
           }}
         />
         {d.picksLoading && d.pickRecords.settled === 0 ? (
-          <ActivityIndicator style={styles.loading} />
+          <SkeletonList label="the pick record" rows={2} style={styles.skeleton} />
         ) : d.pickRecords.settled === 0 ? (
           <Card>
             <Text style={styles.muted}>
@@ -392,7 +399,7 @@ export function TeamStatsScreen() {
             ))}
           </Card>
         ) : d.board.loading ? (
-          <ActivityIndicator style={styles.loading} />
+          <SkeletonList label="efficiency metrics" style={styles.skeleton} />
         ) : (
           <Card>
             <Text style={styles.muted}>No efficiency metrics stored for {team} yet.</Text>
@@ -464,12 +471,26 @@ function NextGameCard({
           one — the title and the status pill say which (UX review). */}
       <SectionTitle title={unstarted ? 'Next game' : 'Today’s game'} />
       <Card>
-        <View style={styles.fixtureRow}>
+        <View
+          style={styles.fixtureRow}
+          accessible={unstarted}
+          accessibilityLabel={
+            unstarted
+              ? `${side}${day || time ? `, ${[day, time].filter(Boolean).join(' ')}` : ''}`
+              : undefined
+          }
+        >
           <Text style={styles.fixture} numberOfLines={1}>
             {side}
-            {unstarted ? <Text style={styles.fixtureWhen}>  {day ? `${day} ` : ''}{time}</Text> : null}
           </Text>
-          {unstarted ? null : <GameStatusPill game={entry.game} />}
+          {unstarted ? (
+            <Text style={styles.fixtureWhen}>
+              {day ? `${day} ` : ''}
+              {time}
+            </Text>
+          ) : (
+            <GameStatusPill game={entry.game} />
+          )}
         </View>
 
         {/* The member's own line for each market, from the team's side. The
@@ -884,15 +905,14 @@ function unitsTint(units: number | null): string | undefined {
 }
 
 const styles = StyleSheet.create({
+  skeleton: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
   container: { flex: 1, backgroundColor: colors.bg },
   list: { paddingBottom: spacing.xxl },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
   teamName: { fontSize: font.size.title2, fontWeight: font.weight.bold, color: colors.textPrimary },
   meta: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2 },
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
   },
@@ -902,14 +922,18 @@ const styles = StyleSheet.create({
   // textSecondary inside a card: textTertiary is ~3.4:1 on bgCard at this size (UX_REVIEW §5).
   legend: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 16 },
   source: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 16 },
-  loading: { marginVertical: spacing.xl },
   loadingInline: { marginTop: spacing.sm },
   // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
   errorBannerInset: { marginTop: spacing.sm },
 
   fixtureRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   fixture: { flexShrink: 1, fontSize: font.size.headline, fontWeight: font.weight.semibold, color: colors.textPrimary },
-  fixtureWhen: { fontSize: font.size.footnote, fontWeight: font.weight.regular, color: colors.textSecondary },
+  fixtureWhen: {
+    flexShrink: 0,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.regular,
+    color: colors.textSecondary,
+  },
   pillRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.md, gap: spacing.sm },
   pillCol: { flex: 1, alignItems: 'flex-end' },
   pillLabel: {

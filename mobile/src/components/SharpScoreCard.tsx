@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { modelClvFor, sharpScore } from '@/lib/sharpScore';
 import { formatPct } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, card } from '@/lib/theme';
 import type { Pick } from '@/types';
 import { SharpScorePill } from './SharpScorePill';
 
@@ -96,9 +96,7 @@ function Part({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },

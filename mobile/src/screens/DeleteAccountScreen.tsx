@@ -65,7 +65,7 @@ import {
   type ReauthMethod,
 } from '@/lib/deleteAccountHelpers';
 import { fallbackManagementUrl } from '@/lib/iapHelpers';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, sectionHeaderText, opacity } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'DeleteAccount'>;
@@ -668,11 +668,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   section: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    ...sectionHeaderText,
     marginBottom: spacing.sm,
     marginLeft: 2,
   },
@@ -749,7 +745,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   dangerBtnBusy: {
-    opacity: 0.7,
+    opacity: opacity.disabled,
   },
   spinner: {
     marginRight: spacing.sm,
@@ -778,7 +774,7 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: opacity.pressed,
   },
   success: {
     alignItems: 'center',

@@ -16,7 +16,7 @@ import {
   passesActionFilter,
 } from '@/lib/thresholds';
 import { trueMinus } from '@/lib/signalsCard';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, spacing, card } from '@/lib/theme';
 import type { Pick } from '@/types';
 import {
   bookLabel,
@@ -173,9 +173,7 @@ function Row({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    ...card,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },

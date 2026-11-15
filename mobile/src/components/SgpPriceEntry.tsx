@@ -12,7 +12,7 @@ import { logSgpPrice } from '@/lib/queries';
 import { sgpShapeFor } from '@/lib/parlayCorrelation';
 import { enteredPriceIsPlausible, parseEnteredAmerican } from '@/lib/sgpPricing';
 import { APP_VERSION } from '@/lib/socialLinks';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 
 /**
  * "Enter <book>'s slip price" — one compact row inside that book's hand-off
@@ -227,13 +227,13 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     backgroundColor: colors.tint,
   },
-  saveDisabled: { opacity: 0.4 },
+  saveDisabled: { opacity: opacity.disabled },
   saveText: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.textInverse,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: opacity.pressed },
   clear: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   clearText: {
     fontSize: font.size.footnote,

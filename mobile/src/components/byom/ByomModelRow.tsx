@@ -13,7 +13,7 @@ import {
   type ByomSport,
 } from '@/lib/byomRecord';
 import type { ByomFilters } from '@/lib/byomFilters';
-import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing, opacity } from '@/lib/theme';
 
 export function ByomModelRow({
   rank,
@@ -141,7 +141,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     gap: spacing.sm,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: opacity.pressed },
   body: {
     flex: 1,
     flexDirection: 'row',

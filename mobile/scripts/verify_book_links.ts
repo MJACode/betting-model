@@ -19,7 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { fillBetslipLink, linkNeedsState } from '../src/lib/betslipLinks';
+import { appClaimedLink, fillBetslipLink, linkNeedsState } from '../src/lib/betslipLinks';
 import { BETTABLE_BOOKS } from '../src/lib/markets';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -119,6 +119,42 @@ check('every store id is a numeric Apple id (nothing hand-typed)', (src.match(/i
 const handoff = read('src/components/ParlayDkHandoff.tsx');
 check('the hand-off sheet offers the store outright, through the same failure path as the bet button', handoff.includes('on the App Store') && handoff.includes('openBookStore(book, state)') && handoff.includes('useBettingState()'));
 check('...except when the build knows the app IS installed (an unknown still shows it)', handoff.includes('useBookAppInstalled(book)') && handoff.includes('store && installed !== true ?'));
+
+// ── open in the app, or the App Store (Matt, 2026-11-14: "Make it open the
+// App Store if I dont have the app or open the app if I have it") ────────────
+// The claimed forms are the ones each host's apple-app-site-association file
+// carries (worker job 1224851, 2026-11-12).
+const MGM = 'https://sports.{state}.betmgm.com/en/sports?options=20076228-1575284363-2342468393&type=Single';
+check('BetMGM: the betslip link moves under /sportsapp/, the only path its app claims, query kept',
+  appClaimedLink('betmgm', MGM, 'NJ') === 'https://sports.nj.betmgm.com/en/sportsapp/sports?options=20076228-1575284363-2342468393&type=Single');
+check('BetMGM: no link still opens the app, at its claimed root', appClaimedLink('betmgm', null, 'pa') === 'https://sports.pa.betmgm.com/en/sportsapp/sports');
+check('BetMGM: a template with no state is never asked about', appClaimedLink('betmgm', MGM, null) === null && appClaimedLink('betmgm', null, null) === null);
+check('BetMGM: a link of a shape we have not seen is not rewritten', appClaimedLink('betmgm', 'https://sports.nj.betmgm.com/en/casino?x=1', 'nj') === null);
+check('FanDuel and DraftKings: the stored link as it is, else the claimed root',
+  appClaimedLink('fanduel', STORED.fanduel!, null) === STORED.fanduel && appClaimedLink('fanduel', null, null) === 'https://sportsbook.fanduel.com/'
+  && appClaimedLink('draftkings', null, null) === 'https://sportsbook.draftkings.com/');
+check('FanDuel and DraftKings: a link on any other host is not asked about',
+  appClaimedLink('fanduel', 'https://account.fanduel.com/x?y=1', null) === null && appClaimedLink('fanduel', 'https://nj.sportsbook.fanduel.com/addToBetslip?marketId=1', null) === null
+  && appClaimedLink('draftkings', 'https://www.draftkings.com/x', null) === null && appClaimedLink('draftkings', STORED.draftkings!, null) === STORED.draftkings);
+check('Caesars: the filled /us/<state>/bet/ link, else that root for the state',
+  appClaimedLink('williamhill_us', STORED.williamhill_us!, 'NJ') === fillBetslipLink(STORED.williamhill_us!, 'nj')
+  && appClaimedLink('williamhill_us', null, 'mi') === 'https://sportsbook.caesars.com/us/mi/bet/' && appClaimedLink('williamhill_us', null, null) === null);
+for (const b of ['betrivers', 'hardrockbet', 'fanatics', 'ballybet', 'betparx', 'rebet', 'fliff'] as const) {
+  check(`${b}: its app claims no link we hold, so iOS is not asked`, appClaimedLink(b, 'https://x.example/bet', 'nj') === null);
+}
+const viaApp = chain.slice(at('const claimed = appClaimedLink'), at('if (link && link.trim())'));
+check('iOS is asked to open the claimed link in the app only, after the not-installed exit and before anything else opens',
+  at('const claimed = appClaimedLink') > at('installed === false') && viaApp.includes('appClaimedLink(book, link, getBettingState())') && viaApp.includes('openUniversalLinkOnly(claimed)'));
+check('...yes is done; no is the App Store only when nothing says the app is installed; cannot-ask falls through to the old chain',
+  viaApp.includes('if (viaApp === true) return true;') && /if \(viaApp === false && installed === null\) \{\s*const store = bookStoreUrl\(book\);/.test(viaApp) && !viaApp.includes('tryOpen(app.web)'));
+const openInApp = read('src/lib/openInApp.ts');
+check('the native module is optional: a binary without it answers null, never throws',
+  openInApp.includes("requireOptionalNativeModule<OpenInAppNative>('OpenInApp')") && openInApp.includes('if (!native) return null;') && openInApp.includes("Platform.OS === 'ios'"));
+const swift = read('modules/open-in-app/ios/OpenInAppModule.swift');
+check('the native call is universalLinksOnly under the name the JS asks for',
+  swift.includes('Name("OpenInApp")') && swift.includes('AsyncFunction("openUniversalLinkOnly")') && swift.includes('[.universalLinksOnly: true]'));
+check('a string iOS cannot parse is an error (cannot ask), never "not installed"', swift.includes('promise.reject("ERR_OPEN_IN_APP_BAD_URL"') && !swift.includes('promise.resolve(false)') && openInApp.includes('return null; // asked and not answered'));
+check('the module is autolinked for iOS', read('modules/open-in-app/expo-module.config.json').includes('"OpenInAppModule"'));
 
 // ── the state setting exists and is reachable ────────────────────────────────
 const settings = read('src/screens/SettingsScreen.tsx');

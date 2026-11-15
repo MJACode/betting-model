@@ -159,7 +159,9 @@ def test_audited_targets():
     manual = _read(SRC / "components" / "ManualBetModal.tsx")
     assert "accessibilityHint={addHint}" in manual
     assert "addBetHint({ bet: desc, stake })" in manual
-    assert "accessibilityState={{ disabled: !valid }}" in manual
+    # "Add bet" is a PrimaryButton; the button exposes the disabled state.
+    assert '<PrimaryButton label="Add bet" onPress={submit} disabled={!valid}' in manual
+    assert "accessibilityState={{ disabled: inactive," in _read(SRC / "components" / "PrimaryButton.tsx")
     for label in ['"Bet"', '"Sportsbook, optional"', '"Stake in units"', '"Odds, American"']:
         assert f"accessibilityLabel={label}" in manual, label
     assert "hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}" in _read(SRC / "components" / "filters" / "FilterChip.tsx")
