@@ -139,6 +139,18 @@ STILL OUTSIDE and worth fixing when touched: the live decision log
 (`DECISION_LOG_DIR`, a JSONL on the worker's volume) and `nfl/data/odds_cache`
 (committed to git, ~45k credits — protected, but by a different scheme).
 
+That list is why the rule was rewritten on 2026-09-12 with no exceptions: the
+old wording carried those two as tolerated, nobody touched them, and 655 MB of
+PAID NFL odds history sat on one laptop for a fortnight. (Moved here from
+CLAUDE.md §1b on 2026-11-14 to make room for the no-deletion rule.)
+
+**NO DATA IS EVER DELETED** (mike, 2026-11-14). Measured that day: the odds
+pruner deleted 2.50M `odds` rows and 6.27M `player_prop_odds` rows in the seven
+morning runs of 11-08 to 11-14 (worker logs), `api_call_log` had lost 11.6M rows
+to its 7-day retention since 03-30, and the PC mirror removed pruned rows from
+its own copy because it converges to Supabase. Inventory and plan:
+`docs/data_archive.md`.
+
 **Live player props are a priority and are treated as a proven-profitable
 market.** The thesis is NOT beating line movement or reacting faster than a
 book. It is a statistical model for live prop over/unders priced RELATIVE TO

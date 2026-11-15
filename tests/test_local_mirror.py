@@ -292,6 +292,73 @@ def test_small_tables_are_copied_whole_every_run(tmp_path):
     assert not (before - {"manifest.json"}) & after, "the old chunk files are removed"
 
 
+# ------------------------------------------------------------- the copy never deletes
+# CLAUDE.md §1b (mike, 2026-11-14): "the archive and the PC copy never delete".
+# The chunks still converge to Supabase; rows that left it are kept beside them.
+
+def vanished(root, info=None):
+    import pyarrow.parquet as pq
+    info = info or table()
+    d = lm.TableDir(root, info.fq).dir / lm.VANISHED_DIR
+    if not d.exists():
+        return []
+    rows = []
+    for p in sorted(d.glob("*.parquet")):
+        rows += [tuple(r.values()) for r in pq.read_table(p).to_pylist()]
+    return sorted(rows)
+
+
+def test_rows_deleted_upstream_are_kept_beside_the_copy(tmp_path):
+    src = seeded(47)
+    mm = mirror(src, tmp_path)
+    mm.sync_table(src.info)
+    src.delete((15, "k015"))
+    src.delete((33, "k033"))
+    res = mm.sync_table(src.info)
+    assert local(tmp_path) == server(src), "the copy still matches Supabase"
+    assert vanished(tmp_path) == [(15, "k015", "v15"), (33, "k033", "v33")]
+    assert res.vanished == 2
+
+
+def test_a_small_table_keeps_rows_deleted_upstream(tmp_path):
+    info = table(est_rows=100)
+    src = seeded(47, info)
+    mm = mirror(src, tmp_path, full_copy_below=2_000_000)
+    mm.sync_table(info)
+    src.delete((40, "k040"))
+    src.put((3, "k003"), "updated")
+    res = mm.sync_table(info)
+    assert res.mode == "full"
+    assert local(tmp_path) == server(src)
+    assert vanished(tmp_path) == [(40, "k040", "v40")], "an update is not a deletion"
+
+
+def test_an_update_alone_keeps_nothing(tmp_path):
+    clock = Clock()
+    src = seeded(47)
+    mm = mirror(src, tmp_path, clock=clock, rotate_days=1)
+    mm.sync_table(src.info)
+    src.put((25, "k025"), "graded WIN")
+    clock.advance(days=2)
+    mm.sync_table(src.info)
+    assert local(tmp_path) == server(src)
+    assert vanished(tmp_path) == []
+
+
+def test_the_latest_line_caches_keep_no_vanished_rows(tmp_path):
+    """latest_odds / latest_prop_odds are rebuilt from the odds tables: a cache,
+    not a record, and their churn would fill the disk."""
+    info = lm.TableInfo("public", "latest_odds", table().columns, ["a", "b"],
+                        ["bigint", "text"], est_rows=10_000_000)
+    src = seeded(47, info)
+    mm = mirror(src, tmp_path)
+    mm.sync_table(info)
+    src.delete((5, "k005"))
+    mm.sync_table(info)
+    assert local(tmp_path, info) == server(src)
+    assert vanished(tmp_path, info) == []
+
+
 def test_a_table_without_a_primary_key_is_copied_by_heap_pages(tmp_path):
     info = table(pk=(), pk_types=(), est_rows=47)
     src = seeded(47, info)

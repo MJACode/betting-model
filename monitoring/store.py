@@ -238,6 +238,11 @@ def prune(conn, days: int = RETENTION_DAYS) -> int:
     set for that transaction only, and the loop stops at PRUNE_BUDGET_S.
     """
     roll_up(conn)
+    # NO DATA IS EVER DELETED (CLAUDE.md §1b, mike 2026-11-14): the rollup
+    # above still runs; the delete needs mike's approval in config.
+    import config as _config
+    if not _config.data_deletion_approved("api_call_log"):
+        return 0
     deleted = 0
     started = time.monotonic()
     while time.monotonic() - started < PRUNE_BUDGET_S:

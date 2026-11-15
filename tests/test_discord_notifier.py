@@ -1191,10 +1191,146 @@ def test_tally_line_omits_clv_unless_asked():
 
 def test_the_recap_carries_no_methodology_footer():
     """Matt/mike, 2026-08-29: the numbers, not an explanation of them."""
-    import ast
     import inspect
-    src = inspect.getsource(dn.notify_discord_results)
+    src = (inspect.getsource(dn.notify_discord_results)
+           + inspect.getsource(dn.results_embed))
     assert '"footer"' not in src, "the results recap must not carry a footer"
+
+
+def test_the_morning_recap_renders_the_all_time_lines():
+    """The 6:00am ET job is scheduler.run_daily_pipeline, which runs
+    run_pipeline.py. That calls step_settle, which posts
+    notify_discord_results. That embed's all-time block is
+    render_all_time_fields, so the win rate, average odds, and average
+    CLV lines are on the morning post."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    scheduler = (root / "scheduler.py").read_text(encoding="utf-8")
+    pipeline = (root / "run_pipeline.py").read_text(encoding="utf-8")
+    assert "CronTrigger(hour=6, minute=0, timezone=TIMEZONE)" in scheduler
+    assert "run_daily_pipeline" in scheduler
+    assert 'results["settle"] = step_settle(yesterday)' in pipeline
+    assert "notify_discord_results(game_date=settle_date)" in pipeline
+    import inspect
+    assert "all_time_fields(" in inspect.getsource(dn.notify_discord_results)
+    assert "render_all_time_fields(" in inspect.getsource(dn.all_time_fields)
+    rendered = inspect.getsource(dn.render_all_time_fields)
+    assert "_win_rate_line" in rendered
+    assert "_average_odds_line" in rendered
+    assert "_avg_clv_line" in rendered
+
+
+def _units_row(sport, units, odds=-110, result="WIN"):
+    """A settled row whose units are the stored profit, not stake_for."""
+    return (sport, "m", result, 0.02, odds, None, False, float(units), 1.0)
+
+
+def test_all_time_sports_sort_by_units_best_first():
+    """mike: the all-time sports run from the most units won to the most lost.
+    An exact tie breaks on the sport name. The day's sports stay alphabetical."""
+    rows = [
+        _units_row("MLB", -4.0, result="LOSS"),
+        _units_row("NBA", 1.0),
+        _units_row("NHL", 10.0),
+        _units_row("NFL", 1.0),
+    ]
+    fields = dn.render_all_time_fields(rows, "2026-09-01")
+    assert fields[0]["name"].startswith("\u200b\nAll-time")
+    assert [f["name"] for f in fields[1:]] == [
+        "NHL (all-time)", "NBA (all-time)", "NFL (all-time)", "MLB (all-time)",
+    ]
+    day = dn.results_embed("2026-11-14", rows, [])
+    assert [f["name"] for f in day["fields"]] == ["MLB", "NBA", "NFL", "NHL"]
+
+
+def test_all_time_overall_lines_precede_the_sports():
+    """Win rate and average odds are two lines on the overall field, before
+    any per-sport record. Pushes are graded and are not part of the win rate."""
+    rows = [
+        _units_row("NBA", 1.0, odds=-110, result="WIN"),
+        _units_row("NBA", 1.5, odds=150, result="WIN"),
+        _units_row("MLB", -1.0, odds=150, result="LOSS"),
+        _units_row("MLB", 0.0, odds=-110, result="PUSH"),
+    ]
+    overall = dn.render_all_time_fields(rows, "2026-09-01")[0]
+    value = overall["value"]
+    assert value.index("Win rate:") < value.index("Average odds:")
+    assert value.index("Average odds:") < value.index("Avg CLV:")
+    assert "Win rate: 66.7% (2/3)" in value
+    assert "(2/4)" not in value
+    assert "Average odds: +116" in value
+    assert "+20" not in value
+    assert "Avg CLV: n/a" in value
+    assert "4 settled" in value
+
+
+def test_all_time_avg_clv_is_the_mean_of_measured_closes():
+    """clv_pct is percent. The mean includes a 0% close as 0 and leaves out
+    a pick with no closing line and an in-play pick, even one that carries
+    a number. The count is how many prices were averaged."""
+    def row(result, clv, live=False):
+        return ("NBA", "m", result, 0.02, -110, clv, live, 1.0, 1.0)
+
+    rows = [
+        row("WIN", 2.4),
+        row("LOSS", -0.6),
+        row("PUSH", 0.004),          # inside the push grain; counts as 0
+        row("WIN", None),            # no closing line
+        row("WIN", 9.9, live=True),  # in-play; CLV does not apply
+    ]
+    t = dn._tally(rows)
+    assert t["clv_measured"] == 3
+    assert t["clv_push"] == 1
+    assert t["clv_sum"] == pytest.approx(1.8)
+    assert t["clv_n"] == 2
+    value = dn.render_all_time_fields(rows, "2026-09-01")[0]["value"]
+    assert "Avg CLV: +0.6% (3 measured)" in value
+    assert "9.9" not in value
+
+    none = [row("WIN", None), row("LOSS", None)]
+    assert dn._avg_clv_line(dn._tally(none)) == "Avg CLV: n/a"
+    negative = [row("LOSS", -2.0), row("LOSS", -1.0)]
+    assert dn._avg_clv_line(dn._tally(negative)) == "Avg CLV: -1.5% (2 measured)"
+
+
+def test_average_odds_are_the_mean_implied_probability():
+    """The mean is of implied probability (1/decimal), converted back to
+    the nearest American price. -110 and +150 are not averaged as American
+    numbers (+20) and not as decimal payouts (+120): the implied mean is
+    +116. One +2500 among fifty -110s stays near -110. The decimal mean of
+    that same set is about +138."""
+    assert dn.average_taken_american([-110, 150]) == 116
+    assert dn.average_taken_american([-200, -110]) == -147
+    assert dn.average_taken_american([-110]) == -110
+    # -100 and +100 are both implied 0.5. Even money comes back as +100.
+    assert dn.average_taken_american([100]) == 100
+    assert dn.average_taken_american([-100]) == 100
+    assert dn._american(dn.average_taken_american([-110, 150])) == "+116"
+    assert dn._american(dn.average_taken_american([-200, -110])) == "-147"
+    longshot = [-110] * 50 + [2500]
+    got = dn.average_taken_american(longshot)
+    assert got == -106
+    assert got < 0
+    # The decimal-payout mean of the same prices, so the test shows the skew
+    # this method does not have.
+    decimals = [dn._taken_decimal(p) for p in longshot]
+    decimal_mean = dn._nearest_american(sum(decimals) / len(decimals))
+    assert decimal_mean == 138
+    assert got != decimal_mean
+
+
+def test_a_missing_price_is_not_filled_in_for_the_average():
+    """A pick with no taken price stays in the record. It is not given -110
+    so it can be averaged. Zero is not a price either."""
+    assert dn.average_taken_american([None, 0, 200]) == 200
+    assert dn.average_taken_american([None, 0, float("nan")]) is None
+    rows = [
+        _units_row("NBA", 1.0, odds=None),
+        _units_row("NBA", -1.0, odds=200, result="LOSS"),
+    ]
+    value = dn.render_all_time_fields(rows, "2026-09-01")[0]["value"]
+    assert "Average odds: +200 (1 priced)" in value
+    assert "-110" not in value.split("Average odds:")[1]
 
 
 def test_snapshot_rows_capture_every_published_figure():

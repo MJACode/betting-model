@@ -300,6 +300,9 @@ def step_prune_odds(run_date: str) -> bool:
     try:
         from data.prune_odds import run_prune_odds
         summary = run_prune_odds(run_date)
+        if summary.get("refused"):
+            logger.info("Odds prune off: no data is deleted (CLAUDE.md §1b)")
+            return True
         total = sum(t["deleted"] for t in summary["tables"])
         logger.success(f"✓ Odds prune: {total:,} line-shop rows removed")
         return True

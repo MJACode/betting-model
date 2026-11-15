@@ -1079,8 +1079,19 @@ def run_prune_odds(run_date: str = None, keep_days: int = None,
         raise ValueError("keep_days must be >= 1 — pruning today's rows would "
                          "blank the live line-shopping board")
 
-    summary = {"today": today, "keep_days": keep, "tables": []}
+    summary = {"today": today, "keep_days": keep, "tables": [], "refused": False}
     tag = "[dry-run] " if dry_run else ""
+
+    # NO DATA IS EVER DELETED (CLAUDE.md §1b, mike 2026-11-14). A dry run only
+    # counts, so it still runs; a real one needs mike's approval in config.
+    import config as _config
+    if not dry_run and not _config.data_deletion_approved("prune_odds"):
+        logger.info("odds prune off: no data is deleted without mike's approval "
+                    "(CLAUDE.md §1b, config.DATA_DELETION_APPROVALS); "
+                    "nothing was read or deleted")
+        summary["refused"] = True
+        summary["thinned"] = None
+        return summary
 
     errors = []
     # First, on its own connection and in its own try: neither it nor the
