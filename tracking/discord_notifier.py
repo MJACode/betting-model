@@ -3026,24 +3026,30 @@ def _nearest_american(dec: float) -> int | None:
 def average_taken_american(prices) -> int | None:
     """Unweighted mean of the taken prices, as American odds.
 
-    American odds are not one linear scale. The arithmetic mean of -110 and
-    +150 is +20, and +20 is not a price between those two. Each taken price
-    is converted to decimal (the payout multiple), those decimals are
-    averaged, and the mean is converted back to the nearest American price.
+    Each taken price is converted to decimal, then to its implied
+    probability (1/decimal). Those probabilities are averaged with equal
+    weight, and the mean is converted back to the nearest American price.
+    That price is the break-even price of the set. Mike, 2026-11-15: use
+    this, not the mean of the decimal payouts. A long shot pulls the
+    decimal mean off the board (one +2500 among fifty -110s lands near
+    +138) and barely moves the implied mean (near -106).
 
     A missing, zero, or non-finite price is left out. It is not replaced
     with -110. No priced pick → None, which the line renders as N/A.
     Pushes stay in: a graded pick was bet at its price whether or not it
     pushed. The mean is one price per graded pick, not weighted by stake.
     """
-    decimals = []
+    implied = []
     for price in prices:
         dec = _taken_decimal(price)
         if dec is not None:
-            decimals.append(dec)
-    if not decimals:
+            implied.append(1.0 / dec)
+    if not implied:
         return None
-    return _nearest_american(sum(decimals) / len(decimals))
+    mean = sum(implied) / len(implied)
+    if not math.isfinite(mean) or mean <= 0.0 or mean >= 1.0:
+        return None
+    return _nearest_american(1.0 / mean)
 
 
 def _win_rate_line(t: dict) -> str:

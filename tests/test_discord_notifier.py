@@ -1258,7 +1258,7 @@ def test_all_time_overall_lines_precede_the_sports():
     assert value.index("Average odds:") < value.index("Avg CLV:")
     assert "Win rate: 66.7% (2/3)" in value
     assert "(2/4)" not in value
-    assert "Average odds: +120" in value
+    assert "Average odds: +116" in value
     assert "+20" not in value
     assert "Avg CLV: n/a" in value
     assert "4 settled" in value
@@ -1293,18 +1293,30 @@ def test_all_time_avg_clv_is_the_mean_of_measured_closes():
     assert dn._avg_clv_line(dn._tally(negative)) == "Avg CLV: -1.5% (2 measured)"
 
 
-def test_average_odds_are_the_mean_decimal_converted_back():
-    """-110 and +150 average to +20 if you average the American numbers.
-    The mean of the decimal odds converts back to +120. Two favorites do
-    not average to the mean of their American numbers either."""
-    assert dn.average_taken_american([-110, 150]) == 120
-    assert dn.average_taken_american([-200, -110]) == -142
+def test_average_odds_are_the_mean_implied_probability():
+    """The mean is of implied probability (1/decimal), converted back to
+    the nearest American price. -110 and +150 are not averaged as American
+    numbers (+20) and not as decimal payouts (+120): the implied mean is
+    +116. One +2500 among fifty -110s stays near -110. The decimal mean of
+    that same set is about +138."""
+    assert dn.average_taken_american([-110, 150]) == 116
+    assert dn.average_taken_american([-200, -110]) == -147
     assert dn.average_taken_american([-110]) == -110
-    # -100 and +100 are both decimal 2.0. Even money comes back as +100.
+    # -100 and +100 are both implied 0.5. Even money comes back as +100.
     assert dn.average_taken_american([100]) == 100
     assert dn.average_taken_american([-100]) == 100
-    assert dn._american(dn.average_taken_american([-110, 150])) == "+120"
-    assert dn._american(dn.average_taken_american([-200, -110])) == "-142"
+    assert dn._american(dn.average_taken_american([-110, 150])) == "+116"
+    assert dn._american(dn.average_taken_american([-200, -110])) == "-147"
+    longshot = [-110] * 50 + [2500]
+    got = dn.average_taken_american(longshot)
+    assert got == -106
+    assert got < 0
+    # The decimal-payout mean of the same prices, so the test shows the skew
+    # this method does not have.
+    decimals = [dn._taken_decimal(p) for p in longshot]
+    decimal_mean = dn._nearest_american(sum(decimals) / len(decimals))
+    assert decimal_mean == 138
+    assert got != decimal_mean
 
 
 def test_a_missing_price_is_not_filled_in_for_the_average():
