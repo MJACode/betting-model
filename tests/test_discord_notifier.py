@@ -1232,11 +1232,42 @@ def test_all_time_overall_lines_precede_the_sports():
     overall = dn.render_all_time_fields(rows, "2026-09-01")[0]
     value = overall["value"]
     assert value.index("Win rate:") < value.index("Average odds:")
+    assert value.index("Average odds:") < value.index("Avg CLV:")
     assert "Win rate: 66.7% (2/3)" in value
     assert "(2/4)" not in value
     assert "Average odds: +120" in value
     assert "+20" not in value
+    assert "Avg CLV: n/a" in value
     assert "4 settled" in value
+
+
+def test_all_time_avg_clv_is_the_mean_of_measured_closes():
+    """clv_pct is percent. The mean includes a 0% close as 0 and leaves out
+    a pick with no closing line and an in-play pick, even one that carries
+    a number. The count is how many prices were averaged."""
+    def row(result, clv, live=False):
+        return ("NBA", "m", result, 0.02, -110, clv, live, 1.0, 1.0)
+
+    rows = [
+        row("WIN", 2.4),
+        row("LOSS", -0.6),
+        row("PUSH", 0.004),          # inside the push grain; counts as 0
+        row("WIN", None),            # no closing line
+        row("WIN", 9.9, live=True),  # in-play; CLV does not apply
+    ]
+    t = dn._tally(rows)
+    assert t["clv_measured"] == 3
+    assert t["clv_push"] == 1
+    assert t["clv_sum"] == pytest.approx(1.8)
+    assert t["clv_n"] == 2
+    value = dn.render_all_time_fields(rows, "2026-09-01")[0]["value"]
+    assert "Avg CLV: +0.6% (3 measured)" in value
+    assert "9.9" not in value
+
+    none = [row("WIN", None), row("LOSS", None)]
+    assert dn._avg_clv_line(dn._tally(none)) == "Avg CLV: n/a"
+    negative = [row("LOSS", -2.0), row("LOSS", -1.0)]
+    assert dn._avg_clv_line(dn._tally(negative)) == "Avg CLV: -1.5% (2 measured)"
 
 
 def test_average_odds_are_the_mean_decimal_converted_back():

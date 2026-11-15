@@ -2743,7 +2743,8 @@ def _tally(rows: list[tuple]) -> dict:
     was never on the board.
     """
     t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0,
-         "clv_n": 0, "clv_beat": 0, "clv_push": 0, "live": 0}
+         "clv_n": 0, "clv_beat": 0, "clv_push": 0, "live": 0,
+         "clv_sum": 0.0, "clv_measured": 0}
     for row in rows:
         _sport, _model_id, result, kelly, price, clv = row[:6]
         # is_live is optional so a caller passing the older 6-tuple still works.
@@ -2766,13 +2767,21 @@ def _tally(rows: list[tuple]) -> dict:
         # includes it as 0. In-play rows stay out of all three counts.
         if clv is not None and not is_live:
             outcome = clv_outcome(clv)
+            # The average is the mean of clv_pct (percent). A push is in it
+            # as 0. A beat or a loss contributes the stored percent. An
+            # unmeasured row never reaches this branch.
             if outcome == "push":
                 t["clv_push"] += 1
+                t["clv_measured"] += 1
             elif outcome == "beat":
                 t["clv_n"] += 1
                 t["clv_beat"] += 1
+                t["clv_sum"] += float(clv)
+                t["clv_measured"] += 1
             elif outcome == "loss":
                 t["clv_n"] += 1
+                t["clv_sum"] += float(clv)
+                t["clv_measured"] += 1
         if result == "WIN":
             t["w"] += 1
         elif result == "LOSS":
@@ -3046,6 +3055,23 @@ def _win_rate_line(t: dict) -> str:
     return f"Win rate: {pct:.1f}% ({t['w']}/{decided})"
 
 
+def _avg_clv_line(t: dict) -> str:
+    """Mean of the stored same-book CLV, in percent.
+
+    ``clv_pct`` is already percent: (taken decimal / close decimal − 1) × 100,
+    and the settled query only selects it when ``clv_method`` is standard_v2.
+    A pick with no closing line is NULL and is not in the mean. An in-play
+    pick is not in it. A close that equals the price taken is a push at the
+    stored grain and is in the mean as 0 (docs/clv.md). The count is every
+    pick that entered the mean, pushes included.
+    """
+    n = int(t.get("clv_measured") or 0)
+    if n <= 0:
+        return "Avg CLV: n/a"
+    avg = float(t.get("clv_sum") or 0.0) / n
+    return f"Avg CLV: {avg:+.1f}% ({n} measured)"
+
+
 def _average_odds_line(rows: list[tuple]) -> str:
     priced = sum(1 for r in rows if _taken_decimal(r[4]) is not None)
     avg = average_taken_american(r[4] for r in rows)
@@ -3068,8 +3094,9 @@ def render_all_time_fields(rows: list[tuple], since: str) -> list[dict]:
     The day's own per-sport lines stay alphabetical; this order is the
     all-time block only.
 
-    The overall field carries the record line, then the all-time win rate
-    and the all-time average odds, before any sport field.
+    The overall field carries the record line, then the all-time win rate,
+    the all-time average odds, and the all-time average CLV, before any
+    sport field.
     """
     overall = _tally(rows)
     by_sport: dict[str, list[tuple]] = {}
@@ -3081,7 +3108,8 @@ def render_all_time_fields(rows: list[tuple], since: str) -> list[dict]:
             f"**{_tally_line(overall, with_clv=True)}**  ·  "
             f"{len(rows)} settled\n"
             f"{_win_rate_line(overall)}\n"
-            f"{_average_odds_line(rows)}"
+            f"{_average_odds_line(rows)}\n"
+            f"{_avg_clv_line(overall)}"
         ),
         "inline": False,
     }]

@@ -1984,8 +1984,9 @@ def capper_embed(capper: Capper, heading: str, rows: list[tuple], pending: int,
 
     `pending` counts unresolved legs, including needs_review. `all_time` is
     every graded leg through the end of this period. The all-time block is
-    the same shape as the main recap: overall (the record, then win rate and
-    average odds), then one field per sport ordered by units, with
+    the same shape as the main recap: overall (the record, then win rate,
+    average odds, and average CLV), then one field per sport ordered by
+    units, with
     beat-the-close and the settled count.
     """
     if pending:
