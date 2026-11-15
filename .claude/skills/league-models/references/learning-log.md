@@ -30,6 +30,46 @@ review as its own entry.
 
 ---
 
+## 2026-11-15 — Horse racing, first market audit on the free files
+
+1. **League and scope**: thoroughbred racing (mike, 2026-11-15: *"pickup the
+   pr that was created and merged on horse racing. do additional research,
+   invoke model skill"*), following PR #1357's scope. On the free files only:
+   Betfair Australia's ANZ CSVs (132,750 races 2020-01 to 2026-10) and Hong
+   Kong's final pools (1997–2005, 2014–2017). Stored in Supabase first
+   (`scripts/horse/store_files.py`, 86 files, restore-and-hash verified, PC
+   mirror matched by row count).
+2. **Tried**: per market (`docs/sports/racing.md`, the grid): blind bets by
+   band at two prices, gross and net of the real commission; calibration;
+   favourites by year, meeting and track size; Harville place against the
+   win market, raw, discounted and calibrated, in both markets; Bolton–Chapman
+   plus Benter, walk-forward with removal of each feature group and a leak
+   check; a logit on the exchange's scheduled-start prices (Sung and
+   Johnson); place by field size. Two scouts: 28 method leads, and where a US
+   bettor can bet a race and at what price. **Every row: nothing clears.**
+3. **New**: the field-and-pool sport shape and racing's free price routes
+   (`market-grid.md`); the place-against-win result and the untested
+   sharp-against-pool rule (`methods.md` §2), the pool's even take and the
+   exchange's calibration (§6), the Benter null (§1), four frontier lines;
+   three data checks (`kill-tests.md`: a broken snapshot under a fine close,
+   a display cap is not a price, prove the harness sees a leak); three
+   scouting routes (`scouting.md`).
+4. **Corrected**: the scope said a backtest that bets final odds "is betting
+   the close" and must be refused. For a pool bet the final odds are the
+   price paid: grading at them is right, deciding on them is not (corrected
+   in place in `docs/horse_racing_scope.md`). And the scope's 60/30/15/5-minute
+   neighbourhood cannot run on any free file: they hold one decision moment.
+5. **The framework**: unchanged steps. One addition in practice: when the
+   users' only bettable price is a pool, the "book a pick may name" question
+   decides which free file is a test and which is a reference, so it was
+   scouted first (Hong Kong's pools are bettable from the US through
+   commingling; the Betfair exchange is not).
+
+What this build taught the skill: in a field market, calibrate the place
+model before any place test (Harville's bias is priced in both markets),
+prove a null harness can see a leak, and start a racing jurisdiction from a
+pre-off price path, because every free price is a close.
+
 ## 2026-11-15 — Horse racing public files, still no model
 
 1. **League and scope**: same planning request. Mike asked for the research
