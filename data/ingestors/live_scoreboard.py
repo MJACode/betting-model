@@ -1,4 +1,14 @@
-"""Live scores for the app's Scoreboard: NFL, NBA and NHL, from ESPN.
+"""Live scores for the app's Scoreboard: NFL, NBA, NHL, NCAAB and NCAABW,
+from ESPN.
+
+Matt, 2026-11-15: the Scoreboard covers every sport with games, and men's and
+women's college basketball get live scores now. Their games are matched to
+ours by ESPN's event id (ncaab_events / ncaabw_events, written with the games
+rows by the ESPN schedule ingestors), never by team names: 300+ Division I
+schools have no three-letter code. Measured 2026-11-15: all 149 NCAAB and 162
+NCAABW games on 11-14..11-16 had an event row. Their scoreboards are asked
+for Division I (groups=50) with limit=500, the parameters the in-play loops
+(data/ingestors/ncaab_live_feed.py) already use from the worker.
 
 Matt, 2026-10-29: the Scoreboard should show every game for a sport, live
 games and their scores included. MLB (live_game_state) and NCAAF
@@ -45,13 +55,26 @@ SPORT_PATHS: dict[str, str] = {
     "NFL": "football/nfl",
     "NBA": "basketball/nba",
     "NHL": "hockey/nhl",
+    "NCAAB": "basketball/mens-college-basketball",
+    "NCAABW": "basketball/womens-college-basketball",
+}
+# Extra query parameters per sport. Without groups=50 the college scoreboard
+# lists ESPN's featured games only, not every Division I game.
+SPORT_PARAMS: dict[str, dict[str, Any]] = {
+    "NCAAB": {"groups": 50, "limit": 500},
+    "NCAABW": {"groups": 50, "limit": 500},
+}
+# Sports whose ESPN events map to our games by event id, through this table.
+EVENT_TABLES: dict[str, str] = {
+    "NCAAB": "ncaab_events",
+    "NCAABW": "ncaabw_events",
 }
 SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard"
 
 # A game is polled from this long before its listed start, so the first
 # in-progress tick is not missed when the start time is a few minutes early.
 LEAD = timedelta(minutes=10)
-# And for this long after it. No NFL, NBA or NHL game runs past it; a game
+# And for this long after it. No game on this board runs past it; a game
 # still unsettled after it is a feed or settlement problem, not a live game.
 TAIL = timedelta(hours=7)
 
@@ -116,8 +139,9 @@ def _side_label(side: dict | None) -> str:
 
 
 def clock_label(sport: str, status: dict) -> str:
-    """'Q3 7:42', 'Half', 'End P2', 'OT 3:10', 'Final'. ESPN's own short
-    detail when the period is missing."""
+    """'Q3 7:42', '2H 5:10', 'Half', 'End P2', 'OT 3:10', 'Final'. ESPN's
+    own short detail when the period is missing. Men's college basketball
+    plays two halves; women's plays four quarters, like the NBA."""
     st = status.get("type") or {}
     name = str(st.get("name") or "").upper()
     period = _int(status.get("period"))
@@ -129,16 +153,17 @@ def clock_label(sport: str, status: dict) -> str:
         return "Half"
     if period is None:
         return short
-    regulation = 3 if sport == "NHL" else 4
-    letter = "P" if sport == "NHL" else "Q"
+    regulation = {"NHL": 3, "NCAAB": 2}.get(sport, 4)
     if period > regulation:
         n = period - regulation
         if sport == "NHL" and n >= 2 and "SHOOTOUT" in (name + short.upper()):
             tag = "SO"
         else:
             tag = "OT" if n == 1 else f"OT{n}"
+    elif sport == "NCAAB":
+        tag = f"{period}H"
     else:
-        tag = f"{letter}{period}"
+        tag = f"{'P' if sport == 'NHL' else 'Q'}{period}"
     if "END_PERIOD" in name or short.lower().startswith("end of"):
         return f"End {tag}"
     if "SHOOTOUT" in name:
@@ -151,8 +176,10 @@ def parse_scoreboard(sport: str, data: dict) -> list[dict]:
 
     A pre-game event, a postponed or cancelled one, and an event whose teams
     are not two of ours are dropped. Scores are None when ESPN leaves them
-    out; nothing is filled in.
+    out; nothing is filled in. A sport in EVENT_TABLES is not mapped by team
+    here: match_games maps it by event id, so its codes are ESPN's own.
     """
+    by_event = sport in EVENT_TABLES
     out: list[dict] = []
     for ev in (data or {}).get("events") or []:
         status = ev.get("status") or _dig(ev, "competitions", 0, "status") or {}
@@ -172,7 +199,9 @@ def parse_scoreboard(sport: str, data: dict) -> list[dict]:
                 continue
             team = c.get("team") or {}
             sides[side] = {
-                "code": team_code(sport, team.get("abbreviation"), team.get("displayName")),
+                "code": (team.get("abbreviation") or team.get("displayName") or "?")
+                if by_event else
+                team_code(sport, team.get("abbreviation"), team.get("displayName")),
                 "abbrev": team.get("abbreviation"),
                 "name": team.get("displayName"),
                 "ids": {str(x) for x in (c.get("id"), team.get("id")) if x is not None},
@@ -260,20 +289,29 @@ def due_sports(games: Iterable[dict], finished: set[str], now: datetime) -> set[
     return out
 
 
-def match_games(sport: str, rows: list[dict], games: Iterable[dict]) -> list[dict]:
+def match_games(sport: str, rows: list[dict], games: Iterable[dict],
+                event_games: dict[str, str] | None = None) -> list[dict]:
     """Attach our game_id to each parsed row. Unmatched rows are dropped and
-    logged once per tick: an event we do not carry is not a game to show."""
+    logged once per tick: an event we do not carry is not a game to show.
+
+    A sport in EVENT_TABLES matches on ESPN's event id only (`event_games`,
+    event id -> our game_id). With no map it matches nothing."""
     by_teams: dict[tuple[str, str], list[dict]] = {}
+    by_id: dict[str, dict] = {}
     for g in games:
         if g.get("sport") != sport:
             continue
         by_teams.setdefault((g.get("home_team"), g.get("away_team")), []).append(g)
+        by_id[g.get("game_id")] = g
     out, missed = [], []
     for row in rows:
-        cands = by_teams.get((row["home"], row["away"])) or []
-        pick = next((g for g in cands if g.get("game_date") == row.get("event_date")), None)
-        if pick is None and len(cands) == 1:
-            pick = cands[0]
+        if sport in EVENT_TABLES:
+            pick = by_id.get((event_games or {}).get(str(row.get("event_id"))))
+        else:
+            cands = by_teams.get((row["home"], row["away"])) or []
+            pick = next((g for g in cands if g.get("game_date") == row.get("event_date")), None)
+            if pick is None and len(cands) == 1:
+                pick = cands[0]
         if pick is None:
             missed.append(f"{row['away']}@{row['home']}")
             continue
@@ -298,7 +336,8 @@ def _default_fetch(sport: str, dates: list[str]) -> dict | None:
     answered = False
     for day in sorted(d.replace("-", "") for d in dates):
         try:
-            r = requests.get(url, params={"dates": day}, headers=ESPN_HEADERS, timeout=10)
+            r = requests.get(url, params={"dates": day, **SPORT_PARAMS.get(sport, {})},
+                             headers=ESPN_HEADERS, timeout=10)
         except Exception as exc:                              # noqa: BLE001
             logger.warning(f"live_scoreboard {sport} {day}: fetch failed: {exc}")
             continue
@@ -334,6 +373,20 @@ ON CONFLICT (game_id) DO UPDATE SET
     snapshot_at = EXCLUDED.snapshot_at,
     event_id = EXCLUDED.event_id
 """
+
+
+def _event_games(conn, sport: str, game_ids: list[str]) -> dict[str, str]:
+    """ESPN event id -> our game_id for these games, from the sport's events
+    table. The table name comes from EVENT_TABLES, never from input."""
+    if not game_ids:
+        return {}
+    table = EVENT_TABLES[sport]
+    rows = conn.execute(
+        f"SELECT espn_event_id::text, game_id FROM public.{table} "
+        "WHERE game_id = ANY(%(ids)s)",
+        {"ids": game_ids},
+    ).fetchall()
+    return {str(r[0]): r[1] for r in rows}
 
 
 def run_once(conn=None, *, now: datetime | None = None,
@@ -374,7 +427,10 @@ def run_once(conn=None, *, now: datetime | None = None,
             data = fetch(sport, dates)
             if data is None:
                 continue
-            rows = match_games(sport, parse_scoreboard(sport, data), games)
+            event_games = (_event_games(conn, sport, [g["game_id"] for g in games
+                                                       if g["sport"] == sport])
+                           if sport in EVENT_TABLES else None)
+            rows = match_games(sport, parse_scoreboard(sport, data), games, event_games)
             stamp = now.isoformat()
             for row in rows:
                 conn.execute(UPSERT_SQL, {**row, "snapshot_at": stamp})
