@@ -318,9 +318,9 @@
     "semantic_hash": ""
   },
   "data/ingestors/odds_ingestor.py": {
-    "mtime": 1794685023.3403282,
-    "seen": 1794690286.708082,
-    "ast_hash": "78eed7bcc76df44d6a493dc52d8fa4c2",
+    "mtime": 1794735019.43579,
+    "seen": 1794771624.3853486,
+    "ast_hash": "d3762542f7b6f42ce1ce2f62c18103b7",
     "semantic_hash": ""
   },
   "data/ingestors/odds_quota.py": {
@@ -1140,9 +1140,9 @@
     "semantic_hash": ""
   },
   "data/view_migrations.py": {
-    "mtime": 1794685024.37244,
-    "seen": 1794690286.7086027,
-    "ast_hash": "42a00c7d23e376d3ccbc3e48f953a79c",
+    "mtime": 1794735019.4373808,
+    "seen": 1794771624.3860443,
+    "ast_hash": "8df18d1e58660febb987b56cbe21245c",
     "semantic_hash": ""
   },
   "dk_mlb_sample.json": {
@@ -1230,9 +1230,9 @@
     "semantic_hash": ""
   },
   "jobs/declared_jobs.json": {
-    "mtime": 1794685025.2093985,
-    "seen": 1794690286.708634,
-    "ast_hash": "eb55038cb07dcba2d94c86952331073a",
+    "mtime": 1794766008.8064175,
+    "seen": 1794771624.3860877,
+    "ast_hash": "19d562bf72470d5be68f677d32516f0c",
     "semantic_hash": ""
   },
   "mobile/App.tsx": {
@@ -1278,9 +1278,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_a11y.ts": {
-    "mtime": 1794685025.285583,
-    "seen": 1794690286.7086651,
-    "ast_hash": "f1effe58069f1786c4abecd6d63b5a50",
+    "mtime": 1794735019.4502475,
+    "seen": 1794771624.3861325,
+    "ast_hash": "5358384bb163bb1e755e380ee44927ee",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_auth.ts": {
@@ -1320,15 +1320,15 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_book_links.ts": {
-    "mtime": 1794685025.3028839,
-    "seen": 1794690286.7086847,
-    "ast_hash": "462b9edd43842dffab18c5094c16fca5",
+    "mtime": 1794766008.8064175,
+    "seen": 1794771624.3861587,
+    "ast_hash": "e0fb31efc102056e8b3ec364f19dd953",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_contrast_tokens.ts": {
-    "mtime": 1794685025.3080425,
-    "seen": 1794690286.7086866,
-    "ast_hash": "37e1bee19e5e07fd161b0c8eaae6dce5",
+    "mtime": 1794735019.451271,
+    "seen": 1794771624.386161,
+    "ast_hash": "b73084bcfff64b4f5394cb38d9380430",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_custom_model_filters.ts": {
@@ -1476,9 +1476,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_pick_card.ts": {
-    "mtime": 1794685025.388863,
-    "seen": 1794690286.7087727,
-    "ast_hash": "1a472bf5f124f75ca4b0ccdce1e8ff5e",
+    "mtime": 1794766008.8064175,
+    "seen": 1794771624.3862743,
+    "ast_hash": "9aa53c7e39ddda896dc4ebc161dd893c",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_pick_categories.ts": {
@@ -1638,27 +1638,27 @@
     "semantic_hash": ""
   },
   "mobile/src/components/AddLineSheet.tsx": {
-    "mtime": 1794685025.4763896,
-    "seen": 1794690286.7088602,
-    "ast_hash": "a73f93fa371914e9d816a9af801702b6",
+    "mtime": 1794735019.4567096,
+    "seen": 1794771624.3863897,
+    "ast_hash": "956cd0a246140302c946b117590650db",
     "semantic_hash": ""
   },
   "mobile/src/components/AddToPlayButton.tsx": {
-    "mtime": 1794685025.4784205,
-    "seen": 1794690286.7088623,
-    "ast_hash": "93546497d2d4b720c13c5c532d39a032",
+    "mtime": 1794735019.4567096,
+    "seen": 1794771624.386392,
+    "ast_hash": "d439fd7122dbf68edd06e9d394f16a33",
     "semantic_hash": ""
   },
   "mobile/src/components/AllBooksCard.tsx": {
-    "mtime": 1794685025.4803827,
-    "seen": 1794690286.708864,
-    "ast_hash": "fa8fd4c7736c9df6609fa7beb7b99f47",
+    "mtime": 1794735019.4578395,
+    "seen": 1794771624.3863947,
+    "ast_hash": "d5bc115be63d49954f7492bc85a46268",
     "semantic_hash": ""
   },
   "mobile/src/components/BetslipBar.tsx": {
-    "mtime": 1794685025.4908884,
-    "seen": 1794690286.7088764,
-    "ast_hash": "eeb0725acc5d142d9c2ca5090b855fcd",
+    "mtime": 1794735019.460871,
+    "seen": 1794771624.3864098,
+    "ast_hash": "87dc92a6612626374dd58311b5b0b244",
     "semantic_hash": ""
   },
   "mobile/src/components/BetslipBarSpacer.tsx": {
@@ -1668,21 +1668,21 @@
     "semantic_hash": ""
   },
   "mobile/src/components/BetslipBooksRow.tsx": {
-    "mtime": 1794685025.4957037,
-    "seen": 1794690286.7088804,
-    "ast_hash": "1b806dbc806ecc324c07fe1dc9ed3b0e",
+    "mtime": 1794735019.460871,
+    "seen": 1794771624.3864145,
+    "ast_hash": "3b9aa4db8046d080056fd3922798ec94",
     "semantic_hash": ""
   },
   "mobile/src/components/BetslipButton.tsx": {
-    "mtime": 1794685025.4977183,
-    "seen": 1794690286.7088823,
-    "ast_hash": "3c49d4231a8f3f13a1e6f67016feb4a0",
+    "mtime": 1794735019.4621947,
+    "seen": 1794771624.3864172,
+    "ast_hash": "5e04752ad9b22172f855c98ba9003275",
     "semantic_hash": ""
   },
   "mobile/src/components/BookLinesRow.tsx": {
-    "mtime": 1794685025.501748,
-    "seen": 1794690286.708887,
-    "ast_hash": "814deea400165086e8aaa081c17a920b",
+    "mtime": 1794735019.4634702,
+    "seen": 1794771624.3864233,
+    "ast_hash": "b59b3ab0ae374bc25e8def228b9810fd",
     "semantic_hash": ""
   },
   "mobile/src/components/BookMark.tsx": {
@@ -1698,39 +1698,39 @@
     "semantic_hash": ""
   },
   "mobile/src/components/CalendarGrid.tsx": {
-    "mtime": 1794685025.5054328,
-    "seen": 1794690286.7089074,
-    "ast_hash": "d06d711fac96467e7ff82a3c02423b41",
+    "mtime": 1794735019.4634702,
+    "seen": 1794771624.3864312,
+    "ast_hash": "ab7f28bb65d114d49708482d86a77b70",
     "semantic_hash": ""
   },
   "mobile/src/components/DailyResultsModal.tsx": {
-    "mtime": 1794685025.5092022,
-    "seen": 1794690286.7089093,
-    "ast_hash": "74c9d772c0733cb073c247ca97e480cd",
+    "mtime": 1794735019.464748,
+    "seen": 1794771624.3864338,
+    "ast_hash": "0f50bd3fa5ca29c79bcd37e5050fbd3a",
     "semantic_hash": ""
   },
   "mobile/src/components/DiscordLinkModal.tsx": {
-    "mtime": 1794685025.511227,
-    "seen": 1794690286.7089133,
-    "ast_hash": "f9b6fe901e01e5ad99079e3be1a07b5a",
+    "mtime": 1794735019.465851,
+    "seen": 1794771624.3864388,
+    "ast_hash": "fb16252c784e2404599de351e1df7903",
     "semantic_hash": ""
   },
   "mobile/src/components/EmptyState.tsx": {
-    "mtime": 1794685025.5152538,
-    "seen": 1794690286.7089179,
-    "ast_hash": "2373f70cec7e473b97f9fb1396f45e7e",
+    "mtime": 1794735019.467275,
+    "seen": 1794771624.3864439,
+    "ast_hash": "6cb3a98e5cb1a8a9be95de14f8e7c48a",
     "semantic_hash": ""
   },
   "mobile/src/components/EquityCurve.tsx": {
-    "mtime": 1794685025.5152538,
-    "seen": 1794690286.7089198,
-    "ast_hash": "79e7315697b5a362dbc0c49ae2e9a766",
+    "mtime": 1794735019.467275,
+    "seen": 1794771624.386446,
+    "ast_hash": "daea40b9287a21376dc85ef9b9c72d17",
     "semantic_hash": ""
   },
   "mobile/src/components/ErrorState.tsx": {
-    "mtime": 1794685025.5172675,
-    "seen": 1794690286.708922,
-    "ast_hash": "7fd92444bc60115c402bdf32f6f979d9",
+    "mtime": 1794735019.4692895,
+    "seen": 1794771624.3864484,
+    "ast_hash": "614b94bf0bb98954b13a01abab6a4291",
     "semantic_hash": ""
   },
   "mobile/src/components/GameStatusPill.tsx": {
@@ -1746,9 +1746,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/HitModeSheet.tsx": {
-    "mtime": 1794685025.5336163,
-    "seen": 1794690286.7089298,
-    "ast_hash": "2a9b5efb771be119c8d15bd57ae363f3",
+    "mtime": 1794735019.4692895,
+    "seen": 1794771624.386459,
+    "ast_hash": "884f7ff36653192fb1bd6a95e53f4a80",
     "semantic_hash": ""
   },
   "mobile/src/components/HitRateChart.tsx": {
@@ -1758,15 +1758,15 @@
     "semantic_hash": ""
   },
   "mobile/src/components/InfoTooltip.tsx": {
-    "mtime": 1794685025.5358431,
-    "seen": 1794690286.708934,
-    "ast_hash": "8e570a15bbcad161025e88e451bd28c0",
+    "mtime": 1794735019.4705098,
+    "seen": 1794771624.386464,
+    "ast_hash": "43ebf5b2b927f4e75e0e8d06de2ff7f5",
     "semantic_hash": ""
   },
   "mobile/src/components/LineMovementCard.tsx": {
-    "mtime": 1794685025.54104,
-    "seen": 1794690286.708938,
-    "ast_hash": "a26ff2c98014f7e1c247123db012dfb2",
+    "mtime": 1794735019.4705098,
+    "seen": 1794771624.3864686,
+    "ast_hash": "9720908344b1e69f753eb0cf1d887e7e",
     "semantic_hash": ""
   },
   "mobile/src/components/LiveDot.tsx": {
@@ -1776,51 +1776,51 @@
     "semantic_hash": ""
   },
   "mobile/src/components/ManualBetModal.tsx": {
-    "mtime": 1794685025.5451424,
-    "seen": 1794690286.7089446,
-    "ast_hash": "bffc04bbad4c5ed5ea0eec4b16c98e04",
+    "mtime": 1794735019.4724684,
+    "seen": 1794771624.3864763,
+    "ast_hash": "9f5f34f9812ceacf4e5aa412ca5d0e86",
     "semantic_hash": ""
   },
   "mobile/src/components/NotificationsCard.tsx": {
-    "mtime": 1794685025.5547383,
-    "seen": 1794690286.7089546,
-    "ast_hash": "4d89b619513f9f52dba4a7d0848f3859",
+    "mtime": 1794735019.473801,
+    "seen": 1794771624.3864887,
+    "ast_hash": "d83983bc6a71f215beb102322f8ec2f1",
     "semantic_hash": ""
   },
   "mobile/src/components/OnboardingModal.tsx": {
-    "mtime": 1794685025.5567508,
-    "seen": 1794690286.7089567,
-    "ast_hash": "a7e41c36b832e7d56dcd01ec748f0dd0",
+    "mtime": 1794735019.475151,
+    "seen": 1794771624.3864908,
+    "ast_hash": "82d378898d913798c1eafe30f475e6d2",
     "semantic_hash": ""
   },
   "mobile/src/components/ParlayDkHandoff.tsx": {
-    "mtime": 1794685025.5581138,
-    "seen": 1794690286.7089586,
-    "ast_hash": "a628b6252e55cd6ca4489d041768d21f",
+    "mtime": 1794766008.8064175,
+    "seen": 1794771624.3864932,
+    "ast_hash": "316e45cd5029a5b5c14cd633a5da60d7",
     "semantic_hash": ""
   },
   "mobile/src/components/ParlayLegCard.tsx": {
-    "mtime": 1794685025.5606382,
-    "seen": 1794690286.7089605,
-    "ast_hash": "7a4cfa76b655867916b016cdd98f4dbe",
+    "mtime": 1794735019.4769187,
+    "seen": 1794771624.3864958,
+    "ast_hash": "fd96eae7faafb165340870990df29b36",
     "semantic_hash": ""
   },
   "mobile/src/components/PickCard.tsx": {
-    "mtime": 1794685025.56355,
-    "seen": 1794690286.7089646,
-    "ast_hash": "2b0acebb2a3ea297655dae4a835518b6",
+    "mtime": 1794766008.8064175,
+    "seen": 1794771624.3865001,
+    "ast_hash": "07f744650bdd32a1efe5b2c7be65ae58",
     "semantic_hash": ""
   },
   "mobile/src/components/PickTimingCard.tsx": {
-    "mtime": 1794685025.566777,
-    "seen": 1794690286.7089686,
-    "ast_hash": "97d0294d73a4ee1d8b65934ab370f288",
+    "mtime": 1794735019.4774256,
+    "seen": 1794771624.3865082,
+    "ast_hash": "71d1f6c91a6fe4a1d4cdd07e5d11c3cd",
     "semantic_hash": ""
   },
   "mobile/src/components/PlayerBetBar.tsx": {
-    "mtime": 1794685025.5687938,
-    "seen": 1794690286.7089705,
-    "ast_hash": "170ff5678fcb10ec0aa7b2122c435166",
+    "mtime": 1794735019.4774256,
+    "seen": 1794771624.3865106,
+    "ast_hash": "5e3ac8cd074b86b047e3bdbb1b659df5",
     "semantic_hash": ""
   },
   "mobile/src/components/PlayerNewsButton.tsx": {
@@ -1830,27 +1830,27 @@
     "semantic_hash": ""
   },
   "mobile/src/components/PlayerNewsSheet.tsx": {
-    "mtime": 1794685025.5728226,
-    "seen": 1794690286.7089744,
-    "ast_hash": "cee258f1c5168a2e756c465fffb3bfc2",
+    "mtime": 1794735019.4806442,
+    "seen": 1794771624.3865156,
+    "ast_hash": "e9c27b12e3ca3f1879cf8ee3c4363d17",
     "semantic_hash": ""
   },
   "mobile/src/components/PositionVsOpponentCard.tsx": {
-    "mtime": 1794685025.5748358,
-    "seen": 1794690286.7089763,
-    "ast_hash": "5db8a86c7fd80d0cf9eed63279468dd1",
+    "mtime": 1794735019.482654,
+    "seen": 1794771624.3865178,
+    "ast_hash": "c79bb8253903442da53556f15fac8618",
     "semantic_hash": ""
   },
   "mobile/src/components/PropContextCard.tsx": {
-    "mtime": 1794685025.5765016,
-    "seen": 1794690286.7089782,
-    "ast_hash": "ffc983dd87f6090e316bbda6eb82fcc7",
+    "mtime": 1794735019.4846618,
+    "seen": 1794771624.386522,
+    "ast_hash": "06b7c1d40b3f1c76c9cac3649d418c13",
     "semantic_hash": ""
   },
   "mobile/src/components/PublicBettingCard.tsx": {
-    "mtime": 1794685025.5765016,
-    "seen": 1794690286.7089803,
-    "ast_hash": "36b0a62c8d620bc4768e7b0fdd325ddf",
+    "mtime": 1794735019.4846618,
+    "seen": 1794771624.3865244,
+    "ast_hash": "d3dd38af52b0400d807df01033aee59c",
     "semantic_hash": ""
   },
   "mobile/src/components/ReadRow.tsx": {
@@ -1860,27 +1860,27 @@
     "semantic_hash": ""
   },
   "mobile/src/components/ReasoningCard.tsx": {
-    "mtime": 1794685025.5806146,
-    "seen": 1794690286.7089841,
-    "ast_hash": "d32409136750bbe374aa822bdc9b24c5",
+    "mtime": 1794735019.4846618,
+    "seen": 1794771624.3865292,
+    "ast_hash": "49c5c29811f59aaf6ce4f633ab6d55ff",
     "semantic_hash": ""
   },
   "mobile/src/components/SectionTitle.tsx": {
-    "mtime": 1794685025.5897532,
-    "seen": 1794690286.7089944,
-    "ast_hash": "83a83ed73fb1eb79dbbc3dff38b45702",
+    "mtime": 1794735019.488835,
+    "seen": 1794771624.3865418,
+    "ast_hash": "91c54ea8bd901544cd9d1cea673b6bdb",
     "semantic_hash": ""
   },
   "mobile/src/components/SettingsButton.tsx": {
-    "mtime": 1794685025.5917656,
-    "seen": 1794690286.7089963,
-    "ast_hash": "fd3ace5302a2e00f12562a495a369632",
+    "mtime": 1794735019.489897,
+    "seen": 1794771624.3865442,
+    "ast_hash": "c2f70e3e839cf7d8881986bb80b29c1d",
     "semantic_hash": ""
   },
   "mobile/src/components/SharpScoreCard.tsx": {
-    "mtime": 1794685025.5937781,
-    "seen": 1794690286.709,
-    "ast_hash": "ad602903ca6b7b8a32281fb0d8acf832",
+    "mtime": 1794735019.489897,
+    "seen": 1794771624.3865485,
+    "ast_hash": "ff56f2ef4b761fb6da2a99f18885f8d5",
     "semantic_hash": ""
   },
   "mobile/src/components/SharpScorePill.tsx": {
@@ -1896,45 +1896,45 @@
     "semantic_hash": ""
   },
   "mobile/src/components/SignalLockCard.tsx": {
-    "mtime": 1794685025.5986023,
-    "seen": 1794690286.709006,
-    "ast_hash": "a58fb2c5b59fa9c72f6c8adab01c36dd",
+    "mtime": 1794735019.489897,
+    "seen": 1794771624.3865561,
+    "ast_hash": "73112ff657ae5a945550bbd445a44804",
     "semantic_hash": ""
   },
   "mobile/src/components/Skeleton.tsx": {
-    "mtime": 1794685025.6032681,
-    "seen": 1794690286.7090082,
-    "ast_hash": "1b797ff2590bc765fe80f9952a0e4f0a",
+    "mtime": 1794735019.493258,
+    "seen": 1794771624.3865588,
+    "ast_hash": "4f1416cc4a6f6b039545e7512ddff0df",
     "semantic_hash": ""
   },
   "mobile/src/components/SportToggle.tsx": {
-    "mtime": 1794685025.6072917,
-    "seen": 1794690286.7090101,
-    "ast_hash": "fa5893f71081775040941405461736c4",
+    "mtime": 1794735019.493258,
+    "seen": 1794771624.3865607,
+    "ast_hash": "4409545743f2860dcb6538873148709f",
     "semantic_hash": ""
   },
   "mobile/src/components/SportsbookIndicator.tsx": {
-    "mtime": 1794685025.610399,
-    "seen": 1794690286.7090123,
-    "ast_hash": "92e5521e59bcf373fbce73aa37b7aa10",
+    "mtime": 1794735019.4947667,
+    "seen": 1794771624.386563,
+    "ast_hash": "9622cbcbffe6260003ad36278a5e6820",
     "semantic_hash": ""
   },
   "mobile/src/components/SportsbookPickerSheet.tsx": {
-    "mtime": 1794685025.610399,
-    "seen": 1794690286.709014,
-    "ast_hash": "8e566df8bc02d73687fb7eec32e103aa",
+    "mtime": 1794735019.4947667,
+    "seen": 1794771624.3865654,
+    "ast_hash": "445ff4f1835f2cef53cd038f576d749e",
     "semantic_hash": ""
   },
   "mobile/src/components/StatTile.tsx": {
-    "mtime": 1794685025.6152513,
-    "seen": 1794690286.7090187,
-    "ast_hash": "395e0a8bdceb14e90896ff490836c59f",
+    "mtime": 1794735019.4965148,
+    "seen": 1794771624.3865702,
+    "ast_hash": "f0ab02c1a0e8d5fd89f9d7b9669c2106",
     "semantic_hash": ""
   },
   "mobile/src/components/StatePickerSheet.tsx": {
-    "mtime": 1794685025.6152513,
-    "seen": 1794690286.7090206,
-    "ast_hash": "0a15c75e45f0540d4146c807d513f1b9",
+    "mtime": 1794735019.4965148,
+    "seen": 1794771624.3865726,
+    "ast_hash": "86d2c1bfcdd60b0de146607aecdb6c8c",
     "semantic_hash": ""
   },
   "mobile/src/components/TagChip.tsx": {
@@ -1944,15 +1944,15 @@
     "semantic_hash": ""
   },
   "mobile/src/components/TaleOfTheTapeCard.tsx": {
-    "mtime": 1794685025.622133,
-    "seen": 1794690286.709027,
-    "ast_hash": "bdeeb4574bca2b7f96a42a183add52ba",
+    "mtime": 1794735019.4965148,
+    "seen": 1794771624.3865795,
+    "ast_hash": "0b9185bb4b0121acabf6d096cab0cb46",
     "semantic_hash": ""
   },
   "mobile/src/components/TeamsBoard.tsx": {
-    "mtime": 1794685025.6262665,
-    "seen": 1794690286.7090292,
-    "ast_hash": "b4aff04dd144432370d0a24da3bda3ee",
+    "mtime": 1794735019.4998248,
+    "seen": 1794771624.3865817,
+    "ast_hash": "445781a5b6b7e6a175771584e6c16d28",
     "semantic_hash": ""
   },
   "mobile/src/components/Toast.tsx": {
@@ -1962,33 +1962,33 @@
     "semantic_hash": ""
   },
   "mobile/src/components/TrackButton.tsx": {
-    "mtime": 1794685025.62929,
-    "seen": 1794690286.709033,
-    "ast_hash": "54fe45e5b7592813faafbcd9f344eee3",
+    "mtime": 1794735019.4998248,
+    "seen": 1794771624.3865867,
+    "ast_hash": "1d38149bed7f904b56ba8f088e239ff9",
     "semantic_hash": ""
   },
   "mobile/src/components/TrendSparkline.tsx": {
-    "mtime": 1794685025.6319096,
-    "seen": 1794690286.709037,
-    "ast_hash": "7042bedf2919cb3e2ad50e3e136b1e2b",
+    "mtime": 1794735019.500999,
+    "seen": 1794771624.3865914,
+    "ast_hash": "65c1747960412c1e899ba082d547cf81",
     "semantic_hash": ""
   },
   "mobile/src/components/TrendStrip.tsx": {
-    "mtime": 1794685025.6339674,
-    "seen": 1794690286.7090394,
-    "ast_hash": "585086a9ecb68d8c3a648f185bf300e3",
+    "mtime": 1794735019.500999,
+    "seen": 1794771624.3865936,
+    "ast_hash": "4b959a40a69c2213d7b07e28a427e77a",
     "semantic_hash": ""
   },
   "mobile/src/components/filters/FilterBar.tsx": {
-    "mtime": 1794685025.6598184,
-    "seen": 1794690286.709069,
-    "ast_hash": "02ae822d1df057d2143c47b579771084",
+    "mtime": 1794735019.5052857,
+    "seen": 1794771624.3866282,
+    "ast_hash": "b23b33fc699950eccc587a19543d12d8",
     "semantic_hash": ""
   },
   "mobile/src/components/filters/FilterChip.tsx": {
-    "mtime": 1794685025.6598184,
-    "seen": 1794690286.7090712,
-    "ast_hash": "8a3d8ac078d675a1862d30afb3f3623b",
+    "mtime": 1794735019.5084116,
+    "seen": 1794771624.3866303,
+    "ast_hash": "ce82ab80ea1adae0cdbb15f775c38ed6",
     "semantic_hash": ""
   },
   "mobile/src/components/filters/FilterField.tsx": {
@@ -1998,21 +1998,21 @@
     "semantic_hash": ""
   },
   "mobile/src/components/filters/FilterSheet.tsx": {
-    "mtime": 1794685025.6638477,
-    "seen": 1794690286.7090752,
-    "ast_hash": "a7ba2dfc3146b2eba263363b91fded6b",
+    "mtime": 1794735019.5084116,
+    "seen": 1794771624.3866355,
+    "ast_hash": "2b3796f156f65b99344b3670260b6777",
     "semantic_hash": ""
   },
   "mobile/src/components/filters/GameFilterSection.tsx": {
-    "mtime": 1794685025.6658611,
-    "seen": 1794690286.7090776,
-    "ast_hash": "a06488f2c6a5d8d05448d977bd999aa5",
+    "mtime": 1794735019.5084116,
+    "seen": 1794771624.3866382,
+    "ast_hash": "b6bb11efe7de008b0394c27c6058fb27",
     "semantic_hash": ""
   },
   "mobile/src/components/filters/PickFilters.tsx": {
-    "mtime": 1794685025.6673753,
-    "seen": 1794690286.7090795,
-    "ast_hash": "485d07ce1d05c6baf9e5ddc13160c6b5",
+    "mtime": 1794735019.5084116,
+    "seen": 1794771624.3866405,
+    "ast_hash": "f15a16d116fc3ebd7d6224b70663a288",
     "semantic_hash": ""
   },
   "mobile/src/components/filters/RangeSlider.tsx": {
@@ -2052,9 +2052,9 @@
     "semantic_hash": ""
   },
   "mobile/src/hooks/useBettingState.ts": {
-    "mtime": 1794685025.683216,
-    "seen": 1794690286.7090936,
-    "ast_hash": "8dbfb1b896a93474fab59bb7803f9d24",
+    "mtime": 1794766008.8064175,
+    "seen": 1794771624.3866591,
+    "ast_hash": "822d619d9559a8db99a2b8c88cd2a41a",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useBookAppInstalled.ts": {
@@ -2274,9 +2274,9 @@
     "semantic_hash": ""
   },
   "mobile/src/hooks/useSportsbookConnection.ts": {
-    "mtime": 1794685025.7730052,
-    "seen": 1794690286.7092083,
-    "ast_hash": "176e9828d9b9a89a07df057e3385347a",
+    "mtime": 1794735019.5084116,
+    "seen": 1794771624.3867962,
+    "ast_hash": "fdab5ecc5238632c2419e58ddd6b74af",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useSportsbookSync.ts": {
@@ -2316,9 +2316,9 @@
     "semantic_hash": ""
   },
   "mobile/src/hooks/useTodayPicks.ts": {
-    "mtime": 1794685025.7842028,
-    "seen": 1794690286.7092218,
-    "ast_hash": "3d3d986c09262eccc651ee37eb75eef7",
+    "mtime": 1794735019.5122168,
+    "seen": 1794771624.3868139,
+    "ast_hash": "57e16604e3698f4ba97f18c568aedb44",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useTrackedBetResults.ts": {
@@ -2328,9 +2328,9 @@
     "semantic_hash": ""
   },
   "mobile/src/hooks/useTrackedBets.ts": {
-    "mtime": 1794685025.7862167,
-    "seen": 1794690286.709226,
-    "ast_hash": "1e9166c6995bf37b388934402e3c3281",
+    "mtime": 1794735019.5132236,
+    "seen": 1794771624.386819,
+    "ast_hash": "c11fe3979933c44ead8d74b9a48171f7",
     "semantic_hash": ""
   },
   "mobile/src/lib/a11y.ts": {
@@ -2364,9 +2364,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/betslipLinks.ts": {
-    "mtime": 1794685025.8083696,
-    "seen": 1794690286.7092493,
-    "ast_hash": "a6f2b97432086b8a589f58cb2478f461",
+    "mtime": 1794766008.8151438,
+    "seen": 1794771624.386848,
+    "ast_hash": "abb4c145a7b4ac188786bd94c4b97b57",
     "semantic_hash": ""
   },
   "mobile/src/lib/billing.ts": {
@@ -2562,9 +2562,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/markets.ts": {
-    "mtime": 1794685025.9075122,
-    "seen": 1794690286.7093604,
-    "ast_hash": "433fbe7fbe57c69e18874722b344d17b",
+    "mtime": 1794766008.8161817,
+    "seen": 1794771624.386991,
+    "ast_hash": "09010c157ca6ff1282980bce2818b272",
     "semantic_hash": ""
   },
   "mobile/src/lib/matchup.ts": {
@@ -2754,9 +2754,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/sportsbookLinks.ts": {
-    "mtime": 1794685026.0570123,
-    "seen": 1794690286.7094731,
-    "ast_hash": "48745c099a5b218342855dc6a8b74cb1",
+    "mtime": 1794766008.8161817,
+    "seen": 1794771624.3871355,
+    "ast_hash": "593a2fe533863f49517e69277c2ff8cc",
     "semantic_hash": ""
   },
   "mobile/src/lib/statCatalog.ts": {
@@ -2808,9 +2808,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/theme.ts": {
-    "mtime": 1794685026.084044,
-    "seen": 1794690286.709502,
-    "ast_hash": "3dc62d5c7fc58726c592aa6dd65bbc95",
+    "mtime": 1794735019.5176044,
+    "seen": 1794771624.3871713,
+    "ast_hash": "a058144e0ac9d97150668c2debfbcf31",
     "semantic_hash": ""
   },
   "mobile/src/lib/thresholds.generated.ts": {
@@ -2844,129 +2844,129 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/BuiltInModelDetailScreen.tsx": {
-    "mtime": 1794685026.1067467,
-    "seen": 1794690286.709523,
-    "ast_hash": "e071a60c0484764e3bed06300695f617",
+    "mtime": 1794735019.5200348,
+    "seen": 1794771624.3871968,
+    "ast_hash": "6c76208f488a98d134ea7703e2221d25",
     "semantic_hash": ""
   },
   "mobile/src/screens/ConnectSportsbookScreen.tsx": {
-    "mtime": 1794685026.1181805,
-    "seen": 1794690286.7095332,
-    "ast_hash": "29dd9c475db23a41c32af1b172cf300e",
+    "mtime": 1794735019.5200348,
+    "seen": 1794771624.3872085,
+    "ast_hash": "66d384627a2806d3d281a7f1852e4172",
     "semantic_hash": ""
   },
   "mobile/src/screens/ExplainerScreen.tsx": {
-    "mtime": 1794685026.1212075,
-    "seen": 1794690286.7095375,
-    "ast_hash": "08f2d7845acf157e08113c3b0089fcd8",
+    "mtime": 1794735019.5200348,
+    "seen": 1794771624.3872132,
+    "ast_hash": "31f22e71f5c831ac927fca5b3ba6643f",
     "semantic_hash": ""
   },
   "mobile/src/screens/FeedbackScreen.tsx": {
-    "mtime": 1794685026.1241696,
-    "seen": 1794690286.7095397,
-    "ast_hash": "1f89759146a82d4066a1aeaeaa0c575c",
+    "mtime": 1794735019.5200348,
+    "seen": 1794771624.3872156,
+    "ast_hash": "9c122e62d32b0753a6d4f709140b10c1",
     "semantic_hash": ""
   },
   "mobile/src/screens/FeedbackThreadScreen.tsx": {
-    "mtime": 1794685026.1241696,
-    "seen": 1794690286.7095418,
-    "ast_hash": "e7bccfcbfc0b1a48d5e5d8a23ad7bdae",
+    "mtime": 1794735019.5200348,
+    "seen": 1794771624.3872182,
+    "ast_hash": "7a3456b979a846be0007aa11ff87dd9b",
     "semantic_hash": ""
   },
   "mobile/src/screens/ModelDetailScreen.tsx": {
-    "mtime": 1794685026.1262012,
-    "seen": 1794690286.709544,
-    "ast_hash": "07a7b39cdbc032c1360808a4c57f080d",
+    "mtime": 1794735019.5279124,
+    "seen": 1794771624.3872201,
+    "ast_hash": "841e62f447ed0a104956d1fcb1f5942b",
     "semantic_hash": ""
   },
   "mobile/src/screens/ModelEditScreen.tsx": {
-    "mtime": 1794685026.1282146,
-    "seen": 1794690286.709546,
-    "ast_hash": "38d00982dac53403917ad2d6ad1e702e",
+    "mtime": 1794735019.5279124,
+    "seen": 1794771624.3872225,
+    "ast_hash": "14e90048abd6c60cb1c8dae1b251be0c",
     "semantic_hash": ""
   },
   "mobile/src/screens/ModelsScreen.tsx": {
-    "mtime": 1794685026.1303816,
-    "seen": 1794690286.709548,
-    "ast_hash": "382e9cb4b727a1319f20c2b0f9766aa0",
+    "mtime": 1794735019.5294566,
+    "seen": 1794771624.3872247,
+    "ast_hash": "0493edff43c693d51c412544e4e959d9",
     "semantic_hash": ""
   },
   "mobile/src/screens/OpeningComparisonScreen.tsx": {
-    "mtime": 1794685026.132396,
-    "seen": 1794690286.7095504,
-    "ast_hash": "1e5cf8d971f0c5541a8b7b18b8d2d9b5",
+    "mtime": 1794735019.5299742,
+    "seen": 1794771624.3872266,
+    "ast_hash": "bfe1e0740649fb0340ec26495d6685bb",
     "semantic_hash": ""
   },
   "mobile/src/screens/ParlayScreen.tsx": {
-    "mtime": 1794685026.135168,
-    "seen": 1794690286.709552,
-    "ast_hash": "bc2b4700c2b8fd4ded0dd7a2e400dd4e",
+    "mtime": 1794735019.5299742,
+    "seen": 1794771624.3872292,
+    "ast_hash": "19b29d1ae9c81f3aab8d7b62b5e4baea",
     "semantic_hash": ""
   },
   "mobile/src/screens/PaywallScreen.tsx": {
-    "mtime": 1794685026.1372027,
-    "seen": 1794690286.7095542,
-    "ast_hash": "c18e44249cea7cb365fd4ae11cc7def3",
+    "mtime": 1794735019.5299742,
+    "seen": 1794771624.3872316,
+    "ast_hash": "eb0a053732b8b4b738db5084972f5503",
     "semantic_hash": ""
   },
   "mobile/src/screens/PerformanceScreen.tsx": {
-    "mtime": 1794685026.1412318,
-    "seen": 1794690286.7095563,
-    "ast_hash": "4fc29b1f4a6e83ba5c231d9b3030e1bc",
+    "mtime": 1794735019.5299742,
+    "seen": 1794771624.3872337,
+    "ast_hash": "cfb7577e7129924c3a0af0dcd9be2adb",
     "semantic_hash": ""
   },
   "mobile/src/screens/PickDetailScreen.tsx": {
-    "mtime": 1794685026.1422436,
-    "seen": 1794690286.7095582,
-    "ast_hash": "1f3dbe57021b03c6c1c8637ad036d002",
+    "mtime": 1794735019.533455,
+    "seen": 1794771624.3872359,
+    "ast_hash": "41b701680f2b5654bbceec247b5153cd",
     "semantic_hash": ""
   },
   "mobile/src/screens/PicksHomeScreen.tsx": {
-    "mtime": 1794685026.1462986,
-    "seen": 1794690286.7095602,
-    "ast_hash": "b9d2b989f5d3ecb2162c26d88dd5ace0",
+    "mtime": 1794735019.535483,
+    "seen": 1794771624.3872378,
+    "ast_hash": "2a17c91ac461af1daa441cfec7f4aa90",
     "semantic_hash": ""
   },
   "mobile/src/screens/PlayerStatsScreen.tsx": {
-    "mtime": 1794685026.149346,
-    "seen": 1794690286.709562,
-    "ast_hash": "2d2fc18158c68328bf2b109b33413889",
+    "mtime": 1794735019.535483,
+    "seen": 1794771624.38724,
+    "ast_hash": "e586210c5fac914d2cc64dbe725ada94",
     "semantic_hash": ""
   },
   "mobile/src/screens/SavedParlaysScreen.tsx": {
-    "mtime": 1794685026.150527,
-    "seen": 1794690286.709564,
-    "ast_hash": "b57a2f00b5287c1fe11b40fb940ce70a",
+    "mtime": 1794735019.535483,
+    "seen": 1794771624.3872426,
+    "ast_hash": "d2edf784d0116029af13071d96cffa7e",
     "semantic_hash": ""
   },
   "mobile/src/screens/SettingsScreen.tsx": {
-    "mtime": 1794685026.1525416,
-    "seen": 1794690286.7095683,
-    "ast_hash": "63ddc3e56f34cb754a1b57fc44002677",
+    "mtime": 1794735019.5381596,
+    "seen": 1794771624.387247,
+    "ast_hash": "5401457f0af1b560f0a09c3f13d90785",
     "semantic_hash": ""
   },
   "mobile/src/screens/SignInScreen.tsx": {
-    "mtime": 1794685026.1566846,
-    "seen": 1794690286.7095704,
-    "ast_hash": "eca1f319140edb0761452e4bdb5d5afa",
+    "mtime": 1794735019.5381596,
+    "seen": 1794771624.3872495,
+    "ast_hash": "3472a78999c1859ca13f21af992a59de",
     "semantic_hash": ""
   },
   "mobile/src/screens/StatsScreen.tsx": {
-    "mtime": 1794685026.1627245,
-    "seen": 1794690286.709572,
-    "ast_hash": "ebd4a243e0f4a98cf31d475c1bdb9b7e",
+    "mtime": 1794735019.5381596,
+    "seen": 1794771624.3872514,
+    "ast_hash": "63bf5c513b064720e9e6e45346046bba",
     "semantic_hash": ""
   },
   "mobile/src/screens/TeamStatsScreen.tsx": {
-    "mtime": 1794685026.1667528,
-    "seen": 1794690286.7095742,
-    "ast_hash": "46fe261a040f71db28c355aefd47208b",
+    "mtime": 1794735019.5381596,
+    "seen": 1794771624.3872538,
+    "ast_hash": "61dcb3dac402285b33ae04aea2d64e78",
     "semantic_hash": ""
   },
   "mobile/src/screens/TrackRecordScreen.tsx": {
-    "mtime": 1794685026.1667528,
-    "seen": 1794690286.7095761,
-    "ast_hash": "53c0acaac941fa896db1ddccb4fe9cd8",
+    "mtime": 1794735019.5441856,
+    "seen": 1794771624.3872561,
+    "ast_hash": "a58e696b3d8012ed284c363a1622acd4",
     "semantic_hash": ""
   },
   "mobile/src/types/index.ts": {
@@ -3948,9 +3948,9 @@
     "semantic_hash": ""
   },
   "scheduler.py": {
-    "mtime": 1794685080.7892091,
-    "seen": 1794690286.7100072,
-    "ast_hash": "5d03f7957c2154876bfef50b3e142670",
+    "mtime": 1794766411.3380065,
+    "seen": 1794771624.3878226,
+    "ast_hash": "3c604feaf90023bc6790e84e95148ca3",
     "semantic_hash": ""
   },
   "scripts/_envfile.py": {
@@ -4284,9 +4284,9 @@
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/book_timing_snapshot.py": {
-    "mtime": 1794685081.582857,
-    "seen": 1794690286.710609,
-    "ast_hash": "d8f6fef9b775ceeb0f676e35c2f6987f",
+    "mtime": 1794735019.5483346,
+    "seen": 1794771624.3886101,
+    "ast_hash": "056387bbee65c3ee0725be08fdc0aa3c",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/consensus_gate.py": {
@@ -5448,9 +5448,9 @@
     "semantic_hash": ""
   },
   "tests/test_discord_notifier.py": {
-    "mtime": 1794685082.2999382,
-    "seen": 1794690286.7113516,
-    "ast_hash": "b4fa1091b4ff8c332ec53ef50331040f",
+    "mtime": 1794766008.8224814,
+    "seen": 1794771624.3895264,
+    "ast_hash": "11a5ee5f7be8aac8df214726600ed87b",
     "semantic_hash": ""
   },
   "tests/test_discord_post_one_pick_migration.py": {
@@ -6012,9 +6012,9 @@
     "semantic_hash": ""
   },
   "tests/test_mobile_a11y.py": {
-    "mtime": 1794685082.5268435,
-    "seen": 1794690286.7116308,
-    "ast_hash": "62d7751f69be7d3d3349d2a7a7dfe22d",
+    "mtime": 1794735019.5531764,
+    "seen": 1794771624.3898537,
+    "ast_hash": "72bf8d57eed092106042a66c1704d64b",
     "semantic_hash": ""
   },
   "tests/test_mobile_bankroll.py": {
@@ -6030,9 +6030,9 @@
     "semantic_hash": ""
   },
   "tests/test_mobile_contrast_tokens.py": {
-    "mtime": 1794685082.5448017,
-    "seen": 1794690286.7116492,
-    "ast_hash": "7ec4bb06388d0567266c2d46d5c2412b",
+    "mtime": 1794735019.5543725,
+    "seen": 1794771624.3898752,
+    "ast_hash": "f94908246eb7fb74593dbd8123dfec64",
     "semantic_hash": ""
   },
   "tests/test_mobile_error_states.py": {
@@ -6072,9 +6072,9 @@
     "semantic_hash": ""
   },
   "tests/test_mobile_paused_catalog.py": {
-    "mtime": 1794685082.6019146,
-    "seen": 1794690286.7116988,
-    "ast_hash": "c87a1e50ffb93e57435a9a13bf74b67f",
+    "mtime": 1794735019.5558815,
+    "seen": 1794771624.3899374,
+    "ast_hash": "c650c58b575b0b80808953822c9197f5",
     "semantic_hash": ""
   },
   "tests/test_mobile_pick_categories.py": {
@@ -7398,9 +7398,9 @@
     "semantic_hash": ""
   },
   "tracking/discord_notifier.py": {
-    "mtime": 1794685083.975,
-    "seen": 1794690286.7132428,
-    "ast_hash": "4b734f05ea0487c041cab13eba7275b3",
+    "mtime": 1794766008.8237667,
+    "seen": 1794771624.3996959,
+    "ast_hash": "80ce01f0cafc68e4b2b241263eec079e",
     "semantic_hash": ""
   },
   "tracking/discord_publish.py": {
@@ -7434,9 +7434,9 @@
     "semantic_hash": ""
   },
   "tracking/job_queue.py": {
-    "mtime": 1794685084.0079107,
-    "seen": 1794690286.713259,
-    "ast_hash": "e9201383a652766355d81140913fa3ac",
+    "mtime": 1794766008.8237667,
+    "seen": 1794771624.399717,
+    "ast_hash": "c4021ba81b2b264b6e3661681bd199de",
     "semantic_hash": ""
   },
   "tracking/live_calibration.py": {
@@ -7656,9 +7656,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/mobile-ota.yml": {
-    "mtime": 1794685022.945041,
-    "seen": 1794690286.7133977,
-    "ast_hash": "d9480f52ea4068edb148c43a03b66138",
+    "mtime": 1794766008.7923822,
+    "seen": 1794771624.3999043,
+    "ast_hash": "e69dd05ae54aa0f65f2b018538cbf243",
     "semantic_hash": ""
   },
   ".github/workflows/monitor-probe.yml": {
@@ -7668,9 +7668,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/pr-ci.yml": {
-    "mtime": 1794685022.9485583,
-    "seen": 1794690286.7134018,
-    "ast_hash": "3644f85f93f99634899cc54f133ddf82",
+    "mtime": 1794735019.4326954,
+    "seen": 1794771624.3999093,
+    "ast_hash": "747fcee706ace9d33effe06ae82a8d1a",
     "semantic_hash": ""
   },
   ".github/workflows/prune-merged-branches.yml": {
@@ -7758,9 +7758,9 @@
     "semantic_hash": ""
   },
   "docs/followups.md": {
-    "mtime": 1794685024.4291165,
-    "seen": 1794690286.7134614,
-    "ast_hash": "63e180880c975277acedb52c1c2dd5ee",
+    "mtime": 1794766518.2661726,
+    "seen": 1794771624.399987,
+    "ast_hash": "1e019e6eee7babffb069258b0012aa5b",
     "semantic_hash": ""
   },
   "docs/game_injury_gate.md": {
@@ -7794,9 +7794,9 @@
     "semantic_hash": ""
   },
   "docs/live_betting.md": {
-    "mtime": 1794685024.4442716,
-    "seen": 1794690286.7134767,
-    "ast_hash": "0ef7b8bc81e1db28a09198cc513e3a76",
+    "mtime": 1794766519.5728514,
+    "seen": 1794771624.4000127,
+    "ast_hash": "f4c26879625399a0fc61cd5e2014c009",
     "semantic_hash": ""
   },
   "docs/live_odds_freshness.md": {
@@ -8214,9 +8214,9 @@
     "semantic_hash": ""
   },
   "mobile/docs/UX_REVIEW.md": {
-    "mtime": 1794685025.251665,
-    "seen": 1794690286.7137098,
-    "ast_hash": "748166b505a6eee349e675d93d4fdfc2",
+    "mtime": 1794735019.4486945,
+    "seen": 1794771624.4003072,
+    "ast_hash": "48dcb7fdcac996d005bb31b6d8979778",
     "semantic_hash": ""
   },
   "monitoring/static/dashboard.html": {
@@ -8880,15 +8880,15 @@
     "semantic_hash": ""
   },
   "mobile/src/components/RecordHeroCard.tsx": {
-    "mtime": 1794685025.5826259,
-    "seen": 1794690286.708986,
-    "ast_hash": "186502c3be6343dc8f119d33cfd626cf",
+    "mtime": 1794735019.4866703,
+    "seen": 1794771624.3865316,
+    "ast_hash": "23af9f8410415b41ae831afa88e0b888",
     "semantic_hash": ""
   },
   "mobile/src/components/RecordInfoSheet.tsx": {
-    "mtime": 1794685025.5837111,
-    "seen": 1794690286.708988,
-    "ast_hash": "bd82be055c9be8c360f7884734eb0d88",
+    "mtime": 1794735019.4866703,
+    "seen": 1794771624.3865342,
+    "ast_hash": "e90431d577477d6444b8a62c43898aef",
     "semantic_hash": ""
   },
   "mobile/src/components/RecordSparkline.tsx": {
@@ -9042,9 +9042,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_crash_log.ts": {
-    "mtime": 1794685025.3100584,
-    "seen": 1794690286.7086887,
-    "ast_hash": "d6b4eb51356f966ceada63b7f9199654",
+    "mtime": 1794735019.451271,
+    "seen": 1794771624.3861635,
+    "ast_hash": "efc193f5e7b429321844fc45ee3f05c1",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_my_books.ts": {
@@ -9060,9 +9060,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/AnytimeMatchupCell.tsx": {
-    "mtime": 1794685025.4814124,
-    "seen": 1794690286.708868,
-    "ast_hash": "a2712071bc70ad108da65906c55ddfe4",
+    "mtime": 1794735019.4590967,
+    "seen": 1794771624.3863995,
+    "ast_hash": "46fcd188655a1e5c17b4206e8a26df07",
     "semantic_hash": ""
   },
   "mobile/src/components/AppErrorBoundary.tsx": {
@@ -9072,9 +9072,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/BookChecklist.tsx": {
-    "mtime": 1794685025.4997332,
-    "seen": 1794690286.7088847,
-    "ast_hash": "2670b96605a4f6ec1f4b43be408b723d",
+    "mtime": 1794735019.4621947,
+    "seen": 1794771624.3864205,
+    "ast_hash": "7fd9375865cf36e1922222ffb3a8faf0",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useNcaafAbbrevs.ts": {
@@ -9090,15 +9090,15 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/crashLog.ts": {
-    "mtime": 1794685025.8314326,
-    "seen": 1794690286.7092748,
-    "ast_hash": "2378fab6620ddb757158f34f0b8d8b94",
+    "mtime": 1794735019.5150464,
+    "seen": 1794771624.3868802,
+    "ast_hash": "4ec57d3738af26ff90cf2b145d76b77f",
     "semantic_hash": ""
   },
   "mobile/src/lib/crashLogSetup.ts": {
-    "mtime": 1794685025.8340044,
-    "seen": 1794690286.7092772,
-    "ast_hash": "748c1e93996bfff51142160bfe1861d7",
+    "mtime": 1794735019.5150464,
+    "seen": 1794771624.3868828,
+    "ast_hash": "246e210c4683a8450497632b7399c311",
     "semantic_hash": ""
   },
   "mobile/src/lib/myBooks.ts": {
@@ -9114,9 +9114,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/signalsCard.ts": {
-    "mtime": 1794685026.0499177,
-    "seen": 1794690286.7094686,
-    "ast_hash": "be64f044fc98e4961abe0a772b28a706",
+    "mtime": 1794766008.8161817,
+    "seen": 1794771624.3871307,
+    "ast_hash": "baa5c438af730dbe08aa88528a30036f",
     "semantic_hash": ""
   },
   "mobile/src/lib/teamForm.ts": {
@@ -9234,9 +9234,9 @@
     "semantic_hash": ""
   },
   "tests/test_app_crash_log.py": {
-    "mtime": 1794685082.1693563,
-    "seen": 1794690286.7111814,
-    "ast_hash": "543c0b847cd470c1417f6346d06db8af",
+    "mtime": 1794735019.5483346,
+    "seen": 1794771624.3893082,
+    "ast_hash": "89c7542e497878d90fdb4e264efa5207",
     "semantic_hash": ""
   },
   "tests/test_byom_facts_schema.py": {
@@ -9384,9 +9384,9 @@
     "semantic_hash": ""
   },
   "docs/app_errors.md": {
-    "mtime": 1794685024.3826478,
-    "seen": 1794690286.7134173,
-    "ast_hash": "8351139782ebeabfbf769453b532d0dd",
+    "mtime": 1794766008.7923822,
+    "seen": 1794771624.39993,
+    "ast_hash": "f08e12e1221f630354db0d131c4ddaa4",
     "semantic_hash": ""
   },
   "docs/byom_nfl.md": {
@@ -9558,15 +9558,15 @@
     "semantic_hash": ""
   },
   "mobile/src/components/AllBooksSheet.tsx": {
-    "mtime": 1794685025.4814124,
-    "seen": 1794690286.7088661,
-    "ast_hash": "3998a38c1ec52cb314b98eed49ea47e6",
+    "mtime": 1794735019.4578395,
+    "seen": 1794771624.386397,
+    "ast_hash": "288caa44a35f4ca8b84238f06d9ae409",
     "semantic_hash": ""
   },
   "mobile/src/components/LinesBoard.tsx": {
-    "mtime": 1794685025.5431285,
-    "seen": 1794690286.7089405,
-    "ast_hash": "c5eafe1b7183dbb6a5907e762456500d",
+    "mtime": 1794735019.4705098,
+    "seen": 1794771624.3864713,
+    "ast_hash": "0fbd643f7e7ae3f3587083fa7abb15f4",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useLinesBoard.ts": {
@@ -9714,9 +9714,9 @@
     "semantic_hash": ""
   },
   "tracking/eggz_picks.py": {
-    "mtime": 1794685083.987103,
-    "seen": 1794690286.7132473,
-    "ast_hash": "9ff407a5b261e17e51dcffd3077d04db",
+    "mtime": 1794766008.8237667,
+    "seen": 1794771624.399702,
+    "ast_hash": "2ce8badb4a2bd679d00b8fdeeaffb8fd",
     "semantic_hash": ""
   },
   "tracking/social_profile.py": {
@@ -10134,9 +10134,9 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/DeleteAccountScreen.tsx": {
-    "mtime": 1794685026.119194,
-    "seen": 1794690286.7095356,
-    "ast_hash": "db4c87e68ad3f2cf1767b97c7272d36b",
+    "mtime": 1794735019.5200348,
+    "seen": 1794771624.387211,
+    "ast_hash": "a6580a22f518c5d95cf18f6d7d3214ef",
     "semantic_hash": ""
   },
   "scripts/eggz_record.py": {
@@ -10302,9 +10302,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/EditLineLegSheet.tsx": {
-    "mtime": 1794685025.51324,
-    "seen": 1794690286.7089157,
-    "ast_hash": "e87cbc2421da8d4e30bf98bf5546061b",
+    "mtime": 1794735019.467275,
+    "seen": 1794771624.3864412,
+    "ast_hash": "386d421592cc26170e660714d8de6fa0",
     "semantic_hash": ""
   },
   "mobile/src/components/FeatureGate.tsx": {
@@ -10320,27 +10320,27 @@
     "semantic_hash": ""
   },
   "mobile/src/components/NbaFirstQuarterCard.tsx": {
-    "mtime": 1794685025.552725,
-    "seen": 1794690286.7089527,
-    "ast_hash": "8fba9a681a6329855d33db3352097e92",
+    "mtime": 1794735019.473801,
+    "seen": 1794771624.3864863,
+    "ast_hash": "a694fa501a183ef58b93df3e28ddc623",
     "semantic_hash": ""
   },
   "mobile/src/components/PickBooksSheet.tsx": {
-    "mtime": 1794685025.5621877,
-    "seen": 1794690286.7089627,
-    "ast_hash": "387e925f0a4593459c71109d0db59931",
+    "mtime": 1794735019.4774256,
+    "seen": 1794771624.3864977,
+    "ast_hash": "d151397359bca4024b071a846175b061",
     "semantic_hash": ""
   },
   "mobile/src/components/ScoreboardBoard.tsx": {
-    "mtime": 1794685025.587742,
-    "seen": 1794690286.7089922,
-    "ast_hash": "ffe57d1e0be4630d9f3def741da782dc",
+    "mtime": 1794735019.488835,
+    "seen": 1794771624.3865392,
+    "ast_hash": "3c1be56d442ae957ec10b01ea7383e64",
     "semantic_hash": ""
   },
   "mobile/src/components/StatsSportButton.tsx": {
-    "mtime": 1794685025.6172824,
-    "seen": 1794690286.709023,
-    "ast_hash": "4d0c72b81bb32ac90d4cc5c4d1299932",
+    "mtime": 1794735019.4965148,
+    "seen": 1794771624.3865745,
+    "ast_hash": "c2156311cf097e831d6b6910a1e4d166",
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomChoiceGroup.tsx": {
@@ -10356,21 +10356,21 @@
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomModelList.tsx": {
-    "mtime": 1794685025.6467326,
-    "seen": 1794690286.7090523,
-    "ast_hash": "22e54e0dc4ecf950c8514c6082370afe",
+    "mtime": 1794735019.503541,
+    "seen": 1794771624.3866088,
+    "ast_hash": "06c27a65bf135e5af41a07ad6902ccc2",
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomModelRow.tsx": {
-    "mtime": 1794685025.6467326,
-    "seen": 1794690286.7090547,
-    "ast_hash": "f5db17bf18f04b9c9f001b47164d443e",
+    "mtime": 1794735019.503541,
+    "seen": 1794771624.3866112,
+    "ast_hash": "1c5af6c007e698d9f27f86c370aa761f",
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomPreviewCard.tsx": {
-    "mtime": 1794685025.6497536,
-    "seen": 1794690286.7090585,
-    "ast_hash": "373e3448cbe452e1ab3aebd950b9666e",
+    "mtime": 1794735019.5052857,
+    "seen": 1794771624.3866155,
+    "ast_hash": "dbdf403e5b0a8fd683461b953531023a",
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomSeasonToggle.tsx": {
@@ -10452,27 +10452,27 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/ByomBuilderScreen.tsx": {
-    "mtime": 1794685026.1135669,
-    "seen": 1794690286.709527,
-    "ast_hash": "2b20e517cbaa7afe42f862d5fa681809",
+    "mtime": 1794735019.5200348,
+    "seen": 1794771624.3872015,
+    "ast_hash": "f985a5629cca18463590b7167829acdd",
     "semantic_hash": ""
   },
   "mobile/src/screens/ByomDetailScreen.tsx": {
-    "mtime": 1794685026.1151187,
-    "seen": 1794690286.7095292,
-    "ast_hash": "d11d4a2dfed328f0b9e0929246c21eec",
+    "mtime": 1794735019.5200348,
+    "seen": 1794771624.387204,
+    "ast_hash": "b5f259636c63e92cd6de1d91e3976d1c",
     "semantic_hash": ""
   },
   "mobile/src/screens/ByomEditScreen.tsx": {
-    "mtime": 1794685026.1161492,
-    "seen": 1794690286.709531,
-    "ast_hash": "f134ec15c810a578b4392a7e14f9f30b",
+    "mtime": 1794735019.5200348,
+    "seen": 1794771624.387206,
+    "ast_hash": "850624969ebf7faf4b5f4f826642a84c",
     "semantic_hash": ""
   },
   "mobile/src/screens/ScoreboardGameScreen.tsx": {
-    "mtime": 1794685026.150527,
-    "seen": 1794690286.7095664,
-    "ast_hash": "5711313c9bd88757707a722d802befcf",
+    "mtime": 1794735019.5381596,
+    "seen": 1794771624.387245,
+    "ast_hash": "7f27f07870b5509ec4804b78fef47897",
     "semantic_hash": ""
   },
   "scripts/ncaab_feed_probe.py": {
@@ -10536,9 +10536,9 @@
     "semantic_hash": ""
   },
   "tests/test_apple_only_app_access.py": {
-    "mtime": 1794685082.172813,
-    "seen": 1794690286.7111876,
-    "ast_hash": "d7fbd4ce576c9beb987ffb2f6a8a2e71",
+    "mtime": 1794735019.5521474,
+    "seen": 1794771624.3893163,
+    "ast_hash": "364b71a1506ab51676ec9d4d6f3d6ae9",
     "semantic_hash": ""
   },
   "tests/test_byom_dk_start_price.py": {
@@ -10776,9 +10776,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomBetCount.tsx": {
-    "mtime": 1794685025.6365268,
-    "seen": 1794690286.7090416,
-    "ast_hash": "767216273096f035136e3b6213ae7cf4",
+    "mtime": 1794735019.5021634,
+    "seen": 1794771624.3865957,
+    "ast_hash": "e5f75af78a556d18faf1725eb046bbed",
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomCheckChip.tsx": {
@@ -10788,15 +10788,15 @@
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomFilterSheet.tsx": {
-    "mtime": 1794685025.644715,
-    "seen": 1794690286.7090502,
-    "ast_hash": "2396ed94d5d7917af30f09af8d23fedc",
+    "mtime": 1794735019.5021634,
+    "seen": 1794771624.3866067,
+    "ast_hash": "50108908aafaa173207395e840ec062f",
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomPropSideFields.tsx": {
-    "mtime": 1794685025.6517649,
-    "seen": 1794690286.7090607,
-    "ast_hash": "2d207f7cedc16feacbdbd341cd4fc438",
+    "mtime": 1794735019.5052857,
+    "seen": 1794771624.386618,
+    "ast_hash": "84601f5b857b2f869c171796d48d911f",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useNbaGameFacts.ts": {
@@ -11802,9 +11802,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomPillToggle.tsx": {
-    "mtime": 1794685025.6487427,
-    "seen": 1794690286.7090566,
-    "ast_hash": "81326242fca2ba984d503d17c694b28a",
+    "mtime": 1794735019.5052857,
+    "seen": 1794771624.3866136,
+    "ast_hash": "7b9efa4084d95292525fad3d1ebf7d94",
     "semantic_hash": ""
   },
   "mobile/src/lib/appReview.ts": {
@@ -11826,9 +11826,9 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/ByomBetsScreen.tsx": {
-    "mtime": 1794685026.1087596,
-    "seen": 1794690286.709525,
-    "ast_hash": "b550942dbdc6f22e4ba18897fccc5a33",
+    "mtime": 1794735019.5200348,
+    "seen": 1794771624.387199,
+    "ast_hash": "0a8656bdf1b2a01c049bfe33a2c5e484",
     "semantic_hash": ""
   },
   "scripts/nba_s_q1props.py": {
@@ -12120,9 +12120,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomSeasonBreakdown.tsx": {
-    "mtime": 1794685025.6517649,
-    "seen": 1794690286.7090623,
-    "ast_hash": "a1aa028b2b24f7c9e3a5dc14e5cb4131",
+    "mtime": 1794735019.5052857,
+    "seen": 1794771624.38662,
+    "ast_hash": "509b0dcc49a6347f814b4570cbf81351",
     "semantic_hash": ""
   },
   "mobile/src/lib/freezeLog.ts": {
@@ -12138,9 +12138,9 @@
     "semantic_hash": ""
   },
   "scripts/grant_founder_comped_2026_11_05.sql": {
-    "mtime": 1794685080.9812198,
-    "seen": 1794690286.7102005,
-    "ast_hash": "f74e993c35ebf0bb31febbab9168af8d",
+    "mtime": 1794735019.5441856,
+    "seen": 1794771624.3880737,
+    "ast_hash": "b9e5c0021e5580da7d1e1fc5c3caea56",
     "semantic_hash": ""
   },
   "tests/test_byom_analyze.py": {
@@ -12276,9 +12276,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/SgpPriceEntry.tsx": {
-    "mtime": 1794685025.5917656,
-    "seen": 1794690286.7089984,
-    "ast_hash": "6aadbc571031d2862224038ada6554be",
+    "mtime": 1794735019.489897,
+    "seen": 1794771624.3865464,
+    "ast_hash": "ae0941fe6c1b2e3b8765cb7ed115a8d6",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useSgpHaircuts.ts": {
@@ -12594,9 +12594,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/NbaFirstBasketBoard.tsx": {
-    "mtime": 1794685025.550707,
-    "seen": 1794690286.7089508,
-    "ast_hash": "5fc989fe6f0f6476b5103977522fd33f",
+    "mtime": 1794735019.4724684,
+    "seen": 1794771624.386484,
+    "ast_hash": "7c1e0a1c7b69cec4513e3a17d937f357",
     "semantic_hash": ""
   },
   "mobile/src/lib/nbaFirstBasket.ts": {
@@ -13248,9 +13248,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/StackBackButton.tsx": {
-    "mtime": 1794685025.613736,
-    "seen": 1794690286.7090166,
-    "ast_hash": "8216651721fd888de7f26780263af3b9",
+    "mtime": 1794735019.4947667,
+    "seen": 1794771624.3865676,
+    "ast_hash": "d099cce93a8f538eb89fbd9bf54d2ae7",
     "semantic_hash": ""
   },
   "mobile/src/lib/stackBack.ts": {
@@ -13452,9 +13452,9 @@
     "semantic_hash": ""
   },
   "scripts/book_app_links_probe.py": {
-    "mtime": 1794685080.8050964,
-    "seen": 1794690286.710024,
-    "ast_hash": "1b306f00c2d2e255e2fb5998bdf1ba1b",
+    "mtime": 1794766008.8161817,
+    "seen": 1794771624.3878462,
+    "ast_hash": "e2ad2365e68a5e2fa9e7c6617aa75046",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/deriv/deriv_lab.py": {
@@ -13524,9 +13524,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_other_lines.ts": {
-    "mtime": 1794685025.3805444,
-    "seen": 1794690286.7087646,
-    "ast_hash": "f81abac5dce68abc7d4db5b19a9e9428",
+    "mtime": 1794766008.8064175,
+    "seen": 1794771624.3862638,
+    "ast_hash": "186538bb9e733042801275448c71a963",
     "semantic_hash": ""
   },
   "scripts/model_display_names.py": {
@@ -14286,9 +14286,9 @@
     "semantic_hash": ""
   },
   ".claude/skills/league-models/references/learning-log.md": {
-    "mtime": 1794685021.9757087,
-    "seen": 1794690286.7133713,
-    "ast_hash": "38dc4fa14ca4e84a0ee64640cd9867b3",
+    "mtime": 1794735019.4316866,
+    "seen": 1794771624.3998706,
+    "ast_hash": "1e589b243ab4dcd5b124001b6012aede",
     "semantic_hash": ""
   },
   ".claude/skills/league-models/references/market-grid.md": {
@@ -14430,15 +14430,15 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_today_picks_flight.ts": {
-    "mtime": 1794685025.4575698,
-    "seen": 1794690286.7088428,
-    "ast_hash": "0b2cc7a4f7720405b4bc3b7f7922a71e",
+    "mtime": 1794735019.4548726,
+    "seen": 1794771624.386365,
+    "ast_hash": "446ce09dc66b80d951d64e2036a46a91",
     "semantic_hash": ""
   },
   "mobile/src/lib/todayPicksFlight.ts": {
-    "mtime": 1794685026.093106,
-    "seen": 1794690286.7095084,
-    "ast_hash": "3aa2b3704d44e678cf5504cf4504675d",
+    "mtime": 1794735019.5176044,
+    "seen": 1794771624.3871784,
+    "ast_hash": "87f311c3e1122314cf65ef4b74041912",
     "semantic_hash": ""
   },
   "models/tennis_common.py": {
@@ -14496,9 +14496,9 @@
     "semantic_hash": ""
   },
   "tests/test_mobile_today_picks_flight.py": {
-    "mtime": 1794685082.6486826,
-    "seen": 1794690286.7117422,
-    "ast_hash": "11c333a8845f0e4120a25c5447e33551",
+    "mtime": 1794735019.5558815,
+    "seen": 1794771624.389987,
+    "ast_hash": "0542f2fb0d9cbd09567c19d95b00b6a7",
     "semantic_hash": ""
   },
   "tests/test_ncaab_margin_pricing_review.py": {
@@ -14910,33 +14910,33 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_bet_all.ts": {
-    "mtime": 1794685025.2941983,
-    "seen": 1794690286.708675,
-    "ast_hash": "0bfe28b6855f79e843c0322ce0e7d41e",
+    "mtime": 1794735019.451271,
+    "seen": 1794771624.3861456,
+    "ast_hash": "21fd1f4ae9539d6c32306f13ebe71806",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_discord_join.ts": {
-    "mtime": 1794685025.324855,
-    "seen": 1794690286.7087011,
-    "ast_hash": "b6333187229f5d780e7e287506f18ae0",
+    "mtime": 1794694072.6879199,
+    "seen": 1794771624.3861802,
+    "ast_hash": "2ea186c3c7872de5389e9a2a3dd7dacf",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_game_state_filter.ts": {
-    "mtime": 1794685025.3378336,
-    "seen": 1794690286.7087176,
-    "ast_hash": "ba8eff5e3a1c11ac6838432179cde905",
+    "mtime": 1794735019.4533045,
+    "seen": 1794771624.386202,
+    "ast_hash": "c59e6f341c8afe0b57f8f7c2074a1de7",
     "semantic_hash": ""
   },
   "mobile/src/components/BetAllSheet.tsx": {
-    "mtime": 1794685025.4908884,
-    "seen": 1794690286.7088745,
-    "ast_hash": "02be0c82925c97799b9653c2028706ef",
+    "mtime": 1794735019.4590967,
+    "seen": 1794771624.3864074,
+    "ast_hash": "4e9a7175ceb709306f8ef25009193968",
     "semantic_hash": ""
   },
   "mobile/src/components/DiscordJoinModal.tsx": {
-    "mtime": 1794685025.5097144,
-    "seen": 1794690286.7089114,
-    "ast_hash": "2036dddf8b50c6fc3233685535697184",
+    "mtime": 1794735019.465851,
+    "seen": 1794771624.386436,
+    "ast_hash": "3ee51b02ddd4b04248753a2be6341246",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useDiscordJoin.ts": {
@@ -14946,15 +14946,15 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/betAll.ts": {
-    "mtime": 1794685025.8063576,
-    "seen": 1794690286.709245,
-    "ast_hash": "a4605872d7bd1300fec6ba9c29020092",
+    "mtime": 1794735019.5132236,
+    "seen": 1794771624.386843,
+    "ast_hash": "be06140e85196f01511cb26ef40ff7a9",
     "semantic_hash": ""
   },
   "mobile/src/lib/discordJoin.ts": {
-    "mtime": 1794685025.8516738,
-    "seen": 1794690286.7093022,
-    "ast_hash": "964fdfea83406c664f0f58bdee718b32",
+    "mtime": 1794694072.6913548,
+    "seen": 1794771624.3869154,
+    "ast_hash": "d87971eed1c5ca84f3ae8a5bf73baa73",
     "semantic_hash": ""
   },
   "mobile/src/lib/discordJoinStore.ts": {
@@ -14964,15 +14964,15 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/gameStateFilter.ts": {
-    "mtime": 1794685025.8773508,
-    "seen": 1794690286.7093253,
-    "ast_hash": "f13df378adaf69833b248a293863bde2",
+    "mtime": 1794735019.5165765,
+    "seen": 1794771624.386945,
+    "ast_hash": "66cfa3bf3e0f8bf7a1b75fdeb2607a15",
     "semantic_hash": ""
   },
   "mobile/src/lib/openInApp.ts": {
-    "mtime": 1794685025.926509,
-    "seen": 1794690286.7093837,
-    "ast_hash": "63e8685218ec84fba9d2282bcdca42b9",
+    "mtime": 1794766008.8161817,
+    "seen": 1794771624.38702,
+    "ast_hash": "36f2f67b5abf28610a2e0b0b2aa9b98d",
     "semantic_hash": ""
   },
   "mobile/src/lib/pickPriceView.ts": {
@@ -14994,9 +14994,9 @@
     "semantic_hash": ""
   },
   "tests/test_mobile_bet_all.py": {
-    "mtime": 1794685082.5349762,
-    "seen": 1794690286.71164,
-    "ast_hash": "149b0f1b4c9b263af5c1525fae13f6f7",
+    "mtime": 1794735019.5543725,
+    "seen": 1794771624.3898647,
+    "ast_hash": "fcb64277298381516f59ba3c9c24b63a",
     "semantic_hash": ""
   },
   "tests/test_mobile_discord_join.py": {
@@ -15027,6 +15027,132 @@
     "mtime": 1794689999.9449337,
     "seen": 1794690286.713442,
     "ast_hash": "c98888fe6c2824d69eab411388acec6d",
+    "semantic_hash": ""
+  },
+  "data/migrations/ncaaf_drop_phantom_lsu_ole_miss_2026_11_21.sql": {
+    "mtime": 1794735019.43579,
+    "seen": 1794771624.385866,
+    "ast_hash": "576d73eec375dc3ecc4a54874403aacb",
+    "semantic_hash": ""
+  },
+  "mobile/scripts/shims/async-storage.mjs": {
+    "mtime": 1794735019.4486945,
+    "seen": 1794771624.3861213,
+    "ast_hash": "b2dd48073a98a30fadf89449ea9d52a8",
+    "semantic_hash": ""
+  },
+  "mobile/scripts/verify_tracked_batch.ts": {
+    "mtime": 1794735019.4548726,
+    "seen": 1794771624.3863704,
+    "ast_hash": "181a26905c692eaed819cc04ceacd616",
+    "semantic_hash": ""
+  },
+  "mobile/src/components/PickResultChip.tsx": {
+    "mtime": 1794735019.4774256,
+    "seen": 1794771624.3865025,
+    "ast_hash": "bc736a8cd097eb4c09376d85461dd276",
+    "semantic_hash": ""
+  },
+  "mobile/src/components/PrimaryButton.tsx": {
+    "mtime": 1794735019.482654,
+    "seen": 1794771624.38652,
+    "ast_hash": "9470c0b4426cb8bce34bb8b2cbddf800",
+    "semantic_hash": ""
+  },
+  "mobile/src/lib/handoffLog.ts": {
+    "mtime": 1794766008.8151438,
+    "seen": 1794771624.3869476,
+    "ast_hash": "110837021efb73c0bcb661ade6683eff",
+    "semantic_hash": ""
+  },
+  "mobile/src/lib/pickResult.ts": {
+    "mtime": 1794735019.5170934,
+    "seen": 1794771624.3870523,
+    "ast_hash": "783ba319f22947d502969d4c4c2a038d",
+    "semantic_hash": ""
+  },
+  "scripts/betmgm_app_link_probe.py": {
+    "mtime": 1794766008.8161817,
+    "seen": 1794771624.3878438,
+    "ast_hash": "e2bf3dbc7294d78ef30fa36161d16111",
+    "semantic_hash": ""
+  },
+  "scripts/horse/__init__.py": {
+    "mtime": 1794735019.5468864,
+    "seen": 1794771624.3880787,
+    "ast_hash": "1cc29907fed6e7cfee48b3d078249fc0",
+    "semantic_hash": ""
+  },
+  "scripts/horse/fetch_datasets.py": {
+    "mtime": 1794735019.5468864,
+    "seen": 1794771624.388081,
+    "ast_hash": "05bf7d3e140eedef0d6a6345839892d3",
+    "semantic_hash": ""
+  },
+  "scripts/horse/manifest.json": {
+    "mtime": 1794735019.5483346,
+    "seen": 1794771624.3880835,
+    "ast_hash": "611da4eafcedde145ec09adef1f88c47",
+    "semantic_hash": ""
+  },
+  "tests/test_betmgm_app_link_probe.py": {
+    "mtime": 1794766008.8161817,
+    "seen": 1794771624.3893378,
+    "ast_hash": "8cee67f597b09d16401b55cce2f91f48",
+    "semantic_hash": ""
+  },
+  "tests/test_horse_datasets.py": {
+    "mtime": 1794735019.5521474,
+    "seen": 1794771624.38967,
+    "ast_hash": "580293d987584671ee8e74e179be11f7",
+    "semantic_hash": ""
+  },
+  "tests/test_inplay_boot_relaunch.py": {
+    "mtime": 1794766206.807715,
+    "seen": 1794771624.3896933,
+    "ast_hash": "3af47ab0c585a31fdaa75ccec1483c07",
+    "semantic_hash": ""
+  },
+  "tests/test_mobile_ota_settings.py": {
+    "mtime": 1794766008.8237667,
+    "seen": 1794771624.389932,
+    "ast_hash": "2935234bcd61476690be74fe7082e92c",
+    "semantic_hash": ""
+  },
+  "tests/test_ncaaf_phantom_lsu_ole_miss_migration.py": {
+    "mtime": 1794735019.5558815,
+    "seen": 1794771624.3904548,
+    "ast_hash": "24728b5a40dd7127779fea368cf0a015",
+    "semantic_hash": ""
+  },
+  "tests/test_ncaaf_unscheduled_opponent.py": {
+    "mtime": 1794735019.5575814,
+    "seen": 1794771624.390482,
+    "ast_hash": "ca86da95fe676e6e3a32a778f29d734f",
+    "semantic_hash": ""
+  },
+  "docs/horse_racing_scope.md": {
+    "mtime": 1794735019.4394014,
+    "seen": 1794771624.4000075,
+    "ast_hash": "89e20822dcbfcd0cbc9d21b5dd496c04",
+    "semantic_hash": ""
+  },
+  "docs/horse_racing_sources.md": {
+    "mtime": 1794735019.4404294,
+    "seen": 1794771624.4000099,
+    "ast_hash": "5b26ca5da767713445bcfeb0eabb010f",
+    "semantic_hash": ""
+  },
+  "scripts/horse/README.md": {
+    "mtime": 1794735019.5441856,
+    "seen": 1794771624.4003448,
+    "ast_hash": "9b7c4c9c05f81ec1bdcd4944b0b007bc",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/horse/LICENCE.txt": {
+    "mtime": 1794735019.5483346,
+    "seen": 1794771624.40036,
+    "ast_hash": "00f0b9576179e94d48799da44474d458",
     "semantic_hash": ""
   }
 }
