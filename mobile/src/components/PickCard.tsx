@@ -78,6 +78,8 @@ import {
   priceCheckSpeech,
 } from '@/lib/heroPriceText';
 import { GameStatusPill } from './GameStatusPill';
+import { PickResultChip } from './PickResultChip';
+import { pickResultView } from '@/lib/pickResult';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
 
@@ -595,7 +597,12 @@ export function PickCard({
   const signalsStakeSpoken = signalsStakeShown
     ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}${stakeReason ? `. ${stakeReason}` : ''}`
     : 'Stake unavailable';
-  const statusSpeech = gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
+  // A graded BET on a finished game says how it did (Matt, 2026-11-15).
+  const resultView = pickResultView(pick, paused);
+  const baseStatusSpeech = gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
+  const statusSpeech = resultView
+    ? [baseStatusSpeech, resultView.spoken].filter(Boolean).join('. ')
+    : baseStatusSpeech;
   // The first spoken word is the chip on the card. A paused or preview row
   // does not say BET before the member hears that it is not a bet.
   const signalsVerdict = preview
@@ -606,6 +613,7 @@ export function PickCard({
   const cardLabel = signals
     ? signalsCardSpeech({
         verdict: signalsVerdict,
+        result: resultView?.spoken ?? null,
         bet: betHeadline,
         price: signalsPriceSpoken,
         reason: reasonLine,
@@ -618,13 +626,13 @@ export function PickCard({
         modelName: `${markedModel} model`,
         posted: timing?.label ?? null,
         paused: null,
-        gameStatus: gameStatus(game, liveState).kind !== 'pre' ? statusSpeech : null,
+        gameStatus: gameStatus(game, liveState).kind !== 'pre' ? baseStatusSpeech : null,
         sharp: sharp && !signalsMuted ? sharpScoreSpeech(sharp.score, sharp.band) : null,
         started: startedSpoken,
       })
     : joinCardSpeech([
         matchup,
-        gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
+        statusSpeech,
         // The title's words (splitPickTitle): no old NFL sizing figure.
         labelWithoutStake(pick.pick_label),
         paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type),
@@ -697,7 +705,10 @@ export function PickCard({
         </Text>
         {/* Live clock stays on this pill (Fixtured-style score + period).
             Do not invent a second clock chrome on the card. */}
-        <GameStatusPill game={game} live={liveState} />
+        <View style={styles.headerStatus}>
+          <GameStatusPill game={game} live={liveState} />
+          {resultView ? <PickResultChip view={resultView} /> : null}
+        </View>
       </View>
 
       <View style={styles.titleBlock}>
@@ -1077,6 +1088,7 @@ export function PickCard({
           {gameStatus(game, liveState).kind !== 'pre' ? (
             <GameStatusPill game={game} live={liveState} />
           ) : null}
+          {resultView ? <PickResultChip view={resultView} /> : null}
         </View>
         ) : null}
       </View>
@@ -1460,6 +1472,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.xs,
+  },
+  // FINAL pill + the graded result chip, kept together at the trailing edge.
+  headerStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   matchup: {
     // flex + truncation so a long matchup can never push the live score /

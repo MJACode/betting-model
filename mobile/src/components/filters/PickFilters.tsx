@@ -57,6 +57,7 @@ import { dateFilterSummary, datesAreNarrowed, type DateOption } from '@/lib/date
 import {
   gameStateSummary,
   gameStatesAreNarrowed,
+  isGameStateSelected,
   type GameState,
   type GameStateOption,
 } from '@/lib/gameStateFilter';
@@ -123,8 +124,9 @@ interface Props {
   onClearDates?: () => void;
   /**
    * Not started / Live / Final, and which the user has picked (Matt,
-   * 2026-11-14). Empty selection = every state. Renders only when the board
-   * holds more than one state.
+   * 2026-11-14). Empty selection = every state but Final, which is opt-in
+   * (2026-11-15). Renders when the board holds more than one state, or any
+   * finished game.
    */
   gameStateOptions?: GameStateOption[];
   selectedGameStates?: Set<GameState>;
@@ -239,8 +241,11 @@ export function PickFilters({
   // hidden when the board holds games in only one state.
   const statesNarrowed = gameStatesAreNarrowed(selectedGameStates, gameStateOptions);
   const stateSummary = gameStateSummary(selectedGameStates, gameStateOptions);
+  // Final always earns the section: it is the only way today's finished games
+  // reach the board, even when they are all the board holds.
   const stateCutBites =
-    !!onToggleGameState && (gameStateOptions.length > 1 || statesNarrowed);
+    !!onToggleGameState &&
+    (gameStateOptions.length > 1 || statesNarrowed || gameStateOptions.some((o) => o.state === 'final'));
   const searchActive = search.trim().length > 0;
   const pills = useMemo(() => {
     const out = buildPills(state, onChange, presentCategories);
@@ -377,11 +382,12 @@ export function PickFilters({
         ) : null}
 
         {/* STATUS between Date and Games: "Not started + Live" is the
-            bettable board, and the Games list below follows it. */}
+            bettable board and the default; Final brings today's finished
+            games back (Matt, 2026-11-15). The Games list below follows it. */}
         {stateCutBites ? (
           <FilterSection
             title="Status"
-            subtitle="Hide games that are over, or show only games in play."
+            subtitle="Finished games stay hidden until you pick Final."
             summary={stateSummary}
             defaultOpen={statesNarrowed}
             onClear={statesNarrowed ? onClearGameStates : undefined}
@@ -392,7 +398,7 @@ export function PickFilters({
                   key={o.state}
                   label={o.label}
                   count={o.count}
-                  active={selectedGameStates.has(o.state)}
+                  active={isGameStateSelected(o.state, selectedGameStates)}
                   onPress={() => onToggleGameState!(o.state)}
                   accessibilityLabel={`${o.label}, ${o.count} ${itemNoun}${o.count === 1 ? '' : 's'}`}
                 />

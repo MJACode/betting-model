@@ -71,8 +71,10 @@ def test_the_hook_reads_through_the_shared_flight():
     assert "Infinity" in flight
     # The paused split stays at the source. All reads pausedData; everyone
     # else reads data. Refresh still goes through the same reader.
-    assert "setData(all.filter((d) => !isPausedForDisplay(d.pick)))" in src
-    assert "setPausedData(all.filter((d) => isPausedForDisplay(d.pick)))" in src
+    # `open` excludes today's finished games, which travel as finishedData.
+    assert "setData(open.filter((d) => !isPausedForDisplay(d.pick)))" in src
+    assert "setPausedData(open.filter((d) => isPausedForDisplay(d.pick)))" in src
+    assert "finishedData: board.finishedData" in src
 
 
 @pytest.mark.skipif(tsx_cmd(MOBILE) is None, reason="mobile node modules not installed")

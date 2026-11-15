@@ -177,6 +177,11 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
   const setPausedData = (rows: EnrichedPick[]) => {
     pausedData = rows;
   };
+  // Today's finished games (paused models' included; the screen labels them).
+  let finishedData: EnrichedPick[] = [];
+  const setFinishedData = (rows: EnrichedPick[]) => {
+    finishedData = rows;
+  };
   // The shared flight publishes loading. This read only fills the rows.
   const setLoading = (_next: boolean) => {};
   const setError = (next: string | null) => {
@@ -254,18 +259,26 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
       ...d,
       pick: byId.get(d.pick.pick_id) ?? d.pick,
     })).filter(
-      (d) => !isGameOver(d.game, d.pick.sport)
-        // A tennis no-bet row never gets a final score (only a settled BET
-        // writes one), so it leaves once its match is past the badge window
-        // instead of lingering, statusless, until midnight. BETs stay until
-        // they settle (UX review, 2026-11-14).
-        && !((d.pick.sport === 'ATP' || d.pick.sport === 'WTA') && d.pick.signal_type !== 'BET'
-             && gameStatus(d.game).kind === 'ended')
-        && !isModelRetired(d.pick.model_id)
-        && !voidHiddenFromBoard(d.pick),
+      (d) => !isModelRetired(d.pick.model_id) && !voidHiddenFromBoard(d.pick),
     );
-    setData(all.filter((d) => !isPausedForDisplay(d.pick)));
-    setPausedData(all.filter((d) => isPausedForDisplay(d.pick)));
+    // A tennis no-bet row never gets a final score (only a settled BET
+    // writes one), so it leaves once its match is past the badge window
+    // instead of lingering, statusless, until midnight. BETs stay until
+    // they settle (UX review, 2026-11-14).
+    const tennisNoBet = (d: EnrichedPick) =>
+      (d.pick.sport === 'ATP' || d.pick.sport === 'WTA') && d.pick.signal_type !== 'BET';
+    const over = (d: EnrichedPick) =>
+      isGameOver(d.game, d.pick.sport) || (tennisNoBet(d) && gameStatus(d.game).kind === 'ended');
+    const open = all.filter((d) => !over(d));
+    setData(open.filter((d) => !isPausedForDisplay(d.pick)));
+    setPausedData(open.filter((d) => isPausedForDisplay(d.pick)));
+    // Today's FINISHED games, kept apart (Matt, 2026-11-15: "filter on
+    // completed games from the day"). Only the Picks screen reads them, and
+    // only once the Status filter's Final chip is picked; every other
+    // consumer still sees the open board above, so no count, badge, betslip
+    // or Bet all ever includes a game that is over. A tennis no-bet row
+    // whose match ran out with no score has nothing to show and stays out.
+    setFinishedData(all.filter((d) => over(d) && !tennisNoBet(d)));
     setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);
     setLoaded(true);
   } catch (e: unknown) {
@@ -273,7 +286,7 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
   } finally {
     setLoading(false);
   }
-  return { data, pausedData, loaded, error, partial };
+  return { data, pausedData, finishedData, loaded, error, partial };
 }
 
 setTodayBoardReader(readTodayBoard);
@@ -392,6 +405,7 @@ export function useTodayPicks(date?: string) {
   return {
     data: board.data,
     pausedData: board.pausedData,
+    finishedData: board.finishedData,
     loading,
     loaded: board.loaded,
     error: board.error,
