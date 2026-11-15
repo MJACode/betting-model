@@ -1696,6 +1696,20 @@
     "args": {}
   },
   {
+    "key": "fanatics-app-link-probe-2026-11-15-share",
+    "job_type": "fanatics_app_link_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-15: 'Just figure out the best route to have it show the bet'. Re-runs the Fanatics probe with three public Fanatics share-a-bet links (AppsFlyer OneLink), followed hop by hop, to see whether the app is given selection ids or a server-side share id. Writes nothing, no Odds API credits.",
+    "args": {}
+  },
+  {
+    "key": "fanatics-app-link-probe-2026-11-15",
+    "job_type": "fanatics_app_link_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-15: Fanatics opens its app but the bet is not on the slip; 'Yes keep pushing'. The feed sends no Fanatics link, only selection ids. Reads the App Store bundle id, the AASA files of Fanatics' hosts and its website's app handoff, to find a betslip link format. Writes nothing, no Odds API credits.",
+    "args": {}
+  },
+  {
     "key": "betmgm-app-link-probe-2026-11-15-www",
     "job_type": "betmgm_app_link_probe",
     "requested_by": "matt",
