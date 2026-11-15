@@ -52,7 +52,9 @@ WEB_ROOTS: dict[str, str] = {
     "betparx": "https://www.betparx.com/",
     "rebet": "https://play.rebet.app/",
 }
-STATES = ("nj", "pa", "mi", "az", "co", "il", "va", "ny")
+# "ma" added 2026-11-15: Matt bets from Massachusetts and BetMGM there was
+# never measured.
+STATES = ("nj", "pa", "mi", "az", "co", "il", "va", "ny", "ma")
 
 
 def _install() -> None:

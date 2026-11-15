@@ -1689,6 +1689,13 @@
     "args": {}
   },
   {
+    "key": "book-app-links-probe-2026-11-15-ma",
+    "job_type": "book_app_links_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-15: BetMGM still opens the website, from Massachusetts. The 2026-11-12 probe covered 8 states, not MA. Re-runs it with sports.ma.betmgm.com added. Writes nothing, no Odds API credits.",
+    "args": {}
+  },
+  {
     "key": "nba-period-lines-and-results-2026-11-13",
     "job_type": "nba_quarters",
     "requested_by": "matt",

@@ -2,7 +2,7 @@ import { Alert, AppState, Linking, Platform } from 'react-native';
 
 import { showToast } from '@/components/Toast';
 
-import { getBettingState } from '@/hooks/useBettingState';
+import { getBettingState, loadBettingState } from '@/hooks/useBettingState';
 import { APP_CLAIMING_BOOKS, appClaimedLink, fillBetslipLink, linkNeedsState } from '@/lib/betslipLinks';
 import { noteHandoffMiss, type HandoffRoute } from '@/lib/handoffLog';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
@@ -243,8 +243,11 @@ export async function openBookBetslip(
     return openThisBooksLinkOnly(book, link);
   }
   const app = BOOK_APPS[book] ?? BOOK_APPS[MODEL_BOOK];
+  // Awaited, never the synchronous read: on the first tap after launch that
+  // read is null and a member with a state set was asked for one.
+  const state = await loadBettingState();
   const installed = await isBookAppInstalled(book);
-  const claimed = appClaimedLink(book, link, getBettingState());
+  const claimed = appClaimedLink(book, link, state);
   let viaApp: boolean | null = null;
   // Every exit that is not "iOS opened the claimed link in the app" is
   // written down (lib/handoffLog.ts), for a book whose app claims links.
@@ -260,7 +263,7 @@ export async function openBookBetslip(
   };
 
   if (installed === false) {
-    const store = bookStoreUrl(book);
+    const store = bookStoreUrl(book, state);
     if (store && (await tryOpen(store))) return went('store', true);
     if (await tryOpen(app.web)) return went('web', true);
     return went('failed', couldNotOpen(book));
@@ -275,7 +278,7 @@ export async function openBookBetslip(
   viaApp = claimed ? await openUniversalLinkOnly(claimed) : null;
   if (viaApp === true) return true;
   if (viaApp === false && installed === null) {
-    const store = bookStoreUrl(book);
+    const store = bookStoreUrl(book, state);
     if (store && (await tryOpen(store))) return went('store', true);
   }
   // iOS refused the link while a scheme says the app IS installed (Matt,
@@ -291,7 +294,7 @@ export async function openBookBetslip(
   }
 
   if (link && link.trim()) {
-    const filled = fillBetslipLink(link, getBettingState());
+    const filled = fillBetslipLink(link, state);
     if (filled) {
       if (await tryOpen(filled)) return went('link', true);
     } else if (linkNeedsState(link)) {
@@ -318,7 +321,7 @@ export async function openBookBetslip(
   // "Open"; one who does not is where they need to be to get it (Matt,
   // 2026-09-04) — the book's web root helps neither, since the bet is not on
   // it.
-  const store = bookStoreUrl(book);
+  const store = bookStoreUrl(book, state);
   if (store && (await tryOpen(store))) return went('store', true);
   if (await tryOpen(app.web)) return went('web', true);
   return went('failed', couldNotOpen(book));
@@ -385,7 +388,7 @@ async function openThisBooksLinkOnly(
   link: string | null | undefined,
 ): Promise<boolean> {
   if (link && link.trim()) {
-    const filled = fillBetslipLink(link, getBettingState());
+    const filled = fillBetslipLink(link, await loadBettingState());
     if (filled) {
       if (await tryOpen(filled)) return true;
     } else if (linkNeedsState(link)) {
