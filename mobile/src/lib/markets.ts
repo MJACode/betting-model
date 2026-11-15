@@ -1544,8 +1544,14 @@ export function otherLineQuotesForPick(
     rows.filter((r) => rowIsSameBet(pick, r, market) && priceForSide(r, pick.pick_side) != null)
       .map((r) => r.bookmaker),
   );
-  // The record book is a same-line quote by construction (pickLineQuotes).
-  sameLine.add(storedQuoteBook(pick));
+  // The record book with no priced row here keeps its lock chip
+  // (pickLineQuotes; missing is not moved). With rows and none at the pick's
+  // number, its line has moved: it is listed at its line now (Matt,
+  // 2026-11-15), and resolveBoardHandoff drops its lock chip from the sheet.
+  const recordBook = storedQuoteBook(pick);
+  if (!rows.some((r) => r.bookmaker === recordBook && priceForSide(r, pick.pick_side) != null)) {
+    sameLine.add(recordBook);
+  }
   const byBook = new Map<string, OtherLineQuote>();
   for (const r of rows) {
     if (!allowed.has(r.bookmaker) || sameLine.has(r.bookmaker)) continue;
@@ -1567,6 +1573,41 @@ export function otherLineQuotesForPick(
 function snapshotSideLink(pick: Pick, rows: BookPricedRow[] | undefined, book: string): string | null {
   const row = (rows ?? []).find((r) => r.bookmaker === book);
   return row ? linkForSide(row, pick.pick_side) : null;
+}
+
+/**
+ * The book's current row AT THE PICK'S NUMBER: its main line, or its
+ * alternate-ladder rung (gameRowsForPick). Null when it has none.
+ */
+function sameLineRowAtBook(
+  pick: Pick,
+  bookRows: BookPricedRow[] | undefined,
+  book: string,
+  priceAge?: PriceAgeContext,
+): { price: number; link: string | null } | null {
+  const market = marketForPick(pick);
+  for (const r of freshBookRows(pick, bookRows, priceAge)) {
+    if (r.bookmaker !== book) continue;
+    const price = priceForSide(r, pick.pick_side);
+    if (price == null || !rowIsSameBet(pick, r, market)) continue;
+    return { price, link: linkForSide(r, pick.pick_side) };
+  }
+  return null;
+}
+
+/**
+ * The deciding book's line has moved and it has nothing at the pick's number,
+ * so a hand-off to it is a bet at its line now. False when it still has the
+ * pick's number on its ladder (that hand-off is the pick's own bet).
+ */
+export function decidingBookOnlyAtMovedLine(
+  pick: Pick,
+  bookRows: BookPricedRow[] | undefined,
+  hero: HeroAmerican | null | undefined,
+  priceAge?: PriceAgeContext,
+): boolean {
+  return hero != null && hero.movedLine != null &&
+    sameLineRowAtBook(pick, bookRows, hero.book, priceAge) == null;
 }
 
 /** One book hand-off for the list card. Full shop stays on Pick Detail. */
@@ -1631,6 +1672,26 @@ function resolveBoardHandoff(
   // (currentLineQuotes; Pick Detail's chips read the same list).
   let quotes = currentLineQuotes(pick, bookRows, hero, priceAge, allowedBooks);
   if (quotes.length === 0) return { handoff: null, quotes: [] };
+  // The record chip is the LOCK. Once the deciding book's line has moved,
+  // that price is not on offer there (Matt, 2026-11-15: the card said "FD
+  // line now −2.5 (−120)" and the sheet listed FanDuel −110). If the book
+  // still has the pick's number (its ladder rung), the hand-off quotes that
+  // row at today's price, as it does for every other book. If not, the chip
+  // leaves the sheet below and the book is listed at its line now
+  // (otherLineQuotesForPick).
+  const heroLineMoved = hero != null && hero.movedLine != null;
+  const isLockChip = (q: { isRecord: boolean; bookmaker: string }) =>
+    hero != null && q.isRecord && q.bookmaker === hero.book;
+  if (hero != null && heroLineMoved && quotes.some(isLockChip)) {
+    const rung = sameLineRowAtBook(pick, bookRows, hero.book, priceAge);
+    if (rung) {
+      quotes = rankQuotes(
+        quotes.map(({ isBest: _isBest, ...q }) =>
+          isLockChip(q) ? { ...q, price: rung.price, link: rung.link, isRecord: false } : q,
+        ),
+      );
+    }
+  }
   let best = quotes.find((q) => q.isBest) ?? quotes[0];
   // The record chip ranks at the STORED price, but the hand-off is a bet
   // placed NOW. Re-rank that book at its current price only while the
@@ -1686,6 +1747,19 @@ function resolveBoardHandoff(
       return { handoff: { bookmaker: hero.book, price: null, link: null, verb: 'Open' }, quotes: [] };
     }
   }
+  // Another book is best and the lock chip is still listed: it comes out.
+  // (A lock chip tied for best ranks first, so it was handled above.)
+  // Only when we hold a priced row for that book: that row is what lists it
+  // at its line now (otherLineQuotesForPick reads the same rows). With none,
+  // dropping the chip would leave a dash beside a card that names its line.
+  if (
+    hero != null && heroLineMoved && sheetQuotes.some(isLockChip) &&
+    freshBookRows(pick, bookRows, priceAge).some(
+      (r) => r.bookmaker === hero.book && priceForSide(r, pick.pick_side) != null,
+    )
+  ) {
+    sheetQuotes = sheetQuotes.filter((q) => !isLockChip(q));
+  }
   const verb: 'Best' | 'Bet' =
     best.isBest && quotes.length > 1 && !best.isRecord ? 'Best' : 'Bet';
   // When the CTA is the same book as hero Now, offer the current/bettable
@@ -1694,7 +1768,9 @@ function resolveBoardHandoff(
   // Same-book CTA offers the current/bettable number — not the record
   // chip. "Now −115 DK" beside "Bet DK −110" was the lock next to the
   // live number (UX review). Narrow in the branch so price stays `number`.
-  if (hero?.kind === 'now' && hero.price != null && best.bookmaker === hero.book) {
+  // Not on a moved line: hero.price is then the price at the NEW number, and
+  // a deciding-book quote that is still here is its rung at the pick's.
+  if (hero?.kind === 'now' && hero.price != null && !heroLineMoved && best.bookmaker === hero.book) {
     const nowPrice = hero.price;
     return {
       handoff: {
