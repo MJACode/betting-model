@@ -30,6 +30,28 @@ review as its own entry.
 
 ---
 
+## 2026-11-15 — Horse racing scoped, not built
+
+1. **League and scope**: thoroughbred racing, US and international (a
+   planning request, 2026-11-15). No market was fit and no pick was written.
+   The design is `docs/horse_racing_scope.md`.
+2. **Tried**: nothing on a price history. Vendor pages were read for
+   coverage and cost. The Racing API coverage page (fetched that day) shows
+   full US and Australia cards on add-ons the FAQ says are closed to new
+   subscribers. Core 2026 counts: GB 8,730, Ireland 2,546, Hong Kong 737,
+   France 2,723, USA 199, Australia 190, UAE 150, Japan 74.
+3. **New**: the multi-runner, pari-mutuel shape (a field, a tote or
+   exchange close, one win bet per race, dead heat not a WIN/PUSH). It is
+   written in the scope doc, not in `market-grid.md`, because that file says
+   to define a new shape when the league is built. Sources and the license
+   limits that block the paid app are in the scope doc. No method was added
+   to `methods.md`.
+4. **Corrected**: nothing in the skill. The Odds API sports list fetched
+   that day has no racing, which matches the scope's "do not spend
+   `ODDS_API_KEY`".
+5. **The framework**: unchanged. A scope is not a build, so step 7's
+   shipping list was used as the checklist and not executed.
+
 ## 2026-11-14 — Tennis round 1: the match winner live (`atp_moneyline_shop`, `wta_moneyline_shop`), the games markets' line shop null
 
 1. **League and scope**: tennis, both tours (mike, 2026-11-13: *"build

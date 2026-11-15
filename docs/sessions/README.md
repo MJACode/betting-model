@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, horse racing scope only (`docs/horse_racing_scope.md`): HDW or TrackMaster for US files, Racing API core for UK/IRE/HK with the US and Australia add-ons closed, Betfair Advanced as the pre-off price, `racing_v1` CLV, dead heat before the first graded bet; no module |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Picks filter review: with Final on, the Signals stake and Bet all stay on open games; a Final tap starts from the chips that are lit |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Picks filter: Final chip brings back today's finished games (opt-in, adds to the open board), graded W/L/P + units chip on the card; counts, badges and Bet all unchanged |
 | 2026-11-14 | [2026-11](./2026-11.md) | 2026-11-14, app UI consistency pass (Mobbin audit, Matt approved 1-7): `PrimaryButton` (one 50pt capsule, 27 buttons), `sectionHeaderText`, `opacity` and `card` tokens, `SegmentTabs` for the BYOM and season switches, `SkeletonList` on six detail screens, last hex literals tokenised, Performance now shows sync errors |
