@@ -47,6 +47,8 @@ import {
   signalsLabelHeadline,
   signalsModelCaption,
   signalsNowLine,
+  nowLineTone,
+  nowLineToneSpeech,
   signalsPriceText,
   signalsReasonLine,
   signalsStakeLine,
@@ -1625,6 +1627,35 @@ check(
     /btnTall: \{[\s\S]*?minHeight: 44/.test(slip) && /btnTall: \{[\s\S]*?minHeight: 44/.test(track) &&
     /inPlay \? 'checkmark'/.test(slip) && /tracked \? 'checkmark'/.test(track) &&
     !/colors\.info/.test(slip) && !/colors\.info/.test(track));
+}
+
+// ── Now line colour: better for a new bettor = green, worse = red (Matt, 2026-11-15) ──
+{
+  console.log('\nNow line tone');
+  const t = (market: string | null, side: string, lockedLine: number | null, nowLine: number | null, lockedPrice: number | null, nowPrice: number | null) =>
+    nowLineTone({ market, side, lockedLine, nowLine, lockedPrice, nowPrice });
+  // The two cards from Matt's screenshot.
+  check('GB -3.5 -110 -> FD -2.5 -120 (home gets a point): better, the line decides over the price',
+    t('spreads', 'home', -3.5, -2.5, -110, -120) === 'better');
+  check('CAR +1.5 -122 -> -105, same line: better (longer payout)', t('spreads', 'away', -1.5, null, -122, -105) === 'better');
+  check('home -3.5 -> -4.5 (laying more): worse', t('spreads', 'home', -3.5, -4.5, -110, -110) === 'worse');
+  // scored_line is the HOME number: an away +3.5 pick is stored as -3.5.
+  check('away +3.5 (home -3.5) -> home -4.5 means away +4.5: better', t('spreads', 'away', -3.5, -4.5, -110, -110) === 'better');
+  check('away +3.5 (home -3.5) -> home -2.5 means away +2.5: worse', t('spreads', 'away', -3.5, -2.5, -110, -110) === 'worse');
+  check('Over 44.5 -> 45.5: worse', t('totals', 'over', 44.5, 45.5, -110, -110) === 'worse');
+  check('Under 44.5 -> 45.5: better', t('totals', 'under', 44.5, 45.5, -110, -110) === 'better');
+  check('prop Over 24.5 -> 23.5: better', t('player_points', 'over', 24.5, 23.5, -115, -115) === 'better');
+  check('moneyline +120 -> +105: worse', t('h2h', 'home', null, null, 120, 105) === 'worse');
+  check('price -110 -> -115, same line: worse', t('totals', 'over', 9, null, -110, -115) === 'worse');
+  check('+100 vs -100 is the same payout: neither', t('h2h', 'away', null, null, 100, -100) === null);
+  check('nothing moved: neutral', t('spreads', 'home', -3.5, null, -110, null) === null);
+  check('VoiceOver words carry the direction',
+    nowLineToneSpeech('better') === 'better than the pick' && nowLineToneSpeech('worse') === 'worse than the pick' && nowLineToneSpeech(null) === '');
+  const card = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf8');
+  check('PickCard colours the Now line with the inks and an arrow, and speaks the tone',
+    /signalsNowTone === 'better' && styles\.nowLineBetter/.test(card) &&
+    /nowLineBetter: \{ color: colors\.betInk \}/.test(card) && /nowLineWorse: \{ color: colors\.avoidInk \}/.test(card) &&
+    /'arrow-up' : 'arrow-down'/.test(card) && /nowLineToneSpeech\(signalsNowTone\)/.test(card));
 }
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILURE(S)`);

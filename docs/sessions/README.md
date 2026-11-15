@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Signals Now line coloured by direction for a new bettor (green better, red worse, arrow + spoken words; line decides over price), `nowLineTone` |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Signals board zero-ready button "See why" → "Bet all 0"; board note pluralised ("5 games started") |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Picks filter review: with Final on, the Signals stake and Bet all stay on open games; a Final tap starts from the chips that are lit |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Picks filter: Final chip brings back today's finished games (opt-in, adds to the open board), graded W/L/P + units chip on the card; counts, badges and Bet all unchanged |
