@@ -1,0 +1,64 @@
+{
+ "header": {
+  "id": "401921760",
+  "season": {
+   "year": 2027,
+   "current": true,
+   "type": 2
+  },
+  "timeValid": true,
+  "competitions": [
+   {
+    "id": "401921760",
+    "date": "2026-12-06T00:00Z",
+    "neutralSite": false,
+    "conferenceCompetition": false,
+    "competitors": [
+     {
+      "id": "254",
+      "homeAway": "home",
+      "team": {
+       "id": "254",
+       "location": "Utah",
+       "name": "Utes",
+       "abbreviation": "UTAH",
+       "displayName": "Utah Utes"
+      }
+     },
+     {
+      "id": "264",
+      "homeAway": "away",
+      "team": {
+       "id": "264",
+       "location": "Washington",
+       "name": "Huskies",
+       "abbreviation": "WASH",
+       "displayName": "Washington Huskies"
+      }
+     }
+    ],
+    "status": {
+     "type": {
+      "id": "1",
+      "name": "STATUS_SCHEDULED",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "detail": "Sat, December 5th at 7:00 PM EST",
+      "shortDetail": "12/5 - 7:00 PM EST"
+     }
+    }
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "id": "2196",
+   "fullName": "Jon M. Huntsman Center",
+   "address": {
+    "city": "Salt Lake City",
+    "state": "UT"
+   }
+  }
+ }
+}
