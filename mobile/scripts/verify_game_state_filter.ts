@@ -15,6 +15,7 @@
  *   5. THE SCREEN APPLIES IT, the bar shows it, and Clear all clears it.
  *   6. TODAY'S FINISHED GAMES reach the board only through Final, never the
  *      open board other surfaces read, and a graded BET says how it did.
+ *      With Final on, the staked total and Bet all still exclude them.
  */
 
 import { readFileSync } from 'node:fs';
@@ -32,6 +33,10 @@ import {
 } from '../src/lib/gameStateFilter';
 import { gameStatus } from '../src/lib/format';
 import { pickResultView } from '../src/lib/pickResult';
+import { betAllCandidates } from '../src/lib/betAll';
+import { decisionOdds } from '../src/lib/decisionPrice';
+import { passesActionFilter, unitsFor } from '../src/lib/thresholds';
+import type { EnrichedPick } from '../src/types';
 
 const ROOT = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf-8');
@@ -109,12 +114,25 @@ const dropLive = toggleGameState(none, 'live');
 check('Live from the default removes Live', dropLive.has('upcoming') && !dropLive.has('live') && !dropLive.has('final'));
 check('the toggle never mutates its input', none.size === 0);
 // The review's repro: Not started dropped ({live}), then every Live game
-// ends. The chips draw the default; tapping Final must keep Not started.
+// ends. Live is no longer a chip, so the chips draw the default (Not
+// started lit, Final off). The tap starts from that drawn set.
 const ghost = new Set<GameState>(['live']);
 const noLive = gameStateOptionsFor(['upcoming', 'final'] as GameState[]);
-const afterTap = toggleGameState(effectiveGameStateSelection(ghost, noLive), 'final');
+const drawn = effectiveGameStateSelection(ghost, noLive);
+check('once Live is gone the chips draw Not started lit and Final off',
+  drawn.size === 0 && isGameStateSelected('upcoming', drawn) && !isGameStateSelected('final', drawn));
+const afterTap = toggleGameState(drawn, 'final');
 check('a stale pick does not switch Not started off when Final is tapped',
-  afterTap.has('upcoming') && afterTap.has('final'), JSON.stringify([...afterTap]));
+  afterTap.has('upcoming') && afterTap.has('final') && isGameStateSelected('upcoming', afterTap),
+  JSON.stringify([...afterTap]));
+const rawTap = toggleGameState(ghost, 'final');
+check('toggling the stored set would have dropped Not started',
+  !rawTap.has('upcoming') && rawTap.has('live') && rawTap.has('final'), JSON.stringify([...rawTap]));
+const liveStillOn = gameStateOptionsFor(['upcoming', 'live', 'final'] as GameState[]);
+const liveOnlyTap = toggleGameState(effectiveGameStateSelection(ghost, liveStillOn), 'final');
+check('a Live chip that is still lit stays the start, so Not started stays off',
+  !liveOnlyTap.has('upcoming') && liveOnlyTap.has('live') && liveOnlyTap.has('final'),
+  JSON.stringify([...liveOnlyTap]));
 check('Final picked when only finished games exist is still a change',
   gameStatesAreNarrowed(finalOnly, gameStateOptionsFor(['final'] as GameState[])));
 
@@ -158,6 +176,71 @@ check('a tap toggles from the drawn selection',
   screen.includes('toggleGameState(effectiveGameStateSelection(prev, gameStateOptions), state)'));
 check('the section shows whenever a finished game is on the board',
   filters.includes("gameStateOptions.some((o) => o.state === 'final')"));
+
+// 6c. Final is on, so the filtered board holds an open bet and today's
+// finished bets. The staked total and Bet all use the same exclusion the
+// screen does (`state !== 'final'`): finished picks are not stakes and not
+// Bet all rows. Reading the whole board first shows the ungraded finished
+// bet would have been listed as started.
+function boardPick(
+  id: number,
+  game: { sport: string; commence_time: string; home_score?: number; away_score?: number },
+  stakeUnits: number,
+  result: string | null,
+): EnrichedPick {
+  return {
+    pick: {
+      pick_id: id,
+      pick_label: `NCAAF pick ${id}`,
+      signal_type: 'BET',
+      model_id: 'ncaaf_spread',
+      sport: 'NCAAF',
+      game_date: '2026-11-15',
+      game_id: `g${id}`,
+      model_probability: 0.62,
+      edge: 0.08,
+      dk_odds: -110,
+      decision_odds: -110,
+      kelly_fraction: 0.02,
+      stake_units: stakeUnits,
+      result,
+      is_live: false,
+      condition_status: null,
+    },
+    game,
+    weather: null,
+  } as unknown as EnrichedPick;
+}
+const openPick = boardPick(1, { sport: 'NCAAF', commence_time: future }, 1, null);
+const ungradedFinal = boardPick(
+  2, { sport: 'NCAAF', commence_time: longAgo, home_score: 28, away_score: 17 }, 2, null);
+const gradedFinal = boardPick(
+  3, { sport: 'NCAAF', commence_time: longAgo, home_score: 21, away_score: 14 }, 3, 'WIN');
+const stateOf = (d: EnrichedPick) => gameStateOf(gameStatus(d.game));
+const finalOn = new Set<GameState>(['upcoming', 'live', 'final']);
+const withFinalOn = [openPick, ungradedFinal, gradedFinal].filter((d) =>
+  isGameStateSelected(stateOf(d), finalOn));
+check('Final on puts the finished picks on the filtered board', withFinalOn.length === 3
+  && stateOf(openPick) === 'upcoming' && stateOf(ungradedFinal) === 'final' && stateOf(gradedFinal) === 'final');
+const openOnly = withFinalOn.filter((d) => stateOf(d) !== 'final');
+const stakeOf = (d: EnrichedPick) =>
+  unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick), d.pick.stake_units);
+const staked = openOnly.reduce((sum, d) => sum + stakeOf(d), 0);
+const finishedStake = stakeOf(ungradedFinal) + stakeOf(gradedFinal);
+check('staked total with Final on is the open pick only',
+  openOnly.length === 1 && openOnly[0] === openPick && staked === stakeOf(openPick) && finishedStake > staked,
+  `staked=${staked} finished=${finishedStake}`);
+check('the ungraded finished bet clears the action filter', passesActionFilter(ungradedFinal.pick));
+const wholeBoard = betAllCandidates(withFinalOn, () => null, ['draftkings']);
+const betAllOpen = betAllCandidates(openOnly, () => null, ['draftkings']);
+const listed = (rows: { key: string }[], id: number) => rows.some((r) => r.key === String(id));
+check('reading the whole board lists the ungraded finished bet as started',
+  wholeBoard.skipped.some((s) => s.key === '2' && s.reason === 'started') && !listed(wholeBoard.picks, 2));
+check('Bet all with Final on omits both finished picks',
+  !listed(betAllOpen.picks, 2) && !listed(betAllOpen.skipped, 2)
+  && !listed(betAllOpen.picks, 3) && !listed(betAllOpen.skipped, 3));
+check('Bet all with Final on still has the open pick',
+  listed(betAllOpen.picks, 1) || listed(betAllOpen.skipped, 1));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
