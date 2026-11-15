@@ -92,6 +92,8 @@ def main() -> None:
         r["source"] = oi.HISTORICAL_ODDS_SOURCE
     conn = get_connection()
     try:
+        game_rows, odds_rows = oi.drop_ncaaf_unscheduled_opponents(
+            conn, game_rows, odds_rows, observed_on=args.date)
         n_games = oi._upsert_games(conn, game_rows)
         n_odds = oi._insert_odds(conn, odds_rows)
         conn.commit()
