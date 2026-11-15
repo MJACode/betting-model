@@ -27,6 +27,10 @@ import { recordReport } from '@/lib/crashLog';
 export type HandoffRoute =
   /** The app, by the scheme that said it is installed (iOS refused the link). */
   | 'scheme'
+  /** NOT a miss: the app opened through the claimed link on another of the
+   *  book's hosts (BetMGM). Logged so we learn which host iOS takes; leave it
+   *  out of miss counts (docs/app_errors.md). */
+  | 'alt_host'
   /** The App Store. */
   | 'store'
   /** The stored link through Linking.openURL: the app or Safari, iOS decides. */

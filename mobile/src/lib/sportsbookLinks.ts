@@ -3,7 +3,7 @@ import { Alert, AppState, Linking, Platform } from 'react-native';
 import { showToast } from '@/components/Toast';
 
 import { getBettingState, loadBettingState } from '@/hooks/useBettingState';
-import { appClaimedLink, fillBetslipLink, linkNeedsState } from '@/lib/betslipLinks';
+import { appClaimedAlternates, appClaimedLink, fillBetslipLink, linkNeedsState } from '@/lib/betslipLinks';
 import { noteHandoffMiss, type HandoffRoute } from '@/lib/handoffLog';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { openInAppAvailable, openUniversalLinkOnly } from '@/lib/openInApp';
@@ -187,11 +187,14 @@ export async function isBookAppInstalled(book: string): Promise<boolean | null> 
  * The scheme that says this book's app is installed, to OPEN the app with.
  * Null when none says yes.
  *
- * A candidate is a guess at the book's scheme, so it is opened in one case
- * only: iOS has just refused the link the book's app claims
- * (`openBookBetslip`), and this scheme answered yes, which iOS does only for
- * a scheme an installed app registered. Every candidate names the sportsbook
- * product, never the bare brand (BookApp), so that app is the book's.
+ * A candidate is a guess at the book's scheme. It is opened only when it
+ * answered yes, which iOS does only for a scheme an installed app
+ * registered, and in two cases (`openBookBetslip`): iOS has just refused the
+ * link the book's app claims, or the app is installed and nothing put the
+ * bet in it (every book with candidates, Fanatics included: Matt,
+ * 2026-11-15, "the actual app if the user has it"). Every candidate names the
+ * sportsbook product, never the bare brand (BookApp), so that app is the
+ * book's.
  */
 async function installedBookScheme(book: string): Promise<string | null> {
   const app = BOOK_APPS[book];
@@ -247,10 +250,11 @@ export async function openBookBetslip(
   // read is null and a member with a state set was asked for one.
   const state = await loadBettingState();
   const installed = await isBookAppInstalled(book);
-  const claimed = appClaimedLink(book, link, state);
+  let claimed = appClaimedLink(book, link, state);
   let viaApp: boolean | null = null;
-  // Every exit that is not "iOS opened the claimed link in the app" is
-  // written down (lib/handoffLog.ts), for every book with an app entry.
+  // Every exit that is not "iOS opened the first claimed link in the app" is
+  // written down (lib/handoffLog.ts), for every book with an app entry. One
+  // is a success: alt_host, the app opened through another host's link.
   // `claimed` null is itself one of the causes, so it is logged too.
   const went = (route: HandoffRoute, ok: boolean, scheme?: string): boolean => {
     if (BOOK_APPS[book] && Platform.OS === 'ios') {
@@ -277,6 +281,18 @@ export async function openBookBetslip(
   // Store. `null` means this build cannot ask.
   viaApp = claimed ? await openUniversalLinkOnly(claimed) : null;
   if (viaApp === true) return true;
+  // Refused: the same link on the book's other state hosts, each of which
+  // serves an association file claiming it (BetMGM; appClaimedAlternates).
+  // The first iOS takes opens the app; a refusal opens nothing. That success
+  // is logged too (route alt_host), to learn which host iOS takes.
+  if (viaApp === false) {
+    for (const alt of appClaimedAlternates(book, claimed)) {
+      if ((await openUniversalLinkOnly(alt)) === true) {
+        claimed = alt;
+        return went('alt_host', true);
+      }
+    }
+  }
   if (viaApp === false && installed === null) {
     const store = bookStoreUrl(book, state);
     if (store && (await tryOpen(store))) return went('store', true);
