@@ -89,3 +89,13 @@ def test_no_other_migration_ors_whop_into_app_access():
             body = _body(text, "public.my_access_for")
             assert "a OR d" not in body, path.name
             assert "(a OR d)" not in body, path.name
+
+
+def test_founder_grant_does_not_write_the_generated_identity_email():
+    # auth.identities.email is a GENERATED column on production (measured
+    # 2026-11-14: inserting into it raised 428C9 and rolled the grant back).
+    grant = (ROOT / "scripts" / "grant_founder_comped_2026_11_05.sql").read_text(encoding="utf-8")
+    statement = grant.split("INSERT INTO auth.identities", 1)[1].split(";", 1)[0]
+    columns = statement.split(") VALUES", 1)[0]
+    names = [c.strip() for c in columns.replace("(", "").split(",")]
+    assert "email" not in names

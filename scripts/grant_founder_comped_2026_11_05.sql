@@ -13,6 +13,8 @@
 --      already exists (email provider, no subscriptions row), so the insert
 --      below does not run. It is here so a missing row is created in the
 --      same shape GoTrue already stored, and no other email is created.
+--      auth.identities.email is a GENERATED column (from identity_data), so
+--      the insert leaves it out. Writing it raised 428C9 on 2026-11-14.
 --   2. Inserts one indefinite comped grant (expires_at left null) with note
 --      'founder TF unblock' when no active comped grant exists.
 --      comped unlocks the app and the subscriber Discord invite.
@@ -92,8 +94,7 @@ BEGIN
             provider,
             last_sign_in_at,
             created_at,
-            updated_at,
-            email
+            updated_at
         ) VALUES (
             v_uid::text,
             v_uid,
@@ -106,8 +107,7 @@ BEGIN
             'email',
             now(),
             now(),
-            now(),
-            v_email
+            now()
         );
     END IF;
 

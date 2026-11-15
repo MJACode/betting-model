@@ -41,11 +41,11 @@ interface Row {
 }
 
 function ok(id: number): TodayBoardRead<Row> {
-  return { data: [{ id }], pausedData: [], loaded: true, error: null, partial: null };
+  return { data: [{ id }], pausedData: [], finishedData: [], loaded: true, error: null, partial: null };
 }
 
 function fail(message: string): TodayBoardRead<Row> {
-  return { data: [], pausedData: [], loaded: false, error: message, partial: null };
+  return { data: [], pausedData: [], finishedData: [], loaded: false, error: message, partial: null };
 }
 
 /** Resolves only when the test says so, so callers can pile onto one read. */
@@ -253,7 +253,7 @@ async function aCancelledReloadKeepsTheError(): Promise<void> {
     calls += 1;
     if (calls === 1) return ok(1);
     if (calls === 2) return fail('timed out');
-    return { data: [], pausedData: [], loaded: false, error: null, partial: null };
+    return { data: [], pausedData: [], finishedData: [], loaded: false, error: null, partial: null };
   });
   await loadTodayBoard(DATE, false);
   await loadTodayBoard(DATE, true);

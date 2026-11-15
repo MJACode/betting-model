@@ -115,6 +115,7 @@ import {
   effectiveGameStateSelection,
   gameStateOf,
   gameStateOptionsFor,
+  toggleGameState,
   isGameStateSelected,
   type GameState,
 } from '@/lib/gameStateFilter';
@@ -135,6 +136,7 @@ import {
   isModelRetired,
   isUnlockedPreview,
   passesActionFilter,
+  passesRecordFilter,
   unitsFor,
   formatUnits,
 } from '@/lib/thresholds';
@@ -173,7 +175,7 @@ const PICKS_REASSURANCE = 'Nothing is wrong with your picks.';
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteProp<TabParamList, 'Picks'>>();
-  const { data: allData, pausedData, loading, loaded, error, partial, refresh, date } = useTodayPicks();
+  const { data: allData, pausedData, finishedData, loading, loaded, error, partial, refresh, date } = useTodayPicks();
   // The threshold store is a module. The fetch does not set React state.
   // This revision is what makes Signals re-run passesActionFilter when it lands.
   const thresholdsRevision = useThresholdsRevision();
@@ -447,6 +449,30 @@ export function PicksHomeScreen() {
   const activeItems: EnrichedPick[] =
     view === 'today' ? todayData : view === 'live' ? liveData : view === 'scoreboard' ? [] : live;
 
+  // Today's FINISHED games for this view (Matt, 2026-11-15: "filter on
+  // completed games from the day"). They join the board only through the
+  // Status filter's Final chip — the default selection leaves Final out — and
+  // never reach the header counts, the sport badges or Bet all, which read
+  // `live` / `allData` above. On Signals a graded pick is history, so it is
+  // cut by passesRecordFilter (the Record tab's test); an ungraded one by
+  // passesActionFilter, as on the open board. Live and Scores have none.
+  const finishedItems: EnrichedPick[] = useMemo(() => {
+    if (view !== 'today' && view !== 'signals') return [];
+    const mine = finishedData.filter((d) => d.pick.sport === sport);
+    if (view === 'today') return mine;
+    return mine.filter((d) => {
+      const graded = d.pick.result === 'WIN' || d.pick.result === 'LOSS' || d.pick.result === 'PUSH';
+      return (graded ? passesRecordFilter(d.pick) : passesActionFilter(d.pick)) && !isUnlockedPreview(d.pick);
+    });
+  }, [view, finishedData, sport, thresholdsRevision]);
+  // Everything the board can show on this view: the open board plus today's
+  // finished games. Every cut below runs on this; the Status cut decides
+  // whether the finished half is on screen.
+  const boardItems: EnrichedPick[] = useMemo(
+    () => (finishedItems.length > 0 ? [...activeItems, ...finishedItems] : activeItems),
+    [activeItems, finishedItems],
+  );
+
   // Restrict the filter's Market options to what is on screen — on EVERY view,
   // not just the signal ones. Today passed `undefined` here until 2026-09-09,
   // which PickFilters read as "offer all four categories", so the NFL board
@@ -455,8 +481,8 @@ export function PicksHomeScreen() {
   // NOT deduplicated: the filter counts picks per market to put a number on
   // each facet chip, and a Set of model ids counts models instead.
   const availableModelIds = useMemo(
-    () => activeItems.map((d) => d.pick.model_id),
-    [activeItems],
+    () => boardItems.map((d) => d.pick.model_id),
+    [boardItems],
   );
 
   // ── The GAMES cut, shared with the Stats tab ───────────────────────────────
@@ -477,8 +503,8 @@ export function PicksHomeScreen() {
     setPickedDates(new Set());
   }, [sport]);
   const dateOptions = useMemo(
-    () => dateOptionsFor(activeItems.map((d) => d.pick.game_date)),
-    [activeItems],
+    () => dateOptionsFor(boardItems.map((d) => d.pick.game_date)),
+    [boardItems],
   );
   // Resolved against THIS board, for display only: a day picked on Today that
   // Signals does not hold reads as all dates there rather than emptying Signals
@@ -509,11 +535,11 @@ export function PicksHomeScreen() {
   }, [sport]);
   const stateByItem = useMemo(() => {
     const out = new Map<EnrichedPick, GameState>();
-    for (const d of activeItems) {
+    for (const d of boardItems) {
       out.set(d, gameStateOf(gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null)));
     }
     return out;
-  }, [activeItems, liveStates]);
+  }, [boardItems, liveStates]);
   const gameStateOptions = useMemo(
     () => gameStateOptionsFor(stateByItem.values()),
     [stateByItem],
@@ -523,14 +549,20 @@ export function PicksHomeScreen() {
     [pickedStates, gameStateOptions],
   );
   const toggleState = useCallback((state: GameState) => {
-    setPickedStates((prev) => {
-      const next = new Set(prev);
-      if (next.has(state)) next.delete(state);
-      else next.add(state);
-      return next;
-    });
-  }, []);
+    // From the selection the chips DRAW, not the raw one: a stale pick for a
+    // state no longer on the board must not come back to life on the next
+    // tap and switch Not started off (PR review, 2026-11-15).
+    setPickedStates((prev) => toggleGameState(effectiveGameStateSelection(prev, gameStateOptions), state));
+  }, [gameStateOptions]);
   const clearStates = useCallback(() => setPickedStates(new Set()), []);
+  // The "N/M" count's M: what the Status cut lets onto the board, so the
+  // finished games the default hides do not read as filtered out.
+  const statusPoolSize = useMemo(() => {
+    const finalShown = selectedStates.has('final');
+    let n = 0;
+    for (const st of stateByItem.values()) if (finalShown || st !== 'final') n += 1;
+    return n;
+  }, [stateByItem, selectedStates]);
   const statusOk = useCallback(
     (d: EnrichedPick) => isGameStateSelected(stateByItem.get(d) ?? 'upcoming', selectedStates),
     [stateByItem, selectedStates],
@@ -538,8 +570,8 @@ export function PicksHomeScreen() {
 
   const datedItems = useMemo(
     () =>
-      activeItems.filter((d) => isDateSelected(d.pick.game_date, selectedDates) && statusOk(d)),
-    [activeItems, selectedDates, statusOk],
+      boardItems.filter((d) => isDateSelected(d.pick.game_date, selectedDates) && statusOk(d)),
+    [boardItems, selectedDates, statusOk],
   );
 
   // The Games list follows the Date cut, so picking Saturday lists Saturday's
@@ -550,7 +582,7 @@ export function PicksHomeScreen() {
   // stays listed, under its own day header.
   const pickableGames = useMemo(() => {
     const byId = new Map<string, NonNullable<EnrichedPick['game']>>();
-    for (const d of activeItems) {
+    for (const d of boardItems) {
       if (!d.game) continue;
       const keep =
         (isDateSelected(d.pick.game_date, selectedDates) && statusOk(d)) ||
@@ -558,7 +590,7 @@ export function PicksHomeScreen() {
       if (keep) byId.set(d.game.game_id, d.game);
     }
     return selectableGames(Array.from(byId.values()), sport, todayET());
-  }, [activeItems, selectedDates, statusOk, gamePicker.selected, sport]);
+  }, [boardItems, selectedDates, statusOk, gamePicker.selected, sport]);
   // THIS SCREEN DOES NOT PRUNE, AND MUST NOT. Pruning belongs to the one read
   // that sees the whole forward window — the Stats tab's slate read. The list
   // here is only the games with picks IN THIS VIEW (`activeItems` swaps with
@@ -609,14 +641,21 @@ export function PicksHomeScreen() {
     [datedItems, displayFilter, gamePicker.selected, thresholdsRevision],
   );
   const filtered = useMemo(() => searchPicks(unsearched, search), [unsearched, search]);
+  // The board as filtered, minus any game that is over. Bet all and the
+  // header's "staked" read this, so picking Final never adds a finished game
+  // to the money or to Bet all's skip list (PR review, 2026-11-15).
+  const openFiltered = useMemo(
+    () => filtered.filter((d) => stateByItem.get(d) !== 'final'),
+    [filtered, stateByItem],
+  );
   // Bet all reads the board as filtered, so it sends what the member sees.
   // Signals only: Live Signals is never part of it (Matt, 2026-11-14).
   const betAll = useMemo(
     () =>
       view === 'signals' && myBooksReady
-        ? betAllCandidates(filtered, (id) => liveStates.get(id) ?? null, myBooks)
+        ? betAllCandidates(openFiltered, (id) => liveStates.get(id) ?? null, myBooks)
         : null,
-    [view, myBooksReady, filtered, liveStates, myBooks, thresholdsRevision],
+    [view, myBooksReady, openFiltered, liveStates, myBooks, thresholdsRevision],
   );
   const publicSortLive = useMemo(() => publicSortAvailable(filtered), [filtered]);
   useEffect(() => {
@@ -659,11 +698,11 @@ export function PicksHomeScreen() {
   // board while Today still has picks — the generic "widen signals / thresholds"
   // empty state never named the shared cut, so the board read as broken.
   const emptiedByGames = useMemo(() => {
-    if (activeItems.length === 0 || filtered.length > 0 || gamePicker.selected.size === 0) {
+    if (boardItems.length === 0 || filtered.length > 0 || gamePicker.selected.size === 0) {
       return false;
     }
     return searchPicks(applyFilter(datedItems, displayFilter), search).length > 0;
-  }, [activeItems, datedItems, filtered.length, displayFilter, search, gamePicker.selected]);
+  }, [boardItems, datedItems, filtered.length, displayFilter, search, gamePicker.selected]);
 
   // Search alone emptied the board: the filters and Games still leave picks,
   // the query matched none of them. The generic "widen signals / thresholds"
@@ -684,8 +723,8 @@ export function PicksHomeScreen() {
   // at the pick's own stake_units when it carries one (the card's stake).
   const signalExposure = useMemo(() => {
     if (view === 'today') return 0;
-    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick), d.pick.stake_units), 0);
-  }, [filtered, view]);
+    return openFiltered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick), d.pick.stake_units), 0);
+  }, [openFiltered, view]);
 
   // FIRST LOAD ONLY on the live board. `refresh()` sets loading on every poll,
   // and the poll is 30s while this segment is open — so while the board was
@@ -708,7 +747,7 @@ export function PicksHomeScreen() {
     loadPresentation({
       loading: false,
       error: viewError,
-      hasData: view === 'live' ? liveData.length > 0 : activeItems.length > 0,
+      hasData: view === 'live' ? liveData.length > 0 : boardItems.length > 0,
     }).body === 'error';
   // Counts that were never loaded are unknown, not zero ("—", PATTERNS §F5):
   // a failed first load, and also everything BEFORE the first successful one
@@ -1020,7 +1059,7 @@ export function PicksHomeScreen() {
         </Pressable>
       ) : null}
 
-      {activeItems.length > 0 ? (
+      {boardItems.length > 0 ? (
         <PickFilters
           state={displayFilter}
           onChange={setFilter}
@@ -1030,7 +1069,7 @@ export function PicksHomeScreen() {
           search={search}
           onSearchChange={setSearch}
           totalShown={filtered.length}
-          totalAll={activeItems.length}
+          totalAll={statusPoolSize}
           availableModelIds={availableModelIds}
           games={pickableGames}
           selectedGames={gamePicker.selected}
@@ -1138,6 +1177,8 @@ export function PicksHomeScreen() {
               emptiedByGames={emptiedByGames}
               gameSummary={gameFilterSummary(pickableGames, gamePicker.selected)}
               onClearGames={gamePicker.clear}
+              finishedHidden={activeItems.length === 0 && !selectedStates.has('final') ? finishedItems.length : 0}
+              onShowFinal={() => toggleState('final')}
             />
           )
         }
@@ -1221,6 +1262,8 @@ function EmptyForView({
   emptiedByGames,
   gameSummary,
   onClearGames,
+  finishedHidden,
+  onShowFinal,
 }: {
   view: PicksView;
   sport: string;
@@ -1232,7 +1275,22 @@ function EmptyForView({
   emptiedByGames: boolean;
   gameSummary: string;
   onClearGames: () => void;
+  /** Today's finished picks the default Status cut is hiding, when nothing
+   *  else is on the board. An empty board that is really "every game is
+   *  over" must say so, not "no picks yet" (UX review, 2026-11-15). */
+  finishedHidden: number;
+  onShowFinal: () => void;
 }) {
+  if (!hasAny && finishedHidden > 0) {
+    return (
+      <EmptyState
+        title={`Today’s ${sport} games are over`}
+        subtitle={`${finishedHidden} finished ${finishedHidden === 1 ? 'pick is' : 'picks are'} hidden. Show them to see how they did.`}
+        actionLabel="Show Final"
+        onAction={onShowFinal}
+      />
+    );
+  }
   if (hasAny && search) {
     return (
       <EmptyState

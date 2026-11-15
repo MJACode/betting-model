@@ -321,9 +321,13 @@ export function signalsCardSpeech(input: {
   gameStatus: string | null;
   sharp: string | null;
   started: string | null;
+  /** A graded BET's result, read right after the verdict: on a finished
+   *  card it is the point (UX review, 2026-11-15). */
+  result?: string | null;
 }): string {
   const parts = [
     input.verdict,
+    input.result,
     input.bet,
     input.price,
     input.teams,
