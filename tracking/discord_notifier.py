@@ -2743,7 +2743,8 @@ def _tally(rows: list[tuple]) -> dict:
     was never on the board.
     """
     t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0,
-         "clv_n": 0, "clv_beat": 0, "clv_push": 0, "live": 0}
+         "clv_n": 0, "clv_beat": 0, "clv_push": 0, "live": 0,
+         "clv_sum": 0.0, "clv_measured": 0}
     for row in rows:
         _sport, _model_id, result, kelly, price, clv = row[:6]
         # is_live is optional so a caller passing the older 6-tuple still works.
@@ -2766,13 +2767,21 @@ def _tally(rows: list[tuple]) -> dict:
         # includes it as 0. In-play rows stay out of all three counts.
         if clv is not None and not is_live:
             outcome = clv_outcome(clv)
+            # The average is the mean of clv_pct (percent). A push is in it
+            # as 0. A beat or a loss contributes the stored percent. An
+            # unmeasured row never reaches this branch.
             if outcome == "push":
                 t["clv_push"] += 1
+                t["clv_measured"] += 1
             elif outcome == "beat":
                 t["clv_n"] += 1
                 t["clv_beat"] += 1
+                t["clv_sum"] += float(clv)
+                t["clv_measured"] += 1
             elif outcome == "loss":
                 t["clv_n"] += 1
+                t["clv_sum"] += float(clv)
+                t["clv_measured"] += 1
         if result == "WIN":
             t["w"] += 1
         elif result == "LOSS":
@@ -2989,20 +2998,126 @@ def _alert_recap_missing_id(game_date: str, kind: str, reason: str,
         logger.error(f"recap no-message-id alert failed ({type(exc).__name__})")
 
 
+def _taken_decimal(american) -> float | None:
+    """Decimal odds for a price that was actually taken.
+
+    `_decimal_or_none` already refuses a missing or zero price. A non-finite
+    value is the same thing: it is not a price, and it is not filled in."""
+    dec = _decimal_or_none(american)
+    if dec is None or not math.isfinite(dec) or dec <= 1.0:
+        return None
+    return dec
+
+
+def _nearest_american(dec: float) -> int | None:
+    """Decimal odds -> the nearest American price. +100 is even money.
+
+    Not `_decimal_to_american`. That one rounds so a published price bound
+    still clears (ceil on plus money, floor on minus money). A mean is a
+    measurement, so it rounds to the nearest price.
+    """
+    if not math.isfinite(dec) or dec <= 1.0:
+        return None
+    if dec >= 2.0:
+        return int(round((dec - 1.0) * 100.0))
+    return -int(round(100.0 / (dec - 1.0)))
+
+
+def average_taken_american(prices) -> int | None:
+    """Unweighted mean of the taken prices, as American odds.
+
+    American odds are not one linear scale. The arithmetic mean of -110 and
+    +150 is +20, and +20 is not a price between those two. Each taken price
+    is converted to decimal (the payout multiple), those decimals are
+    averaged, and the mean is converted back to the nearest American price.
+
+    A missing, zero, or non-finite price is left out. It is not replaced
+    with -110. No priced pick → None, which the line renders as N/A.
+    Pushes stay in: a graded pick was bet at its price whether or not it
+    pushed. The mean is one price per graded pick, not weighted by stake.
+    """
+    decimals = []
+    for price in prices:
+        dec = _taken_decimal(price)
+        if dec is not None:
+            decimals.append(dec)
+    if not decimals:
+        return None
+    return _nearest_american(sum(decimals) / len(decimals))
+
+
+def _win_rate_line(t: dict) -> str:
+    """Wins over wins+losses. A push is graded and is not a decision."""
+    decided = int(t["w"]) + int(t["l"])
+    if decided <= 0:
+        return "Win rate: n/a"
+    pct = t["w"] / decided * 100.0
+    return f"Win rate: {pct:.1f}% ({t['w']}/{decided})"
+
+
+def _avg_clv_line(t: dict) -> str:
+    """Mean of the stored same-book CLV, in percent.
+
+    ``clv_pct`` is already percent: (taken decimal / close decimal − 1) × 100,
+    and the settled query only selects it when ``clv_method`` is standard_v2.
+    A pick with no closing line is NULL and is not in the mean. An in-play
+    pick is not in it. A close that equals the price taken is a push at the
+    stored grain and is in the mean as 0 (docs/clv.md). The count is every
+    pick that entered the mean, pushes included.
+    """
+    n = int(t.get("clv_measured") or 0)
+    if n <= 0:
+        return "Avg CLV: n/a"
+    avg = float(t.get("clv_sum") or 0.0) / n
+    return f"Avg CLV: {avg:+.1f}% ({n} measured)"
+
+
+def _average_odds_line(rows: list[tuple]) -> str:
+    priced = sum(1 for r in rows if _taken_decimal(r[4]) is not None)
+    avg = average_taken_american(r[4] for r in rows)
+    if avg is None:
+        return "Average odds: N/A"
+    line = f"Average odds: {_american(avg)}"
+    # The mean is over priced picks only. Say so when that is not every row,
+    # so an unpriced pick is not silently read as part of the average.
+    if priced != len(rows):
+        line += f" ({priced} priced)"
+    return line
+
+
 def render_all_time_fields(rows: list[tuple], since: str) -> list[dict]:
-    """One overall field, then one per sport. The daily recap, the standalone
-    full-record post, and the Eggz recap all render this."""
+    """One overall field, then one per sport.
+
+    The daily recap, the standalone full-record post, and the Eggz recap all
+    render this. Sports are ordered by all-time units, best first. An exact
+    tie breaks on the sport name so the order does not move between runs.
+    The day's own per-sport lines stay alphabetical; this order is the
+    all-time block only.
+
+    The overall field carries the record line, then the all-time win rate,
+    the all-time average odds, and the all-time average CLV, before any
+    sport field.
+    """
     overall = _tally(rows)
     by_sport: dict[str, list[tuple]] = {}
     for r in rows:
         by_sport.setdefault(r[0], []).append(r)
     fields = [{
         "name": f"\u200b\nAll-time  ·  since {since}",
-        "value": f"**{_tally_line(overall, with_clv=True)}**  ·  "
-                 f"{len(rows)} settled",
+        "value": (
+            f"**{_tally_line(overall, with_clv=True)}**  ·  "
+            f"{len(rows)} settled\n"
+            f"{_win_rate_line(overall)}\n"
+            f"{_average_odds_line(rows)}\n"
+            f"{_avg_clv_line(overall)}"
+        ),
         "inline": False,
     }]
-    for sport, group in sorted(by_sport.items()):
+    ranked = sorted(
+        by_sport.items(),
+        key=lambda item: (-_tally(item[1])["units"], str(item[0] or "")),
+    )
+    for sport, group in ranked:
         fields.append({
             "name": f"{sport} (all-time)",
             "value": _tally_line(_tally(group), with_clv=True),
@@ -3012,11 +3127,41 @@ def render_all_time_fields(rows: list[tuple], since: str) -> list[dict]:
 
 
 def all_time_fields(conn, through: str) -> tuple[list[dict], dict, int]:
-    """The recap's all-time block: one overall field, then one per sport.
+    """The recap's all-time block: overall, then one field per sport by units.
     The daily recap and the standalone full-record post both render this."""
     all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, through)
     return (render_all_time_fields(all_rows, config.PAPER_TRADING_START),
             _tally(all_rows), len(all_rows))
+
+
+def results_embed(game_date: str, rows: list[tuple],
+                  all_time: list[dict]) -> dict:
+    """The morning recap embed.
+
+    The day's sports stay alphabetical. `all_time` is the already-rendered
+    all-time block, which orders its own sports by units.
+    """
+    overall = _tally(rows)
+    by_sport: dict[str, list[tuple]] = {}
+    for r in rows:
+        by_sport.setdefault(r[0], []).append(r)
+    fields = [{
+        "name": sport,
+        "value": _tally_line(_tally(group), with_clv=True),
+        "inline": False,
+    } for sport, group in sorted(by_sport.items())]
+    fields.extend(all_time)
+    color = (_COLOR_RESULTS_UP if overall["units"] > 0
+             else _COLOR_RESULTS_DOWN if overall["units"] < 0
+             else _COLOR_RESULTS_FLAT)
+    pretty = datetime.fromisoformat(game_date).strftime("%a %b %d").replace(" 0", " ")
+    return {
+        "title": f"\U0001F4CA Results — {pretty}",
+        "description": (f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                        f"{len(rows)} settled"),
+        "color": color,
+        "fields": fields,
+    }
 
 
 def all_time_embed(conn, through: str) -> dict:
@@ -3097,35 +3242,18 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         for r in rows:
             by_sport.setdefault(r[0], []).append(r)
 
-        fields = [{
-            "name": sport,
-            "value": _tally_line(_tally(group), with_clv=True),
-            "inline": False,
-        } for sport, group in sorted(by_sport.items())]
-
         # ALL-TIME, as of this recap. A day on its own says nothing about
         # whether the thing works -- 4-3 is noise either way -- so the running
         # record travels with it, broken out by sport for the same reason the
-        # day is.
-        fields.extend(all_time_fields(conn, game_date)[0])
+        # day is. The day's sports stay alphabetical; the all-time sports are
+        # ordered by units inside render_all_time_fields.
         all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, game_date)
         all_overall = _tally(all_rows)
         all_by_sport: dict[str, list[tuple]] = {}
         for r in all_rows:
             all_by_sport.setdefault(r[0], []).append(r)
 
-        color = (_COLOR_RESULTS_UP if overall["units"] > 0
-                 else _COLOR_RESULTS_DOWN if overall["units"] < 0
-                 else _COLOR_RESULTS_FLAT)
-
-        pretty = datetime.fromisoformat(game_date).strftime("%a %b %d").replace(" 0", " ")
-        embed = {
-            "title": f"\U0001F4CA Results — {pretty}",
-            "description": (f"**{_tally_line(overall, with_clv=True)}**  ·  "
-                            f"{len(rows)} settled"),
-            "color": color,
-            "fields": fields,
-        }
+        embed = results_embed(game_date, rows, all_time_fields(conn, game_date)[0])
 
         if dry_run:
             logger.info(f"[dry-run] discord(results) {game_date} → {_tally_line(overall)}")
