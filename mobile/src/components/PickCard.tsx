@@ -1407,7 +1407,10 @@ export function PickCard({
           title={betHeadline}
           subtitle={contextLine}
           lineNote={
-            heroPrice?.movedLine != null && leadRow?.bookmaker === heroPrice.book
+            // Only when the sheet's Bet IS that moved line. The deciding
+            // book leading at its rung is a bet at the pick's own number.
+            heroPrice?.movedLine != null && leadRow?.bookmaker === heroPrice.book &&
+            leadRow.price === heroPrice.price
               ? signalsNow
               : null
           }

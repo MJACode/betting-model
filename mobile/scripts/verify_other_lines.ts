@@ -18,11 +18,17 @@
  *   4. otherLineQuotesForPick lists each of their books with no +10.5 at its
  *      own number, nearest first, never a book outside their set.
  *   5. pickSportsbookRows puts those after the same-line rows, never Best.
+ *   6. The DECIDING book whose line has moved is not listed at the lock
+ *      (Matt, 2026-11-15, "GB -3.5", FanDuel -110): its rung at the pick's
+ *      number at today's price, or else its line now as a different line.
  */
 
 import {
+  bestHandoffForPick,
   currentLineQuotes,
   gameRowsForPick,
+  handoffQuotesForPick,
+  heroAmericanForPick,
   otherLineQuotesForPick,
 } from '../src/lib/markets';
 import { myBooksView } from '../src/lib/myBooks';
@@ -143,6 +149,95 @@ check(
 check('other line row carries its bet', sheet[2].lineText === 'Coppin State +11.5');
 check('Caesars, with nothing, is a dash row last', sheet[4].bookmaker === 'williamhill_us' && sheet[4].price == null);
 check('no book listed twice', new Set(sheet.map((r) => r.bookmaker)).size === sheet.length);
+
+// 6 ─ the deciding book has moved its line (production rows, 2026-11-15
+// 14:17 UTC, NFL_2026_10_MIN_GB). The card said "FD line now −2.5 (−120)"
+// and the sheet listed FanDuel −110 as if it still had −3.5 at the lock.
+{
+  const gb = {
+    pick_id: 4375914,
+    game_id: 'NFL_2026_10_MIN_GB',
+    model_id: 'nfl_opener_spread',
+    sport: 'NFL',
+    game_date: '2026-11-15',
+    pick_side: 'home' as PickSide,
+    pick_label: 'MIN @ GB — GB -3.5 · NEW 0m',
+    model_probability: 0.556,
+    dk_odds: -110,
+    scored_line: -3.5,
+    signal_type: 'BET',
+    is_live: false,
+    decision_odds: -110,
+    decision_book: 'fanduel',
+    line_book: null,
+  } as unknown as Pick;
+  const gbMain: Row[] = [
+    { market: 'spreads', bookmaker: 'betmgm', spread_home: -2.5, home_price: -118, home_link: 'mgm://m' },
+    { market: 'spreads', bookmaker: 'draftkings', spread_home: -3, home_price: -102, home_link: 'dk://m' },
+    { market: 'spreads', bookmaker: 'fanatics', spread_home: -2.5, home_price: -120, home_link: null },
+    { market: 'spreads', bookmaker: 'fanduel', spread_home: -2.5, home_price: -120, home_link: 'fd://m' },
+    { market: 'spreads', bookmaker: 'williamhill_us', spread_home: -2.5, home_price: -121, home_link: 'czr://m' },
+  ];
+  const gbLadder: Row[] = [
+    { market: 'alternate_spreads', bookmaker: 'betmgm', spread_home: -3.5, home_price: 110, home_link: 'mgm://a35' },
+    { market: 'alternate_spreads', bookmaker: 'draftkings', spread_home: -3.5, home_price: 104, home_link: 'dk://a35' },
+    { market: 'alternate_spreads', bookmaker: 'fanatics', spread_home: -3.5, home_price: 115, home_link: null },
+    { market: 'alternate_spreads', bookmaker: 'fanduel', spread_home: -3.5, home_price: 108, home_link: 'fd://a35' },
+  ];
+  const sheetFor = (rows: BookPricedRow[]) => {
+    const hero = heroAmericanForPick(gb, null, rows);
+    const quotes = handoffQuotesForPick(gb, rows, hero, undefined, myBooks);
+    const others = otherLineQuotesForPick(gb, rows, myBooks)
+      .map((q) => ({ ...q, lineText: `GB ${q.line}` }));
+    return { hero, handoff: bestHandoffForPick(gb, rows, hero, undefined, myBooks), sheet: pickSportsbookRows(quotes, myBooks, others) };
+  };
+
+  // FanDuel still has −3.5, on its ladder, at +108.
+  const withRung = sheetFor(gameRowsForPick(gb, 'spreads', [...gbMain, ...gbLadder]));
+  check('the card sees FanDuel at −2.5 (−120) now', withRung.hero?.movedLine === -2.5 && withRung.hero?.price === -120);
+  const fdRung = withRung.sheet.find((r) => r.bookmaker === 'fanduel');
+  check(
+    'FanDuel is listed at its −3.5 price today, +108, not the −110 lock',
+    fdRung?.price === 108 && fdRung.otherLine === false,
+    `${fdRung?.price} otherLine=${fdRung?.otherLine}`,
+  );
+  check('and opens its −3.5 rung', fdRung?.link === 'fd://a35', String(fdRung?.link));
+  check('Fanatics +115 is still Best and the hand-off', withRung.sheet[0].bookmaker === 'fanatics' && withRung.sheet[0].isBest
+    && withRung.handoff?.bookmaker === 'fanatics' && withRung.handoff?.price === 115);
+  const czr = withRung.sheet.find((r) => r.bookmaker === 'williamhill_us');
+  check('Caesars, with no −3.5, is at its own line', czr?.otherLine === true && czr.price === -121);
+  check('no book listed twice', new Set(withRung.sheet.map((r) => r.bookmaker)).size === withRung.sheet.length);
+
+  // FanDuel has no −3.5 at all: its row is its line now, like Caesars.
+  const noRung = sheetFor(gameRowsForPick(gb, 'spreads', [...gbMain, ...gbLadder.filter((r) => r.bookmaker !== 'fanduel')]));
+  const fdMoved = noRung.sheet.find((r) => r.bookmaker === 'fanduel');
+  check(
+    'no −3.5 at FanDuel: listed at −2.5 (−120) as a different line',
+    fdMoved?.otherLine === true && fdMoved.price === -120 && fdMoved.lineText === 'GB -2.5' && !fdMoved.isBest,
+    `${fdMoved?.price} otherLine=${fdMoved?.otherLine} ${fdMoved?.lineText}`,
+  );
+  check('and opens the −2.5 row, not the lock slip', fdMoved?.link === 'fd://m', String(fdMoved?.link));
+  check('the hand-off is never FanDuel at the lock', noRung.handoff?.bookmaker === 'fanatics');
+
+  // The deciding book best at its rung: the hand-off is the rung, never the
+  // moved line's price on the control.
+  const fdBest = sheetFor(gameRowsForPick(gb, 'spreads', [
+    ...gbMain,
+    ...gbLadder.map((r) => (r.bookmaker === 'fanduel' ? { ...r, home_price: 125 } : r)),
+  ]));
+  check(
+    'FanDuel best at its rung hands off to +125 at −3.5',
+    fdBest.handoff?.bookmaker === 'fanduel' && fdBest.handoff.price === 125 && fdBest.handoff.link === 'fd://a35',
+    JSON.stringify(fdBest.handoff),
+  );
+
+  // A deciding book we hold no row for keeps its lock chip (missing ≠ moved).
+  const noFd = gameRowsForPick(gb, 'spreads', [...gbMain, ...gbLadder].filter((r) => r.bookmaker !== 'fanduel'));
+  check(
+    'no FanDuel row at all: not offered as another line',
+    !otherLineQuotesForPick(gb, noFd, myBooks).some((q) => q.bookmaker === 'fanduel'),
+  );
+}
 
 if (failures > 0) {
   console.log(`\n${failures} check(s) FAILED`);
