@@ -2,9 +2,11 @@
  * Picks → Scoreboard. One card per game, DraftKings game markets only.
  *
  * Live scores are whatever a stored feed already wrote: MLB from
- * live_game_state, NCAAF from ncaaf_live_states, and NFL / NBA / NHL from
- * live_scoreboard (data/ingestors/live_scoreboard.py, every minute from
- * ESPN, Matt 2026-10-29). A clock that has passed is not a score. A game
+ * live_game_state, NCAAF from ncaaf_live_states, and NFL / NBA / NHL /
+ * NCAAB / NCAABW from live_scoreboard (data/ingestors/live_scoreboard.py,
+ * every minute from ESPN, Matt 2026-10-29 and 2026-11-15). The other
+ * sports (EuroLeague, WNBA, UFC, tennis) have no live feed: a game shows
+ * Upcoming, then Final once `games` has the result. A clock that has passed is not a score. A game
  * with no fresh stored row stays Upcoming until `games` has a final score.
  * Nothing here fills a number in.
  */
@@ -15,11 +17,21 @@ import {
   formatAmerican,
   formatDayTimeET,
   formatGameTimeET,
+  isVersusSport,
   parseStamp,
 } from '@/lib/format';
+import { sportDisplayName } from '@/lib/liveSports';
 import { compactTeam, trueMinus } from '@/lib/signalsCard';
 
-export const SCOREBOARD_SPORTS = ['NFL', 'NCAAF', 'MLB', 'NBA', 'NHL'] as const;
+/**
+ * Every sport with games (Matt, 2026-11-15). The board's chip row shows only
+ * the ones with a game on the chosen day, plus the open one
+ * (`scoreboardChipSports`), so an off-season sport does not take a chip.
+ */
+export const SCOREBOARD_SPORTS = [
+  'NFL', 'NCAAF', 'MLB', 'NBA', 'NHL',
+  'NCAAB', 'NCAABW', 'EUROLEAGUE', 'WNBA', 'UFC', 'ATP', 'WTA',
+] as const;
 export type ScoreboardSport = (typeof SCOREBOARD_SPORTS)[number];
 
 export type ScoreboardPhase = 'upcoming' | 'live' | 'final';
@@ -28,7 +40,39 @@ export type ScoreboardPhase = 'upcoming' | 'live' | 'final';
 export const SCOREBOARD_PHASE_ORDER: readonly ScoreboardPhase[] = ['live', 'upcoming', 'final'];
 
 /** Sports whose live score comes from live_scoreboard. */
-export const ESPN_LIVE_SPORTS: readonly string[] = ['NFL', 'NBA', 'NHL'];
+export const ESPN_LIVE_SPORTS: readonly string[] = ['NFL', 'NBA', 'NHL', 'NCAAB', 'NCAABW'];
+
+/** Sports whose `games` row names a school, not a code. */
+const SCHOOL_SPORTS: ReadonlySet<string> = new Set(['NCAAB', 'NCAABW']);
+
+/** A school or a person: the disc is initials, so the name must stay on the row. */
+export function isNameSport(sport: string): boolean {
+  return SCHOOL_SPORTS.has(sport) || isVersusSport(sport);
+}
+
+/** Sports with a stored live feed. The rest go from Upcoming to Final. */
+function hasLiveFeed(sport: string): boolean {
+  return sport === 'MLB' || sport === 'NCAAF' || ESPN_LIVE_SPORTS.includes(sport);
+}
+
+/** "games", "fights", "matches" — one noun for the title and the nudge. */
+export function eventNoun(sport: string, n: number): string {
+  const one = sport === 'UFC' ? 'fight' : sport === 'ATP' || sport === 'WTA' ? 'match' : 'game';
+  if (n === 1) return one;
+  return one === 'match' ? 'matches' : `${one}s`;
+}
+
+/**
+ * The chips to draw: sports with a game on the day, in SCOREBOARD_SPORTS
+ * order, plus the open sport so the chip under the user's finger never
+ * vanishes. With no game anywhere, the open sport alone.
+ */
+export function scoreboardChipSports(
+  counts: Readonly<Record<string, number>>,
+  open: ScoreboardSport,
+): ScoreboardSport[] {
+  return SCOREBOARD_SPORTS.filter((id) => id === open || (counts[id] ?? 0) > 0);
+}
 
 /**
  * How long a live_scoreboard row may still say the game is in progress.
@@ -165,17 +209,84 @@ function plain(n: number | null): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
+/**
+ * "Florida Gulf Coast" → "FGC", "Kentucky" → "KENT", "St. John's" → "SJ",
+ * "UC Santa Barbara" → "UCSB" (a word already in capitals is kept whole).
+ * At most four letters.
+ */
+function initialsLabel(name: string): string {
+  const words = name
+    .replace(/['’.]/g, '')
+    .replace(/[^A-Za-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+  if (words.length === 0) return name.slice(0, 4).toUpperCase();
+  if (words.length === 1) return words[0].slice(0, 4).toUpperCase();
+  return words
+    .map((w) => (w.length > 1 && w.length <= 3 && w === w.toUpperCase() ? w : w[0]))
+    .join('')
+    .slice(0, 4)
+    .toUpperCase();
+}
+
+/** Two sides with the same initials: the first four letters of each last word. */
+function lastWordLabel(name: string): string {
+  const words = name.replace(/['’.]/g, '').replace(/[^A-Za-z\s]/g, ' ').split(/\s+/).filter((w) => w.length > 0);
+  return (words[words.length - 1] ?? name).slice(0, 4).toUpperCase();
+}
+
 export function discLabel(
   name: string,
   sport: string,
   abbrevs?: ReadonlyMap<string, string> | null,
 ): string {
+  // A school or a person has no code of ours: initials in the disc, the
+  // name beside it (sideName).
+  if (SCHOOL_SPORTS.has(sport) || isVersusSport(sport)) return initialsLabel(name);
   const compact = compactTeam(name, sport, abbrevs);
   if (sport === 'NCAAF' && compact === name) {
     const letters = name.replace(/[^A-Za-z]/g, '');
     return (letters.slice(0, 3) || name.slice(0, 3)).toUpperCase();
   }
   return compact.slice(0, 5);
+}
+
+/**
+ * The name beside the disc. A code sport repeats its code; a school keeps
+ * its name; a fighter or tennis player is "F. Lastname", everything after
+ * the first name kept ("Benoit Saint Denis" → "B. Saint Denis"), a
+ * Jr./Sr./II/III dropped ("Rodolfo Vieira Jr." → "R. Vieira").
+ */
+export function sideName(
+  name: string,
+  sport: string,
+  abbrevs?: ReadonlyMap<string, string> | null,
+): string {
+  if (SCHOOL_SPORTS.has(sport)) return name;
+  if (isVersusSport(sport)) {
+    const words = name.trim().split(/\s+/).filter((w) => w.length > 0);
+    while (words.length > 2 && /^(jr|sr|ii|iii|iv)\.?$/i.test(words[words.length - 1])) words.pop();
+    if (words.length < 2) return name.trim();
+    return `${words[0][0].toUpperCase()}. ${words.slice(1).join(' ')}`;
+  }
+  return discLabel(name, sport, abbrevs);
+}
+
+/** UFC stores 1 / 0 for the winner and 0.5 / 0.5 for a draw: W, L, D. */
+function fightResult(mine: number | string | null | undefined, theirs: number | string | null | undefined): string {
+  const a = num(mine);
+  const b = num(theirs);
+  if (a == null || b == null) return '—';
+  if (a === b) return 'D';
+  return a > b ? 'W' : 'L';
+}
+
+/**
+ * The market tabs a sport gets. A fight has no spread at DraftKings, so UFC
+ * opens on the moneyline and has no Spread tab.
+ */
+export function scoreboardMarketsFor(sport: string): readonly ScoreboardMarket[] {
+  return sport === 'UFC' ? ['h2h', 'totals'] : SCOREBOARD_MARKET_ORDER;
 }
 
 export function footballClock(
@@ -486,18 +597,40 @@ export function presentScoreboard(input: {
   const scores = shownScores(game, feed, phase);
   const awayScore = scores.away;
   const homeScore = scores.home;
-  const awayMuted = phase === 'final' && awayScore != null && homeScore != null && awayScore < homeScore;
-  const homeMuted = phase === 'final' && awayScore != null && homeScore != null && homeScore < awayScore;
+  // UFC's stored 0.5 / 0.5 draw must not round to 1-1; compare raw.
+  const fight = game.sport === 'UFC';
+  const rawAway = num(game.away_score);
+  const rawHome = num(game.home_score);
+  const awayMuted = phase === 'final' && (fight
+    ? rawAway != null && rawHome != null && rawAway < rawHome
+    : awayScore != null && homeScore != null && awayScore < homeScore);
+  const homeMuted = phase === 'final' && (fight
+    ? rawAway != null && rawHome != null && rawHome < rawAway
+    : awayScore != null && homeScore != null && homeScore < awayScore);
   const poss = phase === 'live' ? feed?.possession ?? null : null;
+  const awayScoreText = fight && phase === 'final'
+    ? fightResult(game.away_score, game.home_score)
+    : awayScore == null ? '—' : String(awayScore);
+  const homeScoreText = fight && phase === 'final'
+    ? fightResult(game.home_score, game.away_score)
+    : homeScore == null ? '—' : String(homeScore);
 
-  const awayName = discLabel(game.away_team, game.sport, input.abbrevs);
-  const homeName = discLabel(game.home_team, game.sport, input.abbrevs);
+  const awayName = sideName(game.away_team, game.sport, input.abbrevs);
+  const homeName = sideName(game.home_team, game.sport, input.abbrevs);
+
+  let awayDisc = discLabel(game.away_team, game.sport, input.abbrevs);
+  let homeDisc = discLabel(game.home_team, game.sport, input.abbrevs);
+  if (awayDisc === homeDisc && isNameSport(game.sport)) {
+    // "North Carolina" and "Northern Colorado" are both NC.
+    awayDisc = lastWordLabel(game.away_team);
+    homeDisc = lastWordLabel(game.home_team);
+  }
 
   const away: ScoreboardSide = {
     name: awayName,
-    disc: awayName,
+    disc: awayDisc,
     possession: poss === 'away',
-    score: awayScore == null ? '—' : String(awayScore),
+    score: awayScoreText,
     scoreMuted: awayMuted,
     spread: signed(homeSpread == null ? null : -homeSpread),
     spreadPrice: priceText(spread?.away_price),
@@ -507,9 +640,9 @@ export function presentScoreboard(input: {
   };
   const home: ScoreboardSide = {
     name: homeName,
-    disc: homeName,
+    disc: homeDisc,
     possession: poss === 'home',
-    score: homeScore == null ? '—' : String(homeScore),
+    score: homeScoreText,
     scoreMuted: homeMuted,
     spread: signed(homeSpread),
     spreadPrice: priceText(spread?.home_price),
@@ -528,18 +661,23 @@ export function presentScoreboard(input: {
     footerBadge = 'F';
     footerText = ot ? 'Final/OT' : 'Final';
   } else {
-    footerText = startedNoScore ? 'Started · no live score yet' : formatGameTimeET(game.commence_time);
+    // A sport with no live feed will never show one: say so, not "yet".
+    footerText = startedNoScore
+      ? hasLiveFeed(game.sport) ? 'Started · no live score yet' : 'Started · live scores not tracked'
+      : formatGameTimeET(game.commence_time);
   }
 
   const situation = phase === 'live' ? feed?.situation ?? null : null;
   const updatedLabel = phase === 'live' && feed?.snapshotAt
     ? `Updated ${formatGameTimeET(feed.snapshotAt)}`
     : null;
-  const matchup = `${game.away_team} at ${game.home_team}`;
+  const matchup = `${game.away_team} ${isVersusSport(game.sport) ? 'versus' : 'at'} ${game.home_team}`;
   const stateWord = phase === 'live' ? 'live' : phase === 'final' ? 'final' : startedNoScore ? 'started' : 'upcoming';
   const scoreSpeech = phase === 'upcoming'
     ? startedNoScore ? 'started, no score stored' : 'not started'
-    : `${away.score} to ${home.score}`;
+    : fight && phase === 'final'
+      ? away.score === 'D' ? 'draw' : `${away.score === 'W' ? game.away_team : game.home_team} won`
+      : `${away.score} to ${home.score}`;
   const possTeam = away.possession ? game.away_team : home.possession ? game.home_team : null;
   const possSpeech = possTeam
     ? game.sport === 'MLB' ? `${possTeam} batting. ` : `${possTeam} has the ball. `
@@ -584,15 +722,16 @@ export function nextSlateText(
 ): string | null {
   if (!game) return null;
   const when = formatDayTimeET(game.commence_time);
-  const away = discLabel(game.away_team, game.sport, abbrevs);
-  const home = discLabel(game.home_team, game.sport, abbrevs);
-  const matchup = `${away} @ ${home}`;
+  const away = sideName(game.away_team, game.sport, abbrevs);
+  const home = sideName(game.home_team, game.sport, abbrevs);
+  const matchup = `${away} ${isVersusSport(game.sport) ? 'vs' : '@'} ${home}`;
   return when ? `${when} · ${matchup}` : matchup;
 }
 
 export function scoreboardSwitchLine(
   counts: Readonly<Record<string, number>>,
   sport: string,
+  dayPhrase = 'today',
 ): string | null {
   let best: string | null = null;
   let n = 0;
@@ -602,8 +741,7 @@ export function scoreboardSwitchLine(
     n = count;
   }
   if (!best || n === 0) return null;
-  const games = n === 1 ? 'game' : 'games';
-  return `Or switch sport above — ${best} has ${n} ${games} today.`;
+  return `Or switch sport above — ${sportDisplayName(best)} has ${n} ${eventNoun(best, n)} ${dayPhrase}.`;
 }
 
 export function movementText(
