@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: no source from 2023 on confirms a US outlet still pools with the Hong Kong Jockey Club; Xpressbet, AmWager, NYRA Bets offer Hong Kong; the archive purchase waits on that |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, TestFlight tester account + comped access; Supabase MCP found to write production |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, re-buy follow-up: zero-row pieces read back (FanDuel at its opener; NHL snapshot before the first other book), end-of-game in-play rows leave latest_odds unchanged, plan total is a ceiling (#1384) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Stats boards: NFL Anytime TD uses the same price column as every other board (HIT, price, MATCHUP; DK green) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Signals card: one line-movement row (line change, price change in parentheses), shown only when the deciding book moved against the pick |
