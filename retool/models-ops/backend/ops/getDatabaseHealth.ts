@@ -37,9 +37,13 @@ export type DbHealthPoint = {
   temp_bytes: number | null
   deadlocks: number | null
   stats_reset: string | null
+  active_time_ms: number | null
+  idle_in_tx_time_ms: number | null
+  sessions: number | null
   stmt_calls: number | null
   stmt_exec_ms: number | null
   stmt_reset: string | null
+  stmt_dealloc: number | null
   unused_indexes: number | null
   unused_index_bytes: number | null
   storage_objects: number | null
@@ -72,8 +76,10 @@ export default async function (req: { params: Params; user: User }): Promise<Res
                 xact_commit::float8 AS xact_commit, xact_rollback::float8 AS xact_rollback,
                 temp_bytes::float8 AS temp_bytes, deadlocks::float8 AS deadlocks,
                 to_char(stats_reset AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS stats_reset,
+                active_time_ms, idle_in_tx_time_ms, sessions::float8 AS sessions,
                 stmt_calls::float8 AS stmt_calls, stmt_exec_ms,
                 to_char(stmt_reset AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS stmt_reset,
+                stmt_dealloc::float8 AS stmt_dealloc,
                 unused_indexes, unused_index_bytes::float8 AS unused_index_bytes,
                 storage_objects::float8 AS storage_objects, storage_bytes::float8 AS storage_bytes,
                 storage_buckets

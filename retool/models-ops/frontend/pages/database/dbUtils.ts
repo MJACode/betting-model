@@ -27,9 +27,13 @@ export type HealthPoint = {
   temp_bytes?: number | null
   deadlocks?: number | null
   stats_reset?: string | null
+  active_time_ms?: number | null
+  idle_in_tx_time_ms?: number | null
+  sessions?: number | null
   stmt_calls?: number | null
   stmt_exec_ms?: number | null
   stmt_reset?: string | null
+  stmt_dealloc?: number | null
   unused_indexes?: number | null
   unused_index_bytes?: number | null
   storage_objects?: number | null
@@ -123,11 +127,15 @@ export type Interval = {
   at: string
   hours: number
   hitRatio: number | null
+  /** Statements running at once, on average (active time per second of wall time). */
   load: number | null
+  /** Sessions sitting idle inside an open transaction, on average. */
+  idleInTx: number | null
   commitsPerSec: number | null
   rollbackShare: number | null
   tempBytesPerHour: number | null
   deadlocks: number | null
+  sessionsPerHour: number | null
 }
 
 /** Rates for each pair of consecutive snapshots, stamped at the later one. */
@@ -144,18 +152,23 @@ export function intervals(points: HealthPoint[]): Interval[] {
     const commits = counterDelta(a, b, 'xact_commit')
     const rollbacks = counterDelta(a, b, 'xact_rollback')
     const temp = counterDelta(a, b, 'temp_bytes')
-    const stmtMs = counterDelta(a, b, 'stmt_exec_ms', 'stmt_reset')
+    // pg_stat_database.active_time, not the pg_stat_statements total: Postgres
+    // drops the least-used statements from that list when it is full, so its
+    // sum can fall between two snapshots with no reset (measured 2026-11-16).
+    const activeMs = counterDelta(a, b, 'active_time_ms')
+    const idleTxMs = counterDelta(a, b, 'idle_in_tx_time_ms')
+    const sessions = counterDelta(a, b, 'sessions')
     out.push({
       at: b.taken_at,
       hours,
       hitRatio: hit != null && read != null && hit + read > 0 ? hit / (hit + read) : null,
-      // Statement time per second of wall time: the average number of
-      // statements running at any moment between the two snapshots.
-      load: stmtMs != null ? stmtMs / (secs * 1000) : null,
+      load: activeMs != null ? activeMs / (secs * 1000) : null,
+      idleInTx: idleTxMs != null ? idleTxMs / (secs * 1000) : null,
       commitsPerSec: commits != null ? commits / secs : null,
       rollbackShare: commits != null && rollbacks != null && commits + rollbacks > 0 ? rollbacks / (commits + rollbacks) : null,
       tempBytesPerHour: temp != null ? temp / hours : null,
       deadlocks: counterDelta(a, b, 'deadlocks'),
+      sessionsPerHour: sessions != null ? sessions / hours : null,
     })
   }
   return out

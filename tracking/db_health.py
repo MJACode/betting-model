@@ -20,6 +20,13 @@ so a lifetime ratio such as the 93% cache hit rate barely moves. The change
 between two rows is what happened in between, and a counter that went down
 was reset; the dashboard leaves that gap blank.
 
+THE STATEMENT TOTAL IS NOT A RUNNING COUNTER. pg_stat_statements keeps at
+most pg_stat_statements.max (5,000) statements and drops the least-used when
+full, taking their time out of the sum: between snapshots 1 and 2 on
+2026-11-16 the sum fell while `dealloc` went from 436 to 437, with no reset.
+Load is therefore read from pg_stat_database.active_time (and
+idle_in_transaction_time), which only ever rise until a reset.
+
 LOAD. Catalog and statistics reads only: no count(*), no table scan.
 pg_database_size and pg_total_relation_size read file sizes. Every read runs
 with a 30-second statement timeout. The worker job is deferred in the morning
@@ -88,6 +95,8 @@ SELECT
   d.blks_hit, d.blks_read, d.xact_commit, d.xact_rollback,
   d.tup_inserted, d.tup_updated, d.tup_deleted,
   d.temp_files, d.temp_bytes, d.deadlocks, d.stats_reset,
+  d.active_time, d.idle_in_transaction_time, d.session_time,
+  d.sessions, d.sessions_abandoned, d.sessions_fatal, d.sessions_killed,
   (SELECT count(*) FROM pg_stat_user_indexes s JOIN pg_index i ON i.indexrelid = s.indexrelid
      WHERE s.idx_scan = 0 AND NOT i.indisunique AND NOT i.indisprimary) AS unused_indexes,
   (SELECT sum(pg_relation_size(s.indexrelid)) FROM pg_stat_user_indexes s JOIN pg_index i ON i.indexrelid = s.indexrelid
@@ -104,6 +113,8 @@ DB_COLUMNS = (
     "blks_hit", "blks_read", "xact_commit", "xact_rollback",
     "tup_inserted", "tup_updated", "tup_deleted",
     "temp_files", "temp_bytes", "deadlocks", "stats_reset",
+    "active_time_ms", "idle_in_tx_time_ms", "session_time_ms",
+    "sessions", "sessions_abandoned", "sessions_fatal", "sessions_killed",
     "unused_indexes", "unused_index_bytes",
 )
 
@@ -111,7 +122,8 @@ DB_COLUMNS = (
 # unqualified name does not resolve (measured 2026-11-16).
 STMT_TOTALS_SQL = """
 SELECT count(*), sum(calls), sum(total_exec_time),
-       (SELECT stats_reset FROM extensions.pg_stat_statements_info)
+       (SELECT stats_reset FROM extensions.pg_stat_statements_info),
+       (SELECT dealloc FROM extensions.pg_stat_statements_info)
 FROM extensions.pg_stat_statements
 WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
 """
@@ -161,9 +173,9 @@ ORDER BY total_exec_time DESC
 _INSERT_DB = (
     "INSERT INTO db_health_snapshots (source, duration_ms, "
     + ", ".join(DB_COLUMNS)
-    + ", stmt_count, stmt_calls, stmt_exec_ms, stmt_reset,"
+    + ", stmt_count, stmt_calls, stmt_exec_ms, stmt_reset, stmt_dealloc,"
     " storage_objects, storage_bytes, storage_buckets, table_rows_taken) VALUES ("
-    + ", ".join(["?"] * (2 + len(DB_COLUMNS) + 4 + 4))
+    + ", ".join(["?"] * (2 + len(DB_COLUMNS) + 5 + 4))
     + ") RETURNING snapshot_id, taken_at"
 )
 
@@ -221,7 +233,7 @@ def take_snapshot(conn, *, source: str = "worker", tables: bool | None = None,
         tables = _tables_due(conn, now)
 
     db_row = conn.execute(DB_SQL).fetchone()
-    stmt_count, stmt_calls, stmt_ms, stmt_reset = conn.execute(STMT_TOTALS_SQL).fetchone()
+    stmt_count, stmt_calls, stmt_ms, stmt_reset, stmt_dealloc = conn.execute(STMT_TOTALS_SQL).fetchone()
     storage_objects, storage_bytes, buckets = _storage(conn)
     table_rows = conn.execute(TABLES_SQL).fetchall() if tables else []
     query_rows = conn.execute(QUERIES_SQL).fetchall() if tables else []
@@ -229,7 +241,7 @@ def take_snapshot(conn, *, source: str = "worker", tables: bool | None = None,
 
     snapshot_id, taken_at = conn.execute(
         _INSERT_DB,
-        (source, duration_ms, *db_row, stmt_count, stmt_calls, stmt_ms, stmt_reset,
+        (source, duration_ms, *db_row, stmt_count, stmt_calls, stmt_ms, stmt_reset, stmt_dealloc,
          storage_objects, storage_bytes, json.dumps(buckets), bool(tables)),
     ).fetchone()
 

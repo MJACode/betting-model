@@ -125,7 +125,7 @@ class _Recorder:
         if sql is db_health.DB_SQL:
             return _Cursor(one=tuple(range(len(db_health.DB_COLUMNS))))
         if sql is db_health.STMT_TOTALS_SQL:
-            return _Cursor(one=(10, 100, 1000.0, NOW))
+            return _Cursor(one=(10, 100, 1000.0, NOW, 437))
         if sql is db_health.STORAGE_SQL:
             return _Cursor(many=[("social-post-media", 34, 6701672)])
         if sql is db_health.TABLES_SQL:

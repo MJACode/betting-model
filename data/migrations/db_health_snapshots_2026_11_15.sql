@@ -38,7 +38,7 @@
 DO $mig$
 BEGIN
   IF COALESCE(obj_description(to_regclass('public.db_health_snapshots'), 'pg_class'), '')
-       = 'db_health_snapshots 20245c6e437f'
+       = 'db_health_snapshots 0e8c3b995b8d'
      AND to_regclass('public.db_table_snapshots') IS NOT NULL
      AND to_regclass('public.db_query_snapshots') IS NOT NULL
      AND to_regclass('public.db_query_texts') IS NOT NULL
@@ -91,11 +91,24 @@ BEGIN
     temp_bytes             BIGINT,
     deadlocks              BIGINT,
     stats_reset            TIMESTAMPTZ,
-    -- pg_stat_statements running totals, since stmt_reset
+    -- pg_stat_database session time, ms, since stats_reset: the change in
+    -- active_time over the wall time between two rows is the average number
+    -- of statements running at once
+    active_time_ms         DOUBLE PRECISION,
+    idle_in_tx_time_ms     DOUBLE PRECISION,
+    session_time_ms        DOUBLE PRECISION,
+    sessions               BIGINT,
+    sessions_abandoned     BIGINT,
+    sessions_fatal         BIGINT,
+    sessions_killed        BIGINT,
+    -- pg_stat_statements totals, since stmt_reset. NOT a running counter:
+    -- Postgres drops the least-used statements when its list is full
+    -- (stmt_dealloc counts those passes), and their time leaves the sum.
     stmt_count             INTEGER,
     stmt_calls             BIGINT,
     stmt_exec_ms           DOUBLE PRECISION,
     stmt_reset             TIMESTAMPTZ,
+    stmt_dealloc           BIGINT,
     -- indexes never scanned since stats_reset (unique and primary keys left out)
     unused_indexes         INTEGER,
     unused_index_bytes     BIGINT,
@@ -156,6 +169,18 @@ BEGIN
     first_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  -- The first version of this file (applied 2026-11-16 03:40 UTC) created the
+  -- table without these; a database that already has them skips each one.
+  ALTER TABLE public.db_health_snapshots
+    ADD COLUMN IF NOT EXISTS active_time_ms DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS idle_in_tx_time_ms DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS session_time_ms DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS sessions BIGINT,
+    ADD COLUMN IF NOT EXISTS sessions_abandoned BIGINT,
+    ADD COLUMN IF NOT EXISTS sessions_fatal BIGINT,
+    ADD COLUMN IF NOT EXISTS sessions_killed BIGINT,
+    ADD COLUMN IF NOT EXISTS stmt_dealloc BIGINT;
+
   ALTER TABLE public.db_health_snapshots ENABLE ROW LEVEL SECURITY;
   ALTER TABLE public.db_table_snapshots ENABLE ROW LEVEL SECURITY;
   ALTER TABLE public.db_query_snapshots ENABLE ROW LEVEL SECURITY;
@@ -166,5 +191,5 @@ BEGIN
   REVOKE ALL ON public.db_query_texts FROM anon, authenticated;
   REVOKE ALL ON SEQUENCE public.db_health_snapshots_snapshot_id_seq FROM anon, authenticated;
 
-  COMMENT ON TABLE public.db_health_snapshots IS 'db_health_snapshots 20245c6e437f';
+  COMMENT ON TABLE public.db_health_snapshots IS 'db_health_snapshots 0e8c3b995b8d';
 END $mig$;

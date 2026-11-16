@@ -85,7 +85,7 @@ morning disk window) reads Postgres's own statistics and writes four tables
 
 | Table | One row per | What it holds |
 |---|---|---|
-| `db_health_snapshots` | run (hourly) | database size split into table data, indexes and toast; Postgres's row estimates; client connections and the limit; the oldest open transaction; transaction-ID age; unused indexes; Storage bytes per bucket; and Postgres's running counters (cache reads, commits, rollbacks, temp files, deadlocks, total statement time) exactly as Postgres reports them |
+| `db_health_snapshots` | run (hourly) | database size split into table data, indexes and toast; Postgres's row estimates; client connections and the limit; the oldest open transaction; transaction-ID age; unused indexes; Storage bytes per bucket; and Postgres's running counters (cache reads, commits, rollbacks, temp files, deadlocks, active and idle-in-transaction time, sessions) exactly as Postgres reports them, plus the `pg_stat_statements` totals |
 | `db_table_snapshots` | table, every six hours | each table's size (table, index, toast), row estimate, dead rows, inserts/updates/deletes, scans, last vacuum and analyze |
 | `db_query_snapshots` | statement, every six hours | the 100 statements with the most total time plus the 25 slowest per call (at least 5 calls), with their running totals |
 | `db_query_texts` | statement | its normalised text, once (constants appear as `$1`) |
@@ -97,12 +97,26 @@ are revoked. The dashboard reads them as the database owner.
 **How to read a rate.** Postgres's counters run from their last reset
 (`pg_stat_database` from 2026-03-30, `pg_stat_statements` from 2026-04-04),
 so a lifetime ratio barely moves. The tab shows the change between two
-snapshots instead: cache hit rate, **load** (statement time per second of
-wall time, i.e. how many statements were running at once on average),
-commits and rollbacks per second, and temp-file bytes per hour. A counter
-that went down was reset in between, and that gap is left blank rather than
-drawn as a negative rate. Row counts are `n_live_tup` estimates, never
-`count(*)`.
+snapshots instead: cache hit rate, **load** (`pg_stat_database.active_time`
+per second of wall time, i.e. how many statements were running at once on
+average), **idle in a transaction** (the same for
+`idle_in_transaction_time`: sessions holding a transaction open while doing
+nothing), commits and rollbacks per second, and temp-file bytes per hour. A
+counter that went down was reset in between, and that gap is left blank
+rather than drawn as a negative rate. Row counts are `n_live_tup` estimates,
+never `count(*)`.
+
+**The `pg_stat_statements` total is not a running counter.** Postgres keeps
+at most 5,000 statements and drops the least-used when the list is full,
+taking their time out of the sum: between the first two snapshots
+(2026-11-16 03:41 and 04:19 UTC) the sum fell while `dealloc` went from 436
+to 437, with no reset. So load is read from `pg_stat_database`, and a
+statement's own "last 24 h" is shown only when its total did not go down.
+
+**Idle in a transaction is large.** Since the 2026-03-30 reset Postgres has
+counted 9,459,708,927 ms idle in a transaction against 2,568,771,649 ms
+active (3.7 to 1), read 2026-11-16 04:2x UTC from `pg_stat_database`. An
+open transaction holds its locks, so the tab now tracks it.
 
 **What the tiles show.** At a glance (ten cards), Size over time (stacked
 table/index/toast, 7/30/90 days; older than 14 days one point per six

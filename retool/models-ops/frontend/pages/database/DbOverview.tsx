@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import {
-  HardDrive, TrendingUp, Rows3, Zap, Gauge, Cable, Recycle, Timer, ListX, Archive,
+  HardDrive, TrendingUp, Rows3, Zap, Gauge, Hourglass, Cable, Recycle, Timer, ListX, Archive,
 } from 'lucide-react'
 import { PanelError, StatsSkeleton, StatCard, EmptyState, Footnote } from '../../components/PanelUtils'
 import {
@@ -100,6 +100,14 @@ export default function DbOverview({ points, total, firstAt, available, loading,
           caption={lastIv?.load != null ? 'Statements running at once, on average, since the last snapshot' : nextHint}
         />
         <StatCard
+          icon={Hourglass}
+          label="Idle in a transaction"
+          value={lastIv?.idleInTx != null ? lastIv.idleInTx.toFixed(2) : '—'}
+          caption={lastIv?.idleInTx != null
+            ? 'Sessions holding a transaction open while doing nothing, on average'
+            : nextHint}
+        />
+        <StatCard
           icon={Cable}
           label="Connections"
           value={last.connections != null ? `${last.connections} / ${last.max_connections ?? '—'}` : '—'}
@@ -123,15 +131,10 @@ export default function DbOverview({ points, total, firstAt, available, loading,
           value={last.unused_indexes != null ? String(last.unused_indexes) : '—'}
           caption={`${fmtBytes(last.unused_index_bytes)}, never scanned since ${utcDate(last.stats_reset)}`}
         />
-        <StatCard
-          icon={Archive}
-          label="File storage"
-          value={fmtBytes(last.storage_bytes)}
-          caption={`${fmtCount(last.storage_objects)} files in ${buckets.length} bucket${buckets.length === 1 ? '' : 's'}`}
-        />
       </div>
       <Footnote>
-        Newest snapshot {fmtUtc(last.taken_at)} ({last.source === 'manual' ? 'taken by hand' : 'hourly job'}).
+        <span className="inline-flex items-center gap-1"><Archive className="h-3 w-3" aria-hidden />File storage {fmtBytes(last.storage_bytes)} in {fmtCount(last.storage_objects)} files, {buckets.length} bucket{buckets.length === 1 ? '' : 's'}.</span>
+        {' '}Newest snapshot {fmtUtc(last.taken_at)} ({last.source === 'manual' ? 'taken by hand' : 'hourly job'}).
         {' '}{total.toLocaleString('en-US')} snapshot{total === 1 ? '' : 's'} stored since {fmtUtc(firstAt)}; none is ever deleted.
         {' '}Sizes are in Postgres’s units (1 GB = 1,024³ bytes). Row counts are Postgres’s estimates.
       </Footnote>

@@ -131,7 +131,7 @@ const HIT_DOMAIN: [string | number, string | number] = ['auto', 100]
 const ZERO_DOMAIN: [string | number, string | number] = [0, 'auto']
 
 const METRICS: ReadonlyArray<{ key: Metric; label: string; hint: string }> = [
-  { key: 'load', label: 'Load', hint: 'Statements running at once, on average, between two snapshots (statement time per second).' },
+  { key: 'load', label: 'Load', hint: 'Sessions running a statement, and sessions holding a transaction open while idle, on average between two snapshots (Postgres’s active and idle-in-transaction time per second).' },
   { key: 'hit', label: 'Cache hits', hint: 'Share of table and index reads served from memory between two snapshots.' },
   { key: 'commits', label: 'Commits/s', hint: 'Transactions committed per second between two snapshots; rollbacks shown beside them.' },
   { key: 'temp', label: 'Temp files', hint: 'Bytes per hour written to temporary files by queries too big for memory.' },
@@ -155,8 +155,9 @@ export function DbActivityChart({ points, firstAt, loading, error }: BaseProps) 
       at: r.at,
       a: metric === 'load' ? r.load : metric === 'hit' ? (r.hitRatio != null ? r.hitRatio * 100 : null)
         : metric === 'commits' ? r.commitsPerSec : r.tempBytesPerHour,
-      b: metric === 'commits' && r.commitsPerSec != null && r.rollbackShare != null
-        ? (r.commitsPerSec * r.rollbackShare) / (1 - r.rollbackShare) : null,
+      b: metric === 'load' ? r.idleInTx
+        : metric === 'commits' && r.commitsPerSec != null && r.rollbackShare != null
+          ? (r.commitsPerSec * r.rollbackShare) / (1 - r.rollbackShare) : null,
       limit: null as number | null,
     }))
   }, [metric, iv, points])
@@ -174,8 +175,10 @@ export function DbActivityChart({ points, firstAt, loading, error }: BaseProps) 
     if (metric === 'temp') return `${fmtBytes(v)}/h`
     return fmtCount(v)
   }
-  const aName = metric === 'connections' ? 'Connections' : metric === 'commits' ? 'Commits/s' : current.label
-  const bName = metric === 'connections' ? 'Active' : metric === 'commits' ? 'Rollbacks/s' : ''
+  const aName = metric === 'connections' ? 'Connections' : metric === 'commits' ? 'Commits/s'
+    : metric === 'load' ? 'Running' : current.label
+  const bName = metric === 'connections' ? 'Active' : metric === 'commits' ? 'Rollbacks/s'
+    : metric === 'load' ? 'Idle in a transaction' : ''
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
