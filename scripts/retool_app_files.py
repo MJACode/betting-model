@@ -13,10 +13,13 @@ either direction. The two directions are:
                    `retool_read_react_app_files` (large results are saved to a
                    JSON file), then:
                        python -m scripts.retool_app_files write DUMP.json ...
-  repo -> Retool   A Claude session sends the change to the app through a
-                   Retool thread and publishes it, then reads the files back
-                   and proves they match:
+  repo -> Retool   python -m scripts.retool_app_files zip OUT.zip
+                   then Retool's import tool (`retool_start_prepared_import`
+                   with the app as target) and an upload of OUT.zip; Retool
+                   copies each file in with a file-copy step, not by retyping.
+                   Then read the files back out of Retool and prove they match:
                        python -m scripts.retool_app_files check DUMP.json ...
+                   `retool/README.md` has the steps in full.
 
 A DUMP is the JSON the MCP tool returns:
     {"files": [{"path": "/frontend/App.tsx", "content": "...",
@@ -40,6 +43,12 @@ DEFAULT_DEST = ROOT / "retool" / "models-ops"
 # Not exported: the read tool truncates any file over 64 KB, and pnpm
 # regenerates the lockfile from the package.json files.
 NOT_EXPORTED = {"/pnpm-lock.yaml"}
+
+# Retool writes this file itself: it holds the app's own ID and a list of which
+# file uses which database connection, and Retool re-orders its keys. So it is
+# left out of the upload, and compared by content (key order ignored), not by
+# bytes. Measured 2026-11-15 on a test import: same content, different order.
+RETOOL_MANAGED = {"/package.json"}
 
 
 @dataclass
@@ -131,7 +140,7 @@ def check(files: list[DumpFile], dest: Path) -> Report:
         target = _local(dest, f.path)
         if not target.exists():
             report.missing_in_repo.append(f.path)
-        elif target.read_bytes() == f.data:
+        elif target.read_bytes() == f.data or _same_managed(f.path, target.read_bytes(), f.data):
             report.match.append(f.path)
         else:
             report.differs.append(f.path)
@@ -142,6 +151,33 @@ def check(files: list[DumpFile], dest: Path) -> Report:
                 if rp not in seen:
                     report.only_in_repo.append(rp)
     return report
+
+
+def _same_managed(path: str, ours: bytes, theirs: bytes) -> bool:
+    """A Retool-written file matches when its JSON content is equal, in any key order."""
+    if path not in RETOOL_MANAGED:
+        return False
+    try:
+        return json.loads(ours) == json.loads(theirs)
+    except ValueError:
+        return False
+
+
+def build_zip(dest: Path, out: Path) -> list[str]:
+    """The upload for Retool's import tool: every file except the Retool-written ones."""
+    import zipfile
+
+    names: list[str] = []
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in sorted(dest.rglob("*")):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(dest).as_posix()
+            if "/" + rel in RETOOL_MANAGED:
+                continue
+            z.writestr(rel, p.read_bytes())
+            names.append(rel)
+    return names
 
 
 def _print(report: Report) -> None:
@@ -156,12 +192,20 @@ def _print(report: Report) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("command", choices=["write", "check"])
-    ap.add_argument("dumps", nargs="+", type=Path)
+    ap.add_argument("command", choices=["write", "check", "zip"])
+    ap.add_argument("paths", nargs="+", type=Path,
+                    help="write/check: one or more MCP read results; zip: the zip to create")
     ap.add_argument("--dest", type=Path, default=DEFAULT_DEST)
     args = ap.parse_args(argv)
 
-    files = load_dumps(args.dumps)
+    if args.command == "zip":
+        if len(args.paths) != 1:
+            ap.error("zip takes exactly one output path")
+        names = build_zip(args.dest, args.paths[0])
+        print(f"zipped: {len(names)} files -> {args.paths[0]}")
+        return 0
+
+    files = load_dumps(args.paths)
     report = write(files, args.dest) if args.command == "write" else check(files, args.dest)
     _print(report)
     bad = report.errors or report.differs or report.missing_in_repo or report.only_in_repo

@@ -109,6 +109,44 @@ def test_the_same_path_in_two_dumps_is_refused(tmp_path):
         raf.load_dumps([a, b])
 
 
+def test_retools_own_package_json_matches_by_content_not_key_order(tmp_path):
+    # Measured on the 2026-11-15 test import: Retool rewrote /package.json with
+    # the same content and the keys in a different order.
+    ours = '{\n  "private": true,\n  "retool": {"app": {"uuid": "a"}},\n  "devDependencies": {"vitest": "4.1.9"}\n}\n'
+    theirs = '{\n  "private": true,\n  "devDependencies": {"vitest": "4.1.9"},\n  "retool": {"app": {"uuid": "a"}}\n}\n'
+    other_app = theirs.replace('"a"', '"b"')
+    dest = tmp_path / "app"
+    dest.mkdir()
+    (dest / "package.json").write_text(ours, encoding="utf-8")
+
+    same = raf.load_dumps([_dump(tmp_path, [_entry("/package.json", theirs)], "same.json")])
+    assert raf.check(same, dest).match == ["/package.json"]
+
+    wrong = raf.load_dumps([_dump(tmp_path, [_entry("/package.json", other_app)], "wrong.json")])
+    assert raf.check(wrong, dest).differs == ["/package.json"]
+
+    # Key order is forgiven ONLY for Retool's own file, never for app source.
+    (dest / "frontend").mkdir()
+    (dest / "frontend" / "package.json").write_text(ours, encoding="utf-8")
+    src = raf.load_dumps([_dump(tmp_path, [_entry("/frontend/package.json", theirs)], "src.json")])
+    assert raf.check(src, dest).differs == ["/frontend/package.json"]
+
+
+def test_the_upload_zip_holds_every_file_but_retools_own(tmp_path):
+    import zipfile
+
+    dest = tmp_path / "app"
+    (dest / "frontend").mkdir(parents=True)
+    (dest / "frontend" / "App.tsx").write_bytes(b"export default 1\n")
+    (dest / "package.json").write_bytes(b"{}\n")
+    out = tmp_path / "up.zip"
+    names = raf.build_zip(dest, out)
+    assert names == ["frontend/App.tsx"]
+    with zipfile.ZipFile(out) as z:
+        assert z.namelist() == ["frontend/App.tsx"]
+        assert z.read("frontend/App.tsx") == b"export default 1\n"
+
+
 def test_the_repo_copy_is_present_and_kept_lf():
     """The export exists, and git is told never to rewrite its line endings."""
     for rel in ("package.json", "frontend/App.tsx", "backend/ops/setModelVolume.ts"):
