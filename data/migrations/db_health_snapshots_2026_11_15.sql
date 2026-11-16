@@ -30,28 +30,51 @@
 -- reads them as the database owner through its own Retool connection.
 --
 -- One DO block: data/view_migrations.py runs each file as one statement on
--- every pass. It returns on a catalog read once db_health_snapshots carries
--- this file's marker (the hash of this file with the marker blanked) and
--- the two app roles still have nothing, so an edit here is applied on the
--- next pass and a re-grant is undone.
+-- every pass. It returns on a catalog read only while everything this file
+-- establishes still holds: the four tables and the id sequence exist,
+-- db_health_snapshots carries this file's marker (the hash of this file with
+-- the marker blanked), row level security is on for all four tables, and
+-- anon and authenticated hold no privilege on any of them: none on a table,
+-- none on a column, none on the sequence. So an edit here is applied on the
+-- next pass, and so is a repair: row level security switched off, or any
+-- privilege granted to either role, is undone on the next pass. The checks
+-- that name a relation sit inside the to_regclass check, so a fresh database
+-- never names a missing one.
 
 DO $mig$
 BEGIN
-  IF COALESCE(obj_description(to_regclass('public.db_health_snapshots'), 'pg_class'), '')
-       = 'db_health_snapshots 0e8c3b995b8d'
+  IF to_regclass('public.db_health_snapshots') IS NOT NULL
      AND to_regclass('public.db_table_snapshots') IS NOT NULL
      AND to_regclass('public.db_query_snapshots') IS NOT NULL
      AND to_regclass('public.db_query_texts') IS NOT NULL
-     AND NOT has_table_privilege('anon', 'public.db_health_snapshots', 'SELECT')
-     AND NOT has_table_privilege('authenticated', 'public.db_health_snapshots', 'SELECT')
-     AND NOT has_table_privilege('anon', 'public.db_table_snapshots', 'SELECT')
-     AND NOT has_table_privilege('authenticated', 'public.db_table_snapshots', 'SELECT')
-     AND NOT has_table_privilege('anon', 'public.db_query_snapshots', 'SELECT')
-     AND NOT has_table_privilege('authenticated', 'public.db_query_snapshots', 'SELECT')
-     AND NOT has_table_privilege('anon', 'public.db_query_texts', 'SELECT')
-     AND NOT has_table_privilege('authenticated', 'public.db_query_texts', 'SELECT')
+     AND to_regclass('public.db_health_snapshots_snapshot_id_seq') IS NOT NULL
   THEN
-    RETURN;
+    IF COALESCE(obj_description('public.db_health_snapshots'::regclass, 'pg_class'), '')
+         = 'db_health_snapshots 3a59b4f67fe8'
+       AND (SELECT bool_and(relrowsecurity) FROM pg_class
+             WHERE oid IN ('public.db_health_snapshots'::regclass, 'public.db_table_snapshots'::regclass,
+                           'public.db_query_snapshots'::regclass, 'public.db_query_texts'::regclass))
+       AND NOT has_table_privilege('anon', 'public.db_health_snapshots', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+       AND NOT has_table_privilege('authenticated', 'public.db_health_snapshots', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+       AND NOT has_table_privilege('anon', 'public.db_table_snapshots', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+       AND NOT has_table_privilege('authenticated', 'public.db_table_snapshots', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+       AND NOT has_table_privilege('anon', 'public.db_query_snapshots', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+       AND NOT has_table_privilege('authenticated', 'public.db_query_snapshots', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+       AND NOT has_table_privilege('anon', 'public.db_query_texts', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+       AND NOT has_table_privilege('authenticated', 'public.db_query_texts', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+       AND NOT has_any_column_privilege('anon', 'public.db_health_snapshots', 'SELECT, INSERT, UPDATE, REFERENCES')
+       AND NOT has_any_column_privilege('authenticated', 'public.db_health_snapshots', 'SELECT, INSERT, UPDATE, REFERENCES')
+       AND NOT has_any_column_privilege('anon', 'public.db_table_snapshots', 'SELECT, INSERT, UPDATE, REFERENCES')
+       AND NOT has_any_column_privilege('authenticated', 'public.db_table_snapshots', 'SELECT, INSERT, UPDATE, REFERENCES')
+       AND NOT has_any_column_privilege('anon', 'public.db_query_snapshots', 'SELECT, INSERT, UPDATE, REFERENCES')
+       AND NOT has_any_column_privilege('authenticated', 'public.db_query_snapshots', 'SELECT, INSERT, UPDATE, REFERENCES')
+       AND NOT has_any_column_privilege('anon', 'public.db_query_texts', 'SELECT, INSERT, UPDATE, REFERENCES')
+       AND NOT has_any_column_privilege('authenticated', 'public.db_query_texts', 'SELECT, INSERT, UPDATE, REFERENCES')
+       AND NOT has_sequence_privilege('anon', 'public.db_health_snapshots_snapshot_id_seq', 'USAGE, SELECT, UPDATE')
+       AND NOT has_sequence_privilege('authenticated', 'public.db_health_snapshots_snapshot_id_seq', 'USAGE, SELECT, UPDATE')
+    THEN
+      RETURN;
+    END IF;
   END IF;
 
   -- 1. one row per run
@@ -191,5 +214,5 @@ BEGIN
   REVOKE ALL ON public.db_query_texts FROM anon, authenticated;
   REVOKE ALL ON SEQUENCE public.db_health_snapshots_snapshot_id_seq FROM anon, authenticated;
 
-  COMMENT ON TABLE public.db_health_snapshots IS 'db_health_snapshots 0e8c3b995b8d';
+  COMMENT ON TABLE public.db_health_snapshots IS 'db_health_snapshots 3a59b4f67fe8';
 END $mig$;

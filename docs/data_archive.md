@@ -158,12 +158,22 @@ price**. It stays in Postgres forever and those readers move to it. The raw
 snapshots behind it can then leave.
 
 **c. Whole-history readers must fail loudly, not train on half the data.**
-Retraining runs on the worker as well as locally (`tracking/job_queue.py:2896`,
-`retrain_model`), and so do research sweeps and the BYOM builds. After a move,
-a whole-history query against Postgres would return a truncated table with
-**no error**. So every whole-history loader goes through one reader. It knows
-the archive boundary (an `archive_watermarks` row per table), reads the
-archive for older rows, and raises if it can't. The same applies to the
+Model building runs on mike's PC (mike, 2026-11-15): retrains, sweeps and
+full-history BYOM backfills. The worker can also run them
+(`tracking/job_queue.py`, `retrain_model`), and it did occasionally: 7 retrains
+on 2026-09-01, 13 sweeps from 09-16 to 10-28, 8 BYOM backfills from 10-28 to
+11-05 (`worker_jobs`). After a move, a whole-history query against Postgres
+would return a truncated table with **no error**. So every whole-history
+loader goes through one reader. It knows the archive boundary (an
+`archive_watermarks` row per table, kept in Supabase). On the PC it reads the
+archive files for the older rows. On the worker, or wherever the files are
+missing, it raises. The worker's recurring jobs don't need the archive: the
+daily `byom_refresh` reads the current season, and the weekly calibration reads
+graded picks (`mv_scored_pick_outcomes`).
+
+Measured 2026-11-15 on the PC (32 GB of memory, pyarrow): all 83,872,923 prop
+rows in 13.6 s, and all 57,362,605 `odds` rows in 12.0 s. One day of props
+(65,774 rows) took 1.63 s from the files and 3.97 s from Supabase. The same applies to the
 ingestors' "is this already stored?" checks before buying history
 (`nba_odds_history.py`, `prop_odds_ingestor.py`, `odds_ingestor.py`). Without
 it, a purchase job would see an archived season as missing and **buy it
@@ -184,17 +194,18 @@ deleted now.
 | Layer | Where | Holds | Read by |
 |---|---|---|---|
 | Live | Supabase Postgres | everything production reads: all small tables whole and forever, the big snapshot tables for settled games inside their window, the opener/close table forever | scorers, app, Discord, worker jobs |
-| Archive | **Supabase Storage**, one Parquet file per table per month, never rewritten | every row that leaves Postgres | the one history reader, research, retrains |
-| PC copy | mike's machine | the live tables (daily, append-only) and the archive files | local retrains and research, through DuckDB |
+| Archive | **mike's PC**, one Parquet file per table per month, never rewritten | every row that leaves Postgres | the one history reader: retrains, sweeps, research |
+| Archive backup | **Supabase Storage**, the same files | the same rows | nothing routinely; it is the copy to restore from |
+| PC copy | mike's machine | the live tables (daily, append-only) | local research next to the archive |
 
-**Why the archive lives in Supabase Storage and not only on the PC.** CLAUDE.md
-§1b says everything is stored in Supabase first, and that the PC copy is a
-backup, never the only copy. A PC-only archive would make one disk in one house
-the sole copy of the paid history, and the cloud worker can't reach the PC.
-Storage satisfies both rules. It is part of the Supabase project, the PC
-mirror already copies its buckets, and the Pro plan includes 100 GB of it
-($0.0213 per GB per month beyond that; Supabase docs, "Manage Storage size
-usage"). The whole database is 3.47 GB as Parquet.
+**Why the archive has a second copy in Supabase Storage** (mike, 2026-11-15:
+*"Yes, keep a copy"*). Supabase Pro keeps 7 days of its own daily backups
+(Supabase docs, "Database Backups"). So a week after rows leave Postgres, the
+archive is their only copy. On the PC alone, one failed disk would lose the
+paid history. Storage is part of the Supabase project, and the Pro plan
+includes 100 GB of it ($0.0213 per GB per month beyond that; Supabase docs,
+"Storage pricing"). The whole database is 3.47 GB as Parquet. Nothing in this
+design needs Supabase's Team plan.
 
 **How a row leaves Postgres.** Copy one table-month to Parquet. Upload it.
 Read it back and check the row count and a hash of every row against Postgres.

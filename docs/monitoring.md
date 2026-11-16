@@ -78,10 +78,12 @@ mike: *"I want to add a section on database health, size and any other
 metrics you think are cool and change over time. both locals and supabase"*.
 
 **Where the numbers come from.** The worker job `db_health_snapshot`
-(`tracking/db_health.py`, hourly at :50 ET, deferred in the 05:40–07:15 ET
-morning disk window) reads Postgres's own statistics and writes four tables
+(`tracking/db_health.py`, hourly at :50 ET) reads Postgres's own statistics
+and writes four tables
 (`data/migrations/db_health_snapshots_2026_11_15.sql`, applied by
-`view_migrations`):
+`view_migrations`). The morning disk window turns away the 05:50 and 06:50
+ticks, and before noon ET so does a daily pipeline that still holds its lock
+(`docs/cloud_worker.md`), so those hours have no row:
 
 | Table | One row per | What it holds |
 |---|---|---|
@@ -128,8 +130,8 @@ click a row for its full text).
 
 **First snapshot**, taken by hand 2026-11-16 03:41:53 UTC (snapshot 1):
 109,078,711,443 bytes (pg_size_pretty: 102 GB), 316 tables, 117 statements
-stored, 1,352 ms of reads. History starts there; growth appears from the
-second snapshot.
+stored, 1,352 ms of reads. History starts there; growth appears once the
+snapshots span an hour.
 
 **Layouts on this tab are not saved.** The layout functions accept four tab
 names and `dashboard_layouts` checks the same four; adding a fifth changes

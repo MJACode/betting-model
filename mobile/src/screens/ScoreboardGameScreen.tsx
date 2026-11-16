@@ -24,6 +24,8 @@ import {
   mergeDkInplay,
   movementText,
   presentScoreboard,
+  scoreboardMarketLabel,
+  scoreboardMarketsFor,
   type ScoreboardQuote,
 } from '@/lib/scoreboard';
 import { colors, font, spacing, sectionHeaderText, card } from '@/lib/theme';
@@ -37,6 +39,12 @@ const MARKETS = [
   { id: 'spreads' as const, title: 'Spread' },
   { id: 'totals' as const, title: 'Total' },
 ];
+
+/** The blocks this sport gets: the board's own tabs (a fight has no spread). */
+function marketsFor(sport: string) {
+  const ids = scoreboardMarketsFor(sport);
+  return MARKETS.filter((m) => ids.includes(m.id));
+}
 
 /**
  * One game: DraftKings moneyline, spread and total, and how the line moved.
@@ -70,7 +78,7 @@ export function ScoreboardGameScreen() {
       }
       const [dk, ends, inplayRows, mlb, ncaaf, espn] = await Promise.all([
         fetchScoreboardDkOddsForGame(gameId).catch(() => []),
-        Promise.all(MARKETS.map(async (m) => [m.id, await fetchDkMarketEnds(gameId, m.id)] as const)).catch(
+        Promise.all(marketsFor(game.sport).map(async (m) => [m.id, await fetchDkMarketEnds(gameId, m.id)] as const)).catch(
           () => [] as const,
         ),
         fetchDkInplayForGames([gameId]),
@@ -185,9 +193,10 @@ export function ScoreboardGameScreen() {
       </Text>
       <Text style={styles.book}>DraftKings</Text>
       {card.situation ? <Text style={styles.situation}>{card.situation}</Text> : null}
-      {MARKETS.map((m) => (
+      {/* The board's tabs: a fight has no spread at DraftKings (review L4). */}
+      {marketsFor(card.sport).map((m) => (
         <View key={m.id} style={styles.block}>
-          <Text style={styles.blockTitle}>{m.id === 'spreads' && card.sport === 'NHL' ? 'Puck line' : m.title}</Text>
+          <Text style={styles.blockTitle}>{m.id === 'h2h' ? m.title : scoreboardMarketLabel(m.id, card.sport)}</Text>
           <MarketLines card={card} market={m.id} />
           {movement[m.id] ? <Text style={styles.move}>{movement[m.id]}</Text> : (
             <Text style={styles.move}>No DraftKings line stored for this market.</Text>
