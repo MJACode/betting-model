@@ -23,6 +23,9 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Database health recorded hourly (worker job db_health_snapshot: db_health_snapshots every hour, every table's size and the heaviest statements every 6 h); pg_stat_statements total is not monotonic, so load comes from pg_stat_database.active_time |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: Hong Kong pools before the off (2016–2018) and UK/Ireland at starting price (1988–2026), both null; free sets stored first (#1387, PC mirror now copies huge rows); UK loader year filter fixed |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Scoreboard follow-up: one sport's DB error no longer skips the others' live scores; live-score chunks read in parallel; UFC game screen has no Spread block |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, credit runway uses the last finished day's burn, not the partial morning |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, ops digest review: stranded NBA props page, other alerter WARNs are in the digest, calibration posts at 9:00, aborted stays dirty |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, ops channel pages outages only; the 7:15 ET post is the digest (offseason skips, job successes, calibration deltas, model-quality flags) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord price line links the book name to that bet's slip (app betslip URL, Massachusetts, sportsbook page when there is no outcome id) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord pick posts link the matchup to the game score page (ESPN gamecast, scoreboard fallback) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Back button: dead again on Pick Detail opened from a push (iOS 27.3); every pushed screen now draws the React Back pill, UIKit Back hidden; push taps wait for the app to be active |

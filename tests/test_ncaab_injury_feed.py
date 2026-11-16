@@ -588,13 +588,20 @@ def test_the_job_runs_every_five_minutes_and_raises_the_alert(monkeypatch):
     assert MAX_SILENCE["ncaab_injury_feed"] == 20
     assert "_publish_new_signals" not in inspect.getsource(scheduler.run_ncaab_injury_feed)
 
-    class Done:
+    class Quiet:
+        returncode = 0
+        stdout = ""
+        stderr = "NCAAB_INJURY_QUIET rotowire returned 0 rows on a game day\n"
+
+    class Broken:
         returncode = 1
         stdout = ""
-        stderr = "NCAAB_INJURY_ALERT rotowire returned 0 rows on a game day\n"
+        stderr = "NCAAB_INJURY_ALERT rotowire poll error HTTP 403\n"
 
-    monkeypatch.setattr(scheduler.subprocess, "run", lambda *a, **k: Done())
-    with pytest.raises(RuntimeError, match="0 rows on a game day"):
+    monkeypatch.setattr(scheduler.subprocess, "run", lambda *a, **k: Quiet())
+    scheduler.run_ncaab_injury_feed()
+    monkeypatch.setattr(scheduler.subprocess, "run", lambda *a, **k: Broken())
+    with pytest.raises(RuntimeError, match="poll error"):
         scheduler.run_ncaab_injury_feed()
 
 

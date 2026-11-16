@@ -101,6 +101,20 @@ COLOR_ALERT = 0xE74C3C
 COLOR_RECOVERY = 0x2ECC71
 
 
+def _state_dir_candidates() -> list[Path]:
+    """Volume first. A redeploy wipes the container disk and would re-page."""
+    found: list[Path] = []
+    for env_var in ("WATCHDOG_STATE_DIR", "RAILWAY_VOLUME_MOUNT_PATH"):
+        raw = os.environ.get(env_var, "").strip()
+        if raw:
+            found.append(Path(raw))
+    # Railway sets RAILWAY_ENVIRONMENT on every service. /data is the worker
+    # volume when the platform variable was not copied into the process.
+    if os.environ.get("RAILWAY_ENVIRONMENT", "").strip():
+        found.append(Path("/data"))
+    return found
+
+
 def alert_state_path(filename: str) -> Path:
     """Where a watch keeps its de-duplication state.
 
@@ -108,16 +122,22 @@ def alert_state_path(filename: str) -> Path:
     every deploy, so a redeploy during an incident would re-alert on everything
     that was already announced. Falls back to temp so a service with no volume
     still runs — noisier, but running.
+
+    `/data` is used only when it is already a directory. mkdir would create
+    it on the container disk and then treat that as the volume.
     """
-    for env_var in ("WATCHDOG_STATE_DIR", "RAILWAY_VOLUME_MOUNT_PATH"):
-        raw = os.environ.get(env_var, "").strip()
-        if raw:
-            try:
-                d = Path(raw)
+    for d in _state_dir_candidates():
+        try:
+            if d == Path("/data"):
+                if not d.is_dir():
+                    continue
+            else:
                 d.mkdir(parents=True, exist_ok=True)
-                return d / filename
-            except OSError:
-                continue
+                if not d.is_dir():
+                    continue
+            return d / filename
+        except OSError:
+            continue
     return Path(tempfile.gettempdir()) / filename
 
 
@@ -129,11 +149,18 @@ def read_alert_state(filename: str) -> dict:
         return {}
 
 
-def write_alert_state(filename: str, state: dict) -> None:
+def write_alert_state(filename: str, state: dict) -> bool:
+    """True when the stamp is on disk. False is a read-only path.
+
+    Callers that page only after a saved arm must page anyway when this
+    returns False, or a condition stays armed in memory and silent forever.
+    """
     try:
         alert_state_path(filename).write_text(json.dumps(state), encoding="utf-8")
     except OSError as exc:  # noqa: BLE001 — bookkeeping must not break the watch
         logger.warning(f"could not persist alert state {filename}: {exc}")
+        return False
+    return True
 
 
 def should_notify(state: dict, key: str, now: datetime, minutes: int) -> bool:

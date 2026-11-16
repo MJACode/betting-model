@@ -104,12 +104,31 @@ def _rows(conn, sql, params=()):
 
 # ── the six rules, each a pure function of rows so it can be tested ──────────
 
+# deploy-cutoff is the SIGTERM drain. `aborted` is listed: _abort_orphans
+# stamps it on a crash as well as a deploy, and that has to stay visible.
+_PASS_META = frozenset({
+    "deploy-cutoff", "health-check", "health_check",
+    "model-quality", "model_quality",
+})
+
+
+def _producer_failed(failed) -> list[str]:
+    """Step names worth a morning line. A bare count is left as-is."""
+    text = str(failed).strip()
+    if not text or text.isdigit():
+        return [text] if text else []
+    return [s.strip() for s in text.split(",")
+            if s.strip() and s.strip() not in _PASS_META]
+
+
 def findings_from_passes(rows) -> list[str]:
-    """A pass that failed, aborted, or never finished.
+    """A pass that failed for a real step, or never finished.
 
     `minutes` is NULL when finished_at is NULL -- the pass died OR its
     finish-ledger call failed. The contract says not to over-read that, so the
-    wording stays neutral.
+    wording stays neutral. `deploy-cutoff` is the SIGTERM drain and is not
+    a finding. `aborted` is: a crash mid-pass is stamped that way when the
+    next pass starts.
     """
     out = []
     for r in rows or []:
@@ -118,16 +137,26 @@ def findings_from_passes(rows) -> list[str]:
             out.append(f"pass at {started} never recorded a finish "
                        f"(died, or its finish-ledger call failed)")
         elif failed:
-            out.append(f"pass at {started} recorded {failed} failed step(s) "
+            names = _producer_failed(failed)
+            if not names:
+                continue
+            shown = failed if str(failed).strip().isdigit() else ", ".join(names)
+            out.append(f"pass at {started} recorded {shown} failed step(s) "
                        f"of {steps_total}")
     return out
 
 
 def findings_from_checks(rows) -> list[str]:
-    """Any health check not OK. CRIT first — that ordering is the report's."""
+    """Health checks that are not OK and not an offseason skip.
+
+    SKIPPED is the gate doing its job (no games). Listing it made every
+    morning an orange finding list through the MLB winter.
+    """
     out = []
     for r in rows or []:
         name, severity, status, detail = (list(r) + [None] * 4)[:4]
+        if str(status or "").upper() == "SKIPPED":
+            continue
         out.append(f"health check `{name}` is {status} ({severity}): {detail}")
     return out
 
@@ -294,6 +323,105 @@ def _stale_weeklies(conn, today: date | None = None) -> list[str]:
 
 # ── the run ─────────────────────────────────────────────────────────────────
 
+def _quality_lines(conn) -> list[str]:
+    """Model-quality FLAGGEDs. The monitor writes a table and does not page."""
+    rows = _rows(conn, """
+        SELECT model_key, check_name, severity, left(detail, 180)
+        FROM model_quality_checks
+        WHERE run_date >= to_char(
+                  (now() AT TIME ZONE 'America/New_York')::date - 1, 'YYYY-MM-DD')
+          AND status = 'FLAGGED'
+        ORDER BY CASE severity WHEN 'CRIT' THEN 0 ELSE 1 END, model_key, check_name
+    """)
+    return [f"model quality `{model}` {check} ({sev}): {detail}"
+            for model, check, sev, detail in rows]
+
+
+def _job_error_lines(conn) -> list[str]:
+    rows = _rows(conn, """
+        SELECT job_id, left(detail, 180)
+        FROM job_heartbeats
+        WHERE last_status = 'error'
+        ORDER BY job_id
+    """)
+    return [f"`{job}` failed its last run: {detail or '(no detail)'}"
+            for job, detail in rows]
+
+
+def _job_success_note(conn) -> str:
+    rows = _rows(conn, """
+        SELECT job_type, count(*)
+        FROM worker_jobs
+        WHERE status = 'done'
+          AND finished_at >= now() - interval '24 hours'
+        GROUP BY 1
+        ORDER BY 2 DESC, 1
+    """)
+    if not rows:
+        return ""
+    parts = [f"{n} {name}" for name, n in rows[:8]]
+    extra = sum(int(n) for _, n in rows[8:])
+    if extra:
+        parts.append(f"{extra} other")
+    return "Jobs finished: " + ", ".join(parts)
+
+
+def _deploy_kill_note(conn, hours: int) -> str:
+    rows = _rows(conn, """
+        SELECT count(*)
+        FROM pipeline_runs
+        WHERE started_at::timestamptz >= now() - (%s || ' hours')::interval
+          AND (
+                failed_steps = 'aborted'
+             OR failed_steps = 'deploy-cutoff'
+             OR failed_steps LIKE '%%deploy-cutoff%%'
+             OR failed_steps LIKE '%%aborted%%'
+          )
+    """, (hours,))
+    n = int(rows[0][0] or 0) if rows and rows[0] and rows[0][0] is not None else 0
+    if not n:
+        return ""
+    return (f"{n} deploy-interrupted pass(es) in the window "
+            f"(aborted or deploy-cutoff)")
+
+
+def _credit_note(conn) -> str:
+    rows = _rows(conn, """
+        SELECT requests_remaining, requests_used
+        FROM odds_api_quota
+        ORDER BY quota_date DESC
+        LIMIT 2
+    """)
+    if not rows or rows[0][0] is None:
+        return ""
+    remaining = float(rows[0][0])
+    used = float(rows[0][1] or 0)
+    burn = ""
+    if len(rows) > 1 and rows[1][1] is not None and float(rows[1][1]) <= used:
+        daily = used - float(rows[1][1])
+        if daily > 0:
+            burn = f", ~{remaining / daily:.1f} days at {daily:,.0f}/day"
+    return f"Credits remaining: {remaining:,.0f}{burn}"
+
+
+def _alerter_digest_lines(conn) -> list[str]:
+    """WARN conditions the failure alerter does not page.
+
+    Health rows are already findings. Stranded prop bets page. What is left
+    is a lost prop decision, a start-time disagreement, and a watch that
+    could not read. Those used to page every 12 hours. They belong here.
+    """
+    try:
+        from datetime import datetime, timezone
+
+        from tracking.failure_alerter import _conditions, unpaged_condition_lines
+        return unpaged_condition_lines(
+            _conditions(conn, datetime.now(timezone.utc)))
+    except Exception as exc:  # noqa: BLE001 — the digest still posts
+        logger.warning(f"pipeline_watch: alerter section failed: {exc}")
+        return []
+
+
 def run_watch(conn, hours: int = 24, today: date | None = None) -> dict:
     """Collect, judge against the six rules, announce. Returns the summary."""
     if not _enabled():
@@ -304,6 +432,7 @@ def run_watch(conn, hours: int = 24, today: date | None = None) -> dict:
 
     data = collect(conn, hours)
 
+    today = today or date.today()
     findings: list[str] = []
     findings += findings_from_passes(data.get("recent_passes"))
     findings += findings_from_checks(data.get("failing_checks"))
@@ -312,13 +441,22 @@ def run_watch(conn, hours: int = 24, today: date | None = None) -> dict:
     findings += _step_regressions(conn, hours)
     findings += _silent_kinds(conn, hours)
     findings += _stale_weeklies(conn, today)
+    findings += _quality_lines(conn)
+    findings += _job_error_lines(conn)
+    findings += _alerter_digest_lines(conn)
+
+    notes = [n for n in (
+        _credit_note(conn),
+        _job_success_note(conn),
+        _deploy_kill_note(conn, hours),
+    ) if n]
 
     picks = sum(int(r[2] or 0) for r in (data.get("picks_written") or [])
                 if len(r) > 2 and str(r[2]).isdigit())
     passes = len(data.get("recent_passes") or [])
 
     summary = {"status": "ok", "hours": hours, "findings": findings,
-               "passes": passes, "picks": picks}
+               "passes": passes, "picks": picks, "notes": notes}
     summary["posted"] = _announce_and_ledger(conn, summary, today or date.today())
     logger.info(f"pipeline_watch: {len(findings)} finding(s), "
                 f"{passes} pass(es), {picks} picks, posted={summary['posted']}")
@@ -354,14 +492,21 @@ def _announce(s: dict) -> bool:
     """
     from tracking.discord_notifier import _post
 
+    header = (f"{s['passes']} pass(es) recorded, "
+              f"{s['picks']} picks written in the last {s['hours']}h.")
+    notes = "\n".join(s.get("notes") or [])
     if s["findings"]:
-        body = "\n".join(f"• {f}" for f in s["findings"][:15])
-        title = f"🔎 Pipeline watch — {len(s['findings'])} finding(s)"
+        body = header
+        if notes:
+            body += "\n" + notes
+        body += "\n" + "\n".join(f"• {f}" for f in s["findings"][:15])
+        title = f"🔎 Ops digest — {len(s['findings'])} item(s)"
         colour = 0xE67E22
     else:
-        body = (f"Nothing to flag. {s['passes']} pass(es) recorded, "
-                f"{s['picks']} picks written in the last {s['hours']}h.")
-        title = "🔎 Pipeline watch — clean"
+        body = f"Nothing to flag. {header}"
+        if notes:
+            body += "\n" + notes
+        title = "🔎 Ops digest — clean"
         colour = 0x2ECC71
 
     url = config.DISCORD_WEBHOOK_OPS

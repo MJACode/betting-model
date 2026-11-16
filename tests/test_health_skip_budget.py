@@ -149,10 +149,28 @@ def test_mlb_game_day_feeds_stay_skipped_through_the_longest_measured_offseason(
     171 days. The 14-day default would turn the streak into STALE and
     fail the daily step for the rest of the winter.
     """
-    for check in ("mlb_bullpen_workload", "mlb_player_game_log", "umpires"):
+    for check in ("mlb_bullpen_workload", "mlb_player_game_log", "umpires",
+                  "mlb_team_stats", "mlb_weather", "mlb_pitcher_stats",
+                  "lineups", "player_prop_odds", "public_betting"):
         results = [_res(check, detail="offseason")]
-        sh._apply_skip_budgets(results, {check: 171})
+        sh._apply_skip_budgets(results, {check: 171}, games_soon=set())
         assert results[0]["status"] == SKIPPED, (check, results[0])
+
+
+def test_an_mlb_gate_pages_when_a_game_is_inside_14_days():
+    """Winter stays quiet. A shut gate during a season, with a game on the
+    schedule, is the stuck gate the budget exists for."""
+    results = [_res("mlb_team_stats", detail="no MLB games today")]
+    sh._apply_skip_budgets(results, {"mlb_team_stats": 20},
+                           games_soon={"mlb_team_stats"})
+    assert results[0]["status"] == STALE
+    assert "14 days" in results[0]["detail"]
+
+
+def test_an_mlb_offseason_past_190_days_stays_skipped_with_no_game_soon():
+    results = [_res("mlb_weather", detail="no MLB games today")]
+    sh._apply_skip_budgets(results, {"mlb_weather": 200}, games_soon=set())
+    assert results[0]["status"] == SKIPPED
 
 
 # ── the persist ordering ─────────────────────────────────────────────────────

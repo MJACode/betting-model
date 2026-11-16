@@ -603,6 +603,9 @@ class GamedayWorker:
         return None
 
     def _alert_ops(self, message: str) -> None:
+        # Production does not pass an alerter (scheduler.run_nfl_live_worker).
+        # The job is disabled. Wiring this later goes through post_ops_alert
+        # and the failure alerter's two-tick confirm, not a post per tick.
         log.error(message)
         if self.alerter:
             try:
