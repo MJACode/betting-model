@@ -73,6 +73,7 @@ import {
   PlayerStatsBackButton,
   SettingsSectionBackButton,
   SettingsSectionHeaderTitle,
+  StackBackButton,
 } from '@/components/StackBackButton';
 import { SETTINGS_SECTION_TITLE } from '@/lib/settingsHome';
 import {
@@ -402,14 +403,26 @@ function App() {
           // stall, only taps that went nowhere. Apple's reported iOS 27 bug is a
           // Back button carrying a custom title; its workaround is this mode.
           // So no screen sets headerBackTitle (tests/test_mobile_back_button.py).
-          screenOptions={{ headerBackButtonDisplayMode: 'minimal' }}
+          //
+          // REACT BACK PILL ON EVERY PUSHED SCREEN (2026-11-15). The arrow-only
+          // system Back went dead again: Pick Detail, opened from a push
+          // notification, iOS 27.3. Player Stats and Settings sections had
+          // already moved to the React pill and have not frozen since, so
+          // every pushed screen now draws it and UIKit's Back is hidden.
+          // Minimal mode stays for any screen that turns the system Back on.
+          // Edge swipe-back is unaffected (gestureEnabled defaults on).
+          screenOptions={{
+            headerBackButtonDisplayMode: 'minimal',
+            headerBackVisible: false,
+            headerLeft: () => <StackBackButton />,
+          }}
         >
           <Stack.Screen
             name="Tabs"
             component={TabsRoot}
-            // With the arrow-only Back, iOS's long-press Back menu lists the
-            // earlier screen by its title. Without one it would read "Tabs".
-            // It names the tab the reader came from (UX review, 2026-11-08).
+            // Named for the tab the reader came from (UX review, 2026-11-08).
+            // It fed iOS's long-press Back menu, which went with UIKit's Back
+            // on 2026-11-15; kept so the route never surfaces as "Tabs".
             options={({ route }) => {
               const tab = getFocusedRouteNameFromRoute(route) ?? 'Picks';
               return { headerShown: false, title: tab === 'TrackRecord' ? 'Record' : tab };
@@ -504,8 +517,9 @@ function App() {
             component={SettingsScreen}
             options={{ title: 'Settings' }}
           />
-          {/* Chevron + "Back" (#1239), same pill as Player Stats. Settings
-              itself keeps the arrow-only system back from screenOptions. */}
+          {/* Chevron + "Back" (#1239), same pill as Player Stats. Its own
+              button only for the empty-stack fallback (Tabs under Settings);
+              Settings itself takes the navigator-default pill. */}
           <Stack.Screen
             name="SettingsSection"
             component={SettingsSectionScreen}

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import type { NavigationContainerRef } from '@react-navigation/native';
 
@@ -6,6 +7,7 @@ import { routeForPush, type PushRoute } from '@/lib/pushRoute';
 import { setSportForVisit } from '@/hooks/useSportFilter';
 import { readAuthStatus, useAuth } from '@/hooks/useAuth';
 import { AUTH_ENABLED } from '@/lib/authConfig';
+import { notePush } from '@/lib/freezeLog';
 import type { RootStackParamList } from '@/types';
 
 type NavRef = NavigationContainerRef<RootStackParamList>;
@@ -100,7 +102,46 @@ function navigateTo(navRef: NavRef, route: PushRoute): boolean {
  */
 export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
   const { status } = useAuth();
+  // NAVIGATE ONLY ONCE THE APP IS ACTIVE (2026-11-15). Both Pick Detail
+  // freezes Matt hit from a push (app_errors 85 and 87, iOS 27.3) have the
+  // same trail: `screen PickDetail` logged ~0.2 s BEFORE `app_state active`,
+  // then taps that went nowhere with no pop-up open. The same screen opened
+  // from the list while active popped normally. A tap on a notification
+  // fires the listener while the app is still coming up, and the push was
+  // being started in that window. Hold the route until iOS says active.
+  // A ref, not state: a state here re-renders the whole App root on every
+  // foreground, and the held route would wait a commit after iOS says active.
+  const appActiveRef = useRef(AppState.currentState === 'active');
   const pendingRef = useRef<PushRoute | null>(null);
+  // `ready` mirrored for the AppState listener, which outlives renders.
+  const readyNowRef = useRef(ready);
+  readyNowRef.current = ready;
+
+  /** Perform the held route if everything it needs is now true. */
+  const replayRef = useRef(() => {});
+  replayRef.current = () => {
+    if (!appActiveRef.current || !readyNowRef.current || !navRef.isReady()) return;
+    if (!shellOpen()) return;
+    const route = pendingRef.current;
+    if (!route) return;
+    pendingRef.current = null;
+    notePush('replay');
+    navigateTo(navRef, route);
+  };
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      appActiveRef.current = next === 'active';
+      if (appActiveRef.current) replayRef.current();
+    });
+    // Re-read AFTER subscribing. The change to active can land between the
+    // first render's read and this effect (a cold start from a notification),
+    // and then no event ever reaches the listener: the tap would be held for
+    // the whole session.
+    appActiveRef.current = AppState.currentState === 'active';
+    replayRef.current();
+    return () => sub.remove();
+  }, []);
   // `ready` in a ref, read at dispatch time. It must NOT be an effect
   // dependency: `ready` always goes false -> true on launch (onReady fires
   // after the first render), so a dependency on it guarantees one teardown —
@@ -116,7 +157,15 @@ export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
 
   useEffect(() => {
     const dispatch = (route: PushRoute) => {
-      if (readyRef.current && navRef.isReady() && navigateTo(navRef, route)) return;
+      if (
+        appActiveRef.current &&
+        readyRef.current &&
+        navRef.isReady() &&
+        navigateTo(navRef, route)
+      ) {
+        return;
+      }
+      if (!appActiveRef.current) notePush('held');
       pendingRef.current = route;
     };
 
@@ -161,13 +210,9 @@ export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
   }, []);
 
   // Replay whatever arrived before the navigator could take it, and a tap
-  // that landed while signed out, once the session is in.
+  // that landed while signed out, once the session is in. A tap held for
+  // the app to become active is replayed by the AppState listener above.
   useEffect(() => {
-    if (!ready || !navRef.isReady()) return;
-    if (!shellOpen()) return;
-    const route = pendingRef.current;
-    if (!route) return;
-    pendingRef.current = null;
-    navigateTo(navRef, route);
+    replayRef.current();
   }, [navRef, ready, status]);
 }

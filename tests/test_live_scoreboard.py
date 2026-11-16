@@ -148,6 +148,9 @@ class _Conn:
     def commit(self):
         self.commits += 1
 
+    def rollback(self):
+        self.rollbacks = getattr(self, "rollbacks", 0) + 1
+
 
 def test_run_once_polls_only_live_sports_and_upserts():
     calls = []
@@ -421,3 +424,29 @@ def test_college_scoreboards_ask_for_all_of_division_one(monkeypatch):
     assert seen[0]["groups"] == 50 and seen[0]["limit"] == 500
     assert seen[1]["groups"] == 50 and seen[1]["limit"] == 500
     assert "groups" not in seen[2]
+
+
+def test_one_sports_database_error_does_not_cost_the_others_their_tick():
+    # Review L1 (2026-11-15): NCAAB sorts before NFL, so an error reading
+    # ncaab_events used to abort the tick before NFL was written.
+    import pytest
+    games = GAMES + [{"game_id": "NCAAB_x", "sport": "NCAAB", "game_date": "2026-10-29",
+                      "home_team": "A", "away_team": "B", "home_score": None,
+                      "away_score": None, "commence_time": "2026-10-30T00:30:00Z"}]
+
+    class Conn(_Conn):
+        def execute(self, sql, params=None):
+            if "FROM public.ncaab_events" in sql:
+                raise RuntimeError("relation ncaab_events does not exist")
+            return super().execute(sql, params)
+
+    def fetch(sport, dates):
+        if sport == "NFL":
+            return {"events": [_event("in", situation={"possession": "29"})]}
+        return {"events": []}
+
+    conn = Conn(games)
+    with pytest.raises(RuntimeError, match="NCAAB"):
+        ls.run_once(conn, now=datetime(2026, 10, 30, 1, 0, tzinfo=timezone.utc), fetch=fetch)
+    assert [r["game_id"] for r in conn.upserts] == ["NFL_2026_08_CAR_GB"]
+    assert conn.rollbacks == 1
