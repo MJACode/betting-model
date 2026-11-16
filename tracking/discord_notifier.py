@@ -115,6 +115,37 @@ def _matchup(sport: str, home: str | None, away: str | None) -> str:
     return f"{away} @ {home}"
 
 
+def _attach_score_links(signals: list[dict], conn=None, *,
+                        network: bool = True) -> None:
+    """Fill score_url on each signal. A failure leaves the matchup plain
+    or on the sport scoreboard; it never stops the post."""
+    if not signals:
+        return
+    try:
+        from tracking.score_links import attach
+        attach(signals, conn, network=network)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(f"Discord score links skipped ({type(exc).__name__})")
+
+
+def _linked_matchup(s: dict, slate_date=None) -> str:
+    """The matchup line, as a masked link when a score page can be named.
+
+    Field values render the link. The field name stays the pick label, word
+    for word: Discord does not link a field name. Anything that fails, or a
+    value that would no longer fit Discord's field cap, stays plain text.
+    """
+    plain = _matchup(s.get("sport"), s.get("home"), s.get("away"))
+    if not plain:
+        return ""
+    try:
+        from tracking.score_links import mask, static_url
+        url = s.get("score_url") or static_url(s, slate_date=slate_date)
+        return mask(plain, url)
+    except Exception:                                          # noqa: BLE001
+        return plain
+
+
 def _posted_et(ts_raw: str | None, *, seconds: bool = False) -> str:
     """When the pick was WRITTEN TO THE DATABASE, in ET.
 
@@ -644,7 +675,8 @@ def _discord_relative(ts_raw) -> str:
 
 def _post_picks(url: str, sport: str, signals: list[dict], game_date: str,
                 live: bool = False,
-                note: str | None = None) -> list[tuple[list[dict], str]]:
+                note: str | None = None,
+                conn=None) -> list[tuple[list[dict], str]]:
     """Post a slate as one embed per message (chunked at Discord's 25-field cap).
 
     Returns one (signals, message_id) pair per chunk that was CONFIRMED
@@ -662,6 +694,13 @@ def _post_picks(url: str, sport: str, signals: list[dict], game_date: str,
     #
     # Groups are emitted in date order, so today's slate always precedes
     # tomorrow's in the channel.
+    # Score links are resolved once for the batch, before any webhook call.
+    # A lookup that fails or runs out of time still posts. A row with no
+    # date of its own (live) uses the slate date; a row that has one keeps it.
+    for sig in signals:
+        if not sig.get("game_date"):
+            sig["game_date"] = game_date
+    _attach_score_links(signals, conn)
     groups: dict = {}
     for sig in signals:
         groups.setdefault(sig.get("game_date") or game_date, []).append(sig)
@@ -1362,7 +1401,7 @@ def publish_price(s: dict) -> tuple[float | None, str | None]:
     return best_odds, _BOOK_NAMES.get(book, book)
 
 
-def _signal_field(s: dict) -> dict:
+def _signal_field(s: dict, slate_date=None) -> dict:
     """One pick as an embed field. Deliberately carries ONLY game, time, odds and
     unit stake — no model probability, no edge. Those are the model's IP and are
     not published to the channel."""
@@ -1373,7 +1412,7 @@ def _signal_field(s: dict) -> dict:
     # ever posted for any sport. The key is supplied now; this makes the class
     # of bug non-fatal rather than relying on three producers staying in sync.
     context = " · ".join(x for x in (
-        _matchup(s.get("sport"), s.get("home"), s.get("away")),
+        _linked_matchup(s, slate_date),
         _game_time_et(s.get("commence")),
     ) if x)
 
@@ -1424,9 +1463,18 @@ def _signal_field(s: dict) -> dict:
     # The label beside the posted stake, without the old NFL sizing figure
     # ("· 0.79u"): one unit number per pick (mike, 2026-11-04). The bet is
     # word for word; the stored row is not touched.
+    value = f"{context}\n{line}" if context else line
+    # A score link that would blow Discord's field cap is dropped. The pick
+    # still posts, with the matchup as plain text.
+    if len(value) > _FIELD_VALUE_MAX:
+        plain = _matchup(s.get("sport"), s.get("home"), s.get("away"))
+        context = " · ".join(x for x in (
+            plain, _game_time_et(s.get("commence")),
+        ) if x)
+        value = f"{context}\n{line}" if context else line
     return {
         "name": label_without_stake(s["label"]),
-        "value": f"{context}\n{line}" if context else line,
+        "value": value,
         "inline": False,
     }
 
@@ -1451,7 +1499,7 @@ def _picks_embed(sport: str, signals: list[dict], game_date: str,
     embed = {
         "title": title,
         "color": _COLOR_LIVE if live else _COLOR_SIGNAL,
-        "fields": [_signal_field(s) for s in signals],
+        "fields": [_signal_field(s, slate_date=game_date) for s in signals],
     }
     if note:
         embed["description"] = note
@@ -1833,7 +1881,7 @@ def notify_discord_restate(target_date: str | None = None,
             # header with nothing under it, and the retry added a second header
             # -- observed live on the first attempt, 2026-08-28 13:19.
             chunks = _post_picks(url, sport, group, target_date,
-                                 note=_RESTATE_NOTE)
+                                 note=_RESTATE_NOTE, conn=conn)
             delivered = sum(len(c) for c, _ in chunks)
             if delivered < len(group):
                 logger.error(f"Discord restate[{sport}]: delivered "
@@ -1862,6 +1910,9 @@ def notify_discord_restate(target_date: str | None = None,
                     logger.info(f"[dry-run] discord restate(free) "
                                 f"\u2192 {pick['label']}")
                 else:
+                    if not pick.get("game_date"):
+                        pick["game_date"] = target_date
+                    _attach_score_links([pick], conn, network=not dry_run)
                     embed = _free_pick_embed(pick, target_date)
                     embed["description"] = _RESTATE_NOTE      # one atomic message
                 if not dry_run and _post(free_url, {"embeds": [embed]}):
@@ -1981,7 +2032,7 @@ def _post_new_signals(conn, target_date: str, dry_run: bool) -> int:
             posted_total += len(capped)
             continue
 
-        chunks = _post_picks(url, sport, capped, target_date)
+        chunks = _post_picks(url, sport, capped, target_date, conn=conn)
         delivered = sum(len(c) for c, _ in chunks)
         if delivered < len(capped):
             logger.error(f"Discord[{sport}]: delivered {delivered}/{len(capped)}; "
@@ -2112,7 +2163,7 @@ def _post_new_live_signals(conn, target_date: str, dry_run: bool) -> int:
             continue
 
         chunks = _post_picks(url, sport, capped, target_date, live=True,
-                             note=LIVE_STALENESS_NOTE)
+                             note=LIVE_STALENESS_NOTE, conn=conn)
         delivered = sum(len(c) for c, _ in chunks)
         for chunk, message_id in chunks:
             for s in chunk:
@@ -2219,8 +2270,10 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
     re-render it through the exact same path — a correction that formats its own
     stake differently from the original would be its own bug."""
     pretty = datetime.fromisoformat(target_date).strftime("%a %b %d").replace(" 0", " ")
+    if not pick.get("game_date"):
+        pick["game_date"] = target_date
     context = " · ".join(x for x in (
-        _matchup(pick["sport"], pick["home"], pick["away"]),
+        _linked_matchup(pick, target_date),
         _game_time_et(pick["commence"]),
     ) if x)
     # The best BETTABLE price and the book that has it, exactly as the paid
@@ -2281,6 +2334,9 @@ def notify_discord_free_pick(target_date: str | None = None,
             logger.info(f"Discord(free): no qualifying signal for {target_date}")
             return 0
 
+        if not pick.get("game_date"):
+            pick["game_date"] = target_date
+        _attach_score_links([pick], conn, network=not dry_run)
         embed = _free_pick_embed(pick, target_date)
 
         if dry_run:
@@ -3592,7 +3648,8 @@ def _discord_jump_line(message_id, guild_id: str | None,
 def _void_field(pick: dict, webhook_url: str | None) -> dict:
     """One pick. The name is pick_label, word for word."""
     label = str(pick.get("label") or "")
-    matchup = _matchup(pick.get("sport"), pick.get("home"), pick.get("away"))
+    plain = _matchup(pick.get("sport"), pick.get("home"), pick.get("away"))
+    matchup = _linked_matchup(pick, pick.get("game_date"))
     odds, book = publish_price(pick)
     price = _american(odds)
     if book:
@@ -3615,7 +3672,11 @@ def _void_field(pick: dict, webhook_url: str | None) -> dict:
     original = _discord_jump_line(pick.get("message_id"), guild_id, channel_id)
     if original:
         bits.append(original)
-    return {"name": label, "value": "\n".join(bits), "inline": False}
+    value = "\n".join(bits)
+    if len(value) > _FIELD_VALUE_MAX and matchup != plain:
+        bits[0] = plain
+        value = "\n".join(bits)
+    return {"name": label, "value": value, "inline": False}
 
 
 def _embed_size(title: str, description: str, fields: list[dict]) -> int:
@@ -3874,6 +3935,8 @@ def notify_discord_void(pick_ids, reason: str | None = None,
         by_sport: dict[str, list[dict]] = {}
         for pick in pending:
             by_sport.setdefault(pick["sport"] or "", []).append(pick)
+        # Stored ids only on a dry run: that path makes no HTTP call.
+        _attach_score_links(pending, conn, network=not dry_run)
 
         payloads: list[dict] = []
         for sport in sorted(by_sport):
