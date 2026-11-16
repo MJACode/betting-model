@@ -1144,6 +1144,52 @@ _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
 _ALWAYS_JOBS = {"heartbeat_watchdog"}
 
 
+# Run once just after boot, then on their own schedules (#1359). Each of these
+# supervisors fires only inside its window, so a container restarted after
+# 23:50 ET waited until 11:00 ET to relaunch the college football and MLB
+# loops. On 2026-11-14 a 23:59 ET restart left North Dakota State at Hawai'i
+# without its in-play model for the second half. Inside a window a restart
+# still left up to 10 minutes uncovered.
+#
+# Each entry is the supervisor's OWN job, given a first run time, never a second
+# job: max_instances=1 is per job, so a separate boot job could start a second
+# copy of a loop the cron had already started. Every loop here exits by itself
+# when nothing is live, so a boot run with no game on is one idle check. The
+# pre-game poller never exits, and its boot run only closes its first 10 minutes.
+#
+# Not here: dk_direct_feed and bovada_feed run their full --minutes whether or
+# not a game is live (15 minutes of polling at 04:40 ET for nothing).
+#
+# The delay clears the old container. Railway stops it once the new one is
+# active (docs/cloud_worker.md), its scheduler passes the stop to its loops
+# (tracking/deploy_drain.py), and no loop handles the signal, so each stops at
+# once. On 2026-11-14 the old college football loop stopped in the same second
+# the new scheduler started (its heartbeat, 23:59:17 ET); on 2026-11-15 the old
+# in-play container was removed 3 s after the new one went live. Nothing outside
+# one process stops two copies of a loop, so the margin matters. The stagger
+# keeps the loops from starting in the same second.
+BOOT_RELAUNCH_JOBS = ("ncaaf_live_loop", "live_loop", "nfl_live_leader",
+                      "nfl_live_worker", "nba_live", "ncaab_live", "ncaabw_live",
+                      "euroleague_live", "pregame_poller")
+BOOT_RELAUNCH_DELAY_S = 60
+BOOT_RELAUNCH_STAGGER_S = 5
+
+
+def schedule_boot_relaunch(sched, now, delay_s: float = BOOT_RELAUNCH_DELAY_S,
+                           stagger_s: float = BOOT_RELAUNCH_STAGGER_S) -> dict:
+    """Give each in-play supervisor this service runs a first run just after
+    `now`. Call before sched.start(). Returns {job id: first run time}; a job
+    this service does not run, or that its switch turned off, is not there."""
+    runs = {}
+    for jid in BOOT_RELAUNCH_JOBS:
+        if sched.get_job(jid) is None:
+            continue
+        at = now + timedelta(seconds=delay_s + len(runs) * stagger_s)
+        sched.modify_job(jid, next_run_time=at)
+        runs[jid] = at
+    return runs
+
+
 def owns(job_id: str) -> bool:
     """True when THIS service should schedule that job.
 
@@ -3859,12 +3905,16 @@ def main() -> None:
         id="refresh_catch_up",
         name="Refresh catch-up (once, 60s after boot)",
     )
+    # After the boot catch-ups above, so a slow weekly catch-up cannot push the
+    # boot run past its misfire grace (#1359).
+    schedule_boot_relaunch(sched, now)
     log.info("Betting scheduler starting (timezone=%s). Registered jobs:", TIMEZONE)
     for job in sched.get_jobs():
-        # next_run_time isn't populated until the scheduler starts, so compute the
-        # next fire directly from the trigger for the startup banner.
+        # next_run_time isn't populated until the scheduler starts unless it was
+        # set (the boot relaunch above), so otherwise compute the next fire
+        # directly from the trigger for the startup banner.
         try:
-            nxt = job.trigger.get_next_fire_time(None, now)
+            nxt = getattr(job, "next_run_time", None) or job.trigger.get_next_fire_time(None, now)
         except Exception:  # noqa: BLE001
             nxt = "?"
         log.info("  - %s [%s] next: %s", job.id, job.name, nxt)
