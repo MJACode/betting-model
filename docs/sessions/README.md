@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, PR CI red since #1381: the voided-free-pick test's sqlite stand-in for the per-pick lookup lacked the two bet-slip link columns; test fixed, no production change |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord price line links the book name to that bet's slip (app betslip URL, Massachusetts, sportsbook page when there is no outcome id) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord pick posts link the matchup to the game score page (ESPN gamecast, scoreboard fallback) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Retool ops dashboard source moved into retool/models-ops/ (69 files, byte-exact); Protect app needs Enterprise (account on Team); push back via Retool's import tool proved end to end with a no-change publish to the live app (69/69 byte-identical, loads, #1382 closed) |
