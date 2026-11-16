@@ -49,6 +49,7 @@ import {
   signalsNowLine,
   nowLineTone,
   nowLineToneSpeech,
+  signalsMoveLine,
   signalsPriceText,
   signalsReasonLine,
   signalsStakeLine,
@@ -1578,9 +1579,9 @@ check(
       !/flexBasis: '100%'/.test(card),
   );
   check(
-    'Signals movement chip uses a true minus; the board chip does not',
-    card.includes('trueMinus(movementSummary.label)') &&
-      card.split('trueMinus(movementSummary.label)').length === 2,
+    'Signals shows ONE move row (no Now line under the hero); the board keeps its chip',
+    card.includes('{signalsMove}') && !card.includes('trueMinus(movementSummary.label)') &&
+      card.includes('{movementSummary.label}') && !/\{signalsNow \? \(/.test(card),
   );
   check(
     'a later day joins the clock; today stays the clock',
@@ -1652,10 +1653,27 @@ check(
   check('VoiceOver words carry the direction',
     nowLineToneSpeech('better') === 'better than the pick' && nowLineToneSpeech('worse') === 'worse than the pick' && nowLineToneSpeech(null) === '');
   const card = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf8');
-  check('PickCard colours the Now line with the inks and an arrow, and speaks the tone',
-    /signalsNowTone === 'better' && styles\.nowLineBetter/.test(card) &&
-    /nowLineBetter: \{ color: colors\.betInk \}/.test(card) && /nowLineWorse: \{ color: colors\.avoidInk \}/.test(card) &&
-    /'arrow-up' : 'arrow-down'/.test(card) && /nowLineToneSpeech\(signalsNowTone\)/.test(card));
+  check('PickCard shows the move row only when the deciding book moved AGAINST the pick, in the red ink',
+    /if \(signalsNowTone !== 'worse'\) return null;/.test(card) &&
+    /\{signalsMove && hero\.has\('movement'\)[\s\S]{0,200}color=\{colors\.avoidInk\}/.test(card) &&
+    /moved against this pick/.test(card) &&
+    !/nowLineBetter|nowLineWorse/.test(card));
+  // The words (Matt, 2026-11-16): line change, then the price change in parentheses.
+  const mv = (o: Parameters<typeof signalsMoveLine>[0]) => signalsMoveLine(o);
+  check('line and price moved: "DK line 145.5 → 142.5 (−105 → −108)"',
+    mv({ book: 'DK', lockedLine: '145.5', nowLine: '142.5', lockedPrice: '-105', nowPrice: '-108' }) ===
+      `DK line 145.5 → 142.5 (${MINUS}105 → ${MINUS}108)`);
+  check('line moved, same price: the price once',
+    mv({ book: 'DK', lockedLine: '-3.5', nowLine: '-4.5', lockedPrice: '-110', nowPrice: null }) ===
+      `DK line ${MINUS}3.5 → ${MINUS}4.5 (${MINUS}110)`);
+  check('price moved, same line: the line once, the price change in parentheses',
+    mv({ book: 'FD', lockedLine: '9', nowLine: null, lockedPrice: '-110', nowPrice: '-120' }) ===
+      `FD line 9 (${MINUS}110 → ${MINUS}120)`);
+  check('moneyline: price change only',
+    mv({ book: 'DK', lockedLine: null, nowLine: null, lockedPrice: '+120', nowPrice: '+105' }) === 'DK +120 → +105');
+  check('nothing moved: no row',
+    mv({ book: 'DK', lockedLine: '9', nowLine: null, lockedPrice: '-110', nowPrice: null }) === null &&
+      mv({ book: 'DK', lockedLine: '9', nowLine: '9', lockedPrice: '-110', nowPrice: '-110' }) === null);
 }
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILURE(S)`);

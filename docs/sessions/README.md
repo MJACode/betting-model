@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Signals card: one line-movement row (line change, price change in parentheses), shown only when the deciding book moved against the pick |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Scoreboard follow-up: one sport's DB error no longer skips the others' live scores; live-score chunks read in parallel; UFC game screen has no Spread block |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord price line links the book name to that bet's slip (app betslip URL, Massachusetts, sportsbook page when there is no outcome id) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord pick posts link the matchup to the game score page (ESPN gamecast, scoreboard fallback) |

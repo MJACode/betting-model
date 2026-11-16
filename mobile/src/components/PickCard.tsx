@@ -76,7 +76,7 @@ import {
   signalsModelCaption,
   signalsNowLine,
   nowLineTone,
-  nowLineToneSpeech,
+  signalsMoveLine,
   signalsReasonLine,
   signalsStakeLine,
   signalsStakeSpeech,
@@ -268,12 +268,6 @@ export function PickCard({
     movementSummaryRaw && staleLineMove
       ? { ...movementSummaryRaw, label: `${bookLabel(staleLineMove.book)} ${movementSummaryRaw.label.replace(/^Line /, 'line ')}` }
       : movementSummaryRaw;
-  // Spoken: the icon and red ink say "against the bet"; VoiceOver hears it.
-  const staleMoveSpoken =
-    staleLineMove?.movement?.lineMovedAgainst && staleLineMove.movement.scoredLine != null && staleLineMove.movement.currentLine != null
-      ? `Line moved against this bet, ${formatSideLine(staleLineMove.movement.scoredLine, pick.pick_side, gameMarketForModel(pick.model_id))}` +
-        ` to ${formatSideLine(staleLineMove.movement.currentLine, pick.pick_side, gameMarketForModel(pick.model_id))}`
-      : null;
   const showClv = pick.clv_method === 'standard_v2' && pick.clv_pct != null;
   // Icon and words share one ink (non-text 3:1 ruling), toned from the CLV
   // ROUNDED as formatClv prints it (1 dp): −0.03 reads "0.0%" and stays
@@ -321,10 +315,6 @@ export function PickCard({
   // green/amber judged version above owns the cases it covers.
   const crowd = contra ? null : publicSplit(pick);
   // Two-tier extras: show at most TWO chips besides injury / preview / contra.
-  const heroOrder: string[] = [];
-  if (movementSummary) heroOrder.push('movement');
-  if (showClv) heroOrder.push('clv');
-  const hero = new Set(heroOrder.slice(0, 2));
   // WHEN this bet posted. Timing is part of the pick, not metadata (§1c).
   const timing = openForAction(pick) && !paused ? pickTimingInfo(pick) : null;
   const previewLabel = preview
@@ -333,8 +323,6 @@ export function PickCard({
       : 'Preview — locks fight-day morning'
     : null;
   const pausedLabel = paused ? 'Model paused — shown for reference, not a bet' : null;
-  const hasExtras =
-    Boolean(previewLabel) || Boolean(pausedLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
   // One book CTA on the list card. Full BookLinesRow stays on Pick Detail.
   // Before the start it is always the BEST available book (bestHandoffForPick),
   // never DraftKings-only. After the start a pre-game pick has no hand-off: the
@@ -525,9 +513,9 @@ export function PickCard({
         book: bookLabel(quoteBookKey),
       })
     : null;
-  // Green when the number on the board now is better for a new bettor than
-  // the pick's, red when worse (Matt, 2026-11-15). The line decides; the
-  // price only when the line is unchanged. Neutral when nothing is shown.
+  // Is the number on the board now better or worse for a new bettor than the
+  // pick's (Matt, 2026-11-15)? The line decides; the price only when the line
+  // is unchanged. Only 'worse' is shown (the one move row below, 2026-11-16).
   const signalsNowTone = !signalsNow
     ? null
     : staleLineMove
@@ -547,20 +535,51 @@ export function PickCard({
         lockedPrice: heroPrice?.lockedPrice ?? null,
         nowPrice: priceDiffers ? (heroPrice?.price ?? null) : null,
       });
-  // Same numbers as the screen. The spoken book is the full name.
-  const signalsNowSpokenRaw = staleLineMove
-    ? staleNowFor(bookName(staleLineMove.book))
-    : quoteBookKey
-    ? signalsNowLine({
-        line: signalsMovedLineText,
-        price: nowPrice,
-        priceDiffers,
-        book: bookName(quoteBookKey),
-      })
+  // ONE line-movement row on Signals (Matt, 2026-11-16): the line change
+  // with the price change in parentheses, shown ONLY when the deciding book
+  // (or, on an "Old price" card, the book the line was scored at) has moved
+  // AGAINST the pick. A move in the bettor's favour shows nothing. It replaces
+  // both the old "DK line now …" line under the hero and the movement chip.
+  const moveFor = (book: string): string | null => {
+    if (signalsNowTone !== 'worse') return null;
+    // A moneyline has no line to quote, only the price.
+    const lockedLineNum = signalsMarket?.startsWith('h2h') ? null : numOrNull(pick.scored_line);
+    const lockedLine = lockedLineNum == null ? null : formatSideLine(lockedLineNum, pick.pick_side, signalsMarket);
+    if (staleLineMove) {
+      const nowLineNum = staleLineMove.line;
+      return signalsMoveLine({
+        book,
+        lockedLine,
+        nowLine: nowLineNum != null && nowLineNum !== lockedLineNum
+          ? formatSideLine(nowLineNum, pick.pick_side, signalsMarket)
+          : null,
+        lockedPrice: decisionPrice == null ? null : formatAmerican(decisionPrice),
+        nowPrice: staleLineMove.price == null ? null : formatAmerican(staleLineMove.price),
+      });
+    }
+    return signalsMoveLine({
+      book,
+      lockedLine,
+      nowLine: signalsMovedLineText,
+      lockedPrice: lockedAmerican,
+      nowPrice: priceDiffers ? nowPrice : null,
+    });
+  };
+  const moveBook = staleLineMove?.book ?? quoteBookKey;
+  const signalsMove = signals && moveBook ? moveFor(bookLabel(moveBook)) : null;
+  const signalsMoveSpokenRaw = signals && moveBook && signalsMove ? moveFor(bookName(moveBook)) : null;
+  const signalsNowSpoken = signalsMoveSpokenRaw
+    ? `${signalsMoveSpokenRaw.replace(/→/g, 'to')}, moved against this pick`
     : null;
-  const signalsNowSpoken = signalsNowSpokenRaw
-    ? [signalsNowSpokenRaw, nowLineToneSpeech(signalsNowTone)].filter(Boolean).join(', ')
-    : null;
+  // Two-tier extras: show at most TWO chips besides injury / preview / contra.
+  // On Signals the movement chip IS the one move row above; elsewhere it is
+  // the board's movement summary.
+  const heroOrder: string[] = [];
+  if (signals ? signalsMove : movementSummary) heroOrder.push('movement');
+  if (showClv) heroOrder.push('clv');
+  const hero = new Set(heroOrder.slice(0, 2));
+  const hasExtras =
+    Boolean(previewLabel) || Boolean(pausedLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
   // Several bettable books: "Best DK −115". One: "Bet FD −105".
   // No "now", and no line — the hero already shows the line.
   const bookControlFor = (h: BoardHandoff | null): { label: string; speech: string; sheet: boolean } | null => {
@@ -635,7 +654,7 @@ export function PickCard({
           now: signalsNowSpoken,
         })
       : (heroPrice
-        ? [heroPriceSpeech(heroPrice, cta.priceTag), signalsNowSpoken, staleMoveSpoken].filter(Boolean).join('. ')
+        ? [heroPriceSpeech(heroPrice, cta.priceTag), signalsNowSpoken].filter(Boolean).join('. ')
         : null);
   const signalsStakeSpoken = signalsStakeShown
     ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}${stakeReason ? `. ${stakeReason}` : ''}`
@@ -1157,30 +1176,6 @@ export function PickCard({
       {heroPrice?.showLockedCaption && (heroPrice.stale || heroPrice.untracked) ? (
         <Text style={styles.lockedCaption}>{trueMinus(lockedCaptionText(heroPrice))}</Text>
       ) : null}
-      {signalsNow ? (
-        // An arrow beside the colour, so the direction is not carried by
-        // green-vs-red alone (UX_REVIEW §5). Inks, not the bright hues.
-        <View style={styles.nowRow}>
-          {signalsNowTone ? (
-            <Ionicons
-              name={signalsNowTone === 'better' ? 'arrow-up' : 'arrow-down'}
-              size={13}
-              color={signalsNowTone === 'better' ? colors.betInk : colors.avoidInk}
-              accessibilityElementsHidden
-              importantForAccessibility="no"
-            />
-          ) : null}
-          <Text
-            style={[
-              styles.nowLine,
-              signalsNowTone === 'better' && styles.nowLineBetter,
-              signalsNowTone === 'worse' && styles.nowLineWorse,
-            ]}
-          >
-            {signalsNow}
-          </Text>
-        </View>
-      ) : null}
 
       <View style={styles.metrics}>
         <View style={styles.metric}>
@@ -1243,21 +1238,21 @@ export function PickCard({
 
       {hasExtras ? (
         <View style={styles.extrasRow}>
-          {movementSummary && hero.has('movement') && !(signalsMuted && movementSummary.color === colors.bet) ? (
+          {signalsMove && hero.has('movement') ? (
             <View style={styles.extraItem}>
               <Ionicons
-                name={movementSummary.icon}
+                name="warning-outline"
                 size={13}
-                color={inkFor(movementSummary.color)}
+                color={colors.avoidInk}
                 style={styles.extraIcon}
               />
               <Text
                 style={[
                   styles.extraText,
-                  { color: inkFor(movementSummary.color), fontWeight: font.weight.medium },
+                  { color: colors.avoidInk, fontWeight: font.weight.medium },
                 ]}
               >
-                {trueMinus(movementSummary.label)}
+                {signalsMove}
               </Text>
             </View>
           ) : null}
@@ -1908,24 +1903,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     fontWeight: font.weight.medium,
     color: colors.textTertiary,
-  },
-  // The book's current line or price, when it is not the lock. Same "Now"
-  // ink as the board's tag (textSecondary, above 4.5:1). Wraps at large text.
-  nowRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    marginTop: 2,
-    marginBottom: spacing.xs,
-  },
-  nowLineBetter: { color: colors.betInk },
-  nowLineWorse: { color: colors.avoidInk },
-  nowLine: {
-    flexShrink: 1,
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-    fontVariant: ['tabular-nums'],
   },
   metrics: {
     flexDirection: 'row',

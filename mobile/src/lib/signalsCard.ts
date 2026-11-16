@@ -487,6 +487,45 @@ export function nowLineToneSpeech(tone: NowLineTone | null): string {
 }
 
 /**
+ * The ONE line-movement row on a Signals card (Matt, 2026-11-16: "only have
+ * one … and only display it when the line or the price is changing against
+ * what the model picked for that specific sportsbook"). The caller shows it
+ * only when `nowLineTone` reads 'worse' at the deciding book; this builds the
+ * words. The line change leads and the price change sits in parentheses:
+ *
+ *   line and price moved   "DK line 145.5 → 142.5 (−105 → −108)"
+ *   line moved, same price "DK line 145.5 → 142.5 (−105)"
+ *   price moved, same line "DK line 145.5 (−105 → −120)"
+ *   no line (moneyline)    "DK −105 → −120"
+ *
+ * Every number is already formatted from the pick's side. `nowLine` /
+ * `nowPrice` are null when that part has not moved. Null when nothing moved.
+ */
+export function signalsMoveLine(input: {
+  book: string;
+  lockedLine: string | null;
+  nowLine: string | null;
+  lockedPrice: string | null;
+  nowPrice: string | null;
+}): string | null {
+  const { book, lockedLine, nowLine, lockedPrice, nowPrice } = input;
+  const lineMoved = lockedLine != null && nowLine != null && nowLine !== lockedLine;
+  const priceMoved = lockedPrice != null && nowPrice != null && nowPrice !== lockedPrice;
+  if (!lineMoved && !priceMoved) return null;
+  const who = book ? `${book} ` : '';
+  const price = priceMoved
+    ? `${trueMinus(lockedPrice!)} → ${trueMinus(nowPrice!)}`
+    : lockedPrice != null
+    ? trueMinus(lockedPrice)
+    : null;
+  if (lockedLine == null) return `${who}${price}`;
+  const line = lineMoved
+    ? `${trueMinus(lockedLine)} → ${trueMinus(nowLine!)}`
+    : trueMinus(lockedLine);
+  return `${who}line ${line}${price ? ` (${price})` : ''}`;
+}
+
+/**
  * VoiceOver for the Signals hero. The 22pt number is the decision price, so
  * that is what is spoken, with the full book name — the same `signalsPriceText`
  * the screen uses, so the two cannot format the price differently. `now` is
