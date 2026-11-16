@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Database health recorded hourly (db_health_snapshots + per-table and heaviest-statement snapshots every 6 h, worker job db_health_snapshot); new Database tab on the ops dashboard; SignalBase redesign of every tab (presentation only); Retool driver binds $N by position in the text; pg_stat_statements total is not monotonic (load from pg_stat_database.active_time) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord price line links the book name to that bet's slip (app betslip URL, Massachusetts, sportsbook page when there is no outcome id) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord pick posts link the matchup to the game score page (ESPN gamecast, scoreboard fallback) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Retool ops dashboard source moved into retool/models-ops/ (69 files, byte-exact); Protect app needs Enterprise (account on Team); push back via Retool's import tool proved end to end with a no-change publish to the live app (69/69 byte-identical, loads, #1382 closed) |
