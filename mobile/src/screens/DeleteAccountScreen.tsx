@@ -307,7 +307,7 @@ export function DeleteAccountScreen() {
             <Ionicons
               name="checkmark"
               size={18}
-              color={colors.textInverse}
+              color={colors.onChrome}
               accessible={false}
             />
             <Text style={styles.toastText}>{DELETED_TOAST}</Text>
@@ -811,7 +811,7 @@ const styles = StyleSheet.create({
   toastText: {
     flex: 1,
     fontSize: font.size.footnote,
-    color: colors.textInverse,
+    color: colors.onChrome,
     lineHeight: 18,
   },
   quietBtn: {

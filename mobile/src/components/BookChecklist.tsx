@@ -117,7 +117,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   badgeTextDk: {
-    color: colors.textPrimary,
+    color: colors.onBright,
   },
   rowBody: {
     flex: 1,

@@ -439,14 +439,14 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.title1,
     fontWeight: font.weight.bold,
-    color: colors.textInverse,
+    color: colors.onChrome,
     textAlign: 'center',
   },
   subtitle: {
     fontFamily: font.family,
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
-    color: colors.textInverse,
+    color: colors.onChrome,
     textAlign: 'center',
   },
   body: {
@@ -524,7 +524,7 @@ const styles = StyleSheet.create({
     minHeight: 50,
     fontFamily: font.family,
     fontSize: font.size.callout,
-    color: colors.textInverse,
+    color: colors.onChrome,
   },
   codeInput: {
     textAlign: 'center',

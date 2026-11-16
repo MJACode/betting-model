@@ -27,6 +27,8 @@ import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useBankroll } from '@/hooks/useBankroll';
+import { useAppearance } from '@/hooks/useAppearance';
+import { APPEARANCE_OPTIONS } from '@/lib/appearance';
 import {
   BANKROLL_CARD_COPY,
   BANKROLL_FOOTER_COPY,
@@ -95,6 +97,7 @@ const SECTION_ICON: Record<SettingsSectionId, React.ComponentProps<typeof Ionico
   sportsbooks: 'storefront-outline',
   bankroll: 'wallet-outline',
   notifications: 'notifications-outline',
+  appearance: 'contrast-outline',
   explore: 'compass-outline',
   community: 'chatbubble-outline',
   account: 'person-outline',
@@ -228,6 +231,8 @@ export function SettingsSectionScreen({
       return <BankrollSection />;
     case 'notifications':
       return <NotificationsSection />;
+    case 'appearance':
+      return <AppearanceSection />;
     case 'explore':
       return <ExploreSection />;
     case 'community':
@@ -426,6 +431,7 @@ function useSettingsHomeModel() {
   const { enabled, ready: pushReady } = usePushOptIn();
   const { status } = usePushState();
   const feedbackUnread = useFeedbackUnread();
+  const { tileSummary: appearanceSummary } = useAppearance();
   const unit = unitDollars(bankroll);
   const unitLabel =
     unit == null ? `1u = ${formatPct(bankroll.unitPct)}` : `1u = ${formatDollars(unit, unit)}`;
@@ -438,6 +444,7 @@ function useSettingsHomeModel() {
         : 'Checking',
     bankroll: bankrollReady ? bankrollTileSummary(amountLabel, unitLabel) : 'Checking',
     notifications: notificationsTileSummary(enabled, status, pushReady),
+    appearance: appearanceSummary,
     explore: EXPLORE_TILE_SUMMARY,
     community: communityTileSummary(plan.showDiscord, feedbackUnread),
     account: accountTileSummary(plan.signedIn, plan.authEmail, plan.planLabel, true),
@@ -568,6 +575,43 @@ function BankrollSection() {
     <SettingsScroll>
       {/* Display only: units in the member's dollars. Nothing is sized off it. */}
       <BankrollCard />
+    </SettingsScroll>
+  );
+}
+
+/**
+ * System / Light / Dark (Matt, 2026-11-16). A pick is saved at once and
+ * applies at the next open — lib/appearance.ts says why it cannot be live.
+ * The footnote says so in the words of the switch that is pending.
+ */
+function AppearanceSection() {
+  const { pref, choose, footnote } = useAppearance();
+  return (
+    <SettingsScroll>
+      <View style={styles.groupCard} accessibilityRole="radiogroup">
+        {APPEARANCE_OPTIONS.map((o, i) => {
+          const selected = o.value === pref;
+          return (
+            <Pressable
+              key={o.value}
+              accessibilityRole="radio"
+              accessibilityState={{ selected, checked: selected }}
+              accessibilityLabel={`${o.label}. ${o.detail}`}
+              onPress={() => choose(o.value)}
+              style={({ pressed }) => [styles.groupRow, i > 0 && styles.groupRule, pressed && styles.pressed]}
+            >
+              <View style={styles.groupText}>
+                <Text style={styles.appearanceLabel}>{o.label}</Text>
+                <Text style={styles.sub}>{o.detail}</Text>
+              </View>
+              {selected ? <Ionicons name="checkmark" size={20} color={colors.tint} /> : null}
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={styles.appearanceNote} accessibilityLiveRegion="polite">
+        {footnote}
+      </Text>
     </SettingsScroll>
   );
 }
@@ -724,7 +768,7 @@ function CommunitySection() {
                 style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
               >
                 {endingTrial ? (
-                  <ActivityIndicator color={colors.textInverse} />
+                  <ActivityIndicator color={colors.onChrome} />
                 ) : (
                   <Text style={styles.manageText}>Unlock Discord early</Text>
                 )}
@@ -1338,6 +1382,17 @@ const styles = StyleSheet.create({
   groupText: {
     flex: 1,
   },
+  appearanceLabel: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  appearanceNote: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    paddingHorizontal: spacing.lg,
+  },
   card: {
     ...card,
     marginBottom: spacing.md,
@@ -1393,7 +1448,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   bookBadgeTextDk: {
-    color: colors.textPrimary,
+    color: colors.onBright,
   },
   bookRowName: {
     flex: 1,
@@ -1635,7 +1690,7 @@ const styles = StyleSheet.create({
   manageText: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
-    color: colors.textInverse,
+    color: colors.onChrome,
   },
   restoreBtn: {
     marginTop: spacing.sm,

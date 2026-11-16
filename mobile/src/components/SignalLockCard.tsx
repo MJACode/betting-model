@@ -77,7 +77,7 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
-    color: colors.textInverse,
+    color: colors.onChrome,
     textAlign: 'center',
   },
   body: {

@@ -128,7 +128,7 @@ export const DK_GREEN = colors.bookDraftKings;
 
 export function bookButtonColors(book: string): { bg: string; fg: string } {
   return book === 'draftkings'
-    ? { bg: DK_GREEN, fg: colors.textPrimary }
+    ? { bg: DK_GREEN, fg: colors.onBright }
     : { bg: colors.tint, fg: colors.textInverse };
 }
 
