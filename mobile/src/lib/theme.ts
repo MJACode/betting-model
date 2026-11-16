@@ -48,6 +48,12 @@ const lightColors = {
   // Text on a bright third-party fill (the DraftKings green handoff). Black in
   // both themes; textPrimary goes white in Dark.
   onBright: '#000000',
+  // A navy chrome SURFACE that sits on the page (lock card, BYOM count bar,
+  // the "Unlock Discord early" button, the delete toast). brandNavy in Light;
+  // a step up in Dark, where the page itself is brandNavy and a navy card
+  // would have no edge. `chromeSurfaceRaised` is the well inside one.
+  chromeSurface: '#0B1220',
+  chromeSurfaceRaised: '#152034',
 
   // Separators
   separator: '#3C3C4349',
@@ -195,6 +201,8 @@ const darkColors: typeof lightColors = {
   textInverse: '#0B1320',
   textInverseSecondary: '#0B1320B8',
   inverseWash: '#0B132040',
+  chromeSurface: '#152034',
+  chromeSurfaceRaised: '#22314F',
 
   separator: '#FFFFFF26',
   separatorOpaque: '#2A3753',

@@ -443,7 +443,7 @@ const primaryBtn = read('src/components/PrimaryButton.tsx');
 const applyTag = /<PrimaryButton\s+label="Apply"[\s\S]*?\/>/.exec(sheet)?.[0] ?? '';
 check('Apply fill is tint, not bet green (H6)',
   applyTag !== '' && !/variant=/.test(applyTag) && /primary: \{ backgroundColor: colors\.tint \}/.test(primaryBtn), applyTag.replace(/\s+/g, ' '));
-check('Apply label is textInverse (H6)', /const fg = variant === 'primary' \? colors\.textInverse/.test(primaryBtn));
+check('Apply label is textInverse (H6)', /const fg =\s*variant === 'primary' \? colors\.textInverse/.test(primaryBtn));
 const toggle = read('src/components/SportToggle.tsx');
 const badge = /\n  badge: \{[\s\S]*?\}/.exec(toggle)?.[0] ?? '';
 const badgeText = /badgeText: \{[\s\S]*?\}/.exec(toggle)?.[0] ?? '';
@@ -506,6 +506,22 @@ for (const g of ['gradeGood', 'gradeMid', 'gradeBad']) D(g, 'bgCard', 'matchup /
 check('DARK grade ramp lightness falls good -> mid -> bad', lum(dark.gradeGood) > lum(dark.gradeMid) && lum(dark.gradeMid) > lum(dark.gradeBad));
 check('DARK tertiary is quieter than secondary', lum(dark.textTertiary) < lum(dark.pausedInk) && lum(dark.pausedInk) < lum(dark.textSecondary));
 D('switchTrackOff', 'bgCard', 'switch OFF track (non-text)', 3);
+D('textPrimary', 'bgCard', 'secondary PrimaryButton label (UX review blocker)');
+D('onChrome', 'chromeSurface', 'BYOM count bar, lock card title, Unlock Discord button');
+D('brandMuted', 'chromeSurface', 'BYOM count bar kickers');
+D('positive', 'chromeSurface', 'BYOM units, gain (bright on navy)');
+D('negative', 'chromeSurface', 'BYOM units, loss (bright on navy)');
+// The token rows above only hold if the code uses these tokens (UX review 2026-11-16).
+const pb = read('src/components/PrimaryButton.tsx');
+check('secondary PrimaryButton label is textPrimary, not brandInk', /variant === 'brand' \? colors\.brandInk : colors\.textPrimary/.test(pb));
+const byom = read('src/components/byom/ByomBetCount.tsx');
+check('BYOM count bar is chromeSurface, not tint', /bar: \{\s*backgroundColor: colors\.chromeSurface/.test(byom));
+check('SavedParlays Undo link is the banner ink', /undoAction: \{\s*color: colors\.bg,/.test(read('src/screens/SavedParlaysScreen.tsx')));
+D('bg', 'textPrimary', 'Undo link on the inverted SavedParlays banner');
+D('onBright', 'onChrome', 'fallback Apple button label');
+check('DARK chrome surfaces stand off the page', ratio(dark.chromeSurface, dark.bg) > ratio(dark.brandNavy, dark.bg));
+check('DARK the lock-card well stands off its card', dark.chromeSurfaceRaised !== dark.chromeSurface);
+check('Light chrome surfaces are the old navy (Light unchanged)', tok.chromeSurface === tok.brandNavy && tok.chromeSurfaceRaised === tok.brandNavyRaised);
 for (const s of ['BET', 'NONE', 'AVOID'] as const) {
   const spec = SIGNAL_BADGE[s];
   const r = ratio(dark[spec.ink], dark[spec.fill]);

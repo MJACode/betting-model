@@ -25,8 +25,10 @@ import {
   bootPref,
   bootScheme,
   parseAppearancePref,
+  phoneScheme,
   resolveScheme,
   setBootAppearance,
+  shouldOverrideNative,
 } from '../src/lib/appearance';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -50,9 +52,23 @@ check('no boot: light', bootScheme() === 'light' && bootPref() === 'light');
 setBootAppearance('dark', 'dark');
 check('boot sets the running scheme', bootScheme() === 'dark' && bootPref() === 'dark');
 
-check('pending switch says reopen', appearanceFootnote('dark', 'light', 'light') === 'Close and reopen Signalbase to switch to Dark.');
-check('pending switch back to light', appearanceFootnote('light', 'dark', 'dark') === 'Close and reopen Signalbase to switch to Light.');
-check('no pending switch: when it applies', appearanceFootnote('system', 'dark', 'dark') === 'A change applies the next time you open Signalbase.');
+check('pending switch says how to reopen on iOS', appearanceFootnote('dark', 'light', 'light') === 'Swipe Signalbase away in the app switcher, then reopen it to switch to Dark.');
+check('pending switch back to light', appearanceFootnote('light', 'dark', 'dark') === 'Swipe Signalbase away in the app switcher, then reopen it to switch to Light.');
+check('no pending switch: when it applies', appearanceFootnote('system', 'dark', 'dark') === 'A change applies after Signalbase is fully closed and reopened.');
+
+// Only a SAVED explicit choice forces native UI; the untouched default does not.
+check('default (nothing stored) does not override native UI', !shouldOverrideNative(null, 'light'));
+check('junk stored value does not override', !shouldOverrideNative('Dark', 'light'));
+check('saved Light / Dark override; saved System does not',
+  shouldOverrideNative('light', 'light') && shouldOverrideNative('dark', 'dark') && !shouldOverrideNative('system', 'system'));
+// RN reports the override, not the phone, once one is set (UX review 2026-11-16).
+setBootAppearance('light', 'light', 'dark', true);
+check('forced Light on a dark phone: the phone is read from boot', phoneScheme('light') === 'dark');
+check('forced Light on a dark phone, choose System -> pending Dark',
+  appearanceFootnote('system', 'light', phoneScheme('light')).endsWith('switch to Dark.'));
+setBootAppearance('light', 'light', 'dark', false);
+check('no override: the live phone value is used', phoneScheme('light') === 'light');
+setBootAppearance('dark', 'dark');
 check('tile: plain label when nothing pending', appearanceTileSummary('dark', 'dark', 'light') === 'Dark');
 check('tile: reopen while pending', appearanceTileSummary('system', 'light', 'dark') === 'System · reopen to apply');
 
@@ -60,9 +76,12 @@ const entry = read('index.tsx');
 const pkg = JSON.parse(read('package.json')) as { main: string };
 check('package.json main is index.tsx', pkg.main === 'index.tsx', pkg.main);
 check('entry reads the appearance key', /AsyncStorage\.getItem\(APPEARANCE_STORAGE_KEY\)/.test(entry) && APPEARANCE_STORAGE_KEY === 'appearance.v1');
-const bootAt = entry.indexOf('setBootAppearance(pref, scheme)');
+const bootAt = entry.indexOf('setBootAppearance(pref, scheme, system, overridden)');
 const requireAt = entry.indexOf("require('./App')");
 check('scheme is set BEFORE App is required', bootAt > 0 && requireAt > bootAt);
+check('the phone is read BEFORE any override is set',
+  entry.indexOf('Appearance.getColorScheme()') > 0 && entry.indexOf('Appearance.getColorScheme()') < entry.indexOf('Appearance.setColorScheme(scheme)'));
+check('native UI is overridden only for a saved choice', /if \(overridden\) Appearance\.setColorScheme\(scheme\);/.test(entry));
 const topImports = entry.match(/^import [\s\S]*? from '([^']+)';/gm) ?? [];
 check(
   'entry imports nothing that loads theme.ts at the top',
@@ -79,7 +98,8 @@ check('status bar follows the scheme', /<StatusBar style=\{isDark \? 'light' : '
 
 const settings = read('src/screens/SettingsScreen.tsx');
 check('Settings has the Appearance drill-in', /case 'appearance':\n\s*return <AppearanceSection \/>;/.test(settings));
-check('options are radios with selected state', /accessibilityRole="radio"/.test(settings) && /accessibilityState=\{\{ selected, checked: selected \}\}/.test(settings));
+check('options are radios with checked state', /accessibilityRole="radio"/.test(settings) && /accessibilityState=\{\{ checked: selected \}\}/.test(settings));
+check('VoiceOver hears the footnote on a pick', /AccessibilityInfo\.announceForAccessibility\(appearanceFootnote\(/.test(read('src/hooks/useAppearance.ts')));
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

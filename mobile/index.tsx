@@ -17,12 +17,15 @@ import {
   parseAppearancePref,
   resolveScheme,
   setBootAppearance,
+  shouldOverrideNative,
 } from './src/lib/appearance';
+import appJson from './app.json';
+
+// The splash ground, from its one home, so the hand-off from the native splash
+// is seamless whichever theme follows (theme.ts cannot load this early).
+const SPLASH_GROUND = appJson.expo.splash.backgroundColor;
 
 const BOOT_TIMEOUT_MS = 1500;
-// The splash ground (app.json splash.backgroundColor), so the hand-off from
-// the native splash is seamless whichever theme follows.
-const SPLASH_GROUND = '#0B1220';
 
 function Boot() {
   const [App, setApp] = useState<React.ComponentType | null>(null);
@@ -33,11 +36,14 @@ function Boot() {
       if (started) return;
       started = true;
       const pref = parseAppearancePref(raw);
-      const scheme = resolveScheme(pref, Appearance.getColorScheme());
-      setBootAppearance(pref, scheme);
-      // Native pieces (alerts, pickers, the keyboard) follow an explicit
-      // choice; System leaves them to the phone.
-      if (pref !== 'system') Appearance.setColorScheme(scheme);
+      // Read the phone BEFORE any override: afterwards RN reports the override.
+      const system = Appearance.getColorScheme() ?? null;
+      const scheme = resolveScheme(pref, system);
+      const overridden = shouldOverrideNative(raw, pref);
+      setBootAppearance(pref, scheme, system, overridden);
+      // Native pieces (alerts, pickers, the keyboard) follow a SAVED choice;
+      // System and the untouched default leave them to the phone.
+      if (overridden) Appearance.setColorScheme(scheme);
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const mod = require('./App') as { default: React.ComponentType };
       setApp(() => mod.default);

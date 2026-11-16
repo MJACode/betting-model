@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
-import { useColorScheme } from 'react-native';
+import { AccessibilityInfo, useColorScheme } from 'react-native';
 
 import {
   APPEARANCE_STORAGE_KEY,
@@ -9,6 +9,7 @@ import {
   bootPref,
   bootScheme,
   parseAppearancePref,
+  phoneScheme,
   type AppearancePref,
 } from '@/lib/appearance';
 
@@ -23,7 +24,7 @@ const listeners = new Set<(p: AppearancePref) => void>();
 
 export function useAppearance() {
   const [pref, setPref] = useState<AppearancePref>(current ?? bootPref());
-  const system = useColorScheme();
+  const system = phoneScheme(useColorScheme());
 
   useEffect(() => {
     const onChange = (p: AppearancePref) => setPref(p);
@@ -42,11 +43,16 @@ export function useAppearance() {
     };
   }, []);
 
-  const choose = useCallback((next: AppearancePref) => {
-    current = next;
-    listeners.forEach((l) => l(next));
-    AsyncStorage.setItem(APPEARANCE_STORAGE_KEY, next).catch(() => {});
-  }, []);
+  const choose = useCallback(
+    (next: AppearancePref) => {
+      current = next;
+      listeners.forEach((l) => l(next));
+      AsyncStorage.setItem(APPEARANCE_STORAGE_KEY, next).catch(() => {});
+      // accessibilityLiveRegion is Android-only; VoiceOver needs the footnote said.
+      AccessibilityInfo.announceForAccessibility(appearanceFootnote(next, bootScheme(), system));
+    },
+    [system],
+  );
 
   const running = bootScheme();
   return {

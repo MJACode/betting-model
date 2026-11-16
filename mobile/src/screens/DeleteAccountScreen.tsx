@@ -804,7 +804,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: spacing.sm,
     marginTop: spacing.xl,
-    backgroundColor: colors.brandNavy,
+    backgroundColor: colors.chromeSurface,
     borderRadius: radii.md,
     padding: spacing.lg,
   },

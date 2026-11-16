@@ -595,21 +595,21 @@ function AppearanceSection() {
             <Pressable
               key={o.value}
               accessibilityRole="radio"
-              accessibilityState={{ selected, checked: selected }}
-              accessibilityLabel={`${o.label}. ${o.detail}`}
+              accessibilityState={{ checked: selected }}
+              accessibilityLabel={o.detail ? `${o.label}. ${o.detail}` : o.label}
               onPress={() => choose(o.value)}
               style={({ pressed }) => [styles.groupRow, i > 0 && styles.groupRule, pressed && styles.pressed]}
             >
               <View style={styles.groupText}>
-                <Text style={styles.appearanceLabel}>{o.label}</Text>
-                <Text style={styles.sub}>{o.detail}</Text>
+                <Text style={[styles.cardLabel, styles.labelFlush]}>{o.label}</Text>
+                {o.detail ? <Text style={styles.sub}>{o.detail}</Text> : null}
               </View>
               {selected ? <Ionicons name="checkmark" size={20} color={colors.tint} /> : null}
             </Pressable>
           );
         })}
       </View>
-      <Text style={styles.appearanceNote} accessibilityLiveRegion="polite">
+      <Text style={[styles.sub, styles.appearanceNote]} accessibilityLiveRegion="polite">
         {footnote}
       </Text>
     </SettingsScroll>
@@ -1382,15 +1382,8 @@ const styles = StyleSheet.create({
   groupText: {
     flex: 1,
   },
-  appearanceLabel: {
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
+  labelFlush: { marginBottom: 0 },
   appearanceNote: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    lineHeight: 18,
     paddingHorizontal: spacing.lg,
   },
   card: {
@@ -1685,7 +1678,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brandNavy,
+    backgroundColor: colors.chromeSurface,
   },
   manageText: {
     fontSize: font.size.body,

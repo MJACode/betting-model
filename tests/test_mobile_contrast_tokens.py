@@ -172,7 +172,7 @@ def test_no_short_white_literal_and_h6_sites():
     assert "variant=" not in apply_tag
     button = _read(SRC / "components" / "PrimaryButton.tsx")
     assert "primary: { backgroundColor: colors.tint }" in button
-    assert "const fg = variant === 'primary' ? colors.textInverse" in button
+    assert re.search(r"const fg =\s*variant === 'primary' \? colors\.textInverse", button)
     toggle = _read(SRC / "components" / "SportToggle.tsx")
     assert "color: colors.onBright" in re.search(r"badgeText: \{.*?\}", toggle, re.S).group(0)
     assert "opacity" not in re.search(r"labelMuted: \{.*?\}", toggle, re.S).group(0)  # M17

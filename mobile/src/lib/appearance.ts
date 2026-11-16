@@ -21,12 +21,13 @@ export type AppearancePref = 'system' | 'light' | 'dark';
 export type ColorScheme = 'light' | 'dark';
 
 export const APPEARANCE_STORAGE_KEY = 'appearance.v1';
+
 export const APPEARANCE_DEFAULT: AppearancePref = 'light';
 
-export const APPEARANCE_OPTIONS: readonly { value: AppearancePref; label: string; detail: string }[] = [
+export const APPEARANCE_OPTIONS: readonly { value: AppearancePref; label: string; detail: string | null }[] = [
   { value: 'system', label: 'System', detail: "Matches your iPhone's setting" },
-  { value: 'light', label: 'Light', detail: 'Always light' },
-  { value: 'dark', label: 'Dark', detail: 'Always dark' },
+  { value: 'light', label: 'Light', detail: null },
+  { value: 'dark', label: 'Dark', detail: null },
 ];
 
 /** A stored value, or the default for anything missing or unrecognised. */
@@ -43,10 +44,41 @@ export function resolveScheme(pref: AppearancePref, system: string | null | unde
 // ── The scheme this run of the app was started in ──────────────────────────
 // Set once, by index.tsx, before App (and so theme.ts) is loaded. Anything
 // that reads it without a boot (a verify script) gets the default.
-let boot: { pref: AppearancePref; scheme: ColorScheme } | null = null;
+let boot: {
+  pref: AppearancePref;
+  scheme: ColorScheme;
+  /** The PHONE's scheme, read before any override was set. */
+  system: string | null;
+  /** Whether index.tsx forced native UI to `scheme` (an explicit pick). */
+  overridden: boolean;
+} | null = null;
 
-export function setBootAppearance(pref: AppearancePref, scheme: ColorScheme): void {
-  boot = { pref, scheme };
+export function setBootAppearance(
+  pref: AppearancePref,
+  scheme: ColorScheme,
+  system: string | null = null,
+  overridden = false,
+): void {
+  boot = { pref, scheme, system, overridden };
+}
+
+/**
+ * Only a choice the user SAVED forces native UI (alerts, sheets, keyboard).
+ * The default Light leaves the phone in charge, as before this feature, so a
+ * member who never opens Appearance sees no change at all.
+ */
+export function shouldOverrideNative(raw: string | null | undefined, pref: AppearancePref): boolean {
+  return raw != null && parseAppearancePref(raw) === raw && pref !== 'system';
+}
+
+/**
+ * The phone's scheme for "is a switch pending?". While an override is set,
+ * React Native reports the OVERRIDE, not the phone (RCTAppearance returns
+ * sColorSchemeOverride first), so the value read at boot stands in for it.
+ */
+export function phoneScheme(live: string | null | undefined): string | null {
+  if (boot?.overridden) return boot.system;
+  return live ?? null;
 }
 
 export function bootScheme(): ColorScheme {
@@ -69,9 +101,9 @@ export function appearanceFootnote(
 ): string {
   const next = resolveScheme(chosen, system);
   if (next !== running) {
-    return `Close and reopen Signalbase to switch to ${next === 'dark' ? 'Dark' : 'Light'}.`;
+    return `Swipe Signalbase away in the app switcher, then reopen it to switch to ${next === 'dark' ? 'Dark' : 'Light'}.`;
   }
-  return 'A change applies the next time you open Signalbase.';
+  return 'A change applies after Signalbase is fully closed and reopened.';
 }
 
 /** The Settings home tile line: the saved choice, and "reopen to apply" while it is pending. */
