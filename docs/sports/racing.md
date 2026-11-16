@@ -67,7 +67,7 @@ search engine's excerpt, are in `docs/horse_racing_scout_us_outlets.md`.
 |---|---|---|
 | DraftKings Racing (DK Horse) | pool (pari-mutuel); joining the host track's pool rests on a search excerpt only | UK, Ireland, Japan, Dubai, Australia, Sweden, Korea; **Hong Kong disputed** (one page lists it, one does not) |
 | FanDuel Racing (formerly TVG) | pool | Australia (~120 tracks), France (~90), UK (~75), Hong Kong (Sha Tin), Japan (local-government tracks; JRA not confirmed), New Zealand and more. Began betting into **commingled Hong Kong Jockey Club pools** on 2014-03-31 (DRF); whether it still commingles in 2026 was not confirmed |
-| Xpressbet (1/ST BET) | pool | Hong Kong (both tracks; commingled HKJC pools from 2014-07-01, per a 2014 announcement; 2026 not confirmed), Japan (local-government only), Australia, New Zealand, UK, Ireland, France and more |
+| Xpressbet (1/ST BET) | pool | Hong Kong (both tracks, offered in 2026, blocked in Arizona; commingled HKJC pools from 2014-07-01, per a 2014 announcement; 2026 not confirmed), Japan (local-government only), Australia, New Zealand, UK, Ireland, France and more |
 | TwinSpires, NYRA Bets, AmWager, BetMGM Racing, Caesars Racebook | pool | wide lists; TwinSpires' own pages did not open (search excerpts only) |
 | bet365 (Colorado, New Jersey) | **fixed odds** | about 140 tracks in Colorado, mostly Australian, UK and Irish |
 | MonmouthBets (New Jersey) | fixed odds | five US tracks (2023 list) |
@@ -95,8 +95,12 @@ search engine's excerpt, are in `docs/horse_racing_scout_us_outlets.md`.
 everywhere: unknown when the pick is made, paid at the final odds, after
 15–18% has been taken. The Betfair exchange is a reference here, not a book a
 pick could name. Hong Kong is the one jurisdiction where the free files hold
-the pool a US outlet offered in 2026 and was commingled into as of 2014
-(2026 commingling not confirmed).
+the pool a US outlet offered in 2026 and was commingled into as of 2014.
+**Whether any US outlet still bets into the Hong Kong Jockey Club's own
+pools is not established** (checked 2026-11-16: Xpressbet, AmWager and NYRA
+Bets offer Hong Kong in 2026, but no page from 2023 on names a US outlet
+pooling with the Club, and no US outlet publishes how late it takes the
+bet; `docs/horse_racing_scout_us_outlets.md`, follow-up).
 
 ## The market grid
 
@@ -130,7 +134,11 @@ the audit, §5.
    or two, which needs a finer path than one snapshot every 6 minutes:
    the US$499 HKJC odds-movement archive (win and place from December 2021,
    polled about every 1 or 5 minutes), or Betfair's own history (behind an
-   account). The UK and Irish files point the same way (audit §8): against
+   account). Before either is bought, two things must be true, and neither
+   is established (2026-11-16): a US outlet's Hong Kong bets join the Club's
+   pools, and that outlet takes a bet in the last minute or two. The first
+   can be measured for free from one US page of Hong Kong payouts: a pooled
+   $2 bet pays the Club's dividend per HK$10 divided by five. The UK and Irish files point the same way (audit §8): against
    the starting price, a form model has added about nothing since 2022, and
    the files hold no earlier price to test it against.
 2. **A sharp price against the pool**, the mechanism that has worked most

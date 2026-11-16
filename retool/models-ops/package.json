@@ -97,6 +97,13 @@
             "type": "postgresql"
           }
         ],
+        "/backend/ops/getPcCopy.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
         "/backend/ops/getPickLedger.ts": [
           {
             "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",

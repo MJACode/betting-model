@@ -56,6 +56,7 @@ BEGIN
             email_change_token_new,
             email_change_token_current,
             reauthentication_token,
+            email_change,
             raw_app_meta_data,
             raw_user_meta_data,
             created_at,
@@ -75,6 +76,7 @@ BEGIN
             '',
             '',
             '',
+            '',  -- email_change: GoTrue cannot scan NULL here (2026-11-16 OTP 500s)
             jsonb_build_object('provider', 'email', 'providers', jsonb_build_array('email')),
             jsonb_build_object(
                 'sub', v_uid::text,
