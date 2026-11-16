@@ -176,6 +176,47 @@ class TestDeliveryAndNoise:
         assert sent == []
         assert fa.RENOTIFY_WARN_MIN > fa.RENOTIFY_CRIT_MIN
 
+    def test_a_stranded_nba_prop_pages_on_the_second_tick(
+            self, monkeypatch, tmp_path):
+        _state_dir(monkeypatch, tmp_path)
+        sent = _posts(monkeypatch)
+        monkeypatch.setattr(fa, "_conditions", lambda conn, now: {
+            "stranded:nba_prop:NBA_1": (
+                "WARN", "3 open NBA prop bets", "no final"),
+        })
+        fa.run_failure_alerter(conn=FakeConn(), now=NOW)
+        r = fa.run_failure_alerter(
+            conn=FakeConn(), now=NOW + timedelta(minutes=10))
+        assert r["alerted"] == ["stranded:nba_prop:NBA_1"]
+        assert sent and sent[0]["recovery"] is False
+
+    def test_a_legacy_stamp_is_not_paged_again(self, monkeypatch, tmp_path):
+        _state_dir(monkeypatch, tmp_path)
+        sent = _posts(monkeypatch)
+        fa.write_alert_state(fa._STATE_FILE, {
+            "health:odds_dk_lines": {
+                "last": (NOW - timedelta(minutes=5)).isoformat(),
+                "title": "odds_dk_lines is STALE",
+                "severity": "CRIT",
+            },
+        })
+        conn = FakeConn(health=[("odds_dk_lines", "STALE", "CRIT", "stale")],
+                        runs=_clean_runs())
+        r = fa.run_failure_alerter(conn=conn, now=NOW)
+        assert r["alerted"] == []
+        assert sent == []
+
+    def test_an_unwritable_state_file_pages_on_the_first_run(
+            self, monkeypatch, tmp_path):
+        _state_dir(monkeypatch, tmp_path)
+        sent = _posts(monkeypatch)
+        monkeypatch.setattr(fa, "write_alert_state", lambda *a, **k: False)
+        conn = FakeConn(health=[("odds_dk_lines", "STALE", "CRIT", "stale")],
+                        runs=_clean_runs())
+        r = fa.run_failure_alerter(conn=conn, now=NOW)
+        assert r["alerted"] == ["health:odds_dk_lines"]
+        assert len(sent) == 1
+
     def test_a_stranded_settlement_pages_on_the_second_tick(
             self, monkeypatch, tmp_path):
         _state_dir(monkeypatch, tmp_path)
@@ -349,10 +390,10 @@ class TestHealthCheckOnlyIsNotADirtyPass:
     health-check is the identity of a clean pass: odds/score/settle ran.
 
     Measured 2026-09-14 last-12 non-daily (Supabase `pipeline_runs`):
-    1 ok, 9 failed_steps='health-check', 2 'aborted'. Health-check-only is
-    clean. `aborted` and `deploy-cutoff` are a deploy closing its own row,
-    so that window is 12/12. A hang that never finished has finished_at NULL
-    and is not in this query.
+    1 ok, 9 failed_steps='health-check', 2 'aborted' → 1/12 under the 0.50
+    floor. Health-check-only is clean, so that window is 10/12 and silent.
+    `aborted` stays dirty: `_abort_orphans` stamps a crash the same way it
+    stamps a deploy. `deploy-cutoff` is the SIGTERM drain and is clean.
     """
 
     def test_health_check_only_is_identity_with_a_clean_pass(self):
@@ -376,16 +417,24 @@ class TestHealthCheckOnlyIsNotADirtyPass:
         assert ranked == [("odds", 12)]
         assert "pass:clean_rate" in fa._conditions(FakeConn(health=[], runs=runs))
 
-    def test_aborted_and_deploy_cutoff_are_not_a_producer_failure(self):
-        """Both sentinels are a deploy closing its own row. A hang that
-        never finished has finished_at NULL and is not in this window."""
-        for failed in ("aborted", "deploy-cutoff"):
-            runs = [(False, failed)] * 12
-            conn = FakeConn(health=[], runs=runs)
-            clean, total, ranked = fa._clean_rate(conn)
-            assert (clean, total) == (12, 12), failed
-            assert ranked == []
-            assert "pass:clean_rate" not in fa._conditions(conn)
+    def test_aborted_still_counts_as_dirty(self):
+        """_abort_orphans stamps a crash and a deploy the same way. A pass
+        that died mid-chain has to stay in the clean rate."""
+        runs = [(False, "aborted")] * 12
+        conn = FakeConn(health=[], runs=runs)
+        clean, total, ranked = fa._clean_rate(conn)
+        assert (clean, total) == (0, 12)
+        assert ranked == [("aborted", 12)]
+        assert "pass:clean_rate" in fa._conditions(conn)
+
+    def test_deploy_cutoff_is_not_a_producer_failure(self):
+        """The SIGTERM drain closes its own row. That is not a dead step."""
+        runs = [(False, "deploy-cutoff")] * 12
+        conn = FakeConn(health=[], runs=runs)
+        clean, total, ranked = fa._clean_rate(conn)
+        assert (clean, total) == (12, 12)
+        assert ranked == []
+        assert "pass:clean_rate" not in fa._conditions(conn)
 
     def test_an_empty_failed_steps_map_on_a_failed_row_is_dirty(self):
         """Identity: we do not invent a health-check excuse for an unknown
@@ -407,9 +456,9 @@ class TestHealthCheckOnlyIsNotADirtyPass:
         assert len(runs) == 12
         conn = FakeConn(health=[], runs=runs)
         clean, total, ranked = fa._clean_rate(conn)
-        assert (clean, total) == (12, 12)
-        assert ranked == []
-        assert 12 / 12 >= fa.CLEAN_RATE_FLOOR
+        assert (clean, total) == (10, 12)
+        assert ranked == [("aborted", 2)]
+        assert 10 / 12 >= fa.CLEAN_RATE_FLOOR
         assert "pass:clean_rate" not in fa._conditions(conn)
 
     def test_clean_rate_pages_only_after_an_hour(self, monkeypatch, tmp_path):

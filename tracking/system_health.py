@@ -265,14 +265,16 @@ def classify_missing_finals(rows, now: datetime) -> tuple[str, str, str]:
     """(status, severity, detail) for games that still have no score.
 
     `rows` are (sport, game_date, commence_time). UFC is omitted. Two or more
-    MLB/NHL/WNBA games older than 36 hours is a dead ingest and pages. One
-    such game is a postponement and stays a digest line. Any NBA or college
-    game older than 36 hours pages. Anything younger than that is a digest
-    line. No rows, or only UFC, is OK.
+    games older than 36 hours, in the worker-owned sports or in NBA/college,
+    is a dead ingest and pages. One game is a postponement and stays a digest
+    line: a cancelled college game and one NBA final the local ingest has not
+    written yet are the same shape. Anything younger than 36 hours is a
+    digest line. No rows, or only UFC, is OK.
     """
     page: list[str] = []
     digest: list[str] = []
     worker_old = 0
+    delay_old = 0
     ufc = 0
     # Group so the detail stays one line per sport-date, matching the old report.
     buckets: dict[tuple, list] = {}
@@ -286,10 +288,13 @@ def classify_missing_finals(rows, now: datetime) -> tuple[str, str, str]:
         buckets.setdefault((sport, str(game_date)[:10], old), []).append(1)
         if sport in FINALS_PAGE_SPORTS and old:
             worker_old += 1
+        elif sport in FINALS_DELAY_SPORTS and old:
+            delay_old += 1
     worker_pages = worker_old >= FINALS_CRIT_MIN_GAMES
+    delay_pages = delay_old >= FINALS_CRIT_MIN_GAMES
     for (sport, game_date, old), games in sorted(buckets.items()):
         line = f"{sport} {game_date}: {len(games)} game(s) missing final score"
-        if sport in FINALS_DELAY_SPORTS and old:
+        if sport in FINALS_DELAY_SPORTS and old and delay_pages:
             page.append(line)
         elif sport in FINALS_PAGE_SPORTS and old and worker_pages:
             page.append(line)
@@ -322,20 +327,23 @@ def credit_should_page(remaining: float, daily_burn: float | None) -> bool:
 
 
 def _mlb_games_soon(conn, run_date: str) -> set | None:
-    """MLB offseason check names that have a game inside the next 14 days.
+    """MLB offseason check names with a game today or in the past 14 days.
 
-    Empty set: the schedule has no MLB game that soon, so a long skip is
-    winter and must not escalate. None: the read failed, and the caller
+    A future Opening Day listing is not enough. Counting the next 14 days
+    turned every winter skip STALE for the two weeks before the first game,
+    while the gate ("no games today") was still telling the truth. A game
+    already on the calendar through today means the season has started and
+    a long skip is a stuck gate. None: the read failed, and the caller
     falls back to the budget alone rather than inventing a season.
     """
     try:
-        end = (datetime.strptime(run_date, "%Y-%m-%d") + timedelta(days=14)).strftime(
+        start = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=14)).strftime(
             "%Y-%m-%d")
         n = _scalar(
             conn,
             """SELECT COUNT(*) FROM games
                WHERE sport = 'MLB' AND game_date >= ? AND game_date <= ?""",
-            (run_date, end),
+            (start, run_date),
         ) or 0
     except Exception:                                       # noqa: BLE001
         getattr(conn, "rollback", lambda: None)()
@@ -352,11 +360,12 @@ def _apply_skip_budgets(results: list, run_days: dict,
     Mutates `results` in place. Idempotent -- a result already carrying its
     streak is left alone, so this is safe to call before more than one persist.
 
-    `games_soon` is the set of check names whose sport has a game inside 14
-    days. MLB checks in that set escalate after the short default budget (a
-    shut gate during a season). MLB checks left out of it stay SKIPPED for
-    the whole offseason, including past the 190-day winter budget. None
-    keeps the budget-only rule (a failed schedule read, and the unit tests).
+    `games_soon` is the set of check names whose sport has a game today or
+    in the past 14 days. MLB checks in that set escalate after the short
+    default budget (a shut gate during a season). MLB checks left out of it
+    stay SKIPPED for the whole offseason, including past the 190-day winter
+    budget and including the fortnight before Opening Day. None keeps the
+    budget-only rule (a failed schedule read, and the unit tests).
     """
     for res in results:
         if res["status"] != SKIPPED or res.get("skip_days") is not None:
@@ -378,7 +387,7 @@ def _apply_skip_budgets(results: list, run_days: dict,
         # NOT "data behind": nothing was read, so the data is not the
         # subject. The gate is.
         res["reason"] = f"Never runs ({days}d)"
-        why = (f"a game is scheduled inside 14 days and the gate has been "
+        why = (f"a game was played in the past 14 days and the gate has been "
                f"shut {days} days" if in_season and days <= budget else
                f"gate shut {days} days running, past this check's {budget}-day budget")
         res["detail"] = (

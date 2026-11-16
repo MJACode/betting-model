@@ -300,14 +300,15 @@ def run_calibration_watch(conn, today: date | None = None) -> dict:
         logger.info("calibration_watch: disabled by RUN_CALIBRATION_WATCH")
         return {"status": "disabled"}
 
+    today = today or date.today()
     summary = collect_summary(conn, today)
-    # The Monday 7:15 digest is the only post. Ledgering a post that did not
-    # happen would make push_sent lie.
-    summary["posted"] = False
+    # 9:00 ET, after the 8:30 sweep. The 7:15 digest would be comparing last
+    # Monday's sweep with the one before it.
+    summary["posted"] = _announce_and_ledger(conn, summary, today)
     logger.info(f"calibration_watch: {len(summary.get('findings') or [])} "
                 f"finding(s) across {summary.get('models', 0)} model(s), "
-                f"baseline={summary.get('baseline')}, posted=False "
-                f"(Monday ops digest carries the deltas)")
+                f"baseline={summary.get('baseline')}, "
+                f"posted={summary['posted']}")
     return summary
 
 
@@ -342,10 +343,17 @@ def format_post(s: dict) -> tuple[str, str, int]:
 
 
 def _announce(s: dict) -> bool:
-    """No longer posts. The Monday ops digest is the only calibration message."""
-    title, body, _colour = format_post(s)
-    logger.info(f"calibration_watch (not posted; Monday digest): {title}\n{body[:500]}")
-    return False
+    """Monday 9:00 ET. Deltas against the sweep that just finished."""
+    from tracking.discord_notifier import _post
+
+    title, body, colour = format_post(s)
+    url = config.DISCORD_WEBHOOK_OPS
+    if not url:
+        logger.critical(f"CALIBRATION WATCH (no DISCORD_WEBHOOK_OPS set)\n{body}")
+        return False
+    return bool(_post(url, {"embeds": [{"title": title,
+                                        "description": body[:4000],
+                                        "color": colour}]}))
 
 
 if __name__ == "__main__":  # pragma: no cover — manual invocation

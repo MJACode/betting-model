@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, ops digest review: stranded NBA props page, other alerter WARNs are in the digest, calibration posts at 9:00, aborted stays dirty |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, ops channel pages outages only; the 7:15 ET post is the digest (offseason skips, job successes, calibration deltas, model-quality flags) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord price line links the book name to that bet's slip (app betslip URL, Massachusetts, sportsbook page when there is no outcome id) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord pick posts link the matchup to the game score page (ESPN gamecast, scoreboard fallback) |

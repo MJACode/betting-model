@@ -231,19 +231,20 @@ class TestTheRun:
         assert "change" not in title, f"a no-change run must not claim one: {title!r}"
         assert "model_auto_pauses" in body
 
-    def test_the_cron_does_not_post_or_ledger(self, monkeypatch):
-        """Deltas go out in the Monday ops digest. A second post here is the
-        noise this change removes. Nothing is ledgered, because nothing posted."""
+    def test_the_9am_watch_posts_and_ledgers_after_the_sweep(self, monkeypatch):
+        """7:15 would be comparing last Monday with the Monday before.
+        This post is 9:00, after the 8:30 sweep."""
         sent = []
         monkeypatch.setattr("tracking.discord_notifier._post",
                             lambda *a, **k: sent.append(a) or "id")
+        monkeypatch.setattr(config, "DISCORD_WEBHOOK_OPS", "https://example/x")
         conn = _Conn(dates=("2026-09-02",),
                      sweeps={"2026-09-02": [_row("m", cur_n=5)]},
                      auto_pauses="x")
         out = cw.run_calibration_watch(conn, today=date(2026, 9, 7))
-        assert out["posted"] is False
-        assert conn.inserts == []
-        assert sent == []
+        assert out["posted"] is True
+        assert sent
+        assert conn.inserts and conn.inserts[0][1] == "calibration_watch"
 
     def test_a_failed_post_is_never_ledgered(self, monkeypatch):
         """§7: a kind with zero push_sent rows must mean it has NEVER succeeded."""

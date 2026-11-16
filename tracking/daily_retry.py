@@ -120,10 +120,17 @@ class DailyRun:
     failed_steps: str | None = None
 
 
+# Why a skip will not start another daily. retry_cap_exhausted reads this,
+# not the sentence, so a reworded reason cannot drop the page.
+CAP_REAL_FAILURE = "real-failure-cap"
+CAP_DEPLOY_KILL = "deploy-kill-cap"
+
+
 @dataclass(frozen=True)
 class Decision:
     action: str  # "run" | "skip"
     reason: str
+    kind: str = ""
 
 
 def _enabled() -> bool:
@@ -300,6 +307,7 @@ def decide_daily_retry(
             f"already finished {real_failures} dailies today that failed "
             f"before MLB freshness for a reason other than aborted "
             f"(one retry; not starting another)",
+            CAP_REAL_FAILURE,
         )
 
     if deploy_kills >= MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY:
@@ -308,6 +316,7 @@ def decide_daily_retry(
             f"already deploy-killed {deploy_kills} dailies today "
             f"(bound {MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY}; a restart loop "
             f"is not started again)",
+            CAP_DEPLOY_KILL,
         )
 
     cutoff = now_et.replace(
@@ -400,8 +409,7 @@ def retry_cap_exhausted(decision) -> bool:
     """True when today's daily will not start again because a cap is spent."""
     if getattr(decision, "action", None) != "skip":
         return False
-    reason = decision.reason or ""
-    return ("not starting another" in reason) or ("not started again" in reason)
+    return getattr(decision, "kind", "") in {CAP_REAL_FAILURE, CAP_DEPLOY_KILL}
 
 
 def announce_daily_cap(conn, decision, now: datetime) -> bool:

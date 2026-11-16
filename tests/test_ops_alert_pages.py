@@ -1,6 +1,8 @@
 """What reaches the ops channel, and what waits for the 7:15 digest."""
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+from tracking.failure_alerter import unpaged_condition_lines
 from tracking.system_health import (
     CREDIT_PAGE_REMAINING,
     CREDIT_PAGE_RUNWAY_DAYS,
@@ -31,11 +33,19 @@ def test_ufc_finals_are_not_an_outage():
     assert "UFC" in detail
 
 
-def test_a_college_final_past_36_hours_pages():
+def test_two_college_finals_past_36_hours_page():
+    old = (NOW - timedelta(hours=40)).isoformat()
+    status, sev, detail = classify_missing_finals(
+        [("NCAAB", "2026-11-14", old), ("NCAAF", "2026-11-14", old)], NOW)
+    assert status == "STALE" and sev == "CRIT"
+    assert "NCAAB" in detail and "NCAAF" in detail
+
+
+def test_one_college_final_past_36_hours_is_a_postponement():
     old = (NOW - timedelta(hours=40)).isoformat()
     status, sev, detail = classify_missing_finals(
         [("NCAAB", "2026-11-14", old)], NOW)
-    assert status == "STALE" and sev == "CRIT"
+    assert status == "STALE" and sev == "WARN"
     assert "NCAAB" in detail
 
 
@@ -58,6 +68,34 @@ def test_one_worker_owned_final_is_a_postponement():
     status, sev, _detail = classify_missing_finals(
         [("MLB", "2026-11-14", old)], NOW)
     assert status == "STALE" and sev == "WARN"
+
+
+def test_a_start_gap_is_in_the_digest_and_a_stranded_prop_is_not():
+    lines = unpaged_condition_lines({
+        "start_gap:nba_prop_market:g": (
+            "WARN", "Two starts for g", "the feed may be wrong"),
+        "check:nba_prop_watch": (
+            "WARN", "The NBA prop watch could not read", "boom"),
+        "stranded:nba_prop:g": ("WARN", "open NBA prop bets", "no final"),
+        "health:lineups": ("WARN", "lineups is STALE", "offseason"),
+        "jobfail:nfl_poll_fast": ("WARN", "nfl_poll_fast failed", "timeout"),
+    })
+    text = "\n".join(lines)
+    assert "Two starts" in text
+    assert "could not read" in text
+    assert "open NBA prop" not in text
+    assert "lineups" not in text
+    assert "nfl_poll_fast" not in text
+
+
+def test_data_mount_is_not_created_on_container_disk(monkeypatch, tmp_path):
+    monkeypatch.delenv("WATCHDOG_STATE_DIR", raising=False)
+    monkeypatch.delenv("RAILWAY_VOLUME_MOUNT_PATH", raising=False)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    path = alert_state_path("failure_alerter_state.json")
+    assert not Path("/data").exists() or path.parent == Path("/data")
+    if not Path("/data").is_dir():
+        assert path.parent != Path("/data")
 
 
 def test_alert_state_lives_on_the_railway_volume(monkeypatch, tmp_path):

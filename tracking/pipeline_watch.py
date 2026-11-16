@@ -104,9 +104,10 @@ def _rows(conn, sql, params=()):
 
 # ── the six rules, each a pure function of rows so it can be tested ──────────
 
-# A deploy closing its own row. Counted in the digest, not listed as a finding.
+# deploy-cutoff is the SIGTERM drain. `aborted` is listed: _abort_orphans
+# stamps it on a crash as well as a deploy, and that has to stay visible.
 _PASS_META = frozenset({
-    "aborted", "deploy-cutoff", "health-check", "health_check",
+    "deploy-cutoff", "health-check", "health_check",
     "model-quality", "model_quality",
 })
 
@@ -125,8 +126,9 @@ def findings_from_passes(rows) -> list[str]:
 
     `minutes` is NULL when finished_at is NULL -- the pass died OR its
     finish-ledger call failed. The contract says not to over-read that, so the
-    wording stays neutral. `aborted` and `deploy-cutoff` are a deploy closing
-    its own row and are not a finding.
+    wording stays neutral. `deploy-cutoff` is the SIGTERM drain and is not
+    a finding. `aborted` is: a crash mid-pass is stamped that way when the
+    next pass starts.
     """
     out = []
     for r in rows or []:
@@ -402,17 +404,22 @@ def _credit_note(conn) -> str:
     return f"Credits remaining: {remaining:,.0f}{burn}"
 
 
-def _calibration_lines(conn, today: date) -> list[str]:
-    """Monday only, and only deltas. The sweep and the watch no longer post."""
-    if today.weekday() != 0:
-        return []
+def _alerter_digest_lines(conn) -> list[str]:
+    """WARN conditions the failure alerter does not page.
+
+    Health rows are already findings. Stranded prop bets page. What is left
+    is a lost prop decision, a start-time disagreement, and a watch that
+    could not read. Those used to page every 12 hours. They belong here.
+    """
     try:
-        from tracking.calibration_watch import collect_summary, format_finding_lines
-        summary = collect_summary(conn, today)
+        from datetime import datetime, timezone
+
+        from tracking.failure_alerter import _conditions, unpaged_condition_lines
+        return unpaged_condition_lines(
+            _conditions(conn, datetime.now(timezone.utc)))
     except Exception as exc:  # noqa: BLE001 — the digest still posts
-        logger.warning(f"pipeline_watch: calibration section failed: {exc}")
+        logger.warning(f"pipeline_watch: alerter section failed: {exc}")
         return []
-    return format_finding_lines(summary)
 
 
 def run_watch(conn, hours: int = 24, today: date | None = None) -> dict:
@@ -436,7 +443,7 @@ def run_watch(conn, hours: int = 24, today: date | None = None) -> dict:
     findings += _stale_weeklies(conn, today)
     findings += _quality_lines(conn)
     findings += _job_error_lines(conn)
-    findings += _calibration_lines(conn, today)
+    findings += _alerter_digest_lines(conn)
 
     notes = [n for n in (
         _credit_note(conn),
