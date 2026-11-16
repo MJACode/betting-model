@@ -332,8 +332,10 @@ reads only this disk:
 
 - `supabase_mirror\STATE.json`: the Supabase copy's last FINISHED run. Any
   run rewrites it, a one-table run by hand included, so the row keeps how many
-  tables that run covered. A pass whose copy did not finish leaves the older
-  run there, and the row says so (`copy_this_pass` false).
+  tables that run covered. It counts as the pass's own copy (`copy_this_pass`)
+  only when it started after the pass did and covered at least 90% of the
+  tables on disk; a pass whose copy did not finish leaves the older run there,
+  and the row says so.
 - Every table's `manifest.json`: rows on disk, and each table's latest
   exact-count check. A table whose latest check counted a different number of
   rows in the copied ranges is listed as differing. Rows written after the copy
@@ -348,9 +350,24 @@ It writes one row to `public.pc_copy_snapshots`, with the pass's stamp and
 each step's exit code, in one short transaction. A database it cannot reach is
 tried twice more, after 30 and 60 seconds. A pass reported twice keeps its
 first row, so a retry after a lost answer adds nothing, and no row is ever
-deleted. An exit code the wrapper cannot
-read is passed as 255, a failure, so the row and the task's own result never
-take "unknown" for success. Its log is `logs\report_<pass>.log`.
+deleted. A failed write prints only the kind of failure, never the driver's
+message, which names the database's host, port and user and echoes a
+malformed `DATABASE_URL` whole. Its log is `logs\report_<pass>.log`.
+
+The task's own result (Task Scheduler's Last Run Result) is a failure when any
+step's code is not 0. An exit code the wrapper cannot read is 255, and a step
+that crashed ends with a negative code; either one counts as a failure, while
+the row gets each real code.
+
+**First in each pass, a catch-up.** On 2026-11-16 the wrapper itself ended
+about nine hours in (Last Run Result 0x8007042B, "the process terminated
+unexpectedly"; why is not known, because the task's history is off), while
+its copy carried on. A pass like that never reaches its last step. So each
+pass starts with `local_mirror_report.py --catch-up`. It writes the PREVIOUS
+pass's row, with its exit codes left empty, when `STATE.json` shows a whole
+copy that started during that pass and has finished. It writes nothing when
+that pass reported, or when its copy never finished. The tile marks such a
+row. Its log is `logs\catchup_<pass>.log`.
 
 The first row was written by hand on 2026-11-16 at 13:16 UTC (row 1, 683 ms
 of reading). The pass that started at 00:30 ET that day was still running on
@@ -373,6 +390,7 @@ python ...\local_mirror_github.py    # GitHub alone
 
 python -I ...\local_mirror_report.py --dry-run   # the dashboard's row, printed, nothing written
 python -I ...\local_mirror_report.py             # one row, marked as taken by hand
+python -I ...\local_mirror_report.py --catch-up --before <this pass's stamp> --dry-run
 ```
 
 `DATABASE_URL` is read from this checkout's `.env` when the run starts. It is

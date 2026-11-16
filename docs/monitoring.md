@@ -144,9 +144,9 @@ Five cards:
 
 | Card | What it says | When it turns red or orange |
 |---|---|---|
-| Last nightly copy | how long ago the last nightly copy finished, when, how long it took, how many tables | red when the last nightly pass's copy did not finish, or ended with an error; orange when no nightly report has come for 36 hours |
+| Last nightly copy | how long ago the last nightly copy finished, when, how long it took, how many of the tables on disk it covered | red when the last nightly pass's copy did not finish, or ended with an error; orange when no nightly report has come for 36 hours (or none at all 36 hours after the first report), when the DuckDB views did not rebuild, or when the row was written by the next pass's catch-up (the pass stopped before reporting, so its exit codes are unknown) |
 | Tables that differ | the tables whose latest exact-count check found a different number of rows than Supabase, and the tables the last run could not copy | red when a table could not be copied; orange when a count differs (usually rows that changed between the copy and its check, which the next run takes) |
-| Size of the copy | the bytes under the copy's folder: the database copy, GitHub, everything else, and the growth a day once there is a day of reports | never |
+| Size of the copy | the bytes under the copy's folder: the database copy, GitHub, everything else (mostly an older full copy kept under `snapshots\`, then logs and other jobs' files), and the growth a day once there is a day of reports | never |
 | Free disk | free space on the PC's disk, and its share | orange under 15% free, red under 5% |
 | GitHub copy | when the GitHub copy last finished, how many repositories, how many failed | red when a repository failed, the last pass's GitHub copy ended with an error, or did not finish; orange when none has finished for 30 hours (it runs at the start of each nightly pass and takes minutes) |
 
