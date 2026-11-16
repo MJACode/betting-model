@@ -4053,8 +4053,9 @@ export async function fetchLiveScoreboard(gameIds: readonly string[]): Promise<L
 }
 
 /**
- * Scoreboard % bets / % money (scoreboard_splits, written each refresh pass
- * by data/ingestors/scoreboard_splits.py). At most 6 rows per game; the
+ * Scoreboard % bets / % money (scoreboard_splits, DraftKings' own split
+ * written each refresh pass by data/ingestors/dk_splits.py; rows an earlier
+ * source wrote are not read). At most 6 rows per game; the
  * caller asks for one sport's slate, 80 games a request, so a request stays
  * under the 1,000-row cap (80 x 6 = 480).
  */
@@ -4066,7 +4067,8 @@ export async function fetchScoreboardSplits(gameIds: readonly string[]): Promise
     const chunk = gameIds.slice(i, i + size);
     const { data, error } = await supabase
       .from('scoreboard_splits')
-      .select('game_id, market, side, bet_pct, money_pct, line_value')
+      .select('game_id, market, side, bet_pct, money_pct, line_value, open_bet_pct, open_money_pct')
+      .eq('source', 'dk_network')
       .in('game_id', [...chunk]);
     if (error) throw error;
     out.push(...((data ?? []) as unknown as ScoreboardSplitRow[]));

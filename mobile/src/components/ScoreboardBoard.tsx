@@ -45,6 +45,7 @@ import {
   type ScoreboardSplitRow,
   type ScoreboardSport,
   type SideSplit,
+  type SplitMove,
 } from '@/lib/scoreboard';
 import { colors, font, radii, spacing, teamDisc, sectionHeaderText, opacity, card, cardDense } from '@/lib/theme';
 import type { GameRow } from '@/types';
@@ -584,8 +585,8 @@ function SideRow({
         {row.score}
       </Text>
       <LineCell value={cell.value} price={cell.price} ink={ink} single={market === 'h2h'} />
-      {showSplits ? <PctCell value={split.bets} /> : null}
-      {showSplits ? <PctCell value={split.money} /> : null}
+      {showSplits ? <PctCell value={split.bets} move={split.betsMove ?? null} /> : null}
+      {showSplits ? <PctCell value={split.money} move={split.moneyMove ?? null} /> : null}
     </View>
   );
 }
@@ -595,7 +596,7 @@ function SideRow({
  * the BET green: on a picks board green reads as "the model says bet this",
  * and the bar only says where the public is (UX review, 2026-10-29).
  */
-function PctCell({ value }: { value: number | null }) {
+function PctCell({ value, move }: { value: number | null; move: SplitMove }) {
   const majority = value != null && value > 50;
   return (
     <View style={[styles.colPct, styles.pct]}>
@@ -607,6 +608,11 @@ function PctCell({ value }: { value: number | null }) {
         maxFontSizeMultiplier={1.6}
       >
         {pctText(value)}
+        {/* Moved since DK's first split for this side (Matt, 2026-11-16).
+            Neutral ink: green/red would read as a model signal. */}
+        {value != null && move ? (
+          <Text style={styles.pctMove}>{move === 'up' ? ' ▲' : ' ▼'}</Text>
+        ) : null}
       </Text>
       <View style={styles.barTrack}>
         {value != null ? (
@@ -743,6 +749,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   pctEmpty: { color: colors.textTertiary },
+  pctMove: { fontSize: font.size.nano, color: colors.textSecondary },
   barTrack: {
     width: 36,
     height: 4,

@@ -16,6 +16,7 @@ import {
   presentScoreboard,
   shownSplitLine,
   splitsFor,
+  splitMove,
   splitsSpeech,
   scoreboardPhase,
   ESPN_LIVE_SPORTS,
@@ -112,6 +113,17 @@ check('the odds cell follows the market', marketCell(cellCard.away, 'spreads').v
   && marketCell(cellCard.away, 'totals').value === 'o46.5' && marketCell(cellCard.home, 'h2h').value === `${SCOREBOARD_MINUS}192`);
 check('a market with no split says nothing extra', splitsSpeech(cellCard, 'h2h', mlSplit) === '');
 check('splits are spoken per side', splitsSpeech(cellCard, 'spreads', spreadSplit).includes('47 percent of bets, 53 percent of money'));
+// Movement arrow vs DK's first split for the side (Matt, 2026-11-16).
+check('no opening stored is no arrow', spreadSplit.away.moneyMove === null);
+check('a 3-point move up is an arrow up, 2 points is none',
+  splitMove(55, 52) === 'up' && splitMove(54, 52) === null && splitMove(32, '47.0') === 'down');
+check('a dash never carries an arrow', splitMove(null, 40) === null);
+const openedRows = splitRows.map((r) => (r.market === 'spreads' && r.side === 'away'
+  ? { ...r, open_bet_pct: 47, open_money_pct: 60 } : r));
+const openedSplit = splitsFor(openedRows, 'spreads', shownSplitLine(cellCard, 'spreads'));
+check('money down 7 from its opening is an arrow down, unmoved bets none',
+  openedSplit.away.moneyMove === 'down' && openedSplit.away.betsMove === null);
+check('a moved split is spoken', splitsSpeech(cellCard, 'spreads', openedSplit).includes('53 percent of money, down'));
 const movedLine = presentScoreboard({
   game: game({ commence_time: '2099-01-01T00:00:00Z' }),
   pregame: [{ market: 'spreads', spread_home: -3, home_price: -110, away_price: -110 }],
