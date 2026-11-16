@@ -325,11 +325,11 @@ UPSERT_SQL = """
 INSERT INTO public.scoreboard_splits
     (game_id, sport, game_date, market, side, bet_pct, money_pct,
      line_value, snapshot_at, source, open_bet_pct, open_money_pct,
-     open_snapshot_at)
+     open_snapshot_at, open_line_value)
 VALUES
     (%(game_id)s, %(sport)s, %(game_date)s, %(market)s, %(side)s,
      %(bet_pct)s, %(money_pct)s, %(line_value)s, %(snapshot_at)s,
-     'dk_network', %(bet_pct)s, %(money_pct)s, %(snapshot_at)s)
+     'dk_network', %(bet_pct)s, %(money_pct)s, %(snapshot_at)s, %(line_value)s)
 ON CONFLICT (game_id, market, side) DO UPDATE SET
     bet_pct = EXCLUDED.bet_pct,
     money_pct = EXCLUDED.money_pct,
@@ -346,7 +346,10 @@ ON CONFLICT (game_id, market, side) DO UPDATE SET
                           THEN scoreboard_splits.open_money_pct ELSE EXCLUDED.money_pct END,
     open_snapshot_at = CASE WHEN scoreboard_splits.source = 'dk_network'
                              AND scoreboard_splits.open_snapshot_at IS NOT NULL
-                            THEN scoreboard_splits.open_snapshot_at ELSE EXCLUDED.snapshot_at END
+                            THEN scoreboard_splits.open_snapshot_at ELSE EXCLUDED.snapshot_at END,
+    open_line_value = CASE WHEN scoreboard_splits.source = 'dk_network'
+                            AND scoreboard_splits.open_snapshot_at IS NOT NULL
+                           THEN scoreboard_splits.open_line_value ELSE EXCLUDED.line_value END
 """
 
 
@@ -365,7 +368,7 @@ def run(conn=None, *, now: datetime | None = None,
     try:
         if conn.execute(
             "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' "
-            "AND table_name = 'scoreboard_splits' AND column_name = 'open_snapshot_at'"
+            "AND table_name = 'scoreboard_splits' AND column_name = 'open_line_value'"
         ).fetchone() is None:
             logger.info("dk_splits: scoreboard_splits migration not applied yet; nothing written")
             return {}

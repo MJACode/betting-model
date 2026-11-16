@@ -816,6 +816,9 @@ export interface ScoreboardSplitRow {
 /** Points a split must move from its opening before it gets an arrow. */
 export const SPLIT_MOVE_POINTS = 3;
 
+/** One line under the column labels saying what the source and arrow are. */
+export const SPLITS_LEGEND = `DraftKings splits · ▲▼ moved ${SPLIT_MOVE_POINTS}+ points since DK's first split`;
+
 export type SplitMove = 'up' | 'down' | null;
 
 /** The line on the card for one market, and whether that cell is in-play. */
@@ -831,6 +834,9 @@ export interface SideSplit {
   /** Direction since the opening split, when it moved SPLIT_MOVE_POINTS+. */
   betsMove?: SplitMove;
   moneyMove?: SplitMove;
+  /** The rounded opening the move is measured from, for VoiceOver. */
+  betsOpen?: number | null;
+  moneyOpen?: number | null;
 }
 
 /** 'up' / 'down' when `now` is SPLIT_MOVE_POINTS or more from `open`. */
@@ -895,6 +901,8 @@ export function splitsFor(
       money,
       betsMove: splitMove(bets, row?.open_bet_pct),
       moneyMove: splitMove(money, row?.open_money_pct),
+      betsOpen: pct(row?.open_bet_pct),
+      moneyOpen: pct(row?.open_money_pct),
     };
   };
   return market === 'totals'
@@ -922,12 +930,13 @@ export function splitsSpeech(
   const label = market === 'totals' ? 'Total' : market === 'h2h' ? 'Moneyline' : 'Spread';
   const empty = (s: SideSplit) => s.bets == null && s.money == null;
   if (empty(splits.away) && empty(splits.home)) return '';
-  const moved = (m: SplitMove | undefined) => (m === 'up' ? ', up' : m === 'down' ? ', down' : '');
+  const moved = (m: SplitMove | undefined, open: number | null | undefined) =>
+    m && open != null ? `, ${m} from ${open} at open` : '';
   const side = (name: string, s: SideSplit) =>
     empty(s)
       ? `${name} no split`
-      : `${name} ${s.bets ?? 'no'} percent of bets${moved(s.betsMove)}, `
-        + `${s.money ?? 'no'} percent of money${moved(s.moneyMove)}`;
+      : `${name} ${s.bets ?? 'no'} percent of bets${moved(s.betsMove, s.betsOpen)}, `
+        + `${s.money ?? 'no'} percent of money${moved(s.moneyMove, s.moneyOpen)}`;
   const awayName = market === 'totals' ? 'Over' : card.awayFull;
   const homeName = market === 'totals' ? 'Under' : card.homeFull;
   return `${label}: ${side(awayName, splits.away)}; ${side(homeName, splits.home)}.`;

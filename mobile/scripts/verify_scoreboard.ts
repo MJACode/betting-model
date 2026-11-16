@@ -123,7 +123,7 @@ const openedRows = splitRows.map((r) => (r.market === 'spreads' && r.side === 'a
 const openedSplit = splitsFor(openedRows, 'spreads', shownSplitLine(cellCard, 'spreads'));
 check('money down 7 from its opening is an arrow down, unmoved bets none',
   openedSplit.away.moneyMove === 'down' && openedSplit.away.betsMove === null);
-check('a moved split is spoken', splitsSpeech(cellCard, 'spreads', openedSplit).includes('53 percent of money, down'));
+check('a moved split is spoken', splitsSpeech(cellCard, 'spreads', openedSplit).includes('53 percent of money, down from 60 at open'));
 const movedLine = presentScoreboard({
   game: game({ commence_time: '2099-01-01T00:00:00Z' }),
   pregame: [{ market: 'spreads', spread_home: -3, home_price: -110, away_price: -110 }],

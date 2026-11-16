@@ -126,7 +126,8 @@ def test_upsert_keeps_the_first_dk_split_as_the_opening():
     assert "'dk_network', %(bet_pct)s, %(money_pct)s, %(snapshot_at)s" in sql
     assert "THEN scoreboard_splits.open_money_pct ELSE EXCLUDED.money_pct" in sql
     # An Action Network row is never the opening.
-    assert sql.count("scoreboard_splits.source = 'dk_network'") == 3
+    assert sql.count("scoreboard_splits.source = 'dk_network'") == 4
+    assert "THEN scoreboard_splits.open_line_value ELSE EXCLUDED.line_value" in sql
 
 
 def test_discovers_event_groups_from_sport_links_only():

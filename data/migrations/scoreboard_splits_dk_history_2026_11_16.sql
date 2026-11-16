@@ -20,7 +20,7 @@ BEGIN
   IF EXISTS (
        SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'scoreboard_splits'
-          AND column_name = 'open_snapshot_at')
+          AND column_name = 'open_line_value')
      AND to_regclass('public.scoreboard_splits_history') IS NOT NULL
      AND NOT has_table_privilege('anon', 'public.scoreboard_splits_history', 'SELECT')
   THEN
@@ -30,7 +30,10 @@ BEGIN
   ALTER TABLE public.scoreboard_splits
     ADD COLUMN IF NOT EXISTS open_bet_pct     numeric(5,1),
     ADD COLUMN IF NOT EXISTS open_money_pct   numeric(5,1),
-    ADD COLUMN IF NOT EXISTS open_snapshot_at timestamptz;
+    ADD COLUMN IF NOT EXISTS open_snapshot_at timestamptz,
+    -- The line the opening split was measured at, so the arrow can later be
+    -- limited to an unmoved line if Matt chooses (UX review 2026-11-16).
+    ADD COLUMN IF NOT EXISTS open_line_value  numeric;
 
   CREATE TABLE IF NOT EXISTS public.scoreboard_splits_history (
     id           bigserial PRIMARY KEY,

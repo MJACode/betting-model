@@ -36,6 +36,7 @@ import {
   scoreboardSwitchLine,
   shownSplitLine,
   splitsFor,
+  SPLITS_LEGEND,
   splitsSpeech,
   type ScoreboardCard,
   type ScoreboardFeed,
@@ -369,6 +370,11 @@ export function ScoreboardBoard({
             ) : null}
           </View>
         ) : null}
+        {cards.length > 0 && showSplits ? (
+          <Text style={styles.caption} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            {SPLITS_LEGEND}
+          </Text>
+        ) : null}
         <FlatList
           data={cards}
           keyExtractor={(c) => c.gameId}
@@ -608,12 +614,11 @@ function PctCell({ value, move }: { value: number | null; move: SplitMove }) {
         maxFontSizeMultiplier={1.6}
       >
         {pctText(value)}
-        {/* Moved since DK's first split for this side (Matt, 2026-11-16).
-            Neutral ink: green/red would read as a model signal. */}
-        {value != null && move ? (
-          <Text style={styles.pctMove}>{move === 'up' ? ' ▲' : ' ▼'}</Text>
-        ) : null}
       </Text>
+      {/* The arrow sits beside the bar, not in the number's Text, so a moved
+          number is fitted exactly like an unmoved one (UX review 2026-11-16).
+          Neutral ink: green/red would read as a model signal. */}
+      <View style={styles.barRow}>
       <View style={styles.barTrack}>
         {value != null ? (
           <View
@@ -623,6 +628,10 @@ function PctCell({ value, move }: { value: number | null; move: SplitMove }) {
             ]}
           />
         ) : null}
+      </View>
+      {value != null && move ? (
+        <Text style={styles.pctMove} maxFontSizeMultiplier={1.3}>{move === 'up' ? '▲' : '▼'}</Text>
+      ) : null}
       </View>
     </View>
   );
@@ -749,7 +758,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   pctEmpty: { color: colors.textTertiary },
-  pctMove: { fontSize: font.size.nano, color: colors.textSecondary },
+  pctMove: { fontFamily: font.family, fontSize: font.size.nano, color: colors.textSecondary },
+  barRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   barTrack: {
     width: 36,
     height: 4,
