@@ -217,7 +217,10 @@ down this list.
   and never stored or posted the bet. The men's college loop had it, and the
   women's and EuroLeague loops were copied from it: 20 of the men's 24 and 13
   of the women's 22 bets lost, 2026-11-09 to 11-15 (`docs/sports/ncaabw.md`,
-  "Why the women's record trails the men's"). Write 0.0 there, with
+  "Why the women's record trails the men's"). On the replay it would have
+  dropped 477 of the women's halftime model's 669 bets of 2025-26, +61.82 of
+  its +89.96 units, at the same return a bet as the rest
+  (`scripts/ncaabw_research/ht_dropped_bets.py`). Write 0.0 there, with
   `line_book` naming the book, as the first-half cards and the NBA loop do.
   `tests/test_inplay_pick_without_draftkings.py` fails any `models/*live*.py`
   that writes NULL.
