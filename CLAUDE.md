@@ -169,7 +169,7 @@ tried and what each returned:
    it, then point a one-off service's start command at it (`prop-probe` exists for
    this) or add a scheduler job. See `docs/cloud_worker.md`.
 3. **Matt's machine** — ask for a specific command, not a vague blocker.
-4. **The Supabase MCP** — READS production. It does not write.
+4. **The Supabase MCP** — READS and (since 2026-11-16) WRITES production.
 
 **The general form of this rule — a banner is not a test, reachability and
 capability are two separate measurements, a missing credential is not a missing
@@ -177,7 +177,7 @@ capability, one absent route is not zero routes — is in the global
 `~/.claude/CLAUDE.md` §0 and loads on every project.** It is not repeated here.
 What is project-specific is the four routes above and the MEASURED limit of each
 tool, which the session-start hook injects verbatim
-(`.claude/hooks/connector_reminder.json`): Supabase `execute_sql` is read-only,
+(`.claude/hooks/connector_reminder.json`): Supabase `execute_sql` now writes,
 Railway `list-variables` hides the values, and there is no node and no Railway
 CLI on this machine. The cases that cost a day each: `docs/rules_evidence.md`.
 **THE CURRENT STATE OF A SYSTEM IS NOT ITS CAPABILITY, AND WORK YOU CAN DO IS
