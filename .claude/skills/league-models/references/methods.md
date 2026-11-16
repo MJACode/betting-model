@@ -61,6 +61,15 @@ error.
   market's own logit and one intercept per outcome type, and fit a two-way
   market once per pair, on one side: fitted on both sides, the inputs cancel
   (`docs/ufc_market_audit.md` §5f).
+  Horse racing, Hong Kong win pools 1997–2005 (2026-11-15): Benter's blend
+  (`softmax(b · log p_model + c · log p_pool)`) on a 25-fact Bolton–Chapman
+  conditional logit, walk-forward, 4,581 graded races: `b` between −0.11 and
+  +0.04 in every season, and the blend scored worse out of sample than the
+  pool calibrated alone. Against a FINAL pool, which already holds the late
+  money, this is the harder test; the published Hong Kong successes blended
+  against the pool minutes before the off. A leak check (the race's own speed
+  figure) lit the same harness up (`b` +2.9 to +9.1), so the null is real
+  (`docs/horse_racing_market_audit.md` §3b).
 
 ## 2. The books disagree — with each other, with themselves, with a sharp book
 
@@ -131,6 +140,23 @@ error.
 - *Failed*: steam lag (about a third of a point of CLV, does not pay at -110);
   predicting the book's next move (correlation +0.66, but the move is smaller
   than the vig).
+- **A market against its own derivative: the place pool against the win
+  pool** (Hausch, Ziemba and Rubinstein's "Dr Z" system, 1981). Harville's
+  place chance from the win prices, calibrated, against the place price.
+  *Failed* in horse racing (2026-11-15): Hong Kong's final pools, calibrated
+  on 1997–2000 and graded on 2001–2004, negative at every EV cut (best
+  −7.2% [−18.0, +3.5], 2,590 bets) even though the rule read both final
+  pools; the Betfair exchange (Australia and New Zealand), calibrated on
+  2020–2022 with a place BSP predicted from the scheduled-start prices,
+  negative net of commission in every graded year 2023–2026 (best −1.78%
+  [−2.33, −1.24]). **Harville over-rates short horses for a place (said 0.84,
+  placed 0.75) in both markets, and both place markets already price that**:
+  calibrate the place model before any ROI test, or the "edge" is Harville's
+  bias (`docs/horse_racing_market_audit.md` §3a, §4a).
+- **Untested in racing, and the shape that has worked elsewhere**: the
+  sharp exchange's price on a race against the pool a US outlet sells, both
+  at a moment before the off. Needs a price path for both, which nothing
+  free holds (`docs/sports/racing.md`, "What would have to change").
 
 ## 3. The book re-hangs a line mechanically
 
@@ -209,6 +235,18 @@ edge is where the rule misses something the state shows.
 
 ## 6. Where the margin sits
 
+- **A pool's take falls evenly; an exchange's margin is the commission.**
+  Horse racing (2026-11-15): Hong Kong's win pool (about 18.7% out, measured
+  from the pool's book) loses −15% to −23% in every odds band and about −50%
+  over 51; the pool share is calibrated within 0.4 points wherever the
+  sample is large. On the Betfair exchange the de-vigged BSP is within 0.2
+  points of the win rate in every band of 8,000+ runners, blind bets are
+  near zero before commission, and 7–10% commission makes every band and
+  every year's favourite lose. No cheap side in either
+  (`docs/horse_racing_market_audit.md` §3, §4). A conditional logit on the
+  exchange's scheduled-start snapshot (back, spread, book, field; after Sung
+  and Johnson 2010) matched the back's own log loss (1.7906 against 1.7907)
+  and lost −3.7% to −4.0% net in every graded year (§4b).
 - **Unders on count props.** Books put more of the margin on the over: blind
   hockey prop overs lost 9.0-12.4%, unders 0.3-3.5%. A Poisson count model
   betting selective unders on its own probability *worked*: saves, shots on
@@ -277,6 +315,18 @@ edge is where the rule misses something the state shows.
 
 Each line is a hypothesis with its doc. Run it, then move it into the
 sections above with its result.
+
+- Horse racing, the sharp price against the pool: Betfair's price on a Hong
+  Kong (or US) race minutes before the off against the commingled pool's odds
+  at the same moment, bet the pool when it pays more than the exchange's fair
+  price by more than the take, graded at the final dividend. Needs both price
+  paths (`docs/sports/racing.md`, "What would have to change").
+- Horse racing, a Betfair back book under 100% at the scheduled start (818
+  of 115,296 races, median 0.99): an arbitrage only if the backs fill, and
+  the free files carry no sizes.
+- Horse racing, the UK/Ireland starting-price set (5.1 million runners,
+  1988–2026, free, 1.12 GB): blind bets by price band at SP, for a third
+  market's favourite-longshot table.
 
 - Tennis total games and games spreads priced from each player's hold and
   break rates; the scout found no published test of these markets anywhere

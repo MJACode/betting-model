@@ -1,5 +1,9 @@
 # Horse racing — scope and design
 
+> **Followed up 2026-11-15** by the first market audit on the free files:
+> the league doc with the market grid is `docs/sports/racing.md`, the tables
+> are `docs/horse_racing_market_audit.md`.
+
 Planning only. Written 2026-11-15. No ingestor, no model, no `picks` row, and
 no code that places a bet or logs into a sportsbook or an ADW (TwinSpires,
 TVG, FanDuel Racing, NYRA Bets, and the rest).
@@ -660,7 +664,7 @@ after a mis-post.
 | License vs the paid app | The app, Discord, and push are one surface. A personal-use grant that forbids publishing analytics for a fee blocks the whole sport, not just the app. |
 | Equibase 2023 clickwrap | DRF's report of the agreement forbids disseminating derivatives. Loading that year into a model that posts picks is the violation. |
 | Add-ons closed | Full US and full Australia on The Racing API are visible on the coverage page and not for sale. HDW and Krok are the substitutes, not the add-on. |
-| No US tote tape | A backtest that bets final odds is betting the close. Phase 2 has to refuse that. Races Betfair does not list are not bet. |
+| No US tote tape | A pool bet is paid at the final odds, so grading at them is right; a rule that DECIDES on them has seen the close. Phase 2 refuses the second, not the first (corrected 2026-11-15, `docs/horse_racing_market_audit.md` §2). Races Betfair does not list are not bet. |
 | JRA-VAN on Windows | A Linux worker job cannot be the Japan ingestor. |
 | Dead heat and the unit function | Grading a dead heat as WIN overstates the payout. Phase 3 waits on the result code. |
 | `games` bridge | Anything that settles `RACING` through `home_win` grades nonsense. The exclusion is a test, watched failing. |
