@@ -44,6 +44,7 @@ import {
   type BookPrice,
 } from './markets';
 import { normalizePlayerName } from './playerNews';
+import { fillMissingGames as fillMissingGamesById } from './pickGames';
 import { NBA_Q1_FETCH_GAMES, NBA_Q1_SEASON_COLUMNS, type NbaQ1Game, type NbaQ1SeasonRow } from './nbaQ1';
 import {
   NBA_FB_PLAYER_COLUMNS,
@@ -1522,6 +1523,8 @@ export async function fetchPicksForDate(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  const missedGamesError = await fillMissingGames(picks, gameById);
+  if (missedGamesError) onEnrichmentError?.('postponed games', missedGamesError);
   const weatherByGame = new Map<string, GameWeather>();
   for (const w of weather) weatherByGame.set(w.game_id, w);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
@@ -1578,6 +1581,21 @@ export async function fetchPicksForDate(
  * shows those bets instead of hiding them until fight week.
  * Same enrichment shape as fetchPicksForDate (UFC has no weather rows).
  */
+/**
+ * Adds to `gameById` the games the picks name that a by-date read did not
+ * return: a game whose row moved date after its pick was written (a
+ * postponement). Without it the card loses its team and matchup. See
+ * lib/pickGames.ts.
+ */
+function fillMissingGames(
+  picks: readonly Pick[],
+  gameById: Map<string, GameRow>,
+): Promise<unknown> {
+  return fillMissingGamesById(picks, gameById, (ids) =>
+    supabase.from('games').select(GAME_COLUMNS).in('game_id', ids),
+  );
+}
+
 export async function fetchUpcomingUfcPicks(
   afterDate: string,
   throughDate: string,
@@ -1638,6 +1656,7 @@ export async function fetchUpcomingUfcPicks(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  await fillMissingGames(picks, gameById);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
 
@@ -1703,6 +1722,7 @@ export async function fetchUpcomingTennisPicks(
 
   const gameById = new Map<string, GameRow>();
   for (const g of (gamesRes.data ?? []) as unknown as GameRow[]) gameById.set(g.game_id, g);
+  await fillMissingGames((picksRes.data ?? []) as unknown as Pick[], gameById);
 
   return ((picksRes.data ?? []) as unknown as Pick[]).map((pick) => ({
     pick,
@@ -1850,6 +1870,7 @@ export async function fetchUpcomingNflPicks(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  await fillMissingGames(picks, gameById);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
 
@@ -1959,6 +1980,7 @@ export async function fetchUpcomingNcaafPicks(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  await fillMissingGames(picks, gameById);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
 
@@ -2207,6 +2229,7 @@ export async function fetchUpcomingNhlPicks(
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  await fillMissingGames(picks, gameById);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
 
@@ -4038,23 +4061,27 @@ const LIVE_SCOREBOARD_COLUMNS =
  */
 export async function fetchLiveScoreboard(gameIds: readonly string[]): Promise<LiveScoreboardRow[]> {
   if (gameIds.length === 0) return [];
-  const out: LiveScoreboardRow[] = [];
+  // 80 ids a request keeps the URL short. A college basketball Saturday
+  // starts 300+ games, so the chunks are read side by side, not one after
+  // another (review L3, 2026-11-15). One row per game: far under 1,000.
   const size = 80;
-  for (let i = 0; i < gameIds.length; i += size) {
-    const chunk = gameIds.slice(i, i + size);
+  const chunks: string[][] = [];
+  for (let i = 0; i < gameIds.length; i += size) chunks.push(gameIds.slice(i, i + size));
+  const parts = await Promise.all(chunks.map(async (chunk) => {
     const { data, error } = await supabase
       .from('live_scoreboard')
       .select(LIVE_SCOREBOARD_COLUMNS)
       .in('game_id', [...chunk]);
     if (error) throw error;
-    out.push(...((data ?? []) as unknown as LiveScoreboardRow[]));
-  }
-  return out;
+    return (data ?? []) as unknown as LiveScoreboardRow[];
+  }));
+  return parts.flat();
 }
 
 /**
- * Scoreboard % bets / % money (scoreboard_splits, written each refresh pass
- * by data/ingestors/scoreboard_splits.py). At most 6 rows per game; the
+ * Scoreboard % bets / % money (scoreboard_splits, DraftKings' own split
+ * written each refresh pass by data/ingestors/dk_splits.py; rows an earlier
+ * source wrote are not read). At most 6 rows per game; the
  * caller asks for one sport's slate, 80 games a request, so a request stays
  * under the 1,000-row cap (80 x 6 = 480).
  */
@@ -4066,7 +4093,8 @@ export async function fetchScoreboardSplits(gameIds: readonly string[]): Promise
     const chunk = gameIds.slice(i, i + size);
     const { data, error } = await supabase
       .from('scoreboard_splits')
-      .select('game_id, market, side, bet_pct, money_pct, line_value')
+      .select('game_id, market, side, bet_pct, money_pct, line_value, open_bet_pct, open_money_pct')
+      .eq('source', 'dk_network')
       .in('game_id', [...chunk]);
     if (error) throw error;
     out.push(...((data ?? []) as unknown as ScoreboardSplitRow[]));

@@ -57,8 +57,8 @@ export function Tile({
           </span>
         )}
         <div className={cn('min-w-0 flex-1', dragging && 'tile-drag-handle cursor-grab active:cursor-grabbing')}>
-          <h2 className="truncate text-[15px] font-semibold leading-snug text-foreground">{meta.title}</h2>
-          <p className="truncate text-xs text-muted-foreground" title={meta.description}>{meta.description}</p>
+          <h2 className="truncate text-[14px] font-semibold leading-snug tracking-[-0.005em] text-foreground">{meta.title}</h2>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground" title={meta.description}>{meta.description}</p>
         </div>
         {actions && <div className="tile-no-drag flex shrink-0 items-center gap-1.5">{actions}</div>}
         <DropdownMenu>

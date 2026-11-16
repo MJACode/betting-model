@@ -3,7 +3,7 @@ import { useGetDashboardLayouts, useSaveDashboardLayout, useDeleteDashboardLayou
 import { useViewerEmail } from '../ViewerContext'
 import { readStorage, writeStorage } from '../../utils/safeStorage'
 import {
-  DEFAULT_LAYOUT, GRID_COLS, bottomOf, defaultLayoutFor, normalizeLayout,
+  DEFAULT_LAYOUT, GRID_COLS, SAVABLE_TABS, bottomOf, defaultLayoutFor, normalizeLayout,
   type TabId, type TileLayout, type TileMeta,
 } from './layoutTypes'
 
@@ -57,7 +57,16 @@ export function useTabLayouts(tab: TabId, metas: TileMeta[]) {
   const saveTrigger = save.trigger
   const deleteTrigger = del.trigger
 
+  // A tab whose layouts cannot be saved never asks the layout functions.
+  const savable = SAVABLE_TABS.has(tab)
+
   useEffect(() => {
+    if (!savable) {
+      setSaved([])
+      setAvailable(false)
+      setLoadError(null)
+      return
+    }
     let cancelled = false
     readTrigger({ tab }).result
       .then(raw => {
@@ -82,7 +91,7 @@ export function useTabLayouts(tab: TabId, metas: TileMeta[]) {
         setAvailable(false)
       })
     return () => { cancelled = true }
-  }, [readTrigger, tab, metas])
+  }, [readTrigger, tab, metas, savable])
 
   // Re-open the layout this viewer last chose, once the list and the viewer are known.
   useEffect(() => {
@@ -244,6 +253,7 @@ export function useTabLayouts(tab: TabId, metas: TileMeta[]) {
   return {
     tab,
     metas,
+    savable,
     selected,
     saved,
     working,

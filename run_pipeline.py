@@ -1728,19 +1728,27 @@ def step_nba_public_splits(run_date: str) -> bool:
 
 def step_scoreboard_splits(run_date: str) -> bool:
     """
-    % of bets and % of money for the app's Scoreboard (Action Network, free),
-    every sport with an unstarted game today or tomorrow. Writes
-    scoreboard_splits only -- never public_betting, which the scorer copies
-    onto every pick. Best-effort.
+    % of bets and % of money for the app's Scoreboard: DraftKings' own split
+    from DK Network (scoreboard_splits + history), and Action Network's
+    consensus into scoreboard_splits_history only. Never public_betting,
+    which the scorer copies onto every pick. Best-effort, both free.
     """
+    ok = True
+    # DraftKings' own split is what the Scoreboard shows (Matt, 2026-11-16).
+    try:
+        from data.ingestors.dk_splits import run as run_dk
+        logger.success(f"✓ Scoreboard splits (DraftKings): {run_dk()}")
+    except Exception as exc:
+        logger.error(f"✗ Scoreboard splits (DraftKings) failed: {exc}")
+        ok = False
+    # Action Network consensus: history only, never the Scoreboard row.
     try:
         from data.ingestors.scoreboard_splits import run
-        result = run()
-        logger.success(f"✓ Scoreboard splits: {result}")
-        return True
+        logger.success(f"✓ Scoreboard splits (Action Network history): {run()}")
     except Exception as exc:
-        logger.error(f"✗ Scoreboard splits failed: {exc}")
-        return False
+        logger.error(f"✗ Scoreboard splits (Action Network) failed: {exc}")
+        ok = False
+    return ok
 
 
 def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:

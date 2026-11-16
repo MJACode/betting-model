@@ -9,6 +9,7 @@ import { sharpScore } from '@/lib/sharpScore';
 import type { Pick } from '@/types';
 import { decisionEdge } from '@/lib/decisionPrice';
 import { flaggedLast } from '@/lib/priceCheck';
+import { postponedStart } from '@/lib/format';
 
 export type SortKey = 'edge' | 'sharp' | 'time' | 'public';
 
@@ -30,6 +31,13 @@ interface PublicSplitPick {
 }
 
 /** Sharp Score; non-BET picks (null) sink below any scored BET (0..100). */
+/** A game moved days past the start this pick was made for keeps the slot
+ *  it was picked for (its game_time), not the new date's. */
+function timeSortKey(it: SortablePick): string {
+  if (postponedStart(it.game, it.pick.game_time)) return it.pick.game_time ?? '';
+  return it.game?.commence_time ?? '';
+}
+
 function sharpOf(it: SortablePick): number {
   return sharpScore(it.pick)?.score ?? -1;
 }
@@ -92,8 +100,8 @@ export function sortPicks<T extends SortablePick>(
       break;
     case 'time':
       arr.sort((a, b) => {
-        const ta = a.game?.commence_time ?? '';
-        const tb = b.game?.commence_time ?? '';
+        const ta = timeSortKey(a);
+        const tb = timeSortKey(b);
         if (ta !== tb) return ta.localeCompare(tb);
         return decisionEdge(b.pick) - decisionEdge(a.pick);
       });

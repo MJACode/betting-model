@@ -569,6 +569,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # policy and SELECT-only grant; catalog return once all three exist.
     # Not public_betting, which the scorer copies onto every pick.
     "add_scoreboard_splits_2026_10_29.sql",
+    # 2026-11-16 (Matt): DraftKings' own splits on the Scoreboard. Adds the
+    # opening-split columns the movement arrow reads, and an append-only
+    # worker-only history (RLS on, nothing granted). Catalog return once the
+    # columns, the table and its lock-down exist. Not picks, odds or record.
+    "scoreboard_splits_dk_history_2026_11_16.sql",
     # 2026-10-29 (Matt): alternate spreads and totals, the current ladder per
     # game, for the betslip's game-line edit. One table written by
     # data/ingestors/alt_game_lines.py, RLS on with a SELECT policy. Returns on
@@ -672,6 +677,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Returns on a catalog read once it exists. The loop refuses to decide
     # until it does.
     "euroleague_live_decisions_2026_11_13.sql",
+    # 2026-11-15 (mike: "a section on database health, size and any other
+    # metrics you think are cool and change over time"): the four tables the
+    # hourly db_health_snapshot job writes and the ops dashboard's Database
+    # tab reads (tracking/db_health.py). New tables, RLS on, anon and
+    # authenticated revoked; touches no view, pick, cut or record. Returns on
+    # a catalog read once db_health_snapshots carries this file's hash.
+    "db_health_snapshots_2026_11_15.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT

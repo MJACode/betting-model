@@ -83,6 +83,29 @@ def test_every_not_ok_health_check_is_reported():
     assert "savant_freshness" in out[0] and "CRIT" in out[0]
 
 
+def test_a_skipped_offseason_check_is_not_a_finding():
+    out = pw.findings_from_checks([
+        ("mlb_team_stats", "CRIT", "SKIPPED", "no MLB games today"),
+        ("final_scores", "WARN", "STALE", "NBA 2026-11-15: 1 game(s)"),
+    ])
+    assert len(out) == 1
+    assert "final_scores" in out[0]
+    assert "mlb_team_stats" not in out[0]
+
+
+def test_a_deploy_cutoff_pass_is_not_a_finding():
+    assert pw.findings_from_passes(
+        [("2026-09-03T06:00", 4.0, 28, "deploy-cutoff")]) == []
+
+
+def test_an_aborted_pass_is_still_a_finding():
+    """A crash is stamped aborted when the next pass starts. Hiding it
+    makes a worker that dies every hour look clean."""
+    out = pw.findings_from_passes(
+        [("2026-09-03T06:00", 4.0, 28, "aborted")])
+    assert len(out) == 1 and "aborted" in out[0]
+
+
 def test_burn_is_judged_against_the_cap_not_against_yesterday():
     """A day-on-day comparison would fire on any quiet day; the account has a
     monthly reset and a 60k daily cap, so the cap is the thing that matters."""
@@ -168,6 +191,7 @@ def test_a_clean_run_still_posts(monkeypatch):
                         lambda url, payload: posts.append(payload))
     monkeypatch.setattr(config, "DISCORD_WEBHOOK_OPS", "https://example.invalid/hook")
     monkeypatch.setattr("scripts.pipeline_report.collect", lambda c, h: {})
+    monkeypatch.setattr(pw, "_alerter_digest_lines", lambda conn: [])
 
     out = pw.run_watch(_Conn(), hours=24)
     assert out["status"] == "ok" and out["findings"] == []

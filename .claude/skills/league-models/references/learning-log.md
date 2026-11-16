@@ -30,6 +30,50 @@ review as its own entry.
 
 ---
 
+## 2026-11-16 — Horse racing: Hong Kong before the off, and UK/Ireland at starting price
+
+1. **League and scope**: thoroughbred racing (mike, 2026-11-15: *"lets use the
+   free hong kong history, and what do you need from me for uk irel;and"*;
+   licences are never a blocker). Two free sets, stored in Supabase first
+   (`scripts/horse/store_files.py`): nch015's Hong Kong pools with snapshots
+   before the off (2016–2018), and deltaromeo's UK/Ireland results at starting
+   price (5.1 million runners, 1988–2026; the 1.12 GB zip stored in 34 parts).
+2. **Tried**: Hong Kong, decided on the pool 2 to 33 minutes out and paid at
+   the dividend: blind bets, late money (six lead pairs), place off the win
+   pool, Benter's blend against the pool before the off (183 bet sets).
+   UK/Ireland at SP: calibration by band, year and code; blind win and
+   each-way bets by race shape; official-rating rules; a place model;
+   Bolton–Chapman then Benter walk-forward 1995–2026 with removal of each
+   group, a leak check and four model-free figure picks. Two reviewers per
+   study reran the scripts, and one per study re-graded the bets from the
+   raw rows with its own code. **Every row: nothing clears.**
+3. **New**: pre-off Benter and pre-off Dr Z, and late money decided before
+   the off (`methods.md`); the UK results (`methods.md` §1 and §6); three
+   kill tests (`kill-tests.md`: rows stored in finishing order, a stored
+   rating checked as the one going into the race, print every obvious
+   variant); the Hong Kong pre-off route and how the UK zip is stored
+   (`market-grid.md`).
+4. **Corrected**: the 2026-11-15 entry said the scope's 60/30/15/5-minute
+   neighbourhood "cannot run on any free file". Now: nch015's Hong Kong set
+   holds a snapshot every 12 minutes, then every 6 inside about 216 minutes,
+   to about 5.6 minutes before the start (`docs/horse_racing_market_audit.md`
+   §7). The neighbourhood ran; the last minute or two still cannot.
+5. **The framework**: steps unchanged. One kill test added
+   (`kill-tests.md`), from a trap that bit twice in this build, both times
+   caught by a reviewer: **a study reported less than it seemed to test**
+   (two Hong Kong lead pairs dropped after their results were seen; one UK
+   figure-based pick reported alone when three obvious siblings existed,
+   all of which lost). Every obvious variant is printed, and a split chosen
+   after looking is printed whole, as a neighbourhood and in halves. If it
+   recurs in another build, promote it to step 6 of `SKILL.md`.
+
+What this build taught the skill: against the closing price a form model
+adds about nothing (in Hong Kong it holds a little 5–12 minutes before the
+off and none at the close; at the UK starting price it has added about
+nothing since 2022); a starting price is a close, so any table that chooses
+on it is an upper bound; and when a source lists runners in finishing
+order, shuffle inside each race before any tie-break.
+
 ## 2026-11-15 — Horse racing, first market audit on the free files
 
 1. **League and scope**: thoroughbred racing (mike, 2026-11-15: *"pickup the
