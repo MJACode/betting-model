@@ -25,6 +25,14 @@ the live date; read the next two sections before this paragraph.
 
 ### The Retool dashboard: tabs, model names, tiles and saved layouts (2026-11-11/12, mike)
 
+**Its source is in this repo, in `retool/models-ops/`** (2026-11-15, mike:
+*"move the betting model retool application to the github repo so I can make
+edits there"*). Retool still runs whatever is published in Retool: its own
+GitHub link ("Protect app") is an Enterprise-plan feature and this account is
+on Team, so nothing syncs by itself. `retool/README.md` says which copy to edit
+and how a change moves each way; `scripts/retool_app_files.py check` says
+whether the two copies hold the same bytes.
+
 Four tabs: **Models**, **Volume**, **Ops**, **Picks & CLV**.
 
 - **Volume** is the one place a person changes what gets posted: one row per

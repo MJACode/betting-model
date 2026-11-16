@@ -113,3 +113,33 @@ def test_the_store_takes_csvs_not_zips_and_marks_whose_file_it_is(tmp_path):
     assert [kind_for(r) for r in rels] == ["betfair_anz_thoroughbreds", "gdaley_hkracing"]
     # the shared table's rel_path is unique: racing rows must not collide with NFL ones
     assert REL_PREFIX == "horse/" and SOURCE_PREFIX == "horse_racing|"
+
+
+def test_gzipped_csvs_are_stored_and_a_zip_folder_stores_only_its_zip(tmp_path):
+    (tmp_path / "nch015-horserace-data").mkdir()
+    (tmp_path / "nch015-horserace-data" / "live_odds.csv.gz").write_bytes(b"\x1f\x8b")
+    uk = tmp_path / "deltaromeo-uk-ireland-1988-2026"
+    uk.mkdir()
+    (uk / "horse-racing-results.zip").write_bytes(b"zip")
+    (uk / "raceform.csv").write_text("extracted, a cache of the zip\n")
+    rels = [rel for rel, _ in files(tmp_path)]
+    assert rels == ["deltaromeo-uk-ireland-1988-2026/horse-racing-results.zip",
+                    "nch015-horserace-data/live_odds.csv.gz"]
+
+
+def test_a_big_file_is_stored_as_parts_that_rejoin_to_the_same_bytes(tmp_path):
+    import hashlib
+    from scripts.horse.store_files import _PART, _read, units
+    d = tmp_path / "gdaley-hkracing"
+    d.mkdir()
+    payload = bytes(range(256)) * 41          # 10,496 bytes
+    (d / "runs.csv").write_bytes(payload)
+    rows = list(units(tmp_path, part_bytes=4096))
+    assert [k for k, *_ in rows] == [f"gdaley-hkracing/runs.csv#part{i:04d}of0003" for i in (1, 2, 3)]
+    assert [n for *_, n in rows] == [4096, 4096, 2304]
+    joined = b"".join(_read(p, off, n) for _, p, off, n in rows)
+    assert hashlib.sha256(joined).digest() == hashlib.sha256(payload).digest()
+    m = _PART.match(rows[1][0])
+    assert m["base"] == "gdaley-hkracing/runs.csv" and m["i"] == "0002" and m["n"] == "0003"
+    # a file at or under the part size is one row with no part suffix
+    assert [k for k, *_ in units(tmp_path, part_bytes=len(payload))] == ["gdaley-hkracing/runs.csv"]

@@ -1,0 +1,142 @@
+{
+  "private": true,
+  "retool": {
+    "app": {
+      "uuid": "ce1154be-a4e3-11f1-af11-a363289481d8",
+      "name": null,
+      "resourceReferencesByFile": {
+        "/backend/ops/dbErrors.ts": [],
+        "/backend/ops/deleteDashboardLayout.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getApiCallTrend.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getApiSourceFrequency.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getAudienceTiles.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getDashboardLayouts.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getHealthChecks.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getModelNames.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getModelRoster.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getModelVolumeBands.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getOddsApiHealth.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getPickLedger.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getPicksTimeSeries.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getPipelineRuns.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getSettledPerformance.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getThresholdPerformance.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getWeatherBoard.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/saveDashboardLayout.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/setModelVolume.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/user.d.ts": []
+      }
+    }
+  },
+  "devDependencies": {
+    "vitest": "4.1.9"
+  }
+}
