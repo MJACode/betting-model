@@ -302,7 +302,8 @@ def test_field_shows_only_game_time_odds_and_units():
     assert f["name"] == "TEX ML F5"
     assert f["value"] == (
         "LAA @ TEX \u00b7 2:36 PM ET\n"
-        "`-154 @ DraftKings`\u2003\u00b7\u2003**1.54u to win 1u**")
+        "-154 @ [DraftKings](https://sportsbook.draftkings.com/?outcomes=abc)"
+        "\u2003\u00b7\u2003**1.54u to win 1u**")
 
 
 def test_field_never_leaks_the_model_s_reasoning():
@@ -323,7 +324,7 @@ def test_field_never_leaks_the_model_s_reasoning():
 def test_the_book_is_published_with_the_price():
     """A quoted price must name where it was quoted."""
     blob = json.dumps(dn._picks_embed("MLB", [_signal()], "2026-08-23"))
-    assert "-154 @ DraftKings" in blob
+    assert "-154 @ [DraftKings](https://sportsbook.draftkings.com/?outcomes=abc)" in blob
 
 
 def test_a_prob_only_pick_names_no_book():

@@ -1056,7 +1056,7 @@ def _new_signals(conn, target_date: str, *,
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
                    p.pick_side, p.scored_line, p.prop_market,
                    p.decision_book, p.decision_odds AS decision_odds_raw,
-                   p.stake_units, p.stake_reason
+                   p.stake_units, p.stake_reason, p.best_bet_link
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -1141,6 +1141,7 @@ def _new_signals(conn, target_date: str, *,
         # and why it is above 1u. stake_for reads it; the card shows both.
         "stake_units": r[25] if len(r) > 25 else None,
         "stake_reason": r[26] if len(r) > 26 else None,
+        "best_bet_link": r[27] if len(r) > 27 else None,
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
         # Belt and braces with the SQL bound above, and the only guard that
@@ -1192,7 +1193,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
                    p.pick_side, p.scored_line, p.prop_market,
                    p.decision_book, p.decision_odds AS decision_odds_raw,
-                   p.stake_units, p.stake_reason
+                   p.stake_units, p.stake_reason, p.best_bet_link
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -1262,6 +1263,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # and why it is above 1u. stake_for reads it; the card shows both.
         "stake_units": r[25] if len(r) > 25 else None,
         "stake_reason": r[26] if len(r) > 26 else None,
+        "best_bet_link": r[27] if len(r) > 27 else None,
     } for r in rows]
 
 
@@ -1401,6 +1403,31 @@ def publish_price(s: dict) -> tuple[float | None, str | None]:
     return best_odds, _BOOK_NAMES.get(book, book)
 
 
+def _booked_price(s: dict, odds, book: str | None, *, linked: bool = True) -> str:
+    """The price, with the book name as a masked link when one can be built.
+
+    Discord renders ``[name](url)`` in a field value and does not render it
+    inside inline code, so a named book is not wrapped in backticks. A price
+    with no book stays `` `N/A` ``, the old shape. ``linked=False`` is the
+    plain book name, used when the URL would not fit the field. Link building
+    never raises and never delays the post.
+    """
+    american = _american(odds)
+    if not book:
+        return f"`{american}`"
+    url = None
+    if linked:
+        try:
+            from tracking.book_slip_links import discord_book_target
+            url, _kind = discord_book_target(s, book)
+        except Exception as exc:                              # noqa: BLE001
+            logger.warning(f"Discord book link skipped ({type(exc).__name__})")
+            url = None
+    if url and not any(ch in book for ch in "[]()\n"):
+        return f"{american} @ [{book}]({url})"
+    return f"{american} @ {book}"
+
+
 def _signal_field(s: dict, slate_date=None) -> dict:
     """One pick as an embed field. Deliberately carries ONLY game, time, odds and
     unit stake — no model probability, no edge. Those are the model's IP and are
@@ -1411,10 +1438,6 @@ def _signal_field(s: dict, slate_date=None) -> dict:
     # KeyError into the caller's swallow-and-log, and not one live signal was
     # ever posted for any sport. The key is supplied now; this makes the class
     # of bug non-fatal rather than relying on three producers staying in sync.
-    context = " · ".join(x for x in (
-        _linked_matchup(s, slate_date),
-        _game_time_et(s.get("commence")),
-    ) if x)
 
     # The price the reader should actually take, at the book that has it.
     odds, book = publish_price(s)
@@ -1423,11 +1446,6 @@ def _signal_field(s: dict, slate_date=None) -> dict:
     # Telling a reader to risk 1.39u at -139 while pointing them at BetMGM's
     # -120 would have them lay 16% more than the bet needs.
     stake = fmt_stake(stake_for(s.get("kelly"), odds, s.get("stake_units")))
-
-    price = _american(odds)
-    if book:
-        price = f"{price} @ {book}"
-    line = f"`{price}` · **{stake}**"
 
     # The price the bet survives to. Nobody outside this repo knows what an edge
     # of 0.14 means; everyone knows what -120 means, so the model's own gates are
@@ -1440,9 +1458,10 @@ def _signal_field(s: dict, slate_date=None) -> dict:
     # It is a bound on the PRICE THE MODEL WOULD STILL HAVE FIRED AT, so it is
     # book-agnostic: at or better than this number the bet holds, wherever you
     # are placing it. .get, so a producer that does not compute it just omits it.
+    tail = ""
     good_to = s.get("good_to")
     if good_to:
-        line += f" · good to `{_american(good_to)}`"
+        tail += f" · good to `{_american(good_to)}`"
 
     # WHEN we got it. Every pick here is a locked bet of record, so created_at
     # is the first moment the bet existed -- which is the reader's answer to
@@ -1452,26 +1471,33 @@ def _signal_field(s: dict, slate_date=None) -> dict:
         # In play the age is the whole question: the second the signal fired,
         # and Discord's counting "x seconds ago" beside it.
         rel = _discord_relative(s.get("posted_at"))
-        line += f" · signal {posted}" + (f" ({rel})" if rel else "")
+        tail += f" · signal {posted}" + (f" ({rel})" if rel else "")
     elif posted:
-        line += f" · posted {posted}"
+        tail += f" · posted {posted}"
     # A pick staked above 1u says why, once, on its own line (picks.stake_reason;
     # NCAAB agreement sizing, mike 2026-11-06). A flat pick adds nothing.
     reason = s.get("stake_reason")
     if reason and pick_conviction(s.get("kelly"), s.get("stake_units")) > FLAT_CONVICTION:
-        line += "\n" + reason
-    # The label beside the posted stake, without the old NFL sizing figure
-    # ("· 0.79u"): one unit number per pick (mike, 2026-11-04). The bet is
-    # word for word; the stored row is not touched.
-    value = f"{context}\n{line}" if context else line
-    # A score link that would blow Discord's field cap is dropped. The pick
-    # still posts, with the matchup as plain text.
+        tail += "\n" + reason
+
+    def _value(matchup_linked: bool, book_linked: bool) -> str:
+        shown = (_linked_matchup(s, slate_date) if matchup_linked
+                 else _matchup(s.get("sport"), s.get("home"), s.get("away")))
+        ctx = " · ".join(x for x in (shown, _game_time_et(s.get("commence"))) if x)
+        # The label beside the posted stake, without the old NFL sizing figure
+        # ("· 0.79u"): one unit number per pick (mike, 2026-11-04). The bet is
+        # word for word; the stored row is not touched.
+        price = _booked_price(s, odds, book, linked=book_linked)
+        line = f"{price} · **{stake}**" + tail
+        return f"{ctx}\n{line}" if ctx else line
+
+    # A link that would blow Discord's field cap is dropped. The book link
+    # goes first, then the score link. The pick still posts.
+    value = _value(True, True)
     if len(value) > _FIELD_VALUE_MAX:
-        plain = _matchup(s.get("sport"), s.get("home"), s.get("away"))
-        context = " · ".join(x for x in (
-            plain, _game_time_et(s.get("commence")),
-        ) if x)
-        value = f"{context}\n{line}" if context else line
+        value = _value(True, False)
+    if len(value) > _FIELD_VALUE_MAX:
+        value = _value(False, False)
     return {
         "name": label_without_stake(s["label"]),
         "value": value,
@@ -2201,7 +2227,8 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
                pk.created_at, pk.best_book, pk.best_odds,
                os.model_id, os.model_probability, t.min_edge, t.min_odds,
                os.pick_side, os.scored_line, pk.prop_market,
-               pk.decision_book, pk.decision_odds, pk.stake_units
+               pk.decision_book, pk.decision_odds, pk.stake_units,
+               pk.dk_bet_link, pk.best_bet_link
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -2211,7 +2238,8 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
             -- markets in one transaction (same created_at) cannot lend one
             -- bet the other's price and book.
             SELECT p.created_at, p.best_book, p.best_odds, p.prop_market,
-                   p.decision_book, p.decision_odds, p.stake_units
+                   p.decision_book, p.decision_odds, p.stake_units,
+                   p.dk_bet_link, p.best_bet_link
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -2238,6 +2266,8 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         "decision_book": r[18] if len(r) > 18 else None,
         "decision_odds_raw": r[19] if len(r) > 19 else None,
         "stake_units": r[20] if len(r) > 20 else None,
+        "bet_link": r[21] if len(r) > 21 else None,
+        "best_bet_link": r[22] if len(r) > 22 else None,
         # Same "good to" the paid channels publish, from the same gates. On the
         # number the pick was DECIDED on: a model in config.MODEL_PROB_SHRINK
         # stores (and the capture copies) a number pulled toward its decision
@@ -2282,16 +2312,29 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
     # a worse number than the shop is a strange thing to have built.
     odds, book = publish_price(pick)
     stake = fmt_stake(stake_for(pick.get("kelly"), odds, pick.get("stake_units")))
-    price = _american(odds)
-    if book:
-        price = f"{price} @ {book}"
-    line = f"`{price}` · **{stake}**"
+    tail = ""
     good_to = pick.get("good_to")
     if good_to:
-        line += f" · good to `{_american(good_to)}`"
+        tail += f" · good to `{_american(good_to)}`"
     posted = _posted_et(pick.get("posted_at"))
     if posted:
-        line += f"\u2003·\u2003posted {posted}"
+        tail += f"\u2003·\u2003posted {posted}"
+
+    def _line(book_linked: bool) -> str:
+        price = _booked_price(pick, odds, book, linked=book_linked)
+        return f"{price} · **{stake}**" + tail
+
+    line = _line(True)
+    value = (f"{context}\n" if context else "") + line
+    if len(value) > _FIELD_VALUE_MAX:
+        line = _line(False)
+        value = (f"{context}\n" if context else "") + line
+    if len(value) > _FIELD_VALUE_MAX:
+        plain = _matchup(pick.get("sport"), pick.get("home"), pick.get("away"))
+        ctx = " · ".join(x for x in (
+            plain, _game_time_et(pick.get("commence")),
+        ) if x)
+        value = (f"{ctx}\n" if ctx else "") + line
     return {
         "title": (f"{_SPORT_EMOJI.get(pick['sport'], chr(0x1F3AF))} "
                   f"Free Pick of the Day — {pretty}"),
@@ -2299,7 +2342,7 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
         "fields": [{
             # Beside the posted stake: no old NFL sizing figure (_signal_field).
             "name": label_without_stake(pick["label"]),
-            "value": (f"{context}\n" if context else "") + line,
+            "value": value,
             "inline": False,
         }],
         "footer": {"text": f"{pick['sport']} · one free pick daily"},
@@ -3651,9 +3694,7 @@ def _void_field(pick: dict, webhook_url: str | None) -> dict:
     plain = _matchup(pick.get("sport"), pick.get("home"), pick.get("away"))
     matchup = _linked_matchup(pick, pick.get("game_date"))
     odds, book = publish_price(pick)
-    price = _american(odds)
-    if book:
-        price = f"{price} @ {book}"
+    price = _booked_price(pick, odds, book)
     game_date = pick.get("game_date") or ""
     if hasattr(game_date, "isoformat"):
         game_date = game_date.isoformat()
@@ -3673,6 +3714,10 @@ def _void_field(pick: dict, webhook_url: str | None) -> dict:
     if original:
         bits.append(original)
     value = "\n".join(bits)
+    if len(value) > _FIELD_VALUE_MAX:
+        plain_price = _booked_price(pick, odds, book, linked=False)
+        bits = [plain_price if bit == price else bit for bit in bits]
+        value = "\n".join(bits)
     if len(value) > _FIELD_VALUE_MAX and matchup != plain:
         bits[0] = plain
         value = "\n".join(bits)
@@ -3758,7 +3803,8 @@ def _void_rows_sql() -> str:
                {key} AS lock_key,
                sig.message_id, sig.sent_at,
                (sig.kind IS NOT NULL) AS has_signal,
-               (void.kind IS NOT NULL) AS already_voided
+               (void.kind IS NOT NULL) AS already_voided,
+               p.dk_bet_link, p.best_bet_link
           FROM picks p
           LEFT JOIN games g ON g.game_id = p.game_id
           LEFT JOIN push_sent sig
@@ -3797,6 +3843,8 @@ def _pick_from_row(row) -> dict:
         "posted_at": posted,
         "has_signal": bool(row[21]),
         "already_voided": bool(row[22]),
+        "bet_link": row[23] if len(row) > 23 else None,
+        "best_bet_link": row[24] if len(row) > 24 else None,
     }
 
 
