@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, model building runs on mike's PC from the archive files; a backup copy goes to Supabase Storage (Pro keeps 7 days of backups); PC reads all 84M prop rows in 13.6 s (#1345) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Scoreboard covers every sport with games (12, chips only for sports with a game that day); NCAAB/NCAABW live scores via ESPN matched by event id; UFC finals W/L/D |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, NCAAB: Utah ML posted on a game postponed to Dec 5 (Washington @ Utah); ESPN ingestor now reads a game that left its date's board by event id; a BET whose game moved over 48h settles NO_ACTION (PR #1375) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Fanatics: app (com.fbg.sportsbook) claims only payment-return links, site opens it at /discover; probe now follows Fanatics' public share-a-bet OneLinks to see what the app is given |
