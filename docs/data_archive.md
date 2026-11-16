@@ -311,3 +311,40 @@ roughly the day's new rows.
 6. The archive job, one table-month at a time, starting with `odds` before
    2025.
 7. Monthly partitions for the two big odds tables.
+
+## 8. Moving rows out: what goes now, and what has to change first (2026-11-16)
+
+mike, 2026-11-16: *"move all the historical data past a certain point to my
+laptop and just keep what was needed in Supabase"*, and of the exact repeats:
+*"keep it in the archive on my computer"*.
+
+**Measured that day** (`pg_total_relation_size`; shares from the PC copy):
+
+- The database is 101.75 GB: player props 40.0, game odds 23.1, NFL odds history 8.8, play-by-play about 7.0.
+- **Exact repeats are the biggest share.** A repeat is a row with the same line and price as the same book's row before it.
+  - Props: 66.0% of rows (about 26.4 GB).
+  - Game odds: 53.8% (about 12.4 GB).
+- **A 90-day cutoff by itself moves about 30 GB**, because props are 87.7% recent.
+
+**The tool:** `scripts/archive_rows.py`. A game's rows leave Supabase only after five checks:
+1. The PC copy picks them and writes a Parquet file under `betting_local_copies\archive`.
+2. The file is read back and matches.
+3. It is uploaded to the private Storage bucket `archive` and read back byte for byte.
+4. In one transaction, Postgres picks the same rows by the same rule, with the same count and fingerprint.
+5. The ledger `archive_batches` records it.
+
+Each kept row is the opener or the close of its proposition. A rung of an alternate line is its own proposition.
+
+**What reads old rows** (an audit of every production reader, 2026-11-16). Only the prop repeats can move today. `archive_rows.ALLOWED` and `REFUSED` enforce that.
+
+| Move | Blocked by | What unblocks it |
+|---|---|---|
+| Prop repeats | nothing found | allowed |
+| Game-odds repeats | `features/market_movement.py` (`mkt_snapshots` counts DraftKings rows per past game, used in MLB training and sweeps); `scripts/build_nba_live_ig2_artifact.py` (groups rows by fetch); `scripts/nhl_totals_lab.py`; `mlb_inplay_history` / `ncaaf_inplay_history` resume from stored served times, so they would re-buy | training reads the archive too (the one history reader, section 3c); the two in-play buyers take a ledger |
+| Older than 90 days, both tables | Teams board (the ±1.5 run line close is not the only `spreads` row of a game); CLV's same-line close; BYOM's lock candidates; `v_nhl_player_prop_odds`; `team_period_results`; the app's line charts | the opener/close table keyed with the line (section 3b), and those readers moved to it |
+
+**The re-buy (#1384) counts archived rows as held.** Its planner finds thinned games by counting rows per line. It now counts the archive too (`odds_rebuy.prop_history`), so it does not buy back what is on the PC.
+
+**The space comes back only after a rewrite.** `archive_rows.py reclaim` runs `VACUUM FULL`. It locks the table while it runs, so it goes in the quiet window (03:00-05:00 ET). It needs free disk the size of what is kept.
+
+The disk itself shrinks only at a Supabase project upgrade, to 1.2x the database ("Manage disk size", Supabase docs).

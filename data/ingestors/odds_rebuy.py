@@ -248,7 +248,7 @@ WITH g AS (
 p AS (
   SELECT p.game_id, p.market, p.player_name, p.bookmaker, p.snapshot_type,
          try_cast(p.snapshot_at AS TIMESTAMPTZ) AS ts, g.start
-    FROM player_prop_odds p JOIN g USING (game_id)
+    FROM {{props}} p JOIN g USING (game_id)
    WHERE p.bookmaker <> 'pinnacle')
 SELECT game_id, epoch(any_value(start)) AS start,
        count(*) FILTER (WHERE bookmaker = '{DK}')
@@ -351,6 +351,25 @@ def _is_thinned(kind: str, other, dk) -> bool:
     return kind == "prop" and other <= PARTIAL_MAX_ROWS and dk > 2 * other
 
 
+def prop_history(con) -> str:
+    """The prop rows the plan counts: the copy's, plus every row moved to the
+    archive (scripts/archive_rows.py, #1345). The plan finds thinned games by
+    counting rows per line, so a row in the archive is a row we hold: without
+    it, a game whose exact repeats were archived would look thinned and the
+    re-buy would pay for what is already on mike's PC. A row the copy still
+    holds is counted once."""
+    from scripts.archive_rows import ARCHIVE_ROOT
+    root = ARCHIVE_ROOT / "player_prop_odds"
+    if not any(root.glob("**/*.parquet")):
+        return "player_prop_odds"
+    glob = (root / "**" / "*.parquet").as_posix()
+    cols = "prop_id, game_id, market, player_name, bookmaker, snapshot_type, snapshot_at"
+    return (f"(SELECT {cols} FROM player_prop_odds UNION ALL "
+            f"SELECT {', '.join('a.' + c for c in cols.split(', '))} "
+            f"FROM read_parquet('{glob}', union_by_name = true) a "
+            f"ANTI JOIN player_prop_odds l ON l.prop_id = a.prop_id)")
+
+
 def thinned_games(con, kind: str, sport: str, start: str, end: str) -> list[dict]:
     lo = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
     hi = datetime.fromisoformat(end).replace(tzinfo=timezone.utc) + timedelta(days=1)
@@ -364,7 +383,7 @@ def thinned_games(con, kind: str, sport: str, start: str, end: str) -> list[dict
     elif kind == "inplay":
         sql = _INPLAY_PLAN_SQL
     else:
-        sql = _PROP_PLAN_SQL
+        sql = _PROP_PLAN_SQL.replace("{props}", prop_history(con))
     cols = ("game_id", "start", "dk_per_line", "other_per_line", "opener", "close",
             "books", "markets", "snapshot_type")
     out = []
