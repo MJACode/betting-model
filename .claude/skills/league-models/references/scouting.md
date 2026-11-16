@@ -52,6 +52,10 @@ not a refusal forever, and a route that failed one way may answer another
 | DraftKings' own site API, read for a new sport | a browser-style session | **refused by the permission check (2026-11-13)** although the repo's in-play reader uses it on mike's recorded call: a new use needs his permission rule |
 | A book's house rules as a PDF (massgaming.com hosts DraftKings') | the web-fetch agent saves the PDF; WebFetch extracts no text, `pypdf` does | yes (2026-11-13) |
 
+| Betfair Australia's data site (`betfair-datascientists.github.io`): the ANZ thoroughbred CSVs and the Automation Hub tutorials | a plain download; a plain fetch | yes (2026-11-15): 82 monthly files fetched, no login; the commission page is at `/gettingStarted/commission/` (the old `/wagering/commission` is 404); `promo.betfair.com` 403; `historicdata.betfair.com/#/help` 403 |
+| Kaggle public datasets | `kaggle.com/api/v1/datasets/download/{owner}/{slug}`, no token | yes (2026-11-15, two Hong Kong sets); competition data (NYRA 2022) 401 |
+| Racing trade press (DRF, BloodHorse, The Straight, Covers, horseracingnation, HKJC's own guides) | a plain fetch | yes (2026-11-15, racing scout); twinspires.com and brisnet.com timed out, support.twinspires.com 403, racing.draftkings.com 403, oddschecker.com 403, geegeez.co.uk 403, hub.hku.hk and eprints.soton.ac.uk 403, lutpub.lut.fi behind a bot wall |
+
 **The weekly cloud review cannot re-probe this table.** Its network refused
 17 of 18 sites on 2026-11-13 (only `api.github.com` answered; the egress
 proxy returned 403 for the rest, including every site above that answered
