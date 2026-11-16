@@ -4607,6 +4607,7 @@ function OddsCell({
   dayLabel,
   onPress,
   muted = false,
+  stacked = false,
 }: {
   quote: StatsOddsQuote | null;
   started?: 'Live' | 'Final' | null;
@@ -4624,14 +4625,16 @@ function OddsCell({
   /** The player is not playing: the price stays, but never as a filled book
    *  pill beside an IR tag (UX review, 2026-10-23). */
   muted?: boolean;
+  /** Anytime TD at large text: the price sits 2pt under the matchup line, so
+   *  vertical hitSlop would steal taps from it. The 44pt goes on the box. */
+  stacked?: boolean;
 }) {
-  const wrapStyle = styles.oddsWrap;
   if (quote == null) {
     // A game in progress has no line a user can still take (unstartedGameIds),
     // and the cell says so — a dash there read as "the book never priced him".
     if (started) {
       return (
-        <View style={wrapStyle} accessible accessibilityLabel={`${playerName}, game ${started.toLowerCase()}`}>
+        <View style={styles.oddsWrap} accessible accessibilityLabel={`${playerName}, game ${started.toLowerCase()}`}>
           <Text style={styles.oddsStarted}>{started}</Text>
         </View>
       );
@@ -4641,7 +4644,7 @@ function OddsCell({
     // entirely is explained on the board-notes ⓘ, not on a cell that is not
     // mounted.
     return (
-      <View style={wrapStyle} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <View style={styles.oddsWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <Text style={styles.oddsEmpty}>—</Text>
       </View>
     );
@@ -4683,6 +4686,45 @@ function OddsCell({
   // VoiceOver reads both regardless — see `label` above.
   const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;
   const caption = [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
+  if (stacked) {
+    return holdSidelinedTap(muted, (
+      <Pressable
+        {...pillA11y}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        // Stacked Anytime TD: the matchup line sits 2pt above, so no vertical
+        // slop. The box itself is the 44pt target.
+        hitSlop={{ top: 0, bottom: 0, left: 8, right: 8 }}
+        style={({ pressed }) => [styles.oddsWrap, styles.oddsWrapStacked, pressed && styles.pressed]}
+      >
+        <View
+          style={[
+            styles.oddsPill,
+            filled ? { backgroundColor: c.bg } : muted ? styles.oddsPillNeutral : styles.oddsPillOutlined,
+          ]}
+        >
+          <Text
+            style={[styles.oddsText, { color: filled ? c.fg : colors.textPrimary }]}
+            numberOfLines={1}
+          >
+            {priceText}
+          </Text>
+          <BookMark book={quote.book} color={filled ? c.fg : colors.textPrimary} />
+        </View>
+        {caption ? (
+          // The day is a SCHEDULE fact and the line marker changes the BET, so
+          // they do not carry equal weight: semibold when an off-line marker is
+          // present, regular when the caption is only a day.
+          <Text
+            style={[styles.oddsCaption, !lineCaption && styles.oddsCaptionDay]}
+            numberOfLines={sport === 'NHL' ? 2 : 1}
+          >
+            {caption}
+          </Text>
+        ) : null}
+      </Pressable>
+    ));
+  }
   return holdSidelinedTap(muted, (
     <Pressable
       {...pillA11y}
@@ -4785,7 +4827,8 @@ function ColumnHeader({
   oddsDateLabel?: string | null;
   showMatchup: boolean;
   matchupTooltip: string;
-  /** NFL Anytime TD: fixed Hit % / Matchup / Best columns, and a sort. */
+  /** NFL Anytime TD: fixed Hit % and Matchup columns, the standard price
+   *  column between them, and a matchup sort. */
   atd?: boolean;
   /** Metrics sit on a second header line so they still line up when stacked. */
   atdStack?: boolean;
@@ -4857,7 +4900,7 @@ function ColumnHeader({
       accessibilityHint="Opens the sportsbook list"
       style={[
         styles.oddsBookBtn,
-        atd && atdStack ? styles.atdHeaderLabelFree : styles.colHeaderOdds,
+        atd && atdStack ? [styles.atdHeaderLabelFree, { minWidth: ODDS_W }] : styles.colHeaderOdds,
       ]}
     >
       <Text
@@ -5101,6 +5144,7 @@ function LeaderRow({
           dayLabel={oddsDay}
           onPress={onOddsPress}
           muted={!!injury?.sidelined}
+          stacked={!!atdView && atdStack}
         />
       ) : null}
       {/* One column order on every board: value, price, MATCHUP (Matt,
@@ -5257,6 +5301,7 @@ function LineOnlyRow({
           dayLabel={oddsDay}
           onPress={onOddsPress}
           muted={!!injury?.sidelined}
+          stacked={!!atdView && atdStack}
         />
       ) : null}
       {/* One column order on every board: value, price, MATCHUP (Matt,
@@ -5424,6 +5469,7 @@ function HitRateRow({
           dayLabel={oddsDay}
           onPress={onOddsPress}
           muted={!!injury?.sidelined}
+          stacked={!!atdView && atdStack}
         />
       ) : null}
       {/* One column order on every board: value, price, MATCHUP (Matt,
@@ -6356,7 +6402,14 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.tint,
   },
-  // Anytime TD price: neutral, never DraftKings green. The book sits under it.
+  // Sidelined player: the price stays, outlined in grey, never a filled book
+  // pill (UX review, 2026-10-23).
+  // Stacked Anytime TD: no vertical hitSlop, so the 44pt is the box itself,
+  // with the spare below the price rather than between it and the matchup.
+  oddsWrapStacked: {
+    minHeight: 44,
+    justifyContent: 'flex-start',
+  },
   oddsPillNeutral: {
     backgroundColor: colors.noneSoft,
     borderWidth: StyleSheet.hairlineWidth,
