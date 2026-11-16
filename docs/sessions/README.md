@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, every reply opens with "Outcome / findings" (mike): CLAUDE.md §0 five headings, UX agent, league-models skill, global CLAUDE.md |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, comped accounts could not sign in: NULL email_change made /otp 500; 9 rows set to '', grant scripts + guard test fixed |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Sport chips: sports with a signal move to the far left of the row |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, The PC copy: one row per nightly pass (pc_copy_snapshots, scripts/local_mirror_report.py, run last by the LocalMirror task) and a PC copy tile on the Database tab; an unreadable exit code is now a failure, not 0 |

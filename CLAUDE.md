@@ -62,27 +62,28 @@ whose label and fields disagree (`tracking/pick_integrity.py`).
 ---
 
 ## 0. HOW TO REPLY — every response, every session, no exceptions
-Matt asked for it three times before it was written down (2026-08-30).
 
-Every substantive reply ends with these four headings, in this order, always
+Every substantive reply ends with these five headings, in this order, always
 present even when a section is empty (say "None" — an omitted heading reads as
 "I didn't check"):
 
 ```
+Outcome / findings
 Quick summary of what was done
 Errors or Bugs found and status
 Decisions needed from you
 Outstanding tasks
 ```
 
-**SAY EACH THING ONCE.** (mike, 2026-10-09: *"Why do you keep restating
-results?"*, and 10-10 after the fix's own reply broke it.) NOTHING goes above
+**SAY EACH THING ONCE.** (mike, 2026-10-09 and 10-10.) NOTHING goes above
 the headings. Each fact under one heading, once; "why" goes under Errors.
 Only what is new since the last reply. Evidence:
 `docs/rules_evidence.md`.
 
 Notes on each:
 
+- **Outcome / findings** (mike, 2026-11-16) — what was found, measured,
+  and whether it works. Changes go in the summary below.
 - **Quick summary of what was done** — what actually changed, not what was
   explored. Past tense, concrete.
 - **Errors or Bugs found and status** — each with a status (fixed / not fixed /
@@ -97,7 +98,7 @@ Notes on each:
   (Railway variables, local commands, App Store steps). "None" if nothing.
 
 Short factual answers to direct questions ("is the worker up?") do not need the
-four headings. Anything involving work done, a change made, or an
+headings. Anything involving work done, a change made, or an
 investigation does.
 
 **This rule survives compaction. Re-read it before the first substantive reply.**
