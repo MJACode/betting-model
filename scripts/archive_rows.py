@@ -78,7 +78,7 @@ REFUSED = {
                         "by fetch; both train on past games from Postgres",
     ("odds", "old"): "the Teams board, CLV's same-line close, BYOM, the line charts and "
                      "team_period_results read mid-path rows of old games",
-    ("player_prop_odds", "old"): "the line charts, v_nhl_player_prop_odds and BYOM prop facts read "
+    ("player_prop_odds", "old"): "the line charts, the NHL player prop view and BYOM prop facts read "
                                  "lines that are neither opener nor close",
 }
 SERVER_GAMES_PER_STATEMENT = 3
