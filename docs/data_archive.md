@@ -13,6 +13,12 @@ or log that produced it, and all were read on 2026-11-14 between 19:38 and
 
 ## 1. What was measured
 
+> **Size is recorded every hour since 2026-11-16** (`db_health_snapshots`,
+> and every table's size every six hours in `db_table_snapshots`; the ops
+> dashboard's Database tab, `docs/monitoring.md`). The first snapshot read
+> 109,078,711,443 bytes (pg_size_pretty 102 GB) at 03:41 UTC. Use those
+> tables for growth instead of re-measuring by hand.
+
 **Size.** The database is 98 GB (`pg_database_size`). Three tables of price
 snapshots hold 70 GB of it:
 
