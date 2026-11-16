@@ -38,11 +38,13 @@ MODEL = "ncaaf_over_under"
 _LATERAL = re.compile(r"LEFT JOIN LATERAL \(.*?\) pk ON TRUE", re.S)
 # The LATERAL's columns are display only: when the pick was made, its best book and
 # price, its market (which sets the "good to" price's EV floor), and the book
-# the quoted price was taken at. None of them decide which signal qualifies.
+# the quoted price was taken at, and (#1381) the two bet-slip links. None of
+# them decide which signal qualifies.
 _DISPLAY_ONLY = ("LEFT JOIN (SELECT NULL AS created_at, NULL AS best_book, "
                  "NULL AS best_odds, NULL AS prop_market, "
                  "NULL AS decision_book, NULL AS decision_odds, "
-                 "NULL AS stake_units) pk ON 1 = 1")
+                 "NULL AS stake_units, NULL AS dk_bet_link, "
+                 "NULL AS best_bet_link) pk ON 1 = 1")
 
 
 class _Conn:
