@@ -30,6 +30,8 @@ export type CrumbKind =
   | 'modal_shown'
   | 'modal_close'
   | 'modal_dismissed'
+  | 'back'
+  | 'push'
   | 'stall';
 
 export interface Crumb {
@@ -117,6 +119,22 @@ function crumb(k: CrumbKind, d?: string): void {
     last.d = String(Number(last.d ?? '1') + 1);
     last.t = t;
     return;
+  }
+  // A tap on the Back pill is a `touch` then a `back`. A run of them on a
+  // dead Back is ONE crumb, "<decision> x<n>", so frantic taps cannot push
+  // the screens and pop-ups from before the freeze out of the trail.
+  if (k === 'back' && d !== undefined) {
+    const tr = session.trail;
+    // The touch of THIS tap only: a lone touch within 1 s (review L10).
+    const lone = last && last.k === 'touch' && last.d === undefined && t - last.t < 1_000;
+    const prev = lone ? tr[tr.length - 2] : last;
+    if (prev && prev.k === 'back' && (prev.d ?? '').split(' x')[0] === d) {
+      if (lone) tr.pop();
+      const n = Number((prev.d ?? '').split(' x')[1] ?? '1') + 1;
+      prev.d = `${d} x${n}`;
+      prev.t = t;
+      return;
+    }
   }
   session.trail.push(d === undefined ? { t, k } : { t, k, d: d.slice(0, 60) });
   if (session.trail.length > MAX_TRAIL) session.trail.splice(0, session.trail.length - MAX_TRAIL);
@@ -383,6 +401,35 @@ export function noteModalVisible(name: string, visible: boolean, confirmsDismiss
       if (confirmsDismiss) watchModal(name, 'dismiss');
       else clearModalWatch(name);
     }
+    save(true);
+  });
+}
+
+/**
+ * A tap on the React Back pill reached JS; the detail is the path it took
+ * (pop, or the empty-stack replace / reset). Taps with no `back` crumb never
+ * reached the pill (2026-11-15, the dead-Back reports). A `back` with no
+ * `screen` after it USUALLY means the pop failed, but noteScreen skips a name
+ * equal to the current one, so popping PlayerStats onto PlayerStats logs none.
+ * Saved at once: a frozen Back ends in a force-quit.
+ */
+export function noteBack(decision: 'pop' | 'replace' | 'reset'): void {
+  safe(() => {
+    if (!ensureSession()) return;
+    crumb('back', decision);
+    save(true);
+  });
+}
+
+/**
+ * A notification tap's route was held because the app was not yet active,
+ * or replayed once it was (2026-11-15, the push-opened Pick Detail freezes).
+ * The next trail says whether the gate fired.
+ */
+export function notePush(what: 'held' | 'replay'): void {
+  safe(() => {
+    if (!ensureSession()) return;
+    crumb('push', what);
     save(true);
   });
 }

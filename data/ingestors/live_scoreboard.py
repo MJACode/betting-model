@@ -423,22 +423,34 @@ def run_once(conn=None, *, now: datetime | None = None,
             {"dates": dates},
         ).fetchall()}
         written: dict[str, int] = {}
+        failed: dict[str, str] = {}
         for sport in sorted(due_sports(games, finished, now)):
-            data = fetch(sport, dates)
-            if data is None:
-                continue
-            event_games = (_event_games(conn, sport, [g["game_id"] for g in games
-                                                       if g["sport"] == sport])
-                           if sport in EVENT_TABLES else None)
-            rows = match_games(sport, parse_scoreboard(sport, data), games, event_games)
-            stamp = now.isoformat()
-            for row in rows:
-                conn.execute(UPSERT_SQL, {**row, "snapshot_at": stamp})
-            conn.commit()
-            written[sport] = len(rows)
+            # One sport's database error must not cost the sports after it
+            # their tick (NBA, NCAAB, NCAABW, NFL, NHL run in that order).
+            # Roll back so the connection is usable, write the rest, then
+            # raise so the heartbeat still marks the tick failed.
+            try:
+                data = fetch(sport, dates)
+                if data is None:
+                    continue
+                event_games = (_event_games(conn, sport, [g["game_id"] for g in games
+                                                           if g["sport"] == sport])
+                               if sport in EVENT_TABLES else None)
+                rows = match_games(sport, parse_scoreboard(sport, data), games, event_games)
+                stamp = now.isoformat()
+                for row in rows:
+                    conn.execute(UPSERT_SQL, {**row, "snapshot_at": stamp})
+                conn.commit()
+                written[sport] = len(rows)
+            except Exception as exc:                          # noqa: BLE001
+                conn.rollback()
+                failed[sport] = f"{type(exc).__name__}: {exc}"
+                logger.error(f"live_scoreboard {sport}: {failed[sport]}")
             time.sleep(0.1)
         if written:
             logger.info(f"live_scoreboard: {written}")
+        if failed:
+            raise RuntimeError(f"live_scoreboard: failed for {sorted(failed)}; wrote {written}")
         return written
     finally:
         if own:

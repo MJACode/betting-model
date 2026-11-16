@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import { noteBack } from '@/lib/freezeLog';
 import {
   PLAYER_DETAIL_PARENT,
   playerTitleMaxWidth,
@@ -69,12 +70,23 @@ export function PlayerStatsHeaderTitle({
  * a React zIndex does not paint over that.
  */
 /** The #1239 pill: 22pt chevron, "Back" at 17pt, 44pt target, hitSlop inside the bar. */
-function BackPill({ onPress }: { onPress: () => void }) {
+type BackPath = 'pop' | 'replace' | 'reset';
+
+/**
+ * The tap is logged BEFORE navigating: if the pop throws or hangs, the crumb
+ * is already saved, so the trail cannot misread a failed pop as a tap that
+ * never arrived (review M3 on #1377).
+ */
+function BackPill({ decide, go }: { decide: () => BackPath; go: (path: BackPath) => void }) {
   const { fontScale } = useWindowDimensions();
   const icon = Math.round(22 * Math.min(Math.max(fontScale, 1), 2));
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        const path = decide();
+        noteBack(path);
+        go(path);
+      }}
       accessibilityRole="button"
       accessibilityLabel="Back"
       hitSlop={{ top: 12, bottom: 0, left: 8, right: 8 }}
@@ -90,11 +102,37 @@ function BackPill({ onPress }: { onPress: () => void }) {
 
 export function PlayerStatsBackButton() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const onPress = () => {
-    if (stackBackDecision(navigation.canGoBack()) === 'pop') navigation.goBack();
-    else navigation.replace(PLAYER_DETAIL_PARENT.name, { screen: PLAYER_DETAIL_PARENT.screen });
-  };
-  return <BackPill onPress={onPress} />;
+  return (
+    <BackPill
+      decide={() => (stackBackDecision(navigation.canGoBack()) === 'pop' ? 'pop' : 'replace')}
+      go={(path) => {
+        if (path === 'pop') navigation.goBack();
+        else navigation.replace(PLAYER_DETAIL_PARENT.name, { screen: PLAYER_DETAIL_PARENT.screen });
+      }}
+    />
+  );
+}
+
+/**
+ * The same pill on every other pushed screen (the navigator's default).
+ *
+ * The arrow-only system Back (2026-11-08) went dead again on 2026-11-15, on
+ * Pick Detail opened from a push notification, iOS 27.3. UIKit's Back has now
+ * failed on three screens, and the React pill has not failed on either screen
+ * that carries it, so no pushed screen uses UIKit's Back. An empty stack (a
+ * reset, or a deep link that landed alone) goes to the tabs.
+ */
+export function StackBackButton() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  return (
+    <BackPill
+      decide={() => (stackBackDecision(navigation.canGoBack()) === 'pop' ? 'pop' : 'reset')}
+      go={(path) => {
+        if (path === 'pop') navigation.goBack();
+        else navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
+      }}
+    />
+  );
 }
 
 /**
@@ -103,15 +141,17 @@ export function PlayerStatsBackButton() {
  */
 export function SettingsSectionBackButton() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const onPress = () => {
-    if (stackBackDecision(navigation.canGoBack()) === 'pop') navigation.goBack();
-    else {
-      // Settings alone has no back and no tabs, so Android back would leave
-      // the app. Put the tabs under it.
-      navigation.reset({ index: 1, routes: [{ name: 'Tabs' }, { name: 'Settings' }] });
-    }
-  };
-  return <BackPill onPress={onPress} />;
+  return (
+    <BackPill
+      decide={() => (stackBackDecision(navigation.canGoBack()) === 'pop' ? 'pop' : 'reset')}
+      go={(path) => {
+        if (path === 'pop') navigation.goBack();
+        // Settings alone has no back and no tabs, so Android back would leave
+        // the app. Put the tabs under it.
+        else navigation.reset({ index: 1, routes: [{ name: 'Tabs' }, { name: 'Settings' }] });
+      }}
+    />
+  );
 }
 
 const styles = StyleSheet.create({
