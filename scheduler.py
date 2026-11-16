@@ -1053,6 +1053,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # The 07:20 / 07:25 catch-up for the ticks the morning
                   # disk window does not run. Same recorders, later minute.
                   "kalshi_ladders_morning", "kalshi_game_markets_morning",
+                  # Stores Betfair's free racing files: research data, no
+                  # picks, a few MB a month.
+                  "betfair_monthly_store",
                   # Writes picks through the same card as the refresh pass,
                   # so it lives beside the passes, not with the loops.
                   "nba_prop_window",
@@ -1701,6 +1704,16 @@ def run_kalshi_game_record() -> None:
     except Exception as exc:                                   # noqa: BLE001
         log.warning("kalshi game market record failed: %s: %s",
                     type(exc).__name__, exc)
+
+
+def run_betfair_monthly_store() -> None:
+    """Store each new Betfair Australia thoroughbred file the day it is
+    published (scripts/horse/betfair_monthly.py; issue #1371). A research
+    record, never on the betting path: the listing is free and keyless, and
+    a run that finds nothing new writes nothing. Its own process, so a large
+    annual zip never sits in the scheduler's memory."""
+    _run([sys.executable, "-m", "scripts.horse.betfair_monthly"],
+         "betfair-monthly-store", timeout=1800)
 
 
 def run_db_health_snapshot() -> None:
@@ -3807,6 +3820,15 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour=7, minute=25, timezone=TIMEZONE),
         id="kalshi_game_markets_morning",
         name="Kalshi NCAAF game markets (07:25 ET catch-up after the morning disk window)",
+    )
+    # Once a day, clear of the 06:00 daily, the morning disk window and the
+    # :37 / :45 / :50 jobs. Betfair posts a month's file once, early in the
+    # next month, so a daily look stores it within a day of its posting.
+    sched.add_job(
+        run_betfair_monthly_store,
+        CronTrigger(hour=10, minute=43, timezone=TIMEZONE),
+        id="betfair_monthly_store",
+        name="Betfair ANZ thoroughbred files (daily 10:43 ET: store each new month)",
     )
 
     # Minute 50: clear of the :17 refresh pass, the :25 prop card, the :32 and
