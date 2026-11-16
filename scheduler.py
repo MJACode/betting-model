@@ -2055,10 +2055,10 @@ def run_ncaab_injury_feed() -> None:
 
     The script decides whether RotoWire or Covers is actually due, so most
     ticks poll one source or neither. It writes change rows and the current
-    injury tags. It writes no picks, so it publishes nothing.     A poll error exits 1. A zero-player report on a game day exits 1 only
-    when that source is the one the tags are using. The alert line is the
-    heartbeat detail the failure alerter posts. RUN_NCAAB_INJURY=0 exits 0
-    without a request.
+    injury tags. It writes no picks, so it publishes nothing. A poll error
+    or an unreadable report exits 1. A zero-player game-day report exits 0:
+    the tags fall back, and exit 1 was an ops page for an empty source.
+    RUN_NCAAB_INJURY=0 exits 0 without a request.
     """
     cmd = [sys.executable, "-m", "scripts.ncaab_injury_feed"]
     log.info("START ncaab-injury-feed: %s", " ".join(cmd))
@@ -2722,6 +2722,17 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
         )
         if decision.action != "run":
             log.info("daily catch-up [%s]: skip — %s", source, decision.reason)
+            from tracking.daily_retry import announce_daily_cap, retry_cap_exhausted
+            if retry_cap_exhausted(decision):
+                # The read connection is already closed. The page needs its own.
+                try:
+                    cap_conn = get_connection()
+                    try:
+                        announce_daily_cap(cap_conn, decision, now)
+                    finally:
+                        cap_conn.close()
+                except Exception:  # noqa: BLE001 — the skip stands either way
+                    log.exception("daily catch-up: cap page failed")
             return {"status": "skipped", "reason": decision.reason}
         start_number = len(runs) + 1
         deploy_kills, real_failures = today_counts(runs)

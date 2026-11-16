@@ -14,7 +14,8 @@
 Refits the calibration candidates, sweeps **every** registered model on
 calibrated probabilities with the price floor applied and the time split
 enforced, writes one row per model per run to `model_calibration_sweeps`, and
-posts a summary to `DISCORD_WEBHOOK_OPS`.
+does not post. Verdict deltas go in the Monday 7:15 ET ops digest
+(`tracking/pipeline_watch.py`), compared with the previous sweep.
 
 **"Every" is the load-bearing word.** Two exclusions were removed to get there:
 
@@ -185,6 +186,10 @@ scoped so the judgement is bounded.
 **Runs:** 7:15am ET daily on the Railway worker, `scheduler.py::run_pipeline_watch`.
 **Code:** `tracking/pipeline_watch.py`. **Kill switch:** `RUN_PIPELINE_WATCH=0`.
 **Output:** one Discord post to `DISCORD_WEBHOOK_OPS` every run, clean or not.
+That post is the ops digest: real findings, model-quality flags, Monday
+calibration deltas, and a count of finished jobs. Offseason SKIPPED checks
+are not findings. A starting daily retry is not a post. The page for a day
+the daily will not run again is `tracking/daily_retry.py`.
 
 **Why it stopped being Sentinel.** mike, 2026-09-03: *"sentinel and janitor keep
 asking for permission to run queries, I have to keep clicking allow"* → *"move

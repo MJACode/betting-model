@@ -35,6 +35,12 @@ demand via `python run_pipeline.py --step health-check`. Results are upserted in
   days old; `settlement_stranded`, older than that with no ceiling, naming the picks).
 - **Cadence-aware:** every sport's checks gate on that sport having games in the window —
   NBA in July, UFC midweek, golf off-weeks are SKIPPED, never false alarms.
+  The MLB "no games" checks use a 190-day skip budget, and a shut gate pages
+  only when `games` has an MLB game inside 14 days. `final_scores` ignores UFC.
+  Two or more MLB/NHL/WNBA finals older than 36 hours page; one is a digest
+  line. An NBA or college final pages once it is still missing after 36 hours.
+  `odds_api_credits` pages when runway is under 5 days or remaining credits
+  are under 50,000. WARN rows do not page; the 7:15 ET ops digest lists them.
   Bullpen, the player game log and umpires expect the newest MLB final on or
   before their ceiling, and skip when that final is more than 7 days behind it,
   so a missing World Series row does not stay STALE until spring.

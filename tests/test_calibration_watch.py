@@ -216,29 +216,34 @@ class TestTheRun:
 
     def test_a_first_sweep_with_a_standing_caveat_still_says_no_baseline(
             self, monkeypatch):
-        """The masking half of the same bug, pinned separately."""
-        sent = {}
-        monkeypatch.setattr("tracking.discord_notifier._post",
-                            lambda url, payload: sent.update(payload) or "id")
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_OPS", "https://example/x")
+        """The masking half of the same bug, pinned separately.
+
+        The cron no longer posts. The text the Monday digest would use still
+        says there is no baseline, and the caveat is on that text.
+        """
         conn = _Conn(dates=("2026-09-02",),
                      sweeps={"2026-09-02": [_row("m", cur_n=5)]},
                      auto_pauses=None)
-        cw.run_calibration_watch(conn, today=date(2026, 9, 7))
-        title = sent["embeds"][0]["title"]
+        out = cw.run_calibration_watch(conn, today=date(2026, 9, 7))
+        assert out["posted"] is False
+        title, body, _colour = cw.format_post(out)
         assert "no baseline" in title, f"got {title!r}"
         assert "change" not in title, f"a no-change run must not claim one: {title!r}"
-        assert "model_auto_pauses" in sent["embeds"][0]["description"]
+        assert "model_auto_pauses" in body
 
-    def test_it_is_ledgered_only_after_the_post_confirms(self, monkeypatch):
-        monkeypatch.setattr(cw, "_announce", lambda s: True)
+    def test_the_cron_does_not_post_or_ledger(self, monkeypatch):
+        """Deltas go out in the Monday ops digest. A second post here is the
+        noise this change removes. Nothing is ledgered, because nothing posted."""
+        sent = []
+        monkeypatch.setattr("tracking.discord_notifier._post",
+                            lambda *a, **k: sent.append(a) or "id")
         conn = _Conn(dates=("2026-09-02",),
                      sweeps={"2026-09-02": [_row("m", cur_n=5)]},
                      auto_pauses="x")
-        cw.run_calibration_watch(conn, today=date(2026, 9, 7))
-        assert conn.inserts, "a confirmed post must be ledgered"
-        assert conn.inserts[0][1] == "calibration_watch"
-        assert conn.committed
+        out = cw.run_calibration_watch(conn, today=date(2026, 9, 7))
+        assert out["posted"] is False
+        assert conn.inserts == []
+        assert sent == []
 
     def test_a_failed_post_is_never_ledgered(self, monkeypatch):
         """§7: a kind with zero push_sent rows must mean it has NEVER succeeded."""
@@ -265,13 +270,10 @@ class TestItNeverDecides:
             assert forbidden not in src.replace(
                 "ACTION_THRESHOLDS['{row['model_id']}']", ""), forbidden
 
-    def test_every_post_carries_the_in_sample_caveat(self, monkeypatch):
+    def test_every_post_carries_the_in_sample_caveat(self):
         """A description reads as a forecast without it."""
-        sent = {}
-        monkeypatch.setattr("tracking.discord_notifier._post",
-                            lambda url, payload: sent.update(payload) or "id1")
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_OPS", "https://example/x")
-        cw._announce({"status": "ok", "run_date": "2026-09-02", "baseline": None,
-                      "models": 22, "findings": []})
-        assert "IN-SAMPLE" in sent["embeds"][0]["description"]
-        assert "13-48pp" in sent["embeds"][0]["description"]
+        _title, body, _colour = cw.format_post(
+            {"status": "ok", "run_date": "2026-09-02", "baseline": None,
+             "models": 22, "findings": []})
+        assert "IN-SAMPLE" in body
+        assert "13-48pp" in body

@@ -130,12 +130,14 @@ class TestWhatCountsAsAFailure:
 
 
 class TestDeliveryAndNoise:
-    def test_a_new_condition_alerts(self, monkeypatch, tmp_path):
+    def test_a_new_condition_waits_for_the_next_tick(self, monkeypatch, tmp_path):
         _state_dir(monkeypatch, tmp_path)
         sent = _posts(monkeypatch)
         conn = FakeConn(health=[("odds_dk_lines", "STALE", "CRIT", "stale")],
                         runs=_clean_runs())
-        r = fa.run_failure_alerter(conn=conn, now=NOW)
+        first = fa.run_failure_alerter(conn=conn, now=NOW)
+        assert first["alerted"] == [] and sent == []
+        r = fa.run_failure_alerter(conn=conn, now=NOW + timedelta(minutes=10))
         assert r["alerted"] == ["health:odds_dk_lines"]
         assert len(sent) == 1 and sent[0]["recovery"] is False
 
@@ -146,7 +148,8 @@ class TestDeliveryAndNoise:
         conn = FakeConn(health=[("odds_dk_lines", "STALE", "CRIT", "stale")],
                         runs=_clean_runs())
         fa.run_failure_alerter(conn=conn, now=NOW)
-        r = fa.run_failure_alerter(conn=conn, now=NOW + timedelta(minutes=10))
+        fa.run_failure_alerter(conn=conn, now=NOW + timedelta(minutes=10))
+        r = fa.run_failure_alerter(conn=conn, now=NOW + timedelta(minutes=20))
         assert r["alerted"] == []
         assert len(sent) == 1, "a standing failure must not post every tick"
 
@@ -156,14 +159,48 @@ class TestDeliveryAndNoise:
         conn = FakeConn(health=[("odds_dk_lines", "STALE", "CRIT", "stale")],
                         runs=_clean_runs())
         fa.run_failure_alerter(conn=conn, now=NOW)
-        later = NOW + timedelta(minutes=fa.RENOTIFY_CRIT_MIN + 1)
+        paged_at = NOW + timedelta(minutes=10)
+        fa.run_failure_alerter(conn=conn, now=paged_at)
+        later = paged_at + timedelta(minutes=fa.RENOTIFY_CRIT_MIN + 1)
         r = fa.run_failure_alerter(conn=conn, now=later)
         assert r["alerted"] == ["health:odds_dk_lines"]
         assert len(sent) == 2
 
-    def test_warn_is_throttled_harder_than_crit(self):
-        # A WARN repeating at CRIT's cadence is how a channel stops being read.
+    def test_warn_does_not_page(self, monkeypatch, tmp_path):
+        _state_dir(monkeypatch, tmp_path)
+        sent = _posts(monkeypatch)
+        conn = FakeConn(health=[("x", "STALE", "WARN", "flaky upstream")],
+                        runs=_clean_runs())
+        fa.run_failure_alerter(conn=conn, now=NOW)
+        fa.run_failure_alerter(conn=conn, now=NOW + timedelta(minutes=10))
+        assert sent == []
         assert fa.RENOTIFY_WARN_MIN > fa.RENOTIFY_CRIT_MIN
+
+    def test_a_stranded_settlement_pages_on_the_second_tick(
+            self, monkeypatch, tmp_path):
+        _state_dir(monkeypatch, tmp_path)
+        sent = _posts(monkeypatch)
+        conn = FakeConn(
+            health=[("settlement_stranded", "STALE", "WARN", "3 picks")],
+            runs=_clean_runs())
+        fa.run_failure_alerter(conn=conn, now=NOW)
+        r = fa.run_failure_alerter(conn=conn, now=NOW + timedelta(minutes=10))
+        assert r["alerted"] == ["health:settlement_stranded"]
+        assert sent and sent[0]["recovery"] is False
+        assert fa._repeat_minutes("WARN", "health:settlement_stranded") == (
+            fa.RENOTIFY_DATA_MIN)
+
+    def test_a_blip_that_clears_before_the_next_tick_sends_nothing(
+            self, monkeypatch, tmp_path):
+        _state_dir(monkeypatch, tmp_path)
+        sent = _posts(monkeypatch)
+        bad = FakeConn(health=[("odds_dk_lines", "STALE", "CRIT", "stale")],
+                       runs=_clean_runs())
+        good = FakeConn(health=[("odds_dk_lines", "OK", "CRIT", "fine")],
+                        runs=_clean_runs())
+        fa.run_failure_alerter(conn=bad, now=NOW)
+        r = fa.run_failure_alerter(conn=good, now=NOW + timedelta(minutes=10))
+        assert sent == [] and r["recovered"] == [] and r["alerted"] == []
 
     def test_a_cleared_condition_posts_a_recovery_once(self, monkeypatch, tmp_path):
         _state_dir(monkeypatch, tmp_path)
@@ -173,11 +210,16 @@ class TestDeliveryAndNoise:
         good = FakeConn(health=[("odds_dk_lines", "OK", "CRIT", "fine")],
                         runs=_clean_runs())
         fa.run_failure_alerter(conn=bad, now=NOW)
-        r = fa.run_failure_alerter(conn=good, now=NOW + timedelta(minutes=10))
+        fa.run_failure_alerter(conn=bad, now=NOW + timedelta(minutes=10))
+        early = fa.run_failure_alerter(conn=good, now=NOW + timedelta(minutes=20))
+        assert early["recovered"] == [], "a page under 30 minutes sends no recovery"
+        # A new episode that holds, then clears after the recovery window.
+        fa.run_failure_alerter(conn=bad, now=NOW + timedelta(minutes=21))
+        fa.run_failure_alerter(conn=bad, now=NOW + timedelta(minutes=31))
+        r = fa.run_failure_alerter(conn=good, now=NOW + timedelta(minutes=62))
         assert r["recovered"] == ["health:odds_dk_lines"]
         assert sent[-1]["recovery"] is True
-        # ...and not again on the next quiet pass.
-        r2 = fa.run_failure_alerter(conn=good, now=NOW + timedelta(minutes=20))
+        r2 = fa.run_failure_alerter(conn=good, now=NOW + timedelta(minutes=70))
         assert r2["recovered"] == []
 
     def test_a_healthy_first_run_announces_nothing(self, monkeypatch, tmp_path):
@@ -195,11 +237,12 @@ class TestDeliveryAndNoise:
         conn = FakeConn(health=[("odds_dk_lines", "STALE", "CRIT", "stale")],
                         runs=_clean_runs())
         fa.run_failure_alerter(conn=conn, now=NOW)
-        r = fa.run_failure_alerter(conn=conn, now=NOW + timedelta(minutes=1))
-        assert r["alerted"] == []          # still not confirmed
+        fa.run_failure_alerter(conn=conn, now=NOW + timedelta(minutes=10))
+        r = fa.run_failure_alerter(conn=conn, now=NOW + timedelta(minutes=11))
+        assert r["alerted"] == []          # the failed post did not stamp
         assert len(sent) == 2, "an unconfirmed alert must be retried"
 
-    def test_a_flapping_condition_alerts_on_each_new_occurrence(
+    def test_a_flapping_condition_alerts_again_once_it_holds(
             self, monkeypatch, tmp_path):
         _state_dir(monkeypatch, tmp_path)
         sent = _posts(monkeypatch)
@@ -207,10 +250,10 @@ class TestDeliveryAndNoise:
         good = FakeConn(health=[("x", "OK", "CRIT", "")], runs=_clean_runs())
         fa.run_failure_alerter(conn=bad, now=NOW)
         fa.run_failure_alerter(conn=good, now=NOW + timedelta(minutes=10))
-        r = fa.run_failure_alerter(conn=bad, now=NOW + timedelta(minutes=20))
+        fa.run_failure_alerter(conn=bad, now=NOW + timedelta(minutes=20))
+        r = fa.run_failure_alerter(conn=bad, now=NOW + timedelta(minutes=30))
         assert r["alerted"] == ["health:x"], (
-            "recovery must clear the throttle, or a flapping failure is "
-            "announced once and then silently repeats")
+            "a condition that returns and holds for a second tick pages again")
 
 
 class TestItCannotBreakTheWorker:
@@ -306,9 +349,10 @@ class TestHealthCheckOnlyIsNotADirtyPass:
     health-check is the identity of a clean pass: odds/score/settle ran.
 
     Measured 2026-09-14 last-12 non-daily (Supabase `pipeline_runs`):
-    1 ok, 9 failed_steps='health-check', 2 'aborted' → 1/12 under the 0.50
-    floor. After this, that window is 10/12 and silent. `aborted` stays
-    dirty: deploy-replace and hang share one sentinel.
+    1 ok, 9 failed_steps='health-check', 2 'aborted'. Health-check-only is
+    clean. `aborted` and `deploy-cutoff` are a deploy closing its own row,
+    so that window is 12/12. A hang that never finished has finished_at NULL
+    and is not in this query.
     """
 
     def test_health_check_only_is_identity_with_a_clean_pass(self):
@@ -332,15 +376,16 @@ class TestHealthCheckOnlyIsNotADirtyPass:
         assert ranked == [("odds", 12)]
         assert "pass:clean_rate" in fa._conditions(FakeConn(health=[], runs=runs))
 
-    def test_aborted_still_counts_as_dirty(self):
-        """No column distinguishes deploy-replace from a hang; a pass that
-        did not finish did not produce what the pass produces."""
-        runs = [(False, "aborted")] * 12
-        conn = FakeConn(health=[], runs=runs)
-        clean, total, ranked = fa._clean_rate(conn)
-        assert (clean, total) == (0, 12)
-        assert ranked == [("aborted", 12)]
-        assert "pass:clean_rate" in fa._conditions(conn)
+    def test_aborted_and_deploy_cutoff_are_not_a_producer_failure(self):
+        """Both sentinels are a deploy closing its own row. A hang that
+        never finished has finished_at NULL and is not in this window."""
+        for failed in ("aborted", "deploy-cutoff"):
+            runs = [(False, failed)] * 12
+            conn = FakeConn(health=[], runs=runs)
+            clean, total, ranked = fa._clean_rate(conn)
+            assert (clean, total) == (12, 12), failed
+            assert ranked == []
+            assert "pass:clean_rate" not in fa._conditions(conn)
 
     def test_an_empty_failed_steps_map_on_a_failed_row_is_dirty(self):
         """Identity: we do not invent a health-check excuse for an unknown
@@ -362,10 +407,22 @@ class TestHealthCheckOnlyIsNotADirtyPass:
         assert len(runs) == 12
         conn = FakeConn(health=[], runs=runs)
         clean, total, ranked = fa._clean_rate(conn)
-        assert (clean, total) == (10, 12)
-        assert ranked == [("aborted", 2)]
-        assert 10 / 12 >= fa.CLEAN_RATE_FLOOR
+        assert (clean, total) == (12, 12)
+        assert ranked == []
+        assert 12 / 12 >= fa.CLEAN_RATE_FLOOR
         assert "pass:clean_rate" not in fa._conditions(conn)
+
+    def test_clean_rate_pages_only_after_an_hour(self, monkeypatch, tmp_path):
+        _state_dir(monkeypatch, tmp_path)
+        sent = _posts(monkeypatch)
+        runs = [(False, "odds")] * 12
+        conn = FakeConn(health=[], runs=runs)
+        fa.run_failure_alerter(conn=conn, now=NOW)
+        early = fa.run_failure_alerter(conn=conn, now=NOW + timedelta(minutes=10))
+        assert early["alerted"] == [] and sent == []
+        later = fa.run_failure_alerter(conn=conn, now=NOW + timedelta(minutes=61))
+        assert later["alerted"] == ["pass:clean_rate"]
+        assert len(sent) == 1
 
     def test_an_empty_window_is_identity(self):
         assert fa._clean_rate(FakeConn(health=[], runs=[])) == (0, 0, [])

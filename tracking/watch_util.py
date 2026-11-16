@@ -101,6 +101,20 @@ COLOR_ALERT = 0xE74C3C
 COLOR_RECOVERY = 0x2ECC71
 
 
+def _state_dir_candidates() -> list[Path]:
+    """Volume first. A redeploy wipes the container disk and would re-page."""
+    found: list[Path] = []
+    for env_var in ("WATCHDOG_STATE_DIR", "RAILWAY_VOLUME_MOUNT_PATH"):
+        raw = os.environ.get(env_var, "").strip()
+        if raw:
+            found.append(Path(raw))
+    # Railway sets RAILWAY_ENVIRONMENT on every service. /data is the worker
+    # volume when the platform variable was not copied into the process.
+    if os.environ.get("RAILWAY_ENVIRONMENT", "").strip():
+        found.append(Path("/data"))
+    return found
+
+
 def alert_state_path(filename: str) -> Path:
     """Where a watch keeps its de-duplication state.
 
@@ -109,15 +123,14 @@ def alert_state_path(filename: str) -> Path:
     that was already announced. Falls back to temp so a service with no volume
     still runs — noisier, but running.
     """
-    for env_var in ("WATCHDOG_STATE_DIR", "RAILWAY_VOLUME_MOUNT_PATH"):
-        raw = os.environ.get(env_var, "").strip()
-        if raw:
-            try:
-                d = Path(raw)
-                d.mkdir(parents=True, exist_ok=True)
-                return d / filename
-            except OSError:
+    for d in _state_dir_candidates():
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            if not d.is_dir():
                 continue
+            return d / filename
+        except OSError:
+            continue
     return Path(tempfile.gettempdir()) / filename
 
 
