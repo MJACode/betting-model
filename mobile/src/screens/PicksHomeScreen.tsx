@@ -837,7 +837,9 @@ export function PicksHomeScreen() {
         {!signalsLocked && view !== 'scoreboard' ? (
           <SportToggle
             available={sportChipsAvailable(availableSports, !todayUnknown && !liveUnknown)}
-            signalCounts={sportSignalCounts}
+            // undefined until today's board is known: built from empty data the
+            // row would draw in SPORTS order, then reshuffle (orderSportChips).
+            signalCounts={todayUnknown ? undefined : sportSignalCounts}
             liveSports={liveSports}
             // H9, 45pt with no visual change: 6pt over the subtitle line above
             // (text, not a control) and half of the 12pt gap to the sub-tab chips
