@@ -3,8 +3,9 @@ import DbOverview from './database/DbOverview'
 import { DbSizeChart, DbActivityChart, type RangeDays } from './database/DbCharts'
 import DbTables from './database/DbTables'
 import DbQueries from './database/DbQueries'
+import DbPcCopy from './database/DbPcCopy'
 import { Chip } from '../components/PanelUtils'
-import { useGetDatabaseHealth, useGetDatabaseTables, useGetDatabaseQueries } from '../hooks/backend/ops'
+import { useGetDatabaseHealth, useGetDatabaseTables, useGetDatabaseQueries, useGetPcCopy } from '../hooks/backend/ops'
 import { TabShell } from '../components/tiles/TabShell'
 import { useRefreshLoad } from '../hooks/useRefreshLoad'
 import type { TileMeta, TileRender } from '../components/tiles/layoutTypes'
@@ -16,10 +17,11 @@ type Props = {
 
 const DATABASE_TILES: TileMeta[] = [
   { id: 'overview', title: 'At a glance', description: 'The newest snapshot of the Supabase database, and how it is changing', x: 0, y: 0, w: 12, h: 9, minW: 6, minH: 5, autoHeight: true },
-  { id: 'size', title: 'Size over time', description: 'Table data, indexes and toast, one point an hour', x: 0, y: 9, w: 7, h: 12, minW: 4, minH: 8 },
-  { id: 'activity', title: 'Activity', description: 'Load, cache, commits, temp files and connections between snapshots', x: 7, y: 9, w: 5, h: 12, minW: 4, minH: 8 },
-  { id: 'tables', title: 'Largest tables', description: 'Size, rows and growth of every table, every six hours', x: 0, y: 21, w: 12, h: 17, minW: 6, minH: 8 },
-  { id: 'queries', title: 'Heaviest statements', description: 'What has used the most database time, from Postgres’s own statement statistics', x: 0, y: 38, w: 12, h: 16, minW: 6, minH: 8 },
+  { id: 'pccopy', title: 'PC copy', description: 'The copy of the database and GitHub on mike’s PC, reported when each nightly copy ends', x: 0, y: 9, w: 12, h: 14, minW: 6, minH: 5, autoHeight: true },
+  { id: 'size', title: 'Size over time', description: 'Table data, indexes and toast, one point an hour', x: 0, y: 23, w: 7, h: 12, minW: 4, minH: 8 },
+  { id: 'activity', title: 'Activity', description: 'Load, cache, commits, temp files and connections between snapshots', x: 7, y: 23, w: 5, h: 12, minW: 4, minH: 8 },
+  { id: 'tables', title: 'Largest tables', description: 'Size, rows and growth of every table, every six hours', x: 0, y: 35, w: 12, h: 17, minW: 6, minH: 8 },
+  { id: 'queries', title: 'Heaviest statements', description: 'What has used the most database time, from Postgres’s own statement statistics', x: 0, y: 52, w: 12, h: 16, minW: 6, minH: 8 },
 ]
 
 const SWR = { cachePolicy: 'stale-while-revalidate' } as const
@@ -39,6 +41,7 @@ export default function DatabaseTab({ refreshKey }: Props) {
   const health = useGetDatabaseHealth(SWR)
   const tables = useGetDatabaseTables(SWR)
   const queries = useGetDatabaseQueries(SWR)
+  const pcCopy = useGetPcCopy(SWR)
   const [days, setDays] = useState<RangeDays>(30)
 
   useRefreshLoad('database', refreshKey, skipCache => {
@@ -46,6 +49,7 @@ export default function DatabaseTab({ refreshKey }: Props) {
     health.trigger({ days }, opts).result.catch(() => {})
     tables.trigger(undefined, opts).result.catch(() => {})
     queries.trigger(undefined, opts).result.catch(() => {})
+    pcCopy.trigger(undefined, opts).result.catch(() => {})
   })
 
   // A new range re-reads the history only.
@@ -84,6 +88,8 @@ export default function DatabaseTab({ refreshKey }: Props) {
             />
           ),
         }
+      case 'pccopy':
+        return { body: <DbPcCopy data={pcCopy.data} loading={pcCopy.loading} error={pcCopy.error} /> }
       case 'size':
         return {
           actions: rangeChips,

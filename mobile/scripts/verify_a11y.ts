@@ -584,7 +584,7 @@ const toggle = read('src/components/SportToggle.tsx');
 check('SportToggle: tablist container, tab items with selected', /accessibilityRole="tablist"/.test(toggle) && /accessibilityRole="tab"/.test(toggle) && /accessibilityState=\{\{ selected: active \}\}/.test(toggle) && !/accessibilityRole="button"/.test(toggle));
 check('SportToggle: slop = the in-bounds room + the reach the screen grants; chips abut, so only the ends take side slop',
   /const TOGGLE_ROOM_ABOVE = spacing\.sm \+ 2;/.test(toggle) &&
-    /top: TOGGLE_ROOM_ABOVE \+ reachAbove,\s*bottom: 2 \+ reachBelow,\s*left: i === 0 \? 2 : 0,\s*right: i === SPORTS\.length - 1 \? 2 : 0,/.test(toggle) &&
+    /top: TOGGLE_ROOM_ABOVE \+ reachAbove,\s*bottom: 2 \+ reachBelow,\s*left: i === 0 \? 2 : 0,\s*right: i === ordered\.length - 1 \? 2 : 0,/.test(toggle) &&
     /const reach = reachFrame\(reachAbove, reachBelow, \{ raise: reachBelow > 0, marginTop \}\);/.test(toggle) &&
     /style=\{reach\.frame\}/.test(toggle) && /contentContainerStyle=\{\[styles\.scroll, reach\.content\]\}/.test(toggle));
 const record = read('src/screens/TrackRecordScreen.tsx');

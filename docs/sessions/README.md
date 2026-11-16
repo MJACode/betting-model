@@ -20,7 +20,11 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, comped accounts could not sign in: NULL email_change made /otp 500; 9 rows set to '', grant scripts + guard test fixed |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Sport chips: sports with a signal move to the far left of the row |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, The PC copy: one row per nightly pass (pc_copy_snapshots, scripts/local_mirror_report.py, run last by the LocalMirror task) and a PC copy tile on the Database tab; an unreadable exit code is now a failure, not 0 |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: no source from 2023 on confirms a US outlet still pools with the Hong Kong Jockey Club; Xpressbet, AmWager, NYRA Bets offer Hong Kong; the archive purchase waits on that |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, TestFlight tester account + comped access; Supabase MCP found to write production |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, archive move built: prop repeats (66% of prop rows) leave Supabase for mike's PC and Storage, checked per game against Postgres; other moves blocked by named readers; re-buy planner counts archived rows (#1345) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, re-buy follow-up: zero-row pieces read back (FanDuel at its opener; NHL snapshot before the first other book), end-of-game in-play rows leave latest_odds unchanged, plan total is a ceiling (#1384) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Stats boards: NFL Anytime TD uses the same price column as every other board (HIT, price, MATCHUP; DK green) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Signals card: one line-movement row (line change, price change in parentheses), shown only when the deciding book moved against the pick |

@@ -52,7 +52,9 @@ review as its own entry.
    kill tests (`kill-tests.md`: rows stored in finishing order, a stored
    rating checked as the one going into the race, print every obvious
    variant); the Hong Kong pre-off route and how the UK zip is stored
-   (`market-grid.md`).
+   (`market-grid.md`); a payout comparison to test whether an outlet's bets
+   join the host's pool (`scouting.md`), after a 2026-11-16 search could not
+   confirm that any US outlet still pools with the Hong Kong Jockey Club.
 4. **Corrected**: the 2026-11-15 entry said the scope's 60/30/15/5-minute
    neighbourhood "cannot run on any free file". Now: nch015's Hong Kong set
    holds a snapshot every 12 minutes, then every 6 inside about 216 minutes,

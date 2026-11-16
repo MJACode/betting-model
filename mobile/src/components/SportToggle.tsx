@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LiveDot } from '@/components/LiveDot';
 import { colors, font, radii, spacing, opacity } from '@/lib/theme';
 import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
-import { sportChipState } from '@/lib/loadState';
+import { orderSportChips, sportChipState } from '@/lib/loadState';
 import { reachFrame } from '@/lib/a11y';
 
 /**
@@ -27,6 +27,8 @@ import { reachFrame } from '@/lib/a11y';
  * their usual sport had no way to know another one had bets waiting — during
  * the Sept/Oct MLB-NFL overlap that meant missing NFL entirely. The badge is
  * the cross-sport signal: green count = actionable bets on that board.
+ * Badged sports also MOVE to the front of the row (orderSportChips, Matt
+ * 2026-11-16): a badge on the ninth chip sat past the screen edge.
  *
  * `liveSports` marks the sports with an in-play pick standing right now, with
  * the same 6pt red dot the LIVE pill on a card uses (GameStatusPill) — one live
@@ -71,14 +73,32 @@ export function SportToggle({
   const { sport, setSport } = useSportFilter();
   const scrollRef = React.useRef<ScrollView>(null);
   const offsets = React.useRef<Record<string, number>>({});
+  const ordered = React.useMemo(() => orderSportChips(SPORTS, signalCounts), [signalCounts]);
 
-  // Scroll the active sport into view once we know where it sits.
+  // Scroll the active sport into view once, on the first layout, so a stored
+  // non-MLB sport isn't hidden off-screen. Only once: a reorder lays every
+  // chip out again, and following the active chip then would scroll AWAY from
+  // the badged sports that just moved to the front (UX review, 2026-11-16).
+  const followActive = React.useRef(true);
   const scrollToActive = React.useCallback(() => {
+    if (!followActive.current) return;
     const x = offsets.current[sport];
-    if (x != null && x > 0) {
-      scrollRef.current?.scrollTo({ x: Math.max(0, x - 40), animated: false });
+    if (x != null) {
+      followActive.current = false;
+      if (x > 0) scrollRef.current?.scrollTo({ x: Math.max(0, x - 40), animated: false });
     }
   }, [sport]);
+
+  // When the order changes (a sport gains or loses its last signal), go back
+  // to the start of the row, where the signalled sports now sit.
+  const orderKey = ordered.join();
+  const prevOrderKey = React.useRef(orderKey);
+  React.useEffect(() => {
+    if (prevOrderKey.current === orderKey) return;
+    prevOrderKey.current = orderKey;
+    followActive.current = false;
+    scrollRef.current?.scrollTo({ x: 0, animated: true });
+  }, [orderKey]);
 
   return (
     <ScrollView
@@ -90,7 +110,7 @@ export function SportToggle({
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.wrap} accessibilityRole="tablist">
-        {SPORTS.map((s: Sport, i: number) => {
+        {ordered.map((s: Sport, i: number) => {
           const active = s === sport;
           const count = signalCounts?.[s] ?? 0;
           const isLive = liveSports?.has(s) ?? false;
@@ -115,7 +135,7 @@ export function SportToggle({
                 top: TOGGLE_ROOM_ABOVE + reachAbove,
                 bottom: 2 + reachBelow,
                 left: i === 0 ? 2 : 0,
-                right: i === SPORTS.length - 1 ? 2 : 0,
+                right: i === ordered.length - 1 ? 2 : 0,
               }}
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}

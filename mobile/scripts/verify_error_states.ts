@@ -53,6 +53,7 @@ import {
   loadPresentation,
   repeatFailureAnnounce,
   showLivePricesBanner,
+  orderSportChips,
   sportChipState,
   sportChipsAvailable,
   todayHeaderCounts,
@@ -216,6 +217,17 @@ check('chips: known and empty → muted, "NFL, no picks today"', known.muted && 
 check('chips: a sport with picks is never muted',
   !sportChipState({ sport: 'MLB', active: false, available: new Set(['MLB']), count: 2, live: true }).muted
   && sportChipState({ sport: 'MLB', active: false, available: new Set(['MLB']), count: 2, live: true }).label === 'MLB, 2 signals, in play now');
+// Matt 2026-11-16: sports with a signal move to the far left, SPORTS order kept within each group.
+const chipSports = ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW', 'UFC', 'NHL', 'ATP', 'WTA', 'EUROLEAGUE'];
+check('chips: signalled sports lead, in SPORTS order',
+  orderSportChips(chipSports, { NCAAF: 6, NHL: 1, NFL: 1, MLB: 0 }).join() === 'NFL,NCAAF,NHL,MLB,WNBA,NBA,NCAAB,NCAABW,UFC,ATP,WTA,EUROLEAGUE');
+check('chips: a bigger count does not jump ahead', orderSportChips(chipSports, { NHL: 9, NFL: 1 }).slice(0, 2).join() === 'NFL,NHL');
+check('chips: a zero count is no signal', orderSportChips(chipSports, { NHL: 0 }).join() === chipSports.join());
+check('chips: PicksHome withholds counts until today is known', /signalCounts=\{todayUnknown \? undefined : sportSignalCounts\}/.test(read('src/screens/PicksHomeScreen.tsx')));
+check('chips: a reorder scrolls the row back to the start', /scrollTo\(\{ x: 0, animated: true \}\)/.test(read('src/components/SportToggle.tsx')));
+check('chips: unknown counts keep SPORTS order', orderSportChips(chipSports, undefined).join() === chipSports.join());
+check('chips: no signals keeps SPORTS order', orderSportChips(chipSports, {}).join() === chipSports.join());
+check('chips: SportToggle renders the ordered list', /orderSportChips\(SPORTS, signalCounts\)/.test(read('src/components/SportToggle.tsx')) && /ordered\.map\(/.test(read('src/components/SportToggle.tsx')));
 check('chips: the active sport is never muted', !sportChipState({ sport: 'NFL', active: true, available: empty, count: 0, live: false }).muted);
 
 // (a) A repeat identical failure after a pressed Retry is announced again.
