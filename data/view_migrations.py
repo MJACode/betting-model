@@ -569,6 +569,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # policy and SELECT-only grant; catalog return once all three exist.
     # Not public_betting, which the scorer copies onto every pick.
     "add_scoreboard_splits_2026_10_29.sql",
+    # 2026-11-16 (Matt): DraftKings' own splits on the Scoreboard. Adds the
+    # opening-split columns the movement arrow reads, and an append-only
+    # worker-only history (RLS on, nothing granted). Catalog return once the
+    # columns, the table and its lock-down exist. Not picks, odds or record.
+    "scoreboard_splits_dk_history_2026_11_16.sql",
     # 2026-10-29 (Matt): alternate spreads and totals, the current ladder per
     # game, for the betslip's game-line edit. One table written by
     # data/ingestors/alt_game_lines.py, RLS on with a SELECT policy. Returns on

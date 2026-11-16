@@ -52,10 +52,10 @@ export function matchupHeaderFontSize(
   return size * (room / natural);
 }
 
-/** The board's column widths. Hit % 40, Matchup 66, Best price 62. */
+/** The board's column widths. Hit % 40, Matchup 66. The price column is the
+ *  standard one every board uses (Matt, 2026-11-16). */
 export const ATD_HIT_W = 40;
 export const ATD_MATCHUP_W = 66;
-export const ATD_ODDS_W = 62;
 
 /** Stable order for the groups a board actually has rows for. */
 const GROUP_ORDER: readonly NflPositionGroup[] = ['QB', 'RB', 'WR', 'TE', 'DL', 'LB', 'DB'];
@@ -110,7 +110,6 @@ export interface DefenseRank {
 export const ATD_COPY = {
   header: 'MATCHUP',
   hitHeader: 'HIT %',
-  priceHeader: 'BEST',
   earlySeason:
     'Some defenses still include last season, until they have played 8 games.',
   totalHeader: 'TD',

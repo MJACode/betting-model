@@ -20,9 +20,18 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, why the women's models trail the men's (first-half prices, DraftKings on one game in ten, this season's halftime books); in-play bets away from DraftKings' number were never stored: 20 of 24 men's, 13 of 22 women's (fixed) |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, re-buy follow-up: zero-row pieces read back (FanDuel at its opener; NHL snapshot before the first other book), end-of-game in-play rows leave latest_odds unchanged, plan total is a ceiling (#1384) |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Stats boards: NFL Anytime TD uses the same price column as every other board (HIT, price, MATCHUP; DK green) |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Signals card: one line-movement row (line change, price change in parentheses), shown only when the deciding book moved against the pick |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Scoreboard splits switch to DraftKings' own numbers (DK Network), opening-move arrow, append-only splits history |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Ops dashboard: a Database tab (reads the hourly database health) and a SignalBase redesign of every tab (presentation only); Retool's driver binds $N in the order the placeholders appear |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, odds re-buy covers every missing piece: extra markets, in-play, part-way props; NFL ids from the schedule; tested with 1,132 credits; whole plan 4,703,617 credits (#1384) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Database health recorded hourly (worker job db_health_snapshot: db_health_snapshots every hour, every table's size and the heaviest statements every 6 h); pg_stat_statements total is not monotonic, so load comes from pg_stat_database.active_time |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: Hong Kong pools before the off (2016–2018) and UK/Ireland at starting price (1988–2026), both null; free sets stored first (#1387, PC mirror now copies huge rows); UK loader year filter fixed |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Scoreboard follow-up: one sport's DB error no longer skips the others' live scores; live-score chunks read in parallel; UFC game screen has no Spread block |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, credit runway uses the last finished day's burn, not the partial morning |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, ops digest review: stranded NBA props page, other alerter WARNs are in the digest, calibration posts at 9:00, aborted stays dirty |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, ops channel pages outages only; the 7:15 ET post is the digest (offseason skips, job successes, calibration deltas, model-quality flags) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord price line links the book name to that bet's slip (app betslip URL, Massachusetts, sportsbook page when there is no outcome id) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord pick posts link the matchup to the game score page (ESPN gamecast, scoreboard fallback) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Back button: dead again on Pick Detail opened from a push (iOS 27.3); every pushed screen now draws the React Back pill, UIKit Back hidden; push taps wait for the app to be active |
@@ -30,6 +39,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, a restart relaunches every in-play loop 60 s after boot (#1359): a 23:59 ET restart had left a live college football game with no in-play model until 11:00 ET |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, model building runs on mike's PC from the archive files; a backup copy goes to Supabase Storage (Pro keeps 7 days of backups); PC reads all 84M prop rows in 13.6 s (#1345) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, SQL over the PC copy: betting.duckdb, views over the Parquet files (269 tables, 258M rows checked in about a minute), rebuilt after each nightly copy |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, odds re-buy built and tested (4,552 credits): plans on the PC copy, buys at refresh times, only price moves; whole plan 3,279,447 credits (#1384) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Scoreboard covers every sport with games (12, chips only for sports with a game that day); NCAAB/NCAABW live scores via ESPN matched by event id; UFC finals W/L/D |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, NCAAB: Utah ML posted on a game postponed to Dec 5 (Washington @ Utah); ESPN ingestor now reads a game that left its date's board by event id; a BET whose game moved over 48h settles NO_ACTION (PR #1375) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, A postponed game's row moved date and its pick lost its team ("ML"): boards now read the missed games by id |

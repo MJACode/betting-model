@@ -110,7 +110,7 @@ def _sweep(conn, run_date: str) -> dict:
     cols = ("model_id", "paused", "settled", "cur_n", "cur_roi", "best_prob",
             "best_edge", "best_n", "best_roi", "best_per_week", "half_a",
             "half_b", "verdict")
-    return {str(r[0]): dict(zip(cols, r)) for r in rows if r}
+    return {str(r[0]): dict(zip(cols, r)) for r in rows if r and len(r) >= len(cols)}
 
 
 # ── the rules, each a pure function so it can be tested without a database ───
@@ -251,20 +251,16 @@ def _proposed_edit(row: dict) -> str:
 
 # ── the run ─────────────────────────────────────────────────────────────────
 
-def run_calibration_watch(conn, today: date | None = None) -> dict:
-    if not _enabled():
-        logger.info("calibration_watch: disabled by RUN_CALIBRATION_WATCH")
-        return {"status": "disabled"}
-
+def collect_summary(conn, today: date | None = None) -> dict:
+    """The judgement, with no Discord post. The Monday ops digest reads this."""
     today = today or date.today()
     dates = _sweep_dates(conn)
 
     if not dates:
-        summary = {"status": "no_sweep", "findings": [
+        return {"status": "no_sweep", "findings": [
             "`model_calibration_sweeps` is empty or unreadable — the weekly sweep "
-            "has never completed, so there is nothing to judge."], "models": 0}
-        summary["posted"] = _announce_and_ledger(conn, summary, today)
-        return summary
+            "has never completed, so there is nothing to judge."], "models": 0,
+            "baseline": None, "caveats": []}
 
     cur = _sweep(conn, dates[0])
     prev = _sweep(conn, dates[1]) if len(dates) > 1 else {}
@@ -284,27 +280,34 @@ def run_calibration_watch(conn, today: date | None = None) -> dict:
         "findings": findings,
         "caveats": [c for c in (auto_pause_caveat(conn),) if c],
     }
+    return summary
+
+
+def run_calibration_watch(conn, today: date | None = None) -> dict:
+    if not _enabled():
+        logger.info("calibration_watch: disabled by RUN_CALIBRATION_WATCH")
+        return {"status": "disabled"}
+
+    today = today or date.today()
+    summary = collect_summary(conn, today)
+    # 9:00 ET, after the 8:30 sweep. The 7:15 digest would be comparing last
+    # Monday's sweep with the one before it.
     summary["posted"] = _announce_and_ledger(conn, summary, today)
-    logger.info(f"calibration_watch: {len(findings)} finding(s) across "
-                f"{len(cur)} model(s), baseline={summary['baseline']}, "
+    logger.info(f"calibration_watch: {len(summary.get('findings') or [])} "
+                f"finding(s) across {summary.get('models', 0)} model(s), "
+                f"baseline={summary.get('baseline')}, "
                 f"posted={summary['posted']}")
     return summary
 
 
 def _announce_and_ledger(conn, summary: dict, run_day: date) -> bool:
+    """Post the Monday 9:00 judgement and ledger it only after Discord confirms."""
     return post_and_ledger(conn, "calibration_watch", run_day,
                            lambda: _announce(summary))
 
 
-def _announce(s: dict) -> bool:
-    """Post EVERY run, clean or not.
-
-    A watch that only speaks when it has news is indistinguishable from one that
-    has stopped — which is how both agent versions of this failed, unnoticed,
-    until a person went looking.
-    """
-    from tracking.discord_notifier import _post
-
+def format_post(s: dict) -> tuple[str, str, int]:
+    """Title, body, and colour for the Monday 9:00 calibration post."""
     if s.get("status") == "no_sweep":
         title, colour = "📐 Calibration watch — no sweep to judge", 0xE74C3C
         body = "\n".join(f"• {f}" for f in s["findings"])
@@ -324,7 +327,14 @@ def _announce(s: dict) -> bool:
 
     footnotes = [IN_SAMPLE_CAVEAT] + list(s.get("caveats") or [])
     body = body + "\n\n" + "\n".join(f"_{f}_" for f in footnotes)
+    return title, body, colour
 
+
+def _announce(s: dict) -> bool:
+    """Monday 9:00 ET. Deltas against the sweep that just finished."""
+    from tracking.discord_notifier import _post
+
+    title, body, colour = format_post(s)
     url = config.DISCORD_WEBHOOK_OPS
     if not url:
         logger.critical(f"CALIBRATION WATCH (no DISCORD_WEBHOOK_OPS set)\n{body}")

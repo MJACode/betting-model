@@ -1,4 +1,9 @@
-"""% of bets and % of money per side, for the app's Scoreboard only.
+"""% of bets and % of money per side from Action Network's consensus.
+
+SINCE 2026-11-16 THIS IS HISTORY ONLY. The Scoreboard shows DraftKings' own
+split (data/ingestors/dk_splits.py); this module appends Action Network's
+consensus to scoreboard_splits_history and no longer writes
+scoreboard_splits. What follows is the original 2026-10-29 note.
 
 Matt, 2026-10-29: the Scoreboard shows Odds, % Bets and % Money for a chosen
 market (spread, total, moneyline), the way Action Network's Matchups board
@@ -196,20 +201,77 @@ def _default_fetch(sport: str, day: str) -> dict | None:
         return None
 
 
-UPSERT_SQL = """
-INSERT INTO public.scoreboard_splits
+# Matt, 2026-11-16: the Scoreboard shows DraftKings' own split
+# (data/ingestors/dk_splits.py), so Action Network's consensus no longer
+# writes scoreboard_splits, where it would overwrite the DK row every pass.
+# It is kept, append-only, in scoreboard_splits_history with its source.
+HISTORY_SOURCE = "action_network"
+
+HISTORY_LATEST_SQL = """
+SELECT DISTINCT ON (game_id, market, side)
+       game_id, market, side, bet_pct, money_pct, line_value
+  FROM public.scoreboard_splits_history
+ WHERE source = %(source)s AND game_id = ANY(%(ids)s)
+ ORDER BY game_id, market, side, snapshot_at DESC
+"""
+
+HISTORY_INSERT_SQL = """
+INSERT INTO public.scoreboard_splits_history
     (game_id, sport, game_date, market, side, bet_pct, money_pct,
-     line_value, snapshot_at, source)
+     line_value, odds, source, snapshot_at)
 VALUES
     (%(game_id)s, %(sport)s, %(game_date)s, %(market)s, %(side)s,
-     %(bet_pct)s, %(money_pct)s, %(line_value)s, %(snapshot_at)s,
-     'action_network')
-ON CONFLICT (game_id, market, side) DO UPDATE SET
-    bet_pct = EXCLUDED.bet_pct,
-    money_pct = EXCLUDED.money_pct,
-    line_value = EXCLUDED.line_value,
-    snapshot_at = EXCLUDED.snapshot_at
+     %(bet_pct)s, %(money_pct)s, %(line_value)s, %(odds)s, %(source)s,
+     %(snapshot_at)s)
+ON CONFLICT (game_id, market, side, source, snapshot_at) DO NOTHING
 """
+
+
+def _same(a: Any, b: Any) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    try:
+        return abs(float(a) - float(b)) < 1e-6
+    except (TypeError, ValueError):
+        return False
+
+
+def changed_rows(rows: list[dict], latest: dict) -> list[dict]:
+    """The rows whose split or line differs from the last stored for the same
+    (game_id, market, side). Pure. A row with no stored predecessor is new."""
+    out = []
+    for r in rows:
+        prev = latest.get((r["game_id"], r["market"], r["side"]))
+        if prev is not None and all(
+            _same(r.get(k), prev.get(k)) for k in ("bet_pct", "money_pct", "line_value")
+        ):
+            continue
+        out.append(r)
+    return out
+
+
+def append_history(conn, rows: list[dict], source: str) -> int:
+    """Append each row that changed since the last one stored for `source`.
+    Never updates or deletes. Returns the number appended; 0 when the history
+    table does not exist yet (the migration runs on the next pipeline pass)."""
+    if not rows:
+        return 0
+    if conn.execute(
+        "SELECT to_regclass('public.scoreboard_splits_history') IS NOT NULL"
+    ).fetchone()[0] is not True:
+        logger.info("scoreboard_splits_history: table not created yet; nothing appended")
+        return 0
+    ids = sorted({r["game_id"] for r in rows})
+    cols = ("game_id", "market", "side", "bet_pct", "money_pct", "line_value")
+    latest = {}
+    for rec in conn.execute(HISTORY_LATEST_SQL, {"source": source, "ids": ids}).fetchall():
+        d = dict(zip(cols, rec))
+        latest[(d["game_id"], d["market"], d["side"])] = d
+    new = [{"odds": None, **r, "source": source} for r in changed_rows(rows, latest)]
+    if new:
+        conn.executemany(HISTORY_INSERT_SQL, new)
+        conn.commit()
+    return len(new)
 
 
 def run(conn=None, *, now: datetime | None = None,
@@ -252,10 +314,8 @@ def run(conn=None, *, now: datetime | None = None,
                     continue
                 rows.extend(build_rows(sport, payload, slate, now, counts))
                 time.sleep(0.5)
-            if rows:
-                conn.executemany(UPSERT_SQL, rows)
-                conn.commit()
             counts["rows"] = len(rows)
+            counts["history"] = append_history(conn, rows, HISTORY_SOURCE)
             out[sport] = counts
         logger.info(f"scoreboard_splits: {out}")
         return out

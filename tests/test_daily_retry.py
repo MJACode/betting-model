@@ -35,6 +35,8 @@ from tracking.daily_retry import (
     MAX_NON_ABORTED_FAILURES,
     DailyRun,
     announce_daily_retry,
+    retry_cap_exhausted,
+    retry_note,
     assess_daily_completion,
     classify_relaunch,
     daily_pipeline_reclaim_decision,
@@ -596,19 +598,28 @@ def test_the_contract_names_the_daily_catch_up():
     assert "catch_up_daily_pipeline" in block
 
 
-def test_the_ops_note_names_which_start_this_is_and_why(monkeypatch):
-    """A boot loop has to be visible in the channel. The note says which
-    start this attempt is, and whether it is a deploy-kill or a real
-    failure. Deploy-kills are not the one-retry cap."""
-    captured: dict = {}
+def test_the_retry_cap_is_the_page_and_a_normal_skip_is_not():
+    full = [
+        _run(
+            started=SIX_AM + timedelta(minutes=i),
+            finished=SIX_AM + timedelta(minutes=i, seconds=30),
+            ok=False,
+            failed="aborted",
+        )
+        for i in range(MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY)
+    ]
+    assert retry_cap_exhausted(decide_daily_retry(now=WATCH_TIME, runs=full))
+    assert not retry_cap_exhausted(
+        decide_daily_retry(now=WATCH_TIME, runs=[_ok()])
+    )
 
-    def _capture(title, detail, *, recovery=False, post=None):
-        captured["title"] = title
-        captured["detail"] = detail
-        captured["recovery"] = recovery
-        return True
 
-    monkeypatch.setattr("tracking.watch_util.post_ops_alert", _capture)
+def test_a_starting_retry_is_logged_and_not_posted(monkeypatch):
+    """A deploy-kill retry is a merge morning. The page is the cap, not the start."""
+    def _boom(*a, **k):
+        raise AssertionError("a starting retry must not post")
+
+    monkeypatch.setattr("tracking.watch_util.post_ops_alert", _boom)
     assert announce_daily_retry(
         "today's daily is unfinished and this process is not running it",
         source="boot",
@@ -616,15 +627,22 @@ def test_the_ops_note_names_which_start_this_is_and_why(monkeypatch):
         relaunch_kind="deploy-kill",
         deploy_kills=4,
         real_failures=0,
+    ) is False
+    detail = retry_note(
+        "today's daily is unfinished and this process is not running it",
+        source="boot",
+        start_number=5,
+        relaunch_kind="deploy-kill",
+        deploy_kills=4,
+        real_failures=0,
     )
-    assert captured["recovery"] is True
-    assert "**Start:** 5 today" in captured["detail"]
-    assert "**Why:** deploy-kill." in captured["detail"]
-    assert "unfinished" in captured["detail"]
-    assert "one retry" in captured["detail"]
-    assert "do not use the failure cap" in captured["detail"]
-    assert "deploy-kills 4" in captured["detail"]
-    assert "boot" in captured["detail"]
+    assert "**Start:** 5 today" in detail
+    assert "**Why:** deploy-kill." in detail
+    assert "unfinished" in detail
+    assert "one retry" in detail
+    assert "do not use the failure cap" in detail
+    assert "deploy-kills 4" in detail
+    assert "boot" in detail
 
 
 def test_kill_switch_is_honoured_from_the_env(monkeypatch, wired):

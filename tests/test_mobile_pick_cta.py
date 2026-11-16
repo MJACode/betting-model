@@ -640,7 +640,7 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "signalsStakeLine(signalsRiskUnits, signalsWinUnits)" in card
     assert "formatUnits(stake.risk)" in card and "formatUnits(stake.win)" in card
     assert "signalsContextTime(" in card and "signalsHeroSpeech(" in card
-    assert "signalsNowLine(" in card and "now: signalsNowSpoken" in card
+    assert "signalsNowLine(" in card and "move: signalsMoveSpoken" in card
     assert "ctaAtMovedLine" not in card and "buttonDiffers" not in card
     markets = _read(LIB / "markets.ts")
     assert "if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book)" in markets

@@ -324,6 +324,8 @@ export function signalsCardSpeech(input: {
   /** A graded BET's result, read right after the verdict: on a finished
    *  card it is the point (UX review, 2026-11-15). */
   result?: string | null;
+  /** The line-movement row, read where it sits on screen: after the stake. */
+  move?: string | null;
 }): string {
   const parts = [
     input.verdict,
@@ -337,6 +339,7 @@ export function signalsCardSpeech(input: {
     input.modelChance,
     input.expectedReturn,
     input.stake,
+    input.move,
     input.modelName,
     input.posted,
     input.paused,
@@ -479,11 +482,95 @@ export function nowLineTone(input: {
   return now > locked ? 'better' : 'worse';
 }
 
-/** The words VoiceOver adds after the Now line, so colour is not the only carrier. */
-export function nowLineToneSpeech(tone: NowLineTone | null): string {
-  if (tone === 'better') return 'better than the pick';
-  if (tone === 'worse') return 'worse than the pick';
-  return '';
+
+/**
+ * The ONE line-movement row on a Signals card (Matt, 2026-11-16: "only have
+ * one … and only display it when the line or the price is changing against
+ * what the model picked for that specific sportsbook"). The caller shows it
+ * only when `nowLineTone` reads 'worse' at the deciding book; this builds the
+ * words. The line change leads and the price change sits in parentheses:
+ *
+ *   line and price moved   "DK line 145.5 → 142.5 (−105 → −108)"
+ *   line moved, same price "DK line 145.5 → 142.5 (−105)"
+ *   price moved, same line "DK line 145.5 (−105 → −120)"
+ *   no line (moneyline)    "DK price −105 → −120"
+ *
+ * Every number is already formatted from the pick's side. `nowLine` /
+ * `nowPrice` are null when that part has not moved. Null when nothing moved.
+ */
+export function signalsMoveLine(input: {
+  book: string;
+  lockedLine: string | null;
+  nowLine: string | null;
+  lockedPrice: string | null;
+  nowPrice: string | null;
+}): string | null {
+  const { book, lockedLine, nowLine, lockedPrice, nowPrice } = input;
+  const lineMoved = lockedLine != null && nowLine != null && nowLine !== lockedLine;
+  const priceMoved = lockedPrice != null && nowPrice != null && nowPrice !== lockedPrice;
+  if (!lineMoved && !priceMoved) return null;
+  const who = book ? `${book} ` : '';
+  const price = priceMoved
+    ? `${trueMinus(lockedPrice!)} → ${trueMinus(nowPrice!)}`
+    : lockedPrice != null
+    ? trueMinus(lockedPrice)
+    : null;
+  if (lockedLine == null) return `${who}price ${price}`;
+  const line = lineMoved
+    ? `${trueMinus(lockedLine)} → ${trueMinus(nowLine!)}`
+    : trueMinus(lockedLine);
+  return `${who}line ${line}${price ? ` (${price})` : ''}`;
+}
+
+/**
+ * The Signals move row from the card's numbers: null unless the move is
+ * AGAINST the pick (`nowLineTone` 'worse'). Two sources:
+ *
+ * - `hero`: the deciding book. Line and price are both that book's, so the
+ *   price change can be shown.
+ * - `scored`: an "Old price" card, read at the book the line was scored at
+ *   (Matt, 2026-11-14). That book is NOT the deciding book, so its price
+ *   is never set against the decision price; the row is the line only
+ *   (UX review, 2026-11-16: a book's name must not carry another book's price).
+ *
+ * Lines are HOME-relative numbers (`scored_line`); `fmtLine` prints them from
+ * the pick's side. `fmtPrice` prints an American price.
+ */
+export function signalsMoveRow(input: {
+  market: string | null;
+  side: string;
+  scoredLine: number | null;
+  book: string;
+  source:
+    | { kind: 'hero'; movedLine: number | null; lockedPrice: number | null; nowPrice: number | null }
+    | { kind: 'scored'; line: number | null };
+  fmtLine: (line: number) => string;
+  fmtPrice: (price: number) => string;
+}): string | null {
+  const { market, side, book, source, fmtLine, fmtPrice } = input;
+  // A moneyline has no line to quote, only the price.
+  const scoredLine = market?.startsWith('h2h') ? null : input.scoredLine;
+  const nowLineNum =
+    source.kind === 'hero' ? source.movedLine : source.line;
+  const lineMoved = scoredLine != null && nowLineNum != null && nowLineNum !== scoredLine;
+  const lockedPrice = source.kind === 'hero' ? source.lockedPrice : null;
+  const nowPrice = source.kind === 'hero' ? source.nowPrice : null;
+  const tone = nowLineTone({
+    market,
+    side,
+    lockedLine: scoredLine,
+    nowLine: lineMoved ? nowLineNum : null,
+    lockedPrice,
+    nowPrice,
+  });
+  if (tone !== 'worse') return null;
+  return signalsMoveLine({
+    book,
+    lockedLine: scoredLine == null ? null : fmtLine(scoredLine),
+    nowLine: lineMoved ? fmtLine(nowLineNum!) : null,
+    lockedPrice: lockedPrice == null ? null : fmtPrice(lockedPrice),
+    nowPrice: nowPrice == null || nowPrice === lockedPrice ? null : fmtPrice(nowPrice),
+  });
 }
 
 /**

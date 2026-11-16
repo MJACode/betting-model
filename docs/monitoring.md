@@ -33,7 +33,22 @@ on Team, so nothing syncs by itself. `retool/README.md` says which copy to edit
 and how a change moves each way; `scripts/retool_app_files.py check` says
 whether the two copies hold the same bytes.
 
-Four tabs: **Models**, **Volume**, **Ops**, **Picks & CLV**.
+Five tabs: **Models**, **Volume**, **Ops**, **Database**, **Picks & CLV**
+(Database added 2026-11-15; next section).
+
+**The SignalBase look** (2026-11-15, mike: *"the UX and UI are very poor -
+please modernize (super modern best practice) and brand the design with
+signalbase"*). A navy header carries the amber stepped-S mark and the
+wordmark (`frontend/components/brand/SignalMark.tsx`, drawn from the
+geometry in `scripts/render_brand_icons.py`); the active tab has the banner's
+amber rule. Each tab opens with its own heading, and the layout controls sit
+beside it: a layout picker, **Customize** (was "Arrange") and a menu with
+Save, Save as, Delete, Reset and the hidden tiles. Colour follows the mobile
+app's brand rule: amber is never text or a control on a light surface (1.9:1
+on white), so light-mode controls are ink and amber stays on the navy chrome;
+in dark mode, controls are amber under ink text. **Warnings moved from amber
+to orange** so a status never reads as brand colour. Tokens:
+`frontend/appTheme.css`. Presentation only: no existing backend query changed.
 
 - **Volume** is the one place a person changes what gets posted: one row per
   model with its four bands and a dropdown, writing through
@@ -56,6 +71,72 @@ Four tabs: **Models**, **Volume**, **Ops**, **Picks & CLV**.
   database.
 - **The redesign changed no number.** Every pre-existing backend query was
   kept byte for byte; the work added queries for names and layouts only.
+
+### The Database tab: Supabase's size, growth and load over time (2026-11-15, mike)
+
+mike: *"I want to add a section on database health, size and any other
+metrics you think are cool and change over time. both locals and supabase"*.
+
+**Where the numbers come from.** The worker job `db_health_snapshot`
+(`tracking/db_health.py`, hourly at :50 ET) reads Postgres's own statistics
+and writes four tables
+(`data/migrations/db_health_snapshots_2026_11_15.sql`, applied by
+`view_migrations`). The morning disk window turns away the 05:50 and 06:50
+ticks, and before noon ET so does a daily pipeline that still holds its lock
+(`docs/cloud_worker.md`), so those hours have no row:
+
+| Table | One row per | What it holds |
+|---|---|---|
+| `db_health_snapshots` | run (hourly) | database size split into table data, indexes and toast; Postgres's row estimates; client connections and the limit; the oldest open transaction; transaction-ID age; unused indexes; Storage bytes per bucket; and Postgres's running counters (cache reads, commits, rollbacks, temp files, deadlocks, active and idle-in-transaction time, sessions) exactly as Postgres reports them, plus the `pg_stat_statements` totals |
+| `db_table_snapshots` | table, every six hours | each table's size (table, index, toast), row estimate, dead rows, inserts/updates/deletes, scans, last vacuum and analyze |
+| `db_query_snapshots` | statement, every six hours | the 100 statements with the most total time plus the 25 slowest per call (at least 5 calls), with their running totals |
+| `db_query_texts` | statement | its normalised text, once (constants appear as `$1`) |
+
+Rows are only ever added (CLAUDE.md §1b). Neither the app nor its users can
+read these tables: RLS is on with no policy, and `anon` / `authenticated`
+are revoked. The dashboard reads them as the database owner.
+
+**How to read a rate.** Postgres's counters run from their last reset
+(`pg_stat_database` from 2026-03-30, `pg_stat_statements` from 2026-04-04),
+so a lifetime ratio barely moves. The tab shows the change between two
+snapshots instead: cache hit rate, **load** (`pg_stat_database.active_time`
+per second of wall time, i.e. how many statements were running at once on
+average), **idle in a transaction** (the same for
+`idle_in_transaction_time`: sessions holding a transaction open while doing
+nothing), commits and rollbacks per second, and temp-file bytes per hour. A
+counter that went down was reset in between, and that gap is left blank
+rather than drawn as a negative rate. Row counts are `n_live_tup` estimates,
+never `count(*)`.
+
+**The `pg_stat_statements` total is not a running counter.** Postgres keeps
+at most 5,000 statements and drops the least-used when the list is full,
+taking their time out of the sum: between the first two snapshots
+(2026-11-16 03:41 and 04:19 UTC) the sum fell while `dealloc` went from 436
+to 437, with no reset. So load is read from `pg_stat_database`, and a
+statement's own "last 24 h" is shown only when its total did not go down.
+
+**Idle in a transaction is large.** Since the 2026-03-30 reset Postgres has
+counted 9,459,708,927 ms idle in a transaction against 2,568,771,649 ms
+active (3.7 to 1), read 2026-11-16 04:2x UTC from `pg_stat_database`. An
+open transaction holds its locks, so the tab now tracks it.
+
+**What the tiles show.** At a glance (ten cards), Size over time (stacked
+table/index/toast, 7/30/90 days; older than 14 days one point per six
+hours), Activity (load, cache hits, commits, temp files, connections),
+Largest tables (size, where the space is, rows, growth a day against the
+snapshot a day earlier, dead rows, last vacuum) and Heaviest statements
+(share of all statement time, total, last 24 hours, calls, time per call;
+click a row for its full text).
+
+**First snapshot**, taken by hand 2026-11-16 03:41:53 UTC (snapshot 1):
+109,078,711,443 bytes (pg_size_pretty: 102 GB), 316 tables, 117 statements
+stored, 1,352 ms of reads. History starts there; growth appears once the
+snapshots span an hour.
+
+**Layouts on this tab are not saved.** The layout functions accept four tab
+names and `dashboard_layouts` checks the same four; adding a fifth changes
+two functions that write (approval at publish) and the table's check. The
+tab can still be arranged for the visit.
 
 ### The official live date is 2026-09-01, and the app now mirrors Retool
 
