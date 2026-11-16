@@ -118,7 +118,41 @@ SKIP_BUDGET_DAYS: dict = {
     "mlb_bullpen_workload": 190,
     "mlb_player_game_log": 190,
     "umpires": 190,
+    # The same winter. These six were still on the 14-day default, so a shut
+    # gate paged for one day, the STALE row reset the streak, and it paged
+    # again a fortnight later for the rest of the offseason. 190 matches the
+    # feeds above. A game inside the next 14 days still escalates (see
+    # _apply_skip_budgets): that is a shut gate during a season, not winter.
+    "mlb_team_stats": 190,
+    "mlb_weather": 190,
+    "mlb_pitcher_stats": 190,
+    "lineups": 190,
+    "player_prop_odds": 190,
+    "public_betting": 190,
 }
+
+# MLB checks whose skip is "no games" rather than a dead feed. Escalating
+# them with no MLB game on the schedule is the offseason false page.
+MLB_OFFSEASON_CHECKS = frozenset({
+    "mlb_bullpen_workload", "mlb_player_game_log", "umpires",
+    "mlb_team_stats", "mlb_weather", "mlb_pitcher_stats",
+    "lineups", "player_prop_odds", "public_betting",
+})
+
+# Odds API credit page. Percent-of-plan (the old 15% line) stays STALE for
+# the rest of a 15M month once burn is normal. Page when the feed is actually
+# close to stopping: under 5 days at the recent burn, or under 50,000 left.
+CREDIT_PAGE_REMAINING = 50_000
+CREDIT_PAGE_RUNWAY_DAYS = 5
+
+# Finals. UFC rows with no score are other promotions and are not an outage.
+# Worker-owned sports page on the existing "two or more, older than a day"
+# bar. College and NBA page once a final is still missing after 36 hours.
+FINALS_PAGE_SPORTS = frozenset({"MLB", "NHL", "WNBA"})
+FINALS_DELAY_SPORTS = frozenset({"NBA", "NCAAB", "NCAABW", "NCAAF"})
+FINALS_IGNORE_SPORTS = frozenset({"UFC", "GOLF"})
+FINALS_PAGE_AFTER = timedelta(hours=36)
+FINALS_CRIT_MIN_GAMES = 2
 
 # Everything else: a fortnight. Long enough for a normal off-week in any sport
 # that plays weekly, short enough that a stuck gate surfaces inside a month.
@@ -210,11 +244,150 @@ def _skip_run_days(conn, run_date: str) -> dict:
     return out
 
 
-def _apply_skip_budgets(results: list, run_days: dict) -> None:
+def _final_missing_age(game_date, commence, now: datetime) -> timedelta | None:
+    """How long this unscored game has been waiting.
+
+    commence_time when it parses. Otherwise the start of game_date, which
+    makes a date-only row look younger than it is and fails toward the digest
+    rather than a page.
+    """
+    ts = _parse_ts(commence)
+    if ts is None:
+        try:
+            ts = datetime.strptime(str(game_date)[:10], "%Y-%m-%d").replace(
+                tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            return None
+    return now - ts
+
+
+def classify_missing_finals(rows, now: datetime) -> tuple[str, str, str]:
+    """(status, severity, detail) for games that still have no score.
+
+    `rows` are (sport, game_date, commence_time). UFC is omitted. Two or more
+    games older than 36 hours, in the worker-owned sports or in NBA/college,
+    is a dead ingest and pages. One game is a postponement and stays a digest
+    line: a cancelled college game and one NBA final the local ingest has not
+    written yet are the same shape. Anything younger than 36 hours is a
+    digest line. No rows, or only UFC, is OK.
+    """
+    page: list[str] = []
+    digest: list[str] = []
+    worker_old = 0
+    delay_old = 0
+    ufc = 0
+    # Group so the detail stays one line per sport-date, matching the old report.
+    buckets: dict[tuple, list] = {}
+    for sport, game_date, commence in rows or []:
+        sport = str(sport or "")
+        if sport in FINALS_IGNORE_SPORTS:
+            ufc += 1
+            continue
+        age = _final_missing_age(game_date, commence, now)
+        old = age is not None and age >= FINALS_PAGE_AFTER
+        buckets.setdefault((sport, str(game_date)[:10], old), []).append(1)
+        if sport in FINALS_PAGE_SPORTS and old:
+            worker_old += 1
+        elif sport in FINALS_DELAY_SPORTS and old:
+            delay_old += 1
+    worker_pages = worker_old >= FINALS_CRIT_MIN_GAMES
+    delay_pages = delay_old >= FINALS_CRIT_MIN_GAMES
+    for (sport, game_date, old), games in sorted(buckets.items()):
+        line = f"{sport} {game_date}: {len(games)} game(s) missing final score"
+        if sport in FINALS_DELAY_SPORTS and old and delay_pages:
+            page.append(line)
+        elif sport in FINALS_PAGE_SPORTS and old and worker_pages:
+            page.append(line)
+        else:
+            digest.append(line)
+    if not page and not digest:
+        note = f"all finals present"
+        if ufc:
+            note += f" ({ufc} UFC row(s) without a final are not an outage)"
+        return OK, "CRIT", note
+    if page:
+        detail = "; ".join(page + digest)
+        return (STALE, "CRIT",
+                detail + " — missing final past 36 hours")
+    return (STALE, "WARN",
+            "; ".join(digest) + " — still inside 36 hours, or a single postponement")
+
+
+def completed_day_burn(prev_used, prev_prev_used) -> float | None:
+    """Credits used on the last finished quota day.
+
+    Today's counter minus yesterday's is only the burn so far today. At the
+    6am check that is a few hours, and the runway looks about four times too
+    long. The last complete day is yesterday's counter minus the day before,
+    when the counter did not reset between them.
+    """
+    if prev_used is None or prev_prev_used is None:
+        return None
+    try:
+        prev_used = float(prev_used)
+        prev_prev_used = float(prev_prev_used)
+    except (TypeError, ValueError):
+        return None
+    if prev_prev_used > prev_used:
+        return None
+    burn = prev_used - prev_prev_used
+    return burn if burn > 0 else None
+
+
+def credit_should_page(remaining: float, daily_burn: float | None) -> bool:
+    """True when the odds feed is close to stopping.
+
+    `daily_burn` is one finished day's credit use (`completed_day_burn`).
+    None or a non-positive burn means runway is unknown, so only the
+    absolute floor pages.
+    """
+    if remaining < CREDIT_PAGE_REMAINING:
+        return True
+    if daily_burn is not None and daily_burn > 0:
+        return (remaining / daily_burn) < CREDIT_PAGE_RUNWAY_DAYS
+    return False
+
+
+def _mlb_games_soon(conn, run_date: str) -> set | None:
+    """MLB offseason check names with a game today or in the past 14 days.
+
+    A future Opening Day listing is not enough. Counting the next 14 days
+    turned every winter skip STALE for the two weeks before the first game,
+    while the gate ("no games today") was still telling the truth. A game
+    already on the calendar through today means the season has started and
+    a long skip is a stuck gate. None: the read failed, and the caller
+    falls back to the budget alone rather than inventing a season.
+    """
+    try:
+        start = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=14)).strftime(
+            "%Y-%m-%d")
+        n = _scalar(
+            conn,
+            """SELECT COUNT(*) FROM games
+               WHERE sport = 'MLB' AND game_date >= ? AND game_date <= ?""",
+            (start, run_date),
+        ) or 0
+    except Exception:                                       # noqa: BLE001
+        getattr(conn, "rollback", lambda: None)()
+        return None
+    if n:
+        return set(MLB_OFFSEASON_CHECKS)
+    return set()
+
+
+def _apply_skip_budgets(results: list, run_days: dict,
+                        games_soon: set | None = None) -> None:
     """Annotate every SKIPPED result with its streak, and escalate a stuck gate.
 
     Mutates `results` in place. Idempotent -- a result already carrying its
     streak is left alone, so this is safe to call before more than one persist.
+
+    `games_soon` is the set of check names whose sport has a game today or
+    in the past 14 days. MLB checks in that set escalate after the short
+    default budget (a shut gate during a season). MLB checks left out of it
+    stay SKIPPED for the whole offseason, including past the 190-day winter
+    budget and including the fortnight before Opening Day. None keeps the
+    budget-only rule (a failed schedule read, and the unit tests).
     """
     for res in results:
         if res["status"] != SKIPPED or res.get("skip_days") is not None:
@@ -223,18 +396,25 @@ def _apply_skip_budgets(results: list, run_days: dict) -> None:
         if not days:
             continue
         res["skip_days"] = days
-        budget = SKIP_BUDGET_DAYS.get(res["check_name"], DEFAULT_SKIP_BUDGET_DAYS)
-        if days > budget:
-            res["status"] = STALE
-            # NOT "data behind": nothing was read, so the data is not the
-            # subject. The gate is.
-            res["reason"] = f"Never runs ({days}d)"
-            res["detail"] = (
-                f"gate shut {days} days running, past this check's {budget}-day "
-                f"budget -- suspect the GATE, not the feed. Gate said: "
-                f"{res['detail']}")
-        else:
+        name = res["check_name"]
+        budget = SKIP_BUDGET_DAYS.get(name, DEFAULT_SKIP_BUDGET_DAYS)
+        in_season = (games_soon is not None and name in MLB_OFFSEASON_CHECKS
+                     and name in games_soon and days > DEFAULT_SKIP_BUDGET_DAYS)
+        offseason = (games_soon is not None and name in MLB_OFFSEASON_CHECKS
+                     and name not in games_soon)
+        if offseason or (days <= budget and not in_season):
             res["detail"] = f"{res['detail']} (skipped {days} days running)"
+            continue
+        res["status"] = STALE
+        # NOT "data behind": nothing was read, so the data is not the
+        # subject. The gate is.
+        res["reason"] = f"Never runs ({days}d)"
+        why = (f"a game was played in the past 14 days and the gate has been "
+               f"shut {days} days" if in_season and days <= budget else
+               f"gate shut {days} days running, past this check's {budget}-day budget")
+        res["detail"] = (
+            f"{why} -- suspect the GATE, not the feed. Gate said: "
+            f"{res['detail']}")
 
 
 
@@ -1474,18 +1654,21 @@ def run_system_health(run_date: str | None = None) -> dict:
         # ── Odds API credit quota (odds_api_quota, written by odds_quota.py) ─
         # Early warning BEFORE credits run out — on 2026-08-14 the quota hit
         # zero with no notice and the odds feed (and with it all MLB/WNBA games
-        # + picks) was dead for 2.5 days. WARN, never CRIT: when credits
-        # actually hit zero, odds_dk_lines CRITs on the real impact.
+        # + picks) was dead for 2.5 days. CRIT only when runway is under
+        # CREDIT_PAGE_RUNWAY_DAYS or remaining is under CREDIT_PAGE_REMAINING.
+        # A percent-of-plan line pages for the rest of a large month. When
+        # credits actually hit zero, odds_dk_lines CRITs on the real impact.
         try:
-            qrow = conn.execute("""
+            qrows = conn.execute("""
                 SELECT quota_date, requests_used, requests_remaining, observed_at
-                FROM odds_api_quota ORDER BY quota_date DESC LIMIT 1
-            """).fetchone()
+                FROM odds_api_quota ORDER BY quota_date DESC LIMIT 3
+            """).fetchall()
+            qrow = qrows[0] if qrows else None
             if qrow is None:
                 r.add("odds_api_credits", SKIPPED, "WARN",
                       "no quota telemetry yet (populates on the next odds fetch)")
             else:
-                q_date, q_used, q_rem, q_obs = qrow
+                _q_date, q_used, q_rem, q_obs = qrow
                 q_obs_ts = _parse_ts(q_obs)
                 obs_age_h = (None if q_obs_ts is None else
                              (datetime.now(timezone.utc) - q_obs_ts).total_seconds() / 3600)
@@ -1500,23 +1683,23 @@ def run_system_health(run_date: str | None = None) -> dict:
                     q_rem, q_used = float(q_rem), float(q_used or 0)
                     total = q_used + q_rem
                     pct = (q_rem / total * 100) if total > 0 else 0.0
-                    # Yesterday's burn, when comparable (same billing period)
-                    prev = conn.execute("""
-                        SELECT requests_used FROM odds_api_quota
-                        WHERE quota_date < ? ORDER BY quota_date DESC LIMIT 1
-                    """, (q_date,)).fetchone()
+                    # Last finished day, not today's counter minus yesterday.
+                    # At 6am today's delta is a few hours and the runway
+                    # reads about four times too long.
+                    prev_used = qrows[1][1] if len(qrows) > 1 else None
+                    prev_prev_used = qrows[2][1] if len(qrows) > 2 else None
+                    daily = completed_day_burn(prev_used, prev_prev_used)
                     burn = ""
-                    if prev and prev[0] is not None and float(prev[0]) <= q_used:
-                        daily = q_used - float(prev[0])
-                        burn = f"; burning ~{daily:,.0f}/day"
-                        if daily > 0:
-                            burn += f" (~{q_rem / daily:.1f} days left at this rate)"
+                    if daily:
+                        burn = (f"; burning ~{daily:,.0f}/day "
+                                f"(~{q_rem / daily:.1f} days left at this rate)")
                     detail = (f"{q_rem:,.0f} of {total:,.0f} credits remaining "
                               f"({pct:.1f}%){burn}")
-                    if q_rem < 1000 or pct < 15:
-                        r.add("odds_api_credits", STALE, "WARN",
-                              detail + " — top up / raise the plan or cut refresh "
-                              "cadence before the feed dies (2026-08-14 incident)", q_obs)
+                    if credit_should_page(q_rem, daily):
+                        r.add("odds_api_credits", STALE, "CRIT",
+                              detail + " — under "
+                              f"{CREDIT_PAGE_RUNWAY_DAYS} days of runway or under "
+                              f"{CREDIT_PAGE_REMAINING:,.0f} credits remaining", q_obs)
                     else:
                         r.add("odds_api_credits", OK, "WARN", detail, q_obs)
         except Exception as exc:
@@ -1532,7 +1715,12 @@ def run_system_health(run_date: str | None = None) -> dict:
         try:
             from tracking.nba_live_health import check as _nba_live_check
             _st, _det = _nba_live_check(conn, yday)
-            r.add("nba_live_outputs", {"ok": OK, "stale": STALE, "skipped": SKIPPED}[_st], "WARN", _det)
+            # A missed fetch window is the loop not buying the lines. One
+            # final with no decision row, and a fetch that did happen, is a
+            # morning note. WARN does not page.
+            _live_sev = "CRIT" if _st == "stale" and "no Odds API call" in _det else "WARN"
+            r.add("nba_live_outputs", {"ok": OK, "stale": STALE, "skipped": SKIPPED}[_st],
+                  _live_sev, _det)
         except Exception as exc:
             getattr(conn, "rollback", lambda: None)()
             r.add("nba_live_outputs", ERROR, "WARN", f"query failed: {type(exc).__name__}: {exc}")
@@ -1656,49 +1844,18 @@ def run_system_health(run_date: str | None = None) -> dict:
             r.add("savant_player_types", SKIPPED, "WARN", str(exc)[:120])
 
         # ── Final scores landing (all sports; catches dead local ingest jobs) ─
-        # GOLF excluded: tournament rows keep NULL scores by design.
+        # GOLF is excluded in the query and again in classify_missing_finals.
+        # UFC is ignored there: non-UFC promotions on the MMA feed keep NULL
+        # scores forever and are not an outage.
         rows = conn.execute("""
-            SELECT sport, game_date, COUNT(*) FROM games
+            SELECT sport, game_date, commence_time FROM games
             WHERE game_date >= ? AND game_date <= ?
               AND sport <> 'GOLF' AND home_score IS NULL
-            GROUP BY sport, game_date ORDER BY sport, game_date
+            ORDER BY sport, game_date
         """, (d3, yday)).fetchall()
-        missing_old = [(s, gd, n) for s, gd, n in rows if str(gd) < yday]
-        # Only MLB/NHL missing-finals are CRIT — those are the sports GitHub Actions
-        # itself controls (statsapi / NHL API both reachable from the runner), so a
-        # gap there is a genuine Actions/pipeline failure worth reddening the run.
-        #
-        # UFC and NBA are excluded from the CRIT tally (WARN only):
-        #   • UFC — The Odds API's mma_mixed_martial_arts feed also lists non-UFC
-        #     promotions (Cage Warriors / PFL / regional cards); those games rows keep
-        #     NULL scores forever (the ufcstats mirror only covers UFC) — a structural
-        #     false positive, and the scorer's min-history gate keeps them pick-less.
-        #   • NBA — final scores + box scores still come only from nba_api
-        #     (stats.nba.com), which blocks datacenter IPs, so they land via the LOCAL
-        #     residential-IP "Basketball Daily Ingest" job. When that job falls behind,
-        #     the worker cannot fix it — reddening the run would wrongly imply the
-        #     pipeline broke. The nba_game_log WARN check surfaces that lag.
-        #
-        # WNBA *is* CRIT (2026-08-07): since session 97 its finals come from the
-        # worker-controlled ESPN step (step_wnba_results), so a WNBA gap IS a
-        # pipeline failure — this is the follow-up the box-score block below asked
-        # for. It was promoted after site.api.espn.com started refusing the worker
-        # on 2026-08-05 and three days of WNBA finals silently went missing behind a
-        # green run (the step logs "✗ WNBA results failed" but returns False, and a
-        # WARN never reddens anything). The local nba_api job remains a redundant
-        # writer, so a CRIT here means BOTH paths are down — which is exactly when
-        # someone needs to know.
-        CRIT_FINALS_SPORTS = {"MLB", "NHL", "WNBA"}
-        missing_old_crit = [(s, gd, n) for s, gd, n in missing_old if s in CRIT_FINALS_SPORTS]
-        if not rows:
-            r.add("final_scores", OK, "CRIT", f"all finals present {d3}..{yday}")
-        else:
-            detail = "; ".join(f"{s} {gd}: {n} game(s) missing final score" for s, gd, n in rows)
-            # ≥2 MLB/NHL games older than yesterday = a dead ingest job, not a postponement
-            if sum(n for _, _, n in missing_old_crit) >= 2:
-                r.add("final_scores", STALE, "CRIT", detail + " — MLB/NHL/WNBA ingest job likely dead (check results steps)")
-            else:
-                r.add("final_scores", STALE, "WARN", detail + " — UFC/NBA local ingest or postponement (non-CRIT)")
+        status, severity, detail = classify_missing_finals(
+            rows, datetime.now(timezone.utc))
+        r.add("final_scores", status, severity, detail)
 
         # ── Basketball box-score logs ────────────────────────────────────────
         # WNBA: fed by BOTH the worker's ESPN results step (step_wnba_results,
@@ -2701,7 +2858,8 @@ def run_system_health(run_date: str | None = None) -> dict:
         # then dropped: zero rows in system_health_checks, ever, while the one
         # thing that reads the table -- Claude mobile, the ops dashboard -- was
         # told nothing. A check whose result is never stored is not a check.
-        _apply_skip_budgets(r.results, _skip_run_days(conn, run_date))
+        _apply_skip_budgets(r.results, _skip_run_days(conn, run_date),
+                            _mlb_games_soon(conn, run_date))
         _ensure_reason_columns(conn)
         checked_at = datetime.now(timezone.utc).isoformat()
         for res in r.results:

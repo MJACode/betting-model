@@ -113,3 +113,22 @@ def test_the_scoreboard_behavioural_checks_pass():
         timeout=120,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_the_game_screen_shows_only_the_sports_markets():
+    # Review L4 (2026-11-15): a UFC game screen drew an empty Spread block.
+    src = (MOBILE / "src" / "screens" / "ScoreboardGameScreen.tsx").read_text(encoding="utf-8")
+    assert "scoreboardMarketsFor(sport)" in src
+    # Both the fetch and the render go through it: no bare MARKETS loop left.
+    assert "MARKETS.map(" not in src
+    assert src.count("marketsFor(") >= 3
+
+
+def test_live_scores_are_read_in_parallel_chunks():
+    # Review L3 (2026-11-15): 300+ started college games were read in
+    # chunks one after another.
+    src = (MOBILE / "src" / "lib" / "queries.ts").read_text(encoding="utf-8")
+    body = src[src.index("export async function fetchLiveScoreboard"):]
+    body = body[:body.index("\n}\n")]
+    assert "Promise.all(" in body
+    assert "for (let i = 0; i < gameIds.length; i += size) {\n    const chunk" not in body

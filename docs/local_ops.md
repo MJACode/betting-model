@@ -417,6 +417,47 @@ schtasks /Delete /TN "BettingModel\LocalMirror" /F
 A run started while another is still going exits at once: one run holds a
 lock file in `supabase_mirror\`, and Windows releases it if the run dies.
 
+### SQL over the copy: `betting.duckdb` (mike, 2026-11-15)
+
+*"Yes, set it up."* `C:\Users\micha\Documents\betting_local_copies\betting.duckdb`
+is a DuckDB file of **views** over the copy's Parquet files. It holds no rows,
+so it is a few MB and rebuilds in about a minute. Each view reads exactly the
+files its table's `manifest.json` lists. The nightly run rebuilds it once the
+Supabase copy ends (`scripts/local_mirror_duckdb.py`, `logs\duckdb_*.log`).
+
+```bat
+:: Rebuild by hand, then read every row of every view and compare counts:
+python -I C:\Users\micha\Documents\betting_local_copies\bin\local_mirror_duckdb.py build
+
+:: One query:
+python -I C:\Users\micha\Documents\betting_local_copies\bin\local_mirror_duckdb.py sql "select bookmaker, count(*) from player_prop_odds group by 1"
+```
+
+In Python: `duckdb.connect(r"C:\Users\micha\Documents\betting_local_copies\betting.duckdb", read_only=True).sql("...").df()`.
+The DuckDB CLI (`winget install DuckDB.cli`, 1.5.6 on 2026-11-15) opens the
+same file. The Python package is pinned to the same 1.5 line
+(`requirements-test.txt`).
+
+- **Names.** `public` tables keep their names (`odds`, `player_prop_odds`,
+  `picks`). Rows the copy kept after they left Supabase are in
+  `<table>__vanished` (capper_picks has one). `mirror_tables` lists every
+  table with its manifest row count, the view's row count, its file count and
+  when it was last copied.
+- **Types.** The copy stores `numeric`, `jsonb` and `uuid` as text. The views
+  read them back as DOUBLE, JSON and UUID. A column with a value that will not
+  convert stays text and is named in `mirror_tables.text_columns`. It is never
+  turned into NULL. Columns that are text in Supabase stay text: `odds.snapshot_at`
+  and `games.commence_time` are compared as `::timestamptz` here as there.
+  Arrays stay as Postgres text (`{a,b}`).
+- **Left out:** Supabase's own schemas (auth, storage, realtime, vault). Add
+  them with `--schemas public,auth`.
+- **During a nightly copy** a view can name a file the copy has just replaced,
+  and the query fails with a missing-file error until the next build.
+- Measured 2026-11-15:
+  - 269 tables and 257,971,016 rows read through the views in 26-68 s, every
+    count equal to its manifest;
+  - a group-by over all 83.9M prop rows in about 5 s.
+
 ---
 
 ## First-time setup (moved from CLAUDE.md §7, 2026-08-30)

@@ -258,7 +258,7 @@ def test_a_final_failure_is_announced():
         q.JOBS.pop("_test_boom2")
 
 
-def test_a_success_is_announced_too():
+def test_a_success_is_not_an_ops_page():
     posted = []
     q.JOBS["_test_ok"] = (lambda **kw: {"ran": True}, lambda a: {})
     original = q._announce
@@ -266,7 +266,7 @@ def test_a_success_is_announced_too():
     try:
         out = q.run_one(_Conn(pending=[(2, "_test_ok", {}, 1)]))
         assert out["status"] == "done"
-        assert posted and posted[0][1] is True
+        assert posted == []
     finally:
         q._announce = original
         q.JOBS.pop("_test_ok")

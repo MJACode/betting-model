@@ -64,6 +64,7 @@ import {
   subscriptionNotice,
   type ReauthMethod,
 } from '@/lib/deleteAccountHelpers';
+import { StackBackButton } from '@/components/StackBackButton';
 import { fallbackManagementUrl } from '@/lib/iapHelpers';
 import { colors, font, radii, spacing, sectionHeaderText, opacity } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -122,7 +123,9 @@ export function DeleteAccountScreen() {
     navigation.setOptions({
       title: onLocalScreen ? 'Clear this phone' : 'Delete account',
       headerShown: phase !== 'done',
-      headerBackVisible: !locked,
+      // The navigator's React Back pill, removed while a delete is running.
+      // headerBackVisible would add UIKit's Back beside it, so it stays false.
+      headerLeft: locked ? () => null : () => <StackBackButton />,
       gestureEnabled: !locked,
     });
   }, [navigation, phase, locked, onLocalScreen]);

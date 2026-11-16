@@ -120,10 +120,17 @@ class DailyRun:
     failed_steps: str | None = None
 
 
+# Why a skip will not start another daily. retry_cap_exhausted reads this,
+# not the sentence, so a reworded reason cannot drop the page.
+CAP_REAL_FAILURE = "real-failure-cap"
+CAP_DEPLOY_KILL = "deploy-kill-cap"
+
+
 @dataclass(frozen=True)
 class Decision:
     action: str  # "run" | "skip"
     reason: str
+    kind: str = ""
 
 
 def _enabled() -> bool:
@@ -300,6 +307,7 @@ def decide_daily_retry(
             f"already finished {real_failures} dailies today that failed "
             f"before MLB freshness for a reason other than aborted "
             f"(one retry; not starting another)",
+            CAP_REAL_FAILURE,
         )
 
     if deploy_kills >= MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY:
@@ -308,6 +316,7 @@ def decide_daily_retry(
             f"already deploy-killed {deploy_kills} dailies today "
             f"(bound {MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY}; a restart loop "
             f"is not started again)",
+            CAP_DEPLOY_KILL,
         )
 
     cutoff = now_et.replace(
@@ -396,7 +405,63 @@ def load_today_dailies(conn, now: datetime) -> list[DailyRun] | None:
     return out
 
 
-def announce_daily_retry(
+def retry_cap_exhausted(decision) -> bool:
+    """True when today's daily will not start again because a cap is spent."""
+    if getattr(decision, "action", None) != "skip":
+        return False
+    return getattr(decision, "kind", "") in {CAP_REAL_FAILURE, CAP_DEPLOY_KILL}
+
+
+def announce_daily_cap(conn, decision, now: datetime) -> bool:
+    """One page per ET day when the catch-up has stopped for the day.
+
+    A deploy-kill that is still going to retry does not come through here.
+    The ledger is push_sent, same as the other ops notes, and only after a
+    confirmed post.
+    """
+    from tracking.watch_util import post_ops_alert
+
+    day = now.astimezone(ET).date().isoformat() if now.tzinfo else now.date().isoformat()
+    kind = "daily_retry_cap"
+    lock = f"{kind}:{day}"
+    try:
+        if conn.execute(
+            "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
+            (lock, kind),
+        ).fetchone():
+            return False
+    except Exception:  # noqa: BLE001
+        logger.warning("daily_retry: could not read the cap ledger")
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+    if not post_ops_alert(
+        "Daily pipeline will not run again today",
+        f"{decision.reason}\n\n"
+        "The 6:00am ET daily is the only writer of `mlb_bullpen_workload` "
+        "and `mlb_team_stats`.",
+        recovery=False,
+    ):
+        return False
+    try:
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at) "
+            "VALUES (%s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock, kind, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("daily_retry: cap page landed but was not ledgered")
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+    return True
+
+
+def retry_note(
     reason: str,
     *,
     source: str,
@@ -404,23 +469,19 @@ def announce_daily_retry(
     relaunch_kind: str = "unspecified",
     deploy_kills: int | None = None,
     real_failures: int | None = None,
-) -> bool:
-    """Ops-channel note. Failure to post must not block the retry itself.
+) -> str:
+    """The text of a starting retry. Logged, not posted.
 
-    ``start_number`` is which ledgered start this attempt will be (1-based).
-    ``relaunch_kind`` is why: ``deploy-kill``, ``real-failure``, ``missing``,
-    or ``manual``. Deploy-kills are named so a busy merge morning is not
-    read as the one-retry failure cap.
+    A deploy-kill retry is expected on a merge morning. The page is
+    `announce_daily_cap`, and only when the catch-up has stopped for the day.
     """
-    from tracking.watch_util import post_ops_alert
-
     if start_number is None:
         start_line = "**Start:** not recorded"
     else:
         start_line = f"**Start:** {start_number} today"
     kills = "?" if deploy_kills is None else str(deploy_kills)
     fails = "?" if real_failures is None else str(real_failures)
-    detail = (
+    return (
         f"**Source:** `{source}`\n"
         f"{start_line}\n"
         f"**Why:** {relaunch_kind}. {reason}\n"
@@ -444,15 +505,28 @@ def announce_daily_retry(
         "was skipped. Deploy-kills do not consume the one-retry cap. The "
         "in-process lock stops a second daily in this process."
     )
-    try:
-        return post_ops_alert(
-            "Same-day daily pipeline retry",
-            detail,
-            recovery=True,
-        )
-    except Exception:  # noqa: BLE001 — the retry is the point; the note is not
-        logger.exception("daily_retry: ops note failed (retry continues)")
-        return False
+
+
+def announce_daily_retry(
+    reason: str,
+    *,
+    source: str,
+    start_number: int | None = None,
+    relaunch_kind: str = "unspecified",
+    deploy_kills: int | None = None,
+    real_failures: int | None = None,
+) -> bool:
+    """Log a starting retry. Does not post. The digest counts deploy-kills.
+
+    Returns False so a caller cannot mistake a log line for a confirmed post.
+    """
+    detail = retry_note(
+        reason, source=source, start_number=start_number,
+        relaunch_kind=relaunch_kind, deploy_kills=deploy_kills,
+        real_failures=real_failures,
+    )
+    logger.info(f"daily_retry: {relaunch_kind} start (not posted)\n{detail}")
+    return False
 
 
 def _minutes(delta: timedelta) -> int:
