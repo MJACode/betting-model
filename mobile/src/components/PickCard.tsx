@@ -75,8 +75,7 @@ import {
   signalsHeroSpeech,
   signalsModelCaption,
   signalsNowLine,
-  nowLineTone,
-  signalsMoveLine,
+  signalsMoveRow,
   signalsReasonLine,
   signalsStakeLine,
   signalsStakeSpeech,
@@ -513,62 +512,37 @@ export function PickCard({
         book: bookLabel(quoteBookKey),
       })
     : null;
-  // Is the number on the board now better or worse for a new bettor than the
-  // pick's (Matt, 2026-11-15)? The line decides; the price only when the line
-  // is unchanged. Only 'worse' is shown (the one move row below, 2026-11-16).
-  const signalsNowTone = !signalsNow
-    ? null
-    : staleLineMove
-    ? nowLineTone({
-        market: signalsMarket,
-        side: pick.pick_side,
-        lockedLine: numOrNull(pick.scored_line),
-        nowLine: staleLineMove.line,
-        lockedPrice: decisionPrice,
-        nowPrice: staleLineMove.price,
-      })
-    : nowLineTone({
-        market: signalsMarket,
-        side: pick.pick_side,
-        lockedLine: numOrNull(pick.scored_line),
-        nowLine: heroPrice?.movedLine ?? null,
-        lockedPrice: heroPrice?.lockedPrice ?? null,
-        nowPrice: priceDiffers ? (heroPrice?.price ?? null) : null,
-      });
   // ONE line-movement row on Signals (Matt, 2026-11-16): the line change
   // with the price change in parentheses, shown ONLY when the deciding book
   // (or, on an "Old price" card, the book the line was scored at) has moved
   // AGAINST the pick. A move in the bettor's favour shows nothing. It replaces
   // both the old "DK line now …" line under the hero and the movement chip.
-  const moveFor = (book: string): string | null => {
-    if (signalsNowTone !== 'worse') return null;
-    // A moneyline has no line to quote, only the price.
-    const lockedLineNum = signalsMarket?.startsWith('h2h') ? null : numOrNull(pick.scored_line);
-    const lockedLine = lockedLineNum == null ? null : formatSideLine(lockedLineNum, pick.pick_side, signalsMarket);
-    if (staleLineMove) {
-      const nowLineNum = staleLineMove.line;
-      return signalsMoveLine({
-        book,
-        lockedLine,
-        nowLine: nowLineNum != null && nowLineNum !== lockedLineNum
-          ? formatSideLine(nowLineNum, pick.pick_side, signalsMarket)
-          : null,
-        lockedPrice: decisionPrice == null ? null : formatAmerican(decisionPrice),
-        nowPrice: staleLineMove.price == null ? null : formatAmerican(staleLineMove.price),
-      });
-    }
-    return signalsMoveLine({
-      book,
-      lockedLine,
-      nowLine: signalsMovedLineText,
-      lockedPrice: lockedAmerican,
-      nowPrice: priceDiffers ? nowPrice : null,
-    });
-  };
+  // Pre-game only for a pre-game pick: once it starts, CLV takes over (as the
+  // old movement chip did). A live pick keeps the row.
+  const moveFor = (book: string): string | null =>
+    !signals || !(pregame || pick.is_live === true)
+      ? null
+      : signalsMoveRow({
+          market: signalsMarket,
+          side: pick.pick_side,
+          scoredLine: numOrNull(pick.scored_line),
+          book,
+          source: staleLineMove
+            ? { kind: 'scored', line: staleLineMove.line }
+            : {
+                kind: 'hero',
+                movedLine: heroPrice?.movedLine ?? null,
+                lockedPrice: heroPrice?.lockedPrice ?? null,
+                nowPrice: nowPrice == null ? null : (heroPrice?.price ?? null),
+              },
+          fmtLine: (l) => formatSideLine(l, pick.pick_side, signalsMarket),
+          fmtPrice: (p) => formatAmerican(p),
+        });
   const moveBook = staleLineMove?.book ?? quoteBookKey;
-  const signalsMove = signals && moveBook ? moveFor(bookLabel(moveBook)) : null;
-  const signalsMoveSpokenRaw = signals && moveBook && signalsMove ? moveFor(bookName(moveBook)) : null;
-  const signalsNowSpoken = signalsMoveSpokenRaw
+  const signalsMove = moveBook ? moveFor(bookLabel(moveBook)) : null;
+  const signalsMoveSpokenRaw = moveBook && signalsMove ? moveFor(bookName(moveBook)) : null;
+  // Read where the row sits on screen, after the stake (UX review).
+  const signalsMoveSpoken = signalsMoveSpokenRaw
     ? `${signalsMoveSpokenRaw.replace(/→/g, 'to')}, moved against this pick`
     : null;
   // Two-tier extras: show at most TWO chips besides injury / preview / contra.
@@ -651,10 +625,10 @@ export function PickCard({
       ? signalsHeroSpeech({
           decisionPrice: lockedAmerican,
           book: bookName(quoteBookKey),
-          now: signalsNowSpoken,
+          now: null,
         })
       : (heroPrice
-        ? [heroPriceSpeech(heroPrice, cta.priceTag), signalsNowSpoken].filter(Boolean).join('. ')
+        ? heroPriceSpeech(heroPrice, cta.priceTag)
         : null);
   const signalsStakeSpoken = signalsStakeShown
     ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}${stakeReason ? `. ${stakeReason}` : ''}`
@@ -693,6 +667,7 @@ export function PickCard({
         gameStatus: gameStatus(game, liveState).kind !== 'pre' ? baseStatusSpeech : null,
         sharp: sharp && !signalsMuted ? sharpScoreSpeech(sharp.score, sharp.band) : null,
         started: startedSpoken,
+        move: signalsMoveSpoken,
       })
     : joinCardSpeech([
         matchup,
