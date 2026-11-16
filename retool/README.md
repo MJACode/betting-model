@@ -58,6 +58,16 @@ the app's own files.
 
 ## What has been proved, and what has not
 
+**The full path works on the live app** (2026-11-16, 01:46 UTC; a push with no
+changes, at mike's request). The import used 0.0023 credits. Every file
+read back from the draft matched. Publishing needed no function approval,
+because the live app's functions were already approved and had not changed.
+The published app was read back with no draft named: all 69 files
+byte-for-byte identical to this folder, including `package.json`,
+`backend/package.json` and `pnpm-workspace.yaml`. It loaded in the browser
+with live data on the Models and Volume tabs and no console errors. Publish
+tag `rr-publish-1794793612838-9275c64`.
+
 Measured on 2026-11-15, on a throwaway copy of the app:
 
 - **Upload and copy.** The upload was accepted (68 files, none dropped).
@@ -82,19 +92,22 @@ What did **not** work, or is still unknown:
   `frontend/vitest.setup.ts`. Retool treats them as its own read-only files.
   **An edit to any of these here will not reach Retool.** They matched
   already.
-- **Two files that could not be read back** from the test app:
-  `backend/package.json` and `pnpm-workspace.yaml`. Retool's file-read tool
-  reported both missing. The builder said it updated `pnpm-workspace.yaml`;
-  why it cannot be read back is not known.
+- **Two files can't be read from a draft:** `backend/package.json` and
+  `pnpm-workspace.yaml`. Retool's file-read tool reports both missing on a
+  draft, on the test app and the live app alike. Read the published app to
+  check them. After the live push, both matched.
 - **Leftover files.** The import leaves `/plans/IMPORT_PLAN.md` and
   `/plans/import-build-plan.json` in the app, and Retool refuses to delete them
-  ("Cannot delete protected file"). The app never loads them, and `check`
+  ("Cannot delete protected file"). They are now in the published live app
+  too (72 files listed instead of 70). The app never loads them, and `check`
   skips them.
-- **Publishing a pushed change is untested.** Publishing the test app was
-  blocked until someone approves its two layout functions
-  (`saveDashboardLayout`, `deleteDashboardLayout`). That approval was not
-  given, so nothing was published. Whether the live app will ask for the same
-  approval is not known until a push is made to it.
+- **A changed write function may need your approval.** Retool records each
+  approval against a fingerprint of the function. The test app, being new, was
+  blocked until its two layout functions (`saveDashboardLayout`,
+  `deleteDashboardLayout`) were approved; that approval was not given there.
+  On the live app, an unchanged push needed none. Expect Retool to ask again
+  when one of those functions is edited (not yet seen). If it does, Claude
+  stops and asks you.
 - **Retool's check misses one write function.** Retool's "this function
   writes" check did not flag `setModelVolume`. That function writes through a
   database function call, which looks like a read.
