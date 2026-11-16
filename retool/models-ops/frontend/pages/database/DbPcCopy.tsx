@@ -119,7 +119,8 @@ export default function DbPcCopy({ data, loading, error, now = Date.now() }: Pro
   }
 
   // 1. The last nightly copy
-  const firstReportAge = (now - Date.parse(points[0].taken_at)) / 3_600_000
+  const firstReport = points[0] ?? latest
+  const firstReportAge = (now - Date.parse(firstReport.taken_at)) / 3_600_000
   let copyValue = '—'
   let copyCaption = 'No nightly report yet. The PC writes one when each nightly copy ends (it starts at 00:30 Eastern, and two minutes after mike signs in).'
   let copyTone: StatTone | undefined
