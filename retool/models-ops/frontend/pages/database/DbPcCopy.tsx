@@ -69,7 +69,7 @@ const DISK_CRIT_SHARE = 0.05
 const SIZE_SERIES = [
   { key: 'database', label: 'Database copy', color: 'var(--series-1)' },
   { key: 'github', label: 'GitHub copy', color: 'var(--series-7)' },
-  { key: 'other', label: 'Everything else', color: 'var(--series-4)' },
+  { key: 'other', label: 'Everything else (older snapshots, logs)', color: 'var(--series-4)' },
 ] as const
 
 function tickDay(iso: unknown): string {
@@ -113,26 +113,41 @@ export default function DbPcCopy({ data, loading, error, now = Date.now() }: Pro
   if (!latest) {
     return (
       <EmptyState icon={Laptop} title="No report from the PC yet">
-        The PC writes one when each nightly copy ends (the copy starts at 00:30, and two minutes after mike signs in).
+        The PC writes one when each nightly copy ends (the copy starts at 00:30 Eastern, and two minutes after mike signs in).
       </EmptyState>
     )
   }
 
   // 1. The last nightly copy
+  const firstReportAge = (now - Date.parse(points[0].taken_at)) / 3_600_000
   let copyValue = '—'
-  let copyCaption = 'No nightly report yet. The PC writes one when each nightly copy ends (it starts at 00:30, and two minutes after mike signs in).'
+  let copyCaption = 'No nightly report yet. The PC writes one when each nightly copy ends (it starts at 00:30 Eastern, and two minutes after mike signs in).'
   let copyTone: StatTone | undefined
+  if (!nightly && firstReportAge > STALE_HOURS) {
+    copyCaption = `No nightly report in the ${fmtSpan(firstReportAge)} since the first report. The PC's LocalMirror task may not be running.`
+    copyTone = 'warning'
+  }
   if (nightly) {
     const reportAge = (now - Date.parse(nightly.taken_at)) / 3_600_000
+    // Written at the start of the next pass, for a pass whose runner stopped
+    // before its last step (local_mirror_report.py --catch-up): no exit codes.
+    const caughtUp = nightly.github_exit == null && nightly.supabase_exit == null && nightly.duckdb_exit == null
+    const ofTables = nightly.copy_tables != null
+      ? ` · ${fmtCount(nightly.copy_tables)}${nightly.local_tables != null ? ` of ${fmtCount(nightly.local_tables)}` : ''} tables`
+      : ''
     if (nightly.copy_this_pass && nightly.copy_finished_at) {
       const took = nightly.copy_started_at ? hoursBetween(nightly.copy_started_at, nightly.copy_finished_at) : null
       copyValue = fmtAgo(nightly.copy_finished_at, now)
-      copyCaption = `Finished ${fmtUtc(nightly.copy_finished_at)}${took != null ? ` · took ${fmtSpan(took)}` : ''}${nightly.copy_tables != null ? ` · ${fmtCount(nightly.copy_tables)} tables` : ''}`
-      copyTone = nightly.supabase_exit ? 'critical' : reportAge > STALE_HOURS ? 'warning' : 'good'
-      if (reportAge > STALE_HOURS) copyCaption += `. No report since: the copy may have missed a night.`
+      copyCaption = `Finished ${fmtUtc(nightly.copy_finished_at)}${took != null ? ` · took ${fmtSpan(took)}` : ''}${ofTables}.`
+      copyTone = nightly.supabase_exit
+        ? 'critical'
+        : reportAge > STALE_HOURS || caughtUp || nightly.duckdb_exit ? 'warning' : 'good'
+      if (caughtUp) copyCaption += ' That pass stopped before it could report; the next pass recorded it, so its exit codes are unknown.'
+      if (nightly.duckdb_exit) copyCaption += ` The SQL views (DuckDB) did not rebuild: code ${nightly.duckdb_exit}.`
+      if (reportAge > STALE_HOURS) copyCaption += ' No report since: the copy may have missed a night.'
     } else {
       copyValue = 'Did not finish'
-      copyCaption = `The pass that started ${fmtUtc(nightly.pass_started_at)} ended${nightly.supabase_exit != null ? ` with code ${nightly.supabase_exit}` : ''}. The last copy that finished: ${fmtUtc(nightly.copy_finished_at)}.`
+      copyCaption = `The pass that started ${fmtUtc(nightly.pass_started_at)} ended${nightly.supabase_exit != null ? ` with code ${nightly.supabase_exit}` : ''}. The last run that finished: ${fmtUtc(nightly.copy_finished_at)}${ofTables}.`
       copyTone = 'critical'
     }
   }
@@ -171,11 +186,14 @@ export default function DbPcCopy({ data, loading, error, now = Date.now() }: Pro
   const ghLate = ghAge == null || ghAge > GITHUB_STALE_HOURS
   const ghTone: StatTone = ghFailed ? 'critical' : ghLate ? 'warning' : 'good'
   const ghRepos = `${fmtCount(latest.github_repos)} repositories${latest.github_repos_failed ? `, ${latest.github_repos_failed} failed` : ''} · ${fmtBytes(latest.github_bytes)}`
+  const ghExit = nightly?.github_exit ?? null
   const ghCaption = ghStale
-    ? `The last pass's GitHub copy did not finish${nightly?.github_exit ? ` (code ${nightly.github_exit})` : ''}. The last one that did: ${fmtUtc(latest.github_finished_at)}.`
-    : ghLate
-      ? `None has finished since ${fmtUtc(latest.github_finished_at)}, so a night went without one. ${ghRepos}`
-      : ghRepos
+    ? `The last pass's GitHub copy did not finish${ghExit ? ` (code ${ghExit})` : ''}. The last one that did: ${fmtUtc(latest.github_finished_at)}.`
+    : ghExit
+      ? `The last pass's GitHub step ended with code ${ghExit}. ${ghRepos}`
+      : ghLate
+        ? `None has finished since ${fmtUtc(latest.github_finished_at)}, so a night went without one. ${ghRepos}`
+        : ghRepos
 
   const rows = points
     .filter(p => p.total_bytes != null)
@@ -196,7 +214,7 @@ export default function DbPcCopy({ data, loading, error, now = Date.now() }: Pro
           icon={Archive}
           label="Size of the copy"
           value={fmtBytes(latest.total_bytes)}
-          caption={`Database ${fmtBytes(latest.tables_bytes)} · GitHub ${fmtBytes(latest.github_bytes)} · other ${fmtBytes(otherBytes(latest))}${growth != null ? ` · ${fmtBytesSigned(growth)}/day` : ''}`}
+          caption={`Database ${fmtBytes(latest.tables_bytes)} · GitHub ${fmtBytes(latest.github_bytes)} · other ${fmtBytes(otherBytes(latest))} (older snapshots, logs, other jobs’ files)${growth != null ? ` · ${fmtBytesSigned(growth)}/day` : ''}`}
         />
         <StatCard
           icon={HardDrive}

@@ -7,9 +7,14 @@ copy's size over time, and the free disk. This script writes the row it reads:
 one row in public.pc_copy_snapshots each time it runs.
 
 WHEN IT RUNS. Last in each pass of scripts/local_mirror_run.ps1 (the LocalMirror
-task: 00:30 nightly, and two minutes after mike signs in), after every copy has
-ended, with --source nightly, the pass's own stamp and each step's exit code.
-By hand it runs with --source manual (the default) and no exit codes.
+task: 00:30 Eastern nightly, and two minutes after mike signs in), after every
+copy has ended, with --source nightly, the pass's own stamp and each step's
+exit code. By hand it runs with --source manual (the default) and no exit codes.
+
+And first in each pass, with --catch-up: on 2026-11-16 the runner ended about
+nine hours in while its copy carried on, so that pass never reached its last
+step. The catch-up writes such a pass's row at the start of the next pass,
+when its copy did finish (see catch_up_row), with its exit codes unknown.
 
 WHAT IT READS, all on this disk and nothing from the database:
   * supabase_mirror\\STATE.json: the last finished run of the Supabase copy (any
@@ -35,8 +40,9 @@ from a copy outside the repo, so it imports nothing from the repo (isolated
 mode does not put the script's folder on the import path either).
 
 SECRETS. DATABASE_URL comes from the environment or, failing that, from the
-main checkout's .env, read at run time. It is never printed; every message
-that could hold it has database URLs removed.
+main checkout's .env, read at run time. It is never printed. A failed write
+prints the error's kind (describe_failure), never the driver's message, which
+names the host, port and user, and echoes a malformed address whole.
 
 Usage:
   python local_mirror_report.py                       # one manual row
@@ -67,6 +73,7 @@ STATEMENT_TIMEOUT_S = 30
 CONNECT_TIMEOUT_S = 20
 WRITE_ATTEMPTS = 3
 RETRY_PAUSE_S = 30.0  # 30 s, then 60 s: under two minutes added to a pass
+WHOLE_RUN_SHARE = 0.9  # a run covering this share of the tables on disk is a pass's copy
 SOURCES = ("nightly", "manual")
 STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 
@@ -264,6 +271,56 @@ def read_github(root: Path) -> tuple[dt.datetime | None, int | None, int | None]
     return parse_iso(s.get("at")), len(repos), failed
 
 
+def is_whole_run(run_tables: int | None, tables_on_disk: int) -> bool:
+    """True when a copy run covered (nearly) every table, so it is a pass's
+    copy and not a run by hand with --only. Not equality: tables come and go
+    between runs (the last whole run covered 311 tables while 316 were on disk
+    the next day, 2026-11-16)."""
+    return run_tables is not None and tables_on_disk > 0 and run_tables >= WHOLE_RUN_SHARE * tables_on_disk
+
+
+def catch_up_row(root: Path, *, before: str, host: str | None, now: dt.datetime,
+                 started_monotonic: float | None = None) -> tuple[dict[str, Any] | None, str]:
+    """The row a pass would have written, for the pass before `before`, when its
+    runner stopped before its last step but its copy carried on and finished
+    (2026-11-16: the runner ended at about nine hours, the copy kept running).
+
+    Written only when STATE.json shows a whole-table run that started after
+    that pass's stamp and before this pass, and finished. Its exit codes are
+    unknown, so they are left empty. If that copy never finished, nothing is
+    written, and the dashboard's no-report rule shows the missing night. A pass
+    that did report keeps its row: the insert adds nothing (ON CONFLICT DO
+    NOTHING). Returns (row or None, why)."""
+    this_start = parse_stamp(before)
+    if this_start is None:
+        return None, f"--before {before!r} is not a pass stamp"
+    stamps = sorted(s for s in (_stamp_of(p.name) for p in (root / "logs").glob("supabase_*.log"))
+                    if s is not None and parse_stamp(s) < this_start)
+    if not stamps:
+        return None, "no earlier pass in logs"
+    prev = stamps[-1]
+    prev_start = parse_stamp(prev)
+    state = _load_json(root / "supabase_mirror" / "STATE.json")
+    state = state if isinstance(state, dict) else {}
+    started = parse_iso(state.get("run_started_at"))
+    finished = parse_iso(state.get("run_finished_at"))
+    tables, _, _ = read_tables(root / "supabase_mirror")
+    if started is None or finished is None or not (prev_start <= started < this_start):
+        return None, f"no copy run that started during pass {prev} has finished"
+    if not is_whole_run(_int(state.get("tables")), tables):
+        return None, f"the last finished run covered {state.get('tables')} of {tables} tables, not a pass's copy"
+    row = build_row(root, source="nightly", pass_id=prev, host=host,
+                    exits={"github": None, "supabase": None, "duckdb": None}, now=now,
+                    started_monotonic=started_monotonic)
+    return row, f"pass {prev}: its copy finished at {finished.isoformat()} and it has no report of its own"
+
+
+def _stamp_of(name: str) -> str | None:
+    """The pass stamp in a log name such as supabase_20261116T054324Z.log."""
+    m = re.fullmatch(r"supabase_(\d{8}T\d{6}Z)\.log", name)
+    return m.group(1) if m and parse_stamp(m.group(1)) else None
+
+
 def build_row(root: Path, *, source: str, pass_id: str, host: str | None,
               exits: dict[str, int | None], now: dt.datetime,
               started_monotonic: float | None = None) -> dict[str, Any]:
@@ -275,12 +332,17 @@ def build_row(root: Path, *, source: str, pass_id: str, host: str | None,
     state = state if isinstance(state, dict) else {}
     copy_started = parse_iso(state.get("run_started_at"))
     copy_finished = parse_iso(state.get("run_finished_at"))
-    if pass_started is not None:
-        this_pass = copy_finished is not None and copy_started is not None and copy_started >= pass_started
-    else:
-        this_pass = None
     failed = state.get("failed_tables")
     tables, rows, differing = read_tables(mirror)
+    if pass_started is not None:
+        # The pass's own copy: a run that finished, started after the pass did,
+        # and covered the whole table list. A one-table run by hand rewrites
+        # STATE.json too, and must not pass for the night's copy.
+        this_pass = (copy_finished is not None and copy_started is not None
+                     and copy_started >= pass_started
+                     and is_whole_run(_int(state.get("tables")), tables))
+    else:
+        this_pass = None
     gh_at, gh_repos, gh_failed = read_github(root)
     sizes = disk_sizes(root)
     try:
@@ -374,8 +436,36 @@ def _is_connection_error(exc: BaseException) -> bool:
     return isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError))
 
 
+def describe_failure(exc: BaseException) -> str:
+    """What went wrong with a write, in words that carry no part of the address.
+
+    Never the driver's own message: it names the database's host, port and
+    user, and a malformed DATABASE_URL comes back whole, password included
+    (measured 2026-11-16 with 'postgresql+psycopg2://', 'postgresql:/' and
+    'postgres//' forms). The kind is read from the message and replaced by a
+    fixed phrase; the class and Postgres's error code are kept."""
+    text = str(exc).lower()
+    kinds = (  # every word in the first part must appear
+        (("invalid dsn",), "DATABASE_URL is not a valid address"),
+        (("missing \"=\"",), "DATABASE_URL is not a valid address"),
+        (("password authentication failed",), "the password was refused"),
+        (("relation", "does not exist"), "the table is not in the database yet"),
+        (("role", "does not exist"), "the user named in DATABASE_URL does not exist"),
+        (("database", "does not exist"), "the database named in DATABASE_URL does not exist"),
+        (("could not translate host name",), "the host name could not be found"),
+        (("connection refused",), "the server refused the connection"),
+        (("timeout expired",), "the connection timed out"),
+        (("timed out",), "the connection timed out"),
+        (("server closed the connection",), "the server closed the connection"),
+        (("ssl",), "the SSL connection failed"),
+    )
+    kind = next((phrase for needles, phrase in kinds if all(n in text for n in needles)), "no detail kept")
+    code = getattr(exc, "pgcode", None)
+    return f"{type(exc).__name__}: {kind}" + (f" (Postgres error {code})" if code else "")
+
+
 def write_with_retries(url: str, row: dict[str, Any], *, attempts: int = WRITE_ATTEMPTS,
-                       pause_s: float = RETRY_PAUSE_S, sleep=time.sleep) -> int | None:
+                       pause_s: float = RETRY_PAUSE_S, sleep=None) -> int | None:
     """insert_row on a fresh connection, tried again after a connection error.
 
     The nightly report runs once per pass, so a database that cannot be reached
@@ -396,8 +486,9 @@ def write_with_retries(url: str, row: dict[str, Any], *, attempts: int = WRITE_A
             if attempt == attempts or not _is_connection_error(exc):
                 raise
             print(f"write attempt {attempt} of {attempts} could not reach the database "
-                  f"({type(exc).__name__}); trying again in {pause_s * attempt:.0f} s", flush=True)
-            sleep(pause_s * attempt)
+                  f"({describe_failure(exc)}); trying again in {pause_s * attempt:.0f} s", flush=True)
+            # Looked up on each try, not bound as a default, so a test can patch it.
+            (sleep or time.sleep)(pause_s * attempt)
     return None
 
 
@@ -425,24 +516,41 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--github-exit", type=int, default=None)
     ap.add_argument("--supabase-exit", type=int, default=None)
     ap.add_argument("--duckdb-exit", type=int, default=None)
+    ap.add_argument("--catch-up", action="store_true",
+                    help="at the start of a pass: write the previous pass's row if its runner stopped "
+                         "before reporting but its copy finished")
+    ap.add_argument("--before", default=None, help="with --catch-up: this pass's stamp")
     ap.add_argument("--dry-run", action="store_true", help="print the row; write nothing")
     args = ap.parse_args(argv)
     t0 = time.monotonic()
     now = dt.datetime.now(UTC)
-    if args.source == "nightly" and parse_stamp(args.pass_id) is None:
-        print("--source nightly needs --pass-id as the pass's stamp (yyyymmddThhmmssZ)", flush=True)
-        return 2
-    pass_id = args.pass_id or now.strftime(STAMP_FORMAT)
-    try:
-        row = build_row(Path(args.root), source=args.source, pass_id=pass_id,
-                        host=socket.gethostname() or None,
-                        exits={"github": args.github_exit, "supabase": args.supabase_exit,
-                               "duckdb": args.duckdb_exit},
-                        now=now, started_monotonic=t0)
-    except Exception as exc:  # noqa: BLE001
-        print(f"{now.isoformat()} could not read the copy: {scrub(exc)}\n{scrub(traceback.format_exc())}",
-              flush=True)
-        return 3
+    root = Path(args.root)
+    if args.catch_up:
+        try:
+            row, why = catch_up_row(root, before=args.before or "", host=socket.gethostname() or None,
+                                    now=now, started_monotonic=t0)
+        except Exception as exc:  # noqa: BLE001
+            print(f"{now.isoformat()} catch-up could not read the copy: {scrub(exc)}", flush=True)
+            return 3
+        print(f"{now.isoformat()} catch-up: {why}", flush=True)
+        if row is None:
+            return 0
+        pass_id = row["pass_id"]
+    else:
+        if args.source == "nightly" and parse_stamp(args.pass_id) is None:
+            print("--source nightly needs --pass-id as the pass's stamp (yyyymmddThhmmssZ)", flush=True)
+            return 2
+        pass_id = args.pass_id or now.strftime(STAMP_FORMAT)
+        try:
+            row = build_row(root, source=args.source, pass_id=pass_id,
+                            host=socket.gethostname() or None,
+                            exits={"github": args.github_exit, "supabase": args.supabase_exit,
+                                   "duckdb": args.duckdb_exit},
+                            now=now, started_monotonic=t0)
+        except Exception as exc:  # noqa: BLE001
+            print(f"{now.isoformat()} could not read the copy: {scrub(exc)}\n{scrub(traceback.format_exc())}",
+                  flush=True)
+            return 3
     print(f"{now.isoformat()} {_summary(row)}", flush=True)
     if args.dry_run:
         print(json.dumps(row, default=str, indent=1), flush=True)
@@ -454,10 +562,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         snapshot_id = write_with_retries(url, row)
     except Exception as exc:  # noqa: BLE001
-        print(f"no row written: {scrub(exc)}", flush=True)
+        print(f"no row written: {describe_failure(exc)}", flush=True)
         return 3
     if snapshot_id is None:
-        print(f"pass {pass_id} ({args.source}) already has a row; kept it, wrote nothing", flush=True)
+        print(f"pass {pass_id} ({row['source']}) already has a row; kept it, wrote nothing", flush=True)
     else:
         print(f"wrote pc_copy_snapshots row {snapshot_id}", flush=True)
     return 0

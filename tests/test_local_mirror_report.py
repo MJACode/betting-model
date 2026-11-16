@@ -94,6 +94,36 @@ def test_every_column_the_report_writes_exists_in_the_migration():
     assert rep.INSERT_SQL.count("%s") == len(rep.COLUMNS)
 
 
+# What production holds: the file as applied on 2026-11-16 at 13:15 UTC.
+SHIPPED_COLUMNS = frozenset({
+    "snapshot_id", "taken_at", "source", "pass_id", "host", "pass_started_at", "copy_run_id",
+    "copy_started_at", "copy_finished_at", "copy_tables", "copy_rows_pulled", "copy_db_seconds",
+    "copy_paused_seconds", "copy_this_pass", "failed_tables", "differing_tables", "github_exit",
+    "supabase_exit", "duckdb_exit", "github_finished_at", "github_repos", "github_repos_failed",
+    "local_tables", "local_rows", "tables_bytes", "schema_bytes", "storage_bytes", "github_bytes",
+    "duckdb_bytes", "other_bytes", "total_bytes", "total_files", "disk_total_bytes", "disk_free_bytes",
+    "report_ms",
+})
+SHIPPED_SOURCES = frozenset({"nightly", "manual"})
+
+
+def test_a_column_or_source_added_later_has_its_own_statement():
+    """CREATE TABLE IF NOT EXISTS does nothing to the table production already
+    has. A column added to it reaches production only through its own ALTER
+    TABLE ... ADD COLUMN IF NOT EXISTS, and a new allowed source only through a
+    constraint statement; without one, the next pass runs the file, restamps
+    the marker, and the table never changes (the review of #1412)."""
+    block = CODE.split("CREATE TABLE IF NOT EXISTS public.pc_copy_snapshots (", 1)[1].split(");", 1)[0]
+    defined = {ln.split()[0] for ln in block.splitlines()
+               if ln.strip() and not ln.strip().startswith(("PRIMARY", "CONSTRAINT"))}
+    for col in sorted(defined - SHIPPED_COLUMNS):
+        assert re.search(rf"ADD COLUMN IF NOT EXISTS {col}\b", CODE), f"{col} needs its own ADD COLUMN IF NOT EXISTS"
+    sources = set(re.findall(r"'(\w+)'", re.search(r"CHECK \(source IN \(([^)]*)\)\)", CODE).group(1)))
+    if sources != SHIPPED_SOURCES:
+        assert "DROP CONSTRAINT IF EXISTS pc_copy_snapshots_source" in CODE, "the source check needs re-adding"
+    assert set(rep.COLUMNS) | {"snapshot_id", "taken_at"} <= SHIPPED_COLUMNS | (defined - SHIPPED_COLUMNS)
+
+
 def test_the_writer_only_ever_adds_a_row():
     """CLAUDE.md section 1b: a report row is never updated or deleted."""
     source = SCRIPT.read_text(encoding="utf-8")
@@ -231,19 +261,110 @@ def test_without_a_database_url_nothing_is_written(copy_root, tmp_path, monkeypa
     assert "no row written" in capsys.readouterr().out
 
 
-def test_a_failed_write_prints_no_database_address(copy_root, tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("url, kind", [
+    # A closed port on this machine: the driver's message names the host and port.
+    ("postgresql://pc_copy_user:S3cretPw_not_real@127.0.0.1:1/postgres", "the server refused the connection"),
+    # Malformed forms the driver echoes whole, password included (measured 2026-11-16).
+    ("postgresql+psycopg2://pc_copy_user:S3cretPw_not_real@127.0.0.1:1/postgres",
+     "DATABASE_URL is not a valid address"),
+    ("postgresql:/pc_copy_user:S3cretPw_not_real@127.0.0.1:1/postgres", "DATABASE_URL is not a valid address"),
+    ("postgres//pc_copy_user:S3cretPw_not_real@127.0.0.1:1/postgres", "DATABASE_URL is not a valid address"),
+])
+def test_a_failed_write_prints_no_part_of_the_address(copy_root, tmp_path, monkeypatch, capsys, url, kind):
+    """Real driver errors, through the report's own main(): never a password,
+    user, host or port. (Under the test suite's connection guard, two of the
+    malformed forms are refused by the guard before the driver sees them; the
+    next test names each kind from the driver's own error.)"""
+    pytest.importorskip("psycopg2")
     env = tmp_path / ".env"
-    env.write_text("DATABASE_URL=postgresql://user:secret@db.example.invalid:5432/postgres\n",
-                   encoding="utf-8")
+    env.write_text(f"DATABASE_URL={url}\n", encoding="utf-8")
     monkeypatch.delenv("DATABASE_URL", raising=False)
-
-    def refuse(url):
-        raise RuntimeError(f"could not connect to {url}")
-
-    monkeypatch.setattr(rep, "connect", refuse)
+    monkeypatch.setattr(rep.time, "sleep", lambda s: None)  # the retries, without the wait
     assert rep.main(["--root", str(copy_root), "--env-file", str(env)]) == 3
     out = capsys.readouterr().out
-    assert "secret" not in out and "<database-url>" in out
+    for secret in ("S3cretPw_not_real", "pc_copy_user", "127.0.0.1", "port 1"):
+        assert secret not in out, (secret, out)
+    assert "no row written: " in out
+
+
+@pytest.mark.parametrize("url, kind", [
+    ("postgresql+psycopg2://pc_copy_user:S3cretPw_not_real@127.0.0.1:1/postgres",
+     "ProgrammingError: DATABASE_URL is not a valid address"),
+    ("postgresql:/pc_copy_user:S3cretPw_not_real@127.0.0.1:1/postgres",
+     "ProgrammingError: DATABASE_URL is not a valid address"),
+    ("postgres//pc_copy_user:S3cretPw_not_real@127.0.0.1:1/postgres",
+     "ProgrammingError: DATABASE_URL is not a valid address"),
+])
+def test_the_kind_of_failure_is_named_from_the_drivers_own_error(url, kind):
+    psycopg2 = pytest.importorskip("psycopg2")
+    with pytest.raises(psycopg2.Error) as caught:
+        psycopg2.extensions.parse_dsn(url)  # the driver's own check, no connection
+    assert "S3cretPw_not_real" in str(caught.value)  # what the old message printed
+    assert rep.describe_failure(caught.value) == kind
+
+
+def test_a_refused_connection_is_named_without_its_host_or_port():
+    psycopg2 = pytest.importorskip("psycopg2")
+    with pytest.raises(psycopg2.OperationalError) as caught:
+        psycopg2.connect("host=127.0.0.1 port=1 user=pc_copy_user dbname=postgres connect_timeout=5")
+    assert "127.0.0.1" in str(caught.value)
+    said = rep.describe_failure(caught.value)
+    assert said == "OperationalError: the server refused the connection", said
+
+
+def test_a_one_table_run_by_hand_is_not_the_passs_copy(copy_root):
+    """A run with --only rewrites STATE.json too. Started after the pass, it
+    would otherwise pass for the night's copy."""
+    _write(copy_root / "supabase_mirror" / "STATE.json", {
+        "run_started_at": "2026-11-16T06:00:00+00:00", "run_id": "20261116T060000Z",
+        "run_finished_at": "2026-11-16T06:04:00+00:00", "tables": 1,
+        "failed_tables": [], "mismatched_tables": [], "rows_pulled": 3820})
+    row = _row(copy_root, pass_id="20261116T054324Z")
+    assert row["copy_tables"] == 1 and row["copy_this_pass"] is False
+    assert rep.is_whole_run(311, 316) and not rep.is_whole_run(1, 316) and not rep.is_whole_run(None, 316)
+
+
+def _logs(root: Path, *stamps: str) -> None:
+    for s in stamps:
+        _write(root / "logs" / f"supabase_{s}.log", b"log")
+
+
+def _state(root: Path, start: str, end: str | None, tables: int) -> None:
+    _write(root / "supabase_mirror" / "STATE.json", {
+        "run_started_at": start, "run_id": "x", "run_finished_at": end, "tables": tables,
+        "failed_tables": [], "mismatched_tables": [], "rows_pulled": 10})
+
+
+NOW = dt.datetime(2026, 11, 17, 5, 31, tzinfo=UTC)
+
+
+def test_catch_up_writes_the_previous_pass_when_its_whole_copy_finished(copy_root):
+    _logs(copy_root, "20261115T053002Z", "20261116T054324Z")
+    _state(copy_root, "2026-11-16T05:49:44+00:00", "2026-11-16T16:20:00+00:00", 4)
+    row, why = rep.catch_up_row(copy_root, before="20261117T053005Z", host="PC", now=NOW)
+    assert row is not None, why
+    assert row["source"] == "nightly" and row["pass_id"] == "20261116T054324Z"
+    assert row["copy_this_pass"] is True
+    assert row["github_exit"] is None and row["supabase_exit"] is None and row["duckdb_exit"] is None
+
+
+@pytest.mark.parametrize("start, end, tables, why", [
+    ("2026-11-16T05:49:44+00:00", None, 4, "has finished"),          # its copy never finished
+    ("2026-11-15T05:35:00+00:00", "2026-11-15T13:00:00+00:00", 4, "has finished"),  # an older run
+    ("2026-11-16T06:10:00+00:00", "2026-11-16T06:14:00+00:00", 1, "not a pass's copy"),  # a run by hand
+    ("2026-11-17T05:31:00+00:00", "2026-11-17T05:35:00+00:00", 4, "has finished"),  # started in this pass
+])
+def test_catch_up_writes_nothing_without_a_finished_whole_copy_from_that_pass(copy_root, start, end, tables, why):
+    _logs(copy_root, "20261116T054324Z")
+    _state(copy_root, start, end, tables)
+    row, reason = rep.catch_up_row(copy_root, before="20261117T053005Z", host="PC", now=NOW)
+    assert row is None and why in reason, reason
+
+
+def test_catch_up_with_no_earlier_pass_writes_nothing(copy_root):
+    row, reason = rep.catch_up_row(copy_root, before="20261117T053005Z", host="PC", now=NOW)
+    assert row is None and "no earlier pass" in reason
+    assert rep.main(["--root", str(copy_root), "--catch-up", "--before", "20261117T053005Z"]) == 0
 
 
 class _Conn:
@@ -316,28 +437,29 @@ name = os.path.basename(sys.argv[0])
 root = os.environ["STUB_LOG_DIR"]
 start = time.time()
 time.sleep({sleep})
-with open(os.path.join(root, name + ".json"), "w", encoding="utf-8") as fh:
-    json.dump({{"argv": sys.argv[1:], "start": start, "end": time.time()}}, fh)
+with open(os.path.join(root, name + ".jsonl"), "a", encoding="utf-8") as fh:
+    fh.write(json.dumps({{"argv": sys.argv[1:], "start": start, "end": time.time()}}) + "\\n")
 sys.exit({code})
 '''
 
 
-@pytest.mark.skipif(shutil.which("powershell") is None or shutil.which("git") is None,
-                    reason="the runner is PowerShell on mike's PC")
-def test_the_runner_reports_last_with_each_steps_exit_code(tmp_path):
+def _run_runner(tmp_path, codes):
+    """The real runner, against a throwaway root and a throwaway repo whose
+    origin/master holds stand-in scripts. Returns (the finished process, every
+    call each stand-in saw, in order)."""
     repo, root, log_dir = tmp_path / "repo", tmp_path / "root", tmp_path / "stub_logs"
     log_dir.mkdir()
     # The GitHub copy runs alongside and is the slowest here, so a report that
     # did not wait for it starts before it ends.
-    stubs = {"local_mirror.py": (1.0, 0), "local_mirror_github.py": (5.0, 1),
-             "local_mirror_report.py": (0.0, 0), "local_mirror_duckdb.py": (0.0, 0)}
+    sleeps = {"local_mirror.py": 1.0, "local_mirror_github.py": 5.0,
+              "local_mirror_report.py": 0.0, "local_mirror_duckdb.py": 0.0}
     ps1 = RUNNER.read_text(encoding="utf-8")
     (repo / "scripts").mkdir(parents=True)
-    for name, (sleep, code) in stubs.items():
+    for name, sleep in sleeps.items():
         if f'"{name}"' not in ps1:
-            continue  # a step this runner does not have yet (#1380 adds the DuckDB one)
-        (repo / "scripts" / name).write_text(_STUB.format(pad="#" * 1100, sleep=sleep, code=code),
-                                             encoding="utf-8")
+            continue  # a step this runner does not have
+        (repo / "scripts" / name).write_text(
+            _STUB.format(pad="#" * 1100, sleep=sleep, code=codes.get(name, 0)), encoding="utf-8")
     env = {**os.environ, "STUB_LOG_DIR": str(log_dir), "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
     for cmd in (["git", "init", "-q"], ["git", "add", "-A"], ["git", "commit", "-q", "-m", "stubs"],
@@ -346,19 +468,47 @@ def test_the_runner_reports_last_with_each_steps_exit_code(tmp_path):
     run = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(RUNNER),
                           "-Root", str(root), "-Repo", str(repo)],
                          capture_output=True, text=True, timeout=300, env=env)
-    seen = {p.stem.replace(".py", ""): json.loads(p.read_text(encoding="utf-8"))
-            for p in log_dir.glob("*.json")}
+    seen = {}
+    for p in log_dir.glob("*.jsonl"):
+        seen[p.name[:-len(".py.jsonl")]] = [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines()]
+    return run, seen, root
+
+
+_NEEDS_PS = pytest.mark.skipif(shutil.which("powershell") is None or shutil.which("git") is None,
+                               reason="the runner is PowerShell on mike's PC")
+
+
+@_NEEDS_PS
+def test_the_runner_catches_up_first_and_reports_last_with_each_steps_exit_code(tmp_path):
+    run, seen, root = _run_runner(tmp_path, {"local_mirror_github.py": 1})
     assert "local_mirror_report" in seen, (run.stdout, run.stderr, sorted(seen))
-    report = seen["local_mirror_report"]
+    calls = seen["local_mirror_report"]
+    assert len(calls) == 2, calls
+    catch_up, report = calls
+    # first, before any copy starts: the previous pass's catch-up
+    assert "--catch-up" in catch_up["argv"]
+    stamp = catch_up["argv"][catch_up["argv"].index("--before") + 1]
+    assert re.fullmatch(r"\d{8}T\d{6}Z", stamp)
+    for step in ("local_mirror", "local_mirror_github"):
+        assert catch_up["end"] <= seen[step][0]["start"], step
+    # last, after every copy has ended: this pass's own row
     args = report["argv"]
     assert args[args.index("--source") + 1] == "nightly"
-    assert re.fullmatch(r"\d{8}T\d{6}Z", args[args.index("--pass-id") + 1])
+    assert args[args.index("--pass-id") + 1] == stamp
     assert args[args.index("--github-exit") + 1] == "1"
     assert args[args.index("--supabase-exit") + 1] == "0"
-    if "--duckdb-exit" in args:
-        assert args[args.index("--duckdb-exit") + 1] == "0"
+    assert args[args.index("--duckdb-exit") + 1] == "0"
     assert args[args.index("--root") + 1] == str(root)
-    # last: after every copy has ended
-    for step in ("local_mirror", "local_mirror_github"):
-        assert seen[step]["end"] <= report["start"], step
-    assert run.returncode == 1  # the GitHub stub's code; the report's 0 does not hide it
+    for step in ("local_mirror", "local_mirror_github", "local_mirror_duckdb"):
+        assert seen[step][0]["end"] <= report["start"], step
+    assert run.returncode == 1  # the GitHub stand-in's code; the report's 0 does not hide it
+
+
+@_NEEDS_PS
+def test_a_crashed_step_fails_the_task_and_the_report_gets_its_real_code(tmp_path):
+    """A crash ends a step with a negative code (0xC0000005 is -1073741819).
+    Ranked as a plain number it is below 0, and the night showed as a success."""
+    run, seen, _ = _run_runner(tmp_path, {"local_mirror.py": -1073741819})
+    report = seen["local_mirror_report"][-1]["argv"]
+    assert report[report.index("--supabase-exit") + 1] == "-1073741819"
+    assert run.returncode == 255, (run.returncode, run.stdout, run.stderr)

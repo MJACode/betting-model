@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import time
 from pathlib import Path
 
@@ -167,6 +168,23 @@ def test_the_next_pass_undoes_any_opening_and_the_one_after_skips(db, drift):
     after = _ddl_seen(conn)
     _apply(conn)
     assert _ddl_seen(conn) == after, "the pass after the repair ran DDL again"
+
+
+def test_an_older_marker_makes_the_next_pass_run_the_file_and_restamp_it(db):
+    """An edit to the file changes its marker. The next pass must run the body
+    and store the new marker; with the marker check switched off, nothing would
+    ever re-run (the review of #1412)."""
+    conn, _ = db
+    _apply(conn)
+    conn.execute(f"COMMENT ON TABLE {TABLE} IS 'pc_copy_snapshots 000000000000'")
+    conn.commit()
+    before = _ddl_seen(conn)
+    _apply(conn)
+    assert _ddl_seen(conn) > before, "the pass after an edit skipped"
+    marker = re.search(r"pc_copy_snapshots [0-9a-f]{12}", _migration()).group(0)
+    got = conn.execute(f"SELECT obj_description('{TABLE}'::regclass, 'pg_class')").fetchone()[0]
+    conn.commit()
+    assert got == marker
 
 
 def test_a_privilege_only_inherited_does_not_rerun_the_file_every_pass(db):
