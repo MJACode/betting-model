@@ -517,7 +517,7 @@ function App() {
             component={SettingsScreen}
             options={{ title: 'Settings' }}
           />
-          {/* Chevron + "Back" (#1239), same pill as Player Stats. Its own
+          {/* Chevron-only Back (2026-11-16), same button as Player Stats. Its own
               button only for the empty-stack fallback (Tabs under Settings);
               Settings itself takes the navigator-default pill. */}
           <Stack.Screen
