@@ -123,8 +123,9 @@ season of BetRivers-first games clear of zero.
 was at a book whose total DraftKings did not hang in that read; the pick row
 left DraftKings' probability empty, `picks` refuses that (the pollers' log:
 "write failed ... null value in column dk_implied_prob"), and none was
-posted. The men's in-play loop carried the same line (`docs/sports/ncaab.md`,
-"In play"). Fixed 2026-11-16: the row takes 0.0 there, as the first-half
+posted. The men's in-play loop carries the same line and is left as it is at
+mike's request (`docs/sports/ncaab.md`, "In play"). Fixed here 2026-11-16: the
+row takes 0.0 there, as the first-half
 cards and the NBA loop do, with `line_book` naming the book
 (`tests/test_inplay_pick_without_draftkings.py`). The 13 went 6-7, -1.69
 units, so everything the model decided is 22 bets, 9-13, -5.53 units.

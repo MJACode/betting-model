@@ -223,7 +223,8 @@ down this list.
   (`scripts/ncaabw_research/ht_dropped_bets.py`). Write 0.0 there, with
   `line_book` naming the book, as the first-half cards and the NBA loop do.
   `tests/test_inplay_pick_without_draftkings.py` fails any `models/*live*.py`
-  that writes NULL.
+  that writes NULL, except a loop named in its `HELD`: the men's college loop
+  is left as it is (mike, 2026-11-16: no change to the men's models or picks).
 - **The decision row and the pick row share one transaction** in the college
   in-play loops, so a failed pick insert also erases the decision, and the
   game can later read as "missed" (5 of the 13 women's games did).

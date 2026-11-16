@@ -365,11 +365,7 @@ def build_pick(ctx: GameCtx, rule: M.Rule, pick: dict, offers: pd.DataFrame, sta
                bankroll: float) -> dict:
     """One `picks` row from one BET. model_probability is P(win | no push);
     the DraftKings columns are DraftKings' own quote on the same side at the
-    same number in this fetch, else dk_odds NULL, dk_implied_prob 0.0 and edge
-    0.0 with line_book naming the book taken (the first-half cards' and the NBA
-    loop's convention). dk_implied_prob is NOT NULL in `picks`: a NULL there
-    failed the insert of 20 of the 24 bets these models decided, 2026-11-09 to
-    11-15 (tests/test_inplay_pick_without_draftkings.py)."""
+    same number in this fetch, else NULL."""
     from models.scorer import _confidence_tier, quarter_kelly
     side, book, price, line = pick["side"], pick["book"], float(pick["price"]), float(pick["line"])
     prob = M.prob_no_push(pick["p_win"], pick.get("p_push", 0.0))
@@ -390,7 +386,7 @@ def build_pick(ctx: GameCtx, rule: M.Rule, pick: dict, offers: pd.DataFrame, sta
         "game_date": ctx.game_date, "game_time": ctx.tip.isoformat(),
         "pick_side": side, "pick_label": M.pick_label(rule, side, line, ctx.home, ctx.away),
         "model_probability": round(prob, 4),
-        "dk_implied_prob": 0.0 if dk_implied is None else round(dk_implied, 4),
+        "dk_implied_prob": None if dk_implied is None else round(dk_implied, 4),
         "edge": round(edge, 4), "dk_odds": dk_odds,
         "scored_line": line,                 # spreads: the HOME number (CLAUDE.md section 4); totals: the total
         "kelly_fraction": kf, "recommended_bet": rec, "bankroll_at_pick": bankroll,

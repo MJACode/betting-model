@@ -14,6 +14,11 @@ The house convention for a pick decided away from DraftKings is the first-half
 cards' and the NBA in-play loop's: dk_odds NULL, dk_implied_prob 0.0, edge 0.0,
 line_book naming the book taken, the decision_* columns carrying the price the
 pick was decided, sized and settled at (CLAUDE.md 6).
+
+The men's loop (models/ncaab_live_loop.py) is left as it is. mike, 2026-11-16:
+nothing is to change in the men's models that would change their model or
+picks. It is named in HELD below; taking it out of HELD, with the same one-value
+change in its build_pick, is what would fix it.
 """
 from __future__ import annotations
 
@@ -31,8 +36,6 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost/db")
 
 import models.euroleague_live_loop as EL  # noqa: E402
-import models.ncaab_live_ig as IG  # noqa: E402
-import models.ncaab_live_loop as MEN  # noqa: E402
 import models.ncaabw_live_loop as WOMEN  # noqa: E402
 
 # The NOT NULL columns of production `picks` with no default, read from
@@ -41,6 +44,8 @@ import models.ncaabw_live_loop as WOMEN  # noqa: E402
 REQUIRED = ("model_id", "sport", "game_date", "pick_side", "pick_label", "model_probability",
             "dk_implied_prob", "edge", "kelly_fraction", "recommended_bet", "bankroll_at_pick")
 TIP = pd.Timestamp("2026-11-14T17:00:00Z")
+# In-play loops left writing NULL on purpose, and who asked.
+HELD = {"ncaab_live_loop.py": "mike, 2026-11-16: no change to the men's models or their picks"}
 
 
 def _women(dk_line):
@@ -55,19 +60,6 @@ def _women(dk_line):
     return WOMEN.build_pick(ctx, best, pd.DataFrame(rows), {"h_pts": 39, "a_pts": 36}, {}, 1000.0), best
 
 
-def _men(dk_line):
-    rule = next(r for r in IG.RULES if r.model_id == IG.TOTAL_H2)
-    ctx = MEN.GameCtx("NCAAB_2026-11-12_niagara_bowling-green", "2026-11-12", 2027, "Bowling Green", "Niagara",
-                      TIP, 402, None, None)
-    best = {"side": "over", "book": "williamhill_us", "price": -110.0, "line": 156.5, "p_win": 0.60, "p_push": 0.0}
-    rows = [{"book": "williamhill_us", "side": "over", "line": 156.5, "ev": 0.10, "price": -110.0, "p_win": 0.60,
-             "p_push": 0.0}]
-    if dk_line is not None:
-        rows.append({"book": "draftkings", "side": "over", "line": dk_line, "ev": 0.05, "price": -105.0,
-                     "p_win": 0.60, "p_push": 0.0})
-    return MEN.build_pick(ctx, rule, best, pd.DataFrame(rows), {"period": 2, "diff": 10}, {}, 1000.0), best
-
-
 def _euroleague(dk_line):
     ctx = EL.GameCtx("EUROLEAGUE_2026-11-14_away_home", "2026-11-14", 2027, "Home Club", "Away Club", TIP,
                      "E2026", 101)
@@ -80,7 +72,7 @@ def _euroleague(dk_line):
     return EL.build_pick(ctx, best, pd.DataFrame(rows), SimpleNamespace(ht_home=40, ht_away=35), {}, 1000.0), best
 
 
-BUILDERS = {"ncaabw": (_women, 147.5), "ncaab": (_men, 157.5), "euroleague": (_euroleague, -4.5)}
+BUILDERS = {"ncaabw": (_women, 147.5), "euroleague": (_euroleague, -4.5)}
 
 
 @pytest.mark.parametrize("name", sorted(BUILDERS))
@@ -99,7 +91,7 @@ def test_a_bet_draftkings_does_not_quote_at_its_number_is_a_writable_pick(name, 
 @pytest.mark.parametrize("name", sorted(BUILDERS))
 def test_draftkings_at_the_same_number_still_fills_its_own_columns(name):
     build, _ = BUILDERS[name]
-    line = {"ncaabw": 145.5, "ncaab": 156.5, "euroleague": -3.5}[name]
+    line = {"ncaabw": 145.5, "euroleague": -3.5}[name]
     row, _ = build(line)
     assert row["dk_odds"] is not None and row["dk_implied_prob"] > 0
     assert row["line_book"] is None
@@ -110,6 +102,12 @@ def test_no_live_loop_writes_an_empty_draftkings_probability():
     bad = []
     for path in sorted((ROOT / "models").glob("*live*.py")):
         text = path.read_text(encoding="utf-8")
-        if re.search(r'"dk_implied_prob"\s*:\s*None\b', text):
+        if re.search(r'"dk_implied_prob"\s*:\s*None\b', text) and path.name not in HELD:
             bad.append(path.name)
     assert not bad, f"these write dk_implied_prob = NULL when DraftKings has no quote: {bad}"
+
+
+def test_every_held_loop_still_exists():
+    """A held name that no longer matches a file is a hold nobody is checking."""
+    missing = [name for name in HELD if not (ROOT / "models" / name).exists()]
+    assert not missing, missing
