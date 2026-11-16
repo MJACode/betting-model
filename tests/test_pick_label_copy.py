@@ -117,12 +117,12 @@ def test_the_discord_embed_names_the_book_and_not_the_annotation():
     assert "Pinnacle" not in blob
     assert "Opener" not in blob
     assert "Wind" not in blob
-    assert "@ BetMGM" in embed["fields"][0]["value"]
-    assert "@ FanDuel" in embed["fields"][1]["value"]
+    assert "@ [BetMGM](" in embed["fields"][0]["value"]
+    assert "@ [FanDuel](" in embed["fields"][1]["value"]
     # A stored opener label still puts BetMGM on the price line.
     old = dn._signal_field(_sig(model_id="nfl_opener_spread", label=OLD_OPENER))
     assert old["name"] == SHOWN_OLD_OPENER
-    assert "@ BetMGM" in old["value"]
+    assert "@ [BetMGM](" in old["value"]
 
 
 def test_the_line_check_passes_for_both_label_shapes():
@@ -238,7 +238,7 @@ def test_fd_and_mgm_prices_are_named_on_discord_and_x():
         assert f"at {shown}" in tweet
         embed = dn._signal_field(row)
         assert embed["name"] == label_without_stake(label)
-        assert f"@ {shown}" in embed["value"]
+        assert f"@ [{shown}](" in embed["value"]
 
 
 def test_push_still_reads_both_labels():
