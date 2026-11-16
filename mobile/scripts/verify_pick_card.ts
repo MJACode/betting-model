@@ -48,7 +48,8 @@ import {
   signalsModelCaption,
   signalsNowLine,
   nowLineTone,
-  nowLineToneSpeech,
+  signalsMoveLine,
+  signalsMoveRow,
   signalsPriceText,
   signalsReasonLine,
   signalsStakeLine,
@@ -1578,9 +1579,9 @@ check(
       !/flexBasis: '100%'/.test(card),
   );
   check(
-    'Signals movement chip uses a true minus; the board chip does not',
-    card.includes('trueMinus(movementSummary.label)') &&
-      card.split('trueMinus(movementSummary.label)').length === 2,
+    'Signals shows ONE move row (no Now line under the hero); the board keeps its chip',
+    card.includes('{signalsMove}') && !card.includes('trueMinus(movementSummary.label)') &&
+      card.includes('{movementSummary.label}') && !/\{signalsNow \? \(/.test(card),
   );
   check(
     'a later day joins the clock; today stays the clock',
@@ -1649,13 +1650,61 @@ check(
   check('price -110 -> -115, same line: worse', t('totals', 'over', 9, null, -110, -115) === 'worse');
   check('+100 vs -100 is the same payout: neither', t('h2h', 'away', null, null, 100, -100) === null);
   check('nothing moved: neutral', t('spreads', 'home', -3.5, null, -110, null) === null);
-  check('VoiceOver words carry the direction',
-    nowLineToneSpeech('better') === 'better than the pick' && nowLineToneSpeech('worse') === 'worse than the pick' && nowLineToneSpeech(null) === '');
   const card = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf8');
-  check('PickCard colours the Now line with the inks and an arrow, and speaks the tone',
-    /signalsNowTone === 'better' && styles\.nowLineBetter/.test(card) &&
-    /nowLineBetter: \{ color: colors\.betInk \}/.test(card) && /nowLineWorse: \{ color: colors\.avoidInk \}/.test(card) &&
-    /'arrow-up' : 'arrow-down'/.test(card) && /nowLineToneSpeech\(signalsNowTone\)/.test(card));
+  check('PickCard shows the move row only when the deciding book moved AGAINST the pick, in the red ink',
+    /!signals \|\| !\(pregame \|\| pick\.is_live === true\)/.test(card) &&
+    /move: signalsMoveSpoken/.test(card) &&
+    /\{signalsMove && hero\.has\('movement'\)[\s\S]{0,200}color=\{colors\.avoidInk\}/.test(card) &&
+    /moved against this pick/.test(card) &&
+    !/nowLineBetter|nowLineWorse/.test(card));
+  // The words (Matt, 2026-11-16): line change, then the price change in parentheses.
+  const mv = (o: Parameters<typeof signalsMoveLine>[0]) => signalsMoveLine(o);
+  check('line and price moved: "DK line 145.5 → 142.5 (−105 → −108)"',
+    mv({ book: 'DK', lockedLine: '145.5', nowLine: '142.5', lockedPrice: '-105', nowPrice: '-108' }) ===
+      `DK line 145.5 → 142.5 (${MINUS}105 → ${MINUS}108)`);
+  check('line moved, same price: the price once',
+    mv({ book: 'DK', lockedLine: '-3.5', nowLine: '-4.5', lockedPrice: '-110', nowPrice: null }) ===
+      `DK line ${MINUS}3.5 → ${MINUS}4.5 (${MINUS}110)`);
+  check('price moved, same line: the line once, the price change in parentheses',
+    mv({ book: 'FD', lockedLine: '9', nowLine: null, lockedPrice: '-110', nowPrice: '-120' }) ===
+      `FD line 9 (${MINUS}110 → ${MINUS}120)`);
+  check('moneyline: price change only',
+    mv({ book: 'DK', lockedLine: null, nowLine: null, lockedPrice: '+120', nowPrice: '+105' }) === 'DK price +120 → +105');
+  // signalsMoveRow: the row the card shows, from the card's numbers.
+  const fl = (l: number) => formatSideLine(l, 'under', 'totals');
+  const fp = (p: number) => formatAmerican(p);
+  const row = (o: Partial<Parameters<typeof signalsMoveRow>[0]>) =>
+    signalsMoveRow({ market: 'totals', side: 'under', scoredLine: 145.5, book: 'DK', fmtLine: fl, fmtPrice: fp,
+      source: { kind: 'hero', movedLine: null, lockedPrice: -105, nowPrice: null }, ...o });
+  check('the screenshot: Under 145.5 −105 → DK 142.5 −108 is against the pick',
+    row({ source: { kind: 'hero', movedLine: 142.5, lockedPrice: -105, nowPrice: -108 } }) ===
+      `DK line 145.5 → 142.5 (${MINUS}105 → ${MINUS}108)`);
+  check('a move in the bettor\'s favour shows nothing (Under 145.5 → 148.5)',
+    row({ source: { kind: 'hero', movedLine: 148.5, lockedPrice: -105, nowPrice: -115 } }) === null);
+  check('same line, worse price shows the price change',
+    row({ source: { kind: 'hero', movedLine: null, lockedPrice: -105, nowPrice: -120 } }) ===
+      `DK line 145.5 (${MINUS}105 → ${MINUS}120)`);
+  check('same line, better price shows nothing',
+    row({ source: { kind: 'hero', movedLine: null, lockedPrice: -105, nowPrice: +100 } }) === null);
+  check('nothing moved: nothing',
+    row({ source: { kind: 'hero', movedLine: null, lockedPrice: -105, nowPrice: null } }) === null);
+  // "Old price" card: decided at FD −105, read at DK (the scored book). DK's
+  // price is not FD's, so the row never sets one against the other.
+  const oldPrice = row({ book: 'DK', source: { kind: 'scored', line: 142.5 } });
+  check('Old price card (FD decided, DK scored): DK line only, never FD\'s price under DK\'s name',
+    oldPrice === 'DK line 145.5 → 142.5' && !oldPrice.includes('105'), oldPrice ?? '');
+  check('Old price card: no line move, no row',
+    row({ source: { kind: 'scored', line: 145.5 } }) === null && row({ source: { kind: 'scored', line: null } }) === null);
+  check('moneyline: price only, named',
+    signalsMoveRow({ market: 'h2h', side: 'home', scoredLine: null, book: 'DK', fmtLine: fl, fmtPrice: fp,
+      source: { kind: 'hero', movedLine: null, lockedPrice: 120, nowPrice: 105 } }) === 'DK price +120 → +105');
+  check('spread, away side (stored home −3.5 = away +3.5) to home −2.5: worse, printed from the away side',
+    signalsMoveRow({ market: 'spreads', side: 'away', scoredLine: -3.5, book: 'DK',
+      fmtLine: (l) => formatSideLine(l, 'away', 'spreads'), fmtPrice: fp,
+      source: { kind: 'hero', movedLine: -2.5, lockedPrice: -110, nowPrice: -110 } }) === 'DK line +3.5 → +2.5 (' + MINUS + '110)');
+  check('nothing moved: no row',
+    mv({ book: 'DK', lockedLine: '9', nowLine: null, lockedPrice: '-110', nowPrice: null }) === null &&
+      mv({ book: 'DK', lockedLine: '9', nowLine: '9', lockedPrice: '-110', nowPrice: '-110' }) === null);
 }
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILURE(S)`);
