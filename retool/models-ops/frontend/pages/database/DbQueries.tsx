@@ -140,8 +140,9 @@ export default function DbQueries({ data, loading, error }: Props) {
                     {isOpen ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
                   </TableCell>
                   <TableCell className="max-w-[560px] px-3 py-2">
-                    <div className={cn('sb-code whitespace-pre-wrap break-words text-foreground', !isOpen && 'line-clamp-2')}>
-                      {q.query}
+                    {/* Collapsed: one flowing line of text. Open: the statement as Postgres stored it. */}
+                    <div className={cn('sb-code break-words text-foreground', isOpen ? 'whitespace-pre-wrap' : 'line-clamp-2')}>
+                      {isOpen ? q.query : q.query.replace(/\s+/g, ' ').trim()}
                     </div>
                     {isOpen && (
                       <div className="mt-1.5 text-[11px] text-muted-foreground">

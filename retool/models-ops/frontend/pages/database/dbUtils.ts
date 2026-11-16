@@ -1,4 +1,5 @@
-// Number helpers for the Database tab. Pure functions, unit-tested in dbUtils.test.ts.
+// Number helpers for the Database tab. Pure functions. (Retool refuses test files while
+// the app has testing off, measured 2026-11-16, so they are checked on the loaded tab.)
 
 export type HealthPoint = {
   taken_at: string

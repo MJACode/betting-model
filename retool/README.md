@@ -112,6 +112,20 @@ What did **not** work, or is still unknown:
   writes" check did not flag `setModelVolume`. That function writes through a
   database function call, which looks like a read.
 
+**Two traps measured 2026-11-16** (the Database tab push):
+
+- **Retool's database driver binds `$1, $2…` in the order the placeholders
+  first appear in the SQL text, not by their numbers.** `SELECT $2::text AS
+  second, $1::text AS first` with `['A', 'B']` returned `second = 'A'`. A
+  query whose `JOIN ... $2` comes before `WHERE ... $1` silently swaps the
+  values and returns nothing. Number placeholders top to bottom. Every
+  function was checked on 2026-11-16 and all are in order.
+- **Retool refuses test files while the app has testing off.** The import
+  left `frontend/pages/database/dbUtils.test.ts` out ("refused because testing
+  is off"), so a `*.test.ts` file here can never match Retool and `check`
+  would fail on it. There are none. The same setting means `vitest run`
+  checks nothing here.
+
 **Routes that do not work**, measured the same day:
 
 - Retool's builder cannot download anything. Its shell allows only a few
