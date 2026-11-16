@@ -14,7 +14,6 @@ import {
   ATD_HIT_W,
   ATD_MATCHUP_W,
   ATD_MATCHUP_WORD_W,
-  ATD_ODDS_W,
   ATD_STACK_FONT_SCALE,
   BLEND_UNTIL_TEAM_GAMES,
   TIER_FLOORS,
@@ -54,7 +53,7 @@ check(
     && ATD_MATCHUP_WORD_W * (matchupHeaderFontSize(1.2) / FONT_SIZE_MICRO) * 1.2 + ATD_HEADER_ARROW_W <= ATD_MATCHUP_W + 0.01,
 );
 check('the header size is the shared micro constant', FONT_SIZE_MICRO === 11 && matchupHeaderFontSize(1, ATD_MATCHUP_W, FONT_SIZE_MICRO) === FONT_SIZE_MICRO);
-check('columns are Hit 40, Matchup 66, Price 62', ATD_HIT_W === 40 && ATD_MATCHUP_W === 66 && ATD_ODDS_W === 62);
+check('columns are Hit 40, Matchup 66', ATD_HIT_W === 40 && ATD_MATCHUP_W === 66);
 
 check('1st 2nd 3rd 4th', ordinal(1) === '1st' && ordinal(2) === '2nd' && ordinal(3) === '3rd' && ordinal(4) === '4th');
 check('11th 12th 13th stay th', ordinal(11) === '11th' && ordinal(12) === '12th' && ordinal(13) === '13th');
@@ -244,7 +243,7 @@ check(
     && !ATD_COPY.infoBody.includes('toughest'),
 );
 check('the board fetches only groups its rows use', groupsUsedByBoard(['WR', 'TE', 'K', 'FB']).join(',') === 'RB,WR,TE' && groupsUsedByBoard(['CB']).join(',') === 'DB' && groupsUsedByBoard([null, 'OL']).length === 0);
-check('headers are HIT %, MATCHUP, BEST', ATD_COPY.hitHeader === 'HIT %' && ATD_COPY.header === 'MATCHUP' && ATD_COPY.priceHeader === 'BEST');
+check('headers are HIT % and MATCHUP; the price header is the shared book label', ATD_COPY.hitHeader === 'HIT %' && ATD_COPY.header === 'MATCHUP' && !('priceHeader' in ATD_COPY));
 check('the unavailable note is one sentence', ATD_COPY.unavailableNote === 'Defense ranks didn’t load. Ranked matchups say Unavailable.');
 check('a partial load names the groups that failed', ATD_COPY.partialNote === 'Some defense ranks didn’t load. Those matchups say Unavailable.');
 

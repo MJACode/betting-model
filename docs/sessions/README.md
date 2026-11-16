@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Stats boards: NFL Anytime TD uses the same price column as every other board (HIT, price, MATCHUP; DK green) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Signals card: one line-movement row (line change, price change in parentheses), shown only when the deciding book moved against the pick |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Scoreboard splits switch to DraftKings' own numbers (DK Network), opening-move arrow, append-only splits history |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Ops dashboard: a Database tab (reads the hourly database health) and a SignalBase redesign of every tab (presentation only); Retool's driver binds $N in the order the placeholders appear |
