@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, why the women's models trail the men's (first-half prices, DraftKings on one game in ten, this season's halftime books); in-play bets away from DraftKings' number were never stored: 20 of 24 men's, 13 of 22 women's (fixed) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Database health recorded hourly (worker job db_health_snapshot: db_health_snapshots every hour, every table's size and the heaviest statements every 6 h); pg_stat_statements total is not monotonic, so load comes from pg_stat_database.active_time |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: Hong Kong pools before the off (2016–2018) and UK/Ireland at starting price (1988–2026), both null; free sets stored first (#1387, PC mirror now copies huge rows); UK loader year filter fixed |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Scoreboard follow-up: one sport's DB error no longer skips the others' live scores; live-score chunks read in parallel; UFC game screen has no Spread block |
