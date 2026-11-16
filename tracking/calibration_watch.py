@@ -283,18 +283,6 @@ def collect_summary(conn, today: date | None = None) -> dict:
     return summary
 
 
-def format_finding_lines(summary: dict) -> list[str]:
-    """Deltas for the Monday digest. Empty when nothing changed.
-
-    The standing auto-pause caveat is not repeated here. It is true every
-    Monday and would make a quiet digest look like it had news.
-    """
-    findings = list(summary.get("findings") or [])
-    if not findings:
-        return []
-    return findings + [IN_SAMPLE_CAVEAT]
-
-
 def run_calibration_watch(conn, today: date | None = None) -> dict:
     if not _enabled():
         logger.info("calibration_watch: disabled by RUN_CALIBRATION_WATCH")
@@ -313,13 +301,13 @@ def run_calibration_watch(conn, today: date | None = None) -> dict:
 
 
 def _announce_and_ledger(conn, summary: dict, run_day: date) -> bool:
-    """Kept so a caller can still ledger a confirmed post. The cron does not."""
+    """Post the Monday 9:00 judgement and ledger it only after Discord confirms."""
     return post_and_ledger(conn, "calibration_watch", run_day,
                            lambda: _announce(summary))
 
 
 def format_post(s: dict) -> tuple[str, str, int]:
-    """Title, body, colour. The Monday digest uses the finding lines, not this."""
+    """Title, body, and colour for the Monday 9:00 calibration post."""
     if s.get("status") == "no_sweep":
         title, colour = "📐 Calibration watch — no sweep to judge", 0xE74C3C
         body = "\n".join(f"• {f}" for f in s["findings"])
