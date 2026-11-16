@@ -62,6 +62,27 @@ proxy returned 403 for the rest, including every site above that answered
 from mike's PC). Those refusals describe the cloud sandbox, not the sites, so
 they are not recorded here: re-probe from mike's PC, during a build.
 
+**Re-probe from mike's PC, 2026-11-16** (curl with a browser user agent, redirects
+not followed unless said). Unchanged from the table: reddit.com and old.reddit.com
+403; cris.unibo.it and iris.uniroma4.it 403; euroleaguebasketball.net 429;
+forum.sportsbookreview.com no answer (000) while sportsbookreview.com/forum/ 200;
+arXiv 200; Kaggle 200; econpapers, centaur.reading.ac.uk, bettingexpert.com,
+tennis-data.co.uk's block (now a plain 403), the ESPN tennis scoreboard, Pinnacle's
+public matchups API, TennisExplorer, the robots.txt of OddsPortal, BetExplorer,
+Flashscore, bestfightodds and tapology all 200 (tapology and bestfightodds as
+before, the file is read, not the pages). Followed redirects, all 200: Pinnacle's
+`/en/betting-articles/` (301 unfollowed), eurohoops.net, basketnews.com, oddspapi.io,
+covers.com/forum. Betfair data site's commission page 200; promo.betfair.com and
+historicdata.betfair.com 403. Changed: **racing.draftkings.com now 200 (was 403 on
+2026-11-15)**, drf.com 403 (listed as answering on 2026-11-15; bloodhorse.com and
+horseracingnation.com 200), twinspires.com no answer, eprints.soton.ac.uk 401 (was
+403), oddschecker.com, geegeez.co.uk, hub.hku.hk 403. Sackmann's `tennis_atp` still
+404; the archive's raw file 200. `WebSearch` answered (2026-11-16): vendor blogs and
+unverified studies on closing line value, no peer-reviewed paper; `gh search repos`
+answered with an empty list for one query. A change from 2026-11-15 on drf.com and
+racing.draftkings.com may be the user agent, not the site: the earlier probes did
+not record theirs.
+
 Not yet probed, worth trying: sports-analytics conference papers (the MIT
 Sloan conference), journals (Journal of Quantitative Analysis in Sports,
 Journal of Sports Analytics, International Journal of Forecasting), sharp

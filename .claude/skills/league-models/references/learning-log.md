@@ -30,6 +30,51 @@ review as its own entry.
 
 ---
 
+## 2026-11-16 — Review
+
+1. **Scope.** The weekly self-review, run on mike's PC. Since: the
+   2026-11-13 Review (second, from mike's PC) entry (merged as 267733a5).
+2. **Tried.** `git log` on master since: 368 commits. `config.py` gained eight
+   model ids in `ACTION_THRESHOLDS` (`atp_moneyline_shop`, `wta_moneyline_shop`,
+   `euroleague_home_ml`, `euroleague_h1_dog_ml`, `euroleague_home_dog_spread`,
+   `euroleague_live_spread_ht`, `euroleague_q1_club_share_total`,
+   `ufc_open_moneyline`) and lost three (`ufc_moneyline`, `ufc_total_rounds`,
+   `ufc_method_of_victory`, retired 2026-11-13); each added model is already
+   named in this log, so no gap to fill. **Live records, read directly and
+   read-only** (settled BETs by `model_id`, units on the posted stake, all
+   time / since 2026-11-13 14:00 UTC): `ncaaf_over_under` 105 bets 62-43,
+   +14.42 units, +12.4% / 1 bet; `nba_prop_projection` 99 bets 41-58, -2.54,
+   -3.2% / 15 bets -2.12; `ncaab_first_half_total` 82 bets 51-31, +13.07,
+   +13.0% / 10 bets +7.55; `ncaaf_live_total` 98 bets, -5.20, -4.4% (no new
+   bets); `mlb_live_total_runs` 162 bets, +18.90, +9.5% (no new bets);
+   `nhl_moneyline` since its rebuild (2026-10-15) 61 bets 32-29, +2.70,
+   +4.1% (all time 67, -0.29, -0.4%); `nfl_wind_totals` 38 bets +1.50, +3.7%
+   (under 50). Under 50 settled bets, nothing changed: `ncaab_first_half_spread`
+   39 (+10.62, +23.7%), `nba_total_luck` 27 (-0.7%), `nba_team_total_luck` 31
+   (-14.4%), `nba_first_half_total_luck` 18, `ncaabw_total_blend` 9,
+   `ncaabw_live_total_ht` 9 (-3.84, -37.4%), `ncaab_total_blend` 2,
+   `nfl_live_leader_ml` 6, `ncaaf_moneyline_market` 7 (+0.72),
+   `ufc_open_moneyline` none settled under that id yet (`ufc_moneyline` 5
+   bets and `ufc_total_rounds` 7 are the retired models), the EuroLeague and
+   tennis models none settled. The tennis models' rows are absent from `picks`
+   (no settled BET by that id).
+3. **New.** Scouting routes re-probed from this PC and dated in `scouting.md`:
+   racing.draftkings.com now answers 200 (403 on 2026-11-15), drf.com 403,
+   twinspires.com no answer, eprints.soton.ac.uk 401. The earlier probes did
+   not record a user agent, so those four changes may be the agent, not the
+   site; this run used a browser one.
+4. **Corrected.** No claim was contradicted. Two annotations moved: the
+   college football totals live figure in `methods.md` (was 94 bets +9.76
+   units, now 105 bets +14.42 units, +12.4%, because 11 more settled) and the
+   pro basketball projection line (was 84 bets -0.42 units -0.6%, now 99 bets
+   -2.54 units -3.2%, because 15 more settled; the verdict is unchanged: 99
+   bets against a 66,588-bet backtest cannot overturn it, but the live return
+   has turned from "about zero" to "below zero" and is the one to watch).
+5. **The framework.** Nothing changed. Open: the log has 14 entries since
+   the last Review, past the "every fifth entry" whole-log read; this run
+   checked each entry's Corrected line for a repeat and found none promoted,
+   but did not re-read every entry in full.
+
 ## 2026-11-16 — Horse racing: Hong Kong before the off, and UK/Ireland at starting price
 
 1. **League and scope**: thoroughbred racing (mike, 2026-11-15: *"lets use the

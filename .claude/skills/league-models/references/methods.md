@@ -52,7 +52,7 @@ error.
   bet only when the model is 8+ points from the line; average the fit over
   seeds. *Live*: college football totals, 346 bets +9.35% (interval -2.2 to
   +21.0) in the live shape, positive under all 11 seeds, and 94 real 2026 bets
-  +9.76 units. (`docs/ncaaf_market_audit.md` §2, §4)
+  +9.76 units (2026-11-13), 105 bets 62-43 +14.42 units +12.4% (re-read 2026-11-16). (`docs/ncaaf_market_audit.md` §2, §4)
 - *Failed*: the anchored recipe on pro basketball found nothing; the women's
   college sides off the ratings had β near zero ("the line already holds it").
   UFC props at five US books, 2021-2026: nothing on KO/TKO, submission,
@@ -334,7 +334,7 @@ edge is where the rule misses something the state shows.
 - Pro football: 11 of 11 stat-projection props lost (2,133 bets -1.90%); the
   book prices its main line flat and the information test found nothing the
   line lacked. Pro basketball: a minutes × rate projection is live (66,588 bets
-  +3.60% in the backtest; live `nba_prop_projection`, all settled to 2026-11-13: 84 bets 36-48, -0.42 units, -0.6%, too few to overturn the backtest, reviewed 2026-11-13). Hockey: count models on their own probability worked on unders.
+  +3.60% in the backtest; live `nba_prop_projection`, all settled to 2026-11-13: 99 bets 41-58, -2.54 units, -3.2% on 2026-11-16 (was 84 bets, -0.42 units, -0.6% on 2026-11-13); under 100 bets against a backtest of 66,588, an interval that wide cannot overturn it, but it has not confirmed it either; reviewed again 2026-11-16). Hockey: count models on their own probability worked on unders.
 - **The architecture is a decision before code**
   (`docs/nfl_props_build_prompt.md`): one model across prop markets, one per
   market, or a shared usage core feeding per-market heads. Decide from the
