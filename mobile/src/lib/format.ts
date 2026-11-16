@@ -653,12 +653,66 @@ export type GameStartState = 'pre' | 'live' | 'over' | 'postponed';
  *    A postponement after the scheduled start can't be told apart from an
  *    ended game on this data and still reads 'over'.
  */
+/** How far past the start a pick was made for its game must now start to be
+ *  a postponement. 48 hours: where the settler voids it (PR #1375) and where
+ *  Fanatics' and BetMGM's postponement rules both void the bet. */
+export const POSTPONED_MOVE_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * The game's new start when it now starts more than POSTPONED_MOVE_MS after
+ * the start the pick was made for (`scheduledStart`, the pick's game_time);
+ * else null. NCAAB Washington @ Utah: bet for 2026-11-15 19:00Z, moved to
+ * 2026-12-06 00:00Z. A move inside the window is a new tip time, not this.
+ */
+export function postponedStart(
+  game: GameLike | null | undefined,
+  scheduledStart: string | null | undefined,
+): string | null {
+  const moved = game?.commence_time;
+  if (!moved || !scheduledStart) return null;
+  const a = parseStamp(scheduledStart).getTime();
+  const b = parseStamp(moved).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return b - a > POSTPONED_MOVE_MS ? moved : null;
+}
+
+/** "Postponed · now Sat, 12/5" — the time line for a pick whose game moved. */
+export function postponedLabel(newStart: string): string {
+  const day = (() => {
+    try {
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', weekday: 'short', month: 'numeric', day: 'numeric',
+      }).format(parseStamp(newStart));
+    } catch {
+      return '';
+    }
+  })();
+  return day ? `Postponed · now ${day}` : 'Postponed';
+}
+
+/** The same, spoken: "Postponed, now Saturday, December 5". */
+export function postponedSpeech(newStart: string): string {
+  const day = (() => {
+    try {
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', weekday: 'long', month: 'long', day: 'numeric',
+      }).format(parseStamp(newStart));
+    } catch {
+      return '';
+    }
+  })();
+  return day ? `Postponed, now ${day}` : 'Postponed';
+}
+
 export function gameStartState(
   game: GameLike | null | undefined,
   live?: LiveStateLike | null,
   scheduledStart?: string | null,
   now: number = Date.now(),
 ): GameStartState {
+  // The game was moved days past the start this pick was made for: the bet
+  // is void at the books, so it is called off here, never 'pre' again.
+  if (postponedStart(game, scheduledStart)) return 'postponed';
   const start = game?.commence_time || scheduledStart || null;
   const scored = game?.home_score != null && game?.away_score != null;
   if (!scored && live?.abstract_game_state === 'Final' && live.home_score == null && live.away_score == null && start) {

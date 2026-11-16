@@ -78,7 +78,12 @@ adds three kinds and a trail.
 **The trail.** Every report from 2026-11-06 carries `extra.trail`: the last 40
 events as `[seconds before the report, kind, detail]` — `launch`, `screen`,
 `touch` (a run of taps is one entry, detail = count), `app_state`,
-`modal_open` / `modal_shown` / `modal_close` / `modal_dismissed`, `stall`.
+`modal_open` / `modal_shown` / `modal_close` / `modal_dismissed`, `back` (a tap
+on the React Back pill reached JS; detail `pop` / `replace` / `reset`, and a run on a dead
+Back is one crumb, `pop x12`; taps with no `back` never reached it; a `back` with no
+`screen` after it usually means the pop failed, but popping onto a screen of the same
+name logs no `screen`, so `pop xN` can include such pops that worked), `push` (`held`: a notification tap
+waited for the app to become active; `replay`: it then opened), `stall`.
 `extra.session` has `app_state`, `open_modals`, `touches_since_nav`,
 `since_last_touch_ms`. On a `restart` the trail's seconds count back from the
 last saved event of that session, not from the report.
