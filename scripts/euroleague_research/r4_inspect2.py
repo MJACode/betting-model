@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 from pathlib import Path
-C = Path(r"C:\Users\micha\euroleague_research\cache")
+C = Path(r"C:\Users\micha\Documents\betting-model\data\local\research\euroleague_research\cache")
 g = pd.read_parquet(C / "games.parquet")
 s = pd.read_parquet(C / "shots.parquet")
 h = pd.read_parquet(C / "halftime.parquet")

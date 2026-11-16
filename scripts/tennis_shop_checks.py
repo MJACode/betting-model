@@ -15,7 +15,7 @@ de-vig?
                best back prices on a thin market sum far from 1.05)
   power grid   the study's shop grid with the power de-vig, Pinnacle only
 
-    python -m scripts.tennis_shop_checks --candidates C:/Users/micha/tennis_research/cache/shop_candidates.parquet
+    python -m scripts.tennis_shop_checks --candidates C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache/shop_candidates.parquet
 """
 from __future__ import annotations
 

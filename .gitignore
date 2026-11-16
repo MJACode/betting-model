@@ -74,6 +74,13 @@ data/local/prop_dump/
 data/local/nba/
 data/local/*.csv
 data/local/over_lean*.csv
+# Research data moved in from the home folder (2026-11-16, CLAUDE.md §7):
+# spools and caches, gigabytes, never committed.
+data/local/research/
+# The always-on feeds' own copies of the project (DraftKings live board,
+# tennis), kept on origin/master by their launchers. Never committed, never
+# removed by a session.
+.claude/feeds/
 # Horse racing research downloads (scripts/horse/fetch_datasets.py).
 # Regenerable public files and the Equibase drop. Not committed.
 data/horse/

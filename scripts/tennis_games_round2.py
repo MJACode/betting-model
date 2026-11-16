@@ -132,13 +132,13 @@ Pinnacle at those four editions. The 2023 bets do not move (they use fits on
 2020-2022, which hold no such row); every 2024-2026 fit and the 2023
 out-of-sample read do. Default off, so the committed design run reproduces.
 
-    python -m scripts.tennis_games_round2 --cache C:/Users/micha/tennis_research/cache \\
-        --spool C:/Users/micha/tennis_research/spool \\
-        --save C:/Users/micha/tennis_research/cache/games_round2_quotes.parquet
-    python -m scripts.tennis_games_round2 --cache C:/Users/micha/tennis_research/cache \\
-        --spool C:/Users/micha/tennis_research/spool --drop-sets-markets \\
-        --save C:/Users/micha/tennis_research/cache/games_round2_quotes_clean.parquet
-    python -m scripts.tennis_games_round2 --cache C:/Users/micha/tennis_research/cache --round1-baseline
+    python -m scripts.tennis_games_round2 --cache C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache \\
+        --spool C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/spool \\
+        --save C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache/games_round2_quotes.parquet
+    python -m scripts.tennis_games_round2 --cache C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache \\
+        --spool C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/spool --drop-sets-markets \\
+        --save C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache/games_round2_quotes_clean.parquet
+    python -m scripts.tennis_games_round2 --cache C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache --round1-baseline
     python -m scripts.tennis_games_round2 --self-test
 """
 from __future__ import annotations

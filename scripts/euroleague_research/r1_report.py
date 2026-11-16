@@ -32,7 +32,7 @@ TEXT = r"""
 
 2026-11-13. Every number below was printed by a script in
 `scripts/euroleague_research/` (named above each table) reading only the local
-parquet cache (`C:\Users\micha\euroleague_research\cache`, a copy of
+parquet cache (`C:\Users\micha\Documents\betting-model\data\local\research\euroleague_research\cache`, a copy of
 Supabase) and, for full-game lines, the purchase spool for 2025-26 only. No
 database, no API call, no repo file edited.
 

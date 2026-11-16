@@ -1,7 +1,7 @@
 """Round 2 (full game): first look at the cache. Prints shapes, dtypes, heads."""
 import pandas as pd
 from pathlib import Path
-C = Path(r"C:\Users\micha\euroleague_research\cache")
+C = Path(r"C:\Users\micha\Documents\betting-model\data\local\research\euroleague_research\cache")
 for f in ["games", "periods", "fullgame_quotes"]:
     d = pd.read_parquet(C / f"{f}.parquet")
     print("=====", f, d.shape)

@@ -2,7 +2,7 @@
 
 FROZEN BEFORE ANY RESULT WAS READ (2026-11-13):
 
-  Data      the local parquet cache only (C:\\Users\\micha\\euroleague_research\\cache)
+  Data      the local parquet cache only (C:\\Users\\micha\\Documents\\betting-model\\data\\local\\research\\euroleague_research\\cache)
             and, for full-game lines, the purchase spool for 2025-26 only.
             No database, no API.
   Markets   spreads_h1, totals_h1, h2h_h1, spreads_q1, totals_q1, h2h_q1, at the
@@ -41,8 +41,8 @@ import numpy as np
 import pandas as pd
 
 REPO = Path(r"C:\Users\micha\documents\bm-euroleague-fix")
-CACHE = Path(r"C:\Users\micha\euroleague_research\cache")
-SPOOL = Path(r"C:\Users\micha\el_spool")
+CACHE = Path(r"C:\Users\micha\Documents\betting-model\data\local\research\euroleague_research\cache")
+SPOOL = Path(r"C:\Users\micha\Documents\betting-model\data\local\research\el_spool")
 
 DECIDABLE = ["fanduel", "betmgm", "betrivers", "fanatics", "draftkings"]
 OFFSHORE = ["betus", "gtbets", "mybookieag"]
