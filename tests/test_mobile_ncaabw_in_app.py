@@ -270,10 +270,13 @@ def test_the_model_page_says_when_the_womens_total_is_decided():
     flat = "".join(re.findall(r"'([^']*)'", branch))
     assert "at DraftKings’ opening total, usually within minutes of it posting" in flat
     assert "DraftKings opens most totals on the day of the game, some up to six days before" in flat
-    assert "only if DraftKings still offers that opening total at the same prices" in flat
+    # The best book at DraftKings' opening moment (mike, 2026-11-16): never "bets at DraftKings".
+    assert "takes the best total and price among the books that have one up" in flat
+    assert "only if DraftKings still offers its opening total at the same prices" in flat
+    assert "bets at DraftKings" not in flat.replace("’", "'") and "It bets at DraftKings" not in flat
     assert "it skips the game" in flat
     assert "An opening total can change within minutes" in flat
-    assert "check DraftKings’ total and price before you bet" in flat
+    assert "check the book’s total and price before you bet" in flat
     assert "never re-priced" in flat
     # The men's measurements, which are not the women's.
     for mens_only in ("the day before the game", "within half an hour"):
@@ -292,7 +295,7 @@ def test_the_pick_screen_says_posted_once_not_first_scoring_run():
     m = re.search(rf"pick\.model_id === '{NCAABW_TOTALS_ID}'\s*\n\s*\? '([^']*)'", body)
     assert m, "the women's totals model's Pick Detail note has no sentence of its own"
     assert "An opening total can change within minutes" in m.group(1)
-    assert "check DraftKings’ total and price before you bet" in m.group(1)
+    assert "check the book’s total and price before you bet" in m.group(1)
 
 
 # -- the board reaches a pick written before game day --------------------------
@@ -571,7 +574,8 @@ def test_the_empty_boards_say_where_the_womens_picks_are():
 
 def test_the_copy_says_a_pick_is_for_the_total_shown_not_a_later_one():
     """A pick at a different number is a different bet (CLAUDE.md 1c), and
-    "check the total" alone does not say so."""
-    assert "This pick is for the total and price shown, not a later one." in _read(MARKETS)
+    "check the total" alone does not say so. Since the best book (mike,
+    2026-11-16) the book is part of the bet too."""
+    assert "This pick is for the book, total and price shown, not a later one." in _read(MARKETS)
     meta = " ".join(re.sub(r"'\s*\+\s*'", "", _read(MODEL_META)).split())
-    assert "The pick is for the total and price shown, not a later one." in meta
+    assert "The pick is for the book, total and price shown, not a later one." in meta

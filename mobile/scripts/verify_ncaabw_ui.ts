@@ -108,11 +108,13 @@ check('its page says it decides at DraftKings\' opening total, usually on the da
     && timing.body.includes('at DraftKings’ opening total, usually within minutes of it posting')
     && timing.body.includes('DraftKings opens most totals on the day of the game, some up to six days before'),
   `${timing.title} | ${timing.body}`);
-check('its page says it bets only that opening total at the same prices, and that an opening total moves',
-  timing.body.includes('only if DraftKings still offers that opening total at the same prices')
+check('its page says it takes the best book at that moment, only while the opening total stands, and that it moves',
+  timing.body.includes('takes the best total and price among the books that have one up')
+    && timing.body.includes('only if DraftKings still offers its opening total at the same prices')
+    && !timing.body.includes('It bets at DraftKings')
     && timing.body.includes('it skips the game') && timing.body.includes('An opening total can change within minutes')
-    && timing.body.includes('check DraftKings’ total and price') && timing.body.includes('never re-priced')
-    && timing.note === 'Posted at DraftKings’ opening total and never re-priced.',
+    && timing.body.includes('check the book’s total and price') && timing.body.includes('never re-priced')
+    && timing.note === 'Posted when DraftKings’ total opens, at the best book, and never re-priced.',
   `${timing.body} | ${timing.note}`);
 check('its page does not carry the men\'s measurements',
   !allTiming.some((s) => s.includes('day before') || s.includes('half an hour')), allTiming.join(' | '));
@@ -137,9 +139,9 @@ const posted = pickTimingInfo(mkPick({}));
 check('its Pick Detail note says posted once, not the first scoring run of the day',
   !!posted && posted.kind === 'posted' && posted.note.startsWith('Posted once') && !posted.note.includes('first scoring run'),
   posted?.note ?? 'null');
-check('its Pick Detail note says an opening total moves, and to check DraftKings\' total and price',
+check('its Pick Detail note says an opening total moves, and to check the book\'s total and price',
   !!posted && posted.note.includes('An opening total can change within minutes')
-    && posted.note.includes('check DraftKings’ total and price before you bet') && !posted.note.includes('half an hour'),
+    && posted.note.includes('check the book’s total and price before you bet') && !posted.note.includes('half an hour'),
   posted?.note ?? 'null');
 
 // ── The women's extra books (config.NCAABW_EXTRA_BOOKMAKERS) ─────────────────
@@ -161,7 +163,7 @@ check('the four books only this feed carries have a label of their own, not a cl
 check('no three-letter label of the seven is another bettable book\'s',
   EXTRA.every((b) => !BETTABLE_BOOKS.some((x) => bookLabelShort(x) === bookLabelShort(b))),
   EXTRA.map((b) => bookLabelShort(b)).join(' '));
-check('DraftKings, the only book the model names, is still bettable', isBettableBook('draftkings'));
+check('DraftKings, where the model decides, is still bettable', isBettableBook('draftkings'));
 // A women's pick's line chips: DraftKings' locked price, and a bettable book
 // at the same total. Never one of the seven, and never a different total.
 const row = (bookmaker: string, total: number, over: number): BookPricedRow => ({

@@ -1565,15 +1565,16 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
       title: 'Decided when the total opens',
       body:
         'This model decides each game once, at DraftKings’ opening total, usually within minutes of it ' +
-        'posting. DraftKings opens most totals on the day of the game, some up to six days before. It bets ' +
-        'at DraftKings, and only if DraftKings still offers that opening total at the same prices. If the ' +
-        'total or a price has moved, it skips the game. An opening total can change within minutes: check ' +
-        'DraftKings’ total and price before you bet. The pick is for the total and price shown, not a ' +
-        'later one. A posted bet is never re-priced: it stays at the line and price it posted at.',
+        'posting. DraftKings opens most totals on the day of the game, some up to six days before. At that ' +
+        'moment it takes the best total and price among the books that have one up, and only if DraftKings ' +
+        'still offers its opening total at the same prices. If that total or a price has moved, it skips ' +
+        'the game. An opening total can change within minutes: check the book’s total and price before ' +
+        'you bet. The pick is for the book, total and price shown, not a later one. A posted bet is never ' +
+        're-priced: it stays at the line and price it posted at.',
       empty:
         'This model bets only some games, usually on the day of each one, as DraftKings opens its totals. ' +
         'Nothing has posted yet.',
-      note: 'Posted at DraftKings’ opening total and never re-priced.',
+      note: 'Posted when DraftKings’ total opens, at the best book, and never re-priced.',
     };
   }
   if (GAME_MORNING_MODELS.includes(modelId)) {
