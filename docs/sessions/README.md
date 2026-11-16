@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Scoreboard splits switch to DraftKings' own numbers (DK Network), opening-move arrow, append-only splits history |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Ops dashboard: a Database tab (reads the hourly database health) and a SignalBase redesign of every tab (presentation only); Retool's driver binds $N in the order the placeholders appear |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, odds re-buy covers every missing piece: extra markets, in-play, part-way props; NFL ids from the schedule; tested with 1,132 credits; whole plan 4,703,617 credits (#1384) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Database health recorded hourly (worker job db_health_snapshot: db_health_snapshots every hour, every table's size and the heaviest statements every 6 h); pg_stat_statements total is not monotonic, so load comes from pg_stat_database.active_time |
