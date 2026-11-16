@@ -55,31 +55,41 @@ _COUNTER = {"n": 0}
 @pytest.fixture()
 def db(cluster):
     """(the worker's connection wrapper, the raw connection) on a fresh database
-    with the two app roles and a DDL counter."""
+    with the two app roles, Supabase's default grants to them, and a DDL counter.
+
+    Supabase grants anon and authenticated rights on every new table and
+    sequence in public by default, so the first build's REVOKEs have real
+    grants to remove here, as they do in production. The per-test address is
+    built with make_dsn, so a URL-style LATEST_LINE_TEST_DSN works too, and
+    everything after CREATE DATABASE is inside the cleanup."""
     _COUNTER["n"] += 1
     name = f"pc_copy_t{_COUNTER['n']}_{int(time.time() * 1000) % 10_000_000}"
+    dsn = psycopg2.extensions.make_dsn(cluster, dbname=name)
+    assert dsn != cluster
     admin = psycopg2.connect(cluster)
     admin.autocommit = True
-    with admin.cursor() as cur:
-        for role in ROLES:
-            cur.execute(f"DO $$ BEGIN CREATE ROLE {role} NOLOGIN; "
-                        "EXCEPTION WHEN duplicate_object THEN NULL; END $$")
-        cur.execute(f"CREATE DATABASE {name}")
-    dsn = cluster.replace("dbname=postgres", f"dbname={name}")
-    raw = psycopg2.connect(dsn)
-    with raw.cursor() as cur:
-        cur.execute("CREATE TABLE ddl_seen (n integer NOT NULL)")
-        cur.execute("INSERT INTO ddl_seen VALUES (0)")
-        cur.execute("""CREATE FUNCTION count_ddl() RETURNS event_trigger LANGUAGE plpgsql AS
-                       $$ BEGIN UPDATE ddl_seen SET n = n + 1; END $$""")
-        cur.execute("CREATE EVENT TRIGGER count_ddl ON ddl_command_start EXECUTE FUNCTION count_ddl()")
-    raw.commit()
-    conn = DBConnection(raw, url=dsn)
+    raw = None
     try:
-        yield conn, raw
+        with admin.cursor() as cur:
+            for role in ROLES:
+                cur.execute(f"DO $$ BEGIN CREATE ROLE {role} NOLOGIN; "
+                            "EXCEPTION WHEN duplicate_object THEN NULL; END $$")
+            cur.execute(f"CREATE DATABASE {name}")
+        raw = psycopg2.connect(dsn)
+        with raw.cursor() as cur:
+            cur.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated")
+            cur.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated")
+            cur.execute("CREATE TABLE ddl_seen (n integer NOT NULL)")
+            cur.execute("INSERT INTO ddl_seen VALUES (0)")
+            cur.execute("""CREATE FUNCTION count_ddl() RETURNS event_trigger LANGUAGE plpgsql AS
+                           $$ BEGIN UPDATE ddl_seen SET n = n + 1; END $$""")
+            cur.execute("CREATE EVENT TRIGGER count_ddl ON ddl_command_start EXECUTE FUNCTION count_ddl()")
+        raw.commit()
+        yield DBConnection(raw, url=dsn), raw
     finally:
         try:
-            raw.close()
+            if raw is not None:
+                raw.close()
         finally:
             with admin.cursor() as cur:
                 cur.execute(f"DROP DATABASE IF EXISTS {name}")

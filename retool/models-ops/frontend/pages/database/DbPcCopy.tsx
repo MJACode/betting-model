@@ -60,6 +60,9 @@ type Props = {
 
 /** A night with no report: the copy runs at 00:30 and takes up to about ten hours. */
 const STALE_HOURS = 36
+/** The GitHub copy runs at the start of each nightly pass and takes minutes, so
+ *  a finish older than a day and six hours means a night went without one. */
+const GITHUB_STALE_HOURS = 30
 const DISK_WARN_SHARE = 0.15
 const DISK_CRIT_SHARE = 0.05
 
@@ -137,7 +140,10 @@ export default function DbPcCopy({ data, loading, error, now = Date.now() }: Pro
   // 2. Tables that differ from Supabase, at each table's latest check
   const differing = latest.differing_tables ?? []
   const failed = (nightly ?? latest).failed_tables ?? []
-  const diffTone: StatTone = differing.length || failed.length ? 'critical' : 'good'
+  // A table that could not be copied is a failure. A count that differs is
+  // usually rows that changed between the copy and its check (the next run
+  // takes them), so it asks for a look rather than raising an alarm.
+  const diffTone: StatTone = failed.length ? 'critical' : differing.length ? 'warning' : 'good'
   const diffCaption = differing.length
     ? `${differing.slice(0, 3).map(t => t.table.replace(/^public\./, '')).join(', ')}${differing.length > 3 ? ` and ${differing.length - 3} more` : ''}: row counts differ at the latest check`
     : `All ${fmtCount(latest.local_tables)} tables matched Supabase at their latest check`
@@ -161,9 +167,15 @@ export default function DbPcCopy({ data, loading, error, now = Date.now() }: Pro
   const ghStale = nightly != null && nightly.pass_started_at != null && nightly.github_finished_at != null
     && Date.parse(nightly.github_finished_at) < Date.parse(nightly.pass_started_at)
   const ghFailed = (latest.github_repos_failed ?? 0) > 0 || (nightly?.github_exit ?? 0) !== 0 || ghStale
+  const ghAge = latest.github_finished_at ? (now - Date.parse(latest.github_finished_at)) / 3_600_000 : null
+  const ghLate = ghAge == null || ghAge > GITHUB_STALE_HOURS
+  const ghTone: StatTone = ghFailed ? 'critical' : ghLate ? 'warning' : 'good'
+  const ghRepos = `${fmtCount(latest.github_repos)} repositories${latest.github_repos_failed ? `, ${latest.github_repos_failed} failed` : ''} · ${fmtBytes(latest.github_bytes)}`
   const ghCaption = ghStale
     ? `The last pass's GitHub copy did not finish${nightly?.github_exit ? ` (code ${nightly.github_exit})` : ''}. The last one that did: ${fmtUtc(latest.github_finished_at)}.`
-    : `${fmtCount(latest.github_repos)} repositories${latest.github_repos_failed ? `, ${latest.github_repos_failed} failed` : ''} · ${fmtBytes(latest.github_bytes)}`
+    : ghLate
+      ? `None has finished since ${fmtUtc(latest.github_finished_at)}, so a night went without one. ${ghRepos}`
+      : ghRepos
 
   const rows = points
     .filter(p => p.total_bytes != null)
@@ -198,7 +210,7 @@ export default function DbPcCopy({ data, loading, error, now = Date.now() }: Pro
           label="GitHub copy"
           value={fmtAgo(latest.github_finished_at, now)}
           caption={ghCaption}
-          tone={ghFailed ? 'critical' : 'good'}
+          tone={ghTone}
         />
       </div>
 

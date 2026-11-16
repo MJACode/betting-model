@@ -65,6 +65,8 @@ DEFAULT_ROOT = Path(r"C:\Users\micha\Documents\betting_local_copies")
 DEFAULT_ENV_FILE = Path(r"C:\Users\micha\documents\betting-model\.env")
 STATEMENT_TIMEOUT_S = 30
 CONNECT_TIMEOUT_S = 20
+WRITE_ATTEMPTS = 3
+RETRY_PAUSE_S = 30.0  # 30 s, then 60 s: under two minutes added to a pass
 SOURCES = ("nightly", "manual")
 STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 
@@ -361,6 +363,44 @@ def connect(url: str):
     return conn
 
 
+def _is_connection_error(exc: BaseException) -> bool:
+    """A failure to reach the database or a dropped connection, worth one more
+    try. A wrong statement or a refused value is not: trying again changes
+    nothing."""
+    try:
+        import psycopg2
+    except ImportError:
+        return False
+    return isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError))
+
+
+def write_with_retries(url: str, row: dict[str, Any], *, attempts: int = WRITE_ATTEMPTS,
+                       pause_s: float = RETRY_PAUSE_S, sleep=time.sleep) -> int | None:
+    """insert_row on a fresh connection, tried again after a connection error.
+
+    The nightly report runs once per pass, so a database that cannot be reached
+    for a minute would otherwise lose that night's row. Trying again is safe:
+    if a commit landed but its answer was lost, the next try finds the row and
+    keeps it (ON CONFLICT DO NOTHING) and returns None."""
+    for attempt in range(1, attempts + 1):
+        try:
+            conn = connect(url)
+            try:
+                return insert_row(conn, row)
+            finally:
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception as exc:  # noqa: BLE001
+            if attempt == attempts or not _is_connection_error(exc):
+                raise
+            print(f"write attempt {attempt} of {attempts} could not reach the database "
+                  f"({type(exc).__name__}); trying again in {pause_s * attempt:.0f} s", flush=True)
+            sleep(pause_s * attempt)
+    return None
+
+
 def _summary(row: dict[str, Any]) -> str:
     differing = json.loads(row["differing_tables"]) if row["differing_tables"] else []
     failed = json.loads(row["failed_tables"]) if row["failed_tables"] else []
@@ -412,11 +452,7 @@ def main(argv: list[str] | None = None) -> int:
         print("DATABASE_URL is not set and is not in the env file; no row written", flush=True)
         return 2
     try:
-        conn = connect(url)
-        try:
-            snapshot_id = insert_row(conn, row)
-        finally:
-            conn.close()
+        snapshot_id = write_with_retries(url, row)
     except Exception as exc:  # noqa: BLE001
         print(f"no row written: {scrub(exc)}", flush=True)
         return 3

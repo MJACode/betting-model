@@ -246,6 +246,52 @@ def test_a_failed_write_prints_no_database_address(copy_root, tmp_path, monkeypa
     assert "secret" not in out and "<database-url>" in out
 
 
+class _Conn:
+    def close(self):
+        pass
+
+
+def test_a_connection_error_is_tried_again_and_the_row_still_lands(monkeypatch):
+    psycopg2 = pytest.importorskip("psycopg2")
+    calls, pauses = [], []
+
+    def connect(url):
+        calls.append(url)
+        if len(calls) < 3:
+            raise psycopg2.OperationalError("server closed the connection unexpectedly")
+        return _Conn()
+
+    monkeypatch.setattr(rep, "connect", connect)
+    monkeypatch.setattr(rep, "insert_row", lambda conn, row: 7)
+    assert rep.write_with_retries("postgresql://x", {}, sleep=pauses.append) == 7
+    assert len(calls) == 3 and pauses == [30.0, 60.0]
+
+
+def test_a_database_that_stays_away_fails_the_report_and_a_wrong_statement_is_not_retried(monkeypatch):
+    psycopg2 = pytest.importorskip("psycopg2")
+    calls = []
+
+    def away(url):
+        calls.append(url)
+        raise psycopg2.OperationalError("could not connect to server")
+
+    monkeypatch.setattr(rep, "connect", away)
+    with pytest.raises(psycopg2.OperationalError):
+        rep.write_with_retries("postgresql://x", {}, sleep=lambda s: None)
+    assert len(calls) == 3
+
+    calls.clear()
+    monkeypatch.setattr(rep, "connect", lambda url: calls.append(url) or _Conn())
+
+    def wrong(conn, row):
+        raise psycopg2.ProgrammingError("column \"nope\" does not exist")
+
+    monkeypatch.setattr(rep, "insert_row", wrong)
+    with pytest.raises(psycopg2.ProgrammingError):
+        rep.write_with_retries("postgresql://x", {}, sleep=lambda s: None)
+    assert len(calls) == 1
+
+
 def test_it_runs_isolated_from_the_repo_as_the_task_runs_it(copy_root, tmp_path):
     """The task starts it as `python -I bin\\local_mirror_report.py` from a copy
     outside the repo: it must import nothing from here."""

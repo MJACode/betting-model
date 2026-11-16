@@ -133,6 +133,28 @@ click a row for its full text).
 stored, 1,352 ms of reads. History starts there; growth appears once the
 snapshots span an hour.
 
+**The PC copy tile** (2026-11-16; mike: "locals" is the copy on his PC). The
+copy of the whole Supabase project and of GitHub on mike's PC
+(`docs/local_ops.md`, "Local carbon copy") reports one row to
+`pc_copy_snapshots` when each nightly pass ends
+(`scripts/local_mirror_report.py`, run last by the LocalMirror task; rows by
+hand are marked so). Every number is read on the PC from the copy's own files,
+and the tile reads it through `backend/ops/getPcCopy.ts` (the last 120 days).
+Five cards:
+
+| Card | What it says | When it turns red or orange |
+|---|---|---|
+| Last nightly copy | how long ago the last nightly copy finished, when, how long it took, how many tables | red when the last nightly pass's copy did not finish, or ended with an error; orange when no nightly report has come for 36 hours |
+| Tables that differ | the tables whose latest exact-count check found a different number of rows than Supabase, and the tables the last run could not copy | red when a table could not be copied; orange when a count differs (usually rows that changed between the copy and its check, which the next run takes) |
+| Size of the copy | the bytes under the copy's folder: the database copy, GitHub, everything else, and the growth a day once there is a day of reports | never |
+| Free disk | free space on the PC's disk, and its share | orange under 15% free, red under 5% |
+| GitHub copy | when the GitHub copy last finished, how many repositories, how many failed | red when a repository failed, the last pass's GitHub copy ended with an error, or did not finish; orange when none has finished for 30 hours (it runs at the start of each nightly pass and takes minutes) |
+
+A table that changes all day, such as `latest_odds`, can show as differing.
+That is the copy's own check catching rows that changed between the copy and
+the count, and the next run takes them. Below the cards: the differing and
+failed tables, and each copy's size over time.
+
 **Layouts on this tab are not saved.** The layout functions accept four tab
 names and `dashboard_layouts` checks the same four; adding a fifth changes
 two functions that write (approval at publish) and the table's check. The
