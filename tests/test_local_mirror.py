@@ -575,6 +575,62 @@ def test_a_range_check_that_times_out_is_copied_again_not_failed(tmp_path):
     assert v.unchecked == 2 and v.error is None
 
 
+def test_a_page_of_huge_rows_halves_down_to_one_row_before_failing(monkeypatch):
+    """2026-11-15: 34 rows of 33.6 MB each (the UK/Ireland racing zip, in
+    parts) went into nfl_research_data_backup. Its average row size gave a
+    100-row batch, the batch hit the statement timeout, and the retry floor
+    (500 rows) sat above it, so the copy failed outright instead of halving.
+    A page must keep halving until one row fits, and fail only on one row."""
+    ext = pytest.importorskip("psycopg2.extensions")
+    monkeypatch.setattr(lm, "page_sql", lambda info, lo, hi: ("SELECT", []))
+    monkeypatch.setattr(lm, "_page_from_rows", lambda info, rows, n_keys: lm.Page([], len(rows), None, 0))
+    src = lm.PgSource.__new__(lm.PgSource)
+    src.log = lambda m: None
+    src._conn_obj = None
+    src._reset = lambda: None
+    asked = []
+
+    class Cur:
+        def execute(self, sql, params):
+            self.limit = params[-1]
+            asked.append(self.limit)
+
+        def fetchall(self):
+            if self.limit > 1:
+                raise ext.QueryCanceledError("canceling statement due to statement timeout")
+            return [("row",)]
+
+    src._run = lambda fn, **kw: fn(Cur())
+    info = lm.TableInfo("public", "t", [], ["id"], ["bigint"])
+    page = src.fetch_page(info, None, None, 100)
+    assert page.limit == 1
+    assert asked == [100, 50, 25, 12, 6, 3, 1]
+
+
+def test_page_size_follows_the_rows_just_read(tmp_path):
+    """After a page of huge rows the next page is one row, not the table's
+    batch size again (which would time out and halve once per huge row), and
+    it returns to the batch size when the rows are small again."""
+    src = seeded(30)
+    for i in (11, 12, 13):
+        src.rows[(i, f"k{i:03d}")] = (i, f"k{i:03d}", "x" * 5000)
+    asked = []
+    real = src.fetch_page
+
+    def spy(info, lo, hi, limit):
+        asked.append(limit)
+        return real(info, lo, hi, limit)
+
+    src.fetch_page = spy
+    mi = mirror(src, tmp_path)
+    mi.batch_bytes = 2000
+    mi.sync_table(src.info)
+    assert local(tmp_path) == server(src)
+    assert asked[0] == 10
+    assert 1 in asked, asked
+    assert asked[asked.index(1):].count(10) >= 1, asked
+
+
 def test_pg_source_narrows_a_timed_out_check_to_the_slow_range(monkeypatch):
     """PgSource splits a group whose check timed out, and reports only the
     range that times out on its own, as None."""

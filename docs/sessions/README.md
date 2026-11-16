@@ -19,7 +19,9 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord price line links the book name to that bet's slip (app betslip URL, Massachusetts, sportsbook page when there is no outcome id) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord pick posts link the matchup to the game score page (ESPN gamecast, scoreboard fallback) |
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Retool ops dashboard source moved into retool/models-ops/ (69 files, byte-exact); Protect app needs Enterprise (account on Team); push back via Retool's import tool proved end to end with a no-change publish to the live app (69/69 byte-identical, loads, #1382 closed) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, SQL over the PC copy: betting.duckdb, views over the Parquet files (269 tables, 258M rows checked in about a minute), rebuilt after each nightly copy |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Scoreboard covers every sport with games (12, chips only for sports with a game that day); NCAAB/NCAABW live scores via ESPN matched by event id; UFC finals W/L/D |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, NCAAB: Utah ML posted on a game postponed to Dec 5 (Washington @ Utah); ESPN ingestor now reads a game that left its date's board by event id; a BET whose game moved over 48h settles NO_ACTION (PR #1375) |
