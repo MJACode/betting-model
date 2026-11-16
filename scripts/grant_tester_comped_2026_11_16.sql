@@ -16,6 +16,9 @@
 -- 79e2efd9-3880-42dc-8873-4c9a36a797f8). Verified: email identity present,
 -- one comped grant with expires_at null, and has_app_access() = true when run
 -- as that user. Kept as the record and as the template for the next tester.
+-- Also applied the same day, same body with v_email changed, for
+-- bcook2929@gmail.com (user id b79e36c9-f0c5-4690-bf35-c7c56a653c2e),
+-- has_app_access() = true as that user.
 --
 -- Before the apply there was no auth.users row for this email, so
 -- the block below creates the email login in the shape GoTrue stores, then
