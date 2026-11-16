@@ -78,7 +78,10 @@ watch patterns limited to the in-play code and what it imports (most merges
 touch shared modules such as `config.py`, `data/`, `tracking/`, so the
 import surface would need narrowing first); (2) a merge gate that holds a
 code merge while in-play games are live, beside the daily-pipeline gate
-(`.github/workflows/daily-merge-gate.yml`).
+(`.github/workflows/daily-merge-gate.yml`). Since #1359 (2026-11-15) each
+in-play supervisor also runs 60-100 s after boot (5 s apart, college football
+first), so a restart costs a live game one to two minutes, not the rest of the
+night.
 
 ## [ ] UFC: next experiments on the bought history (2026-11-13)
 `ufc_open_moneyline` is live on merge (`docs/ufc_market_audit.md` §3d).

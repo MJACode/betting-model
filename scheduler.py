@@ -1099,8 +1099,12 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes the four EuroLeague pre-game rules' picks through
                   # their card, on its own period and full-game fetches.
                   "euroleague_pregame_window",
+                  # Writes one database health snapshot an hour; reads only
+                  # Postgres's own statistics. Not a loop.
+                  "db_health_snapshot",
                   # Queues the daily BYOM NFL refresh onto job_queue, which
-                  # is also a pipeline job.
+                  # is also a pipeline job. Keep it last: a test reads
+                  # '"byom_nfl_refresh"}' to pin it to the pipeline role.
                   "byom_nfl_refresh"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
@@ -1138,6 +1142,52 @@ _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
 # down, and vice versa. The cost is at most one duplicate alert during a
 # genuine outage, which is the right side of that trade.
 _ALWAYS_JOBS = {"heartbeat_watchdog"}
+
+
+# Run once just after boot, then on their own schedules (#1359). Each of these
+# supervisors fires only inside its window, so a container restarted after
+# 23:50 ET waited until 11:00 ET to relaunch the college football and MLB
+# loops. On 2026-11-14 a 23:59 ET restart left North Dakota State at Hawai'i
+# without its in-play model for the second half. Inside a window a restart
+# still left up to 10 minutes uncovered.
+#
+# Each entry is the supervisor's OWN job, given a first run time, never a second
+# job: max_instances=1 is per job, so a separate boot job could start a second
+# copy of a loop the cron had already started. Every loop here exits by itself
+# when nothing is live, so a boot run with no game on is one idle check. The
+# pre-game poller never exits, and its boot run only closes its first 10 minutes.
+#
+# Not here: dk_direct_feed and bovada_feed run their full --minutes whether or
+# not a game is live (15 minutes of polling at 04:40 ET for nothing).
+#
+# The delay clears the old container. Railway stops it once the new one is
+# active (docs/cloud_worker.md), its scheduler passes the stop to its loops
+# (tracking/deploy_drain.py), and no loop handles the signal, so each stops at
+# once. On 2026-11-14 the old college football loop stopped in the same second
+# the new scheduler started (its heartbeat, 23:59:17 ET); on 2026-11-15 the old
+# in-play container was removed 3 s after the new one went live. Nothing outside
+# one process stops two copies of a loop, so the margin matters. The stagger
+# keeps the loops from starting in the same second.
+BOOT_RELAUNCH_JOBS = ("ncaaf_live_loop", "live_loop", "nfl_live_leader",
+                      "nfl_live_worker", "nba_live", "ncaab_live", "ncaabw_live",
+                      "euroleague_live", "pregame_poller")
+BOOT_RELAUNCH_DELAY_S = 60
+BOOT_RELAUNCH_STAGGER_S = 5
+
+
+def schedule_boot_relaunch(sched, now, delay_s: float = BOOT_RELAUNCH_DELAY_S,
+                           stagger_s: float = BOOT_RELAUNCH_STAGGER_S) -> dict:
+    """Give each in-play supervisor this service runs a first run just after
+    `now`. Call before sched.start(). Returns {job id: first run time}; a job
+    this service does not run, or that its switch turned off, is not there."""
+    runs = {}
+    for jid in BOOT_RELAUNCH_JOBS:
+        if sched.get_job(jid) is None:
+            continue
+        at = now + timedelta(seconds=delay_s + len(runs) * stagger_s)
+        sched.modify_job(jid, next_run_time=at)
+        runs[jid] = at
+    return runs
 
 
 def owns(job_id: str) -> bool:
@@ -1651,6 +1701,23 @@ def run_kalshi_game_record() -> None:
     except Exception as exc:                                   # noqa: BLE001
         log.warning("kalshi game market record failed: %s: %s",
                     type(exc).__name__, exc)
+
+
+def run_db_health_snapshot() -> None:
+    """One database health snapshot (tracking/db_health.py), for the ops
+    dashboard's Database tab (mike, 2026-11-15).
+
+    Reads Postgres's own statistics and file sizes, never a table scan, and
+    inserts one row (plus every table's size and the heaviest statements every
+    six hours). It is allowed to raise: the heartbeat records the failure and
+    the failure alerter reports it, so a broken snapshot is not a quiet one.
+    """
+    from tracking.db_health import run_db_health_snapshot as snapshot
+
+    got = snapshot(source="worker")
+    log.info("db health: snapshot %s, %s tables, %s statements, %s ms",
+             got.get("snapshot_id"), got.get("tables"), got.get("statements"),
+             got.get("read_ms"))
 
 
 def run_nfl_prop_card() -> None:
@@ -3731,6 +3798,21 @@ def build_scheduler() -> BlockingScheduler:
         name="Kalshi NCAAF game markets (07:25 ET catch-up after the morning disk window)",
     )
 
+    # Minute 50: clear of the :17 refresh pass, the :25 prop card, the :32 and
+    # :37 Kalshi recorders and the :40/:45 inserts. The morning disk gate
+    # (MAINTENANCE_JOBS) turns away the 05:50 and 06:50 ticks, and before noon
+    # ET any tick while the daily still holds its lock. No catch-up: the
+    # counters are running totals, so the next row still carries what happened
+    # in the gap; only the point-in-time readings (connections, waiting locks,
+    # the oldest open transaction) have no reading for those hours.
+    sched.add_job(
+        run_db_health_snapshot,
+        CronTrigger(minute=50, timezone=TIMEZONE),
+        id="db_health_snapshot",
+        name="Database health snapshot (size, rows, connections, heaviest statements)",
+        max_instances=1, coalesce=True, misfire_grace_time=600,
+    )
+
     if RUN_NCAAF_PROP_ODDS:
         # 9am / 1pm / 6pm ET: one fresh number before each of the day's kick
         # waves (noon, 3:30, 7pm, and the 6pm pass carries the late window).
@@ -3823,12 +3905,16 @@ def main() -> None:
         id="refresh_catch_up",
         name="Refresh catch-up (once, 60s after boot)",
     )
+    # After the boot catch-ups above, so a slow weekly catch-up cannot push the
+    # boot run past its misfire grace (#1359).
+    schedule_boot_relaunch(sched, now)
     log.info("Betting scheduler starting (timezone=%s). Registered jobs:", TIMEZONE)
     for job in sched.get_jobs():
-        # next_run_time isn't populated until the scheduler starts, so compute the
-        # next fire directly from the trigger for the startup banner.
+        # next_run_time isn't populated until the scheduler starts unless it was
+        # set (the boot relaunch above), so otherwise compute the next fire
+        # directly from the trigger for the startup banner.
         try:
-            nxt = job.trigger.get_next_fire_time(None, now)
+            nxt = getattr(job, "next_run_time", None) or job.trigger.get_next_fire_time(None, now)
         except Exception:  # noqa: BLE001
             nxt = "?"
         log.info("  - %s [%s] next: %s", job.id, job.name, nxt)

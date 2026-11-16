@@ -20,11 +20,15 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Signals card: one line-movement row (line change, price change in parentheses), shown only when the deciding book moved against the pick |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Database health recorded hourly (worker job db_health_snapshot: db_health_snapshots every hour, every table's size and the heaviest statements every 6 h); pg_stat_statements total is not monotonic, so load comes from pg_stat_database.active_time |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: Hong Kong pools before the off (2016–2018) and UK/Ireland at starting price (1988–2026), both null; free sets stored first (#1387, PC mirror now copies huge rows); UK loader year filter fixed |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Scoreboard follow-up: one sport's DB error no longer skips the others' live scores; live-score chunks read in parallel; UFC game screen has no Spread block |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord price line links the book name to that bet's slip (app betslip URL, Massachusetts, sportsbook page when there is no outcome id) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord pick posts link the matchup to the game score page (ESPN gamecast, scoreboard fallback) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Back button: dead again on Pick Detail opened from a push (iOS 27.3); every pushed screen now draws the React Back pill, UIKit Back hidden; push taps wait for the app to be active |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Retool ops dashboard source moved into retool/models-ops/ (69 files, byte-exact); Protect app needs Enterprise (account on Team); push back via Retool's import tool proved end to end with a no-change publish to the live app (69/69 byte-identical, loads, #1382 closed) |
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, a restart relaunches every in-play loop 60 s after boot (#1359): a 23:59 ET restart had left a live college football game with no in-play model until 11:00 ET |
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, model building runs on mike's PC from the archive files; a backup copy goes to Supabase Storage (Pro keeps 7 days of backups); PC reads all 84M prop rows in 13.6 s (#1345) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Scoreboard covers every sport with games (12, chips only for sports with a game that day); NCAAB/NCAABW live scores via ESPN matched by event id; UFC finals W/L/D |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, NCAAB: Utah ML posted on a game postponed to Dec 5 (Washington @ Utah); ESPN ingestor now reads a game that left its date's board by event id; a BET whose game moved over 48h settles NO_ACTION (PR #1375) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, A postponed game's row moved date and its pick lost its team ("ML"): boards now read the missed games by id |
