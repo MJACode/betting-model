@@ -133,10 +133,14 @@ units, so everything the model decided is 22 bets, 9-13, -5.53 units.
 replay of the loop's own code bets 60.3% of the games it decides in 2024-25
 and 64.4% in 2025-26 (61.8% and 63.2% of November's). On 2026-11-01 to 11-09,
 with the file the loop loads, it bets 25.5% (14 of 55, 7-7, -0.91 units).
-Live, 22 of the 54 games with a priced quote (41%). Every fit bets the two
-stored seasons alike (54% to 68%) and this season alike (25% to 35%), so it
-is this season's books, not the model file
-(`python -m scripts.ncaabw_research.ht_model_vs_market`). Not the move to
+Every fit bets the two stored seasons alike (54% to 68%) and this season's
+first nine days alike (25% to 35%), so it is this season's books, not the
+model file (`python -m scripts.ncaabw_research.ht_model_vs_market`). Live,
+on 2026-11-11 to 11-15, the loop bet 22 of the 54 games with a priced quote
+(41%): other games than the replay's, and the gap between 41% and 25.5% is
+not explained yet (#1405). Nor are its misses: 8 breaks passed with no
+eligible quote in about 62 games (13%; 5 more were the lost bets above),
+against 22 of 1,061 (2%) in the 2025-26 replay. Not the move to
 DraftKings' own board on 2026-11-13: on the 11 games both covered, the feed's
 DraftKings total in the break was the board's, a minute behind when it moved.
 With the replay's 14, this season's halftime bets are 36, 16-20, -6.44 units.
