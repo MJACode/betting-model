@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: Hong Kong pools before the off (2016–2018) and UK/Ireland at starting price (1988–2026), both null; free sets stored first (#1387, PC mirror now copies huge rows); UK loader year filter fixed |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord price line links the book name to that bet's slip (app betslip URL, Massachusetts, sportsbook page when there is no outcome id) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord pick posts link the matchup to the game score page (ESPN gamecast, scoreboard fallback) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Retool ops dashboard source moved into retool/models-ops/ (69 files, byte-exact); Protect app needs Enterprise (account on Team); push back via Retool's import tool proved end to end with a no-change publish to the live app (69/69 byte-identical, loads, #1382 closed) |

@@ -168,8 +168,12 @@ the off, results; 132,750 races 2020-01 to 2026-10. Kaggle serves public
 datasets with an unauthenticated GET
 (`kaggle.com/api/v1/datasets/download/{owner}/{slug}`); Hong Kong's final
 pools 1997–2005 and 2014–2017 and UK/Ireland starting prices 1988–2026 are
-there. `scripts/horse/fetch_datasets.py` and `store_files.py` fetch and
-store them. Racing is not on the odds feed.
+there. GitHub's raw file host serves nch015's Hong Kong set (2016–2018):
+the win and place pools every 12 minutes, then every 6 inside about 216
+minutes, to about 5.6 minutes before the start; the only free path before
+the off found so far. `scripts/horse/fetch_datasets.py` and `store_files.py`
+fetch and store all of them (the UK zip in 34 parts of 32 MiB). Racing is
+not on the odds feed.
 
 ## Sport shapes — starting hypotheses, not facts
 

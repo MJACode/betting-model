@@ -21,7 +21,7 @@
 | Hong Kong 1997–2005 (Kaggle `gdaley/hkracing`, CC0) | 6,348 races, 79,447 runners, Sha Tin and Happy Valley. Final win and place pool odds, dividends, rating, draw, weights, sectional positions, finish times, jockey and trainer ids. Dates obscured by the author; order kept. | `horse_racing|gdaley_hkracing` |
 | Hong Kong 2014–2017 (Kaggle `lantanacamara`, licence unknown) | 2,367 races, 30,189 runners, final win odds (shown as 99 above 99), positions, weights. | `horse_racing|lantanacamara_hong_kong_horse_racing` |
 | Hong Kong 2016–2018 pools before the off (GitHub `nch015/horserace_data`, no licence stated) | 1,510 races, the win and place pools sampled a median 171 times a race (every 12 minutes, then every 6 in the last 3½ hours), dividends, and results with final odds back to 1979. Added 2026-11-15 evening. | `horse_racing|nch015_horserace_data` (6 rows) |
-| UK/Ireland 1988–2026 (Kaggle `deltaromeo`, CDLA-Sharing) | 5.1 million runners with starting prices (the manifest's count). Added 2026-11-15 evening. | `horse_racing|deltaromeo_uk_ireland_1988_2026`: the 1.12 GB zip in 34 parts of 32 MiB |
+| UK/Ireland 1988–2026 (Kaggle `deltaromeo`, CDLA-Sharing) | **5,112,965 runners in 506,076 races, 1988-01-01 to 2026-10-23** (after 732 duplicate rows); 409,872 British and Irish races are gradeable. Starting price, result, official rating, weight, age, draw, going, jockey, trainer, and the race's own Racing Post and Topspeed figures. No price before the off. No Irish rows in 2000–2002. The source changes format on 2026-05-01 (no figures, initials for people). Checks: `python -I scripts/horse/uk_sp_data.py`. | `horse_racing|deltaromeo_uk_ireland_1988_2026`: the 1.12 GB zip in 34 parts of 32 MiB |
 | National Hunt 2005–2019 (Kaggle `sheikhbarabas`) | 744,347 runners, jumps only. | not downloaded |
 | Equibase 2023 complimentary year | US past performances and charts, by email. "Not for wagering use." | not requested |
 
@@ -108,9 +108,9 @@ the pool a US outlet offered in 2026 and was commingled into as of 2014
 | Place, Australia and New Zealand (Betfair) | Betfair's place market (2 or 3 places) | the same | place BSP | negative in every Harville band net | Harville raw and discounted; a calibrated rule with a predicted place BSP; split by field size | every year negative net; the best gross cut −0.09% | **nothing clears** (audit §4a) |
 | Win and place, US pools | official order after any DQ | none | none free: Equibase charts $219.95/month, HDW $119/month; the free 2023 Equibase year is "not for wagering use" | not measured | none | | **parked: no price.** Routes tried: the free files (none US), Kaggle (NYRA's 2022 set needs a login), Equibase (paid, or free with a no-wagering licence), the odds feed (no racing) |
 | Show (US) | first three | none | none | | | | parked, as US win |
-| Win and place, UK and Ireland | official result | 5.1 million runners with starting prices (not downloaded) | starting price only | not measured | none | | **to do**: the free 1.12 GB set; a starting price is bettable at UK books, not from the US |
+| Win and each-way, UK and Ireland at starting price (UK bookmakers; the US outlets found sell these races as pools; whether bet365 Colorado or New Jersey takes SP was not established) | official result (amended; settlement can differ) | runner facts 1988–2026 | starting price, the close (no price before the off) | at a flat stake: every runner −22% to −26% a year in Britain since 2011 and −31% to −40% in Ireland; British favourites −6% to −12% a year since 2011 | calibration by band, year and code; blind win and each-way by race shape; official-rating rules; a place model; Bolton–Chapman plus Benter, walk-forward 1995–2026, removal of each group, a leak check, four model-free figure picks | no rule that does not read the SP clears on 2005–2026; the few positive at a flat stake are small cells found after looking, none with a flat interval above zero; the form model's gain over SP has been within ±0.7 per 1000 races a year since 2022; the cells that clear all choose on the SP (upper bounds) | **nothing clears** (audit §8) |
 | Win, Australian pools (FanDuel Racing and others offer Australian tracks; whether into the TAB's pool was not established) | TAB result | none | none free (Punting Form Starter, $59.00/Month as printed, carries TAB starting prices) | | | | parked: no price held |
-| Each-way | two bets, win and place terms | | | | | | parked: the unit function grades one result a row (scope §5) |
+| Each-way outside the UK and Ireland | two bets, win and place terms | | | | | | parked: the unit function grades one result a row (scope §5) |
 | Exacta, trifecta, quinella, multi-race | dividends | | Hong Kong win and place dividends only | | | | parked: no exotic dividends held |
 | Fixed odds (bet365 Colorado and New Jersey) | the book's rules | | none found | | | | parked: no price history found |
 | In running (Betfair) | | | in-play traded prices only, no path | | | | parked: not bettable from the US |
@@ -130,7 +130,9 @@ the audit, §5.
    or two, which needs a finer path than one snapshot every 6 minutes:
    the US$499 HKJC odds-movement archive (win and place from December 2021,
    polled about every 1 or 5 minutes), or Betfair's own history (behind an
-   account).
+   account). The UK and Irish files point the same way (audit §8): against
+   the starting price, a form model has added about nothing since 2022, and
+   the files hold no earlier price to test it against.
 2. **A sharp price against the pool**, the mechanism that has worked most
    often in this repo (a sharp reference against a softer price on the same
    event, `methods.md` §2): Betfair's price on a Hong Kong or US race against
@@ -161,8 +163,6 @@ set.
 
 ## Open items
 
-- The UK/Ireland starting-price set: download (1.12 GB), store, grade the
-  blind bets by price band (issue #1370).
 - Store each new Betfair ANZ monthly file as it is published, from the
   2026-11 file onward (issue #1371).
 - A pre-off price path and a US pool series, both behind a purchase or an

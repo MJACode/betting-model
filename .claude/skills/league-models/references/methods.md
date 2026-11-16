@@ -76,6 +76,24 @@ error.
   +0.001 to +0.003 nats a race (within one SE), against the final pool `b`
   ≤ 0, and the bets (longshots) lose. The late money absorbs what the model
   knows, after the last snapshot a bettor can use (§7b).
+  UK and Ireland at starting price, 1995–2026 (2026-11-16): the same two
+  stages, walk-forward by year, Flat and jumps fitted apart, on form,
+  earlier-run figures, official ratings, weight, age, draw, layoff and
+  jockey and trainer records. Stage 1 alone is far weaker than SP
+  (pseudo-R² 0.127 against 0.177 in Britain). Blended with SP it gains
+  +3.60 [+3.25, +3.95] ×1000 log-likelihood a race in Britain, but that
+  gain fell from about +8 to +13 a year in 1996–2003 to within ±0.7 every
+  year from 2022, and most of it (59% to 94%) is the earlier-run figures.
+  SP is the close, so the blend is an information test only. The decidable
+  bet (stage 1's top-rated runner at SP) loses in Britain 2011–2026: −4.28%
+  on units with no cut (flat −4.73%), −0.92% [−2.21, +0.36] on units in the
+  strictest cell (flat −0.11%). Its 1995–2010
+  profit is not taken: whether the stored figures are as published on the
+  day is unknown, and only one of four model-free figure picks was positive
+  then (`docs/horse_racing_market_audit.md` §8b). One subgroup, Irish chases
+  where the model gives its top horse over a 50% chance, is positive in
+  2011–2026 but was found after looking, among 96 late cells, and is a peak
+  whose neighbours and halves span zero (§8b).
 
 ## 2. The books disagree — with each other, with themselves, with a sharp book
 
@@ -266,6 +284,19 @@ edge is where the rule misses something the state shows.
   exchange's scheduled-start snapshot (back, spread, book, field; after Sung
   and Johnson 2010) matched the back's own log loss (1.7906 against 1.7907)
   and lost −3.7% to −4.0% net in every graded year (§4b).
+  UK and Irish starting prices (2026-11-16, 1988–2026): a bookmaker's
+  close that over-prices longshots. Every runner in an SP
+  band at SP, Britain 2015–2026: −3.2% under 1/2, −14.1% at 4/1 to 7/1,
+  −54.1% at 50/1 to 100/1 (flat stake). Power de-vig removes most of the
+  bias at short prices; longshots stay over-bet, though less each decade (A/E at
+  50/1 to 100/1: 0.40 in 1988–99 to 0.81 in 2020–26 in Britain, 0.19 to
+  0.80 in Ireland). Irish books run higher (median 1.228 against 1.155,
+  2015–2026). The place part of an each-way bet clears only when the
+  runner is chosen on the SP itself (an upper bound); the two place-part
+  rules that do not read the SP are positive only on units, which rely on
+  knowing the SP. At each-way terms the place part is sold only inside the
+  whole bet, which loses at a flat stake in every family where it was
+  graded, pooled over 2005–2026 (`docs/horse_racing_market_audit.md` §8a).
 - **Unders on count props.** Books put more of the margin on the over: blind
   hockey prop overs lost 9.0-12.4%, unders 0.3-3.5%. A Poisson count model
   betting selective unders on its own probability *worked*: saves, shots on
@@ -343,9 +374,6 @@ sections above with its result.
 - Horse racing, a Betfair back book under 100% at the scheduled start (818
   of 115,296 races, median 0.99): an arbitrage only if the backs fill, and
   the free files carry no sizes.
-- Horse racing, the UK/Ireland starting-price set (5.1 million runners,
-  1988–2026, free, 1.12 GB): blind bets by price band at SP, for a third
-  market's favourite-longshot table.
 
 - Tennis total games and games spreads priced from each player's hold and
   break rates; the scout found no published test of these markets anywhere

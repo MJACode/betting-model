@@ -23,6 +23,11 @@ historical and the `source` marker says whose file it is):
 | `horse_racing|betfair_anz_thoroughbreds` | 82 monthly CSVs, 2020-01 to 2026-10 | 340.2 MB | 91.7 MB |
 | `horse_racing|gdaley_hkracing` | 2 (races, runs) | 11.5 MB | 3.5 MB |
 | `horse_racing|lantanacamara_hong_kong_horse_racing` | 2 | 8.8 MB | 2.2 MB |
+| `horse_racing|nch015_horserace_data` (added the same evening, §7) | 6 (gzipped CSVs, stored as fetched) | 40.6 MB | 40.5 MB |
+| `horse_racing|deltaromeo_uk_ireland_1988_2026` (added the same evening, §8) | 34 parts of the 1.12 GB zip | 1,120.7 MB | 1,120.9 MB |
+
+(The last two rows: a read-only count on Supabase, 2026-11-16, grouped by
+`source`.)
 
 `store_files --verify` read every row back, decompressed it and matched its
 sha256 to the file on disk: 86 stored, 0 missing, 0 mismatches. The PC mirror
@@ -493,3 +498,317 @@ Both studies were rerun by two independent reviewers each (look-ahead; grading
 and data). Every table reproduced byte for byte; one reviewer re-graded the
 pool study from the raw files with its own parser and got the same results.
 None found look-ahead. Their corrections to the wording are applied above.
+
+## 8. UK and Ireland at starting price, 1988–2026
+
+The free Kaggle set `deltaromeo/horse-racing-results-ukireland-2015-2025`
+holds three CSVs (1988–2004, 2005–2014, 2015-01-01 to 2026-10-23), stored in
+Supabase as the downloaded zip (§1). The loader is
+`scripts/horse/uk_sp_data.py`; running `python -I scripts/horse/uk_sp_data.py`
+prints its checks.
+
+**What the price is.** The starting price (SP) is the bookmakers' price at
+the off. UK and Irish bookmakers settle bets at it, so a rule may be graded
+at it, but it is a close: there is no earlier price in these files. A table
+that chooses its bets on the SP, the order of the betting, the favourite's
+price or the race's book (every runner's chance implied by its SP, added
+up; the amount over 1.0 is the bookmakers' margin) has seen the close. It
+is an upper bound or a description, not a bet.
+
+**For a bettor in the US**, the outlets found sell UK and Irish races as
+pools, and bet365 in Colorado and New Jersey sells fixed odds on them
+(`docs/sports/racing.md`; the New Jersey launch rests on a search excerpt).
+No option to bet at SP was found (`docs/horse_racing_scout_us_outlets.md`).
+So a rule that cleared here would still be graded at a price a US user may
+not be able to take.
+
+**Data checks.** From the loader's printed output unless a bullet names
+another source.
+
+- **Rows.** 5,113,697 valid rows, matching the manifest; 732 exact duplicate
+  rows dropped, leaving **5,112,965 runners in 506,076 races**. The
+  1988–2004 file repeats its header 12 more times inside it; the SQLite
+  copies keep those as data rows, so the loader reads the CSVs. 700 of the
+  source's race numbers each label two to five different races, so a race
+  is keyed on file, race number, date, course and off time.
+- **Region.** From explicit course lists: 332,578 British races, 80,945
+  Irish, 92,553 other. (The loader's notes record why: Irish courses carry
+  no "(IRE)" suffix in either archive, nor again from 2025-10 to 2026-04.)
+  727 foreign races written under British course names (Ascot in Perth,
+  Sandown in Melbourne, Newcastle NSW, 496 races at South Africa's
+  Newmarket) are moved to "other" by off time and by breeding. **There are
+  no Irish rows in 2000, 2001 or 2002.**
+- **Gradeable.** 409,872 of 413,523 British and Irish races. Left out:
+  1,687 races (all 1988–2004) holding fewer rows than runners, races with
+  no result, races where a runner has no SP, and two checks that a race's
+  prices are valid (1,521 races whose book is under 1.0, and 120 more whose
+  favourite marker is missing or not on the shortest price). Both studies
+  also report their rules with those two groups put back.
+- **SP strings.** 912 distinct strings over every region, 281 of them in
+  British and Irish rows, each parsed once. A trailing F, J or C is the
+  favourite marker (653 strings once it is removed). "Evens", "Evs" and
+  "1/1" are 2.0, and "100/30" and "10/3" are 4.33. Only a bare "F" (10
+  rows) does not parse. 5,314 British and Irish prices are not on the usual
+  list of bookmaker fractions (the commonest are 16/5, 9/10 and 18/5):
+  under 0.1% of prices a year to 2019, and 0.30% to 0.52% a year from 2020.
+- **Results.** Dead heats are split (the share of the win sums to 1 in
+  100.00% of races with a result). Results are the amended official ones
+  (2,096 disqualifications in every region), which can differ from how bets
+  were settled. There is no non-runner code: non-runners are simply not
+  listed, so Rule 4 deductions (the cut UK books take from winning bets when
+  a runner is withdrawn late) cannot be measured.
+- **Rows are in finishing order** inside a race in 1988–2014: the first row
+  won 99.7–99.8% of races (the fundamentals study's first table). That
+  study picks one runner a race, so it shuffles the runners inside each race
+  with a fixed seed before it builds anything, and prints the check. The
+  structure study never uses row order to choose a horse: horses on equal
+  prices or ratings share a rank, and the top-rated horse's margin uses only
+  the rating numbers.
+- **The source changes format on 2026-05-01**: no favourite marker and no
+  Racing Post or Topspeed figures, and jockeys and trainers written as
+  initials. Official ratings are still there: 99.8% of British and 100.0%
+  of Irish handicaps May–Oct 2026 have every runner rated (the structure
+  study's rating-coverage table). The loader links horses, jockeys and
+  trainers across the change; 79.7% of British and Irish rows from that
+  date link to a horse seen earlier.
+- **The official rating is the mark going into the race.** Winners' marks
+  had risen +0.3 to +0.8 lb going into a race, and rose +4.0 to +5.0 lb
+  after it (measured by the structure study's look-ahead reviewer).
+
+**Grading.** Win at SP, with dead-heat shares. Each-way at the standard
+terms: 2–4 runners win only; 5–7 runners 2 places at 1/4; 8+ 3 places at
+1/5; handicaps of 12–15 3 places at 1/4, of 16+ 4 places at 1/4. Books often
+paid extra places, which is not modelled. Field size is the final field,
+which is how bets settle; a rule meant for betting early would need the
+declared field. Handicaps are detected from the race name, which misses a
+few famous handicaps whose names lack the word. **The flat stake (1 unit
+risked) is the figure a bettor at SP could get.** The repo's unit stake
+(bet enough to win 1 unit) depends on the price, and at SP the price is not
+known when the bet goes on. So a result that is positive only on units
+relies on knowing the SP, and is not a bet.
+
+### 8a. The starting price as a market (`scripts/horse/uk_sp_structure.py`)
+
+Fit on 1988–2004 (training), graded on 2005–2014 and 2015–2026. A cell is
+examined if it has 200+ bets on 1988–2004, and flagged if it is positive
+there on either stake. A flagged cell clears only if, on 2005–2026, its
+flat interval is above zero, its units return is positive, and its flat
+return is positive in both 2005–2014 and 2015–2026.
+
+**Calibration.** A/E is actual wins divided by the wins the price implies:
+1.0 is fair, under 1 means over-bet. Power de-vig (raise each 1/SP to the
+power that makes the race's book 1) removes most of the favourite-longshot
+bias at short prices: A/E 0.998 to 1.023 for British runners up to 7/1.
+Longshots stay over-bet, and less each decade (A/E at 50/1 to 100/1,
+Britain: 0.40 in 1988–99, 0.60, 0.62, then 0.81 in 2020–26; Ireland 0.19 to
+0.80). Irish books run far above British: median 1.356 against 1.186 in
+1988–2004, 1.228 against 1.155 in 2015–2026.
+
+**Blind win bets at SP** (flat stake):
+
+| Bet | Britain 2005–2014 | Britain 2015–2026 | Ireland 2005–2014 | Ireland 2015–2026 |
+|---|---:|---:|---:|---:|
+| Every runner priced under 1/2 | −2.6% | −3.2% | −2.0% | −2.7% |
+| Every runner priced 4/1 to 7/1 | −13.3% | −14.1% | −14.2% | −18.0% |
+| Every runner priced 50/1 to 100/1 | −56.9% | −54.1% | −89.2% | −65.1% |
+| The favourite (incl. joint) | −7.3% | −7.8% | −8.8% | −10.7% |
+
+These rows choose their runners by SP, so they describe the market. The
+rule "back every runner" lost −21.6% to −26.0% a year in Britain and
+−30.7% to −39.9% a year in Ireland over 2011–2026.
+
+**Rules that do not read the SP.** Blind win and each-way bets by race
+type, handicap and field size; the official-rating rank; and the
+top-rated horse's margin over the next. 143 such cells had 200+ bets on
+1988–2004 and **one** was positive there: in British non-handicaps of 8–11
+runners where the top-rated horse is clear by 6–11 lb, the second-rated
+horse each-way, flat +7.0% on 231 bets. It lost on 2005–2026: 710 bets,
+flat −10.0%, units −5.4% [−12.3, +1.5].
+
+Chosen by looking at 2005–2026: of the 200 rule cells with 200+ bets there,
+194 lost on both stakes, and 6 are positive on at least one:
+
+- **British handicaps of 16+ runners, the place part** (4 places at 1/4):
+  109,804 bets, +300.5 units, +0.9% [+0.6, +1.1] on units, but flat −0.0%,
+  and −1.2% flat on 2015–2026; 7 of 22 years positive on flat.
+- **British 8-runner non-handicaps, the place part**: 71,232 bets, +397.3
+  units, +0.6% [+0.3, +1.0] on units, flat −3.2%; 6 of 22 years positive.
+- Both are positive on units only, which relies on knowing the SP. At
+  each-way terms the place part is sold only inside an each-way bet, and
+  that loses on both shapes: flat −15.0% and −16.3%. Both place parts were
+  −4.2% and −1.0% on units in 1988–2004.
+- **Three small official-rating cells** (four bets, one cell graded both as
+  a place part and each-way; 300 to 805 bets) are positive on flat over
+  2005–2026. No rule cell has a flat interval above zero there. Each had 62
+  to 189 bets in 1988–2004, too few to be examined, and three of the four
+  lost 24% to 28% on units in those years.
+
+**Upper bounds** (cells that choose on the SP). 40 cells clear, all of them
+the place part of an each-way bet chosen on the SP. Most are a place model's
+picks; nine are races with a short favourite. For example, in British
+non-handicaps of 8–11 runners with a favourite under 1/2, the place part of
+a bet on the second favourite made +25.4% [+21.3, +29.5] on units (+25.7%
+flat) on 1,792 bets, and on the third favourite +31.5% flat on 1,761.
+Backing the place part whenever the place model says it is worth more than
+its price was positive in Britain in all 22 years from 2005. **The whole
+each-way bet loses at a flat stake in every family where it was graded over
+2005–2026** (the place model's picks and the short-favourite races; the
+place model's by-shape cells were graded as place parts only), with one
+exception: +0.9% when the place model's value is over 0.20 and the races
+that failed the price checks are put back. Every one chose its runner on the
+close. These describe how standard each-way terms misprice the place part,
+most of all when the favourite is short. They are not a bet.
+
+**How it was built.** The place model, the exact-field-size table and the
+place-model value tables were shaped on five development runs over
+2005–2012, inside the graded period. No development run touched
+2015–2026, so 2015–2026 is the only clean half for those tables and for
+the 8-runner cell. Five full runs (two by the reviewers) agree on every
+table apart from the two whose layout was changed for the reviewers.
+
+**Verdict: null.** No rule that can be decided before the off clears. Both
+reviewers reran the whole script, with identical output, and one re-graded
+straight from the loader's rows with its own SP parser and place rules (SPs
+to 8.9e-16, each-way terms 0 disagreements). Their findings, all applied
+above or flagged: the development-window note; field size is the final
+field; units rely on knowing the SP; the 8-runner cell's positive years were
+undercounted (6, not 5; the script now counts from unrounded returns); the
+training-years grading has 29 races whose position numbering has a gap (a
+horse with no placing between placed horses, or a dead heat whose next
+place is not skipped) and 12 horses withdrawn under starter's orders in
+1988–1994, neither of which touches 2005–2026; and handicaps detected by
+name miss a few (re-detected from weight following rating, the 16+ cell is
+unchanged).
+
+### 8b. Fundamentals, then the starting price (`scripts/horse/uk_sp_fundamentals.py`)
+
+**Stage 1** gives each horse a chance of winning from facts known before
+the race, with a race's chances adding to 1 (a conditional logit), fitted
+apart for the Flat and for jumps. It is walk-forward: each year is
+predicted only from a fit on earlier years. The groups are official
+rating, weight, age, draw, layoff, form, earlier-run figures (Racing Post
+and Topspeed from the horse's last three runs), course and distance, and
+the jockey's and trainer's records: their wins against what their horses'
+field sizes would predict, over the previous two years, counting only races
+that went off at least 30 minutes earlier. **Stage 2** mixes those chances
+with the SP's, `softmax(b · log p_stage1 + c · log p_SP)`, with the weights
+`b` and `c` fitted on the year before. The bet uses a stage 1 fitted on the
+five years before (Y−5 to Y−1); the blend uses one fitted a year further
+back (Y−6 to Y−2), so that `b` and `c` are fitted on predictions made out
+of sample. Graded 1995–2026: 352,633 races. From 2026-05-01 the source has
+no figures, so those races use a stage 1 fitted without them.
+
+Two switches were added after a first full run showed 1998–1999 and
+May–Oct 2026 collapsing: an input that is almost always empty in a fit's
+years gets no weight, and races from 2026-05 use the model without
+figures. Both are triggered by data coverage and the source's format, not
+by results. The look-ahead reviewer found they moved the strictest cells
+by at most 0.15 points and changed no verdict.
+
+**What the model knows that SP does not** (log-likelihood of the winner per
+race, higher is better; SP is the close, so this is an information test,
+not a bet). Pseudo-R² is the share of the uncertainty explained, compared
+with picking at random.
+
+| | Races | SP calibrated | Stage 1 (Y−6 to Y−2, as the blend uses it) | Blend | Blend − SP (×1000, 95% CI) | Pseudo-R²: stage 1 / SP |
+|---|---:|---:|---:|---:|---:|---:|
+| Britain | 278,027 | −1.7991 | −1.9070 | −1.7955 | +3.60 [+3.25, +3.95] | 0.127 / 0.177 |
+| Ireland | 64,956 | −1.9093 | −2.0657 | −1.9054 | +3.88 [+3.08, +4.69] | 0.146 / 0.211 |
+
+Stage 1 alone is far weaker than SP. The blend's gain over SP has shrunk to
+about nothing (×1000 a race): in Britain it was +5.8 to +13.0 a year in
+1996–2004, and between −0.69 and +1.32 from 2015, with intervals spanning
+zero in 2015–2017, 2020, 2022, 2023, 2025 and both parts of 2026. Since
+2022 it has been within ±0.7 every year (2024's +0.16 has an interval just
+above zero). The Flat weight on stage 1 fell from +0.19 to +0.33 in
+1995–2003 to between −0.01 and +0.03 in 2021–2025. Ireland is the same
+shape. **Removing one group at a time**: most of the gain (59% to 94% by
+country and code) is the earlier-run figures, whose removal costs the blend
+2.0 to 4.4 ×1000 a race; the jockey and trainer records carry 0.5 to 1.2;
+removing form makes the British blend better (+0.48 and +0.72), so form is
+already in the price.
+
+**The bet a person could place**: back stage 1's top-rated runner at SP. It
+never reads the SP to choose. `p` is stage 1's chance for its top-rated
+runner, and `margin` is that minus the second-rated runner's chance.
+
+| | Cut | Bets | Units | Return on units (95% CI) | Flat (95% CI) |
+|---|---|---:|---:|---:|---:|
+| Britain 2011–2026 | none | 154,784 | −3,858.9 | −4.28% [−4.93, −3.64] | −4.73% [−5.61, −3.86] |
+| Britain 2011–2026 | p > 0.5, margin > 0.2 | 11,788 | −191.3 | −0.92% [−2.21, +0.36] | −0.11% [−1.73, +1.52] |
+| Ireland 2011–2026 | none | 41,956 | −1,699.4 | −7.00% [−8.23, −5.78] | −10.19% [−11.90, −8.48] |
+| Ireland 2011–2026 | p > 0.6 (Ireland's best late cut) | 1,574 | −7.0 | −0.23% [−3.39, +2.94] | −1.51% [−5.73, +2.72] |
+| Britain 1995–2010 | p > 0.5, margin > 0.2 | 13,301 | +673.7 | +3.29% [+1.97, +4.61] | +6.93% [+5.23, +8.62] |
+| Ireland 1995–2010 | p > 0.5, margin > 0.2 | 2,065 | +132.0 | +4.58% [+1.08, +8.08] | +5.12% [+0.43, +9.80] |
+
+- **2011–2026: no cut clears.** Every one of the 24 cuts per country has
+  its interval spanning zero or below, on both stakes, and every point
+  estimate is negative. With the races that failed the price checks put
+  back, Britain's p > 0.5, margin > 0.2 cell is −0.91% on units and +0.06%
+  [−1.57, +1.69] flat.
+- **1995–2010 is positive and is not taken.** Most of what the model knows
+  beyond SP comes from the earlier-run figures, and nothing in these files
+  shows whether a stored figure is the one published on the day or a later
+  revision. The early bets were not re-graded without the figures. Backing
+  the horse with the best earlier figure, with no model, was tried four
+  ways, all printed, and made money in only one: in Britain 1995–2010, the
+  best Racing Post figure of the last three runs made +1.09% [+0.30, +1.89]
+  on units (flat +2.35%), and the other three lost (the latest Racing Post
+  figure −1.38%, best Topspeed −5.25%, latest Topspeed −5.48%). A race is
+  bet only when two runners have different earlier figures. In Ireland all
+  four lost in both eras. In Britain 2011–2026 all four lost (−2.00% to
+  −7.99%).
+- **Splits chosen after looking.** Race type is known before the race, so
+  it was split by era, with the late era also in halves; all 384 cells are
+  printed. Of the 96 cells for 2011–2026, two have an interval above zero,
+  and they are nearly the same bets: **Irish chases at p > 0.5**, 872 bets,
+  +5.55% [+0.79, +10.32] on units (flat +6.91%), and at p > 0.5 with margin
+  > 0.2, 838 bets, +76.1 units, +5.48% [+0.66, +10.31] (flat +6.47%
+  [+0.32, +12.62]). It is a peak, not a plateau: at p > 0.4 it is +2.03% to
+  +2.72% with intervals spanning zero, and at p > 0.6 +4.42% [−1.39,
+  +10.23]. Each half alone spans zero (p > 0.5, margin > 0.2: 2011–2018
+  +5.01% [−1.98, +12.00]; 2019–2026 +5.94% [−0.72, +12.60]), 1995–2010 was
+  +1.07% [−6.63, +8.78], and British chases lose at every cut in 2011–2026.
+  A separate split of British handicaps at p > 0.5, margin > 0.2 made
+  +2.40% [−1.14, +5.93] on units (flat +3.79%) on 2,164 bets. **Neither is
+  taken**: each is one of many cells looked at after the pooled results
+  were seen.
+- **Upper bound** (chooses on the SP): the blend's best value runner,
+  where `p_blend × SP − 1 > 0`, made +3.42% on units in Britain over
+  1995–2026 (+4.16% early, +1.63% late) and lost in Ireland (−2.42%).
+- **Leak check.** Adding the race's own Racing Post figure, which is known
+  only after the race, makes the same code show huge profits on 2010–2025,
+  as a working leak test should: Britain's stage-1 log-likelihood goes
+  from −1.8790 to −0.2793, and the top-rated runner from −4.01% to
+  +193.83% on 156,054 bets.
+
+**Reviewers.** Both reviewers reran the bet from the script, and one
+re-graded all 352,633 picks with its own code (0 SP and 0 win-share
+mismatches); every cell they reran matched. The leak check and the
+remove-one-group table were compared with the saved output, not rerun.
+Their corrections, applied above: the figure-based picks are printed as
+four (the study had chosen one and reported it alone; the reviewer ran the
+other three); the race-type split is printed whole; the flat stake is
+negative at every cut only when Britain and Ireland are each taken whole
+(it is positive for British handicaps and Irish chases). Also from them,
+not changing the result: dropping the 201 picks graded as losers because
+the horse was disqualified or has no placing moves any return by at most
+0.12 points (this removes losers only, so it shows one direction, not a
+bound); dropping picks at prices off the usual fractions leaves Britain
+2011–2026 at −4.30% to −0.94%; from May 2026 the loader matches each
+trainer's new short name to the old full name using the horses that
+trainer runs in later months, which uses who trains which horse, not any
+result; and each input is put on a common scale using its spread over all
+years, which uses no results.
+
+**Verdict for 8a and 8b: null.** No rule that can be decided before the
+off clears on 2011–2026 in Britain or Ireland, at either stake. What a form
+model knows beyond the starting price has been within ±0.7 per 1000 races
+every year since 2022. The positives either choose on the close, come from
+1995–2010 (not taken, because the figures' timing is unknown), or are
+among many splits looked at after the results were seen. **What would
+have to change**: a price before the off (these files hold none). The
+model's information is small against the close and was larger earlier, so
+a decision against an earlier price is the main test left. From the US,
+the outlets found sell these races as pools, and bet365 in Colorado and
+New Jersey sells fixed odds; no option to bet at SP was found.
