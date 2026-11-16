@@ -111,7 +111,7 @@ def test_a_pick_with_no_alternative_falls_back_to_draftkings():
 def test_the_free_card_names_the_cheaper_book():
     embed = dn._free_pick_embed(_pick(), "2026-09-02")
     value = embed["fields"][0]["value"]
-    assert "+100 @ ESPN BET" in value
+    assert "+100 @ [ESPN BET](" in value
     assert "-102" not in value, "the DK price is no longer the published one"
 
 
