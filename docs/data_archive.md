@@ -345,6 +345,14 @@ Each kept row is the opener or the close of its proposition. A rung of an altern
 
 **The re-buy (#1384) counts archived rows as held.** Its planner finds thinned games by counting rows per line. It now counts the archive too (`odds_rebuy.prop_history`), so it does not buy back what is on the PC.
 
+**Running it** (from the repo, with `SUPABASE_SERVICE_ROLE_KEY` in `.env`):
+
+```bash
+python scripts/archive_rows.py run --table player_prop_odds --rule repeat --start 2026-03-01 --end <3 days ago>   # prepare and upload, any time
+python scripts/archive_rows.py remove --table player_prop_odds --rule repeat --pending                         # 01:30-05:30 ET only
+python scripts/archive_rows.py status
+```
+
 **When it touches Supabase.** Only step 4 reads Postgres, and only between 01:30 and 05:30 ET. Inside that window it also pauses for the hourly refresh pass and while more than 6 other statements are running.
 - Preparing (steps 1 and 2) reads the PC copy alone. `--check` adds a Postgres check, but step 4 makes the same check anyway.
 - A game whose removal runs past 900 s is noted in the ledger and tried again the next night.
