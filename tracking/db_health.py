@@ -29,8 +29,13 @@ idle_in_transaction_time), which only ever rise until a reset.
 
 LOAD. Catalog and statistics reads only: no count(*), no table scan.
 pg_database_size and pg_total_relation_size read file sizes. Every read runs
-with a 30-second statement timeout. The worker job is deferred in the morning
-disk window like the other recorders (tracking/morning_disk.py).
+with a 30-second statement timeout. The worker job is deferred like the other
+recorders (tracking/morning_disk.py): in the 05:40-07:15 ET window, and before
+noon ET while the daily pipeline holds its lock.
+
+EVERY SELECTED COLUMN IS NAMED FOR THE COLUMN IT IS INSERTED INTO, and
+tests/test_db_health.py holds the two lists together, so a reordered select
+fails a test instead of writing one counter into another's column.
 
 NEVER DELETES OR UPDATES A ROW (CLAUDE.md section 1b). A statement's text is
 inserted once and kept (ON CONFLICT DO NOTHING).
@@ -68,6 +73,11 @@ _SCHEMA_FILTER = (
     "AND n.nspname !~ '^pg_(toast|temp)'"
 )
 
+# The oldest open transaction is aged against clock_timestamp(), the time of
+# the read. now() is the start of this run's own transaction, which opens at
+# the SET LOCAL before pg_stat_activity is read, so a transaction that began
+# in between came out negative: -0.29 s and -0.36 s in 2 of 15 read-only
+# replays on 2026-11-16.
 DB_SQL = f"""
 SELECT
   pg_database_size(current_database()) AS db_bytes,
@@ -87,7 +97,7 @@ SELECT
   (SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend'
      AND state IN ('idle in transaction', 'idle in transaction (aborted)')) AS connections_idle_in_tx,
   current_setting('max_connections')::int AS max_connections,
-  (SELECT max(extract(epoch FROM now() - xact_start)) FROM pg_stat_activity
+  (SELECT max(extract(epoch FROM clock_timestamp() - xact_start)) FROM pg_stat_activity
      WHERE backend_type = 'client backend' AND xact_start IS NOT NULL AND pid <> pg_backend_pid()) AS longest_xact_s,
   (SELECT count(*) FROM pg_locks WHERE NOT granted) AS waiting_locks,
   (SELECT age(datfrozenxid) FROM pg_database WHERE datname = current_database()) AS xid_age,
@@ -95,7 +105,8 @@ SELECT
   d.blks_hit, d.blks_read, d.xact_commit, d.xact_rollback,
   d.tup_inserted, d.tup_updated, d.tup_deleted,
   d.temp_files, d.temp_bytes, d.deadlocks, d.stats_reset,
-  d.active_time, d.idle_in_transaction_time, d.session_time,
+  d.active_time AS active_time_ms, d.idle_in_transaction_time AS idle_in_tx_time_ms,
+  d.session_time AS session_time_ms,
   d.sessions, d.sessions_abandoned, d.sessions_fatal, d.sessions_killed,
   (SELECT count(*) FROM pg_stat_user_indexes s JOIN pg_index i ON i.indexrelid = s.indexrelid
      WHERE s.idx_scan = 0 AND NOT i.indisunique AND NOT i.indisprimary) AS unused_indexes,
@@ -134,14 +145,15 @@ FROM storage.objects GROUP BY bucket_id ORDER BY bucket_id
 """
 
 TABLES_SQL = f"""
-SELECT n.nspname, c.relname,
-       CASE c.relkind WHEN 'm' THEN 'matview' ELSE 'table' END,
-       pg_total_relation_size(c.oid), pg_relation_size(c.oid), pg_indexes_size(c.oid),
-       CASE WHEN c.reltoastrelid <> 0 THEN pg_total_relation_size(c.reltoastrelid) ELSE 0 END,
-       s.n_live_tup, s.n_dead_tup, s.n_tup_ins, s.n_tup_upd, s.n_tup_del,
-       s.seq_scan, s.idx_scan,
-       GREATEST(s.last_vacuum, s.last_autovacuum),
-       GREATEST(s.last_analyze, s.last_autoanalyze)
+SELECT n.nspname AS schema_name, c.relname AS table_name,
+       CASE c.relkind WHEN 'm' THEN 'matview' ELSE 'table' END AS kind,
+       pg_total_relation_size(c.oid) AS total_bytes, pg_relation_size(c.oid) AS heap_bytes,
+       pg_indexes_size(c.oid) AS index_bytes,
+       CASE WHEN c.reltoastrelid <> 0 THEN pg_total_relation_size(c.reltoastrelid) ELSE 0 END AS toast_bytes,
+       s.n_live_tup AS live_rows_est, s.n_dead_tup AS dead_rows_est,
+       s.n_tup_ins, s.n_tup_upd, s.n_tup_del, s.seq_scan, s.idx_scan,
+       GREATEST(s.last_vacuum, s.last_autovacuum) AS last_vacuum,
+       GREATEST(s.last_analyze, s.last_autoanalyze) AS last_analyze
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid
@@ -162,9 +174,10 @@ WITH s AS (
   WHERE s.dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
     AND s.queryid IS NOT NULL
 )
-SELECT queryid, role_name, toplevel, calls, total_exec_time, mean_exec_time,
-       max_exec_time, rows, shared_blks_hit, shared_blks_read, temp_blks_written,
-       left(query, {MAX_QUERY_CHARS})
+SELECT queryid, role_name, toplevel, calls, total_exec_time AS total_exec_ms,
+       mean_exec_time AS mean_exec_ms, max_exec_time AS max_exec_ms, rows,
+       shared_blks_hit, shared_blks_read, temp_blks_written,
+       left(query, {MAX_QUERY_CHARS}) AS query
 FROM s
 WHERE by_total <= {TOP_BY_TOTAL} OR (by_mean <= {TOP_BY_MEAN} AND calls >= {MIN_CALLS})
 ORDER BY total_exec_time DESC

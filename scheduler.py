@@ -3753,9 +3753,12 @@ def build_scheduler() -> BlockingScheduler:
     )
 
     # Minute 50: clear of the :17 refresh pass, the :25 prop card, the :32 and
-    # :37 Kalshi recorders and the :40/:45 inserts. The morning disk window
-    # turns away the 05:50 and 06:50 ticks (MAINTENANCE_JOBS); no catch-up,
-    # since the next hour's snapshot covers the gap.
+    # :37 Kalshi recorders and the :40/:45 inserts. The morning disk gate
+    # (MAINTENANCE_JOBS) turns away the 05:50 and 06:50 ticks, and before noon
+    # ET any tick while the daily still holds its lock. No catch-up: the
+    # counters are running totals, so the next row still carries what happened
+    # in the gap; only the point-in-time readings (connections, waiting locks,
+    # the oldest open transaction) have no reading for those hours.
     sched.add_job(
         run_db_health_snapshot,
         CronTrigger(minute=50, timezone=TIMEZONE),
