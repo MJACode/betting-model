@@ -378,6 +378,11 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # the stored ones, so nothing is bought twice. Created on demand by
     # data/ingestors/odds_rebuy.ensure_ledger; never read by the app.
     "odds_rebuy_requests",
+    # The archive's ledger (#1345): one row per game and rule moved out of
+    # Supabase to mike's PC and Storage, with the rows, their fingerprint, the
+    # file, its Storage path and when they were removed. Created on demand by
+    # scripts/archive_rows.ensure_ledger; never read by the app.
+    "archive_batches",
     # Men's college basketball identity: the ESPN team registry, the ESPN
     # event <-> game_id map the odds join reads, and the venues. Created on
     # demand by data/ingestors/ncaab_teams.ensure_tables; never read by the app.

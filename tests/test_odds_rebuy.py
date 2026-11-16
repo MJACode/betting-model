@@ -343,3 +343,41 @@ def test_only_events_near_a_planned_game_are_parsed(monkeypatch):
     undated = {"id": "undated"}
     rb.game_rows(_req(), [near, far, undated], "2026-10-15T15:15:36Z")
     assert [e["id"] for e in seen] == ["near", "undated"]
+
+
+def test_the_prop_plan_counts_rows_moved_to_the_archive(tmp_path, monkeypatch):
+    """A game whose exact repeats went to the archive still holds them. Counted
+    from the copy alone, DraftKings falls to 2 rows a line and the game stops
+    looking like the cleanup's work, or (for a sport the cleanup never touched)
+    starts looking thinned and gets bought again."""
+    from scripts import archive_rows
+    monkeypatch.setattr(archive_rows, "ARCHIVE_ROOT", tmp_path)
+    con = duckdb.connect()
+    con.execute("CREATE TABLE games (game_id VARCHAR, sport VARCHAR, commence_time VARCHAR)")
+    con.execute("""CREATE TABLE player_prop_odds (prop_id BIGINT, game_id VARCHAR, game_date VARCHAR,
+        player_name VARCHAR, market VARCHAR, bookmaker VARCHAR, snapshot_type VARCHAR,
+        snapshot_at VARCHAR, line DOUBLE, over_price DOUBLE, under_price DOUBLE)""")
+    con.execute("CREATE TABLE pipeline_runs (run_kind VARCHAR, started_at VARCHAR)")
+    con.execute("INSERT INTO games VALUES ('NHL_G', 'NHL', '2026-10-15T23:00:00Z')")
+
+    def prop(pid, book, ts):
+        con.execute("INSERT INTO player_prop_odds VALUES (?, 'NHL_G', '2026-10-15', 'A', "
+                    "'player_points', ?, 'open', ?, 0.5, -120, 100)", [pid, book, ts])
+    prop(1, "fanduel", "2026-10-15T12:10:00Z")
+    prop(2, "fanduel", "2026-10-15T22:50:00Z")
+    for pid, ts in ((3, "12:00"), (6, "22:55")):
+        prop(pid, "draftkings", f"2026-10-15T{ts}:00Z")
+    assert rb.thinned_games(con, "prop", "NHL", "2026-10-15", "2026-10-15") == []
+    # DraftKings' two middle rows were repeats, moved to the archive
+    out = tmp_path / "player_prop_odds" / "repeat" / "2026-10"
+    out.mkdir(parents=True)
+    con.execute("CREATE TABLE moved AS SELECT * FROM player_prop_odds WHERE false")
+    con.execute("INSERT INTO moved VALUES (4, 'NHL_G', '2026-10-15', 'A', 'player_points', 'draftkings', "
+                "'open', '2026-10-15T15:00:00Z', 0.5, -120, 100), (5, 'NHL_G', '2026-10-15', 'A', "
+                "'player_points', 'draftkings', 'open', '2026-10-15T18:00:00Z', 0.5, -120, 100)")
+    con.execute(f"COPY moved TO '{(out / '2026-10-15.parquet').as_posix()}' (FORMAT PARQUET)")
+    assert [g["game_id"] for g in rb.thinned_games(con, "prop", "NHL", "2026-10-15", "2026-10-15")] == ["NHL_G"]
+    # a moved row the copy still holds is counted once
+    con.execute("INSERT INTO player_prop_odds SELECT * FROM moved WHERE prop_id = 4")
+    g = rb.thinned_games(con, "prop", "NHL", "2026-10-15", "2026-10-15")[0]
+    assert g["dk_per_line"] == 4
