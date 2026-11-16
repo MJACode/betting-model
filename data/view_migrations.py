@@ -679,6 +679,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # authenticated revoked; touches no view, pick, cut or record. Returns on
     # a catalog read once db_health_snapshots carries this file's hash.
     "db_health_snapshots_2026_11_15.sql",
+    # 2026-11-16 (mike: "locals" is the copy on his PC): the one table the
+    # PC's nightly copy reports into (scripts/local_mirror_report.py) and the
+    # Database tab's PC copy section reads. New table, RLS on, anon,
+    # authenticated and PUBLIC revoked; touches no view, pick, cut or record.
+    # Returns on a catalog read once pc_copy_snapshots carries this file's hash.
+    "pc_copy_snapshots_2026_11_16.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT
