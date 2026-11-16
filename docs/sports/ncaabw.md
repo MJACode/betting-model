@@ -129,6 +129,21 @@ cards and the NBA loop do, with `line_book` naming the book
 (`tests/test_inplay_pick_without_draftkings.py`). The 13 went 6-7, -1.69
 units, so everything the model decided is 22 bets, 9-13, -5.53 units.
 
+The bets the bug drops are most of the model, and they are not worse ones. On
+the replay, a bet counts as dropped when its read holds no DraftKings total at
+its number (`python -m scripts.ncaabw_research.ht_dropped_bets`):
+
+| | All bets | Kept even with the bug | Dropped by the bug |
+|---|---|---|---|
+| 2025-26 (walk-forward) | 669, +89.96 units, +11.84% | 192, +28.14, +12.88% | 477, +61.82, +11.42% |
+| 2024-25 (second look) | 298, +42.10, +12.35% | 135, +22.00, +14.34% | 163, +20.10, +10.72% |
+| 2026-27 to 11-09 | 14, -0.91 | 4, -2.23 | 10, +1.32 |
+
+So the fix multiplies the bets the model posts by about 3.5 in a season like
+2025-26 (669 against 192), at much the same return a bet; four in five of the
+dropped bets were at BetMGM or FanDuel. What a bet returns this season is the
+open question (below; #1405).
+
 **This season the books' halftime totals sit closer to the model.** The
 replay of the loop's own code bets 60.3% of the games it decides in 2024-25
 and 64.4% in 2025-26 (61.8% and 63.2% of November's). On 2026-11-01 to 11-09,
