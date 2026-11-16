@@ -69,7 +69,13 @@ error.
   money, this is the harder test; the published Hong Kong successes blended
   against the pool minutes before the off. A leak check (the race's own speed
   figure) lit the same harness up (`b` +2.9 to +9.1), so the null is real
-  (`docs/horse_racing_market_audit.md` §3b).
+  (`docs/horse_racing_market_audit.md` §3b). Against the pool 5 to 12
+  minutes BEFORE the off (2016–2018, the free GitHub snapshots), with stage
+  1 fit on ten earlier seasons: `b` +0.14 to +0.21 (1.8 to 2.7 SE), so the
+  form model does hold a little the pre-race pool lacks; out of sample
+  +0.001 to +0.003 nats a race (within one SE), against the final pool `b`
+  ≤ 0, and the bets (longshots) lose. The late money absorbs what the model
+  knows, after the last snapshot a bettor can use (§7b).
 
 ## 2. The books disagree — with each other, with themselves, with a sharp book
 
@@ -152,11 +158,24 @@ error.
   [−2.33, −1.24]). **Harville over-rates short horses for a place (said 0.84,
   placed 0.75) in both markets, and both place markets already price that**:
   calibrate the place model before any ROI test, or the "edge" is Harville's
-  bias (`docs/horse_racing_market_audit.md` §3a, §4a).
+  bias (`docs/horse_racing_market_audit.md` §3a, §4a). On Hong Kong's live
+  pools before the off (2016–2018), calibrated on 2016/17 and graded on
+  2017/18 at the final place dividend: −7.6% to −36.9% at every lead from
+  33 to 5.6 minutes and every EV cut (§7a).
 - **Untested in racing, and the shape that has worked elsewhere**: the
   sharp exchange's price on a race against the pool a US outlet sells, both
   at a moment before the off. Needs a price path for both, which nothing
   free holds (`docs/sports/racing.md`, "What would have to change").
+
+- **Late money in a pool, decided before the off.** Back (or fade) the
+  runner whose pool share moved most between two snapshots, decided at the
+  later one, paid at the final dividend. *Failed* in Hong Kong 2016–2018
+  (six lead pairs from 30 to 5.6 minutes out; biggest steamer −12.9% to
+  −19.3%, biggest drifter −7.4% to −20.5%, none positive in both seasons).
+  The pool's last snapshot a bettor can use is 0.0634 nats a race short of
+  the close, 84% of all it learns after 30 minutes out (§7a). A late-money
+  rule has to act after the moves it reads, and in a pool the price paid
+  includes the moves after it acts.
 
 ## 3. The book re-hangs a line mechanically
 

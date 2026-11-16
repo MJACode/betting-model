@@ -362,9 +362,134 @@ the scheduled start, no form outside Hong Kong) binds every row:
 
 **What would have to change** is in `docs/sports/racing.md`.
 
-## 6. What was not run
+## 6. What was not run in the first pass
 
-- The UK/Ireland starting-price set (1.12 GB) and the National Hunt set.
-- Anything on US racing: there is no free US price.
-- A price path, in any market: none is free without an account.
-- Exotic pools: no dividends are held beyond win and place.
+The first pass (above) ran without a price path and without the UK/Ireland
+set. Both were added the same evening (mike: *"lets use the free hong kong
+history"*): §7 and §8. Still not run: anything on US racing (no free US
+price), the National Hunt set, and exotic pools (no exotic dividends beyond
+Hong Kong's 2016–2018 `all_dividends`).
+
+## 7. Hong Kong pools before the off, 2016–2018
+
+The free GitHub set `nch015/horserace_data` holds the HKJC win and place
+pools sampled before every Hong Kong race from 2016-09-27 to 2018-06-27
+(1,510 races, median 171 snapshots a race), the dividends, and results with
+final odds back to 1979. Stored in Supabase (`horse_racing|nch015_horserace_data`,
+6 rows, verified). This is the price a US bettor watches on a commingling
+ADW's screen before betting the pool, so these are the first rules here that
+are decided on a price the bettor could see and paid at the price they would
+be paid.
+
+**The clock** (`scripts/horse/hk_preoff_data.py`, `python -I` it to print
+the checks). `capture_time` is UTC; `race_time` is the scheduled start in Hong
+Kong time (UTC+8). The evidence: with +8 hours, the first snapshot showing the
+final odds comes after the listed start in every one of 1,483 races (median
+4.4 minutes after: the pools close when the race actually starts); no
+snapshot before the start ever shows the final odds; no other whole-hour
+offset fits; the monthly median does not drift over 21 months. Snapshots come
+every 12 minutes until about 3½ hours out, then every 6 minutes to the off,
+so each race has one snapshot in its last 6 minutes. **The latest decision
+these files can test is about 5.6 minutes before the scheduled start**
+(the median real lead of the "2-minute" frame); the "5-minute" and
+"2-minute" frames use the same snapshot in 1,083 of 1,474 races.
+
+**Grading.** 1,508 graded races, 18,474 starters. Win and place paid at the
+dividend per HK$10 (decimal = dividend / 10); a winner's final pool share
+times its dividend / 10 has a median of 0.8252 against 1 − takeout = 0.8250,
+so the grading reproduces the 17.5% take. Dead heats are already split in the
+dividend. A runner priced at the lead and scratched later is a refund, not a
+bet.
+
+### 7a. The pool before the off (`scripts/horse/hk_preoff_pool_study.py`)
+
+**How much the late money knows.** Log loss of the winner per race, on the
+1,406 single-winner races present at every lead:
+
+| Moment | Log loss | Gap to the close (SE) |
+|---|---:|---:|
+| 30 minutes | 2.0926 | +0.0754 (0.0083) |
+| 15 minutes | 2.0930 | +0.0758 (0.0087) |
+| 10 minutes | 2.0879 | +0.0707 (0.0083) |
+| 5 minutes | 2.0830 | +0.0658 (0.0078) |
+| 2 minutes (real lead ~5.6) | 2.0806 | +0.0634 (0.0077) |
+| the close (hindsight) | 2.0172 | — |
+| uniform | 2.4979 | |
+
+Of what the pool learns after 30 minutes out, 84% (0.0634 of 0.0754) arrives
+after the last snapshot a bettor can act on. The pool is close to calibrated
+at every lead (a one-parameter fit of share^β gives β 0.97 to 1.07); at the
+close it shows a mild favourite-longshot lean (β 1.05 and 1.07).
+
+**Blind win bets, decided at the lead, paid at the final dividend.** Every
+runner loses −19.2% to −19.6% at every lead (about 18,100 bets and 2,350 to
+2,430 units risked a lead), against −16.9% deciding on the final pool, which
+no one can see. Every odds band loses at every lead; over 51 is worst
+(−36% to −47%). The favourite loses −20.7% to −22.1%. A winner backed at the
+screen price is paid a median 0.950 to 0.975 of it: 61.6% to 65.0% of runners
+lose pool share between the lead and the close.
+
+**Late money.** The change in pool share between two leads (30→15, 15→5,
+10→2, 30→5, 15→2, 30→2), backed or faded, by size of move, by odds, and the
+race's biggest steamer and drifter. The biggest steamer loses −12.9% to
+−19.3%; the biggest drifter −7.4% to −20.5%, negative in at least one season
+in every pair. 16 of 61 move cells beat their own season's odds-band control
+in both seasons, which is about the rate chance gives, and none is positive
+in both seasons.
+
+**Win pool against place pool at the lead** (the "Dr Z" test on live
+pools). Harville from the win pool at the lead, calibrated on 2016/17 (its
+log-odds coefficient 0.83 to 0.91 confirms it over-rates short horses for a
+place), against the place pool's odds at the same lead, graded on 2017/18 at
+the final place dividend: every lead and every EV cut from −0.20 to +0.30
+loses, −7.6% to −36.9% (the −7.6% is 52 bets, 33.9 units risked).
+
+**Verdict.** 183 decidable bet sets were graded (111 on both seasons, plus
+50 place sets on the out-of-sample season, plus the restored lead pairs). 6
+have a positive return, all on small stakes; **none has its 95% interval
+above zero, and none is positive in both seasons. Null.** Two lead pairs
+(30→5, 15→2) were dropped from an early draft of the script after their
+results were seen; a reviewer caught it, and they are restored in the
+committed script, so the count above includes them.
+
+### 7b. Benter against the pool before the off (`scripts/horse/hk_preoff_benter.py`)
+
+Stage 1: a conditional logit on runner facts from earlier Hong Kong races
+(form, rating and weights, draw, jockey and trainer rates, layoff, a speed
+figure, the horse's own odds last time), fit on the ten seasons 2006/07 to
+2015/16 (7,509 races). Stage 2: `softmax(b · log p_model + c · log p_pool)`
+with the pool at the lead, fit on one season, graded on the other at the
+final dividend. Fold A (fit 2016/17, graded 2017/18) is the forward test;
+fold B reverses it and is a robustness row only.
+
+| Pool / fold | Races | Pool | Stage 1 | Blend | Blend − pool (± SE) |
+|---|---:|---:|---:|---:|---:|
+| 10 min, A | 756 | −2.0904 | −2.2042 | −2.0871 | +0.0033 ± 0.0037 |
+| 5 min, A | 755 | −2.0854 | −2.2054 | −2.0835 | +0.0019 ± 0.0031 |
+| 2 min, A | 752 | −2.0787 | −2.2039 | −2.0776 | +0.0010 ± 0.0029 |
+| final pool, A (hindsight) | 756 | −2.0095 | −2.2022 | −2.0072 | +0.0023 ± 0.0017 |
+
+(log-likelihood of the winner per race, higher is better)
+
+The model's weight against the pool at the lead is `b` = +0.14 to +0.21
+(1.8 to 2.7 standard errors) in every fit: **the form model carries a little
+information the pool 5–12 minutes out does not**. Out of sample that is worth
++0.001 to +0.003 nats a race, within one standard error, and against the
+final pool `b` goes to zero or below: the late money absorbs it. The blend's
+best-EV runners are longshots (median decision odds 49 to 200); the largest
+bet set (10 minutes, fold A, EV > 0) lost 5.01 units on 13.59 risked over 331
+bets, −36.8% (a race bootstrap gives −71.1% to +0.8%), and −70.7% at a flat
+stake. **Null.** The leak check lit the same harness up (the race's own
+finishing position: stage-1 log-likelihood −2.21 → −0.01, `b` +0.18 → +4.05,
+756 of 756 bets won).
+
+**What it means.** In Hong Kong's pools the last money in (after the final
+bettable snapshot) holds what a fundamentals model knows, and a bettor paid at
+the final dividend cannot get ahead of it from 5 minutes out. A model would
+have to be decided seconds before the off, at the moment the large late
+bettors act, which a retail bettor through a US ADW cannot do.
+
+Both studies were rerun by two independent reviewers each (look-ahead; grading
+and data). Every table reproduced byte for byte; one reviewer re-graded the
+pool study from the raw files with its own parser and got the same results.
+None found look-ahead. Their corrections to the wording are applied above.

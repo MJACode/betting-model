@@ -20,7 +20,8 @@
 | Betfair Australia's ANZ thoroughbred CSVs (free, no login) | **1,303,266 runners in 132,750 races, 2020-01 to 2026-10**, 11–14% of them New Zealand. One row a runner: the best back and lay and both book percentages **at the scheduled start**, win and place BSP, traded prices and volumes to the off and in play, win and place result. No form, no tote price, no fixed-odds price. | Supabase, `horse_racing|betfair_anz_thoroughbreds` (82 files) |
 | Hong Kong 1997–2005 (Kaggle `gdaley/hkracing`, CC0) | 6,348 races, 79,447 runners, Sha Tin and Happy Valley. Final win and place pool odds, dividends, rating, draw, weights, sectional positions, finish times, jockey and trainer ids. Dates obscured by the author; order kept. | `horse_racing|gdaley_hkracing` |
 | Hong Kong 2014–2017 (Kaggle `lantanacamara`, licence unknown) | 2,367 races, 30,189 runners, final win odds (shown as 99 above 99), positions, weights. | `horse_racing|lantanacamara_hong_kong_horse_racing` |
-| UK/Ireland 1988–2026 (Kaggle `deltaromeo`, CDLA-Sharing) | 5.1 million runners with starting prices (the manifest's count). | **not downloaded** this session (1.12 GB zip): see Open items |
+| Hong Kong 2016–2018 pools before the off (GitHub `nch015/horserace_data`, no licence stated) | 1,510 races, the win and place pools sampled a median 171 times a race (every 12 minutes, then every 6 in the last 3½ hours), dividends, and results with final odds back to 1979. Added 2026-11-15 evening. | `horse_racing|nch015_horserace_data` (6 rows) |
+| UK/Ireland 1988–2026 (Kaggle `deltaromeo`, CDLA-Sharing) | 5.1 million runners with starting prices (the manifest's count). Added 2026-11-15 evening. | `horse_racing|deltaromeo_uk_ireland_1988_2026`: the 1.12 GB zip in 34 parts of 32 MiB |
 | National Hunt 2005–2019 (Kaggle `sheikhbarabas`) | 744,347 runners, jumps only. | not downloaded |
 | Equibase 2023 complimentary year | US past performances and charts, by email. "Not for wagering use." | not requested |
 
@@ -101,8 +102,8 @@ the pool a US outlet offered in 2026 and was commingled into as of 2014
 
 | Market | Settles on | Inputs held | Prices | Baseline | Methods tried | Result | Status |
 |---|---|---|---|---|---|---|---|
-| Win, Hong Kong pools (offered by US outlets in 2026; commingled as of 2014, 2026 not confirmed) | official first; a dead heat splits | runner facts 1997–2005 | final pool odds 1997–2005 and 2014–2017; no pre-off path | every band −13% to −28%, longshots −48% to −54%; favourite −16.7% and −14.2% | pool calibration; Bolton–Chapman fundamentals; Benter blend; removal of each feature group; split by meeting | the blend holds nothing the pool lacks (`b` ≈ 0 every season); a leak check shows the harness can see an edge | **nothing clears** (audit §3, §3b) |
-| Place, Hong Kong pools | first three (7+ runners) | the same | final place odds | −18.4% betting every runner | Harville against the win pool (the "Dr Z" test), raw and calibrated on early seasons | the calibrated rule is negative at every cut, and it read both final pools, so it is an upper bound | **nothing clears** (audit §3a) |
+| Win, Hong Kong pools (offered by US outlets in 2026; commingled as of 2014, 2026 not confirmed) | official first; a dead heat splits | runner facts 1979–2018 | final pool odds 1997–2005 and 2014–2017; **the pool before the off, 2016–2018** (to about 5.6 minutes out) | every band −13% to −28%, longshots −48% to −54%; favourite −16.7% and −14.2% | pool calibration; Bolton–Chapman fundamentals; Benter blend against the final pool and against the pool 5–12 minutes out; late money (six lead pairs); removal of each feature group; split by meeting | decided before the off and paid at the dividend: every runner −19.2% to −19.6% at every lead; the form model carries a little against the pool before the off (`b` +0.14 to +0.21) and none against the close, and its bets lose; 183 bet sets, none with an interval above zero | **nothing clears** (audit §3, §3b, §7) |
+| Place, Hong Kong pools | first three (7+ runners) | the same | final place odds | −18.4% betting every runner | Harville against the win pool (the "Dr Z" test), raw and calibrated, on final pools and on both pools before the off; by field size | before the off, graded 2017/18: −7.6% to −36.9% at every lead and cut; every field size loses | **nothing clears** (audit §3a, §7a) |
 | Win, Australia and New Zealand (Betfair exchange; not bettable from the US) | Betfair's result; a dead heat splits | prices only, no form | scheduled-start back and lay, BSP, 2020-01 to 2026-10 | every band negative net of commission (−0.70% to −12.6% at BSP); the favourite negative every year | price bands at two prices; favourites by year and by track size; BSP against the back; a logit on the scheduled-start prices | audit §4, §4b | **nothing clears** |
 | Place, Australia and New Zealand (Betfair) | Betfair's place market (2 or 3 places) | the same | place BSP | negative in every Harville band net | Harville raw and discounted; a calibrated rule with a predicted place BSP; split by field size | every year negative net; the best gross cut −0.09% | **nothing clears** (audit §4a) |
 | Win and place, US pools | official order after any DQ | none | none free: Equibase charts $219.95/month, HDW $119/month; the free 2023 Equibase year is "not for wagering use" | not measured | none | | **parked: no price.** Routes tried: the free files (none US), Kaggle (NYRA's 2022 set needs a login), Equibase (paid, or free with a no-wagering licence), the odds feed (no racing) |
@@ -119,15 +120,17 @@ the audit, §5.
 
 ## What would have to change before a model could pass
 
-1. **A pre-off price path.** Every free price here is either the close (BSP,
-   final pools) or one snapshot at the scheduled start. The published racing
-   edges either need prices minutes before the off (Benter's pools, the
-   late-money studies) or vanish at the off (Betfair's own tutorial: 241 late
-   plunges paid only from the price 10 minutes out). Routes found: Betfair's
-   free Basic history (1-minute last traded price) and its paid tiers, all
-   behind a Betfair account; a US$499 HKJC odds-movement archive (win and
-   place from December 2021); an unlicensed GitHub set of Hong Kong live odds,
-   2016–2018.
+1. **A price closer to the off than 5 minutes.** The free Hong Kong path
+   (2016–2018, added 2026-11-15) answered the "pre-off price" question it
+   could: decided on the pool 5.6 to 33 minutes out and paid at the
+   dividend, nothing clears, and 84% of what the pool learns after 30 minutes
+   out arrives after its last bettable snapshot (audit §7). A form model
+   holds a little information the pool 5–12 minutes out lacks, and the close
+   holds all of it. So the remaining test needs a decision in the last minute
+   or two, which needs a finer path than one snapshot every 6 minutes:
+   the US$499 HKJC odds-movement archive (win and place from December 2021,
+   polled about every 1 or 5 minutes), or Betfair's own history (behind an
+   account).
 2. **A sharp price against the pool**, the mechanism that has worked most
    often in this repo (a sharp reference against a softer price on the same
    event, `methods.md` §2): Betfair's price on a Hong Kong or US race against
