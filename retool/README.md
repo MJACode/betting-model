@@ -22,9 +22,11 @@ direction: a change merged here reaches the live dashboard only when it is
 pushed to Retool, and a change made in Retool's own editor reaches this folder
 only when it is copied back.
 
-**This folder is the copy you edit.** Treat a change made directly in Retool's
-editor as a change that must be copied back here the same day, or the next push
-from here will overwrite it.
+**This folder is the copy you edit.** A change made directly in Retool's
+editor must be copied back here the same day, or the next push from here will
+overwrite it. Both Retool accounts are admins, and the admin group owns this
+app in a way the sharing settings cannot change, so nothing on the Team plan
+can lock the app against an edit in Retool.
 
 ## Getting a change from here into Retool
 
@@ -39,28 +41,70 @@ Merge the change to `master`, then ask Claude to "push the dashboard". It:
    what gets posted.
 3. Uploads the zip to the address the tool returns (`curl -X PUT`; Python's
    default client is refused by Retool's firewall with error 1010).
-4. Waits for the import, then deletes the two planning files it leaves behind
-   (`/plans/IMPORT_PLAN.md`, `/plans/import-build-plan.json`).
-5. Reads every file back out of Retool and runs
+4. If a file was **deleted** here, sends one thread message telling Retool's
+   builder to delete it there too. The import only adds and overwrites.
+5. Reads the app's files back out of Retool and runs
    `python -m scripts.retool_app_files check <dumps>`. It fails on any
    difference, missing file or extra file.
-6. Publishes only when that check is clean, then reads the published version
-   back and checks it again.
+6. Publishes only when that check is clean. If Retool asks for approval of a
+   function that writes to the database, Claude stops and asks you. Then it
+   reads the published version back and checks it again.
 
-**What was proved on 2026-11-15, on a throwaway copy of the app:** the upload
-was accepted (68 files, none dropped), Retool's builder placed them with a
-file-copy step (not by retyping), ran no server function, and used 0.002 of
-the month's 1,000 Retool AI credits. Reading the copy back, all 66 files that
-could be compared were byte-for-byte identical. Two small files,
-`backend/package.json` and `pnpm-workspace.yaml`, could not be read back from
-that copy. Retool calls them its own read-only files, and both are Retool's
-defaults. A publish to the live app has not been done this way yet; step 6
-is what checks it the first time.
+**Read the right listing for the extra-file check.** The app's published
+listing (no thread named) shows only the app's own files: 70 for the live app.
+A thread's listing also shows Retool's hidden system files and the upload
+folder (269 files on the test app). Those are not app source; compare only
+the app's own files.
 
-**Routes that do not work**, measured the same day: Retool's builder cannot
-download anything (its shell allows only a few `git` commands, `pnpm install`
-and `vitest`, and its `git` can only pull from Retool's own internal copy);
-and Retool's GitHub link needs the Enterprise plan.
+## What has been proved, and what has not
+
+Measured on 2026-11-15, on a throwaway copy of the app:
+
+- **Upload and copy.** The upload was accepted (68 files, none dropped).
+  Retool's builder reported placing 63 files with its file-copy tool, and its
+  event log shows that tool in use. It wrote `frontend/package.json` by
+  editing rather than copying, and that file came out identical too.
+- **Byte check.** Reading the copy back, all 66 files that could be compared
+  were byte-for-byte identical.
+- **No database writes.** The builder ran no server function. The volume
+  settings change log has no entry after 2026-11-11, and the layouts table is
+  empty.
+- **Cost.** The import used 0.002 Retool AI credits; the two follow-up test
+  messages used about 5.9. The account has 1,000 a month; 992.07 were left
+  afterwards (resets 2026-12-14).
+- **Deleting a file works.** A thread message deleted an ordinary app file,
+  and the file list confirmed it was gone.
+
+What did **not** work, or is still unknown:
+
+- **Four files Retool will not let an import overwrite:** `vitest.config.mjs`,
+  `backend/package.json`, `frontend/vitest.config.ts`,
+  `frontend/vitest.setup.ts`. Retool treats them as its own read-only files.
+  **An edit to any of these here will not reach Retool.** They matched
+  already.
+- **Two files that could not be read back** from the test app:
+  `backend/package.json` and `pnpm-workspace.yaml`. Retool's file-read tool
+  reported both missing. The builder said it updated `pnpm-workspace.yaml`;
+  why it cannot be read back is not known.
+- **Leftover files.** The import leaves `/plans/IMPORT_PLAN.md` and
+  `/plans/import-build-plan.json` in the app, and Retool refuses to delete them
+  ("Cannot delete protected file"). The app never loads them, and `check`
+  skips them.
+- **Publishing a pushed change is untested.** Publishing the test app was
+  blocked until someone approves its two layout functions
+  (`saveDashboardLayout`, `deleteDashboardLayout`). That approval was not
+  given, so nothing was published. Whether the live app will ask for the same
+  approval is not known until a push is made to it.
+- **Retool's check misses one write function.** Retool's "this function
+  writes" check did not flag `setModelVolume`. That function writes through a
+  database function call, which looks like a read.
+
+**Routes that do not work**, measured the same day:
+
+- Retool's builder cannot download anything. Its shell allows only a few
+  `git` commands, `pnpm install` and `vitest`, and its `git` can only pull from
+  Retool's own internal copy.
+- Retool's GitHub link needs the Enterprise plan.
 
 ## Getting a change made in Retool back here
 
@@ -78,14 +122,13 @@ and Retool currently hold the same bytes.
 - `pnpm-lock.yaml` (201,834 bytes in Retool). Retool's file-read tool cuts any
   file off at 64 KB, so it cannot be copied whole, and a partial lockfile is
   worse than none. pnpm rebuilds it from the `package.json` files.
-- `backend/user.d.ts` and the read-only system half of the theme are Retool's
-  own files: `package.json` refers to the first, and Retool's file list does not
-  include it.
+- Retool's own hidden files (`backend/user.d.ts`, the shared UI components,
+  the generated hooks). Retool's ignore file lists them, and its published
+  file list does not include them.
 
 ## What stays the same after the move
 
 - The app reads the database through Retool's saved **supabase** connection,
   named by ID in `package.json`. No password or key is in these files.
 - This repository is **public**, so the dashboard's queries are now public too.
-  They hold table and view names only, all of which are already in
-  `data/migrations/`.
+  Every table and view they name is already named elsewhere in this repo.

@@ -87,6 +87,22 @@ def test_truncated_and_lockfile_entries_are_never_written(tmp_path):
     assert not (dest / "big.ts").exists() and not (dest / "pnpm-lock.yaml").exists()
 
 
+def test_the_import_tools_leftover_plan_is_skipped_not_written_or_flagged(tmp_path):
+    dump = _dump(tmp_path, [
+        _entry("/plans/IMPORT_PLAN.md", "# plan\n"),
+        _entry("/frontend/App.tsx", "x\n"),
+    ])
+    dest = tmp_path / "app"
+    files = raf.load_dumps([dump])
+    w = raf.write(files, dest)
+    assert w.written == ["/frontend/App.tsx"]
+    assert not (dest / "plans").exists()
+    c = raf.check(files, dest)
+    assert c.match == ["/frontend/App.tsx"]
+    assert not (c.missing_in_repo or c.differs or c.only_in_repo)
+    assert len(c.skipped) == 1
+
+
 def test_content_that_disagrees_with_retools_size_is_refused(tmp_path):
     entry = _entry("/a.ts", "x = 1\n")
     entry["sizeBytes"] += 1

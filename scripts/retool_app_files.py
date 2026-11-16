@@ -15,9 +15,9 @@ either direction. The two directions are:
                        python -m scripts.retool_app_files write DUMP.json ...
   repo -> Retool   python -m scripts.retool_app_files zip OUT.zip
                    then Retool's import tool (`retool_start_prepared_import`
-                   with the app as target) and an upload of OUT.zip; Retool
-                   copies each file in with a file-copy step, not by retyping.
-                   Then read the files back out of Retool and prove they match:
+                   with the app as target) and an upload of OUT.zip; Retool's
+                   builder places the files (mostly with a file-copy tool), so
+                   never trust its report: read the files back and prove it:
                        python -m scripts.retool_app_files check DUMP.json ...
                    `retool/README.md` has the steps in full.
 
@@ -49,6 +49,11 @@ NOT_EXPORTED = {"/pnpm-lock.yaml"}
 # left out of the upload, and compared by content (key order ignored), not by
 # bytes. Measured 2026-11-15 on a test import: same content, different order.
 RETOOL_MANAGED = {"/package.json"}
+
+# Retool's import tool writes its plan here and its builder refuses to delete
+# it ("Cannot delete protected file", measured 2026-11-15). The app's code never
+# loads it, so `check` skips it instead of calling every push a mismatch.
+IMPORT_LEFTOVERS = ("/plans/",)
 
 
 @dataclass
@@ -100,6 +105,9 @@ def _local(dest: Path, retool_path: str) -> Path:
 
 
 def _usable(f: DumpFile, report: Report) -> bool:
+    if f.path.startswith(IMPORT_LEFTOVERS):
+        report.skipped.append(f"{f.path} (left behind by Retool's import tool)")
+        return False
     if f.path in NOT_EXPORTED:
         report.skipped.append(f"{f.path} (not exported: lockfile)")
         return False
