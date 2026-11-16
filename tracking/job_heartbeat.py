@@ -157,6 +157,12 @@ MAX_SILENCE: dict = {
     # ticks, and every first post stored meanwhile goes past the card's
     # 15-minute limit and is written `missed`.
     "ncaab_moneyline_first_post": 20,
+    # The database health snapshot (tracking/db_health.py): hourly at :50 ET,
+    # 24x7. The morning disk window turns away the 05:50 and 06:50 ticks, and
+    # a turned-away tick still beats ("skipped"), so 180 minutes is three
+    # missed hours: the job has stopped and the Database tab's history has a
+    # hole in it.
+    "db_health_snapshot": 180,
 }
 
 # Jobs that run only inside fixed Eastern hours: (first hour, last hour,

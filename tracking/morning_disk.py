@@ -58,6 +58,9 @@ MAINTENANCE_JOBS = frozenset({
     "kalshi_game_markets",
     "kalshi_ladders_morning",
     "kalshi_game_markets_morning",
+    # The hourly database health snapshot (tracking/db_health.py). It reads
+    # file sizes for every table; the window loses at most two hourly points.
+    "db_health_snapshot",
 })
 
 # Nothing in the queue is latency-sensitive (the job's own comment). A

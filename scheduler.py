@@ -1101,7 +1101,10 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "euroleague_pregame_window",
                   # Queues the daily BYOM NFL refresh onto job_queue, which
                   # is also a pipeline job.
-                  "byom_nfl_refresh"}
+                  "byom_nfl_refresh",
+                  # Writes one database health snapshot an hour; reads only
+                  # Postgres's own statistics. Not a loop.
+                  "db_health_snapshot"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -1651,6 +1654,23 @@ def run_kalshi_game_record() -> None:
     except Exception as exc:                                   # noqa: BLE001
         log.warning("kalshi game market record failed: %s: %s",
                     type(exc).__name__, exc)
+
+
+def run_db_health_snapshot() -> None:
+    """One database health snapshot (tracking/db_health.py), for the ops
+    dashboard's Database tab (mike, 2026-11-15).
+
+    Reads Postgres's own statistics and file sizes, never a table scan, and
+    inserts one row (plus every table's size and the heaviest statements every
+    six hours). It is allowed to raise: the heartbeat records the failure and
+    the failure alerter reports it, so a broken snapshot is not a quiet one.
+    """
+    from tracking.db_health import run_db_health_snapshot as snapshot
+
+    got = snapshot(source="worker")
+    log.info("db health: snapshot %s, %s tables, %s statements, %s ms",
+             got.get("snapshot_id"), got.get("tables"), got.get("statements"),
+             got.get("read_ms"))
 
 
 def run_nfl_prop_card() -> None:
@@ -3729,6 +3749,18 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour=7, minute=25, timezone=TIMEZONE),
         id="kalshi_game_markets_morning",
         name="Kalshi NCAAF game markets (07:25 ET catch-up after the morning disk window)",
+    )
+
+    # Minute 50: clear of the :17 refresh pass, the :25 prop card, the :32 and
+    # :37 Kalshi recorders and the :40/:45 inserts. The morning disk window
+    # turns away the 05:50 and 06:50 ticks (MAINTENANCE_JOBS); no catch-up,
+    # since the next hour's snapshot covers the gap.
+    sched.add_job(
+        run_db_health_snapshot,
+        CronTrigger(minute=50, timezone=TIMEZONE),
+        id="db_health_snapshot",
+        name="Database health snapshot (size, rows, connections, heaviest statements)",
+        max_instances=1, coalesce=True, misfire_grace_time=600,
     )
 
     if RUN_NCAAF_PROP_ODDS:

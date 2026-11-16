@@ -672,6 +672,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Returns on a catalog read once it exists. The loop refuses to decide
     # until it does.
     "euroleague_live_decisions_2026_11_13.sql",
+    # 2026-11-15 (mike: "a section on database health, size and any other
+    # metrics you think are cool and change over time"): the four tables the
+    # hourly db_health_snapshot job writes and the ops dashboard's Database
+    # tab reads (tracking/db_health.py). New tables, RLS on, anon and
+    # authenticated revoked; touches no view, pick, cut or record. Returns on
+    # a catalog read once db_health_snapshots carries this file's hash.
+    "db_health_snapshots_2026_11_15.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT
