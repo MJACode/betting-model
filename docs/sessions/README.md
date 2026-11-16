@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Scoreboard follow-up: one sport's DB error no longer skips the others' live scores; live-score chunks read in parallel; UFC game screen has no Spread block |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord price line links the book name to that bet's slip (app betslip URL, Massachusetts, sportsbook page when there is no outcome id) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord pick posts link the matchup to the game score page (ESPN gamecast, scoreboard fallback) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Back button: dead again on Pick Detail opened from a push (iOS 27.3); every pushed screen now draws the React Back pill, UIKit Back hidden; push taps wait for the app to be active |

@@ -4061,18 +4061,21 @@ const LIVE_SCOREBOARD_COLUMNS =
  */
 export async function fetchLiveScoreboard(gameIds: readonly string[]): Promise<LiveScoreboardRow[]> {
   if (gameIds.length === 0) return [];
-  const out: LiveScoreboardRow[] = [];
+  // 80 ids a request keeps the URL short. A college basketball Saturday
+  // starts 300+ games, so the chunks are read side by side, not one after
+  // another (review L3, 2026-11-15). One row per game: far under 1,000.
   const size = 80;
-  for (let i = 0; i < gameIds.length; i += size) {
-    const chunk = gameIds.slice(i, i + size);
+  const chunks: string[][] = [];
+  for (let i = 0; i < gameIds.length; i += size) chunks.push(gameIds.slice(i, i + size));
+  const parts = await Promise.all(chunks.map(async (chunk) => {
     const { data, error } = await supabase
       .from('live_scoreboard')
       .select(LIVE_SCOREBOARD_COLUMNS)
       .in('game_id', [...chunk]);
     if (error) throw error;
-    out.push(...((data ?? []) as unknown as LiveScoreboardRow[]));
-  }
-  return out;
+    return (data ?? []) as unknown as LiveScoreboardRow[];
+  }));
+  return parts.flat();
 }
 
 /**
