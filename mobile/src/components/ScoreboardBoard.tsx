@@ -36,6 +36,7 @@ import {
   scoreboardSwitchLine,
   shownSplitLine,
   splitsFor,
+  SPLITS_LEGEND,
   splitsSpeech,
   type ScoreboardCard,
   type ScoreboardFeed,
@@ -45,6 +46,7 @@ import {
   type ScoreboardSplitRow,
   type ScoreboardSport,
   type SideSplit,
+  type SplitMove,
 } from '@/lib/scoreboard';
 import { colors, font, radii, spacing, teamDisc, sectionHeaderText, opacity, card, cardDense } from '@/lib/theme';
 import type { GameRow } from '@/types';
@@ -368,6 +370,11 @@ export function ScoreboardBoard({
             ) : null}
           </View>
         ) : null}
+        {cards.length > 0 && showSplits ? (
+          <Text style={styles.caption} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            {SPLITS_LEGEND}
+          </Text>
+        ) : null}
         <FlatList
           data={cards}
           keyExtractor={(c) => c.gameId}
@@ -584,8 +591,8 @@ function SideRow({
         {row.score}
       </Text>
       <LineCell value={cell.value} price={cell.price} ink={ink} single={market === 'h2h'} />
-      {showSplits ? <PctCell value={split.bets} /> : null}
-      {showSplits ? <PctCell value={split.money} /> : null}
+      {showSplits ? <PctCell value={split.bets} move={split.betsMove ?? null} /> : null}
+      {showSplits ? <PctCell value={split.money} move={split.moneyMove ?? null} /> : null}
     </View>
   );
 }
@@ -595,7 +602,7 @@ function SideRow({
  * the BET green: on a picks board green reads as "the model says bet this",
  * and the bar only says where the public is (UX review, 2026-10-29).
  */
-function PctCell({ value }: { value: number | null }) {
+function PctCell({ value, move }: { value: number | null; move: SplitMove }) {
   const majority = value != null && value > 50;
   return (
     <View style={[styles.colPct, styles.pct]}>
@@ -608,6 +615,10 @@ function PctCell({ value }: { value: number | null }) {
       >
         {pctText(value)}
       </Text>
+      {/* The arrow sits beside the bar, not in the number's Text, so a moved
+          number is fitted exactly like an unmoved one (UX review 2026-11-16).
+          Neutral ink: green/red would read as a model signal. */}
+      <View style={styles.barRow}>
       <View style={styles.barTrack}>
         {value != null ? (
           <View
@@ -617,6 +628,10 @@ function PctCell({ value }: { value: number | null }) {
             ]}
           />
         ) : null}
+      </View>
+      {value != null && move ? (
+        <Text style={styles.pctMove} maxFontSizeMultiplier={1.3}>{move === 'up' ? '▲' : '▼'}</Text>
+      ) : null}
       </View>
     </View>
   );
@@ -743,6 +758,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   pctEmpty: { color: colors.textTertiary },
+  pctMove: { fontFamily: font.family, fontSize: font.size.nano, color: colors.textSecondary },
+  barRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   barTrack: {
     width: 36,
     height: 4,

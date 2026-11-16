@@ -493,9 +493,9 @@ check('PickCard: an "Old price" card reads the line move at the scored book',
   /: \(staleLineMove\?\.movement \?\? null\)/.test(card) &&
   /const signalsNow = staleLineMove\s*\?\s*staleNowFor\(bookLabel\(staleLineMove\.book\)\)/.test(card) &&
   /layout === 'signals' && pregame && flagged/.test(card) &&
-  /staleMoveSpoken\]\.filter\(Boolean\)/.test(card) &&
-  /movementSummary && hero\.has\('movement'\) && !\(signalsMuted && movementSummary\.color === colors\.bet\)/.test(card) &&
-  card.indexOf('lockedCaptionText(heroPrice))}</Text>\n      ) : null}\n      {signalsNow ?') > 0);
+  /const moveBook = staleLineMove\?\.book \?\? quoteBookKey/.test(card) &&
+  /\{signalsMove && hero\.has\('movement'\) \? \(/.test(card) &&
+  !/\{signalsNow \? \(/.test(card));
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASS');
 process.exit(failures ? 1 : 0);

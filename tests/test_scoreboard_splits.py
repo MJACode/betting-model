@@ -120,10 +120,14 @@ class _Conn:
             g = GAMES[0]
             return _Cur([(g["game_id"], g["sport"], g["game_date"], g["home_team"],
                           g["away_team"], g["commence_time"])])
+        if "FROM public.scoreboard_splits_history" in sql:
+            return _Cur([])
         raise AssertionError(sql)
 
     def executemany(self, sql, rows):
-        assert "INSERT INTO public.scoreboard_splits" in sql
+        # 2026-11-16: Action Network consensus is history only. The
+        # Scoreboard row is DraftKings' (data/ingestors/dk_splits.py).
+        assert "INSERT INTO public.scoreboard_splits_history" in sql
         self.rows.extend(rows)
 
     def commit(self):
@@ -142,6 +146,8 @@ def test_run_fetches_only_sports_and_days_with_an_unstarted_game(monkeypatch):
     out = ss.run(conn, now=BEFORE, fetch=fetch)
     assert calls == [("NFL", "2026-10-29")]
     assert out["NFL"]["rows"] == 4 and len(conn.rows) == 4
+    assert out["NFL"]["history"] == 4
+    assert {r["source"] for r in conn.rows} == {"action_network"}
 
 
 def test_never_written_to_public_betting():

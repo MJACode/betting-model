@@ -64,3 +64,29 @@ FanDuel's international track-rules page (empty shell); every TwinSpires fact
 pool; JRA's take and whether any US outlet carries JRA races; Australia's
 2026 one-pool rates (an image); NYRA Bets' and AmWager's international lists;
 any operator odds API; a CHRB CAW rule.
+
+## Follow-up, 2026-11-16: does a US outlet bet into the Hong Kong Jockey Club's own pools?
+
+Asked because the one racing test left needs the Club's own odds history
+(about US$499), and that only tests a bet a US user can place if a US
+outlet's Hong Kong bets join the Club's pools and are paid its dividend.
+Three searches (the Club's own side; each outlet's pages; trade press,
+regulators and forums), then a verifier who reopened the key sources.
+[O] and [S] as above.
+
+| Question | Answer | Sources |
+|---|---|---|
+| Does any US outlet bet into the Club's pools in 2025–2026? | **Not established.** No page from 2023 on that was opened names a US outlet doing so. The last named evidence is old: TVG (2014-03-31, first card 2014-04-05/06), Xpressbet (2014-07-01, [S]), WatchandWager renewed to 2021-22 (2019). A 2020 Club release says partners "from the U.S." pooled on the Dubai World Cup card, with no operator named. Listing Hong Kong races does not prove pooling: in the May 2025 Sha Tin outage, Australian bettors were put in a separate pool that paid differently ($18.10 against Hong Kong's $13.85 on one winner). | drf.com/news/tvg-agreement-allows-betting-commingled-pools-hong-kong-races [O, 2014-03-31]; bloodhorse.com articles/115192 [O, 2014-03-31]; wp.tdn.pmadv.com/?p=233618 [O, 2020-02-27]; thestraight.com.au/commingling-issue-delivers-a-69-million-hit-to-hong-kong-turnover [O, 2025-05-26] |
+| Which US outlets offer Hong Kong in 2026? | **Xpressbet / 1/ST BET** (Happy Valley and Sha Tin; a points promotion on Hong Kong bets 2026-11-11 to 12-27), **AmWager** (a Sha Tin promotion for 2026-11-21), **NYRA Bets** (Sha Tin and Happy Valley, 2026 schedule; win, place, exacta, trifecta, omni, daily double, pick 3). TwinSpires likely ([S]; its site timed out). FanDuel Racing and DraftKings Racing not established. | xpressbet.com/available-tracks [O, undated]; news.1st.com promotion 5409 [O]; amwager.com/event/hong-kong-jockey-club-bonus-builder-november-21-2026 [O]; racing.nyrabets.com/handicapping/bet-hong-kong-racing [O, undated] |
+| Which states? | Only Xpressbet's is known: Hong Kong is blocked in Arizona (and Canada), and Xpressbet takes no account bets at all in AK, DC, GA, HI, MS, NV, NJ, NC, SC, TX, UT, PR and the USVI. Not established for the other outlets. | xpressbet.com/available-tracks [O]; xpressbet.com/state-restrictions [O] |
+| Anything on top of the Club's 17.5% win and place take? | **Not established** for any US outlet. For comparison, New Zealand's TAB, a guest in the Club's pools, publishes that the host's deductions apply and its dividends equal the host's (Win, Place, Quinella, Double 17.5% from 2024-10-15). | special.hkjc.com e-win local pools [O]; gazette.govt.nz 2024-sl5206 [O, 2024-10-11] |
+| How late does a US outlet take a Hong Kong bet? | **Not established** for any US outlet, nor how often its odds refresh. The Club cuts off its own computer-betting customers about 15 seconds before the off (TDN, 2024-10-01); its rules set no fixed closing minute (Rule 2, file dated 2022-01-20). | wp.tdn.pmadv.com/computer-assisted-wagering-different-worlds-different-fixes [O, 2024-10-01]; hkjc.com/english/betting/betting_rule.htm [O] |
+| How many partners pool with the Club? | 2025/26: more than 60 partners in 26 countries and jurisdictions, HK$34.3bn to 34.4bn on Hong Kong races, 23.9% of all racing turnover. 2024/25: over 70 partners, HK$31.8bn. No partner is named in either year. | corporate.hkjc.com who-we-are/world-class-races [O]; corporate.hkjc.com news 2025-08-29 [O]; thestandard.com.hk article 341683 [O, 2026-09-02] |
+
+**What would settle it, measured rather than read.** A bet that joins the
+Club's pool is paid the Club's dividend, so a US outlet's $2 payout on a
+Hong Kong race would equal the Club's dividend per HK$10 divided by five.
+One public US payout page for Hong Kong races, compared race by race with
+the Club's dividends, answers the question. None was found in two searches
+on 2026-11-16 (press reports of the December 2025 International Races quote
+no US payout).

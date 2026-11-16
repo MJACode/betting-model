@@ -20,7 +20,15 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, The PC copy: one row per nightly pass (pc_copy_snapshots, scripts/local_mirror_report.py, run last by the LocalMirror task) and a PC copy tile on the Database tab; an unreadable exit code is now a failure, not 0 |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: no source from 2023 on confirms a US outlet still pools with the Hong Kong Jockey Club; Xpressbet, AmWager, NYRA Bets offer Hong Kong; the archive purchase waits on that |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, TestFlight tester account + comped access; Supabase MCP found to write production |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, archive move built: prop repeats (66% of prop rows) leave Supabase for mike's PC and Storage, checked per game against Postgres; other moves blocked by named readers; re-buy planner counts archived rows (#1345) |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, re-buy follow-up: zero-row pieces read back (FanDuel at its opener; NHL snapshot before the first other book), end-of-game in-play rows leave latest_odds unchanged, plan total is a ceiling (#1384) |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Stats boards: NFL Anytime TD uses the same price column as every other board (HIT, price, MATCHUP; DK green) |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Signals card: one line-movement row (line change, price change in parentheses), shown only when the deciding book moved against the pick |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Scoreboard splits switch to DraftKings' own numbers (DK Network), opening-move arrow, append-only splits history |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Ops dashboard: a Database tab (reads the hourly database health) and a SignalBase redesign of every tab (presentation only); Retool's driver binds $N in the order the placeholders appear |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, odds re-buy covers every missing piece: extra markets, in-play, part-way props; NFL ids from the schedule; tested with 1,132 credits; whole plan 4,703,617 credits (#1384) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Database health recorded hourly (worker job db_health_snapshot: db_health_snapshots every hour, every table's size and the heaviest statements every 6 h); pg_stat_statements total is not monotonic, so load comes from pg_stat_database.active_time |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: Hong Kong pools before the off (2016–2018) and UK/Ireland at starting price (1988–2026), both null; free sets stored first (#1387, PC mirror now copies huge rows); UK loader year filter fixed |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Scoreboard follow-up: one sport's DB error no longer skips the others' live scores; live-score chunks read in parallel; UFC game screen has no Spread block |
@@ -34,6 +42,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, a restart relaunches every in-play loop 60 s after boot (#1359): a 23:59 ET restart had left a live college football game with no in-play model until 11:00 ET |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, model building runs on mike's PC from the archive files; a backup copy goes to Supabase Storage (Pro keeps 7 days of backups); PC reads all 84M prop rows in 13.6 s (#1345) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, SQL over the PC copy: betting.duckdb, views over the Parquet files (269 tables, 258M rows checked in about a minute), rebuilt after each nightly copy |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, odds re-buy built and tested (4,552 credits): plans on the PC copy, buys at refresh times, only price moves; whole plan 3,279,447 credits (#1384) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Scoreboard covers every sport with games (12, chips only for sports with a game that day); NCAAB/NCAABW live scores via ESPN matched by event id; UFC finals W/L/D |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, NCAAB: Utah ML posted on a game postponed to Dec 5 (Washington @ Utah); ESPN ingestor now reads a game that left its date's board by event id; a BET whose game moved over 48h settles NO_ACTION (PR #1375) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, A postponed game's row moved date and its pick lost its team ("ML"): boards now read the missed games by id |
