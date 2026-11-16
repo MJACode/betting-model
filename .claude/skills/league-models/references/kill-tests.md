@@ -213,6 +213,27 @@ finding either way.
   percentages, back under lay), so a live rule skips the same races. And
   read every file's date format: one month of 82 wrote its dates day-first
   (`docs/sports/racing.md`, data checks).
+- **Rows can be stored in finishing order.** The UK/Ireland results files
+  (horse racing, 2026-11-16) list each race's runners in the order they
+  finished in 1988–2014: the first row won 99.7–99.8% of races. Any
+  tie-break on row order (a sort that keeps the first of equals, `idxmax`)
+  then picks winners. Shuffle inside each race with a fixed seed before
+  anything is built, and print the check (`scripts/horse/uk_sp_fundamentals.py`,
+  section 0).
+- **Check that a stored rating is the one going into the race.** A rating
+  column may be the mark after the race. Compare the change from the
+  previous run with the change to the next, split by this race's result:
+  in the UK files, winners' marks had risen +0.3 to +0.8 lb going into the
+  race and rose +4.0 to +5.0 lb after it, so the stored mark is the one going in
+  (`docs/horse_racing_market_audit.md` §8).
+- **Print every obvious variant, not one.** Twice in one build a study
+  reported less than a reader would assume it tested: two Hong Kong lead
+  pairs were dropped after their results were seen, and one UK figure-based
+  pick (the best Racing Post figure of the last three runs) was reported
+  alone when three obvious siblings existed; a reviewer ran them and all
+  three lost. Define the obvious variants before looking and print them
+  all. A split chosen after looking is printed whole, as a neighbourhood
+  and in halves, and named as chosen after looking.
 - **A display cap is not a price.** A results site that shows odds above 99
   as 99 (Hong Kong 2014–2017: 11.4% of runners) gives a floor, not the
   price paid; grade the long band with that said.

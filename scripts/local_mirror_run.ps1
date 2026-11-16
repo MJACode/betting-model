@@ -2,8 +2,10 @@
   One carbon-copy pass onto mike's machine: GitHub first (minutes), then the
   whole Supabase project (an hour or two once the first copy exists).
 
-  This is what the PROPOSED scheduled task runs (docs/local_ops.md, "Local
-  carbon copy"). Nothing registers it: mike has not approved a schedule yet.
+  This is what the Windows scheduled task LocalMirror runs, nightly at 00:30
+  (docs/local_ops.md, "Local carbon copy"; task checked 2026-11-15). When the
+  Supabase copy ends, it rebuilds the DuckDB views over it
+  (scripts/local_mirror_duckdb.py, <Root>\betting.duckdb).
 
   DATABASE_URL is never passed here. scripts/local_mirror.py reads it from the
   main checkout's .env at run time, so a rotated password reaches the next run.
@@ -23,7 +25,7 @@ $logs = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $bin, $logs | Out-Null
 $ts = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
 
-foreach ($f in @("local_mirror.py", "local_mirror_github.py")) {
+foreach ($f in @("local_mirror.py", "local_mirror_github.py", "local_mirror_duckdb.py")) {
     $tmp = Join-Path $bin "$f.new"
     $p = Start-Process -FilePath "git" -NoNewWindow -Wait -PassThru `
         -ArgumentList @("-C", "`"$Repo`"", "show", "origin/master:scripts/$f") `
@@ -49,5 +51,12 @@ $sb = Start-Process -FilePath $python -NoNewWindow -Wait -PassThru `
                     "--env-file", "`"$Repo\.env`"") `
     -RedirectStandardOutput "$logs\supabase_$ts.log" -RedirectStandardError "$logs\supabase_$ts.err"
 
+# SQL over the copy: views only, rebuilt in seconds once the copy has ended, so
+# each view names the files the copy just finished writing.
+$dd = Start-Process -FilePath $python -NoNewWindow -Wait -PassThru `
+    -ArgumentList @("-I", "`"$bin\local_mirror_duckdb.py`"", "build", "--mirror", "`"$Root\supabase_mirror`"",
+                    "--db", "`"$Root\betting.duckdb`"") `
+    -RedirectStandardOutput "$logs\duckdb_$ts.log" -RedirectStandardError "$logs\duckdb_$ts.err"
+
 $gh.WaitForExit()
-exit [Math]::Max($gh.ExitCode, $sb.ExitCode)
+exit [Math]::Max([Math]::Max($gh.ExitCode, $sb.ExitCode), $dd.ExitCode)
