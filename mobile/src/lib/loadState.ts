@@ -144,6 +144,22 @@ export function sportChipState(o: {
   return { muted, label };
 }
 
+/**
+ * The order the sport chips sit in: every sport with a signal first, then the
+ * rest (Matt, 2026-11-16: "anytime we have a sport that has a signal, move
+ * those to the far left"). The row scrolls, so a badged sport past the screen
+ * edge (NHL is ninth) was a bet nobody saw.
+ *
+ * Within each group the SPORTS order holds, so the row only changes when a
+ * sport gains or loses its last signal, never because one count passed
+ * another. Counts unknown (undefined) = SPORTS order unchanged.
+ */
+export function orderSportChips<S extends string>(sports: readonly S[], signalCounts?: Record<string, number>): S[] {
+  if (!signalCounts) return [...sports];
+  const hasSignal = (s: S) => (signalCounts[s] ?? 0) > 0;
+  return [...sports.filter(hasSignal), ...sports.filter((s) => !hasSignal(s))];
+}
+
 export type DetailBody = 'loading' | 'error' | 'notFound' | 'content';
 
 /**

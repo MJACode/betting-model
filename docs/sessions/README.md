@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Sport chips: sports with a signal move to the far left of the row |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, The PC copy: one row per nightly pass (pc_copy_snapshots, scripts/local_mirror_report.py, run last by the LocalMirror task) and a PC copy tile on the Database tab; an unreadable exit code is now a failure, not 0 |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: no source from 2023 on confirms a US outlet still pools with the Hong Kong Jockey Club; Xpressbet, AmWager, NYRA Bets offer Hong Kong; the archive purchase waits on that |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, TestFlight tester account + comped access; Supabase MCP found to write production |
