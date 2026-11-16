@@ -7,6 +7,7 @@ import {
   configureFreezeLog,
   noteAppState,
   noteBack,
+  notePush,
   noteModalDismissed,
   noteModalShown,
   noteModalVisible,
@@ -185,6 +186,9 @@ function session(over: Partial<SessionRecord>): SessionRecord {
     after.length === before && after.at(-1)?.[2] === 'pop x21', JSON.stringify(after.slice(-3)));
   check('the taps before the dead Back are still in the trail',
     after.some((c) => c[1] === 'screen' && c[2] === 'Picks'));
+  notePush('held'); notePush('replay');
+  const pu = (trailForReport() ?? []).slice(-2).map((c) => `${c[1]}:${c[2]}`).join(',');
+  check('a held and replayed push tap are both in the trail', pu === 'push:held,push:replay', pu);
   noteScreen('Settings');
   check('a screen change resets the tap count', sessionSummary()?.touches_since_nav === 0);
   for (let i = 0; i < 200; i += 1) { noteScreen(`S${i}`); }

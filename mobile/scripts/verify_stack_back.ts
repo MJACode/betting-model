@@ -99,6 +99,10 @@ check(
     pill,
   ),
 );
+check(
+  'the Back tap is logged before it navigates (a hung pop still leaves the crumb)',
+  /const path = decide\(\);\s*noteBack\(path\);\s*go\(path\);/.test(code(pill)),
+);
 // No screen turns UIKit's Back back on: headerBackVisible true (or a
 // variable) beside a headerLeft draws two Backs, and brings the dead one back.
 const offenders: string[] = [];

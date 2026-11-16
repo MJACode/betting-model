@@ -145,7 +145,7 @@ const pill = read('src/components/StackBackButton.tsx');
 check(
   'settings, player stats and the navigator default share the pill',
   ['PlayerStatsBackButton', 'SettingsSectionBackButton', 'StackBackButton'].every((name) =>
-    new RegExp(`export function ${name}\\(\\)[\\s\\S]*?return <BackPill `).test(pill),
+    new RegExp(`export function ${name}\\(\\)[\\s\\S]*?return \\(?\\s*<BackPill\\b`).test(pill),
   ),
 );
 check(
