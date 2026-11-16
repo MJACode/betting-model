@@ -330,3 +330,16 @@ def test_props_cut_part_way_count_as_thinned():
     assert not rb._is_thinned("prop", 5, 8)         # about as many as DraftKings
     assert not rb._is_thinned("prop", 7, 40)        # more than 6 survived
     assert not rb._is_thinned("game", 5, 20)        # the main lines keep the strict rule
+
+
+def test_only_events_near_a_planned_game_are_parsed(monkeypatch):
+    """A bulk snapshot lists the whole slate; an event days from any planned
+    game is dropped before the parser (and the NFL schedule lookup) sees it."""
+    seen = []
+    monkeypatch.setattr("data.ingestors.odds_ingestor._process_events",
+                        lambda events, *a, **k: seen.extend(events) or ([], []))
+    near = {"id": "near", "commence_time": "2026-10-15T23:00:00Z"}
+    far = {"id": "far", "commence_time": "2026-10-19T23:00:00Z"}
+    undated = {"id": "undated"}
+    rb.game_rows(_req(), [near, far, undated], "2026-10-15T15:15:36Z")
+    assert [e["id"] for e in seen] == ["near", "undated"]
