@@ -79,8 +79,10 @@ export function EmptyState({
   className?: string
 }) {
   return (
-    <div className={cn('flex flex-col items-center justify-center gap-1.5 rounded-[10px] border border-dashed px-6 py-10 text-center', className)}>
-      <Icon className="h-5 w-5 text-muted-foreground" aria-hidden />
+    <div className={cn('flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed bg-raised/60 px-6 py-10 text-center', className)}>
+      <span className="mb-1 flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+        <Icon className="h-[18px] w-[18px] text-muted-foreground" aria-hidden />
+      </span>
       <p className="text-sm font-medium text-foreground">{title}</p>
       {children && <p className="max-w-md text-xs text-muted-foreground">{children}</p>}
     </div>
@@ -127,10 +129,10 @@ export function Chip({
       title={title}
       aria-pressed={active}
       className={cn(
-        'inline-flex h-7 items-center rounded-full border px-2.5 text-xs font-medium transition-colors',
+        'inline-flex h-7 items-center rounded-full border px-3 text-xs font-medium transition-colors',
         active
-          ? 'border-primary bg-primary text-primary-foreground'
-          : 'border-border bg-card text-secondary-fg hover:border-foreground/30 hover:bg-muted',
+          ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+          : 'border-border bg-card text-secondary-fg hover:border-foreground/25 hover:bg-muted hover:text-foreground',
       )}
     >
       {children}
@@ -176,18 +178,20 @@ export function StatCard({
 }) {
   const toneText = tone === 'good' ? 'text-good' : tone === 'warning' ? 'text-warn' : tone === 'critical' ? 'text-crit' : 'text-foreground'
   const toneBorder = tone === 'good' ? 'border-good' : tone === 'warning' ? 'border-warn' : tone === 'critical' ? 'border-crit' : ''
+  const toneBar = tone === 'good' ? 'bg-good' : tone === 'warning' ? 'bg-warn' : tone === 'critical' ? 'bg-crit' : ''
   const body = (
     <>
+      {tone && <span className={cn('absolute bottom-3 left-0 top-3 w-[3px] rounded-r-full', toneBar)} aria-hidden />}
       <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         {Icon && <Icon className={cn('h-3.5 w-3.5', tone ? toneText : 'text-muted-foreground')} aria-hidden />}
         {label}
       </span>
-      <span className={cn('mt-1 text-2xl font-semibold leading-tight tracking-tight', toneText)}>{value}</span>
-      {caption && <span className="mt-0.5 text-xs text-muted-foreground">{caption}</span>}
+      <span className={cn('sb-figure mt-1.5 text-[24px] font-semibold leading-tight tracking-tight', toneText)}>{value}</span>
+      {caption && <span className="mt-1 text-xs leading-snug text-muted-foreground">{caption}</span>}
     </>
   )
   const base = cn(
-    'flex min-w-0 flex-col items-start rounded-[10px] border bg-raised px-4 py-3 text-left',
+    'relative flex min-w-0 flex-col items-start overflow-hidden rounded-xl border bg-raised px-4 py-3.5 text-left',
     toneBorder,
     className,
   )
