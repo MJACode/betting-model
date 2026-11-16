@@ -24,10 +24,13 @@ failures where a person will see them.
 
 WHAT IT ALERTS ON
 -----------------
-1. Any health check whose status is not OK, keyed individually so each gets its
-   own throttle and its own recovery message. CRIT severity alerts on sight;
-   WARN is throttled harder, because a WARN that pages at CRIT's cadence
-   teaches people to ignore the channel and that is silence by another route.
+1. Any health check whose status is STALE, keyed individually. CRIT pages
+   after it is still true on the next run, then repeats every 2 hours.
+   WARN does not page: it is a line in the 7:15 ops digest. A data defect
+   (`ncaaf_game_identity`, `settlement_stranded`) repeats every 6 hours.
+   `settlement_stranded` is stored as WARN so it does not fail the daily
+   health step, and it still pages. A recovery posts only after a confirmed
+   page that lasted at least 30 minutes.
 2. The refresh pass's CLEAN RATE over a recent window. This is the one that
    would have caught 2026-09-06: no single step was failing in every pass, so
    the persistent-failure rule stayed quiet at WARN, while the board was
@@ -63,7 +66,7 @@ healthy system.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
@@ -77,12 +80,40 @@ from tracking.watch_util import (
 
 _STATE_FILE = "failure_alerter_state.json"
 
-# CRIT repeats every 2h; WARN every 12h. Different numbers because they are
-# different claims: a CRIT is "a thing that produces picks is not producing",
-# which stays worth repeating, while a WARN is usually a flaky upstream and
-# repeating it hourly is how a channel stops being read.
+# CRIT repeats every 2h; WARN every 12h. WARN does not page (it is a line in
+# the 7:15 digest). The WARN number stays so a future page cannot inherit
+# CRIT's cadence by accident. Data defects repeat every 6h: they are real,
+# and they are not an outage in progress.
 RENOTIFY_CRIT_MIN = int(os.environ.get("ALERT_RENOTIFY_CRIT_MINUTES", "120"))
 RENOTIFY_WARN_MIN = int(os.environ.get("ALERT_RENOTIFY_WARN_MINUTES", "720"))
+RENOTIFY_DATA_MIN = int(os.environ.get("ALERT_RENOTIFY_DATA_MINUTES", "360"))
+
+# A condition has to still be true on the next run before the first page.
+# The job is every 10 minutes. Clean rate waits an hour, so one deploy
+# burst cannot trip it. A recovery posts only after a confirmed page that
+# lasted at least this long. A one-tick flap sends neither.
+RECOVERY_MIN = int(os.environ.get("ALERT_RECOVERY_MINUTES", "30"))
+CLEAN_RATE_CONFIRM_MIN = int(os.environ.get("ALERT_CLEAN_RATE_CONFIRM_MINUTES", "60"))
+
+# settlement_stranded is stored as WARN so a standing unsettled pick does not
+# fail the daily health step. It still pages. A stranded NBA prop bet is the
+# same fact on one game. ncaaf_game_identity and final_scores are already
+# CRIT. All four repeat every 6 hours: they are data defects, not a feed
+# that just died.
+PAGE_WARN_CHECKS = frozenset({"settlement_stranded"})
+PAGE_WARN_PREFIXES = ("stranded:nba_prop:",)
+DATA_DEFECT_CHECKS = frozenset({
+    "ncaaf_game_identity", "settlement_stranded", "final_scores",
+})
+
+# deploy-cutoff is the SIGTERM drain closing its own row. `aborted` is not:
+# run_ledger._abort_orphans stamps it on any orphan, including an OOM or a
+# crash, and that has to stay countable. A hang that never finished has
+# finished_at NULL and is not in the clean-rate window.
+_PASS_META = frozenset({
+    "health-check", "health_check", "deploy-cutoff",
+    "model-quality", "model_quality",
+})
 
 # The clean-rate rule. 12 passes is about two hours at the evening cadence —
 # long enough that one flaky API call does not trip it, short enough to notice
@@ -254,26 +285,26 @@ def _producer_failures(failed) -> list:
     `health-check` / `health_check` are excluded: that step writes
     system_health_checks and, until 2026-09-14, returned False on any
     standing CRIT — reddening every refresh pass without a producer dying.
+    `deploy-cutoff` is the SIGTERM drain. `aborted` is not excluded:
+    `_abort_orphans` writes it for a crash as well as a deploy.
     Observability is not a producer. The ranked map of a health-check-only
     window is empty (identity).
     """
-    return [s for s in _step_names(failed) if not _is_health_check_step(s)]
+    return [s for s in _step_names(failed)
+            if s not in _PASS_META and not _is_health_check_step(s)]
 
 
 def _pass_is_clean(ok, failed) -> bool:
     """A refresh pass is clean when no producer step failed.
 
-    `ok` True is identity. `failed_steps` that are only health-check /
-    health_check are also clean: measured 2026-09-14 last-12 was 1 clean +
-    9 health-check-only + 2 aborted → 1/12 under the floor, while
-    odds/score/settle had succeeded.
+    `ok` True is identity. `failed_steps` that are only health-check or
+    `deploy-cutoff` are also clean. `deploy-cutoff` is the SIGTERM drain.
+    `aborted` stays dirty: `_abort_orphans` stamps it when the next pass
+    starts, including after a crash, so a worker dying every hour stays
+    visible here.
 
-    `aborted` stays dirty. run_ledger writes it when a worker is replaced
-    mid-pass (usually a deploy) AND when a pass never finished. There is
-    no column that distinguishes those two, and a pass that did not
-    finish did not produce what the pass produces. An empty failed_steps
-    map on ok=False is also dirty — we do not invent a health-check
-    excuse for an unknown failure.
+    An empty failed_steps map on ok=False is dirty — we do not invent a
+    health-check excuse for an unknown failure.
     """
     if ok:
         return True
@@ -285,10 +316,8 @@ def _clean_rate(conn) -> tuple:
     """(clean, total, failing_steps) over the last CLEAN_RATE_WINDOW passes.
 
     Health-check-only failures do not dirty a pass (see `_pass_is_clean`).
-    `aborted` runs still count as failures: run_ledger writes that sentinel
-    when a worker is replaced mid-pass, and a pass that did not finish did
-    not produce what the pass produces. Deploy-replace vs hang share the
-    same sentinel; they are not distinguished.
+    `aborted` and `deploy-cutoff` do not either: both are a deploy closing
+    its own row. A pass that never finished is not in this query.
     """
     rows = query_rows(conn, """
         SELECT ok, failed_steps FROM pipeline_runs
@@ -372,6 +401,94 @@ def _conditions(conn, now: datetime | None = None) -> dict:
     return out
 
 
+def _check_name(key: str) -> str:
+    if key.startswith("health:"):
+        return key.split(":", 1)[1]
+    return ""
+
+
+def _is_stranded_prop(key: str) -> bool:
+    return key.startswith(PAGE_WARN_PREFIXES)
+
+
+def should_page(severity: str, key: str) -> bool:
+    """CRIT pages. WARN does not, except a stranded settlement or prop bet."""
+    if _is_stranded_prop(key) or _check_name(key) in PAGE_WARN_CHECKS:
+        return True
+    return str(severity).upper() == "CRIT"
+
+
+def unpaged_condition_lines(conditions: dict) -> list[str]:
+    """WARN conditions the 7:15 digest has to list, because they do not page.
+
+    Health rows are already in the digest from system_health_checks. A
+    stranded prop bet pages, so it is not repeated here.
+    """
+    out = []
+    for key, (sev, title, detail) in sorted(conditions.items()):
+        if (key.startswith("health:") or key.startswith("jobfail:")
+                or should_page(sev, key)):
+            continue
+        first = (detail or "").splitlines()[0][:180]
+        out.append(f"{title}" + (f": {first}" if first else ""))
+    return out
+
+
+def _repeat_minutes(severity: str, key: str) -> int:
+    if _is_stranded_prop(key) or _check_name(key) in DATA_DEFECT_CHECKS:
+        return RENOTIFY_DATA_MIN
+    if str(severity).upper() == "CRIT":
+        return RENOTIFY_CRIT_MIN
+    return RENOTIFY_WARN_MIN
+
+
+def _parse_state_time(raw) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _remember_legacy_pages(state: dict) -> dict:
+    """A stamp from before the two-tick fields is a page that already went out.
+
+    Without this, the first run after the deploy re-arms every standing CRIT
+    and pages it again ten minutes later, and a clear sends no recovery
+    because `paged` is missing.
+    """
+    for key, entry in list(state.items()):
+        if not isinstance(entry, dict) or not entry.get("last"):
+            continue
+        if entry.get("armed"):
+            continue
+        entry["armed"] = True
+        entry["paged"] = True
+        entry.setdefault("first", entry["last"])
+        entry.setdefault("title", key)
+    return state
+
+
+def _confirmed(entry: dict, now: datetime, key: str) -> bool:
+    """True once this episode has been seen on an earlier run, and long enough.
+
+    The first run only arms the key. Clean rate also waits an hour, so a
+    deploy that dirties a few passes cannot page on the next tick.
+    """
+    if not entry.get("armed"):
+        return False
+    if key != "pass:clean_rate":
+        return True
+    first = _parse_state_time(entry.get("first"))
+    if first is None:
+        return False
+    return now - first >= timedelta(minutes=CLEAN_RATE_CONFIRM_MIN)
+
+
 def run_failure_alerter(conn=None, now: datetime | None = None) -> dict:
     """Alert on what is broken, recover what has cleared. Never raises.
 
@@ -398,39 +515,76 @@ def run_failure_alerter(conn=None, now: datetime | None = None) -> dict:
         result["error"] = str(exc)
         return result
 
-    state = read_alert_state(_STATE_FILE)
+    state = _remember_legacy_pages(read_alert_state(_STATE_FILE))
     result["conditions"] = sorted(active)
 
     # RECOVERIES FIRST, so a pass that both clears one condition and raises
     # another reports them in the order they happened rather than alphabetically.
+    # A recovery posts only after a confirmed page that lasted RECOVERY_MIN.
+    # A condition that armed and died on the next tick sends nothing.
     for key in sorted(set(state) - set(active)):
-        title = (state.get(key) or {}).get("title", key)
-        if post_ops_alert(f"Resolved — {title}",
-                          f"`{key}` has cleared.", recovery=True):
-            result["recovered"].append(key)
+        entry = state.get(key) or {}
+        title = entry.get("title", key) if isinstance(entry, dict) else key
+        first = _parse_state_time(entry.get("first")) if isinstance(entry, dict) else None
+        lasted = (now - first) if first is not None else timedelta(0)
+        paged = bool(entry.get("paged")) if isinstance(entry, dict) else False
+        if paged and lasted >= timedelta(minutes=RECOVERY_MIN):
+            if post_ops_alert(f"Resolved — {title}",
+                              f"`{key}` has cleared.", recovery=True):
+                result["recovered"].append(key)
         # Drop the key either way. A recovery that failed to POST must not
-        # leave a stamp behind that suppresses the next occurrence.
+        # leave a stamp behind that suppresses the next occurrence, and an
+        # unpaged blip must not suppress the next real one either.
         state.pop(key, None)
 
     for key, (sev, title, detail) in sorted(active.items()):
-        minutes = RENOTIFY_CRIT_MIN if sev == "CRIT" else RENOTIFY_WARN_MIN
+        if not should_page(sev, key):
+            continue
+        entry = state.get(key)
+        if not isinstance(entry, dict):
+            entry = {}
+        if not entry.get("armed"):
+            state[key] = {"armed": True, "first": now.isoformat(),
+                          "title": title, "severity": sev, "paged": False}
+            continue
+        entry["title"] = title
+        entry["severity"] = sev
+        if not _confirmed(entry, now, key):
+            state[key] = entry
+            continue
+        minutes = _repeat_minutes(sev, key)
         if should_notify(state, key, now, minutes):
             if post_ops_alert(title, detail):
                 # Stamp ONLY on a confirmed post: stamping on a failed POST
                 # would silence the next window on the strength of a message
                 # nobody received.
-                state[key] = {"last": now.isoformat(), "title": title,
-                              "severity": sev}
+                entry["last"] = now.isoformat()
+                entry["paged"] = True
+                entry["armed"] = True
+                state[key] = entry
                 result["alerted"].append(key)
             else:
-                state.setdefault(key, {"title": title, "severity": sev})
+                state[key] = entry
         else:
-            entry = state.get(key)
-            if isinstance(entry, dict):
-                entry["title"] = title
-                entry["severity"] = sev
+            state[key] = entry
 
-    write_alert_state(_STATE_FILE, state)
+    if not write_alert_state(_STATE_FILE, state):
+        # A read-only state file would otherwise arm forever and never page:
+        # the next run cannot see the arm. Page the ones this run only armed.
+        logger.error(
+            "alert state was not saved; paging armed conditions now so a "
+            "read-only disk is not silence")
+        for key, (sev, title, detail) in sorted(active.items()):
+            entry = state.get(key) or {}
+            if not should_page(sev, key) or entry.get("paged"):
+                continue
+            if post_ops_alert(title, detail):
+                entry["last"] = now.isoformat()
+                entry["paged"] = True
+                entry["armed"] = True
+                state[key] = entry
+                result["alerted"].append(key)
+        write_alert_state(_STATE_FILE, state)
     logger.info(
         f"Failure alerter: {len(active)} condition(s), "
         f"{len(result['alerted'])} alerted, {len(result['recovered'])} recovered")

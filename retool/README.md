@@ -68,6 +68,21 @@ byte-for-byte identical to this folder, including `package.json`,
 with live data on the Models and Volume tabs and no console errors. Publish
 tag `rr-publish-1794793612838-9275c64`.
 
+**A push that adds backend functions works too** (2026-11-16, import 12:39
+UTC, published 12:49 UTC: the SignalBase redesign and the Database tab, after mike's "Yes,
+publish it"). The upload was accepted (78 files, none dropped). The builder
+copied 73 and left the five read-only files, which matched. The draft read
+matched every file it could see. Publishing asked for no approval: the three
+new functions only read, and no function that writes had changed. Read back
+with no draft named, 78 files were identical and **`package.json` differed in
+one way: Retool had added each new function's database connection** (its
+`retool.app.resourceReferencesByFile`). So after a push that adds a backend
+function, copy Retool's `package.json` back with `write` and commit it;
+`check` then read 79 of 79. The app loaded with live data on the Models and
+Database tabs and no console errors. Publish tag
+`rr-publish-1794833342231-a352318`. The account had 992.02 of its 1,000
+monthly Retool AI credits left afterwards.
+
 Measured on 2026-11-15, on a throwaway copy of the app:
 
 - **Upload and copy.** The upload was accepted (68 files, none dropped).
@@ -111,6 +126,20 @@ What did **not** work, or is still unknown:
 - **Retool's check misses one write function.** Retool's "this function
   writes" check did not flag `setModelVolume`. That function writes through a
   database function call, which looks like a read.
+
+**Two traps measured 2026-11-16** (the Database tab push):
+
+- **Retool's database driver binds `$1, $2…` in the order the placeholders
+  first appear in the SQL text, not by their numbers.** `SELECT $2::text AS
+  second, $1::text AS first` with `['A', 'B']` returned `second = 'A'`. A
+  query whose `JOIN ... $2` comes before `WHERE ... $1` silently swaps the
+  values and returns nothing. Number placeholders top to bottom. Every
+  function was checked on 2026-11-16 and all are in order.
+- **Retool refuses test files while the app has testing off.** The import
+  left `frontend/pages/database/dbUtils.test.ts` out ("refused because testing
+  is off"), so a `*.test.ts` file here can never match Retool and `check`
+  would fail on it. There are none. The same setting means `vitest run`
+  checks nothing here.
 
 **Routes that do not work**, measured the same day:
 

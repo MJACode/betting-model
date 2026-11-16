@@ -1140,8 +1140,21 @@ def injury_tags_before_tip(conn, game_id: str) -> list[dict]:
     return tags_from_rows([dict(zip(keys, row)) for row in rows])
 
 
+def alert_is_fatal(alert: str) -> bool:
+    """A zero-row game-day report is a fallback, not a dead job.
+
+    Poll errors, an unreadable report, and a backoff still fail the tick.
+    Those are what the heartbeat should mark `error`.
+    """
+    return "returned 0 rows on a game day" not in (alert or "")
+
+
 def main() -> int:
-    """Exit 1 when a due poll errors or returns 0 players on a game day."""
+    """Exit 1 when a due poll errors or the report cannot be read.
+
+    A zero-player game-day report is logged and exits 0. The tags fall back
+    to the other source, and exiting 1 turned that into an ops page.
+    """
     if not enabled():
         logger.info("NCAAB injury feed: RUN_NCAAB_INJURY is off")
         return 0
@@ -1155,8 +1168,12 @@ def main() -> int:
         f"NCAAB injury feed: polled={result.polled or 'none'} "
         f"changes={result.changes} misses={result.misses}"
     )
-    if result.alerts:
-        logger.error("NCAAB_INJURY_ALERT " + "; ".join(result.alerts))
+    quiet = [a for a in result.alerts if not alert_is_fatal(a)]
+    fatal = [a for a in result.alerts if alert_is_fatal(a)]
+    if quiet:
+        logger.warning("NCAAB_INJURY_QUIET " + "; ".join(quiet))
+    if fatal:
+        logger.error("NCAAB_INJURY_ALERT " + "; ".join(fatal))
         return 1
     return 0
 

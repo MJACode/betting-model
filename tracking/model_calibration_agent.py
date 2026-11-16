@@ -213,37 +213,16 @@ def run_agent(conn, today: date | None = None, refit: bool = True) -> dict:
 
 
 def _announce(s: dict) -> None:
-    from tracking.discord_notifier import _post
+    """Log the sweep. The Monday ops digest posts calibration deltas, not this.
 
-    lines = [f"Swept **{s['swept']}** models "
-             f"({s['skipped']} below the settled-bet floor).", ""]
-    if s["actionable"]:
-        lines.append(f"**{len(s['actionable'])} models where a better cut survives "
-                     "the time split:**")
-        lines += [f"• `{a['model_id']}` — now "
-                  + (f"{a['cur_roi']:+.1f}%" if a["cur_roi"] is not None else "no bets")
-                  + (f", best {a['best_roi']:+.1f}%" if a["best_roi"] is not None else "")
-                  for a in s["actionable"][:12]]
-        lines.append("")
-    if s["no_cut"]:
-        lines.append("**No profitable cut exists:** "
-                     + ", ".join(f"`{m}`" for m in s["no_cut"]))
-    if s["dormant"]:
-        lines.append("**Live but producing nothing** (a dormant model and a broken "
-                     "feed look identical): " + ", ".join(f"`{m}`" for m in s["dormant"]))
-    lines += ["", "_Nothing was changed. Thresholds, pauses and promotions are "
-              "model updates and need a person (CLAUDE.md §1b)._"]
-
-    body = "\n".join(lines)
-    url = config.DISCORD_WEBHOOK_OPS
-    if not url:
-        logger.critical(f"MODELCALIBRATION (no DISCORD_WEBHOOK_OPS set)\n{body}")
-        return
-    _post(url, {"embeds": [{
-        "title": f"📐 ModelCalibration — weekly sweep {s['run_date']}",
-        "description": body[:4000],
-        "color": 0x3498DB,
-    }]})
+    This list is the standing verdicts. Posting it every Monday repeated the
+    same RE-CUT lines forever. The digest compares this sweep to the last one.
+    """
+    logger.info(
+        f"ModelCalibration sweep {s.get('run_date')}: "
+        f"{s.get('swept')} swept, {len(s.get('actionable') or [])} actionable, "
+        f"{len(s.get('no_cut') or [])} with no cut, "
+        f"{len(s.get('dormant') or [])} dormant. Not posted.")
 
 
 if __name__ == "__main__":  # pragma: no cover — manual invocation

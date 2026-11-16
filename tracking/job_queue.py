@@ -3243,7 +3243,8 @@ def _execute(conn, job: dict) -> dict:
         """, (json.dumps(result, default=str), job["job_id"]))
         conn.commit()
         logger.success(f"job {job['job_id']} {job['job_type']} done")
-        _announce(job, ok=True, detail=json.dumps(result, default=str)[:900])
+        # Successes are a count in the 7:15 ops digest. A green embed per
+        # finished backfill was most of the channel.
         return {"status": "done", "job": job, "result": result}
     except Exception as exc:  # noqa: BLE001 — every failure is recorded, not raised
         err = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-1500:]}"
