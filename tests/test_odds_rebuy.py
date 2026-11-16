@@ -182,7 +182,7 @@ def buyer(monkeypatch):
     monkeypatch.setattr("data.ingestors.odds_quota.persist_quota", lambda conn: None)
     monkeypatch.setattr(rb, "fetch_game_snapshot",
                         lambda sport, at, m, b: ([], _iso(at - timedelta(minutes=4)), 10))
-    monkeypatch.setattr(rb, "game_rows", lambda req, ev, served, conn=None:
+    monkeypatch.setattr(rb, "game_rows", lambda req, ev, served, conn=None, resolver=None:
                         ([{**_row("fanduel", -130 - req.at.hour, stamp=served),
                            "source": rb.REBUY_SOURCE}], []))
     return ledger, inserted, budget
@@ -218,3 +218,115 @@ def test_the_run_refuses_when_the_reserve_would_be_spent(buyer, monkeypatch):
 def test_the_cleanup_never_touches_a_bought_row():
     from data import prune_odds
     assert rb.REBUY_SOURCE in prune_odds.PROTECTED_SOURCES
+
+
+# ── The pieces added 2026-11-16 (mike: "Yes, add them") ─────────────────────
+
+def _nfl_event(books):
+    return {"id": "ev1", "commence_time": "2026-10-02T00:15:00Z",
+            "home_team": "Cleveland Browns", "away_team": "Pittsburgh Steelers",
+            "bookmakers": [{"key": b, "markets": [{
+                "key": "h2h", "last_update": "2026-10-01T20:10:00Z",
+                "outcomes": [{"name": "Cleveland Browns", "price": 120},
+                             {"name": "Pittsburgh Steelers", "price": -140}]}]}
+                for b in books]}
+
+
+def test_an_nfl_row_takes_its_game_id_from_the_schedule(monkeypatch):
+    """An NFL id is NFL_<season>_<week>_<away>_<home>. Left to itself the
+    event parser would build NFL_2026-10-01_..., which no game has, and every
+    bought NFL row would be thrown away after it was paid for."""
+    gid = "NFL_2026_04_PIT_CLE"
+    monkeypatch.setattr("data.ingestors.odds_ingestor._schedule_resolver",
+                        lambda sport, conn, around: (lambda h, a, c: gid))
+    req = rb.Request("game", "NFL", _t("2026-10-01T20:20:00"), [gid],
+                     {gid: _t("2026-10-02T00:15:00")}, ["h2h"], ["fanduel"],
+                     windows={gid: (_t("2026-10-01T12:00:00"), _t("2026-10-02T00:00:00"))})
+    keep, dk = rb.game_rows(req, [_nfl_event(["draftkings", "fanduel"])],
+                            "2026-10-01T20:19:30Z", conn=object())
+    assert [(r["game_id"], r["bookmaker"]) for r in keep] == [(gid, "fanduel")]
+    assert [r["game_id"] for r in dk] == [gid]
+
+
+def test_an_nfl_request_without_the_schedule_buys_nothing():
+    with pytest.raises(RuntimeError, match="no schedule resolver"):
+        rb.schedule_resolver("NFL", None, _t("2026-10-01T20:20:00"))
+    assert rb.schedule_resolver("NHL", None, _t("2026-10-01T20:20:00")) is None
+
+
+def test_extra_markets_are_planned_per_event_and_asked_under_the_feeds_key(copy):
+    # NHL_THIN's 3-way: DraftKings every pass, the other books an opener and a close.
+    passes = [r[0] for r in copy.execute("SELECT started_at FROM pipeline_runs "
+                                         "WHERE run_kind = 'hourly'").fetchall()]
+    for p in passes:
+        copy.execute("INSERT INTO odds VALUES ('NHL_THIN', 'NHL', 'h2h_3way', 'draftkings', "
+                     "'open', ?, NULL, 150, 180, NULL, NULL, NULL, NULL)",
+                     [_iso(datetime.fromisoformat(p))])
+    for b in BOOKS:
+        for ts in ("2026-10-15T12:10:00Z", "2026-10-15T22:50:00Z"):
+            copy.execute("INSERT INTO odds VALUES ('NHL_THIN', 'NHL', 'h2h_3way', ?, 'open', ?,"
+                         " NULL, 155, 175, NULL, NULL, NULL, NULL)", [b, ts])
+    reqs = rb.plan(copy, "extra", "NHL", "2026-10-15", "2026-10-15")
+    assert len(reqs) == 10
+    assert {r.event_key for r in reqs} == {"NHL_THIN"}
+    assert all(r.markets == ["h2h_3way"] and r.feed_markets == ["h2h_3_way"] for r in reqs)
+    # one events listing for the game, then 10 credits a request
+    assert rb.summarize(reqs)["credits"] == 10 * 10 + 1
+
+
+def _rung_row(book, line, over, stamp="2026-10-15T15:18:00Z"):
+    return {**_row(book, 0, stamp=stamp, market="alternate_totals"),
+            "home_price": None, "away_price": None, "total_line": line,
+            "over_price": over, "under_price": -over}
+
+
+def test_every_rung_of_a_ladder_is_its_own_line(copy):
+    last: dict = {}
+    req = _req(markets=["alternate_totals"])
+    first = rb.drop_unchanged_game_rows(copy, req, [
+        _rung_row("fanduel", 5.5, 120), _rung_row("fanduel", 6.5, 160)], last)
+    assert [r["total_line"] for r in first] == [5.5, 6.5]
+    # the next pass: 5.5 unchanged, 6.5 moved
+    second = rb.drop_unchanged_game_rows(copy, _req(at=_t("2026-10-15T16:20:00"),
+                                                    markets=["alternate_totals"]), [
+        _rung_row("fanduel", 5.5, 120, "2026-10-15T16:19:00Z"),
+        _rung_row("fanduel", 6.5, 150, "2026-10-15T16:19:00Z")], last)
+    assert [(r["total_line"], r["over_price"]) for r in second] == [(6.5, 150)]
+    # two rungs share a book and a stamp; both are stored, once
+    seen: set = set()
+    rows = [_rung_row("betmgm", 5.5, 110), _rung_row("betmgm", 6.5, 150)]
+    assert len(rb.drop_stored_game_rows(None, rows, seen)) == 2
+    assert rb.drop_stored_game_rows(None, rows, seen) == []
+
+
+def test_inplay_is_planned_every_five_minutes_from_the_start_to_draftkings_last_row(copy):
+    for m in range(0, 41, 10):     # DraftKings in play, 23:00 to 23:40
+        copy.execute("INSERT INTO odds VALUES ('NHL_THIN', 'NHL', 'h2h', 'draftkings', "
+                     "'in_play', ?, NULL, -200, 170, NULL, NULL, NULL, NULL)",
+                     [f"2026-10-15T23:{m:02d}:00Z"])
+    reqs = rb.plan(copy, "inplay", "NHL", "2026-10-15", "2026-10-15")
+    assert [r.at for r in reqs] == [_t("2026-10-15T23:05:00") + timedelta(minutes=5 * i)
+                                    for i in range(8)]
+    assert all(r.games == ["NHL_THIN"] and r.snapshot_type == "in_play" for r in reqs)
+    assert set(reqs[0].books) == set(BOOKS)        # the game's own books before the start
+
+
+def test_inplay_rows_are_typed_in_play_and_only_quotes_changed_after_the_start(monkeypatch):
+    start = _t("2026-10-15T23:00:00")
+    req = rb.Request("inplay", "NHL", _t("2026-10-15T23:20:00"), ["NHL_THIN"],
+                     {"NHL_THIN": start}, ["h2h"], list(BOOKS), "in_play", "",
+                     {"NHL_THIN": (start, _t("2026-10-15T23:40:00"))})
+    rows = [{**_row("fanduel", -210, stamp="2026-10-15T23:18:00Z"), "snapshot_type": "in_play"},
+            {**_row("betmgm", -115, stamp="2026-10-15T22:58:00Z"), "snapshot_type": "in_play"}]
+    monkeypatch.setattr("data.ingestors.odds_ingestor._process_events", lambda *a, **k: ([], rows))
+    keep, _ = rb.game_rows(req, [], "2026-10-15T23:19:40Z")
+    assert [(r["bookmaker"], r["snapshot_type"]) for r in keep] == [("fanduel", "in_play")]
+    # a snapshot from before the start is not an in-play price
+    assert rb.game_rows(req, [], "2026-10-15T22:59:00Z")[0] == []
+
+
+def test_props_cut_part_way_count_as_thinned():
+    assert rb._is_thinned("prop", 5, 20)            # 5 rows a line against DraftKings' 20
+    assert not rb._is_thinned("prop", 5, 8)         # about as many as DraftKings
+    assert not rb._is_thinned("prop", 7, 40)        # more than 6 survived
+    assert not rb._is_thinned("game", 5, 20)        # the main lines keep the strict rule

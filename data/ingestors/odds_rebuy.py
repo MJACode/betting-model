@@ -23,6 +23,22 @@ moments, the close stays the close, and a back-dated insert does not move the
 latest-line tables (their triggers keep the newer row,
 data/migrations/latest_line_state_tables.sql).
 
+FOUR KINDS (mike, 2026-11-16, "Yes, add them", to the pieces the first plan
+left out):
+  game    the main lines (h2h, spreads, totals) before the start, one bulk
+          request per refresh moment for every thinned game of the sport.
+  extra   the markets the bulk endpoint never returns, per event at the same
+          moments: MLB first five innings, NHL 3-way regulation (asked under
+          the feed's key h2h_3_way, stored as h2h_3way), alternate spreads and
+          totals (every rung its own line), UFC round totals.
+  inplay  the main lines while a game was under way, every 5-minute snapshot
+          from the start to DraftKings' last in-play row, stored typed
+          'in_play'. The refresh passes had kept fetching every book during a
+          game; the cleanup kept none of those rows.
+  prop    player props, per event at the refresh moments. A game whose props
+          were cut part-way (more than 3 rows per line, at most 6, and under
+          half of DraftKings') counts too.
+
 WHERE THE PLAN COMES FROM. The PC copy, through betting.duckdb
 (scripts/local_mirror_duckdb.py): no load on Supabase and no egress. The
 buyer writes to Supabase, which is the record.
@@ -74,12 +90,39 @@ REBUY_SOURCE = "odds_api_rebuy"
 DEFAULT_COPY_DB = r"C:\Users\micha\Documents\betting_local_copies\betting.duckdb"
 DK = "draftkings"
 GAME_MARKETS = ("h2h", "spreads", "totals")
+# The markets the bulk endpoint never returns, by our stored name -> the feed's
+# key (odds_ingestor: MLB_F5_MARKETS, NHL_3WAY_MARKET / NHL_3WAY_API_KEY,
+# ALT_GAME_LINE_MARKETS). Bought per event, like the live pass buys them.
+EXTRA_MARKETS = {
+    "h2h_1st_5_innings": "h2h_1st_5_innings",
+    "spreads_1st_5_innings": "spreads_1st_5_innings",
+    "totals_1st_5_innings": "totals_1st_5_innings",
+    "h2h_3way": "h2h_3_way",
+    "alternate_spreads": "alternate_spreads",
+    "alternate_totals": "alternate_totals",
+}
+# UFC round totals: the bulk MMA feed carries h2h only (odds_ingestor
+# UFC_BULK_MARKETS / UFC_EVENT_MARKETS), so they are an extra market there.
+PER_EVENT_BY_SPORT = {"UFC": ("totals",)}
+# A ladder holds one row per rung, so the rung is part of what the line IS.
+LADDER_MARKETS = ("alternate_spreads", "alternate_totals")
 THIN_MAX_ROWS = 3          # other-book rows per line at or under this = thinned
+# Props cut part-way: more than THIN_MAX_ROWS rows per line survived, but under
+# half of DraftKings' (NCAAF, 54 games, measured on the PC copy 2026-11-16).
+PARTIAL_MAX_ROWS = 6
 CLEANUP_START = "2026-08-15"
 CLEANUP_STOP = "2026-11-14"
+# The games the plan reads, by start date. Not CLEANUP_START: the cleanup's
+# first runs thinned every game more than 2 days old, back to the start of the
+# live-collected history, so a game from March was thinned in August. Seasons
+# before this were bought from the history endpoint and re-bought after their
+# own thinning (the MLB 2024-25 re-buy, 2026-09-07).
+PLAN_START = "2026-03-01"
+PLAN_END = "2026-11-13"
 RUN_LOG_START = "2026-08-27T22:20:00+00:00"   # first pipeline_runs refresh row
 BEFORE_LOG_EVERY = timedelta(hours=1)
 SNAP = timedelta(minutes=5)
+EVENT_START_SLACK = timedelta(hours=36)  # a feed start this far from a planned game's is another game
 MAX_BOOKS_ONE_REGION = 10  # every 10 bookmakers bill as one region
 REQUEST_SLEEP = 0.3
 _ET = ZoneInfo("America/New_York")
@@ -109,7 +152,7 @@ LEDGER_COLUMNS = ("kind", "sport", "event_key", "requested_at", "served_at", "ma
 
 @dataclass
 class Request:
-    kind: str                      # 'game' | 'prop'
+    kind: str                      # 'game' | 'extra' | 'inplay' | 'prop'
     sport: str
     at: datetime                   # UTC, on the 5-minute grid
     games: list[str]               # game ids this request fills
@@ -117,14 +160,24 @@ class Request:
     markets: list[str]
     books: list[str]               # non-DraftKings books to store
     snapshot_type: str = "open"
-    event_key: str = ""            # '' for game odds; the game id for props
-    windows: dict = field(default_factory=dict)  # game id -> (stored opener, stored close)
+    event_key: str = ""            # '' for the bulk kinds; the game id for 'extra' and 'prop'
+    # game id -> (stored opener, stored close); for 'inplay', (start, last
+    # DraftKings in-play row)
+    windows: dict = field(default_factory=dict)
 
     @property
     def est_credits(self) -> int:
-        # 10 x markets per request (one region); a prop request also lists
+        # 10 x markets per request (one region); a per-event request also lists
         # events once per game (1 credit), counted on the game's first request.
         return 10 * len(self.markets)
+
+    @property
+    def per_event(self) -> bool:
+        return self.kind in ("extra", "prop")
+
+    @property
+    def feed_markets(self) -> list[str]:
+        return [EXTRA_MARKETS.get(m, m) for m in self.markets]
 
     def key(self) -> tuple:
         return (self.kind, self.sport, self.event_key, self.at)
@@ -173,7 +226,7 @@ o AS (
          try_cast(o.snapshot_at AS TIMESTAMPTZ) AS ts, g.start
     FROM odds o JOIN g USING (game_id)
    WHERE coalesce(o.snapshot_type, '') <> 'in_play' AND coalesce(o.source, '') = ''
-     AND o.market IN {GAME_MARKETS})
+     AND o.market IN {GAME_MARKETS} AND o.market NOT IN (SELECT unnest(?)))
 SELECT game_id, epoch(any_value(start)) AS start,
        count(*) FILTER (WHERE bookmaker = '{DK}')
          / nullif(count(DISTINCT market) FILTER (WHERE bookmaker = '{DK}'), 0) AS dk_per_line,
@@ -212,24 +265,132 @@ SELECT game_id, epoch(any_value(start)) AS start,
 """
 
 
+# Extra markets, per (game, market): the same thinning rule, read per market,
+# because a game's F5, 3-way and ladder rows each had their own opener and
+# close. DraftKings offers no F5 spreads or totals (odds_ingestor
+# _get_event_odds), so a market DraftKings never posted counts too. A ladder
+# row is one rung: a ladder cut to its opener and close holds two or three rungs
+# per book where it held the whole ladder at every pass.
+_EXTRA_PLAN_SQL = f"""
+WITH g AS (
+  SELECT game_id, try_cast(commence_time AS TIMESTAMPTZ) AS start
+    FROM games WHERE sport = ?
+     AND try_cast(commence_time AS TIMESTAMPTZ) BETWEEN to_timestamp(?) AND to_timestamp(?)),
+o AS (
+  SELECT o.game_id, o.market, o.bookmaker, try_cast(o.snapshot_at AS TIMESTAMPTZ) AS ts, g.start
+    FROM odds o JOIN g USING (game_id)
+   WHERE coalesce(o.snapshot_type, '') <> 'in_play' AND coalesce(o.source, '') = ''
+     AND o.market IN (SELECT unnest(?))),
+pm AS (
+  SELECT game_id, market, any_value(start) AS start,
+         count(*) FILTER (WHERE bookmaker = '{DK}') AS dk,
+         count(*) FILTER (WHERE bookmaker <> '{DK}')
+           / nullif(count(DISTINCT bookmaker) FILTER (WHERE bookmaker <> '{DK}'), 0) AS other,
+         min(ts) FILTER (WHERE bookmaker <> '{DK}') AS op,
+         max(ts) FILTER (WHERE bookmaker <> '{DK}' AND ts <= start) AS cl,
+         list(DISTINCT bookmaker) FILTER (WHERE bookmaker <> '{DK}') AS books
+    FROM o GROUP BY game_id, market)
+SELECT game_id, epoch(any_value(start)), NULL, max(other), epoch(min(op)), epoch(max(cl)),
+       flatten(list(books)), list(market), 'open'
+  FROM pm
+ WHERE other <= {THIN_MAX_ROWS} AND op < cl AND (dk > {THIN_MAX_ROWS} OR dk = 0)
+ GROUP BY game_id
+"""
+
+# In-play: games DraftKings was followed through (its in-play rows), whose other
+# books hold almost nothing after the start. The refresh passes kept fetching
+# every book once a game was under way (the bulk endpoint keeps serving it), and
+# outside the NBA stored those prices typed 'open' (odds_ingestor
+# LIVE_PULL_IN_PLAY_SPORTS); the cleanup kept only each book's opener and its
+# pre-game close, so every one went. A bought row is typed 'in_play', the label
+# the historical purchases use (odds_ingestor._mark_in_play). The books are the
+# game's own line-shop books before the start.
+_INPLAY_PLAN_SQL = f"""
+WITH g AS (
+  SELECT game_id, try_cast(commence_time AS TIMESTAMPTZ) AS start
+    FROM games WHERE sport = ?
+     AND try_cast(commence_time AS TIMESTAMPTZ) BETWEEN to_timestamp(?) AND to_timestamp(?)),
+o AS (
+  SELECT o.game_id, o.market, o.bookmaker, o.snapshot_type,
+         try_cast(o.snapshot_at AS TIMESTAMPTZ) AS ts, g.start
+    FROM odds o JOIN g USING (game_id)
+   WHERE coalesce(o.source, '') = '' AND o.market IN {GAME_MARKETS})
+SELECT game_id, epoch(any_value(start)) AS start,
+       count(*) FILTER (WHERE bookmaker = '{DK}' AND snapshot_type = 'in_play')
+         / nullif(count(DISTINCT market) FILTER (WHERE bookmaker = '{DK}'
+                                                  AND snapshot_type = 'in_play'), 0),
+       count(*) FILTER (WHERE bookmaker <> '{DK}' AND ts > start)
+         / nullif(count(DISTINCT market || bookmaker) FILTER (WHERE bookmaker <> '{DK}'
+                                                               AND ts > start), 0),
+       epoch(any_value(start)),
+       epoch(max(ts) FILTER (WHERE bookmaker = '{DK}' AND snapshot_type = 'in_play')),
+       list(DISTINCT bookmaker) FILTER (WHERE bookmaker <> '{DK}' AND ts <= start),
+       list(DISTINCT market) FILTER (WHERE bookmaker = '{DK}' AND snapshot_type = 'in_play'),
+       'in_play'
+  FROM o GROUP BY game_id
+"""
+
+
+def _extra_markets_for(sport: str) -> list[str]:
+    return list(EXTRA_MARKETS) + list(PER_EVENT_BY_SPORT.get(sport, ()))
+
+
+def _is_thinned(kind: str, other, dk) -> bool:
+    if kind == "extra":
+        return other is not None           # the SQL applied the per-market rule
+    if kind == "inplay":
+        # DraftKings followed in play; the other books hold at most an opener
+        # and close's worth after the start, or nothing.
+        return dk is not None and dk > THIN_MAX_ROWS and (other is None or other <= THIN_MAX_ROWS)
+    if other is None or dk is None or dk <= THIN_MAX_ROWS:
+        return False
+    if other <= THIN_MAX_ROWS:
+        return True
+    # Props cut part-way (NCAAF): a few middle rows survived, well under
+    # DraftKings'. Only moves are bought, so a surviving row is not bought twice.
+    return kind == "prop" and other <= PARTIAL_MAX_ROWS and dk > 2 * other
+
+
 def thinned_games(con, kind: str, sport: str, start: str, end: str) -> list[dict]:
-    sql = _GAME_PLAN_SQL if kind == "game" else _PROP_PLAN_SQL
     lo = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
     hi = datetime.fromisoformat(end).replace(tzinfo=timezone.utc) + timedelta(days=1)
+    params = [sport, lo.timestamp(), hi.timestamp()]
+    if kind == "game":
+        sql = _GAME_PLAN_SQL
+        params.append(list(PER_EVENT_BY_SPORT.get(sport, ())) or ["(none)"])
+    elif kind == "extra":
+        sql = _EXTRA_PLAN_SQL
+        params.append(_extra_markets_for(sport))
+    elif kind == "inplay":
+        sql = _INPLAY_PLAN_SQL
+    else:
+        sql = _PROP_PLAN_SQL
     cols = ("game_id", "start", "dk_per_line", "other_per_line", "opener", "close",
             "books", "markets", "snapshot_type")
     out = []
-    for row in con.execute(sql, [sport, lo.timestamp(), hi.timestamp()]).fetchall():
+    for row in con.execute(sql, params).fetchall():
         g = dict(zip(cols, row))
-        if (g["other_per_line"] is None or g["dk_per_line"] is None
-                or g["other_per_line"] > THIN_MAX_ROWS or g["dk_per_line"] <= THIN_MAX_ROWS
+        if (not _is_thinned(kind, g["other_per_line"], g["dk_per_line"])
                 or g["opener"] is None or g["close"] is None or g["start"] is None):
             continue
         g["start"], g["opener"], g["close"] = (_from_epoch(g["start"]), _from_epoch(g["opener"]),
                                                _from_epoch(g["close"]))
-        g["books"] = sorted(b for b in (g["books"] or []) if b and b != DK)
-        g["markets"] = sorted(m for m in (g["markets"] or []) if m)
+        g["books"] = sorted({b for b in (g["books"] or []) if b and b != DK})
+        g["markets"] = sorted({m for m in (g["markets"] or []) if m})
+        if not g["books"] or not g["markets"]:
+            continue
         out.append(g)
+    return out
+
+
+def inplay_times(start: datetime, end: datetime) -> list[datetime]:
+    """Every 5-minute snapshot after the start, up to the last DraftKings
+    in-play row. The live loops followed a game far more often than the
+    feed's history keeps (every 5 minutes), so every snapshot is taken."""
+    out, t = [], _ceil_snap(start + timedelta(seconds=1))
+    while t <= end:
+        out.append(t)
+        t += SNAP
     return out
 
 
@@ -238,39 +399,46 @@ def plan(con, kind: str, sport: str, start: str, end: str) -> list[Request]:
     games = thinned_games(con, kind, sport, start, end)
     if not games:
         return []
-    lo = min(g["opener"] for g in games)
-    hi = max(g["close"] for g in games)
-    times = pass_times(con, lo, hi)
-    if kind == "prop":
+    if kind in ("prop", "extra"):
+        times = pass_times(con, min(g["opener"] for g in games),
+                           max(g["close"] for g in games))
         reqs = []
         for g in games:
             upper = min(g["close"], g["start"])
             for t in times:
                 if g["opener"] < t < upper:
-                    reqs.append(Request("prop", sport, t, [g["game_id"]],
+                    reqs.append(Request(kind, sport, t, [g["game_id"]],
                                         {g["game_id"]: g["start"]}, g["markets"],
                                         g["books"][:MAX_BOOKS_ONE_REGION - 1],
                                         "open", g["game_id"],
                                         {g["game_id"]: (g["opener"], g["close"])}))
         return sorted(reqs, key=lambda r: (r.at, r.event_key))
     by_time: dict[datetime, list[dict]] = {}
-    for t in times:
-        live = [g for g in games if g["opener"] < t < min(g["close"], g["start"])]
-        if live:
-            by_time[t] = live
+    if kind == "inplay":
+        for g in games:
+            for t in inplay_times(g["start"], g["close"]):
+                by_time.setdefault(t, []).append(g)
+    else:
+        times = pass_times(con, min(g["opener"] for g in games),
+                           max(g["close"] for g in games))
+        for t in times:
+            live = [g for g in games if g["opener"] < t < min(g["close"], g["start"])]
+            if live:
+                by_time[t] = live
     reqs = []
     for t, live in sorted(by_time.items()):
         books = sorted({b for g in live for b in g["books"]})[:MAX_BOOKS_ONE_REGION - 1]
         markets = sorted({m for g in live for m in g["markets"]})
-        reqs.append(Request("game", sport, t, [g["game_id"] for g in live],
+        reqs.append(Request(kind, sport, t, [g["game_id"] for g in live],
                             {g["game_id"]: g["start"] for g in live}, markets, books,
-                            "open", "", {g["game_id"]: (g["opener"], g["close"]) for g in live}))
+                            "in_play" if kind == "inplay" else "open", "",
+                            {g["game_id"]: (g["opener"], g["close"]) for g in live}))
     return reqs
 
 
 def summarize(reqs: list[Request]) -> dict:
     games = {g for r in reqs for g in r.games}
-    events = {r.event_key for r in reqs if r.kind == "prop"}
+    events = {(r.kind, r.event_key) for r in reqs if r.per_event}
     return {"requests": len(reqs), "games": len(games),
             "credits": sum(r.est_credits for r in reqs) + len(events),
             "first": min(r.at for r in reqs).isoformat() if reqs else None,
@@ -315,7 +483,8 @@ def fetch_events(sport: str, at: datetime):
     return resp.json().get("data", []) or [], credits
 
 
-def fetch_event_props(sport: str, event_id: str, at: datetime, markets, books):
+def fetch_event_odds(sport: str, event_id: str, at: datetime, markets, books):
+    """One event's historical odds: (the event, served timestamp, credits)."""
     from data.ingestors.odds_ingestor import SPORT_KEYS
     resp, credits = _api_get(
         f"/historical/sports/{SPORT_KEYS[sport]}/events/{event_id}/odds",
@@ -324,8 +493,7 @@ def fetch_event_props(sport: str, event_id: str, at: datetime, markets, books):
     if resp.status_code != 200:
         raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
     body = resp.json()
-    data = body.get("data", {}) or {}
-    return data.get("bookmakers", []) or [], body.get("timestamp"), credits
+    return body.get("data", {}) or {}, body.get("timestamp"), credits
 
 
 def _event_game_id(sport: str, ev: dict, conn) -> str | None:
@@ -354,13 +522,41 @@ def _event_game_id(sport: str, ev: dict, conn) -> str | None:
 
 # ── Rows ─────────────────────────────────────────────────────────────────────
 
-def game_rows(req: Request, events: list[dict], served: str, conn=None) -> tuple[list, list]:
-    """(rows to store, DraftKings rows for the check) from one game-odds snapshot."""
-    from data.ingestors.odds_ingestor import (RESOLVE_ONLY_SPORTS, _process_events,
-                                              _schedule_resolver)
-    resolver = None
-    if req.sport in RESOLVE_ONLY_SPORTS:
-        resolver = _schedule_resolver(req.sport, conn, served[:10])
+def schedule_resolver(sport: str, conn, at: datetime):
+    """The live pass's schedule resolver for a schedule-resolved sport, None for
+    a sport that mints its own ids, and RuntimeError when the sport needs one
+    and it cannot be built (checked BEFORE paying for the request)."""
+    from data.ingestors.odds_ingestor import SCHEDULE_RESOLVED_SPORTS, _schedule_resolver
+    if sport not in SCHEDULE_RESOLVED_SPORTS:
+        return None
+    resolver = _schedule_resolver(sport, conn, _iso(at)[:10]) if conn is not None else None
+    if resolver is None:
+        raise RuntimeError(f"{sport}: no schedule resolver near {_iso(at)[:10]}; "
+                           f"nothing bought rather than rows under invented ids")
+    return resolver
+
+
+def game_rows(req: Request, events: list[dict], served: str, conn=None,
+              resolver=None) -> tuple[list, list]:
+    """(rows to store, DraftKings rows for the check) from one game-odds snapshot.
+
+    The game id comes the way the live pass gets it: from the schedule for the
+    sports whose ids the schedule owns (odds_ingestor.SCHEDULE_RESOLVED_SPORTS:
+    an NFL id is NFL_<season>_<week>_<away>_<home>, which _process_events would
+    not build on its own), else _process_events' own rule. A schedule-resolved
+    sport whose resolver cannot be built stores nothing rather than rows under
+    an id no game has."""
+    from data.ingestors.odds_ingestor import _process_events
+    if resolver is None:
+        resolver = schedule_resolver(req.sport, conn, _parse_ts(served) or req.at)
+    # A bulk snapshot lists the whole slate. Only events starting near a planned
+    # game are parsed: the rest are dropped anyway, and the schedule resolver
+    # logs a warning for every NFL event it cannot place (14 a snapshot in the
+    # 2026-11-16 test).
+    starts = list(req.starts.values())
+    events = [e for e in events
+              if (t := _parse_ts(e.get("commence_time"))) is None
+              or any(abs(t - s) <= EVENT_START_SLACK for s in starts)]
     _games, rows = _process_events(events, req.sport, req.snapshot_type, served,
                                    resolve_game_id=resolver)
     served_t = datetime.fromisoformat(served.replace("Z", "+00:00"))
@@ -369,7 +565,18 @@ def game_rows(req: Request, events: list[dict], served: str, conn=None) -> tuple
     for r in rows:
         if r.get("game_id") not in wanted or r.get("market") not in markets:
             continue
-        if served_t >= req.starts[r["game_id"]]:
+        start = req.starts[r["game_id"]]
+        window = req.windows.get(r["game_id"])
+        changed = _parse_ts(r.get("snapshot_at"))
+        if req.kind == "inplay":
+            # Only a game under way, up to DraftKings' last in-play row, and only
+            # a quote the book changed after the start: an older one is a
+            # pre-game price still hanging, and its close is already stored.
+            if served_t <= start or (window and served_t > window[1] + SNAP):
+                continue
+            if changed is not None and changed <= start:
+                continue
+        elif served_t >= start:
             continue
         if r.get("bookmaker") == DK:
             dk.append(r)
@@ -377,12 +584,12 @@ def game_rows(req: Request, events: list[dict], served: str, conn=None) -> tuple
         if r.get("bookmaker") not in books:
             continue
         # The feed stamps a game-odds row with the book's own last change
-        # (`_process_events`: snapshot_at = the market's last_update). A change
-        # at or before the stored opener, or at or after the stored close, is
-        # already a stored row; only a move between them is missing.
-        changed = _parse_ts(r.get("snapshot_at"))
-        window = req.windows.get(r["game_id"])
-        if window and changed is not None and not (window[0] < changed < window[1]):
+        # (`_process_events`: snapshot_at = the market's last_update). Before
+        # the start, a change at or before the stored opener, or at or after
+        # the stored close, is already a stored row; only a move between them
+        # is missing.
+        if (req.kind != "inplay" and window and changed is not None
+                and not (window[0] < changed < window[1])):
             continue
         keep.append({**r, "source": REBUY_SOURCE})
     return keep, dk
@@ -399,19 +606,36 @@ def _parse_ts(v) -> datetime | None:
         return None
 
 
+def _rung(r: dict):
+    """A ladder row's rung (the home number, or the total); None for a market
+    that holds one row per book."""
+    m = r.get("market")
+    v = (r.get("spread_home") if m == "alternate_spreads"
+         else r.get("total_line") if m == "alternate_totals" else None)
+    return None if v is None else float(v)
+
+
 def _gkey(r: dict) -> tuple:
-    return (r["game_id"], r["market"], r["bookmaker"], str(r["snapshot_at"]))
+    return (r["game_id"], r["market"], r["bookmaker"], str(r["snapshot_at"]), _rung(r))
 
 
-_STORED_GAME_OPENERS_SQL = f"""
+# The newest stored row per (game, market, book[, rung]) at or before the
+# request: the live rows, plus what this re-buy already stored once the
+# nightly copy has it. For in-play, only in-play rows count: a pre-game price
+# is not the price a book moved from during the game.
+_STORED_GAME_PRICES_SQL = f"""
 SELECT game_id, market, bookmaker, {", ".join(("home_price", "away_price", "spread_home",
                                               "total_line", "over_price", "under_price"))}
   FROM odds
  WHERE game_id IN (SELECT unnest(?)) AND bookmaker <> '{DK}'
-   AND coalesce(snapshot_type, '') <> 'in_play' AND coalesce(source, '') = ''
+   AND (coalesce(snapshot_type, '') = 'in_play') = ?
+   AND coalesce(source, '') IN ('', '{REBUY_SOURCE}')
    AND try_cast(snapshot_at AS TIMESTAMPTZ) <= to_timestamp(?)
-QUALIFY row_number() OVER (PARTITION BY game_id, market, bookmaker
-                           ORDER BY try_cast(snapshot_at AS TIMESTAMPTZ) DESC) = 1
+QUALIFY row_number() OVER (
+    PARTITION BY game_id, market, bookmaker,
+                 CASE market WHEN 'alternate_spreads' THEN spread_home
+                             WHEN 'alternate_totals' THEN total_line END
+    ORDER BY try_cast(snapshot_at AS TIMESTAMPTZ) DESC) = 1
 """
 
 
@@ -424,20 +648,23 @@ def _game_price(r: dict) -> tuple:
 def drop_unchanged_game_rows(copy_con, req: Request, rows: list[dict], last: dict) -> list[dict]:
     """Keep a book's game-odds row only where its price or line moved since the
     book's previous known price: the row bought before it in this run (`last`),
-    else the stored opener in the PC copy, read once per game. The feed's
+    else the newest stored row in the PC copy, read once per game. The feed's
     last_update keeps ticking while a price stands still (978 of 1,051 rows
     bought for one NHL game on the first test day repeated the row before), so
-    the price is the change signal, not the time."""
+    the price is the change signal, not the time. A ladder's rungs are each
+    their own line."""
+    inplay = req.kind == "inplay"
     new_games = sorted({r["game_id"] for r in rows} - set(last))
     for gid in new_games:
         last[gid] = {}
     if new_games and copy_con is not None:
         for g, m, b, *price in copy_con.execute(
-                _STORED_GAME_OPENERS_SQL, [new_games, req.at.timestamp()]).fetchall():
-            last[g][(m, b)] = tuple(None if v is None else float(v) for v in price)
+                _STORED_GAME_PRICES_SQL, [new_games, inplay, req.at.timestamp()]).fetchall():
+            p = tuple(None if v is None else float(v) for v in price)
+            last[g][(m, b, _rung({"market": m, "spread_home": p[2], "total_line": p[3]}))] = p
     out = []
     for r in rows:
-        k, p = (r["market"], r["bookmaker"]), _game_price(r)
+        k, p = (r["market"], r["bookmaker"], _rung(r)), _game_price(r)
         if last[r["game_id"]].get(k) == p:
             continue
         last[r["game_id"]][k] = p
@@ -459,11 +686,13 @@ def drop_stored_game_rows(conn, rows: list[dict], seen: set) -> list[dict]:
         fresh.append(r)
     if fresh and conn is not None:
         have = conn.execute("""
-            SELECT game_id, market, bookmaker, snapshot_at FROM odds
+            SELECT game_id, market, bookmaker, snapshot_at, spread_home, total_line FROM odds
              WHERE game_id = ANY(%s) AND bookmaker = ANY(%s) AND snapshot_at = ANY(%s)""",
             (sorted({r["game_id"] for r in fresh}), sorted({r["bookmaker"] for r in fresh}),
              sorted({str(r["snapshot_at"]) for r in fresh}))).fetchall()
-        have = {(g, m, b, str(t)) for g, m, b, t in have}
+        have = {_gkey({"game_id": g, "market": m, "bookmaker": b, "snapshot_at": t,
+                       "spread_home": sh, "total_line": tl})
+                for g, m, b, t, sh, tl in have}
         fresh = [r for r in fresh if _gkey(r) not in have]
     seen.update(_gkey(r) for r in fresh)
     return fresh
@@ -573,7 +802,8 @@ _DK_GAME_SQL = """
 SELECT game_id, market, home_price, away_price, spread_home, total_line, over_price, under_price
   FROM odds
  WHERE game_id IN (SELECT unnest(?)) AND bookmaker = 'draftkings'
-   AND coalesce(snapshot_type, '') <> 'in_play'
+   AND (coalesce(snapshot_type, '') = 'in_play') = ?
+   AND market NOT IN ('alternate_spreads', 'alternate_totals')
    AND try_cast(snapshot_at AS TIMESTAMPTZ) <= to_timestamp(?)
 QUALIFY row_number() OVER (PARTITION BY game_id, market
                            ORDER BY try_cast(snapshot_at AS TIMESTAMPTZ) DESC) = 1
@@ -603,11 +833,13 @@ def dk_agreement(copy_con, kind: str, dk_rows: list[dict], served: str) -> tuple
         return 0, 0
     at = _parse_ts(served).timestamp()
     games = sorted({r["game_id"] for r in dk_rows})
-    if kind == "game":
+    if kind != "prop":
         stored = {(g, m): tuple(_num(v) for v in rest)
-                  for g, m, *rest in copy_con.execute(_DK_GAME_SQL, [games, at]).fetchall()}
+                  for g, m, *rest in copy_con.execute(
+                      _DK_GAME_SQL, [games, kind == "inplay", at]).fetchall()}
+        # A ladder has many rows per (game, market); its rungs are not checked.
         pairs = [((r["game_id"], r["market"]), tuple(_num(r.get(k)) for k in _GAME_FIELDS))
-                 for r in dk_rows]
+                 for r in dk_rows if r.get("market") not in LADDER_MARKETS]
     else:
         stored = {(g, m, pl): tuple(_num(v) for v in rest)
                   for g, m, pl, *rest in copy_con.execute(_DK_PROP_SQL, [games, at]).fetchall()}
@@ -672,14 +904,9 @@ def buy(reqs: list[Request], *, conn=None, copy_con=None, write: bool = True,
                 break
             try:
                 spent = 0
-                if req.kind == "game":
-                    events, served, c = fetch_game_snapshot(req.sport, req.at, req.markets, req.books)
-                    spent += c or 0
-                    served = served or _iso(req.at)
-                    keep, dk = game_rows(req, events, served, conn)
-                    keep = drop_unchanged_game_rows(copy_con, req, keep, last_game)
-                    keep = drop_stored_game_rows(conn if write else None, keep, seen_game_rows)
-                else:
+                resolver = (schedule_resolver(req.sport, conn, req.at)
+                            if req.kind != "prop" else None)
+                if req.per_event:
                     gid = req.event_key
                     if gid not in event_ids:
                         evs, c = fetch_events(req.sport, req.at)
@@ -688,16 +915,28 @@ def buy(reqs: list[Request], *, conn=None, copy_con=None, write: bool = True,
                                                if _event_game_id(req.sport, e, conn) == gid), None)
                     if not event_ids[gid]:
                         raise RuntimeError(f"no Odds API event for {gid} at {_iso(req.at)}")
-                    books, served, c = fetch_event_props(req.sport, event_ids[gid], req.at,
-                                                         req.markets, req.books)
+                    event, served, c = fetch_event_odds(req.sport, event_ids[gid], req.at,
+                                                        req.feed_markets, req.books)
                     spent += c or 0
                     served = served or _iso(req.at)
-                    keep, dk = prop_rows(req, books, served)
+                if req.kind == "prop":
+                    keep, dk = prop_rows(req, event.get("bookmakers", []) or [], served)
                     keep = drop_unchanged_props(copy_con, req, keep, last_props)
+                else:
+                    if not req.per_event:
+                        events, served, c = fetch_game_snapshot(req.sport, req.at,
+                                                                req.feed_markets, req.books)
+                        spent += c or 0
+                        served = served or _iso(req.at)
+                    else:
+                        events = [event] if event else []
+                    keep, dk = game_rows(req, events, served, conn, resolver=resolver)
+                    keep = drop_unchanged_game_rows(copy_con, req, keep, last_game)
+                    keep = drop_stored_game_rows(conn if write else None, keep, seen_game_rows)
                 checked, matched = dk_agreement(copy_con, req.kind, dk, served)
                 if write:
-                    n = (_insert_odds(conn, keep) if req.kind == "game"
-                         else _insert_prop_odds(conn, keep)) if keep else 0
+                    n = (_insert_prop_odds(conn, keep) if req.kind == "prop"
+                         else _insert_odds(conn, keep)) if keep else 0
                     _ledger(conn, req, served, spent, n, checked, matched)
                     conn.commit()
                 else:
@@ -796,10 +1035,10 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("plan", "buy"):
         p = sub.add_parser(name)
-        p.add_argument("--kind", choices=("game", "prop"), required=True)
+        p.add_argument("--kind", choices=("game", "extra", "inplay", "prop"), required=True)
         p.add_argument("--sport", required=True)
-        p.add_argument("--start", default=CLEANUP_START)
-        p.add_argument("--end", default=CLEANUP_STOP)
+        p.add_argument("--start", default=PLAN_START)
+        p.add_argument("--end", default=PLAN_END)
         p.add_argument("--copy-db", default=DEFAULT_COPY_DB)
         if name == "buy":
             p.add_argument("--limit", type=int)
