@@ -118,6 +118,24 @@ BetRivers' first posts alone made +21.22% on 60 bets in 2025-26: one book
 picked after the fact. Nothing ships from it. What would change it: a second
 season of BetRivers-first games clear of zero.
 
+**The best book at DraftKings' first post does better than DraftKings alone.**
+The live model bets DraftKings' first total only, copied from the men's totals
+model, which does the same. Shopping at the same moment, the best bettable
+book's standing total and price, priced the same way
+(`python -m scripts.ncaabw_research.totals_best_book`):
+
+| Edge above | 2025-26, DraftKings only | 2025-26, best book | 2024-25 / 2026-27, best book |
+|---|---|---|---|
+| 0.03 | 516 bets, +26.33 units, +4.63% | 556, +35.77, +5.82% | 141, +44.54 / 30, +9.03 |
+| 0.05 | 402, +29.96, +6.77% [-2.2, +15.3] | 435, +39.12, +8.13% [-1.0, +16.8] | 52, +26.80 / 25, +6.13 |
+| 0.08 | 276, +32.16, +10.57% | 302, +36.67, +10.98% | 10, +7.90 / 20, +3.23 |
+
+Better at every cut, and it beats the closing consensus by 0.90 points against
+0.58. In 2025-26 at 0.05, another book was best on 102 bets (+12.97 units,
++11.33%). The other two seasons barely move, because at DraftKings' first post
+the median game has no other book up yet. Not live: switching the book a live
+model bets is mike's call.
+
 **13 of the halftime model's first 22 bets were never stored.** From
 2026-11-11 to 11-15 the loop decided 22 bets and wrote 9. Each of the other 13
 was at a book whose total DraftKings did not hang in that read; the pick row
