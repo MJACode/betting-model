@@ -1,6 +1,14 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { gameDayLabelET, gameStatus, inningLong, inningShort } from '@/lib/format';
+import {
+  gameDayLabelET,
+  gameStatus,
+  inningLong,
+  inningShort,
+  postponedLabel,
+  postponedSpeech,
+  postponedStart,
+} from '@/lib/format';
 import { LiveDot } from '@/components/LiveDot';
 import { gameStatusSpeech } from '@/lib/a11y';
 import { colors, font, radii } from '@/lib/theme';
@@ -16,9 +24,23 @@ interface Props {
    * instead of a bare badge — `games` scores don't land until settlement.
    */
   live?: LiveGameStateRow | null;
+  /**
+   * The start the pick was made for (its game_time). A game since moved more
+   * than two days past it reads "Postponed · now Sat, 12/5", not the new date
+   * as if it were simply scheduled then.
+   */
+  scheduledStart?: string | null;
 }
 
-export function GameStatusPill({ game, compact = true, live }: Props) {
+export function GameStatusPill({ game, compact = true, live, scheduledStart }: Props) {
+  const movedTo = postponedStart(game, scheduledStart);
+  if (movedTo) {
+    return (
+      <Text style={compact ? styles.timeCompact : styles.time} accessibilityLabel={postponedSpeech(movedTo)}>
+        {postponedLabel(movedTo)}
+      </Text>
+    );
+  }
   const status = gameStatus(game, live);
   // Spoken form (audit M22): "Live, bottom 9th, 3 to 2", not "3 dash 2 B9 live".
   const spoken = gameStatusSpeech(status, gameDayLabelET(game?.commence_time));
