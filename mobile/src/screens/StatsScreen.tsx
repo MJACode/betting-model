@@ -65,7 +65,7 @@ import {
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
-import { bookLabel, bookLabelShort, bookName, booksLabel, booksName, booksNoneName, MODEL_BOOK, oneWayMarket, propDisplayLabel } from '@/lib/markets';
+import { bookLabel, bookName, booksLabel, booksName, booksNoneName, MODEL_BOOK, oneWayMarket, propDisplayLabel } from '@/lib/markets';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
 import {
   ambiguousKeys,
@@ -239,7 +239,6 @@ import {
   ATD_COPY,
   ATD_HIT_W,
   ATD_MATCHUP_W,
-  ATD_ODDS_W,
   ATD_STACK_FONT_SCALE,
   matchupHeaderFontSize,
   anyBlended,
@@ -3238,15 +3237,13 @@ export function StatsScreen() {
           // user never reads an unlabelled number as someone else's. With
           // several books selected the cells no longer share one, so the
           // header names the rule ("BEST") and each pill carries its badge.
-          oddsLabel={atdOn ? ATD_COPY.priceHeader : booksLabel(books)}
+          oddsLabel={booksLabel(books)}
           // On an off day the lines belong to a FUTURE date, and an undated
           // header would read as "now" (UX_REVIEW §3). Dated off the same value
           // the pill captions are the exception to, so the header and the
-          // column can never name different days. Anytime TD keeps the day on
-          // the subline: the price header is BEST, and the book sits under it.
-          oddsDateLabel={
-            atdOn ? null : oddsHeaderDate && oddsHeaderDate !== todayET() ? weekdayET(oddsHeaderDate) : null
-          }
+          // column can never name different days. Anytime TD reads the same
+          // header as every other board (Matt, 2026-11-16).
+          oddsDateLabel={oddsHeaderDate && oddsHeaderDate !== todayET() ? weekdayET(oddsHeaderDate) : null}
           showMatchup={showMatchupCol || atdOn}
           matchupTooltip={matchupTooltip}
           atd={atdOn}
@@ -4609,8 +4606,6 @@ function OddsCell({
   sport,
   dayLabel,
   onPress,
-  bestPrice = false,
-  priceFixed = false,
   muted = false,
 }: {
   quote: StatsOddsQuote | null;
@@ -4626,16 +4621,11 @@ function OddsCell({
    *  about the day exactly as it was before the odds window widened. */
   dayLabel?: string | null;
   onPress?: () => void;
-  /** Anytime TD: neutral pill, book abbreviation under the price, line chip
-   *  only when the book's line differs. The day stays on the subline. */
-  bestPrice?: boolean;
-  /** Lock the column width. Off once the metrics have stacked under the name. */
-  priceFixed?: boolean;
   /** The player is not playing: the price stays, but never as a filled book
    *  pill beside an IR tag (UX review, 2026-10-23). */
   muted?: boolean;
 }) {
-  const wrapStyle = [styles.oddsWrap, bestPrice && priceFixed && styles.oddsWrapFixed];
+  const wrapStyle = styles.oddsWrap;
   if (quote == null) {
     // A game in progress has no line a user can still take (unstartedGameIds),
     // and the cell says so — a dash there read as "the book never priced him".
@@ -4692,41 +4682,7 @@ function OddsCell({
   // 2026-09-12). The day is what a third line would have carried.
   // VoiceOver reads both regardless — see `label` above.
   const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode, sport) : null;
-  const caption = bestPrice ? null : [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
-  if (bestPrice) {
-    return holdSidelinedTap(muted, (
-      <Pressable
-        {...pillA11y}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        // Vertical slop crossed into the matchup line and the next name once
-        // the stacked gap shrank to 2pt. The 44pt box is the target.
-        hitSlop={{ top: 0, bottom: 0, left: 8, right: 8 }}
-        style={({ pressed }) => [
-          styles.oddsBestWrap,
-          priceFixed && styles.oddsWrapFixed,
-          !priceFixed && styles.oddsBestAlignStart,
-          pressed && styles.pressed,
-        ]}
-      >
-        <View style={[styles.oddsPill, styles.oddsPillNeutral]}>
-          <Text style={[styles.oddsText, { color: colors.textPrimary }]} numberOfLines={1}>
-            {priceText}
-          </Text>
-        </View>
-        <Text style={styles.oddsBook} numberOfLines={1}>
-          {bookLabelShort(quote.book)}
-        </Text>
-        {quote.offLine && lineCaption ? (
-          <View style={styles.lineChip}>
-            <Text style={styles.lineChipText} numberOfLines={1}>
-              {lineCaption}
-            </Text>
-          </View>
-        ) : null}
-      </Pressable>
-    ));
-  }
+  const caption = [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
   return holdSidelinedTap(muted, (
     <Pressable
       {...pillA11y}
@@ -4901,16 +4857,16 @@ function ColumnHeader({
       accessibilityHint="Opens the sportsbook list"
       style={[
         styles.oddsBookBtn,
-        atd ? (atdStack ? styles.atdHeaderLabelFree : styles.atdOddsHeadText) : styles.colHeaderOdds,
+        atd && atdStack ? styles.atdHeaderLabelFree : styles.colHeaderOdds,
       ]}
     >
       <Text
         style={
-          atd
-            ? [styles.atdHeaderLabel, atdStack ? styles.atdHeaderLabelFree : styles.atdOddsHeadText]
+          atd && atdStack
+            ? [styles.atdHeaderLabel, styles.atdHeaderLabelFree]
             : [styles.colHeaderRight, styles.colHeaderOdds]
         }
-        numberOfLines={atd ? 2 : 1}
+        numberOfLines={atd && atdStack ? 2 : 1}
       >
         {oddsSpoken}
       </Text>
@@ -4973,13 +4929,8 @@ function ColumnHeader({
       </View>
     )
   ) : null;
-  const metrics = atd ? (
-    <>
-      {valueHead}
-      {matchupHead}
-      {oddsHead}
-    </>
-  ) : (
+  // One order on every board, Anytime TD included (Matt, 2026-11-16).
+  const metrics = (
     <>
       {valueHead}
       {oddsHead}
@@ -5139,9 +5090,6 @@ function LeaderRow({
           {fmtValue(value, basis)}
         </Text>
       </View>
-      {atdView && !atdStack ? (
-        <AnytimeMatchupCell view={atdView} onExplain={onMatchupExplain} />
-      ) : null}
       {showOdds ? (
         <OddsCell
           quote={quote}
@@ -5152,10 +5100,13 @@ function LeaderRow({
           sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
-          bestPrice={!!atdView}
-          priceFixed={!!atdView && !atdStack}
           muted={!!injury?.sidelined}
         />
+      ) : null}
+      {/* One column order on every board: value, price, MATCHUP (Matt,
+          2026-11-16). Anytime TD keeps its own defense-rank cell. */}
+      {atdView && !atdStack ? (
+        <AnytimeMatchupCell view={atdView} onExplain={onMatchupExplain} />
       ) : null}
       {!atdView && showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
@@ -5295,9 +5246,6 @@ function LineOnlyRow({
         </Text>
         {omitNoGames ? null : <Text style={styles.valueLabel}>no games</Text>}
       </View>
-      {atdView && !atdStack ? (
-        <AnytimeMatchupCell view={atdView} onExplain={onMatchupExplain} />
-      ) : null}
       {showOdds ? (
         <OddsCell
           quote={quote}
@@ -5308,10 +5256,13 @@ function LineOnlyRow({
           sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
-          bestPrice={!!atdView}
-          priceFixed={!!atdView && !atdStack}
           muted={!!injury?.sidelined}
         />
+      ) : null}
+      {/* One column order on every board: value, price, MATCHUP (Matt,
+          2026-11-16). Anytime TD keeps its own defense-rank cell. */}
+      {atdView && !atdStack ? (
+        <AnytimeMatchupCell view={atdView} onExplain={onMatchupExplain} />
       ) : null}
       {!atdView && showMatchup ? <MatchupCell matchup={null} /> : null}
     </>
@@ -5462,9 +5413,6 @@ function HitRateRow({
           {player.hits}/{player.total}
         </Text>
       </View>
-      {atdView && !atdStack ? (
-        <AnytimeMatchupCell view={atdView} onExplain={onMatchupExplain} />
-      ) : null}
       {showOdds ? (
         <OddsCell
           quote={quote}
@@ -5475,10 +5423,13 @@ function HitRateRow({
           sport={sport}
           dayLabel={oddsDay}
           onPress={onOddsPress}
-          bestPrice={!!atdView}
-          priceFixed={!!atdView && !atdStack}
           muted={!!injury?.sidelined}
         />
+      ) : null}
+      {/* One column order on every board: value, price, MATCHUP (Matt,
+          2026-11-16). Anytime TD keeps its own defense-rank cell. */}
+      {atdView && !atdStack ? (
+        <AnytimeMatchupCell view={atdView} onExplain={onMatchupExplain} />
       ) : null}
       {!atdView && showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
@@ -6155,13 +6106,6 @@ const styles = StyleSheet.create({
   // "HIT" wraps and "%" drops under it instead of becoming "HIT…".
   atdHitLabel: { width: ATD_HIT_W, flexShrink: 1 },
   atdHitLabelWithArrow: { width: ATD_HIT_W - 10 },
-  atdOddsHeadText: {
-    width: ATD_ODDS_W,
-    minWidth: ATD_ODDS_W,
-    maxWidth: ATD_ODDS_W,
-    flexShrink: 0,
-    textAlign: 'right',
-  },
   // MATCHUP is ~57pt. letterSpacing 0 keeps the word plus the 9pt arrow
   // inside this 66pt column. The button is the whole column, so the target
   // stays above 44pt.
@@ -6396,26 +6340,6 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     alignItems: 'flex-end',
   },
-  oddsWrapFixed: {
-    width: ATD_ODDS_W,
-    minWidth: ATD_ODDS_W,
-    maxWidth: ATD_ODDS_W,
-    flexShrink: 0,
-  },
-  // 44pt on purpose: the pill plus the book under it is the bet control, and
-  // the verifier reads minHeight rather than the conditional width.
-  oddsBestWrap: {
-    minWidth: ATD_ODDS_W,
-    minHeight: 44,
-    flexShrink: 1,
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-  },
-  // Stacked: the price sits against the matchup line. The 44pt target stays,
-  // and the spare is below the price rather than between the two lines.
-  oddsBestAlignStart: {
-    justifyContent: 'flex-start',
-  },
   // Filled in the book's own colour — the pill IS the bet button, and the mark
   // beside the price says whose price it is.
   oddsPill: {
@@ -6438,28 +6362,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.separatorOpaque,
     alignSelf: 'flex-end',
-  },
-  oddsBook: {
-    fontSize: font.size.nano,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-    textAlign: 'right',
-    marginTop: 1,
-  },
-  lineChip: {
-    marginTop: 2,
-    paddingHorizontal: 4,
-    borderRadius: radii.sm,
-    backgroundColor: colors.noneSoft,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.separatorOpaque,
-    alignSelf: 'flex-end',
-  },
-  lineChipText: {
-    fontSize: font.size.nano,
-    color: colors.textSecondary,
-    fontVariant: ['tabular-nums'],
-    textAlign: 'right',
   },
   oddsText: {
     fontSize: font.size.caption,
