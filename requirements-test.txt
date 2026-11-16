@@ -15,3 +15,8 @@ nodejs-wheel-binaries>=22.6
 # when no system initdb and no LATEST_LINE_TEST_DSN exist. Without any of the
 # three, those 17 tests skip.
 embedded-postgres>=18
+# DuckDB, for SQL over the PC copy (scripts/local_mirror_duckdb.py) and its
+# tests. Pinned to the line the DuckDB CLI ships on winget (DuckDB.cli 1.5.6,
+# 2026-11-15), so a file the script writes opens in the CLI too. Without it,
+# tests/test_local_mirror_duckdb.py skips.
+duckdb==1.5.6
