@@ -372,6 +372,12 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # on demand by data/ingestors/ncaaf_derivative_history.py; never read by
     # the app.
     "ncaaf_derivative_fetches",
+    # The odds re-buy's ledger (#1384): one row per historical request, with
+    # the snapshot the feed served, the games, books and markets, the credits
+    # billed, the rows stored and how many bought DraftKings prices matched
+    # the stored ones, so nothing is bought twice. Created on demand by
+    # data/ingestors/odds_rebuy.ensure_ledger; never read by the app.
+    "odds_rebuy_requests",
     # Men's college basketball identity: the ESPN team registry, the ESPN
     # event <-> game_id map the odds join reads, and the venues. Created on
     # demand by data/ingestors/ncaab_teams.ensure_tables; never read by the app.
