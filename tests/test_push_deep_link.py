@@ -349,3 +349,30 @@ def test_the_sport_setter_is_callable_outside_react():
         "setSportForVisit is gone — the push router cannot set the sport from a "
         "non-component callback without it"
     )
+
+
+def test_a_tap_navigates_only_once_the_app_is_active():
+    """2026-11-15: both Pick Detail freezes after a push logged the screen
+    ~0.2 s BEFORE `app_state active` (app_errors 85, 87), then taps went
+    nowhere. A route that arrives before iOS reports active is held, and the
+    replay runs when it does."""
+    src = _code(HOOK_TS)
+    dispatch = re.search(r"const dispatch = \(route: PushRoute\) => \{(.*?)\n    \};", src, re.S)
+    assert dispatch, "dispatch moved"
+    assert "appActiveRef.current" in dispatch.group(1), (
+        "dispatch navigates without checking the app is active"
+    )
+    assert re.search(r"AppState\.addEventListener\('change'", src), "no AppState listener"
+    listener = re.search(r"AppState\.addEventListener\('change'.*?\}\);(.*?)return \(\) => sub\.remove\(\);", src, re.S)
+    assert listener, "AppState effect moved"
+    whole = re.search(r"AppState\.addEventListener\('change',(.*?)\}\);", src, re.S).group(1)
+    assert "replayRef.current()" in whole, (
+        "the held route is never replayed when the app becomes active"
+    )
+    # The change to active can land between the first render and the
+    # subscribe; only a re-read after subscribing sees it (UX review).
+    after = listener.group(1)
+    assert "AppState.currentState" in after and "replayRef.current()" in after, (
+        "the state is not re-read after subscribing: a cold-start tap can be "
+        "held for the whole session"
+    )

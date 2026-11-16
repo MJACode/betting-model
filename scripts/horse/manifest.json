@@ -14,8 +14,16 @@
       "zip_bytes": 3584412,
       "large": false,
       "files": {
-        "races.csv": {"bytes": 896095, "rows": 6349, "columns": 37},
-        "runs.csv": {"bytes": 10564287, "rows": 79447, "columns": 37}
+        "races.csv": {
+          "bytes": 896095,
+          "rows": 6349,
+          "columns": 37
+        },
+        "runs.csv": {
+          "bytes": 10564287,
+          "rows": 79447,
+          "columns": 37
+        }
       },
       "date_range": "1997-06-02 to 2005-08-28",
       "note": "The dataset card says these dates have been obscured and are not the real race dates. Gaps between races should still be right. Horse and jockey names are not included. 6348 distinct race_id values in runs.csv; one race in races.csv has no runs."
@@ -31,8 +39,15 @@
       "zip_bytes": 2245030,
       "large": false,
       "files": {
-        "race-result-race.csv": {"bytes": 6048396, "rows": 2367},
-        "race-result-horse.csv": {"bytes": 2788615, "rows": 30189, "horses": 2162}
+        "race-result-race.csv": {
+          "bytes": 6048396,
+          "rows": 2367
+        },
+        "race-result-horse.csv": {
+          "bytes": 2788615,
+          "rows": 30189,
+          "horses": 2162
+        }
       },
       "date_range": "2014-09-14 to 2017-07-16",
       "note": "Kaggle lists the licence as Unknown. The card says the rows were extracted from the Hong Kong Jockey Club website. 254 race dates, Sha Tin and Happy Valley. Do not commit a sample."
@@ -49,9 +64,21 @@
       "unzipped_bytes": 3947445590,
       "large": true,
       "rows": {
-        "raceform.csv": {"rows": 1904737, "races": 194125, "dates": "2015-01-01 to 2026-10-23"},
-        "1988-2004.csv": {"valid_rows": 1653834, "races": 157900, "dates": "1988-01-01 to 2004-12-31"},
-        "2005-2014.csv": {"rows": 1555126, "races": 153300, "dates": "2005-01-01 to 2014-12-31"}
+        "raceform.csv": {
+          "rows": 1904737,
+          "races": 194125,
+          "dates": "2015-01-01 to 2026-10-23"
+        },
+        "1988-2004.csv": {
+          "valid_rows": 1653834,
+          "races": 157900,
+          "dates": "1988-01-01 to 2004-12-31"
+        },
+        "2005-2014.csv": {
+          "rows": 1555126,
+          "races": 153300,
+          "dates": "2005-01-01 to 2014-12-31"
+        }
       },
       "combined_valid_runner_rows": 5113697,
       "note": "Results and starting prices from a Sporting Life scraper (tastethewhip/Sporting-Life-Results-Scraper). Flat, Hurdle, Chase, and NH Flat. Not a live odds feed. The zip is 1.12 GB and the listing is about 3.95 GB uncompressed. --all skips it unless --include-large is set."
@@ -67,7 +94,12 @@
       "zip_bytes": 78948203,
       "large": false,
       "files": {
-        "all_races05_19.csv": {"bytes": 332987202, "rows": 744347, "columns": 42, "races": 72896}
+        "all_races05_19.csv": {
+          "bytes": 332987202,
+          "rows": 744347,
+          "columns": 42,
+          "races": 72896
+        }
       },
       "date_range": "2005-04-24 to 2019-12-29",
       "note": "National Hunt only (Bumper, Chase, Hurdle, Unknown). 30573 rows have date=NA. Kaggle lists the licence as Unknown. Do not commit a sample. Flat racing is not in this file."
@@ -77,8 +109,26 @@
     "base": "https://betfair-datascientists.github.io/data/assets/",
     "listing": "https://betfair-datascientists.github.io/data/dataListing/",
     "licence": "Published free by Betfair Australia on the Automation Hub. No login. CSV market snapshots for Australia and New Zealand thoroughbreds: max and min matched prices and volume, weighted average price, BSP, winner, and on the monthly files the best available prices and overrounds at the scheduled start, plus win and place results. Not a form or sectional feed. Harness and greyhound files on the same listing are not fetched.",
-    "annual_zip_years": [2020, 2021, 2022, 2023, 2024, 2025],
-    "monthly_csv": ["2026_01", "2026_02", "2026_03", "2026_04", "2026_05", "2026_06", "2026_07", "2026_08", "2026_09", "2026_10"]
+    "annual_zip_years": [
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025
+    ],
+    "monthly_csv": [
+      "2026_01",
+      "2026_02",
+      "2026_03",
+      "2026_04",
+      "2026_05",
+      "2026_06",
+      "2026_07",
+      "2026_08",
+      "2026_09",
+      "2026_10"
+    ]
   },
   "manual": [
     {
@@ -95,6 +145,42 @@
       "id": "nyra-big-data-derby-2022",
       "url": "https://www.kaggle.com/competitions/big-data-derby-2022/data",
       "note": "The competition data list returned HTTP 401 without a Kaggle login on 14 Nov 2026. A download attempt returned HTTP 404. No account was created. Community re-uploads were left alone because the licence is not a clear open licence."
+    }
+  ],
+  "github": [
+    {
+      "id": "nch015-horserace-data",
+      "repo": "nch015/horserace_data",
+      "base": "https://raw.githubusercontent.com/nch015/horserace_data/master/data/",
+      "licence": "None stated in the repository (scraped from the HKJC and Singapore Turf Club sites). Used for research; mike, 2026-11-15: licences are not a blocker.",
+      "checked": "2026-11-15",
+      "pushed_at": "2019-09-18",
+      "files": {
+        "live_odds.csv.gz": {
+          "bytes": 11765245,
+          "note": "HKJC pool odds probed at intervals before each race, 2016-09-27 to 2018-06-27"
+        },
+        "performances.csv.gz": {
+          "bytes": 20423743,
+          "note": "one row per horse per race with final win odds; Hong Kong 1979 to 2018-06-27, Singapore 2002-03-08 to 2018-04-24"
+        },
+        "races.csv.gz": {
+          "bytes": 141765,
+          "note": "races 2016-09-28 to 2018-06-27 (HK) and 2016-09-25 to 2018-04-24 (SG)"
+        },
+        "all_dividends.csv.gz": {
+          "bytes": 113292,
+          "note": "JSON-encoded dividends, HK races 2016-09-28 to 2018-06-27"
+        },
+        "sectional_times.csv.gz": {
+          "bytes": 6504754,
+          "note": "sectional positions and times, 2008-06-05 to 2018-06-27"
+        },
+        "horses.csv.gz": {
+          "bytes": 1628957,
+          "note": "every horse that ran, to 2018-07-01"
+        }
+      }
     }
   ]
 }
