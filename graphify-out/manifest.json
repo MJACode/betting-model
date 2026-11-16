@@ -3948,9 +3948,9 @@
     "semantic_hash": ""
   },
   "scheduler.py": {
-    "mtime": 1794869416.8391378,
-    "seen": 1794870677.0954676,
-    "ast_hash": "98dbe7dc5187aa080938611b1965dafd",
+    "mtime": 1794871858.520788,
+    "seen": 1794873142.9048789,
+    "ast_hash": "e93bc8c001b8e8b586bb62715ee162ce",
     "semantic_hash": ""
   },
   "scripts/_envfile.py": {
@@ -6168,9 +6168,9 @@
     "semantic_hash": ""
   },
   "tests/test_monitoring.py": {
-    "mtime": 1794870177.631917,
-    "seen": 1794870677.0977426,
-    "ast_hash": "66cdc364b7c5959444219e1dcc6f98cc",
+    "mtime": 1794871585.4848585,
+    "seen": 1794873142.9117177,
+    "ast_hash": "16b71e4442a30b07bd17e15e22250da8",
     "semantic_hash": ""
   },
   "tests/test_multi_book_odds.py": {
@@ -7428,15 +7428,15 @@
     "semantic_hash": ""
   },
   "tracking/job_heartbeat.py": {
-    "mtime": 1794834531.8847706,
-    "seen": 1794870677.1077197,
-    "ast_hash": "f841628e688935f1c46595b85e1c47db",
+    "mtime": 1794871578.56594,
+    "seen": 1794873142.9330041,
+    "ast_hash": "fea40318001957c2d3bf7bd8b7a17c9d",
     "semantic_hash": ""
   },
   "tracking/job_queue.py": {
-    "mtime": 1794869724.6723084,
-    "seen": 1794870677.1077225,
-    "ast_hash": "1db9e7382f76296a47d5ad53dcadc14f",
+    "mtime": 1794871581.6509707,
+    "seen": 1794873142.93301,
+    "ast_hash": "13e4f80b1124286bd79b0ec10dd6d810",
     "semantic_hash": ""
   },
   "tracking/live_calibration.py": {
@@ -7728,9 +7728,9 @@
     "semantic_hash": ""
   },
   "docs/cloud_worker.md": {
-    "mtime": 1794869611.7871993,
-    "seen": 1794870677.1079345,
-    "ast_hash": "f652bf5372c5c89a51556dfb2050b67c",
+    "mtime": 1794872528.3888342,
+    "seen": 1794873142.933458,
+    "ast_hash": "262786a8dfa766d0c90a2392a0d6d77a",
     "semantic_hash": ""
   },
   "docs/clv.md": {
@@ -15084,9 +15084,9 @@
     "semantic_hash": ""
   },
   "scripts/horse/anz_study.py": {
-    "mtime": 1794776524.0157115,
-    "seen": 1794870677.0957544,
-    "ast_hash": "db938885900981c444ac818d97e07c00",
+    "mtime": 1794871843.5840304,
+    "seen": 1794873142.905551,
+    "ast_hash": "7c3a17e1ac566177f6d8c1cf6c1ca96a",
     "semantic_hash": ""
   },
   "scripts/horse/clogit.py": {
@@ -15930,9 +15930,9 @@
     "semantic_hash": ""
   },
   "scripts/horse/betfair_monthly.py": {
-    "mtime": 1794869708.9623356,
-    "seen": 1794870677.0957577,
-    "ast_hash": "fd859b671b58f67dd94b4aef5fe81686",
+    "mtime": 1794872596.8122714,
+    "seen": 1794873142.9055567,
+    "ast_hash": "03d8ef5d6b1cba5c85ab0ece2e664f38",
     "semantic_hash": ""
   },
   "tests/test_auth_user_insert_columns.py": {
@@ -15942,9 +15942,9 @@
     "semantic_hash": ""
   },
   "tests/test_betfair_monthly.py": {
-    "mtime": 1794869737.216067,
-    "seen": 1794870677.0970404,
-    "ast_hash": "a46d89a970eda829d92ac18b51e77d8d",
+    "mtime": 1794872549.2185273,
+    "seen": 1794873142.9098396,
+    "ast_hash": "f29a8927b7f6789e03b33e61debfd08f",
     "semantic_hash": ""
   }
 }
