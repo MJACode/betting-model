@@ -345,6 +345,28 @@ Each kept row is the opener or the close of its proposition. A rung of an altern
 
 **The re-buy (#1384) counts archived rows as held.** Its planner finds thinned games by counting rows per line. It now counts the archive too (`odds_rebuy.prop_history`), so it does not buy back what is on the PC.
 
-**The space comes back only after a rewrite.** `archive_rows.py reclaim` runs `VACUUM FULL`. It locks the table while it runs, so it goes in the quiet window (03:00-05:00 ET). It needs free disk the size of what is kept.
+**When it touches Supabase.** Only step 4 reads Postgres, and only between 01:30 and 05:30 ET. Inside that window it also pauses for the hourly refresh pass and while more than 6 other statements are running.
+- Preparing (steps 1 and 2) reads the PC copy alone. `--check` adds a Postgres check, but step 4 makes the same check anyway.
+- A game whose removal runs past 900 s is noted in the ledger and tried again the next night.
+- A game where Postgres and the file disagree is refused and noted. It is prepared again after the next copy.
+
+**Why (measured 2026-11-16).** The database server is small for what it holds. It has 256 MB of shared buffers and a 60-connection limit, and it holds 101 GB.
+- Supabase's compute table gives a 60-connection limit only to its two smallest sizes, with 0.5 GB and 1 GB of memory.
+- It recommends at most 10 GB of data for the 1 GB size.
+- The dashboard's compute page would confirm which size this is.
+- A game's prop rows come off disk at 650-2,300 rows a second: 45,000 rows in 70 s, 340,000 in 148 s.
+- The daytime prepare pass also checked every game in Postgres, from 09:00 to 13:50 ET.
+- The project logged 178 statement timeouts in those hours, 79 of them reads from the app. That compares with at most 5 an hour in the 18 hours before the pass, and none after it stopped.
+- So nothing in this tool reads Postgres in the daytime.
+
+**The space comes back only after a rewrite, and that rewrite is not yet measured.** `archive_rows.py reclaim` runs `VACUUM FULL`.
+- It locks the props table for the whole rewrite: no prop row can be written or read.
+- Nobody has timed a 40 GB rewrite on this machine.
+- It needs free disk for the new table, its indexes and the write-ahead log.
+
+Before it is scheduled, time a sequential read of the table in the quiet window and read the free disk. If the rewrite cannot finish inside the window, the options are:
+- a plain `VACUUM` (new rows reuse the space, but it is not returned);
+- `pg_repack` (no long lock);
+- a larger machine for one night.
 
 The disk itself shrinks only at a Supabase project upgrade, to 1.2x the database ("Manage disk size", Supabase docs).

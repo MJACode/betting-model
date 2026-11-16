@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, the archive move stays off Supabase in the daytime: the daytime check pass coincided with 178 timeouts (79 app reads); preparing now reads the PC copy only, removals run 01:30-05:30 ET, a timeout is not retried as a dropped connection, the rewrite is unmeasured (#1345, #1419) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, The PC copy: one row per nightly pass (pc_copy_snapshots, scripts/local_mirror_report.py, run last by the LocalMirror task) and a PC copy tile on the Database tab; an unreadable exit code is now a failure, not 0 |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: no source from 2023 on confirms a US outlet still pools with the Hong Kong Jockey Club; Xpressbet, AmWager, NYRA Bets offer Hong Kong; the archive purchase waits on that |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, TestFlight tester account + comped access; Supabase MCP found to write production |

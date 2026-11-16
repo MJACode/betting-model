@@ -171,7 +171,7 @@ def test_a_dropped_connection_retries_the_date_on_a_new_one(monkeypatch):
     from data.db import ConnectionLost
     calls = []
 
-    def prepare(copy, conn, table, rule, date, now, log):
+    def prepare(copy, conn, table, rule, date, now, log, **kw):
         calls.append((conn, date))
         if conn == "first":
             raise ConnectionLost("server closed the connection unexpectedly")
@@ -192,3 +192,166 @@ def test_a_dropped_connection_retries_the_date_on_a_new_one(monkeypatch):
     with pytest.raises(ConnectionLost):
         ar.run(None, "first", "player_prop_odds", "repeat", "2026-06-30", "2026-06-30", NOW,
                log=lambda *_: None)
+
+
+def _timeout():
+    import psycopg2.errors
+    return psycopg2.errors.QueryCanceled("canceling statement due to statement timeout")
+
+
+def test_a_statement_timeout_is_not_retried_as_a_dropped_connection(monkeypatch):
+    # 2026-09-10 timed out and was read again, twice, at the same size.
+    calls = []
+
+    def prepare(copy, conn, table, rule, date, now, log, **kw):
+        calls.append(date)
+        raise _timeout()
+    monkeypatch.setattr(ar, "prepare", prepare)
+    monkeypatch.setattr(ar, "_storage", lambda: (_ for _ in ()).throw(RuntimeError("no key")))
+    import psycopg2.errors
+    with pytest.raises(psycopg2.errors.QueryCanceled):
+        ar.run(None, "first", "player_prop_odds", "repeat", "2026-09-10", "2026-09-10", NOW,
+               log=lambda *_: None, connect=lambda: "second")
+    assert calls == ["2026-09-10"]
+
+
+class _Conn:
+    """Records every statement; answers the ledger read with `ledger`."""
+
+    def __init__(self, ledger=(), active=0):
+        self.sql = []
+        self.ledger = list(ledger)
+        self.active = active if callable(active) else (lambda: active)
+
+    def execute(self, sql, params=None):
+        self.sql.append((sql, params))
+        conn = self
+
+        class R:
+            rowcount = 0
+
+            def fetchall(self):
+                return conn.ledger if "FROM archive_batches" in sql else []
+
+            def fetchone(self):
+                return (conn.active(),) if "pg_stat_activity" in sql else (0, "0")
+        return R()
+
+    def rollback(self):
+        pass
+
+    def commit(self):
+        pass
+
+
+def test_prepare_reads_the_pc_copy_only(copy, tmp_path, monkeypatch):
+    # The daytime pass that also picked every game in Postgres coincided with
+    # 178 statement timeouts on 2026-11-16. The removal checks Postgres anyway.
+    monkeypatch.setattr(ar, "ARCHIVE_ROOT", tmp_path)
+    monkeypatch.setattr(ar, "ensure_ledger", lambda conn: None)
+    start = NOW - dt.timedelta(days=10)
+    _game(copy, "G", start)
+    for m, p in ((0, 100), (10, 100), (20, 110)):
+        _prop(copy, "G", start - dt.timedelta(hours=5) + dt.timedelta(minutes=m), p)
+    day = start.astimezone(ar.ET).date().isoformat()
+    conn = _Conn()
+    out = ar.prepare(copy, conn, "player_prop_odds", "repeat", day, NOW, log=lambda *_: None)
+    assert out["ready"] == 1 and out["refused"] == []
+    assert not [s for s, _ in conn.sql if "player_prop_odds t" in s], "prepare read Postgres"
+    inserts = [p for s, p in conn.sql if "INSERT INTO archive_batches" in s]
+    assert len(inserts) == 1 and inserts[0][-1] is None
+
+
+def _stored(copy, tmp_path, monkeypatch, games):
+    monkeypatch.setattr(ar, "ARCHIVE_ROOT", tmp_path)
+    start = NOW - dt.timedelta(days=10)
+    for g in games:
+        _game(copy, g, start)
+        for m in (0, 10, 20):
+            _prop(copy, g, start - dt.timedelta(hours=5) + dt.timedelta(minutes=m), 100)
+    spec = ar.SPECS["player_prop_odds"]
+    day = "2026-11-06"
+    path = ar.file_path("player_prop_odds", "repeat", day)
+    ar.write_file(copy, spec, "repeat", list(games), NOW, path)
+    sel = ar.file_selection(spec, path)
+    digest = ar.sha256(path)
+    ledger = [(g, sel[g][0], str(sel[g][1]), digest, NOW, None, None) for g in games]
+    return day, ledger
+
+
+def test_a_slow_game_is_noted_and_skipped_and_the_rest_still_go(copy, tmp_path, monkeypatch):
+    day, ledger = _stored(copy, tmp_path, monkeypatch, ["SLOW", "BAD", "OK"])
+    monkeypatch.setattr(ar, "wait_for_quiet", lambda *a, **k: True, raising=False)
+
+    def remove_game(conn, spec, rule, game, want, now):
+        if game == "SLOW":
+            raise _timeout()
+        if game == "BAD":
+            raise RuntimeError("BAD: Postgres picks 3 rows; nothing removed")
+        return want[0]
+    monkeypatch.setattr(ar, "remove_game", remove_game)
+    conn = _Conn(ledger)
+    out = ar.remove(conn, "player_prop_odds", "repeat", day, NOW, log=lambda *_: None)
+    assert out["removed"] == 1 and out["games"] == 1
+    assert {g for g, _ in out["skipped"]} == {"SLOW", "BAD"}
+    notes = {p[-1]: p[0] for s, p in conn.sql if "SET note" in s}
+    assert notes["SLOW"].startswith("removal timed out")
+    assert notes["BAD"].startswith("refused at removal")
+
+
+def test_a_game_that_timed_out_is_tried_again_the_next_night(copy, tmp_path, monkeypatch):
+    day, ledger = _stored(copy, tmp_path, monkeypatch, ["SLOW"])
+    g, n, c, sha, stored, removed, _ = ledger[0]
+    monkeypatch.setattr(ar, "wait_for_quiet", lambda *a, **k: True, raising=False)
+    monkeypatch.setattr(ar, "remove_game", lambda conn, spec, rule, game, want, now: want[0])
+    for note, gone in (("removal timed out after 900s at 2026-11-17T07:00:00Z; left in Supabase", 1),
+                       ("refused at removal: Postgres picks 3 rows", 0)):
+        conn = _Conn([(g, n, c, sha, stored, removed, note)])
+        out = ar.remove(conn, "player_prop_odds", "repeat", day, NOW, log=lambda *_: None)
+        assert out["removed"] == gone
+
+
+def _clock(start_et):
+    t = [start_et.astimezone(UTC)]
+
+    def clock():
+        return t[0]
+
+    def sleeper(s):
+        t[0] = t[0] + dt.timedelta(seconds=s)
+    return clock, sleeper, t
+
+
+def test_removals_run_only_in_the_overnight_quiet_window():
+    def at(h, m):
+        return dt.datetime(2026, 11, 17, h, m, tzinfo=ar.ET)
+    # midday: no removal, and nothing waits
+    clock, sleeper, t = _clock(at(14, 0))
+    assert ar.wait_for_quiet(_Conn(), clock, sleeper, log=lambda *_: None) is False
+    assert t[0] == at(14, 0).astimezone(UTC)
+    # 02:00, quiet: go now
+    clock, sleeper, t = _clock(at(2, 0))
+    assert ar.wait_for_quiet(_Conn(), clock, sleeper, log=lambda *_: None) is True
+    assert t[0] == at(2, 0).astimezone(UTC)
+    # 02:16: the refresh pass runs; wait for 02:28
+    clock, sleeper, t = _clock(at(2, 16))
+    assert ar.wait_for_quiet(_Conn(), clock, sleeper, log=lambda *_: None) is True
+    assert t[0] == at(2, 28).astimezone(UTC)
+    # busy, then quiet
+    seen = iter([9, 9, 2])
+    clock, sleeper, t = _clock(at(3, 0))
+    assert ar.wait_for_quiet(_Conn(active=lambda: next(seen)), clock, sleeper, log=lambda *_: None)
+    assert t[0] == (at(3, 0) + dt.timedelta(seconds=2 * ar.BUSY_SLEEP_S)).astimezone(UTC)
+    # 05:29 busy until the window closes: stop, do not run into the 06:00 pipeline
+    clock, sleeper, t = _clock(at(5, 29))
+    assert ar.wait_for_quiet(_Conn(active=9), clock, sleeper, log=lambda *_: None) is False
+
+
+def test_no_row_is_removed_outside_the_window(copy, tmp_path, monkeypatch):
+    day, ledger = _stored(copy, tmp_path, monkeypatch, ["G"])
+    called = []
+    monkeypatch.setattr(ar, "remove_game", lambda *a: called.append(a) or 1)
+    clock, sleeper, _ = _clock(dt.datetime(2026, 11, 17, 14, 0, tzinfo=ar.ET))
+    out = ar.remove(_Conn(ledger), "player_prop_odds", "repeat", day, NOW, log=lambda *_: None,
+                    clock=clock, sleeper=sleeper)
+    assert called == [] and out["stopped"]

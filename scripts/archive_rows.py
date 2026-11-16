@@ -30,6 +30,16 @@ HOW A ROW LEAVES. Nothing is removed until all of these hold, per game:
 A row the copy has not seen (written after the copy) changes Postgres's
 fingerprint, so its game is refused and retried after the next nightly copy.
 
+WHEN IT TOUCHES SUPABASE. Step 4 is the only heavy read, and it runs only in
+the quiet window (REMOVE_WINDOW_ET, outside the hourly refresh, and only while
+the database is not busy). Preparing reads the PC copy alone: no Postgres
+check by default (--check adds one). Measured 2026-11-16: 256 MB of shared
+buffers and a 60-connection limit (Supabase's two smallest sizes) for a 101 GB
+database, so a game's rows come off disk at 650-2,300 rows a second, and the daytime prepare
+pass that also checked every game in Postgres, 09:00-13:50 ET, coincided with
+178 statement timeouts across the project, 79 of them app reads, against at most 5 an
+hour in the 18 hours before and none after it stopped.
+
 THE FINGERPRINT. Per row, md5 of the row's columns as text (numbers as
 round(x * 1e6), times as text), first 15 hex digits as an integer, summed over
 the rows. Postgres and DuckDB compute it alike: measured 2026-11-16 on 199,991
@@ -38,8 +48,9 @@ the rows. Postgres and DuckDB compute it alike: measured 2026-11-16 on 199,991
     python scripts/archive_rows.py prepare --table player_prop_odds --rule repeat --date 2026-10-20
     python scripts/archive_rows.py upload  --table player_prop_odds --rule repeat --date 2026-10-20
     python scripts/archive_rows.py remove  --table player_prop_odds --rule repeat --date 2026-10-20
+    python scripts/archive_rows.py remove  --table player_prop_odds --rule repeat --pending   # every stored date
     python scripts/archive_rows.py run     --table player_prop_odds --rule repeat --start 2026-03-01 --end 2026-11-12
-    python scripts/archive_rows.py reclaim --table player_prop_odds      # quiet window only
+    python scripts/archive_rows.py reclaim --table player_prop_odds      # see reclaim(): unmeasured
     python scripts/archive_rows.py status
 
 Only (player_prop_odds, repeat) may move today; ALLOWED and REFUSED say why.
@@ -81,10 +92,20 @@ REFUSED = {
     ("player_prop_odds", "old"): "the line charts, the NHL player prop view and BYOM prop facts read "
                                  "lines that are neither opener nor close",
 }
-SERVER_GAMES_PER_STATEMENT = 3
+# One game a statement. Measured 2026-11-16 at midday: one game of 45k rows
+# took 70 s and one of 340k took 148 s; three such games in one statement ran
+# past 300 s.
 STATEMENT_TIMEOUT = "300s"
+REMOVE_TIMEOUT = "900s"
 ET = ZoneInfo("America/New_York")
 UTC = dt.timezone.utc
+# Removals run from 01:30 to 05:30 ET: after the late games, before the 06:00
+# pipeline and its merge gate. Inside it they also stay out of the hourly
+# refresh (minutes 15-28, the PC copy's own closed windows) and pause while more
+# than MAX_ACTIVE_OTHERS other statements are running.
+REMOVE_WINDOW_ET = (dt.time(1, 30), dt.time(5, 30))
+MAX_ACTIVE_OTHERS = 6
+BUSY_SLEEP_S = 20.0
 
 LEDGER_DDL = """
 CREATE TABLE IF NOT EXISTS archive_batches (
@@ -306,23 +327,36 @@ def ensure_ledger(conn) -> None:
         conn.commit()
 
 
+def is_timeout(exc: BaseException) -> bool:
+    """A statement the database cancelled for running too long. psycopg2 makes
+    it an OperationalError, the same family as a dropped connection, but it is
+    not one: running it again at the same size only repeats the heavy read."""
+    import psycopg2.errors
+    return isinstance(exc, psycopg2.errors.QueryCanceled)
+
+
+TIMED_OUT = "timed out"
+
+
 def server_selection(conn, spec: Spec, rule: str, games, now: dt.datetime) -> dict:
-    """{game_id: (rows, checksum)} by the rule, in Postgres, read-only."""
-    if not games:
-        return {}
+    """{game_id: (rows, checksum)} by the rule, in Postgres, read-only, one
+    game a statement. A game whose statement times out maps to TIMED_OUT."""
     d = Dialect("pg")
     sql = (f"SELECT game_id, count(*), sum(h)::text FROM ({rule_sql(spec, rule, d)}) s "
            f"GROUP BY game_id")
     out = {}
-    games = list(games)
-    # A few games a statement: all 23 games of 2026-11-08 in one statement ran
-    # into the database's statement timeout; 3 took 4 s.
-    for i in range(0, len(games), SERVER_GAMES_PER_STATEMENT):
-        part = games[i:i + SERVER_GAMES_PER_STATEMENT]
-        conn.execute(f"SET LOCAL statement_timeout = '{STATEMENT_TIMEOUT}'")
-        rows = conn.execute(sql, tuple(_params(d, rule, part, now))).fetchall()
+    for g in games:
+        try:
+            conn.execute(f"SET LOCAL statement_timeout = '{STATEMENT_TIMEOUT}'")
+            rows = conn.execute(sql, tuple(_params(d, rule, [g], now))).fetchall()
+        except Exception as exc:  # noqa: BLE001
+            conn.rollback()
+            if not is_timeout(exc):
+                raise
+            out[g] = TIMED_OUT
+            continue
         conn.rollback()
-        out.update({g: (int(n), int(c)) for g, n, c in rows})
+        out.update({gid: (int(n), int(c)) for gid, n, c in rows})
     return out
 
 
@@ -375,7 +409,7 @@ def remove_game(conn, spec: Spec, rule: str, game: str, want: tuple[int, int],
     sel = rule_sql(spec, rule, d)
     params = tuple(_params(d, rule, [game], now))
     try:
-        conn.execute(f"SET LOCAL statement_timeout = '{STATEMENT_TIMEOUT}'")
+        conn.execute(f"SET LOCAL statement_timeout = '{REMOVE_TIMEOUT}'")
         conn.execute(f"CREATE TEMP TABLE archive_pick ON COMMIT DROP AS {sel}", params)
         n, c = conn.execute("SELECT count(*), coalesce(sum(h), 0)::text FROM archive_pick").fetchone()
         if (int(n), int(c)) != want:
@@ -397,9 +431,57 @@ def remove_game(conn, spec: Spec, rule: str, game: str, want: tuple[int, int],
         raise
 
 
+# ── The quiet window ─────────────────────────────────────────────────────────
+
+def in_removal_window(t: dt.datetime) -> bool:
+    start, end = REMOVE_WINDOW_ET
+    return start <= t.astimezone(ET).time() < end
+
+
+def _active_others(conn) -> int:
+    n = conn.execute("SELECT count(*) FROM pg_stat_activity WHERE state = 'active' "
+                     "AND backend_type = 'client backend' AND pid <> pg_backend_pid()").fetchone()[0]
+    conn.rollback()
+    return int(n)
+
+
+def wait_for_quiet(conn, clock=None, sleeper=None, log=print) -> bool:
+    """True when a removal may start now; False once the night's window is over.
+    Waits out the hourly refresh and a busy database while the window lasts."""
+    import time
+    from scripts.local_mirror import closed_until
+    clock = clock or (lambda: dt.datetime.now(UTC))
+    sleeper = sleeper or time.sleep
+    said = None
+    while True:
+        t = clock()
+        if not in_removal_window(t):
+            return False
+        until = closed_until(t)
+        if until is not None:
+            if said != "refresh":
+                log(f"removals pause for the refresh pass until {until.astimezone(ET):%H:%M} ET")
+                said = "refresh"
+            sleeper(max(1.0, (until - t).total_seconds()))
+            continue
+        busy = _active_others(conn)
+        if busy > MAX_ACTIVE_OTHERS:
+            if said != "busy":
+                log(f"removals pause: {busy} other statements running (> {MAX_ACTIVE_OTHERS})")
+                said = "busy"
+            sleeper(BUSY_SLEEP_S)
+            continue
+        return True
+
+
 # ── Steps ────────────────────────────────────────────────────────────────────
 
-def prepare(copy, conn, table: str, rule: str, date: str, now: dt.datetime, log=print) -> dict:
+def prepare(copy, conn, table: str, rule: str, date: str, now: dt.datetime, log=print,
+            check: bool = False) -> dict:
+    """Write the date's file from the PC copy and its ledger rows. With `check`
+    it also picks each game in Postgres now; without it (the default) the only
+    Postgres read is the one inside the removal, which refuses any game where
+    Postgres and the file differ."""
     spec = SPECS[table]
     games = games_on(copy, date, now)
     mine = copy_selection(copy, spec, rule, games, now)
@@ -412,10 +494,10 @@ def prepare(copy, conn, table: str, rule: str, date: str, now: dt.datetime, log=
     back = file_selection(spec, path)
     if back != mine:
         raise RuntimeError(f"{path}: the file read back differs from the copy's selection")
-    theirs = server_selection(conn, spec, rule, list(mine), now)
+    theirs = server_selection(conn, spec, rule, list(mine), now) if check else None
     ensure_ledger(conn)
     for g, (n, c) in sorted(mine.items()):
-        ok = theirs.get(g) == (n, c)
+        ok = theirs is None or theirs.get(g) == (n, c)
         conn.execute("""
             INSERT INTO archive_batches (table_name, rule, batch_key, game_date, file_path,
                                          storage_path, rows, checksum, note)
@@ -432,8 +514,12 @@ def prepare(copy, conn, table: str, rule: str, date: str, now: dt.datetime, log=
         else:
             out["refused"].append(g)
     conn.commit()
-    log(f"prepare {table} {rule} {date}: {out['rows']:,} rows in {out['with_rows']} games; "
-        f"{out['ready']} match Postgres, {len(out['refused'])} refused")
+    if check:
+        log(f"prepare {table} {rule} {date}: {out['rows']:,} rows in {out['with_rows']} games; "
+            f"{out['ready']} match Postgres, {len(out['refused'])} refused")
+    else:
+        log(f"prepare {table} {rule} {date}: {out['rows']:,} rows in {out['with_rows']} games "
+            f"written and read back; Postgres is checked at removal")
     return out
 
 
@@ -448,7 +534,22 @@ def upload(conn, table: str, rule: str, date: str, log=print) -> str:
     return digest
 
 
-def remove(conn, table: str, rule: str, date: str, now: dt.datetime, log=print) -> dict:
+REMOVAL_TIMED_OUT = "removal timed out"
+
+
+def _note(conn, spec: Spec, rule: str, game: str, note: str) -> None:
+    conn.execute("""UPDATE archive_batches SET note = %s
+                     WHERE table_name = %s AND rule = %s AND batch_key = %s AND removed_at IS NULL""",
+                 (note, spec.table, rule, game))
+    conn.commit()
+
+
+def remove(conn, table: str, rule: str, date: str, now: dt.datetime, log=print,
+           clock=None, sleeper=None) -> dict:
+    """Remove the date's stored games, one transaction each, in the quiet window
+    only. A game Postgres disagrees on is refused and noted (it is prepared
+    again after the next copy); a game that runs past REMOVE_TIMEOUT is noted
+    and left for the next night; neither stops the others."""
     spec = SPECS[table]
     path = file_path(table, rule, date)
     back = file_selection(spec, path)
@@ -458,23 +559,62 @@ def remove(conn, table: str, rule: str, date: str, now: dt.datetime, log=print) 
         (table, rule, date)).fetchall()
     conn.rollback()
     digest = sha256(path)
-    out = {"removed": 0, "games": 0, "skipped": []}
+    out = {"removed": 0, "games": 0, "skipped": [], "stopped": None}
     for g, n, c, fsha, stored, removed_at, note in rows:
         if removed_at is not None:
             continue
         if stored is None or fsha != digest:
             out["skipped"].append((g, "no verified Storage copy of this file"))
             continue
-        if note or back.get(g) != (int(n), int(c)):
-            out["skipped"].append((g, note or "file does not hold the ledger's rows"))
+        if note and not note.startswith(REMOVAL_TIMED_OUT):
+            out["skipped"].append((g, note))
             continue
+        if back.get(g) != (int(n), int(c)):
+            out["skipped"].append((g, "file does not hold the ledger's rows"))
+            continue
+        if not wait_for_quiet(conn, clock, sleeper, log):
+            out["stopped"] = "outside the quiet window"
+            break
         try:
             out["removed"] += remove_game(conn, spec, rule, g, (int(n), int(c)), now)
             out["games"] += 1
         except RuntimeError as exc:
+            _note(conn, spec, rule, g, f"refused at removal: {exc}")
             out["skipped"].append((g, str(exc)))
+        except Exception as exc:  # noqa: BLE001
+            if not is_timeout(exc):
+                raise
+            msg = f"{REMOVAL_TIMED_OUT} after {REMOVE_TIMEOUT} at {_utc_iso(now)}; left in Supabase"
+            _note(conn, spec, rule, g, msg)
+            out["skipped"].append((g, msg))
     log(f"remove {table} {rule} {date}: {out['removed']:,} rows from {out['games']} games; "
-        f"{len(out['skipped'])} skipped")
+        f"{len(out['skipped'])} skipped" + (f"; stopped: {out['stopped']}" if out["stopped"] else ""))
+    return out
+
+
+def _utc_iso(t: dt.datetime) -> str:
+    return t.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def remove_pending(conn, table: str, rule: str, now: dt.datetime, log=print,
+                   clock=None, sleeper=None) -> dict:
+    """Every date with a stored copy and a game not yet removed, oldest first,
+    until the quiet window ends."""
+    check_allowed(table, rule)
+    dates = [r[0] for r in conn.execute("""
+        SELECT DISTINCT game_date FROM archive_batches
+         WHERE table_name = %s AND rule = %s AND stored_at IS NOT NULL AND removed_at IS NULL
+         ORDER BY 1""", (table, rule)).fetchall()]
+    conn.rollback()
+    out = {"dates": 0, "removed_rows": 0, "skipped_games": 0, "stopped": None}
+    for date in dates:
+        r = remove(conn, table, rule, date, now, log, clock, sleeper)
+        out["dates"] += 1
+        out["removed_rows"] += r["removed"]
+        out["skipped_games"] += len(r["skipped"])
+        if r["stopped"]:
+            out["stopped"] = r["stopped"]
+            break
     return out
 
 
@@ -488,15 +628,18 @@ DATE_ATTEMPTS = 3
 
 
 def run(copy, conn, table: str, rule: str, start: str, end: str, now: dt.datetime,
-        log=print, connect=None) -> dict:
-    """Every ET game date in [start, end]: prepare, then upload and remove when
-    the Storage copy can be made. Without the key it prepares only.
+        log=print, connect=None, check: bool = False, clock=None, sleeper=None) -> dict:
+    """Every ET game date in [start, end]: prepare, then upload when the
+    Storage copy can be made (without the key it prepares only), then remove
+    if it is the quiet window.
 
     A dropped connection retries the date on a new one (`connect`). On
     2026-11-16 the pooler closed the connection on the 40th date (Postgres
     itself had not restarted). Every step is safe to repeat: prepare
     rewrites its file and ledger rows, upload overwrites the object and reads
-    it back, and remove skips games already removed."""
+    it back, and remove skips games already removed. A statement timeout is
+    not a dropped connection and is never retried here: the same read would
+    only run again (2026-09-10 was read three times that way)."""
     import psycopg2
     from data.db import ConnectionLost
     check_allowed(table, rule)
@@ -506,19 +649,22 @@ def run(copy, conn, table: str, rule: str, start: str, end: str, now: dt.datetim
     except RuntimeError as exc:
         can_store = False
         log(f"Storage: {exc}")
+    clock = clock or (lambda: dt.datetime.now(UTC))
     d = dt.date.fromisoformat(start)
     out = {"dates": 0, "prepared_rows": 0, "removed_rows": 0, "refused_games": 0}
     while d <= dt.date.fromisoformat(end):
         for attempt in range(1, DATE_ATTEMPTS + 1):
             try:
-                p = prepare(copy, conn, table, rule, d.isoformat(), now, log)
+                p = prepare(copy, conn, table, rule, d.isoformat(), now, log, check=check)
                 removed = 0
                 if can_store and p["ready"]:
                     upload(conn, table, rule, d.isoformat(), log)
-                    removed = remove(conn, table, rule, d.isoformat(), now, log)["removed"]
+                    if in_removal_window(clock()):
+                        removed = remove(conn, table, rule, d.isoformat(), now, log,
+                                         clock, sleeper)["removed"]
                 break
             except (ConnectionLost, psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
-                if connect is None or attempt == DATE_ATTEMPTS:
+                if is_timeout(exc) or connect is None or attempt == DATE_ATTEMPTS:
                     raise
                 log(f"{d}: connection lost ({type(exc).__name__}); retrying on a new one "
                     f"({attempt}/{DATE_ATTEMPTS - 1})")
@@ -544,8 +690,16 @@ def table_size(conn, table: str) -> tuple[int, int]:
 
 def reclaim(conn, table: str, log=print) -> dict:
     """Rewrite the table so the removed rows' space comes back (VACUUM FULL).
-    It locks the table while it runs, so it belongs in the quiet window, and it
-    needs free disk the size of what is kept."""
+
+    NOT YET MEASURED, so not yet scheduled. It holds an exclusive lock on the
+    table for the whole rewrite (no prop row can be written or read), and on
+    this small machine nobody has timed a rewrite of a 40 GB table: a game's
+    rows came off disk at 650-2,300 rows a second on 2026-11-16. It also needs
+    free disk for the new table, its indexes and the write-ahead log. Before it
+    runs: time a sequential read of the table in the quiet window, and read the
+    free disk. If it cannot finish inside the window, the choices are a plain
+    VACUUM (the space is reused by new rows but not returned), pg_repack (no
+    long lock), or a larger machine for one night."""
     before = table_size(conn, table)
     conn.commit()
     raw = conn._conn
@@ -578,6 +732,10 @@ def main(argv=None) -> int:
     ap.add_argument("--start", help="run: first ET game date")
     ap.add_argument("--end", help="run: last ET game date")
     ap.add_argument("--copy-db", default=DEFAULT_COPY_DB)
+    ap.add_argument("--check", action="store_true",
+                    help="prepare/run: also pick each game in Postgres now (heavy; quiet window)")
+    ap.add_argument("--pending", action="store_true",
+                    help="remove: every date with a stored copy, until the quiet window ends")
     a = ap.parse_args(argv)
     from dotenv import load_dotenv
     load_dotenv(os.environ.get("ARCHIVE_ENV_FILE", DEFAULT_ENV), override=False)
@@ -605,7 +763,12 @@ def main(argv=None) -> int:
             import duckdb
             copy = duckdb.connect(a.copy_db, read_only=True)
             print(json.dumps(run(copy, conn, a.table, a.rule, a.start, a.end, now,
-                                 connect=get_connection)))
+                                 connect=get_connection, check=a.check)))
+            return 0
+        if a.step == "remove" and a.pending:
+            if not a.table:
+                ap.error("--table is required")
+            print(json.dumps(remove_pending(conn, a.table, a.rule, now)))
             return 0
         if not (a.table and a.date):
             ap.error("--table and --date are required")
@@ -614,7 +777,7 @@ def main(argv=None) -> int:
         if a.step == "prepare":
             import duckdb
             copy = duckdb.connect(a.copy_db, read_only=True)
-            prepare(copy, conn, a.table, a.rule, a.date, now)
+            prepare(copy, conn, a.table, a.rule, a.date, now, check=a.check)
         elif a.step == "upload":
             upload(conn, a.table, a.rule, a.date)
         else:
