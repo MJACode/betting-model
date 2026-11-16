@@ -209,6 +209,22 @@ down this list.
 - **A scorer's clear can delete other writers' rows** (dead-zone rows of
   another model on the same game).
 
+## Writing the pick
+
+- **An empty DraftKings probability loses the bet.** `picks.dk_implied_prob`
+  is NOT NULL. An in-play loop that left it NULL when DraftKings had no quote
+  at the bet's number failed the insert, logged "write failed (non-fatal)",
+  and never stored or posted the bet. The men's college loop had it, and the
+  women's and EuroLeague loops were copied from it: 20 of the men's 24 and 13
+  of the women's 22 bets lost, 2026-11-09 to 11-15 (`docs/sports/ncaabw.md`,
+  "Why the women's record trails the men's"). Write 0.0 there, with
+  `line_book` naming the book, as the first-half cards and the NBA loop do.
+  `tests/test_inplay_pick_without_draftkings.py` fails any `models/*live*.py`
+  that writes NULL.
+- **The decision row and the pick row share one transaction** in the college
+  in-play loops, so a failed pick insert also erases the decision, and the
+  game can later read as "missed" (5 of the 13 women's games did).
+
 ## Replaying the research (EuroLeague, 2026-11-14)
 
 - **The research cache moves under the build.** It had gained a game after the

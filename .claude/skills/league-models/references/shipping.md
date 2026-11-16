@@ -199,7 +199,10 @@ A new writer that skips one of these bets something it should not:
 6. **The first run**: the job registered, its heartbeat, its ledger rows, and
    the reasons on its first non-bet rows.
 7. **The first bet reaches every surface**: the app, the Discord channel,
-   push.
+   push. And every bet the model decided reached `picks`: its decided-bet
+   lines in the service's log against the rows, with no "write failed" line.
+   An insert error logged as non-fatal hid 33 in-play bets in one week
+   (2026-11-16, `porting-traps.md`, "Writing the pick").
 8. **Trained models**: `--store`/`--register` with an absolute path, then
    queue `health_check` and read `model_artifacts_load`.
 9. **Volume after shipping** is set with `set_model_volume` (tighten-only,

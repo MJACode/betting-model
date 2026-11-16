@@ -501,6 +501,10 @@ live slate, or a card's only deciding run.
 
 ### 8. Live: improve, never re-gate
 
+- First check that every decision reached `picks`: the decided-bet lines in
+  the service's log against the rows, and no "write failed" line. An insert
+  error logged as non-fatal hid 33 in-play bets in one week
+  (`references/porting-traps.md`, "Writing the pick").
 - Grade the live record on every scored pick (BET, AVOID and the dead zone),
   on the artifact that is actually live, in units, early/late. Report the
   go-live gate standing (≥ 50 settled, positive flat-bet return, calibration

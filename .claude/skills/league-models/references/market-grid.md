@@ -159,6 +159,12 @@ season can be researched.
 - Some leagues have no sharp book at all (the women's college game: no
   Pinnacle). Then closing-line value is measured against the nearest thing,
   and the doc says so.
+- **Count the anchor book's coverage before comparing two leagues.**
+  DraftKings posted a total on 69 of 701 women's college games (2026-11-03 to
+  11-15) against 519 of 681 men's, and its own board agreed (at most 3 women's
+  games in play at once), so a DraftKings-only model sees one game in ten.
+  Pricing the same model at other books' first totals did not clear
+  (`methods.md` §1, `docs/sports/ncaabw.md`).
 
 **Racing's free price routes** (2026-11-15, `docs/sports/racing.md`):
 Betfair Australia publishes the ANZ thoroughbred markets free, with no login,

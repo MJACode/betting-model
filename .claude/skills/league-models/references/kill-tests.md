@@ -164,6 +164,13 @@ finding either way.
   +6.7%; refitted back to 2015 the same rule read -5.6%. Read a walk-forward
   return only from a table fitted on everything the data allows.
 - **Era.** On live records, the artifact that is live (above).
+- **A live model that bets far less often than its replay**: replay it with
+  every fit on every season. If each fit bets the seasons alike, the books
+  moved, not the model file. The women's college halftime total bet 54% to 68%
+  of the stored seasons' priced games under every fit, and 25% to 35% of
+  2026-27's first nine days (`scripts/ncaabw_research/ht_model_vs_market.py`,
+  2026-11-16). First check that its bets were stored at all (`shipping.md`,
+  after mike's "merge", step 7).
 
 ## Is the data right?
 

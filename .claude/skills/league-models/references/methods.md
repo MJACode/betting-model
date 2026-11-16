@@ -47,6 +47,10 @@ error.
   positive; the same settings, unchanged, are live on the women's game (402
   bets +6.77% [-2.2, +15.1] on its one walk-forward season). The edge is larger at the first post (9.4% of games
   clear against 3.2% later). (`docs/sports/ncaab.md`, `docs/sports/ncaabw.md`)
+  *Failed*: the same model at another book's first total, on the games the
+  anchor book never prices (women's college, 2026-11-16): 140 bets +5.97%
+  [-6.7, +18.4] walk-forward, falling to -4.92% above 0.08, the opposite of
+  the anchor-book games (`scripts/ncaabw_research/totals_other_books.py`).
 - **Fundamentals regression behind a wide gate.** The market number is not a
   feature; the probability comes from an out-of-sample residual distribution;
   bet only when the model is 8+ points from the line; average the fit over
@@ -220,7 +224,10 @@ edge is where the rule misses something the state shows.
   halftime second-half lines, later-quarter basketball.
 - **The halftime break as the decision point.** The state is fixed and "a
   bettor has minutes, not seconds". *Worked*: women's college halftime total,
-  669 bets +11.84% [+5.1, +18.1], replayed on the loop's own code.
+  669 bets +11.84% [+5.1, +18.1], replayed on the loop's own code. In 2026-27
+  the books hang halftime totals closer to it: it bets 25% of decided games
+  against 60–64% in the stored seasons, under every fit, and this season's 36
+  bets went 16-20 (`docs/sports/ncaabw.md`, 2026-11-16).
   *EuroLeague*: the total, ported unchanged, failed (574 bets -1.93%: it
   expected too many second-half points); the spread is a lead that misses the
   bar (364 bets +10.93% [+3.40, +18.48], placebo passed, the false-discovery
