@@ -77,7 +77,7 @@ export default function DbOverview({ points, total, firstAt, available, loading,
           value={size24 ? `${fmtBytesSigned(size24.perDay)}/day` : '—'}
           caption={size24
             ? `${size24.full ? 'Over the last 24 h' : `Over the ${fmtSpan(size24.hours)} recorded`}${size7d ? ` · 7-day ${fmtBytesSigned(size7d.perDay)}/day` : ''}`
-            : nextHint}
+            : points.length >= 2 ? 'Shows once the snapshots span an hour.' : nextHint}
         />
         <StatCard
           icon={Rows3}
