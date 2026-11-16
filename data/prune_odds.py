@@ -308,6 +308,10 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      "odds_api_ncaab_derivative_15z",
                      "odds_api_ncaab_derivative_18z",
                      "odds_api_ncaab_derivative_tip60",
+                     # The line-shop history the prune itself removed, bought
+                     # back (2026-11-16, mike; data/ingestors/odds_rebuy.py,
+                     # REBUY_SOURCE, #1384). Paid rows on past games.
+                     "odds_api_rebuy",
                      # The re-bought in-play instants (2026-11-07,
                      # data/ingestors/ncaab_inplay_history.SOURCE): paid rows on
                      # past games, the NCAAB in-play model's graded market.
