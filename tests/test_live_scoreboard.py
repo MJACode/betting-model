@@ -333,3 +333,91 @@ def test_a_date_that_fails_does_not_lose_the_other(monkeypatch):
 
     monkeypatch.setattr(requests, "get", _espn_like(calls, broken={"20261029", "20261030"}))
     assert ls._default_fetch("NHL", ["2026-10-30", "2026-10-29"]) is None
+
+
+# ── Men's and women's college basketball (Matt, 2026-11-15) ──────────────
+# Matched to our games by ESPN's event id (ncaab_events / ncaabw_events),
+# never by team names: 300+ Division I schools have no code of ours.
+
+NCAAB_FIX = ROOT / "tests" / "fixtures" / "ncaab_espn" / "scoreboard_2025-11-27.json"
+
+
+def test_clock_labels_for_college_basketball():
+    st = lambda period, clock, name="STATUS_IN_PROGRESS", short="": {  # noqa: E731
+        "period": period, "displayClock": clock,
+        "type": {"state": "in", "name": name, "shortDetail": short}}
+    # Men's: two halves.
+    assert ls.clock_label("NCAAB", st(1, "12:34")) == "1H 12:34"
+    assert ls.clock_label("NCAAB", st(2, "0:41")) == "2H 0:41"
+    assert ls.clock_label("NCAAB", st(3, "3:10")) == "OT 3:10"
+    assert ls.clock_label("NCAAB", st(4, "1:00")) == "OT2 1:00"
+    assert ls.clock_label("NCAAB", st(1, "0:00", "STATUS_HALFTIME")) == "Half"
+    # Women's: four quarters.
+    assert ls.clock_label("NCAABW", st(3, "4:21")) == "Q3 4:21"
+    assert ls.clock_label("NCAABW", st(5, "2:00")) == "OT 2:00"
+    assert ls.clock_label("NCAABW", st(2, "0:00", "STATUS_END_PERIOD", "End of 2nd")) == "End Q2"
+
+
+def test_real_ncaab_finals_match_by_event_id_not_team_name():
+    data = json.loads(NCAAB_FIX.read_text(encoding="utf-8"))
+    rows = ls.parse_scoreboard("NCAAB", data)
+    assert len(rows) == len(data["events"]) == 3
+    assert all(r["state"] == "post" for r in rows)
+    assert all(r["home_score"] is not None and r["away_score"] is not None for r in rows)
+    first = data["events"][0]
+    games = [{"game_id": "NCAAB_ours", "sport": "NCAAB", "game_date": "2025-11-27",
+              "home_team": "Somebody", "away_team": "Else"}]
+    out = ls.match_games("NCAAB", rows, games, {str(first["id"]): "NCAAB_ours"})
+    assert [r["game_id"] for r in out] == ["NCAAB_ours"]
+    assert out[0]["event_id"] == str(first["id"])
+    # No event map: nothing is matched on names, even if they agreed.
+    assert ls.match_games("NCAAB", rows, games, None) == []
+
+
+def test_run_once_polls_college_basketball_and_upserts_by_event_id():
+    games = [{"game_id": "NCAAB_2026-11-15_a_b", "sport": "NCAAB", "game_date": "2026-11-15",
+              "home_team": "Central Connecticut", "away_team": "Quinnipiac",
+              "home_score": None, "away_score": None,
+              "commence_time": "2026-11-15T17:00:00Z"}]
+
+    class Conn(_Conn):
+        def execute(self, sql, params=None):
+            if "FROM public.ncaab_events" in sql:
+                assert params["ids"] == ["NCAAB_2026-11-15_a_b"]
+                return _Cur([("401999", "NCAAB_2026-11-15_a_b")])
+            return super().execute(sql, params)
+
+    def fetch(sport, dates):
+        assert sport == "NCAAB"
+        ev = _event("in", home=("CCSU", "Central Connecticut Blue Devils", "2115"),
+                    away=("QUIN", "Quinnipiac Bobcats", "2514"),
+                    hs="40", as_="38", period=2, clock="11:02", date="2026-11-15T17:00Z")
+        ev["id"] = "401999"
+        return {"events": [ev]}
+
+    conn = Conn(games)
+    out = ls.run_once(conn, now=datetime(2026, 11, 15, 18, 0, tzinfo=timezone.utc), fetch=fetch)
+    assert out == {"NCAAB": 1}
+    [row] = conn.upserts
+    assert row["game_id"] == "NCAAB_2026-11-15_a_b" and row["sport"] == "NCAAB"
+    assert (row["home_score"], row["away_score"]) == (40, 38)
+    assert row["clock_label"] == "2H 11:02"
+
+
+def test_college_scoreboards_ask_for_all_of_division_one(monkeypatch):
+    import requests
+    seen: list[dict] = []
+
+    def get(url, params=None, headers=None, timeout=None):
+        seen.append({"url": url, **(params or {})})
+        return _Resp(200, {"events": []})
+
+    monkeypatch.setattr(requests, "get", get)
+    ls._default_fetch("NCAAB", ["2026-11-15"])
+    ls._default_fetch("NCAABW", ["2026-11-15"])
+    ls._default_fetch("NBA", ["2026-11-15"])
+    assert seen[0]["url"].endswith("basketball/mens-college-basketball/scoreboard")
+    assert seen[1]["url"].endswith("basketball/womens-college-basketball/scoreboard")
+    assert seen[0]["groups"] == 50 and seen[0]["limit"] == 500
+    assert seen[1]["groups"] == 50 and seen[1]["limit"] == 500
+    assert "groups" not in seen[2]

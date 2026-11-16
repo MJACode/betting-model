@@ -20,6 +20,11 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, a restart relaunches every in-play loop 60 s after boot (#1359): a 23:59 ET restart had left a live college football game with no in-play model until 11:00 ET |
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Scoreboard covers every sport with games (12, chips only for sports with a game that day); NCAAB/NCAABW live scores via ESPN matched by event id; UFC finals W/L/D |
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, NCAAB: Utah ML posted on a game postponed to Dec 5 (Washington @ Utah); ESPN ingestor now reads a game that left its date's board by event id; a BET whose game moved over 48h settles NO_ACTION (PR #1375) |
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, Fanatics: app (com.fbg.sportsbook) claims only payment-return links, site opens it at /discover; probe now follows Fanatics' public share-a-bet OneLinks to see what the app is given |
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, horse racing first market audit: free Betfair ANZ and Hong Kong files stored in Supabase first; every market null (pools take ~18.7%, exchange calibrated, place-vs-win and Benter blend null); US bettors face pools almost everywhere |
+| 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, BetMGM bet lands on the slip via www.<st>.betmgm.com (alt_host); Fanatics opens by fanaticssportsbook:// but the feed has 0 Fanatics links, only selection ids; worker probe for a Fanatics betslip format |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, BetMGM: every host's AASA claims /*/sportsapp/* for the App Store app; after iOS refuses sports.<st>, ask www.<st> and <st> (logged as alt_host) |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, BetMGM opens its app (betmgmsports://, real) but iOS refuses the /sportsapp/ link; Fanatics has no betslip link (\"NaN\"), installed app now opens instead of the website; hand-off log covers every book |
 | 2026-11-15 | [2026-11](./2026-11.md) | 2026-11-15, no OTA reached a phone since #1202 (11-06): local `expo export` bundled without the EAS environment, crashed on `supabaseUrl is required` and rolled back; workflow now pulls it and refuses a bundle without the URL. First-tap \"Which state?\" fixed by awaiting the saved state |
