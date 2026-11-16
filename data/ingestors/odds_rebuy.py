@@ -65,6 +65,11 @@ from zoneinfo import ZoneInfo
 import requests
 from loguru import logger
 
+# Importing config installs the api_call_log logger, so every request this
+# module sends is logged however it was started
+# (tests/test_odds_call_log_everywhere.py).
+import config  # noqa: F401
+
 REBUY_SOURCE = "odds_api_rebuy"
 DEFAULT_COPY_DB = r"C:\Users\micha\Documents\betting_local_copies\betting.duckdb"
 DK = "draftkings"
