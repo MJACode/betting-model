@@ -8,8 +8,10 @@ title; the workaround is the minimal display mode with no custom title. A
 
 That workaround did not reach the phone that reproduced it again on
 2026-11-10 (PlayerStats, bundle created 2026-11-07). The player / prop
-detail screen therefore does not use the system pill at all. The checks for
-that replacement are mobile/scripts/verify_stack_back.ts.
+detail screen therefore stopped using the system pill. On 2026-11-15 the
+arrow-only system Back went dead on Pick Detail (opened from a push), so
+every pushed screen now draws the React pill and UIKit's Back is hidden. The
+checks for that replacement are mobile/scripts/verify_stack_back.ts.
 """
 from __future__ import annotations
 

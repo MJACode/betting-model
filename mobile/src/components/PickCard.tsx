@@ -7,7 +7,17 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus, isVersusSport, labelWithoutStake } from '@/lib/format';
+import {
+  formatGameTimeET,
+  formatSigned,
+  gameDayLabelET,
+  gameStatus,
+  isVersusSport,
+  labelWithoutStake,
+  postponedLabel,
+  postponedSpeech,
+  postponedStart,
+} from '@/lib/format';
 import {
   bestHandoffForPick,
   decidingBookOnlyAtMovedLine,
@@ -461,7 +471,12 @@ export function PickCard({
     : null;
   const contextSport = game?.sport ?? pick.sport;
   const contextWhen = game?.commence_time ?? pick.game_time;
-  const contextTime = signalsContextTime(gameDayLabelET(contextWhen), formatGameTimeET(contextWhen));
+  // A game moved days past the start this pick was made for says so, not
+  // the new date as if it were simply scheduled then.
+  const movedTo = postponedStart(game, pick.game_time);
+  const contextTime = movedTo
+    ? postponedLabel(movedTo)
+    : signalsContextTime(gameDayLabelET(contextWhen), formatGameTimeET(contextWhen));
   const contextLine = signalsContextLine({
     sport: contextSport,
     away: game?.away_team ?? '',
@@ -627,7 +642,9 @@ export function PickCard({
     : 'Stake unavailable';
   // A graded BET on a finished game says how it did (Matt, 2026-11-15).
   const resultView = pickResultView(pick, paused);
-  const baseStatusSpeech = gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
+  const baseStatusSpeech = movedTo
+    ? postponedSpeech(movedTo)
+    : gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
   const statusSpeech = resultView
     ? [baseStatusSpeech, resultView.spoken].filter(Boolean).join('. ')
     : baseStatusSpeech;
@@ -734,7 +751,7 @@ export function PickCard({
         {/* Live clock stays on this pill (Fixtured-style score + period).
             Do not invent a second clock chrome on the card. */}
         <View style={styles.headerStatus}>
-          <GameStatusPill game={game} live={liveState} />
+          <GameStatusPill game={game} live={liveState} scheduledStart={pick.game_time} />
           {resultView ? <PickResultChip view={resultView} /> : null}
         </View>
       </View>
@@ -1114,7 +1131,7 @@ export function PickCard({
             </View>
           ) : null}
           {gameStatus(game, liveState).kind !== 'pre' ? (
-            <GameStatusPill game={game} live={liveState} />
+            <GameStatusPill game={game} live={liveState} scheduledStart={pick.game_time} />
           ) : null}
           {resultView ? <PickResultChip view={resultView} /> : null}
         </View>
