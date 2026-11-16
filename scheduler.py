@@ -1099,12 +1099,13 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes the four EuroLeague pre-game rules' picks through
                   # their card, on its own period and full-game fetches.
                   "euroleague_pregame_window",
-                  # Queues the daily BYOM NFL refresh onto job_queue, which
-                  # is also a pipeline job.
-                  "byom_nfl_refresh",
                   # Writes one database health snapshot an hour; reads only
                   # Postgres's own statistics. Not a loop.
-                  "db_health_snapshot"}
+                  "db_health_snapshot",
+                  # Queues the daily BYOM NFL refresh onto job_queue, which
+                  # is also a pipeline job. Keep it last: a test reads
+                  # '"byom_nfl_refresh"}' to pin it to the pipeline role.
+                  "byom_nfl_refresh"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
