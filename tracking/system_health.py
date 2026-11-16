@@ -313,11 +313,33 @@ def classify_missing_finals(rows, now: datetime) -> tuple[str, str, str]:
             "; ".join(digest) + " — still inside 36 hours, or a single postponement")
 
 
+def completed_day_burn(prev_used, prev_prev_used) -> float | None:
+    """Credits used on the last finished quota day.
+
+    Today's counter minus yesterday's is only the burn so far today. At the
+    6am check that is a few hours, and the runway looks about four times too
+    long. The last complete day is yesterday's counter minus the day before,
+    when the counter did not reset between them.
+    """
+    if prev_used is None or prev_prev_used is None:
+        return None
+    try:
+        prev_used = float(prev_used)
+        prev_prev_used = float(prev_prev_used)
+    except (TypeError, ValueError):
+        return None
+    if prev_prev_used > prev_used:
+        return None
+    burn = prev_used - prev_prev_used
+    return burn if burn > 0 else None
+
+
 def credit_should_page(remaining: float, daily_burn: float | None) -> bool:
     """True when the odds feed is close to stopping.
 
-    `daily_burn` is yesterday's credit use when it is comparable. None or a
-    non-positive burn means runway is unknown, so only the absolute floor pages.
+    `daily_burn` is one finished day's credit use (`completed_day_burn`).
+    None or a non-positive burn means runway is unknown, so only the
+    absolute floor pages.
     """
     if remaining < CREDIT_PAGE_REMAINING:
         return True
@@ -1637,15 +1659,16 @@ def run_system_health(run_date: str | None = None) -> dict:
         # A percent-of-plan line pages for the rest of a large month. When
         # credits actually hit zero, odds_dk_lines CRITs on the real impact.
         try:
-            qrow = conn.execute("""
+            qrows = conn.execute("""
                 SELECT quota_date, requests_used, requests_remaining, observed_at
-                FROM odds_api_quota ORDER BY quota_date DESC LIMIT 1
-            """).fetchone()
+                FROM odds_api_quota ORDER BY quota_date DESC LIMIT 3
+            """).fetchall()
+            qrow = qrows[0] if qrows else None
             if qrow is None:
                 r.add("odds_api_credits", SKIPPED, "WARN",
                       "no quota telemetry yet (populates on the next odds fetch)")
             else:
-                q_date, q_used, q_rem, q_obs = qrow
+                _q_date, q_used, q_rem, q_obs = qrow
                 q_obs_ts = _parse_ts(q_obs)
                 obs_age_h = (None if q_obs_ts is None else
                              (datetime.now(timezone.utc) - q_obs_ts).total_seconds() / 3600)
@@ -1660,23 +1683,19 @@ def run_system_health(run_date: str | None = None) -> dict:
                     q_rem, q_used = float(q_rem), float(q_used or 0)
                     total = q_used + q_rem
                     pct = (q_rem / total * 100) if total > 0 else 0.0
-                    # Yesterday's burn, when comparable (same billing period)
-                    prev = conn.execute("""
-                        SELECT requests_used FROM odds_api_quota
-                        WHERE quota_date < ? ORDER BY quota_date DESC LIMIT 1
-                    """, (q_date,)).fetchone()
+                    # Last finished day, not today's counter minus yesterday.
+                    # At 6am today's delta is a few hours and the runway
+                    # reads about four times too long.
+                    prev_used = qrows[1][1] if len(qrows) > 1 else None
+                    prev_prev_used = qrows[2][1] if len(qrows) > 2 else None
+                    daily = completed_day_burn(prev_used, prev_prev_used)
                     burn = ""
-                    if prev and prev[0] is not None and float(prev[0]) <= q_used:
-                        daily = q_used - float(prev[0])
-                        burn = f"; burning ~{daily:,.0f}/day"
-                        if daily > 0:
-                            burn += f" (~{q_rem / daily:.1f} days left at this rate)"
+                    if daily:
+                        burn = (f"; burning ~{daily:,.0f}/day "
+                                f"(~{q_rem / daily:.1f} days left at this rate)")
                     detail = (f"{q_rem:,.0f} of {total:,.0f} credits remaining "
                               f"({pct:.1f}%){burn}")
-                    daily_burn = None
-                    if prev and prev[0] is not None and float(prev[0]) <= q_used:
-                        daily_burn = q_used - float(prev[0])
-                    if credit_should_page(q_rem, daily_burn):
+                    if credit_should_page(q_rem, daily):
                         r.add("odds_api_credits", STALE, "CRIT",
                               detail + " — under "
                               f"{CREDIT_PAGE_RUNWAY_DAYS} days of runway or under "

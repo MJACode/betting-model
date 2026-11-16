@@ -7,11 +7,26 @@ from tracking.system_health import (
     CREDIT_PAGE_REMAINING,
     CREDIT_PAGE_RUNWAY_DAYS,
     classify_missing_finals,
+    completed_day_burn,
     credit_should_page,
 )
 from tracking.watch_util import alert_state_path, read_alert_state, write_alert_state
 
 NOW = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
+
+
+def test_a_partial_morning_does_not_stretch_the_runway():
+    """Yesterday burned 200,000. By 6am today only 50,000 more is on the
+    counter. 600,000 left is 12 days at the partial rate and 3 days at the
+    finished day. The page uses the finished day."""
+    full = completed_day_burn(1_000_000, 800_000)
+    assert full == 200_000
+    remaining = 600_000
+    assert remaining / 50_000 > CREDIT_PAGE_RUNWAY_DAYS
+    assert credit_should_page(remaining, 50_000) is False
+    assert credit_should_page(remaining, full) is True
+    # A billing-period reset cannot be read as a negative day.
+    assert completed_day_burn(100, 5_000_000) is None
 
 
 def test_credits_page_on_runway_or_the_absolute_floor():
