@@ -361,7 +361,8 @@ Each kept row is the opener or the close of its proposition. A rung of an altern
 
 **The space comes back only after a rewrite, and that rewrite is not yet measured.** `archive_rows.py reclaim` runs `VACUUM FULL`.
 - It locks the props table for the whole rewrite: no prop row can be written or read.
-- Nobody has timed a 40 GB rewrite on this machine.
+- Nobody has timed a 40 GB rewrite on this machine. The table is 25.96 GB of rows and 14.05 GB of indexes.
+- One short read was timed at about 14:25 ET on 2026-11-16: 512 MB of the table, read in order, took 3.2 s (about 160 MB a second). A 26 GB read is not timed by that, because Supabase's smaller sizes run above their baseline speed only for a limited time.
 - It needs free disk for the new table, its indexes and the write-ahead log.
 
 Before it is scheduled, time a sequential read of the table in the quiet window and read the free disk. If the rewrite cannot finish inside the window, the options are:
