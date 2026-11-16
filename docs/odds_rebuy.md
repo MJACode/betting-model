@@ -91,8 +91,9 @@ endpoints. The Supabase backup restore was considered and not used.
 - **Row size:** 168 bytes (odds) and 212 bytes (props) per bought row, against
   320 and 342 for live rows, because they carry no links.
 
-**2026-11-16, 1,132 credits** (the four kinds, a few requests each, plus 30
-credits on one NFL snapshot read raw to explain its zero rows):
+**2026-11-16, 1,192 credits** (the four kinds, a few requests each; 30
+credits on one NFL snapshot read raw to explain its zero rows; 60 on the
+end-of-game check below):
 
 | Piece | Requests | Credits | Rows | DraftKings matched |
 |---|---|---|---|---|
@@ -107,16 +108,26 @@ credits on one NFL snapshot read raw to explain its zero rows):
 | NFL in-play | 6 | 60 | 41 | — |
 | NFL game odds, nine days out | 5 | 150 | 0 | 15 of 15 |
 
-- Every stored row has its game. Ladders keep their rungs (NFL: 978 rows over
-  13 moments, 7 books). In-play rows are labelled `in_play` and stamped after
-  the start.
+- Every stored row has its game. Ladders keep their rungs: the NFL game's
+  alternate lines came to 978 rows from 5 requests across 7 books. In-play
+  rows are labelled `in_play` and stamped after the start.
 - The newest-line table (`latest_odds`) for these games was the same before
   and after: 2,599 rows, same hash.
-- **Zero rows is the only-moves rule working.** NFL nine days out: FanDuel was
-  the only other book listing the game, at the price already stored as its
-  opener. NHL a day out: the feed returned one market.
-- An in-play DraftKings mismatch is DraftKings moving inside the 5 minutes
-  between the snapshot and the stored row it is compared with.
+- **The end of a game is safe too.** The last two in-play snapshots of
+  MLB_2026-10-27_MIL_TB (60 credits, 42 rows) became the game's newest
+  other-book rows (04:20:15 UTC), and `latest_odds` still held the same 47
+  rows with the same hash. The live trigger skips in-play rows
+  (`latest_odds_on_insert`, read from the database 2026-11-16).
+- **The two pieces with zero rows, read back:**
+  - NFL nine days out: FanDuel was the only other book listing the game, and
+    its prices (-120/+102, -1.5 at -108/-112, 45.5 at -105/-115) equal its
+    stored opener from 21:17:27, so nothing moved.
+  - NHL a day out: the feed served its 17:15:36 snapshot, and the first other
+    book posted the 3-way at 17:16:27 (Fanatics). No other book was up yet;
+    the 11 credits are the event list plus one market.
+  - So each game's first request can land just before the other books'
+    opener and store nothing. The plan still asks for it.
+- The in-play DraftKings mismatches (6 of 21 in MLB) were not read one by one.
 
 ## The whole plan, games 2026-03-01 to 2026-11-13, measured 2026-11-16
 
@@ -131,6 +142,9 @@ credits on one NFL snapshot read raw to explain its zero rows):
 - Nothing is planned for NBA, NCAAB, NCAABW or EuroLeague game odds, extra
   markets or in-play, or for NFL props: the cleanup kept their full history.
 - The total counts the test requests too; a run skips them.
+- **The total is a ceiling.** It counts every requested market at 10 credits,
+  and the feed bills only the markets it returns: the NHL request a day out
+  billed 11 where the plan counted 31.
 
 ## Running it
 
