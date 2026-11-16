@@ -10,3 +10,8 @@ ncaaf_live/data/artifacts/* -text
 # graphify outputs are machine-written JSON/HTML, rewritten whole by `graphify
 # update .`. Never translate line endings or every checkout shows them modified.
 graphify-out/** -text
+
+# The Retool ops dashboard's source (retool/README.md). Retool stores it with LF
+# endings and scripts/retool_app_files.py compares it byte for byte, so a
+# checkout must never turn LF into CRLF (autocrlf=true on mike's machine).
+retool/** text eol=lf

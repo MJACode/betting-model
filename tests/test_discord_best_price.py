@@ -81,7 +81,7 @@ def test_missing_data_falls_back_rather_than_breaking(missing):
 
 def test_the_headline_reaches_the_rendered_line():
     value = _signal_field(_sig())["value"]
-    assert "-120 @ BetMGM" in value
+    assert "-120 @ [BetMGM](" in value
     assert "-139" not in value, "the DK price is no longer the published one"
 
 
