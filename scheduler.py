@@ -1712,8 +1712,13 @@ def run_betfair_monthly_store() -> None:
     record, never on the betting path: the listing is free and keyless, and
     a run that finds nothing new writes nothing. Its own process, so a large
     annual zip never sits in the scheduler's memory."""
-    _run([sys.executable, "-m", "scripts.horse.betfair_monthly"],
-         "betfair-monthly-store", timeout=1800)
+    outcome = _run([sys.executable, "-m", "scripts.horse.betfair_monthly"],
+                   "betfair-monthly-store", timeout=1800)
+    if outcome not in ("ok", "drained"):
+        # A listing that moved, a size check that stopped working, or a row that
+        # did not read back must not read as a healthy job: raising makes the
+        # heartbeat record the failure, and MAX_SILENCE makes it an alert.
+        raise RuntimeError(f"betfair-monthly-store exited {outcome}")
 
 
 def run_db_health_snapshot() -> None:

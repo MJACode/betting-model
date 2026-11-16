@@ -835,8 +835,19 @@ def _job_betfair_monthly_store(dry_run: bool = False, **kw):
     """One run of the daily Betfair ANZ store (scripts/horse/betfair_monthly.py),
     on demand: stores any month not yet in Supabase, never overwrites a stored
     file, and reads each new row back. Free listing, no Odds API call."""
-    text = _run_script_main("scripts.horse.betfair_monthly",
-                            ["--dry-run"] if dry_run else []).strip()
+    # Called in-process on a fresh connection, not through main(): main()
+    # installs the traffic probe under its own name, which would relabel the
+    # scheduler process's probe for every later call.
+    import psycopg2
+    from data.db import get_connection
+    from scripts.horse import betfair_monthly as bm
+    lines: list[str] = []
+    conn = get_connection()
+    try:
+        bm.run(conn, dry_run=dry_run, binary=psycopg2.Binary, say=lines.append)
+    finally:
+        conn.close()
+    text = "\n".join(lines)
     return {"summary": text[-1500:] or "(no output)", "stdout": text[-50_000:]}
 
 

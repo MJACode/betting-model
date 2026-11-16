@@ -555,6 +555,7 @@ INSTRUMENTED_ENTRYPOINTS = [
     "scripts/ncaab_first_half_spread_card.py",
     "scripts/ncaab_first_half_total_card.py",
     "scripts/horse/betfair_monthly.py",
+    "scripts/nba_q1_trend_window.py",
 ]
 
 
@@ -570,9 +571,10 @@ def test_entrypoint_installs_the_probe(rel):
 def test_scheduler_does_not_invoke_an_uninstrumented_script():
     """Any `python -m scripts.X` the scheduler runs must be in the list above."""
     sched = (ROOT / "scheduler.py").read_text(encoding="utf-8")
-    # Nested modules too (scripts.horse.betfair_monthly): a pattern that
-    # stopped at the first dot never saw them.
-    referenced = set(re.findall(r'"(scripts(?:\.[a-z_]+)+)"', sched))
+    # Nested modules (scripts.horse.betfair_monthly) and names with digits
+    # (scripts.nba_q1_trend_window): a pattern that stopped at the first dot or
+    # digit never saw them.
+    referenced = set(re.findall(r'"(scripts(?:\.[a-z0-9_]+)+)"', sched))
     listed = {e.replace("/", ".").removesuffix(".py") for e in INSTRUMENTED_ENTRYPOINTS}
     # nfl_wind_publisher is DB-only (no HTTP), so it is legitimately exempt.
     exempt = {"scripts.nfl_wind_publisher"}
