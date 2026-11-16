@@ -41,6 +41,27 @@
             "type": "postgresql"
           }
         ],
+        "/backend/ops/getDatabaseHealth.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getDatabaseQueries.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getDatabaseTables.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
         "/backend/ops/getHealthChecks.ts": [
           {
             "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",

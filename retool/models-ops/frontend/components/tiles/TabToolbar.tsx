@@ -1,13 +1,12 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
-  LayoutGrid, Save, CopyPlus, Trash2, RotateCcw, Eye, Move, AlertCircle, CheckCircle2, Loader2,
+  Save, CopyPlus, Trash2, RotateCcw, Eye, Move, AlertCircle, CheckCircle2, Loader2, MoreHorizontal, Check, Info,
 } from 'lucide-react'
 import { Button } from '../../lib/shadcn/button'
-import { Switch } from '../../lib/shadcn/switch'
 import { Input } from '../../lib/shadcn/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectSeparator } from '../../lib/shadcn/select'
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '../../lib/shadcn/dropdown-menu'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -16,6 +15,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '../../lib/shadcn/alert-dialog'
+import { cn } from '../../lib/shadcn/utils'
 import { DEFAULT_LAYOUT } from './layoutTypes'
 import type { TabLayouts } from './useTabLayouts'
 import { useMediaQuery, DESKTOP_QUERY } from '../../hooks/useMediaQuery'
@@ -76,110 +76,102 @@ function SaveAsDialog({
   )
 }
 
+/**
+ * The layout controls beside a tab's heading: which layout, Customize (drag
+ * and resize tiles), and a menu with save, save as, delete, reset and the
+ * hidden tiles. Every action of the earlier toolbar is here.
+ */
 export function TabToolbar({ layouts }: { layouts: TabLayouts }) {
   const [saveAsOpen, setSaveAsOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const desktop = useMediaQuery(DESKTOP_QUERY)
   const isDefault = layouts.selected === DEFAULT_LAYOUT
   const canSave = layouts.available === true && !layouts.busy
   const hidden = layouts.working.filter(t => t.hidden)
   const metaById = new Map(layouts.metas.map(m => [m.id, m]))
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-card px-3 py-2 shadow-retool-sm">
-        <div className="flex items-center gap-2">
-          <LayoutGrid className="h-4 w-4 text-muted-foreground" aria-hidden />
-          <span className="text-xs font-medium text-muted-foreground">Layout</span>
-          <Select value={layouts.selected} onValueChange={layouts.selectLayout}>
-            <SelectTrigger className="h-8 w-48 text-sm" aria-label="Layout">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={DEFAULT_LAYOUT} className="text-sm">Default</SelectItem>
-              {layouts.saved.length > 0 && <SelectSeparator />}
-              {layouts.saved.map(s => (
-                <SelectItem key={s.name} value={s.name} className="text-sm">{s.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {layouts.dirty && (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-secondary-fg">Unsaved changes</span>
+    <div className="flex flex-wrap items-center gap-2">
+      {layouts.savable && (
+        <Select value={layouts.selected} onValueChange={layouts.selectLayout}>
+          <SelectTrigger className="h-8 w-44 bg-card text-[13px]" aria-label="Layout">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={DEFAULT_LAYOUT} className="text-sm">Default layout</SelectItem>
+            {layouts.saved.length > 0 && <SelectSeparator />}
+            {layouts.saved.map(s => (
+              <SelectItem key={s.name} value={s.name} className="text-sm">{s.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      <Button
+        size="sm"
+        variant={layouts.arrange ? 'default' : 'outline'}
+        className={cn('h-8 gap-1.5 text-xs', !layouts.arrange && 'bg-card')}
+        onClick={() => layouts.setArrange(!layouts.arrange)}
+        aria-pressed={layouts.arrange}
+      >
+        {layouts.arrange ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Move className="h-3.5 w-3.5" aria-hidden />}
+        {layouts.arrange ? 'Done' : 'Customize'}
+      </Button>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="outline" className="relative h-8 w-8 bg-card p-0" aria-label="Layout options">
+            <MoreHorizontal className="h-4 w-4" aria-hidden />
+            {hidden.length > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold leading-none text-white">
+                {hidden.length}
+              </span>
+            )}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-64">
+          {layouts.savable ? (
+            <>
+              <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Layout</DropdownMenuLabel>
+              <DropdownMenuItem
+                onSelect={() => void layouts.saveCurrent()}
+                disabled={!canSave || isDefault}
+                className="gap-2 text-sm"
+                title={isDefault ? 'The built-in Default cannot be overwritten; use Save as…' : undefined}
+              >
+                <Save className="h-3.5 w-3.5" /> Save
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setSaveAsOpen(true)} disabled={!canSave} className="gap-2 text-sm">
+                <CopyPlus className="h-3.5 w-3.5" /> Save as…
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setConfirmDelete(true)} disabled={!canSave || isDefault} className="gap-2 text-sm">
+                <Trash2 className="h-3.5 w-3.5" /> Delete
+              </DropdownMenuItem>
+            </>
+          ) : (
+            <div className="flex items-start gap-2 px-2 py-1.5 text-xs text-muted-foreground">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              Layouts on this tab last for this visit; they are not saved.
+            </div>
           )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1">
-          <Button
-            size="sm" variant="outline" className="h-8 gap-1.5 text-xs"
-            onClick={() => void layouts.saveCurrent()}
-            disabled={!canSave || isDefault}
-            title={isDefault ? 'The built-in Default cannot be overwritten; use Save as…' : undefined}
-          >
-            <Save className="h-3.5 w-3.5" /> Save
-          </Button>
-          <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => setSaveAsOpen(true)} disabled={!canSave}>
-            <CopyPlus className="h-3.5 w-3.5" /> Save as…
-          </Button>
-          <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-xs" onClick={() => setConfirmDelete(true)} disabled={!canSave || isDefault}>
-            <Trash2 className="h-3.5 w-3.5" /> Delete
-          </Button>
-          <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-xs" onClick={layouts.resetToDefault}>
+          <DropdownMenuItem onSelect={layouts.resetToDefault} className="gap-2 text-sm">
             <RotateCcw className="h-3.5 w-3.5" /> Reset to default
-          </Button>
-          {layouts.busy && <Loader2 className="ml-1 h-4 w-4 animate-spin text-muted-foreground" aria-label="Working" />}
-        </div>
-
-        <div className="ml-auto flex items-center gap-3">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs">
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Hidden tiles</DropdownMenuLabel>
+          {hidden.length === 0 ? (
+            <div className="px-2 py-1.5 text-xs text-muted-foreground">Every tile is showing. Hide one from its own menu.</div>
+          ) : (
+            hidden.map(t => (
+              <DropdownMenuItem key={t.id} onSelect={() => layouts.showTile(t.id)} className="gap-2 text-sm">
                 <Eye className="h-3.5 w-3.5" />
-                Tiles{hidden.length > 0 ? ` (${hidden.length} hidden)` : ''}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-60">
-              <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Hidden tiles</DropdownMenuLabel>
-              {hidden.length === 0 ? (
-                <div className="px-2 py-1.5 text-xs text-muted-foreground">Every tile is showing. Hide one from its own menu.</div>
-              ) : (
-                hidden.map(t => (
-                  <DropdownMenuItem key={t.id} onSelect={() => layouts.showTile(t.id)} className="gap-2 text-sm">
-                    <Eye className="h-3.5 w-3.5" />
-                    Show {metaById.get(t.id)?.title ?? t.id}
-                  </DropdownMenuItem>
-                ))
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-secondary-fg">
-            <Move className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-            Arrange
-            <Switch checked={layouts.arrange} onCheckedChange={layouts.setArrange} aria-label="Arrange tiles" />
-          </label>
-        </div>
-      </div>
+                Show {metaById.get(t.id)?.title ?? t.id}
+              </DropdownMenuItem>
+            ))
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-      <div className="flex min-h-[18px] flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs">
-        {layouts.available === false && !layouts.loadError && (
-          <span className="text-muted-foreground">Saving layouts turns on after a database update.</span>
-        )}
-        {layouts.loadError && (
-          <span className="flex items-center gap-1.5 text-crit"><AlertCircle className="h-3.5 w-3.5" />Saved layouts could not be read: {layouts.loadError}</span>
-        )}
-        {layouts.actionError && !saveAsOpen && (
-          <span className="flex items-center gap-1.5 text-crit"><AlertCircle className="h-3.5 w-3.5" />{layouts.actionError}</span>
-        )}
-        {layouts.notice && (
-          <span className="flex items-center gap-1.5 text-good"><CheckCircle2 className="h-3.5 w-3.5" />{layouts.notice}</span>
-        )}
-        {layouts.arrange && (
-          <span className="text-muted-foreground">
-            {desktop
-              ? 'Drag a tile by its header; resize from the bottom-right corner or pick a size from its menu.'
-              : 'On a narrow screen tiles stack in layout order; you can still hide and show them.'}
-          </span>
-        )}
-      </div>
+      {layouts.busy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="Working" />}
 
       <SaveAsDialog open={saveAsOpen} onOpenChange={setSaveAsOpen} layouts={layouts} />
 
@@ -197,4 +189,40 @@ export function TabToolbar({ layouts }: { layouts: TabLayouts }) {
       </AlertDialog>
     </div>
   )
+}
+
+/** One line under the heading: unsaved changes, notices, errors, and how to arrange. */
+export function TabToolbarStatus({ layouts }: { layouts: TabLayouts }) {
+  const desktop = useMediaQuery(DESKTOP_QUERY)
+  const items: ReactNode[] = []
+  if (layouts.dirty && layouts.savable) {
+    items.push(
+      <span key="dirty" className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-secondary-fg">Unsaved changes</span>,
+    )
+  }
+  if (layouts.savable && layouts.available === false && !layouts.loadError) {
+    items.push(<span key="off" className="text-muted-foreground">Saving layouts turns on after a database update.</span>)
+  }
+  if (layouts.loadError) {
+    items.push(
+      <span key="load" className="flex items-center gap-1.5 text-crit"><AlertCircle className="h-3.5 w-3.5" />Saved layouts could not be read: {layouts.loadError}</span>,
+    )
+  }
+  if (layouts.actionError) {
+    items.push(<span key="act" className="flex items-center gap-1.5 text-crit"><AlertCircle className="h-3.5 w-3.5" />{layouts.actionError}</span>)
+  }
+  if (layouts.notice) {
+    items.push(<span key="note" className="flex items-center gap-1.5 text-good"><CheckCircle2 className="h-3.5 w-3.5" />{layouts.notice}</span>)
+  }
+  if (layouts.arrange) {
+    items.push(
+      <span key="how" className="text-muted-foreground">
+        {desktop
+          ? 'Drag a tile by its header; resize from the bottom-right corner or pick a size from its menu. Press Done when finished.'
+          : 'On a narrow screen tiles stack in layout order; you can still hide and show them.'}
+      </span>,
+    )
+  }
+  if (items.length === 0) return null
+  return <div className="-mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">{items}</div>
 }
