@@ -66,6 +66,18 @@ def iter_items(manifest: dict, only: set[str] | None, include_large: bool) -> li
             "licence": row["licence"],
             "expected_bytes": row.get("zip_bytes"),
         })
+    for repo in manifest.get("github", []):
+        if only is not None and repo["id"] not in only:
+            continue
+        for name, meta in repo["files"].items():
+            items.append({
+                "id": repo["id"],
+                "url": repo["base"] + name,
+                "filename": name,
+                "licence": repo["licence"],
+                "expected_bytes": meta.get("bytes"),
+                "group": repo["id"],
+            })
     block = manifest["betfair_anz_thoroughbreds"]
     base = block["base"]
     for name in betfair_names(block):
@@ -158,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
             mark = " large" if row.get("large") else ""
             print(f"{row['id']}{mark}  {row['licence']}")
         print("betfair-anz-thoroughbreds  " + str(len(betfair_names(manifest["betfair_anz_thoroughbreds"]))) + " files")
+        for repo in manifest.get("github", []):
+            print(f"{repo['id']}  github {repo['repo']}  {len(repo['files'])} files")
         for row in manifest["manual"]:
             print(f"{row['id']}  manual  {row['licence']}")
         return 0
@@ -172,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         known.add("betfair-anz-thoroughbreds")
         known.update("betfair-" + name for name in betfair_names(manifest["betfair_anz_thoroughbreds"]))
         known.update(row["id"] for row in manifest["manual"])
+        known.update(repo["id"] for repo in manifest.get("github", []))
         missing = sorted(only - known)
         if missing:
             print("unknown id: " + ", ".join(missing), file=sys.stderr)

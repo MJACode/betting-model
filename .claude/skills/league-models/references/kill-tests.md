@@ -205,6 +205,22 @@ finding either way.
   site's price history at the decision time; report the share whose price
   then equals the last recorded one, by book (`docs/ufc_market_audit.md`
   §5f).
+- **A snapshot can be broken while the close is fine.** Betfair's ANZ files
+  (horse racing, 2026-11-15): 13.1% of races had an unusable scheduled-start
+  book (a back book from 0.56 to 13.9, a lay under the back, favourites
+  shown at 1.01 that started at 3.46), which put runners in the wrong price
+  band. Filter on what the decision moment itself shows (the book's own
+  percentages, back under lay), so a live rule skips the same races. And
+  read every file's date format: one month of 82 wrote its dates day-first
+  (`docs/sports/racing.md`, data checks).
+- **A display cap is not a price.** A results site that shows odds above 99
+  as 99 (Hong Kong 2014–2017: 11.4% of runners) gives a floor, not the
+  price paid; grade the long band with that said.
+- **Prove the harness can see an edge before trusting its null.** Add a
+  feature that leaks the result (Hong Kong: the race's own speed figure) and
+  rerun the same walk-forward: the model weight went from about 0 to +2.9
+  to +9.1 and the log-likelihood from −2.24 to −0.17. A harness that stays
+  null with the leak in is broken (`docs/horse_racing_market_audit.md` §3b).
 - **Validate the grading before moving a cut.** Recompute outcomes from raw
   scores and reconcile with stored settlements. A sign error in away-side
   spread grading once turned -20.6% into +15%. `scored_line` is the home

@@ -116,7 +116,10 @@ STATEMENT_TIMEOUT_S = 60
 # A batch may not start this close to a closed window: a statement can run for
 # up to STATEMENT_TIMEOUT_S, and it must not run into the window.
 WINDOW_MARGIN_S = STATEMENT_TIMEOUT_S + 15
-MIN_BATCH_ROWS = 500
+# A batch that hits the statement timeout halves until it fits, down to one
+# row. The floor was 500 until 2026-11-15, above the 100-row batch a table of
+# 33 MB rows gets, so such a table failed instead of halving.
+MIN_BATCH_ROWS = 1
 
 SYSTEM_SCHEMAS = ("pg_catalog", "information_schema")
 
@@ -681,6 +684,19 @@ class PgSource:
         return _page_from_rows(info, rows, n_keys=0)
 
 
+def page_bytes(page: Page) -> int:
+    """Approximate bytes a page carries: string and binary values by length,
+    anything else as 8."""
+    n = 0
+    for col in page.columns:
+        for v in col:
+            if isinstance(v, (bytes, bytearray, memoryview, str)):
+                n += len(v)
+            elif v is not None:
+                n += 8
+    return n
+
+
 def _page_from_rows(info: TableInfo, rows: list[tuple], n_keys: int) -> Page:
     ncol = len(info.columns)
     if not rows:
@@ -906,6 +922,19 @@ class Mirror:
             return "full"
         return "incremental"
 
+    def next_limit(self, base: int, page: Page) -> int:
+        """The next page's size, from the bytes of the page just read.
+
+        A table's average row size hides a few huge rows (2026-11-15: 34 rows
+        of 33.6 MB in a table of 0.1 MB rows). Sizing each page from the rows
+        just read keeps a run of huge rows at one row a page, after one
+        timeout-and-halve, and returns to `base` once the rows are small again.
+        """
+        if page.n <= 0:
+            return base
+        avg = page_bytes(page) / page.n
+        return max(1, min(base, int(self.batch_bytes // max(avg, 1.0))))
+
     def rows_per_batch(self, info: TableInfo) -> int:
         if info.est_rows > 0 and info.table_bytes > 0:
             avg = info.table_bytes / info.est_rows
@@ -942,7 +971,8 @@ class Mirror:
         The last chunk of a bounded range takes `hi` as its bound, so the
         ranges stay contiguous whatever the server holds now.
         """
-        limit = self.rows_per_batch(info)
+        base = self.rows_per_batch(info)
+        limit = base
         after = lo
         made: list[dict] = []
         pulled = 0
@@ -958,6 +988,7 @@ class Mirror:
             after = page.last_key
             if page.n < (page.limit or limit):
                 break
+            limit = self.next_limit(base, page)
         if hi is not None and made and made[-1]["hi"] != list(hi):
             made[-1]["hi"] = list(hi)
             on_chunk(made[-1])

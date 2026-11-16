@@ -16,6 +16,11 @@ Fixtures are REAL ESPN payloads, trimmed (fetched 2026-10-26, tests/fixtures/nca
                               9th's board and not the 10th's.
   teams.json / groups.json    /teams?groups=50 and the groups listing, trimmed;
                               groups carries Queens, which /teams lacks.
+  summary_401921760.json      summary?event=401921760, trimmed (fetched
+                              2026-11-15): Washington @ Utah, postponed twice
+                              by the 2026-11-13 FAA ground stop and now on
+                              2026-12-06T00:00Z, after the 2026-11-15 board
+                              had dropped it.
 
 The SQL runs on sqlite through a shim that maps %s and NOW() (the module's SQL
 is written to stay inside what both engines accept), so these tests exercise
@@ -49,6 +54,7 @@ BOARD_1103 = _load("scoreboard_2026-11-03.json")
 BOARD_1109 = _load("scoreboard_2025-11-09.json")
 TEAMS = _load("teams.json")
 GROUPS = _load("groups.json")
+SUMMARY_WASH_UTAH = _load("summary_401921760.json")
 
 AFTER_1127 = datetime(2025, 11, 28, 12, 0, tzinfo=timezone.utc)
 
@@ -103,8 +109,9 @@ class LiteConn:
 class Espn:
     """A fake get_json: boards by YYYYMMDD, plus /teams and groups. Records calls."""
 
-    def __init__(self, boards=None):
+    def __init__(self, boards=None, summaries=None):
         self.boards = dict(boards or {})
+        self.summaries = dict(summaries or {})
         self.calls: list[tuple[str, dict]] = []
 
     def __call__(self, url, params):
@@ -115,10 +122,15 @@ class Espn:
             return copy.deepcopy(GROUPS)
         if url == ing.SCOREBOARD_URL:
             return copy.deepcopy(self.boards.get(params["dates"], {"events": []}))
-        raise AssertionError(f"unexpected URL {url}")
+        if url == ing.SUMMARY_URL and params["event"] in self.summaries:
+            return copy.deepcopy(self.summaries[params["event"]])
+        raise AssertionError(f"unexpected URL {url} {params}")
 
     def scoreboard_dates(self):
         return [p["dates"] for u, p in self.calls if u == ing.SCOREBOARD_URL]
+
+    def summary_events(self):
+        return [p["event"] for u, p in self.calls if u == ing.SUMMARY_URL]
 
 
 @pytest.fixture(autouse=True)
@@ -390,6 +402,75 @@ def test_a_postponed_game_records_its_status_and_is_never_due(conn):
                     (BETH_PAC,))
     later = datetime(2026, 11, 4, 18, 0, tzinfo=timezone.utc)
     assert ing.due_dates(conn, "2026-11-04", later) == []
+
+
+WASH_UTAH = "NCAAB_2026-11-15_washington_utah"
+
+
+def _wash_utah_on_the_15th():
+    """The board ESPN showed for 2026-11-15 after the first move: the same
+    event, tipping 19:00Z (noon in Salt Lake City)."""
+    ev = ing.event_from_summary(SUMMARY_WASH_UTAH)
+    ev["date"] = "2026-11-15T19:00Z"
+    ev["competitions"][0]["date"] = "2026-11-15T19:00Z"
+    ev["competitions"][0]["status"] = {"type": {"name": "STATUS_SCHEDULED", "state": "pre",
+                                                "completed": False}}
+    ev["competitions"][0]["venue"] = {**SUMMARY_WASH_UTAH["gameInfo"]["venue"], "indoor": True}
+    return {"events": [ev]}
+
+
+def test_a_game_moved_past_every_window_is_found_by_its_event_id(conn):
+    """Washington @ Utah, 2026-11-15: ESPN moved it to 2026-12-05 and dropped it
+    from the 15th's board. Before the fix the row stayed on the 15th, started
+    and unscored, and a moneyline BET was posted for a game not played."""
+    ing.ingest_day(conn, "2026-11-15", get_json=Espn({"20261115": _wash_utah_on_the_15th()}))
+    assert _game(conn, WASH_UTAH)["commence_time"] == "2026-11-15T19:00:00Z"
+    espn = Espn({"20261115": {"events": []}}, {"401921760": SUMMARY_WASH_UTAH})
+    t = ing.run_results("2026-11-15", now=datetime(2026, 11, 15, 21, 49, tzinfo=timezone.utc),
+                        connect=lambda: conn, get_json=espn, sleep=0)
+    assert espn.scoreboard_dates() == ["20261115"] and espn.summary_events() == ["401921760"]
+    assert t["off_board"] == 1 and t["moved"] == 1 and t["off_board_unresolved"] == 0
+    g = _game(conn, WASH_UTAH)                         # the id still says 11-15
+    assert (g["game_date"], g["commence_time"]) == ("2026-12-05", "2026-12-06T00:00:00Z")
+    assert g["venue_id"] == 2196 and g["home_team"] == "Utah"
+    assert conn.q("SELECT game_id, game_date, status FROM ncaab_events "
+                  "WHERE espn_event_id = 401921760") == \
+        [(WASH_UTAH, "2026-12-05", "STATUS_SCHEDULED")]
+    # no longer a started game, so the next pass asks ESPN nothing
+    assert ing.due_dates(conn, "2026-11-15", datetime(2026, 11, 15, 22, tzinfo=timezone.utc)) == []
+
+
+def test_a_board_that_lists_every_stored_game_asks_for_no_summary(conn):
+    espn = Espn({"20251127": BOARD_1127})
+    ing.ingest_day(conn, "2025-11-27", get_json=espn)
+    ing.ingest_day(conn, "2025-11-27", get_json=espn)
+    assert espn.summary_events() == []
+
+
+def test_a_late_tip_missing_from_its_own_dates_board_is_not_looked_up(conn):
+    """ESPN files a 01:00 ET tip on the previous board (EARLY_TIP_HOUR_ET), so
+    its absence from its own date's board is not a move."""
+    pre = _board_with(BOARD_1109, 401824896, lambda e: e["competitions"][0]["status"].update(
+        {"period": 0, "type": {"name": "STATUS_SCHEDULED", "state": "pre", "completed": False}}))
+    ing.ingest_day(conn, "2025-11-09", get_json=Espn({"20251109": pre}))
+    espn = Espn({"20251110": {"events": []}})
+    t = ing.ingest_day(conn, "2025-11-10", get_json=espn)
+    assert espn.summary_events() == [] and t["off_board"] == 0
+    assert _game(conn, ETAM_HAW)["game_date"] == "2025-11-10"
+
+
+def test_an_unreadable_summary_is_counted_and_the_day_still_runs(conn):
+    ing.ingest_day(conn, "2026-11-15", get_json=Espn({"20261115": _wash_utah_on_the_15th()}))
+    board = copy.deepcopy(BOARD_1103)
+    for e in board["events"]:                          # two other games, same day
+        for d in (e, e["competitions"][0]):
+            d["date"] = "2026-11-15T23:00Z"
+    espn = Espn({"20261115": board})                    # no summary served: it raises
+    t = ing.ingest_day(conn, "2026-11-15", get_json=espn)
+    assert espn.summary_events() == ["401921760"]
+    assert t["off_board"] == 1 and t["off_board_unresolved"] == 1 and t["games_inserted"] == 2
+    assert _game(conn, WASH_UTAH)["game_date"] == "2026-11-15"   # left as stored
+    assert not t["failed"]
 
 
 def test_a_second_event_for_the_same_game_is_refused(conn):

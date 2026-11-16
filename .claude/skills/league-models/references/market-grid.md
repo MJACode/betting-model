@@ -160,6 +160,17 @@ season can be researched.
   Pinnacle). Then closing-line value is measured against the nearest thing,
   and the doc says so.
 
+**Racing's free price routes** (2026-11-15, `docs/sports/racing.md`):
+Betfair Australia publishes the ANZ thoroughbred markets free, with no login,
+as annual zips and monthly CSVs (`betfair-datascientists.github.io/data/
+dataListing/`): one snapshot at the scheduled start, BSP, traded prices to
+the off, results; 132,750 races 2020-01 to 2026-10. Kaggle serves public
+datasets with an unauthenticated GET
+(`kaggle.com/api/v1/datasets/download/{owner}/{slug}`); Hong Kong's final
+pools 1997–2005 and 2014–2017 and UK/Ireland starting prices 1988–2026 are
+there. `scripts/horse/fetch_datasets.py` and `store_files.py` fetch and
+store them. Racing is not on the odds feed.
+
 ## Sport shapes — starting hypotheses, not facts
 
 When a league is new, the closest shape below suggests what to test first.
@@ -206,3 +217,18 @@ define it here when it is built.
   model is easy to build and trails the market (Elo's Brier about 0.215
   against Pinnacle's 0.196 in the published comparison). Settlement differs by
   book on a retirement: grade each book at its own rule.
+- **A field, priced by a pool or an exchange (horse racing).**
+  (`docs/sports/racing.md`, 2026-11-15.) Five to sixteen runners, one
+  winner, dead heats in about 0.3–0.4% of races (they split the stake), and
+  win, place, show, each-way and exotic markets on one race. **The price
+  differs in kind:** a pool pays the final odds, which nobody sees when
+  deciding, after 15–18% is taken; an exchange (Betfair) sells a back price
+  or BSP, net of 5–10% commission on a win; fixed odds exist only at a few
+  books. Grade a pool bet at the final odds and never decide on them. For a
+  US bettor almost every price is a pool (no US exchange since 2020; fixed
+  odds only in New Jersey and Colorado), so an exchange is a reference, not
+  a book. One bet per race per model (two win bets cannot both win). Every
+  free price is a close or one snapshot at the scheduled start, and on those
+  the pools and the exchange are calibrated, the place markets price
+  Harville's bias, and fundamentals added nothing to Hong Kong's final pool.
+  Start a new racing jurisdiction from a pre-off price path, not a model.
