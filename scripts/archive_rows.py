@@ -484,10 +484,21 @@ def check_allowed(table: str, rule: str) -> None:
                          f"{REFUSED.get((table, rule), 'not reviewed')}")
 
 
+DATE_ATTEMPTS = 3
+
+
 def run(copy, conn, table: str, rule: str, start: str, end: str, now: dt.datetime,
-        log=print) -> dict:
+        log=print, connect=None) -> dict:
     """Every ET game date in [start, end]: prepare, then upload and remove when
-    the Storage copy can be made. Without the key it prepares only."""
+    the Storage copy can be made. Without the key it prepares only.
+
+    A dropped connection retries the date on a new one (`connect`). On
+    2026-11-16 the pooler closed the connection on the 40th date (Postgres
+    itself had not restarted). Every step is safe to repeat: prepare
+    rewrites its file and ledger rows, upload overwrites the object and reads
+    it back, and remove skips games already removed."""
+    import psycopg2
+    from data.db import ConnectionLost
     check_allowed(table, rule)
     try:
         _storage()
@@ -498,13 +509,28 @@ def run(copy, conn, table: str, rule: str, start: str, end: str, now: dt.datetim
     d = dt.date.fromisoformat(start)
     out = {"dates": 0, "prepared_rows": 0, "removed_rows": 0, "refused_games": 0}
     while d <= dt.date.fromisoformat(end):
-        p = prepare(copy, conn, table, rule, d.isoformat(), now, log)
+        for attempt in range(1, DATE_ATTEMPTS + 1):
+            try:
+                p = prepare(copy, conn, table, rule, d.isoformat(), now, log)
+                removed = 0
+                if can_store and p["ready"]:
+                    upload(conn, table, rule, d.isoformat(), log)
+                    removed = remove(conn, table, rule, d.isoformat(), now, log)["removed"]
+                break
+            except (ConnectionLost, psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+                if connect is None or attempt == DATE_ATTEMPTS:
+                    raise
+                log(f"{d}: connection lost ({type(exc).__name__}); retrying on a new one "
+                    f"({attempt}/{DATE_ATTEMPTS - 1})")
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                conn = connect()
         out["dates"] += 1
         out["prepared_rows"] += p["rows"]
         out["refused_games"] += len(p["refused"])
-        if can_store and p["ready"]:
-            upload(conn, table, rule, d.isoformat(), log)
-            out["removed_rows"] += remove(conn, table, rule, d.isoformat(), now, log)["removed"]
+        out["removed_rows"] += removed
         d += dt.timedelta(days=1)
     return out
 
@@ -578,7 +604,8 @@ def main(argv=None) -> int:
                 ap.error("--table, --start and --end are required")
             import duckdb
             copy = duckdb.connect(a.copy_db, read_only=True)
-            print(json.dumps(run(copy, conn, a.table, a.rule, a.start, a.end, now)))
+            print(json.dumps(run(copy, conn, a.table, a.rule, a.start, a.end, now,
+                                 connect=get_connection)))
             return 0
         if not (a.table and a.date):
             ap.error("--table and --date are required")

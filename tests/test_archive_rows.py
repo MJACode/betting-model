@@ -165,3 +165,30 @@ def test_a_move_with_a_reader_that_would_break_is_refused(table, rule):
     with pytest.raises(SystemExit, match="may not move yet"):
         ar.check_allowed(table, rule)
     ar.check_allowed("player_prop_odds", "repeat")
+
+
+def test_a_dropped_connection_retries_the_date_on_a_new_one(monkeypatch):
+    from data.db import ConnectionLost
+    calls = []
+
+    def prepare(copy, conn, table, rule, date, now, log):
+        calls.append((conn, date))
+        if conn == "first":
+            raise ConnectionLost("server closed the connection unexpectedly")
+        return {"rows": 5, "refused": [], "ready": 1}
+
+    class Old:
+        def close(self):
+            pass
+    monkeypatch.setattr(ar, "prepare", prepare)
+    monkeypatch.setattr(ar, "_storage", lambda: (_ for _ in ()).throw(RuntimeError("no key")))
+    first = Old()
+    calls.clear()
+    seq = iter(["second"])
+    out = ar.run(None, "first", "player_prop_odds", "repeat", "2026-06-30", "2026-06-30", NOW,
+                 log=lambda *_: None, connect=lambda: next(seq))
+    assert [c for _, c in calls] == ["2026-06-30", "2026-06-30"]
+    assert out["dates"] == 1 and out["prepared_rows"] == 5
+    with pytest.raises(ConnectionLost):
+        ar.run(None, "first", "player_prop_odds", "repeat", "2026-06-30", "2026-06-30", NOW,
+               log=lambda *_: None)
