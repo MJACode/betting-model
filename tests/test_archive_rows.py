@@ -218,10 +218,12 @@ def test_a_statement_timeout_is_not_retried_as_a_dropped_connection(monkeypatch)
 class _Conn:
     """Records every statement; answers the ledger read with `ledger`."""
 
-    def __init__(self, ledger=(), active=0):
+    def __init__(self, ledger=(), active=0, app_s=0.0):
         self.sql = []
         self.ledger = list(ledger)
         self.active = active if callable(active) else (lambda: active)
+        self.app_s = app_s if callable(app_s) else (lambda: app_s)
+        self.lock_free = True
 
     def execute(self, sql, params=None):
         self.sql.append((sql, params))
@@ -234,7 +236,9 @@ class _Conn:
                 return conn.ledger if "FROM archive_batches" in sql else []
 
             def fetchone(self):
-                return (conn.active(),) if "pg_stat_activity" in sql else (0, "0")
+                if "pg_try_advisory_lock" in sql:
+                    return (conn.lock_free,)
+                return (conn.active(), conn.app_s()) if "pg_stat_activity" in sql else (0, "0")
         return R()
 
     def rollback(self):
@@ -410,3 +414,52 @@ def test_a_file_over_the_storage_limit_goes_up_in_parts(tmp_path, monkeypatch):
     st2 = _Storage(limit=12, corrupt="p/2026-09-13.parquet.part-007")
     with pytest.raises(RuntimeError, match="differs"):
         ar.upload_and_check(f, "p/2026-09-13.parquet", storage=(st2, "https://x"))
+
+
+def test_now_mode_runs_in_the_daytime_but_waits_for_slow_app_reads():
+    # mike, 2026-11-16: "why cant you just fuckin run it now". App reads give
+    # up at 8 s, so a removal waits while one has run 2 s.
+    def at(h, m):
+        return dt.datetime(2026, 11, 16, h, m, tzinfo=ar.ET)
+    clock, sleeper, t = _clock(at(18, 40))
+    assert ar.wait_for_quiet(_Conn(), clock, sleeper, log=lambda *_: None, anytime=True) is True
+    assert t[0] == at(18, 40).astimezone(UTC)
+    slow = iter([5.0, 3.1, 0.4])
+    clock, sleeper, t = _clock(at(18, 40))
+    assert ar.wait_for_quiet(_Conn(app_s=lambda: next(slow)), clock, sleeper,
+                             log=lambda *_: None, anytime=True) is True
+    assert t[0] > at(18, 40).astimezone(UTC)
+    # the morning window still closes it: 06:00 waits past 07:16 and the 07:17 refresh
+    clock, sleeper, t = _clock(at(6, 0))
+    assert ar.wait_for_quiet(_Conn(), clock, sleeper, log=lambda *_: None, anytime=True) is True
+    assert t[0] == at(7, 28).astimezone(UTC)
+    # without --now, the daytime is still closed
+    clock, sleeper, t = _clock(at(18, 40))
+    assert ar.wait_for_quiet(_Conn(), clock, sleeper, log=lambda *_: None) is False
+
+
+def test_now_mode_rests_after_each_game_as_long_as_it_took(copy, tmp_path, monkeypatch):
+    day, ledger = _stored(copy, tmp_path, monkeypatch, ["A", "B"])
+    clock, sleeper, t = _clock(dt.datetime(2026, 11, 16, 18, 40, tzinfo=ar.ET))
+    rests = []
+
+    def remove_game(conn, spec, rule, game, want, now):
+        t[0] = t[0] + dt.timedelta(seconds=30)      # each game takes 30 s
+        return want[0]
+
+    def sleep(s):
+        rests.append(s)
+        sleeper(s)
+    monkeypatch.setattr(ar, "remove_game", remove_game)
+    out = ar.remove(_Conn(ledger), "player_prop_odds", "repeat", day, NOW, log=lambda *_: None,
+                    clock=clock, sleeper=sleep, anytime=True)
+    assert out["games"] == 2 and rests == [30.0, 30.0]
+
+
+def test_a_second_removal_run_does_nothing_while_one_is_running(monkeypatch):
+    called = []
+    monkeypatch.setattr(ar, "remove", lambda *a, **k: called.append(a))
+    conn = _Conn([("2026-11-06",)])
+    conn.lock_free = False
+    out = ar.remove_pending(conn, "player_prop_odds", "repeat", NOW, log=lambda *_: None)
+    assert out["stopped"] == "another removal is running" and called == []

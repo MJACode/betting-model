@@ -106,6 +106,15 @@ UTC = dt.timezone.utc
 REMOVE_WINDOW_ET = (dt.time(1, 30), dt.time(5, 30))
 MAX_ACTIVE_OTHERS = 6
 BUSY_SLEEP_S = 20.0
+# `--now` (mike, 2026-11-16: "why cant you just fuckin run it now"): removals at
+# any hour, guarded harder. The app's reads give up at 8 s (role
+# `authenticated`; `anon` at 3 s, measured in pg_roles), so a removal waits
+# while any app read has run APP_READ_LIMIT_S, rests after each game as long as
+# the game took (it holds the disk at most half the time), and still stays out
+# of the :17 refresh and the 05:40-07:16 morning window.
+APP_ROLES = ("authenticator", "authenticated", "anon")
+APP_READ_LIMIT_S = 2.0
+REMOVE_LOCK = 1345_0001   # pg advisory lock key: one removal run at a time
 
 LEDGER_DDL = """
 CREATE TABLE IF NOT EXISTS archive_batches (
@@ -462,16 +471,22 @@ def in_removal_window(t: dt.datetime) -> bool:
     return start <= t.astimezone(ET).time() < end
 
 
-def _active_others(conn) -> int:
-    n = conn.execute("SELECT count(*) FROM pg_stat_activity WHERE state = 'active' "
-                     "AND backend_type = 'client backend' AND pid <> pg_backend_pid()").fetchone()[0]
+def _load(conn) -> tuple[int, float]:
+    """(other statements running, seconds the longest app read has run)."""
+    n, app_s = conn.execute(
+        "SELECT count(*), coalesce(max(extract(epoch FROM now() - query_start)) "
+        "FILTER (WHERE usename = ANY(%s)), 0) FROM pg_stat_activity WHERE state = 'active' "
+        "AND backend_type = 'client backend' AND pid <> pg_backend_pid()",
+        (list(APP_ROLES),)).fetchone()
     conn.rollback()
-    return int(n)
+    return int(n), float(app_s)
 
 
-def wait_for_quiet(conn, clock=None, sleeper=None, log=print) -> bool:
+def wait_for_quiet(conn, clock=None, sleeper=None, log=print, anytime: bool = False) -> bool:
     """True when a removal may start now; False once the night's window is over.
-    Waits out the hourly refresh and a busy database while the window lasts."""
+    Waits out the hourly refresh and a busy database while the window lasts.
+    With `anytime` there is no window: it also waits while an app read has run
+    APP_READ_LIMIT_S, and the morning window counts as closed."""
     import time
     from scripts.local_mirror import closed_until
     clock = clock or (lambda: dt.datetime.now(UTC))
@@ -479,7 +494,7 @@ def wait_for_quiet(conn, clock=None, sleeper=None, log=print) -> bool:
     said = None
     while True:
         t = clock()
-        if not in_removal_window(t):
+        if not anytime and not in_removal_window(t):
             return False
         until = closed_until(t)
         if until is not None:
@@ -488,12 +503,14 @@ def wait_for_quiet(conn, clock=None, sleeper=None, log=print) -> bool:
                 said = "refresh"
             sleeper(max(1.0, (until - t).total_seconds()))
             continue
-        busy = _active_others(conn)
-        if busy > MAX_ACTIVE_OTHERS:
-            if said != "busy":
-                log(f"removals pause: {busy} other statements running (> {MAX_ACTIVE_OTHERS})")
-                said = "busy"
-            sleeper(BUSY_SLEEP_S)
+        busy, app_s = _load(conn)
+        if busy > MAX_ACTIVE_OTHERS or (anytime and app_s >= APP_READ_LIMIT_S):
+            why = (f"an app read has run {app_s:.1f} s" if anytime and app_s >= APP_READ_LIMIT_S
+                   else f"{busy} other statements running (> {MAX_ACTIVE_OTHERS})")
+            if said != why[:12]:
+                log(f"removals pause: {why}")
+                said = why[:12]
+            sleeper(BUSY_SLEEP_S if busy > MAX_ACTIVE_OTHERS else 5.0)
             continue
         return True
 
@@ -569,9 +586,10 @@ def _note(conn, spec: Spec, rule: str, game: str, note: str) -> None:
 
 
 def remove(conn, table: str, rule: str, date: str, now: dt.datetime, log=print,
-           clock=None, sleeper=None) -> dict:
+           clock=None, sleeper=None, anytime: bool = False) -> dict:
     """Remove the date's stored games, one transaction each, in the quiet window
-    only. A game Postgres disagrees on is refused and noted (it is prepared
+    only (with `anytime`, at any hour under the harder guard and resting after
+    each game as long as it took). A game Postgres disagrees on is refused and noted (it is prepared
     again after the next copy); a game that runs past REMOVE_TIMEOUT is noted
     and left for the next night; neither stops the others."""
     spec = SPECS[table]
@@ -596,12 +614,18 @@ def remove(conn, table: str, rule: str, date: str, now: dt.datetime, log=print,
         if back.get(g) != (int(n), int(c)):
             out["skipped"].append((g, "file does not hold the ledger's rows"))
             continue
-        if not wait_for_quiet(conn, clock, sleeper, log):
+        if not wait_for_quiet(conn, clock, sleeper, log, anytime=anytime):
             out["stopped"] = "outside the quiet window"
             break
+        t0 = (clock or (lambda: dt.datetime.now(UTC)))()
         try:
-            out["removed"] += remove_game(conn, spec, rule, g, (int(n), int(c)), now)
+            got = remove_game(conn, spec, rule, g, (int(n), int(c)), now)
+            out["removed"] += got
             out["games"] += 1
+            took = ((clock or (lambda: dt.datetime.now(UTC)))() - t0).total_seconds()
+            log(f"  {g}: {got:,} rows removed in {took:.1f} s")
+            if anytime and took > 0:
+                (sleeper or __import__("time").sleep)(took)
         except RuntimeError as exc:
             _note(conn, spec, rule, g, f"refused at removal: {exc}")
             out["skipped"].append((g, str(exc)))
@@ -621,10 +645,18 @@ def _utc_iso(t: dt.datetime) -> str:
 
 
 def remove_pending(conn, table: str, rule: str, now: dt.datetime, log=print,
-                   clock=None, sleeper=None) -> dict:
+                   clock=None, sleeper=None, anytime: bool = False) -> dict:
     """Every date with a stored copy and a game not yet removed, oldest first,
-    until the quiet window ends."""
+    until the quiet window ends (with `anytime`, until all are done)."""
     check_allowed(table, rule)
+    # One removal at a time: a second run would find the first one's games
+    # already gone and note them refused.
+    got = conn.execute("SELECT pg_try_advisory_lock(%s)", (REMOVE_LOCK,)).fetchone()[0]
+    if not got:
+        conn.rollback()
+        log("another removal is running; nothing done")
+        return {"dates": 0, "removed_rows": 0, "skipped_games": 0,
+                "stopped": "another removal is running"}
     dates = [r[0] for r in conn.execute("""
         SELECT DISTINCT game_date FROM archive_batches
          WHERE table_name = %s AND rule = %s AND stored_at IS NOT NULL AND removed_at IS NULL
@@ -632,13 +664,15 @@ def remove_pending(conn, table: str, rule: str, now: dt.datetime, log=print,
     conn.rollback()
     out = {"dates": 0, "removed_rows": 0, "skipped_games": 0, "stopped": None}
     for date in dates:
-        r = remove(conn, table, rule, date, now, log, clock, sleeper)
+        r = remove(conn, table, rule, date, now, log, clock, sleeper, anytime=anytime)
         out["dates"] += 1
         out["removed_rows"] += r["removed"]
         out["skipped_games"] += len(r["skipped"])
         if r["stopped"]:
             out["stopped"] = r["stopped"]
             break
+    conn.execute("SELECT pg_advisory_unlock(%s)", (REMOVE_LOCK,))
+    conn.rollback()
     return out
 
 
@@ -760,6 +794,9 @@ def main(argv=None) -> int:
                     help="prepare/run: also pick each game in Postgres now (heavy; quiet window)")
     ap.add_argument("--pending", action="store_true",
                     help="remove: every date with a stored copy, until the quiet window ends")
+    ap.add_argument("--now", action="store_true",
+                    help="remove: at any hour, waiting while an app read has run 2 s and "
+                         "resting after each game as long as it took")
     a = ap.parse_args(argv)
     from dotenv import load_dotenv
     load_dotenv(os.environ.get("ARCHIVE_ENV_FILE", DEFAULT_ENV), override=False)
@@ -792,7 +829,22 @@ def main(argv=None) -> int:
         if a.step == "remove" and a.pending:
             if not a.table:
                 ap.error("--table is required")
-            print(json.dumps(remove_pending(conn, a.table, a.rule, now)))
+            # A dropped connection starts the pending list again on a new one
+            # (games already removed are skipped); a timeout is never retried here.
+            import psycopg2
+            for attempt in range(1, DATE_ATTEMPTS + 1):
+                try:
+                    print(json.dumps(remove_pending(conn, a.table, a.rule, now, anytime=a.now)))
+                    break
+                except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+                    if is_timeout(exc) or attempt == DATE_ATTEMPTS:
+                        raise
+                    print(f"connection lost ({type(exc).__name__}); again on a new one", flush=True)
+                    try:
+                        conn.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    conn = get_connection()
             return 0
         if not (a.table and a.date):
             ap.error("--table and --date are required")
