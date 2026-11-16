@@ -355,3 +355,58 @@ def test_no_row_is_removed_outside_the_window(copy, tmp_path, monkeypatch):
     out = ar.remove(_Conn(ledger), "player_prop_odds", "repeat", day, NOW, log=lambda *_: None,
                     clock=clock, sleeper=sleeper)
     assert called == [] and out["stopped"]
+
+
+class _Storage:
+    """Storage that refuses any object over `limit` bytes, like HTTP 413."""
+
+    def __init__(self, limit, corrupt=None):
+        self.objects, self.limit, self.corrupt = {}, limit, corrupt
+
+    def _r(self, code, content=b"", js=None):
+        class R:
+            status_code = code
+            text = ""
+
+            def json(self):
+                return js or {}
+        r = R()
+        r.content = content
+        return r
+
+    def get(self, url, timeout=None):
+        if "/bucket/" in url:
+            return self._r(200, js={"public": False})
+        name = url.split("/object/archive/", 1)[1]
+        body = self.objects.get(name)
+        if body is not None and name == self.corrupt:
+            body = body[:-1] + b"?"
+        return self._r(200 if body is not None else 404, body or b"")
+
+    def post(self, url, data=None, timeout=None, headers=None):
+        body = data if isinstance(data, bytes) else data.read()
+        if len(body) > self.limit:
+            return self._r(400)
+        self.objects[url.split("/object/archive/", 1)[1]] = body
+        return self._r(200)
+
+
+def test_a_file_over_the_storage_limit_goes_up_in_parts(tmp_path, monkeypatch):
+    # 2026-09-13 (70.5 MB) and 2026-09-20 (52.9 MB) were refused whole.
+    monkeypatch.setattr(ar, "PART_BYTES", 10)
+    f = tmp_path / "2026-09-13.parquet"
+    f.write_bytes(bytes(range(256)) * 1)            # 256 bytes, 26 parts of 10
+    st = _Storage(limit=12)
+    digest = ar.upload_and_check(f, "p/2026-09-13.parquet", storage=(st, "https://x"))
+    assert digest == ar.sha256(f)
+    assert sorted(st.objects) == ar.part_names("p/2026-09-13.parquet", 256)
+    assert b"".join(st.objects[n] for n in ar.part_names("p/2026-09-13.parquet", 256)) == f.read_bytes()
+    # a small file stays one object, under its own name
+    small = tmp_path / "small.parquet"
+    small.write_bytes(b"abc")
+    ar.upload_and_check(small, "p/small.parquet", storage=(st, "https://x"))
+    assert st.objects["p/small.parquet"] == b"abc"
+    # one bad byte in one part read back: refused
+    st2 = _Storage(limit=12, corrupt="p/2026-09-13.parquet.part-007")
+    with pytest.raises(RuntimeError, match="differs"):
+        ar.upload_and_check(f, "p/2026-09-13.parquet", storage=(st2, "https://x"))

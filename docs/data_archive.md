@@ -330,6 +330,7 @@ laptop and just keep what was needed in Supabase"*, and of the exact repeats:
 1. The PC copy picks them and writes a Parquet file under `betting_local_copies\archive`.
 2. The file is read back and matches.
 3. It is uploaded to the private Storage bucket `archive` and read back byte for byte.
+   Storage refuses one object over its file-size limit (it refused 52.9 MB and 70.5 MB files on 2026-11-16), so a file over 40 MB goes up in parts (`<file>.part-001`, `-002`, ...). The parts, joined, must hash to the file.
 4. In one transaction, Postgres picks the same rows by the same rule, with the same count and fingerprint.
 5. The ledger `archive_batches` records it.
 

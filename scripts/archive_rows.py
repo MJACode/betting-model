@@ -386,18 +386,42 @@ def ensure_bucket(s, base: str) -> None:
         raise RuntimeError(f"could not create bucket {BUCKET!r}: HTTP {r.status_code} {r.text[:200]}")
 
 
-def upload_and_check(path: Path, obj: str) -> str:
-    """Upload, download again, compare bytes. Returns the file's sha256."""
-    s, base = _storage()
+# Storage refuses one object over the project's file-size limit: on 2026-11-16
+# it took a 23.8 MB file and refused 52.9 MB and 70.5 MB ones with HTTP 413
+# (Supabase's default limit is 50 MB). A larger file goes up in parts of this
+# size, named <object>.part-001, -002, ...; the local file stays whole.
+PART_BYTES = 40 * 2**20
+
+
+def part_names(obj: str, size: int) -> list[str]:
+    if size <= PART_BYTES:
+        return [obj]
+    n = -(-size // PART_BYTES)
+    return [f"{obj}.part-{i:03d}" for i in range(1, n + 1)]
+
+
+def upload_and_check(path: Path, obj: str, storage=None) -> str:
+    """Upload, download again, compare bytes. Returns the file's sha256.
+    A file over PART_BYTES is stored in parts; the parts read back and joined
+    must hash to the file's sha256."""
+    s, base = storage or _storage()
     ensure_bucket(s, base)
     want = sha256(path)
+    names = part_names(obj, path.stat().st_size)
+    got = hashlib.sha256()
     with open(path, "rb") as fh:
-        r = s.post(f"{base}/storage/v1/object/{BUCKET}/{obj}", data=fh, timeout=600,
-                   headers={"content-type": "application/octet-stream", "x-upsert": "true"})
-    if r.status_code not in (200, 201):
-        raise RuntimeError(f"upload of {obj} failed: HTTP {r.status_code} {r.text[:200]}")
-    got = s.get(f"{base}/storage/v1/object/{BUCKET}/{obj}", timeout=600)
-    if got.status_code != 200 or hashlib.sha256(got.content).hexdigest() != want:
+        for name in names:
+            chunk = fh.read(PART_BYTES) if len(names) > 1 else fh.read()
+            r = s.post(f"{base}/storage/v1/object/{BUCKET}/{name}", data=chunk, timeout=600,
+                       headers={"content-type": "application/octet-stream", "x-upsert": "true"})
+            if r.status_code not in (200, 201):
+                raise RuntimeError(f"upload of {name} failed: HTTP {r.status_code} {r.text[:200]}")
+    for name in names:
+        back = s.get(f"{base}/storage/v1/object/{BUCKET}/{name}", timeout=600)
+        if back.status_code != 200:
+            raise RuntimeError(f"{name}: could not read the copy back (HTTP {back.status_code})")
+        got.update(back.content)
+    if got.hexdigest() != want:
         raise RuntimeError(f"{obj}: the copy read back from Storage differs from the file")
     return want
 
