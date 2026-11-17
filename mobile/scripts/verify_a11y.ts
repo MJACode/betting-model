@@ -255,6 +255,8 @@ function expandThemeSpreads(block: string): string {
 
 const a11ySrc = read('src/lib/a11y.ts');
 const ROW_SLOP_PAD = Number(/export const ROW_SLOP_PAD = (\d+);/.exec(a11ySrc)?.[1] ?? NaN);
+// Header-slot views are 36pt tall (iOS 26 glass bubble; stackBack.ts explains).
+const HEADER_ITEM_HEIGHT = Number(/export const HEADER_ITEM_HEIGHT = (\d+);/.exec(read('src/lib/stackBack.ts'))?.[1] ?? NaN);
 const SPACING: Record<string, number> = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
 const MIN_TAP_V = 44;
 function num(v: string): number | null {
@@ -263,6 +265,7 @@ function num(v: string): number | null {
   const s = /^spacing\.(\w+)(?:\s*\+\s*(\d+))?$/.exec(t);
   if (s && SPACING[s[1]] != null) return SPACING[s[1]] + Number(s[2] ?? 0);
   if (t === 'ROW_SLOP_PAD') return ROW_SLOP_PAD;
+  if (t === 'HEADER_ITEM_HEIGHT') return HEADER_ITEM_HEIGHT;
   return null;
 }
 
@@ -297,6 +300,7 @@ function evalExpr(expr: string, consts: Record<string, string>, depth = 0): numb
     else if (/^spacing\.\w+$/.test(term)) v = SPACING[term.slice(8)] ?? null;
     else if (/^font\.size\.\w+$/.test(term)) v = FONT[term.slice(10)] ?? null;
     else if (term === 'ROW_SLOP_PAD') v = ROW_SLOP_PAD;
+    else if (term === 'HEADER_ITEM_HEIGHT') v = HEADER_ITEM_HEIGHT;
     else if (/^\w+$/.test(term) && consts[term] != null) v = evalExpr(consts[term], consts, depth + 1);
     if (v == null) return null;
     total += sign * v;

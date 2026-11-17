@@ -221,3 +221,39 @@ def test_run_card_stops_a_division_i_game_on_a_schedule_not_stored_whole(board, 
     _stub_season(monkeypatch, first)
     out = card.run_card(do_publish=True, now=first + timedelta(minutes=8))
     assert out["bets"] == 1 and out["published"] == 1
+
+
+# ── the best book (mike, 2026-11-16) ─────────────────────────────────────────
+
+def test_other_books_count_only_when_up_at_the_first_post_and_still_standing(board):
+    c = board
+    now = datetime(2027, 1, 11, 0, 13, tzinfo=timezone.utc)
+    _odds(c, "2027-01-11T00:10:00Z", "2027-01-11 00:11:00+00", 125.5)                    # DK's first post
+    _odds(c, "2027-01-11T00:05:00Z", "2027-01-11 00:06:00+00", 124.5, book="fanduel")    # up, still standing
+    _odds(c, "2027-01-11T00:04:00Z", "2027-01-11 00:05:00+00", 124.5, book="betmgm")     # up, then moved
+    _odds(c, "2027-01-11T00:12:00Z", "2027-01-11 00:12:30+00", 126.5, book="betmgm")
+    _odds(c, "2027-01-11T00:11:00Z", "2027-01-11 00:11:30+00", 123.5, book="betrivers")  # posted after DK's first
+    _odds(c, "2027-01-11T00:05:00Z", "2027-01-11 00:06:00+00", 122.5, book="betparx")    # never a book a pick names
+    _odds(c, "2027-01-11T00:05:00Z", "2027-01-11 00:06:00+00", 121.5, book="fanatics", kind="in_play")
+    firsts = card.load_first_posts(c, {GID: {}}, now)
+    got = card.load_other_books(c, firsts, now)
+    assert [(q.book, q.line) for q in got[GID]] == [("fanduel", 124.5)]
+    assert got[GID][0].quote_at == datetime(2027, 1, 11, 0, 5, tzinfo=timezone.utc)
+    assert "draftkings" not in card.other_books() and "betparx" not in card.other_books()
+
+
+def test_run_card_bets_the_best_book_at_the_first_post(board, dsn, monkeypatch):
+    c = board
+    first = datetime(2027, 1, 11, 0, 10, tzinfo=timezone.utc)
+    _odds(c, "2027-01-11T00:10:00Z", "2027-01-11 00:11:00+00", 125.5)
+    _odds(c, "2027-01-11T00:05:00Z", "2027-01-11 00:06:00+00", 123.5, book="fanduel")
+    _stub_season(monkeypatch, first)
+    monkeypatch.setattr(card, "get_connection", lambda: DBConnection(psycopg2.connect(dsn), url=dsn))
+    out = card.run_card(do_publish=True, now=first + timedelta(minutes=3))
+    assert out["bets"] == 1 and out["diag"]["at_other_book"] == 1
+    ((line, quote_at, detail),) = c.execute(
+        "SELECT total_line, quote_at, detail FROM ncaabw_total_decisions").fetchall()
+    assert float(line) == 123.5 and quote_at.startswith("2027-01-11T00:10:00") and "at fanduel" in detail
+    ((book, scored, line_book, dk_odds),) = c.execute(
+        "SELECT decision_book, scored_line, line_book, dk_odds FROM picks").fetchall()
+    assert book == "fanduel" and float(scored) == 123.5 and line_book == "fanduel" and dk_odds is None

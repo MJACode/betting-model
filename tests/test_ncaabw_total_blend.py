@@ -740,7 +740,7 @@ class _ClosingConn:
 
 
 def _card_run(monkeypatch, art, extra_season=None, drop_boxes=(), standing="same", d1=(),
-              keep_games=None):
+              keep_games=None, others=None):
     """run_card over the synthetic season's last game, read through stubs:
     no database. `extra_season` adds a game of that season to the slate;
     `drop_boxes` removes those games' box rows; `standing` is DraftKings'
@@ -780,6 +780,9 @@ def _card_run(monkeypatch, art, extra_season=None, drop_boxes=(), standing="same
              None: lambda x: None}[standing]
     monkeypatch.setattr(card, "load_quotes", lambda conn, g, now: {
         x: now_q(x) for x in g if now_q(x) is not None})
+    # `others(game_id, first_post_time)` -> the other books' standing quotes; none by default
+    monkeypatch.setattr(card, "load_other_books", lambda conn, live, now: {
+        x: others(x, at) for x in live} if others else {})
     import models.scorer as scorer
     monkeypatch.setattr(scorer, "_get_current_bankroll", lambda conn: 1000.0)
     calls = []
@@ -1104,3 +1107,127 @@ def test_publish_counts_only_bets_and_marks_a_none_row_as_no_bet_in_the_ledger()
 def test_the_womens_sport_has_the_same_emoji_as_the_mens():
     from tracking.discord_notifier import _SPORT_EMOJI
     assert _SPORT_EMOJI["NCAABW"] == _SPORT_EMOJI["NCAAB"]
+
+
+# ── the best book (mike, 2026-11-16: "merge 1423") ───────────────────────────
+
+def _other(gid, book, line, at, op=-110, up=-110):
+    import models.ncaabw_total_blend as nb
+    return nb.Quote(game_id=gid, line=line, over_price=op, under_price=up, quote_at=at,
+                    fetched_at=at, book=book)
+
+
+def test_the_best_book_takes_the_bet_and_a_tie_stays_at_draftkings():
+    """At DraftKings' first post every other bettable book's standing total is
+    priced the same way and the bet goes to the largest edge. The moment, the
+    ratings' hour and the cut stay DraftKings'."""
+    import models.ncaabw_total_blend as nb
+    games, box = _season()
+    sg, b = _prepared(games, box)
+    art = _art(sorted(set(sg["home_espn_id"])))
+    t, at = _late_target(sg)
+    gid = t["game_id"].iloc[0]
+    dk = _quote(gid, line=125.5, at=at)
+    (alone,) = nb.decide(t, {gid: dk}, sg, b, art, 0.04)
+    assert alone.status == "bets" and alone.priced.side == "over" and alone.quote.book == "draftkings"
+    # a lower total at FanDuel is a better over: the bet goes there
+    (d,) = nb.decide(t, {gid: dk}, sg, b, art, 0.04, others={gid: [_other(gid, "fanduel", 123.5, at)]})
+    assert d.status == "bets" and d.quote.book == "fanduel" and d.quote.line == 123.5
+    assert d.priced.edge > alone.priced.edge and "at fanduel" in d.detail
+    assert d.extra["dk_quote"] is dk and d.extra["dk_priced"].edge == pytest.approx(alone.priced.edge)
+    assert d.cutoff == alone.cutoff and d.model_total == pytest.approx(alone.model_total)
+    # the same number and prices elsewhere: DraftKings keeps the bet
+    (tie,) = nb.decide(t, {gid: dk}, sg, b, art, 0.04, others={gid: [_other(gid, "betmgm", 125.5, at)]})
+    assert tie.quote.book == "draftkings"
+    # a worse number elsewhere changes nothing
+    (worse,) = nb.decide(t, {gid: dk}, sg, b, art, 0.04, others={gid: [_other(gid, "betmgm", 128.5, at)]})
+    assert worse.quote.book == "draftkings" and worse.priced.edge == pytest.approx(alone.priced.edge)
+
+
+def test_another_books_data_error_is_dropped_and_never_fails_the_run():
+    """A typo total, or an edge above the data-error cap, at another book is
+    dropped: DraftKings' own decision stands and the run does not fail."""
+    import models.ncaabw_total_blend as nb
+    games, box = _season()
+    sg, b = _prepared(games, box)
+    art = _art(sorted(set(sg["home_espn_id"])))
+    t, at = _late_target(sg)
+    gid = t["game_id"].iloc[0]
+    dk = _quote(gid, line=125.5, at=at)
+    (alone,) = nb.decide(t, {gid: dk}, sg, b, art, 0.04)
+    bad = [_other(gid, "fanduel", 1005.0, at), _other(gid, "betmgm", 92.5, at)]
+    (d,) = nb.decide(t, {gid: dk}, sg, b, art, 0.04, others={gid: bad})
+    assert d.status == alone.status == "bets" and d.quote.book == "draftkings"
+    assert "dropped fanduel 1005" in d.detail and "betmgm 92.5" in d.detail
+
+
+def _other_decision(dk_line):
+    import models.ncaabw_total_blend as nb
+    d = _bet_decision()
+    dk = _quote(d.game_id, line=dk_line, op=-115, up=-105)
+    d.quote = _other(d.game_id, "fanduel", 145.5, d.quote.quote_at, op=-108)
+    d.priced = nb.Priced(side="over", prob=0.58, price=-108.0, edge=0.58 - 108 / 208, mean=149.0,
+                         sigma=16.5)
+    d.extra = {"dk_quote": dk, "dk_priced": None}
+    return d
+
+
+def test_a_bet_at_another_book_is_decided_and_settled_there():
+    """decision_* is the book bet. With DraftKings on another number its own
+    columns are empty and line_book names the book (CLAUDE.md 6)."""
+    import scripts.ncaabw_total_card as card
+    rows, refused = card.pick_rows([_other_decision(146.5)], GAMES, 1000.0)
+    assert not refused
+    (r,) = rows
+    assert r["decision_book"] == "fanduel" and r["decision_odds"] == -108.0
+    assert r["decision_edge"] == pytest.approx(0.58 - 108 / 208, abs=1e-4)
+    assert r["line_book"] == "fanduel" and r["dk_odds"] is None and r["dk_implied_prob"] == 0.0
+    assert r["edge"] == 0.0 and r["dk_bet_link"] is None
+    assert r["best_book"] == "fanduel" and r["best_odds"] == -108.0
+    assert r["scored_line"] == 145.5 and r["pick_label"] == "Duke vs Kansas Over 145.5"
+    assert r["signal_type"] == "BET"
+    # every NOT NULL column of production picks is filled (tests/test_inplay_pick_without_draftkings.py)
+    for c in ("model_id", "sport", "game_date", "pick_side", "pick_label", "model_probability",
+              "dk_implied_prob", "edge", "kelly_fraction", "recommended_bet", "bankroll_at_pick"):
+        assert r[c] is not None, c
+
+
+def test_a_bet_at_another_book_on_draftkings_number_keeps_draftkings_price_beside_it():
+    import scripts.ncaabw_total_card as card
+    (r,), _ = card.pick_rows([_other_decision(145.5)], GAMES, 1000.0)
+    assert r["decision_book"] == "fanduel" and r["decision_odds"] == -108.0
+    assert r["line_book"] is None and r["dk_odds"] == -115.0
+    assert r["dk_implied_prob"] == pytest.approx(115 / 215, abs=1e-4)
+
+
+def test_the_card_bets_the_best_book_and_records_the_first_post_as_the_moment(monkeypatch):
+    games, box = _season()
+    sg, _ = _prepared(games, box)
+    art = _art(sorted(set(sg["home_espn_id"])))
+    card, _, now, (_, _, at) = _card_run(
+        monkeypatch, art, others=lambda gid, at: [_other(gid, "fanduel", 123.5, at)])
+    got = []
+    monkeypatch.setattr(card, "publish", lambda conn, rows, decisions, hour, refused:
+                        got.append((rows, decisions)) or (len(rows), len(decisions)))
+    out = card.run_card(do_publish=True, now=now)
+    assert out["bets"] == 1 and out["diag"]["at_other_book"] == 1
+    ((rows, (d,)),) = got
+    assert d.quote.book == "fanduel" and d.extra["dk_quote"].quote_at == at
+    assert rows[0]["decision_book"] == "fanduel" and rows[0]["scored_line"] == 123.5
+    assert rows[0]["line_book"] == "fanduel"
+
+
+def test_the_decision_row_keeps_draftkings_first_post_time(monkeypatch):
+    import scripts.ncaabw_total_card as card
+    import scripts.nfl_wind_publisher as pub
+    monkeypatch.setattr(pub, "_lock_model", lambda conn, model: None)
+    d = _other_decision(146.5)
+    first = d.extra["dk_quote"].quote_at
+    d.quote.quote_at = first + timedelta(hours=-2)       # FanDuel's number was up two hours earlier
+    rows, refused = card.pick_rows([d], GAMES, 1000.0)
+    conn = _Conn()
+    card.publish(conn, rows, [d], datetime(2027, 1, 10, 22, tzinfo=timezone.utc), refused)
+    (led,) = conn.ledger
+    assert led["quote_at"] == first.isoformat() and led["total_line"] == 145.5
+    (pick,) = conn.picks
+    assert pick["decision_book"] == "fanduel"

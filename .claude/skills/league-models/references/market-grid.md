@@ -172,7 +172,8 @@ there. GitHub's raw file host serves nch015's Hong Kong set (2016–2018):
 the win and place pools every 12 minutes, then every 6 inside about 216
 minutes, to about 5.6 minutes before the start; the only free path before
 the off found so far. `scripts/horse/fetch_datasets.py` and `store_files.py`
-fetch and store all of them (the UK zip in 34 parts of 32 MiB). Racing is
+fetch and store all of them (the UK zip in 34 parts of 32 MiB), and the
+worker stores each new Betfair month daily (`scripts/horse/betfair_monthly.py`). Racing is
 not on the odds feed.
 
 ## Sport shapes — starting hypotheses, not facts

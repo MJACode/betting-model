@@ -90,6 +90,29 @@ def first_posts(quotes: pd.DataFrame) -> pd.DataFrame:
     return dk[["game_id", "line", "over_price", "under_price", "quote_ns"]]
 
 
+def others_at_first_post(quotes: pd.DataFrame, dk: pd.DataFrame) -> dict:
+    """Every other bettable book's total standing at DraftKings' first post
+    (THE BEST BOOK, mike 2026-11-16; the card's load_other_books): per game and
+    book, its newest usable row stamped at or before the first post (data
+    errors dropped first, as for DraftKings). -> {game_id: [(book, line, over,
+    under, stamp_ns)]}."""
+    import config
+    books = [b for b in config.BEST_LINE_BOOKMAKERS if b != nb.BOOK]
+    t = quotes[(quotes["market"] == nb.MARKET) & quotes["bookmaker"].isin(books)]
+    t = t.dropna(subset=["total_line", "over_price", "under_price"]).rename(columns={"total_line": "line"})
+    t, _ = qb.split(t, nb.MARKET, "line", ("over_price", "under_price"))
+    t = t.assign(lu_ns=pd.to_datetime(t["last_update"], utc=True).dt.as_unit("ns").astype("int64"))
+    t = t.merge(dk[["game_id", "quote_ns"]], on="game_id")
+    t = t[t["lu_ns"] <= t["quote_ns"]].sort_values(["game_id", "bookmaker", "lu_ns", "snapshot_ts"],
+                                                   kind="stable")
+    t = t.groupby(["game_id", "bookmaker"]).tail(1)
+    out: dict = {}
+    for r in t.itertuples(index=False):
+        out.setdefault(r.game_id, []).append((r.bookmaker, float(r.line), float(r.over_price),
+                                              float(r.under_price), int(r.lu_ns)))
+    return out
+
+
 def load(cache: Path, last: int):
     g = pd.read_parquet(cache / "games.parquet",
                         columns=["game_id", "season", "game_date", "commence_time", "home_score",
@@ -201,28 +224,37 @@ def grade(x: pd.DataFrame) -> dict:
             "price_min": float(x["price"].min()), "price_max": float(x["price"].max())}
 
 
-def score(te: pd.DataFrame, blends: dict) -> pd.DataFrame:
+def score(te: pd.DataFrame, blends: dict, others: dict | None = None) -> pd.DataFrame:
     """Each game of `te` (the model total, DraftKings' first post, the final)
-    priced with its phase's blend, else the all-phase one."""
+    priced with its phase's blend, else the all-phase one; with `others`, at
+    the best book (the largest edge, a tie staying at DraftKings, a data error
+    at another book dropped: models.ncaabw_total_blend.decide's rule)."""
     rows = []
     for r in te.itertuples(index=False):
         b = nb.blend_for(blends, r.game_date)
         if b is None:
             continue
         pz = nb.price(r.pt, r.line, r.over_price, r.under_price, b)
+        book, line = nb.BOOK, r.line
+        for ob, ol, oo, ou, _ in (others or {}).get(r.game_id, ()):
+            po = nb.price(r.pt, ol, oo, ou, b)
+            if qb.edge_problem(po.edge, nb.MODEL_ID):
+                continue
+            if po.edge > pz.edge:
+                pz, book, line = po, ob, ol
         rows.append({"game_id": r.game_id, "season": int(r.season), "game_date": r.game_date,
-                     "total": r.total, "line": r.line, "side": pz.side, "price": pz.price,
+                     "total": r.total, "line": line, "book": book, "side": pz.side, "price": pz.price,
                      "edge": pz.edge, "prob": pz.prob, "min_gp": min(r.ng_h, r.ng_a)})
     return pd.DataFrame(rows)
 
 
-def replay(x: pd.DataFrame, last: int) -> pd.DataFrame:
+def replay(x: pd.DataFrame, last: int, others: dict | None = None) -> pd.DataFrame:
     """Walk-forward: each priced season after the first, on the blend of the
     priced seasons before it."""
     parts = []
     for S in range(PAID_FIRST + 1, last + 1):
         tr = x[(x["season"] >= PAID_FIRST) & (x["season"] < S)]
-        parts.append(score(x[x["season"] == S], nb.fit_blends(tr)))
+        parts.append(score(x[x["season"] == S], nb.fit_blends(tr), others))
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
@@ -246,7 +278,7 @@ def season_artifact(S: int, ends: dict, lg: dict, coefs: dict, x: pd.DataFrame) 
 
 
 def card_path(g: pd.DataFrame, b: pd.DataFrame, dk: pd.DataFrame, ends: dict, lg: dict,
-              coefs: dict, x: pd.DataFrame, seasons, log=print) -> pd.DataFrame:
+              coefs: dict, x: pd.DataFrame, seasons, log=print, others: dict | None = None) -> pd.DataFrame:
     """The card's decision on every priced game of each season in `seasons`:
     nb.decide at the game's first post (the hold, the refit at one cutoff,
     the inputs, the price), with season_artifact()'s numbers, then the card's
@@ -270,13 +302,18 @@ def card_path(g: pd.DataFrame, b: pd.DataFrame, dk: pd.DataFrame, ends: dict, lg
             at = pd.Timestamp(int(r["quote_ns"]), tz="UTC").to_pydatetime()
             quotes[gid] = nb.Quote(game_id=gid, line=float(r["line"]), over_price=float(r["over_price"]),
                                    under_price=float(r["under_price"]), quote_at=at, fetched_at=at)
-        got = nb.decide(sg[sg["game_id"].isin(gids)], quotes, sg, box, art, cut)
+        oq = {gid: [nb.Quote(game_id=gid, line=ol, over_price=oo, under_price=ou,
+                             quote_at=pd.Timestamp(ons, tz="UTC").to_pydatetime(),
+                             fetched_at=pd.Timestamp(ons, tz="UTC").to_pydatetime(), book=ob)
+                    for ob, ol, oo, ou, ons in (others or {}).get(gid, ())] for gid in gids}
+        got = nb.decide(sg[sg["game_id"].isin(gids)], quotes, sg, box, art, cut, others=oq)
         for dcn in got:
             pz = dcn.priced
             row = {"game_id": dcn.game_id, "season": S, "status": dcn.status,
                    "side": pz.side if pz else None, "price": pz.price if pz else None,
                    "edge": pz.edge if pz else None, "prob": pz.prob if pz else None,
-                   "line": dcn.quote.line if dcn.quote else None, "refused": None}
+                   "line": dcn.quote.line if dcn.quote else None,
+                   "book": dcn.quote.book if dcn.quote else None, "refused": None}
             if dcn.status == "bets":
                 if floor is not None and pz.price < floor:
                     row["refused"] = "below_price_floor"
@@ -297,6 +334,7 @@ def match_card_path(cp: pd.DataFrame, sc: pd.DataFrame, bets: pd.DataFrame) -> d
     allg = sc[sc["season"].isin(seasons)].merge(cp[cp["edge"].notna()], on="game_id", suffixes=("", "_card"))
     return {"replay_bets": int(len(rb)), "card_bets": int(len(cb)), "same_game": int(len(both)),
             "same_side": int((both["side"] == both["side_card"]).sum()),
+            "same_book": int((both["book"] == both["book_card"]).sum()) if "book" in both else None,
             "replay_only": sorted(set(rb["game_id"]) - set(cb["game_id"]))[:20],
             "card_only": sorted(set(cb["game_id"]) - set(rb["game_id"]))[:20],
             "refused": cp["refused"].value_counts().to_dict(),
@@ -346,20 +384,26 @@ def main(argv=None) -> None:
     d["rhat"] = rh
     d["pt"] = d["pt_s1"] + d["rhat"].fillna(0.0)
     x = d.merge(dk, on="game_id")
+    # every other bettable book's total standing at the first post (THE BEST BOOK)
+    others = others_at_first_post(pd.read_parquet(a.cache / "pregame_quotes.parquet"), dk)
+    print(f"other books' totals standing at DraftKings' first post: {sum(map(len, others.values()))} "
+          f"on {len(others)} games")
     paid = x[(x["season"] >= PAID_FIRST) & (x["season"] <= last)]
     blend = nb.fit_blends(paid)
     # 1. walk-forward; 2. the first priced season on the later ones; 3. in sample
-    sc = replay(x, last)
+    sc = replay(x, last, others)
     bets = sc[sc["edge"] > CUT] if len(sc) else sc
     later = x[(x["season"] > PAID_FIRST) & (x["season"] <= last)]
-    second = score(x[x["season"] == PAID_FIRST], nb.fit_blends(later)) if len(later) else pd.DataFrame()
-    live = score(paid, blend)
+    second = score(x[x["season"] == PAID_FIRST], nb.fit_blends(later), others) if len(later) else pd.DataFrame()
+    live = score(paid, blend, others)
     live_bets = live[live["edge"] > CUT]
     pooled = pd.concat([bets, second[second["edge"] > CUT]]) if len(second) else bets
     summary = {
         "cut": CUT, "rule": "every priced game, no games-played wait",
         "quote": "DraftKings' first posted total (earliest pre-game row by its own time, "
-                 f"totals outside {list(nb.TOTAL_RANGE)} dropped first)",
+                 f"totals outside {list(nb.TOTAL_RANGE)} dropped first), bet at the best book: "
+                 "every bettable book's total standing at that moment, the largest edge, a tie "
+                 "at DraftKings (mike, 2026-11-16)",
         "priced_games_by_season": {str(int(s)): int(n) for s, n in paid.groupby("season").size().items()},
         "walk_forward": {"what": "each priced season after the first, blend fitted on the priced "
                                  "seasons before it", **grade(bets), "by_season": by_season(bets) if len(bets) else {}},
@@ -390,7 +434,7 @@ def main(argv=None) -> None:
     if spec.lower() != "none":
         lo, _, hi = spec.partition("-")
         seasons = list(range(int(lo), int(hi or lo) + 1))
-        cp = card_path(g, b, dk, ends, lg, coefs, x, seasons)
+        cp = card_path(g, b, dk, ends, lg, coefs, x, seasons, others=others)
         cbets = cp[(cp["status"] == "bets") & cp["refused"].isna()].merge(
             d[["game_id", "total", "game_date"]], on="game_id")
         summary["card_path"] = {"seasons": [seasons[0], seasons[-1]],
@@ -407,7 +451,8 @@ def main(argv=None) -> None:
         "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "command": f"python -m scripts.ncaabw_total_blend_build --last-season {last}",
         "quote_rule": ("DraftKings' first posted full-game total: the earliest pre-game row by its own "
-                       f"time, totals outside {list(nb.TOTAL_RANGE)} dropped first"),
+                       f"time, totals outside {list(nb.TOTAL_RANGE)} dropped first; bet at the best "
+                       "bettable book's total standing at that moment (mike, 2026-11-16)"),
         "params": SETTINGS,
         "possessions": "fga - orb + tov + 0.475 fta, the two teams averaged, every season",
         "end_state": ends[last].to_json(),

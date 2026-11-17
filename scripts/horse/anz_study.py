@@ -43,8 +43,27 @@ NUM = ["WIN_BSP", "PLACE_BSP", "BEST_AVAIL_BACK_AT_SCHEDULED_OFF",
 BANDS = [1.0, 1.5, 2.0, 3.0, 5.0, 8.0, 13.0, 21.0, 51.0, 1001.0]
 
 
+def month_files(paths: list[str]) -> list[str]:
+    """One file per month. The daily store (scripts/horse/betfair_monthly.py) keeps a
+    republished month beside the original as `<stem>.v<UTC stamp>-<sha 8>.csv`;
+    the newest stamp wins, else the original. Two files for one month at the same
+    stamp (two unversioned copies) stop the load rather than count the month twice."""
+    from scripts.horse.betfair_monthly import MONTH_FILE
+    best: dict[tuple[int, int], tuple[str, str]] = {}
+    for p in paths:
+        m = MONTH_FILE.match(Path(p).name)
+        if not m:
+            raise SystemExit(f"{p}: not a Betfair month file name")
+        key, stamp = (int(m.group(1)), int(m.group(2))), m.group(3) or ""
+        if key in best and best[key][0] == stamp:
+            raise SystemExit(f"two copies of {key[0]}-{key[1]:02d}: {best[key][1]} and {p}")
+        if key not in best or stamp > best[key][0]:
+            best[key] = (stamp, p)
+    return [best[k][1] for k in sorted(best)]
+
+
 def load(root: Path = DATA) -> pd.DataFrame:
-    files = sorted(glob.glob(str(root / "betfair-*" / "*.csv")))
+    files = month_files(sorted(glob.glob(str(root / "betfair-*" / "*.csv"))))
     if not files:
         raise SystemExit(f"no Betfair CSVs under {root}")
     parts = []
@@ -62,7 +81,7 @@ def load(root: Path = DATA) -> pd.DataFrame:
     df["date"] = iso.fillna(dmy)
     if df["date"].isna().any():
         raise SystemExit(f"{int(df['date'].isna().sum())} rows with an unreadable date")
-    named = df["file"].str.extract(r"(\d{4})_(\d{2})\.csv$").astype(int)
+    named = df["file"].str.extract(r"_(\d{4})_(\d{2})(?:\.v[0-9TZ]+-[0-9a-f]{8})?\.csv$").astype(int)
     off = (df["date"].dt.year != named[0]) | (df["date"].dt.month != named[1])
     if off.any():
         raise SystemExit(f"{int(off.sum())} rows dated outside their file's month")
