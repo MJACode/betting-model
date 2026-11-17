@@ -160,11 +160,8 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
     """The DDL, the anon role, and the L5 window. Same shape as the scratch
     cluster in tests/test_discord_void_notice.py. Skips only when Postgres
     cannot be started."""
+    import contextlib
     import os
-    import shutil
-    import socket
-    import subprocess
-    import tempfile
 
     psycopg2 = pytest.importorskip("psycopg2")
 
@@ -177,19 +174,14 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
             if os.environ.get("GITHUB_ACTIONS"):
                 pytest.fail("initdb is missing in CI — the scratch Postgres test would skip")
             pytest.skip("LATEST_LINE_TEST_DSN not set and initdb is missing")
-        owned = tempfile.mkdtemp(prefix="nhl-stats-pg-")
-        subprocess.run(
-            [initdb, "-D", owned, "-A", "trust", "--username", "postgres"],
-            check=True, capture_output=True, text=True)
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        sock.close()
-        subprocess.run(
-            [pg_ctl, "-D", owned, "-o", f"-p {port} -k {owned}",
-             "-l", str(Path(owned) / "log"), "-w", "start"],
-            check=True, capture_output=True, text=True)
-        dsn = f"host={owned} port={port} dbname=postgres user=postgres"
+        # tests/_pg.py starts the cluster: UTF-8, trusted, TCP on a free port
+        # on 127.0.0.1, pg_ctl's output to a file. This test used to start
+        # its own with capture_output=True, and on Windows the postmaster
+        # kept that pipe open, so every full run waited forever here (#1445).
+        # `owned` is the ExitStack that stops and deletes the cluster.
+        from tests._pg import scratch_cluster
+        owned = contextlib.ExitStack()
+        dsn = owned.enter_context(scratch_cluster("nhl-stats-pg-"))
 
     conn = None
     try:
@@ -392,7 +384,4 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
         if conn is not None:
             conn.close()
         if owned is not None:
-            subprocess.run(
-                [_pg_bin("pg_ctl"), "-D", owned, "-w", "-m", "immediate", "stop"],
-                check=False, capture_output=True, text=True)
-            shutil.rmtree(owned, ignore_errors=True)
+            owned.close()
