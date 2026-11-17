@@ -12,7 +12,8 @@
  * Pins:
  *   - the token values, and that the bright fills did NOT change;
  *   - every new/changed TEXT token clears 4.5:1 on each ground it is used on
- *     (the app is light-only; there is no dark palette to measure);
+ *     in Light, and every text token in the Dark palette on its Dark grounds
+ *     (Matt, 2026-11-16: dark mode, brand navy);
  *   - the signal badge: ink + ✓/–/✕ glyph per signal, each ≥ 4.5:1 on its wash;
  *   - signed results: "+" / U+2212, zero unsigned, never an ASCII hyphen;
  *   - no white text on a green fill (H6), and no bright bet/avoid/med hue left
@@ -50,11 +51,17 @@ function check(name: string, cond: boolean, detail = '') {
 // ── theme.ts hexes ──────────────────────────────────────────────────────────
 const themeSrc = read('src/lib/theme.ts');
 const brandInk = /const BRAND_INK = '(#[0-9A-Fa-f]{6})'/.exec(themeSrc)?.[1] ?? '';
-const colorsBlock = /export const colors = \{([\s\S]*?)\n\};/.exec(themeSrc)?.[1] ?? '';
-const tok: Record<string, string> = {};
-for (const m of colorsBlock.matchAll(/^\s*(\w+):\s*(?:'(#[0-9A-Fa-f]{6,8})'|(BRAND_INK))/gm)) {
-  tok[m[1]] = (m[2] ?? brandInk).toUpperCase();
+function parsePalette(name: string): Record<string, string> {
+  const block = new RegExp(`const ${name}(?:: [^=]+)? = \\{([\\s\\S]*?)\\n\\};`).exec(themeSrc)?.[1] ?? '';
+  const out: Record<string, string> = {};
+  for (const m of block.matchAll(/^\s*(\w+):\s*(?:'(#[0-9A-Fa-f]{6,8})'|(BRAND_INK))/gm)) {
+    out[m[1]] = (m[2] ?? brandInk).toUpperCase();
+  }
+  return out;
 }
+const tok = parsePalette('lightColors');
+// Dark spreads Light and overrides; the fills it does not override stay put.
+const dark: Record<string, string> = { ...tok, ...parsePalette('darkColors') };
 check('theme colours parsed', Object.keys(tok).length > 30 && brandInk !== '', `${Object.keys(tok).length} tokens`);
 
 // ── WCAG 2.x ────────────────────────────────────────────────────────────────
@@ -147,10 +154,10 @@ const PAIRS: Pair[] = [
   T('textSecondary', 'noneSoft', 'NONE badge, LOW tier, P letter, Preview (H1)'),
   T('pausedInk', 'noneSoft', 'Paused pick chip (designer, #963)'),
   W('textPrimary', 'info', 'parlay "Good" grade (H2)'),
-  T('textPrimary', 'bet', 'SportToggle count on green (H6)'),
-  T('textPrimary', 'med', 'player hit-rate badge on amber (H6 class)'),
-  T('textPrimary', 'avoid', 'player hit-rate badge on red'),
-  T('textPrimary', 'none', 'player hit-rate badge on grey'),
+  T('onBright', 'bet', 'SportToggle count on green (H6)'),
+  T('onBright', 'med', 'player hit-rate badge on amber (H6 class)'),
+  T('onBright', 'avoid', 'player hit-rate badge on red'),
+  T('onBright', 'none', 'player hit-rate badge on grey'),
   T('textInverse', 'tint', 'sportsbook sheet Apply (H6)'),
   // Non-text (WCAG 1.4.11, 3:1): the badge glyph shares the ink, so it clears
   // this by construction; pinned anyway.
@@ -436,14 +443,14 @@ const primaryBtn = read('src/components/PrimaryButton.tsx');
 const applyTag = /<PrimaryButton\s+label="Apply"[\s\S]*?\/>/.exec(sheet)?.[0] ?? '';
 check('Apply fill is tint, not bet green (H6)',
   applyTag !== '' && !/variant=/.test(applyTag) && /primary: \{ backgroundColor: colors\.tint \}/.test(primaryBtn), applyTag.replace(/\s+/g, ' '));
-check('Apply label is textInverse (H6)', /const fg = variant === 'primary' \? colors\.textInverse/.test(primaryBtn));
+check('Apply label is textInverse (H6)', /const fg =\s*variant === 'primary' \? colors\.textInverse/.test(primaryBtn));
 const toggle = read('src/components/SportToggle.tsx');
 const badge = /\n  badge: \{[\s\S]*?\}/.exec(toggle)?.[0] ?? '';
 const badgeText = /badgeText: \{[\s\S]*?\}/.exec(toggle)?.[0] ?? '';
-check('SportToggle count badge: textPrimary on bet (H6)', /colors\.bet\b/.test(badge) && /color: colors\.textPrimary/.test(badgeText));
+check('SportToggle count badge: onBright on bet (H6)', /colors\.bet\b/.test(badge) && /color: colors\.onBright/.test(badgeText));
 check('SportToggle muted label has no extra opacity (M17)', !/labelMuted: \{[^}]*opacity/.test(toggle));
 const player = read('src/screens/PlayerStatsScreen.tsx');
-check('player hit-rate badge text is dark on its bright fill', /hitBadgeText: \{[^}]*color: colors\.textPrimary/.test(player));
+check('player hit-rate badge text is dark on its bright fill', /hitBadgeText: \{[^}]*color: colors\.onBright/.test(player));
 // Tracking / In slip ON state: outlined in tint + checkmark, never green
 // (UX_REVIEW §2: green means only "good for the user").
 const trackSrc = read('src/components/TrackButton.tsx');
@@ -462,6 +469,64 @@ check(
 check('PickCard tier chip is BET-only (M6)', /showTier = [^;]*pick\.signal_type === 'BET'/.test(read('src/components/PickCard.tsx')));
 const scan = read('scripts/ux_scan.mts');
 check('ux_scan reads short hex, rgb() and App.tsx (L3)', /shortRe/.test(scan) && /rgbRe/.test(scan) && /APP_ROOT_FILE/.test(scan));
+
+// ── Dark palette (Matt, 2026-11-16) ─────────────────────────────────────────
+check('dark palette parsed and overrides the grounds', dark.bg === '#0B1220' && dark.bgCard !== tok.bgCard && dark.textPrimary !== tok.textPrimary);
+check('dark keeps the bright fills', ['bet', 'avoid', 'med', 'brand', 'bookDraftKings'].every((k) => dark[k] === tok[k]));
+check('chrome / bright-fill content is the same in both themes', ['onChrome', 'onChromeSecondary', 'onBright', 'brandNavy'].every((k) => dark[k] === tok[k]));
+check('Light onChrome is the old textInverse (Light unchanged)', tok.onChrome === tok.textInverse);
+const D = (fg: string, bgName: string, where: string, min = 4.5) => {
+  const r = ratio(dark[fg], dark[bgName]);
+  check(`DARK ${fg} on ${bgName} ≥ ${min}:1 — ${where}`, r >= min, r.toFixed(2));
+};
+for (const b of ['bg', 'bgCard', 'bgElevated']) {
+  D('textPrimary', b, 'body text');
+  D('textSecondary', b, 'secondary text');
+  D('textTertiary', b, 'tertiary text');
+  D('tint', b, 'links, selection, outlined controls');
+  D('betInk', b, 'gain text');
+  D('avoidInk', b, 'loss / error text');
+  D('medInk', b, 'caution text');
+}
+for (const b of ['noneSoft', 'betSoft', 'avoidSoft', 'medSoft']) D('textTertiary', b, 'secondary text on washes');
+D('textSecondary', 'noneSoft', 'NONE badge');
+D('pausedInk', 'noneSoft', 'Paused chip');
+D('betInk', 'betSoft', 'BET badge');
+D('avoidInk', 'avoidSoft', 'AVOID badge');
+D('medInk', 'medSoft', 'MED tier');
+D('tint', 'tintSoft', 'Slip / Track selected');
+D('textInverse', 'tint', 'label on a primary (amber) button');
+D('textInverse', 'avoidInk', 'Delete account button label');
+D('textInverse', 'betInk', 'Best price pill label');
+D('onBright', 'bet', 'count on green');
+D('onBright', 'bookDraftKings', 'DraftKings chip label');
+D('onChrome', 'brandNavy', 'text on navy chrome');
+D('onChrome', 'brandNavyRaised', 'betslip bar text');
+for (const g of ['gradeGood', 'gradeMid', 'gradeBad']) D(g, 'bgCard', 'matchup / hit-rate ramp');
+check('DARK grade ramp lightness falls good -> mid -> bad', lum(dark.gradeGood) > lum(dark.gradeMid) && lum(dark.gradeMid) > lum(dark.gradeBad));
+check('DARK tertiary is quieter than secondary', lum(dark.textTertiary) < lum(dark.pausedInk) && lum(dark.pausedInk) < lum(dark.textSecondary));
+D('switchTrackOff', 'bgCard', 'switch OFF track (non-text)', 3);
+D('textPrimary', 'bgCard', 'secondary PrimaryButton label (UX review blocker)');
+D('onChrome', 'chromeSurface', 'BYOM count bar, lock card title, Unlock Discord button');
+D('brandMuted', 'chromeSurface', 'BYOM count bar kickers');
+D('positive', 'chromeSurface', 'BYOM units, gain (bright on navy)');
+D('negative', 'chromeSurface', 'BYOM units, loss (bright on navy)');
+// The token rows above only hold if the code uses these tokens (UX review 2026-11-16).
+const pb = read('src/components/PrimaryButton.tsx');
+check('secondary PrimaryButton label is textPrimary, not brandInk', /variant === 'brand' \? colors\.brandInk : colors\.textPrimary/.test(pb));
+const byom = read('src/components/byom/ByomBetCount.tsx');
+check('BYOM count bar is chromeSurface, not tint', /bar: \{\s*backgroundColor: colors\.chromeSurface/.test(byom));
+check('SavedParlays Undo link is the banner ink', /undoAction: \{\s*color: colors\.bg,/.test(read('src/screens/SavedParlaysScreen.tsx')));
+D('bg', 'textPrimary', 'Undo link on the inverted SavedParlays banner');
+D('onBright', 'onChrome', 'fallback Apple button label');
+check('DARK chrome surfaces stand off the page', ratio(dark.chromeSurface, dark.bg) > ratio(dark.brandNavy, dark.bg));
+check('DARK the lock-card well stands off its card', dark.chromeSurfaceRaised !== dark.chromeSurface);
+check('Light chrome surfaces are the old navy (Light unchanged)', tok.chromeSurface === tok.brandNavy && tok.chromeSurfaceRaised === tok.brandNavyRaised);
+for (const s of ['BET', 'NONE', 'AVOID'] as const) {
+  const spec = SIGNAL_BADGE[s];
+  const r = ratio(dark[spec.ink], dark[spec.fill]);
+  check(`DARK badge ${s}: ${spec.ink} on ${spec.fill} ≥ 4.5:1`, r >= 4.5, r.toFixed(2));
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

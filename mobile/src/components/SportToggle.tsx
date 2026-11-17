@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.nano,
     lineHeight: 13,
     fontWeight: font.weight.bold,
-    color: colors.textPrimary,
+    color: colors.onBright,
   },
   segment: {
     paddingHorizontal: spacing.md,

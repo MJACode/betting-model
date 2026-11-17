@@ -238,7 +238,7 @@ function SavedParlayCard({
       onPress={onDelete}
       style={({ pressed }) => [styles.swipeDelete, pressed && styles.pressed]}
     >
-      <Ionicons name="trash-outline" size={22} color={colors.textInverse} />
+      <Ionicons name="trash-outline" size={22} color={colors.onChrome} />
       <Text style={styles.swipeDeleteText}>Delete</Text>
     </Pressable>
   );
@@ -406,8 +406,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.medium,
   },
+  // The banner's own ink: tint was near-black on this black banner in Light
+  // (1.1:1) and amber on a white one in Dark (1.73:1). The underline is the
+  // affordance (UX review, 2026-11-16).
   undoAction: {
-    color: colors.tint,
+    color: colors.bg,
     textDecorationLine: 'underline',
     fontSize: font.size.callout,
     // The underline is the affordance; bold on top of it made a three-second
@@ -434,7 +437,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: radii.md,
   },
   swipeDeleteText: {
-    color: colors.textInverse,
+    color: colors.onChrome,
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
   },
