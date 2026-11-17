@@ -68,7 +68,7 @@ search engine's excerpt, are in `docs/horse_racing_scout_us_outlets.md`.
 | DraftKings Racing (DK Horse) | pool (pari-mutuel); joining the host track's pool rests on a search excerpt only | UK, Ireland, Japan, Dubai, Australia, Sweden, Korea; **Hong Kong disputed** (one page lists it, one does not) |
 | FanDuel Racing (formerly TVG) | pool | Australia (~120 tracks), France (~90), UK (~75), Hong Kong (Sha Tin), Japan (local-government tracks; JRA not confirmed), New Zealand and more. Began betting into **commingled Hong Kong Jockey Club pools** on 2014-03-31 (DRF); whether it still commingles in 2026 was not confirmed |
 | Xpressbet (1/ST BET) | pool | Hong Kong (both tracks, offered in 2026, blocked in Arizona; commingled HKJC pools from 2014-07-01, per a 2014 announcement; 2026 not confirmed), Japan (local-government only), Australia, New Zealand, UK, Ireland, France and more |
-| Off Track Betting (offtrackbetting.com) | pool | Sha Tin and Happy Valley results published in 2026; **its $2 payouts equal the Club's dividends** (measured 2026-11-17); which states it takes bets in was not checked |
+| Off Track Betting (offtrackbetting.com) | pool | Sha Tin and Happy Valley, in "co-mingled pools" (its own undated page); **its published $2 payouts equal the Club's dividends** (measured 2026-11-17); which states it takes bets in was not checked |
 | TwinSpires, NYRA Bets, AmWager, BetMGM Racing, Caesars Racebook | pool | wide lists; TwinSpires' own pages did not open (search excerpts only) |
 | bet365 (Colorado, New Jersey) | **fixed odds** | about 140 tracks in Colorado, mostly Australian, UK and Irish |
 | MonmouthBets (New Jersey) | fixed odds | five US tracks (2023 list) |
@@ -97,22 +97,23 @@ everywhere: unknown when the pick is made, paid at the final odds, after
 15–18% has been taken. The Betfair exchange is a reference here, not a book a
 pick could name. Hong Kong is the one jurisdiction where the free files hold
 the pool a US outlet sells.
-**US Hong Kong payouts are the Club's own dividends (measured
-2026-11-17).** For the Sha Tin card of 2026-11-14 and the Happy Valley card
-of 2026-11-11, Off Track Betting (a US online wagering site) published $2
-payouts, and all 77 win and place payouts equal the Club's dividend per
-HK$10 divided by five, to the cent. So do the 7 exotic payouts checked. One
-of the place payouts is $2.02: the Club's HK$10.10 dividend passed straight
-through, not a separately rounded US figure. A separate US pool would pay
-its own amounts. Which other US outlets pool the same way, and how late any
-of them takes a Hong Kong bet, are still not established
+**A US site that takes Hong Kong bets publishes the Club's own dividends
+(measured 2026-11-17).** Off Track Betting, a US online wagering site, says
+on its own Hong Kong page (undated) that its customers can bet Sha Tin and
+Happy Valley, and calls the pools co-mingled. For the Sha Tin card of
+2026-11-14 and the Happy Valley card of 2026-11-11, all 77 win and place
+payouts it published equal the Club's dividend per HK$10 divided by five,
+to the cent, and so do the 7 exotic payouts checked. One place payout is
+$2.02: the Club's HK$10.10 passed straight through. What was not measured:
+a settled bet (that needs an account), which other US outlets pool the same
+way, and how late any of them takes a Hong Kong bet
 (`docs/horse_racing_scout_us_outlets.md`, "Measured, 2026-11-17").
 
 ## The market grid
 
 | Market | Settles on | Inputs held | Prices | Baseline | Methods tried | Result | Status |
 |---|---|---|---|---|---|---|---|
-| Win, Hong Kong pools (offered by US outlets in 2026; a US site's payouts equal the Club's dividends, measured 2026-11-17) | official first; a dead heat splits | runner facts 1979–2018 | final pool odds 1997–2005 and 2014–2017; **the pool before the off, 2016–2018** (to about 5.6 minutes out) | every band −13% to −28%, longshots −48% to −54%; favourite −16.7% and −14.2% | pool calibration; Bolton–Chapman fundamentals; Benter blend against the final pool and against the pool 5–12 minutes out; late money (six lead pairs); removal of each feature group; split by meeting | decided before the off and paid at the dividend: every runner −19.2% to −19.6% at every lead; the form model carries a little against the pool before the off (`b` +0.14 to +0.21) and none against the close, and its bets lose; 183 bet sets, none with an interval above zero | **nothing clears** (audit §3, §3b, §7) |
+| Win, Hong Kong pools (offered by US outlets in 2026; one US site's published payouts equal the Club's dividends, measured 2026-11-17) | official first; a dead heat splits | runner facts 1979–2018 | final pool odds 1997–2005 and 2014–2017; **the pool before the off, 2016–2018** (to about 5.6 minutes out) | every band −13% to −28%, longshots −48% to −54%; favourite −16.7% and −14.2% | pool calibration; Bolton–Chapman fundamentals; Benter blend against the final pool and against the pool 5–12 minutes out; late money (six lead pairs); removal of each feature group; split by meeting | decided before the off and paid at the dividend: every runner −19.2% to −19.6% at every lead; the form model carries a little against the pool before the off (`b` +0.14 to +0.21) and none against the close, and its bets lose; 183 bet sets, none with an interval above zero | **nothing clears** (audit §3, §3b, §7) |
 | Place, Hong Kong pools | first three (7+ runners) | the same | final place odds | −18.4% betting every runner | Harville against the win pool (the "Dr Z" test), raw and calibrated, on final pools and on both pools before the off; by field size | before the off, graded 2017/18: −7.6% to −36.9% at every lead and cut; every field size loses | **nothing clears** (audit §3a, §7a) |
 | Win, Australia and New Zealand (Betfair exchange; not bettable from the US) | Betfair's result; a dead heat splits | prices only, no form | scheduled-start back and lay, BSP, 2020-01 to 2026-10 | every band negative net of commission (−0.70% to −12.6% at BSP); the favourite negative every year | price bands at two prices; favourites by year and by track size; BSP against the back; a logit on the scheduled-start prices | audit §4, §4b | **nothing clears** |
 | Place, Australia and New Zealand (Betfair) | Betfair's place market (2 or 3 places) | the same | place BSP | negative in every Harville band net | Harville raw and discounted; a calibrated rule with a predicted place BSP; split by field size | every year negative net; the best gross cut −0.09% | **nothing clears** (audit §4a) |
@@ -145,11 +146,16 @@ the audit, §5.
    it polled about every minute in 2021-12-08 to 2023-09-27, 2024-01-31 to
    2024-07-14 and from 2026-05-28, and about every 5 minutes in between (then
    "the price 1 minute before post time is usually the one from 5 minutes
-   before"). 18 meetings have no odds at all. Two things had to be true
-   before buying it. The first is now measured: US Hong Kong payouts are
-   the Club's own dividends (above). The second is not: how late a US
-   outlet takes the bet. That only matters if the archive's test clears, so
-   it is checked after the test, not before. The UK and Irish files point the same way (audit §8): against
+   before"). Only the one-minute spans can test a decision 1–2 minutes
+   out. 18 meetings have no odds at all. The archive holds odds; the
+   results, dividends and runner facts for those years (stored Hong Kong
+   files end in 2018) come from the Club's own results pages, which load by
+   date for 2019 and 2022 meetings as well as 2026 (checked 2026-11-17).
+   Two things had to be true before buying it. The first is now measured as
+   far as it can be without an account: a US site that takes Hong Kong bets
+   publishes the Club's own dividends (above). The second is not: how late a
+   US outlet takes the bet. That only matters if the archive's test clears,
+   so it is checked after the test, not before. The UK and Irish files point the same way (audit §8): against
    the starting price, a form model has added about nothing since 2022, and
    the files hold no earlier price to test it against.
 2. **A sharp price against the pool**, the mechanism that has worked most
@@ -185,7 +191,7 @@ set.
 - Each new Betfair ANZ month is stored by the worker, daily at 10:43 ET
   (`scripts/horse/betfair_monthly.py`; `docs/cloud_worker.md`). Issue #1371
   closes when the job stores its first new month, the 2026-11 file.
-- Buying the Hong Kong odds archive (US$499, one payment) to test a decision
+- Buying the Hong Kong odds archive (US$499, one payment; issue #1442) to test a decision
   1–2 minutes before the off, paid at the Club's dividend: a decision for
   mike. The pooling check it waited on passed on 2026-11-17.
 - A US pool series and Betfair's own history: behind a purchase or an

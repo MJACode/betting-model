@@ -116,12 +116,21 @@ with no separate US rounding. The US quinella and quinella place are sold
 at a $0.20 stake and pay the Club's HK$10 dividend divided by fifty
 ($7.35 against HK$367.50).
 
-**What this settles.** Hong Kong payouts published by a US wagering site in
-November 2026 are the Club's own dividends, so the Hong Kong pool files
-(and the archive the racing doc names) describe the price a US bettor is
-paid.
+**Does the site take Hong Kong bets?** Its own page
+(offtrackbetting.com/hong-kong-jockey-club/, undated, read 2026-11-17) says
+its customers can watch and bet Sha Tin and Happy Valley, and calls the
+pools "co-mingled".
 
-**What it does not.** It is one site. Xpressbet's results page did not open
-("Oops, there is nothing here!", 2026-11-17), and the others were not
-checked. Which states Off Track Betting serves, and how late any US outlet
-takes a Hong Kong bet, are still not established.
+**What this settles.** A US wagering site that takes Hong Kong bets
+publishes, for November 2026, the Club's own dividends as its payouts. So
+the Hong Kong pool files (and the archive the racing doc names) describe the
+price that site's customers are shown as paid.
+
+**What it does not.** No bet was placed, so a settled payout was not seen
+(that needs an account). A results feed that converts the host's dividends
+would print the same figures, so the page alone cannot rule that out; the
+site's own "co-mingled" statement is what points to pooling. It is one
+site: Xpressbet's results page did not open ("Oops, there is nothing
+here!", 2026-11-17), and the others were not checked. Which states Off Track
+Betting serves, and how late any US outlet takes a Hong Kong bet, are still
+not established.

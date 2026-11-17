@@ -19,7 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, horse racing: a US site's Hong Kong payouts equal the Jockey Club's dividends (77 of 77 win and place, 7 of 7 exotics, two cards); the US$499 archive is mike's call |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, horse racing: a US site that takes Hong Kong bets publishes the Jockey Club's own dividends (77 of 77 win and place, 7 of 7 exotics, two cards); the US$499 archive is mike's call |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: a daily worker job stores each new Betfair ANZ month (never overwrites, reads every row back); run against production, 0 to fetch (#1371) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord book name links to /pick/<id> on the worker; the page opens the app book sheet or lists the books |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, women's totals model bets the best book at DraftKings' first post (435 bets +39.12 units vs 402 +29.96 in 2025-26; card matches replay bet for bet) |
