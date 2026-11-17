@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._node import NODE
+
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 
@@ -128,9 +130,12 @@ def test_landing_record_row_is_hidden_until_the_live_view_loads(tmp_path):
     assert "service_role" not in config["supabaseAnonKey"]
 
 
+# NODE, not a bare "node": this PC has no system node, only the pip wheel's
+# (tests/_node.py), and a bare name raised FileNotFoundError instead of running.
+@pytest.mark.skipif(NODE is None, reason="node not available")
 def test_record_math_matches_the_node_suite():
     completed = subprocess.run(
-        ["node", "--test", "src/record-math.test.mjs"],
+        [NODE, "--test", "src/record-math.test.mjs"],
         cwd=WEB,
         check=False,
         capture_output=True,

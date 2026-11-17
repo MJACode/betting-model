@@ -171,6 +171,15 @@ class FakeConn:
         pass
 
 
+def _frozen_datetime(at: datetime) -> type:
+    """datetime, with now() pinned to `at`."""
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return at if tz is None else at.astimezone(tz)
+    return Frozen
+
+
 class World:
     def __init__(self, monkeypatch, *, now, games=None, events=None, bodies=None, left=4_000_000,
                  burn=120_000, last=None):
@@ -182,6 +191,11 @@ class World:
         self.bodies = {"ev1": {"bookmakers": [_book("fanduel", spreads=[(-3.5, -110, -110)])]}} \
             if bodies is None else bodies
         m = monkeypatch
+        # The fetch re-reads the wall clock before each call, so a game that
+        # tips while earlier calls run is not bought. Freeze that clock at
+        # `now`: with the real one, every fixture here (tip 2026-11-11 00:00Z)
+        # reads as tipped once that date has passed, and nothing is fetched.
+        m.setattr(feed, "datetime", _frozen_datetime(now))
         m.setattr(feed, "ensure_ledger", lambda conn: None)
         m.setattr(feed, "_known_games", lambda conn, ids: {g: v for g, v in games.items() if g in ids})
         m.setattr(feed, "last_fetches", lambda conn, ids, now=None, ok_only=True: dict(last or {}))

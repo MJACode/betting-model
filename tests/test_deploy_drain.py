@@ -277,6 +277,11 @@ def test_the_daily_start_blocks_even_when_the_ledger_is_clear():
     assert block
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows has no catchable SIGTERM: Popen.send_signal(SIGTERM) is "
+           "TerminateProcess, so the child's handler never runs. The drain is "
+           "for the Linux Railway worker; PR CI runs this file on Linux.")
 def test_sigterm_is_forwarded_and_the_child_finishes_its_step(tmp_path):
     out = tmp_path / "out"
     script = tmp_path / "child.py"

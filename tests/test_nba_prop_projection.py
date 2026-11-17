@@ -599,7 +599,9 @@ def test_the_posting_run_sends_every_near_tip_pick_over_the_cap(monkeypatch):
     monkeypatch.setattr(dn, "_new_signals", lambda conn, d: sigs)
     monkeypatch.setattr(dn, "refuse_mismatched", lambda s, where: s)
     monkeypatch.setattr(dn, "_webhook_for_sport", lambda sport: "https://example.invalid/hook")
-    monkeypatch.setattr(dn, "_post_picks", lambda url, sport, group, d: sent.extend(group) or [(group, "m1")])
+    # **kw: _post_picks takes conn= since #1379 (2026-11-15), for the matchup link.
+    monkeypatch.setattr(dn, "_post_picks",
+                        lambda url, sport, group, d, **kw: sent.extend(group) or [(group, "m1")])
 
     class _C:
         def execute(self, *a, **k):

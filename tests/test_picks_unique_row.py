@@ -159,4 +159,8 @@ def test_the_card_insert_tolerates_the_unique_index():
     DAL@NYG failure. Dropping the copy is the safe direction."""
     src = (ROOT / "scripts" / "nfl_prop_market_card.py").read_text(encoding="utf-8")
     i = src.index("INSERT INTO picks (")
-    assert "ON CONFLICT DO NOTHING" in src[i:i + 1000]   # widened 2026-09-19: +model_probability_cal
+    # The whole statement, up to the closing quotes of its string. A fixed
+    # character window broke twice as columns were added (model_probability_cal
+    # 2026-09-19, the decision_* columns after it).
+    statement = src[i:src.index('"""', i)]
+    assert "ON CONFLICT DO NOTHING" in statement
