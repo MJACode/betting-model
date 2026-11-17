@@ -57,6 +57,7 @@ import {
   type ByomPropSide,
   type ByomSport, asByomSport, byomUsesRest, gameMarketLabel } from '@/lib/byomRecord';
 import { EMPTY_PROP_FILTERS, type ByomPropFilterState } from '@/lib/byomPropFilters';
+import { HEADER_ITEM_HEIGHT } from '@/lib/stackBack';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -110,6 +111,7 @@ export function ByomBuilderScreen() {
           onPress={() => navigation.goBack()}
           accessibilityRole="button"
           accessibilityLabel="Cancel"
+          hitSlop={{ top: 4, bottom: 4 }}
           style={styles.headerBtn}
         >
           <Text style={styles.headerBtnText}>Cancel</Text>
@@ -533,8 +535,10 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
   },
+  // 36 tall, not 44: the header-slot height (HEADER_ITEM_HEIGHT explains).
+  // hitSlop makes up the 44pt target.
   headerBtn: {
-    minHeight: 44,
+    height: HEADER_ITEM_HEIGHT,
     justifyContent: 'center',
     paddingHorizontal: spacing.sm,
   },

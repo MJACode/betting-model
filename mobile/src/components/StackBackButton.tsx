@@ -6,7 +6,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { noteBack } from '@/lib/freezeLog';
 import {
+  HEADER_ITEM_HEIGHT,
   PLAYER_DETAIL_PARENT,
+  backChevronSize,
   playerTitleMaxWidth,
   settingsTitleMaxWidth,
   stackBackDecision,
@@ -73,8 +75,11 @@ export function PlayerStatsHeaderTitle({
  * "Back" word). Below iOS 26 there is no bubble and it is a bare chevron.
  * VoiceOver still reads "Back". Supersedes the chevron + "Back" of #1239.
  *
- * 44pt is the floor. hitSlop grows the target inside the bar; it does not
- * reach down into the title. zIndex / elevation order the button inside its
+ * A 36pt square, not 44 (2026-11-17): on iOS 26+ UIKit fits a header view
+ * into 36pt and react-native-screens 4.16 does not re-center our content, so
+ * a 44pt square drew the chevron 4pt low in its bubble (HEADER_ITEM_HEIGHT).
+ * hitSlop takes the target to 52 x 52 (12 above, 4 below, 8 a side); it stays
+ * inside the bar and does not reach down into the title. zIndex / elevation order the button inside its
  * own header slot. The title width is what keeps a long name off it — the
  * title is a UIKit label, and a React zIndex does not paint over that.
  */
@@ -87,7 +92,7 @@ type BackPath = 'pop' | 'replace' | 'reset';
  */
 function BackPill({ decide, go }: { decide: () => BackPath; go: (path: BackPath) => void }) {
   const { fontScale } = useWindowDimensions();
-  const icon = Math.round(22 * Math.min(Math.max(fontScale, 1), 2));
+  const icon = backChevronSize(fontScale);
   return (
     <Pressable
       onPress={() => {
@@ -97,7 +102,7 @@ function BackPill({ decide, go }: { decide: () => BackPath; go: (path: BackPath)
       }}
       accessibilityRole="button"
       accessibilityLabel="Back"
-      hitSlop={{ top: 12, bottom: 0, left: 8, right: 8 }}
+      hitSlop={{ top: 12, bottom: 4, left: 8, right: 8 }}
       style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
     >
       <Ionicons name="chevron-back" size={icon} color={colors.tint} />
@@ -169,8 +174,8 @@ const styles = StyleSheet.create({
   pill: {
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 44,
-    minHeight: 44,
+    width: HEADER_ITEM_HEIGHT,
+    height: HEADER_ITEM_HEIGHT,
     zIndex: 20,
     elevation: 20,
   },

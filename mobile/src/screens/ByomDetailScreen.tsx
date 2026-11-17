@@ -23,6 +23,7 @@ import { byomBetsAvailable, deleteByomModel } from '@/lib/byom';
 import { friendlyCause, isAbortError } from '@/lib/errors';
 import { isPropMarket, isWholeSeason, marketLabel, showsUnits, byomEmptyLabel, type ByomSport, asByomSport } from '@/lib/byomRecord';
 import { propFilterSummary } from '@/lib/byomPropFilters';
+import { HEADER_ITEM_HEIGHT } from '@/lib/stackBack';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -56,6 +57,7 @@ export function ByomDetailScreen() {
           onPress={() => navigation.navigate('ByomEdit', { modelId })}
           accessibilityRole="button"
           accessibilityLabel={`Edit ${model.name}`}
+          hitSlop={{ top: 4, bottom: 4 }}
           style={styles.headerBtn}
         >
           <Text style={styles.headerBtnText}>Edit</Text>
@@ -193,8 +195,10 @@ const styles = StyleSheet.create({
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
   },
+  // 36 tall, not 44: the header-slot height (HEADER_ITEM_HEIGHT explains).
+  // hitSlop makes up the 44pt target.
   headerBtn: {
-    minHeight: 44,
+    height: HEADER_ITEM_HEIGHT,
     justifyContent: 'center',
     paddingHorizontal: spacing.sm,
   },

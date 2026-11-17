@@ -68,14 +68,31 @@ check(
   'the player name is textPrimary, not the header tint',
   /color:\s*colors\.textPrimary/.test(titleStyle) && !/color:\s*tintColor/.test(code(pill)),
 );
-check('the pill is at least 44pt wide and tall', /minWidth:\s*44/.test(pill) && /minHeight:\s*44/.test(pill));
+// 2026-11-17: 36pt, not 44. On iOS 26+ UIKit fits a header view into 36pt and
+// react-native-screens 4.16 leaves our content at its top, so a 44pt square
+// drew the chevron 4pt low in its glass bubble (stackBack.HEADER_ITEM_HEIGHT).
+check('header items are 36pt tall', back.HEADER_ITEM_HEIGHT === 36);
 check(
-  'the pill has hitSlop inside the bar, not down into the player name',
-  /hitSlop=\{\{\s*top:\s*12,\s*bottom:\s*0/.test(pill),
+  'the pill is a 36pt square, not a 44pt one',
+  /width:\s*HEADER_ITEM_HEIGHT/.test(pill) && /height:\s*HEADER_ITEM_HEIGHT/.test(pill) && !/min(Width|Height):\s*44/.test(pill),
+);
+check(
+  'the chevron fits inside the 36pt square at every font scale',
+  [1, 1.5, 2, 3].every((s) => back.backChevronSize(s) <= 28) && back.backChevronSize(1) === 22,
+);
+for (const screen of ['src/screens/ByomBuilderScreen.tsx', 'src/screens/ByomDetailScreen.tsx']) {
+  const src = read(screen);
+  const btn = /headerBtn:\s*\{([^}]+)\}/.exec(src)?.[1] ?? '';
+  check(`${screen}: its header button is 36pt tall`, /height:\s*HEADER_ITEM_HEIGHT/.test(btn) && !/minHeight:\s*44/.test(btn));
+  check(`${screen}: its header button keeps a 44pt target`, /hitSlop=\{\{\s*top:\s*4,\s*bottom:\s*4\s*\}\}/.test(src));
+}
+check(
+  'the pill has hitSlop to a 52pt target inside the bar, not down into the player name',
+  /hitSlop=\{\{\s*top:\s*12,\s*bottom:\s*4,\s*left:\s*8,\s*right:\s*8/.test(pill),
 );
 // 2026-11-16 (Matt): chevron only. iOS 26+ draws a glass bubble behind the
 // left slot; with the word "Back" in it the bubble hugged the text and read
-// as a cramped grey pill. A centered 44pt square makes it a circle.
+// as a cramped grey pill. A centered square makes it a circle.
 const pillFn = code(/function BackPill[\s\S]*?\n}\n/.exec(pill)?.[0] ?? '');
 check('the Back button function is present', pillFn.length > 0);
 check('the Back button draws a chevron', /name="chevron-back"/.test(pillFn));
