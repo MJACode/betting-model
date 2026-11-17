@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, Picks tab "Bet all" banner gets the cards' 16pt side inset so it lines up |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: a daily worker job stores each new Betfair ANZ month (never overwrites, reads every row back); run against production, 0 to fetch (#1371) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord book name links to /pick/<id> on the worker; the page opens the app book sheet or lists the books |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, women's totals model bets the best book at DraftKings' first post (435 bets +39.12 units vs 402 +29.96 in 2025-26; card matches replay bet for bet) |
