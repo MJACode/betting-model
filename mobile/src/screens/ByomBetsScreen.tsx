@@ -33,6 +33,7 @@ import {
   type ByomBetList,
   type ByomTiming,
 } from '@/lib/byom';
+import { byomActualText } from '@/lib/byomActual';
 import { byomFilters } from '@/lib/byomFilters';
 import { propMarketLabel, type ByomSeasonScope, byomStartWord } from '@/lib/byomRecord';
 import { unitsSpeech } from '@/lib/a11y';
@@ -72,6 +73,7 @@ function BetRow({ bet, withYear, first, last }: {
   const matchup = `${bet.away_team} @ ${bet.home_team}`;
   const price = bet.price == null ? '—' : formatAmerican(bet.price);
   const result = RESULT_TEXT[bet.result];
+  const actual = byomActualText(bet);
   // The game's date, not when the line locked (Matt, 2026-11-11). First on
   // the line, so a long row cuts the team names, not the date.
   const played = formatGameDateET(bet.commence_time, { withYear });
@@ -82,6 +84,7 @@ function BetRow({ bet, withYear, first, last }: {
     matchup,
     bet.price == null ? 'no price' : price,
     bet.result === '' ? 'no result' : result,
+    actual,
     bet.units == null ? 'no result' : unitsSpeech(units),
   ].filter(Boolean).join(', ');
   return (
@@ -98,6 +101,9 @@ function BetRow({ bet, withYear, first, last }: {
         </Text>
         <Text style={styles.meta}>{price} · {result}</Text>
       </View>
+      {actual ? (
+        <Text style={styles.meta} numberOfLines={1}>{actual}</Text>
+      ) : null}
     </View>
   );
 }
