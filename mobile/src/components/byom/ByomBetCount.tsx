@@ -64,12 +64,12 @@ export function ByomBetCount({
   }
   const unitsText = showsUnits && record.units != null ? formatSignedUnits(record.units) : null;
   const unitsColor = record.units == null
-    ? colors.textInverse
+    ? colors.onChrome
     : record.units > 0
       ? colors.positive
       : record.units < 0
         ? colors.negative
-        : colors.textInverse;
+        : colors.onChrome;
   const recordText = formatByomRecord(record);
   const noun = record.bets === 1 ? 'bet' : 'bets';
   const label = [
@@ -157,8 +157,10 @@ const styles = StyleSheet.create({
     fontSize: font.size.title3,
     color: colors.textTertiary,
   },
+  // Navy chrome in both themes: the bright positive / negative units and the
+  // brandMuted kickers are measured on navy, not on the amber Dark tint.
   bar: {
-    backgroundColor: colors.tint,
+    backgroundColor: colors.chromeSurface,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
@@ -178,7 +180,7 @@ const styles = StyleSheet.create({
   count: {
     fontSize: font.size.title1,
     fontWeight: font.weight.bold,
-    color: colors.textInverse,
+    color: colors.onChrome,
   },
   right: {
     alignItems: 'flex-end',
@@ -193,7 +195,7 @@ const styles = StyleSheet.create({
   },
   record: {
     fontSize: font.size.footnote,
-    color: colors.textInverse,
+    color: colors.onChrome,
   },
   empty: {
     ...card,

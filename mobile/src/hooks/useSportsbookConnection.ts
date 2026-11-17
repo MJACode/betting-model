@@ -31,7 +31,7 @@ export interface ProviderMeta {
 /** Order here is the order books render in the Connect screen. */
 export const SPORTSBOOK_PROVIDERS: ProviderMeta[] = [
   { id: 'draftkings', name: 'DraftKings', abbrev: 'DK', logoBg: colors.bookDraftKingsGround, logoFg: colors.bookDraftKings },
-  { id: 'fanduel', name: 'FanDuel', abbrev: 'FD', logoBg: colors.bookFanDuel, logoFg: colors.textInverse },
+  { id: 'fanduel', name: 'FanDuel', abbrev: 'FD', logoBg: colors.bookFanDuel, logoFg: colors.onChrome },
 ];
 
 export function providerMeta(id: SportsbookProvider): ProviderMeta {

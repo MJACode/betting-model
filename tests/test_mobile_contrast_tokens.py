@@ -37,7 +37,7 @@ def _read(path: Path) -> str:
 def _tokens() -> dict[str, str]:
     src = _read(SRC / "lib" / "theme.ts")
     brand = re.search(r"const BRAND_INK = '(#[0-9A-Fa-f]{6})'", src).group(1)
-    block = re.search(r"export const colors = \{(.*?)\n\};", src, re.S).group(1)
+    block = re.search(r"const lightColors = \{(.*?)\n\};", src, re.S).group(1)
     out = {}
     for m in re.finditer(r"^\s*(\w+):\s*(?:'(#[0-9A-Fa-f]{6,8})'|(BRAND_INK))", block, re.M):
         out[m.group(1)] = (m.group(2) or brand).upper()
@@ -106,10 +106,10 @@ PAIRS = [
     ("medInk", "medSoft", 4.5),
     ("textSecondary", "noneSoft", 4.5),
     ("pausedInk", "noneSoft", 4.5),  # Paused pick chip, #963
-    ("textPrimary", "bet", 4.5),  # SportToggle count (H6)
-    ("textPrimary", "med", 4.5),  # player hit-rate badge
-    ("textPrimary", "avoid", 4.5),
-    ("textPrimary", "none", 4.5),
+    ("onBright", "bet", 4.5),  # SportToggle count (H6)
+    ("onBright", "med", 4.5),  # player hit-rate badge
+    ("onBright", "avoid", 4.5),
+    ("onBright", "none", 4.5),
     ("textInverse", "tint", 4.5),  # Apply (H6)
 ]
 
@@ -134,7 +134,7 @@ def test_the_audit_ratios():
     assert round(_ratio(t["betInk"], t["betSoft"]), 2) == 4.61
     assert round(_ratio(t["avoidInk"], t["avoidSoft"]), 2) == 5.01
     assert round(_ratio(t["medInk"], t["medSoft"]), 2) == 4.99
-    assert round(_ratio(t["textPrimary"], t["bet"]), 2) == 9.46
+    assert round(_ratio(t["onBright"], t["bet"]), 2) == 9.46
     assert round(_ratio(t["pausedInk"], t["noneSoft"]), 2) == 5.79
 
 
@@ -172,9 +172,9 @@ def test_no_short_white_literal_and_h6_sites():
     assert "variant=" not in apply_tag
     button = _read(SRC / "components" / "PrimaryButton.tsx")
     assert "primary: { backgroundColor: colors.tint }" in button
-    assert "const fg = variant === 'primary' ? colors.textInverse" in button
+    assert re.search(r"const fg =\s*variant === 'primary' \? colors\.textInverse", button)
     toggle = _read(SRC / "components" / "SportToggle.tsx")
-    assert "color: colors.textPrimary" in re.search(r"badgeText: \{.*?\}", toggle, re.S).group(0)
+    assert "color: colors.onBright" in re.search(r"badgeText: \{.*?\}", toggle, re.S).group(0)
     assert "opacity" not in re.search(r"labelMuted: \{.*?\}", toggle, re.S).group(0)  # M17
 
 
