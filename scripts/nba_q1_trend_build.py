@@ -38,7 +38,7 @@ import models.nba_total_luck as tl  # noqa: E402
 from scripts import nba_game_harness as H  # noqa: E402
 from scripts.nba_game4_p3 import period_close_rows  # noqa: E402
 
-BETS = Path("C:/Users/micha/AppData/Local/Temp/q1trend/results/bets/bets_Q1A_D_spreads_q1_0008.parquet")
+BETS = Path("C:/Users/micha/Documents/betting-model/data/local/research/q1trend/results/bets/bets_Q1A_D_spreads_q1_0008.parquet")
 ROW_SEASONS = (H.REGIME, *H.CHOOSE, H.CONFIRM)          # 2021-2026: the lab's full-game load
 BUCKET_SEASONS = (2024, 2025, 2026)
 CELL = {"family": "Q1A", "point": "D", "market": q1.MARKET, "cell_side": q1.SIDE_LABEL, "cut": q1.K_CUT}

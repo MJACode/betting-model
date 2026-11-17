@@ -36,7 +36,7 @@ and no cut, constant or rule below was chosen from a betting result.
             placebo, never judged.
   TIMING    --full prints a progress line per group and per placebo pass.
 
-    python C:/Users/micha/AppData/Local/Temp/q1trend/run_with_db.py scripts.nba_s_shotluck --pull
+    python C:/Users/micha/Documents/betting-model/data/local/research/q1trend/run_with_db.py scripts.nba_s_shotluck --pull
     NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -W ignore -m scripts.nba_s_shotluck --smoke
     NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> NBA_GAME2_BETS=<folder>/bets NBA_RESEARCH_CACHE=<cache> \
         PYTHONPATH=. python -W ignore -m scripts.nba_s_shotluck --full
