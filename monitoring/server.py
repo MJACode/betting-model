@@ -171,6 +171,14 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/healthz":                     # unauthenticated liveness
             return self._send(200, b'{"ok":true}', "application/json")
 
+        # Public book-picker page for a Discord pick link. No token: the URL
+        # is what the channel posts. The body is that pick's sportsbook list
+        # and nothing from the dashboard.
+        from tracking.pick_landing import parse_pick_path
+        pick_id = parse_pick_path(route)
+        if pick_id is not None:
+            return self._pick_page(pick_id)
+
         if not self._authorised(qs):
             return self._send(401, b'{"error":"unauthorised"}', "application/json")
 
@@ -194,6 +202,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._stream(qs)
 
         return self._send(404, b'{"error":"not found"}', "application/json")
+
+    def _pick_page(self, pick_id: int):
+        from tracking.pick_landing import render_pick_http
+        try:
+            status, body = render_pick_http(pick_id)
+        except Exception as exc:                               # noqa: BLE001
+            # The type only. The message can carry a connection string.
+            from loguru import logger
+            logger.warning(f"pick landing failed ({type(exc).__name__})")
+            from tracking.pick_landing import _page, render_html
+            status, body = 200, render_html(_page(pick_id, None, [])).encode("utf-8")
+        return self._send(status, body, "text/html; charset=utf-8", extra={
+            "Referrer-Policy": "no-referrer",
+            "X-Robots-Tag": "noindex",
+            "Content-Security-Policy":
+                "default-src 'none'; style-src 'unsafe-inline'; "
+                "script-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; "
+                "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        })
 
     @staticmethod
     def _window(qs) -> int:
