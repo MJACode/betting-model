@@ -509,7 +509,9 @@ export interface TrendValue {
 
 export type RootStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList> | undefined;
-  PickDetail: { pickId: number };
+  /** openBooks is a tap token. A new Discord open sends a new number.
+   *  Zero and absent leave the book sheet closed. */
+  PickDetail: { pickId: number; openBooks?: number };
   /** Scoreboard game sheet. Game markets and line movement. No pick. */
   ScoreboardGame: { gameId: string };
   ModelEdit: { modelId?: string };
