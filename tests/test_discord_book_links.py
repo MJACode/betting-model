@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import tracking.book_slip_links as links
 from tracking.book_slip_links import discord_book_target, fill_betslip_link
+from tracking.pick_landing import DEFAULT_ORIGIN, discord_book_href
 from tracking.discord_notifier import (
     _booked_price, _free_pick_embed, _picks_embed, _signal_field,
 )
@@ -167,6 +168,36 @@ def test_a_broken_link_does_not_raise_and_the_price_still_renders():
     assert "](" not in field["value"].split("\n")[-1]
 
 
+def test_a_pick_id_links_the_book_name_to_the_landing_page():
+    """The text stays the book. The URL is the book-picker page, not that book."""
+    field = _signal_field(_sig(
+        pick_id=42, best_book="fanduel", best_odds=-105, best_bet_link=FD,
+    ))
+    price = field["value"].split("\n")[-1]
+    assert price.startswith(f"-105 @ [FanDuel]({DEFAULT_ORIGIN}/pick/42)")
+    assert "addToBetslip" not in price
+    assert "signalbase://" not in price
+
+
+def test_without_an_id_the_link_stays_the_book_slip():
+    url, kind = discord_book_href(
+        _sig(best_book="fanduel", best_odds=-105, best_bet_link=FD), "FanDuel")
+    assert kind == "slip" and url == FD
+
+
+def test_a_blank_origin_falls_back_to_the_book_slip(monkeypatch):
+    monkeypatch.setenv("PICK_LANDING_ORIGIN", "")
+    url, kind = discord_book_href(
+        _sig(pick_id=42, best_book="fanduel", best_odds=-105, best_bet_link=FD),
+        "FanDuel")
+    assert kind == "slip" and url == FD
+    monkeypatch.setenv("PICK_LANDING_ORIGIN", "http://example.com")
+    url, kind = discord_book_href(
+        _sig(pick_id=42, best_book="fanduel", best_odds=-105, best_bet_link=FD),
+        "FanDuel")
+    assert kind == "slip" and url == FD
+
+
 def test_the_price_line_is_not_one_code_span():
     field = _signal_field(_sig(best_book="fanduel", best_odds=-105,
                                best_bet_link=FD))
@@ -224,8 +255,10 @@ def test_every_pick_producer_selects_the_link_it_renders():
                  "_new_live_signals"):
         src = inspect.getsource(getattr(dn, name))
         assert "dk_bet_link" in src and "best_bet_link" in src, name
+        assert "pick_id" in src, name
     void = inspect.getsource(dn._void_rows_sql)
     assert "p.dk_bet_link" in void and "p.best_bet_link" in void
+    assert "p.pick_id" in void
 
 
 def test_the_module_does_not_call_the_network():

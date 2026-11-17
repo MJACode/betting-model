@@ -721,7 +721,7 @@ def load_artifact(path: str | Path | None = None) -> dict:
 
 DIAG_KEYS = ("games", "already_decided", "wrong_season", "no_dk_total", "first_post_gone",
              "out_of_range", "schedule_short", "box_pending", "box_missing", "no_blend",
-             "edge_cap", "below_cut", "bets")
+             "edge_cap", "below_cut", "bets", "at_other_book")
 # Hold a game while a team's earlier game that ended before the quote has no
 # final score or no box yet, for this long after it ended (counted to now, so a
 # box that never lands stops holding while the quote stays the first post). A
@@ -740,10 +740,11 @@ class Quote:
     line: float
     over_price: float
     under_price: float
-    quote_at: datetime          # DraftKings' own time on the row (snapshot_at)
+    quote_at: datetime          # the book's own time on the row (snapshot_at)
     fetched_at: datetime        # when it was stored (created_at)
     link_over: str | None = None
     link_under: str | None = None
+    book: str = BOOK            # whose number this is (decide: the best book, mike 2026-11-16)
 
 
 @dataclass
@@ -782,7 +783,8 @@ def missing_inputs(sg: pd.DataFrame, box_rows: dict, team: int, cut_ns: int,
 
 
 def decide(targets: pd.DataFrame, quotes: dict, sg: pd.DataFrame, box: pd.DataFrame,
-           art: dict, cut: float, now: datetime | None = None) -> list[Decision]:
+           art: dict, cut: float, now: datetime | None = None,
+           others: dict | None = None) -> list[Decision]:
     """Decide each target game at its DraftKings quote (live: the first post).
 
     targets: rows of sg (the season's games, season_games() applied, with
@@ -790,7 +792,19 @@ def decide(targets: pd.DataFrame, quotes: dict, sg: pd.DataFrame, box: pd.DataFr
     season's box rows as place_box() returns them, with end_ns. now: the run's
     instant, which ages a missing box (BOX_WAIT_H); the quote's own time when
     not given. The ratings and inputs are as of the quote's hour whatever
-    `now` is. Pure given its inputs."""
+    `now` is. Pure given its inputs.
+
+    THE BEST BOOK (mike, 2026-11-16). others: game_id -> [Quote], every other
+    bettable book's total standing at DraftKings' first post. Each is priced
+    with the same mean and blend, and the bet goes to the largest edge; a tie
+    stays at DraftKings. The moment, the hold, the ratings' hour and the cut
+    are DraftKings' first post's, as before. An other book's quote outside the
+    ranges, or with an edge above the cap, is dropped as a data error rather
+    than failing the run. On 2025-26 (walk-forward) the best book made 435
+    bets, +39.12 units, against DraftKings alone's 402, +29.96
+    (docs/sports/ncaabw.md, "Why the women's record trails the men's").
+    The Decision's quote is the book bet; extra["dk_quote"] and
+    extra["dk_priced"] keep DraftKings' own."""
     now_ns = to_ns(now) if now is not None else None
     params = Params.from_dict(art["params"])
     prior = EndState.from_json(art["end_state"])
@@ -864,13 +878,26 @@ def decide(targets: pd.DataFrame, quotes: dict, sg: pd.DataFrame, box: pd.DataFr
                                 f"no blend fit for {phase_of(r.game_date)} and none for all phases",
                                 quote=q, cutoff=cutoff, model_total=float(x.pt), ng=ng))
             continue
-        pz = price(float(x.pt), q.line, q.over_price, q.under_price, b)
+        dk_pz = price(float(x.pt), q.line, q.over_price, q.under_price, b)
+        chosen, pz, dropped = q, dk_pz, []
+        for o in (others or {}).get(r.game_id, ()):
+            if qb.problem(MARKET, o.line, (o.over_price, o.under_price)):
+                dropped.append(f"{o.book} {o.line:g}: outside the ranges")
+                continue
+            po = price(float(x.pt), o.line, o.over_price, o.under_price, b)
+            if qb.edge_problem(po.edge, MODEL_ID):
+                dropped.append(f"{o.book} {o.line:g} edge {po.edge:+.4f}: above the cap")
+                continue
+            if po.edge > pz.edge:
+                chosen, pz = o, po
         capped = qb.edge_problem(pz.edge, MODEL_ID)
         status = "edge_cap" if capped else "bets" if pz.edge > cut else "below_cut"
         out.append(Decision(r.game_id, status,
-                            f"{pz.side} {q.line:g} edge {pz.edge:+.4f} model {x.pt:.2f} mean {pz.mean:.2f} "
-                            f"games {ng[0]}/{ng[1]}"
-                            + (f"; {capped}: a data error, not a bet" if capped else ""),
-                            quote=q, cutoff=cutoff, model_total=float(x.pt), priced=pz, ng=ng,
-                            extra={"pt_s1": float(x.pt_s1), "rhat": float(x.rhat), "pp": float(x.pp)}))
+                            f"{pz.side} {chosen.line:g} at {chosen.book} edge {pz.edge:+.4f} model {x.pt:.2f} "
+                            f"mean {pz.mean:.2f} games {ng[0]}/{ng[1]}"
+                            + (f"; {capped}: a data error, not a bet" if capped else "")
+                            + (f"; dropped {', '.join(dropped)}" if dropped else ""),
+                            quote=chosen, cutoff=cutoff, model_total=float(x.pt), priced=pz, ng=ng,
+                            extra={"pt_s1": float(x.pt_s1), "rhat": float(x.rhat), "pp": float(x.pp),
+                                   "dk_quote": q, "dk_priced": dk_pz}))
     return out

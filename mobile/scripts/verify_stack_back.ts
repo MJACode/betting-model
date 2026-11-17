@@ -68,14 +68,47 @@ check(
   'the player name is textPrimary, not the header tint',
   /color:\s*colors\.textPrimary/.test(titleStyle) && !/color:\s*tintColor/.test(code(pill)),
 );
-check('the pill is at least 44pt wide and tall', /minWidth:\s*44/.test(pill) && /minHeight:\s*44/.test(pill));
+// 2026-11-17: 36pt, not 44. On iOS 26+ UIKit fits a header view into 36pt and
+// react-native-screens 4.16 leaves our content at its top, so a 44pt square
+// drew the chevron 4pt low in its glass bubble (stackBack.HEADER_ITEM_HEIGHT).
+check('header items are 36pt tall', back.HEADER_ITEM_HEIGHT === 36);
 check(
-  'the pill has hitSlop inside the bar, not down into the player name',
-  /hitSlop=\{\{\s*top:\s*12,\s*bottom:\s*0/.test(pill),
+  'the pill is a 36pt square, not a 44pt one',
+  /width:\s*HEADER_ITEM_HEIGHT/.test(pill) && /height:\s*HEADER_ITEM_HEIGHT/.test(pill) && !/min(Width|Height):\s*44/.test(pill),
 );
 check(
-  'the label stays one line and caps at 2×',
-  /numberOfLines=\{1\}/.test(pill) && /maxFontSizeMultiplier=\{2\}/.test(pill),
+  'the chevron is a fixed 22pt with the Large Content Viewer, not scaled past the 36pt square',
+  back.BACK_CHEVRON_SIZE === 22 &&
+    /size=\{BACK_CHEVRON_SIZE\}/.test(pill) &&
+    /accessibilityShowsLargeContentViewer/.test(pill),
+);
+for (const screen of ['src/screens/ByomBuilderScreen.tsx', 'src/screens/ByomDetailScreen.tsx']) {
+  const src = read(screen);
+  const btn = /headerBtn:\s*\{([^}]+)\}/.exec(src)?.[1] ?? '';
+  check(`${screen}: its header button is 36pt tall`, /height:\s*HEADER_ITEM_HEIGHT/.test(btn) && !/minHeight:\s*44/.test(btn));
+  check(`${screen}: its header button declares a 4pt vertical hitSlop`, /hitSlop=\{\{\s*top:\s*4,\s*bottom:\s*4\s*\}\}/.test(src));
+  check(
+    `${screen}: its label stops growing at accessibility Medium, so it fits the 36pt item`,
+    /maxFontSizeMultiplier=\{HEADER_TEXT_MAX_FONT_MULTIPLIER\}/.test(src) &&
+      /accessibilityShowsLargeContentViewer/.test(src) &&
+      back.HEADER_TEXT_MAX_FONT_MULTIPLIER < 2.143,
+  );
+}
+check(
+  'the pill declares hitSlop (≈52pt wide, bar-height tall once forwarded), not down into the player name',
+  /hitSlop=\{\{\s*top:\s*12,\s*bottom:\s*4,\s*left:\s*8,\s*right:\s*8/.test(pill),
+);
+// 2026-11-16 (Matt): chevron only. iOS 26+ draws a glass bubble behind the
+// left slot; with the word "Back" in it the bubble hugged the text and read
+// as a cramped grey pill. A centered square makes it a circle.
+const pillFn = code(/function BackPill[\s\S]*?\n}\n/.exec(pill)?.[0] ?? '');
+check('the Back button function is present', pillFn.length > 0);
+check('the Back button draws a chevron', /name="chevron-back"/.test(pillFn));
+check('the Back button draws no "Back" word (chevron only)', !/<Text\b/.test(pillFn));
+const pillStyle = /pill:\s*\{([^}]+)\}/.exec(pill)?.[1] ?? '';
+check(
+  'the chevron is centered in its square (the iOS bubble becomes a circle)',
+  /alignItems:\s*'center'/.test(pillStyle) && /justifyContent:\s*'center'/.test(pillStyle),
 );
 check('the pill sits above an overlapping title', /zIndex:\s*20/.test(pill) && /elevation:\s*20/.test(pill));
 check(
@@ -124,9 +157,14 @@ check(
   'the player name is a single truncating header title',
   /headerTitle: \(props\) => <PlayerStatsHeaderTitle \{\.\.\.props\} \/>/.test(player),
 );
+check('the Back button reserves 44pt at 1× and 2×', back.backButtonWidth(1) === 44 && back.backButtonWidth(2) === 44);
 check(
-  'a 390pt window at 1× leaves the name short of the pill',
-  back.playerTitleMaxWidth(390, 1) === 162,
+  'a 390pt window at 1× leaves the name short of the button (390 − 2 × (16 + 44 + 8))',
+  back.playerTitleMaxWidth(390, 1) === 254,
+);
+check(
+  'a Settings section title gets the same room as the player name',
+  back.settingsTitleMaxWidth(390, 1) === 254,
 );
 check(
   'font scale above 2 does not widen the reserved pill',

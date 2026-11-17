@@ -831,6 +831,36 @@ def _job_ncaab_injury_probe(**kw):
     return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
 
 
+def _job_betfair_monthly_store(dry_run: bool = False, **kw):
+    """One run of the daily Betfair ANZ store (scripts/horse/betfair_monthly.py),
+    on demand: stores any month not yet in Supabase, never overwrites a stored
+    file, and reads each new row back. Free listing, no Odds API call."""
+    # Called in-process on a fresh connection, not through main(): main()
+    # installs the traffic probe under its own name, which would relabel the
+    # scheduler process's probe for every later call.
+    import psycopg2
+    from data.db import get_connection
+    from scripts.horse import betfair_monthly as bm
+    lines: list[str] = []
+    conn = get_connection()
+    try:
+        bm.run(conn, dry_run=dry_run, binary=psycopg2.Binary, say=lines.append)
+    finally:
+        conn.close()
+    text = "\n".join(lines)
+    return {"summary": text[-1500:] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _validate_betfair_monthly_store(args: dict) -> dict:
+    extra = sorted(set(args) - {"dry_run"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes only dry_run")
+    dry = args.get("dry_run", False)
+    if not isinstance(dry, bool):
+        raise ValueError("dry_run must be true or false")
+    return {"dry_run": dry}
+
+
 def _job_splits_source_probe(**kw):
     """DK Network's splits page and Action Network's book ids. Writes nothing,
     no Odds API call (scripts/splits_source_probe.py)."""
@@ -2932,6 +2962,8 @@ JOBS = {
     "ncaab_injury_probe": (_job_ncaab_injury_probe, _validate_ncaab_injury_probe),
     # Where the Scoreboard splits can come from: DK Network + AN book ids. Free, writes nothing.
     "splits_source_probe": (_job_splits_source_probe, _validate_splits_source_probe),
+    # One on-demand run of the daily Betfair ANZ racing-file store. Free, idempotent.
+    "betfair_monthly_store": (_job_betfair_monthly_store, _validate_betfair_monthly_store),
     "book_app_links_probe": (_job_book_app_links_probe, _validate_book_app_links_probe),
     # BetMGM: which link puts the bet on the app's slip. Free, writes nothing.
     "betmgm_app_link_probe": (_job_betmgm_app_link_probe, _validate_book_app_links_probe),

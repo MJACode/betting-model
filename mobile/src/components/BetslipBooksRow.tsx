@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   badgeTextDk: {
-    color: colors.textPrimary,
+    color: colors.onBright,
   },
   odds: {
     fontSize: font.size.callout,

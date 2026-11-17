@@ -187,7 +187,7 @@ export function PaywallScreen() {
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={styles.close}
           >
-            <Ionicons name="close" size={22} color={colors.textInverse} />
+            <Ionicons name="close" size={22} color={colors.onChrome} />
           </Pressable>
           <ScrollView
             style={styles.scroller}
@@ -335,7 +335,7 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.title1,
     fontWeight: font.weight.bold,
-    color: colors.textInverse,
+    color: colors.onChrome,
   },
   subtitle: {
     fontFamily: font.family,
@@ -348,7 +348,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: font.family,
     fontSize: font.size.footnote,
-    color: colors.textInverse,
+    color: colors.onChrome,
     lineHeight: 18,
   },
   sourceNote: {
@@ -388,7 +388,7 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
-    color: colors.textInverse,
+    color: colors.onChrome,
   },
   planTrial: {
     fontFamily: font.family,
@@ -399,7 +399,7 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.body,
     fontWeight: font.weight.bold,
-    color: colors.textInverse,
+    color: colors.onChrome,
   },
   planCaption: {
     fontFamily: font.family,

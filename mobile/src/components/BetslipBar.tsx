@@ -151,7 +151,7 @@ function BetslipBarContent({
       ]}
     >
       <View style={styles.left}>
-        <Ionicons name="receipt-outline" size={20} color={colors.textInverse} />
+        <Ionicons name="receipt-outline" size={20} color={colors.onChrome} />
         <Text style={styles.title}>Betslip</Text>
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{badgeCount}</Text>
@@ -175,7 +175,7 @@ function BetslipBarContent({
       ) : heldOnly ? (
         <Text style={styles.priceValue}>No live price</Text>
       ) : (
-        <Ionicons name="chevron-forward" size={20} color={colors.textInverse} />
+        <Ionicons name="chevron-forward" size={20} color={colors.onChrome} />
       )}
     </Pressable>
   );
@@ -219,7 +219,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   title: {
-    color: colors.textInverse,
+    color: colors.onChrome,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
   },
@@ -247,20 +247,20 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   priceLabel: {
-    color: colors.textInverseSecondary,
+    color: colors.onChromeSecondary,
     fontSize: font.size.footnote,
   },
   priceValue: {
-    color: colors.textInverse,
+    color: colors.onChrome,
     fontSize: font.size.callout,
     fontWeight: font.weight.bold,
   },
   payLabel: {
-    color: colors.textInverseSecondary,
+    color: colors.onChromeSecondary,
     fontSize: font.size.caption,
   },
   payValue: {
-    color: colors.textInverse,
+    color: colors.onChrome,
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
   },

@@ -63,7 +63,10 @@ export function PrimaryButton({
   testID?: string;
 }) {
   const inactive = disabled || loading;
-  const fg = variant === 'primary' ? colors.textInverse : colors.brandInk;
+  // Secondary sits on a card, so its label is body ink (black in Light, as
+  // brandInk was; white in Dark). Brand sits on amber in both themes.
+  const fg =
+    variant === 'primary' ? colors.textInverse : variant === 'brand' ? colors.brandInk : colors.textPrimary;
   return (
     <Pressable
       onPress={onPress}

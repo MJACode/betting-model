@@ -234,7 +234,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   chipTextDk: {
-    color: colors.textPrimary,
+    color: colors.onBright,
   },
   chipTag: {
     fontSize: font.size.caption,

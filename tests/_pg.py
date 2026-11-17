@@ -5,7 +5,8 @@ Two test files need a real server (`test_latest_line_state.py`,
 this starts a throwaway cluster from whichever binaries exist:
 
   1. `initdb` / `pg_ctl` on PATH (a system install),
-  2. the Debian path the Linux sandbox carries (/usr/lib/postgresql/16/bin),
+  2. the Debian layout, /usr/lib/postgresql/<major>/bin, newest major first
+     (the sandbox carries 16; GitHub's runner installs 18 since 2026-11),
   3. the `embedded-postgres` pip package (declared in requirements-test.txt),
      which ships a full server beside its module — the route on this machine,
      where nothing else is installed.
@@ -31,13 +32,32 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+DEBIAN_PG_ROOT = Path("/usr/lib/postgresql")
+
+
+def _debian_bin(name: str, root: Path | None = None) -> str | None:
+    """The newest /usr/lib/postgresql/<major>/bin/<name>. Never a pinned major:
+    a hard-coded 16 made every scratch test fail in CI the day the runner's
+    apt moved to 18 (PR #1426, 2026-11-16), while the workflow's own check,
+    which scanned every version, passed."""
+    root = DEBIAN_PG_ROOT if root is None else root
+    if not root.is_dir():
+        return None
+    majors = [d for d in root.iterdir() if d.name.isdigit()]
+    for version in sorted(majors, key=lambda d: int(d.name), reverse=True):
+        cand = version / "bin" / name
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
 def pg_bin(name: str) -> str | None:
     found = shutil.which(name)
     if found:
         return found
-    debian = Path(f"/usr/lib/postgresql/16/bin/{name}")
-    if debian.is_file():
-        return str(debian)
+    debian = _debian_bin(name)
+    if debian:
+        return debian
     try:
         import embedded_postgres  # type: ignore
     except ImportError:

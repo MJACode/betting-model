@@ -163,6 +163,10 @@ MAX_SILENCE: dict = {
     # missed hours: the job has stopped and the Database tab's history has a
     # hole in it.
     "db_health_snapshot": 180,
+    # The daily Betfair ANZ store (scripts/horse/betfair_monthly.py), 10:43 ET.
+    # Two days: one run lost to a deploy at 10:43 is not a stopped job, two
+    # are. A failed run is reported by its 'error' beat, not by this bound.
+    "betfair_monthly_store": 2880,
 }
 
 # Jobs that run only inside fixed Eastern hours: (first hour, last hour,

@@ -195,7 +195,7 @@ const card = readFileSync(join(root, 'src/components/LinesBoard.tsx'), 'utf8');
 const sheet = readFileSync(join(root, 'src/components/AllBooksSheet.tsx'), 'utf8');
 const queries = readFileSync(join(root, 'src/lib/queries.ts'), 'utf8');
 const picksHome = readFileSync(join(root, 'src/screens/PicksHomeScreen.tsx'), 'utf8');
-check('the pick dot is navy', /backgroundColor: colors\.brandNavy/.test(card));
+check('the pick dot is body ink (navy-black in Light, white on the navy Dark page)', /pickDot: \{[^}]*backgroundColor: colors\.textPrimary/.test(card));
 check('the price is the callout, and only the side label is clipped', /styles\.cellPrice/.test(card) && /fontSize: font\.size\.callout/.test(card) && /numberOfLines=\{1\}/.test(card));
 check('an unloaded board is the skeleton, not the empty state', /if \(!loaded && !error\)/.test(card));
 check('each side opens its own book and its own link', /openBookBetslip\(row\.bookmaker, s\.link, \{ sameBookOnly: true \}\)/.test(sheet));
