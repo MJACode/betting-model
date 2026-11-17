@@ -16,6 +16,14 @@ account (`docs/rules_evidence.md`). A 2026-10-19 session recorded
 So `execute_sql` is write-capable here, same as `apply_migration`. An allow
 entry, or a wildcard that covers one, would run UPDATE/DELETE/DROP against
 production with no prompt on any connection that is not read-only.
+
+2026-11-17, Matt: "Stop asking me for sql approval access. Just do it", then
+"Make it permanent for every session" (PR #1437). The exact names
+`execute_sql` and `apply_migration` are allowed, and only as exact names:
+a wildcard that covers them is still refused, because it would also cover the
+branch, deploy and project tools below. Every other write-capable tool stays
+prompted. The no-deletion rule (CLAUDE.md 1b) still governs what that SQL may
+do; this file only governs whether it is prompted.
 """
 from __future__ import annotations
 
@@ -42,6 +50,22 @@ WRITE_CAPABLE = frozenset({
     "create_project",
     "execute_sql",
 })
+
+
+# Exact allow entries Matt approved (2026-11-17, PR #1437). An exact name only:
+# `_covers_write` still reports a wildcard that reaches these tools.
+APPROVED_EXACT = frozenset({"execute_sql", "apply_migration"})
+
+
+def _approved(rule: str) -> bool:
+    base = rule.split("(", 1)[0].strip()
+    parts = base.split("__")
+    return (
+        len(parts) >= 3
+        and parts[0] == "mcp"
+        and "supabase" in parts[1].lower()
+        and parts[-1] in APPROVED_EXACT
+    )
 
 
 def _allow_rules() -> list[str]:
@@ -82,7 +106,7 @@ def test_permissions_allow_has_no_write_capable_supabase_tool() -> None:
     offenders = {
         rule: hit
         for rule in _allow_rules()
-        if (hit := _covers_write(rule)) is not None
+        if not _approved(rule) and (hit := _covers_write(rule)) is not None
     }
     assert not offenders, (
         "permissions.allow auto-approves a write-capable Supabase tool: "
@@ -103,3 +127,14 @@ def test_supabase_wildcards_cover_execute_sql_and_reads_do_not() -> None:
     assert _covers_write("mcp__Supabase__list_tables") is None
     assert _covers_write("mcp__claude_ai_Supabase__query_logs") is None
     assert _covers_write("mcp__Railway__*") is None
+
+
+def test_only_exact_approved_names_pass() -> None:
+    """Matt's approval covers two exact names, never a wildcard or another tool."""
+    assert _approved("mcp__Supabase__execute_sql")
+    assert _approved("mcp__claude_ai_Supabase__apply_migration")
+    assert not _approved("mcp__Supabase__execute_*")
+    assert not _approved("mcp__Supabase__*")
+    assert not _approved("mcp__claude_ai_Supabase")
+    assert not _approved("mcp__Supabase__delete_branch")
+    assert not _approved("mcp__Supabase__pause_project")
