@@ -5,7 +5,7 @@ WHY A REAL DATABASE. The migration is plpgsql over transition tables, ON
 CONFLICT guards and window functions; a Python re-implementation would test the
 re-implementation. So this runs against whatever Postgres LATEST_LINE_TEST_DSN
 points at, or at a throwaway cluster tests/_pg.py starts from whichever
-initdb it finds (PATH, the sandbox's /usr/lib/postgresql/16/bin, or the
+initdb it finds (PATH, the newest /usr/lib/postgresql/<major>/bin, or the
 `embedded-postgres` pip package in requirements-test.txt), and SKIPS only
 when there is none -- the worker. The static shape is pinned separately in
 tests/test_latest_odds_views.py, which always runs.

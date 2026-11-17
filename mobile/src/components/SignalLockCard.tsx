@@ -59,7 +59,7 @@ export function SignalLockCard({
 const styles = StyleSheet.create({
   wrap: { padding: spacing.lg, gap: spacing.md },
   card: {
-    backgroundColor: colors.brandNavy,
+    backgroundColor: colors.chromeSurface,
     borderRadius: radii.md,
     padding: spacing.xl,
     alignItems: 'center',
@@ -69,7 +69,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: colors.brandNavyRaised,
+    backgroundColor: colors.chromeSurfaceRaised,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -77,7 +77,7 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
-    color: colors.textInverse,
+    color: colors.onChrome,
     textAlign: 'center',
   },
   body: {

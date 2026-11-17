@@ -2324,7 +2324,7 @@ const styles = StyleSheet.create({
   hitBadgeText: {
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
-    color: colors.textPrimary,
+    color: colors.onBright,
   },
   statsRow: {
     flexDirection: 'row',

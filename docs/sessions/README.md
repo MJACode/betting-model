@@ -20,6 +20,10 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: a daily worker job stores each new Betfair ANZ month (never overwrites, reads every row back); run against production, 0 to fetch (#1371) |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, women's totals model bets the best book at DraftKings' first post (435 bets +39.12 units vs 402 +29.96 in 2025-26; card matches replay bet for bet) |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, PR CI pytest-subset red on every PR: tests/_pg.py looked only in postgresql/16, runner now installs 18; finder is version-agnostic, pinned by test_pg_finder.py |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Back button: chevron only on every pushed screen (iOS 26 glass bubble hugged chevron + "Back"); title room 162 → 254pt |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Dark mode (brand navy) + Settings > Appearance (System / Light / Dark, Light default); applies at next open, no reloadAsync |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, comped accounts could not sign in: NULL email_change made /otp 500; 9 rows set to '', grant scripts + guard test fixed |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Sport chips: sports with a signal move to the far left of the row |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, The PC copy: one row per nightly pass (pc_copy_snapshots, scripts/local_mirror_report.py, run last by the LocalMirror task) and a PC copy tile on the Database tab; an unreadable exit code is now a failure, not 0 |

@@ -24,29 +24,34 @@ export const PLAYER_DETAIL_PARENT = {
 };
 
 /**
- * How wide the centered player name may be before it reaches the Back pill.
- *
- * The native stack centers the title. zIndex on the pill does not lift it
- * over UIKit's title label, so the title has to stop short of the pill on
- * both sides. The pill is a 22pt chevron plus the word "Back" at 17pt.
- * Font scale is capped at 2, the same cap the segmented controls use.
+ * The width the Back button takes in the bar: a 44pt square holding a 22pt
+ * chevron, and the chevron grows with font scale (capped at 2, the same cap
+ * the segmented controls use). Chevron only since 2026-11-16, so there is no
+ * "Back" word to reserve room for.
  */
-export function playerTitleMaxWidth(windowWidth: number, fontScale: number): number {
+export function backButtonWidth(fontScale: number): number {
   const scale = Math.min(Math.max(fontScale, 1), 2);
-  const pill = 22 * scale + 17 * scale * 4;
-  const side = 16 + pill + 8;
-  return Math.max(80, Math.floor(windowWidth - side * 2));
+  return Math.max(44, Math.round(22 * scale));
 }
 
 /**
- * How wide a Settings section title may be before it reaches the same Back pill.
+ * How wide a centered title may be before it reaches the Back button.
  *
- * The player name reserves 4em for "Back", which is wider than the word, so
- * "Legal & support" ellipsizes. This reserves the chevron plus about 2.6em.
+ * The native stack centers the title. zIndex on the button does not lift it
+ * over UIKit's title label, so the title has to stop short of the button on
+ * both sides: 16pt bar inset, the button, 8pt gap.
  */
+function titleMaxWidth(windowWidth: number, fontScale: number, floor: number): number {
+  const side = 16 + backButtonWidth(fontScale) + 8;
+  return Math.max(floor, Math.floor(windowWidth - side * 2));
+}
+
+/** The player name on the player / prop detail screen. */
+export function playerTitleMaxWidth(windowWidth: number, fontScale: number): number {
+  return titleMaxWidth(windowWidth, fontScale, 80);
+}
+
+/** A Settings section title such as "Legal & support". */
 export function settingsTitleMaxWidth(windowWidth: number, fontScale: number): number {
-  const scale = Math.min(Math.max(fontScale, 1), 2);
-  const pill = 22 * scale + 17 * scale * 2.6;
-  const side = 16 + pill + 8;
-  return Math.max(120, Math.floor(windowWidth - side * 2));
+  return titleMaxWidth(windowWidth, fontScale, 120);
 }
