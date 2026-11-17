@@ -83,9 +83,17 @@ or a better price writes nothing.
 A game priced below the cut is a NONE row (no stake) in the same
 transaction, so the app's All board shows every scored game; nothing
 publishes or settles a NONE row.
-BET ROWS in picks, at DraftKings' own price on DraftKings' own number:
-the evidence priced DraftKings and nothing else, so the line is not shopped.
-dk_* and decision_* are that price; best_* is empty. Every bet is the flat
+THE BEST BOOK (mike, 2026-11-16: "merge 1423"). At the same moment, every
+other bettable book's total standing at DraftKings' first post (its newest
+row stamped at or before it, and still that book's standing number now) is
+priced the same way, and the bet goes to the largest edge (a tie stays at
+DraftKings). On 2025-26 (walk-forward): 435 bets, +39.12 units, against
+DraftKings alone's 402, +29.96 (load_other_books; docs/sports/ncaabw.md).
+decision_* is the book bet; dk_* is DraftKings' own price when it hangs the
+same number, else dk_odds NULL, dk_implied_prob 0.0 and line_book naming the
+book (the first-half cards' convention); best_* is the book bet when it is not
+DraftKings. Before 2026-11-16 the card bet DraftKings only, as the men's totals
+card does. Every bet is the flat
 stake (stake_units is not written): one women's model, so there is no second
 bet to agree with. The label is the platform's ("Duke vs Kansas Over 145.5"),
 checked against the side and line before it is written
@@ -406,6 +414,70 @@ def load_quotes(conn, games: dict[str, dict], now: datetime) -> dict[str, nb.Quo
     return _quote_rows(rows, now, keep_bad_total=True)
 
 
+def other_books() -> list[str]:
+    """The bettable books other than DraftKings (config.BEST_LINE_BOOKMAKERS)."""
+    return [b for b in config.BEST_LINE_BOOKMAKERS if b != nb.BOOK]
+
+
+def load_other_books(conn, firsts: dict[str, nb.Quote], now: datetime) -> dict[str, list[nb.Quote]]:
+    """Every other bettable book's total standing at DraftKings' first post:
+    per game and book, the newest pre-game totals row stamped (snapshot_at) at
+    or before the first post's stamp and stored by now, with a usable total and
+    both prices, kept only while it is still that book's standing number (its
+    newest row stored within DK_MAX_AGE_MIN, the same total and prices): a
+    number gone from the board cannot be bet. One read, by game id."""
+    books = other_books()
+    if not firsts or not books:
+        return {}
+    gids = sorted(firsts)
+    ats = [firsts[g].quote_at.isoformat() for g in gids]
+    oldest = now - timedelta(minutes=DK_MAX_AGE_MIN)
+    rows = conn.execute(f"""
+        WITH f AS (
+            SELECT * FROM unnest(%s::text[], %s::timestamptz[]) AS f(game_id, first_at)
+        ), g AS (
+            SELECT game_id, commence_time::timestamptz AS ct
+            FROM games WHERE game_id = ANY(%s) AND commence_time IS NOT NULL
+        ), at_first AS (
+            SELECT DISTINCT ON (o.game_id, o.bookmaker)
+                   o.game_id, o.bookmaker, o.total_line, o.over_price, o.under_price, o.snapshot_at,
+                   o.created_at::timestamptz AS created, o.over_link, o.under_link
+            FROM odds o JOIN f ON f.game_id = o.game_id JOIN g ON g.game_id = o.game_id
+            WHERE o.market = 'totals' AND o.bookmaker = ANY(%s) AND o.snapshot_type = 'open'
+              AND o.snapshot_at::timestamptz <= f.first_at
+              AND o.snapshot_at::timestamptz <= g.ct
+              AND o.created_at::timestamptz <= %s
+              {_USABLE}
+            ORDER BY o.game_id, o.bookmaker, o.snapshot_at::timestamptz DESC, o.created_at::timestamptz DESC
+        ), standing AS (
+            SELECT DISTINCT ON (o.game_id, o.bookmaker)
+                   o.game_id, o.bookmaker, o.total_line, o.over_price, o.under_price
+            FROM odds o JOIN g ON g.game_id = o.game_id
+            WHERE o.market = 'totals' AND o.bookmaker = ANY(%s) AND o.snapshot_type = 'open'
+              AND o.snapshot_at::timestamptz <= g.ct
+              AND o.created_at::timestamptz <= %s
+              AND o.created_at::timestamptz >= %s
+            ORDER BY o.game_id, o.bookmaker, o.created_at::timestamptz DESC, o.snapshot_at::timestamptz DESC
+        )
+        SELECT a.game_id, a.bookmaker, a.total_line, a.over_price, a.under_price, a.snapshot_at,
+               a.created, a.over_link, a.under_link
+        FROM at_first a JOIN standing s ON s.game_id = a.game_id AND s.bookmaker = a.bookmaker
+        WHERE s.total_line = a.total_line AND s.over_price = a.over_price
+          AND s.under_price = a.under_price
+    """, (gids, ats, gids, books, now.isoformat(), books, now.isoformat(),
+          oldest.isoformat())).fetchall()
+    out: dict[str, list[nb.Quote]] = {}
+    for gid, book, line, op, up, snap, created, lo, lu in rows:
+        if line is None or implied(op) is None or implied(up) is None or not nb.valid_total(line):
+            continue
+        snap_t = _tip(snap) or _tip(created)
+        out.setdefault(gid, []).append(nb.Quote(
+            game_id=gid, line=float(line), over_price=float(op), under_price=float(up),
+            quote_at=min(snap_t, now), fetched_at=_tip(created), link_over=lo, link_under=lu,
+            book=str(book)))
+    return out
+
+
 # ── rows ──────────────────────────────────────────────────────────────────────
 
 _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", "pick_label",
@@ -472,27 +544,43 @@ def pick_rows(decisions: list[nb.Decision], games: dict[str, dict],
         edge = round(pz.prob - imp, 4)
         kelly_frac, rec_bet = quarter_kelly(pz.prob, imp, bankroll) if is_bet else (0.0, 0.0)
         link = q.link_over if pz.side == "over" else q.link_under
+        book = q.book
+        # DraftKings' own columns: its price on the side taken when it hangs the
+        # same number, else empty with line_book naming the book (CLAUDE.md 6).
+        dk_q = d.extra.get("dk_quote", q)
+        if book == nb.BOOK:
+            dk_odds, dk_imp, dk_edge, dk_link, line_book = pz.price, round(imp, 4), edge, link, None
+        elif float(dk_q.line) == float(q.line):
+            dk_odds = float(dk_q.over_price if pz.side == "over" else dk_q.under_price)
+            dk_imp = round(implied(dk_odds), 4)
+            dk_edge = round(pz.prob - implied(dk_odds), 4)
+            dk_link = dk_q.link_over if pz.side == "over" else dk_q.link_under
+            line_book = None
+        else:
+            dk_odds, dk_imp, dk_edge, dk_link, line_book = None, 0.0, 0.0, None, book
+        other = book != nb.BOOK
         rows.append({
             "game_id": d.game_id, "model_id": MODEL_ID, "sport": SPORT,
             "game_date": g.get("game_date"),
             "game_time": g.get("commence_time"),
             "pick_side": pz.side, "pick_label": label,
-            # P(win | no push) at DraftKings' line: the number the cut was
+            # P(win | no push) at the line bet: the number the cut was
             # measured on (models/ncaabw_total_blend.py, THE PROBABILITY).
             "model_probability": round(pz.prob, 4),
             "model_probability_cal": round(pz.prob, 4),
-            "dk_odds": pz.price, "dk_implied_prob": round(imp, 4), "edge": edge,
-            "dk_bet_link": link, "line_book": None,
+            "dk_odds": dk_odds, "dk_implied_prob": dk_imp, "edge": dk_edge,
+            "dk_bet_link": dk_link, "line_book": line_book,
             "scored_line": float(q.line),
             "kelly_fraction": kelly_frac, "recommended_bet": rec_bet,
             "bankroll_at_pick": bankroll, "signal_type": "BET" if is_bet else "NONE",
             # MED on every bet, as the other rule cards write: the evidence
             # gives no tier.
             "confidence_tier": "MED",
-            "decision_book": nb.BOOK, "decision_odds": pz.price,
+            "decision_book": book, "decision_odds": pz.price,
             "decision_implied_prob": round(imp, 4), "decision_edge": edge,
-            "best_book": None, "best_odds": None, "best_implied_prob": None,
-            "best_edge": None, "best_bet_link": None,
+            "best_book": book if other else None, "best_odds": pz.price if other else None,
+            "best_implied_prob": round(imp, 4) if other else None,
+            "best_edge": edge if other else None, "best_bet_link": link if other else None,
             "downgrade_reason": pause,
         })
     return rows, refused
@@ -522,9 +610,11 @@ def publish(conn, rows: list[dict], decisions: list[nb.Decision], check_hour: da
         if d.game_id in refused:
             detail += f"; refused {refused[d.game_id]}"
         q, pz = d.quote, d.priced
+        # The decision moment is DraftKings' first post, whichever book is bet.
+        first = d.extra.get("dk_quote", q) if d.extra else q
         got = conn.execute(_INSERT_DECISION, {
             "game_id": d.game_id, "check_hour": check_hour.isoformat(),
-            "quote_at": q.quote_at.isoformat() if q else None,
+            "quote_at": first.quote_at.isoformat() if first else None,
             "cutoff": d.cutoff.isoformat() if d.cutoff else None,
             "total_line": q.line if q else None,
             "model_total": None if d.model_total is None else round(d.model_total, 3),
@@ -577,7 +667,7 @@ def render(decisions: list[nb.Decision], diag: dict, written=None, decided=None)
         if d.status in ("bets", "below_cut"):
             q, pz = d.quote, d.priced
             lines.append(f"  {d.game_id:44s} {d.status:9s} {pz.side:5s} {q.line:g} "
-                         f"{pz.price:+.0f}  p {pz.prob:.4f} edge {pz.edge:+.4f}  model "
+                         f"{pz.price:+.0f} at {q.book}  p {pz.prob:.4f} edge {pz.edge:+.4f}  model "
                          f"{d.model_total:.1f} mean {pz.mean:.1f}  games {d.ng[0]}/{d.ng[1]}  "
                          f"quote {q.quote_at.isoformat()}")
         elif d.status != "no_dk_total":
@@ -635,6 +725,8 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 decisions.append(first_post_gone(q, now_q))
                 diag["first_post_gone"] += 1
         art = artifact() if live else None
+        # Every other bettable book's total standing at the first post (THE BEST BOOK).
+        others = load_other_books(conn, live, now) if live else {}
         problems: list[str] = []          # why a due game was not decided; fails the run
         for season in sorted({due[g]["season"] for g in live}):
             gids = sorted(g for g in live if due[g]["season"] == season)
@@ -659,9 +751,12 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             gids = [g for g in gids if g not in short]
             targets = sg[sg["game_id"].isin(gids)]
             got = nb.decide(targets, {g: live[g] for g in gids}, sg, box, art,
-                            config.MODEL_EDGE_THRESHOLDS[MODEL_ID], now=now) if gids else []
+                            config.MODEL_EDGE_THRESHOLDS[MODEL_ID], now=now,
+                            others={g: others.get(g, []) for g in gids}) if gids else []
             for d in got:
                 diag[d.status] = diag.get(d.status, 0) + 1
+                if d.status == "bets" and d.quote is not None and d.quote.book != nb.BOOK:
+                    diag["at_other_book"] += 1
                 if d.status == "box_missing":
                     logger.error(f"NCAABW totals card: {d.game_id} held, {d.detail}. The ESPN box "
                                  f"feed and NCAA's file fill ncaabw_team_game_stats; a game "
