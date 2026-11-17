@@ -1489,6 +1489,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
+    // Same side inset as PickCard's card, so the banner lines up with the
+    // cards under it (Matt, 2026-11-17).
+    marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
   },
   betAllText: { flex: 1, minWidth: 0 },
