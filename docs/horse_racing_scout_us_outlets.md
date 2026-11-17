@@ -90,3 +90,47 @@ One public US payout page for Hong Kong races, compared race by race with
 the Club's dividends, answers the question. None was found in two searches
 on 2026-11-16 (press reports of the December 2025 International Races quote
 no US payout).
+
+## Measured, 2026-11-17: US Hong Kong payouts are the Club's own dividends
+
+The payout page the follow-up asked for exists: Off Track Betting, a US
+online wagering site, publishes $2 payouts for every Hong Kong meeting
+(offtrackbetting.com/results/452/sha-tin-(hong-kong).html and
+/results/451/happy-valley-(hong-kong).html). The site refuses automated
+fetches (HTTP 403); the pages open in a browser. The Club's dividends came
+from its own results pages (racing.hkjc.com, LocalResults, by date, course
+and race; race 1 of each card cross-checked on the South China Morning
+Post). The comparison is `scripts/horse/hk_pooling_check.py` (Club
+dividend per HK$10, divided by five, against the US $2 payout, exact
+decimals; `python -I` it to reprint the table).
+
+| Meeting | Races | Win and place payouts compared | Equal to the cent |
+|---|---:|---:|---:|
+| Sha Tin, 2026-11-14 (race 6 abandoned; the US page numbers the rest 1–10) | 10 | 41 | 41 |
+| Happy Valley, 2026-11-11 | 9 | 36 | 36 |
+| Sha Tin race 1 exotics (quinella, quinella place ×3, forecast, tierce, trio) | 1 | 7 | 7 |
+
+Two details show the Club's figures passed straight through. A place payout of $2.02 (Sha
+Tin race 7, a dead heat for third) is the Club's HK$10.10 divided by five,
+with no separate US rounding. The US quinella and quinella place are sold
+at a $0.20 stake and pay the Club's HK$10 dividend divided by fifty
+($7.35 against HK$367.50).
+
+**Does the site take Hong Kong bets?** Its own page
+(offtrackbetting.com/hong-kong-jockey-club/, undated, read 2026-11-17) says
+its customers can watch and bet Sha Tin and Happy Valley, and calls the
+pools "co-mingled".
+
+**What this settles.** A US wagering site that takes Hong Kong bets
+publishes, for November 2026, the Club's own dividends as its payouts. So
+the Hong Kong pool files (and the archive the racing doc names) describe the
+price that site's customers are shown as paid.
+
+**What it does not.** No bet was placed, so a settled payout was not seen
+(that needs an account). A results feed that converts the host's dividends
+would print the same figures, so the page alone cannot rule that out; the
+site's own "co-mingled" statement is what points to pooling. It is one
+site: Xpressbet's results page did not open ("Oops, there is nothing
+here!", 2026-11-17), and the others were not checked. Which states Off Track
+Betting serves, and how late any US outlet takes a Hong Kong bet, are still
+not established.
