@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, Discord /pick page always lists FD, DK, Fanatics, BetMGM, Caesars and does not open the app |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, X posts the day's best four pre-game picks, each with a rationale reply; the 2099 pause row was what stopped the slate |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, Picks tab "Bet all" banner gets the cards' 16pt side inset so it lines up |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: a daily worker job stores each new Betfair ANZ month (never overwrites, reads every row back); run against production, 0 to fetch (#1371) |
