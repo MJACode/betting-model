@@ -73,9 +73,17 @@ check(
   'the pill has hitSlop inside the bar, not down into the player name',
   /hitSlop=\{\{\s*top:\s*12,\s*bottom:\s*0/.test(pill),
 );
+// 2026-11-16 (Matt): chevron only. iOS 26+ draws a glass bubble behind the
+// left slot; with the word "Back" in it the bubble hugged the text and read
+// as a cramped grey pill. A centered 44pt square makes it a circle.
+const pillFn = code(/function BackPill[\s\S]*?\n}\n/.exec(pill)?.[0] ?? '');
+check('the Back button function is present', pillFn.length > 0);
+check('the Back button draws a chevron', /name="chevron-back"/.test(pillFn));
+check('the Back button draws no "Back" word (chevron only)', !/<Text\b/.test(pillFn));
+const pillStyle = /pill:\s*\{([^}]+)\}/.exec(pill)?.[1] ?? '';
 check(
-  'the label stays one line and caps at 2×',
-  /numberOfLines=\{1\}/.test(pill) && /maxFontSizeMultiplier=\{2\}/.test(pill),
+  'the chevron is centered in its square (the iOS bubble becomes a circle)',
+  /alignItems:\s*'center'/.test(pillStyle) && /justifyContent:\s*'center'/.test(pillStyle),
 );
 check('the pill sits above an overlapping title', /zIndex:\s*20/.test(pill) && /elevation:\s*20/.test(pill));
 check(
@@ -124,9 +132,14 @@ check(
   'the player name is a single truncating header title',
   /headerTitle: \(props\) => <PlayerStatsHeaderTitle \{\.\.\.props\} \/>/.test(player),
 );
+check('the Back button reserves 44pt at 1× and 2×', back.backButtonWidth(1) === 44 && back.backButtonWidth(2) === 44);
 check(
-  'a 390pt window at 1× leaves the name short of the pill',
-  back.playerTitleMaxWidth(390, 1) === 162,
+  'a 390pt window at 1× leaves the name short of the button (390 − 2 × (16 + 44 + 8))',
+  back.playerTitleMaxWidth(390, 1) === 254,
+);
+check(
+  'a Settings section title gets the same room as the player name',
+  back.settingsTitleMaxWidth(390, 1) === 254,
 );
 check(
   'font scale above 2 does not widen the reserved pill',

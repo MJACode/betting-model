@@ -5,13 +5,14 @@
 
 import { Platform } from 'react-native';
 
+import { bootScheme } from './appearance';
 import type { MatchupGrade } from './matchup';
 import { pnlTone } from './tone';
 import { FONT_SIZE_MICRO } from './typeScale';
 
 const BRAND_INK = '#0B1320'; // the S itself; also `tint` (one literal, two names)
 
-export const colors = {
+const lightColors = {
   // System backgrounds
   bg: '#F2F2F7',
   bgElevated: '#FFFFFF',
@@ -38,6 +39,21 @@ export const colors = {
   // A light wash on a dark or tint fill — the count bubble inside an
   // active filter chip. White at 25%.
   inverseWash: '#FFFFFF40',
+  // Text and icons on the navy brand chrome (tab bar, betslip bar, sign-in,
+  // paywall, lock card). White in BOTH themes: the chrome stays navy, while
+  // `textInverse` above means "on a tint fill" and goes dark in Dark, where
+  // tint is amber. Same value as textInverse in Light, so Light is unchanged.
+  onChrome: '#FFFFFF',
+  onChromeSecondary: '#FFFFFFB8',
+  // Text on a bright third-party fill (the DraftKings green handoff). Black in
+  // both themes; textPrimary goes white in Dark.
+  onBright: '#000000',
+  // A navy chrome SURFACE that sits on the page (lock card, BYOM count bar,
+  // the "Unlock Discord early" button, the delete toast). brandNavy in Light;
+  // a step up in Dark, where the page itself is brandNavy and a navy card
+  // would have no edge. `chromeSurfaceRaised` is the well inside one.
+  chromeSurface: '#0B1220',
+  chromeSurfaceRaised: '#152034',
 
   // Separators
   separator: '#3C3C4349',
@@ -162,6 +178,67 @@ export const colors = {
   negative: '#FF3B30',
   neutral: '#C7C7CC',
 };
+
+/**
+ * Dark — brand navy (Matt, 2026-11-16): the banner's #0B1220 ground, cards a
+ * step up. Tint is the brand amber (8.4:1 on bgCard), which is why
+ * `textInverse` (content on a tint fill) is the near-black ink here. Every
+ * text token is measured on its grounds by scripts/verify_contrast_tokens.ts.
+ * The bright FILLS (bet / avoid / med / brand / the books) do not change.
+ */
+const darkColors: typeof lightColors = {
+  ...lightColors,
+  bg: '#0B1220',
+  bgElevated: '#1C2944',
+  bgGrouped: '#0B1220',
+  bgCard: '#16213A',
+
+  textPrimary: '#F2F4F8',
+  textSecondary: '#C3CBD8',
+  // Darker than secondary here (the hierarchy is reversed on a dark ground).
+  textTertiary: '#97A2B4',
+  pausedInk: '#A9B3C3',
+  textInverse: '#0B1320',
+  textInverseSecondary: '#0B1320B8',
+  inverseWash: '#0B132040',
+  chromeSurface: '#152034',
+  chromeSurfaceRaised: '#22314F',
+
+  separator: '#FFFFFF26',
+  separatorOpaque: '#2A3753',
+  switchTrackOff: '#6E7A90',
+
+  tint: '#F2B01E',
+  tintSoft: '#3A3320',
+  scrim: '#00000099',
+  info: '#4DA3FF',
+
+  betSoft: '#0F2E22',
+  avoidSoft: '#3A1C22',
+  matchupEmpty: '#2E3A52',
+  noneSoft: '#202C44',
+
+  betInk: '#4CD07A',
+  avoidInk: '#FF8A80',
+  medInk: '#FFB648',
+
+  // Lightness still falls good -> mid -> bad (L 0.499 / 0.476 / 0.334).
+  gradeGood: '#5AD282',
+  gradeMid: '#B0B8C6',
+  gradeBad: '#F2786E',
+
+  medSoft: '#33280F',
+  best: '#E8B53A',
+  neutral: '#3A4558',
+};
+
+/** The scheme this run started in (lib/appearance.ts: it changes at the next open). */
+export const isDark = bootScheme() === 'dark';
+
+export const colors = isDark ? darkColors : lightColors;
+
+/** For scripts/verify_contrast_tokens.ts only. */
+export const __palettes = { light: lightColors, dark: darkColors };
 
 /**
  * Abbreviation discs on the Scoreboard. White text. Dark fills only —
