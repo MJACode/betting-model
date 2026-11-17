@@ -103,7 +103,7 @@ check(
 check(
   'grid order then legal',
   home.SETTINGS_GRID_SECTIONS.join(',') ===
-    'sportsbooks,bankroll,notifications,explore,community,account' &&
+    'sportsbooks,bankroll,notifications,appearance,explore,community,account' &&
     home.SETTINGS_LEGAL_SECTION === 'legal',
 );
 check('titles match the approved board', home.SETTINGS_SECTION_TITLE.notifications === 'Notifications');

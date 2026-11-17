@@ -1,7 +1,7 @@
 {
   "name": "signalbase-mobile",
   "version": "0.1.0",
-  "main": "node_modules/expo/AppEntry.js",
+  "main": "index.tsx",
   "scripts": {
     "start": "expo start",
     "ios": "expo start --ios",

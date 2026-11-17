@@ -63,8 +63,18 @@ under a second?**
 ## 2. Tokens
 
 Everything visual comes from `src/lib/theme.ts`. The reason is not taste: the
-app is light-only today, and a hard-coded colour is the thing that breaks
-first when that changes.
+app has a Light and a Dark palette (Settings > Appearance, 2026-11-16), and a
+hard-coded colour is the thing that breaks in one of them.
+
+- **Check a change in both themes.** Dark is brand navy: `bg` is `brandNavy`,
+  `tint` is the brand amber, and `textInverse` means content ON A TINT FILL
+  (near-black in Dark). Text on the navy chrome is `onChrome`, text on a
+  bright fill (DraftKings green, the bet-green count) is `onBright`, and a navy
+  card or button that sits on the page is `chromeSurface` — each is fixed
+  across themes. `textInverse` on navy, `textPrimary` on a bright fill and
+  `brandNavy` as a card on the page are Should-fix findings: each one vanishes
+  in Dark. Amber as text is fine in Dark (8.4:1 on `bgCard`); in Light it is
+  still never text on a light surface.
 
 - No hex literals outside `theme.ts`. The scan reports these; the existing
   exceptions are modal backdrops (`#00000055`) and two `#FFF4E5` MED tints, and
