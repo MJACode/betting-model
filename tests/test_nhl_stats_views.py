@@ -112,15 +112,10 @@ def test_no_scorer_or_card_reads_the_new_names():
 
 
 def _pg_bin(name: str) -> str | None:
-    import shutil
-    found = shutil.which(name)
-    if found:
-        return found
-    for version in ("17", "16", "15", "14"):
-        path = Path(f"/usr/lib/postgresql/{version}/bin/{name}")
-        if path.is_file():
-            return str(path)
-    return None
+    # One finder for every scratch test (tests/_pg.py). This file's own list
+    # stopped at 17 and failed CI once the runner installed 18.
+    from tests._pg import pg_bin
+    return pg_bin(name)
 
 
 def _date_filter_runs_before_dedupe(plan: list) -> bool:
