@@ -1,6 +1,6 @@
-"""The Discord book name opens /pick/<id>. The page tries the app, then
-lists the books. No request leaves the process in these tests: the database
-read is replaced.
+"""The Discord book name opens /pick/<id>. The page is the book picker.
+It does not open the Signalbase app. No request leaves the process in these
+tests: the database read is replaced.
 """
 from __future__ import annotations
 
@@ -9,8 +9,9 @@ import threading
 import pytest
 
 from monitoring import server
+from tracking.book_slip_links import page_url
 from tracking.pick_landing import (
-    DEFAULT_ORIGIN, app_open_url, book_rows_for_pick, landing_url,
+    ALWAYS_ON_PAGE, DEFAULT_ORIGIN, book_rows_for_pick, landing_url,
     page_for_context, parse_pick_path, render_html, render_pick_http,
 )
 import tracking.pick_landing as landing
@@ -60,7 +61,6 @@ def test_the_landing_url_is_https_on_the_worker():
     assert parse_pick_path("/pick/42") == 42
     assert parse_pick_path("/pick/0") is None
     assert parse_pick_path("/pick/42/extra") is None
-    assert app_open_url(42) == "signalbase://pick/42"
 
 
 def test_the_page_lists_books_and_marks_the_best_price():
@@ -92,6 +92,31 @@ def test_the_page_lists_books_and_marks_the_best_price():
     assert "Pinnacle" not in by_name
     assert rows[0]["name"] == "FanDuel"
     assert "selectionId=9" not in by_name["FanDuel"]["url"]
+    # The five books are on the page even with no stored price.
+    assert {"FanDuel", "DraftKings", "Fanatics", "BetMGM", "Caesars"} <= set(by_name)
+    assert by_name["Fanatics"]["price_text"] is None
+    assert by_name["Fanatics"]["url"] == page_url("fanatics")
+    assert by_name["Caesars"]["price_text"] is None
+    assert by_name["Caesars"]["url"] == page_url("williamhill_us")
+    priced = [r["name"] for r in rows if r["price_text"]]
+    assert priced[0] == "FanDuel"
+    assert set(priced) >= {"FanDuel", "DraftKings", "BetMGM"}
+
+
+def test_the_five_books_are_listed_when_only_draftkings_has_a_price():
+    rows = book_rows_for_pick(_pick(best_book=None, best_odds=None, best_bet_link=None))
+    assert [r["name"] for r in rows] == [
+        "DraftKings", "FanDuel", "Fanatics", "BetMGM", "Caesars",
+    ]
+    assert rows[0]["is_best"] is True and rows[0]["price_text"] == "-110"
+    assert rows[0]["url"] == DK
+    for row in rows[1:]:
+        assert row["price_text"] is None and row["is_best"] is False
+        assert row["url"].startswith("https://")
+        assert row["kind"] == "page"
+    assert tuple(ALWAYS_ON_PAGE) == (
+        "fanduel", "draftkings", "fanatics", "betmgm", "williamhill_us",
+    )
 
 
 def test_a_live_pick_does_not_use_a_pregame_quote():
@@ -102,8 +127,12 @@ def test_a_live_pick_does_not_use_a_pregame_quote():
         "under_price": -101,
         "under_link": FD,
     }])
-    assert [r["name"] for r in rows] == ["DraftKings"]
-    assert rows[0]["url"] == DK
+    assert rows[0]["name"] == "DraftKings" and rows[0]["url"] == DK
+    assert rows[0]["is_best"] is True
+    assert {r["name"] for r in rows} >= {
+        "FanDuel", "DraftKings", "Fanatics", "BetMGM", "Caesars",
+    }
+    assert "fanduel.com/addToBetslip" not in " ".join(r["url"] for r in rows)
 
 
 def test_a_non_bet_lists_nothing():
@@ -113,11 +142,12 @@ def test_a_non_bet_lists_nothing():
     assert page["app_url"] == "signalbase://pick/7"
 
 
-def test_the_html_tries_the_app_and_escapes_the_label():
+def test_the_html_does_not_open_the_app_and_escapes_the_label():
     page = page_for_context(42, _pick(pick_label='<script>alert(1)</script> Under'))
     html = render_html(page)
-    assert 'f.src="signalbase://pick/42"' in html
-    assert 'href="signalbase://pick/42"' in html
+    assert "signalbase://" not in html
+    assert "iframe" not in html
+    assert "<script" not in html
     assert "window.location" not in html
     assert "<script>alert" not in html
     assert "&lt;script&gt;" in html
@@ -139,15 +169,16 @@ def test_a_failed_read_does_not_include_the_error(monkeypatch):
     text = body.decode()
     assert status == 200
     assert "secret" not in text and "postgres" not in text
-    assert "signalbase://pick/9" in text
+    assert "signalbase://" not in text
     assert "No sportsbook link" in text
 
 
-def test_a_missing_pick_still_offers_the_app(monkeypatch):
+def test_a_missing_pick_does_not_open_the_app(monkeypatch):
     monkeypatch.setattr(landing, "fetch_pick_context", lambda _pick_id: None)
     status, body = render_pick_http(9)
     text = body.decode()
-    assert status == 200 and "signalbase://pick/9" in text
+    assert status == 200
+    assert "signalbase://" not in text
     assert "No sportsbook link" in text
 
 
@@ -163,8 +194,10 @@ def test_the_http_route_needs_no_token(monkeypatch):
             body = resp.read().decode()
             assert resp.status == 200
             assert "text/html" in resp.headers["Content-Type"]
-        assert "signalbase://pick/42" in body
-        assert "FanDuel" in body and "Best" in body
+        assert "signalbase://" not in body
+        assert "FanDuel" in body and "DraftKings" in body
+        assert "Fanatics" in body and "BetMGM" in body and "Caesars" in body
+        assert "Best" in body
         assert "s3cret" not in body
         with pytest.raises(urllib.error.HTTPError) as denied:
             urllib.request.urlopen(base + "/api/snapshot", timeout=5)
