@@ -94,6 +94,11 @@ BEGIN
 
   REVOKE ALL ON FUNCTION public.byom_bets(integer, jsonb, text) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION public.byom_bets(integer, jsonb, text)
-    TO anon, authenticated, service_role;
+    TO anon, authenticated;
+  -- service_role exists on Supabase, not on a scratch database.
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.byom_bets(integer, jsonb, text)
+      TO service_role;
+  END IF;
 END
 $mig$;

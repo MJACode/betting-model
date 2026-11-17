@@ -88,7 +88,8 @@ def test_migration_is_active_and_safe():
     for col in ("actual numeric", "home_score numeric", "away_score numeric"):
         assert col in sql
     assert "FROM PUBLIC" in sql
-    assert "TO anon, authenticated, service_role" in sql
+    assert "TO anon, authenticated;" in sql
+    assert "TO service_role;" in sql
     assert "picks" not in sql.lower().replace("does not write picks", "")
 
 
