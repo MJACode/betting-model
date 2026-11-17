@@ -2506,7 +2506,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
           : '') +
         (pick.model_id === 'ncaabw_total_blend'
           ? ' An opening total can change within minutes: check the book’s total and price before you bet.' +
-            ' This pick is for the book, total and price shown, not a later one.'
+            ' This pick is for the total and price shown at the book named, not a later one.'
           : '') +
         (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
         (nbaPosted ? ' Void if the player doesn’t play.' : ''),

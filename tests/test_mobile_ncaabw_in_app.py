@@ -271,8 +271,10 @@ def test_the_model_page_says_when_the_womens_total_is_decided():
     assert "at DraftKings’ opening total, usually within minutes of it posting" in flat
     assert "DraftKings opens most totals on the day of the game, some up to six days before" in flat
     # The best book at DraftKings' opening moment (mike, 2026-11-16): never "bets at DraftKings".
-    assert "takes the best total and price among the books that have one up" in flat
-    assert "only if DraftKings still offers its opening total at the same prices" in flat
+    assert "bets at the book with the best total and price among those that have one up, which may" in flat
+    assert "not be DraftKings" in flat
+    assert "only while DraftKings still offers its opening total at the same prices" in flat
+    assert "If DraftKings has moved that total or either price, it skips the game" in flat
     assert "bets at DraftKings" not in flat.replace("’", "'") and "It bets at DraftKings" not in flat
     assert "it skips the game" in flat
     assert "An opening total can change within minutes" in flat
@@ -576,6 +578,6 @@ def test_the_copy_says_a_pick_is_for_the_total_shown_not_a_later_one():
     """A pick at a different number is a different bet (CLAUDE.md 1c), and
     "check the total" alone does not say so. Since the best book (mike,
     2026-11-16) the book is part of the bet too."""
-    assert "This pick is for the book, total and price shown, not a later one." in _read(MARKETS)
+    assert "This pick is for the total and price shown at the book named, not a later one." in _read(MARKETS)
     meta = " ".join(re.sub(r"'\s*\+\s*'", "", _read(MODEL_META)).split())
-    assert "The pick is for the book, total and price shown, not a later one." in meta
+    assert "The pick is for the total and price at the book it names, not a later one." in meta

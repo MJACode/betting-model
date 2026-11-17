@@ -109,8 +109,9 @@ check('its page says it decides at DraftKings\' opening total, usually on the da
     && timing.body.includes('DraftKings opens most totals on the day of the game, some up to six days before'),
   `${timing.title} | ${timing.body}`);
 check('its page says it takes the best book at that moment, only while the opening total stands, and that it moves',
-  timing.body.includes('takes the best total and price among the books that have one up')
-    && timing.body.includes('only if DraftKings still offers its opening total at the same prices')
+  timing.body.includes('bets at the book with the best total and price among those that have one up, which may not be DraftKings')
+    && timing.body.includes('only while DraftKings still offers its opening total at the same prices')
+    && timing.body.includes('If DraftKings has moved that total or either price, it skips the game')
     && !timing.body.includes('It bets at DraftKings')
     && timing.body.includes('it skips the game') && timing.body.includes('An opening total can change within minutes')
     && timing.body.includes('check the book’s total and price') && timing.body.includes('never re-priced')
