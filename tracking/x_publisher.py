@@ -1,29 +1,57 @@
 """
-Post every released pre-game pick, and the settled recaps, to X
+Post the day's best pre-game picks, and the settled recaps, to X
 (@signalbasepicks).
 
 SCOPE. mike, 2026-08-30, chose "A without links": one free pick plus the
 settled recap. mike, 2026-10-18, widened that to every pre-game pick the
 system releases, and later the same day took the free-pick concept off X:
-every pick post is the same format. No "Free pick" label, no "More in
-Discord", no hashtags, and X does not read or wait on Discord's free-pick
-choice. Discord's own free pick is unchanged and is not an input here.
-Live picks stay off X.
+every pick post is the same format. mike, 2026-11-17, narrowed it again:
+X gets the best of the day, not the whole slate. No "Free pick" label, no
+hashtags, and X does not read or wait on Discord's free-pick choice.
+Discord's own free pick is unchanged and is not an input here. Live picks
+stay off X. Each pick tweet, or its reply when the tweet cannot hold the
+sentence, says in plain words that all picks are in the free Discord and
+the stat sheet. That sentence has no URL.
 
-X_POST_ALL_PICKS defaults to on, which posts that slate. 0, false, no, or
-off posts no pick slate. Off used to mean "the free pick only"; that mode
-is gone, because X has no free pick to fall back to. The daily recap is
-notify_x_results (yesterday, inside the 6:00am ET pipeline) and is not
-affected by this flag. The week and the previous calendar month are
-notify_x_period, the same renderer, Monday 7:30am ET. RUN_X_PUBLISHER=0
-still stops the slate and every recap.
+THE DAY'S CARD. At most 4 confirmed pick tweets per America/New_York date.
+The pool is the released pre-game set Discord's sport channels use
+(`_new_signals` with the Discord ledger ignored): BET, not live, not
+paused, not VOID, clearing the same action cut, game not started. Rank is
+the decision edge (`decision_edge`, else `edge`), then expected value at
+the price taken (model probability times the decimal odds, minus 1), then
+model probability. An earlier `created_at` breaks a tie. One pick per
+game. The card takes the best pick of each sport that is not already on
+today's card before it takes a second pick from a sport, then fills
+remaining slots by the same rank, and the send order is that rank. Fewer
+than 4 go out when fewer picks are released. A pick whose game has started
+is not tweeted and is not ledgered, so it does not use a slot.
 
-Pick posts are one tweet per call, at least 10 minutes after the previous
-x_pick row, and never between 1:00am and 8:00am ET. A pick whose game has
-already started is not tweeted and is not ledgered. The 5-minute social
-job and the pipeline refresh both call notify_x_picks; the session lock
-plus the ledger timestamp keep those two from sending a pair. Recaps are
-not on this clock.
+X_POST_ALL_PICKS defaults to on, which posts that card. 0, false, no, or
+off posts no pick slate. The name is the old switch; on no longer means
+every released pick. The daily recap is notify_x_results (yesterday,
+inside the 6:00am ET pipeline) and is not affected by this flag. The week
+and the previous calendar month are notify_x_period, the same renderer,
+Monday 7:30am ET. RUN_X_PUBLISHER=0 still stops the card and every recap.
+
+Pick posts are one tweet per call, normally at least 10 minutes after the
+previous real x_pick row, and normally never between 1:00am and 8:00am ET.
+A future sent_at is not a real post. The row
+PAUSE:x_pick_alerts:approved-by-mike-2026-11-10 at 2099-01-01 was the
+pause mike approved on 2026-11-10, and it sat at the front of the gap
+clock, so every later pick waited forever. A stamp more than a day ahead
+of the call, and any lock_key that starts with PAUSE:, is ignored by the
+gap and by the daily count. The gap and the quiet window are also waived
+for a card pick whose game would start before the hold ends, so the hold
+cannot drop that pick or push the tweet past the start. The 5-minute
+social job and the pipeline refresh both call notify_x_picks; the session
+lock plus the ledger timestamp keep those two from sending a pair. Recaps
+are not on this clock.
+
+After a pick tweet is confirmed, a reply is posted under it. The reply is
+built only from numbers and text already stored on the pick. It is
+ledgered as x_pick_reply, and only after a confirmed 2xx. A failed reply
+does not un-send or re-send the pick tweet. The pick tweet's id is the
+push_sent.message_id, which a later call uses to retry the reply.
 
 Manual marketing posts are not rendered here. They are rows in
 social_post_queue, drained by tracking.social_posts, and they call
@@ -54,9 +82,9 @@ its suite as the only gate.
 Env (Railway Variables, all four required or this no-ops):
     X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET
 Kill switch: RUN_X_PUBLISHER=0
-Slate switch: X_POST_ALL_PICKS=1 (default) posts every released pre-game
-    pick, each in the same format. =0 posts no pick slate. It does not
-    restore a free-pick-only tweet; X no longer has one.
+Slate switch: X_POST_ALL_PICKS=1 (default) posts the day's card, at most
+    4 pre-game picks. =0 posts no pick slate. It does not restore a
+    free-pick-only tweet; X no longer has one.
 No hashtags. mike, 2026-11-10: X had started treating @SignalBasePicks as
     spam (reach at 0-10 views, some posts hidden), and the stacked tags
     were a likely cause. Pick posts and the daily, weekly, and monthly
@@ -151,6 +179,9 @@ X_PROFILE_URL = "https://api.x.com/1.1/account/update_profile.json"
 PROFILE_NAME_MAX = 50
 PROFILE_DESCRIPTION_MAX = 160
 MAX_TWEET = 280
+# On the pick tweet when it fits, otherwise on the reply. No URL: X bills
+# a link at $0.20 instead of $0.015, and _assert_no_link refuses one.
+ALL_PICKS_NOTE = "All picks are in the free Discord and the stat sheet."
 # twitter-text v3, the count X enforces. A code point in one of these
 # ranges is one weighted character. Emoji and everything else are two.
 # Scale is 100, so a configured weight of 200 is two characters. A URL
@@ -177,8 +208,8 @@ def post_all_picks() -> bool:
 
     Off ('0', 'false', 'no', 'off') posts no pick slate. The settled recap
     is a different function and still runs. Anything else, including an
-    unset variable, posts every released pre-game pick. There is no
-    free-pick-only mode on X.
+    unset variable, posts the day's card (at most 4 pre-game picks). There
+    is no free-pick-only mode on X, and on is not the whole released slate.
     """
     raw = os.environ.get("X_POST_ALL_PICKS", "1").strip().lower()
     return raw not in ("0", "false", "no", "off")
@@ -451,6 +482,8 @@ def _render_pick(pick: dict) -> str:
             pinned.append(matchup)
         if when:
             pinned.append(when)
+        # The note stays whole. The body shortens before this sentence does.
+        pinned.append(ALL_PICKS_NOTE)
         return pinned
 
     base = _body(None)
@@ -993,14 +1026,28 @@ def _ledger(conn, lock_key: str, kind: str, tweet_id: str | None) -> None:
 # and does not tweet that pick again. The row is still written only after
 # a confirmed post. Pacing reads sent_at; it does not insert a claim row.
 X_PICK_KIND = "x_pick"
+# The rationale reply. Written only after X confirms it. A missing row
+# means the reply can be retried; it does not mean the pick tweet failed.
+X_PICK_REPLY_KIND = "x_pick_reply"
+# At most this many confirmed pick tweets on one America/New_York date.
+X_CARD_PER_DAY = 4
 # Minimum gap between two confirmed pick tweets. The 5-minute job is what
-# makes the gap about 10 minutes instead of the hourly refresh.
+# makes the gap about 10 minutes instead of the hourly refresh. The gap
+# is waived when waiting it out would put the tweet at or after the start.
 PICK_MIN_GAP = timedelta(minutes=10)
 # 1:00am inclusive through 8:00am exclusive, America/New_York. 12:35am is
-# before this window. A held pick posts on the first eligible call at or
-# after 8:00am whose game has not started.
+# before this window. A pick whose game starts before 8:00am is not held:
+# holding it would drop it once the game had started.
 _QUIET_START = dt_time(1, 0)
 _QUIET_END = dt_time(8, 0)
+# A stamp further ahead than this is not a real post. The 2099-01-01
+# pause row is the case this exists for.
+_FUTURE_STAMP = timedelta(days=1)
+# Longest prefix first so NCAABW is not read as NCAAB.
+_LOCK_SPORTS = (
+    "NCAABW", "EUROLEAGUE", "NCAAF", "NCAAB", "WNBA", "MLB", "NBA",
+    "NHL", "NFL", "UFC", "ATP", "WTA", "GOLF",
+)
 
 
 def _as_et(now: datetime | None) -> datetime:
@@ -1034,83 +1081,609 @@ def _parse_sent_at(value) -> datetime | None:
     return ts.astimezone(ZoneInfo("UTC"))
 
 
-def _latest_x_pick_sent(conn) -> datetime | None:
-    """Newest x_pick sent_at, or None when no pick has been confirmed.
+def _lock_and_stamp(row) -> tuple:
+    """(lock_key or None, sent_at). A one-column row is a stamp only."""
+    if not row:
+        return None, None
+    if len(row) >= 2:
+        return row[0], row[1]
+    return None, row[0]
+
+
+def _latest_x_pick_sent(conn, now: datetime | None = None) -> datetime | None:
+    """Newest real x_pick sent_at, or None when no pick has been confirmed.
 
     Raises when the read fails or a returned stamp cannot be parsed. The
     caller treats that as "do not post": an unreadable clock cannot prove
     the gap. String order of the offset is wrong across the DST overlap,
     so the newest of the last few rows is taken by parsed time.
+
+    A lock_key that starts with PAUSE: is not a pick. A stamp more than a
+    day ahead of `now` is not a pick either. The pause row dated 2099-01-01
+    is both, and treating it as the latest post held every later pick.
     """
+    clock = _as_et(now) if now is not None else datetime.now(ET)
+    horizon = clock.astimezone(ZoneInfo("UTC")) + _FUTURE_STAMP
     rows = conn.execute(
-        "SELECT sent_at FROM push_sent WHERE kind = %s "
+        "SELECT lock_key, sent_at FROM push_sent WHERE kind = %s "
         "ORDER BY sent_at DESC LIMIT 8",
         (X_PICK_KIND,)).fetchall()
     latest = None
     saw = False
+    unreadable = False
     for row in rows:
+        lock, stamp = _lock_and_stamp(row)
+        if isinstance(lock, str) and lock.startswith("PAUSE:"):
+            continue
         saw = True
-        parsed = _parse_sent_at(row[0])
-        if parsed is not None and (latest is None or parsed > latest):
+        parsed = _parse_sent_at(stamp)
+        if parsed is None:
+            unreadable = True
+            continue
+        if parsed > horizon:
+            continue
+        if latest is None or parsed > latest:
             latest = parsed
-    if saw and latest is None:
+    if saw and latest is None and unreadable:
         raise ValueError("x_pick sent_at unreadable")
     return latest
 
 
 def _x_pick_gap_open(conn, now: datetime) -> bool:
     try:
-        last = _latest_x_pick_sent(conn)
+        last = _latest_x_pick_sent(conn, now)
     except Exception as exc:                                  # noqa: BLE001
         logger.warning(f"X publisher: pick clock unreadable ({exc}) — skipping")
         return False
     if last is None:
         return True
-    return now - last >= PICK_MIN_GAP
+    return _as_et(now).astimezone(ZoneInfo("UTC")) - last >= PICK_MIN_GAP
 
 
-def _game_already_started(pick: dict, now: datetime) -> bool:
-    """True when this pick's commence is at or before now.
+def _commence_instant(pick: dict) -> datetime | None:
+    """The start as a UTC instant. None when it is missing or unparseable.
 
-    A missing or unparseable commence is not treated as started. That is
-    the same rule as the slate query: an unknown start must not drop a pick.
+    A missing start is not treated as started. That is the same rule as
+    the slate query: an unknown start must not drop a pick.
     """
     raw = pick.get("commence")
     if raw is None or raw == "":
-        return False
+        return None
     if isinstance(raw, datetime):
         ts = raw
     else:
         try:
             ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
         except ValueError:
-            return False
+            return None
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=ZoneInfo("UTC"))
+    return ts.astimezone(ZoneInfo("UTC"))
+
+
+def _game_already_started(pick: dict, now: datetime) -> bool:
+    """True when this pick's commence is at or before now.
+
+    A missing or unparseable commence is not treated as started.
+    """
+    ts = _commence_instant(pick)
+    if ts is None:
+        return False
     # Instants, not the ET clock face. The November overlap makes 1:30am EDT
     # compare greater than 1:00am EST when both carry the same tzinfo.
-    return ts.astimezone(ZoneInfo("UTC")) <= _as_et(now).astimezone(ZoneInfo("UTC"))
+    return ts <= _as_et(now).astimezone(ZoneInfo("UTC"))
+
+
+def _num(value):
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _american_implied(odds) -> float | None:
+    """Implied probability of an American price. The price's own number."""
+    a = _num(odds)
+    if a is None or a == 0:
+        return None
+    if a > 0:
+        return 100.0 / (a + 100.0)
+    return abs(a) / (abs(a) + 100.0)
+
+
+def _decimal_american(odds) -> float | None:
+    a = _num(odds)
+    if a is None or a == 0:
+        return None
+    return 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
+
+
+def _rank_edge(pick: dict) -> float | None:
+    """The edge the bet was decided on. `edge` when decision_edge is absent."""
+    edge = _num(pick.get("decision_edge"))
+    if edge is None:
+        edge = _num(pick.get("edge"))
+    return edge
+
+
+def _taken_ev(pick: dict) -> float | None:
+    """model_probability × decimal(the price taken) − 1.
+
+    The same definition config states for EV. Both inputs are stored on
+    the pick. A missing probability or a missing price is not filled in.
+    """
+    prob = _num(pick.get("prob"))
+    odds, _book = _publish_price(pick)
+    dec = _decimal_american(odds)
+    if prob is None or dec is None:
+        return None
+    return prob * dec - 1.0
+
+
+def _score_key(pick: dict) -> tuple:
+    edge = _rank_edge(pick)
+    ev = _taken_ev(pick)
+    prob = _num(pick.get("prob"))
+    return (
+        edge is not None,
+        0.0 if edge is None else edge,
+        ev is not None,
+        0.0 if ev is None else ev,
+        prob is not None,
+        0.0 if prob is None else prob,
+    )
+
+
+def _sorted_best(picks: list[dict]) -> list[dict]:
+    """Highest decision edge, then EV, then probability.
+
+    An earlier created_at wins a tie. A missing number sorts below a real
+    one and is not treated as zero.
+    """
+    ordered = sorted(picks, key=lambda p: str(p.get("posted_at") or ""))
+    return sorted(ordered, key=_score_key, reverse=True)
+
+
+def _is_live_row(pick: dict) -> bool:
+    if pick.get("is_live") or pick.get("live"):
+        return True
+    return "_live_" in str(pick.get("model_id") or "")
+
+
+def _game_of(pick: dict) -> str:
+    gid = pick.get("game_id")
+    if gid:
+        return str(gid)
+    key = str(pick.get("lock_key") or "")
+    if ":" in key:
+        return key.split(":", 1)[0]
+    return key
+
+
+def _sport_of_lock(lock_key: str) -> str:
+    game = str(lock_key).split(":", 1)[0]
+    for sport in _LOCK_SPORTS:
+        if game == sport or game.startswith(sport + "_"):
+            return sport
+    return ""
+
+
+def choose_x_card(picks: list[dict], limit: int = X_CARD_PER_DAY,
+                  sports_already=()) -> list[dict]:
+    """The picks this call may still send, best first, at most `limit`.
+
+    Live rows are dropped. One pick per game: the higher rank keeps the
+    game. The best pick of each sport that is not already in
+    `sports_already` is taken before a second pick from any sport. Slots
+    that remain are filled by rank. The returned list is in send order,
+    which is the rank, not the order the sports were spread.
+    """
+    if limit <= 0:
+        return []
+    used = {s for s in sports_already if s}
+    by_game: dict[str, dict] = {}
+    for pick in picks:
+        if _is_live_row(pick):
+            continue
+        gid = _game_of(pick)
+        if not gid:
+            continue
+        prev = by_game.get(gid)
+        if prev is None or _score_key(pick) > _score_key(prev) or (
+                _score_key(pick) == _score_key(prev)
+                and str(pick.get("posted_at") or "") < str(prev.get("posted_at") or "")):
+            by_game[gid] = pick
+    pool = list(by_game.values())
+    by_sport: dict[str, dict] = {}
+    for pick in pool:
+        sport = str(pick.get("sport") or "")
+        prev = by_sport.get(sport)
+        if prev is None or _score_key(pick) > _score_key(prev) or (
+                _score_key(pick) == _score_key(prev)
+                and str(pick.get("posted_at") or "") < str(prev.get("posted_at") or "")):
+            by_sport[sport] = pick
+    chosen: list[dict] = []
+    seen: set[str] = set()
+
+    def take(pick: dict) -> None:
+        if len(chosen) >= limit:
+            return
+        gid = _game_of(pick)
+        if gid in seen:
+            return
+        chosen.append(pick)
+        seen.add(gid)
+
+    fresh = [p for sport, p in by_sport.items() if sport not in used]
+    for pick in _sorted_best(fresh):
+        take(pick)
+    for pick in _sorted_best(list(by_sport.values())):
+        take(pick)
+    for pick in _sorted_best(pool):
+        take(pick)
+    return _sorted_best(chosen)
+
+
+def _clean_clause(text) -> str | None:
+    """A stored sentence that can go in a reply. A link or a tag cannot."""
+    if text is None:
+        return None
+    raw = " ".join(str(text).split())
+    if not raw or "#" in raw or len(raw) > 180:
+        return None
+    try:
+        _assert_no_link(raw)
+    except ValueError:
+        return None
+    if raw[-1] not in ".!?":
+        raw += "."
+    return raw
+
+
+def render_rationale(pick: dict, *, include_note: bool = False) -> str:
+    """2–4 sentences from numbers the pick already stores. Empty when none.
+
+    Nothing here is estimated. Probability, edge, and the public and
+    injury fields are copied off the row. Expected value is the repo's
+    formula on the stored probability and the price the tweet names.
+    Implied probability is that price's own American number. A stored
+    implied of 0 is not used. The all-picks sentence is added only when
+    the pick tweet could not hold it.
+    """
+    sentences: list[str] = []
+    prob = _num(pick.get("prob"))
+    edge = _rank_edge(pick)
+    odds, _book = _publish_price(pick)
+    implied = _american_implied(odds)
+    if implied is None:
+        stored = _num(pick.get("dk_implied_prob"))
+        if stored is not None and stored > 0:
+            implied = stored
+    if prob is not None and implied is not None and edge is not None:
+        sentences.append(
+            f"The model prices this at {prob * 100:.1f}% against "
+            f"{implied * 100:.1f}% implied by the price taken, "
+            f"an edge of {edge * 100:.1f} percentage points.")
+    elif prob is not None and implied is not None:
+        sentences.append(
+            f"The model prices this at {prob * 100:.1f}% against "
+            f"{implied * 100:.1f}% implied by the price taken.")
+    elif edge is not None:
+        sentences.append(
+            f"The edge at the price taken is {edge * 100:.1f} percentage points.")
+    ev = _taken_ev(pick)
+    if ev is not None:
+        sentences.append(
+            f"Expected value at the price taken is {ev * 100:+.1f}%.")
+    reason = _clean_clause(pick.get("stake_reason"))
+    if reason:
+        sentences.append(reason)
+    bets = _num(pick.get("public_bet_pct"))
+    if bets is not None and 0 <= bets <= 100:
+        sentences.append(f"Public tickets on this side are {bets:.0f}%.")
+    money = _num(pick.get("public_money_pct"))
+    if money is not None and 0 <= money <= 100:
+        sentences.append(f"Public money on this side is {money:.0f}%.")
+    injury = _clean_clause(pick.get("injury_detail"))
+    if injury:
+        sentences.append(injury)
+    sentences = sentences[:4]
+    note = ALL_PICKS_NOTE if include_note else ""
+    while sentences:
+        body = " ".join(sentences)
+        text = f"{body} {note}".strip() if note else body
+        if "#" not in text and weighted_len(text) <= MAX_TWEET:
+            try:
+                _assert_no_link(text)
+                return text
+            except ValueError:
+                pass
+        sentences.pop()
+    if note and weighted_len(note) <= MAX_TWEET:
+        try:
+            _assert_no_link(note)
+            return note
+        except ValueError:
+            return ""
+    return ""
+
+
+def _ensure_note(text: str) -> tuple[str, bool]:
+    """(text, note_is_on_it). The sentence is kept whole.
+
+    When the rendered pick already carries it, the text is unchanged.
+    When it does not fit, the body is shortened and the sentence stays.
+    The only False is a sentence that itself cannot fit in one tweet.
+    """
+    if ALL_PICKS_NOTE in text:
+        return text, True
+    candidate = f"{text.rstrip()} {ALL_PICKS_NOTE}".strip()
+    if weighted_len(candidate) <= MAX_TWEET:
+        _assert_no_link(candidate)
+        return candidate, True
+    room = MAX_TWEET - weighted_len(ALL_PICKS_NOTE) - 1
+    if room < 1:
+        return text, False
+    trimmed = _trim(text.rstrip(), room).rstrip()
+    candidate = f"{trimmed} {ALL_PICKS_NOTE}"
+    _assert_no_link(candidate)
+    return candidate, True
+
+
+def _today_x_card(conn, now: datetime) -> tuple[int, set[str]]:
+    """Confirmed pick tweets whose sent_at falls on `now`'s ET date.
+
+    The pause row is not one of them. Raises when the read fails: an
+    unknown count cannot prove the day is still under the cap.
+    """
+    rows = conn.execute(
+        "SELECT lock_key, sent_at FROM push_sent WHERE kind = %s "
+        "ORDER BY sent_at DESC LIMIT 16",
+        (X_PICK_KIND,)).fetchall()
+    day = _as_et(now).date()
+    horizon = _as_et(now).astimezone(ZoneInfo("UTC")) + _FUTURE_STAMP
+    count = 0
+    sports: set[str] = set()
+    for row in rows:
+        lock, stamp = _lock_and_stamp(row)
+        if isinstance(lock, str) and lock.startswith("PAUSE:"):
+            continue
+        parsed = _parse_sent_at(stamp)
+        if parsed is None or parsed > horizon:
+            continue
+        if parsed.astimezone(ET).date() != day:
+            continue
+        count += 1
+        sport = _sport_of_lock(str(lock or ""))
+        if sport:
+            sports.add(sport)
+    return count, sports
+
+
+def _quiet_holds(now: datetime, pick: dict) -> bool:
+    """True when quiet hours should hold this pick.
+
+    A game that starts before 8:00am ET is not held. Holding it would
+    drop it, because a pre-game tweet stops at the start.
+    """
+    if not _in_pick_quiet_hours(now):
+        return False
+    commence = _commence_instant(pick)
+    if commence is None:
+        return True
+    local = _as_et(now)
+    quiet_end = local.replace(
+        hour=_QUIET_END.hour, minute=0, second=0, microsecond=0)
+    return commence > quiet_end.astimezone(ZoneInfo("UTC"))
+
+
+def _gap_would_miss(last: datetime | None, now: datetime, pick: dict) -> bool:
+    """True when waiting out the gap would be at or after the start."""
+    if last is None:
+        return False
+    commence = _commence_instant(pick)
+    if commence is None:
+        return False
+    return commence <= last + PICK_MIN_GAP
+
+
+def _pick_to_send(card: list[dict], now: datetime,
+                  last: datetime | None) -> dict | None:
+    """The one pick this call sends, or None when the hold still applies.
+
+    `card` is best-first. A pick the quiet window or the gap would drop,
+    because its game would start first, goes ahead of a pick that can wait.
+    """
+    now_utc = _as_et(now).astimezone(ZoneInfo("UTC"))
+    gap_open = last is None or now_utc - last >= PICK_MIN_GAP
+    urgent: list[dict] = []
+    ready: list[dict] = []
+    for pick in card:
+        if _quiet_holds(now, pick):
+            continue
+        if gap_open:
+            ready.append(pick)
+        elif _gap_would_miss(last, now, pick):
+            urgent.append(pick)
+    if urgent:
+        return urgent[0]
+    if ready:
+        return ready[0]
+    return None
+
+
+def _pending_replies(conn, now: datetime | None = None) -> list[tuple[str, str]]:
+    """(lock_key, tweet id) for a recent pick tweet with no reply row.
+
+    Only the last 36 hours. The picks posted before this reply existed
+    are not given a rationale a week later. A pause row, a 2xx that
+    returned no id, and a non-numeric id are not retried. The read
+    failure returns nothing: a missed retry is not a second pick tweet.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT p.lock_key, p.message_id, p.sent_at FROM push_sent p "
+            "WHERE p.kind = %s AND p.message_id IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM push_sent r "
+            "WHERE r.lock_key = p.lock_key AND r.kind = %s) "
+            "ORDER BY p.sent_at DESC LIMIT 8",
+            (X_PICK_KIND, X_PICK_REPLY_KIND)).fetchall()
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(f"X picks: reply ledger unreadable ({exc})")
+        return []
+    cutoff = _as_et(now).astimezone(ZoneInfo("UTC")) - timedelta(hours=36)
+    out: list[tuple[str, str]] = []
+    for row in rows:
+        if len(row) < 2:
+            continue
+        lock, mid = row[0], row[1]
+        stamp = row[2] if len(row) > 2 else None
+        if not lock or str(lock).startswith("PAUSE:"):
+            continue
+        parsed = _parse_sent_at(stamp)
+        if parsed is None or parsed < cutoff:
+            continue
+        text = str(mid or "")
+        # X ids are decimal. "posted" is the no-id sentinel and a timestamp
+        # is not an id, so neither is retried.
+        if not text.isdigit():
+            continue
+        out.append((str(lock), text))
+    return out
+
+
+def _load_reply_pick(conn, lock_key: str) -> dict | None:
+    """The stored pick for a reply retry after it has left the slate.
+
+    The slate query drops a game that has started. The reply can still
+    be sent, from the same columns, until the row is found.
+    """
+    game_id = str(lock_key).split(":", 1)[0]
+    if not game_id:
+        return None
+    try:
+        from tracking.publish_keys import lock_key_sql
+        rows = conn.execute(
+            f"""SELECT {lock_key_sql()} AS lock_key,
+                      p.pick_label, p.sport, p.model_id, p.model_probability,
+                      p.edge, p.decision_edge, p.dk_odds, p.dk_implied_prob,
+                      p.best_odds, p.best_book,
+                      COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
+                      p.decision_odds AS decision_odds_raw, p.decision_book,
+                      p.public_bet_pct, p.public_money_pct, p.stake_reason,
+                      p.injury_detail, p.pick_side, p.scored_line, p.game_id,
+                      p.created_at, p.is_live, g.home_team, g.away_team,
+                      g.commence_time
+               FROM picks p
+               LEFT JOIN games g ON g.game_id = p.game_id
+               WHERE p.game_id = %s AND p.signal_type = 'BET'
+               LIMIT 30""",
+            (game_id,)).fetchall()
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(f"X picks: reply pick read failed ({exc})")
+        return None
+    for row in rows:
+        if str(row[0]) != lock_key:
+            continue
+        return {
+            "lock_key": row[0], "label": row[1], "sport": row[2],
+            "model_id": row[3], "prob": row[4], "edge": row[5],
+            "decision_edge": row[6], "dk_odds": row[7],
+            "dk_implied_prob": row[8], "best_odds": row[9],
+            "best_book": row[10], "decision_odds": row[11],
+            "decision_odds_raw": row[12], "decision_book": row[13],
+            "public_bet_pct": row[14], "public_money_pct": row[15],
+            "stake_reason": row[16], "injury_detail": row[17],
+            "side": row[18], "line": row[19], "game_id": row[20],
+            "posted_at": row[21], "is_live": bool(row[22]),
+            "home": row[23], "away": row[24], "commence": row[25],
+        }
+    return None
+
+
+def _send_pick_reply(conn, pick: dict, tweet_id: str, *,
+                     dry_run: bool, include_note: bool) -> str:
+    """Post the rationale under `tweet_id`. Returns posted, failed, or limited.
+
+    A missing reply is not a missing pick. Nothing here deletes or
+    re-sends the pick tweet. The reply row is written only after a
+    confirmed id.
+    """
+    key = pick.get("lock_key")
+    # "posted" is the 2xx-with-no-id sentinel. "dry-run" never left this
+    # process. Anything else is the id the reply threads under, including
+    # a test id that is not all digits.
+    if not key or not tweet_id or str(tweet_id) in ("posted", "dry-run"):
+        return "failed"
+    if _already_sent(conn, key, X_PICK_REPLY_KIND):
+        return "posted"
+    try:
+        text = render_rationale(pick, include_note=include_note)
+    except ValueError as exc:
+        logger.error(f"X publisher: {exc}")
+        return "failed"
+    if not text:
+        logger.info(f"X picks: no stored rationale for {key} — reply skipped")
+        return "failed"
+    reply_id, limited = _deliver_tweet(text, dry_run=dry_run, reply_to=str(tweet_id))
+    if limited:
+        logger.warning(f"X picks: rationale reply for {key} was rate limited")
+        return "limited"
+    if not reply_id:
+        logger.warning(f"X picks: rationale reply for {key} did not post")
+        return "failed"
+    if not dry_run:
+        _ledger(conn, key, X_PICK_REPLY_KIND, reply_id)
+    return "posted"
+
+
+def _retry_one_reply(conn, picks: list[dict], *, dry_run: bool,
+                     now: datetime | None = None) -> str:
+    """One pending reply. 'limited' tells the caller not to send a new pick."""
+    pending = _pending_replies(conn, now)
+    if not pending:
+        return "none"
+    lock, tweet_id = pending[0]
+    by_key = {p.get("lock_key"): p for p in picks if p.get("lock_key")}
+    pick = by_key.get(lock) or _load_reply_pick(conn, lock)
+    if not pick:
+        return "none"
+    note_on_pick = False
+    try:
+        _text, note_on_pick = _ensure_note(render_pick(pick))
+    except ValueError:
+        note_on_pick = False
+    return _send_pick_reply(
+        conn, pick, tweet_id, dry_run=dry_run, include_note=not note_on_pick)
 
 
 def _post_released_picks(conn, target_date: str, dry_run: bool = False,
                          now: datetime | None = None) -> int:
-    """Tweet at most one released pre-game pick that has no X row yet.
+    """Tweet at most one pick from the day's card.
 
-    The set is _new_signals with the Discord ledger ignored: the same picks
-    Discord's sport channels release, including a game dated ahead of today,
-    excluding live and started games. Discord's free-pick choice is not
-    consulted. Order is that query's order. This posts the first one that
-    is not already ledgered and whose game has not started. A pick whose label
-    disagrees with its side and line is refused here, as on every other surface
+    The set is _new_signals with the Discord ledger ignored: the same
+    pre-game picks Discord's sport channels release, including a game
+    dated ahead of today, excluding live and started games. Discord's
+    free-pick choice is not consulted. A pick whose label disagrees with
+    its side and line is refused here, as on every other surface
     (tracking/pick_integrity).
 
-    One confirmed tweet per call. The previous x_pick sent_at must be at
-    least PICK_MIN_GAP old. From 1:00am through 8:00am ET the call posts
-    nothing and writes nothing; the pick stays eligible. A game that has
-    started by send time is skipped and not ledgered, and the call moves
-    to the next pick. Each posted pick is ledgered as x_pick on its own
-    lock_key after a confirmed post. A 429 stops the call; nothing unsent
-    is ledgered, so the next eligible call retries that same pick.
+    The card is choose_x_card: at most X_CARD_PER_DAY confirmed x_pick
+    rows on this ET date, one per game, spread across sports, highest
+    decision edge first. One confirmed tweet per call. The previous real
+    x_pick sent_at is normally at least PICK_MIN_GAP old, and 1:00am
+    through 8:00am ET normally posts nothing. Either hold is skipped for
+    a card pick whose game would start before the hold ends. A game that
+    has already started is not tweeted and not ledgered, so the slot
+    stays open. A 429 stops the call; nothing unsent is ledgered.
+
+    The reply goes out after the pick tweet is confirmed. Its failure
+    does not change the pick's ledger row and does not send the pick
+    again. A pick tweet that already has an id and no reply row is
+    retried once on this call, before a new pick, and a rate limit on
+    that retry sends no new pick.
 
     The session advisory lock is held across the read, the send, and the
     ledger so a pipeline pass and the 5-minute job cannot each send one.
@@ -1118,14 +1691,19 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
     if not post_all_picks():
         return 0
     clock = _as_et(now)
-    if _in_pick_quiet_hours(clock):
-        logger.info("X picks: quiet hours (1:00am–8:00am ET) — holding")
-        return 0
     from tracking.publish_lock import X_PICKS_LOCK, publish_lock
     with publish_lock(conn, X_PICKS_LOCK, "X picks") as owned:
         if not owned:
             return 0
-        if not _x_pick_gap_open(conn, clock):
+        try:
+            last = _latest_x_pick_sent(conn, clock)
+        except Exception as exc:                              # noqa: BLE001
+            logger.warning(f"X publisher: pick clock unreadable ({exc}) — skipping")
+            return 0
+        try:
+            posted_today, sports_today = _today_x_card(conn, clock)
+        except Exception as exc:                              # noqa: BLE001
+            logger.warning(f"X publisher: day count unreadable ({exc}) — skipping")
             return 0
         try:
             from tracking.discord_notifier import _new_signals
@@ -1137,8 +1715,15 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"X slate failed: {exc}")
             return 0
-        posted = 0
+        if _retry_one_reply(conn, picks, dry_run=dry_run, now=clock) == "limited":
+            return 0
+        if posted_today >= X_CARD_PER_DAY:
+            logger.info(f"X picks: {posted_today} already posted today — holding")
+            return 0
+        fresh = []
         for pick in picks:
+            if _is_live_row(pick):
+                continue
             key = pick.get("lock_key")
             if not key:
                 continue
@@ -1147,45 +1732,55 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
             if _game_already_started(pick, clock):
                 logger.info(f"X picks: {key} game has started — not posting")
                 continue
-            try:
-                text = render_pick(pick)
-            except ValueError as exc:
-                logger.error(f"X publisher: {exc}")
-                continue
-            tweet_id, limited = _deliver_tweet(text, dry_run=dry_run)
-            if limited:
-                logger.warning(
-                    "X publisher: rate limited — this pick waits for the next pass")
-                break
-            if not tweet_id:
-                continue
-            if not dry_run:
-                _ledger(conn, key, X_PICK_KIND, tweet_id)
-            posted += 1
-            break
-        if posted:
-            logger.info(f"X: {posted} pick(s) tweeted")
-        return posted
+            fresh.append(pick)
+        slots = X_CARD_PER_DAY - posted_today
+        card = choose_x_card(fresh, limit=slots, sports_already=sports_today)
+        pick = _pick_to_send(card, clock, last)
+        if pick is None:
+            if card and all(_quiet_holds(clock, p) for p in card):
+                logger.info("X picks: quiet hours (1:00am–8:00am ET) — holding")
+            return 0
+        key = pick.get("lock_key")
+        try:
+            text, note_on_pick = _ensure_note(render_pick(pick))
+        except ValueError as exc:
+            logger.error(f"X publisher: {exc}")
+            return 0
+        tweet_id, limited = _deliver_tweet(text, dry_run=dry_run)
+        if limited:
+            logger.warning(
+                "X publisher: rate limited — this pick waits for the next pass")
+            return 0
+        if not tweet_id:
+            return 0
+        if not dry_run:
+            _ledger(conn, key, X_PICK_KIND, tweet_id)
+        _send_pick_reply(
+            conn, pick, tweet_id, dry_run=dry_run, include_note=not note_on_pick)
+        logger.info("X: 1 pick tweeted")
+        return 1
 
 
 def notify_x_picks(target_date: str | None = None,
                    dry_run: bool = False,
                    now: datetime | None = None) -> int:
-    """Tweet the next released pre-game pick that is not already on X.
+    """Tweet the next pick on the day's card that is not already on X.
 
     One format for every pick. This does not read Discord's free-pick row,
     does not wait for that choice, and does not label one tweet differently.
     Each pick is ledgered on its own lock key, so a later pass posts only
-    picks that were not confirmed. One call confirms at most one tweet, and
-    only when the last x_pick is at least 10 minutes old and the ET clock
-    is outside 1:00am–8:00am.
+    picks that were not confirmed. One call confirms at most one pick
+    tweet. The card is at most 4 picks on the ET date. The last real
+    x_pick is normally at least 10 minutes old, and the ET clock is
+    normally outside 1:00am–8:00am. A hold that would miss the game's
+    start does not apply. Live picks are not in the card.
 
     The connection is session mode so the advisory lock is held across the
     HTTP call. The transaction pooler would release it after the lock
     statement, and the pipeline pass and the 5-minute job would both send.
 
     X_POST_ALL_PICKS=0 returns 0 and posts nothing. Returns the number of
-    tweets confirmed on this call.
+    pick tweets confirmed on this call. A rationale reply is not counted.
     """
     if not _enabled() or not _creds() or not post_all_picks():
         return 0
