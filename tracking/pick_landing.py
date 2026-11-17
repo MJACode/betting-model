@@ -1,14 +1,16 @@
-"""The https page a Discord book name opens, and the app URL it tries first.
+"""The https page a Discord book name opens.
 
 Discord renders a masked link only when the URL is http(s). The book name
 stays the link text. The URL is this page (``/pick/<id>`` on the worker that
 already serves HTTPS), not one sportsbook.
 
-The page tries ``signalbase://pick/<id>``, which the app handles by opening
-the book-picker sheet. The same response lists every bettable book that has
-this pick, each linked with the Massachusetts fill ``book_slip_links`` already
-uses. Nothing here places a bet, and the HTML carries no model probability,
-edge, or stake.
+The page is the book picker. It does not open the Signalbase app. It lists
+FanDuel, DraftKings, Fanatics, BetMGM and Caesars on every pick, with a price
+when one is stored and the Massachusetts slip when one can be built. A book
+with neither gets the sportsbook page ``book_slip_links.page_url`` already
+uses (Massachusetts where that page is state-specific). This repo has no
+per-sport board URL for a book. Nothing here places a bet, and the HTML
+carries no model probability, edge, or stake.
 
 A pick with no id, or an origin that is not an https URL, is not a landing
 link. The caller then uses today's direct book link.
@@ -34,6 +36,17 @@ DEFAULT_ORIGIN = "https://worker-production-229d.up.railway.app"
 APP_SCHEME_PREFIX = "signalbase://pick/"
 
 _PICK_PATH = re.compile(r"^/pick/([1-9][0-9]{0,17})$")
+# Every landing page names these books, priced or not. Order is the order
+# Mike asked for among the rows that have no price. A priced row sorts ahead
+# of them; the best price is first.
+ALWAYS_ON_PAGE = (
+    "fanduel",
+    "draftkings",
+    "fanatics",
+    "betmgm",
+    "williamhill_us",
+)
+
 _NAME = {
     "draftkings": "DraftKings",
     "fanduel": "FanDuel",
@@ -238,13 +251,24 @@ def _stored_price(pick: dict, key: str):
     return None
 
 
+def _always_index(key: str) -> int:
+    try:
+        return ALWAYS_ON_PAGE.index(key)
+    except ValueError:
+        return len(ALWAYS_ON_PAGE) + _shop_index(key)
+
+
 def book_rows_for_pick(pick: dict | None, game_rows=(), prop_rows=()) -> list[dict]:
-    """Bettable books for one pick, best price first.
+    """Books for one pick. The best price is first. The five named books are
+    always present.
 
     Each row is ``name``, ``price_text``, ``url``, ``is_best``, ``kind``
-    (``slip`` or ``page``). A book with no link is left out. Current quotes
-    at the pick's number replace the stored price and link. A live pick uses
-    only the links stored on the row: a pre-game quote is a different bet.
+    (``slip`` or ``page``). A priced book we can link is included even when it
+    is not one of the five. A book among the five with no stored price still
+    gets a row: its Massachusetts slip when one can be built, otherwise
+    ``page_url``. Current quotes at the pick's number replace the stored
+    price and link. A live pick uses only the links stored on the row: a
+    pre-game quote is a different bet.
 
     Which stored link belongs to which book is ``_stored_links`` — a
     DraftKings slip is never listed under FanDuel.
@@ -270,6 +294,8 @@ def book_rows_for_pick(pick: dict | None, game_rows=(), prop_rows=()) -> list[di
             if not found:
                 continue
             _put(offers, row.get("bookmaker"), found[0], found[1])
+    for key in ALWAYS_ON_PAGE:
+        offers.setdefault(key, {"price": None, "link": None})
 
     rows = []
     for key, slot in offers.items():
@@ -294,8 +320,9 @@ def book_rows_for_pick(pick: dict | None, game_rows=(), prop_rows=()) -> list[di
         row["is_best"] = best_dec is not None and row["decimal"] == best_dec
     rows.sort(key=lambda r: (
         0 if r["is_best"] else 1,
-        -(r["decimal"] if r["decimal"] is not None else -1.0),
-        _shop_index(r["key"]),
+        0 if r["decimal"] is not None else 1,
+        -(r["decimal"] if r["decimal"] is not None else 0.0),
+        _always_index(r["key"]),
     ))
     for row in rows:
         row.pop("decimal", None)
@@ -439,8 +466,7 @@ main{max-width:28rem;margin:0 auto;padding:24px 16px 48px}
 .brand{margin:0 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#3C3C43}
 h1{margin:0 0 8px;font-size:22px;line-height:1.25}
 .note,.fine{color:#3C3C43;font-size:15px}
-.app{display:block;margin:16px 0;padding:12px 14px;border-radius:12px;background:#0B1320;color:#fff;text-align:center;text-decoration:none;font-weight:600}
-ul{list-style:none;margin:0;padding:0}
+ul{list-style:none;margin:16px 0 0;padding:0}
 li{margin:0 0 8px}
 li a{display:flex;align-items:center;gap:8px;min-height:44px;padding:12px 14px;border-radius:12px;background:#fff;color:#000;text-decoration:none}
 li.best a{background:#E8F8EC}
@@ -452,10 +478,7 @@ li.best a{background:#E8F8EC}
 
 
 def render_html(page: dict) -> str:
-    """The landing document. The book list is in the HTML, not only after the
-    app opens. The script asks the phone to open the app once."""
-    pick_id = int(page["pick_id"])
-    app = app_open_url(pick_id)
+    """The landing document. It is the book picker. It does not open the app."""
     label = page.get("label")
     title = html.escape(label) if isinstance(label, str) and label.strip() else "This pick"
     items = []
@@ -477,9 +500,6 @@ def render_html(page: dict) -> str:
         if items
         else '<p class="empty">No sportsbook link is available for this pick.</p>'
     )
-    # The id is an integer, so the script cannot close its string early.
-    # An iframe, not a location change: a missing app must leave this page
-    # and its book list on screen. The link above is the tap that opens it.
     return (
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
@@ -489,13 +509,11 @@ def render_html(page: dict) -> str:
         f"<h1>{title}</h1>"
         "<p class=\"note\">Choose a sportsbook. The link opens that book’s bet slip. "
         "It does not place the bet.</p>"
-        f"<a class=\"app\" href=\"{html.escape(app, quote=True)}\">Open in the Signalbase app</a>"
         f"{books}"
         "<p class=\"fine\">The highlighted book has the best price. "
+        "A book with no price opens that book’s page. "
         "A book that asks for a state is filled for Massachusetts.</p>"
-        "</main><script>(function(){try{var f=document.createElement(\"iframe\");"
-        "f.setAttribute(\"aria-hidden\",\"true\");f.style.display=\"none\";f.src="
-        f"\"{app}\";document.body.appendChild(f);}}catch(e){{}}}})();</script></body></html>"
+        "</main></body></html>"
     )
 
 
