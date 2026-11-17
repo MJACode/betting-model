@@ -121,6 +121,14 @@ which is exactly when users open it.
 
 - Every tappable has a hit area of at least 44×44pt. Icon buttons under that
   size carry `hitSlop`. The `*Button.tsx` components are the pattern.
+- **Header-bar views (`headerLeft` / `headerRight`) are 36pt tall
+  (`stackBack.HEADER_ITEM_HEIGHT`), not 44.** On iOS 26+ UIKit fits them into
+  36pt and react-native-screens 4.16 does not re-center, so 44pt content draws
+  4pt low in its glass bubble. Their `hitSlop` only works inside the nav bar,
+  and only for the first left/right header view (RNS 4.16 forwards taps to
+  that one view only), so a second header button's target is its 36pt box.
+  Text in them caps at `HEADER_TEXT_MAX_FONT_MULTIPLIER` and shows the Large
+  Content Viewer.
 - Primary actions sit in the bottom half of the screen or in a bar
   (`BetslipBar`), not the top-right corner.
 - Sheets (`*Sheet.tsx`) dismiss on backdrop tap and on swipe; a sheet that
