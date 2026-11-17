@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,6 +7,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { AddToPlayButton } from '@/components/AddToPlayButton';
 import { AllBooksCard } from '@/components/AllBooksCard';
+import { PickBooksSheet } from '@/components/PickBooksSheet';
 import { BookLinesRow } from '@/components/BookLinesRow';
 import { GameStatusPill } from '@/components/GameStatusPill';
 import { LineMovementCard } from '@/components/LineMovementCard';
@@ -45,11 +46,15 @@ import {
   basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus, isVersusSport, labelWithoutStake,
 } from '@/lib/format';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
-import { MODEL_META, modelLongWithMark, sportOfModel } from '@/lib/modelMeta';
+import { MODEL_META, isPropModel, modelLongWithMark, sportOfModel } from '@/lib/modelMeta';
 import {
   bookLabel,
   bookName,
   currentLineQuotes,
+  bestHandoffForPick,
+  decidingBookOnlyAtMovedLine,
+  handoffQuotesForPick,
+  marketForPick,
   otherLineQuotesForPick,
   displayQuoteForPick,
   formatSideLine,
@@ -84,6 +89,14 @@ import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 import { hitModeFromPickSide } from '@/lib/hitMode';
 import { thresholdFromBookLine } from '@/lib/playerDetail';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { pickSportsbookRows } from '@/lib/pickBooks';
+import { openBookBetslip } from '@/lib/sportsbookLinks';
+import { signalsBetHeadline, signalsCtaLabel, signalsCtaSpeech, signalsNowLine } from '@/lib/signalsCard';
+
+/** Tokens already used to open the sheet. Survives a remount of this
+ *  screen (the premium gate's hold spinner) so the sheet does not reopen
+ *  without a new Discord tap. */
+const openedBookTokens = new Set<string>();
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -168,10 +181,21 @@ export function PickDetailScreen() {
     );
   }
 
-  return <PickDetailContent enriched={data} />;
+  return (
+    <PickDetailContent
+      enriched={data}
+      openBooks={route.params.openBooks ?? 0}
+    />
+  );
 }
 
-function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
+function PickDetailContent({
+  enriched,
+  openBooks,
+}: {
+  enriched: EnrichedPick;
+  openBooks: number;
+}) {
   const navigation = useNavigation<Nav>();
   const tracked = useTrackedBets();
   const slip = useParlaySlip();
@@ -362,6 +386,110 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
     stat: propSport ? propStat : null,
     playerType: isPitcherProp ? 'pitcher' : isBatterProp ? 'batter' : null,
   });
+  // signalbase://pick/<id> opens the same sheet as the card, and only in
+  // the cases the card opens it. A started, paused, preview or withdrawn
+  // pick stays on this screen with the sheet closed.
+  const notAtMyBooks = myView?.status === 'none';
+  const sheetGate =
+    openBooks > 0 &&
+    pick.signal_type === 'BET' &&
+    !preview &&
+    !paused &&
+    !retired &&
+    !voided &&
+    !hero?.stale &&
+    cta.handoff &&
+    !cta.startedLine &&
+    (myBooksReady || pick.is_live === true);
+  const bookSheet = useMemo(() => {
+    const allowed = myBooksReady ? myBooks : undefined;
+    const offersBook = sheetGate && !notAtMyBooks;
+    const handoff = offersBook
+      ? bestHandoffForPick(pick, bookRows, hero, priceAge, allowed)
+      : null;
+    const shopQuotes = handoff
+      ? handoffQuotesForPick(pick, bookRows, hero, priceAge, allowed)
+      : [];
+    const gameMarket = gameMarketForModel(pick.model_id);
+    const propMarket = gameMarket ? null : propMarketForPick(pick);
+    const market = gameMarket ?? marketForPick(pick);
+    const headlineAt = (line: number | string | null) =>
+      signalsBetHeadline({
+        side: pick.pick_side,
+        line,
+        market: gameMarket ?? propMarket,
+        homeTeam: game?.home_team ?? '',
+        awayTeam: game?.away_team ?? '',
+        player: propMarket && isPropModel(pick.model_id)
+          ? playerNameFromPickLabel(pick.pick_label)
+          : null,
+        stat: pick.model_id === 'ufc_total_rounds' ? 'Rounds' : null,
+        label: pick.pick_label,
+      });
+    const ownHeadline = headlineAt(pick.scored_line);
+    const otherLinesOffered =
+      sheetGate &&
+      pick.is_live !== true &&
+      myBooksReady &&
+      (Boolean(handoff) || notAtMyBooks);
+    const otherLineRows = otherLinesOffered
+      ? otherLineQuotesForPick(pick, bookRows, myBooks, priceAge)
+          .sort((a, b) => {
+            const scored = numOrNull(pick.scored_line) ?? 0;
+            return Math.abs(a.line - scored) - Math.abs(b.line - scored);
+          })
+          .map((q) => ({ ...q, lineText: headlineAt(q.line) }))
+          .filter((q) => q.lineText !== ownHeadline)
+      : [];
+    const rows = pickSportsbookRows(
+      shopQuotes,
+      pick.is_live === true || !myBooksReady ? null : myBooks,
+      otherLineRows,
+    );
+    const lead = rows.find((row) => row.price != null && !row.otherLine) ?? null;
+    const lineNote =
+      hero?.movedLine != null &&
+      lead?.bookmaker === hero.book &&
+      decidingBookOnlyAtMovedLine(pick, bookRows, hero, priceAge)
+        ? signalsNowLine({
+            line: formatSideLine(hero.movedLine, pick.pick_side, market),
+            price: hero.price != null ? formatAmerican(hero.price) : null,
+            priceDiffers: hero.kind === 'now' && hero.price !== hero.lockedPrice,
+            book: bookLabel(hero.book),
+          })
+        : null;
+    return {
+      rows,
+      lead,
+      lineNote,
+      canOpen: sheetGate && (lead != null || otherLineRows.length > 0),
+      label: lead?.price != null
+        ? signalsCtaLabel(lead.short, formatAmerican(lead.price))
+        : null,
+      speech: lead?.price != null
+        ? signalsCtaSpeech(lead.name, formatAmerican(lead.price))
+        : null,
+    };
+  }, [
+    sheetGate, notAtMyBooks, pick, bookRows, hero, priceAge, myBooks, myBooksReady, game,
+  ]);
+  const [booksOpen, setBooksOpen] = useState(false);
+  useEffect(() => {
+    if (!bookSheet.canOpen) return;
+    const key = `${pick.pick_id}:${openBooks}`;
+    if (openedBookTokens.has(key)) return;
+    openedBookTokens.add(key);
+    setBooksOpen(true);
+  }, [bookSheet.canOpen, openBooks, pick.pick_id]);
+  const openSheetBook = (row: { bookmaker: string; link: string | null }) => {
+    setBooksOpen(false);
+    void openBookBetslip(row.bookmaker, row.link, { sameBookOnly: true });
+  };
+  const bookSheetSubtitle = !game?.away_team && !game?.home_team
+    ? ''
+    : isVersusSport(game?.sport ?? pick.sport)
+      ? `${game?.away_team ?? ''} vs ${game?.home_team ?? ''}`
+      : `${game?.away_team ?? ''} @ ${game?.home_team ?? ''}`;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -673,6 +801,22 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
         ) : null}
         <BetslipBarSpacer />
       </ScrollView>
+      {bookSheet.canOpen ? (
+        <PickBooksSheet
+          visible={booksOpen}
+          title={labelWithoutStake(pick.pick_label)}
+          subtitle={bookSheetSubtitle}
+          lineNote={bookSheet.lineNote}
+          rows={bookSheet.rows}
+          betLabel={bookSheet.label}
+          betSpeech={bookSheet.speech}
+          onBet={() => {
+            if (bookSheet.lead) openSheetBook(bookSheet.lead);
+          }}
+          onRow={openSheetBook}
+          onClose={() => setBooksOpen(false)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }

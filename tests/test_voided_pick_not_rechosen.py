@@ -38,15 +38,15 @@ MODEL = "ncaaf_over_under"
 _LATERAL = re.compile(r"LEFT JOIN LATERAL \(.*?\) pk ON TRUE", re.S)
 # The LATERAL's columns are display only: when the pick was made, its best book and
 # price, its market (which sets the "good to" price's EV floor), the book the
-# quoted price was taken at, and the bet-slip links the post's book name opens
-# (#1381). None of them decide which signal qualifies. The NULL list has to
-# name every pk column the SELECT reads, or sqlite fails the query before the
-# WHERE is tested.
+# quoted price was taken at, the bet-slip links the post's book name opens
+# (#1381), and the pick id the landing link is built from. None of them decide
+# which signal qualifies. The NULL list has to name every pk column the SELECT
+# reads, or sqlite fails the query before the WHERE is tested.
 _DISPLAY_ONLY = ("LEFT JOIN (SELECT NULL AS created_at, NULL AS best_book, "
                  "NULL AS best_odds, NULL AS prop_market, "
                  "NULL AS decision_book, NULL AS decision_odds, "
                  "NULL AS stake_units, NULL AS dk_bet_link, "
-                 "NULL AS best_bet_link) pk ON 1 = 1")
+                 "NULL AS best_bet_link, NULL AS pick_id) pk ON 1 = 1")
 
 
 class _Conn:

@@ -19,6 +19,9 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord book name links to /pick/<id> on the worker; the page opens the app book sheet or lists the books |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, women's totals model bets the best book at DraftKings' first post (435 bets +39.12 units vs 402 +29.96 in 2025-26; card matches replay bet for bet) |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, PR CI pytest-subset red on every PR: tests/_pg.py looked only in postgresql/16, runner now installs 18; finder is version-agnostic, pinned by test_pg_finder.py |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Everything on the PC moved under the project folder: 37 copies removed, 2 feeds and 2 tennis loops moved to .claude/feeds, research to data/local/research, §7 rule (#1425) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Back button: chevron only on every pushed screen (iOS 26 glass bubble hugged chevron + "Back"); title room 162 → 254pt |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Dark mode (brand navy) + Settings > Appearance (System / Light / Dark, Light default); applies at next open, no reloadAsync |
