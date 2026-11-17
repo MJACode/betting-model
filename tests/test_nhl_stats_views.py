@@ -116,10 +116,14 @@ def _pg_bin(name: str) -> str | None:
     found = shutil.which(name)
     if found:
         return found
-    for version in ("17", "16", "15", "14"):
-        path = Path(f"/usr/lib/postgresql/{version}/bin/{name}")
-        if path.is_file():
-            return str(path)
+    # Newest install, not a pinned major: the GitHub runner's apt postgresql
+    # is 18 on Ubuntu 26, and a list that stops at 17 reports initdb missing.
+    root = Path("/usr/lib/postgresql")
+    if root.is_dir():
+        for version in sorted(root.iterdir(), reverse=True):
+            path = version / "bin" / name
+            if path.is_file():
+                return str(path)
     return None
 
 

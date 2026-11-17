@@ -5,7 +5,8 @@ Two test files need a real server (`test_latest_line_state.py`,
 this starts a throwaway cluster from whichever binaries exist:
 
   1. `initdb` / `pg_ctl` on PATH (a system install),
-  2. the Debian path the Linux sandbox carries (/usr/lib/postgresql/16/bin),
+  2. the newest install under /usr/lib/postgresql (16 on the old sandbox,
+     18 on the Ubuntu 26 GitHub runner),
   3. the `embedded-postgres` pip package (declared in requirements-test.txt),
      which ships a full server beside its module — the route on this machine,
      where nothing else is installed.
@@ -35,9 +36,12 @@ def pg_bin(name: str) -> str | None:
     found = shutil.which(name)
     if found:
         return found
-    debian = Path(f"/usr/lib/postgresql/16/bin/{name}")
-    if debian.is_file():
-        return str(debian)
+    root = Path("/usr/lib/postgresql")
+    if root.is_dir():
+        for version in sorted(root.iterdir(), reverse=True):
+            cand = version / "bin" / name
+            if cand.is_file():
+                return str(cand)
     try:
         import embedded_postgres  # type: ignore
     except ImportError:
