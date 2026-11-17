@@ -1,10 +1,11 @@
 """
-Posting every released pre-game pick, and the settled recap, to X
+Posting the day's best pre-game picks, and the settled recap, to X
 (@signalbasepicks).
 
 SCOPE. mike, 2026-08-30, chose the free pick plus the recap, with no links.
-mike, 2026-10-18: every released pre-game pick is posted, and every pick
-post is the same format. Discord's free pick is not an input to X.
+mike, 2026-10-18: every released pre-game pick was posted, in one format.
+mike, 2026-11-17: the card is at most 4, ranked by edge. Discord's free
+pick is not an input to X. Live picks stay off X.
 
 THE THREE THINGS THAT COULD GO WRONG, and all three are cheap to get wrong:
 
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import pytest
@@ -751,9 +753,11 @@ def test_x_posts_without_reading_discords_free_pick(monkeypatch):
     assert xp.notify_x_picks("2026-09-02", now=afternoon) == 1
     assert len(posted) == 1
     assert "NYY ML" in posted[0]
+    assert xp.ALL_PICKS_NOTE in posted[0]
     assert "Free pick" not in posted[0]
     assert "More in Discord" not in posted[0]
     assert "#FreePicks" not in posted[0]
+    assert "http" not in posted[0].lower()
     assert "Pick 17" not in posted[0]
 
 
@@ -821,21 +825,23 @@ def test_a_split_that_cannot_fit_says_how_many_it_dropped():
     assert "#" not in text
 
 
-# ── 6. every released pick, one format, posted once ──────────────────────────
-# mike, 2026-10-18: the slate is the X post. X_POST_ALL_PICKS=0 posts no
-# pick slate. There is no free-pick tweet.
+# ── 6. the day's card, one format, posted once ───────────────────────────────
+# mike, 2026-11-17: at most 4 pre-game picks, ranked by edge. X_POST_ALL_PICKS=0
+# posts no pick slate. There is no free-pick tweet. Live picks stay off X.
 
 def _slate():
+    # Edges descend in list order, so the card's send order is this order
+    # even after the one-per-sport spread (two MLB, one NFL).
     return [
         {"lock_key": "k-free", "label": "NYY ML", "sport": "MLB",
          "dk_odds": -115, "home": "NYY", "away": "BOS", "side": "home", "line": None,
-         "good_to": None},
+         "good_to": None, "edge": 0.05, "prob": 0.58, "game_id": "g-free"},
         {"lock_key": "k-total", "label": "NYY vs BOS Over 8.5", "sport": "MLB",
          "dk_odds": -110, "home": "NYY", "away": "BOS", "side": "over", "line": 8.5,
-         "good_to": None},
+         "good_to": None, "edge": 0.04, "prob": 0.56, "game_id": "g-total"},
         {"lock_key": "k-nfl", "label": "SF -3.5", "sport": "NFL",
          "dk_odds": -110, "home": "SF", "away": "SEA", "side": "home", "line": -3.5,
-         "good_to": None},
+         "good_to": None, "edge": 0.03, "prob": 0.54, "game_id": "g-nfl"},
     ]
 
 
@@ -861,7 +867,7 @@ def _wire_slate(monkeypatch, slate, already=None):
     ledgered = []
     pace = {"last": None, "now": None}
 
-    def _last(conn):
+    def _last(conn, now=None):
         if pace["last"] == "unreadable":
             raise RuntimeError("ledger unreadable")
         return pace["last"]
@@ -876,10 +882,14 @@ def _wire_slate(monkeypatch, slate, already=None):
 
     monkeypatch.setattr(xp, "_ledger", _remember)
     posted = []
+    pace["replies"] = []
 
     def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
-        posted.append(text)
-        return f"id{len(posted)}", False
+        if reply_to:
+            pace["replies"].append((reply_to, text))
+        else:
+            posted.append(text)
+        return f"id{len(posted) + len(pace['replies'])}", False
 
     monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
 
@@ -957,7 +967,9 @@ def test_a_side_that_omits_the_opponent_gains_the_matchup_when_it_fits():
     })
     assert "NYY ML" in text
     assert "NYY @ BOS" in text
-    assert text.endswith("Tue 10/20")
+    assert "Tue 10/20" in text
+    assert text.endswith(xp.ALL_PICKS_NOTE)
+    assert text.index("Tue 10/20") < text.index(xp.ALL_PICKS_NOTE)
     assert "#" not in text
 
 
@@ -1016,10 +1028,15 @@ def test_all_released_picks_are_posted_once_in_one_format(monkeypatch):
     assert any("NYY ML" in t for t in posted)
     assert any("Over 8.5" in t for t in posted)
     assert any("SF -3.5" in t for t in posted)
-    assert {row[0] for row in ledgered} == {"k-free", "k-total", "k-nfl"}
-    assert [row[0] for row in ledgered] == ["k-free", "k-total", "k-nfl"]
-    assert all(kind == "x_pick" for _key, kind, _id in ledgered)
+    pick_keys = [key for key, kind, _id in ledgered if kind == "x_pick"]
+    reply_keys = [key for key, kind, _id in ledgered if kind == "x_pick_reply"]
+    assert pick_keys == ["k-free", "k-total", "k-nfl"]
+    assert reply_keys == ["k-free", "k-total", "k-nfl"]
     assert not any(kind == "x_free_pick" for _key, kind, _id in ledgered)
+    assert all(xp.ALL_PICKS_NOTE in t for t in posted)
+    assert all("#" not in text and "http" not in text.lower()
+               and "percentage points" in text and "Expected value" in text
+               for _parent, text in _pace["replies"])
 
 
 def test_the_flag_off_posts_no_pick_slate(monkeypatch):
@@ -1072,11 +1089,12 @@ def test_a_rate_limit_does_not_ledger_and_the_same_pick_retries(monkeypatch):
     # Nothing was confirmed, so the gap does not start. The next call retries
     # the same pick.
     assert post_at(start) == 1
-    assert len(posted) == 1
     assert "NYY ML" in posted[0]
     assert "Free pick" not in posted[0]
     assert ledgered[0][0] == "k-free"
-    assert calls["n"] == 2
+    assert ledgered[0][1] == "x_pick"
+    # The failed attempt, the pick, and its rationale reply.
+    assert calls["n"] == 3
 
 
 def test_quiet_hours_hold_the_pick_until_8am(monkeypatch):
@@ -1118,6 +1136,244 @@ def test_an_unreadable_pick_clock_posts_nothing(monkeypatch):
     pace["last"] = "unreadable"
     assert post_at(_afternoon()) == 0
     assert posted == [] and ledgered == []
+
+
+def test_the_2099_pause_row_is_not_the_latest_pick():
+    """The pause mike approved on 2026-11-10 is an x_pick row dated
+    2099-01-01. The gap clock used to treat that stamp as the last post,
+    so every later pick waited forever."""
+    class _Conn:
+        def execute(self, sql, params=None):
+            return self
+
+        def fetchall(self):
+            return [
+                ("PAUSE:x_pick_alerts:approved-by-mike-2026-11-10",
+                 "2099-01-01T00:00:00-05:00"),
+                ("NBA_2026-11-10_BOS_PHI:nba_total_luck",
+                 "2026-11-10T19:27:58.636578-05:00"),
+            ]
+
+    now = datetime(2026, 11, 17, 14, 0, tzinfo=xp.ET)
+    got = xp._latest_x_pick_sent(_Conn(), now)
+    assert got == datetime.fromisoformat(
+        "2026-11-10T19:27:58.636578-05:00").astimezone(ZoneInfo("UTC"))
+    only_pause = xp._latest_x_pick_sent(_PauseOnly(), now)
+    assert only_pause is None
+
+
+class _PauseOnly:
+    def execute(self, sql, params=None):
+        return self
+
+    def fetchall(self):
+        return [(
+            "PAUSE:x_pick_alerts:approved-by-mike-2026-11-10",
+            "2099-01-01T00:00:00-05:00",
+        )]
+
+
+def test_a_future_pause_row_does_not_stop_the_card(monkeypatch):
+    """With only that 2099 row in the ledger, the next released pick posts."""
+    _creds_on(monkeypatch)
+    import data.db
+    from tracking import discord_notifier as dn
+
+    class _Conn:
+        def __init__(self):
+            self.sql = ""
+
+        def execute(self, sql, params=None):
+            self.sql = str(sql)
+            return self
+
+        def fetchall(self):
+            if "message_id" in self.sql:
+                return []
+            return [(
+                "PAUSE:x_pick_alerts:approved-by-mike-2026-11-10",
+                "2099-01-01T00:00:00-05:00",
+            )]
+
+        def fetchone(self):
+            if "pg_try_advisory_lock" in self.sql:
+                return (True,)
+            return None
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(data.db, "get_connection", lambda *a, **k: _Conn())
+    monkeypatch.setattr(
+        dn, "_new_signals",
+        lambda conn, d, include_already_posted=False: [{
+            "lock_key": "MLB_g:mlb_moneyline", "label": "NYY ML", "sport": "MLB",
+            "dk_odds": -115, "side": "home", "line": None,
+            "home": "NYY", "away": "BOS",
+            "edge": 0.04, "prob": 0.56, "game_id": "MLB_g",
+        }])
+    sent = []
+
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
+        sent.append((reply_to, text))
+        return ("111" if reply_to is None else "222"), False
+
+    monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
+    assert xp.notify_x_picks("2026-11-17", now=datetime(2026, 11, 17, 14, 0, tzinfo=xp.ET)) == 1
+    assert sent[0][0] is None
+    assert "NYY ML" in sent[0][1]
+    assert xp.ALL_PICKS_NOTE in sent[0][1]
+    assert sent[1][0] == "111"
+    assert "percentage points" in sent[1][1]
+    assert "#" not in sent[1][1]
+    xp._assert_no_link(sent[0][1])
+    xp._assert_no_link(sent[1][1])
+
+
+def test_a_reply_is_not_retried_for_a_pick_posted_last_week():
+    class _Conn:
+        def execute(self, sql, params=None):
+            return self
+
+        def fetchall(self):
+            return [
+                ("NBA_2026-11-10_BOS_PHI:nba_total_luck",
+                 "2120312543424188626", "2026-11-10T19:27:58-05:00"),
+                ("NBA_2026-11-17_A_B:nba_total_luck",
+                 "2121000000000000001", "2026-11-17T13:00:00-05:00"),
+            ]
+
+    now = datetime(2026, 11, 17, 15, 0, tzinfo=xp.ET)
+    assert xp._pending_replies(_Conn(), now) == [
+        ("NBA_2026-11-17_A_B:nba_total_luck", "2121000000000000001")]
+
+
+def test_the_day_count_skips_the_pause_row_and_other_dates():
+    class _Conn:
+        def execute(self, sql, params=None):
+            return self
+
+        def fetchall(self):
+            return [
+                ("PAUSE:x_pick_alerts:approved-by-mike-2026-11-10",
+                 "2099-01-01T00:00:00-05:00"),
+                ("NBA_2026-11-17_A_B:nba_total_luck", "2026-11-17T12:00:00-05:00"),
+                ("MLB_2026-11-16_A_B:mlb_moneyline", "2026-11-16T12:00:00-05:00"),
+            ]
+
+    count, sports = xp._today_x_card(
+        _Conn(), datetime(2026, 11, 17, 15, 0, tzinfo=xp.ET))
+    assert count == 1
+    assert sports == {"NBA"}
+
+
+def test_four_posts_today_hold_the_fifth(monkeypatch):
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, _slate())
+    monkeypatch.setattr(xp, "_today_x_card", lambda conn, now: (4, {"MLB"}))
+    assert post_at(_afternoon()) == 0
+    assert posted == [] and ledgered == []
+
+
+def test_one_pick_per_game_and_a_sport_spread():
+    low = {"lock_key": "G1:low", "game_id": "G1", "sport": "NBA", "label": "Low",
+           "edge": 0.02, "prob": 0.52, "dk_odds": -110, "posted_at": "b"}
+    high = {"lock_key": "G1:high", "game_id": "G1", "sport": "NBA", "label": "High",
+            "edge": 0.09, "prob": 0.60, "dk_odds": -110, "posted_at": "a"}
+    second = {"lock_key": "G2:nba", "game_id": "G2", "sport": "NBA", "label": "Second",
+              "edge": 0.08, "prob": 0.58, "dk_odds": -110}
+    nfl = {"lock_key": "G3:nfl", "game_id": "G3", "sport": "NFL", "label": "NFL",
+           "edge": 0.03, "prob": 0.54, "dk_odds": -110}
+    live = {"lock_key": "G4:live", "game_id": "G4", "sport": "NBA", "label": "Live",
+            "edge": 0.20, "prob": 0.70, "dk_odds": -110, "is_live": True}
+    card = xp.choose_x_card([low, high, second, nfl, live], limit=2)
+    assert [p["lock_key"] for p in card] == ["G1:high", "G3:nfl"]
+    # A sport already on today's card does not take the next slot ahead of
+    # a sport that has none.
+    later = xp.choose_x_card(
+        [second, nfl], limit=1, sports_already={"NBA"})
+    assert [p["lock_key"] for p in later] == ["G3:nfl"]
+
+
+def test_a_live_pick_is_not_posted(monkeypatch):
+    live = dict(_slate()[0], is_live=True, edge=0.5, label="Live side")
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, [live])
+    assert post_at(_afternoon()) == 0
+    assert posted == [] and ledgered == []
+
+
+def test_a_failed_reply_does_not_resend_the_pick(monkeypatch):
+    slate = [_slate()[0]]
+    posted, ledgered, post_at, pace = _wire_slate(monkeypatch, slate)
+
+    def _deliver(text, dry_run=False, reply_to=None, allow_link=False):
+        if reply_to:
+            pace["replies"].append((reply_to, text))
+            return None, False
+        posted.append(text)
+        return "111", False
+
+    monkeypatch.setattr(xp, "_deliver_tweet", _deliver)
+    start = _afternoon()
+    assert post_at(start) == 1
+    assert len(posted) == 1
+    assert not any(kind == "x_pick_reply" for _k, kind, _i in ledgered)
+    monkeypatch.setattr(xp, "_pending_replies", lambda conn: [("k-free", "111")])
+    assert post_at(start + timedelta(minutes=10)) == 0
+    assert len(posted) == 1
+    assert pace["replies"][-1][0] == "111"
+    assert not any(kind == "x_pick_reply" for _k, kind, _i in ledgered)
+
+
+def test_the_gap_is_waived_when_waiting_would_miss_the_start(monkeypatch):
+    slate = _slate()[:2]
+    slate[1]["commence"] = "2026-10-18T16:28:00-04:00"
+    posted, _ledgered, post_at, _pace = _wire_slate(monkeypatch, slate)
+    start = _afternoon()
+    assert post_at(start) == 1
+    assert post_at(start + timedelta(minutes=1)) == 1
+    assert "Over 8.5" in posted[1]
+
+
+def test_quiet_hours_do_not_drop_a_pick_whose_game_starts_before_8am(monkeypatch):
+    slate = [_slate()[0]]
+    slate[0]["commence"] = "2026-10-19T07:00:00-04:00"
+    posted, ledgered, post_at, _pace = _wire_slate(monkeypatch, slate)
+    when = datetime(2026, 10, 19, 6, 30, tzinfo=xp.ET)
+    assert post_at(when) == 1
+    assert ledgered[0][0] == "k-free"
+    later = [_slate()[0]]
+    later[0]["commence"] = "2026-10-19T19:00:00-04:00"
+    posted2, ledgered2, post_at2, _pace2 = _wire_slate(monkeypatch, later)
+    assert post_at2(when) == 0
+    assert posted2 == [] and ledgered2 == []
+
+
+def test_a_rationale_uses_only_stored_numbers_and_refuses_a_link():
+    assert xp.render_rationale({"label": "NYY ML", "sport": "MLB"}) == ""
+    text = xp.render_rationale({
+        "label": "NYY ML", "sport": "MLB", "prob": 0.58, "edge": 0.05,
+        "dk_odds": -115, "dk_implied_prob": 0,
+        "stake_reason": "see https://sportsbook.example/bet",
+        "injury_detail": "tag #Yankees",
+        "public_bet_pct": 62, "public_money_pct": 71,
+    })
+    assert "58.0%" in text
+    assert "percentage points" in text
+    assert "Expected value" in text
+    assert "62%" in text and "71%" in text
+    assert "http" not in text.lower()
+    assert "#" not in text
+    assert "sportsbook" not in text
+    assert xp.weighted_len(text) <= xp.MAX_TWEET
+    xp._assert_no_link(text)
+    with_note = xp.render_rationale(
+        {"prob": 0.58, "edge": 0.05, "dk_odds": -115}, include_note=True)
+    assert xp.ALL_PICKS_NOTE in with_note
+    assert xp.weighted_len(with_note) <= xp.MAX_TWEET
+    assert "#" not in with_note
 
 
 def test_a_held_lock_posts_nothing(monkeypatch):

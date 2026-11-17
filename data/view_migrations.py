@@ -531,6 +531,16 @@ ACTIVE_MIGRATIONS: list[str] = [
     # and byom_save_model gain them; byom_line_move and byom_team_division
     # are new. Skips once both bodies carry byom_trend_filters_v1.
     "byom_trend_filters_2026_11_05.sql",
+    # 2026-11-17 (Matt: "show actual on the win or loss"): byom_bets adds
+    # actual (a prop's stat), home_score and away_score. Same 500 rows,
+    # same order. Drops and re-creates (the columns change) with its own
+    # GRANT; keeps byom_official_legs_v1. Skips once byom_bets_actual_v1.
+    "byom_bets_actual_2026_11_17.sql",
+    # 2026-11-17 (Matt, "drop 0.5 on yardage only"): byom_legs skips a
+    # 0.5 line on the four yardage markets, on the official search and
+    # the close. Patches the live body at two anchors (raises if either
+    # is not there exactly once). Skips once byom_no_half_yards_v1.
+    "byom_no_half_yards_2026_11_17.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.

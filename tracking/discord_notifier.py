@@ -1056,7 +1056,10 @@ def _new_signals(conn, target_date: str, *,
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
                    p.pick_side, p.scored_line, p.prop_market,
                    p.decision_book, p.decision_odds AS decision_odds_raw,
-                   p.stake_units, p.stake_reason, p.best_bet_link, p.pick_id
+                   p.stake_units, p.stake_reason, p.best_bet_link, p.pick_id,
+                   p.game_id, p.decision_edge, p.dk_implied_prob,
+                   p.public_bet_pct, p.public_money_pct, p.injury_detail,
+                   p.is_live
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -1143,6 +1146,15 @@ def _new_signals(conn, target_date: str, *,
         "stake_reason": r[26] if len(r) > 26 else None,
         "best_bet_link": r[27] if len(r) > 27 else None,
         "pick_id": int(r[28]) if len(r) > 28 and r[28] is not None else None,
+        # X's card ranks on decision_edge and quotes these stored fields in
+        # the reply. Shorter fixtures omit them; the indexes stay put.
+        "game_id": r[29] if len(r) > 29 else None,
+        "decision_edge": r[30] if len(r) > 30 else None,
+        "dk_implied_prob": r[31] if len(r) > 31 else None,
+        "public_bet_pct": r[32] if len(r) > 32 else None,
+        "public_money_pct": r[33] if len(r) > 33 else None,
+        "injury_detail": r[34] if len(r) > 34 else None,
+        "is_live": bool(r[35]) if len(r) > 35 and r[35] is not None else False,
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
         # Belt and braces with the SQL bound above, and the only guard that

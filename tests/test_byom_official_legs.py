@@ -27,6 +27,8 @@ NHL_SQL = "byom_nhl_2026_11_05.sql"
 SAVE_SQL = "byom_save_filters_2026_11_05.sql"
 UNITS_SQL = "byom_units_inline_2026_11_05.sql"
 TREND_SQL = "byom_trend_filters_2026_11_05.sql"
+ACTUAL_SQL = "byom_bets_actual_2026_11_17.sql"
+HALF_YARDS_SQL = "byom_no_half_yards_2026_11_17.sql"
 KICK = datetime(2026, 10, 27, 0, 15, tzinfo=timezone.utc)
 
 
@@ -327,7 +329,8 @@ def scratch():
                      LOCK_READ_SQL, LOCK_READ_SQL, PUSHDOWN_SQL, PUSHDOWN_SQL,
                      PROP_LOOKUP_SQL, PROP_LOOKUP_SQL, NHL_SQL, NHL_SQL,
                      SAVE_SQL, SAVE_SQL,
-                     UNITS_SQL, UNITS_SQL, TREND_SQL, TREND_SQL):
+                     UNITS_SQL, UNITS_SQL, TREND_SQL, TREND_SQL,
+                     ACTUAL_SQL, ACTUAL_SQL, HALF_YARDS_SQL, HALF_YARDS_SQL):
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
             INSERT INTO byom_game_facts (
@@ -1290,3 +1293,92 @@ def test_nhl_game_bets_grade_label_and_save(scratch):
     assert cur.fetchone()[0] == 2027
     cur.execute("SELECT sport FROM byom_models WHERE name = 'Home puck line'")
     assert cur.fetchone()[0] == "NHL"
+
+
+def _seed_half_yards(cur):
+    # PHI: a backup TE first offered at receiving yards 0.5, then 1.5; a WR
+    # at 55.5; a QB at passing TDs 0.5, where 0.5 is the normal line.
+    cur.execute("""
+        INSERT INTO byom_prop_facts (
+          prop_key, canonical_key, sport, season, week, player_name, player_key,
+          team, market, line, line_basis, actual, over_result, under_result,
+          log_status, over_price, under_price)
+        VALUES
+          ('k|rec|te|0.5', '2026_07_DAL_PHI', 'NFL', 2026, 7, 'Backup TE', 'backup te',
+           'PHI', 'player_reception_yds', 0.5, 'DraftKings line at game start',
+           7, 'win', 'loss', 'logged', 110, -140),
+          ('k|rec|wr|55.5', '2026_07_DAL_PHI', 'NFL', 2026, 7, 'Star WR', 'star wr',
+           'PHI', 'player_reception_yds', 55.5, 'DraftKings line at game start',
+           60, 'win', 'loss', 'logged', -115, -105),
+          ('k|ptd|qb|0.5', '2026_07_DAL_PHI', 'NFL', 2026, 7, 'The QB', 'the qb',
+           'PHI', 'player_pass_tds', 0.5, 'DraftKings line at game start',
+           0, 'loss', 'win', 'logged', -200, 160);
+        INSERT INTO byom_official_legs (
+          canonical_key, sport, season, market, leg_side, player_key,
+          match_role, leg_role, team, locked_at, point, price, result)
+        VALUES
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'player_reception_yds', 'over', 'backup te',
+           'any', 'underdog', 'PHI', '2026-10-20 00:00+00', 0.5, 120, 'win'),
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'player_reception_yds', 'over', 'backup te',
+           'any', 'underdog', 'PHI', '2026-10-23 00:00+00', 1.5, 105, 'win'),
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'player_reception_yds', 'over', 'star wr',
+           'any', 'underdog', 'PHI', '2026-10-20 00:00+00', 55.5, -115, 'win'),
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'player_pass_tds', 'over', 'the qb',
+           'any', 'underdog', 'PHI', '2026-10-20 00:00+00', 0.5, -200, 'loss');
+    """)
+
+
+def _prop_bets(cur, market, timing):
+    cur.execute("SELECT player_name, point, actual FROM byom_bets("
+                "2026, %s::jsonb, %s) ORDER BY player_name",
+                ('{"markets":["%s"],"prop_side":"over"}' % market, timing))
+    return [(name, float(point), None if actual is None else float(actual))
+            for name, point, actual in cur.fetchall()]
+
+
+def test_no_half_line_on_a_yardage_market_and_the_list_carries_the_actual(scratch):
+    """Matt, 2026-11-17: drop 0.5 on yardage only; show the actual."""
+    _pg, cur = scratch
+    _seed_half_yards(cur)
+    # Official: the 0.5 quote is skipped, so the TE's bet is the later 1.5.
+    assert _prop_bets(cur, "player_reception_yds", "official") == [
+        ("Backup TE", 1.5, 7.0), ("Star WR", 55.5, 60.0)]
+    # Close: the only TE line is 0.5, so the TE is not a bet at all.
+    assert _prop_bets(cur, "player_reception_yds", "close") == [
+        ("Star WR", 55.5, 60.0)]
+    # 0.5 is the normal line on passing TDs and stays, on both timings.
+    for timing in ("official", "close"):
+        assert _prop_bets(cur, "player_pass_tds", timing) == [("The QB", 0.5, 0.0)]
+
+
+def test_a_game_bet_carries_the_final_score(scratch):
+    _pg, cur = scratch
+    cur.execute("SELECT label, actual, home_score, away_score FROM byom_bets("
+                "2026, '{\"markets\":[\"spreads\"],\"side\":\"away\"}', 'official')")
+    assert [(r[0], r[1], float(r[2]), float(r[3])) for r in cur.fetchall()] == [
+        ("DAL -2.5", None, 21.0, 38.0)]
+
+
+def test_the_two_2026_11_17_files_skip_and_keep_every_marker(scratch):
+    _pg, cur = scratch
+    cur.execute("""
+        SELECT position('byom_no_half_yards_v1' in prosrc) > 0,
+               position('byom_trend_filters_v1' in prosrc) > 0,
+               'plan_cache_mode=force_custom_plan' = ANY (proconfig),
+               (length(prosrc) - length(replace(prosrc, 'byom_no_half_yards_v1', '')))
+                 / length('byom_no_half_yards_v1')
+          FROM pg_proc WHERE oid = 'public.byom_legs(integer, jsonb, text)'::regprocedure""")
+    # Applied twice in the fixture: one patch, not two (marker + comment).
+    assert cur.fetchone() == (True, True, True, 2)
+    cur.execute("""
+        SELECT count(*) FROM pg_proc
+         WHERE proname IN ('byom_legs', 'byom_record', 'byom_bets',
+                           'byom_backtest', 'byom_leg_label')
+           AND position('byom_official_legs_v1' in prosrc) > 0""")
+    assert cur.fetchone()[0] == 5
+    cur.execute("SET ROLE anon")
+    try:
+        cur.execute("SELECT count(*) FROM byom_bets(2026, '{}', 'close')")
+        assert cur.fetchone()[0] > 0
+    finally:
+        cur.execute("RESET ROLE")

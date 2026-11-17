@@ -70,20 +70,17 @@ def test_the_tweet_never_publishes_a_worse_price_than_draftkings(worse):
 def test_the_good_to_clause_is_dropped_not_truncated_when_it_will_not_fit():
     """A half-written price is worse than none.
 
-    237 still fits "Good to -115." inside 280 weighted characters. 238 does
-    not, so the clause is left off whole. 235 used to be the boundary when
-    the post also carried team tags; that room belongs to the text now, and
-    235 fits the clause.
+    The all-picks sentence is pinned on the tweet, so the clause has less
+    room than it did before that sentence. 183 still fits "Good to -115."
+    inside 280 weighted characters. 184 does not, so the clause is left
+    off whole. The matchup and the sentence stay.
     """
-    freed = xp.render_pick(_pick(label="X" * 235, good_to=-115))
+    freed = xp.render_pick(_pick(label="X" * 183, good_to=-115))
     assert "Good to -115." in freed
+    assert xp.ALL_PICKS_NOTE in freed
     assert xp.weighted_len(freed) <= xp.MAX_TWEET
 
-    still = xp.render_pick(_pick(label="X" * 237, good_to=-115))
-    assert "Good to -115." in still
-    assert xp.weighted_len(still) <= xp.MAX_TWEET
-
-    label = "X" * 238
+    label = "X" * 184
     base = xp.render_pick(_pick(label=label))
     assert xp.weighted_len(base) <= xp.MAX_TWEET, (
         "fixture no longer fits without the clause")
@@ -92,6 +89,7 @@ def test_the_good_to_clause_is_dropped_not_truncated_when_it_will_not_fit():
     assert "Good to" not in t, "the clause was added and then truncated"
     assert "#" not in t
     assert "MIA @ KC" in t
+    assert t.endswith(xp.ALL_PICKS_NOTE)
 
 
 def test_the_tweet_publishes_the_good_to_bound_when_it_fits():

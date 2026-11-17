@@ -23,6 +23,7 @@ import { byomBetsAvailable, deleteByomModel } from '@/lib/byom';
 import { friendlyCause, isAbortError } from '@/lib/errors';
 import { isPropMarket, isWholeSeason, marketLabel, showsUnits, byomEmptyLabel, type ByomSport, asByomSport } from '@/lib/byomRecord';
 import { propFilterSummary } from '@/lib/byomPropFilters';
+import { HEADER_ITEM_HEIGHT, HEADER_TEXT_MAX_FONT_MULTIPLIER } from '@/lib/stackBack';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -56,9 +57,14 @@ export function ByomDetailScreen() {
           onPress={() => navigation.navigate('ByomEdit', { modelId })}
           accessibilityRole="button"
           accessibilityLabel={`Edit ${model.name}`}
+          accessibilityShowsLargeContentViewer
+          accessibilityLargeContentTitle="Edit"
+          hitSlop={{ top: 4, bottom: 4 }}
           style={styles.headerBtn}
         >
-          <Text style={styles.headerBtnText}>Edit</Text>
+          <Text style={styles.headerBtnText} maxFontSizeMultiplier={HEADER_TEXT_MAX_FONT_MULTIPLIER}>
+            Edit
+          </Text>
         </Pressable>
       ),
     });
@@ -193,8 +199,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
   },
+  // 36 tall, not 44: the header-slot height (HEADER_ITEM_HEIGHT explains).
+  // The 4pt hitSlop is declared, but on RNS 4.16 it may not reach (only the
+  // first header view gets taps forwarded), so the target may be 36pt tall.
   headerBtn: {
-    minHeight: 44,
+    height: HEADER_ITEM_HEIGHT,
     justifyContent: 'center',
     paddingHorizontal: spacing.sm,
   },

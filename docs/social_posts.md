@@ -13,41 +13,56 @@ the pick clock below. They still ledger in `push_sent` on their own kinds.
 
 ## Pick timing
 
-`notify_x_picks` posts the same released pre-game picks as before
-(`_new_signals` with Discord's ledger ignored, same order, same text).
-One call confirms at most one tweet. The pipeline refresh still calls
-it, and this 5-minute job calls it too. The call opens a session-mode
-connection and takes `X_PICKS_LOCK` for the read, the send, and the
-ledger, so those two callers cannot each send one.
+`notify_x_picks` posts the day's card, not every released pick. The pool
+is still `_new_signals` with the Discord ledger ignored (pre-game only;
+live picks stay off X). The card is at most 4 confirmed `x_pick` rows
+on the America/New_York date. Rank is `decision_edge`, else `edge`, then
+expected value at the price taken, then model probability. One pick per
+game. The best pick of each sport that is not already on today's card
+is taken before a second pick from a sport. One call confirms at most
+one pick tweet. The pipeline refresh still calls it, and this 5-minute
+job calls it too. The call opens a session-mode connection and takes
+`X_PICKS_LOCK` for the read, the send, and the ledger, so those two
+callers cannot each send one.
 
 A call posts only when all of these hold:
 
 - `RUN_X_PUBLISHER` is not `0`, the four keys are set, and
-  `X_POST_ALL_PICKS` is not `0` / `false` / `no` / `off`.
+  `X_POST_ALL_PICKS` is not `0` / `false` / `no` / `off`. On posts the
+  card. Off posts no pick slate.
+- Fewer than 4 real `x_pick` rows have `sent_at` on this ET date.
 - The America/New_York clock is outside 1:00am inclusive through 8:00am
-  exclusive. 12:35am is before this window, so a pick can still post
-  then. A call inside the window posts nothing and writes nothing. The
-  next call at or after 8:00am posts the next unsent pick whose game
-  has not started.
-- The newest `push_sent.sent_at` with `kind = 'x_pick'` is at least 10
-  minutes old, or there is no such row. The newest of the last eight
-  stamps is taken by parsed time. A read failure or an unreadable stamp
-  posts nothing.
+  exclusive, unless the pick's game starts before 8:00am. 12:35am is
+  before this window. A pick with no commence is held through the window.
+  A call that holds posts nothing and writes nothing.
+- The newest real `push_sent.sent_at` with `kind = 'x_pick'` is at least
+  10 minutes old, or there is no such row, unless waiting out the gap
+  would be at or after the game's start. A `lock_key` that starts with
+  `PAUSE:` is not a real post. A stamp more than a day ahead of the call
+  is not a real post. The row
+  `PAUSE:x_pick_alerts:approved-by-mike-2026-11-10` at `2099-01-01` is
+  that case: it was the newest stamp, so the gap never opened after
+  2026-11-10. The newest of the last eight stamps is taken by parsed
+  time, after those two are skipped. A read failure or an unreadable
+  stamp posts nothing.
 - The pick has no `x_pick` row yet. A pick whose `commence` is at or
-  before the send time is not tweeted and is not ledgered. The call
-  moves on to the next pick. A missing commence is still postable.
+  before the send time is not tweeted and is not ledgered. A missing
+  commence is still postable.
 
 `push_sent` is inserted only after X confirms the tweet,
 `UNIQUE(lock_key, kind)`, kind `x_pick`, `sent_at` the ET timestamp,
-`message_id` the tweet id. That insert is unchanged. Discord and the
-published record do not read this kind. A pick that is held or dropped
-stays out of the ledger, so a later pass can still post it until the
-game starts. A 429 does not ledger; the next call retries that same
-pick, and the 10-minute gap does not start until a tweet is confirmed.
+`message_id` the tweet id. The rationale reply is a second row, kind
+`x_pick_reply`, written only after that reply's own 2xx, with the reply's
+id in `message_id`. A failed reply does not remove or re-send the pick
+tweet. The next call retries the reply from the pick's `message_id`.
+Discord and the published record do not read these kinds. A pick that is
+held or dropped stays out of the ledger, so a later pass can still post
+it until the game starts or the day's four slots are full. A 429 does
+not ledger; the next call retries that same pick, and the 10-minute gap
+does not start until a tweet is confirmed.
 
-The set of picks is the set that clears the existing slate query. The
-one pick that does not go out is one whose game has started before its
-send slot.
+The pick tweet carries "All picks are in the free Discord and the stat
+sheet." with no URL. When that sentence cannot fit, the reply carries it.
 
 ## What is already queued
 

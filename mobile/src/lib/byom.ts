@@ -353,6 +353,12 @@ export interface ByomBet {
   units: number | null;
   /** When the bet became official. Null on a closing-line row. */
   locked_at: string | null;
+  /** A prop's stat in the game. Null on a game bet or before the
+   *  server has byom_bets_actual_2026_11_17.sql. */
+  actual: number | null;
+  /** Final score. Null when the server does not send it. */
+  home_score: number | null;
+  away_score: number | null;
 }
 
 export interface ByomBetList {
@@ -381,6 +387,9 @@ export function parseByomBet(value: unknown): ByomBet {
       ? result : '',
     units: optionalNum(row, 'units'),
     locked_at: text(row.locked_at) || null,
+    actual: optionalNum(row, 'actual'),
+    home_score: optionalNum(row, 'home_score'),
+    away_score: optionalNum(row, 'away_score'),
   };
 }
 

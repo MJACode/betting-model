@@ -171,7 +171,8 @@ set.
 
 ## Open items
 
-- Store each new Betfair ANZ monthly file as it is published, from the
-  2026-11 file onward (issue #1371).
+- Each new Betfair ANZ month is stored by the worker, daily at 10:43 ET
+  (`scripts/horse/betfair_monthly.py`; `docs/cloud_worker.md`). Issue #1371
+  closes when the job stores its first new month, the 2026-11 file.
 - A pre-off price path and a US pool series, both behind a purchase or an
   account: decisions for mike.

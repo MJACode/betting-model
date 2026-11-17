@@ -1729,5 +1729,12 @@
     "requested_by": "matt",
     "note": "Matt 2026-11-13: half and quarter ATS / O-U on the Stats tab's Betting filters; '4. Yes' (backfill this season's period lines) and '5. Yes' (add them to the regular pull). Runs the daily nba_quarters step now instead of at 6am: buys the half and quarter closing lines (spreads and totals, H1 and Q1-Q4, tip minus 5 minutes) for every finished 2026-27 game that lacks them, under a ceiling equal to its own plan (10 credits a market a game, 101 a game, upper bound: the endpoint bills only markets it returns) and the measured reserve floor, then builds team_period_results. No model, pick, stake or threshold is touched.",
     "args": {}
+  },
+  {
+    "key": "betfair-monthly-store-first-worker-run-2026-11-16",
+    "job_type": "betfair_monthly_store",
+    "requested_by": "mike",
+    "note": "The first run of the daily Betfair ANZ store on the worker itself, so the worker's own network and database path is tested the day it ships (issue #1371). Expected: 16 files listed, 2 fetched (2026_09 and 2026_10, the daily check of the two newest months), 0 rows stored, because 2026-10 was the last file published as of 2026-11-16.",
+    "args": {}
   }
 ]
