@@ -1734,7 +1734,7 @@
     "key": "betfair-monthly-store-first-worker-run-2026-11-16",
     "job_type": "betfair_monthly_store",
     "requested_by": "mike",
-    "note": "The first run of the daily Betfair ANZ store on the worker itself, so the worker's own network and database path is tested the day it ships (issue #1371). Expected: 16 files listed, nothing to fetch, 0 rows stored, because 2026-10 was the last file published as of 2026-11-16.",
+    "note": "The first run of the daily Betfair ANZ store on the worker itself, so the worker's own network and database path is tested the day it ships (issue #1371). Expected: 16 files listed, 2 fetched (2026_09 and 2026_10, the daily check of the two newest months), 0 rows stored, because 2026-10 was the last file published as of 2026-11-16.",
     "args": {}
   }
 ]

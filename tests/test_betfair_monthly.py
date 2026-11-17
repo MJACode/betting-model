@@ -267,10 +267,19 @@ def test_a_file_over_the_part_size_is_split_and_restores_byte_for_byte(monkeypat
 
     store_files.restore(Reader(), tmp_path)
     assert (tmp_path / NOV[len("horse/"):]).read_bytes() == raw
-    # and the size check sees the whole file, not one part: a quiet next day writes nothing
-    out, _ = _run(conn, {"ANZ_Thoroughbreds_2026_10.csv": b"oct", "ANZ_Thoroughbreds_2026_11.csv": raw},
-                  sizes={"ANZ_Thoroughbreds_2026_10.csv": 3, "ANZ_Thoroughbreds_2026_11.csv": len(raw)})
-    assert out["written"] == 0
+    # The size check sees the whole file, not one part. Two newer months make November an
+    # OLDER month, so only its size can bring it back: the whole size is held, it stays put.
+    dec = "horse/betfair-ANZ_Thoroughbreds_2026_12.csv/ANZ_Thoroughbreds_2026_12.csv"
+    jan = "horse/betfair-ANZ_Thoroughbreds_2027_01.csv/ANZ_Thoroughbreds_2027_01.csv"
+    conn.rows.update(FakeConn({dec: b"dec", jan: b"jan27"}).rows)
+    html = (LISTING_HTML + '<a href="../assets/ANZ_Thoroughbreds_2026_12.csv">Dec</a>'
+            '<a href="../assets/ANZ_Thoroughbreds_2027_01.csv">Jan</a>')
+    downloads = {"ANZ_Thoroughbreds_2026_10.csv": b"oct", "ANZ_Thoroughbreds_2026_11.csv": raw,
+                 "ANZ_Thoroughbreds_2026_12.csv": b"dec", "ANZ_Thoroughbreds_2027_01.csv": b"jan27"}
+    out, fetched = _run(conn, downloads, html=html,
+                        sizes={"ANZ_Thoroughbreds_2026_10.csv": 3, "ANZ_Thoroughbreds_2026_11.csv": len(raw),
+                               "ANZ_Thoroughbreds_2026_12.csv": 3, "ANZ_Thoroughbreds_2027_01.csv": 5})
+    assert "ANZ_Thoroughbreds_2026_11.csv" not in fetched and out["written"] == 0
 
 
 def test_a_listing_with_no_thoroughbred_file_fails_instead_of_reporting_nothing_new():
@@ -342,3 +351,132 @@ def test_an_older_month_that_changes_size_is_fetched_by_the_size_check_alone():
                                "ANZ_Thoroughbreds_2026_11.csv": 3}, html=html)
     assert "ANZ_Thoroughbreds_2026_09.csv" in fetched and out["written"] == 1
     assert conn.rows[sep][0] == _sha(b"sep")
+
+
+# ── a month is one month, wherever its copies sit (the second review's cases) ──
+
+Z26 = "horse/betfair-ANZ_Thoroughbreds_2026.zip/"
+DEC = "horse/betfair-ANZ_Thoroughbreds_2026_12.csv/ANZ_Thoroughbreds_2026_12.csv"
+HTML_ZIP26 = (LISTING_HTML + '<a href="../assets/ANZ_Thoroughbreds_2026.zip">2026</a>'
+              '<a href="../assets/ANZ_Thoroughbreds_2026_12.csv">Dec</a>')
+
+
+def _study_months(conn):
+    from scripts.horse.anz_study import month_files
+    return month_files(sorted(r[len("horse/"):] for r in conn.rows
+                              if r.endswith(".csv") and "/other/" not in r))
+
+
+def test_a_month_arriving_with_its_years_zip_is_stored_once():
+    conn = FakeConn({ZIP25: b"jan", OCT: b"oct", NOV: b"nov"})
+    z = _zip({"ANZ_Thoroughbreds_2026_10.csv": b"oct", "ANZ_Thoroughbreds_2026_11.csv": b"nov",
+              "ANZ_Thoroughbreds_2026_12.csv": b"dec"})
+    downloads = {"ANZ_Thoroughbreds_2026.zip": z, "ANZ_Thoroughbreds_2026_10.csv": b"oct",
+                 "ANZ_Thoroughbreds_2026_11.csv": b"nov", "ANZ_Thoroughbreds_2026_12.csv": b"dec"}
+    sizes = {"ANZ_Thoroughbreds_2026_10.csv": 3, "ANZ_Thoroughbreds_2026_11.csv": 3}
+    _run(conn, downloads, sizes=sizes, html=HTML_ZIP26)
+    decs = [r for r in conn.rows if "2026_12" in r]
+    assert decs == [Z26 + "ANZ_Thoroughbreds_2026_12.csv"]             # the zip's copy, and only it
+    assert len(_study_months(conn)) == 4                               # Jan 2025, Oct, Nov, Dec 2026
+    # the next day December's own link is now a held month: nothing is stored again
+    out, _ = _run(conn, downloads, sizes={**sizes, "ANZ_Thoroughbreds_2026_12.csv": 3}, html=HTML_ZIP26)
+    assert out["written"] == 0
+
+
+def test_a_month_listed_after_its_years_zip_is_not_stored_twice():
+    conn = FakeConn({ZIP25: b"jan", OCT: b"oct", NOV: b"nov"})
+    z = _zip({"ANZ_Thoroughbreds_2026_12.csv": b"dec"})
+    zip_only = LISTING_HTML + '<a href="../assets/ANZ_Thoroughbreds_2026.zip">2026</a>'
+    _run(conn, {"ANZ_Thoroughbreds_2026.zip": z, "ANZ_Thoroughbreds_2026_10.csv": b"oct",
+                "ANZ_Thoroughbreds_2026_11.csv": b"nov"},
+         sizes={"ANZ_Thoroughbreds_2026_10.csv": 3, "ANZ_Thoroughbreds_2026_11.csv": 3}, html=zip_only)
+    out, _ = _run(conn, {"ANZ_Thoroughbreds_2026_10.csv": b"oct", "ANZ_Thoroughbreds_2026_11.csv": b"nov",
+                         "ANZ_Thoroughbreds_2026_12.csv": b"dec"},
+                  sizes={"ANZ_Thoroughbreds_2026_10.csv": 3, "ANZ_Thoroughbreds_2026_11.csv": 3,
+                         "ANZ_Thoroughbreds_2026_12.csv": 3}, html=HTML_ZIP26)
+    assert out["written"] == 0 and [r for r in conn.rows if "2026_12" in r] == [Z26 + "ANZ_Thoroughbreds_2026_12.csv"]
+    assert len(_study_months(conn)) == 4
+
+
+def test_an_already_zipped_month_listed_again_with_the_same_bytes_stores_nothing():
+    jun = "horse/betfair-ANZ_Thoroughbreds_2025.zip/ANZ_Thoroughbreds_2025_06.csv"
+    conn = FakeConn({ZIP25: b"jan", jun: b"jun", OCT: b"oct", NOV: b"nov"})
+    html = LISTING_HTML + '<a href="../assets/ANZ_Thoroughbreds_2025_06.csv">Jun</a>'
+    out, _ = _run(conn, {"ANZ_Thoroughbreds_2025_06.csv": b"jun", "ANZ_Thoroughbreds_2026_10.csv": b"oct",
+                         "ANZ_Thoroughbreds_2026_11.csv": b"nov"},
+                  sizes={"ANZ_Thoroughbreds_2025_06.csv": 4, "ANZ_Thoroughbreds_2026_10.csv": 3,
+                         "ANZ_Thoroughbreds_2026_11.csv": 3}, html=html)
+    assert out["written"] == 0 and len(_study_months(conn)) == 4
+
+
+def test_two_versions_of_one_month_in_one_run_get_different_stamps_and_the_later_is_read():
+    conn = FakeConn({ZIP25: b"jan", OCT: b"oct", NOV: b"nov"})
+    z = _zip({"ANZ_Thoroughbreds_2026_11.csv": b"nov from the zip"})
+    zip_html = LISTING_HTML + '<a href="../assets/ANZ_Thoroughbreds_2026.zip">2026</a>'
+    _run(conn, {"ANZ_Thoroughbreds_2026.zip": z, "ANZ_Thoroughbreds_2026_10.csv": b"oct",
+                "ANZ_Thoroughbreds_2026_11.csv": b"nov from its own link"},
+         sizes={"ANZ_Thoroughbreds_2026_10.csv": 3, "ANZ_Thoroughbreds_2026_11.csv": 21}, html=zip_html)
+    versions = sorted(r for r in conn.rows if ".v" in r and "2026_11" in r)
+    assert len(versions) == 2 and versions[0].split(".v")[1][:16] != versions[1].split(".v")[1][:16]
+    nov = [p for p in _study_months(conn) if "2026_11" in p]
+    assert nov == [max(versions)[len("horse/"):]]                      # the later stamp is read
+    assert gzip.decompress(conn.rows[max(versions)][2]) == b"nov from its own link"
+
+
+def test_a_return_to_an_earlier_version_is_stored_so_the_study_reads_what_is_published_now():
+    conn = FakeConn({ZIP25: b"jan", OCT: b"oct", NOV: b"nov"})
+    sizes = {"ANZ_Thoroughbreds_2026_10.csv": 3, "ANZ_Thoroughbreds_2026_11.csv": 3}
+    _run(conn, {"ANZ_Thoroughbreds_2026_10.csv": b"oct", "ANZ_Thoroughbreds_2026_11.csv": b"NOV"}, sizes=sizes)
+    out, _ = _run(conn, {"ANZ_Thoroughbreds_2026_10.csv": b"oct", "ANZ_Thoroughbreds_2026_11.csv": b"nov"},
+                  sizes=sizes)
+    assert out["written"] == 1
+    nov = [p for p in _study_months(conn) if "2026_11" in p][0]
+    assert gzip.decompress(conn.rows["horse/" + nov][2]) == b"nov"
+
+
+def test_a_whole_year_re_exported_through_its_zip_is_not_a_false_size_alarm():
+    sep = "horse/betfair-ANZ_Thoroughbreds_2026_09.csv/ANZ_Thoroughbreds_2026_09.csv"
+    conn = FakeConn({ZIP25: b"jan", sep: b"sep", OCT: b"oct", NOV: b"nov"})
+    new = {"ANZ_Thoroughbreds_2026_09.csv": b"sep v2", "ANZ_Thoroughbreds_2026_10.csv": b"oct v2",
+           "ANZ_Thoroughbreds_2026_11.csv": b"nov v2"}
+    html = (LISTING_HTML + '<a href="../assets/ANZ_Thoroughbreds_2026_09.csv">Sep</a>'
+            '<a href="../assets/ANZ_Thoroughbreds_2026.zip">2026</a>')
+    out, _ = _run(conn, {**new, "ANZ_Thoroughbreds_2026.zip": _zip(new)},
+                  sizes={k: len(v) for k, v in new.items()}, html=html)      # no RuntimeError
+    assert out["written"] == 4                                          # 3 versions + the manifest
+    for m in ("2026_09", "2026_10", "2026_11"):
+        p = [x for x in _study_months(conn) if m in x][0]
+        assert gzip.decompress(conn.rows["horse/" + p][2]).endswith(b"v2")
+
+
+def test_a_zip_member_that_is_not_a_month_file_is_kept_out_of_the_studys_way():
+    conn = FakeConn({OCT: b"oct", NOV: b"nov"})
+    z = _zip({"ANZ_Thoroughbreds_2025_01.csv": b"jan", "__MACOSX/notes.csv": b"x"})
+    _run(conn, {"ANZ_Thoroughbreds_2025.zip": z, "ANZ_Thoroughbreds_2026_10.csv": b"oct",
+                "ANZ_Thoroughbreds_2026_11.csv": b"nov"},
+         sizes={"ANZ_Thoroughbreds_2026_10.csv": 3, "ANZ_Thoroughbreds_2026_11.csv": 3})
+    assert "horse/betfair-ANZ_Thoroughbreds_2025.zip/other/notes.csv" in conn.rows
+    assert len(_study_months(conn)) == 3
+
+
+def test_a_new_version_sorts_after_every_stored_one_even_with_a_clock_behind():
+    later = "horse/betfair-ANZ_Thoroughbreds_2026_11.csv/ANZ_Thoroughbreds_2026_11.v20991231T235959Z-00000000.csv"
+    conn = FakeConn({ZIP25: b"jan", OCT: b"oct", NOV: b"nov", later: b"nov from the future"})
+    _run(conn, {"ANZ_Thoroughbreds_2026_10.csv": b"oct", "ANZ_Thoroughbreds_2026_11.csv": b"nov now"},
+         sizes={"ANZ_Thoroughbreds_2026_10.csv": 3, "ANZ_Thoroughbreds_2026_11.csv": 7})
+    nov = [p for p in _study_months(conn) if "2026_11" in p][0]
+    assert gzip.decompress(conn.rows["horse/" + nov][2]) == b"nov now"
+
+
+def test_an_older_month_held_only_inside_a_zip_is_not_downloaded_again_by_its_own_link():
+    # September sits only in the 2026 zip's folder, and is not one of the two newest
+    # months, so neither the daily hash nor a size change brings it back.
+    sep_in_zip = Z26 + "ANZ_Thoroughbreds_2026_09.csv"
+    conn = FakeConn({ZIP25: b"jan", sep_in_zip: b"sep", Z26 + bm.MANIFEST: b"{}", OCT: b"oct", NOV: b"nov"})
+    html = (LISTING_HTML + '<a href="../assets/ANZ_Thoroughbreds_2026.zip">2026</a>'
+            '<a href="../assets/ANZ_Thoroughbreds_2026_09.csv">Sep</a>')
+    out, fetched = _run(conn, {"ANZ_Thoroughbreds_2026_09.csv": b"sep", "ANZ_Thoroughbreds_2026_10.csv": b"oct",
+                               "ANZ_Thoroughbreds_2026_11.csv": b"nov"},
+                        sizes={"ANZ_Thoroughbreds_2026_09.csv": 3, "ANZ_Thoroughbreds_2026_10.csv": 3,
+                               "ANZ_Thoroughbreds_2026_11.csv": 3}, html=html)
+    assert "ANZ_Thoroughbreds_2026_09.csv" not in fetched and out["written"] == 0
