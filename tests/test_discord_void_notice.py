@@ -502,7 +502,8 @@ def test_the_notice_quotes_the_label_and_does_not_carry_the_webhook(monkeypatch)
     field = embed["fields"][0]
     assert field["name"] == "Georgia vs Auburn Under 54.5"
     assert "Auburn @ Georgia" in field["value"]
-    assert "-105 @ [DraftKings](https://sportsbook.draftkings.com/)" in field["value"]
+    from tracking.pick_landing import DEFAULT_ORIGIN
+    assert f"-105 @ [DraftKings]({DEFAULT_ORIGIN}/pick/2992290)" in field["value"]
     assert "game 2026-10-17" in field["value"]
     assert dn._posted_et("2026-09-27T06:23:03-04:00") in field["value"]
     assert "original post" not in field["value"]

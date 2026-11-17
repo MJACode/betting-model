@@ -51,6 +51,7 @@ import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { useOtaUpdates } from '@/hooks/useOtaUpdates';
 import { usePushDeepLink } from '@/hooks/usePushDeepLink';
+import { usePickBooksLink } from '@/hooks/usePickBooksLink';
 import { installNotificationHandler } from '@/lib/pushPresentation';
 import { startCrashLogging } from '@/lib/crashLogSetup';
 import { setCrashScreen } from '@/lib/crashLog';
@@ -328,6 +329,7 @@ function App() {
   // out here. Covers the tap that LAUNCHES the app, not just the one that
   // arrives while it is already running.
   usePushDeepLink(navRef, navReady);
+  usePickBooksLink(navRef, navReady);
   const openBetslip = useCallback(() => {
     navRef.navigate('Betslip');
   }, [navRef]);
