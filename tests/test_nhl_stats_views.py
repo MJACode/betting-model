@@ -112,19 +112,10 @@ def test_no_scorer_or_card_reads_the_new_names():
 
 
 def _pg_bin(name: str) -> str | None:
-    import shutil
-    found = shutil.which(name)
-    if found:
-        return found
-    # Newest install, not a pinned major: the GitHub runner's apt postgresql
-    # is 18 on Ubuntu 26, and a list that stops at 17 reports initdb missing.
-    root = Path("/usr/lib/postgresql")
-    if root.is_dir():
-        for version in sorted(root.iterdir(), reverse=True):
-            path = version / "bin" / name
-            if path.is_file():
-                return str(path)
-    return None
+    # One finder for every scratch test (tests/_pg.py). This file's own list
+    # stopped at 17 and failed CI once the runner installed 18.
+    from tests._pg import pg_bin
+    return pg_bin(name)
 
 
 def _date_filter_runs_before_dedupe(plan: list) -> bool:
