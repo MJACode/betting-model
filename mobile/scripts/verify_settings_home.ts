@@ -158,9 +158,11 @@ check(
 );
 
 const back = await import(pathToFileURL(join(ROOT, 'src/lib/stackBack.ts')).href);
+// Since 2026-11-16 the Back button is a chevron only, so both titles reserve
+// the same 44pt button; a settings title is never squeezed narrower.
 check(
-  'a settings title is wider than the player-name cap',
-  back.settingsTitleMaxWidth(390, 1) > back.playerTitleMaxWidth(390, 1),
+  'a settings title is at least as wide as the player-name cap',
+  back.settingsTitleMaxWidth(390, 1) >= back.playerTitleMaxWidth(390, 1),
 );
 check('Legal & support fits at 390pt', back.settingsTitleMaxWidth(390, 1) >= 180);
 
