@@ -334,7 +334,7 @@ def _first_half_sig(key, label):
 @pytest.fixture
 def x_tweets(monkeypatch):
     """The real _post_released_picks with the clock gates, the lock and the send
-    replaced. One confirmed tweet per call, the first pick that survives."""
+    replaced. One confirmed pick tweet per call, the pick that survives."""
     from contextlib import contextmanager
 
     import tracking.publish_lock as publish_lock
@@ -365,7 +365,9 @@ def test_x_slate_refuses_and_does_not_ledger(monkeypatch, x_tweets):
                         lambda c, d, include_already_posted=False: [BAD, GOOD])
     conn = _Conn()
     assert x_publisher._post_released_picks(conn, "2026-09-13") == 1
-    assert x_tweets == [GOOD["label"]]
+    assert GOOD["label"] in x_tweets[0]
+    assert not any(BAD["label"] in t for t in x_tweets)
+    assert any("stat sheet" in t for t in x_tweets)
     assert conn.ledgered() == {GOOD["lock_key"]}
 
 
@@ -378,7 +380,8 @@ def test_x_slate_refuses_a_first_half_pick_that_reads_as_the_full_game_total(mon
                         lambda c, d, include_already_posted=False: [bad, good])
     conn = _Conn()
     assert x_publisher._post_released_picks(conn, "2026-09-13") == 1
-    assert x_tweets == [good["label"]]
+    assert good["label"] in x_tweets[0]
+    assert not any(bad["label"] in t for t in x_tweets)
     assert conn.ledgered() == {good["lock_key"]}
 
 

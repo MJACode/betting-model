@@ -784,13 +784,14 @@ def run_calibration_watch() -> None:
 def run_social_post_queue() -> None:
     """Publish manual rows, then one profile update, then at most one pick.
 
-    Pick posts go through notify_x_picks, which sends one tweet and only
-    when the last x_pick is at least 10 minutes old and the ET clock is
-    outside 1:00am–8:00am. Recaps are not posted here. A raise must not
-    kill the scheduler. The claim in each drain is what stops two services
-    sending the same manual row; this job does not take the worker_jobs
-    session lock. Each pass is its own try, so one failure does not skip
-    the others.
+    Pick posts go through notify_x_picks: one tweet from the day's card of
+    at most 4, normally when the last real x_pick is at least 10 minutes
+    old and the ET clock is outside 1:00am–8:00am. A hold that would miss
+    the game's start does not apply. Recaps are not posted here. A raise
+    must not kill the scheduler. The claim in each drain is what stops two
+    services sending the same manual row; this job does not take the
+    worker_jobs session lock. Each pass is its own try, so one failure
+    does not skip the others.
     """
     try:
         from data.db import get_connection
@@ -3122,9 +3123,10 @@ def build_scheduler() -> BlockingScheduler:
     )
 
     # Manual posts, one profile update, and one paced pick tweet.
-    # Five minutes is the pick clock: notify_x_picks itself refuses a second
-    # pick inside 10 minutes and refuses 1:00am–8:00am ET. Recaps stay on
-    # their own jobs. This does not move any other trigger.
+    # Five minutes is the pick clock: notify_x_picks itself posts at most
+    # one pick from a card of 4, and normally refuses a second pick inside
+    # 10 minutes and refuses 1:00am–8:00am ET. Recaps stay on their own
+    # jobs. This does not move any other trigger.
     sched.add_job(
         run_social_post_queue,
         CronTrigger(minute="*/5", timezone=TIMEZONE),

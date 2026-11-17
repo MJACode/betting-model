@@ -2222,10 +2222,11 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         # that has since changed. No-op unless the date is in
         # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
         rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
-        # X posts the next released pre-game pick, one per call, in the same
-        # format. The 5-minute job is the other caller. notify_x_picks holds
-        # them 10 minutes apart and holds 1:00am–8:00am ET. Discord's free
-        # pick is not an input. X_POST_ALL_PICKS=0 posts no pick slate.
+        # X posts the next pick on the day's card (at most 4), one per call.
+        # The 5-minute job is the other caller. notify_x_picks holds them 10
+        # minutes apart and holds 1:00am–8:00am ET, unless that hold would
+        # miss the game's start. Discord's free pick is not an input.
+        # X_POST_ALL_PICKS=0 posts no pick slate. Live picks stay off X.
         # Ledgered independently of Discord, so one surface failing never
         # suppresses the other.
         try:
