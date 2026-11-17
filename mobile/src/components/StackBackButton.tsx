@@ -6,9 +6,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { noteBack } from '@/lib/freezeLog';
 import {
+  BACK_CHEVRON_SIZE,
   HEADER_ITEM_HEIGHT,
   PLAYER_DETAIL_PARENT,
-  backChevronSize,
   playerTitleMaxWidth,
   settingsTitleMaxWidth,
   stackBackDecision,
@@ -78,8 +78,10 @@ export function PlayerStatsHeaderTitle({
  * A 36pt square, not 44 (2026-11-17): on iOS 26+ UIKit fits a header view
  * into 36pt and react-native-screens 4.16 does not re-center our content, so
  * a 44pt square drew the chevron 4pt low in its bubble (HEADER_ITEM_HEIGHT).
- * hitSlop takes the target to 52 x 52 (12 above, 4 below, 8 a side); it stays
- * inside the bar and does not reach down into the title. zIndex / elevation order the button inside its
+ * hitSlop widens the target to about 52pt. react-native-screens forwards
+ * header taps only inside the navigation bar's frame, so the 12pt top slop
+ * past the bar is not reached: the target is ~52 wide by the bar's height.
+ * Read from RNS 4.16 source (RNSScreenStack.mm hitTest), not tapped on a device. zIndex / elevation order the button inside its
  * own header slot. The title width is what keeps a long name off it — the
  * title is a UIKit label, and a React zIndex does not paint over that.
  */
@@ -91,8 +93,6 @@ type BackPath = 'pop' | 'replace' | 'reset';
  * never arrived (review M3 on #1377).
  */
 function BackPill({ decide, go }: { decide: () => BackPath; go: (path: BackPath) => void }) {
-  const { fontScale } = useWindowDimensions();
-  const icon = backChevronSize(fontScale);
   return (
     <Pressable
       onPress={() => {
@@ -102,10 +102,12 @@ function BackPill({ decide, go }: { decide: () => BackPath; go: (path: BackPath)
       }}
       accessibilityRole="button"
       accessibilityLabel="Back"
+      accessibilityShowsLargeContentViewer
+      accessibilityLargeContentTitle="Back"
       hitSlop={{ top: 12, bottom: 4, left: 8, right: 8 }}
       style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
     >
-      <Ionicons name="chevron-back" size={icon} color={colors.tint} />
+      <Ionicons name="chevron-back" size={BACK_CHEVRON_SIZE} color={colors.tint} />
     </Pressable>
   );
 }

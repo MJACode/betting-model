@@ -77,17 +77,25 @@ check(
   /width:\s*HEADER_ITEM_HEIGHT/.test(pill) && /height:\s*HEADER_ITEM_HEIGHT/.test(pill) && !/min(Width|Height):\s*44/.test(pill),
 );
 check(
-  'the chevron fits inside the 36pt square at every font scale',
-  [1, 1.5, 2, 3].every((s) => back.backChevronSize(s) <= 28) && back.backChevronSize(1) === 22,
+  'the chevron is a fixed 22pt with the Large Content Viewer, not scaled past the 36pt square',
+  back.BACK_CHEVRON_SIZE === 22 &&
+    /size=\{BACK_CHEVRON_SIZE\}/.test(pill) &&
+    /accessibilityShowsLargeContentViewer/.test(pill),
 );
 for (const screen of ['src/screens/ByomBuilderScreen.tsx', 'src/screens/ByomDetailScreen.tsx']) {
   const src = read(screen);
   const btn = /headerBtn:\s*\{([^}]+)\}/.exec(src)?.[1] ?? '';
   check(`${screen}: its header button is 36pt tall`, /height:\s*HEADER_ITEM_HEIGHT/.test(btn) && !/minHeight:\s*44/.test(btn));
-  check(`${screen}: its header button keeps a 44pt target`, /hitSlop=\{\{\s*top:\s*4,\s*bottom:\s*4\s*\}\}/.test(src));
+  check(`${screen}: its header button declares a 4pt vertical hitSlop`, /hitSlop=\{\{\s*top:\s*4,\s*bottom:\s*4\s*\}\}/.test(src));
+  check(
+    `${screen}: its label stops growing at accessibility Medium, so it fits the 36pt item`,
+    /maxFontSizeMultiplier=\{HEADER_TEXT_MAX_FONT_MULTIPLIER\}/.test(src) &&
+      /accessibilityShowsLargeContentViewer/.test(src) &&
+      back.HEADER_TEXT_MAX_FONT_MULTIPLIER < 2.143,
+  );
 }
 check(
-  'the pill has hitSlop to a 52pt target inside the bar, not down into the player name',
+  'the pill declares hitSlop (≈52pt wide, bar-height tall once forwarded), not down into the player name',
   /hitSlop=\{\{\s*top:\s*12,\s*bottom:\s*4,\s*left:\s*8,\s*right:\s*8/.test(pill),
 );
 // 2026-11-16 (Matt): chevron only. iOS 26+ draws a glass bubble behind the

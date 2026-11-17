@@ -43,11 +43,19 @@ export const PLAYER_DETAIL_PARENT = {
  */
 export const HEADER_ITEM_HEIGHT = 36;
 
-/** The Back chevron: 22pt, and at most 28 so it stays inside the 36pt item at any font scale. */
-export function backChevronSize(fontScale: number): number {
-  const scale = Math.min(Math.max(fontScale, 1), 2);
-  return Math.min(28, Math.round(22 * scale));
-}
+/**
+ * The Back chevron: 22pt at every text size. Bar items do not grow with
+ * Dynamic Type (HIG); a long press shows the Large Content Viewer instead
+ * (accessibilityShowsLargeContentViewer on the button). UX review, 2026-11-17.
+ */
+export const BACK_CHEVRON_SIZE = 22;
+
+/**
+ * The text-size cap for a text header button ("Cancel", "Edit"): accessibility
+ * Medium (RN's multiplier 1.786). At 15pt body that is a ~27pt font, whose line
+ * still fits the 36pt item; above it the text spilled out of the bubble.
+ */
+export const HEADER_TEXT_MAX_FONT_MULTIPLIER = 1.786;
 
 /**
  * The width the Back button takes in the bar: its 36pt square plus the 4pt
