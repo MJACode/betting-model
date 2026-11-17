@@ -114,6 +114,11 @@ BUSY_SLEEP_S = 20.0
 # of the :17 refresh and the 05:40-07:16 morning window.
 APP_ROLES = ("authenticator", "authenticated", "anon")
 APP_READ_LIMIT_S = 2.0
+# A game with more archived rows than this is removed one market a transaction.
+# Measured 2026-11-16: 82,694 rows in 10.4 s and 289,143 in 25.3 s, but one
+# 408,831-row game took 395 s in the evening and six app reads timed out
+# behind it; the guard runs only between transactions.
+SPLIT_ROWS = 50_000
 REMOVE_LOCK = 1345_0001   # pg advisory lock key: one removal run at a time
 
 LEDGER_DDL = """
@@ -209,10 +214,12 @@ def fingerprint_expr(spec: Spec, d: Dialect, alias: str = "k") -> str:
     return d.h(" || '|' || ".join(parts))
 
 
-def rule_sql(spec: Spec, rule: str, d: Dialect) -> str:
+def rule_sql(spec: Spec, rule: str, d: Dialect, by_market: bool = False) -> str:
     """SELECT pk, h, game_id for the rows of the given games the rule moves.
-    Parameters, in order: the game ids, the min-age cutoff, and for 'old' the
-    old cutoff (all UTC epoch seconds for DuckDB, timestamps for Postgres)."""
+    Parameters, in order: the game ids, the market when `by_market`, the
+    min-age cutoff, and for 'old' the old cutoff (all UTC epoch seconds for
+    DuckDB, timestamps for Postgres). Every window is partitioned by market, so
+    one market's selection is exactly that market's share of the game's."""
     if rule not in RULES:
         raise ValueError(f"unknown rule {rule!r}")
     p = d.param()
@@ -222,12 +229,13 @@ def rule_sql(spec: Spec, rule: str, d: Dialect) -> str:
     lags = ",\n           ".join(f"lag({c}) OVER w AS lag_{c}" for c in spec.values)
     same = " AND ".join(f"{c} IS NOT DISTINCT FROM lag_{c}" for c in spec.values)
     old = f"start < {cut(p)}" if rule == "old" else "FALSE"
+    mkt = f" WHERE t.market = {p}" if by_market else ""
     return f"""
 WITH g AS (
   SELECT game_id, {d.ts('commence_time')} AS start FROM games WHERE game_id {d.games()}),
 r0 AS (
   SELECT t.*, g.start, {d.ts('t.snapshot_at')} AS ts, {rung} AS rung
-    FROM {spec.table} t JOIN g ON g.game_id = t.game_id),
+    FROM {spec.table} t JOIN g ON g.game_id = t.game_id{mkt}),
 r AS (
   SELECT r0.*, (coalesce(snapshot_type, '') <> 'in_play' AND ts <= start) AS pre FROM r0),
 k AS (
@@ -253,12 +261,13 @@ def cutoffs(now: dt.datetime) -> tuple[dt.datetime, dt.datetime]:
     return now - dt.timedelta(days=MIN_AGE_DAYS), now - dt.timedelta(days=OLD_DAYS)
 
 
-def _params(d: Dialect, rule: str, games, now: dt.datetime) -> list:
+def _params(d: Dialect, rule: str, games, now: dt.datetime, market: str | None = None) -> list:
     min_cut, old_cut = cutoffs(now)
+    m = [market] if market is not None else []
     if d.pg:
-        out = [list(games), min_cut]
+        out = [list(games)] + m + [min_cut]
         return out + [old_cut] if rule == "old" else out
-    out = [list(games), min_cut.timestamp()]
+    out = [list(games)] + m + [min_cut.timestamp()]
     return out + [old_cut.timestamp()] if rule == "old" else out
 
 
@@ -314,6 +323,17 @@ def file_selection(spec: Spec, path: Path) -> dict:
     sql = (f"SELECT k.game_id, count(*), sum({fingerprint_expr(spec, d)}) "
            f"FROM read_parquet('{path.as_posix()}') k GROUP BY k.game_id")
     return {g: (int(n), int(c)) for g, n, c in con.execute(sql).fetchall()}
+
+
+def file_markets(spec: Spec, path: Path, game: str) -> dict:
+    """{market: (rows, checksum, [pk, ...])} for one game, read from the file."""
+    import duckdb
+    con = duckdb.connect()
+    d = Dialect("dk")
+    sql = (f"SELECT k.market, count(*), sum({fingerprint_expr(spec, d)}), list(k.{spec.pk}) "
+           f"FROM read_parquet('{path.as_posix()}') k WHERE k.game_id = ? GROUP BY k.market")
+    return {m: (int(n), int(c), [int(x) for x in pks])
+            for m, n, c, pks in con.execute(sql, [game]).fetchall()}
 
 
 def sha256(path: Path) -> str:
@@ -515,6 +535,43 @@ def wait_for_quiet(conn, clock=None, sleeper=None, log=print, anytime: bool = Fa
         return True
 
 
+def remove_market(conn, spec: Spec, rule: str, game: str, market: str,
+                  want: tuple, now: dt.datetime) -> int:
+    """Remove one market of one game, only if Postgres picks exactly the
+    archived set for it. Returns rows removed; 0 when an earlier run that
+    stopped part-way through the game already removed this market."""
+    d = Dialect("pg")
+    sel = rule_sql(spec, rule, d, by_market=True)
+    params = tuple(_params(d, rule, [game], now, market))
+    n_want, c_want, pks = want
+    try:
+        conn.execute(f"SET LOCAL statement_timeout = '{REMOVE_TIMEOUT}'")
+        conn.execute(f"CREATE TEMP TABLE archive_pick ON COMMIT DROP AS {sel}", params)
+        n, c = conn.execute("SELECT count(*), coalesce(sum(h), 0)::text FROM archive_pick").fetchone()
+        if int(n) == 0:
+            left = conn.execute(f"SELECT count(*) FROM {spec.table} WHERE {spec.pk} = ANY(%s)",
+                                (pks,)).fetchone()[0]
+            conn.rollback()
+            if int(left) == 0:
+                return 0
+            raise RuntimeError(f"{game} {market}: Postgres picks no rows but {left} archived rows "
+                               f"remain; nothing removed")
+        if (int(n), int(c)) != (n_want, c_want):
+            conn.rollback()
+            raise RuntimeError(f"{game} {market}: Postgres picks {n} rows / {c}, the archive holds "
+                               f"{n_want} / {c_want}; nothing removed")
+        cur = conn.execute(f"DELETE FROM {spec.table} t USING archive_pick a WHERE t.{spec.pk} = a.pk")
+        if cur.rowcount != n_want:
+            conn.rollback()
+            raise RuntimeError(f"{game} {market}: the delete matched {cur.rowcount} rows, not "
+                               f"{n_want}; rolled back")
+        conn.commit()
+        return n_want
+    except Exception:
+        conn.rollback()
+        raise
+
+
 # ── Steps ────────────────────────────────────────────────────────────────────
 
 def prepare(copy, conn, table: str, rule: str, date: str, now: dt.datetime, log=print,
@@ -617,15 +674,25 @@ def remove(conn, table: str, rule: str, date: str, now: dt.datetime, log=print,
         if not wait_for_quiet(conn, clock, sleeper, log, anytime=anytime):
             out["stopped"] = "outside the quiet window"
             break
-        t0 = (clock or (lambda: dt.datetime.now(UTC)))()
+        tick = clock or (lambda: dt.datetime.now(UTC))
+        rest = sleeper or __import__("time").sleep
+        t0 = tick()
         try:
-            got = remove_game(conn, spec, rule, g, (int(n), int(c)), now)
+            if int(n) > SPLIT_ROWS:
+                got, done = _remove_by_market(conn, spec, rule, g, path, (int(n), int(c)), now,
+                                              log, clock, sleeper, anytime)
+                if not done:
+                    out["removed"] += got
+                    out["stopped"] = "outside the quiet window"
+                    break
+            else:
+                got = remove_game(conn, spec, rule, g, (int(n), int(c)), now)
+                took = (tick() - t0).total_seconds()
+                if anytime and took > 0:
+                    rest(took)
             out["removed"] += got
             out["games"] += 1
-            took = ((clock or (lambda: dt.datetime.now(UTC)))() - t0).total_seconds()
-            log(f"  {g}: {got:,} rows removed in {took:.1f} s")
-            if anytime and took > 0:
-                (sleeper or __import__("time").sleep)(took)
+            log(f"  {g}: {got:,} rows removed in {(tick() - t0).total_seconds():.1f} s")
         except RuntimeError as exc:
             _note(conn, spec, rule, g, f"refused at removal: {exc}")
             out["skipped"].append((g, str(exc)))
@@ -638,6 +705,31 @@ def remove(conn, table: str, rule: str, date: str, now: dt.datetime, log=print,
     log(f"remove {table} {rule} {date}: {out['removed']:,} rows from {out['games']} games; "
         f"{len(out['skipped'])} skipped" + (f"; stopped: {out['stopped']}" if out["stopped"] else ""))
     return out
+
+
+def _remove_by_market(conn, spec: Spec, rule: str, game: str, path: Path, want: tuple,
+                      now: dt.datetime, log, clock, sleeper, anytime: bool) -> tuple:
+    """A game over SPLIT_ROWS, one market a transaction, the guard before each.
+    Returns (rows removed, finished). Unfinished leaves the game resumable."""
+    tick = clock or (lambda: dt.datetime.now(UTC))
+    rest = sleeper or __import__("time").sleep
+    markets = file_markets(spec, path, game)
+    if (sum(v[0] for v in markets.values()), sum(v[1] for v in markets.values())) != tuple(want):
+        raise RuntimeError(f"{game}: the file's markets do not add up to the ledger; nothing removed")
+    got = 0
+    for i, m in enumerate(sorted(markets)):
+        if i and not wait_for_quiet(conn, clock, sleeper, log, anytime=anytime):
+            return got, False
+        t0 = tick()
+        got += remove_market(conn, spec, rule, game, m, markets[m], now)
+        took = (tick() - t0).total_seconds()
+        if anytime and took > 0:
+            rest(took)
+    conn.execute("""UPDATE archive_batches SET removed_at = now(), removed_rows = %s
+                     WHERE table_name = %s AND rule = %s AND batch_key = %s""",
+                 (want[0], spec.table, rule, game))
+    conn.commit()
+    return got, True
 
 
 def _utc_iso(t: dt.datetime) -> str:

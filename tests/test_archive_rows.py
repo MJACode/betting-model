@@ -463,3 +463,94 @@ def test_a_second_removal_run_does_nothing_while_one_is_running(monkeypatch):
     conn.lock_free = False
     out = ar.remove_pending(conn, "player_prop_odds", "repeat", NOW, log=lambda *_: None)
     assert out["stopped"] == "another removal is running" and called == []
+
+
+def test_one_market_at_a_time_picks_exactly_what_the_whole_game_picks(copy):
+    # A large game is removed one market a transaction (2026-11-16: one
+    # 408,831-row game held the disk 395 s). The rule never compares across
+    # markets, so the markets' picks must add up to the game's, row for row.
+    start = NOW - dt.timedelta(days=10)
+    _game(copy, "G", start)
+    h = lambda m: start - dt.timedelta(hours=5) + dt.timedelta(minutes=m)   # noqa: E731
+    for market in ("player_points", "player_rebounds", "player_points_alternate"):
+        for m, p in ((0, 100), (10, 100), (20, 120), (30, 120), (40, 120)):
+            _prop(copy, "G", h(m), p, market=market)
+    spec = ar.SPECS["player_prop_odds"]
+    dk = ar.Dialect("dk")
+    whole = sorted(r[0] for r in copy.execute(ar.rule_sql(spec, "repeat", dk),
+                                              ar._params(dk, "repeat", ["G"], NOW)).fetchall())
+    parts = []
+    for market in ("player_points", "player_rebounds", "player_points_alternate"):
+        parts += [r[0] for r in copy.execute(ar.rule_sql(spec, "repeat", dk, by_market=True),
+                                             ar._params(dk, "repeat", ["G"], NOW, market)).fetchall()]
+    assert whole and sorted(parts) == whole
+
+
+class _MarketConn(_Conn):
+    """Postgres as seen by remove_market: per market, what the rule picks now
+    and how many archived rows are still there."""
+
+    def __init__(self, picks, left):
+        super().__init__()
+        self.picks, self.left, self.market, self.deleted = picks, left, None, []
+
+    def execute(self, sql, params=None):
+        self.sql.append((sql, params))
+        conn = self
+        if "CREATE TEMP TABLE archive_pick" in sql:
+            self.market = params[1]
+
+        class R:
+            rowcount = 0
+
+            def fetchall(self):
+                return conn.ledger if "FROM archive_batches" in sql else []
+
+            def fetchone(self):
+                if "FROM archive_pick" in sql:
+                    return conn.picks[conn.market]
+                if "= ANY(%s)" in sql:
+                    return (conn.left[conn.market],)
+                return (conn.active(), conn.app_s()) if "pg_stat_activity" in sql else (0, "0")
+        r = R()
+        if sql.startswith("DELETE"):
+            r.rowcount = self.picks[self.market][0]
+            self.deleted.append(self.market)
+        return r
+
+
+def test_a_large_game_goes_one_market_at_a_time_and_resumes(copy, tmp_path, monkeypatch):
+    monkeypatch.setattr(ar, "ARCHIVE_ROOT", tmp_path)
+    monkeypatch.setattr(ar, "SPLIT_ROWS", 1)
+    start = NOW - dt.timedelta(days=10)
+    _game(copy, "G", start)
+    for market in ("player_points", "player_rebounds"):
+        for m in (0, 10, 20, 30):
+            _prop(copy, "G", start - dt.timedelta(hours=5) + dt.timedelta(minutes=m), 100, market=market)
+    spec = ar.SPECS["player_prop_odds"]
+    day = "2026-11-06"
+    path = ar.file_path("player_prop_odds", "repeat", day)
+    ar.write_file(copy, spec, "repeat", ["G"], NOW, path)
+    fm = ar.file_markets(spec, path, "G")
+    n, c = ar.file_selection(spec, path)["G"]
+    ledger = [("G", n, str(c), ar.sha256(path), NOW, None, None)]
+    monkeypatch.setattr(ar, "wait_for_quiet", lambda *a, **k: True)
+    # points was removed by a run that stopped part-way; rebounds is still there
+    conn = _MarketConn(picks={"player_points": (0, "0"),
+                              "player_rebounds": (fm["player_rebounds"][0], str(fm["player_rebounds"][1]))},
+                       left={"player_points": 0, "player_rebounds": fm["player_rebounds"][0]})
+    conn.ledger = ledger
+    out = ar.remove(conn, "player_prop_odds", "repeat", day, NOW, log=lambda *_: None)
+    assert conn.deleted == ["player_rebounds"]
+    assert out["games"] == 1 and out["removed"] == fm["player_rebounds"][0]
+    done = [p for s, p in conn.sql if "SET removed_at" in s]
+    assert done == [(n, "player_prop_odds", "repeat", "G")]
+    # a market Postgres disagrees on: nothing deleted, the game noted and kept
+    bad = _MarketConn(picks={"player_points": (fm["player_points"][0], "999"),
+                             "player_rebounds": (fm["player_rebounds"][0], str(fm["player_rebounds"][1]))},
+                      left={"player_points": fm["player_points"][0], "player_rebounds": 0})
+    bad.ledger = ledger
+    out = ar.remove(bad, "player_prop_odds", "repeat", day, NOW, log=lambda *_: None)
+    assert bad.deleted == [] and out["games"] == 0
+    assert any(p[0].startswith("refused at removal") for s, p in bad.sql if "SET note" in s)
+    assert not [p for s, p in bad.sql if "SET removed_at" in s]
