@@ -113,10 +113,12 @@ def scratch_cluster(prefix: str = "scratch-pg-"):
 def _remove(path: str, tries: int = 20, pause: float = 0.25) -> None:
     """Delete a cluster's folder, retrying for up to about five seconds.
 
-    `pg_ctl stop -w` returns once postmaster.pid is gone, but on Windows the
-    server's processes can still hold `log` and `pg_ctl.out` open for a
-    moment. One rmtree then leaves those two files behind (seen 2026-11-17 in
-    byom-pg- and latest-line-pg- folders; the server itself had stopped).
+    One rmtree after `pg_ctl stop -w` left `log` and `pg_ctl.out` behind in
+    three folders on 2026-11-17 (byom-pg- and latest-line-pg-), although the
+    server had stopped. The likely cause, not measured: the server's processes
+    still hold those files for a moment, and on Windows a file another process
+    holds cannot be deleted. The leftover did not recur in 35 tries, so this
+    retry is tested only against a stand-in delete.
     """
     for attempt in range(tries):
         shutil.rmtree(path, ignore_errors=True)
