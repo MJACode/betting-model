@@ -1,4 +1,4 @@
-"""Women's full-game totals: DraftKings only (live) against the best bettable book, decided at the same
+"""Women's full-game totals: DraftKings only (the card before 2026-11-16) against the best bettable book, decided at the same
 moment (DraftKings' first posted total).
 
 For each game DraftKings priced, every bettable book's standing total at DraftKings' first-post time
