@@ -340,7 +340,7 @@ Each kept row is the opener or the close of its proposition. A rung of an altern
 
 | Move | Blocked by | What unblocks it |
 |---|---|---|
-| Prop repeats | nothing found | allowed |
+| Prop repeats | moved 11-16 and 11-17; the 2026-11-18 audit then found the app's "At pick" price (#1458) and research replays (below) | allowed in the tool; nothing scheduled runs it |
 | Game-odds repeats | The 2026-11-18 audit, below: the app's line history for past picks, the first-half CLV close, the NCAAB spread and moneyline builds, the MLB market-movement feature, the paid in-play buyers, the NFL cache import, and research scripts that rebuild fetches or measure price age | those readers read the archive too (the one history reader, section 3c); the buyers and importers take a ledger |
 | Older than 90 days, both tables | Teams board (the ±1.5 run line close is not the only `spreads` row of a game); CLV's same-line close; BYOM's lock candidates; `v_nhl_player_prop_odds`; `team_period_results`; the app's line charts | the opener/close table keyed with the line (section 3b), and those readers moved to it |
 
@@ -384,6 +384,24 @@ What the audit found reading those rows, by what breaks:
   - the player comes from the label.
   - It ignores the card's 500-row cap.
 - **The prop CLV close is unaffected:** it is the newest row before the start.
+
+**The prop readers, audited after the move (2026-11-18).** It ran on `origin/master` at c1e4240c.
+- **How the rule keeps rows.** The kept "close" is the last pre-game row of the proposition, of whatever type. The repeat check runs per type.
+  - NHL files its last pre-game pull as `close` (`nhl_prop_odds_ingestor.py`), and so does NBA for games with a bet (`nba_prop_close_ingestor.py`).
+  - So for those props, the last `open` row can have moved, and so can `open` repeats after the start.
+- **Production:**
+  - The "At pick" card (#1458).
+  - The app's divider, "Some prices after your pick not shown", now shows less often. That is harmless.
+  - `latest_prop_odds_recompute`, live in the catalog, takes alternate-line rows at `MAX(snapshot_at)`. It runs only from the update trigger or a manual rebuild of `latest_prop_odds`. For a past game whose newest row is a moved post-start `open` repeat, only the rungs that changed at that instant would survive.
+- **Research, when replayed on past games against the database:**
+  - `models/nfl_prop_market.drop_pulled_quotes` (a price over 30 minutes behind the book's newest row reads as pulled);
+  - `models/nfl_prop_injury_veto` (the quote's time is now the start of the unchanged run);
+  - `scripts/nfl_edge_cache.py` with `nfl_edge_prop_market_floor.py` (a bucket with no change has no row);
+  - `scripts/nhl_prop_card.py` and `nhl_props_card.py` (the newest `open` fetch);
+  - `scripts/nhl_prop_ev_lab.py` (its "close" is the newest `open` fetch).
+  - Live runs read unstarted games and are unchanged.
+- **Could re-insert moved rows:** `scripts/restore_sharp_prop_history.py`, a manual script. It anti-joins on the exact stamp.
+- **Unchanged** (the price as of a time, the first row, unstarted games, or bought single snapshots): the scorer, the prop CLV close, BYOM prop facts and lock candidates, the NBA prop models and their training, and the ingestors' existence checks.
 
 **Running it** (from the repo, with `SUPABASE_SERVICE_ROLE_KEY` in `.env`):
 
