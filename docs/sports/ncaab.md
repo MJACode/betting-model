@@ -1401,6 +1401,21 @@ bet settles on the full game, overtime included**; the half in the name is when
 it is placed. At most five a night across the three, posted to #ncaab-live and
 the app's Live board only.
 
+**20 of their first 24 bets were never stored (left as it is, 2026-11-16).** For game
+dates 2026-11-09 to 11-14 the loop decided 24 bets and wrote 4. Each of the
+other 20 was at a book whose number DraftKings did not hang in that fetch; the
+pick row left DraftKings' probability empty, `picks` refuses that (the
+pollers' log: "write failed ... null value in column dk_implied_prob"), and
+none was posted. Graded on the finals they went 14-6, +6.93 units, so the
+three models' first 24 bets went 18-6, +10.93. **Not fixed, on purpose**:
+mike, 2026-11-16, wants nothing changed in the men's models that would change
+their model or picks, so this loop still writes the empty value and still
+drops those bets. The fix is one value in `build_pick` (0.0, as the
+first-half cards, the NBA loop and now the women's loop write), and
+`tests/test_inplay_pick_without_draftkings.py` names this loop in `HELD`.
+The women's halftime loop lost 13 of 22 the same way, and is fixed (`docs/sports/ncaabw.md`, "Why the women's
+record trails the men's").
+
 **Graded on the night's selection, walk-forward 2022-23 to 2025-26** (each
 season's model fit only on earlier seasons, each night's cut set only from
 earlier seasons' decisions; `python -m scripts.ncaab_ingame_search

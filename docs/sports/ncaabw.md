@@ -39,10 +39,10 @@ purchase below walks the feed's own chain (`next_timestamp`) for that reason.
 
 | Market | Settles on | Inputs held | Prices | Status |
 |---|---|---|---|---|
-| Full-game total | both scores, overtime included | NCAA box scores 2010-27, ESPN finals 2015-16 on | the feed, 2024-25 and 2025-26 | **live** from 2026-11-10 (`ncaabw_total_blend`) |
+| Full-game total | both scores, overtime included | NCAA box scores 2010-27, ESPN finals 2015-16 on | the feed, 2024-25 and 2025-26 | **live** from 2026-11-10 (`ncaabw_total_blend`), at DraftKings' first total; at other books' first totals, where DraftKings posts none: does not clear (2026-11-16, "Why the women's record trails the men's") |
 | Full-game spread | final margin, overtime included | the books' own lines; the team ratings | the same | **nothing clears**: a line-shopping rule fails, and the team ratings add nothing to DraftKings' first spread in 2025-26 (both below) |
 | Full-game moneyline | winner, overtime included | each book's own spread; the team ratings | the same | **nothing clears**: an own-spread rule, the team ratings and every price band (below) |
-| Halftime total | both scores, overtime included | the halftime score, the pre-game total | the feed's snapshots, five minutes apart | **built** 2026-11-11 (`ncaabw_live_total_ht`, "In play" below) |
+| Halftime total | both scores, overtime included | the halftime score, the pre-game total | the feed's snapshots, five minutes apart | **live** from 2026-11-11 (`ncaabw_live_total_ht`, "In play" below); 13 of its first 22 bets were never stored, fixed 2026-11-16 |
 | Halftime spread | final margin | the same | the same | **does not clear**: the walk-forward interval reaches zero, and 2026-27 to date is 11-17 (below) |
 | In play outside the break | the final | ESPN play-by-play with wallclock | the same | first-half total loses, first-half spread is flat (below) |
 | First-half moneyline | the first two quarters | none | BetMGM alone, tournament games | parked: one book, a handful of games |
@@ -64,6 +64,122 @@ purchase below walks the feed's own chain (`next_timestamp`) for that reason.
   the nearest thing, on under half the games.
 - **No first-half, quarter or team-total line, and no player prop**, in the
   feed (above).
+
+## Why the women's record trails the men's (measured 2026-11-16)
+
+mike, 2026-11-16: *"Why isn't the ncaabw models as successful as the ncaab?
+What are we missing"*. Every number below was read that day. Units: one unit
+to win, risk capped at 3, at the price the pick was decided at.
+
+**The two records are not the same markets.** Settled bets through
+2026-11-15 (`picks`, BET rows, void and duplicate rows left out):
+
+| | Bets | Record | Units |
+|---|---|---|---|
+| Men's, all nine models | 166 | 104-62 | +29.72 |
+| of which the two first-half models | 121 | 76-45 | +23.69 |
+| Men's full-game total | 2 | 2-0 | +2.00 |
+| Men's in-play, three models | 4 | 4-0 | +4.00 |
+| Women's full-game total | 9 | 5-4 | +0.60 |
+| Women's halftime total | 9 | 3-6 | -3.84 |
+
+Four fifths of the men's units are the two first-half models. There is no
+women's first-half model because no book in the feed prices a women's first
+half: 0 of the 701 women's games of 2026-11-03 to 11-15 carried a first-half
+line, against 471 of the 681 men's. DraftKings' own board is the untried
+route (#1311).
+
+**DraftKings prices about one women's game in ten.** Same window: a
+DraftKings pre-game total on 69 of 701 women's games and on 519 of 681 men's;
+some book's total on 174 women's games. DraftKings' own board agrees, so it
+is DraftKings and not the feed: the board feed on mike's machine saw at most
+3 women's games in play at once on 2026-11-13 to 11-15 (the men's up to 35)
+and placed every one. The totals model decides at DraftKings' first posted
+total, so it sees about one game in ten. Its 9 bets beat or matched
+DraftKings' closing total on all 9, by 1.11 points on average, and its side
+won 26 of the 43 games it priced.
+
+**Other books' first totals do not fill the gap.** The 648 games of 2024-25
+to 2026-27 with a pre-game total at a bettable book and none at DraftKings,
+priced at the earliest other book's first total, the blend fitted on
+DraftKings' first posts of the earlier season
+(`python -m scripts.ncaabw_research.totals_other_books`):
+
+| Edge above | 2025-26 (walk-forward) | 2026-27 to date |
+|---|---|---|
+| 0.03 | 198 bets, +11.90 units, +5.26% [-6.8, +15.7] | 23, +5.90 |
+| 0.05 | 140, 79-61, +9.53, +5.97% [-6.7, +18.4] | 20, 13-7, +5.00 |
+| 0.06 | 116, +0.47, +0.36% [-13.7, +13.3] | 20, +5.00 |
+| 0.08 | 79, -4.43, -4.92% [-22.8, +12.0] | 15, +4.25 |
+
+It falls as the cut rises, the opposite of the DraftKings games (+6.77% at
+0.05 and +10.57% at 0.08 the same season), and 2024-25 holds 5 bets.
+BetRivers' first posts alone made +21.22% on 60 bets in 2025-26: one book
+picked after the fact. Nothing ships from it. What would change it: a second
+season of BetRivers-first games clear of zero.
+
+**The best book at DraftKings' first post does better than DraftKings alone.**
+Until 2026-11-16 the live model bet DraftKings' first total only, copied from
+the men's totals model, which still does. Shopping at the same moment, the best bettable
+book's standing total and price, priced the same way
+(`python -m scripts.ncaabw_research.totals_best_book`):
+
+| Edge above | 2025-26, DraftKings only | 2025-26, best book | 2024-25 / 2026-27, best book |
+|---|---|---|---|
+| 0.03 | 516 bets, +26.33 units, +4.63% | 556, +35.77, +5.82% | 141, +44.54 / 30, +9.03 |
+| 0.05 | 402, +29.96, +6.77% [-2.2, +15.3] | 435, +39.12, +8.13% [-1.0, +16.8] | 52, +26.80 / 25, +6.13 |
+| 0.08 | 276, +32.16, +10.57% | 302, +36.67, +10.98% | 10, +7.90 / 20, +3.23 |
+
+Better at every cut, and it beats the closing consensus by 0.90 points against
+0.58. In 2025-26 at 0.05, another book was best on 102 bets (+12.97 units,
++11.33%). The other two seasons barely move, because at DraftKings' first post
+the median game has no other book up yet. The card has bet the best book since
+2026-11-16 (mike: "merge 1423"; "The best book" under the totals model below).
+
+**13 of the halftime model's first 22 bets were never stored.** From
+2026-11-11 to 11-15 the loop decided 22 bets and wrote 9. Each of the other 13
+was at a book whose total DraftKings did not hang in that read; the pick row
+left DraftKings' probability empty, `picks` refuses that (the pollers' log:
+"write failed ... null value in column dk_implied_prob"), and none was
+posted. The men's in-play loop carries the same line and is left as it is at
+mike's request (`docs/sports/ncaab.md`, "In play"). Fixed here 2026-11-16: the
+row takes 0.0 there, as the first-half
+cards and the NBA loop do, with `line_book` naming the book
+(`tests/test_inplay_pick_without_draftkings.py`). The 13 went 6-7, -1.69
+units, so everything the model decided is 22 bets, 9-13, -5.53 units.
+
+The bets the bug drops are most of the model, and they are not worse ones. On
+the replay, a bet counts as dropped when its read holds no DraftKings total at
+its number (`python -m scripts.ncaabw_research.ht_dropped_bets`):
+
+| | All bets | Kept even with the bug | Dropped by the bug |
+|---|---|---|---|
+| 2025-26 (walk-forward) | 669, +89.96 units, +11.84% | 192, +28.14, +12.88% | 477, +61.82, +11.42% |
+| 2024-25 (second look) | 298, +42.10, +12.35% | 135, +22.00, +14.34% | 163, +20.10, +10.72% |
+| 2026-27 to 11-09 | 14, -0.91 | 4, -2.23 | 10, +1.32 |
+
+So the fix multiplies the bets the model posts by about 3.5 in a season like
+2025-26 (669 against 192), at much the same return a bet; four in five of the
+dropped bets were at BetMGM or FanDuel. What a bet returns this season is the
+open question (below; #1405).
+
+**This season the books' halftime totals sit closer to the model.** The
+replay of the loop's own code bets 60.3% of the games it decides in 2024-25
+and 64.4% in 2025-26 (61.8% and 63.2% of November's). On 2026-11-01 to 11-09,
+with the file the loop loads, it bets 25.5% (14 of 55, 7-7, -0.91 units).
+Every fit bets the two stored seasons alike (54% to 68%) and this season's
+first nine days alike (25% to 35%), so it is this season's books, not the
+model file (`python -m scripts.ncaabw_research.ht_model_vs_market`). Live,
+on 2026-11-11 to 11-15, the loop bet 22 of the 54 games with a priced quote
+(41%): other games than the replay's, and the gap between 41% and 25.5% is
+not explained yet (#1405). Nor are its misses: 8 breaks passed with no
+eligible quote in about 62 games (13%; 5 more were the lost bets above),
+against 22 of 1,061 (2%) in the 2025-26 replay. Not the move to
+DraftKings' own board on 2026-11-13: on the 11 games both covered, the feed's
+DraftKings total in the break was the board's, a minute behind when it moved.
+With the replay's 14, this season's halftime bets are 36, 16-20, -6.44 units.
+A model as good as its replay (576 of 966 won) goes 16-20 or worse 4.7% of
+the time. That is the assessment to keep running as the season fills.
 
 ## Identity: ESPN owns the games row
 

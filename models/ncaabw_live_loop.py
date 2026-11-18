@@ -292,7 +292,11 @@ def build_pick(ctx: GameCtx, best: dict, offers: pd.DataFrame, state: dict, link
                bankroll: float) -> dict:
     """One `picks` row from one BET. model_probability is P(win | no push); the
     DraftKings columns are DraftKings' own quote on the same side at the same
-    total in this read, else NULL."""
+    total in this read, else dk_odds NULL, dk_implied_prob 0.0 and edge 0.0 with
+    line_book naming the book taken (the first-half cards' and the NBA loop's
+    convention). dk_implied_prob is NOT NULL in `picks`: a NULL there failed the
+    insert of 13 of the 22 bets this loop decided, 2026-11-11 to 11-15
+    (tests/test_inplay_pick_without_draftkings.py)."""
     from models.scorer import _confidence_tier, quarter_kelly
     side, book, price, line = best["side"], best["book"], float(best["price"]), float(best["line"])
     prob = float(best["prob"])
@@ -313,7 +317,7 @@ def build_pick(ctx: GameCtx, best: dict, offers: pd.DataFrame, state: dict, link
         "game_date": ctx.game_date, "game_time": ctx.tip.isoformat(),
         "pick_side": side, "pick_label": M.pick_label(side, line, ctx.home, ctx.away),
         "model_probability": round(prob, 4),
-        "dk_implied_prob": None if dk_implied is None else round(dk_implied, 4),
+        "dk_implied_prob": 0.0 if dk_implied is None else round(dk_implied, 4),
         "edge": round(edge, 4), "dk_odds": dk_odds,
         "scored_line": line,                         # the total taken
         "kelly_fraction": kf, "recommended_bet": rec, "bankroll_at_pick": bankroll,
