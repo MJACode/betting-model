@@ -28,7 +28,7 @@ called, never copied, wherever the doc says "unchanged".
              state, moved between games on the same date and market (IG-2's placebo), built one
              frame at a time.
 
-    PYTHONPATH=. python %TEMP%/q1trend/run_with_db.py scripts.nba_s_ingame27 --pull
+    PYTHONPATH=. python C:/Users/micha/Documents/betting-model/data/local/research/q1trend/run_with_db.py scripts.nba_s_ingame27 --pull
     NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -m scripts.nba_s_ingame27 --smoke
     NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> NBA_GAME2_BETS=<folder>/bets \
         NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -m scripts.nba_s_ingame27 --full

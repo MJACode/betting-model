@@ -218,4 +218,4 @@ python deriv_r4b.py              # R4 on the longer table
 ```
 
 `paths.py` one level up names the mirror and the cache
-(`C:\Users\micha\ncaaf_research\data`).
+(`C:\Users\micha\Documents\betting-model\data\local\research\ncaaf_research\data`).

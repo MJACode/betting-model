@@ -7,7 +7,7 @@ tennis_odds_quotes is read one sport key at a time on its (sport_key,
 commence_time) index; a single scan of its 3 million rows hit the statement
 timeout on 2026-11-13.
 
-    python -m scripts.tennis_cache --out C:/Users/micha/tennis_research/cache
+    python -m scripts.tennis_cache --out C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache
 """
 from __future__ import annotations
 

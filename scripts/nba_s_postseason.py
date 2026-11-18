@@ -6,7 +6,7 @@ any bet in the search was graded. This lab EMITS cells through the shared harnes
 (python -m scripts.nba_game2_verdict --results DIR --house5, section 9.1's bars). No cut, constant
 or rule below was chosen from a betting result of a play-in, playoff or Cup final game.
 
-    python C:/Users/micha/AppData/Local/Temp/q1trend/run_with_db.py scripts.nba_s_postseason --pull
+    python C:/Users/micha/Documents/betting-model/data/local/research/q1trend/run_with_db.py scripts.nba_s_postseason --pull
     NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -m scripts.nba_s_postseason --smoke
     NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<dir> NBA_GAME2_BETS=<dir>/bets NBA_RESEARCH_CACHE=<cache> \
         PYTHONPATH=. python -m scripts.nba_s_postseason --full

@@ -2308,7 +2308,7 @@ chance). The 14 cells with 200 or more bets have a median return of +0.2%; 8 are
   decision.
 
 **Independent verification** (workflow `nba-alt-lines-regrade-verify`, scripts under
-`%TEMP%/q1trend/verify6/` on the build machine):
+`C:/Users/micha/Documents/betting-model/data/local/research/q1trend/verify6/` on the build machine):
 - All 3,709 bets of six headline cells settled again from final scores: 0 differ. Every bet's rung
   is in the purchase at that book, line and price, before tip, 1.5 or more from the book's main,
   priced −200 to +400, from a ladder no more than 15 minutes old.
@@ -2528,7 +2528,7 @@ one asked for (11.6, item 2). Of the plan's 1,927 events, 1,894 have a window at
 
 **N1, the stale book: almost never a bet.** 0 to 4 bets per cell over two seasons (3 spread bets at
 R+5). An independent recount from the raw quotes (workflow `nba-injury-news-verify`, scripts under
-`%TEMP%/q1trend/verify7/` on the build machine) found the same candidates row for row, so the rule
+`C:/Users/micha/Documents/betting-model/data/local/research/q1trend/verify7/` on the build machine) found the same candidates row for row, so the rule
 saw every stale quote the data holds. What it showed instead:
 - After Pinnacle's number moves a point or more, a deciding book's quote is often unchanged: 18% to
   41% of the time, by book.
@@ -2730,7 +2730,7 @@ their answer is "too few games to tell". The full table is in the lab's output.
 
 Run `2026-10-28-eighth`: 64 registered cells and 20 controls (`--full`, then
 `python -m scripts.nba_game2_verdict --house5`). The cells, bets and per-game inputs are on the
-build machine under `%TEMP%/q1trend/results/`, and in Supabase (84 rows, read back 2026-11-01, after the login
+build machine under `C:/Users/micha/Documents/betting-model/data/local/research/q1trend/results/`, and in Supabase (84 rows, read back 2026-11-01, after the login
 that first blocked storing them was fixed).
 
 **0 of the 64 cells pass.** The verdict counts 7 whose 95% interval clears zero, against about
@@ -2766,7 +2766,7 @@ mike's method, the spread cells (first-quarter spread, the hot team, best decidi
   (+5.8% to +44.0%); the table's +36.6% is its first two seasons only. It fails the 200-bet
   bar, and the band just below it (last-10 k from 0 to 2) lost 5.9% on 88 bets. By 12.4 its
   answer is **too few games to tell**. An independent stress test (workflow
-  `nba-q1-trend-postgrade-verify`, scripts under `%TEMP%/q1trend/verify/stress0008/`) found:
+  `nba-q1-trend-postgrade-verify`, scripts under `C:/Users/micha/Documents/betting-model/data/local/research/q1trend/verify/stress0008/`) found:
   - it is not one team, date or book: leaving any one team out keeps it above +22%;
   - it clears zero only at the best of the books' numbers: at the worst deciding offer the
     interval is −1% to +35%, and 17 bets at a number no other book hung went 15-1-1 for
