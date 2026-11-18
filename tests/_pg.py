@@ -5,7 +5,8 @@ Two test files need a real server (`test_latest_line_state.py`,
 this starts a throwaway cluster from whichever binaries exist:
 
   1. `initdb` / `pg_ctl` on PATH (a system install),
-  2. the Debian path the Linux sandbox carries (/usr/lib/postgresql/16/bin),
+  2. the Debian layout, /usr/lib/postgresql/<major>/bin, newest major first
+     (the sandbox carries 16; GitHub's runner installs 18 since 2026-11),
   3. the `embedded-postgres` pip package (declared in requirements-test.txt),
      which ships a full server beside its module — the route on this machine,
      where nothing else is installed.
@@ -27,17 +28,37 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
+
+
+DEBIAN_PG_ROOT = Path("/usr/lib/postgresql")
+
+
+def _debian_bin(name: str, root: Path | None = None) -> str | None:
+    """The newest /usr/lib/postgresql/<major>/bin/<name>. Never a pinned major:
+    a hard-coded 16 made every scratch test fail in CI the day the runner's
+    apt moved to 18 (PR #1426, 2026-11-16), while the workflow's own check,
+    which scanned every version, passed."""
+    root = DEBIAN_PG_ROOT if root is None else root
+    if not root.is_dir():
+        return None
+    majors = [d for d in root.iterdir() if d.name.isdigit()]
+    for version in sorted(majors, key=lambda d: int(d.name), reverse=True):
+        cand = version / "bin" / name
+        if cand.is_file():
+            return str(cand)
+    return None
 
 
 def pg_bin(name: str) -> str | None:
     found = shutil.which(name)
     if found:
         return found
-    debian = Path(f"/usr/lib/postgresql/16/bin/{name}")
-    if debian.is_file():
-        return str(debian)
+    debian = _debian_bin(name)
+    if debian:
+        return debian
     try:
         import embedded_postgres  # type: ignore
     except ImportError:
@@ -86,7 +107,25 @@ def scratch_cluster(prefix: str = "scratch-pg-"):
         with open(Path(owned) / "pg_ctl.out", "ab") as sink:
             subprocess.run([pg_ctl, "-D", owned, "-m", "fast", "-w", "stop"],
                            stdout=sink, stderr=sink)
-        shutil.rmtree(owned, ignore_errors=True)
+        _remove(owned)
+
+
+def _remove(path: str, tries: int = 20, pause: float = 0.25) -> None:
+    """Delete a cluster's folder, retrying for up to about five seconds.
+
+    One rmtree after `pg_ctl stop -w` left `log` and `pg_ctl.out` behind in
+    three folders on 2026-11-17 (byom-pg- and latest-line-pg-), although the
+    server had stopped. The likely cause, not measured: the server's processes
+    still hold those files for a moment, and on Windows a file another process
+    holds cannot be deleted. The leftover did not recur in 35 tries, so this
+    retry is tested only against a stand-in delete.
+    """
+    for attempt in range(tries):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            return
+        if attempt + 1 < tries:
+            time.sleep(pause)
 
 
 def env_dsn() -> str | None:

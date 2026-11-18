@@ -8,7 +8,7 @@
   to 3am (an NFL game can kick off at 9:30am ET), and two minutes after sign-in (mike, 2026-11-12: "yes"). A start
   while a feed is running exits at once (the feed holds 127.0.0.1:47231).
 
-  The feed runs from its own worktree, C:\Users\micha\Documents\bm-live-feed,
+  The feed runs from its own worktree, C:\Users\micha\Documents\betting-model\.claude\feeds\dk-live-board,
   put on origin/master before each start, so a merged fix reaches the next
   start and no other session's branch is ever what runs. DATABASE_URL is
   read from the main checkout's .env for this process only.
@@ -16,7 +16,7 @@
 param(
     [string]$Root = "C:\Users\micha\Documents\betting_local_copies",
     [string]$Repo = "C:\Users\micha\documents\betting-model",
-    [string]$Feed = "C:\Users\micha\Documents\bm-live-feed",
+    [string]$Feed = "C:\Users\micha\Documents\betting-model\.claude\feeds\dk-live-board",
     [int]$LockPort = 47232
 )
 $ErrorActionPreference = "Continue"

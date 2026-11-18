@@ -42,7 +42,9 @@ if str(ROOT) not in sys.path:
 
 from models import euroleague_live_ht as M  # noqa: E402
 
-CACHE = Path(os.environ.get("EUROLEAGUE_RESEARCH_DIR") or Path.home() / "euroleague_research") / "cache"
+CACHE = Path(os.environ.get("EUROLEAGUE_RESEARCH_DIR")
+             or Path.home() / "Documents" / "betting-model" / "data" / "local" / "research"
+             / "euroleague_research") / "cache"
 WF_SEASONS = (2023, 2024, 2025, 2026, 2027)
 FIRST_TRAIN = 2022
 BREAK_OK = (10.0, 25.0)

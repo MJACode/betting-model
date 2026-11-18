@@ -332,7 +332,7 @@ are kept raw in `ncaabw_odds_unmatched`.
 | Paid history | Every snapshot of 2024-25, 2025-26 and 2026-27 to date (above) | `data/ingestors/ncaabw_odds_history.py` |
 | Free history | NCAA possession box scores and season player minutes, 2010 to 2027 | `data/ingestors/ncaabw_sdv_import.py` |
 | Box scores, this season | ESPN's summary after each final on the hourly passes (step `ncaabw-box`); NCAA's file once a day (step `ncaabw-ncaa-box`, new contests only) | `data/ingestors/ncaabw_espn_box.py`, `ncaabw_sdv_import.refresh_season` |
-| Totals model card | Every 5 minutes, three after each capture tick: decides each game once at DraftKings' first posted total, bets only while it still stands, then publishes; `RUN_NCAABW_TOTAL_CARD=0` stops it | `scripts/ncaabw_total_card.py`, job `ncaabw_total_card` |
+| Totals model card | Every 5 minutes, three after each capture tick: decides each game once at DraftKings' first posted total, at the best bettable book's total standing then (from 2026-11-16), bets only while it still stands, then publishes; `RUN_NCAABW_TOTAL_CARD=0` stops it | `scripts/ncaabw_total_card.py`, job `ncaabw_total_card` |
 | Play-by-play | ESPN's plays with their wallclock, 2024-25 on, from sportsdataverse's season files; the halftime loop reads the same feed live | `data/ingestors/ncaabw_pbp.py` |
 | Halftime total loop | On pollers: reads the books every five minutes while a game is at the half, decides each game once, posts to the women's live channel; `RUN_NCAABW_LIVE=0` stops it | `models/ncaabw_live_loop.py`, job `ncaabw_live` |
 
@@ -388,7 +388,7 @@ men's. The men's totals method on the women's games, at the women's own cut.
 | | | |
 |---|---|---|
 | model | ratings refit as of the quote, a correction on shooting luck and style, blended with DraftKings' total | `models/ncaabw_total_blend.py` |
-| card | decides each game once at DraftKings' first posted total, only while it still stands | `scripts/ncaabw_total_card.py` |
+| card | decides each game once at DraftKings' first posted total, only while it still stands; bets the best bettable book's total standing at that moment (mike, 2026-11-16) | `scripts/ncaabw_total_card.py` |
 | frozen numbers | `models/saved/ncaabw_total_blend_2027.json` | `scripts/ncaabw_total_blend_build.py` |
 | cut | edge above 0.05: P(win, push left out) minus DraftKings' implied probability | `config.MODEL_EDGE_THRESHOLDS` |
 | EV floor / price floor | 0.07 / -200 | `config.MODEL_OWN_EV_FLOOR`, `MODEL_MIN_ODDS` |
@@ -427,6 +427,32 @@ better).
 **Prices.** Every replayed bet was laid at -115 to -105. DraftKings priced
 every women's total it posted in 2024-25 to 2026-27 between -120 and -102.
 The floor is -200.
+
+**The best book (from 2026-11-16; mike: "merge 1423").** The card used to bet
+DraftKings only, copied from the men's totals card. It now prices every other
+bettable book's total standing at DraftKings' first post (its newest row
+stamped at or before it, still that book's standing number when the card
+runs) with the same mean and blend, and bets the largest edge; a tie stays at
+DraftKings. The moment, the hold, the ratings' hour and the cut are unchanged,
+and so is every frozen number in the artifact (the rebuild's params, end
+state, league rates, stage 2 and blend equal the old file's). The build
+(`python -m scripts.ncaabw_total_blend_build`) replays it:
+
+| Edge above 0.05 | DraftKings only | Best book |
+|---|---|---|
+| 2025-26 (walk-forward) | 402 bets, +29.96 units, +6.77% | 435 bets, 247-188, +39.12 units, +8.13% [-1.0, +17.3] |
+| 2024-25 (second look) | 51, +25.80 | 52, +26.80 |
+| Each season on the other's blend | 453, +55.76, +11.18% | 487, +65.92, +12.25% |
+
+The card's own decision code reproduces the best-book replay bet for bet on
+2025-26: 435 bets, the same games, sides and books, largest edge difference
+0.00000004, none refused by a floor. Prices laid: -122 to -105. At DraftKings'
+first post the median game has no other book up; another book was best on 102
+of the 435 bets. On production, 9 of the 34 games decided 2026-11-12 to 11-16
+had another book standing at the first post (FanDuel 8 quotes, BetRivers 3,
+Caesars 2). A pick at another book names it in `decision_book` and, when
+DraftKings' number differs, in `line_book`, with DraftKings' own columns empty
+(CLAUDE.md §6). The men's totals card is not changed (mike, 2026-11-16).
 
 **2026-27 to date, through the card's own reads** (2026-11-10, `python -m
 scripts.ncaabw_research.season_to_date`): 42 priced finals. At 0.05: 14 bets,

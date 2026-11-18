@@ -330,6 +330,7 @@ laptop and just keep what was needed in Supabase"*, and of the exact repeats:
 1. The PC copy picks them and writes a Parquet file under `betting_local_copies\archive`.
 2. The file is read back and matches.
 3. It is uploaded to the private Storage bucket `archive` and read back byte for byte.
+   Storage refuses one object over its file-size limit (it refused 52.9 MB and 70.5 MB files on 2026-11-16), so a file over 40 MB goes up in parts (`<file>.part-001`, `-002`, ...). The parts, joined, must hash to the file.
 4. In one transaction, Postgres picks the same rows by the same rule, with the same count and fingerprint.
 5. The ledger `archive_batches` records it.
 
@@ -345,6 +346,50 @@ Each kept row is the opener or the close of its proposition. A rung of an altern
 
 **The re-buy (#1384) counts archived rows as held.** Its planner finds thinned games by counting rows per line. It now counts the archive too (`odds_rebuy.prop_history`), so it does not buy back what is on the PC.
 
-**The space comes back only after a rewrite.** `archive_rows.py reclaim` runs `VACUUM FULL`. It locks the table while it runs, so it goes in the quiet window (03:00-05:00 ET). It needs free disk the size of what is kept.
+**Running it** (from the repo, with `SUPABASE_SERVICE_ROLE_KEY` in `.env`):
+
+```bash
+python scripts/archive_rows.py run --table player_prop_odds --rule repeat --start 2026-03-01 --end <3 days ago>   # prepare and upload, any time
+python scripts/archive_rows.py remove --table player_prop_odds --rule repeat --pending                         # 01:30-05:30 ET only
+python scripts/archive_rows.py status
+```
+
+**When it touches Supabase.** Only step 4 reads Postgres, and only between 01:30 and 05:30 ET. Inside that window it also pauses for the hourly refresh pass and while more than 6 other statements are running.
+- Preparing (steps 1 and 2) reads the PC copy alone. `--check` adds a Postgres check, but step 4 makes the same check anyway.
+- A game whose removal runs past 900 s is noted in the ledger and tried again the next night.
+- A game where Postgres and the file disagree is refused and noted. It is prepared again after the next copy.
+
+**Why (measured 2026-11-16).** The database server is small for what it holds. It has 256 MB of shared buffers and a 60-connection limit, and it holds 101 GB.
+- Supabase's compute table gives a 60-connection limit only to its two smallest sizes, with 0.5 GB and 1 GB of memory.
+- It recommends at most 10 GB of data for the 1 GB size.
+- The dashboard's compute page would confirm which size this is. At 02:28 ET on 2026-11-18 it read Medium, with 13 of 120 connections in use.
+- A game's prop rows come off disk at 650-2,300 rows a second: 45,000 rows in 70 s, 340,000 in 148 s.
+- The daytime prepare pass also checked every game in Postgres, from 09:00 to 13:50 ET.
+- The project logged 178 statement timeouts in those hours, 79 of them reads from the app. That compares with at most 5 an hour in the 18 hours before the pass, and none after it stopped.
+- So nothing in this tool reads Postgres in the daytime.
+
+**Getting the space back: the props table was rewritten online on 2026-11-18 (measured).** Removed rows leave their space inside the table file until the table is rewritten.
+- **What was used:** `pg_repack` 1.5.2, not `archive_rows.py reclaim`. `reclaim` runs `VACUUM FULL`, which blocks every read and write of the table for the whole rewrite. `pg_repack` holds that lock only for a moment at the start and at the swap.
+- **When:** 02:29 to 02:55 ET. The copy took about 10 minutes and the 5 indexes about 16.
+- **Result:** the props table's data went from 26.05 to 10.73 GB, and its indexes from 4.37 to 4.33 GB. The whole database went from 93.34 to 78.01 GB. The dashboard read 81.55 GB used of 135 afterwards, including 3.3 GB of write-ahead log.
+- **Disk headroom:** database plus log peaked at 112.14 GB, 17.8 GB over where it started. That is the new table plus its indexes, plus the log grown to 4 GB (its `max_wal_size`).
+- **Checks:** a count and checksum of the 37,193,430 rows up to ID 121,946,715, the 17:49 baseline on 11-17, matched before and after.
+  - The 1.15 million rows written after that baseline (IDs up to 123,097,605) were not checksummed before the rewrite.
+  - Triggers, the anon read rule, permissions and all 5 indexes were unchanged. The 3:15 refresh pass's 21,218 new rows all reached `latest_prop_odds`. There were no app errors and no failed app reads in any 5-minute window.
+- **Not tested:** rows arriving mid-run. None arrived: the last ID stayed at 123,097,605 from 02:28 to 03:17, and the change log table stayed empty. So nothing here shows how a run behaves on `odds`, or at a busier hour, while rows are being written.
+
+**How to run it again** (for example, on `odds`):
+- **The client must match the database extension exactly.** The extension is 1.5.2, and that is the highest version Supabase offers. The PostgreSQL apt repository the image uses (PGDG) has 1.5.3, which refuses to run: "program 'pg_repack 1.5.3' does not match database library 'pg_repack 1.5.2'". `scripts/pg_repack_helper.sh` builds 1.5.2 from the upstream source tag when apt has no exact match.
+- **Where it runs:** a temporary Railway service. Image `postgres:17-bookworm`, restart policy NEVER.
+  - Variables: `DATABASE_URL=${{worker.DATABASE_URL}}`, `REPACK_TABLE`, `REPACK_MODE` (`dry` first, then `run`), and `REPACK_SH`.
+  - `REPACK_SH` is the script in base64. Encode it from the committed file, `git show HEAD:scripts/pg_repack_helper.sh | base64 -w0`, because a Windows checkout carries CRLF line endings.
+  - Start command: `bash -c 'echo "$REPACK_SH" | base64 -d > /tmp/r.sh && exec bash /tmp/r.sh'`. Create it live, not staged: Railway's pending-changes list holds old worker settings, and committing it would push them too.
+- **Connection:** it uses port 5432, Supavisor's session pooler. Flags: `-k --no-order --no-kill-backend --wait-timeout=120`.
+- **Guard:** start `python -m scripts.pg_repack_guard --table <t> --abort-gib <line>` before the rewrite. Set the line under the disk's auto-grow point, which is 90% of the disk. It cancels the rewrite from SQL, and `pg_repack` then removes its own trigger and copy tables. That was rehearsed twice on `nfl_live_prop_snapshots`.
+- **Never stop it from Railway.** A redeploy or delete mid-run kills the client before it cleans up, which leaves a trigger on the table.
+- **Finding its connections:** Supavisor rewrites `application_name`, so they are found by what they run.
+- **When to run it:** after the 02:15 refresh pass, never inside :15 to :28 past the hour, and finished before 05:40. The rebuild was moved off the evening of 11-17 because the dashboard's disk speed allowance read 8% after that day's work. On 11-18 the day's point read 99%.
+- **Free space needed:** the new table plus its indexes, plus up to 4 GB of log.
+- **Delete the service afterwards.** A restart would run the rewrite again.
 
 The disk itself shrinks only at a Supabase project upgrade, to 1.2x the database ("Manage disk size", Supabase docs).

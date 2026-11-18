@@ -30,6 +30,45 @@ review as its own entry.
 
 ---
 
+## 2026-11-17 — Horse racing: US Hong Kong payouts measured against the Club's dividends
+
+1. **League and scope**: thoroughbred racing, the "whats next" after the
+   daily Betfair store (#1433). The one free check the racing doc had left:
+   does a US outlet's Hong Kong bet join the Jockey Club's pool?
+2. **Tried**: the payout comparison `scouting.md` named on 2026-11-16. The
+   Club's win, place and exotic dividends for Sha Tin 2026-11-14 and Happy
+   Valley 2026-11-11 (its own results pages), against the $2 payouts Off
+   Track Betting published for the same races. Result: 77 of 77 win and
+   place payouts and 7 of 7 exotics equal to the cent, including a $2.02
+   place payout (`docs/horse_racing_scout_us_outlets.md`, "Measured,
+   2026-11-17"; `scripts/horse/hk_pooling_check.py`, which was watched
+   failing on one changed payout). The site's own Hong Kong page says its
+   customers can bet both tracks, in "co-mingled" pools.
+3. **New**: a price route, written into `scouting.md`: a US wagering site's
+   own results pages carry the payouts it publishes, for US and overseas
+   tracks. Open web searches on both days found nothing; a search limited to
+   the site found its results index; the fetch tool got HTTP 403; the
+   browser opened the page on the first try. And a limit, written there
+   too: a published payout is not a settled one (a feed converting the
+   host's dividends would print the same figures). The Hong Kong archive was
+   re-read the same day (US$499, one payment, refundable until downloaded;
+   one-minute polls before the off in three spans, five-minute in between;
+   odds only, so results and form for 2018 on come from the Club's results
+   pages, which load for 2019 and 2022 dates) and the racing doc carries it.
+4. **Corrected**: was "whether any US outlet still bets into the Club's
+   pools is not established" (`docs/sports/racing.md`, 2026-11-16), now "a
+   US site that takes Hong Kong bets publishes the Club's own dividends",
+   because the payouts match race by race and the site says it pools. Still
+   open: a settled bet, which other outlets, which states, and how late a US
+   outlet takes the bet. The order changed too: the late-bet question only
+   matters if the archive's test clears, so it is checked after the test,
+   not before buying.
+5. **The framework**: nothing in `SKILL.md`. One note for step 2: "two web
+   searches found no page" was the stated reason for leaving a question open
+   that one site's own results index answered. Search the sites that would
+   hold the page (here, US wagering sites' results), not only the open web;
+   and a site that blocks the fetch tool is not a site with no page.
+
 ## 2026-11-16 — Women's college basketball against the men's: why it trails, and in-play bets that were never stored
 
 1. **League and scope**: women's college basketball against the men's. mike,

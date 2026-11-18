@@ -542,7 +542,7 @@ several lines under that key the last one wins, and the two prices can come from
 
 - **One paid call (1 credit), 2026-11-03 02:13Z, PHX at GSW, `player_points`, eight books.** Seven books list one line
   a player. Bovada lists several for all 13 players (seven for Brandin Podziemski, 12.5 to 18.5), and the line we
-  keep is not the one closest to even for any of them. The raw response is in `%TEMP%/q1trend/probe_prop_ladder_raw.json`.
+  keep is not the one closest to even for any of them. The raw response is in `C:/Users/micha/Documents/betting-model/data/local/research/q1trend/probe_prop_ladder_raw.json`.
 - Bovada's own site, read once without credits: the stored line is the last it lists for 90 of 90 players.
 - Raw NFL in-play responses (`nfl_live_prop_snapshots`): 4 of 75,024 player-market groups list several lines, and the
   parser mixed two lines into one row on 2 of them, both DraftKings.

@@ -284,7 +284,7 @@ export function SignInScreen() {
                       ]}
                     >
                       {pending ? (
-                        <ActivityIndicator color={isApple ? colors.textPrimary : colors.textInverse} />
+                        <ActivityIndicator color={isApple ? colors.onBright : colors.textInverse} />
                       ) : (
                         <Text
                           style={[
@@ -439,14 +439,14 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.title1,
     fontWeight: font.weight.bold,
-    color: colors.textInverse,
+    color: colors.onChrome,
     textAlign: 'center',
   },
   subtitle: {
     fontFamily: font.family,
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
-    color: colors.textInverse,
+    color: colors.onChrome,
     textAlign: 'center',
   },
   body: {
@@ -483,7 +483,8 @@ const styles = StyleSheet.create({
     minHeight: 50,
     borderRadius: radii.pill,
   },
-  appleBtn: { backgroundColor: colors.textInverse },
+  // White with black text in both themes (Apple's bounded button).
+  appleBtn: { backgroundColor: colors.onChrome },
   appleNativeBtn: {
     alignSelf: 'stretch',
     width: '100%',
@@ -497,7 +498,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
   },
-  appleFallbackText: { color: colors.textPrimary },
+  appleFallbackText: { color: colors.onBright },
   googleBtnText: { color: colors.textInverse },
   dividerRow: {
     alignSelf: 'stretch',
@@ -524,7 +525,7 @@ const styles = StyleSheet.create({
     minHeight: 50,
     fontFamily: font.family,
     fontSize: font.size.callout,
-    color: colors.textInverse,
+    color: colors.onChrome,
   },
   codeInput: {
     textAlign: 'center',

@@ -112,15 +112,10 @@ def test_no_scorer_or_card_reads_the_new_names():
 
 
 def _pg_bin(name: str) -> str | None:
-    import shutil
-    found = shutil.which(name)
-    if found:
-        return found
-    for version in ("17", "16", "15", "14"):
-        path = Path(f"/usr/lib/postgresql/{version}/bin/{name}")
-        if path.is_file():
-            return str(path)
-    return None
+    # One finder for every scratch test (tests/_pg.py). This file's own list
+    # stopped at 17 and failed CI once the runner installed 18.
+    from tests._pg import pg_bin
+    return pg_bin(name)
 
 
 def _date_filter_runs_before_dedupe(plan: list) -> bool:
@@ -165,16 +160,16 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
     """The DDL, the anon role, and the L5 window. Same shape as the scratch
     cluster in tests/test_discord_void_notice.py. Skips only when Postgres
     cannot be started."""
+    import contextlib
     import os
-    import shutil
-    import socket
-    import subprocess
-    import tempfile
+
+    from tests._pg import scratch_cluster
 
     psycopg2 = pytest.importorskip("psycopg2")
 
     dsn = os.environ.get("LATEST_LINE_TEST_DSN")
-    owned = None
+    # Closing `owned` stops and deletes a cluster this test started.
+    owned = contextlib.ExitStack()
     if not dsn:
         initdb = _pg_bin("initdb")
         pg_ctl = _pg_bin("pg_ctl")
@@ -182,19 +177,11 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
             if os.environ.get("GITHUB_ACTIONS"):
                 pytest.fail("initdb is missing in CI — the scratch Postgres test would skip")
             pytest.skip("LATEST_LINE_TEST_DSN not set and initdb is missing")
-        owned = tempfile.mkdtemp(prefix="nhl-stats-pg-")
-        subprocess.run(
-            [initdb, "-D", owned, "-A", "trust", "--username", "postgres"],
-            check=True, capture_output=True, text=True)
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        sock.close()
-        subprocess.run(
-            [pg_ctl, "-D", owned, "-o", f"-p {port} -k {owned}",
-             "-l", str(Path(owned) / "log"), "-w", "start"],
-            check=True, capture_output=True, text=True)
-        dsn = f"host={owned} port={port} dbname=postgres user=postgres"
+        # tests/_pg.py starts it: UTF-8, trusted, TCP on a free port, and
+        # pg_ctl's output to a file. This test used to run pg_ctl itself with
+        # its output captured. On Windows the server keeps that pipe open, so
+        # every full run waited here forever (#1445, measured 2026-11-17).
+        dsn = owned.enter_context(scratch_cluster("nhl-stats-pg-"))
 
     conn = None
     try:
@@ -396,8 +383,4 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
     finally:
         if conn is not None:
             conn.close()
-        if owned is not None:
-            subprocess.run(
-                [_pg_bin("pg_ctl"), "-D", owned, "-w", "-m", "immediate", "stop"],
-                check=False, capture_output=True, text=True)
-            shutil.rmtree(owned, ignore_errors=True)
+        owned.close()

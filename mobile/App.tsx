@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
+  DarkTheme,
   DefaultTheme,
   getFocusedRouteNameFromRoute,
   NavigationContainer,
@@ -51,6 +52,7 @@ import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { useOtaUpdates } from '@/hooks/useOtaUpdates';
 import { usePushDeepLink } from '@/hooks/usePushDeepLink';
+import { usePickBooksLink } from '@/hooks/usePickBooksLink';
 import { installNotificationHandler } from '@/lib/pushPresentation';
 import { startCrashLogging } from '@/lib/crashLogSetup';
 import { setCrashScreen } from '@/lib/crashLog';
@@ -86,7 +88,7 @@ import { readAuthStatus, useAuth } from '@/hooks/useAuth';
 import { useMembership } from '@/hooks/useMembership';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { signedOutRouteIsShell } from '@/lib/authShell';
-import { colors } from '@/lib/theme';
+import { colors, isDark } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
 
 const Tab = createBottomTabNavigator<TabParamList>();
@@ -117,10 +119,11 @@ const NO_BETSLIP_BAR_ROUTES = new Set<string>(['Betslip', 'SignIn', 'Paywall', '
  * default iOS blue — a third interactive colour beside the amber tab bar and
  * the navy controls. One theme, from the tokens.
  */
+const NAV_BASE = isDark ? DarkTheme : DefaultTheme;
 const NAV_THEME = {
-  ...DefaultTheme,
+  ...NAV_BASE,
   colors: {
-    ...DefaultTheme.colors,
+    ...NAV_BASE.colors,
     primary: colors.tint,
     background: colors.bg,
     card: colors.bgCard,
@@ -328,6 +331,7 @@ function App() {
   // out here. Covers the tap that LAUNCHES the app, not just the one that
   // arrives while it is already running.
   usePushDeepLink(navRef, navReady);
+  usePickBooksLink(navRef, navReady);
   const openBetslip = useCallback(() => {
     navRef.navigate('Betslip');
   }, [navRef]);
@@ -517,7 +521,7 @@ function App() {
             component={SettingsScreen}
             options={{ title: 'Settings' }}
           />
-          {/* Chevron + "Back" (#1239), same pill as Player Stats. Its own
+          {/* Chevron-only Back (2026-11-16), same button as Player Stats. Its own
               button only for the empty-stack fallback (Tabs under Settings);
               Settings itself takes the navigator-default pill. */}
           <Stack.Screen
@@ -591,7 +595,7 @@ function App() {
             options={{ headerShown: false, title: 'Subscribe' }}
           />
         </Stack.Navigator>
-        <StatusBar style="auto" />
+        <StatusBar style={isDark ? 'light' : 'dark'} />
       </NavigationContainer>
       )}
       <BetslipBar

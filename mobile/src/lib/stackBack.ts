@@ -24,29 +24,67 @@ export const PLAYER_DETAIL_PARENT = {
 };
 
 /**
- * How wide the centered player name may be before it reaches the Back pill.
+ * Height of every React view in a header bar slot (headerLeft / headerRight).
  *
- * The native stack centers the title. zIndex on the pill does not lift it
- * over UIKit's title label, so the title has to stop short of the pill on
- * both sides. The pill is a 22pt chevron plus the word "Back" at 17pt.
- * Font scale is capped at 2, the same cap the segmented controls use.
+ * WHY 36, NOT 44 (2026-11-17, Matt's screenshot: the Back chevron sat 3.8pt
+ * below the middle of its glass bubble). On iOS 26+ UIKit sizes a bar
+ * button's custom view itself. react-native-screens 4.16 (Expo SDK 54's
+ * pin) hands UIKit our header view directly, and leaves our content at that
+ * view's top-left corner whatever size UIKit gives it. Upstream fixed this
+ * in a centering wrapper (#3449, #3548; present in 4.23.0's
+ * RNSScreenStackHeaderSubview.mm, absent from 4.16.0's). Measured on iOS
+ * 27.3 (screenshot, 3x pixels): a 44 x 44 view drew its center 3.8pt below
+ * the bubble's, and the bubble was 52 x 44. Both fit UIKit giving the view a
+ * 36pt-tall slot (top 4pt down) with the bubble 4pt outside it all round, and
+ * our 44pt content hanging below from that top. A 36pt-tall view fills that
+ * slot exactly. Upstream's fix pins compression resistance and hugging for
+ * the same reason; the community workaround on its issue (#2990) is 36pt.
+ * The tap target stays at least 44pt through hitSlop.
  */
-export function playerTitleMaxWidth(windowWidth: number, fontScale: number): number {
-  const scale = Math.min(Math.max(fontScale, 1), 2);
-  const pill = 22 * scale + 17 * scale * 4;
-  const side = 16 + pill + 8;
-  return Math.max(80, Math.floor(windowWidth - side * 2));
+export const HEADER_ITEM_HEIGHT = 36;
+
+/**
+ * The Back chevron: 22pt at every text size. Bar items do not grow with
+ * Dynamic Type (HIG); a long press shows the Large Content Viewer instead
+ * (accessibilityShowsLargeContentViewer on the button). UX review, 2026-11-17.
+ */
+export const BACK_CHEVRON_SIZE = 22;
+
+/**
+ * The text-size cap for a text header button ("Cancel", "Edit"): accessibility
+ * Medium (RN's multiplier 1.786). At 15pt body that is a ~27pt font, whose line
+ * still fits the 36pt item; above it the text spilled out of the bubble.
+ */
+export const HEADER_TEXT_MAX_FONT_MULTIPLIER = 1.786;
+
+/**
+ * The width the Back button takes in the bar: its 36pt square plus the 4pt
+ * the iOS glass bubble pads each side, 44 in all. Chevron only since
+ * 2026-11-16, so there is no "Back" word to reserve room for. The chevron is
+ * capped (backChevronSize), so font scale does not widen it.
+ */
+export function backButtonWidth(_fontScale: number): number {
+  return HEADER_ITEM_HEIGHT + 2 * 4;
 }
 
 /**
- * How wide a Settings section title may be before it reaches the same Back pill.
+ * How wide a centered title may be before it reaches the Back button.
  *
- * The player name reserves 4em for "Back", which is wider than the word, so
- * "Legal & support" ellipsizes. This reserves the chevron plus about 2.6em.
+ * The native stack centers the title. zIndex on the button does not lift it
+ * over UIKit's title label, so the title has to stop short of the button on
+ * both sides: 16pt bar inset, the button, 8pt gap.
  */
+function titleMaxWidth(windowWidth: number, fontScale: number, floor: number): number {
+  const side = 16 + backButtonWidth(fontScale) + 8;
+  return Math.max(floor, Math.floor(windowWidth - side * 2));
+}
+
+/** The player name on the player / prop detail screen. */
+export function playerTitleMaxWidth(windowWidth: number, fontScale: number): number {
+  return titleMaxWidth(windowWidth, fontScale, 80);
+}
+
+/** A Settings section title such as "Legal & support". */
 export function settingsTitleMaxWidth(windowWidth: number, fontScale: number): number {
-  const scale = Math.min(Math.max(fontScale, 1), 2);
-  const pill = 22 * scale + 17 * scale * 2.6;
-  const side = 16 + pill + 8;
-  return Math.max(120, Math.floor(windowWidth - side * 2));
+  return titleMaxWidth(windowWidth, fontScale, 120);
 }

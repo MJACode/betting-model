@@ -6,6 +6,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { noteBack } from '@/lib/freezeLog';
 import {
+  BACK_CHEVRON_SIZE,
+  HEADER_ITEM_HEIGHT,
   PLAYER_DETAIL_PARENT,
   playerTitleMaxWidth,
   settingsTitleMaxWidth,
@@ -14,7 +16,7 @@ import {
 import { colors, font, opacity } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
-/** Same type as the player title, sized for a short section name such as "Legal & support". */
+/** Same type as the player title, for a short section name such as "Legal & support". */
 export function SettingsSectionHeaderTitle({
   children,
 }: {
@@ -36,7 +38,7 @@ export function SettingsSectionHeaderTitle({
   );
 }
 
-/** Centered player name. One line, and no wider than the gap between the pills. */
+/** Centered player name. One line, and no wider than the gap between the Back buttons. */
 export function PlayerStatsHeaderTitle({
   children,
 }: {
@@ -57,19 +59,32 @@ export function PlayerStatsHeaderTitle({
 }
 
 /**
- * The "< Back" pill for the player / prop detail screen.
+ * The Back button on every pushed screen: a chevron, no word.
  *
- * It replaces UIKit's back button on that screen. The system pill sits in
- * the iOS 26/27 bar, and after a modal it stops taking taps (the restarts
- * on PlayerStats). This one is a React pressable in the header's left slot.
- * The stack insets that header by the safe area; the provider is seeded so
- * the inset exists on the first frame. 44pt is the floor. hitSlop grows the
- * target inside the bar; it does not reach down into the player name.
- * zIndex / elevation order the pill inside its own header slot. The title
- * width is what keeps a long name off it — the title is a UIKit label, and
- * a React zIndex does not paint over that.
+ * It replaces UIKit's back button, which went dead after a modal on iOS 27
+ * (Player Stats, Settings, Pick Detail from a push). This one is a React
+ * pressable in the header's left slot. The stack insets that header by the
+ * safe area; the provider is seeded so the inset exists on the first frame.
+ *
+ * CHEVRON ONLY (Matt, 2026-11-16). On iOS 26+ UIKit draws its own glass
+ * bubble behind any view in the bar's left slot. With a chevron and "Back"
+ * inside it, the bubble hugged the text with no side padding and read as a
+ * cramped grey pill. A 44pt square makes that bubble a circle around the
+ * chevron, which is what Apple's own minimal Back looks like and what the
+ * Mobbin reference set uses (IMDb, TIDE, Tiimo, Calm, X; none of 15 shows a
+ * "Back" word). Below iOS 26 there is no bubble and it is a bare chevron.
+ * VoiceOver still reads "Back". Supersedes the chevron + "Back" of #1239.
+ *
+ * A 36pt square, not 44 (2026-11-17): on iOS 26+ UIKit fits a header view
+ * into 36pt and react-native-screens 4.16 does not re-center our content, so
+ * a 44pt square drew the chevron 4pt low in its bubble (HEADER_ITEM_HEIGHT).
+ * hitSlop widens the target to about 52pt. react-native-screens forwards
+ * header taps only inside the navigation bar's frame, so the 12pt top slop
+ * past the bar is not reached: the target is ~52 wide by the bar's height.
+ * Read from RNS 4.16 source (RNSScreenStack.mm hitTest), not tapped on a device. zIndex / elevation order the button inside its
+ * own header slot. The title width is what keeps a long name off it — the
+ * title is a UIKit label, and a React zIndex does not paint over that.
  */
-/** The #1239 pill: 22pt chevron, "Back" at 17pt, 44pt target, hitSlop inside the bar. */
 type BackPath = 'pop' | 'replace' | 'reset';
 
 /**
@@ -78,8 +93,6 @@ type BackPath = 'pop' | 'replace' | 'reset';
  * never arrived (review M3 on #1377).
  */
 function BackPill({ decide, go }: { decide: () => BackPath; go: (path: BackPath) => void }) {
-  const { fontScale } = useWindowDimensions();
-  const icon = Math.round(22 * Math.min(Math.max(fontScale, 1), 2));
   return (
     <Pressable
       onPress={() => {
@@ -89,13 +102,12 @@ function BackPill({ decide, go }: { decide: () => BackPath; go: (path: BackPath)
       }}
       accessibilityRole="button"
       accessibilityLabel="Back"
-      hitSlop={{ top: 12, bottom: 0, left: 8, right: 8 }}
+      accessibilityShowsLargeContentViewer
+      accessibilityLargeContentTitle="Back"
+      hitSlop={{ top: 12, bottom: 4, left: 8, right: 8 }}
       style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
     >
-      <Ionicons name="chevron-back" size={icon} color={colors.tint} />
-      <Text style={styles.label} numberOfLines={1} maxFontSizeMultiplier={2}>
-        Back
-      </Text>
+      <Ionicons name="chevron-back" size={BACK_CHEVRON_SIZE} color={colors.tint} />
     </Pressable>
   );
 }
@@ -114,7 +126,7 @@ export function PlayerStatsBackButton() {
 }
 
 /**
- * The same pill on every other pushed screen (the navigator's default).
+ * The same button on every other pushed screen (the navigator's default).
  *
  * The arrow-only system Back (2026-11-08) went dead again on 2026-11-15, on
  * Pick Detail opened from a push notification, iOS 27.3. UIKit's Back has now
@@ -136,7 +148,7 @@ export function StackBackButton() {
 }
 
 /**
- * The same pill on a Settings section. An empty stack returns to Settings.
+ * The same button on a Settings section. An empty stack returns to Settings.
  * The player screen's empty-stack parent stays the Stats tab.
  */
 export function SettingsSectionBackButton() {
@@ -162,17 +174,12 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   pill: {
-    flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 44,
-    minHeight: 44,
+    justifyContent: 'center',
+    width: HEADER_ITEM_HEIGHT,
+    height: HEADER_ITEM_HEIGHT,
     zIndex: 20,
     elevation: 20,
   },
   pressed: { opacity: opacity.pressed },
-  label: {
-    fontSize: font.size.headline,
-    color: colors.tint,
-    fontWeight: font.weight.regular,
-  },
 });

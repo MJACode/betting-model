@@ -784,13 +784,14 @@ def run_calibration_watch() -> None:
 def run_social_post_queue() -> None:
     """Publish manual rows, then one profile update, then at most one pick.
 
-    Pick posts go through notify_x_picks, which sends one tweet and only
-    when the last x_pick is at least 10 minutes old and the ET clock is
-    outside 1:00am–8:00am. Recaps are not posted here. A raise must not
-    kill the scheduler. The claim in each drain is what stops two services
-    sending the same manual row; this job does not take the worker_jobs
-    session lock. Each pass is its own try, so one failure does not skip
-    the others.
+    Pick posts go through notify_x_picks: one tweet from the day's card of
+    at most 4, normally when the last real x_pick is at least 10 minutes
+    old and the ET clock is outside 1:00am–8:00am. A hold that would miss
+    the game's start does not apply. Recaps are not posted here. A raise
+    must not kill the scheduler. The claim in each drain is what stops two
+    services sending the same manual row; this job does not take the
+    worker_jobs session lock. Each pass is its own try, so one failure
+    does not skip the others.
     """
     try:
         from data.db import get_connection
@@ -1053,6 +1054,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # The 07:20 / 07:25 catch-up for the ticks the morning
                   # disk window does not run. Same recorders, later minute.
                   "kalshi_ladders_morning", "kalshi_game_markets_morning",
+                  # Stores Betfair's free racing files: research data, no
+                  # picks, a few MB a month.
+                  "betfair_monthly_store",
                   # Writes picks through the same card as the refresh pass,
                   # so it lives beside the passes, not with the loops.
                   "nba_prop_window",
@@ -1701,6 +1705,21 @@ def run_kalshi_game_record() -> None:
     except Exception as exc:                                   # noqa: BLE001
         log.warning("kalshi game market record failed: %s: %s",
                     type(exc).__name__, exc)
+
+
+def run_betfair_monthly_store() -> None:
+    """Store each new Betfair Australia thoroughbred file the day it is
+    published (scripts/horse/betfair_monthly.py; issue #1371). A research
+    record, never on the betting path: the listing is free and keyless, and
+    a run that finds nothing new writes nothing. Its own process, so a large
+    annual zip never sits in the scheduler's memory."""
+    outcome = _run([sys.executable, "-m", "scripts.horse.betfair_monthly"],
+                   "betfair-monthly-store", timeout=1800)
+    if outcome not in ("ok", "drained"):
+        # A listing that moved, a size check that stopped working, or a row that
+        # did not read back must not read as a healthy job: raising makes the
+        # heartbeat record the failure, and MAX_SILENCE makes it an alert.
+        raise RuntimeError(f"betfair-monthly-store exited {outcome}")
 
 
 def run_db_health_snapshot() -> None:
@@ -3104,9 +3123,10 @@ def build_scheduler() -> BlockingScheduler:
     )
 
     # Manual posts, one profile update, and one paced pick tweet.
-    # Five minutes is the pick clock: notify_x_picks itself refuses a second
-    # pick inside 10 minutes and refuses 1:00am–8:00am ET. Recaps stay on
-    # their own jobs. This does not move any other trigger.
+    # Five minutes is the pick clock: notify_x_picks itself posts at most
+    # one pick from a card of 4, and normally refuses a second pick inside
+    # 10 minutes and refuses 1:00am–8:00am ET. Recaps stay on their own
+    # jobs. This does not move any other trigger.
     sched.add_job(
         run_social_post_queue,
         CronTrigger(minute="*/5", timezone=TIMEZONE),
@@ -3807,6 +3827,15 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour=7, minute=25, timezone=TIMEZONE),
         id="kalshi_game_markets_morning",
         name="Kalshi NCAAF game markets (07:25 ET catch-up after the morning disk window)",
+    )
+    # Once a day, clear of the 06:00 daily, the morning disk window and the
+    # :37 / :45 / :50 jobs. Betfair posts a month's file once, early in the
+    # next month, so a daily look stores it within a day of its posting.
+    sched.add_job(
+        run_betfair_monthly_store,
+        CronTrigger(hour=10, minute=43, timezone=TIMEZONE),
+        id="betfair_monthly_store",
+        name="Betfair ANZ thoroughbred files (daily 10:43 ET: store each new month)",
     )
 
     # Minute 50: clear of the :17 refresh pass, the :25 prop card, the :32 and

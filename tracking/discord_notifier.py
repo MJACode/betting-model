@@ -1056,7 +1056,10 @@ def _new_signals(conn, target_date: str, *,
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
                    p.pick_side, p.scored_line, p.prop_market,
                    p.decision_book, p.decision_odds AS decision_odds_raw,
-                   p.stake_units, p.stake_reason, p.best_bet_link
+                   p.stake_units, p.stake_reason, p.best_bet_link, p.pick_id,
+                   p.game_id, p.decision_edge, p.dk_implied_prob,
+                   p.public_bet_pct, p.public_money_pct, p.injury_detail,
+                   p.is_live
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -1142,6 +1145,16 @@ def _new_signals(conn, target_date: str, *,
         "stake_units": r[25] if len(r) > 25 else None,
         "stake_reason": r[26] if len(r) > 26 else None,
         "best_bet_link": r[27] if len(r) > 27 else None,
+        "pick_id": int(r[28]) if len(r) > 28 and r[28] is not None else None,
+        # X's card ranks on decision_edge and quotes these stored fields in
+        # the reply. Shorter fixtures omit them; the indexes stay put.
+        "game_id": r[29] if len(r) > 29 else None,
+        "decision_edge": r[30] if len(r) > 30 else None,
+        "dk_implied_prob": r[31] if len(r) > 31 else None,
+        "public_bet_pct": r[32] if len(r) > 32 else None,
+        "public_money_pct": r[33] if len(r) > 33 else None,
+        "injury_detail": r[34] if len(r) > 34 else None,
+        "is_live": bool(r[35]) if len(r) > 35 and r[35] is not None else False,
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
         # Belt and braces with the SQL bound above, and the only guard that
@@ -1193,7 +1206,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
                    p.pick_side, p.scored_line, p.prop_market,
                    p.decision_book, p.decision_odds AS decision_odds_raw,
-                   p.stake_units, p.stake_reason, p.best_bet_link
+                   p.stake_units, p.stake_reason, p.best_bet_link, p.pick_id
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -1264,6 +1277,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         "stake_units": r[25] if len(r) > 25 else None,
         "stake_reason": r[26] if len(r) > 26 else None,
         "best_bet_link": r[27] if len(r) > 27 else None,
+        "pick_id": int(r[28]) if len(r) > 28 and r[28] is not None else None,
     } for r in rows]
 
 
@@ -1409,8 +1423,10 @@ def _booked_price(s: dict, odds, book: str | None, *, linked: bool = True) -> st
     Discord renders ``[name](url)`` in a field value and does not render it
     inside inline code, so a named book is not wrapped in backticks. A price
     with no book stays `` `N/A` ``, the old shape. ``linked=False`` is the
-    plain book name, used when the URL would not fit the field. Link building
-    never raises and never delays the post.
+    plain book name, used when the URL would not fit the field. The book name
+    is the link text. The URL is the pick's book-picker page when the row has
+    an id; otherwise the direct book link. Link building never raises and
+    never delays the post.
     """
     american = _american(odds)
     if not book:
@@ -1418,8 +1434,8 @@ def _booked_price(s: dict, odds, book: str | None, *, linked: bool = True) -> st
     url = None
     if linked:
         try:
-            from tracking.book_slip_links import discord_book_target
-            url, _kind = discord_book_target(s, book)
+            from tracking.pick_landing import discord_book_href
+            url, _kind = discord_book_href(s, book)
         except Exception as exc:                              # noqa: BLE001
             logger.warning(f"Discord book link skipped ({type(exc).__name__})")
             url = None
@@ -2101,7 +2117,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
                p.best_book, p.best_odds, p.best_bet_link,
                COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
                p.decision_book, p.scored_line, p.prop_market,
-               p.decision_odds AS decision_odds_raw
+               p.decision_odds AS decision_odds_raw, p.pick_id
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         -- The model's own gates, from the same table the app's action filter
@@ -2135,6 +2151,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         # "good to" from the deciding price, the same way the pre-game
         # producers bound theirs.
         "good_to": price_bound(_honest(r[1], r[5]), r[1], r[15], r[16], r[21]),
+        "pick_id": int(r[26]) if len(r) > 26 and r[26] is not None else None,
     } for r in rows]
 
 
@@ -2228,7 +2245,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
                os.model_id, os.model_probability, t.min_edge, t.min_odds,
                os.pick_side, os.scored_line, pk.prop_market,
                pk.decision_book, pk.decision_odds, pk.stake_units,
-               pk.dk_bet_link, pk.best_bet_link
+               pk.dk_bet_link, pk.best_bet_link, pk.pick_id
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -2239,7 +2256,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
             -- bet the other's price and book.
             SELECT p.created_at, p.best_book, p.best_odds, p.prop_market,
                    p.decision_book, p.decision_odds, p.stake_units,
-                   p.dk_bet_link, p.best_bet_link
+                   p.dk_bet_link, p.best_bet_link, p.pick_id
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -2268,6 +2285,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         "stake_units": r[20] if len(r) > 20 else None,
         "bet_link": r[21] if len(r) > 21 else None,
         "best_bet_link": r[22] if len(r) > 22 else None,
+        "pick_id": int(r[23]) if len(r) > 23 and r[23] is not None else None,
         # Same "good to" the paid channels publish, from the same gates. On the
         # number the pick was DECIDED on: a model in config.MODEL_PROB_SHRINK
         # stores (and the capture copies) a number pulled toward its decision

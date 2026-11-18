@@ -19,9 +19,25 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, why the women's models trail the men's (first-half prices, DraftKings on one game in ten, this season's halftime books); in-play bets away from DraftKings' number were never stored: 20 of 24 men's, 13 of 22 women's (fixed) |
+| 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, the props table rewritten online with pg_repack: data 26.05 GB to 10.73 GB, database 93.34 GB to 78.01 GB, 37.19 million rows checked by count and checksum, guard and helper script saved |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, the full test suite no longer hangs on Windows: two scratch-database starters moved onto tests/_pg.py, 88 BYOM tests now run here, and a guard stops a third copy (#1445) |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, horse racing: a US site that takes Hong Kong bets publishes the Jockey Club's own dividends (77 of 77 win and place, 7 of 7 exotics, two cards); the US$499 archive is mike's call |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, Discord /pick page always lists FD, DK, Fanatics, BetMGM, Caesars and does not open the app |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, X posts the day's best four pre-game picks, each with a rationale reply; the 2099 pause row was what stopped the slate |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, Picks tab "Bet all" banner gets the cards' 16pt side inset so it lines up |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: a daily worker job stores each new Betfair ANZ month (never overwrites, reads every row back); run against production, 0 to fetch (#1371) |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Discord book name links to /pick/<id> on the worker; the page opens the app book sheet or lists the books |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, women's totals model bets the best book at DraftKings' first post (435 bets +39.12 units vs 402 +29.96 in 2025-26; card matches replay bet for bet) |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, header buttons 4pt low in the iOS 26 glass bubble (RNS 4.16 does not center custom views); header items 36pt tall |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, PR CI pytest-subset red on every PR: tests/_pg.py looked only in postgresql/16, runner now installs 18; finder is version-agnostic, pinned by test_pg_finder.py |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, BYOM bet list shows the actual stat / final score; no 0.5 line on yardage markets |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Everything on the PC moved under the project folder: 37 copies removed, 2 feeds and 2 tennis loops moved to .claude/feeds, research to data/local/research, §7 rule (#1425) |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Back button: chevron only on every pushed screen (iOS 26 glass bubble hugged chevron + "Back"); title room 162 → 254pt |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Dark mode (brand navy) + Settings > Appearance (System / Light / Dark, Light default); applies at next open, no reloadAsync |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, why the women's models trail the men's (first-half prices, DraftKings on one game in ten, this season's halftime books); in-play bets away from DraftKings' number were never stored: 20 of 24 men's, 13 of 22 women's (women's and EuroLeague fixed; the men's loop left as it is, mike 11-16) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, comped accounts could not sign in: NULL email_change made /otp 500; 9 rows set to '', grant scripts + guard test fixed |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Sport chips: sports with a signal move to the far left of the row |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, the archive move stays off Supabase in the daytime: the daytime check pass coincided with 178 timeouts (79 app reads); preparing now reads the PC copy only, removals run 01:30-05:30 ET, a timeout is not retried as a dropped connection, the rewrite is unmeasured (#1345, #1419) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, The PC copy: one row per nightly pass (pc_copy_snapshots, scripts/local_mirror_report.py, run last by the LocalMirror task) and a PC copy tile on the Database tab; an unreadable exit code is now a failure, not 0 |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, horse racing: no source from 2023 on confirms a US outlet still pools with the Hong Kong Jockey Club; Xpressbet, AmWager, NYRA Bets offer Hong Kong; the archive purchase waits on that |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, TestFlight tester account + comped access; Supabase MCP found to write production |

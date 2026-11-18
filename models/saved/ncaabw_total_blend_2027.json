@@ -3,9 +3,9 @@
  "model_id": "ncaabw_total_blend",
  "season": 2027,
  "prior_season": 2026,
- "built_at": "2026-11-10T04:47:31Z",
+ "built_at": "2026-11-16T23:35:48Z",
  "command": "python -m scripts.ncaabw_total_blend_build --last-season 2026",
- "quote_rule": "DraftKings' first posted full-game total: the earliest pre-game row by its own time, totals outside [90.0, 200.0] dropped first",
+ "quote_rule": "DraftKings' first posted full-game total: the earliest pre-game row by its own time, totals outside [90.0, 200.0] dropped first; bet at the best bettable book's total standing at that moment (mike, 2026-11-16)",
  "params": {
   "K": 9.0,
   "KT": 3.0,
@@ -1903,336 +1903,336 @@
  "replay": {
   "cut": 0.05,
   "rule": "every priced game, no games-played wait",
-  "quote": "DraftKings' first posted total (earliest pre-game row by its own time, totals outside [90.0, 200.0] dropped first)",
+  "quote": "DraftKings' first posted total (earliest pre-game row by its own time, totals outside [90.0, 200.0] dropped first), bet at the best book: every bettable book's total standing at that moment, the largest edge, a tie at DraftKings (mike, 2026-11-16)",
   "priced_games_by_season": {
    "2025": 827,
    "2026": 903
   },
   "walk_forward": {
    "what": "each priced season after the first, blend fitted on the priced seasons before it",
-   "bets": 402,
-   "wins": 225,
-   "losses": 177,
+   "bets": 435,
+   "wins": 247,
+   "losses": 188,
    "pushes": 0,
-   "units": 29.96,
-   "roi_pct": 6.77,
+   "units": 39.12,
+   "roi_pct": 8.13,
    "roi_95": [
-    -2.6,
-    15.7
+    -1.0,
+    17.3
    ],
-   "overs": 303,
-   "price_min": -115.0,
+   "overs": 319,
+   "price_min": -122.0,
    "price_max": -105.0,
    "by_season": {
     "2026": {
-     "bets": 402,
-     "wins": 225,
-     "losses": 177,
+     "bets": 435,
+     "wins": 247,
+     "losses": 188,
      "pushes": 0,
-     "units": 29.96,
-     "roi_pct": 6.77,
+     "units": 39.12,
+     "roi_pct": 8.13,
      "roi_95": [
-      -2.6,
-      15.7
+      -1.0,
+      17.3
      ],
-     "overs": 303,
-     "price_min": -115.0,
+     "overs": 319,
+     "price_min": -122.0,
      "price_max": -105.0
     }
    }
   },
   "second_look": {
    "what": "2025 on the blend of the later priced seasons (not walk-forward)",
-   "bets": 51,
-   "wins": 39,
+   "bets": 52,
+   "wins": 40,
    "losses": 12,
    "pushes": 0,
-   "units": 25.8,
-   "roi_pct": 46.06,
+   "units": 26.8,
+   "roi_pct": 46.93,
    "roi_95": [
-    26.0,
-    66.5
+    27.3,
+    67.2
    ],
    "overs": 16,
    "price_min": -112.0,
    "price_max": -105.0
   },
   "each_season_on_the_others_pooled": {
-   "bets": 453,
-   "wins": 264,
-   "losses": 189,
+   "bets": 487,
+   "wins": 287,
+   "losses": 200,
    "pushes": 0,
-   "units": 55.76,
-   "roi_pct": 11.18,
+   "units": 65.92,
+   "roi_pct": 12.25,
    "roi_95": [
-    2.6,
-    19.6
+    3.5,
+    20.7
    ],
-   "overs": 319,
-   "price_min": -115.0,
+   "overs": 335,
+   "price_min": -122.0,
    "price_max": -105.0
   },
   "live_blend_in_sample": {
    "what": "every priced season on the blend the artifact holds",
-   "bets": 374,
-   "wins": 232,
-   "losses": 142,
+   "bets": 408,
+   "wins": 256,
+   "losses": 152,
    "pushes": 0,
-   "units": 75.73,
-   "roi_pct": 18.39,
+   "units": 88.36,
+   "roi_pct": 19.65,
    "roi_95": [
-    9.4,
-    27.1
+    10.9,
+    28.0
    ],
-   "overs": 240,
-   "price_min": -115.0,
-   "price_max": -105.0,
+   "overs": 264,
+   "price_min": -120.0,
+   "price_max": 150.0,
    "by_season": {
     "2025": {
-     "bets": 124,
-     "wins": 83,
-     "losses": 41,
+     "bets": 134,
+     "wins": 90,
+     "losses": 44,
      "pushes": 0,
-     "units": 38.02,
-     "roi_pct": 27.92,
+     "units": 41.74,
+     "roi_pct": 28.36,
      "roi_95": [
       13.5,
-      42.6
+      43.3
      ],
-     "overs": 53,
-     "price_min": -112.0,
+     "overs": 60,
+     "price_min": -115.0,
      "price_max": -105.0
     },
     "2026": {
-     "bets": 250,
-     "wins": 149,
-     "losses": 101,
+     "bets": 274,
+     "wins": 166,
+     "losses": 108,
      "pushes": 0,
-     "units": 37.71,
-     "roi_pct": 13.69,
+     "units": 46.62,
+     "roi_pct": 15.41,
      "roi_95": [
-      2.4,
-      24.5
+      3.8,
+      26.3
      ],
-     "overs": 187,
-     "price_min": -115.0,
-     "price_max": -105.0
+     "overs": 204,
+     "price_min": -120.0,
+     "price_max": 150.0
     }
    },
-   "share_of_priced_games_bet": 0.2162,
-   "min_prob": 0.563,
-   "min_ev": 0.0956,
+   "share_of_priced_games_bet": 0.2358,
+   "min_prob": 0.4784,
+   "min_ev": 0.0954,
    "max_edge_every_priced_game": 0.2076,
    "by_phase": {
     "Nov": {
-     "bets": 68,
-     "wins": 36,
-     "losses": 32,
+     "bets": 71,
+     "wins": 37,
+     "losses": 34,
      "pushes": 0,
-     "units": 0.77,
-     "roi_pct": 1.03,
+     "units": -0.43,
+     "roi_pct": -0.55,
      "roi_95": [
-      -18.2,
-      20.4
+      -19.1,
+      18.5
      ],
-     "overs": 45,
-     "price_min": -115.0,
-     "price_max": -108.0
+     "overs": 47,
+     "price_min": -117.0,
+     "price_max": -105.0
     },
     "Dec+": {
-     "bets": 306,
-     "wins": 196,
-     "losses": 110,
+     "bets": 337,
+     "wins": 219,
+     "losses": 118,
      "pushes": 0,
-     "units": 74.96,
-     "roi_pct": 22.25,
+     "units": 88.79,
+     "roi_pct": 23.9,
      "roi_95": [
-      12.0,
-      32.0
+      14.1,
+      33.8
      ],
-     "overs": 195,
-     "price_min": -115.0,
-     "price_max": -105.0
+     "overs": 217,
+     "price_min": -120.0,
+     "price_max": 150.0
     }
    }
   },
   "each_season_on_the_others_by_phase": {
    "Nov": {
-    "bets": 80,
-    "wins": 43,
-    "losses": 37,
+    "bets": 83,
+    "wins": 45,
+    "losses": 38,
     "pushes": 0,
-    "units": 2.3,
-    "roi_pct": 2.61,
+    "units": 3.15,
+    "roi_pct": 3.44,
     "roi_95": [
-     -14.8,
-     19.3
+     -13.6,
+     20.1
     ],
-    "overs": 55,
-    "price_min": -115.0,
+    "overs": 56,
+    "price_min": -117.0,
     "price_max": -105.0
    },
    "Dec+": {
-    "bets": 373,
-    "wins": 221,
-    "losses": 152,
+    "bets": 404,
+    "wins": 242,
+    "losses": 162,
     "pushes": 0,
-    "units": 53.46,
-    "roi_pct": 13.01,
+    "units": 62.77,
+    "roi_pct": 14.05,
     "roi_95": [
-     3.6,
-     22.4
+     4.1,
+     23.4
     ],
-    "overs": 264,
-    "price_min": -115.0,
+    "overs": 279,
+    "price_min": -122.0,
     "price_max": -105.0
    }
   },
   "neighbours_live_blend": {
    "0.02": {
-    "bets": 763,
-    "units": 65.63,
-    "roi_pct": 7.82,
+    "bets": 818,
+    "units": 80.16,
+    "roi_pct": 8.89,
     "roi_95": [
-     1.9,
-     13.7
+     2.7,
+     14.9
     ]
    },
    "0.03": {
-    "bets": 606,
-    "units": 68.23,
-    "roi_pct": 10.23,
+    "bets": 659,
+    "units": 80.82,
+    "roi_pct": 11.12,
     "roi_95": [
-     3.2,
-     17.2
+     4.2,
+     18.2
     ]
    },
    "0.04": {
-    "bets": 484,
-    "units": 63.89,
-    "roi_pct": 11.99,
+    "bets": 529,
+    "units": 76.83,
+    "roi_pct": 13.17,
     "roi_95": [
-     4.0,
-     19.5
+     5.4,
+     21.1
     ]
    },
    "0.05": {
-    "bets": 374,
-    "units": 75.73,
-    "roi_pct": 18.39,
+    "bets": 408,
+    "units": 88.36,
+    "roi_pct": 19.65,
     "roi_95": [
-     9.4,
-     27.1
+     10.9,
+     28.0
     ]
    },
    "0.06": {
-    "bets": 283,
-    "units": 76.96,
-    "roi_pct": 24.69,
+    "bets": 308,
+    "units": 82.69,
+    "roi_pct": 24.35,
     "roi_95": [
-     14.4,
+     14.1,
      34.6
     ]
    },
    "0.07": {
-    "bets": 198,
-    "units": 50.71,
-    "roi_pct": 23.24,
+    "bets": 222,
+    "units": 53.38,
+    "roi_pct": 21.79,
     "roi_95": [
-     11.0,
-     34.5
+     9.2,
+     33.6
     ]
    },
    "0.08": {
-    "bets": 156,
-    "units": 46.58,
-    "roi_pct": 27.08,
+    "bets": 174,
+    "units": 49.71,
+    "roi_pct": 25.84,
     "roi_95": [
-     12.5,
-     40.8
+     12.4,
+     39.3
     ]
    },
    "0.10": {
-    "bets": 84,
-    "units": 29.23,
-    "roi_pct": 31.57,
+    "bets": 100,
+    "units": 30.51,
+    "roi_pct": 27.63,
     "roi_95": [
-     11.5,
-     50.4
+     8.4,
+     45.0
     ]
    }
   },
   "neighbours_each_season_on_the_others": {
    "0.02": {
-    "bets": 785,
-    "units": 58.02,
-    "roi_pct": 6.72,
+    "bets": 836,
+    "units": 63.58,
+    "roi_pct": 6.89,
     "roi_95": [
-     0.7,
-     12.6
+     0.8,
+     13.0
     ]
    },
    "0.03": {
-    "bets": 644,
-    "units": 68.35,
-    "roi_pct": 9.64,
+    "bets": 697,
+    "units": 80.31,
+    "roi_pct": 10.43,
     "roi_95": [
-     3.3,
-     16.3
+     3.8,
+     17.3
     ]
    },
    "0.04": {
-    "bets": 538,
-    "units": 65.23,
-    "roi_pct": 11.02,
+    "bets": 581,
+    "units": 73.81,
+    "roi_pct": 11.5,
     "roi_95": [
-     3.7,
-     17.9
+     3.8,
+     19.4
     ]
    },
    "0.05": {
-    "bets": 453,
-    "units": 55.76,
-    "roi_pct": 11.18,
+    "bets": 487,
+    "units": 65.92,
+    "roi_pct": 12.25,
     "roi_95": [
-     2.6,
-     19.6
+     3.5,
+     20.7
     ]
    },
    "0.06": {
-    "bets": 378,
-    "units": 50.09,
-    "roi_pct": 12.03,
+    "bets": 415,
+    "units": 65.49,
+    "roi_pct": 14.27,
     "roi_95": [
-     2.4,
-     21.1
+     4.9,
+     23.5
     ]
    },
    "0.07": {
-    "bets": 328,
-    "units": 40.06,
-    "roi_pct": 11.09,
+    "bets": 361,
+    "units": 51.44,
+    "roi_pct": 12.88,
     "roi_95": [
-     1.3,
-     20.8
+     2.9,
+     22.7
     ]
    },
    "0.08": {
-    "bets": 286,
-    "units": 40.06,
-    "roi_pct": 12.71,
+    "bets": 312,
+    "units": 44.57,
+    "roi_pct": 12.92,
     "roi_95": [
-     2.5,
-     22.9
+     2.0,
+     23.2
     ]
    },
    "0.10": {
-    "bets": 198,
-    "units": 29.71,
-    "roi_pct": 13.6,
+    "bets": 217,
+    "units": 33.57,
+    "roi_pct": 13.96,
     "roi_95": [
-     -0.9,
-     26.9
+     0.7,
+     27.1
     ]
    }
   },
@@ -2242,10 +2242,11 @@
     2026
    ],
    "match": {
-    "replay_bets": 402,
-    "card_bets": 402,
-    "same_game": 402,
-    "same_side": 402,
+    "replay_bets": 435,
+    "card_bets": 435,
+    "same_game": 435,
+    "same_side": 435,
+    "same_book": 435,
     "replay_only": [],
     "card_only": [],
     "refused": {},
@@ -2254,18 +2255,18 @@
    },
    "by_season": {
     "2026": {
-     "bets": 402,
-     "wins": 225,
-     "losses": 177,
+     "bets": 435,
+     "wins": 247,
+     "losses": 188,
      "pushes": 0,
-     "units": 29.96,
-     "roi_pct": 6.77,
+     "units": 39.12,
+     "roi_pct": 8.13,
      "roi_95": [
-      -2.6,
-      15.7
+      -1.0,
+      17.3
      ],
-     "overs": 303,
-     "price_min": -115.0,
+     "overs": 319,
+     "price_min": -122.0,
      "price_max": -105.0
     }
    }

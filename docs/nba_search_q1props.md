@@ -325,7 +325,7 @@ A pass is built live (CLAUDE.md section 2) with its own EV floor and the prices 
 live feed captures no first-quarter prop today (no code on master reads `player_points_q1`), so a pass needs that
 capture first.
 
-    python C:/Users/micha/AppData/Local/Temp/q1trend/run_with_db.py scripts.nba_s_q1props --pull [--seed FILE]
+    python C:/Users/micha/Documents/betting-model/data/local/research/q1trend/run_with_db.py scripts.nba_s_q1props --pull [--seed FILE]
     NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -m scripts.nba_s_q1props --smoke
     NBA_RESEARCH_CACHE=<cache> NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> NBA_GAME2_BETS=<folder>/bets \
         PYTHONPATH=. python -m scripts.nba_s_q1props --full

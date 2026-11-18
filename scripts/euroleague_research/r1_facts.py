@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-C = Path(r"C:\Users\micha\euroleague_research\cache")
+C = Path(r"C:\Users\micha\Documents\betting-model\data\local\research\euroleague_research\cache")
 g = pd.read_parquet(C / "games.parquet")
 q = pd.read_parquet(C / "period_quotes.parquet")
 q = q.merge(g[["game_id", "season", "played"]], on="game_id", how="left")

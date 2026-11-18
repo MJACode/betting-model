@@ -85,7 +85,7 @@ export function DiscordLinkModal({
 
           <View style={styles.iconRow}>
             <View style={[styles.iconTile, styles.discordTile]}>
-              <Ionicons name="logo-discord" size={34} color={colors.textInverse} />
+              <Ionicons name="logo-discord" size={34} color={colors.onChrome} />
             </View>
             <Ionicons name="add" size={22} color={colors.tint} />
             <View style={[styles.iconTile, styles.appTile]}>

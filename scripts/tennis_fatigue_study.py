@@ -9,8 +9,8 @@ READS the local research cache and the spooled match archive only:
 WRITES nothing but a regenerable feature cache (--features, outside the repo)
 and its own report. No database, no network, no paid call.
 
-    python -m scripts.tennis_fatigue_study --cache C:/Users/micha/tennis_research/cache \\
-        --spool C:/Users/micha/tennis_research/spool
+    python -m scripts.tennis_fatigue_study --cache C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache \\
+        --spool C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/spool
 
 EVERYTHING BELOW WAS FIXED BEFORE ANY RESULT WAS READ.
 
