@@ -257,9 +257,14 @@ edge: they remove none of the replayed bets. The rule is the cut.
 
 | Model | Uplift (bets) | Smallest EV / median | Smallest edge | EV floor | Edge cut |
 |---|---|---|---|---|---|
-| euroleague_home_ml | +0.0520 (921) | +0.0401 / +0.0628 | +0.0197 | 0.04 | 0.01 |
+| euroleague_home_ml | +0.0823 (458) | +0.1111 / +0.1552 | +0.0500 | 0.11 | 0.04 |
 | euroleague_home_dog_spread | +0.0904 (421) | +0.1181 / +0.1272 | +0.0632 | 0.11 | 0.06 |
-| euroleague_h1_dog_ml | +0.0524 (347, 2025-26) | +0.0106 / +0.0902 | +0.0055 | 0.01 | 0.00 |
+| euroleague_h1_dog_ml | +0.0967 (93, 2025-26) | +0.0951 / +0.1677 | +0.0498 | 0.09 | 0.04 |
+
+The moneyline and first-half rows are the live rules since 2026-11-17 (the
+same-team cuts). Their uplifts rose (from +0.0520 and +0.0524) because each is
+now measured on the bets the cut keeps, which were the better ones: read both
+as a stronger upper bound than before.
 | euroleague_q1_club_share_total | +0.1575 (53, 2025-26) | +0.1779 / +0.2240 | +0.1053 | 0.17 | 0.10 |
 
 Read every model probability as an upper bound: each uplift is the extra the
@@ -267,6 +272,14 @@ rule's own bets won, in sample.
 
 ### euroleague_home_ml — "EuroLeague Moneyline"
 
+- **Since 2026-11-17 (mike, "Yes, both") only when the home side is getting
+  points:** the modal deciding-book home spread number on the same board above
+  0. A home favourite or a level game is a NONE row. On the posted stake the
+  research rule's replay is 984 bets, +35.32 units; the live rule's 491 bets,
+  222-269, +44.97 units, +13.27% [90%: +4.47, +22.14]; the 493 it cuts made
+  -9.65. Prices median +145, shortest -112, longest +550. Why, and what it does
+  not prove: "Several bets on one game" below. The evidence that follows is the
+  research rule's, on the research's stake.
 - **The rule** (round 2, A1, `r3_a_home.py`): the home side's moneyline at the
   close when its price is -200 or longer, not at a neutral site; every quote
   shorter than -200 is removed BEFORE the best price is picked.
@@ -282,7 +295,12 @@ rule's own bets won, in sample.
   1,572).
 - **Prices:** median -110, shortest -200, longest +550; none shorter than
   -300. The -200 floor is the rule itself.
-- **Volume:** about 184 bets a full season, about 6 a week.
+- **Volume:** about 92 bets a full season, about 3 a week, since the cut
+  (about 184 and 6 before it).
+- **Relocated venues:** the cut reads the home number, not the venue, so a
+  home side getting points at a relocated venue is still bet (TEL ML at
+  Limassol on 2026-11-17). Those replayed: 36 bets, +1.27 units, +5.06%
+  [90%: -27.34, +42.90]; at own venues 455 bets, +43.71 units, +13.92%.
 
 ### euroleague_heavy_fav_ml — removed
 
@@ -312,6 +330,15 @@ be -200"): every bet the rule found was -500 or shorter (188 bets +34.59 units
 
 ### euroleague_h1_dog_ml — "EuroLeague First Half Moneyline"
 
+- **Since 2026-11-17 (mike, "Yes, both") only the home underdog getting
+  points:** the first-half underdog must be the home side, and the modal
+  deciding-book home number on the full-game spread, on the board at the
+  decision fetch, above 0; never at a neutral site. Anything else is a NONE
+  row. On the posted stake the research rule's replay is 465 bets, +19.82
+  units; the live rule's 131 bets, 64-61-6, +15.85 units, +15.70% [90%: -0.31,
+  +31.60]; the 334 it cuts made +3.96. Prices median +120, shortest -111,
+  longest +250. In-sample, on 1.2 priced seasons. The evidence that follows is
+  the research rule's, on the research's stake.
 - **The rule** (first half round 1, `r1_baselines.py`, the best baseline): the
   first-half moneyline side whose mean deciding-book no-vig chance is under
   one half, at its best deciding-book price, on the tip-minus-10 fetch. A level
@@ -324,8 +351,11 @@ be -200"): every bet the rule found was -500 or shorter (188 bets +34.59 units
 - **What it missed:** the interval runs through zero; 2026-27 negative; one
   priced season before the live one.
 - **Prices:** median +142, shortest -115, longest +475.
-- **Volume:** about 358 bets a full season (2025-26), about 11 a week: the
-  rule bets nearly every game a deciding book prices.
+- **Volume:** about 98 bets a full season (2025-26), about 3 a week, since the
+  cut (about 358 and 11 before it, when the rule bet nearly every game a
+  deciding book priced).
+- **Relocated venues** are bet the same way as the moneyline's: 16 replayed
+  bets, +2.91 units; at own venues 115 bets, +12.94 units, +14.80%.
 
 ### euroleague_q1_club_share_total — "EuroLeague First Quarter Totals"
 
@@ -353,6 +383,126 @@ be -200"): every bet the rule found was -500 or shorter (188 bets +34.59 units
 
 **In the app** (UX review, 2026-11-14): the names above; each model page says
 what it bets and the prices it lays.
+
+### Several bets on one game (measured 2026-11-17; two cuts built the same day)
+
+mike, 2026-11-17, after three bets on Virtus in one game (First Half VIR ML
++176, VIR +7.5, VIR ML +235): *"too many duplicative bets ... what impact does
+this have on potential winnings"*. `scripts/euroleague_stacking_check.py` grades
+every replayed bet of the five EuroLeague models (the four pre-game rules
+through the card's own code, matched bet for bet to the research on
+2026-11-17; the halftime spread at EV >= 0.05) on the POSTED stake (1 unit to
+win, risk capped at 3), on games where each model being compared priced the
+game. Games through 2026-11-12.
+
+**It is one finding bet up to three times.** Every home-underdog spread bet
+(455 of 455) has a moneyline bet on the same team: the moneyline rule takes
+the home side at -200 or longer, so it always includes the games where the
+home side is getting points. Their results move together (win correlation
+0.78; both lost on 42% of those games). The first-half rule bets the
+first-half underdog in every game it prices, the same team as the spread bet
+on 115 of 116 games. First half plus moneyline (the pair mike named), from
+2025-26: both bet 268 games, the same team on 134 (win correlation 0.39, both
+lost 34%) and opposite teams on 134. Beside a same-team bet the first half made
++12.94 units, +14.46% [-4.7, 35.5] on 117 bets. From 2025-26, 74% of games with any bet carried two or
+more and 35% three or more. The first night live (2026-11-17) was the same:
+17 bets on 9 games, 7 games with two or more.
+
+**The moneyline's units are all on the home-underdog games.** All seasons,
+on the 1,663 games both full-game rules priced:
+
+| Moneyline bets | Bets | Units | Return (95%) | By season, 2021-22 to 2026-27 |
+|---|---|---|---|---|
+| home side getting points (a spread bet beside it) | 455 | +43.71 | +13.92% [2.6, 26.1] | +18.4, +1.6, -7.9, +5.4, +29.1, -2.9 |
+| home side favoured or level (no spread bet) | 472 | -10.97 | -1.54% [-8.8, 5.3] | -0.3, +9.0, +11.1, -6.4, -15.1, -9.2 |
+
+From 2025-26 there are 129 favoured-home moneylines, -29.45 units, -15.08%
+[-28.9, -0.4]. 127 of them sit beside a first-half bet on the OTHER team
+(BAR ML with First Half PRS ML, PAR ML with First Half PAM ML, on
+2026-11-17): -29.45 units, -15.24% [-29.7, -1.1]. The other 2 are beside a
+first-half bet on the same team.
+
+**One bet a game costs units; dropping the favoured-home moneylines adds them.**
+
+| The two full-game rules, all seasons | Bets | Units | Return | Worst night | Deepest drawdown |
+|---|---|---|---|---|---|
+| every bet (live today) | 1,382 | +87.28 | +5.74% | -10.56 | -24.97 |
+| one a game, the spread kept | 927 | +43.57 | +3.61% | -6.96 | -19.14 |
+| one a game, the moneyline kept | 927 | +32.74 | +3.19% | -5.02 | -16.05 |
+| moneyline only when the home side gets points | 910 | +98.25 | +12.13% | -9.14 | -20.37 |
+
+| The three pre-game side rules, 2025-26 on (420 games) | Bets | Units | Return | Worst game | Deepest drawdown |
+|---|---|---|---|---|---|
+| every bet (live today) | 781 | +36.71 | +5.32% | -3.16 | -34.72 |
+| one a game, by each of the six orders | 420 | -2.31 to +30.44 | | -1.13 to -2.00 | -13.30 to -20.65 |
+| one a game, highest EV | 420 | +0.16 | +0.05% | -2.00 | -24.13 |
+| moneyline only when the home side gets points | 652 | +66.16 | +13.37% | -3.16 | -28.98 |
+
+With the halftime spread added (397 games): every bet 852, +44.10; the same
+moneyline change 731, +72.42.
+
+**Fewer bets and more units** (mike, 2026-11-17: "what do you recommend that
+helps us decrease volume exposure and also maximizes units"). B = the
+moneyline only when the home side gets points; C = B plus the first half only
+when its underdog is that same home side.
+
+| All five models, 2025-26 on (361 games) | Bets | Units | Return (95%) | 2025-26 / 2026-27 | Deepest drawdown |
+|---|---|---|---|---|---|
+| today | 818 | +61.68 | +8.13% [-0.3, 16.2] | +75.7 / -14.1 | -26.92 |
+| B | 715 | +80.70 | +13.43% [3.3, 24.0] | +86.2 / -5.5 | -24.02 |
+| C | 455 | +82.88 | +18.93% [6.1, 31.9] | +79.9 / +3.0 | -20.16 |
+
+The first-half bets C removes: 260, -2.18 units, -1.34% [-15.8, 13.7] (on the
+four pre-game models' 380 games: 274, +5.55, +3.21% [-10.9, 17.8]). Both cuts
+are in-sample. The first half's rests on 1.2 priced seasons. What C leaves is
+one finding, the home underdog, bet up to three times a game (101 games with 3+
+bets).
+
+- **The bets one-a-game drops are profitable.** The spread bets it drops
+  (moneyline kept): +54.54, +11.00% [2.3, 20.1]; the moneyline bets (spread
+  kept): +43.71, +13.92% [2.1, 26.2]. Cutting the stack trades 44 to 55
+  units over 5.3 seasons for a worst night about half as deep. It is not
+  steady: the dropped spread bets by season +14.5, +7.6, -5.3, +8.6, +34.7,
+  -5.5 (2025-26 is 34.7 of the 54.54); the dropped moneylines +18.4, +1.6,
+  -7.9, +5.4, +29.1, -2.9. Positive in 4 of 6 seasons either way.
+- **Highest EV is not a measure here**, as in the NBA game totals
+  (`scripts/nba_game_totals_door.py`): each rule's probability is the market's
+  fair price plus one fixed uplift, so EV ranks the rules in a fixed order.
+  Asked again 2026-11-17 (mike: "can we just pick the strongest EV pick for a
+  game?"). Highest EV a game against every bet: the two full-game rules, all
+  seasons, +41.15 against +87.28 (it keeps the spread on 445 of 455 shared
+  games); the three side rules from 2025-26, +0.16 against +36.71; all four
+  pre-game rules from 2025-26, +20.56 against +53.26. On the games with two or
+  more bets the bet it keeps did not do better than the ones it drops: +10.68%
+  against +14.33%, -1.19% against +10.63%, +7.25% against +9.06%.
+- **The best order is not to be trusted.** "Spread, then first half, then
+  moneyline" holds +30.44, but it is the best of six orders on 1.2 priced
+  seasons; the moneyline-first orders lose.
+- **A three-bet stack is a big single bet.** 115 games from 2025-26: about
+  2.6 units staked a game, all three won 41, all three lost 32, split 42; +59.16
+  units. Virtus on 2026-11-17 was 2.09 units staked to win 3 (0.57, 1.10, 0.43).
+- **This season the stacked finding is the loser:** on the 420 games, the
+  three pre-game side rules made -26.07 units in 2026-27 to 11-12 (moneyline
+  -12.14, first half -8.45, spread -5.48). Over every replayed 2026-27 bet the
+  halftime spread (+11.85) and first-quarter total (+3.28) are positive.
+- **What the dropped favoured-home moneylines are not:** a proven loser. The
+  interval over all seasons crosses zero and the first three seasons were
+  positive (+19.8 units); it is the last three (-30.7) that lose. It was found
+  by looking at this split, so it is in-sample.
+
+**The research's units are not on the posted stake for underdog prices.**
+`models.euroleague_pregame.stake`, the research's stake, risks 1 unit on an
+underdog; every surface stakes 1 unit to WIN (`stake_for`). On the posted
+stake the moneyline's research-rule replay is +35.32 units, +3.27% (not
++64.80, +5.24%) and the first half's +19.82, +6.23% (not +19.14, +4.22%). The
+spread and first-quarter totals (all near -110) are unchanged. The live picks
+were always staked correctly. Since 2026-11-17 the build grades the live
+replay, the artifact and the live-rule figures in this doc on the posted stake
+(`posted_stake`, #1446); the research comparison keeps the research's.
+
+**Built 2026-11-17 (mike: "Yes, both").** The moneyline bets only a home side
+getting points, and the first half only that home underdog: see each model's
+section above.
 
 ### When they decide, and on what
 
