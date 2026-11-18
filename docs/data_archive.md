@@ -351,7 +351,11 @@ Each kept row is the opener or the close of its proposition. A rung of an altern
 **Game-odds repeats stay in Supabase (reader audit, 2026-11-18).** mike asked that day for the odds table to be done the same way as props. Measured on the PC copy that day:
 - 28,198,332 of the 59,301,354 `odds` rows (47.6%) are repeats, for games that started over 3 days ago.
 - 23,828,919 of them fall outside the four readers the 11-16 audit named.
-- A second audit read every reader of `odds` on `origin/master`. Once the readers it found are kept whole, at most 1,279,329 repeats (2.2% of the table) could move. That figure counts 596,699 NFL cache-import rows the keep list now holds. So nothing moves until the readers read the archive too.
+- A second audit read every reader of `odds` on `origin/master`.
+  - Protecting what its readers touch, in whole groups, leaves 1,279,329 repeats (2.2% of the table). The groups were every game with a pick, all NCAAB and NBA pre-game rows, all MLB in-play rows, NCAAF paid history, and NHL moneyline paid history and 3-way rows.
+  - That figure counts 596,699 NFL cache-import rows the keep list now holds.
+  - A finer keep list would free more; that is not measured.
+- Nothing moves until the readers read the archive too. The readers went from 4 to more than 14 in two days, and the prop move already changed an app screen (below).
 
 What the audit found reading those rows, by what breaks:
 - **The app (production).** The line-history card for a past pick shows "At pick" only when the book's last stored row before the pick is within 6 hours of it (`AT_PICK_MAX_MS`, `mobile/src/lib/lineMovementView.ts`). A repeat is the row that keeps a standing price inside those 6 hours.
@@ -364,12 +368,16 @@ What the audit found reading those rows, by what breaks:
   - `data/ingestors/ncaaf_derivative_history.py` buys a game at a pull only if the game holds a row from it.
 - **Research.** `scripts/ncaaf_search/steam_lag.py`, `scripts/nhl_moneyline_rebuild.py`, `scripts/nhl_regulation_game_day_grade.py`, `scripts/live_inning_gate_replay.py`, `scripts/nba_research_cache.py` / `scripts/nba_game_harness.py` and `models/backtester.py` rebuild fetches, need a row inside a window, or measure how long a price stood.
 
+**Not checked:** the rule's "row before it" ignores `source`, so a reader that filters on `source` can see a different row before a repeat. The safe verdicts for readers that filter on `source` are not verified.
+
 `scripts/archive_rows.py` keeps the code for this: `_ODDS_KEEP` (the rows a reader needs whole), `prepare_range` (every date from one pass of the copy) and `--batch-rows` (small games together, each still checked on its own). Its `REFUSED` entry blocks the move.
 - **Never run against Postgres:** the batched removal. Its first use should be one date, with the row counts and the ledger read back before `--pending`.
 - **The odds table holds 85,666 games against 1,007 for props,** so removing one game a transaction would take about 38 hours.
 
 **The prop move cost past prop picks their "At pick" price (measured 2026-11-18).** The same app rule reads `player_prop_odds`.
-- **Measured:** 77,435 pre-game prop picks are on games whose repeats were archived. On the PC copy plus the archive files, 74,913 had a row at the pick's book within 6 hours before the pick. On the PC copy alone, as Supabase now is, 70,266 do. So 4,647 cards lost "At pick" and now say the book's newest price is from before the pick.
+- **Measured:** 77,435 pre-game prop picks are on games whose repeats were archived. On the PC copy plus the archive files, 74,913 had a row at the pick's book within 6 hours before the pick. On the PC copy alone, as Supabase now is, 70,266 do. So up to 4,647 cards lost "At pick" and now say the book's newest price is from before the pick.
+  - In 4,613 of those, the row left before the pick holds the locked line and price, so the card would otherwise have shown it.
+  - On five sampled picks, the app's own read on live Supabase (the newest 500 rows) put the last row before the pick 6 h 2 min to 9 h 10 min back. The archive holds a row with the same prices 1 min 50 s to 1 h 2 min before each pick.
 - **How it was counted** (the PC copy and the archive files, read-only):
   - the pick's book is `decision_book`, else DraftKings;
   - the market comes from the app's model-to-market map;
