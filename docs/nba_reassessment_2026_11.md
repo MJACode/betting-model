@@ -36,11 +36,11 @@ Settled NBA bets, 2026-10-20 to 2026-11-17, units on the posted stake (productio
   None was proven; the best scored 5 of 10 for being real (`<R>/reassess/ranked_portfolio.md`).
 - **The live record was diagnosed** on 2026-11-12 (`<R>/reassess/live_diagnosis.md`); change 2 came from it.
 
-## 4. The eleven registered backtests
+## 4. The twelve registered backtests
 
 Each was written down and frozen before it was graded, then graded once. Four also had an
 independent audit and recomputation. Folders: `<R>/reassess/studies/<name>`; each line is from
-that study's own `RESULT.md`, `AUDIT.md` and `REPLICATION.md`.
+that study's own `RESULT.md`, and its `AUDIT.md` and `REPLICATION.md` where it has them.
 
 | Study | What it asked | Result |
 |---|---|---|
@@ -55,8 +55,9 @@ that study's own `RESULT.md`, `AUDIT.md` and `REPLICATION.md`.
 | `2026-11-14-tracking-info` | Free player tracking data as an input to the prop projection | The data lowers the fit error for assists, steals and blocks in both test seasons. No priced cell passes: assists overs -0.46% on 5,685 bets, steals +0.94% on 8,881, blocks unders +3.00% on 5,546 |
 | `2026-11-14-prop-timing` | Decide the two prop models 20 minutes before tip instead of 55, on this season's 24 game dates | Information only, nothing passes. The under model made +14.64 units more at 20 minutes on paired games; the interval is -18.7 to +51.5 |
 | `2026-11-15-prop-refusals` | Refuse prop bets after a late scratch, on a growing role, or on a scorer in a slump | Five of six fail. The late-scratch refusal would have cost the card 62.99 units over three seasons. The slump refusal cleared by a hair (195 bets, -23.95 units); the audit and the recomputation both say it is too few bets and was read before it was registered |
+| `2026-11-18-kalshi-price` | mike said on 2026-11-14 he would bet at Kalshi. Would its price, after its fee, have beaten the sportsbooks on the two prop models' own bets? | No: not worth building for price. The nightly card from 2025-11-18, 745 bets: Kalshi better on 4, +0.15 units (95% interval -0.00 to +0.43). Both models' full lists, 22,126 bets: better on 298, +6.16 units (+4.84 to +7.64). This season's 125 live bets: better on 13, +0.36 units (+0.11 to +0.70). Where Kalshi quoted the bet, its price after the fee was a median 3.84 points of implied chance worse than the sportsbook's on the card |
 
-**Read together:** no new model came out of the eleven. Each of the four cells that passed was
+**Read together:** no new model came out of the twelve. Each of the four cells that passed was
 refuted by its own audit as a result to act on. What they did show is which existing bets are weak.
 
 ## 5. The two changes made (commit trailer `Updated-By: mike`)
@@ -124,9 +125,12 @@ have not paid yet: threes unders 10-17, -4.39 units; rebounds unders 2-9, -6.21 
 - **The slow book's total.** On paper a number 1.5 or more points better than the market is worth
   about +2% to +3% a bet. Stored 5-minute rows cannot show it can be bet. The clean test is forward
   on 2026-27, with the slow book read fresh at the decision (`2026-11-14-stale-total/AUDIT.md`).
-- **Kalshi prices.** mike said on 2026-11-14 he would bet there. A study of whether Kalshi's price
-  beats the sportsbooks on the two prop models' own bets was registered on 2026-11-18 and has no
-  result yet (`<R>/reassess/studies/2026-11-18-kalshi-price/prereg.md`).
+- **The prop bets Kalshi also lists.** Seen after the Kalshi grade, and not registered. On both
+  prop models' full backtest lists for 2025-26 from 2025-11-18, graded at the sportsbooks, the
+  bets on a player and line Kalshi also listed returned -1.0% on 4,123 bets. The rest returned
+  +4.1% on 18,003. The difference is -5.1 points (95% interval -8.6 to -1.4). This season's 124
+  graded live bets point the other way on a small sample. It is a lead to register, not a finding
+  (`<R>/reassess/studies/2026-11-18-kalshi-price/RESULT.md`, section 5.4).
 - **Tracking data in the projection.** It improves the fit for assists, steals and blocks and no
   priced cell passed. The next test is a refit on a longer history, steals first.
 - **A later prop decision time.** Not settled by 24 game dates; about 151 are needed for the

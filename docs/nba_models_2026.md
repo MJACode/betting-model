@@ -3239,7 +3239,7 @@ so no `Updated-By`.
 mike, 2026-11-18: *"NBA is bleeding money and we've made no changes to improve the models ... I
 don't care what you have to do, just do it."* Live to 2026-11-17 the NBA models stood at 221
 settled bets, 100-121, -9.63 units (production `picks`, read 2026-11-18). The reassessment digested
-the 266 ideas already graded here, read nine research angles, judged 42 new ideas and ran eleven
+the 266 ideas already graded here, read nine research angles, judged 42 new ideas and ran twelve
 registered backtests. **`docs/nba_reassessment_2026_11.md`** is the whole record, one line per
 backtest. Two changes came out of it, both model updates (`Updated-By: mike`):
 
@@ -3256,6 +3256,7 @@ backtest. Two changes came out of it, both model updates (`Updated-By: mike`):
    a team under 10 games and went 21-29, -11.10 units; the other 6 went 5-1, +3.85. The backtest
    had the kept-out games at -0.14% on 211, +4.50% on 80 and -0.03% on 150.
 
-Nothing else is built from the eleven backtests: each of the four registered cells that passed
-was refuted by its own audit as a result to act on. The settings are in `docs/thresholds.md`; the
+Nothing else is built from the twelve backtests: each of the four registered cells that passed
+was refuted by its own audit as a result to act on, and the twelfth (Kalshi's price on the two
+prop models' own bets, graded 2026-11-18) came back not worth building. The settings are in `docs/thresholds.md`; the
 two rules in plain words are in `docs/sports/nba.md`.

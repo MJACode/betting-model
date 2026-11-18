@@ -41,8 +41,13 @@ any of them cannot run until its feed is restarted.
 - The slow book's total: a forward test on 2026-27 with the slow book read
   fresh at the decision. The backtest's pass rested on copies more than 5
   minutes old.
-- Kalshi's price on the two prop models' own bets: registered 2026-11-18, not
-  graded (`reassess/studies/2026-11-18-kalshi-price` in the research folder).
+- The prop bets Kalshi also lists: on both prop models' 2025-26 backtest lists
+  they returned -1.0% on 4,123 bets at the sportsbooks against +4.1% on 18,003
+  for the rest. Seen after the Kalshi price study was graded and not
+  registered, so it needs its own registered test
+  (`reassess/studies/2026-11-18-kalshi-price/RESULT.md`, section 5.4, in the
+  research folder). The price question itself is closed: not worth building
+  (`docs/nba_reassessment_2026_11.md`, section 4).
 - The prop percentile table (`models/nba_prop_rank.py`) still holds threes
   overs' EVs. Rebuilding it without them needs a replay of the nightly card
   first; each remaining bet's percentile would rise 0.6 points on average.
@@ -854,6 +859,8 @@ Recorded so they are not re-derived (`docs/nba_models_2026.md` §4):
   −6.3..+19.1 — re-grade when 2026-27 adds a season.
 - Kalshi carries NBA prop and game ladders with hourly history from 2025-26
   (free, `api.elections.kalshi.com`); the repo maps only NFL series. Not built.
+  Its price on the two prop models' own bets was graded 2026-11-18: not worth
+  building for price (`docs/nba_reassessment_2026_11.md`, section 4).
 
 ## [ ] App: a non-DraftKings pick's line move can read as a price move in the member's favour (found 2026-10-16)
 
