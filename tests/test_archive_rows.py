@@ -33,7 +33,7 @@ def copy():
     con.execute("""CREATE TABLE odds (odds_id BIGINT, game_id VARCHAR, market VARCHAR,
         bookmaker VARCHAR, snapshot_type VARCHAR, snapshot_at VARCHAR, source VARCHAR,
         home_price DOUBLE, away_price DOUBLE, draw_price DOUBLE, spread_home DOUBLE,
-        total_line DOUBLE, over_price DOUBLE, under_price DOUBLE)""")
+        total_line DOUBLE, over_price DOUBLE, under_price DOUBLE, sport VARCHAR)""")
     return con
 
 
@@ -110,7 +110,7 @@ def test_game_odds_repeat_compares_every_price_and_line(copy):
 
     def row(m, home, total=None, market="h2h"):
         oid = next(_ids)
-        copy.execute("INSERT INTO odds VALUES (?, 'G', ?, 'betmgm', 'open', ?, NULL, ?, ?, NULL, NULL, ?, NULL, NULL)",
+        copy.execute("INSERT INTO odds VALUES (?, 'G', ?, 'betmgm', 'open', ?, NULL, ?, ?, NULL, NULL, ?, NULL, NULL, 'NBA')",
                      [oid, market, _iso(start - dt.timedelta(hours=3) + dt.timedelta(minutes=m)),
                       home, -home, total])
         return oid
@@ -165,6 +165,64 @@ def test_a_move_with_a_reader_that_would_break_is_refused(table, rule):
     with pytest.raises(SystemExit, match="may not move yet"):
         ar.check_allowed(table, rule)
     ar.check_allowed("player_prop_odds", "repeat")
+
+
+# One repeat in each group of game-odds rows a reader needs whole, and the same
+# repeat in a group nothing needs. Only the last may move.
+KEPT_WHOLE = [
+    ("MLB", "h2h", "open", None),                                   # market_movement's mkt_snapshots
+    ("MLB", "totals", "close", None),
+    ("MLB", "totals", "in_play", "historical_inplay|req=a|served=b"),  # a paid in-play buyer's rows
+    ("NCAAF", "h2h", "in_play", "historical_inplay|req=a|served=b"),
+    ("NCAAB", "h2h", "in_play", "odds_api_ncaab_inplay_history"),
+    ("NBA", "spreads", "in_play", None),                            # the NBA in-play model's fetch groups
+    ("NHL", "totals", "open", "odds_api_historical"),               # the NHL totals lab
+    ("NFL", "h2h", "open", "nfl_odds_cache|served=2025-09-07T16:00:00Z"),  # the cache import
+]
+MOVES = [
+    ("NBA", "h2h", "open", None),
+    ("MLB", "alternate_totals", "open", None),
+    ("MLB", "totals", "in_play", None),
+    ("NHL", "totals", "open", None),
+    ("NHL", "h2h", "open", "odds_api_historical"),
+]
+
+
+def _odds_path(con, gid, start, sport, market, typ, source):
+    """Four rows at one price: opener, repeat, repeat, close. Returns the middle two."""
+    ids = []
+    for m in (0, 10, 20, 30):
+        t = start - dt.timedelta(hours=3) + dt.timedelta(minutes=m)
+        if typ == "in_play":
+            t = start + dt.timedelta(minutes=m)
+        oid = next(_ids)
+        con.execute("INSERT INTO odds VALUES (?, ?, ?, 'draftkings', ?, ?, ?, -120, 100, NULL, NULL, 8.5, -110, -110, ?)",
+                    [oid, gid, market, typ, _iso(t), source, sport])
+        ids.append(oid)
+    return ids[1:3] if typ != "in_play" else ids[1:]
+
+
+@pytest.mark.parametrize("sport,market,typ,source", KEPT_WHOLE)
+def test_game_odds_a_reader_needs_whole_never_move(copy, sport, market, typ, source):
+    start = NOW - dt.timedelta(days=10)
+    _game(copy, "G", start)
+    _odds_path(copy, "G", start, sport, market, typ, source)
+    assert _picked(copy, "odds", "repeat", ["G"]) == []
+
+
+@pytest.mark.parametrize("sport,market,typ,source", MOVES)
+def test_game_odds_repeats_nothing_needs_whole_move(copy, sport, market, typ, source):
+    start = NOW - dt.timedelta(days=10)
+    _game(copy, "G", start)
+    reps = _odds_path(copy, "G", start, sport, market, typ, source)
+    assert _picked(copy, "odds", "repeat", ["G"]) == sorted(reps)
+
+
+def test_the_postgres_keep_list_is_the_duckdb_one_with_its_percent_doubled():
+    spec = ar.SPECS["odds"]
+    assert spec.keep_pg == spec.keep_dk.replace("%", "%%")
+    assert "historical_inplay%%" in spec.keep_pg
+    assert ar.SPECS["player_prop_odds"].keep_pg == "FALSE"
 
 
 def test_a_dropped_connection_retries_the_date_on_a_new_one(monkeypatch):
@@ -554,3 +612,111 @@ def test_a_large_game_goes_one_market_at_a_time_and_resumes(copy, tmp_path, monk
     assert bad.deleted == [] and out["games"] == 0
     assert any(p[0].startswith("refused at removal") for s, p in bad.sql if "SET note" in s)
     assert not [p for s, p in bad.sql if "SET removed_at" in s]
+
+
+# ── Bulk (game odds, 2026-11-18): one pass of the copy; small games together ──
+
+def _two_days_of_props(copy):
+    days = []
+    for gid, back in (("A", 10), ("B", 10), ("C", 11)):
+        start = NOW - dt.timedelta(days=back)
+        _game(copy, gid, start)
+        for m, p in ((0, 100), (10, 100), (20, 100), (30, 110)):
+            _prop(copy, gid, start - dt.timedelta(hours=5) + dt.timedelta(minutes=m), p)
+        days.append(start.astimezone(ar.ET).date().isoformat())
+    return sorted(set(days))
+
+
+def test_bulk_prepare_writes_what_prepare_writes_date_by_date(copy, tmp_path, monkeypatch):
+    monkeypatch.setattr(ar, "ensure_ledger", lambda conn: None)
+    days = _two_days_of_props(copy)
+    assert len(days) == 2
+    monkeypatch.setattr(ar, "ARCHIVE_ROOT", tmp_path / "one")
+    for day in days:
+        ar.prepare(copy, _Conn(), "player_prop_odds", "repeat", day, NOW, log=lambda *_: None)
+    one = {d: ar.file_selection(ar.SPECS["player_prop_odds"],
+                                ar.file_path("player_prop_odds", "repeat", d)) for d in days}
+    monkeypatch.setattr(ar, "ARCHIVE_ROOT", tmp_path / "bulk")
+    conn = _Conn()
+    out = ar.prepare_range(copy, conn, "player_prop_odds", "repeat", days[0], days[-1], NOW,
+                           log=lambda *_: None)
+    bulk = {d: ar.file_selection(ar.SPECS["player_prop_odds"],
+                                 ar.file_path("player_prop_odds", "repeat", d)) for d in days}
+    assert bulk == one and out["dates"] == 2 and out["games"] == 3
+    # one ledger statement per date, holding every game of that date
+    inserts = [p for s, p in conn.sql if "INSERT INTO archive_batches" in s]
+    assert len(inserts) == 2
+    assert sorted(g for p in inserts for g in p[5]) == ["A", "B", "C"]
+
+
+def test_bulk_prepare_never_rewrites_a_date_already_in_storage(copy, tmp_path, monkeypatch):
+    monkeypatch.setattr(ar, "ensure_ledger", lambda conn: None)
+    monkeypatch.setattr(ar, "ARCHIVE_ROOT", tmp_path)
+    days = _two_days_of_props(copy)
+    conn = _Conn(ledger=[(days[0],)])          # the ledger: days[0] is already stored
+    out = ar.prepare_range(copy, conn, "player_prop_odds", "repeat", days[0], days[-1], NOW,
+                           log=lambda *_: None)
+    assert out["dates"] == 1
+    assert not ar.file_path("player_prop_odds", "repeat", days[0]).exists()
+    assert ar.file_path("player_prop_odds", "repeat", days[1]).exists()
+
+
+class _BatchConn(_Conn):
+    """Postgres as remove_batch sees it: what the rule picks per game now."""
+
+    def __init__(self, picks):
+        super().__init__()
+        self.picks, self.deleted, self.marked = picks, None, None
+
+    def execute(self, sql, params=None):
+        self.sql.append((sql, params))
+        conn = self
+
+        class R:
+            rowcount = 0
+
+            def fetchall(self):
+                if "FROM archive_pick GROUP BY game_id" in sql:
+                    return [(g, n, c) for g, (n, c) in conn.picks.items()]
+                return []
+        r = R()
+        if sql.startswith("DELETE"):
+            self.deleted = list(params[0])
+            r.rowcount = sum(self.picks[g][0] for g in params[0])
+        if "SET removed_at" in sql:
+            self.marked = list(params[0])
+        return r
+
+
+def test_a_batch_removes_only_the_games_postgres_agrees_on():
+    wants = {"A": (3, 111), "B": (2, 222), "C": (4, 333)}
+    conn = _BatchConn({"A": (3, "111"), "B": (2, "999"), "C": (4, "333")})   # B's rows changed
+    got, refused = ar.remove_batch(conn, ar.SPECS["odds"], "repeat", wants, NOW)
+    assert got == 7 and set(refused) == {"B"}
+    assert conn.deleted == ["A", "C"] and conn.marked == ["A", "C"]
+
+
+def test_a_batch_where_postgres_agrees_on_nothing_deletes_nothing():
+    conn = _BatchConn({"A": (1, "5")})
+    got, refused = ar.remove_batch(conn, ar.SPECS["odds"], "repeat", {"A": (3, 111)}, NOW)
+    assert got == 0 and set(refused) == {"A"} and conn.deleted is None
+
+
+def test_batched_removal_groups_small_games_and_notes_the_refused(copy, tmp_path, monkeypatch):
+    day, ledger = _stored(copy, tmp_path, monkeypatch, ["A", "B", "C", "D", "E"])
+    monkeypatch.setattr(ar, "wait_for_quiet", lambda *a, **k: True)
+    monkeypatch.setattr(ar, "BATCH_GAMES", 2)
+    calls = []
+
+    def remove_batch(conn, spec, rule, wants, now):
+        calls.append(sorted(wants))
+        bad = {g: f"{g}: Postgres picks other rows" for g in wants if g == "D"}
+        return sum(w[0] for g, w in wants.items() if g not in bad), bad
+    monkeypatch.setattr(ar, "remove_batch", remove_batch)
+    conn = _Conn(ledger)
+    out = ar.remove(conn, "player_prop_odds", "repeat", day, NOW, log=lambda *_: None,
+                    batch_rows=10_000)
+    assert calls == [["A", "B"], ["C", "D"], ["E"]]
+    assert out["games"] == 4 and [g for g, _ in out["skipped"]] == ["D"]
+    notes = {p[-1]: p[0] for s, p in conn.sql if "SET note" in s}
+    assert notes["D"].startswith("refused at removal")

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, the odds table: a rewrite frees nothing yet (34.2 rows a page, packed 34), its 28.2M duplicates have readers (at most 1.28M movable), the re-buy planner counts archived game odds, and the prop move cost 4,647 "At pick" prices |
 | 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, the props table rewritten online with pg_repack: data 26.05 GB to 10.73 GB, database 93.34 GB to 78.01 GB, 37.19 million rows checked by count and checksum, guard and helper script saved |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, the full test suite no longer hangs on Windows: two scratch-database starters moved onto tests/_pg.py, 88 BYOM tests now run here, and a guard stops a third copy (#1445) |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, horse racing: a US site that takes Hong Kong bets publishes the Jockey Club's own dividends (77 of 77 win and place, 7 of 7 exotics, two cards); the US$499 archive is mike's call |
