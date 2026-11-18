@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, EuroLeague moneyline and first half bet only the home underdog getting points (mike: "Yes, both"); build replays research and live rules, posted stake |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, EuroLeague several bets on one game measured: one home-underdog finding bet up to three times; one-a-game costs units, the favoured-home moneylines lose; nothing changed |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, Discord /pick page always lists FD, DK, Fanatics, BetMGM, Caesars and does not open the app |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, X posts the day's best four pre-game picks, each with a rationale reply; the 2099 pause row was what stopped the slate |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, Picks tab "Bet all" banner gets the cards' 16pt side inset so it lines up |

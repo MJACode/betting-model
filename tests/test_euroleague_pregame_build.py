@@ -73,13 +73,29 @@ def test_the_big_favourite_moneyline_is_gone_from_the_artifact_and_config():
     assert gone not in config.MODELS_ON_OWN_PROBABILITY
 
 
-def test_the_replayed_records_are_the_researchs():
-    # With no rule left to conflict with in one pass, each live population is
-    # the research's best-deciding-book read, bet for bet.
+def test_the_replayed_records_are_the_researchs_less_the_same_team_cuts():
+    # The research's rules still replay bet for bet (replay_matches_research).
+    # The live rules are those bets less the same-team cuts (mike, 2026-11-17,
+    # "Yes, both"), and nothing that is not a research bet. Units on the posted
+    # stake, 1 unit to win at every price (issue #1446).
+    assert ART["live_is_research_less_the_cuts"] is True
     got = {m: (ART["models"][m]["replay"]["all"]["bets"], ART["models"][m]["replay"]["all"]["units"])
            for m in R.MODELS}
-    assert got == {R.HOME_ML: (984, 64.8), R.HOME_DOG_SPREAD: (455, 54.54),
-                   R.H1_DOG_ML: (465, 19.14), R.Q1_SHARE_TOTAL: (63, 17.71)}
+    assert got == {R.HOME_ML: (491, 44.97), R.HOME_DOG_SPREAD: (455, 54.54),
+                   R.H1_DOG_ML: (131, 15.85), R.Q1_SHARE_TOTAL: (63, 17.71)}
+    research = {m: (ART["models"][m]["research_rule_replay"]["bets"],
+                    ART["models"][m]["research_rule_replay"]["cut_bets"]) for m in R.MODELS}
+    assert research == {R.HOME_ML: (984, 493), R.HOME_DOG_SPREAD: (455, 0),
+                        R.H1_DOG_ML: (465, 334), R.Q1_SHARE_TOTAL: (63, 0)}
+
+
+def test_only_the_moneyline_and_the_first_half_carry_the_same_team_cut():
+    assert ART["models"][R.HOME_ML]["params"]["min_home_line"] == 0.0
+    assert ART["models"][R.H1_DOG_ML]["params"] == {"home_dog_only": True, "min_home_line": 0.0}
+    assert "home_dog_only" not in ART["models"][R.HOME_DOG_SPREAD]["params"]
+    assert set(build.CUT_MODELS) == {R.HOME_ML, R.H1_DOG_ML}
+    assert "min_home_line" not in build.RESEARCH_PARAMS[R.HOME_ML]
+    assert build.RESEARCH_PARAMS[R.H1_DOG_ML] == {}
 
 
 def test_the_relocated_venues_are_the_researchs():

@@ -834,7 +834,8 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // 2026-11-14). Each decides a game once, five to ten minutes before tip, at
   // the best price at the sportsbooks a pick may name. Every id starts with
   // 'euroleague', a prefix no other sport's ids share.
-  // The home side's moneyline, priced -200 or longer.
+  // The home side's moneyline, priced -200 or longer, when it is getting
+  // points on the spread (mike, 2026-11-17).
   euroleague_home_ml: {
     shortLabel: 'ML',
     longLabel: 'EuroLeague Moneyline',
@@ -850,7 +851,8 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
-  // The first half's moneyline, the underdog. A tied half returns the stake.
+  // The first half's moneyline, the home underdog when it is also getting
+  // points on the full-game spread (mike, 2026-11-17). A tied half returns the stake.
   euroleague_h1_dog_ml: {
     shortLabel: '1H ML',
     longLabel: 'EuroLeague First Half Moneyline',
@@ -1166,7 +1168,7 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   // over the earlier seasons. The rule is the cut, so the note says the number
   // is an estimate, not the reason for the bet.
   euroleague_home_ml:
-    'The market’s fair chance that the home team wins, plus about 5 percentage points, the extra this ' +
+    'The market’s fair chance that the home team wins, plus about 8 percentage points, the extra this ' +
     'rule’s bets won in earlier EuroLeague seasons. The rule picks the side; this number is our estimate ' +
     'of its chance. Read it as an upper bound.',
   euroleague_home_dog_spread:
@@ -1174,10 +1176,9 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
     'this rule’s bets won in earlier EuroLeague seasons. The rule picks the side; this number is our ' +
     'estimate of its chance. Read it as an upper bound.',
   euroleague_h1_dog_ml:
-    'The market’s fair chance that this underdog leads at halftime, leaving out a tied half, which ' +
-    'returns the stake, plus about 5 percentage points, the extra this rule’s bets won last season ' +
-    '(347 bets). The rule picks the side; this number is our estimate of its chance. Read it as an ' +
-    'upper bound.',
+    'The market’s fair chance that the home team leads at halftime, plus about 10 percentage points, the extra ' +
+    'this rule’s bets won last season. A tied half returns the stake and is left out. That is only 93 bets ' +
+    'that were not tied, so the real extra could be much smaller. Read it as an upper bound.',
   euroleague_q1_club_share_total:
     'The market’s fair chance this side hits, on the first quarter’s points alone, plus about 16 ' +
     'percentage points, the extra this rule’s bets won last season. That is only 53 bets, so the real ' +
@@ -1324,7 +1325,8 @@ const EUROLEAGUE_CHECKED =
 const MINUTES_BEFORE_TIP_BODY: Readonly<Record<string, string>> = {
   euroleague_home_ml:
     EUROLEAGUE_CHECKED +
-    'It bets the home team’s moneyline at -200 or longer, never shorter. ' +
+    'It bets the home team’s moneyline only when the home team is the underdog on the full-game spread. ' +
+    'It never lays more than -200. ' +
     'A posted bet is never re-priced: it stays at the price it posted at.',
   euroleague_home_dog_spread:
     EUROLEAGUE_CHECKED +
@@ -1332,7 +1334,8 @@ const MINUTES_BEFORE_TIP_BODY: Readonly<Record<string, string>> = {
     'is never re-priced: it stays at the line and price it posted at.',
   euroleague_h1_dog_ml:
     EUROLEAGUE_CHECKED +
-    'It bets the first-half moneyline underdog. The bet settles on the first half’s score alone, and a ' +
+    'It bets the home team’s first-half moneyline only when the home team is the underdog for the first half ' +
+    'and on the full-game spread. The bet settles on the first half’s score alone, and a ' +
     'tied first half returns the stake. A posted bet is never re-priced: it stays at the price it posted at.',
   euroleague_q1_club_share_total:
     EUROLEAGUE_CHECKED +

@@ -49,7 +49,7 @@ RESEARCH_LAST_DATE = "2026-11-12"
 CLOSE_LEAD_MIN = 10
 PERIOD_MARK = "T-10"
 
-PARAMS = {
+RESEARCH_PARAMS = {
     # r3_a_home.a1: home price -200 or longer, 2021-22 on, not neutral.
     R.HOME_ML: {"min_price": -200.0, "min_season": 2022},
     # r2_leads2 H3: the home number above 0.
@@ -61,6 +61,16 @@ PARAMS = {
     # lost): K 40, earlier = tipped 3+ hours before.
     R.Q1_SHARE_TOTAL: {"margin": 1.0, "k_share": 40.0, "prior_gap_hours": 3.0},
 }
+# THE LIVE RULES: the research's, plus the same-team cuts (mike, 2026-11-17,
+# "Yes, both"; docs/sports/euroleague.md, "Several bets on one game"). The
+# moneyline only when the home side gets points; the first half only on that
+# home underdog. The research replay runs on RESEARCH_PARAMS, the artifact on these.
+PARAMS = {
+    **RESEARCH_PARAMS,
+    R.HOME_ML: {**RESEARCH_PARAMS[R.HOME_ML], "min_home_line": 0.0},
+    R.H1_DOG_ML: {"home_dog_only": True, "min_home_line": 0.0},
+}
+CUT_MODELS = (R.HOME_ML, R.H1_DOG_ML)
 FIRST_READ_SEASON = {R.HOME_ML: 2022, R.HOME_DOG_SPREAD: 2022,
                      R.H1_DOG_ML: 2026, R.Q1_SHARE_TOTAL: 2026}
 
@@ -103,9 +113,11 @@ def close_times(g: pd.DataFrame, ledger: np.ndarray) -> pd.Series:
     return pd.Series(when, index=t.index[ok])
 
 
-def replay(data: dict, played: pd.DataFrame, books=R.DECIDABLE) -> dict[str, list]:
-    """Every rule's decisions on `played` through the card's own code."""
-    art = {"models": {m: {"params": PARAMS[m]} for m in R.MODELS}}
+def replay(data: dict, played: pd.DataFrame, books=R.DECIDABLE, params: dict | None = None) -> dict[str, list]:
+    """Every rule's decisions on `played` through the card's own code, on
+    `params` (the live PARAMS by default; RESEARCH_PARAMS for the comparison)."""
+    params = PARAMS if params is None else params
+    art = {"models": {m: {"params": params[m]} for m in R.MODELS}}
     tips = data["games"].set_index("game_id").tip
     fq = data["fq"][data["fq"].game_id.isin(played.game_id)]
     prepared = R.prepare_fullgame(fq, tips)
@@ -119,16 +131,19 @@ def replay(data: dict, played: pd.DataFrame, books=R.DECIDABLE) -> dict[str, lis
             out[R.H1_DOG_ML], out[R.Q1_SHARE_TOTAL] = [], []
             return out
         per = R.prepare_period(rows)
-        out[R.H1_DOG_ML] = R.decide_h1_dog(per, played, art, books)
+        # the full-game board at the fetch, as the card reads it (the same-team cut, Q1's anchor)
         asked = pd.to_datetime(per[~per.rung].groupby("game_id").asked_at.min(), utc=True)
         fgb = R.board_at(prepared, asked)
+        out[R.H1_DOG_ML] = R.decide_h1_dog(per, played, art, books, fg_board=fgb)
         hist = R.share_history(data["games"], data["periods"])
         out[R.Q1_SHARE_TOTAL] = R.decide_q1_share(per, rows, fgb, hist, played, art, books)
     return out
 
 
-def graded(decisions: list, g: pd.DataFrame, model: str) -> pd.DataFrame:
-    """The BETs as a frame, graded at the posted stake."""
+def graded(decisions: list, g: pd.DataFrame, model: str, posted: bool = False) -> pd.DataFrame:
+    """The BETs as a frame, graded at the research's stake (an underdog risks 1;
+    the comparison) or, posted=True, at the posted stake (1 unit to win, every
+    price: the live record, the artifact and the docs; issue #1446)."""
     rows = [d.__dict__ | {"extra": None} for d in decisions if d.status == "bet"]
     x = pd.DataFrame(rows, columns=["game_id", "model_id", "status", "detail", "side", "book", "price",
                                     "line", "p_fair", "uplift", "p_model", "ev", "edge", "dk_price",
@@ -145,7 +160,7 @@ def graded(decisions: list, g: pd.DataFrame, model: str) -> pd.DataFrame:
     else:
         r = np.sign(x.q1_total - x.line)
     x["res"] = (sgn * r).astype(int)
-    risk, win = R.stake(x.price.to_numpy())
+    risk, win = (R.posted_stake if posted else R.stake)(x.price.to_numpy())
     x["risk"] = np.where(x.res == 0, 0.0, risk)
     x["units"] = np.where(x.res > 0, win, np.where(x.res < 0, -risk, 0.0))
     return x
@@ -259,18 +274,17 @@ def build(write: bool = False) -> dict:
     later_games = played[played.game_date > RESEARCH_LAST_DATE]
     report: list[str] = [f"# EuroLeague pre-game build, season {SEASON} (research state: games through "
                          f"{RESEARCH_LAST_DATE})\n"]
-    best = replay(data, research_games)
-    dk = replay(data, research_games, books=("draftkings",))
+    best = replay(data, research_games, params=RESEARCH_PARAMS)
+    dk = replay(data, research_games, books=("draftkings",), params=RESEARCH_PARAMS)
     ref = research_bets()
     art = {"season": SEASON, "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "research_last_date": RESEARCH_LAST_DATE, "decision_lead_min": CLOSE_LEAD_MIN,
-           "deciding_books": list(R.DECIDABLE), "models": {}}
+           "deciding_books": list(R.DECIDABLE), "stake": "posted: 1 unit to win, risk capped at 3",
+           "models": {}}
     all_ok = True
     rows = []
-    graded_best: dict[str, pd.DataFrame] = {}
     for m in R.MODELS:
         gb = graded(best[m], played, m)
-        graded_best[m] = gb
         c = compare(gb, ref[m]["best"][ref[m]["best"].game_date <= RESEARCH_LAST_DATE])
         ok = not (c["only_card"] or c["only_research"] or c["different"])
         all_ok &= ok
@@ -292,8 +306,34 @@ def build(write: bool = False) -> dict:
                          "different": len(cd["different"]), "same price, other book": len(cd["book_ties"])})
             if not okd:
                 report.append(f"DIFFERENCE {m} (DraftKings): {json.dumps({k: cd[k][:20] for k in ('only_card', 'only_research', 'different')})}")
-    report.append("## The replay against the research's own code\n")
+    report.append("## The replay against the research's own code (the research's rules, its stake)\n")
     report.append(md(rows))
+
+    # the live rules: the research's bets less the same-team cuts, nothing else
+    live_dec = replay(data, research_games)
+    live_ok = True
+    graded_best: dict[str, pd.DataFrame] = {}
+    cut_rows = []
+    for m in R.MODELS:
+        lv = graded(live_dec[m], played, m, posted=True)
+        rs = graded(best[m], played, m, posted=True)
+        c = compare(lv, rs)
+        ok = not (c["only_card"] or c["different"]) and (m in CUT_MODELS or not c["only_research"])
+        live_ok &= ok
+        graded_best[m] = lv
+        cut = rs[rs.game_id.isin(c["only_research"])]
+        cut_rows.append({"model": m, "research rule": len(rs), "units": round(float(rs.units.sum()), 2),
+                         "live rule": len(lv), "units ": round(float(lv.units.sum()), 2),
+                         "cut": len(cut), "cut units": round(float(cut.units.sum()), 2),
+                         "not a research bet": len(c["only_card"]) + len(c["different"])})
+        art["models"].setdefault(m, {})["research_rule_replay"] = {
+            "bets": int(len(rs)), "units": round(float(rs.units.sum()), 2),
+            "cut_bets": int(len(cut)), "cut_units": round(float(cut.units.sum()), 2)}
+        if not ok:
+            report.append(f"LIVE IS NOT THE RESEARCH LESS THE CUT {m}: "
+                          f"{json.dumps({k: c[k][:20] for k in ('only_card', 'only_research', 'different')})}")
+    report.append("\n## The live rules: the research's bets less the same-team cuts (posted stake)\n")
+    report.append(md(cut_rows))
     print("\n".join(report), flush=True)
     report = []
 
@@ -319,8 +359,9 @@ def build(write: bool = False) -> dict:
         per_season = float(np.mean([len(x) for x in full])) if full else None
         per_week = ([len(x) / ((pd.to_datetime(x.game_date).max() - pd.to_datetime(x.game_date).min()).days / 7 + 1)
                      for x in full])
-        later = graded(later_dec.get(m, []), played, m) if len(later_games) else live.iloc[0:0]
+        later = graded(later_dec.get(m, []), played, m, posted=True) if len(later_games) else live.iloc[0:0]
         art["models"][m] = {
+            **art["models"].get(m, {}),
             "params": PARAMS[m], "market": R.MARKET[m],
             "uplift": round(up, 6), "uplift_bets": n_up, "uplift_by_season": by_season,
             "ev_min": round(float(live.ev.min()), 6), "edge_min": round(float(live.edge.min()), 6),
@@ -343,6 +384,8 @@ def build(write: bool = False) -> dict:
     report.append(f"\nGames after the research's state ({len(later_games)}): " + ", ".join(
         f"{m}: {art['models'][m]['after_research_state'].get('bets', 0)} bet(s)" for m in R.MODELS))
     art["replay_matches_research"] = bool(all_ok)
+    art["live_is_research_less_the_cuts"] = bool(live_ok)
+    all_ok &= live_ok
     text = "\n".join(report)
     print(text)
     if write:
