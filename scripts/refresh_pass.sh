@@ -47,11 +47,14 @@ LEASE_DIR="$(mktemp -d)"
 python -m tracking.scoring_lease --kind refresh \
   --ready "$LEASE_DIR/ready" --release "$LEASE_DIR/release" &
 LEASE_PID=$!
-# par_wait uses a bare `wait`, which waits for every child still in the
-# shell's job table. The helper stays up until the EXIT trap, so leaving
-# it there deadlocks the first parallel group. disown drops it from that
-# table. `wait $LEASE_PID` can no longer see it; the release file is how
-# the trap asks it to unlock.
+# par_wait waits only the pids par() recorded, so this helper is not one
+# of them. It stays up until the EXIT trap. Leaving it in the job table
+# would still matter for a bare `wait`, which is why it is disowned: a
+# bare `wait` deadlocks the first parallel group on it, and on bash 5.3.9
+# (Ubuntu 26.04, the GitHub runner; the fix is bash53-010, which that
+# bash does not have) a bare `wait` loops forever once any job pid is not
+# a child of this shell. `wait $LEASE_PID` can no longer see it; the
+# release file is how the trap asks it to unlock.
 disown "$LEASE_PID" 2>/dev/null || true
 _lease_i=0
 while [ "$_lease_i" -lt 6600 ]; do
@@ -84,6 +87,10 @@ RUN_ID="$(python -m tracking.run_ledger start --kind "$MODE" 2>/dev/null | tail 
 
 FAILED_STEPS=()
 STEPS_TOTAL=0
+# Pids started by par() in the group that is still open. par_wait waits
+# for these and then clears the list. A bare `wait` is not used: it also
+# waits for every other job in this shell.
+PAR_PIDS=()
 
 step() {
   if [ "${DRAIN:-0}" = 1 ]; then
@@ -127,24 +134,52 @@ par() {
   fi
   STEPS_TOTAL=$((STEPS_TOTAL + 1))
   (
+    # The subshell inherits this shell's traps and job table. The step
+    # does not use either. Drop them so an inherited EXIT trap cannot
+    # wait on jobs that are not this subshell's children.
+    trap - EXIT TERM
+    disown -a 2>/dev/null || true
     if ! python run_pipeline.py --step "$1"; then
       echo "WARN: step '$1' failed - continuing with the rest of the pass" >&2
       : > "$PAR_DIR/$1.failed"
     fi
   ) &
+  PAR_PIDS+=("$!")
 }
 
 par_wait() {
   # A SIGTERM trap makes `wait` return immediately (status 128+signal)
-  # while the background steps are still running. Loop until it returns
-  # a child status, which is when the group has actually finished.
-  local rc=0
-  while true; do
-    wait
-    rc=$?
-    if [ "$rc" -lt 128 ]; then
-      break
-    fi
+  # while that step is still running. Wait only the pids this group
+  # started, and retry a pid only while it is still our child.
+  local pid rc ppid
+  local pids=()
+  if [ -n "${PAR_PIDS+x}" ]; then
+    pids=("${PAR_PIDS[@]+"${PAR_PIDS[@]}"}")
+    PAR_PIDS=()
+  fi
+  for pid in "${pids[@]}"; do
+    [ -n "$pid" ] || continue
+    while true; do
+      wait "$pid" 2>/dev/null
+      rc=$?
+      # 0: the step finished. 127: this pid is not our child (already
+      # reaped, or never was). Either way it is not still running here.
+      if [ "$rc" -lt 128 ]; then
+        break
+      fi
+      if [ -r "/proc/$pid/status" ]; then
+        ppid="$(awk '/^PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || true)"
+        if [ -n "$ppid" ] && [ "$ppid" != "$$" ]; then
+          break
+        fi
+      fi
+      if ! kill -0 "$pid" 2>/dev/null; then
+        break
+      fi
+      # The signal interrupted the wait and the step is still our child.
+      # Sleep so a wait that comes back at once cannot spin.
+      sleep 0.05
+    done
   done
   # Collect what the subshells could not append themselves.
   for f in "$PAR_DIR"/*.failed; do

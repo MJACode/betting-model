@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, pytest-subset: par_wait waits only its own pids (bash 5.3.9 bare wait loop); UFC recap harness already matches the retired catalog |
 | 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, EuroLeague Moneyline, Spreads and First Half pages say the three bet the same team (mike: "Yes, add it"); scheduler tests dial the .env database, 4 s per refused connect, suite stuck 14 h (#1456) |
 | 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, the props table rewritten online with pg_repack: data 26.05 GB to 10.73 GB, database 93.34 GB to 78.01 GB, 37.19 million rows checked by count and checksum, guard and helper script saved |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, EuroLeague moneyline and first half bet only the home underdog getting points (mike: "Yes, both"); build replays research and live rules, posted stake |
