@@ -1,14 +1,14 @@
 """Where the tennis build stands: every collector's progress, read from
 Supabase. Read-only.
 
-    python C:/Users/micha/tennis_research/run_with_db.py scripts.tennis_progress
+    python C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/run_with_db.py scripts.tennis_progress
 """
 from __future__ import annotations
 
 import json
 from datetime import date, datetime, timedelta, timezone
 
-WINDOWS = r"C:\Users\micha\tennis_research\coverage_windows.json"
+WINDOWS = r"C:\Users\micha\Documents\betting-model\data\local\research\tennis_research\coverage_windows.json"
 PLAN_CREDITS = 2_292_240
 FLOOR = 2_099_550          # mike, 2026-11-13: "lower the floor" (no reserve days)
 

@@ -11,7 +11,7 @@ level, Finals; women: Grand Slams, 1000s, 500s, 250s, Finals), from 2015,
 walkovers out. WRITES nothing.
 
     python -m scripts.tennis_retirement_rates
-    python -m scripts.tennis_retirement_rates --spool C:/Users/micha/tennis_research/spool
+    python -m scripts.tennis_retirement_rates --spool C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/spool
 """
 from __future__ import annotations
 

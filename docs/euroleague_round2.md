@@ -1,7 +1,7 @@
 # EuroLeague research, round 2 (2026-11-13)
 
 Run by a read-only research agent on the local parquet cache
-(`C:\Users\micha\euroleague_research\cache`). No paid call, no database, no
+(`C:\Users\micha\Documents\betting-model\data\local\research\euroleague_research\cache`). No paid call, no database, no
 API key, no .env (none exists in the checkout: `ls .env` -> "No such file").
 Scripts: `scripts/euroleague_research/r3_*.py` in `bm-euroleague-fix`. Every
 table below names the script that printed it.

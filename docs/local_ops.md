@@ -686,7 +686,7 @@ minute halves it back. Five refusals in a row back the feed off two minutes
 minutes after sign-in. A start while a run is going is ignored
 (`MultipleInstances = IgnoreNew`), and a feed already running holds
 127.0.0.1:47231, so a second one exits at once. The launcher puts its own
-worktree, `C:\Users\micha\Documents\bm-live-feed`, on origin/master before
+worktree, `C:\Users\micha\Documents\betting-model\.claude\feeds\dk-live-board`, on origin/master before
 each start, so what runs is always master and never another session's branch.
 Until the feed is merged and its tables exist it logs one line and exits. Like
 the backup task, it runs only while mike is signed in to Windows. Log:
@@ -715,7 +715,7 @@ The task `BettingModel\TennisFeeds` runs
 `betting_local_copies\bin\tennis_feeds_run.ps1` (in the repo as
 `scripts/tennis_feeds_run.ps1`): one pass of each collector, each with a
 20-minute limit. The launcher puts its own worktree,
-`C:\Users\micha\Documents\bm-tennis-feed`, on origin/master before each run,
+`C:\Users\micha\Documents\betting-model\.claude\feeds\tennis`, on origin/master before each run,
 and reads `DATABASE_URL` from the main checkout's `.env` for these processes
 only. Until tennis is merged it logs one line and exits. Each collector exits
 at once when another copy of itself is running, so a long-running loop
@@ -728,6 +728,29 @@ schtasks /Query /TN "BettingModel\TennisFeeds" /V /FO LIST
 schtasks /Run /TN "BettingModel\TennisFeeds"
 schtasks /Delete /TN "BettingModel\TennisFeeds" /F
 ```
+
+**Two long-running loops sit beside the task** (started by hand 2026-11-13,
+moved 2026-11-16): the Pinnacle logger and the DraftKings board reader, every
+30 minutes until 2026-12-31, from the tennis feed copy. While they run, the
+task's Pinnacle and DraftKings passes print `already_running` and exit, which
+is the guard working. Start either again with
+`betting_local_copies\bin\tennis_loop_pin.cmd` or `tennis_loop_dkp.cmd` (in the
+repo as `scripts/tennis_loop_*.cmd`). **Never start them through a wrapper
+whose command line names the module**: each reader treats ANY other process
+naming it as a second copy, so a `cmd /c "... tennis_dk_probe ..."` wrapper
+makes the reader refuse to start. The launcher files avoid the name on purpose.
+Logs: `data\local\research\tennis_research\logs\{pinnacle,dk2}.{out,err}`.
+
+## Where everything on this PC lives (2026-11-16, CLAUDE.md §7)
+
+| What | Where |
+|---|---|
+| The project | `Documents\betting-model` |
+| A session's copy of the project | `Documents\betting-model\.claude\worktrees\<name>` — removed once its work is merged or pushed |
+| The always-on feeds' copies | `Documents\betting-model\.claude\feeds\{dk-live-board,tennis}` — never removed |
+| Research data (spools, caches, probes) | `Documents\betting-model\data\local\research\<name>` |
+| Logs, and the loose files gathered on 2026-11-16 | `Documents\betting-model\logs\` (`tidy_2026-11-16\MOVED.txt` lists where each came from) |
+| The PC copy of Supabase and GitHub | `Documents\betting_local_copies` — outside the project on purpose |
 
 ## Diagnosing a DATABASE_URL that will not authenticate
 
