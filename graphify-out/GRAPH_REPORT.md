@@ -1,7 +1,7 @@
 # Graph Report - scratch-pg-merge  (2026-11-17)
 
 ## Corpus Check
-- 2644 files · ~4,814,545 words
+- 2644 files · ~4,814,569 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 22 file(s) not represented in the graph (top: (none) 8, .example 3, .css 3)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `38095531`
+- Built from commit: `6a4f2998`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -5885,7 +5885,7 @@ Nodes (15): backfill_ufc_stats(), _build_ufc_game_id(), _fetch_event(), _fetch_e
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Freeze tracking (added 2026-11-06)` connect `gate` to `test_global_ev_floor.py`, `handoffLog.ts`, `ref_react`?**
-  _High betweenness centrality (0.078) - this node is a cross-community bridge._
+  _High betweenness centrality (0.079) - this node is a cross-community bridge._
 - **Are the 5 inferred relationships involving `get_connection()` (e.g. with `main()` and `main()`) actually correct?**
   _`get_connection()` has 5 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `ExpoModulesCore`, `UIKit`, `expo-apple-authentication` to the rest of the system?**
@@ -5893,7 +5893,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `schema_is_current` be split into smaller, more focused modules?**
   _Cohesion score 0.009757524870874997 - nodes in this community are weakly interconnected._
 - **Why does `Modal()` connect `ref_react` to `Mobile pick cards, market formatting`, `gate`, `ParlayScreen.tsx`, `SettingsScreen.tsx`, `queries.ts`, `PerformanceScreen.tsx`, `linesBoard.ts`, `Mobile stats board`, `byomRecord.ts`?**
-  _High betweenness centrality (0.078) - this node is a cross-community bridge._
+  _High betweenness centrality (0.079) - this node is a cross-community bridge._
 - **Should `Mobile player stats page` be split into smaller, more focused modules?**
   _Cohesion score 0.016687319289549772 - nodes in this community are weakly interconnected._
 
