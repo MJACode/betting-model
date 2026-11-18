@@ -1,7 +1,7 @@
 """Round 2 (full game): the quote clock and structure checks."""
 import pandas as pd, numpy as np
 from pathlib import Path
-C = Path(r"C:\Users\micha\euroleague_research\cache")
+C = Path(r"C:\Users\micha\Documents\betting-model\data\local\research\euroleague_research\cache")
 q = pd.read_parquet(C / "fullgame_quotes.parquet")
 g = pd.read_parquet(C / "games.parquet")
 g["tip"] = pd.to_datetime(g.commence_time, utc=True)

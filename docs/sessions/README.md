@@ -30,6 +30,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, header buttons 4pt low in the iOS 26 glass bubble (RNS 4.16 does not center custom views); header items 36pt tall |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, PR CI pytest-subset red on every PR: tests/_pg.py looked only in postgresql/16, runner now installs 18; finder is version-agnostic, pinned by test_pg_finder.py |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, BYOM bet list shows the actual stat / final score; no 0.5 line on yardage markets |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Everything on the PC moved under the project folder: 37 copies removed, 2 feeds and 2 tennis loops moved to .claude/feeds, research to data/local/research, §7 rule (#1425) |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Back button: chevron only on every pushed screen (iOS 26 glass bubble hugged chevron + "Back"); title room 162 → 254pt |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Dark mode (brand navy) + Settings > Appearance (System / Light / Dark, Light default); applies at next open, no reloadAsync |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, comped accounts could not sign in: NULL email_change made /otp 500; 9 rows set to '', grant scripts + guard test fixed |

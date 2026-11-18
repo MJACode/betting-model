@@ -24,8 +24,8 @@ twice, the second time after mike's yes in chat. It runs from mike's own
 terminal (or from a session once his settings allow
 "Bash(python -m scripts.tennis_dk_probe:*)"):
 
-    python C:/Users/micha/tennis_research/run_with_db.py scripts.tennis_dk_probe \\
-        --out C:/Users/micha/tennis_research/dk_probe --log-until 2026-12-31T00:00:00
+    python C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/run_with_db.py scripts.tennis_dk_probe \\
+        --out C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/dk_probe --log-until 2026-12-31T00:00:00
 """
 from __future__ import annotations
 
@@ -291,7 +291,7 @@ def main(argv=None) -> int:
     ap.add_argument("--no-store", action="store_true", help="read and save raw only")
     ap.add_argument("--detach", action="store_true",
                     help="start the reader as its own process and return at once")
-    ap.add_argument("--log-dir", type=Path, default=Path(r"C:\Users\micha\tennis_research\logs"))
+    ap.add_argument("--log-dir", type=Path, default=Path(r"C:\Users\micha\Documents\betting-model\data\local\research\tennis_research\logs"))
     import os
     import sys
     raw_args = list(sys.argv[1:] if argv is None else argv)
