@@ -101,6 +101,19 @@ export const TABLE_ROWS = 8;
  */
 export const AT_PICK_MAX_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * The last game date whose prop rows went to the archive (#1345): a prop row
+ * that only repeated the price before it was moved out for games through
+ * 2026-11-12, on 11-16 and 11-17, and the archive tool refuses prop moves
+ * since 11-18. On those games a price that stood for hours has no row near the
+ * pick, and the row before it is still the price in force (every change is
+ * kept), so AT_PICK_MAX_MS does not apply when the book priced the prop again
+ * after the pick. Measured 2026-11-18: 4,647 prop picks lost "At pick" that
+ * way, every one with a later row; 4,613 hold the locked number (#1458). Move
+ * this date if prop rows are ever archived again.
+ */
+export const PROP_ARCHIVED_THROUGH = '2026-11-12';
+
 const CLV_POINTER = 'See Closing Line Value for how your number compared to the close.';
 
 const dayFmt = new Intl.DateTimeFormat('en-US', {
@@ -167,15 +180,14 @@ export function lineMovementView(
   // is the locked number and recent.
   const pickPrice = hist.fromPick && !hist.afterStart;
   // Older than AT_PICK_MAX_MS reads as a feed that stopped, except on a prop
-  // the book priced again after the pick. Since 2026-11-17 a prop row that
-  // only repeats the price before it is archived (#1345), so a price that
-  // stood for hours has no row near the pick, and the row before it is still
-  // the price in force: every change is kept. 4,647 prop picks lost "At pick"
-  // that way, and every one has a later row (#1458).
+  // of an archived game that the book priced again after the pick, even after
+  // the start (PROP_ARCHIVED_THROUGH).
+  const gameDate = pick.game_date ?? '';
+  const archivedProp = isProp && gameDate !== '' && gameDate <= PROP_ARCHIVED_THROUGH;
   const stale =
     pickPrice &&
     instant(pick.created_at) - instant(first.snapshot_at) > AT_PICK_MAX_MS &&
-    !(isProp && hist.since > 0);
+    !(archivedProp && hist.later > 0);
   const pickRowIsLock = pickPrice && !stale && snapshotMatchesLock(pick, first, market);
   // The only row is the book's price before the pick: nothing to call steady or moved.
   const nothingSince = pickPrice && hist.since === 0;

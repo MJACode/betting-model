@@ -841,6 +841,15 @@ if (v.note.includes('from Sat, 8/22')) throw new Error(`dated as stale: ${v.note
 // Nothing after the pick: a price six hours old is still not called the pick's.
 const alone = view(CARTER, rows.slice(0, 1), 'batter_walks', '2026-08-23T05:00:00Z', true);
 if (alone.rows[0].label === 'At pick') throw new Error(text(alone));
+// Pick 3337170's shape: the pick's game time is before the book's next row, so the
+// card's window holds nothing after the pick, but the feed ran on: still "At pick".
+const early = view({ ...CARTER, game_time: '2026-08-22T21:00:00+00:00' }, rows, 'batter_walks', '2026-08-23T05:00:00Z', true);
+eq([early.rows[0].label, early.verdict.label], ['At pick', 'No new price from DraftKings between your pick and game time'], 'next row after the start');
+// After the last archived game date nothing was thinned: an old price is a feed gap.
+const unarchived = view({ ...CARTER, game_date: '2026-11-15', created_at: '2026-11-15 19:20:36+00', game_time: '2026-11-15T23:06:00+00:00' },
+  [pr('2026-11-15T07:17:49-05:00', 0.5, 122, -169), pr('2026-11-15T17:00:56-05:00', 0.5, 118, -163)],
+  'batter_walks', '2026-11-16T05:00:00Z', true);
+if (unarchived.rows[0].label === 'At pick') throw new Error(`a feed gap read as the pick's price: ${text(unarchived)}`);
 // A game line with the same shape keeps the six-hour rule (its repeats are not archived).
 const OLD = {
   pick_id: 3434426, game_id: 'NCAAF_2026-10-24_X_Y', model_id: 'ncaaf_over_under', sport: 'NCAAF', game_date: '2026-10-24',
