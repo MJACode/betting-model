@@ -35,7 +35,8 @@ tip (decision point D, H.per_event_times), 2024-25 and 2025-26 pooled:
               through the shape; the best deciding offer at EV >= .02/.04/.06
               (q1, h1 x over, under x same book, consensus).
   FAMILY B    the live home team-total rule (models/nba_team_total_luck: the
-              home part of the shooting-luck gap <= -GAP_CUT, under, LIVE_MIN_GAMES)
+              home part of the shooting-luck gap <= -GAP_CUT, under, one game
+              this season: the live rule when this search was graded)
               on the HOME first-half and first-quarter team totals; the period's
               share scales the gap and the cut alike, so it moves no bet.
   SETTLEMENT  the team's own first-quarter or first-half points (H.with_periods,
@@ -117,7 +118,11 @@ B_LABEL = {"q1": "q1_home_team_total", "h1": "h1_home_team_total"}
 B_SIDE, B_CUT = tt.SIDE, float(tt.GAP_CUT)  # imported, never typed: the live rule
 B_EDGES = (1.0, 2.0, 3.0, 4.0)             # the fifth search's F8 bands: 1-2, 2-3, 3-4, 4+
 B_CUT_INDEX = B_EDGES.index(B_CUT)
-B_MIN_GAMES = tl.LIVE_MIN_GAMES            # the live rule: one game this season (mike, 2026-11-02)
+# The live rule ON THE DAY THIS SEARCH WAS GRADED (2026-11-04): one game this season (mike,
+# 2026-11-02). Typed, not imported: the live models went back to the 10-game wait on 2026-11-18
+# (models/nba_total_luck.LIVE_MIN_GAMES), and a re-run of this closed search must still grade the
+# population it registered (docs/nba_search_q1tt.md).
+B_MIN_GAMES = 1
 EARLY_GAMES = tl.MIN_GAMES                 # the graded evidence's 10: bets inside it are counted beside
 EXPECTED_CELLS = {FAM_SAME: 12, FAM_CONS: 12, FAM_B: 2}
 MIN_SHAPE_ROWS = 600                       # two teams a game, 300 games: the live team-total model's bar
@@ -723,7 +728,7 @@ def build(games: pd.DataFrame, games_p: pd.DataFrame, close: pd.DataFrame, pe: p
         out["periods"][p]["cand_b"] = tl.side_strength(nb, signal)
         out["periods"][p]["share"] = {int(s): period_share(games_p, p, int(s)) for s in graded}
     pe_live = pe[pe["market"].isin(LIVE_MARKETS) & pe["season"].isin(list(graded))].reset_index(drop=True)
-    live = live_games(pe_live, tl.f4_projections(gr, tb, min_games=tl.LIVE_MIN_GAMES))
+    live = live_games(pe_live, tl.f4_projections(gr, tb, min_games=B_MIN_GAMES))
     out.update({"games": games, "games_p": games_p, "times": times, "times_pe": times_pe, "pricing": pricing,
                 "shapes": shapes, "resid": resid, "ladders": ladders, "q_tt": q_tt, "pe4": pe4,
                 "pe4_raw": pe4_raw, "q_all": q_all, "vis_ref": vis_ref, "proj": proj, "signal": signal,

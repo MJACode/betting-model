@@ -14,6 +14,11 @@ grade_cap.load), each reproducing docs/thresholds.md to the unit:
   nba_prop_projection bets_card_arriving5.parquet (the 5 books the live feed returns), assists
                       overs removed, graded rows only: 66,588 bets, +2,392.8 units
 
+THREES OVERS ARE STILL IN THE PROJECTION LIST (below: only assists overs are removed), though the
+model stopped betting them on 2026-11-18. That is deliberate: the stored table is the one the
+2026-11-18 card replay ranked with (models/nba_prop_rank.py, "THE PROJECTION TABLE STILL HOLDS").
+Dropping them here changes how the two models share a night and needs its own replay first.
+
     python -m scripts.nba_prop_rank_table
     python -m scripts.nba_prop_rank_table --market <parquet> --projection <parquet>
 """
