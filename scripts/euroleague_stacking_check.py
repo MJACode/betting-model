@@ -35,7 +35,8 @@ RESEARCH_PARAMS: the rules as they ran until the same-team cuts of
 2026-11-17), which is what the 2026-11-17 result measured; --live replays the
 build's PARAMS, the cuts included.
 
-Reads only the local research cache (~/euroleague_research/cache, a copy of
+Reads only the local research cache (scripts/euroleague_research/_paths.py:
+the main checkout's data/local/research/euroleague_research/cache, a copy of
 Supabase; scripts/euroleague_research/cache*.py rebuild it) and writes one
 derived file beside it (stacking_bets.parquet), regenerable from the cache.
 No database, no network. The 2026-11-17 run and its result:

@@ -19,7 +19,8 @@ The research read the cache as it stood on 2026-11-13 (games through
 replayed separately and reported, never mixed into the comparison.
 
 Reads the local research cache only (EUROLEAGUE_RESEARCH_DIR, default
-~/euroleague_research; scripts/euroleague_research/_paths.py): no database, no
+the main checkout's data/local/research/euroleague_research;
+scripts/euroleague_research/_paths.py): no database, no
 network, no key.
 
     python -m scripts.euroleague_pregame_build              # replay and print
