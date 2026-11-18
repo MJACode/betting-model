@@ -127,7 +127,7 @@ def test_each_side_models_page_says_the_other_two_bet_the_same_team():
         body = _page_body(meta, model)
         others = [_long_label(meta, m).removeprefix("EuroLeague ") for m in SIDE_MODELS if m != model]
         assert f"The EuroLeague {others[0]} and {others[1]} models also bet only home underdogs. " in body, model
-        assert "So when more than one of the three bets a game, every bet is on the same team. " in body, model
+        assert "So when two or all three of these models bet the same game, every bet is on the same team. " in body, model
     # the totals model bets no side, so it carries no such line
     assert "same team" not in _page_body(meta, "euroleague_q1_club_share_total")
 

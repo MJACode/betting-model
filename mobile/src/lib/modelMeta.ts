@@ -1330,13 +1330,13 @@ const MINUTES_BEFORE_TIP_BODY: Readonly<Record<string, string>> = {
     'It bets the home team’s moneyline only when the home team is the underdog on the full-game spread. ' +
     'It never lays more than -200. ' +
     'The EuroLeague Spreads and First Half Moneyline models also bet only home underdogs. ' +
-    'So when more than one of the three bets a game, every bet is on the same team. ' +
+    'So when two or all three of these models bet the same game, every bet is on the same team. ' +
     'A posted bet is never re-priced: it stays at the price it posted at.',
   euroleague_home_dog_spread:
     EUROLEAGUE_CHECKED +
-    'It bets the home team against the full-game spread when the home team is the underdog. ' +
+    'It bets the home team against the full-game spread only when the home team is the underdog. ' +
     'The EuroLeague Moneyline and First Half Moneyline models also bet only home underdogs. ' +
-    'So when more than one of the three bets a game, every bet is on the same team. ' +
+    'So when two or all three of these models bet the same game, every bet is on the same team. ' +
     'A posted bet is never re-priced: it stays at the line and price it posted at.',
   euroleague_h1_dog_ml:
     EUROLEAGUE_CHECKED +
@@ -1344,7 +1344,7 @@ const MINUTES_BEFORE_TIP_BODY: Readonly<Record<string, string>> = {
     'and on the full-game spread. The bet settles on the first half’s score alone, and a ' +
     'tied first half returns the stake. ' +
     'The EuroLeague Moneyline and Spreads models also bet only home underdogs. ' +
-    'So when more than one of the three bets a game, every bet is on the same team. ' +
+    'So when two or all three of these models bet the same game, every bet is on the same team. ' +
     'A posted bet is never re-priced: it stays at the price it posted at.',
   euroleague_q1_club_share_total:
     EUROLEAGUE_CHECKED +
