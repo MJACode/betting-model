@@ -105,9 +105,9 @@ FIXED BEFORE ANY RESULT WAS READ (none was changed after):
                the most units on all earlier seasons (none positive: no bets that
                season), applied to that season; the applied seasons totalled
 
-    python -m scripts.tennis_serve_study --cache C:/Users/micha/tennis_research/cache \\
-        --spool C:/Users/micha/tennis_research/spool \\
-        --save C:/Users/micha/tennis_research/cache/serve_candidates.parquet
+    python -m scripts.tennis_serve_study --cache C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache \\
+        --spool C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/spool \\
+        --save C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache/serve_candidates.parquet
     python -m scripts.tennis_serve_study --self-test
 """
 from __future__ import annotations

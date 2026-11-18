@@ -303,7 +303,7 @@ so it is not read later as a broken bar.
 ## 7. What the lab writes, and how to run it
 
 ```
-python C:/Users/micha/AppData/Local/Temp/q1trend/run_with_db.py scripts.nba_s_postseason --pull
+python C:/Users/micha/Documents/betting-model/data/local/research/q1trend/run_with_db.py scripts.nba_s_postseason --pull
 NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -m scripts.nba_s_postseason --smoke
 NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<dir> NBA_GAME2_BETS=<dir>/bets NBA_RESEARCH_CACHE=<cache> \
     PYTHONPATH=. python -m scripts.nba_s_postseason --full

@@ -13,7 +13,7 @@
   while another copy of itself runs, so a long-running loop and this task never
   both poll a site.
 
-  The passes run from their own worktree, C:\Users\micha\Documents\bm-tennis-feed,
+  The passes run from their own worktree, C:\Users\micha\Documents\betting-model\.claude\feeds\tennis,
   put on origin/master before each run, so a merged fix reaches the next run
   and no other session's branch is ever what runs. DATABASE_URL is read from
   the main checkout's .env for these processes only.
@@ -21,7 +21,7 @@
 param(
     [string]$Root = "C:\Users\micha\Documents\betting_local_copies",
     [string]$Repo = "C:\Users\micha\documents\betting-model",
-    [string]$Feed = "C:\Users\micha\Documents\bm-tennis-feed",
+    [string]$Feed = "C:\Users\micha\Documents\betting-model\.claude\feeds\tennis",
     [int]$PassTimeoutSec = 1200
 )
 $ErrorActionPreference = "Continue"

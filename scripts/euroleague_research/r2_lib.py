@@ -2,7 +2,7 @@
 
 FROZEN BEFORE ANY RESULT WAS READ (2026-11-13):
 
-  Data      the local parquet cache only (C:\\Users\\micha\\euroleague_research\\cache):
+  Data      the local parquet cache only (C:\\Users\\micha\\Documents\\betting-model\\data\\local\\research\\euroleague_research\\cache):
             games.parquet, fullgame_quotes.parquet. No database, no API.
   Markets   h2h, spreads, totals (full game, overtime included).
   Books     decidable: draftkings, fanduel, betmgm, betrivers, fanatics.
@@ -92,7 +92,7 @@ sys.path.insert(0, str(HERE.parent.parent))   # the repo, for models.ncaab_margi
 
 import r1_lib  # noqa: E402  (imp, dec, stake, summary, bh)
 
-CACHE = Path(r"C:\Users\micha\euroleague_research\cache")
+CACHE = Path(r"C:\Users\micha\Documents\betting-model\data\local\research\euroleague_research\cache")
 DECIDABLE = ["draftkings", "fanduel", "betmgm", "betrivers", "fanatics"]
 SHARP = "pinnacle"
 REFS = ["bovada", "marathonbet", "unibet", "paddypower"]

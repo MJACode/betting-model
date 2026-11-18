@@ -46,7 +46,7 @@ tip (decision point D, H.per_event_times), 2024-25 and 2025-26 pooled:
               the same date, same period and team role, added to that game's own
               centre; prices stay. B: the home part moved the same way.
 
-    PYTHONPATH=. python C:/Users/micha/AppData/Local/Temp/q1trend/run_with_db.py scripts.nba_s_q1tt --pull
+    PYTHONPATH=. python C:/Users/micha/Documents/betting-model/data/local/research/q1trend/run_with_db.py scripts.nba_s_q1tt --pull
     NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -m scripts.nba_s_q1tt --smoke
     NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> NBA_GAME2_BETS=<folder>/bets \
         NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -m scripts.nba_s_q1tt --full

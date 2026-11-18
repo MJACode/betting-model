@@ -1,6 +1,6 @@
 # EuroLeague halftime betting — round 4 (2026-11-13)
 
-Run on the local parquet cache only (`C:\Users\micha\euroleague_research\cache`).
+Run on the local parquet cache only (`C:\Users\micha\Documents\betting-model\data\local\research\euroleague_research\cache`).
 No paid call, no database read, no repo file edited. Scripts:
 `C:\Users\micha\documents\bm-euroleague-fix\scripts\euroleague_research\r4_*.py`.
 Units only: each bet is sized to win 1 unit, with risk capped at 3, graded at the quoted price; a push returns the stake.

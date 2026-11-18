@@ -476,7 +476,7 @@ a half weeks of 2026-27 played, that is expected for every 2026-27 cell. For eac
 ## 10. What the lab writes, and how it runs
 
 - `--pull`: section 1.1's read, once, into the scratch folder. `--pull-held`: section 3.1's read
-  of the held seasons' play-by-play. Both run through `%TEMP%/q1trend/run_with_db.py`, which
+  of the held seasons' play-by-play. Both run through `C:/Users/micha/Documents/betting-model/data/local/research/q1trend/run_with_db.py`, which
   supplies only `DATABASE_URL`; `--full` refuses until both have run.
 - `--smoke`: synthetic checks (each rule watched failing), then counts on the real data: no result
   of any bet. Every grade inside it reads scores replaced by random numbers, and a guard stops the
@@ -491,8 +491,8 @@ a half weeks of 2026-27 played, that is expected for every 2026-27 cell. For eac
   `S2_lead_live27` (point `Q4-last6`).
 
 ```
-PYTHONPATH=. python C:/Users/micha/AppData/Local/Temp/q1trend/run_with_db.py scripts.nba_s_ingame27 --pull
-PYTHONPATH=. python C:/Users/micha/AppData/Local/Temp/q1trend/run_with_db.py scripts.nba_s_ingame27 --pull-held
+PYTHONPATH=. python C:/Users/micha/Documents/betting-model/data/local/research/q1trend/run_with_db.py scripts.nba_s_ingame27 --pull
+PYTHONPATH=. python C:/Users/micha/Documents/betting-model/data/local/research/q1trend/run_with_db.py scripts.nba_s_ingame27 --pull-held
 NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -m scripts.nba_s_ingame27 --smoke
 NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> NBA_GAME2_BETS=<folder>/bets NBA_RESEARCH_CACHE=<cache> \
     PYTHONPATH=. python -m scripts.nba_s_ingame27 --full
