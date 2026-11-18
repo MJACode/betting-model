@@ -32,6 +32,18 @@ from live_model.pick_writer import (  # noqa: E402
 )
 
 
+@pytest.fixture(autouse=True)
+def _the_live_notifiers_send_nothing(monkeypatch):
+    """A BET written here without its own `announce` goes to the default
+    announcer, which calls both live notifiers, and the push notifier opens a
+    database connection (#1396). Every test here gets notifiers that do
+    nothing. The test of the default announcer sets its own over these."""
+    from tracking import discord_notifier as dn
+    from tracking import push_notifier as pn
+    monkeypatch.setattr(pn, "notify_live_signals", lambda *a, **k: None)
+    monkeypatch.setattr(dn, "notify_discord_live", lambda *a, **k: None)
+
+
 class _Decision:
     """The fields pick_writer reads off a real executor Decision."""
 

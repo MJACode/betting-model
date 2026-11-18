@@ -10,6 +10,16 @@ import pytest
 # Add project root to sys.path so all modules resolve correctly
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# The database guard, installed BEFORE anything imports data.db. data.db loads
+# the checkout's .env, which in the main checkout names production, so a test
+# that reaches a connection without mocking it would be talking to production
+# (#1396 counted 329 such connections in one run). Any connection to a host
+# off this machine is refused without dialling, and the run's summary counts
+# them (pytest_terminal_summary below). The scratch Postgres in tests/_pg.py
+# is on 127.0.0.1 and still gets through. Child processes are not covered.
+from tests import _db_guard                                          # noqa: E402
+_db_guard.install()
+
 # The call logger, installed BEFORE anything imports config. config.py installs
 # it in every process (so a paid call is logged however the process started),
 # and its writer would send each recorded call to DATABASE_URL -- which on a
@@ -55,6 +65,48 @@ def _refuse_real_odds_api_calls() -> None:
 _refuse_real_odds_api_calls()
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "real_heartbeat: run the real tracking.job_heartbeat.beat instead of "
+        "conftest's stub (for tests of the heartbeat itself)")
+
+
+def pytest_terminal_summary(terminalreporter):
+    for line in _db_guard.summary_lines():
+        terminalreporter.write_line(line)
+
+
+@pytest.fixture(autouse=True)
+def _heartbeats_write_nothing(request, monkeypatch):
+    """Every heartbeat a test triggers writes nothing (#1455, #1456).
+
+    Building the scheduler registers every watched job, and each registration
+    calls tracking/job_heartbeat.beat (through `seed` and `mark_disabled`),
+    which opens a database connection: 32 per build, measured 2026-11-18. From
+    the main checkout each one wrote a heartbeat row to production. With no
+    .env each one dialled localhost:5432 and took 4.1 s to be refused, so one
+    scheduler-building test took about 130 s.
+
+    `seed`, `mark_disabled`, the scheduler's wrapper and the live loops all
+    reach `beat` through the module at call time, so this one patch covers
+    them. The stub is wrapped, so inspect.getsource still reads the real
+    function. A test of the heartbeat itself is marked
+    `@pytest.mark.real_heartbeat` and gets the real code.
+    tests/test_no_test_reaches_a_database.py holds both to account.
+    """
+    if request.node.get_closest_marker("real_heartbeat"):
+        return
+    import functools
+    from tracking import job_heartbeat
+
+    @functools.wraps(job_heartbeat.beat)
+    def beat(job_id, status="ok", detail=""):
+        return None
+
+    monkeypatch.setattr(job_heartbeat, "beat", beat)
+
+
 @pytest.fixture
 def db_conn():
     """In-memory SQLite database with the full schema applied."""
@@ -93,6 +145,12 @@ def _platform_gates_at_identity(monkeypatch):
     #     monkeypatch.setattr(config, "MODEL_OWN_EV_FLOOR", {})
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", -1.0)
     monkeypatch.setattr(sc, "_CAL_CACHE", {})
+    # The leftover auto-pause list, read from model_auto_pauses once per
+    # process and cached. Unset, the first test in a run to ask opened a
+    # database connection for it (#1396), whichever test that happened to be.
+    # Empty is what it reads when the table cannot be read. A test that wants
+    # a model auto-paused patches sc._auto_paused_models, as several do.
+    monkeypatch.setattr(sc, "_AUTO_PAUSE_CACHE", set())
 
 
 @pytest.fixture(autouse=True)

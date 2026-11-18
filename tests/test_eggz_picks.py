@@ -888,6 +888,11 @@ def test_the_main_recap_waits_while_a_game_on_that_date_is_unfinished(monkeypatc
             pass
 
     monkeypatch.setattr(dn, "get_connection", lambda: Conn())
+    # The record grades its ungraded picks first, and the grader and the NHL
+    # log top-up each open their own database connection (#1396). Neither
+    # grades anything here, so the picks stay ungraded and the record waits.
+    monkeypatch.setattr("tracking.paper_tracker.settle_picks", lambda *a, **k: None)
+    monkeypatch.setattr("data.ingestors.nhl_game_logs.top_up", lambda *a, **k: None)
     morning = datetime(2026, 10, 21, 8, 0, tzinfo=dn.ET)
     assert dn.notify_discord_results(game_date="2026-10-20", now=morning) == 0
     assert dn.notify_discord_period(
