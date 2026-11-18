@@ -28,6 +28,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -106,7 +107,23 @@ def scratch_cluster(prefix: str = "scratch-pg-"):
         with open(Path(owned) / "pg_ctl.out", "ab") as sink:
             subprocess.run([pg_ctl, "-D", owned, "-m", "fast", "-w", "stop"],
                            stdout=sink, stderr=sink)
-        shutil.rmtree(owned, ignore_errors=True)
+        _remove(owned)
+
+
+def _remove(path: str, tries: int = 20, pause: float = 0.25) -> None:
+    """Delete a cluster's folder, retrying for up to about five seconds.
+
+    `pg_ctl stop -w` returns once postmaster.pid is gone, but on Windows the
+    server's processes can still hold `log` and `pg_ctl.out` open for a
+    moment. One rmtree then leaves those two files behind (seen 2026-11-17 in
+    byom-pg- and latest-line-pg- folders; the server itself had stopped).
+    """
+    for attempt in range(tries):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            return
+        if attempt + 1 < tries:
+            time.sleep(pause)
 
 
 def env_dsn() -> str | None:
