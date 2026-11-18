@@ -19,6 +19,10 @@ Run from the repo root, in this order:
 | 8 | `python -m scripts.ncaabw_research.inplay` | The in-play game-state model against every snapshot's in-play quotes (needs `pbp_<season>.parquet` in the cache: sportsdataverse's `espn_womens_college_basketball_pbp/play_by_play_<season>.parquet`) |
 | 9 | `python -m scripts.ncaabw_research.inplay_checks` | The halftime total's and halftime spread's four checks (blind sides, claimed-EV bands, a placebo, stale prices), on the priced quotes step 8 leaves in the cache |
 | 10 | `python -m scripts.ncaabw_research.sides`, then `sides grid` | Spread and moneyline off the totals model's team ratings at DraftKings' first posted line; the same with the ratings' settings moved |
+| 11 | `python -m scripts.ncaabw_research.totals_other_books` | The totals model at the other bettable books' first posted totals, on the games DraftKings never prices (2026-11-16) |
+| 12 | `python -m scripts.ncaabw_research.ht_model_vs_market` | The halftime total's betting share by season with every model fit: this season's books against the model file (2026-11-16) |
+| 13 | `python -m scripts.ncaabw_research.ht_dropped_bets DIR` | The halftime total's replayed bets split by whether the in-play write bug (#1407) would have dropped them; DIR is `build_ncaabw_live_ht_artifact --keep DIR` (2026-11-16) |
+| 14 | `python -m scripts.ncaabw_research.totals_best_book` | The totals model at DraftKings' first post: DraftKings only against the best bettable book's standing total at that moment (2026-11-16) |
 
 Two more read production through the totals card's own reads (they need
 production settings, and write nothing). `box_coverage` prints this season's

@@ -119,6 +119,27 @@ def test_the_period_rules_read_only_the_decision_fetchs_rows_and_the_full_game_t
     assert by[R.HOME_ML].p_model == pytest.approx(by[R.HOME_ML].p_fair + 0.05)
 
 
+def test_the_first_half_cut_reads_the_full_game_spread_on_the_board_at_the_fetch():
+    # mike, 2026-11-17: the first half only on the home underdog getting points.
+    f = pd.Timestamp(TIP - timedelta(minutes=10))
+    early = f - pd.Timedelta(minutes=50)
+    per = _odds([{"game_id": "G1", "market": "h2h_h1", "bookmaker": "fanduel", "snapshot_at": f,
+                  "created_at": f, "home_price": 130, "away_price": -150}])
+    art = {"models": {R.H1_DOG_ML: {"params": {"home_dog_only": True, "min_home_line": 0.0}, "uplift": 0.05}}}
+    for at_fetch, want in ((3.5, "bet"), (-1.5, "no_bet")):
+        fg = _odds([
+            # earlier: the home side getting points; the board at the fetch is what counts
+            {"game_id": "G1", "market": "spreads", "bookmaker": "draftkings", "snapshot_at": early,
+             "created_at": early, "home_price": -110, "away_price": -110, "spread_home": -at_fetch},
+            {"game_id": "G1", "market": "spreads", "bookmaker": "draftkings",
+             "snapshot_at": f - pd.Timedelta(minutes=1), "created_at": f, "home_price": -110,
+             "away_price": -110, "spread_home": at_fetch},
+        ])
+        out = card.decide(games(), {"G1": (f, f)}, {"G1": (R.H1_DOG_ML,)}, fg, per, None, {2027: art},
+                          R.DECIDABLE)
+        assert (out[0].status, out[0].side) == (want, "home"), at_fetch
+
+
 def test_without_the_decision_fetch_the_period_rules_are_missed_and_the_full_game_rules_say_so():
     t = pd.Timestamp(TIP - timedelta(minutes=10))
     fg = _odds([{"game_id": "G1", "market": "h2h", "bookmaker": "draftkings",

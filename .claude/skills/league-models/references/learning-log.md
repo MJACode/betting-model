@@ -69,6 +69,52 @@ review as its own entry.
    hold the page (here, US wagering sites' results), not only the open web;
    and a site that blocks the fetch tool is not a site with no page.
 
+## 2026-11-16 — Women's college basketball against the men's: why it trails, and in-play bets that were never stored
+
+1. **League and scope**: women's college basketball against the men's. mike,
+   2026-11-16: *"Why isn't the ncaabw models as successful as the ncaab? What
+   are we missing"*. An audit of the live records, the market grid and the
+   in-play loop, not a build (PR #1407). The answer, with every number's
+   source, is `docs/sports/ncaabw.md`, "Why the women's record trails the
+   men's".
+2. **Tried**: the live records model by model; a census of ESPN's games
+   against the games each book priced (2026-11-03 to 11-15); the women's
+   totals model at other books' first posted totals; the halftime model's
+   live decisions against its replay, by EV band and share that bets; the
+   replay with every model fit on every season; DraftKings' own board against
+   the feed's DraftKings quote in the break; every decided bet in the
+   pollers' log against `picks`.
+3. **New**:
+   - A trap: an in-play pick row written with an empty DraftKings probability
+     is never stored. `picks` refuses it, the loop logs "write failed
+     (non-fatal)", and nothing is posted. The men's loop had it and the
+     women's and EuroLeague loops were copied from it: 20 of the men's 24 and
+     13 of the women's 22 bets were lost, 2026-11-09 to 11-15
+     (`porting-traps.md`, "Writing the pick"; the check after a merge in
+     `shipping.md`).
+   - A kill test: a live model that bets far less often than its replay is
+     replayed with every fit on every season; if each fit splits the seasons
+     alike, the books moved, not the model file (`kill-tests.md`, "Is it
+     stable?").
+   - A null: the ratings blend at another book's first posted total, on the
+     games the anchor book never prices (`methods.md` §1).
+   - A coverage measurement to make before comparing two leagues: DraftKings
+     priced 69 of 701 women's games against 519 of 681 men's, and its own
+     board agreed (`market-grid.md`, "Which book's price counts").
+4. **Corrected**: `methods.md`, the halftime break as the decision point. Was
+   "*Worked*: 669 bets +11.84%" with no word on this season; now it also says
+   2026-27's books hang halftime totals closer to the model (it bets 25% of
+   decided games against 60–64% in the stored seasons, every fit alike) and
+   this season's 36 bets went 16-20, because the replay of 2026-11-01 to
+   11-09 and the live ledger both show it (`docs/sports/ncaabw.md`; re-check
+   #1405). A hypothesis of the session, not a claim of the skill, was also
+   wrong: the move to DraftKings' own board on 2026-11-13 is not the cause (on
+   the 11 games both covered, the feed's DraftKings total was the board's).
+5. **The framework**: step 8 graded a live record without first checking that
+   the model's decisions reached `picks`; it now opens with that check. The
+   reply section's five headings, with the results table leading "Outcome /
+   findings", come with #1422 (mike, 2026-11-16).
+
 ## 2026-11-16 — Horse racing: Hong Kong before the off, and UK/Ireland at starting price
 
 1. **League and scope**: thoroughbred racing (mike, 2026-11-15: *"lets use the
