@@ -1289,19 +1289,34 @@ ACTION_THRESHOLDS: dict = {
     # found was -500 or shorter, so at a -200 floor it could never bet.
     # The home moneyline, priced -200 or longer (round 2, A1: 972 bets, +59.64
     # units at DraftKings alone; 984, +64.80 at the best deciding book, both
-    # replayed bet for bet). Live: 984 bets, 513-471, +64.80 units, +5.24% (90% -0.27 to +11.08); prices median -110, shortest -200, longest +550.
+    # replayed bet for bet, on the research's stake where an underdog risks 1).
     # MISSED: +0.29% without its 10 best dates, 2026-27 -18.50%, the
     # false-discovery correction (p 0.071), the interval reaches below zero.
-    "euroleague_home_ml":         {"min_prob": 0.0, "min_edge": 0.01},
+    # 2026-11-17 (mike, "Yes, both"): ONLY WHEN THE HOME SIDE IS GETTING POINTS
+    # on the spread. Its home-favourite bets carried no edge and sat beside an
+    # other-team first-half bet; the home-underdog ones carried all its units
+    # (docs/sports/euroleague.md, "Several bets on one game"). On the posted
+    # stake (1u to win, issue #1446): research rule 984 bets +35.32 units; live
+    # rule 491 bets, 222-269, +44.97 units, +13.27% (90% +4.47 to +22.14); the
+    # 493 cut made -9.65. Prices median +145, shortest -112, longest +550.
+    # The cut is in-sample.
+    "euroleague_home_ml":         {"min_prob": 0.0, "min_edge": 0.04},
     # The home underdog against the spread (full game round 1, H3): 455 bets, 262-189-4, +54.54 units, +11.00% (90% +3.63 to +17.95);
     # prices median -110, shortest -120, longest -102. MISSED: 2025-26 carries most of
     # the units, +5.37% without its 10 best dates (DraftKings), walk-forward
     # +3.16%, 2026-27 -24.06% on 30.
     "euroleague_home_dog_spread": {"min_prob": 0.0, "min_edge": 0.06},
-    # The first-half moneyline underdog (first half round 1): 465 bets, 192-258-15, +19.14 units, +4.22% (90% -4.64 to +12.35);
-    # prices median +142, shortest -115, longest +475. A tied half pushes. MISSED: the
+    # The first-half moneyline underdog (first half round 1): 465 bets, 192-258-15, +19.14 units, +4.22% (90% -4.64 to +12.35)
+    # on the research's stake; prices median +142, shortest -115, longest +475. A tied half pushes. MISSED: the
     # interval runs through zero, 2026-27 negative.
-    "euroleague_h1_dog_ml":       {"min_prob": 0.0, "min_edge": 0.00},
+    # 2026-11-17 (mike, "Yes, both"): ONLY THE HOME UNDERDOG GETTING POINTS on
+    # the full-game spread, never at a neutral site; its other bets were about
+    # break-even (docs/sports/euroleague.md, "Several bets on one game"). On
+    # the posted stake: research rule 465 bets +19.82 units; live rule 131
+    # bets, 64-61-6, +15.85 units, +15.70% (90% -0.31 to +31.60); the 334 cut
+    # made +3.96. Prices median +120, shortest -111, longest +250. In-sample,
+    # on 1.2 priced seasons.
+    "euroleague_h1_dog_ml":       {"min_prob": 0.0, "min_edge": 0.04},
     # The first-quarter total from each club's prior first-quarter share (round
     # 2, Q1-i at margin 1.0): 63 bets, 43-20, +17.71 units, +22.23% (90% +4.08 to +39.66); prices
     # median -122, shortest -145, longest -111. MISSED: 63 bets against the 200 bar,
@@ -2750,9 +2765,9 @@ MODEL_OWN_EV_FLOOR: dict = {
     # replayed bets reach at the 2026-27 uplift (scripts/euroleague_pregame_build.py):
     # it removes none of them. Each rule's uplift is larger than the vig it
     # pays, so every replayed bet carries a positive EV and so does every floor.
-    "euroleague_home_ml": 0.04,   # replay min EV +0.0401, median +0.0628
+    "euroleague_home_ml": 0.11,   # 2026-11-17 mike (the same-team cut): replay min EV +0.1111, median +0.1552
     "euroleague_home_dog_spread": 0.11,   # replay min EV +0.1181, median +0.1272
-    "euroleague_h1_dog_ml": 0.01,   # replay min EV +0.0106, median +0.0902
+    "euroleague_h1_dog_ml": 0.09,   # 2026-11-17 mike (the same-team cut): replay min EV +0.0951, median +0.1677
     "euroleague_q1_club_share_total": 0.17,   # replay min EV +0.1779, median +0.2240
     "nfl_prop_pass_completions": 0.20,   # n=1, min +0.329, never bet under 0.20
     "nfl_prop_rec_yards":        0.20,   # n=3, min +0.302, never bet under 0.20
@@ -3474,9 +3489,9 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaab_live_total_h2":         0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
     "ncaabw_live_total_ht":        0.0,    # 2026-11-11 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
     "euroleague_live_spread_ht":   0.0,    # 2026-11-13 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
-    "euroleague_home_ml": 0.01,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
+    "euroleague_home_ml": 0.04,  # 2026-11-17 mike: the cut is the rule; see ACTION_THRESHOLDS
     "euroleague_home_dog_spread": 0.06,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
-    "euroleague_h1_dog_ml": 0.00,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
+    "euroleague_h1_dog_ml": 0.04,  # 2026-11-17 mike: the cut is the rule; see ACTION_THRESHOLDS
     "euroleague_q1_club_share_total": 0.10,  # 2026-11-14 mike: the cut is the rule; see ACTION_THRESHOLDS
     "mlb_spread_market":           0.018,  # see ACTION_THRESHOLDS
     "mlb_total_market":            0.02,   # see ACTION_THRESHOLDS
