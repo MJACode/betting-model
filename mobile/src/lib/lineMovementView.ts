@@ -166,7 +166,16 @@ export function lineMovementView(
   // book's last price at or before the pick. It reads "At pick" only when it
   // is the locked number and recent.
   const pickPrice = hist.fromPick && !hist.afterStart;
-  const stale = pickPrice && instant(pick.created_at) - instant(first.snapshot_at) > AT_PICK_MAX_MS;
+  // Older than AT_PICK_MAX_MS reads as a feed that stopped, except on a prop
+  // the book priced again after the pick. Since 2026-11-17 a prop row that
+  // only repeats the price before it is archived (#1345), so a price that
+  // stood for hours has no row near the pick, and the row before it is still
+  // the price in force: every change is kept. 4,647 prop picks lost "At pick"
+  // that way, and every one has a later row (#1458).
+  const stale =
+    pickPrice &&
+    instant(pick.created_at) - instant(first.snapshot_at) > AT_PICK_MAX_MS &&
+    !(isProp && hist.since > 0);
   const pickRowIsLock = pickPrice && !stale && snapshotMatchesLock(pick, first, market);
   // The only row is the book's price before the pick: nothing to call steady or moved.
   const nothingSince = pickPrice && hist.since === 0;

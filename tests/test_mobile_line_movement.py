@@ -812,3 +812,44 @@ def test_the_card_prints_what_the_view_says():
 
 def test_this_file_is_on_the_pr_ci_subset():
     assert "tests/test_mobile_line_movement.py" in _read(ROOT / ".github" / "workflows" / "pr-ci.yml")
+
+
+@node
+def test_a_prop_priced_again_after_the_pick_keeps_its_at_pick_price(tmp_path):
+    """Pick 1385353 (#1458): Evan Carter Under 0.5 Walks at DraftKings -169,
+    made 2026-08-22 19:20:36 UTC. Since its repeat rows went to the archive
+    (2026-11-17), DraftKings' last stored row before the pick is the -169 from
+    13:17:49 UTC, six hours and three minutes before it (the archive holds a
+    -169 from 19:17:59). The book priced it again at 22:00:56 and 23:01:03, so
+    the feed was alive and the -169 was the price at the pick: "At pick".
+    Without a later row the old rule stands, and game lines keep it too."""
+    script = VIEW_PRELUDE + """
+const CARTER = {
+  pick_id: 1385353, game_id: 'MLB_2026-08-22_LAA_TEX', model_id: 'mlb_prop_batter_walks', sport: 'MLB',
+  game_date: '2026-08-22', pick_side: 'under', signal_type: 'BET', is_live: false,
+  pick_label: 'Evan Carter Under 0.5 Walks', dk_odds: -169, scored_line: 0.5,
+  decision_odds: null, decision_edge: null, decision_book: null, line_book: null,
+  created_at: '2026-08-22 19:20:36.701767+00', game_time: '2026-08-22T23:06:00+00:00',
+};
+const pr = (snapshot_at, line, over_price, under_price) => ({ snapshot_at, line, over_price, under_price });
+const rows = [pr('2026-08-22T09:17:49.732933-04:00', 0.5, 122, -169),
+              pr('2026-08-22T18:00:56.625235-04:00', 0.5, 118, -163),
+              pr('2026-08-22T19:01:03.493148-04:00', 0.5, 118, -163)];
+const v = view(CARTER, rows, 'batter_walks', '2026-08-23T05:00:00Z', true);
+eq(v.rows[0].label, 'At pick', 'the price at the pick, priced again after it');
+if (v.note.includes('from Sat, 8/22')) throw new Error(`dated as stale: ${v.note}`);
+// Nothing after the pick: a price six hours old is still not called the pick's.
+const alone = view(CARTER, rows.slice(0, 1), 'batter_walks', '2026-08-23T05:00:00Z', true);
+if (alone.rows[0].label === 'At pick') throw new Error(text(alone));
+// A game line with the same shape keeps the six-hour rule (its repeats are not archived).
+const OLD = {
+  pick_id: 3434426, game_id: 'NCAAF_2026-10-24_X_Y', model_id: 'ncaaf_over_under', sport: 'NCAAF', game_date: '2026-10-24',
+  pick_side: 'under', signal_type: 'BET', is_live: false, pick_label: 'Y vs X Under 54.5', dk_odds: -108, scored_line: 54.5,
+  decision_odds: -108, decision_edge: 0.04, decision_book: 'draftkings', line_book: null,
+  created_at: '2026-10-09 16:23:40+00', game_time: '2026-10-24T19:30:00+00:00',
+};
+const game = view(OLD, [tot('2026-10-09T09:00:00Z', 54.5, -112, -108), tot('2026-10-09T18:00:00Z', 54.5, -115, -105)], 'totals', '2026-10-09T19:00:00Z');
+if (game.rows[0].label === 'At pick') throw new Error(text(game));
+"""
+    proc = _run(tmp_path, script, VIEW_FILES)
+    assert proc.returncode == 0, proc.stderr
