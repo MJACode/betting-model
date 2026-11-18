@@ -340,7 +340,7 @@ Each kept row is the opener or the close of its proposition. A rung of an altern
 
 | Move | Blocked by | What unblocks it |
 |---|---|---|
-| Prop repeats | moved 11-16 and 11-17; the 2026-11-18 audit then found the app's "At pick" price (#1458) and research replays (below) | allowed in the tool; nothing scheduled runs it |
+| Prop repeats | moved 11-16 and 11-17; the 2026-11-18 audit then found the app's "At pick" price (#1458) and research replays (below) | refused in the tool since 2026-11-18 until the app fix (#1458) is live |
 | Game-odds repeats | The 2026-11-18 audit, below: the app's line history for past picks, the first-half CLV close, the NCAAB spread and moneyline builds, the MLB market-movement feature, the paid in-play buyers, the NFL cache import, and research scripts that rebuild fetches or measure price age | those readers read the archive too (the one history reader, section 3c); the buyers and importers take a ledger |
 | Older than 90 days, both tables | Teams board (the ±1.5 run line close is not the only `spreads` row of a game); CLV's same-line close; BYOM's lock candidates; `v_nhl_player_prop_odds`; `team_period_results`; the app's line charts | the opener/close table keyed with the line (section 3b), and those readers moved to it |
 

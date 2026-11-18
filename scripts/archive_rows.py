@@ -53,7 +53,8 @@ the rows. Postgres and DuckDB compute it alike: measured 2026-11-16 on 199,991
     python scripts/archive_rows.py reclaim --table player_prop_odds      # see reclaim(): unmeasured
     python scripts/archive_rows.py status
 
-Only (player_prop_odds, repeat) may move today; ALLOWED and REFUSED say why.
+Nothing may move today: prop repeats moved on 2026-11-16 and 11-17, then the app's
+"At pick" price was found reading them (#1458). ALLOWED and REFUSED say why.
 """
 from __future__ import annotations
 
@@ -82,8 +83,14 @@ RULES = ("repeat", "old")
 # would change what it returns, found by the reader audit of 2026-11-16 (the
 # reasons below; detail in docs/data_archive.md, "What reads old rows"). Each
 # opens once its reader reads the archive or a kept summary instead.
-ALLOWED = {("player_prop_odds", "repeat")}
+# Prop repeats moved on 2026-11-16 and 11-17 (49.5M rows). On 2026-11-18 the
+# app's "At pick" price was found reading them (#1458), and the move was
+# stopped until that fix is live and the prop readers are cleared.
+ALLOWED: set = set()
 REFUSED = {
+    ("player_prop_odds", "repeat"): "the app's \"At pick\" price on past prop picks read the "
+                                    "rows a repeat moves (#1458); research replays of NFL and NHL "
+                                    "props too (docs/data_archive.md)",
     # The reader audit of 2026-11-18 found more than _ODDS_KEEP holds, among them
     # two in production; the list is in docs/data_archive.md, "What reads old rows".
     ("odds", "repeat"): "the app's line history for past picks (the at-pick price and its "

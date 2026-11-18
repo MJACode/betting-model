@@ -17,6 +17,14 @@ from scripts import archive_rows as ar  # noqa: E402
 
 UTC = dt.timezone.utc
 NOW = dt.datetime(2026, 11, 16, 12, 0, tzinfo=UTC)
+REAL_ALLOWED = set(ar.ALLOWED)
+
+
+@pytest.fixture(autouse=True)
+def _mechanics_with_props_allowed(monkeypatch):
+    """These tests drive the tool's mechanics on prop rows. Whether a move is
+    allowed today is its own test, which uses the real list."""
+    monkeypatch.setattr(ar, "ALLOWED", {("player_prop_odds", "repeat")})
 
 
 def _iso(t):
@@ -160,11 +168,13 @@ def test_a_removal_is_refused_when_postgres_picks_other_rows():
     assert conn.rolled
 
 
-@pytest.mark.parametrize("table,rule", [("odds", "repeat"), ("odds", "old"), ("player_prop_odds", "old")])
-def test_a_move_with_a_reader_that_would_break_is_refused(table, rule):
+@pytest.mark.parametrize("table,rule", [("odds", "repeat"), ("odds", "old"), ("player_prop_odds", "old"),
+                                        ("player_prop_odds", "repeat")])
+def test_a_move_with_a_reader_that_would_break_is_refused(table, rule, monkeypatch):
+    # Prop repeats too since 2026-11-18: the app's "At pick" price read them (#1458).
+    monkeypatch.setattr(ar, "ALLOWED", REAL_ALLOWED)
     with pytest.raises(SystemExit, match="may not move yet"):
         ar.check_allowed(table, rule)
-    ar.check_allowed("player_prop_odds", "repeat")
 
 
 # One repeat in each group of game-odds rows a reader needs whole, and the same
