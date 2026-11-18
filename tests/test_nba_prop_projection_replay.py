@@ -5,7 +5,10 @@ Two checks that the code which bets is the code that was graded
 
   * find_bets, the live selection, on a month of 2025-26's archived quotes and
     the stored walk-forward means, returns the graded card's bets, bet for bet:
-    same propositions, side, line, book and price.
+    same propositions, side, line, book and price. The graded list is the card
+    as shipped on 2026-10-16, threes overs included, so the selection is proved
+    on that card (pj.CARD_AS_GRADED); the live card, which dropped threes overs
+    on 2026-11-18, must then return the same list less its threes overs.
   * project_core, the live projection, on one 2025-26 night from the research
     cache, gives the graded walk-forward means and projects every player the
     graded card bet.
@@ -86,23 +89,49 @@ def test_the_live_selection_returns_the_graded_bets_for_a_month(monkeypatch):
             r[k] = None if v is None or (isinstance(v, float) and np.isnan(v)) else float(v)
         r["over_link"] = r["under_link"] = r["book_last_update"] = None
         by_game.setdefault(r["game_id"], []).append(r)
-    bets = []
-    for gid, rows in by_game.items():
-        now = max(parse_ts(r["snapshot_at"]) for r in rows) + timedelta(seconds=1)
-        games = {gid: {"tip": tips[gid].to_pydatetime(), "game_date": str(g.game_date[gid])[:10]}}
-        b, _, _ = pj.find_bets(rows, proj[proj.game_id == gid], games, now, art, rule_keys, set(), {gid},
-                               books, price_floor=-200.0)
-        bets += b
-    live = pd.DataFrame([b.__dict__ for b in bets])
+    def select() -> pd.DataFrame:
+        bets = []
+        for gid, rows in by_game.items():
+            now = max(parse_ts(r["snapshot_at"]) for r in rows) + timedelta(seconds=1)
+            games = {gid: {"tip": tips[gid].to_pydatetime(), "game_date": str(g.game_date[gid])[:10]}}
+            b, _, _ = pj.find_bets(rows, proj[proj.game_id == gid], games, now, art, rule_keys, set(), {gid},
+                                   books, price_floor=-200.0)
+            bets += b
+        return pd.DataFrame([b.__dict__ for b in bets])
+
     graded = pd.read_parquet(RESEARCH / "proj/bets_card_best.parquet")
     graded = graded[(graded.season == SEASON) & graded.market.isin(pj.MARKETS)
                     & graded.game_id.isin(set(by_game))].copy()
     graded["player_id"] = graded.player_id.astype(str)
     assert len(graded) > 1000, "a month of 2025-26 holds thousands of graded bets"
-    m = graded.merge(live, on=KEY, how="outer", suffixes=("_g", "_l"), indicator=True)
+    threes_over = (graded.market == "player_threes") & (graded.side == "over")
+    assert threes_over.any(), "the graded card bet threes overs"
+
+    # 1. the card as graded: the live selection code returns the graded list, bet for bet
+    live_card = dict(pj.CARD)
+    monkeypatch.setattr(pj, "CARD", pj.CARD_AS_GRADED)
+    m = graded.merge(select(), on=KEY, how="outer", suffixes=("_g", "_l"), indicator=True)
     assert (m._merge == "both").all(), m._merge.value_counts().to_dict()
     for c in ("side", "line", "book", "price"):
         assert (m[f"{c}_g"] == m[f"{c}_l"]).all(), c
+
+    # 2. the live card (threes unders only, 2026-11-18): no threes over, every other graded bet
+    #    unchanged. A threes proposition whose graded bet was the over can still clear on the under
+    #    (both sides over a 0.04 floor needs a 4% cross-book arbitrage: 26 of 51,418 stored threes
+    #    propositions could); those unders are the only bets not on the graded list.
+    monkeypatch.setattr(pj, "CARD", live_card)
+    live = select()
+    assert not ((live.market == "player_threes") & (live.side == "over")).any()
+    m = graded[~threes_over].merge(live, on=KEY, how="outer", suffixes=("_g", "_l"), indicator=True)
+    assert not (m._merge == "left_only").any(), m._merge.value_counts().to_dict()
+    both = m[m._merge == "both"]
+    for c in ("side", "line", "book", "price"):
+        assert (both[f"{c}_g"] == both[f"{c}_l"]).all(), c
+    extra = m[m._merge == "right_only"]
+    was_over = set(map(tuple, graded.loc[threes_over, KEY].to_numpy()))
+    assert all(k in was_over for k in map(tuple, extra[KEY].to_numpy())), extra[KEY]
+    assert ((extra.market == "player_threes") & (extra.side_l == "under")).all()
+    assert len(extra) <= 0.01 * int(threes_over.sum()) + 1, len(extra)
 
 
 def test_the_live_projection_gives_the_graded_means_for_one_night():

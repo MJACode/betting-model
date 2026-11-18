@@ -628,9 +628,12 @@ def test_full_refuses_without_the_owners_switches(monkeypatch):
 
 
 def test_the_registered_cells_are_the_rule_and_the_six_market_cells_at_their_shipped_floors():
-    assert S.EXPECTED_CELLS == 1 + len(pj.CARD) == 7
+    # the card as it was shipped when this search was graded (threes on both sides); the live card
+    # dropped threes overs on 2026-11-18 and the closed search still grades what it registered
+    assert S.EXPECTED_CELLS == 1 + len(pj.CARD_AS_GRADED) == 7
+    assert pj.CARD_AS_GRADED["player_threes"][0] == ("over", "under")
     assert S.PM_FLOOR == 0.0
-    assert {m: v[1] for m, v in pj.CARD.items()} == {
+    assert {m: v[1] for m, v in pj.CARD_AS_GRADED.items()} == {
         "player_steals": 0.02, "player_rebounds": 0.01, "player_blocks_steals": 0.05, "player_blocks": 0.02,
         "player_rebounds_assists": 0.04, "player_threes": 0.04}
     assert S.PM_BANDS == [(-0.01, 0.0), (0.0, 0.01), (0.01, np.inf)]

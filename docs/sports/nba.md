@@ -8,17 +8,22 @@
 > Every market was graded at real prices against bars written before the first
 > grid ran: **`docs/nba_models_2026.md`** (the bars, the market grid, every
 > result and what failed). Thresholds: `docs/thresholds.md`, NBA section.
+>
+> **Reassessed 2026-11-11 to 11-18 (mike: "NBA is bleeding money").** Two rule
+> changes came out of it, both below: `nba_prop_projection` no longer bets threes
+> overs, and the three shooting-luck total models wait for 10 games again. What
+> was asked, tried, found and left open: **`docs/nba_reassessment_2026_11.md`**.
 
 ## The models
 
 | Model | What it bets | Status |
 |---|---|---|
-| `nba_prop_projection` | Steals (over or under), rebounds (under), blocks+steals (over or under), blocks (under), rebounds+assists (under), threes (over or under): each player's projected count — minutes × per-minute rate, a negative-binomial width, a per-market calibration map — priced at the consensus main line, every proposition whose calibrated EV at the best bettable price clears its market's floor. Decided once, in the same 45-57 minute window and the same look as `nba_prop_market`. One bet a game across both NBA prop models, at most six a night (four until 2026-11-04), each bet ranked by its EV percentile within its own model (`scripts/nba_props_card.py`, mike 2026-10-20 and 2026-11-04). | **LIVE** (artifact — `models/nba_prop_projection.py`, card `scripts/nba_prop_projection_card.py`, steps `nba-prop-project` / `nba-props`) |
-| `nba_total_luck` | The full-game OVER, when the projected total with the opponents' three-point and free-throw shooting luck taken out is at least 3 points above the plain projected total. At the best bettable price under the market's fair line; each game decided once, on a fetch 60-66 minutes before tip made by its own one-minute job; regular-season games only (the NBA Cup final never counts); each team needs one game (no 10-game wait, 2026-11-02). One NBA game-total bet a game: it decides first, so the first-half over and the home team total under stand aside on a game it bets (`scripts/nba_game_totals_door.py`, mike 2026-11-04). | **LIVE** (rule with a parameter artifact — `models/nba_total_luck.py`, card `scripts/nba_total_luck_card.py`, step `nba-total-luck`, job `nba_total_luck_window`) |
-| `nba_first_half_total_luck` | The FIRST-HALF total OVER, when the full-game shooting-luck gap (`nba_total_luck`'s number, unscaled) is at least 2 points and below 3 (from 2026-11-04, mike: at 3 or more `nba_total_luck` bets the same game on the same gap, so this was its twin; `docs/thresholds.md`). At the best bettable price under the market's fair line; each game decided once, on this model's own first-half fetch 45-66 minutes before tip, made by the same one-minute job; settled on Q1 + Q2 points; a game with no trustworthy quarter scores stays pending; regular-season games only; each team needs one game (no 10-game wait, 2026-11-02). One NBA game-total bet a game (`scripts/nba_game_totals_door.py`). | **LIVE** (rule with a parameter artifact — `models/nba_first_half_total_luck.py`, card `scripts/nba_first_half_total_luck_card.py`, step `nba-first-half-total-luck`, job `nba_total_luck_window`) |
+| `nba_prop_projection` | Steals (over or under), rebounds (under), blocks+steals (over or under), blocks (under), rebounds+assists (under), threes (under only from 2026-11-18, mike; over or under before): each player's projected count — minutes × per-minute rate, a negative-binomial width, a per-market calibration map — priced at the consensus main line, every proposition whose calibrated EV at the best bettable price clears its market's floor. Decided once, in the same 45-57 minute window and the same look as `nba_prop_market`. One bet a game across both NBA prop models, at most six a night (four until 2026-11-04), each bet ranked by its EV percentile within its own model (`scripts/nba_props_card.py`, mike 2026-10-20 and 2026-11-04). | **LIVE** (artifact — `models/nba_prop_projection.py`, card `scripts/nba_prop_projection_card.py`, steps `nba-prop-project` / `nba-props`) |
+| `nba_total_luck` | The full-game OVER, when the projected total with the opponents' three-point and free-throw shooting luck taken out is at least 3 points above the plain projected total. At the best bettable price under the market's fair line; each game decided once, on a fetch 60-66 minutes before tip made by its own one-minute job; regular-season games only (the NBA Cup final never counts); both teams need 10 games this season (the wait is back from 2026-11-18, mike; one game was enough from 2026-11-02 to 11-17). One NBA game-total bet a game: it decides first, so the first-half over and the home team total under stand aside on a game it bets (`scripts/nba_game_totals_door.py`, mike 2026-11-04). | **LIVE** (rule with a parameter artifact — `models/nba_total_luck.py`, card `scripts/nba_total_luck_card.py`, step `nba-total-luck`, job `nba_total_luck_window`) |
+| `nba_first_half_total_luck` | The FIRST-HALF total OVER, when the full-game shooting-luck gap (`nba_total_luck`'s number, unscaled) is at least 2 points and below 3 (from 2026-11-04, mike: at 3 or more `nba_total_luck` bets the same game on the same gap, so this was its twin; `docs/thresholds.md`). At the best bettable price under the market's fair line; each game decided once, on this model's own first-half fetch 45-66 minutes before tip, made by the same one-minute job; settled on Q1 + Q2 points; a game with no trustworthy quarter scores stays pending; regular-season games only; both teams need 10 games this season (the wait is back from 2026-11-18, mike; one game was enough from 2026-11-02 to 11-17). One NBA game-total bet a game (`scripts/nba_game_totals_door.py`). | **LIVE** (rule with a parameter artifact — `models/nba_first_half_total_luck.py`, card `scripts/nba_first_half_total_luck_card.py`, step `nba-first-half-total-luck`, job `nba_total_luck_window`) |
 | `nba_q1_trend` | The FIRST-QUARTER spread of the hot team: mike's cover-record trend, the "bump it out to L10" step with his season-average check. A team 4-1 or 5-0 against the first-quarter spread over its last 5 games at tonight's venue, against an opponent 2-3 or 1-3 over its last 5 there, both teams' last 10 agreeing by k >= 2, and the hot team's projected first-quarter margin from both teams' season averages covering its number. Each game decided once on this model's own first-quarter fetch 45-66 minutes before tip, at the deciding book with the best EV under the first-quarter market's fair line, -200 floor; settled on period 1 against the HOME number; regular season only. Did NOT pass the house standard (the 200-bet bar): 88 bets, +27.4%. Section "First quarter" below. | **LIVE 2026-11-07** (mike: "I WANT THAT MODEL"; rule with a parameter artifact `models/saved/nba_q1_trend_20261107.pkl`, `models/nba_q1_trend.py`, card `scripts/nba_q1_trend_card.py`, step `nba-q1-trend`, job `nba_total_luck_window`) |
 | `nba_q1_trend_ml` | The FIRST-QUARTER MONEYLINE of the same hot team: `nba_q1_trend`'s rule exactly, bet on the first-quarter moneyline. Decided on the same fetch (one call holds both markets), at the deciding book with the best EV under the moneyline's no-vig fair price, -200 floor; settled on period 1, a level quarter a push; regular season only. Did NOT pass the house standard (the 200-bet bar): 87 bets, +25.8%. It bets the same team in the same games as `nba_q1_trend`. Section "First quarter" below. | **LIVE 2026-11-07** (mike: "Build it anyway"; rule with a parameter artifact `models/saved/nba_q1_trend_ml_20261107.pkl`, `models/nba_q1_trend_ml.py`, card `scripts/nba_q1_trend_ml_card.py`, step `nba-q1-trend-ml`, job `nba_total_luck_window`) |
-| `nba_team_total_luck` | The HOME team total UNDER, when the home team's own part of that shooting-luck gap is at least 2 points toward the under (the away defence's luck, in the home team's points). At the best bettable price under the market's fair line; each game decided once, on this model's own team-total fetch 45-66 minutes before tip, made by the same one-minute job; settled on the home team's final score, overtime included; regular-season games only; each team needs one game (no 10-game wait, 2026-11-02). One NBA game-total bet a game (`scripts/nba_game_totals_door.py`). | **LIVE** (rule with a parameter artifact — `models/nba_team_total_luck.py`, card `scripts/nba_team_total_luck_card.py`, step `nba-team-total-luck`, job `nba_total_luck_window`) |
+| `nba_team_total_luck` | The HOME team total UNDER, when the home team's own part of that shooting-luck gap is at least 2 points toward the under (the away defence's luck, in the home team's points). At the best bettable price under the market's fair line; each game decided once, on this model's own team-total fetch 45-66 minutes before tip, made by the same one-minute job; settled on the home team's final score, overtime included; regular-season games only; both teams need 10 games this season (the wait is back from 2026-11-18, mike; one game was enough from 2026-11-02 to 11-17). One NBA game-total bet a game (`scripts/nba_game_totals_door.py`). | **LIVE** (rule with a parameter artifact — `models/nba_team_total_luck.py`, card `scripts/nba_team_total_luck_card.py`, step `nba-team-total-luck`, job `nba_total_luck_window`) |
 | `nba_live_spread_q12` | IN PLAY. The game-state model (IG-2) against the live spread in quarters 1-2: per game, the first fetch holding a fresh quote decides, at the best of the eight deciding books, -200 floor, when the model's EV is 0.05 or better; the fetches are the archive's hourly purchase moments, each hour minus 264 seconds. Settled on the full-game score at the HOME number. The quarter-3 moneyline and spread (`nba_live_ml_q3`, `nba_live_spread_q3`) are held out: they fail the house standard on those fetches. Section "In play" below. | **LIVE 2026-11-04** (artifact `models/saved/nba_live_ig2_2027.json`, `models/nba_live_ig2.py`, loop `models/nba_live_loop.py`, job `nba_live`) |
 | `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-57 minutes before tip. One bet a game across both NBA prop models, at most six a night (four until 2026-11-04), each bet ranked by its EV percentile within its own model (`scripts/nba_props_card.py`, mike 2026-10-20 and 2026-11-04). The only NBA model that bets the play-in, the playoffs and the Cup final (below). | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-props`) |
 
@@ -58,6 +63,12 @@ percentile −166, median +108, 95th +170, max +3000; 64% plus money; the +1,600
 tail is threes overs at 0.5 quoted by one book. **The probability it shows is an upper
 bound**: in the band it bets it claimed 0.533 and won 0.501. Assists overs, which the
 search chose, are not bet (they failed on 2025-26 and lose at the feed's books).
+**Threes overs are not bet from 2026-11-18** (mike; "Threes overs are not bet" below),
+so the figures above, which include them, are the rule to 2026-11-17. Without them, at
+the seven deciding books: 70,843 bets, +2,913.5 units, +4.06% (2023-24 → 2025-26:
++4.77% / +3.80% / +3.31%). **Prices it lays now:** min −200, 5th percentile −166, median
++105, 95th +165, max +375; 62% plus money. The +1,600..+3,000 tail is gone with the cell.
+On the nightly card the bets this model gets lay −194 to +330, median +125.
 
 **`nba_total_luck`** (2026-10-17, mike: *"Find it ... edge like we have with
 other sports"*; the evidence is `docs/nba_models_2026.md` 6.6 and 6.7, the
@@ -432,18 +443,59 @@ bet it graded, 1,753 / 768 / 1,210 over 2020-21 to 2025-26, the same book,
 side, number and price, both over the whole table and one game at a time
 through the loop's own path (`decide`).
 
-## No 10-game wait on the shooting-luck totals (mike, 2026-11-02)
+## The 10-game wait is back on the shooting-luck totals (mike, 2026-11-18)
 
-mike: *"Yes, remove it"*, after the same wait came off the NCAAB totals model
-(*"we do not need to wait 10 games, I never approved that"*). `nba_total_luck`,
-`nba_team_total_luck` and `nba_first_half_total_luck` now price a game once each
-team has played one game this season (`models/nba_total_luck.LIVE_MIN_GAMES`). A
-team with no game has no number to compute, so about 16 games a season are still
-declined `early_season`, on opening night and just after.
+**The rule now.** `nba_total_luck`, `nba_team_total_luck` and
+`nba_first_half_total_luck` bet no game until both teams have played 10 games
+this season (`models/nba_total_luck.LIVE_MIN_GAMES = 10`, imported by the other
+two). A game held for the wait is a recorded decision: a row in the model's
+decisions table with the reason `early_season: a team has under 10 games` and no
+bet. It gets no row on the app's All board, because it was never scored
+(`scripts/nba_none_rows.py`). The wait holds 155 to 157 games a season (the
+replay's own count on each of 2020-21 → 2025-26).
 
-The labs and the replays keep the 10-game population (`MIN_GAMES`, passed to
-`decide` by each `scripts/nba_*_total_luck_replay.py`), so they still prove the
-live code against what the lab graded.
+**This reverses mike's instruction of 2026-11-02, on his instruction of
+2026-11-18** (*"NBA is bleeding money and we've made no changes to improve the
+models ... I don't care what you have to do, just do it"*). The reasons:
+
+- **The live bets on those games lost.** Of the three models' first 56 settled
+  bets (through the 2026-11-10 slate), 50 had a team under 10 games: 21-29,
+  -11.10 units. The other 6 went 5-1, +3.85 (the research folder's
+  `reassess/live_diagnosis.md`, section 3.1).
+- **Once every team had 10 games they won.** Before 2026-11-12 the fewest games
+  any of the 30 teams had played was 10 (production `games`, read 2026-11-18).
+  From 2026-11-12 to 11-17 the three models went 15-6, +8.38 units: full game
+  7-2, +4.81; first half 4-1, +2.85; home team total 4-3, +0.72 (production
+  `picks`, read 2026-11-18). Twenty-one bets is a small sample.
+- **The backtest never showed an edge on those games**: the "kept out" rows of
+  the table below, -0.14% on 211 bets, +4.50% on 80 and -0.03% on 150.
+- **Held to the six house bars at seven books as they bet with no wait, the
+  three fail two, one and three bars.** With the wait the full-game model clears
+  all six: 508 bets, +55.42 units (study `2026-11-14-live-house-table`).
+- **On seasons never split this way** (2020-21 to 2022-23) full-game overs with
+  a team under 20 games made -21.95 units on 212 bets against +11.24 on 205
+  otherwise. The sign is the same in all three seasons; the interval of the
+  difference reaches below zero, so it is a direction, not a proof (study
+  `2026-11-14-luck-conditioning`).
+
+**What it changes today: nothing this season.** Every team is past 10 games, so
+no game of 2026-27 is held from here. It stops the same bets next October.
+
+The record of the three weeks without the wait stands exactly as written: those
+bets were bets (CLAUDE.md §1c). `docs/nba_reassessment_2026_11.md` has the whole
+reassessment.
+
+### The three weeks with no wait (2026-11-02 to 2026-11-17), kept as history
+
+mike, 2026-11-02: *"Yes, remove it"*, after the same wait came off the NCAAB
+totals model (*"we do not need to wait 10 games, I never approved that"*). From
+then the three models priced a game once each team had played one game this
+season. A team with no game has no number to compute, so opening night was still
+declined `early_season`.
+
+The labs and the replays kept the 10-game population throughout (`MIN_GAMES`,
+passed to `decide` by each `scripts/nba_*_total_luck_replay.py`), so they prove
+the live code against what the lab graded, before and after either change.
 
 **The replay** (2026-11-02): each model's live `decide` on the research cache of
 2026-10-29, at the lab's own decision times, graded by the harness that graded
@@ -451,14 +503,14 @@ the evidence, bootstrap by day. "Kept out" is the games the wait used to skip.
 
 | Model | Seasons | Games | Bets | Units | ROI | 95% interval |
 |---|---|---|---|---|---|---|
-| `nba_total_luck` | 2021-22..2025-26 | **no wait (live)** | **719** | **+55.25** | **+7.07%** | **+0.4..+13.7** |
-| | | 10-game wait | 508 | +55.56 | +10.05% | +1.9..+18.3 |
+| `nba_total_luck` | 2021-22..2025-26 | no wait (live 11-02 to 11-17) | 719 | +55.25 | +7.07% | +0.4..+13.7 |
+| | | **10-game wait (live again)** | **508** | **+55.56** | **+10.05%** | **+1.9..+18.3** |
 | | | kept out | 211 | -0.31 | -0.14% | -12.3..+11.1 |
-| `nba_team_total_luck` | 2023-24..2025-26 | **no wait (live)** | **429** | **+68.73** | **+14.33%** | **+4.8..+23.3** |
-| | | 10-game wait | 349 | +64.72 | +16.58% | +6.4..+26.4 |
+| `nba_team_total_luck` | 2023-24..2025-26 | no wait (live 11-02 to 11-17) | 429 | +68.73 | +14.33% | +4.8..+23.3 |
+| | | **10-game wait (live again)** | **349** | **+64.72** | **+16.58%** | **+6.4..+26.4** |
 | | | kept out | 80 | +4.01 | +4.50% | -18.4..+25.1 |
-| `nba_first_half_total_luck` | 2023-24..2025-26 | **no wait (live)** | **745** | **+51.44** | **+6.38%** | **-0.5..+13.4** |
-| | | 10-game wait | 595 | +51.49 | +8.01% | +0.4..+15.4 |
+| `nba_first_half_total_luck` | 2023-24..2025-26 | no wait (live 11-02 to 11-17) | 745 | +51.44 | +6.38% | -0.5..+13.4 |
+| | | **10-game wait (live again)** | **595** | **+51.49** | **+8.01%** | **+0.4..+15.4** |
 | | | kept out | 150 | -0.06 | -0.03% | -14.6..+14.0 |
 
 **What it means.** The kept-out games add volume at about break-even: units are
@@ -467,10 +519,43 @@ games played is consistently better; each is under 60 bets per model and the
 intervals are wide. The team-total model's kept-out count is thin because the
 cache has almost no October 2023 team-total prices (3 bets that season).
 
-**Sizing runs ahead of the evidence on these bets.** `model_probability` adds each
+**Sizing ran ahead of the evidence on these bets.** `model_probability` adds each
 model's uplift, measured on games with both teams on 10+. The full-game kept-out
 bets won 109 of 211 (0.517) where that uplift assumes about 0.57, so tenth-Kelly
-stakes them as if they had the later games' edge.
+staked them as if they had the later games' edge. With the wait back, every bet
+is again in the population the uplift was measured on.
+
+## Threes overs are not bet (mike, 2026-11-18)
+
+`nba_prop_projection` keeps threes unders and every other cell; it no longer
+bets a threes over (`models/nba_prop_projection._SIDES`). A threes over already
+written stays as it is, settles and counts. No artifact was refitted: the
+calibration map is per market, not per side, and the cell is simply never
+offered. Why:
+
+- **On the nightly card they are the one losing cell of size.** The card (one
+  prop a game across both prop models, six a night) replayed on 2023-24 →
+  2025-26 at the seven deciding books: this model's threes overs are 287 bets,
+  -23.08 units, -12.6%. The card without them makes +209.60 units against
+  +190.26 with them. The difference, +19.34, has a 95% interval of -19.58 to
+  +60.75 and is +15.72 / -6.49 / +10.11 by season: it points one way, it is not
+  proven (`scripts/card_variants_2026_11_18.py` in the research folder).
+- **Off the card they barely pay.** Every qualifying bet at seven books: threes
+  overs +0.93% on 6,828 bets, interval -1.5% to +3.4% (+1.8% / -0.1% / +1.4% by
+  season). Every under cell's interval sits above zero
+  (`scripts/proj_by_market_7books.py`).
+- **The card over-picks them.** Live to 2026-11-17 they were 26 of the model's
+  109 settled bets (24%), 9-17, -0.64 units, median price +158.5 (production
+  `picks`, read 2026-11-18), against 8.8% of its graded bets. The card ranks by
+  claimed EV, and this cell's claim is the most inflated.
+- **What it does not fix.** The model's live threes unders are 10-17, -4.39
+  units and its rebounds unders 2-9, -6.21 over the same weeks. Those cells
+  carry the backtest's profit, and four weeks do not overturn three seasons.
+
+The percentile table that shares a night between the two prop models
+(`models/nba_prop_rank.py`) still holds threes overs' EVs. It is the table the
+replay above ranked with, so it is left alone; rebuilt without them each
+remaining bet's percentile would rise by 0.6 points on average.
 
 **The earlier research said wait.** The fifth search (`docs/nba_models_2026.md`
 section 9.4, F8) tested an early start with last season blended in, and closed it

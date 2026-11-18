@@ -563,6 +563,30 @@ def test_the_ev_floor_is_the_model_s_own_and_the_bet_is_priced_as_a_rule():
     assert g.cal_prob == 0.60 and g.ev == pytest.approx(0.60 * (1 + 100 / 112) - 1)
 
 
+@pytest.mark.parametrize("n,held", [(1, True), (9, True), (10, False)])
+def test_both_teams_need_ten_games(art, n, held):
+    """RULE (mike, 2026-11-18, reversing 2026-11-02's no wait): no bet until
+    both teams have played 10 games this season. The real ratings, no stand-in.
+    A held game is a recorded decision with the reason, never a missing one."""
+    games, box = _season(n)
+    day = (pd.Timestamp("2026-10-21") + pd.Timedelta(days=n)).strftime("%Y-%m-%d")
+    t = _target(day)
+    tip = _et(*map(int, day.split("-")), 19, 30)
+    fetch = tip - timedelta(minutes=55)
+    q = tt.quote_frame(_rows(t.game_id[0], fetch, [("pinnacle", 112.5, -110, -110),
+                                                   ("draftkings", 112.5, -110, -110)]),
+                       t.assign(tip=pd.Timestamp(tip)))
+    times = pd.DataFrame({"game_id": t.game_id, "T": [pd.Timestamp(fetch)]})
+    bets, decisions, diag = tt.decide(t, q, box, games, times, art, scheduled=games)
+    assert len(decisions) == 1 and diag["early_season"] == (1 if held else 0), (decisions, diag)
+    if held:
+        assert bets == [] and decisions[0].n_bets == 0
+        assert decisions[0].detail == "early_season: a team has under 10 games"
+    else:
+        # hot shooting against the away defence: the home part is an under (the test above)
+        assert len(bets) == 1 and decisions[0].detail.startswith("bet:"), (decisions, diag)
+
+
 def test_opening_night_declines_every_game_without_crashing(art):
     """RULE: on a season with no final game yet, every game is declined under
     the 10-game rule. On 2026-10-20 the card failed every tick of its window:

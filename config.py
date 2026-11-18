@@ -807,6 +807,9 @@ ACTION_THRESHOLDS: dict = {
     # calibrated-EV floor (models/nba_prop_projection.CARD). Graded walk-forward
     # 2023-24..2025-26 at the best bettable price: 83,360 bets, +4.12%
     # (docs/nba_models_2026.md section 5). THE CUT IS EV, per market, in the card.
+    # From 2026-11-18 (mike) the threes cell is unders only: threes overs were
+    # the one losing cell of size on the nightly card (287 bets, -23.08 units
+    # on three seasons; docs/nba_reassessment_2026_11.md).
     # Written through scripts/nba_props_card.py from 2026-10-20 (mike): one bet a
     # game across both NBA prop models and four a night (six from 2026-11-04),
     # strongest first by each bet's EV percentile within its own model
@@ -2454,8 +2457,10 @@ MODEL_MIN_ODDS: dict = {
     # season; docs/nba_models_2026.md 4.3). Pinned for the same reason as
     # nhl_over_under: a Railway DEFAULT_MIN_ODDS override must not move it.
     "nba_prop_market":           -200,
-    # The projection model was graded at the same -200 floor; it lays -200 to
-    # +3000 (median +110; the long tail is threes overs at 0.5 from one book).
+    # The projection model was graded at the same -200 floor. Without threes
+    # overs (not bet from 2026-11-18) it lays -200 to +375, median +105, on its
+    # graded bets at the seven deciding books. The +3000 tail it had was
+    # threes overs at 0.5 from one book and went with them.
     "nba_prop_projection":       -200,
     # NBA totals overs (2026-10-17, mike): graded at the same -200 floor; it laid
     # -115 to +100 on its 611 graded bets (median -110). Pinned so a Railway
@@ -3148,7 +3153,9 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
 # chosen per market on 2023-24 + 2024-25 and confirmed on 2025-26
 # (docs/nba_models_2026.md section 5). min_ev_for(model, market) returns the
 # market's floor, so the Discord "good to" price solves the cut the pick
-# actually cleared rather than the lowest of the six.
+# actually cleared rather than the lowest of the six. Which SIDES a market
+# bets is in the model (its _SIDES): threes is unders only from 2026-11-18,
+# and its 0.04 here is that under cell's floor, unchanged.
 MODEL_MARKET_EV_FLOOR: dict = {
     "nba_prop_projection": {
         "player_steals":           0.02,

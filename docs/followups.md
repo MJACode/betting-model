@@ -21,6 +21,32 @@
 
 ---
 
+## [ ] NBA: store the player tracking pull in Supabase (2026-11-18)
+The reassessment pulled the league's one-day player tracking set for 2023-24 to
+2026-27 (5,110 files, 79.8 MB) and it sits only on mike's PC, under
+`data/local/research/nba_research/cache/tracking`. It improved the fit for
+assists, steals and blocks; no priced cell passed. Before anything is built on
+it: an importer keyed on (season, measure, date), then a daily pull (the
+research folder's `reassess/studies/2026-11-14-tracking-info/RESULT.md`,
+section 6, has the calls, the posting time and the pace). The reassessment was
+not allowed to write to production. `docs/nba_reassessment_2026_11.md`.
+
+## [ ] NBA: four tables have no 2026-27 rows (2026-11-18)
+`nba_player_game_adv`, `nba_game_inactives`, `nba_game_officials` and
+`nba_injury_report` (last report 2026-05-10) stopped at the end of 2025-26
+(production, read 2026-11-12). No live model reads them today; a model built on
+any of them cannot run until its feed is restarted.
+
+## [ ] NBA: three leads the reassessment left open (2026-11-18)
+- The slow book's total: a forward test on 2026-27 with the slow book read
+  fresh at the decision. The backtest's pass rested on copies more than 5
+  minutes old.
+- Kalshi's price on the two prop models' own bets: registered 2026-11-18, not
+  graded (`reassess/studies/2026-11-18-kalshi-price` in the research folder).
+- The prop percentile table (`models/nba_prop_rank.py`) still holds threes
+  overs' EVs. Rebuilding it without them needs a replay of the nightly card
+  first; each remaining bet's percentile would rise 0.6 points on average.
+
 ## [ ] EuroLeague pre-game rules: the channel, then watch the first slate (2026-11-14)
 The four rules (`docs/sports/euroleague.md`, "The four pre-game rules") post
 nothing to Discord until `DISCORD_CHANNEL_EUROLEAGUE` (or

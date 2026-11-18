@@ -193,7 +193,8 @@ down this list.
 - **The first week** carries last season's final totals and league-average
   starters. Grade the early window against the rest before proposing any hold:
   the proposed hockey hold was wrong when measured, and two basketball leagues
-  were told "no 10-game wait" by mike.
+  were told "no 10-game wait" by mike. The NBA totals wait came back on
+  2026-11-18: those games were break-even in the replay and 21-29 live.
 - **A first-come cap** ("lock the first qualifying quote") can fire far more
   often live than in the backtest (18% of games against 3.5%), because the live
   path sees many more quotes. Replay the live cadence.

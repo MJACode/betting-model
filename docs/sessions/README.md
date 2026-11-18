@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, NBA reassessment: the projection model stops betting threes overs (287 card bets, -23.08 units on three seasons) and the three shooting-luck total models wait for 10 games again (21-29, -11.10 units on teams under 10 games); the week's eleven backtests in one doc |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, the full test suite no longer hangs on Windows: two scratch-database starters moved onto tests/_pg.py, 88 BYOM tests now run here, and a guard stops a third copy (#1445) |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, horse racing: a US site that takes Hong Kong bets publishes the Jockey Club's own dividends (77 of 77 win and place, 7 of 7 exotics, two cards); the US$499 archive is mike's call |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, Discord /pick page always lists FD, DK, Fanatics, BetMGM, Caesars and does not open the app |

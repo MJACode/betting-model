@@ -260,6 +260,12 @@ then bars 4–10 on all three seasons. Seven cells entered; one is dropped (belo
 | Reb + Ast | under | 0.04 | 9,605 | +393.9 | +4.22% | +3.86% (+0.58..+7.10) |
 | Threes | over + under | 0.04 | 16,750 | +496.5 | +3.11% | +4.60% (+2.34..+6.83) |
 
+**From 2026-11-18 the threes cell is unders only (mike; section 17).** The table above and every
+figure in this section are the card as graded and shipped on 2026-10-16, threes overs included
+(`models/nba_prop_projection.CARD_AS_GRADED`). Split by side at the seven deciding books, threes
+overs are +0.93% on 6,828 bets (95% interval -1.5% to +3.4%) and threes unders +4.27% on 9,893
+(+2.5% to +6.1%).
+
 The pooled card, 2023-24..2025-26, -200 floor, every qualifying proposition, 1 unit to win:
 
 | books | bets | units | ROI | 90% CI | by season (units) | a night (median / most) |
@@ -3227,3 +3233,29 @@ projection bet clears: the projection bets it would hand the game to did no bett
 stays one a game, six a night, first by tip, ranked by each model's own percentile of raw EV.
 The prices it lays are unchanged: -194 to +380, median +120, 78% plus money. No model change,
 so no `Updated-By`.
+
+## 17. The reassessment of 2026-11-11 to 11-18: two rule changes (mike)
+
+mike, 2026-11-18: *"NBA is bleeding money and we've made no changes to improve the models ... I
+don't care what you have to do, just do it."* Live to 2026-11-17 the NBA models stood at 221
+settled bets, 100-121, -9.63 units (production `picks`, read 2026-11-18). The reassessment digested
+the 266 ideas already graded here, read nine research angles, judged 42 new ideas and ran eleven
+registered backtests. **`docs/nba_reassessment_2026_11.md`** is the whole record, one line per
+backtest. Two changes came out of it, both model updates (`Updated-By: mike`):
+
+1. **`nba_prop_projection` no longer bets threes overs** (section 5's sixth cell becomes unders
+   only). On the nightly card replayed on 2023-24..2025-26 at seven books they are 287 bets,
+   -23.08 units, -12.6%, the only losing cell of size; the card without them makes +209.60 units
+   against +190.26 (difference +19.34, 95% interval -19.58 to +60.75). The gain is not
+   established; the direction is the same on the card, off it (+0.93% on 6,828 bets, interval
+   through zero) and live (26 of its first 109 settled bets, 9-17, -0.64 units). No artifact was
+   refitted.
+2. **The three shooting-luck total models wait for 10 games again** (sections 6.7 and 8.4 graded
+   them on that population; section 9.4's early-season test had closed on too few bets). This
+   reverses 2026-11-02's removal of the wait. With no wait, 50 of their first 56 settled bets had
+   a team under 10 games and went 21-29, -11.10 units; the other 6 went 5-1, +3.85. The backtest
+   had the kept-out games at -0.14% on 211, +4.50% on 80 and -0.03% on 150.
+
+Nothing else is built from the eleven backtests: each of the four registered cells that passed
+was refuted by its own audit as a result to act on. The settings are in `docs/thresholds.md`; the
+two rules in plain words are in `docs/sports/nba.md`.

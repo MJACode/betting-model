@@ -396,8 +396,8 @@ baseline in that window. Season-to-date rates are noise early — blend toward
 the prior season by games played. **NHL: no hold** (mike, 2026-10-01;
 `docs/sports/nhl.md`). **NCAAB totals: no hold** (mike, 2026-11-02:
 *"we do not need to wait 10 games, I never approved that"*;
-`docs/sports/ncaab.md`). **NBA shooting-luck totals (full game, home team total,
-first half): no hold** (mike, 2026-11-02; `docs/sports/nba.md`).
+`docs/sports/ncaab.md`). **NBA shooting-luck totals: the 10-game hold is back**
+(mike, 2026-11-18, reversing his 11-02 no hold; `docs/sports/nba.md`).
 
 ### NHL Overtime
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
