@@ -1318,7 +1318,9 @@ const MINUTES_BEFORE_TIP_MODELS: readonly string[] = [
 ];
 
 // The four EuroLeague pre-game rules' page text (UX review, 2026-11-14): what
-// each bets and the prices it lays, and no "line" for the two moneylines.
+// each bets and the prices it lays, and no "line" for the two moneylines. The
+// three side models bet only home underdogs, so each page says one game can
+// carry more than one of their bets, all on the same team (mike, 2026-11-18).
 const EUROLEAGUE_CHECKED =
   'This model checks each game once, five to ten minutes before tip-off, at the sportsbook with the best ' +
   'price, which may not be DraftKings. ';
@@ -1327,16 +1329,23 @@ const MINUTES_BEFORE_TIP_BODY: Readonly<Record<string, string>> = {
     EUROLEAGUE_CHECKED +
     'It bets the home team’s moneyline only when the home team is the underdog on the full-game spread. ' +
     'It never lays more than -200. ' +
+    'The EuroLeague Spreads and First Half Moneyline models also bet only home underdogs. ' +
+    'So when more than one of the three bets a game, every bet is on the same team. ' +
     'A posted bet is never re-priced: it stays at the price it posted at.',
   euroleague_home_dog_spread:
     EUROLEAGUE_CHECKED +
-    'It bets the home team against the full-game spread when the home team is the underdog. A posted bet ' +
-    'is never re-priced: it stays at the line and price it posted at.',
+    'It bets the home team against the full-game spread when the home team is the underdog. ' +
+    'The EuroLeague Moneyline and First Half Moneyline models also bet only home underdogs. ' +
+    'So when more than one of the three bets a game, every bet is on the same team. ' +
+    'A posted bet is never re-priced: it stays at the line and price it posted at.',
   euroleague_h1_dog_ml:
     EUROLEAGUE_CHECKED +
     'It bets the home team’s first-half moneyline only when the home team is the underdog for the first half ' +
     'and on the full-game spread. The bet settles on the first half’s score alone, and a ' +
-    'tied first half returns the stake. A posted bet is never re-priced: it stays at the price it posted at.',
+    'tied first half returns the stake. ' +
+    'The EuroLeague Moneyline and Spreads models also bet only home underdogs. ' +
+    'So when more than one of the three bets a game, every bet is on the same team. ' +
+    'A posted bet is never re-priced: it stays at the price it posted at.',
   euroleague_q1_club_share_total:
     EUROLEAGUE_CHECKED +
     'It bets the first-quarter total, over or under, and settles on the first quarter’s points alone. A ' +

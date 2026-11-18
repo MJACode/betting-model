@@ -103,6 +103,35 @@ def test_the_pre_game_boards_say_when_euroleague_picks_post():
     assert "The app has no EuroLeague player or team stats." in stats
 
 
+SIDE_MODELS = ("euroleague_home_ml", "euroleague_home_dog_spread", "euroleague_h1_dog_ml")
+
+
+def _page_body(meta: str, model: str) -> str:
+    """The model page's text in MINUTES_BEFORE_TIP_BODY, its string literals joined."""
+    block = re.search(r"const MINUTES_BEFORE_TIP_BODY[^=]*= \{\n(.*?)^\};", meta, re.M | re.S).group(1)
+    entry = re.search(r"^  " + model + r":\n(.*?)(?=^  \w+:\n|\Z)", block, re.M | re.S).group(1)
+    return "".join(re.findall(r"'((?:[^'\\]|\\.)*)'", entry))
+
+
+def _long_label(meta: str, model: str) -> str:
+    entry = re.search(r"^  " + model + r": \{\n(.*?)^  \},", meta, re.M | re.S).group(1)
+    return re.search(r"longLabel: '([^']*)'", entry).group(1)
+
+
+def test_each_side_models_page_says_the_other_two_bet_the_same_team():
+    """mike, 2026-11-18: "Yes, add it". The three EuroLeague side models bet
+    only home underdogs, so a game two or three of them bet carries every bet
+    on one team. Each page names the other two by the name the app shows."""
+    meta = _read("lib/modelMeta.ts")
+    for model in SIDE_MODELS:
+        body = _page_body(meta, model)
+        others = [_long_label(meta, m).removeprefix("EuroLeague ") for m in SIDE_MODELS if m != model]
+        assert f"The EuroLeague {others[0]} and {others[1]} models also bet only home underdogs. " in body, model
+        assert "So when more than one of the three bets a game, every bet is on the same team. " in body, model
+    # the totals model bets no side, so it carries no such line
+    assert "same team" not in _page_body(meta, "euroleague_q1_club_share_total")
+
+
 def test_the_recap_and_the_board_clock_know_the_sport():
     assert "EUROLEAGUE: 11," in _read("lib/dailyResults.ts")
     fmt = _read("lib/format.ts")
