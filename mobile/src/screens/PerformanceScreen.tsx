@@ -803,7 +803,10 @@ const styles = StyleSheet.create({
     borderColor: colors.separatorOpaque,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
+    // Same inset as every other card on the tab; without it the note ran
+    // edge to edge (Matt, 2026-11-19, screenshot).
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
   },
   soonText: { flex: 1 },
   soonTitle: {

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Performance tab: the sportsbook-sync note now sits on the same 16pt gutter as the other cards (#1491) |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Key Metrics: an exec summary tab (results, beating the close, models, operations), first in the ops dashboard |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, the three NCAAF totals bet after kickoff voided out of the record (mike; worker job 1478685, void notice posted) |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, three NCAAF totals placed after kickoff read in-play on Model Health; NCAAF pre-game picks refused in the last 10 minutes before the feed's listed start (#1484) |
