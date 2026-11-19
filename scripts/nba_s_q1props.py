@@ -1146,7 +1146,7 @@ def live_keys() -> dict:
     if CARD_BETS.exists():
         b = pd.read_parquet(CARD_BETS, columns=["game_id", "player_id", "market", "side", "season", "ev", "price"])
         keep = np.zeros(len(b), bool)
-        for m, (sides, floor) in pj.CARD.items():
+        for m, (sides, floor) in pj.CARD_AS_GRADED.items():
             keep |= (b.market == m).to_numpy() & b.side.isin(sides).to_numpy() & (b.ev >= floor).to_numpy() \
                 & (b.price >= float(config.DEFAULT_MIN_ODDS)).to_numpy()
         b = b[keep & b.season.isin(PROP_SEASONS).to_numpy()]
