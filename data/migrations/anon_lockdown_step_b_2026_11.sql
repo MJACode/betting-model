@@ -488,10 +488,12 @@ BEGIN
    WHERE c.relnamespace = 'public'::regnamespace
      AND c.relkind IN ('r', 'v', 'm', 'p', 'f')
      AND c.relname <> 'site_public_record'
-     AND (has_table_privilege('anon', c.oid, 'SELECT')
-          OR has_table_privilege('anon', c.oid, 'INSERT')
-          OR has_table_privilege('anon', c.oid, 'UPDATE')
-          OR has_table_privilege('anon', c.oid, 'DELETE'));
+     AND CASE WHEN c.relkind IN ('r', 'v', 'm', 'p', 'f') THEN
+           has_table_privilege('anon', c.oid, 'SELECT')
+           OR has_table_privilege('anon', c.oid, 'INSERT')
+           OR has_table_privilege('anon', c.oid, 'UPDATE')
+           OR has_table_privilege('anon', c.oid, 'DELETE')
+         ELSE false END;
   IF bad IS NOT NULL THEN
     RAISE EXCEPTION 'anon still has table privs on: %', bad;
   END IF;

@@ -688,6 +688,65 @@ def test_supabase_admin_defaults_are_out_of_postgres_reach():
         _psql_file(dsn, ROOT / "scripts" / "lockdown_anon_stray_check.sql")
 
 
+def test_lockdown_runbook_sql_runs_on_scratch_postgres():
+    """The snapshot and the pre-apply check are executed, not only read.
+
+    Postgres can evaluate has_sequence_privilege on a table before the
+    relkind filter, and text || defaclobjtype is an ambiguous operator.
+    Both failed on production 17.6. Step A's own post-apply check runs
+    with the migration. Undo A runs after it.
+    """
+    if not pg_bin("psql"):
+        pytest.skip("psql is not installed")
+    from scripts.restore_acl_from_snapshot import _split_defacl
+
+    files = _sql_files()
+    with scratch_cluster("runbook-sql-") as dsn:
+        _psql(dsn, _fixture_sql())
+        _psql(dsn, """
+          CREATE INDEX one_time_tokens_link_token_hash_hash_idx
+            ON public.games (id);
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT SELECT ON TABLES TO anon;
+          ALTER DEFAULT PRIVILEGES
+            REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+        """)
+        _psql_file(dsn, ROOT / "scripts" / "lockdown_acl_snapshot.sql")
+        rows = _psql(
+            dsn,
+            "SELECT object FROM ops.acl_snapshot WHERE kind = 'defacl' ORDER BY 1;")
+        objects = [line.strip() for line in rows.splitlines() if line.strip()]
+        assert objects
+        saw_global = False
+        saw_schema = False
+        for obj in objects:
+            role, typ, global_scope = _split_defacl(obj)
+            assert role
+            assert len(typ) == 1 and typ.isalpha()
+            assert obj == (f"{role}:{typ}:global" if global_scope else f"{role}:{typ}")
+            saw_global = saw_global or global_scope
+            saw_schema = saw_schema or not global_scope
+        assert saw_global and saw_schema
+        try:
+            _psql_file(dsn, ROOT / "scripts" / "lockdown_preapply_check.sql")
+        except AssertionError as exc:
+            text = str(exc)
+            assert "not a sequence" not in text
+            assert "operator is not unique" not in text
+            assert "42809" not in text
+            assert "42725" not in text
+            assert "baseline drifted" in text
+        else:
+            raise AssertionError("preapply check did not raise on the scratch counts")
+        _psql_file(dsn, files["site"])
+        _psql_file(dsn, files["a"])
+        ok, err = _can(dsn, "anon", "SELECT 1 FROM picks;")
+        assert not ok and "42501" in err
+        _psql_file(dsn, files["undo_a"])
+        ok, _ = _can(dsn, "anon", "SELECT 1 FROM picks;")
+        assert ok
+
+
 def test_stray_check_keep_names_match_the_spec():
     from data.anon_readable import ANON_READABLE, RPC_ANON_CALLABLE
     import inspect

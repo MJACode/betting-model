@@ -436,3 +436,4 @@ jobs:
             exit 1
           fi
           grep -q 'test_steps_a_and_b_on_scratch_postgres PASSED' /tmp/anon-lockdown-pytest.txt
+          grep -q 'test_lockdown_runbook_sql_runs_on_scratch_postgres PASSED' /tmp/anon-lockdown-pytest.txt

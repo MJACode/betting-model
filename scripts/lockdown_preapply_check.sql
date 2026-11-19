@@ -18,7 +18,12 @@ BEGIN
     FROM pg_class c
    WHERE c.relnamespace = 'public'::regnamespace
      AND c.relkind IN ('r', 'v', 'm')
-     AND has_table_privilege('anon', c.oid, 'SELECT')
+     -- The relkind filter is not enough. Postgres can call the function
+     -- on an index or a sequence first, and has_table_privilege is only
+     -- asked of a table, view or matview.
+     AND CASE WHEN c.relkind IN ('r', 'v', 'm')
+              THEN has_table_privilege('anon', c.oid, 'SELECT')
+              ELSE false END
      AND (
            c.relkind IN ('v', 'm')
         OR NOT c.relrowsecurity
@@ -45,7 +50,9 @@ BEGIN
    WHERE c.relnamespace = 'public'::regnamespace
      AND c.relkind = 'r'
      AND c.relrowsecurity
-     AND has_table_privilege('anon', c.oid, 'SELECT')
+     AND CASE WHEN c.relkind = 'r'
+              THEN has_table_privilege('anon', c.oid, 'SELECT')
+              ELSE false END
      AND NOT EXISTS (
            SELECT 1
              FROM pg_policy p
@@ -72,7 +79,11 @@ BEGIN
     FROM pg_class c
    WHERE c.relnamespace = 'public'::regnamespace
      AND c.relkind = 'S'
-     AND has_sequence_privilege('anon', c.oid, 'USAGE');
+     -- Measured: with the filter alone, Postgres 17 and 18 call
+     -- has_sequence_privilege on a table first and raise 42809.
+     AND CASE WHEN c.relkind = 'S'
+              THEN has_sequence_privilege('anon', c.oid, 'USAGE')
+              ELSE false END;
 
   IF readable <> 97 OR grant_only <> 20 OR fns <> 82 OR seqs <> 67 THEN
     RAISE EXCEPTION
