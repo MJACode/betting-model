@@ -232,7 +232,9 @@ fair line. It is `H.market_fair` on the team-total quotes: the median of the dec
   (`GAP_CUT`, `SIDE`).
 - **Games:** both teams with at least **one** game this season (`LIVE_MIN_GAMES`, mike 2026-11-02:
   no 10-game wait). The live model's graded evidence was on 10+ games, so the bets inside either
-  team's first 10 games are counted beside each cell.
+  team's first 10 games are counted beside each cell. (Note, 2026-11-18: the live models went back
+  to the 10-game wait and `LIVE_MIN_GAMES` is 10 again. This search keeps the one game it was
+  graded with, typed in the lab as `B_MIN_GAMES = 1`.)
 - **The offer:** the best under at a deciding book, under the team-total market's own fair line
   (section 4.6), at -200 or better. The gap decides the game; the fair line only chooses the offer.
 - **Not carried over:** the live card's expected-value floor. It is applied to the fair chance plus

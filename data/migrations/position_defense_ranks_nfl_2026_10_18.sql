@@ -154,7 +154,11 @@ BEGIN
         $ddl$;
 
         EXECUTE 'REVOKE ALL ON FUNCTION public.position_defense_ranks_nfl(integer[], text, text) FROM PUBLIC';
-        EXECUTE 'GRANT EXECUTE ON FUNCTION public.position_defense_ranks_nfl(integer[], text, text) TO anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.position_defense_ranks_nfl(integer[], text, text) TO authenticated';
+        IF to_regclass('public.picks') IS NULL
+           OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.position_defense_ranks_nfl(integer[], text, text) TO anon';
+        END IF;
         RAISE NOTICE 'position_defense_ranks_nfl created';
     ELSE
         RAISE NOTICE 'position_defense_ranks_nfl already present — skipping';
@@ -225,7 +229,11 @@ BEGIN
         $fn$
         $ddl$;
         EXECUTE 'REVOKE ALL ON FUNCTION public.player_season_stat_values_nfl(integer, text) FROM PUBLIC';
-        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_season_stat_values_nfl(integer, text) TO anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_season_stat_values_nfl(integer, text) TO authenticated';
+        IF to_regclass('public.picks') IS NULL
+           OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_season_stat_values_nfl(integer, text) TO anon';
+        END IF;
         RAISE NOTICE 'player_season_stat_values_nfl now returns pos';
     ELSE
         RAISE NOTICE 'player_season_stat_values_nfl already returns pos — skipping';
@@ -315,7 +323,11 @@ BEGIN
         $fn$
         $ddl$;
         EXECUTE 'REVOKE ALL ON FUNCTION public.player_h2h_stat_values_nfl(integer[], text, text[], text[]) FROM PUBLIC';
-        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_nfl(integer[], text, text[], text[]) TO anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_nfl(integer[], text, text[], text[]) TO authenticated';
+        IF to_regclass('public.picks') IS NULL
+           OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_nfl(integer[], text, text[], text[]) TO anon';
+        END IF;
         RAISE NOTICE 'player_h2h_stat_values_nfl now returns pos';
     ELSE
         RAISE NOTICE 'player_h2h_stat_values_nfl already returns pos — skipping';

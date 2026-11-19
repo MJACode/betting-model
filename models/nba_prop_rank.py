@@ -28,6 +28,15 @@ decimals) of the bets it would have made at its LIVE rule over 2023-24, 2024-25 
 Built 2026-10-20 by scripts/nba_prop_rank_table.py from the bet lists the cap grade used
 (props_market_bets_sharp_ALL_under_prop_0.00.parquet, bets_card_arriving5.parquet). Rerun it
 and paste its output here to rebuild the table. No results are used: only each bet's EV.
+
+THE PROJECTION TABLE STILL HOLDS THREES OVERS' EVs, ON PURPOSE. The model stopped betting threes
+overs on 2026-11-18 (mike; models/nba_prop_projection.py). The replay that change rests on (the
+nightly card on 2023-24..2025-26 at seven books: +209.60 units without them against +190.26 with)
+ranked every remaining bet with THIS table, unchanged, so the table is left as graded. Threes
+overs are 5,442 of its 66,588 bets (8.2%), median EV 0.0926 against 0.0819 for the rest. Rebuilt
+without them, every remaining projection bet's percentile rises, by 0.6 points on average and 1.2
+at most (measured 2026-11-18 on bets_card_arriving5.parquet): a small tilt of the door toward
+this model that has not been replayed, so it is not made here.
 """
 from __future__ import annotations
 

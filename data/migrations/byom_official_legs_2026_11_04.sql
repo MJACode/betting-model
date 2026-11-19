@@ -106,7 +106,11 @@ BEGIN
     ON public.byom_official_legs (sport, season, match_role, market);
 
   REVOKE ALL ON public.byom_official_legs FROM PUBLIC, anon, authenticated;
-  GRANT SELECT ON public.byom_official_legs TO anon, authenticated;
+  GRANT SELECT ON public.byom_official_legs TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.byom_official_legs TO anon;
+  END IF;
   ALTER TABLE public.byom_official_legs ENABLE ROW LEVEL SECURITY;
   IF NOT EXISTS (
     SELECT 1 FROM pg_policy
@@ -643,11 +647,39 @@ BEGIN
   REVOKE ALL ON FUNCTION public.byom_record(integer, jsonb) FROM PUBLIC;
   REVOKE ALL ON FUNCTION public.byom_bets(integer, jsonb, text) FROM PUBLIC;
   REVOKE ALL ON FUNCTION public.byom_backtest(integer, jsonb) FROM PUBLIC;
-  GRANT EXECUTE ON FUNCTION public.byom_risk_units(numeric) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.byom_win_units(numeric) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.byom_leg_label(text, text, text, numeric, text) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.byom_legs(integer, jsonb, text) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.byom_record(integer, jsonb) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.byom_bets(integer, jsonb, text) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.byom_backtest(integer, jsonb) TO anon, authenticated;
+  GRANT EXECUTE ON FUNCTION public.byom_risk_units(numeric) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.byom_risk_units(numeric) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.byom_win_units(numeric) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.byom_win_units(numeric) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.byom_leg_label(text, text, text, numeric, text) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.byom_leg_label(text, text, text, numeric, text) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.byom_legs(integer, jsonb, text) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.byom_legs(integer, jsonb, text) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.byom_record(integer, jsonb) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.byom_record(integer, jsonb) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.byom_bets(integer, jsonb, text) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.byom_bets(integer, jsonb, text) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.byom_backtest(integer, jsonb) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.byom_backtest(integer, jsonb) TO anon;
+  END IF;
 END $mig$;

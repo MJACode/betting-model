@@ -73,7 +73,8 @@ def test_the_prop_quote_is_pre_game_and_refuses_an_ambiguous_player():
 def test_it_is_registered_after_the_clv_stamp_and_declared_for_anon():
     from data.anon_readable import (
         ANON_READABLE,
-        RPC_ANON_CALLABLE,
+        AUTHENTICATED_READABLE,
+        RPC_AUTHENTICATED_CALLABLE,
         VIEW_BASE_TABLES,
     )
     from data.view_migrations import ACTIVE_MIGRATIONS
@@ -87,12 +88,12 @@ def test_it_is_registered_after_the_clv_stamp_and_declared_for_anon():
         "v_team_season_totals_nhl",
         "v_nhl_player_prop_odds",
     ):
-        assert view in ANON_READABLE
+        assert view in AUTHENTICATED_READABLE
         assert view in AHEAD_OF_THE_APP
     for table in ("nhl_skater_game_log", "nhl_goalie_game_log", "nhl_team_game_log"):
         assert table in VIEW_BASE_TABLES
         assert table not in ANON_READABLE
-    assert "player_stat_values_nhl" in RPC_ANON_CALLABLE
+    assert "player_stat_values_nhl" in RPC_AUTHENTICATED_CALLABLE
 
 
 def test_no_scorer_or_card_reads_the_new_names():

@@ -3,7 +3,7 @@
 mike, 2026-10-16: "build the projection model", "maximize units won". Six
 cells, every qualifying proposition, never a proposition nba_prop_market
 holds, decided once in the same window, at the consensus main line, on the
-worker's inputs only.
+worker's inputs only. From 2026-11-18 (mike) the threes cell is unders only.
 """
 from __future__ import annotations
 
@@ -67,14 +67,45 @@ def test_labels_use_the_live_nba_rules_words_for_shared_markets():
     assert pj.MARKET_LABEL["player_rebounds_assists"] == "Reb+Ast"
 
 
-def test_the_card_is_the_six_confirmed_cells_without_assists_overs():
+def test_the_card_is_the_six_confirmed_cells_without_assists_overs_or_threes_overs():
     assert pj.CARD == {
         "player_steals": (("over", "under"), 0.02), "player_rebounds": (("under",), 0.01),
         "player_blocks_steals": (("over", "under"), 0.05), "player_blocks": (("under",), 0.02),
-        "player_rebounds_assists": (("under",), 0.04), "player_threes": (("over", "under"), 0.04),
+        "player_rebounds_assists": (("under",), 0.04), "player_threes": (("under",), 0.04),
     }
     assert "player_assists" not in pj.CARD
     assert set(pj.STATS) == {"rebounds", "assists", "fg3_made", "steals", "blocks"}
+    # the card as graded on 2026-10-16 (what the closed searches replayed): the same six
+    # markets and floors, threes on both sides. Nothing live reads it.
+    assert pj.CARD_AS_GRADED == {**pj.CARD, "player_threes": (("over", "under"), 0.04)}
+
+
+def test_threes_overs_are_never_offered():
+    """RULE (mike, 2026-11-18): nba_prop_projection bets threes UNDERS only. On the nightly
+    card replayed on 2023-24..2025-26 its threes overs were 287 bets, -23.08 units, the only
+    losing cell of size, and they were 24% of its first 109 live bets against 8.8% of its
+    graded ones (docs/nba_reassessment_2026_11.md). However good the over looks, it is not a
+    bet; the under still is; every other cell keeps its sides."""
+    # a 60% over at +150 (EV +0.50, far over the 0.04 floor): no bet, and the game is still decided
+    over = [_q("draftkings", 2.5, +140, -180, market="player_threes"),
+            _q("fanduel", 2.5, +150, -190, market="player_threes")]
+    bets, diag, dec = _run(over, art=_art(0.60))
+    assert bets == [] and len(dec) == 1 and dec[0]["n_bets"] == 0
+    assert diag["qualifying"] == 0, "the over was priced as a candidate"
+    # the under on the same market is still bet
+    under = _run([_q("draftkings", 2.5, -180, +140, market="player_threes"),
+                  _q("fanduel", 2.5, -190, +150, market="player_threes")], art=_art(0.40))[0]
+    assert len(under) == 1 and (under[0].side, under[0].book, under[0].price) == ("under", "fanduel", 150.0)
+    # no market, at any probability or price, can produce a threes over
+    for p in (0.05, 0.40, 0.60, 0.95):
+        for o, u in ((+3000, -10000), (+150, -190), (-110, -110), (-190, +150)):
+            got = _run([_q("draftkings", 0.5, o, u, market="player_threes")], art=_art(p))[0]
+            assert all(b.side == "under" for b in got), (p, o, u, got)
+    # and the overs that stay on the card are still bet (steals, blocks+steals)
+    for market in ("player_steals", "player_blocks_steals"):
+        kept = _run([_q("draftkings", 1.5, +150, -190, market=market)], art=_art(0.60))[0]
+        assert len(kept) == 1 and kept[0].side == "over", market
+    assert pj.CARD["player_threes"][0] == ("under",)
 
 
 def test_the_inputs_are_the_workers_only():
@@ -491,6 +522,8 @@ def _settle(side, line, market):
     ("over", 11.5, "player_rebounds_assists", "WIN"),
     ("over", 1.5, "player_steals", "WIN"),
     ("under", 3.5, "player_threes", "LOSS"),             # 4 threes
+    # a threes over is no longer bet (2026-11-18), but one already written still settles (CLAUDE.md 1c)
+    ("over", 3.5, "player_threes", "WIN"),
     ("under", 1.5, "player_blocks", "WIN"),
     ("under", 5.5, "player_rebounds", "WIN"),
 ])
@@ -599,7 +632,9 @@ def test_the_posting_run_sends_every_near_tip_pick_over_the_cap(monkeypatch):
     monkeypatch.setattr(dn, "_new_signals", lambda conn, d: sigs)
     monkeypatch.setattr(dn, "refuse_mismatched", lambda s, where: s)
     monkeypatch.setattr(dn, "_webhook_for_sport", lambda sport: "https://example.invalid/hook")
-    monkeypatch.setattr(dn, "_post_picks", lambda url, sport, group, d: sent.extend(group) or [(group, "m1")])
+    # **_: the run passes conn= since the matchup link (#1379); the stand-in ignores it
+    monkeypatch.setattr(dn, "_post_picks",
+                        lambda url, sport, group, d, **_: sent.extend(group) or [(group, "m1")])
 
     class _C:
         def execute(self, *a, **k):

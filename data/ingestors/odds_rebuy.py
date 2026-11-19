@@ -224,7 +224,7 @@ WITH g AS (
 o AS (
   SELECT o.game_id, o.market, o.bookmaker, o.snapshot_type,
          try_cast(o.snapshot_at AS TIMESTAMPTZ) AS ts, g.start
-    FROM odds o JOIN g USING (game_id)
+    FROM {{odds}} o JOIN g USING (game_id)
    WHERE coalesce(o.snapshot_type, '') <> 'in_play' AND coalesce(o.source, '') = ''
      AND o.market IN {GAME_MARKETS} AND o.market NOT IN (SELECT unnest(?)))
 SELECT game_id, epoch(any_value(start)) AS start,
@@ -278,7 +278,7 @@ WITH g AS (
      AND try_cast(commence_time AS TIMESTAMPTZ) BETWEEN to_timestamp(?) AND to_timestamp(?)),
 o AS (
   SELECT o.game_id, o.market, o.bookmaker, try_cast(o.snapshot_at AS TIMESTAMPTZ) AS ts, g.start
-    FROM odds o JOIN g USING (game_id)
+    FROM {{odds}} o JOIN g USING (game_id)
    WHERE coalesce(o.snapshot_type, '') <> 'in_play' AND coalesce(o.source, '') = ''
      AND o.market IN (SELECT unnest(?))),
 pm AS (
@@ -313,7 +313,7 @@ WITH g AS (
 o AS (
   SELECT o.game_id, o.market, o.bookmaker, o.snapshot_type,
          try_cast(o.snapshot_at AS TIMESTAMPTZ) AS ts, g.start
-    FROM odds o JOIN g USING (game_id)
+    FROM {{odds}} o JOIN g USING (game_id)
    WHERE coalesce(o.source, '') = '' AND o.market IN {GAME_MARKETS})
 SELECT game_id, epoch(any_value(start)) AS start,
        count(*) FILTER (WHERE bookmaker = '{DK}' AND snapshot_type = 'in_play')
@@ -351,23 +351,36 @@ def _is_thinned(kind: str, other, dk) -> bool:
     return kind == "prop" and other <= PARTIAL_MAX_ROWS and dk > 2 * other
 
 
-def prop_history(con) -> str:
-    """The prop rows the plan counts: the copy's, plus every row moved to the
-    archive (scripts/archive_rows.py, #1345). The plan finds thinned games by
-    counting rows per line, so a row in the archive is a row we hold: without
-    it, a game whose exact repeats were archived would look thinned and the
-    re-buy would pay for what is already on mike's PC. A row the copy still
+def _with_archive(table: str, pk: str, cols: str) -> str:
+    """The rows of `table` the plan counts: the copy's, plus every row moved to
+    the archive (scripts/archive_rows.py, #1345). The plan finds thinned games
+    by counting rows per line, so a row in the archive is a row we hold:
+    without it, a game whose exact repeats were archived would look thinned and
+    the re-buy would pay for what is already on mike's PC. A row the copy still
     holds is counted once."""
     from scripts.archive_rows import ARCHIVE_ROOT
-    root = ARCHIVE_ROOT / "player_prop_odds"
+    root = ARCHIVE_ROOT / table
     if not any(root.glob("**/*.parquet")):
-        return "player_prop_odds"
+        return table
     glob = (root / "**" / "*.parquet").as_posix()
-    cols = "prop_id, game_id, market, player_name, bookmaker, snapshot_type, snapshot_at"
-    return (f"(SELECT {cols} FROM player_prop_odds UNION ALL "
+    cols = f"{pk}, {cols}"
+    return (f"(SELECT {cols} FROM {table} UNION ALL "
             f"SELECT {', '.join('a.' + c for c in cols.split(', '))} "
             f"FROM read_parquet('{glob}', union_by_name = true) a "
-            f"ANTI JOIN player_prop_odds l ON l.prop_id = a.prop_id)")
+            f"ANTI JOIN {table} l ON l.{pk} = a.{pk})")
+
+
+def prop_history(con) -> str:
+    """Prop rows, the copy's plus the archive's (`_with_archive`)."""
+    return _with_archive("player_prop_odds", "prop_id",
+                         "game_id, market, player_name, bookmaker, snapshot_type, snapshot_at")
+
+
+def odds_history(con) -> str:
+    """Game-odds rows, the copy's plus the archive's (`_with_archive`): the
+    game, extra-market and in-play plans all count rows per line."""
+    return _with_archive("odds", "odds_id",
+                         "game_id, market, bookmaker, snapshot_type, snapshot_at, source")
 
 
 def thinned_games(con, kind: str, sport: str, start: str, end: str) -> list[dict]:
@@ -384,6 +397,8 @@ def thinned_games(con, kind: str, sport: str, start: str, end: str) -> list[dict
         sql = _INPLAY_PLAN_SQL
     else:
         sql = _PROP_PLAN_SQL.replace("{props}", prop_history(con))
+    if kind != "prop":
+        sql = sql.replace("{odds}", odds_history(con))
     cols = ("game_id", "start", "dk_per_line", "other_per_line", "opener", "close",
             "books", "markets", "snapshot_type")
     out = []

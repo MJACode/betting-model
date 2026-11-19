@@ -223,7 +223,8 @@ def test_the_view_patch_is_idempotent_and_keeps_the_grants():
     assert "IF position('DUPLICATE' in d) > 0 THEN" in code
     assert "CONTINUE" in code
     assert "security_invoker = on" in code
-    assert "GRANT SELECT ON public.%I TO anon, authenticated" in code
+    assert "GRANT SELECT ON public.%I TO authenticated" in code
+    assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in code
     assert code.count("DO $mig$") == 1, "view migrations must be ONE statement"
 
 

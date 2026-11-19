@@ -26,6 +26,7 @@ import {
   type PushFailureReason,
 } from '../src/lib/pushDiagnosis';
 import { buildTestMessage, interpretExpoResponse } from '../src/lib/pushTest';
+import { createQueue } from '../src/lib/pushQueue';
 import { PUSH_ROUTE_VERSION } from '../src/lib/pushRouteVersion';
 
 let passed = 0;
@@ -308,10 +309,50 @@ eq(
   PUSH_ROUTE_VERSION,
 );
 
-// ── Report ───────────────────────────────────────────────────────────────────
-if (failures.length > 0) {
-  console.error(`verify_push: ${failures.length} FAILED, ${passed} passed`);
-  for (const f of failures) console.error(`  ✗ ${f}`);
-  process.exit(1);
-}
-console.log(`verify_push: ${passed} checks passed`);
+// ── 9. Opt-out waits for an in-flight registration ───────────────────────────
+// The toggle and a registration that started on the previous value both
+// write the same token row. Whichever finishes last is what the server
+// keeps. Opt-out has to be last when it was asked for last.
+check(
+  'unregisterForPush is on the same queue as registerForPush',
+  /export async function unregisterForPush[\s\S]{0,400}enqueuePushWrite\(/.test(hook),
+);
+const clearPushBody = hook.slice(hook.indexOf('export async function clearPushForAccountDeletion'));
+check(
+  'account deletion opts out without waiting on the registration queue',
+  /pushWritesClosed = true[\s\S]{0,200}unregisterForPushNow\(\)/.test(clearPushBody)
+    && !/unregisterForPush\(\)/.test(clearPushBody.slice(0, 500)),
+);
+check(
+  'a registration that is still in flight does not enable the token after deletion',
+  /if \(pushWritesClosed\) \{[\s\S]{0,120}status: 'idle'/.test(hook.slice(hook.indexOf('async function registerForPushNow'))),
+);
+
+void (async () => {
+  const optOutQueue = createQueue();
+  const optOutOrder: string[] = [];
+  let releaseRegistration: () => void = () => {};
+  const registrationGate = new Promise<void>((resolve) => {
+    releaseRegistration = resolve;
+  });
+  const registration = optOutQueue(async () => {
+    optOutOrder.push('start-reg');
+    await registrationGate;
+    optOutOrder.push('end-reg');
+  });
+  await Promise.resolve();
+  const optOut = optOutQueue(async () => {
+    optOutOrder.push('off');
+  });
+  check('opt-out has not run ahead of the in-flight registration', optOutOrder.join(',') === 'start-reg');
+  releaseRegistration();
+  await Promise.all([registration, optOut]);
+  eq('opt-out is the last write', optOutOrder.join(','), 'start-reg,end-reg,off');
+
+  if (failures.length > 0) {
+    console.error(`verify_push: ${failures.length} FAILED, ${passed} passed`);
+    for (const f of failures) console.error(`  ✗ ${f}`);
+    process.exit(1);
+  }
+  console.log(`verify_push: ${passed} checks passed`);
+})();

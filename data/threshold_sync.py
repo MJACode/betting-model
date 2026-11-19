@@ -100,6 +100,26 @@ def _apply_volume_settings(conn: DBConnection) -> int | None:
         return None
 
 
+def _sync_retired_models(conn: DBConnection) -> None:
+    """Keep site_retired_models equal to config.RETIRED_MODELS.
+
+    The table is created by site_public_record_2026_11.sql, which is applied
+    by hand. Until that migration is on the database this is a no-op, so the
+    daily threshold sync does not fail closed.
+    """
+    row = conn.execute(
+        "SELECT to_regclass('public.site_retired_models')").fetchone()
+    if not row or row[0] is None:
+        return
+    from config import RETIRED_MODELS
+    ids = sorted(RETIRED_MODELS)
+    conn.execute("DELETE FROM public.site_retired_models")
+    if ids:
+        conn.executemany(
+            "INSERT INTO public.site_retired_models (model_id) VALUES (%s)",
+            [(mid,) for mid in ids])
+
+
 def sync_action_thresholds(conn: DBConnection = None) -> int:
     """Upsert every config model into model_action_thresholds and prune stragglers.
 
@@ -184,6 +204,7 @@ def sync_action_thresholds(conn: DBConnection = None) -> int:
         # LAST before the commit: the upsert above has just written config's
         # cut over every row, settings included.
         in_force = _apply_volume_settings(conn) if volume else None
+        _sync_retired_models(conn)
 
         conn.commit()
         logger.success(

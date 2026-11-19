@@ -340,11 +340,68 @@ Each kept row is the opener or the close of its proposition. A rung of an altern
 
 | Move | Blocked by | What unblocks it |
 |---|---|---|
-| Prop repeats | nothing found | allowed |
-| Game-odds repeats | `features/market_movement.py` (`mkt_snapshots` counts DraftKings rows per past game, used in MLB training and sweeps); `scripts/build_nba_live_ig2_artifact.py` (groups rows by fetch); `scripts/nhl_totals_lab.py`; `mlb_inplay_history` / `ncaaf_inplay_history` resume from stored served times, so they would re-buy | training reads the archive too (the one history reader, section 3c); the two in-play buyers take a ledger |
+| Prop repeats | moved 11-16 and 11-17; the 2026-11-18 audit then found the app's "At pick" price (#1458) and research replays (below) | refused in the tool since 2026-11-18. The app fix (#1460) is live but covers only games up to 2026-11-12 (`PROP_ARCHIVED_THROUGH`), so a later move must move that date in the same change |
+| Game-odds repeats | The 2026-11-18 audit, below: the app's line history for past picks, the first-half CLV close, the NCAAB spread and moneyline builds, the MLB market-movement feature, the paid in-play buyers, the NFL cache import, and research scripts that rebuild fetches or measure price age | those readers read the archive too (the one history reader, section 3c); the buyers and importers take a ledger |
 | Older than 90 days, both tables | Teams board (the ±1.5 run line close is not the only `spreads` row of a game); CLV's same-line close; BYOM's lock candidates; `v_nhl_player_prop_odds`; `team_period_results`; the app's line charts | the opener/close table keyed with the line (section 3b), and those readers moved to it |
 
-**The re-buy (#1384) counts archived rows as held.** Its planner finds thinned games by counting rows per line. It now counts the archive too (`odds_rebuy.prop_history`), so it does not buy back what is on the PC.
+**The re-buy (#1384) counts archived rows as held.** Its planner finds thinned games by counting rows per line. It now counts the archive too, so it does not buy back what is on the PC.
+- Props: `odds_rebuy.prop_history`.
+- Game odds, from 2026-11-18: `odds_rebuy.odds_history`, used by the game, extra-market and in-play plans. Without it, a game whose other books' repeats were archived would drop to `THIN_MAX_ROWS` rows a line and be bought again.
+
+**Game-odds repeats stay in Supabase (reader audit, 2026-11-18).** mike asked that day for the odds table to be done the same way as props. Measured on the PC copy that day:
+- 28,198,332 of the 59,301,354 `odds` rows (47.6%) are repeats, for games that started over 3 days ago.
+- 23,828,919 of them fall outside the four readers the 11-16 audit named.
+- A second audit read every reader of `odds` on `origin/master`.
+  - Protecting what its readers touch, in whole groups, leaves 1,279,329 repeats (2.2% of the table). The groups were every game with a pick, all NCAAB and NBA pre-game rows, all MLB in-play rows, NCAAF paid history, and NHL moneyline paid history and 3-way rows.
+  - That figure counts 596,699 NFL cache-import rows the keep list now holds.
+  - A finer keep list would free more; that is not measured.
+- Nothing moves until the readers read the archive too. The readers went from 4 to more than 14 in two days, and the prop move already changed an app screen (below).
+
+What the audit found reading those rows, by what breaks:
+- **The app (production).** The line-history card for a past pick shows "At pick" only when the book's last stored row before the pick is within 6 hours of it (`AT_PICK_MAX_MS`, `mobile/src/lib/lineMovementView.ts`). A repeat is the row that keeps a standing price inside those 6 hours.
+- **First-half CLV (production).** `tracking/paper_tracker._closing_odds` reads the NCAAB first-half close from a row on the pick's line after the pick. When the line moves later, only repeats sit on that line after the pick. The backfill reaches 7 days back.
+- **NCAAB builds (live models).** `scripts/ncaab_spread_market_build.py` and `scripts/ncaab_moneyline_build.py` read each book's rows in the hour before 15:00 UTC (`models/ncaab_book_quotes.py`). A book whose price stood still in that hour drops out.
+- **Buyers and importers.**
+  - The re-buy planner: now fixed, above.
+  - `data/ingestors/nfl_odds_cache_import.py` resumes on stored served times.
+  - `data/ingestors/ncaab_odds_history.py` replays dedupe on the exact stamp.
+  - `data/ingestors/ncaaf_derivative_history.py` buys a game at a pull only if the game holds a row from it.
+- **Research.** `scripts/ncaaf_search/steam_lag.py`, `scripts/nhl_moneyline_rebuild.py`, `scripts/nhl_regulation_game_day_grade.py`, `scripts/live_inning_gate_replay.py`, `scripts/nba_research_cache.py` / `scripts/nba_game_harness.py` and `models/backtester.py` rebuild fetches, need a row inside a window, or measure how long a price stood.
+
+**Not checked:** the rule's "row before it" ignores `source`, so a reader that filters on `source` can see a different row before a repeat. The safe verdicts for readers that filter on `source` are not verified.
+
+`scripts/archive_rows.py` keeps the code for this: `_ODDS_KEEP` (the rows a reader needs whole), `prepare_range` (every date from one pass of the copy) and `--batch-rows` (small games together, each still checked on its own). Its `REFUSED` entry blocks the move.
+- **Never run against Postgres:** the batched removal. Its first use should be one date, with the row counts and the ledger read back before `--pending`.
+- **The odds table holds 85,666 games against 1,007 for props,** so removing one game a transaction would take about 38 hours.
+
+**The prop move cost past prop picks their "At pick" price (measured 2026-11-18).** The same app rule reads `player_prop_odds`.
+- **Measured:** 77,435 pre-game prop picks are on games whose repeats were archived. On the PC copy plus the archive files, 74,913 had a row at the pick's book within 6 hours before the pick. On the PC copy alone, as Supabase now is, 70,266 do. So up to 4,647 cards lost "At pick" and now say the book's newest price is from before the pick.
+  - In 4,613 of those, the row left before the pick holds the locked line and price, so the card would otherwise have shown it.
+  - On five sampled picks, the app's own read on live Supabase (the newest 500 rows) put the last row before the pick 6 h 2 min to 9 h 10 min back. The archive holds a row with the same prices 1 min 50 s to 1 h 2 min before each pick.
+- **How it was counted** (the PC copy and the archive files, read-only):
+  - the pick's book is `decision_book`, else DraftKings;
+  - the market comes from the app's model-to-market map;
+  - the player comes from the label.
+  - It ignores the card's 500-row cap.
+- **The prop CLV close is unaffected:** it is the newest row before the start.
+
+**The prop readers, audited after the move (2026-11-18).** It ran on `origin/master` at c1e4240c.
+- **How the rule keeps rows.** The kept "close" is the last pre-game row of the proposition, of whatever type. The repeat check runs per type.
+  - NHL files its last pre-game pull as `close` (`nhl_prop_odds_ingestor.py`), and so does NBA for games with a bet (`nba_prop_close_ingestor.py`).
+  - So for those props, the last `open` row can have moved, and so can `open` repeats after the start.
+- **Production:**
+  - The "At pick" card (#1458).
+  - The app's divider, "Some prices after your pick not shown", now shows less often. That is harmless.
+  - `latest_prop_odds_recompute`, live in the catalog, takes alternate-line rows at `MAX(snapshot_at)`. It runs only from the update trigger or a manual rebuild of `latest_prop_odds`. For a past game whose newest row is a moved post-start `open` repeat, only the rungs that changed at that instant would survive.
+- **Research, when replayed on past games against the database:**
+  - `models/nfl_prop_market.drop_pulled_quotes` (a price over 30 minutes behind the book's newest row reads as pulled);
+  - `models/nfl_prop_injury_veto` (the quote's time is now the start of the unchanged run);
+  - `scripts/nfl_edge_cache.py` with `nfl_edge_prop_market_floor.py` (a bucket with no change has no row);
+  - `scripts/nhl_prop_card.py` and `nhl_props_card.py` (the newest `open` fetch);
+  - `scripts/nhl_prop_ev_lab.py` (its "close" is the newest `open` fetch).
+  - Live runs read unstarted games and are unchanged.
+- **Could re-insert moved rows:** `scripts/restore_sharp_prop_history.py`, a manual script. It anti-joins on the exact stamp.
+- **Unchanged** (the price as of a time, the first row, unstarted games, or bought single snapshots): the scorer, the prop CLV close, BYOM prop facts and lock candidates, the NBA prop models and their training, and the ingestors' existence checks.
 
 **Running it** (from the repo, with `SUPABASE_SERVICE_ROLE_KEY` in `.env`):
 
@@ -378,7 +435,19 @@ python scripts/archive_rows.py status
   - Triggers, the anon read rule, permissions and all 5 indexes were unchanged. The 3:15 refresh pass's 21,218 new rows all reached `latest_prop_odds`. There were no app errors and no failed app reads in any 5-minute window.
 - **Not tested:** rows arriving mid-run. None arrived: the last ID stayed at 123,097,605 from 02:28 to 03:17, and the change log table stayed empty. So nothing here shows how a run behaves on `odds`, or at a busier hour, while rows are being written.
 
-**How to run it again** (for example, on `odds`):
+**`odds` gives back nothing from a rewrite until rows leave it** (2026-11-18).
+- A 0.2% block sample holds 34.2 live rows a page, against 34 for a packed page at its 228-byte average row.
+- Dead rows: 107,448 of 59.5M.
+- Its indexes can shrink, by `REINDEX CONCURRENTLY` as on props (#1345).
+
+**`odds` primary key rebuilt, 2026-11-19** (`REINDEX INDEX CONCURRENTLY`, 02:33:05 to 02:41:03 ET, 478 s; #1345).
+- **Only the primary key.** The dashboard's disk speed allowance ("Disk IO balance") read 8%. The runbook rebuilds only the index with a firm size estimate when it is under 50%.
+  - **That 8% is not today's figure.** Read from the chart's own data after the run, the headline is the lowest daily point of the last 7 days. It is 11-17, the day of the props index rebuild. The daily points for 11-18 and 11-19 both read 99%, the latter after this rebuild. So the headline stays at 8% until 11-17 leaves the window, and the next run reads the latest daily point instead.
+- **Result:** `odds_pkey` went from 1.86 to 1.26 GB. All the table's indexes went from 10.58 to 9.98 GB, freeing 0.60 GB, as estimated. Database plus write-ahead log went from 80.90 to 80.30 GB. All 5 indexes are valid.
+- **Checks:** before the run, no other lock, no vacuum, no transaction over 60 s and no broken index. During it, the worker's refresh steps ran on schedule and the failure alerter sent no alerts. 139 rows reached `odds` during the rebuild (IDs 90,460,314 to 90,460,452, 136 NFL and 3 NCAAB), read back by the rebuilt primary key. There were 0 app errors and 0 app reads, so the app side was not tested.
+- **Not done:** the other four indexes (`idx_odds_book_snap` 6.67, `idx_odds_date` 0.88, `idx_odds_game` 0.86, `idx_odds_source_inplay` 0.30 GB). Their gain is not known: the size estimate overstates non-unique indexes 1.7 to 6.7 times. They can run on a night when the chart's latest daily point reads 50% or more (#1478).
+
+**How to run it again:**
 - **The client must match the database extension exactly.** The extension is 1.5.2, and that is the highest version Supabase offers. The PostgreSQL apt repository the image uses (PGDG) has 1.5.3, which refuses to run: "program 'pg_repack 1.5.3' does not match database library 'pg_repack 1.5.2'". `scripts/pg_repack_helper.sh` builds 1.5.2 from the upstream source tag when apt has no exact match.
 - **Where it runs:** a temporary Railway service. Image `postgres:17-bookworm`, restart policy NEVER.
   - Variables: `DATABASE_URL=${{worker.DATABASE_URL}}`, `REPACK_TABLE`, `REPACK_MODE` (`dry` first, then `run`), and `REPACK_SH`.

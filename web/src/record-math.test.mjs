@@ -11,11 +11,10 @@ test("formatSigned matches the app: plus, U+2212, unsigned zero", () => {
   assert.equal(formatSigned("12.5", 2, "u"), "+12.50u");
 });
 
-test("retired models are left out; picks are wins plus losses plus pushes", () => {
+test("picks are wins plus losses plus pushes; the view already dropped retired models", () => {
   const rows = [
     {
       sport: "MLB",
-      model_id: "mlb_f5_moneyline",
       picks: 3,
       wins: 2,
       losses: 1,
@@ -24,18 +23,7 @@ test("retired models are left out; picks are wins plus losses plus pushes", () =
       risked: 3,
     },
     {
-      sport: "MLB",
-      model_id: "golf_make_cut",
-      picks: 10,
-      wins: 10,
-      losses: 0,
-      pushes: 0,
-      units: 50,
-      risked: 10,
-    },
-    {
       sport: "NFL",
-      model_id: "nfl_spread",
       picks: 0,
       wins: 0,
       losses: 0,
@@ -45,7 +33,6 @@ test("retired models are left out; picks are wins plus losses plus pushes", () =
     },
     {
       sport: "NBA",
-      model_id: "nba_live_total",
       picks: 4,
       wins: 1,
       losses: 2,
@@ -54,11 +41,41 @@ test("retired models are left out; picks are wins plus losses plus pushes", () =
       risked: 4,
     },
   ];
-  const summary = summarizeRecord(rows, ["golf_make_cut"]);
+  const summary = summarizeRecord(rows);
   assert.ok(summary);
   assert.equal(summary.picks, 2 + 1 + 1 + 2 + 1);
   assert.equal(summary.sports, 2);
   assert.equal(summary.unitsText, "+1.00u");
+});
+
+test("a retired model id is skipped only when the fallback list is passed", () => {
+  const rows = [
+    {
+      sport: "MLB",
+      model_id: "golf_outright",
+      picks: 2,
+      wins: 2,
+      losses: 0,
+      pushes: 0,
+      units: 1,
+      risked: 2,
+    },
+    {
+      sport: "NBA",
+      model_id: "nba_moneyline",
+      picks: 1,
+      wins: 1,
+      losses: 0,
+      pushes: 0,
+      units: 0.5,
+      risked: 1,
+    },
+  ];
+  const kept = summarizeRecord(rows, ["golf_outright"]);
+  assert.equal(kept && kept.picks, 1);
+  assert.equal(kept && kept.sports, 1);
+  const all = summarizeRecord(rows, []);
+  assert.equal(all && all.picks, 3);
 });
 
 test("nothing to show hides the row", () => {
@@ -81,22 +98,18 @@ test("nothing to show hides the row", () => {
     ),
     null,
   );
-  assert.equal(
-    summarizeRecord(
-      [
-        {
-          sport: "MLB",
-          model_id: "golf_make_cut",
-          picks: 4,
-          wins: 4,
-          losses: 0,
-          pushes: 0,
-          units: 3,
-          risked: 4,
-        },
-      ],
-      ["golf_make_cut"],
-    ),
-    null,
+  const counted = summarizeRecord(
+    [
+      {
+        sport: "MLB",
+        picks: 4,
+        wins: 4,
+        losses: 0,
+        pushes: 0,
+        units: 3,
+        risked: 4,
+      },
+    ],
   );
+  assert.equal(counted && counted.picks, 4);
 });

@@ -10,6 +10,7 @@ import {
   usePushState,
 } from '@/hooks/usePushNotifications';
 import { colors, font, radii, spacing, opacity, card } from '@/lib/theme';
+import { newInboxId, recordTestNotification } from '@/hooks/useNotificationInbox';
 import { sendTestPush, type TestPushResult } from '@/lib/pushTest';
 
 /**
@@ -60,7 +61,9 @@ export function NotificationsCard(): React.ReactElement {
     if (!token) return;
     setTesting(true);
     setTestResult(null);
-    const result = await sendTestPush(token);
+    const inboxId = newInboxId();
+    const result = await sendTestPush(token, inboxId);
+    if (result.ok) void recordTestNotification(inboxId);
     setTestResult(result);
     setTestedAt(new Date().toISOString());
     setTesting(false);
@@ -106,6 +109,7 @@ export function NotificationsCard(): React.ReactElement {
         <AppSwitch
           value={enabled}
           onValueChange={onToggle}
+          trackColor={{ true: colors.tint }}
           accessibilityLabel="Notifications"
           accessibilityValue={{ text: statusSentence }}
         />
@@ -175,7 +179,7 @@ export function NotificationsCard(): React.ReactElement {
       {enabled && status === 'registered' ? (
         <>
           <View style={styles.statusRow}>
-            <Ionicons name="checkmark-circle" size={16} color={colors.gradeGood} />
+            <Ionicons name="checkmark-circle" size={16} color={colors.tint} />
             <Text style={styles.statusText}>
               This device is registered{registeredAt ? ` · ${timeLabel(registeredAt)}` : ''}
             </Text>

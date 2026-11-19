@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useSyncExternalStore } from 'react';
 
+import { useAuth } from '@/hooks/useAuth';
 import { fetchActionThresholds } from '@/lib/queries';
 import {
   markThresholdsFetched,
@@ -31,7 +32,9 @@ export function useThresholdsRevision(): number {
 }
 
 export function useActionThresholds(): void {
+  const { ready: authReady, signedIn } = useAuth();
   useEffect(() => {
+    if (!authReady) return;
     let mounted = true;
 
     // 1. Prime from cache so the filter is server-driven before the fetch lands.
@@ -64,5 +67,5 @@ export function useActionThresholds(): void {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [authReady, signedIn]);
 }

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect } from 'react';
 
+import { useAuth } from '@/hooks/useAuth';
 import { clvBeatRate } from '@/lib/clvBeat';
 import { fetchPublicTrackRecord } from '@/lib/queries';
 import { setModelClv, type ModelClv } from '@/lib/sharpScore';
@@ -48,7 +49,9 @@ export function buildModelClvMap(rows: TrackRecordRow[]): Record<string, ModelCl
 }
 
 export function useModelClvPedigree(): void {
+  const { ready: authReady, signedIn } = useAuth();
   useEffect(() => {
+    if (!authReady) return;
     let mounted = true;
 
     AsyncStorage.getItem(CACHE_KEY)
@@ -77,5 +80,5 @@ export function useModelClvPedigree(): void {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [authReady, signedIn]);
 }

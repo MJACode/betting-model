@@ -370,11 +370,23 @@ BEGIN
     $ddl$;
 
     EXECUTE 'REVOKE ALL ON FUNCTION public.player_vs_defense_nba(text, text, text, integer[], integer, text) FROM PUBLIC';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_vs_defense_nba(text, text, text, integer[], integer, text) TO anon, authenticated';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_vs_defense_nba(text, text, text, integer[], integer, text) TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_vs_defense_nba(text, text, text, integer[], integer, text) TO anon';
+    END IF;
     EXECUTE 'REVOKE ALL ON FUNCTION public.player_vs_defense_wnba(text, text, text, integer[], integer, text) FROM PUBLIC';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_vs_defense_wnba(text, text, text, integer[], integer, text) TO anon, authenticated';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_vs_defense_wnba(text, text, text, integer[], integer, text) TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_vs_defense_wnba(text, text, text, integer[], integer, text) TO anon';
+    END IF;
     EXECUTE 'REVOKE ALL ON FUNCTION public.player_vs_defense_nfl(text, text, text, integer[], integer, text) FROM PUBLIC';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_vs_defense_nfl(text, text, text, integer[], integer, text) TO anon, authenticated';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_vs_defense_nfl(text, text, text, integer[], integer, text) TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_vs_defense_nfl(text, text, text, integer[], integer, text) TO anon';
+    END IF;
 
     RAISE NOTICE 'player_vs_defense_nba/wnba/nfl created';
 END

@@ -86,7 +86,11 @@ BEGIN
       TO anon, authenticated
       USING (true);
   END IF;
-  GRANT SELECT ON public.ncaab_player_game_log TO anon, authenticated;
+  GRANT SELECT ON public.ncaab_player_game_log TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.ncaab_player_game_log TO anon;
+  END IF;
 
   -- Games whose player box ESPN could not answer usefully: attempts, the last
   -- reason, when. Stops a bad game being re-fetched every pass. Worker only:
@@ -126,7 +130,11 @@ BEGIN
   $view$;
   EXECUTE $c$COMMENT ON VIEW public.v_player_season_totals_ncaab IS 'ncaab_player_game_log v1'$c$;
   REVOKE ALL ON public.v_player_season_totals_ncaab FROM anon, authenticated;
-  GRANT SELECT ON public.v_player_season_totals_ncaab TO anon, authenticated;
+  GRANT SELECT ON public.v_player_season_totals_ncaab TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.v_player_season_totals_ncaab TO anon;
+  END IF;
 
   -- ── Last-N-games totals (the L3/L5/L10 chips on Averages) ───────────────
   EXECUTE $f$
@@ -297,8 +305,24 @@ BEGIN
   REVOKE ALL ON FUNCTION public.player_recent_games_ncaab(integer, integer, text[]) FROM PUBLIC, anon, authenticated;
   REVOKE ALL ON FUNCTION public.player_season_stat_values_ncaab(integer, text) FROM PUBLIC, anon, authenticated;
   REVOKE ALL ON FUNCTION public.player_h2h_stat_values_ncaab(integer[], text, text[], text[]) FROM PUBLIC, anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.player_window_totals_ncaab(integer, integer) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.player_recent_games_ncaab(integer, integer, text[]) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.player_season_stat_values_ncaab(integer, text) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_ncaab(integer[], text, text[], text[]) TO anon, authenticated;
+  GRANT EXECUTE ON FUNCTION public.player_window_totals_ncaab(integer, integer) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.player_window_totals_ncaab(integer, integer) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.player_recent_games_ncaab(integer, integer, text[]) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.player_recent_games_ncaab(integer, integer, text[]) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.player_season_stat_values_ncaab(integer, text) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.player_season_stat_values_ncaab(integer, text) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_ncaab(integer[], text, text[], text[]) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_ncaab(integer[], text, text[], text[]) TO anon;
+  END IF;
 END $$;

@@ -63,6 +63,10 @@ BEGIN
       TO anon, authenticated
       USING (true);
   END IF;
-  GRANT SELECT ON public.alt_game_lines TO anon, authenticated;
+  GRANT SELECT ON public.alt_game_lines TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.alt_game_lines TO anon;
+  END IF;
 END
 $$;

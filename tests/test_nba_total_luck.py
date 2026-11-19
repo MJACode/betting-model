@@ -152,12 +152,44 @@ def test_the_gap_uses_only_games_before_the_game_date():
     assert moved["gap_total"].iloc[0] != pytest.approx(base)
 
 
-# ── no ten-game wait ────────────────────────────────────────────────────────
+# ── the ten-game wait (back 2026-11-18) ──────────────────────────────────────
 
-@pytest.mark.parametrize("n,priced", [(1, True), (9, True), (10, True)])
-def test_a_team_needs_one_game_not_ten(monkeypatch, art, n, priced):
-    """mike, 2026-11-02: no 10-game wait. A team with no game has no number:
-    the opening-night test further down."""
+def test_the_live_wait_is_ten_games_on_all_three_models():
+    """RULE (mike, 2026-11-18, reversing his 2026-11-02 "remove it"): the three
+    shooting-luck total models bet no game until both teams have played 10 this
+    season. One number, each model's own default, and no card passes another.
+    With one game enough, 50 of their first 56 settled bets had a team under 10
+    games: 21-29, -11.10 units (docs/nba_reassessment_2026_11.md). Lowering it
+    needs a backtest of the games it lets in, not an edit here."""
+    import inspect
+    import models.nba_first_half_total_luck as fh
+    import models.nba_team_total_luck as tt
+    assert tl.LIVE_MIN_GAMES >= 10, "the 10-game wait is off again"
+    for mod in (tl, tt, fh):
+        assert mod.LIVE_MIN_GAMES == tl.LIVE_MIN_GAMES, mod.__name__
+        default = inspect.signature(mod.decide).parameters["min_games"].default
+        assert default == tl.LIVE_MIN_GAMES, f"{mod.__name__}.decide waits {default} games"
+    for card in ("nba_total_luck_card", "nba_team_total_luck_card", "nba_first_half_total_luck_card"):
+        src = (ROOT / "scripts" / f"{card}.py").read_text(encoding="utf-8")
+        assert "min_games" not in src, f"scripts/{card}.py sets its own wait"
+
+
+def test_the_replays_keep_the_graded_ten_game_population():
+    """RULE: each replay of the lab passes the graded population (MIN_GAMES)
+    itself, so the live wait can never change what a replay proves."""
+    assert tl.MIN_GAMES == 10
+    for name, calls in (("nba_total_luck_replay", 2), ("nba_team_total_luck_replay", 1),
+                        ("nba_first_half_total_luck_replay", 2)):
+        src = (ROOT / "scripts" / f"{name}.py").read_text(encoding="utf-8")
+        assert "from models.nba_total_luck import MIN_GAMES" in src, name
+        assert src.count("min_games=MIN_GAMES") == calls, name
+
+
+@pytest.mark.parametrize("n,priced", [(1, False), (9, False), (10, True), (12, True)])
+def test_both_teams_need_ten_games(monkeypatch, art, n, priced):
+    """RULE: no bet until both teams have played 10 games this season. A game
+    held for the wait is a RECORDED decision carrying the reason (the card
+    writes every decision to its ledger), never a missing one."""
     games, box = _season(n)
     day = (pd.Timestamp("2026-10-21") + pd.Timedelta(days=n)).strftime("%Y-%m-%d")
     t = _target(day)
@@ -170,6 +202,13 @@ def test_a_team_needs_one_game_not_ten(monkeypatch, art, n, priced):
     bets, decisions, diag = tl.decide(t, q, box, games, times, art, scheduled=games)
     assert diag["early_season"] == (0 if priced else 1)
     assert (len(bets) == 1) is priced, (decisions, diag)
+    assert len(decisions) == 1 and decisions[0].game_id == t.game_id[0]
+    if not priced:
+        assert decisions[0].detail == "early_season: a team has under 10 games"
+        assert decisions[0].n_bets == 0 and decisions[0].gap is None
+    # the replays' population is the same rule passed by hand
+    again = tl.decide(t, q, box, games, times, art, scheduled=games, min_games=tl.MIN_GAMES)
+    assert [d.detail for d in again[1]] == [d.detail for d in decisions]
 
 
 def test_a_missing_box_score_declines_the_game(art):

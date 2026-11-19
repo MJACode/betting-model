@@ -1628,6 +1628,12 @@ check(
     /btnTall: \{[\s\S]*?minHeight: 44/.test(slip) && /btnTall: \{[\s\S]*?minHeight: 44/.test(track) &&
     /inPlay \? 'checkmark'/.test(slip) && /tracked \? 'checkmark'/.test(track) &&
     !/colors\.info/.test(slip) && !/colors\.info/.test(track));
+  const centersTall = (src: string) => {
+    const block = src.match(/btnTall: \{([^}]*)\}/);
+    return !!block && block[1].includes("alignItems: 'center'") && block[1].includes("justifyContent: 'center'");
+  };
+  check('tall Slip and Track center the icon and the label in the 44pt pill',
+    centersTall(slip) && centersTall(track));
 }
 
 // ── Now line colour: better for a new bettor = green, worse = red (Matt, 2026-11-15) ──

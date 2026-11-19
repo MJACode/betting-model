@@ -18,15 +18,36 @@ THE CARD (six cells; the evidence is docs/nba_models_2026.md section 5):
     blocks + steals         over + under   0.05
     blocks                  under          0.02
     rebounds + assists      under          0.04
-    threes                  over + under   0.04
+    threes                  under          0.04   (over + under until 2026-11-18)
 
 Graded walk-forward on 2023-24..2025-26 at the best of the eight bettable
 books, the -200 price floor, every qualifying proposition: 83,360 bets,
-+4.12% (the seven-cell research card less assists overs). The research chose
-a seventh cell, ASSISTS OVERS, and it is NOT here: on 2025-26, the season it
-was confirmed on, it made +0.74% with a 90% interval of -2.88..+4.27, its
-neighbouring floor lost, its late half lost, and at the five books the live
-feed returns it was -1.29% (DraftKings alone -3.51%).
++4.12% (the seven-cell research card less assists overs, threes overs still
+in it). The research chose a seventh cell, ASSISTS OVERS, and it is NOT here:
+on 2025-26, the season it was confirmed on, it made +0.74% with a 90% interval
+of -2.88..+4.27, its neighbouring floor lost, its late half lost, and at the
+five books the live feed returns it was -1.29% (DraftKings alone -3.51%).
+
+THREES OVERS ARE NOT BET FROM 2026-11-18 (mike: "NBA is bleeding money and
+we've made no changes to improve the models ... just do it"). Threes unders
+and every other cell stay. The evidence, docs/nba_reassessment_2026_11.md:
+  * On the nightly card (one prop a game across both prop models, six a
+    night) replayed on 2023-24..2025-26 at the seven deciding books, this
+    model's threes overs are 287 bets, -23.08 units, -12.6%: the only losing
+    cell of size. The card without them makes +209.60 units against +190.26
+    (+19.34; 95% interval -19.58 to +60.75, so the gain is not established;
+    by season +15.72 / -6.49 / +10.11).
+  * Off the card they return +0.93% on 6,828 bets (interval -1.5% to +3.4%)
+    while every under cell's interval sits above zero.
+  * They were 26 of the model's first 109 settled live bets (24%) against
+    8.8% of its graded bets: the card's ranking picks the cell whose claimed
+    EV is most inflated.
+A threes over already written stays as it is, settles and counts (CLAUDE.md
+1c). The calibration map is per market, not per side, so no artifact was
+refitted; the cell is simply never offered. CARD_AS_GRADED keeps the card as
+it was graded for the closed searches that replayed it. Without threes overs
+the model lays -200 to +375 (5th percentile -166, median +105, 95th +165);
+the +1,600..+3,000 tail was threes overs at 0.5 from one book and is gone.
 
 THE RULE, per game, ONCE:
   1. Decide in the same window as nba_prop_market, 45-57 minutes before tip
@@ -111,12 +132,24 @@ _SIDES: dict[str, tuple[str, ...]] = {
     "player_blocks_steals":    ("over", "under"),
     "player_blocks":           ("under",),
     "player_rebounds_assists": ("under",),
-    "player_threes":           ("over", "under"),
+    # Unders only from 2026-11-18 (mike; the docstring's THREES OVERS block and
+    # docs/nba_reassessment_2026_11.md). find_bets offers only the sides listed
+    # here, so a threes over can no longer be written. Pinned by
+    # tests/test_nba_prop_projection.py::test_threes_overs_are_never_offered.
+    "player_threes":           ("under",),
 }
 CARD: dict[str, tuple[tuple[str, ...], float]] = {
     m: (sides, float(config.MODEL_MARKET_EV_FLOOR["nba_prop_projection"][m])) for m, sides in _SIDES.items()
 }
 MARKETS = tuple(CARD)
+# The card as it was graded and shipped on 2026-10-16, threes overs included.
+# Nothing live reads it. The closed searches that replayed "the projection
+# card as shipped" (scripts/nba_s_postseason.py, nba_s_propoffline.py,
+# nba_s_q1props.py) read this one, so a re-run still grades what they
+# registered, and the replay test compares the live selection against the
+# graded bet list through it (tests/test_nba_prop_projection_replay.py).
+CARD_AS_GRADED: dict[str, tuple[tuple[str, ...], float]] = {
+    **CARD, "player_threes": (("over", "under"), CARD["player_threes"][1])}
 # The words a pick label uses for each market. Rebounds and threes take
 # nba_prop_market's words ("Reb", "3PM") so one NBA board never says the same
 # market two ways; labels are permanent once a pick is written.
