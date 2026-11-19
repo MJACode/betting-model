@@ -7,8 +7,11 @@
  *      Nothing is unlinked before this call succeeds.
  *   2. Unlink Discord and SharpSports. A failure here is not success: the
  *      login stays, so a retry can still revoke the links.
- *   3. Call delete_my_login(). That removes auth.users.
- *   4. Wipe this install and sign out locally.
+ *   3. Forget this user's notification rows, and try the push opt-out,
+ *      while the login still exists. A failed opt-out is logged and does
+ *      not stop the login delete. The wipe retries the opt-out afterwards.
+ *   4. Call delete_my_login(). That removes auth.users.
+ *   5. Wipe this install and sign out locally.
  *
  * The phone clock does not gate any step. The 10-minute rule is the
  * server's, inside both functions.
@@ -187,10 +190,36 @@ export async function finishLocalAccountDeletion(
   return failure;
 }
 
+/** A stuck token write must not hold delete_my_login. */
+const PUSH_OPT_OUT_MS = 5000;
+
 /**
- * Unlink, delete the login, then clear the phone. Call only after
+ * Start the opt-out and give it five seconds. The call itself does not
+ * wait on the registration queue. A timeout is a logged failure, not a
+ * reason to leave the login in place.
+ */
+function pushOptOutBeforeLoginDelete(): Promise<boolean> {
+  const optOut = clearPushForAccountDeletion().then(
+    (ok) => ok,
+    (err) => {
+      console.warn('[deleteAccount] push opt-out', err);
+      return false;
+    },
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timed = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), PUSH_OPT_OUT_MS);
+  });
+  return Promise.race([optOut, timed]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/**
+ * Unlink, forget this user's notifications, opt the device out, then
+ * delete the login and clear the phone. Call only after
  * delete_my_account() has committed. A stale login delete opens re-auth.
- * An unlink failure leaves the login in place.
+ * An unlink failure leaves the login in place. A failed opt-out does not.
  */
 export async function continueAccountDeletion(
   deviceId: string | null,
@@ -198,6 +227,22 @@ export async function continueAccountDeletion(
   const unlinked = await unlinkAfterDelete(deviceId);
   if (!unlinked) {
     return { ok: false, stale: false, serverDeleted: true, localFailure: 'unlink', loginDeleted: false };
+  }
+  // Opt out and drop this user's inbox while the login row still exists.
+  // A later wipe may save the token again; by then the user is gone and
+  // save_device_push_token stores a null user instead of failing the FK.
+  const forgot = await supabase.rpc('forget_my_notifications');
+  if (forgot.error) {
+    const text = `${forgot.error.code ?? ''} ${forgot.error.message ?? ''}`;
+    if (!/PGRST202|schema cache|Could not find the function|forget_my_notifications/i.test(text)) {
+      console.warn('[deleteAccount] notifications', forgot.error.message);
+    }
+  }
+  // The opt-out does not join the registration queue, and it does not hold
+  // the login delete. A permission prompt or a hung token write loses.
+  const pushCleared = await pushOptOutBeforeLoginDelete();
+  if (!pushCleared) {
+    console.warn('[deleteAccount] push opt-out');
   }
   const { error } = await supabase.rpc('delete_my_login');
   if (error) {

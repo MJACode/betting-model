@@ -100,6 +100,27 @@ export function readAuthStatus(): AuthStatus {
   return state.status;
 }
 
+/** The signed-in user, for callers that are not components (push registration). */
+export function readAuthUserId(): string | null {
+  return state.session?.user?.id ?? null;
+}
+
+/**
+ * Hear sign-in, sign-out and the first resolved session. The listener is
+ * called once immediately with the current state. `loading` means the
+ * session is not known yet — callers must not treat that as signed out.
+ */
+export function subscribeAuthUser(
+  listener: (userId: string | null, status: AuthStatus) => void,
+): () => void {
+  const wrap = (s: AuthState) => listener(s.session?.user?.id ?? null, s.status);
+  listeners.add(wrap);
+  wrap(state);
+  return () => {
+    listeners.delete(wrap);
+  };
+}
+
 export function useAuth(): UseAuth {
   const [local, setLocal] = useState<AuthState>(state);
 

@@ -987,5 +987,9 @@ RPC_AFTER_SIGN_IN: tuple[str, ...] = (
     "byom_delete_model",
     "delete_my_account",
     "delete_my_login",
+    # The caller's inbox, sport mutes, and the token's user link.
+    # notification_inbox_2026_11_19.sql grants EXECUTE to authenticated
+    # only. The sweep must not name it before that migration is applied.
+    "forget_my_notifications",
 )
 

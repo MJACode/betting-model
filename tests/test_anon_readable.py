@@ -143,7 +143,11 @@ def test_the_plain_sweep_keeps_todays_anon_grants():
         "scripts", "apply_anon_grants.py").read_text(encoding="utf-8")
     stray = src.index("Stray anon grants")
     assert "if args.lockdown_b:" in src[:stray]
-    assert "REVOKE ALL ON TABLE" in src[stray:stray + 900]
+    assert "_revoke_lockdown_strays(conn)" in src[stray:stray + 400]
+    body = src[src.index("def _revoke_lockdown_strays"):src.index("def _step_b_applied")]
+    assert "REVOKE ALL ON TABLE" in body
+    assert "REVOKE ALL ON SEQUENCE" in body
+    assert "REVOKE ALL ON FUNCTION" in body
 
     class NoColumn:
         def execute(self, sql, params=None):

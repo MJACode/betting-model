@@ -47,6 +47,7 @@ import {
   visibleBankrollError,
 } from '@/lib/bankroll';
 import { NotificationsCard } from '@/components/NotificationsCard';
+import { SportNotificationSwitches } from '@/components/SportNotificationSwitches';
 import { usePushOptIn } from '@/hooks/usePushOptIn';
 import { usePushState } from '@/hooks/usePushNotifications';
 import { useFeedbackUnread } from '@/hooks/useFeedback';
@@ -617,9 +618,11 @@ function AppearanceSection() {
 }
 
 function NotificationsSection() {
+  const { enabled } = usePushOptIn();
   return (
     <SettingsScroll>
       <NotificationsCard />
+      <SportNotificationSwitches masterOn={enabled} />
     </SettingsScroll>
   );
 }
