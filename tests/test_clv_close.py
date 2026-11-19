@@ -286,3 +286,50 @@ def test_one_bet_that_fails_does_not_stop_the_pass(db, monkeypatch):
     assert m["source"] == "none" and "bad row" in m["note"]
     # and it is not picked up again, so it cannot pin the head of the queue
     assert cc.measure_started(db, now=T0 + timedelta(hours=2))["bets"] == 0
+
+
+def test_player_names_match_across_accents_case_and_suffixes():
+    assert cc.player_key("José Soriano") == cc.player_key("Jose Soriano")
+    assert cc.player_key("Walbert Ureña") == cc.player_key("Walbert Urena")
+    assert cc.player_key("Luther Burden III") == cc.player_key("Luther Burden")
+    assert cc.player_key("Tim Stützle") == cc.player_key("tim stutzle")
+    assert cc.player_key("Azeez Al-Shaair") == cc.player_key("Azeez Al Shaair")
+    assert cc.player_key("Chris Sale") != cc.player_key("Cristopher Sanchez")
+
+
+def test_a_moved_prop_line_is_a_line_move_even_without_prop_market_on_the_row():
+    bet = _bet(kind="prop", market="pitcher_strikeouts", player="Seth Lugo", pick_side="under",
+               number=4.5, prop_market=None, model_id="mlb_prop_pitcher_k")
+    c = cc.choose_close(bet, [_q("pitcher_strikeouts", 3, 3.5, over_price=-120, under_price=-105),
+                              _q("pitcher_strikeouts_alternate", 3, 4.5, over_price=150)])
+    assert c.odds is None and c.line == 3.5 and c.line_pts == 1.0   # Under 4.5 against a 3.5 close: one point our way
+
+
+def test_a_prop_close_is_found_when_the_feed_drops_the_accent(db):
+    db.execute("INSERT INTO games VALUES (%s,'2026-11-19','home','away',%s) ON CONFLICT DO NOTHING",
+               (GAME, T0.strftime("%Y-%m-%dT%H:%M:%SZ")))
+    db.execute("""INSERT INTO picks (pick_id, model_id, game_id, game_date, pick_side, scored_line, pick_label,
+                  dk_odds, decision_odds, decision_book, created_at, signal_type, is_live, clv_method)
+                  VALUES (9,'nhl_prop_saves',%s,'2026-11-19','under',25.5,'José Ureña Under 25.5 Saves',
+                          -110,-110,'draftkings',%s,'BET',false,'standard_v2')""", (GAME, _z(BET_AT)))
+    db.execute("""INSERT INTO player_prop_odds VALUES (%s,'player_total_saves','draftkings','Jose Urena',
+                  25.5,-105,-125,%s,%s)""", (GAME, _z(T0 - timedelta(minutes=5)), _z(T0 - timedelta(minutes=5))))
+    db.commit()
+    bet = cc.load_bets(db, "p.pick_id = %s", (9,))[0]
+    assert cc.choose_close(bet, cc.feed_quotes(db, bet)).odds == -125
+
+
+def test_a_bet_placed_after_the_games_closing_pull_gets_another(db):
+    from data.ingestors import clv_closing_pull as cp
+    _pick(db, pick_id=7, created=T0 - timedelta(minutes=3))      # after the T-4 pull below
+    db.execute("""INSERT INTO clv_close_purchases (game_id, bookmaker, asked_for, markets, snapshot_at, ok, kind)
+                  VALUES (%s, 'draftkings', %s, 'spreads', %s, true, 'closing')""",
+               (GAME, T0, T0 - timedelta(minutes=4)))
+    db.commit()
+    now = T0 - timedelta(minutes=2)
+    assert GAME in cp.due(db, now)
+    db.execute("""INSERT INTO clv_close_purchases (game_id, bookmaker, asked_for, markets, snapshot_at, ok, kind)
+                  VALUES (%s, 'draftkings', %s, 'spreads', %s, true, 'closing')""",
+               (GAME, T0, T0 - timedelta(minutes=2, seconds=30)))
+    db.commit()
+    assert GAME not in cp.due(db, now)

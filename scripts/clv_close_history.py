@@ -19,6 +19,9 @@ Commands (dry run unless --apply; nothing is bought without `buy`):
   python -m scripts.clv_close_history plan
   python -m scripts.clv_close_history buy [--limit N]
   python -m scripts.clv_close_history history [--apply]
+  python -m scripts.clv_close_history remeasure-none [--apply]
+            every bet measured with no closing price, measured again from
+            stored rows and bought quotes (after a fix to the rule)
 
 WHAT ONE CALL COSTS, measured 2026-11-19 on NHL_2026-11-05_VAN_WPG: an event
 list is 1 credit (x-requests-last); one game's odds at one book is 10 credits
@@ -46,7 +49,7 @@ import requests  # noqa: E402
 from loguru import logger  # noqa: E402
 
 import config  # noqa: E402
-from data.db import get_connection  # noqa: E402
+from data.db import ConnectionLost, get_connection  # noqa: E402
 from tracking import clv_close as cc  # noqa: E402
 
 RESERVE_DAYS = 3
@@ -202,8 +205,23 @@ def buy(conn, limit: int | None = None) -> dict:
             for bk in ((body.get("data") or {}).get("bookmakers") or []):
                 if bk.get("key") == book:
                     rows += parse_book(game_id, bk, home_name, snap, ev["id"], slot["props"])
-            n = store_quotes(conn, rows, SOURCE)
-            _ledger(conn, game_id, book, slot, ev["id"], snap, True, billed, n, None, markets)
+            # The session pooler drops a long-lived connection now and then
+            # (2026-11-19: twice in 300 calls, "server closed the connection
+            # unexpectedly"). The quotes are already fetched and paid for, so
+            # store them again on the reconnected connection, not re-buy.
+            for attempt in range(3):
+                try:
+                    n = store_quotes(conn, rows, SOURCE)
+                    _ledger(conn, game_id, book, slot, ev["id"], snap, True, billed, n, None, markets)
+                    break
+                except ConnectionLost:
+                    logger.warning(f"{game_id} {book}: connection lost while storing; retrying ({attempt + 1})")
+                    try:
+                        conn.rollback()
+                    except Exception:                          # noqa: BLE001
+                        pass
+            else:
+                raise RuntimeError(f"{game_id} {book}: could not store the bought quotes")
             stats["bought"] += 1
             stats["quotes"] += n
             time.sleep(0.15)
@@ -249,7 +267,7 @@ def run_measure(conn, bets: list[cc.Bet], history: bool, apply: bool) -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("command", choices=["recent", "plan", "buy", "history"])
+    ap.add_argument("command", choices=["recent", "plan", "buy", "history", "remeasure-none"])
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--only-bought", action="store_true",
@@ -284,6 +302,11 @@ def main(argv=None) -> int:
         if a.only_bought:
             done = bought(conn)
             bets = [b for b in bets if (b.game_id, b.bet_book) in done]
+        print(json.dumps(run_measure(conn, bets, True, a.apply), indent=1, default=str))
+    elif a.command == "remeasure-none":
+        bets = cc.load_bets(conn, """
+            p.pick_id IN (SELECT pick_id FROM public.clv_close_measurements WHERE source = 'none')
+            ORDER BY p.pick_id""")
         print(json.dumps(run_measure(conn, bets, True, a.apply), indent=1, default=str))
     return 0
 

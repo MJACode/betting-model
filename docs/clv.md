@@ -248,3 +248,18 @@ the alternate ladder), 24 whose book's last pull no longer priced our number,
 first-half spreads placed on the last pull, 3 NHL moneylines placed 4 minutes
 before the start, 2 Hard Rock props). The closing pull is what closes the last
 group from now on.
+
+**Two fixes, 2026-11-19 (after the first full run).** A player is matched
+across accents, case, punctuation and Jr./III (`clv_close.player_key`): the
+feed's history spells "Jose Soriano" and "Walbert Urena" where our labels say
+"José Soriano" and "Walbert Ureña". And a prop's line move is recorded whether
+or not the pick row carries `prop_market` (the single-market prop models leave
+it empty), so an Under the book no longer offered at our number shows as a
+line move, not as "no closing price". The closing pull now pulls a game again
+when a bet lands after its last closing pull (NHL moneylines are decided about
+four minutes before the start). After both, the published record's pre-game
+bets: 1,163 priced, 102 line moved our way, 53 against, 32 no closing price
+(22 placed in the last ten minutes before the start, after the book's final
+pull; 8 whose player or market the book no longer listed at the start; 1 with
+no main line in the last pull; 1 other).
+
