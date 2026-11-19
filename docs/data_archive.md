@@ -440,6 +440,12 @@ python scripts/archive_rows.py status
 - Dead rows: 107,448 of 59.5M.
 - Its indexes can shrink, by `REINDEX CONCURRENTLY` as on props (#1345).
 
+**`odds` primary key rebuilt, 2026-11-19** (`REINDEX INDEX CONCURRENTLY`, 02:33:05 to 02:41:03 ET, 478 s; #1345).
+- **Only the primary key.** The dashboard's disk speed allowance ("Disk IO balance") read 8%. The runbook rebuilds only the index with a firm size estimate when it is under 50%.
+- **Result:** `odds_pkey` went from 1.86 to 1.26 GB. All the table's indexes went from 10.58 to 9.98 GB, freeing 0.60 GB, as estimated. Database plus write-ahead log went from 80.90 to 80.30 GB. All 5 indexes are valid.
+- **Checks:** before the run, no other lock, no vacuum, no transaction over 60 s and no broken index. During it, the worker's refresh steps ran on schedule and wrote to `odds`, and the failure alerter sent no alerts. There were 0 app errors and 0 app reads, so the app side was not tested.
+- **Not done:** the other four indexes (`idx_odds_book_snap` 6.67, `idx_odds_date` 0.88, `idx_odds_game` 0.86, `idx_odds_source_inplay` 0.30 GB). Their gain is not known: the size estimate overstates non-unique indexes 1.7 to 6.7 times. They can run on a night when the allowance reads 50% or more.
+
 **How to run it again:**
 - **The client must match the database extension exactly.** The extension is 1.5.2, and that is the highest version Supabase offers. The PostgreSQL apt repository the image uses (PGDG) has 1.5.3, which refuses to run: "program 'pg_repack 1.5.3' does not match database library 'pg_repack 1.5.2'". `scripts/pg_repack_helper.sh` builds 1.5.2 from the upstream source tag when apt has no exact match.
 - **Where it runs:** a temporary Railway service. Image `postgres:17-bookworm`, restart policy NEVER.
