@@ -51,6 +51,9 @@ export interface PushState {
 const TOKEN_KEY = 'push.token.v1';
 
 const listeners = new Set<(s: PushState) => void>();
+/** Account deletion sets this so a registration still waiting on the
+ *  permission prompt cannot finish last and leave the token enabled. */
+let pushWritesClosed = false;
 let state: PushState = { status: 'idle', token: null, diagnosis: null, registeredAt: null };
 function setState(next: Partial<PushState>): PushState {
   state = { ...state, ...next };
@@ -167,6 +170,9 @@ async function registerForPushNow(): Promise<PushState> {
       // A server that has not been migrated rejects the extra argument, and
       // the same call without it still registers the device.
       const userId = readAuthUserId();
+      if (pushWritesClosed) {
+        return setState({ status: 'idle', token: null, diagnosis: null });
+      }
       const base = {
         p_token: token,
         p_device_id: deviceId,
@@ -181,6 +187,11 @@ async function registerForPushNow(): Promise<PushState> {
           ? (await supabase.rpc('save_device_push_token', base)).error
           : error;
         if (failed) return setState({ status: 'failed', token, diagnosis: diagnosePushError(failed, 'storage') });
+      }
+      if (pushWritesClosed) {
+        await savePushToken({ ...base, p_enabled: false, p_user_id: userId });
+        await rememberToken(null);
+        return setState({ status: 'idle', token: null, diagnosis: null });
       }
 
       await rememberToken(token);
@@ -247,10 +258,13 @@ async function unregisterForPushNow(): Promise<boolean> {
   return true;
 }
 
-/** Opt out and unregister. False when the server still has the token enabled. */
+/** Opt out and unregister. False when the server still has the token enabled.
+ *  Not queued: a registration stuck on the permission prompt must not hold
+ *  the delete spinner. The flag stops that registration from enabling the row. */
 export async function clearPushForAccountDeletion(): Promise<boolean> {
+  pushWritesClosed = true;
   await clearPushOptInForAccountDeletion();
-  return unregisterForPush();
+  return unregisterForPushNow();
 }
 
 /** Subscribe to the shared registration state. Render-only; starts nothing. */

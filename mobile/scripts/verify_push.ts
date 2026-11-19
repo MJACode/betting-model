@@ -317,6 +317,16 @@ check(
   'unregisterForPush is on the same queue as registerForPush',
   /export async function unregisterForPush[\s\S]{0,400}enqueuePushWrite\(/.test(hook),
 );
+const clearPushBody = hook.slice(hook.indexOf('export async function clearPushForAccountDeletion'));
+check(
+  'account deletion opts out without waiting on the registration queue',
+  /pushWritesClosed = true[\s\S]{0,200}unregisterForPushNow\(\)/.test(clearPushBody)
+    && !/unregisterForPush\(\)/.test(clearPushBody.slice(0, 500)),
+);
+check(
+  'a registration that is still in flight does not enable the token after deletion',
+  /if \(pushWritesClosed\) \{[\s\S]{0,120}status: 'idle'/.test(hook.slice(hook.indexOf('async function registerForPushNow'))),
+);
 
 void (async () => {
   const optOutQueue = createQueue();

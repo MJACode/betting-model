@@ -30,6 +30,7 @@ import {
   TRACKED_INCOMPLETE,
   UNLINK_INCOMPLETE,
   deletedLines,
+  deletionBanner,
   isStaleSessionError,
   providersForUser,
   purchasePlace,
@@ -103,6 +104,27 @@ eq(
   ],
 );
 
+eq('success copy is the deleted toast', deletionBanner({ ok: true, serverDeleted: true, loginDeleted: true }), DELETED_TOAST);
+eq(
+  'success copy is refused when the login delete did not happen',
+  deletionBanner({ ok: true, serverDeleted: true, loginDeleted: false }),
+  LOGIN_INCOMPLETE,
+);
+eq(
+  'a failed login delete says the sign-in is still active',
+  deletionBanner({ ok: false, serverDeleted: true, localFailure: 'login', loginDeleted: false }),
+  LOGIN_INCOMPLETE,
+);
+eq(
+  'a failed push opt-out before the login delete is not the wiped-phone copy',
+  deletionBanner({ ok: false, serverDeleted: true, localFailure: 'wipe', loginDeleted: false }),
+  LOGIN_INCOMPLETE,
+);
+eq(
+  'a failed push opt-out after the login delete is the wiped-phone copy',
+  deletionBanner({ ok: false, serverDeleted: true, localFailure: 'wipe', loginDeleted: true }),
+  LOCAL_INCOMPLETE,
+);
 eq('no subscription, no box', purchasePlace({ appAccess: false, whopAccess: false }), 'none');
 eq('app store', purchasePlace({ appAccess: true, whopAccess: false }), 'app_store');
 eq('whop', purchasePlace({ appAccess: false, whopAccess: true }), 'whop');
@@ -145,13 +167,95 @@ for (const key of ['settledPicks.v9', 'actionThresholds.v1', 'modelClvPedigree.v
   check(`query cache includes ${key}`, (QUERY_CACHE_KEYS as readonly string[]).includes(key));
 }
 
+/** Calls in source order. Comments and string literals are not calls. */
+function functionCalls(src: string): string[] {
+  const calls: string[] = [];
+  const keywords = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'typeof', 'await']);
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === '/' && src[i + 1] === '/') {
+      const nl = src.indexOf('\n', i);
+      i = nl < 0 ? src.length : nl + 1;
+      continue;
+    }
+    if (c === '/' && src[i + 1] === '*') {
+      const end = src.indexOf('*/', i + 2);
+      i = end < 0 ? src.length : end + 2;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      const quote = c;
+      i += 1;
+      while (i < src.length && src[i] !== quote) {
+        i += src[i] === '\\' ? 2 : 1;
+      }
+      i += 1;
+      continue;
+    }
+    if (/[A-Za-z_]/.test(c)) {
+      const start = i;
+      i += 1;
+      while (i < src.length && /[A-Za-z0-9_]/.test(src[i])) i += 1;
+      const name = src.slice(start, i);
+      let j = i;
+      while (src[j] === ' ' || src[j] === '\n' || src[j] === '\t' || src[j] === '\r') j += 1;
+      if (name === 'return') {
+        calls.push('return');
+        continue;
+      }
+      if (src[j] !== '(') continue;
+      if (keywords.has(name)) continue;
+      if (name === 'rpc') {
+        const lit = /^\(\s*'([^']+)'/.exec(src.slice(j));
+        calls.push(lit ? `rpc:${lit[1]}` : 'rpc');
+      } else {
+        calls.push(name);
+      }
+      continue;
+    }
+    i += 1;
+  }
+  return calls;
+}
+
+function callPositions(calls: string[], names: string[]): number[] {
+  const at: number[] = [];
+  let from = 0;
+  for (const name of names) {
+    const found = calls.indexOf(name, from);
+    at.push(found);
+    if (found >= 0) from = found + 1;
+  }
+  return at;
+}
+
 const flow = read('src/lib/deleteAccount.ts');
 const runAt = flow.indexOf('export async function runAccountDeletion');
 const continueAt = flow.indexOf('export async function continueAccountDeletion');
 const unlinkAt = flow.indexOf('async function unlinkAfterDelete');
+const optOutAt = flow.indexOf('function pushOptOutBeforeLoginDelete');
 const runBody = flow.slice(runAt);
 const continueBody = flow.slice(continueAt, runAt);
 const unlinkBody = flow.slice(unlinkAt, flow.indexOf('export async function finishLocalAccountDeletion'));
+const continueCalls = functionCalls(continueBody);
+const optOutCalls = functionCalls(flow.slice(optOutAt, continueAt));
+const decoy = [
+  '// clearPushForAccountDeletion()',
+  "// supabase.rpc('delete_my_login')",
+  'await unlinkAfterDelete(deviceId);',
+  "await supabase.rpc('forget_my_notifications');",
+  'await clearPushForAccountDeletion();',
+  "await supabase.rpc('delete_my_login');",
+  'await finishLocalAccountDeletion(deviceId);',
+].join('\n');
+eq('a comment is not a call', functionCalls(decoy), [
+  'unlinkAfterDelete',
+  'rpc:forget_my_notifications',
+  'clearPushForAccountDeletion',
+  'rpc:delete_my_login',
+  'finishLocalAccountDeletion',
+]);
 check('the flow calls delete_my_account', flow.includes("supabase.rpc('delete_my_account')"));
 check('the flow calls delete_my_login', flow.includes("supabase.rpc('delete_my_login')"));
 check('the flow guards on AUTH_ENABLED', flow.includes('assertAuthEnabled(AUTH_ENABLED)'));
@@ -160,25 +264,36 @@ check('the phone clock is not consulted', !flow.includes('sessionLooksFresh') &&
 check('the data delete does not unlink', !runBody.includes('unlinkDiscord') && !runBody.includes('unlinkSportsbooks'));
 check(
   'unlink runs only after the data delete commits',
-  runBody.indexOf('continueAccountDeletion') > runBody.indexOf("rpc('delete_my_account')"),
+  callPositions(functionCalls(runBody), ['rpc:delete_my_account', 'continueAccountDeletion']).every((n, i, all) => n >= 0 && (i === 0 || n > all[i - 1])),
 );
 check('discord unlink is in the post-delete helper', unlinkBody.includes('unlinkDiscord()'));
 check('sharpsports unlink is in the post-delete helper', unlinkBody.includes('unlinkSportsbooks('));
+const continueOrder = callPositions(continueCalls, [
+  'unlinkAfterDelete',
+  'rpc:forget_my_notifications',
+  'pushOptOutBeforeLoginDelete',
+  'rpc:delete_my_login',
+  'finishLocalAccountDeletion',
+]);
 check(
-  'continue unlinks before deleting the login',
-  continueBody.indexOf('unlinkAfterDelete') !== -1
-    && continueBody.indexOf('unlinkAfterDelete') < continueBody.indexOf("rpc('delete_my_login')"),
+  'continue calls unlink, forget, opt-out, login delete, then the local wipe',
+  continueOrder.every((n, i, all) => n >= 0 && (i === 0 || n > all[i - 1])),
 );
 check(
-  'push opt-out and notification forget run before the login delete',
-  continueBody.indexOf("rpc('forget_my_notifications')") !== -1
-    && continueBody.indexOf('clearPushForAccountDeletion') !== -1
-    && continueBody.indexOf("rpc('forget_my_notifications')") < continueBody.indexOf("rpc('delete_my_login')")
-    && continueBody.indexOf('clearPushForAccountDeletion') < continueBody.indexOf("rpc('delete_my_login')"),
+  'the opt-out helper is the push clear, and it does not delete the login',
+  optOutCalls.includes('clearPushForAccountDeletion') && !optOutCalls.includes('rpc:delete_my_login'),
+);
+const optOutCall = continueCalls.indexOf('pushOptOutBeforeLoginDelete');
+const loginCall = continueCalls.indexOf('rpc:delete_my_login', optOutCall + 1);
+check(
+  'a failed push opt-out does not return before the login delete',
+  optOutCall >= 0
+    && loginCall > optOutCall
+    && !continueCalls.slice(optOutCall + 1, loginCall).includes('return'),
 );
 check(
-  'the login delete is before the local wipe',
-  continueBody.indexOf('finishLocalAccountDeletion') > continueBody.indexOf("rpc('delete_my_login')"),
+  'the opt-out gives up on a hung write',
+  optOutCalls.includes('setTimeout') && flow.includes('PUSH_OPT_OUT_MS = 5000'),
 );
 check('an unlink failure is not success', continueBody.includes("localFailure: 'unlink'"));
 check('a login-delete failure names the login', continueBody.includes("localFailure: 'login'"));
@@ -214,9 +329,8 @@ check('large text is not switched off', !screen.includes('allowFontScaling={fals
 check('the title is not truncated', !/style=\{styles\.title\}[^>]*numberOfLines/.test(screen));
 check('try again retries the delete', screen.includes("phase === 'error'"));
 check('the screen does not read the phone clock', !screen.includes('last_sign_in_at'));
-check('unlink failure is shown on the local screen', screen.includes('UNLINK_INCOMPLETE'));
-check('login failure is shown on the local screen', screen.includes('LOGIN_INCOMPLETE'));
-check('tracked failure is shown on the local screen', screen.includes('TRACKED_INCOMPLETE'));
+check('the local screen asks the banner for the copy', screen.includes('deletionBanner({ ok: false, serverDeleted: true, localFailure, loginDeleted })'));
+check('the success screen asks the banner with the login deleted', screen.includes('deletionBanner({ ok: true, serverDeleted: true, loginDeleted: true })'));
 const apply = screen.slice(screen.indexOf('const applyOutcome'), screen.indexOf('const run ='));
 check(
   'a stale login delete does not return to the start screen',
