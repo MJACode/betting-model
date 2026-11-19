@@ -1,6 +1,6 @@
 // Shared types and helpers for the Picks & CLV tab
 
-export type ClvOutcome = 'BEAT' | 'FLAT' | 'WORSE' | 'NOT_MEASURED' | 'UNRESOLVED'
+export type ClvOutcome = 'BEAT' | 'FLAT' | 'WORSE' | 'LINE_FOR' | 'LINE_AGAINST' | 'NOT_MEASURED' | 'UNRESOLVED'
 export type Lane = 'pregame' | 'live' | 'repair'
 
 export type PickRow = {
@@ -54,14 +54,16 @@ export type RollupStats = {
   roi: number | null
   partialUnits: boolean
   laneUnits: LaneUnits
-  // CLV — keyed on clv_captured_at, independent of result
+  // CLV — from the published record's own classification (v_model_health_bets)
   notMeasured: number
   measured: number
   beat: number
   flat: number
   worse: number
-  beatRateAll: number | null      // beat / measured
-  beatRateMoved: number | null    // beat / (beat + worse)
+  lineFor: number
+  lineAgainst: number
+  beatRatePrice: number | null     // beat / (beat + worse), the published headline (a same-price close is left out)
+  beatRateWithLine: number | null  // (beat + lineFor) / (beat + worse + lineFor + lineAgainst)
 }
 
 export function computeRollup(rows: PickRow[]): RollupStats {
@@ -69,7 +71,7 @@ export function computeRollup(rows: PickRow[]): RollupStats {
   let priced = 0, pricedNoPush = 0
   let totalUnits = 0
   let hasAnyUnits = false
-  let notMeasured = 0, measured = 0, beat = 0, flat = 0, worse = 0
+  let notMeasured = 0, measured = 0, beat = 0, flat = 0, worse = 0, lineFor = 0, lineAgainst = 0
 
   // Per-lane unit tracking
   let pregameUnits = 0, hasPregame = false
@@ -108,7 +110,8 @@ export function computeRollup(rows: PickRow[]): RollupStats {
 
     if (r.lane === 'repair') repairCount++
 
-    // CLV: independent of result — keyed on clv_captured_at
+    // CLV: independent of result. Line moves are measured but are never a
+    // price beat or a price worse.
     const co = r.clv_outcome
     if (co === 'NOT_MEASURED' || co === 'UNRESOLVED') notMeasured++
     else {
@@ -116,6 +119,8 @@ export function computeRollup(rows: PickRow[]): RollupStats {
       if (co === 'BEAT') beat++
       else if (co === 'FLAT') flat++
       else if (co === 'WORSE') worse++
+      else if (co === 'LINE_FOR') lineFor++
+      else if (co === 'LINE_AGAINST') lineAgainst++
     }
   }
 
@@ -146,8 +151,12 @@ export function computeRollup(rows: PickRow[]): RollupStats {
     beat,
     flat,
     worse,
-    beatRateAll: measured > 0 ? beat / measured : null,
-    beatRateMoved: beat + worse > 0 ? beat / (beat + worse) : null,
+    lineFor,
+    lineAgainst,
+    beatRatePrice: beat + worse > 0 ? beat / (beat + worse) : null,
+    beatRateWithLine: beat + worse + lineFor + lineAgainst > 0
+      ? (beat + lineFor) / (beat + worse + lineFor + lineAgainst)
+      : null,
   }
 }
 

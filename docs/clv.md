@@ -128,7 +128,7 @@ close was better than the price we took, which is the negative market edge.
 
 ## What this is not
 
-- **In-play.** `is_live IS NOT TRUE`. No unbounded latest snapshot.
+- **In-play.** Not measured, by design (mike, 2026-11-19). `is_live IS NOT TRUE`. No unbounded latest snapshot.
 - **A substitute book.** A missing bet-book close is NULL, not DraftKings
   and not Pinnacle.
 - **P&L, a threshold, or a pause.** `results_snapshots` units and the
@@ -161,3 +161,90 @@ unmeasured. A recent never-captured miss is left for the Python backfill.
 `scripts/recompute_empty_clv.py` recomputes rows already stamped
 `standard_v2` with every closing field empty. It is a dry run until
 `--apply`.
+
+## Model health: per model, in blocks and rolling (2026-11-18)
+
+`data/migrations/model_health_2026_11_18.sql` builds three read-only views over
+the published record's graded bets. The bets are the ones
+`v_public_track_record` counts: the views read its filter out of its own
+definition and carry the filter's hash, so they cannot drift from it.
+
+- `v_model_health_bets`: one row per bet. `status` is `price` (the bet book
+  closed on our number; `clv_pct` is the measure), `line_for` / `line_against`
+  (the main line left our number, our way or against), `in_play`, `no_close`,
+  `not_measured`, `old_method`. `verdict` is beat / push / miss for a price
+  close (push = `|clv_pct| < 0.005`, as above) and beat / miss for a line move.
+  `seq` 1 is the model's newest bet (`created_at`, then `pick_id`).
+- `v_model_health_windows`: blocks of 25, 50 and 100 over each model's newest
+  500 bets, `block_no` 1 the newest; average CLV with its standard error, beat
+  rates with and without line moves, Pinnacle's market edge, units.
+- `v_model_health_summary`: one row per model, over every bet and its newest
+  25, 50 and 100.
+
+`price_beat_rate` is the record's headline rate. `beat_rate_with_line` adds
+line moves by direction. Neither counts a push. The average CLV uses price
+closes only.
+
+The ops dashboard's Model Health tab reads these and nothing else, and the
+Picks & CLV tab takes its bets from `v_model_health_bets`.
+
+**Superseded 2026-11-19 by "The final close" below**, which closes the
+three gaps this section listed (a close older than the bet, no price at our
+number after a line move, NCAAB first-half spreads with no later pull). In-play
+bets stay unmeasured, by design. NCAAB first-half spreads also gained a
+tip-minus-3 pull (`data/ingestors/ncaab_first_half_odds.CLOSE_MARK`).
+
+## The final close (2026-11-19, issue #1470)
+
+mike: *"yes I want it to be accurate please correct"*. In-play bets are not
+measured for closing-line value, by design (*"don't need clv for in play
+bets"*). Every pre-game bet's close is now set once, after its start, by
+`tracking/clv_close.py`, under one rule:
+
+**The bet book's quote at the exact number we bet, in that book's last pull
+before the start, pulled after the bet.** From the main line when its number in
+that last pull is ours; otherwise from the book's alternate ladder
+(`alternate_spreads` / `alternate_totals`, `<market>_alternate` for first half,
+quarters, team totals and props), when that ladder's newest pull is no more
+than 15 minutes older than the last main pull. Otherwise the bet has no closing
+price: `clv_pct` is NULL, never 0.00, and the main line's move stays in
+`line_clv_pts` when a post-bet pull exists.
+
+"Pulled" is the row's `created_at` (the instant we fetched it), not
+`snapshot_at` (the book's own last change). Both earlier writers bounded on
+`snapshot_at` only, so a bet placed after the book's last pull was compared
+with a price from before the bet: 4 of 73 measured bets on games from
+2026-11-15, three stored as 0.00.
+
+**Where it runs.** The settle step, after `_capture_clv` and `_backfill_clv`,
+measures every started pre-game BET (games from 2026-11-15, ten minutes after
+the start) not yet in `clv_close_measurements`, and writes the bet's closing
+columns stamped `standard_v2`. Neither earlier writer revisits a row stamped
+`standard_v2`, so this is the last word. Each measurement row keeps the
+values the row held before (`before`); `picks_log` keeps the update too.
+Pinnacle's market-edge columns are not changed.
+
+**The closing pull.** `data/ingestors/clv_closing_pull.py`, every minute on
+the worker (`clv_closing_pull`): for each game with a pre-game BET starting in
+the next four minutes, one call to the feed's event endpoint for the bet books,
+the bet markets and their alternate ladders, stored in `clv_close_quotes` with
+the instant it was pulled. One credit per market returned (an NFL spread and
+its ladder: 2 credits, measured 2026-11-19). Before it, the regular passes
+stopped pulling many books about ten minutes before the start and pulled no
+alternate ladder for most markets.
+
+**Older games.** The odds prune deleted later rows of settled games until
+2026-11-14, so bets on games before 2026-11-15 are measured from the bet
+book's quotes bought from the feed's history at the start
+(`scripts/clv_close_history.py`, main line and alternate ladder, into
+`clv_close_quotes`; ledger `clv_close_purchases`). Measured cost: an event
+list is 1 credit; one game at one book is 10 credits per market returned
+(241 credits for the first 10 games).
+
+**Measured on the 145 published pre-game bets of games 2026-11-15..18, from
+stored rows** (applied 2026-11-19): 111 priced (98 from the main line, 13 from
+the alternate ladder), 24 whose book's last pull no longer priced our number,
+10 with no pull of the bet book between the bet and the start (5 NCAAB
+first-half spreads placed on the last pull, 3 NHL moneylines placed 4 minutes
+before the start, 2 Hard Rock props). The closing pull is what closes the last
+group from now on.

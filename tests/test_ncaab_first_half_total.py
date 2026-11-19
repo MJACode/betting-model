@@ -383,7 +383,7 @@ def test_an_11am_tip_s_15z_call_is_its_tip_minus_60_call():
     tip = datetime(2026, 11, 10, 16, 0, tzinfo=UTC)
     s = dict((t, m) for m, t in feed.slots(DATE, tip))
     assert s[datetime(2026, 11, 10, 15, 0, tzinfo=UTC)] == "T-60"
-    assert len(s) == 8
+    assert len(s) == 9      # ten marks, the 15z one merged into tip minus 60
     # and a 10:10am ET tip's 15:00 UTC call is the spread's tip minus 10
     tip = datetime(2026, 11, 10, 15, 10, tzinfo=UTC)
     assert dict((t, m) for m, t in feed.slots(DATE, tip))[tip - timedelta(minutes=10)] == "T-10"

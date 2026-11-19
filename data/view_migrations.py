@@ -716,6 +716,23 @@ ACTIVE_MIGRATIONS: list[str] = [
     # before the pair below, whose view patch calls the three-argument
     # functions. A NULL row grades exactly as before.
     "pick_stake_units_2026_11_06.sql",
+    # 2026-11-18 (mike: "rolling clv tracking per model in 25 bet increments
+    # ... a dedicated page in the retool app called model health"): three
+    # read-only views over the published record's bets, one row per bet,
+    # blocks of 25/50/100 over the newest 500, and a per-model summary. The
+    # filter is read out of v_public_track_record's own definition, and the
+    # views carry its hash, so a change to the record's filter rebuilds them
+    # on the next pass. Calls the three-argument unit functions (the file
+    # above). anon, authenticated and PUBLIC revoked; touches no pick, cut or
+    # record. Returns on a catalog read once all three carry the mark.
+    "model_health_2026_11_18.sql",
+    # 2026-11-19 (mike: "yes I want it to be accurate please correct", #1470):
+    # the three worker-only tables the final close stands on
+    # (tracking/clv_close.py): quotes bought from the feed's history, the
+    # ledger of those calls, and one measurement row per bet. RLS on, anon,
+    # authenticated and PUBLIC revoked; touches no pick, view, cut or record.
+    # Returns on a catalog read once all three exist with their comment.
+    "clv_close_2026_11_19.sql",
     # 2026-11-13 (mike, finishing #818): three 2026-09-26 NCAAF games each
     # have a second games row under the Odds API's nickname for the FCS
     # visitor (William and Mary Tribe, LIU Sharks, Houston Baptist Huskies).

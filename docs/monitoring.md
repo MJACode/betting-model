@@ -33,8 +33,12 @@ on Team, so nothing syncs by itself. `retool/README.md` says which copy to edit
 and how a change moves each way; `scripts/retool_app_files.py check` says
 whether the two copies hold the same bytes.
 
-Five tabs: **Models**, **Volume**, **Ops**, **Database**, **Picks & CLV**
-(Database added 2026-11-15; next section).
+Six tabs: **Models**, **Model Health**, **Volume**, **Ops**, **Database**,
+**Picks & CLV** (Database added 2026-11-15; next section). **Model Health**
+(2026-11-18) is closing-line value per model, in blocks of 25, 50 and 100
+bets and as a rolling average, read from the three `v_model_health_*` views
+(`docs/clv.md`, "Model health"). Like Database, its arrangement is for the
+session only.
 
 **The SignalBase look** (2026-11-15, mike: *"the UX and UI are very poor -
 please modernize (super modern best practice) and brand the design with

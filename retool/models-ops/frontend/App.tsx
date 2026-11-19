@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './lib/shadcn/tabs'
-import { RefreshCw, Moon, Sun, Layers, SlidersHorizontal, Activity, Database, TrendingUp, type LucideIcon } from 'lucide-react'
+import { RefreshCw, Moon, Sun, Layers, SlidersHorizontal, Activity, Database, TrendingUp, HeartPulse, type LucideIcon } from 'lucide-react'
 import ModelsTab from './pages/ModelsTab'
 import { TableSkeleton } from './components/PanelUtils'
 import { ModelNamesProvider } from './components/models/ModelNamesProvider'
@@ -14,6 +14,7 @@ const VolumeTab = lazy(() => import('./pages/VolumeTab'))
 const OpsTab = lazy(() => import('./pages/OpsTab'))
 const DatabaseTab = lazy(() => import('./pages/DatabaseTab'))
 const PicksClvTab = lazy(() => import('./pages/picks/PicksClvTab'))
+const HealthTab = lazy(() => import('./pages/HealthTab'))
 
 function TabFallback() {
   return (
@@ -34,6 +35,7 @@ function formatTimestamp(d: Date): string {
 
 const TABS: ReadonlyArray<{ value: string; label: string; icon: LucideIcon }> = [
   { value: 'models', label: 'Models', icon: Layers },
+  { value: 'health', label: 'Model Health', icon: HeartPulse },
   { value: 'volume', label: 'Volume', icon: SlidersHorizontal },
   { value: 'ops', label: 'Ops', icon: Activity },
   { value: 'database', label: 'Database', icon: Database },
@@ -133,6 +135,9 @@ export default function App() {
             <main className="mx-auto max-w-[1680px] pb-10">
               <TabsContent value="models" className={contentClass}>
                 <ModelsTab refreshKey={refreshKey} />
+              </TabsContent>
+              <TabsContent value="health" className={contentClass}>
+                <Suspense fallback={<TabFallback />}><HealthTab refreshKey={refreshKey} /></Suspense>
               </TabsContent>
               <TabsContent value="volume" className={contentClass}>
                 <Suspense fallback={<TabFallback />}><VolumeTab refreshKey={refreshKey} /></Suspense>
