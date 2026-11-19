@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ReferenceDot, ResponsiveContainer } from 'recharts'
 import { PALETTE, AXIS_COLOR, TEXT_COLOR, axisProps, gridProps, ChartTooltipBox, Swatch } from '../../components/chartTheme'
-import { fmtU, type SimResult } from './simMath'
-import { linearAxis, logAxis, logSafe } from './simAxis'
+import type { Fmt, SimResult } from './simMath'
+import { linearAxis, logAxis, logSafe, scaledAxis } from './simAxis'
 
 export type Scale = 'log' | 'linear'
 
@@ -19,14 +19,14 @@ type FanRow = {
 
 const SAMPLE_COLOR = 'var(--series-other)'
 
-function FanTip({ active, payload }: { active?: boolean; payload?: ReadonlyArray<{ payload?: FanRow }> }) {
+function FanTip({ active, payload, fmt }: { active?: boolean; payload?: ReadonlyArray<{ payload?: FanRow }>; fmt: Fmt }) {
   const row = active ? payload?.[0]?.payload : undefined
   if (!row) return null
   const [p5, p25, p50, p75, p95] = row.q
   const line = (label: string, v: number | undefined, strong = false) => (
     <div className="flex justify-between gap-4 tabular-nums">
       <span className={strong ? 'font-medium' : 'text-muted-foreground'}>{label}</span>
-      <span className={strong ? 'font-semibold' : ''}>{v == null ? '—' : fmtU(v)}</span>
+      <span className={strong ? 'font-semibold' : ''}>{v == null ? '—' : fmt(v)}</span>
     </div>
   )
   return (
@@ -40,7 +40,22 @@ function FanTip({ active, payload }: { active?: boolean; payload?: ReadonlyArray
   )
 }
 
-export default function FanChart({ result, B0, N, scale }: { result: SimResult; B0: number; N: number; scale: Scale }) {
+export default function FanChart({
+  result,
+  B0,
+  N,
+  scale,
+  fmt,
+  k,
+}: {
+  result: SimResult
+  B0: number
+  N: number
+  scale: Scale
+  fmt: Fmt
+  /** Display amount per unit (1 in Units): the axis ticks are chosen in display amounts. */
+  k: number
+}) {
   const isLog = scale === 'log'
 
   const { rows, axis } = useMemo(() => {
@@ -62,8 +77,8 @@ export default function FanChart({ result, B0, N, scale }: { result: SimResult; 
         q,
       }
     })
-    return { rows: out, axis: isLog ? logAxis(lo, hi) : linearAxis(hi) }
-  }, [result, B0, isLog])
+    return { rows: out, axis: scaledAxis(isLog ? logAxis : (_lo, h) => linearAxis(h), lo, hi, k) }
+  }, [result, B0, isLog, k])
 
   const finalMed = result.final[2]!
 
@@ -91,9 +106,9 @@ export default function FanChart({ result, B0, N, scale }: { result: SimResult; 
               allowDataOverflow
               {...axisProps}
               width={64}
-              tickFormatter={(v: number) => fmtU(v, { axis: true })}
+              tickFormatter={(v: number) => fmt(v, { axis: true })}
             />
-            <Tooltip content={<FanTip />} cursor={{ stroke: AXIS_COLOR, strokeWidth: 1, strokeDasharray: '3 3' }} isAnimationActive={false} />
+            <Tooltip content={<FanTip fmt={fmt} />} cursor={{ stroke: AXIS_COLOR, strokeWidth: 1, strokeDasharray: '3 3' }} isAnimationActive={false} />
             <Area dataKey="outer" stroke="none" fill={PALETTE[0]} fillOpacity={0.12} isAnimationActive={false} activeDot={false} />
             <Area dataKey="inner" stroke="none" fill={PALETTE[0]} fillOpacity={0.24} isAnimationActive={false} activeDot={false} />
             {result.sp.map((_, j) => (
@@ -112,7 +127,7 @@ export default function FanChart({ result, B0, N, scale }: { result: SimResult; 
               y={isLog ? logSafe(B0) : B0}
               stroke={AXIS_COLOR}
               strokeDasharray="4 4"
-              label={{ value: `Start ${fmtU(B0, { axis: true })}`, position: 'insideBottomLeft', fontSize: 11, fill: AXIS_COLOR }}
+              label={{ value: `Start ${fmt(B0, { axis: true })}`, position: 'insideBottomLeft', fontSize: 11, fill: AXIS_COLOR }}
             />
             <Line dataKey="med" stroke={PALETTE[0]} strokeWidth={2} dot={false} activeDot={{ r: 3 }} isAnimationActive={false} />
             <ReferenceDot
@@ -122,7 +137,7 @@ export default function FanChart({ result, B0, N, scale }: { result: SimResult; 
               fill={PALETTE[0]}
               stroke="hsl(var(--card))"
               strokeWidth={1.5}
-              label={{ value: fmtU(finalMed), position: 'right', fontSize: 11, fontWeight: 600, fill: TEXT_COLOR }}
+              label={{ value: fmt(finalMed), position: 'right', fontSize: 11, fontWeight: 600, fill: TEXT_COLOR }}
             />
           </ComposedChart>
         </ResponsiveContainer>

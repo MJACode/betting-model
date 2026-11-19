@@ -1,9 +1,9 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../lib/shadcn/table'
-import { fmtU, pct, type CheckpointRow } from './simMath'
+import { pct, type CheckpointRow, type Fmt } from './simMath'
 
 const HEADS = ['5th', '25th', 'Median', '75th', '95th']
 
-export default function CheckpointTable({ rows }: { rows: CheckpointRow[] }) {
+export default function CheckpointTable({ rows, fmt }: { rows: CheckpointRow[]; fmt: Fmt }) {
   return (
     <Table className="text-[13px]">
       <TableHeader>
@@ -21,7 +21,7 @@ export default function CheckpointTable({ rows }: { rows: CheckpointRow[] }) {
             <TableCell className="px-3 py-2 tabular-nums">{r.bets.toLocaleString('en-US')}</TableCell>
             {r.values.map((v, i) => (
               <TableCell key={i} className={`px-3 py-2 text-right tabular-nums ${i === 2 ? 'font-semibold' : ''}`}>
-                {fmtU(v)}
+                {fmt(v)}
               </TableCell>
             ))}
             <TableCell className="px-3 py-2 text-right tabular-nums">{pct(r.below)}</TableCell>

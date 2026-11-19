@@ -44,7 +44,11 @@ bankroll simulator ported unchanged in its math (fixed win rate, price and stake
 percentage; exact binomial bands plus 2,000 seeded paths for drawdowns), shown in
 units (start 100u, so the first 1% bet is 1u) under the units-only rule. Checked
 against the original script on four settings, every output equal. Frontend only,
-session-only arrangement.
+session-only arrangement. A Units / Dollars switch (2026-11-19, mike: *"units
+everywhere, but for the sim alone have an option for dollars"*) shows every
+bankroll figure as units times a dollars-per-unit amount (default 100) in the
+original's dollar format; the math stays in units, and Units is the default.
+This tab is the only place in the dashboard that shows dollars.
 
 **The SignalBase look** (2026-11-15, mike: *"the UX and UI are very poor -
 please modernize (super modern best practice) and brand the design with

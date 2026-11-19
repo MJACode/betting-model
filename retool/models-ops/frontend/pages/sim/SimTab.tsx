@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TabShell } from '../../components/tiles/TabShell'
 import type { TileMeta, TileRender } from '../../components/tiles/layoutTypes'
-import { DEFAULT_PARAMS, checkpointRows, compute, computeSweep, edgeInfo, edgeLine, newSeed, type SimParams } from './simMath'
+import {
+  DEFAULT_DISPLAY,
+  DEFAULT_PARAMS,
+  checkpointRows,
+  compute,
+  computeSweep,
+  displayFactor,
+  edgeInfo,
+  edgeLine,
+  makeFmt,
+  newSeed,
+  type Display,
+  type SimParams,
+} from './simMath'
 import SimAssumptions from './SimAssumptions'
 import SimSummary from './SimSummary'
 import FanChart, { type Scale } from './FanChart'
@@ -21,6 +34,9 @@ const SIM_TILES: TileMeta[] = [
 export default function SimTab() {
   const [params, setParams] = useState<SimParams>(DEFAULT_PARAMS)
   const [scale, setScale] = useState<Scale>('log')
+  const [display, setDisplay] = useState<Display>(DEFAULT_DISPLAY)
+  const fmt = useMemo(() => makeFmt(display), [display])
+  const k = displayFactor(display)
 
   // Slider input is batched to one recompute per animation frame, as in the original.
   const pendingP = useRef<number | null>(null)
@@ -60,6 +76,8 @@ export default function SimTab() {
               edgeText={edgeText}
               scale={scale}
               onScale={setScale}
+              display={display}
+              onDisplay={setDisplay}
               onSlide={onSlide}
               onRerun={onRerun}
               onChange={onChange}
@@ -67,13 +85,13 @@ export default function SimTab() {
           ),
         }
       case 'summary':
-        return { body: <SimSummary result={result} B0={B0} N={N} paths={paths} /> }
+        return { body: <SimSummary result={result} B0={B0} N={N} paths={paths} fmt={fmt} /> }
       case 'fan':
-        return { body: <FanChart result={result} B0={B0} N={N} scale={scale} /> }
+        return { body: <FanChart result={result} B0={B0} N={N} scale={scale} fmt={fmt} k={k} /> }
       case 'sweep':
-        return { body: <SweepChart sweep={sweep} p={p} selectedMed={result.final[2]!} B0={B0} breakEven={breakEven} /> }
+        return { body: <SweepChart sweep={sweep} p={p} selectedMed={result.final[2]!} B0={B0} breakEven={breakEven} fmt={fmt} k={k} /> }
       case 'table':
-        return { body: <CheckpointTable rows={checkpoints} /> }
+        return { body: <CheckpointTable rows={checkpoints} fmt={fmt} /> }
       case 'notes':
         return { body: <SimNotes /> }
       default:

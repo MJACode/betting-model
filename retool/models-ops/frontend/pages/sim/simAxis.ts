@@ -60,3 +60,19 @@ export function logAxis(loRaw: number, hiRaw: number): { domain: [number, number
   }
   return { domain: [lo, hi], ticks }
 }
+
+/**
+ * An axis chosen in display amounts, returned in units. `k` is the display
+ * amount per unit (1 in Units, dollars per unit in Dollars), so the ticks land
+ * on round dollars in Dollars mode. With k = 1 it is the plain axis.
+ */
+export function scaledAxis(
+  axis: (lo: number, hi: number) => { domain: [number, number]; ticks: number[] },
+  lo: number,
+  hi: number,
+  k: number,
+): { domain: [number, number]; ticks: number[] } {
+  if (k === 1) return axis(lo, hi)
+  const a = axis(lo * k, hi * k)
+  return { domain: [a.domain[0] / k, a.domain[1] / k], ticks: a.ticks.map(t => t / k) }
+}
