@@ -161,3 +161,41 @@ unmeasured. A recent never-captured miss is left for the Python backfill.
 `scripts/recompute_empty_clv.py` recomputes rows already stamped
 `standard_v2` with every closing field empty. It is a dry run until
 `--apply`.
+
+## Model health: per model, in blocks and rolling (2026-11-18)
+
+`data/migrations/model_health_2026_11_18.sql` builds three read-only views over
+the published record's graded bets. The bets are the ones
+`v_public_track_record` counts: the views read its filter out of its own
+definition and carry the filter's hash, so they cannot drift from it.
+
+- `v_model_health_bets`: one row per bet. `status` is `price` (the bet book
+  closed on our number; `clv_pct` is the measure), `line_for` / `line_against`
+  (the main line left our number, our way or against), `in_play`, `no_close`,
+  `not_measured`, `old_method`. `verdict` is beat / push / miss for a price
+  close (push = `|clv_pct| < 0.005`, as above) and beat / miss for a line move.
+  `seq` 1 is the model's newest bet (`created_at`, then `pick_id`).
+- `v_model_health_windows`: blocks of 25, 50 and 100 over each model's newest
+  500 bets, `block_no` 1 the newest; average CLV with its standard error, beat
+  rates with and without line moves, Pinnacle's market edge, units.
+- `v_model_health_summary`: one row per model, over every bet and its newest
+  25, 50 and 100.
+
+`price_beat_rate` is the record's headline rate. `beat_rate_with_line` adds
+line moves by direction. Neither counts a push. The average CLV uses price
+closes only.
+
+The ops dashboard's Model Health tab reads these and nothing else, and the
+Picks & CLV tab takes its bets from `v_model_health_bets`.
+
+**What the measurement does not cover yet.**
+- In-play bets have no pre-game close.
+- A line move has a direction in points, not a price at our number.
+- The close is the bet book's newest pre-start row, and for game lines and
+  props nothing requires that row to have been fetched after the bet. A bet
+  placed after the book's last pre-start pull is compared against a price from
+  before the bet (4 of 73 measured bets on games from 2026-11-15).
+- NCAAB first-half spreads gained a tip-minus-3 pull on 2026-11-18
+  (`data/ingestors/ncaab_first_half_odds.CLOSE_MARK`); before it the bet's
+  pull was the last one, and none of those 42 bets has a close.
+

@@ -30,13 +30,17 @@ FEED_HOME, FEED_AWAY = "Kansas Jayhawks", "Duke Blue Devils"
 
 # ── the schedule ─────────────────────────────────────────────────────────────
 
-def test_nine_fetch_times_a_game_ending_ten_minutes_before_tip():
+def test_ten_fetch_times_a_game_ending_three_minutes_before_tip():
     s = feed.slots(DATE, TIP)
     assert [m for m, _ in s] == ["15z", "T-180", "T-120", "T-60", "T-50", "T-40", "T-30",
-                                 "T-20", "T-10"]
+                                 "T-20", "T-10", "T-3"]
     assert s[0][1] == datetime(2026, 11, 10, 15, 0, tzinfo=UTC)
-    assert s[-1][1] == TIP - timedelta(minutes=10)
-    assert len(s) * feed.MAX_CREDITS_PER_CALL == 36
+    assert s[-1] == (feed.CLOSE_MARK, TIP - timedelta(minutes=3))
+    assert len(s) * feed.MAX_CREDITS_PER_CALL == 40
+    # The closing call lands after the spread card's decision window closes
+    # (5 minutes before tip), so the card can never decide on it.
+    from scripts.ncaab_first_half_spread_card import DECISION_LEAD_MIN
+    assert timedelta(minutes=3) < timedelta(minutes=min(DECISION_LEAD_MIN))
 
 
 def test_a_morning_tip_drops_the_15z_time_and_never_duplicates_one():
@@ -56,10 +60,26 @@ def test_a_time_is_due_once_it_passes_until_an_ok_call_lands_after_it():
     assert feed.due_mark(DATE, TIP, t10 + timedelta(minutes=1), t10 - timedelta(minutes=9))[0] == "T-10"
     # a call that landed after it does
     assert feed.due_mark(DATE, TIP, t10 + timedelta(minutes=2), t10 + timedelta(seconds=5)) is None
-    # a failed -10 stays due, minute after minute, until just before tip
-    assert feed.due_mark(DATE, TIP, TIP - timedelta(minutes=1), None)[0] == "T-10"
+    # a failed -10 stays due, minute after minute, until the closing time
+    assert feed.due_mark(DATE, TIP, TIP - timedelta(minutes=4), None)[0] == "T-10"
+    assert feed.due_mark(DATE, TIP, TIP - timedelta(minutes=3), None)[0] == "T-3"
     assert feed.due_mark(DATE, TIP, TIP - timedelta(seconds=20), None) is None
     assert feed.due_mark(DATE, TIP, TIP + timedelta(minutes=1), None) is None
+
+
+def test_the_decision_call_does_not_count_as_the_close_and_a_failed_close_is_retried():
+    t3 = TIP - timedelta(minutes=3)
+    decided = TIP - timedelta(minutes=10) + timedelta(seconds=5)
+    # the -10 call landed: nothing until the closing time, then the close is due
+    assert feed.due_mark(DATE, TIP, t3 - timedelta(seconds=1), decided) is None
+    assert feed.due_mark(DATE, TIP, t3, decided) == ("T-3", t3)
+    # a failed closing call is called again the next minute, until 30 s before tip
+    failed = t3 + timedelta(seconds=2)
+    assert feed.due_mark(DATE, TIP, t3 + timedelta(minutes=1), decided, failed) == ("T-3", t3)
+    assert feed.due_mark(DATE, TIP, TIP - timedelta(seconds=40), decided, failed) == ("T-3", t3)
+    assert feed.due_mark(DATE, TIP, TIP - timedelta(seconds=20), decided, failed) is None
+    # one that landed ends it
+    assert feed.due_mark(DATE, TIP, t3 + timedelta(minutes=1), t3 + timedelta(seconds=4)) is None
 
 
 def test_a_failed_history_fetch_waits_for_the_next_time_but_the_decision_is_retried():

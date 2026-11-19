@@ -93,6 +93,8 @@
   --clv-worse: #e34948;
   --clv-flat: #d5dae3;
   --clv-flat-fg: #414b5c;
+  --clv-line-for: #93bcef;
+  --clv-line-against: #f2a7a6;
   --clv-grid: #e4e8ef;
   --clv-muted: #6b7587;
 
@@ -169,6 +171,8 @@
   --clv-worse: #e66767;
   --clv-flat: #364256;
   --clv-flat-fg: #c3cbd8;
+  --clv-line-for: #24528c;
+  --clv-line-against: #8c3a3a;
   --clv-grid: #1c2638;
   --clv-muted: #8d98aa;
 

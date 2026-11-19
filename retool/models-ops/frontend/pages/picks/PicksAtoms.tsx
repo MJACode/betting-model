@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { ArrowUp, ArrowDown, Equal, Check, X, Minus, Clock, Ban, CircleDashed } from 'lucide-react'
+import { ArrowUp, ArrowDown, Equal, Check, X, Minus, Clock, Ban, CircleDashed, TrendingUp, TrendingDown } from 'lucide-react'
 import { Badge } from '../../components/StatusBadge'
 import { Chip } from '../../components/PanelUtils'
 import type { ClvOutcome } from './picksUtils'
@@ -9,6 +9,8 @@ export function ClvBadge({ outcome }: { outcome: ClvOutcome }) {
     case 'BEAT': return <Badge tone="info" icon={ArrowUp}>Beat</Badge>
     case 'WORSE': return <Badge tone="critical" icon={ArrowDown}>Worse</Badge>
     case 'FLAT': return <Badge tone="neutral" icon={Equal}>Flat</Badge>
+    case 'LINE_FOR': return <Badge tone="outline" icon={TrendingUp} title="The book's line left our number before the start, in our favour; no closing price on our exact bet">Line moved our way</Badge>
+    case 'LINE_AGAINST': return <Badge tone="outline" icon={TrendingDown} title="The book's line left our number before the start, against us; no closing price on our exact bet">Line moved against</Badge>
     case 'NOT_MEASURED': return <Badge tone="outline">Not measured</Badge>
     case 'UNRESOLVED': return <Badge tone="outline">Unresolved</Badge>
   }

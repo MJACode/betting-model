@@ -14,6 +14,8 @@ import { useModelNames, distinctLabels } from '../../components/models/modelName
 const BEAT = 'var(--clv-beat)'
 const WORSE = 'var(--clv-worse)'
 const FLAT = 'var(--clv-flat)'
+const LINE_FOR = 'var(--clv-line-for)'
+const LINE_AGAINST = 'var(--clv-line-against)'
 const ZERO_LINE = 'var(--clv-muted)'
 
 function signedU(n: number): string {
@@ -242,8 +244,8 @@ export function UnitsByModel({ rows }: { rows: PickRow[] }) {
 // ---- 3. CLV outcome by model ----
 type ModelClv = {
   model_id: string
-  beat: number; flat: number; worse: number; total: number
-  beatPct: number; flatPct: number; worsePct: number
+  beat: number; flat: number; worse: number; lineFor: number; lineAgainst: number; total: number
+  beatPct: number; flatPct: number; worsePct: number; lineForPct: number; lineAgainstPct: number
 }
 
 export function ClvByModel({ rows }: { rows: PickRow[] }) {
@@ -254,13 +256,18 @@ export function ClvByModel({ rows }: { rows: PickRow[] }) {
     for (const r of rows) {
       if (r.clv_outcome === 'NOT_MEASURED' || r.clv_outcome === 'UNRESOLVED') continue
       if (!map.has(r.model_id)) {
-        map.set(r.model_id, { model_id: r.model_id, beat: 0, flat: 0, worse: 0, total: 0, beatPct: 0, flatPct: 0, worsePct: 0 })
+        map.set(r.model_id, {
+          model_id: r.model_id, beat: 0, flat: 0, worse: 0, lineFor: 0, lineAgainst: 0, total: 0,
+          beatPct: 0, flatPct: 0, worsePct: 0, lineForPct: 0, lineAgainstPct: 0,
+        })
       }
       const m = map.get(r.model_id)!
       m.total++
       if (r.clv_outcome === 'BEAT') m.beat++
       else if (r.clv_outcome === 'FLAT') m.flat++
       else if (r.clv_outcome === 'WORSE') m.worse++
+      else if (r.clv_outcome === 'LINE_FOR') m.lineFor++
+      else if (r.clv_outcome === 'LINE_AGAINST') m.lineAgainst++
     }
 
     const allModels = Array.from(new Set(rows.map(r => r.model_id))).sort()
@@ -273,6 +280,8 @@ export function ClvByModel({ rows }: { rows: PickRow[] }) {
         beatPct: m.total > 0 ? parseFloat(((m.beat / m.total) * 100).toFixed(2)) : 0,
         flatPct: m.total > 0 ? parseFloat(((m.flat / m.total) * 100).toFixed(2)) : 0,
         worsePct: m.total > 0 ? parseFloat(((m.worse / m.total) * 100).toFixed(2)) : 0,
+        lineForPct: m.total > 0 ? parseFloat(((m.lineFor / m.total) * 100).toFixed(2)) : 0,
+        lineAgainstPct: m.total > 0 ? parseFloat(((m.lineAgainst / m.total) * 100).toFixed(2)) : 0,
       }))
 
     return { data, excluded }
@@ -280,7 +289,7 @@ export function ClvByModel({ rows }: { rows: PickRow[] }) {
 
   const axisLabels = useMemo(() => distinctLabels(data.map(d => d.model_id), names, true), [data, names])
 
-  if (data.length === 0) return <NoData>Beat, flat and worse shares per model appear here once the filter includes picks with a measured close.</NoData>
+  if (data.length === 0) return <NoData>Beat, flat, worse and line-move shares per model appear here once the filter includes picks with a measured close.</NoData>
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -308,7 +317,9 @@ export function ClvByModel({ rows }: { rows: PickRow[] }) {
                 <ChartTooltipBox title={names.modelLabel(d.model_id).name}>
                   <div className="mb-1 font-mono text-[11px] text-muted-foreground">{d.model_id}</div>
                   <div><Swatch color={BEAT} />Beat: <span className="tabular-nums">{d.beatPct.toFixed(1)}%</span> ({d.beat})</div>
+                  <div><Swatch color={LINE_FOR} />Line moved our way: <span className="tabular-nums">{d.lineForPct.toFixed(1)}%</span> ({d.lineFor})</div>
                   <div><Swatch color={FLAT} />Flat: <span className="tabular-nums">{d.flatPct.toFixed(1)}%</span> ({d.flat})</div>
+                  <div><Swatch color={LINE_AGAINST} />Line moved against: <span className="tabular-nums">{d.lineAgainstPct.toFixed(1)}%</span> ({d.lineAgainst})</div>
                   <div><Swatch color={WORSE} />Worse: <span className="tabular-nums">{d.worsePct.toFixed(1)}%</span> ({d.worse})</div>
                   <div className="mt-1 text-muted-foreground">{d.total} measured</div>
                 </ChartTooltipBox>
@@ -317,7 +328,9 @@ export function ClvByModel({ rows }: { rows: PickRow[] }) {
           />
           <Legend {...legendProps} verticalAlign="top" align="left" wrapperStyle={{ fontSize: 12, paddingBottom: 8 }} />
           <Bar dataKey="beatPct" name="Beat" stackId="a" fill={BEAT} maxBarSize={20} radius={[4, 0, 0, 4]} />
+          <Bar dataKey="lineForPct" name="Line moved our way" stackId="a" fill={LINE_FOR} maxBarSize={20} />
           <Bar dataKey="flatPct" name="Flat" stackId="a" fill={FLAT} maxBarSize={20} />
+          <Bar dataKey="lineAgainstPct" name="Line moved against" stackId="a" fill={LINE_AGAINST} maxBarSize={20} />
           <Bar dataKey="worsePct" name="Worse" stackId="a" fill={WORSE} maxBarSize={20} radius={[0, 4, 4, 0]}>
             <LabelList
               content={(props) => {
@@ -347,7 +360,7 @@ export function ClvByModel({ rows }: { rows: PickRow[] }) {
           No close measured (in-play only or never captured): {excluded.map(id => names.modelLabel(id).name).join(', ')}
         </p>
       )}
-      <p className="text-xs text-muted-foreground">In-play picks and any pick without a captured close are left out of CLV, not counted as losses.</p>
+      <p className="text-xs text-muted-foreground">In-play picks and any pick without a captured close are left out of CLV, not counted as losses. A line move means the book's line left our number before the start, so there is no closing price on our exact bet; it is shown on its own, not as beat or worse.</p>
     </div>
   )
 }
