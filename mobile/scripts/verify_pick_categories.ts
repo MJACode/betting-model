@@ -25,8 +25,12 @@ import {
   categoriesAreNarrowed,
   categoryCountsFor,
   freshFilter,
+  modelsAreNarrowed,
   presentCategoriesFor,
+  presentModelsFor,
+  resetImpossibleModels,
   selectedCategories,
+  selectedModels,
   type ModelCategory,
   type PicksFilterState,
 } from '../src/lib/pickFilterState';
@@ -229,6 +233,52 @@ check(
   'every NFL prop model is a player prop',
   NFL_PROPS.every((id) => modelCategory(id) === 'player_prop'),
 );
+
+// ── 7. the MODEL cut (Matt, 2026-11-18): scoped to the board, like Market ──
+{
+  const NHL = ['nhl_moneyline', 'nhl_prop_shots_on_goal', 'nhl_prop_shots_on_goal', 'nhl_prop_saves'];
+  const NCAAB = ['ncaab_spread_market', 'ncaab_first_half_total'];
+  const paused = (id: string) => id === 'nhl_prop_saves';
+  const present = presentModelsFor(NHL, paused);
+  check(
+    'the Model list holds only the board\'s models, most picks first, paused left out',
+    present.map((m) => `${m.modelId}:${m.count}`).join(',') ===
+      'nhl_prop_shots_on_goal:2,nhl_moneyline:1',
+    present.map((m) => `${m.modelId}:${m.count}`).join(','),
+  );
+  const fresh = freshFilter();
+  check('an empty model selection keeps every pick', applyFilter(NHL.map(pick), fresh).length === NHL.length);
+  const sogOnly: PicksFilterState = { ...freshFilter(), models: new Set(['nhl_prop_shots_on_goal']) };
+  const kept = applyFilter(NHL.map(pick), sogOnly).map((i) => i.pick.model_id);
+  check(
+    'picking one model keeps only that model\'s picks',
+    kept.length === 2 && kept.every((id) => id === 'nhl_prop_shots_on_goal'),
+    kept.join(','),
+  );
+  check(
+    'picking one of two listed models is a narrowing cut, counted once',
+    modelsAreNarrowed(sogOnly, present) &&
+      activeFilterCount(sogOnly, presentCategoriesFor(NHL), present) === 1,
+    String(activeFilterCount(sogOnly, presentCategoriesFor(NHL), present)),
+  );
+  const both: PicksFilterState = {
+    ...freshFilter(),
+    models: new Set(['nhl_prop_shots_on_goal', 'nhl_moneyline']),
+  };
+  check('picking every listed model is not a narrowing cut', !modelsAreNarrowed(both, present));
+  // Switch to NCAAB with an NHL-only selection: the board would be empty with
+  // no NCAAB model named anywhere. It must be cleared, not kept.
+  const ncaabPresent = presentModelsFor(NCAAB);
+  check(
+    'an NHL model selection on the NCAAB board is cleared',
+    selectedModels(sogOnly, ncaabPresent).length === 0 &&
+      resetImpossibleModels(sogOnly, ncaabPresent).models.size === 0,
+  );
+  check(
+    'a selection that still overlaps the board is left alone',
+    resetImpossibleModels(sogOnly, present) === sogOnly,
+  );
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

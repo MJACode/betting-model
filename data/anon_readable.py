@@ -178,6 +178,9 @@ ANON_READABLE: tuple[str, ...] = (
     "open_picks",
     "v_public_track_record",
     "v_public_track_record_daily",
+    # Per model per day, built from the daily view's own definition
+    # (data/migrations/public_track_record_model_daily_2026_11_18.sql).
+    "v_public_track_record_model_daily",
 )
 
 # In ANON_READABLE, and not yet named by a mobile `.from()`. The stale-entry

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Picks filter Model section: each model's total published record and a hot / cold tag (3u on 8+ bets, last 7 days); new view v_public_track_record_model_daily built from the daily view's definition |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, horse racing: a US site that takes Hong Kong bets publishes the Jockey Club's own dividends (77 of 77 win and place, 7 of 7 exotics, two cards); the US$499 archive is mike's call |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, Discord /pick page always lists FD, DK, Fanatics, BetMGM, Caesars and does not open the app |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, X posts the day's best four pre-game picks, each with a rationale reply; the 2099 pause row was what stopped the slate |

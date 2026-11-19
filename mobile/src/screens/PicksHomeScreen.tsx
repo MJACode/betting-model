@@ -124,8 +124,11 @@ import { slipKeyForPick } from '@/lib/parlay';
 import {
   ALL_SIGNALS,
   presentCategoriesFor,
+  presentModelsFor,
   resetImpossibleMarket,
+  resetImpossibleModels,
 } from '@/lib/pickFilterState';
+import { useModelFilterRecords } from '@/hooks/useModelFilterRecords';
 import { publicSortAvailable, searchPicks, sortPicks, type SortKey } from '@/lib/pickSort';
 import { priceCheckForItem } from '@/lib/pickPriceCheck';
 import { colors, font, radii, spacing, opacity } from '@/lib/theme';
@@ -485,6 +488,16 @@ export function PicksHomeScreen() {
     [boardItems],
   );
 
+  // ── The MODEL cut (Matt, 2026-11-18) ───────────────────────────────────────
+  // Paused models are not listed (Matt). Keyed on thresholdsRevision because
+  // isModelPaused reads the server thresholds, which arrive after first paint.
+  const excludeModel = useCallback(
+    (id: string) => isModelPaused(id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [thresholdsRevision],
+  );
+  const modelRecords = useModelFilterRecords();
+
   // ── The GAMES cut, shared with the Stats tab ───────────────────────────────
   // Matt, 2026-09-09: one selection across both tabs, so picking tonight's
   // game on the Stats board narrows this list to that game's bets and back.
@@ -611,14 +624,17 @@ export function PicksHomeScreen() {
   // on a board with no Signal section) — the case locks 3/4 exist to stop.
   const displayFilter = useMemo(() => {
     const present = presentCategoriesFor(availableModelIds);
-    const afterMarket = resetImpossibleMarket(filter, present);
+    const afterMarket = resetImpossibleModels(
+      resetImpossibleMarket(filter, present),
+      presentModelsFor(availableModelIds, excludeModel),
+    );
     if (view !== 'today' && afterMarket.signals.size < ALL_SIGNALS.length) {
       const next = afterMarket === filter ? cloneFilter(filter) : afterMarket;
       next.signals = new Set(ALL_SIGNALS);
       return next;
     }
     return afterMarket;
-  }, [filter, view, availableModelIds]);
+  }, [filter, view, availableModelIds, excludeModel]);
   useEffect(() => {
     if (displayFilter !== filter) setFilter(displayFilter);
   }, [displayFilter, filter]);
@@ -1073,6 +1089,8 @@ export function PicksHomeScreen() {
           totalShown={filtered.length}
           totalAll={statusPoolSize}
           availableModelIds={availableModelIds}
+          excludeModel={excludeModel}
+          modelRecords={modelRecords}
           games={pickableGames}
           selectedGames={gamePicker.selected}
           onToggleGame={gamePicker.toggle}

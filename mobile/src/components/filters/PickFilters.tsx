@@ -15,10 +15,12 @@
  * `PicksFilterState`, `DEFAULT_FILTER` and `applyFilter` are exported from here
  * — they're pure and the screens depend on them.
  *
- * There is deliberately NO per-model filter. It listed every model across every
- * sport in one flat list (four unlabeled "Moneyline" chips, and so on), and the
- * cut people actually want — regular betting lines vs player props — is what
- * the Market section expresses.
+ * THE MODEL SECTION CAME BACK ON 2026-11-18 (Matt), on the terms its removal
+ * named. The old one listed every model across every sport in one flat list
+ * (four unlabeled "Moneyline" chips, and so on). This one lists only the
+ * models with picks on the board on screen, never a paused model, each with
+ * its published record and a hot / cold tag (ModelFilterSection,
+ * lib/modelHeat).
  *
  * THE MARKET CUT IS SCOPED TO THE BOARD ON SCREEN (2026-09-09). `pitcher_prop`
  * and `batter_prop` are MLB-only markets and this offered all four categories
@@ -42,9 +44,13 @@ import {
   cloneFilter,
   freshFilter,
   presentCategoriesFor,
+  presentModelsFor,
+  modelsAreNarrowed,
   selectedCategories,
+  selectedModels,
   type ModelCategory,
   type PicksFilterState,
+  type PresentModel,
 } from '@/lib/pickFilterState';
 import { spacing } from '@/lib/theme';
 import { FilterBar, type ActivePill } from './FilterBar';
@@ -52,6 +58,9 @@ import { FilterChip } from './FilterChip';
 import { FilterField } from './FilterField';
 import { FilterSection, FilterSheet } from './FilterSheet';
 import { GameFilterSection } from './GameFilterSection';
+import { ModelFilterSection } from './ModelFilterSection';
+import { modelShort } from '@/lib/modelMeta';
+import type { ModelRecordSummary } from '@/lib/modelHeat';
 import { gameFilterSummary, type SelectableGame } from '@/lib/gameFilter';
 import { dateFilterSummary, datesAreNarrowed, type DateOption } from '@/lib/dateFilter';
 import {
@@ -78,6 +87,8 @@ const EMPTY_SELECTION: Set<string> = new Set();
 const EMPTY_DATES: DateOption[] = [];
 const EMPTY_STATES: GameStateOption[] = [];
 const EMPTY_STATE_SELECTION: Set<GameState> = new Set();
+const EMPTY_RECORDS: Record<string, ModelRecordSummary> = {};
+const NO_EXCLUDE = () => false;
 
 interface Props {
   state: PicksFilterState;
@@ -103,6 +114,13 @@ interface Props {
    * Batter chips on the NFL board.
    */
   availableModelIds: string[];
+  /**
+   * Leaves a model out of the Model section's list (Matt, 2026-11-18: paused
+   * models are not listed). Its picks still show while no model is picked.
+   */
+  excludeModel?: (modelId: string) => boolean;
+  /** Each model's published record and hot / cold tag (useModelFilterRecords). */
+  modelRecords?: Record<string, ModelRecordSummary>;
   /**
    * Tonight's games, and which of them the user has picked. The SELECTION is
    * shared with the Stats tab (useGameSelection) rather than living in
@@ -149,6 +167,8 @@ export function PickFilters({
   totalShown,
   totalAll,
   availableModelIds,
+  excludeModel = NO_EXCLUDE,
+  modelRecords = EMPTY_RECORDS,
   games = [],
   selectedGames = EMPTY_SELECTION,
   onToggleGame,
@@ -175,6 +195,11 @@ export function PickFilters({
     [availableModelIds],
   );
 
+  const presentModels = useMemo(
+    () => presentModelsFor(availableModelIds, excludeModel),
+    [availableModelIds, excludeModel],
+  );
+
   const patch = (fn: (draft: PicksFilterState) => void) => {
     const next = cloneFilter(state);
     fn(next);
@@ -191,6 +216,12 @@ export function PickFilters({
     patch((d) => {
       if (d.categories.has(c)) d.categories.delete(c);
       else d.categories.add(c);
+    });
+
+  const toggleModel = (id: string) =>
+    patch((d) => {
+      if (d.models.has(id)) d.models.delete(id);
+      else d.models.add(id);
     });
 
   const setThreshold = (key: 'minProb' | 'minEdge' | 'minEV', text: string) => {
@@ -213,6 +244,9 @@ export function PickFilters({
   // Signals/Live, and a hidden cut with no undo empties the board.
   const marketIsNarrowed = categoriesAreNarrowed(state, presentCategories);
   const marketCutBites = presentCategories.length > 1 || marketIsNarrowed;
+  // Model: the same rule. One model on the board is nothing to choose between.
+  const modelIsNarrowed = modelsAreNarrowed(state, presentModels);
+  const modelCutBites = presentModels.length > 1 || modelIsNarrowed;
 
   // THE GAME CUT IS IN THE BAR, NOT JUST THE SHEET. It lives outside
   // PicksFilterState (it is shared with the Stats tab), and leaving it out of
@@ -248,7 +282,7 @@ export function PickFilters({
     (gameStateOptions.length > 1 || statesNarrowed || gameStateOptions.some((o) => o.state === 'final'));
   const searchActive = search.trim().length > 0;
   const pills = useMemo(() => {
-    const out = buildPills(state, onChange, presentCategories);
+    const out = buildPills(state, onChange, presentCategories, presentModels);
     if (searchActive) {
       out.unshift({
         key: 'search',
@@ -274,6 +308,7 @@ export function PickFilters({
     state,
     onChange,
     presentCategories,
+    presentModels,
     searchActive,
     search,
     onSearchChange,
@@ -290,7 +325,7 @@ export function PickFilters({
   ]);
 
   const count =
-    activeFilterCount(state, presentCategories) +
+    activeFilterCount(state, presentCategories, presentModels) +
     (datesNarrowed ? 1 : 0) +
     (statesNarrowed ? 1 : 0) +
     (gamesNarrowed ? 1 : 0) +
@@ -312,6 +347,12 @@ export function PickFilters({
     if (shown.length === 0) return 'None';
     return shown.map((c) => CATEGORY_LABEL[c]).join(', ');
   }, [state, presentCategories]);
+
+  const modelSummary = useMemo(() => {
+    const shown = selectedModels(state, presentModels);
+    if (shown.length === 0 || shown.length === presentModels.length) return 'All models';
+    return modelPillLabel(shown);
+  }, [state, presentModels]);
 
   const minimumsSummary = useMemo(() => {
     const parts: string[] = [];
@@ -472,6 +513,26 @@ export function PickFilters({
           </FilterSection>
         ) : null}
 
+        {modelCutBites ? (
+          <FilterSection
+            title="Model"
+            subtitle="Show only the models you pick. Leave empty for every model."
+            summary={modelSummary}
+            defaultOpen={modelIsNarrowed}
+            onClear={
+              state.models.size > 0 ? () => patch((d) => (d.models = new Set())) : undefined
+            }
+          >
+            <ModelFilterSection
+              models={presentModels}
+              selected={state.models}
+              records={modelRecords}
+              onToggle={toggleModel}
+              itemNoun={itemNoun}
+            />
+          </FilterSection>
+        ) : null}
+
         <FilterSection
           title="Minimums"
           subtitle={
@@ -516,6 +577,12 @@ export function PickFilters({
   );
 }
 
+/** "NHL Moneyline", "NHL Moneyline, NHL Saves", or "3 models". */
+function modelPillLabel(ids: string[]): string {
+  if (ids.length <= 2) return ids.map(modelShort).join(', ');
+  return `${ids.length} models`;
+}
+
 function pctText(v: number | null): string {
   return v == null ? '' : String(Math.round(v * 100));
 }
@@ -526,6 +593,7 @@ function buildPills(
   state: PicksFilterState,
   onChange: (next: PicksFilterState) => void,
   presentCategories: ModelCategory[],
+  presentModels: PresentModel[],
 ): ActivePill[] {
   const out: ActivePill[] = [];
   const patch = (fn: (d: PicksFilterState) => void) => {
@@ -554,6 +622,14 @@ function buildPills(
       // to say which half is wrong — the filter, not the board.
       label: shown.map((c) => CATEGORY_LABEL[c]).join(', ') || 'No markets on this board',
       onRemove: () => patch((d) => (d.categories = new Set(ALL_CATEGORIES))),
+    });
+  }
+  // Named from the models on THIS board, like the Market pill.
+  if (modelsAreNarrowed(state, presentModels)) {
+    out.push({
+      key: 'models',
+      label: modelPillLabel(selectedModels(state, presentModels)),
+      onRemove: () => patch((d) => (d.models = new Set())),
     });
   }
   if (state.minProb != null) {
