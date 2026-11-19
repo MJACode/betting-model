@@ -224,6 +224,12 @@ export interface PickWindow<T> {
    * with `fromPick`: the book has posted nothing since the pick.
    */
   since: number;
+  /**
+   * Snapshots after the pick at any time, the start included: the book's feed
+   * ran past the pick even when its next row lands after the start the card
+   * uses (lineMovementView, PROP_ARCHIVED_THROUGH).
+   */
+  later: number;
   /** The game has started: the last row is the last price before it, not "now". */
   closed: boolean;
   /**
@@ -265,7 +271,8 @@ export function sincePick<T extends { snapshot_at: string }>(
   // pick made exactly then has no stretch "since the pick" either.
   const afterStart = !Number.isNaN(raw) && raw >= end;
   const pick = Math.min(raw, end);
-  if (Number.isNaN(pick)) return { rows: [], fromPick: false, gap: false, since: 0, closed, afterStart };
+  if (Number.isNaN(pick)) return { rows: [], fromPick: false, gap: false, since: 0, later: 0, closed, afterStart };
+  const later = rows.filter((r) => instant(r.snapshot_at) > raw).length;
   const pre = byTime(rows).filter((r) => instant(r.snapshot_at) < end);
   const after = pre.filter((r) => instant(r.snapshot_at) > pick);
   const atPick = pre.filter((r) => instant(r.snapshot_at) <= pick).pop();
@@ -275,6 +282,7 @@ export function sincePick<T extends { snapshot_at: string }>(
     fromPick: atPick != null,
     gap: kept.length < after.length,
     since: after.length,
+    later,
     closed,
     afterStart,
   };
