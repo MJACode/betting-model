@@ -106,11 +106,11 @@ def test_the_refresh_swaps_one_pair_in_one_transaction():
 def test_the_two_functions_are_recorded_as_revoked_in_the_manifest():
     """data/anon_readable.RPC_REVOKE is where a deliberate revoke lives, so the
     admin sweep re-applies it rather than the default privilege re-opening it."""
-    from data.anon_readable import RPC_ANON_CALLABLE, RPC_REVOKE
+    from data.anon_readable import RPC_ANON_CALLABLE, RPC_AUTHENTICATED_CALLABLE, RPC_REVOKE
     for fn in ("team_stats_board_compute", "refresh_team_stats_board"):
         assert fn in RPC_REVOKE
         assert fn not in RPC_ANON_CALLABLE
-    assert "team_stats_board" in RPC_ANON_CALLABLE
+    assert "team_stats_board" in RPC_AUTHENTICATED_CALLABLE
 
 
 # ── the pipeline step ─────────────────────────────────────────────────────────

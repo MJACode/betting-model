@@ -640,6 +640,8 @@ export type RootStackParamList = {
   Settings: undefined;
   /** One section of Settings, pushed from the home grid. */
   SettingsSection: { section: SettingsSectionId };
+  /** The 7-day notifications inbox. Same screen from the bell and the Picks pill. */
+  Notifications: undefined;
   // Account deletion. Reachable from Settings only while signed in.
   DeleteAccount: undefined;
   // In-app feedback: the composer + your past conversations, and one thread.

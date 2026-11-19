@@ -47,6 +47,10 @@ BEGIN
   $fn$;
 
   REVOKE ALL ON FUNCTION public.custom_model_backtest_posted(jsonb, jsonb) FROM PUBLIC;
-  GRANT EXECUTE ON FUNCTION public.custom_model_backtest_posted(jsonb, jsonb) TO anon, authenticated;
+  GRANT EXECUTE ON FUNCTION public.custom_model_backtest_posted(jsonb, jsonb) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.custom_model_backtest_posted(jsonb, jsonb) TO anon;
+  END IF;
 END
 $mig$;

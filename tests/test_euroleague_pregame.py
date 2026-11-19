@@ -198,6 +198,83 @@ def test_a_level_first_half_mean_is_a_pick_em_with_no_bet():
     assert R.decide_h1_dog(p, game(), ART)[0].status == "pick_em"
 
 
+# ── the same-team cuts (mike, 2026-11-17: "Yes, both") ───────────────────────
+# The moneyline bets the home side only when it is getting points on the
+# full-game spread, and the first half only when its underdog is that same
+# home side. The research's rules (no cut) are what an artifact without the
+# parameters decides: ART above.
+
+CUT = {"models": {**ART["models"],
+                  R.HOME_ML: {"params": {"min_price": -200.0, "min_season": 2022, "min_home_line": 0.0},
+                              "uplift": 0.05},
+                  R.H1_DOG_ML: {"params": {"home_dog_only": True, "min_home_line": 0.0}, "uplift": 0.05}}}
+
+
+@pytest.mark.parametrize("line, h2h, want", [(3.5, (140, -160), "bet"), (0.5, (-102, -118), "bet"),
+                                             (0.0, (-110, -110), "no_bet"), (-2.5, (-140, 120), "no_bet")])
+def test_the_moneyline_bets_only_a_home_side_getting_points(line, h2h, want):
+    b = board([("draftkings", "h2h", 30, *h2h, None), ("draftkings", "spreads", 30, -110, -110, line)])
+    d = R.decide_home_ml(b, game(), CUT)[0]
+    assert (d.status, d.side, d.price) == (want, "home", float(h2h[0]))
+    assert d.extra["home_line"] == line
+    if want == "no_bet":
+        assert "not getting points" in d.detail
+
+
+def test_the_moneyline_reads_the_modal_deciding_book_number_not_pinnacles():
+    b = board([("draftkings", "h2h", 30, 105, -125, None),
+               ("draftkings", "spreads", 30, -110, -110, 1.5), ("fanduel", "spreads", 30, -110, -110, 1.5),
+               ("betmgm", "spreads", 30, -110, -110, -1.5),
+               ("pinnacle", "spreads", 30, -110, -110, -1.5), ("pinnacle", "spreads", 31, -110, -110, -1.5)])
+    assert R.decide_home_ml(b, game(), CUT)[0].status == "bet"
+
+
+def test_with_no_deciding_book_spread_the_moneyline_does_not_bet():
+    b = board([("draftkings", "h2h", 30, 140, -160, None), ("pinnacle", "spreads", 30, -110, -110, 3.5)])
+    d = R.decide_home_ml(b, game(), CUT)[0]
+    assert d.status == "no_bet" and "no deciding-book spread" in d.detail and d.price == 140.0
+
+
+def test_without_the_cut_the_moneyline_is_the_researchs_rule():
+    b = board([("draftkings", "h2h", 30, -150, 130, None), ("draftkings", "spreads", 30, -110, -110, -3.5)])
+    assert R.decide_home_ml(b, game(), ART)[0].status == "bet"
+
+
+def test_the_first_half_bets_only_the_home_underdog_getting_points():
+    home_dog = R.prepare_period(per([("fanduel", "h2h_h1", 130, -150, None)]))
+    away_dog = R.prepare_period(per([("fanduel", "h2h_h1", -150, 130, None)]))
+    gets = board([("draftkings", "spreads", 30, -110, -110, 3.5)])
+    gives = board([("draftkings", "spreads", 30, -110, -110, -1.5)])
+    d = R.decide_h1_dog(home_dog, game(), CUT, fg_board=gets)[0]
+    assert (d.status, d.side, d.price) == ("bet", "home", 130.0) and d.extra["home_line"] == 3.5
+    d = R.decide_h1_dog(home_dog, game(), CUT, fg_board=gives)[0]
+    assert (d.status, d.side, d.price) == ("no_bet", "home", 130.0) and "not getting points" in d.detail
+    d = R.decide_h1_dog(away_dog, game(), CUT, fg_board=gets)[0]
+    assert (d.status, d.side, d.price) == ("no_bet", "away", 130.0) and "away side" in d.detail
+    # a priced NONE row still carries the market's chance, so EV is written for it
+    assert d.p_fair is not None and d.scored
+
+
+def test_the_first_half_cut_does_not_bet_without_a_full_game_spread_or_at_a_neutral_site():
+    home_dog = R.prepare_period(per([("fanduel", "h2h_h1", 130, -150, None)]))
+    gets = board([("draftkings", "spreads", 30, -110, -110, 3.5)])
+    none = board([("draftkings", "h2h", 30, 140, -160, None)])
+    assert R.decide_h1_dog(home_dog, game(), CUT, fg_board=none)[0].status == "no_bet"
+    d = R.decide_h1_dog(home_dog, game(neutral=True), CUT, fg_board=gets)[0]
+    assert d.status == "no_bet" and "neutral site" in d.detail
+
+
+def test_the_first_half_cut_refuses_to_decide_without_the_full_game_board():
+    home_dog = R.prepare_period(per([("fanduel", "h2h_h1", 130, -150, None)]))
+    with pytest.raises(ValueError):
+        R.decide_h1_dog(home_dog, game(), CUT)
+
+
+def test_without_the_cut_the_first_half_is_the_researchs_rule():
+    away_dog = R.prepare_period(per([("fanduel", "h2h_h1", -150, 130, None)]))
+    assert R.decide_h1_dog(away_dog, game(), ART)[0].status == "bet"
+
+
 # ── model 5: the club first-quarter share ────────────────────────────────────
 
 def test_pinnacles_ladder_interpolates_at_its_first_crossing_of_one_half():

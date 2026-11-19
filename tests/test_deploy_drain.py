@@ -489,3 +489,23 @@ def test_the_refresh_shell_takes_the_lease_before_the_ledger_start():
     assert "disown" in sh
     assert "release_scoring_lease" in sh
     assert sh.index("tracking.run_ledger finish") < sh.index("exit 0")
+
+
+def test_par_wait_waits_only_the_pids_that_group_started():
+    """A bare `wait` reaps every job in the shell. On bash 5.3.9 (Ubuntu
+    26.04, the GitHub runner) that builtin never returns once one of those
+    pids is not a child: it prints `wait: pid N is not a child of this
+    shell` until the log fills. The deploy-drain test then times out.
+    par_wait may wait only the pids `par` recorded."""
+    sh = (ROOT / "scripts" / "refresh_pass.sh").read_text(encoding="utf-8")
+    par = sh.split("\npar() {", 1)[1].split("\n}", 1)[0]
+    body = sh.split("\npar_wait() {", 1)[1].split("\n}", 1)[0]
+    assert 'PAR_PIDS+=("$!")' in par
+    assert 'wait "$pid"' in body
+    bare = [
+        line for line in body.splitlines()
+        if line.strip() == "wait" or (
+            line.strip().startswith("wait ") and "$pid" not in line
+        )
+    ]
+    assert bare == []

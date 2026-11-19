@@ -62,7 +62,11 @@ BEGIN
     ALTER TABLE public.player_news ENABLE ROW LEVEL SECURITY;
     REVOKE ALL ON public.player_news FROM anon, authenticated;
     REVOKE ALL ON SEQUENCE public.player_news_news_id_seq FROM anon, authenticated;
-    GRANT SELECT ON public.player_news TO anon, authenticated;
+    GRANT SELECT ON public.player_news TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT SELECT ON public.player_news TO anon;
+    END IF;
     CREATE POLICY "anon read player_news"
       ON public.player_news FOR SELECT TO anon, authenticated USING (true);
   END IF;

@@ -97,10 +97,10 @@ def test_public_betting_policy_migration_exists_and_is_select_only():
 
 
 def test_the_new_relations_are_in_the_manifest():
-    from data.anon_readable import ANON_READABLE
+    from data.anon_readable import AUTHENTICATED_READABLE
 
-    assert "public_betting" in ANON_READABLE
-    assert "nfl_team_game_stats" in ANON_READABLE
+    assert "public_betting" in AUTHENTICATED_READABLE
+    assert "nfl_team_game_stats" in AUTHENTICATED_READABLE
 
 
 def test_every_team_page_read_names_its_relation_literally():

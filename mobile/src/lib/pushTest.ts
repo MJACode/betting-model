@@ -45,12 +45,16 @@ export interface TestPushResult {
  * about plumbing (UX review, 2026-09-12). Today shows everything scored, so it
  * is true whatever is on the board — and the body says where the tap goes.
  */
-export function buildTestMessage(token: string): Record<string, unknown> {
+export function buildTestMessage(token: string, inboxId?: string): Record<string, unknown> {
+  const data: Record<string, unknown> = { v: PUSH_ROUTE_VERSION, type: 'dropped' };
+  // Optional. The inbox row uses the same id to dismiss this notification.
+  // Absent, the payload is the one verify_push already pins.
+  if (inboxId) data.inboxId = inboxId;
   return {
     to: token,
     title: 'Signalbase test',
     body: "Notifications are working. Tap to open today's board.",
-    data: { v: PUSH_ROUTE_VERSION, type: 'dropped' },
+    data,
     sound: 'default',
     priority: 'high',
   };
@@ -109,12 +113,12 @@ export function interpretExpoResponse(body: unknown): TestPushResult {
 }
 
 /** POST the test message. Never throws — a thrown error comes back diagnosed. */
-export async function sendTestPush(token: string): Promise<TestPushResult> {
+export async function sendTestPush(token: string, inboxId?: string): Promise<TestPushResult> {
   try {
     const resp = await fetch(EXPO_PUSH_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(buildTestMessage(token)),
+      body: JSON.stringify(buildTestMessage(token, inboxId)),
     });
     // A non-2xx still carries a JSON body worth reading; fall back to the
     // status line only when it does not parse.

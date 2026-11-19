@@ -109,9 +109,10 @@ def test_any_other_model_or_a_missing_price_or_date_is_never_guessed():
 def test_find_bets_decides_on_the_models_own_number_whatever_k_is(monkeypatch):
     from tests.test_nba_prop_projection import _q, _run
     quotes = [_q("draftkings", 1.5, +105, -135), _q("fanduel", 1.5, +115, -145),
-              _q("draftkings", 2.5, +140, -180, market="player_threes"),
-              _q("fanduel", 2.5, +150, -190, market="player_threes")]
+              _q("draftkings", 2.5, +140, -180, market="player_blocks_steals"),
+              _q("fanduel", 2.5, +150, -190, market="player_blocks_steals")]
     with_k = _run(quotes)
+    assert len(with_k[0]) == 2, "both overs are bets (threes overs, used here until 2026-11-18, no longer are)"
     monkeypatch.setattr(config, "MODEL_PROB_SHRINK", {MODEL: {"k": 0.05, "from": "2000-01-01"}})
     other_k = _run(quotes)
     _without_shrink(monkeypatch)

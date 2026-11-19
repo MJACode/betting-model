@@ -15,8 +15,8 @@ export default function RollupStrip({ rows, total }: Props) {
 
   const unitsDisplay = s.totalUnits != null ? signedU(s.totalUnits) : '—'
   const roiDisplay = s.roi != null ? (s.roi >= 0 ? '+' : '') + s.roi.toFixed(2) + '%' : '—'
-  const beatRateAll = s.beatRateAll != null ? (s.beatRateAll * 100).toFixed(1) + '%' : '—'
-  const beatRateMoved = s.beatRateMoved != null ? (s.beatRateMoved * 100).toFixed(1) + '%' : '—'
+  const beatRatePrice = s.beatRatePrice != null ? (s.beatRatePrice * 100).toFixed(1) + '%' : '—'
+  const beatRateWithLine = s.beatRateWithLine != null ? (s.beatRateWithLine * 100).toFixed(1) + '%' : '—'
   const coveragePct = s.total > 0 ? ((s.measured / s.total) * 100).toFixed(0) + '%' : '—'
 
   const partial = s.partialUnits
@@ -98,13 +98,14 @@ export default function RollupStrip({ rows, total }: Props) {
       <StatCard
         label="CLV beat rate"
         icon={Target}
-        value={beatRateAll}
+        value={beatRatePrice}
         caption={
           <span className="flex flex-col gap-0.5">
-            <span>of {s.measured.toLocaleString()} measured · {beatRateMoved} of the {(s.beat + s.worse).toLocaleString()} that moved</span>
-            <span>Beat {s.beat} · Flat {s.flat} · Worse {s.worse}</span>
+            <span>{`${s.beat} beat · ${s.worse} worse · ${s.flat} same price, of ${s.beat + s.worse + s.flat} closing prices`}</span>
+            <span>{`With line moves ${beatRateWithLine}: ${s.lineFor} moved our way · ${s.lineAgainst} against`}</span>
           </span>
         }
+        title="Beat rate = beat / (beat + worse) over bets whose book closed on our number; a close at our exact price is left out. Line moves (the book's line left our number before the start) are counted only in the 'with line moves' rate: our way is a beat, against is a miss."
       />
 
       <StatCard
@@ -112,7 +113,7 @@ export default function RollupStrip({ rows, total }: Props) {
         icon={Gauge}
         value={`${s.measured.toLocaleString()} / ${s.total.toLocaleString()}`}
         caption={`${coveragePct} measured · ${s.notMeasured.toLocaleString()} not measured`}
-        title="In-play picks (no pre-game close) and picks made before CLV capture began are never measured; they show as not measured, not as losses. CLV is independent of result: a void bet can still have CLV."
+        title="Measured means a closing price on our number or a line move. In-play bets are not measured for closing-line value, by design: there is no pre-game close. CLV is independent of result."
       />
     </div>
   )

@@ -19,7 +19,7 @@ const PICKS_TILES: TileMeta[] = [
   { id: 'ledger', title: 'Ledger', description: 'Every bet pick in the filter, with prices, CLV and result', x: 0, y: 8, w: 12, h: 18, minW: 6, minH: 8 },
   { id: 'equity', title: 'Equity curve', description: 'Running units over time, settled and priced picks only', x: 0, y: 26, w: 6, h: 10, minW: 4, minH: 7 },
   { id: 'unitsByModel', title: 'Units by model', description: 'Settled, priced picks only, sorted by units', x: 6, y: 26, w: 6, h: 10, minW: 4, minH: 7 },
-  { id: 'clvByModel', title: 'CLV by model', description: 'Share of measured picks that beat, matched or missed the close', x: 0, y: 36, w: 6, h: 12, minW: 4, minH: 7 },
+  { id: 'clvByModel', title: 'CLV by model', description: 'Share of measured picks that beat, matched or missed the close, or whose line moved our way or against', x: 0, y: 36, w: 6, h: 12, minW: 4, minH: 7 },
   { id: 'clvDistribution', title: 'CLV distribution', description: 'How far same-line picks beat or missed the closing price', x: 6, y: 36, w: 6, h: 12, minW: 4, minH: 7 },
 ]
 

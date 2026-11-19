@@ -37,6 +37,7 @@ import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
 import { OpeningComparisonScreen } from '@/screens/OpeningComparisonScreen';
 import { SettingsScreen, SettingsSectionScreen } from '@/screens/SettingsScreen';
+import { NotificationsScreen } from '@/screens/NotificationsScreen';
 import { DeleteAccountScreen } from '@/screens/DeleteAccountScreen';
 import { SignInScreen } from '@/screens/SignInScreen';
 import { PaywallScreen } from '@/screens/PaywallScreen';
@@ -520,6 +521,11 @@ function App() {
             name="Settings"
             component={SettingsScreen}
             options={{ title: 'Settings' }}
+          />
+          <Stack.Screen
+            name="Notifications"
+            component={NotificationsScreen}
+            options={{ title: 'Notifications' }}
           />
           {/* Chevron-only Back (2026-11-16), same button as Player Stats. Its own
               button only for the empty-stack fallback (Tabs under Settings);

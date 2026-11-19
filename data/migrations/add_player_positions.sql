@@ -43,7 +43,11 @@ BEGIN
 
     ALTER TABLE public.player_positions ENABLE ROW LEVEL SECURITY;
     REVOKE ALL ON public.player_positions FROM anon, authenticated;
-    GRANT SELECT ON public.player_positions TO anon, authenticated;
+    GRANT SELECT ON public.player_positions TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT SELECT ON public.player_positions TO anon;
+    END IF;
     CREATE POLICY "anon read player_positions"
         ON public.player_positions FOR SELECT TO anon, authenticated USING (true);
 

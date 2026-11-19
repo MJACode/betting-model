@@ -92,7 +92,19 @@ BEGIN
     $risked$;
   END IF;
 
-  GRANT EXECUTE ON FUNCTION public.published_pick_stake(numeric) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.published_pick_unit_profit(numeric, text) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.published_pick_unit_risked(numeric, text) TO anon, authenticated;
+  GRANT EXECUTE ON FUNCTION public.published_pick_stake(numeric) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.published_pick_stake(numeric) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.published_pick_unit_profit(numeric, text) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.published_pick_unit_profit(numeric, text) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.published_pick_unit_risked(numeric, text) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.published_pick_unit_risked(numeric, text) TO anon;
+  END IF;
 END $mig$;

@@ -146,6 +146,11 @@ def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
         # Push counts on the live view. Not a rewrite of wins or units.
         if name == "clv_push_beat_rate_2026_11_04.sql":
             continue
+        # Reads the record view's filter out of its definition to build the
+        # model health views; never replaces it (tests/test_model_health.py
+        # pins that the file creates, replaces and drops no record view).
+        if name == "model_health_2026_11_18.sql":
+            continue
         body = (ROOT / "data" / "migrations" / name).read_text(encoding="utf-8")
         assert "v_public_track_record" not in body, name
     i = ACTIVE_MIGRATIONS.index(MIG.name)

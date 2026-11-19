@@ -281,7 +281,8 @@ def test_migration_is_declared_before_the_posted_stake_pair_and_grants_select_on
     assert mig.index("add_live_scoreboard_2026_10_29.sql") < mig.index('"published_pick_units_2026_10_17.sql"')
     sql = (ROOT / "data" / "migrations" / "add_live_scoreboard_2026_10_29.sql").read_text(encoding="utf-8")
     assert "REVOKE ALL ON public.live_scoreboard FROM anon, authenticated" in sql
-    assert "GRANT SELECT ON public.live_scoreboard TO anon, authenticated" in sql
+    assert "GRANT SELECT ON public.live_scoreboard TO authenticated" in sql
+    assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in sql
     # The guard returns before any DDL once the table, policy and grant exist.
     assert sql.index("RETURN;") < sql.index("CREATE TABLE")
 

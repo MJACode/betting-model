@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react'
 
-export type TabId = 'models' | 'volume' | 'ops' | 'database' | 'picks'
+export type TabId = 'exec' | 'models' | 'volume' | 'ops' | 'database' | 'picks' | 'health' | 'sim'
 
 /**
  * Tabs whose layouts can be saved. It matches the tab list the layout
  * functions accept (backend/ops/dbErrors.ts) and the check on the
- * dashboard_layouts table. The Database tab arranges for the session only:
+ * dashboard_layouts table. The Database and Model Health tabs arrange for the session only:
  * adding it there means changing two functions that write, which need
  * approval at publish, and the table's check.
  */
@@ -13,11 +13,14 @@ export const SAVABLE_TABS: ReadonlySet<TabId> = new Set<TabId>(['models', 'volum
 
 /** The heading shown at the top of each tab. */
 export const TAB_META: Record<TabId, { title: string; description: string }> = {
+  exec: { title: 'Key Metrics', description: 'The summary: results in units, beating the closing line, the models and whether the system is running' },
   models: { title: 'Models', description: 'Every model, its state, its settled record and its daily volume' },
   volume: { title: 'Volume', description: 'How many of each pre-game model’s bets get posted' },
   ops: { title: 'Ops', description: 'Feeds, pipeline runs, health checks and audience' },
   database: { title: 'Database', description: 'Size, growth and load of the Supabase database, measured every hour' },
   picks: { title: 'Picks & CLV', description: 'Every bet pick, its result and how it did against the closing price' },
+  health: { title: 'Model Health', description: 'Closing-line value per model: every bet, blocks of 25, 50 and 100, and a rolling average' },
+  sim: { title: 'Profit Simulation', description: 'How a bankroll compounds at a fixed stake percentage, win rate and price' },
 }
 
 /** What a saved layout stores per tile. */

@@ -381,3 +381,50 @@ def test_the_prop_plan_counts_rows_moved_to_the_archive(tmp_path, monkeypatch):
     con.execute("INSERT INTO player_prop_odds SELECT * FROM moved WHERE prop_id = 4")
     g = rb.thinned_games(con, "prop", "NHL", "2026-10-15", "2026-10-15")[0]
     assert g["dk_per_line"] == 4
+
+
+
+@pytest.mark.parametrize("kind", ["game", "inplay"])
+def test_the_game_odds_plans_count_rows_moved_to_the_archive(tmp_path, monkeypatch, kind):
+    """The same for game odds (#1345, 2026-11-18). FanDuel's price stood still,
+    so its middle rows were repeats and went to the archive; DraftKings moved
+    every pass. Counted from the copy alone FanDuel holds two rows a line, under
+    THIN_MAX_ROWS, and the game would be bought again."""
+    from scripts import archive_rows
+    monkeypatch.setattr(archive_rows, "ARCHIVE_ROOT", tmp_path)
+    con = duckdb.connect()
+    con.execute("CREATE TABLE games (game_id VARCHAR, sport VARCHAR, commence_time VARCHAR)")
+    cols = """(odds_id BIGINT, game_id VARCHAR, sport VARCHAR, market VARCHAR,
+        bookmaker VARCHAR, snapshot_type VARCHAR, snapshot_at VARCHAR, source VARCHAR,
+        home_price DOUBLE, away_price DOUBLE, spread_home DOUBLE, total_line DOUBLE,
+        over_price DOUBLE, under_price DOUBLE)"""
+    con.execute(f"CREATE TABLE odds {cols}")
+    con.execute(f"CREATE TABLE moved {cols}")
+    con.execute("CREATE TABLE pipeline_runs (run_kind VARCHAR, started_at VARCHAR)")
+    con.execute("INSERT INTO games VALUES ('NHL_G', 'NHL', '2026-10-15T23:00:00Z')")
+    ids = iter(range(1, 100))
+
+    def row(table, book, typ, hhmm, home):
+        con.execute(f"INSERT INTO {table} VALUES (?, 'NHL_G', 'NHL', 'h2h', ?, ?, ?, NULL, ?, 100, "
+                    "NULL, NULL, NULL, NULL)", [next(ids), book, typ, f"2026-10-15T{hhmm}:00Z", home])
+    if kind == "game":
+        for n, hhmm in enumerate(("12:00", "14:00", "16:00", "18:00", "22:55")):
+            row("odds", "draftkings", "open", hhmm, -120 - n)
+        row("odds", "fanduel", "open", "12:10", -118)
+        for hhmm in ("14:10", "16:10", "18:10"):
+            row("moved", "fanduel", "open", hhmm, -118)
+        row("odds", "fanduel", "open", "22:50", -118)
+    else:
+        row("odds", "fanduel", "open", "22:50", -118)                 # its pre-game book
+        for n, hhmm in enumerate(("23:05", "23:15", "23:25", "23:35", "23:45")):
+            row("odds", "draftkings", "in_play", hhmm, -120 - n)
+        row("odds", "fanduel", "open", "23:06", -130)
+        for hhmm in ("23:16", "23:26", "23:36"):
+            row("moved", "fanduel", "open", hhmm, -130)
+    out = tmp_path / "odds" / "repeat" / "2026-10"
+    out.mkdir(parents=True)
+    con.execute(f"COPY moved TO '{(out / '2026-10-15.parquet').as_posix()}' (FORMAT PARQUET)")
+    assert rb.thinned_games(con, kind, "NHL", "2026-10-15", "2026-10-15") == []
+    # without the archive's rows the same game looks thinned
+    monkeypatch.setattr(archive_rows, "ARCHIVE_ROOT", tmp_path / "nothing_archived")
+    assert [g["game_id"] for g in rb.thinned_games(con, kind, "NHL", "2026-10-15", "2026-10-15")] == ["NHL_G"]

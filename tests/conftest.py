@@ -55,6 +55,58 @@ def _refuse_real_odds_api_calls() -> None:
 _refuse_real_odds_api_calls()
 
 
+def _no_job_check_ins():
+    """No test writes a job check-in row to a real database (#1456).
+
+    Every scheduled job writes "I ran" to `job_heartbeats` through
+    tracking.job_heartbeat.beat, which opens its own connection to
+    DATABASE_URL. Building the scheduler calls it once per watched job (27
+    times for the worker, measured 2026-11-18), and 21 calls in this
+    directory build it. `data.db` loads the checkout's .env above, so from
+    the main checkout each call was a write to production: it reset the
+    silence clock on a watched job, or marked a job this PC does not run as
+    switched off. From a copy with no .env, each was a refused localhost dial
+    of 4 s, and a full run had not finished after 14 hours.
+
+    So `beat` is replaced here, once, before any test file is imported. That
+    covers `seed` and `mark_disabled`, the scheduler's job wrapper and the
+    in-play loops, because each of them looks `beat` up at call time. A test
+    that wants the real one asks for the `real_heartbeat` fixture and gives it
+    a stand-in database. functools.wraps keeps the real function on
+    `__wrapped__`, so its source is still readable through the stub.
+    tests/test_suite_writes_no_heartbeats.py holds this in place.
+    """
+    import functools
+    from tracking import job_heartbeat as _jh
+    real = _jh.beat
+    if getattr(real, "_suite_stub", False):
+        return real.__wrapped__
+
+    @functools.wraps(real)
+    def beat(job_id, status="ok", detail=""):
+        return None
+
+    beat._suite_stub = True
+    _jh.beat = beat
+    return real
+
+
+_REAL_BEAT = _no_job_check_ins()
+
+
+@pytest.fixture
+def real_heartbeat(monkeypatch):
+    """The real tracking.job_heartbeat.beat, for this test only.
+
+    It opens a connection through data.db.get_connection, so the test must
+    replace that with a stand-in first, or it writes to whatever DATABASE_URL
+    names.
+    """
+    from tracking import job_heartbeat as jh
+    monkeypatch.setattr(jh, "beat", _REAL_BEAT)
+    return _REAL_BEAT
+
+
 @pytest.fixture
 def db_conn():
     """In-memory SQLite database with the full schema applied."""

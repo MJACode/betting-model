@@ -30,8 +30,14 @@ def test_the_migration_is_one_statement_and_registered():
     assert SQL.strip().endswith(";")
     assert "CONCURRENTLY" not in code.upper()
     # Display only: it never touches a pick, a threshold or a publisher.
+    # The lockdown gate only asks whether anon can still read picks.
+    lowered = code.lower()
+    kept = "\n".join(
+        ln for ln in lowered.splitlines()
+        if "to_regclass('public.picks')" not in ln
+        and "has_table_privilege('anon', 'public.picks'" not in ln)
     for word in ("public.picks", "model_action_thresholds", "push_sent", "discord"):
-        assert word not in code.lower()
+        assert word not in kept
 
 
 def test_the_second_pass_returns_before_it_locks():

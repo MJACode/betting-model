@@ -13,14 +13,24 @@ config.BEST_LINE_BOOKMAKERS no longer lists):
 
   euroleague_home_ml            the home moneyline at the close, when the home
                                 price is -200 or longer (round 2, A1). Not at a
-                                neutral site.
+                                neutral site. Since 2026-11-17 (mike) only when
+                                the home side is getting points on the spread.
   euroleague_home_dog_spread    the home underdog against the spread at the
                                 close: the home number above 0 (full game round
                                 1, H3). Own-country games only: not neutral, not
                                 at a relocated venue (RELOCATED_VENUES).
   euroleague_h1_dog_ml          the first-half moneyline underdog at the close
                                 (first half round 1, the best baseline). A tied
-                                half pushes.
+                                half pushes. Since 2026-11-17 (mike) only when
+                                that underdog is the home side and the home
+                                side is getting points on the full-game spread.
+
+THE SAME-TEAM CUTS (mike, 2026-11-17, "Yes, both"; docs/sports/euroleague.md,
+"Several bets on one game"): the three side rules were one finding, the home
+underdog, bet up to three times, and the moneyline's home-favourite bets and
+the first half's other bets carried no edge. The cuts are artifact parameters
+(min_home_line, home_dog_only): without them each function is the research's
+rule, which the build still replays bet for bet.
   euroleague_q1_club_share_total
                                 the first-quarter total against each club's
                                 prior-games first-quarter share of the full-game
@@ -141,14 +151,25 @@ def power_fair(p1, p2):
 
 
 def stake(price):
-    """(risk, win) at the posted stake: 1 unit to win, risk capped at 3; an
-    underdog risks 1 (r1_lib.stake; config's stake_for)."""
+    """(risk, win) at the RESEARCH's stake (r1_lib.stake): a favourite risks
+    enough to win 1 (capped at 3), an underdog risks 1. Not the posted stake for
+    an underdog; the build compares the research with it. See posted_stake."""
     p = np.asarray(price, float)
     neg = p < 0
     risk = np.where(neg, np.minimum(np.abs(p) / 100.0, 3.0), 1.0)
     with np.errstate(divide="ignore", invalid="ignore"):
         win = np.where(neg, risk * 100.0 / np.abs(p), p / 100.0)
     return risk, win
+
+
+def posted_stake(price):
+    """(risk, win) at the stake every surface posts (tracking.discord_notifier.
+    stake_for, flat): 1 unit to WIN at every price, risk capped at 3. An
+    underdog at +235 risks 0.43. Issue #1446."""
+    d = dec(price)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        risk = np.minimum(1.0 / (d - 1.0), 3.0)
+    return risk, risk * (d - 1.0)
 
 
 # ── the full-game board ─────────────────────────────────────────────────────
@@ -324,15 +345,43 @@ def _games(games: pd.DataFrame) -> pd.DataFrame:
     return g
 
 
+def home_line(board_rows: pd.DataFrame, books=DECIDABLE) -> float | None:
+    """The modal deciding-book HOME number on the full-game spread in these
+    board rows (one game), the number the spread rule reads; None when no
+    deciding book has one."""
+    s = board_rows[(board_rows.market == "spreads") & board_rows.bookmaker.isin(books)]
+    s = s[np.isfinite(s.line.astype(float))] if len(s) else s
+    return modal_line(s.line) if len(s) else None
+
+
+def gets_points(board_rows: pd.DataFrame, min_line: float, books=DECIDABLE) -> tuple[bool, float | None, str]:
+    """The same-team cut (mike, 2026-11-17): is the home side getting points?
+    (yes?, the home number, why not)."""
+    line = home_line(board_rows, books)
+    if line is None:
+        return False, None, "no deciding-book spread to tell whether the home side is getting points"
+    if not line > min_line:
+        return False, line, f"home {line:+g} on the spread: not getting points"
+    return True, line, ""
+
+
 def decide_home_ml(board: pd.DataFrame, games: pd.DataFrame, art: dict,
                    books=DECIDABLE) -> list[Decision]:
     """Model 1 (r3_a_home.a1): the home side at the best deciding-book close,
-    every quote shorter than the floor removed BEFORE the best is picked."""
+    every quote shorter than the floor removed BEFORE the best is picked.
+
+    With params["min_home_line"] (the live artifact since 2026-11-17, mike:
+    "Yes, both"): only when the home side is getting points, the modal
+    deciding-book home spread number above it. A home favourite or a level game
+    is a NONE row at the price it would have taken. Without the key it is the
+    research's rule, which the build replays against the research."""
     p = art["models"][HOME_ML]["params"]
     floor, min_season = float(p["min_price"]), int(p["min_season"])
+    min_line = p.get("min_home_line")
     out = []
     g = _games(games)
     h2h = _by_game(board[(board.market == "h2h") & board.bookmaker.isin(books)])
+    fg_rows = _by_game(board) if min_line is not None else {}
     for row in g.itertuples(index=False):
         gid = row.game_id
         if bool(row.neutral_site):
@@ -358,10 +407,16 @@ def decide_home_ml(board: pd.DataFrame, games: pd.DataFrame, art: dict,
                                 p_fair=fair, dk_price=dk_price, n_books=int(len(home))))
             continue
         best = _best_per_side(ok).iloc[0]
-        out.append(Decision(gid, HOME_ML, "bet", f"home {best.price:+.0f} at {best.bookmaker}",
+        status, detail, extra = "bet", f"home {best.price:+.0f} at {best.bookmaker}", {}
+        if min_line is not None:
+            yes, line, why = gets_points(fg_rows.get(gid, _NONE), float(min_line), books)
+            extra["home_line"] = line
+            if not yes:
+                status, detail = "no_bet", f"home {best.price:+.0f} at {best.bookmaker}; {why}"
+        out.append(Decision(gid, HOME_ML, status, detail,
                             side="home", book=best.bookmaker, price=float(best.price),
                             p_fair=float(np.nanmean(ok.fair_pow)), dk_price=dk_price,
-                            n_books=int(len(ok))))
+                            n_books=int(len(ok)), extra=extra))
     return out
 
 
@@ -459,11 +514,25 @@ def prepare_period(rows: pd.DataFrame) -> pd.DataFrame:
 
 
 def decide_h1_dog(period: pd.DataFrame, games: pd.DataFrame, art: dict,
-                  books=DECIDABLE) -> list[Decision]:
+                  books=DECIDABLE, fg_board: pd.DataFrame | None = None) -> list[Decision]:
     """Model 4 (r1_baselines.best_decidable, side 'dog'): the first-half
     moneyline side whose mean deciding-book no-vig chance is under one half,
     at its best deciding-book price. A level mean is a pick'em: no bet.
-    `period`: prepare_period() of the decision fetch."""
+    `period`: prepare_period() of the decision fetch.
+
+    With params["home_dog_only"] (the live artifact since 2026-11-17, mike:
+    "Yes, both"): only when that underdog is the HOME side and the home side is
+    getting points on the full-game spread (`fg_board`, the full-game board at
+    the fetch; the modal deciding-book home number above params["min_home_line"]),
+    and never at a neutral site. Anything else is a NONE row at the price it
+    would have taken. Without the key it is the research's rule."""
+    p = (art["models"].get(H1_DOG_ML) or {}).get("params") or {}
+    cut = bool(p.get("home_dog_only"))
+    if cut and fg_board is None:
+        raise ValueError("the first-half home-underdog cut needs the full-game board at the fetch")
+    min_line = float(p.get("min_home_line", 0.0))
+    fg_rows = _by_game(fg_board) if cut and len(fg_board) else {}
+    neutral = (dict(zip(games.game_id, _games(games).neutral_site)) if cut else {})
     out = []
     x = _by_game(period[(period.market == "h2h_h1") & period.bookmaker.isin(books) & ~period.offc])
     for gid in games.game_id:
@@ -483,10 +552,20 @@ def decide_h1_dog(period: pd.DataFrame, games: pd.DataFrame, art: dict,
         price, book = float(y.loc[i, col]), str(y.loc[i, "bookmaker"])
         dk = y[y.bookmaker == REFERENCE_BOOK]
         dk_price = _num(dk[col].iloc[0]) if len(dk) else None
-        out.append(Decision(gid, H1_DOG_ML, "bet", f"{side} {price:+.0f} at {book}", side=side,
+        status, detail = "bet", f"{side} {price:+.0f} at {book}"
+        extra = {"mean_home_fair": round(fair, 6)}
+        if cut:
+            yes, line, why = gets_points(fg_rows.get(gid, _NONE), min_line, books)
+            extra["home_line"] = line
+            if bool(neutral.get(gid)):
+                yes, why = False, "neutral site: no home side"
+            elif side != "home":
+                yes, why = False, "the first-half underdog is the away side"
+            if not yes:
+                status, detail = "no_bet", f"{detail}; {why}"
+        out.append(Decision(gid, H1_DOG_ML, status, detail, side=side,
                             book=book, price=price, p_fair=(1 - fair) if fav_home else fair,
-                            dk_price=dk_price, n_books=int(y[col].notna().sum()),
-                            extra={"mean_home_fair": round(fair, 6)}))
+                            dk_price=dk_price, n_books=int(y[col].notna().sum()), extra=extra))
     return out
 
 
