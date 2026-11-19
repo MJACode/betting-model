@@ -40,11 +40,15 @@ already bets.
 
 THE RULE, per regular-season game:
   1. RATINGS AND COMPLETENESS: exactly models/nba_total_luck.py's (team_box,
-     f4_projections, missing_inputs, regular_season), imported. No 10-game wait
-     (mike, 2026-11-02): a team needs one game this season (LIVE_MIN_GAMES),
-     where the evidence above is both teams on 10+ (docs/sports/nba.md,
-     "No 10-game wait"). Every scheduled game of the season before the date must be
-     scored and boxed, else the game is declined.
+     f4_projections, missing_inputs, regular_season), imported. Both teams need
+     10+ games this season (LIVE_MIN_GAMES, the full-game model's): the wait is
+     back from 2026-11-18 on mike's instruction, reversing his of 2026-11-02
+     (one game was enough from 11-02 to 11-17). It is the population the
+     evidence above was graded on; the reason is rule 3 of
+     models/nba_total_luck.py and docs/sports/nba.md, "The 10-game wait is
+     back". A game held for it is a recorded decision, 'early_season'. Every
+     scheduled game of the season before the date must be scored and boxed,
+     else the game is declined.
   2. THE CUT: gap_total >= 2.0 (GAP_CUT, this model's own; nba_total_luck's 3.0
      is its own and does not change), AND below the full-game model's cut
      (FULL_GAME_GAP_CUT, nba_total_luck's GAP_CUT, 3.0) from 2026-11-04 (mike:

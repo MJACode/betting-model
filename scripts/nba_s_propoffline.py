@@ -754,7 +754,7 @@ def card_propositions(r: pd.DataFrame, props: pd.DataFrame, preds: pd.DataFrame,
         fo = s["prop_id"].map(fair).to_numpy(float)
         ov = H.dec(s["over_price"].to_numpy(float)) * fo - 1.0
         un = H.dec(s["under_price"].to_numpy(float)) * (1.0 - fo) - 1.0
-        for m, (sides, floor) in pj.CARD.items():
+        for m, (sides, floor) in pj.CARD_AS_GRADED.items():
             on = (s["market"] == m).to_numpy()
             if "over" in sides:
                 held |= set(s.loc[on & (ov >= floor) & (s["over_price"].to_numpy(float) >= H.PRICE_FLOOR), "prop_id"])

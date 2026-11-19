@@ -275,6 +275,10 @@ DDL_GUARD_EXEMPT = {
     "data/ingestors/odds_ingestor.py": "per historical pull; 4 calls measured",
     # View definitions applied by a migration step, not by a writer.
     "data/view_migrations.py": "migration step, not a write path",
+    # SQL text for the hand-applied anon lockdown. Nothing in the worker
+    # imports this module or executes the strings. The files it writes live
+    # under data/migrations, which this scan already skips.
+    "data/anon_lockdown_spec.py": "emits migration SQL; the worker never runs it",
     # model_artifacts, written once per retrain.
     "models/trainer.py": "per retrain, not a write path",
     # Weekly sweep. model_calibration_sweeps never broke double digits.

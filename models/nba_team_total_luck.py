@@ -39,11 +39,15 @@ at the same cut (713 bets, +61.3 units; docs/nba_models_2026.md 8.4).
 
 THE RULE, per regular-season game:
   1. RATINGS AND COMPLETENESS: exactly models/nba_total_luck.py's (team_box,
-     f4_projections, missing_inputs, regular_season), imported. No 10-game wait
-     (mike, 2026-11-02): a team needs one game this season (LIVE_MIN_GAMES),
-     where the evidence above is both teams on 10+ (docs/sports/nba.md,
-     "No 10-game wait"). Every scheduled game of the season before the date must be
-     scored and boxed, else the game is declined.
+     f4_projections, missing_inputs, regular_season), imported. Both teams need
+     10+ games this season (LIVE_MIN_GAMES, the full-game model's): the wait is
+     back from 2026-11-18 on mike's instruction, reversing his of 2026-11-02
+     (one game was enough from 11-02 to 11-17). It is the population the
+     evidence above was graded on; the reason is rule 3 of
+     models/nba_total_luck.py and docs/sports/nba.md, "The 10-game wait is
+     back". A game held for it is a recorded decision, 'early_season'. Every
+     scheduled game of the season before the date must be scored and boxed,
+     else the game is declined.
   2. THE QUOTES (models/nba_book_numbers.py, the lab's own code): each book's
      MAIN number per fetch (coherent rungs first, prices closest to even, ties
      to the lower number); each book's newest fetch at or before the decision

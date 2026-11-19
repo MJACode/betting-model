@@ -1,0 +1,118 @@
+relname,relkind,rls,anon_sel,auth_sel,policies
+alt_game_lines,r,True,True,True,"anon read alt_game_lines[SELECT:anon,authenticated:true]"
+byom_game_facts,r,True,True,True,"anon read byom_game_facts[SELECT:anon,authenticated:true]"
+byom_official_legs,r,True,True,True,"anon read byom_official_legs[SELECT:anon,authenticated:true]"
+byom_prop_facts,r,True,True,True,"anon read byom_prop_facts[SELECT:anon,authenticated:true]"
+confirmed_picks,v,False,True,True,
+device_push_tokens,r,True,True,True,
+dk_line_observations,r,True,True,True,
+feedback,r,True,True,True,"anon insert feedback[INSERT:anon,authenticated:]"
+fighters,r,True,True,True,"anon read fighters[SELECT:anon,authenticated:true]"
+game_weather,r,True,True,True,"allow anon read[SELECT:public:true] | anon read game_weather[SELECT:anon,authenticated:true] | service_role_all[ALL:public:(auth.role() = 'service_role'::text)]"
+games,r,True,True,True,"allow anon read[SELECT:public:true] | anon read games[SELECT:anon,authenticated:true]"
+golf_odds,r,True,True,True,
+golf_players,r,True,True,True,"anon read golf_players[SELECT:anon,authenticated:true]"
+golf_rounds,r,True,True,True,"anon read golf_rounds[SELECT:anon,authenticated:true]"
+golf_tournaments,r,True,True,True,"anon read golf_tournaments[SELECT:anon,authenticated:true]"
+injuries,r,True,True,True,
+injury_status_current,r,True,True,True,"anon read injury_status_current[SELECT:anon,authenticated:true]"
+latest_live_game_state,r,True,True,True,"anon read latest_live_game_state[SELECT:anon,authenticated:true]"
+latest_odds,r,True,True,True,"anon read latest_odds[SELECT:anon,authenticated:true]"
+latest_prop_odds,r,True,True,True,"anon read latest_prop_odds[SELECT:anon,authenticated:true]"
+lineup_slots,r,True,True,True,"anon read lineup_slots[SELECT:anon,authenticated:true]"
+linked_sportsbook_accounts,r,True,True,True,
+live_credit_telemetry,r,True,True,True,
+live_feed_probe,r,True,True,True,
+live_game_state,r,True,True,True,"anon read live_game_state[SELECT:anon,authenticated:true]"
+live_scoreboard,r,True,True,True,"anon read live_scoreboard[SELECT:anon,authenticated:true]"
+live_trigger_events,r,True,True,True,
+mlb_bullpen_stats,r,True,True,True,
+mlb_pitcher_stats,r,True,True,True,"anon read mlb_pitcher_stats[SELECT:anon,authenticated:true]"
+mlb_team_stats,r,True,True,True,"anon read mlb_team_stats[SELECT:anon,authenticated:true]"
+model_action_thresholds,r,True,True,True,"anon read model_action_thresholds[SELECT:anon,authenticated:true]"
+model_quality_checks,r,True,True,True,"anon read model_quality_checks[SELECT:anon,authenticated:true]"
+model_registry,r,True,True,True,"anon read model_registry[SELECT:anon,authenticated:true]"
+mv_scored_pick_outcomes,m,False,True,True,
+nba_first_basket_games,r,True,True,True,"anon read nba_first_basket_games[SELECT:anon,authenticated:true]"
+nba_first_basket_players,r,True,True,True,"anon read nba_first_basket_players[SELECT:anon,authenticated:true]"
+nba_player_dnp,r,True,True,True,"anon read nba_player_dnp[SELECT:anon,authenticated:true]"
+nba_player_game_log,r,True,True,True,"anon read nba_player_game_log[SELECT:anon,authenticated:true]"
+nba_team_q1_games,r,True,True,True,"anon read nba_team_q1_games[SELECT:anon,authenticated:true]"
+nba_team_stats,r,True,True,True,"anon read nba_team_stats[SELECT:anon,authenticated:true]"
+ncaab_player_game_log,r,True,True,True,"anon read ncaab_player_game_log[SELECT:anon,authenticated:true]"
+ncaabw_player_game_log,r,True,True,True,"anon read ncaabw_player_game_log[SELECT:anon,authenticated:true]"
+ncaaf_live_states,r,True,True,True,"anon read ncaaf_live_states[SELECT:anon,authenticated:true]"
+ncaaf_player_game_log,r,True,True,True,"anon read ncaaf_player_game_log[SELECT:anon,authenticated:true]"
+ncaaf_team_game_log,r,True,True,True,
+ncaaf_team_stats,r,True,True,True,"anon read ncaaf_team_stats[SELECT:anon,authenticated:true]"
+ncaaf_teams,r,True,True,True,"anon read ncaaf_teams[SELECT:anon,authenticated:true]"
+ncaaf_venues,r,True,True,True,
+nfl_player_game_log,r,True,True,True,"anon read nfl_player_game_log[SELECT:anon,authenticated:true]"
+nfl_snap_counts,r,True,True,True,
+nfl_team_game_stats,r,True,True,True,"anon read nfl_team_game_stats[SELECT:anon,authenticated:true]"
+nhl_goalie_game_log,r,True,True,True,"anon read nhl_goalie_game_log[SELECT:anon,authenticated:true]"
+nhl_goalie_stats,r,True,True,True,
+nhl_skater_game_log,r,True,True,True,"anon read nhl_skater_game_log[SELECT:anon,authenticated:true]"
+nhl_skater_stats,r,True,True,True,
+nhl_team_game_log,r,True,True,True,"anon read nhl_team_game_log[SELECT:anon,authenticated:true]"
+nhl_team_stats,r,True,True,True,"anon read nhl_team_stats[SELECT:anon,authenticated:true]"
+odds,r,True,True,True,"allow anon read[SELECT:public:true] | anon read odds[SELECT:anon,authenticated:true]"
+odds_api_quota,r,True,True,True,"anon read odds_api_quota[SELECT:anon,authenticated:true]"
+open_picks,v,False,True,True,
+opening_signals,r,True,True,True,"anon read opening_signals[SELECT:anon,authenticated:true]"
+parlay_correlations,r,True,True,True,"anon read parlay_correlations[SELECT:anon,authenticated:true]"
+parlay_track_record,r,True,True,True,"anon read parlay_track_record[SELECT:anon,authenticated:true]"
+picks,r,True,True,True,"allow anon read[SELECT:public:true] | anon read picks[SELECT:anon,authenticated:true]"
+picks_log,r,True,True,True,
+pipeline_log,r,True,True,True,
+player_game_log,r,True,True,True,"anon read player_game_log[SELECT:anon,authenticated:true]"
+player_handedness,r,True,True,True,"anon read player_handedness[SELECT:anon,authenticated:true]"
+player_news,r,True,True,True,"anon read player_news[SELECT:anon,authenticated:true]"
+player_positions,r,True,True,True,"anon read player_positions[SELECT:anon,authenticated:true]"
+player_prop_odds,r,True,True,True,"anon read player_prop_odds[SELECT:anon,authenticated:true]"
+player_savant_stats,r,True,True,True,"anon read player_savant_stats[SELECT:anon,authenticated:true]"
+plays,r,True,True,True,
+public_betting,r,True,True,True,"anon read public_betting[SELECT:anon,authenticated:true]"
+results_snapshots,r,True,True,True,"anon read results_snapshots[SELECT:anon,authenticated:true]"
+scoreboard_splits,r,True,True,True,"anon read scoreboard_splits[SELECT:anon,authenticated:true]"
+synced_bets,r,True,True,True,
+system_health_checks,r,True,True,True,"anon read system_health_checks[SELECT:anon,authenticated:true]"
+team_period_results,r,True,True,True,"anon read team_period_results[SELECT:anon,authenticated:true]"
+team_stats_board_cache,r,True,True,True,"team_stats_board_cache_read[SELECT:anon,authenticated:true]"
+tracked_bets,r,True,True,True,"anon delete tracked_bets[DELETE:anon,authenticated:true] | anon insert tracked_bets[INSERT:anon,authenticated:]"
+ufc_fight_log,r,True,True,True,"anon read ufc_fight_log[SELECT:anon,authenticated:true]"
+umpires,r,True,True,True,"anon read umpires[SELECT:anon,authenticated:true]"
+v_discord_published,v,False,True,True,
+v_discord_void_notice,v,False,True,True,
+v_fighter_season_totals_ufc,v,False,True,True,
+v_latest_dk_odds,v,False,True,True,
+v_latest_inplay_odds_all_books,v,False,True,True,
+v_latest_odds_all_books,v,False,True,True,
+v_latest_prop_odds_all_books,v,False,True,True,
+v_live_game_state_latest,v,False,True,True,
+v_mlb_tonight_matchups,v,False,True,True,
+v_model_full_outcome_picks,v,False,True,True,
+v_model_full_outcome_record,v,False,True,True,
+v_model_full_record,v,False,True,True,
+v_nba_first_basket_player_season,v,False,True,True,
+v_nba_first_basket_team_season,v,False,True,True,
+v_nba_team_q1_season,v,False,True,True,
+v_ncaaf_scoreboard_latest,v,False,True,True,
+v_nhl_player_prop_odds,v,False,True,True,
+v_opening_signal_slices,v,False,True,True,
+v_opening_vs_live,v,False,True,True,
+v_player_season_totals_mlb,v,False,True,True,
+v_player_season_totals_nba,v,False,True,True,
+v_player_season_totals_ncaab,v,False,True,True,
+v_player_season_totals_ncaabw,v,False,True,True,
+v_player_season_totals_ncaaf,v,False,True,True,
+v_player_season_totals_nfl,v,False,True,True,
+v_player_season_totals_nhl,v,False,True,True,
+v_player_season_totals_wnba,v,False,True,True,
+v_public_track_record,v,False,True,True,
+v_public_track_record_daily,v,False,True,True,
+v_team_season_record_mlb,v,False,True,True,
+v_team_season_totals_nhl,v,False,True,True,
+v_wnba_tonight_matchups,v,False,True,True,
+wnba_player_game_log,r,True,True,True,"anon read wnba_player_game_log[SELECT:anon,authenticated:true]"
+wnba_team_stats,r,True,True,True,"anon read wnba_team_stats[SELECT:anon,authenticated:true]"

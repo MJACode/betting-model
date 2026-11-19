@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
+import { useAuth } from '@/hooks/useAuth';
 import { getDeviceId } from '@/hooks/useDeviceId';
 import { BETTABLE_BOOKS, type BookKey } from '@/lib/markets';
 import { supabase } from '@/lib/supabase';
@@ -183,6 +184,7 @@ async function save(v: BookKey[]) {
 }
 
 export function usePreferredBooks() {
+  const { ready: authReady, signedIn } = useAuth();
   const [state, setState] = useState<State>(cached ?? { books: DEFAULT_BOOKS, chosen: false, checked: false });
   // False until storage has answered. Every consumer that renders a book name
   // or hands off must gate on it: without it the default shows for a frame —
@@ -195,7 +197,6 @@ export function usePreferredBooks() {
       if (!mounted) return;
       setState(s);
       setReady(true);
-      void syncServer();
     });
     const listener = (s: State) => setState(s);
     listeners.add(listener);
@@ -204,6 +205,14 @@ export function usePreferredBooks() {
       listeners.delete(listener);
     };
   }, []);
+
+  // member_books_get is signed-in after the lockdown. The launch sync used
+  // to run once, before the session existed, and then never again.
+  useEffect(() => {
+    if (!authReady) return;
+    serverSynced = false;
+    void syncServer();
+  }, [authReady, signedIn]);
 
   const setBooks = useCallback((v: BookKey[]) => {
     save(v).catch((err) => console.warn('[preferredBooks] set failed', err));

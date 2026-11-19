@@ -62,5 +62,9 @@ BEGIN
   -- Supabase's default grant is ALL; REVOKE FROM PUBLIC does nothing.
   -- Revoke by name, then give the app SELECT only.
   REVOKE ALL ON public.live_scoreboard FROM anon, authenticated;
-  GRANT SELECT ON public.live_scoreboard TO anon, authenticated;
+  GRANT SELECT ON public.live_scoreboard TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.live_scoreboard TO anon;
+  END IF;
 END $$;

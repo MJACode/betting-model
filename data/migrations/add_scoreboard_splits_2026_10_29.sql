@@ -53,5 +53,9 @@ BEGIN
   END IF;
 
   REVOKE ALL ON public.scoreboard_splits FROM anon, authenticated;
-  GRANT SELECT ON public.scoreboard_splits TO anon, authenticated;
+  GRANT SELECT ON public.scoreboard_splits TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.scoreboard_splits TO anon;
+  END IF;
 END $$;

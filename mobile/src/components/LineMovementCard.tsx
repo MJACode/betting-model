@@ -20,6 +20,7 @@ const NO_HISTORY: PickWindow<Snap> = {
   fromPick: false,
   gap: false,
   since: 0,
+  later: 0,
   closed: false,
   afterStart: false,
 };

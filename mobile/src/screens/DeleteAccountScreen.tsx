@@ -48,15 +48,11 @@ import {
   DELETE_ERROR,
   DELETE_PERMANENT,
   DELETE_TITLE,
-  DELETED_TOAST,
-  LOCAL_INCOMPLETE,
   REAUTH_APPLE_BODY,
   REAUTH_TITLE,
   STAYS_LINE,
-  LOGIN_INCOMPLETE,
-  TRACKED_INCOMPLETE,
-  UNLINK_INCOMPLETE,
   deletedLines,
+  deletionBanner,
   providersForUser,
   purchasePlace,
   reauthEmailBody,
@@ -71,13 +67,6 @@ import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'DeleteAccount'>;
 type Phase = 'ready' | 'deleting' | 'error' | 'local' | 'done';
-
-function localBannerCopy(failure: LocalFailure): string {
-  if (failure === 'unlink') return UNLINK_INCOMPLETE;
-  if (failure === 'login') return LOGIN_INCOMPLETE;
-  if (failure === 'tracked') return TRACKED_INCOMPLETE;
-  return LOCAL_INCOMPLETE;
-}
 
 /**
  * Delete account. Option A confirm (the system alert). Re-auth is shown
@@ -310,7 +299,7 @@ export function DeleteAccountScreen() {
               color={colors.onChrome}
               accessible={false}
             />
-            <Text style={styles.toastText}>{DELETED_TOAST}</Text>
+            <Text style={styles.toastText}>{deletionBanner({ ok: true, serverDeleted: true, loginDeleted: true })}</Text>
           </View>
         </ScrollView>
         <View style={styles.footer}>
@@ -370,7 +359,9 @@ export function DeleteAccountScreen() {
             accessibilityLiveRegion="polite"
           >
             <Text style={onLocalScreen ? styles.localBannerText : styles.bannerText}>
-              {onLocalScreen ? localBannerCopy(localFailure) : DELETE_ERROR}
+              {onLocalScreen
+                ? deletionBanner({ ok: false, serverDeleted: true, localFailure, loginDeleted })
+                : DELETE_ERROR}
             </Text>
           </View>
         ) : null}

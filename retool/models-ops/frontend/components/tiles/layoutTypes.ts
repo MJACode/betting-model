@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react'
 
-export type TabId = 'models' | 'volume' | 'ops' | 'database' | 'picks'
+export type TabId = 'models' | 'volume' | 'ops' | 'database' | 'picks' | 'health'
 
 /**
  * Tabs whose layouts can be saved. It matches the tab list the layout
  * functions accept (backend/ops/dbErrors.ts) and the check on the
- * dashboard_layouts table. The Database tab arranges for the session only:
+ * dashboard_layouts table. The Database and Model Health tabs arrange for the session only:
  * adding it there means changing two functions that write, which need
  * approval at publish, and the table's check.
  */
@@ -18,6 +18,7 @@ export const TAB_META: Record<TabId, { title: string; description: string }> = {
   ops: { title: 'Ops', description: 'Feeds, pipeline runs, health checks and audience' },
   database: { title: 'Database', description: 'Size, growth and load of the Supabase database, measured every hour' },
   picks: { title: 'Picks & CLV', description: 'Every bet pick, its result and how it did against the closing price' },
+  health: { title: 'Model Health', description: 'Closing-line value per model: every bet, blocks of 25, 50 and 100, and a rolling average' },
 }
 
 /** What a saved layout stores per tile. */

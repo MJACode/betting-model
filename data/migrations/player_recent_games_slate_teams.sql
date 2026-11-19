@@ -250,15 +250,35 @@ BEGIN
     -- to PUBLIC on a new function and anon is a member, so a named revoke alone
     -- leaves it callable and reports success (measured 2026-09-04).
         EXECUTE 'REVOKE ALL ON FUNCTION public.player_recent_games_mlb(integer, text, integer, text[]) FROM PUBLIC';
-        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_mlb(integer, text, integer, text[]) TO anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_mlb(integer, text, integer, text[]) TO authenticated';
+        IF to_regclass('public.picks') IS NULL
+           OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_mlb(integer, text, integer, text[]) TO anon';
+        END IF;
         EXECUTE 'REVOKE ALL ON FUNCTION public.player_recent_games_nba(integer, integer, text[]) FROM PUBLIC';
-        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_nba(integer, integer, text[]) TO anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_nba(integer, integer, text[]) TO authenticated';
+        IF to_regclass('public.picks') IS NULL
+           OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_nba(integer, integer, text[]) TO anon';
+        END IF;
         EXECUTE 'REVOKE ALL ON FUNCTION public.player_recent_games_wnba(integer, integer, text[]) FROM PUBLIC';
-        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_wnba(integer, integer, text[]) TO anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_wnba(integer, integer, text[]) TO authenticated';
+        IF to_regclass('public.picks') IS NULL
+           OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_wnba(integer, integer, text[]) TO anon';
+        END IF;
         EXECUTE 'REVOKE ALL ON FUNCTION public.player_recent_games_nfl(integer, integer, text[]) FROM PUBLIC';
-        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_nfl(integer, integer, text[]) TO anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_nfl(integer, integer, text[]) TO authenticated';
+        IF to_regclass('public.picks') IS NULL
+           OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_nfl(integer, integer, text[]) TO anon';
+        END IF;
         EXECUTE 'REVOKE ALL ON FUNCTION public.player_recent_games_ncaaf(integer, integer, text[]) FROM PUBLIC';
-        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_ncaaf(integer, integer, text[]) TO anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_ncaaf(integer, integer, text[]) TO authenticated';
+        IF to_regclass('public.picks') IS NULL
+           OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_recent_games_ncaaf(integer, integer, text[]) TO anon';
+        END IF;
 
     RAISE NOTICE 'player_recent_games_* now take p_teams (filtered on the rn=1 team)';
 END
