@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from data.anon_lockdown_spec import (  # noqa: E402
     ANON_KEEP_FUNCTIONS,
+    ANON_KEEP_RELATIONS,
     EXPECTED_ANON_EXECUTABLE,
     EXPECTED_ANON_GRANT_ONLY,
     EXPECTED_ANON_READABLE,
@@ -685,6 +686,100 @@ def test_supabase_admin_defaults_are_out_of_postgres_reach():
         ).strip() == "t"
         _psql(dsn, "REVOKE ALL ON TABLE public.opened_by_admin FROM anon;")
         _psql_file(dsn, ROOT / "scripts" / "lockdown_anon_stray_check.sql")
+
+
+def test_stray_check_keep_names_match_the_spec():
+    from data.anon_readable import ANON_READABLE, RPC_ANON_CALLABLE
+    import inspect
+    from scripts.apply_anon_grants import _revoke_lockdown_strays
+
+    text = (ROOT / "scripts" / "lockdown_anon_stray_check.sql").read_text(
+        encoding="utf-8")
+    rel = re.search(r"c\.relname <> '([^']+)'", text)
+    fn = re.search(r"p\.proname NOT IN \(([^)]+)\)", text)
+    assert rel is not None and fn is not None
+    names = re.findall(r"'([^']+)'", fn.group(1))
+    assert frozenset({rel.group(1)}) == ANON_KEEP_RELATIONS
+    assert frozenset(names) == ANON_KEEP_FUNCTIONS
+    assert ANON_KEEP_RELATIONS == frozenset(ANON_READABLE)
+    assert ANON_KEEP_FUNCTIONS == frozenset(RPC_ANON_CALLABLE)
+    src = inspect.getsource(_revoke_lockdown_strays)
+    assert "'p'" in src and "'f'" in src
+
+
+class _Pg:
+    def __init__(self, raw):
+        self.raw = raw
+
+    def execute(self, sql, params=None):
+        cur = self.raw.cursor()
+        cur.execute(sql, params)
+        return cur
+
+
+def test_lockdown_sweep_fails_closed_when_revoke_only_warns():
+    """A non-owner who holds SELECT without grant option gets a warning
+    and a successful REVOKE. The anon grant stays. The sweep must not
+    record that as revoked. A partitioned table this role owns is
+    revoked in the same pass, then restored when the caller rolls back.
+    """
+    psycopg2 = pytest.importorskip("psycopg2")
+    if not pg_bin("psql"):
+        pytest.skip("psql is not installed")
+    from loguru import logger
+    from scripts.apply_anon_grants import _revoke_lockdown_strays
+
+    with scratch_cluster("stray-warn-") as dsn:
+        _psql(dsn, """
+          CREATE ROLE supabase_admin NOLOGIN;
+          CREATE ROLE worker NOLOGIN;
+          CREATE ROLE anon NOLOGIN;
+          GRANT CREATE, USAGE ON SCHEMA public TO supabase_admin, worker;
+          GRANT supabase_admin TO postgres;
+          SET ROLE supabase_admin;
+          CREATE TABLE public.opened_by_admin (id int);
+          GRANT SELECT ON public.opened_by_admin TO anon;
+          GRANT SELECT ON public.opened_by_admin TO worker;
+          RESET ROLE;
+          REVOKE supabase_admin FROM postgres;
+          GRANT worker TO postgres;
+          SET ROLE worker;
+          CREATE TABLE public.opened_parts (id int, k int) PARTITION BY LIST (k);
+          GRANT SELECT ON public.opened_parts TO anon;
+          RESET ROLE;
+        """)
+        raw = psycopg2.connect(dsn)
+        raw.autocommit = False
+        lines: list[str] = []
+        sink = logger.add(lambda msg: lines.append(str(msg)), format="{message}")
+        try:
+            raw.cursor().execute("SET ROLE worker")
+            left = _revoke_lockdown_strays(_Pg(raw))
+        finally:
+            logger.remove(sink)
+        assert any(
+            "opened_by_admin" in item and "supabase_admin" in item for item in left)
+        assert not any("opened_parts" in item for item in left)
+        text = "\n".join(lines)
+        assert "opened_by_admin: anon grant remains (owner supabase_admin)" in text
+        assert "opened_by_admin: revoked" not in text
+        assert "opened_parts: revoked anon grant" in text
+        cur = raw.cursor()
+        cur.execute(
+            "SELECT has_table_privilege('anon', 'public.opened_by_admin', 'SELECT')")
+        assert cur.fetchone()[0] is True
+        cur.execute(
+            "SELECT has_table_privilege('anon', 'public.opened_parts', 'SELECT')")
+        assert cur.fetchone()[0] is False
+        raw.rollback()
+        cur = raw.cursor()
+        cur.execute(
+            "SELECT has_table_privilege('anon', 'public.opened_parts', 'SELECT')")
+        assert cur.fetchone()[0] is True
+        cur.execute(
+            "SELECT has_table_privilege('anon', 'public.opened_by_admin', 'SELECT')")
+        assert cur.fetchone()[0] is True
+        raw.close()
 
 
 def test_retired_sync_writes_config_retired_models():

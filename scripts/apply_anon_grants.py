@@ -292,16 +292,57 @@ def _revoke_or_note(conn, sql: str) -> str | None:
         return str(exc).splitlines()[0]
 
 
+def _anon_table_open(conn, oid) -> bool:
+    row = conn.execute(
+        "SELECT has_table_privilege('anon', %s, 'SELECT') "
+        "OR has_table_privilege('anon', %s, 'INSERT') "
+        "OR has_table_privilege('anon', %s, 'UPDATE') "
+        "OR has_table_privilege('anon', %s, 'DELETE')",
+        (oid, oid, oid, oid),
+    ).fetchone()
+    return bool(row and row[0])
+
+
+def _anon_sequence_open(conn, oid) -> bool:
+    row = conn.execute(
+        "SELECT EXISTS ("
+        "  SELECT 1 FROM pg_class c, aclexplode(c.relacl) a "
+        "  WHERE c.oid = %s AND c.relacl IS NOT NULL "
+        "    AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'anon') "
+        "    AND a.privilege_type = 'USAGE')",
+        (oid,),
+    ).fetchone()
+    return bool(row and row[0])
+
+
+def _log_revoke(name: str, owner: str, err: str | None, still: bool, kind: str) -> None:
+    """A REVOKE that only warns still returns success.
+
+    Postgres says "no privileges could be revoked" when this role holds
+    the privilege without grant option and is not the owner. The grant
+    is unchanged. Say so, and name the owner.
+    """
+    if still:
+        extra = f"; {err}" if err else ""
+        logger.error(f"{name}: anon {kind} remains (owner {owner}){extra}")
+    elif err:
+        logger.error(f"{name}: anon {kind} revoke failed: {err}")
+    else:
+        logger.info(f"{name}: revoked anon {kind}")
+
+
 def _public_anon_strays(conn) -> list[str]:
     """Public objects anon can still use, outside the keep list.
 
-    Same names as scripts/lockdown_anon_stray_check.sql. storage,
-    graphql and graphql_public are not in this query.
+    Same names as scripts/lockdown_anon_stray_check.sql. Each line names
+    the owner, because a revoke this role cannot perform leaves the
+    grant in place. storage, graphql and graphql_public are not in
+    this query.
     """
     from data.anon_lockdown_spec import ANON_KEEP_FUNCTIONS, ANON_KEEP_RELATIONS
     found: list[str] = []
     rels = conn.execute(
-        "SELECT c.relname FROM pg_class c "
+        "SELECT c.relname, pg_get_userbyid(c.relowner) FROM pg_class c "
         "JOIN pg_namespace n ON n.oid = c.relnamespace "
         "WHERE n.nspname = 'public' AND c.relkind IN ('r','v','m','p','f') "
         "AND (has_table_privilege('anon', c.oid, 'SELECT') "
@@ -311,9 +352,10 @@ def _public_anon_strays(conn) -> list[str]:
         "ORDER BY c.relname"
     ).fetchall()
     found.extend(
-        f"table {name}" for (name,) in rels if name not in ANON_KEEP_RELATIONS)
+        f"table {name} (owner {owner})"
+        for name, owner in rels if name not in ANON_KEEP_RELATIONS)
     seqs = conn.execute(
-        "SELECT c.relname FROM pg_class c "
+        "SELECT c.relname, pg_get_userbyid(c.relowner) FROM pg_class c "
         "JOIN pg_namespace n ON n.oid = c.relnamespace "
         "WHERE n.nspname = 'public' AND c.relkind = 'S' "
         "AND c.relacl IS NOT NULL AND EXISTS ("
@@ -322,17 +364,80 @@ def _public_anon_strays(conn) -> list[str]:
         "    AND a.privilege_type = 'USAGE') "
         "ORDER BY c.relname"
     ).fetchall()
-    found.extend(f"sequence {name}" for (name,) in seqs)
+    found.extend(f"sequence {name} (owner {owner})" for name, owner in seqs)
     fns = conn.execute(
-        "SELECT p.proname FROM pg_proc p "
+        "SELECT p.proname, pg_get_userbyid(p.proowner) FROM pg_proc p "
         "JOIN pg_namespace n ON n.oid = p.pronamespace "
         "WHERE n.nspname = 'public' "
         "AND has_function_privilege('anon', p.oid, 'EXECUTE') "
         "ORDER BY p.proname"
     ).fetchall()
     found.extend(
-        f"function {name}" for (name,) in fns if name not in ANON_KEEP_FUNCTIONS)
+        f"function {name} (owner {owner})"
+        for name, owner in fns if name not in ANON_KEEP_FUNCTIONS)
     return found
+
+
+def _revoke_lockdown_strays(conn) -> list[str]:
+    """Revoke anon on public objects outside the keep list.
+
+    relkind includes partitioned tables (p) and foreign tables (f): the
+    stray check flags both. Returns whatever anon can still use. The
+    caller rolls the transaction back when the list is not empty.
+    """
+    anon_rels = conn.execute(
+        "SELECT c.relname, c.oid, pg_get_userbyid(c.relowner) FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relkind IN ('r','v','m','p','f') "
+        "AND (has_table_privilege('anon', c.oid, 'SELECT') "
+        "  OR has_table_privilege('anon', c.oid, 'INSERT') "
+        "  OR has_table_privilege('anon', c.oid, 'UPDATE') "
+        "  OR has_table_privilege('anon', c.oid, 'DELETE')) "
+        "ORDER BY c.relname"
+    ).fetchall()
+    for rel, oid, owner in anon_rels:
+        if rel in ANON_READABLE:
+            continue
+        err = _revoke_or_note(
+            conn, f'REVOKE ALL ON TABLE public."{rel}" FROM anon')
+        _log_revoke(rel, owner, err, _anon_table_open(conn, oid), "grant")
+    anon_seqs = conn.execute(
+        "SELECT c.relname, c.oid, pg_get_userbyid(c.relowner) FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relkind = 'S' "
+        "AND c.relacl IS NOT NULL AND EXISTS ("
+        "  SELECT 1 FROM aclexplode(c.relacl) a "
+        "  WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'anon') "
+        "    AND a.privilege_type = 'USAGE')"
+    ).fetchall()
+    for rel, oid, owner in anon_seqs:
+        err = _revoke_or_note(
+            conn, f'REVOKE ALL ON SEQUENCE public."{rel}" FROM anon')
+        _log_revoke(
+            rel, owner, err, _anon_sequence_open(conn, oid), "sequence")
+    if _relation_exists(conn, "tracked_bets"):
+        conn.execute(
+            "GRANT USAGE, SELECT ON SEQUENCE public.tracked_bets_id_seq "
+            "TO authenticated")
+    keep_fn = set(RPC_ANON_CALLABLE)
+    stray = conn.execute(
+        "SELECT p.oid::regprocedure::text, p.proname, p.oid, "
+        "pg_get_userbyid(p.proowner) FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE n.nspname = 'public' "
+        "AND has_function_privilege('anon', p.oid, 'EXECUTE')"
+    ).fetchall()
+    for sig, name, oid, owner in stray:
+        if name in keep_fn:
+            continue
+        err = _revoke_or_note(
+            conn, f"REVOKE ALL ON FUNCTION {sig} FROM PUBLIC, anon")
+        still = bool(conn.execute(
+            "SELECT has_function_privilege('anon', %s, 'EXECUTE')",
+            (oid,),
+        ).fetchone()[0])
+        _log_revoke(sig, owner, err, still, "execute")
+    return _public_anon_strays(conn)
 
 
 def _step_b_applied(conn) -> bool:
@@ -502,62 +607,7 @@ def main() -> int:
         if args.lockdown_b:
             # Stray anon grants the step B file did not name. Refused above
             # unless the marker says step B is already applied.
-            anon_rels = conn.execute(
-                "SELECT c.relname FROM pg_class c "
-                "JOIN pg_namespace n ON n.oid = c.relnamespace "
-                "WHERE n.nspname = 'public' AND c.relkind IN ('r','v','m') "
-                "AND (has_table_privilege('anon', c.oid, 'SELECT') "
-                "  OR has_table_privilege('anon', c.oid, 'INSERT') "
-                "  OR has_table_privilege('anon', c.oid, 'UPDATE') "
-                "  OR has_table_privilege('anon', c.oid, 'DELETE')) "
-                "ORDER BY c.relname"
-            ).fetchall()
-            for (rel,) in anon_rels:
-                if rel in ANON_READABLE:
-                    continue
-                err = _revoke_or_note(
-                    conn, f'REVOKE ALL ON TABLE public."{rel}" FROM anon')
-                if err:
-                    logger.error(f"{rel}: anon revoke failed: {err}")
-                else:
-                    logger.info(f"{rel}: revoked anon")
-            anon_seqs = conn.execute(
-                "SELECT c.relname FROM pg_class c "
-                "JOIN pg_namespace n ON n.oid = c.relnamespace "
-                "WHERE n.nspname = 'public' AND c.relkind = 'S' "
-                "AND c.relacl IS NOT NULL AND EXISTS ("
-                "  SELECT 1 FROM aclexplode(c.relacl) a "
-                "  WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'anon') "
-                "    AND a.privilege_type = 'USAGE')"
-            ).fetchall()
-            for (rel,) in anon_seqs:
-                err = _revoke_or_note(
-                    conn, f'REVOKE ALL ON SEQUENCE public."{rel}" FROM anon')
-                if err:
-                    logger.error(f"{rel}: anon sequence revoke failed: {err}")
-                else:
-                    logger.info(f"{rel}: revoked anon sequence")
-            if _relation_exists(conn, "tracked_bets"):
-                conn.execute(
-                    "GRANT USAGE, SELECT ON SEQUENCE public.tracked_bets_id_seq "
-                    "TO authenticated")
-            keep_fn = set(RPC_ANON_CALLABLE)
-            stray = conn.execute(
-                "SELECT p.oid::regprocedure::text, p.proname FROM pg_proc p "
-                "JOIN pg_namespace n ON n.oid = p.pronamespace "
-                "WHERE n.nspname = 'public' "
-                "AND has_function_privilege('anon', p.oid, 'EXECUTE')"
-            ).fetchall()
-            for sig, name in stray:
-                if name in keep_fn:
-                    continue
-                err = _revoke_or_note(
-                    conn, f"REVOKE ALL ON FUNCTION {sig} FROM PUBLIC, anon")
-                if err:
-                    logger.error(f"{sig}: anon execute revoke failed: {err}")
-                else:
-                    logger.info(f"{sig}: revoked anon execute")
-            left = _public_anon_strays(conn)
+            left = _revoke_lockdown_strays(conn)
             if left:
                 conn.rollback()
                 logger.error(
