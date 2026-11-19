@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -93,6 +94,22 @@ def _utc(value) -> datetime | None:
 
 def _f(v) -> float | None:
     return None if v is None else float(v)
+
+
+_SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
+
+
+def player_key(name: str | None) -> str:
+    """A player's name as the feeds can disagree on it: accents, case,
+    punctuation and Jr./III dropped. The feed's history spells "Jose Soriano"
+    and "Walbert Urena" where our labels, written from the live feed, carry
+    "José Soriano" and "Walbert Ureña" (measured 2026-11-19)."""
+    if not name:
+        return ""
+    plain = unicodedata.normalize("NFKD", name)
+    plain = "".join(ch for ch in plain if not unicodedata.combining(ch))
+    words = re.sub(r"[^a-z0-9 ]+", " ", plain.lower()).split()
+    return " ".join(w for w in words if w not in _SUFFIXES)
 
 
 @dataclass
@@ -233,15 +250,16 @@ def feed_quotes(conn, bet: Bet) -> list[Quote]:
         if not bet.player:
             return []
         rows = conn.execute("""
-            SELECT market, created_at::timestamptz, line, over_price, under_price
+            SELECT market, created_at::timestamptz, line, over_price, under_price, player_name
               FROM public.player_prop_odds
-             WHERE game_id = %s AND bookmaker = %s AND player_name = %s AND market = ANY(%s)
+             WHERE game_id = %s AND bookmaker = %s AND market = ANY(%s)
                AND created_at IS NOT NULL
                AND created_at::timestamptz > %s AND created_at::timestamptz <= %s
-        """, (bet.game_id, bet.bet_book, bet.player, _markets(bet), bet.created_at, bet.bound)).fetchall()
+        """, (bet.game_id, bet.bet_book, _markets(bet), bet.created_at, bet.bound)).fetchall()
         conn.commit()
+        want = player_key(bet.player)
         return [Quote(r[0], _utc(r[1]), _f(r[2]), {"over_price": _f(r[3]), "under_price": _f(r[4])}, "feed")
-                for r in rows]
+                for r in rows if player_key(r[5]) == want]
     rows = conn.execute("""
         SELECT market, created_at::timestamptz, spread_home, total_line,
                home_price, away_price, draw_price, over_price, under_price
@@ -273,7 +291,7 @@ def history_quotes(conn, bet: Bet) -> list[Quote]:
     out = []
     for r in rows:
         if bet.kind == "prop":
-            if r[10] != bet.player:
+            if player_key(r[10]) != player_key(bet.player):
                 continue
             out.append(Quote(r[0], _utc(r[1]), _f(r[9]),
                              {"over_price": _f(r[7]), "under_price": _f(r[8])}, "history"))
@@ -306,7 +324,10 @@ def _line_pts(bet: Bet, main_number: float | None) -> float | None:
     from tracking.paper_tracker import _line_clv_pts
     if main_number is None or bet.number is None:
         return None
-    return _line_clv_pts(bet.market or "", bet.prop_market if bet.kind == "prop" else None,
+    # A prop's line move reads its own market when picks.prop_market is empty
+    # (the single-market prop models leave it empty): without it the move was
+    # never recorded, and a moved prop line showed as "no closing price".
+    return _line_clv_pts(bet.market or "", (bet.prop_market or bet.market) if bet.kind == "prop" else None,
                          bet.pick_side, bet.number, main_number)
 
 
