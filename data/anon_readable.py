@@ -595,14 +595,6 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "ncaab_first_half_spread_decisions",
     "ncaab_first_half_fetches",
     "ncaab_first_half_team_games",
-    # The final close of every pre-game bet (tracking/clv_close.py, #1470):
-    # bookmaker quotes bought from the feed's history or pulled live just
-    # before the start, the ledger of those calls, and one measurement row per
-    # bet. Created by data/migrations/clv_close_2026_11_19.sql; read by the
-    # settle step and scripts/clv_close_history.py, never by the app.
-    "clv_close_quotes",
-    "clv_close_purchases",
-    "clv_close_measurements",
     # The NCAAB first-half total model's decisions ledger
     # (scripts/ncaab_first_half_total_card.py, created on demand); it reads the
     # same fetch ledger and team games as the spread model.
