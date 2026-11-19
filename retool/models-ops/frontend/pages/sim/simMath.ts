@@ -256,3 +256,45 @@ export function fmtU(v: number, opts?: { axis?: boolean }): string {
   if (Math.abs(Number(scaled.toPrecision(3))) >= 1000) return v.toExponential(2) + ' u'
   return String(Number(scaled.toPrecision(3))) + BIG_SUFFIXES[i]! + ' u'
 }
+
+/** The original simulator's dollar formats, verbatim (`money`, `axisMoney`). Only the Dollars display uses them. */
+export function money(v: number): string {
+  const a = Math.abs(v)
+  if (a >= 1e9) return '$' + (v / 1e9).toFixed(a >= 1e10 ? 1 : 2) + 'B'
+  if (a >= 1e6) return '$' + (v / 1e6).toFixed(a >= 1e7 ? 1 : 2) + 'M'
+  if (a >= 1e4) return '$' + Math.round(v / 1e3) + 'K'
+  if (a >= 1e3) return '$' + (v / 1e3).toFixed(1) + 'K'
+  return '$' + Math.round(v)
+}
+
+export function axisMoney(v: number): string {
+  const trim = (x: number) => String(parseFloat(x.toFixed(2)))
+  if (v >= 1e9) return '$' + trim(v / 1e9) + 'B'
+  if (v >= 1e6) return '$' + trim(v / 1e6) + 'M'
+  if (v >= 1e3) return '$' + trim(v / 1e3) + 'K'
+  return '$' + Math.round(v)
+}
+
+/** How bankroll figures are shown. The math always runs in units; Dollars multiplies for display only. */
+export type Display = { mode: 'units' | 'dollars'; perUnit: number }
+
+export const DEFAULT_DISPLAY: Display = { mode: 'units', perUnit: 100 }
+
+export type Fmt = (v: number, opts?: { axis?: boolean }) => string
+
+/** Display amount per bankroll unit: 1 in Units, the dollars per unit in Dollars. */
+export function displayFactor(d: Display): number {
+  return d.mode === 'dollars' ? d.perUnit : 1
+}
+
+/** The bankroll formatter for a display. Units is `fmtU` itself; Dollars is units x dollars per unit in the original's formats. */
+export function makeFmt(d: Display): Fmt {
+  if (d.mode === 'units') return fmtU
+  const k = d.perUnit
+  return (v, opts) => (!Number.isFinite(v) ? '—' : opts?.axis ? axisMoney(v * k) : money(v * k))
+}
+
+/** Dollars per unit: any positive amount up to 1,000,000; null keeps the previous value. */
+export function clampPerUnit(v: number): number | null {
+  return Number.isFinite(v) && v > 0 ? Math.min(1e6, v) : null
+}

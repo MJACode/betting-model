@@ -1,8 +1,8 @@
 import { Coins, MoveHorizontal, TrendingDown, ArrowDownRight, AlertTriangle, Divide } from 'lucide-react'
 import { StatCard } from '../../components/PanelUtils'
-import { fmtU, pct, type SimResult } from './simMath'
+import { pct, type Fmt, type SimResult } from './simMath'
 
-export default function SimSummary({ result, B0, N, paths }: { result: SimResult; B0: number; N: number; paths: number }) {
+export default function SimSummary({ result, B0, N, paths, fmt }: { result: SimResult; B0: number; N: number; paths: number; fmt: Fmt }) {
   const med = result.final[2]!
   const mult = med / B0
   const multText = mult >= 10 ? mult.toFixed(0) : mult.toFixed(2)
@@ -11,13 +11,13 @@ export default function SimSummary({ result, B0, N, paths }: { result: SimResult
       <StatCard
         label="Median ending bankroll"
         icon={Coins}
-        value={fmtU(med)}
-        caption={`${multText}× start · mean ${fmtU(result.meanFinal)}`}
+        value={fmt(med)}
+        caption={`${multText}× start · mean ${fmt(result.meanFinal)}`}
       />
       <StatCard
         label="Middle 90% of endings"
         icon={MoveHorizontal}
-        value={<span className="text-[18px]">{fmtU(result.final[0]!)} to {fmtU(result.final[4]!)}</span>}
+        value={<span className="text-[18px]">{fmt(result.final[0]!)} to {fmt(result.final[4]!)}</span>}
         caption="5th to 95th percentile"
       />
       <StatCard

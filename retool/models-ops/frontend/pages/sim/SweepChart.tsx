@@ -1,21 +1,21 @@
 import { useMemo } from 'react'
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ReferenceDot, ResponsiveContainer } from 'recharts'
 import { PALETTE, AXIS_COLOR, TEXT_COLOR, axisProps, gridProps, ChartTooltipBox } from '../../components/chartTheme'
-import { fmtU, pct, type SweepPoint } from './simMath'
-import { logAxis, logSafe } from './simAxis'
+import { pct, type Fmt, type SweepPoint } from './simMath'
+import { logAxis, logSafe, scaledAxis } from './simAxis'
 
 type SweepRow = { x: number; med: number; draw: number; below: number }
 
 const X_TICKS = [48, 50, 52, 54, 56, 58, 60]
 
-function SweepTip({ active, payload }: { active?: boolean; payload?: ReadonlyArray<{ payload?: SweepRow }> }) {
+function SweepTip({ active, payload, fmt }: { active?: boolean; payload?: ReadonlyArray<{ payload?: SweepRow }>; fmt: Fmt }) {
   const row = active ? payload?.[0]?.payload : undefined
   if (!row) return null
   return (
     <ChartTooltipBox title={`Win rate ${row.x.toFixed(2)}%`}>
       <div className="flex justify-between gap-4 tabular-nums">
         <span className="text-muted-foreground">Median ending</span>
-        <span className="font-semibold">{fmtU(row.med)}</span>
+        <span className="font-semibold">{fmt(row.med)}</span>
       </div>
       <div className="flex justify-between gap-4 tabular-nums">
         <span className="text-muted-foreground">Chance below start</span>
@@ -31,6 +31,8 @@ export default function SweepChart({
   selectedMed,
   B0,
   breakEven,
+  fmt,
+  k,
 }: {
   sweep: SweepPoint[]
   p: number
@@ -38,6 +40,9 @@ export default function SweepChart({
   B0: number
   /** Simple break-even win rate, 0..1. */
   breakEven: number
+  fmt: Fmt
+  /** Display amount per unit (1 in Units): the axis ticks are chosen in display amounts. */
+  k: number
 }) {
   const { rows, axis } = useMemo(() => {
     let lo = B0, hi = B0
@@ -48,8 +53,8 @@ export default function SweepChart({
     })
     if (selectedMed < lo) lo = selectedMed
     if (selectedMed > hi) hi = selectedMed
-    return { rows: out, axis: logAxis(lo, hi) }
-  }, [sweep, B0, selectedMed])
+    return { rows: out, axis: scaledAxis(logAxis, lo, hi, k) }
+  }, [sweep, B0, selectedMed, k])
 
   const beX = breakEven * 100
 
@@ -76,14 +81,14 @@ export default function SweepChart({
             allowDataOverflow
             {...axisProps}
             width={64}
-            tickFormatter={(v: number) => fmtU(v, { axis: true })}
+            tickFormatter={(v: number) => fmt(v, { axis: true })}
           />
-          <Tooltip content={<SweepTip />} cursor={{ stroke: AXIS_COLOR, strokeWidth: 1, strokeDasharray: '3 3' }} isAnimationActive={false} />
+          <Tooltip content={<SweepTip fmt={fmt} />} cursor={{ stroke: AXIS_COLOR, strokeWidth: 1, strokeDasharray: '3 3' }} isAnimationActive={false} />
           <ReferenceLine
             y={logSafe(B0)}
             stroke={AXIS_COLOR}
             strokeDasharray="4 4"
-            label={{ value: `Start ${fmtU(B0, { axis: true })}`, position: 'insideBottomLeft', fontSize: 11, fill: AXIS_COLOR }}
+            label={{ value: `Start ${fmt(B0, { axis: true })}`, position: 'insideBottomLeft', fontSize: 11, fill: AXIS_COLOR }}
           />
           {beX >= 48 && beX <= 60 && (
             <ReferenceLine
@@ -101,7 +106,7 @@ export default function SweepChart({
             fill={PALETTE[0]}
             stroke="hsl(var(--card))"
             strokeWidth={1.5}
-            label={{ value: `${(p * 100).toFixed(1)}%: ${fmtU(selectedMed)}`, position: 'left', fontSize: 11, fontWeight: 600, fill: TEXT_COLOR }}
+            label={{ value: `${(p * 100).toFixed(1)}%: ${fmt(selectedMed)}`, position: 'left', fontSize: 11, fontWeight: 600, fill: TEXT_COLOR }}
           />
         </ComposedChart>
       </ResponsiveContainer>
