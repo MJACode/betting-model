@@ -10,7 +10,7 @@ than MIN_AGE_DAYS ago:
   repeat  a row with the same prices and line as the same book's row before it
           for the same proposition and label (an exact duplicate saved again a
           few minutes later). 66.0% of prop rows and 53.8% of game-odds rows,
-          measured on the PC copy 2026-11-16.
+          measured on the PC copy 2026-11-16 (game odds 47.6% on 11-18).
   old     for games that started more than OLD_DAYS ago, every row but the two
           kept below.
 Never moved: each proposition's first row (the opener) and its last pre-game
@@ -53,7 +53,8 @@ the rows. Postgres and DuckDB compute it alike: measured 2026-11-16 on 199,991
     python scripts/archive_rows.py reclaim --table player_prop_odds      # see reclaim(): unmeasured
     python scripts/archive_rows.py status
 
-Only (player_prop_odds, repeat) may move today; ALLOWED and REFUSED say why.
+Nothing may move today: prop repeats moved on 2026-11-16 and 11-17, then the app's
+"At pick" price was found reading them (#1458). ALLOWED and REFUSED say why.
 """
 from __future__ import annotations
 
@@ -82,11 +83,21 @@ RULES = ("repeat", "old")
 # would change what it returns, found by the reader audit of 2026-11-16 (the
 # reasons below; detail in docs/data_archive.md, "What reads old rows"). Each
 # opens once its reader reads the archive or a kept summary instead.
-ALLOWED = {("player_prop_odds", "repeat")}
+# Prop repeats moved on 2026-11-16 and 11-17 (49.5M rows). On 2026-11-18 the
+# app's "At pick" price was found reading them (#1458), and the move was
+# stopped until that fix is live and the prop readers are cleared.
+ALLOWED: set = set()
 REFUSED = {
-    ("odds", "repeat"): "features/market_movement.py counts DraftKings snapshots per past game "
-                        "(mkt_snapshots) and scripts/build_nba_live_ig2_artifact.py groups rows "
-                        "by fetch; both train on past games from Postgres",
+    ("player_prop_odds", "repeat"): "the app's \"At pick\" price on past prop picks read the "
+                                    "rows a repeat moves (#1458); research replays of NFL and NHL "
+                                    "props too (docs/data_archive.md)",
+    # The reader audit of 2026-11-18 found more than _ODDS_KEEP holds, among them
+    # two in production; the list is in docs/data_archive.md, "What reads old rows".
+    ("odds", "repeat"): "the app's line history for past picks (the at-pick price and its "
+                        "6-hour limit), the first-half CLV close (a row on the pick's line "
+                        "after the pick), the NCAAB spread and moneyline builds (the hour "
+                        "before 15:00 UTC), and research scripts that rebuild fetches or "
+                        "measure price age read the rows a repeat would move",
     ("odds", "old"): "the Teams board, CLV's same-line close, BYOM, the line charts and "
                      "team_period_results read mid-path rows of old games",
     ("player_prop_odds", "old"): "the line charts, the NHL player prop view and BYOM prop facts read "
@@ -120,6 +131,12 @@ APP_READ_LIMIT_S = 2.0
 # behind it; the guard runs only between transactions.
 SPLIT_ROWS = 50_000
 REMOVE_LOCK = 1345_0001   # pg advisory lock key: one removal run at a time
+# --batch-rows N (game odds, 2026-11-18): 85,666 games hold `odds` rows, most
+# of a few hundred, against 1,007 prop games. One game a transaction costs
+# about 1.6 s even for 96 rows (the prop removal log of 2026-11-17), which is
+# 38 hours for odds. So small games go together, up to N archived rows and
+# BATCH_GAMES games a transaction, each game still checked on its own.
+BATCH_GAMES = 200
 
 LEDGER_DDL = """
 CREATE TABLE IF NOT EXISTS archive_batches (
@@ -154,6 +171,32 @@ class Spec:
     text_cols: tuple[str, ...]    # fingerprinted as text
     rung_pg: str                  # the rung of an alternate line, Postgres
     rung_dk: str                  # the same, DuckDB
+    # Rows a reader needs whole, so no rule moves them, as a predicate on the
+    # alias k (the rule's last step). Written for both engines: Postgres needs
+    # its % doubled, because the statement goes through psycopg2 with params.
+    keep_pg: str = "FALSE"
+    keep_dk: str = "FALSE"
+
+
+# The game-odds rows a reader needs whole (the reader audit of 2026-11-18, in
+# docs/data_archive.md, "What reads old rows"). Each line names its reader.
+# Narrowing this list moves rows that games already archived kept, and the
+# ledger marks those games done, so a narrower list needs a new rule name.
+_ODDS_KEEP = """(
+  -- features/market_movement.py: mkt_snapshots counts each book's MLB pre-game snapshots
+  (k.sport = 'MLB' AND coalesce(k.snapshot_type, '') <> 'in_play'
+     AND k.market IN ('h2h', 'spreads', 'totals'))
+  -- the paid in-play history buyers resume from the served times they stored
+  OR (coalesce(k.snapshot_type, '') = 'in_play'
+      AND (k.source LIKE 'historical_inplay{p}' OR k.source = 'odds_api_ncaab_inplay_history'))
+  -- scripts/build_nba_live_ig2_artifact.py and scripts/nba_s_ingame27.py group by fetch
+  OR (k.sport = 'NBA' AND coalesce(k.snapshot_type, '') = 'in_play' AND k.source IS NULL)
+  -- scripts/nhl_totals_lab.py reads this paid history whole
+  OR (k.sport = 'NHL' AND k.market = 'totals' AND k.source = 'odds_api_historical')
+  -- data/ingestors/nfl_odds_cache_import.py resumes on the served times it stored,
+  -- so a re-run would import a moved row again
+  OR k.source LIKE 'nfl_odds_cache{p}'
+)"""
 
 
 SPECS = {
@@ -165,7 +208,8 @@ SPECS = {
         "CASE t.market WHEN 'alternate_spreads' THEN t.spread_home "
         "WHEN 'alternate_totals' THEN t.total_line END",
         "CASE t.market WHEN 'alternate_spreads' THEN t.spread_home "
-        "WHEN 'alternate_totals' THEN t.total_line END"),
+        "WHEN 'alternate_totals' THEN t.total_line END",
+        _ODDS_KEEP.replace("{p}", "%%"), _ODDS_KEEP.replace("{p}", "%")),
     "player_prop_odds": Spec(
         "player_prop_odds", "prop_id", ("game_id", "market", "player_name", "bookmaker"),
         ("line", "over_price", "under_price"),
@@ -230,6 +274,7 @@ def rule_sql(spec: Spec, rule: str, d: Dialect, by_market: bool = False) -> str:
     same = " AND ".join(f"{c} IS NOT DISTINCT FROM lag_{c}" for c in spec.values)
     old = f"start < {cut(p)}" if rule == "old" else "FALSE"
     mkt = f" WHERE t.market = {p}" if by_market else ""
+    keep = spec.keep_pg if d.pg else spec.keep_dk
     return f"""
 WITH g AS (
   SELECT game_id, {d.ts('commence_time')} AS start FROM games WHERE game_id {d.games()}),
@@ -254,6 +299,7 @@ SELECT k.{spec.pk} AS pk, {fingerprint_expr(spec, d)} AS h, k.game_id AS game_id
    AND k.first_n > 1
    AND NOT (k.close_n = 1 AND coalesce(k.pre, FALSE))
    AND ({old} OR (k.lag_pk IS NOT NULL AND {same}))
+   AND NOT coalesce({keep}, FALSE)
 """
 
 
@@ -643,7 +689,7 @@ def _note(conn, spec: Spec, rule: str, game: str, note: str) -> None:
 
 
 def remove(conn, table: str, rule: str, date: str, now: dt.datetime, log=print,
-           clock=None, sleeper=None, anytime: bool = False) -> dict:
+           clock=None, sleeper=None, anytime: bool = False, batch_rows: int = 0) -> dict:
     """Remove the date's stored games, one transaction each, in the quiet window
     only (with `anytime`, at any hour under the harder guard and resting after
     each game as long as it took). A game Postgres disagrees on is refused and noted (it is prepared
@@ -659,6 +705,9 @@ def remove(conn, table: str, rule: str, date: str, now: dt.datetime, log=print,
     conn.rollback()
     digest = sha256(path)
     out = {"removed": 0, "games": 0, "skipped": [], "stopped": None}
+    if batch_rows > 0:
+        return _remove_batched(conn, spec, rule, date, path, back, digest, rows, now, log,
+                               clock, sleeper, anytime, batch_rows, out)
     for g, n, c, fsha, stored, removed_at, note in rows:
         if removed_at is not None:
             continue
@@ -707,6 +756,90 @@ def remove(conn, table: str, rule: str, date: str, now: dt.datetime, log=print,
     return out
 
 
+def _remove_batched(conn, spec: Spec, rule: str, date: str, path: Path, back: dict, digest: str,
+                    rows, now: dt.datetime, log, clock, sleeper, anytime: bool, batch_rows: int,
+                    out: dict) -> dict:
+    """remove() with small games together: the same checks per game, then up to
+    batch_rows archived rows and BATCH_GAMES games a transaction. A game over
+    SPLIT_ROWS still goes one market a transaction."""
+    tick = clock or (lambda: dt.datetime.now(UTC))
+    rest = sleeper or __import__("time").sleep
+    ready = []
+    for g, n, c, fsha, stored, removed_at, note in rows:
+        if removed_at is not None:
+            continue
+        if stored is None or fsha != digest:
+            out["skipped"].append((g, "no verified Storage copy of this file"))
+        elif note and not note.startswith(REMOVAL_TIMED_OUT):
+            out["skipped"].append((g, note))
+        elif back.get(g) != (int(n), int(c)):
+            out["skipped"].append((g, "file does not hold the ledger's rows"))
+        else:
+            ready.append((g, (int(n), int(c))))
+    big = [(g, w) for g, w in ready if w[0] > SPLIT_ROWS]
+    small = sorted((g, w) for g, w in ready if w[0] <= SPLIT_ROWS)
+    batches, cur, cur_n = [], {}, 0
+    for g, w in small:
+        if cur and (cur_n + w[0] > batch_rows or len(cur) >= BATCH_GAMES):
+            batches.append(cur)
+            cur, cur_n = {}, 0
+        cur[g] = w
+        cur_n += w[0]
+    if cur:
+        batches.append(cur)
+    for g, w in big:
+        if not wait_for_quiet(conn, clock, sleeper, log, anytime=anytime):
+            out["stopped"] = "outside the quiet window"
+            break
+        t0 = tick()
+        try:
+            got, done = _remove_by_market(conn, spec, rule, g, path, w, now, log, clock, sleeper,
+                                          anytime)
+        except RuntimeError as exc:
+            _note(conn, spec, rule, g, f"refused at removal: {exc}")
+            out["skipped"].append((g, str(exc)))
+            continue
+        out["removed"] += got
+        if not done:
+            out["stopped"] = "outside the quiet window"
+            break
+        out["games"] += 1
+        log(f"  {g}: {got:,} rows removed in {(tick() - t0).total_seconds():.1f} s")
+    for b in ([] if out["stopped"] else batches):
+        if not wait_for_quiet(conn, clock, sleeper, log, anytime=anytime):
+            out["stopped"] = "outside the quiet window"
+            break
+        t0 = tick()
+        try:
+            got, refused = remove_batch(conn, spec, rule, b, now)
+        except RuntimeError as exc:
+            for g in b:
+                _note(conn, spec, rule, g, f"refused at removal: {exc}")
+                out["skipped"].append((g, str(exc)))
+            continue
+        except Exception as exc:  # noqa: BLE001
+            if not is_timeout(exc):
+                raise
+            msg = f"{REMOVAL_TIMED_OUT} after {REMOVE_TIMEOUT} at {_utc_iso(now)}; left in Supabase"
+            for g in b:
+                _note(conn, spec, rule, g, msg)
+                out["skipped"].append((g, msg))
+            continue
+        took = (tick() - t0).total_seconds()
+        for g, why in refused.items():
+            _note(conn, spec, rule, g, f"refused at removal: {why}")
+            out["skipped"].append((g, why))
+        out["removed"] += got
+        out["games"] += len(b) - len(refused)
+        log(f"  {len(b) - len(refused)} games: {got:,} rows removed in {took:.1f} s"
+            + (f"; {len(refused)} refused" if refused else ""))
+        if anytime and took > 0:
+            rest(took)
+    log(f"remove {spec.table} {rule} {date}: {out['removed']:,} rows from {out['games']} games; "
+        f"{len(out['skipped'])} skipped" + (f"; stopped: {out['stopped']}" if out["stopped"] else ""))
+    return out
+
+
 def _remove_by_market(conn, spec: Spec, rule: str, game: str, path: Path, want: tuple,
                       now: dt.datetime, log, clock, sleeper, anytime: bool) -> tuple:
     """A game over SPLIT_ROWS, one market a transaction, the guard before each.
@@ -737,7 +870,7 @@ def _utc_iso(t: dt.datetime) -> str:
 
 
 def remove_pending(conn, table: str, rule: str, now: dt.datetime, log=print,
-                   clock=None, sleeper=None, anytime: bool = False) -> dict:
+                   clock=None, sleeper=None, anytime: bool = False, batch_rows: int = 0) -> dict:
     """Every date with a stored copy and a game not yet removed, oldest first,
     until the quiet window ends (with `anytime`, until all are done)."""
     check_allowed(table, rule)
@@ -756,7 +889,8 @@ def remove_pending(conn, table: str, rule: str, now: dt.datetime, log=print,
     conn.rollback()
     out = {"dates": 0, "removed_rows": 0, "skipped_games": 0, "stopped": None}
     for date in dates:
-        r = remove(conn, table, rule, date, now, log, clock, sleeper, anytime=anytime)
+        r = remove(conn, table, rule, date, now, log, clock, sleeper, anytime=anytime,
+                   batch_rows=batch_rows)
         out["dates"] += 1
         out["removed_rows"] += r["removed"]
         out["skipped_games"] += len(r["skipped"])
@@ -766,6 +900,140 @@ def remove_pending(conn, table: str, rule: str, now: dt.datetime, log=print,
     conn.execute("SELECT pg_advisory_unlock(%s)", (REMOVE_LOCK,))
     conn.rollback()
     return out
+
+
+# ── Bulk: many dates from one pass of the copy; small games together ─────────
+
+def _games_by_date(copy, start: str, end: str, now: dt.datetime) -> dict:
+    """{ET date: [game_id, ...]} for games in [start, end] that started over
+    MIN_AGE_DAYS ago: games_on() for a range, in one read."""
+    min_cut, _ = cutoffs(now)
+    lo = dt.datetime.fromisoformat(start).replace(tzinfo=ET)
+    hi = dt.datetime.fromisoformat(end).replace(tzinfo=ET) + dt.timedelta(days=1)
+    rows = copy.execute("""
+        SELECT game_id, epoch(try_cast(commence_time AS TIMESTAMPTZ)) FROM games
+         WHERE try_cast(commence_time AS TIMESTAMPTZ) >= to_timestamp(?)
+           AND try_cast(commence_time AS TIMESTAMPTZ) < to_timestamp(?)""",
+        [lo.timestamp(), hi.timestamp()]).fetchall()
+    out: dict = {}
+    for g, start_s in rows:
+        if start_s is not None and start_s < min_cut.timestamp():
+            day = dt.datetime.fromtimestamp(start_s, ET).date().isoformat()
+            out.setdefault(day, []).append(g)
+    return {d: sorted(v) for d, v in sorted(out.items())}
+
+
+def prepare_range(copy, conn, table: str, rule: str, start: str, end: str, now: dt.datetime,
+                  log=print) -> dict:
+    """prepare() for every ET date in [start, end], from ONE pass of the copy.
+
+    The same file per date, the same read-back and the same ledger rows as
+    prepare(), one ledger statement per date. Measured 2026-11-18: one pick
+    over all of `odds` on the copy took 515 s, and a per-date pick 13 s, which
+    is about 11 hours for its 2,984 dates before writing a file.
+
+    A date whose file is already in Storage is skipped, never rewritten: its
+    rows may have left Supabase, and a new pick could then hold fewer rows than
+    the archive it would replace."""
+    check_allowed(table, rule)
+    spec = SPECS[table]
+    ensure_ledger(conn)
+    done = {r[0] for r in conn.execute(
+        """SELECT DISTINCT game_date FROM archive_batches
+            WHERE table_name = %s AND rule = %s AND stored_at IS NOT NULL""", (table, rule)).fetchall()}
+    conn.rollback()
+    by_date = {d: g for d, g in _games_by_date(copy, start, end, now).items() if d not in done}
+    out = {"dates": 0, "games": 0, "rows": 0, "skipped_dates": len(done)}
+    games = [g for v in by_date.values() for g in v]
+    if not games:
+        return out
+    d = Dialect("dk")
+    copy.execute("DROP TABLE IF EXISTS temp.archive_days")
+    copy.execute("CREATE TEMP TABLE archive_days AS SELECT unnest(?) AS game_id, unnest(?) AS _day",
+                 [games, [day for day, v in by_date.items() for _ in v]])
+    copy.execute("DROP TABLE IF EXISTS temp.archive_bulk")
+    copy.execute(f"""
+        CREATE TEMP TABLE archive_bulk AS
+        SELECT t.*, a._day FROM {spec.table} t
+          JOIN ({rule_sql(spec, rule, d)}) s ON t.{spec.pk} = s.pk
+          JOIN temp.archive_days a ON a.game_id = t.game_id
+         ORDER BY a._day, t.{spec.pk}""", _params(d, rule, games, now))
+    sel: dict = {}
+    for day, g, n, c in copy.execute(
+            f"SELECT k._day, k.game_id, count(*), sum({fingerprint_expr(spec, d)}) "
+            f"FROM temp.archive_bulk k GROUP BY 1, 2").fetchall():
+        sel.setdefault(day, {})[g] = (int(n), int(c))
+    for day in sorted(sel):
+        mine = sel[day]
+        path = file_path(table, rule, day)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        copy.execute(f"""COPY (SELECT * EXCLUDE (_day) FROM temp.archive_bulk WHERE _day = ?
+                               ORDER BY {spec.pk})
+                         TO '{tmp.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)""", [day])
+        os.replace(tmp, path)
+        if file_selection(spec, path) != mine:
+            raise RuntimeError(f"{path}: the file read back differs from the copy's selection")
+        gs = sorted(mine)
+        conn.execute("""
+            INSERT INTO archive_batches (table_name, rule, batch_key, game_date, file_path,
+                                         storage_path, rows, checksum, note)
+            SELECT %s, %s, u.g, %s, %s, %s, u.n, u.c, NULL
+              FROM unnest(%s::text[], %s::bigint[], %s::text[]) AS u(g, n, c)
+            ON CONFLICT (table_name, rule, batch_key) DO UPDATE SET
+              file_path = EXCLUDED.file_path, storage_path = EXCLUDED.storage_path,
+              rows = EXCLUDED.rows, checksum = EXCLUDED.checksum, note = EXCLUDED.note,
+              prepared_at = now()
+            WHERE archive_batches.removed_at IS NULL""",
+            (table, rule, day, str(path), storage_path(table, rule, day),
+             gs, [mine[g][0] for g in gs], [str(mine[g][1]) for g in gs]))
+        conn.commit()
+        out["dates"] += 1
+        out["games"] += len(gs)
+        out["rows"] += sum(n for n, _ in mine.values())
+    copy.execute("DROP TABLE IF EXISTS temp.archive_bulk")
+    log(f"prepare {table} {rule} {start}..{end}: {out['rows']:,} rows in {out['games']:,} games "
+        f"over {out['dates']} dates written and read back; {len(done)} dates already stored")
+    return out
+
+
+def remove_batch(conn, spec: Spec, rule: str, wants: dict, now: dt.datetime) -> tuple:
+    """Remove several small games in ONE transaction. Each is still checked on
+    its own: only a game whose Postgres pick equals the archive's count and
+    fingerprint is deleted. Returns (rows removed, {game: why refused})."""
+    d = Dialect("pg")
+    games = sorted(wants)
+    sel = rule_sql(spec, rule, d)
+    try:
+        conn.execute(f"SET LOCAL statement_timeout = '{REMOVE_TIMEOUT}'")
+        conn.execute(f"CREATE TEMP TABLE archive_pick ON COMMIT DROP AS {sel}",
+                     tuple(_params(d, rule, games, now)))
+        got = {g: (int(n), int(c)) for g, n, c in conn.execute(
+            "SELECT game_id, count(*), coalesce(sum(h), 0)::text FROM archive_pick GROUP BY game_id"
+        ).fetchall()}
+        ok = [g for g in games if got.get(g) == tuple(wants[g])]
+        refused = {g: (f"{g}: Postgres picks {got.get(g, (0, 0))[0]} rows / {got.get(g, (0, 0))[1]}, "
+                       f"the archive holds {wants[g][0]} / {wants[g][1]}; nothing removed")
+                   for g in games if g not in ok}
+        removed = 0
+        if ok:
+            want_n = sum(wants[g][0] for g in ok)
+            cur = conn.execute(f"DELETE FROM {spec.table} t USING archive_pick a "
+                               f"WHERE t.{spec.pk} = a.pk AND a.game_id = ANY(%s)", (ok,))
+            if cur.rowcount != want_n:
+                conn.rollback()
+                raise RuntimeError(f"a batch of {len(ok)} games: the delete matched {cur.rowcount} "
+                                   f"rows, not {want_n}; rolled back")
+            conn.execute("""UPDATE archive_batches b SET removed_at = now(), removed_rows = u.n
+                              FROM unnest(%s::text[], %s::bigint[]) AS u(g, n)
+                             WHERE b.table_name = %s AND b.rule = %s AND b.batch_key = u.g""",
+                         (ok, [wants[g][0] for g in ok], spec.table, rule))
+            removed = want_n
+        conn.commit()
+        return removed, refused
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def check_allowed(table: str, rule: str) -> None:
@@ -875,7 +1143,8 @@ def main(argv=None) -> int:
         except (AttributeError, ValueError):
             pass
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    ap.add_argument("step", choices=("prepare", "upload", "remove", "run", "reclaim", "status"))
+    ap.add_argument("step", choices=("prepare", "upload", "remove", "run", "bulk", "reclaim",
+                                     "status"))
     ap.add_argument("--table", choices=sorted(SPECS))
     ap.add_argument("--rule", choices=RULES, default="repeat")
     ap.add_argument("--date", help="ET game date, YYYY-MM-DD")
@@ -889,6 +1158,8 @@ def main(argv=None) -> int:
     ap.add_argument("--now", action="store_true",
                     help="remove: at any hour, waiting while an app read has run 2 s and "
                          "resting after each game as long as it took")
+    ap.add_argument("--batch-rows", type=int, default=0,
+                    help="remove: small games together, up to N archived rows a transaction")
     a = ap.parse_args(argv)
     from dotenv import load_dotenv
     load_dotenv(os.environ.get("ARCHIVE_ENV_FILE", DEFAULT_ENV), override=False)
@@ -918,6 +1189,24 @@ def main(argv=None) -> int:
             print(json.dumps(run(copy, conn, a.table, a.rule, a.start, a.end, now,
                                  connect=get_connection, check=a.check)))
             return 0
+        if a.step == "bulk":
+            # prepare every date in [start, end] from one pass of the copy, then
+            # upload each; removal stays its own step (remove --pending).
+            if not (a.table and a.start and a.end):
+                ap.error("--table, --start and --end are required")
+            import duckdb
+            copy = duckdb.connect(a.copy_db, read_only=True)
+            p = prepare_range(copy, conn, a.table, a.rule, a.start, a.end, now)
+            dates = [r[0] for r in conn.execute("""
+                SELECT DISTINCT game_date FROM archive_batches
+                 WHERE table_name = %s AND rule = %s AND stored_at IS NULL AND removed_at IS NULL
+                   AND game_date BETWEEN %s AND %s ORDER BY 1""",
+                (a.table, a.rule, a.start, a.end)).fetchall()]
+            conn.rollback()
+            for day in dates:
+                upload(conn, a.table, a.rule, day)
+            print(json.dumps({**p, "uploaded_dates": len(dates)}))
+            return 0
         if a.step == "remove" and a.pending:
             if not a.table:
                 ap.error("--table is required")
@@ -926,7 +1215,8 @@ def main(argv=None) -> int:
             import psycopg2
             for attempt in range(1, DATE_ATTEMPTS + 1):
                 try:
-                    print(json.dumps(remove_pending(conn, a.table, a.rule, now, anytime=a.now)))
+                    print(json.dumps(remove_pending(conn, a.table, a.rule, now, anytime=a.now,
+                                                    batch_rows=a.batch_rows)))
                     break
                 except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
                     if is_timeout(exc) or attempt == DATE_ATTEMPTS:
@@ -949,7 +1239,7 @@ def main(argv=None) -> int:
         elif a.step == "upload":
             upload(conn, a.table, a.rule, a.date)
         else:
-            remove(conn, a.table, a.rule, a.date, now)
+            remove(conn, a.table, a.rule, a.date, now, anytime=a.now, batch_rows=a.batch_rows)
         return 0
     finally:
         conn.close()
