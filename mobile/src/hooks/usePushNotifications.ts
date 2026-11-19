@@ -237,12 +237,16 @@ export function usePushNotifications(): PushState & { retry: () => void } {
     // `ready` guards the first frame: usePushOptIn reports `false` before
     // AsyncStorage answers, and acting on that would unregister on every cold
     // start of an opted-in device.
-    // save_device_push_token is authenticated-only after the anon lockdown.
-    // Wait for the session, then register. A cold start that races sign-in
-    // retries when signedIn flips, so the token is not lost.
-    if (!ready || !authReady || !signedIn) return;
-    if (enabled) void registerForPush();
-    else void unregisterForPush();
+    // Registration waits for a session. Opt-out does not: a signed-out
+    // device that turned push off must still flip the token row, and
+    // save_device_push_token stays callable without a session for that.
+    if (!ready || !authReady) return;
+    if (!enabled) {
+      void unregisterForPush();
+      return;
+    }
+    if (!signedIn) return;
+    void registerForPush();
   }, [enabled, ready, authReady, signedIn]);
 
   const retry = useCallback(() => {

@@ -54,6 +54,7 @@ def test_it_is_read_only_and_sums_the_published_stake():
 def test_it_grants_the_app_and_nobody_else():
     code = _code(SQL)
     assert "REVOKE ALL ON FUNCTION public.custom_model_backtest_posted(jsonb, jsonb) FROM PUBLIC" in code
-    assert "GRANT EXECUTE ON FUNCTION public.custom_model_backtest_posted(jsonb, jsonb) TO anon, authenticated" in code
+    assert "GRANT EXECUTE ON FUNCTION public.custom_model_backtest_posted(jsonb, jsonb) TO authenticated" in code
+    assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in code
     from data.anon_readable import RPC_AUTHENTICATED_CALLABLE
     assert "custom_model_backtest_posted" in RPC_AUTHENTICATED_CALLABLE

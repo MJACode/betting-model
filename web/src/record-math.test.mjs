@@ -48,6 +48,36 @@ test("picks are wins plus losses plus pushes; the view already dropped retired m
   assert.equal(summary.unitsText, "+1.00u");
 });
 
+test("a retired model id is skipped only when the fallback list is passed", () => {
+  const rows = [
+    {
+      sport: "MLB",
+      model_id: "golf_outright",
+      picks: 2,
+      wins: 2,
+      losses: 0,
+      pushes: 0,
+      units: 1,
+      risked: 2,
+    },
+    {
+      sport: "NBA",
+      model_id: "nba_moneyline",
+      picks: 1,
+      wins: 1,
+      losses: 0,
+      pushes: 0,
+      units: 0.5,
+      risked: 1,
+    },
+  ];
+  const kept = summarizeRecord(rows, ["golf_outright"]);
+  assert.equal(kept && kept.picks, 1);
+  assert.equal(kept && kept.sports, 1);
+  const all = summarizeRecord(rows, []);
+  assert.equal(all && all.picks, 3);
+});
+
 test("nothing to show hides the row", () => {
   assert.equal(summarizeRecord([], []), null);
   assert.equal(

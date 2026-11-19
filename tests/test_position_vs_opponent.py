@@ -67,7 +67,8 @@ def test_the_worker_applies_it_and_anon_can_call_it():
     assert MIG.name in ACTIVE_MIGRATIONS
     assert "position_vs_opponent_nfl" in RPC_AUTHENTICATED_CALLABLE
     assert "REVOKE ALL ON FUNCTION public.position_vs_opponent_nfl(integer[], text, text, text) FROM PUBLIC" in CODE
-    assert "TO anon, authenticated" in CODE
+    assert "TO authenticated" in CODE
+    assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in CODE
 
 
 def test_it_is_one_statement_and_does_its_ddl_once():

@@ -127,7 +127,8 @@ def test_the_table_is_migrated_guarded_and_read_only_to_anon():
     assert sql.strip().startswith("DO $mig$") and sql.strip().endswith("$mig$;")
     assert "IF to_regclass('public.player_positions') IS NOT NULL THEN" in code
     assert "REVOKE ALL ON public.player_positions FROM anon, authenticated;" in code
-    assert "GRANT SELECT ON public.player_positions TO anon, authenticated;" in code
+    assert "GRANT SELECT ON public.player_positions TO authenticated;" in code
+    assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in code
     assert "PRIMARY KEY (sport, player_id)" in code
 
 

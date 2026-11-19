@@ -888,11 +888,18 @@ _RPC_SURFACE: tuple[str, ...] = (
     "_jsonb_text_array",
 )
 
-# Anon after the lockdown: crash and timing logs only. Both are SECURITY
-# DEFINER and return nothing. Everything else the app calls is signed-in.
+# What the plain grant sweep still gives anon. The lockdown SQL is what
+# takes anon off this list. A routine --apply must not use the shorter
+# list below, or the next sweep is the lockdown.
+RPC_SWEEP_ANON: tuple[str, ...] = _RPC_SURFACE
+
+# Anon after the lockdown: crash and timing logs, plus the push opt-out.
+# save_device_push_token stays callable without a session so turning
+# notifications off still reaches the server. The SQL keeps that grant.
 RPC_ANON_CALLABLE: tuple[str, ...] = (
     "log_app_error",
     "log_app_timings",
+    "save_device_push_token",
 )
 
 # Granted to authenticated and service_role. PUBLIC and anon are revoked.
@@ -970,6 +977,10 @@ RPC_MISSING_IN_PROD: tuple[str, ...] = (
 # applies it and turns sign-in on. Do not add these names to RPC_ANON_CALLABLE.
 # delete_my_account / delete_my_login: data/migrations/delete_my_account_2026_10_24.sql.
 RPC_AFTER_SIGN_IN: tuple[str, ...] = (
+    # Created by anon_lockdown_step_b. The app falls back to a direct
+    # DELETE until that migration is applied, so the sweep must not
+    # GRANT a function that is not there yet.
+    "untrack_tracked_bet",
     "byom_save_model",
     "byom_list_models",
     "byom_delete_model",

@@ -98,6 +98,10 @@ BEGIN
     $ddl$;
 
     EXECUTE 'REVOKE ALL ON FUNCTION public.player_window_totals_nhl(integer, integer) FROM PUBLIC';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_window_totals_nhl(integer, integer) TO anon, authenticated';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_window_totals_nhl(integer, integer) TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_window_totals_nhl(integer, integer) TO anon';
+    END IF;
 END
 $mig$;

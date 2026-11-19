@@ -96,17 +96,29 @@ BEGIN
   $n$;
 
   REVOKE ALL ON TABLE public.push_sent FROM anon, authenticated;
-  GRANT SELECT (lock_key, kind, sent_at) ON TABLE public.push_sent TO anon, authenticated;
+  GRANT SELECT (lock_key, kind, sent_at) ON TABLE public.push_sent TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT (lock_key, kind, sent_at) ON TABLE public.push_sent TO anon;
+  END IF;
 
   DROP POLICY IF EXISTS anon_read_discord_publish ON public.push_sent;
   CREATE POLICY anon_read_discord_publish ON public.push_sent
     FOR SELECT TO anon, authenticated
     USING (kind IN ('discord_signal', 'discord_live', 'discord_void'));
 
-  GRANT SELECT ON public.v_discord_published TO anon, authenticated;
+  GRANT SELECT ON public.v_discord_published TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.v_discord_published TO anon;
+  END IF;
   REVOKE INSERT, UPDATE, DELETE ON public.v_discord_published
     FROM anon, authenticated;
-  GRANT SELECT ON public.v_discord_void_notice TO anon, authenticated;
+  GRANT SELECT ON public.v_discord_void_notice TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.v_discord_void_notice TO anon;
+  END IF;
   REVOKE INSERT, UPDATE, DELETE ON public.v_discord_void_notice
     FROM anon, authenticated;
 END $mig$;

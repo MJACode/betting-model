@@ -11,8 +11,9 @@
 -- the role list again. No EXCEPTION handler swallows an error.
 
 -- Step B. Everything else off anon, plus tracked_bets owner policies.
--- Afterwards anon keeps only site_public_record, log_app_error and
--- log_app_timings. Authenticated access is unchanged apart from tracked_bets.
+-- Afterwards anon keeps site_public_record, log_app_error, log_app_timings
+-- and save_device_push_token (signed-out opt-out). Authenticated access is
+-- unchanged apart from tracked_bets.
 -- Run at least 24 hours after step A unless Matt says otherwise.
 
 BEGIN;
@@ -111,8 +112,14 @@ REVOKE ALL ON public.tracked_bets FROM anon;
 
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;
 GRANT USAGE ON SEQUENCE public.tracked_bets_id_seq TO authenticated;
+-- New objects from postgres must not arrive open. Tables repeat the
+-- 2026-09-03 sweep. Sequences and PUBLIC function execute are new here.
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+    REVOKE ALL ON TABLES FROM anon;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
     REVOKE ALL ON SEQUENCES FROM anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+    REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon;
 
 ALTER POLICY "anon read alt_game_lines" ON public.alt_game_lines TO authenticated;
 ALTER POLICY "anon read fighters" ON public.fighters TO authenticated;
@@ -163,7 +170,6 @@ ALTER POLICY "anon read live_game_state" ON public.live_game_state TO authentica
 ALTER POLICY "anon read latest_live_game_state" ON public.latest_live_game_state TO authenticated;
 ALTER POLICY "allow anon read" ON public.game_weather TO authenticated;
 ALTER POLICY "anon read game_weather" ON public.game_weather TO authenticated;
-ALTER POLICY "service_role_all" ON public.game_weather TO authenticated;
 ALTER POLICY "anon read golf_players" ON public.golf_players TO authenticated;
 ALTER POLICY "anon read golf_rounds" ON public.golf_rounds TO authenticated;
 ALTER POLICY "anon read golf_tournaments" ON public.golf_tournaments TO authenticated;
@@ -270,8 +276,8 @@ REVOKE ALL ON FUNCTION public.member_books_get(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.member_books_get(text) TO postgres, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.member_books_set(text, text[]) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.member_books_set(text, text[]) TO postgres, authenticated, service_role;
-REVOKE ALL ON FUNCTION public.save_device_push_token(text, text, text, boolean, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.save_device_push_token(text, text, text, boolean, text) TO postgres, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.save_device_push_token(text, text, text, boolean, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.save_device_push_token(text, text, text, boolean, text) TO postgres, anon, authenticated, service_role;
 
 -- notification_inbox and notification_sport_prefs are authenticated-only
 -- (draft PR for the inbox). If they already exist, anon loses every grant.
@@ -288,14 +294,37 @@ END $inbox$;
 
 -- tracked_bets. DEFAULT auth.uid() fills the column the shipping app does
 -- not send, so builds 14401 and 14601 keep inserting. A client that sends
--- another user's id fails the check. The 135 legacy rows stay user_id NULL:
--- invisible to the API, still readable by the worker. The column is kept
--- on undo.
+-- another user's id fails the check. The column is kept on undo.
+-- Legacy rows with user_id NULL are filled only when that device_id maps
+-- to exactly one account in app_timings or feedback_threads. Anything
+-- still NULL is deleted by untrack_tracked_bet when the caller is that
+-- device and no other account has used it. The worker then stops alerting.
 ALTER TABLE public.tracked_bets
     ADD COLUMN IF NOT EXISTS user_id uuid NULL DEFAULT auth.uid()
     REFERENCES auth.users(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS tracked_bets_user_id_idx
     ON public.tracked_bets (user_id);
+
+DO $backfill$
+DECLARE src text := '';
+BEGIN
+  IF to_regclass('public.app_timings') IS NOT NULL THEN
+    src := 'SELECT device_id, user_id FROM public.app_timings'
+        || ' WHERE user_id IS NOT NULL AND device_id IS NOT NULL';
+  END IF;
+  IF to_regclass('public.feedback_threads') IS NOT NULL THEN
+    IF src <> '' THEN src := src || ' UNION '; END IF;
+    src := src || 'SELECT device_id, user_id FROM public.feedback_threads'
+        || ' WHERE user_id IS NOT NULL AND device_id IS NOT NULL';
+  END IF;
+  IF src = '' THEN RETURN; END IF;
+  EXECUTE
+    'UPDATE public.tracked_bets tb SET user_id = mapped.user_id FROM ('
+    || 'SELECT device_id, min(user_id::text)::uuid AS user_id FROM ('
+    || src || ') seen GROUP BY device_id '
+    || 'HAVING count(DISTINCT user_id) = 1) mapped '
+    || 'WHERE tb.user_id IS NULL AND tb.device_id = mapped.device_id';
+END $backfill$;
 DROP POLICY IF EXISTS "anon insert tracked_bets" ON public.tracked_bets;
 DROP POLICY IF EXISTS "anon delete tracked_bets" ON public.tracked_bets;
 DROP POLICY IF EXISTS tracked_bets_owner_insert ON public.tracked_bets;
@@ -314,7 +343,52 @@ CREATE POLICY tracked_bets_owner_delete ON public.tracked_bets
     FOR DELETE TO authenticated
     USING (user_id = (SELECT auth.uid()));
 
--- Anon may read only site_public_record and execute only the two loggers.
+-- Direct DELETE cannot see a legacy NULL user_id row. This function can,
+-- and only when no other account is stored for that device.
+CREATE OR REPLACE FUNCTION public.untrack_tracked_bet(
+    p_device_id text, p_pick_id bigint)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $fn$
+DECLARE
+  uid uuid := auth.uid();
+  other_owner boolean := false;
+BEGIN
+  IF uid IS NULL THEN
+    RAISE EXCEPTION 'untrack_tracked_bet: sign in required' USING ERRCODE = '42501';
+  END IF;
+  IF p_device_id IS NULL OR p_device_id !~ '^[A-Za-z0-9-]{8,64}$' THEN
+    RAISE EXCEPTION 'untrack_tracked_bet: bad device id' USING ERRCODE = '22023';
+  END IF;
+  IF to_regclass('public.app_timings') IS NOT NULL THEN
+    EXECUTE
+      'SELECT EXISTS (SELECT 1 FROM public.app_timings'
+      || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
+      INTO other_owner USING p_device_id, uid;
+  END IF;
+  IF NOT other_owner AND to_regclass('public.feedback_threads') IS NOT NULL THEN
+    EXECUTE
+      'SELECT EXISTS (SELECT 1 FROM public.feedback_threads'
+      || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
+      INTO other_owner USING p_device_id, uid;
+  END IF;
+  IF other_owner THEN
+    DELETE FROM public.tracked_bets
+     WHERE pick_id = p_pick_id AND device_id = p_device_id AND user_id = uid;
+    RETURN;
+  END IF;
+  DELETE FROM public.tracked_bets
+   WHERE pick_id = p_pick_id AND device_id = p_device_id
+     AND (user_id = uid OR user_id IS NULL);
+END $fn$;
+REVOKE ALL ON FUNCTION public.untrack_tracked_bet(text, bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.untrack_tracked_bet(text, bigint)
+    TO postgres, authenticated, service_role;
+
+-- Anon may read only site_public_record and execute only the two loggers
+-- plus save_device_push_token.
 -- An extension function installed in public would trip this. Stop and ask
 -- rather than widening the revoke.
 DO $guard$
@@ -335,7 +409,7 @@ BEGIN
   SELECT string_agg(p.oid::regprocedure::text, ',') INTO bad
     FROM pg_proc p
    WHERE p.pronamespace = 'public'::regnamespace
-     AND p.proname NOT IN ('log_app_error', 'log_app_timings')
+     AND p.proname NOT IN ('log_app_error', 'log_app_timings', 'save_device_push_token')
      AND has_function_privilege('anon', p.oid, 'EXECUTE');
   IF bad IS NOT NULL THEN
     RAISE EXCEPTION 'anon still executes: %', bad;

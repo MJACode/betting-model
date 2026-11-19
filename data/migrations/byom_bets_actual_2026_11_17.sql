@@ -94,7 +94,12 @@ BEGIN
 
   REVOKE ALL ON FUNCTION public.byom_bets(integer, jsonb, text) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION public.byom_bets(integer, jsonb, text)
-    TO anon, authenticated;
+    TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT EXECUTE ON FUNCTION public.byom_bets(integer, jsonb, text)
+      TO anon;
+  END IF;
   -- service_role exists on Supabase, not on a scratch database.
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     GRANT EXECUTE ON FUNCTION public.byom_bets(integer, jsonb, text)

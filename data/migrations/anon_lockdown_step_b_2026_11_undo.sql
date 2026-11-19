@@ -11,7 +11,23 @@
 -- the role list again. No EXCEPTION handler swallows an error.
 -- Undo step B. Keeps tracked_bets.user_id and its index.
 -- Does not give anon back the step A relations.
+--
+-- SEQUENCE GRANTS ARE NOT IN THIS FILE. Anon held rwU on 67
+-- sequences, not on every sequence in public. GRANT ON ALL
+-- would open the other 16. The documented rollback for
+-- sequences, and for any grant this file does not name, is:
+--   python -m scripts.restore_acl_from_snapshot --label pre_step_a_20261118
+-- which reads ops.acl_snapshot taken before step A.
 BEGIN;
+-- Inverse of the default-privilege statements in step B.
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+    GRANT ALL ON TABLES TO anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+    GRANT EXECUTE ON FUNCTIONS TO PUBLIC, anon;
+-- The plain grant sweep revokes anon on new tables again.
+-- Run it after this undo if that 2026-09-03 default should stay.
 GRANT SELECT ON public.alt_game_lines TO anon;
 GRANT SELECT ON public.fighters TO anon;
 GRANT SELECT ON public.games TO anon;
@@ -103,10 +119,7 @@ GRANT SELECT ON public.pipeline_log TO anon;
 GRANT SELECT ON public.plays TO anon;
 GRANT SELECT ON public.synced_bets TO anon;
 GRANT DELETE, INSERT, REFERENCES, SELECT, TRIGGER ON public.tracked_bets TO anon, authenticated;
--- rwU (USAGE, SELECT, UPDATE) is what anon held on 67 sequences.
--- GRANT ON ALL is wider than those 67 if 16 sequences had no anon
--- grant. scripts/restore_acl_from_snapshot.py is the exact restore.
-GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO anon;
+DROP FUNCTION IF EXISTS public.untrack_tracked_bet(text, bigint);
 ALTER POLICY "anon read alt_game_lines" ON public.alt_game_lines TO anon, authenticated;
 ALTER POLICY "anon read fighters" ON public.fighters TO anon, authenticated;
 ALTER POLICY "allow anon read" ON public.games TO public;
@@ -156,7 +169,6 @@ ALTER POLICY "anon read live_game_state" ON public.live_game_state TO anon, auth
 ALTER POLICY "anon read latest_live_game_state" ON public.latest_live_game_state TO anon, authenticated;
 ALTER POLICY "allow anon read" ON public.game_weather TO public;
 ALTER POLICY "anon read game_weather" ON public.game_weather TO anon, authenticated;
-ALTER POLICY "service_role_all" ON public.game_weather TO public;
 ALTER POLICY "anon read golf_players" ON public.golf_players TO anon, authenticated;
 ALTER POLICY "anon read golf_rounds" ON public.golf_rounds TO anon, authenticated;
 ALTER POLICY "anon read golf_tournaments" ON public.golf_tournaments TO anon, authenticated;

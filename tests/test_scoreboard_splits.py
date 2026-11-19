@@ -163,4 +163,5 @@ def test_wired_into_the_refresh_pass_and_migrations():
     assert mig.index("add_scoreboard_splits_2026_10_29.sql") < mig.index('"published_pick_units_2026_10_17.sql"')
     sql = (ROOT / "data" / "migrations" / "add_scoreboard_splits_2026_10_29.sql").read_text(encoding="utf-8")
     assert sql.index("RETURN;") < sql.index("CREATE TABLE")
-    assert "GRANT SELECT ON public.scoreboard_splits TO anon, authenticated" in sql
+    assert "GRANT SELECT ON public.scoreboard_splits TO authenticated" in sql
+    assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in sql

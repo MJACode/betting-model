@@ -304,7 +304,8 @@ def test_spec_counts_match_the_baseline():
     assert EXPECTED_ANON_GRANT_ONLY == 20
     assert EXPECTED_ANON_EXECUTABLE == 82
     assert EXPECTED_ANON_SEQUENCES == 67
-    assert ANON_KEEP_FUNCTIONS == {"log_app_error", "log_app_timings"}
+    assert ANON_KEEP_FUNCTIONS == {
+        "log_app_error", "log_app_timings", "save_device_push_token"}
 
 
 def test_steps_a_and_b_on_scratch_postgres():
@@ -361,6 +362,10 @@ def test_steps_a_and_b_on_scratch_postgres():
         assert not ok and "42501" in err
         ok, err = _can(dsn, "anon", "SELECT public.feedback_unread_count('d');")
         assert not ok
+        ok, err = _can(
+            dsn, "anon",
+            "SELECT public.save_device_push_token('t','device-1','ios',false,'n');")
+        assert ok, err
         ok, _ = _can(dsn, "authenticated", "SELECT 1 FROM picks;")
         assert ok
         ok, _ = _can(dsn, "authenticated", "SELECT 1 FROM nba_player_game_log;")
@@ -455,19 +460,41 @@ def test_steps_a_and_b_on_scratch_postgres():
         assert not ok
         ok, err = _can(dsn, "anon", "DELETE FROM tracked_bets;")
         assert not ok
-        # Legacy null owner: the worker still sees it, the API does not.
+        # Legacy null owner: the worker still sees it, the API select does not.
+        # untrack_tracked_bet deletes it when no other account used the device.
         _psql(dsn, "INSERT INTO tracked_bets (device_id, pick_id, user_id) "
-                  "VALUES ('legacy', 9, NULL);")
-        assert "legacy" in _psql(
-            dsn, "SELECT device_id FROM tracked_bets WHERE device_id = 'legacy';")
+                  "VALUES ('legacy-device', 9, NULL);")
+        assert "legacy-device" in _psql(
+            dsn, "SELECT device_id FROM tracked_bets WHERE device_id = 'legacy-device';")
         hidden = _psql(dsn, f"""
           BEGIN;
           SELECT set_config('request.jwt.claims', '{{"sub": "{X}"}}', true);
           SET LOCAL ROLE authenticated;
-          SELECT count(*) FROM tracked_bets WHERE device_id = 'legacy';
+          SELECT count(*) FROM tracked_bets WHERE device_id = 'legacy-device';
           ROLLBACK;
         """)
         assert hidden.strip().endswith("0")
+        ok, err = _can(
+            dsn, "authenticated",
+            "SELECT public.untrack_tracked_bet('legacy-device', 9);",
+            claims='{"sub": "%s"}' % X, commit=True)
+        assert ok, err
+        assert "0" in _psql(
+            dsn, "SELECT count(*) FROM tracked_bets WHERE device_id = 'legacy-device';")
+        _psql(dsn, """
+          CREATE TABLE public.app_timings (device_id text, user_id uuid);
+          INSERT INTO public.app_timings (device_id, user_id)
+          VALUES ('other-device', '%s');
+          INSERT INTO public.tracked_bets (device_id, pick_id, user_id)
+          VALUES ('other-device', 11, NULL);
+        """ % Y)
+        ok, err = _can(
+            dsn, "authenticated",
+            "SELECT public.untrack_tracked_bet('other-device', 11);",
+            claims='{"sub": "%s"}' % X, commit=True)
+        assert ok, err
+        assert "1" in _psql(
+            dsn, "SELECT count(*) FROM tracked_bets WHERE device_id = 'other-device';")
         _psql(dsn, f"DELETE FROM auth.users WHERE id = '{X}';")
         assert "0" in _psql(
             dsn, f"SELECT count(*) FROM tracked_bets WHERE user_id = '{X}';")
@@ -490,3 +517,94 @@ def test_steps_a_and_b_on_scratch_postgres():
             dsn,
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name = 'tracked_bets' AND column_name = 'user_id';")
+
+
+def test_worker_migrations_do_not_reopen_anon():
+    """A refresh pass re-runs every ACTIVE_MIGRATIONS file. After step A
+    those files must not GRANT anon again, or step B's guard aborts."""
+    combined = re.compile(r"\bGRANT\b[^;]*\bTO\s+anon\s*,\s*authenticated\b", re.I)
+    for name in ACTIVE_MIGRATIONS:
+        lines = (MIGRATIONS / name).read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines, 1):
+            if line.strip().startswith("--"):
+                continue
+            assert combined.search(line) is None, f"{name}:{i}"
+            if re.search(r"\bTO\s+anon\b", line) and "authenticated" not in line:
+                window = "\n".join(lines[max(0, i - 8):i])
+                if not re.search(r"\bGRANT\b", line) and not re.search(r"\bGRANT\b", window):
+                    continue
+                assert "public.picks" in window or "public.picks" in line, (
+                    f"{name}:{i} {line.strip()}")
+
+    if not pg_bin("psql"):
+        pytest.skip("psql is not installed")
+    import psycopg2
+    with scratch_cluster("lockdown-mig-") as dsn:
+        _psql(dsn, """
+          CREATE ROLE anon NOLOGIN;
+          CREATE TABLE public.picks (id int);
+          CREATE TABLE public.games (id int);
+          REVOKE ALL ON public.picks FROM PUBLIC, anon;
+          REVOKE ALL ON public.games FROM PUBLIC, anon;
+        """)
+        _psql(dsn, """
+          DO $t$
+          BEGIN
+            IF to_regclass('public.picks') IS NULL
+               OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+              GRANT SELECT ON public.games TO anon;
+            END IF;
+          END $t$;
+        """)
+        ok, err = _can(dsn, "anon", "SELECT 1 FROM public.games;")
+        assert not ok and "42501" in err
+        conn = psycopg2.connect(dsn)
+        try:
+            for name in ACTIVE_MIGRATIONS:
+                sql = (MIGRATIONS / name).read_text(encoding="utf-8")
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SET LOCAL lock_timeout = '3s'")
+                        cur.execute(sql)
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+        finally:
+            conn.close()
+        ok, err = _can(dsn, "anon", "SELECT 1 FROM public.picks;")
+        assert not ok and "42501" in err
+        ok, err = _can(dsn, "anon", "SELECT 1 FROM public.games;")
+        assert not ok and "42501" in err
+
+
+def test_retired_sync_writes_config_retired_models():
+    from config import RETIRED_MODELS
+    from data.threshold_sync import _sync_retired_models
+
+    class Conn:
+        def __init__(self):
+            self.rows = []
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+            return self
+
+        def executemany(self, sql, rows):
+            self.rows = list(rows)
+
+        def fetchone(self):
+            return ("site_retired_models",)
+
+    conn = Conn()
+    _sync_retired_models(conn)
+    assert "DELETE FROM public.site_retired_models" in conn.sql
+    assert {row[0] for row in conn.rows} == set(RETIRED_MODELS)
+
+
+def test_signed_in_hooks_refetch_when_auth_changes():
+    root = ROOT / "mobile" / "src" / "hooks"
+    for name in ("useActionThresholds.ts", "useModelClvPedigree.ts",
+                 "usePreferredBooks.ts"):
+        src = (root / name).read_text(encoding="utf-8")
+        assert "signedIn" in src, name
+        assert "[authReady, signedIn]" in src, name

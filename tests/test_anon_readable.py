@@ -104,7 +104,7 @@ def test_the_view_base_tables_are_granted_but_never_read_directly():
     for rel in VIEW_BASE_TABLES:
         assert rel not in app, f"{rel} is read directly now; move it to AUTHENTICATED_READABLE"
         assert rel not in all_readable(), rel
-        assert f'ON public."{rel}" TO authenticated' in plan, rel
+        assert f'ON public."{rel}" TO anon, authenticated' in plan, rel
         with pytest.raises(ValueError):
             lock_down_sql(rel)
     for view in ("v_latest_odds_all_books", "v_latest_prop_odds_all_books",
@@ -126,6 +126,33 @@ def test_notification_tables_are_never_granted_to_anon():
         assert set(AUTHENTICATED_WRITABLE[rel]) == {"INSERT", "UPDATE"}
         assert f'ON public."{rel}" TO authenticated' in plan
         assert f'ON public."{rel}" TO anon' not in plan
+
+
+def test_the_plain_sweep_keeps_todays_anon_grants():
+    """A merge must not make the next --apply the lockdown.
+
+    The catalog revoke lives behind --lockdown-b, and that flag refuses
+    until tracked_bets.user_id exists and the anon policies are gone.
+    """
+    from scripts.apply_anon_grants import _step_b_applied
+
+    plan = " | ".join(_plan())
+    assert 'ON public."picks" TO anon, authenticated' in plan
+    assert 'ON public."games" TO anon, authenticated' in plan
+    src = Path(__file__).parent.parent.joinpath(
+        "scripts", "apply_anon_grants.py").read_text(encoding="utf-8")
+    stray = src.index("Stray anon grants")
+    assert "if args.lockdown_b:" in src[:stray]
+    assert "REVOKE ALL ON TABLE" in src[stray:stray + 900]
+
+    class NoColumn:
+        def execute(self, sql, params=None):
+            return self
+
+        def fetchone(self):
+            return None
+
+    assert _step_b_applied(NoColumn()) is False
 
 
 def test_subscriptions_stays_authenticated_only():
@@ -193,9 +220,10 @@ def test_every_declared_relation_is_granted_exactly_once():
     plan = " | ".join(_plan())
     for rel in ANON_READABLE:
         assert f'ON public."{rel}" TO anon, authenticated' in plan, rel
+    # The plain sweep keeps today's anon grants. Step B, not this plan,
+    # is what takes anon off the app surface.
     for rel in AUTHENTICATED_READABLE:
-        assert f'ON public."{rel}" TO authenticated' in plan, rel
-        assert f'ON public."{rel}" TO anon, authenticated' not in plan, rel
+        assert f'ON public."{rel}" TO anon, authenticated' in plan, rel
     for rel in AUTHENTICATED_ONLY:
         assert f'ON public."{rel}" TO authenticated' in plan, rel
         assert f'ON public."{rel}" TO anon' not in plan, rel

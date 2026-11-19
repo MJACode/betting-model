@@ -105,7 +105,11 @@ BEGIN
       FROM graded
       GROUP BY model_id
     $v$;
-    GRANT SELECT ON public.v_model_full_outcome_record TO anon, authenticated;
+    GRANT SELECT ON public.v_model_full_outcome_record TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT SELECT ON public.v_model_full_outcome_record TO anon;
+    END IF;
     RAISE NOTICE 'v_model_full_outcome_record now reads mv_scored_pick_outcomes at the decision price';
   END IF;
 

@@ -175,7 +175,9 @@ def test_public_is_revoked_before_anon_is_granted():
         revoke = CODE.index(f"REVOKE ALL ON FUNCTION {fn}")
         grant = CODE.index(f"GRANT EXECUTE ON FUNCTION {fn}")
         assert revoke < grant, sport
-        assert "TO anon, authenticated" in CODE[grant:grant + 200], sport
+        window = CODE[grant:grant + 500]
+        assert "TO authenticated" in window, sport
+        assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in window, sport
 
 
 def test_the_rpcs_are_declared_anon_callable():
