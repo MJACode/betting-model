@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, three NCAAF totals placed after kickoff read in-play on Model Health; NCAAF pre-game picks refused in the last 10 minutes before the feed's listed start (#1484) |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Profit Simulation: a Units / Dollars switch for that tab only (dollars per unit, default 100, in the original's dollar format); published and read back 99 of 99 |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, the last bets with no closing price: closed at the last price before the first play (8 more priced, rule v2); 16 left: 13 with no price anywhere after the bet and 3 NCAAF totals placed after kickoff (#1484) |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Profit Simulation tab: the bankroll simulator from another chat ported to the ops dashboard in units, its math checked equal to the original on four settings |

@@ -3205,7 +3205,11 @@ def _drop_pregame_after_cutoff(conn: DBConnection, picks: list[dict]) -> list[di
         gid = p.get("game_id")
         raw = cutoffs.get(gid) if gid else None
         start = _parse_cutoff(raw)
-        if start is None or not _game_started(raw, now=now):
+        # A sport whose listed start can come after the real one is closed
+        # early (config.PREGAME_START_BUFFER_MIN, NCAAF: #1484).
+        buffer = timedelta(minutes=config.PREGAME_START_BUFFER_MIN.get(
+            (gid or "").split("_", 1)[0], 0))
+        if start is None or not _game_started(raw, now=now + buffer):
             kept.append(p)
             continue
         minutes = (now - start).total_seconds() / 60.0
@@ -3213,6 +3217,7 @@ def _drop_pregame_after_cutoff(conn: DBConnection, picks: list[dict]) -> list[di
             game_id=gid,
             model=p.get("model_id"),
             minutes_after_start=round(minutes, 4),
+            buffer_min=buffer.total_seconds() / 60.0,
         ).warning("pregame pick rejected: at or past the pregame cutoff")
     return kept
 

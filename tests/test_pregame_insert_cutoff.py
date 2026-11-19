@@ -356,3 +356,24 @@ def test_the_scorer_loop_skips_a_passed_cutoff_and_scores_the_rest(monkeypatch):
     after = next(i for i, ev in enumerate(conn.events)
                  if ev[0] == "built" and ev[1] == "NHL_AFTER")
     assert reset < after
+
+
+def test_an_ncaaf_row_inside_the_buffer_before_the_listed_start_is_rejected(clock, warnings):
+    """#1484: the feed listed NCAAF starts 1.8-6.4 minutes after the real
+    kickoff, and three totals were bet after it. NCAAF closes 10 minutes before
+    the listed start; another sport at the same moment is still inserted."""
+    gid = "NCAAF_2026-11-17_eastern-michigan_western-michigan"
+    cutoff = NOW + timedelta(minutes=4)                 # listed start, 4 minutes away
+    conn = _Conn([(gid, cutoff.isoformat()), ("G1", cutoff.isoformat())])
+    _insert_picks(conn, [_row(game_id=gid, model_id="ncaaf_over_under", sport="NCAAF"), _row()])
+    assert [r["game_id"] for r in conn.inserted] == ["G1"]
+    got = _rejected(warnings)
+    assert len(got) == 1 and got[0]["extra"]["game_id"] == gid
+    assert got[0]["extra"]["buffer_min"] == 10
+
+
+def test_an_ncaaf_row_before_the_buffer_is_inserted(clock, warnings):
+    gid = "NCAAF_2026-11-17_eastern-michigan_western-michigan"
+    conn = _Conn([(gid, (NOW + timedelta(minutes=11)).isoformat())])
+    _insert_picks(conn, [_row(game_id=gid, model_id="ncaaf_over_under", sport="NCAAF")])
+    assert len(conn.inserted) == 1 and _rejected(warnings) == []
