@@ -502,10 +502,34 @@ def test_steps_a_and_b_on_scratch_postgres():
             "SELECT public.clear_my_tracked_bets('legacy-device');",
             claims='{"sub": "%s"}' % X, commit=True)
         assert ok, err
-        assert "0" in _psql(
-            dsn, "SELECT count(*) FROM tracked_bets WHERE device_id = 'legacy-device';")
-        assert "1" in _psql(
-            dsn, "SELECT count(*) FROM tracked_bets WHERE device_id = 'other-device';")
+        assert _psql(
+            dsn, "SELECT count(*) FROM tracked_bets WHERE device_id = 'legacy-device';"
+        ).strip() == "0"
+        assert _psql(
+            dsn, "SELECT count(*) FROM tracked_bets WHERE device_id = 'other-device';"
+        ).strip() == "1"
+        # Same device, another account has used it. The caller's row goes.
+        # The legacy NULL row stays: it has no owner who can remove it.
+        _psql(dsn, f"""
+          INSERT INTO public.app_timings (device_id, user_id)
+          VALUES ('shared-device1', '{Y}');
+          INSERT INTO public.tracked_bets (device_id, pick_id, user_id) VALUES
+            ('shared-device1', 20, NULL),
+            ('shared-device1', 21, '{X}');
+        """)
+        ok, err = _can(
+            dsn, "authenticated",
+            "SELECT public.clear_my_tracked_bets('shared-device1');",
+            claims='{"sub": "%s"}' % X, commit=True)
+        assert ok, err
+        assert _psql(dsn, """
+          SELECT count(*) FROM tracked_bets
+           WHERE device_id = 'shared-device1' AND user_id IS NULL
+        """).strip() == "1"
+        assert _psql(dsn, f"""
+          SELECT count(*) FROM tracked_bets
+           WHERE device_id = 'shared-device1' AND user_id = '{X}'
+        """).strip() == "0"
         _psql(dsn, f"DELETE FROM auth.users WHERE id = '{X}';")
         assert "0" in _psql(
             dsn, f"SELECT count(*) FROM tracked_bets WHERE user_id = '{X}';")

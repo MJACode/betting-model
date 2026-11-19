@@ -439,6 +439,23 @@ COMMIT;
 """
 
 
+# Both tracked-bet functions use this. A second copy is how they drift.
+_OTHER_OWNER_CHECK = """
+  IF to_regclass('public.app_timings') IS NOT NULL THEN
+    EXECUTE
+      'SELECT EXISTS (SELECT 1 FROM public.app_timings'
+      || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
+      INTO other_owner USING p_device_id, uid;
+  END IF;
+  IF NOT other_owner AND to_regclass('public.feedback_threads') IS NOT NULL THEN
+    EXECUTE
+      'SELECT EXISTS (SELECT 1 FROM public.feedback_threads'
+      || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
+      INTO other_owner USING p_device_id, uid;
+  END IF;
+"""
+
+
 def step_b_sql() -> str:
     return f"""{HEADER}
 -- Step B. Everything else off anon, plus tracked_bets owner policies.
@@ -547,19 +564,7 @@ BEGIN
   IF p_device_id IS NULL OR p_device_id !~ '^[A-Za-z0-9-]{{8,64}}$' THEN
     RAISE EXCEPTION 'untrack_tracked_bet: bad device id' USING ERRCODE = '22023';
   END IF;
-  IF to_regclass('public.app_timings') IS NOT NULL THEN
-    EXECUTE
-      'SELECT EXISTS (SELECT 1 FROM public.app_timings'
-      || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
-      INTO other_owner USING p_device_id, uid;
-  END IF;
-  IF NOT other_owner AND to_regclass('public.feedback_threads') IS NOT NULL THEN
-    EXECUTE
-      'SELECT EXISTS (SELECT 1 FROM public.feedback_threads'
-      || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
-      INTO other_owner USING p_device_id, uid;
-  END IF;
-  IF other_owner THEN
+{_OTHER_OWNER_CHECK}  IF other_owner THEN
     DELETE FROM public.tracked_bets
      WHERE pick_id = p_pick_id AND device_id = p_device_id AND user_id = uid;
     RETURN;
@@ -589,19 +594,7 @@ BEGIN
   IF p_device_id IS NULL OR p_device_id !~ '^[A-Za-z0-9-]{{8,64}}$' THEN
     RAISE EXCEPTION 'clear_my_tracked_bets: bad device id' USING ERRCODE = '22023';
   END IF;
-  IF to_regclass('public.app_timings') IS NOT NULL THEN
-    EXECUTE
-      'SELECT EXISTS (SELECT 1 FROM public.app_timings'
-      || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
-      INTO other_owner USING p_device_id, uid;
-  END IF;
-  IF NOT other_owner AND to_regclass('public.feedback_threads') IS NOT NULL THEN
-    EXECUTE
-      'SELECT EXISTS (SELECT 1 FROM public.feedback_threads'
-      || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
-      INTO other_owner USING p_device_id, uid;
-  END IF;
-  IF other_owner THEN
+{_OTHER_OWNER_CHECK}  IF other_owner THEN
     DELETE FROM public.tracked_bets
      WHERE device_id = p_device_id AND user_id = uid;
     RETURN;

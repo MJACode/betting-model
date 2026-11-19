@@ -363,6 +363,7 @@ BEGIN
   IF p_device_id IS NULL OR p_device_id !~ '^[A-Za-z0-9-]{8,64}$' THEN
     RAISE EXCEPTION 'untrack_tracked_bet: bad device id' USING ERRCODE = '22023';
   END IF;
+
   IF to_regclass('public.app_timings') IS NOT NULL THEN
     EXECUTE
       'SELECT EXISTS (SELECT 1 FROM public.app_timings'
@@ -405,6 +406,7 @@ BEGIN
   IF p_device_id IS NULL OR p_device_id !~ '^[A-Za-z0-9-]{8,64}$' THEN
     RAISE EXCEPTION 'clear_my_tracked_bets: bad device id' USING ERRCODE = '22023';
   END IF;
+
   IF to_regclass('public.app_timings') IS NOT NULL THEN
     EXECUTE
       'SELECT EXISTS (SELECT 1 FROM public.app_timings'
