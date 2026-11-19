@@ -113,14 +113,18 @@ REVOKE ALL ON public.tracked_bets FROM anon;
 
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;
 GRANT USAGE ON SEQUENCE public.tracked_bets_id_seq TO authenticated;
--- New objects from postgres must not arrive open. Tables repeat the
--- 2026-09-03 sweep. Sequences and PUBLIC function execute are new here.
+-- New objects from postgres must not arrive open. Tables and the anon
+-- function grant are per-schema. PUBLIC EXECUTE is the built-in default.
+-- A per-schema REVOKE cannot take that away, so the PUBLIC revoke is global
+-- (defaclnamespace 0).
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
     REVOKE ALL ON TABLES FROM anon;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
     REVOKE ALL ON SEQUENCES FROM anon;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-    REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon;
+    REVOKE EXECUTE ON FUNCTIONS FROM anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres
+    REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 ALTER POLICY "anon read alt_game_lines" ON public.alt_game_lines TO authenticated;
 ALTER POLICY "anon read fighters" ON public.fighters TO authenticated;

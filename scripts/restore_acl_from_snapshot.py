@@ -58,8 +58,21 @@ def parse_acl(items: list[str] | None) -> dict[str, set[str]]:
 
 
 def acl_type_for_relkind(relkind: str) -> str:
-    """acldefault type character. Sequences differ. Everything else is a table."""
-    return "S" if relkind == "S" else "r"
+    """acldefault type character.
+
+    pg_class.relkind 'S' is a sequence. acldefault uses lowercase 's' for
+    that. Uppercase 'S' is a foreign server, whose default is only USAGE.
+    A sequence's default is rwU. Everything else here is a table.
+    """
+    return "s" if relkind == "S" else "r"
+
+
+def acldefault_type(objtype: str) -> str:
+    """Map a pg_default_acl type onto acldefault's character.
+
+    defaclobjtype 'S' is a sequence. acldefault('S') is a foreign server.
+    """
+    return "s" if objtype == "S" else objtype
 
 
 def expand_null_acl(cur, acl, typ: str, owner_oid: int):
@@ -102,15 +115,29 @@ def column_statements(object_name: str, snapshot: list[str] | None,
     return _diff(target, snapshot, live, column=column)
 
 
+def _split_defacl(object_name: str) -> tuple[str, str, bool]:
+    """role, defaclobjtype, global.
+
+    `postgres:f` is the public schema. `postgres:f:global` is
+    defaclnamespace 0. The global entry is what can take PUBLIC EXECUTE
+    off new functions. A per-schema entry cannot.
+    """
+    parts = object_name.split(":")
+    role = parts[0] if parts else ""
+    objtype = parts[1] if len(parts) > 1 else ""
+    return role, objtype, len(parts) > 2 and parts[2] == "global"
+
+
 def default_statements(object_name: str, snapshot: list[str] | None,
-                       live: list[str] | None) -> list[str]:
-    role, _, objtype = object_name.partition(":")
+                       live: list[str] | None, *, global_scope: bool = False) -> list[str]:
+    role, objtype, marked = _split_defacl(object_name)
     target = DEFACL_TARGET.get(objtype)
     if not role or not target:
         return []
+    schema = "" if (global_scope or marked) else " IN SCHEMA public"
     prefix = (
         "ALTER DEFAULT PRIVILEGES FOR ROLE "
-        f"{_quote_role(role)} IN SCHEMA public"
+        f"{_quote_role(role)}{schema}"
     )
     lines = []
     for verb, role_name, letters in _changes(snapshot, live):
@@ -222,22 +249,31 @@ def _live_acl(cur, kind: str, object_name: str):
             return None
         return (row[0], None, "c", row[1])
     if kind == "defacl":
-        role, _, objtype = object_name.partition(":")
+        role, objtype, global_scope = _split_defacl(object_name)
         owner = _owner_oid(cur, role)
         if owner is None or objtype not in DEFACL_TARGET:
             return None
-        cur.execute(
-            "SELECT d.defaclacl::text[] FROM pg_default_acl d "
-            "JOIN pg_namespace n ON n.oid = d.defaclnamespace "
-            "WHERE n.nspname = 'public' AND d.defaclrole = %s "
-            "AND d.defaclobjtype = %s",
-            (owner, objtype),
-        )
+        if global_scope:
+            cur.execute(
+                "SELECT d.defaclacl::text[] FROM pg_default_acl d "
+                "WHERE d.defaclnamespace = 0 AND d.defaclrole = %s "
+                "AND d.defaclobjtype = %s",
+                (owner, objtype),
+            )
+        else:
+            cur.execute(
+                "SELECT d.defaclacl::text[] FROM pg_default_acl d "
+                "JOIN pg_namespace n ON n.oid = d.defaclnamespace "
+                "WHERE n.nspname = 'public' AND d.defaclrole = %s "
+                "AND d.defaclobjtype = %s",
+                (owner, objtype),
+            )
         row = cur.fetchone()
-        # No row means the built-in default. NULL here is that default,
-        # not an empty grant list.
-        acl = None if row is None else row[0]
-        return (acl, None, objtype, owner)
+        # No per-schema (or global) row means nothing is added on top of
+        # the built-in default. That is an empty list, not acldefault().
+        # A stored NULL ACL is still expanded by the caller.
+        acl = [] if row is None else row[0]
+        return (acl, None, acldefault_type(objtype), owner)
     return None
 
 

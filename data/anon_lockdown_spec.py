@@ -470,14 +470,18 @@ BEGIN;
 {_revoke_rels(STEP_B_RELATIONS + STEP_B_HYGIENE)}
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;
 GRANT USAGE ON SEQUENCE public.tracked_bets_id_seq TO authenticated;
--- New objects from postgres must not arrive open. Tables repeat the
--- 2026-09-03 sweep. Sequences and PUBLIC function execute are new here.
+-- New objects from postgres must not arrive open. Tables and the anon
+-- function grant are per-schema. PUBLIC EXECUTE is the built-in default.
+-- A per-schema REVOKE cannot take that away, so the PUBLIC revoke is global
+-- (defaclnamespace 0).
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
     REVOKE ALL ON TABLES FROM anon;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
     REVOKE ALL ON SEQUENCES FROM anon;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-    REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon;
+    REVOKE EXECUTE ON FUNCTIONS FROM anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres
+    REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 {_alter_policies(STEP_B_POLICIES, "authenticated")}
 {_functions(STEP_B_STATS_FUNCTIONS + STEP_B_DEVICE_FUNCTIONS)}
@@ -679,7 +683,9 @@ def undo_b_sql() -> str:
              "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public\n",
              "    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO anon;\n",
              "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public\n",
-             "    GRANT EXECUTE ON FUNCTIONS TO PUBLIC, anon;\n",
+             "    GRANT EXECUTE ON FUNCTIONS TO anon;\n",
+             "ALTER DEFAULT PRIVILEGES FOR ROLE postgres\n",
+             "    GRANT EXECUTE ON FUNCTIONS TO PUBLIC;\n",
              "-- The plain grant sweep revokes anon on new tables again.\n",
              "-- Run it after this undo if that 2026-09-03 default should stay.\n"]
     for name in STEP_B_RELATIONS + STEP_B_HYGIENE:

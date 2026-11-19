@@ -111,6 +111,70 @@ def test_a_null_snapshot_acl_keeps_the_owners_execute():
     assert "GRANT EXECUTE ON FUNCTION public.f() TO PUBLIC" in text
 
 
+def test_a_null_sequence_acl_keeps_select_and_update():
+    """acldefault('S') is a foreign server (USAGE only). Sequences are 's'."""
+    import psycopg2
+    import pytest
+
+    from scripts.restore_acl_from_snapshot import build_statements
+    from tests._pg import pg_bin, scratch_cluster
+
+    if not pg_bin("psql"):
+        pytest.skip("psql is not installed")
+    with scratch_cluster("aclseq-") as dsn:
+        conn = psycopg2.connect(dsn)
+        cur = conn.cursor()
+        cur.execute("CREATE ROLE anon NOLOGIN")
+        cur.execute("CREATE SEQUENCE public.s")
+        cur.execute(
+            "CREATE SCHEMA IF NOT EXISTS ops; "
+            "CREATE TABLE ops.acl_snapshot ("
+            " taken_at timestamptz NOT NULL DEFAULT now(),"
+            " label text NOT NULL, kind text NOT NULL,"
+            " object text NOT NULL, detail jsonb NOT NULL)")
+        cur.execute(
+            "INSERT INTO ops.acl_snapshot (label, kind, object, detail) "
+            "VALUES ('pre', 'relacl', 'public.s', '{\"acl\": null}'::jsonb)")
+        cur.execute("REVOKE ALL ON SEQUENCE public.s FROM anon")
+        conn.commit()
+        lines = build_statements(cur, "pre")
+        text = "\n".join(lines)
+        conn.close()
+    assert "REVOKE" not in text
+    assert 'FROM "postgres"' not in text
+
+
+def test_a_missing_defacl_row_is_an_empty_list():
+    """No pg_default_acl row means nothing extra, not acldefault()."""
+    import psycopg2
+    import pytest
+
+    from scripts.restore_acl_from_snapshot import build_statements
+    from tests._pg import pg_bin, scratch_cluster
+
+    if not pg_bin("psql"):
+        pytest.skip("psql is not installed")
+    with scratch_cluster("acldef-") as dsn:
+        conn = psycopg2.connect(dsn)
+        cur = conn.cursor()
+        cur.execute(
+            "CREATE SCHEMA IF NOT EXISTS ops; "
+            "CREATE TABLE ops.acl_snapshot ("
+            " taken_at timestamptz NOT NULL DEFAULT now(),"
+            " label text NOT NULL, kind text NOT NULL,"
+            " object text NOT NULL, detail jsonb NOT NULL)")
+        cur.execute(
+            "INSERT INTO ops.acl_snapshot (label, kind, object, detail) "
+            "VALUES ('pre', 'defacl', 'postgres:r', "
+            """ '{"acl": ["anon=r/postgres"]}'::jsonb)""")
+        conn.commit()
+        lines = build_statements(cur, "pre")
+        text = "\n".join(lines)
+        conn.close()
+    assert 'GRANT SELECT ON TABLES TO "anon"' in text
+    assert "REVOKE" not in text
+
+
 def test_dry_run_refuses_without_a_dsn():
     from scripts.restore_acl_from_snapshot import main
     assert main(["--label", "pre_step_a_20261118"]) == 2

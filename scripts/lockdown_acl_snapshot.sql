@@ -57,7 +57,11 @@ SELECT 'pre_step_a_20261118', 'policy',
  WHERE schemaname = 'public'
 UNION ALL
 SELECT 'pre_step_a_20261118', 'defacl',
-       pg_get_userbyid(d.defaclrole) || ':' || d.defaclobjtype,
-       jsonb_build_object('acl', d.defaclacl::text[])
+       pg_get_userbyid(d.defaclrole) || ':' || d.defaclobjtype
+         || CASE WHEN d.defaclnamespace = 0 THEN ':global' ELSE '' END,
+       jsonb_build_object(
+           'acl', d.defaclacl::text[],
+           'global', d.defaclnamespace = 0)
   FROM pg_default_acl d
- WHERE d.defaclnamespace = 'public'::regnamespace;
+ WHERE d.defaclnamespace = 'public'::regnamespace
+    OR d.defaclnamespace = 0;

@@ -25,7 +25,9 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
     GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO anon;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-    GRANT EXECUTE ON FUNCTIONS TO PUBLIC, anon;
+    GRANT EXECUTE ON FUNCTIONS TO anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres
+    GRANT EXECUTE ON FUNCTIONS TO PUBLIC;
 -- The plain grant sweep revokes anon on new tables again.
 -- Run it after this undo if that 2026-09-03 default should stay.
 GRANT SELECT ON public.alt_game_lines TO anon;

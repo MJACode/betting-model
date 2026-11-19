@@ -362,6 +362,12 @@ def test_steps_a_and_b_on_scratch_postgres():
         assert not ok and "42501" in err
         ok, err = _can(dsn, "anon", "SELECT public.feedback_unread_count('d');")
         assert not ok
+        # A function created after step B must not be executable by anon.
+        # The per-schema PUBLIC revoke does not do this. The global one does.
+        _psql(dsn, "CREATE FUNCTION public.fresh_after_b() RETURNS int "
+                  "LANGUAGE sql AS $$ SELECT 1 $$;")
+        ok, err = _can(dsn, "anon", "SELECT public.fresh_after_b();")
+        assert not ok and "42501" in err
         ok, err = _can(
             dsn, "anon",
             "SELECT public.save_device_push_token('t','device-1','ios',false,'n');")
@@ -541,6 +547,10 @@ def test_steps_a_and_b_on_scratch_postgres():
 
         # Undo B, then A.
         _psql_file(dsn, files["undo_b"])
+        _psql(dsn, "CREATE FUNCTION public.fresh_after_undo() RETURNS int "
+                  "LANGUAGE sql AS $$ SELECT 1 $$;")
+        ok, err = _can(dsn, "anon", "SELECT public.fresh_after_undo();")
+        assert ok, err
         ok, _ = _can(dsn, "anon", "SELECT 1 FROM games;")
         assert ok
         ok, err = _can(dsn, "anon", "SELECT 1 FROM picks;")
