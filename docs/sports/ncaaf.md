@@ -458,9 +458,10 @@ Michigan Under 52.5 (2026-11-17), 1-2 for -1.34 units. So the pick insert
 (`models/scorer._drop_pregame_after_cutoff`) refuses an NCAAF pre-game row from
 10 minutes before the listed start (`config.PREGAME_START_BUFFER_MIN`). 4 of the
 115 published NCAAF pre-game bets were placed inside that window, 3 of them after
-kickoff. The three stay in the record as written; Model Health shows them as
-in-play (mike: *"should be moved to live bets"*), so they carry no pre-game
-closing value. The in-play loop's first stored state is no start signal: it
+kickoff. Model Health showed them as in-play (mike: *"should be moved to
+live bets"*), and they were then VOIDED out of the record (mike, 2026-11-19:
+*"yes come out of the record on those bets"*; worker job 1478685,
+`scripts/void_picks.py` with both opt-ins, the grade kept in `condition_note`). The in-play loop's first stored state is no start signal: it
 landed 1 to 10 minutes after kickoff on these games.
 
 ### Data / conventions (load-bearing)

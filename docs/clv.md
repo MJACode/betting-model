@@ -307,7 +307,8 @@ same-book column measures, so it is not used. mike: *"leave the 13 missing blank
 (mike, 2026-11-19: the three NCAAF totals *"should be moved to live bets"*).
 `v_model_health_bets` reads any bet placed at or after its game's first play
 (`game_first_play`) as `in_play`, whatever model wrote it, so it is out of the
-pre-game closing-line figures. The published record is unchanged: its views
-count an in-play bet only from an in-play model posted to a live channel, so
-setting `is_live` on these rows would take them out of the record.
+pre-game closing-line figures. Setting `is_live` on the pick rows would not
+move them into a live record (the record counts an in-play bet only from an
+in-play model posted to a live channel); mike chose to take the three out of
+the record instead, and they were voided the same day (`docs/sports/ncaaf.md`).
 
