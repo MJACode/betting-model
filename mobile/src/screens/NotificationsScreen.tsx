@@ -5,6 +5,7 @@ import React, { useCallback, useLayoutEffect, useMemo } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ErrorBanner } from '@/components/ErrorState';
 import { readAuthUserId } from '@/hooks/useAuth';
 import { openPushRoute } from '@/hooks/usePushDeepLink';
@@ -126,6 +127,7 @@ export function NotificationsScreen() {
           >
             <Text style={styles.emptyLink}>Notification settings</Text>
           </Pressable>
+          <BetslipBarSpacer />
         </View>
       ) : (
         <SectionList
@@ -135,6 +137,7 @@ export function NotificationsScreen() {
           refreshControl={
             <RefreshControl refreshing={inbox.loading} onRefresh={() => void inbox.refresh()} tintColor={colors.tint} />
           }
+          ListFooterComponent={<BetslipBarSpacer />}
           renderSectionHeader={({ section }) => (
             <Text style={styles.section}>{section.title}</Text>
           )}
@@ -214,6 +217,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
+    minHeight: 44,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
   },
