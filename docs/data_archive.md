@@ -340,7 +340,7 @@ Each kept row is the opener or the close of its proposition. A rung of an altern
 
 | Move | Blocked by | What unblocks it |
 |---|---|---|
-| Prop repeats | moved 11-16 and 11-17; the 2026-11-18 audit then found the app's "At pick" price (#1458) and research replays (below) | refused in the tool since 2026-11-18 until the app fix (#1458) is live |
+| Prop repeats | moved 11-16 and 11-17; the 2026-11-18 audit then found the app's "At pick" price (#1458) and research replays (below) | refused in the tool since 2026-11-18. The app fix (#1460) is live but covers only games up to 2026-11-12 (`PROP_ARCHIVED_THROUGH`), so a later move must move that date in the same change |
 | Game-odds repeats | The 2026-11-18 audit, below: the app's line history for past picks, the first-half CLV close, the NCAAB spread and moneyline builds, the MLB market-movement feature, the paid in-play buyers, the NFL cache import, and research scripts that rebuild fetches or measure price age | those readers read the archive too (the one history reader, section 3c); the buyers and importers take a ledger |
 | Older than 90 days, both tables | Teams board (the ±1.5 run line close is not the only `spreads` row of a game); CLV's same-line close; BYOM's lock candidates; `v_nhl_player_prop_odds`; `team_period_results`; the app's line charts | the opener/close table keyed with the line (section 3b), and those readers moved to it |
 
@@ -442,9 +442,10 @@ python scripts/archive_rows.py status
 
 **`odds` primary key rebuilt, 2026-11-19** (`REINDEX INDEX CONCURRENTLY`, 02:33:05 to 02:41:03 ET, 478 s; #1345).
 - **Only the primary key.** The dashboard's disk speed allowance ("Disk IO balance") read 8%. The runbook rebuilds only the index with a firm size estimate when it is under 50%.
+  - **That 8% is not today's figure.** Read from the chart's own data after the run, the headline is the lowest daily point of the last 7 days. It is 11-17, the day of the props index rebuild. The daily points for 11-18 and 11-19 both read 99%, the latter after this rebuild. So the headline stays at 8% until 11-17 leaves the window, and the next run reads the latest daily point instead.
 - **Result:** `odds_pkey` went from 1.86 to 1.26 GB. All the table's indexes went from 10.58 to 9.98 GB, freeing 0.60 GB, as estimated. Database plus write-ahead log went from 80.90 to 80.30 GB. All 5 indexes are valid.
-- **Checks:** before the run, no other lock, no vacuum, no transaction over 60 s and no broken index. During it, the worker's refresh steps ran on schedule and wrote to `odds`, and the failure alerter sent no alerts. There were 0 app errors and 0 app reads, so the app side was not tested.
-- **Not done:** the other four indexes (`idx_odds_book_snap` 6.67, `idx_odds_date` 0.88, `idx_odds_game` 0.86, `idx_odds_source_inplay` 0.30 GB). Their gain is not known: the size estimate overstates non-unique indexes 1.7 to 6.7 times. They can run on a night when the allowance reads 50% or more.
+- **Checks:** before the run, no other lock, no vacuum, no transaction over 60 s and no broken index. During it, the worker's refresh steps ran on schedule and the failure alerter sent no alerts. 139 rows reached `odds` during the rebuild (IDs 90,460,314 to 90,460,452, 136 NFL and 3 NCAAB), read back by the rebuilt primary key. There were 0 app errors and 0 app reads, so the app side was not tested.
+- **Not done:** the other four indexes (`idx_odds_book_snap` 6.67, `idx_odds_date` 0.88, `idx_odds_game` 0.86, `idx_odds_source_inplay` 0.30 GB). Their gain is not known: the size estimate overstates non-unique indexes 1.7 to 6.7 times. They can run on a night when the chart's latest daily point reads 50% or more (#1478).
 
 **How to run it again:**
 - **The client must match the database extension exactly.** The extension is 1.5.2, and that is the highest version Supabase offers. The PostgreSQL apt repository the image uses (PGDG) has 1.5.3, which refuses to run: "program 'pg_repack 1.5.3' does not match database library 'pg_repack 1.5.2'". `scripts/pg_repack_helper.sh` builds 1.5.2 from the upstream source tag when apt has no exact match.
