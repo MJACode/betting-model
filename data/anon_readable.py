@@ -34,9 +34,10 @@ import re
 # which has to interpolate a table name it is sometimes handed at runtime.
 _IDENT = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 
-# Readable by anon AND authenticated -- the board, the odds, the public record.
-# Nothing here is user-scoped; anon is how the app reads before sign-in.
-ANON_READABLE: tuple[str, ...] = (
+# Readable by a signed-in user. Anon lost these in the 2026-11 lockdown
+# (data/migrations/anon_lockdown_step_a_2026_11.sql and step B). The apply
+# script grants this list to authenticated only.
+AUTHENTICATED_READABLE: tuple[str, ...] = (
     # ── tables ──────────────────────────────────────────────────────────────
     # device_push_tokens is not here. The app does not .from() it. The write
     # is save_device_push_token(), and there is no SELECT policy on purpose.
@@ -180,7 +181,13 @@ ANON_READABLE: tuple[str, ...] = (
     "v_public_track_record_daily",
 )
 
-# In ANON_READABLE, and not yet named by a mobile `.from()`. The stale-entry
+# The only relation anon may read after steps A and B. Granted by
+# site_public_record_2026_11.sql. The website record row is the caller.
+ANON_READABLE: tuple[str, ...] = (
+    "site_public_record",
+)
+
+# In AUTHENTICATED_READABLE, and not yet named by a mobile `.from()`. The stale-entry
 # test subtracts this tuple and fails if anything else is granted unread.
 # byom_prop_facts is granted and the app does not .from() it yet.
 # byom_game_facts left this list when the NBA builder started reading it.
@@ -271,6 +278,17 @@ ANON_WRITABLE: dict[str, tuple[str, ...]] = {
 # INSERT+UPDATE+DELETE, and the surplus was inert only because no policy backed
 # it -- one lock, exactly the state game_weather was in.
 
+# Writes the signed-in app still makes after anon is locked out.
+# SELECT is a grant, not a write verb. UPDATE is not granted: the app
+# inserts and deletes, and a cross-user update has no policy.
+AUTHENTICATED_WRITABLE: dict[str, tuple[str, ...]] = {
+    "tracked_bets": ("INSERT", "DELETE"),
+    # Inbox rows and sport mutes (notification_inbox_2026_11_19.sql).
+    # Authenticated only. The sweep revokes every anon write regardless.
+    "notification_inbox": ("INSERT", "UPDATE"),
+    "notification_sport_prefs": ("INSERT", "UPDATE"),
+}
+
 WRITE_VERBS: tuple[str, ...] = ("INSERT", "UPDATE", "DELETE", "TRUNCATE")
 
 
@@ -281,8 +299,8 @@ def write_verbs_for(rel: str) -> tuple[str, ...]:
 
 
 def all_readable() -> tuple[str, ...]:
-    """Every relation the app may read, either role."""
-    return ANON_READABLE + AUTHENTICATED_ONLY
+    """Every relation the signed-in app may read."""
+    return AUTHENTICATED_READABLE + AUTHENTICATED_ONLY
 
 
 # Read by the app only THROUGH a security_invoker view, never named in a
@@ -764,7 +782,7 @@ def lock_down(conn, table: str) -> tuple[str, ...]:
 # list would have revoked EXECUTE on eight functions the app reaches through a
 # ternary and broken the NBA, WNBA, NCAAF and NFL stats screens -- silently.
 # tests/test_anon_readable.py resolves both forms.
-RPC_ANON_CALLABLE: tuple[str, ...] = (
+_RPC_SURFACE: tuple[str, ...] = (
     # per-sport stats, selected by ternary as well as by literal
     "player_recent_games_mlb",
     "player_recent_games_nba",
@@ -870,6 +888,48 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "_jsonb_text_array",
 )
 
+# What the plain grant sweep still gives anon. The lockdown SQL is what
+# takes anon off this list. A routine --apply must not use the shorter
+# list below, or the next sweep is the lockdown.
+RPC_SWEEP_ANON: tuple[str, ...] = _RPC_SURFACE
+
+# Anon after the lockdown: crash and timing logs, plus the push opt-out.
+# save_device_push_token stays callable without a session so turning
+# notifications off still reaches the server. The SQL keeps that grant.
+RPC_ANON_CALLABLE: tuple[str, ...] = (
+    "log_app_error",
+    "log_app_timings",
+    "save_device_push_token",
+)
+
+# Granted to authenticated and service_role. PUBLIC and anon are revoked.
+# Includes the helpers the invoker RPCs call (clv_*, published_pick_*,
+# byom_line_move) and the picks trigger, which Postgres does not check
+# EXECUTE on when it fires.
+RPC_AUTHENTICATED_CALLABLE: tuple[str, ...] = tuple(
+    name for name in _RPC_SURFACE if name not in RPC_ANON_CALLABLE
+) + (
+    "byom_leg_label",
+    "byom_legs",
+    "byom_line_move",
+    "byom_player_names",
+    "byom_risk_units",
+    "byom_team_division",
+    "byom_win_units",
+    "clv_american_decimal",
+    "clv_american_implied",
+    "clv_game_market",
+    "clv_label_book",
+    "clv_market_edge",
+    "clv_power_fair",
+    "clv_prop_key",
+    "clv_same_book",
+    "published_pick_stake",
+    "published_pick_unit_profit",
+    "published_pick_unit_risked",
+    "log_picks_changes",
+)
+
 # Functions that exist and are deliberately NOT callable by anon/authenticated.
 # Listed so the revoke is a decision on the record rather than a side effect.
 RPC_REVOKE: tuple[str, ...] = (
@@ -889,13 +949,10 @@ RPC_REVOKE: tuple[str, ...] = (
     "refresh_team_stats_board",
 )
 
-# LEFT ALONE, deliberately: log_picks_changes(). It returns `trigger`, so
-# PostgREST will not expose it and Postgres does not check EXECUTE when a
-# trigger fires -- revoking gains nothing and risks the picks_log audit trail
-# that made this week's deletes recoverable. An asymmetric bet with no upside.
-RPC_LEFT_ALONE: tuple[str, ...] = (
-    "log_picks_changes",
-)
+# log_picks_changes moved to RPC_AUTHENTICATED_CALLABLE in the lockdown.
+# It returns trigger, so a firing trigger does not check EXECUTE. Anon and
+# PUBLIC still lose EXECUTE so the function cannot be called over PostgREST.
+RPC_LEFT_ALONE: tuple[str, ...] = ()
 
 # `my_access` is called by mobile/src/lib/discord.ts and DOES NOT EXIST in
 # production -- it is defined only in
@@ -920,6 +977,11 @@ RPC_MISSING_IN_PROD: tuple[str, ...] = (
 # applies it and turns sign-in on. Do not add these names to RPC_ANON_CALLABLE.
 # delete_my_account / delete_my_login: data/migrations/delete_my_account_2026_10_24.sql.
 RPC_AFTER_SIGN_IN: tuple[str, ...] = (
+    # Created by anon_lockdown_step_b. The app falls back to a direct
+    # DELETE until that migration is applied, so the sweep must not
+    # GRANT a function that is not there yet.
+    "untrack_tracked_bet",
+    "clear_my_tracked_bets",
     "byom_save_model",
     "byom_list_models",
     "byom_delete_model",

@@ -54,6 +54,8 @@ def test_the_migration_is_not_registered_and_not_anon_granted():
         assert table not in WORKER_ONLY_TABLES
         assert table not in MAY_BE_UNAPPLIED
     assert RPC_AFTER_SIGN_IN == (
+        "untrack_tracked_bet",
+        "clear_my_tracked_bets",
         "byom_save_model",
         "byom_list_models",
         "byom_delete_model",

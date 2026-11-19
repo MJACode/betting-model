@@ -58,7 +58,11 @@ BEGIN
          AND NOT (p.model_id = 'mlb_over_under' AND p.game_date < '2026-07-05')
        GROUP BY p.sport, p.model_id
     $v$;
-    GRANT SELECT ON public.v_public_track_record TO anon, authenticated;
+    GRANT SELECT ON public.v_public_track_record TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT SELECT ON public.v_public_track_record TO anon;
+    END IF;
     RAISE NOTICE 'v_public_track_record CLV pedigree is no-vig only';
   END IF;
 END $$;

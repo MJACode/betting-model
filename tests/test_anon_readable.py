@@ -17,7 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data.anon_readable import ANON_READABLE, AUTHENTICATED_ONLY, all_readable
+from data.anon_readable import (
+    ANON_READABLE, AUTHENTICATED_ONLY, AUTHENTICATED_READABLE, all_readable)
 from scripts.apply_anon_grants import REVOKE_DEFAULT, _plan
 
 MOBILE_SRC = Path(__file__).parent.parent / "mobile" / "src"
@@ -70,12 +71,16 @@ def test_the_manifest_does_not_grow_stale_entries():
     app = _app_relations()
     # NHL display views stay on the frozenset above. The facts tables are
     # the module tuple. Either list alone would flag the other as unused.
+    from scripts.apply_anon_grants import MAY_BE_UNAPPLIED
+
     ahead = set(AHEAD_OF_THE_APP) | set(DECLARED_AHEAD)
-    assert ahead <= set(ANON_READABLE)
+    assert ahead <= set(AUTHENTICATED_READABLE)
     assert ahead.isdisjoint(app), (
         f"{sorted(ahead & app)} is read by the app now. Remove it from "
         f"AHEAD_OF_THE_APP.")
-    unused = sorted(set(all_readable()) - app - ahead)
+    # Hand migrations that are not applied yet (the notification inbox) are
+    # not a stale grant. A .from() in mobile/src still has to be declared.
+    unused = sorted(set(all_readable()) - app - ahead - set(MAY_BE_UNAPPLIED))
     assert not unused, (
         f"{unused} are granted but nothing in mobile/src reads them. Remove "
         f"them from data/anon_readable.py, or add the query that needs them.")
@@ -97,14 +102,61 @@ def test_the_view_base_tables_are_granted_but_never_read_directly():
     app = _app_relations()
     plan = " | ".join(_plan())
     for rel in VIEW_BASE_TABLES:
-        assert rel not in app, f"{rel} is read directly now; move it to ANON_READABLE"
+        assert rel not in app, f"{rel} is read directly now; move it to AUTHENTICATED_READABLE"
         assert rel not in all_readable(), rel
         assert f'ON public."{rel}" TO anon, authenticated' in plan, rel
         with pytest.raises(ValueError):
             lock_down_sql(rel)
     for view in ("v_latest_odds_all_books", "v_latest_prop_odds_all_books",
                  "v_latest_dk_odds", "v_live_game_state_latest"):
-        assert view in ANON_READABLE, f"{view} is what the app reads; it must stay declared"
+        assert view in AUTHENTICATED_READABLE, (
+            f"{view} is what the app reads; it must stay declared")
+
+
+def test_notification_tables_are_never_granted_to_anon():
+    """Draft PR 1473. Signed-in only. The lockdown must not hand anon a grant."""
+    from data.anon_readable import ANON_WRITABLE, AUTHENTICATED_WRITABLE
+
+    plan = " | ".join(_plan())
+    for rel in ("notification_inbox", "notification_sport_prefs"):
+        assert rel in AUTHENTICATED_ONLY
+        assert rel not in ANON_READABLE
+        assert rel not in AUTHENTICATED_READABLE
+        assert set(ANON_WRITABLE[rel]) == {"INSERT", "UPDATE"}
+        assert set(AUTHENTICATED_WRITABLE[rel]) == {"INSERT", "UPDATE"}
+        assert f'ON public."{rel}" TO authenticated' in plan
+        assert f'ON public."{rel}" TO anon' not in plan
+
+
+def test_the_plain_sweep_keeps_todays_anon_grants():
+    """A merge must not make the next --apply the lockdown.
+
+    The catalog revoke lives behind --lockdown-b, and that flag refuses
+    until tracked_bets.user_id exists and the anon policies are gone.
+    """
+    from scripts.apply_anon_grants import _step_b_applied
+
+    plan = " | ".join(_plan())
+    assert 'ON public."picks" TO anon, authenticated' in plan
+    assert 'ON public."games" TO anon, authenticated' in plan
+    src = Path(__file__).parent.parent.joinpath(
+        "scripts", "apply_anon_grants.py").read_text(encoding="utf-8")
+    stray = src.index("Stray anon grants")
+    assert "if args.lockdown_b:" in src[:stray]
+    assert "_revoke_lockdown_strays(conn)" in src[stray:stray + 400]
+    body = src[src.index("def _revoke_lockdown_strays"):src.index("def _step_b_applied")]
+    assert "REVOKE ALL ON TABLE" in body
+    assert "REVOKE ALL ON SEQUENCE" in body
+    assert "REVOKE ALL ON FUNCTION" in body
+
+    class NoColumn:
+        def execute(self, sql, params=None):
+            return self
+
+        def fetchone(self):
+            return None
+
+    assert _step_b_applied(NoColumn()) is False
 
 
 def test_subscriptions_stays_authenticated_only():
@@ -172,6 +224,10 @@ def test_every_declared_relation_is_granted_exactly_once():
     plan = " | ".join(_plan())
     for rel in ANON_READABLE:
         assert f'ON public."{rel}" TO anon, authenticated' in plan, rel
+    # The plain sweep keeps today's anon grants. Step B, not this plan,
+    # is what takes anon off the app surface.
+    for rel in AUTHENTICATED_READABLE:
+        assert f'ON public."{rel}" TO anon, authenticated' in plan, rel
     for rel in AUTHENTICATED_ONLY:
         assert f'ON public."{rel}" TO authenticated' in plan, rel
         assert f'ON public."{rel}" TO anon' not in plan, rel
@@ -218,9 +274,11 @@ def test_the_dynamic_rpc_resolver_actually_finds_the_ternary_names():
 
 def test_every_rpc_the_app_calls_is_declared_or_known_absent():
     from data.anon_readable import (
-        RPC_AFTER_SIGN_IN, RPC_ANON_CALLABLE, RPC_MISSING_IN_PROD)
+        RPC_AFTER_SIGN_IN, RPC_ANON_CALLABLE, RPC_AUTHENTICATED_CALLABLE,
+        RPC_MISSING_IN_PROD)
 
-    known = set(RPC_ANON_CALLABLE) | set(RPC_MISSING_IN_PROD) | set(RPC_AFTER_SIGN_IN)
+    known = (set(RPC_ANON_CALLABLE) | set(RPC_AUTHENTICATED_CALLABLE)
+             | set(RPC_MISSING_IN_PROD) | set(RPC_AFTER_SIGN_IN))
     undeclared = sorted(_app_rpcs() - known)
     assert not undeclared, (
         f"mobile/src calls {undeclared}, which data/anon_readable.py does not "
@@ -235,18 +293,18 @@ def test_the_transitive_helper_is_granted():
     """custom_model_picks and custom_model_backtest are SECURITY INVOKER and
     both call _jsonb_text_array, so the CALLER needs EXECUTE on it even though
     the app never names it. Measured in pg_proc, not assumed."""
-    from data.anon_readable import RPC_ANON_CALLABLE
+    from data.anon_readable import RPC_AUTHENTICATED_CALLABLE
 
-    assert "_jsonb_text_array" in RPC_ANON_CALLABLE
+    assert "_jsonb_text_array" in RPC_AUTHENTICATED_CALLABLE
 
 
 def test_the_trigger_function_is_not_swept():
     """log_picks_changes returns `trigger`: PostgREST will not expose it and
     Postgres does not check EXECUTE when a trigger fires. Revoking gains
     nothing and risks the picks_log audit trail."""
-    from data.anon_readable import RPC_LEFT_ALONE, RPC_REVOKE
+    from data.anon_readable import RPC_AUTHENTICATED_CALLABLE, RPC_REVOKE
 
-    assert "log_picks_changes" in RPC_LEFT_ALONE
+    assert "log_picks_changes" in RPC_AUTHENTICATED_CALLABLE
     assert "log_picks_changes" not in RPC_REVOKE
 
 
@@ -286,11 +344,10 @@ def test_the_function_revoke_names_public_as_well_as_the_roles():
     assert full, (
         f"no revoke targets anon at all; found {targets!r}. The RPC_REVOKE "
         f"path must remove the named roles as well as PUBLIC.")
-    for roles in full:
-        assert "PUBLIC" in roles, (
-            f"revoke targets {roles!r} -- without PUBLIC the function stays "
-            f"callable and the run still reports success")
-        assert "authenticated" in roles, roles
+    assert "PUBLIC, anon, authenticated" in full, full
+    # The lockdown path takes PUBLIC and anon off functions the signed-in
+    # app still calls. authenticated is not in that revoke.
+    assert "PUBLIC, anon" in full, full
 
 
 def test_public_is_stripped_from_every_declared_callable_before_it_is_granted():
@@ -647,12 +704,15 @@ def test_every_declared_write_verb_has_a_call_site_that_needs_it():
                     "lib/feedback.ts")
     )
 
-    from data.anon_readable import ANON_WRITABLE
+    from data.anon_readable import ANON_WRITABLE, AUTHENTICATED_WRITABLE
 
-    # tracked_bets: added and removed, never edited
+    # tracked_bets: added and removed, never edited. The name stays in
+    # ANON_WRITABLE so the inbox PR's write map merges. The sweep still
+    # revokes every anon write; authenticated keeps INSERT and DELETE only.
     assert "from('tracked_bets').insert(" in src.replace("\n", "")
-    assert "UPDATE" not in ANON_WRITABLE["tracked_bets"], (
-        "tracked_bets declares UPDATE, but the app only inserts and deletes")
+    assert set(ANON_WRITABLE["tracked_bets"]) == {"INSERT", "DELETE"}
+    assert "UPDATE" not in AUTHENTICATED_WRITABLE["tracked_bets"]
+    assert set(AUTHENTICATED_WRITABLE["tracked_bets"]) == {"INSERT", "DELETE"}
 
     # device_push_tokens: the hook calls the definer function and does not
     # upsert. Putting the table back in ANON_WRITABLE would not make the

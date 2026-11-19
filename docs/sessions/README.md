@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, anon-key lockdown prepared (steps A and B, website record view, tracked_bets owner policies); not applied |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, A failed push opt-out no longer blocks delete_my_login; the success copy requires the login delete |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Account delete opts the push token out before the login is deleted; a missing auth user stores a null user |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Inbox review: token owner is auth.uid(), relink on sign-in, idempotent inbox rows |

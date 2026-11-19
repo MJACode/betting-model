@@ -162,16 +162,17 @@ def test_it_is_read_with_the_callers_rights_and_granted_select_only():
     code = _code(SQL)
     assert "CREATE OR REPLACE VIEW public.open_picks\n    WITH (security_invoker = on) AS" in code
     assert "REVOKE ALL ON public.open_picks FROM anon, authenticated" in code
-    assert "GRANT SELECT ON public.open_picks TO anon, authenticated" in code
+    assert "GRANT SELECT ON public.open_picks TO authenticated" in code
+    assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in code
     assert code.index("REVOKE ALL ON public.open_picks") < code.index("GRANT SELECT ON public.open_picks")
 
 
 def test_it_is_declared_readable():
-    from data.anon_readable import ANON_READABLE
+    from data.anon_readable import AUTHENTICATED_READABLE
 
     from tests.test_anon_readable import AHEAD_OF_THE_APP
 
-    assert "open_picks" in ANON_READABLE
+    assert "open_picks" in AUTHENTICATED_READABLE
     # Read by Claude chats, not by a mobile `.from()`.
     assert "open_picks" in AHEAD_OF_THE_APP
 

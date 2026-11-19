@@ -12,7 +12,7 @@ import subprocess
 
 import pytest
 
-from data.anon_readable import ANON_READABLE
+from data.anon_readable import AUTHENTICATED_READABLE
 from data.ingestors import injury_ingestor as ing
 from data.view_migrations import ACTIVE_MIGRATIONS
 from tests._node import tsx_cmd
@@ -102,7 +102,7 @@ def test_an_empty_pull_writes_nothing():
 
 def test_the_table_is_migrated_and_readable_by_the_app():
     assert MIGRATION in ACTIVE_MIGRATIONS
-    assert "injury_status_current" in ANON_READABLE
+    assert "injury_status_current" in AUTHENTICATED_READABLE
     sql = io.open(os.path.join(ROOT, "data", "migrations", MIGRATION), encoding="utf-8").read()
     assert "to_regclass('public.injury_status_current') IS NULL" in sql
     assert "REVOKE ALL ON public.injury_status_current FROM anon, authenticated" in sql

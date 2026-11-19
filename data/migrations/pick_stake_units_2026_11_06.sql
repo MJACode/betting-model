@@ -177,7 +177,11 @@ BEGIN
       EXECUTE format('CREATE OR REPLACE VIEW public.open_picks AS %s', d);
       ALTER VIEW public.open_picks SET (security_invoker = on);
       REVOKE ALL ON public.open_picks FROM anon, authenticated;
-      GRANT SELECT ON public.open_picks TO anon, authenticated;
+      GRANT SELECT ON public.open_picks TO authenticated;
+      IF to_regclass('public.picks') IS NULL
+         OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+      GRANT SELECT ON public.open_picks TO anon;
+      END IF;
       RAISE NOTICE 'open_picks: stake now reads the pick''s stake_units';
     END IF;
   END IF;

@@ -74,10 +74,10 @@ def test_ncaaf_scoreboard_index_is_hand_applied():
 
 
 def test_the_ncaaf_view_is_declared_and_not_last():
-    from data.anon_readable import ANON_READABLE, VIEW_BASE_TABLES
+    from data.anon_readable import ANON_READABLE, AUTHENTICATED_READABLE, VIEW_BASE_TABLES
 
     migrations = (ROOT / "data" / "view_migrations.py").read_text(encoding="utf-8")
-    assert "v_ncaaf_scoreboard_latest" in ANON_READABLE
+    assert "v_ncaaf_scoreboard_latest" in AUTHENTICATED_READABLE
     assert "ncaaf_live_states" in VIEW_BASE_TABLES
     assert "ncaaf_live_states" not in ANON_READABLE
     added = migrations.index("add_ncaaf_scoreboard_latest_2026_10_28.sql")

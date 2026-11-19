@@ -72,7 +72,8 @@ def test_registered_for_the_worker_and_the_app():
     for s in FUNCS:
         assert f'"player_vs_defense_{s}"' in anon
         assert f"REVOKE ALL ON FUNCTION public.player_vs_defense_{s}{ARGS} FROM PUBLIC" in code
-        assert f"GRANT EXECUTE ON FUNCTION public.player_vs_defense_{s}{ARGS} TO anon, authenticated" in code
+        assert f"GRANT EXECUTE ON FUNCTION public.player_vs_defense_{s}{ARGS} TO authenticated" in code
+    assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in code
 
 
 def test_one_guarded_statement():

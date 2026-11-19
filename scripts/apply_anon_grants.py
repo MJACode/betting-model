@@ -33,18 +33,22 @@ data.threshold_sync generates the threshold SQL from config.py.
 ────────────────────────────────────────────────────────────────────────────
 TWO LIMITS, MEASURED AND STATED RATHER THAN DISCOVERED LATER
 
-ALTER DEFAULT PRIVILEGES is PER GRANTOR ROLE, and `public` tables have TWO
-default-ACL entries handing anon arwdDxtm:
+ALTER DEFAULT PRIVILEGES is PER GRANTOR ROLE. Measured on production
+2026-11-18, read-only, no global (NULL schema) rows:
 
-    grantor postgres        -> anon=arwdDxtm/postgres
-    grantor supabase_admin  -> anon=arwdDxtm/supabase_admin
+    public / postgres       sequences: anon has rwU
+                            functions and tables: postgres and service_role only
+    public / supabase_admin sequences, functions and tables: anon,
+                            authenticated and service_role
+    storage / postgres      and graphql, graphql_public / supabase_admin
+                            also grant anon. Those schemas are not changed.
 
-This changes the `postgres` one, because that is the role everything here
-creates tables as -- the worker and the pollers over DATABASE_URL, and the
-Supabase SQL editor. The `supabase_admin` entry is not touched: altering it
-needs membership in supabase_admin, which `postgres` does not have on a managed
-project. So a table created BY supabase_admin would still arrive open. Nothing
-in this repo creates one.
+Step B revokes the postgres public entries it can. It cannot revoke the
+supabase_admin entries: that needs membership in supabase_admin, which
+postgres does not have. A table that role creates in public arrives open
+to anon. scripts/lockdown_anon_stray_check.sql raises when that happens.
+--lockdown-b revokes the grant when this role owns the object, and the
+same check fails the run when it does not.
 
 SEQUENCES AND FUNCTIONS ARE LEFT ALONE, deliberately and not by oversight. The
 same default privileges also grant anon `rwU` on every new sequence and EXECUTE
@@ -67,10 +71,15 @@ from data.anon_readable import (
     ANON_READABLE,
     API_ROLES,
     AUTHENTICATED_ONLY,
+    AUTHENTICATED_READABLE,
+    AUTHENTICATED_WRITABLE,
     ANON_WRITABLE,
     RPC_ANON_CALLABLE,
+    RPC_AUTHENTICATED_CALLABLE,
+    RPC_SWEEP_ANON,
     RPC_REVOKE,
     VIEW_BASE_TABLES,
+    WRITE_VERBS,
     lock_down,
     closed_tables,
     write_verbs_for,
@@ -153,17 +162,47 @@ def _table_exists(conn, rel: str) -> bool:
         (rel,)).fetchall())
 
 
-def _plan(conn=None) -> list[str]:
+def _relation_exists(conn, rel: str) -> bool:
+    """True when `rel` is a table, view or matview in public."""
+    return bool(conn.execute(
+        "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relname = %s "
+        "AND c.relkind IN ('r', 'v', 'm')",
+        (rel,)).fetchall())
+
+
+def _plan(conn=None, lockdown: bool = False) -> list[str]:
     """Table statements only. Function statements need the database to resolve
     each signature, so they are built in main().
 
-    Pass conn on an apply. A MAY_BE_UNAPPLIED relation that is not in the
-    catalog is left out, because GRANT on a missing name raises.
+    Pass conn on an apply. A missing MAY_BE_UNAPPLIED relation, or
+    site_public_record before its migration, is left out: GRANT on a missing
+    name raises.
+
+    lockdown=False is today's grants: anon and authenticated both read the
+    app surface. That is the plain sweep. lockdown=True is the state after
+    step B: anon keeps ANON_READABLE only. The plain sweep sets that flag
+    only when tracked_bets.user_id exists and no anon policy remains, so a
+    merge does not revoke the live anon key.
     """
     stmts = [REVOKE_DEFAULT]
+    app_role = "authenticated" if lockdown else "anon, authenticated"
+
+    def _skip(rel: str) -> bool:
+        if conn is None:
+            return False
+        if rel in MAY_BE_UNAPPLIED and not _table_exists(conn, rel):
+            return True
+        if rel in ANON_READABLE and not _relation_exists(conn, rel):
+            return True
+        return False
+
+    for rel in AUTHENTICATED_READABLE:
+        if _skip(rel):
+            continue
+        stmts.append(f'GRANT SELECT ON public."{rel}" TO {app_role}')
     for rel in ANON_READABLE:
-        if (conn is not None and rel in MAY_BE_UNAPPLIED
-                and not _table_exists(conn, rel)):
+        if _skip(rel):
             continue
         stmts.append(f'GRANT SELECT ON public."{rel}" TO anon, authenticated')
     for rel in AUTHENTICATED_ONLY:
@@ -173,10 +212,9 @@ def _plan(conn=None) -> list[str]:
         stmts.append(f'GRANT SELECT ON public."{rel}" TO authenticated')
     # The security_invoker views' base tables: the caller reads them too.
     for rel in VIEW_BASE_TABLES:
-        if (conn is not None and rel in MAY_BE_UNAPPLIED
-                and not _table_exists(conn, rel)):
+        if _skip(rel):
             continue
-        stmts.append(f'GRANT SELECT ON public."{rel}" TO anon, authenticated')
+        stmts.append(f'GRANT SELECT ON public."{rel}" TO {app_role}')
     return stmts
 
 
@@ -184,80 +222,294 @@ def _anon_can_read(conn, rel: str) -> bool:
     """False only when the relation exists and anon cannot SELECT it.
 
     A MAY_BE_UNAPPLIED relation that is not in the catalog is not a failure:
-    has_table_privilege on a missing name raises.
+    has_table_privilege on a missing name raises. Views are included: the
+    website record is a view, and relkind 'r' alone would miss it.
     """
-    if not _table_exists(conn, rel):
+    if not _relation_exists(conn, rel):
         return rel in MAY_BE_UNAPPLIED
     return bool(conn.execute(
         "SELECT has_table_privilege('anon', %s, 'SELECT')",
         (f'public."{rel}"',)).fetchone()[0])
 
 
-def _function_plan(conn) -> tuple[list[str], list[str]]:
-    """(statements, skipped names). Resolves every signature from pg_proc."""
+def _function_plan(conn, lockdown: bool = False) -> tuple[list[str], list[str]]:
+    """(statements, skipped names). Resolves every signature from pg_proc.
+
+    The plain sweep grants RPC_SWEEP_ANON to anon. That is today's app.
+    lockdown=True grants only RPC_ANON_CALLABLE and takes PUBLIC and anon
+    off every other declared function. PUBLIC is revoked first: anon is a
+    member of PUBLIC, so a named revoke leaves the function callable.
+    """
     stmts = [REVOKE_DEFAULT_FUNCTIONS]
     skipped: list[str] = []
-    for name in RPC_ANON_CALLABLE:
+    anon_names = RPC_ANON_CALLABLE if lockdown else RPC_SWEEP_ANON
+    for name in anon_names:
         sig = _function_signature(conn, name)
         if sig is None:
             skipped.append(name)
             continue
         for one in sig.split("|"):
-            # PUBLIC OFF FIRST, then the named grant. Postgres grants function
-            # EXECUTE to PUBLIC by default, so most of these carry `=X/postgres`
-            # in their ACL and are callable by any role at all -- including any
-            # role added later. The named grants are what the app actually needs,
-            # so the end state is "PUBLIC holds nothing, anon and authenticated
-            # hold exactly EXECUTE".
-            #
-            # Safe because the grant follows in the same transaction, and the
-            # read-back at the end refuses to commit if anon has lost the call.
-            # Verified before shipping: all 20 functions carrying the PUBLIC
-            # grant already held explicit anon=X and authenticated=X, so PUBLIC
-            # was never the only source for any of them.
             stmts.append(f"REVOKE ALL ON FUNCTION {one} FROM PUBLIC")
             stmts.append(f"GRANT EXECUTE ON FUNCTION {one} TO anon, authenticated")
+    if lockdown:
+        keep = set(RPC_ANON_CALLABLE)
+        for name in RPC_AUTHENTICATED_CALLABLE:
+            if name in keep:
+                continue
+            sig = _function_signature(conn, name)
+            if sig is None:
+                skipped.append(name)
+                continue
+            for one in sig.split("|"):
+                stmts.append(f"REVOKE ALL ON FUNCTION {one} FROM PUBLIC, anon")
+                stmts.append(
+                    "GRANT EXECUTE ON FUNCTION "
+                    f"{one} TO postgres, authenticated, service_role")
     for name in RPC_REVOKE:
         sig = _function_signature(conn, name)
         if sig is None:
             skipped.append(name)
             continue
         for one in sig.split("|"):
-            # PUBLIC FIRST, AND THAT IS NOT COSMETIC. Postgres grants EXECUTE on
-            # a function to PUBLIC by default, and anon is a member of PUBLIC --
-            # so `REVOKE ... FROM anon, authenticated` leaves the function
-            # callable and reports success. Measured 2026-09-04: the first run
-            # of this script revoked has_active_subscription from both named
-            # roles and anon could still execute it, because its ACL carried
-            # `=X/postgres` (empty grantee = PUBLIC). 21 of 28 public functions
-            # carry that grant. data/migrations/add_discord_link_and_whop_
-            # memberships.sql already spelled it `FROM PUBLIC, anon,
-            # authenticated`; this is that lesson, relearned the hard way.
             stmts.append(
                 f"REVOKE ALL ON FUNCTION {one} FROM PUBLIC, anon, authenticated")
     return stmts, skipped
+
+
+def _revoke_or_note(conn, sql: str) -> str | None:
+    """None when the revoke committed to this transaction.
+
+    A table owned by another role raises. The savepoint keeps the rest
+    of the sweep able to run. The stray check then fails the run.
+    """
+    try:
+        conn.execute("SAVEPOINT lockdown_stray")
+        conn.execute(sql)
+        conn.execute("RELEASE SAVEPOINT lockdown_stray")
+        return None
+    except Exception as exc:  # noqa: BLE001
+        conn.execute("ROLLBACK TO SAVEPOINT lockdown_stray")
+        return str(exc).splitlines()[0]
+
+
+def _anon_table_open(conn, oid) -> bool:
+    row = conn.execute(
+        "SELECT has_table_privilege('anon', %s, 'SELECT') "
+        "OR has_table_privilege('anon', %s, 'INSERT') "
+        "OR has_table_privilege('anon', %s, 'UPDATE') "
+        "OR has_table_privilege('anon', %s, 'DELETE')",
+        (oid, oid, oid, oid),
+    ).fetchone()
+    return bool(row and row[0])
+
+
+def _anon_sequence_open(conn, oid) -> bool:
+    row = conn.execute(
+        "SELECT EXISTS ("
+        "  SELECT 1 FROM pg_class c, aclexplode(c.relacl) a "
+        "  WHERE c.oid = %s AND c.relacl IS NOT NULL "
+        "    AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'anon') "
+        "    AND a.privilege_type = 'USAGE')",
+        (oid,),
+    ).fetchone()
+    return bool(row and row[0])
+
+
+def _log_revoke(name: str, owner: str, err: str | None, still: bool, kind: str) -> None:
+    """A REVOKE that only warns still returns success.
+
+    Postgres says "no privileges could be revoked" when this role holds
+    the privilege without grant option and is not the owner. The grant
+    is unchanged. Say so, and name the owner.
+    """
+    if still:
+        extra = f"; {err}" if err else ""
+        logger.error(f"{name}: anon {kind} remains (owner {owner}){extra}")
+    elif err:
+        logger.error(f"{name}: anon {kind} revoke failed: {err}")
+    else:
+        logger.info(f"{name}: revoked anon {kind}")
+
+
+def _public_anon_strays(conn) -> list[str]:
+    """Public objects anon can still use, outside the keep list.
+
+    Same names as scripts/lockdown_anon_stray_check.sql. Each line names
+    the owner, because a revoke this role cannot perform leaves the
+    grant in place. storage, graphql and graphql_public are not in
+    this query.
+    """
+    from data.anon_lockdown_spec import ANON_KEEP_FUNCTIONS, ANON_KEEP_RELATIONS
+    found: list[str] = []
+    rels = conn.execute(
+        "SELECT c.relname, pg_get_userbyid(c.relowner) FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relkind IN ('r','v','m','p','f') "
+        "AND (has_table_privilege('anon', c.oid, 'SELECT') "
+        "  OR has_table_privilege('anon', c.oid, 'INSERT') "
+        "  OR has_table_privilege('anon', c.oid, 'UPDATE') "
+        "  OR has_table_privilege('anon', c.oid, 'DELETE')) "
+        "ORDER BY c.relname"
+    ).fetchall()
+    found.extend(
+        f"table {name} (owner {owner})"
+        for name, owner in rels if name not in ANON_KEEP_RELATIONS)
+    seqs = conn.execute(
+        "SELECT c.relname, pg_get_userbyid(c.relowner) FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relkind = 'S' "
+        "AND c.relacl IS NOT NULL AND EXISTS ("
+        "  SELECT 1 FROM aclexplode(c.relacl) a "
+        "  WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'anon') "
+        "    AND a.privilege_type = 'USAGE') "
+        "ORDER BY c.relname"
+    ).fetchall()
+    found.extend(f"sequence {name} (owner {owner})" for name, owner in seqs)
+    fns = conn.execute(
+        "SELECT p.proname, pg_get_userbyid(p.proowner) FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE n.nspname = 'public' "
+        "AND has_function_privilege('anon', p.oid, 'EXECUTE') "
+        "ORDER BY p.proname"
+    ).fetchall()
+    found.extend(
+        f"function {name} (owner {owner})"
+        for name, owner in fns if name not in ANON_KEEP_FUNCTIONS)
+    return found
+
+
+def _revoke_lockdown_strays(conn) -> list[str]:
+    """Revoke anon on public objects outside the keep list.
+
+    relkind includes partitioned tables (p) and foreign tables (f): the
+    stray check flags both. Returns whatever anon can still use. The
+    caller rolls the transaction back when the list is not empty.
+    """
+    anon_rels = conn.execute(
+        "SELECT c.relname, c.oid, pg_get_userbyid(c.relowner) FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relkind IN ('r','v','m','p','f') "
+        "AND (has_table_privilege('anon', c.oid, 'SELECT') "
+        "  OR has_table_privilege('anon', c.oid, 'INSERT') "
+        "  OR has_table_privilege('anon', c.oid, 'UPDATE') "
+        "  OR has_table_privilege('anon', c.oid, 'DELETE')) "
+        "ORDER BY c.relname"
+    ).fetchall()
+    for rel, oid, owner in anon_rels:
+        if rel in ANON_READABLE:
+            continue
+        err = _revoke_or_note(
+            conn, f'REVOKE ALL ON TABLE public."{rel}" FROM anon')
+        _log_revoke(rel, owner, err, _anon_table_open(conn, oid), "grant")
+    anon_seqs = conn.execute(
+        "SELECT c.relname, c.oid, pg_get_userbyid(c.relowner) FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relkind = 'S' "
+        "AND c.relacl IS NOT NULL AND EXISTS ("
+        "  SELECT 1 FROM aclexplode(c.relacl) a "
+        "  WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'anon') "
+        "    AND a.privilege_type = 'USAGE')"
+    ).fetchall()
+    for rel, oid, owner in anon_seqs:
+        err = _revoke_or_note(
+            conn, f'REVOKE ALL ON SEQUENCE public."{rel}" FROM anon')
+        _log_revoke(
+            rel, owner, err, _anon_sequence_open(conn, oid), "sequence")
+    if _relation_exists(conn, "tracked_bets"):
+        conn.execute(
+            "GRANT USAGE, SELECT ON SEQUENCE public.tracked_bets_id_seq "
+            "TO authenticated")
+    keep_fn = set(RPC_ANON_CALLABLE)
+    stray = conn.execute(
+        "SELECT p.oid::regprocedure::text, p.proname, p.oid, "
+        "pg_get_userbyid(p.proowner) FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE n.nspname = 'public' "
+        "AND has_function_privilege('anon', p.oid, 'EXECUTE')"
+    ).fetchall()
+    for sig, name, oid, owner in stray:
+        if name in keep_fn:
+            continue
+        err = _revoke_or_note(
+            conn, f"REVOKE ALL ON FUNCTION {sig} FROM PUBLIC, anon")
+        still = bool(conn.execute(
+            "SELECT has_function_privilege('anon', %s, 'EXECUTE')",
+            (oid,),
+        ).fetchone()[0])
+        _log_revoke(sig, owner, err, still, "execute")
+    return _public_anon_strays(conn)
+
+
+def _step_b_applied(conn) -> bool:
+    """True when step B has replaced the tracked_bets anon policies.
+
+    user_id existing is not enough on its own: the column is added in the
+    same migration as the policy swap. An anon or PUBLIC policy still on
+    the table means the swap has not happened, and the plain sweep must
+    keep today's grants.
+    """
+    col = conn.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'tracked_bets' "
+        "AND column_name = 'user_id'"
+    ).fetchone()
+    if not col:
+        return False
+    anon_policy = conn.execute(
+        "SELECT 1 FROM pg_policy pol "
+        "JOIN pg_class c ON c.oid = pol.polrelid "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relname = 'tracked_bets' "
+        "AND (pol.polroles = ARRAY[0]::oid[] OR EXISTS ("
+        "  SELECT 1 FROM pg_roles r "
+        "   WHERE r.oid = ANY (pol.polroles) AND r.rolname = 'anon')) "
+        "LIMIT 1"
+    ).fetchone()
+    return anon_policy is None
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--apply", action="store_true",
                     help="actually run it (default is a dry run)")
+    ap.add_argument(
+        "--lockdown-b", action="store_true",
+        help="after step B is applied, revoke anon from every public "
+             "relation, sequence and function outside the keep list. "
+             "Refuses when tracked_bets.user_id is missing or an anon "
+             "policy remains. The plain sweep never does this.")
     args = ap.parse_args()
 
     if not args.apply:
         stmts = _plan()
         logger.info(f"{len(stmts)} statement(s): 1 ALTER DEFAULT PRIVILEGES, "
-                    f"{len(ANON_READABLE)} anon+authenticated grants, "
+                    f"{len(AUTHENTICATED_READABLE)} anon+authenticated grants, "
                     f"{len(AUTHENTICATED_ONLY)} authenticated-only grant(s); plus "
                     f"revoke+RLS on {len(closed_tables())} closed tables, "
                     f"gated on the catalog")
         logger.info(REVOKE_DEFAULT)
+        if args.lockdown_b:
+            logger.info(
+                "--lockdown-b refuses until step B is applied "
+                "(tracked_bets.user_id and no anon policy). "
+                "Nothing executed.")
         logger.info("DRY RUN — nothing executed. Re-run with --apply.")
         return 0
 
     conn = get_connection()
     try:
-        stmts = _plan(conn)
+        lockdown = _step_b_applied(conn)
+        if args.lockdown_b and not lockdown:
+            conn.rollback()
+            logger.error(
+                "refusing --lockdown-b: tracked_bets.user_id is missing "
+                "or an anon policy remains. Apply "
+                "anon_lockdown_step_b_2026_11.sql first.")
+            return 1
+        if lockdown and not args.lockdown_b:
+            logger.info(
+                "step B marker is present; anon grants are not restored")
+        stmts = _plan(conn, lockdown=lockdown)
         absent = [rel for rel in MAY_BE_UNAPPLIED if not _table_exists(conn, rel)]
         if absent:
             logger.warning(
@@ -267,7 +519,7 @@ def main() -> int:
                     f"relations; revoke+RLS on {len(closed_tables())} closed "
                     f"tables, gated on the catalog")
         logger.info(REVOKE_DEFAULT)
-        fn_stmts, skipped = _function_plan(conn)
+        fn_stmts, skipped = _function_plan(conn, lockdown=lockdown)
         if skipped:
             logger.warning(
                 f"skipped (absent from pg_proc, granting would error): {skipped}")
@@ -318,39 +570,82 @@ def main() -> int:
                 "ORDER BY c.relname").fetchall()
         ]
         revoked = 0
+        # The inbox is authenticated-only even before the lockdown. Anon
+        # does not keep those writes. tracked_bets does, until step B.
+        never_anon_write = {"notification_inbox", "notification_sport_prefs"}
         for rel in holders:
-            verbs = write_verbs_for(rel)
-            held = [
-                v for v in verbs
-                if conn.execute(
-                    "SELECT has_table_privilege('anon', %s, %s) "
-                    "OR has_table_privilege('authenticated', %s, %s)",
-                    (f'public."{rel}"', v, f'public."{rel}"', v)).fetchone()[0]
+            anon_allowed = set() if lockdown else set(ANON_WRITABLE.get(rel, ()))
+            if rel in never_anon_write:
+                anon_allowed = set()
+            auth_allowed = set(AUTHENTICATED_WRITABLE.get(rel, ()))
+            if not lockdown:
+                auth_allowed |= set(ANON_WRITABLE.get(rel, ())) - never_anon_write
+            anon_held = [
+                v for v in WRITE_VERBS
+                if v not in anon_allowed and conn.execute(
+                    "SELECT has_table_privilege('anon', %s, %s)",
+                    (f'public."{rel}"', v)).fetchone()[0]
             ]
-            if not held:
-                continue
-            conn.execute(
-                f'REVOKE {", ".join(held)} ON public."{rel}" FROM anon, authenticated')
-            logger.info(f"{rel}: revoked {', '.join(held)}")
-            revoked += 1
+            auth_held = [
+                v for v in WRITE_VERBS
+                if v not in auth_allowed and conn.execute(
+                    "SELECT has_table_privilege('authenticated', %s, %s)",
+                    (f'public."{rel}"', v)).fetchone()[0]
+            ]
+            if anon_held:
+                conn.execute(
+                    f'REVOKE {", ".join(anon_held)} ON public."{rel}" FROM anon')
+                logger.info(f"{rel}: revoked {', '.join(anon_held)} from anon")
+                revoked += 1
+            if auth_held:
+                conn.execute(
+                    f'REVOKE {", ".join(auth_held)} ON public."{rel}" '
+                    f'FROM authenticated')
+                logger.info(
+                    f"{rel}: revoked {', '.join(auth_held)} from authenticated")
+                revoked += 1
+        if args.lockdown_b:
+            # Stray anon grants the step B file did not name. Refused above
+            # unless the marker says step B is already applied.
+            left = _revoke_lockdown_strays(conn)
+            if left:
+                conn.rollback()
+                logger.error(
+                    "anon still holds public grants the sweep could not "
+                    f"revoke: {left}")
+                return 1
         logger.info(f"write verbs revoked on {revoked} of {len(holders)} "
                     f"relation(s) holding one; {len(ANON_WRITABLE)} declared "
                     f"writable keep their declared verbs")
 
         # Verify inside the transaction: the app's read surface must survive.
+        must_read = list(ANON_READABLE)
+        if not lockdown:
+            must_read += list(AUTHENTICATED_READABLE) + list(VIEW_BASE_TABLES)
         missing = [
-            rel for rel in ANON_READABLE
-            if not _anon_can_read(conn, rel)
+            rel for rel in must_read
+            if _relation_exists(conn, rel) and not _anon_can_read(conn, rel)
         ]
         if missing:
             conn.rollback()
             logger.error(f"anon cannot read {missing} — rolled back.")
             return 1
+        if lockdown:
+            still_open = [
+                rel for rel in AUTHENTICATED_READABLE
+                if _relation_exists(conn, rel) and _anon_can_read(conn, rel)
+                and rel not in MAY_BE_UNAPPLIED
+            ]
+            if still_open:
+                conn.rollback()
+                logger.error(f"anon can still read {still_open} — rolled back.")
+                return 1
         # And every RPC it must be able to call. _jsonb_text_array is in here
         # too: it is a transitive dependency of the two SECURITY INVOKER
         # custom-model RPCs, so losing it breaks that screen.
+        anon_rpcs = RPC_ANON_CALLABLE if lockdown else RPC_SWEEP_ANON
         uncallable = [
-            name for name in RPC_ANON_CALLABLE
+            name for name in anon_rpcs
             if (sig := _function_signature(conn, name)) is not None
             and not all(
                 conn.execute("SELECT has_function_privilege('anon', %s, 'EXECUTE')",
@@ -379,8 +674,11 @@ def main() -> int:
             return 1
         # PUBLIC must hold nothing on the declared callables. Read back for the
         # same reason as above: a revoke that did not bite reports success.
+        public_names = (
+            (*RPC_ANON_CALLABLE, *RPC_AUTHENTICATED_CALLABLE)
+            if lockdown else RPC_SWEEP_ANON)
         public_left = [
-            name for name in RPC_ANON_CALLABLE
+            name for name in public_names
             if (sig := _function_signature(conn, name)) is not None
             and any(
                 conn.execute("SELECT has_function_privilege('public', %s, 'EXECUTE')",
@@ -427,15 +725,25 @@ def main() -> int:
         # And nothing in the read surface holds a write verb it was not declared
         # to need. Read back for the same reason as every other revoke here: one
         # that did not bite reports success.
-        surplus = [
-            f"{rel}:{v}"
-            for rel in holders
-            for v in write_verbs_for(rel)
-            if conn.execute(
-                "SELECT has_table_privilege('anon', %s, %s) "
-                "OR has_table_privilege('authenticated', %s, %s)",
-                (f'public."{rel}"', v, f'public."{rel}"', v)).fetchone()[0]
-        ]
+        surplus = []
+        for rel in holders:
+            for v in WRITE_VERBS:
+                anon_has = conn.execute(
+                    "SELECT has_table_privilege('anon', %s, %s)",
+                    (f'public."{rel}"', v)).fetchone()[0]
+                auth_has = conn.execute(
+                    "SELECT has_table_privilege('authenticated', %s, %s)",
+                    (f'public."{rel}"', v)).fetchone()[0]
+                anon_ok = set() if lockdown else set(ANON_WRITABLE.get(rel, ()))
+                if rel in never_anon_write:
+                    anon_ok = set()
+                auth_ok = set(AUTHENTICATED_WRITABLE.get(rel, ()))
+                if not lockdown:
+                    auth_ok |= set(ANON_WRITABLE.get(rel, ())) - never_anon_write
+                if anon_has and v not in anon_ok:
+                    surplus.append(f"anon {rel}:{v}")
+                if auth_has and v not in auth_ok:
+                    surplus.append(f"authenticated {rel}:{v}")
         if surplus:
             conn.rollback()
             logger.error(f"undeclared write privileges survive: {surplus} — "

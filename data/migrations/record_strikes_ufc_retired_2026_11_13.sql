@@ -45,7 +45,11 @@ BEGIN
                         E'\n    AND model_id <> ''ufc_moneyline''::text\n    AND model_id <> ''ufc_total_rounds''::text\n    AND model_id <> ''ufc_method_of_victory''::text\n  GROUP BY ');
     EXECUTE format('CREATE OR REPLACE VIEW public.%I AS %s', v, d);
     EXECUTE format('ALTER VIEW public.%I SET (security_invoker = on)', v);
-    EXECUTE format('GRANT SELECT ON public.%I TO anon, authenticated', v);
+    EXECUTE format('GRANT SELECT ON public.%I TO authenticated', v);
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE format('GRANT SELECT ON public.%I TO anon', v);
+    END IF;
     RAISE NOTICE '%: the retired UFC models struck from the published record', v;
   END LOOP;
 END $mig$;

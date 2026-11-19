@@ -295,7 +295,8 @@ export function usePushNotifications(): PushState & { retry: () => void } {
     // start of an opted-in device. Auth can still be `loading` after that.
     // Re-save when the user id changes, including sign-in after a cold start
     // that registered with no user, and sign-out (auth.uid() is then null,
-    // which unlinks the token).
+    // which unlinks the token). Opt-out does not wait for a session:
+    // save_device_push_token stays callable without one.
     if (!ready) return;
     let seen = '';
     let have = false;

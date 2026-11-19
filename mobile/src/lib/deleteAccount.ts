@@ -115,8 +115,16 @@ export async function wipeLocalAccountData(deviceId: string | null): Promise<Loc
     failure = 'wipe';
   }
   if (!deviceId) return failure;
-  // This install's push-notify rows. The policy already allows the delete.
-  // The public picks table is not this table.
+  // Owner DELETE cannot see a legacy row whose user_id is still null.
+  // clear_my_tracked_bets deletes those when no other account used this
+  // device. Until that function exists, the direct delete is what ships.
+  const rpc = await supabase.rpc('clear_my_tracked_bets', { p_device_id: deviceId });
+  if (!rpc.error) return failure;
+  const code = (rpc.error as { code?: string }).code;
+  if (code !== 'PGRST202' && code !== '42883') {
+    console.warn('[deleteAccount] tracked_bets', rpc.error.message);
+    return 'tracked';
+  }
   const { error } = await supabase.from('tracked_bets').delete().eq('device_id', deviceId);
   if (error) {
     console.warn('[deleteAccount] tracked_bets', error.message);

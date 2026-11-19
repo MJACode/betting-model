@@ -2,7 +2,7 @@
 
 Static site for signalbase-ai.com. Four pages: `/`, `/terms`, `/privacy`, `/support`.
 
-The record row on the landing page is not a stored number. The browser reads the same public view as the app's Record tab, `v_public_track_record`, with the public Supabase anon key, and rolls the rows up the same way `mobile/src/lib/trackRecord.ts` does (retired models left out, picks = wins + losses + pushes, posted-stake `units`). If that request fails or comes back empty, the row stays hidden.
+The record row on the landing page is not a stored number. The browser reads `site_public_record` with the public Supabase anon key. That view is settled, published picks, one row per sport, with retired models already removed and no model id. The page rolls the rows up the same way the app's Record tab does (picks = wins + losses + pushes, posted-stake `units`). If that request fails or comes back empty, the row stays hidden.
 
 `web/src/public-config.json` holds that anon key. It is the public key already shipped in the app (`EXPO_PUBLIC_SUPABASE_ANON_KEY` for project `vvprgnrmzeekokzkrkfu`). It is not a service-role key. The build refuses any key whose JWT role is not `anon`.
 
