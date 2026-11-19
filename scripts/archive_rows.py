@@ -85,7 +85,9 @@ RULES = ("repeat", "old")
 # opens once its reader reads the archive or a kept summary instead.
 # Prop repeats moved on 2026-11-16 and 11-17 (49.5M rows). On 2026-11-18 the
 # app's "At pick" price was found reading them (#1458), and the move was
-# stopped until that fix is live and the prop readers are cleared.
+# stopped. The app fix (#1460) covers only games up to its PROP_ARCHIVED_THROUGH
+# (mobile/src/lib/lineMovementView.ts, 2026-11-12), so a later prop move must
+# move that date in the same change, and the research readers must be cleared.
 ALLOWED: set = set()
 REFUSED = {
     ("player_prop_odds", "repeat"): "the app's \"At pick\" price on past prop picks read the "
