@@ -916,10 +916,7 @@ def apply_view_migrations(conn=None) -> ViewMigrationResult:
                 logger.warning(f"View migration missing on disk: {name}")
                 failed.append((name, "missing on disk"))
                 continue
-            sql = path.read_text(encoding="utf-8")
-            if locked:
-                sql = _without_combined_anon_grants(sql)
-            err = _apply_one(conn, name, sql)
+            err = _apply_one(conn, name, _without_combined_anon_grants(path.read_text(encoding="utf-8")) if locked else path.read_text(encoding="utf-8"))
             if err is None:
                 applied += 1
                 logger.info(f"View migration OK: {name}")

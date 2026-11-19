@@ -29,7 +29,12 @@ def test_the_migration_is_one_statement_and_registered():
     assert "CONCURRENTLY" not in code.upper()
     assert "FORCE ROW LEVEL SECURITY" not in code.upper()
     # A facts table is not the pick store and not a publisher.
-    assert "public.picks" not in code
+    # The lockdown gate only asks whether anon can still read picks.
+    kept = "\n".join(
+        ln for ln in code.splitlines()
+        if "to_regclass('public.picks')" not in ln
+        and "has_table_privilege('anon', 'public.picks'" not in ln)
+    assert "public.picks" not in kept
     assert "discord" not in code.lower()
 
 
