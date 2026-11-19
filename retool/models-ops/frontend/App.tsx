@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './lib/shadcn/tabs'
-import { RefreshCw, Moon, Sun, Layers, SlidersHorizontal, Activity, Database, TrendingUp, HeartPulse, Calculator, type LucideIcon } from 'lucide-react'
+import { RefreshCw, Moon, Sun, Layers, SlidersHorizontal, Activity, Database, TrendingUp, HeartPulse, Calculator, LayoutDashboard, type LucideIcon } from 'lucide-react'
 import ModelsTab from './pages/ModelsTab'
 import { TableSkeleton } from './components/PanelUtils'
 import { ModelNamesProvider } from './components/models/ModelNamesProvider'
@@ -9,7 +9,9 @@ import { BrandLockup } from './components/brand/SignalMark'
 import { useThemeMode } from './hooks/useThemeMode'
 import './appTheme.css'
 
-// Only the Models tab is needed for first paint; the rest load when opened.
+// The Models tab is bundled in; the rest load when opened. Key Metrics opens
+// first, so it loads at once (its own code is small; its data is one call).
+const KeyMetricsTab = lazy(() => import('./pages/exec/KeyMetricsTab'))
 const VolumeTab = lazy(() => import('./pages/VolumeTab'))
 const OpsTab = lazy(() => import('./pages/OpsTab'))
 const DatabaseTab = lazy(() => import('./pages/DatabaseTab'))
@@ -35,6 +37,7 @@ function formatTimestamp(d: Date): string {
 }
 
 const TABS: ReadonlyArray<{ value: string; label: string; icon: LucideIcon }> = [
+  { value: 'exec', label: 'Key Metrics', icon: LayoutDashboard },
   { value: 'models', label: 'Models', icon: Layers },
   { value: 'health', label: 'Model Health', icon: HeartPulse },
   { value: 'volume', label: 'Volume', icon: SlidersHorizontal },
@@ -81,7 +84,7 @@ export default function App() {
     <ViewerProvider>
       <ModelNamesProvider>
         <div className="min-h-screen bg-background text-foreground">
-          <Tabs defaultValue="models" className="w-full">
+          <Tabs defaultValue="exec" className="w-full">
             <header className="sb-header sb-header-top">
               <div className="mx-auto flex h-14 max-w-[1680px] items-center justify-between gap-3 px-4 sm:px-6">
                 <BrandLockup product="Ops" />
@@ -135,6 +138,9 @@ export default function App() {
             </div>
 
             <main className="mx-auto max-w-[1680px] pb-10">
+              <TabsContent value="exec" className={contentClass}>
+                <Suspense fallback={<TabFallback />}><KeyMetricsTab refreshKey={refreshKey} /></Suspense>
+              </TabsContent>
               <TabsContent value="models" className={contentClass}>
                 <ModelsTab refreshKey={refreshKey} />
               </TabsContent>

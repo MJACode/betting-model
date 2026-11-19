@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-export type TabId = 'models' | 'volume' | 'ops' | 'database' | 'picks' | 'health' | 'sim'
+export type TabId = 'exec' | 'models' | 'volume' | 'ops' | 'database' | 'picks' | 'health' | 'sim'
 
 /**
  * Tabs whose layouts can be saved. It matches the tab list the layout
@@ -13,6 +13,7 @@ export const SAVABLE_TABS: ReadonlySet<TabId> = new Set<TabId>(['models', 'volum
 
 /** The heading shown at the top of each tab. */
 export const TAB_META: Record<TabId, { title: string; description: string }> = {
+  exec: { title: 'Key Metrics', description: 'The summary: results in units, beating the closing line, the models and whether the system is running' },
   models: { title: 'Models', description: 'Every model, its state, its settled record and its daily volume' },
   volume: { title: 'Volume', description: 'How many of each pre-game model’s bets get posted' },
   ops: { title: 'Ops', description: 'Feeds, pipeline runs, health checks and audience' },

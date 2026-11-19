@@ -1,17 +1,17 @@
 # Graph Report - betting-model  (2026-11-19)
 
 ## Corpus Check
-- 2706 files · ~4,910,962 words
+- 2710 files · ~4,915,388 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 22 file(s) not represented in the graph (top: (none) 7, .example 3, .css 3)
 
 ## Summary
-- 56584 nodes · 138369 edges · 1548 communities (1196 shown, 352 thin omitted)
-- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 3707 edges (avg confidence: 0.87)
+- 56641 nodes · 138572 edges · 1507 communities (1154 shown, 353 thin omitted)
+- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 3708 edges (avg confidence: 0.87)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `00db92b7`
+- Built from commit: `60697bbe`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -21,24 +21,24 @@
 - Mobile pick cards, market formatting
 - verify_ncaab_ui.ts
 - verify_record_hero.ts
-- unicodedata
+- nfl_prop_feature_engine.py
 - nba_s_shapes.py
 - test_pitcher_stats_asof_invariants.py
-- ncaabw_odds_history.py
+- lineLegs.ts
 - push_notifier.py
 - queries.ts
 - EuroLeague early research rounds
-- PositionVsOpponentCard.tsx
+- scoreboard.ts
 - test_discord_notifier.py
 - test_nba_team_total_luck.py
-- test_x_publisher.py
+- x_publisher.py
 - linesBoard.ts
 - NBA first quarter props search study
 - test_dk_freshness_parse.py
 - test_nba_first_half_total_luck.py
 - Mobile stats board
 - NbaFirstBasketBoard.tsx
-- test_ncaab_paid_calls.py
+- euroleague_period_history.py
 - NBA game two projection model
 - NBA fifth search period shares
 - NBA game model research harness
@@ -56,43 +56,43 @@
 - NBA lineup stints from play-by-play
 - SettingsScreen.tsx
 - NFL in-play executor decision tests
-- ParlayScreen.tsx
+- parlay.ts
 - Live quote staleness, gameday lock
-- ncaabw_total_card.py
+- nba_schedule_refresh.py
 - Job queue, deploy check tests
 - build_nfl_live_leader_artifact.py
 - NFL prop one read per game tests
-- types/index.ts
-- nba_first_half_total_luck_replay.py
+- thresholds.ts
+- nba_total_luck_card.py
 - Calibration watch change tests
 - test_publish_key_identity.py
 - Worker scheduler and catch-up jobs
 - test_multi_book_odds.py
-- PicksHomeScreen.tsx
+- nba_game7_news.py
 - nba_s_starters.py
-- lab.py
-- _lab
+- nba_game2_market.py
+- nba_live_ig2.py
 - Daily pipeline retry decision tests
 - Live book move guard tests
 - datagolf_ingestor.py
-- nhl_live_artifact_grade.py
+- summarise
 - WNBA player availability features and tests
 - _periods
 - NBA game market research lab
-- ncaab_first_half_odds.py
+- nba_box_enrich.py
 - pick_landing.py
 - ncaabw_live_loop.py
 - NFL props model write-ups
 - test_record_correction_post.py
 - nfl_edge_qb_wind.py
-- pick_problems
+- test_monitoring.py
 - One pick per event record tests
 - ncaab_live_ig.py
-- ncaab_total_blend.py
+- ncaab_total_blend_build.py
 - NFL in-play player prop projection tests
 - ast
 - nfl_edge_gameline_rules.py
-- test_live_slate_midnight.py
+- ufc_prop_history.py
 - WNBA prop market card tests
 - test_nfl_scored_rows.py
 - test_byom_official_legs.py
@@ -103,7 +103,7 @@
 - NBA prop cards across models
 - Results recap skipped day retry tests
 - test_tennis_moneyline_card.py
-- nba_prop_model_lab.py
+- freezeLog.ts
 - test_nba_prop_market.py
 - Mobile accessibility audit script
 - test_nba_total_luck.py
@@ -116,28 +116,28 @@
 - Scoring lease and tests
 - test_social_profile.py
 - NBA search shot luck study
-- nhl_shot_events.py
+- nba_game6_alt.py
 - test_ncaabw_total_blend.py
 - pandas
 - euroleague_pregame.py
 - nfl_edge_preregistered_2026.py
-- summarise
+- nba_pregame_window.py
 - NBA first quarter trends study
 - nba_game2_luck.py
 - test_nba_s_starters.py
-- _adapt_sql
+- golf_feature_engine.py
 - Mobile line movement table tests
 - live_calibration.py
 - NBA in-play game-state study
 - NFL live leader gameday loop tests
 - test_nba_live_config.py
 - NBA offline prop placebo tests
-- nba_prop_projection_lab.py
+- math
 - NBA lineup stint derivation tests
 - sqlite3
 - NCAAF live pick notify tests
 - NCAAF alias score mirroring tests
-- ncaab_odds_history.py
+- HealthOverview.tsx
 - gate
 - Backtester summary and go-live gate tests
 - NCAABW ESPN box score tests
@@ -148,27 +148,27 @@
 - nba_prop_market_lab.py
 - nba_props.py
 - test_eggz_picks.py
-- get_connection
+- cfbd_ingestor.py
 - Bovada direct feed tests
 - _announce
 - PanelUtils.tsx
 - NCAAF cross-book opener tests
 - NBA shapes search tests
 - Paused model keeps real verdict tests
-- _get_live_dk_odds
+- nba_stats_ingestor.py
 - pick_problems
 - deriv_rules.py
 - Pregame prices current health tests
 - test_ddl_guard.py
 - nfl_edge_halftime_oos.py
-- run_one
-- refresh_teams
+- test_deploy_checks.py
+- merge_d1
 - NFL extreme props edge study
 - NFL prop settlement edge study
 - NBA results ingestor and settlement tests
 - run_review
 - Standing rules evidence doc
-- view_migrations.py
+- test_refresh_reads_prop_odds_after_the_game_legs_commit
 - Agents contract doc tests
 - ncaab_live_loop.py
 - test_nba_s_shotluck.py
@@ -183,22 +183,22 @@
 - EuroLeague halftime in-play model
 - NCAAB live loop, DraftKings tests
 - NCAAF derivative odds history tests
-- NFL preflight checks, schema splitter
+- nfl_preflight.py
 - NHL shot events parser
-- NCAABW team name resolver
+- ncaabw_odds_history.py
 - NBA luck, build-your-own transaction tests
 - _conditions
-- decide_fight
-- official.py
+- test_ufc_open_moneyline.py
+- game_facts.py
 - clv_close_history.py
 - DraftKings direct feed tests
-- test_byom_nba_props.py
+- _market_for_pick
 - test_ncaaf_feature_engine.py
 - ncaab_moneyline_first_post_card.py
 - Mobile Expo app config
-- _assert_no_link
-- injury_ingestor.py
-- test_ncaab_feed_probe.py
+- weekly_wind_card.py
+- feature_engine.py
+- test_clv_price_taken.py
 - FakeConn
 - Mobile build workflow
 - verify_error_states.ts
@@ -215,14 +215,14 @@
 - time
 - run_pipeline.py
 - NBA game four part one tests
-- FakeConn
+- kalshi_game_ingestor.py
 - morning_disk.py
 - NBA second-game move study tests
-- test_ncaab_espn_box.py
-- _LookConn
+- schema_is_current
+- test_nba_team_total_luck_card.py
 - dk_splits.py
 - live_model/backtest/calibrate.py
-- nba_prop_model_verify.py
+- mlb_prop_market_sweep.py
 - PerformanceScreen.tsx
 - test_pick_lock_survives_settlement.py
 - NBA offline prop search script
@@ -238,19 +238,19 @@
 - NFL live leader state parsing tests
 - Database reconnect wrapper tests
 - NCAAF quarterback stats parsing tests
-- pickle
+- trainer.py
 - In-play scorer locks and guards
-- nhl_market_lab.py
+- ncaaf_live/backtest/train_engine.py
 - _league
 - nba_game4_p2.py
 - nba_ingame_ht1.py
 - NCAAF in-play audit grid scripts
 - nba_s_q1tt.py
-- test_alternate_game_lines.py
+- odds_ingestor.py
 - test_calibration_check_coverage.py
 - test_free_pick_names_the_cheaper_book.py
 - NCAABW ESPN ingestor tests
-- Live game poller, board cache
+- run_cards
 - test_the_prop_purchase_does_not_buy_a_game_only_the_schedule_holds
 - test_byom_prop_facts.py
 - test_ncaaf_fbs_registry.py
@@ -268,10 +268,10 @@
 - Slate concentration guard
 - useFeedback.ts
 - View migration lock handling tests
-- test_record_correction_post.py
+- ncaaf_live/engine/pricing.py
 - Project history and learnings docs
-- test_period_recaps.py
-- test_signal_publish_on_write.py
+- discord_notifier.py
+- tracking/__init__.py
 - Live prop validation workflow
 - Open picks view tests
 - NBA first quarter anchored search
@@ -288,7 +288,7 @@
 - NCAAF teams ingest and refresh tests
 - test_nba_prop_projection.py
 - test_line_clv.py
-- eggz_picks.py
+- ingest_messages
 - Prop odds UTC timestamp tests
 - Local mirror sync tests
 - NBA game harness tests
@@ -297,7 +297,7 @@
 - test_backtest.py
 - DBConnection
 - _signal_field
-- models/__init__.py
+- _get_current_bankroll
 - NHL side models never bet against each other
 - nhl_prop_blocked_shots.py
 - Schedule gate publishing tests
@@ -306,25 +306,25 @@
 - test_nba_team_total_luck_window.py
 - test_social_posts.py
 - nfl_edge_luck_gap.py
-- DataFrame
+- test_odds_call_log_everywhere.py
 - EuroLeague pregame model tests
 - NHL sport runbook
-- test_nhl_moneyline_anchored.py
-- parse_player_rows
+- Conn
+- flow_validate.py
 - parse_summary
-- ncaab_espn_box.py
+- ncaab_espn_ingestor.py
 - CLV Pinnacle mainline backfill tests
 - test_engine.py
 - Context file size budget tests
-- discord_notifier.py
-- nba_espn_box.py
+- test_nfl_lookahead_signals.py
+- flow_eval.py
 - NFL weather Supabase readback tests
 - Player head-to-head migration tests
 - test_pregame_price_age.py
 - Retired models removal tests
 - test_prop_price_pregame_bound.py
 - local_mirror_github.py
-- _capture_clv
+- same_book_clv
 - test_model_artifacts_load.py
 - MLB market features and game gate docs
 - NCAAF sport runbook
@@ -337,17 +337,17 @@
 - Live record start date view tests
 - nba_s_popular.py
 - Score off book line tests
-- json
-- ingestors/ncaab_injury_feed.py
-- pipeline_watch.py
+- euroleague_odds_history.py
+- run
+- am_to_dec
 - Discord — publishing picks over webhooks
 - Team stats leak and rebuild docs
 - NBA first quarter props search tests
 - NHL prop odds alternate line tests
-- prop_facts.py
+- Build Your Own Model — NFL facts
 - NFL opener spread board selection
 - EuroLeague in-play loop tests
-- ncaab_moneyline_own_spread.py
+- test_prop_ladder.py
 - verify_app_review_sign_in.ts
 - NFL wind fire window tests
 - test_nba_game4_p2.py
@@ -363,7 +363,7 @@
 - Mobile over-the-air release workflow
 - tennis_odds_history.py
 - card
-- test_euroleague_pregame_card.py
+- euroleague_pregame_card.py
 - ncaaf_margin_eval.py
 - test_prop_missing_features.py
 - test_ncaab_moneyline_own_spread.py
@@ -376,7 +376,7 @@
 - test_book_team_map.py
 - NBA period map pricing tests
 - test_ncaab_spread_market.py
-- os
+- dataclasses
 - EuroLeague live feed and tests
 - MLB runline sweep workflow
 - Pipeline run ledger orphan sweep tests
@@ -387,21 +387,21 @@
 - discordJoin.ts
 - subprocess
 - PgSource
-- test_ncaab_opener_grid.py
+- ncaab_odds_history.py
 - nhl_goalie_designations.py
 - Seed average model tests
 - docs/thresholds.md
-- verify_sentry_scrub.ts
+- test_nfl_live_leader_config.py
 - nhl_moneyline_anchored.py
 - nfl_edge_prop_wind.py
 - PicksClvTab.tsx
 - verify_bet_all.ts
-- test_ncaab_teams.py
+- ncaab_teams.py
 - Games and live state schema
 - parse_nhl_game
 - test_nba_s_q1tt.py
 - Mobile threshold mirror parity tests
-- test_ncaab_first_half_spread.py
+- test_nba_team_total_clv.py
 - PanelError
 - Bogus first pitch label repair tests
 - Track record views migration tests
@@ -410,11 +410,11 @@
 - Project guide and GitHub workflows
 - NCAAF player props audit doc
 - SBR loader abbreviation and shim tests
-- NBA schedule refresh tests
+- test_nba_schedule_refresh.py
 - Scheduled agents contract doc
-- ncaab_first_half_total_build.py
+- glob
 - PanelError
-- _CatalogConn
+- test_schedule_context.py
 - NFL live leader model tests
 - ncaabw_total_blend_build.py
 - weather.py
@@ -422,7 +422,7 @@
 - test_flow_slice.py
 - Calibration promote worker job tests
 - Operations rule file
-- ncaaf_moneyline_market.py
+- ncaaf_moneyline_card.py
 - Live odds freshness doc
 - NFL wind forecast stability tests
 - DraftKings live board merge tests
@@ -434,7 +434,7 @@
 - game_line_market_sweep.py
 - test_nba_first_half_total_luck_window.py
 - Sentry events sync and tests
-- test_cbb_pairs.py
+- prop_ladder.py
 - NBA period team totals search doc
 - Front-end UX review checklist doc
 - nfl_edge_live_rush_pace.py
@@ -442,21 +442,21 @@
 - GoalieBook
 - fetch_datasets.py
 - test_suite_writes_no_heartbeats.py
-- PicksRecorder
+- test_nfl_live_pick_writer.py
 - nhl_period_scores_api.py
 - settle_picks
 - Player game logs and record views
 - NBA first-half total replay tests
 - Cross-sport pick lock tests
 - NCAAF gameday and live feeds
-- parse_upcoming_team_rows
+- test_ncaab_injury_feed.py
 - test_pregame_insert_cutoff.py
-- League models hook tests
+- Cloud worker — the pipeline on Railway
 - Game calibrated decision tests
 - Picks table and track record views
-- impossible_games_played
-- test_a_pass_stores_only_what_changed
-- .keep_vanished
+- test_team_stats_asof_invariants.py
+- matrix.py
+- nhl_derivative_odds_history.py
 - nba_game2_verdict.py
 - ncaabw_quote_bounds.py
 - Team period results tests
@@ -467,8 +467,8 @@
 - Discord channel probe tests
 - NFL prop CLV book mapping tests
 - test_mlb_runline_retrain_sweep_job.py
-- test_nfl_live_prop_settlement.py
-- test_parlaymatt_ingest_keeps_his_author_and_eggz_kinds_stay
+- ncaab_total_blend.py
+- Follow-ups — the durable backlog
 - UX designer agent and project rules
 - Picks and publishing rule file
 - Model updates rule file
@@ -476,7 +476,7 @@
 - test_euroleague_live_ht.py
 - nfl_edge_kalshi.py
 - Signal timing and pick lock doc
-- x_publisher.py
+- test_nfl_label_units.py
 - Discord linking runbook
 - social_posts.py
 - _get
@@ -488,24 +488,24 @@
 - Refresh pass, crash log tests
 - test_ncaaf_game_identity.py
 - wnba_results_ingestor.py
-- test_nba_prop_rest_inputs.py
+- _tiny_raw
 - test_local_mirror_report.py
 - NBA SBR odds archive import
 - rp
 - Transaction pooler URL tests
-- test_anon_lockdown.py
+- apply_anon_grants.py
 - glob
 - Live betting operations doc
 - Brand asset fetch workflow
 - Mobile TypeScript compiler config
 - test_mlb_total_public_fade.py
-- test_feature_engine.py
+- game_market_gate.py
 - test_nba_first_half_odds.py
 - live_scorer.py
 - workers/gameday.py
 - SharpSports bet sync edge function
 - NBA first quarter props search doc
-- run
+- pull_snaps.py
 - nba_live_feed.py
 - prop_box_scores.py
 - NBA in-play state search doc
@@ -515,7 +515,7 @@
 - dependencies
 - test_betparx_never_a_pick_book.py
 - SBR loader file parsing tests
-- D. First half and first quarter: our own mechanisms (r3_d_periods.py)
+- EuroLeague research, round 2 (2026-11-13)
 - NBA — pipeline operations (nba.md)
 - normalize_player_name
 - Empty close CLV recompute script
@@ -534,7 +534,7 @@
 - Run ledger table health tests
 - NHL stats views tests
 - ufc_ratings.py
-- config.py
+- requests
 - NFL prop features, cache tests
 - backup_snaps.py
 - SBR loader team name tests
@@ -542,9 +542,9 @@
 - App sign-in runbook
 - betfair_monthly.py
 - test_nhl_goalie_guards.py
-- parse_summary
-- test_nba_odds_history.py
-- stake_sizing.py
+- ncaaf_live/feeds/espn.py
+- opener_strategy.py
+- validate.py
 - Unauthorized auto-pause cleanup migration tests
 - NCAAF Louisiana alias migration tests
 - test_player_news_ingestor.py
@@ -567,9 +567,9 @@
 - EuroLeague full-game markets (moneyline, spread, total): research round 1, 2026-11-13
 - NBA prop offline search doc
 - build_market_features
-- nfl_wind_publisher.py
+- build_opener_rows
 - Play-by-play backfill resilience tests
-- nhl_derivative_totals.py
+- docs/prop_market_research.md
 - NCAAF in-play market audit doc
 - step_ok
 - Front-end rule file
@@ -601,7 +601,7 @@
 - grade_pending
 - classify
 - ScoreDistribution
-- prop_box_scores.py
+- season_pass
 - Stripe webhook edge function
 - NFL wind opening signals cleanup migration tests
 - test_global_ev_floor.py
@@ -614,37 +614,37 @@
 - pathlib
 - test_book_app_links_probe.py
 - NCAAF totals regression tests
-- dk_live_board.py
+- validate_wind_forecast.py
 - test_ncaabw_player_game_log.py
-- test_http_timeout_floor.py
-- PicksRecorder
+- test_mlb_runline_feature_matrix_dtypes.py
+- find_bets
 - TestDailyOnlyFeedsOvernightWindow
 - NFL props deep dive review
 - test_opp_starter_features.py
 - Monitor probe GitHub workflow
-- test_injury_fetch_speed.py
+- nfl_live_prop_assessment.py
 - Railway deploy configuration
 - nhl_stats_ingestor.py
-- test_mobile_lines_board.py
+- test_local_mirror_report_pg.py
 - test_ncaab_quote_bounds.py
-- nfl_edge_halftime_oos.py
+- test_ufc_odds_history.py
 - test_flow_validate.py
-- build_scored_rows
+- PlayerResolver
 - Sportsbook list billing group tests
-- test_prop_ladder.py
+- find_bets
 - test_tennis_dk_probe.py
 - Mobile type-check baseline checker
 - test_mobile_team_detail.py
 - NCAAB ESPN ingestor test fakes
 - season_pass
-- test_gameday_lock.py
+- nba_live_loop.py
 - NBA heavy favourites search doc
 - App terms and conditions
 - Mobile app dependencies
 - SBR loader odds conversion tests
 - ncaaf_inplay_history.py
 - Prop market coverage doc
-- test_dedupe_opening_signals.py
+- buy
 - test_settle_clv_timeout.py
 - test_ncaaf_inplay_history.py
 - nba_pbp.py
@@ -658,7 +658,7 @@
 - _results
 - Mobile quiet update download tests
 - nfl_edge_weather_fetch.py
-- ncaab_archive_import.py
+- resolve_player
 - ufc_stats_ingestor.py
 - test_settle_self_heal.py
 - table
@@ -669,25 +669,25 @@
 - test_clv_close.py
 - CI workflow and dependency pins
 - subscriptionFetch.ts
-- test_ufc_stats_ingestor.py
+- parse_event_page
 - nfl_edge_weather.py
 - test_game_market_gate.py
 - NHL moneyline rebuild write-up
 - espn_probables.py
-- test_query_injuries_for_game.py
+- view_migrations.py
 - Health reason and cadence tests
-- nhl_derivative_totals_backtest.py
+- test_nhl_derivative_totals.py
 - test_mobile_player_detail.py
 - test_model_calibration_agent.py
-- In-play rushing-attempt UNDER on pace ratio >= 1.25
+- _card_q
 - test_live_game_features.py
-- _jobs
+- _plan
 - NFL wind venue gate tests
-- verify_ota_update.ts
-- io
-- test_ufc_open_moneyline.py
+- ncaab_live_latency_probe.py
+- get_connection
+- min_ev_for
 - test_credit_budget.py
-- test_house_juice_floor.py
+- _Conn
 - post_eggz_recaps
 - nba_prop_market_card.py
 - NBA search: the starters and the first quarter (pre-registered 2026-10-31, before any cell was graded)
@@ -712,24 +712,24 @@
 - NCAAB margin pricing internal views
 - Worker dependency tests
 - NBA prop market publish tests
-- test_ncaab_espn_ingestor.py
-- ufc_open_moneyline.py
+- ingest_day
+- Event
 - test_ncaaf_fcs_opponent_alias_migration.py
 - Discord link and Whop memberships
 - test_mobile_live_segment.py
 - ufc_odds_history.py
-- mobile/package.json
+- build_euroleague_live_ht_artifact.py
 - Render service configuration
-- ncaab_first_half_spread_build.py
+- _published_record_problems
 - NCAABW live synthetic game fixtures
 - test_dashboard_support.py
 - NCAAB — men's college basketball: data, odds capture, models
-- nfl_live_prop_feasibility.py
+- test_push_tickets.py
 - App entitlement access gate doc
 - decide
 - MLB — model state and player-props plan (mlb.md)
 - Mobile results in units tests
-- Board
+- _split_sql_statements
 - test_ufc_phantom_filter.py
 - differ_rows
 - Overnight polling coverage tests
@@ -741,35 +741,35 @@
 - retool_app_files.py
 - main.py
 - NFL in-play prop polling tests
-- test_feature_artifact_agreement.py
+- test_backfill_results_recap.py
 - live_game_state_poller.py
 - parse_covers
-- refuse_publish_reason
+- side
 - Project docs map
 - NCAAB margin pricing review tests
 - NBA in-play loop window tests
-- build_rows
+- ncaab_stacking_check.py
 - test_live_bet_index.py
 - test_ncaabw_history_imports.py
-- test_clv_card_price_taken.py
-- byom/prop_load.py
+- test_db_health_pg.py
+- _Fetcher
 - record_ladders
 - main_v1_as_first_run.py
 - walk_forward_eval.py
-- test_nba_game2_verdict.py
+- docs/probability_calibration.md
 - test_clv_backfill_job.py
 - _Conn
 - resourceReferencesByFile
-- test_paused_and_no_signal_rows.py
+- test_rule_model_markets_everywhere.py
 - test_position_defense_ranks.py
-- _pick
-- nhl_prop_lab_priced.py
+- parse_games
+- _ReclaimConn
 - test_restore_swept_ncaab_none_rows.py
 - backtest_clv.py
 - test_ncaaf_live_states.py
 - UFC market audit report
 - nfl_edge_lib.py
-- bisect
+- _bet_decision
 - test_nhl_schedule_refresh_pg.py
 - nfl_weather_cache_import.py
 - test_nba_game_harness_derivatives.py
@@ -777,21 +777,21 @@
 - paused_model_assessment.py
 - r2_methods.py
 - test_best_line_sweep.py
-- nba_live_ig2.py
+- season
 - test_first_half_market.py
 - ncaaf_live/backtest/states.py
-- pytest
+- ingestors/__init__.py
 - run_system_health
 - byom/prop_load.py
 - Local mirror fake server
-- verify
+- EuroLeague first half and first quarter: research round 1
 - test_ncaabw_live_ht.py
 - NCAABW — women's college basketball: data, odds capture, models
 - market.py
 - In-app feedback threads
-- test_nfl_live_pick_writer.py
+- ncaab_live_dk.py
 - test_settlement_timing.py
-- fit_table
+- qb.py
 - NFL prop modeling tables
 - NHL game logs schema
 - Team stats board across sports
@@ -806,16 +806,16 @@
 - crashLog.ts
 - Disk load database indexes
 - test_betfair_monthly.py
-- ncaab_moneyline_first_post_build.py
+- _assemble
 - test_sql_percent_escaping.py
 - test_nfl_schedule_from_db.py
 - test_app_timings.py
 - test_nhl_research_job.py
 - League models learning log
 - League models methods reference
-- _FakeConn
+- test_tennis_ingestors.py
 - r
-- PoolMeter
+- _Shim
 - test_system_health_checks.py
 - NCAABW halftime total, side research
 - Mobile matchup and verify scripts
@@ -825,26 +825,26 @@
 - store_files.py
 - NBA public splits quality flag
 - NHL stats and prop odds views
-- .real
+- test_ops_alert_pages.py
 - test_picks_unique_row.py
 - NCAAB period scores tables
 - NBA postseason search: the two prop models that make money, on games no NBA model was graded on (pre-registered 2026-10-31, before any bet in it was graded)
 - manifest.json
 - test_nba_team_q1.py
 - units_for_result
-- NCAAB in-play history tests
+- all_readable
 - outcome_edge_scan.py
 - NCAAF player stats leaderboard schema
 - Weekly catch-up job tests
 - wind_totals.py
 - test_mobile_paused_catalog.py
-- pick_rows
+- live_scoreboard.py
 - test_price_prefilter_rollback.py
 - NCAAB live synthetic game builder
 - test_league_models_skill.py
 - model.py
 - test_injury_status_current.py
-- test_nfl_injury_ingest.py
+- parse_fight_page
 - NCAAF team tables schema
 - test_player_vs_defense.py
 - verify_discord_join.ts
@@ -857,8 +857,8 @@
 - test_nfl_prop_unstarted_clear.py
 - NFL prop settle fallback tests
 - test_nfl_stale_card_file.py
-- _Decision
-- test_recap_restatement.py
+- build_quotes
+- weather_totals.py
 - LiteConn
 - test_mobile_board_season.py
 - ml_base.py
@@ -866,13 +866,13 @@
 - Horse racing — first market audit on the free files
 - NCAAF market audit doc
 - test_nfl_stale_card_file.py
-- test_intraday_freshness.py
+- test_dashboard_rule_models.py
 - test_nfl_model_imports.py
 - NFL, NBA postseason prop tests
 - FakeDB
 - NFL player stats leaderboard schema
-- test_ncaaf_citadel_alias_migration.py
-- _resolve
+- test_mobile_scoreboard.py
+- test_ufc_stats_ingestor.py
 - ncaabw_sdv_import.py
 - test_two_refreshes_waiting_behind_a_daily_run_one_pass
 - Build your own model facts schema
@@ -882,18 +882,18 @@
 - tennis_retirement_rates.py
 - NCAABW ingestor test database shim
 - _DdlConn
-- mlb_game_final
+- injury_tags_before_tip
 - test_first_pitch_guard.py
 - App error logging schema
 - _compute_target
 - revenuecat-webhook/index.ts
 - test_nba_schedule_ingestor.py
 - Player news feed table
-- _tiny
+- main
 - test_nfl_prop_thresholds.py
-- TeeRecorder
+- registry.py
 - x_teams.py
-- mlb_live_total_runs (in-play total)
+- line_move_spots.py
 - load_artifact
 - NFL preflight lock check tests
 - nba_s_q1mt.py
@@ -902,29 +902,29 @@
 - Custom model official legs functions
 - 0. Pre-registration (written 2026-11-13 BEFORE any result was computed)
 - Capper picks ingest tables
-- counts
+- nfl_edge_kalshi_fetch.py
 - ncaab_spread_market_build.py
 - Kalshi game markets table
 - Kalshi prop ladders table
-- seasons_with_too_few_snapshots
+- test_claude_settings_allowlist.py
 - verify_stack_back.ts
 - NCAAF quarterback game logs
 - Opening signals shadow table
 - test_mobile_player_stat_handoff.py
 - Build-your-own NBA props backtest
-- _credit_cells
+- test_mobile_sgp_pricing.py
 - Build-your-own prop side backtest
 - Build-your-own total side backtest
 - Custom model backtest functions
 - App access grants migration
 - Account deletion functions
-- test_prop_odds_missing_game.py
+- _R
 - r2_leads.py
 - NCAAB player game log schema
 - NFL live game state tables
-- reset_registry_cache
+- test_ncaab_first_half_clv.py
 - best_per_prop
-- slugify_fighter
+- enqueue
 - test_nba_prop_settle_stats.py
 - NBA 2026-27 rebuild write-up
 - nba_injury_report.py
@@ -932,12 +932,12 @@
 - test_nhl_props.py
 - _euroleague_live_synth.py
 - Signal Base privacy policy
-- beginLaunch
+- test_team_stats_explained.py
 - API call log table
-- Meter
+- nba_odds_history.py
 - Model quality checks table
 - NBA team first quarter table
-- .alt
+- alternate_market
 - NCAAF play-by-play table
 - NCAAF latest scoreboard view
 - NHL shot events table
@@ -947,16 +947,16 @@
 - Results snapshots migration
 - Team stats board cache
 - _SlateConn
-- nba_prop_projection_card.py
+- test_nba_prop_projection_shrink.py
 - Discord one post per pick
 - Discord void notice view
 - Scored pick outcomes materialized view
 - Member sportsbook preferences
 - _FakeConn
-- test_results_in_units.py
+- Rec
 - test_ufc_csv_loader.py
 - Model full outcome record view
-- test_recap_waits_on_bet_games.py
+- _Gate
 - _ingest
 - Mobile stat label parity tests
 - resolve_nfl_game_id
@@ -981,15 +981,15 @@
 - Mobile OTA sourcemap upload
 - NFL stadium hourly weather
 - Account deletion endpoint tests
-- _Conn
+- nba_live_health.py
 - devDependencies
 - NHL goalie designations table
 - NCAABW player game log migration
 - NHL period scores table
 - Player positions migration
-- start_run
+- gen_report.py
 - NFL player season stats
-- _as_dt
+- The four pre-game rules (live 2026-11-14, mike)
 - Scoreboard betting splits table
 - test_mobile_sentry.py
 - System health checks table
@@ -997,11 +997,11 @@
 - One live bet row index
 - One row per pick index
 - Open non-bet picks index
-- math
+- tennis_fatigue_study.py
 - Published picks record backfill
-- test_live_orchestrator.py
+- live_scorer.py
 - App auth and billing shell tests
-- nhl_totals_lab.py
+- urllib_parse
 - nba_public_splits_ingestor.py
 - due_dates
 - parse_period_rows
@@ -1021,26 +1021,26 @@
 - test_mobile_units_one_basis.py
 - Marketing site hosting readme
 - test_mobile_bankroll.py
-- nba_s_q1pin.py
+- _repo_sources
 - nba_results_ingestor.py
-- _compute_injury_adjustment
-- test_ncaab_moneyline_card_pg.py
+- test_a_false_step_is_recorded_once_and_not_requeued
+- ncaab_spread_card.py
 - test_probability_calibration.py
-- fit_one
+- closed_tables
 - test_clv_no_vig_capture.py
 - Website record page loader
-- parse_teams
+- _espn_like
 - Handler
 - prune
 - NBA live decisions table migration
 - NBA live game decision loop
 - cached
 - vitest.setup.ts
-- Clock
-- test_ncaab_spread_card_pg.py
+- et_game_date
+- test_a_game_moved_past_every_window_is_found_by_its_event_id
 - stripe-checkout/index.ts
 - prune_table
-- test_nhl_prop_blocked_shots.py
+- pick_rows
 - TestOneNhlPropBetAGame
 - Game log backfill skip tests
 - test_health_skip_budget.py
@@ -1048,18 +1048,18 @@
 - _sqlite
 - Database schema creation tests
 - test_health_check_job.py
-- test_mlb_retrain_freeze.py
+- parse_fighter_page
 - _clean_rate
 - MLB first-five edge search doc
-- test_a_rejected_football_alternate_chunk_costs_only_itself
+- _venue_features
 - Savant freshness health check tests
-- test_push_line_change_alerts.py
-- nfl_prop_odds_ingestor.py
+- nhl_goalie_window.py
+- parametrize
 - test_ungraded_model_performance.py
-- StatCard
+- ExecParts.tsx
 - tsx_cmd
 - test_recap_waits_for_nfl_box_scores.py
-- test_mobile_stat_segments.py
+- test_team_stats_asof_verify_job.py
 - NBA public betting splits (Action Network) — `nba_public_splits`
 - TestMarketCardPublisher
 - 3. The women's college halftime method, ported unchanged, then the variants
@@ -1069,7 +1069,7 @@
 - App review sign in attempts table
 - EuroLeague sport reference doc
 - test_scoring_methods.py
-- write_with_retries
+- TeamView
 - MLB run-line edge hunt doc
 - _RepairConn
 - Mobile React Native test shim
@@ -1077,136 +1077,136 @@
 - NFL prop card replay tests
 - nfl_prop_lean_concentration.py
 - _SlateConn
-- TestHistoricalBackfill
+- _assemble_ncaaf_features
 - Prop odds book update-time tests
 - Website support page
 - situational_spots.py
 - Custom model official legs lock index
-- implied
+- test_nfl_props.py
 - Named sportsbook fetch tests
 - League model scouting guide
 - RACING — thoroughbred horse racing: sources, the market grid, open items
 - scoreboard_splits.py
 - TestPropOddsLoader
-- _void_postponed_mlb_picks
+- price
 - Build-your-own NHL bets doc
 - EuroLeague halftime betting — round 4 (2026-11-13)
-- step_nba_quarters
+- pooled_ids
 - load_data
-- LiteConn
-- _write_game_log
+- r1_baselines.py
+- _Conn
 - test_savant_freshness.py
 - test_ncaaf_phantom_lsu_ole_miss_migration.py
 - CreditBudget
-- alt_markets_due
+- test_a_missing_table_is_a_no_op
 - test_pipeline_watch.py
 - Live monitor dashboard (monitoring/)
-- ncaaf_inplay_history_backtest.py
+- build_candidates
 - player_prop_odds
 - TENNIS — data, odds capture, models
 - NBA reassessment, 2026-11-11 to 2026-11-18
-- frames_at
-- Roster
-- test_promote_external.py
+- test_sbr_loader.py
+- nba_prop_market.py
+- .frame
 - drop_pulled_quotes
-- cbb_pairs.py
+- ncaab_total_card.py
 - NFL prop market card tests
-- ncaab_quote_bounds.py
+- _placebo_core
 - League model market grid guide
-- main
+- _detect_score_convention
 - rehearse
-- _has_starter_out
+- getKeyMetrics.ts
 - _build_injury_flag
-- estimate_parlay_correlations.py
-- slate
+- bad_moneyline
+- test_fanatics_app_link_probe.py
 - anon_lockdown_spec.py
-- test_ncaab_odds_history.py
+- _luck_games
 - test_cfbd_yardline.py
 - Same game parlay prices migration
-- kickoff_wind_reads.py
+- GradeConn
 - ncaab_first_post_fill.py
 - Sentry crash and hang doc
 - scorer.py
 - test_college_team_board.py
 - test_mobile_euroleague_in_app.py
-- _apply_price_floor
-- test_revoke_remaining_grants.py
+- drop_unchanged_game_rows
+- app.py
 - TestMakePick
 - test_wind_stake_beyond_calibration.py
 - test_byom_facts_schema.py
-- GameClock
+- resolve_conflicts
 - NBA first basket tables migration
 - test_system_health_meta_steps.py
-- ScoreClock
-- test_drop_voided_nfl_prop_market_opening_signals_migration.py
+- flow_robustness.py
+- _Conn
 - 4. Definitions
 - test_mobile_line_ruler.py
 - Dashboard layouts and names migration
 - verify_stats_filter_ux.ts
-- nba_team_total_luck_build.py
-- deploy_checks.py
-- _BoardConn
+- test_the_nov_3_x_results_ledger_blocks_a_second_tweet
+- ufc_study/prop_load.py
+- In-app feedback — reading it and replying
 - verify_contrast_tokens.ts
-- TestNflPropSettlement
-- test_voided_pick_not_rechosen.py
+- market
+- prepare_fullgame
 - Sentry events table migration
-- _odds_from_frame
-- _game_id_for
+- .probs
+- test_a_play_by_play_error_fails_the_step_rebuilds_and_reaches_pipeline_log
 - DraftKings live reads schema
 - walk
 - test_inplay_pick_without_draftkings.py
 - nhl_props_card.py
-- _art
-- startCrashLogging
-- test_book_sweep_bettability.py
+- test_a_clv_failure_does_not_stop_settlement
+- test_outstanding.py
+- h1_check_espn.py
 - test_snapshot_pass_order.py
-- eastern_game_date
+- write_verbs_for
 - nba_s_ingame27.py
 - main
 - _Conn
 - Posts to @SignalBasePicks
-- quote_offers
+- clean_pair
 - NCAAB live decisions table migration
-- The Pinnacle run-line rule (`mlb_spread_market`): the 2026 season, month by month
-- _discover_active_games
+- test_mlb_game_market.py
+- shard_windows
 - Horse racing files
 - Live latency probe table migration
-- describe_failure
-- probs
+- test_january_and_february_use_the_previous_ncaaf_fall
+- LiveOddsFeed
 - Porting traps: what a copy of existing code got wrong on a new league
-- run_card
+- _ladder_quotes
 - MLB totals edge hunt doc
-- _minutes_apart
+- test_a_past_game_never_projected_gets_the_newest_espn_pull_55_minutes_before_its_tip
 - _scoreboard
 - 3b. Kill tests on what read positive
 - StarterCanvas.tsx
-- test_the_prop_fetch_never_buys_a_game_it_was_not_given
-- test_nfl_prop_week1_candidate_pool.py
+- _Store
+- closing_rows
 - r2_kill.py
 - Team period results table migration
 - CLV Pinnacle mainline fix
-- test_restate_keeps_the_better_price.py
-- _void_rescheduled_picks
+- _placebo_frame
+- test_a_flipped_final_is_taken_in_the_stored_orientation
 - UFC market study overview
 - The kill tests
 - _feature_value
 - Model volume settings migration
-- load_schedule
+- dk_line_rows
 - assemble_game
 - test_claude_rules_split.py
-- _naive_projection
-- away
-- _event
-- resolve_game_id
-- QuoteKeeper
+- _run_scorer_body
+- test_every_pick_writing_scheduler_job_publishes
+- _process_events
+- team_code
+- C. Totals (r3_c_totals.py)
 - ncaaf_db
-- _read_only_connection
-- NBA play-by-play and on-court lineup segments
-- _PollConn
+- test_retired_sync_writes_config_retired_models
+- nhl_goalie_designations.py
+- test_prop_no_bet_rows_survive_to_tipoff.py
 - _Board
 - Where a US bettor can bet a race — the outlet scout, 2026-11-15
 - test_live_scoreboard.py
-- test_nfl_schedule_refresh.py
+- _Lite
 - test_live_prop_pull_asks_for_the_sharp_book
 - label
 - r2_coverage.py
@@ -1215,116 +1215,111 @@
 - _NoOpConn
 - async-storage.mjs
 - _NullConn
-- _stored_state
+- ncaabw_espn_ingestor.py
 - test_mobile_nhl_lookahead.py
 - 4. Structural check: are halftime lines re-hung mechanically, and where do they miss?
-- Budget
+- test_the_all_time_line_stops_at_the_period_and_posts_on_every_span
 - ncaaf_margin_eval.py
-- _universe_summary
-- 2. Schema
+- test_a_live_game_on_the_slate_date_holds_the_recap
+- test_a_stored_needs_review_message_is_reparsed_and_a_parsed_one_is_not
 - scoreboard_splits_dk_history_2026_11_16.sql
 - NCAABW research scripts readme
-- load_artifact
+- live_server
 - EuroLeague in-play decisions table
 - Horse racing leads: market structure, models, commission, price paths
 - test_team_board_commence_bound.py
 - Weekly catch up cursor stub
 - scripts
-- .execute
-- no_vig_pair
-- load_artifact
+- _Counted
+- _SettleConn
+- groups
 - test_pg_finder.py
 - test_a_dropped_connection_replays_the_migration_with_its_lock_timeout
 - test_nba_pbp.py
 - test_module_entrypoints.py
 - test_an_unreadable_pause_table_fails_open
-- TestFourNhlPropBetsANight
+- _visible
 - _Conn
 - pc_copy_snapshots_2026_11_16.sql
 - TestMarketRuleSettlement
 - TestReturningStarterIsNamedFromTheLog
 - _extremes
-- gather
+- split_by_pr_state
 - notification_inbox_2026_11_19.sql
 - Game-model starter / star / goalie gate
-- _Conn
+- test_full_refuses_without_the_go_a_results_folder_or_a_bets_folder_before_reading
 - _SqliteShim
-- _prep
+- TestItSettlesAsAPropNotAsAGame
 - _UfcBoardConn
-- _push_adjusted
+- test_a_real_run_before_the_table_exists_fails_so_it_is_retried
 - eggz_picks.py
-- test_publish_skips_games_with_no_games_row
+- _collapse_same_matchup
 - TestThePriceGate
-- _SqliteShim
+- clock_label
 - nfl_live_leader/gameday.py
 - Service role job filter test
-- Pacer
+- B. Market-anchored models (r3_b_anchored.py)
 - db_health_snapshots_2026_11_15.sql
 - D. First half and first quarter: our own mechanisms (r3_d_periods.py)
-- test_prop_lookahead.py
-- nfl_edge_prop_market_floor.py
+- TestTheScorerReachesTomorrow
+- load_artifact
 - _bet_price_and_book
 - test_insert_column_alignment.py
-- _Conn
-- test_a_night_game_pick_carries_the_game_s_date_not_the_utc_clock
+- hk_pooling_check.py
+- sink
 - out_path
-- _SqliteShim
-- test_the_read_starts_just_before_the_window_and_casts_numerics
-- fetch_https_image
+- _job_publish_discord_signals
+- test_pg_source_narrows_a_timed_out_check_to_the_slow_range
+- _games3
 - 1. Coverage, data notes and what a live loop gets
 - clv_close_2026_11_19.sql
 - 11. Counts before grading
-- test_alt_game_lines.py
-- _RecordingConn
+- _inp
+- _step1_world
 - nba_player_game_log
 - _deletion_approved_for_the_mechanism_tests
 - pg_repack_helper.sh
-- Player news: Recent News sheet
+- _Conn
 - devDependencies
-- _bases_state
+- TweetDelivery
 - OpenInAppModule.swift
-- test_a_page_of_huge_rows_halves_down_to_one_row_before_failing
+- FakeFeed
 - TestTheDeadNhlApiImport
 - _blk_nhl_asof
-- team_game_residuals
+- cell_specs
 - EuroLeague market audit — the scout, and the research to come
 - test_live_money_no_record_only.py
 - whop-webhook/index.ts
-- Conn
+- test_each_season_is_calibrated_by_its_own_model_and_2019_20_is_left_out
 - Retool ops dashboard — source
 - TestTheDropIsDeclared
 - TestFeatureMap
 - test_ncaaf_moneyline_market.py
 - _OddsConn
-- test_two_players_in_one_game_can_both_get_a_bet
+- test_smoke_never_grades_a_real_score
 - setModelVolume.ts
 - test_team_total_market.py
-- run_agent
+- _Stop
 - test_threshold_review.py
-- test_ncaab_pbp.py
+- ncaab_pbp.py
 - test_web_site.py
-- _Conn
-- test_the_2099_pause_row_is_not_the_latest_pick
 - test_a_failed_prune_is_reported_as_a_failed_step
 - r2_baselines.py
 - getPickLedger.ts
 - getWeatherBoard.ts
 - r2_firstpost.py
 - 2. Baselines at halftime
-- Verdicts (written by hand from the tables below; each number is from the script named in its table)
-- team_game_residuals
-- _run_runner
+- test_the_synthetic_checks_write_no_bets_into_the_real_folder
 - test_custom_model_backtest_posted_migration.py
-- test_the_main_recap_waits_while_a_game_on_that_date_is_unfinished
-- test_nfl_props.py
+- test_the_credit_line_stops_when_the_control_is_not_on_the_same_games
+- test_a_team_is_pooled_by_its_own_seasons_schedule
 - getApiCallTrend.ts
 - getOddsApiHealth.ts
 - backend/package.json
 - _stored_state
 - test_mobile_ota_settings.py
-- test_nhl_derivative_totals.py
-- _pm
-- _HealthConn
+- test_a_total_outside_90_200_is_a_feed_error
+- test_the_cli_defaults_to_a_dry_run
 - getApiSourceFrequency.ts
 - getHealthChecks.ts
 - getPipelineRuns.ts
@@ -1332,76 +1327,41 @@
 - _ShopConn
 - parse_team_game_stats
 - failure_alerter.py
-- PreconditionError
+- _due_milestone
 - _goalie_line
+- _enabled
 - getAudienceTiles.ts
 - getModelRoster.ts
 - getModelVolumeBands.ts
 - getPicksTimeSeries.ts
 - getSettledPerformance.ts
-- Signalbase Privacy Policy
 - clv_close.py
-- _local_aggregates
 - public.v_model_health_bets
 - _box_row
-- 0. Frozen before any return was read (written 2026-11-13, before the first r3 script ran)
-- TestThePollerCanCreateAGame
-- eggz_embed
-- _lane_signature
-- fit
-- extremes
+- render_all_time_fields
 - repo_slug
 - test_migration_string_literals.py
 - _EmptyConn
-- test_a_caller_supplied_connection_is_not_closed_by_the_write
-- test_a_write_that_opens_its_own_connection_still_closes_it
-- .test_a_same_named_table_in_another_schema_does_not_drop_the_venue
 - test_the_store_can_be_queued_on_the_worker_with_only_a_dry_run_switch
-- ncaaf_line_bookmaker
-- key
-- top_players
-- _post_window
-- slugify
+- test_the_recap_posts_only_to_his_webhook_and_only_once
 - feed_kill.py
 - test_a_failed_quarter_pull_leaves_every_other_pick_grading
-- test_a_live_pull_stores_an_nba_row_stamped_after_the_tip_as_in_play
-- test_verify_aliases_mlb_twins_and_still_catches_april_leak
-- test_the_posting_run_sends_every_near_tip_pick_over_the_cap
 - FlatTable
 - public.site_public_record
-- _fit_rows
-- ran
-- .install
-- test_the_game_odds_plans_count_rows_moved_to_the_archive
-- TestItCannotBreakTheWorker
+- thinned_games
 - test_a_line_that_rose_over_an_over_is_a_skip
+- _Conn
 - _Storage
-- test_the_prop_plan_counts_rows_moved_to_the_archive
 - test_a_failed_card_run_beats_error_and_the_alerter_reports_it
 - TestEvalRowsCarryTheLine
-- registered_cells
-- test_the_insert_rolls_back_per_row
-- test_verify_skips_live_season_for_impossible_but_keeps_thin_check
-- test_verify_tolerates_one_game_boundary_on_hist_season
-- test_verify_normalizes_as_of_date_to_yyyy_mm_dd
 - test_a_removal_is_refused_when_postgres_picks_other_rows
 - _quiet
-- test_the_feed_is_off_by_default
-- test_a_run_that_writes_nothing_is_not_reported_as_success
-- verify
-- test_saved_frames_built_by_other_code_do_not_pass_for_this_codes
-- test_the_steps_go_red_on_a_failed_date
-- test_a_real_scheduler_runs_each_loop_once_at_boot
-- test_a_step_that_raises_is_a_false_not_a_crash
-- test_an_already_paused_model_is_not_flagged_again
-- test_a_season_that_is_already_a_series_is_refused
-- TestTheUmpireLandsOnEveryPass
+- test_ncaab_espn_ingestor.py
 - test_the_first_post_read_is_draftkings_earliest_usable_pregame_row
 - test_the_quote_read_is_pregame_draftkings_and_fresh
 - lockdown_acl_snapshot.sql
 - .execute
 - test_a_file_over_the_part_size_is_split_and_restores_byte_for_byte
-- captured
 
 ## God Nodes (most connected - your core abstractions)
 1. `get_connection()` - 903 edges
@@ -1450,103 +1410,103 @@
 - **The team-stats leak: discovery, rebuild, freeze gate and the honest retrain** — docs_team_stats_leak_season_final_snapshot_leak, docs_team_stats_leak_pitcher_stats_rebuild, docs_team_stats_rebuild_scope_phased_sequencing, docs_team_stats_leak_assert_retrain_allowed, docs_team_stats_leak_team_stats_asof_verify, docs_sports_mlb_leak_repair_2026_09_03, docs_sports_mlb_f5_moneyline_v4 [INFERRED 0.85]
 - **From DK-decides to deciding, settling and grading CLV at the price actually taken** — docs_config_topology_models_only_decide_on_draftkings, docs_best_line_decision_columns_stage_2, docs_best_line_live_lanes_join_best_price, docs_live_betting_live_pick_decided_at_best_in_play_price, docs_clv_which_price_is_the_bet, docs_followups_clv_at_price_taken_decided [INFERRED 0.95]
 
-## Communities (1548 total, 352 thin omitted)
+## Communities (1507 total, 353 thin omitted)
 
 ### Community 0 - "test_record_never_restated.py"
 Cohesion: 0.04
-Nodes (49): build_parser(), _date_is_over(), main(), post_backfill(), test_a_day_that_is_not_over_is_refused(), test_apply_calls_both_notifiers_for_that_date(), test_dry_run_is_the_default_and_posts_nothing(), test_main_dry_run_prints_and_returns() (+41 more)
+Nodes (42): _Conn, _resp(), test_a_404_is_an_answer_not_a_retry(), test_a_persistent_403_still_raises_after_the_last_attempt(), test_a_recap_whose_count_merely_drifted_is_not_short(), test_a_recap_with_a_late_grade_is_short(), test_a_transient_403_is_retried_and_the_second_answer_is_used(), test_the_check_after_noon_does_not_touch_the_database() (+34 more)
 
 ### Community 1 - "Mobile player stats page"
 Cohesion: 0.01
-Nodes (281): In the app (2026-11-10), d, nextInEmptyTier, rows, tough, again, bogus, catalog (+273 more)
+Nodes (380): d, nextInEmptyTier, rows, tough, again, bogus, catalog, dh (+372 more)
 
 ### Community 2 - "Mobile pick cards, market formatting"
 Cohesion: 0.01
-Nodes (528): ConfigBooks, OVERRIDES, readConfigBooks(), sameList(), sameSet(), SNIPPET, all, avoid (+520 more)
+Nodes (525): ConfigBooks, OVERRIDES, readConfigBooks(), sameList(), sameSet(), SNIPPET, all, avoid (+517 more)
 
 ### Community 3 - "verify_ncaab_ui.ts"
-Cohesion: 0.02
-Nodes (181): startOtherLoggers(), harness(), Sent, session(), badgeCalls, bellScreens, bets, check() (+173 more)
+Cohesion: 0.03
+Nodes (108): badgeCalls, bellScreens, bets, check(), checkBadge(), dismissed, failures, fake (+100 more)
 
 ### Community 4 - "verify_record_hero.ts"
-Cohesion: 0.04
-Nodes (93): bubble, columnsMissing, first, hero, layout, mid, missing, pill (+85 more)
+Cohesion: 0.05
+Nodes (84): cache, FILES, gateCopy, hook, keyVersion, models, paperCopy, q (+76 more)
 
-### Community 5 - "unicodedata"
-Cohesion: 0.04
-Nodes (52): american(), attach_game_ids(), ensure_tables(), _fight_log(), main(), parse_canon(), parse_uud(), slugify() (+44 more)
+### Community 5 - "nfl_prop_feature_engine.py"
+Cohesion: 0.08
+Nodes (21): _add_features(), build_nfl_prop_scoring_rows(), _cols(), derived_targets(), _load(), _nfl_season(), _pool_mask(), _read() (+13 more)
 
 ### Community 6 - "nba_s_shapes.py"
 Cohesion: 0.03
-Nodes (82): Data, _american(), bets_folder, _both(), build_gap(), build_model(), build_pricing(), build_spec() (+74 more)
+Nodes (82): 5.2 F1's shape, Data, _american(), bets_folder, _both(), build_gap(), build_model(), build_pricing() (+74 more)
 
 ### Community 7 - "test_pitcher_stats_asof_invariants.py"
-Cohesion: 0.05
-Nodes (31): last3_rates(), outs_from_ip(), per_nine(), whip(), _avg_distinct(), build_rows(), constant_era_pitcher_seasons(), _row() (+23 more)
+Cohesion: 0.06
+Nodes (25): outs_from_ip(), build_rows(), constant_era_pitcher_seasons(), self_inconsistent_rows(), _app(), _FakeConn, test_a_doubleheader_emits_one_row_per_date(), test_a_fractional_part_that_is_not_thirds_raises() (+17 more)
 
-### Community 8 - "ncaabw_odds_history.py"
-Cohesion: 0.07
-Nodes (33): _Billed, build_resolver(), ChangeKeeper, check_precondition(), check_resume(), _day_dir(), _dry_run(), ensure_tables() (+25 more)
+### Community 8 - "lineLegs.ts"
+Cohesion: 0.02
+Nodes (161): addedAt, board, doubs, gameLeg, idx, lineHook, NOW, sameRef (+153 more)
 
 ### Community 9 - "push_notifier.py"
-Cohesion: 0.03
-Nodes (67): Signal-flip push notifications, APNs key / aps-environment entitlement is the blocker, device_push_tokens table (anon INSERT/UPDATE, no SELECT), No push has ever reached a phone (2026-09-12), push_sent ledger means considered, not delivered, Versioned data payload routes a tap (PUSH_ROUTE_VERSION), Three producers: signal changes, line changes, live signals, mobile usePushNotifications / NotificationsCard / pushDiagnosis (+59 more)
+Cohesion: 0.04
+Nodes (62): paused_row_exclusion_sql(), Signalbase Privacy Policy, On-device storage: bankroll and placed-bet flags in AsyncStorage, Claim: the app cannot write to the backend, Signalbase privacy policy: nothing personal collected, Signal-flip push notifications, APNs key / aps-environment entitlement is the blocker, device_push_tokens table (anon INSERT/UPDATE, no SELECT) (+54 more)
 
 ### Community 10 - "queries.ts"
 Cohesion: 0.01
-Nodes (400): In the app (2026-10-30), bad, bare, blank, pgrst, rendered, shapes, timeout (+392 more)
+Nodes (271): In the app (2026-10-30), scorable, card, custom, home, parlay, pickCols, queries (+263 more)
 
 ### Community 11 - "EuroLeague early research rounds"
 Cohesion: 0.02
-Nodes (147): 10. What to test next, 1. Settlement, 2. Data facts that shape every table, 3. Coverage (task 1), 4. Baselines (task 2), 5. The market's own accuracy, and the half against the full game (task 3), 6. The catalogued method, run unchanged (task 4), 7. Kill tests on every positive result (+139 more)
+Nodes (147): 5. Multiplicity: Benjamini-Hochberg across every registered cell, 0.1 Common rules, 0.2 A. The home lean, 0.3 B. Market-anchored logistic model (moneyline) and anchored residual model (spread), 0.4 C. Totals, 0.5 D. First half and first quarter: three mechanisms of our own per market, 0. Frozen before any return was read (written 2026-11-13, before the first r3 script ran), _nhl_blended_features() (+139 more)
 
-### Community 12 - "PositionVsOpponentCard.tsx"
-Cohesion: 0.04
-Nodes (90): games, seasonRow(), autoThenOpponent, card, choiceInput(), emptyCard, fay, firstMeeting (+82 more)
+### Community 12 - "scoreboard.ts"
+Cohesion: 0.03
+Nodes (159): bare, cellCard, chips, clash, collegeLive, draw, espnCard, espnFinal (+151 more)
 
 ### Community 13 - "test_discord_notifier.py"
-Cohesion: 0.02
-Nodes (108): _cand(), _et_now_iso(), _FakeConn, _FakeResult, _freeze_now(), _live_channel_http(), get(), post() (+100 more)
+Cohesion: 0.01
+Nodes (120): _cand(), _FakeConn, _FakeResult, _freeze_now(), _live_channel_http(), get(), post(), _live_row() (+112 more)
 
 ### Community 14 - "test_nba_team_total_luck.py"
 Cohesion: 0.03
-Nodes (54): 5. Family B: the live home team-total rule on the period totals, book_ages(), _build_dist(), decide(), record(), home_part(), newest_season(), pricing_dist() (+46 more)
+Nodes (61): 5. Family B: the live home team-total rule on the period totals, book_ages(), _build_dist(), decide(), record(), home_part(), load_artifact(), newest_season() (+53 more)
 
-### Community 15 - "test_x_publisher.py"
-Cohesion: 0.02
-Nodes (67): execute(), _R, test_allow_link_is_off_on_the_pick_client(), _post(), get(), _afternoon(), _creds_on(), _fake_conn() (+59 more)
+### Community 15 - "x_publisher.py"
+Cohesion: 0.01
+Nodes (157): _x_api_profile(), test_a_push_only_period_does_not_invent_an_roi(), test_the_period_tweet_uses_the_daily_tally_and_states_roi(), test_form_params_are_in_the_signature_and_not_in_the_header(), _afternoon(), _creds_on(), _fake_conn(), _PauseOnly (+149 more)
 
 ### Community 16 - "linesBoard.ts"
-Cohesion: 0.04
+Cohesion: 0.03
 Nodes (110): active, away, bounded, card, dkMl, fdMgm, fdMgmSheet, fdMl (+102 more)
 
 ### Community 17 - "NBA first quarter props search study"
 Cohesion: 0.03
-Nodes (83): 16.6 Counts before grading, under sections 14 and 16, 5.4 The first-quarter factor and the count distribution, p_over_calibrated(), decimal(), fit_alpha(), p_over(), _american(), _asof() (+75 more)
+Nodes (78): 16.6 Counts before grading, under sections 14 and 16, decimal(), q(), _american(), _asof(), assert_identity(), attach_means(), beside_rows() (+70 more)
 
 ### Community 18 - "test_dk_freshness_parse.py"
 Cohesion: 0.12
 Nodes (17): _american(), parse_dk_payload(), _store(), _FakeConn, _FakeResult, _payload(), test_a_half_priced_market_is_dropped_rather_than_half_recorded(), test_an_event_with_no_markets_yields_nothing_rather_than_raising() (+9 more)
 
 ### Community 19 - "test_nba_first_half_total_luck.py"
-Cohesion: 0.04
-Nodes (47): _build_dist(), decide(), record(), FirstHalfBet, FirstHalfDecision, newest_season(), pricing_dist(), quote_frame() (+39 more)
+Cohesion: 0.03
+Nodes (63): _build_dist(), decide(), record(), FirstHalfBet, FirstHalfDecision, load_artifact(), newest_season(), pricing_dist() (+55 more)
 
 ### Community 20 - "Mobile stats board"
 Cohesion: 0.01
-Nodes (505): DailyRecap(), band(), bye, byeFailed, place, rank, sixAtZero, tiedGroup (+497 more)
+Nodes (453): DailyRecap(), band(), bye, byeFailed, place, rank, sixAtZero, tiedGroup (+445 more)
 
 ### Community 21 - "NbaFirstBasketBoard.tsx"
-Cohesion: 0.07
-Nodes (49): tag(), bos, bosInj, lines, now, nyk, order, OUT (+41 more)
+Cohesion: 0.04
+Nodes (84): pill(), tag(), bos, bosInj, lines, now, nyk, order (+76 more)
 
-### Community 22 - "test_ncaab_paid_calls.py"
-Cohesion: 0.08
-Nodes (26): buy_many(), consume(), jobs(), run_date(), _paid_calls(), handle_oldest(), _argv(), _Clock (+18 more)
+### Community 22 - "euroleague_period_history.py"
+Cohesion: 0.04
+Nodes (57): current_season_label(), fetch_season(), main(), parse_game(), _periods(), results(), run(), store_season() (+49 more)
 
 ### Community 23 - "NBA game two projection model"
 Cohesion: 0.03
-Nodes (91): actuals(), apply_models(), availability(), box_design(), box_guard(), box_rating(), build_models(), build_panel() (+83 more)
+Nodes (89): actuals(), apply_models(), availability(), box_design(), box_guard(), box_rating(), build_models(), build_panel() (+81 more)
 
 ### Community 24 - "NBA fifth search period shares"
 Cohesion: 0.04
@@ -1554,35 +1514,35 @@ Nodes (43): 8. The placebo, and the check that it is a null, american(), band_bo
 
 ### Community 25 - "NBA game model research harness"
 Cohesion: 0.04
-Nodes (56): attach_fetch(), blind_by_real_side(), blind_pool(), blind_side(), boot(), cell_report(), cents(), check() (+48 more)
+Nodes (57): attach_fetch(), blind_by_real_side(), blind_pool(), blind_side(), boot(), cell_report(), cents(), check() (+49 more)
 
 ### Community 26 - "TeamsBoard.tsx"
 Cohesion: 0.03
-Nodes (163): check(), COLLEGE_BET, COLLEGE_EFF, COLLEGE_REC, cuts, eq(), BookMark(), FilterChip() (+155 more)
+Nodes (159): check(), COLLEGE_BET, COLLEGE_EFF, COLLEGE_REC, cuts, eq(), FilterChip(), GroupTabs() (+151 more)
 
 ### Community 27 - "_row"
 Cohesion: 0.04
-Nodes (20): announce_posted_voids(), build_parser(), graded_note(), main(), plan_voids(), _posted_sql(), _select(), void() (+12 more)
+Nodes (21): announce_posted_voids(), build_parser(), graded_note(), main(), plan_voids(), _select(), void(), _FakeConn (+13 more)
 
 ### Community 28 - "numpy"
 Cohesion: 0.01
-Nodes (183): bh_fdr(), binom_p(), eval_rule(), load(), main(), _load_backtest(), main(), selected_bets() (+175 more)
+Nodes (219): 5. Grading, units, staking, american_to_decimal(), cover_probs(), ev_per_unit(), fit_margin_pmf(), kelly_fraction(), margin_pmf_for(), add_model_mu() (+211 more)
 
 ### Community 29 - "NBA game two prop projections"
 Cohesion: 0.06
 Nodes (40): appearances(), box_tables(), build(), check_close_prior(), consensus_number(), empty_times(), fit_shape(), latest_team() (+32 more)
 
 ### Community 30 - "NCAAB in-play search study"
-Cohesion: 0.07
-Nodes (41): season(), _pitcher_rolling_all(), _season_avg(), assign_fetch(), best(), blind(), boot_ci(), _cached() (+33 more)
+Cohesion: 0.10
+Nodes (26): assign_fetch(), best(), blind(), boot_ci(), calibration(), cell_verdict(), clean_games(), _conn() (+18 more)
 
 ### Community 31 - "Supabase database schema tables"
 Cohesion: 0.03
 Nodes (96): api_call_log, app_errors, device_push_tokens, feedback_messages, feedback_threads, fighters, golf_players, golf_rounds (+88 more)
 
 ### Community 32 - "test_nba_postseason_gate.py"
-Cohesion: 0.05
-Nodes (35): _season_label(), slate(), _Conn, _frame(), _ids(), _misdated_rows(), _post(), _python_sources() (+27 more)
+Cohesion: 0.06
+Nodes (33): _season_label(), _Conn, _frame(), _ids(), _misdated_rows(), _post(), _python_sources(), _reg() (+25 more)
 
 ### Community 33 - "r4_lib.py"
 Cohesion: 0.04
@@ -1594,39 +1554,39 @@ Nodes (41): anchor(), archive_check(), averages(), best_per_event(), _by_bo(), _
 
 ### Community 35 - "test_nba_game2_projection.py"
 Cohesion: 0.05
-Nodes (46): _box(), _cons(), _dist(), _emit_world(), _games(), _games_file(), _inj(), _neutral() (+38 more)
+Nodes (47): _box(), _cons(), _dist(), _emit_world(), _games(), _games_file(), _inj(), _neutral() (+39 more)
 
 ### Community 36 - "CFBD ingestor parsing tests"
 Cohesion: 0.03
-Nodes (42): _day_before(), parse_lines(), shrink_to_prior(), _stat_row(), citadel_registry(), fbs_registry(), fcs_visitor_registry(), full_registry() (+34 more)
+Nodes (60): build_ncaaf_game_id(), eastern_game_date(), _local_aggregates(), ncaaf_slug(), parse_lines(), parse_teams(), shrink_to_prior(), _split_ratio() (+52 more)
 
 ### Community 37 - "NBA lineup stints from play-by-play"
 Cohesion: 0.05
-Nodes (48): alias_play_ids(), score_plays(), _accumulate(), _add_one(), appearances(), _athletes(), _blank(), classify_field_goal() (+40 more)
+Nodes (48): roster_from_plays(), score_plays(), _accumulate(), _add_one(), _and_one_follows(), appearances(), _athletes(), _blank() (+40 more)
 
 ### Community 38 - "SettingsScreen.tsx"
 Cohesion: 0.01
-Nodes (303): appJson, appSrc, authSrc, failures, picksSrc, pkg, pushSrc, signInSrc (+295 more)
+Nodes (322): react, @types/react, typescript, main, name, private, version, appJson (+314 more)
 
 ### Community 39 - "NFL in-play executor decision tests"
-Cohesion: 0.04
-Nodes (67): american_to_decimal(), Decision, derivative_lag(), ev_floor(), Executor, _mk(), expected_value(), honest_probability() (+59 more)
+Cohesion: 0.06
+Nodes (48): Decision, derivative_lag(), ev_floor(), Executor, _mk(), expected_value(), honest_probability(), is_hunt_state() (+40 more)
 
-### Community 40 - "ParlayScreen.tsx"
-Cohesion: 0.01
-Nodes (280): barPickA, barPickB, barPicks, BOOKS, correlated, custom, ghost, ghostKeys (+272 more)
+### Community 40 - "parlay.ts"
+Cohesion: 0.02
+Nodes (132): barPickA, barPickB, barPicks, BOOKS, correlated, custom, ghost, ghostKeys (+124 more)
 
 ### Community 41 - "Live quote staleness, gameday lock"
-Cohesion: 0.05
-Nodes (41): build_row(), quote_from_nfl_quotes(), rows_from_quote(), _abbrev(), rows_for_quotes(), quote_predates_score(), _parse_book_markets(), parse_event_odds() (+33 more)
+Cohesion: 0.04
+Nodes (45): build_row(), quote_from_nfl_quotes(), rows_from_quote(), _abbrev(), rows_for_quotes(), ScoreClock, _parse_book_markets(), parse_event_odds() (+37 more)
 
-### Community 42 - "ncaabw_total_card.py"
-Cohesion: 0.07
-Nodes (36): Quote, valid_total(), artifact(), CardIncomplete, d1_team_ids(), decided_games(), enabled(), ensure_decisions_table() (+28 more)
+### Community 42 - "nba_schedule_refresh.py"
+Cohesion: 0.05
+Nodes (42): apply(), core_event(), core_month(), _core_team(), _counts(), event_rows(), feed_shows(), fetch_core() (+34 more)
 
 ### Community 43 - "Job queue, deploy check tests"
-Cohesion: 0.03
-Nodes (54): _posted_row(), _quiet(), _run_void(), _run_void_job(), test_a_failed_job_needs_a_new_key_to_rerun(), test_a_graded_pick_is_refused_not_rewritten(), test_a_pick_that_does_not_exist_is_reported_as_missing(), test_a_real_model_id_validates() (+46 more)
+Cohesion: 0.02
+Nodes (74): _fake(), _Conn, _DedupeConn, _posted_row(), _quiet(), _run_void(), _run_void_job(), test_a_busy_queue_claims_nothing() (+66 more)
 
 ### Community 44 - "build_nfl_live_leader_artifact.py"
 Cohesion: 0.09
@@ -1636,65 +1596,65 @@ Nodes (26): wp_design(), wp_lookup(), attach_games(), build_artifact(), check_po
 Cohesion: 0.06
 Nodes (25): publish_hour_missed(), publishable_games(), _at(), _Conn, _games(), _Log, test_a_game_is_publishable_on_exactly_one_pass_in_its_window(), test_a_game_with_no_kickoff_is_never_published() (+17 more)
 
-### Community 46 - "types/index.ts"
+### Community 46 - "thresholds.ts"
 Cohesion: 0.01
-Nodes (355): scorable, all, COUNTED_MODELS, empty, games, hrOnly, liveDay, nhlScope (+347 more)
+Nodes (476): In the app (2026-11-10), all, COUNTED_MODELS, empty, games, hrOnly, liveDay, nhlScope (+468 more)
 
-### Community 47 - "nba_first_half_total_luck_replay.py"
-Cohesion: 0.03
-Nodes (41): load_artifact(), load_artifact(), load_artifact(), artifact(), _bound(), _graded_bets(), lab_bets(), lab_gaps() (+33 more)
+### Community 47 - "nba_total_luck_card.py"
+Cohesion: 0.05
+Nodes (31): starts_disagree(), load_artifact(), artifact(), decided_games(), ensure_decisions_table(), ledger_exists(), load_quote_rows(), load_season() (+23 more)
 
 ### Community 48 - "Calibration watch change tests"
 Cohesion: 0.04
 Nodes (22): _Conn, _Res, _row(), TestDormantLiveModels, TestItNeverDecides, TestRosterChanges, TestTheRun, TestVerdictChanges (+14 more)
 
 ### Community 49 - "test_publish_key_identity.py"
-Cohesion: 0.03
-Nodes (39): _Conn, _sql_for(), test_a_started_game_is_still_never_published(), test_both_publishers_apply_the_apps_action_filter(), test_both_publishers_read_the_table_the_app_reads(), test_capture_reaches_as_far_as_the_poller_can_write(), test_capture_reaches_forward_for_the_locked_lookahead_sports(), test_ncaaf_lookahead_is_only_safe_because_the_lock_is_general() (+31 more)
+Cohesion: 0.05
+Nodes (24): _Conn, _key(), _KeyConn, _mobile(), _sql(), test_a_game_level_live_row_keeps_the_key_it_was_published_under(), test_a_game_level_row_keeps_the_key_it_was_published_under(), test_a_player_id_row_keeps_the_key_it_was_published_under() (+16 more)
 
 ### Community 50 - "Worker scheduler and catch-up jobs"
 Cohesion: 0.03
-Nodes (89): Refresh, abort_orphaned_refresh_runs(), build_scheduler(), _add_job(), _with_heartbeat(), _wrapped(), catch_up_daily_pipeline(), catch_up_refresh_pass() (+81 more)
+Nodes (87): _run_migrations(), serve_in_thread(), abort_orphaned_refresh_runs(), build_scheduler(), _add_job(), _with_heartbeat(), _wrapped(), catch_up_refresh_pass() (+79 more)
 
 ### Community 51 - "test_multi_book_odds.py"
 Cohesion: 0.05
-Nodes (25): _odds_query(), _OddsConn, _prop_markets(), _Resp, _source(), test_a_game_with_no_commence_time_keeps_every_row(), test_a_rejected_book_list_falls_back_to_the_decision_book(), _get() (+17 more)
+Nodes (26): _odds_query(), _OddsConn, _prop_markets(), _Resp, _source(), test_a_game_with_no_commence_time_keeps_every_row(), test_a_rejected_book_list_falls_back_to_the_decision_book(), _get() (+18 more)
 
-### Community 52 - "PicksHomeScreen.tsx"
-Cohesion: 0.02
-Nodes (180): boardDates, detail, empty, every, filters, gfs, linkRow, oneDay (+172 more)
+### Community 52 - "nba_game7_news.py"
+Cohesion: 0.05
+Nodes (38): at_fetch(), bands(), before_report_share(), blinds(), cell_rows(), centre_lookup(), centres(), choose_first_event() (+30 more)
 
 ### Community 53 - "nba_s_starters.py"
-Cohesion: 0.08
-Nodes (29): beta_mismatch(), cell_specs(), credit(), credit_table(), drop_unpriceable(), engine(), engine_check(), _fingerprint() (+21 more)
+Cohesion: 0.04
+Nodes (61): beta_mismatch(), build_engine(), cell_specs(), counts(), credit(), credit_table(), _dates(), drop_impossible() (+53 more)
 
-### Community 54 - "lab.py"
-Cohesion: 0.05
-Nodes (41): fit(), from_json(), _ge(), home_cover(), _interp(), mean_for_cover(), probs(), to_json() (+33 more)
+### Community 54 - "nba_game2_market.py"
+Cohesion: 0.06
+Nodes (37): cache_for(), check_cells(), combine_times(), f2_cells(), f2_point(), f6a_placebo(), f6a_point(), f6a_strength() (+29 more)
 
-### Community 55 - "_lab"
-Cohesion: 0.13
-Nodes (12): _action_mask(), artifact_from_dict(), choose_bets(), decide_first_fetch(), fetch_quotes(), in_play_state(), _lab(), live_bounds() (+4 more)
+### Community 55 - "nba_live_ig2.py"
+Cohesion: 0.06
+Nodes (28): _action_mask(), Artifact, artifact_from_dict(), cannot_both_win(), choose_bets(), decide(), decide_first_fetch(), Decision (+20 more)
 
 ### Community 56 - "Daily pipeline retry decision tests"
 Cohesion: 0.03
-Nodes (89): _aborted(), _aborted_row(), _Conn, _Cursor, _FrozenDatetime, _killed_ledger(), _ok(), _ok_row() (+81 more)
+Nodes (83): catch_up_daily_pipeline(), _aborted(), _aborted_row(), _Conn, _Cursor, _FrozenDatetime, _ok(), _ok_row() (+75 more)
 
 ### Community 57 - "Live book move guard tests"
-Cohesion: 0.09
-Nodes (32): american_to_implied(), BookMoveClock, _Unset, _at(), _delaware_ctx(), _dk(), _iso(), _ncaaf_engine() (+24 more)
+Cohesion: 0.07
+Nodes (38): american_to_implied(), BookMoveClock, _at(), _delaware_ctx(), _dk(), _iso(), _mlb_odds(), _mlb_ts() (+30 more)
 
 ### Community 58 - "datagolf_ingestor.py"
-Cohesion: 0.05
-Nodes (45): _american(), backfill_golf_rounds(), build_game_id(), _dg_get(), _earliest_commence_iso(), event_slug(), ingest_golf_field(), ingest_golf_odds() (+37 more)
+Cohesion: 0.03
+Nodes (70): _american(), backfill_golf_rounds(), build_game_id(), _dg_get(), _earliest_commence_iso(), _event_meta_lookup(), event_slug(), ingest_golf_field() (+62 more)
 
-### Community 59 - "nhl_live_artifact_grade.py"
-Cohesion: 0.06
-Nodes (43): build_training_dataset(), accuracy(), first_games(), logloss(), main(), sweep(), units(), walk() (+35 more)
+### Community 59 - "summarise"
+Cohesion: 0.02
+Nodes (141): build_training_dataset(), load_calibrations(), american_b(), bettable(), boot_roi(), brier(), design(), fit_market() (+133 more)
 
 ### Community 60 - "WNBA player availability features and tests"
-Cohesion: 0.06
-Nodes (50): absence_features(), absent_teammates(), build_context_features(), expected_rotation(), is_starter_tier(), _mean(), prior_rows(), recent_team_game_dates() (+42 more)
+Cohesion: 0.07
+Nodes (43): absence_features(), absent_teammates(), build_context_features(), expected_rotation(), is_starter_tier(), _mean(), prior_rows(), recent_team_game_dates() (+35 more)
 
 ### Community 61 - "_periods"
 Cohesion: 0.17
@@ -1702,83 +1662,83 @@ Nodes (18): _periods(), _pick(), _settle(), _settled(), _stored(), test_a_failed
 
 ### Community 62 - "NBA game market research lab"
 Cohesion: 0.05
-Nodes (60): 8.2 P2, the first search's market rules: choices fixed before any P2 cell was graded (2026-10-18), assemble(), _assert_spread_sign(), attach_close(), bars(), bet_frame(), blind_bets(), blind_first_fetch() (+52 more)
+Nodes (61): 8.2 P2, the first search's market rules: choices fixed before any P2 cell was graded (2026-10-18), assemble(), _assert_spread_sign(), attach_close(), bars(), bet_frame(), blind_bets(), blind_first_fetch() (+53 more)
 
-### Community 63 - "ncaab_first_half_odds.py"
-Cohesion: 0.06
-Nodes (26): due_mark(), reserve_days(), slots(), _book(), FakeConn, test_a_due_game_is_bought_once_with_all_four_markets_and_ledgered(), test_a_failed_history_fetch_waits_for_the_next_time_but_the_decision_is_retried(), test_a_flipped_event_is_parsed_in_espn_s_orientation() (+18 more)
+### Community 63 - "nba_box_enrich.py"
+Cohesion: 0.07
+Nodes (48): _blank(), box_rows(), _check_unmapped(), _create(), dnp_kind(), ensure_tables(), fetch_advanced(), _flt() (+40 more)
 
 ### Community 64 - "pick_landing.py"
 Cohesion: 0.05
 Nodes (46): test_fill_matches_the_app_for_the_stored_shapes(), _pick(), test_a_failed_read_does_not_include_the_error(), test_a_live_pick_does_not_use_a_pregame_quote(), test_a_missing_pick_does_not_open_the_app(), test_a_non_bet_lists_nothing(), test_an_unposted_pick_is_not_readable_from_the_query(), test_the_five_books_are_listed_when_only_draftkings_has_a_price() (+38 more)
 
 ### Community 65 - "ncaabw_live_loop.py"
-Cohesion: 0.05
-Nodes (32): release_read(), header_state(), rows_from_events(), summary_rows(), load_games_window(), make_resolver(), ledger_ready(), unsettled_bet_dates() (+24 more)
+Cohesion: 0.04
+Nodes (43): release_read(), record_credits(), header_state(), rows_from_events(), summary_rows(), record_credits(), record_credits(), cannot_both_win() (+35 more)
 
 ### Community 66 - "NFL props model write-ups"
-Cohesion: 0.06
-Nodes (45): tackles_assists +21% is a measurement error (control), Prompt: build a profitable NFL player-props model, Traps specific to props, docs/nfl_props_model.md, Anytime TD field de-vig: closed, #215 artifacts could not be deserialised, betonlineag as a second sharp reference (OR, not AND), Book census: 14 books served, 6 used (+37 more)
+Cohesion: 0.09
+Nodes (27): tackles_assists +21% is a measurement error (control), Prompt: build a profitable NFL player-props model, Traps specific to props, docs/nfl_props_model.md, Anytime TD field de-vig: closed, betonlineag as a second sharp reference (OR, not AND), Book census: 14 books served, 6 used, Calibration tracks sample size, not market quality (+19 more)
 
 ### Community 67 - "test_record_correction_post.py"
-Cohesion: 0.04
-Nodes (36): record_restatement_approved(), RecordRestatementRefused, require_record_restatement_approval(), delete_custom_record_post(), _jump(), LedgerUnread, _place(), _publish() (+28 more)
+Cohesion: 0.03
+Nodes (65): record_restatement_approved(), RecordRestatementRefused, require_record_restatement_approval(), delete_custom_record_post(), _jump(), LedgerUnread, _pin(), _place() (+57 more)
 
 ### Community 68 - "nfl_edge_qb_wind.py"
 Cohesion: 0.10
-Nodes (42): band_table(), bh(), build_priced(), decisions_2026(), decisions_hist(), era5_hourly(), fc_at_decision(), fetch_2026() (+34 more)
+Nodes (43): band_table(), bh(), build_priced(), decisions_2026(), decisions_hist(), era5_hourly(), fc_at_decision(), fetch_2026() (+35 more)
 
-### Community 69 - "pick_problems"
-Cohesion: 0.03
-Nodes (46): _add_pick(), _Conn, discord_sent(), _first_half_sig(), _health(), health_db(), _Shim, test_a_label_may_not_name_a_market_the_pick_does_not_settle_on() (+38 more)
+### Community 69 - "test_monitoring.py"
+Cohesion: 0.05
+Nodes (37): _credits_from(), _redact(), _scrub(), _get(), _perf_rows(), _Resp, _run_exit_child(), test_a_call_is_charged_its_own_bill_not_the_accounts_other_spend() (+29 more)
 
 ### Community 70 - "One pick per event record tests"
-Cohesion: 0.05
+Cohesion: 0.04
 Nodes (42): _CaptureConn, _code(), _copy_for_node(), _fn(), _node(), _read(), _RecordingConn, test_a_custom_model_counts_the_kept_copy_once() (+34 more)
 
 ### Community 71 - "ncaab_live_ig.py"
 Cohesion: 0.05
-Nodes (31): Artifact, artifact_from_dict(), choose(), dec(), decision_offers(), drop_outliers(), eligible_quotes(), ev_of() (+23 more)
+Nodes (30): Artifact, artifact_from_dict(), choose(), dec(), decision_offers(), drop_outliers(), eligible_quotes(), ev_of() (+22 more)
 
-### Community 72 - "ncaab_total_blend.py"
-Cohesion: 0.03
-Nodes (57): box_pairs(), day_number(), dec(), decide(), Decision, dedupe_box(), end_ns_of(), EndState (+49 more)
+### Community 72 - "ncaab_total_blend_build.py"
+Cohesion: 0.14
+Nodes (15): by_season(), card_path(), features_all(), grade(), load(), main(), match_card_path(), match_contests() (+7 more)
 
 ### Community 73 - "NFL in-play player prop projection tests"
-Cohesion: 0.05
-Nodes (51): evaluate(), _infer_position(), main(), _pool_prior(), report(), _rows_for_market(), _to_states(), accrual_at() (+43 more)
+Cohesion: 0.08
+Nodes (35): _to_states(), _accrued(), _count(), detect_inactive(), price_over(), project(), PropProjection, _rate() (+27 more)
 
 ### Community 74 - "ast"
 Cohesion: 0.09
 Nodes (18): _fn(), test_a_backfill_failure_never_breaks_settlement(), test_a_pick_is_only_stamped_captured_once_a_measure_resolved(), test_a_pick_stamped_after_first_pitch_is_never_measured(), test_a_prop_pick_whose_label_has_no_name_is_skipped_not_guessed(), test_both_guards_agree(), test_clv_pct_never_compares_prices_across_a_moved_line(), test_every_prop_model_maps_to_a_dk_market() (+10 more)
 
 ### Community 75 - "nfl_edge_gameline_rules.py"
-Cohesion: 0.09
-Nodes (47): ats(), bettable_ats(), bh(), board_at(), board_open(), bstat(), cell(), conference() (+39 more)
+Cohesion: 0.08
+Nodes (48): ats(), bettable_ats(), bh(), board_at(), board_open(), bstat(), cell(), conference() (+40 more)
 
-### Community 76 - "test_live_slate_midnight.py"
-Cohesion: 0.10
-Nodes (10): _at(), test_both_live_loops_share_one_definition_of_the_slate(), test_by_daytime_yesterday_is_dropped(), test_just_after_midnight_still_asks_about_yesterday(), test_just_before_midnight_asks_about_today_only(), test_the_apps_live_hook_resolves_the_window_per_fetch(), test_the_apps_live_reads_take_a_LIST_of_dates(), test_the_ncaaf_live_loop_got_the_same_fix() (+2 more)
+### Community 76 - "ufc_prop_history.py"
+Cohesion: 0.08
+Nodes (38): american(), Cell, chart_jobs(), chart_key(), chart_path(), chart_query(), compact(), decimal_to_american() (+30 more)
 
 ### Community 77 - "WNBA prop market card tests"
 Cohesion: 0.05
 Nodes (30): apply_price_floor(), norm_name(), pick_rows(), player_ids(), publish(), render(), run_card(), slate() (+22 more)
 
 ### Community 78 - "test_nfl_scored_rows.py"
-Cohesion: 0.07
-Nodes (20): _model_lock_key(), _After, _bet_row(), _Conn, _dump(), _eval(), _kick(), _lock_index() (+12 more)
+Cohesion: 0.05
+Nodes (27): _american_to_prob(), build_scored_rows(), _fmt_spread(), latest_eval_rows(), _num(), _After, _bet_row(), _Conn (+19 more)
 
 ### Community 79 - "test_byom_official_legs.py"
-Cohesion: 0.03
-Nodes (38): _close_h2h(), _legs(), _prop_bets(), _q(), _record(), _save(), _seed_half_yards(), test_a_damaged_byom_legs_body_rebuilds_despite_the_skip_guard() (+30 more)
+Cohesion: 0.02
+Nodes (69): _adapt_sql(), NoCommit, _close_h2h(), _legs(), _prop_bets(), _record(), _save(), _seed_half_yards() (+61 more)
 
 ### Community 80 - "NBA search postseason study"
 Cohesion: 0.03
 Nodes (82): apply_caps(), archive_outside(), band_counts(), n(), band_rows(), cap_rows(), capped_frame(), card_offers() (+74 more)
 
 ### Community 81 - "NHL market lab and CLV assessment docs"
-Cohesion: 0.09
-Nodes (35): DraftKings de-vigged price sits above realised over-rate, Anytime goalscorer: not a candidate once names corrected, nhl_moneyline and nhl_moneyline_regulation: no cut clears, NHL derivative totals: team, alternate, first period, scripts/nhl_derivative_totals_backtest, data/ingestors/nhl_derivative_odds_history, Team-total under flips sign between regulation and full-game goals, NHL market lab (+27 more)
+Cohesion: 0.08
+Nodes (40): DraftKings de-vigged price sits above realised over-rate, NHL models CLV and EV assessment (2026-10-08), Anytime goalscorer: not a candidate once names corrected, nhl_moneyline and nhl_moneyline_regulation: no cut clears, Game models: lock later? Refuted, Name-key matching attached prices to both namesakes, nhl_research worker job, The overnight pass takes the night's slots (+32 more)
 
 ### Community 82 - "uk_sp_fundamentals.py"
 Cohesion: 0.02
@@ -1786,27 +1746,27 @@ Nodes (145): commission_schedule(), data_checks(), devig(), fmt(), harville_top(
 
 ### Community 83 - "test_model_quality.py"
 Cohesion: 0.04
-Nodes (47): duplicate_copy_exclusion_sql(), record_exclusion_sql(), _bet(), _fade_slate(), _insert_open_bet(), _Shim, test_a_mixed_slate_is_ok(), test_all_home_ncaaf_slate_is_flagged_without_mlb_hardcoding() (+39 more)
+Nodes (44): record_exclusion_sql(), _bet(), _fade_slate(), _insert_open_bet(), _Shim, test_a_mixed_slate_is_ok(), test_all_home_ncaaf_slate_is_flagged_without_mlb_hardcoding(), test_all_unders_public_fade_risk_is_crit() (+36 more)
 
 ### Community 84 - "NBA prop cards across models"
-Cohesion: 0.05
-Nodes (47): ev_percentile(), choose(), _detail(), games_with_a_prop_bet(), main(), one_per_game(), per_night(), prop_bets_by_night() (+39 more)
+Cohesion: 0.08
+Nodes (32): one_per_game(), publish_across_models(), _Conn, _patch_looks(), _proj_bet(), _proj_dec(), _proj_rows(), _rule_bet() (+24 more)
 
 ### Community 85 - "Results recap skipped day retry tests"
-Cohesion: 0.04
-Nodes (29): _add_pick(), _grade(), _lite(), _LiteConn, _schema(), test_a_day_with_nothing_counting_posts_nothing_and_logs_nothing(), test_a_failed_receipt_never_reposts_the_day(), test_a_later_snapshot_still_lands_after_the_ledger_commits() (+21 more)
+Cohesion: 0.05
+Nodes (25): _add_pick(), _grade(), _lite(), _LiteConn, _schema(), test_a_day_with_nothing_counting_posts_nothing_and_logs_nothing(), test_a_failed_receipt_never_reposts_the_day(), test_a_later_snapshot_still_lands_after_the_ledger_commits() (+17 more)
 
 ### Community 86 - "test_tennis_moneyline_card.py"
-Cohesion: 0.11
-Nodes (18): decide_event(), _pick(), _PublishConn, _Rows, _SettleConn, _stand(), test_a_bet_on_the_player_who_advances_after_a_retirement(), test_a_bet_on_the_retiring_player_settles_at_its_books_rule() (+10 more)
+Cohesion: 0.06
+Nodes (36): active_keys(), fold(), buy_pass(), CardIncomplete, decide_event(), decided_events(), due_events(), enabled() (+28 more)
 
-### Community 87 - "nba_prop_model_lab.py"
-Cohesion: 0.07
-Nodes (47): books(), expected_value(), implied(), _agg(), apply_rule(), binary_baselines(), binary_indep(), blind_same() (+39 more)
+### Community 87 - "freezeLog.ts"
+Cohesion: 0.09
+Nodes (42): harness(), Sent, session(), setTrailProvider(), AppStateName, beginFreezeLog(), configureFreezeLog(), Crumb (+34 more)
 
 ### Community 88 - "test_nba_prop_market.py"
-Cohesion: 0.07
-Nodes (38): fair_under(), q(), _quotes_at(), run(), run_full(), _settle(), _SettleConn, test_a_fetch_after_now_or_at_tip_and_a_close_row_never_decide() (+30 more)
+Cohesion: 0.04
+Nodes (61): fair_under(), _LookConn, _one_look(), _po_game(), _po_quotes(), q(), _quotes_at(), _rows_of() (+53 more)
 
 ### Community 89 - "Mobile accessibility audit script"
 Cohesion: 0.03
@@ -1814,135 +1774,135 @@ Nodes (70): a11ySrc, allowHit, ALLOWLIST, app, badExempt, bar, bareClose, baseli
 
 ### Community 90 - "test_nba_total_luck.py"
 Cohesion: 0.03
-Nodes (83): decide(), Decision, lead_minutes(), newest_season(), pricing_dist(), quote_frame(), scheduled_games(), team_box() (+75 more)
+Nodes (71): Decision, lead_minutes(), quote_frame(), timing(), TotalLuckBet, pick_label(), pick_rows(), _bet() (+63 more)
 
 ### Community 91 - "test_ncaaf_pbp_store.py"
 Cohesion: 0.09
-Nodes (18): load_season_from_db(), _report_ranges(), store_season(), _Conn, _plays(), test_a_rerun_updates_rather_than_duplicating(), test_a_season_in_neither_place_is_an_error_not_a_short_corpus(), test_a_season_survives_the_round_trip_in_the_cfbd_spelling() (+10 more)
+Nodes (17): load_season_from_db(), _report_ranges(), store_season(), _Conn, _plays(), test_a_rerun_updates_rather_than_duplicating(), test_a_season_in_neither_place_is_an_error_not_a_short_corpus(), test_a_season_survives_the_round_trip_in_the_cfbd_spelling() (+9 more)
 
 ### Community 92 - "NCAAF prop odds pull tests"
 Cohesion: 0.05
 Nodes (27): _market_chunks(), _Conn, _football_map(), resolver(), _Resp, scope(), test_a_book_we_did_not_ask_for_is_never_written(), test_a_day_with_no_college_games_spends_nothing() (+19 more)
 
 ### Community 93 - "PicksTimeSeries.tsx"
-Cohesion: 0.09
-Nodes (42): recharts, assignStableSlots(), AXIS_COLOR, axisProps, GRID_COLOR, gridProps, legendProps, OTHER_KEY (+34 more)
+Cohesion: 0.10
+Nodes (41): recharts, assignStableSlots(), AXIS_COLOR, axisProps, ChartTooltipBox(), colorsByIdentity(), GRID_COLOR, gridProps (+33 more)
 
 ### Community 94 - "test_calibration_promotion.py"
-Cohesion: 0.07
-Nodes (26): eligibility_clause(), load_calibrations(), maps_materially_differ(), promote(), FakeConn, _payload(), _row(), test_a_broken_table_is_identity_maps_not_an_exception() (+18 more)
+Cohesion: 0.06
+Nodes (28): eligibility_clause(), maps_materially_differ(), promote(), FakeConn, _payload(), _row(), test_a_broken_table_is_identity_maps_not_an_exception(), test_a_map_that_does_not_help_is_silent() (+20 more)
 
 ### Community 95 - "test_states.py"
-Cohesion: 0.13
-Nodes (22): build_states(), _platform(), _plays(), _post_convention_game(), _pre_convention_game(), test_a_scoring_plays_state_does_not_contain_its_own_points(), test_ambiguous_convention_refuses_to_build(), test_halftime_scores_carried_for_2h_settlement() (+14 more)
+Cohesion: 0.17
+Nodes (17): build_states(), _platform(), _plays(), _post_convention_game(), test_a_scoring_plays_state_does_not_contain_its_own_points(), test_halftime_scores_carried_for_2h_settlement(), test_join_key_is_exact_and_carries_the_line(), test_missing_pregame_line_filters_the_game() (+9 more)
 
 ### Community 96 - "run_watchdog"
-Cohesion: 0.04
-Nodes (50): _break_db(), _FakeConn, _FakeCursor, sink(), test_a_failed_post_does_not_start_the_throttle(), test_a_healthy_start_never_announces_a_recovery(), test_a_returning_outage_alerts_again_immediately(), test_a_silent_failure_alerter_is_caught_by_the_watchdog() (+42 more)
+Cohesion: 0.05
+Nodes (36): _break_db(), _FakeConn, _FakeCursor, test_a_failed_post_does_not_start_the_throttle(), test_a_healthy_start_never_announces_a_recovery(), test_a_returning_outage_alerts_again_immediately(), test_a_silent_failure_alerter_is_caught_by_the_watchdog(), test_a_stalled_pipeline_outranks_a_silent_alerter() (+28 more)
 
 ### Community 97 - "Scoring lease and tests"
 Cohesion: 0.06
 Nodes (22): Fake, test_a_database_that_cannot_be_opened_does_not_block_the_boot(), test_a_timed_out_wait_does_not_count_as_free(), test_acquire_locks_and_release_unlocks(), test_acquire_returns_none_when_the_lock_times_out(), test_boot_sweep_aborts_the_daily_when_the_lease_is_free(), test_boot_sweep_does_not_abort_a_daily_whose_lease_is_held(), test_drop_live_kinds_keeps_a_held_daily_out_of_the_sweep() (+14 more)
 
 ### Community 98 - "test_social_profile.py"
-Cohesion: 0.05
-Nodes (39): _code(), _creds(), _drain(), ProfileConn, _row(), _Rows, test_a_429_is_a_4xx_and_is_not_retried(), test_a_4xx_is_failed_and_not_retried() (+31 more)
+Cohesion: 0.08
+Nodes (25): _code(), _creds(), _drain(), ProfileConn, _row(), _Rows, test_a_429_is_a_4xx_and_is_not_retried(), test_a_4xx_is_failed_and_not_retried() (+17 more)
 
 ### Community 99 - "NBA search shot luck study"
 Cohesion: 0.04
 Nodes (56): side_strength(), _active(), added_signal(), as_of_luck(), assemble(), assemble_world(), best_offers(), bet_list() (+48 more)
 
-### Community 100 - "nhl_shot_events.py"
-Cohesion: 0.05
-Nodes (41): _cache_path(), fetch_pbp(), FetchFailed, game_list(), _session(), _write_cache(), attempts_frame(), build_goalie_rows() (+33 more)
+### Community 100 - "nba_game6_alt.py"
+Cohesion: 0.08
+Nodes (31): derivative_pricing(), _american(), band_cols(), blinds(), book_mains(), cache_alt(), clv_shaped(), eligible_offers() (+23 more)
 
 ### Community 101 - "test_ncaabw_total_blend.py"
-Cohesion: 0.05
-Nodes (56): logs(), test_a_1465_first_post_that_reached_the_decision_is_not_priced(), test_a_1465_total_is_never_priced_and_the_game_waits(), test_a_first_post_priced_beyond_100000_is_not_priced_and_waits(), test_a_normal_total_still_bets(), test_a_total_the_mens_range_allows_and_the_womens_does_not_waits(), test_an_absurd_total_edge_is_not_a_bet_and_fails_the_run(), _totals_run() (+48 more)
+Cohesion: 0.08
+Nodes (38): test_a_1465_first_post_that_reached_the_decision_is_not_priced(), _art(), _card_run(), _ClosingConn, _late_target(), _other(), _other_decision(), _prepared() (+30 more)
 
 ### Community 102 - "pandas"
 Cohesion: 0.01
-Nodes (243): box_rows(), dnp_kind(), minutes_to_float(), minutes_to_seconds(), starter_update_batches(), _int_or_none(), _num(), player_rows() (+235 more)
+Nodes (208): 12.5 Counts before grading (2026-10-28), espn_compact(), load_games(), main(), pivot_spreads(), pivot_totals(), load_games(), main() (+200 more)
 
 ### Community 103 - "euroleague_pregame.py"
-Cohesion: 0.05
-Nodes (37): Several bets on one game (measured 2026-11-17; two cuts built the same day), anchor(), artifact_path(), _best_per_side(), board_at(), _by_game(), cannot_both_win(), dec() (+29 more)
+Cohesion: 0.08
+Nodes (25): anchor(), _best_per_side(), _by_game(), dec(), decide_h1_dog(), decide_home_dog(), decide_home_ml(), decide_q1_share() (+17 more)
 
 ### Community 104 - "nfl_edge_preregistered_2026.py"
 Cohesion: 0.09
 Nodes (39): bar(), bets_frame(), bh(), binom_line(), _by_game(), cell(), fam(), first_last() (+31 more)
 
-### Community 105 - "summarise"
-Cohesion: 0.07
-Nodes (42): fit(), feed_prices(), fit_predict(), main(), ml_grid(), _nv(), pl_grid(), show() (+34 more)
+### Community 105 - "nba_pregame_window.py"
+Cohesion: 0.08
+Nodes (24): fetch(), main(), plan(), plan_tick(), _listed_without_a_row(), plan(), plan_tick(), undecided_games() (+16 more)
 
 ### Community 106 - "NBA first quarter trends study"
-Cohesion: 0.05
-Nodes (39): all_cells(), _asof(), counts(), emit(), full(), game_inputs(), game_numbers(), half_round() (+31 more)
+Cohesion: 0.07
+Nodes (34): 1. Data, decision time, prices, 2. Family M: the step's hot team on the first-quarter moneyline (4 cells), 3. Family T: the shooting-luck gap on the first-quarter total (8 cells), 4. Seasons and bars, 5. What a pass means, 6. Counts before grading (2026-11-07, `--counts`, no bet graded), 7. Results (graded 2026-11-07, run `2026-11-07-q1mt`), NBA search: first-quarter moneyline on the cover-record step, first-quarter total on the shooting-luck gap (pre-registered 2026-11-07, before any bet in it was graded) (+26 more)
 
 ### Community 107 - "nba_game2_luck.py"
 Cohesion: 0.04
-Nodes (52): 9.1 The bars, 9.2 The cells (54), 9.3 F7: what the shares are and how the period number is projected, 9.4 F8: the early season, 9.5 Do team period shares persist? (measured 2026-10-20, period scores only, no price), 9.6 Counts before grading, 9.7 What the lab writes, 9.8 Changes after the check, before any cell was graded (2026-10-20) (+44 more)
+Nodes (57): 9.1 The bars, 9.2 The cells (54), 9.3 F7: what the shares are and how the period number is projected, 9.4 F8: the early season, 9.5 Do team period shares persist? (measured 2026-10-20, period scores only, no price), 9.6 Counts before grading, 9.7 What the lab writes, 9.8 Changes after the check, before any cell was graded (2026-10-20) (+49 more)
 
 ### Community 108 - "test_nba_s_starters.py"
-Cohesion: 0.07
-Nodes (15): _dist(), _frame(), _gap_one(), _runs(), _seg(), test_a_game_alone_on_its_date_keeps_its_number_and_share_differs_says_so(), test_a_game_failing_the_guard_has_no_tilt(), test_a_placebo_gap_stays_on_its_date_and_never_touches_an_offer() (+7 more)
+Cohesion: 0.03
+Nodes (66): _box(), _cell(), _credit_cells(), _cuts(), _dist(), _fit_rows(), _frame(), _games() (+58 more)
 
-### Community 109 - "_adapt_sql"
-Cohesion: 0.05
-Nodes (35): _adapt_sql(), _convert_params(), _convert_params_outside_literals(), NoCommit, test_a_byom_legs_without_force_custom_plan_is_rebuilt_once(), test_a_damaged_body_is_rebuilt_once(), test_a_healthy_lock_bands_body_skips_the_rebuild(), test_a_second_pass_leaves_byom_legs_alone() (+27 more)
+### Community 109 - "golf_feature_engine.py"
+Cohesion: 0.07
+Nodes (29): assemble_player_features(), _avg_finish(), build_bulk_golf_lookups(), build_golf_training_dataset(), compute_golf_target(), compute_matchup_target(), _event_finishes(), _f() (+21 more)
 
 ### Community 110 - "Mobile line movement table tests"
 Cohesion: 0.07
 Nodes (28): _fn(), _read(), _run(), test_a_cut_table_keeps_the_pick_and_says_what_it_covers(), test_a_cut_window_keeps_the_pick_row_on_the_8_row_table(), test_a_pick_made_after_the_cards_start_never_reads_since_your_pick(), test_a_prop_priced_again_after_the_pick_keeps_its_at_pick_price(), test_after_the_start_the_verdict_is_not_graded() (+20 more)
 
 ### Community 111 - "live_calibration.py"
-Cohesion: 0.07
-Nodes (32): pick(), test_a_peak_with_no_plateau_anywhere_is_labelled_as_one(), test_a_prob_cut_and_an_ev_cut_select_different_picks(), test_calibration_also_scores_ev_against_realised_roi(), test_calibration_is_empty_rather_than_wrong_with_nothing_settled(), test_calibration_reports_the_gap_between_claim_and_reality(), test_expected_value_matches_the_hand_calculation(), test_expected_value_refuses_a_missing_or_zero_price() (+24 more)
+Cohesion: 0.05
+Nodes (39): 2. Schema, synthetic(), decide(), test_a_last_game_filter_waits_for_that_game_on_the_official_line(), official(), pick(), test_a_peak_with_no_plateau_anywhere_is_labelled_as_one(), test_a_prob_cut_and_an_ev_cut_select_different_picks() (+31 more)
 
 ### Community 112 - "NBA in-play game-state study"
 Cohesion: 0.07
-Nodes (35): norm_cdf(), threshold(), apply_model(), benchmark_columns(), decision_quotes(), delta_ci(), _design(), eligible() (+27 more)
+Nodes (34): norm_cdf(), apply_model(), benchmark_columns(), decision_quotes(), delta_ci(), _design(), eligible(), _expit() (+26 more)
 
 ### Community 113 - "NFL live leader gameday loop tests"
 Cohesion: 0.05
-Nodes (36): script(), Src, test_a_due_game_is_evaluated_on_the_board_with_no_provider_call(), test_draftkings_ahead_of_our_state_waits_without_spending_the_slot(), art(), FakeClock, FakeConn, FakeFeed (+28 more)
+Nodes (34): script(), Src, test_a_due_game_is_evaluated_on_the_board_with_no_provider_call(), test_draftkings_ahead_of_our_state_waits_without_spending_the_slot(), art(), FakeConn, FakeFeed, live_state() (+26 more)
 
 ### Community 114 - "test_nba_live_config.py"
 Cohesion: 0.06
-Nodes (20): _final_nba(), _nba_live_slate(), _registered_names(), test_a_covered_slate_with_its_row_and_its_call_is_ok(), test_a_game_still_in_span_at_go_live_with_no_row_is_stale(), test_a_moneyline_counts_overtime(), test_a_pickem_spread_is_labelled_pk(), test_a_post_go_live_slate_missing_a_row_and_a_call_is_stale() (+12 more)
+Nodes (21): _final_nba(), _nba_live_slate(), _registered_names(), test_a_covered_slate_with_its_row_and_its_call_is_ok(), test_a_game_still_in_span_at_go_live_with_no_row_is_stale(), test_a_live_pull_stores_an_nba_row_stamped_after_the_tip_as_in_play(), test_a_moneyline_counts_overtime(), test_a_pickem_spread_is_labelled_pk() (+13 more)
 
 ### Community 115 - "NBA offline prop placebo tests"
-Cohesion: 0.04
-Nodes (48): Counts before grading, _before(), _fake_pred(), fast_boot(), _frame_the_folds_read(), spy(), _keep_thread_setting(), _model_table() (+40 more)
+Cohesion: 0.05
+Nodes (35): _fake_pred(), fast_boot(), _frame_the_folds_read(), spy(), _keep_thread_setting(), _model_table(), _ol_rows(), _q() (+27 more)
 
-### Community 116 - "nba_prop_projection_lab.py"
-Cohesion: 0.10
-Nodes (45): bars(), bh_read(), blind(), boot(), by(), cal_ab(), candidates(), card_bets() (+37 more)
+### Community 116 - "math"
+Cohesion: 0.08
+Nodes (25): _as_float(), _as_int(), _as_opt_float(), _as_opt_int(), from_espn(), from_extract(), from_pbp_row(), smooth_pass_rate() (+17 more)
 
 ### Community 117 - "NBA lineup stint derivation tests"
 Cohesion: 0.07
-Nodes (50): _and_one_follows(), dead_ball_rebounds(), derive_stints(), ft_info(), order_plays(), possession_ends(), _blowout_q4(), derive() (+42 more)
+Nodes (50): derive_stints(), _garbage_ok(), garbage_start(), order_plays(), _blowout_q4(), derive(), dreb(), _dup_game() (+42 more)
 
 ### Community 118 - "sqlite3"
-Cohesion: 0.02
-Nodes (92): _fmt_et_time(), get_conn(), _price_or_none(), query(), _stake_cell(), _stake_or_none(), _units_cell(), 1. Data sources (+84 more)
+Cohesion: 0.01
+Nodes (125): _price_or_none(), _stake_cell(), _stake_or_none(), _units_at_risk(), _units_cell(), 1. Data sources, 3. Modeling, 4. CLV (+117 more)
 
 ### Community 119 - "NCAAF live pick notify tests"
-Cohesion: 0.07
-Nodes (16): _load_write_picks(), _restore_stubbed_modules(), test_a_failing_notifier_never_breaks_pricing(), test_a_full_slate_announces_once(), test_a_live_bet_notifies_push_and_discord(), test_a_locked_lane_is_not_rewritten(), test_a_locked_lane_keeps_notifying_after_the_engine_stops_betting(), test_a_locked_lane_still_reports_a_date_with_no_bet_this_pass() (+8 more)
+Cohesion: 0.05
+Nodes (18): _load_write_picks(), _restore_stubbed_modules(), test_a_caller_supplied_connection_is_not_closed_by_the_write(), test_a_failing_notifier_never_breaks_pricing(), test_a_full_slate_announces_once(), test_a_live_bet_notifies_push_and_discord(), test_a_locked_lane_is_not_rewritten(), test_a_locked_lane_keeps_notifying_after_the_engine_stops_betting() (+10 more)
 
 ### Community 120 - "NCAAF alias score mirroring tests"
 Cohesion: 0.08
-Nodes (31): alias_score_updates(), _date_or_none(), mirror_scores_to_alias_rows(), _cfbd(), _FakeConn, _FakeCursor, _row(), test_a_bare_substring_is_not_an_extension() (+23 more)
+Nodes (32): alias_score_updates(), mirror_scores_to_alias_rows(), mirror_stored_finals(), _slug_pair(), _cfbd(), _FakeConn, _FakeCursor, _row() (+24 more)
 
-### Community 121 - "ncaab_odds_history.py"
-Cohesion: 0.03
-Nodes (85): flush(), _write(), buy_one(), _write(), _write(), _write(), _write_with_retry(), buy() (+77 more)
+### Community 121 - "HealthOverview.tsx"
+Cohesion: 0.10
+Nodes (43): PanelLoading(), TableSkeleton(), BlockTip(), HealthBlocks(), Point, Props, ClvCell(), HealthOverview() (+35 more)
 
 ### Community 122 - "gate"
 Cohesion: 0.04
-Nodes (53): 1.1 2026-27: the live in-play prices, 1.2 2020-21 to 2025-26: the held in-play quotes, 1.3 Play-by-play and starters, 1.4 Results, 1. Data, attach_pinnacle(), box_checks(), build() (+45 more)
+Nodes (48): attach_pinnacle(), box_checks(), build(), drop_wild_wallclocks(), espn_map(), foul_flags(), is_heave(), keep_in_play() (+40 more)
 
 ### Community 123 - "Backtester summary and go-live gate tests"
 Cohesion: 0.07
@@ -1950,11 +1910,11 @@ Nodes (9): _calibration_error(), compute_backtest_summary(), _evaluate_result(),
 
 ### Community 124 - "NCAABW ESPN box score tests"
 Cohesion: 0.06
-Nodes (40): contest_id(), refused_run(), run_recent(), step_ncaab_box(), step_ncaabw_box(), Clock, Espn, _http_error() (+32 more)
+Nodes (37): run_recent(), step_ncaabw_box(), Clock, Espn, _http_error(), insert_reader_cases(), _insert_sdv(), _periods() (+29 more)
 
 ### Community 125 - "test_nba_q1_trend.py"
-Cohesion: 0.06
-Nodes (40): _build_dist(), decide(), record(), _f(), history_numbers(), inputs(), decide(), record() (+32 more)
+Cohesion: 0.04
+Nodes (48): parse_first_quarter(), _build_dist(), decide(), record(), _f(), history_numbers(), inputs(), load_artifact() (+40 more)
 
 ### Community 126 - "store.py"
 Cohesion: 0.11
@@ -1966,83 +1926,79 @@ Nodes (25): _blend_world(), _cell(), _grid(), _mid(), ran(), _tb_rows(), test_a_
 
 ### Community 128 - "Settled record immutability tests"
 Cohesion: 0.05
-Nodes (24): _code(), test_a_dedicated_live_lane_still_counts_and_a_pre_game_in_play_pick_does_not(), test_a_paused_model_is_not_an_excluded_model(), test_a_voided_pick_is_still_out_of_the_record(), test_both_published_views_keep_the_live_date_gate(), test_both_rules_name_the_two_exits_and_not_the_paused_flag(), test_both_views_are_redefined_by_name(), test_every_explicit_exclusion_names_who_asked_for_it() (+16 more)
+Nodes (23): _code(), test_a_dedicated_live_lane_still_counts_and_a_pre_game_in_play_pick_does_not(), test_a_paused_model_is_not_an_excluded_model(), test_a_voided_pick_is_still_out_of_the_record(), test_both_published_views_keep_the_live_date_gate(), test_both_rules_name_the_two_exits_and_not_the_paused_flag(), test_both_views_are_redefined_by_name(), test_every_explicit_exclusion_names_who_asked_for_it() (+15 more)
 
 ### Community 129 - "nba_prop_market_lab.py"
-Cohesion: 0.09
-Nodes (45): Definitions, add_units(), assemble(), best_per_key(), boot_ci(), build_quotes(), candidates_from(), choose_floor() (+37 more)
+Cohesion: 0.15
+Nodes (33): add_units(), assemble(), best_per_key(), boot_ci(), candidates_from(), choose_floor(), evaluate(), fmt() (+25 more)
 
 ### Community 130 - "nba_props.py"
-Cohesion: 0.04
-Nodes (73): Official pick and the bet list, minutes_cols(), predict_means(), rate_cols(), alias_key(), all_rates(), apply_calibration(), _attach_report_ids() (+65 more)
+Cohesion: 0.01
+Nodes (238): Official pick and the bet list, 14. A change before any grade: the points distribution (2026-11-03), 5.1 First-quarter minutes when he plays it, 5.2 Teammates' absences, 5.3 The per-minute rate, 5.4 The first-quarter factor and the count distribution, 5. The projection, asof_roster() (+230 more)
 
 ### Community 131 - "test_eggz_picks.py"
-Cohesion: 0.05
-Nodes (44): _army_tulsa(), _sqlite_pg(), test_a_bare_ncaab_line_is_a_slate_header_and_the_school_total_parses(), test_a_college_total_matches_the_two_school_names(), test_a_date_without_a_sport_is_a_slate_header(), test_a_discord_mention_is_not_a_row_and_does_not_renumber(), test_a_first_half_moneyline_or_total_is_not_the_full_game(), test_a_first_half_spread_is_not_graded_on_the_final() (+36 more)
+Cohesion: 0.04
+Nodes (48): _army_tulsa(), _recap_db(), _sqlite_pg(), test_a_bare_ncaab_line_is_a_slate_header_and_the_school_total_parses(), test_a_college_total_matches_the_two_school_names(), test_a_date_without_a_sport_is_a_slate_header(), test_a_discord_mention_is_not_a_row_and_does_not_renumber(), test_a_first_half_moneyline_or_total_is_not_the_full_game() (+40 more)
 
-### Community 132 - "get_connection"
-Cohesion: 0.01
-Nodes (199): sports_in_games(), get_connection(), main(), backfill_ncaaf(), backfill_ncaaf_lines(), backfill_ncaaf_players(), backfill_ncaaf_qb(), build_ncaaf_game_id() (+191 more)
+### Community 132 - "cfbd_ingestor.py"
+Cohesion: 0.05
+Nodes (39): backfill_ncaaf_lines(), backfill_ncaaf_players(), backfill_ncaaf_qb(), _date_or_none(), _day_before(), _existing_ncaaf_ids(), _fold(), ingest_ncaaf_game_log() (+31 more)
 
 ### Community 133 - "Bovada direct feed tests"
-Cohesion: 0.10
-Nodes (31): _american(), _complete(), _num(), parse_coupon(), _row_for(), _seen_key(), _stamp(), _coupon() (+23 more)
-
-### Community 134 - "_announce"
-Cohesion: 0.20
-Nodes (3): _announce(), _due_milestone(), _enabled()
+Cohesion: 0.11
+Nodes (29): _american(), _complete(), _num(), parse_coupon(), _row_for(), _seen_key(), _stamp(), _coupon() (+21 more)
 
 ### Community 135 - "PanelUtils.tsx"
-Cohesion: 0.05
-Nodes (95): @tanstack/react-table, ModelName(), useModelNames(), ChipGroup(), fmtDate(), fmtDuration(), fmtPct(), fmtUnits() (+87 more)
+Cohesion: 0.07
+Nodes (63): lucide-react, @tanstack/react-table, ModelName(), useModelNames(), ChipGroup(), fmtDate(), fmtPct(), fmtUnits() (+55 more)
 
 ### Community 136 - "NCAAF cross-book opener tests"
-Cohesion: 0.09
-Nodes (19): build_artifact(), build_band_artifact(), _branch(), test_absent_ceiling_means_unbounded(), test_artifact_shape(), test_band_ceiling_is_enforced_in_the_scorer(), test_band_volumes_sum_to_the_single_gate_backtest(), test_both_band_probs_clear_their_configured_floors() (+11 more)
+Cohesion: 0.07
+Nodes (25): _minutes_apart(), build_artifact(), build_band_artifact(), _branch(), test_absent_ceiling_means_unbounded(), test_artifact_shape(), test_band_ceiling_is_enforced_in_the_scorer(), test_band_volumes_sum_to_the_single_gate_backtest() (+17 more)
 
 ### Community 137 - "NBA shapes search tests"
 Cohesion: 0.03
-Nodes (42): built(), close_frame(), coarse_tables(), group(), quote(), slow_placebo_roi(), test_a_big_underdog_reads_a_smaller_chance_under_its_own_shape(), test_a_level_line_and_no_number_read_the_one_shape() (+34 more)
+Nodes (44): test_the_posting_run_sends_every_near_tip_pick_over_the_cap(), built(), close_frame(), coarse_tables(), group(), quote(), slow_placebo_roi(), test_a_big_underdog_reads_a_smaller_chance_under_its_own_shape() (+36 more)
 
 ### Community 138 - "Paused model keeps real verdict tests"
-Cohesion: 0.06
-Nodes (37): _bet(), _bodies(), _Capture, _code(), _fn(), _pause(), _prop(), _rules() (+29 more)
+Cohesion: 0.05
+Nodes (38): _bet(), _bodies(), _Capture, _code(), _dk(), _fn(), _game(), _pause() (+30 more)
 
-### Community 139 - "_get_live_dk_odds"
-Cohesion: 0.09
-Nodes (18): _book_move(), _get_live_dk_odds(), _mlb_odds(), _mlb_ts(), _MlbConn, test_mlb_declines_a_total_that_moved_a_full_run_on_an_unchanged_state(), test_mlb_first_sight_is_not_a_move(), test_mlb_keeps_a_total_that_has_not_moved_since_the_state_changed() (+10 more)
+### Community 139 - "nba_stats_ingestor.py"
+Cohesion: 0.08
+Nodes (25): fill_missing_game_logs(), backfill_nba_stats(), _box_adds_up(), boxes_to_repair(), _build_game_rows(), _build_player_log_rows(), _build_team_stat_rows(), _fetch_league_game_log() (+17 more)
 
 ### Community 140 - "pick_problems"
 Cohesion: 0.01
-Nodes (295): The shared gates every writer goes through, min_ev_for(), min_odds_for(), scoring_method(), parse_first_quarter(), mlb_spread_market 1.8pp run-line rule, mlb_total_market paper totals logger, implied() (+287 more)
+Nodes (208): min_odds_for(), min_edge_by_side (opt-in, tighten-only), implied(), newest_season(), Q1MLBet, newest_season(), Q1Bet, Quote (+200 more)
 
 ### Community 141 - "deriv_rules.py"
 Cohesion: 0.10
 Nodes (30): boot(), dec(), load(), one_per_game(), power_devig(), stake(), summ(), table() (+22 more)
 
 ### Community 142 - "Pregame prices current health tests"
-Cohesion: 0.05
-Nodes (52): _at(), _call(), _Conn, _game(), _kick(), _live_slate_calls(), _nba_today_and_friday(), _row() (+44 more)
+Cohesion: 0.06
+Nodes (51): _at(), _call(), _game(), _kick(), _live_slate_calls(), _nba_today_and_friday(), _row(), _run() (+43 more)
 
 ### Community 143 - "test_ddl_guard.py"
 Cohesion: 0.06
-Nodes (22): _ddl(), _dk_direct_feed(), GuardConn, _is_guarded(), _job_queue(), _kickoff_wind(), _modules_with_write_time_ddl(), _run_ledger() (+14 more)
+Nodes (22): _ddl(), _dk_direct_feed(), GuardConn, _is_guarded(), _job_queue(), _kickoff_wind(), _modules_with_write_time_ddl(), _monitoring() (+14 more)
 
 ### Community 144 - "nfl_edge_halftime_oos.py"
 Cohesion: 0.07
-Nodes (28): What the drain will not do, build(), cache_dir(), close_times(), compare(), graded(), load(), main() (+20 more)
+Nodes (29): How a row gets published, What the drain will not do, build(), cache_dir(), close_times(), compare(), graded(), load() (+21 more)
 
-### Community 145 - "run_one"
-Cohesion: 0.04
-Nodes (35): _Conn, test_a_declared_job_carries_its_run_after(), test_a_job_can_only_name_a_registered_check(), test_enqueue_rejects_a_naive_run_after(), test_enqueue_stores_run_after(), test_every_check_is_read_only(), test_the_claim_waits_for_run_after(), _fake() (+27 more)
+### Community 145 - "test_deploy_checks.py"
+Cohesion: 0.07
+Nodes (17): _Conn, test_a_declared_job_carries_its_run_after(), test_a_failing_check_raises_so_the_queue_announces_it(), test_a_job_can_only_name_a_registered_check(), test_enqueue_rejects_a_naive_run_after(), test_enqueue_stores_run_after(), test_every_check_is_read_only(), test_the_claim_waits_for_run_after() (+9 more)
 
-### Community 146 - "refresh_teams"
-Cohesion: 0.14
-Nodes (12): assign_slug(), _ensure_d1_registry(), _int(), merge_d1(), parse_team(), refresh_teams(), _registry(), _school_from_display() (+4 more)
+### Community 146 - "merge_d1"
+Cohesion: 0.29
+Nodes (5): _int(), merge_d1(), parse_team(), _school_from_display(), test_d1_is_the_union_of_teams_and_groups()
 
 ### Community 147 - "NFL extreme props edge study"
-Cohesion: 0.16
-Nodes (25): actuals(), add_modes(), bar(), candidates(), cell(), decision_boards(), devig(), fit_holdout() (+17 more)
+Cohesion: 0.12
+Nodes (29): actuals(), add_modes(), bar(), candidates(), cell(), decision_boards(), devig(), fit_holdout() (+21 more)
 
 ### Community 148 - "NFL prop settlement edge study"
 Cohesion: 0.14
@@ -2050,19 +2006,19 @@ Nodes (30): add_test(), attach(), banner(), bh(), board(), boot_draws(), cell(),
 
 ### Community 149 - "NBA results ingestor and settlement tests"
 Cohesion: 0.06
-Nodes (42): _ESPN, FakeStore, _FixedNow, _flip_store(), _game(), _post_run(), _post_store(), _PostESPN (+34 more)
+Nodes (38): _ESPN, FakeStore, _FixedNow, _flip_store(), _game(), _post_run(), _post_store(), _PostESPN (+30 more)
 
 ### Community 150 - "run_review"
-Cohesion: 0.12
-Nodes (16): _Conn, _slate(), test_a_losing_model_with_enough_bets_is_flagged(), test_a_losing_model_with_too_few_bets_is_left_alone(), test_a_milestone_fires_only_once(), test_a_model_paused_in_config_is_not_reported_again(), test_a_profitable_model_is_never_touched(), test_dry_run_decides_without_writing() (+8 more)
+Cohesion: 0.11
+Nodes (17): _Conn, _slate(), test_a_losing_model_with_enough_bets_is_flagged(), test_a_losing_model_with_too_few_bets_is_left_alone(), test_a_milestone_fires_only_once(), test_a_model_paused_in_config_is_not_reported_again(), test_a_profitable_model_is_never_touched(), test_an_already_paused_model_is_not_flagged_again() (+9 more)
 
 ### Community 151 - "Standing rules evidence doc"
 Cohesion: 0.07
 Nodes (13): Evidence behind the standing rules (rules_evidence.md), 'Decisions needed from you' is second person, never first, A model in config.MODELS with no FEATURE_MAP entry kills scoring for every sport, Every front-end change is reviewed by the UX designer agent before its PR opens, Gate the number that gets bet (cal_error_actionable), A health check must not gate on the thing that breaks, The settled live-prop record is zero bets, The Odds API returns x-requests-remaining on every response, including 401 (+5 more)
 
-### Community 152 - "view_migrations.py"
-Cohesion: 0.04
-Nodes (24): analyze_tables(), _anon_lock_started(), apply_view_migrations(), _is_transient_lock_error(), ViewMigrationResult, _with_lock_timeout(), _without_combined_anon_grants(), test_a_failed_analyze_is_skipped_not_raised() (+16 more)
+### Community 152 - "test_refresh_reads_prop_odds_after_the_game_legs_commit"
+Cohesion: 0.10
+Nodes (8): _season_events(), legs(), test_prop_seasons_commit_the_leg_write_before_the_next_odds_read(), test_refresh_reads_prop_odds_after_the_game_legs_commit(), test_the_next_season_reads_odds_after_the_official_write_commits(), facts(), test_full_asks_the_load_for_every_season_it_grades(), load()
 
 ### Community 153 - "Agents contract doc tests"
 Cohesion: 0.05
@@ -2070,23 +2026,23 @@ Nodes (20): _labelled_retired(), test_blocked_items_are_marked_so_the_agent_skip
 
 ### Community 154 - "ncaab_live_loop.py"
 Cohesion: 0.07
-Nodes (18): build_pick(), deciding_books(), evaluate_game(), evaluate_states(), GameCtx, insert_ledger(), ledger_row(), live_destination() (+10 more)
+Nodes (16): build_pick(), deciding_books(), evaluate_game(), evaluate_states(), GameCtx, insert_ledger(), ledger_row(), live_destination() (+8 more)
 
 ### Community 155 - "test_nba_s_shotluck.py"
 Cohesion: 0.04
-Nodes (42): _games(), _gap(), _lg(), _only_team_total_purchases(), _quotes(), _rates(), _shots(), _targets() (+34 more)
+Nodes (41): _games(), _gap(), _lg(), _only_team_total_purchases(), _quotes(), _rates(), _shots(), _targets() (+33 more)
 
 ### Community 156 - "NBA game model prop feature tests"
 Cohesion: 0.06
 Nodes (40): _box(), _g(), _games(), _inj(), _model(), _props(), _run(), _season_rows() (+32 more)
 
 ### Community 157 - "NCAAB odds capture"
-Cohesion: 0.06
-Nodes (41): capture(), drop_beyond_window(), drop_started(), enabled(), has_upcoming_games(), _key(), main(), split_changes() (+33 more)
+Cohesion: 0.05
+Nodes (45): The pick, capture(), drop_beyond_window(), drop_started(), enabled(), has_upcoming_games(), _key(), main() (+37 more)
 
 ### Community 158 - "euroleague_live_loop.py"
-Cohesion: 0.07
-Nodes (29): rows_from_events(), record_credits(), build_pick(), decided_games(), deciding_books(), GameCtx, in_progress(), insert_ledger() (+21 more)
+Cohesion: 0.08
+Nodes (22): rows_from_events(), build_pick(), decided_games(), deciding_books(), GameCtx, in_progress(), insert_ledger(), ledger_ready() (+14 more)
 
 ### Community 159 - "NCAABW live loop tests"
 Cohesion: 0.05
@@ -2097,128 +2053,128 @@ Cohesion: 0.03
 Nodes (60): autoprefixer, class-variance-authority, clsx, cmdk, code-inspector-plugin, embla-carousel-react, esbuild, input-otp (+52 more)
 
 ### Community 161 - "test_nba_s_popular.py"
-Cohesion: 0.04
-Nodes (46): closing_rows(), groups(), _h2h_world(), _inp(), _placebo_frame(), prep(), ran(), schedule() (+38 more)
+Cohesion: 0.08
+Nodes (3): _h2h_world(), test_the_control_leaves_out_what_the_floor_keeps_from_the_cell_and_a_level_market_has_no_underdog(), test_the_controls_games_do_not_depend_on_the_cut()
 
 ### Community 162 - "test_db_health.py"
 Cohesion: 0.05
-Nodes (25): _code(), _Cursor, _insert_columns(), _named_row(), _Recorder, _select_names(), test_a_due_run_writes_every_table_and_the_statement_text_once(), test_a_run_without_the_table_rows_writes_one_row_and_commits_once() (+17 more)
+Nodes (23): _code(), _Cursor, _insert_columns(), _named_row(), _Recorder, _select_names(), test_a_due_run_writes_every_table_and_the_statement_text_once(), test_a_run_without_the_table_rows_writes_one_row_and_commits_once() (+15 more)
 
 ### Community 163 - "NBA derivative market lab"
 Cohesion: 0.09
 Nodes (35): add_team(), am_to_dec(), bars_for(), bet_list(), blind(), boot_ci(), build_line_rows(), build_outcomes() (+27 more)
 
 ### Community 164 - "EuroLeague halftime in-play model"
-Cohesion: 0.05
-Nodes (38): Artifact, artifact_from_dict(), coherent(), covers(), decimal(), design(), _f(), fit() (+30 more)
+Cohesion: 0.06
+Nodes (26): Artifact, artifact_from_dict(), coherent(), covers(), decimal(), design(), _f(), fit() (+18 more)
 
 ### Community 165 - "NCAAB live loop, DraftKings tests"
 Cohesion: 0.03
-Nodes (52): Fetch, art(), board(), dk_window(), FakeDk, fouls(), make_board(), read() (+44 more)
+Nodes (53): Fetch, test_the_quota_floor_stops_fetching(), art(), board(), dk_window(), FakeDk, fouls(), make_board() (+45 more)
 
 ### Community 166 - "NCAAF derivative odds history tests"
 Cohesion: 0.03
-Nodes (117): _end_read(), build_plans(), buy_read(), coverage(), _day(), describe_plan(), _dry_run(), _eastern_date() (+109 more)
+Nodes (125): _end_read(), _rank(), _budget(), build_plans(), buy_read(), buy_many(), jobs(), run_date() (+117 more)
 
-### Community 167 - "NFL preflight checks, schema splitter"
-Cohesion: 0.08
-Nodes (24): _load_postgres_schema(), _run_migrations(), setup_database(), _split_sql_statements(), setup_database(), check(), check_cards_run(), check_config_gates() (+16 more)
+### Community 167 - "nfl_preflight.py"
+Cohesion: 0.19
+Nodes (17): _load_postgres_schema(), check(), check_cards_run(), check_config_gates(), check_cost(), check_data(), data_check(), check_import_shadowing() (+9 more)
 
 ### Community 168 - "NHL shot events parser"
-Cohesion: 0.10
-Nodes (30): _clock(), decode_situation(), _event_team_id(), GameMeta, parse_game(), _period(), period_sides(), process_game() (+22 more)
+Cohesion: 0.12
+Nodes (27): _clock(), decode_situation(), _event_team_id(), parse_game(), _period(), period_sides(), _shooter(), shooter_view() (+19 more)
 
-### Community 169 - "NCAABW team name resolver"
-Cohesion: 0.04
-Nodes (51): resolve(), build_ncaabw_game_id(), eastern_game_date(), _fold(), load_registry(), resolve(), match_event(), gap() (+43 more)
+### Community 169 - "ncaabw_odds_history.py"
+Cohesion: 0.02
+Nodes (88): _Billed, build_resolver(), ChangeKeeper, check_precondition(), check_resume(), _day_dir(), _dry_run(), EventResolver (+80 more)
 
 ### Community 170 - "NBA luck, build-your-own transaction tests"
 Cohesion: 0.06
 Nodes (37): _against_bet(), _f6c_inputs(), _games_for_standings(), _gs(), _market_pricing(), _one_game_data(), _pair(), _season() (+29 more)
 
 ### Community 171 - "_conditions"
-Cohesion: 0.09
+Cohesion: 0.08
 Nodes (8): _decided_by(), _listed(), NbaConn, pregame_et(), TestAModelThatLostAGame, TestTheRulesOwnWatch, _watch(), _conditions()
 
-### Community 172 - "decide_fight"
-Cohesion: 0.17
-Nodes (12): Decision, bets_decided_at(), decide_fight(), load_pull(), _utc(), _z(), _fight(), test_a_pull_below_the_cut_decides_nothing_until_the_week_out_mark() (+4 more)
+### Community 172 - "test_ufc_open_moneyline.py"
+Cohesion: 0.04
+Nodes (44): ufc_slugs(), american_to_decimal(), decide_pull(), Decision, fit(), logit(), novig_a(), opinion() (+36 more)
 
-### Community 173 - "official.py"
-Cohesion: 0.07
-Nodes (28): american_odds(), _quote_id(), _rank(), roles(), _best_by_snapshot(), _candidate(), _first(), first_fit() (+20 more)
+### Community 173 - "game_facts.py"
+Cohesion: 0.03
+Nodes (71): american_odds(), _choose(), grade_ats(), grade_ml(), grade_total(), lead_hours(), line_at_start(), _line_text() (+63 more)
 
 ### Community 174 - "clv_close_history.py"
-Cohesion: 0.09
-Nodes (27): game_for_event(), api_markets(), _billed(), due(), ledger(), parse_book(), pull(), store_quotes() (+19 more)
+Cohesion: 0.10
+Nodes (21): api_markets(), _billed(), due(), ledger(), parse_book(), pull(), store_quotes(), stored_market() (+13 more)
 
 ### Community 175 - "DraftKings direct feed tests"
-Cohesion: 0.19
-Nodes (13): _row_for(), _seen_key(), _rec(), test_a_line_move_is_a_new_quote(), test_a_market_we_do_not_understand_is_dropped_not_guessed(), test_a_price_move_is_a_new_quote(), test_a_priced_market_with_no_line_is_dropped(), test_every_row_is_tagged_dk_direct() (+5 more)
+Cohesion: 0.09
+Nodes (21): _row_for(), _seen_key(), _Conn, _rec(), test_a_line_move_is_a_new_quote(), test_a_market_we_do_not_understand_is_dropped_not_guessed(), test_a_price_move_is_a_new_quote(), test_a_priced_market_with_no_line_is_dropped() (+13 more)
 
-### Community 176 - "test_byom_nba_props.py"
-Cohesion: 0.08
-Nodes (27): is_standard_market(), _as_et(), current_nba_season(), current_nfl_season(), current_nhl_season(), _code(), test_the_function_is_invoker_and_has_no_price_or_line_filter(), test_the_season_label_is_the_year_the_season_starts() (+19 more)
+### Community 176 - "_market_for_pick"
+Cohesion: 0.05
+Nodes (28): test_config_carries_the_models_cut_floors_and_settlement(), Periods, _res(), test_a_tied_first_half_pushes_the_two_way_moneyline(), test_each_rule_settles_on_its_own_market(), test_periods_that_do_not_add_up_to_the_final_keep_the_pick_pending(), test_the_closing_line_recompute_treats_a_period_pick_like_the_ncaab_first_half(), test_the_first_half_is_quarters_one_and_two_and_overtime_never_counts() (+20 more)
 
 ### Community 177 - "test_ncaaf_feature_engine.py"
-Cohesion: 0.05
-Nodes (37): _assemble_ncaaf_features(), build_bulk_ncaaf_lookups(), _game_tier(), haversine_miles(), shrink_hfa(), tz_offset_from_lon(), _venue_features(), trip() (+29 more)
+Cohesion: 0.10
+Nodes (16): build_bulk_ncaaf_lookups(), haversine_miles(), shrink_hfa(), tz_offset_from_lon(), trip(), test_backtester_and_scorer_dispatch_ncaaf_explicitly(), test_backtester_feature_vector_exempts_sparse_columns(), test_bulk_asof_never_reads_a_future_snapshot() (+8 more)
 
 ### Community 178 - "ncaab_moneyline_first_post_card.py"
-Cohesion: 0.07
-Nodes (39): PostDecision, artifact(), bet_games(), CardIncomplete, decide(), decision_row(), _Decisions, enabled() (+31 more)
+Cohesion: 0.05
+Nodes (48): _book_reason(), decide_posts(), PostDecision, read(), the_bet(), too_close(), bet_games(), CardIncomplete (+40 more)
 
 ### Community 179 - "Mobile Expo app config"
 Cohesion: 0.05
 Nodes (39): backgroundColor, foregroundImage, adaptiveIcon, package, projectId, expo, android, extra (+31 more)
 
-### Community 180 - "_assert_no_link"
-Cohesion: 0.04
-Nodes (30): test_a_push_only_period_does_not_invent_an_roi(), test_the_period_tweet_uses_the_daily_tally_and_states_roi(), _split(), test_a_day_with_nothing_graded_carries_no_clv_line(), test_a_day_with_nothing_risked_states_units_and_does_not_divide(), test_a_full_post_stops_at_280_weighted_characters(), test_a_future_pause_row_does_not_stop_the_card(), test_a_long_post_keeps_the_date_and_the_matchup_and_gives_the_rest_to_the_body() (+22 more)
-
-### Community 181 - "injury_ingestor.py"
-Cohesion: 0.06
-Nodes (22): _athlete_name(), _compute_return_ramp(), _espn_team_ids(), fetch_espn_injuries(), _fetch_espn_team_injuries(), fetch_mlb_transactions(), _fetch_nba_espn_team_ids(), fetch_return_ramp_players() (+14 more)
-
-### Community 182 - "test_ncaab_feed_probe.py"
+### Community 180 - "weekly_wind_card.py"
 Cohesion: 0.08
-Nodes (22): _free_verdict(), fp(), _Conn, _http(), get(), Resp, _run(), test_a_free_call_that_billed_is_flagged() (+14 more)
+Nodes (19): bettable_books(), dump_eval_rows(), coverage_check(), expected_true_wind(), open_air_mask(), load_nfl_model(), boot_ci(), candidate_rows() (+11 more)
+
+### Community 181 - "feature_engine.py"
+Cohesion: 0.01
+Nodes (152): trusted_first_pitch(), _athlete_name(), _compute_return_ramp(), _espn_team_ids(), fetch_espn_injuries(), _fetch_espn_team_injuries(), fetch_mlb_transactions(), _fetch_nba_espn_team_ids() (+144 more)
+
+### Community 182 - "test_clv_price_taken.py"
+Cohesion: 0.07
+Nodes (22): _Conn, _fn(), _migration(), _pick(), _Res, test_a_draftkings_decided_row_is_unchanged(), test_a_legacy_row_that_cannot_be_re_measured_leaves_the_old_method(), test_a_legacy_stamped_row_is_re_measured_and_leaves_the_queue() (+14 more)
 
 ### Community 183 - "FakeConn"
 Cohesion: 0.11
-Nodes (8): _clean_runs(), FakeConn, _posts(), _state_dir(), TestDeliveryAndNoise, TestSilentJobs, TestWhatCountsAsAFailure, run_failure_alerter()
+Nodes (9): _clean_runs(), FakeConn, _posts(), _state_dir(), TestDeliveryAndNoise, TestItCannotBreakTheWorker, TestSilentJobs, TestWhatCountsAsAFailure (+1 more)
 
 ### Community 184 - "Mobile build workflow"
 Cohesion: 0.04
 Nodes (45): default, description, type, name, permissions, runs-on, steps, timeout-minutes (+37 more)
 
 ### Community 185 - "verify_error_states.ts"
-Cohesion: 0.04
-Nodes (48): abort, aborts, ALLOW, cases, chipSports, copy, D(), empty (+40 more)
+Cohesion: 0.05
+Nodes (55): abort, aborts, ALLOW, cases, chipSports, copy, D(), empty (+47 more)
 
 ### Community 186 - "hk_preoff_data.py"
-Cohesion: 0.07
+Cohesion: 0.06
 Nodes (42): 10. The counts this was written on (prices only, read 2026-11-06), 11. What a pass means, 12. Counts before grading (2026-11-06, `--counts`, no bet graded), 13. Results (graded 2026-11-06, run `2026-11-06-q1anchor`), 14. Would the near miss bet live? (measured 2026-11-06, after the grade), 1. The idea, 2. The population, 3. The anchor: the same player's full-game quote, same stat, same fetch (+34 more)
 
 ### Community 187 - "nba_game4_p3.py"
-Cohesion: 0.05
-Nodes (40): 1. Data, decision time, prices, 2. Family M: the step's hot team on the first-quarter moneyline (4 cells), 3. Family T: the shooting-luck gap on the first-quarter total (8 cells), 4. Seasons and bars, 5. What a pass means, 6. Counts before grading (2026-11-07, `--counts`, no bet graded), 7. Results (graded 2026-11-07, run `2026-11-07-q1mt`), NBA search: first-quarter moneyline on the cover-record step, first-quarter total on the shooting-luck gap (pre-registered 2026-11-07, before any bet in it was graded) (+32 more)
+Cohesion: 0.07
+Nodes (32): calibrated_refs(), cell_specs(), choosing(), decision_quotes(), derivative_data(), emit_f1(), emit_f4(), f1_fair() (+24 more)
 
 ### Community 188 - "Pipeline step timing tests"
 Cohesion: 0.06
 Nodes (11): test_a_dead_database_does_not_fail_the_step(), test_a_raised_failure_still_records_the_exception(), test_a_step_that_raises_is_still_TIMED(), test_a_step_that_raises_still_raises(), boom(), test_a_step_that_returns_false_records_a_REASON(), test_a_successful_step_records_a_duration(), test_every_step_name_in_the_dispatch_table_is_reachable() (+3 more)
 
 ### Community 189 - "test_prune_keeps_the_close.py"
-Cohesion: 0.07
-Nodes (25): _game(), _props(), _prune(), _prune_props(), _quotes(), test_a_first_pitch_more_than_an_hour_early_is_ignored(), test_a_game_quoted_only_after_its_start_keeps_its_opener_and_no_close(), test_a_row_exactly_at_the_start_is_the_close() (+17 more)
+Cohesion: 0.05
+Nodes (29): Budget, BudgetSpent, _day(), prune_table(), test_a_one_row_budget_stops_after_one_deleting_statement(), test_the_time_budget_stops_the_run(), test_the_two_prune_tiers_leave_every_ncaab_row(), _game() (+21 more)
 
 ### Community 190 - "archive_rows.py"
 Cohesion: 0.07
-Nodes (45): check_allowed(), copy_selection(), cutoffs(), Dialect, ensure_bucket(), ensure_ledger(), file_markets(), file_path() (+37 more)
+Nodes (42): check_allowed(), copy_selection(), cutoffs(), Dialect, ensure_bucket(), ensure_ledger(), file_markets(), file_selection() (+34 more)
 
 ### Community 191 - "restore_acl_from_snapshot.py"
-Cohesion: 0.08
-Nodes (31): acl_type_for_relkind(), acldefault_type(), build_statements(), _changes(), column_statements(), default_statements(), _diff(), expand_null_acl() (+23 more)
+Cohesion: 0.09
+Nodes (30): acl_type_for_relkind(), acldefault_type(), build_statements(), _changes(), column_statements(), default_statements(), _diff(), expand_null_acl() (+22 more)
 
 ### Community 192 - "NFL Game Lines Model System (canonical write-up)"
 Cohesion: 0.05
@@ -2229,80 +2185,80 @@ Cohesion: 0.08
 Nodes (27): step_restore_first_signals(), _Conn, patch_conn(), _make(), _sql_of(), test_a_lane_already_holding_its_first_bet_is_untouched(), test_a_lane_with_no_sibling_still_restores(), test_a_lane_with_nothing_standing_is_restored() (+19 more)
 
 ### Community 194 - "test_game_injury_gate.py"
-Cohesion: 0.08
-Nodes (32): apply_to_picks(), _goalie_names(), _pitcher_names(), player_matches_veto(), relevant_players(), _star_names(), stars_from_logs(), veto_reason() (+24 more)
+Cohesion: 0.06
+Nodes (47): apply_to_picks(), _goalie_names(), _pitcher_names(), player_matches_veto(), relevant_players(), _star_names(), stars_from_logs(), veto_reason() (+39 more)
 
 ### Community 195 - "Mobile colour contrast token tests"
 Cohesion: 0.12
 Nodes (30): _code_lines(), _ionicon_colors(), _lum(), _over(), _ratio(), _read(), _rgb(), test_badge_glyph_tracks_dynamic_type() (+22 more)
 
 ### Community 196 - "time"
-Cohesion: 0.01
-Nodes (138): _fetch_bat_hands(), _fetch_lineup(), ingest_lineups_for_date(), _already_loaded(), backfill_pbp(), _fetch_pbp(), fill_play_times(), _game_id_from_schedule() (+130 more)
+Cohesion: 0.02
+Nodes (107): backfill_savant_stats(), _fetch_pitcher_gb_pct(), _fetch_bat_hands(), backfill_f5_scores(), ensure_first_half_period_scores(), fetch_date(), main(), _refused_games() (+99 more)
 
 ### Community 197 - "run_pipeline.py"
-Cohesion: 0.02
-Nodes (95): run_ncaaf_stats_ingestor(), current_season_label(), run_bullpen_ingestor(), run_player_news_ingestor(), run_nba_prop_odds_ingestor(), run_wnba_prop_odds_ingestor(), format_view_migration_failure(), check_env() (+87 more)
+Cohesion: 0.01
+Nodes (154): setup_database(), run_savant_ingestor(), _fetch_lineup(), ingest_lineups_for_date(), run_bullpen_ingestor(), main(), rebuild(), seasons_to_build() (+146 more)
 
 ### Community 198 - "NBA game four part one tests"
 Cohesion: 0.06
 Nodes (32): _base(), _fair(), _ladder_quotes(), _offered(), _offers(), _period_games(), _rows(), _rung() (+24 more)
 
-### Community 199 - "FakeConn"
-Cohesion: 0.06
-Nodes (42): buy_derivatives(), sample_games(), tip_bucket(), _bought(), _dry_world(), _job_argv(), _season_slate(), _strata() (+34 more)
+### Community 199 - "kalshi_game_ingestor.py"
+Cohesion: 0.07
+Nodes (19): event_code(), event_date(), kalshi_school(), _num(), probe(), record_game_markets(), resolve_events(), rows_for() (+11 more)
 
 ### Community 200 - "morning_disk.py"
-Cohesion: 0.05
-Nodes (38): _Conn, _deletion_approved_for_the_mechanism_tests(), _field(), _jobs(), test_a_refresh_already_running_returns_skipped_and_beats_it(), test_a_refresh_does_not_score_while_the_daily_holds_its_lock(), test_a_second_prune_skips_when_the_lock_is_held(), test_a_tick_that_runs_still_beats_ok() (+30 more)
+Cohesion: 0.04
+Nodes (42): _Conn, _deletion_approved_for_the_mechanism_tests(), _field(), _jobs(), test_a_refresh_already_running_returns_skipped_and_beats_it(), test_a_refresh_does_not_score_while_the_daily_holds_its_lock(), test_a_second_prune_skips_when_the_lock_is_held(), test_a_tick_that_runs_still_beats_ok() (+34 more)
 
 ### Community 201 - "NBA second-game move study tests"
 Cohesion: 0.06
 Nodes (39): _priced_season(), _q(), _sched(), _season_games(), _signal(), _split(), _stub_main(), test_a_fetch_after_T_never_reaches_the_move() (+31 more)
 
-### Community 202 - "test_ncaab_espn_box.py"
-Cohesion: 0.06
-Nodes (40): new_totals(), refused_run(), run_recent(), Clock, _columns(), Espn, _http_error(), _insert_sdv() (+32 more)
+### Community 202 - "schema_is_current"
+Cohesion: 0.01
+Nodes (216): lock_down(), lock_down_sql(), _fetchone(), schema_is_current(), ensure_tables(), ensure_tables(), fetch(), _int() (+208 more)
 
-### Community 203 - "_LookConn"
-Cohesion: 0.08
-Nodes (25): _LookConn, _one_look(), _po_game(), _po_quotes(), _rows_of(), test_a_false_early_start_from_espn_writes_no_bet_at_its_window_and_one_at_the_feeds(), test_a_feed_row_the_other_way_round_reads_espns_tip(), test_a_flipped_final_with_no_row_of_its_own_is_bet_once_on_the_feeds_row() (+17 more)
+### Community 203 - "test_nba_team_total_luck_card.py"
+Cohesion: 0.10
+Nodes (21): fetch_team_totals(), _known_games(), _bet(), card_world(), _one_none_row(), _run(), test_a_bet_under_the_model_s_ev_floor_is_refused_and_the_game_still_decided(), test_a_dry_run_creates_no_table_and_writes_nothing() (+13 more)
 
 ### Community 204 - "dk_splits.py"
-Cohesion: 0.07
-Nodes (26): build_rows(), discover_event_groups(), fetch_sport(), _full_names(), _game_date(), _line(), match(), _odds() (+18 more)
+Cohesion: 0.06
+Nodes (31): build_rows(), discover_event_groups(), fetch_sport(), _full_names(), _game_date(), _line(), match(), _odds() (+23 more)
 
 ### Community 205 - "live_model/backtest/calibrate.py"
-Cohesion: 0.06
-Nodes (23): _cluster_bootstrap(), evaluate(), main(), report(), fit(), load_states(), main(), walk_forward_oos() (+15 more)
+Cohesion: 0.04
+Nodes (37): _cluster_bootstrap(), evaluate(), main(), evaluate(), _infer_position(), main(), _pool_prior(), report() (+29 more)
 
-### Community 206 - "nba_prop_model_verify.py"
-Cohesion: 0.12
-Nodes (29): decisions_for(), adv_from_log(), asof_roster(), blind_structured(), card_block(), collapse_report(), _compare(), log() (+21 more)
+### Community 206 - "mlb_prop_market_sweep.py"
+Cohesion: 0.07
+Nodes (15): MLB prop market-relative rule (not wired), mlb_spread_market 1.8pp run-line rule, mlb_total_market paper totals logger, card(), load_quotes(), actuals(), grade_day(), main() (+7 more)
 
 ### Community 207 - "PerformanceScreen.tsx"
 Cohesion: 0.04
-Nodes (89): asPosted, half, leg, loss, one, t, win, asPosted (+81 more)
+Nodes (85): asPosted, half, leg, loss, one, t, win, asPosted (+77 more)
 
 ### Community 208 - "test_pick_lock_survives_settlement.py"
 Cohesion: 0.08
 Nodes (22): conn(), _game(), _pick(), _SqliteShim, _survivors(), test_a_bet_is_never_dropped_for_an_earlier_no_signal(), test_a_dead_zone_prop_row_locks_too(), test_a_final_game_is_not_a_scoring_target() (+14 more)
 
 ### Community 209 - "NBA offline prop search script"
-Cohesion: 0.05
-Nodes (62): _american(), an_groups(), anchored_offers(), anchored_table(), _assert_identity(), beside_rows(), box_ceilings(), build_all() (+54 more)
+Cohesion: 0.03
+Nodes (77): _american(), an_groups(), anchored_offers(), anchored_table(), _assert_identity(), beside_rows(), box_ceilings(), build_all() (+69 more)
 
 ### Community 210 - "test_flow.py"
-Cohesion: 0.04
-Nodes (57): bias_table(), main(), apply_anchor(), best_hit(), _boot_ci(), drop_degenerate(), evaluate(), fit_time_curve() (+49 more)
+Cohesion: 0.06
+Nodes (23): grade(), grade_real(), naive_line(), _anchor_frame(), _long(), test_a_degenerate_line_is_dropped(), test_a_push_on_a_whole_number_line_is_not_a_loss(), test_accrual_is_as_of_the_mark_not_the_last_involvement() (+15 more)
 
 ### Community 211 - "test_odds_rebuy.py"
-Cohesion: 0.11
-Nodes (28): game_rows(), buyer(), _Conn, copy(), _iso(), _nfl_event(), _req(), _row() (+20 more)
+Cohesion: 0.13
+Nodes (25): game_rows(), buyer(), copy(), _iso(), _nfl_event(), _req(), _row(), _rung_row() (+17 more)
 
 ### Community 212 - "test_prop_calibrated_decision.py"
-Cohesion: 0.06
-Nodes (32): apply_prop_daily_cap(), _apply_schedule_hold(), bets(), _claimed_ev(), dedupe_player_props(), _downgrade(), _is_paused_row(), _bet() (+24 more)
+Cohesion: 0.07
+Nodes (29): apply_prop_daily_cap(), _claimed_ev(), dedupe_player_props(), _is_paused_row(), _bet(), _identity_cal(), _prop(), test_a_genuinely_big_edge_still_fires_after_calibration() (+21 more)
 
 ### Community 213 - "NFL in-play model README"
 Cohesion: 0.06
@@ -2318,47 +2274,47 @@ Nodes (14): _flat(), _Rec, test_a_lock_timeout_fails_that_file_and_the_next_stil
 
 ### Community 216 - "NCAABW odds capture and tests"
 Cohesion: 0.06
-Nodes (40): capture(), drop_beyond_window(), drop_started(), enabled(), has_upcoming_games(), _key(), main(), split_changes() (+32 more)
+Nodes (41): capture(), drop_beyond_window(), drop_started(), enabled(), has_upcoming_games(), _key(), main(), split_changes() (+33 more)
 
 ### Community 217 - "nba_s_fav200.py"
-Cohesion: 0.07
-Nodes (38): alone_rows(), bad_moneyline(), bad_spread(), blind_scores(), cell_specs(), check_rows(), control_specs(), count_rows() (+30 more)
+Cohesion: 0.08
+Nodes (33): alone_rows(), blind_scores(), cell_specs(), check_rows(), control_specs(), extremes(), favourites(), Frames (+25 more)
 
 ### Community 218 - "test_nba_postseason_pg.py"
-Cohesion: 0.09
-Nodes (30): stranded_prop_bets(), disputed_start_games(), rule_slate(), slate(), tipped_rule_games(), postseason_games(), _read_games(), _reversed_starts() (+22 more)
+Cohesion: 0.14
+Nodes (23): stranded_prop_bets(), rule_slate(), slate(), tipped_rule_games(), _at(), _bet(), conn(), _game() (+15 more)
 
 ### Community 219 - "NFL live leader state parsing tests"
 Cohesion: 0.12
 Nodes (21): test_a_failed_card_run_beats_error_and_the_alerter_reports_it(), execute(), situation(), status(), test_a_conversion_try_is_skipped(), test_a_previous_quarters_play_is_not_the_state(), test_a_timeout_is_skipped_for_the_play_before_it(), test_after_a_scoring_play_nothing_is_evaluated() (+13 more)
 
 ### Community 220 - "Database reconnect wrapper tests"
-Cohesion: 0.08
-Nodes (18): _is_write(), _Conn, _Cursor, _lost(), test_a_committed_transaction_is_clean_again(), test_a_lost_connection_with_uncommitted_writes_raises_connection_lost(), test_a_read_on_a_lost_connection_reconnects_and_retries(), test_a_statement_timeout_is_not_a_lost_connection() (+10 more)
+Cohesion: 0.09
+Nodes (16): _Conn, _Cursor, _lost(), test_a_committed_transaction_is_clean_again(), test_a_lost_connection_with_uncommitted_writes_raises_connection_lost(), test_a_read_on_a_lost_connection_reconnects_and_retries(), test_a_statement_timeout_is_not_a_lost_connection(), test_a_wrapper_without_a_url_cannot_reconnect_and_re_raises() (+8 more)
 
 ### Community 221 - "NCAAF quarterback stats parsing tests"
 Cohesion: 0.12
-Nodes (22): _athlete_stats(), _comp_att(), parse_qb_game_stats(), _parse(), _payload(), _team(), test_athlete_stats_helper_is_category_scoped(), test_athlete_without_an_id_is_ignored() (+14 more)
+Nodes (23): _athlete_stats(), _comp_att(), parse_qb_game_stats(), _pick(), _parse(), _payload(), _team(), test_athlete_stats_helper_is_category_scoped() (+15 more)
 
-### Community 222 - "pickle"
+### Community 222 - "trainer.py"
 Cohesion: 0.01
-Nodes (145): assert_retrain_allowed(), calibration_method(), planned_calls(), Live feature sensitivity (12.8pp median swing), build_live_state_row(), build_bulk_wnba_prop_lookups(), build_wnba_prop_scoring_rows(), build_wnba_prop_training_dataset() (+137 more)
+Nodes (120): assert_retrain_allowed(), calibration_method(), _all_batter_rows(), _all_pitcher_rows(), _batter_rate(), _batter_rolling_avg(), _batter_savant(), _batter_season_avg() (+112 more)
 
 ### Community 223 - "In-play scorer locks and guards"
 Cohesion: 0.13
-Nodes (18): _write_live_picks(), _locked_live_lanes(), FakeConn, _log_lines(), _pick(), _Rows, test_a_locked_lane_still_says_so_and_names_the_lane(), test_all_lanes_locked_touches_nothing() (+10 more)
+Nodes (17): _write_live_picks(), FakeConn, _log_lines(), _pick(), _Rows, test_a_locked_lane_still_says_so_and_names_the_lane(), test_all_lanes_locked_touches_nothing(), test_an_unchanged_lane_is_not_reported_as_locked() (+9 more)
 
-### Community 224 - "nhl_market_lab.py"
+### Community 224 - "ncaaf_live/backtest/train_engine.py"
 Cohesion: 0.10
-Nodes (26): add_rating(), build(), bets(), line(), main(), goalie_frame(), grid(), logistic() (+18 more)
+Nodes (18): fit(), load_states(), main(), walk_forward_oos(), coverage_on(), get_oos(), main(), build_features() (+10 more)
 
 ### Community 225 - "_league"
 Cohesion: 0.12
-Nodes (7): _load_fixture(), hist(), resolver(), _league(), fake_load(), _name(), fake_get()
+Nodes (9): regime(), _load_fixture(), hist(), _cand(), _league(), fake_load(), _name(), test_the_whole_script_runs_on_a_synthetic_league() (+1 more)
 
 ### Community 226 - "nba_game4_p2.py"
-Cohesion: 0.02
-Nodes (128): 12.1 Data, 12.2 Definitions, 12.3 The cells (64), 12.4 The bars, 12.6 Results (graded 2026-10-28), 12. Eighth search: the first-quarter trend method (pre-registered 2026-10-28, before any cell was graded), 5.1 The shape, 5.2 F1's shape (+120 more)
+Cohesion: 0.05
+Nodes (49): 10. Results (graded 2026-10-31), 1. What is tested and why, 2. What earlier searches covered, and what they did not, 5. The cells (48), 6. Impossible numbers (stated before any cell is graded), 7. The bars, 8. Reported beside, never judged, 9. Counts before grading (+41 more)
 
 ### Community 227 - "nba_ingame_ht1.py"
 Cohesion: 0.05
@@ -2369,12 +2325,12 @@ Cohesion: 0.06
 Nodes (35): asof(), blind(), boot_ci(), calibration(), dec(), eligibility(), ev_of(), features() (+27 more)
 
 ### Community 229 - "nba_s_q1tt.py"
-Cohesion: 0.03
-Nodes (72): 1. Everything is the team-totals search's, but the reference, 2. The cells (12), 3. Bars, seasons and the placebo, 4. What a pass means, 5. Counts before grading (2026-11-06, `--counts`, no bet graded), 6. Results (graded 2026-11-06, run `2026-11-06-q1pin`), NBA search: first-quarter and first-half team totals against Pinnacle's own period spread and total (pre-registered 2026-11-06, before any bet in it was graded), a_keys() (+64 more)
+Cohesion: 0.02
+Nodes (85): 1. Everything is the team-totals search's, but the reference, 2. The cells (12), 3. Bars, seasons and the placebo, 4. What a pass means, 5. Counts before grading (2026-11-06, `--counts`, no bet graded), 6. Results (graded 2026-11-06, run `2026-11-06-q1pin`), NBA search: first-quarter and first-half team totals against Pinnacle's own period spread and total (pre-registered 2026-11-06, before any bet in it was graded), _tail() (+77 more)
 
-### Community 230 - "test_alternate_game_lines.py"
-Cohesion: 0.08
-Nodes (23): _alt_window_hours(), _fetch_alternate_game_lines(), _meter_add(), _parse_alternate_spread_rows(), _parse_alternate_total_rows(), _Conn, _event(), test_a_bad_cap_buys_nothing_on_the_pass() (+15 more)
+### Community 230 - "odds_ingestor.py"
+Cohesion: 0.02
+Nodes (114): _billed(), _bounded(), buy_allowance(), drop_started_ladders(), ensure_ledger(), event_rows(), game_for_event(), in_window() (+106 more)
 
 ### Community 231 - "test_calibration_check_coverage.py"
 Cohesion: 0.11
@@ -2385,24 +2341,24 @@ Cohesion: 0.13
 Nodes (11): _pick(), test_every_offerable_book_has_a_human_name_on_both_surfaces(), test_the_free_card_names_the_cheaper_book(), test_the_free_card_query_reads_the_columns_it_renders(), test_the_good_to_clause_is_dropped_not_truncated_when_it_will_not_fit(), test_the_tweet_names_the_cheaper_book(), test_the_tweet_never_publishes_a_worse_price_than_draftkings(), test_the_tweet_publishes_the_good_to_bound_when_it_fits() (+3 more)
 
 ### Community 233 - "NCAABW ESPN ingestor tests"
-Cohesion: 0.04
-Nodes (71): assign_slug(), _days(), due_dates(), _ensure_d1_registry(), ingest_day(), _int(), merge_d1(), new_totals() (+63 more)
+Cohesion: 0.07
+Nodes (47): ingest_day(), parse_event(), _board_with(), Espn, _event(), _final(), _game(), _one_at_a_time() (+39 more)
 
-### Community 234 - "Live game poller, board cache"
+### Community 234 - "run_cards"
 Cohesion: 0.08
-Nodes (11): refresh_team_board_cache(), team_board_pairs(), team_board_seasons(), _cols(), _Conn, _Cursor, test_every_team_sport_gets_last_this_and_next_year(), test_one_failing_pair_does_not_stop_the_rest() (+3 more)
+Nodes (19): ev_percentile(), main(), render(), run_card(), choose(), _detail(), games_with_a_prop_bet(), main() (+11 more)
 
 ### Community 236 - "test_byom_prop_facts.py"
-Cohesion: 0.12
-Nodes (32): backtest(), _capture_rank(), facts_for_game(), line_key(), _game(), _log(), _one(), _q() (+24 more)
+Cohesion: 0.07
+Nodes (46): backtest(), facts_for_game(), _identity(), in_backtest(), is_standard_market(), team_for_fact(), _game(), _log() (+38 more)
 
 ### Community 237 - "test_ncaaf_fbs_registry.py"
 Cohesion: 0.06
 Nodes (17): fbs_refusal_claims(), unrated_fbs_claim(), _alarm_part(), hdb(), _live_db(), _promoted(), _rating(), _registry_check() (+9 more)
 
 ### Community 238 - "NFL in-play rush attempt pace model"
-Cohesion: 0.09
-Nodes (16): _price(), test_a_line_he_has_already_passed_is_not_a_live_proposition(), test_a_missing_accrued_count_is_refused_not_treated_as_zero(), test_a_reachable_over_is_declined_rather_than_faded(), test_a_surge_requirement_reaches_a_price(), test_no_bet_before_a_pace_exists(), test_settlement_resolves_this_model_per_pick_not_per_model_id(), test_the_book_move_guard_covers_the_new_market() (+8 more)
+Cohesion: 0.07
+Nodes (21): pace_ratio(), Read, _sigmoid(), under_prob(), _price(), test_a_line_he_has_already_passed_is_not_a_live_proposition(), test_a_missing_accrued_count_is_refused_not_treated_as_zero(), test_a_reachable_over_is_declined_rather_than_faded() (+13 more)
 
 ### Community 239 - "NFL wind publisher and snapshots"
 Cohesion: 0.11
@@ -2418,7 +2374,7 @@ Nodes (27): _close_frames(), _data(), _f2_games(), _f6a_data(), _f6d_total_data(
 
 ### Community 242 - "NCAAB moneyline first post tests"
 Cohesion: 0.11
-Nodes (33): the_bet(), _american(), _Conn, _decide(), _one(), _others(), _ph(), _rows() (+25 more)
+Nodes (32): _american(), _Conn, _decide(), _one(), _others(), _ph(), _rows(), test_a_book_no_longer_bettable_is_not_replaced_by_the_next() (+24 more)
 
 ### Community 243 - "nba_game2_move.py"
 Cohesion: 0.04
@@ -2429,16 +2385,16 @@ Cohesion: 0.09
 Nodes (11): _celsius_to_f(), _fetch_open_meteo(), _game_hour_utc(), _target_hour_utc(), _utc_offset_from_lon(), captured(), fake_get(), _hours() (+3 more)
 
 ### Community 245 - "test_ncaaf_board_visibility.py"
-Cohesion: 0.08
-Nodes (22): _days_until(), _opener_rule(), _line(), _patch(), test_a_declined_rule_can_never_leak_a_signal(), test_a_fired_pick_clears_its_own_probability_floor(), test_a_no_signal_row_does_not_lock_an_ncaaf_game_for_the_week(), test_books_agreeing_is_a_no_signal_row() (+14 more)
+Cohesion: 0.07
+Nodes (21): _days_until(), _line(), _patch(), test_a_declined_rule_can_never_leak_a_signal(), test_a_fired_pick_clears_its_own_probability_floor(), test_a_no_signal_row_does_not_lock_an_ncaaf_game_for_the_week(), test_books_agreeing_is_a_no_signal_row(), test_days_until_is_none_without_a_kickoff_time() (+13 more)
 
 ### Community 246 - "Best line and config topology docs"
-Cohesion: 0.07
-Nodes (33): Best line on pre-game picks, Book roles: fetched (LINE_SHOP_BOOKMAKERS) vs offered (BEST_LINE_BOOKMAKERS), DECIDE_ON_BEST_PRICE=0 restores DraftKings as the deciding price, Stage 2: decide, size and settle at the best price (picks.decision_*), _get_event_odds fetched DraftKings-only (MLB F5, UFC round totals), The live models join best-price deciding (2026-09-10), PREGAME_PRICE_MAX_AGE_MIN (180 min) on game-market reads, Pruner keeps the opener AND the close per (proposition, book) (+25 more)
+Cohesion: 0.11
+Nodes (19): Best line on pre-game picks, Book roles: fetched (LINE_SHOP_BOOKMAKERS) vs offered (BEST_LINE_BOOKMAKERS), DECIDE_ON_BEST_PRICE=0 restores DraftKings as the deciding price, Stage 2: decide, size and settle at the best price (picks.decision_*), _get_event_odds fetched DraftKings-only (MLB F5, UFC round totals), The live models join best-price deciding (2026-09-10), Scoring off another book's line (picks.line_book), BEST_LINE_EXCLUDE_BOOKMAKERS — unbettable books out of shopping (+11 more)
 
 ### Community 247 - "NBA postseason search tests"
 Cohesion: 0.05
-Nodes (64): 8. Each rule watched failing, p(), _bets(), _card_q(), _exact_ev(), _inputs(), _keys(), _means() (+56 more)
+Nodes (47): 8. Each rule watched failing, p(), _bets(), _keys(), _one_game_cell(), test_a_block_goes_to_the_blocker_not_the_shooter(), test_a_cup_final_map_never_reads_its_own_season_after_2023_24_or_a_later_game(), test_a_cup_final_reads_the_fit_before_its_season() (+39 more)
 
 ### Community 248 - "nfl_live_leader/state.py"
 Cohesion: 0.10
@@ -2449,28 +2405,28 @@ Cohesion: 0.15
 Nodes (15): apply_slate_guard(), apply_slate_concentration_guard(), _attr(), _edge_of(), _is_bet(), measure_side_concentration(), _side_of(), SlateConcentration (+7 more)
 
 ### Community 250 - "useFeedback.ts"
-Cohesion: 0.09
-Nodes (41): base, generic, input, inputOrder, pgParsed, serverWhitelist, sorted, trimmed (+33 more)
+Cohesion: 0.05
+Nodes (60): RFC-4122, config, { getSentryExpoConfig }, path, base, generic, input, inputOrder (+52 more)
 
 ### Community 251 - "View migration lock handling tests"
 Cohesion: 0.09
 Nodes (24): execute(), _before(), _code(), _Conn, _Deadlock, _LockTimeout, _sql(), _StatementTimeout (+16 more)
 
-### Community 252 - "test_record_correction_post.py"
-Cohesion: 0.07
-Nodes (25): _pin(), _real_tweet(), x_posts(), Ledger, _publish(), _Result, test_a_failed_discord_ledger_does_not_send_x(), test_a_missing_x_credential_does_not_tweet_and_keeps_discord() (+17 more)
+### Community 252 - "ncaaf_live/engine/pricing.py"
+Cohesion: 0.10
+Nodes (19): _cluster_bootstrap(), evaluate(), main(), report(), anchor_to_market(), margin_pmf(), _over_under(), price_moneyline() (+11 more)
 
 ### Community 253 - "Project history and learnings docs"
 Cohesion: 0.09
 Nodes (25): Build state, data sources, model registry, spec (2026-08 snapshot), Data sources table (Odds API, SBR, MLB Stats API, Savant, Open-Meteo, NHL API, nba_api, ESPN, UFC CSV mirror, DataGolf), FanGraphs / pybaseball removed (IP-blocked); replaced by MLB Stats API + Savant, MLB_Basic.csv datawarehouse (2009-2025, 40,996 games; runline derived as -1.5), What's built (package tree) and what's not, Learnings and rejected approaches (learnings.md), AlphaPy rejected (deprecated, team-level only, defunct connectors), Team stats need at least 10 games before they stabilize (+17 more)
 
-### Community 254 - "test_period_recaps.py"
-Cohesion: 0.07
-Nodes (19): _at(), test_a_later_weekday_still_retries_that_week(), test_a_week_that_crosses_months_names_both(), test_an_evening_with_a_live_game_waits_for_the_next_morning(), test_discord_period_uses_the_results_webhook_and_ledgers_once(), test_monday_at_730_opens_the_prior_mon_sun_week(), test_monday_before_730_has_not_opened_the_new_week(), test_sunday_does_not_open_the_week_that_is_still_in_progress() (+11 more)
+### Community 254 - "discord_notifier.py"
+Cohesion: 0.02
+Nodes (75): test_average_odds_are_the_mean_implied_probability(), test_prob_only_picks_fall_back_to_the_settlement_price(), test_tally_line_reports_units(), test_units_convention_matches_the_stated_rule(), test_embeds_chunk_at_the_field_cap_and_the_size_cap(), bulky(), test_the_main_recap_waits_while_a_game_on_that_date_is_unfinished(), _at() (+67 more)
 
-### Community 255 - "test_signal_publish_on_write.py"
+### Community 255 - "tracking/__init__.py"
 Cohesion: 0.03
-Nodes (40): _clear_locks(), _Conn, _no_prod_threshold_sync(), _Result, _signal_row(), test_a_connection_that_cannot_lock_still_publishes(), test_an_exception_mid_publish_does_not_wedge_every_later_pass(), test_every_signal_publisher_takes_the_lock() (+32 more)
+Nodes (29): test_the_job_does_not_bypass_the_day_is_over_guard(), test_the_job_does_not_read_rowcount_off_the_cursor(), test_the_job_only_clears_its_own_ledger_kind(), _clear_locks(), _Conn, _no_prod_threshold_sync(), _Result, _signal_row() (+21 more)
 
 ### Community 256 - "Live prop validation workflow"
 Cohesion: 0.05
@@ -2481,8 +2437,8 @@ Cohesion: 0.10
 Nodes (23): _code(), _model_meta(), _select_list(), test_every_book_has_its_channel_name(), test_every_model_has_its_app_name(), test_it_is_one_statement_that_returns_on_a_catalog_read_once_applied(), test_it_is_read_with_the_callers_rights_and_granted_select_only(), test_it_waits_for_what_it_reads_instead_of_failing_the_pass() (+15 more)
 
 ### Community 258 - "NBA first quarter anchored search"
-Cohesion: 0.11
-Nodes (21): anchors(), build_groups(), clean_full_quotes(), counts(), fit_anchors(), Fits, full(), full_quotes() (+13 more)
+Cohesion: 0.08
+Nodes (31): anchors(), build_groups(), clean_full_quotes(), counts(), fit_anchors(), Fits, full(), full_quotes() (+23 more)
 
 ### Community 259 - "NCAAF totals weather hold tests"
 Cohesion: 0.08
@@ -2490,15 +2446,15 @@ Nodes (24): _features(), _no_forecast(), _Reg, _run(), _score(), test_a_dome_gam
 
 ### Community 260 - "test_nba_live_ig2.py"
 Cohesion: 0.07
-Nodes (32): plays_from_summary(), rows_from_events(), starters_from_summary(), art(), lab(), pipeline(), q2_books(), test_a_fresh_quote_in_quarter_2_is_eligible_and_decides() (+24 more)
+Nodes (33): plays_from_summary(), rows_from_events(), starters_from_summary(), espn_score_ours(), art(), lab(), pipeline(), q2_books() (+25 more)
 
 ### Community 261 - "nba_game4_p1.py"
-Cohesion: 0.07
-Nodes (36): base_inputs(), cell_specs(), check_cell_count(), derivative_data(), derivative_plan(), derivative_plumbing(), derivative_seasons(), derivative_times() (+28 more)
+Cohesion: 0.05
+Nodes (41): base_inputs(), cell_specs(), check_cell_count(), choose_C_linear(), derivative_data(), derivative_plan(), derivative_plumbing(), derivative_seasons() (+33 more)
 
 ### Community 262 - "verify_bankroll.ts"
-Cohesion: 0.05
-Nodes (87): check(), DE, EN, eq(), explainer, fakeStore(), fieldFlow(), files (+79 more)
+Cohesion: 0.03
+Nodes (146): check(), DE, EN, eq(), explainer, fakeStore(), fieldFlow(), files (+138 more)
 
 ### Community 263 - "NBA favourite 200 search tests"
 Cohesion: 0.05
@@ -2509,76 +2465,76 @@ Cohesion: 0.16
 Nodes (26): Signalbase pipeline monitor dashboard page, dashboard.html ageNote(), dashboard.html callRow(), dashboard.html connect(), dashboard.html drawSeries(), dashboard.html drawTimeline(), dashboard.html flush(), dashboard.html ingestCalls() (+18 more)
 
 ### Community 265 - "test_prop_alternate_lines.py"
-Cohesion: 0.13
-Nodes (12): _market_chunks(), _ou(), _parse(), test_a_player_the_book_lists_at_1_5_keeps_the_0_5_alternate(), test_a_standard_market_still_yields_one_row_per_player(), test_an_alternate_market_yields_one_row_per_line_under_its_own_key(), test_an_alternate_milestone_with_no_number_is_not_a_line(), test_an_alternate_that_duplicates_the_standard_line_is_dropped() (+4 more)
+Cohesion: 0.07
+Nodes (27): alt_markets_due(), _Conn, _ou(), _parse(), _Resp, test_a_422_retries_without_the_alternates_before_going_dk_only(), fake_get(), test_a_422_with_no_alternates_still_takes_the_dk_only_retry() (+19 more)
 
 ### Community 266 - "_tally"
-Cohesion: 0.03
-Nodes (57): _row(), test_a_push_is_out_of_the_denominator_and_a_loss_is_in_it(), test_an_all_push_day_does_not_divide(), test_an_all_push_quality_window_does_not_divide(), test_equal_american_prices_are_a_push(), test_in_play_and_a_missing_close_stay_out(), test_model_quality_keeps_zero_in_the_mean_only(), test_nothing_measured_stays_blank() (+49 more)
+Cohesion: 0.05
+Nodes (40): _row(), test_a_push_is_out_of_the_denominator_and_a_loss_is_in_it(), test_an_all_push_day_does_not_divide(), test_an_all_push_quality_window_does_not_divide(), test_equal_american_prices_are_a_push(), test_in_play_and_a_missing_close_stay_out(), test_model_quality_keeps_zero_in_the_mean_only(), test_nothing_measured_stays_blank() (+32 more)
 
 ### Community 267 - "test_nhl_goalie_gate.py"
 Cohesion: 0.05
-Nodes (53): fetch_espn_nhl_designations(), assess(), refuse_unknown(), _competitor(), _db(), _df_game(), _df_html(), _espn_docs() (+45 more)
+Nodes (53): fetch_espn_nhl_designations(), matchup_reasons(), refuse_unknown(), _competitor(), _db(), _df_game(), _df_html(), _espn_docs() (+45 more)
 
 ### Community 268 - "ref_react"
 Cohesion: 0.02
-Nodes (249): Mobile, ByomBetCount(), ByomCheckChip(), ByomChoiceGroup(), ByomMarketField(), ByomSideFields(), GAME_MARKETS, isGameMarket() (+241 more)
+Nodes (355): Mobile, bad, bare, blank, pgrst, rendered, shapes, timeout (+347 more)
 
 ### Community 269 - "NCAAF teams ingest and refresh tests"
-Cohesion: 0.07
-Nodes (8): _GamesConn, _TeamsConn, test_ingest_games_retains_a_historical_utc_id_and_uses_et_for_a_new_row(), fake_get(), test_ingest_pulls_fbs_then_everyone_and_fbs_rows_win(), test_ingest_retries_everyone_without_a_year_if_the_season_filter_is_empty(), test_prior_context_tolerates_missing_talent_and_returning(), test_weekly_snapshot_build_aborts_on_failed_fetch()
+Cohesion: 0.06
+Nodes (11): ingest_ncaaf_teams(), _GamesConn, _TeamsConn, test_ingest_games_retains_a_historical_utc_id_and_uses_et_for_a_new_row(), fake_get(), test_ingest_pulls_fbs_then_everyone_and_fbs_rows_win(), test_ingest_retries_everyone_without_a_year_if_the_season_filter_is_empty(), test_prior_context_tolerates_missing_talent_and_returning() (+3 more)
 
 ### Community 270 - "test_nba_prop_projection.py"
-Cohesion: 0.04
-Nodes (38): compact_report(), main_line(), injury_asof(), _art(), _proj(), _q(), _report(), _run() (+30 more)
+Cohesion: 0.06
+Nodes (30): _art(), _proj(), _q(), _run(), _settle(), test_a_book_hanging_two_lines_for_one_player_is_refused(), test_a_decision_with_no_bet_is_still_a_decision(), test_a_pick_near_its_tip_is_never_held_back_by_the_per_run_cap() (+22 more)
 
 ### Community 271 - "test_line_clv.py"
-Cohesion: 0.07
-Nodes (7): _load(), test_a_line_that_held_is_exactly_zero_not_none(), test_a_missing_close_is_not_a_zero(), test_a_side_that_cannot_be_oriented_returns_none_rather_than_guessing(), test_the_home_and_away_sides_are_exact_mirrors(), test_the_prop_market_flag_wins_over_the_market_string(), test_the_signs_are_the_negation_of_the_apps_entry_frame()
+Cohesion: 0.06
+Nodes (9): test_runner_captures_stdout_from_the_script_main(), _load(), test_a_line_that_held_is_exactly_zero_not_none(), test_a_missing_close_is_not_a_zero(), test_a_side_that_cannot_be_oriented_returns_none_rather_than_guessing(), test_the_home_and_away_sides_are_exact_mirrors(), test_the_prop_market_flag_wins_over_the_market_string(), test_the_signs_are_the_negation_of_the_apps_entry_frame() (+1 more)
 
-### Community 272 - "eggz_picks.py"
-Cohesion: 0.08
-Nodes (30): test_an_undated_needs_review_holds_the_new_york_day(), _all_time_rows(), _blocked(), Capper, configured_to_read(), fetch_channel_messages(), _flag_message(), _graded_legs() (+22 more)
+### Community 272 - "ingest_messages"
+Cohesion: 0.07
+Nodes (15): test_parlaymatt_ingest_keeps_his_author_and_eggz_kinds_stay(), test_parlaymatt_unset_does_not_read_or_post(), test_the_cursor_moves_past_every_message_and_the_next_poll_starts_after_it(), fetch(), configured_to_read(), fetch_channel_messages(), ingest_messages(), fetch() (+7 more)
 
 ### Community 273 - "Prop odds UTC timestamp tests"
 Cohesion: 0.12
 Nodes (13): _assert_utc_stamp(), _Conn, _frozen(), _run_mlb(), capture(), events(), _run_ncaaf(), test_an_eastern_row_then_a_later_utc_row_sorts_in_time_order() (+5 more)
 
 ### Community 274 - "Local mirror sync tests"
-Cohesion: 0.10
-Nodes (42): cmd_export_csv(), Column, seconds_until_reads_allowed(), TableDir, at(), Clock, local(), mirror() (+34 more)
+Cohesion: 0.12
+Nodes (37): Column, at(), Clock, local(), mirror(), seeded(), server(), table() (+29 more)
 
 ### Community 275 - "NBA game harness tests"
-Cohesion: 0.06
-Nodes (29): ResidDist, test_a_period_moneyline_removes_the_tie_mass(), _cov_data(), _fetches(), _games(), _offers(), _q(), _stale_cache() (+21 more)
+Cohesion: 0.09
+Nodes (23): _cov_data(), _fetches(), _games(), _offers(), _q(), _stale_cache(), test_a_cell_reports_its_pooled_walk_forward_and_writes_its_bets(), test_a_graded_load_refuses_a_season_the_cache_does_not_price() (+15 more)
 
 ### Community 276 - "test_ncaaf_unscheduled_opponent.py"
-Cohesion: 0.11
-Nodes (21): _drop_ncaaf_far_lead(), _drop_ncaaf_opponent_conflicts(), drop_ncaaf_unscheduled_opponents(), _without_game_ids(), _Aborting, _Conn, _game(), _odds() (+13 more)
+Cohesion: 0.13
+Nodes (18): drop_ncaaf_unscheduled_opponents(), _Aborting, _Conn, _game(), _odds(), _Rows, _schedule(), test_a_bowl_listed_inside_the_lead_window_is_kept() (+10 more)
 
 ### Community 277 - "test_ncaabw_odds_history.py"
 Cohesion: 0.05
 Nodes (42): _body(), _book(), _Conn, _CountConn, _event(), _Feed, _Fetched, _resolver() (+34 more)
 
 ### Community 278 - "test_backtest.py"
-Cohesion: 0.05
-Nodes (33): align_states(), build_team_map(), _game_index(), kill_verdict(), load_cached_snapshots(), main(), replay(), _settle() (+25 more)
+Cohesion: 0.07
+Nodes (23): _settle(), _team_side(), build_states(), load_pbp(), monotonicity_report(), _repair_day_offsets(), sample_states(), _pbp() (+15 more)
 
 ### Community 279 - "DBConnection"
 Cohesion: 0.01
-Nodes (312): live_slate_dates(), _connect(), connection_lost(), ConnectionLost, DBConnection, _go(), _open(), rollback_savepoint() (+304 more)
+Nodes (251): live_slate_dates(), _connect(), connection_lost(), ConnectionLost, DBConnection, _go(), _is_write(), _open() (+243 more)
 
 ### Community 280 - "_signal_field"
 Cohesion: 0.03
-Nodes (83): _sig(), test_a_strictly_better_book_becomes_the_headline(), test_an_equal_or_worse_price_never_replaces_draftkings(), test_best_odds_never_reaches_the_qualifying_gate(), test_draftkings_winning_its_own_shop_is_published_as_draftkings(), test_every_pre_game_producer_computes_good_to(), test_good_to_is_published_when_the_producer_supplies_it(), test_good_to_is_simply_absent_when_it_cannot_be_computed() (+75 more)
+Nodes (79): _sig(), test_a_strictly_better_book_becomes_the_headline(), test_an_equal_or_worse_price_never_replaces_draftkings(), test_best_odds_never_reaches_the_qualifying_gate(), test_draftkings_winning_its_own_shop_is_published_as_draftkings(), test_every_pre_game_producer_computes_good_to(), test_good_to_is_published_when_the_producer_supplies_it(), test_good_to_is_simply_absent_when_it_cannot_be_computed() (+71 more)
 
-### Community 281 - "models/__init__.py"
-Cohesion: 0.02
-Nodes (117): _aware(), decision_fetches(), event_rows(), fetch_first_half(), _known_games(), last_fetches(), ledger_exists(), _ledger_row() (+109 more)
+### Community 281 - "_get_current_bankroll"
+Cohesion: 0.01
+Nodes (230): _aware(), balance_floor(), _billed(), decision_fetches(), due_mark(), event_rows(), fetch_first_half(), _known_games() (+222 more)
 
 ### Community 282 - "NHL side models never bet against each other"
-Cohesion: 0.07
-Nodes (30): _apply_side_conflicts(), _endings_won(), picks_cannot_both_win(), side_checked_models(), load_rows(), load_rows(), _Conn, ml() (+22 more)
+Cohesion: 0.08
+Nodes (26): load_rows(), load_rows(), _Conn, ml(), _pick(), reg(), _score_regulation(), test_a_market_not_listed_is_never_a_conflict() (+18 more)
 
 ### Community 283 - "nhl_prop_blocked_shots.py"
 Cohesion: 0.08
@@ -2594,23 +2550,23 @@ Nodes (14): _choose_context(), _has_pregame_lines(), load_context(), GameContext
 
 ### Community 286 - "useTabLayouts.ts"
 Cohesion: 0.06
-Nodes (57): lucide-react, bottomOf(), DEFAULT_LAYOUT, defaultLayoutFor(), GRID_COLS, GRID_GAP, normalizeLayout(), readingOrder() (+49 more)
+Nodes (48): bottomOf(), DEFAULT_LAYOUT, defaultLayoutFor(), GRID_COLS, GRID_GAP, normalizeLayout(), readingOrder(), ROW_HEIGHT (+40 more)
 
 ### Community 287 - "test_nba_team_total_luck_window.py"
 Cohesion: 0.08
 Nodes (23): PregamePlan, _db(), _decided_by(), _fires(), _job(), _slate(), test_a_close_alone_runs_only_the_close(), test_a_failed_team_total_step_is_an_error_after_publishing() (+15 more)
 
 ### Community 288 - "test_social_posts.py"
-Cohesion: 0.07
-Nodes (49): _blank(), _creds(), _drain(), _Fetcher, _no_network(), Poster, QueueConn, _Rows (+41 more)
+Cohesion: 0.14
+Nodes (29): _blank(), _drain(), _no_network(), Poster, QueueConn, _Rows, test_a_bad_reply_target_fails_without_posting(), test_a_fresh_claim_is_not_posted_again() (+21 more)
 
 ### Community 289 - "nfl_edge_luck_gap.py"
 Cohesion: 0.10
 Nodes (30): add_windows(), add_windows_fast(), bh(), binom_p(), board(), boot(), cell(), fit_points() (+22 more)
 
-### Community 290 - "DataFrame"
-Cohesion: 0.10
-Nodes (16): _dates(), drop_impossible(), emit_family(), impossible_mask(), _pick(), placebo_null(), placebo_rois(), _row_seasons() (+8 more)
+### Community 290 - "test_odds_call_log_everywhere.py"
+Cohesion: 0.08
+Nodes (16): stats(), _assert_one_odds_row(), _odds_callers(), _run(), test_a_database_that_never_answers_never_breaks_the_call(), test_a_direct_module_run_logs_its_odds_api_call(), test_a_failed_write_is_kept_and_written_later(), test_a_failing_recorder_never_breaks_the_call() (+8 more)
 
 ### Community 291 - "EuroLeague pregame model tests"
 Cohesion: 0.09
@@ -2620,41 +2576,41 @@ Nodes (39): _bet(), board(), fg(), game(), history(), per(), q1_case(), test_a_g
 Cohesion: 0.12
 Nodes (22): NHL models code-complete, not yet trained (2026-06-13 snapshot), NHL — pipeline operations (nhl.md), docs/nhl_clv_ev_assessment.md: the current CLV/EV grade of every NHL model, Per-game logs from the NHL stats API (team, goalie, skater) via data/ingestors/nhl_game_logs.py, Starting-goalie confirm via ESPN core probableStartingGoalie; game-model veto on Out/Doubtful, docs/nhl_market_research.md: six defects and the honest walk-forward, data/nhl_asof.py: one function rates goalies and teams as-of, strictly before the date, nhl_over_under is live as a rule: Pinnacle de-vigged vs the bettable books in the same fetch (+14 more)
 
-### Community 293 - "test_nhl_moneyline_anchored.py"
-Cohesion: 0.08
-Nodes (17): _Fixed, _GamesConn, _logs(), _served(), test_a_later_result_cannot_reach_an_earlier_game(), test_a_matinee_is_not_decided_once_it_has_started(), test_a_missing_input_skips_the_game(), test_a_scheduled_game_missing_from_the_logs_marks_both_teams_stale() (+9 more)
+### Community 293 - "Conn"
+Cohesion: 0.11
+Nodes (25): FetchResult, Conn, _covers(), Fetch, test_a_403_alerts_sets_backoff_and_does_not_clear(), fetch_both(), test_a_current_schema_runs_no_ddl(), test_a_healthy_rotowire_is_not_replaced_by_covers() (+17 more)
 
-### Community 294 - "parse_player_rows"
-Cohesion: 0.31
-Nodes (6): derived_targets(), _derive(), _frame(), test_a_game_log_without_the_column_cannot_build_tackles(), test_the_ingestor_carries_tackles_with_assist(), test_the_target_is_the_box_score_total()
+### Community 294 - "flow_validate.py"
+Cohesion: 0.13
+Nodes (15): bias_table(), main(), apply_anchor(), load_rows(), main(), attach_ids(), _game_marks(), load_snapshots() (+7 more)
 
 ### Community 295 - "parse_summary"
-Cohesion: 0.09
-Nodes (23): box_rows(), _final(), _int(), parse_scoreboard(), parse_summary(), period_rows(), _periods(), possessions() (+15 more)
+Cohesion: 0.11
+Nodes (20): box_rows(), contest_id(), _final(), parse_summary(), period_rows(), possessions(), Refused, team_box() (+12 more)
 
-### Community 296 - "ncaab_espn_box.py"
-Cohesion: 0.03
-Nodes (87): call_in_savepoint(), _board_dates(), _default_get_json(), due_box_games(), due_period_games(), ensure_tables(), fetch_scoreboard(), fetch_summary() (+79 more)
+### Community 296 - "ncaab_espn_ingestor.py"
+Cohesion: 0.11
+Nodes (25): assign_slug(), _days(), _ensure_d1_registry(), fetch_scoreboard(), main(), _merge(), new_totals(), _open() (+17 more)
 
 ### Community 297 - "CLV Pinnacle mainline backfill tests"
 Cohesion: 0.09
 Nodes (33): _base_schema(), _bet(), _Conn, _dk_total(), _exec(), _game(), _lateral(), _market_fns() (+25 more)
 
 ### Community 298 - "test_engine.py"
-Cohesion: 0.07
-Nodes (33): _model_price(), american_to_prob(), anchor_to_market(), devig_power(), margin_pmf(), _over_under(), price_moneyline(), price_quarter() (+25 more)
+Cohesion: 0.05
+Nodes (47): align_states(), build_team_map(), _game_index(), kill_verdict(), load_cached_snapshots(), main(), _model_price(), replay() (+39 more)
 
 ### Community 299 - "Context file size budget tests"
 Cohesion: 0.12
 Nodes (14): _expand_braces(), _hook_context(), _read(), _rule_files(), _size(), test_claude_md_stays_small_enough_to_load_every_session(), test_every_doc_referenced_by_the_index_exists(), test_every_rules_file_is_pointed_at_from_claude_md() (+6 more)
 
-### Community 300 - "discord_notifier.py"
-Cohesion: 0.02
-Nodes (71): 5. The projection model that ships — `nba_prop_projection` (2026-10-16, mike), test_a_live_channel_id_creates_a_webhook_named_sport_live(), test_a_malformed_timestamp_drops_the_stamp_rather_than_raising(), test_delete_posted_degrades_when_the_column_is_missing(), test_free_pick_does_not_fall_back_to_the_default_channel(), test_free_pick_is_none_when_nothing_qualifies(), test_only_a_live_channel_id_counts_when_the_bot_token_is_present(), test_only_live_channels_configured_still_counts_as_configured() (+63 more)
+### Community 300 - "test_nfl_lookahead_signals.py"
+Cohesion: 0.08
+Nodes (14): _Conn, _sql_for(), test_a_started_game_is_still_never_published(), test_both_publishers_apply_the_apps_action_filter(), test_both_publishers_read_the_table_the_app_reads(), test_capture_reaches_as_far_as_the_poller_can_write(), test_capture_reaches_forward_for_the_locked_lookahead_sports(), test_ncaaf_lookahead_is_only_safe_because_the_lock_is_general() (+6 more)
 
-### Community 301 - "nba_espn_box.py"
-Cohesion: 0.07
-Nodes (26): box_team_totals(), et_date(), nba_team(), _no_minutes(), parse_nba_box(), parse_nba_dnp(), parse_nba_scoreboard(), _played() (+18 more)
+### Community 301 - "flow_eval.py"
+Cohesion: 0.12
+Nodes (16): best_hit(), _boot_ci(), drop_degenerate(), evaluate(), fit_time_curve(), main(), report(), sweep() (+8 more)
 
 ### Community 302 - "NFL weather Supabase readback tests"
 Cohesion: 0.13
@@ -2665,12 +2621,12 @@ Cohesion: 0.10
 Nodes (13): _body(), test_each_function_reads_its_own_log_table(), test_it_does_its_ddl_once_and_guards_on_the_property_it_establishes(), test_it_is_one_statement_so_conn_execute_cannot_shred_it(), test_public_is_revoked_before_anon_is_granted(), test_security_invoker_like_the_season_rpcs_it_mirrors(), test_the_fixture_is_two_parallel_arrays_not_a_separator(), test_the_players_latest_team_decides_his_fixture() (+5 more)
 
 ### Community 304 - "test_pregame_price_age.py"
-Cohesion: 0.07
-Nodes (19): _ago(), _clock(), _h2h_row(), _OddsConn, _score_card(), test_a_copy_that_was_never_priced_still_reads_the_other_orientation(), test_a_month_old_price_on_an_unstarted_game_is_no_price(), test_a_price_stored_this_pass_still_decides() (+11 more)
+Cohesion: 0.05
+Nodes (22): _ago(), _BoardConn, _clock(), _h2h_row(), _OddsConn, _score_card(), test_a_copy_that_was_never_priced_still_reads_the_other_orientation(), test_a_game_the_feed_dropped_is_not_scored() (+14 more)
 
 ### Community 305 - "Retired models removal tests"
 Cohesion: 0.05
-Nodes (16): test_a_retired_game_model_is_in_no_feature_map(), test_a_retired_model_is_in_no_registry_and_no_threshold_dict(), test_a_retired_prop_has_no_feature_map_and_no_training_label(), test_a_retired_sport_is_not_still_health_checked(), test_paused_nfl_props_still_in_prop_models_and_thresholds(), test_retired_prop_picks_still_settle_on_their_own_stat(), test_retired_ufc_picks_still_settle_on_their_own_market(), test_ten_nfl_distributional_props_are_paused() (+8 more)
+Nodes (15): test_a_retired_game_model_is_in_no_feature_map(), test_a_retired_model_is_in_no_registry_and_no_threshold_dict(), test_a_retired_prop_has_no_feature_map_and_no_training_label(), test_a_retired_sport_is_not_still_health_checked(), test_paused_nfl_props_still_in_prop_models_and_thresholds(), test_retired_prop_picks_still_settle_on_their_own_stat(), test_retired_ufc_picks_still_settle_on_their_own_market(), test_ten_nfl_distributional_props_are_paused() (+7 more)
 
 ### Community 306 - "test_prop_price_pregame_bound.py"
 Cohesion: 0.08
@@ -2680,13 +2636,13 @@ Nodes (14): _latest_dk_prop_row(), _assigned_from(), _prop_scorers(), _StubConn,
 Cohesion: 0.10
 Nodes (21): discover(), export_meta(), record(), gh_path(), gh_token(), _git(), _git_auth_args(), _git_env() (+13 more)
 
-### Community 308 - "_capture_clv"
-Cohesion: 0.02
-Nodes (77): test_a_one_way_close_is_not_de_vigged(), test_a_worse_close_is_negative_and_equal_prices_are_zero(), test_devigging_the_taken_price_is_not_what_primary_does(), test_kalshi_close_is_not_de_vigged(), test_market_edge_devigs_only_the_close(), test_other_side_prices_include_the_draw_on_a_three_way(), test_power_devig_of_a_balanced_market_is_a_coin_flip(), test_primary_does_not_move_when_the_other_side_changes() (+69 more)
+### Community 308 - "same_book_clv"
+Cohesion: 0.06
+Nodes (29): test_a_one_way_close_is_not_de_vigged(), test_a_worse_close_is_negative_and_equal_prices_are_zero(), test_devigging_the_taken_price_is_not_what_primary_does(), test_kalshi_close_is_not_de_vigged(), test_market_edge_devigs_only_the_close(), test_other_side_prices_include_the_draw_on_a_three_way(), test_power_devig_of_a_balanced_market_is_a_coin_flip(), test_primary_does_not_move_when_the_other_side_changes() (+21 more)
 
 ### Community 309 - "test_model_artifacts_load.py"
-Cohesion: 0.07
-Nodes (19): _git(), _gitignore_keep_pkls(), _ignored(), _manifest_keep_pkls(), _newest_per_model(), test_a_path_that_is_not_ignored_is_not_reported(), test_a_superseded_timestamped_pkl_is_ignored(), test_an_ignored_path_comes_back_byte_identical() (+11 more)
+Cohesion: 0.09
+Nodes (17): _git(), _gitignore_keep_pkls(), _ignored(), _manifest_keep_pkls(), _newest_per_model(), test_a_path_that_is_not_ignored_is_not_reported(), test_a_superseded_timestamped_pkl_is_ignored(), test_an_ignored_path_comes_back_byte_identical() (+9 more)
 
 ### Community 310 - "MLB market features and game gate docs"
 Cohesion: 0.15
@@ -2701,20 +2657,20 @@ Cohesion: 0.11
 Nodes (39): check(), controllable(), main(), setup(), sleep(), begin(), buffer, closeWindow() (+31 more)
 
 ### Community 313 - "ncaabw_espn_box.py"
-Cohesion: 0.10
-Nodes (24): _board_dates(), _default_get_json(), due_box_games(), due_period_games(), ensure_tables(), fetch_scoreboard(), fetch_summary(), _iso() (+16 more)
+Cohesion: 0.08
+Nodes (28): _board_dates(), _default_get_json(), due_box_games(), due_period_games(), fetch_scoreboard(), fetch_summary(), _int(), _iso() (+20 more)
 
 ### Community 314 - "Pipeline log reason tests"
 Cohesion: 0.22
 Nodes (6): _capture(), _Conn, test_a_false_step_records_the_last_error_it_logged(), test_a_false_step_that_logged_nothing_still_says_so(), test_a_raising_step_still_records_the_exception(), test_the_sink_is_removed_after_the_step()
 
 ### Community 315 - "test_live_inning_gate_replay.py"
-Cohesion: 0.12
-Nodes (28): _grade(), _pair(), _refuse_tables(), _score_seen_at(), _game(), _price(), _scored(), _sig() (+20 more)
+Cohesion: 0.13
+Nodes (26): _pair(), _refuse_tables(), _game(), _price(), _scored(), _sig(), _state(), test_a_clean_control_prints_the_tables() (+18 more)
 
 ### Community 316 - "web/build.py"
-Cohesion: 0.12
-Nodes (23): test_ncaaf_live_floors_come_from_the_platform_config(), assert_public_anon(), _b64url_json(), _blocks(), build(), escape(), footer(), header() (+15 more)
+Cohesion: 0.10
+Nodes (27): test_ncaaf_live_floors_come_from_the_platform_config(), chart(), event(), get(), sitemap(), assert_public_anon(), _b64url_json(), _blocks() (+19 more)
 
 ### Community 317 - "Results recap message id tests"
 Cohesion: 0.04
@@ -2732,21 +2688,21 @@ Nodes (78): 10. Changes after the first smoke run, before any bet was graded, 11
 Cohesion: 0.08
 Nodes (33): _fallback_line_quote(), _cut(), _FakeConn, _on(), _pick(), _row(), _sql_const(), _src() (+25 more)
 
-### Community 321 - "json"
-Cohesion: 0.02
-Nodes (93): parse_game(), _periods(), results(), store_season(), _Billed, build_resolver(), ChangeKeeper, check_precondition() (+85 more)
+### Community 321 - "euroleague_odds_history.py"
+Cohesion: 0.06
+Nodes (40): _Billed, build_resolver(), ChangeKeeper, check_precondition(), check_resume(), chunk_plan(), _day_dir(), dense() (+32 more)
 
-### Community 322 - "ingestors/ncaab_injury_feed.py"
-Cohesion: 0.04
-Nodes (88): absence_rows(), _aware(), backoff_after(), classify_status(), diff_report(), FetchResult, injury_tags_before_tip(), insert_changes() (+80 more)
+### Community 322 - "run"
+Cohesion: 0.09
+Nodes (29): _aware(), backoff_after(), insert_changes(), load_open(), load_polls(), load_roster(), load_slate(), _log_misses() (+21 more)
 
-### Community 323 - "pipeline_watch.py"
-Cohesion: 0.07
-Nodes (26): collect(), test_a_missing_webhook_escalates_rather_than_vanishing(), test_a_skipped_offseason_check_is_not_a_finding(), test_burn_survives_a_non_numeric_credits_column(), test_every_not_ok_health_check_is_reported(), test_failed_api_calls_are_reported_even_when_burn_is_low(), _alerter_digest_lines(), _announce() (+18 more)
+### Community 323 - "am_to_dec"
+Cohesion: 0.18
+Nodes (22): am_to_dec(), boot_ci(), be(), bettable_board(), bettable_legs(), era_grid(), era_slice(), ev_k() (+14 more)
 
 ### Community 324 - "Discord — publishing picks over webhooks"
-Cohesion: 0.06
-Nodes (38): catch_up_daily_pipeline / tracking/daily_retry.py, Cloud worker — the pipeline on Railway, Discord guarantees: never twice, only ledger what sent, never breaks the pipeline, recap covers a finished day, DISCORD_WEBHOOK_* variables, one channel per sport, Heartbeat watchdog -> DISCORD_WEBHOOK_OPS, LIVE_DAILY_CREDIT_CAP and RUN_LIVE_LOOP, In-play live loop under a */10 supervisor, Live monitor dashboard (monitoring/, MONITOR_TOKEN) (+30 more)
+Cohesion: 0.13
+Nodes (17): Discord guarantees: never twice, only ledger what sent, never breaks the pipeline, recap covers a finished day, Discord — publishing picks over webhooks, The producers in tracking/discord_notifier.py, notify_discord_void / push_sent kind discord_void, Live MLB is one model and the loop runs at 5s, Live picks go to their sport's live channel (_live_webhook_for_sport), post_missed_recap from 7am ET on every refresh pass, posted <time ET> = picks.created_at (+9 more)
 
 ### Community 325 - "Team stats leak and rebuild docs"
 Cohesion: 0.15
@@ -2760,9 +2716,9 @@ Nodes (18): fast_boot(), lumpy_points(), play(), plays_world(), quote(), segment
 Cohesion: 0.06
 Nodes (25): due(), test_a_game_confirmed_after_its_newest_prop_fetch_owes_one_more_open(), test_an_unknown_game_with_no_prop_fetch_still_owes_its_opening_snapshot(), test_the_close_is_the_post_confirmation_snapshot_when_both_are_owed(), _book(), test_a_200_on_both_calls_merges_the_alternate_lines(), fake_fetch(), test_a_game_first_priced_inside_the_final_window_gets_nothing_more() (+17 more)
 
-### Community 328 - "prop_facts.py"
-Cohesion: 0.06
-Nodes (26): lead_hours(), parse_ts(), actual_from_log(), grade_ou(), _identity(), in_backtest(), _line_of(), log_status() (+18 more)
+### Community 328 - "Build Your Own Model — NFL facts"
+Cohesion: 0.15
+Nodes (11): log_status(), Backtest and save, Build Your Own Model — NBA props, Markets, Official line, refresh, and backfill (2026-11-04), Build Your Own Model — NFL facts, Prop facts, Refresh (+3 more)
 
 ### Community 329 - "NFL opener spread board selection"
 Cohesion: 0.14
@@ -2770,11 +2726,11 @@ Nodes (11): age_tag(), american_to_prob(), _bettable_books(), clean_board(), edg
 
 ### Community 330 - "EuroLeague in-play loop tests"
 Cohesion: 0.05
-Nodes (33): cannot_both_win(), art(), board(), Clock, Db, FakeApi, FakeConn, FakeFeed (+25 more)
+Nodes (31): art(), board(), Clock, Db, FakeApi, FakeConn, FakeFeed, make() (+23 more)
 
-### Community 331 - "ncaab_moneyline_own_spread.py"
-Cohesion: 0.09
-Nodes (20): decide_posts(), best_per_game(), dec(), decide(), Decision, _dropped_list(), _f(), flag_moneylines() (+12 more)
+### Community 331 - "test_prop_ladder.py"
+Cohesion: 0.10
+Nodes (18): from_one_sided_overs(), _ladder(), test_a_clean_ladder_is_not_reported_as_repaired(), test_a_one_sided_ladder_is_vigged_and_says_so(), test_a_quoted_strike_returns_its_own_mid(), test_a_thin_one_sided_ladder_cannot_be_anchored(), test_an_unquoted_line_interpolates_between_its_neighbours(), test_anchoring_moves_the_ladder_onto_an_honest_point() (+10 more)
 
 ### Community 332 - "verify_app_review_sign_in.ts"
 Cohesion: 0.09
@@ -2782,7 +2738,7 @@ Nodes (38): authSrc, check(), checkBuckets(), deleteSrc, failures, fn, root, scr
 
 ### Community 333 - "NFL wind fire window tests"
 Cohesion: 0.07
-Nodes (17): _retractable_slate(), _slate(), test_a_blank_roof_at_a_NON_retractable_venue_is_unaffected(), test_a_closed_roof_is_still_indoor(), test_a_retractable_venue_with_an_unknown_roof_does_not_fire(), test_a_waiting_game_is_not_reported_as_a_collapsed_premise(), test_a_waiting_row_keeps_its_line_price_and_edge(), test_every_blank_roof_row_is_a_retractable_venue() (+9 more)
+Nodes (18): _retractable_slate(), _slate(), test_a_blank_roof_at_a_NON_retractable_venue_is_unaffected(), test_a_closed_roof_is_still_indoor(), test_a_retractable_venue_with_an_unknown_roof_does_not_fire(), test_a_waiting_game_is_not_reported_as_a_collapsed_premise(), test_a_waiting_row_keeps_its_line_price_and_edge(), test_every_blank_roof_row_is_a_retractable_venue() (+10 more)
 
 ### Community 334 - "test_nba_game4_p2.py"
 Cohesion: 0.11
@@ -2793,8 +2749,8 @@ Cohesion: 0.17
 Nodes (17): parse_public_betting(), _pct(), _select_book(), _make_game(), test_parse_emits_six_rows(), test_parse_game_id_and_sides(), test_parse_marks_source_and_snapshot(), test_parse_missing_teams_returns_empty() (+9 more)
 
 ### Community 336 - "Player positions ingestor, tests"
-Cohesion: 0.03
-Nodes (54): _athlete_room(), _basketball(), basketball_group(), _cached_unmatched_ids(), _column_exists(), _espn(), _fresh_source_ids(), _get_json() (+46 more)
+Cohesion: 0.04
+Nodes (48): _athlete_room(), _basketball(), basketball_group(), _cached_unmatched_ids(), _column_exists(), _espn(), _fresh_source_ids(), is_within_window() (+40 more)
 
 ### Community 337 - "NFL sport runbook"
 Cohesion: 0.17
@@ -2813,32 +2769,32 @@ Cohesion: 0.19
 Nodes (21): revenuecat-webhook Edge Function, Stripe rail (stripe-checkout / stripe-portal / stripe-webhook), dark, subscriptions table (keyed to auth.users, webhooks write), discord-link Edge Function (OAuth, guild join, role sync), _shared/discord.ts (bot API helpers), _shared/entitlement.ts (two-way rule, one place), Supabase Edge Functions README, discord-link Edge Function (verify_jwt true) (+13 more)
 
 ### Community 341 - "tennis_common.py"
-Cohesion: 0.06
-Nodes (36): american_to_decimal(), fold(), from_archive_score(), grade_games_spread(), grade_moneyline(), grade_total(), implied(), name_key() (+28 more)
+Cohesion: 0.10
+Nodes (22): from_archive_score(), grade_games_spread(), grade_moneyline(), grade_total(), name_key(), Result, _set_done(), units() (+14 more)
 
 ### Community 342 - "score_links.py"
-Cohesion: 0.04
-Nodes (52): team_code(), _board(), _fresh_cache(), _louis(), _ncaab(), test_a_bad_stored_id_cannot_become_a_url(), test_a_failed_lookup_posts_the_scoreboard_and_does_not_raise(), test_a_lookup_that_blows_up_does_not_drop_the_pick() (+44 more)
+Cohesion: 0.05
+Nodes (49): _board(), _fresh_cache(), _louis(), _ncaab(), test_a_bad_stored_id_cannot_become_a_url(), test_a_failed_lookup_posts_the_scoreboard_and_does_not_raise(), test_a_lookup_that_blows_up_does_not_drop_the_pick(), test_a_scoreboard_match_replaces_the_fallback_and_is_cached() (+41 more)
 
 ### Community 343 - "Mobile screen source check tests"
 Cohesion: 0.02
-Nodes (105): slugify(), slugify(), test_every_revoke_names_the_roles_rather_than_public(), test_odds_keeps_select_for_the_app(), test_the_two_rls_off_tables_lose_everything(), test_every_declared_write_verb_has_a_call_site_that_needs_it(), test_the_function_revoke_names_public_as_well_as_the_roles(), _auth_user_inserts() (+97 more)
+Nodes (104): slugify(), slugify(), test_every_revoke_names_the_roles_rather_than_public(), test_odds_keeps_select_for_the_app(), test_the_two_rls_off_tables_lose_everything(), _auth_user_inserts(), test_every_auth_user_insert_sets_the_scanned_token_columns(), test_there_is_something_to_check() (+96 more)
 
 ### Community 344 - "Mobile over-the-air release workflow"
 Cohesion: 0.06
 Nodes (32): EXPO_TOKEN, default, description, type, force, message, jobs, ota (+24 more)
 
 ### Community 345 - "tennis_odds_history.py"
-Cohesion: 0.03
-Nodes (79): _clean(), fetch_all(), _iso_date(), _jobs(), main(), parse_match_file(), _raw_url(), _spool_name() (+71 more)
+Cohesion: 0.06
+Nodes (33): credit_floor(), ensure_tables(), events_at(), Floor, _get(), held_asks(), held_snapshots(), _iso() (+25 more)
 
 ### Community 346 - "card"
-Cohesion: 0.06
-Nodes (27): test_the_decisions_ledger_is_worker_only_and_created_behind_the_guard(), _et(), _game(), _jobs(), test_a_fetch_that_stored_nothing_exits_non_zero(), test_a_schedule_placeholder_with_no_teams_is_never_planned(), test_a_tick_fetches_then_decides_then_publishes_each_step_bounded(), test_a_tick_with_nothing_due_spends_nothing() (+19 more)
+Cohesion: 0.14
+Nodes (13): _et(), _game(), _jobs(), test_a_fetch_that_stored_nothing_exits_non_zero(), test_a_schedule_placeholder_with_no_teams_is_never_planned(), test_a_tick_fetches_then_decides_then_publishes_each_step_bounded(), test_a_tick_with_nothing_due_spends_nothing(), test_every_team_on_the_stored_schedule_is_planned() (+5 more)
 
-### Community 347 - "test_euroleague_pregame_card.py"
-Cohesion: 0.06
-Nodes (46): artifacts(), CardIncomplete, decide(), deciding_books(), due_games(), enabled(), models_on(), odds_rows() (+38 more)
+### Community 347 - "euroleague_pregame_card.py"
+Cohesion: 0.03
+Nodes (100): balance_floor(), _billed(), books_param(), decision_fetches(), due_mark(), enabled(), ensure_ledger(), event_rows() (+92 more)
 
 ### Community 348 - "ncaaf_margin_eval.py"
 Cohesion: 0.14
@@ -2849,8 +2805,8 @@ Cohesion: 0.14
 Nodes (5): _frame(), helper(), TestARowMissingAFeatureIsNotScored, TestEveryPropLoopGoesThroughTheHelper, TestTheUmpireIsTheDeclaredException
 
 ### Community 350 - "test_ncaab_moneyline_own_spread.py"
-Cohesion: 0.08
-Nodes (34): _american(), art(), _bet(), _decide(), _ml(), _NullConn, _ph(), table() (+26 more)
+Cohesion: 0.04
+Nodes (59): best_per_game(), dec(), decide(), Decision, _dropped_list(), _f(), flag_moneylines(), moneyline_quotes() (+51 more)
 
 ### Community 351 - "mlb_total_public_fade_topk.py"
 Cohesion: 0.12
@@ -2858,39 +2814,39 @@ Nodes (18): american_units(), bucket_win_rates(), build_candidates(), _fmt(), gr
 
 ### Community 352 - "test_discord_void_notice.py"
 Cohesion: 0.02
-Nodes (65): paused_row_exclusion_sql(), test_a_real_pause_is_not_logged_as_stale(), execute(), test_empty_set_errors_when_a_stale_pause_flag_hides_bets(), execute(), _sql_key(), test_a_game_level_key_has_no_tail(), test_a_published_void_keeps_track_and_betslip() (+57 more)
+Nodes (84): _posted_sql(), test_a_real_pause_is_not_logged_as_stale(), execute(), test_empty_set_errors_when_a_stale_pause_flag_hides_bets(), execute(), _sql_key(), test_a_game_level_key_has_no_tail(), test_an_opening_signal_is_live_only_when_discord_published_it() (+76 more)
 
 ### Community 353 - "Pull request checks workflow"
 Cohesion: 0.07
 Nodes (32): concurrency, cancel-in-progress, group, DATABASE_URL, ODDS_API_KEY, SUPABASE_KEY, SUPABASE_URL, jobs (+24 more)
 
 ### Community 354 - "test_no_data_deleted.py"
-Cohesion: 0.05
-Nodes (18): data_deletion_approved(), prune_app_timings(), prune_old(), test_prune_deletes_only_rows_older_than_the_window(), test_prune_on_postgres_keeps_the_recent_rows(), _Cursor, _Recorder, test_an_approval_names_the_job_it_opens() (+10 more)
+Cohesion: 0.06
+Nodes (17): data_deletion_approved(), prune_app_timings(), prune_old(), test_prune_on_postgres_keeps_the_recent_rows(), _Cursor, _Recorder, test_an_approval_names_the_job_it_opens(), test_app_timings_are_not_deleted() (+9 more)
 
 ### Community 355 - "fetch_first_half"
-Cohesion: 0.13
-Nodes (21): fetch_first_half(), _known_games(), h1_book(), card_world(), _one_none_row(), _run(), test_a_bet_under_the_model_s_ev_floor_is_refused_and_the_game_still_decided(), test_a_dry_run_creates_no_table_and_writes_nothing() (+13 more)
+Cohesion: 0.12
+Nodes (22): fetch_first_half(), _known_games(), _ledger_row(), newest_fetch(), card_world(), _one_none_row(), _run(), test_a_bet_under_the_model_s_ev_floor_is_refused_and_the_game_still_decided() (+14 more)
 
 ### Community 356 - "Position versus opponent parity tests"
 Cohesion: 0.07
 Nodes (20): _bn_body(), _sql_groups(), test_a_failed_position_read_is_said_not_hidden(), test_a_failed_read_is_not_held_on_the_spinner(), test_every_mlb_stat_chip_has_a_branch(), test_every_nfl_stat_chip_has_a_branch(), test_every_roster_sport_chip_has_a_branch(), test_mlb_lineup_buckets_agree_between_app_and_server() (+12 more)
 
 ### Community 357 - "test_book_team_map.py"
-Cohesion: 0.15
-Nodes (10): abbr_from_team_string(), split_matchup(), test_a_string_with_no_at_sign_is_refused(), test_an_unrecognised_club_is_refused_not_guessed(), test_draftkings_and_bovada_formats_resolve_the_same(), test_the_athletics_use_the_abbreviation_the_database_uses(), test_the_matchup_split_is_away_at_home(), test_the_two_chicago_clubs_do_not_collapse() (+2 more)
+Cohesion: 0.11
+Nodes (15): abbr_from_team_string(), resolve_game_id(), split_matchup(), _Conn, test_a_non_mlb_sport_is_refused_rather_than_guessed(), test_a_string_with_no_at_sign_is_refused(), test_a_unique_game_resolves(), test_an_ambiguous_game_resolves_to_none() (+7 more)
 
 ### Community 358 - "NBA period map pricing tests"
-Cohesion: 0.06
-Nodes (33): _game(), _games3(), _gaps(), _ladder_quotes(), _luck_games(), _maps(), _odds_row(), _offered() (+25 more)
+Cohesion: 0.11
+Nodes (16): _maps(), ran(), test_a_purchase_outside_45_to_75_minutes_is_never_a_decision(), test_a_season_with_too_few_earlier_games_gets_no_pricing_and_the_run_stops(), test_full_refuses_without_the_owners_go_before_reading_anything(), test_team_totals_take_f6ds_distribution(), test_the_market_pricing_reads_only_earlier_seasons(), test_the_period_map_and_its_error_read_only_seasons_before_the_one_they_price() (+8 more)
 
 ### Community 359 - "test_ncaab_spread_market.py"
-Cohesion: 0.05
-Nodes (53): check_instant(), dropped_quotes(), flag_and_consensus(), load_rows(), _market(), _newest(), snapshot(), standing_quotes() (+45 more)
+Cohesion: 0.04
+Nodes (54): check_instant(), dropped_quotes(), flag_and_consensus(), load_rows(), _market(), _newest(), snapshot(), standing_quotes() (+46 more)
 
-### Community 360 - "os"
-Cohesion: 0.01
-Nodes (212): _fold(), resolve_odds_api_school(), _rest_is_mascot(), _mark_written(), now_iso(), _publish_key(), record_live_prices(), fetch_url() (+204 more)
+### Community 360 - "dataclasses"
+Cohesion: 0.04
+Nodes (41): _bound(), _default_source(), _drain(), _enqueue(), _ensure_writer(), _flush_on_exit(), install(), instrumented() (+33 more)
 
 ### Community 361 - "EuroLeague live feed and tests"
 Cohesion: 0.05
@@ -2905,32 +2861,32 @@ Cohesion: 0.10
 Nodes (24): _Conn, db(), _insert_open(), _ledger(), _open_rows(), _row(), test_a_daily_from_the_previous_process_is_aborted_when_asked(), test_a_daily_older_than_the_max_is_aborted_when_the_caller_says_so() (+16 more)
 
 ### Community 366 - "test_kalshi_game_recording.py"
-Cohesion: 0.07
-Nodes (17): event_code(), event_date(), kalshi_school(), _num(), probe(), record_game_markets(), resolve_events(), rows_for() (+9 more)
+Cohesion: 0.09
+Nodes (8): run_kalshi_game_record(), test_a_kalshi_outage_cannot_break_the_pass(), test_event_code_is_shared_across_series(), test_event_date_is_searched_not_anchored(), test_kalshi_labels_expand_st_and_use_the_explicit_map(), test_resolution_runs_after_every_snapshot(), test_the_recorder_is_scheduled_on_the_pipeline_role(), test_the_recorder_keeps_raw_contracts()
 
 ### Community 367 - "job_queue.py"
 Cohesion: 0.02
-Nodes (48): derive_first_pitch(), test_the_worker_job_is_registered_and_defaults_to_dry_run(), test_runner_captures_stdout_from_the_script_main(), test_a_request_outside_the_approved_scope_is_refused(), test_each_mode_buys_its_own_fixed_scope(), test_the_declared_purchases_validate_and_fit_their_ceilings(), test_a_false_step_is_recorded_once_and_not_requeued(), test_the_players_job_runs_the_player_module() (+40 more)
+Nodes (66): analyze_tables(), derive_first_pitch(), test_a_failed_analyze_is_skipped_not_raised(), _Conn, test_byom_jobs_open_with_their_own_idle_timeout(), test_the_worker_job_is_registered_and_defaults_to_dry_run(), test_a_request_outside_the_approved_scope_is_refused(), test_each_mode_buys_its_own_fixed_scope() (+58 more)
 
 ### Community 368 - "discordJoin.ts"
-Cohesion: 0.13
-Nodes (34): useDiscordJoin(), confirmedTrial(), DISCORD_CARD_BODY, DISCORD_CARD_TITLE, DISCORD_JOIN_STORAGE_KEY, discordJoinBlocksRecap(), DiscordJoinChoice, DiscordJoinGate (+26 more)
+Cohesion: 0.12
+Nodes (35): useDiscordJoin(), confirmedTrial(), DISCORD_CARD_BODY, DISCORD_CARD_TITLE, DISCORD_JOIN_STORAGE_KEY, discordJoinBlocksRecap(), DiscordJoinChoice, DiscordJoinGate (+27 more)
 
 ### Community 369 - "subprocess"
 Cohesion: 0.02
-Nodes (86): run(), tables(), node_exe(), node_strips_types(), test_app_errors_is_write_only_for_the_anon_key(), test_crash_log_is_free_of_app_imports(), test_kinds_agree_between_app_and_server(), test_the_app_reads_the_expo_updates_log() (+78 more)
+Nodes (102): run(), tables(), node_exe(), node_strips_types(), test_app_errors_is_write_only_for_the_anon_key(), test_crash_log_is_free_of_app_imports(), test_kinds_agree_between_app_and_server(), test_the_app_reads_the_expo_updates_log() (+94 more)
 
 ### Community 370 - "PgSource"
-Cohesion: 0.11
-Nodes (8): line_books(), params(), arrow_kind(), PgSource, q(), q(), q(), Throttle
+Cohesion: 0.09
+Nodes (15): params(), keyset_where(), order_by(), Page, _page_from_rows(), page_sql(), PgSource, q() (+7 more)
 
-### Community 371 - "test_ncaab_opener_grid.py"
-Cohesion: 0.03
-Nodes (88): buy_lines(), buy_opener_grid(), consume(), _buy_snapshot(), ChangeKeeper, check_precondition(), _ensure_tables(), EventResolver (+80 more)
+### Community 371 - "ncaab_odds_history.py"
+Cohesion: 0.01
+Nodes (334): flush(), _write(), buy_one(), _write(), _write(), _write(), _write_with_retry(), buy() (+326 more)
 
 ### Community 372 - "nhl_goalie_designations.py"
-Cohesion: 0.05
-Nodes (34): changes(), fetch_dailyfaceoff(), _latest(), main(), normalize_status(), _observe_date(), parse_dailyfaceoff(), parse_dailyfaceoff_page() (+26 more)
+Cohesion: 0.08
+Nodes (22): assess(), _first_names_agree(), is_gated_bet(), is_nhl_bet(), known_games(), log_held(), Matchup, matchup_states() (+14 more)
 
 ### Community 373 - "Seed average model tests"
 Cohesion: 0.09
@@ -2940,29 +2896,29 @@ Nodes (18): _predict_on_one_thread(), SeedAverage, _booster_threads(), _Line, te
 Cohesion: 0.15
 Nodes (14): Min-history gate: >= 3 prior UFC fights or the fight is skipped, docs/thresholds.md, Breakeven is the mean DK implied probability of the bets taken, not 52.4%, The forward check on fresh quotes: the 73.5% never existed, mlb_live_total_runs on the bought 2025 in-play history (260,190 credits), The live calibration map (Platt a=0.8578, b=-0.0787, promote_external), mlb_live_total_runs cut 0.70 -> 0.72 (superseded 2026-09-10), nfl_opener_spread cut: |dev| 1.0 -> 2.0, gate 0.52 -> 0.55 (+6 more)
 
-### Community 375 - "verify_sentry_scrub.ts"
-Cohesion: 0.22
-Nodes (11): cold, crumb, event, scrubbed, tags, initSentry(), scopeTags(), scrubBreadcrumb() (+3 more)
+### Community 375 - "test_nfl_live_leader_config.py"
+Cohesion: 0.08
+Nodes (13): expected_value(), Gate, honest_probability(), test_expected_value_is_on_the_quoted_price(), test_the_shared_gate_is_unchanged_for_every_other_caller(), test_a_loop_that_dies_fails_its_job(), test_it_decides_on_its_own_probability(), test_it_is_a_live_engine_model_that_settles_as_a_moneyline() (+5 more)
 
 ### Community 376 - "nhl_moneyline_anchored.py"
-Cohesion: 0.09
-Nodes (16): games_between(), teams_missing_from_logs(), _add_rating(), build_inputs(), choose_C(), decision_window(), _goalie_frame(), inputs_for_date() (+8 more)
+Cohesion: 0.05
+Nodes (34): games_between(), teams_missing_from_logs(), _add_rating(), build_inputs(), choose_C(), decision_window(), fit(), _goalie_frame() (+26 more)
 
 ### Community 377 - "nfl_edge_prop_wind.py"
-Cohesion: 0.06
-Nodes (42): at_lead(), boot_ci(), odds_2026(), player_log(), props_2026(), props_hist(), props_market(), summarize() (+34 more)
+Cohesion: 0.09
+Nodes (23): at_lead(), ev(), odds_2026(), pbp(), player_log(), props_2026(), props_hist(), props_market() (+15 more)
 
 ### Community 378 - "PicksClvTab.tsx"
-Cohesion: 0.06
-Nodes (59): ChartTooltipBox(), colorsByIdentity(), Swatch(), distinctLabels(), Badge(), ClvBadge(), MultiToggle(), MultiToggleProps (+51 more)
+Cohesion: 0.07
+Nodes (50): Swatch(), distinctLabels(), MultiToggle(), ClvByModel(), ClvDistribution(), CombinedDay, EquityCurve(), HistBucket (+42 more)
 
 ### Community 379 - "verify_bet_all.ts"
 Cohesion: 0.13
 Nodes (23): czr, dk3, dkHash, espn, fd, handoff, mgm, ROOT (+15 more)
 
-### Community 380 - "test_ncaab_teams.py"
-Cohesion: 0.07
-Nodes (33): _fold(), match_event(), gap(), ncaab_slug(), _resolve_shortened_school(), resolve_team_name(), _rest_is_mascot(), _school_spellings() (+25 more)
+### Community 380 - "ncaab_teams.py"
+Cohesion: 0.03
+Nodes (77): _fresh_registry(), build_ncaab_game_id(), eastern_game_date(), _fold(), load_registry(), make_resolver(), resolve(), match_event() (+69 more)
 
 ### Community 381 - "Games and live state schema"
 Cohesion: 0.05
@@ -2973,20 +2929,20 @@ Cohesion: 0.38
 Nodes (9): parse_nhl_game(), _g(), test_arizona_folds_into_utah(), test_missing_teams_returns_none(), test_ot_home_win_is_regulation_draw(), test_preseason_game_skipped(), test_regulation_home_win(), test_scheduled_game_has_no_scores() (+1 more)
 
 ### Community 383 - "test_nba_s_q1tt.py"
-Cohesion: 0.06
-Nodes (35): 14.4 Family B is now checked against the live decision function, CentrePlacebo, _dist(), _games(), _passing_row(), ran(), ran_live(), _raw() (+27 more)
+Cohesion: 0.08
+Nodes (33): 14.4 Family B is now checked against the live decision function, _dist(), _games(), _passing_row(), ran(), ran_live(), _raw(), _ref_quotes() (+25 more)
 
 ### Community 384 - "Mobile threshold mirror parity tests"
 Cohesion: 0.16
 Nodes (12): _block(), _canonical(), _mirror(), _mirror_paused(), _src(), test_every_cut_matches_config(), test_every_scorable_model_is_in_the_app_mirror(), test_the_app_mirror_holds_no_model_config_cannot_score() (+4 more)
 
-### Community 385 - "test_ncaab_first_half_spread.py"
-Cohesion: 0.09
-Nodes (23): decide(), Decision, bet_books(), _art(), _Conn, _decision(), _quotes(), test_a_bet_at_another_book_names_it_and_carries_draftkings_only_at_the_same_number() (+15 more)
+### Community 385 - "test_nba_team_total_clv.py"
+Cohesion: 0.11
+Nodes (14): _book(), _capture(), _lateral(), _oc(), _quotes(), _SnapConn, _team_total_pick(), test_a_close_at_the_same_number_is_graded_against_the_bet_book_s_close() (+6 more)
 
 ### Community 386 - "PanelError"
-Cohesion: 0.09
-Nodes (34): fmtDateTime(), StatTone, BadgeTone, severityVariant(), stateVariant(), StatusBadge(), statusVariant(), toneClasses (+26 more)
+Cohesion: 0.05
+Nodes (58): fmtDateTime(), fmtDuration(), StatTone, Badge(), BadgeTone, ModelStateBadge(), severityVariant(), stateLabel() (+50 more)
 
 ### Community 387 - "Bogus first pitch label repair tests"
 Cohesion: 0.13
@@ -3013,84 +2969,84 @@ Cohesion: 0.06
 Nodes (34): 1. What was run, 2.1 Two-way coverage, eight over/under markets, pre-game, 2.2 Snapshot cadence, 2.3 The 2026 capture changed at the end of September, 2.4 Matching odds to results, 2.5 How much of the soft board each reference can be compared with, 2.6 Is the grading right? De-vigged probability against what happened, 2.7 The baseline: bet every proposition blind (+26 more)
 
 ### Community 393 - "SBR loader abbreviation and shim tests"
-Cohesion: 0.12
-Nodes (5): canonical_abbrev(), loader_conn(), _SqliteConnShim, _SqliteCursorShim, test_sbr_abbreviations_are_canonicalised_for_mlb_only()
+Cohesion: 0.14
+Nodes (3): loader_conn(), _SqliteConnShim, _SqliteCursorShim
 
-### Community 394 - "NBA schedule refresh tests"
-Cohesion: 0.03
-Nodes (81): apply(), core_event(), core_month(), _core_team(), _counts(), event_rows(), feed_shows(), fetch_core() (+73 more)
+### Community 394 - "test_nba_schedule_refresh.py"
+Cohesion: 0.05
+Nodes (43): plan(), _board(), _by_gid(), _Conn, _espn(), _final_event(), _flex(), _HealthConn (+35 more)
 
 ### Community 395 - "Scheduled agents contract doc"
-Cohesion: 0.07
-Nodes (28): AGENTS — one-screen agent roster, Agents contract — Sentinel and Janitor, catch_up_weekly_jobs on boot, Janitor retired 2026-09-03, ModelCalibration weekly re-measure, The pipeline watch's six rules, Sentinel (pipeline watch Routine, retired), Guardrails both agents share (+20 more)
-
-### Community 396 - "ncaab_first_half_total_build.py"
 Cohesion: 0.14
-Nodes (14): compare(), date_ci(), _dec(), fit(), grade(), load(), load_asof_totals(), load_quotes() (+6 more)
+Nodes (14): AGENTS — one-screen agent roster, Agents contract — Sentinel and Janitor, catch_up_weekly_jobs on boot, Janitor retired 2026-09-03, ModelCalibration weekly re-measure, The pipeline watch's six rules, Sentinel (pipeline watch Routine, retired), Guardrails both agents share (+6 more)
+
+### Community 396 - "glob"
+Cohesion: 0.03
+Nodes (51): snapshot_to_frame(), unmapped_teams(), work(), work(), cached_snapshots(), _load_model(), main(), week_schedule() (+43 more)
 
 ### Community 397 - "PanelError"
-Cohesion: 0.08
-Nodes (69): tooltipProps, ChartSkeleton(), Chip(), EmptyState(), Footnote(), PanelError(), BaseProps, DbActivityChart() (+61 more)
+Cohesion: 0.07
+Nodes (70): legendProps, tooltipProps, Chip(), EmptyState(), Footnote(), PanelError(), StatCard(), BaseProps (+62 more)
 
-### Community 398 - "_CatalogConn"
-Cohesion: 0.08
-Nodes (9): _ncaab_resolver(), hit(), _CatalogConn, resolve(), _registry_rows(), spy(), _Result, test_the_resolver_looks_thirty_days_ahead() (+1 more)
+### Community 398 - "test_schedule_context.py"
+Cohesion: 0.14
+Nodes (18): collapse(), team_view(), _at(), _NhlConn, _row(), _stale_teams_before(), test_a_game_still_to_be_played_is_pending_and_counts_for_rest(), test_a_past_game_that_never_got_a_result_stops_holding_after_the_lookback() (+10 more)
 
 ### Community 399 - "NFL live leader model tests"
 Cohesion: 0.12
 Nodes (14): art(), _d(), _raw(), test_600_seconds_and_both_lead_ends_are_inside(), test_a_flipped_spread_sign_changes_the_decision(), test_a_qualifying_state_bets_the_leader_at_its_price(), test_artifact_identity_training_and_rule(), test_band_matches_training_leader_view_on_nflverse_sign() (+6 more)
 
 ### Community 400 - "ncaabw_total_blend_build.py"
-Cohesion: 0.12
-Nodes (19): dec(), by_phase(), by_season(), card_path(), features_all(), first_posts(), grade(), load() (+11 more)
+Cohesion: 0.11
+Nodes (20): dec(), fit_blends(), by_phase(), by_season(), card_path(), features_all(), first_posts(), grade() (+12 more)
 
 ### Community 401 - "weather.py"
-Cohesion: 0.06
-Nodes (33): coverage_check(), expected_true_wind(), fetch_era5(), fetch_issued_forecasts(), fetch_live_forecast(), _frame(), _get(), _issued_columns() (+25 more)
+Cohesion: 0.09
+Nodes (21): fetch_era5(), fetch_issued_forecasts(), fetch_live_forecast(), _frame(), _get(), _issued_columns(), _issued_from_supabase(), OpenMeteoError (+13 more)
 
 ### Community 402 - "Push deep link tests"
-Cohesion: 0.09
-Nodes (20): _code(), _py_version(), _read(), test_a_tap_navigates_only_once_the_app_is_active(), test_an_unreadable_payload_routes_nowhere_rather_than_guessing(), test_both_halves_pin_the_same_payload_version(), test_every_expo_message_carries_a_data_payload(), test_every_summary_producer_can_deep_link_a_single_pick() (+12 more)
+Cohesion: 0.07
+Nodes (24): _code(), _py_version(), _read(), test_a_single_pick_deep_links_and_a_batch_does_not(), test_a_tap_navigates_only_once_the_app_is_active(), test_an_unreadable_payload_routes_nowhere_rather_than_guessing(), test_both_halves_pin_the_same_payload_version(), test_every_expo_message_carries_a_data_payload() (+16 more)
 
 ### Community 403 - "test_flow_slice.py"
 Cohesion: 0.13
-Nodes (17): _clustered_ci(), main(), _qcut(), _rows_for(), slice_table(), verdict(), _frame(), _table() (+9 more)
+Nodes (16): _clustered_ci(), _qcut(), _rows_for(), slice_table(), verdict(), _frame(), _table(), test_a_bias_living_in_one_quarter_reads_as_concentrated() (+8 more)
 
 ### Community 404 - "Calibration promote worker job tests"
 Cohesion: 0.11
 Nodes (3): test_a_refused_model_rolls_back_and_raises(), test_a_successful_promote_commits(), _job_promote_calibration()
 
-### Community 406 - "ncaaf_moneyline_market.py"
-Cohesion: 0.08
-Nodes (22): best_per_game(), check_instant(), dec(), decide(), Decision, eastern_date(), _f(), load_artifact() (+14 more)
+### Community 406 - "ncaaf_moneyline_card.py"
+Cohesion: 0.07
+Nodes (35): Decision, artifact(), CardIncomplete, decided_games(), decision_row(), _drop_duplicate_rows(), enabled(), ensure_decisions_table() (+27 more)
 
 ### Community 407 - "Live odds freshness doc"
-Cohesion: 0.14
-Nodes (18): Basketball Daily Ingest stays on Matt's PC, The Odds API in-play feed is a ~45-67 s cache, Direct book feeds from both addresses (book_direct_probe.py), data/ingestors/dk_direct_feed.py (RUN_DK_DIRECT_FEED defaults 0), DK direct: fingerprint AND address are both necessary, Live odds freshness — what was measured and what to do, config.live_slate_dates() — the midnight blind spot, Our pipeline is 1.33 seconds end to end (+10 more)
+Cohesion: 0.16
+Nodes (14): Basketball Daily Ingest stays on Matt's PC, DraftKings direct needs BOTH a browser fingerprint and a residential address, The feed has a ~45s floor and it cannot be bought past, The Odds API in-play feed is a ~45-67 s cache, Direct book feeds from both addresses (book_direct_probe.py), data/ingestors/dk_direct_feed.py (RUN_DK_DIRECT_FEED defaults 0), DK direct: fingerprint AND address are both necessary, Live odds freshness — what was measured and what to do (+6 more)
 
 ### Community 408 - "NFL wind forecast stability tests"
 Cohesion: 0.13
 Nodes (14): _series(), _slate(), test_a_covered_window_at_or_above_11_fires_and_records_the_minimum(), test_a_covered_window_whose_minimum_is_under_11_does_not_fire(), test_a_database_miss_returns_only_the_current_reading(), test_a_dip_inside_the_window_is_the_number_the_check_sees(), test_a_dip_older_than_the_lookback_does_not_count(), test_a_single_issued_forecast_still_fires() (+6 more)
 
 ### Community 409 - "DraftKings live board merge tests"
-Cohesion: 0.12
-Nodes (11): Clock, football_board(), _git(), test_a_flipped_game_turns_the_moneyline_and_possession_over(), test_a_merge_that_changes_the_feed_restarts_it_and_any_other_merge_does_not(), test_a_moneyline_move_is_a_change_and_the_row_carries_every_column(), test_a_refused_league_reads_slower_and_five_in_a_row_back_it_off(), test_period_names_per_sport() (+3 more)
+Cohesion: 0.09
+Nodes (14): Clock, Conn, football_board(), _git(), test_a_flipped_game_turns_the_moneyline_and_possession_over(), test_a_merge_that_changes_the_feed_restarts_it_and_any_other_merge_does_not(), test_a_moneyline_move_is_a_change_and_the_row_carries_every_column(), test_a_refused_league_reads_slower_and_five_in_a_row_back_it_off() (+6 more)
 
 ### Community 410 - "Latest line state rebuild tests"
 Cohesion: 0.16
 Nodes (22): as_app(), db(), odds(), prop(), test_a_bulk_insert_costs_one_upsert_per_key_and_keeps_the_newest_of_the_batch(), test_a_late_row_for_an_alternate_market_cannot_add_a_stale_line(), test_a_newer_snapshot_replaces_and_an_older_one_is_ignored(), test_a_standard_market_keeps_one_row_even_when_the_line_moves() (+14 more)
 
 ### Community 411 - "diagnose"
-Cohesion: 0.14
-Nodes (18): _classes(), diagnose(), bad(), _safe(), _fails(), _levels(), test_a_correct_url_reports_no_failures(), test_bare_postgres_on_a_DIRECT_host_is_fine() (+10 more)
+Cohesion: 0.16
+Nodes (17): diagnose(), bad(), _safe(), _fails(), _levels(), test_a_correct_url_reports_no_failures(), test_bare_postgres_on_a_DIRECT_host_is_fine(), test_bare_postgres_on_a_pooler_host_is_named() (+9 more)
 
 ### Community 412 - "NCAAF moneyline market build script"
-Cohesion: 0.10
-Nodes (19): too_close(), check_bets(), closing_spreads(), grade(), halves(), history(), load_games(), load_odds() (+11 more)
+Cohesion: 0.08
+Nodes (24): fit(), to_json(), too_close(), check_bets(), closing_spreads(), grade(), halves(), history() (+16 more)
 
 ### Community 413 - "test_nba_team_total_odds.py"
-Cohesion: 0.05
-Nodes (42): _deriv_done(), fetch_team_totals(), _known_games(), parse_team_totals(), _bet(), card_world(), _one_none_row(), _run() (+34 more)
+Cohesion: 0.07
+Nodes (25): closes_taken(), parse_team_totals(), book(), event(), FakeResp, _like(), outcome(), test_a_game_missing_from_the_event_list_is_a_failed_call() (+17 more)
 
 ### Community 414 - "test_cloud_retrain_artifacts.py"
 Cohesion: 0.08
@@ -3101,16 +3057,16 @@ Cohesion: 0.08
 Nodes (22): _by_month(), collect_picks(), devig(), _gap_seconds(), grade(), implied(), iter_months(), load() (+14 more)
 
 ### Community 416 - "test_nba_first_half_total_luck_window.py"
-Cohesion: 0.06
-Nodes (28): build(), _db(), _slate(), test_a_close_alone_runs_only_the_close(), test_a_failed_first_half_step_does_not_stop_the_team_total_s_steps(), test_a_failed_team_total_step_does_not_stop_the_first_half_s_steps(), test_a_failing_first_half_plan_still_runs_the_others_then_fails(), test_a_fetch_with_a_failed_call_exits_non_zero_and_an_empty_one_does_not() (+20 more)
+Cohesion: 0.07
+Nodes (26): build(), _db(), _slate(), test_a_close_alone_runs_only_the_close(), test_a_failed_first_half_step_does_not_stop_the_team_total_s_steps(), test_a_failing_first_half_plan_still_runs_the_others_then_fails(), test_a_fetch_with_a_failed_call_exits_non_zero_and_an_empty_one_does_not(), test_a_first_half_tick_fetches_exactly_the_planned_games_then_decides() (+18 more)
 
 ### Community 417 - "Sentry events sync and tests"
 Cohesion: 0.10
 Nodes (19): config_from_env(), fetch_pages(), next_cursor(), row_for(), sync_sentry_events(), _tags(), _event(), FakeConn (+11 more)
 
-### Community 418 - "test_cbb_pairs.py"
-Cohesion: 0.08
-Nodes (12): bet(), Conn, _quotes(), test_a_bet_that_cannot_be_half_of_the_pair_reads_nothing(), test_a_big_favourite_is_stopped_by_a_standing_under_and_names_it(), test_a_cards_bet_that_would_make_the_pair_becomes_a_none_row(), test_an_under_is_not_bet_when_the_favourite_lays_twelve_in_the_half(), test_an_under_is_stopped_by_a_standing_big_favourite_and_names_it() (+4 more)
+### Community 418 - "prop_ladder.py"
+Cohesion: 0.10
+Nodes (7): _expit(), from_kalshi(), Ladder, _logit(), _monotone(), Rung, test_from_kalshi_reads_the_dollars_fields()
 
 ### Community 419 - "NBA period team totals search doc"
 Cohesion: 0.06
@@ -3125,11 +3081,11 @@ Cohesion: 0.18
 Nodes (26): _asof(), boot_p(), build_state(), first(), grade(), initial_last(), load_pbp(), main() (+18 more)
 
 ### Community 422 - "test_ncaaf_search_features.py"
-Cohesion: 0.07
-Nodes (26): AdjRatings, blended_rating(), build_adjusted_ratings(), build_prior_season_ratings(), fit_opponent_adjustment(), load_team_games(), pool_fcs_opponents(), rolling_variants() (+18 more)
+Cohesion: 0.11
+Nodes (15): AdjRatings, blended_rating(), build_adjusted_ratings(), fit_opponent_adjustment(), _synth(), test_blend_falls_back_when_one_side_missing(), test_blend_weights_move_from_prior_to_current(), test_confounded_home_assignment_plus_heavy_alpha_corrupts_hfa() (+7 more)
 
 ### Community 423 - "GoalieBook"
-Cohesion: 0.19
+Cohesion: 0.17
 Nodes (3): GoalieBook, _g(), TestGoalieAsOf
 
 ### Community 424 - "fetch_datasets.py"
@@ -3140,9 +3096,9 @@ Nodes (16): betfair_names(), build_parser(), dest_root(), _download(), fetch_ite
 Cohesion: 0.09
 Nodes (10): _build(), _run_a_wrapped_job(), _StandInConn, test_a_job_that_runs_in_a_test_opens_no_database_connection(), test_building_the_scheduler_opens_no_database_connection(), test_the_real_heartbeat_still_writes_its_row(), test_the_suite_stub_keeps_the_real_source_readable(), test_the_trap_sees_the_route_the_real_heartbeat_takes() (+2 more)
 
-### Community 426 - "PicksRecorder"
-Cohesion: 0.12
-Nodes (12): PicksRecorder, _AvoidConn, _mk_decline(), test_a_market_opinion_decline_is_written_as_avoid(), test_a_moved_line_is_rewritten(), test_an_unchanged_proposition_is_not_rewritten(), test_plumbing_refusals_stay_out_of_picks(), test_recording_a_decline_can_never_break_a_bet() (+4 more)
+### Community 426 - "test_nfl_live_pick_writer.py"
+Cohesion: 0.02
+Nodes (63): build_pick(), _is_market_opinion(), _lane_is_locked(), _norm_player(), PicksRecorder, refuse_publish_reason(), resolve_game(), resolve_game_id() (+55 more)
 
 ### Community 427 - "nhl_period_scores_api.py"
 Cohesion: 0.10
@@ -3165,20 +3121,20 @@ Cohesion: 0.16
 Nodes (9): _between(), _sql(), test_a_bet_is_still_never_re_scored(), test_only_a_bet_locks_a_pair(), test_the_cleanup_covers_the_whole_look_ahead_window(), test_the_cleanup_never_touches_a_started_game_or_a_live_row(), test_the_lock_is_no_longer_ncaaf_specific(), test_the_prop_and_live_locks_are_unchanged() (+1 more)
 
 ### Community 432 - "NCAAF gameday and live feeds"
-Cohesion: 0.05
-Nodes (56): _clock_seconds(), extract_live_states_cfbd(), _parse_situation(), check_feed_assumptions(), _competitors(), _count_plays(), _dig(), extract_live_events() (+48 more)
-
-### Community 433 - "parse_upcoming_team_rows"
 Cohesion: 0.07
-Nodes (15): games_rows(), _int_or_none(), _kickoff_utc(), _neutral_site(), _num_or_none(), parse_player_rows(), parse_team_rows(), parse_upcoming_team_rows() (+7 more)
+Nodes (37): _clock_seconds(), extract_live_states_cfbd(), _parse_situation(), _cfbd_game(), _ctx(), _no_ev_floor(), _settled(), _stamped() (+29 more)
+
+### Community 433 - "test_ncaab_injury_feed.py"
+Cohesion: 0.14
+Nodes (20): absence_rows(), diff_report(), resolve_listing(), resolve_team(), school_name(), _sig(), _listing(), _open() (+12 more)
 
 ### Community 434 - "test_pregame_insert_cutoff.py"
 Cohesion: 0.07
 Nodes (18): _AbortConn, clock(), _Conn, _rejected(), _row(), test_a_failed_cutoff_read_keeps_the_row(), test_a_live_row_is_inserted_and_not_looked_up(), test_a_live_row_stays_when_the_pregame_cutoff_has_passed() (+10 more)
 
-### Community 435 - "League models hook tests"
-Cohesion: 0.13
-Nodes (20): _blocks(), decide(), main(), _read_lines(), scan(), _texts(), _decide(), _run() (+12 more)
+### Community 435 - "Cloud worker — the pipeline on Railway"
+Cohesion: 0.09
+Nodes (25): catch_up_daily_pipeline / tracking/daily_retry.py, Cloud worker — the pipeline on Railway, DISCORD_WEBHOOK_* variables, one channel per sport, Heartbeat watchdog -> DISCORD_WEBHOOK_OPS, LIVE_DAILY_CREDIT_CAP and RUN_LIVE_LOOP, In-play live loop under a */10 supervisor, Live monitor dashboard (monitoring/, MONITOR_TOKEN), NFL poll driver — hourly from T-10, every 10 min inside 3h (+17 more)
 
 ### Community 436 - "Game calibrated decision tests"
 Cohesion: 0.06
@@ -3188,21 +3144,25 @@ Nodes (19): _pick(), _pick_at(), test_a_calibrated_cut_is_paired_with_a_calibrat
 Cohesion: 0.07
 Nodes (24): v_opening_signal_slices, v_opening_vs_live, mv_scored_pick_outcomes_model_idx, mv_scored_pick_outcomes_pick_id_idx, public.v_model_full_outcome_record, public.v_public_track_record, public.v_public_track_record_daily, public.v_public_track_record (+16 more)
 
-### Community 438 - "impossible_games_played"
-Cohesion: 0.08
-Nodes (14): impossible_games_played(), _played_actual(), test_a_missing_count_is_reported_not_silently_passed(), test_an_honest_row_passes(), test_claiming_fewer_games_than_played_is_fine(), test_feb_gp_climbing_vs_zero_regular_season_still_fails(), test_mlb_twin_codes_do_not_false_crit(), test_mlb_twin_reverse_lookup_also_resolves() (+6 more)
+### Community 438 - "test_team_stats_asof_invariants.py"
+Cohesion: 0.02
+Nodes (60): already_a_series(), build_rows(), _games(), impossible_games_played(), live_season_snapshot_grace(), main(), _played_actual(), _prior_season_rates() (+52 more)
 
-### Community 439 - "test_a_pass_stores_only_what_changed"
-Cohesion: 0.25
-Nodes (4): test_the_backfill_jobs_validate_and_are_free(), test_turning_a_backfill_on_is_one_line(), read_text(), __init__()
+### Community 439 - "matrix.py"
+Cohesion: 0.14
+Nodes (12): build_prior_season_ratings(), load_fbs_membership(), load_team_games(), pool_fcs_opponents(), rolling_variants(), _asof_merge(), build_matrix(), _haversine() (+4 more)
+
+### Community 440 - "nhl_derivative_odds_history.py"
+Cohesion: 0.12
+Nodes (14): _blank_row(), _done_ids(), _ensure_ledger(), estimate_credits(), format_plan(), _games_by_date(), main(), Meter (+6 more)
 
 ### Community 441 - "nba_game2_verdict.py"
-Cohesion: 0.12
-Nodes (17): axes_of(), band_slots(), bands_ok(), bar9(), cell_key(), _floats(), house_bar4(), house_verdict() (+9 more)
+Cohesion: 0.07
+Nodes (37): axes_of(), band_slots(), bands_ok(), bar9(), cell_key(), _floats(), house_bar4(), house_verdict() (+29 more)
 
 ### Community 442 - "ncaabw_quote_bounds.py"
-Cohesion: 0.16
-Nodes (10): describe(), edge_problem(), _fmt(), _known(), problem(), split(), dk_first(), test_the_model_is_registered_everywhere_a_live_model_must_be() (+2 more)
+Cohesion: 0.09
+Nodes (17): describe(), edge_problem(), _fmt(), _known(), problem(), split(), dk_first(), test_the_model_is_registered_everywhere_a_live_model_must_be() (+9 more)
 
 ### Community 443 - "Team period results tests"
 Cohesion: 0.13
@@ -3217,8 +3177,8 @@ Cohesion: 0.08
 Nodes (25): concurrency, cancel-in-progress, group, default, description, type, DRY_RUN, dry_run (+17 more)
 
 ### Community 446 - "test_ncaaf_qb_features.py"
-Cohesion: 0.13
-Nodes (23): build_qb_team_features(), merge_qb_features(), _feat(), _frame(), _games(), _qb_rows(), _qb_team(), test_a_games_features_never_use_that_game() (+15 more)
+Cohesion: 0.19
+Nodes (16): build_qb_team_features(), _feat(), _frame(), _qb_rows(), test_a_games_features_never_use_that_game(), test_current_qb_is_the_previous_games_primary(), test_empty_input_returns_the_right_shape(), test_first_game_has_no_qb_features_at_all() (+8 more)
 
 ### Community 447 - "Discord link, billing webhook functions"
 Cohesion: 0.13
@@ -3233,16 +3193,16 @@ Cohesion: 0.16
 Nodes (9): _assign(), _book_from_label_fn(), _fn(), test_the_book_is_read_from_the_label_suffix(), test_the_closing_prop_lookup_defaults_to_draftkings_and_binds_the_book(), test_the_label_book_map_is_the_inverse_of_both_cards(), test_the_map_test_no_longer_excludes_nfl(), test_the_market_relative_rules_take_their_market_from_the_row() (+1 more)
 
 ### Community 450 - "test_mlb_runline_retrain_sweep_job.py"
-Cohesion: 0.07
-Nodes (11): test_the_raised_timeout_is_restored_after_the_job(), test_the_restore_puts_back_a_pre_existing_value(), test_missing_artifact_path_refuses_to_sweep_live(), test_retrain_then_sweep_passes_the_new_path(), test_marker_file_is_in_tree_so_the_freeze_would_not_block_the_worker(), test_missing_artifact_path_refuses_to_sweep_live(), test_retrain_then_sweep_passes_the_new_path(), test_the_runner_retrains_then_sweeps_the_new_artifact() (+3 more)
+Cohesion: 0.05
+Nodes (17): test_the_raised_timeout_is_restored_after_the_job(), test_the_restore_puts_back_a_pre_existing_value(), test_marker_file_is_in_tree_so_the_freeze_would_not_block_the_worker(), test_missing_artifact_path_refuses_to_sweep_live(), test_over_covers_when_combined_score_beats_the_total_line(), test_price_below_the_house_floor_is_not_a_gradable_side(), test_push_on_the_total_emits_no_sides(), test_retrain_then_sweep_passes_the_new_path() (+9 more)
 
-### Community 451 - "test_nfl_live_prop_settlement.py"
-Cohesion: 0.28
-Nodes (10): _box(), _game(), _live_bet(), _row(), test_a_neighbouring_days_game_does_not_grade_the_wrong_player(), test_a_same_day_live_bet_grades_against_pass_attempts(), test_an_evening_bet_dated_the_next_utc_day_still_finds_its_box_score(), test_the_game_path_leaves_a_live_prop_bet_alone() (+2 more)
+### Community 451 - "ncaab_total_blend.py"
+Cohesion: 0.13
+Nodes (13): box_pairs(), day_number(), decide(), Decision, dedupe_box(), end_ns_of(), floor_hour_ns(), league_rates() (+5 more)
 
-### Community 452 - "test_parlaymatt_ingest_keeps_his_author_and_eggz_kinds_stay"
-Cohesion: 0.14
-Nodes (3): test_parlaymatt_ingest_keeps_his_author_and_eggz_kinds_stay(), test_the_cursor_moves_past_every_message_and_the_next_poll_starts_after_it(), fetch()
+### Community 452 - "Follow-ups — the durable backlog"
+Cohesion: 0.11
+Nodes (22): PREGAME_PRICE_MAX_AGE_MIN (180 min) on game-market reads, Pruner keeps the opener AND the close per (proposition, book), Closing line value (CLV), clv_method = standard_v2 (PEDIGREE_CLV_METHODS), clv_standard_v2_2026_10_14.sql bulk rewrite, Secondary — market edge vs Pinnacle's fair close (market_clv_*), Power de-vig (bisection, 80 steps, k in [0.05, 12]), Primary CLV — same-book raw price (clv_pct, clv_pp, clv_beat_close) (+14 more)
 
 ### Community 453 - "UX designer agent and project rules"
 Cohesion: 0.20
@@ -3258,31 +3218,31 @@ Nodes (23): test_a_drained_refresh_with_steps_recorded_is_still_replaced(), _dec
 
 ### Community 457 - "test_euroleague_live_ht.py"
 Cohesion: 0.09
-Nodes (32): edge_problem(), board(), quotes(), read(), rows(), test_a_line_more_than_six_points_off_the_reads_median_is_not_bet(), test_a_pregame_stamp_is_not_in_play_and_does_not_count(), test_a_price_under_100_is_not_a_price() (+24 more)
+Nodes (31): edge_problem(), board(), quotes(), read(), rows(), test_a_line_more_than_six_points_off_the_reads_median_is_not_bet(), test_a_pregame_stamp_is_not_in_play_and_does_not_count(), test_a_price_under_100_is_not_a_price() (+23 more)
 
 ### Community 458 - "nfl_edge_kalshi.py"
-Cohesion: 0.07
-Nodes (44): Buying back the line-shop history the cleanup removed (#1384), How it decides, Running it, Tested on production data, The whole plan, games 2026-03-01 to 2026-11-13, measured 2026-11-16, What a bought row looks like, What it buys: four kinds, Full-game totals: the men's totals model passes (+36 more)
+Cohesion: 0.12
+Nodes (26): Full-game totals: the men's totals model passes, Halftime spread: close, and it does not clear (2026-11-11), In play: the first look (its checks are in the next section), Research (2026-11-09), Spread and moneyline off the team ratings: nothing clears (2026-11-11), The second-half total is a halftime total, and it passes its checks (2026-11-11), align_check(), bh() (+18 more)
 
 ### Community 459 - "Signal timing and pick lock doc"
 Cohesion: 0.18
 Nodes (8): Signal-timing analysis — the pick lock (signal_timing.md), Does the daily pick lock cost us signals? (2026-08-23), MAX_EDGE_CAP blind spot: games with no row at all, A model re-run harness over stored snapshots (open item), Four NONE-row coverage traps, Prop NONE/AVOID rows are a survivor sample (poller clear), The pre-game line poller wipes a game's non-BET prop picks (known issue), The lock is signal-aware for NCAAF only (NONE rows refreshed, BETs lock at first cross)
 
-### Community 460 - "x_publisher.py"
-Cohesion: 0.04
-Nodes (64): test_a_pick_with_no_alternative_falls_back_to_draftkings(), test_a_pick_near_its_tip_is_never_held_back_by_the_per_run_cap(), _alert_record_held(), _as_et(), _cap_for_run(), _display_book(), in_daily_retry_window(), in_period_recap_window() (+56 more)
+### Community 460 - "test_nfl_label_units.py"
+Cohesion: 0.06
+Nodes (33): test_a_pick_with_no_alternative_falls_back_to_draftkings(), _opener_card_row(), _sig(), test_a_label_with_no_unit_figure_is_returned_as_stored(), test_a_new_label_reads_like_every_other_sports_label(), test_a_new_opener_label_keeps_the_age_and_drops_the_unit_figure(), test_a_new_wind_label_is_the_bet_only(), test_a_void_notice_quotes_the_message_it_voids() (+25 more)
 
 ### Community 461 - "Discord linking runbook"
 Cohesion: 0.23
 Nodes (11): Discord linking runbook: one membership, two surfaces, Migration add_discord_link_and_whop_memberships.sql, DISCORD_LINK_ENABLED flag, discord_links table, Connect Discord flow (start -> consent -> complete -> role sync), public.my_access() computes access on every read, useAccess access state hook, scripts/verify_discord_link.ts (44 assertions) (+3 more)
 
 ### Community 462 - "social_posts.py"
-Cohesion: 0.09
-Nodes (36): _actionable(), _as_utc(), _attach_media(), _checked_media_urls(), _checked_reply(), _claim(), drain_social_posts(), enqueue() (+28 more)
+Cohesion: 0.11
+Nodes (32): test_dry_run_writes_nothing_and_does_not_send(), test_the_cli_can_enqueue_one_image_without_posting(), test_the_kill_switch_posts_nothing(), _actionable(), _as_utc(), _attach_media(), _claim(), drain_social_posts() (+24 more)
 
 ### Community 463 - "_get"
-Cohesion: 0.19
-Nodes (9): _arm_cfbd(), _Resp, _Sess, test_a_429_waits_for_retry_after_then_returns_the_body(), test_a_call_stops_when_the_next_sleep_would_pass_its_budget(), test_a_connection_error_uses_the_same_backoff_and_then_succeeds(), test_a_missing_retry_after_uses_exponential_backoff(), test_an_http_date_retry_after_is_seconds_from_now() (+1 more)
+Cohesion: 0.11
+Nodes (16): _cfbd_delay(), _cfbd_sleep(), _get(), _retry_after_seconds(), _RetryClock, _session(), _arm_cfbd(), _Resp (+8 more)
 
 ### Community 464 - "test_gameday_cadence.py"
 Cohesion: 0.04
@@ -3293,8 +3253,8 @@ Cohesion: 0.24
 Nodes (9): boot(), by_season(), exp_win(), load(), main(), price(), report(), residuals() (+1 more)
 
 ### Community 466 - "nfl_inplay_history.py"
-Cohesion: 0.16
-Nodes (22): Budget, buy_halftime(), buy_inplay(), events_for(), _floor5(), _get(), halftime_requests(), halftime_windows() (+14 more)
+Cohesion: 0.06
+Nodes (37): Budget, buy_halftime(), buy_inplay(), events_for(), _floor5(), _get(), halftime_requests(), halftime_windows() (+29 more)
 
 ### Community 467 - "ncaabw_total_blend.py"
 Cohesion: 0.06
@@ -3313,39 +3273,39 @@ Cohesion: 0.11
 Nodes (17): _add(), _conn(), _identity_sql(), _run(), test_a_clean_slate_reports_nothing(), test_a_non_fbs_fixture_is_not_reported(), test_a_phantom_opponent_is_detected_too(), test_a_real_doubleheader_is_not_a_duplicate() (+9 more)
 
 ### Community 471 - "wnba_results_ingestor.py"
-Cohesion: 0.05
-Nodes (51): build_log_row(), _core_athlete(), _deref(), _et_date(), _fetch_core_box_players(), _fetch_core_games(), _fetch_scoreboard(), _fetch_summary() (+43 more)
+Cohesion: 0.02
+Nodes (129): call_in_savepoint(), rollback_savepoint(), box_team_totals(), et_date(), fill_missing(), _no_minutes(), parse_nba_box(), parse_nba_dnp() (+121 more)
 
-### Community 472 - "test_nba_prop_rest_inputs.py"
-Cohesion: 0.09
-Nodes (20): asof_roster(), box_from_log(), collapse_official(), espn_compact(), worker_data(), load_cache(), research_inputs(), test_the_live_projection_gives_the_graded_means_for_one_night() (+12 more)
+### Community 472 - "_tiny_raw"
+Cohesion: 0.31
+Nodes (5): _before(), test_the_labs_inputs_are_the_shipped_research_path_but_for_the_lag(), test_the_shift_lands_before_the_report_is_compacted(), _tiny_raw(), _tip()
 
 ### Community 473 - "test_local_mirror_report.py"
-Cohesion: 0.09
-Nodes (21): _code(), copy_root(), _logs(), _manifest(), _row(), _state(), test_a_column_or_source_added_later_has_its_own_statement(), test_a_one_table_run_by_hand_is_not_the_passs_copy() (+13 more)
+Cohesion: 0.06
+Nodes (32): _code(), _Conn, copy_root(), _logs(), _manifest(), _row(), _run_runner(), _state() (+24 more)
 
 ### Community 474 - "NBA SBR odds archive import"
 Cohesion: 0.05
 Nodes (40): classify(), _fold(), _gid(), _is_half(), iso_z(), load(), match(), ml_timing() (+32 more)
 
 ### Community 475 - "rp"
-Cohesion: 0.11
-Nodes (6): _nhl_blended_features(), d(), rp(), test_a_gap_game_is_found_by_its_teams_a_day_off_and_never_twice(), test_the_pipeline_runs_the_card_under_both_names(), TestTheWeatherStepWalksTheWindow
+Cohesion: 0.15
+Nodes (3): rp(), test_the_pipeline_runs_the_card_under_both_names(), TestTheWeatherStepWalksTheWindow
 
 ### Community 476 - "Transaction pooler URL tests"
 Cohesion: 0.19
 Nodes (8): _transaction_endpoint(), test_a_direct_connection_is_left_alone(), test_a_local_postgres_is_left_alone(), test_a_supabase_session_url_becomes_the_transaction_url(), test_it_is_idempotent(), test_only_the_port_changes(), test_the_escape_hatch_works(), test_the_job_queue_still_gets_session_mode()
 
-### Community 477 - "test_anon_lockdown.py"
-Cohesion: 0.07
-Nodes (20): _anon_sequence_open(), _anon_table_open(), _log_revoke(), _public_anon_strays(), _revoke_lockdown_strays(), _revoke_or_note(), _can(), _fixture_sql() (+12 more)
+### Community 477 - "apply_anon_grants.py"
+Cohesion: 0.13
+Nodes (13): _anon_can_read(), _anon_sequence_open(), _anon_table_open(), _function_plan(), _function_signature(), _log_revoke(), main(), _public_anon_strays() (+5 more)
 
 ### Community 478 - "glob"
-Cohesion: 0.10
-Nodes (6): main(), main(), schema(), load(), settle(), mirror()
+Cohesion: 0.13
+Nodes (5): main(), main(), schema(), load(), mirror()
 
 ### Community 479 - "Live betting operations doc"
-Cohesion: 0.22
+Cohesion: 0.20
 Nodes (12): BookMoveClock — the book has moved past a cap while our state has not changed, LOCK_LIVE_PICKS_AT_FIRST_SIGNAL — the first live BET per lane is the bet of record, The live staleness guards (data/live_quote_guard.py), Live (in-play) betting — pipeline operations, Live cutoffs are re-derived every pass (tracking/live_calibration.py), LIVE_MAX_BETS_PER_WEEK is advisory, not a runtime cap, config.LIVE_MODELS — a separate registry from MODELS, live_pick_features — one row per lane, the first one, under its own SAVEPOINT (+4 more)
 
 ### Community 480 - "Brand asset fetch workflow"
@@ -3357,48 +3317,48 @@ Cohesion: 0.13
 Nodes (14): compilerOptions, esModuleInterop, jsx, module, moduleResolution, noUncheckedIndexedAccess, paths, resolveJsonModule (+6 more)
 
 ### Community 482 - "test_mlb_total_public_fade.py"
-Cohesion: 0.09
-Nodes (36): find_fade_bets(), is_pre_commence(), select_latest_pre_commence_over(), under_in_odds_band(), pick_rows(), publish(), rows_for_insert(), _dk_board() (+28 more)
+Cohesion: 0.10
+Nodes (33): find_fade_bets(), is_pre_commence(), select_latest_pre_commence_over(), under_in_odds_band(), publish(), rows_for_insert(), _dk_board(), _quote() (+25 more)
 
-### Community 483 - "test_feature_engine.py"
-Cohesion: 0.19
-Nodes (4): _has_returnee(), _market_for_odds(), TestHasReturnee, TestMarketForOdds
+### Community 483 - "game_market_gate.py"
+Cohesion: 0.11
+Nodes (14): _as_float(), fair_prob(), first_eligible_snapshot(), _line_changed(), _line_for_market(), _line_moved_against(), load_opening_odds(), _moved_toward_us() (+6 more)
 
 ### Community 484 - "test_nba_first_half_odds.py"
 Cohesion: 0.06
-Nodes (31): event_rows(), fetches(), ledger_exists(), parse_first_half(), install(), test_a_200_with_no_first_half_total_is_a_fetch(), test_a_book_outside_the_line_shop_is_not_stored(), test_a_book_s_first_half_market_reads_its_line_and_prices() (+23 more)
+Nodes (34): closes_taken(), event_rows(), fetches(), ledger_exists(), parse_first_half(), h1_book(), H1DB, install() (+26 more)
 
 ### Community 485 - "live_scorer.py"
 Cohesion: 0.04
-Nodes (44): _best_live_price(), _best_live_side(), _live_book_quotes(), _live_quote_is_on_offer(), best_takeable_quote(), _ev(), _FakeConn, _live_pick() (+36 more)
+Nodes (46): _best_live_price(), _best_live_side(), _live_book_quotes(), _live_decision_quote(), _live_quote_is_on_offer(), best_takeable_quote(), _ev(), _FakeConn (+38 more)
 
 ### Community 486 - "workers/gameday.py"
 Cohesion: 0.04
-Nodes (52): _competitors(), _deref(), fetch_live_events(), _https(), make_fetcher(), fetch(), parse_core_event(), _score() (+44 more)
+Nodes (53): _competitors(), _deref(), fetch_live_events(), _https(), make_fetcher(), fetch(), parse_core_event(), _score() (+45 more)
 
 ### Community 487 - "SharpSports bet sync edge function"
 Cohesion: 0.28
 Nodes (14): admin, americanFromBetSlip(), asArray(), cors, createContext(), isSettled(), json(), pick() (+6 more)
 
 ### Community 488 - "NBA first quarter props search doc"
-Cohesion: 0.06
-Nodes (30): 11. Reported beside every cell, never a bar, 12. What a pass means, and running it, 13. Counts before grading, under the rules as registered (2026-11-03), 14. A change before any grade: the points distribution (2026-11-03), 15. Counts before grading, under section 14 (2026-11-03), 16.1 A player's own status no longer moves his own minutes, 16.2 The chance a listed player plays is fitted on pool players only, 16.3 A player who has left the team leaves its pool once anything known says so (+22 more)
+Cohesion: 0.08
+Nodes (25): 11. Reported beside every cell, never a bar, 12. What a pass means, and running it, 13. Counts before grading, under the rules as registered (2026-11-03), 15. Counts before grading, under section 14 (2026-11-03), 16.1 A player's own status no longer moves his own minutes, 16.2 The chance a listed player plays is fitted on pool players only, 16.3 A player who has left the team leaves its pool once anything known says so, 16.4 `--full` refuses any other books or floor (+17 more)
 
-### Community 489 - "run"
-Cohesion: 0.09
-Nodes (19): _bounded(), drop_started_ladders(), in_window(), _known_games(), _ledger(), _match(), plan(), _replace_state() (+11 more)
+### Community 489 - "pull_snaps.py"
+Cohesion: 0.13
+Nodes (10): ledger_status(), OddsAPIClient, game_windows(), _kickoff(), main(), plan(), pull(), snapshot_times() (+2 more)
 
 ### Community 490 - "nba_live_feed.py"
 Cohesion: 0.05
-Nodes (22): _api_key(), below_floor(), clock_running(), Espn, EspnGame, header_score(), _install_api_call_log(), late_plays() (+14 more)
+Nodes (24): _api_key(), below_floor(), clock_running(), Espn, EspnGame, header_score(), _install_api_call_log(), late_plays() (+16 more)
 
 ### Community 491 - "prop_box_scores.py"
-Cohesion: 0.09
-Nodes (18): ensure_prop_box_scores(), missing_prop_games(), GradeConn, _pick(), ScriptConn, test_a_logged_game_is_not_fetched_and_a_goalie_gap_is(), test_a_non_timeout_prop_error_rolls_back_and_raises(), test_a_probe_error_that_is_not_a_timeout_raises_after_rollback() (+10 more)
+Cohesion: 0.12
+Nodes (14): ensure_prop_box_scores(), missing_prop_games(), _pick(), ScriptConn, test_a_logged_game_is_not_fetched_and_a_goalie_gap_is(), test_a_probe_error_that_is_not_a_timeout_raises_after_rollback(), test_a_probe_timeout_rolls_back_and_returns_empty(), test_a_recent_nfl_attempt_is_not_repeated() (+6 more)
 
 ### Community 492 - "NBA in-play state search doc"
-Cohesion: 0.08
-Nodes (23): 10. What the lab writes, and how it runs, 11.1 The 2026-27 in-play prices found, 11.2 Bad rows, 11.3 Counts by cell and season, 11.4 The placebo on real prices, 11.5 Still offered at the next fetch (step 1, 2026-27, prices only), 11.6 The late-window training states, and the check against IG-2, 11.7 Time and memory for `--full` (+15 more)
+Cohesion: 0.07
+Nodes (28): 10. What the lab writes, and how it runs, 11.1 The 2026-27 in-play prices found, 11.2 Bad rows, 11.3 Counts by cell and season, 11.4 The placebo on real prices, 11.5 Still offered at the next fetch (step 1, 2026-27, prices only), 11.6 The late-window training states, and the check against IG-2, 11.7 Time and memory for `--full` (+20 more)
 
 ### Community 493 - "Mobile today picks flight checks"
 Cohesion: 0.16
@@ -3409,32 +3369,28 @@ Cohesion: 0.05
 Nodes (22): correct_for_pregame(), _load_pregame_calibration(), pregame_dog_points(), _real_artifact(), test_a_big_dog_is_marked_down_hard(), test_a_corrupt_artifact_leaves_the_probability_alone(), test_a_favourite_is_marked_up(), test_a_missing_artifact_leaves_the_probability_alone() (+14 more)
 
 ### Community 495 - "test_anon_readable.py"
-Cohesion: 0.03
-Nodes (48): closed_tables(), write_verbs_for(), _anon_can_read(), _function_plan(), _function_signature(), main(), _plan(), _skip() (+40 more)
+Cohesion: 0.06
+Nodes (17): _app_rpcs(), test_a_writable_relation_that_is_not_readable_is_still_swept(), test_every_declared_write_verb_has_a_call_site_that_needs_it(), test_every_rpc_the_app_calls_is_declared_or_known_absent(), test_lock_down_sql_refuses_anything_that_is_not_a_plain_identifier(), test_public_is_stripped_from_every_declared_callable_before_it_is_granted(), test_subscriptions_stays_authenticated_only(), test_the_apply_script_reads_back_that_rls_actually_landed() (+9 more)
 
 ### Community 496 - "dependencies"
 Cohesion: 0.04
 Nodes (45): dependencies, class-variance-authority, clsx, cmdk, embla-carousel-react, input-otp, lucide-react, lz4js (+37 more)
 
 ### Community 497 - "test_betparx_never_a_pick_book.py"
-Cohesion: 0.06
-Nodes (18): feed_books(), bettable_books(), boot_ci(), candidate_rows(), _load_backtest(), main(), select(), FakeConn (+10 more)
+Cohesion: 0.09
+Nodes (12): feed_books(), FakeConn, _source(), test_a_better_betparx_game_price_does_not_win_the_shop(), test_a_better_betparx_prop_price_does_not_win_the_shop(), test_an_environment_override_cannot_put_betparx_back(), test_betparx_is_still_fetched(), test_the_app_never_offers_betparx() (+4 more)
 
-### Community 498 - "SBR loader file parsing tests"
-Cohesion: 0.22
-Nodes (4): parse_csv_file(), parse_sbr_file(), _safe_float(), TestSafeFloat
-
-### Community 499 - "D. First half and first quarter: our own mechanisms (r3_d_periods.py)"
-Cohesion: 0.12
-Nodes (15): A1. Home moneyline at the full-game close, -200 floor (r3_a_home.py), A2. First-half home bets at T-10, 2025-26 and 2026-27 (r3_a_home.py), A3. Round 1's frozen home-underdog spread rule, read unchanged (r3_a_home.py), A. The home lean (r3_a_home.py), B1. Moneyline: market-anchored logit, walk-forward (r3_b_anchored.py), B2. Spread: market-anchored residual model, walk-forward (r3_b_anchored.py), B3. Kill tests on the headline cells (r3_b_anchored.py), B. Market-anchored models (r3_b_anchored.py) (+7 more)
+### Community 499 - "EuroLeague research, round 2 (2026-11-13)"
+Cohesion: 0.15
+Nodes (12): A1. Home moneyline at the full-game close, -200 floor (r3_a_home.py), A2. First-half home bets at T-10, 2025-26 and 2026-27 (r3_a_home.py), A3. Round 1's frozen home-underdog spread rule, read unchanged (r3_a_home.py), A. The home lean, A. The home lean (r3_a_home.py), B. The market-anchored models, C. Totals, D. First half and first quarter (the invention floor: three mechanisms each, all run) (+4 more)
 
 ### Community 500 - "NBA — pipeline operations (nba.md)"
 Cohesion: 0.21
 Nodes (13): NBA — pipeline operations (nba.md), Double-double is logistic, over-only, prob-only (COMPUTE_DD sentinel), NBA: 10 models live (moneyline + 9 props), O/U and spread blocked, NBA pipeline steps (odds, prop odds, stats local, scoring, settlement), stats.nba.com blocks datacenter IPs; team stats run on the local Task Scheduler job, WNBA — pipeline operations (wnba.md), WNBA results from the ESPN hidden API with core-API fallback, The wnba_over_under / wnba_spread sweep was leaked (latest snapshot had no pre-tipoff cutoff) (+5 more)
 
 ### Community 501 - "normalize_player_name"
-Cohesion: 0.11
-Nodes (15): normalize_player_name(), resolve_feed_name(), _get_prop_dk_odds(), FakeConn, test_accented_roster_name_matches_the_flat_feed_name(), test_ambiguity_is_a_miss_not_a_guess(), test_an_unlisted_player_is_still_a_miss(), test_every_prop_lane_keys_line_shopping_on_the_resolved_name() (+7 more)
+Cohesion: 0.09
+Nodes (17): drop_duplicate_box_ids(), normalize_player_name(), resolve_feed_name(), _get_prop_dk_odds(), test_a_player_listed_twice_in_the_box_keeps_the_id_the_plays_use(), FakeConn, test_accented_roster_name_matches_the_flat_feed_name(), test_ambiguity_is_a_miss_not_a_guess() (+9 more)
 
 ### Community 502 - "Empty close CLV recompute script"
 Cohesion: 0.16
@@ -3446,7 +3402,7 @@ Nodes (14): _prop_reference_books(), protected_for(), _thin_book_filter(), test_
 
 ### Community 504 - "pytest"
 Cohesion: 0.03
-Nodes (51): _identity_maps(), _platform_gates_off(), ScratchPostgres, pg_bin(), _scratch(), test_analyze_gives_the_planner_the_real_row_count(), test_the_job_is_registered_and_declared_once(), test_scratch_backtest_defaults_to_the_current_season_and_filters() (+43 more)
+Nodes (62): _identity_maps(), _platform_gates_off(), _split_defacl(), ScratchPostgres, pg_bin(), db(), _scratch(), _can() (+54 more)
 
 ### Community 505 - "verify_book_links.ts"
 Cohesion: 0.06
@@ -3461,16 +3417,16 @@ Cohesion: 0.15
 Nodes (18): public.latest_lines_rebuild_props(), public.latest_live_game_state, public.latest_live_game_state_on_insert(), public.latest_odds, public.latest_odds_on_insert(), public.latest_odds_on_update(), public.latest_prop_odds, public.latest_prop_odds_on_insert() (+10 more)
 
 ### Community 508 - "mlb_total_public_fade.py"
-Cohesion: 0.08
-Nodes (29): diff(), pitcher_diff(), diff(), pitcher_diff(), numeric_feature_value(), _pct_pair(), _better_under(), composite_score() (+21 more)
+Cohesion: 0.06
+Nodes (40): diff(), pitcher_diff(), diff(), pitcher_diff(), numeric_feature_value(), _better_under(), composite_score(), edge_floor() (+32 more)
 
 ### Community 510 - "LiveEngine"
-Cohesion: 0.09
-Nodes (10): american_to_prob(), devig_power(), expected_value(), _is_paused(), LiveEngine, test_ev_floor_cannot_fire_without_a_price(), test_ev_floor_declines_a_qualifying_pick_that_is_priced_too_short(), test_ev_floor_only_tightens_and_never_touches_avoid() (+2 more)
+Cohesion: 0.07
+Nodes (13): american_to_prob(), devig_power(), expected_value(), _is_paused(), LiveEngine, test_ev_floor_cannot_fire_without_a_price(), test_ev_floor_declines_a_qualifying_pick_that_is_priced_too_short(), test_ev_floor_only_tightens_and_never_touches_avoid() (+5 more)
 
 ### Community 511 - "test_live_calibrated_decision.py"
 Cohesion: 0.09
-Nodes (15): _cut(), RecordingConn, _signal(), test_a_big_enough_claim_still_fires_after_calibration(), test_a_calibration_failure_falls_back_to_raw_rather_than_blocking(), test_a_hot_live_model_no_longer_fires_the_marginal_bet(), test_a_live_model_is_read_out_of_picks_not_the_matview(), test_a_live_read_bounds_on_a_real_price() (+7 more)
+Nodes (14): _cut(), RecordingConn, _signal(), test_a_big_enough_claim_still_fires_after_calibration(), test_a_hot_live_model_no_longer_fires_the_marginal_bet(), test_a_live_model_is_read_out_of_picks_not_the_matview(), test_a_live_read_bounds_on_a_real_price(), test_a_live_read_does_not_apply_the_dead_zone_windows() (+6 more)
 
 ### Community 512 - "Mobile first half, team-total tests"
 Cohesion: 0.07
@@ -3481,28 +3437,28 @@ Cohesion: 0.23
 Nodes (9): _between(), _broken_per_game_sql(), _first_sql(), _per_game_sql(), _sweep_sql(), test_escape_tripwire_is_on_the_pr_ci_subset(), test_live_per_game_clear_interpolates_with_one_game_id(), test_live_sweep_clear_interpolates_with_date_horizon_now() (+1 more)
 
 ### Community 514 - "test_model_volume_settings.py"
-Cohesion: 0.06
-Nodes (15): _column_values(), _Conn, _Result, _sync(), test_a_failed_apply_still_commits_configs_cuts(), test_a_lost_savepoint_rolls_the_whole_sync_back(), test_a_setting_only_tightens(), test_in_play_models_are_never_moved_and_the_id_pattern_names_them_all() (+7 more)
+Cohesion: 0.05
+Nodes (18): scratch_sql(), _code(), _column_values(), _Conn, _Result, _sync(), test_a_failed_apply_still_commits_configs_cuts(), test_a_lost_savepoint_rolls_the_whole_sync_back() (+10 more)
 
 ### Community 516 - "NHL stats views tests"
 Cohesion: 0.15
 Nodes (14): _date_filter_runs_before_dedupe(), anywhere(), blob(), filter_wraps_unique(), has_unique(), pred(), pred_inside_unique(), _pg_bin() (+6 more)
 
 ### Community 517 - "ufc_ratings.py"
-Cohesion: 0.19
-Nodes (13): _day(), diffs(), Fighter, fighter_inputs(), load(), _mins(), _nanmean(), _nansum() (+5 more)
+Cohesion: 0.15
+Nodes (15): _day(), diffs(), Fighter, fighter_inputs(), load(), _mins(), _nanmean(), _nansum() (+7 more)
 
-### Community 518 - "config.py"
+### Community 518 - "requests"
 Cohesion: 0.01
-Nodes (305): all_readable(), lock_down(), lock_down_sql(), _fetchone(), schema_is_current(), _billed(), buy_allowance(), ensure_ledger() (+297 more)
+Nodes (150): _load_schools(), resolve_odds_api_school(), _get(), _iso(), main(), planned_calls(), pull_day(), rows_for() (+142 more)
 
 ### Community 519 - "NFL prop features, cache tests"
 Cohesion: 0.12
 Nodes (8): cached(), _FakeConn, _frame(), test_a_first_ever_pull_still_works(), test_a_pull_that_lost_rows_keeps_them(), test_an_unreadable_cache_refuses_rather_than_overwrites(), test_rows_present_in_both_are_kept_once(), test_the_pull_ITSELF_is_additive()
 
 ### Community 520 - "backup_snaps.py"
-Cohesion: 0.08
-Nodes (24): back_up(), _connect(), digest(), _flush(), iter_files(), main(), _mb(), psycopg2_bytes() (+16 more)
+Cohesion: 0.09
+Nodes (22): back_up(), digest(), _flush(), iter_files(), main(), _mb(), psycopg2_bytes(), restore() (+14 more)
 
 ### Community 522 - "NBA first basket rebuild tests"
 Cohesion: 0.12
@@ -3518,19 +3474,19 @@ Nodes (24): blob_fingerprint(), current(), fetch_bytes(), fetch_text(), folder()
 
 ### Community 525 - "test_nhl_goalie_guards.py"
 Cohesion: 0.03
-Nodes (70): _refuse_unknown_nhl_bets(), publish(), publish(), _blocked_rows(), _both(), _CardDB, _Clf, _FetchDB (+62 more)
+Nodes (75): publish(), publish(), publish(), src(), _blocked_rows(), _both(), _CardDB, _Clf (+67 more)
 
-### Community 526 - "parse_summary"
-Cohesion: 0.11
-Nodes (16): box_rows(), contest_id(), _int(), parse_scoreboard(), parse_summary(), _periods(), possessions(), Refused (+8 more)
+### Community 526 - "ncaaf_live/feeds/espn.py"
+Cohesion: 0.17
+Nodes (16): check_feed_assumptions(), _competitors(), _count_plays(), _dig(), extract_live_events(), extract_summary_state(), _int(), _num() (+8 more)
 
-### Community 527 - "test_nba_odds_history.py"
-Cohesion: 0.05
-Nodes (29): gap_instants(), line_snapshots(), parse_alternates(), parse_period_team_totals(), _hourly(), _Ledger, _Meter, _PropMeter (+21 more)
+### Community 527 - "opener_strategy.py"
+Cohesion: 0.15
+Nodes (11): experiment_bands(), experiment_crossbook(), _load_cross_book(), main(), build_opener_cache(), coverage_report(), fetch_season(), _headers() (+3 more)
 
-### Community 528 - "stake_sizing.py"
-Cohesion: 0.09
-Nodes (22): american_to_decimal(), cover_probs(), ev_per_unit(), fit_margin_pmf(), margin_pmf_for(), add_model_mu(), load(), main() (+14 more)
+### Community 528 - "validate.py"
+Cohesion: 0.16
+Nodes (12): brier(), calibration_curve(), clv_report(), ece(), FoldResult, kelly_stake(), log_loss(), market_only_sanity() (+4 more)
 
 ### Community 529 - "Unauthorized auto-pause cleanup migration tests"
 Cohesion: 0.19
@@ -3542,11 +3498,11 @@ Nodes (4): test_a_pick_is_never_deleted_and_never_regraded(), test_it_guards_on_
 
 ### Community 531 - "test_player_news_ingestor.py"
 Cohesion: 0.04
-Nodes (44): _article_url(), _athletes_in(), build_name_index(), _fetch_espn(), fetch_espn_news(), absorb(), ingest_player_news(), main() (+36 more)
+Nodes (40): _article_url(), _athletes_in(), build_name_index(), _fetch_espn(), fetch_espn_news(), absorb(), NewsItem, NewsPlayer (+32 more)
 
 ### Community 532 - "test_market_handicap.py"
-Cohesion: 0.05
-Nodes (36): attach_market_handicap(), build_public_features(), empty_handicap(), favorite_side(), _rlm(), row_is_pregame(), select_latest_pregame_splits(), _split() (+28 more)
+Cohesion: 0.04
+Nodes (42): attach_market_handicap(), build_public_features(), build_rich_handicap(), empty_handicap(), _fav_signed_home_move(), favorite_side(), _gated_flag(), _mul() (+34 more)
 
 ### Community 533 - "sides.py"
 Cohesion: 0.12
@@ -3565,12 +3521,12 @@ Cohesion: 0.29
 Nodes (13): _entries(), _log(), _log_line(), _run(), test_a_clean_log_warns_for_every_baseline_entry(), test_a_compiler_crash_is_not_a_clean_run(), test_a_different_app_message_fails(), test_a_fixed_baseline_entry_warns_and_does_not_fail() (+5 more)
 
 ### Community 537 - "schedule_context.py"
-Cohesion: 0.05
-Nodes (44): _games(), _postponed(), _schedule(), end(), failed(), _before(), _clock(), collapse() (+36 more)
+Cohesion: 0.12
+Nodes (15): failed(), _day(), _final(), GameRow, _is_listing(), _joins(), _log_check(), parse_start() (+7 more)
 
 ### Community 538 - "test_model_calibration_check.py"
-Cohesion: 0.11
-Nodes (11): _calibration_sql(), test_a_flagged_model_is_named_eligible_or_not(), test_a_thin_model_is_still_excluded_rather_than_accused(), test_eligibility_notes_must_not_sink_the_gap_check(), test_it_grades_the_calibrated_probability_not_the_raw_one(), test_it_joins_picks_to_reach_the_calibrated_column(), test_the_check_has_a_skip_budget_that_survives_a_regime_change(), test_the_probability_floor_applies_to_the_decision_number_too() (+3 more)
+Cohesion: 0.07
+Nodes (14): _calibration_sql(), test_a_flagged_model_is_named_eligible_or_not(), test_a_thin_model_is_still_excluded_rather_than_accused(), test_eligibility_notes_must_not_sink_the_gap_check(), test_eligibility_notes_parse_the_payload_verdicts(), test_it_grades_the_calibrated_probability_not_the_raw_one(), test_it_joins_picks_to_reach_the_calibrated_column(), test_the_check_has_a_skip_budget_that_survives_a_regime_change() (+6 more)
 
 ### Community 539 - "UFC prop history tests"
 Cohesion: 0.08
@@ -3589,44 +3545,44 @@ Cohesion: 0.08
 Nodes (14): _db_row(), _feed_schedule(), _giants_board(), _giants_prior_at_2129(), _giants_sched(), _obs(), _row(), TestFireWindow (+6 more)
 
 ### Community 544 - "urllib_parse"
-Cohesion: 0.16
-Nodes (11): database_url(), _default_env_path(), env_value(), parse_env_file(), test_a_missing_env_file_is_empty_not_an_error(), test_a_value_containing_equals_survives(), test_env_file_is_read_when_the_environment_is_empty(), test_env_value_reads_other_keys_too() (+3 more)
+Cohesion: 0.12
+Nodes (13): _classes(), main(), database_url(), _default_env_path(), env_value(), parse_env_file(), test_a_missing_env_file_is_empty_not_an_error(), test_a_value_containing_equals_survives() (+5 more)
 
 ### Community 545 - "UFC fighter name resolution"
-Cohesion: 0.14
-Nodes (12): resolve_fighter_id(), resolve_slug(), _slug_tokens(), test_a_generational_suffix_resolves_either_way(), test_a_near_miss_is_not_a_match(), test_a_reversed_name_order_resolves(), test_a_shared_surname_alone_is_not_a_match(), test_an_ambiguous_token_set_resolves_to_nothing() (+4 more)
+Cohesion: 0.16
+Nodes (11): resolve_slug(), _slug_tokens(), test_a_generational_suffix_resolves_either_way(), test_a_near_miss_is_not_a_match(), test_a_reversed_name_order_resolves(), test_a_shared_surname_alone_is_not_a_match(), test_an_ambiguous_token_set_resolves_to_nothing(), test_an_empty_or_tokenless_name_is_safe() (+3 more)
 
 ### Community 546 - "test_config.py"
-Cohesion: 0.05
-Nodes (21): After mike's "merge", Before the reply that ships it, config.py, for a new model, Ingestion, for a new sport, Replaying the research, Scoring and publishing, Shipping: every file, table, test and production step, Tests and docs (+13 more)
+Cohesion: 0.04
+Nodes (22): After mike's "merge", Before the reply that ships it, config.py, for a new model, Ingestion, for a new sport, Replaying the research, Scoring and publishing, Shipping: every file, table, test and production step, Tests and docs (+14 more)
 
 ### Community 547 - "outstanding.py"
-Cohesion: 0.28
-Nodes (10): cache_path(), checks_state(), main(), read_cache(), report(), session_summary(), write_cache(), _gathered() (+2 more)
+Cohesion: 0.26
+Nodes (11): branches_without_pr(), cache_path(), checks_state(), _days(), gather(), main(), read_cache(), report() (+3 more)
 
 ### Community 548 - "EuroLeague full-game markets (moneyline, spread, total): research round 1, 2026-11-13"
 Cohesion: 0.17
 Nodes (11): By season, EuroLeague full-game markets (moneyline, spread, total): research round 1, 2026-11-13, H2, home against the spread by the club's previous-season attendance (blind), H3, the home underdog against the spread (blind), H3 walk-forward (buckets chosen from earlier seasons only), Multiplicity (r2_report.py), r2_accuracy.py, r2_leads2.py (+3 more)
 
 ### Community 549 - "NBA prop offline search doc"
-Cohesion: 0.11
-Nodes (17): Controls, graded and reported, never judged, Counts under the 30-minute read, Data, Dated line, 2026-10-31, later the same day, before any cell was graded: when a report counts as known, Dated lines, 2026-10-31, before any cell was graded, NBA search: props off Pinnacle's line, the soft-book consensus, and a market-anchored prop model (pre-registered 2026-10-30, before any cell was graded), Reported beside every cell, never a bar, Results (graded 2026-10-31) (+9 more)
+Cohesion: 0.12
+Nodes (15): Controls, graded and reported, never judged, Counts under the 30-minute read, Data, Dated line, 2026-10-31, later the same day, before any cell was graded: when a report counts as known, Dated lines, 2026-10-31, before any cell was graded, NBA search: props off Pinnacle's line, the soft-book consensus, and a market-anchored prop model (pre-registered 2026-10-30, before any cell was graded), Reported beside every cell, never a bar, Results (graded 2026-10-31) (+7 more)
 
 ### Community 550 - "build_market_features"
-Cohesion: 0.07
-Nodes (26): american_to_prob(), build_market_features(), _is_full_game_snap(), _latest_two_sided(), _snap_sort_key(), _snapshot_type_rank(), _unique_ordered(), _s() (+18 more)
-
-### Community 551 - "nfl_wind_publisher.py"
 Cohesion: 0.09
-Nodes (16): _changed(), _clear_scored_row(), _field_moved(), _flush_board_safe(), _flush_snapshots_safe(), _held_out(), latest_eval_rows(), _number_moved() (+8 more)
+Nodes (23): american_to_prob(), build_market_features(), _is_full_game_snap(), _latest_two_sided(), _s(), test_a_game_with_no_decision_book_still_gets_features(), test_a_line_that_genuinely_did_not_move_is_zero_not_none(), test_a_one_way_sharp_quote_yields_nothing() (+15 more)
+
+### Community 551 - "build_opener_rows"
+Cohesion: 0.12
+Nodes (8): build_opener_rows(), _opener_model(), _taken_at(), _card_row(), TestBuildOpenerRows, _row(), TestPublishOpenerInsertOnce, execute()
 
 ### Community 552 - "Play-by-play backfill resilience tests"
 Cohesion: 0.24
 Nodes (6): _backfill_body(), test_a_failed_game_rolls_the_connection_back(), test_a_run_that_wrote_nothing_reports_an_error_not_a_success(), test_errors_are_counted_not_just_logged(), test_partial_failures_are_surfaced_too(), test_the_rollback_cannot_itself_raise()
 
-### Community 553 - "nhl_derivative_totals.py"
-Cohesion: 0.13
-Nodes (17): build_p1_frame(), build_team_frame(), _ew(), fit(), _implied_vec(), Market, p_under(), _payout() (+9 more)
+### Community 553 - "docs/prop_market_research.md"
+Cohesion: 0.16
+Nodes (18): Odds sources: what exists, costs, what it adds, Alternate coverage effectively begins in 2024, Anchored ladder graded: fails every clause, scripts/nfl_prop_ladder_grade, Provider comparison: Odds API, Kalshi, SportsGameOdds, OddsJam, Unabated, OpticOdds, 1.48M alternate-market rows already stored and unread, Prediction markets evaluation memo, Kalshi (CFTC-regulated event contracts) (+10 more)
 
 ### Community 554 - "NCAAF in-play market audit doc"
 Cohesion: 0.08
@@ -3637,36 +3593,36 @@ Cohesion: 0.11
 Nodes (17): step_ok(), _Conn, _deleted(), _run(), test_a_dry_run_writes_nothing(), test_a_failed_write_is_rolled_back_and_reported(), test_a_past_row_the_api_lists_as_played_is_left_for_the_results_step(), test_a_run_writes_its_plan_once() (+9 more)
 
 ### Community 558 - "Model artifacts: present, tracked, loadable"
-Cohesion: 0.20
-Nodes (12): Model artifacts: present, tracked, loadable, model_artifacts_load counts what it opened, model_artifacts table fallback restore, Three separate artifact questions, three separate failures, test_every_model_artifact_on_disk_is_tracked_by_git, Daily system health check + retrain workflow, KNOWN_UNTRAINED — config models intentionally without artifacts, Pipeline-observability checks: refresh_pass_completion, refresh_pass_steps, signal_delivery, pick_label_integrity (+4 more)
+Cohesion: 0.12
+Nodes (17): Activating the opposing-starter features (MLB batter props), _KNOWN_DRIFT: mlb_prop_pitcher_hits and mlb_prop_batter_sb, Matched baseline with --no-register, Opposing-starter Savant features (opp_starter_k_pct, whiff_pct, xera, bb_pct), Model artifacts: present, tracked, loadable, model_artifacts_load counts what it opened, model_artifacts table fallback restore, Three separate artifact questions, three separate failures (+9 more)
 
 ### Community 559 - "Live publish pause parity tests"
 Cohesion: 0.17
 Nodes (12): _Conn, _db(), _labels(), _pick(), test_a_bet_written_while_paused_is_not_announced_after_an_unpause(), test_a_live_health_state_still_publishes(), test_a_paused_model_is_not_announced(), test_a_retired_model_is_not_announced() (+4 more)
 
 ### Community 560 - "Paused model and retrain docs"
-Cohesion: 0.18
-Nodes (12): Paused model profitability assessment, scripts/paused_model_assessment, F5 O/U and F5 RL paused: leak-mismatched, synthetic-line trained, NCAAF in-play season replay: -3.4% and -13.1%, No model has a cut that clears on the deployed artifact, 2026 retrain plan: red MLB prop models, data.ingestors.baseball_savant_ingestor, batter_sb: opp_team_sb_allowed feature (+4 more)
+Cohesion: 0.17
+Nodes (13): #215 artifacts could not be deserialised, Paused model profitability assessment, scripts/paused_model_assessment, F5 O/U and F5 RL paused: leak-mismatched, synthetic-line trained, NCAAF in-play season replay: -3.4% and -13.1%, No model has a cut that clears on the deployed artifact, 2026 retrain plan: red MLB prop models, data.ingestors.baseball_savant_ingestor (+5 more)
 
 ### Community 561 - "build_rows"
-Cohesion: 0.08
-Nodes (16): build_opener_rows(), build_rows(), _fmt_line(), kick_fields(), _opener_model(), parse_matchup(), _taken_at(), test_nfl_wind_and_opener_rows_drop_a_bet_under_the_floor() (+8 more)
+Cohesion: 0.14
+Nodes (8): build_rows(), _fmt_line(), kick_fields(), parse_matchup(), _card_row(), TestBuildRows, TestKickFields, TestParseMatchup
 
 ### Community 562 - "NCAAF in-play audit report builder"
 Cohesion: 0.15
 Nodes (13): band(), bars_table(), blind_table(), cells(), compare_a(), ev_band_table(), fb_summary(), grid_table() (+5 more)
 
 ### Community 563 - "test_f5_any_book_line.py"
-Cohesion: 0.09
-Nodes (29): _fallback_game_line_quote(), _Clf, _cut(), _GameOddsConn, _mlb_feat(), _on(), _spreads_row(), _src() (+21 more)
+Cohesion: 0.08
+Nodes (31): _fallback_game_line_quote(), _get_scoring_odds(), _has_real_game_price(), _Clf, _cut(), _GameOddsConn, _mlb_feat(), _on() (+23 more)
 
 ### Community 564 - "DataFrame"
-Cohesion: 0.14
-Nodes (20): bets_dir(), blind_cand(), decorate(), emit_blind(), emit_dog(), emit_model(), emit_power(), emit_same() (+12 more)
+Cohesion: 0.13
+Nodes (20): bets_dir(), decorate(), emit_blind(), emit_dog(), emit_model(), emit_power(), emit_same(), emit_spread() (+12 more)
 
 ### Community 565 - "_unprotected"
-Cohesion: 0.10
-Nodes (12): _unprotected(), test_the_prune_protects_every_ladder_source_by_its_writer_s_own_name(), test_each_time_has_its_own_source_and_the_prune_keeps_every_one(), test_its_tables_are_worker_only_and_its_rows_are_kept_by_the_prune(), test_both_sources_are_protected_from_the_odds_clean_up(), test_the_two_prune_tiers_never_select_a_path_kept_sport(), test_no_literal_percent_sign_reaches_psycopg2(), test_cfbd_archive_prefix_is_protected() (+4 more)
+Cohesion: 0.07
+Nodes (17): ncaaf_line_bookmaker(), _unprotected(), test_prune_never_touches_cfbd_archive_lines(), test_the_prune_protects_every_ladder_source_by_its_writer_s_own_name(), test_each_time_has_its_own_source_and_the_prune_keeps_every_one(), test_its_tables_are_worker_only_and_its_rows_are_kept_by_the_prune(), test_both_sources_are_protected_from_the_odds_clean_up(), test_the_two_prune_tiers_never_select_a_path_kept_sport() (+9 more)
 
 ### Community 566 - "Odds repeat thinning keeps NBA rows"
 Cohesion: 0.16
@@ -3678,7 +3634,7 @@ Nodes (16): best_price(), CreditMeter, LiveOddsClient, parse_events(), _parse_ts
 
 ### Community 568 - "inspect"
 Cohesion: 0.01
-Nodes (93): _ledger_entry_is_resumable(), relabel_in_play(), run_historical_odds_range(), candidate_markets(), _standard_markets(), test_the_artifact_table_revokes_at_its_own_creation(), test_a_fold_can_never_lower_a_stored_total(), test_a_new_process_does_not_prune_on_its_first_flush() (+85 more)
+Nodes (87): _ledger_entry_is_resumable(), relabel_in_play(), run_historical_odds_range(), candidate_markets(), _standard_markets(), test_the_artifact_table_revokes_at_its_own_creation(), test_a_fold_can_never_lower_a_stored_total(), test_a_new_process_does_not_prune_on_its_first_flush() (+79 more)
 
 ### Community 569 - "test_nba_clv_feed_start.py"
 Cohesion: 0.09
@@ -3690,11 +3646,11 @@ Nodes (47): _build_parser(), register_totals(), _scorer_holds_missing_weather(),
 
 ### Community 571 - "ref_react"
 Cohesion: 0.01
-Nodes (544): RFC-4122, App(), GatedBuiltInModel, GatedByomBets, GatedByomBuilder, GatedByomDetail, GatedByomEdit, GatedModelDetail (+536 more)
+Nodes (460): App(), GatedBuiltInModel, GatedByomBets, GatedByomBuilder, GatedByomDetail, GatedByomEdit, GatedModelDetail, GatedModelEdit (+452 more)
 
 ### Community 572 - "NBA search result shapes doc"
-Cohesion: 0.08
-Nodes (24): 10.1 Rule changes from the independent review, dated 2026-11-01, before any cell is graded, 10. The placebo: 200 runs, seeds 1 to 200, 11. Controls, and how the two runs compare, 12. Expected passes by chance, and what a pass means, 13. How it runs, 14. Not covered, so nobody reads this as closing them, 15.1 Bets per family and season, 15.2 What the shape moves, bet for bet, no result read (+16 more)
+Cohesion: 0.07
+Nodes (28): 10.1 Rule changes from the independent review, dated 2026-11-01, before any cell is graded, 10. The placebo: 200 runs, seeds 1 to 200, 11. Controls, and how the two runs compare, 12. Expected passes by chance, and what a pass means, 13. How it runs, 14. Not covered, so nobody reads this as closing them, 15.1 Bets per family and season, 15.2 What the shape moves, bet for bet, no result read (+20 more)
 
 ### Community 573 - "UFC prop walk-forward grading"
 Cohesion: 0.08
@@ -3706,103 +3662,103 @@ Nodes (5): test_the_auto_pause_lookup_fails_open(), test_the_doc_asks_for_no_pas
 
 ### Community 575 - "verify_appearance.ts"
 Cohesion: 0.13
-Nodes (28): Boot(), app, bootAt, entry, pkg, reloaders, requireAt, ROOT (+20 more)
+Nodes (27): Boot(), app, bootAt, entry, pkg, reloaders, requireAt, ROOT (+19 more)
 
 ### Community 576 - "local_mirror_duckdb.py"
 Cohesion: 0.13
 Nodes (24): build(), _check(), _create_view(), _empty_table_sql(), _files_sql(), _lit(), main(), _present_columns() (+16 more)
 
 ### Community 577 - "MLB twin game merge script"
-Cohesion: 0.16
-Nodes (8): canonical(), _Conn, test_a_canonical_id_maps_to_nothing(), test_a_non_mlb_or_malformed_id_is_left_alone(), test_an_empty_scope_counts_zero_rather_than_none(), test_both_teams_are_mapped_in_one_id(), test_only_the_four_renamed_franchises_map(), test_the_scoped_count_asks_only_about_the_affected_ids()
+Cohesion: 0.15
+Nodes (9): canonical(), counts(), _Conn, test_a_canonical_id_maps_to_nothing(), test_a_non_mlb_or_malformed_id_is_left_alone(), test_an_empty_scope_counts_zero_rather_than_none(), test_both_teams_are_mapped_in_one_id(), test_only_the_four_renamed_franchises_map() (+1 more)
 
 ### Community 579 - "StandIn"
 Cohesion: 0.05
-Nodes (46): _day(), prune_table(), p(), _after_nth_delete(), build(), drain(), _expire_after_deletes(), execute() (+38 more)
+Nodes (53): p(), _after_nth_delete(), build(), _Ctx, drain(), _expire_after_deletes(), execute(), _fails_on() (+45 more)
 
 ### Community 580 - "App icon renderer"
 Cohesion: 0.24
 Nodes (3): draw_mark(), main(), render()
 
 ### Community 581 - "test_nba_pricing_tables.py"
-Cohesion: 0.09
-Nodes (16): with_pricing_table(), embed(), main(), probs_identical(), tables_identical(), fresh_caches(), _no_tabulating(), test_a_card_prices_the_live_season_without_tabulating() (+8 more)
+Cohesion: 0.08
+Nodes (17): embed(), main(), probs_identical(), tables_identical(), fresh_caches(), _no_tabulating(), test_a_card_prices_the_live_season_without_tabulating(), test_a_refit_stores_the_table_of_the_season_after_its_rows() (+9 more)
 
 ### Community 582 - "grade_pending"
 Cohesion: 0.05
 Nodes (14): _grade_conn(), _reg_conn(), test_a_final_moneyline_uses_the_settler_result(), test_a_player_missing_from_the_log_is_not_a_silent_no_action(), test_a_regulation_win_comes_from_home_win_reg_when_period_scores_are_missing(), test_an_empty_nfl_log_stays_pending(), test_an_mlb_prop_waits_when_the_log_is_not_in_yet(), test_an_nfl_receptions_prop_grades_from_the_log() (+6 more)
 
 ### Community 583 - "classify"
-Cohesion: 0.14
-Nodes (7): classify(), latest_per_pick(), _row(), TestClassify, TestImmutabilityContract, TestLatestPerPick, TestWindPublisherLock
+Cohesion: 0.11
+Nodes (11): classify(), _f(), latest_per_pick(), main(), monitor(), read_eval_rows(), _row(), TestClassify (+3 more)
 
 ### Community 584 - "ScoreDistribution"
-Cohesion: 0.03
-Nodes (56): _cluster_bootstrap(), evaluate(), main(), report(), fit(), load_states(), main(), walk_forward_oos() (+48 more)
+Cohesion: 0.08
+Nodes (14): gaussian_copula_joint(), mu_bucket(), _mu_centres(), ScoreDistribution, _spearman_to_gaussian(), _tilt_to_mean(), time_bucket(), _synth() (+6 more)
 
-### Community 585 - "prop_box_scores.py"
-Cohesion: 0.11
-Nodes (26): one(), fill_missing(), _call_fill(), _cooled(), _day(), _default_mlb(), _default_nba(), _default_nfl() (+18 more)
+### Community 585 - "season_pass"
+Cohesion: 0.12
+Nodes (5): EndState, Params, ratings_at(), season_pass(), SeasonRatings
 
 ### Community 586 - "Stripe webhook edge function"
 Cohesion: 0.17
 Nodes (17): IncomingSubscription, isLiveSubscriptionStatus(), SecondSubAction, secondSubscriptionAction(), StoredSubscriptionRow, StripeSubscriptionSnapshot, admin, applySubscription() (+9 more)
 
 ### Community 588 - "test_global_ev_floor.py"
-Cohesion: 0.05
-Nodes (38): NhlTotalBet, pick_rows(), _built(), floor_030(), identity_maps(), open_pregame_cut(), _pregame(), shrink_map() (+30 more)
+Cohesion: 0.04
+Nodes (40): NhlTotalBet, _model_lock_key(), pick_rows(), _built(), floor_030(), identity_maps(), open_pregame_cut(), _pregame() (+32 more)
 
 ### Community 589 - "Mobile neutral signal label tests"
 Cohesion: 0.31
 Nodes (7): _read(), test_explainer_names_neutral(), test_filters_and_card_speak_the_display_name(), test_model_screens_speak_the_display_name(), test_no_member_label_prints_a_raw_signal_type(), test_none_badge_reads_neutral(), test_withdrawn_pick_is_not_badged_neutral()
 
 ### Community 590 - "nhl_props.py"
-Cohesion: 0.04
-Nodes (58): NHL models CLV and EV assessment (2026-10-08), Game models: lock later? Refuted, nhl_research worker job, The overnight pass takes the night's slots, _attach_teams(), books(), build_frame(), build_goalie_frame() (+50 more)
+Cohesion: 0.05
+Nodes (51): _attach_teams(), books(), build_frame(), build_goalie_frame(), build_skater_frame(), _ew(), excess_variance(), expected_value() (+43 more)
 
 ### Community 591 - "test_mlb_pbp_ingestor.py"
 Cohesion: 0.16
 Nodes (15): _bases_after_from_matchup(), parse_game_plays(), parse_play(), _split_event_type(), test_bases_empty_matchup(), test_bases_with_runners(), test_parse_game_plays_empty_feed(), test_parse_game_plays_walks_full_inning() (+7 more)
 
 ### Community 592 - "implied"
-Cohesion: 0.07
-Nodes (30): Soft-book stack on pass attempts (two seasons of three), closing_prices(), devig(), ecdf_p_over(), main(), bets(), design(), main() (+22 more)
+Cohesion: 0.06
+Nodes (34): The market stack (every signal that could locate the median), Soft-book stack on pass attempts (two seasons of three), closing_prices(), devig(), ecdf_p_over(), main(), bets(), design() (+26 more)
 
 ### Community 593 - "Scorer per-game commit tests"
 Cohesion: 0.40
 Nodes (8): _between(), _run_scorer_body(), test_a_lost_connection_re_runs_the_game_once_and_never_the_pass(), test_each_game_is_its_own_committed_unit(), test_no_bulk_delete_of_non_bet_rows_precedes_the_loop(), test_picks_are_only_counted_once_the_game_committed(), test_the_housekeeping_delete_is_a_sweep_after_the_loop(), test_the_outer_handler_still_records_the_failure()
 
 ### Community 594 - "docs/probability_calibration.md"
-Cohesion: 0.10
-Nodes (33): NFL 2026 live track: opener and wind, MAX_FIRE_LEAD = 4, MODEL_OWN_EV_FLOOR and MODELS_ON_OWN_PROBABILITY for wind and opener, nfl_opener_spread, nfl_wind_totals, tracking.paper_tracker (_NFL_MODEL_MARKETS), scripts/nfl_rule_2026_track, NFL wind totals lead evidence (+25 more)
+Cohesion: 0.16
+Nodes (18): NFL 2026 live track: opener and wind, MAX_FIRE_LEAD = 4, nfl_opener_spread, nfl_wind_totals, tracking.paper_tracker (_NFL_MODEL_MARKETS), scripts/nfl_rule_2026_track, NFL wind totals lead evidence, CALIBRATED_UNDER_RATE stops at lead 7 (+10 more)
 
 ### Community 595 - "pathlib"
 Cohesion: 0.01
-Nodes (81): closes_taken(), closes_taken(), backfill_umpires(), _fetch_umpires_for_date(), ingest_umpires_for_date(), run_umpire_ingestor(), backfill_weather(), fetch_and_store_weather_for_date() (+73 more)
+Nodes (242): _convert_params(), _convert_params_outside_literals(), _df_to_rows(), _fetch_savant_csv(), _get_col(), _normalize_name(), _parse_pct(), fetch_all() (+234 more)
 
 ### Community 596 - "test_book_app_links_probe.py"
-Cohesion: 0.10
-Nodes (20): _component_matches(), link_verdict(), _pattern_match(), _aasa(), test_a_components_rule_on_the_path_claims_the_link(), test_a_query_rule_must_match_the_named_parameter(), test_an_exclude_rule_first_means_not_claimed(), test_nothing_fetched_fails_the_job() (+12 more)
+Cohesion: 0.14
+Nodes (18): _component_matches(), _get(), _install(), link_verdict(), main(), _pattern_match(), probe(), _targets() (+10 more)
 
 ### Community 597 - "NCAAF totals regression tests"
 Cohesion: 0.09
 Nodes (15): total_over_prob(), test_artifact_kind_is_routed_by_the_scorer(), test_asymmetry_is_real_and_would_have_bitten(), test_extremes_are_clamped_away_from_certainty(), test_model_above_the_line_favours_the_over(), test_model_below_the_line_favours_the_under(), test_no_dk_total_means_skip_not_prob_only(), test_no_residuals_returns_one_half_not_a_confident_bet() (+7 more)
 
-### Community 598 - "dk_live_board.py"
-Cohesion: 0.13
-Nodes (14): american(), BoardEvent, columns_ready(), dk_session(), feed_changed_on_master(), _int(), main(), oriented() (+6 more)
+### Community 598 - "validate_wind_forecast.py"
+Cohesion: 0.15
+Nodes (17): Buying back the line-shop history the cleanup removed (#1384), How it decides, Running it, Tested on production data, The whole plan, games 2026-03-01 to 2026-11-13, measured 2026-11-16, What a bought row looks like, What it buys: four kinds, build() (+9 more)
 
 ### Community 599 - "test_ncaabw_player_game_log.py"
-Cohesion: 0.11
+Cohesion: 0.10
 Nodes (13): _box(), _LogConn, raw(), test_a_box_row_lands_on_the_stored_game_and_school(), test_a_stored_side_does_not_block_the_other_side(), test_log_only_fills_a_stored_season_without_rewriting_it(), test_minutes_stay_fractional_and_counts_are_whole(), test_rows_the_board_cannot_join_are_left_out() (+5 more)
 
-### Community 600 - "test_http_timeout_floor.py"
-Cohesion: 0.11
-Nodes (11): install_timeout_floor(), _call(), clean_requests(), test_a_call_with_no_timeout_gets_one(), test_an_explicit_timeout_is_never_overridden(), test_installing_twice_is_a_no_op(), test_the_deadline_is_env_overridable(), test_the_deadline_survives_telemetry_being_turned_off() (+3 more)
+### Community 600 - "test_mlb_runline_feature_matrix_dtypes.py"
+Cohesion: 0.16
+Nodes (11): coerce_numeric_features(), feature_matrix(), _runline_row(), test_empty_last3_is_missing_so_strict_dropna_drops_the_row(), test_feature_matrix_coerces_decimal_last3_to_float(), test_feature_matrix_coerces_last3_empty_and_none_to_numeric_nan(), test_numeric_feature_value_empty_missing_decimal(), test_raw_pandas_frame_leaves_last3_non_numeric() (+3 more)
 
-### Community 601 - "PicksRecorder"
-Cohesion: 0.12
-Nodes (8): _is_market_opinion(), _lane_is_locked(), _norm_player(), resolve_game(), resolve_game_id(), test_normalised_player_key_is_the_join_the_prop_system_uses(), test_the_lane_lock_shares_the_scorers_meaning_of_locked(), test_the_lock_is_scoped_by_player_not_just_by_game()
+### Community 601 - "find_bets"
+Cohesion: 0.15
+Nodes (13): _coherent(), find_bets(), _two_way(), _q(), test_a_different_number_is_not_the_same_bet(), test_a_soft_quote_pairs_only_with_pinnacle_from_the_same_fetch(), test_decided_on_its_own_probability(), test_one_bet_a_game_best_ev_ties_by_book_order() (+5 more)
 
 ### Community 603 - "NFL props deep dive review"
 Cohesion: 0.33
@@ -3816,49 +3772,49 @@ Nodes (15): _opp_starter_savant(), _starter_gb_pct(), _batter_bulk(), _StubConn,
 Cohesion: 0.11
 Nodes (17): BASE, MONITOR_TOKEN, jobs, probe, name, on, push, workflow_dispatch (+9 more)
 
-### Community 606 - "test_injury_fetch_speed.py"
-Cohesion: 0.07
-Nodes (10): _clear_cache(), test_a_dead_database_leaves_the_cache_empty_not_broken(), test_a_failed_lookup_is_not_cached(), test_a_known_athlete_costs_no_request(), test_a_SUCCESSFUL_response_with_no_name_is_not_cached(), test_an_unknown_athlete_is_fetched_and_then_remembered(), test_one_team_failing_does_not_lose_the_others(), test_output_order_follows_the_team_list_not_completion_order() (+2 more)
+### Community 606 - "nfl_live_prop_assessment.py"
+Cohesion: 0.19
+Nodes (14): _connect(), american_b(), boot_ci(), build(), cluster_se_mean(), implied(), load(), main() (+6 more)
 
 ### Community 607 - "Railway deploy configuration"
 Cohesion: 0.20
 Nodes (9): build, builder, watchPatterns, deploy, drainingSeconds, numReplicas, restartPolicyType, startCommand (+1 more)
 
 ### Community 608 - "nhl_stats_ingestor.py"
-Cohesion: 0.04
-Nodes (44): top_up(), fetch_all(), _fold(), load(), load_period_scores(), _num(), _odds_rows(), parse_season() (+36 more)
+Cohesion: 0.05
+Nodes (38): backfill(), build_goalie_rows(), build_skater_rows(), build_team_rows(), _complete(), _fetch(), _game_key(), _int() (+30 more)
 
-### Community 609 - "test_mobile_lines_board.py"
-Cohesion: 0.22
-Nodes (9): _read(), test_a_missing_draw_price_is_remembered(), test_lines_board_pins_are_on_the_pr_ci_subset(), test_scoreboard_replaced_the_lines_view(), test_the_behavioural_checks_pass(), test_the_board_reloads_when_the_et_date_changes(), test_the_lines_read_names_the_view_and_pages(), test_the_scoreboard_segment_is_unconditional_and_after_live() (+1 more)
+### Community 609 - "test_local_mirror_report_pg.py"
+Cohesion: 0.17
+Nodes (12): _apply(), db(), _ddl_seen(), _migration(), _open(), _row(), test_a_privilege_only_inherited_does_not_rerun_the_file_every_pass(), test_an_older_marker_makes_the_next_pass_run_the_file_and_restamp_it() (+4 more)
 
 ### Community 610 - "test_ncaab_quote_bounds.py"
-Cohesion: 0.07
-Nodes (32): _rows(), test_a_spread_that_cannot_be_priced_gives_no_fair(), _fh_quotes(), _fh_wire(), _fht_quotes(), logs(), ml_table(), _Null (+24 more)
+Cohesion: 0.09
+Nodes (26): _fh_quotes(), _fh_wire(), _fht_quotes(), logs(), ml_table(), _Null, test_a_1465_total_is_never_priced_and_the_game_waits(), test_a_250000_moneyline_is_dropped_and_never_bet() (+18 more)
 
-### Community 611 - "nfl_edge_halftime_oos.py"
-Cohesion: 0.12
-Nodes (22): assert_same_as_earlier(), bh(), boot(), boot_coef(), build(), ci(), coverage(), fmt() (+14 more)
+### Community 611 - "test_ufc_odds_history.py"
+Cohesion: 0.16
+Nodes (12): _body(), _Conn, _index(), _Rows, _t(), test_a_card_gets_six_asks_timed_off_its_first_middle_and_last_fight(), test_a_snapshot_becomes_one_row_per_event_book_and_market(), test_an_event_is_placed_on_our_fight_by_its_pair_within_two_days() (+4 more)
 
 ### Community 612 - "test_flow_validate.py"
 Cohesion: 0.16
 Nodes (20): match_to_flow(), pseudo_clv(), _bet(), _preds(), _quote(), _quotes(), test_a_far_away_kickoff_is_a_different_season(), test_a_quote_before_any_state_is_dropped() (+12 more)
 
-### Community 613 - "build_scored_rows"
-Cohesion: 0.10
-Nodes (8): _american_to_prob(), build_scored_rows(), _fmt_spread(), _num(), TestBuildScoredRows, TestPickEmLabel, TestPreflightLockChecks, TestQualifyingRowIsNotANoneRow
+### Community 613 - "PlayerResolver"
+Cohesion: 0.14
+Nodes (10): build_log_rows(), fallback_id(), PlayerResolver, _resolver(), test_a_rookie_keeps_one_id_across_games(), test_ambiguous_or_claimed_names_fall_back(), test_one_unresolved_player_does_not_drop_the_game(), test_resolution_order() (+2 more)
 
 ### Community 614 - "Sportsbook list billing group tests"
 Cohesion: 0.31
 Nodes (4): _names(), test_every_book_the_nfl_prop_model_bets_at_is_actually_fetched(), test_the_nfl_prop_pull_is_one_group_with_both_references_in_it(), test_the_shared_list_is_one_group()
 
-### Community 615 - "test_prop_ladder.py"
-Cohesion: 0.03
-Nodes (34): find_bets(), _expit(), Ladder, _logit(), _monotone(), Rung, _ladder(), test_a_replay_never_prices_off_todays_ladder_even_when_on() (+26 more)
+### Community 615 - "find_bets"
+Cohesion: 0.10
+Nodes (12): find_bets(), _ladder(), test_a_replay_never_prices_off_todays_ladder_even_when_on(), test_fetch_helper_swallows_errors(), test_kalshi_is_not_graded_until_settled_history_exists(), test_kalshi_outside_the_ladder_is_refused_not_extrapolated(), test_kalshi_prices_a_line_pinnacle_cannot(), test_missing_game_date_fails_closed_for_that_row() (+4 more)
 
 ### Community 616 - "test_tennis_dk_probe.py"
 Cohesion: 0.09
-Nodes (18): _american(), league_ids(), one_pass(), selection_rows(), _store(), subpages(), _board_with_pages(), _session() (+10 more)
+Nodes (23): _american(), detach(), ensure_tables(), last_values(), league_ids(), main(), one_pass(), other_readers() (+15 more)
 
 ### Community 617 - "Mobile type-check baseline checker"
 Cohesion: 0.27
@@ -3868,17 +3824,13 @@ Nodes (8): diagnostic_key(), log_is_compiler_failure(), main(), parse_baseline()
 Cohesion: 0.11
 Nodes (15): _read(), test_every_team_page_read_names_its_relation_literally(), test_next_game_is_earliest_in_the_window_not_tonights_date(), test_no_paper_trading_copy(), test_public_betting_policy_migration_exists_and_is_select_only(), test_recent_games_are_scoped_by_sport(), test_results_are_units_never_dollars(), test_sharp_gap_is_no_vig_vs_no_vig() (+7 more)
 
-### Community 619 - "NCAAB ESPN ingestor test fakes"
-Cohesion: 0.14
-Nodes (5): conn(), http_calls(), _lite(), LiteConn, _no_ddl_and_no_cache()
-
 ### Community 620 - "season_pass"
-Cohesion: 0.12
-Nodes (5): EndState, Params, ratings_at(), season_pass(), SeasonRatings
-
-### Community 621 - "test_gameday_lock.py"
 Cohesion: 0.14
-Nodes (12): write_picks(), db(), FakeConn, _Rows, test_both_lanes_locked_touches_nothing(), test_dry_run_never_touches_db(), test_first_bet_is_written_and_will_lock(), test_flag_off_restores_delete_and_replace() (+4 more)
+Nodes (3): EndState, season_pass(), SeasonRatings
+
+### Community 621 - "nba_live_loop.py"
+Cohesion: 0.02
+Nodes (79): american(), _cbb(), columns_ready(), dk_session(), feed_changed_on_master(), _fold(), _int(), main() (+71 more)
 
 ### Community 622 - "NBA heavy favourites search doc"
 Cohesion: 0.10
@@ -3893,28 +3845,28 @@ Cohesion: 0.08
 Nodes (25): dependencies, expo, expo-apple-authentication, expo-asset, expo-dev-client, expo-font, expo-notifications, expo-status-bar (+17 more)
 
 ### Community 626 - "ncaaf_inplay_history.py"
-Cohesion: 0.14
-Nodes (19): _blank_row(), budget_for(), calls_in(), _floor5(), _get(), _iso(), main(), parse_shard() (+11 more)
+Cohesion: 0.19
+Nodes (14): _blank_row(), budget_for(), calls_in(), _floor5(), _get(), _iso(), main(), planned_calls() (+6 more)
 
 ### Community 627 - "Prop market coverage doc"
 Cohesion: 0.31
 Nodes (7): ncaaf_prop_odds_ingestor and its probe, test_the_mlb_board_and_the_mlb_pull_are_one_set, Prop market coverage — what the feed actually serves, MLB probe 2026-09-05 — served, unsupported and unpriced keys, NCAAF prune — FOOTBALL_MARKET_NOT_PRICED per league, scripts/probe_market_coverage.py — one market per call, writes nothing, Neither prop ingestor writes to api_call_log
 
-### Community 628 - "test_dedupe_opening_signals.py"
-Cohesion: 0.10
-Nodes (9): test_a_graded_row_is_never_deleted(), test_a_row_with_computed_clv_is_never_deleted(), test_every_field_that_defines_the_bet_must_agree(), test_it_is_dry_run_by_default(), test_the_delete_selects_through_the_same_gates(), test_the_pair_must_be_an_old_shape_new_shape_pair(), test_the_report_and_the_delete_share_one_definition(), test_the_row_kept_is_the_one_locked_earlier() (+1 more)
+### Community 628 - "buy"
+Cohesion: 0.14
+Nodes (13): buy(), _copy(), drop_unchanged_props(), ensure_ledger(), _ledger(), main(), plan(), _prop_key() (+5 more)
 
 ### Community 629 - "test_settle_clv_timeout.py"
 Cohesion: 0.10
 Nodes (13): _Conn, _fn(), _sql(), test_a_non_timeout_is_not_retried(), test_a_second_timeout_does_not_abort_the_next_statement(), test_a_timeout_is_rolled_back_and_retried_once(), test_one_date_timeout_does_not_drop_the_next_date(), test_query_canceled_with_sqlstate_is_a_timeout() (+5 more)
 
 ### Community 630 - "test_ncaaf_inplay_history.py"
-Cohesion: 0.10
-Nodes (16): grade(), _cand(), _Conn, _event(), _no_db_school_lookup(), _StubEngine, test_a_late_kickoff_falls_back_to_its_utc_dated_games_row(), test_a_market_filter_writes_only_that_market() (+8 more)
+Cohesion: 0.11
+Nodes (17): rows_for(), first_signals(), grade(), _cand(), _event(), _no_db_school_lookup(), _StubEngine, test_a_late_kickoff_falls_back_to_its_utc_dated_games_row() (+9 more)
 
 ### Community 631 - "nba_pbp.py"
-Cohesion: 0.04
-Nodes (59): active_queries(), alias_map_rows(), _bool(), box_context(), box_finals(), build_game(), build_gap_game(), build_map() (+51 more)
+Cohesion: 0.05
+Nodes (58): nba_team(), active_queries(), alias_map_rows(), alias_play_ids(), _bool(), box_context(), box_finals(), build_game() (+50 more)
 
 ### Community 632 - "test_injury_timeout_contained.py"
 Cohesion: 0.09
@@ -3925,8 +3877,8 @@ Cohesion: 0.20
 Nodes (5): _both_sides(), _frame(), _sched(), TestBettableBooksOnly, TestSelectOpenerBets
 
 ### Community 634 - "test_units_one_basis.py"
-Cohesion: 0.13
-Nodes (16): _dash_units_cell(), _FakeConn, _query_sql(), _read(), test_a_dashboard_record_query_does_not_recut_with_todays_filter(), test_an_unpriced_opening_signal_gets_no_profit(), test_settle_picks_logs_the_published_units_not_the_flat_total(), test_the_cards_take_no_bankroll() (+8 more)
+Cohesion: 0.16
+Nodes (14): _dash_units_cell(), _FakeConn, _query_sql(), _read(), test_a_dashboard_record_query_does_not_recut_with_todays_filter(), test_settle_picks_logs_the_published_units_not_the_flat_total(), test_the_cards_take_no_bankroll(), test_the_dashboard_totals_are_the_published_record() (+6 more)
 
 ### Community 635 - "NCAAF over under demotion migration tests"
 Cohesion: 0.32
@@ -3953,32 +3905,32 @@ Cohesion: 0.17
 Nodes (8): _code_only(), _read(), test_a_downloaded_update_is_announced_quietly_once(), test_app_root_mounts_the_ota_updater(), test_every_trigger_only_downloads(), test_nothing_in_the_app_reloads_a_running_app(), test_the_pieces_exist(), test_the_updater_downloads_the_update()
 
 ### Community 642 - "nfl_edge_weather_fetch.py"
-Cohesion: 0.22
+Cohesion: 0.18
 Nodes (10): consolidate(), DailyLimit, era5_check(), game_hours(), log(), main(), om_get(), Pacer (+2 more)
 
-### Community 643 - "ncaab_archive_import.py"
-Cohesion: 0.08
-Nodes (33): _dedupe(), ensure_table(), _f(), fetch_pt(), fetch_sbro(), _fold(), _i(), _key() (+25 more)
+### Community 643 - "resolve_player"
+Cohesion: 0.33
+Nodes (4): fold_player(), resolve_player(), test_a_player_override_is_used_only_when_that_key_is_on_the_roster(), test_a_roster_key_matches_and_an_unknown_name_is_not_given_someone_elses()
 
 ### Community 644 - "ufc_stats_ingestor.py"
 Cohesion: 0.12
 Nodes (15): backfill_ufc_stats(), _build_ufc_game_id(), _fetch_event(), _fetch_event_list(), _fetch_fight(), _fetch_fighter(), _get(), _home_win_for_row() (+7 more)
 
 ### Community 645 - "test_settle_self_heal.py"
-Cohesion: 0.17
-Nodes (15): _game(), _pick(), test_a_game_with_any_box_score_row_is_not_refetched(), test_a_scored_game_whose_props_have_no_box_score_is_found(), test_an_nfl_prop_pick_on_a_scored_game_is_left_for_the_prop_settler(), test_dates_inside_the_per_pass_fetch_window_are_left_to_it(), test_settled_scored_and_non_mlb_rows_do_not_trigger_a_fetch(), test_the_game_window_ignores_prop_ufc_and_golf_picks() (+7 more)
+Cohesion: 0.07
+Nodes (34): conn(), _FakeStatsapi, _game(), _moved_bet(), _pick(), raw(), _SqliteShim, test_a_bet_whose_game_moved_weeks_settles_no_action() (+26 more)
 
 ### Community 646 - "table"
-Cohesion: 0.10
-Nodes (17): _grade(), main(), outcomes(), sides(), _units(), link(), decisions(), main() (+9 more)
+Cohesion: 0.07
+Nodes (26): _grade(), main(), outcomes(), sides(), _units(), decision_quotes(), espn_result(), link() (+18 more)
 
 ### Community 647 - "test_nba_prop_window.py"
-Cohesion: 0.12
-Nodes (20): _game(), _plan(), _PlanConn, _t(), test_a_postseason_game_is_done_when_the_rule_alone_has_decided_it(), test_a_postseason_game_near_its_tip_keeps_the_tick_publishing(), test_a_projection_too_old_to_price_does_not_block_the_retry(), test_a_tick_fetches_exactly_the_window_games_then_decides_closes_and_publishes() (+12 more)
+Cohesion: 0.06
+Nodes (41): test_it_rides_the_nba_totals_window_job_and_adds_no_job(), _fires(), _game(), _jobs(), _plan(), _PlanConn, _t(), test_a_postseason_game_is_done_when_the_rule_alone_has_decided_it() (+33 more)
 
 ### Community 648 - "test_model_health.py"
-Cohesion: 0.08
-Nodes (32): _apply_one(), db(), _apply(), db(), _ddl_seen(), _migration(), _open(), _row() (+24 more)
+Cohesion: 0.20
+Nodes (17): _apply(), _bet(), _code(), _ddl_seen(), _rows(), _seed(), test_a_bet_placed_after_its_first_play_is_in_play(), test_a_change_to_the_records_filter_reaches_these_views_on_the_next_pass() (+9 more)
 
 ### Community 649 - "NCAAB injury feed hand-off"
 Cohesion: 0.09
@@ -3989,8 +3941,8 @@ Cohesion: 0.12
 Nodes (16): _decision(), fill_missing(), _insert_absent(), _int(), _name(), parse_boxscore(), side_rows(), store_boxscore() (+8 more)
 
 ### Community 651 - "test_clv_close.py"
-Cohesion: 0.13
-Nodes (35): _after(), _bet(), _odds(), _pick(), _q(), _row(), test_a_bet_placed_after_the_first_play_is_not_a_pregame_bet(), test_a_bet_placed_after_the_games_closing_pull_gets_another() (+27 more)
+Cohesion: 0.16
+Nodes (31): _after(), _bet(), _odds(), _pick(), _q(), _row(), test_a_bet_placed_after_the_first_play_is_not_a_pregame_bet(), test_a_bet_placed_after_the_games_closing_pull_gets_another() (+23 more)
 
 ### Community 652 - "CI workflow and dependency pins"
 Cohesion: 0.33
@@ -4000,17 +3952,17 @@ Nodes (5): Mobile thresholds drift check (generate_mobile_thresholds --check), N
 Cohesion: 0.22
 Nodes (9): createSubscriptionStore(), load(), noteUser(), ticketNow(), write(), subscriptionFetchStillCurrent(), SubscriptionFetchTicket, SubscriptionSnapshot (+1 more)
 
-### Community 654 - "test_ufc_stats_ingestor.py"
-Cohesion: 0.10
-Nodes (23): _int_or_none(), _mmss_to_sec(), _of_pair(), _parse_event_date(), parse_event_list(), parse_event_page(), _two_ints(), parse_fight_page() (+15 more)
+### Community 654 - "parse_event_page"
+Cohesion: 0.17
+Nodes (10): _int_or_none(), _parse_event_date(), parse_event_list(), parse_event_page(), _two_ints(), test_event_date(), test_parse_event_list(), test_parse_event_page_draw_fight() (+2 more)
 
 ### Community 655 - "nfl_edge_weather.py"
 Cohesion: 0.15
 Nodes (18): audit(), baseline(), bh(), boot(), classify(), era(), grade(), load() (+10 more)
 
 ### Community 656 - "test_game_market_gate.py"
-Cohesion: 0.06
-Nodes (49): apply_to_picks(), _as_float(), bookend_from_odds(), evaluate(), fair_prob(), first_eligible_snapshot(), GateVerdict, _line_changed() (+41 more)
+Cohesion: 0.11
+Nodes (33): apply_to_picks(), bookend_from_odds(), evaluate(), GateVerdict, MarketBookend, opening_from_snapshots(), _h2h(), _pick() (+25 more)
 
 ### Community 657 - "NHL moneyline rebuild write-up"
 Cohesion: 0.25
@@ -4020,17 +3972,17 @@ Nodes (7): Method, NHL moneyline, rebuilt (2026-10-13), Read, Results, The produ
 Cohesion: 0.11
 Nodes (11): _default_fetch(), fetch_espn_nhl_probables(), _https(), parse_probable(), _short_name_teams(), _slot(), _team_abbrev(), test_fetch_fail_open() (+3 more)
 
-### Community 659 - "test_query_injuries_for_game.py"
-Cohesion: 0.08
-Nodes (24): latest_injury_rows(), _one_player_per_row(), _parse_injury_ts(), _player_key(), _report_date_as_of(), snapshot_instant(), _snapshot_rank(), _team_injury_rows() (+16 more)
+### Community 659 - "view_migrations.py"
+Cohesion: 0.13
+Nodes (9): _anon_lock_started(), _apply_one(), apply_view_migrations(), _is_transient_lock_error(), ViewMigrationResult, _with_lock_timeout(), _without_combined_anon_grants(), db() (+1 more)
 
 ### Community 660 - "Health reason and cadence tests"
-Cohesion: 0.10
-Nodes (19): _one(), Report, test_a_24h_ts_check_reads_as_daily(), test_a_bare_add_still_fills_both_columns(), test_a_broken_query_is_its_own_reason(), test_a_late_check_says_how_late(), test_a_passing_check_says_fresh(), test_a_skipped_check_says_the_gate_was_shut() (+11 more)
-
-### Community 661 - "nhl_derivative_totals_backtest.py"
 Cohesion: 0.09
-Nodes (25): day_interval(), game_means(), neighbour_clears(), publishable(), select_bets(), blind_rows(), _csv(), even_money() (+17 more)
+Nodes (20): _one(), Report, test_a_24h_ts_check_reads_as_daily(), test_a_bare_add_still_fills_both_columns(), test_a_broken_query_is_its_own_reason(), test_a_late_check_says_how_late(), test_a_passing_check_says_fresh(), test_a_skipped_check_says_the_gate_was_shut() (+12 more)
+
+### Community 661 - "test_nhl_derivative_totals.py"
+Cohesion: 0.04
+Nodes (61): build_p1_frame(), build_team_frame(), day_interval(), _ew(), fit(), game_means(), _implied_vec(), Market (+53 more)
 
 ### Community 662 - "test_mobile_player_detail.py"
 Cohesion: 0.12
@@ -4038,43 +3990,43 @@ Nodes (16): _read(), test_every_player_page_read_names_its_relation_literally(),
 
 ### Community 663 - "test_model_calibration_agent.py"
 Cohesion: 0.05
-Nodes (17): _ProbeConn, _rows(), test_a_prob_only_sweep_uses_only_the_probability_dimension(), test_column_migrations_run_every_pipeline_pass(), test_home_runs_are_no_longer_exempt_from_pausing(), test_plateau_is_computed_within_the_narrow_grid(), test_the_agent_changes_nothing_on_its_own(), test_the_agent_sweeps_every_registered_model_except_live_ones() (+9 more)
+Nodes (18): sweep(), _ProbeConn, _rows(), test_a_prob_only_sweep_uses_only_the_probability_dimension(), test_column_migrations_run_every_pipeline_pass(), test_home_runs_are_no_longer_exempt_from_pausing(), test_plateau_is_computed_within_the_narrow_grid(), test_the_agent_changes_nothing_on_its_own() (+10 more)
 
-### Community 664 - "In-play rushing-attempt UNDER on pace ratio >= 1.25"
-Cohesion: 0.11
-Nodes (13): NFL edge search 2026-10-11, docs/nfl_live_prop_assessment.md, Live pass-attempt bias assessment (2026-09-21), The live prop market leans over like the pre-game one, Publish backstop refuses pass-attempt overs, docs/nfl_live_rush_attempts.md, Accrued carries from ESPN core leaders, rush_attempt_pace model: one offset on the book's number (+5 more)
+### Community 664 - "_card_q"
+Cohesion: 0.18
+Nodes (16): _card_q(), _exact_ev(), _inputs(), _means(), _meta(), _priced_rule(), _rule_quotes(), row() (+8 more)
 
 ### Community 665 - "test_live_game_features.py"
 Cohesion: 0.11
 Nodes (19): compute_live_target(), half_innings_left(), parse_bases(), state_features(), test_build_live_state_row_merges_pregame_context(), test_build_live_state_row_unusable_state(), test_half_innings_left_bottom_ninth(), test_half_innings_left_extras_clamps_to_one() (+11 more)
 
-### Community 666 - "_jobs"
+### Community 666 - "_plan"
 Cohesion: 0.11
-Nodes (20): _fires(), _jobs(), test_every_tip_time_gets_a_look_inside_its_window(), test_the_first_look_inside_the_window_is_at_the_graded_lead(), test_the_refresh_passes_alone_reached_none_of_these_tips(), test_the_window_job_is_every_five_minutes_on_the_pipeline_service(), test_it_rides_the_nba_totals_window_job_and_adds_no_job(), test_the_job_runs_every_five_minutes_and_raises_the_alert() (+12 more)
+Nodes (8): _plan(), _skip(), _table_exists(), test_every_declared_relation_is_granted_exactly_once(), test_notification_tables_are_never_granted_to_anon(), test_the_plain_sweep_keeps_todays_anon_grants(), test_the_plan_revokes_before_it_grants(), test_unapplied_facts_tables_are_not_granted_until_they_exist()
 
 ### Community 667 - "NFL wind venue gate tests"
 Cohesion: 0.14
 Nodes (10): _covered_reads(), _slate(), test_a_locked_pick_with_no_venue_reads_degraded_never_gone(), test_a_placed_game_still_bets(), test_no_venue_no_bet(), test_stored_readings_cannot_carry_an_unplaced_game(), test_the_bernabeu_with_no_roof_state_is_held_back(), test_the_board_and_the_card_agree_on_a_placed_game() (+2 more)
 
-### Community 668 - "verify_ota_update.ts"
-Cohesion: 0.14
-Nodes (22): Calls, check(), fakeApi(), main(), showUpdateNote(), useOtaUpdates(), CheckState, CheckTrigger (+14 more)
+### Community 668 - "ncaab_live_latency_probe.py"
+Cohesion: 0.20
+Nodes (13): cache_path(), collect(), dk_rows(), _espn_scoreboard(), _espn_summary(), first_at(), import_file(), load() (+5 more)
 
-### Community 669 - "io"
-Cohesion: 0.02
-Nodes (72): _bool(), clock_seconds(), _copy(), ensure_tables(), events_for(), fetch_summary_plays(), game_ledger(), game_seconds() (+64 more)
+### Community 669 - "get_connection"
+Cohesion: 0.01
+Nodes (117): get_connection(), backfill_player_handedness(), _copy(), backfill_nfl_player_stats(), current_nfl_season(), _fetch_game_dates(), _fetch_season_csv(), ingest_nfl_player_stats() (+109 more)
 
-### Community 670 - "test_ufc_open_moneyline.py"
-Cohesion: 0.21
-Nodes (10): _log(), _row(), _SettleConn, test_a_bet_on_a_fight_missing_from_its_logged_card_settles_no_action(), test_a_card_not_logged_yet_or_a_fighter_on_it_settles_nothing(), test_a_fight_sees_only_the_fights_before_it_with_a_the_smaller_slug(), test_a_fight_with_no_recorded_length_is_left_out_of_the_minutes(), test_a_missing_stat_is_skipped_as_pandas_skips_it() (+2 more)
+### Community 670 - "min_ev_for"
+Cohesion: 0.05
+Nodes (24): min_ev_for(), scoring_method(), test_ncaaf_live_ev_floor_is_wired_from_config(), test_no_cut_or_floor_in_config_removes_a_replayed_bet(), test_the_artifacts_rule_is_the_builds(), test_the_floors_sit_just_under_the_replay_not_far_under(), test_the_floor_is_the_global_one_unless_the_model_carries_a_higher_one(), test_the_shipped_floor_is_020_and_the_ncaaf_moneyline_keeps_the_030_it_was_swept_under() (+16 more)
 
 ### Community 671 - "test_credit_budget.py"
-Cohesion: 0.08
-Nodes (22): daily_burn(), credit_floor(), The purchase, _burn_conn(), _Conn, _plan(), test_a_billing_reset_is_not_a_refund(), test_a_call_is_billed_at_what_the_api_says_it_cost() (+14 more)
+Cohesion: 0.09
+Nodes (22): daily_burn(), The purchase, refuse_reason(), _burn_conn(), _Conn, _plan(), test_a_billing_reset_is_not_a_refund(), test_a_call_is_billed_at_what_the_api_says_it_cost() (+14 more)
 
-### Community 672 - "test_house_juice_floor.py"
-Cohesion: 0.11
-Nodes (10): _blocked_by_min_odds(), test_a_pick_with_no_price_is_never_blocked_by_the_floor(), test_an_explicit_floor_wins_in_BOTH_directions(), test_every_registered_model_has_an_effective_floor(), test_ordinary_prices_still_fire(), test_the_default_is_overridable_without_a_code_change(), test_the_measured_blast_radius_is_recorded(), test_the_mirror_never_writes_a_null_floor() (+2 more)
+### Community 672 - "_Conn"
+Cohesion: 0.13
+Nodes (11): _Conn, _Cur, test_idle_tick_makes_no_http_call(), test_one_sports_database_error_does_not_cost_the_others_their_tick(), execute(), fetch(), test_run_once_polls_college_basketball_and_upserts_by_event_id(), execute() (+3 more)
 
 ### Community 673 - "post_eggz_recaps"
 Cohesion: 0.08
@@ -4102,11 +4054,11 @@ Nodes (6): art(), ld(), results(), test_the_artifact_holds_the_lab_s_team_total_
 
 ### Community 679 - "test_archive_rows.py"
 Cohesion: 0.05
-Nodes (44): _BatchConn, _clock(), sleeper(), _Conn, copy(), _game(), _iso(), _MarketConn (+36 more)
+Nodes (46): file_path(), _BatchConn, _clock(), sleeper(), _Conn, copy(), _game(), _iso() (+38 more)
 
 ### Community 681 - "test_nhl_schedule_refresh.py"
-Cohesion: 0.13
-Nodes (19): _listed(), _plan(), _rows(), _stored(), test_a_game_games_lacks_is_inserted(), test_a_game_listed_under_another_day_than_its_eastern_start_is_keyed_on_the_start(), test_a_game_moved_to_another_date_leaves_its_old_row_as_an_orphan(), test_a_game_that_has_started_by_the_clock_is_not_kept() (+11 more)
+Cohesion: 0.12
+Nodes (20): _listed(), _plan(), _rows(), _stored(), test_a_game_games_lacks_is_inserted(), test_a_game_listed_under_another_day_than_its_eastern_start_is_keyed_on_the_start(), test_a_game_moved_to_another_date_leaves_its_old_row_as_an_orphan(), test_a_game_that_has_started_by_the_clock_is_not_kept() (+12 more)
 
 ### Community 682 - "test_mobile_pick_categories.py"
 Cohesion: 0.12
@@ -4125,16 +4077,16 @@ Cohesion: 0.25
 Nodes (7): hooks, PreToolUse, SessionStart, Stop, permissions, allow, $schema
 
 ### Community 686 - "build_row"
-Cohesion: 0.19
-Nodes (12): build_row(), catch_up_row(), disk_sizes(), _int(), is_whole_run(), _load_json(), parse_iso(), parse_stamp() (+4 more)
+Cohesion: 0.10
+Nodes (23): build_row(), catch_up_row(), connect(), describe_failure(), disk_sizes(), insert_row(), _int(), _is_connection_error() (+15 more)
 
 ### Community 687 - "Intraday refresh pass script"
 Cohesion: 0.43
 Nodes (4): par(), par_wait(), refresh_pass.sh script, step()
 
 ### Community 688 - "frontend/App.tsx"
-Cohesion: 0.10
-Nodes (28): App(), DatabaseTab, formatTimestamp(), HealthTab, OpsTab, PicksClvTab, SimTab, TabFallback() (+20 more)
+Cohesion: 0.13
+Nodes (22): App(), DatabaseTab, formatTimestamp(), HealthTab, KeyMetricsTab, OpsTab, PicksClvTab, SimTab (+14 more)
 
 ### Community 689 - "Latest odds views and triggers"
 Cohesion: 0.12
@@ -4150,7 +4102,7 @@ Nodes (43): attach_rates(), build(), close_totals(), decisions(), eligible(), fa
 
 ### Community 692 - "shutil"
 Cohesion: 0.04
-Nodes (41): _conn(), copy_main_local(), _df(), _games_2026(), log(), main(), nflverse_misc(), nflverse_pbp() (+33 more)
+Nodes (44): _conn(), copy_main_local(), _df(), _games_2026(), log(), main(), nflverse_misc(), nflverse_pbp() (+36 more)
 
 ### Community 693 - "NCAAF player game stats parser tests"
 Cohesion: 0.18
@@ -4166,15 +4118,15 @@ Nodes (4): _requirements(), test_dashboard_packages_are_not_on_the_worker(), tes
 
 ### Community 696 - "NBA prop market publish tests"
 Cohesion: 0.11
-Nodes (15): NbaPropBet, pick_label(), pick_rows(), _bet(), _decision(), _PublishConn, test_a_bet_at_draftkings_carries_no_best_columns(), test_a_bet_away_from_draftkings_with_dk_at_the_line() (+7 more)
+Nodes (16): NbaPropBet, pick_label(), pick_rows(), _bet(), _decision(), _PublishConn, test_a_bet_at_draftkings_carries_no_best_columns(), test_a_bet_away_from_draftkings_with_dk_at_the_line() (+8 more)
 
-### Community 697 - "test_ncaab_espn_ingestor.py"
-Cohesion: 0.07
-Nodes (46): ingest_day(), parse_event(), run_results(), _board_with(), Espn, _event(), _final(), _game() (+38 more)
+### Community 697 - "ingest_day"
+Cohesion: 0.12
+Nodes (23): ingest_day(), _board_with(), Espn, _game(), _postpone(), test_a_board_that_lists_every_stored_game_asks_for_no_summary(), test_a_day_writes_games_events_and_venues(), test_a_failed_date_is_reported_and_the_rest_still_run() (+15 more)
 
-### Community 698 - "ufc_open_moneyline.py"
-Cohesion: 0.17
-Nodes (11): american_to_decimal(), decide_pull(), load_artifact(), logit(), novig_a(), opinion(), Pick, test_a_missing_input_counts_as_the_training_mean() (+3 more)
+### Community 698 - "Event"
+Cohesion: 0.20
+Nodes (8): _games(), _postponed(), _schedule(), end(), _before(), _clock(), Event, logged()
 
 ### Community 699 - "test_ncaaf_fcs_opponent_alias_migration.py"
 Cohesion: 0.11
@@ -4189,44 +4141,44 @@ Cohesion: 0.06
 Nodes (30): _read(), test_a_sport_switch_cannot_report_a_game_finishing(), test_all_three_segments_are_unconditional(), test_live_is_not_a_bottom_tab(), test_live_is_not_in_the_tab_param_list(), test_no_app_root_component_reaches_a_focus_aware_hook(), imports_of(), strip_comments() (+22 more)
 
 ### Community 702 - "ufc_odds_history.py"
-Cohesion: 0.07
-Nodes (35): card_instants(), card_starts(), ChangeKeeper, daily_instants(), ensure_tables(), feed_slug(), fetch(), consume() (+27 more)
+Cohesion: 0.10
+Nodes (23): card_instants(), card_starts(), ChangeKeeper, daily_instants(), ensure_tables(), feed_slug(), fetch(), consume() (+15 more)
 
-### Community 703 - "mobile/package.json"
-Cohesion: 0.08
-Nodes (23): config, { getSentryExpoConfig }, path, react, @types/react, typescript, main, name (+15 more)
+### Community 703 - "build_euroleague_live_ht_artifact.py"
+Cohesion: 0.24
+Nodes (12): compare(), fold(), load(), main(), pinnacle_priors(), price_range(), qualifying(), replay() (+4 more)
 
 ### Community 704 - "Render service configuration"
 Cohesion: 0.15
 Nodes (12): key, sync, value, services, autoDeploy, buildCommand, envVars, name (+4 more)
 
-### Community 705 - "ncaab_first_half_spread_build.py"
-Cohesion: 0.14
-Nodes (12): dec(), closing_lines(), compare(), fit(), grade(), halves(), load(), main() (+4 more)
+### Community 705 - "_published_record_problems"
+Cohesion: 0.16
+Nodes (8): test_a_pick_before_the_live_date_is_caught_in_either_view(), test_a_sport_missing_from_the_daily_view_is_caught(), test_an_empty_record_is_not_a_problem(), test_cent_level_agreement_is_required(), test_same_picks_but_different_money_is_caught(), test_the_fixed_production_numbers_reconcile(), test_the_real_production_drift_is_caught(), _published_record_problems()
 
 ### Community 706 - "NCAABW live synthetic game fixtures"
-Cohesion: 0.12
-Nodes (18): quotes_frame(), at(), book(), build_plays(), add(), clock_text(), events(), half_end() (+10 more)
+Cohesion: 0.19
+Nodes (11): at(), book(), build_plays(), add(), clock_text(), events(), half_end(), iso() (+3 more)
 
 ### Community 707 - "test_dashboard_support.py"
 Cohesion: 0.12
 Nodes (13): _lit(), main(), model_meta(), render(), stamp(), values_block(), _code(), _rows() (+5 more)
 
 ### Community 708 - "NCAAB — men's college basketball: data, odds capture, models"
-Cohesion: 0.06
-Nodes (30): The pick, 15. The projection model's EV claims three times what it returns, and a corrected EV does not rank the night better (2026-11-04, mike), Pick timing, Agreement sizing: 2u when a second model agrees (2026-11-06, mike), An under beside a big favourite (2026-11-11, mike), Box scores and period scores (ESPN, from 2026-27), Data accounts and sources (measured 2026-10-28), Feed team names (2026-10-29) (+22 more)
+Cohesion: 0.07
+Nodes (24): Board, BoardEvent, changed(), oriented(), Agreement sizing: 2u when a second model agrees (2026-11-06, mike), An under beside a big favourite (2026-11-11, mike), Box scores and period scores (ESPN, from 2026-27), Data accounts and sources (measured 2026-10-28) (+16 more)
 
-### Community 709 - "nfl_live_prop_feasibility.py"
+### Community 709 - "test_push_tickets.py"
 Cohesion: 0.22
-Nodes (18): american_b(), bettable(), boot_roi(), brier(), design(), fit_market(), grade(), implied() (+10 more)
+Nodes (10): _msgs(), test_a_credentials_failure_disables_nobody(), test_a_request_level_rejection_accepts_nothing(), test_a_retired_device_is_named_for_disabling(), test_a_single_message_reply_may_be_a_bare_object(), test_a_ticket_that_is_not_an_object_is_not_a_delivery(), test_an_error_ticket_is_not_counted_as_sent(), test_an_unpairable_reply_counts_nothing_and_disables_nothing() (+2 more)
 
 ### Community 710 - "App entitlement access gate doc"
 Cohesion: 1.00
 Nodes (4): useEntitlement() access gate (subscription OR Discord), useSubscription() subscription-only state, useEntitlement(), not useSubscription(), Access is one gate: useEntitlement(), never useSubscription().entitled
 
 ### Community 711 - "decide"
-Cohesion: 0.15
-Nodes (18): best_of(), Choice, decide(), power_devig(), Quote, retirement_term(), tour_of(), test_best_of_five_only_at_the_mens_slams() (+10 more)
+Cohesion: 0.12
+Nodes (21): american_to_decimal(), implied(), no_vig_pair(), best_of(), Choice, decide(), power_devig(), Quote (+13 more)
 
 ### Community 712 - "MLB — model state and player-props plan (mlb.md)"
 Cohesion: 0.13
@@ -4236,17 +4188,17 @@ Nodes (14): MLB — model state and player-props plan (mlb.md), Batter prop mode
 Cohesion: 0.15
 Nodes (11): _code_only(), _read(), _sources(), test_each_record_surface_tones_from_the_units_it_prints(), test_no_copy_says_dollars_for_a_result(), test_no_dollar_formatter_survives(), test_no_screen_prints_a_dollar_amount(), test_the_behavioural_checks_pass() (+3 more)
 
-### Community 714 - "Board"
-Cohesion: 0.25
-Nodes (3): Board, changed(), The NCAAB opening moneyline model (`ncaab_moneyline_first_post`), live from 2026-11-03
+### Community 714 - "_split_sql_statements"
+Cohesion: 0.19
+Nodes (4): _split_sql_statements(), TestRealSchema, TestSplitter, TestSqliteSchema
 
 ### Community 715 - "test_ufc_phantom_filter.py"
 Cohesion: 0.21
 Nodes (6): _filter_ufc_phantom(), _is_known_ufc_matchup(), _game(), _odds(), TestFilterUfcPhantom, TestIsKnownUfcMatchup
 
 ### Community 716 - "differ_rows"
-Cohesion: 0.11
-Nodes (12): band_flags(), blind_builder(), block_perm(), differ_rows(), differ_share(), ev_builder(), _logit(), model_differ_rows() (+4 more)
+Cohesion: 0.14
+Nodes (13): band_flags(), blind_builder(), blind_cand(), block_perm(), differ_rows(), differ_share(), ev_builder(), Keyed (+5 more)
 
 ### Community 717 - "Overnight polling coverage tests"
 Cohesion: 0.24
@@ -4282,23 +4234,19 @@ Nodes (21): add_windows(), boot_ci(), breakdown(), build_actuals(), build_candid
 
 ### Community 727 - "NFL in-play prop polling tests"
 Cohesion: 0.03
-Nodes (52): blind_over_prob(), over_prob(), _pass_attempt_bias_allowed(), Read, test_a_host_switch_is_alerted(), test_the_worker_self_checks_once_and_alerts_on_a_broken_feed(), _core_worker(), _FakeOdds (+44 more)
+Nodes (53): blind_over_prob(), over_prob(), _pass_attempt_bias_allowed(), Read, test_the_worker_self_checks_once_and_alerts_on_a_broken_feed(), _core_worker(), _FakeOdds, _IdRecordingOdds (+45 more)
 
-### Community 729 - "test_feature_artifact_agreement.py"
-Cohesion: 0.11
-Nodes (13): Activating the opposing-starter features (MLB batter props), _KNOWN_DRIFT: mlb_prop_pitcher_hits and mlb_prop_batter_sb, Matched baseline with --no-register, Opposing-starter Savant features (opp_starter_k_pct, whiff_pct, xera, bb_pct), SPARSE_OK_FEATURES — a null does not dropna the row, _load(), _newest_artifact(), _Stub (+5 more)
+### Community 729 - "test_backfill_results_recap.py"
+Cohesion: 0.20
+Nodes (8): build_parser(), _date_is_over(), main(), post_backfill(), test_a_day_that_is_not_over_is_refused(), test_apply_calls_both_notifiers_for_that_date(), test_dry_run_is_the_default_and_posts_nothing(), test_main_dry_run_prints_and_returns()
 
 ### Community 730 - "live_game_state_poller.py"
-Cohesion: 0.17
-Nodes (16): _detect_triggers(), _is_active_or_starting_soon(), test_active_in_progress_game_is_active(), test_combined_changes_fire_all_relevant_triggers(), test_due_up_change_fires_due_up_change(), test_final_game_is_not_active(), test_identical_state_fires_no_triggers(), test_inning_half_change_fires_inning_change() (+8 more)
+Cohesion: 0.12
+Nodes (23): _bases_state(), _detect_triggers(), _extract_state(), _is_active_or_starting_soon(), test_active_in_progress_game_is_active(), test_bases_state_empty(), test_bases_state_loaded(), test_bases_state_single_runner() (+15 more)
 
 ### Community 731 - "parse_covers"
-Cohesion: 0.16
-Nodes (13): collapse(), _covers_team(), Listing, parse_covers(), parse_rotowire(), _parse_source(), ParseError, _rank() (+5 more)
-
-### Community 732 - "refuse_publish_reason"
-Cohesion: 0.14
-Nodes (6): refuse_publish_reason(), side(), fetchall(), test_refuse_publish_allows_a_real_rush_under(), test_refuse_publish_blocks_pass_attempt_overs(), test_refuse_publish_blocks_the_constant_prob_fingerprint_even_on_rush()
+Cohesion: 0.11
+Nodes (21): classify_status(), collapse(), _covers_team(), fetch_url(), Listing, parse_covers(), parse_rotowire(), _parse_source() (+13 more)
 
 ### Community 741 - "NCAAB margin pricing review tests"
 Cohesion: 0.20
@@ -4308,41 +4256,41 @@ Nodes (18): _baseline(), _code(), db(), _event(), _future(), _manual(), _price_r
 Cohesion: 0.03
 Nodes (48): newest_play_score(), art(), board_row(), FakeDk, fast(), test_a_stale_feed_is_the_slow_way_as_before(), test_espn_behind_draftkings_is_re_read_until_it_shows_the_score(), test_the_board_quote_replaces_the_providers_draftkings_row() (+40 more)
 
-### Community 753 - "build_rows"
-Cohesion: 0.12
-Nodes (14): build_rows(), _game(), test_a_row_never_includes_its_own_date(), test_counts_accumulate_across_dates(), test_every_emitted_column_exists_in_the_real_table(), columns_of(), test_every_sport_uses_its_own_scoring_noun(), test_home_and_away_splits_use_only_the_relevant_games() (+6 more)
+### Community 753 - "ncaab_stacking_check.py"
+Cohesion: 0.27
+Nodes (11): dec(), first_half_points(), frame(), load(), main(), one_a_game(), sizing(), stacking() (+3 more)
 
 ### Community 754 - "test_live_bet_index.py"
-Cohesion: 0.12
-Nodes (14): _db(), _insert(), _signals(), test_a_live_bet_survives_an_avoid_on_the_same_lane(), test_a_second_live_bet_on_the_same_lane_still_conflicts(), test_a_void_notice_sibling_query_keeps_a_published_bet(), test_a_void_or_no_action_live_bet_does_not_hold_the_lane(), test_mlb_and_ncaaf_already_clear_the_standing_non_bet_before_insert() (+6 more)
+Cohesion: 0.14
+Nodes (13): _db(), _insert(), _signals(), test_a_live_bet_survives_an_avoid_on_the_same_lane(), test_a_second_live_bet_on_the_same_lane_still_conflicts(), test_a_void_or_no_action_live_bet_does_not_hold_the_lane(), test_mlb_and_ncaaf_already_clear_the_standing_non_bet_before_insert(), test_the_health_check_compares_the_exact_definitions() (+5 more)
 
 ### Community 755 - "test_ncaabw_history_imports.py"
-Cohesion: 0.10
-Nodes (10): refresh_season(), run_refresh(), schedule_dates(), _BoxConn, _file(), test_a_season_with_no_file_yet_is_not_an_error(), test_schedule_dates_are_iso(), test_team_box_rows_key_on_the_ncaa_contest_and_carry_the_opponent() (+2 more)
+Cohesion: 0.12
+Nodes (8): _BoxConn, _file(), test_a_season_with_no_file_yet_is_not_an_error(), test_player_seasons_sum_by_team_and_folded_name(), test_schedule_dates_are_iso(), test_team_box_rows_key_on_the_ncaa_contest_and_carry_the_opponent(), test_the_daily_read_stores_only_contests_not_stored_yet(), test_the_daily_step_reads_the_season_the_date_falls_in()
 
-### Community 756 - "test_clv_card_price_taken.py"
-Cohesion: 0.13
-Nodes (18): _app(), _clv_card(), _node_strips_types(), _server(), test_a_label_book_nfl_pick_compares_its_line_with_that_book(), test_a_recorded_book_differs_from_the_derived_one(), test_the_app_prefers_the_recorded_book_at_the_derived_price(), test_the_app_prices_every_row_as_the_server_grades_it() (+10 more)
+### Community 756 - "test_db_health_pg.py"
+Cohesion: 0.18
+Nodes (9): _apply(), db(), _ddl_seen(), _migration(), _open_to_app_roles(), test_it_builds_the_tables_closed_and_a_second_pass_runs_no_ddl(), test_the_live_and_dead_row_estimates_land_in_their_own_columns(), test_the_next_pass_undoes_any_opening_to_the_app_roles() (+1 more)
 
-### Community 757 - "byom/prop_load.py"
-Cohesion: 0.19
-Nodes (10): _as_quotes(), build_seasons(), facts_for_season(), _fetch(), _games(), _log_for_game(), _log_table(), _markets() (+2 more)
+### Community 757 - "_Fetcher"
+Cohesion: 0.16
+Nodes (9): _Fetcher, test_a_failed_upload_does_not_tweet(), test_a_partial_upload_is_not_repeated_on_requeue(), test_a_rate_limit_after_one_upload_keeps_that_id(), test_an_image_is_uploaded_then_attached(), test_an_upload_rate_limit_requeues_and_does_not_tweet(), _Uploader, ImageFetch (+1 more)
 
 ### Community 758 - "record_ladders"
-Cohesion: 0.05
-Nodes (18): _event_date(), _player(), record_ladders(), test_a_kalshi_outage_cannot_break_the_pass(), test_a_run_is_idempotent_within_its_snapshot(), test_one_snapshot_timestamp_for_the_whole_run(), test_the_recorder_is_scheduled_on_the_pipeline_role(), test_the_recorder_keeps_raw_prices_not_a_filtered_ladder() (+10 more)
+Cohesion: 0.08
+Nodes (6): test_a_kalshi_outage_cannot_break_the_pass(), test_a_run_is_idempotent_within_its_snapshot(), test_one_snapshot_timestamp_for_the_whole_run(), test_the_recorder_is_scheduled_on_the_pipeline_role(), test_the_recorder_keeps_raw_prices_not_a_filtered_ladder(), test_the_recorder_walks_every_mapped_series()
 
 ### Community 759 - "main_v1_as_first_run.py"
 Cohesion: 0.16
 Nodes (20): add_windows(), boot_ci(), breakdown(), build_actuals(), build_candidates(), build_quotes(), close_value(), devig_power() (+12 more)
 
 ### Community 760 - "walk_forward_eval.py"
-Cohesion: 0.11
-Nodes (12): _frame(), walk_forward(), _Cols, _fake(), _Frame, test_a_fold_with_too_little_history_is_skipped(), test_a_single_class_test_season_is_skipped(), _frame() (+4 more)
+Cohesion: 0.10
+Nodes (13): _frame(), main(), walk_forward(), _Cols, _fake(), _Frame, test_a_fold_with_too_little_history_is_skipped(), test_a_single_class_test_season_is_skipped() (+5 more)
 
-### Community 761 - "test_nba_game2_verdict.py"
-Cohesion: 0.21
-Nodes (20): _cell(), _grid(), _hgrid(), _house(), _mid(), test_a_cell_below_the_bet_count_enters_the_correction_at_p_one(), test_a_cell_clearing_every_bar_passes(), test_a_cell_with_no_dominant_side_is_not_held_to_a_blind_bet() (+12 more)
+### Community 761 - "docs/probability_calibration.md"
+Cohesion: 0.24
+Nodes (14): MODEL_OWN_EV_FLOOR and MODELS_ON_OWN_PROBABILITY for wind and opener, docs/probability_calibration.md, fetch_graded reads picks for NFL/NCAAF/UFC/rule models, GLOBAL_MIN_EV: 0.30 then 0.20, The go-live calibration gate never computed a real number, models/honest_ev.gate and honest_probability, tracking/system_health._report_model_calibration, ncaaf_over_under Platt map demoted 2026-09-26 (+6 more)
 
 ### Community 762 - "test_clv_backfill_job.py"
 Cohesion: 0.15
@@ -4354,23 +4302,23 @@ Nodes (4): no_database(), _Stub, stub_fit(), fit()
 
 ### Community 764 - "resourceReferencesByFile"
 Cohesion: 0.07
-Nodes (28): resourceReferencesByFile, /backend/ops/dbErrors.ts, /backend/ops/deleteDashboardLayout.ts, /backend/ops/getApiCallTrend.ts, /backend/ops/getApiSourceFrequency.ts, /backend/ops/getAudienceTiles.ts, /backend/ops/getDashboardLayouts.ts, /backend/ops/getDatabaseHealth.ts (+20 more)
+Nodes (29): resourceReferencesByFile, /backend/ops/dbErrors.ts, /backend/ops/deleteDashboardLayout.ts, /backend/ops/getApiCallTrend.ts, /backend/ops/getApiSourceFrequency.ts, /backend/ops/getAudienceTiles.ts, /backend/ops/getDashboardLayouts.ts, /backend/ops/getDatabaseHealth.ts (+21 more)
 
-### Community 765 - "test_paused_and_no_signal_rows.py"
+### Community 765 - "test_rule_model_markets_everywhere.py"
 Cohesion: 0.17
-Nodes (10): _game_pick(), _prop_pick(), test_auto_paused_counts_as_paused(), test_no_signal_rows_persist_the_reason(), test_paused_game_model_avoid_stays_avoid_with_reason(), test_paused_game_model_bet_stays_bet_with_reason_and_stake(), test_paused_prop_model_avoid_stays_avoid_with_reason(), test_score_game_routes_no_signal_through_the_helper() (+2 more)
+Nodes (7): _case(), _clv_game_market(), _like(), _scorer_case(), test_the_case_reader_reads_the_name_patterns_as_postgres_does(), test_the_closing_line_recompute_reads_the_rule_card_s_market(), test_the_line_movement_check_reads_the_rule_card_s_market()
 
 ### Community 766 - "test_position_defense_ranks.py"
 Cohesion: 0.21
 Nodes (10): _read(), _sql(), test_it_is_one_statement_and_each_piece_is_guarded(), test_the_app_calls_the_function_by_its_literal_name(), test_the_blend_cut_matches_the_app(), test_the_matchup_checks_pass(), test_the_matchup_header_fills_its_column_and_large_text_is_one_line(), test_the_role_and_stat_cuts_match_the_player_card() (+2 more)
 
-### Community 767 - "_pick"
-Cohesion: 0.10
-Nodes (20): _int(), _num(), parse_advanced_stats(), parse_games(), parse_returning(), parse_season_stats(), parse_venues(), _pick() (+12 more)
+### Community 767 - "parse_games"
+Cohesion: 0.12
+Nodes (15): parse_games(), retain_existing_cfbd_ids(), _check(), _lines_coverage(), main(), _null_report(), _sample_keys(), test_parse_games_dates_a_night_kick_by_et_not_utc() (+7 more)
 
-### Community 768 - "nhl_prop_lab_priced.py"
-Cohesion: 0.18
-Nodes (12): _ew(), fit_score(), main(), opponent_allowed(), coherent(), fold(), load_prices(), main() (+4 more)
+### Community 768 - "_ReclaimConn"
+Cohesion: 0.19
+Nodes (8): _killed_ledger(), _reclaim_then_claim(), _ReclaimConn, test_reclaim_after_the_cutoff_does_not_start_a_daily(), test_reclaim_after_the_deploy_kill_cap_does_not_start_a_daily(), test_reclaim_does_not_start_a_daily_when_the_ledger_is_unreadable(), test_reclaim_inside_the_bounds_leaves_the_manual_daily_pending(), test_reclaim_with_the_kill_switch_off_does_not_start_a_daily()
 
 ### Community 769 - "test_restore_swept_ncaab_none_rows.py"
 Cohesion: 0.11
@@ -4389,16 +4337,16 @@ Cohesion: 0.07
 Nodes (26): 1. What was deleted, 2. What the sources hold (measured 2026-11-13), 3. Moneyline, 3a. Baselines, 7,541 fights 2010-2026 (`ml_base.py`, `ml_blind_open.py`), 3b. The market-anchored rating model (`ml_anchor.py`), 3c. It is not yet a bet: DraftKings' own opener (`ml_open_2026.py`, `ml_shop_2026.py`), 3d. The bought history: the model at prices a pick may name (`feed_quotes.py`, `feed_open.py`, `feed_kill.py`, `card_replay.py`), 4. Round totals (`totals_search.py`; the 2026 pilot `totals_model.py`) (+18 more)
 
 ### Community 773 - "nfl_edge_lib.py"
-Cohesion: 0.21
-Nodes (16): backfill_cost(), bets(), bh(), clean_2h(), fmt(), forward_2026(), hdr(), _line_models() (+8 more)
+Cohesion: 0.23
+Nodes (15): backfill_cost(), bets(), bh(), clean_2h(), fmt(), forward_2026(), hdr(), _line_models() (+7 more)
 
-### Community 774 - "bisect"
-Cohesion: 0.04
-Nodes (36): _blk_nhl_loc_goals(), _blk_nhl_rolling_goals(), _all_batter_rows(), _all_pitcher_rows(), _batter_rate(), _batter_rolling_avg(), _batter_savant(), _batter_season_avg() (+28 more)
+### Community 774 - "_bet_decision"
+Cohesion: 0.13
+Nodes (9): _bet_decision(), _Conn, test_a_bet_row_carries_the_probability_the_cut_was_measured_on(), test_a_bet_under_its_ev_floor_is_refused(), test_a_decided_game_is_never_decided_again_and_the_slate_reads_the_ledger_alone(), test_a_game_priced_below_the_cut_is_a_none_row_and_one_waiting_is_no_row(), test_every_bet_is_the_flat_stake(), test_publish_counts_only_bets_and_marks_a_none_row_as_no_bet_in_the_ledger() (+1 more)
 
 ### Community 775 - "test_nhl_schedule_refresh_pg.py"
-Cohesion: 0.16
-Nodes (16): _game(), conn(), _count(), _get(), _put(), _refresh(), _row(), test_a_book_listing_the_game_the_other_way_round_takes_it_over() (+8 more)
+Cohesion: 0.14
+Nodes (17): slate(), _game(), conn(), _count(), _get(), _put(), _refresh(), _row() (+9 more)
 
 ### Community 776 - "nfl_weather_cache_import.py"
 Cohesion: 0.14
@@ -4409,52 +4357,52 @@ Cohesion: 0.17
 Nodes (20): _bets(), _games(), _graded_games(), _results(), test_a_game_whose_periods_do_not_add_up_is_never_graded_on_them(), test_a_graded_derivative_load_refuses_a_season_it_does_not_price(), test_a_level_first_half_or_first_quarter_voids_the_moneyline_and_leaves_the_denominator(), test_a_period_bet_needs_the_period_scores_and_a_full_game_bet_does_not() (+12 more)
 
 ### Community 778 - "nhl_schedule_refresh.py"
-Cohesion: 0.15
-Nodes (13): apply(), et_date(), game_rows(), http_get_json(), main(), _mine(), _new_totals(), plan() (+5 more)
+Cohesion: 0.13
+Nodes (15): apply(), et_date(), game_rows(), http_get_json(), listed_by_a_book(), main(), _mine(), _new_totals() (+7 more)
 
 ### Community 779 - "paused_model_assessment.py"
-Cohesion: 0.11
-Nodes (12): assess(), _half(), fetch(), grade(), sweep(), _units(), _rows(), test_a_cell_below_the_floor_is_not_a_result() (+4 more)
+Cohesion: 0.09
+Nodes (16): _auto_paused_models(), active_era(), assess(), _half(), fetch(), grade(), main(), sweep() (+8 more)
 
 ### Community 780 - "r2_methods.py"
 Cohesion: 0.10
 Nodes (21): (a) line shopping, spreads, consensus over all ten books: cut 0.03 by season, (a) line shopping, spreads, consensus over all ten books: read x cut, (a) line shopping, spreads, consensus over decidable only (catalogued): cut 0.03 by season, (a) line shopping, spreads, consensus over decidable only (catalogued): read x cut, (a) line shopping, totals, consensus over all ten books: cut 0.03 by season, (a) line shopping, totals, consensus over all ten books: read x cut, (a) line shopping, totals, consensus over decidable only (catalogued): cut 0.03 by season, (a) line shopping, totals, consensus over decidable only (catalogued): read x cut (+13 more)
 
 ### Community 781 - "test_best_line_sweep.py"
-Cohesion: 0.16
-Nodes (9): american_to_decimal(), units_at(), test_a_better_price_pays_more_than_the_dk_price(), test_a_loss_costs_one_unit_at_every_price(), test_a_push_is_flat(), test_a_retired_model_is_never_recommended_a_cut(), test_a_win_pays_the_stored_convention(), test_the_free_half_is_worth_more_than_the_dk_price() (+1 more)
+Cohesion: 0.09
+Nodes (13): american_to_decimal(), _basis(), units_at(), _Conn, _row(), test_a_better_price_pays_more_than_the_dk_price(), test_a_loss_costs_one_unit_at_every_price(), test_a_push_is_flat() (+5 more)
 
-### Community 782 - "nba_live_ig2.py"
-Cohesion: 0.13
-Nodes (11): cannot_both_win(), decide(), Decision, eligible_for(), pick_label(), prob_no_push(), Rule, rule_cut() (+3 more)
+### Community 782 - "season"
+Cohesion: 0.24
+Nodes (13): season(), _cached(), grid_states(), build(), load_plays(), build(), load_priors(), build() (+5 more)
 
 ### Community 783 - "test_first_half_market.py"
 Cohesion: 0.13
 Nodes (14): _check(), _old_pick(), _result(), test_a_bet_stranded_past_the_two_week_check_is_still_reported(), test_a_label_that_disagrees_is_refused(), test_a_win_pays_at_the_price_and_a_loss_costs_the_stake(), test_no_line_is_no_action_not_a_guess(), test_no_other_model_is_asked_to_say_first_half() (+6 more)
 
 ### Community 784 - "ncaaf_live/backtest/states.py"
-Cohesion: 0.16
-Nodes (11): main(), _classify(), classify_report(), _detect_score_convention(), load_pbp(), load_platform_games(), pace_report(), _repair_day_offsets() (+3 more)
+Cohesion: 0.18
+Nodes (10): main(), _classify(), classify_report(), load_pbp(), load_platform_games(), pace_report(), _repair_day_offsets(), sample_states() (+2 more)
 
-### Community 785 - "pytest"
-Cohesion: 0.03
-Nodes (81): can_scratch(), env_dsn(), _free_port(), _remove(), scratch_cluster(), dsn(), cluster(), _cluster() (+73 more)
+### Community 785 - "ingestors/__init__.py"
+Cohesion: 0.02
+Nodes (102): player_rows(), Refused, can_scratch(), env_dsn(), _free_port(), _remove(), scratch_cluster(), dsn() (+94 more)
 
 ### Community 786 - "run_system_health"
-Cohesion: 0.02
-Nodes (56): discord_sports_wired(), ncaaf_season_for_date(), test_a_game_date_inside_the_window_counts(), test_a_lookahead_commence_counts_even_when_game_date_is_outside(), test_a_signal_locked_after_first_pitch_was_never_deliverable(), test_a_signal_locked_before_first_pitch_still_counts(), test_a_signal_locked_exactly_at_first_pitch_counts(), test_a_started_game_outside_the_window_does_not_count() (+48 more)
+Cohesion: 0.03
+Nodes (41): discord_sports_wired(), ncaaf_season_for_date(), test_january_games_belong_to_the_prior_season(), test_a_game_date_inside_the_window_counts(), test_a_lookahead_commence_counts_even_when_game_date_is_outside(), test_a_signal_locked_after_first_pitch_was_never_deliverable(), test_a_signal_locked_before_first_pitch_still_counts(), test_a_signal_locked_exactly_at_first_pitch_counts() (+33 more)
 
 ### Community 787 - "byom/prop_load.py"
 Cohesion: 0.05
-Nodes (46): parse_date(), parse_game_id(), _pre_start(), _as_quotes(), build_season(), build_seasons(), _dk_history_floor(), _dk_quotes() (+38 more)
+Nodes (41): parse_date(), _fetch(), _games(), _aware(), _clock(), due_games(), _fact_rows(), freshness() (+33 more)
 
-### Community 789 - "verify"
-Cohesion: 0.07
-Nodes (12): _SeasonConn, test_verify_collapsed_series_with_a_fresh_row_stays_thin(), test_verify_empty_games_read_does_not_hide_a_young_series(), test_verify_established_live_season_with_two_snapshots_stays_thin(), test_verify_five_day_old_series_with_two_snapshots_stays_thin(), test_verify_five_day_span_with_one_snapshot_is_thin(), test_verify_four_day_opening_span_is_still_grace(), test_verify_opening_live_season_is_not_thin() (+4 more)
+### Community 789 - "EuroLeague first half and first quarter: research round 1"
+Cohesion: 0.13
+Nodes (13): 10. What to test next, 1. Settlement, 2. Data facts that shape every table, 3. Coverage (task 1), 4. Baselines (task 2), 5. The market's own accuracy, and the half against the full game (task 3), 6. The catalogued method, run unchanged (task 4), 7. Kill tests on every positive result (+5 more)
 
 ### Community 790 - "test_ncaabw_live_ht.py"
-Cohesion: 0.08
-Nodes (29): sport_bookmakers_param(), game(), quotes(), read(), rows_of(), test_a_decision_under_the_cut_is_still_the_decision(), test_a_late_logged_early_play_does_not_lower_the_score(), test_a_point_logged_between_the_stamp_and_the_read_spoils_the_quote() (+21 more)
+Cohesion: 0.09
+Nodes (26): game(), quotes(), read(), rows_of(), test_a_decision_under_the_cut_is_still_the_decision(), test_a_late_logged_early_play_does_not_lower_the_score(), test_a_point_logged_between_the_stamp_and_the_read_spoils_the_quote(), test_a_quote_stamped_before_the_half_ended_is_not_bet() (+18 more)
 
 ### Community 791 - "NCAABW — women's college basketball: data, odds capture, models"
 Cohesion: 0.11
@@ -4468,17 +4416,17 @@ Nodes (14): cover_probs(), dec(), drop_sign_errors(), fit_margin(), imp(), load(
 Cohesion: 0.36
 Nodes (10): feedback_messages, feedback_threads, idx_feedback_messages_thread, idx_feedback_threads_device, idx_feedback_threads_status, public.feedback_messages_for_thread(), public.feedback_reply(), public.feedback_submit() (+2 more)
 
-### Community 794 - "test_nfl_live_pick_writer.py"
-Cohesion: 0.10
-Nodes (9): _executor_min_price(), _probe_config(), test_the_ceiling_is_a_refusal_not_a_filter(), test_the_default_announcer_calls_both_live_notifiers(), test_the_insert_tolerates_the_one_row_per_pick_index(), test_the_lane_can_actually_settle(), test_the_lane_refuses_a_quote_past_the_ceiling(), test_the_retired_model_carries_no_threshold_row() (+1 more)
+### Community 794 - "ncaab_live_dk.py"
+Cohesion: 0.20
+Nodes (7): current_quotes(), feed_is_live(), feed_last_read(), _fouls_at(), quote_states_dk(), recent_reads(), _same()
 
 ### Community 795 - "test_settlement_timing.py"
 Cohesion: 0.14
 Nodes (9): test_capture_clv_requires_the_game_to_have_started(), test_future_kickoffs_are_not_treated_as_started(), test_game_log_skips_per_game_not_per_date(), test_mirror_unchanged_is_conservative_when_it_cannot_tell(), test_started_games_are_recognised_in_every_stored_format(), test_ufc_poll_uses_the_etag_gate_and_the_daily_run_does_not(), test_unparseable_timestamps_yield_none_rather_than_a_guess(), test_z_and_offset_forms_are_the_same_instant_but_not_the_same_string() (+1 more)
 
-### Community 796 - "fit_table"
-Cohesion: 0.10
-Nodes (12): fit_table(), grid(), fit_table(), grid(), with_table(), _table(), _table(), test_a_count_weighted_sample_rebuilds_the_same_table() (+4 more)
+### Community 796 - "qb.py"
+Cohesion: 0.19
+Nodes (8): load_qb_games(), merge_qb_features(), _games(), _qb_team(), test_either_changed_is_a_game_level_flag_the_diff_would_cancel(), test_every_declared_feature_is_actually_produced(), test_missing_qb_table_yields_nan_columns_not_a_crash(), test_positive_diff_always_means_good_for_home()
 
 ### Community 797 - "NFL prop modeling tables"
 Cohesion: 0.27
@@ -4522,35 +4470,35 @@ Nodes (5): _body(), test_access_grants_or_into_app_access_and_not_whop(), test_h
 
 ### Community 807 - "Deploy drain and merge gate"
 Cohesion: 0.04
-Nodes (45): App load times (`app_timings`), Reading it, Retention and the cap, What is captured, Where it lives, _handle_deploy_sigterm(), _gate(), _reset_drain() (+37 more)
+Nodes (44): App load times (`app_timings`), Reading it, Retention and the cap, What is captured, Where it lives, _handle_deploy_sigterm(), _gate(), _reset_drain() (+36 more)
 
 ### Community 808 - "crashLog.ts"
-Cohesion: 0.10
-Nodes (35): check(), CTX, main(), memStore(), setup(), clip(), configureCrashLog(), CrashContext (+27 more)
+Cohesion: 0.08
+Nodes (51): startOtherLoggers(), check(), CTX, main(), memStore(), setup(), beginLaunch(), clip() (+43 more)
 
 ### Community 809 - "Disk load database indexes"
 Cohesion: 0.18
 Nodes (5): idx_live_state_snapshot, idx_odds_book_snap, idx_picks_game, idx_player_game_log_name, idx_prop_odds_snapshot
 
 ### Community 810 - "test_betfair_monthly.py"
-Cohesion: 0.15
-Nodes (27): month_files(), FakeConn, _run(), _sha(), _study_months(), test_a_dry_run_downloads_nothing_and_writes_nothing(), test_a_file_that_fails_part_way_leaves_nothing_and_the_next_run_stores_it_whole(), test_a_listing_with_no_thoroughbred_file_fails_instead_of_reporting_nothing_new() (+19 more)
+Cohesion: 0.14
+Nodes (29): month_files(), FakeConn, _run(), _sha(), _study_months(), test_a_dry_run_downloads_nothing_and_writes_nothing(), test_a_file_over_the_part_size_is_split_and_restores_byte_for_byte(), test_a_file_that_fails_part_way_leaves_nothing_and_the_next_run_stores_it_whole() (+21 more)
 
-### Community 811 - "ncaab_moneyline_first_post_build.py"
-Cohesion: 0.09
-Nodes (18): _book_reason(), ev_of(), read(), too_close(), as_card_rows(), bets_at(), bought_instants(), by_season() (+10 more)
+### Community 811 - "_assemble"
+Cohesion: 0.18
+Nodes (11): _assemble(), _stats(), test_assembly_diffs_and_context(), test_early_season_is_flagged_not_gated(), test_fbs_gate_rejects_an_explicitly_fcs_classification(), test_fbs_gate_rejects_an_fcs_team_that_has_a_snapshot_row(), test_fbs_gate_returns_none_when_a_team_has_no_stats_row(), test_fbs_gate_uses_sp_plus_as_evidence_when_classification_is_missing() (+3 more)
 
 ### Community 812 - "test_sql_percent_escaping.py"
 Cohesion: 0.21
 Nodes (5): _adapt(), _parameterised_sql(), test_check_line_movement_query_interpolates(), test_parameterised_sql_escapes_literal_percents(), test_the_scanner_actually_catches_the_regression()
 
 ### Community 813 - "test_nfl_schedule_from_db.py"
-Cohesion: 0.06
-Nodes (31): resolve_venue(), _venue_key(), clock(), _clock_file(), _et(), _feed(), _load_script(), nfl_path() (+23 more)
+Cohesion: 0.05
+Nodes (37): _empty(), fetch_rows(), load_schedule(), _text(), _utc(), resolve_venue(), _venue_key(), venue_roof() (+29 more)
 
 ### Community 814 - "test_app_timings.py"
-Cohesion: 0.12
-Nodes (12): _auth_uid(), _deletion_approved_for_the_mechanism_tests(), _src(), test_a_missing_table_does_not_fail_the_daily_step(), boom(), test_a_real_prune_failure_marks_the_step_failed(), test_kinds_agree_between_app_and_server(), test_own_rpc_names_agree() (+4 more)
+Cohesion: 0.09
+Nodes (13): _auth_uid(), _deletion_approved_for_the_mechanism_tests(), _src(), test_a_missing_table_does_not_fail_the_daily_step(), boom(), test_a_real_prune_failure_marks_the_step_failed(), test_kinds_agree_between_app_and_server(), test_own_rpc_names_agree() (+5 more)
 
 ### Community 815 - "test_nhl_research_job.py"
 Cohesion: 0.13
@@ -4564,61 +4512,57 @@ Nodes (26): 2026-11-12 — EuroLeague, the first league built with the skill (gr
 Cohesion: 0.15
 Nodes (12): 1. Anchor on the market, let the model only move it, 2. The books disagree — with each other, with themselves, with a sharp book, 3. The book re-hangs a line mechanically, 4. A regressing quantity priced as if it persists, 5. An input the market under-weights at the moment of decision, 6. Where the margin sits, 7. The book settles a different number, 8. Stat projections — the default that usually fails (+4 more)
 
-### Community 818 - "_FakeConn"
-Cohesion: 0.15
-Nodes (3): _FakeConn, _LedgerConn, _Rows
+### Community 818 - "test_tennis_ingestors.py"
+Cohesion: 0.06
+Nodes (28): _clean(), _iso_date(), parse_match_file(), collect(), ensure_tables(), fetch(), FetchFailed, main() (+20 more)
 
-### Community 819 - "r"
-Cohesion: 0.10
-Nodes (3): _probables_are_fresh(), _FakeConn, TestProbablesReachTomorrow
-
-### Community 820 - "PoolMeter"
-Cohesion: 0.11
-Nodes (6): _billed(), Fetched, PoolMeter, KeepAliveMeter, test_a_call_in_flight_counts_at_its_most_against_the_floor_and_the_ceiling(), test_the_concurrency_setting_is_bounded()
+### Community 820 - "_Shim"
+Cohesion: 0.27
+Nodes (5): _bet(), _played(), _result(), _Shim, TestSettlement
 
 ### Community 821 - "test_system_health_checks.py"
 Cohesion: 0.12
 Nodes (7): db(), _FrozenDatetime, mlb_wired(), _nhl_row(), _Shim, test_the_nhl_schedule_check_stands_down_with_nothing_of_its_own_ahead(), test_the_run_reports_whether_the_nhl_schedule_is_being_refreshed()
 
 ### Community 822 - "NCAABW halftime total, side research"
-Cohesion: 0.06
-Nodes (29): The score is the highest logged so far, Artifact, artifact_from_dict(), decimal(), design(), _finite(), fit(), load_artifact() (+21 more)
+Cohesion: 0.08
+Nodes (19): The score is the highest logged so far, Artifact, artifact_from_dict(), decimal(), design(), _finite(), fit(), load_artifact() (+11 more)
 
 ### Community 823 - "Mobile matchup and verify scripts"
 Cohesion: 0.17
 Nodes (18): APP_ROOT_FILE, changedFiles(), entitlementGate(), Finding, fontScaling(), fontSizeLiterals(), hexColors(), main() (+10 more)
 
 ### Community 824 - "Daily model-quality monitor"
-Cohesion: 0.12
-Nodes (17): docs/cloud_worker.md, docs/clv.md, docs/health_checks.md, MLB runline / over-under edge search, Hybrid Pin-agreement filter on mlb_over_under bets, mlb_runline and mlb_over_under (paused), docs/mlb_total_public_fade.md, mlb_total_public_fade card (paper UNDER) (+9 more)
+Cohesion: 0.11
+Nodes (18): docs/cloud_worker.md, docs/clv.md, docs/health_checks.md, MLB runline / over-under edge search, Hybrid Pin-agreement filter on mlb_over_under bets, mlb_runline and mlb_over_under (paused), docs/mlb_total_public_fade.md, mlb_total_public_fade card (paper UNDER) (+10 more)
 
 ### Community 825 - "test_mobile_player_stat_groups.py"
 Cohesion: 0.15
 Nodes (10): _set_literal(), _src(), test_a_group_is_filled_only_by_a_real_number(), test_a_tab_opens_on_the_stat_the_player_fills_most(), test_defensive_positions_get_only_the_defense_group(), test_every_logged_position_is_classified(), test_non_defensive_positions_get_no_defense_group(), test_offensive_positions_are_not_defensive() (+2 more)
 
 ### Community 826 - "test_nba_public_splits_ingestor.py"
-Cohesion: 0.05
-Nodes (36): clean_pair(), _entry(), _NoDB, _scoreboard(), _Store, test_a_late_game_still_in_play_after_midnight_is_archived_at_the_next_pass(), test_a_late_tip_matches_its_et_dated_game_id(), test_a_lone_side_is_kept_as_served() (+28 more)
+Cohesion: 0.07
+Nodes (35): an_pct(), build_rows(), match_game(), parse_v1_sides(), parse_v2_sides(), v1_consensus_row(), _entry(), _NoDB (+27 more)
 
 ### Community 827 - "store_files.py"
 Cohesion: 0.21
 Nodes (12): files(), kind_for(), main(), _read(), restore(), store(), _stored(), units() (+4 more)
 
 ### Community 828 - "NBA public splits quality flag"
-Cohesion: 0.13
-Nodes (7): backfill_quality(), quality_backfill_statements(), _CountingConn, test_an_existing_table_gets_the_quality_column(), test_the_backfill_adds_the_column_and_commits_once(), test_the_backfill_rolls_back_when_a_count_is_not_what_was_measured(), test_the_stored_row_backfill_flags_exactly_what_the_rule_flags()
+Cohesion: 0.11
+Nodes (9): backfill_quality(), quality_backfill_statements(), quality_flag(), _CountingConn, test_an_existing_table_gets_the_quality_column(), test_the_backfill_adds_the_column_and_commits_once(), test_the_backfill_rolls_back_when_a_count_is_not_what_was_measured(), test_the_quality_rule_puts_reversed_ahead_of_late() (+1 more)
 
 ### Community 829 - "NHL stats and prop odds views"
 Cohesion: 0.24
 Nodes (3): public.v_nhl_player_prop_odds, public.v_player_season_totals_nhl, public.v_team_season_totals_nhl
 
-### Community 830 - ".real"
-Cohesion: 0.09
-Nodes (15): MoveShuffle, permute_within(), Reading, boom(), racing(), spy(), spy(), spy() (+7 more)
+### Community 830 - "test_ops_alert_pages.py"
+Cohesion: 0.21
+Nodes (10): test_a_college_final_inside_36_hours_is_a_digest_line(), test_a_partial_morning_does_not_stretch_the_runway(), test_credits_page_on_runway_or_the_absolute_floor(), test_one_college_final_past_36_hours_is_a_postponement(), test_one_worker_owned_final_is_a_postponement(), test_two_college_finals_past_36_hours_page(), test_two_worker_owned_finals_past_36_hours_page(), test_ufc_finals_are_not_an_outage() (+2 more)
 
 ### Community 831 - "test_picks_unique_row.py"
-Cohesion: 0.11
-Nodes (10): conn(), _prop(), test_dedupe_and_health_use_the_shared_tuple(), test_player_id_uniqueness_is_unchanged(), test_the_card_insert_tolerates_the_unique_index(), test_the_narrow_index_collides_null_player_id_props(), test_the_same_proposition_still_collides_on_the_widened_index(), test_the_widen_migration_is_property_guarded() (+2 more)
+Cohesion: 0.17
+Nodes (7): _prop(), test_player_id_uniqueness_is_unchanged(), test_the_card_insert_tolerates_the_unique_index(), test_the_narrow_index_collides_null_player_id_props(), test_the_same_proposition_still_collides_on_the_widened_index(), test_the_widen_migration_is_property_guarded(), test_the_widened_index_allows_null_player_id_props()
 
 ### Community 832 - "NCAAB period scores tables"
 Cohesion: 0.67
@@ -4633,16 +4577,16 @@ Cohesion: 0.14
 Nodes (13): betfair_anz_thoroughbreds, annual_zip_years, base, licence, listing, monthly_csv, betfair_listing_checked, checked (+5 more)
 
 ### Community 835 - "test_nba_team_q1.py"
-Cohesion: 0.12
-Nodes (12): main(), rebuild(), table_exists(), _Conn, db(), _rebuild(), test_a_rerun_rewrites_nothing_unchanged_and_picks_up_a_correction(), test_anon_can_read_both_relations_and_cannot_write() (+4 more)
+Cohesion: 0.14
+Nodes (9): _Conn, db(), _rebuild(), test_a_rerun_rewrites_nothing_unchanged_and_picks_up_a_correction(), test_anon_can_read_both_relations_and_cannot_write(), test_one_row_per_team_per_game_with_possessions_only_when_points_agree(), test_registered_and_rebuild_skips_without_the_table(), execute() (+1 more)
 
 ### Community 836 - "units_for_result"
 Cohesion: 0.13
 Nodes (15): test_an_ncaab_first_half_spread_grades_from_the_half(), test_parlay_rollup_uses_the_stated_price_not_the_leg_prices(), test_units_use_the_stated_stake_and_do_not_invent_a_price(), _decimal_or_none(), _game_clv(), _grade_log_prop(), _grade_one(), _grade_parlays() (+7 more)
 
-### Community 837 - "NCAAB in-play history tests"
-Cohesion: 0.15
-Nodes (6): _Conn, _t(), test_only_in_play_rows_are_kept_and_they_carry_the_source(), test_plan_shares_an_instant_between_games_and_skips_unknown_tips(), test_plan_takes_only_instants_with_a_game_in_progress(), test_the_resume_refuses_when_the_ledger_does_not_cover_the_stored_rows()
+### Community 837 - "all_readable"
+Cohesion: 0.16
+Nodes (8): all_readable(), _app_relations(), test_every_relation_the_app_reads_is_declared(), test_everything_declared_writable_is_also_readable_or_deliberately_not(), test_lock_down_sql_refuses_every_table_the_app_reads(), test_the_manifest_does_not_grow_stale_entries(), test_the_view_base_tables_are_granted_but_never_read_directly(), test_registered_readable_and_wired_into_the_nba_step()
 
 ### Community 838 - "outcome_edge_scan.py"
 Cohesion: 0.19
@@ -4664,9 +4608,9 @@ Nodes (18): eval_row(), _picks_game_id(), american_to_decimal(), american_to_pro
 Cohesion: 0.15
 Nodes (12): _block(), _read(), test_a_cached_row_without_a_paused_flag_stays_on_the_bundle_until_the_fetch(), test_paused_picks_reach_the_all_board_only_and_labelled(), test_stats_add_pick_refuses_a_paused_model(), test_the_behavioural_checks_pass(), test_the_bet_type_picker_filters_paused_models(), test_the_custom_model_picker_is_three_bet_types() (+4 more)
 
-### Community 844 - "pick_rows"
-Cohesion: 0.08
-Nodes (10): implied(), limit_per_game(), pick_rows(), db(), _mus(), _quotes(), TestInsertOnce, TestTheBacktestGradesTheRuleTheCardPlays (+2 more)
+### Community 844 - "live_scoreboard.py"
+Cohesion: 0.24
+Nodes (7): _dig(), due_sports(), et_date(), _event_games(), _int(), _parse_ts(), run_once()
 
 ### Community 845 - "test_price_prefilter_rollback.py"
 Cohesion: 0.15
@@ -4686,11 +4630,11 @@ Nodes (11): am_to_dec(), Artifact, artifact_from_dict(), band_for(), decide(), D
 
 ### Community 849 - "test_injury_status_current.py"
 Cohesion: 0.15
-Nodes (14): current_status_rows(), _replace_current_status(), FakeConn, _row(), test_a_current_status_failure_cannot_cost_the_log(), test_a_degraded_pull_only_replaces_the_teams_that_answered(), test_a_healthy_pull_replaces_the_whole_sport(), test_a_player_listed_twice_keeps_the_worse_status() (+6 more)
+Nodes (13): current_status_rows(), FakeConn, _row(), test_a_current_status_failure_cannot_cost_the_log(), test_a_degraded_pull_only_replaces_the_teams_that_answered(), test_a_healthy_pull_replaces_the_whole_sport(), test_a_player_listed_twice_keeps_the_worse_status(), test_an_empty_pull_writes_nothing() (+5 more)
 
-### Community 850 - "test_nfl_injury_ingest.py"
-Cohesion: 0.11
-Nodes (9): _fetch_nfl_espn_team_ids_core(), _nfl_espn_team_to_abbrev(), _fake_fetch(), test_core_nfl_listing_failure_returns_empty(), test_core_nfl_team_ids_resolve_lar_and_wsh_to_ours(), test_injury_fetch_raises_the_page_limit(), test_nfl_active_rows_are_dropped_and_out_keeps_espn_date(), test_nfl_name_join_uses_our_abbrevs_not_espns() (+1 more)
+### Community 850 - "parse_fight_page"
+Cohesion: 0.15
+Nodes (9): _aggregate_stats(), _kd_int(), _mmss_to_sec(), _of_pair(), parse_fight_page(), test_kd_int_handles_float_strings_and_blanks(), test_mmss_to_sec(), test_of_pair() (+1 more)
 
 ### Community 851 - "NCAAF team tables schema"
 Cohesion: 0.39
@@ -4717,8 +4661,8 @@ Cohesion: 0.14
 Nodes (10): _crit(), fake(), test_a_crit_does_not_fail_the_observe_path(), test_a_crit_still_fails_the_daily_step(), test_an_exception_does_not_fail_the_observe_path(), test_daily_syncs_thresholds_after_view_migrations(), test_it_still_runs_the_check_when_observing(), test_ok_is_identity_in_both_modes() (+2 more)
 
 ### Community 857 - "opener_strategy.py"
-Cohesion: 0.06
-Nodes (36): features_for(), _apply_calibration(), exponential_recency_weights(), _logit(), make_ensemble(), fit_predict(), make_lgbm(), fit_predict() (+28 more)
+Cohesion: 0.11
+Nodes (20): features_for(), _apply_calibration(), exponential_recency_weights(), _logit(), make_ensemble(), fit_predict(), make_lgbm(), fit_predict() (+12 more)
 
 ### Community 858 - "test_line_churn.py"
 Cohesion: 0.21
@@ -4740,17 +4684,17 @@ Nodes (10): _never(), _row(), test_a_first_name_the_stat_log_spells_differently_
 Cohesion: 0.11
 Nodes (5): _attach(), books(), _quote(), TestTheCardFilters, TestTheListIsShared
 
-### Community 863 - "_Decision"
-Cohesion: 0.13
-Nodes (10): build_pick(), _Decision, test_a_locked_lane_writes_nothing_further(), test_a_pass_is_never_announced(), test_edge_is_the_platform_edge_not_the_lanes_ev(), test_every_row_key_is_actually_bound_by_the_insert(), test_the_label_agrees_with_the_side_and_the_line_it_carries(), test_the_label_names_the_stat_the_model_actually_trades() (+2 more)
+### Community 863 - "build_quotes"
+Cohesion: 0.16
+Nodes (7): Definitions, build_quotes(), dec_from_american(), match_one(), name_key(), nb_alpha(), NBTable
 
-### Community 864 - "test_recap_restatement.py"
-Cohesion: 0.15
-Nodes (11): _Conn, _resp(), test_a_404_is_an_answer_not_a_retry(), test_a_persistent_403_still_raises_after_the_last_attempt(), test_a_recap_whose_count_merely_drifted_is_not_short(), test_a_recap_with_a_late_grade_is_short(), test_a_transient_403_is_retried_and_the_second_answer_is_used(), test_the_check_after_noon_does_not_touch_the_database() (+3 more)
+### Community 864 - "weather_totals.py"
+Cohesion: 0.23
+Nodes (6): build_spots(), evaluate(), load_games(), main(), scoring_by_wind(), wilson()
 
 ### Community 865 - "LiteConn"
-Cohesion: 0.13
-Nodes (7): conn(), insert_reader_cases(), put(), _lite(), LiteConn, _no_ddl(), _team_row()
+Cohesion: 0.15
+Nodes (6): conn(), put(), _lite(), LiteConn, _no_ddl(), _team_row()
 
 ### Community 866 - "test_mobile_board_season.py"
 Cohesion: 0.16
@@ -4776,9 +4720,9 @@ Nodes (9): 1. The market grid, 2. What the live models did in 2026, 3. The four 
 Cohesion: 0.14
 Nodes (8): card_path(), clear_card(), _load_script(), nfl_path(), test_a_dry_run_leaves_the_card_alone(), test_a_priced_wind_run_with_no_bets_removes_the_earlier_card(), test_clear_card_removes_todays_file_and_only_that(), _windless_run()
 
-### Community 872 - "test_intraday_freshness.py"
+### Community 872 - "test_dashboard_rule_models.py"
 Cohesion: 0.14
-Nodes (10): _is_fresh(), _minutes_since(), _age(), test_an_unknown_age_refetches_rather_than_skipping(), test_fresh_data_is_skipped(), test_stale_data_is_refetched(), test_the_6am_pipeline_is_never_throttled(), test_the_boundary_refetches() (+2 more)
+Nodes (5): test_a_rule_carries_a_cut_but_is_in_no_training_registry(), test_a_rule_is_not_styled_as_a_warning(), test_a_rule_sorts_with_the_live_models_not_the_broken_ones(), test_the_roster_query_flags_rules(), test_the_summary_counts_rules_apart_from_outages()
 
 ### Community 873 - "test_nfl_model_imports.py"
 Cohesion: 0.15
@@ -4788,37 +4732,33 @@ Nodes (6): _import_under_scheduler_env(), _scheduler_env(), test_no_nfl_script_u
 Cohesion: 0.19
 Nodes (7): _Conn, _games(), _Meter, _Resp, test_a_stored_game_is_not_bought_again(), test_postseason_rows_go_to_their_writer_and_games_is_left_alone(), test_the_regular_season_path_still_stamps_games()
 
-### Community 875 - "FakeDB"
-Cohesion: 0.16
-Nodes (3): H1DB, _Cur, FakeDB
-
 ### Community 876 - "NFL player stats leaderboard schema"
 Cohesion: 0.52
 Nodes (6): idx_nfl_plog_player, idx_nfl_plog_season, nfl_player_game_log, public.player_recent_games_nfl(), public.player_window_totals_nfl(), v_player_season_totals_nfl
 
-### Community 877 - "test_ncaaf_citadel_alias_migration.py"
-Cohesion: 0.11
-Nodes (8): _counts(), _seed(), test_a_pick_is_never_deleted_and_never_regraded(), test_it_consolidates_the_measured_shapes_and_a_second_pass_is_a_noop(), test_it_guards_on_the_alias_being_unscored_and_still_named_so(), test_latest_odds_never_collide_on_the_canonical_key(), test_migration_is_one_statement(), test_odds_move_as_a_whole()
+### Community 877 - "test_mobile_scoreboard.py"
+Cohesion: 0.19
+Nodes (6): _read(), test_picks_keeps_live_signals_separate(), test_scoreboard_is_on_the_pr_ci_subset(), test_scoreboard_poll_is_one_game_and_stops_when_hidden(), test_scoreboard_reads_name_the_relation_at_from(), test_the_scoreboard_behavioural_checks_pass()
 
-### Community 878 - "_resolve"
-Cohesion: 0.10
-Nodes (10): _FakeConn, _resolve(), test_resolve_anchor_declines_when_opponent_changed(), test_resolve_anchor_refuses_a_late_replacement(), test_resolve_anchor_rescues_unmapped_variant(), test_resolve_anchor_returns_a_fight_stored_twice_but_not_beside_a_changed_opponent(), test_resolve_exact_pair_wins(), test_resolve_ignores_unrelated_fights() (+2 more)
+### Community 878 - "test_ufc_stats_ingestor.py"
+Cohesion: 0.07
+Nodes (26): normalize_method(), rounds_completed(), slugify_fighter(), _FakeConn, _resolve(), test_a_misspelled_fighter_is_scored_for_the_side_they_fought_on(), test_alias_makes_both_sources_agree(), test_aliases_do_not_touch_unmapped_names() (+18 more)
 
 ### Community 879 - "ncaabw_sdv_import.py"
-Cohesion: 0.19
-Nodes (11): _count(), game_log_rows(), _int_or_none(), _num(), _played(), player_key(), player_rows(), _s() (+3 more)
+Cohesion: 0.12
+Nodes (21): _count(), _fetch_parquet(), game_log_rows(), import_game_logs(), import_season(), _int_or_none(), _log_table_ready(), main() (+13 more)
 
 ### Community 880 - "test_two_refreshes_waiting_behind_a_daily_run_one_pass"
-Cohesion: 0.12
-Nodes (10): _quiet_passes(), _sleep_until_wait(), spy(), test_a_daily_and_a_refresh_do_not_score_at_the_same_time(), fake_run(), test_a_refresh_scores_if_the_daily_lock_never_clears(), test_a_second_refresh_skips_without_waiting_out_the_daily(), test_daily_does_not_score_while_a_refresh_holds_the_lock() (+2 more)
+Cohesion: 0.10
+Nodes (11): _quiet_passes(), _sleep_until_wait(), spy(), test_a_daily_and_a_refresh_do_not_score_at_the_same_time(), fake_run(), test_a_refresh_scores_if_the_daily_lock_never_clears(), test_a_second_refresh_skips_without_waiting_out_the_daily(), test_daily_does_not_score_while_a_refresh_holds_the_lock() (+3 more)
 
 ### Community 881 - "Build your own model facts schema"
 Cohesion: 0.48
 Nodes (6): idx_byom_game_facts_date, idx_byom_game_facts_season, idx_byom_prop_facts_game, idx_byom_prop_facts_season, public.byom_game_facts, public.byom_prop_facts
 
 ### Community 882 - "job_heartbeat.py"
-Cohesion: 0.15
-Nodes (8): _build(), Conn, test_a_job_marked_disabled_is_not_silent(), test_a_job_that_runs_here_is_not_marked(), test_a_service_leaves_alone_the_jobs_another_service_owns(), test_startup_marks_an_owned_job_that_is_switched_off(), allowed_silence(), stale_jobs()
+Cohesion: 0.13
+Nodes (9): _build(), Conn, test_a_job_marked_disabled_is_not_silent(), test_a_job_that_runs_here_is_not_marked(), test_a_service_leaves_alone_the_jobs_another_service_owns(), test_startup_marks_an_owned_job_that_is_switched_off(), allowed_silence(), ensure_schema() (+1 more)
 
 ### Community 884 - "test_mobile_sport_filter.py"
 Cohesion: 0.14
@@ -4840,9 +4780,9 @@ Nodes (5): conn(), http_calls(), _lite(), LiteConn, _no_ddl_and_no_cache()
 Cohesion: 0.11
 Nodes (5): _DdlConn, _DdlRes, test_a_failed_lock_down_does_not_lose_the_table(), test_ensure_schema_commits_the_tables_it_creates(), test_the_tables_are_locked_down_at_the_create_site()
 
-### Community 890 - "mlb_game_final"
-Cohesion: 0.21
-Nodes (9): _lookup_home_won(), mlb_game_final(), sbr_twin_id(), _Conn, _Cur, test_no_final_anywhere_is_none(), test_scored_canonical_row_wins_and_keeps_its_label(), test_twin_id_swaps_only_the_renamed_franchises() (+1 more)
+### Community 890 - "injury_tags_before_tip"
+Cohesion: 0.17
+Nodes (7): injury_tags_before_tip(), tag_label(), tags_from_rows(), Load-bearing facts, test_a_game_with_no_tip_has_no_tag(), test_suspension_is_out_with_that_injury_type(), test_tags_before_tip_use_the_tip_and_drop_cleared()
 
 ### Community 891 - "test_first_pitch_guard.py"
 Cohesion: 0.11
@@ -4868,33 +4808,33 @@ Nodes (11): ot_periods(), schedule_rows(), season_str(), _tv(), _row(), test_a_l
 Cohesion: 0.60
 Nodes (5): player_news_by_id, player_news_by_key, player_news_item_player, player_news_published, public.player_news
 
-### Community 899 - "_tiny"
-Cohesion: 0.16
-Nodes (16): _box(), _games(), _inj(), _out_tonight(), test_a_game_with_an_unrated_player_has_no_tilt(), test_a_players_own_game_box_never_reaches_the_tilt(), test_a_report_printed_after_t_changes_nothing(), test_a_starters_first_quarter_weights_sum_to_five_players_so_the_tilt_is_a_reweighting() (+8 more)
+### Community 899 - "main"
+Cohesion: 0.15
+Nodes (9): fit_blend(), fit_stage2(), phase_of(), consensus_close(), dk_first_totals(), fit_blends(), blends(), first_posts() (+1 more)
 
 ### Community 900 - "test_nfl_prop_thresholds.py"
 Cohesion: 0.12
 Nodes (7): cfg(), test_no_nfl_prop_market_is_back_on_the_uniform_placeholder(), test_one_bad_date_does_not_cost_the_others(), test_the_prop_window_has_exactly_one_declaration(), test_the_scorer_step_covers_the_whole_window_not_one_date(), fake(), test_the_three_threshold_dicts_agree_for_every_nfl_prop_market()
 
-### Community 901 - "TeeRecorder"
-Cohesion: 0.11
-Nodes (8): TeeRecorder, _OpenConn, test_a_failing_announcer_cannot_undo_or_fail_the_write(), test_a_failing_recorder_cannot_take_the_other_down(), boom(), test_a_written_bet_is_announced_with_its_own_game_date(), test_an_unlocked_lane_does_write(), test_the_audit_log_is_written_before_the_database()
+### Community 901 - "registry.py"
+Cohesion: 0.17
+Nodes (8): classify(), paid_apis(), _refuse_real_odds_api_calls(), send(), test_garbage_url_does_not_raise(), test_paid_apis_are_the_metered_ones(), test_specific_host_beats_generic(), test_college_basketball_data_is_a_named_metered_host()
 
 ### Community 902 - "x_teams.py"
 Cohesion: 0.17
 Nodes (11): test_college_nicknames_and_a_shared_mascot_falls_back_to_the_school(), test_team_hashtags_use_the_nickname(), _both_teams(), _from_full_names(), hashtag_token(), _index(), _mlb(), _nickname() (+3 more)
 
-### Community 903 - "mlb_live_total_runs (in-play total)"
-Cohesion: 0.06
-Nodes (16): Live inning gate replay, mlb_live_total_runs (in-play total), Negative-binomial (NB1) tail, pregame_total_line feature (market anchor), Model state assessment, all 71 models (2026-09-03 snapshot), Honest MLB signal is ~0.55-0.56 AUC, Live tuning panel (Models view), ncaaf_live_total 2025 in-play backtest (+8 more)
+### Community 903 - "line_move_spots.py"
+Cohesion: 0.27
+Nodes (6): eval_follow_spread(), eval_follow_total(), load(), main(), _summ(), wilson()
 
 ### Community 904 - "load_artifact"
-Cohesion: 0.13
-Nodes (10): load_artifact(), load_artifact(), table_digest(), artifact(), art(), table(), test_an_artifact_whose_table_moved_is_refused(), test_the_15z_card_records_a_game_the_first_post_model_bet_and_never_prices_it() (+2 more)
+Cohesion: 0.11
+Nodes (13): from_json(), load_artifact(), load_artifact(), table_digest(), artifact(), artifact(), art(), table() (+5 more)
 
 ### Community 905 - "NFL preflight lock check tests"
-Cohesion: 0.09
-Nodes (6): _Pg, _PgCursor, TestPreflightCiMode, wind(), wrapped(), fake_open()
+Cohesion: 0.07
+Nodes (7): _Pg, _PgCursor, TestPreflightCiMode, TestPreflightLockChecks, wind(), wrapped(), fake_open()
 
 ### Community 906 - "nba_s_q1mt.py"
 Cohesion: 0.22
@@ -4902,7 +4842,7 @@ Nodes (9): _bands(), counts(), emit_m(), emit_t(), full(), main(), ml_cand(), pr
 
 ### Community 907 - "FakeConn"
 Cohesion: 0.07
-Nodes (14): model_performance(), FakeConn, http_server(), live_server(), _perf_rows(), test_an_unpriced_model_reports_no_roi(), test_partially_priced_model_keeps_its_denominator_visible(), test_perf_reads_the_matview_not_the_expensive_view() (+6 more)
+Nodes (14): duplicate_copy_exclusion_sql(), model_performance(), FakeConn, test_ops_payload_is_cached_not_requeried(), test_perf_reads_the_matview_not_the_expensive_view(), test_roster_reports_a_registered_but_untrained_model(), test_the_discord_recap_counts_each_event_once(), test_the_finder_skips_copies_already_marked() (+6 more)
 
 ### Community 908 - "NCAAF first-half team totals write-up"
 Cohesion: 0.18
@@ -4916,13 +4856,13 @@ Nodes (12): 0.10 Kill tests, for anything positive at the headline cut or chosen
 Cohesion: 0.60
 Nodes (4): idx_capper_picks_status, public.capper_ingest_cursor, public.capper_messages, public.capper_picks
 
-### Community 912 - "counts"
-Cohesion: 0.13
-Nodes (8): counts(), fit_betas(), gap_frame(), period_results_r(), project_with_tilt(), _spec(), synthetic_run(), synthetic_tilts()
+### Community 912 - "nfl_edge_kalshi_fetch.py"
+Cohesion: 0.23
+Nodes (6): candles(), get(), map_games(), paged(), parse_event(), probe()
 
 ### Community 913 - "ncaab_spread_market_build.py"
-Cohesion: 0.13
-Nodes (20): check_bets(), check_tables(), grade(), load_h2h_rows(), main(), summarize(), archive_lines(), c_by_phase() (+12 more)
+Cohesion: 0.07
+Nodes (33): ev_of(), check_bets(), check_tables(), grade(), main(), summarize(), as_card_rows(), bets_at() (+25 more)
 
 ### Community 914 - "Kalshi game markets table"
 Cohesion: 0.70
@@ -4932,9 +4872,9 @@ Nodes (4): kalshi_game_markets_contract, kalshi_game_markets_date, kalshi_game_m
 Cohesion: 0.70
 Nodes (4): kalshi_prop_ladders_prop, kalshi_prop_ladders_rung, kalshi_prop_ladders_snapshot, public.kalshi_prop_ladders
 
-### Community 916 - "seasons_with_too_few_snapshots"
-Cohesion: 0.25
-Nodes (5): seasons_with_too_few_snapshots(), test_a_real_series_passes(), test_a_single_snapshot_season_is_flagged(), test_a_two_snapshot_season_is_flagged(), test_ncaaf_shaped_weekly_snapshots_pass()
+### Community 916 - "test_claude_settings_allowlist.py"
+Cohesion: 0.24
+Nodes (7): _allow_rules(), _approved(), _covers_write(), test_look_alike_server_fails_the_guard(), test_only_exact_approved_names_pass(), test_permissions_allow_has_no_write_capable_supabase_tool(), test_supabase_wildcards_cover_execute_sql_and_reads_do_not()
 
 ### Community 917 - "verify_stack_back.ts"
 Cohesion: 0.08
@@ -4952,17 +4892,17 @@ Nodes (4): idx_opening_signals_date, idx_opening_signals_model, idx_opening_sign
 Cohesion: 0.18
 Nodes (8): _navigate_blocks(), _src(), test_every_caller_states_the_stat(), test_innings_resolves_to_the_outs_chip(), test_route_carries_the_stat(), test_screen_opens_on_the_requested_stat(), test_the_requested_stat_survives_the_loaded_player_filter(), test_the_side_travels_with_the_stat()
 
-### Community 922 - "_credit_cells"
-Cohesion: 0.13
-Nodes (14): _cell(), _credit_cells(), _cuts(), _spread_cell(), test_a_cell_counts_for_the_starters_only_when_it_passes_and_beats_its_control(), test_a_cell_that_fails_a_bar_is_never_credited(), test_a_number_no_board_could_hang_is_dropped_and_counted(), test_a_spread_cell_that_passes_and_loses_to_its_control_is_not_the_starters() (+6 more)
+### Community 922 - "test_mobile_sgp_pricing.py"
+Cohesion: 0.24
+Nodes (9): _read(), test_an_estimate_is_labelled_as_one(), test_bar_and_screen_read_the_same_fits(), test_entered_prices_are_stored_through_the_insert_only_rpc(), test_every_pricing_surface_applies_the_same_game_estimate(), test_line_shop_is_withheld_on_a_same_game_slip(), test_nfl_correlations_bundled_in_the_app_match_the_stored_rows(), test_the_behavioural_checks_pass() (+1 more)
 
 ### Community 926 - "App access grants migration"
 Cohesion: 0.31
 Nodes (5): access_grants_user_source_idx, public.access_grants, public.app_grant_access_for(), public.discord_grant_access_for(), public.my_access_for()
 
-### Community 928 - "test_prop_odds_missing_game.py"
-Cohesion: 0.15
-Nodes (4): FakeConn, _run(), test_event_with_no_games_row_is_skipped_and_others_still_insert(), test_fk_on_insert_does_not_unwrite_the_events_that_already_landed()
+### Community 928 - "_R"
+Cohesion: 0.03
+Nodes (17): execute(), test_the_prop_fetch_never_buys_a_game_it_was_not_given(), execute(), execute(), test_discord_free_pick_candidates_refuse(), execute(), fetchall(), row() (+9 more)
 
 ### Community 929 - "r2_leads.py"
 Cohesion: 0.17
@@ -4976,33 +4916,33 @@ Nodes (6): idx_ncaab_plog_event, idx_ncaab_plog_player, idx_ncaab_plog_season, p
 Cohesion: 0.60
 Nodes (4): live_game_states_ts_idx, live_odds_snapshots_game_ts_idx, public.live_game_states, public.live_odds_snapshots
 
-### Community 932 - "reset_registry_cache"
-Cohesion: 0.14
-Nodes (7): reset_registry_cache(), _fresh_registry(), no_feed(), _Conn, test_an_empty_registry_read_is_not_cached(), test_no_registry_or_no_schedule_means_no_resolver(), test_the_resolver_joins_feed_names_to_scheduled_games()
+### Community 932 - "test_ncaab_first_half_clv.py"
+Cohesion: 0.29
+Nodes (7): _capture(), _half_pick(), _quote(), test_a_null_close_is_not_stamped_measured(), test_an_nba_first_half_still_reads_only_a_close_row(), test_an_ncaab_first_half_spread_with_no_pull_after_creation_stays_unmeasured(), test_an_ncaab_first_half_total_uses_the_post_creation_pre_tip_row()
 
 ### Community 933 - "best_per_prop"
 Cohesion: 0.16
 Nodes (8): best_per_prop(), _Conn, _hockenson(), test_a_different_market_on_the_same_player_is_still_its_own_bet(), test_input_order_does_not_decide_the_side(), test_nfl_publish_will_not_add_the_other_side_of_a_locked_line(), test_opposite_sides_of_one_line_collapse_to_the_bigger_edge(), test_wnba_publish_will_not_add_the_other_side_of_a_locked_line()
 
-### Community 934 - "slugify_fighter"
-Cohesion: 0.14
-Nodes (11): normalize_method(), slugify_fighter(), test_alias_makes_both_sources_agree(), test_aliases_do_not_touch_unmapped_names(), test_confirmed_aliases_resolve_to_ufcstats_slug(), test_normalize_method(), test_resolve_anchor_matches_every_real_name_variant(), test_resolve_anchor_refuses_every_real_stale_booking_on_its_own() (+3 more)
+### Community 934 - "enqueue"
+Cohesion: 0.19
+Nodes (9): test_enqueue_inserts_a_thread_and_refuses_a_second_copy(), test_enqueue_refuses_a_url_unless_allow_link_is_set(), test_enqueue_stores_images_and_a_reply_target(), _checked_media_urls(), _checked_reply(), enqueue(), posts_to_rows(), QueueRejected (+1 more)
 
 ### Community 935 - "test_nba_prop_settle_stats.py"
 Cohesion: 0.12
 Nodes (8): _SelectConn, test_a_missing_stat_is_none_not_zero(), test_a_turnovers_bet_on_a_player_who_played_settles_win_not_no_action(), test_combo_markets_are_mapped_to_helpers_and_only_the_nba_rule_uses_them(), test_double_double_matches_the_rule_it_replaced(), test_the_loader_carries_every_stat_a_market_settles_on(), test_the_loader_selects_turnovers(), _nba_prop_actual()
 
 ### Community 936 - "NBA 2026-27 rebuild write-up"
-Cohesion: 0.04
-Nodes (54): 10.1 Three free checks (2026-10-21; prices only, no game score read except where named), 10.2 The hypothesis, 10.3 Data (all into Supabase first), 10.4 Rules every cell is graded under, 10.5 The cells (30), 10.6 The bars, 10.7 Two changes after two checks, before any rung was graded (2026-10-21), 10.8 A change after the first grade: impossible total rungs (2026-10-29) (+46 more)
+Cohesion: 0.03
+Nodes (60): 10.1 Three free checks (2026-10-21; prices only, no game score read except where named), 10.2 The hypothesis, 10.3 Data (all into Supabase first), 10.4 Rules every cell is graded under, 10.5 The cells (30), 10.6 The bars, 10.7 Two changes after two checks, before any rung was graded (2026-10-21), 10.8 A change after the first grade: impossible total rungs (2026-10-29) (+52 more)
 
 ### Community 937 - "nba_injury_report.py"
 Cohesion: 0.03
-Nodes (89): _all_slots(), _ampm(), _bands(), _column_of(), _columns(), content_hash(), ensure_tables(), Fetcher (+81 more)
+Nodes (88): _all_slots(), _ampm(), _bands(), _column_of(), _columns(), content_hash(), Fetcher, finish_rows() (+80 more)
 
 ### Community 939 - "test_nhl_props.py"
-Cohesion: 0.05
-Nodes (18): upcoming_rows(), _bet(), _Conn, _in_goal(), _log(), _players(), _result(), _Shim (+10 more)
+Cohesion: 0.04
+Nodes (26): implied(), draftkings_at(), limit_per_game(), pick_rows(), _bet(), db(), _in_goal(), _log() (+18 more)
 
 ### Community 940 - "_euroleague_live_synth.py"
 Cohesion: 0.16
@@ -5012,17 +4952,17 @@ Nodes (9): answers(), at_break(), book(), events(), first_half(), iso(), third_b
 Cohesion: 0.17
 Nodes (11): 10. Contact, 1. Information we collect, 2. How we use information, 3. How we share information, 4. Retention, 5. Your choices and rights, 6. Security, 7. Age requirement (+3 more)
 
-### Community 942 - "beginLaunch"
-Cohesion: 0.23
-Nodes (10): beginLaunch(), CrashLogDeps, earlyExitFrom(), enqueue(), flushCrashQueue(), KeyValueStore, markUpdatesLogSeen(), readQueue() (+2 more)
+### Community 942 - "test_team_stats_explained.py"
+Cohesion: 0.27
+Nodes (6): _run(), test_a_split_under_ten_games_ranks_below_one_with_enough(), test_every_stat_in_every_sport_is_explained(), test_nba_and_nhl_ask_for_the_season_by_its_ending_year(), test_run_line_and_puck_line_are_named_for_their_sport(), test_unadjusted_scoring_and_nfl_volume_are_record_not_efficiency()
 
 ### Community 943 - "API call log table"
 Cohesion: 0.83
 Nodes (3): api_call_log, idx_api_call_api_ts, idx_api_call_ts
 
-### Community 944 - "Meter"
-Cohesion: 0.04
-Nodes (50): _alt_done(), buy_alternates(), buy_derivatives(), buy_gaps(), buy_instants(), buy_lines(), _buy_per_event(), listed() (+42 more)
+### Community 944 - "nba_odds_history.py"
+Cohesion: 0.02
+Nodes (87): _alt_done(), buy_alternates(), buy_derivatives(), buy_gaps(), buy_instants(), buy_lines(), _buy_per_event(), listed() (+79 more)
 
 ### Community 945 - "Model quality checks table"
 Cohesion: 0.83
@@ -5031,10 +4971,6 @@ Nodes (3): idx_model_quality_run_date, model_quality_checks_key, public.model_qu
 ### Community 946 - "NBA team first quarter table"
 Cohesion: 0.83
 Nodes (3): nba_team_q1_games_team_date, public.nba_team_q1_games, public.v_nba_team_q1_season
-
-### Community 947 - ".alt"
-Cohesion: 0.16
-Nodes (7): _patch_run(), _RunConn, test_the_cap_stops_after_one_game_and_does_not_list_the_next_sport(), match(), test_unset_cap_buys_every_game_in_the_window(), test_alternate_names(), alternate_market()
 
 ### Community 948 - "NCAAF play-by-play table"
 Cohesion: 0.83
@@ -5064,37 +5000,37 @@ Nodes (3): public.results_snapshots, results_snapshots_date, results_snapshots_k
 Cohesion: 0.20
 Nodes (5): _SlateConn, _t(), test_an_nba_cup_week_game_the_schedule_does_not_list_is_still_priced(), test_the_regular_season_slate_never_prices_the_postseason(), test_the_slate_is_regular_season_games_inside_the_horizon()
 
-### Community 959 - "nba_prop_projection_card.py"
-Cohesion: 0.02
-Nodes (88): expected_value(), bet_games(), due(), _event_props(), _events(), run_nba_prop_close_ingestor(), decision_probability(), Gate (+80 more)
+### Community 959 - "test_nba_prop_projection_shrink.py"
+Cohesion: 0.04
+Nodes (49): 5. The projection model that ships — `nba_prop_projection` (2026-10-16, mike), decision_probability(), shown_probability(), shrink_factor(), ProjectionBet, pick_label(), pick_rows(), render() (+41 more)
 
 ### Community 964 - "_FakeConn"
 Cohesion: 0.12
 Nodes (5): _espn(), _FakeConn, test_the_quarters_of_a_pending_pick_are_fetched_one_call_a_date(), json(), test_the_query_asks_only_for_this_model_s_unsettled_bets_with_a_final_and_no_row()
 
-### Community 965 - "test_results_in_units.py"
-Cohesion: 0.03
-Nodes (55): _units_at_risk(), _fmt_edge(), _fmt_odds(), main(), Pick, _pick_card(), render_email(), _stake() (+47 more)
+### Community 965 - "Rec"
+Cohesion: 0.19
+Nodes (3): Rec, test_the_pick_row_binds_every_parameter_of_the_real_insert(), test_the_mlb_record_audit_prints_units()
 
 ### Community 968 - "test_ufc_csv_loader.py"
-Cohesion: 0.14
-Nodes (16): _aggregate_stats(), backfill_ufc_csv(), build_events(), build_fighter_index(), _kd_int(), _scheduled_rounds(), _split_bout(), _id_from_url() (+8 more)
+Cohesion: 0.15
+Nodes (15): backfill_ufc_csv(), build_events(), build_fighter_index(), ingest_ufc_results_for_date_csv(), load_fighter_profiles_from_csv(), _scheduled_rounds(), _split_bout(), _id_from_url() (+7 more)
 
-### Community 970 - "test_recap_waits_on_bet_games.py"
-Cohesion: 0.12
-Nodes (4): _Gate, test_a_bet_game_that_is_not_final_does_block(), test_an_unbet_game_that_is_not_final_does_not_block(), test_the_nov_3_x_results_ledger_blocks_a_second_tweet()
+### Community 970 - "_Gate"
+Cohesion: 0.25
+Nodes (3): _Gate, test_a_bet_game_that_is_not_final_does_block(), test_an_unbet_game_that_is_not_final_does_not_block()
 
 ### Community 971 - "_ingest"
-Cohesion: 0.11
-Nodes (7): _ingest(), _IngestConn, _one_fight_event(), test_a_late_replacement_is_not_scored_on_the_original_booking(), test_a_misspelled_fighter_is_scored_for_the_side_they_fought_on(), test_a_row_naming_neither_fighter_is_left_unscored(), test_the_same_fight_stored_twice_is_scored_on_both_rows_each_way_round()
+Cohesion: 0.12
+Nodes (6): _ingest(), _IngestConn, _one_fight_event(), test_a_late_replacement_is_not_scored_on_the_original_booking(), test_a_row_naming_neither_fighter_is_left_unscored(), test_the_same_fight_stored_twice_is_scored_on_both_rows_each_way_round()
 
 ### Community 972 - "Mobile stat label parity tests"
 Cohesion: 0.21
 Nodes (6): _meta_entries(), _server_stat_labels(), test_both_rushing_models_call_the_stat_the_same_thing(), test_the_live_model_names_the_market_it_actually_trades(), test_the_parser_actually_found_the_models(), test_the_unreconciled_models_are_named()
 
 ### Community 973 - "resolve_nfl_game_id"
-Cohesion: 0.16
-Nodes (5): resolve_nfl_game_id(), _nfl_resolver(), resolve(), TestTheResolverFailsClosed, TestResolveGameId
+Cohesion: 0.14
+Nodes (6): resolve_nfl_game_id(), _nfl_resolver(), resolve(), _event_game_id(), TestTheResolverFailsClosed, TestResolveGameId
 
 ### Community 974 - "health_db"
 Cohesion: 0.12
@@ -5105,24 +5041,24 @@ Cohesion: 0.08
 Nodes (30): cleanLayoutName(), errorMessage(), isLayoutTab(), isMissingRelation(), LAYOUT_TABS, LayoutTab, Params, Result (+22 more)
 
 ### Community 978 - "TeamBook"
-Cohesion: 0.13
-Nodes (4): TeamBook, _r(), TestBlendedTeamInputs, TestTeamRatesAsOf
+Cohesion: 0.12
+Nodes (6): TeamBook, _r(), _t(), test_the_training_path_reads_nhl_odds_by_game_not_by_sport(), TestBlendedTeamInputs, TestTeamRatesAsOf
 
 ### Community 979 - "handoffLog.ts"
-Cohesion: 0.25
-Nodes (9): linkShape(), recordReport(), withTrail(), flag(), HandoffMiss, HandoffRoute, logged, nativeBuild() (+1 more)
+Cohesion: 0.12
+Nodes (16): active(), App crash and error logging (`app_errors`), Freeze tracking (added 2026-11-06), Hand-offs that missed the app (added 2026-11-15), Native aborts before JS (added 2026-11-14), Reading it, What is captured, Where it lives (+8 more)
 
 ### Community 980 - "betmgm_app_link_probe.py"
-Cohesion: 0.08
-Nodes (28): app_store_apps(), custom_schemes(), _get(), _install(), main(), meta_tags(), probe(), script_srcs() (+20 more)
+Cohesion: 0.10
+Nodes (23): app_store_apps(), custom_schemes(), _get(), _install(), main(), meta_tags(), probe(), script_srcs() (+15 more)
 
 ### Community 985 - "test_pregame_line_poller.py"
-Cohesion: 0.04
-Nodes (45): changed_rows(), _fingerprint(), _key(), over_credit_cap(), poll_once(), quoted_keys(), stored_quotes(), _PollConn (+37 more)
+Cohesion: 0.03
+Nodes (61): changed_rows(), _credits_used_today(), _fingerprint(), _key(), last_known_prices(), over_credit_cap(), poll_once(), quoted_keys() (+53 more)
 
 ### Community 986 - "eggz_record.py"
-Cohesion: 0.14
-Nodes (13): _capper(), cmd_grade(), cmd_restate(), cmd_settle(), main(), _print_open(), _take_capper(), test_settle_manual_uses_the_stored_price_and_refuses_a_graded_row() (+5 more)
+Cohesion: 0.15
+Nodes (12): _capper(), cmd_grade(), cmd_restate(), cmd_settle(), main(), _print_open(), _take_capper(), test_settle_manual_uses_the_stored_price_and_refuses_a_graded_row() (+4 more)
 
 ### Community 993 - "Mobile OTA sourcemap upload"
 Cohesion: 0.20
@@ -5132,9 +5068,9 @@ Nodes (12): appRelease(), groupAssets(), here, isBundle(), main(), require, sent
 Cohesion: 0.39
 Nodes (5): _body(), _code(), _deletes(), test_every_delete_is_the_caller_and_the_public_record_is_absent(), test_only_the_caller_and_only_a_fresh_session()
 
-### Community 996 - "_Conn"
-Cohesion: 0.12
-Nodes (7): _Conn, test_a_pass_is_never_written_to_picks(), test_an_unresolvable_decision_writes_nothing(), test_game_id_resolves_from_the_book_s_team_names(), test_picks_recorder_drops_a_pass_attempt_over_before_sql(), test_the_announce_runs_after_the_commit_and_after_the_connection_closes(), commit()
+### Community 996 - "nba_live_health.py"
+Cohesion: 0.27
+Nodes (6): check(), games_without_rows(), span_ended_before_go_live(), _ts(), windows_between(), windows_without_calls()
 
 ### Community 997 - "devDependencies"
 Cohesion: 0.10
@@ -5144,41 +5080,41 @@ Nodes (20): devDependencies, autoprefixer, code-inspector-plugin, esbuild, jiti,
 Cohesion: 0.29
 Nodes (5): idx_ncaabw_plog_event, idx_ncaabw_plog_player, idx_ncaabw_plog_season, public.ncaabw_player_game_log, public.v_player_season_totals_ncaabw
 
-### Community 1002 - "start_run"
-Cohesion: 0.17
-Nodes (8): roll_up(), _abort_orphans(), abort_prior_refresh_orphans(), _boot_cutoff(), finish_run(), main(), _now(), start_run()
+### Community 1002 - "gen_report.py"
+Cohesion: 0.35
+Nodes (7): grid_table(), main(), md(), num(), pct(), pivot_table(), w()
 
-### Community 1004 - "_as_dt"
-Cohesion: 0.18
-Nodes (5): _as_dt(), grade(), season_of(), TestKickoffGate, TestMarketGrading
+### Community 1004 - "The four pre-game rules (live 2026-11-14, mike)"
+Cohesion: 0.17
+Nodes (10): euroleague_h1_dog_ml — "EuroLeague First Half Moneyline", euroleague_heavy_fav_ml — removed, euroleague_home_dog_spread — "EuroLeague Spreads", euroleague_home_ml — "EuroLeague Moneyline", euroleague_q1_club_share_total — "EuroLeague First Quarter Totals", Several bets on one game (measured 2026-11-17; two cuts built the same day), The four pre-game rules (live 2026-11-14, mike), When they decide, and on what (+2 more)
 
 ### Community 1006 - "test_mobile_sentry.py"
 Cohesion: 0.15
 Nodes (10): _src(), test_a_missing_sentry_token_never_fails_a_build_or_an_ota(), test_an_empty_dsn_starts_nothing(), test_device_id_and_release_are_on_the_first_event(), test_native_config(), test_ota_upload_uses_the_native_release_and_dist(), test_privacy_settings(), test_the_public_dsn_is_set() (+2 more)
 
-### Community 1013 - "math"
-Cohesion: 0.03
-Nodes (80): pace_ratio(), Read, _sigmoid(), under_prob(), test_the_ratio_is_the_requirement_against_the_actual_pace(), bias_table(), confident_share(), load_artifact() (+72 more)
+### Community 1013 - "tennis_fatigue_study.py"
+Cohesion: 0.11
+Nodes (31): best_rows(), bet_inputs(), bet_rule(), book_term(), build(), decision_frame(), descriptive(), flat_rate() (+23 more)
 
-### Community 1015 - "test_live_orchestrator.py"
-Cohesion: 0.04
-Nodes (43): should_fetch(), split_triggers(), under_credit_cap(), apply_daily_cap(), classify_live_signal(), _ev_floor(), expected_value(), test_decide_agrees_with_classify_live_signal() (+35 more)
+### Community 1015 - "live_scorer.py"
+Cohesion: 0.01
+Nodes (136): _credit_cost(), credits_used_today(), fetch_in_play_odds(), consume_triggers_once(), _last_fg_fetch_age(), _live_game_ids(), _pending_triggers(), run_live_loop() (+128 more)
 
 ### Community 1016 - "App auth and billing shell tests"
 Cohesion: 0.48
 Nodes (5): _read(), test_flags_default_off_in_source(), test_signals_open_the_same_paywall(), test_signed_out_navigation_returns_to_sign_in(), test_whop_only_row_cannot_stay_entitled()
 
-### Community 1017 - "nhl_totals_lab.py"
-Cohesion: 0.26
-Nodes (8): grade(), imp(), interval(), load(), main(), row(), show(), wpu()
+### Community 1017 - "urllib_parse"
+Cohesion: 0.27
+Nodes (6): main(), scram_stored_key(), test_a_different_password_gives_a_different_key(), test_a_different_salt_gives_a_different_key(), test_iterations_matter(), test_rfc7677_test_vector()
 
 ### Community 1018 - "nba_public_splits_ingestor.py"
-Cohesion: 0.06
-Nodes (31): active_queries(), an_pct(), archive_ready(), build_rows(), ensure_table(), fetch_scoreboard(), flip_side(), _game_meta() (+23 more)
+Cohesion: 0.09
+Nodes (20): active_queries(), archive_ready(), ensure_table(), fetch_scoreboard(), flip_side(), keep_for_poll(), _known_abbrs(), load_games_index() (+12 more)
 
 ### Community 1019 - "due_dates"
-Cohesion: 0.15
-Nodes (8): due_dates(), event_from_summary(), fetch_event(), _moved_off_board(), _off_board_ids(), _today_et(), _ts(), _utc_iso()
+Cohesion: 0.22
+Nodes (7): due_dates(), _off_board_ids(), _today_et(), _ts(), _utc_iso(), test_a_tbd_tip_is_due_once_its_date_is_live_or_past(), test_the_due_window_is_bounded()
 
 ### Community 1020 - "parse_period_rows"
 Cohesion: 0.32
@@ -5189,8 +5125,8 @@ Cohesion: 0.29
 Nodes (6): buildCommand, cleanUrls, headers, outputDirectory, $schema, trailingSlash
 
 ### Community 1030 - "local_mirror.py"
-Cohesion: 0.06
-Nodes (41): _storage(), arrow_schema(), _arrow_type(), _atomic_write_text(), cmd_run(), cmd_status(), cmd_verify(), _day_start() (+33 more)
+Cohesion: 0.05
+Nodes (42): _storage(), arrow_kind(), arrow_schema(), _arrow_type(), _atomic_write_text(), closed_until(), cmd_export_csv(), cmd_run() (+34 more)
 
 ### Community 1043 - "test_mobile_units_one_basis.py"
 Cohesion: 0.22
@@ -5204,41 +5140,41 @@ Nodes (4): DNS, Local preview, Signal Base marketing site, Vercel
 Cohesion: 0.19
 Nodes (14): _read(), test_copy_is_word_for_word(), test_display_only_nothing_sized(), test_error_text_uses_the_text_safe_red(), test_explainer_no_longer_denies_a_bankroll(), test_exposure_card_hook_and_banner_stay_removed(), test_keyboard_never_covers_the_field(), test_locale_separators_decide_the_decimal() (+6 more)
 
-### Community 1047 - "nba_s_q1pin.py"
-Cohesion: 0.24
-Nodes (8): add_pinnacle(), counts(), emit(), full(), tag(), main(), pinnacle_numbers(), synthetic_checks()
+### Community 1047 - "_repo_sources"
+Cohesion: 0.17
+Nodes (6): _call_source(), _repo_sources(), test_every_guard_on_a_worker_only_table_asks_about_rls(), test_every_literal_lock_down_target_is_declared(), test_every_worker_only_create_site_goes_through_the_gated_helper(), test_no_create_site_uses_the_ungated_builder()
 
 ### Community 1048 - "nba_results_ingestor.py"
 Cohesion: 0.05
-Nodes (26): parse_nba_postponed(), box_is_complete(), build_dnp_rows(), build_log_rows(), fallback_id(), ingest_nba_results(), _is_team(), main() (+18 more)
+Nodes (30): parse_nba_postponed(), parse_nba_scoreboard(), board(), box_is_complete(), build_dnp_rows(), ingest_nba_results(), _is_team(), main() (+22 more)
 
-### Community 1049 - "_compute_injury_adjustment"
-Cohesion: 0.16
-Nodes (3): _compute_injury_adjustment(), _assemble_wnba_features(), TestComputeInjuryAdjustment
-
-### Community 1050 - "test_ncaab_moneyline_card_pg.py"
-Cohesion: 0.21
-Nodes (12): _american(), _connect(), db(), _ledger(), p_home(), _parx(), test_a_best_side_at_a_state_limited_book_is_a_no_bet_and_the_run_does_not_fail(), test_a_game_nobody_decided_at_15z_is_written_missed_and_the_run_fails() (+4 more)
+### Community 1050 - "ncaab_spread_card.py"
+Cohesion: 0.05
+Nodes (44): CardIncomplete, decided_games(), decision_row(), enabled(), first_post_bets(), _is_bet(), ledger_exists(), lock_both() (+36 more)
 
 ### Community 1051 - "test_probability_calibration.py"
-Cohesion: 0.03
-Nodes (63): apply_calibration(), demote(), ensure_schema(), _era_start(), fetch_graded(), fit_model(), fit_offset(), fit_platt() (+55 more)
+Cohesion: 0.02
+Nodes (101): apply_calibration(), demote(), ensure_schema(), _era_start(), fetch_graded(), fit_model(), fit_offset(), fit_platt() (+93 more)
 
-### Community 1052 - "fit_one"
-Cohesion: 0.16
-Nodes (5): choose_C_linear(), fit_one(), model_move(), _mse(), OffsetRidge
+### Community 1052 - "closed_tables"
+Cohesion: 0.20
+Nodes (5): closed_tables(), main(), test_lock_down_never_uses_force_row_level_security(), test_lock_down_sql_revokes_before_it_enables_rls(), test_the_worker_only_tables_are_not_also_declared_app_readable()
 
 ### Community 1063 - "test_clv_no_vig_capture.py"
 Cohesion: 0.20
 Nodes (8): _fn(), test_a_missing_bet_book_close_is_not_filled_from_another_book(), test_backfill_revisits_anything_that_is_not_standard_v2(), test_capture_grades_raw_same_book_and_a_separate_pinnacle_edge(), test_capture_stamps_method_and_close_book(), test_game_close_never_falls_back_past_first_pitch(), test_pinnacle_is_a_second_lookup_not_the_headline_close(), test_prop_close_stays_bounded_at_first_pitch()
 
-### Community 1113 - "parse_teams"
-Cohesion: 0.33
-Nodes (4): parse_teams(), test_parse_teams_all_schools_pull_never_defaults_to_fbs(), test_parse_teams_joins_alt_names(), test_parse_teams_keeps_cfbd_classification_and_lowercases_it()
+### Community 1113 - "_espn_like"
+Cohesion: 0.24
+Nodes (8): _default_fetch(), _espn_like(), get(), _Resp, test_a_date_that_fails_does_not_lose_the_other(), test_college_scoreboards_ask_for_all_of_division_one(), get(), test_the_early_morning_slate_asks_espn_one_date_at_a_time()
+
+### Community 1114 - "Handler"
+Cohesion: 0.29
+Nodes (4): _connect(), dumps(), Handler, _json_default()
 
 ### Community 1122 - "prune"
-Cohesion: 0.07
-Nodes (15): 1. What was measured, 2. What deleted, and what still does, 3. Does moving history out affect the models?, 4. The design, 5. Making it fast, 6. The nightly backup, 7. Order of work, Data archive: no deletions, a small live database, a full history (+7 more)
+Cohesion: 0.12
+Nodes (12): 1. What was measured, 2. What deleted, and what still does, 3. Does moving history out affect the models?, 4. The design, 5. Making it fast, 6. The nightly backup, 7. Order of work, Data archive: no deletions, a small live database, a full history (+4 more)
 
 ### Community 1123 - "NBA live decisions table migration"
 Cohesion: 0.83
@@ -5246,47 +5182,47 @@ Nodes (3): nba_live_decisions_date_idx, public.nba_live_decisions, uq_nba_live_d
 
 ### Community 1124 - "NBA live game decision loop"
 Cohesion: 0.05
-Nodes (26): score_mismatch(), build_pick(), decided_keys(), dk_score_now(), espn_score_ours(), evaluate_game(), GameCtx, insert_ledger() (+18 more)
+Nodes (22): build_pick(), decided_keys(), dk_score_now(), evaluate_game(), GameCtx, insert_ledger(), ledger_row(), live_destination() (+14 more)
 
 ### Community 1125 - "cached"
 Cohesion: 0.15
-Nodes (10): age(), cached(), clear(), test_cache_raises_when_it_has_nothing_to_fall_back_on(), test_cache_reports_age(), test_cache_serves_stale_rather_than_failing(), boom(), test_cache_serves_within_ttl_and_recomputes_after() (+2 more)
+Nodes (9): age(), cached(), clear(), test_cache_raises_when_it_has_nothing_to_fall_back_on(), test_cache_reports_age(), test_cache_serves_stale_rather_than_failing(), boom(), test_cache_serves_within_ttl_and_recomputes_after() (+1 more)
 
 ### Community 1126 - "vitest.setup.ts"
 Cohesion: 0.12
 Nodes (13): @testing-library/jest-dom, @testing-library/react, @vitejs/plugin-react, vitest, TaskMeta, vitest, name, uuid (+5 more)
 
-### Community 1127 - "Clock"
-Cohesion: 0.13
-Nodes (6): _bet(), test_a_label_that_disagrees_with_its_line_is_refused(), test_a_label_that_reads_as_the_game_total_is_refused(), test_a_paused_model_s_rows_carry_the_paused_marker(), test_the_card_writes_only_what_every_publisher_shows(), Clock
+### Community 1127 - "et_game_date"
+Cohesion: 0.18
+Nodes (7): et_game_date(), _game_meta(), team_abbr(), parse_game(), team_candidates(), test_a_late_west_coast_tip_belongs_to_the_previous_et_date(), test_team_ids_come_from_the_abbr_then_the_full_name()
 
-### Community 1128 - "test_ncaab_spread_card_pg.py"
-Cohesion: 0.21
-Nodes (10): _connect(), db(), _ledger(), _parx(), test_a_best_quote_at_a_state_limited_book_is_a_no_bet_and_the_run_does_not_fail(), test_a_game_nobody_decided_at_15z_is_written_missed_and_the_run_fails(), test_an_exact_tie_at_a_state_limited_book_bets_at_the_book_that_can_be_bet(), test_any_other_book_that_cannot_be_bet_still_fails_the_run() (+2 more)
+### Community 1128 - "test_a_game_moved_past_every_window_is_found_by_its_event_id"
+Cohesion: 0.18
+Nodes (6): event_from_summary(), fetch_event(), _moved_off_board(), test_a_game_moved_past_every_window_is_found_by_its_event_id(), test_an_unreadable_summary_is_counted_and_the_day_still_runs(), _wash_utah_on_the_15th()
 
 ### Community 1129 - "stripe-checkout/index.ts"
 Cohesion: 0.31
 Nodes (8): admin, cors, customerFor(), form(), json(), PRICES, stripe(), TRIAL_DAYS
 
 ### Community 1131 - "prune_table"
-Cohesion: 0.12
-Nodes (9): main(), run_prune_odds(), test_prune_rejects_keep_days_below_one(), _Ctx, test_a_thinning_failure_still_prunes_both_tables_and_is_reported(), test_every_statement_the_prune_sends_names_its_game(), test_the_daily_run_gives_the_thinning_a_budget(), thin() (+1 more)
+Cohesion: 0.18
+Nodes (6): main(), run_prune_odds(), test_prune_rejects_keep_days_below_one(), test_a_thinning_failure_still_prunes_both_tables_and_is_reported(), test_the_daily_run_gives_the_thinning_a_budget(), thin()
 
-### Community 1132 - "test_nhl_prop_blocked_shots.py"
-Cohesion: 0.07
-Nodes (13): pick_rows(), _bet(), db(), _played(), _result(), _scored(), _Shim, test_slate_only_holds_games_that_have_not_started() (+5 more)
+### Community 1132 - "pick_rows"
+Cohesion: 0.19
+Nodes (4): pick_rows(), _scored(), TestTheCard, execute()
 
 ### Community 1134 - "Game log backfill skip tests"
 Cohesion: 0.25
 Nodes (5): _backfill_body(), test_a_game_absent_from_our_games_table_is_still_skipped(), test_no_skip_is_keyed_on_date_alone(), test_the_coverage_set_is_scoped_to_the_season_being_built(), test_the_skip_is_keyed_on_game_id()
 
 ### Community 1135 - "test_health_skip_budget.py"
-Cohesion: 0.06
-Nodes (22): test_a_stuck_gate_is_not_reported_as_stale_data(), FakeConn, _res(), _source_outside_the_budget_table(), test_a_check_never_seen_non_skipped_counts_its_whole_history(), test_a_check_skipped_only_today_is_not_counted_as_a_streak(), test_a_non_skipped_result_is_never_touched(), test_a_stuck_gate_escalates_past_its_budget() (+14 more)
+Cohesion: 0.07
+Nodes (21): FakeConn, _res(), _source_outside_the_budget_table(), test_a_check_never_seen_non_skipped_counts_its_whole_history(), test_a_check_skipped_only_today_is_not_counted_as_a_streak(), test_a_non_skipped_result_is_never_touched(), test_a_stuck_gate_escalates_past_its_budget(), test_an_honest_offseason_skip_stays_skipped_but_shows_its_length() (+13 more)
 
 ### Community 1137 - "_sqlite"
-Cohesion: 0.08
-Nodes (8): _sqlite(), test_a_needs_review_leg_holds_the_recap(), test_a_stored_needs_review_message_is_reparsed_and_a_parsed_one_is_not(), test_an_nba_first_half_spread_grades_from_the_quarters(), test_grade_pending_reparses_the_stuck_posts_and_grades_the_under(), test_reparse_leaves_a_graded_leg_and_keeps_an_unparsed_line(), test_the_record_script_does_not_write_without_apply(), reparse_stored()
+Cohesion: 0.11
+Nodes (7): _sqlite(), test_a_needs_review_leg_holds_the_recap(), test_an_nba_first_half_spread_grades_from_the_quarters(), test_an_undated_needs_review_holds_the_new_york_day(), test_grade_pending_reparses_the_stuck_posts_and_grades_the_under(), test_reparse_leaves_a_graded_leg_and_keeps_an_unparsed_line(), test_the_record_script_does_not_write_without_apply()
 
 ### Community 1138 - "Database schema creation tests"
 Cohesion: 0.23
@@ -5296,33 +5232,33 @@ Nodes (6): _get_columns(), test_games_table_columns(), test_injuries_table_colum
 Cohesion: 0.15
 Nodes (7): _declared(), test_an_explicit_run_date_must_be_a_real_iso_date(), test_declared_keys_are_unique(), test_every_declared_job_names_a_registered_type(), test_every_declared_job_validates(), test_no_run_date_means_the_module_resolves_it(), test_the_validator_drops_unknown_args()
 
-### Community 1140 - "test_mlb_retrain_freeze.py"
-Cohesion: 0.12
-Nodes (8): test_import_time_flag_follows_marker_file(), test_marker_or_env_lifts_the_freeze(), test_mlb_prop_market_sweep_is_documented_exempt(), test_mlb_retrain_refused_while_incomplete(), test_mlb_threshold_sweeps_call_the_guard(), test_non_mlb_sports_are_not_gated(), test_repo_marker_file_is_present(), test_trainer_calls_the_guard()
+### Community 1140 - "parse_fighter_page"
+Cohesion: 0.22
+Nodes (7): _height_to_inches(), _parse_dob(), parse_fighter_page(), _reach_to_inches(), test_height_reach_dob(), test_parse_fighter_page(), test_parse_fighter_page_missing_fields()
 
 ### Community 1143 - "MLB first-five edge search doc"
 Cohesion: 0.15
 Nodes (12): 1. Pinnacle no-vig against a bettable soft book's no-vig, first-five totals (the closest miss), 2. First-five moneyline, following or fading a DraftKings line move (May 10 to Sep 18; 1,595 games, 11.8 snapshots a game on average), 3. Fading the full-game public on the first-five moneyline (splits taken before first pitch), 4. First-five moneyline against the full-game moneyline (DraftKings against DraftKings), 5. Blind and price-band first-five moneyline, 6. Full-game public over pile, bet the first-five under (September only; FanDuel first-five total), 7. Pinnacle first-five "spreads" at line 0 against DraftKings' first-five moneyline, Addendum (2026-10-10): through September 30, and by side (+4 more)
 
-### Community 1144 - "test_a_rejected_football_alternate_chunk_costs_only_itself"
-Cohesion: 0.14
-Nodes (9): _Resp, test_a_422_retries_without_the_alternates_before_going_dk_only(), fake_get(), test_a_422_with_no_alternates_still_takes_the_dk_only_retry(), fake_get(), test_a_rejected_football_alternate_chunk_costs_only_itself(), fake_get(), test_football_live_slate_requests_alternates_and_a_backfill_does_not() (+1 more)
+### Community 1144 - "_venue_features"
+Cohesion: 0.18
+Nodes (6): _venue_features(), test_altitude_climb_is_signed_from_each_teams_own_elevation(), test_both_teams_travel_at_a_neutral_site(), test_eastward_travel_is_positive_tz_shift(), test_host_travels_zero_at_a_normal_home_game(), test_missing_venue_data_yields_nulls_not_zeros()
 
-### Community 1146 - "test_push_line_change_alerts.py"
-Cohesion: 0.17
-Nodes (5): _alerts(), _Conn, _Res, test_a_moneyline_has_no_number_and_still_alerts(), test_a_price_at_another_number_is_not_a_move()
+### Community 1146 - "nhl_goalie_window.py"
+Cohesion: 0.35
+Nodes (6): has_games_today(), main(), Plan, plan_tick(), score(), today_slate()
 
-### Community 1147 - "nfl_prop_odds_ingestor.py"
-Cohesion: 0.05
-Nodes (31): backfill_nfl_prop_odds(), census_books(), _credits_used(), _event_props(), _fetch_slice(), _get(), _iter_prop_rows(), list_events() (+23 more)
+### Community 1147 - "parametrize"
+Cohesion: 0.20
+Nodes (9): _swapped_game(), test_exactly_5_from_the_median_is_out_and_under_it_stays(), test_only_clean_v1_closing_rows_are_read(), test_the_dog_control_bets_the_markets_underdog_in_the_same_games(), test_the_swapped_row_is_no_offer_at_either_point(), test_the_swapped_row_is_out_before_the_fair_line_is_read(), test_the_synthetic_moneyline_really_holds_favourites_the_cell_cannot_bet(), test_the_synthetic_world_holds_what_the_checks_claim() (+1 more)
 
 ### Community 1148 - "test_ungraded_model_performance.py"
 Cohesion: 0.19
 Nodes (7): _second_arm(), _sql(), test_both_arms_stay_inside_the_settled_bet_gate(), test_models_the_matview_does_not_grade_are_sourced_from_picks(), test_the_arm_does_not_key_on_is_live(), test_the_arm_is_scoped_by_absence_from_the_matview_not_by_model_id(), test_the_arm_prices_units_the_same_way_the_matview_does()
 
-### Community 1149 - "StatCard"
-Cohesion: 0.21
-Nodes (11): StatCard(), StatsSkeleton(), AudienceData, AudienceTiles(), NoteWithTooltip(), Props, TileConfig, computeRollup() (+3 more)
+### Community 1149 - "ExecParts.tsx"
+Cohesion: 0.12
+Nodes (44): StatsSkeleton(), ago(), ClvSplit(), EquityChart(), EquityTip(), ModelList(), ModelsStrip(), OpsStrip() (+36 more)
 
 ### Community 1150 - "tsx_cmd"
 Cohesion: 0.03
@@ -5332,13 +5268,13 @@ Nodes (64): tsx_cmd(), _read(), test_a_theme_change_never_reloads_the_runtime(),
 Cohesion: 0.17
 Nodes (8): _daily(), _job_body(), test_a_malformed_date_is_refused_before_anything_runs(), test_nfl_box_scores_are_ingested_before_settle(), test_nfl_finals_still_precede_the_box_scores(), test_the_job_does_not_read_rowcount_off_the_cursor(), test_the_job_only_clears_its_own_two_ledger_kinds(), test_the_job_posts_both_surfaces_through_the_ordinary_paths()
 
-### Community 1153 - "test_mobile_stat_segments.py"
-Cohesion: 0.20
-Nodes (10): _read(), test_one_shared_defensive_set(), test_position_is_never_inferred_from_stats(), test_runs_in_pr_ci(), test_search_and_position_review_fixes(), test_segment_labels_cap_only_on_fit(), test_tabs_speak_the_visible_label_not_the_key(), test_the_behavioural_checks_pass() (+2 more)
+### Community 1153 - "test_team_stats_asof_verify_job.py"
+Cohesion: 0.18
+Nodes (4): test_declared_job_is_present_and_validates(), test_job_calls_verify_and_never_rebuilds(), test_validator_rejects_empty_seasons(), test_validator_rejects_unknown_sport()
 
 ### Community 1154 - "NBA public betting splits (Action Network) — `nba_public_splits`"
-Cohesion: 0.12
-Nodes (14): inserted_minus_start_min(), Backtest, Coverage, Forward capture (2026-27), How to read it, NBA public betting splits (Action Network) — `nba_public_splits`, Rows to leave out, Source (+6 more)
+Cohesion: 0.18
+Nodes (10): inserted_minus_start_min(), Coverage, Forward capture (2026-27), How to read it, NBA public betting splits (Action Network) — `nba_public_splits`, Rows to leave out, Source, Table (+2 more)
 
 ### Community 1156 - "3. The women's college halftime method, ported unchanged, then the variants"
 Cohesion: 0.22
@@ -5350,27 +5286,23 @@ Nodes (3): ncaabw_live_decisions_date_idx, public.ncaabw_live_decisions, uq_ncaa
 
 ### Community 1158 - "json"
 Cohesion: 0.02
-Nodes (109): _ledger_row(), crawl(), ensure_tables(), _games(), held_days(), level_of(), main(), _num() (+101 more)
+Nodes (74): _blocks(), decide(), main(), _read_lines(), scan(), _texts(), crawl(), _games() (+66 more)
 
 ### Community 1159 - "odds_rebuy.py"
-Cohesion: 0.07
-Nodes (40): _api_get(), buy(), _ceil_snap(), compare(), _copy(), dk_agreement(), done_keys(), drop_stored_game_rows() (+32 more)
+Cohesion: 0.18
+Nodes (16): _api_get(), _ceil_snap(), compare(), dk_agreement(), done_keys(), fetch_event_odds(), fetch_events(), fetch_game_snapshot() (+8 more)
 
 ### Community 1160 - "App review sign in attempts table"
 Cohesion: 0.83
 Nodes (3): app_review_sign_in_attempts_attempted_at_idx, app_review_sign_in_attempts_bucket_attempted_at_idx, public.app_review_sign_in_attempts
 
 ### Community 1161 - "EuroLeague sport reference doc"
-Cohesion: 0.10
-Nodes (19): Differences from the research a live loop cannot avoid, EUROLEAGUE — data, odds capture, models, euroleague_h1_dog_ml — "EuroLeague First Half Moneyline", euroleague_heavy_fav_ml — removed, euroleague_home_dog_spread — "EuroLeague Spreads", euroleague_home_ml — "EuroLeague Moneyline", euroleague_q1_club_share_total — "EuroLeague First Quarter Totals", Halftime spread: `euroleague_live_spread_ht` (live 2026-11-13, mike) (+11 more)
+Cohesion: 0.15
+Nodes (12): Differences from the research a live loop cannot avoid, EUROLEAGUE — data, odds capture, models, Halftime spread: `euroleague_live_spread_ht` (live 2026-11-13, mike), Identity: EuroLeague owns the games row, Open items, The forward collection, The live path, and why, The market grid (+4 more)
 
 ### Community 1162 - "test_scoring_methods.py"
 Cohesion: 0.13
 Nodes (7): _generic(), test_a_generic_model_is_never_declared_rule_or_engine(), test_accessor_defaults_to_artifact(), test_every_classified_model_carries_thresholds(), test_mlb_live_total_runs_is_artifact_backed(), test_rule_based_models_never_appear_in_a_feature_map(), test_the_map_covers_exactly_the_non_generic_models()
-
-### Community 1164 - "write_with_retries"
-Cohesion: 0.18
-Nodes (8): connect(), insert_row(), _transaction_endpoint(), write_with_retries(), _Conn, test_a_connection_error_is_tried_again_and_the_row_still_lands(), connect(), test_a_database_that_stays_away_fails_the_report_and_a_wrong_statement_is_not_retried()
 
 ### Community 1165 - "MLB run-line edge hunt doc"
 Cohesion: 0.18
@@ -5384,17 +5316,13 @@ Nodes (8): AccessibilityInfo, Alert, AppState, Linking, NativeModules, Platform,
 Cohesion: 0.25
 Nodes (7): Australia and New Zealand, Equibase 2023, by hand, Horse racing sources, Kaggle and the other public files, Methods, UK, Ireland, Hong Kong, US thoroughbred
 
-### Community 1169 - "NFL prop card replay tests"
-Cohesion: 0.17
-Nodes (3): Floor, TestCardReplay, execute()
-
 ### Community 1170 - "nfl_prop_lean_concentration.py"
 Cohesion: 0.25
 Nodes (7): add_context(), boot(), main(), profit(), report(), tercile_split(), under_profit()
 
-### Community 1173 - "TestHistoricalBackfill"
-Cohesion: 0.18
-Nodes (3): TestHistoricalBackfill, _unresolvable_event(), _job_historical_odds()
+### Community 1173 - "_assemble_ncaaf_features"
+Cohesion: 0.20
+Nodes (4): _assemble_ncaaf_features(), _game_tier(), test_assembly_carries_venue_context_and_hfa(), test_season_opener_gets_a_zero_rest_differential_not_a_null()
 
 ### Community 1176 - "Prop odds book update-time tests"
 Cohesion: 0.26
@@ -5408,9 +5336,9 @@ Nodes (3): Contact, Delete your account, Support
 Cohesion: 0.18
 Nodes (7): is_bowl_game(), build_spots(), evaluate(), load_team_games(), main(), wilson(), test_is_bowl_game()
 
-### Community 1182 - "implied"
+### Community 1182 - "test_nfl_props.py"
 Cohesion: 0.01
-Nodes (195): pregame_cutoff_sql(), trusted_first_pitch(), ladders(), ladders_or_empty(), run_nfl_prop_odds_ingestor(), norm_player_name(), activate(), available() (+187 more)
+Nodes (226): ladders(), ladders_or_empty(), _iter_prop_rows(), load_nfl_prop_odds(), load_nfl_prop_quotes(), _odds_from_frame(), _p(), norm_player_name() (+218 more)
 
 ### Community 1184 - "Named sportsbook fetch tests"
 Cohesion: 0.18
@@ -5425,56 +5353,52 @@ Cohesion: 0.25
 Nodes (7): Leads found outside the repo (scouted 2026-11-15), Open items, RACING — thoroughbred horse racing: sources, the market grid, open items, The market grid, What the sources hold (measured 2026-11-15), What would have to change before a model could pass, Where a bettor in the United States can bet a race (scouted 2026-11-15)
 
 ### Community 1188 - "scoreboard_splits.py"
-Cohesion: 0.07
-Nodes (22): et_game_date(), build_rows(), _default_fetch(), _headers(), match(), parse_game(), run(), team_candidates() (+14 more)
+Cohesion: 0.12
+Nodes (14): build_rows(), match(), _Conn, _Cur, _entry(), _game(), test_a_pair_that_does_not_sum_to_100_is_dropped(), test_a_started_game_keeps_its_last_pre_start_split() (+6 more)
 
 ### Community 1191 - "TestPropOddsLoader"
 Cohesion: 0.16
 Nodes (4): TestPropOddsLoader, _Conn, _Cur, execute()
 
-### Community 1194 - "_void_postponed_mlb_picks"
-Cohesion: 0.18
-Nodes (9): _FakeStatsapi, test_a_doubleheader_row_with_a_final_keeps_its_picks_grading(), test_a_final_game_is_never_voided(), test_a_postponed_game_voids_its_pending_bets(), test_a_recent_postponement_waits_for_a_same_day_resumption(), test_no_statsapi_means_no_void(), _use_statsapi(), _postponed_mlb_games() (+1 more)
+### Community 1194 - "price"
+Cohesion: 0.20
+Nodes (8): dec(), outcome_probs(), price(), Priced, price_all(), summarise(), units(), score()
 
 ### Community 1196 - "EuroLeague halftime betting — round 4 (2026-11-13)"
 Cohesion: 0.18
 Nodes (10): 4b. P1, after the fact: fade the book's stray from the mechanical total, 6.1 What the sample resolves, 6.2 Per market, at the pre-registered headline cut of 0.05 (pooled walk-forward, 2022-23 to 2026-27), 6.3 The structural check (experiment 4): are halftime lines re-hung mechanically?, 6.4 What a live loop would need (no live EuroLeague in-play feed exists yet), 6.5 What would change the verdict, 6. Verdict (written after every table above; each number is quoted from them), EuroLeague halftime betting — round 4 (2026-11-13) (+2 more)
 
-### Community 1197 - "step_nba_quarters"
-Cohesion: 0.21
-Nodes (7): main(), rebuild(), seasons_to_build(), tables_exist(), seasons_to_build(), table_exists(), step_nba_quarters()
+### Community 1197 - "pooled_ids"
+Cohesion: 0.22
+Nodes (4): game_possessions(), pooled_ids(), residual(), team_possessions()
 
 ### Community 1198 - "load_data"
 Cohesion: 0.21
 Nodes (3): load_data(), main(), scan_spot()
 
-### Community 1199 - "LiteConn"
-Cohesion: 0.14
-Nodes (7): conn(), put(), _lite(), LiteConn, _no_ddl(), _team_row(), test_the_job_runs_the_cli_it_names()
-
-### Community 1200 - "_write_game_log"
-Cohesion: 0.22
-Nodes (8): _fetch_parquet(), import_game_logs(), import_season(), _log_table_ready(), main(), _stored_games(), stored_seasons(), _write_game_log()
+### Community 1199 - "r1_baselines.py"
+Cohesion: 0.24
+Nodes (3): assign(), at_decision(), best_decidable()
 
 ### Community 1201 - "test_savant_freshness.py"
 Cohesion: 0.14
 Nodes (5): test_rows_are_stamped_with_a_capture_date(), test_savant_has_a_schedule(), test_the_insert_persists_the_stamp(), test_the_savant_job_belongs_to_the_pipeline_service(), test_the_stamp_defaults_rather_than_being_required_at_call_sites()
 
-### Community 1204 - "alt_markets_due"
-Cohesion: 0.22
-Nodes (8): alt_markets_due(), _Conn, test_a_failed_check_does_not_spend(), test_a_sport_with_no_alternates_never_asks(), test_alternates_are_due_only_once_the_newest_row_is_old_enough(), test_alternates_are_due_when_there_are_none_yet(), test_refresh_min_zero_means_every_pass(), test_the_gate_asks_only_about_this_sports_alternate_keys()
+### Community 1204 - "test_a_missing_table_is_a_no_op"
+Cohesion: 0.20
+Nodes (5): _creds(), test_a_5xx_is_transport_and_not_a_tweet_id(), test_a_missing_table_is_a_no_op(), test_allow_link_is_off_on_the_pick_client(), _post()
 
 ### Community 1205 - "test_pipeline_watch.py"
-Cohesion: 0.05
-Nodes (28): _Conn, test_a_clean_pass_produces_no_finding(), test_a_clean_run_still_posts(), test_a_confirmed_post_is_ledgered_so_the_run_can_be_verified(), test_a_deploy_cutoff_pass_is_not_a_finding(), test_a_failed_ledger_does_not_lose_the_report(), execute(), test_a_failed_query_rolls_back_and_does_not_sink_the_run() (+20 more)
+Cohesion: 0.03
+Nodes (54): collect(), _Conn, test_a_clean_pass_produces_no_finding(), test_a_clean_run_still_posts(), test_a_confirmed_post_is_ledgered_so_the_run_can_be_verified(), test_a_deploy_cutoff_pass_is_not_a_finding(), test_a_failed_ledger_does_not_lose_the_report(), execute() (+46 more)
 
 ### Community 1206 - "Live monitor dashboard (monitoring/)"
-Cohesion: 0.10
-Nodes (11): docs/followups.md, MLB pick volume efficiency assessment, roi_collapse check, api_call_log table, Heartbeat watchdog, Live monitor dashboard (monitoring/), mv_scored_pick_outcomes (sweep matview), Official live date 2026-09-01 (+3 more)
+Cohesion: 0.17
+Nodes (10): roi_collapse check, api_call_log table, Heartbeat watchdog, Live monitor dashboard (monitoring/), Live tuning panel (Models view), mv_scored_pick_outcomes (sweep matview), Official live date 2026-09-01, The request probe: one patch, not 75 call-site edits (+2 more)
 
-### Community 1208 - "ncaaf_inplay_history_backtest.py"
-Cohesion: 0.11
-Nodes (14): build_candidates(), decide(), first_signals(), _fmt(), load_snapshots(), odds_from_rows(), report(), split_halves() (+6 more)
+### Community 1208 - "build_candidates"
+Cohesion: 0.18
+Nodes (6): build_candidates(), load_snapshots(), odds_from_rows(), state_index_at(), _ts(), test_odds_dict_has_the_shape_the_loop_reads()
 
 ### Community 1210 - "player_prop_odds"
 Cohesion: 0.15
@@ -5488,61 +5412,61 @@ Nodes (12): Discord, Mechanisms to test (from the scout, and our own), Open item
 Cohesion: 0.15
 Nodes (12): 1. What was asked, 2. The live record it started from, 3. What was researched, 4. The twelve registered backtests, 5.1 `nba_prop_projection` stops betting threes overs, 5.2 The three shooting-luck total models wait for 10 games again, 5. The two changes made (commit trailer `Updated-By: mike`), 6. What the data says is the engine (+4 more)
 
-### Community 1213 - "frames_at"
-Cohesion: 0.21
-Nodes (5): build_engine(), frames_at(), game_frame(), player_rows(), team_ratings()
+### Community 1213 - "test_sbr_loader.py"
+Cohesion: 0.25
+Nodes (3): canonical_abbrev(), parse_csv_file(), test_sbr_abbreviations_are_canonicalised_for_mlb_only()
 
-### Community 1214 - "Roster"
-Cohesion: 0.23
-Nodes (5): name_key(), Roster, test_a_books_initials_match_the_logs(), test_a_rookie_logged_under_an_espn_id_resolves_to_it(), test_the_resolver_uses_the_results_writers_normaliser()
+### Community 1214 - "nba_prop_market.py"
+Cohesion: 0.08
+Nodes (24): coherent(), fair_under(), fetch_times(), find_bets(), in_window(), load_quotes(), minutes_to_tip(), name_key() (+16 more)
 
-### Community 1215 - "test_promote_external.py"
-Cohesion: 0.16
-Nodes (5): promote_external(), _Conn, test_external_promotion_refuses_a_map_that_does_not_transfer(), test_external_promotion_writes_only_the_promoted_columns(), test_the_scorer_reads_the_external_map_like_any_promoted_one()
+### Community 1215 - ".frame"
+Cohesion: 0.31
+Nodes (8): Counts before grading, _reading_rows(), test_a_consensus_edge_beats_its_placebo(), test_a_donor_sends_a_proposition_to_the_side_its_own_rule_did_not_bet(), test_a_planted_edge_can_pass_every_bar_of_the_verdict(), test_an_offer_below_the_price_floor_is_never_read(), test_the_best_priced_offer_stays_best_under_a_donor(), test_the_identity_returns_the_real_bets()
 
 ### Community 1216 - "drop_pulled_quotes"
 Cohesion: 0.32
 Nodes (8): drop_pulled_quotes(), _ts(), _q(), test_a_book_on_its_own_cadence_is_not_penalised_inside_three_hours(), test_a_book_that_stopped_returning_the_game_is_dropped(), test_a_player_the_book_stopped_quoting_is_dropped(), test_a_whole_market_the_book_pulled_is_dropped(), test_rows_from_one_fetch_minutes_apart_are_kept_and_a_line_move_is_not_a_pull()
 
-### Community 1217 - "cbb_pairs.py"
-Cohesion: 0.24
-Nodes (6): big_favourite(), clash(), hold_back(), pair(), points_laid(), under()
+### Community 1217 - "ncaab_total_card.py"
+Cohesion: 0.06
+Nodes (31): big_favourite(), clash(), hold_back(), pair(), points_laid(), under(), load_artifact(), Quote (+23 more)
 
-### Community 1219 - "ncaab_quote_bounds.py"
-Cohesion: 0.24
-Nodes (7): describe(), _fmt(), _known(), problem(), split(), test_a_typo_is_a_data_error_and_the_extremes_history_holds_are_not(), test_split_keeps_order_and_says_why()
+### Community 1219 - "_placebo_core"
+Cohesion: 0.22
+Nodes (6): The placebo: 200 runs, seeds 1-200, grid_placebo(), placebo(), _placebo_core(), gap_placebo(), stake()
 
 ### Community 1220 - "League model market grid guide"
 Cohesion: 0.29
 Nodes (6): Prices: the routes, in the order to try them, Sport shapes — starting hypotheses, not facts, The market families — one row each, at least, The market grid, and every route to a price, The template, Which book's price counts
 
-### Community 1221 - "main"
-Cohesion: 0.22
-Nodes (6): main(), read_env_value(), scrub(), test_a_nightly_report_needs_the_passs_stamp(), test_catch_up_with_no_earlier_pass_writes_nothing(), test_without_a_database_url_nothing_is_written()
+### Community 1221 - "_detect_score_convention"
+Cohesion: 0.31
+Nodes (6): _detect_score_convention(), _pre_convention_game(), test_ambiguous_convention_refuses_to_build(), test_post_convention_is_detected(), test_pre_convention_is_detected(), _with_raw()
 
 ### Community 1222 - "rehearse"
-Cohesion: 0.20
-Nodes (8): main(), Rehearsal, rehearse(), differs(), producers(), scratch_sql(), _code(), test_the_rehearsal_can_only_read_the_real_database()
+Cohesion: 0.33
+Nodes (5): main(), Rehearsal, rehearse(), differs(), producers()
 
-### Community 1223 - "_has_starter_out"
-Cohesion: 0.18
-Nodes (3): _build_nhl_features_from_bulk(), _has_starter_out(), TestHasStarterOut
+### Community 1223 - "getKeyMetrics.ts"
+Cohesion: 0.22
+Nodes (8): CheckRow, ClvRow, CountsRow, CreditsRow, DailyRow, KeyMetrics, ModelRow, PipelineRow
 
-### Community 1225 - "estimate_parlay_correlations.py"
-Cohesion: 0.24
-Nodes (7): estimate(), estimate_basketball(), estimate_mlb(), estimate_nfl(), main(), _median(), tetrachoric_bonett_price()
+### Community 1225 - "bad_moneyline"
+Cohesion: 0.28
+Nodes (5): bad_moneyline(), bad_spread(), count_rows(), no_vig_home(), _season_counts()
 
-### Community 1227 - "slate"
-Cohesion: 0.18
-Nodes (6): slate(), _Conn, _Rows, test_a_fight_listed_before_its_alias_and_after_it_is_one_slate_entry(), test_one_fight_stored_under_two_ids_is_one_slate_entry(), test_the_feed_s_placeholder_date_is_not_a_fight_to_bet()
+### Community 1227 - "test_fanatics_app_link_probe.py"
+Cohesion: 0.28
+Nodes (5): _no_hop(), test_an_aasa_and_a_scheme_in_a_script_reach_the_summary(), get(), test_nothing_reached_is_a_failure(), page()
 
 ### Community 1228 - "anon_lockdown_spec.py"
 Cohesion: 0.29
 Nodes (8): _alter_policies(), _functions(), _regrant_functions(), _revoke_rels(), step_a_sql(), step_b_sql(), undo_a_sql(), undo_b_sql()
 
-### Community 1229 - "test_ncaab_odds_history.py"
-Cohesion: 0.03
-Nodes (79): check_process_events_contract(), ContractError, line_snapshots(), parse_derivatives(), planned_instant(), _side_team(), _cli(), _dk_gated() (+71 more)
+### Community 1229 - "_luck_games"
+Cohesion: 0.28
+Nodes (7): _game(), _gaps(), _luck_games(), _side(), test_a_teams_total_reads_only_the_luck_of_the_defence_it_scores_against(), test_the_first_half_total_reads_f4s_full_game_gap_unscaled(), test_the_team_total_gaps_add_up_to_f4s_total_gap_and_differ_by_its_margin_gap()
 
 ### Community 1230 - "test_cfbd_yardline.py"
 Cohesion: 0.21
@@ -5552,9 +5476,9 @@ Nodes (6): _abbrev_fits(), _parse_yardline(), _cfbd_game(), test_cfbd_state_carr
 Cohesion: 0.31
 Nodes (5): idx_sgp_obs_book_received, idx_sgp_obs_device_received, public.log_sgp_price(), sgp_price_observations, public.log_sgp_price()
 
-### Community 1233 - "kickoff_wind_reads.py"
-Cohesion: 0.26
-Nodes (5): attach_live_wind_reads(), _connect(), _current(), _utc(), _with_current()
+### Community 1233 - "GradeConn"
+Cohesion: 0.25
+Nodes (4): GradeConn, test_a_non_timeout_prop_error_rolls_back_and_raises(), test_a_timed_out_prop_date_does_not_abort_the_next(), settle()
 
 ### Community 1234 - "ncaab_first_post_fill.py"
 Cohesion: 0.26
@@ -5566,7 +5490,7 @@ Nodes (5): Reading it, Sentry — native crashes and iOS app hangs (added 2026-1
 
 ### Community 1236 - "scorer.py"
 Cohesion: 0.01
-Nodes (208): today_et(), One BET per pitcher plus interim daily cap, Nickname-aware settlement join, nfl_prop_market EV floor 0.20 -> 0.07, NFL Monday 2026-09-21: empty Today / Signals, MODEL_OWN_EV_FLOOR per model, load_sport_injury_index(), _make_live_pick() (+200 more)
+Nodes (196): today_et(), pregame_cutoff_sql(), One BET per pitcher plus interim daily cap, NFL props 2025 re-grade and walk-forward, anytime_td verdict: inert, not losing, Walk-forward re-fit 2023-2025 (-4.32% over 1,554 bets), build_golf_scoring_features(), build_nfl_prop_training_dataset() (+188 more)
 
 ### Community 1237 - "test_college_team_board.py"
 Cohesion: 0.29
@@ -5576,13 +5500,13 @@ Nodes (10): _before(), _fn(), _read(), test_a_zero_to_one_efg_is_not_what_dec1_p
 Cohesion: 0.21
 Nodes (12): _fn(), _long_label(), _page_body(), _read(), test_each_side_models_page_says_the_other_two_bet_the_same_team(), test_euroleague_is_the_last_chip_and_a_sport(), test_its_prices_and_its_timing_line(), test_the_in_play_sports_name_euroleague_and_its_empty_board_says_when_it_bets() (+4 more)
 
-### Community 1239 - "_apply_price_floor"
-Cohesion: 0.23
-Nodes (8): _basis(), _apply_price_floor(), _row(), test_a_model_with_no_floor_is_untouched(), test_every_prop_model_in_the_sweep_has_a_floor_to_apply(), test_plus_money_always_survives(), test_prices_juicier_than_the_floor_are_dropped(), test_the_boundary_matches_the_scorer()
+### Community 1239 - "drop_unchanged_game_rows"
+Cohesion: 0.25
+Nodes (5): drop_stored_game_rows(), drop_unchanged_game_rows(), _game_price(), _gkey(), _rung()
 
-### Community 1240 - "test_revoke_remaining_grants.py"
-Cohesion: 0.15
-Nodes (6): test_it_asserts_the_app_write_surface_survives(), test_it_revokes_every_write_privilege(), test_select_is_never_revoked(), test_the_roles_are_named_never_public(), test_the_runners_transaction_stripping_leaves_the_do_block_intact(), test_the_set_is_computed_from_the_policy_rule_not_listed()
+### Community 1240 - "app.py"
+Cohesion: 0.08
+Nodes (9): _fmt_et_time(), get_conn(), query(), main(), _strip_outer_tx(), test_it_asserts_the_app_write_surface_survives(), test_the_roles_are_named_never_public(), test_the_runners_transaction_stripping_leaves_the_do_block_intact() (+1 more)
 
 ### Community 1242 - "test_wind_stake_beyond_calibration.py"
 Cohesion: 0.22
@@ -5592,9 +5516,9 @@ Nodes (6): _probe(), test_an_uncalibrated_lead_is_sized_rather_than_zeroed_on_th
 Cohesion: 0.24
 Nodes (6): _code(), test_results_keep_pushes_and_ties_and_carry_no_stake(), test_the_migration_is_one_statement_and_registered(), test_the_second_pass_returns_before_it_locks(), test_the_skip_guard_refuses_every_write_verb(), test_there_is_no_lock_price_or_unit_column()
 
-### Community 1244 - "GameClock"
-Cohesion: 0.22
-Nodes (6): GameClock, _t(), test_before_first_pitch_and_after_last_play_are_not_priced(), test_between_pas_across_third_out_rolls_over_to_next_half(), test_mid_plate_appearance_is_that_pa_before_state(), test_plays_without_times_are_ignored()
+### Community 1244 - "resolve_conflicts"
+Cohesion: 0.25
+Nodes (4): cannot_both_win(), full_game_margins(), resolve_conflicts(), winning_margins()
 
 ### Community 1245 - "NBA first basket tables migration"
 Cohesion: 0.48
@@ -5604,17 +5528,13 @@ Nodes (6): nba_first_basket_games_season_team, nba_first_basket_players_season_e
 Cohesion: 0.22
 Nodes (6): _meta_steps(), test_aborted_sentinel_is_excluded(), test_deploy_cutoff_sentinel_is_excluded(), test_health_check_is_excluded(), test_model_quality_is_excluded(), test_sentinel_matches_the_writer()
 
-### Community 1247 - "ScoreClock"
-Cohesion: 0.23
-Nodes (5): ScoreClock, test_score_clock_ignores_a_dropped_score_field(), test_score_clock_keeps_games_independent(), test_score_clock_reports_no_event_at_first_sight(), test_score_clock_stamps_the_change_and_holds_it()
-
-### Community 1248 - "test_drop_voided_nfl_prop_market_opening_signals_migration.py"
-Cohesion: 0.23
-Nodes (6): _stmts(), test_it_deletes_exactly_the_three_measured_lock_keys(), test_it_does_not_touch_picks_or_discord(), test_it_still_skips_a_key_that_has_a_standing_bet(), test_migration_is_one_statement(), test_standing_pick_uses_lock_key_sql_not_player_id()
+### Community 1247 - "flow_robustness.py"
+Cohesion: 0.43
+Nodes (4): anchors(), best_gate(), grade_against(), main()
 
 ### Community 1249 - "4. Definitions"
-Cohesion: 0.17
-Nodes (11): 4.1 The minutes, 4.2 The ratings, 4.3 The tilt, 4.4 The projected number, 4.5 Beta, 4.6 The gap and the bet, 4.7 Impossible numbers, stated before anything is read, 4. Definitions (+3 more)
+Cohesion: 0.18
+Nodes (10): 4.1 The minutes, 4.2 The ratings, 4.3 The tilt, 4.4 The projected number, 4.5 Beta, 4.6 The gap and the bet, 4.7 Impossible numbers, stated before anything is read, 4. Definitions (+2 more)
 
 ### Community 1250 - "test_mobile_line_ruler.py"
 Cohesion: 0.32
@@ -5624,33 +5544,29 @@ Nodes (8): _read(), _slice(), test_a_bubble_tap_does_not_clear_the_tick_guard_in
 Cohesion: 0.17
 Nodes (10): board, chip, lineOnlyFn, playersDay, ROOT, sportReset, stats, teams (+2 more)
 
-### Community 1253 - "nba_team_total_luck_build.py"
-Cohesion: 0.32
-Nodes (6): bucket_counts(), build(), cell_bets(), main(), store(), tt_residuals()
-
-### Community 1254 - "deploy_checks.py"
-Cohesion: 0.17
-Nodes (5): test_a_failing_check_raises_so_the_queue_announces_it(), _kalshi_game_snapshot_fresh(), _ncaaf_paused_avoid_gone(), run_checks(), _job_verify_checks()
+### Community 1255 - "In-app feedback — reading it and replying"
+Cohesion: 0.38
+Nodes (6): In-app feedback — reading it and replying, Abuse guards in feedback_submit (4,000 chars, 20/hour, 25 open), feedback_reply is service-role only, feedback_threads / feedback_messages, push_notifier.notify_feedback_replies, Anon grants and RLS: the schema-wide sweep (anon_readable.py, apply_anon_grants.py)
 
 ### Community 1256 - "verify_contrast_tokens.ts"
-Cohesion: 0.05
-Nodes (45): addSrc, badgeSrc, badToneCalls, brightIcons, byom, CASES, check(), code() (+37 more)
+Cohesion: 0.04
+Nodes (48): Backtest, addSrc, badgeSrc, badToneCalls, brightIcons, byom, CASES, check() (+40 more)
 
-### Community 1258 - "test_voided_pick_not_rechosen.py"
-Cohesion: 0.16
-Nodes (6): _Conn, _db(), test_a_voided_pick_is_not_a_free_pick_candidate(), test_a_voided_pick_is_not_a_parlay_leg(), capture_parlay_track_record(), _decimal_to_american()
+### Community 1257 - "market"
+Cohesion: 0.29
+Nodes (5): Full-game spread and moneyline: the men's two market rules fail, persist(), _run(), lines(), market()
+
+### Community 1258 - "prepare_fullgame"
+Cohesion: 0.29
+Nodes (3): board_at(), power_fair(), prepare_fullgame()
 
 ### Community 1259 - "Sentry events table migration"
 Cohesion: 0.83
 Nodes (3): idx_sentry_events_device, idx_sentry_events_occurred, sentry_events
 
-### Community 1260 - "_odds_from_frame"
-Cohesion: 0.33
-Nodes (4): _odds_from_frame(), _odds_frame(), test_a_one_way_market_stays_one_way_through_the_cache(), TestLocalOddsCache
-
-### Community 1261 - "_game_id_for"
-Cohesion: 0.24
-Nodes (6): _game_id_for(), _Conn, test_a_unique_match_resolves(), test_an_ambiguous_event_name_writes_nothing(), test_an_event_name_with_no_at_sign_is_refused(), test_an_unmatched_event_name_writes_nothing()
+### Community 1260 - ".probs"
+Cohesion: 0.29
+Nodes (5): test_a_period_moneyline_removes_the_tie_mass(), test_a_past_average_miss_does_not_move_the_centre(), test_a_skewed_distribution_is_not_read_as_normal(), test_the_empirical_model_matches_the_normal_one_on_normal_residuals(), test_whole_lines_carry_push_mass_and_half_lines_none()
 
 ### Community 1262 - "DraftKings live reads schema"
 Cohesion: 0.60
@@ -5666,27 +5582,19 @@ Nodes (6): _euroleague(), test_a_bet_draftkings_does_not_quote_at_its_number_is_
 
 ### Community 1265 - "nhl_props_card.py"
 Cohesion: 0.05
-Nodes (33): listed_by_a_book(), is_exempt(), step_nhl_prop_scoring(), after_confirmation(), bs_implied(), candidates(), identities(), known_slate() (+25 more)
+Nodes (33): nhl_season_label(), is_exempt(), step_nhl_prop_scoring(), after_confirmation(), bs_implied(), candidates(), identities(), known_slate() (+25 more)
 
-### Community 1266 - "_art"
-Cohesion: 0.24
-Nodes (3): _art(), TestBinaryMarket, TestCountDistributions
-
-### Community 1267 - "startCrashLogging"
-Cohesion: 0.18
-Nodes (10): active(), App crash and error logging (`app_errors`), Freeze tracking (added 2026-11-06), Hand-offs that missed the app (added 2026-11-15), Native aborts before JS (added 2026-11-14), Reading it, What is captured, Where it lives (+2 more)
-
-### Community 1268 - "test_book_sweep_bettability.py"
-Cohesion: 0.25
-Nodes (6): soft_verdict(), test_a_bettable_book_still_passes(), test_an_unbettable_book_is_excluded_however_good_its_numbers(), test_every_incumbent_soft_book_is_bettable(), test_the_clause_is_not_dead_code(), _verdict()
+### Community 1267 - "test_outstanding.py"
+Cohesion: 0.43
+Nodes (4): _gathered(), test_session_start_prints_the_cache_without_asking_github(), test_the_cache_round_trips_and_expires(), test_the_session_line_names_counts_the_oldest_items_and_the_rule()
 
 ### Community 1269 - "test_snapshot_pass_order.py"
 Cohesion: 0.25
 Nodes (6): _between(), _code(), _pass(), test_a_second_pass_does_not_mix_posted_wins_with_all_bets_units(), test_published_rewrite_runs_once_and_uses_the_view_clv_rule(), test_recompute_rewrites_snapshots_only_while_the_old_column_exists()
 
-### Community 1270 - "eastern_game_date"
-Cohesion: 0.20
-Nodes (6): eastern_game_date(), test_eastern_game_date_agrees_with_utc_before_8pm_et(), test_eastern_game_date_falls_back_to_the_utc_prefix_when_unparseable(), test_eastern_game_date_files_army_tulsa_on_oct_23(), test_eastern_game_date_leaves_a_bare_calendar_date_alone(), test_eastern_game_date_matches_the_odds_ingestor_for_a_night_kick()
+### Community 1270 - "write_verbs_for"
+Cohesion: 0.33
+Nodes (3): write_verbs_for(), test_write_verbs_for_keeps_exactly_what_a_writable_relation_declares(), test_write_verbs_for_revokes_everything_on_a_read_only_relation()
 
 ### Community 1271 - "nba_s_ingame27.py"
 Cohesion: 0.03
@@ -5697,28 +5605,28 @@ Cohesion: 0.22
 Nodes (6): alert_is_fatal(), enabled(), main(), _install(), main(), test_the_kill_switch_exits_before_a_connection()
 
 ### Community 1273 - "_Conn"
-Cohesion: 0.14
-Nodes (6): _rows(), _Conn, test_a_failed_query_rolls_back(), test_every_section_is_still_present(), test_one_broken_section_does_not_break_the_rest(), test_the_health_check_query_does_not_compare_text_to_a_date()
+Cohesion: 0.20
+Nodes (4): _rows(), _Conn, test_a_failed_query_rolls_back(), test_one_broken_section_does_not_break_the_rest()
 
 ### Community 1274 - "Posts to @SignalBasePicks"
-Cohesion: 0.20
-Nodes (9): How a row gets published, How to enqueue a post with an image, How to enqueue another post or thread, Pinning, Posts to @SignalBasePicks, Profile, What is already queued, run_social_post_queue() (+1 more)
+Cohesion: 0.17
+Nodes (12): 15. The projection model's EV claims three times what it returns, and a corrected EV does not rank the night better (2026-11-04, mike), How to enqueue a post with an image, How to enqueue another post or thread, Pick timing, Pinning, Posts to @SignalBasePicks, Profile, What is already queued (+4 more)
 
-### Community 1275 - "quote_offers"
-Cohesion: 0.22
-Nodes (4): best_offer(), Offer, quote_offers(), test_ties_between_books_go_to_the_alphabetically_first_key()
+### Community 1275 - "clean_pair"
+Cohesion: 0.33
+Nodes (5): clean_pair(), test_a_lone_side_is_kept_as_served(), test_a_pair_that_does_not_sum_to_100_is_dropped(), test_a_valid_pair_sums_to_100_within_rounding(), test_a_zero_zero_pair_is_missing_not_zero()
 
 ### Community 1277 - "NCAAB live decisions table migration"
 Cohesion: 0.83
 Nodes (3): ncaab_live_decisions_date_idx, public.ncaab_live_decisions, uq_ncaab_live_decisions_one_decision
 
-### Community 1278 - "The Pinnacle run-line rule (`mlb_spread_market`): the 2026 season, month by month"
-Cohesion: 0.20
-Nodes (9): How it was measured, Monthly grid at 1.8 points, Narrowing it (2026-09-19, 11 books, not re-run), Neighbouring cuts (2026-09-19, 11 books, not re-run), Public-betting coverage gap, The live bets against the re-measure, The Pinnacle run-line rule (`mlb_spread_market`): the 2026 season, month by month, What this is not (+1 more)
+### Community 1278 - "test_mlb_game_market.py"
+Cohesion: 0.06
+Nodes (32): How it was measured, Monthly grid at 1.8 points, Narrowing it (2026-09-19, 11 books, not re-run), Neighbouring cuts (2026-09-19, 11 books, not re-run), Public-betting coverage gap, The live bets against the re-measure, The Pinnacle run-line rule (`mlb_spread_market`): the 2026 season, month by month, What this is not (+24 more)
 
-### Community 1279 - "_discover_active_games"
-Cohesion: 0.18
-Nodes (7): _discover_active_games(), _game_id_from_statsapi(), test_a_game_seen_twice_is_polled_once(), test_discovery_asks_statsapi_about_every_date_it_is_given(), fake_schedule(), test_discovery_still_accepts_a_bare_string(), test_one_broken_date_does_not_lose_the_other()
+### Community 1279 - "shard_windows"
+Cohesion: 0.40
+Nodes (4): parse_shard(), shard_windows(), test_a_bad_shard_spec_is_refused(), test_shard_parsing_and_splitting_is_round_robin_and_total()
 
 ### Community 1280 - "Horse racing files"
 Cohesion: 0.40
@@ -5728,29 +5636,17 @@ Nodes (4): Equibase 2023, Horse racing files, Licences, Not fetched
 Cohesion: 0.83
 Nodes (3): live_latency_probe_run_kind_idx, public.live_latency_probe, uq_live_latency_probe_line
 
-### Community 1282 - "describe_failure"
-Cohesion: 0.20
-Nodes (5): describe_failure(), _is_connection_error(), test_a_failed_write_prints_no_part_of_the_address(), test_a_refused_connection_is_named_without_its_host_or_port(), test_the_kind_of_failure_is_named_from_the_drivers_own_error()
-
-### Community 1283 - "probs"
-Cohesion: 0.22
-Nodes (7): _interp(), price_quote(), probs(), test_a_level_first_half_has_real_mass_at_an_even_mean(), test_home_covers_when_the_margin_beats_minus_the_home_number(), test_the_edge_is_raw_against_each_side_s_own_price(), test_the_three_outcomes_add_to_one_and_a_whole_number_carries_the_push()
-
 ### Community 1284 - "Porting traps: what a copy of existing code got wrong on a new league"
 Cohesion: 0.18
 Nodes (10): Leakage, Play-by-play and in-play state, Porting traps: what a copy of existing code got wrong on a new league, Replaying the research (EuroLeague, 2026-11-14), Schedule and identity, Scores, periods and settlement, The app and the ids, The odds feed (+2 more)
 
-### Community 1285 - "run_card"
-Cohesion: 0.13
-Nodes (13): edge_floor(), load_public_over_splits(), max_per_slate(), publish_enabled(), rank_kind(), ticket_threshold(), under_odds_band(), ranked_bets() (+5 more)
+### Community 1285 - "_ladder_quotes"
+Cohesion: 0.33
+Nodes (4): _ladder_quotes(), _offered(), _rung(), test_both_families_see_each_books_main_number_only()
 
 ### Community 1286 - "MLB totals edge hunt doc"
 Cohesion: 0.40
 Nodes (4): How the 2026-10-10 rows were measured, MLB totals: the search for a second betting rule (2026-09-19), What was not changed, What was tried
-
-### Community 1287 - "_minutes_apart"
-Cohesion: 0.18
-Nodes (6): _minutes_apart(), test_identical_timestamps_are_zero_apart(), test_one_refresh_pass_late_is_tolerated(), test_the_real_production_skew_is_rejected(), test_timezone_suffixes_do_not_crash(), test_unparseable_timestamps_fail_closed()
 
 ### Community 1288 - "_scoreboard"
 Cohesion: 0.18
@@ -5764,9 +5660,9 @@ Nodes (8): 3b. Kill tests on what read positive, A spread, ported unchanged, cut
 Cohesion: 0.21
 Nodes (11): COLOR_A, COLOR_B, COLOR_C, compileShader(), createProgram(), GRAY, setUniform(), StarterCanvas() (+3 more)
 
-### Community 1292 - "test_nfl_prop_week1_candidate_pool.py"
-Cohesion: 0.22
-Nodes (5): partially_played_week_one(), _player_row(), _team_row(), test_a_clean_week_one_is_unchanged(), test_teams_still_to_play_keep_a_candidate_pool()
+### Community 1292 - "closing_rows"
+Cohesion: 0.53
+Nodes (6): closing_rows(), schedule(), test_a_filtered_games_frame_reads_each_games_own_numbers(), test_a_game_never_counts_in_its_own_popularity(), test_numbers_start_again_each_season(), test_ten_earlier_games_are_needed_for_either_team()
 
 ### Community 1293 - "r2_kill.py"
 Cohesion: 0.25
@@ -5776,13 +5672,13 @@ Nodes (8): 1a. (a) spreads, cut 0.03, 2023-24 on: the side split at every read, 
 Cohesion: 0.50
 Nodes (3): _pin_mainline_affected, public.clv_pinnacle_mainline_backup_2026_10_14, public.clv_pinnacle_mainline_once_2026_10_14
 
-### Community 1296 - "test_restate_keeps_the_better_price.py"
-Cohesion: 0.22
-Nodes (5): _producer(), test_a_restated_pick_still_names_the_cheaper_book(), test_a_worse_price_elsewhere_never_replaces_draftkings(), test_both_signal_producers_select_the_better_price(), test_the_locked_producer_maps_the_columns_into_the_dict()
+### Community 1296 - "_placebo_frame"
+Cohesion: 0.33
+Nodes (6): _placebo_frame(), test_a_game_with_no_number_neither_gives_nor_takes(), test_a_seed_gives_one_shuffle_and_seeds_differ(), test_no_game_keeps_its_own_inputs_unless_it_is_alone_on_its_date(), test_the_placebo_moves_the_inputs_together_within_a_date(), _tuples()
 
-### Community 1297 - "_void_rescheduled_picks"
-Cohesion: 0.25
-Nodes (7): _moved_bet(), test_a_bet_whose_game_moved_weeks_settles_no_action(), test_a_move_inside_48_hours_still_grades(), test_only_unsettled_bets_are_touched(), test_with_no_tip_time_the_dates_decide_and_only_past_doubt(), _moved_hours(), _void_rescheduled_picks()
+### Community 1297 - "test_a_flipped_final_is_taken_in_the_stored_orientation"
+Cohesion: 0.40
+Nodes (4): _final(), swap_opponent(), test_a_flipped_final_is_taken_in_the_stored_orientation(), flip_and_finish()
 
 ### Community 1300 - "The kill tests"
 Cohesion: 0.20
@@ -5792,61 +5688,65 @@ Nodes (9): Is it one bet repeated?, Is it stable?, Is it the model, or the selec
 Cohesion: 0.33
 Nodes (3): model_volume_settings_log_trg, public.model_volume_settings, public.model_volume_settings_log
 
-### Community 1306 - "load_schedule"
-Cohesion: 0.06
-Nodes (19): append_snapshot_csv(), dk_line_rows(), dump_dk_lines(), _num(), snapshot_schedule(), _empty(), fetch_rows(), load_schedule() (+11 more)
+### Community 1306 - "dk_line_rows"
+Cohesion: 0.32
+Nodes (4): dk_line_rows(), _num(), _rec(), TestDkLineRows
 
 ### Community 1307 - "assemble_game"
-Cohesion: 0.06
-Nodes (46): assemble_game(), _choose(), grade_ats(), grade_ml(), grade_total(), _identity(), is_primetime(), line_at_start() (+38 more)
+Cohesion: 0.05
+Nodes (52): assemble_game(), _identity(), is_primetime(), _num(), parse_game_id(), _side(), _week(), _as_quotes() (+44 more)
 
 ### Community 1308 - "test_claude_rules_split.py"
 Cohesion: 0.18
 Nodes (4): test_claude_md_still_points_at_the_rules_directory(), test_every_rule_file_actually_carries_rules(), test_every_rule_file_is_path_scoped(), test_no_rule_was_lost_when_the_split_happened()
 
-### Community 1310 - "away"
-Cohesion: 0.17
-Nodes (13): _cbb(), _fold(), ncaab_resolver(), ncaabw_resolver(), resolve(), ncaaf_resolver(), resolve(), nickname_resolver() (+5 more)
+### Community 1309 - "_run_scorer_body"
+Cohesion: 0.33
+Nodes (3): _run_scorer_body(), test_every_housekeeping_delete_in_run_scorer_is_scoped_to_the_subset(), test_the_subset_predicate_never_builds_an_empty_IN_list()
 
-### Community 1311 - "_event"
-Cohesion: 0.09
-Nodes (9): _book(), _event(), _fake_resolver(), _resolver_spy(), _rows(), TestFetchPregameRows, TestNcaabResolvesOntoEspn, TestRunOddsIngestor (+1 more)
+### Community 1310 - "test_every_pick_writing_scheduler_job_publishes"
+Cohesion: 0.33
+Nodes (3): _body(), test_every_pick_writing_scheduler_job_publishes(), test_publish_syncs_thresholds_before_either_notifier()
 
-### Community 1312 - "resolve_game_id"
-Cohesion: 0.24
-Nodes (5): resolve_game_id(), _Conn, test_a_non_mlb_sport_is_refused_rather_than_guessed(), test_a_unique_game_resolves(), test_an_ambiguous_game_resolves_to_none()
+### Community 1311 - "_process_events"
+Cohesion: 0.03
+Nodes (37): fetch_pregame_rows(), _ncaab_resolver(), _process_events(), _schedule_resolver(), hit(), _book(), _CatalogConn, _event() (+29 more)
 
-### Community 1313 - "QuoteKeeper"
-Cohesion: 0.38
-Nodes (6): QuoteKeeper, _row(), test_a_game_with_no_tip_keeps_its_opener_and_anchors(), test_each_book_and_market_has_its_own_first_sighting(), test_in_play_prices_are_never_stored(), test_the_keeper_stores_the_opener_the_anchors_and_the_pre_tip_hours_only()
+### Community 1312 - "team_code"
+Cohesion: 0.40
+Nodes (3): _known(), team_code(), test_abbreviation_only_maps_both_utah_spellings_and_drops_unknowns()
 
-### Community 1315 - "_read_only_connection"
-Cohesion: 0.20
-Nodes (3): _read_only_connection(), _run_replay(), test_the_dry_run_connection_cannot_write_and_cannot_reconnect()
+### Community 1313 - "C. Totals (r3_c_totals.py)"
+Cohesion: 0.40
+Nodes (5): C1. Does the prior crew score predict the residual? (out of sample by season), C2. The crew bet rule at the DraftKings closing total, 2022-23 on, C3. DraftKings' first-post total, blind, by season, C4. DraftKings open-to-close total movement, C. Totals (r3_c_totals.py)
 
-### Community 1316 - "NBA play-by-play and on-court lineup segments"
-Cohesion: 0.20
-Nodes (8): Commands, How a stretch is built (each rule is pinned by a test that was watched to fail), NBA play-by-play and on-court lineup segments, Source, Tables (all worker-only, locked down where they are created), Things a reader should know, What was loaded, and the checks (re-measured 2026-10-17 on production, after the rebuild), execute()
+### Community 1316 - "nhl_goalie_designations.py"
+Cohesion: 0.05
+Nodes (28): changes(), fetch_dailyfaceoff(), _latest(), main(), normalize_status(), _observe_date(), parse_dailyfaceoff(), parse_dailyfaceoff_page() (+20 more)
+
+### Community 1317 - "test_prop_no_bet_rows_survive_to_tipoff.py"
+Cohesion: 0.06
+Nodes (16): _Board, _Clock, _fake_datetime_class(), _game(), _iso(), _PollConn, test_the_poller_tells_the_scorer_to_leave_prop_rows_alone(), _wire() (+8 more)
 
 ### Community 1319 - "Where a US bettor can bet a race — the outlet scout, 2026-11-15"
 Cohesion: 0.22
 Nodes (8): Computer-assisted wagering, Follow-up, 2026-11-16: does a US outlet bet into the Hong Kong Jockey Club's own pools?, Host-pool take, Measured, 2026-11-17: US Hong Kong payouts are the Club's own dividends, Not answered, Odds, fixed odds, exchanges, Outlets, Where a US bettor can bet a race — the outlet scout, 2026-11-15
 
 ### Community 1320 - "test_live_scoreboard.py"
-Cohesion: 0.05
-Nodes (45): clock_label(), _default_fetch(), _dig(), due_sports(), et_date(), _event_games(), _int(), _known() (+37 more)
+Cohesion: 0.15
+Nodes (15): match_games(), parse_scoreboard(), _side_label(), _event(), _load(), test_an_abbreviation_that_is_not_ours_is_dropped_and_warned(), test_due_sports_is_started_unsettled_and_not_already_final(), test_espn_abbrevs_that_are_not_ours_map_by_name() (+7 more)
 
-### Community 1321 - "test_nfl_schedule_refresh.py"
-Cohesion: 0.07
-Nodes (15): upcoming_schedule_rows(), _game(), _jobs(), _Lite, test_a_game_that_has_started_is_not_touched(), test_a_naive_now_is_read_as_utc(), test_a_new_game_is_inserted_whole_and_games_comes_first(), test_a_row_the_deploy_left_without_a_venue_gets_one() (+7 more)
+### Community 1321 - "_Lite"
+Cohesion: 0.13
+Nodes (4): _Lite, test_without_the_venue_columns_the_schedule_still_lands(), resolver(), fake_get()
 
 ### Community 1325 - "test_live_prop_pull_asks_for_the_sharp_book"
 Cohesion: 0.22
 Nodes (3): test_live_prop_pull_asks_for_the_sharp_book(), TestIngestEventsDoesNotShadowItsMarkets, fake_event_props()
 
 ### Community 1326 - "label"
-Cohesion: 0.06
-Nodes (20): label(), test_the_job_starts_the_card_only_for_a_new_post_and_publishes(), test_the_job_runs_the_card_and_publishes_and_a_failure_raises(), test_the_job_runs_the_card_and_publishes_and_a_failure_raises(), test_the_job_runs_the_card_and_publishes(), test_the_job_runs_the_card_and_publishes(), test_the_job_runs_the_card_and_publishes_and_a_failure_raises(), TestTickLatency (+12 more)
+Cohesion: 0.08
+Nodes (12): label(), test_a_failed_team_total_step_does_not_stop_the_first_half_s_steps(), test_the_job_starts_the_card_only_for_a_new_post_and_publishes(), test_the_job_runs_the_card_and_publishes_and_a_failure_raises(), test_the_job_runs_the_card_and_publishes_and_a_failure_raises(), test_the_job_runs_the_card_and_publishes(), test_the_job_runs_the_card_and_publishes(), test_the_job_runs_the_card_and_publishes_and_a_failure_raises() (+4 more)
 
 ### Community 1327 - "r2_coverage.py"
 Cohesion: 0.20
@@ -5857,12 +5757,12 @@ Cohesion: 0.24
 Nodes (5): keyed(), best_in_range(), model_cands(), same_cands(), same_number_frame()
 
 ### Community 1332 - "_NullConn"
-Cohesion: 0.20
-Nodes (6): _NullConn, test_backfill_returns_totals_when_every_season_succeeds(), test_backfill_survives_a_mid_run_season_failure(), test_refresh_games_happy_path_counts_games(), test_refresh_games_repairs_every_season_and_reports_failures(), test_refresh_stats_isolates_a_failing_season()
+Cohesion: 0.16
+Nodes (8): backfill_ncaaf(), refresh_ncaaf_games(), _NullConn, test_backfill_returns_totals_when_every_season_succeeds(), test_backfill_survives_a_mid_run_season_failure(), test_refresh_games_happy_path_counts_games(), test_refresh_games_repairs_every_season_and_reports_failures(), test_refresh_stats_isolates_a_failing_season()
 
-### Community 1333 - "_stored_state"
-Cohesion: 0.29
-Nodes (5): _bool(), _in(), _stored_games(), _stored_state(), _write_venues()
+### Community 1333 - "ncaabw_espn_ingestor.py"
+Cohesion: 0.08
+Nodes (33): assign_slug(), _bool(), _days(), due_dates(), _ensure_d1_registry(), _in(), _int(), main() (+25 more)
 
 ### Community 1336 - "test_mobile_nhl_lookahead.py"
 Cohesion: 0.29
@@ -5872,25 +5772,9 @@ Nodes (5): _fn(), _read(), test_the_nhl_read_matches_the_other_look_aheads(), te
 Cohesion: 0.22
 Nodes (9): 4. Structural check: are halftime lines re-hung mechanically, and where do they miss?, Is the book's stray from the mechanical number information or noise?, Spreads by the pre-game favourite's half-time lead, Spreads: each book's first fresh halftime home spread against the mechanical number, Spreads: the book's second-half margin against what happened (DraftKings, 1,628 games, OLS, SE in brackets), The shares used (fitted on earlier seasons), Totals by the first half's surprise (half-time points minus the share of the pre-game total due by the half), Totals: each book's first fresh halftime total against the mechanical line (+1 more)
 
-### Community 1338 - "Budget"
-Cohesion: 0.20
-Nodes (3): Budget, BudgetSpent, test_the_two_prune_tiers_leave_every_ncaab_row()
-
 ### Community 1339 - "ncaaf_margin_eval.py"
 Cohesion: 0.06
 Nodes (38): margin_cover_prob(), _blank(), build_frames(), _fit(), fit_and_register(), _fit_seed_average(), fit_totals(), _fmt_record() (+30 more)
-
-### Community 1340 - "_universe_summary"
-Cohesion: 0.29
-Nodes (6): _universe_summary(), test_a_universe_without_the_model_sums_still_summarises(), test_mean_projection_and_mean_actual_separate_mean_bias_from_shape_bias(), test_model_over_rate_and_its_gap_are_reported(), _universe(), test_a_nonfinite_fair_price_cannot_switch_the_gate_off()
-
-### Community 1341 - "2. Schema"
-Cohesion: 0.22
-Nodes (5): 2. Schema, synthetic(), test_a_last_game_filter_waits_for_that_game_on_the_official_line(), official(), place()
-
-### Community 1344 - "load_artifact"
-Cohesion: 0.22
-Nodes (3): Artifact, load_artifact(), prior_margin()
 
 ### Community 1345 - "EuroLeague in-play decisions table"
 Cohesion: 0.83
@@ -5904,65 +5788,65 @@ Nodes (5): 1-2. Leads table, 3. Betfair Australia commission and the ANZ CSV dic
 Cohesion: 0.25
 Nodes (8): scripts, android, build:ios:preview, build:ios:production, ios, start, typecheck, web
 
-### Community 1350 - ".execute"
-Cohesion: 0.11
-Nodes (9): _Counted, _lit(), _operand_start(), render(), sqlite_casts(), test_a_record_write_that_fails_for_a_bug_fails_the_table(), execute(), __init__() (+1 more)
-
-### Community 1353 - "load_artifact"
-Cohesion: 0.28
-Nodes (6): artifact_path(), load_artifact(), with_table(), test_the_artifact_for_another_season_is_refused(), test_the_committed_2027_artifact_loads_and_carries_the_replay(), test_the_ev_floor_sits_under_the_smallest_ev_the_cut_admitted()
+### Community 1353 - "groups"
+Cohesion: 0.40
+Nodes (3): groups(), prep(), ran()
 
 ### Community 1354 - "test_pg_finder.py"
-Cohesion: 0.24
-Nodes (6): _debian_bin(), _layout(), test_finds_a_major_other_than_16(), test_missing_root_or_binary_is_none(), test_newest_major_wins_numerically(), test_no_test_hard_codes_a_postgres_major()
+Cohesion: 0.13
+Nodes (13): quotes_frame(), _debian_bin(), ctx(), provider_rows(), test_a_read_two_minutes_into_the_break_is_settled_and_one_sooner_is_not(), test_draftkings_total_comes_from_its_board_and_the_other_books_stay_the_providers(), test_once_the_third_quarter_is_logged_the_break_is_not_settled(), test_the_model_decides_on_the_overlaid_read_as_on_the_providers() (+5 more)
 
 ### Community 1355 - "test_a_dropped_connection_replays_the_migration_with_its_lock_timeout"
-Cohesion: 0.07
-Nodes (9): _CursorResult, execute(), test_a_malformed_date_is_refused_before_anything_runs(), test_the_cursor_wrapper_rowcount_is_the_cursors(), test_the_job_does_not_bypass_the_day_is_over_guard(), test_the_job_does_not_read_rowcount_off_the_cursor(), test_the_job_only_clears_its_own_ledger_kind(), test_a_dropped_connection_replays_the_migration_with_its_lock_timeout() (+1 more)
+Cohesion: 0.11
+Nodes (5): _CursorResult, execute(), test_the_cursor_wrapper_rowcount_is_the_cursors(), test_a_dropped_connection_replays_the_migration_with_its_lock_timeout(), cursor()
 
 ### Community 1356 - "test_nba_pbp.py"
-Cohesion: 0.04
-Nodes (34): _last(), match_games(), match_names(), _g(), _game_recs(), _GapConn, _patch_gap_io(), _rec() (+26 more)
+Cohesion: 0.05
+Nodes (33): _last(), match_games(), match_names(), resolve_map(), _g(), _game_recs(), _GapConn, _patch_gap_io() (+25 more)
 
 ### Community 1357 - "test_module_entrypoints.py"
 Cohesion: 0.28
 Nodes (4): _is_main_guard(), _modules_with_guard(), test_at_least_one_entrypoint_is_scanned(), test_nothing_is_defined_after_the_main_guard()
 
+### Community 1359 - "_visible"
+Cohesion: 0.40
+Nodes (5): test_a_spread_5_from_the_median_takes_the_books_spread_and_moneyline_and_leaves_its_total(), test_an_incoherent_row_does_not_move_the_median(), test_only_deciding_books_set_the_median_and_only_they_are_removed(), test_two_books_cannot_say_which_is_wrong(), _visible()
+
 ### Community 1364 - "_extremes"
 Cohesion: 0.33
 Nodes (3): _extremes(), observed_ranges(), test_the_scan_survives_nulls_and_non_numeric_cells()
-
-### Community 1365 - "gather"
-Cohesion: 0.28
-Nodes (6): branches_without_pr(), _days(), gather(), _run(), split_by_pr_state(), test_a_merged_pull_request_closes_the_branch_and_a_closed_one_is_listed_apart()
 
 ### Community 1367 - "Game-model starter / star / goalie gate"
 Cohesion: 0.40
 Nodes (5): ESPN core probables for the NHL starting goalie, Game-model starter / star / goalie gate, A NONE from this gate is not locked — the reprice path, The gate rule — refuse a game-model BET on a confirmed Out starter/star/goalie, Fires in scorer.score_game and _score_nhl_3way, after best-price requalify, before insert
 
-### Community 1368 - "_Conn"
-Cohesion: 0.22
-Nodes (3): _Conn, _row(), test_the_free_half_never_changes_the_pick_set()
+### Community 1368 - "test_full_refuses_without_the_go_a_results_folder_or_a_bets_folder_before_reading"
+Cohesion: 0.40
+Nodes (3): test_full_refuses_without_the_go_a_results_folder_or_a_bets_folder_before_reading(), test_full_stops_before_any_grade_when_the_credit_line_is_not_on_the_same_games(), boom()
 
 ### Community 1369 - "_SqliteShim"
 Cohesion: 0.22
 Nodes (3): _SqliteShim, test_overtime_counts_in_the_check_and_never_in_the_first_half(), test_the_opening_signal_shadow_track_grades_it_the_same_way()
 
-### Community 1370 - "_prep"
-Cohesion: 0.22
-Nodes (8): _prep(), test_full_end_to_end_on_made_up_games_writes_what_the_verdict_and_the_credit_read(), test_full_refuses_without_the_go_a_results_folder_or_a_bets_folder_before_reading(), test_the_clock_grades_only_made_up_results(), spy(), test_the_counts_say_how_many_bets_are_only_the_cells_and_only_the_controls(), test_the_counts_the_placebo_share_and_the_extremes_never_call_the_grader(), boom()
-
 ### Community 1373 - "eggz_picks.py"
-Cohesion: 0.08
-Nodes (30): test_canadians_and_a_one_edit_nickname_resolve_to_montreal(), _add_last(), _aliases(), add(), _as_et(), _candidate_games(), _collapse_same_matchup(), _fetch_games() (+22 more)
+Cohesion: 0.05
+Nodes (56): test_a_graded_parlay_counts_once_and_his_all_time_starts_at_his_first(), test_canadians_and_a_one_edit_nickname_resolve_to_montreal(), restate_lock_key(), _add_last(), _aliases(), add(), _all_time_rows(), _as_et() (+48 more)
 
-### Community 1376 - "_SqliteShim"
-Cohesion: 0.22
-Nodes (3): conn(), raw(), _SqliteShim
+### Community 1374 - "_collapse_same_matchup"
+Cohesion: 0.40
+Nodes (3): _collapse_same_matchup(), _has_final(), _prefer_twin()
+
+### Community 1376 - "clock_label"
+Cohesion: 0.50
+Nodes (3): clock_label(), test_clock_labels(), test_clock_labels_for_college_basketball()
 
 ### Community 1377 - "nfl_live_leader/gameday.py"
-Cohesion: 0.04
-Nodes (41): parse_book_ts(), notify_live(), notify_live(), discord(), push(), notify_live(), _confidence_tier(), notify_live() (+33 more)
+Cohesion: 0.05
+Nodes (30): parse_book_ts(), build_pick(), Cadence, dk_board_quotes(), dk_source(), evaluate(), GameContext, is_locked() (+22 more)
+
+### Community 1379 - "B. Market-anchored models (r3_b_anchored.py)"
+Cohesion: 0.50
+Nodes (4): B1. Moneyline: market-anchored logit, walk-forward (r3_b_anchored.py), B2. Spread: market-anchored residual model, walk-forward (r3_b_anchored.py), B3. Kill tests on the headline cells (r3_b_anchored.py), B. Market-anchored models (r3_b_anchored.py)
 
 ### Community 1380 - "db_health_snapshots_2026_11_15.sql"
 Cohesion: 0.60
@@ -5972,33 +5856,17 @@ Nodes (4): public.db_health_snapshots, public.db_query_snapshots, public.db_quer
 Cohesion: 0.25
 Nodes (8): D. First half and first quarter: our own mechanisms (r3_d_periods.py), H1-i. Club-pair H1 share of the full-game total (r3_d_periods.py), H1-ii. The H1 moneyline shrunk toward 50% (r3_d_periods.py), H1-iii. The stale H1 total: the full game moved T-60 -> T-10 (r3_d_periods.py), P2. Round 1's frozen first-quarter total lead, read unchanged (r3_d_periods.py, running r1_method's own fit and decide), Q1-i. Club-pair Q1 share of the full-game total (r3_d_periods.py), Q1-ii. The Q1 moneyline shrunk toward 50% (r3_d_periods.py), Q1-iii. The stale Q1 total: the full game moved T-60 -> T-10 (r3_d_periods.py)
 
-### Community 1382 - "test_prop_lookahead.py"
-Cohesion: 0.19
-Nodes (3): _events_src(), TestTheOddsFetchReachesTomorrow, TestTheScorerReachesTomorrow
-
-### Community 1383 - "nfl_edge_prop_market_floor.py"
-Cohesion: 0.32
-Nodes (4): _book_of(), part_a_card(), part_b(), _table()
-
 ### Community 1384 - "_bet_price_and_book"
-Cohesion: 0.25
-Nodes (5): test_the_bet_is_the_price_taken_at_the_book_it_was_taken(), test_grading_finds_the_book_on_every_generation(), test_the_line_check_passes_for_both_label_shapes(), _bet_price_and_book(), _book_from_label()
+Cohesion: 0.33
+Nodes (4): test_the_bet_is_the_price_taken_at_the_book_it_was_taken(), test_grading_finds_the_book_on_every_generation(), test_the_line_check_passes_for_both_label_shapes(), _bet_price_and_book()
 
 ### Community 1385 - "test_insert_column_alignment.py"
 Cohesion: 0.32
 Nodes (3): _statements(), test_columns_and_values_line_up(), test_the_scorer_pick_insert_is_actually_covered()
 
-### Community 1390 - "test_a_night_game_pick_carries_the_game_s_date_not_the_utc_clock"
-Cohesion: 0.25
-Nodes (3): test_a_night_game_pick_carries_the_game_s_date_not_the_utc_clock(), test_nothing_written_means_nothing_announced(), test_resolution_refuses_rather_than_guesses()
-
-### Community 1392 - "_SqliteShim"
-Cohesion: 0.25
-Nodes (3): conn(), raw(), _SqliteShim
-
-### Community 1394 - "fetch_https_image"
-Cohesion: 0.25
-Nodes (3): test_fetch_https_image_sniffs_bytes_and_refuses_gif(), fetch_https_image(), _sniff_tweet_image()
+### Community 1394 - "_games3"
+Cohesion: 0.67
+Nodes (4): _games3(), _odds_row(), test_2024_25_and_2025_26_are_required_even_when_the_cache_lacks_one(), test_a_partly_bought_season_makes_the_graded_load_refuse()
 
 ### Community 1395 - "1. Coverage, data notes and what a live loop gets"
 Cohesion: 0.29
@@ -6012,9 +5880,13 @@ Nodes (7): clv_close_purchases_game_book, clv_close_quotes_game_book, clv_close_
 Cohesion: 0.29
 Nodes (7): 11.1 Games per season, 11.2 The betas (registered), 11.3 How far the projection sits from the period market, 11.4 Games per band of the gap, each side, 11.5 The bets each cell would place, 11.6 What the rest of the smoke run measured, 11. Counts before grading
 
-### Community 1398 - "test_alt_game_lines.py"
-Cohesion: 0.07
-Nodes (14): event_rows(), parse_ladder(), _state_payload(), _Conn, db(), _rows(), test_a_duplicate_point_is_logged_and_kept_once(), test_a_failed_refresh_still_ledgers_the_spend() (+6 more)
+### Community 1398 - "_inp"
+Cohesion: 0.50
+Nodes (4): _inp(), test_a_missing_popularity_gives_no_side(), test_the_bet_is_against_the_more_popular_team(), test_the_totals_strength_is_the_smaller_habit_above_the_league()
+
+### Community 1399 - "_step1_world"
+Cohesion: 0.50
+Nodes (4): _step1_world(), test_step1_leaves_a_push_out_and_the_total_is_the_under(), test_step1_reads_the_popular_sides_result_against_the_no_vig_close(), test_the_step1_report_has_each_band_and_a_slope()
 
 ### Community 1400 - "nba_player_game_log"
 Cohesion: 0.29
@@ -6024,33 +5896,17 @@ Nodes (7): idx_nba_plog_game, idx_nba_plog_player, nba_player_game_log, public.p
 Cohesion: 0.67
 Nodes (3): DEBIAN_FRONTEND, pick(), pg_repack_helper.sh script
 
-### Community 1403 - "Player news: Recent News sheet"
-Cohesion: 0.43
-Nodes (5): Name-key matching attached prices to both namesakes, Player news: Recent News sheet, PlayerNewsButton / PlayerNewsSheet / usePlayerNews / fetchPlayerNews, player_news table: player_id plus player_key, Recent News sheet on prop player screens
-
 ### Community 1404 - "devDependencies"
 Cohesion: 0.29
 Nodes (7): devDependencies, @babel/core, babel-plugin-module-resolver, babel-preset-expo, tsx, @types/react, typescript
-
-### Community 1405 - "_bases_state"
-Cohesion: 0.22
-Nodes (7): _bases_state(), _extract_state(), test_bases_state_empty(), test_bases_state_loaded(), test_bases_state_single_runner(), test_extract_state_handles_empty_feed(), test_extract_state_pulls_fields_from_live_feed()
 
 ### Community 1406 - "OpenInAppModule.swift"
 Cohesion: 0.29
 Nodes (3): ExpoModulesCore, OpenInAppModule, UIKit
 
-### Community 1407 - "test_a_page_of_huge_rows_halves_down_to_one_row_before_failing"
+### Community 1407 - "FakeFeed"
 Cohesion: 0.13
-Nodes (6): fn(), test_a_page_of_huge_rows_halves_down_to_one_row_before_failing(), test_pg_source_narrows_a_timed_out_check_to_the_slow_range(), logged(), call(), test_a_summary_with_no_player_block_is_refused_not_raised()
-
-### Community 1409 - "_blk_nhl_asof"
-Cohesion: 0.22
-Nodes (4): _blk_nhl_asof(), _t(), test_the_training_path_reads_nhl_odds_by_game_not_by_sport(), TestOpeningNightIsEarlySeason
-
-### Community 1410 - "team_game_residuals"
-Cohesion: 0.38
-Nodes (6): team_game_residuals(), _t(), test_a_team_term_counts_only_games_that_ended_and_shrinks_by_k(), test_the_consensus_is_each_bettable_book_s_newest_line_by_the_moment(), test_the_tilt_residual_removes_the_line_s_expected_tilt(), _tg()
+Nodes (7): fn(), logged(), call(), FakeFeed, logged(), call(), test_a_summary_with_no_player_block_is_refused_not_raised()
 
 ### Community 1411 - "EuroLeague market audit — the scout, and the research to come"
 Cohesion: 0.20
@@ -6064,37 +5920,29 @@ Nodes (4): _allowed(), _hits(), _rel(), test_the_repo_has_no_record_only_or_pape
 Cohesion: 0.25
 Nodes (4): admin, signatureValid(), timingSafeEqual(), WhopMembership
 
-### Community 1414 - "Conn"
-Cohesion: 0.29
-Nodes (3): Conn, test_college_football_folds_accents_takes_aliases_and_the_games_own_date(), test_nba_resolves_by_nickname_either_way_round()
-
 ### Community 1415 - "Retool ops dashboard — source"
 Cohesion: 0.25
 Nodes (7): Getting a change from here into Retool, Getting a change made in Retool back here, Not here, Retool ops dashboard — source, What has been proved, and what has not, What stays the same after the move, Which copy runs
 
 ### Community 1418 - "test_ncaaf_moneyline_market.py"
-Cohesion: 0.07
-Nodes (53): mark(), quotes_at(), _american(), _at(), _decide(), _games(), _moneylines(), _NullConn (+45 more)
+Cohesion: 0.04
+Nodes (74): best_per_game(), check_instant(), dec(), decide(), eastern_date(), _f(), load_artifact(), mark() (+66 more)
 
 ### Community 1421 - "setModelVolume.ts"
 Cohesion: 0.33
 Nodes (5): Level, LEVELS, Params, Result, SetModelVolumeRow
 
 ### Community 1422 - "test_team_total_market.py"
-Cohesion: 0.07
-Nodes (16): _PickConn, raw(), _result(), _Rows, _SqliteShim, test_a_line_that_dropped_under_an_under_is_a_skip(), test_an_away_team_total_settles_on_the_away_team_s_points(), test_an_overtime_final_counts_and_a_full_game_total_would_not() (+8 more)
-
-### Community 1423 - "run_agent"
-Cohesion: 0.33
-Nodes (3): _announce(), _enabled(), run_agent()
+Cohesion: 0.08
+Nodes (13): _PickConn, raw(), _result(), _Rows, _SqliteShim, test_a_line_that_dropped_under_an_under_is_a_skip(), test_an_away_team_total_settles_on_the_away_team_s_points(), test_an_overtime_final_counts_and_a_full_game_total_would_not() (+5 more)
 
 ### Community 1424 - "test_threshold_review.py"
 Cohesion: 0.12
-Nodes (7): test_both_review_tables_are_declared_worker_only(), test_config_pauses_still_work_through_the_same_helper(), test_every_pause_check_in_the_scorer_goes_through_the_helper(), test_it_never_unpauses(), test_the_announce_does_not_claim_a_pause(), test_the_review_cannot_write_a_pause_even_when_enabled(), test_the_scorer_still_honours_a_leftover_auto_pause_row()
+Nodes (8): _is_paused(), test_both_review_tables_are_declared_worker_only(), test_config_pauses_still_work_through_the_same_helper(), test_every_pause_check_in_the_scorer_goes_through_the_helper(), test_it_never_unpauses(), test_the_announce_does_not_claim_a_pause(), test_the_review_cannot_write_a_pause_even_when_enabled(), test_the_scorer_still_honours_a_leftover_auto_pause_row()
 
-### Community 1425 - "test_ncaab_pbp.py"
-Cohesion: 0.28
-Nodes (4): _kw(), test_ledger_reads_numeric_final_scores_as_integers(), test_play_row_keeps_or_swaps_to_our_orientation(), test_release_games_groups_each_game_in_play_order()
+### Community 1425 - "ncaab_pbp.py"
+Cohesion: 0.05
+Nodes (32): _bool(), clock_seconds(), ensure_tables(), events_for(), fetch_summary_plays(), game_ledger(), game_seconds(), _int() (+24 more)
 
 ### Community 1426 - "test_web_site.py"
 Cohesion: 0.43
@@ -6120,25 +5968,9 @@ Nodes (6): (c2) results, (c2) the catalogued first-post card (moneyline off its 
 Cohesion: 0.33
 Nodes (6): 2. Baselines at halftime, (a) Blind bets at each book's first fresh halftime quote, all seasons, (b2) Moneyline at the best decidable price, by price band (not registered: sub-rows), (b3) The same blind bets: early/late half of each season, without the 10 best dates, and by price band (not registered: sub-rows), (b) Blind bets at the best decidable price, first read holding a fresh decidable quote, What the sample resolves (blind bet at the best decidable price, all seasons)
 
-### Community 1435 - "Verdicts (written by hand from the tables below; each number is from the script named in its table)"
-Cohesion: 0.33
-Nodes (6): A. The home lean, B. The market-anchored models, C. Totals, D. First half and first quarter (the invention floor: three mechanisms each, all run), Verdicts (written by hand from the tables below; each number is from the script named in its table), What to try next
-
-### Community 1436 - "team_game_residuals"
-Cohesion: 0.47
-Nodes (5): team_game_residuals(), _t(), test_a_team_term_counts_only_games_that_ended_and_shrinks_by_236(), test_both_teams_carry_the_same_residual_and_the_line_s_tilt_comes_out(), _tg()
-
-### Community 1437 - "_run_runner"
-Cohesion: 0.40
-Nodes (3): _run_runner(), test_a_crashed_step_fails_the_task_and_the_report_gets_its_real_code(), test_the_runner_catches_up_first_and_reports_last_with_each_steps_exit_code()
-
 ### Community 1438 - "test_custom_model_backtest_posted_migration.py"
 Cohesion: 0.53
 Nodes (4): _code(), test_it_grants_the_app_and_nobody_else(), test_it_is_one_idempotent_statement_registered_before_the_posted_pair(), test_it_is_read_only_and_sums_the_published_stake()
-
-### Community 1440 - "test_nfl_props.py"
-Cohesion: 0.04
-Nodes (29): _verdict(), test_a_half_line_market_priced_to_its_own_skew_is_not_flagged(), test_a_sharp_reference_is_never_a_book_we_bet(), test_a_targeted_backfill_never_substitutes_draftkings(), test_a_timing_run_can_be_labelled_so_it_cannot_displace_the_main_series(), test_both_sharp_references_are_fetched(), test_card_bets_exactly_the_books_the_backtest_graded(), test_census_sends_no_bookmakers_filter() (+21 more)
 
 ### Community 1441 - "getApiCallTrend.ts"
 Cohesion: 0.50
@@ -6160,81 +5992,41 @@ Nodes (5): _bool(), _in(), _stored_games(), _stored_state(), _write_venues()
 Cohesion: 0.53
 Nodes (4): _publish_step(), test_a_bundle_without_the_supabase_url_publishes_nothing(), test_a_missing_setting_publishes_nothing(), test_settings_are_pulled_before_the_bundle_is_built()
 
-### Community 1446 - "test_nhl_derivative_totals.py"
-Cohesion: 0.07
-Nodes (20): main(), run(), _clear_bets(), _graded_game(), _markets(), _Meter, _quote(), _Resp (+12 more)
-
-### Community 1447 - "_pm"
-Cohesion: 0.47
-Nodes (5): _panel(), _pm(), test_a_game_never_counts_in_its_own_minutes(), test_a_team_game_whose_segments_do_not_fill_the_period_gives_no_reading(), test_only_games_he_played_count_and_sitting_out_the_period_counts_zero()
-
-### Community 1448 - "_HealthConn"
-Cohesion: 0.33
-Nodes (3): _HealthConn, test_the_leagues_own_load_removes_the_espn_row_of_every_game_it_writes(), execute()
-
 ### Community 1454 - "parse_team_game_stats"
-Cohesion: 0.11
-Nodes (14): parse_team_game_stats(), _possession_seconds(), _split_ratio(), _to_int(), test_an_fcs_name_that_extends_an_fbs_school_passes_through_unresolved(), test_parse_team_game_stats_builds_one_row_per_team(), test_parse_team_game_stats_skips_games_missing_from_the_id_map(), test_plays_is_none_when_neither_attempt_stat_is_present() (+6 more)
+Cohesion: 0.22
+Nodes (7): parse_team_game_stats(), _possession_seconds(), _to_int(), test_parse_team_game_stats_builds_one_row_per_team(), test_parse_team_game_stats_skips_games_missing_from_the_id_map(), test_plays_is_none_when_neither_attempt_stat_is_present(), test_plays_tolerates_one_attempt_stat_missing()
 
 ### Community 1455 - "failure_alerter.py"
 Cohesion: 0.09
-Nodes (18): test_the_alerter_names_a_game_either_first_half_model_lost(), test_a_start_gap_is_in_the_digest_and_a_stranded_prop_is_not(), _check_name(), _confirmed(), _is_health_check_step(), _is_stranded_prop(), _latest_health_rows(), _ncaab_first_half_undecided() (+10 more)
+Nodes (19): disputed_start_games(), test_a_start_gap_is_in_the_digest_and_a_stranded_prop_is_not(), _check_name(), _confirmed(), _is_health_check_step(), _is_stranded_prop(), _latest_health_rows(), _ncaab_first_half_undecided() (+11 more)
 
 ### Community 1457 - "_goalie_line"
 Cohesion: 0.83
 Nodes (4): _goalie_line(), regressed(), saved_above(), tot()
 
-### Community 1464 - "Signalbase Privacy Policy"
-Cohesion: 0.83
-Nodes (4): Signalbase Privacy Policy, On-device storage: bankroll and placed-bet flags in AsyncStorage, Claim: the app cannot write to the backend, Signalbase privacy policy: nothing personal collected
-
 ### Community 1467 - "clv_close.py"
-Cohesion: 0.16
-Nodes (20): Bet, bet_from_row(), Close, close_for(), _f(), feed_quotes(), _game_quote(), history_quotes() (+12 more)
-
-### Community 1468 - "_local_aggregates"
-Cohesion: 0.40
-Nodes (3): _local_aggregates(), test_local_aggregates_computes_season_to_date_form(), test_local_aggregates_does_no_date_filtering_of_its_own()
+Cohesion: 0.13
+Nodes (25): run_measure(), test_player_names_match_across_accents_case_and_suffixes(), Bet, bet_from_row(), choose_final(), Close, close_for(), _f() (+17 more)
 
 ### Community 1470 - "_box_row"
 Cohesion: 0.36
 Nodes (6): _box_row(), _game(), test_a_contest_two_games_could_be_is_placed_on_neither(), test_a_row_naming_espns_event_is_placed_by_it_whatever_its_teams_say(), test_a_row_on_no_stored_game_keeps_its_own_key(), test_ncaas_rows_with_no_espn_game_id_land_on_the_game_and_replace_espns()
 
-### Community 1473 - "0. Frozen before any return was read (written 2026-11-13, before the first r3 script ran)"
-Cohesion: 0.40
-Nodes (5): 0.2 A. The home lean, 0.3 B. Market-anchored logistic model (moneyline) and anchored residual model (spread), 0.4 C. Totals, 0.5 D. First half and first quarter: three mechanisms of our own per market, 0. Frozen before any return was read (written 2026-11-13, before the first r3 script ran)
-
-### Community 1475 - "eggz_embed"
-Cohesion: 0.50
-Nodes (3): test_the_all_time_block_matches_the_main_recap(), test_the_embed_names_eggz_and_states_units_and_roi(), eggz_embed()
-
-### Community 1478 - "extremes"
-Cohesion: 0.40
-Nodes (3): extremes(), _extremes(), reference_gaps()
+### Community 1475 - "render_all_time_fields"
+Cohesion: 0.25
+Nodes (5): test_the_all_time_block_matches_the_main_recap(), test_the_embed_names_eggz_and_states_units_and_roi(), render_all_time_fields(), _win_rate_line(), eggz_embed()
 
 ### Community 1480 - "repo_slug"
 Cohesion: 0.40
 Nodes (3): repo_slug(), test_checks_state(), test_repo_slug()
 
-### Community 1488 - "key"
-Cohesion: 0.50
-Nodes (3): key(), school(), _strip_mascot()
-
-### Community 1490 - "_post_window"
-Cohesion: 0.07
-Nodes (14): _recap_db(), test_a_graded_parlay_counts_once_and_his_all_time_starts_at_his_first(), test_a_live_game_on_the_slate_date_holds_the_recap(), test_parlaymatt_unset_does_not_read_or_post(), test_restate_dry_run_and_an_unresolved_leg_post_nothing(), test_restate_posts_corrected_and_keeps_the_sent_row(), test_the_all_time_line_stops_at_the_period_and_posts_on_every_span(), test_the_recap_posts_only_to_his_webhook_and_only_once() (+6 more)
-
-### Community 1499 - "_fit_rows"
-Cohesion: 0.50
-Nodes (4): _fit_rows(), test_beta_reads_no_game_of_its_own_season_or_a_later_one(), test_beta_recovers_a_planted_slope_keeps_its_sign_and_ignores_a_level_bias(), test_too_few_earlier_games_stop_the_fit()
-
-### Community 1500 - "ran"
-Cohesion: 0.50
-Nodes (3): ran(), test_the_synthetic_checks_write_no_bets_into_a_graded_runs_folder(), stub()
-
-### Community 1523 - "verify"
+### Community 1502 - "thinned_games"
 Cohesion: 0.12
-Nodes (12): already_a_series(), _games(), live_season_snapshot_grace(), main(), _prior_season_rates(), rebuild_sport(), _team_games(), verify() (+4 more)
+Nodes (10): _extra_markets_for(), _is_thinned(), odds_history(), prop_history(), thinned_games(), _with_archive(), 8. Moving rows out: what goes now, and what has to change first (2026-11-16), test_props_cut_part_way_count_as_thinned() (+2 more)
+
+### Community 1527 - "test_ncaab_espn_ingestor.py"
+Cohesion: 0.13
+Nodes (12): parse_event(), conn(), _event(), http_calls(), _no_ddl_and_no_cache(), test_a_late_tip_files_on_its_eastern_date(), test_a_second_event_for_the_same_game_is_refused(), test_a_step_that_raises_is_a_false_not_a_crash() (+4 more)
 
 ## Ambiguous Edges - Review These
 - `Claim: the app cannot write to the backend` → `device_push_tokens table (anon INSERT/UPDATE, no SELECT)`  [AMBIGUOUS]
@@ -6242,24 +6034,24 @@ Nodes (12): already_a_series(), _games(), live_season_snapshot_grace(), main(), 
 
 ## Knowledge Gaps
 - **166 isolated node(s):** `ExpoModulesCore`, `UIKit`, `expo-apple-authentication`, `expo-asset`, `expo-dev-client` (+161 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 22046 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **352 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 22061 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **353 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Freeze tracking (added 2026-11-06)` connect `startCrashLogging` to `gate`, `ref_react`, `NFL in-play executor decision tests`?**
+- **Why does `Freeze tracking (added 2026-11-06)` connect `handoffLog.ts` to `gate`, `ref_react`, `NFL in-play executor decision tests`?**
   _High betweenness centrality (0.068) - this node is a cross-community bridge._
 - **Are the 5 inferred relationships involving `get_connection()` (e.g. with `main()` and `main()`) actually correct?**
   _`get_connection()` has 5 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `ExpoModulesCore`, `UIKit`, `expo-apple-authentication` to the rest of the system?**
   _166 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `test_record_never_restated.py` be split into smaller, more focused modules?**
-  _Cohesion score 0.035526315789473684 - nodes in this community are weakly interconnected._
-- **Why does `Modal()` connect `ref_react` to `Mobile pick cards, market formatting`, `verify_ncaab_ui.ts`, `SettingsScreen.tsx`, `ParlayScreen.tsx`, `ref_react`, `types/index.ts`, `linesBoard.ts`, `startCrashLogging`, `PicksHomeScreen.tsx`, `Mobile stats board`?**
+  _Cohesion score 0.03901319563970167 - nodes in this community are weakly interconnected._
+- **Why does `Modal()` connect `ref_react` to `Mobile player stats page`, `Mobile pick cards, market formatting`, `SettingsScreen.tsx`, `lineLegs.ts`, `ref_react`, `thresholds.ts`, `linesBoard.ts`, `handoffLog.ts`, `freezeLog.ts`?**
   _High betweenness centrality (0.068) - this node is a cross-community bridge._
 - **Should `Mobile player stats page` be split into smaller, more focused modules?**
-  _Cohesion score 0.014521077627873745 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.011404709267642208 - nodes in this community are weakly interconnected._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._

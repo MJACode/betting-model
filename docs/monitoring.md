@@ -33,7 +33,7 @@ on Team, so nothing syncs by itself. `retool/README.md` says which copy to edit
 and how a change moves each way; `scripts/retool_app_files.py check` says
 whether the two copies hold the same bytes.
 
-Six tabs: **Models**, **Model Health**, **Volume**, **Ops**, **Database**,
+Eight tabs: **Key Metrics**, **Models**, **Model Health**, **Volume**, **Ops**, **Database**,
 **Picks & CLV** (Database added 2026-11-15; next section). **Model Health**
 (2026-11-18) is closing-line value per model, in blocks of 25, 50 and 100
 bets and as a rolling average, read from the three `v_model_health_*` views
@@ -49,6 +49,32 @@ everywhere, but for the sim alone have an option for dollars"*) shows every
 bankroll figure as units times a dollars-per-unit amount (default 100) in the
 original's dollar format; the math stays in units, and Units is the default.
 This tab is the only place in the dashboard that shows dollars.
+
+**Key Metrics** (2026-11-19, mike: *"what are the most important things we
+should track based on what we do and put those on an exec summary dash"*) is
+the first tab and the one the dashboard opens on. One read-only backend call
+(`getKeyMetrics`) over the record's own views, five groups:
+
+- **Results**: units won, return on risk, the record, the last 30 and 7 days
+  (game dates ending today, Eastern), and the deepest drop from a high on the
+  daily running total; a running-total chart by game date.
+- **Beating the closing line**: of the pre-game bets with a closing price or a
+  line move, how many beat, matched and trailed the close (price when the book
+  kept our number, the move when it did not), the average price gain, and the
+  stricter Pinnacle fair-price figure (its timing is #1482).
+- **Models**: live and paused (`model_action_thresholds`), in profit, 50+ bets
+  and in profit, and how many beat or trail the close by Model Health's own
+  verdict; the five models carrying and dragging the record.
+- **Operations**: the last daily pipeline run, today's health checks (skipped
+  counted on their own, not as passing), odds feed credits with days left at
+  the median daily use of the last 14 days, and the share of pre-game bets with
+  a closing price.
+- No audience group yet: 0 app subscribers, 0 Whop members (read 2026-11-19).
+
+Its totals are the sum of `v_model_health_summary`'s rows, which equal
+`v_public_track_record` (1,636 bets, +71.11u on both, read 2026-11-19). Measured
+database time per open: about 0.6 s, the slowest of its seven reads in parallel
+(the record views carry the per-bet stake cost in #1486).
 
 **The SignalBase look** (2026-11-15, mike: *"the UX and UI are very poor -
 please modernize (super modern best practice) and brand the design with
