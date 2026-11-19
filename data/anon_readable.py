@@ -207,7 +207,6 @@ AUTHENTICATED_ONLY: tuple[str, ...] = (
     # data/migrations/notification_inbox_2026_11_19.sql grants SELECT,
     # INSERT and UPDATE to authenticated and nothing to anon. It is not
     # applied until Matt runs it, so both names are also MAY_BE_UNAPPLIED.
-    # The lockdown must never grant anon on these two.
     "notification_inbox",
     "notification_sport_prefs",
 )
@@ -246,12 +245,15 @@ ANON_WRITABLE: dict[str, tuple[str, ...]] = {
     # policy). Do not put the table back here to "match" the old policies.
     # `.insert()` and `.delete()` in mobile/src/lib/queries.ts. A tracked bet is
     # added and removed, never edited, so UPDATE is not needed.
-    # tracked_bets left this map in the 2026-11 lockdown. Anon has no write.
-    # Authenticated keeps INSERT and DELETE, owner-scoped, in
-    # AUTHENTICATED_WRITABLE below.
-    # notification_inbox and notification_sport_prefs are not here either.
-    # Anon gets no write on them. Their authenticated INSERT and UPDATE
-    # live in AUTHENTICATED_WRITABLE.
+    "tracked_bets": ("INSERT", "DELETE"),
+    # The sweep revokes authenticated writes with this same list. The inbox
+    # migration grants INSERT and UPDATE to authenticated only; declaring
+    # them here is what keeps that grant when the sweep next runs. Anon is
+    # not granted those verbs, and there is no anon policy, so a leftover
+    # anon grant would still be denied by RLS. The app writes its own rows
+    # (test alert, mark read, sport switch) under user_id = auth.uid().
+    "notification_inbox": ("INSERT", "UPDATE"),
+    "notification_sport_prefs": ("INSERT", "UPDATE"),
     # `feedback` is DELIBERATELY ABSENT. The app never touches the table: it
     # calls rpc('feedback_submit') (mobile/src/lib/feedback.ts), and all six
     # feedback_* functions are SECURITY DEFINER owned by postgres, so they act

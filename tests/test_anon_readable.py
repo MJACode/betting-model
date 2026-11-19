@@ -122,7 +122,7 @@ def test_notification_tables_are_never_granted_to_anon():
         assert rel in AUTHENTICATED_ONLY
         assert rel not in ANON_READABLE
         assert rel not in AUTHENTICATED_READABLE
-        assert rel not in ANON_WRITABLE
+        assert set(ANON_WRITABLE[rel]) == {"INSERT", "UPDATE"}
         assert set(AUTHENTICATED_WRITABLE[rel]) == {"INSERT", "UPDATE"}
         assert f'ON public."{rel}" TO authenticated' in plan
         assert f'ON public."{rel}" TO anon' not in plan
@@ -674,10 +674,11 @@ def test_every_declared_write_verb_has_a_call_site_that_needs_it():
 
     from data.anon_readable import ANON_WRITABLE, AUTHENTICATED_WRITABLE
 
-    # tracked_bets: added and removed, never edited. Anon has no write.
-    # Authenticated keeps INSERT and DELETE, and not UPDATE.
+    # tracked_bets: added and removed, never edited. The name stays in
+    # ANON_WRITABLE so the inbox PR's write map merges. The sweep still
+    # revokes every anon write; authenticated keeps INSERT and DELETE only.
     assert "from('tracked_bets').insert(" in src.replace("\n", "")
-    assert "tracked_bets" not in ANON_WRITABLE
+    assert set(ANON_WRITABLE["tracked_bets"]) == {"INSERT", "DELETE"}
     assert "UPDATE" not in AUTHENTICATED_WRITABLE["tracked_bets"]
     assert set(AUTHENTICATED_WRITABLE["tracked_bets"]) == {"INSERT", "DELETE"}
 

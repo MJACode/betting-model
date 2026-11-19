@@ -136,7 +136,6 @@ MAY_BE_UNAPPLIED = (
     # Notification inbox. Hand migration, not applied until Matt runs it.
     # Authenticated-only. The migration's own GRANT is the one that opens
     # them; this entry only stops a sweep from GRANT-ing a missing name.
-    # Never grant these to anon.
     "notification_inbox",
     "notification_sport_prefs",
 )
@@ -196,7 +195,8 @@ def _plan(conn=None) -> list[str]:
             continue
         stmts.append(f'GRANT SELECT ON public."{rel}" TO anon, authenticated')
     for rel in AUTHENTICATED_ONLY:
-        if _skip(rel):
+        if (conn is not None and rel in MAY_BE_UNAPPLIED
+                and not _table_exists(conn, rel)):
             continue
         stmts.append(f'GRANT SELECT ON public."{rel}" TO authenticated')
     # The security_invoker views' base tables: the caller reads them too.
