@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import type { NavigationContainerRef } from '@react-navigation/native';
 
+import { markReadByInboxId } from '@/hooks/useNotificationInbox';
 import { routeForPush, type PushRoute } from '@/lib/pushRoute';
 import { setSportForVisit } from '@/hooks/useSportFilter';
 import { readAuthStatus, useAuth } from '@/hooks/useAuth';
@@ -188,7 +189,11 @@ export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
         handledResponseIds.add(id);
       }
       clearNativeLastResponse();
-      const route = routeForPush(response.notification.request.content.data);
+      const data = response.notification.request.content.data;
+      if (data && typeof data === 'object' && 'inboxId' in data) {
+        void markReadByInboxId((data as { inboxId?: unknown }).inboxId);
+      }
+      const route = routeForPush(data);
       // null is the deliberate outcome for a payload this build cannot read:
       // the app simply opens, which is what tapping a notification did before
       // any of this existed.

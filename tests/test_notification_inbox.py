@@ -29,6 +29,13 @@ def test_the_migration_is_hand_applied():
     assert "p_user_id uuid DEFAULT NULL" in sql
     # The 5-arg overload would make PostgREST return 300. It is dropped.
     assert "DROP FUNCTION IF EXISTS public.save_device_push_token(text, text, text, boolean, text)" in sql
+    assert "v_uid := auth.uid()" in sql
+    assert "p_user_id IS DISTINCT FROM v_uid" in sql
+    assert "ERRCODE = '42501'" in sql
+    assert "user_id   = v_uid" in sql
+    assert "forget_my_notifications" in sql
+    assert "ON DELETE CASCADE" in sql
+    assert "ON DELETE SET NULL" in sql
 
 
 def test_a_muted_sport_is_dropped_and_an_empty_batch_sends_nothing():
@@ -148,6 +155,202 @@ def test_inbox_ready_is_false_when_the_probe_returns_nothing():
     assert inbox_ready(Conn()) is False
 
 
+def test_the_same_alert_keeps_one_id_when_the_keys_are_reordered():
+    from tracking.notification_inbox import bind_inbox_id, make_row, stable_notification_id
+
+    user = "11111111-1111-4111-8111-111111111111"
+    first = stable_notification_id(user, "new_bets", ["k-ufc", "k-nba"])
+    second = stable_notification_id(user, "new_bets", ["k-nba", "k-ufc"])
+    assert first == second
+    assert stable_notification_id(user, "new_bets", ["k-nba"]) != first
+    data = bind_inbox_id(user, "line_change", ["9", "line_change_1", "-130"], {"type": "line_change", "pickId": 9})
+    row = make_row(user, "line_change", "t", "b", data)
+    again = make_row(user, "line_change", "t", "b", dict(data))
+    assert row["notification_id"] == again["notification_id"] == data["inboxId"]
+
+
+class _Recorder:
+    def __init__(self):
+        self.sql: list[tuple[str, tuple]] = []
+
+    def execute(self, sql, params=()):
+        self.sql.append((str(sql), tuple(params or ())))
+
+        class _R:
+            rowcount = 1
+
+            def fetchall(self):
+                return []
+
+            def fetchone(self):
+                return None
+
+        return _R()
+
+    def commit(self):
+        self.sql.append(("COMMIT", ()))
+
+    def close(self):
+        pass
+
+
+def _plan_two_users():
+    from tracking.notification_inbox import group_by_user
+
+    user_a = "11111111-1111-4111-8111-111111111111"
+    user_b = "22222222-2222-4222-8222-222222222222"
+    devices = [
+        {"token": "tok-a", "device_id": "device-a-1111", "user_id": user_a},
+        {"token": "tok-b", "device_id": "device-b-2222", "user_id": user_b},
+        {"token": "tok-n", "device_id": "device-n-3333", "user_id": None},
+    ]
+    # A hides UFC. B hides every sport in the batch.
+    mutes = {user_a: {"UFC"}, user_b: {"NBA", "UFC"}}
+    unread = {user_a: 1, user_b: 4}
+    return (group_by_user(devices), mutes, unread), user_a, user_b
+
+
+def _signals():
+    return [
+        {"sport": "NBA", "label": "Lakers -4.5", "pick_id": 11, "lock_key": "k-nba"},
+        {"sport": "UFC", "label": "Fighter A", "pick_id": 22, "lock_key": "k-ufc"},
+    ]
+
+
+def test_send_signal_changes_filters_mutes_and_ledgers_them(monkeypatch):
+    import tracking.push_notifier as pn
+
+    plan, user_a, _user_b = _plan_two_users()
+    sent: list[list[dict]] = []
+    monkeypatch.setattr(pn, "refuse_mismatched", lambda rows, *_a, **_k: rows)
+    monkeypatch.setattr(pn, "_new_bet_signals", lambda _c, _d: _signals())
+    monkeypatch.setattr(pn, "_dropped_signals", lambda _c, _d: [])
+    monkeypatch.setattr(pn, "_inbox_plan", lambda _c: plan)
+    monkeypatch.setattr(pn, "_expo_send", lambda messages, conn=None: sent.append(messages) or len(messages))
+    conn = _Recorder()
+    assert pn._send_signal_changes(conn, "2026-11-18", False) == 2
+    messages = sent[0]
+    by_token = {m["to"]: m for m in messages}
+    assert set(by_token) == {"tok-a", "tok-n"}
+    assert by_token["tok-a"]["title"] == "🟢 1 new BET signal"
+    assert by_token["tok-a"]["data"]["pickId"] == 11
+    assert by_token["tok-a"]["badge"] == 2
+    assert "inboxId" in by_token["tok-a"]["data"]
+    assert by_token["tok-n"]["title"] == "🟢 2 new BET signals"
+    assert "pickId" not in by_token["tok-n"]["data"]
+    assert "badge" not in by_token["tok-n"]
+    assert "inboxId" not in by_token["tok-n"]["data"]
+    inbox = [params for sql, params in conn.sql if "INSERT INTO notification_inbox" in sql]
+    assert len(inbox) == 1
+    assert inbox[0][0] == user_a
+    assert "ON CONFLICT (user_id, notification_id) DO NOTHING" in conn.sql[0][0] or any(
+        "ON CONFLICT (user_id, notification_id) DO NOTHING" in sql for sql, _p in conn.sql
+    )
+    ledger = {params[0] for sql, params in conn.sql if "INSERT INTO push_sent" in sql}
+    assert ledger == {"k-nba", "k-ufc"}
+    # The inbox write is after the send and before the ledger commit.
+    kinds = ["send" if sql == "COMMIT" else "inbox" if "notification_inbox" in sql else "ledger" if "push_sent" in sql else "" for sql, _p in conn.sql]
+    assert kinds.index("inbox") < kinds.index("ledger")
+
+
+def test_live_and_line_change_skip_a_muted_sport(monkeypatch):
+    import tracking.push_notifier as pn
+
+    plan, user_a, _user_b = _plan_two_users()
+    sent: list[list[dict]] = []
+    monkeypatch.setattr(pn, "refuse_mismatched", lambda rows, *_a, **_k: rows)
+    monkeypatch.setattr(pn, "_new_live_signals", lambda _c, _d: _signals())
+    monkeypatch.setattr(pn, "_inbox_plan", lambda _c: plan)
+    monkeypatch.setattr(pn, "_expo_send", lambda messages, conn=None: sent.append(list(messages)) or len(messages))
+    monkeypatch.setattr(pn, "get_connection", lambda: _Recorder())
+    assert pn.notify_live_signals("2026-11-18") == 2
+    live = {m["to"]: m for m in sent[0]}
+    assert set(live) == {"tok-a", "tok-n"}
+    assert live["tok-a"]["title"] == "🔴 1 live pick"
+    assert live["tok-a"]["badge"] == 2
+    assert "badge" not in live["tok-n"]
+
+    def alert(device, sport, pick):
+        return {
+            "device_id": device, "lock_key": f"track:{device}:{pick}", "kind": "line_change_1",
+            "pick_id": pick, "label": f"{sport} side", "locked": -110, "current": -130,
+            "against": True, "sport": sport,
+        }
+
+    sent.clear()
+    conn = _Recorder()
+    monkeypatch.setattr(pn, "get_connection", lambda: conn)
+    monkeypatch.setattr(pn, "_line_change_alerts", lambda _c, _d: [
+        alert("device-a-1111", "UFC", 22),
+        alert("device-a-1111", "NBA", 11),
+        alert("device-n-3333", "UFC", 22),
+    ])
+    assert pn.notify_line_changes("2026-11-18") == 2
+    line = {m["to"]: m for m in sent[0]}
+    # A's UFC alert is muted. A's NBA alert is sent. The unsigned device
+    # still gets the UFC alert, with no badge.
+    assert set(line) == {"tok-a", "tok-n"}
+    assert line["tok-a"]["data"]["pickId"] == 11
+    assert line["tok-a"]["badge"] == 2
+    assert "badge" not in line["tok-n"]
+    ledger = {params[0] for sql, params in conn.sql if "INSERT INTO push_sent" in sql}
+    assert ledger == {
+        "track:device-a-1111:22",
+        "track:device-a-1111:11",
+        "track:device-n-3333:22",
+    }
+
+
+def test_feedback_inbox_row_uses_the_reply_key(monkeypatch):
+    import tracking.push_notifier as pn
+
+    plan, user_a, _user_b = _plan_two_users()
+    monkeypatch.setattr(pn, "_inbox_plan", lambda _c: plan)
+    replies = [{
+        "lock_key": "feedback:9", "device_id": "device-a-1111", "token": "tok-a",
+        "subject": "s", "body": "hello", "thread_id": 9,
+    }]
+    messages = [{
+        "to": "tok-a",
+        "title": "💬 We replied to your feedback",
+        "body": "hello",
+        "data": {"v": 1, "type": "feedback_reply", "threadId": 9},
+    }]
+    rows = pn._feedback_inbox_rows(_Recorder(), replies, messages)
+    assert len(rows) == 1
+    assert rows[0]["user_id"] == user_a
+    assert rows[0]["notification_id"] == messages[0]["data"]["inboxId"]
+    again = pn._feedback_inbox_rows(_Recorder(), replies, [{
+        "to": "tok-a", "title": "t", "body": "b",
+        "data": {"v": 1, "type": "feedback_reply", "threadId": 9},
+    }])
+    assert again[0]["notification_id"] == rows[0]["notification_id"]
+
+
+def test_unread_counts_drop_muted_sports_and_keep_sportless_rows():
+    from tracking.notification_inbox import unread_counts
+
+    class Conn:
+        def execute(self, sql, params=None):
+            class R:
+                def fetchall(self):
+                    return [("u1", "UFC"), ("u1", None), ("u1", "NBA"), ("u2", "UFC")]
+            return R()
+
+    assert unread_counts(Conn(), {"u1": {"UFC"}}) == {"u1": 2, "u2": 1}
+
+
+def test_insert_rows_is_conflict_safe():
+    from tracking.notification_inbox import insert_rows, make_row
+
+    conn = _Recorder()
+    row = make_row("u", "new_bets", "t", "b", {"type": "new_bets", "inboxId": "same"})
+    insert_rows(conn, [row])
+    sql = conn.sql[1][0]
+    assert "ON CONFLICT (user_id, notification_id) DO NOTHING" in sql
+    assert conn.sql[1][1][-1] == "same"
+
+
 def test_rls_hides_another_users_inbox_rows():
     psycopg2 = pytest.importorskip("psycopg2")
     from tests.byom_scratch import ScratchPostgres, pg_bin
@@ -241,6 +444,43 @@ def test_rls_hides_another_users_inbox_rows():
         with pytest.raises(psycopg2.Error):
             cur.execute("SELECT * FROM public.notification_inbox")
         cur.execute("RESET ROLE")
+        # Anon cannot attach the token to a user. A mismatched signed-in id
+        # is the same refusal. A signed-out save stores no user.
+        cur.execute("SELECT set_config('request.jwt.claim.sub', '', false)")
+        token = "ExponentPushToken[inbox-probe-tokenxx]"
+        device = "11111111-aaaa-4aaa-8aaa-111111111111"
+        cur.execute("SET ROLE anon")
+        with pytest.raises(psycopg2.Error) as anon_link:
+            cur.execute(
+                "SELECT public.save_device_push_token(%s, %s, 'ios', true, 'seen', %s)",
+                (token, device, user_b),
+            )
+        assert anon_link.value.pgcode == "42501"
+        cur.execute("RESET ROLE")
+        cur.execute("SELECT set_config('request.jwt.claim.sub', %s, false)", (user_a,))
+        cur.execute("SET ROLE authenticated")
+        with pytest.raises(psycopg2.Error) as mismatch:
+            cur.execute(
+                "SELECT public.save_device_push_token(%s, %s, 'ios', true, 'seen', %s)",
+                (token, device, user_b),
+            )
+        assert mismatch.value.pgcode == "42501"
+        cur.execute(
+            "SELECT public.save_device_push_token(%s, %s, 'ios', true, 'seen', %s)",
+            (token, device, user_a),
+        )
+        cur.execute("RESET ROLE")
+        cur.execute("SELECT user_id::text FROM public.device_push_tokens WHERE token = %s", (token,))
+        assert cur.fetchone()[0] == user_a
+        cur.execute("SELECT set_config('request.jwt.claim.sub', '', false)")
+        cur.execute("SET ROLE anon")
+        cur.execute(
+            "SELECT public.save_device_push_token(%s, %s, 'ios', true, 'seen', NULL)",
+            (token, device),
+        )
+        cur.execute("RESET ROLE")
+        cur.execute("SELECT user_id FROM public.device_push_tokens WHERE token = %s", (token,))
+        assert cur.fetchone()[0] is None
     finally:
         if conn is not None:
             conn.close()

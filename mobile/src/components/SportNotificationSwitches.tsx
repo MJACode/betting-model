@@ -1,9 +1,8 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { AppSwitch } from '@/components/AppSwitch';
-import { readAuthUserId } from '@/hooks/useAuth';
-import { refreshNotificationInbox, useNotificationInbox } from '@/hooks/useNotificationInbox';
+import { useNotificationInbox } from '@/hooks/useNotificationInbox';
 import { SPORTS } from '@/hooks/useSportFilter';
 import { colors, font, opacity, radii, sectionHeaderText, spacing } from '@/lib/theme';
 
@@ -15,10 +14,6 @@ import { colors, font, opacity, radii, sectionHeaderText, spacing } from '@/lib/
  */
 export function SportNotificationSwitches({ masterOn }: { masterOn: boolean }) {
   const { muted, setSportEnabled, userId, loaded } = useNotificationInbox();
-
-  useEffect(() => {
-    void refreshNotificationInbox(readAuthUserId());
-  }, []);
 
   const signedIn = userId != null;
 

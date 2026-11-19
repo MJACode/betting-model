@@ -41,9 +41,15 @@ BEGIN
   SECURITY DEFINER
   SET search_path = ''
   AS $fn$
+  DECLARE
+    v_uid uuid;
   BEGIN
     -- p_last_seen stays in the signature so a shipped client still matches.
-    -- The stored clock is the server's.
+    -- The stored clock is the server's. The owner is auth.uid(), never the
+    -- id the caller typed. p_user_id is only a compatibility argument: a
+    -- value that is not this session is rejected. Anon has no uid, so a
+    -- caller who passes any user id is rejected, and a signed-out save
+    -- stores NULL (that is the unlink).
     IF p_token IS NULL
        OR p_token !~ '^Expo(nent)?PushToken\[[A-Za-z0-9_-]{10,100}\]$' THEN
       RAISE EXCEPTION 'save_device_push_token: bad token' USING ERRCODE = '22023';
@@ -58,18 +64,22 @@ BEGIN
       RAISE EXCEPTION 'save_device_push_token: enabled is required' USING ERRCODE = '22023';
     END IF;
 
-    -- A null p_user_id does not clear a user already stored. A signed-out
-    -- re-register must not detach the row from the inbox it already owns.
+    v_uid := auth.uid();
+    IF p_user_id IS NOT NULL AND p_user_id IS DISTINCT FROM v_uid THEN
+      RAISE EXCEPTION 'save_device_push_token: user does not match the session'
+        USING ERRCODE = '42501';
+    END IF;
+
     INSERT INTO public.device_push_tokens
         (token, device_id, platform, enabled, last_seen, user_id)
     VALUES
-        (p_token, p_device_id, p_platform, p_enabled, pg_catalog.now()::text, p_user_id)
+        (p_token, p_device_id, p_platform, p_enabled, pg_catalog.now()::text, v_uid)
     ON CONFLICT (token) DO UPDATE
       SET device_id = COALESCE(EXCLUDED.device_id, public.device_push_tokens.device_id),
           platform  = COALESCE(EXCLUDED.platform, public.device_push_tokens.platform),
           enabled   = EXCLUDED.enabled,
           last_seen = pg_catalog.now()::text,
-          user_id   = COALESCE(EXCLUDED.user_id, public.device_push_tokens.user_id);
+          user_id   = v_uid;
   END
   $fn$;
 
@@ -194,5 +204,56 @@ BEGIN
 
   REVOKE ALL ON public.notification_sport_prefs FROM PUBLIC, anon, authenticated;
   GRANT SELECT, INSERT, UPDATE ON public.notification_sport_prefs TO authenticated;
+
+  -- The caller's own alerts. Account deletion already removes the caller's
+  -- other rows (delete_my_account). This is that same delete, for the two
+  -- tables that did not exist then, plus unlinking this user's tokens.
+  -- It is not the 7-day retention prune.
+  CREATE OR REPLACE FUNCTION public.forget_my_notifications()
+  RETURNS void
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = ''
+  AS $fn$
+  DECLARE
+    v_uid uuid;
+  BEGIN
+    v_uid := auth.uid();
+    IF v_uid IS NULL THEN
+      RAISE EXCEPTION 'forget_my_notifications: not signed in' USING ERRCODE = '42501';
+    END IF;
+    DELETE FROM public.notification_inbox WHERE user_id = v_uid;
+    DELETE FROM public.notification_sport_prefs WHERE user_id = v_uid;
+    UPDATE public.device_push_tokens
+       SET user_id = NULL
+     WHERE user_id = v_uid;
+  END
+  $fn$;
+
+  ALTER FUNCTION public.forget_my_notifications() OWNER TO postgres;
+  REVOKE ALL ON FUNCTION public.forget_my_notifications() FROM PUBLIC, anon, authenticated;
+  GRANT EXECUTE ON FUNCTION public.forget_my_notifications() TO authenticated;
+
+  -- When the login row itself is deleted, the history goes with it.
+  -- device_push_tokens stays (the install) and its user_id is cleared.
+  IF pg_catalog.to_regclass('auth.users') IS NOT NULL THEN
+    ALTER TABLE public.notification_inbox
+      DROP CONSTRAINT IF EXISTS notification_inbox_user_fk;
+    ALTER TABLE public.notification_inbox
+      ADD CONSTRAINT notification_inbox_user_fk
+      FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE;
+
+    ALTER TABLE public.notification_sport_prefs
+      DROP CONSTRAINT IF EXISTS notification_sport_prefs_user_fk;
+    ALTER TABLE public.notification_sport_prefs
+      ADD CONSTRAINT notification_sport_prefs_user_fk
+      FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE;
+
+    ALTER TABLE public.device_push_tokens
+      DROP CONSTRAINT IF EXISTS device_push_tokens_user_fk;
+    ALTER TABLE public.device_push_tokens
+      ADD CONSTRAINT device_push_tokens_user_fk
+      FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE SET NULL;
+  END IF;
 END
 $mig$;

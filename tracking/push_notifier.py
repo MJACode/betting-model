@@ -418,9 +418,13 @@ def _store_inbox(conn, rows: list[dict]) -> None:
     insert_rows(conn, rows)
 
 
-def _fanout_summaries(conn, plan, new_bets, dropped, build) -> list[dict]:
-    """One summary per user, rebuilt after that user's mutes are removed."""
-    from tracking.notification_inbox import visible_signals
+def _fanout_summaries(conn, plan, new_bets, dropped, build) -> tuple[list[dict], list[dict]]:
+    """One summary per user, rebuilt after that user's mutes are removed.
+
+    Rows are returned, not written. The caller inserts them after the send,
+    in the same transaction as push_sent, so a retry cannot double-insert.
+    """
+    from tracking.notification_inbox import bind_inbox_id, visible_signals
     groups, mutes, unread = plan
     messages: list[dict] = []
     rows: list[dict] = []
@@ -435,14 +439,19 @@ def _fanout_summaries(conn, plan, new_bets, dropped, build) -> list[dict]:
             continue
         built = build(tokens, bets, drops)
         if user_id:
+            bet_keys = [str(s["lock_key"]) for s in bets if s.get("lock_key")]
+            drop_keys = [str(s["lock_key"]) for s in drops if s.get("lock_key")]
+            for msg in built:
+                kind = str((msg.get("data") or {}).get("type") or "alert")
+                parts = bet_keys if kind == "new_bets" else drop_keys
+                msg["data"] = bind_inbox_id(user_id, kind, parts, msg.get("data") or {})
             rows.extend(_stamp_owned([(user_id, msg) for msg in built], unread))
         messages.extend(built)
-    _store_inbox(conn, rows)
-    return messages
+    return messages, rows
 
 
-def _fanout_live(conn, plan, signals: list[dict]) -> list[dict]:
-    from tracking.notification_inbox import visible_signals
+def _fanout_live(conn, plan, signals: list[dict]) -> tuple[list[dict], list[dict]]:
+    from tracking.notification_inbox import bind_inbox_id, visible_signals
     groups, mutes, unread = plan
     messages: list[dict] = []
     rows: list[dict] = []
@@ -457,22 +466,31 @@ def _fanout_live(conn, plan, signals: list[dict]) -> list[dict]:
         title = f"🔴 {len(kept)} live pick{'s' if len(kept) != 1 else ''}"
         body = _summary_body([s["label"] for s in kept])
         data = _route("live_signals", kept)
-        built = [{
-            "to": token, "title": title, "body": body, "data": dict(data),
-            "sound": "default", "priority": "high",
-        } for token in tokens]
+        keys = [str(s["lock_key"]) for s in kept if s.get("lock_key")]
+        built = []
+        for token in tokens:
+            payload = dict(data)
+            if user_id:
+                payload = bind_inbox_id(user_id, "live_signals", keys, payload)
+            built.append({
+                "to": token, "title": title, "body": body, "data": payload,
+                "sound": "default", "priority": "high",
+            })
         if user_id:
             rows.extend(_stamp_owned([(user_id, msg) for msg in built], unread))
         messages.extend(built)
-    _store_inbox(conn, rows)
-    return messages
+    return messages, rows
 
 
-def _store_feedback_inbox(conn, replies: list[dict], messages: list[dict]) -> None:
-    """Feedback has no sport. Write one inbox row per user who has a token."""
+def _feedback_inbox_rows(conn, replies: list[dict], messages: list[dict]) -> list[dict]:
+    """Feedback has no sport. One inbox row per user who has a token.
+
+    The id is the reply's lock_key, so a retry does not insert a second row.
+    """
+    from tracking.notification_inbox import bind_inbox_id
     plan = _inbox_plan(conn)
     if plan is None:
-        return
+        return []
     user_by_device = {}
     for _, group in plan[0]:
         for device in group:
@@ -482,8 +500,12 @@ def _store_feedback_inbox(conn, replies: list[dict], messages: list[dict]) -> No
     for reply, msg in zip(replies, messages):
         user_id = user_by_device.get(reply.get("device_id"))
         if user_id:
+            msg["data"] = bind_inbox_id(
+                user_id, "feedback_reply", [str(reply.get("lock_key") or "")],
+                msg.get("data") or {},
+            )
             owned.append((user_id, msg))
-    _store_inbox(conn, _stamp_owned(owned, plan[2]))
+    return _stamp_owned(owned, plan[2])
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
@@ -543,11 +565,13 @@ def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
     # Ledger regardless of token count, so a signal with zero devices online
     # isn't re-detected forever (it would spam once a device registers late).
     sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+    inbox_rows: list[dict] = []
     if plan is None:
         messages = _build_messages(tokens, new_bets, dropped) if tokens else []
     else:
-        messages = _fanout_summaries(conn, plan, new_bets, dropped, _build_messages)
+        messages, inbox_rows = _fanout_summaries(conn, plan, new_bets, dropped, _build_messages)
     sent = _expo_send(messages, conn) if messages else 0
+    _store_inbox(conn, inbox_rows)
 
     for s in new_bets:
         conn.execute(
@@ -710,9 +734,16 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
                     "priority": "high",
                 })
                 if user_id:
+                    from tracking.notification_inbox import bind_inbox_id
+                    messages[-1]["data"] = bind_inbox_id(
+                        user_id, "line_change",
+                        [str(a["pick_id"]), str(a["kind"]), str(a["current"])],
+                        messages[-1]["data"],
+                    )
                     owned.append((user_id, messages[-1]))
-        _store_inbox(conn, _stamp_owned(owned, unread))
+        inbox_rows = _stamp_owned(owned, unread)
         sent = _expo_send(messages, conn) if messages else 0
+        _store_inbox(conn, inbox_rows)
 
         # Ledger every alert (even with no device online) so it isn't re-detected
         # forever — mirrors notify_signal_changes.
@@ -799,6 +830,7 @@ def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -
         # "live pick" is what the board calls these (PicksHomeScreen's
         # itemNoun), and the tap now lands on that board — so the push should
         # not invent a third noun for it.
+        inbox_rows: list[dict] = []
         if plan is None:
             title = f"🔴 {len(new)} live pick{'s' if len(new) != 1 else ''}"
             body = _summary_body([s["label"] for s in new])
@@ -808,8 +840,9 @@ def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -
                 "sound": "default", "priority": "high",
             } for token in tokens]
         else:
-            messages = _fanout_live(conn, plan, new)
+            messages, inbox_rows = _fanout_live(conn, plan, new)
         sent = _expo_send(messages, conn) if messages else 0
+        _store_inbox(conn, inbox_rows)
 
         for s in new:
             conn.execute(
@@ -885,9 +918,11 @@ def notify_feedback_replies(dry_run: bool = False) -> int:
             "priority": "high",
         } for r in replies]
         # Feedback has no sport, so a mute never drops it. The inbox row is
-        # per user when the device token carries one.
-        _store_feedback_inbox(conn, replies, messages)
+        # per user when the device token carries one. Written with the ledger,
+        # after the send, so a retry cannot insert it twice.
+        inbox_rows = _feedback_inbox_rows(conn, replies, messages)
         sent = _expo_send(messages, conn)
+        _store_inbox(conn, inbox_rows)
 
         # Ledger every reply, delivered or not — mirrors the other producers, so
         # a delivery failure can't turn into a nightly re-notify.

@@ -3,7 +3,7 @@ import * as Notifications from 'expo-notifications';
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
-import { readAuthUserId } from '@/hooks/useAuth';
+import { readAuthStatus, readAuthUserId, subscribeAuthUser } from '@/hooks/useAuth';
 import { getDeviceId } from '@/hooks/useDeviceId';
 import { clearPushOptInForAccountDeletion, usePushOptIn } from '@/hooks/usePushOptIn';
 import { diagnosePushError, type PushDiagnosis } from '@/lib/pushDiagnosis';
@@ -51,7 +51,18 @@ const TOKEN_KEY = 'push.token.v1';
 
 const listeners = new Set<(s: PushState) => void>();
 let state: PushState = { status: 'idle', token: null, diagnosis: null, registeredAt: null };
-let inFlight: Promise<PushState> | null = null;
+let chain: Promise<unknown> = Promise.resolve();
+
+/** One registration at a time. A sign-in that lands mid-flight runs after it,
+ *  reading the user id then, so the earlier null write cannot finish last. */
+function enqueue<T>(job: () => Promise<T>): Promise<T> {
+  const run = chain.then(job, job);
+  chain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 function setState(next: Partial<PushState>): PushState {
   state = { ...state, ...next };
@@ -112,8 +123,11 @@ async function rememberedToken(): Promise<string | null> {
  * Concurrent callers share one attempt.
  */
 export function registerForPush(): Promise<PushState> {
-  if (inFlight) return inFlight;
-  inFlight = (async () => {
+  return enqueue(() => registerForPushNow());
+}
+
+async function registerForPushNow(): Promise<PushState> {
+  return (async () => {
     setState({ status: 'registering', diagnosis: null });
     try {
       // Ask what we already have before prompting. On iOS a second request
@@ -190,10 +204,9 @@ export function registerForPush(): Promise<PushState> {
       // verbatim rather than guessing.
       return setState({ status: 'failed', diagnosis: diagnosePushError(err) });
     } finally {
-      inFlight = null;
+      /* The queue, not an in-flight flag, serialises the next call. */
     }
   })();
-  return inFlight;
 }
 
 /**
@@ -271,10 +284,22 @@ export function usePushNotifications(): PushState & { retry: () => void } {
   useEffect(() => {
     // `ready` guards the first frame: usePushOptIn reports `false` before
     // AsyncStorage answers, and acting on that would unregister on every cold
-    // start of an opted-in device.
+    // start of an opted-in device. Auth can still be `loading` after that.
+    // Re-save when the user id changes, including sign-in after a cold start
+    // that registered with no user, and sign-out (auth.uid() is then null,
+    // which unlinks the token).
     if (!ready) return;
-    if (enabled) void registerForPush();
-    else void unregisterForPush();
+    let seen = '';
+    let have = false;
+    return subscribeAuthUser((userId, status) => {
+      if (status === 'loading' || readAuthStatus() === 'loading') return;
+      const key = userId ?? '';
+      if (have && seen === key) return;
+      have = true;
+      seen = key;
+      if (enabled) void registerForPush();
+      else void unregisterForPush();
+    });
   }, [enabled, ready]);
 
   const retry = useCallback(() => {

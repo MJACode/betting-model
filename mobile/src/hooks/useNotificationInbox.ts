@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
-import { readAuthUserId } from '@/hooks/useAuth';
+import { readAuthStatus, readAuthUserId, subscribeAuthUser } from '@/hooks/useAuth';
 import { applyUnreadBadge, dismissInboxNotifications } from '@/lib/notificationBadge';
 import {
   mutedSports,
@@ -103,6 +104,9 @@ async function load(userId: string | null): Promise<void> {
 }
 
 export function refreshNotificationInbox(userId?: string | null): Promise<void> {
+  // Auth still resolving is not "signed out". Loading as signed out clears
+  // the icon badge and then nothing reloads when the session arrives.
+  if (readAuthStatus() === 'loading') return Promise.resolve();
   const id = userId === undefined ? readAuthUserId() : userId;
   if (inflight && inflightFor === id) return inflight;
   inflightFor = id;
@@ -110,6 +114,53 @@ export function refreshNotificationInbox(userId?: string | null): Promise<void> 
     inflight = null;
   });
   return inflight;
+}
+
+let watching = false;
+/** A tap that arrived before the session was known. Marked once auth resolves. */
+let pendingInboxId: string | null = null;
+
+/** One listener set for the process: auth, foreground, and a push arriving. */
+function watchInbox(): void {
+  if (watching) return;
+  watching = true;
+  subscribeAuthUser(() => {
+    if (pendingInboxId && readAuthStatus() !== 'loading' && readAuthUserId()) {
+      const id = pendingInboxId;
+      pendingInboxId = null;
+      void markReadByInboxId(id);
+    }
+    void refreshNotificationInbox();
+  });
+  AppState.addEventListener('change', (next) => {
+    if (next === 'active') void refreshNotificationInbox();
+  });
+  try {
+    Notifications.addNotificationReceivedListener(() => {
+      void refreshNotificationInbox();
+    });
+  } catch (err) {
+    console.warn('[push] inbox listener unavailable', err);
+  }
+}
+
+/** The OS tap opened this alert. Mark that inbox row read and refresh the bell. */
+export async function markReadByInboxId(inboxId: unknown): Promise<void> {
+  if (typeof inboxId !== 'string' || inboxId.length === 0) return;
+  if (readAuthStatus() === 'loading') {
+    pendingInboxId = inboxId;
+    return;
+  }
+  const userId = readAuthUserId();
+  if (!userId) return;
+  const readAt = new Date().toISOString();
+  const { error } = await supabase
+    .from('notification_inbox')
+    .update({ read_at: readAt })
+    .eq('notification_id', inboxId)
+    .eq('user_id', userId);
+  await dismissInboxNotifications([inboxId], Notifications);
+  if (!error) await refreshNotificationInbox(userId);
 }
 
 export function useNotificationInbox(): InboxSnapshot & {
@@ -121,6 +172,7 @@ export function useNotificationInbox(): InboxSnapshot & {
 } {
   const [local, setLocal] = useState(snapshot);
   useEffect(() => {
+    watchInbox();
     setLocal(snapshot);
     const listener = (s: InboxSnapshot) => setLocal(s);
     listeners.add(listener);

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Inbox review: token owner is auth.uid(), relink on sign-in, idempotent inbox rows |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Notifications inbox: bell on every tab, 7-day history, per-sport mutes, app badge. Hand migration, not applied |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Signals + Slip and Track pills: the icon and label sat ~4pt high in the 44pt pill; centered, pill size unchanged |
 | 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, NBA reassessment: the projection model stops betting threes overs (287 card bets, -23.08 units on three seasons) and the three shooting-luck total models wait for 10 games again (21-29, -11.10 units on teams under 10 games); the twelve registered backtests in one doc, Kalshi's price on the prop bets among them (not worth building) |

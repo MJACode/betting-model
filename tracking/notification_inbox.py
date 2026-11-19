@@ -22,6 +22,9 @@ import json
 import uuid
 from collections import OrderedDict
 
+# Fixed namespace so a retry of the same alert produces the same inbox id.
+_INBOX_NS = uuid.UUID("6f1b6c3a-8e4d-4c1a-9b2e-3d5a7c9e1f04")
+
 from loguru import logger
 
 RETENTION_DAYS = 7
@@ -140,10 +143,30 @@ def unread_counts(conn, mutes: dict[str, set[str]]) -> dict[str, int]:
     return counts
 
 
+def stable_notification_id(user_id: str, kind: str, parts: list[str]) -> str:
+    """Same alert, same id, including when the parts arrive in another order.
+
+    A retry then hits ON CONFLICT (user_id, notification_id) DO NOTHING
+    instead of writing a second row.
+    """
+    material = "|".join([str(user_id), kind, *sorted(str(p) for p in parts)])
+    return str(uuid.uuid5(_INBOX_NS, material))
+
+
+def bind_inbox_id(user_id: str, kind: str, parts: list[str], data: dict) -> dict:
+    """Copy `data` and set inboxId. Callers must not share one dict across tokens."""
+    route = dict(data)
+    route["inboxId"] = stable_notification_id(user_id, kind, parts)
+    return route
+
+
 def make_row(user_id: str, kind: str, title: str, body: str, data: dict) -> dict:
     """One inbox row. notification_id is also data.inboxId so the phone can
     dismiss the delivered OS notification that belongs to this row."""
-    nid = str(uuid.uuid4())
+    preset = data.get("inboxId")
+    nid = preset if isinstance(preset, str) and preset else stable_notification_id(
+        user_id, kind or "alert", [title, body],
+    )
     route = dict(data)
     route["inboxId"] = nid
     sport = route.get("sport")

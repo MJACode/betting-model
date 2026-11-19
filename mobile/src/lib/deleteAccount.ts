@@ -217,6 +217,15 @@ export async function runAccountDeletion(input: {
   deviceId: string | null;
 }): Promise<DeleteOutcome> {
   assertAuthEnabled(AUTH_ENABLED);
+  // The caller's alerts and sport switches, and the token's user link.
+  // Missing until the inbox migration is applied; that is not a failed delete.
+  const forgot = await supabase.rpc('forget_my_notifications');
+  if (forgot.error) {
+    const text = `${forgot.error.code ?? ''} ${forgot.error.message ?? ''}`;
+    if (!/PGRST202|schema cache|Could not find the function|forget_my_notifications/i.test(text)) {
+      console.warn('[deleteAccount] notifications', forgot.error.message);
+    }
+  }
   const { error } = await supabase.rpc('delete_my_account');
   if (error) {
     return isStaleSessionError(error)

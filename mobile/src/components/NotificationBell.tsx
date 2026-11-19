@@ -1,11 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { readAuthUserId } from '@/hooks/useAuth';
-import { refreshNotificationInbox, useNotificationInbox } from '@/hooks/useNotificationInbox';
+import { useNotificationInbox } from '@/hooks/useNotificationInbox';
 import { colors, font, opacity } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -19,10 +18,6 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export function NotificationBell() {
   const navigation = useNavigation<Nav>();
   const { unread } = useNotificationInbox();
-
-  useEffect(() => {
-    void refreshNotificationInbox(readAuthUserId());
-  }, []);
 
   const label = unread > 0 ? `Notifications, ${unread} unread` : 'Notifications';
   const shown = unread > 99 ? '99+' : String(unread);
