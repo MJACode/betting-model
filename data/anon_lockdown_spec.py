@@ -439,6 +439,12 @@ COMMIT;
 """
 
 
+# Supabase-managed. Step B does not write default privileges in these
+# schemas. Measured 2026-11-18: storage is postgres-owned and already
+# grants anon; graphql and graphql_public are supabase_admin-owned and
+# already grant anon. They stay as they are.
+UNTOUCHED_SCHEMAS = ("storage", "graphql", "graphql_public")
+
 # Both tracked-bet functions use this. A second copy is how they drift.
 _OTHER_OWNER_CHECK = """
   IF to_regclass('public.app_timings') IS NOT NULL THEN
@@ -493,6 +499,7 @@ BEGIN
      WHERE n.nspname <> 'public'
        AND n.nspname <> 'information_schema'
        AND n.nspname NOT LIKE 'pg_%'
+       AND n.nspname NOT IN ('storage', 'graphql', 'graphql_public')
   LOOP
     EXECUTE format(
       'ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I '
@@ -500,6 +507,27 @@ BEGIN
   END LOOP;
 END
 $keep_other_schemas$;
+-- supabase_admin's public defaults grant anon on tables, functions and
+-- sequences (measured 2026-11-18). postgres can change that role's
+-- defaults only as a member. On the managed project it is not one, so
+-- this notices and continues. Objects that role creates in public stay
+-- open to anon until scripts/lockdown_anon_stray_check.sql flags them
+-- and someone who owns them revokes.
+DO $admin_defaults$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+    RAISE NOTICE 'no supabase_admin role';
+    RETURN;
+  END IF;
+  IF NOT pg_has_role('supabase_admin', 'MEMBER') THEN
+    RAISE NOTICE 'not a member of supabase_admin; its public anon defaults stay';
+    RETURN;
+  END IF;
+  EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE ALL ON TABLES FROM anon';
+  EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon';
+  EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM anon';
+END
+$admin_defaults$;
 
 {_alter_policies(STEP_B_POLICIES, "authenticated")}
 {_functions(STEP_B_STATS_FUNCTIONS + STEP_B_DEVICE_FUNCTIONS)}
@@ -712,6 +740,7 @@ def undo_b_sql() -> str:
              "     WHERE n.nspname <> 'public'\n",
              "       AND n.nspname <> 'information_schema'\n",
              "       AND n.nspname NOT LIKE 'pg_%'\n",
+             "       AND n.nspname NOT IN ('storage', 'graphql', 'graphql_public')\n",
              "  LOOP\n",
              "    EXECUTE format(\n",
              "      'ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I '\n",

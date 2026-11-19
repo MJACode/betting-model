@@ -136,6 +136,7 @@ BEGIN
      WHERE n.nspname <> 'public'
        AND n.nspname <> 'information_schema'
        AND n.nspname NOT LIKE 'pg_%'
+       AND n.nspname NOT IN ('storage', 'graphql', 'graphql_public')
   LOOP
     EXECUTE format(
       'ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I '
@@ -143,6 +144,27 @@ BEGIN
   END LOOP;
 END
 $keep_other_schemas$;
+-- supabase_admin's public defaults grant anon on tables, functions and
+-- sequences (measured 2026-11-18). postgres can change that role's
+-- defaults only as a member. On the managed project it is not one, so
+-- this notices and continues. Objects that role creates in public stay
+-- open to anon until scripts/lockdown_anon_stray_check.sql flags them
+-- and someone who owns them revokes.
+DO $admin_defaults$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+    RAISE NOTICE 'no supabase_admin role';
+    RETURN;
+  END IF;
+  IF NOT pg_has_role('supabase_admin', 'MEMBER') THEN
+    RAISE NOTICE 'not a member of supabase_admin; its public anon defaults stay';
+    RETURN;
+  END IF;
+  EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE ALL ON TABLES FROM anon';
+  EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon';
+  EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM anon';
+END
+$admin_defaults$;
 
 ALTER POLICY "anon read alt_game_lines" ON public.alt_game_lines TO authenticated;
 ALTER POLICY "anon read fighters" ON public.fighters TO authenticated;

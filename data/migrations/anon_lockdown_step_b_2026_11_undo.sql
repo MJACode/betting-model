@@ -36,6 +36,7 @@ BEGIN
      WHERE n.nspname <> 'public'
        AND n.nspname <> 'information_schema'
        AND n.nspname NOT LIKE 'pg_%'
+       AND n.nspname NOT IN ('storage', 'graphql', 'graphql_public')
   LOOP
     EXECUTE format(
       'ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I '

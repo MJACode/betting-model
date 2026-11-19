@@ -626,6 +626,65 @@ def test_worker_migrations_do_not_reopen_anon():
         assert not ok and "42501" in err
         ok, err = _can(dsn, "anon", "SELECT 1 FROM public.games;")
         assert not ok and "42501" in err
+        # A new public table that arrives with anon is the supabase_admin
+        # gap. The stray check flags it. Revoking works when we own it.
+        _psql(dsn, "CREATE TABLE public.arrived_open (id int); "
+                  "GRANT SELECT ON public.arrived_open TO anon;")
+        try:
+            _psql_file(dsn, ROOT / "scripts" / "lockdown_anon_stray_check.sql")
+        except AssertionError as exc:
+            assert "arrived_open" in str(exc)
+        else:
+            raise AssertionError("stray check did not raise")
+        _psql(dsn, "REVOKE ALL ON public.arrived_open FROM anon;")
+
+
+def test_supabase_admin_defaults_are_out_of_postgres_reach():
+    """Measured: a non-member cannot change that role's defaults or revoke
+    on a table it owns. storage and graphql are not named as targets."""
+    sql = (MIGRATIONS / "anon_lockdown_step_b_2026_11.sql").read_text(encoding="utf-8")
+    undo = (MIGRATIONS / "anon_lockdown_step_b_2026_11_undo.sql").read_text(encoding="utf-8")
+    assert "pg_has_role('supabase_admin', 'MEMBER')" in sql
+    assert "IN SCHEMA storage" not in sql
+    assert "IN SCHEMA graphql" not in sql
+    assert "IN SCHEMA storage" not in undo
+    assert "IN SCHEMA graphql" not in undo
+    if not pg_bin("psql"):
+        pytest.skip("psql is not installed")
+    with scratch_cluster("admin-acl-") as dsn:
+        _psql(dsn, """
+          CREATE ROLE supabase_admin NOLOGIN;
+          CREATE ROLE worker NOLOGIN;
+          CREATE ROLE anon NOLOGIN;
+          GRANT CREATE, USAGE ON SCHEMA public TO supabase_admin, worker;
+          GRANT supabase_admin TO postgres;
+        """)
+        _psql(dsn, """
+          SET ROLE supabase_admin;
+          ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
+            GRANT SELECT ON TABLES TO anon;
+          CREATE TABLE public.opened_by_admin (id int);
+          RESET ROLE;
+          REVOKE supabase_admin FROM postgres;
+        """)
+        proc_sql = """
+          GRANT worker TO postgres;
+          SET ROLE worker;
+          ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
+            REVOKE SELECT ON TABLES FROM anon;
+        """
+        psql = pg_bin("psql")
+        proc = subprocess.run(
+            [psql, dsn, "-v", "ON_ERROR_STOP=1", "-X", "-q", "-f", "-"],
+            input=proc_sql, text=True, capture_output=True)
+        assert proc.returncode != 0
+        assert "permission denied to change default privileges" in proc.stderr
+        assert _psql(
+            dsn,
+            "SELECT has_table_privilege('anon', 'public.opened_by_admin', 'SELECT');"
+        ).strip() == "t"
+        _psql(dsn, "REVOKE ALL ON TABLE public.opened_by_admin FROM anon;")
+        _psql_file(dsn, ROOT / "scripts" / "lockdown_anon_stray_check.sql")
 
 
 def test_retired_sync_writes_config_retired_models():
