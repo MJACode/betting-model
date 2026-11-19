@@ -46,7 +46,7 @@ import requests  # noqa: E402
 from loguru import logger  # noqa: E402
 
 import config  # noqa: E402
-from data.db import get_connection  # noqa: E402
+from data.db import ConnectionLost, get_connection  # noqa: E402
 from tracking import clv_close as cc  # noqa: E402
 
 RESERVE_DAYS = 3
@@ -202,8 +202,23 @@ def buy(conn, limit: int | None = None) -> dict:
             for bk in ((body.get("data") or {}).get("bookmakers") or []):
                 if bk.get("key") == book:
                     rows += parse_book(game_id, bk, home_name, snap, ev["id"], slot["props"])
-            n = store_quotes(conn, rows, SOURCE)
-            _ledger(conn, game_id, book, slot, ev["id"], snap, True, billed, n, None, markets)
+            # The session pooler drops a long-lived connection now and then
+            # (2026-11-19: twice in 300 calls, "server closed the connection
+            # unexpectedly"). The quotes are already fetched and paid for, so
+            # store them again on the reconnected connection, not re-buy.
+            for attempt in range(3):
+                try:
+                    n = store_quotes(conn, rows, SOURCE)
+                    _ledger(conn, game_id, book, slot, ev["id"], snap, True, billed, n, None, markets)
+                    break
+                except ConnectionLost:
+                    logger.warning(f"{game_id} {book}: connection lost while storing; retrying ({attempt + 1})")
+                    try:
+                        conn.rollback()
+                    except Exception:                          # noqa: BLE001
+                        pass
+            else:
+                raise RuntimeError(f"{game_id} {book}: could not store the bought quotes")
             stats["bought"] += 1
             stats["quotes"] += n
             time.sleep(0.15)
