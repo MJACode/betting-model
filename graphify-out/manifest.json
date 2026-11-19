@@ -48,9 +48,9 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "data/anon_readable.py": {
-    "mtime": 1795049393.0657885,
-    "seen": 1795054710.010699,
-    "ast_hash": "5d81018164b097066e1acf0f752179ab",
+    "mtime": 1795063781.8573053,
+    "seen": 1795064726.3043358,
+    "ast_hash": "5ea4e88faf46a2455b9d87f506aea583",
     "semantic_hash": ""
   },
   "data/db.py": {
@@ -1140,9 +1140,9 @@
     "semantic_hash": ""
   },
   "data/view_migrations.py": {
-    "mtime": 1795051583.890145,
-    "seen": 1795054710.0123794,
-    "ast_hash": "eb11b6c9f62ebe3ea59965c47f32d936",
+    "mtime": 1795059572.2287767,
+    "seen": 1795064726.3056452,
+    "ast_hash": "12cf4736e8f7dcd3e1ba118085aa7546",
     "semantic_hash": ""
   },
   "dk_mlb_sample.json": {
@@ -3948,9 +3948,9 @@
     "semantic_hash": ""
   },
   "scheduler.py": {
-    "mtime": 1795049393.801005,
-    "seen": 1795054710.0153437,
-    "ast_hash": "9256c8a6a7936e59895fa5c631d1c79b",
+    "mtime": 1795064306.4405503,
+    "seen": 1795064726.3114784,
+    "ast_hash": "e44a5a4cc6fe49b658e8852d380c3cfd",
     "semantic_hash": ""
   },
   "scripts/_envfile.py": {
@@ -7428,9 +7428,9 @@
     "semantic_hash": ""
   },
   "tracking/job_heartbeat.py": {
-    "mtime": 1795049394.1787684,
-    "seen": 1795054710.0359428,
-    "ast_hash": "fea40318001957c2d3bf7bd8b7a17c9d",
+    "mtime": 1795060870.9198816,
+    "seen": 1795064726.3345916,
+    "ast_hash": "7d04032f25db928e4175b60628cb0981",
     "semantic_hash": ""
   },
   "tracking/job_queue.py": {
@@ -7470,9 +7470,9 @@
     "semantic_hash": ""
   },
   "tracking/paper_tracker.py": {
-    "mtime": 1795049394.1905797,
-    "seen": 1795054710.0359879,
-    "ast_hash": "22bc3f9071d47e3e502ced0d7b9d0633",
+    "mtime": 1795059569.7957046,
+    "seen": 1795064726.334641,
+    "ast_hash": "0630f3c25407eb6c408b553409d44b1c",
     "semantic_hash": ""
   },
   "tracking/parlay_track_record.py": {
@@ -7728,15 +7728,15 @@
     "semantic_hash": ""
   },
   "docs/cloud_worker.md": {
-    "mtime": 1795049393.0933375,
-    "seen": 1795054710.0363703,
-    "ast_hash": "f7abb4740e64cc4383e89d2b5ece521d",
+    "mtime": 1795064306.434197,
+    "seen": 1795064726.3350642,
+    "ast_hash": "557f834dd18e297a2bbd5f7511313de3",
     "semantic_hash": ""
   },
   "docs/clv.md": {
-    "mtime": 1795051715.0626397,
-    "seen": 1795054710.036375,
-    "ast_hash": "2a2ae6cb94387022b2e2fff1ec3f799b",
+    "mtime": 1795063249.950639,
+    "seen": 1795064726.3350866,
+    "ast_hash": "9f85029ea600bcfcce506f7c2106f2a6",
     "semantic_hash": ""
   },
   "docs/config_topology.md": {
@@ -15348,8 +15348,8 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/components/StarterCanvas.tsx": {
-    "mtime": 1795049393.7219636,
-    "seen": 1795054710.0150266,
+    "mtime": 1795063341.443338,
+    "seen": 1795064726.3111515,
     "ast_hash": "51c73bd92ca1451d5f82bb0c510bcba1",
     "semantic_hash": ""
   },
@@ -15468,14 +15468,14 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/models/ModelRoster.tsx": {
-    "mtime": 1795049393.7607982,
-    "seen": 1795054710.0152094,
+    "mtime": 1795063341.6287122,
+    "seen": 1795064726.3113403,
     "ast_hash": "147b5a1a1ca7f997b17e279531228ecd",
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/models/ModelVolume.tsx": {
-    "mtime": 1795049393.7618093,
-    "seen": 1795054710.0152137,
+    "mtime": 1795063341.6614444,
+    "seen": 1795064726.3113444,
     "ast_hash": "3f4bfe56eedbeeb85c23d029a9ef48a0",
     "semantic_hash": ""
   },
@@ -15492,8 +15492,8 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/models/ThresholdWhatIf.tsx": {
-    "mtime": 1795049393.7653098,
-    "seen": 1795054710.0152273,
+    "mtime": 1795063341.7132,
+    "seen": 1795064726.3113613,
     "ast_hash": "f1df4a00cd4512ee09b4cadcbd0d9e17",
     "semantic_hash": ""
   },
@@ -15546,8 +15546,8 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/picks/PicksCharts.tsx": {
-    "mtime": 1795051794.1342695,
-    "seen": 1795054710.015278,
+    "mtime": 1795063341.7510338,
+    "seen": 1795064726.311409,
     "ast_hash": "c6f193f0188776727f54c5814a30b870",
     "semantic_hash": ""
   },
@@ -15558,8 +15558,8 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/picks/PicksFilterBar.tsx": {
-    "mtime": 1795051794.1885965,
-    "seen": 1795054710.0152888,
+    "mtime": 1795063341.797792,
+    "seen": 1795064726.311421,
     "ast_hash": "bea7d0e42c93da95b5849ffb5859116b",
     "semantic_hash": ""
   },
@@ -15570,9 +15570,9 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/picks/RollupStrip.tsx": {
-    "mtime": 1795051794.226598,
-    "seen": 1795054710.015299,
-    "ast_hash": "f9434af13e3cfa9e0496b9d11e0c4a2e",
+    "mtime": 1795063341.841126,
+    "seen": 1795064726.3114316,
+    "ast_hash": "7ff741906c85dca7ae8a8adf480fdf12",
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/picks/picksUtils.ts": {
@@ -15858,8 +15858,8 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/database/DbPcCopy.tsx": {
-    "mtime": 1795049393.755392,
-    "seen": 1795054710.015164,
+    "mtime": 1795063341.472586,
+    "seen": 1795064726.311291,
     "ast_hash": "940dd5f7d9f31eaa1c9ae86cd253ad76",
     "semantic_hash": ""
   },
@@ -16104,15 +16104,15 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/health/HealthCoverage.tsx": {
-    "mtime": 1795051794.0103889,
-    "seen": 1795054710.0151916,
-    "ast_hash": "2f160a54938c79e5263633423e8ec48d",
+    "mtime": 1795063341.5088172,
+    "seen": 1795064726.311319,
+    "ast_hash": "ec5ec6759599c8d020451b6579fd0db3",
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/health/HealthOverview.tsx": {
-    "mtime": 1795051794.0334024,
-    "seen": 1795054710.0151963,
-    "ast_hash": "e071b085b94d7228dc65d15b6083d828",
+    "mtime": 1795063341.5554504,
+    "seen": 1795064726.311324,
+    "ast_hash": "fc9f4405ebb0a9a35aa5510065fce4e3",
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/health/HealthRolling.tsx": {
@@ -16122,9 +16122,9 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/health/healthUtils.ts": {
-    "mtime": 1795051794.083588,
-    "seen": 1795054710.0152044,
-    "ast_hash": "e2425d245a68034f27dae0410cc14a67",
+    "mtime": 1795063341.5916963,
+    "seen": 1795064726.3113348,
+    "ast_hash": "fd83e88d2f743260522a704bd3526910",
     "semantic_hash": ""
   },
   "scripts/euroleague_stacking_check.py": {
@@ -16173,6 +16173,36 @@
     "mtime": 1795049393.1336858,
     "seen": 1795054710.0366075,
     "ast_hash": "cbb2337988fe1bfa67c25ac374c36d3a",
+    "semantic_hash": ""
+  },
+  "data/ingestors/clv_closing_pull.py": {
+    "mtime": 1795060805.781263,
+    "seen": 1795064726.3043928,
+    "ast_hash": "6e0bcdfc8324c795d13c992b6b63cb30",
+    "semantic_hash": ""
+  },
+  "data/migrations/clv_close_2026_11_19.sql": {
+    "mtime": 1795060832.7279174,
+    "seen": 1795064726.30524,
+    "ast_hash": "adfd65373cdde48627fd2f4bee2517b8",
+    "semantic_hash": ""
+  },
+  "scripts/clv_close_history.py": {
+    "mtime": 1795064306.426191,
+    "seen": 1795064726.3116019,
+    "ast_hash": "8aae5dc6520b6375069dc55718dbbe03",
+    "semantic_hash": ""
+  },
+  "tests/test_clv_close.py": {
+    "mtime": 1795064373.8698018,
+    "seen": 1795064726.3147635,
+    "ast_hash": "c260e4a3648d6a18f9baafa90993cf41",
+    "semantic_hash": ""
+  },
+  "tracking/clv_close.py": {
+    "mtime": 1795064439.0075371,
+    "seen": 1795064726.3345196,
+    "ast_hash": "fe445b02879cd3387510feca8adaecbd",
     "semantic_hash": ""
   }
 }
