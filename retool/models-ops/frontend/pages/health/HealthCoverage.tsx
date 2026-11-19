@@ -31,11 +31,11 @@ export default function HealthCoverage({ rows, loading, error }: Props) {
         <StatCard label="Closing price on our number" icon={CheckCircle2} value={t.price.toLocaleString()} caption={share(t.price)} />
         <StatCard label="Line moved our way" icon={TrendingUp} value={t.lineFor.toLocaleString()} caption={share(t.lineFor)} />
         <StatCard label="Line moved against us" icon={TrendingDown} value={t.lineAgainst.toLocaleString()} caption={share(t.lineAgainst)} />
-        <StatCard label="In-play (no pre-game close)" icon={Radio} value={t.inPlay.toLocaleString()} caption={share(t.inPlay)} />
-        <StatCard label="Not measured" icon={HelpCircle} value={t.unmeasured.toLocaleString()} caption={share(t.unmeasured)} />
+        <StatCard label="In-play: not measured, by design" icon={Radio} value={t.inPlay.toLocaleString()} caption={share(t.inPlay)} />
+        <StatCard label="No closing price" icon={HelpCircle} value={t.unmeasured.toLocaleString()} caption={share(t.unmeasured)} />
       </div>
       <Footnote>
-        The same bets as the published record. Average CLV uses only bets whose book closed on the number we bet: the close is that book’s last pre-game price, and CLV is how much better our price was. When the book’s main line left our number before the start, there is no closing price for our exact bet, so the bet counts as a beat (line moved our way) or a miss (moved against us) in the beat rate “with line moves”, and is not in the average. In-play bets have no pre-game close. “Not measured” is mostly NCAAB first-half spreads, whose last line pull before tip is the one the bet was made on.
+        The same bets as the published record. In-play bets are not measured for closing-line value, by design: there is no pre-game close to compare against. Every pre-game bet is measured against its book's last price before the start, at the exact number we bet, from a pull made after the bet: the main line, or the book's alternate ladder when the main line had moved. "Line moved" counts are bets where the book no longer offered our number at the start; they count as a beat (moved our way) or a miss (against us) in the beat rate with line moves, and are not in the average. "No closing price" is a bet the book was not pulled again between the bet and the start.
       </Footnote>
     </div>
   )

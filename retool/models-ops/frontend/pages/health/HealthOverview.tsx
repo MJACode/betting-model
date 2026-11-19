@@ -325,7 +325,7 @@ export default function HealthOverview({ rows, windows, loading, error, selected
       </div>
 
       <Footnote>
-        CLV is how much better the price we took was than the same book’s last pre-game price on the same number, in percent (the published standard). ± is the 95% margin of the average. “Last 25 / 50 / 100” are the model’s newest bets; a dash means it has fewer bets than that. Beat rate counts line moves (our way is a beat, against is a miss) and leaves out bets that closed at our exact price; “price only” is the published headline rate. “Vs Pinnacle” is our price against Pinnacle’s fair closing price, where Pinnacle closed on our number. Against the close: a verdict only from {MIN_MEASURED} closing prices up.
+        In-play bets are not measured for closing-line value, by design. CLV is how much better the price we took was than the same book’s last pre-game price on the same number, in percent (the published standard). ± is the 95% margin of the average. “Last 25 / 50 / 100” are the model’s newest bets; a dash means it has fewer bets than that. Beat rate counts line moves (our way is a beat, against is a miss) and leaves out bets that closed at our exact price; “price only” is the published headline rate. “Vs Pinnacle” is our price against Pinnacle’s fair closing price, where Pinnacle closed on our number. Against the close: a verdict only from {MIN_MEASURED} closing prices up.
       </Footnote>
     </div>
   )

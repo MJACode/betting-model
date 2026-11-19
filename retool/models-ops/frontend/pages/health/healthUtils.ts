@@ -137,7 +137,7 @@ export const VERDICT: Record<Verdict, { label: string; tone: 'good' | 'critical'
   trails: { label: 'Trails the close', tone: 'critical', help: 'Average CLV is below zero by more than its 95% margin.' },
   unclear: { label: 'Not clear yet', tone: 'neutral', help: 'The 95% range of the average CLV includes zero.' },
   few: { label: 'Too few measured', tone: 'outline', help: `Fewer than ${MIN_MEASURED} bets with a closing price on our number.` },
-  inplay: { label: 'In-play: no close', tone: 'info', help: 'In-play bets have no pre-game closing price to compare against.' },
+  inplay: { label: 'In-play: not measured', tone: 'info', help: 'In-play bets are not measured for closing-line value, by design: there is no pre-game close to compare against.' },
 }
 
 export function verdictOf(avg: number | null, se: number | null, measured: number, inPlayOnly: boolean): Verdict {
@@ -174,9 +174,9 @@ export const STATUS_LABEL: Record<ClvStatus, string> = {
   price: 'Closing price on our number',
   line_for: 'Line moved our way',
   line_against: 'Line moved against us',
-  in_play: 'In-play (no pre-game close)',
-  no_close: 'No closing quote found',
-  not_measured: 'Not measured',
+  in_play: 'In-play (not measured, by design)',
+  no_close: 'No closing price found',
+  not_measured: 'Not measured yet',
   old_method: 'Old method (not counted)',
 }
 

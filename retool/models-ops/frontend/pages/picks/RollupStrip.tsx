@@ -113,7 +113,7 @@ export default function RollupStrip({ rows, total }: Props) {
         icon={Gauge}
         value={`${s.measured.toLocaleString()} / ${s.total.toLocaleString()}`}
         caption={`${coveragePct} measured · ${s.notMeasured.toLocaleString()} not measured`}
-        title="Measured means a closing price on our number or a line move. In-play bets have no pre-game close, so they are never measured; they show as not measured, not as losses. CLV is independent of result."
+        title="Measured means a closing price on our number or a line move. In-play bets are not measured for closing-line value, by design: there is no pre-game close. CLV is independent of result."
       />
     </div>
   )
