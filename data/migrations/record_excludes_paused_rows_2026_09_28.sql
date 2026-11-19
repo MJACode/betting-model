@@ -75,7 +75,11 @@ BEGIN
          AND p.downgrade_reason IS DISTINCT FROM 'model paused'
        GROUP BY p.sport, p.model_id
     $v$;
-    GRANT SELECT ON public.v_public_track_record TO anon, authenticated;
+    GRANT SELECT ON public.v_public_track_record TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT SELECT ON public.v_public_track_record TO anon;
+    END IF;
     RAISE NOTICE 'v_public_track_record now excludes paused rows';
   END IF;
 
@@ -107,7 +111,11 @@ BEGIN
        GROUP BY p.game_date, p.sport
       HAVING count(*) FILTER (WHERE p.result = ANY (ARRAY['WIN','LOSS','PUSH'])) > 0
     $v$;
-    GRANT SELECT ON public.v_public_track_record_daily TO anon, authenticated;
+    GRANT SELECT ON public.v_public_track_record_daily TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT SELECT ON public.v_public_track_record_daily TO anon;
+    END IF;
     RAISE NOTICE 'v_public_track_record_daily now excludes paused rows';
   END IF;
 END $mig$;

@@ -42,7 +42,11 @@ BEGIN
                         E'\n    AND condition_status IS DISTINCT FROM ''DUPLICATE''::text\n  GROUP BY ');
     EXECUTE format('CREATE OR REPLACE VIEW public.%I AS %s', v, d);
     EXECUTE format('ALTER VIEW public.%I SET (security_invoker = on)', v);
-    EXECUTE format('GRANT SELECT ON public.%I TO anon, authenticated', v);
+    EXECUTE format('GRANT SELECT ON public.%I TO authenticated', v);
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE format('GRANT SELECT ON public.%I TO anon', v);
+    END IF;
     RAISE NOTICE '%: the second copy of one bet no longer counts', v;
   END LOOP;
 END $mig$;

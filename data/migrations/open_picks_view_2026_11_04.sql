@@ -284,5 +284,9 @@ BEGIN
 $view$;
   EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks 1605a3f8d18f'$c$;
   REVOKE ALL ON public.open_picks FROM anon, authenticated;
-  GRANT SELECT ON public.open_picks TO anon, authenticated;
+  GRANT SELECT ON public.open_picks TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.open_picks TO anon;
+  END IF;
 END $mig$;

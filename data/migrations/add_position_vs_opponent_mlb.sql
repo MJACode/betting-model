@@ -127,7 +127,11 @@ BEGIN
     $ddl$;
 
     EXECUTE 'REVOKE ALL ON FUNCTION public.position_vs_opponent_mlb(integer[], text, text, text) FROM PUBLIC';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.position_vs_opponent_mlb(integer[], text, text, text) TO anon, authenticated';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.position_vs_opponent_mlb(integer[], text, text, text) TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.position_vs_opponent_mlb(integer[], text, text, text) TO anon';
+    END IF;
 
     RAISE NOTICE 'position_vs_opponent_mlb created';
 END

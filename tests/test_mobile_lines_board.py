@@ -91,10 +91,10 @@ def test_try_again_is_not_spoken_as_try_again_loading():
 
 
 def test_lines_is_in_the_anon_manifest():
-    from data.anon_readable import ANON_READABLE
+    from data.anon_readable import AUTHENTICATED_READABLE
 
-    assert "v_latest_odds_all_books" in ANON_READABLE
-    assert "games" in ANON_READABLE
+    assert "v_latest_odds_all_books" in AUTHENTICATED_READABLE
+    assert "games" in AUTHENTICATED_READABLE
 
 
 @pytest.mark.skipif(

@@ -34,6 +34,7 @@ Deliberate constraints:
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -883,6 +884,30 @@ def _apply_one(conn, name: str, sql: str) -> str | None:
     return last
 
 
+_COMBINED_ANON_GRANT = re.compile(r"\bTO\s+anon\s*,\s*authenticated\b", re.I)
+
+
+def _anon_lock_started(conn) -> bool:
+    """True after step A: picks exists and anon can no longer read it.
+
+    A migration that still says GRANT ... TO anon, authenticated would
+    undo that. The files are gated themselves. This is the backstop for
+    the next file that forgets the gate.
+    """
+    try:
+        row = conn.execute(
+            "SELECT to_regclass('public.picks') IS NOT NULL "
+            "AND NOT has_table_privilege('anon', 'public.picks', 'SELECT')"
+        ).fetchone()
+    except Exception:
+        return False
+    return bool(row and row[0])
+
+
+def _without_combined_anon_grants(sql: str) -> str:
+    return _COMBINED_ANON_GRANT.sub("TO authenticated", sql)
+
+
 def apply_view_migrations(conn=None) -> ViewMigrationResult:
     """Run each ACTIVE_MIGRATIONS file. Never raises — observability and
     schema polish must not break the pass. The caller turns `failed` into
@@ -897,13 +922,18 @@ def apply_view_migrations(conn=None) -> ViewMigrationResult:
         return ViewMigrationResult(0, (("(connection)", str(exc)),))
 
     try:
+        locked = _anon_lock_started(conn)
+        if locked:
+            logger.info(
+                "anon can no longer read picks; combined anon grants "
+                "in this pass are rewritten to authenticated")
         for name in ACTIVE_MIGRATIONS:
             path = MIGRATIONS_DIR / name
             if not path.exists():
                 logger.warning(f"View migration missing on disk: {name}")
                 failed.append((name, "missing on disk"))
                 continue
-            err = _apply_one(conn, name, path.read_text(encoding="utf-8"))
+            err = _apply_one(conn, name, _without_combined_anon_grants(path.read_text(encoding="utf-8")) if locked else path.read_text(encoding="utf-8"))
             if err is None:
                 applied += 1
                 logger.info(f"View migration OK: {name}")

@@ -19,6 +19,11 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, anon-key lockdown prepared (steps A and B, website record view, tracked_bets owner policies); not applied |
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, A failed push opt-out no longer blocks delete_my_login; the success copy requires the login delete |
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Account delete opts the push token out before the login is deleted; a missing auth user stores a null user |
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Inbox review: token owner is auth.uid(), relink on sign-in, idempotent inbox rows |
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Notifications inbox: bell on every tab, 7-day history, per-sport mutes, app badge. Hand migration, not applied |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, closing-line value: one final close for every pre-game bet (the bet book's last pull before the start, pulled after the bet, at our number from the main line or the alternate ladder; never a made-up 0.00); a closing pull four minutes before each start; 145 recent bets corrected, the 1,191 older bets' closes priced at about 24,000 credits and waiting on mike; in-play bets not measured, by design |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Signals + Slip and Track pills: the icon and label sat ~4pt high in the 44pt pill; centered, pill size unchanged |
 | 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, closing-line value: 622 of 1,595 published bets had no number (274 in-play, 300 line moved off our number, 42 NCAAB first-half spreads with no later pull, 6 no quote); the Picks & CLV tab called every line move "Worse"; a Model Health tab with blocks of 25/50/100 and a rolling average, on three views that read the record's own filter; a tip-minus-3 NCAAB first-half pull |

@@ -2,8 +2,9 @@
  * Same rollup as mobile/src/lib/trackRecord.ts summarize() and groupBySport().
  *
  * Picks are wins + losses + pushes, not the view's picks column.
- * A retired model id is skipped, matching isModelRetired.
- * Sports covered are sports with a non-retired model whose picks column is > 0.
+ * site_public_record already leaves retired models out. The fallback
+ * view still has model_id, and those rows are skipped when `retired` is passed.
+ * Sports covered are sports whose picks column is > 0.
  * Units are the posted-stake `units` column the Record hero prints
  * (formatSigned to 2 decimals, U+2212 for a loss, unsigned when the
  * rounded value is zero). A missing units column hides the row.
@@ -21,14 +22,14 @@ export function formatSigned(value, digits = 2, suffix = "") {
 
 /**
  * @param {Array<Record<string, unknown>>} rows
- * @param {Iterable<string>} retired
+ * @param {Iterable<string>} [retired]
  * @returns {{picks: number, units: number, unitsText: string, sports: number} | null}
  */
 export function summarizeRecord(rows, retired) {
-  const retiredSet = retired instanceof Set ? retired : new Set(retired);
+  const retiredSet = retired instanceof Set ? retired : new Set(retired || []);
   const kept = [];
-  for (const row of rows) {
-    if (retiredSet.has(String(row.model_id))) continue;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row.model_id != null && retiredSet.has(String(row.model_id))) continue;
     kept.push(row);
   }
   if (kept.length === 0) return null;

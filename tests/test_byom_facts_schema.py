@@ -29,7 +29,12 @@ def test_the_migration_is_one_statement_and_registered():
     assert "CONCURRENTLY" not in code.upper()
     assert "FORCE ROW LEVEL SECURITY" not in code.upper()
     # A facts table is not the pick store and not a publisher.
-    assert "public.picks" not in code
+    # The lockdown gate only asks whether anon can still read picks.
+    kept = "\n".join(
+        ln for ln in code.splitlines()
+        if "to_regclass('public.picks')" not in ln
+        and "has_table_privilege('anon', 'public.picks'" not in ln)
+    assert "public.picks" not in kept
     assert "discord" not in code.lower()
 
 
@@ -85,10 +90,10 @@ def test_the_skip_guard_refuses_every_write_verb():
 
 
 def test_both_tables_are_on_the_anon_read_list():
-    from data.anon_readable import AHEAD_OF_THE_APP, ANON_READABLE
+    from data.anon_readable import AHEAD_OF_THE_APP, AUTHENTICATED_READABLE
 
     for rel in ("byom_game_facts", "byom_prop_facts"):
-        assert rel in ANON_READABLE
+        assert rel in AUTHENTICATED_READABLE
     assert "byom_prop_facts" in AHEAD_OF_THE_APP
     assert "byom_game_facts" not in AHEAD_OF_THE_APP
     # The builder reads byom_game_facts. Prop facts are still unread.

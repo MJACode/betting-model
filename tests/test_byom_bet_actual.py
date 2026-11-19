@@ -88,9 +88,11 @@ def test_migration_is_active_and_safe():
     for col in ("actual numeric", "home_score numeric", "away_score numeric"):
         assert col in sql
     assert "FROM PUBLIC" in sql
-    assert "TO anon, authenticated;" in sql
+    assert "TO authenticated;" in sql
+    assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in sql
     assert "TO service_role;" in sql
-    assert "picks" not in sql.lower().replace("does not write picks", "")
+    quiet = sql.lower().replace("does not write picks", "").replace("public.picks", "")
+    assert "picks" not in quiet
 
 
 def test_yes_no_keys_match_the_record_constants():

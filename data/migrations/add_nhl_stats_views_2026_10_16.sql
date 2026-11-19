@@ -352,13 +352,41 @@ BEGIN
     $fn$
     $ddl$;
 
-    EXECUTE 'GRANT SELECT ON public.nhl_skater_game_log TO anon, authenticated';
-    EXECUTE 'GRANT SELECT ON public.nhl_goalie_game_log TO anon, authenticated';
-    EXECUTE 'GRANT SELECT ON public.nhl_team_game_log TO anon, authenticated';
-    EXECUTE 'GRANT SELECT ON public.v_player_season_totals_nhl TO anon, authenticated';
-    EXECUTE 'GRANT SELECT ON public.v_team_season_totals_nhl TO anon, authenticated';
-    EXECUTE 'GRANT SELECT ON public.v_nhl_player_prop_odds TO anon, authenticated';
+    EXECUTE 'GRANT SELECT ON public.nhl_skater_game_log TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT SELECT ON public.nhl_skater_game_log TO anon';
+    END IF;
+    EXECUTE 'GRANT SELECT ON public.nhl_goalie_game_log TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT SELECT ON public.nhl_goalie_game_log TO anon';
+    END IF;
+    EXECUTE 'GRANT SELECT ON public.nhl_team_game_log TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT SELECT ON public.nhl_team_game_log TO anon';
+    END IF;
+    EXECUTE 'GRANT SELECT ON public.v_player_season_totals_nhl TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT SELECT ON public.v_player_season_totals_nhl TO anon';
+    END IF;
+    EXECUTE 'GRANT SELECT ON public.v_team_season_totals_nhl TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT SELECT ON public.v_team_season_totals_nhl TO anon';
+    END IF;
+    EXECUTE 'GRANT SELECT ON public.v_nhl_player_prop_odds TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT SELECT ON public.v_nhl_player_prop_odds TO anon';
+    END IF;
     EXECUTE 'REVOKE ALL ON FUNCTION public.player_stat_values_nhl(integer, text, text, integer) FROM PUBLIC';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_stat_values_nhl(integer, text, text, integer) TO anon, authenticated';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_stat_values_nhl(integer, text, text, integer) TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_stat_values_nhl(integer, text, text, integer) TO anon';
+    END IF;
 END
 $mig$;

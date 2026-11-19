@@ -69,9 +69,9 @@ def test_entered_prices_are_stored_through_the_insert_only_rpc():
     q = _read("lib/queries.ts")
     assert "supabase.rpc('log_sgp_price'" in q
     assert "supabase.rpc('sgp_haircuts')" in q
-    from data.anon_readable import RPC_ANON_CALLABLE  # type: ignore
+    from data.anon_readable import RPC_AUTHENTICATED_CALLABLE  # type: ignore
 
-    assert "log_sgp_price" in RPC_ANON_CALLABLE and "sgp_haircuts" in RPC_ANON_CALLABLE
+    assert "log_sgp_price" in RPC_AUTHENTICATED_CALLABLE and "sgp_haircuts" in RPC_AUTHENTICATED_CALLABLE
     mig = (ROOT / "data" / "migrations" / "add_sgp_price_observations_2026_11_06.sql").read_text(encoding="utf-8")
     assert "REVOKE ALL ON TABLE sgp_price_observations FROM anon, authenticated;" in mig
     assert "SECURITY DEFINER" in mig

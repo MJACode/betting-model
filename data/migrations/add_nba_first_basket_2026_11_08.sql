@@ -106,8 +106,16 @@ BEGIN
     CREATE POLICY "anon read nba_first_basket_players"
       ON public.nba_first_basket_players FOR SELECT TO anon, authenticated USING (true);
   END IF;
-  GRANT SELECT ON public.nba_first_basket_games TO anon, authenticated;
-  GRANT SELECT ON public.nba_first_basket_players TO anon, authenticated;
+  GRANT SELECT ON public.nba_first_basket_games TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.nba_first_basket_games TO anon;
+  END IF;
+  GRANT SELECT ON public.nba_first_basket_players TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.nba_first_basket_players TO anon;
+  END IF;
 
   -- One row per season and team. The likely jumper is the player who jumped
   -- the team's opening tip most often (ties: the most recent).
@@ -172,6 +180,14 @@ BEGIN
 
   REVOKE ALL ON public.v_nba_first_basket_team_season FROM anon, authenticated;
   REVOKE ALL ON public.v_nba_first_basket_player_season FROM anon, authenticated;
-  GRANT SELECT ON public.v_nba_first_basket_team_season TO anon, authenticated;
-  GRANT SELECT ON public.v_nba_first_basket_player_season TO anon, authenticated;
+  GRANT SELECT ON public.v_nba_first_basket_team_season TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.v_nba_first_basket_team_season TO anon;
+  END IF;
+  GRANT SELECT ON public.v_nba_first_basket_player_season TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.v_nba_first_basket_player_season TO anon;
+  END IF;
 END $$;

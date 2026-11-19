@@ -235,7 +235,11 @@ BEGIN
       ON public.mv_scored_pick_outcomes (model_id, model_probability, decision_edge);
 
     REVOKE ALL ON public.mv_scored_pick_outcomes FROM anon, authenticated;
-    GRANT SELECT ON public.mv_scored_pick_outcomes TO anon, authenticated;
+    GRANT SELECT ON public.mv_scored_pick_outcomes TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT SELECT ON public.mv_scored_pick_outcomes TO anon;
+    END IF;
 
     -- v_model_full_outcome_record depends on the matview, so it is recreated
     -- here with its cut on the decision columns. track_record_reads_graded_
@@ -273,7 +277,11 @@ BEGIN
       GROUP BY model_id
     $v$;
     REVOKE ALL ON public.v_model_full_outcome_record FROM anon, authenticated;
-    GRANT SELECT ON public.v_model_full_outcome_record TO anon, authenticated;
+    GRANT SELECT ON public.v_model_full_outcome_record TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT SELECT ON public.v_model_full_outcome_record TO anon;
+    END IF;
     RAISE NOTICE 'mv_scored_pick_outcomes rebuilt at the decision price';
   END IF;
 
@@ -527,8 +535,16 @@ BEGIN
       $body$
     $fn$;
 
-    GRANT EXECUTE ON FUNCTION public.custom_model_backtest(jsonb, jsonb) TO anon, authenticated;
-    GRANT EXECUTE ON FUNCTION public.custom_model_picks(jsonb, jsonb, int) TO anon, authenticated;
+    GRANT EXECUTE ON FUNCTION public.custom_model_backtest(jsonb, jsonb) TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT EXECUTE ON FUNCTION public.custom_model_backtest(jsonb, jsonb) TO anon;
+    END IF;
+    GRANT EXECUTE ON FUNCTION public.custom_model_picks(jsonb, jsonb, int) TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT EXECUTE ON FUNCTION public.custom_model_picks(jsonb, jsonb, int) TO anon;
+    END IF;
     RAISE NOTICE 'custom_model_backtest / custom_model_picks grade at the decision price';
   END IF;
 END

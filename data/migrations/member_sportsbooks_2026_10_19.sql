@@ -100,7 +100,15 @@ BEGIN
 
   REVOKE ALL ON FUNCTION public.member_books_get(TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION public.member_books_set(TEXT, TEXT[]) FROM PUBLIC;
-  GRANT EXECUTE ON FUNCTION public.member_books_get(TEXT) TO anon, authenticated;
-  GRANT EXECUTE ON FUNCTION public.member_books_set(TEXT, TEXT[]) TO anon, authenticated;
+  GRANT EXECUTE ON FUNCTION public.member_books_get(TEXT) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.member_books_get(TEXT) TO anon;
+  END IF;
+  GRANT EXECUTE ON FUNCTION public.member_books_set(TEXT, TEXT[]) TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT EXECUTE ON FUNCTION public.member_books_set(TEXT, TEXT[]) TO anon;
+  END IF;
 END
 $mig$;

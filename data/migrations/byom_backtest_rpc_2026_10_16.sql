@@ -210,5 +210,10 @@ BEGIN
 
   REVOKE ALL ON FUNCTION public.byom_backtest(integer, jsonb) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION public.byom_backtest(integer, jsonb)
-    TO anon, authenticated;
+    TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT EXECUTE ON FUNCTION public.byom_backtest(integer, jsonb)
+      TO anon;
+  END IF;
 END $mig$;

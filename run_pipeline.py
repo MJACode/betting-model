@@ -2201,6 +2201,13 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         logger.success(
             f"✓ Push notifications: {n} signal + {m} line-change + {f} feedback message(s) sent"
         )
+        # 7-day inbox retention. Deletes nothing until the deletion gate is
+        # open; the read path already hides rows older than 7 days.
+        try:
+            from tracking.notification_inbox import prune_notification_inbox
+            prune_notification_inbox()
+        except Exception as exc:  # noqa: BLE001 — retention must not fail the push
+            logger.error(f"notification inbox retention skipped: {exc}")
     except Exception as exc:
         logger.error(f"✗ Push notifications failed: {exc}")
         return False
