@@ -36,7 +36,11 @@ BEGIN
     END IF;
     EXECUTE 'CREATE OR REPLACE VIEW public.v_public_track_record AS ' || d;
     EXECUTE 'ALTER VIEW public.v_public_track_record SET (security_invoker = on)';
-    EXECUTE 'GRANT SELECT ON public.v_public_track_record TO anon, authenticated';
+    EXECUTE 'GRANT SELECT ON public.v_public_track_record TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT SELECT ON public.v_public_track_record TO anon';
+    END IF;
     RAISE NOTICE 'v_public_track_record counts CLV pushes';
   END IF;
 
@@ -57,7 +61,11 @@ BEGIN
     RAISE EXCEPTION 'v_opening_vs_live CLV push count was not inserted';
   END IF;
   EXECUTE 'CREATE OR REPLACE VIEW public.v_opening_vs_live WITH (security_invoker = on) AS ' || d;
-  EXECUTE 'GRANT SELECT ON public.v_opening_vs_live TO anon, authenticated';
+  EXECUTE 'GRANT SELECT ON public.v_opening_vs_live TO authenticated';
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  EXECUTE 'GRANT SELECT ON public.v_opening_vs_live TO anon';
+  END IF;
   RAISE NOTICE 'v_opening_vs_live counts CLV pushes';
 END
 $mig$;

@@ -351,7 +351,7 @@ def decide(games: dict, due: dict, todo: dict, fg: pd.DataFrame, per: pd.DataFra
             rows = per[(per.game_id == gid) & (per.created_at == pd.Timestamp(fetch_at))]
             pq = R.prepare_period(rows)
             if R.H1_DOG_ML in want:
-                got += R.decide_h1_dog(pq, gf, art, books)
+                got += R.decide_h1_dog(pq, gf, art, books, fg_board=board)
             if R.Q1_SHARE_TOTAL in want:
                 got += R.decide_q1_share(pq, rows, board, hist if hist is not None else
                                          pd.DataFrame(columns=["game_id", "tip", "home_code", "away_code",

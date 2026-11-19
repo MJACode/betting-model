@@ -12,6 +12,7 @@ import {
 import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { NotificationBell } from '@/components/NotificationBell';
 import { SettingsButton } from '@/components/SettingsButton';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
@@ -115,7 +116,10 @@ export function PerformanceScreen() {
           <View style={styles.header}>
             <View style={styles.titleRow}>
               <Text style={styles.title}>Performance</Text>
-              <SettingsButton />
+              <View style={styles.headerActions}>
+                <NotificationBell />
+                <SettingsButton />
+              </View>
             </View>
             <Text style={styles.subtitle}>Your bets, tracked by you</Text>
           </View>
@@ -185,7 +189,10 @@ export function PerformanceScreen() {
         <View style={styles.header}>
           <View style={styles.titleRow}>
             <Text style={styles.title}>Performance</Text>
-            <SettingsButton />
+            <View style={styles.headerActions}>
+              <NotificationBell />
+              <SettingsButton />
+            </View>
           </View>
           <Text style={styles.subtitle}>{bookLabel || 'Sportsbook'} · pull to refresh</Text>
         </View>
@@ -733,6 +740,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   title: {
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
@@ -791,7 +803,10 @@ const styles = StyleSheet.create({
     borderColor: colors.separatorOpaque,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
+    // Same inset as every other card on the tab; without it the note ran
+    // edge to edge (Matt, 2026-11-19, screenshot).
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
   },
   soonText: { flex: 1 },
   soonTitle: {

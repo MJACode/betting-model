@@ -39,7 +39,11 @@ BEGIN
     -- Written by the pipeline as the table owner; readable by the app.
     ALTER TABLE public.results_snapshots ENABLE ROW LEVEL SECURITY;
     REVOKE ALL ON public.results_snapshots FROM anon, authenticated;
-    GRANT SELECT ON public.results_snapshots TO anon, authenticated;
+    GRANT SELECT ON public.results_snapshots TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT SELECT ON public.results_snapshots TO anon;
+    END IF;
     CREATE POLICY "anon read results_snapshots"
       ON public.results_snapshots FOR SELECT TO anon, authenticated USING (true);
   END IF;

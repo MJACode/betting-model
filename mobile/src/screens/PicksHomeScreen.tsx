@@ -83,7 +83,9 @@ import {
   type PicksFilterState,
 } from '@/components/filters/PickFilters';
 import { SportToggle } from '@/components/SportToggle';
+import { NotificationBell } from '@/components/NotificationBell';
 import { SettingsButton } from '@/components/SettingsButton';
+import { UnreadNotificationsPill } from '@/components/UnreadNotificationsPill';
 import { BetslipButton } from '@/components/BetslipButton';
 import { LiveDot } from '@/components/LiveDot';
 import { SignalLockCard } from '@/components/SignalLockCard';
@@ -841,6 +843,7 @@ export function PicksHomeScreen() {
             accessibilityLabel="About these boards"
           />
           <View style={styles.headerRight}>
+            <NotificationBell />
             <BetslipButton />
             <SettingsButton />
           </View>
@@ -1117,7 +1120,9 @@ export function PicksHomeScreen() {
         data={rows}
         keyExtractor={(row) => row.key}
         ListHeaderComponent={
-          betAll && betAll.picks.length + betAll.skipped.length > 0 ? (
+          <>
+          <UnreadNotificationsPill />
+          {betAll && betAll.picks.length + betAll.skipped.length > 0 ? (
             <View style={styles.betAllRow}>
               <View style={styles.betAllText}>
                 <Text style={styles.betAllTitle}>
@@ -1146,7 +1151,8 @@ export function PicksHomeScreen() {
                 <Text style={styles.betAllButtonText}>{`Bet all ${betAll.picks.length}`}</Text>
               </Pressable>
             </View>
-          ) : null
+          ) : null}
+          </>
         }
         renderItem={({ item: row, index }) => {
           if (row.kind === 'day') {

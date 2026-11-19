@@ -59,7 +59,11 @@ BEGIN
     END IF;
     EXECUTE format('CREATE OR REPLACE VIEW public.%I AS %s', view_name, d);
     EXECUTE format('ALTER VIEW public.%I SET (security_invoker = on)', view_name);
-    EXECUTE format('GRANT SELECT ON public.%I TO anon, authenticated', view_name);
+    EXECUTE format('GRANT SELECT ON public.%I TO authenticated', view_name);
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE format('GRANT SELECT ON public.%I TO anon', view_name);
+    END IF;
     RAISE NOTICE '%: posted-stake units added', view_name;
   END LOOP;
 END $mig$;

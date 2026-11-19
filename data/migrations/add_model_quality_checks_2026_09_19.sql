@@ -30,7 +30,11 @@ BEGIN
 
     ALTER TABLE public.model_quality_checks ENABLE ROW LEVEL SECURITY;
     REVOKE ALL ON public.model_quality_checks FROM anon, authenticated;
-    GRANT SELECT ON public.model_quality_checks TO anon, authenticated;
+    GRANT SELECT ON public.model_quality_checks TO authenticated;
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    GRANT SELECT ON public.model_quality_checks TO anon;
+    END IF;
     CREATE POLICY "anon read model_quality_checks"
       ON public.model_quality_checks FOR SELECT TO anon, authenticated
       USING (true);

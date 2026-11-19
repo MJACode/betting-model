@@ -21,7 +21,7 @@ FIXED BEFORE ANY RESULT WAS READ (the match-winner study's choices, carried):
               and sides
   cuts        EV >= 0.00, 0.01, 0.02, 0.03, 0.05, 0.08
 
-    python -m scripts.tennis_games_study --cache C:/Users/micha/tennis_research/cache
+    python -m scripts.tennis_games_study --cache C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache
 """
 from __future__ import annotations
 

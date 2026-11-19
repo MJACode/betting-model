@@ -34,5 +34,9 @@ BEGIN
 
   EXECUTE 'CREATE OR REPLACE VIEW public.v_model_full_outcome_record AS ' || d;
   EXECUTE 'ALTER VIEW public.v_model_full_outcome_record SET (security_invoker = on)';
-  EXECUTE 'GRANT SELECT ON public.v_model_full_outcome_record TO anon, authenticated';
+  EXECUTE 'GRANT SELECT ON public.v_model_full_outcome_record TO authenticated';
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  EXECUTE 'GRANT SELECT ON public.v_model_full_outcome_record TO anon';
+  END IF;
 END $mig$;

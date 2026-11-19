@@ -18,17 +18,26 @@ and NCAAB live feeds, odds_ingestor._get_event_odds), so a call costs at most 4
 credits and an empty answer 0. credits_last records the feed's own
 x-requests-last for each call: the bill is read, never assumed.
 
-WHEN (scripts/ncaab_first_half_window.py plans it, every minute). Nine fetch
+WHEN (scripts/ncaab_first_half_window.py plans it, every minute). Ten fetch
 times per game: 15:00 UTC on its Eastern date, then 180, 120, 60, 50, 40, 30,
-20 and 10 minutes before tip (MARKS). A time is due once it has passed and no
+20, 10 and 3 minutes before tip (MARKS). A time is due once it has passed and no
 ok call for the game has landed since; a missed time is covered by the next
 tick, and a time the next one overtakes is skipped. A failed call at a history
 time waits for the next time; a failed call at a decision time (DECISION_MARKS)
-is retried every minute. At most 9 x 4 = 36 credits a game (an empty answer and an HTTP
+or at the closing time (CLOSE_MARK) is retried every minute. At most 10 x 4 = 40
+credits a game (an empty answer and an HTTP
 404 billed 0 in the measured calls, the purchase's api_call_log). The call at tip minus 10 (DECISION_MARK) is the one the spread card decides
 on (scripts/ncaab_first_half_spread_card.py); the call at tip minus 60
 (TOTAL_DECISION_MARK) is the one the total card decides on
 (scripts/ncaab_first_half_total_card.py).
+
+THE CLOSING FETCH (CLOSE_MARK, tip minus 3, added 2026-11-18). The spread card
+bets on the tip-minus-10 call, which used to be the last one, so its bets had
+no later line to close against: all 42 published first-half spread bets
+2026-11-03..11-17 were unmeasured (docs/clv.md, "NCAAB first-half totals and
+spreads": the close is the bet book's newest pre-tip row pulled after the pick).
+The card never decides on this call: it needs a tip-minus-10 call that landed
+5 to 10.5 minutes before tip, and this one lands 3 minutes before.
 
 WHAT ONE CALL STORES, per line-shop book, in ESPN's home/away orientation (the
 feed's event is placed on ESPN's game by ncaab_teams' resolver; when the feed
@@ -105,10 +114,15 @@ _ET = ZoneInfo("America/New_York")
 # purchase (tip minus 60), the first-half total's. A call at either is retried
 # every minute until one lands (due_mark).
 MARKS = (("15z", None), ("T-180", 180), ("T-120", 120), ("T-60", 60), ("T-50", 50),
-         ("T-40", 40), ("T-30", 30), ("T-20", 20), ("T-10", 10))
+         ("T-40", 40), ("T-30", 30), ("T-20", 20), ("T-10", 10), ("T-3", 3))
 DECISION_MARK = "T-10"
 TOTAL_DECISION_MARK = "T-60"
 DECISION_MARKS = (DECISION_MARK, TOTAL_DECISION_MARK)
+# The closing fetch: the line every first-half bet is graded against for CLV.
+# Not a decision time. Retried every minute like one, so a failed call still
+# leaves a close.
+CLOSE_MARK = "T-3"
+RETRIED_MARKS = DECISION_MARKS + (CLOSE_MARK,)
 MAX_CREDITS_PER_CALL = len(API_MARKETS)      # one per market returned, one region
 # No call this close to tip: the answer could land after the start.
 LAST_CALL_LEAD = timedelta(seconds=30)
@@ -285,10 +299,10 @@ def due_mark(game_date: str, tip: datetime, now: datetime, last_ok: datetime | N
     that has passed, with no ok call landed at or after it. None otherwise, and
     always None within LAST_CALL_LEAD of tip or after it.
 
-    Only the decision times (DECISION_MARKS) are retried every tick: a history
-    fetch time that has had one failed attempt waits for the next fetch time,
-    so a game the feed keeps refusing is called once per fetch time, not once
-    a minute."""
+    Only the decision times (DECISION_MARKS) and the closing time (CLOSE_MARK)
+    are retried every tick: a history fetch time that has had one failed
+    attempt waits for the next fetch time, so a game the feed keeps refusing is
+    called once per fetch time, not once a minute."""
     if now >= tip - LAST_CALL_LEAD:
         return None
     passed = [(m, t) for m, t in slots(game_date, tip) if t <= now]
@@ -297,7 +311,7 @@ def due_mark(game_date: str, tip: datetime, now: datetime, last_ok: datetime | N
     mark, t = passed[-1]
     if last_ok is not None and last_ok >= t:
         return None
-    if mark not in DECISION_MARKS and last_try is not None and last_try >= t:
+    if mark not in RETRIED_MARKS and last_try is not None and last_try >= t:
         return None
     return mark, t
 

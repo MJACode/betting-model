@@ -486,9 +486,21 @@ RLS statement, and **only deliberately reverting the fix showed it**.
 ### Verification standards — what "verified" means here
 
 - **`git stash` is NOT a master baseline once the work is committed.** Use
-  `git worktree add --detach origin/master` and diff against that. Local
-  `master` in these sandboxes is routinely dozens of commits behind — always
-  compare to `origin/master`.
+  `git worktree add --detach .claude/worktrees/<name> origin/master` and diff
+  against that. Local `master` in these sandboxes is routinely dozens of
+  commits behind — always compare to `origin/master`.
+- **Everything on the PC lives under the project folder** (2026-11-16). The
+  line above used to name no folder, and nothing said to remove a copy, so
+  sessions put them beside the project: measured that day, 52 copies (33 in
+  `Documents\bm-*`, 32.3 GB with their neighbours), and research data in nine
+  home-folder directories (`nba_research` 2,207 MB, `ncaabw_research` 428 MB,
+  `tennis_research` 344 MB, `el_spool` 324 MB, `ncaaf_research` 311 MB, and
+  smaller). The research sat outside the project because a helper,
+  `run_with_db.py`, was kept there "so the .env file itself never enters a
+  worktree", and caches were put beside it; `tests/test_everything_in_supabase.py`
+  scans only inside the project, so none of it was ever checked. Two live
+  feeds ran from Documents copies (`bm-live-feed`, `bm-tennis-feed`) and two
+  tennis loops from a third (`bm-tennis`). All moved 2026-11-16 (issue #1425).
 - **Report a tsc or pytest baseline as an error-SET diff, not a count.** The
   mobile tree carries a documented set of pre-existing `queries.ts` cast errors;
   the claim to make is "byte-identical to master, 0 in touched files".

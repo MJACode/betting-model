@@ -56,12 +56,16 @@ def test_grants_are_select_only():
     assert "security_invoker = on" in CODE
     for role in ("PUBLIC", "anon", "authenticated"):
         assert f"REVOKE ALL ON public.v_public_track_record_model_daily FROM {role};" in CODE
-    assert "GRANT SELECT ON public.v_public_track_record_model_daily TO anon, authenticated;" in CODE
+    # Authenticated only: the anon-key lockdown takes anon off the record
+    # views, and this view is rebuilt on later passes.
+    assert "GRANT SELECT ON public.v_public_track_record_model_daily TO authenticated;" in CODE
+    assert "TO anon" not in CODE
 
 
-def test_the_view_is_in_the_anon_manifest():
-    from data.anon_readable import ANON_READABLE
-    assert "v_public_track_record_model_daily" in ANON_READABLE
+def test_the_view_is_in_the_authenticated_manifest_and_not_anon():
+    from data.anon_readable import ANON_READABLE, AUTHENTICATED_READABLE
+    assert "v_public_track_record_model_daily" in AUTHENTICATED_READABLE
+    assert "v_public_track_record_model_daily" not in ANON_READABLE
 
 
 def test_the_app_reads_it_by_literal_name():

@@ -70,7 +70,8 @@ def test_the_worker_list_and_the_anon_grant():
         "player_h2h_stat_values_nfl(integer[], text, text[], text[])",
     ):
         assert f"REVOKE ALL ON FUNCTION public.{fn} FROM PUBLIC" in code
-        assert f"GRANT EXECUTE ON FUNCTION public.{fn} TO anon, authenticated" in code
+        assert f"GRANT EXECUTE ON FUNCTION public.{fn} TO authenticated" in code
+    assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in code
 
 
 def test_it_is_one_statement_and_each_piece_is_guarded():

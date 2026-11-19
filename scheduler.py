@@ -115,6 +115,9 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         prices it off the same book's spread, decides it once, and the job
         publishes. One bet a game across both moneyline models.
         RUN_NCAAB_MONEYLINE_FIRST_POST=0 stops it.)
+  * CLV closing pull      every minute, 24x7    -> run_clv_closing_pull
+        (data/ingestors/clv_closing_pull.py: the bet book's price at the bet's
+        number and its alternate ladder, four minutes before each start)
   * NCAAB first half      every minute, 24x7    -> run_ncaab_first_half_window
         (scripts/ncaab_first_half_window.py: one first-half call per listed
         game at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10
@@ -1100,6 +1103,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes NCAAB first-half spread and total picks through
                   # their own cards, on its own first-half fetches.
                   "ncaab_first_half_window",
+                  # Pulls the bet book's price at the start for every
+                  # pre-game bet (clv_close_quotes); writes no pick.
+                  "clv_closing_pull",
                   # Writes the four EuroLeague pre-game rules' picks through
                   # their card, on its own period and full-game fetches.
                   "euroleague_pregame_window",
@@ -2351,6 +2357,20 @@ def run_tennis_moneyline_card() -> None:
 # ten minutes, and about a second a call puts that slate near a minute. The
 # card reads the due games' quotes and lines and the season's finished games.
 NCAAB_FIRST_HALF_TIMEOUT_S = {"fetch": 300, "card": 240}
+
+
+def run_clv_closing_pull() -> None:
+    """One closing-pull tick (data/ingestors/clv_closing_pull.py, issue #1470).
+
+    For each game with a pre-game BET starting in the next four minutes, one
+    call to the feed's event endpoint: the bet books, the bet markets and their
+    alternate ladders, stored in clv_close_quotes with the instant they were
+    pulled. tracking/clv_close.py measures each bet's close from them and our
+    own rows. Most ticks have no game due and return after one read.
+    RUN_CLV_CLOSING_PULL=0 makes it return at once.
+    """
+    from data.ingestors.clv_closing_pull import pull
+    pull()
 
 
 def run_ncaab_first_half_window() -> None:
@@ -3763,6 +3783,18 @@ def build_scheduler() -> BlockingScheduler:
         id="ncaab_moneyline_first_post",
         name="NCAAB first-post moneyline (every minute, 24x7: decide each book's first "
              "moneyline post off its own spread)",
+        max_instances=1, coalesce=True, misfire_grace_time=30,
+    )
+
+    # The closing pull -- every minute, 24x7 (run_clv_closing_pull). Every
+    # minute because the window is the four minutes before each start; a tick
+    # overtaken by the next one has nothing left to add.
+    sched.add_job(
+        run_clv_closing_pull,
+        CronTrigger(minute="*", timezone=TIMEZONE),
+        id="clv_closing_pull",
+        name="CLV closing pull (every minute, 24x7: the bet book's price at the "
+             "bet's number and its alternate ladder, four minutes before each start)",
         max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 

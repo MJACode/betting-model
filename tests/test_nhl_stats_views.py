@@ -73,7 +73,8 @@ def test_the_prop_quote_is_pre_game_and_refuses_an_ambiguous_player():
 def test_it_is_registered_after_the_clv_stamp_and_declared_for_anon():
     from data.anon_readable import (
         ANON_READABLE,
-        RPC_ANON_CALLABLE,
+        AUTHENTICATED_READABLE,
+        RPC_AUTHENTICATED_CALLABLE,
         VIEW_BASE_TABLES,
     )
     from data.view_migrations import ACTIVE_MIGRATIONS
@@ -87,12 +88,12 @@ def test_it_is_registered_after_the_clv_stamp_and_declared_for_anon():
         "v_team_season_totals_nhl",
         "v_nhl_player_prop_odds",
     ):
-        assert view in ANON_READABLE
+        assert view in AUTHENTICATED_READABLE
         assert view in AHEAD_OF_THE_APP
     for table in ("nhl_skater_game_log", "nhl_goalie_game_log", "nhl_team_game_log"):
         assert table in VIEW_BASE_TABLES
         assert table not in ANON_READABLE
-    assert "player_stat_values_nhl" in RPC_ANON_CALLABLE
+    assert "player_stat_values_nhl" in RPC_AUTHENTICATED_CALLABLE
 
 
 def test_no_scorer_or_card_reads_the_new_names():
@@ -160,16 +161,16 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
     """The DDL, the anon role, and the L5 window. Same shape as the scratch
     cluster in tests/test_discord_void_notice.py. Skips only when Postgres
     cannot be started."""
+    import contextlib
     import os
-    import shutil
-    import socket
-    import subprocess
-    import tempfile
+
+    from tests._pg import scratch_cluster
 
     psycopg2 = pytest.importorskip("psycopg2")
 
     dsn = os.environ.get("LATEST_LINE_TEST_DSN")
-    owned = None
+    # Closing `owned` stops and deletes a cluster this test started.
+    owned = contextlib.ExitStack()
     if not dsn:
         initdb = _pg_bin("initdb")
         pg_ctl = _pg_bin("pg_ctl")
@@ -177,19 +178,11 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
             if os.environ.get("GITHUB_ACTIONS"):
                 pytest.fail("initdb is missing in CI — the scratch Postgres test would skip")
             pytest.skip("LATEST_LINE_TEST_DSN not set and initdb is missing")
-        owned = tempfile.mkdtemp(prefix="nhl-stats-pg-")
-        subprocess.run(
-            [initdb, "-D", owned, "-A", "trust", "--username", "postgres"],
-            check=True, capture_output=True, text=True)
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        sock.close()
-        subprocess.run(
-            [pg_ctl, "-D", owned, "-o", f"-p {port} -k {owned}",
-             "-l", str(Path(owned) / "log"), "-w", "start"],
-            check=True, capture_output=True, text=True)
-        dsn = f"host={owned} port={port} dbname=postgres user=postgres"
+        # tests/_pg.py starts it: UTF-8, trusted, TCP on a free port, and
+        # pg_ctl's output to a file. This test used to run pg_ctl itself with
+        # its output captured. On Windows the server keeps that pipe open, so
+        # every full run waited here forever (#1445, measured 2026-11-17).
+        dsn = owned.enter_context(scratch_cluster("nhl-stats-pg-"))
 
     conn = None
     try:
@@ -391,8 +384,4 @@ def test_the_views_run_as_anon_on_a_scratch_database_and_windows_skip_nulls():
     finally:
         if conn is not None:
             conn.close()
-        if owned is not None:
-            subprocess.run(
-                [_pg_bin("pg_ctl"), "-D", owned, "-w", "-m", "immediate", "stop"],
-                check=False, capture_output=True, text=True)
-            shutil.rmtree(owned, ignore_errors=True)
+        owned.close()

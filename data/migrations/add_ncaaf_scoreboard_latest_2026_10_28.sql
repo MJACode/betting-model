@@ -50,6 +50,14 @@ BEGIN
      ORDER BY s.game_id, s.seen_at DESC, s.state_id DESC
   $view$;
 
-  EXECUTE 'GRANT SELECT ON public.v_ncaaf_scoreboard_latest TO anon, authenticated';
-  EXECUTE 'GRANT SELECT ON public.ncaaf_live_states TO anon, authenticated';
+  EXECUTE 'GRANT SELECT ON public.v_ncaaf_scoreboard_latest TO authenticated';
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  EXECUTE 'GRANT SELECT ON public.v_ncaaf_scoreboard_latest TO anon';
+  END IF;
+  EXECUTE 'GRANT SELECT ON public.ncaaf_live_states TO authenticated';
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  EXECUTE 'GRANT SELECT ON public.ncaaf_live_states TO anon';
+  END IF;
 END $$;

@@ -89,13 +89,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: 3,
   },
-  // Signals card. minHeight 44 (HIG). Outline is tint — brand navy, 18:1 on
-  // bgCard — not the system blue.
+  // Signals card. minHeight 44 (HIG). The icon+label row is shorter than
+  // that, and a column lays out from the top, so the row sat ~4pt high
+  // (Matt, 2026-11-18: more empty space under "Track" than above it). The
+  // bell glyph is centered in its own box; the offset was the row, not the
+  // glyph. Outline is tint — brand navy, 18:1 on bgCard — not the system blue.
   btnTall: {
     minHeight: 44,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   on: {
     borderColor: colors.tint,

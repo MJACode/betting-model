@@ -178,8 +178,16 @@ BEGIN
   -- stops a write if a later grant is wider than the policy.
   REVOKE ALL ON public.byom_game_facts FROM PUBLIC, anon, authenticated;
   REVOKE ALL ON public.byom_prop_facts FROM PUBLIC, anon, authenticated;
-  GRANT SELECT ON public.byom_game_facts TO anon, authenticated;
-  GRANT SELECT ON public.byom_prop_facts TO anon, authenticated;
+  GRANT SELECT ON public.byom_game_facts TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.byom_game_facts TO anon;
+  END IF;
+  GRANT SELECT ON public.byom_prop_facts TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.byom_prop_facts TO anon;
+  END IF;
   ALTER TABLE public.byom_game_facts ENABLE ROW LEVEL SECURITY;
   ALTER TABLE public.byom_prop_facts ENABLE ROW LEVEL SECURITY;
 

@@ -8,7 +8,7 @@ Planned every minute (scheduler.run_ncaab_first_half_window, 24x7). A tick:
      a game appearing on the board; a game the feed does not list has no
      first-half market and no event to call). For each, the newest fetch time
      that has passed (data/ingestors/ncaab_first_half_odds.MARKS: 15:00 UTC on
-     its date, then 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip)
+     its date, then 180, 120, 60, 50, 40, 30, 20, 10 and 3 minutes before tip)
      with no ok call since is due. And the games each card must look at: not
      decided by it, ten minutes or less from tip for the spread card, sixty
      for the total card. Reads only; no API call.

@@ -27,11 +27,11 @@ def test_the_season_label_is_the_year_the_season_starts():
 
 
 def test_the_function_is_invoker_and_has_no_price_or_line_filter():
-    from data.anon_readable import RPC_ANON_CALLABLE
+    from data.anon_readable import RPC_AUTHENTICATED_CALLABLE
     from data.view_migrations import ACTIVE_MIGRATIONS
 
     assert "byom_backtest_rpc_2026_10_16.sql" in ACTIVE_MIGRATIONS
-    assert "byom_backtest" in RPC_ANON_CALLABLE
+    assert "byom_backtest" in RPC_AUTHENTICATED_CALLABLE
     code = _code(SQL)
     assert "SECURITY INVOKER" in code
     assert "byom_backtest_v1" in SQL
@@ -41,8 +41,13 @@ def test_the_function_is_invoker_and_has_no_price_or_line_filter():
     assert "pushes bigint" in code
     lowered = code.lower()
     for banned in ("minodds", "maxodds", "minline", "maxline", "spread_size",
-                   "price_band", "kelly", "stake", "public.picks"):
+                   "price_band", "kelly", "stake"):
         assert banned not in lowered, banned
+    kept = "\n".join(
+        ln for ln in lowered.splitlines()
+        if "to_regclass('public.picks')" not in ln
+        and "has_table_privilege('anon', 'public.picks'" not in ln)
+    assert "public.picks" not in kept
     assert code.index("RETURN;") < code.index("CREATE OR REPLACE FUNCTION")
     assert "SET statement_timeout = '3s'" in code
     assert "in-function 3s timeout does not apply" in SQL

@@ -403,6 +403,33 @@ def test_the_floor_and_the_thresholds_are_the_model_s_own():
     assert fh.MODEL_ID not in config.PAUSED_MODELS
 
 
+@pytest.mark.parametrize("n,held", [(1, True), (9, True), (10, False)])
+def test_both_teams_need_ten_games(art, n, held):
+    """RULE (mike, 2026-11-18, reversing 2026-11-02's no wait): no bet until
+    both teams have played 10 games this season. The real ratings, no stand-in
+    (the full-game model's synthetic season). A held game is a recorded
+    decision with the reason, never a missing one."""
+    from tests.test_nba_total_luck import _season
+    games, box = _season(n)
+    day = (pd.Timestamp("2026-10-21") + pd.Timedelta(days=n)).strftime("%Y-%m-%d")
+    t = _target(day)
+    tip = datetime(*map(int, day.split("-")), 19, 30, tzinfo=ET).astimezone(UTC)
+    fetch = tip - timedelta(minutes=55)
+    q = fh.quote_frame(_rows(t.game_id[0], fetch, [("pinnacle", 112.5, -110, -110),
+                                                   ("draftkings", 112.5, -110, -110)]),
+                       t.assign(tip=pd.Timestamp(tip)))
+    times = pd.DataFrame({"game_id": t.game_id, "T": [pd.Timestamp(fetch)]})
+    bets, decisions, diag = fh.decide(t, q, box, games, times, art, scheduled=games)
+    assert len(decisions) == 1 and diag["early_season"] == (1 if held else 0), (decisions, diag)
+    if held:
+        assert bets == [] and decisions[0].n_bets == 0 and decisions[0].gap_total is None
+        assert decisions[0].detail == "early_season: a team has under 10 games"
+    else:
+        # past the wait the game is scored: it has a gap and a reason of its own
+        assert decisions[0].gap_total is not None
+        assert not decisions[0].detail.startswith("early_season"), decisions
+
+
 def test_opening_night_declines_every_game_without_crashing(art):
     """No team has 10 games and no season game is stored: every game is recorded
     with the reason, and nothing raises."""

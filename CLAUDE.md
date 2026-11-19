@@ -396,8 +396,8 @@ baseline in that window. Season-to-date rates are noise early — blend toward
 the prior season by games played. **NHL: no hold** (mike, 2026-10-01;
 `docs/sports/nhl.md`). **NCAAB totals: no hold** (mike, 2026-11-02:
 *"we do not need to wait 10 games, I never approved that"*;
-`docs/sports/ncaab.md`). **NBA shooting-luck totals (full game, home team total,
-first half): no hold** (mike, 2026-11-02; `docs/sports/nba.md`).
+`docs/sports/ncaab.md`). **NBA shooting-luck totals: the 10-game hold is back**
+(mike, 2026-11-18, reversing his 11-02 no hold; `docs/sports/nba.md`).
 
 ### NHL Overtime
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
@@ -560,9 +560,12 @@ What stays here is what has to be known BEFORE deciding which file to open
 ### Verification standards — what "verified" means here
 
 - **`git stash` is NOT a master baseline once the work is committed.** Use
-  `git worktree add --detach origin/master` and diff against that. Local
-  `master` in these sandboxes is routinely dozens of commits behind — always
+  `git worktree add --detach .claude/worktrees/<name> origin/master` and diff
+  against that. Local `master` is routinely dozens of commits behind — always
   compare to `origin/master`.
+- **EVERYTHING ON THE PC LIVES UNDER THE PROJECT FOLDER** (mike, 2026-11-16):
+  copies as above, removed once merged or pushed; research in
+  `data/local/research/`; feeds in `.claude/feeds/`, never removed.
 - **Report a tsc or pytest baseline as an error-SET diff, not a count.** The
   claim to make is "byte-identical to master, 0 in touched files".
 - **Read source with an explicit encoding.** `read_text()` with no encoding uses
@@ -580,10 +583,8 @@ What stays here is what has to be known BEFORE deciding which file to open
 - **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB, NCAABW,
   EUROLEAGUE, ATP, WTA. 87 models carry their own cut
   (`config.ACTION_THRESHOLDS`); 28 paused.
-- **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
-  the worker, so every golf pipeline step no-opped and the sport produced no
-  games, no odds and no picks, ever. The ingestors, feature engine and pipeline
-  steps are left in place; reviving it starts with the key, not with config.
+- **GOLF was RETIRED 2026-09-08** (mike): why, and how to revive it, in
+  `docs/sports/golf.md`.
 - **Where it runs:** the Railway worker (`scheduler.py`) — 6am daily pipeline,
   intraday refresh passes, the MLB and NCAAF live loops, the NFL card poll.
   See `docs/cloud_worker.md`.

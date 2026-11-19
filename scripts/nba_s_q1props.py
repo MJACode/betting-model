@@ -32,7 +32,7 @@ the choosing season the placebo reads; 2023-24 is history for the fits.
   filed under the harness's total market, so H.choose takes one bet per proposition and H.settle gives
   over when the stat is above the line. A void has no row.
 
-    python C:/Users/micha/AppData/Local/Temp/q1trend/run_with_db.py scripts.nba_s_q1props --pull [--seed FILE]
+    python C:/Users/micha/Documents/betting-model/data/local/research/q1trend/run_with_db.py scripts.nba_s_q1props --pull [--seed FILE]
     NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -m scripts.nba_s_q1props --smoke
     NBA_RESEARCH_CACHE=<cache> NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> NBA_GAME2_BETS=<folder>/bets \\
         PYTHONPATH=. python -m scripts.nba_s_q1props --full
@@ -1146,7 +1146,7 @@ def live_keys() -> dict:
     if CARD_BETS.exists():
         b = pd.read_parquet(CARD_BETS, columns=["game_id", "player_id", "market", "side", "season", "ev", "price"])
         keep = np.zeros(len(b), bool)
-        for m, (sides, floor) in pj.CARD.items():
+        for m, (sides, floor) in pj.CARD_AS_GRADED.items():
             keep |= (b.market == m).to_numpy() & b.side.isin(sides).to_numpy() & (b.ev >= floor).to_numpy() \
                 & (b.price >= float(config.DEFAULT_MIN_ODDS)).to_numpy()
         b = b[keep & b.season.isin(PROP_SEASONS).to_numpy()]

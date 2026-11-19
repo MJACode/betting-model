@@ -12,6 +12,8 @@ const CLV_OPTIONS: { value: ClvOutcome; label: string }[] = [
   { value: 'BEAT', label: 'Beat' },
   { value: 'FLAT', label: 'Flat' },
   { value: 'WORSE', label: 'Worse' },
+  { value: 'LINE_FOR', label: 'Line moved our way' },
+  { value: 'LINE_AGAINST', label: 'Line moved against' },
   { value: 'NOT_MEASURED', label: 'Not measured' },
 ]
 

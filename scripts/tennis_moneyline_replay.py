@@ -22,7 +22,7 @@ REFERENCES  pinnacle (the model); bovada and betonlineag as placebos: two soft
 Reads the local cache (scripts/tennis_cache.py); writes nothing but its report
 and, with --save, the decisions.
 
-    python -m scripts.tennis_moneyline_replay --cache C:/Users/micha/tennis_research/cache
+    python -m scripts.tennis_moneyline_replay --cache C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/cache
 """
 from __future__ import annotations
 

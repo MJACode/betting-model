@@ -260,6 +260,12 @@ then bars 4–10 on all three seasons. Seven cells entered; one is dropped (belo
 | Reb + Ast | under | 0.04 | 9,605 | +393.9 | +4.22% | +3.86% (+0.58..+7.10) |
 | Threes | over + under | 0.04 | 16,750 | +496.5 | +3.11% | +4.60% (+2.34..+6.83) |
 
+**From 2026-11-18 the threes cell is unders only (mike; section 17).** The table above and every
+figure in this section are the card as graded and shipped on 2026-10-16, threes overs included
+(`models/nba_prop_projection.CARD_AS_GRADED`). Split by side at the seven deciding books, threes
+overs are +0.93% on 6,828 bets (95% interval -1.5% to +3.4%) and threes unders +4.27% on 9,893
+(+2.5% to +6.1%).
+
 The pooled card, 2023-24..2025-26, -200 floor, every qualifying proposition, 1 unit to win:
 
 | books | bets | units | ROI | 90% CI | by season (units) | a night (median / most) |
@@ -2308,7 +2314,7 @@ chance). The 14 cells with 200 or more bets have a median return of +0.2%; 8 are
   decision.
 
 **Independent verification** (workflow `nba-alt-lines-regrade-verify`, scripts under
-`%TEMP%/q1trend/verify6/` on the build machine):
+`C:/Users/micha/Documents/betting-model/data/local/research/q1trend/verify6/` on the build machine):
 - All 3,709 bets of six headline cells settled again from final scores: 0 differ. Every bet's rung
   is in the purchase at that book, line and price, before tip, 1.5 or more from the book's main,
   priced −200 to +400, from a ladder no more than 15 minutes old.
@@ -2528,7 +2534,7 @@ one asked for (11.6, item 2). Of the plan's 1,927 events, 1,894 have a window at
 
 **N1, the stale book: almost never a bet.** 0 to 4 bets per cell over two seasons (3 spread bets at
 R+5). An independent recount from the raw quotes (workflow `nba-injury-news-verify`, scripts under
-`%TEMP%/q1trend/verify7/` on the build machine) found the same candidates row for row, so the rule
+`C:/Users/micha/Documents/betting-model/data/local/research/q1trend/verify7/` on the build machine) found the same candidates row for row, so the rule
 saw every stale quote the data holds. What it showed instead:
 - After Pinnacle's number moves a point or more, a deciding book's quote is often unchanged: 18% to
   41% of the time, by book.
@@ -2730,7 +2736,7 @@ their answer is "too few games to tell". The full table is in the lab's output.
 
 Run `2026-10-28-eighth`: 64 registered cells and 20 controls (`--full`, then
 `python -m scripts.nba_game2_verdict --house5`). The cells, bets and per-game inputs are on the
-build machine under `%TEMP%/q1trend/results/`, and in Supabase (84 rows, read back 2026-11-01, after the login
+build machine under `C:/Users/micha/Documents/betting-model/data/local/research/q1trend/results/`, and in Supabase (84 rows, read back 2026-11-01, after the login
 that first blocked storing them was fixed).
 
 **0 of the 64 cells pass.** The verdict counts 7 whose 95% interval clears zero, against about
@@ -2766,7 +2772,7 @@ mike's method, the spread cells (first-quarter spread, the hot team, best decidi
   (+5.8% to +44.0%); the table's +36.6% is its first two seasons only. It fails the 200-bet
   bar, and the band just below it (last-10 k from 0 to 2) lost 5.9% on 88 bets. By 12.4 its
   answer is **too few games to tell**. An independent stress test (workflow
-  `nba-q1-trend-postgrade-verify`, scripts under `%TEMP%/q1trend/verify/stress0008/`) found:
+  `nba-q1-trend-postgrade-verify`, scripts under `C:/Users/micha/Documents/betting-model/data/local/research/q1trend/verify/stress0008/`) found:
   - it is not one team, date or book: leaving any one team out keeps it above +22%;
   - it clears zero only at the best of the books' numbers: at the worst deciding offer the
     interval is −1% to +35%, and 17 bets at a number no other book hung went 15-1-1 for
@@ -3227,3 +3233,30 @@ projection bet clears: the projection bets it would hand the game to did no bett
 stays one a game, six a night, first by tip, ranked by each model's own percentile of raw EV.
 The prices it lays are unchanged: -194 to +380, median +120, 78% plus money. No model change,
 so no `Updated-By`.
+
+## 17. The reassessment of 2026-11-11 to 11-18: two rule changes (mike)
+
+mike, 2026-11-18: *"NBA is bleeding money and we've made no changes to improve the models ... I
+don't care what you have to do, just do it."* Live to 2026-11-17 the NBA models stood at 221
+settled bets, 100-121, -9.63 units (production `picks`, read 2026-11-18). The reassessment digested
+the 266 ideas already graded here, read nine research angles, judged 42 new ideas and ran twelve
+registered backtests. **`docs/nba_reassessment_2026_11.md`** is the whole record, one line per
+backtest. Two changes came out of it, both model updates (`Updated-By: mike`):
+
+1. **`nba_prop_projection` no longer bets threes overs** (section 5's sixth cell becomes unders
+   only). On the nightly card replayed on 2023-24..2025-26 at seven books they are 287 bets,
+   -23.08 units, -12.6%, the only losing cell of size; the card without them makes +209.60 units
+   against +190.26 (difference +19.34, 95% interval -19.58 to +60.75). The gain is not
+   established; the direction is the same on the card, off it (+0.93% on 6,828 bets, interval
+   through zero) and live (26 of its first 109 settled bets, 9-17, -0.64 units). No artifact was
+   refitted.
+2. **The three shooting-luck total models wait for 10 games again** (sections 6.7 and 8.4 graded
+   them on that population; section 9.4's early-season test had closed on too few bets). This
+   reverses 2026-11-02's removal of the wait. With no wait, 50 of their first 56 settled bets had
+   a team under 10 games and went 21-29, -11.10 units; the other 6 went 5-1, +3.85. The backtest
+   had the kept-out games at -0.14% on 211, +4.50% on 80 and -0.03% on 150.
+
+Nothing else is built from the twelve backtests: each of the four registered cells that passed
+was refuted by its own audit as a result to act on, and the twelfth (Kalshi's price on the two
+prop models' own bets, graded 2026-11-18) came back not worth building. The settings are in `docs/thresholds.md`; the
+two rules in plain words are in `docs/sports/nba.md`.

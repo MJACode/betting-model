@@ -54,10 +54,19 @@ THE RULE, per regular-season game:
   2. PROJECTION: pace = mean of the two teams' possessions per game;
        total = pace/100 x [ORtg_H + DRtg_A + ORtg_A + DRtg_H - 2 x league rating]
      gap = adjusted total - raw total, in points.
-  3. NO 10-GAME WAIT (mike, 2026-11-02). A team needs one game this season so
-     it has a number at all (LIVE_MIN_GAMES). The evidence above is the games
-     with both teams on 10+ (MIN_GAMES, which the labs and replays keep);
-     docs/sports/nba.md, "No 10-game wait" has the replay with no wait.
+  3. BOTH TEAMS NEED 10+ GAMES this season (LIVE_MIN_GAMES; CLAUDE.md
+     section 3). Restored 2026-11-18 on mike's instruction ("NBA is bleeding
+     money ... just do it"), reversing his instruction of 2026-11-02, which
+     had taken the wait off (one game was enough from 11-02 to 11-17). The
+     evidence above is the games with both teams on 10+ (MIN_GAMES, which the
+     labs and replays pass explicitly). With no wait the three shooting-luck
+     models' first 56 settled bets held 50 with a team under 10 games: 21-29,
+     -11.10 units; the other 6 went 5-1, +3.85. The backtest never showed an
+     edge on those games (-0.14% on 211 bets here, +4.50% on 80 and -0.03% on
+     150 for the two models that import this rule). A game held for the wait
+     is a recorded decision, 'early_season', never a missing one.
+     docs/sports/nba.md, "The 10-game wait is back"; the whole record is
+     docs/nba_reassessment_2026_11.md.
   4. DECISION TIME (decision point C: "the newest fetch 60-180 minutes before
      tip"): the newest fetch, when it landed 60 to 66 minutes before tip and
      is at most 5 minutes old (timing below). A job of its own makes that
@@ -160,7 +169,15 @@ STALE_FETCH_MAX_MIN = 5.0
 
 FTA_POSS = 0.44              # Oliver / Hollinger possession estimate
 MIN_GAMES = 10               # the population every lab and replay graded
-LIVE_MIN_GAMES = 1           # the live models: no 10-game wait (mike, 2026-11-02)
+# The live wait of the three shooting-luck total models (this one, and
+# nba_team_total_luck and nba_first_half_total_luck, which import it): both
+# teams need this many games of the season before the game's date. 10 again
+# from 2026-11-18 (mike), reversing 2026-11-02's no wait (it was 1 from
+# 2026-11-02 to 2026-11-17). The reason is rule 3 of the docstring. Do not
+# lower it without a backtest of the games it lets in:
+# tests/test_nba_total_luck.py::test_the_live_wait_is_ten_games_on_all_three_models
+# fails below 10.
+LIVE_MIN_GAMES = 10
 
 BOX_COLS = {"points": "pts", "fg_att": "fga", "fg3_made": "fg3m", "fg3_att": "fg3a",
             "ft_made": "ftm", "ft_att": "fta", "offensive_reb": "oreb", "turnovers": "tov"}

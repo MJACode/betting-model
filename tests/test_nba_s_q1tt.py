@@ -32,7 +32,9 @@ def test_the_search_registers_26_cells_and_imports_the_live_rule():
     assert fam == {Q.FAM_SAME: 12, Q.FAM_CONS: 12, Q.FAM_B: 2}
     assert Q.EV_CUTS == (0.02, 0.04, 0.06)
     assert {s[1] for s in specs} == {"q1", "h1"}
-    assert (Q.B_CUT, Q.B_SIDE, Q.B_MIN_GAMES) == (tt.GAP_CUT, tt.SIDE, tl.LIVE_MIN_GAMES)
+    # one game: the live rule on the day this search was graded (2026-11-04). The live models went
+    # back to ten on 2026-11-18; the closed search keeps the population it registered.
+    assert (Q.B_CUT, Q.B_SIDE, Q.B_MIN_GAMES) == (tt.GAP_CUT, tt.SIDE, 1)
     assert Q.GRADED == (2025, 2026) and Q.CHOOSE == P3.choosing(Q.GRADED) == (2025,)
 
 

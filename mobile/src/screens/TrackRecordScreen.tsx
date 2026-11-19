@@ -23,6 +23,7 @@ import { EquityCurve } from '@/components/EquityCurve';
 import { RecordHeroCard } from '@/components/RecordHeroCard';
 import type { EquityPoint } from '@/lib/equityGeometry';
 import { DISCORD_ALL_TIME_LABEL } from '@/lib/recordHero';
+import { NotificationBell } from '@/components/NotificationBell';
 import { SettingsButton } from '@/components/SettingsButton';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
@@ -186,6 +187,7 @@ export function TrackRecordScreen() {
                 <Ionicons name="share-outline" size={22} color={colors.tint} />
               </Pressable>
             ) : null}
+            <NotificationBell />
             <SettingsButton />
           </View>
         </View>

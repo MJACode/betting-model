@@ -6,7 +6,7 @@ any bet in the search was graded. This lab EMITS cells through the shared harnes
 (python -m scripts.nba_game2_verdict --results DIR --house5, section 9.1's bars). No cut, constant
 or rule below was chosen from a betting result of a play-in, playoff or Cup final game.
 
-    python C:/Users/micha/AppData/Local/Temp/q1trend/run_with_db.py scripts.nba_s_postseason --pull
+    python C:/Users/micha/Documents/betting-model/data/local/research/q1trend/run_with_db.py scripts.nba_s_postseason --pull
     NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -m scripts.nba_s_postseason --smoke
     NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<dir> NBA_GAME2_BETS=<dir>/bets NBA_RESEARCH_CACHE=<cache> \
         PYTHONPATH=. python -m scripts.nba_s_postseason --full
@@ -817,7 +817,7 @@ def card_offers(at: pd.DataFrame, means: pd.DataFrame, inputs: dict, rule_keys: 
     x = at[[k not in rule_keys for k in zip(at.game_id, at.player_id, at.market)]]
     rows = []
     for side in ("over", "under"):
-        s = x[x.market.map(lambda m: side in pj.CARD[m][0]).to_numpy()].copy()
+        s = x[x.market.map(lambda m: side in pj.CARD_AS_GRADED[m][0]).to_numpy()].copy()
         col = f"{side}_price"
         s = s[s[col].notna()]
         s["side"], s["price"], s["book"] = side, s[col].to_numpy(float), s.bookmaker
@@ -829,7 +829,7 @@ def card_offers(at: pd.DataFrame, means: pd.DataFrame, inputs: dict, rule_keys: 
     r = r.merge(m, on=KEY, how="inner")
     off = offers_frame(r, meta, PROJECTION_ID)
     off["model_mu"] = r.model_mu.to_numpy(float)
-    off["floor"] = r.market.map(lambda k: pj.CARD[k][1]).to_numpy(float)
+    off["floor"] = r.market.map(lambda k: pj.CARD_AS_GRADED[k][1]).to_numpy(float)
     off["alpha"] = [inputs[g][1][k] for g, k in zip(r.game_id, r.market)]
     off["cal_a"] = [inputs[g][2][k][0] for g, k in zip(r.game_id, r.market)]
     off["cal_b"] = [inputs[g][2][k][1] for g, k in zip(r.game_id, r.market)]
@@ -920,7 +920,7 @@ def registered_cells(prep: dict, plc: bool, progress=say) -> tuple[list[dict], l
                      {"signal_meaning": "nba_prop_market as shipped"}))
     progress(f"cell {FAM_PM} done, {time.time() - t0:.0f}s")
     market_pricers = {}
-    for mk, (sides, floor) in pj.CARD.items():
+    for mk, (sides, floor) in pj.CARD_AS_GRADED.items():
         sub = prep["pj_offers"][prep["pj_offers"].real_market == mk]
         p = ProjectionPricer(sub)
         market_pricers[mk] = p
@@ -1189,8 +1189,8 @@ def check_regular_card(prep_like: dict) -> dict:
     q = q[q.usable & ~q.status.isin(OUT_STATUS)]
     stored = pd.read_parquet(CARD_BETS, columns=[*KEY, "side", "season", "ev", "is_main", "rule_key"])
     stored = stored[stored.market.isin(pj.MARKETS) & stored.season.isin([2025, 2026])]
-    stored = stored[[pj.CARD[m][0] is not None and s in pj.CARD[m][0] for m, s in zip(stored.market, stored.side)]]
-    stored = stored[stored.ev >= stored.market.map(lambda m: pj.CARD[m][1])]
+    stored = stored[[pj.CARD_AS_GRADED[m][0] is not None and s in pj.CARD_AS_GRADED[m][0] for m, s in zip(stored.market, stored.side)]]
+    stored = stored[stored.ev >= stored.market.map(lambda m: pj.CARD_AS_GRADED[m][1])]
     rule = pd.read_parquet(RULE_BETS, columns=KEY)
     rk = set(zip(rule.game_id, rule.player_id.astype(str), rule.market))
     main = lab.main_lines(q).rename(columns={"line": "main_line"})
@@ -1201,7 +1201,7 @@ def check_regular_card(prep_like: dict) -> dict:
             - nb._utc(P.snapshot_at)).dt.total_seconds() / 60
     P = P[lead.between(*LEAD_MIN).to_numpy()]
     P = P[[k not in rk for k in zip(P.game_id, P.player_id, P.market)]]
-    P = P[[s in pj.CARD[m][0] for m, s in zip(P.market, P.side)]]
+    P = P[[s in pj.CARD_AS_GRADED[m][0] for m, s in zip(P.market, P.side)]]
     got = []
     for s in (2025, 2026):
         te = fr[nb.usable(fr) & (fr.season == s)]
@@ -1214,7 +1214,7 @@ def check_regular_card(prep_like: dict) -> dict:
             pr = np.where(u.side == "over", po, 1 - po)
             ev = nb.expected_value(pr, u.price.to_numpy())
             u = u.assign(ev=ev)
-            u = u[u.ev >= pj.CARD[mk][1]].sort_values("ev", ascending=False).drop_duplicates(KEY)
+            u = u[u.ev >= pj.CARD_AS_GRADED[mk][1]].sort_values("ev", ascending=False).drop_duplicates(KEY)
             got.append(u[[*KEY, "side", "season"]])
     g = pd.concat(got, ignore_index=True)
     a = set(zip(g.game_id, g.player_id, g.market, g.side))
@@ -1253,7 +1253,7 @@ def counts(prep: dict) -> dict:
                 "price_median": float(b.price.median()) if len(b) else np.nan,
                 "price_max": float(b.price.max()) if len(b) else np.nan, "ev_max": float(b.ev.max()) if len(b) else np.nan}
     out.append(row(FAM_PM, LABEL_PM, real, b, PM_FLOOR))
-    for mk, (sides, floor) in pj.CARD.items():
+    for mk, (sides, floor) in pj.CARD_AS_GRADED.items():
         sub = prep["pj_offers"][prep["pj_offers"].real_market == mk]
         p = ProjectionPricer(sub).priced()
         side = sides[0] if len(sides) == 1 else SIDE_BOTH
@@ -1274,7 +1274,7 @@ def band_counts(prep: dict) -> list[dict]:
         a = set(qualifying(c, lo, side, strength).game_id)
         return len(a - set(qualifying(c, hi, side, strength).game_id)) if np.isfinite(hi) else len(a)
     out = [{"cell": LABEL_PM, **{f"{lo:+.2f}": n(prep["pm_pricer"].priced(), lo, hi, "under") for lo, hi in PM_BANDS}}]
-    for mk, (sides, floor) in pj.CARD.items():
+    for mk, (sides, floor) in pj.CARD_AS_GRADED.items():
         p = ProjectionPricer(prep["pj_offers"][prep["pj_offers"].real_market == mk]).priced()
         side = sides[0] if len(sides) == 1 else SIDE_BOTH
         out.append({"cell": mk, **{f"{lo:+.2f}": n(p, lo, hi, side) for lo, hi in pj_bounds(float(floor))}})
@@ -1300,7 +1300,7 @@ def placebo_null(prep: dict, seeds=range(1, 21)) -> dict:
                       "by_round": {k: round(float(np.nanmean(v)), 3) for k, v in sorted(by_round.items())},
                       "propositions": int(len(p.keys)), "groups": int(g.size), "alone_in_group": int((g == 1).sum())}
     run(pm, PM_FLOOR, "under", LABEL_PM, real)
-    for mk, (sides, floor) in pj.CARD.items():
+    for mk, (sides, floor) in pj.CARD_AS_GRADED.items():
         p = ProjectionPricer(prep["pj_offers"][prep["pj_offers"].real_market == mk])
         side = sides[0] if len(sides) == 1 else SIDE_BOTH
         run(p, float(floor), side, mk, qualifying(p.priced(), float(floor), side))
@@ -1315,7 +1315,7 @@ def timed_placebo(prep: dict) -> dict:
     t0 = time.time()
     pm, pjp = prep["pm_pricer"], prep["pj_pricer"]
     H.grade(qualifying(pm.placebo(1), PM_FLOOR, "under"), blind)
-    for mk, (sides, floor) in pj.CARD.items():
+    for mk, (sides, floor) in pj.CARD_AS_GRADED.items():
         p = ProjectionPricer(prep["pj_offers"][prep["pj_offers"].real_market == mk])
         side = sides[0] if len(sides) == 1 else SIDE_BOTH
         H.grade(qualifying(p.placebo(1), float(floor), side), blind)

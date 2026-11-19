@@ -3533,8 +3533,25 @@ export async function trackBet(deviceId: string, pick: Pick): Promise<void> {
   if (error && (error as { code?: string }).code !== '23505') throw error;
 }
 
-/** Stop tracking a bet. */
+/** Stop tracking a bet.
+ *
+ * After step B, a legacy row with user_id NULL is invisible to the owner
+ * DELETE policy, so the direct delete matches nothing and the worker keeps
+ * alerting. untrack_tracked_bet deletes that row when this device is not
+ * stored against another account. Until that function exists, the direct
+ * delete is what builds 14401 and 14601 already do. Zero rows is success.
+ */
 export async function untrackBet(deviceId: string, pickId: number): Promise<void> {
+  const rpc = await supabase.rpc('untrack_tracked_bet', {
+    p_device_id: deviceId,
+    p_pick_id: pickId,
+  });
+  if (!rpc.error) return;
+  const code = (rpc.error as { code?: string }).code;
+  // PGRST202 / 42883: the function is not applied yet. 42501: signed out,
+  // so the direct delete matches zero rows and that is still success.
+  const fallback = code === 'PGRST202' || code === '42883' || code === '42501';
+  if (!fallback) throw rpc.error;
   const { error } = await supabase
     .from('tracked_bets')
     .delete()

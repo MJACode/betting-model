@@ -20,9 +20,12 @@
 -- runs before published_record_units_2026_10_16.sql (that file stays last),
 -- so on a fresh database it follows that file's patch one pass later.
 --
--- security_invoker, SELECT for anon and authenticated, every other privilege
--- revoked by name (default privileges grant ALL). Reads picks and
--- v_discord_published, like the daily view. Writes nothing. One statement.
+-- security_invoker, SELECT for authenticated ONLY, every other privilege
+-- revoked by name (default privileges grant ALL). Not anon: the anon-key
+-- lockdown (anon_lockdown_step_a_2026_11.sql) takes anon off both record
+-- views, and a grant re-issued on every rebuild would re-open this one after
+-- it. Reads picks and v_discord_published, like the daily view. Writes
+-- nothing. One statement.
 
 DO $mig$
 DECLARE
@@ -41,7 +44,7 @@ BEGIN
   IF to_regclass('public.v_public_track_record_model_daily') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.v_public_track_record_model_daily'), 'pg_class'), '')
          = marker
-     AND has_table_privilege('anon', 'public.v_public_track_record_model_daily', 'SELECT')
+     AND NOT has_table_privilege('anon', 'public.v_public_track_record_model_daily', 'SELECT')
      AND has_table_privilege('authenticated', 'public.v_public_track_record_model_daily', 'SELECT')
   THEN
     RETURN;
@@ -64,6 +67,6 @@ BEGIN
   REVOKE ALL ON public.v_public_track_record_model_daily FROM PUBLIC;
   REVOKE ALL ON public.v_public_track_record_model_daily FROM anon;
   REVOKE ALL ON public.v_public_track_record_model_daily FROM authenticated;
-  GRANT SELECT ON public.v_public_track_record_model_daily TO anon, authenticated;
+  GRANT SELECT ON public.v_public_track_record_model_daily TO authenticated;
 END
 $mig$;

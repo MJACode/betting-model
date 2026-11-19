@@ -69,7 +69,11 @@ BEGIN
       TO anon, authenticated
       USING (true);
   END IF;
-  GRANT SELECT ON public.nba_team_q1_games TO anon, authenticated;
+  GRANT SELECT ON public.nba_team_q1_games TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.nba_team_q1_games TO anon;
+  END IF;
 
   EXECUTE $view$
     CREATE OR REPLACE VIEW public.v_nba_team_q1_season
@@ -112,5 +116,9 @@ BEGIN
   $view$;
   EXECUTE $c$COMMENT ON VIEW public.v_nba_team_q1_season IS 'nba_team_q1 v1'$c$;
   REVOKE ALL ON public.v_nba_team_q1_season FROM anon, authenticated;
-  GRANT SELECT ON public.v_nba_team_q1_season TO anon, authenticated;
+  GRANT SELECT ON public.v_nba_team_q1_season TO authenticated;
+  IF to_regclass('public.picks') IS NULL
+     OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+  GRANT SELECT ON public.v_nba_team_q1_season TO anon;
+  END IF;
 END $$;

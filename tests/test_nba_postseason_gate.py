@@ -282,8 +282,11 @@ _ALLOWED = {
 
 
 def _python_sources():
+    # data/local holds caches and research copied in from outside (gitignored,
+    # no tracked .py); its scripts are not the code that reads the slate.
+    local = ROOT / "data" / "local"
     for sub in ("scripts", "models", "tracking", "data", "nfl", "ncaaf_live", "monitoring", "byom"):
-        yield from sorted((ROOT / sub).rglob("*.py"))
+        yield from sorted(p for p in (ROOT / sub).rglob("*.py") if local not in p.parents)
     yield ROOT / "scheduler.py"
     yield ROOT / "run_pipeline.py"
 

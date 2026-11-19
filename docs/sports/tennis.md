@@ -418,7 +418,7 @@ assuming the reset is 2026-12-08 (the later of the two candidates: earlier
 cycles reset on the 1st). At the ceiling the purchase leaves about 3.5 million.
 The meter stops the run at the floor whatever else is spending.
 
-    python C:/Users/micha/tennis_research/run_with_db.py data.ingestors.tennis_odds_history         --buy C:/Users/micha/tennis_research/coverage_windows.json --step-min 60 --max-credits 2300000
+    python C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/run_with_db.py data.ingestors.tennis_odds_history         --buy C:/Users/micha/Documents/betting-model/data/local/research/tennis_research/coverage_windows.json --step-min 60 --max-credits 2300000
 
 **The purchase, as run (2026-11-13, mike's yes).** Launched 10:29 ET in six
 shards whose ceilings summed to the plan. Two shards stopped on a database

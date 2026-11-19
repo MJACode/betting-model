@@ -350,6 +350,8 @@ jobs:
             tests/test_discord_publish_sync.py \
             tests/test_discord_void_notice.py \
             tests/test_anon_readable.py \
+            tests/test_anon_lockdown.py \
+            tests/test_restore_acl_snapshot.py \
             tests/test_nhl_stats_views.py \
             tests/test_byom_facts_schema.py \
             tests/test_byom_game_facts.py \
@@ -410,12 +412,14 @@ jobs:
             tests/test_scoring_lease.py \
             tests/test_morning_disk.py \
             tests/test_overnight_polling.py \
+            tests/test_suite_writes_no_heartbeats.py \
             tests/test_api_call_rollup.py \
             tests/test_ncaaf_fcs_opponent_alias_migration.py \
             tests/test_ncaaf_game_identity.py \
             tests/test_cfbd_ingestor.py \
             tests/test_clv_pinnacle_mainline.py \
-            tests/test_pg_finder.py
+            tests/test_pg_finder.py \
+            tests/test_scratch_pg_start.py
           # -q does not name a passed test, and a skip exits 0. Re-run this
           # file verbosely and refuse a skip so the scratch cluster is in
           # the log. The file is also in the list above.
@@ -426,3 +430,10 @@ jobs:
             exit 1
           fi
           grep -q 'test_direct_upsert_is_refused_and_the_function_is_not_a_read PASSED' /tmp/push-token-pytest.txt
+          python -m pytest -v --tb=short tests/test_anon_lockdown.py | tee /tmp/anon-lockdown-pytest.txt
+          if grep -q SKIPPED /tmp/anon-lockdown-pytest.txt; then
+            echo "tests/test_anon_lockdown.py was skipped; the scratch cluster did not run"
+            exit 1
+          fi
+          grep -q 'test_steps_a_and_b_on_scratch_postgres PASSED' /tmp/anon-lockdown-pytest.txt
+          grep -q 'test_lockdown_runbook_sql_runs_on_scratch_postgres PASSED' /tmp/anon-lockdown-pytest.txt

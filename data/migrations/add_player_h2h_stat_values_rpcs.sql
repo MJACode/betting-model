@@ -433,15 +433,35 @@ BEGIN
     $ddl$;
 
     EXECUTE 'REVOKE ALL ON FUNCTION public.player_h2h_stat_values_mlb(integer[], text, text, text[], text[]) FROM PUBLIC';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_mlb(integer[], text, text, text[], text[]) TO anon, authenticated';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_mlb(integer[], text, text, text[], text[]) TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_mlb(integer[], text, text, text[], text[]) TO anon';
+    END IF;
     EXECUTE 'REVOKE ALL ON FUNCTION public.player_h2h_stat_values_wnba(integer[], text, text[], text[]) FROM PUBLIC';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_wnba(integer[], text, text[], text[]) TO anon, authenticated';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_wnba(integer[], text, text[], text[]) TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_wnba(integer[], text, text[], text[]) TO anon';
+    END IF;
     EXECUTE 'REVOKE ALL ON FUNCTION public.player_h2h_stat_values_nba(integer[], text, text[], text[]) FROM PUBLIC';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_nba(integer[], text, text[], text[]) TO anon, authenticated';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_nba(integer[], text, text[], text[]) TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_nba(integer[], text, text[], text[]) TO anon';
+    END IF;
     EXECUTE 'REVOKE ALL ON FUNCTION public.player_h2h_stat_values_nfl(integer[], text, text[], text[]) FROM PUBLIC';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_nfl(integer[], text, text[], text[]) TO anon, authenticated';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_nfl(integer[], text, text[], text[]) TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_nfl(integer[], text, text[], text[]) TO anon';
+    END IF;
     EXECUTE 'REVOKE ALL ON FUNCTION public.player_h2h_stat_values_ncaaf(integer[], text, text[], text[]) FROM PUBLIC';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_ncaaf(integer[], text, text[], text[]) TO anon, authenticated';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_ncaaf(integer[], text, text[], text[]) TO authenticated';
+    IF to_regclass('public.picks') IS NULL
+       OR has_table_privilege('anon', 'public.picks', 'SELECT') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.player_h2h_stat_values_ncaaf(integer[], text, text[], text[]) TO anon';
+    END IF;
 
     RAISE NOTICE 'player_h2h_stat_values_* created for MLB, WNBA, NBA, NFL, NCAAF';
 END

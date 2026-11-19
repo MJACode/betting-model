@@ -69,6 +69,34 @@
             "type": "postgresql"
           }
         ],
+        "/backend/ops/getKeyMetrics.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getModelHealthBets.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getModelHealthSummary.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
+        "/backend/ops/getModelHealthWindows.ts": [
+          {
+            "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",
+            "displayName": "supabase",
+            "type": "postgresql"
+          }
+        ],
         "/backend/ops/getModelNames.ts": [
           {
             "name": "ba09008f-94cd-4bae-9dcf-d7db5140e9fb",

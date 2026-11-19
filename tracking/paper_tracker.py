@@ -3528,6 +3528,22 @@ def settle_picks(game_date: str = None) -> dict:
         _backfill_clv(conn, clv_at)
         conn.commit()
 
+        # The final close of every started pre-game bet (tracking/clv_close.py,
+        # issue #1470): the bet book's last pull before the start, at our
+        # exact number (main line or alternate ladder), fetched after the bet.
+        # It runs after the two writers above and is the last word: neither
+        # revisits a row stamped standard_v2. It commits per bet, so it is not
+        # run inside the savepoint wrapper.
+        try:
+            from tracking.clv_close import measure_started
+            measure_started(conn)
+        except Exception as exc:                               # noqa: BLE001
+            logger.warning(f"CLV final close failed (non-fatal): {exc}")
+            try:
+                conn.rollback()
+            except Exception:                                  # noqa: BLE001
+                pass
+
         # Props grade off the player log. Pull a missing box on a separate
         # connection (the HTTP must not sit inside this transaction) before
         # the grade writes. A failure leaves the pick unsettled; the next

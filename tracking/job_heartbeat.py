@@ -147,6 +147,10 @@ MAX_SILENCE: dict = {
     # return), so 20 minutes is 20 missed ticks: a stopped job, and every game
     # tipping meanwhile undecided by the NCAAB first-half spread model.
     "ncaab_first_half_window": 20,
+    # The closing pull: every minute, 24x7, beating on the idle ticks too (one
+    # planning read, then return). 20 minutes is 20 missed ticks, and every
+    # bet starting meanwhile closes on whatever the regular passes stored.
+    "clv_closing_pull": 20,
     # The EuroLeague pre-game window: the same shape (every minute, 24x7,
     # beating on the idle ticks too). 20 minutes is 20 missed ticks: a stopped
     # job, and every EuroLeague game tipping meanwhile undecided by the five
