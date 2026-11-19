@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './lib/shadcn/tabs'
-import { RefreshCw, Moon, Sun, Layers, SlidersHorizontal, Activity, Database, TrendingUp, HeartPulse, type LucideIcon } from 'lucide-react'
+import { RefreshCw, Moon, Sun, Layers, SlidersHorizontal, Activity, Database, TrendingUp, HeartPulse, Calculator, type LucideIcon } from 'lucide-react'
 import ModelsTab from './pages/ModelsTab'
 import { TableSkeleton } from './components/PanelUtils'
 import { ModelNamesProvider } from './components/models/ModelNamesProvider'
@@ -15,6 +15,7 @@ const OpsTab = lazy(() => import('./pages/OpsTab'))
 const DatabaseTab = lazy(() => import('./pages/DatabaseTab'))
 const PicksClvTab = lazy(() => import('./pages/picks/PicksClvTab'))
 const HealthTab = lazy(() => import('./pages/HealthTab'))
+const SimTab = lazy(() => import('./pages/sim/SimTab'))
 
 function TabFallback() {
   return (
@@ -40,6 +41,7 @@ const TABS: ReadonlyArray<{ value: string; label: string; icon: LucideIcon }> = 
   { value: 'ops', label: 'Ops', icon: Activity },
   { value: 'database', label: 'Database', icon: Database },
   { value: 'picks', label: 'Picks & CLV', icon: TrendingUp },
+  { value: 'sim', label: 'Profit Simulation', icon: Calculator },
 ]
 
 const contentClass = 'mt-0 focus-visible:outline-none focus-visible:ring-0'
@@ -150,6 +152,9 @@ export default function App() {
               </TabsContent>
               <TabsContent value="picks" className={contentClass}>
                 <Suspense fallback={<TabFallback />}><PicksClvTab refreshKey={refreshKey} /></Suspense>
+              </TabsContent>
+              <TabsContent value="sim" className={contentClass}>
+                <Suspense fallback={<TabFallback />}><SimTab /></Suspense>
               </TabsContent>
             </main>
           </Tabs>

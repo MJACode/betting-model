@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Profit Simulation tab: the bankroll simulator from another chat ported to the ops dashboard in units, its math checked equal to the original on four settings |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, the older bets' closes bought (1,011 calls, 17,380 credits) and measured: 1,037 of 1,191 priced; CLV is price-based (+120 to +115 = +2.33%); against Pinnacle's fair close the priced bets average -0.85% (same-book +3.77%) on 614 bets, shots on goal +6.28% |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, the odds primary key rebuilt (1.86 to 1.26 GB; the disk allowance read 8%, so only that one); "At pick" fix and archive refusals shipped |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, anon-key lockdown prepared (steps A and B, website record view, tracked_bets owner policies); not applied |

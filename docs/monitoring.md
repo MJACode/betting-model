@@ -38,7 +38,13 @@ Six tabs: **Models**, **Model Health**, **Volume**, **Ops**, **Database**,
 (2026-11-18) is closing-line value per model, in blocks of 25, 50 and 100
 bets and as a rolling average, read from the three `v_model_health_*` views
 (`docs/clv.md`, "Model health"). Like Database, its arrangement is for the
-session only.
+session only. **Profit Simulation** (2026-11-19, mike: *"create a tab for profits
+simulation in retool ... the dash we build from another chat"*) is that chat's
+bankroll simulator ported unchanged in its math (fixed win rate, price and stake
+percentage; exact binomial bands plus 2,000 seeded paths for drawdowns), shown in
+units (start 100u, so the first 1% bet is 1u) under the units-only rule. Checked
+against the original script on four settings, every output equal. Frontend only,
+session-only arrangement.
 
 **The SignalBase look** (2026-11-15, mike: *"the UX and UI are very poor -
 please modernize (super modern best practice) and brand the design with

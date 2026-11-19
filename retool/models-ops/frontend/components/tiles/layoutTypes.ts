@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-export type TabId = 'models' | 'volume' | 'ops' | 'database' | 'picks' | 'health'
+export type TabId = 'models' | 'volume' | 'ops' | 'database' | 'picks' | 'health' | 'sim'
 
 /**
  * Tabs whose layouts can be saved. It matches the tab list the layout
@@ -19,6 +19,7 @@ export const TAB_META: Record<TabId, { title: string; description: string }> = {
   database: { title: 'Database', description: 'Size, growth and load of the Supabase database, measured every hour' },
   picks: { title: 'Picks & CLV', description: 'Every bet pick, its result and how it did against the closing price' },
   health: { title: 'Model Health', description: 'Closing-line value per model: every bet, blocks of 25, 50 and 100, and a rolling average' },
+  sim: { title: 'Profit Simulation', description: 'How a bankroll compounds at a fixed stake percentage, win rate and price' },
 }
 
 /** What a saved layout stores per tile. */
