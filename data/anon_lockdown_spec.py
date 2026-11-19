@@ -273,9 +273,11 @@ ANON_KEEP_RELATIONS: frozenset[str] = frozenset({"site_public_record"})
 ANON_KEEP_FUNCTIONS: frozenset[str] = frozenset({
     "log_app_error",
     "log_app_timings",
-    # Signed-out opt-out. The function returns nothing and only writes a
-    # row the caller already knows the token for. Revoking anon here leaves
-    # a device that turned push off still enabled.
+    # Stays callable without a session so a signed-out opt-out still
+    # reaches the server. It is not opt-out-only: a caller who already
+    # has the token can also re-enable it or rebind device_id. That is
+    # the function the push migration shipped. An opt-out-only RPC has
+    # to stay aligned with the inbox PR, which binds the token's user.
     "save_device_push_token",
 })
 
@@ -303,7 +305,8 @@ def _functions(sigs: tuple[str, ...]) -> str:
     for sig in sigs:
         bare = sig.split(".", 1)[1].split("(", 1)[0]
         if bare in ANON_KEEP_FUNCTIONS:
-            # PUBLIC off, anon kept. save_device_push_token is the opt-out.
+            # PUBLIC off, anon kept. save_device_push_token can also
+            # re-enable a token the caller already has. See ANON_KEEP_FUNCTIONS.
             lines.append(f"REVOKE ALL ON FUNCTION {sig} FROM PUBLIC;\n")
             lines.append(
                 "GRANT EXECUTE ON FUNCTION "
@@ -440,7 +443,8 @@ def step_b_sql() -> str:
     return f"""{HEADER}
 -- Step B. Everything else off anon, plus tracked_bets owner policies.
 -- Afterwards anon keeps site_public_record, log_app_error, log_app_timings
--- and save_device_push_token (signed-out opt-out). Authenticated access is
+-- and save_device_push_token (signed-out; the caller who has the token
+-- can also re-enable it). Authenticated access is
 -- unchanged apart from tracked_bets.
 -- Run at least 24 hours after step A unless Matt says otherwise.
 

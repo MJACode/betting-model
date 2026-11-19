@@ -3518,8 +3518,10 @@ export async function untrackBet(deviceId: string, pickId: number): Promise<void
   });
   if (!rpc.error) return;
   const code = (rpc.error as { code?: string }).code;
-  const missing = code === 'PGRST202' || code === '42883';
-  if (!missing) throw rpc.error;
+  // PGRST202 / 42883: the function is not applied yet. 42501: signed out,
+  // so the direct delete matches zero rows and that is still success.
+  const fallback = code === 'PGRST202' || code === '42883' || code === '42501';
+  if (!fallback) throw rpc.error;
   const { error } = await supabase
     .from('tracked_bets')
     .delete()

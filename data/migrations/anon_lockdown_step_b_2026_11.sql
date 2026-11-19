@@ -12,7 +12,8 @@
 
 -- Step B. Everything else off anon, plus tracked_bets owner policies.
 -- Afterwards anon keeps site_public_record, log_app_error, log_app_timings
--- and save_device_push_token (signed-out opt-out). Authenticated access is
+-- and save_device_push_token (signed-out; the caller who has the token
+-- can also re-enable it). Authenticated access is
 -- unchanged apart from tracked_bets.
 -- Run at least 24 hours after step A unless Matt says otherwise.
 

@@ -72,6 +72,45 @@ def test_policy_roles_become_an_alter():
     )
 
 
+def test_a_null_snapshot_acl_keeps_the_owners_execute():
+    """NULL proacl is the built-in default, not an empty grant list.
+
+    Step B replaces that NULL with an explicit ACL. A restore that treats
+    NULL as nobody must not REVOKE the owner's EXECUTE.
+    """
+    import psycopg2
+    import pytest
+
+    from scripts.restore_acl_from_snapshot import build_statements
+    from tests._pg import pg_bin, scratch_cluster
+
+    if not pg_bin("psql"):
+        pytest.skip("psql is not installed")
+    with scratch_cluster("aclnull-") as dsn:
+        conn = psycopg2.connect(dsn)
+        cur = conn.cursor()
+        cur.execute(
+            "CREATE FUNCTION public.f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$")
+        cur.execute(
+            "CREATE SCHEMA IF NOT EXISTS ops; "
+            "CREATE TABLE ops.acl_snapshot ("
+            " taken_at timestamptz NOT NULL DEFAULT now(),"
+            " label text NOT NULL, kind text NOT NULL,"
+            " object text NOT NULL, detail jsonb NOT NULL)")
+        cur.execute(
+            "INSERT INTO ops.acl_snapshot (label, kind, object, detail) "
+            "VALUES ('pre', 'proacl', 'public.f()', "
+            """ '{"acl": null, "owner": "postgres"}'::jsonb)""")
+        cur.execute("REVOKE ALL ON FUNCTION public.f() FROM PUBLIC")
+        cur.execute("GRANT EXECUTE ON FUNCTION public.f() TO postgres")
+        conn.commit()
+        lines = build_statements(cur, "pre")
+        text = "\n".join(lines)
+        conn.close()
+    assert 'FROM "postgres"' not in text
+    assert "GRANT EXECUTE ON FUNCTION public.f() TO PUBLIC" in text
+
+
 def test_dry_run_refuses_without_a_dsn():
     from scripts.restore_acl_from_snapshot import main
     assert main(["--label", "pre_step_a_20261118"]) == 2

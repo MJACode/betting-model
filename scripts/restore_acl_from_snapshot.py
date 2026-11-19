@@ -39,7 +39,13 @@ DEFACL_TARGET = {"r": "TABLES", "S": "SEQUENCES", "f": "FUNCTIONS"}
 
 
 def parse_acl(items: list[str] | None) -> dict[str, set[str]]:
-    """aclitem text to {grantee: privilege letters}. Empty grantee is PUBLIC."""
+    """aclitem text to {grantee: privilege letters}. Empty grantee is PUBLIC.
+
+    A SQL NULL ACL is not an empty list. NULL means acldefault() for that
+    object type and owner: the owner has the built-in rights, and a
+    function also grants EXECUTE to PUBLIC. Callers expand NULL before
+    this function sees it. An empty list is a real empty ACL.
+    """
     out: dict[str, set[str]] = {}
     for item in items or []:
         match = _ACL.match(item)
@@ -49,6 +55,20 @@ def parse_acl(items: list[str] | None) -> dict[str, set[str]]:
         letters = {ch for ch in match.group(2) if ch != "*"}
         out.setdefault(grantee, set()).update(letters)
     return out
+
+
+def acl_type_for_relkind(relkind: str) -> str:
+    """acldefault type character. Sequences differ. Everything else is a table."""
+    return "S" if relkind == "S" else "r"
+
+
+def expand_null_acl(cur, acl, typ: str, owner_oid: int):
+    """Replace a SQL NULL ACL with acldefault(typ, owner). Leave a real ACL."""
+    if acl is not None:
+        return list(acl)
+    cur.execute("SELECT acldefault(%s, %s)::text[]", (typ, owner_oid))
+    row = cur.fetchone()
+    return list(row[0] or [])
 
 
 def _words(letters: set[str]) -> str:
@@ -156,45 +176,68 @@ def _fetch_snapshot(cur, label: str) -> list[tuple]:
     return cur.fetchall()
 
 
+def _owner_oid(cur, role: str):
+    cur.execute("SELECT oid FROM pg_roles WHERE rolname = %s", (role,))
+    row = cur.fetchone()
+    return None if row is None else row[0]
+
+
 def _live_acl(cur, kind: str, object_name: str):
+    """(acl, relkind, acldefault type, owner oid).
+
+    acl is still NULL when the catalog stores NULL. build_statements
+    expands it. A missing defacl row is the built-in default, so its
+    acl is NULL on purpose and the type/owner are filled in.
+    """
     if kind == "relacl":
         cur.execute(
-            "SELECT c.relacl::text[], c.relkind::text FROM pg_class c "
-            "WHERE c.oid = to_regclass(%s)",
+            "SELECT c.relacl::text[], c.relkind::text, c.relowner "
+            "FROM pg_class c WHERE c.oid = to_regclass(%s)",
             (object_name,),
         )
         row = cur.fetchone()
         if not row:
             return None
-        return row
+        return (row[0], row[1], acl_type_for_relkind(row[1]), row[2])
     if kind == "proacl":
         cur.execute(
-            "SELECT p.proacl::text[] FROM pg_proc p "
+            "SELECT p.proacl::text[], p.proowner FROM pg_proc p "
             "WHERE p.oid = to_regprocedure(%s)",
             (object_name,),
         )
         row = cur.fetchone()
-        return None if row is None else (row[0], None)
+        if row is None:
+            return None
+        return (row[0], None, "f", row[1])
     if kind == "attacl":
         table, _, column = object_name.rpartition(".")
         cur.execute(
-            "SELECT a.attacl::text[] FROM pg_attribute a "
+            "SELECT a.attacl::text[], c.relowner FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
             "WHERE a.attrelid = to_regclass(%s) AND a.attname = %s",
             (table, column),
         )
         row = cur.fetchone()
-        return None if row is None else (row[0], None)
+        if row is None:
+            return None
+        return (row[0], None, "c", row[1])
     if kind == "defacl":
         role, _, objtype = object_name.partition(":")
+        owner = _owner_oid(cur, role)
+        if owner is None or objtype not in DEFACL_TARGET:
+            return None
         cur.execute(
             "SELECT d.defaclacl::text[] FROM pg_default_acl d "
             "JOIN pg_namespace n ON n.oid = d.defaclnamespace "
-            "WHERE n.nspname = 'public' AND pg_get_userbyid(d.defaclrole) = %s "
+            "WHERE n.nspname = 'public' AND d.defaclrole = %s "
             "AND d.defaclobjtype = %s",
-            (role, objtype),
+            (owner, objtype),
         )
         row = cur.fetchone()
-        return (None, None) if row is None else (row[0], None)
+        # No row means the built-in default. NULL here is that default,
+        # not an empty grant list.
+        acl = None if row is None else row[0]
+        return (acl, None, objtype, owner)
     return None
 
 
@@ -217,10 +260,19 @@ def build_statements(cur, label: str) -> list[str]:
         if live is None:
             out.append(f"-- skipped, not in the catalog: {kind} {object_name}")
             continue
-        snap_acl = detail.get("acl")
-        live_acl = live[0]
+        snap_acl, live_acl, relkind, typ, owner = (
+            detail.get("acl"), live[0], live[1], live[2], live[3])
+        # Snapshot detail for relations does not store the owner. The
+        # live owner is the same role: steps A and B do not change it.
+        # A JSON null and a missing key are both SQL NULL.
+        if snap_acl is None and detail.get("owner"):
+            named = _owner_oid(cur, str(detail.get("owner")))
+            if named is not None:
+                owner = named
+        snap_acl = expand_null_acl(cur, snap_acl, typ, owner)
+        live_acl = expand_null_acl(cur, live_acl, typ, owner)
         if kind == "relacl":
-            out.extend(rel_statements(object_name, live[1], snap_acl, live_acl))
+            out.extend(rel_statements(object_name, relkind, snap_acl, live_acl))
         elif kind == "proacl":
             out.extend(func_statements(object_name, snap_acl, live_acl))
         elif kind == "attacl":
