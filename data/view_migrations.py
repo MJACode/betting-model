@@ -725,6 +725,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # above). anon, authenticated and PUBLIC revoked; touches no pick, cut or
     # record. Returns on a catalog read once all three carry the mark.
     "model_health_2026_11_18.sql",
+    # 2026-11-19 (mike: "yes I want it to be accurate please correct", #1470):
+    # the three worker-only tables the final close stands on
+    # (tracking/clv_close.py): quotes bought from the feed's history, the
+    # ledger of those calls, and one measurement row per bet. RLS on, anon,
+    # authenticated and PUBLIC revoked; touches no pick, view, cut or record.
+    # Returns on a catalog read once all three exist with their comment.
+    "clv_close_2026_11_19.sql",
     # 2026-11-13 (mike, finishing #818): three 2026-09-26 NCAAF games each
     # have a second games row under the Odds API's nickname for the FCS
     # visitor (William and Mary Tribe, LIU Sharks, Houston Baptist Huskies).
