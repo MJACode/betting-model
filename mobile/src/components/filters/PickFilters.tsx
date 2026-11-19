@@ -61,6 +61,7 @@ import { GameFilterSection } from './GameFilterSection';
 import { ModelFilterSection } from './ModelFilterSection';
 import { modelShort } from '@/lib/modelMeta';
 import type { ModelRecordSummary } from '@/lib/modelHeat';
+import type { ModelRecordsStatus } from '@/hooks/useModelFilterRecords';
 import { gameFilterSummary, type SelectableGame } from '@/lib/gameFilter';
 import { dateFilterSummary, datesAreNarrowed, type DateOption } from '@/lib/dateFilter';
 import {
@@ -88,7 +89,6 @@ const EMPTY_DATES: DateOption[] = [];
 const EMPTY_STATES: GameStateOption[] = [];
 const EMPTY_STATE_SELECTION: Set<GameState> = new Set();
 const EMPTY_RECORDS: Record<string, ModelRecordSummary> = {};
-const NO_EXCLUDE = () => false;
 
 interface Props {
   state: PicksFilterState;
@@ -115,12 +115,17 @@ interface Props {
    */
   availableModelIds: string[];
   /**
-   * Leaves a model out of the Model section's list (Matt, 2026-11-18: paused
-   * models are not listed). Its picks still show while no model is picked.
+   * The model id of every pick the Model section may LIST, duplicates
+   * included. The screen leaves out picks that draw as PAUSED (Matt,
+   * 2026-11-18: paused models are not listed), and keeps a paused model's
+   * posted or settled BET, which still draws as a bet (§1c) and must keep a
+   * row, or ticking any model would hide it with nothing to bring it back.
+   * Defaults to availableModelIds.
    */
-  excludeModel?: (modelId: string) => boolean;
+  selectableModelIds?: string[];
   /** Each model's published record and hot / cold tag (useModelFilterRecords). */
   modelRecords?: Record<string, ModelRecordSummary>;
+  modelRecordsStatus?: ModelRecordsStatus;
   /**
    * Tonight's games, and which of them the user has picked. The SELECTION is
    * shared with the Stats tab (useGameSelection) rather than living in
@@ -167,8 +172,9 @@ export function PickFilters({
   totalShown,
   totalAll,
   availableModelIds,
-  excludeModel = NO_EXCLUDE,
+  selectableModelIds,
   modelRecords = EMPTY_RECORDS,
+  modelRecordsStatus = 'loading',
   games = [],
   selectedGames = EMPTY_SELECTION,
   onToggleGame,
@@ -196,8 +202,8 @@ export function PickFilters({
   );
 
   const presentModels = useMemo(
-    () => presentModelsFor(availableModelIds, excludeModel),
-    [availableModelIds, excludeModel],
+    () => presentModelsFor(selectableModelIds ?? availableModelIds),
+    [selectableModelIds, availableModelIds],
   );
 
   const patch = (fn: (draft: PicksFilterState) => void) => {
@@ -516,7 +522,7 @@ export function PickFilters({
         {modelCutBites ? (
           <FilterSection
             title="Model"
-            subtitle="Show only the models you pick. Leave empty for every model."
+            subtitle="Show only the models you choose. Leave empty for every model."
             summary={modelSummary}
             defaultOpen={modelIsNarrowed}
             onClear={
@@ -527,6 +533,7 @@ export function PickFilters({
               models={presentModels}
               selected={state.models}
               records={modelRecords}
+              status={modelRecordsStatus}
               onToggle={toggleModel}
               itemNoun={itemNoun}
             />
@@ -577,7 +584,7 @@ export function PickFilters({
   );
 }
 
-/** "NHL Moneyline", "NHL Moneyline, NHL Saves", or "3 models". */
+/** "ML", "ML, SOG", or "3 models" — the sheet's collapsed-row summary. */
 function modelPillLabel(ids: string[]): string {
   if (ids.length <= 2) return ids.map(modelShort).join(', ');
   return `${ids.length} models`;
@@ -628,7 +635,8 @@ function buildPills(
   if (modelsAreNarrowed(state, presentModels)) {
     out.push({
       key: 'models',
-      label: modelPillLabel(selectedModels(state, presentModels)),
+      // "Model: ML", so a short label cannot be read as a Market pill.
+      label: `Model: ${modelPillLabel(selectedModels(state, presentModels))}`,
       onRemove: () => patch((d) => (d.models = new Set())),
     });
   }

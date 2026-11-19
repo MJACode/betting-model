@@ -13,6 +13,9 @@
  * Pure: the hook (useModelFilterRecords) fetches, this decides.
  */
 
+import { addDays, formatSigned } from '@/lib/format';
+import { unitsSpeech } from '@/lib/a11y';
+
 export const HEAT_WINDOW_DAYS = 7;
 export const HEAT_MIN_UNITS = 3;
 export const HEAT_MIN_BETS = 8;
@@ -43,12 +46,7 @@ export interface ModelDailyRow {
   units?: number | string | null;
 }
 
-/** 'YYYY-MM-DD' plus n days (n may be negative). Calendar arithmetic only. */
-export function addDays(date: string, n: number): string {
-  const [y, m, d] = date.split('-').map(Number);
-  const t = new Date(Date.UTC(y, m - 1, d + n, 12));
-  return t.toISOString().slice(0, 10);
-}
+export { addDays };
 
 /** The heat window for a given ET "today": [first, last], both inclusive. */
 export function heatWindow(today: string): { first: string; last: string } {
@@ -91,21 +89,30 @@ export function buildModelRecords(
   return out;
 }
 
-/** "+4.2u · 61 bets". No bets yet reads as such, never "+0.0u". */
-export function modelRecordLine(r: ModelRecordSummary | undefined): string {
-  if (!r || r.bets === 0) return 'No settled bets yet';
-  const u = Math.round(r.units * 10) / 10;
-  const sign = u > 0 ? '+' : u < 0 ? '−' : '';
-  return `${sign}${Math.abs(u).toFixed(1)}u · ${r.bets} bet${r.bets === 1 ? '' : 's'}`;
+/**
+ * "+4.24u · 61 bets" — the same 2-decimal units the Record tab and the model
+ * pages print for the same view (formatSigned(units, 2, 'u')).
+ */
+export function modelRecordLine(r: ModelRecordSummary): string {
+  if (r.bets === 0) return 'No settled bets yet';
+  return `${formatSigned(r.units, 2, 'u')} · ${r.bets} bet${r.bets === 1 ? '' : 's'}`;
 }
 
 /** Spoken form of modelRecordLine and the tag. */
-export function modelRecordSpoken(r: ModelRecordSummary | undefined): string {
-  if (!r || r.bets === 0) return 'no settled bets yet';
-  const u = Math.round(r.units * 10) / 10;
-  const dir = u > 0 ? 'up' : u < 0 ? 'down' : 'even,';
-  const amt = u === 0 ? '' : ` ${Math.abs(u).toFixed(1)} units`;
+export function modelRecordSpoken(r: ModelRecordSummary): string {
   const tag =
-    r.heat === 'hot' ? ', hot over the last 7 days' : r.heat === 'cold' ? ', cold over the last 7 days' : '';
-  return `${dir}${amt} over ${r.bets} bet${r.bets === 1 ? '' : 's'}${tag}`;
+    r.heat === 'hot'
+      ? `, hot over the last ${HEAT_WINDOW_DAYS} days`
+      : r.heat === 'cold'
+        ? `, cold over the last ${HEAT_WINDOW_DAYS} days`
+        : '';
+  return `${unitsSpeech(modelRecordLine(r).replace(' · ', ', '))}${tag}`;
+}
+
+/** The footnote under the list, built from the same constants as the tag. */
+export function modelHeatFootnote(): string {
+  return (
+    `Record: every settled bet, in units. HOT or COLD: up or down ${HEAT_MIN_UNITS}u or more ` +
+    `over the last ${HEAT_WINDOW_DAYS} days, on at least ${HEAT_MIN_BETS} bets.`
+  );
 }

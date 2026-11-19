@@ -69,11 +69,15 @@ def test_the_app_reads_it_by_literal_name():
     assert ".from('v_public_track_record_model_daily')" in src
 
 
-def test_paused_models_are_not_listed():
-    """Matt, 2026-11-18: paused models are not in the Model list."""
+def test_paused_models_are_not_listed_but_their_posted_bets_keep_a_row():
+    """Matt, 2026-11-18: paused models are not in the Model list. The test is
+    per pick (isPausedForDisplay), so a paused model's posted or settled BET,
+    which still draws as a bet (CLAUDE.md 1c), keeps a row; with
+    isModelPaused, ticking any model hid that bet with no row to restore it."""
     screen = (MOBILE / "src" / "screens" / "PicksHomeScreen.tsx").read_text(encoding="utf-8")
-    assert "excludeModel={excludeModel}" in screen
-    assert "(id: string) => isModelPaused(id)" in screen
+    assert "selectableModelIds={selectableModelIds}" in screen
+    assert "boardItems.filter((d) => !isPausedForDisplay(d.pick))" in screen
+    assert "presentModelsFor(selectableModelIds)" in screen
 
 
 @pytest.mark.skipif(tsx_cmd(MOBILE) is None, reason="mobile node modules not installed")

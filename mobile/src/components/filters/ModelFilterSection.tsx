@@ -2,7 +2,7 @@
  * The MODEL section of the Picks filter sheet (Matt, 2026-11-18).
  *
  * One row per model with picks on the board: its name, its total published
- * record ("+4.2u · 61 bets"), a HOT / COLD tag when its last 7 days earn one
+ * record ("+4.24u · 61 bets"), a HOT / COLD tag when its last 7 days earn one
  * (lib/modelHeat.ts), how many picks it has on this board, and a checkbox.
  * Rows, not chips: a chip cannot carry the record line under the name, and
  * the same row shape as the Games section keeps the sheet one language.
@@ -13,79 +13,97 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, font, radii, spacing, opacity } from '@/lib/theme';
+import { colors, font, opacity, pnlColor, radii, spacing } from '@/lib/theme';
 import { modelShort } from '@/lib/modelMeta';
 import {
+  modelHeatFootnote,
   modelRecordLine,
   modelRecordSpoken,
   type ModelRecordSummary,
 } from '@/lib/modelHeat';
+import type { ModelRecordsStatus } from '@/hooks/useModelFilterRecords';
 import type { PresentModel } from '@/lib/pickFilterState';
+
+const NO_RECORD: ModelRecordSummary = {
+  bets: 0,
+  units: 0,
+  windowBets: 0,
+  windowUnits: 0,
+  heat: null,
+};
 
 export function ModelFilterSection({
   models,
   selected,
   records,
+  status,
   onToggle,
   itemNoun,
 }: {
   models: PresentModel[];
   selected: Set<string>;
   records: Record<string, ModelRecordSummary>;
+  status: ModelRecordsStatus;
   onToggle: (modelId: string) => void;
   itemNoun: string;
 }) {
+  const ready = status === 'ready';
   return (
     <View>
       {models.map(({ modelId, count }) => {
         const checked = selected.has(modelId);
-        const rec = records[modelId];
+        // Only a finished read may say "no settled bets"; loading and failure
+        // print no record line at all.
+        const rec = ready ? (records[modelId] ?? NO_RECORD) : null;
         const name = modelShort(modelId);
-        const units = rec && rec.bets > 0 ? Math.round(rec.units * 10) / 10 : 0;
+        const onBoard = `${count} ${itemNoun}${count === 1 ? '' : 's'}`;
         return (
           <Pressable
             key={modelId}
             onPress={() => onToggle(modelId)}
             accessibilityRole="checkbox"
             accessibilityState={{ checked }}
-            accessibilityLabel={`${name}, ${count} ${itemNoun}${count === 1 ? '' : 's'} on this board, ${modelRecordSpoken(rec)}`}
+            accessibilityLabel={`${name}, ${onBoard} on this board${rec ? `, ${modelRecordSpoken(rec)}` : ''}`}
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
           >
             <View style={styles.text}>
               <View style={styles.nameLine}>
-                <Text style={styles.name} numberOfLines={1}>
+                <Text style={styles.name} numberOfLines={2}>
                   {name}
                 </Text>
                 {rec?.heat ? <HeatTag heat={rec.heat} /> : null}
               </View>
-              <Text
-                style={[
-                  styles.record,
-                  units > 0 && styles.recordUp,
-                  units < 0 && styles.recordDown,
-                ]}
-                numberOfLines={1}
-              >
-                {modelRecordLine(rec)}
-              </Text>
+              {rec ? (
+                <Text
+                  style={[
+                    styles.record,
+                    rec.bets > 0 && { color: pnlColor(rec.units, 2) },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {modelRecordLine(rec)}
+                </Text>
+              ) : status === 'error' ? (
+                <Text style={styles.record}>Record unavailable</Text>
+              ) : null}
             </View>
-            <Text style={styles.count}>{count}</Text>
+            <Text style={styles.count} numberOfLines={1}>
+              {onBoard}
+            </Text>
             <View style={[styles.box, checked && styles.boxOn]}>
               {checked ? <Ionicons name="checkmark" size={14} color={colors.textInverse} /> : null}
             </View>
           </Pressable>
         );
       })}
-      <Text style={styles.note}>
-        Record: units and settled bets since the record started. Hot or cold: up or down 3u or
-        more over the last 7 days, on 8 or more bets.
-      </Text>
+      {ready ? <Text style={styles.note}>{modelHeatFootnote()}</Text> : null}
     </View>
   );
 }
 
 function HeatTag({ heat }: { heat: 'hot' | 'cold' }) {
   const hot = heat === 'hot';
+  const ink = hot ? colors.betInk : colors.avoidInk;
   return (
     <View
       style={[styles.tag, hot ? styles.tagHot : styles.tagCold]}
@@ -93,8 +111,8 @@ function HeatTag({ heat }: { heat: 'hot' | 'cold' }) {
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      <Ionicons name={hot ? 'flame' : 'snow'} size={11} color={hot ? colors.betInk : colors.avoidInk} />
-      <Text style={[styles.tagText, { color: hot ? colors.betInk : colors.avoidInk }]}>
+      <Ionicons name={hot ? 'flame' : 'snow'} size={11} color={ink} />
+      <Text style={[styles.tagText, { color: ink }]} maxFontSizeMultiplier={1.6}>
         {hot ? 'HOT' : 'COLD'}
       </Text>
     </View>
@@ -113,7 +131,15 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: opacity.pressed },
   text: { flex: 1, minWidth: 0 },
-  nameLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  // Wraps, so at large Dynamic Type the tag drops under the name instead of
+  // truncating it to a few letters.
+  nameLine: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: spacing.xs,
+    rowGap: spacing.xs,
+  },
   name: {
     flexShrink: 1,
     fontSize: font.size.body,
@@ -126,8 +152,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontVariant: ['tabular-nums'],
   },
-  recordUp: { color: colors.betInk },
-  recordDown: { color: colors.avoidInk },
   count: {
     fontSize: font.size.caption,
     color: colors.textSecondary,
@@ -136,20 +160,22 @@ const styles = StyleSheet.create({
   tag: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 6,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
     paddingVertical: 2,
     borderRadius: radii.pill,
   },
   tagHot: { backgroundColor: colors.betSoft },
   tagCold: { backgroundColor: colors.avoidSoft },
-  tagText: { fontSize: font.size.nano, fontWeight: font.weight.bold, letterSpacing: 0.4 },
+  tagText: { fontSize: font.size.nano, fontWeight: font.weight.bold },
   box: {
     width: 22,
     height: 22,
     borderRadius: radii.sm,
     borderWidth: 1.5,
-    borderColor: colors.separator,
+    // textTertiary, not separator: an empty box's outline needs 3:1 against
+    // the card (WCAG 1.4.11); separator measured 1.69:1 (UX review).
+    borderColor: colors.textTertiary,
     alignItems: 'center',
     justifyContent: 'center',
   },

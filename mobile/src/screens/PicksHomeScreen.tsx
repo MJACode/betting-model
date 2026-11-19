@@ -489,14 +489,17 @@ export function PicksHomeScreen() {
   );
 
   // ── The MODEL cut (Matt, 2026-11-18) ───────────────────────────────────────
-  // Paused models are not listed (Matt). Keyed on thresholdsRevision because
-  // isModelPaused reads the server thresholds, which arrive after first paint.
-  const excludeModel = useCallback(
-    (id: string) => isModelPaused(id),
+  // Paused models are not listed (Matt). The test is per PICK,
+  // isPausedForDisplay, not isModelPaused: a paused model's posted or settled
+  // BET still draws as a bet (§1c) and keeps its row, or ticking any model
+  // would hide it with no row to bring it back (UX review, 2026-11-19).
+  // thresholdsRevision: the paused flags arrive after first paint.
+  const selectableModelIds = useMemo(
+    () => boardItems.filter((d) => !isPausedForDisplay(d.pick)).map((d) => d.pick.model_id),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [thresholdsRevision],
+    [boardItems, thresholdsRevision],
   );
-  const modelRecords = useModelFilterRecords();
+  const { records: modelRecords, status: modelRecordsStatus } = useModelFilterRecords(date);
 
   // ── The GAMES cut, shared with the Stats tab ───────────────────────────────
   // Matt, 2026-09-09: one selection across both tabs, so picking tonight's
@@ -626,7 +629,7 @@ export function PicksHomeScreen() {
     const present = presentCategoriesFor(availableModelIds);
     const afterMarket = resetImpossibleModels(
       resetImpossibleMarket(filter, present),
-      presentModelsFor(availableModelIds, excludeModel),
+      presentModelsFor(selectableModelIds),
     );
     if (view !== 'today' && afterMarket.signals.size < ALL_SIGNALS.length) {
       const next = afterMarket === filter ? cloneFilter(filter) : afterMarket;
@@ -634,7 +637,7 @@ export function PicksHomeScreen() {
       return next;
     }
     return afterMarket;
-  }, [filter, view, availableModelIds, excludeModel]);
+  }, [filter, view, availableModelIds, selectableModelIds]);
   useEffect(() => {
     if (displayFilter !== filter) setFilter(displayFilter);
   }, [displayFilter, filter]);
@@ -1089,8 +1092,9 @@ export function PicksHomeScreen() {
           totalShown={filtered.length}
           totalAll={statusPoolSize}
           availableModelIds={availableModelIds}
-          excludeModel={excludeModel}
+          selectableModelIds={selectableModelIds}
           modelRecords={modelRecords}
+          modelRecordsStatus={modelRecordsStatus}
           games={pickableGames}
           selectedGames={gamePicker.selected}
           onToggleGame={gamePicker.toggle}

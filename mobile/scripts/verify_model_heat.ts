@@ -15,6 +15,7 @@ import {
   buildModelRecords,
   heatFor,
   heatWindow,
+  modelHeatFootnote,
   modelRecordLine,
   modelRecordSpoken,
 } from '../src/lib/modelHeat';
@@ -86,17 +87,27 @@ check(
 );
 
 // ── the row text ──
-check('record line, up', modelRecordLine(recs.nhl_prop_shots_on_goal) === '+4.2u · 61 bets', modelRecordLine(recs.nhl_prop_shots_on_goal));
-check('record line, down (true minus)', modelRecordLine(recs.nhl_moneyline) === '−1.0u · 15 bets', modelRecordLine(recs.nhl_moneyline));
-check('record line, no record', modelRecordLine(undefined) === 'No settled bets yet');
+// 2 decimals, the Record tab's format for the same view.
+check('record line, up', modelRecordLine(recs.nhl_prop_shots_on_goal) === '+4.20u · 61 bets', modelRecordLine(recs.nhl_prop_shots_on_goal));
+check('record line, down', /^[−-]1\.00u · 15 bets$/.test(modelRecordLine(recs.nhl_moneyline)), modelRecordLine(recs.nhl_moneyline));
 check(
-  'record line, one bet is singular',
-  modelRecordLine({ bets: 1, units: 0.91, windowBets: 1, windowUnits: 0.91, heat: null }) === '+0.9u · 1 bet',
+  'record line, no record',
+  modelRecordLine({ bets: 0, units: 0, windowBets: 0, windowUnits: 0, heat: null }) === 'No settled bets yet',
 );
 check(
-  'spoken form names the tag',
-  modelRecordSpoken(recs.ncaabw_live_total_ht) === 'down 4.0 units over 20 bets, cold over the last 7 days',
-  modelRecordSpoken(recs.ncaabw_live_total_ht),
+  'record line, one bet is singular',
+  modelRecordLine({ bets: 1, units: 0.91, windowBets: 1, windowUnits: 0.91, heat: null }) === '+0.91u · 1 bet',
+);
+const spoken = modelRecordSpoken(recs.ncaabw_live_total_ht);
+check(
+  'spoken form says units, not "u", and names the tag',
+  /4\.04 units, 20 bets, cold over the last 7 days$/.test(spoken) && !/\du\b/.test(spoken),
+  spoken,
+);
+check(
+  'the footnote is built from the constants',
+  modelHeatFootnote().includes(`${HEAT_MIN_UNITS}u`) && modelHeatFootnote().includes(`${HEAT_MIN_BETS} bets`),
+  modelHeatFootnote(),
 );
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
