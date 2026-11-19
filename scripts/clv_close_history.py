@@ -22,6 +22,13 @@ Commands (dry run unless --apply; nothing is bought without `buy`):
   python -m scripts.clv_close_history remeasure-none [--apply]
             every bet measured with no closing price, measured again from
             stored rows and bought quotes (after a fix to the rule)
+  python -m scripts.clv_close_history first-play [--apply]
+            for bets with no pull between them and the listed start, the
+            game's first play from ESPN's wall clock, into game_first_play
+            (NHL and NCAAF matched; other sports are listed, not guessed)
+  python -m scripts.clv_close_history buy-late [--limit N]
+            those bets' book at the first play less one minute, from the
+            feed's history (the rule's v2 fallback, tracking/clv_close.py)
 
 WHAT ONE CALL COSTS, measured 2026-11-19 on NHL_2026-11-05_VAN_WPG: an event
 list is 1 credit (x-requests-last); one game's odds at one book is 10 credits
@@ -69,12 +76,27 @@ def history_targets(conn) -> list[cc.Bet]:
         AND g.commence_time::timestamptz < %s::timestamptz ORDER BY p.pick_id""", (cc.STORED_FROM,))
 
 
-def plan(conn, bets: list[cc.Bet]) -> dict:
+def late_targets(conn) -> list[cc.Bet]:
+    """Published pre-game bets measured with no pull between them and the
+    listed start, whose game's first play is stored and came after the bet."""
+    bets = cc.load_bets(conn, PUBLISHED_PREGAME + """
+        AND p.pick_id IN (SELECT pick_id FROM public.clv_close_measurements
+                           WHERE source = 'none' AND note LIKE 'no pull%%')
+        ORDER BY p.pick_id""")
+    return [b for b in bets if b.first_play is not None and b.first_play > b.created_at
+            and cc.late_bet(b) is not None]
+
+
+def plan(conn, bets: list[cc.Bet], late: bool = False) -> dict:
     """{(sport, eastern date): {(game_id, book): {"bound": t, "markets": set, "props": set}}}"""
     from zoneinfo import ZoneInfo
     et = ZoneInfo("America/New_York")
     out: dict = defaultdict(dict)
     for b in bets:
+        if late:
+            b = cc.late_bet(b)
+            if b is None:
+                continue
         if b.bound is None or not b.market:
             continue
         sport = b.game_id.split("_", 1)[0]
@@ -89,7 +111,16 @@ def plan(conn, bets: list[cc.Bet]) -> dict:
     return out
 
 
-def bought(conn) -> set[tuple[str, str]]:
+def bought(conn, late: bool = False) -> set[tuple[str, str]]:
+    """(game, book) pairs bought ok; with late, only purchases asked for after
+    the listed start (the first-play fallback's)."""
+    if late:
+        rows = conn.execute("""
+            SELECT DISTINCT p.game_id, p.bookmaker FROM public.clv_close_purchases p
+              JOIN public.games g ON g.game_id = p.game_id
+             WHERE p.ok AND p.kind = 'history' AND p.asked_for > g.commence_time::timestamptz""").fetchall()
+        conn.commit()
+        return {(r[0], r[1]) for r in rows}
     rows = conn.execute("SELECT DISTINCT game_id, bookmaker FROM public.clv_close_purchases WHERE ok AND kind = 'history'").fetchall()
     conn.commit()
     return {(r[0], r[1]) for r in rows}
@@ -139,7 +170,7 @@ def refuse_reason(conn) -> str | None:
     return None
 
 
-def buy(conn, limit: int | None = None) -> dict:
+def buy(conn, limit: int | None = None, late: bool = False) -> dict:
     from data.ingestors.alt_game_lines import game_for_event
     from data.ingestors.odds_ingestor import SPORT_KEYS, _schedule_resolver
     reason = refuse_reason(conn)
@@ -147,8 +178,8 @@ def buy(conn, limit: int | None = None) -> dict:
         logger.error(f"Refusing to buy: {reason}")
         return {"refused": reason}
     feed = Feed()
-    done = bought(conn)
-    p = plan(conn, history_targets(conn))
+    done = bought(conn, late)
+    p = plan(conn, late_targets(conn) if late else history_targets(conn), late)
     stats = Counter()
     calls = 0
     for (sport, day), slots in sorted(p.items()):
@@ -240,6 +271,91 @@ def _ledger(conn, game_id, book, slot, event_id, snap, ok, credits, quotes, erro
            ok, credits, quotes, error, "history")
 
 
+# ── the first play ───────────────────────────────────────────────────────────
+
+ESPN = "https://site.api.espn.com/apis/site/v2/sports"
+_ESPN_PATH = {"NHL": "hockey/nhl", "NCAAF": "football/college-football"}
+_ESPN_NHL = {"LAK": "LA", "TBL": "TB", "NJD": "NJ", "SJS": "SJ"}
+
+
+def _espn(path: str, params: dict) -> dict:
+    r = requests.get(f"{ESPN}/{path}", params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def espn_event(game_id: str) -> dict | None:
+    """The ESPN event for one of our game ids, matched on its teams; None when
+    the sport is not matched here or no event fits."""
+    parts = game_id.split("_")
+    path = _ESPN_PATH.get(parts[0])
+    if path is None:
+        return None
+    day = datetime.fromisoformat(parts[1]).date()
+    for d in (day, day + timedelta(days=1)):
+        params = {"dates": d.strftime("%Y%m%d")}
+        if parts[0] == "NCAAF":
+            params.update({"groups": "80", "limit": "300"})
+        for e in (_espn(f"{path}/scoreboard", params).get("events") or []):
+            teams = e["competitions"][0]["competitors"]
+            if parts[0] == "NHL":
+                want = {_ESPN_NHL.get(t, t) for t in parts[2:4]}
+                if {t["team"]["abbreviation"] for t in teams} == want:
+                    return e
+            else:
+                names = " ".join(t["team"]["displayName"].lower() for t in teams)
+                if all(slug.split("-")[0] in names for slug in parts[2:]):
+                    return e
+    return None
+
+
+def first_play_of(game_id: str) -> dict | None:
+    """{first_play_at, listed_start, source_id} from the earliest wall clock
+    among the event's plays (ESPN), or None."""
+    e = espn_event(game_id)
+    if e is None:
+        return None
+    path = _ESPN_PATH[game_id.split("_", 1)[0]]
+    d = _espn(f"{path}/summary", {"event": e["id"]})
+    walls = [p["wallclock"] for p in (d.get("plays") or []) if p.get("wallclock")]
+    for drive in ((d.get("drives") or {}).get("previous") or []):
+        walls += [p["wallclock"] for p in (drive.get("plays") or []) if p.get("wallclock")]
+    if not walls:
+        return None
+    return {"first_play_at": cc._utc(min(walls)), "listed_start": cc._utc(e.get("date")),
+            "source_id": str(e["id"])}
+
+
+def store_first_plays(conn, apply: bool) -> dict:
+    rows = conn.execute("""
+        SELECT DISTINCT p.game_id FROM public.picks p
+         WHERE p.pick_id IN (SELECT pick_id FROM public.clv_close_measurements
+                              WHERE source = 'none' AND note LIKE 'no pull%%')
+           AND """ + PUBLISHED_PREGAME + """
+           AND NOT EXISTS (SELECT 1 FROM public.game_first_play fp WHERE fp.game_id = p.game_id)
+         ORDER BY 1""").fetchall()
+    conn.commit()
+    out = {"games": len(rows), "stored": [], "not_matched": []}
+    for (game_id,) in rows:
+        try:
+            fp = first_play_of(game_id)
+        except Exception as exc:                               # noqa: BLE001
+            logger.warning(f"{game_id}: ESPN read failed ({exc})")
+            fp = None
+        if fp is None:
+            out["not_matched"].append(game_id)
+            continue
+        out["stored"].append((game_id, fp["first_play_at"].isoformat()))
+        if apply:
+            conn.execute("""
+                INSERT INTO public.game_first_play (game_id, first_play_at, listed_start, source, source_id)
+                VALUES (%s, %s, %s, 'espn_wallclock', %s)
+                ON CONFLICT (game_id) DO NOTHING""",
+                (game_id, fp["first_play_at"], fp["listed_start"], fp["source_id"]))
+            conn.commit()
+    return out
+
+
 # ── measuring ────────────────────────────────────────────────────────────────
 
 def run_measure(conn, bets: list[cc.Bet], history: bool, apply: bool) -> dict:
@@ -247,8 +363,7 @@ def run_measure(conn, bets: list[cc.Bet], history: bool, apply: bool) -> dict:
     by_model = defaultdict(Counter)
     changes = []
     for b in bets:
-        quotes = cc.feed_quotes(conn, b) + (cc.history_quotes(conn, b) if history else [])
-        close = cc.choose_close(b, quotes)
+        close = cc.choose_final(b, cc.quotes_for(conn, b, history))
         m = cc.measure(b, close)
         state = "priced" if m["clv_pct"] is not None else ("polled" if close.last_poll else "no_pull")
         stats[state] += 1
@@ -267,7 +382,8 @@ def run_measure(conn, bets: list[cc.Bet], history: bool, apply: bool) -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("command", choices=["recent", "plan", "buy", "history", "remeasure-none"])
+    ap.add_argument("command", choices=["recent", "plan", "buy", "history", "remeasure-none",
+                                        "first-play", "buy-late"])
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--only-bought", action="store_true",
@@ -303,6 +419,10 @@ def main(argv=None) -> int:
             done = bought(conn)
             bets = [b for b in bets if (b.game_id, b.bet_book) in done]
         print(json.dumps(run_measure(conn, bets, True, a.apply), indent=1, default=str))
+    elif a.command == "first-play":
+        print(json.dumps(store_first_plays(conn, a.apply), indent=1, default=str))
+    elif a.command == "buy-late":
+        print(json.dumps(buy(conn, a.limit, late=True), indent=1, default=str))
     elif a.command == "remeasure-none":
         bets = cc.load_bets(conn, """
             p.pick_id IN (SELECT pick_id FROM public.clv_close_measurements WHERE source = 'none')

@@ -22,18 +22,26 @@
 --                           the bet's closing-line columns as they stood
 --                           before, so nothing the earlier writers stored is
 --                           lost (picks_log also keeps the update).
+--   game_first_play         the instant a game actually began: its first
+--                           play's wall clock (ESPN). A bet placed in the
+--                           last minutes before the listed start, with no
+--                           pull after it before that listed start, is closed
+--                           against the last price before the first play
+--                           instead (v3, 2026-11-19).
 --
 -- Worker-only: RLS on, anon, authenticated and PUBLIC hold nothing. Touches no
 -- pick, view, cut or record. One DO block; returns on a catalog read once all
--- three tables exist with their comment (v2 added clv_close_purchases.kind).
+-- four tables exist with their comment (v2 added clv_close_purchases.kind,
+-- v3 game_first_play).
 
 DO $mig$
 BEGIN
   IF to_regclass('public.clv_close_quotes') IS NOT NULL
      AND to_regclass('public.clv_close_purchases') IS NOT NULL
      AND to_regclass('public.clv_close_measurements') IS NOT NULL
+     AND to_regclass('public.game_first_play') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.clv_close_measurements'), 'pg_class'), '')
-         = 'clv_close 2026-11-19 v2'
+         = 'clv_close 2026-11-19 v3'
      AND NOT has_table_privilege('anon', 'public.clv_close_measurements', 'SELECT')
      AND NOT has_table_privilege('authenticated', 'public.clv_close_quotes', 'SELECT')
   THEN
@@ -106,13 +114,24 @@ BEGIN
     before            JSONB
   );
 
+  CREATE TABLE IF NOT EXISTS public.game_first_play (
+    game_id         TEXT PRIMARY KEY,
+    first_play_at   TIMESTAMPTZ NOT NULL,
+    listed_start    TIMESTAMPTZ,
+    source          TEXT NOT NULL,
+    source_id       TEXT,
+    fetched_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+
   ALTER TABLE public.clv_close_quotes ENABLE ROW LEVEL SECURITY;
   ALTER TABLE public.clv_close_purchases ENABLE ROW LEVEL SECURITY;
   ALTER TABLE public.clv_close_measurements ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE public.game_first_play ENABLE ROW LEVEL SECURITY;
   REVOKE ALL ON public.clv_close_quotes FROM anon, authenticated, PUBLIC;
   REVOKE ALL ON public.clv_close_purchases FROM anon, authenticated, PUBLIC;
   REVOKE ALL ON public.clv_close_measurements FROM anon, authenticated, PUBLIC;
+  REVOKE ALL ON public.game_first_play FROM anon, authenticated, PUBLIC;
   REVOKE ALL ON SEQUENCE public.clv_close_quotes_quote_id_seq FROM anon, authenticated, PUBLIC;
   REVOKE ALL ON SEQUENCE public.clv_close_purchases_purchase_id_seq FROM anon, authenticated, PUBLIC;
-  COMMENT ON TABLE public.clv_close_measurements IS 'clv_close 2026-11-19 v2';
+  COMMENT ON TABLE public.clv_close_measurements IS 'clv_close 2026-11-19 v3';
 END $mig$;

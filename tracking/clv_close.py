@@ -22,6 +22,17 @@ a price from before the bet, stored as 0.00).
 
 No other book, no quote from before the bet, no in-play quote, no made-up 0.00.
 
+THE LISTED START AND THE FIRST PLAY (v2, 2026-11-19). The start is the listed
+one. A bet placed in the last minutes before it can have no pull of its book
+between the bet and that listed start, and an NHL puck drops 8 to 18 minutes
+after the listed time (ESPN wall clocks, the 11 such bets measured that day).
+For that bet only, the close is the book's last price before the game actually
+began: the first play's wall clock (`game_first_play`) less FIRST_PLAY_MARGIN.
+A bet placed at or after the first play is not a pre-game bet and has no close.
+The worker's stage measures bets placed before the listed start and has no
+first plays of its own; `scripts/clv_close_history.py first-play` and
+`buy-late` store the first play and buy that last price for the rest.
+
 WHERE THE QUOTES COME FROM. Our own stored rows (`odds`, `player_prop_odds`)
 for games from STORED_FROM, when nothing was being deleted; for older games,
 the quotes bought from the feed's history into `clv_close_quotes`
@@ -40,14 +51,14 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
 from tracking.clv_math import same_book_clv
 
-RULE = "fetched_after_bet_v1"
+RULE = "fetched_after_bet_v2"
 # Games starting on or after this were stored in full: the odds prune stopped
 # on 2026-11-14 (docs/data_archive.md), so every pull of them is still there.
 STORED_FROM = "2026-11-15T00:00:00+00:00"
@@ -59,6 +70,8 @@ ALT_WINDOW = timedelta(minutes=15)
 # A started game is measured this long after its start, so the last pre-start
 # pull has landed.
 SETTLE_AFTER = timedelta(minutes=10)
+# A price this close to the first play may already be the book's in-play one.
+FIRST_PLAY_MARGIN = timedelta(seconds=60)
 BATCH = 400
 
 _FULL_GAME_ALT = {"spreads": "alternate_spreads", "totals": "alternate_totals"}
@@ -128,6 +141,7 @@ class Bet:
     bet_book: str | None
     prop_market: str | None
     before: dict = field(default_factory=dict)
+    first_play: datetime | None = None   # the game's first play (game_first_play)
 
     @property
     def alt(self) -> str | None:
@@ -168,7 +182,8 @@ _BET_SQL = """
               WHERE ns.game_id IN (p.game_id, 'NBA_' || g.game_date || '_' || g.home_team || '_' || g.away_team)
                 AND ns.commence_time IS NOT NULL) END AS nba_tip,
            p.closing_dk_odds, p.closing_line, p.clv_pct, p.clv_pp, p.line_clv_pts,
-           p.clv_beat_close, p.clv_captured_at, p.clv_method, p.clv_close_book, p.clv_bet_book
+           p.clv_beat_close, p.clv_captured_at, p.clv_method, p.clv_close_book, p.clv_bet_book,
+           (SELECT fp.first_play_at FROM public.game_first_play fp WHERE fp.game_id = p.game_id) AS first_play
       FROM public.picks p
       JOIN public.games g ON g.game_id = p.game_id
 """
@@ -177,7 +192,8 @@ _BET_COLS = ("pick_id", "model_id", "game_id", "pick_side", "scored_line", "pick
              "game_time", "commence_time", "game_date", "home_team", "away_team",
              "game_market", "prop_key", "nba_tip",
              "closing_dk_odds", "closing_line", "clv_pct", "clv_pp", "line_clv_pts",
-             "clv_beat_close", "clv_captured_at", "clv_method", "clv_close_book", "clv_bet_book")
+             "clv_beat_close", "clv_captured_at", "clv_method", "clv_close_book", "clv_bet_book",
+             "first_play")
 _BEFORE = ("closing_dk_odds", "closing_line", "clv_pct", "clv_pp", "line_clv_pts",
            "clv_beat_close", "clv_captured_at", "clv_method", "clv_close_book", "clv_bet_book")
 
@@ -221,6 +237,7 @@ def bet_from_row(row: dict) -> Bet | None:
         created_at=created, bound=bound, bet_price=float(price), bet_book=book.strip().lower(),
         prop_market=row["prop_market"] if kind == "prop" else None,
         before={k: _jsonable(row[k]) for k in _BEFORE},
+        first_play=_utc(row.get("first_play")),
     )
 
 
@@ -371,6 +388,45 @@ def choose_close(bet: Bet, quotes: list[Quote]) -> Close:
     return Close("none", None, None, None, main_number, line_pts, last, note)
 
 
+def late_bet(bet: Bet) -> Bet | None:
+    """The bet bounded on its game's first play, when that is later than the
+    listed start; None otherwise."""
+    if bet.first_play is None or bet.bound is None:
+        return None
+    late = bet.first_play - FIRST_PLAY_MARGIN
+    return replace(bet, bound=late) if late > bet.bound else None
+
+
+def choose_final(bet: Bet, quotes: list[Quote]) -> Close:
+    """The close at the listed start; for a bet with no pull between it and the
+    listed start, the close before the first play. Pure: no database. `quotes`
+    may run to the first-play bound (quotes_for)."""
+    if bet.first_play is not None and bet.created_at >= bet.first_play:
+        return Close("none", note=(f"placed after the game began (first play "
+                                   f"{bet.first_play:%Y-%m-%d %H:%M:%S}Z): not a pre-game bet"))
+    quotes = [q for q in quotes if q.fetched_at > bet.created_at]
+    listed = [q for q in quotes if bet.bound is not None and q.fetched_at <= bet.bound]
+    close = choose_close(bet, listed)
+    late = late_bet(bet)
+    if close.odds is None and close.last_poll is None and late is not None:
+        alt = choose_close(late, [q for q in quotes if q.fetched_at <= late.bound])
+        if alt.last_poll is not None:
+            alt.note = f"{alt.note}, pulled after the listed start and before the first play"
+            return alt
+    return close
+
+
+def quotes_for(conn, bet: Bet, history: bool = True) -> list[Quote]:
+    """Every quote choose_final may use: to the first-play bound when there is
+    one, else to the listed start."""
+    b = late_bet(bet) or bet
+    return feed_quotes(conn, b) + (history_quotes(conn, b) if history else [])
+
+
+def close_for(conn, bet: Bet) -> Close:
+    return choose_final(bet, quotes_for(conn, bet))
+
+
 # ── writing ──────────────────────────────────────────────────────────────────
 
 def measure(bet: Bet, close: Close) -> dict:
@@ -449,7 +505,7 @@ def measure_started(conn, now: datetime | None = None, limit: int = BATCH) -> di
                 counts["waiting"] += 1
                 continue
         try:
-            close = choose_close(bet, feed_quotes(conn, bet) + history_quotes(conn, bet))
+            close = close_for(conn, bet)
             res = write(conn, bet, close, now)
         except Exception as exc:                               # noqa: BLE001
             # One bad bet must not pin the head of the queue (ORDER BY
