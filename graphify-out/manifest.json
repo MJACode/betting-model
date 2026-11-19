@@ -7734,9 +7734,9 @@
     "semantic_hash": ""
   },
   "docs/clv.md": {
-    "mtime": 1795097037.2391672,
-    "seen": 1795097630.6119785,
-    "ast_hash": "0464fdd0d2c8635cdeeadd897e7f100a",
+    "mtime": 1795102908.2387283,
+    "seen": 1795103494.6920376,
+    "ast_hash": "7c63c613214d49221266eb2f2a893f89",
     "semantic_hash": ""
   },
   "docs/config_topology.md": {
@@ -7878,9 +7878,9 @@
     "semantic_hash": ""
   },
   "docs/monitoring.md": {
-    "mtime": 1795073173.087392,
-    "seen": 1795097630.6122267,
-    "ast_hash": "08645e3b8a87e03b2dea0cef1ab1dd65",
+    "mtime": 1795098266.3756356,
+    "seen": 1795103494.6923072,
+    "ast_hash": "56fe6d2bca0032b4cbf4c66e68b504a2",
     "semantic_hash": ""
   },
   "docs/ncaaf_inplay_backtest_2025.txt": {
@@ -15336,9 +15336,9 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/App.tsx": {
-    "mtime": 1795073173.7396605,
-    "seen": 1795097630.6016297,
-    "ast_hash": "3844b1c4b604c523f31ca935fd0f4491",
+    "mtime": 1795098156.8327012,
+    "seen": 1795103494.6833932,
+    "ast_hash": "307c002caa1e4ff5f1852064c189d33d",
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/components/PanelUtils.tsx": {
@@ -15414,9 +15414,9 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/components/tiles/layoutTypes.ts": {
-    "mtime": 1795073173.7428901,
-    "seen": 1795097630.6017165,
-    "ast_hash": "e33a4b66376e88270f004bc12b84dfe6",
+    "mtime": 1795098156.8811822,
+    "seen": 1795103494.683482,
+    "ast_hash": "c4a2f1e46942a0eea6c4e683b6845ac9",
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/components/tiles/useTabLayouts.ts": {
@@ -15474,8 +15474,8 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/models/ModelVolume.tsx": {
-    "mtime": 1795063341.6614444,
-    "seen": 1795071391.6051645,
+    "mtime": 1795098157.0145066,
+    "seen": 1795103494.6836278,
     "ast_hash": "3f4bfe56eedbeeb85c23d029a9ef48a0",
     "semantic_hash": ""
   },
@@ -15492,8 +15492,8 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/models/ThresholdWhatIf.tsx": {
-    "mtime": 1795063341.7132,
-    "seen": 1795071391.6051805,
+    "mtime": 1795098157.1030254,
+    "seen": 1795103494.683647,
     "ast_hash": "f1df4a00cd4512ee09b4cadcbd0d9e17",
     "semantic_hash": ""
   },
@@ -15546,8 +15546,8 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/picks/PicksCharts.tsx": {
-    "mtime": 1795073173.756433,
-    "seen": 1795097630.6019146,
+    "mtime": 1795098157.174663,
+    "seen": 1795103494.6837049,
     "ast_hash": "c6f193f0188776727f54c5814a30b870",
     "semantic_hash": ""
   },
@@ -15600,8 +15600,8 @@
     "semantic_hash": ""
   },
   "retool/models-ops/package.json": {
-    "mtime": 1795073173.7641337,
-    "seen": 1795097630.6019695,
+    "mtime": 1795098157.8340738,
+    "seen": 1795103494.6839314,
     "ast_hash": "705c4335258c2ae4dbd12aadd22ba6ed",
     "semantic_hash": ""
   },
@@ -15858,8 +15858,8 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/database/DbPcCopy.tsx": {
-    "mtime": 1795063341.472586,
-    "seen": 1795071391.6051128,
+    "mtime": 1795098156.9441576,
+    "seen": 1795103494.6835613,
     "ast_hash": "940dd5f7d9f31eaa1c9ae86cd253ad76",
     "semantic_hash": ""
   },
@@ -16116,9 +16116,9 @@
     "semantic_hash": ""
   },
   "data/migrations/clv_close_2026_11_19.sql": {
-    "mtime": 1795073173.0087745,
-    "seen": 1795097630.5962796,
-    "ast_hash": "adfd65373cdde48627fd2f4bee2517b8",
+    "mtime": 1795100516.5902305,
+    "seen": 1795103494.679071,
+    "ast_hash": "26e7277a99816097658829f038d1729d",
     "semantic_hash": ""
   },
   "data/migrations/model_health_2026_11_18.sql": {
@@ -16254,9 +16254,9 @@
     "semantic_hash": ""
   },
   "scripts/clv_close_history.py": {
-    "mtime": 1795096492.4599288,
-    "seen": 1795097630.6021192,
-    "ast_hash": "31b00d8c208e25f0e80afd497e740a43",
+    "mtime": 1795100670.1303623,
+    "seen": 1795103494.6840637,
+    "ast_hash": "6c00d52f9ee45866c5947d3a98b5a92a",
     "semantic_hash": ""
   },
   "scripts/euroleague_stacking_check.py": {
@@ -16320,9 +16320,9 @@
     "semantic_hash": ""
   },
   "tests/test_clv_close.py": {
-    "mtime": 1795096931.47766,
-    "seen": 1795097630.6059859,
-    "ast_hash": "73f94cd96e5f6c4c5f26ad7a5deb567e",
+    "mtime": 1795102062.4220061,
+    "seen": 1795103494.6874905,
+    "ast_hash": "8ce25ab3d48623122bb068b564c99422",
     "semantic_hash": ""
   },
   "tests/test_inplay_pick_without_draftkings.py": {
@@ -16350,9 +16350,9 @@
     "semantic_hash": ""
   },
   "tracking/clv_close.py": {
-    "mtime": 1795096474.4677787,
-    "seen": 1795097630.611312,
-    "ast_hash": "313789de00e466dcfff90a98c539e3c8",
+    "mtime": 1795102163.5583377,
+    "seen": 1795103494.6914961,
+    "ast_hash": "4cebeafa8ba9ee05b9f3191fed6f6837",
     "semantic_hash": ""
   },
   "tracking/notification_inbox.py": {
@@ -16365,6 +16365,60 @@
     "mtime": 1795073173.0947113,
     "seen": 1795097630.6122541,
     "ast_hash": "cbb2337988fe1bfa67c25ac374c36d3a",
+    "semantic_hash": ""
+  },
+  "retool/models-ops/frontend/pages/sim/CheckpointTable.tsx": {
+    "mtime": 1795098157.261351,
+    "seen": 1795103494.6837509,
+    "ast_hash": "750a04a0c1fda711afa7620fa065a1c1",
+    "semantic_hash": ""
+  },
+  "retool/models-ops/frontend/pages/sim/FanChart.tsx": {
+    "mtime": 1795098157.3247404,
+    "seen": 1795103494.6837566,
+    "ast_hash": "75345612468cd22874b5c78979c64da5",
+    "semantic_hash": ""
+  },
+  "retool/models-ops/frontend/pages/sim/SimAssumptions.tsx": {
+    "mtime": 1795098157.4020665,
+    "seen": 1795103494.6837633,
+    "ast_hash": "be07496b17207bc2fbd1f9e3cbb4446b",
+    "semantic_hash": ""
+  },
+  "retool/models-ops/frontend/pages/sim/SimNotes.tsx": {
+    "mtime": 1795098157.4655843,
+    "seen": 1795103494.6838882,
+    "ast_hash": "7c827073003b9d467f3defacd3326769",
+    "semantic_hash": ""
+  },
+  "retool/models-ops/frontend/pages/sim/SimSummary.tsx": {
+    "mtime": 1795098157.5341434,
+    "seen": 1795103494.6838932,
+    "ast_hash": "44e1ea11a515bb8d2484b32a26c32f86",
+    "semantic_hash": ""
+  },
+  "retool/models-ops/frontend/pages/sim/SimTab.tsx": {
+    "mtime": 1795098157.5762222,
+    "seen": 1795103494.6838975,
+    "ast_hash": "1f48dd0b4f1c58091589869a5a2d5ba2",
+    "semantic_hash": ""
+  },
+  "retool/models-ops/frontend/pages/sim/SweepChart.tsx": {
+    "mtime": 1795098157.6321607,
+    "seen": 1795103494.683902,
+    "ast_hash": "2e582edf5aa078326880ee1c449afdfc",
+    "semantic_hash": ""
+  },
+  "retool/models-ops/frontend/pages/sim/simAxis.ts": {
+    "mtime": 1795098157.7033598,
+    "seen": 1795103494.6839058,
+    "ast_hash": "18be9d48c3e332114e7b2c56c9d9d4e2",
+    "semantic_hash": ""
+  },
+  "retool/models-ops/frontend/pages/sim/simMath.ts": {
+    "mtime": 1795098157.753927,
+    "seen": 1795103494.68391,
+    "ast_hash": "de4cdbab0497332b9e99fb620594370e",
     "semantic_hash": ""
   }
 }
