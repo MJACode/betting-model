@@ -100,6 +100,11 @@ export function readAuthStatus(): AuthStatus {
   return state.status;
 }
 
+/** The signed-in user, for callers that are not components (push registration). */
+export function readAuthUserId(): string | null {
+  return state.session?.user?.id ?? null;
+}
+
 export function useAuth(): UseAuth {
   const [local, setLocal] = useState<AuthState>(state);
 

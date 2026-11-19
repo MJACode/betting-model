@@ -3,6 +3,7 @@ import * as Notifications from 'expo-notifications';
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
+import { readAuthUserId } from '@/hooks/useAuth';
 import { getDeviceId } from '@/hooks/useDeviceId';
 import { clearPushOptInForAccountDeletion, usePushOptIn } from '@/hooks/usePushOptIn';
 import { diagnosePushError, type PushDiagnosis } from '@/lib/pushDiagnosis';
@@ -56,6 +57,36 @@ function setState(next: Partial<PushState>): PushState {
   state = { ...state, ...next };
   listeners.forEach((fn) => fn(state));
   return state;
+}
+
+/**
+ * Save the token. Pass p_user_id when we know who is signed in. If the
+ * deployed function does not take that argument yet, retry without it so
+ * registration does not start failing before the inbox migration is applied.
+ */
+function pushTokenArgMissing(error: { message?: string; code?: string }): boolean {
+  const text = `${error.code ?? ''} ${error.message ?? ''}`;
+  return /PGRST202|p_user_id|Could not find the function|schema cache/i.test(text);
+}
+
+async function savePushToken(args: {
+  p_token: string;
+  p_device_id: string;
+  p_platform: string;
+  p_enabled: boolean;
+  p_last_seen: string;
+  p_user_id: string | null;
+}): Promise<{ error: { message?: string; code?: string } | null }> {
+  const { p_user_id, ...rest } = args;
+  const withUser = p_user_id ? { ...rest, p_user_id } : rest;
+  const first = await supabase.rpc('save_device_push_token', withUser);
+  if (!first.error || !p_user_id) return { error: first.error };
+  const text = `${first.error.code ?? ''} ${first.error.message ?? ''}`;
+  if (!/PGRST202|p_user_id|Could not find the function|schema cache/i.test(text)) {
+    return { error: first.error };
+  }
+  const second = await supabase.rpc('save_device_push_token', rest);
+  return { error: second.error };
 }
 
 async function rememberToken(token: string | null): Promise<void> {
@@ -130,19 +161,24 @@ export function registerForPush(): Promise<PushState> {
       // has no SELECT policy, including when the row does not exist yet. A
       // SELECT policy would let the anon key list every Expo token. The
       // function runs as the table owner and returns nothing.
-      const { error } = await supabase.rpc('save_device_push_token', {
+      // p_user_id is optional and only exists after the inbox migration.
+      // A server that has not been migrated rejects the extra argument, and
+      // the same call without it still registers the device.
+      const userId = readAuthUserId();
+      const base = {
         p_token: token,
         p_device_id: deviceId,
         p_platform: Platform.OS,
         p_enabled: true,
         p_last_seen: registeredAt,
-      });
+      };
+      const payload = userId ? { ...base, p_user_id: userId } : base;
+      const { error } = await supabase.rpc('save_device_push_token', payload);
       if (error) {
-        return setState({
-          status: 'failed',
-          token,
-          diagnosis: diagnosePushError(error, 'storage'),
-        });
+        const failed = userId && pushTokenArgMissing(error)
+          ? (await supabase.rpc('save_device_push_token', base)).error
+          : error;
+        if (failed) return setState({ status: 'failed', token, diagnosis: diagnosePushError(failed, 'storage') });
       }
 
       await rememberToken(token);
@@ -180,12 +216,13 @@ export async function unregisterForPush(): Promise<boolean> {
   // success, because the row is not visible without a SELECT policy, so the
   // toggle would say notifications are off while the worker still sends.
   const deviceId = await getDeviceId();
-  const { error } = await supabase.rpc('save_device_push_token', {
+  const { error } = await savePushToken({
     p_token: token,
     p_device_id: deviceId,
     p_platform: Platform.OS,
     p_enabled: false,
     p_last_seen: new Date().toISOString(),
+    p_user_id: readAuthUserId(),
   });
   if (error) {
     // Surfaced, not swallowed: the reader has turned notifications off and is

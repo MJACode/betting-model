@@ -12,6 +12,7 @@ import {
 import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { NotificationBell } from '@/components/NotificationBell';
 import { SettingsButton } from '@/components/SettingsButton';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
@@ -115,7 +116,10 @@ export function PerformanceScreen() {
           <View style={styles.header}>
             <View style={styles.titleRow}>
               <Text style={styles.title}>Performance</Text>
-              <SettingsButton />
+              <View style={styles.headerActions}>
+                <NotificationBell />
+                <SettingsButton />
+              </View>
             </View>
             <Text style={styles.subtitle}>Your bets, tracked by you</Text>
           </View>
@@ -185,7 +189,10 @@ export function PerformanceScreen() {
         <View style={styles.header}>
           <View style={styles.titleRow}>
             <Text style={styles.title}>Performance</Text>
-            <SettingsButton />
+            <View style={styles.headerActions}>
+              <NotificationBell />
+              <SettingsButton />
+            </View>
           </View>
           <Text style={styles.subtitle}>{bookLabel || 'Sportsbook'} · pull to refresh</Text>
         </View>
@@ -732,6 +739,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   title: {
     fontSize: font.size.largeTitle,

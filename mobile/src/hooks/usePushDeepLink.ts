@@ -53,6 +53,13 @@ function shellOpen(): boolean {
 }
 
 /** Perform a resolved route. One place, so the two callers cannot drift. */
+export function openPushRoute(
+  navigation: { navigate: NavRef['navigate'] },
+  route: PushRoute,
+): boolean {
+  return navigateTo(navigation as NavRef, route);
+}
+
 function navigateTo(navRef: NavRef, route: PushRoute): boolean {
   if (AUTH_ENABLED && readAuthStatus() === 'signedOut') return false;
   switch (route.kind) {

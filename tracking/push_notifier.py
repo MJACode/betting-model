@@ -377,6 +377,115 @@ def _expo_send(messages: list[dict], conn=None) -> int:
     return sent
 
 
+# ── Inbox (hand migration notification_inbox_2026_11_19.sql) ────────────────
+#
+# Until that migration is applied, _inbox_plan is None and every producer
+# below sends the one batch it always sent. Once it is applied, each user
+# gets a batch with their muted sports removed. An empty batch sends nothing
+# and writes no inbox row. The push_sent ledger still records the signal, so
+# unmuting later does not replay an alert whose moment has passed.
+
+def _inbox_plan(conn):
+    """(groups, mutes, unread) or None when the inbox tables are not there."""
+    from tracking.notification_inbox import (
+        group_by_user, inbox_ready, load_devices, load_mutes, unread_counts,
+    )
+    if not inbox_ready(conn):
+        return None
+    devices = load_devices(conn)
+    mutes = load_mutes(conn)
+    return group_by_user(devices), mutes, unread_counts(conn, mutes)
+
+
+def _sport_muted(user_id, sport, mutes) -> bool:
+    from tracking.notification_inbox import sport_is_muted
+    return sport_is_muted(user_id, sport, mutes)
+
+
+def _stamp_owned(owned: list[tuple], unread: dict) -> list[dict]:
+    from tracking.notification_inbox import attach_inbox
+    rows: list[dict] = []
+    by_user: dict = {}
+    for user_id, msg in owned:
+        by_user.setdefault(user_id, []).append(msg)
+    for user_id, msgs in by_user.items():
+        attach_inbox(user_id, msgs, rows, unread)
+    return rows
+
+
+def _store_inbox(conn, rows: list[dict]) -> None:
+    from tracking.notification_inbox import insert_rows
+    insert_rows(conn, rows)
+
+
+def _fanout_summaries(conn, plan, new_bets, dropped, build) -> list[dict]:
+    """One summary per user, rebuilt after that user's mutes are removed."""
+    from tracking.notification_inbox import visible_signals
+    groups, mutes, unread = plan
+    messages: list[dict] = []
+    rows: list[dict] = []
+    for user_id, group in groups:
+        muted = mutes.get(user_id, set()) if user_id else set()
+        bets = visible_signals(new_bets, muted)
+        drops = visible_signals(dropped, muted)
+        if not bets and not drops:
+            continue
+        tokens = [d["token"] for d in group if d.get("token")]
+        if not tokens:
+            continue
+        built = build(tokens, bets, drops)
+        if user_id:
+            rows.extend(_stamp_owned([(user_id, msg) for msg in built], unread))
+        messages.extend(built)
+    _store_inbox(conn, rows)
+    return messages
+
+
+def _fanout_live(conn, plan, signals: list[dict]) -> list[dict]:
+    from tracking.notification_inbox import visible_signals
+    groups, mutes, unread = plan
+    messages: list[dict] = []
+    rows: list[dict] = []
+    for user_id, group in groups:
+        muted = mutes.get(user_id, set()) if user_id else set()
+        kept = visible_signals(signals, muted)
+        if not kept:
+            continue
+        tokens = [d["token"] for d in group if d.get("token")]
+        if not tokens:
+            continue
+        title = f"🔴 {len(kept)} live pick{'s' if len(kept) != 1 else ''}"
+        body = _summary_body([s["label"] for s in kept])
+        data = _route("live_signals", kept)
+        built = [{
+            "to": token, "title": title, "body": body, "data": dict(data),
+            "sound": "default", "priority": "high",
+        } for token in tokens]
+        if user_id:
+            rows.extend(_stamp_owned([(user_id, msg) for msg in built], unread))
+        messages.extend(built)
+    _store_inbox(conn, rows)
+    return messages
+
+
+def _store_feedback_inbox(conn, replies: list[dict], messages: list[dict]) -> None:
+    """Feedback has no sport. Write one inbox row per user who has a token."""
+    plan = _inbox_plan(conn)
+    if plan is None:
+        return
+    user_by_device = {}
+    for _, group in plan[0]:
+        for device in group:
+            if device.get("device_id"):
+                user_by_device[device["device_id"]] = device.get("user_id")
+    owned = []
+    for reply, msg in zip(replies, messages):
+        user_id = user_by_device.get(reply.get("device_id"))
+        if user_id:
+            owned.append((user_id, msg))
+    _store_inbox(conn, _stamp_owned(owned, plan[2]))
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 def notify_signal_changes(target_date: str | None = None, dry_run: bool = False) -> int:
@@ -409,13 +518,19 @@ def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
         logger.info(f"Push: no new/dropped signals for {target_date}")
         return 0
 
-    tokens = [r[0] for r in conn.execute(
-        "SELECT token FROM device_push_tokens WHERE enabled = TRUE"
-    ).fetchall()]
+    plan = _inbox_plan(conn)
+    if plan is None:
+        tokens = [r[0] for r in conn.execute(
+            "SELECT token FROM device_push_tokens WHERE enabled = TRUE"
+        ).fetchall()]
+        device_count = len(tokens)
+    else:
+        tokens = []
+        device_count = sum(len(group) for _, group in plan[0])
 
     logger.info(
         f"Push: {len(new_bets)} new, {len(dropped)} dropped for {target_date}; "
-        f"{len(tokens)} device(s)"
+        f"{device_count} device(s)"
     )
 
     if dry_run:
@@ -428,7 +543,10 @@ def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
     # Ledger regardless of token count, so a signal with zero devices online
     # isn't re-detected forever (it would spam once a device registers late).
     sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
-    messages = _build_messages(tokens, new_bets, dropped) if tokens else []
+    if plan is None:
+        messages = _build_messages(tokens, new_bets, dropped) if tokens else []
+    else:
+        messages = _fanout_summaries(conn, plan, new_bets, dropped, _build_messages)
     sent = _expo_send(messages, conn) if messages else 0
 
     for s in new_bets:
@@ -465,7 +583,7 @@ def _line_change_alerts(conn, target_date: str) -> list[dict]:
     rows = conn.execute("""
         SELECT tb.device_id, tb.pick_id, tb.game_id, tb.model_id, tb.pick_side,
                tb.locked_odds, tb.pick_label, tb.locked_line,
-               g.home_team, g.away_team
+               g.home_team, g.away_team, g.sport
         FROM tracked_bets tb
         JOIN games g ON g.game_id = tb.game_id
         WHERE tb.game_date = %s
@@ -476,7 +594,7 @@ def _line_change_alerts(conn, target_date: str) -> list[dict]:
 
     alerts: list[dict] = []
     for (device_id, pick_id, game_id, model_id, pick_side, locked_odds, label,
-         locked_line, home, away) in rows:
+         locked_line, home, away, sport) in rows:
         col = _SIDE_PRICE_COL.get(pick_side)
         if not col:
             continue
@@ -516,7 +634,7 @@ def _line_change_alerts(conn, target_date: str) -> list[dict]:
             # locked_line is the pick's scored_line, the HOME number for spreads.
             "model_id": model_id, "side": pick_side,
             "line": None if locked_line is None else float(locked_line),
-            "home": home, "away": away,
+            "home": home, "away": away, "sport": sport,
         })
     return alerts
 
@@ -536,12 +654,24 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
             logger.info(f"Push(line-change): nothing tracked moved for {target_date}")
             return 0
 
-        token_by_device = {
-            r[0]: r[1] for r in conn.execute(
-                "SELECT device_id, token FROM device_push_tokens "
-                "WHERE enabled = TRUE AND device_id IS NOT NULL"
-            ).fetchall()
-        }
+        plan = _inbox_plan(conn)
+        user_by_device: dict = {}
+        if plan is None:
+            token_by_device = {
+                r[0]: r[1] for r in conn.execute(
+                    "SELECT device_id, token FROM device_push_tokens "
+                    "WHERE enabled = TRUE AND device_id IS NOT NULL"
+                ).fetchall()
+            }
+            mutes, unread = {}, {}
+        else:
+            mutes, unread = plan[1], plan[2]
+            token_by_device = {}
+            for _, group in plan[0]:
+                for device in group:
+                    if device.get("device_id"):
+                        token_by_device[device["device_id"]] = device["token"]
+                        user_by_device[device["device_id"]] = device.get("user_id")
         logger.info(f"Push(line-change): {len(alerts)} alert(s) for {target_date}")
 
         if dry_run:
@@ -553,7 +683,11 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
 
         sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
         messages = []
+        owned: list[tuple] = []
         for a in alerts:
+            user_id = user_by_device.get(a["device_id"])
+            if _sport_muted(user_id, a.get("sport"), mutes):
+                continue
             token = token_by_device.get(a["device_id"])
             if token:
                 arrow = "moved against you" if a["against"] else "moved in your favor"
@@ -568,12 +702,16 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
                              f"{a['locked']:+d} → {a['current']:+d}"),
                     # Always one pick, so this is the one push that can always
                     # open the bet itself — which is the whole point when the
-                    # line the user locked has moved.
+                    # line the user locked has moved. sport is optional and
+                    # ignored by the router; the inbox uses it to hide a mute.
                     "data": {"v": PUSH_ROUTE_VERSION, "type": "line_change",
-                             "pickId": a["pick_id"]},
+                             "pickId": a["pick_id"], "sport": a.get("sport")},
                     "sound": "default",
                     "priority": "high",
                 })
+                if user_id:
+                    owned.append((user_id, messages[-1]))
+        _store_inbox(conn, _stamp_owned(owned, unread))
         sent = _expo_send(messages, conn) if messages else 0
 
         # Ledger every alert (even with no device online) so it isn't re-detected
@@ -640,11 +778,17 @@ def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -
         if not new:
             return 0
 
-        tokens = [r[0] for r in conn.execute(
-            "SELECT token FROM device_push_tokens WHERE enabled = TRUE"
-        ).fetchall()]
+        plan = _inbox_plan(conn)
+        if plan is None:
+            tokens = [r[0] for r in conn.execute(
+                "SELECT token FROM device_push_tokens WHERE enabled = TRUE"
+            ).fetchall()]
+            device_count = len(tokens)
+        else:
+            tokens = []
+            device_count = sum(len(group) for _, group in plan[0])
         logger.info(f"Push(live): {len(new)} new live signal(s) for {target_date}; "
-                    f"{len(tokens)} device(s)")
+                    f"{device_count} device(s)")
 
         if dry_run:
             for s in new:
@@ -655,13 +799,16 @@ def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -
         # "live pick" is what the board calls these (PicksHomeScreen's
         # itemNoun), and the tap now lands on that board — so the push should
         # not invent a third noun for it.
-        title = f"🔴 {len(new)} live pick{'s' if len(new) != 1 else ''}"
-        body = _summary_body([s["label"] for s in new])
-        data = _route("live_signals", new)
-        messages = [{
-            "to": token, "title": title, "body": body, "data": data,
-            "sound": "default", "priority": "high",
-        } for token in tokens]
+        if plan is None:
+            title = f"🔴 {len(new)} live pick{'s' if len(new) != 1 else ''}"
+            body = _summary_body([s["label"] for s in new])
+            data = _route("live_signals", new)
+            messages = [{
+                "to": token, "title": title, "body": body, "data": data,
+                "sound": "default", "priority": "high",
+            } for token in tokens]
+        else:
+            messages = _fanout_live(conn, plan, new)
         sent = _expo_send(messages, conn) if messages else 0
 
         for s in new:
@@ -737,6 +884,9 @@ def notify_feedback_replies(dry_run: bool = False) -> int:
             "sound": "default",
             "priority": "high",
         } for r in replies]
+        # Feedback has no sport, so a mute never drops it. The inbox row is
+        # per user when the device token carries one.
+        _store_feedback_inbox(conn, replies, messages)
         sent = _expo_send(messages, conn)
 
         # Ledger every reply, delivered or not — mirrors the other producers, so

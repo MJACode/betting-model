@@ -105,6 +105,13 @@ def test_app_timings_are_not_deleted():
     assert conn.deletes() == []
 
 
+def test_the_notification_inbox_is_not_deleted():
+    from tracking.notification_inbox import prune_notification_inbox
+    conn = _Recorder()
+    assert prune_notification_inbox(conn) == 0
+    assert conn.deletes() == []
+
+
 def test_player_news_is_not_deleted():
     from data.ingestors import player_news_ingestor as pni
     conn = _Recorder()

@@ -44,6 +44,7 @@ import { StatsSportButton } from '@/components/StatsSportButton';
 import { TeamsBoard } from '@/components/TeamsBoard';
 import { NbaFirstBasketBoard } from '@/components/NbaFirstBasketBoard';
 import { InjuryChip } from '@/components/InjuryChip';
+import { NotificationBell } from '@/components/NotificationBell';
 import { SettingsButton } from '@/components/SettingsButton';
 import { FilterChip } from '@/components/filters/FilterChip';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
@@ -2594,7 +2595,10 @@ export function StatsScreen() {
               </Text>
               <StatsSportButton />
             </View>
-            <SettingsButton />
+            <View style={styles.rightActions}>
+              <NotificationBell />
+              <SettingsButton />
+            </View>
           </View>
           {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
@@ -2631,7 +2635,10 @@ export function StatsScreen() {
               </Text>
               <StatsSportButton />
             </View>
-            <SettingsButton />
+            <View style={styles.rightActions}>
+              <NotificationBell />
+              <SettingsButton />
+            </View>
           </View>
         </View>
         <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
@@ -2665,7 +2672,10 @@ export function StatsScreen() {
               </Text>
               <StatsSportButton />
             </View>
-            <SettingsButton />
+            <View style={styles.rightActions}>
+              <NotificationBell />
+              <SettingsButton />
+            </View>
           </View>
           {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
@@ -2873,6 +2883,7 @@ export function StatsScreen() {
                 </View>
               ) : null}
             </Pressable>
+            <NotificationBell />
             <SettingsButton />
           </View>
         </View>
