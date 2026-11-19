@@ -7,6 +7,7 @@ import { readAuthStatus, readAuthUserId, subscribeAuthUser } from '@/hooks/useAu
 import { getDeviceId } from '@/hooks/useDeviceId';
 import { clearPushOptInForAccountDeletion, usePushOptIn } from '@/hooks/usePushOptIn';
 import { diagnosePushError, type PushDiagnosis } from '@/lib/pushDiagnosis';
+import { enqueuePushWrite } from '@/lib/pushQueue';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -51,19 +52,6 @@ const TOKEN_KEY = 'push.token.v1';
 
 const listeners = new Set<(s: PushState) => void>();
 let state: PushState = { status: 'idle', token: null, diagnosis: null, registeredAt: null };
-let chain: Promise<unknown> = Promise.resolve();
-
-/** One registration at a time. A sign-in that lands mid-flight runs after it,
- *  reading the user id then, so the earlier null write cannot finish last. */
-function enqueue<T>(job: () => Promise<T>): Promise<T> {
-  const run = chain.then(job, job);
-  chain = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
-}
-
 function setState(next: Partial<PushState>): PushState {
   state = { ...state, ...next };
   listeners.forEach((fn) => fn(state));
@@ -123,7 +111,7 @@ async function rememberedToken(): Promise<string | null> {
  * Concurrent callers share one attempt.
  */
 export function registerForPush(): Promise<PushState> {
-  return enqueue(() => registerForPushNow());
+  return enqueuePushWrite(() => registerForPushNow());
 }
 
 async function registerForPushNow(): Promise<PushState> {
@@ -220,6 +208,12 @@ async function registerForPushNow(): Promise<PushState> {
  * no token row has ever existed.
  */
 export async function unregisterForPush(): Promise<boolean> {
+  // Behind any registration already in flight. Otherwise that write lands
+  // last and the server stays enabled after the reader turned notifications off.
+  return enqueuePushWrite(() => unregisterForPushNow());
+}
+
+async function unregisterForPushNow(): Promise<boolean> {
   const token = state.token ?? (await rememberedToken());
   setState({ status: 'idle', token: null, diagnosis: null });
   // Nothing was ever registered from this install, so there is no row to flip

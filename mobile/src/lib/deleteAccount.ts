@@ -7,8 +7,11 @@
  *      Nothing is unlinked before this call succeeds.
  *   2. Unlink Discord and SharpSports. A failure here is not success: the
  *      login stays, so a retry can still revoke the links.
- *   3. Call delete_my_login(). That removes auth.users.
- *   4. Wipe this install and sign out locally.
+ *   3. Forget this user's notification rows and opt the device out of push,
+ *      while the login still exists, so the token write is not pointed at
+ *      a user that was just deleted.
+ *   4. Call delete_my_login(). That removes auth.users.
+ *   5. Wipe this install and sign out locally.
  *
  * The phone clock does not gate any step. The 10-minute rule is the
  * server's, inside both functions.
@@ -180,7 +183,8 @@ export async function finishLocalAccountDeletion(
 }
 
 /**
- * Unlink, delete the login, then clear the phone. Call only after
+ * Unlink, forget this user's notifications, opt the device out, then
+ * delete the login and clear the phone. Call only after
  * delete_my_account() has committed. A stale login delete opens re-auth.
  * An unlink failure leaves the login in place.
  */
@@ -190,6 +194,20 @@ export async function continueAccountDeletion(
   const unlinked = await unlinkAfterDelete(deviceId);
   if (!unlinked) {
     return { ok: false, stale: false, serverDeleted: true, localFailure: 'unlink', loginDeleted: false };
+  }
+  // Opt out and drop this user's inbox while the login row still exists.
+  // A later wipe may save the token again; by then the user is gone and
+  // save_device_push_token stores a null user instead of failing the FK.
+  const forgot = await supabase.rpc('forget_my_notifications');
+  if (forgot.error) {
+    const text = `${forgot.error.code ?? ''} ${forgot.error.message ?? ''}`;
+    if (!/PGRST202|schema cache|Could not find the function|forget_my_notifications/i.test(text)) {
+      console.warn('[deleteAccount] notifications', forgot.error.message);
+    }
+  }
+  const pushCleared = await clearPushForAccountDeletion();
+  if (!pushCleared) {
+    return { ok: false, stale: false, serverDeleted: true, localFailure: 'wipe', loginDeleted: false };
   }
   const { error } = await supabase.rpc('delete_my_login');
   if (error) {
@@ -217,15 +235,6 @@ export async function runAccountDeletion(input: {
   deviceId: string | null;
 }): Promise<DeleteOutcome> {
   assertAuthEnabled(AUTH_ENABLED);
-  // The caller's alerts and sport switches, and the token's user link.
-  // Missing until the inbox migration is applied; that is not a failed delete.
-  const forgot = await supabase.rpc('forget_my_notifications');
-  if (forgot.error) {
-    const text = `${forgot.error.code ?? ''} ${forgot.error.message ?? ''}`;
-    if (!/PGRST202|schema cache|Could not find the function|forget_my_notifications/i.test(text)) {
-      console.warn('[deleteAccount] notifications', forgot.error.message);
-    }
-  }
   const { error } = await supabase.rpc('delete_my_account');
   if (error) {
     return isStaleSessionError(error)

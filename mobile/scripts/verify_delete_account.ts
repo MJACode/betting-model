@@ -170,6 +170,13 @@ check(
     && continueBody.indexOf('unlinkAfterDelete') < continueBody.indexOf("rpc('delete_my_login')"),
 );
 check(
+  'push opt-out and notification forget run before the login delete',
+  continueBody.indexOf("rpc('forget_my_notifications')") !== -1
+    && continueBody.indexOf('clearPushForAccountDeletion') !== -1
+    && continueBody.indexOf("rpc('forget_my_notifications')") < continueBody.indexOf("rpc('delete_my_login')")
+    && continueBody.indexOf('clearPushForAccountDeletion') < continueBody.indexOf("rpc('delete_my_login')"),
+);
+check(
   'the login delete is before the local wipe',
   continueBody.indexOf('finishLocalAccountDeletion') > continueBody.indexOf("rpc('delete_my_login')"),
 );

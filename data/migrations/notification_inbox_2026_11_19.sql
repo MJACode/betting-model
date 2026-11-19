@@ -43,6 +43,7 @@ BEGIN
   AS $fn$
   DECLARE
     v_uid uuid;
+    v_gone boolean;
   BEGIN
     -- p_last_seen stays in the signature so a shipped client still matches.
     -- The stored clock is the server's. The owner is auth.uid(), never the
@@ -68,6 +69,19 @@ BEGIN
     IF p_user_id IS NOT NULL AND p_user_id IS DISTINCT FROM v_uid THEN
       RAISE EXCEPTION 'save_device_push_token: user does not match the session'
         USING ERRCODE = '42501';
+    END IF;
+    -- The phone can still hold a JWT after delete_my_login(). Writing that
+    -- id back would violate the user foreign key and leave the token
+    -- enabled. A uid with no auth.users row is stored as NULL.
+    -- Dynamic SQL: a scratch database has no auth.users, and a static
+    -- reference would fail to plan even when the table check is false.
+    IF v_uid IS NOT NULL AND pg_catalog.to_regclass('auth.users') IS NOT NULL THEN
+      EXECUTE 'SELECT NOT EXISTS (SELECT 1 FROM auth.users AS u WHERE u.id = $1)'
+        INTO v_gone
+        USING v_uid;
+      IF v_gone THEN
+        v_uid := NULL;
+      END IF;
     END IF;
 
     INSERT INTO public.device_push_tokens

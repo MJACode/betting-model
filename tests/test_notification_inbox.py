@@ -351,6 +351,104 @@ def test_insert_rows_is_conflict_safe():
     assert conn.sql[1][1][-1] == "same"
 
 
+def test_delete_flow_opts_the_token_out_with_a_null_user():
+    """Opt-out before the login delete, and a save after the user is gone.
+
+    The late save is what the phone still does once the local wipe runs.
+    It must not raise on the user foreign key, and it must leave the token
+    disabled with no user.
+    """
+    psycopg2 = pytest.importorskip("psycopg2")
+    from tests.byom_scratch import ScratchPostgres, pg_bin
+
+    if pg_bin("initdb") is None:
+        pytest.skip("initdb is not installed")
+
+    user_a = "11111111-1111-4111-8111-111111111111"
+    token = "ExponentPushToken[delete-flow-tokenxx]"
+    device = "22222222-bbbb-4bbb-8bbb-222222222222"
+    cluster = ScratchPostgres()
+    conn = None
+    try:
+        try:
+            dsn = cluster.start()
+        except Exception as exc:
+            pytest.skip(f"scratch cluster did not start: {exc}")
+        conn = psycopg2.connect(dsn)
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            DO $$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+                CREATE ROLE anon NOLOGIN;
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+                CREATE ROLE authenticated NOLOGIN;
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
+                CREATE ROLE postgres SUPERUSER;
+              END IF;
+            END $$;
+            CREATE SCHEMA IF NOT EXISTS auth;
+            CREATE TABLE auth.users (id uuid PRIMARY KEY);
+            CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid
+            LANGUAGE sql STABLE AS $$
+              SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid
+            $$;
+            GRANT USAGE ON SCHEMA auth TO anon, authenticated;
+            GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated;
+            GRANT USAGE ON SCHEMA public TO anon, authenticated;
+            CREATE TABLE public.device_push_tokens (
+                token text PRIMARY KEY,
+                platform text,
+                device_id text,
+                enabled boolean DEFAULT true,
+                last_seen text
+            );
+        """)
+        cur.execute("INSERT INTO auth.users (id) VALUES (%s)", (user_a,))
+        cur.execute(MIG.read_text(encoding="utf-8"))
+        cur.execute("SELECT set_config('request.jwt.claim.sub', %s, false)", (user_a,))
+        cur.execute("SET ROLE authenticated")
+        cur.execute(
+            "SELECT public.save_device_push_token(%s, %s, 'ios', true, 'seen', %s)",
+            (token, device, user_a),
+        )
+        cur.execute(
+            "INSERT INTO public.notification_inbox "
+            "(id, user_id, kind, title, body, route, notification_id) "
+            "VALUES ('33333333-cccc-4ccc-8ccc-333333333333', %s, 'test', 't', 'b', '{}', 'del-1')",
+            (user_a,),
+        )
+        cur.execute("SELECT public.forget_my_notifications()")
+        cur.execute(
+            "SELECT public.save_device_push_token(%s, %s, 'ios', false, 'seen', %s)",
+            (token, device, user_a),
+        )
+        cur.execute("RESET ROLE")
+        cur.execute("DELETE FROM auth.users WHERE id = %s", (user_a,))
+        cur.execute("SET ROLE authenticated")
+        cur.execute(
+            "SELECT public.save_device_push_token(%s, %s, 'ios', false, 'seen', %s)",
+            (token, device, user_a),
+        )
+        cur.execute("RESET ROLE")
+        cur.execute(
+            "SELECT enabled, user_id IS NULL, "
+            "(SELECT count(*) FROM public.notification_inbox) "
+            "FROM public.device_push_tokens WHERE token = %s",
+            (token,),
+        )
+        enabled, user_is_null, inbox_rows = cur.fetchone()
+        assert enabled is False
+        assert user_is_null is True
+        assert inbox_rows == 0
+    finally:
+        if conn is not None:
+            conn.close()
+        cluster.stop()
+
+
 def test_rls_hides_another_users_inbox_rows():
     psycopg2 = pytest.importorskip("psycopg2")
     from tests.byom_scratch import ScratchPostgres, pg_bin
