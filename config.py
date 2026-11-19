@@ -4555,6 +4555,16 @@ BEST_LINE_MAX_LAG_MIN: float = float(os.environ.get("BEST_LINE_MAX_LAG_MIN", "30
 # normal age is hours (14 of 81 NHL prop BETs since 08-15 were 6-24 hours).
 PREGAME_PRICE_MAX_AGE_MIN: int = int(os.environ.get("PREGAME_PRICE_MAX_AGE_MIN", "180"))
 
+# A PRE-GAME PICK IS REFUSED THIS MANY MINUTES BEFORE THE FEED'S LISTED START,
+# per sport (models/scorer._drop_pregame_after_cutoff; mike, 2026-11-19, #1484).
+# NCAAF: in all 4 games checked the odds feed listed the start 1.8 to 6.4
+# minutes AFTER the real kickoff (ESPN's first-play wall clock, game_first_play),
+# and three ncaaf_over_under bets were written after kickoff. 4 of the 115
+# published NCAAF pre-game bets were placed inside 10 minutes of the listed
+# start, 3 of them after kickoff. NHL needs none: puck drop came 8 to 18 minutes
+# after the listed start in all 30 games checked. Other sports not measured.
+PREGAME_START_BUFFER_MIN: dict = {"NCAAF": 10}
+
 # A PROPOSITION DraftKings DOES NOT LIST IS STILL A PROPOSITION (mike,
 # 2026-09-12: "Yes, scoring of other books lines.")
 #

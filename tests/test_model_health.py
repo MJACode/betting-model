@@ -368,3 +368,24 @@ def test_the_app_roles_can_read_none_of_it(db):
         for role in ROLES:
             got = _rows(db, "SELECT has_table_privilege(%s, %s, 'SELECT') AS ok", (role, f"public.{view}"))
             assert got == [{"ok": False}], (role, view)
+
+
+def test_a_bet_placed_after_its_first_play_is_in_play(db):
+    """mike, 2026-11-19: three NCAAF totals bet after kickoff "should be moved to
+    live bets". Once game_first_play exists the views rebuild and read them as
+    in-play; the record's own rows are untouched."""
+    _apply(db)
+    early = _bet(db, "ncaaf_over_under", minute=10, clv=1.0)
+    late = _bet(db, "ncaaf_over_under", minute=20, clv=0.38)
+    db.execute("""CREATE TABLE game_first_play (game_id text PRIMARY KEY, first_play_at timestamptz,
+                  listed_start timestamptz, source text, source_id text, fetched_at timestamptz)""")
+    for pid in (early, late):
+        db.execute("INSERT INTO game_first_play (game_id, first_play_at, source) VALUES (%s, '2026-11-10 00:15:00+00', 'espn_wallclock')",
+                   (f"G{pid}",))
+    db.commit()
+    before = {r["pick_id"]: r["status"] for r in _rows(db, "SELECT pick_id, status FROM v_model_health_bets")}
+    assert before[late] == "price"                    # the views have not rebuilt yet
+    _apply(db)
+    after = {r["pick_id"]: r for r in _rows(db, "SELECT pick_id, status, clv_pct FROM v_model_health_bets")}
+    assert after[early]["status"] == "price"
+    assert after[late]["status"] == "in_play" and after[late]["clv_pct"] is None

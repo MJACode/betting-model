@@ -248,3 +248,67 @@ the alternate ladder), 24 whose book's last pull no longer priced our number,
 first-half spreads placed on the last pull, 3 NHL moneylines placed 4 minutes
 before the start, 2 Hard Rock props). The closing pull is what closes the last
 group from now on.
+
+**Two fixes, 2026-11-19 (after the first full run).** A player is matched
+across accents, case, punctuation and Jr./III (`clv_close.player_key`): the
+feed's history spells "Jose Soriano" and "Walbert Urena" where our labels say
+"José Soriano" and "Walbert Ureña". And a prop's line move is recorded whether
+or not the pick row carries `prop_market` (the single-market prop models leave
+it empty), so an Under the book no longer offered at our number shows as a
+line move, not as "no closing price". The closing pull now pulls a game again
+when a bet lands after its last closing pull (NHL moneylines are decided about
+four minutes before the start). After both, the published record's pre-game
+bets: 1,163 priced, 102 line moved our way, 53 against, 32 no closing price
+(22 placed in the last ten minutes before the start, after the book's final
+pull; 8 whose player or market the book no longer listed at the start; 1 with
+no main line in the last pull; 1 other).
+
+**The listed start and the first play (rule v2, 2026-11-19).** mike: *"figure
+out the last 22 missing"*. The start the rule bounds on is the listed one, and
+an NHL puck drops 8 to 18 minutes after it (ESPN's wall clock on the first
+play, 11 games measured). A bet placed in the last minutes before the listed
+start can have no pull of its book between the bet and that time. For that bet
+only, the close is the book's last price before the game actually began: the
+first play (`game_first_play`) less one minute. A bet placed at or after the
+first play is not a pre-game bet and has no close. `scripts/clv_close_history.py
+first-play` stores first plays from ESPN (NHL and NCAAF matched) and `buy-late`
+buys the bet book at that moment from the feed's history (19 game-and-book
+calls, 174 credits). The worker's settle step has no first plays of its own and
+still measures bets placed before the listed start; the closing pull, which
+runs to 40 seconds before it, covers all but a bet placed in those last
+seconds.
+
+After it, the published record's pre-game bets: 1,180 priced, 101 line moved
+our way, 53 against, 16 no closing price. Of the 22: 8 priced at the last
+pre-game price before puck drop. 13 have no price after the bet anywhere, and
+3 are NCAAF totals placed after kickoff:
+
+* 3 BetRivers NHL bets placed 1.5 to 8 seconds after the feed's last BetRivers
+  snapshot. BetRivers takes its pre-game market down at the listed start: the
+  snapshot 36 seconds after it lists DraftKings and not BetRivers, and our own
+  last BetRivers pull (local copy) came before each bet.
+* 8 shots-on-goal props (7 Hard Rock, 1 William Hill): the book stopped
+  offering that player's shots line after the bet while it kept listing his
+  other props, through the start and in the history before the first play.
+* 1 NFL prop at Fliff: no Fliff pull after the bet, and the history at kickoff
+  lists Fliff without the player.
+* 1 NBA Under at FanDuel: its last pull before the tip offered only Overs at
+  our number; the main line came back at another number.
+* 3 NCAAF totals placed after kickoff, because the feed listed the start 4 to
+  8 minutes after the real kickoff (issue #1484). One was among the 22; the
+  other two had been measured against post-kickoff prices (one +0.38%, one a
+  line move our way) and now read "placed after the game began".
+
+Pinnacle's fair close covers 10 of the 13 (`market_clv_pct`; its timing is
+issue #1482). A close from another book at our number would change what the
+same-book column measures, so it is not used. mike: *"leave the 13 missing blank"*.
+
+**A bet placed after its game's first play is in-play on Model Health**
+(mike, 2026-11-19: the three NCAAF totals *"should be moved to live bets"*).
+`v_model_health_bets` reads any bet placed at or after its game's first play
+(`game_first_play`) as `in_play`, whatever model wrote it, so it is out of the
+pre-game closing-line figures. Setting `is_live` on the pick rows would not
+move them into a live record (the record counts an in-play bet only from an
+in-play model posted to a live channel); mike chose to take the three out of
+the record instead, and they were voided the same day (`docs/sports/ncaaf.md`).
+

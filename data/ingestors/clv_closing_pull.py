@@ -19,9 +19,12 @@ returned per region; a bookmakers list of up to ten counts as one region
 game with one moneyline bet is one credit; a spread bet two (the line and its
 ladder); a prop bet two per market.
 
-A game is pulled once (the ledger, clv_close_purchases with kind 'closing').
-A failed call is tried again on the next tick while the game is still inside
-the window. No call within PULL_LEAD_MIN of the start: the answer could land
+A game is pulled once per bet that came before the pull (the ledger,
+clv_close_purchases with kind 'closing'): a bet placed after the game's last
+closing pull gets another on the next tick, while the game is still inside
+the window. NHL moneylines are decided about four minutes before the start,
+which is after the first closing pull (measured on 2026-11-11..16 bets). A
+failed call is tried again on the next tick the same way. No call within PULL_LEAD_MIN of the start: the answer could land
 after it.
 """
 from __future__ import annotations
@@ -180,7 +183,8 @@ def due(conn, now: datetime) -> dict:
         AND g.commence_time::timestamptz > %s::timestamptz
         AND g.commence_time::timestamptz <= %s::timestamptz + interval '15 minutes'
         AND NOT EXISTS (SELECT 1 FROM public.clv_close_purchases c
-                         WHERE c.game_id = p.game_id AND c.kind = 'closing' AND c.ok)
+                         WHERE c.game_id = p.game_id AND c.kind = 'closing' AND c.ok
+                           AND c.snapshot_at > p.created_at::timestamptz)
     """, ((now - timedelta(days=1)).date().isoformat(), (now + timedelta(days=1)).date().isoformat(),
           lo.isoformat(), hi.isoformat()))
     out: dict = {}
