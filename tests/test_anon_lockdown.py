@@ -273,6 +273,7 @@ def _can(dsn: str, role: str, statement: str, claims: str | None = None,
 def test_the_lockdown_files_are_not_auto_applied():
     banned = {
         "site_public_record_2026_11.sql",
+        "site_public_record_v2_2026_11.sql",
         "anon_lockdown_step_a_2026_11.sql",
         "anon_lockdown_step_b_2026_11.sql",
         "anon_lockdown_step_a_2026_11_undo.sql",
@@ -686,6 +687,114 @@ def test_supabase_admin_defaults_are_out_of_postgres_reach():
         ).strip() == "t"
         _psql(dsn, "REVOKE ALL ON TABLE public.opened_by_admin FROM anon;")
         _psql_file(dsn, ROOT / "scripts" / "lockdown_anon_stray_check.sql")
+
+
+def _anon_kept_rpcs(dsn: str) -> None:
+    ok, err = _can(
+        dsn, "anon",
+        "SELECT public.log_app_error("
+        "'d','k','m',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,now(),'{}'::jsonb);")
+    assert ok, err
+    ok, err = _can(
+        dsn, "anon",
+        "SELECT public.log_app_timings('d','[]'::jsonb,NULL,NULL,'ios');")
+    assert ok, err
+    ok, err = _can(
+        dsn, "anon",
+        "SELECT public.save_device_push_token('t','device-1','ios',false,'n');")
+    assert ok, err
+
+
+def test_anon_selects_site_public_record_after_step_a_and_b():
+    """Privilege checks missed this. The view has to return a row as anon.
+
+    v_public_track_record and v_discord_published are security_invoker.
+    A view that still reads them fails after step A. v2 reads the tables.
+    """
+    if not pg_bin("psql"):
+        pytest.skip("psql is not installed")
+    v2 = (MIGRATIONS / "site_public_record_v2_2026_11.sql").read_text(encoding="utf-8")
+    body = v2.split("CREATE OR REPLACE VIEW", 1)[1]
+    assert "v_public_track_record" not in body
+    assert "v_discord_published" not in body
+    assert "published_pick_unit_profit" not in body
+    assert "FROM public.picks p" in body
+    assert "FROM public.picks p" in (
+        ROOT / "scripts" / "site_public_record_v2_verify.sql"
+    ).read_text(encoding="utf-8")
+
+    files = _sql_files()
+    with scratch_cluster("record-v2-") as dsn:
+        _psql(dsn, _fixture_sql())
+        _psql_file(dsn, files["site"])
+        _psql(dsn, """
+          ALTER TABLE public.picks
+            ADD COLUMN signal_type text,
+            ADD COLUMN sport text,
+            ADD COLUMN model_id text,
+            ADD COLUMN result text,
+            ADD COLUMN game_date text,
+            ADD COLUMN is_live boolean,
+            ADD COLUMN game_id text,
+            ADD COLUMN pick_side text,
+            ADD COLUMN player_id text,
+            ADD COLUMN player_key text,
+            ADD COLUMN prop_market text,
+            ADD COLUMN decision_odds numeric,
+            ADD COLUMN dk_odds numeric,
+            ADD COLUMN stake_units numeric,
+            ADD COLUMN downgrade_reason text,
+            ADD COLUMN condition_status text;
+          INSERT INTO public.picks (
+            id, signal_type, sport, model_id, result, game_date, is_live,
+            game_id, pick_side, decision_odds, stake_units)
+          VALUES (
+            1, 'BET', 'NBA', 'nba_live_total', 'WIN', '2026-11-01', false,
+            'g1', 'home', -110, 1);
+          INSERT INTO public.push_sent (lock_key, kind, sent_at)
+          VALUES ('g1:nba_live_total', 'discord_signal', now());
+        """)
+        _psql_file(dsn, MIGRATIONS / "site_public_record_v2_2026_11.sql")
+        _psql(dsn, """
+          DROP VIEW public.v_public_track_record;
+          DROP VIEW public.v_discord_published;
+          CREATE VIEW public.v_discord_published
+            WITH (security_invoker = true) AS
+            SELECT lock_key, kind FROM public.push_sent;
+          CREATE VIEW public.v_public_track_record
+            WITH (security_invoker = true) AS
+            SELECT p.sport, p.model_id,
+                   1::bigint AS picks, 1::bigint AS wins,
+                   0::bigint AS losses, 0::bigint AS pushes,
+                   1::numeric AS units, 1::numeric AS risked,
+                   p.game_date AS first_date, p.game_date AS last_date
+              FROM public.picks p;
+          CREATE VIEW public.site_record_via_invoker
+            WITH (security_invoker = false) AS
+            SELECT sport, picks FROM public.v_public_track_record;
+          GRANT SELECT ON public.site_record_via_invoker TO anon;
+          GRANT SELECT ON public.v_public_track_record TO anon, authenticated;
+          GRANT SELECT ON public.v_discord_published TO anon, authenticated;
+        """)
+        _psql_file(dsn, files["a"])
+        ok, out = _can(
+            dsn, "anon",
+            "SELECT sport, picks, wins FROM public.site_public_record;")
+        assert ok, out
+        flat = out.replace(" ", "")
+        assert "NBA|1|1" in flat
+        ok, err = _can(
+            dsn, "anon", "SELECT sport FROM public.site_record_via_invoker;")
+        assert not ok and "42501" in err
+        _anon_kept_rpcs(dsn)
+        _psql(dsn, "DROP VIEW public.site_record_via_invoker;")
+        _psql_file(dsn, files["b"])
+        ok, out = _can(
+            dsn, "anon",
+            "SELECT sport, picks, wins FROM public.site_public_record;")
+        assert ok, out
+        assert "NBA|1|1" in out.replace(" ", "")
+        _anon_kept_rpcs(dsn)
 
 
 def test_lockdown_runbook_sql_runs_on_scratch_postgres():

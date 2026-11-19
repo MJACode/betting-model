@@ -401,8 +401,11 @@ def step_a_sql() -> str:
         for sig in STEP_A_FUNCTIONS)
     return f"""{HEADER}
 -- Step A. Model, picks, record, BYOM and ops off anon.
--- site_public_record_2026_11.sql must already be applied and the website
--- pointed at it. Authenticated SELECT on every relation below is kept.
+-- site_public_record_2026_11.sql and site_public_record_v2_2026_11.sql
+-- must already be applied and the website pointed at the view.
+-- v2 reads picks and push_sent. The v1 body reads security_invoker
+-- views, and anon SELECT fails after this file. Authenticated SELECT
+-- on every relation below is kept.
 -- The matview loses anon and keeps authenticated until step D.
 
 BEGIN;
