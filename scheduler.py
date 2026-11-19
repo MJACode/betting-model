@@ -115,6 +115,9 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         prices it off the same book's spread, decides it once, and the job
         publishes. One bet a game across both moneyline models.
         RUN_NCAAB_MONEYLINE_FIRST_POST=0 stops it.)
+  * CLV closing pull      every minute, 24x7    -> run_clv_closing_pull
+        (data/ingestors/clv_closing_pull.py: the bet book's price at the bet's
+        number and its alternate ladder, four minutes before each start)
   * NCAAB first half      every minute, 24x7    -> run_ncaab_first_half_window
         (scripts/ncaab_first_half_window.py: one first-half call per listed
         game at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10

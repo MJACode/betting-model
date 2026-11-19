@@ -427,8 +427,24 @@ def measure_started(conn, now: datetime | None = None, limit: int = BATCH) -> di
             if (now - bet.created_at) < timedelta(days=2):
                 counts["waiting"] += 1
                 continue
-        close = choose_close(bet, feed_quotes(conn, bet) + history_quotes(conn, bet))
-        res = write(conn, bet, close, now)
+        try:
+            close = choose_close(bet, feed_quotes(conn, bet) + history_quotes(conn, bet))
+            res = write(conn, bet, close, now)
+        except Exception as exc:                               # noqa: BLE001
+            # One bad bet must not pin the head of the queue (ORDER BY
+            # pick_id): it is recorded as measured with no close and the
+            # error, and the pass goes on.
+            logger.warning(f"CLV final close: pick {bet.pick_id} failed ({exc})")
+            try:
+                conn.rollback()
+            except Exception:                                  # noqa: BLE001
+                pass
+            counts["failed"] = counts.get("failed", 0) + 1
+            try:
+                write(conn, bet, Close("none", note=f"error: {str(exc)[:200]}"), now)
+            except Exception:                                  # noqa: BLE001
+                conn.rollback()
+            continue
         counts["priced" if res["clv_pct"] is not None else "unpriced"] += 1
     if bets:
         logger.info(f"CLV final close: {counts}")

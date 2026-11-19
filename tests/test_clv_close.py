@@ -266,3 +266,23 @@ def test_the_tables_are_closed_to_the_app_roles(db):
         r = _row(db, "SELECT has_table_privilege('anon', %s, 'SELECT') a, has_table_privilege('authenticated', %s, 'SELECT') b",
                  (f"public.{t}", f"public.{t}"))
         assert r == {"a": False, "b": False}, t
+
+
+def test_one_bet_that_fails_does_not_stop_the_pass(db, monkeypatch):
+    _pick(db, pick_id=7)
+    _pick(db, pick_id=8)
+    _odds(db, 5, -3.5, -130)
+    real = cc.choose_close
+
+    def boom(bet, quotes):
+        if bet.pick_id == 7:
+            raise ValueError("bad row")
+        return real(bet, quotes)
+
+    monkeypatch.setattr(cc, "choose_close", boom)
+    res = cc.measure_started(db, now=T0 + timedelta(hours=1))
+    assert res["failed"] == 1 and res["priced"] == 1
+    m = _row(db, "SELECT source, note FROM clv_close_measurements WHERE pick_id = 7")
+    assert m["source"] == "none" and "bad row" in m["note"]
+    # and it is not picked up again, so it cannot pin the head of the queue
+    assert cc.measure_started(db, now=T0 + timedelta(hours=2))["bets"] == 0

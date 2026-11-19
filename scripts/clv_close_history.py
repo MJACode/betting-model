@@ -274,6 +274,13 @@ def main(argv=None) -> int:
         print(json.dumps(buy(conn, a.limit), indent=1, default=str))
     elif a.command == "history":
         bets = history_targets(conn)
+        if a.apply and not a.only_bought:
+            # The older games' stored rows were pruned: without a purchase the
+            # rule finds no pull and would write "no close" over a close that
+            # was right. Apply only where the history has been bought.
+            print("history --apply needs --only-bought: a bet whose game and book were "
+                  "not bought would be measured from pruned rows alone.")
+            return 2
         if a.only_bought:
             done = bought(conn)
             bets = [b for b in bets if (b.game_id, b.bet_book) in done]
