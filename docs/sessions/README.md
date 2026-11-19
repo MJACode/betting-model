@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Performance tab: the sportsbook-sync note now sits on the same 16pt gutter as the other cards (#1491) |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, the full test suite no longer hangs on Windows: two scratch-database starters moved onto tests/_pg.py, 88 BYOM tests now run here, and a guard stops a third copy (#1445) |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, horse racing: a US site that takes Hong Kong bets publishes the Jockey Club's own dividends (77 of 77 win and place, 7 of 7 exotics, two cards); the US$499 archive is mike's call |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, Discord /pick page always lists FD, DK, Fanatics, BetMGM, Caesars and does not open the app |
