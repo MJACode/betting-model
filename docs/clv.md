@@ -301,5 +301,13 @@ pre-game price before puck drop. 13 have no price after the bet anywhere, and
 
 Pinnacle's fair close covers 10 of the 13 (`market_clv_pct`; its timing is
 issue #1482). A close from another book at our number would change what the
-same-book column measures, so it is not used.
+same-book column measures, so it is not used. mike: *"leave the 13 missing blank"*.
+
+**A bet placed after its game's first play is in-play on Model Health**
+(mike, 2026-11-19: the three NCAAF totals *"should be moved to live bets"*).
+`v_model_health_bets` reads any bet placed at or after its game's first play
+(`game_first_play`) as `in_play`, whatever model wrote it, so it is out of the
+pre-game closing-line figures. The published record is unchanged: its views
+count an in-play bet only from an in-play model posted to a live channel, so
+setting `is_live` on these rows would take them out of the record.
 

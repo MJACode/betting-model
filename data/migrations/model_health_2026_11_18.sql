@@ -16,7 +16,11 @@
 --   price          the bet book closed on our number: clv_pct is the measure
 --   line_for       the book's main line left our number in our favour
 --   line_against   the book's main line left our number against us
---   in_play        an in-play bet: there is no pre-game close to compare to
+--   in_play        an in-play bet: there is no pre-game close to compare to.
+--                  A bet placed at or after its game's first play
+--                  (game_first_play, ESPN's wall clock) is one too, whatever
+--                  model wrote it (mike, 2026-11-19: three NCAAF totals placed
+--                  after kickoff "should be moved to live bets").
 --   no_close       the capture ran and found no closing quote
 --   not_measured   the capture has not written a close (clv_method unset)
 --   old_method     a close stamped by a retired method (excluded, as in the record)
@@ -45,9 +49,10 @@
 
 DO $mig$
 DECLARE
-  file_mark CONSTANT text := 'model_health 562ef6715677';
+  file_mark CONSTANT text := 'model_health 54e0b4b6480c';
   rec_def   text;
   rec_where text;
+  after_kickoff text;
   mark      text;
 BEGIN
   IF to_regclass('public.v_public_track_record') IS NULL THEN
@@ -60,7 +65,12 @@ BEGIN
   IF rec_where IS NULL THEN
     RAISE EXCEPTION 'model_health: could not read the published record''s filter out of v_public_track_record';
   END IF;
-  mark := file_mark || ' ' || left(md5(rec_where), 12);
+  -- game_first_play is built by clv_close_2026_11_19.sql; until it exists no
+  -- bet is known to be placed after its first play. Part of the mark, so the
+  -- views rebuild once it appears.
+  after_kickoff := CASE WHEN to_regclass('public.game_first_play') IS NULL THEN 'false' ELSE
+    'EXISTS (SELECT 1 FROM public.game_first_play fp WHERE fp.game_id = r.game_id AND fp.first_play_at <= r.created_at)' END;
+  mark := file_mark || ' ' || left(md5(rec_where || after_kickoff), 12);
 
   IF COALESCE(obj_description(to_regclass('public.v_model_health_bets'), 'pg_class'), '') = mark
      AND COALESCE(obj_description(to_regclass('public.v_model_health_windows'), 'pg_class'), '') = mark
@@ -96,7 +106,7 @@ BEGIN
     ), graded AS (
       SELECT r.*,
              CASE
-               WHEN r.is_live IS TRUE THEN 'in_play'
+               WHEN r.is_live IS TRUE OR $v2$ || after_kickoff || $v3$ THEN 'in_play'
                WHEN r.clv_method IS NULL THEN 'not_measured'
                WHEN r.clv_method <> 'standard_v2' THEN 'old_method'
                WHEN r.clv_pct IS NOT NULL THEN 'price'
@@ -129,7 +139,7 @@ BEGIN
            row_number() OVER (PARTITION BY g.model_id ORDER BY g.created_at DESC, g.pick_id DESC) AS seq,
            count(*) OVER (PARTITION BY g.model_id) AS model_bets
       FROM graded g
-  $v2$;
+  $v3$;
 
   EXECUTE $w$
     CREATE VIEW public.v_model_health_windows WITH (security_invoker = on) AS

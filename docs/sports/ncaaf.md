@@ -447,6 +447,22 @@ and models."* Three changes, all reading the stored schedule through one module
   from Sunday morning, about 6.5 days before kickoff, against a median BET lead
   of 5.2 days.
 
+### No pre-game pick in the last 10 minutes before the listed start (2026-11-19, #1484)
+
+The odds feed's listed start for an NCAAF game can come after the real
+kickoff: 1.8 to 6.4 minutes after it in all 4 games checked (ESPN's first-play
+wall clock, `game_first_play`). Three `ncaaf_over_under` bets were written after
+kickoff that way: Texas Tech vs Sam Houston Under 59.5 (2026-09-26), Missouri
+State vs Sam Houston Under 54.5 (2026-10-27) and Western Michigan vs Eastern
+Michigan Under 52.5 (2026-11-17), 1-2 for -1.34 units. So the pick insert
+(`models/scorer._drop_pregame_after_cutoff`) refuses an NCAAF pre-game row from
+10 minutes before the listed start (`config.PREGAME_START_BUFFER_MIN`). 4 of the
+115 published NCAAF pre-game bets were placed inside that window, 3 of them after
+kickoff. The three stay in the record as written; Model Health shows them as
+in-play (mike: *"should be moved to live bets"*), so they carry no pre-game
+closing value. The in-play loop's first stored state is no start signal: it
+landed 1 to 10 minutes after kickoff on these games.
+
 ### Data / conventions (load-bearing)
 
 - **New CFBD games are dated by Eastern kickoff** (Matt, 2026-09-13, the
