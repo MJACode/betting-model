@@ -125,6 +125,24 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
     REVOKE EXECUTE ON FUNCTIONS FROM anon;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres
     REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+-- The global revoke covers every schema. Put PUBLIC execute back on every
+-- schema except public, using the schemas that exist when this runs.
+-- public is the one schema that stays without it.
+DO $keep_other_schemas$
+DECLARE s text;
+BEGIN
+  FOR s IN
+    SELECT n.nspname FROM pg_namespace n
+     WHERE n.nspname <> 'public'
+       AND n.nspname <> 'information_schema'
+       AND n.nspname NOT LIKE 'pg_%'
+  LOOP
+    EXECUTE format(
+      'ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I '
+      'GRANT EXECUTE ON FUNCTIONS TO PUBLIC', s);
+  END LOOP;
+END
+$keep_other_schemas$;
 
 ALTER POLICY "anon read alt_game_lines" ON public.alt_game_lines TO authenticated;
 ALTER POLICY "anon read fighters" ON public.fighters TO authenticated;

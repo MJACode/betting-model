@@ -347,6 +347,7 @@ def test_steps_a_and_b_on_scratch_postgres():
         ok, _ = _can(dsn, "anon", "SELECT public.team_stats_board('nba', 2026);")
         assert ok, "stats RPCs stay anon-callable until step B"
 
+        _psql(dsn, "CREATE SCHEMA lockdown_other;")
         _psql_file(dsn, files["b"])
         _psql_file(dsn, files["b"])
         ok, err = _can(dsn, "anon", "SELECT 1 FROM games;")
@@ -368,6 +369,11 @@ def test_steps_a_and_b_on_scratch_postgres():
                   "LANGUAGE sql AS $$ SELECT 1 $$;")
         ok, err = _can(dsn, "anon", "SELECT public.fresh_after_b();")
         assert not ok and "42501" in err
+        _psql(dsn, "GRANT USAGE ON SCHEMA lockdown_other TO anon; "
+                  "CREATE FUNCTION lockdown_other.fresh() RETURNS int "
+                  "LANGUAGE sql AS $$ SELECT 1 $$;")
+        ok, err = _can(dsn, "anon", "SELECT lockdown_other.fresh();")
+        assert ok, err
         ok, err = _can(
             dsn, "anon",
             "SELECT public.save_device_push_token('t','device-1','ios',false,'n');")

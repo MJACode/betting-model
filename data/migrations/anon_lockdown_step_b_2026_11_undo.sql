@@ -28,6 +28,21 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
     GRANT EXECUTE ON FUNCTIONS TO anon;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres
     GRANT EXECUTE ON FUNCTIONS TO PUBLIC;
+DO $drop_other_schemas$
+DECLARE s text;
+BEGIN
+  FOR s IN
+    SELECT n.nspname FROM pg_namespace n
+     WHERE n.nspname <> 'public'
+       AND n.nspname <> 'information_schema'
+       AND n.nspname NOT LIKE 'pg_%'
+  LOOP
+    EXECUTE format(
+      'ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I '
+      'REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC', s);
+  END LOOP;
+END
+$drop_other_schemas$;
 -- The plain grant sweep revokes anon on new tables again.
 -- Run it after this undo if that 2026-09-03 default should stay.
 GRANT SELECT ON public.alt_game_lines TO anon;

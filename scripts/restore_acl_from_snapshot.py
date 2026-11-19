@@ -269,10 +269,13 @@ def _live_acl(cur, kind: str, object_name: str):
                 (owner, objtype),
             )
         row = cur.fetchone()
-        # No per-schema (or global) row means nothing is added on top of
-        # the built-in default. That is an empty list, not acldefault().
-        # A stored NULL ACL is still expanded by the caller.
-        acl = [] if row is None else row[0]
+        # A missing per-schema row means nothing is added. An empty list.
+        # A missing global row means the built-in default, so the caller
+        # expands NULL with acldefault. A stored NULL ACL is expanded too.
+        if row is None:
+            acl = None if global_scope else []
+        else:
+            acl = row[0]
         return (acl, None, acldefault_type(objtype), owner)
     return None
 
@@ -282,6 +285,7 @@ def build_statements(cur, label: str) -> list[str]:
     if not rows:
         raise SystemExit(f"no ops.acl_snapshot rows for label {label}")
     out: list[str] = []
+    seen_defacl: set[str] = set()
     for kind, object_name, detail in rows:
         detail = detail or {}
         if kind == "policy":
@@ -314,8 +318,32 @@ def build_statements(cur, label: str) -> list[str]:
         elif kind == "attacl":
             out.extend(column_statements(object_name, snap_acl, live_acl))
         elif kind == "defacl":
+            seen_defacl.add(object_name)
             out.extend(default_statements(object_name, snap_acl, live_acl))
+    out.extend(_unlisted_global_function_defaults(cur, seen_defacl))
     return [line for line in out if line]
+
+
+def _unlisted_global_function_defaults(cur, seen: set[str]) -> list[str]:
+    """Live global function defaults the snapshot does not name.
+
+    Step B writes `postgres:f:global` as owner-only EXECUTE. A pre-step
+    snapshot has no such row. The built-in default is acldefault, which
+    includes PUBLIC EXECUTE. The diff grants that back.
+    """
+    cur.execute(
+        "SELECT pg_get_userbyid(d.defaclrole), d.defaclacl::text[], d.defaclrole "
+        "FROM pg_default_acl d "
+        "WHERE d.defaclnamespace = 0 AND d.defaclobjtype = 'f'"
+    )
+    lines: list[str] = []
+    for role, acl, oid in cur.fetchall():
+        key = f"{role}:f:global"
+        if key in seen:
+            continue
+        baseline = expand_null_acl(cur, None, "f", oid)
+        lines.extend(default_statements(key, baseline, list(acl or []), global_scope=True))
+    return lines
 
 
 def main(argv: list[str] | None = None) -> int:

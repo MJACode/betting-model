@@ -482,6 +482,24 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
     REVOKE EXECUTE ON FUNCTIONS FROM anon;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres
     REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+-- The global revoke covers every schema. Put PUBLIC execute back on every
+-- schema except public, using the schemas that exist when this runs.
+-- public is the one schema that stays without it.
+DO $keep_other_schemas$
+DECLARE s text;
+BEGIN
+  FOR s IN
+    SELECT n.nspname FROM pg_namespace n
+     WHERE n.nspname <> 'public'
+       AND n.nspname <> 'information_schema'
+       AND n.nspname NOT LIKE 'pg_%'
+  LOOP
+    EXECUTE format(
+      'ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I '
+      'GRANT EXECUTE ON FUNCTIONS TO PUBLIC', s);
+  END LOOP;
+END
+$keep_other_schemas$;
 
 {_alter_policies(STEP_B_POLICIES, "authenticated")}
 {_functions(STEP_B_STATS_FUNCTIONS + STEP_B_DEVICE_FUNCTIONS)}
@@ -686,6 +704,21 @@ def undo_b_sql() -> str:
              "    GRANT EXECUTE ON FUNCTIONS TO anon;\n",
              "ALTER DEFAULT PRIVILEGES FOR ROLE postgres\n",
              "    GRANT EXECUTE ON FUNCTIONS TO PUBLIC;\n",
+             "DO $drop_other_schemas$\n",
+             "DECLARE s text;\n",
+             "BEGIN\n",
+             "  FOR s IN\n",
+             "    SELECT n.nspname FROM pg_namespace n\n",
+             "     WHERE n.nspname <> 'public'\n",
+             "       AND n.nspname <> 'information_schema'\n",
+             "       AND n.nspname NOT LIKE 'pg_%'\n",
+             "  LOOP\n",
+             "    EXECUTE format(\n",
+             "      'ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA %I '\n",
+             "      'REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC', s);\n",
+             "  END LOOP;\n",
+             "END\n",
+             "$drop_other_schemas$;\n",
              "-- The plain grant sweep revokes anon on new tables again.\n",
              "-- Run it after this undo if that 2026-09-03 default should stay.\n"]
     for name in STEP_B_RELATIONS + STEP_B_HYGIENE:

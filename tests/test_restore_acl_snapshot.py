@@ -175,6 +175,43 @@ def test_a_missing_defacl_row_is_an_empty_list():
     assert "REVOKE" not in text
 
 
+def test_an_unlisted_global_function_default_is_granted_back_to_public():
+    """A pre-step snapshot has no postgres:f:global row. Step B creates one.
+
+    Restore must grant PUBLIC execute back. Undo B is not the only path.
+    """
+    import psycopg2
+    import pytest
+
+    from scripts.restore_acl_from_snapshot import build_statements
+    from tests._pg import pg_bin, scratch_cluster
+
+    if not pg_bin("psql"):
+        pytest.skip("psql is not installed")
+    with scratch_cluster("aclglob-") as dsn:
+        conn = psycopg2.connect(dsn)
+        cur = conn.cursor()
+        cur.execute(
+            "ALTER DEFAULT PRIVILEGES FOR ROLE postgres "
+            "REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC")
+        cur.execute(
+            "CREATE SCHEMA IF NOT EXISTS ops; "
+            "CREATE TABLE ops.acl_snapshot ("
+            " taken_at timestamptz NOT NULL DEFAULT now(),"
+            " label text NOT NULL, kind text NOT NULL,"
+            " object text NOT NULL, detail jsonb NOT NULL)")
+        cur.execute(
+            "INSERT INTO ops.acl_snapshot (label, kind, object, detail) "
+            "VALUES ('pre', 'defacl', 'postgres:r', "
+            """ '{"acl": ["anon=r/postgres"]}'::jsonb)""")
+        conn.commit()
+        lines = build_statements(cur, "pre")
+        text = "\n".join(lines)
+        conn.close()
+    assert "GRANT EXECUTE ON FUNCTIONS TO PUBLIC" in text
+    assert "IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO PUBLIC" not in text
+
+
 def test_dry_run_refuses_without_a_dsn():
     from scripts.restore_acl_from_snapshot import main
     assert main(["--label", "pre_step_a_20261118"]) == 2
