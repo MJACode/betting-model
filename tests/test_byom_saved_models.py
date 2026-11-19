@@ -59,6 +59,7 @@ def test_the_migration_is_not_registered_and_not_anon_granted():
         "byom_delete_model",
         "delete_my_account",
         "delete_my_login",
+        "forget_my_notifications",
     )
     assert not (set(RPC_AFTER_SIGN_IN) & set(RPC_ANON_CALLABLE))
     assert not (set(RPC_AFTER_SIGN_IN) & set(RPC_REVOKE))

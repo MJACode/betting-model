@@ -11,9 +11,9 @@ import * as Notifications from 'expo-notifications';
  * where everything else was correct. A silent pass for a working system is the
  * same class of bug as a silent failure for a broken one.
  *
- * Banner and list, sound on, badge left alone: the badge is a running count
- * nothing in this app clears, and a number that only ever grows stops meaning
- * anything.
+ * Banner and list, sound on, and the badge from the payload. The inbox
+ * sets and clears the same count when a row is read, so a badge can mean
+ * "unread" instead of a number that only ever grows.
  *
  * Called once from App.tsx module scope. Guarded because a binary built before
  * expo-notifications landed throws on the property access itself, and this file
@@ -27,7 +27,7 @@ export function installNotificationHandler(): void {
         shouldShowBanner: true,
         shouldShowList: true,
         shouldPlaySound: true,
-        shouldSetBadge: false,
+        shouldSetBadge: true,
       }),
     });
   } catch (err) {

@@ -10,6 +10,7 @@ import { errorSurface, loadPresentation } from '@/lib/loadState';
 import { sportDisplayName } from '@/lib/liveSports';
 import { Skeleton, SkeletonRow } from '@/components/Skeleton';
 import { SportToggle } from '@/components/SportToggle';
+import { NotificationBell } from '@/components/NotificationBell';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { ByomModelList } from '@/components/byom/ByomModelList';
@@ -103,6 +104,7 @@ export function ModelsScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Models</Text>
           <View style={styles.rightActions}>
+            <NotificationBell />
             <SettingsButton />
           </View>
         </View>

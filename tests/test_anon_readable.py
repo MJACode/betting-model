@@ -143,6 +143,8 @@ def test_unapplied_facts_tables_are_not_granted_until_they_exist():
         "byom_game_facts",
         "byom_prop_facts",
         "v_player_season_totals_ncaabw",
+        "notification_inbox",
+        "notification_sport_prefs",
     )
     dry = " | ".join(_plan())
     for rel in MAY_BE_UNAPPLIED:

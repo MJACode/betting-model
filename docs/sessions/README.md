@@ -19,6 +19,10 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, A failed push opt-out no longer blocks delete_my_login; the success copy requires the login delete |
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Account delete opts the push token out before the login is deleted; a missing auth user stores a null user |
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Inbox review: token owner is auth.uid(), relink on sign-in, idempotent inbox rows |
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Notifications inbox: bell on every tab, 7-day history, per-sport mutes, app badge. Hand migration, not applied |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Signals + Slip and Track pills: the icon and label sat ~4pt high in the 44pt pill; centered, pill size unchanged |
 | 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, NBA reassessment: the projection model stops betting threes overs (287 card bets, -23.08 units on three seasons) and the three shooting-luck total models wait for 10 games again (21-29, -11.10 units on teams under 10 games); the twelve registered backtests in one doc, Kalshi's price on the prop bets among them (not worth building) |
 | 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, EuroLeague Moneyline, Spreads and First Half pages say the three bet the same team (mike: "Yes, add it"); scheduler tests dial the .env database, 4 s per refused connect, suite stuck 14 h (#1456) |

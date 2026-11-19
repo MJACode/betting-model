@@ -3,9 +3,11 @@ import * as Notifications from 'expo-notifications';
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
+import { readAuthStatus, readAuthUserId, subscribeAuthUser } from '@/hooks/useAuth';
 import { getDeviceId } from '@/hooks/useDeviceId';
 import { clearPushOptInForAccountDeletion, usePushOptIn } from '@/hooks/usePushOptIn';
 import { diagnosePushError, type PushDiagnosis } from '@/lib/pushDiagnosis';
+import { enqueuePushWrite } from '@/lib/pushQueue';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -49,13 +51,44 @@ export interface PushState {
 const TOKEN_KEY = 'push.token.v1';
 
 const listeners = new Set<(s: PushState) => void>();
+/** Account deletion sets this so a registration still waiting on the
+ *  permission prompt cannot finish last and leave the token enabled. */
+let pushWritesClosed = false;
 let state: PushState = { status: 'idle', token: null, diagnosis: null, registeredAt: null };
-let inFlight: Promise<PushState> | null = null;
-
 function setState(next: Partial<PushState>): PushState {
   state = { ...state, ...next };
   listeners.forEach((fn) => fn(state));
   return state;
+}
+
+/**
+ * Save the token. Pass p_user_id when we know who is signed in. If the
+ * deployed function does not take that argument yet, retry without it so
+ * registration does not start failing before the inbox migration is applied.
+ */
+function pushTokenArgMissing(error: { message?: string; code?: string }): boolean {
+  const text = `${error.code ?? ''} ${error.message ?? ''}`;
+  return /PGRST202|p_user_id|Could not find the function|schema cache/i.test(text);
+}
+
+async function savePushToken(args: {
+  p_token: string;
+  p_device_id: string;
+  p_platform: string;
+  p_enabled: boolean;
+  p_last_seen: string;
+  p_user_id: string | null;
+}): Promise<{ error: { message?: string; code?: string } | null }> {
+  const { p_user_id, ...rest } = args;
+  const withUser = p_user_id ? { ...rest, p_user_id } : rest;
+  const first = await supabase.rpc('save_device_push_token', withUser);
+  if (!first.error || !p_user_id) return { error: first.error };
+  const text = `${first.error.code ?? ''} ${first.error.message ?? ''}`;
+  if (!/PGRST202|p_user_id|Could not find the function|schema cache/i.test(text)) {
+    return { error: first.error };
+  }
+  const second = await supabase.rpc('save_device_push_token', rest);
+  return { error: second.error };
 }
 
 async function rememberToken(token: string | null): Promise<void> {
@@ -81,8 +114,11 @@ async function rememberedToken(): Promise<string | null> {
  * Concurrent callers share one attempt.
  */
 export function registerForPush(): Promise<PushState> {
-  if (inFlight) return inFlight;
-  inFlight = (async () => {
+  return enqueuePushWrite(() => registerForPushNow());
+}
+
+async function registerForPushNow(): Promise<PushState> {
+  return (async () => {
     setState({ status: 'registering', diagnosis: null });
     try {
       // Ask what we already have before prompting. On iOS a second request
@@ -130,19 +166,32 @@ export function registerForPush(): Promise<PushState> {
       // has no SELECT policy, including when the row does not exist yet. A
       // SELECT policy would let the anon key list every Expo token. The
       // function runs as the table owner and returns nothing.
-      const { error } = await supabase.rpc('save_device_push_token', {
+      // p_user_id is optional and only exists after the inbox migration.
+      // A server that has not been migrated rejects the extra argument, and
+      // the same call without it still registers the device.
+      const userId = readAuthUserId();
+      if (pushWritesClosed) {
+        return setState({ status: 'idle', token: null, diagnosis: null });
+      }
+      const base = {
         p_token: token,
         p_device_id: deviceId,
         p_platform: Platform.OS,
         p_enabled: true,
         p_last_seen: registeredAt,
-      });
+      };
+      const payload = userId ? { ...base, p_user_id: userId } : base;
+      const { error } = await supabase.rpc('save_device_push_token', payload);
       if (error) {
-        return setState({
-          status: 'failed',
-          token,
-          diagnosis: diagnosePushError(error, 'storage'),
-        });
+        const failed = userId && pushTokenArgMissing(error)
+          ? (await supabase.rpc('save_device_push_token', base)).error
+          : error;
+        if (failed) return setState({ status: 'failed', token, diagnosis: diagnosePushError(failed, 'storage') });
+      }
+      if (pushWritesClosed) {
+        await savePushToken({ ...base, p_enabled: false, p_user_id: userId });
+        await rememberToken(null);
+        return setState({ status: 'idle', token: null, diagnosis: null });
       }
 
       await rememberToken(token);
@@ -154,10 +203,9 @@ export function registerForPush(): Promise<PushState> {
       // verbatim rather than guessing.
       return setState({ status: 'failed', diagnosis: diagnosePushError(err) });
     } finally {
-      inFlight = null;
+      /* The queue, not an in-flight flag, serialises the next call. */
     }
   })();
-  return inFlight;
 }
 
 /**
@@ -171,6 +219,12 @@ export function registerForPush(): Promise<PushState> {
  * no token row has ever existed.
  */
 export async function unregisterForPush(): Promise<boolean> {
+  // Behind any registration already in flight. Otherwise that write lands
+  // last and the server stays enabled after the reader turned notifications off.
+  return enqueuePushWrite(() => unregisterForPushNow());
+}
+
+async function unregisterForPushNow(): Promise<boolean> {
   const token = state.token ?? (await rememberedToken());
   setState({ status: 'idle', token: null, diagnosis: null });
   // Nothing was ever registered from this install, so there is no row to flip
@@ -180,12 +234,13 @@ export async function unregisterForPush(): Promise<boolean> {
   // success, because the row is not visible without a SELECT policy, so the
   // toggle would say notifications are off while the worker still sends.
   const deviceId = await getDeviceId();
-  const { error } = await supabase.rpc('save_device_push_token', {
+  const { error } = await savePushToken({
     p_token: token,
     p_device_id: deviceId,
     p_platform: Platform.OS,
     p_enabled: false,
     p_last_seen: new Date().toISOString(),
+    p_user_id: readAuthUserId(),
   });
   if (error) {
     // Surfaced, not swallowed: the reader has turned notifications off and is
@@ -203,10 +258,13 @@ export async function unregisterForPush(): Promise<boolean> {
   return true;
 }
 
-/** Opt out and unregister. False when the server still has the token enabled. */
+/** Opt out and unregister. False when the server still has the token enabled.
+ *  Not queued: a registration stuck on the permission prompt must not hold
+ *  the delete spinner. The flag stops that registration from enabling the row. */
 export async function clearPushForAccountDeletion(): Promise<boolean> {
+  pushWritesClosed = true;
   await clearPushOptInForAccountDeletion();
-  return unregisterForPush();
+  return unregisterForPushNow();
 }
 
 /** Subscribe to the shared registration state. Render-only; starts nothing. */
@@ -234,10 +292,22 @@ export function usePushNotifications(): PushState & { retry: () => void } {
   useEffect(() => {
     // `ready` guards the first frame: usePushOptIn reports `false` before
     // AsyncStorage answers, and acting on that would unregister on every cold
-    // start of an opted-in device.
+    // start of an opted-in device. Auth can still be `loading` after that.
+    // Re-save when the user id changes, including sign-in after a cold start
+    // that registered with no user, and sign-out (auth.uid() is then null,
+    // which unlinks the token).
     if (!ready) return;
-    if (enabled) void registerForPush();
-    else void unregisterForPush();
+    let seen = '';
+    let have = false;
+    return subscribeAuthUser((userId, status) => {
+      if (status === 'loading' || readAuthStatus() === 'loading') return;
+      const key = userId ?? '';
+      if (have && seen === key) return;
+      have = true;
+      seen = key;
+      if (enabled) void registerForPush();
+      else void unregisterForPush();
+    });
   }, [enabled, ready]);
 
   const retry = useCallback(() => {

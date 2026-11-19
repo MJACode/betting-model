@@ -63,6 +63,30 @@ export const LOCAL_INCOMPLETE =
 export const DELETED_TOAST =
   "Your account was deleted. You're signed out. You can keep using Signalbase without an account.";
 
+export type DeletionFailure = 'unlink' | 'login' | 'tracked' | 'wipe';
+
+/**
+ * The banner for one delete result. The success sentence is only for a
+ * login that was actually removed. A failed login delete says the sign-in
+ * is still active, including when the push opt-out failed first.
+ */
+export function deletionBanner(input: {
+  ok: boolean;
+  serverDeleted: boolean;
+  localFailure?: DeletionFailure;
+  loginDeleted?: boolean;
+}): string {
+  if (!input.serverDeleted) return DELETE_ERROR;
+  if (input.ok && input.loginDeleted !== false) return DELETED_TOAST;
+  if (!input.loginDeleted) {
+    return input.localFailure === 'unlink' ? UNLINK_INCOMPLETE : LOGIN_INCOMPLETE;
+  }
+  if (!input.localFailure) return DELETE_ERROR;
+  if (input.localFailure === 'tracked') return TRACKED_INCOMPLETE;
+  if (input.localFailure === 'login' || input.localFailure === 'unlink') return LOGIN_INCOMPLETE;
+  return LOCAL_INCOMPLETE;
+}
+
 export const STAYS_LINE =
   'The public model record. It shows how our models did, not anything about you.';
 

@@ -195,6 +195,13 @@ AHEAD_OF_THE_APP: tuple[str, ...] = (
 # readable before sign-in, so that is the right shape and is pinned here.
 AUTHENTICATED_ONLY: tuple[str, ...] = (
     "subscriptions",
+    # Per-user notification history and per-sport mutes. RLS is
+    # user_id = auth.uid(). The hand migration
+    # data/migrations/notification_inbox_2026_11_19.sql grants SELECT,
+    # INSERT and UPDATE to authenticated and nothing to anon. It is not
+    # applied until Matt runs it, so both names are also MAY_BE_UNAPPLIED.
+    "notification_inbox",
+    "notification_sport_prefs",
 )
 
 
@@ -232,6 +239,14 @@ ANON_WRITABLE: dict[str, tuple[str, ...]] = {
     # `.insert()` and `.delete()` in mobile/src/lib/queries.ts. A tracked bet is
     # added and removed, never edited, so UPDATE is not needed.
     "tracked_bets": ("INSERT", "DELETE"),
+    # The sweep revokes authenticated writes with this same list. The inbox
+    # migration grants INSERT and UPDATE to authenticated only; declaring
+    # them here is what keeps that grant when the sweep next runs. Anon is
+    # not granted those verbs, and there is no anon policy, so a leftover
+    # anon grant would still be denied by RLS. The app writes its own rows
+    # (test alert, mark read, sport switch) under user_id = auth.uid().
+    "notification_inbox": ("INSERT", "UPDATE"),
+    "notification_sport_prefs": ("INSERT", "UPDATE"),
     # `feedback` is DELIBERATELY ABSENT. The app never touches the table: it
     # calls rpc('feedback_submit') (mobile/src/lib/feedback.ts), and all six
     # feedback_* functions are SECURITY DEFINER owned by postgres, so they act
@@ -910,5 +925,9 @@ RPC_AFTER_SIGN_IN: tuple[str, ...] = (
     "byom_delete_model",
     "delete_my_account",
     "delete_my_login",
+    # The caller's inbox, sport mutes, and the token's user link.
+    # notification_inbox_2026_11_19.sql grants EXECUTE to authenticated
+    # only. The sweep must not name it before that migration is applied.
+    "forget_my_notifications",
 )
 
