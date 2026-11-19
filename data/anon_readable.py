@@ -981,6 +981,7 @@ RPC_AFTER_SIGN_IN: tuple[str, ...] = (
     # DELETE until that migration is applied, so the sweep must not
     # GRANT a function that is not there yet.
     "untrack_tracked_bet",
+    "clear_my_tracked_bets",
     "byom_save_model",
     "byom_list_models",
     "byom_delete_model",

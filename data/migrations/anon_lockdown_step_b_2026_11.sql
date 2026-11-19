@@ -387,6 +387,48 @@ REVOKE ALL ON FUNCTION public.untrack_tracked_bet(text, bigint) FROM PUBLIC, ano
 GRANT EXECUTE ON FUNCTION public.untrack_tracked_bet(text, bigint)
     TO postgres, authenticated, service_role;
 
+-- Account deletion. Same rule as untrack, for every row on this device.
+CREATE OR REPLACE FUNCTION public.clear_my_tracked_bets(p_device_id text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $fn$
+DECLARE
+  uid uuid := auth.uid();
+  other_owner boolean := false;
+BEGIN
+  IF uid IS NULL THEN
+    RAISE EXCEPTION 'clear_my_tracked_bets: sign in required' USING ERRCODE = '42501';
+  END IF;
+  IF p_device_id IS NULL OR p_device_id !~ '^[A-Za-z0-9-]{8,64}$' THEN
+    RAISE EXCEPTION 'clear_my_tracked_bets: bad device id' USING ERRCODE = '22023';
+  END IF;
+  IF to_regclass('public.app_timings') IS NOT NULL THEN
+    EXECUTE
+      'SELECT EXISTS (SELECT 1 FROM public.app_timings'
+      || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
+      INTO other_owner USING p_device_id, uid;
+  END IF;
+  IF NOT other_owner AND to_regclass('public.feedback_threads') IS NOT NULL THEN
+    EXECUTE
+      'SELECT EXISTS (SELECT 1 FROM public.feedback_threads'
+      || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
+      INTO other_owner USING p_device_id, uid;
+  END IF;
+  IF other_owner THEN
+    DELETE FROM public.tracked_bets
+     WHERE device_id = p_device_id AND user_id = uid;
+    RETURN;
+  END IF;
+  DELETE FROM public.tracked_bets
+   WHERE device_id = p_device_id
+     AND (user_id = uid OR user_id IS NULL);
+END $fn$;
+REVOKE ALL ON FUNCTION public.clear_my_tracked_bets(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.clear_my_tracked_bets(text)
+    TO postgres, authenticated, service_role;
+
 -- Anon may read only site_public_record and execute only the two loggers
 -- plus save_device_push_token.
 -- An extension function installed in public would trip this. Stop and ask

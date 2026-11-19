@@ -120,6 +120,7 @@ GRANT SELECT ON public.plays TO anon;
 GRANT SELECT ON public.synced_bets TO anon;
 GRANT DELETE, INSERT, REFERENCES, SELECT, TRIGGER ON public.tracked_bets TO anon, authenticated;
 DROP FUNCTION IF EXISTS public.untrack_tracked_bet(text, bigint);
+DROP FUNCTION IF EXISTS public.clear_my_tracked_bets(text);
 ALTER POLICY "anon read alt_game_lines" ON public.alt_game_lines TO anon, authenticated;
 ALTER POLICY "anon read fighters" ON public.fighters TO anon, authenticated;
 ALTER POLICY "allow anon read" ON public.games TO public;

@@ -495,6 +495,17 @@ def test_steps_a_and_b_on_scratch_postgres():
         assert ok, err
         assert "1" in _psql(
             dsn, "SELECT count(*) FROM tracked_bets WHERE device_id = 'other-device';")
+        _psql(dsn, "INSERT INTO tracked_bets (device_id, pick_id, user_id) "
+                  "VALUES ('legacy-device', 12, NULL);")
+        ok, err = _can(
+            dsn, "authenticated",
+            "SELECT public.clear_my_tracked_bets('legacy-device');",
+            claims='{"sub": "%s"}' % X, commit=True)
+        assert ok, err
+        assert "0" in _psql(
+            dsn, "SELECT count(*) FROM tracked_bets WHERE device_id = 'legacy-device';")
+        assert "1" in _psql(
+            dsn, "SELECT count(*) FROM tracked_bets WHERE device_id = 'other-device';")
         _psql(dsn, f"DELETE FROM auth.users WHERE id = '{X}';")
         assert "0" in _psql(
             dsn, f"SELECT count(*) FROM tracked_bets WHERE user_id = '{X}';")
