@@ -263,3 +263,43 @@ bets: 1,163 priced, 102 line moved our way, 53 against, 32 no closing price
 pull; 8 whose player or market the book no longer listed at the start; 1 with
 no main line in the last pull; 1 other).
 
+**The listed start and the first play (rule v2, 2026-11-19).** mike: *"figure
+out the last 22 missing"*. The start the rule bounds on is the listed one, and
+an NHL puck drops 8 to 18 minutes after it (ESPN's wall clock on the first
+play, 11 games measured). A bet placed in the last minutes before the listed
+start can have no pull of its book between the bet and that time. For that bet
+only, the close is the book's last price before the game actually began: the
+first play (`game_first_play`) less one minute. A bet placed at or after the
+first play is not a pre-game bet and has no close. `scripts/clv_close_history.py
+first-play` stores first plays from ESPN (NHL and NCAAF matched) and `buy-late`
+buys the bet book at that moment from the feed's history (19 game-and-book
+calls, 174 credits). The worker's settle step has no first plays of its own and
+still measures bets placed before the listed start; the closing pull, which
+runs to 40 seconds before it, covers all but a bet placed in those last
+seconds.
+
+After it, the published record's pre-game bets: 1,180 priced, 101 line moved
+our way, 53 against, 16 no closing price. Of the 22: 8 priced at the last
+pre-game price before puck drop. 13 have no price after the bet anywhere, and
+3 are NCAAF totals placed after kickoff:
+
+* 3 BetRivers NHL bets placed 1.5 to 8 seconds after the feed's last BetRivers
+  snapshot. BetRivers takes its pre-game market down at the listed start: the
+  snapshot 36 seconds after it lists DraftKings and not BetRivers, and our own
+  last BetRivers pull (local copy) came before each bet.
+* 8 shots-on-goal props (7 Hard Rock, 1 William Hill): the book stopped
+  offering that player's shots line after the bet while it kept listing his
+  other props, through the start and in the history before the first play.
+* 1 NFL prop at Fliff: no Fliff pull after the bet, and the history at kickoff
+  lists Fliff without the player.
+* 1 NBA Under at FanDuel: its last pull before the tip offered only Overs at
+  our number; the main line came back at another number.
+* 3 NCAAF totals placed after kickoff, because the feed listed the start 4 to
+  8 minutes after the real kickoff (issue #1484). One was among the 22; the
+  other two had been measured against post-kickoff prices (one +0.38%, one a
+  line move our way) and now read "placed after the game began".
+
+Pinnacle's fair close covers 10 of the 13 (`market_clv_pct`; its timing is
+issue #1482). A close from another book at our number would change what the
+same-book column measures, so it is not used.
+

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -106,6 +107,49 @@ def test_alternate_names():
     assert cc.alternate_market("team_totals_home") == "team_totals_home_alternate"
     assert cc.alternate_market("player_points") == "player_points_alternate"
     assert cc.alternate_market("h2h") is None and cc.alternate_market("h2h_3way") is None
+
+
+# ── the listed start and the first play (v2) ────────────────────────────────
+# Measured 2026-11-19: NHL_2026-11-11_UTA_VGK, listed 02:30, puck drop 02:48:36
+# (ESPN wall clock), FanDuel bet at 02:27:08 and no FanDuel pull after it
+# before 02:30. The feed's history still prices the pre-game market at 02:45:36.
+
+FIRST = T0 + timedelta(minutes=18, seconds=36)
+
+
+def _after(market, minutes_after, number, source="history", **prices) -> cc.Quote:
+    return cc.Quote(market, T0 + timedelta(minutes=minutes_after), number, prices, source)
+
+
+def test_a_bet_with_no_pull_before_the_listed_start_is_closed_before_the_first_play():
+    bet = _bet(model_id="nhl_moneyline", market="h2h", number=None, pick_side="away",
+               created_at=T0 - timedelta(minutes=3), first_play=FIRST)
+    quotes = [_q("h2h", 5, None, home_price=-150, away_price=130),          # before the bet
+              _after("h2h", 15, None, home_price=-155, away_price=135),     # the last pre-game
+              _after("h2h", 18, None, home_price=-400, away_price=300)]     # inside the margin
+    assert cc.choose_final(replace(bet, first_play=None), quotes).odds is None   # v1: none
+    c = cc.choose_final(bet, quotes)
+    assert c.odds == 135 and "before the first play" in c.note
+
+
+def test_a_bet_with_a_pull_before_the_listed_start_keeps_that_close():
+    bet = _bet(model_id="nhl_moneyline", market="h2h", number=None, pick_side="away",
+               created_at=T0 - timedelta(minutes=30), first_play=FIRST)
+    c = cc.choose_final(bet, [_q("h2h", 4, None, home_price=-150, away_price=128),
+                              _after("h2h", 15, None, home_price=-155, away_price=135)])
+    assert c.odds == 128 and "first play" not in c.note
+
+
+def test_a_bet_placed_after_the_first_play_is_not_a_pregame_bet():
+    bet = _bet(created_at=FIRST + timedelta(seconds=30), first_play=FIRST)
+    c = cc.choose_final(bet, [_after("spreads", 19, -3.5, home_price=-110)])
+    assert c.odds is None and c.source == "none" and "placed after the game began" in c.note
+
+
+def test_without_a_first_play_nothing_after_the_listed_start_is_used():
+    bet = _bet(created_at=T0 - timedelta(minutes=3))
+    c = cc.choose_final(bet, [_after("spreads", 5, -3.5, home_price=-110)])
+    assert c.odds is None and c.last_poll is None
 
 
 # ── the reads and the write, on a real Postgres ──────────────────────────────
@@ -262,7 +306,7 @@ def test_the_stage_prices_from_the_ladder_and_waits_for_the_start(db):
 
 
 def test_the_tables_are_closed_to_the_app_roles(db):
-    for t in ("clv_close_quotes", "clv_close_purchases", "clv_close_measurements"):
+    for t in ("clv_close_quotes", "clv_close_purchases", "clv_close_measurements", "game_first_play"):
         r = _row(db, "SELECT has_table_privilege('anon', %s, 'SELECT') a, has_table_privilege('authenticated', %s, 'SELECT') b",
                  (f"public.{t}", f"public.{t}"))
         assert r == {"a": False, "b": False}, t
@@ -333,3 +377,18 @@ def test_a_bet_placed_after_the_games_closing_pull_gets_another(db):
                (GAME, T0, T0 - timedelta(minutes=2, seconds=30)))
     db.commit()
     assert GAME not in cp.due(db, now)
+
+
+def test_the_stored_first_play_reaches_the_bet_and_its_close(db):
+    _pick(db, pick_id=7, created=T0 - timedelta(minutes=3))
+    _odds(db, -15, -3.5, -120)                     # pulled 15 min after the listed start
+    _odds(db, -18.5, -3.5, -300)                   # inside the margin before the first play
+    bet = cc.load_bets(db, "p.pick_id = 7")[0]
+    assert bet.first_play is None and cc.close_for(db, bet).odds is None
+    db.execute("INSERT INTO game_first_play (game_id, first_play_at, source) VALUES (%s, %s, 'espn_wallclock')",
+               (GAME, FIRST))
+    db.commit()
+    bet = cc.load_bets(db, "p.pick_id = 7")[0]
+    assert bet.first_play == FIRST
+    c = cc.close_for(db, bet)
+    assert c.odds == -120 and c.source == "feed"
