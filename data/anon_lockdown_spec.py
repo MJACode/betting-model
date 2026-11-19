@@ -438,6 +438,19 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
 
 {_alter_policies(STEP_B_POLICIES, "authenticated")}
 {_functions(STEP_B_STATS_FUNCTIONS + STEP_B_DEVICE_FUNCTIONS)}
+-- notification_inbox and notification_sport_prefs are authenticated-only
+-- (draft PR for the inbox). If they already exist, anon loses every grant.
+-- If they do not exist yet, this is a no-op.
+DO $inbox$
+BEGIN
+  IF to_regclass('public.notification_inbox') IS NOT NULL THEN
+    EXECUTE 'REVOKE ALL ON TABLE public.notification_inbox FROM anon';
+  END IF;
+  IF to_regclass('public.notification_sport_prefs') IS NOT NULL THEN
+    EXECUTE 'REVOKE ALL ON TABLE public.notification_sport_prefs FROM anon';
+  END IF;
+END $inbox$;
+
 -- tracked_bets. DEFAULT auth.uid() fills the column the shipping app does
 -- not send, so builds 14401 and 14601 keep inserting. A client that sends
 -- another user's id fails the check. The 135 legacy rows stay user_id NULL:

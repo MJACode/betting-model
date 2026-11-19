@@ -202,6 +202,14 @@ AHEAD_OF_THE_APP: tuple[str, ...] = (
 # readable before sign-in, so that is the right shape and is pinned here.
 AUTHENTICATED_ONLY: tuple[str, ...] = (
     "subscriptions",
+    # Per-user notification history and per-sport mutes. RLS is
+    # user_id = auth.uid(). The hand migration
+    # data/migrations/notification_inbox_2026_11_19.sql grants SELECT,
+    # INSERT and UPDATE to authenticated and nothing to anon. It is not
+    # applied until Matt runs it, so both names are also MAY_BE_UNAPPLIED.
+    # The lockdown must never grant anon on these two.
+    "notification_inbox",
+    "notification_sport_prefs",
 )
 
 
@@ -241,6 +249,9 @@ ANON_WRITABLE: dict[str, tuple[str, ...]] = {
     # tracked_bets left this map in the 2026-11 lockdown. Anon has no write.
     # Authenticated keeps INSERT and DELETE, owner-scoped, in
     # AUTHENTICATED_WRITABLE below.
+    # notification_inbox and notification_sport_prefs are not here either.
+    # Anon gets no write on them. Their authenticated INSERT and UPDATE
+    # live in AUTHENTICATED_WRITABLE.
     # `feedback` is DELIBERATELY ABSENT. The app never touches the table: it
     # calls rpc('feedback_submit') (mobile/src/lib/feedback.ts), and all six
     # feedback_* functions are SECURITY DEFINER owned by postgres, so they act
@@ -270,6 +281,10 @@ ANON_WRITABLE: dict[str, tuple[str, ...]] = {
 # inserts and deletes, and a cross-user update has no policy.
 AUTHENTICATED_WRITABLE: dict[str, tuple[str, ...]] = {
     "tracked_bets": ("INSERT", "DELETE"),
+    # Inbox rows and sport mutes (notification_inbox_2026_11_19.sql).
+    # Authenticated only. The sweep revokes every anon write regardless.
+    "notification_inbox": ("INSERT", "UPDATE"),
+    "notification_sport_prefs": ("INSERT", "UPDATE"),
 }
 
 WRITE_VERBS: tuple[str, ...] = ("INSERT", "UPDATE", "DELETE", "TRUNCATE")

@@ -71,12 +71,16 @@ def test_the_manifest_does_not_grow_stale_entries():
     app = _app_relations()
     # NHL display views stay on the frozenset above. The facts tables are
     # the module tuple. Either list alone would flag the other as unused.
+    from scripts.apply_anon_grants import MAY_BE_UNAPPLIED
+
     ahead = set(AHEAD_OF_THE_APP) | set(DECLARED_AHEAD)
     assert ahead <= set(AUTHENTICATED_READABLE)
     assert ahead.isdisjoint(app), (
         f"{sorted(ahead & app)} is read by the app now. Remove it from "
         f"AHEAD_OF_THE_APP.")
-    unused = sorted(set(all_readable()) - app - ahead)
+    # Hand migrations that are not applied yet (the notification inbox) are
+    # not a stale grant. A .from() in mobile/src still has to be declared.
+    unused = sorted(set(all_readable()) - app - ahead - set(MAY_BE_UNAPPLIED))
     assert not unused, (
         f"{unused} are granted but nothing in mobile/src reads them. Remove "
         f"them from data/anon_readable.py, or add the query that needs them.")
@@ -107,6 +111,21 @@ def test_the_view_base_tables_are_granted_but_never_read_directly():
                  "v_latest_dk_odds", "v_live_game_state_latest"):
         assert view in AUTHENTICATED_READABLE, (
             f"{view} is what the app reads; it must stay declared")
+
+
+def test_notification_tables_are_never_granted_to_anon():
+    """Draft PR 1473. Signed-in only. The lockdown must not hand anon a grant."""
+    from data.anon_readable import ANON_WRITABLE, AUTHENTICATED_WRITABLE
+
+    plan = " | ".join(_plan())
+    for rel in ("notification_inbox", "notification_sport_prefs"):
+        assert rel in AUTHENTICATED_ONLY
+        assert rel not in ANON_READABLE
+        assert rel not in AUTHENTICATED_READABLE
+        assert rel not in ANON_WRITABLE
+        assert set(AUTHENTICATED_WRITABLE[rel]) == {"INSERT", "UPDATE"}
+        assert f'ON public."{rel}" TO authenticated' in plan
+        assert f'ON public."{rel}" TO anon' not in plan
 
 
 def test_subscriptions_stays_authenticated_only():
@@ -145,6 +164,8 @@ def test_unapplied_facts_tables_are_not_granted_until_they_exist():
         "byom_game_facts",
         "byom_prop_facts",
         "v_player_season_totals_ncaabw",
+        "notification_inbox",
+        "notification_sport_prefs",
     )
     dry = " | ".join(_plan())
     for rel in MAY_BE_UNAPPLIED:
