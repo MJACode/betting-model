@@ -182,9 +182,9 @@ def test_the_rpcs_are_declared_anon_callable():
     """A new RPC 404s through PostgREST without this (test_anon_readable.py).
     apply_anon_grants skips a function that is not in production yet, so
     declaring it before the migration lands is safe."""
-    from data.anon_readable import RPC_ANON_CALLABLE
+    from data.anon_readable import RPC_AUTHENTICATED_CALLABLE
     for sport in SPORTS:
-        assert f"player_h2h_stat_values_{sport}" in RPC_ANON_CALLABLE, sport
+        assert f"player_h2h_stat_values_{sport}" in RPC_AUTHENTICATED_CALLABLE, sport
 
 
 def test_security_invoker_like_the_season_rpcs_it_mirrors():

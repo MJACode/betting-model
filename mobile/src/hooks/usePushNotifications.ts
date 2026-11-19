@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
 import { getDeviceId } from '@/hooks/useDeviceId';
+import { useAuth } from '@/hooks/useAuth';
 import { clearPushOptInForAccountDeletion, usePushOptIn } from '@/hooks/usePushOptIn';
 import { diagnosePushError, type PushDiagnosis } from '@/lib/pushDiagnosis';
 import { supabase } from '@/lib/supabase';
@@ -229,16 +230,20 @@ export function usePushState(): PushState {
  */
 export function usePushNotifications(): PushState & { retry: () => void } {
   const { enabled, ready } = usePushOptIn();
+  const { ready: authReady, signedIn } = useAuth();
   const snapshot = usePushState();
 
   useEffect(() => {
     // `ready` guards the first frame: usePushOptIn reports `false` before
     // AsyncStorage answers, and acting on that would unregister on every cold
     // start of an opted-in device.
-    if (!ready) return;
+    // save_device_push_token is authenticated-only after the anon lockdown.
+    // Wait for the session, then register. A cold start that races sign-in
+    // retries when signedIn flips, so the token is not lost.
+    if (!ready || !authReady || !signedIn) return;
     if (enabled) void registerForPush();
     else void unregisterForPush();
-  }, [enabled, ready]);
+  }, [enabled, ready, authReady, signedIn]);
 
   const retry = useCallback(() => {
     void registerForPush();

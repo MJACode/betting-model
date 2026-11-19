@@ -85,10 +85,10 @@ def test_the_skip_guard_refuses_every_write_verb():
 
 
 def test_both_tables_are_on_the_anon_read_list():
-    from data.anon_readable import AHEAD_OF_THE_APP, ANON_READABLE
+    from data.anon_readable import AHEAD_OF_THE_APP, AUTHENTICATED_READABLE
 
     for rel in ("byom_game_facts", "byom_prop_facts"):
-        assert rel in ANON_READABLE
+        assert rel in AUTHENTICATED_READABLE
     assert "byom_prop_facts" in AHEAD_OF_THE_APP
     assert "byom_game_facts" not in AHEAD_OF_THE_APP
     # The builder reads byom_game_facts. Prop facts are still unread.

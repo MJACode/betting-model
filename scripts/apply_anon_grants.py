@@ -67,10 +67,14 @@ from data.anon_readable import (
     ANON_READABLE,
     API_ROLES,
     AUTHENTICATED_ONLY,
+    AUTHENTICATED_READABLE,
+    AUTHENTICATED_WRITABLE,
     ANON_WRITABLE,
     RPC_ANON_CALLABLE,
+    RPC_AUTHENTICATED_CALLABLE,
     RPC_REVOKE,
     VIEW_BASE_TABLES,
+    WRITE_VERBS,
     lock_down,
     closed_tables,
     write_verbs_for,
@@ -148,27 +152,51 @@ def _table_exists(conn, rel: str) -> bool:
         (rel,)).fetchall())
 
 
+def _relation_exists(conn, rel: str) -> bool:
+    """True when `rel` is a table, view or matview in public."""
+    return bool(conn.execute(
+        "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relname = %s "
+        "AND c.relkind IN ('r', 'v', 'm')",
+        (rel,)).fetchall())
+
+
 def _plan(conn=None) -> list[str]:
     """Table statements only. Function statements need the database to resolve
     each signature, so they are built in main().
 
-    Pass conn on an apply. A MAY_BE_UNAPPLIED relation that is not in the
-    catalog is left out, because GRANT on a missing name raises.
+    Pass conn on an apply. A missing MAY_BE_UNAPPLIED relation, or
+    site_public_record before its migration, is left out: GRANT on a missing
+    name raises. Anon is granted only ANON_READABLE. Everything the app reads
+    is granted to authenticated alone.
     """
     stmts = [REVOKE_DEFAULT]
+
+    def _skip(rel: str) -> bool:
+        if conn is None:
+            return False
+        if rel in MAY_BE_UNAPPLIED and not _table_exists(conn, rel):
+            return True
+        if rel in ANON_READABLE and not _relation_exists(conn, rel):
+            return True
+        return False
+
+    for rel in AUTHENTICATED_READABLE:
+        if _skip(rel):
+            continue
+        stmts.append(f'GRANT SELECT ON public."{rel}" TO authenticated')
     for rel in ANON_READABLE:
-        if (conn is not None and rel in MAY_BE_UNAPPLIED
-                and not _table_exists(conn, rel)):
+        if _skip(rel):
             continue
         stmts.append(f'GRANT SELECT ON public."{rel}" TO anon, authenticated')
     for rel in AUTHENTICATED_ONLY:
         stmts.append(f'GRANT SELECT ON public."{rel}" TO authenticated')
     # The security_invoker views' base tables: the caller reads them too.
+    # Authenticated only. Anon must not receive them.
     for rel in VIEW_BASE_TABLES:
-        if (conn is not None and rel in MAY_BE_UNAPPLIED
-                and not _table_exists(conn, rel)):
+        if _skip(rel):
             continue
-        stmts.append(f'GRANT SELECT ON public."{rel}" TO anon, authenticated')
+        stmts.append(f'GRANT SELECT ON public."{rel}" TO authenticated')
     return stmts
 
 
@@ -176,9 +204,10 @@ def _anon_can_read(conn, rel: str) -> bool:
     """False only when the relation exists and anon cannot SELECT it.
 
     A MAY_BE_UNAPPLIED relation that is not in the catalog is not a failure:
-    has_table_privilege on a missing name raises.
+    has_table_privilege on a missing name raises. Views are included: the
+    website record is a view, and relkind 'r' alone would miss it.
     """
-    if not _table_exists(conn, rel):
+    if not _relation_exists(conn, rel):
         return rel in MAY_BE_UNAPPLIED
     return bool(conn.execute(
         "SELECT has_table_privilege('anon', %s, 'SELECT')",
@@ -186,7 +215,13 @@ def _anon_can_read(conn, rel: str) -> bool:
 
 
 def _function_plan(conn) -> tuple[list[str], list[str]]:
-    """(statements, skipped names). Resolves every signature from pg_proc."""
+    """(statements, skipped names). Resolves every signature from pg_proc.
+
+    Anon keeps EXECUTE only on RPC_ANON_CALLABLE. Every other declared
+    function loses PUBLIC and anon, then receives an explicit grant to
+    authenticated and service_role. PUBLIC is revoked first: anon is a
+    member of PUBLIC, so a named revoke leaves the function callable.
+    """
     stmts = [REVOKE_DEFAULT_FUNCTIONS]
     skipped: list[str] = []
     for name in RPC_ANON_CALLABLE:
@@ -195,36 +230,24 @@ def _function_plan(conn) -> tuple[list[str], list[str]]:
             skipped.append(name)
             continue
         for one in sig.split("|"):
-            # PUBLIC OFF FIRST, then the named grant. Postgres grants function
-            # EXECUTE to PUBLIC by default, so most of these carry `=X/postgres`
-            # in their ACL and are callable by any role at all -- including any
-            # role added later. The named grants are what the app actually needs,
-            # so the end state is "PUBLIC holds nothing, anon and authenticated
-            # hold exactly EXECUTE".
-            #
-            # Safe because the grant follows in the same transaction, and the
-            # read-back at the end refuses to commit if anon has lost the call.
-            # Verified before shipping: all 20 functions carrying the PUBLIC
-            # grant already held explicit anon=X and authenticated=X, so PUBLIC
-            # was never the only source for any of them.
             stmts.append(f"REVOKE ALL ON FUNCTION {one} FROM PUBLIC")
             stmts.append(f"GRANT EXECUTE ON FUNCTION {one} TO anon, authenticated")
+    for name in RPC_AUTHENTICATED_CALLABLE:
+        sig = _function_signature(conn, name)
+        if sig is None:
+            skipped.append(name)
+            continue
+        for one in sig.split("|"):
+            stmts.append(f"REVOKE ALL ON FUNCTION {one} FROM PUBLIC, anon")
+            stmts.append(
+                "GRANT EXECUTE ON FUNCTION "
+                f"{one} TO postgres, authenticated, service_role")
     for name in RPC_REVOKE:
         sig = _function_signature(conn, name)
         if sig is None:
             skipped.append(name)
             continue
         for one in sig.split("|"):
-            # PUBLIC FIRST, AND THAT IS NOT COSMETIC. Postgres grants EXECUTE on
-            # a function to PUBLIC by default, and anon is a member of PUBLIC --
-            # so `REVOKE ... FROM anon, authenticated` leaves the function
-            # callable and reports success. Measured 2026-09-04: the first run
-            # of this script revoked has_active_subscription from both named
-            # roles and anon could still execute it, because its ACL carried
-            # `=X/postgres` (empty grantee = PUBLIC). 21 of 28 public functions
-            # carry that grant. data/migrations/add_discord_link_and_whop_
-            # memberships.sql already spelled it `FROM PUBLIC, anon,
-            # authenticated`; this is that lesson, relearned the hard way.
             stmts.append(
                 f"REVOKE ALL ON FUNCTION {one} FROM PUBLIC, anon, authenticated")
     return stmts, skipped
@@ -311,20 +334,62 @@ def main() -> int:
         ]
         revoked = 0
         for rel in holders:
-            verbs = write_verbs_for(rel)
-            held = [
-                v for v in verbs
+            # Anon keeps no write. Authenticated keeps only AUTHENTICATED_WRITABLE.
+            anon_held = [
+                v for v in WRITE_VERBS
                 if conn.execute(
-                    "SELECT has_table_privilege('anon', %s, %s) "
-                    "OR has_table_privilege('authenticated', %s, %s)",
-                    (f'public."{rel}"', v, f'public."{rel}"', v)).fetchone()[0]
+                    "SELECT has_table_privilege('anon', %s, %s)",
+                    (f'public."{rel}"', v)).fetchone()[0]
             ]
-            if not held:
+            auth_allowed = set(AUTHENTICATED_WRITABLE.get(rel, ()))
+            auth_held = [
+                v for v in WRITE_VERBS
+                if v not in auth_allowed and conn.execute(
+                    "SELECT has_table_privilege('authenticated', %s, %s)",
+                    (f'public."{rel}"', v)).fetchone()[0]
+            ]
+            if anon_held:
+                conn.execute(
+                    f'REVOKE {", ".join(anon_held)} ON public."{rel}" FROM anon')
+                logger.info(f"{rel}: revoked {', '.join(anon_held)} from anon")
+                revoked += 1
+            if auth_held:
+                conn.execute(
+                    f'REVOKE {", ".join(auth_held)} ON public."{rel}" '
+                    f'FROM authenticated')
+                logger.info(
+                    f"{rel}: revoked {', '.join(auth_held)} from authenticated")
+                revoked += 1
+        # Anon loses every other public relation too, not only the ones that
+        # were writable. site_public_record is the only name that stays.
+        anon_rels = conn.execute(
+            "SELECT c.relname FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'public' AND c.relkind IN ('r','v','m') "
+            "AND (has_table_privilege('anon', c.oid, 'SELECT') "
+            "  OR has_table_privilege('anon', c.oid, 'INSERT') "
+            "  OR has_table_privilege('anon', c.oid, 'UPDATE') "
+            "  OR has_table_privilege('anon', c.oid, 'DELETE')) "
+            "ORDER BY c.relname"
+        ).fetchall()
+        for (rel,) in anon_rels:
+            if rel in ANON_READABLE:
                 continue
+            conn.execute(f'REVOKE ALL ON TABLE public."{rel}" FROM anon')
+            logger.info(f"{rel}: revoked anon")
+        anon_seqs = conn.execute(
+            "SELECT c.relname FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'public' AND c.relkind = 'S' "
+            "AND has_sequence_privilege('anon', c.oid, 'USAGE')"
+        ).fetchall()
+        for (rel,) in anon_seqs:
+            conn.execute(f'REVOKE ALL ON SEQUENCE public."{rel}" FROM anon')
+            logger.info(f"{rel}: revoked anon sequence")
+        if _relation_exists(conn, "tracked_bets"):
             conn.execute(
-                f'REVOKE {", ".join(held)} ON public."{rel}" FROM anon, authenticated')
-            logger.info(f"{rel}: revoked {', '.join(held)}")
-            revoked += 1
+                "GRANT USAGE, SELECT ON SEQUENCE public.tracked_bets_id_seq "
+                "TO authenticated")
         logger.info(f"write verbs revoked on {revoked} of {len(holders)} "
                     f"relation(s) holding one; {len(ANON_WRITABLE)} declared "
                     f"writable keep their declared verbs")
@@ -332,11 +397,20 @@ def main() -> int:
         # Verify inside the transaction: the app's read surface must survive.
         missing = [
             rel for rel in ANON_READABLE
-            if not _anon_can_read(conn, rel)
+            if _relation_exists(conn, rel) and not _anon_can_read(conn, rel)
         ]
         if missing:
             conn.rollback()
             logger.error(f"anon cannot read {missing} — rolled back.")
+            return 1
+        still_open = [
+            rel for rel in AUTHENTICATED_READABLE
+            if _relation_exists(conn, rel) and _anon_can_read(conn, rel)
+            and rel not in MAY_BE_UNAPPLIED
+        ]
+        if still_open:
+            conn.rollback()
+            logger.error(f"anon can still read {still_open} — rolled back.")
             return 1
         # And every RPC it must be able to call. _jsonb_text_array is in here
         # too: it is a transitive dependency of the two SECURITY INVOKER
@@ -372,7 +446,7 @@ def main() -> int:
         # PUBLIC must hold nothing on the declared callables. Read back for the
         # same reason as above: a revoke that did not bite reports success.
         public_left = [
-            name for name in RPC_ANON_CALLABLE
+            name for name in (*RPC_ANON_CALLABLE, *RPC_AUTHENTICATED_CALLABLE)
             if (sig := _function_signature(conn, name)) is not None
             and any(
                 conn.execute("SELECT has_function_privilege('public', %s, 'EXECUTE')",
@@ -419,15 +493,19 @@ def main() -> int:
         # And nothing in the read surface holds a write verb it was not declared
         # to need. Read back for the same reason as every other revoke here: one
         # that did not bite reports success.
-        surplus = [
-            f"{rel}:{v}"
-            for rel in holders
-            for v in write_verbs_for(rel)
-            if conn.execute(
-                "SELECT has_table_privilege('anon', %s, %s) "
-                "OR has_table_privilege('authenticated', %s, %s)",
-                (f'public."{rel}"', v, f'public."{rel}"', v)).fetchone()[0]
-        ]
+        surplus = []
+        for rel in holders:
+            for v in WRITE_VERBS:
+                anon_has = conn.execute(
+                    "SELECT has_table_privilege('anon', %s, %s)",
+                    (f'public."{rel}"', v)).fetchone()[0]
+                auth_has = conn.execute(
+                    "SELECT has_table_privilege('authenticated', %s, %s)",
+                    (f'public."{rel}"', v)).fetchone()[0]
+                if anon_has:
+                    surplus.append(f"anon {rel}:{v}")
+                if auth_has and v not in AUTHENTICATED_WRITABLE.get(rel, ()):
+                    surplus.append(f"authenticated {rel}:{v}")
         if surplus:
             conn.rollback()
             logger.error(f"undeclared write privileges survive: {surplus} — "

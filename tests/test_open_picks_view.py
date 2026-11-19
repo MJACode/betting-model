@@ -167,11 +167,11 @@ def test_it_is_read_with_the_callers_rights_and_granted_select_only():
 
 
 def test_it_is_declared_readable():
-    from data.anon_readable import ANON_READABLE
+    from data.anon_readable import AUTHENTICATED_READABLE
 
     from tests.test_anon_readable import AHEAD_OF_THE_APP
 
-    assert "open_picks" in ANON_READABLE
+    assert "open_picks" in AUTHENTICATED_READABLE
     # Read by Claude chats, not by a mobile `.from()`.
     assert "open_picks" in AHEAD_OF_THE_APP
 

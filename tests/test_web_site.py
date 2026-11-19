@@ -114,8 +114,9 @@ def test_landing_record_row_is_hidden_until_the_live_view_loads(tmp_path):
     assert "hidden" in html
     assert 'id="record-picks"' in html
     script = (tmp_path / "record.js").read_text(encoding="utf-8")
-    assert "v_public_track_record" in script
-    assert "sport,model_id,picks,wins,losses,pushes,units,risked" in script
+    assert "site_public_record" in script
+    assert "v_public_track_record" not in script
+    assert "sport,picks,wins,losses,pushes,units,risked" in script
     assert "credentials: \"omit\"" in script or 'credentials: "omit"' in script
     config = json.loads((WEB / "src" / "public-config.json").read_text(encoding="utf-8"))
     payload = config["supabaseAnonKey"].split(".")[1]

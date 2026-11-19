@@ -55,5 +55,5 @@ def test_it_grants_the_app_and_nobody_else():
     code = _code(SQL)
     assert "REVOKE ALL ON FUNCTION public.custom_model_backtest_posted(jsonb, jsonb) FROM PUBLIC" in code
     assert "GRANT EXECUTE ON FUNCTION public.custom_model_backtest_posted(jsonb, jsonb) TO anon, authenticated" in code
-    from data.anon_readable import RPC_ANON_CALLABLE
-    assert "custom_model_backtest_posted" in RPC_ANON_CALLABLE
+    from data.anon_readable import RPC_AUTHENTICATED_CALLABLE
+    assert "custom_model_backtest_posted" in RPC_AUTHENTICATED_CALLABLE

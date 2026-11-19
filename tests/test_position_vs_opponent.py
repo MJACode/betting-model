@@ -61,11 +61,11 @@ def _ts_groups() -> dict[str, str]:
 
 
 def test_the_worker_applies_it_and_anon_can_call_it():
-    from data.anon_readable import RPC_ANON_CALLABLE
+    from data.anon_readable import RPC_AUTHENTICATED_CALLABLE
     from data.view_migrations import ACTIVE_MIGRATIONS
 
     assert MIG.name in ACTIVE_MIGRATIONS
-    assert "position_vs_opponent_nfl" in RPC_ANON_CALLABLE
+    assert "position_vs_opponent_nfl" in RPC_AUTHENTICATED_CALLABLE
     assert "REVOKE ALL ON FUNCTION public.position_vs_opponent_nfl(integer[], text, text, text) FROM PUBLIC" in CODE
     assert "TO anon, authenticated" in CODE
 
@@ -164,11 +164,11 @@ MLB_SQL = "\n".join(ln for ln in MLB_CODE.splitlines() if not ln.lstrip().starts
 
 
 def test_mlb_is_applied_guarded_and_granted():
-    from data.anon_readable import RPC_ANON_CALLABLE
+    from data.anon_readable import RPC_AUTHENTICATED_CALLABLE
     from data.view_migrations import ACTIVE_MIGRATIONS
 
     assert MLB_MIG.name in ACTIVE_MIGRATIONS
-    assert "position_vs_opponent_mlb" in RPC_ANON_CALLABLE
+    assert "position_vs_opponent_mlb" in RPC_AUTHENTICATED_CALLABLE
     assert MLB_SQL.strip().startswith("DO $mig$") and MLB_SQL.strip().endswith("$mig$;")
     assert MLB_SQL.count("$mig$") == 2
     assert "p.proname = 'position_vs_opponent_mlb') THEN" in MLB_CODE
@@ -256,13 +256,13 @@ def _bn_body(sport: str) -> str:
 
 
 def test_roster_sports_are_applied_after_their_table_guarded_and_granted():
-    from data.anon_readable import ANON_READABLE, RPC_ANON_CALLABLE
+    from data.anon_readable import AUTHENTICATED_READABLE, RPC_AUTHENTICATED_CALLABLE
     from data.view_migrations import ACTIVE_MIGRATIONS
 
     assert ACTIVE_MIGRATIONS.index(BN_MIG.name) > ACTIVE_MIGRATIONS.index("add_player_positions.sql")
-    assert "player_positions" in ANON_READABLE
+    assert "player_positions" in AUTHENTICATED_READABLE
     for s in ("nba", "wnba", "ncaaf"):
-        assert f"position_vs_opponent_{s}" in RPC_ANON_CALLABLE
+        assert f"position_vs_opponent_{s}" in RPC_AUTHENTICATED_CALLABLE
         assert (f"REVOKE ALL ON FUNCTION public.position_vs_opponent_{s}"
                 "(integer[], text, text, text) FROM PUBLIC") in BN_CODE
     assert BN_SQL.strip().startswith("DO $mig$") and BN_SQL.strip().endswith("$mig$;")

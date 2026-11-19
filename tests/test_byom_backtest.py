@@ -27,11 +27,11 @@ def test_the_season_label_is_the_year_the_season_starts():
 
 
 def test_the_function_is_invoker_and_has_no_price_or_line_filter():
-    from data.anon_readable import RPC_ANON_CALLABLE
+    from data.anon_readable import RPC_AUTHENTICATED_CALLABLE
     from data.view_migrations import ACTIVE_MIGRATIONS
 
     assert "byom_backtest_rpc_2026_10_16.sql" in ACTIVE_MIGRATIONS
-    assert "byom_backtest" in RPC_ANON_CALLABLE
+    assert "byom_backtest" in RPC_AUTHENTICATED_CALLABLE
     code = _code(SQL)
     assert "SECURITY INVOKER" in code
     assert "byom_backtest_v1" in SQL

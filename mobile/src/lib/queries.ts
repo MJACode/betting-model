@@ -3503,7 +3503,12 @@ export async function trackBet(deviceId: string, pick: Pick): Promise<void> {
   if (error && (error as { code?: string }).code !== '23505') throw error;
 }
 
-/** Stop tracking a bet. */
+/** Stop tracking a bet.
+ *
+ * Zero rows is success. A legacy row written before user_id existed is
+ * invisible to the owner policy, and the on-device list is the source of
+ * truth. Builds 14401 and 14601 do not check a row count.
+ */
 export async function untrackBet(deviceId: string, pickId: number): Promise<void> {
   const { error } = await supabase
     .from('tracked_bets')

@@ -2,10 +2,10 @@ async function loadRecord() {
   const section = document.getElementById("record");
   if (!section) return;
   try {
-    const endpoint = new URL("/rest/v1/v_public_track_record", CONFIG.supabaseUrl);
+    const endpoint = new URL("/rest/v1/site_public_record", CONFIG.supabaseUrl);
     endpoint.searchParams.set(
       "select",
-      "sport,model_id,picks,wins,losses,pushes,units,risked",
+      "sport,picks,wins,losses,pushes,units,risked",
     );
     const response = await fetch(endpoint, {
       headers: {
@@ -19,7 +19,7 @@ async function loadRecord() {
     if (!response.ok) return;
     const rows = await response.json();
     if (!Array.isArray(rows) || rows.length === 0) return;
-    const summary = summarizeRecord(rows, CONFIG.retired);
+    const summary = summarizeRecord(rows);
     if (!summary) return;
     const picks = document.getElementById("record-picks");
     const units = document.getElementById("record-units");

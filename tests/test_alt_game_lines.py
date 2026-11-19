@@ -101,12 +101,12 @@ def test_a_resolver_sport_asks_the_schedule_and_honours_the_flip():
 
 
 def test_the_source_is_protected_the_migration_active_and_the_table_readable():
-    from data.anon_readable import ANON_READABLE
+    from data.anon_readable import AUTHENTICATED_READABLE
     from data.prune_odds import PROTECTED_SOURCES
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert alt.SOURCE in PROTECTED_SOURCES
     assert "add_alt_game_lines_2026_10_29.sql" in ACTIVE_MIGRATIONS
-    assert alt.STATE_TABLE in ANON_READABLE
+    assert alt.STATE_TABLE in AUTHENTICATED_READABLE
 
 
 def test_the_daily_pipeline_runs_it_after_the_opening_odds():
