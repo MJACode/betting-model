@@ -900,6 +900,10 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "log_app_error",
     "log_app_timings",
     "save_device_push_token",
+    # Not called by the website directly: site_public_record reads through it
+    # (data/migrations/site_public_record_2026_11.sql), and Postgres checks
+    # EXECUTE on a function inside a view against the caller.
+    "site_public_record_rows",
 )
 
 # Granted to authenticated and service_role. PUBLIC and anon are revoked.

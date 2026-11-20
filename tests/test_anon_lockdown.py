@@ -138,20 +138,6 @@ def _fixture_sql() -> str:
         GRANT EXECUTE ON FUNCTION public.has_app_access() TO authenticated;
         """,
         """
-        CREATE VIEW public.v_public_track_record AS
-        SELECT * FROM (VALUES
-          ('NBA', 'nba_live_total', 2::bigint, 1::bigint, 1::bigint, 0::bigint,
-           1.25::numeric, 2::numeric, '2026-09-01', '2026-09-02'),
-          ('NBA', 'nba_moneyline', 4::bigint, 4::bigint, 0::bigint, 0::bigint,
-           9::numeric, 4::numeric, '2026-09-01', '2026-09-03'),
-          ('NFL', 'nfl_spread', 1::bigint, 1::bigint, 0::bigint, 0::bigint,
-           0.50::numeric, 1::numeric, '2026-10-01', '2026-10-01')
-        ) AS t(sport, model_id, picks, wins, losses, pushes, units, risked,
-               first_date, last_date);
-        CREATE VIEW public.v_public_track_record_daily AS
-        SELECT '2026-09-01'::text AS game_date, 'NBA'::text AS sport, 1::bigint AS picks;
-        """,
-        """
         CREATE TABLE public.push_sent (
           lock_key text, kind text, sent_at timestamptz
         );
@@ -159,6 +145,24 @@ def _fixture_sql() -> str:
         GRANT SELECT (lock_key, kind, sent_at) ON public.push_sent TO anon, authenticated;
         CREATE POLICY anon_read_discord_publish ON public.push_sent
           FOR SELECT TO anon, authenticated USING (true);
+        -- Production's record view is security_invoker and reads push_sent
+        -- (through v_discord_published), which step A takes from anon. A
+        -- fixture without both let a site view that anon cannot read pass
+        -- (2026-11-19: the website lost its record for minutes after step A).
+        CREATE VIEW public.v_public_track_record WITH (security_invoker = on) AS
+        SELECT t.* FROM (VALUES
+          ('NBA', 'nba_live_total', 2::bigint, 1::bigint, 1::bigint, 0::bigint,
+           1.25::numeric, 2::numeric, '2026-09-01', '2026-09-02'),
+          ('NBA', 'nba_moneyline', 4::bigint, 4::bigint, 0::bigint, 0::bigint,
+           9::numeric, 4::numeric, '2026-09-01', '2026-09-03'),
+          ('NFL', 'nfl_spread', 1::bigint, 1::bigint, 0::bigint, 0::bigint,
+           0.50::numeric, 1::numeric, '2026-10-01', '2026-10-01')
+        ) AS t(sport, model_id, picks, wins, losses, pushes, units, risked,
+               first_date, last_date)
+        WHERE NOT EXISTS (SELECT 1 FROM public.push_sent p
+                           WHERE p.lock_key = t.model_id AND p.kind = 'discord_void');
+        CREATE VIEW public.v_public_track_record_daily AS
+        SELECT '2026-09-01'::text AS game_date, 'NBA'::text AS sport, 1::bigint AS picks;
         """,
         """
         CREATE TABLE public.tracked_bets (
@@ -306,7 +310,8 @@ def test_spec_counts_match_the_baseline():
     assert EXPECTED_ANON_EXECUTABLE == 82
     assert EXPECTED_ANON_SEQUENCES == 67
     assert ANON_KEEP_FUNCTIONS == {
-        "log_app_error", "log_app_timings", "save_device_push_token"}
+        "log_app_error", "log_app_timings", "save_device_push_token",
+        "site_public_record_rows"}
 
 
 def test_steps_a_and_b_on_scratch_postgres():
@@ -341,6 +346,8 @@ def test_steps_a_and_b_on_scratch_postgres():
         _psql(dsn, "INSERT INTO picks (id) VALUES (1);")
         ok, _ = _can(dsn, "authenticated", "SELECT 1 FROM picks;")
         assert ok
+        ok, err = _can(dsn, "anon", "SELECT sport, picks FROM site_public_record;")
+        assert ok, f"after A, anon lost the website record: {err}"
         ok, err = _can(dsn, "anon", "SELECT public.byom_record(1, '{}'::jsonb);")
         assert not ok and "42501" in err
         ok, _ = _can(dsn, "authenticated", "SELECT public.byom_record(1, '{}'::jsonb);")
