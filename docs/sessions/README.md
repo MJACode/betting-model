@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, pre-request hook lost anon EXECUTE through the worker's combined-grant rewrite; granted by hand, migration and test fixed (no request affected) |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, founders (Matt, Mike) recorded in app_founders for unlimited MCP questions |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, premium gate part 2: PostgREST pre-request hook refuses the six scored-picks matview endpoints to signed-in accounts without access; tracked bets were never hidden (app never reads the table) |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, Bet all: a Placed tick on each pick tracks it at once; the per-book question and the "Stop Bet all?" warning are gone |

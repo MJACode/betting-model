@@ -60,7 +60,17 @@ BEGIN
     $ddl$;
     REVOKE ALL ON FUNCTION public.premium_pre_request() FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.premium_pre_request()
-        TO anon, authenticated, service_role, postgres;
+        TO authenticated, service_role, postgres;
+  END IF;
+
+  -- anon on its OWN statement, and re-granted whenever it is missing. The
+  -- worker rewrites any "TO anon, authenticated" to "TO authenticated" after
+  -- lockdown step A (view_migrations._without_combined_anon_grants), which
+  -- dropped anon here on 2026-11-20: with the hook set, every anon request
+  -- (the website record, the crash logger) would be refused. Granted by hand
+  -- at ~17:57 UTC; this keeps it so.
+  IF NOT has_function_privilege('anon', 'public.premium_pre_request()', 'EXECUTE') THEN
+    GRANT EXECUTE ON FUNCTION public.premium_pre_request() TO anon;
   END IF;
 
   -- PostgREST's login role. Absent on a scratch cluster: nothing to set there.
