@@ -115,6 +115,51 @@ review as its own entry.
    reply section's five headings, with the results table leading "Outcome /
    findings", come with #1422 (mike, 2026-11-16).
 
+## 2026-11-16 — Review
+
+1. **Scope.** The weekly self-review, run on mike's PC. Since: the
+   2026-11-13 Review (second, from mike's PC) entry (merged as 267733a5).
+2. **Tried.** `git log` on master since: 368 commits. `config.py` gained eight
+   model ids in `ACTION_THRESHOLDS` (`atp_moneyline_shop`, `wta_moneyline_shop`,
+   `euroleague_home_ml`, `euroleague_h1_dog_ml`, `euroleague_home_dog_spread`,
+   `euroleague_live_spread_ht`, `euroleague_q1_club_share_total`,
+   `ufc_open_moneyline`) and lost three (`ufc_moneyline`, `ufc_total_rounds`,
+   `ufc_method_of_victory`, retired 2026-11-13); each added model is already
+   named in this log, so no gap to fill. **Live records, read directly and
+   read-only** (settled BETs by `model_id`, units on the posted stake, all
+   time / since 2026-11-13 14:00 UTC): `ncaaf_over_under` 105 bets 62-43,
+   +14.42 units, +12.4% / 1 bet; `nba_prop_projection` 99 bets 41-58, -2.54,
+   -3.2% / 15 bets -2.12; `ncaab_first_half_total` 82 bets 51-31, +13.07,
+   +13.0% / 10 bets +7.55; `ncaaf_live_total` 98 bets, -5.20, -4.4% (no new
+   bets); `mlb_live_total_runs` 162 bets, +18.90, +9.5% (no new bets);
+   `nhl_moneyline` since its rebuild (2026-10-15) 61 bets 32-29, +2.70,
+   +4.1% (all time 67, -0.29, -0.4%); `nfl_wind_totals` 38 bets +1.50, +3.7%
+   (under 50). Under 50 settled bets, nothing changed: `ncaab_first_half_spread`
+   39 (+10.62, +23.7%), `nba_total_luck` 27 (-0.7%), `nba_team_total_luck` 31
+   (-14.4%), `nba_first_half_total_luck` 18, `ncaabw_total_blend` 9,
+   `ncaabw_live_total_ht` 9 (-3.84, -37.4%), `ncaab_total_blend` 2,
+   `nfl_live_leader_ml` 6, `ncaaf_moneyline_market` 7 (+0.72),
+   `ufc_open_moneyline` none settled under that id yet (`ufc_moneyline` 5
+   bets and `ufc_total_rounds` 7 are the retired models), the EuroLeague and
+   tennis models none settled. The tennis models' rows are absent from `picks`
+   (no settled BET by that id).
+3. **New.** Scouting routes re-probed from this PC and dated in `scouting.md`:
+   racing.draftkings.com now answers 200 (403 on 2026-11-15), drf.com 403,
+   twinspires.com no answer, eprints.soton.ac.uk 401. The earlier probes did
+   not record a user agent, so those four changes may be the agent, not the
+   site; this run used a browser one.
+4. **Corrected.** No claim was contradicted. Two annotations moved: the
+   college football totals live figure in `methods.md` (was 94 bets +9.76
+   units, now 105 bets +14.42 units, +12.4%, because 11 more settled) and the
+   pro basketball projection line (was 84 bets -0.42 units -0.6%, now 99 bets
+   -2.54 units -3.2%, because 15 more settled; the verdict is unchanged: 99
+   bets against a 66,588-bet backtest cannot overturn it, but the live return
+   has turned from "about zero" to "below zero" and is the one to watch).
+5. **The framework.** Nothing changed. Open: the log has 14 entries since
+   the last Review, past the "every fifth entry" whole-log read; this run
+   checked each entry's Corrected line for a repeat and found none promoted,
+   but did not re-read every entry in full.
+
 ## 2026-11-16 — Horse racing: Hong Kong before the off, and UK/Ireland at starting price
 
 1. **League and scope**: thoroughbred racing (mike, 2026-11-15: *"lets use the
@@ -238,6 +283,97 @@ pre-off price path, because every free price is a close.
    `ODDS_API_KEY`".
 5. **The framework**: unchanged. A scope is not a build, so step 7's
    shipping list was used as the checklist and not executed.
+
+## 2026-11-14: NCAAF moneyline, its decision timing replayed at every hour (`ncaaf_moneyline_market`)
+
+1. **League and scope**: college football's moneyline model, live since
+   2026-11-10 and decided once at 14:00 UTC. mike, 2026-11-14: when a model
+   decides is a per-model parameter, chosen by out-of-sample expected units;
+   "Buy all of it now" for every hour of 2023-2025 (152,680 credits).
+2. **Tried**: the live card's own read and decision at every whole UTC hour
+   of three seasons, graded as 26 timings (each fixed hour on game day,
+   every hour until it bets, the last read before kickoff) after the card's
+   price and EV floors; chosen on 2023-2024, confirmed on 2025, BH-FDR over
+   all 26 (`scripts/ncaaf_moneyline_timing.py`).
+3. **New**: "When the model decides" in `porting-traps.md` (the method, and
+   the hockey evidence for the live check rate); the timing inventory of
+   every model with its credit number (`docs/decision_timing.md`); a light
+   read of a purchase's rows by primary-key range instead of a by-hand
+   mirror run (`scripts/ncaaf_hourly_extract.py`).
+4. **Corrected**: `shipping.md` said "a game is decided once"; the lock is on
+   a BET, and a card's "EACH GAME DECIDED ONCE (CLAUDE.md 1c)" is a timing
+   choice under the pick rule's name. Measured on the bought hours: the
+   feed's own stamp on every row is within a minute of its pull at every
+   UTC hour, so the card's 60-minute window thins no quiet hour; an old
+   stamp in a change-only store is the store's doing, not the feed's.
+5. **The framework**: step 7 now measures the timing before shipping and
+   says the lock is on a BET.
+
+Result: no timing clears. 14:00 UTC (live) is the 2023-2024 choice, +0.81
+units on 2025; checking every hour until it bets triples the bets for +1.6%;
+the bet price sits 3-4% below Pinnacle's close at every fixed hour. And a
+purchase can damage what it touches: the history job's game upsert moved
+1,690 stored kickoffs (fixed, restored). Read a purchase's side effects on
+`games`, not only its odds rows.
+
+## 2026-11-14 — NBL (Australia), groundwork: one book a pick may name, and a purchase the balance cannot hold this cycle
+
+1. **League and scope**: the NBL, mike, 2026-11-14: *"Invoke model skill and
+   build Australia nbl models"*. A new sport, `NBL`. Steps 0 to 2b and the
+   groundwork; no grid row has a priced result yet (`docs/sports/nbl.md`).
+2. **Tried**: the feed's history depth (five empty event lists, first snapshot
+   2024-09-24), its books at every region on two history days and at the
+   line-shop ten on four, its per-event markets today, and the per-event
+   history of BetRivers and Pinnacle on six past games for every period,
+   team-total and alternate key (free when empty); ESPN's NBL scoreboard and
+   summaries by season; the league's own stats API (refused, below); a scout;
+   three trial days of the purchase (0, 1 and 2 games); a projection of the
+   whole history from the stored schedule and the three measured day costs.
+3. **New**:
+   - `market-grid.md`: an NBL line in the basketball shape. **One book a pick
+     may name** (BetRivers, full game only) and a sharp book that enters the
+     feed mid-history (Pinnacle from 2026-27, so two seasons measure value
+     against the exchange and the local consensus). Price route 2: measure a
+     no-game day as well as a game day before projecting a purchase (here a
+     no-game day held a snapshot every five minutes and cost 70% of a game
+     day). Route 3: prediction-market history as a free second price (Kalshi's
+     NBL game markets from 2025-12-04, liquid; Polymarket from 2026-01-09).
+   - `porting-traps.md`: ESPN labels a preseason game regular-season
+     (401707730), caught by every club's regular-season count; stale ESPN
+     events years old ("end of period" with no score, "scheduled"), kept out
+     of `games` by a 36-hour rule; ESPN's ranged `dates=` form answers 400 for
+     this league; venue blank for whole seasons; plays with no wall clock.
+     And a trap in the EuroLeague purchaser, fixed in the NBL fork only: its
+     one-day path (`--only-days`) ignored `--pregame-step-min`, so a trial
+     measured every snapshot, not what the thinned purchase would cost.
+   - `shipping.md`: the tests a new resolve-only sport extends (the
+     college basketball odds-intake pins and the price-path pin). And a trap
+     seen twice, so a rule there: the bounded clean-up test's tie fixture drew
+     each row's source from the whole protected list, so each new protected
+     source changed which rows were protected and took its ties away
+     (EuroLeague's period source, seed 11; the NBL's two, seeds 7 and 11). It
+     now draws from a fixed first 25. Found by comparing the full suite's
+     failures on the branch and on master: 6 only on the branch, 17 on both.
+   - `scouting.md`: eleven routes dated (ESPN's NBL, Kalshi, Polymarket,
+     FIBA LiveStats answered; the league site's API refused by the permission
+     check; AusSportsBetting's file refused, its robots.txt naming Claude's
+     crawlers; hoops.com.au 403).
+4. **Corrected**: nothing in the skill was contradicted by a measurement.
+5. **The framework**: one promotion, one gap.
+   - **Promoted.** The skill did not load because the session's checkout was
+     on a branch without it: the Skill tool answered "Unknown skill", the
+     second time (the first is the 2026-11-13 entry, "the skill never
+     loaded"). Step 0 now says what to do: a worktree from `origin/master`,
+     read `SKILL.md` there, build there.
+   - **A gap, written into step 0.** The purchase is sized against the credit
+     balance and the days to the plan's refill before it is put to mike: here
+     the whole history (at most 1.70M) does not fit beside the platform's
+     burn to a 12-08 refill, which turns the purchase decision into a top-up
+     decision.
+
+What this build taught the skill: price a purchase on a no-game day as well
+as a game day, size it against the balance and the refill before asking, and
+when the skill does not load, build from a worktree off master.
 
 ## 2026-11-14 — Tennis round 1: the match winner live (`atp_moneyline_shop`, `wta_moneyline_shop`), the games markets' line shop null
 
