@@ -183,7 +183,9 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: radii.sm,
     borderWidth: 1.5,
-    borderColor: colors.separator,
+    // textTertiary, not separator: an empty box's outline needs 3:1 against
+    // the card (WCAG 1.4.11); separator measured 1.69:1 (UX review, 2026-11-19).
+    borderColor: colors.textTertiary,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -102,6 +102,14 @@ jobs:
         working-directory: mobile
         run: npx tsx scripts/verify_pick_books_link.ts
 
+      # Picks filter Model section (PR #1492): the record line, HOT / COLD,
+      # and the model cut scoped to the board (the hidden-cut cases).
+      - name: Model filter
+        working-directory: mobile
+        run: |
+          npx tsx scripts/verify_model_heat.ts
+          npx tsx scripts/verify_pick_categories.ts
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -279,6 +287,7 @@ jobs:
             tests/test_live_money_no_record_only.py \
             tests/test_horse_datasets.py \
             tests/test_published_record.py \
+            tests/test_model_filter_heat.py \
             tests/test_snapshot_pass_order.py \
             tests/test_record_units_agree.py \
             tests/test_record_hero.py \

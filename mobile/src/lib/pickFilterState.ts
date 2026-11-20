@@ -46,6 +46,12 @@ export const CATEGORY_LABEL: Record<ModelCategory, string> = {
 export interface PicksFilterState {
   signals: Set<SignalType>;
   categories: Set<ModelCategory>;
+  /**
+   * The models to keep. EMPTY = every model (Matt, 2026-11-18): the default
+   * must not have to name the models, because the board's models change with
+   * the sport and the day. See presentModelsFor.
+   */
+  models: Set<string>;
   minProb: number | null;
   minEdge: number | null;
   minEV: number | null;
@@ -54,6 +60,7 @@ export interface PicksFilterState {
 export const DEFAULT_FILTER: PicksFilterState = {
   signals: new Set<SignalType>(ALL_SIGNALS),
   categories: new Set<ModelCategory>(ALL_CATEGORIES),
+  models: new Set<string>(),
   minProb: null,
   minEdge: null,
   minEV: null,
@@ -63,6 +70,7 @@ export function cloneFilter(state: PicksFilterState): PicksFilterState {
   return {
     signals: new Set(state.signals),
     categories: new Set(state.categories),
+    models: new Set(state.models),
     minProb: state.minProb,
     minEdge: state.minEdge,
     minEV: state.minEV,
@@ -148,13 +156,98 @@ export function resetImpossibleMarket(
   return next;
 }
 
+// ── The MODEL cut (Matt, 2026-11-18) ─────────────────────────────────────────
+// Brought back after the 2026-09 removal (see PickFilters' header) on the
+// terms that removal named: one sport's models, only the ones with picks on
+// the board, never paused ones. Scoped like Market: every comparison is
+// relative to the models on screen, so a cut made on NHL cannot empty NCAAB.
+
+export interface PresentModel {
+  modelId: string;
+  /** Picks on the board for this model. */
+  count: number;
+}
+
+/**
+ * The models the board holds, most picks first, then by id for a stable
+ * order. Pass the model id of EVERY pick on screen, duplicates included.
+ * `exclude` drops a model from the list (paused ones; Matt, 2026-11-18).
+ */
+export function presentModelsFor(
+  modelIds: Iterable<string>,
+  exclude: (modelId: string) => boolean = () => false,
+): PresentModel[] {
+  const counts = new Map<string, number>();
+  for (const id of modelIds) {
+    if (exclude(id)) continue;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return Array.from(counts, ([modelId, count]) => ({ modelId, count })).sort(
+    (a, b) => b.count - a.count || (a.modelId < b.modelId ? -1 : a.modelId > b.modelId ? 1 : 0),
+  );
+}
+
+/** The selected models this board can show. */
+export function selectedModels(state: PicksFilterState, present: PresentModel[]): string[] {
+  return present.filter((m) => state.models.has(m.modelId)).map((m) => m.modelId);
+}
+
+/** Is the Model cut narrowing THIS board? Picking every model listed is not. */
+export function modelsAreNarrowed(state: PicksFilterState, present: PresentModel[]): boolean {
+  const n = selectedModels(state, present).length;
+  return n > 0 && n < present.length;
+}
+
+/**
+ * After a segment or sport change: a model selection none of whose models is
+ * on this board would empty it with a cut the user cannot see. Clear it.
+ * A selection that still overlaps the board is left alone.
+ */
+export function resetImpossibleModels(
+  state: PicksFilterState,
+  present: PresentModel[],
+): PicksFilterState {
+  if (state.models.size === 0) return state;
+  // A board with nothing listable (every pick draws as PAUSED) has no Model
+  // section to undo a cut from, so a leftover selection is cleared too.
+  if (present.length > 0 && selectedModels(state, present).length > 0) return state;
+  const next = cloneFilter(state);
+  next.models = new Set();
+  return next;
+}
+
+/**
+ * The state applyFilter should CUT with: the model selection reduced to the
+ * models listed on this board, and no cut at all when that leaves none or
+ * all of them (PR #1492 review). The raw selection stays in the state, so the
+ * boxes the user ticked stay ticked; only the cut follows what the bar shows.
+ *
+ * Without this, ticking every listed model read as "no filter" (no pill, no
+ * count, "All models") while applyFilter still dropped every pick of a model
+ * that is not listed, which on the All board is every PAUSED row: a hidden
+ * cut with no undo, the thing the Market scoping exists to prevent.
+ */
+export function effectiveModelCut(
+  state: PicksFilterState,
+  present: PresentModel[],
+): PicksFilterState {
+  if (state.models.size === 0) return state;
+  const keep = modelsAreNarrowed(state, present) ? selectedModels(state, present) : [];
+  if (keep.length === state.models.size && keep.every((id) => state.models.has(id))) return state;
+  const next = cloneFilter(state);
+  next.models = new Set(keep);
+  return next;
+}
+
 export function activeFilterCount(
   state: PicksFilterState,
   present: ModelCategory[] = ALL_CATEGORIES,
+  presentModels: PresentModel[] = [],
 ): number {
   let n = 0;
   if (state.signals.size < ALL_SIGNALS.length) n++;
   if (categoriesAreNarrowed(state, present)) n++;
+  if (modelsAreNarrowed(state, presentModels)) n++;
   if (state.minProb != null) n++;
   if (state.minEdge != null) n++;
   if (state.minEV != null) n++;
@@ -182,6 +275,7 @@ export function applyFilter<T extends { pick: FilterablePick }>(
     // modelCategory, NOT `MODEL_META[id]?.type` — a model with no metadata gets
     // its category from its id and is cut like any other. See modelCategory.
     if (!state.categories.has(modelCategory(p.model_id))) return false;
+    if (state.models.size > 0 && !state.models.has(p.model_id)) return false;
     if (state.minProb != null && p.model_probability < state.minProb) return false;
     // Edge and EV at the price the pick was decided at.
     if (state.minEdge != null && decisionEdge(p) < state.minEdge) return false;

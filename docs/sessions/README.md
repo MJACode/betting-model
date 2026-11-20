@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, view migrations: byom_official_legs skips after anon-lockdown step A and drops byom_bets before replacing it, so the refresh pass no longer dies on the widened return type |
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Picks filter Model section: each model's total published record and a hot / cold tag (3u on 8+ bets, last 7 days); new view v_public_track_record_model_daily built from the daily view's definition |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, the PC backup copies only what changed each night and checks everything once a month, its schedule and runs on the dashboard; the other four odds indexes rebuilt, 3.38 GB back (#1493, #1478) |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Performance tab: the sportsbook-sync note now sits on the same 16pt gutter as the other cards (#1491) |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Key Metrics: an exec summary tab (results, beating the close, models, operations), first in the ops dashboard |

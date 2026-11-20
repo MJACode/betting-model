@@ -2,6 +2,7 @@ import { nhlSkaterReadMissing } from '@/lib/nhlBoard';
 import { nhlSeasonCandidates } from '@/lib/nhlSkaterTotals';
 import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
+import type { ModelDailyRow, ModelTotalRow } from '@/lib/modelHeat';
 import type { PeriodKey, TeamPeriodRow } from '@/lib/teamPeriodSplits';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
@@ -3246,6 +3247,35 @@ export async function fetchTrackRecordDaily(): Promise<TrackRecordDailyRow[]> {
   }
   if (first.error) throw first.error;
   return (first.data ?? []) as TrackRecordDailyRow[];
+}
+
+/**
+ * The published record per model per day, from `from` (a game_date) on — the
+ * hot / cold window of the Picks filter's Model section (lib/modelHeat.ts).
+ * At most ~20 rows a day were measured on 2026-11-19 (550 rows in the whole
+ * view), so an 8-day read is far under the 1,000-row cap; paged anyway with a
+ * deterministic order, because the cap is silent.
+ */
+export async function fetchModelDailyRecord(from: string): Promise<ModelDailyRow[]> {
+  return fetchAllPages<ModelDailyRow>((lo, hi) =>
+    supabase
+      .from('v_public_track_record_model_daily')
+      .select('game_date, model_id, picks, units')
+      .gte('game_date', from)
+      .order('game_date', { ascending: true })
+      .order('sport', { ascending: true })
+      .order('model_id', { ascending: true })
+      .range(lo, hi),
+  );
+}
+
+/** Per-model totals for the same section: units and settled bets, whole record. */
+export async function fetchModelTotalRecord(): Promise<ModelTotalRow[]> {
+  const { data, error } = await supabase
+    .from('v_public_track_record')
+    .select('model_id, picks, units');
+  if (error) throw error;
+  return (data ?? []) as unknown as ModelTotalRow[];
 }
 
 /** The daily canonical cross-game parlays (public parlay track record). */
