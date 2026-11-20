@@ -20,6 +20,7 @@ exhaustively, and an unknown role fails OPEN.
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -34,6 +35,38 @@ def _sched(role: str, monkeypatch):
     monkeypatch.setenv("SERVICE_ROLE", role)
     import scheduler
     return importlib.reload(scheduler)
+
+
+@pytest.fixture(autouse=True)
+def _scheduler_back_to_its_own_role():
+    """Reload `scheduler` under the role the run started with.
+
+    monkeypatch puts SERVICE_ROLE back, but the module keeps the role it was
+    last reloaded with. The last test here reloads as "poller", and every
+    later file that builds the scheduler then saw only the poller's jobs:
+    test_social_posts and test_social_profile failed in a full run, and
+    passed alone.
+
+    It cannot wait for monkeypatch to restore the environment: conftest's
+    autouse fixtures ask for monkeypatch, so monkeypatch tears down AFTER
+    this one. So it sets the starting value itself for the reload, then puts
+    back whatever the test left, for monkeypatch to undo as usual."""
+    start = os.environ.get("SERVICE_ROLE")
+    yield
+    import scheduler
+    left = os.environ.get("SERVICE_ROLE")
+    _set_env("SERVICE_ROLE", start)
+    try:
+        importlib.reload(scheduler)
+    finally:
+        _set_env("SERVICE_ROLE", left)
+
+
+def _set_env(name: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
 
 
 def _all_job_ids() -> list[str]:

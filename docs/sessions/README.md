@@ -50,6 +50,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, EuroLeague moneyline and first half bet only the home underdog getting points (mike: "Yes, both"); build replays research and live rules, posted stake |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, EuroLeague several bets on one game measured: one home-underdog finding bet up to three times; one-a-game costs units, the favoured-home moneylines lose; nothing changed |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, the full test suite no longer hangs on Windows: two scratch-database starters moved onto tests/_pg.py, 88 BYOM tests now run here, and a guard stops a third copy (#1445) |
+| 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, the 19 tests master failed in a full run (#1447): all stale tests or this PC's harness, none a code bug; fixed in the tests, a full run now has 0 failures |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, horse racing: a US site that takes Hong Kong bets publishes the Jockey Club's own dividends (77 of 77 win and place, 7 of 7 exotics, two cards); the US$499 archive is mike's call |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, Discord /pick page always lists FD, DK, Fanatics, BetMGM, Caesars and does not open the app |
 | 2026-11-17 | [2026-11](./2026-11.md) | 2026-11-17, X posts the day's best four pre-game picks, each with a rationale reply; the 2099 pause row was what stopped the slate |
