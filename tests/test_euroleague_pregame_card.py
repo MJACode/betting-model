@@ -234,6 +234,42 @@ def test_a_price_typo_edge_is_refused_as_a_data_error(monkeypatch):
     assert rows[0]["signal_type"] == "NONE" and "data-error cap" in refused[("G1", R.HOME_ML)]
 
 
+def _four_bets():
+    return [_decided(R.Q1_SHARE_TOTAL, "under", -120.0, line=41.5, p_fair=0.5, uplift=0.15),
+            _decided(R.H1_DOG_ML, "home", 130.0, p_fair=0.42, uplift=0.08),
+            _decided(R.HOME_DOG_SPREAD, "home", -105.0, line=3.5, p_fair=0.49, uplift=0.09),
+            _decided(R.HOME_ML, "home", 145.0, p_fair=0.40, uplift=0.10)]
+
+
+def test_one_game_keeps_one_bet_the_moneyline_and_the_rest_are_none_rows_with_the_reason():
+    """mike, 2026-11-19: "Strict, moneyline first"."""
+    rows, refused = card.pick_rows(_four_bets(), games(), 1000.0)
+    sig = {r["model_id"]: r["signal_type"] for r in rows}
+    assert sig == {R.HOME_ML: "BET", R.HOME_DOG_SPREAD: "NONE", R.H1_DOG_ML: "NONE", R.Q1_SHARE_TOTAL: "NONE"}
+    assert {k: v for k, v in refused.items()} == {
+        ("G1", m): "one bet a game: MAD ML keeps it" for m in (R.HOME_DOG_SPREAD, R.H1_DOG_ML, R.Q1_SHARE_TOTAL)}
+    assert all(r["kelly_fraction"] == 0.0 and r["recommended_bet"] == 0.0
+               for r in rows if r["signal_type"] == "NONE")
+
+
+def test_a_moneyline_the_price_floor_refused_leaves_the_game_to_the_spread():
+    ds = _four_bets()
+    ds[3] = _decided(R.HOME_ML, "home", -210.0, p_fair=0.95, uplift=0.03)
+    rows, refused = card.pick_rows(ds, games(), 1000.0)
+    sig = {r["model_id"]: r["signal_type"] for r in rows}
+    assert sig == {R.HOME_ML: "NONE", R.HOME_DOG_SPREAD: "BET", R.H1_DOG_ML: "NONE", R.Q1_SHARE_TOTAL: "NONE"}
+    assert refused[("G1", R.HOME_ML)].startswith("below_price_floor")
+    assert refused[("G1", R.H1_DOG_ML)] == "one bet a game: MAD +3.5 keeps it"
+
+
+def test_a_standing_halftime_bet_keeps_the_game_from_every_pre_game_bet():
+    standing = [{"game_id": "G1", "model_id": "euroleague_live_spread_ht", "market": "spreads",
+                 "side": "home", "line": -2.5, "label": "MAD -2.5 (live)"}]
+    rows, refused = card.pick_rows(_four_bets(), games(), 1000.0, standing=standing)
+    assert {r["signal_type"] for r in rows} == {"NONE"}
+    assert set(refused.values()) == {"one bet a game: MAD -2.5 (live) keeps it"}
+
+
 def test_the_decision_row_carries_the_instant_the_fetch_and_the_lead():
     d = _decided(R.HOME_ML, "home", 120.0)
     t = pd.Timestamp(TIP - timedelta(minutes=9, seconds=30))
@@ -243,7 +279,7 @@ def test_the_decision_row_carries_the_instant_the_fetch_and_the_lead():
     assert row["fetch_at"] == t.isoformat() and row["model_id"] == R.HOME_ML
 
 
-def test_a_standing_moneyline_is_read_as_a_moneyline_and_a_spread_as_a_spread():
+def test_a_standing_bet_of_each_of_the_five_models_is_read_with_its_own_market():
     class C:
         def execute(self, sql, params):
             self.params = params
@@ -252,7 +288,17 @@ def test_a_standing_moneyline_is_read_as_a_moneyline_and_a_spread_as_a_spread():
         def fetchall(self):
             return [("G1", R.HOME_ML, "home", None, "MAD ML"),
                     ("G1", "euroleague_live_spread_ht", "away", 3.5, "PAN -3.5 (live)"),
-                    ("G1", R.HOME_DOG_SPREAD, "home", 4.5, "MAD +4.5")]
-    got = card.standing_full_game(C(), ["G1"])
+                    ("G1", R.HOME_DOG_SPREAD, "home", 4.5, "MAD +4.5"),
+                    ("G1", R.H1_DOG_ML, "home", None, "PAN @ MAD — First Half MAD ML"),
+                    ("G1", R.Q1_SHARE_TOTAL, "over", 41.5, "PAN @ MAD — First Quarter Over 41.5")]
+    c = C()
+    got = card.standing_bets(c, ["G1"])
+    # every one of the five closes the game (one bet a game), so all five are read
+    assert c.params[1] == list(R.ONE_A_GAME_MODELS)
+    assert set(c.params[1]) == set(R.MODELS) | {"euroleague_live_spread_ht"}
     assert [(s["market"], s["side"], s["line"]) for s in got] == [
-        ("h2h", "home", None), ("spreads", "away", 3.5), ("spreads", "home", 4.5)]
+        ("h2h", "home", None), ("spreads", "away", 3.5), ("spreads", "home", 4.5),
+        ("h2h_h1", "home", None), ("totals_q1", "over", 41.5)]
+    # a first-half or first-quarter bet never reads as a full-game conflict
+    mine = {"market": "h2h", "side": "away", "line": None}
+    assert not R.cannot_both_win(mine, got[3]) and not R.cannot_both_win(mine, got[4])

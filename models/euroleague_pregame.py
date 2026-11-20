@@ -36,6 +36,13 @@ rule, which the build still replays bet for bet.
                                 prior-games first-quarter share of the full-game
                                 total (round 2, Q1-i at margin 1.0).
 
+ONE BET A GAME (mike, 2026-11-19: "Strict, moneyline first"): a game carries
+one EuroLeague bet across all five models. The moneyline keeps it, else the
+spread, else the first half, else the first-quarter total; the halftime spread
+bets only a game with no pre-game bet; a standing bet keeps its game whatever
+its order (one_bet_a_game). Each rule above still decides alone, as the build
+replays it; this is the card's gate after every other one.
+
 WHAT EACH RULE READS. The full-game rules read the BOARD at the decision
 instant: per (game, market, book), the newest coherent stored quote stamped at
 or before it (r2_lib.board_at). The period rules read the quotes of ONE fetch:
@@ -775,6 +782,54 @@ def resolve_conflicts(decisions: list[Decision], standing: list[dict]) -> list[D
             d.detail = f"{d.detail}; {notes[id(d)]}"
             d.extra["conflict"] = notes[id(d)]
     return decisions
+
+
+# ── one bet a game (mike, 2026-11-19: "Strict, moneyline first") ────────────
+
+# The halftime spread (models/euroleague_live_loop.py): it decides at the break,
+# after every pre-game rule, so it bets only a game with no pre-game BET.
+LIVE_HT = "euroleague_live_spread_ht"
+# Every EuroLeague model whose BET closes a game to the others.
+ONE_A_GAME_MODELS = MODELS + (LIVE_HT,)
+# The order a game's one bet is kept in: the first of these whose row is still a
+# BET after every gate keeps the game, and every later one is a NONE row. The
+# moneyline first: per unit risked it returned the most of the three side rules
+# (docs/sports/euroleague.md, "Several bets on one game").
+ONE_A_GAME_ORDER = (HOME_ML, HOME_DOG_SPREAD, H1_DOG_ML, Q1_SHARE_TOTAL)
+
+
+def one_a_game_rank(model_id: str) -> int:
+    """The model's place in ONE_A_GAME_ORDER (the halftime spread last)."""
+    return ONE_A_GAME_ORDER.index(model_id) if model_id in ONE_A_GAME_ORDER else len(ONE_A_GAME_ORDER)
+
+
+def one_bet_a_game(rows: list[dict], standing: list[dict], paused_note: str | None = None) -> dict:
+    """{(game, model): why} for every BET row that must be a NONE row so its game
+    carries one EuroLeague bet (mike, 2026-11-19: "Strict, moneyline first").
+
+    Per game: a standing BET of any EuroLeague model keeps the game, whatever
+    its order (a pick that exists stands, CLAUDE.md 1c); else the first BET row
+    in ONE_A_GAME_ORDER keeps it. Run on rows still BET after every other gate,
+    so a moneyline the price floor or the EV floor refused leaves the game to
+    the spread. A row a paused model writes (downgrade_reason == paused_note)
+    posts nothing: it neither keeps the game nor is changed here.
+
+    rows: game_id, model_id, signal_type, pick_label, downgrade_reason.
+    standing: game_id, model_id, label (standing_bets in the card: VOID and
+    paused rows already left out). Pure."""
+    keeper: dict[str, str] = {}
+    for s in standing:
+        keeper.setdefault(s["game_id"], s.get("label") or s["model_id"])
+    out: dict = {}
+    live = [r for r in rows if r.get("signal_type") == "BET"
+            and (paused_note is None or r.get("downgrade_reason") != paused_note)]
+    for r in sorted(live, key=lambda r: (r["game_id"], one_a_game_rank(r["model_id"]))):
+        held = keeper.get(r["game_id"])
+        if held is None:
+            keeper[r["game_id"]] = r.get("pick_label") or r["model_id"]
+        else:
+            out[(r["game_id"], r["model_id"])] = f"one bet a game: {held} keeps it"
+    return out
 
 
 # ── the replayed-bet bookkeeping the build and the card share ───────────────

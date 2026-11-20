@@ -14,6 +14,8 @@ Pinned here:
   * no EuroLeague live destination: nothing is decided;
   * no Pinnacle pre-game number: the game is refused and costs no call;
   * a bet that cannot win beside the game's standing spread bet is declined;
+  * a game with any standing EuroLeague bet, settled or not, is declined (one
+    bet a game, mike 2026-11-19);
     the price floor and the edge cap decline too;
   * the pick row: label, the HOME number, the deciding book, P(win | no push),
     is_live; --dry-run makes no paid call.
@@ -112,6 +114,7 @@ class Db:
         self.credits: list = []
         self.prices: list = []
         self.standing = standing or []
+        self.bets: list = []            # every standing EuroLeague BET on the game (one bet a game)
         self.prior = prior
 
     def outcomes(self, kind):
@@ -151,6 +154,7 @@ class Db:
         monkeypatch.setattr(LP, "insert_ledger", insert_ledger)
         monkeypatch.setattr(LP, "write_bet", write_bet)
         monkeypatch.setattr(LP, "standing_spreads", lambda conn, gid: list(db.standing))
+        monkeypatch.setattr(LP, "standing_bets", lambda conn, gid: list(db.bets))
         monkeypatch.setattr(LP, "under_daily_cap", lambda conn, cost: True)
         monkeypatch.setattr(LP, "record_credits", lambda conn, c: db.credits.append(c))
         import data.ingestors.live_price_log as lpl
@@ -363,6 +367,46 @@ def test_a_bet_that_cannot_win_beside_the_standing_spread_bet_is_declined(art, m
     loop.tick()
     row = db.final[S.GAME_ID]
     assert row["outcome"] == "declined" and "cannot both win" in row["reason"] and db.picks == []
+
+
+@pytest.mark.parametrize("model,label", [
+    ("euroleague_h1_dog_ml", "BAR @ PAN — First Half BAR ML"),
+    ("euroleague_q1_club_share_total", "BAR @ PAN — First Quarter Under 41.5"),
+    ("euroleague_home_ml", "PAN ML"),
+])
+def test_a_game_with_a_pre_game_bet_is_declined_one_bet_a_game(art, monkeypatch, model, label):
+    """mike, 2026-11-19: "Strict, moneyline first". The halftime spread bets
+    only a game with no pre-game bet, even one that can win beside it (a
+    first-half bet is already graded at the break)."""
+    loop, db, _ = make(art, monkeypatch)
+    db.bets = [{"model_id": model, "label": label}]
+    loop.tick()
+    row = db.final[S.GAME_ID]
+    assert row["outcome"] == "declined" and row["reason"] == f"one bet a game: {label} keeps it"
+    assert db.picks == []
+
+
+def test_the_standing_bets_read_is_every_euroleague_model_less_void_and_paused():
+    import config
+
+    class Conn:
+        def execute(self, sql, params):
+            self.sql, self.params = sql, params
+            return self
+
+        def fetchall(self):
+            return [("euroleague_h1_dog_ml", "BAR @ PAN — First Half BAR ML")]
+
+        def rollback(self):
+            pass
+
+    c = Conn()
+    got = LP.standing_bets(c, S.GAME_ID)
+    assert got == [{"model_id": "euroleague_h1_dog_ml", "label": "BAR @ PAN — First Half BAR ML"}]
+    assert set(c.params[1]) == {"euroleague_home_ml", "euroleague_home_dog_spread", "euroleague_h1_dog_ml",
+                                "euroleague_q1_club_share_total", "euroleague_live_spread_ht"}
+    assert "'VOID'" in c.sql and c.params[2] == config.PAUSED_NOTE
+    assert "result" not in c.sql                       # settled or not
 
 
 def test_a_price_shorter_than_the_floor_is_declined(art, monkeypatch):
