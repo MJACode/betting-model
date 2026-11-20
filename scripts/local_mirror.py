@@ -24,20 +24,33 @@ HOW A TABLE CONVERGES. A table is a list of chunks. A chunk is one Parquet file
 holding every row whose primary key lies in (previous chunk's last key, this
 chunk's last key]. Each chunk records its row count and an XOR of per-row
 hashes (md5 of the row's text, computed by the server in the same SELECT that
-returned the rows). On each run:
+returned the rows).
 
-  * Tables under --full-copy-below rows (2M), tables with no primary key, and
-    the two tables whose whole row set churns (latest_odds, latest_prop_odds:
-    measured 2026-11-03 at 16.8M updates and 82M deletes against 2.8M and 8.8M
-    live rows) are copied whole into a new set of chunks, then swapped in.
-  * Bigger tables are incremental: new keys past the last chunk are appended;
-    every chunk's row count is compared with the server's (an index range
-    count, ten chunks per query), which catches deletes and inserts; and a
-    rolling set of chunks also has its hash compared, which catches updates.
-    The hashed set is the newest --hot-chunks chunks (where picks get graded
-    and odds get marked in_play) plus the chunks whose hash is oldest, capped
-    at 1/--rotate-days of the table per run, so every chunk is re-checked about
-    every --rotate-days days. A chunk that differs is pulled again.
+TWO KINDS OF RUN (mike, 2026-11-19: "we should just be running a diff and a
+full backup like once a month"). --kind auto, the default, picks one:
+
+  * diff, every night. Every table with a primary key catches up: new keys
+    past the last chunk are appended; every chunk's row count is compared with
+    the server's (an index range count, ten chunks per query), which catches
+    deletes and inserts; and a set of chunks also has its hash compared, which
+    catches updates. The hashed set is the newest --hot-chunks chunks (40:
+    every chunk of all but three tables, measured 2026-11-19) plus the chunks
+    whose hash is oldest, capped at 1/--rotate-days of the table per run. Only
+    a chunk that differs is pulled again, so an unchanged table pulls nothing.
+    Tables with no primary key (18, 167,476 rows on 2026-11-19) are copied
+    whole. The two latest-line caches (latest_odds, latest_prop_odds) are left
+    as they are: they are rebuilt from the odds tables, and nearly every row
+    of them changes between nights (measured 2026-11-03 at 16.8M updates and
+    82M deletes against 2.8M and 8.8M live rows), so a diff saves nothing.
+  * full, the first run on or after the 1st of each month (Eastern), so a PC
+    that was off on the 1st runs it at its next pass. Every chunk of every
+    table has its hash compared with the server's and its file on this disk
+    read back; any chunk that differs, or whose file does not read back with
+    its rows, is pulled again. The two caches and the tables with no primary
+    key are copied whole. It records itself in LAST_FULL.json.
+
+  Until 2026-11-19 every table under 2M rows was also copied whole every
+  night: 29.8M of the 34.4M rows the night of 11-19 pulled.
   * None of the tables above 2M rows has an updated_at-style column (measured
     2026-11-03), so the hash IS the update detector for them.
 
@@ -61,7 +74,8 @@ main checkout's .env at run time. It is never printed, logged or written; every
 logged error has database URLs scrubbed out.
 
 Usage:
-  python local_mirror.py run                 # one full pass (schema, storage, tables, verify)
+  python local_mirror.py run                 # one pass (schema, storage, tables, verify): diff, or the month's full
+  python local_mirror.py run --kind full     # the monthly full, now
   python local_mirror.py run --only public.picks --skip-storage --skip-schema
   python local_mirror.py verify              # counts only, local vs Supabase
   python local_mirror.py status              # local manifests only, no database
@@ -101,7 +115,11 @@ DEFAULT_ENV_FILE = Path(r"C:\Users\micha\documents\betting-model\.env")
 
 BATCH_ROWS = 50_000
 BATCH_BYTES = 32 * 1024 * 1024
-FULL_COPY_BELOW = 2_000_000
+# A keyed table under this many rows is copied whole every run. 0 since
+# 2026-11-19: the nightly diff catches every keyed table up instead.
+FULL_COPY_BELOW = 0
+KINDS = ("auto", "diff", "full")
+LAST_FULL_FILE = "LAST_FULL.json"
 # Whole row set churns between runs, so range checks would re-pull nearly
 # every chunk anyway. Measured 2026-11-03 (pg_stat_user_tables): latest_odds
 # 16.8M updates + 6.1M deletes vs 2.8M live; latest_prop_odds 82M deletes vs
@@ -848,6 +866,17 @@ class TableDir:
         os.replace(tmp, path)
         return name, path.stat().st_size
 
+    def reads_back(self, chunk: dict) -> bool:
+        """The chunk's file is on disk, reads as Parquet, and holds its rows."""
+        import pyarrow.parquet as pq
+        name = chunk.get("file")
+        if not name:
+            return chunk.get("rows", 0) == 0
+        try:
+            return pq.read_table(self.dir / name).num_rows == chunk.get("rows")
+        except Exception:  # noqa: BLE001 - missing, truncated or not Parquet
+            return False
+
     def remove(self, name: str | None) -> None:
         if name:
             with contextlib.suppress(FileNotFoundError):
@@ -899,9 +928,12 @@ class Mirror:
                  batch_rows: int = BATCH_ROWS, batch_bytes: int = BATCH_BYTES,
                  full_copy_below: int = FULL_COPY_BELOW, always_full=ALWAYS_FULL,
                  rotate_days: float = ROTATE_DAYS, hot_chunks: int = HOT_CHUNKS,
-                 count_group: int = COUNT_GROUP,
+                 count_group: int = COUNT_GROUP, kind: str = "diff",
                  clock: Callable[[], dt.datetime] = _utcnow,
                  progress: Callable[[str, int], None] | None = None):
+        if kind not in ("diff", "full"):
+            raise ValueError(f"kind must be diff or full, not {kind!r}")
+        self.kind = kind
         self.source = source
         self.root = Path(root)
         self.log = log
@@ -918,7 +950,10 @@ class Mirror:
     # -- policy -----------------------------------------------------------------
 
     def mode_for(self, info: TableInfo) -> str:
-        if not info.pk or info.fq in self.always_full or info.est_rows < self.full_copy_below:
+        """full (copied whole), incremental (caught up) or skipped (left as it is)."""
+        if info.fq in self.always_full:
+            return "full" if self.kind == "full" else "skipped"
+        if not info.pk or info.est_rows < self.full_copy_below:
             return "full"
         return "incremental"
 
@@ -1065,6 +1100,8 @@ class Mirror:
 
     def _choose_hashed(self, m: dict) -> set[int]:
         chunks = m["chunks"]
+        if self.kind == "full":
+            return {c["id"] for c in chunks}
         n = len(chunks)
         chosen = {c["id"] for c in chunks[-self.hot_chunks:]} if self.hot_chunks else set()
         now = self.clock()
@@ -1078,7 +1115,8 @@ class Mirror:
         chosen.update(c["id"] for c in due[:cap])
         return chosen
 
-    def _compare(self, info: TableInfo, m: dict, hashed: set[int]) -> tuple[list[int], int]:
+    def _compare(self, info: TableInfo, m: dict, hashed: set[int],
+                 store: "TableDir | None" = None) -> tuple[list[int], int]:
         """Ids of chunks whose server range differs from the local chunk."""
         chunks = m["chunks"]
         sig = info.signature()
@@ -1089,6 +1127,12 @@ class Mirror:
         while i < len(chunks):
             c = chunks[i]
             if c.get("sig") != sig:
+                bad.append(c["id"])
+                i += 1
+                continue
+            if self.kind == "full" and store is not None and not store.reads_back(c):
+                self.log(f"{info.fq}: {c.get('file')} does not read back with its "
+                         f"{c['rows']:,} rows; it is copied again")
                 bad.append(c["id"])
                 i += 1
                 continue
@@ -1129,7 +1173,9 @@ class Mirror:
                 fresh.append(chunk)
         pulled = self._pull_range(store, m, info, lo, hi, keep)
         # Before the old chunk goes: keep the rows of it Supabase no longer has.
-        kept = store.keep_vanished([old.get("file")], [c.get("file") for c in fresh],
+        # A file that does not read back has no rows to keep.
+        olds = [old.get("file")] if store.reads_back(old) else []
+        kept = store.keep_vanished(olds, [c.get("file") for c in fresh],
                                    m.get("key_columns") or info.pk, self._stamp())
         if kept:
             if res is not None:
@@ -1163,7 +1209,7 @@ class Mirror:
         res.pulled_rows += self._pull_range(store, m, info, last_hi, None, append)
 
         hashed = self._choose_hashed(m)
-        bad, n_hashed = self._compare(info, m, hashed)
+        bad, n_hashed = self._compare(info, m, hashed, store)
         for cid in bad:
             res.pulled_rows += self._repull(store, m, info, cid, res)
         res.repulled = len(bad)
@@ -1188,7 +1234,11 @@ class Mirror:
         if removed:
             self.log(f"{info.fq}: removed {removed} file(s) left by an interrupted run")
         mode = self.mode_for(info)
-        if mode == "full":
+        if mode == "skipped" and m is None:
+            mode = "full"  # no copy yet: make one, then leave it to the monthly full
+        if mode == "skipped":
+            res = TableResult(info.fq, "skipped", local_rows=m.get("rows", 0))
+        elif mode == "full":
             res = self._full_copy(store, info, m)
         else:
             res = self._incremental(store, info, m)
@@ -1624,6 +1674,53 @@ def mirror_storage(src: PgSource, dest: Path, base_url: str | None, service_key:
 
 # --------------------------------------------------------------- runner
 
+def last_full(dest: Path) -> dict | None:
+    """The last monthly full that finished (LAST_FULL.json), or None."""
+    try:
+        with open(Path(dest) / LAST_FULL_FILE, encoding="utf-8") as fh:
+            got = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return got if isinstance(got, dict) else None
+
+
+def record_full(dest: Path, state: dict) -> None:
+    _atomic_write_text(Path(dest) / LAST_FULL_FILE, json.dumps(
+        {k: state.get(k) for k in ("run_id", "run_started_at", "run_finished_at", "tables",
+                                   "failed_tables", "rows_pulled")}, indent=1, default=str))
+
+
+def _month_start_et(t: dt.datetime) -> dt.datetime:
+    e = t.astimezone(ET)
+    return e.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def next_full_from(dest: Path) -> dt.datetime | None:
+    """When the next monthly full is due: the 1st (Eastern) of the month after
+    the last full started, or None when there has been none (due now)."""
+    started = _parse_iso((last_full(dest) or {}).get("run_started_at"))
+    if started is None:
+        return None
+    m = _month_start_et(started)
+    return (m.replace(year=m.year + 1, month=1) if m.month == 12 else m.replace(month=m.month + 1))
+
+
+def choose_kind(asked: str, dest: Path, now: dt.datetime, *, partial: bool) -> tuple[str, str]:
+    """(diff or full, why). auto runs the full at the first pass on or after the
+    1st of each month (Eastern) with no full yet that month; a run by hand on a
+    few tables (--only or --exclude) is never the month's full."""
+    if asked in ("diff", "full"):
+        return asked, f"--kind {asked}"
+    if partial:
+        return "diff", "a run on chosen tables is a diff"
+    due = next_full_from(dest)
+    if due is None:
+        return "full", "no monthly full has finished yet"
+    if now >= due:
+        return "full", f"the monthly full is due from {due.date().isoformat()}"
+    return "diff", f"the next monthly full is due from {due.date().isoformat()}"
+
+
 class Logger:
     def __init__(self, path: Path | None):
         self.path = path
@@ -1676,6 +1773,8 @@ def _fmt_table(results: list[TableResult]) -> str:
     for r in results:
         if r.error:
             status = f"ERROR {r.error[:60]}"
+        elif r.mode == "skipped":
+            status = "left as it is: a cache, copied by the monthly full"
         elif r.server_rows is None:
             status = "not verified"
         elif r.server_rows == r.local_rows and not r.unchecked:
@@ -1766,6 +1865,10 @@ def cmd_run(args) -> int:
                 log(f"storage mirror FAILED: {scrub(exc)}")
                 state["storage_error"] = scrub(exc)
 
+        partial = bool(args.only or args.exclude)
+        kind, why = choose_kind(args.kind, dest, _utcnow(), partial=partial)
+        state["kind"] = kind
+        log(f"this run is a {kind}: {why}")
         tables = _select(src.list_tables(), args.only or [], args.exclude or [])
         for t in tables:
             if t.est_rows < 0:  # never analysed: small, so count it exactly
@@ -1775,7 +1878,7 @@ def cmd_run(args) -> int:
         progress = Progress(dest, total_est, log, src)
         mirror = Mirror(src, dest, log=log, batch_rows=args.batch_rows,
                         full_copy_below=args.full_copy_below, rotate_days=args.rotate_days,
-                        hot_chunks=args.hot_chunks, progress=progress)
+                        hot_chunks=args.hot_chunks, kind=kind, progress=progress)
         _atomic_write_text(dest / "tables_inventory.json", json.dumps(
             [{"table": t.fq, "est_rows": t.est_rows, "table_bytes": t.table_bytes,
               "total_bytes": t.total_bytes, "key_columns": t.pk, "mode": mirror.mode_for(t)}
@@ -1786,7 +1889,7 @@ def cmd_run(args) -> int:
                 r = mirror.sync_table(t)
                 log(f"{t.fq}: {r.mode} pass done: {r.local_rows:,} rows local, "
                     f"{r.pulled_rows:,} pulled, {r.repulled} range(s) re-pulled, {r.seconds:,.0f}s")
-                if not args.no_verify:
+                if not args.no_verify and r.mode != "skipped":
                     v = mirror.verify_table(t)
                     v.pulled_rows, v.repulled, v.seconds = r.pulled_rows, r.repulled, r.seconds
                     r = v
@@ -1805,9 +1908,12 @@ def cmd_run(args) -> int:
                       "failed_tables": [r.fq for r in results if r.error],
                       "mismatched_tables": [r.fq for r in results
                                             if r.server_rows is not None and r.server_rows != r.local_rows],
+                      "skipped_tables": [r.fq for r in results if r.mode == "skipped"],
                       "rows_pulled": progress.rows, "db_seconds": round(src.db_seconds),
                       "paused_seconds": round(src.throttle.paused_s)})
         _atomic_write_text(dest / "STATE.json", json.dumps(state, indent=1, default=str))
+        if kind == "full" and not partial:
+            record_full(dest, state)
         log(f"run finished: {progress.rows:,} rows pulled; "
             f"{len(state['failed_tables'])} failed, {len(state['mismatched_tables'])} with differences")
         return 1 if state["failed_tables"] else 0
@@ -1912,6 +2018,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--full-copy-below", type=int, default=FULL_COPY_BELOW)
     p.add_argument("--rotate-days", type=float, default=ROTATE_DAYS)
     p.add_argument("--hot-chunks", type=int, default=HOT_CHUNKS)
+    p.add_argument("--kind", choices=KINDS, default="auto",
+                   help="diff (nightly), full (monthly: every chunk hashed and read back), "
+                        "or auto (the full at the first run of each month, else a diff)")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("verify")
     common(p)

@@ -69,3 +69,36 @@ def test_refused_items_are_recorded_with_their_status(tmp_path):
     gh2 = FakeGitHub(routes)
     lmg.export_meta(gh2, "o/r", tmp_path)
     assert not any("/reviews" in p for p in gh2.seen)
+
+
+def test_a_response_cut_off_mid_read_is_retried(monkeypatch):
+    """2026-11-18 and 11-19: the issue and pull-request export of 2 of the 4
+    repositories stopped on http.client.IncompleteRead ("1308424 bytes read,
+    27945 more expected"), which nothing retried, so the step exited 1."""
+    import http.client
+
+    class Resp:
+        def __init__(self, cut):
+            self.cut, self.status, self.headers = cut, 200, {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            if self.cut:
+                raise http.client.IncompleteRead(b"[", 27945)
+            return b"[]"
+
+    calls = []
+
+    def opener(req, timeout=None):
+        calls.append(req.full_url)
+        return Resp(cut=len(calls) == 1)
+
+    monkeypatch.setattr(lmg.time, "sleep", lambda s: None)
+    gh = lmg.GitHub("not-a-real-token", opener=opener)
+    assert gh._request("/repos/a/b/issues") == (200, b"[]", {})
+    assert len(calls) == 2

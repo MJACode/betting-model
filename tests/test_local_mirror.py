@@ -351,7 +351,7 @@ def test_the_latest_line_caches_keep_no_vanished_rows(tmp_path):
     info = lm.TableInfo("public", "latest_odds", table().columns, ["a", "b"],
                         ["bigint", "text"], est_rows=10_000_000)
     src = seeded(47, info)
-    mm = mirror(src, tmp_path)
+    mm = mirror(src, tmp_path, kind="full")  # the monthly full is what copies them
     mm.sync_table(info)
     src.delete((5, "k005"))
     mm.sync_table(info)
@@ -654,3 +654,123 @@ def test_pg_source_narrows_a_timed_out_check_to_the_slow_range(monkeypatch):
     info = lm.TableInfo("public", "t", [], ["a"], ["bigint"])
     out = src.range_summaries(info, None, [["10"], ["20"], ["30"], ["40"], ["50"]], False)
     assert out == [(7, None), (7, None), None, (7, None), (7, None)]
+
+
+# ------------------------------------------------------------- nightly diff, monthly full
+# mike, 2026-11-19: "why is the nightly backup so big, we should just be running
+# a diff and a full backup like once a month". The night of 11-19 pulled
+# 35,347,926 rows: 29.8M of them were tables re-copied whole (every table under
+# 2M rows, and the two latest-line caches), whether or not they had changed.
+
+def small(name="t"):
+    """A keyed table of the size that used to be re-copied whole every night."""
+    return lm.TableInfo("public", name, table().columns, ["a", "b"], ["bigint", "text"], est_rows=100)
+
+
+def nightly(src, root, clock=None, **kw):
+    """The Mirror as the nightly run builds it: production defaults."""
+    kw.setdefault("hot_chunks", lm.HOT_CHUNKS)
+    kw.setdefault("full_copy_below", lm.FULL_COPY_BELOW)
+    return mirror(src, root, clock=clock, kind="diff", **kw)
+
+
+def test_a_nightly_diff_pulls_nothing_from_an_unchanged_small_table(tmp_path):
+    src = seeded(47, small())
+    mm = nightly(src, tmp_path)
+    assert mm.sync_table(src.info).pulled_rows == 47
+    res = mm.sync_table(src.info)
+    assert res.mode == "incremental"
+    assert res.pulled_rows == 0, "an unchanged table is not copied again"
+    assert local(tmp_path, src.info) == server(src)
+
+
+def test_a_nightly_diff_catches_an_edit_to_an_old_row_of_a_small_table(tmp_path):
+    src = seeded(47, small())
+    mm = nightly(src, tmp_path)
+    mm.sync_table(src.info)
+    src.put((3, "k003"), "graded WIN")
+    res = mm.sync_table(src.info)
+    assert local(tmp_path, src.info) == server(src)
+    assert 0 < res.pulled_rows <= 10, "only the chunk holding the edit is copied again"
+
+
+def test_a_nightly_diff_catches_a_row_inserted_mid_range_under_a_text_key(tmp_path):
+    info = lm.TableInfo("public", "t", table().columns, ["b"], ["text"], est_rows=100)
+    rows = {(f"k{i:03d}",): (i, f"k{i:03d}", f"v{i}") for i in range(1, 48)}
+    src = FakeServer(info, rows)
+    mm = nightly(src, tmp_path)
+    mm.sync_table(info)
+    src.rows[("k002a",)] = (99, "k002a", "inserted")
+    mm.sync_table(info)
+    assert local(tmp_path, info) == server(src)
+
+
+def test_a_nightly_diff_keeps_a_row_deleted_from_a_small_table(tmp_path):
+    src = seeded(47, small())
+    mm = nightly(src, tmp_path)
+    mm.sync_table(src.info)
+    src.delete((40, "k040"))
+    mm.sync_table(src.info)
+    assert local(tmp_path, src.info) == server(src)
+    assert vanished(tmp_path, src.info) == [(40, "k040", "v40")]
+
+
+def cache_table():
+    return lm.TableInfo("public", "latest_odds", table().columns, ["a", "b"],
+                        ["bigint", "text"], est_rows=10_000_000)
+
+
+def test_the_latest_line_caches_are_left_alone_by_the_nightly_diff(tmp_path):
+    """They are rebuilt from the odds tables and change almost whole between
+    nights (12.99M of the 34.39M rows pulled on 11-19), so a diff saves nothing
+    on them. The monthly full copies them."""
+    info = cache_table()
+    src = seeded(47, info)
+    nightly(src, tmp_path).sync_table(info)  # no copy yet: the first run makes one
+    kept = local(tmp_path, info)
+    src.put((5, "k005"), "moved")
+    res = nightly(src, tmp_path).sync_table(info)
+    assert res.mode == "skipped" and res.pulled_rows == 0
+    assert local(tmp_path, info) == kept
+    res = mirror(src, tmp_path, kind="full").sync_table(info)
+    assert res.mode == "full"
+    assert local(tmp_path, info) == server(src)
+
+
+def test_the_monthly_full_checks_every_chunk_of_a_big_table(tmp_path):
+    clock = Clock()
+    src = seeded(47)
+    mirror(src, tmp_path, clock=clock, kind="diff").sync_table(src.info)
+    src.put((3, "k003"), "edited")
+    mirror(src, tmp_path, clock=clock, kind="diff").sync_table(src.info)
+    assert local(tmp_path) != server(src), "a diff hashes only the rotating share"
+    mirror(src, tmp_path, clock=clock, kind="full").sync_table(src.info)
+    assert local(tmp_path) == server(src)
+
+
+def test_the_monthly_full_copies_again_a_chunk_whose_file_is_damaged(tmp_path):
+    src = seeded(47)
+    mirror(src, tmp_path, kind="diff").sync_table(src.info)
+    store = lm.TableDir(tmp_path, src.info.fq)
+    victim = store.dir / store.load()["chunks"][1]["file"]
+    victim.write_bytes(b"not a parquet file")
+    res = mirror(src, tmp_path, kind="full").sync_table(src.info)
+    assert res.repulled == 1
+    assert local(tmp_path) == server(src)
+
+
+def test_auto_runs_the_full_once_a_month_and_a_diff_otherwise(tmp_path):
+    et = lm.ET
+    nov19 = dt.datetime(2026, 11, 19, 0, 30, tzinfo=et)
+    assert lm.choose_kind("auto", tmp_path, nov19, partial=False)[0] == "full", "no full yet"
+    lm.record_full(tmp_path, {"run_id": "x", "run_started_at": lm._iso(nov19)})
+    assert lm.choose_kind("auto", tmp_path, nov19 + dt.timedelta(days=1), partial=False)[0] == "diff"
+    nov30 = dt.datetime(2026, 11, 30, 23, 59, tzinfo=et)
+    assert lm.choose_kind("auto", tmp_path, nov30, partial=False)[0] == "diff"
+    dec3 = dt.datetime(2026, 12, 3, 0, 30, tzinfo=et)
+    assert lm.choose_kind("auto", tmp_path, dec3, partial=False)[0] == "full", \
+        "a PC that was off on the 1st runs it at its next pass"
+    assert lm.choose_kind("auto", tmp_path, dec3, partial=True)[0] == "diff", \
+        "a run by hand on a few tables is never the month's full"
+    assert lm.choose_kind("full", tmp_path, nov19, partial=False)[0] == "full"
+    assert lm.choose_kind("diff", tmp_path, dec3, partial=False)[0] == "diff"

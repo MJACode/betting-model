@@ -288,26 +288,51 @@ Not covered, and why:
 - **The `auth` tables hold password hashes and session tokens.** They are copied,
   because that is what a full backup is. They are on this disk.
 
-### How a table catches up
+### How a table catches up: a diff every night, a full once a month
+
+mike, 2026-11-19: *"why is the nightly backup so big, we should just be running
+a diff and a full backup like once a month"*. Until then every table under 2
+million rows was copied whole every night, changed or not. The night of 11-19
+copied 35,347,926 rows (`pc_copy_snapshots` row 7), and 29.8M of them were
+those whole copies: 16.8M from 312 smaller tables, and 13.0M from the two
+latest-price tables (`logs\supabase_20261119T053004Z.log`).
 
 A table is split into chunks. Each chunk is one file holding every row whose
 primary key falls between the previous chunk's last key and its own. Each chunk
 remembers its row count and a fingerprint of its rows (a hash Postgres computes
 in the same read that returns them).
 
-- **Tables under 2 million rows**, the 14 tables with no primary key, and
-  `latest_odds` and `latest_prop_odds` (whose rows are almost all replaced
-  between runs) are copied whole every run, then swapped in.
-- **The bigger tables** (`player_prop_odds`, `odds`, `nfl_odds_history`,
-  `picks_log`, `kalshi_game_markets`, `nba_pbp`, `kalshi_prop_ladders` on
-  2026-11-03) are caught up. New rows past the last key are added. Every chunk's
-  row count is compared with Supabase's, which finds rows the odds prune deleted.
-  The fingerprints of the newest 40 chunks (where odds get marked in play) and of
-  the oldest-checked seventh of the rest are compared too, which finds edited
-  rows. A chunk that differs is copied again. Run daily, every chunk's
-  fingerprint is re-checked about once a week.
-- None of those big tables has an `updated_at` column, so the fingerprint is how
+**The nightly diff** (every pass, except the month's full):
+
+- **Every table with a primary key is caught up**, whatever its size. New rows
+  past the last key are added. Every chunk's row count is compared with
+  Supabase's, which finds deleted and inserted rows. The fingerprints of the
+  newest 40 chunks, and of the oldest-checked seventh of the rest, are compared
+  too, which finds edited rows. Only a chunk that differs is copied again, so a
+  table that did not change copies nothing.
+- 40 chunks is every chunk of every table except three (on 2026-11-19:
+  `latest_prop_odds` 192, `latest_odds` 69, `nfl_research_data_backup` 66),
+  so an edit anywhere in the other tables is found the same night.
+- **The 18 tables with no primary key** (167,476 rows in all) are copied whole.
+- **`latest_odds` and `latest_prop_odds` are left as they are.** They are
+  rebuilt from the odds tables, and nearly all of their rows change between
+  nights, so a diff of them would copy almost all of them anyway.
+- None of the big tables has an `updated_at` column, so the fingerprint is how
   an edit is found.
+
+**The monthly full** (`--kind full`): the first pass on or after the 1st of each
+month, Eastern time. A PC that was off on the 1st runs it at its next pass.
+
+- Every chunk of every table has its fingerprint compared with Supabase's.
+- Every file on this disk is read back and its rows counted.
+- Any chunk that differs, or whose file does not read back, is copied again.
+- The two latest-price tables and the tables with no primary key are copied whole.
+- It writes `supabase_mirror\LAST_FULL.json`. The next full is due from the 1st
+  of the following month.
+
+It does not download every row again: it checks every row, and copies again
+only what differs. `--kind auto`, the default, decides which kind a run is, and
+a run by hand with `--only` is always a diff.
 
 ### Load on production
 
@@ -379,6 +404,10 @@ on 2026-11-17, or a sign-in before then).
 ```powershell
 # One pass of both (what a schedule would run):
 powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\micha\Documents\betting_local_copies\bin\local_mirror_run.ps1
+
+# The month's full now, or a diff now:
+python C:\Users\micha\Documents\betting_local_copies\bin\local_mirror.py run --kind full
+python C:\Users\micha\Documents\betting_local_copies\bin\local_mirror.py run --kind diff
 
 # The database alone, or a few tables:
 python C:\Users\micha\Documents\betting_local_copies\bin\local_mirror.py run
@@ -476,6 +505,12 @@ schtasks /Delete /TN "BettingModel\LocalMirror" /F
 
 A run started while another is still going exits at once: one run holds a
 lock file in `supabase_mirror\`, and Windows releases it if the run dies.
+
+**The schedule is on the dashboard** (from 2026-11-20). Each report reads the
+task from Task Scheduler: its triggers, its next and last run, and its last
+result. It adds the last monthly full and the date the next one is due from,
+in `pc_copy_snapshots.schedule`. Each run's kind is in `copy_kind`. The Retool
+Database tab's PC copy section shows both (`docs/monitoring.md`).
 
 ### SQL over the copy: `betting.duckdb` (mike, 2026-11-15)
 

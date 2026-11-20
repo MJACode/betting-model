@@ -512,3 +512,70 @@ def test_a_crashed_step_fails_the_task_and_the_report_gets_its_real_code(tmp_pat
     report = seen["local_mirror_report"][-1]["argv"]
     assert report[report.index("--supabase-exit") + 1] == "-1073741819"
     assert run.returncode == 255, (run.returncode, run.stdout, run.stderr)
+
+
+# -- the run's kind and the schedule (mike, 2026-11-19: "ensure the backup
+# schedule and runs are captured in the retool app") ---------------------------
+
+TASK = {"state": "Ready", "next_run_at": "2026-11-20T05:30:00.0000000Z",
+        "last_run_at": "2026-11-19T05:30:01.0000000Z", "last_result": 1,
+        "triggers": [{"type": "MSFT_TaskDailyTrigger", "start": "2026-11-03T00:30:00",
+                      "delay": None, "enabled": True},
+                     {"type": "MSFT_TaskLogonTrigger", "start": None, "delay": "PT2M", "enabled": True}]}
+
+
+@pytest.fixture(autouse=True)
+def _no_task_scheduler(monkeypatch):
+    """No test reads this machine's Task Scheduler: the real task answers here."""
+    monkeypatch.setattr(rep, "read_task", lambda *a, **k: dict(TASK))
+
+
+def test_the_row_records_the_kind_of_run(copy_root):
+    assert _row(copy_root)["copy_kind"] is None, "a run before 2026-11-20 has no kind"
+    state = json.loads((copy_root / "supabase_mirror" / "STATE.json").read_text(encoding="utf-8"))
+    for kind in ("diff", "full"):
+        state["kind"] = kind
+        _write(copy_root / "supabase_mirror" / "STATE.json", state)
+        assert _row(copy_root)["copy_kind"] == kind
+    state["kind"] = "something else"
+    _write(copy_root / "supabase_mirror" / "STATE.json", state)
+    assert _row(copy_root)["copy_kind"] is None
+
+
+def test_the_row_records_the_schedule_from_task_scheduler(copy_root):
+    s = json.loads(_row(copy_root)["schedule"])
+    assert s["task"] == "\\BettingModel\\LocalMirror"
+    assert s["next_run_at"] == "2026-11-20T05:30:00.0000000Z" and s["last_result"] == 1
+    assert s["triggers"] == [{"type": "daily", "enabled": True, "at": "00:30"},
+                             {"type": "sign-in", "enabled": True, "delay": "PT2M"}]
+    assert s["last_full"] is None and s["next_full_from"] is None, "no full yet: the next pass runs it"
+    _write(copy_root / "supabase_mirror" / "LAST_FULL.json", {
+        "run_id": "20261120T053020Z", "run_started_at": "2026-11-20T05:30:20+00:00",
+        "run_finished_at": "2026-11-20T09:00:00+00:00", "failed_tables": []})
+    s = json.loads(_row(copy_root)["schedule"])
+    assert s["last_full"]["run_id"] == "20261120T053020Z"
+    assert s["next_full_from"] == "2026-12-01"
+
+
+def test_a_full_started_on_the_evening_of_the_last_day_belongs_to_that_month():
+    """23:30 Eastern on 11-30 is 04:30 UTC on 12-01: the month is Eastern."""
+    assert rep.next_full_from({"run_started_at": "2026-12-01T04:30:00+00:00"}) == "2026-12-01"
+    assert rep.next_full_from({"run_started_at": "2026-12-15T06:00:00+00:00"}) == "2027-01-01"
+
+
+def test_a_task_that_cannot_be_read_is_recorded_and_the_row_still_written(copy_root, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("Get-ScheduledTask : No MSFT_ScheduledTask objects found")
+    monkeypatch.setattr(rep, "read_task", boom)
+    row = _row(copy_root)
+    s = json.loads(row["schedule"])
+    assert "No MSFT_ScheduledTask" in s["error"]
+    assert set(row) == set(rep.COLUMNS)
+
+
+def test_a_repository_whose_issues_could_not_be_exported_counts_as_failed(copy_root):
+    _write(copy_root / "github" / "_mirror_summary.json", {
+        "at": "2026-11-19T05:38:10+00:00",
+        "repos": [{"repo": "a/b", "git": {"ok": True}},
+                  {"repo": "a/c", "git": {"ok": True}, "error": "IncompleteRead(1308424 bytes read)"}]})
+    assert _row(copy_root)["github_repos_failed"] == 1

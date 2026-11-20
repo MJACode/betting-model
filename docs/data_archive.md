@@ -299,6 +299,15 @@ Ranges are re-pulled mostly because the pruner changed them overnight.
 With deletions stopped and repeats no longer written, a night's work becomes
 roughly the day's new rows.
 
+**Done 2026-11-19 (items 2 and 4).** mike that day: *"we should just be running
+a diff and a full backup like once a month"*. Every keyed table is now caught up
+each night, and an unchanged one copies nothing. The two latest-price caches are
+left for the monthly full. The full runs at the first pass on or after the 1st
+of each month: every chunk is hashed against Postgres, and every file on the PC
+is read back. Not a weekend afternoon, as planned above: the PC skips nights,
+so the full is due by date and runs at the next pass. Items 1 and 3 stand as
+before. `docs/local_ops.md` has the detail.
+
 ## 7. Order of work
 
 1. Stop the deleting jobs (section 2), and make the PC copy append-only the
