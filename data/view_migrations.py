@@ -776,6 +776,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # endpoints over mv_scored_pick_outcomes to signed-in accounts without
     # access (a matview cannot carry RLS). No-op once the hook is set.
     "premium_gate_matview_2026_11_20.sql",
+    # Founders (Matt, Mike): unlimited MCP questions. Closed to anon and
+    # authenticated. DDL only when the table is missing.
+    "app_founders_2026_11_20.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

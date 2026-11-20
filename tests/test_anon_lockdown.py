@@ -1111,3 +1111,44 @@ def test_premium_gate_matview_hook_through_the_worker_path():
         assert ok, err
         ok, err = hook("anon", None, "/site_public_record")
         assert ok, err
+
+
+def test_app_founders_through_the_worker_path():
+    """Founders table: created once, holds Matt and Mike, closed to the API."""
+    from data.view_migrations import _apply_one
+    import psycopg2
+
+    assert "app_founders_2026_11_20.sql" in ACTIVE_MIGRATIONS
+    sql = (MIGRATIONS / "app_founders_2026_11_20.sql").read_text(encoding="utf-8")
+    matt, mike = "33f61a85-b7ee-4a00-9641-73600e410305", "a2f697f8-02e1-4006-b7b2-6f7a0999f62c"
+    with scratch_cluster("founders-") as dsn:
+        _psql(dsn, _fixture_sql())
+        _psql(dsn, f"INSERT INTO auth.users (id) VALUES ('{matt}'), ('{mike}');")
+
+        class _Conn:
+            def __init__(self, raw):
+                self.raw = raw
+
+            def execute(self, q, params=None):
+                cur = self.raw.cursor()
+                cur.execute(q, params)
+                return cur
+
+            def commit(self):
+                self.raw.commit()
+
+            def rollback(self):
+                self.raw.rollback()
+
+        raw = psycopg2.connect(dsn)
+        try:
+            conn = _Conn(raw)
+            assert _apply_one(conn, "app_founders_2026_11_20.sql", sql) is None
+            assert _apply_one(conn, "app_founders_2026_11_20.sql", sql) is None
+        finally:
+            raw.close()
+        rows = _psql(dsn, "SELECT string_agg(label, ',' ORDER BY label) FROM app_founders;")
+        assert rows.strip() == "Matt,Mike"
+        for role in ("anon", "authenticated"):
+            ok, err = _can(dsn, role, "SELECT 1 FROM public.app_founders;")
+            assert not ok and "42501" in err, role
