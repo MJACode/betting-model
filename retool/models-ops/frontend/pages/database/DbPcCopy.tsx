@@ -118,7 +118,7 @@ function fmtUntil(iso: string | null | undefined, now: number): string {
 function kindLabel(kind: string | null | undefined): string {
   if (kind === 'diff') return 'Nightly diff'
   if (kind === 'full') return 'Monthly full'
-  return 'Before diffs'
+  return 'Nightly (before 11-20)'
 }
 
 /** "Mon, Dec 1" from a date string. */

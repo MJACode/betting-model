@@ -196,8 +196,8 @@ That is the copy's own check catching rows that changed between the copy and
 the count, and the next run takes them. Below the cards: the differing and
 failed tables, the last 14 backup runs (when each started, its kind, how long
 it took, how many rows it copied, and how it ended), and each copy's size over
-time. A run before 2026-11-20 shows as "Before diffs": it re-copied every small
-table whole.
+time. A run before 2026-11-20 shows as "Nightly (before 11-20)": it re-copied every
+small table whole.
 
 **Layouts on this tab are not saved.** The layout functions accept four tab
 names and `dashboard_layouts` checks the same four; adding a fifth changes
