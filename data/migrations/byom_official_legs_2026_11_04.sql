@@ -37,7 +37,12 @@
 --
 -- In data/view_migrations.ACTIVE_MIGRATIONS. The guard returns before
 -- any DDL once the table, its grants, its policy, and the five functions
--- carrying byom_official_legs_v1 are present. Does not write picks.
+-- carrying byom_official_legs_v1 are present. After anon-lockdown step A
+-- the grant on this table is authenticated SELECT only (anon cannot read
+-- picks); that shape skips too. Re-entering would replace functions a
+-- later file already changed, and byom_bets' OUT list is one of them
+-- (byom_bets_actual_2026_11_17.sql), which CREATE OR REPLACE cannot do.
+-- Does not write picks.
 
 DO $mig$
 BEGIN
@@ -49,10 +54,28 @@ BEGIN
        SELECT 1 FROM pg_policy
         WHERE polrelid = to_regclass('public.byom_official_legs')
           AND polname = 'anon read byom_official_legs')
-     AND EXISTS (
-       SELECT 1 FROM information_schema.role_table_grants
-        WHERE table_schema = 'public' AND table_name = 'byom_official_legs'
-          AND grantee = 'anon' AND privilege_type = 'SELECT')
+     AND (
+       -- Pre-lockdown: anon can read this table.
+       EXISTS (
+         SELECT 1 FROM information_schema.role_table_grants
+          WHERE table_schema = 'public' AND table_name = 'byom_official_legs'
+            AND grantee = 'anon' AND privilege_type = 'SELECT')
+       -- Step A revoked that grant (prod, 2026-11-20 03:12 UTC). The
+       -- table is still present: authenticated can read it, anon cannot,
+       -- and anon cannot read picks. to_regclass, never ::regclass.
+       OR (
+         to_regclass('public.picks') IS NOT NULL
+         AND NOT has_table_privilege('anon', 'public.picks', 'SELECT')
+         AND EXISTS (
+           SELECT 1 FROM information_schema.role_table_grants
+            WHERE table_schema = 'public' AND table_name = 'byom_official_legs'
+              AND grantee = 'authenticated' AND privilege_type = 'SELECT')
+         AND NOT EXISTS (
+           SELECT 1 FROM information_schema.role_table_grants
+            WHERE table_schema = 'public' AND table_name = 'byom_official_legs'
+              AND grantee = 'anon')
+       )
+     )
      AND NOT EXISTS (
        SELECT 1 FROM information_schema.role_table_grants
         WHERE table_schema = 'public' AND table_name = 'byom_official_legs'
@@ -577,6 +600,32 @@ BEGIN
   $fn$;
 
   -- ── the bets one timing counts ────────────────────────────────────────
+  -- byom_bets_actual_2026_11_17.sql added actual, home_score and
+  -- away_score. CREATE OR REPLACE cannot change that row type (42P13:
+  -- "Use DROP FUNCTION byom_bets(integer,jsonb,text) first."). No other
+  -- function's source names byom_bets, and no view depends on it
+  -- (measured 2026-11-20). The GRANT block below re-issues anon and
+  -- authenticated the same way this file already did.
+  IF EXISTS (
+       SELECT 1 FROM pg_proc p
+        WHERE p.pronamespace = 'public'::regnamespace
+          AND p.proname <> 'byom_bets'
+          AND position('byom_bets' in p.prosrc) > 0) THEN
+    RAISE EXCEPTION 'byom_bets is used by another function; refusing to drop it';
+  END IF;
+  IF to_regprocedure('public.byom_bets(integer, jsonb, text)') IS NOT NULL
+     AND EXISTS (
+       SELECT 1
+         FROM pg_depend d
+         JOIN pg_rewrite r
+           ON r.oid = d.objid AND d.classid = 'pg_rewrite'::regclass
+         JOIN pg_class c ON c.oid = r.ev_class
+        WHERE d.refobjid = to_regprocedure('public.byom_bets(integer, jsonb, text)')
+          AND c.relkind IN ('v', 'm')) THEN
+    RAISE EXCEPTION 'byom_bets is used by a view; refusing to drop it';
+  END IF;
+  DROP FUNCTION IF EXISTS public.byom_bets(integer, jsonb, text);
+
   EXECUTE $fn$
   CREATE OR REPLACE FUNCTION public.byom_bets(
     p_season integer,
