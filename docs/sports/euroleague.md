@@ -233,6 +233,10 @@ are the live populations. The cache has gained one game since (2026-11-13):
 the full-game purchase's quotes end at 05:45 UTC that day, so its "close" is a
 stale board and it is not read.
 
+**One bet a game, since 2026-11-19 (mike).** On top of the rule below, a game
+carries one EuroLeague bet across all five models, the moneyline first:
+"One bet a game, moneyline first" below.
+
 **One game never carries two bets that cannot both win.** The two full-game
 rules both bet the home side (the moneyline, and the spread only when the home
 number is above 0), so they can always win together, and a first-half or
@@ -326,7 +330,9 @@ be -200"): every bet the rule found was -500 or shorter (188 bets +34.59 units
   earlier seasons) +3.16%; 2026-27 -24.06% on 30 at DraftKings; the
   multiplicity bar; it was chosen with the residual table in view.
 - **Prices:** median -110, shortest -120, longest -102.
-- **Volume:** about 85 bets a full season, about 3 a week.
+- **Volume:** about 85 bets a full season, about 3 a week, on its own. Since
+  2026-11-19 it bets only a game the moneyline does not ("One bet a game,
+  moneyline first"), which no replayed game from 2025-26 on was.
 
 ### euroleague_h1_dog_ml — "EuroLeague First Half Moneyline"
 
@@ -353,7 +359,9 @@ be -200"): every bet the rule found was -500 or shorter (188 bets +34.59 units
 - **Prices:** median +142, shortest -115, longest +475.
 - **Volume:** about 98 bets a full season (2025-26), about 3 a week, since the
   cut (about 358 and 11 before it, when the rule bet nearly every game a
-  deciding book priced).
+  deciding book priced), on its own. Since 2026-11-19 it bets only a game
+  neither the moneyline nor the spread does ("One bet a game, moneyline
+  first"), which no replayed game from 2025-26 on was.
 - **Relocated venues** are bet the same way as the moneyline's: 16 replayed
   bets, +2.91 units; at own venues 115 bets, +12.94 units, +14.80%.
 
@@ -503,6 +511,66 @@ replay, the artifact and the live-rule figures in this doc on the posted stake
 **Built 2026-11-17 (mike: "Yes, both").** The moneyline bets only a home side
 getting points, and the first half only that home underdog: see each model's
 section above.
+
+### One bet a game, moneyline first (built 2026-11-19, mike)
+
+The first card run under the cuts (2026-11-19, six games) still put three bets
+each on ZAL and MIL. A home underdog getting points is now the only thing the
+three side models bet, so when one bets a game, all three do. mike chose from
+every option on the table (2026-11-19: *"Strict, moneyline first"*).
+
+**The rule** (`models.euroleague_pregame.one_bet_a_game`). A game carries one
+EuroLeague bet across all five models. After every other gate, the moneyline
+keeps the game, else the spread, else the first half, else the first-quarter
+total. The halftime spread bets only a game with no pre-game bet. Every other
+bet the rules make is written as a NONE row at its side and price, so the
+rule's cost can be graded. The reason is on the card's decision row
+(`euroleague_pregame_decisions.detail` gets `; refused one bet a game: <label>
+keeps it`), the same place the other gates record theirs; the pick row itself
+carries none.
+Two edge cases:
+- **A standing bet keeps its game, whatever its order.** A pick that exists
+  stands (CLAUDE.md 1c), so a bet written in an earlier run is never undone by
+  a higher-order one. This is the one case where the moneyline does not go
+  first. The card decides all four pre-game rules on one fetch, so it arises
+  only when a model's switch was off at the decision and on afterwards.
+- **VOID rows and rows written while a model is paused post nothing**, so they
+  keep no game and are not changed.
+
+The card applies the rule in `pick_rows` (after the price floor, the EV floor,
+the cuts and the conflict rule, so a moneyline refused by a gate leaves the
+game to the spread), and again in `publish` under the locks on the re-read
+standing bets. The halftime loop declines the game with the same reason. Each
+rule still decides alone, as the build replays it: the artifact, the uplifts,
+the EV floors and the cuts are unchanged.
+
+**What it does, replayed** (`python -m scripts.euroleague_stacking_check
+--live`, section 5): the 361 games all five models priced, 2025-26 to
+2026-11-12, on the posted stake.
+
+| | Bets | Units | Return (95%) | 2025-26 / 2026-27 | At risk a game | Worst night | Deepest drawdown |
+|---|---|---|---|---|---|---|---|
+| every bet (the rules before 2026-11-19) | 455 | +82.88 | +18.93% [6.6, 31.8] | +79.9 / +3.0 | 2.16 | -6.89 | -20.16 |
+| one bet a game, moneyline first | 205 | +46.25 | +23.78% [10.4, 36.3] | +43.7 / +2.6 | 0.95 | -2.87 | -8.73 |
+| the bets it drops | 250 | +36.63 | +15.05% [0.2, 29.4] | +36.2 / +0.5 | | | |
+
+- **The spread and first-half models almost stop betting.** Of the 205 kept
+  bets, the moneyline keeps 102 games, the halftime spread 64 and the
+  first-quarter total 39; the spread and the first half keep none. On every
+  replayed game from 2025-26 on, each of their bets (125 spread, 131 first
+  half) sits on a game the moneyline also bet. Live, they bet only when the
+  moneyline cannot: a gate refuses it, its switch is off, or it has no price.
+- **The cost is units.** The dropped bets made +36.63 units, and their
+  interval sits just above zero. What the rule buys is less risk: under 1 unit
+  at risk a game instead of 2.16, and a deepest drawdown under half as deep.
+  The kept bets went 120-85. The moneyline alone, over every replayed season
+  since 2021-22, loses more often than it wins (491 bets, 222-269, +44.97
+  units, +13.27%) and is paid by its plus-money prices.
+- **The 2026-11-19 card, replayed through the rule** (the rows as written; the
+  earlier steps are unchanged): 10 bets written, -1.66 units; kept TEL ML, ZAL
+  ML and MIL ML, -0.60 units. One night is not evidence.
+- **Limits:** 1.2 seasons (the first half has no older prices); nearly all the
+  units are 2025-26's; the side cuts were found on this same data.
 
 ### When they decide, and on what
 

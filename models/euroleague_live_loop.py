@@ -61,6 +61,12 @@ WHAT IS NOT HERE, AND WHY
     and the home moneyline, models/euroleague_pregame.py; a moneyline is
     checked as the spread at -0.5 for the home side, +0.5 for the away side,
     since a full game cannot end level).
+  * One bet a game (mike, 2026-11-19: "Strict, moneyline first";
+    models/euroleague_pregame.one_bet_a_game): the halftime spread decides
+    after every pre-game rule, so it bets only a game with no standing
+    EuroLeague BET of any of the five models, settled or not (a first-half
+    bet is graded by the break). Any is a 'declined' row naming the bet that
+    keeps the game.
 """
 from __future__ import annotations
 
@@ -81,6 +87,7 @@ if str(ROOT) not in sys.path:
 import pandas as pd  # noqa: E402
 
 from models import euroleague_live_ht as M  # noqa: E402
+from models import euroleague_pregame as PG  # noqa: E402
 from models.ncaab_live_ig import cannot_both_win  # noqa: E402
 from models.ncaab_live_loop import (Slots, SlotState, _num, _recycle, notify_live,  # noqa: E402,F401
                                     platform_gates, quotes_frame, under_daily_cap, write_bet)
@@ -295,6 +302,23 @@ def standing_spreads(conn, game_id: str) -> list[dict]:
         elif ln is not None:
             out.append({"model_id": m, "market": M.MARKET, "side": s, "line": float(ln), "label": lb})
     return out
+
+
+def standing_bets(conn, game_id: str) -> list[dict]:
+    """The game's standing EuroLeague BETs of all five models (one bet a game),
+    settled or not. VOID and paused rows post nothing, so they keep no game."""
+    import config
+    from data.db import release_read
+    try:
+        rows = conn.execute("""
+            SELECT model_id, pick_label FROM picks
+             WHERE game_id = %s AND signal_type = 'BET' AND model_id = ANY(%s)
+               AND condition_status IS DISTINCT FROM 'VOID'
+               AND downgrade_reason IS DISTINCT FROM %s
+        """, (game_id, list(PG.ONE_A_GAME_MODELS), config.PAUSED_NOTE)).fetchall()
+    finally:
+        release_read(conn)
+    return [{"model_id": m, "label": lb} for m, lb in rows]
 
 
 def build_pick(ctx: GameCtx, best: dict, offers: pd.DataFrame, half, links: dict, bankroll: float) -> dict:
@@ -660,8 +684,12 @@ class Loop:
                 # a failed read here raises: the game stays undecided and the next read tries again
                 held = None if self.dry_run else next(
                     (s for s in standing_spreads(self.c(), c.game_id) if cannot_both_win(mine, s)), None)
+                kept = None if (self.dry_run or held is not None) else next(
+                    iter(standing_bets(self.c(), c.game_id)), None)
                 if held is not None:
                     outcome, reason = "declined", f"cannot both win with {held.get('label') or held['model_id']}"
+                elif kept is not None:
+                    outcome, reason = "declined", f"one bet a game: {kept.get('label') or kept['model_id']} keeps it"
                 else:
                     if self.bankroll is None and not self.dry_run:
                         try:

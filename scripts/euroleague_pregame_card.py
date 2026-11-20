@@ -46,6 +46,16 @@ full-game rules here both bet the home side, so they never conflict with each
 other, and a first-half or first-quarter bet and a full-game bet can always
 both win.
 
+ONE BET A GAME (mike, 2026-11-19: "Strict, moneyline first";
+models/euroleague_pregame.one_bet_a_game). After every gate above, a game
+keeps one BET across the five EuroLeague models: the moneyline's, else the
+spread's, else the first half's, else the first-quarter total's. Every other
+is written NONE, so the rule's cost can be graded; the reason ("one bet a
+game: <label> keeps it") is on its decision row (DECISIONS_TABLE detail,
+after "; refused"), as every gate's is, not on the pick row. A standing
+BET of any of the five keeps its game whatever its order. Applied in
+pick_rows, and again in publish under the locks on the re-read standing bets.
+
 ROWS. A bet is a BET row at the best deciding-book price (CLAUDE.md 6); a game
 a rule priced and did not bet is a NONE row at the side and price it would have
 taken, no stake, so the whole universe can be graded; nothing publishes or
@@ -104,8 +114,8 @@ CARD_LEAD_MIN = 10.5
 LOOKBACK_HOURS = 3.0
 # The research's decision instant: tip minus 10 (models/euroleague_pregame.py).
 CLOSE_LEAD = timedelta(minutes=10)
-# Every full-game EuroLeague model a pre-game bet may conflict with.
-FULL_GAME_MODELS = R.FULL_GAME_MODELS + ("euroleague_live_spread_ht",)
+# The market each EuroLeague model's BET settles on, the halftime spread's included.
+BET_MARKET = {**R.MARKET, R.LIVE_HT: "spreads"}
 
 
 def _on(name: str) -> bool:
@@ -199,9 +209,12 @@ def decided(conn, game_ids: list[str]) -> set[tuple[str, str]]:
     return done
 
 
-def standing_full_game(conn, game_ids: list[str]) -> list[dict]:
-    """The games' standing full-game EuroLeague BETs, pre-game and live. A BET
-    counts unless it is VOID or was written while its model was paused."""
+def standing_bets(conn, game_ids: list[str]) -> list[dict]:
+    """The games' standing EuroLeague BETs of all five models, pre-game and
+    live, each with the market it settles on. A BET counts unless it is VOID or
+    was written while its model was paused (it posts nothing). Any of them
+    keeps its game (one bet a game); the full-game ones are also what a new
+    full-game bet may not conflict with (R.cannot_both_win reads only those)."""
     if not game_ids:
         return []
     rows = conn.execute("""
@@ -209,13 +222,11 @@ def standing_full_game(conn, game_ids: list[str]) -> list[dict]:
         WHERE game_id = ANY(%s) AND signal_type = 'BET' AND model_id = ANY(%s)
           AND condition_status IS DISTINCT FROM 'VOID'
           AND downgrade_reason IS DISTINCT FROM %s
-    """, (list(game_ids), list(FULL_GAME_MODELS), config.PAUSED_NOTE)).fetchall()
+    """, (list(game_ids), list(R.ONE_A_GAME_MODELS), config.PAUSED_NOTE)).fetchall()
     out = []
     for gid, mid, side, line, label in rows:
-        market = "spreads" if mid in ("euroleague_live_spread_ht", R.HOME_DOG_SPREAD) else "h2h"
-        if side in ("home", "away"):
-            out.append({"game_id": gid, "model_id": mid, "market": market, "side": side,
-                        "line": None if line is None else float(line), "label": label})
+        out.append({"game_id": gid, "model_id": mid, "market": BET_MARKET[mid], "side": side,
+                    "line": None if line is None else float(line), "label": label})
     return out
 
 
@@ -422,10 +433,25 @@ def bet_problem(d: R.Decision, label: str, home: str, away: str) -> str | None:
     return None
 
 
+def keep_one_bet_a_game(rows: list[dict], standing: list[dict], refused: dict) -> list[dict]:
+    """Turn every BET row past its game's one bet into a NONE row with no stake
+    (R.one_bet_a_game), its reason added to `refused`. Mutates and returns."""
+    drop = R.one_bet_a_game(rows, standing, config.PAUSED_NOTE)
+    for r in rows:
+        why = drop.get((r["game_id"], r["model_id"]))
+        if why:
+            logger.info(f"{r['model_id']}: {r['game_id']} {r['pick_label']} not bet: {why}")
+            refused[(r["game_id"], r["model_id"])] = why
+            r.update(signal_type="NONE", kelly_fraction=0.0, recommended_bet=0.0)
+    return rows
+
+
 def pick_rows(decisions: list[R.Decision], games: dict, bankroll: float,
-              link_rows: pd.DataFrame | None = None) -> tuple[list[dict], dict]:
+              link_rows: pd.DataFrame | None = None,
+              standing: list[dict] | None = None) -> tuple[list[dict], dict]:
     """Decisions -> picks rows (BET or NONE), and {(game, model): why} for a
-    bet turned into a NONE row here. Pure given its inputs."""
+    bet turned into a NONE row here: by a gate, then by one bet a game against
+    `standing` (standing_bets) and the other rows. Pure given its inputs."""
     from models.scorer import _build_pick_label, _pause_note, quarter_kelly
     rows, refused = [], {}
     for d in decisions:
@@ -476,6 +502,7 @@ def pick_rows(decisions: list[R.Decision], games: dict, bankroll: float,
             "best_edge": edge, "best_bet_link": link,
             "downgrade_reason": _pause_note(d.model_id),
         })
+    keep_one_bet_a_game(rows, standing or [], refused)
     return rows, refused
 
 
@@ -503,8 +530,10 @@ def publish(conn, rows: list[dict], decisions: list[R.Decision], games: dict,
             refused: dict) -> tuple[int, int]:
     """Write each decided (game, model) once: its decision row and its pick
     (BET or NONE) in ONE transaction, under each model's lock, the ledger and
-    the picks re-read inside it. A conflict with a BET that landed since the
-    decision turns this one into a NONE row. -> (bets written, decisions)."""
+    the standing bets re-read inside it. A conflict with a BET that landed
+    since the decision, or any standing EuroLeague BET on the game (one bet a
+    game), turns this one into a NONE row; the game's keeper is chosen again
+    here, in R.ONE_A_GAME_ORDER. -> (bets written, decisions)."""
     if not decisions:
         return 0, 0
     from scripts.nfl_wind_publisher import _lock_model
@@ -512,21 +541,24 @@ def publish(conn, rows: list[dict], decisions: list[R.Decision], games: dict,
         _lock_model(conn, m)
     ids = sorted({d.game_id for d in decisions})
     done = decided(conn, ids)
-    standing = standing_full_game(conn, ids)
-    by_key = {(r["game_id"], r["model_id"]): r for r in rows}
-    n_bets = n_decided = 0
-    for d in sorted(decisions, key=lambda x: (x.game_id, x.model_id)):
-        if (d.game_id, d.model_id) in done:
-            continue
+    standing = standing_bets(conn, ids)
+    todo = [d for d in decisions if (d.game_id, d.model_id) not in done]
+    by_key = {(r["game_id"], r["model_id"]): dict(r) for r in rows}
+    for d in todo:
         row = by_key.get((d.game_id, d.model_id))
-        if row is not None and row["signal_type"] == "BET":
-            mine = {"market": R.MARKET[d.model_id], "side": d.side, "line": d.line}
-            held = next((s for s in standing if s["game_id"] == d.game_id
-                         and R.cannot_both_win(mine, s)), None)
-            if held is not None:
-                why = f"cannot both win with {held['label']}, already bet"
-                refused[(d.game_id, d.model_id)] = why
-                row = {**row, "signal_type": "NONE", "kelly_fraction": 0.0, "recommended_bet": 0.0}
+        if row is None or row["signal_type"] != "BET":
+            continue
+        mine = {"market": R.MARKET[d.model_id], "side": d.side, "line": d.line}
+        held = next((s for s in standing if s["game_id"] == d.game_id
+                     and R.cannot_both_win(mine, s)), None)
+        if held is not None:
+            refused[(d.game_id, d.model_id)] = f"cannot both win with {held['label']}, already bet"
+            row.update(signal_type="NONE", kelly_fraction=0.0, recommended_bet=0.0)
+    keep_one_bet_a_game([by_key[k] for k in ((d.game_id, d.model_id) for d in todo) if k in by_key],
+                        standing, refused)
+    n_bets = n_decided = 0
+    for d in sorted(todo, key=lambda x: (x.game_id, R.one_a_game_rank(x.model_id))):
+        row = by_key.get((d.game_id, d.model_id))
         bet = row is not None and row["signal_type"] == "BET"
         got = conn.execute(_INSERT_DECISION, decision_row(
             d, games, bet, refused.get((d.game_id, d.model_id)))).fetchone()
@@ -535,10 +567,6 @@ def publish(conn, rows: list[dict], decisions: list[R.Decision], games: dict,
         n_decided += 1
         if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
             n_bets += bet
-            if bet:
-                standing.append({"game_id": d.game_id, "model_id": d.model_id,
-                                 "market": R.MARKET[d.model_id], "side": d.side, "line": d.line,
-                                 "label": row["pick_label"]})
     conn.commit()
     return n_bets, n_decided
 
@@ -618,7 +646,8 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 if d.status in ("missed", "no_artifact"):
                     problems.append(f"{d.game_id} {d.model_id}: {d.status} ({d.detail})")
             # one game never carries two bets that cannot both win
-            R.resolve_conflicts(got, standing_full_game(conn, ids))
+            standing = standing_bets(conn, ids)
+            R.resolve_conflicts(got, standing)
             decisions += got
         counts: dict = {"games": len(games), "waiting": len(waiting)}
         for d in decisions:
@@ -628,7 +657,8 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             from models.scorer import _get_current_bankroll
             ids = sorted({d.game_id for d in decisions})
             links = odds_rows(conn, ids, R.FULL_GAME_MARKETS + R.PERIOD_MAIN_MARKETS)
-            rows, refused = pick_rows(decisions, games, _get_current_bankroll(conn), links)
+            rows, refused = pick_rows(decisions, games, _get_current_bankroll(conn), links,
+                                      standing_bets(conn, ids))
             written, n_decided = publish(conn, rows, decisions, games, refused)
         logger.info("\n" + render(decisions, counts, written if do_publish else None,
                                   n_decided if do_publish else None))
