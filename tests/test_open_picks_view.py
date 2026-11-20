@@ -128,6 +128,57 @@ def test_it_is_one_statement_that_returns_on_a_catalog_read_once_applied():
     assert "open_picks already present - skipping" in guard
 
 
+def test_open_picks_step_a_skips_on_a_scratch_database():
+    """After step A the comment still matches and anon cannot read the
+    view. The file must return before CREATE OR REPLACE VIEW."""
+    import pytest
+    psycopg2 = pytest.importorskip("psycopg2")
+    from tests.byom_scratch import ScratchPostgres, pg_bin
+
+    if pg_bin("initdb") is None:
+        pytest.skip("initdb is not installed")
+
+    marker = re.search(
+        r"COMMENT ON VIEW public.open_picks IS '([^']+)'", SQL).group(1)
+    cluster = ScratchPostgres()
+    conn = None
+    try:
+        conn = psycopg2.connect(cluster.start())
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE ROLE anon NOLOGIN;
+            CREATE ROLE authenticated NOLOGIN;
+            CREATE FUNCTION public.published_pick_stake(numeric)
+              RETURNS numeric LANGUAGE sql AS $$ SELECT $1 $$;
+            CREATE TABLE public.model_action_thresholds (id integer);
+            CREATE VIEW public.v_discord_published AS SELECT 1 AS lock_key;
+            CREATE VIEW public.open_picks AS SELECT 1 AS kept;
+            CREATE TABLE public.picks (id integer);
+            REVOKE ALL ON public.picks FROM PUBLIC, anon, authenticated;
+            REVOKE ALL ON public.open_picks FROM PUBLIC, anon;
+        """)
+        cur.execute(
+            "COMMENT ON VIEW public.open_picks IS %s", (marker,))
+        cur.execute(
+            "GRANT SELECT ON public.open_picks TO authenticated")
+        conn.notices.clear()
+        cur.execute(SQL)
+        assert any("open_picks already present - skipping" in n
+                   for n in conn.notices)
+        cur.execute("SELECT pg_get_viewdef('public.open_picks'::regclass, true)")
+        assert "kept" in cur.fetchone()[0]
+        cur.execute("""
+            SELECT has_table_privilege('anon', 'public.open_picks', 'SELECT'),
+                   has_table_privilege('authenticated', 'public.open_picks', 'SELECT')
+        """)
+        assert cur.fetchone() == (False, True)
+    finally:
+        if conn is not None:
+            conn.close()
+        cluster.stop()
+
+
 def test_it_waits_for_what_it_reads_instead_of_failing_the_pass():
     """On a fresh database this file runs before the posted-stake functions.
     It must skip, not raise, or the view-migrations step reds every pass."""

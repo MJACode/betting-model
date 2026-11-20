@@ -135,6 +135,59 @@ def test_discord_publish_state_compares_the_whole_view_and_policy():
     assert "USING (kind IN ('discord_signal', 'discord_live'))" in policy
 
 
+def test_discord_publish_state_step_a_skips_when_the_policy_still_names_anon():
+    """The body still creates the policy FOR SELECT TO anon, authenticated
+    when anon cannot read picks. The next pass has to skip that shape.
+    A step-A branch that accepts only {authenticated} runs the DROP POLICY
+    again."""
+    import pytest
+    psycopg2 = pytest.importorskip("psycopg2")
+    from tests.byom_scratch import ScratchPostgres, pg_bin
+
+    if pg_bin("initdb") is None:
+        pytest.skip("initdb is not installed")
+
+    sql = _sql("discord_publish_state_2026_09_23.sql")
+    cluster = ScratchPostgres()
+    conn = None
+    try:
+        conn = psycopg2.connect(cluster.start())
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE ROLE anon NOLOGIN;
+            CREATE ROLE authenticated NOLOGIN;
+            CREATE TABLE public.push_sent (
+              lock_key text, kind text, message_id text);
+            CREATE TABLE public.picks (id integer);
+            REVOKE ALL ON public.picks FROM PUBLIC, anon, authenticated;
+        """)
+        cur.execute(sql)
+        cur.execute("""
+            SELECT ARRAY(SELECT r::regrole::text
+                           FROM unnest(p.polroles) r ORDER BY 1)
+              FROM pg_policy p
+             WHERE p.polrelid = 'public.push_sent'::regclass
+               AND p.polname = 'anon_read_discord_publish'
+        """)
+        assert cur.fetchone()[0] == ["anon", "authenticated"]
+        cur.execute("""
+            SELECT has_table_privilege('anon', 'public.v_discord_published', 'SELECT'),
+                   has_table_privilege('authenticated',
+                     'public.v_discord_published', 'SELECT')
+        """)
+        assert cur.fetchone() == (False, True)
+        conn.notices.clear()
+        cur.execute(sql)
+        assert any(
+            "v_discord_published already matches - skipping" in n
+            for n in conn.notices)
+    finally:
+        if conn is not None:
+            conn.close()
+        cluster.stop()
+
+
 def test_injuries_status_ts_returns_before_alter_and_stays_one_statement():
     sql = _sql("add_injuries_status_ts_2026_09_14.sql")
     assert sql.count("$$") == 2

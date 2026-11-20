@@ -93,9 +93,17 @@ BEGIN
           AND has_column_privilege('anon', 'public.push_sent', 'kind', 'SELECT')
           AND has_table_privilege('anon', 'public.v_discord_published', 'SELECT'))
          OR (
+           -- The body below still creates the policy TO anon, authenticated.
+           -- After step A that apply grants nothing to anon, so the role
+           -- list stays {anon, authenticated} (or {authenticated} if a
+           -- rewrite narrowed it). Either list, with anon unable to read,
+           -- is already applied.
            to_regclass('public.picks') IS NOT NULL
            AND NOT has_table_privilege('anon', 'public.picks', 'SELECT')
-           AND roles IS NOT DISTINCT FROM ARRAY['authenticated']
+           AND (
+             roles IS NOT DISTINCT FROM ARRAY['authenticated']
+             OR roles IS NOT DISTINCT FROM ARRAY['anon', 'authenticated']
+           )
            AND NOT has_column_privilege('anon', 'public.push_sent', 'lock_key', 'SELECT')
            AND NOT has_column_privilege('anon', 'public.push_sent', 'kind', 'SELECT')
            AND NOT has_table_privilege('anon', 'public.v_discord_published', 'SELECT')
