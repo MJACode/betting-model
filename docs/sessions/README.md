@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, tennis bets get their closing price: the final close reads the tennis card's own change-only price table through its poll ledger; the one settled ATP bet re-measured, +2.27% (#1505 for Pinnacle) |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, BetMGM opened its app with no bet: the link now asks www.<st> first and opens the game's page with the selection (app + Discord) |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, view migrations: byom_official_legs skips after anon-lockdown step A and drops byom_bets before replacing it, so the refresh pass no longer dies on the widened return type |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, NHL moneyline assessment: the season's loss is the retired model and the five days before the goalie gate (29-27, +2.39u since); seven alternatives graded, none beats it; no change |
