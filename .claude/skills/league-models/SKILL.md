@@ -550,10 +550,10 @@ live slate, or a card's only deciding run.
 
 ## The reply
 
-CLAUDE.md §0 governs: the four headings, nothing above them, each fact once.
-For this work, **"Quick summary of what was done" leads with the grid and the
-results table** (bets, units, return with interval, CLV, early/late), then the
-approach. Every model that is about to ship states its price range there. It
-ends with the line *"What this build taught the skill: …"*, naming what was
-added or corrected. Decisions are written so mike can answer without opening a
+CLAUDE.md §0 governs: the five headings, nothing above them, each fact once.
+For this work, **"Outcome / findings" leads with the grid and the results
+table** (bets, units, return with interval, CLV, early/late), and every model
+that is about to ship states its price range there. "Quick summary of what was
+done" then gives the approach, and ends with the line *"What this build taught
+the skill: …"*, naming what was added or corrected. Decisions are written so mike can answer without opening a
 file: what he gets or loses, one idea per sentence, a recommendation.

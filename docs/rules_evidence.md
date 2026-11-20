@@ -1442,7 +1442,24 @@ bullshit."* Measured on the three session transcripts from 2026-10-03 and
 Cause: §0 required the four headings but never said what goes above them, so the
 habit was a prose answer followed by a heading-shaped recap of it, with every
 open item re-listed each turn. The rule now says the headings are the reply and
-only what is new since the last reply is stated.
+only what is new since the last reply is stated. On 2026-10-10 the reply that
+shipped the fix broke it again, and mike repeated it. (Moved here from §0's
+text on 2026-11-16, with the quote above, to pay for the "Outcome / findings"
+heading inside the CLAUDE.md cap.)
+
+## §0 (evidence). An "Outcome / findings" heading first (2026-11-16)
+
+mike, 2026-11-16, before merging #1407: *"before I merge, what was the actual
+outcome, in this formatting for all rsponses across repo work include an
+outcome/findings section as well"*. The reply before it had put the answer to
+his question (why the women's college basketball models trail the men's)
+inside "Quick summary of what was done", mixed with the list of what changed,
+so the result had no heading of its own. "Outcome / findings" is now the first of the five headings: results
+there, changes under the summary. It is also in the global
+`~/.claude/CLAUDE.md`, so a reply on any repo carries it. To pay for the
+heading inside the CLAUDE.md cap, §0's first line ("Matt asked for it three
+times before it was written down (2026-08-30)") moved here; §1b above already
+recorded it.
 
 ## §1c (evidence). One event bet twice under two game ids counts once (2026-10-09)
 

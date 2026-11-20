@@ -127,9 +127,10 @@ Then findings, most severe first. Each one:
 
 Then the scan output, verbatim, under its own heading.
 
-Then the four CLAUDE.md §0 headings, always, even when a section is "None":
+Then the CLAUDE.md §0 headings, always, even when a section is "None":
 
 ```
+Outcome / findings
 Quick summary of what was done
 Errors or Bugs found and status
 Decisions needed from me

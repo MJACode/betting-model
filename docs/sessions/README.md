@@ -64,6 +64,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Back button: chevron only on every pushed screen (iOS 26 glass bubble hugged chevron + "Back"); title room 162 → 254pt |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Dark mode (brand navy) + Settings > Appearance (System / Light / Dark, Light default); applies at next open, no reloadAsync |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, why the women's models trail the men's (first-half prices, DraftKings on one game in ten, this season's halftime books); in-play bets away from DraftKings' number were never stored: 20 of 24 men's, 13 of 22 women's (women's and EuroLeague fixed; the men's loop left as it is, mike 11-16) |
+| 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, every reply opens with "Outcome / findings" (mike): CLAUDE.md §0 five headings, UX agent, league-models skill, global CLAUDE.md |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, comped accounts could not sign in: NULL email_change made /otp 500; 9 rows set to '', grant scripts + guard test fixed |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, Sport chips: sports with a signal move to the far left of the row |
 | 2026-11-16 | [2026-11](./2026-11.md) | 2026-11-16, the archive move stays off Supabase in the daytime: the daytime check pass coincided with 178 timeouts (79 app reads); preparing now reads the PC copy only, removals run 01:30-05:30 ET, a timeout is not retried as a dropped connection, the rewrite is unmeasured (#1345, #1419) |
