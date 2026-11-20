@@ -87,3 +87,40 @@ Forward from the merge of the change that adds both markets to `config.PROP_MARK
 refresh pass and prop window job stores the boards, so the price path to tip is collected every night.
 Those passes land about every 10 minutes in the last hour, the last about a minute before tip
 (NBA_2026-11-19_GSW_MEM, DraftKings points), so the forward boards hold the point the history buys.
+
+## 6. The grade at real prices (2026-11-20): nothing passes; the blend fails only the interval
+
+mike said yes to the history on 2026-11-20. `fb_buy_history.py` stored 246,350 rows on 3,094 games in
+its final run and billed 50,698 credits (its own count of `x-requests-last`; three earlier runs,
+restarted for speed and for an unhandled 502, stored the first 266 games and did not log a total).
+273 games had no quote. Balance afterwards 1,286,602 (2026-11-20 21:37Z, all spending included).
+Stored, by season: `player_first_basket` 684 / 1,228 / 1,230 / 226 games (2023-24 from January),
+`player_first_team_basket` 304 / 1,230 / 226 from 2024-25.
+
+Three tests, each written in `<R>/first_basket/prereg.md` before it was computed, each against six
+bars: 200+ bets; the ROI interval above zero (bootstrap over game dates); positive in each full
+season; the floors either side positive; positive before and after day 45; the probability beating the
+books' own fair price. One bet a game (a team, for the team market), best of the seven books, 1 unit
+to win.
+
+| Test | Bets | Units | ROI (95% interval) | Bars passed | Fails |
+|---|---|---|---|---|---|
+| 1. The model alone, first basket, EV 0.10, graded 2024..2027 | 2,924 | +18.78 | +5.9% (-4.8 to +16.7) | 4 | the interval; the books' median prices it better (log loss 0.32142 against 0.32249) |
+| 2a. The other books' median price alone, EV 0.05, 2024-25 on | 1,953 | +6.24 | +3.2% (-10.5 to +16.6) | 3 | the interval, 2025-26 (-2.0%), the first 45 days |
+| 2b. Blend, 0.25 model + 0.75 the other books' median (weight fitted on 2023-24), EV 0.05 | 1,930 | +14.56 | +7.5% (-5.0 to +20.9) | 5 | the interval |
+| 3. The same blend on the team market, EV 0.05 | 1,056 | +25.14 | +9.5% (-3.8 to +22.6) | 5 | the interval |
+
+What the blend shows: positive in every season graded (2b: +8.5% 2024-25, +7.9% 2025-26; 3: +17.9%,
++8.2%), at every floor tried, and before and after day 45, and it predicts the first scorer slightly
+better than the books' median. What it does not show: an interval clear of zero. Its bets are priced
+around +1000 (first basket) and +425 (team), so about 2,000 and 1,000 bets cannot tell +8% from 0.
+
+**The team market cannot be bet by this rule this season.** Of the seven books only DraftKings (221
+games) and FanDuel (226) quote it in 2026-27; BetMGM, BetRivers and Hard Rock did in 2025-26. The rule
+needs three other books for its fair price.
+
+Not registered, seen in test 1's splits, not acted on: home starters +19.4% (1,265 bets) against away
+-4.6%; bets taken at FanDuel +23.1% (861).
+
+Files: `<R>/first_basket/grade_*.csv|parquet`, `grade2_*`, `grade3_bets.parquet`; scripts
+`fb_grade.py`, `fb_grade2.py`, `fb_grade3.py`.
