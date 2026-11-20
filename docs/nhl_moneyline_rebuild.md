@@ -225,7 +225,7 @@ prices is 5.9%. The market overrated them too.
 Scratch scripts: `%TEMP%/van_ml_why.py` (the breakdown, live artifact, database
 read) and `%TEMP%/van_ml_backtest.py` (the walk-forward, mirror only, no database).
 
-## Is the live loss the model? The record by era, and six alternatives (2026-11-19)
+## Is the live loss the model? The record by era, and seven alternatives (2026-11-19)
 
 mike: *"So the ML model loses. Anything we can do to improve"*. No change was
 made: nothing graded below beats the live model.
@@ -303,6 +303,11 @@ At EV ≥ 0.06 (the live floor):
   cut. At DraftKings' own price the two are +3.0% (-2.2..+8.0) and +3.8%
   (-1.2..+8.9). The 2026-10-20 re-grade found the same (+5.08% / +5.21%), and
   so does 2026-27 replayed (+5.5% on 67 / +5.2% on 72). Timing stays as is.
+- **Who dressed** (the rebuild's lineup inputs, at the last fetch, the only
+  moment a lineup is known; issue #1497): accuracy +0.0003 worse than without
+  (-0.0005..+0.0012) on 5,931 games. Units at 0.04 / 0.06 / 0.08: +3.4 /
+  +7.7 / -0.9 against the live recipe at the same moment, each interval about
+  ±50 to ±65 units. Nothing.
 
 **Expected goals are not current.** `nhl_shot_events` and `nhl_team_game_xg`
 end at 2026-10-12 (the one-off backfill; no scheduled job writes them). No live
@@ -311,6 +316,6 @@ served until that ingest is scheduled, and none above earned it.
 
 **Read.** The current model with its goalie gate is level live. Replayed at
 0.06 it is positive in 5 of 6 seasons at the last fetch and 3 of 6 at ~8 h
-(2025-26 negative at both). None of the six alternatives beats
+(2025-26 negative at both). None of the seven alternatives beats
 it, and no version beats Pinnacle on accuracy. The next measurement is the
 ~250-bet re-sweep (issue #1307).

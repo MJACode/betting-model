@@ -19,7 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, NHL moneyline assessment: the season's loss is the retired model and the five days before the goalie gate (28-27, +1.39u since); six alternatives graded, none beats it; no change |
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, NHL moneyline assessment: the season's loss is the retired model and the five days before the goalie gate (28-27, +1.39u since); seven alternatives graded, none beats it; no change |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Picks filter Model section: each model's total published record and a hot / cold tag (3u on 8+ bets, last 7 days); new view v_public_track_record_model_daily built from the daily view's definition |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Performance tab: the sportsbook-sync note now sits on the same 16pt gutter as the other cards (#1491) |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Key Metrics: an exec summary tab (results, beating the close, models, operations), first in the ops dashboard |
