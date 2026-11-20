@@ -11,6 +11,7 @@ import {
   BET_ALL_SKIP_TEXT,
   bestLinePlan,
   bookCoverage,
+  quoteForBestLine,
   oneBookPlan,
   planTotals,
   type BetAllCandidates,
@@ -160,7 +161,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
 
   const pickRow = (p: BetAllPick, i: number) => {
     const inBookMode = mode === 'book' && chosenBook != null;
-    const q = inBookMode ? p.quotes.find((x) => x.bookmaker === chosenBook) ?? null : p.quotes[0]!;
+    const q = inBookMode ? p.quotes.find((x) => x.bookmaker === chosenBook) ?? null : quoteForBestLine(p);
     const available = q != null;
     const on = selected.has(p.key) && available;
     const best = p.quotes[0]!;
@@ -205,11 +206,11 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
     );
   };
 
-  // Best line: picks grouped under the book with their best price.
+  // Best line: picks grouped under the book the plan will open.
   const bestGroups = useMemo(() => {
     const m = new Map<string, BetAllPick[]>();
     for (const p of picks) {
-      const b = p.quotes[0]!.bookmaker;
+      const b = quoteForBestLine(p).bookmaker;
       m.set(b, [...(m.get(b) ?? []), p]);
     }
     return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
