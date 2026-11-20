@@ -12,6 +12,7 @@
  */
 
 import { spokenDate, unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
+import { allMatchedText } from '@/lib/clvBeat';
 import { formatPct, formatPctSigned, formatSigned } from '@/lib/format';
 import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import { pnlTone } from '@/lib/tone';
@@ -107,7 +108,7 @@ export function heroAccessibilityLabel(o: {
   const clvSpoken = quiet
     ? 'unavailable'
     : clv === '—'
-      ? (pushes > 0 ? `0 measured, ${pushes} push` : 'unavailable')
+      ? (pushes > 0 ? allMatchedText(pushes) : 'unavailable')
       : pushes > 0 ? `${clv}, ${pushes} push` : clv;
   return [
     units,
@@ -116,7 +117,7 @@ export function heroAccessibilityLabel(o: {
     roi,
     record,
     `Win rate ${win === '—' ? 'unavailable' : win}`,
-    `Beat the closing line ${clvSpoken}`,
+    `Beat the closing line, ${clvSpoken}`,
   ].join('. ');
 }
 
@@ -170,7 +171,7 @@ export function closingLineBody(o: {
     return `${lead}\n\nWe don’t have a closing price for these bets yet.`;
   }
   if (o.clvBeatRate == null) {
-    return `${lead}\n\n0 measured, ${pushes} push`;
+    return `${lead}\n\n${allMatchedText(pushes, { sentence: true })}`;
   }
   const figures = [
     splitPiece('Overall', o.clvSettled, o.clvBeatRate, pushes),
@@ -188,7 +189,7 @@ export function closingLineBody(o: {
 function splitPiece(label: string, settled: number, rate: number | null, pushes: number): string {
   if (settled <= 0) return '';
   const decisive = Math.max(0, settled - pushes);
-  if (decisive <= 0) return `${label}  0 measured, ${pushes} push`;
+  if (decisive <= 0) return `${label}  ${allMatchedText(pushes, { sentence: true })}`;
   const pushNote = pushes > 0 ? `, ${pushes} push` : '';
   if (decisive < MIN_PICKS_FOR_COLOURED_ROI) return `${label}  ${thinSampleCaption()}${pushNote}`;
   return `${label}  ${rate != null ? formatPct(rate, 0) : '—'} of ${decisive}${pushNote}`;

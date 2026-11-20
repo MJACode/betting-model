@@ -73,7 +73,10 @@ def test_zero_pushes_omit_the_push_clause():
 def test_an_all_push_day_does_not_divide():
     t = _tally([_row(0.0) for _ in range(7)])
     assert t["clv_n"] == 0 and t["clv_beat"] == 0 and t["clv_push"] == 7
-    assert clv_line(t) == "0 measured, 7 push"
+    # Every bet was measured; none moved. "0 measured" said the opposite
+    # (EuroLeague, 2026-11-19: eight bets, all at our price).
+    assert clv_line(t) == "all 7 matched the close"
+    assert "measured" not in clv_line(t)
     stored = snapshot_rows(
         "2026-11-03", "ts", t, {"NCAAB": [_row(0.0)]}, t, {"NCAAB": [_row(0.0)]},
         7, 7,

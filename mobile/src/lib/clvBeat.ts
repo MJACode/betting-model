@@ -32,13 +32,23 @@ export function clvBeatRate(beats: number, settled: number, pushes: number): num
 }
 
 /**
+ * Every measured bet closed at the price taken: none beat it, none trailed it.
+ * It read `0 measured, N push` until 2026-11-20, which said nothing had been
+ * measured. Same words as the Discord recap (tracking/discord_notifier.all_matched_text).
+ */
+export function allMatchedText(pushes: number, opts: { sentence?: boolean } = {}): string {
+  if (pushes === 1) return '1 matched the close';
+  return `${opts.sentence ? 'All' : 'all'} ${pushes} matched the close`;
+}
+
+/**
  * The results-recap clause. Push count is omitted at zero.
- * An all-push set does not divide: `0 measured, N push`.
+ * An all-push set does not divide: `all N matched the close`.
  */
 export function formatClvBeatLine(beats: number, losses: number, pushes: number): string {
   const decisive = beats + losses;
   if (decisive <= 0 && pushes <= 0) return '';
-  if (decisive <= 0) return `0 measured, ${pushes} push`;
+  if (decisive <= 0) return allMatchedText(pushes);
   const pct = Math.round((beats / decisive) * 100);
   const core = `${pct}% beat close (${beats}/${decisive}`;
   return pushes > 0 ? `${core}, ${pushes} push)` : `${core})`;
