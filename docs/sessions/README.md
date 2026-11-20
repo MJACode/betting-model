@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, premium gate part 2: PostgREST pre-request hook refuses the six scored-picks matview endpoints to signed-in accounts without access; tracked bets were never hidden (app never reads the table) |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, Bet all: a Placed tick on each pick tracks it at once; the per-book question and the "Stop Bet all?" warning are gone |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, premium gate part 1: signed-in reads of model and Stats data require has_app_access() (66 policies), ops tables closed to signed-in; the scored-picks matview is part 2 |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, anon-key lockdown step B part 1 applied (anon off Stats, odds, scoreboard, ops); part 2 (tracked_bets owner policies) written for the SQL editor |
