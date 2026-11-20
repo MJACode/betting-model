@@ -8,6 +8,7 @@ and out of the record.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 
@@ -145,6 +146,14 @@ def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
             continue
         # Push counts on the live view. Not a rewrite of wins or units.
         if name == "clv_push_beat_rate_2026_11_04.sql":
+            continue
+        # Reads the daily view's definition to build a THIRD view (per model,
+        # for the Picks filter). It must never redefine either record view.
+        if name == "public_track_record_model_daily_2026_11_18.sql":
+            body = (ROOT / "data" / "migrations" / name).read_text(encoding="utf-8")
+            code = "\n".join(l for l in body.splitlines() if not l.lstrip().startswith("--"))
+            created = re.findall(r"VIEW\s+(?:IF\s+EXISTS\s+)?public\.(\w+)", code)
+            assert created and set(created) == {"v_public_track_record_model_daily"}, created
             continue
         # Reads the record view's filter out of its definition to build the
         # model health views; never replaces it (tests/test_model_health.py

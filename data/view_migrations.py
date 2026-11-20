@@ -755,6 +755,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # (clv_pinnacle_mainline_once_2026_10_14). Sits immediately before the
     # posted-stake pair, which stays adjacent with the view patch last.
     "clv_pinnacle_mainline_2026_10_14.sql",
+    # 2026-11-18 (Matt): the published record per model per day, for the
+    # Picks filter's Model section (hot / cold over 7 days). Built from
+    # v_public_track_record_daily's own definition with model_id added to
+    # SELECT and GROUP BY, so it cannot drift from it; rebuilt whenever that
+    # definition's md5 changes. Creates nothing if the edit does not apply.
+    # SELECT only; writes no pick, snapshot or push_sent row.
+    "public_track_record_model_daily_2026_11_18.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
