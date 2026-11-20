@@ -321,8 +321,8 @@ REVOKE ALL ON FUNCTION public.member_books_get(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.member_books_get(text) TO postgres, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.member_books_set(text, text[]) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.member_books_set(text, text[]) TO postgres, authenticated, service_role;
-REVOKE ALL ON FUNCTION public.save_device_push_token(text, text, text, boolean, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.save_device_push_token(text, text, text, boolean, text) TO postgres, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.save_device_push_token(text, text, text, boolean, text, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.save_device_push_token(text, text, text, boolean, text, uuid) TO postgres, anon, authenticated, service_role;
 
 -- notification_inbox and notification_sport_prefs are authenticated-only
 -- (draft PR for the inbox). If they already exist, anon loses every grant.
@@ -500,7 +500,7 @@ BEGIN
   SELECT string_agg(p.oid::regprocedure::text, ',') INTO bad
     FROM pg_proc p
    WHERE p.pronamespace = 'public'::regnamespace
-     AND p.proname NOT IN ('log_app_error', 'log_app_timings', 'save_device_push_token')
+     AND p.proname NOT IN ('log_app_error', 'log_app_timings', 'save_device_push_token', 'site_public_record_rows')
      AND has_function_privilege('anon', p.oid, 'EXECUTE');
   IF bad IS NOT NULL THEN
     RAISE EXCEPTION 'anon still executes: %', bad;

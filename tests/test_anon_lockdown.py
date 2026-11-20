@@ -138,20 +138,6 @@ def _fixture_sql() -> str:
         GRANT EXECUTE ON FUNCTION public.has_app_access() TO authenticated;
         """,
         """
-        CREATE VIEW public.v_public_track_record AS
-        SELECT * FROM (VALUES
-          ('NBA', 'nba_live_total', 2::bigint, 1::bigint, 1::bigint, 0::bigint,
-           1.25::numeric, 2::numeric, '2026-09-01', '2026-09-02'),
-          ('NBA', 'nba_moneyline', 4::bigint, 4::bigint, 0::bigint, 0::bigint,
-           9::numeric, 4::numeric, '2026-09-01', '2026-09-03'),
-          ('NFL', 'nfl_spread', 1::bigint, 1::bigint, 0::bigint, 0::bigint,
-           0.50::numeric, 1::numeric, '2026-10-01', '2026-10-01')
-        ) AS t(sport, model_id, picks, wins, losses, pushes, units, risked,
-               first_date, last_date);
-        CREATE VIEW public.v_public_track_record_daily AS
-        SELECT '2026-09-01'::text AS game_date, 'NBA'::text AS sport, 1::bigint AS picks;
-        """,
-        """
         CREATE TABLE public.push_sent (
           lock_key text, kind text, sent_at timestamptz
         );
@@ -159,6 +145,24 @@ def _fixture_sql() -> str:
         GRANT SELECT (lock_key, kind, sent_at) ON public.push_sent TO anon, authenticated;
         CREATE POLICY anon_read_discord_publish ON public.push_sent
           FOR SELECT TO anon, authenticated USING (true);
+        -- Production's record view is security_invoker and reads push_sent
+        -- (through v_discord_published), which step A takes from anon. A
+        -- fixture without both let a site view that anon cannot read pass
+        -- (2026-11-19: the website lost its record for minutes after step A).
+        CREATE VIEW public.v_public_track_record WITH (security_invoker = on) AS
+        SELECT t.* FROM (VALUES
+          ('NBA', 'nba_live_total', 2::bigint, 1::bigint, 1::bigint, 0::bigint,
+           1.25::numeric, 2::numeric, '2026-09-01', '2026-09-02'),
+          ('NBA', 'nba_moneyline', 4::bigint, 4::bigint, 0::bigint, 0::bigint,
+           9::numeric, 4::numeric, '2026-09-01', '2026-09-03'),
+          ('NFL', 'nfl_spread', 1::bigint, 1::bigint, 0::bigint, 0::bigint,
+           0.50::numeric, 1::numeric, '2026-10-01', '2026-10-01')
+        ) AS t(sport, model_id, picks, wins, losses, pushes, units, risked,
+               first_date, last_date)
+        WHERE NOT EXISTS (SELECT 1 FROM public.push_sent p
+                           WHERE p.lock_key = t.model_id AND p.kind = 'discord_void');
+        CREATE VIEW public.v_public_track_record_daily AS
+        SELECT '2026-09-01'::text AS game_date, 'NBA'::text AS sport, 1::bigint AS picks;
         """,
         """
         CREATE TABLE public.tracked_bets (
@@ -306,7 +310,8 @@ def test_spec_counts_match_the_baseline():
     assert EXPECTED_ANON_EXECUTABLE == 82
     assert EXPECTED_ANON_SEQUENCES == 67
     assert ANON_KEEP_FUNCTIONS == {
-        "log_app_error", "log_app_timings", "save_device_push_token"}
+        "log_app_error", "log_app_timings", "save_device_push_token",
+        "site_public_record_rows"}
 
 
 def test_steps_a_and_b_on_scratch_postgres():
@@ -341,6 +346,8 @@ def test_steps_a_and_b_on_scratch_postgres():
         _psql(dsn, "INSERT INTO picks (id) VALUES (1);")
         ok, _ = _can(dsn, "authenticated", "SELECT 1 FROM picks;")
         assert ok
+        ok, err = _can(dsn, "anon", "SELECT sport, picks FROM site_public_record;")
+        assert ok, f"after A, anon lost the website record: {err}"
         ok, err = _can(dsn, "anon", "SELECT public.byom_record(1, '{}'::jsonb);")
         assert not ok and "42501" in err
         ok, _ = _can(dsn, "authenticated", "SELECT public.byom_record(1, '{}'::jsonb);")
@@ -377,7 +384,7 @@ def test_steps_a_and_b_on_scratch_postgres():
         assert ok, err
         ok, err = _can(
             dsn, "anon",
-            "SELECT public.save_device_push_token('t','device-1','ios',false,'n');")
+            "SELECT public.save_device_push_token('t','device-1','ios',false,'n',NULL::uuid);")
         assert ok, err
         ok, _ = _can(dsn, "authenticated", "SELECT 1 FROM picks;")
         assert ok
@@ -872,3 +879,82 @@ def test_signed_in_hooks_refetch_when_auth_changes():
         src = (root / name).read_text(encoding="utf-8")
         assert "signedIn" in src, name
         assert "[authReady, signedIn]" in src, name
+
+
+def test_tracked_bets_owner_migration_through_the_worker_path():
+    """Step B part 2 ships as an ACTIVE_MIGRATIONS file the worker applies.
+
+    Production state on 2026-11-20: step A and step B part 1 applied (anon has
+    no grant on tracked_bets), the two legacy policies still open to
+    authenticated with true. Run the file through the worker's own apply path
+    twice: the first pass makes every row owner-scoped and keeps every row; the
+    second is a no-op.
+    """
+    from data.view_migrations import _apply_one
+    from data.db import get_connection  # noqa: F401  (import check only)
+    import psycopg2
+
+    assert "tracked_bets_owner_2026_11_20.sql" in ACTIVE_MIGRATIONS
+    sql = (MIGRATIONS / "tracked_bets_owner_2026_11_20.sql").read_text(encoding="utf-8")
+    files = _sql_files()
+    with scratch_cluster("tb-owner-") as dsn:
+        _psql(dsn, _fixture_sql())
+        _psql_file(dsn, files["site"])
+        _psql_file(dsn, files["a"])
+        _psql(dsn, "REVOKE ALL ON public.tracked_bets FROM anon;")
+        _psql(dsn, "INSERT INTO public.app_timings (device_id, user_id) "
+                   f"VALUES ('mapped-device', '{X}');"
+              if "app_timings" in _psql(dsn, "SELECT to_regclass('public.app_timings');")
+              else "SELECT 1;")
+        _psql(dsn, "INSERT INTO tracked_bets (device_id, pick_id) VALUES "
+                   "('mapped-device', 1), ('unknown-device', 2), ('unknown-device', 3);")
+
+        class _Conn:
+            def __init__(self, raw):
+                self.raw = raw
+
+            def execute(self, q, params=None):
+                cur = self.raw.cursor()
+                cur.execute(q, params)
+                return cur
+
+            def commit(self):
+                self.raw.commit()
+
+            def rollback(self):
+                self.raw.rollback()
+
+        raw = psycopg2.connect(dsn)
+        try:
+            conn = _Conn(raw)
+            assert _apply_one(conn, "tracked_bets_owner_2026_11_20.sql", sql) is None
+            first = _psql(dsn, "SELECT string_agg(polname, ',' ORDER BY polname) "
+                               "FROM pg_policy WHERE polrelid = 'public.tracked_bets'::regclass;")
+            assert first.strip() == (
+                "tracked_bets_owner_delete,tracked_bets_owner_insert,tracked_bets_owner_select")
+            assert _apply_one(conn, "tracked_bets_owner_2026_11_20.sql", sql) is None
+        finally:
+            raw.close()
+
+        assert _psql(dsn, "SELECT count(*) FROM tracked_bets;").strip() == "3"
+        ok, err = _can(
+            dsn, "authenticated",
+            f"INSERT INTO tracked_bets (device_id, pick_id, user_id) VALUES ('d2', 8, '{Y}');",
+            claims='{"sub": "%s"}' % X)
+        assert not ok and ("42501" in err or "row-level security" in err)
+        ok, err = _can(
+            dsn, "authenticated",
+            "INSERT INTO tracked_bets (device_id, pick_id) VALUES ('d1', 7);",
+            claims='{"sub": "%s"}' % X, commit=True)
+        assert ok, err
+        gone = _psql(dsn, f"""
+          BEGIN;
+          SELECT set_config('request.jwt.claims', '{{"sub": "{Y}"}}', true);
+          SET LOCAL ROLE authenticated;
+          WITH gone AS (DELETE FROM tracked_bets RETURNING 1) SELECT count(*) FROM gone;
+          ROLLBACK;
+        """)
+        assert gone.strip().endswith("0")
+        ok, err = _can(dsn, "anon", "DELETE FROM tracked_bets;")
+        assert not ok
+        assert _psql(dsn, "SELECT count(*) FROM tracked_bets;").strip() == "4"
