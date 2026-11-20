@@ -1551,3 +1551,14 @@ Measured in `picks` on 2026-11-06, BETs only, VOID excluded:
 
 Why it is in CLAUDE.md and not only in `config.py`: "where should this be bet"
 is answered in chat and in SQL without opening any file.
+
+## §2 and §3 (evidence). Moved out of CLAUDE.md to keep it under its size cap (2026-11-20)
+
+Moved word for word when the 2026-11-20 batch merge (#1339, #1334, #1422,
+#1421, #1452) put the always-loaded layer 83 bytes over its limit. The rules
+themselves stay in CLAUDE.md.
+
+- **`nfl_live_prop`, retired 2026-10-04 and its record struck:** 7-17, -10.27
+  units over 24 settled bets (`config.RECORD_EXCLUSIONS`).
+- **NCAAB totals, no early-season hold:** mike, 2026-11-02, *"we do not need to
+  wait 10 games, I never approved that"*.

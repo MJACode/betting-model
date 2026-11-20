@@ -306,9 +306,9 @@ record (Discord, X, `results_snapshots`, the two app views) counts a settled
 BET only while Discord still holds its lock (`v_discord_published`). An
 unposted row stays in `picks`. Every model locks
 its pick at its first BET. **The lock is on a BET, not a game:** a game that did
-not bet is not frozen. When, and how often, a model decides is its own
-parameter, chosen by out-of-sample expected units replayed at the live check
-rate (mike, 2026-11-14; `docs/decision_timing.md`). **Timing is data, not metadata:** `created_at` is when the number
+not bet is not frozen. When and how often a model decides is its own
+parameter, chosen by out-of-sample units at the live check rate (mike,
+2026-11-14; `docs/decision_timing.md`). **Timing is data, not metadata:** `created_at` is when the number
 was available and is part of the pick's meaning.
 
 - **A SETTLED PICK LEAVES THE RECORD ONLY TWO WAYS, AND A PAUSE IS NEITHER.**
@@ -355,8 +355,8 @@ back.) Report gate standing — ≥ 50 settled picks, positive flat-bet ROI,
 calibration error ≤ 5% — and build the model live.
 
 **`nfl_live_prop` (NFL in-play props) was RETIRED 2026-10-04 and its record
-STRUCK** (mike: *"It was never a good model. Remove this model."*) — 7-17,
--10.27 units over 24 settled bets. `config.RETIRED_MODELS` + `RECORD_EXCLUSIONS`;
+STRUCK** (mike: *"It was never a good model. Remove this model."*).
+`config.RETIRED_MODELS` + `RECORD_EXCLUSIONS`;
 the worker loop is off unless `RUN_NFL_LIVE=1`. Do not revive it under that id.
 
 **The NHL models are LIVE this way**: `docs/sports/nhl.md`.
@@ -396,8 +396,7 @@ flat bet; tenth-Kelly keeps bets at 2-4% and lets edge drive the difference
 No picks until a team has played >= 10 games; prior-season stats are the
 baseline in that window. Season-to-date rates are noise early — blend toward
 the prior season by games played. **NHL: no hold** (mike, 2026-10-01;
-`docs/sports/nhl.md`). **NCAAB totals: no hold** (mike, 2026-11-02:
-*"we do not need to wait 10 games, I never approved that"*;
+`docs/sports/nhl.md`). **NCAAB totals: no hold** (mike, 2026-11-02;
 `docs/sports/ncaab.md`). **NBA shooting-luck totals: the 10-game hold is back**
 (mike, 2026-11-18, reversing his 11-02 no hold; `docs/sports/nba.md`).
 
