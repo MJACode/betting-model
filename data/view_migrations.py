@@ -485,6 +485,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Creates byom_official_legs, byom_legs/record/bets, and replaces
     # byom_backtest with its closing rows (same columns). Returns before any
     # DDL once the table, grants, policy and five marked functions exist.
+    # After anon-lockdown step A the table grant is authenticated SELECT
+    # only; that shape skips too, so a later byom_bets return type is not
+    # replaced. If the body does run, it drops byom_bets first (42P13).
     # Does not touch picks or the record views.
     "byom_official_legs_2026_11_04.sql",
     # 2026-11-04 (Matt): the official lock search includes line, price,
