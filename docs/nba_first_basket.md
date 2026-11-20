@@ -15,14 +15,14 @@ quotes in Supabase, price a board), `scripts/fb_probe_live.py`, `scripts/fb_prob
 
 | Market (Odds API key) | Settles on | Books quoting it (2026-11-20) | Their margin |
 |---|---|---|---|
-| `player_first_basket` | the game's first score of any kind, free throws included | DraftKings, FanDuel, BetMGM, Caesars, Fanatics, Hard Rock, Courtside; BetRivers in history | 11.6% (Caesars) to 32.4% (Fanatics) over the ten listed starters on one game; median 20.7% over 9 games |
-| `player_first_team_basket` | each team's first score | FanDuel on the live probe | not measured |
+| `player_first_basket` | the game's first score of any kind, free throws included | DraftKings, FanDuel, BetMGM, Caesars, Fanatics, Hard Rock, Courtside; BetRivers in history | 11.6% (Caesars) to 32.4% (Fanatics) over the ten listed starters on one game; median 19.7% over 53 book-games on 2026-11-20's 9 games (FanDuel 16.1%, DraftKings 18.3%, Fanatics 19.7%, Hard Rock 21.3%, BetMGM 22.0%, Caesars 23.3%) |
+| `player_first_team_basket` | each team's first score | FanDuel on the live probe; FanDuel, DraftKings, Hard Rock, BetMGM, BetRivers in history (2026-01-15) | not measured |
 
 Prices: live 1 credit an event a market (`x-requests-last` 4 for two markets at two regions);
 history 10 credits an event a market with up to ten books named (`x-requests-last` 10). History
 exists on 2024-03-15, 2024-11-15 and 2026-01-15 and not on 2023-11-15 or 2024-01-10 (both billed 0),
-so it starts between 2024-01-10 and 2024-03-15. Every quote bought for this file is stored in
-`player_prop_odds` (260 rows, `market IN ('player_first_basket','player_first_team_basket')`).
+so it starts between 2024-01-10 and 2024-03-15; `player_first_team_basket` history is there on 2026-01-15.
+Every quote bought for this file is stored in `player_prop_odds` (305 rows, `market IN ('player_first_basket','player_first_team_basket')`).
 
 ## 2. What drives it (stored play-by-play, 2018-19 to 2026-27)
 
@@ -61,7 +61,7 @@ claims 0.050 and wins 0.069; the 0.128-0.144 tenth claims 0.135 and wins 0.124.
 
 ## 4. Tonight's board (2026-11-20, read about 12:00Z, before lineups)
 
-Eight of nine games priced (OKC's listed players did not map to five starters). Best price per
+Eight of nine games priced (NOP's listed players at NOP v OKC mapped to four starters, not five). Best price per
 player: 7 of 80 at an EV of 0.10 or more, every one of them a price of +800 or longer, most at
 DraftKings (`<R>/first_basket/board_2026-11-20.parquet`). Example: Kelly Oubre Jr. +1400 at
 DraftKings, the model 0.093 against DraftKings' no-vig 0.060.
@@ -75,12 +75,15 @@ Whether the fair price beats the books' prices after their margin. The only test
 at the prices on sale before each tip, walk-forward, for every listed starter (the evaluation rule):
 units, ROI with an interval, by season and early/late, as a neighbourhood of EV floors.
 
-That needs the history (section 1): 3,031 finished regular-season games from 2024-03-01 to 2026-11-19
-(production `games`; 345 + 1,230 + 1,230 + 226). One snapshot each about 10 minutes before the listed
-tip, the seven deciding books in one request: **about 30,310 credits for `player_first_basket`, the
-same again for `player_first_team_basket`, plus about one credit per events list.** The 405 games from
-2024-01-10 to 03-01 can be tried at no odds cost, since an empty answer bills 0. Balance 1,357,732 at
-the last probe (`x-requests-remaining`, 2026-11-20).
+That needs the history (section 1). `scripts/fb_buy_history.py --dry-run` (2026-11-20, spent 0): 3,369
+finished regular-season games from 2024-01-10 to 2026-11-19, 2,168 snapshot times, 6,736 market-calls
+for both markets, one snapshot 10 minutes before each tip with the seven deciding books in one
+request. **Ceiling 69,528 credits** (events 2,168 + odds 67,360), taken from that plan. Games before
+history starts bill 0, so the spend is lower. Balance 1,357,416; the reserve floor is 387,639 (7 days at
+the median 55,377 a day, `odds_quota.plan_credit_budget`). The grade must split by price band and by
+the player's prior starts (tonight's 0.10+ EV prices were all +875 or longer, four of seven rookies).
 
 Forward from the merge of the change that adds both markets to `config.PROP_MARKETS_NBA`, every
 refresh pass and prop window job stores the boards, so the price path to tip is collected every night.
+Those passes land about every 10 minutes in the last hour, the last about a minute before tip
+(NBA_2026-11-19_GSW_MEM, DraftKings points), so the forward boards hold the point the history buys.
