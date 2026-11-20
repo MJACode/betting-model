@@ -224,3 +224,93 @@ prices is 5.9%. The market overrated them too.
 
 Scratch scripts: `%TEMP%/van_ml_why.py` (the breakdown, live artifact, database
 read) and `%TEMP%/van_ml_backtest.py` (the walk-forward, mirror only, no database).
+
+## Is the live loss the model? The record by era, and six alternatives (2026-11-19)
+
+mike: *"So the ML model loses. Anything we can do to improve"*. No change was
+made: nothing graded below beats the live model.
+
+**The live record, by what decided it** (settled pre-game BETs on 2026-27
+games, VOID and DUPLICATE excluded, staked like the published record: to win
+1u, risk capped at 3u; `picks`, read 2026-11-20 ~01:30Z):
+
+| who decided | bets | W-L | units | return on risk |
+|---|---|---|---|---|
+| the retired tree model (registry 170), written 09-22..10-02 | 6 | 1-5 | -2.99 | -62.0% |
+| the live model (registry 176) before the goalie gate, 10-16..10-20 | 11 | 5-6 | -1.68 | -14.0% |
+| the live model since the goalie gate, 10-22..11-18 | 55 | 28-27 | +1.39 | +2.4% (roughly -27..+32) |
+
+The season's loss is the first 17 bets: the retired model and the five days
+the live model decided before both starting goalies were confirmed. Since the
+gate (2026-10-20) the record is level, and 55 bets cannot tell +2% from +6%.
+
+**Closing-line value: two definitions, do not compare them.** The "beat
+Pinnacle close" column in this file's tables is Pinnacle's own move from its
+first quote to its close, on the side taken. The `picks.market_clv_pp` column
+is Pinnacle's closing fair probability minus the implied probability of the
+price taken. On the second definition the live bets average -0.80 points and
+23% are positive; the same model replayed on 2021-22..2026-27 (below) averages
+-0.79 points and 29% positive at the noon-style moment. The live number is what
+the backtest does; it is not a sign the model broke.
+
+**The harness** (`data/local/research/nhl_ml_improve/`, gitignored; reads the
+local mirror only, no database): the production module's own inputs and fit,
+each season fit only on earlier ones. Its 2026-27 probabilities equal the live
+artifact's on all 283 games graded (max difference 0.00000). Two decision
+moments, each the last stored fetch before it, with DraftKings, Pinnacle and a
+bettable book present: **~8 h** (at least 5 h before the start; the history's
+slot near noon, median 8.2 h) and **last** (at least 10 min before, the
+scorer's own cutoff). Best bettable price in that same fetch, -200 floor,
+closing value against Pinnacle's last pre-game price. DraftKings- and
+Pinnacle-at-the-moment versions start in 2022-23 (2021-22 has too few
+training rows at those moments).
+
+Accuracy against Pinnacle's price at the same moment, every graded game (mean
+log-loss difference, positive = worse than Pinnacle): the live recipe +0.0010
+(-0.0015..+0.0034) at ~8 h and +0.0011 (-0.0013..+0.0035) at last; every
+other version +0.0015 to +0.0021. **No version is more accurate than
+Pinnacle.** Any edge is in the soft books' prices, not in knowing more.
+
+At EV ≥ 0.06 (the live floor):
+
+| version | ~8 h: bets, units, return, 95% | last: bets, units, return, 95% |
+|---|---|---|
+| live recipe (trained on DraftKings' first quote) | 1,671, +57.5, +2.7%, -1.6..+6.7 | 1,791, +103.7, +4.6%, +0.6..+8.7 |
+| trained and served on DraftKings at the moment | 1,372, +12.4, +0.7%, -4.1..+5.4 | 1,460, +41.2, +2.3%, -2.2..+6.9 |
+| trained and served on Pinnacle at the moment | 1,410, +4.0, +0.2%, -4.3..+4.9 | 1,466, +36.1, +2.0%, -2.5..+6.7 |
+| Pinnacle version plus expected goals (to 2025-26) | 1,400, +26.6, +1.4%, -3.1..+5.8 | 1,452, +45.8, +2.4%, -2.2..+6.8 |
+| live recipe plus expected goals | 1,633, +38.8, +1.8%, -2.5..+6.2 | 1,726, +81.8, +3.6%, -0.5..+7.6 |
+
+- **A stronger pull toward the market changes nothing.** The penalty search
+  already picks the strongest setting in the grid (C 0.003) every season, as
+  the live artifact did.
+- **Pinnacle's price alone, bet at a soft book that beats it** (the totals
+  rule's method): at ~8 h, 753 bets +0.3% at EV ≥ 0; at last, +1.3% on 879, then
+  -0.8% at 0.01, +19.3% on 128 at 0.02 (-0.1..+38.3). Not a plateau, too few bets.
+- **Pinnacle as a veto** (bet only when the price is also worth ≥ 0 / -0.01 /
+  -0.02 against Pinnacle in the same fetch): up to +9% on 167-244 bets at last,
+  negative at ~8 h. It flips with the moment, so it is noise.
+- **Favourites and underdogs** (live recipe, last, 0.06): favourites 1,221
+  bets +3.2% (-1.4..+7.7), underdogs 570 bets +10.2% (+1.0..+19.5), the same
+  split as the 2026-10-13 rebuild. Live 2026-27: favourites 22-16 +1.76u,
+  underdogs 13-21 -2.79u. No change.
+- **Deciding at the last fetch instead of ~8 h out.** The live recipe at last
+  beats ~8 h by +46.2u at 0.06, over every game either moment bets (95% +3.2..+90.0),
+  but +29.8u (-20.2..+80.5) at 0.04 and +4.7u (-33.5..+40.7) at 0.08: a peak.
+  On the 1,513 games both moments bet (always the same side) ~8 h made more,
+  +77.5u against +70.0u. All of the gap is the games only one moment bets
+  (last only, 278: +33.7u; ~8 h only, 158: -20.0u), i.e. games sitting on the
+  cut. At DraftKings' own price the two are +3.0% (-2.2..+8.0) and +3.8%
+  (-1.2..+8.9). The 2026-10-20 re-grade found the same (+5.08% / +5.21%), and
+  so does 2026-27 replayed (+5.5% on 67 / +5.2% on 72). Timing stays as is.
+
+**Expected goals are not current.** `nhl_shot_events` and `nhl_team_game_xg`
+end at 2026-10-12 (the one-off backfill; no scheduled job writes them). No live
+model reads them, so nothing is broken, but no expected-goals version can be
+served until that ingest is scheduled, and none above earned it.
+
+**Read.** The current model with its goalie gate is level live. Replayed at
+0.06 it is positive in 5 of 6 seasons at the last fetch and 3 of 6 at ~8 h
+(2025-26 negative at both). None of the six alternatives beats
+it, and no version beats Pinnacle on accuracy. The next measurement is the
+~250-bet re-sweep (issue #1307).
