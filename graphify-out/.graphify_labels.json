@@ -486,8 +486,6 @@
   "1123": "NBA live decisions table migration",
   "1124": "NBA live game decision loop",
   "1130": "Pick stake units SQL functions",
-  "1134": "Game log backfill skip tests",
-  "1138": "Database schema creation tests",
   "1141": "Build-your-own official market pushdown",
   "1143": "MLB first-five edge search doc",
   "1145": "Savant freshness health check tests",

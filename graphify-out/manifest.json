@@ -48,9 +48,9 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "data/anon_readable.py": {
-    "mtime": 1795183578.3864212,
-    "seen": 1795196417.5271878,
-    "ast_hash": "e561cd27075441f6166425d3ac78a22d",
+    "mtime": 1795196502.177493,
+    "seen": 1795197660.4821906,
+    "ast_hash": "224991444e5770c61a8a8bc09db2734a",
     "semantic_hash": ""
   },
   "data/db.py": {
@@ -1140,9 +1140,9 @@
     "semantic_hash": ""
   },
   "data/view_migrations.py": {
-    "mtime": 1795182871.5985048,
-    "seen": 1795196417.529351,
-    "ast_hash": "1e847dc852ddaaf6444a4409db78745a",
+    "mtime": 1795196502.1981256,
+    "seen": 1795197660.4874845,
+    "ast_hash": "85615e50c81ee4829a3ee968ffd94041",
     "semantic_hash": ""
   },
   "dk_mlb_sample.json": {
@@ -2922,9 +2922,9 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/PicksHomeScreen.tsx": {
-    "mtime": 1795182884.1924224,
-    "seen": 1795196417.5318115,
-    "ast_hash": "b372110b72f26e5b073cf69c83a9906d",
+    "mtime": 1795196502.2283616,
+    "seen": 1795197660.490747,
+    "ast_hash": "c4ce14d1c31b5093e856b2fed78269ca",
     "semantic_hash": ""
   },
   "mobile/src/screens/PlayerStatsScreen.tsx": {
@@ -14910,9 +14910,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_bet_all.ts": {
-    "mtime": 1795182878.7647219,
-    "seen": 1795196417.529548,
-    "ast_hash": "21fd1f4ae9539d6c32306f13ebe71806",
+    "mtime": 1795196502.2218323,
+    "seen": 1795197660.4877,
+    "ast_hash": "59484f75857566b019c6b50689ba3783",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_discord_join.ts": {
@@ -14928,9 +14928,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/BetAllSheet.tsx": {
-    "mtime": 1795182879.900561,
-    "seen": 1795196417.5300853,
-    "ast_hash": "4e9a7175ceb709306f8ef25009193968",
+    "mtime": 1795196502.2238333,
+    "seen": 1795197660.4886858,
+    "ast_hash": "eb7f7cd3c3bbfd3c11ea4ff54850330e",
     "semantic_hash": ""
   },
   "mobile/src/components/DiscordJoinModal.tsx": {
@@ -14994,9 +14994,9 @@
     "semantic_hash": ""
   },
   "tests/test_mobile_bet_all.py": {
-    "mtime": 1795183009.0750911,
-    "seen": 1795196417.5376005,
-    "ast_hash": "fcb64277298381516f59ba3c9c24b63a",
+    "mtime": 1795196502.2354977,
+    "seen": 1795197660.4982886,
+    "ast_hash": "9f15494fec41d1064b2468033bef0a89",
     "semantic_hash": ""
   },
   "tests/test_mobile_discord_join.py": {
@@ -16068,9 +16068,9 @@
     "semantic_hash": ""
   },
   "data/anon_lockdown_spec.py": {
-    "mtime": 1795182862.0847223,
-    "seen": 1795196417.527183,
-    "ast_hash": "64b2dd6cecb044a19bb990cde97e4268",
+    "mtime": 1795196502.1749277,
+    "seen": 1795197660.4821842,
+    "ast_hash": "6ec40a96b0ac800025c9c150df4fbc4a",
     "semantic_hash": ""
   },
   "data/ingestors/clv_closing_pull.py": {
@@ -16104,15 +16104,15 @@
     "semantic_hash": ""
   },
   "data/migrations/anon_lockdown_step_b_2026_11.sql": {
-    "mtime": 1795182866.339841,
-    "seen": 1795196417.5283244,
-    "ast_hash": "ca55bf069a02b0ef5f0ae654bad66e9a",
+    "mtime": 1795196502.1811888,
+    "seen": 1795197660.4843965,
+    "ast_hash": "7da67b538e2d9e7663c6f7a7e9f82815",
     "semantic_hash": ""
   },
   "data/migrations/anon_lockdown_step_b_2026_11_undo.sql": {
-    "mtime": 1795182866.3997242,
-    "seen": 1795196417.5283291,
-    "ast_hash": "7582c5135add968bc89e351d986f08fe",
+    "mtime": 1795196502.1827288,
+    "seen": 1795197660.4844024,
+    "ast_hash": "1cca573f8f7d8a1182e5d4aef587e71a",
     "semantic_hash": ""
   },
   "data/migrations/clv_close_2026_11_19.sql": {
@@ -16134,9 +16134,9 @@
     "semantic_hash": ""
   },
   "data/migrations/site_public_record_2026_11.sql": {
-    "mtime": 1795182871.1086311,
-    "seen": 1795196417.5291953,
-    "ast_hash": "7be6a57e5304e4a5b9a89acd02b241f2",
+    "mtime": 1795196502.1938405,
+    "seen": 1795197660.487309,
+    "ast_hash": "8a83970f9a9243ce0a7da19eebd86ade",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_notification_inbox.ts": {
@@ -16272,9 +16272,9 @@
     "semantic_hash": ""
   },
   "scripts/lockdown_anon_stray_check.sql": {
-    "mtime": 1795182998.5426288,
-    "seen": 1795196417.534092,
-    "ast_hash": "8bad7fedc8fb3ae5cb5db6add5168907",
+    "mtime": 1795196502.2294288,
+    "seen": 1795197660.494518,
+    "ast_hash": "3a7a66b4742a4ddf260fcf4dc4f4a08b",
     "semantic_hash": ""
   },
   "scripts/lockdown_preapply_check.sql": {
@@ -16314,9 +16314,9 @@
     "semantic_hash": ""
   },
   "tests/test_anon_lockdown.py": {
-    "mtime": 1795183005.0066216,
-    "seen": 1795196417.5364096,
-    "ast_hash": "ba01655ce00e9cff66ca0ffe4da5bbee",
+    "mtime": 1795196502.2334552,
+    "seen": 1795197660.4970121,
+    "ast_hash": "387fc9d402b4455f962da72a50440b62",
     "semantic_hash": ""
   },
   "tests/test_clv_close.py": {
@@ -16557,6 +16557,48 @@
     "mtime": 1795183578.798426,
     "seen": 1795196417.562224,
     "ast_hash": "82c058db82b7fbc6115e923eca2477b2",
+    "semantic_hash": ""
+  },
+  "data/migrations/anon_lockdown_step_b_part2_tracked_bets_2026_11.sql": {
+    "mtime": 1795196502.1842587,
+    "seen": 1795197660.4844077,
+    "ast_hash": "85d5417c6931f53d0ee1ab25f3ef6394",
+    "semantic_hash": ""
+  },
+  "data/migrations/app_founders_2026_11_20.sql": {
+    "mtime": 1795196502.186273,
+    "seen": 1795197660.4844294,
+    "ast_hash": "b409e8aedc34b2c8e18e5143d9737abb",
+    "semantic_hash": ""
+  },
+  "data/migrations/premium_gate_2026_11_20.sql": {
+    "mtime": 1795196502.1872969,
+    "seen": 1795197660.4871788,
+    "ast_hash": "d12c074919599716390ef61c05a1d2fa",
+    "semantic_hash": ""
+  },
+  "data/migrations/premium_gate_2026_11_20_undo.sql": {
+    "mtime": 1795196502.1893091,
+    "seen": 1795197660.4871843,
+    "ast_hash": "9739803dc2aa30374ad2397cf7bd497d",
+    "semantic_hash": ""
+  },
+  "data/migrations/premium_gate_matview_2026_11_20.sql": {
+    "mtime": 1795196502.1903117,
+    "seen": 1795197660.4871898,
+    "ast_hash": "d592b9213fa91592f39c21c2e670a676",
+    "semantic_hash": ""
+  },
+  "data/migrations/premium_gate_matview_2026_11_20_undo.sql": {
+    "mtime": 1795196502.191825,
+    "seen": 1795197660.4871948,
+    "ast_hash": "baae41bf77ab098bea6b4bcfb295a5b6",
+    "semantic_hash": ""
+  },
+  "data/migrations/tracked_bets_owner_2026_11_20.sql": {
+    "mtime": 1795196502.1961155,
+    "seen": 1795197660.4873886,
+    "ast_hash": "b10affb25b84a4b1af6f39c471fbe0ba",
     "semantic_hash": ""
   }
 }
