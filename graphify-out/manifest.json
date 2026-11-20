@@ -48,9 +48,9 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "data/anon_readable.py": {
-    "mtime": 1795073172.9505794,
-    "seen": 1795097630.594642,
-    "ast_hash": "8f5fc9fa268ea39eccd7d91cb6c73f51",
+    "mtime": 1795173766.5469468,
+    "seen": 1795177346.212561,
+    "ast_hash": "afe222c042994f17a39b52e57d514c18",
     "semantic_hash": ""
   },
   "data/db.py": {
@@ -1140,9 +1140,9 @@
     "semantic_hash": ""
   },
   "data/view_migrations.py": {
-    "mtime": 1795073173.0544765,
-    "seen": 1795097630.596977,
-    "ast_hash": "a29a0f617555744c4a229c1154c05d05",
+    "mtime": 1795173766.5582018,
+    "seen": 1795177346.2147565,
+    "ast_hash": "1e847dc852ddaaf6444a4409db78745a",
     "semantic_hash": ""
   },
   "dk_mlb_sample.json": {
@@ -1320,9 +1320,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_book_links.ts": {
-    "mtime": 1795049393.534555,
-    "seen": 1795071391.599624,
-    "ast_hash": "e0fb31efc102056e8b3ec364f19dd953",
+    "mtime": 1795173766.5847445,
+    "seen": 1795177346.2150452,
+    "ast_hash": "41086692337c34c1a630850f8eae1450",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_contrast_tokens.ts": {
@@ -1482,9 +1482,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_pick_categories.ts": {
-    "mtime": 1789044225.009379,
-    "seen": 1795071391.5999222,
-    "ast_hash": "3888648862ac0c8652d498ed075f9456",
+    "mtime": 1795173766.589068,
+    "seen": 1795177346.2156234,
+    "ast_hash": "9f82aa9d0e76131ce38592a90547a31d",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_pick_cta.ts": {
@@ -1494,9 +1494,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_pick_filter_ux.ts": {
-    "mtime": 1791058010.9197402,
-    "seen": 1795071391.5999315,
-    "ast_hash": "03b5a09dc83bbdd21396d6b5650e53dc",
+    "mtime": 1795173766.5911388,
+    "seen": 1795177346.2156339,
+    "ast_hash": "e7ee5031ae0438d7766f3e58212ac922",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_pick_timing.ts": {
@@ -2004,15 +2004,15 @@
     "semantic_hash": ""
   },
   "mobile/src/components/filters/GameFilterSection.tsx": {
-    "mtime": 1794756827.8060987,
-    "seen": 1795071391.6009629,
-    "ast_hash": "b6bb11efe7de008b0394c27c6058fb27",
+    "mtime": 1795173766.5926611,
+    "seen": 1795177346.2164695,
+    "ast_hash": "fc88ac53f990eeabb4405cc1fcddbbb8",
     "semantic_hash": ""
   },
   "mobile/src/components/filters/PickFilters.tsx": {
-    "mtime": 1794756827.8081734,
-    "seen": 1795071391.6009674,
-    "ast_hash": "f15a16d116fc3ebd7d6224b70663a288",
+    "mtime": 1795173766.595194,
+    "seen": 1795177346.2164812,
+    "ast_hash": "cf4b07271894828fef47fcea428588e6",
     "semantic_hash": ""
   },
   "mobile/src/components/filters/RangeSlider.tsx": {
@@ -2364,9 +2364,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/betslipLinks.ts": {
-    "mtime": 1795049393.5881596,
-    "seen": 1795071391.6014483,
-    "ast_hash": "abb4c145a7b4ac188786bd94c4b97b57",
+    "mtime": 1795173766.598625,
+    "seen": 1795177346.2169511,
+    "ast_hash": "bc3ceacb5ffd0227df407acb03e69da9",
     "semantic_hash": ""
   },
   "mobile/src/lib/billing.ts": {
@@ -2610,9 +2610,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/pickFilterState.ts": {
-    "mtime": 1789839705.0223787,
-    "seen": 1795071391.6019933,
-    "ast_hash": "bd1c57572abccc24b0113ec7d5735f5f",
+    "mtime": 1795173766.6006227,
+    "seen": 1795177346.2174864,
+    "ast_hash": "af09694b638636c99c161408b1331701",
     "semantic_hash": ""
   },
   "mobile/src/lib/pickPriceCheck.ts": {
@@ -2700,9 +2700,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/queries.ts": {
-    "mtime": 1795073173.688166,
-    "seen": 1795097630.5998151,
-    "ast_hash": "c78e87f2ae25b4bb12ced2a9d6b2f0fc",
+    "mtime": 1795173766.6053998,
+    "seen": 1795177346.2175877,
+    "ast_hash": "e5be8ec740fe7dacd4488564eb558fb0",
     "semantic_hash": ""
   },
   "mobile/src/lib/rangeSlider.ts": {
@@ -2910,9 +2910,9 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/PerformanceScreen.tsx": {
-    "mtime": 1795073173.6982975,
-    "seen": 1795097630.6001432,
-    "ast_hash": "0f58c7ffa12ada8dc5dce1c10b931660",
+    "mtime": 1795173766.6062949,
+    "seen": 1795177346.2179067,
+    "ast_hash": "5ac2bc6fdae9e5cd1922e43c7cf0b3b2",
     "semantic_hash": ""
   },
   "mobile/src/screens/PickDetailScreen.tsx": {
@@ -2922,9 +2922,9 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/PicksHomeScreen.tsx": {
-    "mtime": 1795073173.7012968,
-    "seen": 1795097630.600153,
-    "ast_hash": "8f4cc2c7b8c4e7ddea847a67bee58682",
+    "mtime": 1795173766.6093907,
+    "seen": 1795177346.2179172,
+    "ast_hash": "b372110b72f26e5b073cf69c83a9906d",
     "semantic_hash": ""
   },
   "mobile/src/screens/PlayerStatsScreen.tsx": {
@@ -4956,9 +4956,9 @@
     "semantic_hash": ""
   },
   "scripts/refresh_pass.sh": {
-    "mtime": 1794756827.9870262,
-    "seen": 1795071391.608476,
-    "ast_hash": "b9d2f038c81f6d66cbca9b5df20d37f3",
+    "mtime": 1795173766.623394,
+    "seen": 1795177346.2232373,
+    "ast_hash": "e711d60c653a0d385a24ddf45fc814b5",
     "semantic_hash": ""
   },
   "scripts/regrade_nfl_prop_name_miss.py": {
@@ -6936,9 +6936,9 @@
     "semantic_hash": ""
   },
   "tests/test_published_record.py": {
-    "mtime": 1795073174.047418,
-    "seen": 1795097630.6102924,
-    "ast_hash": "d2caae52c295d84888daa75112075a4f",
+    "mtime": 1795173766.6418562,
+    "seen": 1795177346.2427332,
+    "ast_hash": "7e38f3e1dc6e187063ce06a67f68f28a",
     "semantic_hash": ""
   },
   "tests/test_published_record_reconciliation.py": {
@@ -7668,9 +7668,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/pr-ci.yml": {
-    "mtime": 1795073172.9365077,
-    "seen": 1795097630.6118674,
-    "ast_hash": "42e7470b8ae40fd0c8ba1877944509ed",
+    "mtime": 1795173766.5453897,
+    "seen": 1795177346.244456,
+    "ast_hash": "0958633764a8faaf69976c801f465898",
     "semantic_hash": ""
   },
   ".github/workflows/prune-merged-branches.yml": {
@@ -7734,9 +7734,9 @@
     "semantic_hash": ""
   },
   "docs/clv.md": {
-    "mtime": 1795116730.3040664,
-    "seen": 1795119261.3742447,
-    "ast_hash": "a4305be2a2fbbc661405422cca647c93",
+    "mtime": 1795174042.5588534,
+    "seen": 1795177346.244592,
+    "ast_hash": "18629a62e60f928ffeaa813d3ce2c703",
     "semantic_hash": ""
   },
   "docs/config_topology.md": {
@@ -7806,9 +7806,9 @@
     "semantic_hash": ""
   },
   "docs/local_ops.md": {
-    "mtime": 1795049393.1251695,
-    "seen": 1795071391.6174579,
-    "ast_hash": "56338f3f6ee64369f021241507a00ae4",
+    "mtime": 1795173766.5622025,
+    "seen": 1795177346.244726,
+    "ast_hash": "0b3cdebbd82f127b3726f627f553401c",
     "semantic_hash": ""
   },
   "docs/market_coverage.md": {
@@ -7878,9 +7878,9 @@
     "semantic_hash": ""
   },
   "docs/monitoring.md": {
-    "mtime": 1795118081.6152809,
-    "seen": 1795119261.3743842,
-    "ast_hash": "0073930e52a5e00e91a413e4579ce046",
+    "mtime": 1795173766.5652018,
+    "seen": 1795177346.2448113,
+    "ast_hash": "4af2fa1fe82a9118cf92e8001109e996",
     "semantic_hash": ""
   },
   "docs/ncaaf_inplay_backtest_2025.txt": {
@@ -8610,9 +8610,9 @@
     "semantic_hash": ""
   },
   "docs/nhl_moneyline_rebuild.md": {
-    "mtime": 1794756827.4963157,
-    "seen": 1795071391.6177487,
-    "ast_hash": "bc4a9a37edd4002f1ddadfce7edb3be4",
+    "mtime": 1795173766.5667121,
+    "seen": 1795177346.2450614,
+    "ast_hash": "c767346b7450a866ea35b48c324781b1",
     "semantic_hash": ""
   },
   "tests/fixtures/nba_injury_report/Injury-Report_2018-12-17_05PM_page3.pdf": {
@@ -11622,15 +11622,15 @@
     "semantic_hash": ""
   },
   "scripts/local_mirror.py": {
-    "mtime": 1795049393.8835633,
-    "seen": 1795071391.6063333,
-    "ast_hash": "39114f40a6da7d56117b14c73b84dc59",
+    "mtime": 1795173766.616455,
+    "seen": 1795177346.2213323,
+    "ast_hash": "8f52e0baef75bde02433f21a77e7ee1e",
     "semantic_hash": ""
   },
   "scripts/local_mirror_github.py": {
-    "mtime": 1793976226.7863233,
-    "seen": 1795071391.6063442,
-    "ast_hash": "34003c121586878e6b55dcbc80d2c837",
+    "mtime": 1795173766.618465,
+    "seen": 1795177346.221344,
+    "ast_hash": "9145ec3e0edcbcaa0010e0606dd73ea0",
     "semantic_hash": ""
   },
   "scripts/local_mirror_run.ps1": {
@@ -11676,15 +11676,15 @@
     "semantic_hash": ""
   },
   "tests/test_local_mirror.py": {
-    "mtime": 1795049394.02825,
-    "seen": 1795071391.6103795,
-    "ast_hash": "30277a5d59ed71d8f44fdcc6678b5650",
+    "mtime": 1795173766.6324065,
+    "seen": 1795177346.2268822,
+    "ast_hash": "c1f1d1695226b6d81aa0f45f6aca927c",
     "semantic_hash": ""
   },
   "tests/test_local_mirror_github.py": {
-    "mtime": 1793976227.1182563,
-    "seen": 1795071391.610392,
-    "ast_hash": "2ce4be2988ce2a749e0bb08ba5f14d48",
+    "mtime": 1795173766.6344056,
+    "seen": 1795177346.2268925,
+    "ast_hash": "92238329e7c8ea44a0c81f4296926989",
     "semantic_hash": ""
   },
   "tests/test_mobile_results_in_units.py": {
@@ -11772,9 +11772,9 @@
     "semantic_hash": ""
   },
   "data/migrations/byom_official_legs_2026_11_04.sql": {
-    "mtime": 1795073173.007265,
-    "seen": 1795097630.5961578,
-    "ast_hash": "1a78b1e0b2b396f3c12821e53c699657",
+    "mtime": 1795173766.5510747,
+    "seen": 1795177346.2140331,
+    "ast_hash": "952711e6dfd4c5b86f81aef52c3833f3",
     "semantic_hash": ""
   },
   "data/migrations/byom_official_legs_lock_read_idx_2026_11_04.sql": {
@@ -11874,9 +11874,9 @@
     "semantic_hash": ""
   },
   "tests/test_byom_official_legs.py": {
-    "mtime": 1795049393.9796216,
-    "seen": 1795071391.6094246,
-    "ast_hash": "f62d81a9c817e47059429329a2f0bbac",
+    "mtime": 1795173766.627928,
+    "seen": 1795177346.2259364,
+    "ast_hash": "702a9bbec79a7de955a23ca55badc726",
     "semantic_hash": ""
   },
   "tests/test_byom_open_transaction.py": {
@@ -12156,9 +12156,9 @@
     "semantic_hash": ""
   },
   "tests/test_deploy_drain.py": {
-    "mtime": 1793976227.0923612,
-    "seen": 1795071391.6097765,
-    "ast_hash": "d62f8c672b63512ffd7d5bc01bdb4248",
+    "mtime": 1795173766.6289387,
+    "seen": 1795177346.2262528,
+    "ast_hash": "f21c77f5fc920f8a33b9725b312e94e8",
     "semantic_hash": ""
   },
   "tests/test_mobile_freeze_log.py": {
@@ -15024,9 +15024,9 @@
     "semantic_hash": ""
   },
   "docs/data_archive.md": {
-    "mtime": 1795106020.694138,
-    "seen": 1795107147.9297779,
-    "ast_hash": "cc97f1e98e4879c2da2e05562d1f647c",
+    "mtime": 1795173766.560202,
+    "seen": 1795177346.2446027,
+    "ast_hash": "e85d8b5c797fffdb241d0c1a761dcfd2",
     "semantic_hash": ""
   },
   "data/migrations/ncaaf_drop_phantom_lsu_ole_miss_2026_11_21.sql": {
@@ -15690,9 +15690,9 @@
     "semantic_hash": ""
   },
   "tests/test_discord_book_links.py": {
-    "mtime": 1795049393.9911406,
-    "seen": 1795071391.6097875,
-    "ast_hash": "d5219c3507dc08421558efa32b68c0f6",
+    "mtime": 1795173766.630153,
+    "seen": 1795177346.2262633,
+    "ast_hash": "5d3e9387694a9c407a730615f403682f",
     "semantic_hash": ""
   },
   "tests/test_hk_preoff_data.py": {
@@ -15708,9 +15708,9 @@
     "semantic_hash": ""
   },
   "tracking/book_slip_links.py": {
-    "mtime": 1795049394.1643548,
-    "seen": 1795071391.616873,
-    "ast_hash": "df028f235187706864c93baf533ade26",
+    "mtime": 1795173766.6448786,
+    "seen": 1795177346.2438807,
+    "ast_hash": "7c249f752034816298b6cb6eec955cfd",
     "semantic_hash": ""
   },
   "data/ingestors/odds_rebuy.py": {
@@ -15798,9 +15798,9 @@
     "semantic_hash": ""
   },
   "data/migrations/pc_copy_snapshots_2026_11_16.sql": {
-    "mtime": 1795049393.0795598,
-    "seen": 1795071391.599027,
-    "ast_hash": "3a9a964b8dbd6d6d502155b4ae6bd1c7",
+    "mtime": 1795173766.552286,
+    "seen": 1795177346.2144403,
+    "ast_hash": "022858cecfb87e034e6b07f6f38cfb6e",
     "semantic_hash": ""
   },
   "data/migrations/scoreboard_splits_dk_history_2026_11_16.sql": {
@@ -15828,9 +15828,9 @@
     "semantic_hash": ""
   },
   "retool/models-ops/backend/ops/getPcCopy.ts": {
-    "mtime": 1795049393.7063248,
-    "seen": 1795071391.604774,
-    "ast_hash": "4c935eb6b7e927547dbf0e148ba2b409",
+    "mtime": 1795173766.611402,
+    "seen": 1795177346.2199254,
+    "ast_hash": "ad739ec5a50baf68cb4079ed6c627770",
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/components/brand/SignalMark.tsx": {
@@ -15858,9 +15858,9 @@
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/database/DbPcCopy.tsx": {
-    "mtime": 1795098156.9441576,
-    "seen": 1795103494.6835613,
-    "ast_hash": "940dd5f7d9f31eaa1c9ae86cd253ad76",
+    "mtime": 1795173766.6144238,
+    "seen": 1795177346.2201684,
+    "ast_hash": "0d6b1417dd324feab4a35fc811509100",
     "semantic_hash": ""
   },
   "retool/models-ops/frontend/pages/database/DbQueries.tsx": {
@@ -15894,9 +15894,9 @@
     "semantic_hash": ""
   },
   "scripts/local_mirror_report.py": {
-    "mtime": 1795049393.886593,
-    "seen": 1795071391.6063514,
-    "ast_hash": "10dddbe13b9a9ac0923102890f30d060",
+    "mtime": 1795173766.6220665,
+    "seen": 1795177346.2213495,
+    "ast_hash": "f9bbc501ef8bd621073bf9c3b5a5ff43",
     "semantic_hash": ""
   },
   "tests/test_archive_rows.py": {
@@ -15912,15 +15912,15 @@
     "semantic_hash": ""
   },
   "tests/test_local_mirror_report.py": {
-    "mtime": 1795049394.0302985,
-    "seen": 1795071391.6103983,
-    "ast_hash": "4a1518c32c6e3e2c0d0a7117b4faadaf",
+    "mtime": 1795173766.6364071,
+    "seen": 1795177346.2268977,
+    "ast_hash": "04b25a788f4a8d81eb14fd00808e9988",
     "semantic_hash": ""
   },
   "tests/test_local_mirror_report_pg.py": {
-    "mtime": 1795049394.0323238,
-    "seen": 1795071391.610403,
-    "ast_hash": "be5d66f97681118294dbcd457b4de368",
+    "mtime": 1795173766.638406,
+    "seen": 1795177346.2269032,
+    "ast_hash": "dc3807d883e952befe3253379380d22e",
     "semantic_hash": ""
   },
   "tests/test_ops_alert_pages.py": {
@@ -15948,9 +15948,9 @@
     "semantic_hash": ""
   },
   "data/migrations/byom_bets_actual_2026_11_17.sql": {
-    "mtime": 1795073173.003539,
-    "seen": 1795097630.5961092,
-    "ast_hash": "afdaa37eb0af4cef1d742951ef861941",
+    "mtime": 1795173766.5495317,
+    "seen": 1795177346.213994,
+    "ast_hash": "9cb80ca46163940352e52fe3b3255b3d",
     "semantic_hash": ""
   },
   "data/migrations/byom_no_half_yards_2026_11_17.sql": {
@@ -16014,9 +16014,9 @@
     "semantic_hash": ""
   },
   "tests/test_byom_bet_actual.py": {
-    "mtime": 1795073173.8837965,
-    "seen": 1795097630.6058056,
-    "ast_hash": "d8fea8707a84019856f33dff8416da9e",
+    "mtime": 1795173766.6253989,
+    "seen": 1795177346.225882,
+    "ast_hash": "c1287f0f843d0504cbafb60b47898b39",
     "semantic_hash": ""
   },
   "tests/test_mobile_appearance.py": {
@@ -16032,9 +16032,9 @@
     "semantic_hash": ""
   },
   "tests/test_pick_landing.py": {
-    "mtime": 1795049394.1285367,
-    "seen": 1795071391.615853,
-    "ast_hash": "4347dd72369473671a32bf0b71b98f27",
+    "mtime": 1795173766.641327,
+    "seen": 1795177346.242494,
+    "ast_hash": "aefaa0298b558457b9d521033ea3747e",
     "semantic_hash": ""
   },
   "tracking/pick_landing.py": {
@@ -16254,9 +16254,9 @@
     "semantic_hash": ""
   },
   "scripts/clv_close_history.py": {
-    "mtime": 1795106021.2123344,
-    "seen": 1795107147.9227207,
-    "ast_hash": "6c00d52f9ee45866c5947d3a98b5a92a",
+    "mtime": 1795173986.7057967,
+    "seen": 1795177346.2205296,
+    "ast_hash": "4ef211fe9721bafeb8f2dcdb05ad60a5",
     "semantic_hash": ""
   },
   "scripts/euroleague_stacking_check.py": {
@@ -16320,9 +16320,9 @@
     "semantic_hash": ""
   },
   "tests/test_clv_close.py": {
-    "mtime": 1795106021.2139342,
-    "seen": 1795107147.9259782,
-    "ast_hash": "d67278902b43287a60ee043f9fb29ca3",
+    "mtime": 1795173900.240057,
+    "seen": 1795177346.2260492,
+    "ast_hash": "e0e9c169617e04d621b393164f8cac78",
     "semantic_hash": ""
   },
   "tests/test_inplay_pick_without_draftkings.py": {
@@ -16350,9 +16350,9 @@
     "semantic_hash": ""
   },
   "tracking/clv_close.py": {
-    "mtime": 1795106021.2178302,
-    "seen": 1795107147.929291,
-    "ast_hash": "4cebeafa8ba9ee05b9f3191fed6f6837",
+    "mtime": 1795173930.4474673,
+    "seen": 1795177346.2438927,
+    "ast_hash": "51e8e43c70a25bea5fd26792f8d16fd8",
     "semantic_hash": ""
   },
   "tracking/notification_inbox.py": {
@@ -16443,6 +16443,42 @@
     "mtime": 1795117359.2654424,
     "seen": 1795119261.3575273,
     "ast_hash": "26793b8843defb1b48282da25999b52b",
+    "semantic_hash": ""
+  },
+  "data/migrations/public_track_record_model_daily_2026_11_18.sql": {
+    "mtime": 1795173766.5540466,
+    "seen": 1795177346.2144895,
+    "ast_hash": "1937fce23854a078b1698b39c973ca05",
+    "semantic_hash": ""
+  },
+  "mobile/scripts/verify_model_heat.ts": {
+    "mtime": 1795173766.5875735,
+    "seen": 1795177346.2155252,
+    "ast_hash": "1c4b09e360ed89c07b101eac500c57b9",
+    "semantic_hash": ""
+  },
+  "mobile/src/components/filters/ModelFilterSection.tsx": {
+    "mtime": 1795173766.5941842,
+    "seen": 1795177346.2164752,
+    "ast_hash": "1cbe1781a695109cccc6d7a084baab6f",
+    "semantic_hash": ""
+  },
+  "mobile/src/hooks/useModelFilterRecords.ts": {
+    "mtime": 1795173766.5964534,
+    "seen": 1795177346.21667,
+    "ast_hash": "ed2c328e20378132f0a220003f5ee65d",
+    "semantic_hash": ""
+  },
+  "mobile/src/lib/modelHeat.ts": {
+    "mtime": 1795173766.5996244,
+    "seen": 1795177346.2173748,
+    "ast_hash": "df0dc959ac3ae43233f3720e60310bda",
+    "semantic_hash": ""
+  },
+  "tests/test_model_filter_heat.py": {
+    "mtime": 1795173766.6393168,
+    "seen": 1795177346.227402,
+    "ast_hash": "ae346fb8b61cad3d7b47e27f84b4a825",
     "semantic_hash": ""
   }
 }
