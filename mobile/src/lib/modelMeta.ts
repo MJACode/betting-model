@@ -407,6 +407,16 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NBA first basket (models/nba_first_basket.py, 2026-11-20): who scores the game's first
+  // points, from the opening tip and each starter's share of his team's first scores, blended with
+  // the other books' price. Decided once, 5-20 minutes before tip. The stat is in the label.
+  nba_prop_first_basket: {
+    shortLabel: 'First Basket',
+    longLabel: 'NBA First Basket',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
   // NBA full-game totals, overs only (models/nba_total_luck.py, 2026-10-17).
   // A team's points allowed include how well its opponents happened to shoot
   // threes and free throws, which is mostly luck. When a total projected with

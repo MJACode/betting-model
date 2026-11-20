@@ -122,6 +122,8 @@ const PROP_MARKET_BY_MODEL: Record<string, string> = {
   nba_prop_player_steals: 'player_steals',
   nba_prop_player_turnovers: 'player_turnovers',
   nba_prop_player_dd: 'player_double_double',
+  // NBA first basket (models/nba_first_basket.py, 2026-11-20): Yes only, stored as Over 0.5.
+  nba_prop_first_basket: 'player_first_basket',
   nhl_prop_blocked_shots: 'player_blocked_shots',
   nhl_prop_saves: 'player_total_saves',
   nhl_prop_shots_on_goal: 'player_shots_on_goal',
@@ -147,6 +149,8 @@ const PROP_MARKET_BY_MODEL: Record<string, string> = {
 export function propDisplayLabel(market: string | null, statLabel: string): string {
   if (market === 'player_anytime_td') return 'Anytime TD';
   if (market === 'player_goal_scorer_anytime') return 'Anytime Goal';
+  // Sold as "First Basket" (Yes); a leg reading "Over 0.5" is not a bet anyone can find.
+  if (market === 'player_first_basket') return 'First Basket';
   return statLabel;
 }
 
@@ -161,6 +165,8 @@ export function oneWayMarket(market: string | null, side: 'over' | 'under'): boo
   // Anytime goal scorer is the same Yes/No shape: the book posts Yes (over
   // 0.5) and no No, stored as player_goal_scorer_anytime.
   if (market === 'player_goal_scorer_anytime') return side === 'under';
+  // First basket is Yes only at every book the model bets (Hard Rock's No is not a pick).
+  if (market === 'player_first_basket') return side === 'under';
   return market === 'player_anytime_td' && side === 'under';
 }
 
@@ -2053,6 +2059,8 @@ const BET_BOOK_LINE_MODELS: readonly string[] = [
   'ncaab_first_half_total',
   'nba_prop_market',
   'nba_prop_projection',
+  // NBA first basket (scripts/nba_first_basket_card.py): the same row, line 0.5 at every book.
+  'nba_prop_first_basket',
   'nba_team_total_luck',
   'nba_total_luck',
   'ncaab_spread_market',
@@ -2310,6 +2318,20 @@ export interface PickTiming {
 const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_projection'];
 
 /**
+ * How each book settles first basket (house rules read 2026-11-20; models/nba_first_basket.py
+ * FIELD_GOAL_BOOKS). These pay on the first made field goal; the rest on the first points of any
+ * kind, free throws included.
+ */
+const FIRST_BASKET_FIELD_GOAL_BOOKS: readonly string[] = ['draftkings', 'betmgm', 'fanatics', 'betrivers'];
+
+export function firstBasketRuleNote(book: string | null | undefined): string {
+  if (!book) return '';
+  return FIRST_BASKET_FIELD_GOAL_BOOKS.includes(book)
+    ? ' This book pays on the first made field goal: a free throw first doesn’t count.'
+    : ' This book pays on the first points of any kind, free throws included.';
+}
+
+/**
  * When this bet posted, and what that time means for the number beside it.
  *
  * created_at IS the post time for every locked pick, because a locked row is
@@ -2484,6 +2506,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'euroleague_home_dog_spread' ||
     pick.model_id === 'euroleague_h1_dog_ml' ||
     pick.model_id === 'euroleague_q1_club_share_total' ||
+    // NBA first basket decides each game once, 5-20 minutes before tip
+    // (scripts/nba_first_basket_card.py), on the starters the books list.
+    pick.model_id === 'nba_prop_first_basket' ||
     nbaPosted
   ) {
     return {
@@ -2509,7 +2534,10 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
             ' This pick is for the total and price shown at the book named, not a later one.'
           : '') +
         (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
-        (nbaPosted ? ' Void if the player doesn’t play.' : ''),
+        (nbaPosted ? ' Void if the player doesn’t play.' : '') +
+        (pick.model_id === 'nba_prop_first_basket'
+          ? ' Void if the player doesn’t start.' + firstBasketRuleNote(pick.decision_book)
+          : ''),
     };
   }
 

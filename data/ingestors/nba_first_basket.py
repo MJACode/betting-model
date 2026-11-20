@@ -51,6 +51,37 @@ SELECT p.espn_game_id, p.play_no, p.team_side, p.athlete_id_1, p.athlete_id_2,
    AND p.period = 1
 """
 
+# The copy is filled 100 games at a time through nba_pbp's primary key (espn_game_id, play_no):
+# PERIOD1_SQL as one statement scans the whole table, and on 2024-25 it hit the statement
+# timeout (2026-11-20 22:23Z); filled in chunks, a season took 4.1-4.7 seconds. PERIOD1_SQL
+# still defines the copy's columns (created empty, then filled).
+PERIOD1_GAMES_SQL = """
+SELECT espn_game_id FROM nba_pbp_games
+ WHERE season = ANY(%(seasons)s) AND season_type = 2 AND game_id IS NOT NULL
+ ORDER BY espn_game_id
+"""
+PERIOD1_CHUNK_SQL = """
+INSERT INTO fb_period1
+SELECT espn_game_id, play_no, team_side, athlete_id_1, athlete_id_2,
+       type_text, shooting_play, scoring_play, points
+  FROM nba_pbp
+ WHERE espn_game_id = ANY(%(ids)s) AND period = 1
+"""
+PERIOD1_CHUNK = 100
+
+
+def fill_period1(conn, params: dict) -> int:
+    """Create the session's period-1 copy and fill it a chunk of games at a time."""
+    empty = PERIOD1_SQL.replace("WHERE g.season = ANY", "WHERE FALSE AND g.season = ANY")
+    if empty == PERIOD1_SQL:
+        raise RuntimeError("PERIOD1_SQL changed shape: cannot create the period-1 copy empty")
+    conn.execute(empty, params)
+    ids = [r[0] for r in conn.execute(PERIOD1_GAMES_SQL, params).fetchall()]
+    for i in range(0, len(ids), PERIOD1_CHUNK):
+        conn.execute(PERIOD1_CHUNK_SQL, {"ids": ids[i:i + PERIOD1_CHUNK]})
+    return len(ids)
+
+
 # Shared CTEs: the games, their period-1 plays, the opening tip, the game's
 # first score, and each team's first shot and first score.
 _BASE = """
@@ -257,7 +288,7 @@ def rebuild(conn, seasons: list[int]) -> dict:
         return {"seasons": seasons, "games": 0, "players": 0, "skipped": "no table"}
     params = {"seasons": seasons}
     conn.execute("DROP TABLE IF EXISTS fb_period1")
-    conn.execute(PERIOD1_SQL, params)
+    fill_period1(conn, params)
     conn.execute("ANALYZE fb_period1")
     cur = conn.execute(GAMES_SQL, params)
     n_games = cur.rowcount if cur.rowcount is not None else 0
