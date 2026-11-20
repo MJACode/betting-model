@@ -768,6 +768,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Anon-key lockdown step B part 2: tracked_bets rows owned by auth.uid().
     # One DO block; returns at once when the owner policies are in place.
     "tracked_bets_owner_2026_11_20.sql",
+    # Premium gate part 1 (Matt, 2026-11-20): every authenticated SELECT
+    # policy that said USING (true) now requires has_app_access(); ops tables
+    # the app never reads lose the authenticated grant. No-op once applied.
+    "premium_gate_2026_11_20.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
