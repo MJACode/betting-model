@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, an all-push closing-line set reads "all N matched the close", not "0 measured, N push" (Discord, X, the app): every EuroLeague bet of 11-19 had been measured |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, NBA first basket graded at real prices (50,698 credits of history): nothing passes; the blend +7.5% / +9.5% fails only the interval |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, tennis bets get their closing price: the final close reads the tennis card's own change-only price table through its poll ledger; the one settled ATP bet re-measured, +2.27% (#1505 for Pinnacle) |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, NBA: the 0-6 night measured (projection unders 34-53 vs 46.8 claimed), and first basket priced for the first time; both first-basket markets now collected |

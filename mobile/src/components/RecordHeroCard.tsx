@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { EquityPoint } from '@/lib/equityGeometry';
 import { RecordInfoSheet } from '@/components/RecordInfoSheet';
 import { RecordSparkline } from '@/components/RecordSparkline';
+import { allMatchedText } from '@/lib/clvBeat';
 import {
   CLOSING_LINE_TITLE,
   ROI_SHEET_TITLE,
@@ -58,7 +59,7 @@ export function RecordHeroCard({
   const clv = quiet
     ? clvPct
     : summary.clvBeatRate == null
-      ? (summary.clvPush > 0 ? `0 measured, ${summary.clvPush} push` : clvPct)
+      ? (summary.clvPush > 0 ? allMatchedText(summary.clvPush, { sentence: true }) : clvPct)
       : summary.clvPush > 0
         ? `${clvPct}, ${summary.clvPush} push`
         : clvPct;
@@ -137,7 +138,7 @@ export function RecordHeroCard({
               value={clv}
               stacked={stacked}
               labelMinHeight={labelMinHeight}
-              lines={summary.clvPush > 0 ? 2 : 1}
+              lines={summary.clvPush > 0 ? (stacked ? 3 : 2) : 1}
               onInfo={() => open('clv')}
               infoLabel="Beat the closing line details"
             />
