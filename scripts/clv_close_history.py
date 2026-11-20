@@ -19,9 +19,11 @@ Commands (dry run unless --apply; nothing is bought without `buy`):
   python -m scripts.clv_close_history plan
   python -m scripts.clv_close_history buy [--limit N]
   python -m scripts.clv_close_history history [--apply]
-  python -m scripts.clv_close_history remeasure-none [--apply]
+  python -m scripts.clv_close_history remeasure-none [--model M ...] [--apply]
             every bet measured with no closing price, measured again from
-            stored rows and bought quotes (after a fix to the rule)
+            stored rows and bought quotes (after a fix to the rule); --model
+            keeps it to those models (tennis, 2026-11-20: atp_moneyline_shop
+            wta_moneyline_shop, once tennis prices were read)
   python -m scripts.clv_close_history first-play [--apply]
             for bets with no pull between them and the listed start, the
             game's first play from ESPN's wall clock, into game_first_play
@@ -388,6 +390,8 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int)
     ap.add_argument("--only-bought", action="store_true",
                     help="history: measure only bets whose game and book were bought")
+    ap.add_argument("--model", nargs="+",
+                    help="remeasure-none: only these model ids")
     a = ap.parse_args(argv)
     conn = get_connection()
     if a.command == "recent":
@@ -424,9 +428,10 @@ def main(argv=None) -> int:
     elif a.command == "buy-late":
         print(json.dumps(buy(conn, a.limit, late=True), indent=1, default=str))
     elif a.command == "remeasure-none":
+        only = " AND p.model_id = ANY(%s)" if a.model else ""
         bets = cc.load_bets(conn, """
-            p.pick_id IN (SELECT pick_id FROM public.clv_close_measurements WHERE source = 'none')
-            ORDER BY p.pick_id""")
+            p.pick_id IN (SELECT pick_id FROM public.clv_close_measurements WHERE source = 'none')"""
+            + only + " ORDER BY p.pick_id", (list(a.model),) if a.model else ())
         print(json.dumps(run_measure(conn, bets, True, a.apply), indent=1, default=str))
     return 0
 

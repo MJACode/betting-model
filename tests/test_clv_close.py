@@ -183,6 +183,11 @@ CREATE FUNCTION clv_game_market(m text) RETURNS text LANGUAGE sql IMMUTABLE AS
   $$ SELECT CASE WHEN m LIKE '%spread%' THEN 'spreads' WHEN m LIKE '%moneyline%' THEN 'h2h' ELSE 'totals' END $$;
 CREATE FUNCTION clv_prop_key(m text) RETURNS text LANGUAGE sql IMMUTABLE AS
   $$ SELECT CASE WHEN m = 'nhl_prop_saves' THEN 'player_total_saves' END $$;
+CREATE TABLE tennis_moneyline_decisions (event_id text PRIMARY KEY, sport_key text, game_id text);
+CREATE TABLE tennis_odds_fetches (id bigserial PRIMARY KEY, endpoint text, sport_key text,
+  asked_ts timestamptz, snapshot_ts timestamptz, events integer);
+CREATE TABLE tennis_odds_quotes (sport_key text, event_id text, bookmaker text, market text,
+  snapshot_ts timestamptz, home_price integer, away_price integer);
 """
 
 
@@ -392,3 +397,90 @@ def test_the_stored_first_play_reaches_the_bet_and_its_close(db):
     assert bet.first_play == FIRST
     c = cc.close_for(db, bet)
     assert c.odds == -120 and c.source == "feed"
+
+
+# ── tennis: its own change-only table, read through the card's polls ─────────
+
+TGAME = "ATP_2026-11-19_arthur-fils_alexander-zverev"
+TKEY, TEVENT = "tennis_atp_finals", "66cc3b98e9e67560a34198715ee78d75"
+
+
+def _tennis_pick(db, pick_id=11, created=T0 - timedelta(minutes=27), price=-275, book="hardrockbet"):
+    db.execute("INSERT INTO games VALUES (%s,'2026-11-19','alexander-zverev','arthur-fils',%s) ON CONFLICT DO NOTHING",
+               (TGAME, T0.strftime("%Y-%m-%dT%H:%M:%SZ")))
+    db.execute("INSERT INTO tennis_moneyline_decisions VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+               (TEVENT, TKEY, TGAME))
+    db.execute("""INSERT INTO picks (pick_id, model_id, game_id, game_date, pick_side, pick_label,
+                  dk_odds, decision_odds, decision_book, created_at, game_time, signal_type, is_live)
+                  VALUES (%s,'atp_moneyline_shop',%s,'2026-11-19','home','Alexander Zverev ML',
+                          -294,%s,%s,%s,%s,'BET',false)""",
+               (pick_id, TGAME, price, book, _z(created), T0.isoformat()))
+    db.commit()
+
+
+def _poll(db, minutes_before, events=3, key=TKEY):
+    """One card poll, both book groups, as poll_live ledgers it."""
+    t = T0 - timedelta(minutes=minutes_before)
+    for _ in range(2):
+        db.execute("INSERT INTO tennis_odds_fetches (endpoint, sport_key, asked_ts, snapshot_ts, events) "
+                   "VALUES ('live',%s,%s,%s,%s)", (key, t, t, events))
+    db.commit()
+
+
+def _tq(db, minutes_before, home, away, book="hardrockbet", market="h2h"):
+    """A change-only quote row, stored by the poll at `minutes_before`."""
+    db.execute("INSERT INTO tennis_odds_quotes VALUES (%s,%s,%s,%s,%s,%s,%s)",
+               (TKEY, TEVENT, book, market, T0 - timedelta(minutes=minutes_before), home, away))
+    db.commit()
+
+
+def test_a_tennis_bet_whose_price_held_after_it_closes_at_that_price(db):
+    # Measured 2026-11-20: the one tennis bet was stamped "no pull of this book"
+    # because only odds / player_prop_odds were read. A held price has no new
+    # row after the bet; the card's polls are the pulls.
+    _tennis_pick(db)
+    _tq(db, 47, -275, 225)                         # last change, before the bet
+    for m in (37, 27, 17, 7):
+        _poll(db, m)
+    bet = cc.load_bets(db, "p.pick_id = 11")[0]
+    c = cc.close_for(db, bet)
+    assert (c.odds, c.source, c.fetched_at) == (-275, "feed", T0 - timedelta(minutes=7))
+    assert cc.measure(bet, c)["clv_pct"] == 0.0     # a push, not "no close"
+
+
+def test_a_tennis_close_is_the_bet_books_quote_at_its_last_pull_before_the_start(db):
+    _tennis_pick(db)
+    _tq(db, 47, -275, 225)
+    _tq(db, 7, -300, 240)                          # Hard Rock moved at the last pre-start poll
+    _tq(db, 5, -999, 600, book="draftkings")        # another book
+    _tq(db, 7, -110, -110, market="spreads")        # another market
+    _tq(db, -13, -900, 550)                        # in play, after the start
+    for m in (37, 27, 17, 7, -3, -13):
+        _poll(db, m)
+    bet = cc.load_bets(db, "p.pick_id = 11")[0]
+    c = cc.close_for(db, bet)
+    assert (c.odds, c.fetched_at) == (-300, T0 - timedelta(minutes=7))
+    assert cc.measure(bet, c)["clv_pct"] > 0       # -275 taken against a -300 close: a beat
+
+
+def test_a_tennis_bet_with_no_poll_after_it_or_only_empty_polls_has_no_close(db):
+    _tennis_pick(db, created=T0 - timedelta(minutes=5))
+    _tq(db, 47, -275, 225)
+    _poll(db, 7)                                   # before the bet
+    _poll(db, 3, events=0)                         # the feed answered with nothing
+    _poll(db, 2, key="tennis_wta_finals")          # another key
+    bet = cc.load_bets(db, "p.pick_id = 11")[0]
+    c = cc.close_for(db, bet)
+    assert c.odds is None and c.last_poll is None
+
+
+def test_the_stage_measures_a_tennis_bet(db):
+    _tennis_pick(db)
+    _tq(db, 47, -275, 225)
+    _tq(db, 7, -300, 240)
+    for m in (17, 7):
+        _poll(db, m)
+    assert cc.measure_started(db, now=T0 + timedelta(minutes=30))["priced"] == 1
+    p = _row(db, "SELECT closing_dk_odds, clv_pct, clv_close_book, clv_method FROM picks WHERE pick_id = 11")
+    assert float(p["closing_dk_odds"]) == -300 and float(p["clv_pct"]) > 0
+    assert p["clv_close_book"] == "hardrockbet" and p["clv_method"] == "standard_v2"
