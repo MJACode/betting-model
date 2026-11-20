@@ -14,6 +14,7 @@ import {
   oneBookPlan,
   planTotals,
   type BetAllCandidates,
+  type BetAllLeg,
   type BetAllMode,
   type BetAllPick,
   type BetAllStep,
@@ -30,16 +31,20 @@ import { colors, font, radii, spacing, sectionHeaderText, opacity, cardDense } f
 import type { Pick } from '@/types';
 import { PrimaryButton } from '@/components/PrimaryButton';
 
-type StepStatus = 'todo' | 'opened' | 'placed' | 'skipped';
-
 interface Props {
   visible: boolean;
   sport: string;
   candidates: BetAllCandidates;
   myBooks: readonly string[];
+  /** Whether a pick is already in the member's tracked bets
+   *  (useTrackedBets.isTracked). The tick on each pick reads this, so a
+   *  tick is the tracked state itself, not a copy of it. */
+  isTracked: (pick: Pick) => boolean;
   /** Adds placed bets to the member's tracked bets, all in one write
    *  (useTrackedBets.trackMany). */
   onTrack: (picks: Pick[]) => void;
+  /** Takes a pick back out of tracked bets (useTrackedBets.untrackPick). */
+  onUntrack: (pick: Pick) => void;
   onClose: () => void;
 }
 
@@ -54,10 +59,15 @@ function stakeText(risk: number, win: number): string {
  * it, and the sheet says so. lib/betAll.ts holds the rules.
  *
  * Two phases. Choose: the picks, ticked by default, and the mode. Send: the
- * books as a list, opened one at a time. Coming back from a book asks once
- * whether the bets were placed; Placed adds them to tracked bets.
+ * books as a list, opened one at a time, each pick with a Placed tick.
+ *
+ * Tracking is per pick (Matt, 2026-11-20, replacing the per-book placed
+ * question and the warning on close): ticking a
+ * pick tracks it at once, unticking takes it back out, and a book with more
+ * than one pick has a "Placed all" shortcut. Nothing waits for an answer, so
+ * closing the sheet never loses a placed bet and never needs a warning.
  */
-export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onClose }: Props) {
+export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, onTrack, onUntrack, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const { picks, skipped } = candidates;
   const [mode, setMode] = useState<BetAllMode>('best');
@@ -65,10 +75,8 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
   const [book, setBook] = useState<string | null>(null);
   const [phase, setPhase] = useState<'choose' | 'send'>('choose');
   const [steps, setSteps] = useState<BetAllStep[]>([]);
-  const [status, setStatus] = useState<Record<string, StepStatus>>({});
-  const [askFor, setAskFor] = useState<string | null>(null);
+  const [opened, setOpened] = useState<Set<string>>(() => new Set());
   const awaiting = useRef<string | null>(null);
-  const [confirmStop, setConfirmStop] = useState(false);
 
   // A fresh sheet every time it opens: every pick ticked, Best line.
   const pickKeys = picks.map((p) => p.key).join(',');
@@ -79,9 +87,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
     setBook(null);
     setPhase('choose');
     setSteps([]);
-    setStatus({});
-    setAskFor(null);
-    setConfirmStop(false);
+    setOpened(new Set());
     awaiting.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -91,24 +97,17 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickKeys]);
 
-  // Back from a book: ask once about that book's bets.
+  // Back from a book: no question, only a spoken nudge for VoiceOver (iOS
+  // has no live regions), since a sighted member sees the ticks.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'active' && awaiting.current) {
-        setAskFor(awaiting.current);
+        AccessibilityInfo.announceForAccessibility(`Back from ${bookName(awaiting.current)}. Tick each bet you placed to track it.`);
         awaiting.current = null;
       }
     });
     return () => sub.remove();
   }, []);
-
-  // iOS has no live regions: say the question out loud when it appears
-  // (UX review), so a VoiceOver user is asked about the bets they placed.
-  useEffect(() => {
-    if (askFor) {
-      AccessibilityInfo.announceForAccessibility(`Back from ${bookName(askFor)}. Did you place these bets as singles?`);
-    }
-  }, [askFor]);
 
   const coverage = useMemo(() => bookCoverage(picks, selected, myBooks), [picks, selected, myBooks]);
   const chosenBook = book && coverage.some((c) => c.bookmaker === book) ? book : coverage[0]?.bookmaker ?? null;
@@ -132,33 +131,32 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
     const opened = await openBookBetslip(step.bookmaker, link, { sameBookOnly: true });
     if (!opened) return;
     awaiting.current = step.bookmaker;
-    setStatus((s) => ({ ...s, [step.bookmaker]: s[step.bookmaker] === 'placed' ? 'placed' : 'opened' }));
+    setOpened((prev) => new Set(prev).add(step.bookmaker));
   };
 
   const start = () => {
     if (planSteps.length === 0) return;
     setSteps(planSteps);
-    setStatus(Object.fromEntries(planSteps.map((s) => [s.bookmaker, 'todo' as StepStatus])));
+    setOpened(new Set());
     setPhase('send');
     // One book: no list to read first, open it straight away.
     if (planSteps.length === 1) void openStep(planSteps[0]!, planSteps[0]!.links[0] ?? null);
   };
 
-  const answer = (book: string, placed: 'placed' | 'todo' | 'skipped') => {
-    if (placed === 'placed') {
-      const step = steps.find((s) => s.bookmaker === book);
-      if (step) onTrack(step.legs.map((l) => l.pick));
-    }
-    setStatus((s) => ({ ...s, [book]: placed }));
-    setAskFor(null);
+  // One tick per pick: ticking tracks it now, unticking takes it back out.
+  const togglePlaced = (leg: BetAllLeg) => {
+    if (isTracked(leg.pick)) onUntrack(leg.pick);
+    else onTrack([leg.pick]);
+  };
+  const placeAll = (step: BetAllStep) => {
+    const rest = step.legs.filter((l) => !isTracked(l.pick)).map((l) => l.pick);
+    if (rest.length > 0) onTrack(rest);
   };
 
-  const doneCount = steps.filter((s) => status[s.bookmaker] === 'placed' || status[s.bookmaker] === 'skipped').length;
-  const allDone = phase === 'send' && steps.length > 0 && doneCount === steps.length;
-  const placedLegs = steps
-    .filter((s) => status[s.bookmaker] === 'placed')
-    .reduce((n, s) => n + s.legs.length, 0);
-  const nextStep = steps.find((s) => status[s.bookmaker] === 'todo' || status[s.bookmaker] === 'opened');
+  const trackedIn = (step: BetAllStep) => step.legs.filter((l) => isTracked(l.pick)).length;
+  const totalLegs = steps.reduce((n, s) => n + s.legs.length, 0);
+  const placedLegs = steps.reduce((n, s) => n + trackedIn(s), 0);
+  const nextStep = steps.find((s) => trackedIn(s) < s.legs.length);
 
   const pickRow = (p: BetAllPick, i: number) => {
     const inBookMode = mode === 'book' && chosenBook != null;
@@ -217,13 +215,6 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
     return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [picks]);
 
-  // Mid-send, a stray tap must not throw away a book that is waiting for
-  // its Placed answer (UX review): the backdrop does nothing, and the X asks.
-  const pendingAnswer = phase === 'send' && !allDone && steps.some((s) => status[s.bookmaker] === 'opened');
-  const requestClose = () => {
-    if (pendingAnswer) setConfirmStop(true);
-    else onClose();
-  };
   const allSelected = picks.length > 0 && picks.every((p) => selected.has(p.key));
 
   const ctaLabel =
@@ -238,6 +229,9 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
       <View style={styles.backdrop}>
         <Pressable
           style={StyleSheet.absoluteFill}
+          // Mid-send a stray tap would lose the member's place in the book
+          // list (reopening starts at Choose); the X and Done still close,
+          // and with every tick already tracked there is nothing to warn about.
           onPress={phase === 'send' ? undefined : onClose}
           accessibilityRole="button"
           accessibilityLabel="Close Bet all"
@@ -253,29 +247,16 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
           <View style={styles.header}>
             <View style={styles.headerBody}>
               <Text style={styles.title} accessibilityRole="header">
-                {phase === 'choose' ? `Bet all · ${sport}` : allDone ? 'All done' : `Bet all · ${doneCount} of ${steps.length} done`}
+                {phase === 'choose' ? `Bet all · ${sport}` : `Bet all · ${placedLegs} of ${totalLegs} tracked`}
               </Text>
-              <Text style={styles.subtitle}>{BET_ALL_LIVE_NOTE}</Text>
+              <Text style={styles.subtitle}>
+                {phase === 'choose' ? BET_ALL_LIVE_NOTE : 'Tick each bet once you’ve placed it to track it.'}
+              </Text>
             </View>
-            <Pressable onPress={requestClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close Bet all">
+            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close Bet all">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
-
-          {confirmStop ? (
-            <View style={styles.ask}>
-              <Text style={styles.askTitle} accessibilityRole="header">Stop Bet all?</Text>
-              <Text style={styles.askBody}>Bets you placed and haven’t marked won’t be tracked.</Text>
-              <View style={styles.askButtons}>
-                <Pressable onPress={() => setConfirmStop(false)} accessibilityRole="button" accessibilityLabel="Keep going" style={[styles.askBtn, styles.askPrimary]}>
-                  <Text style={styles.askPrimaryText}>Keep going</Text>
-                </Pressable>
-                <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Stop Bet all" style={styles.askBtn}>
-                  <Text style={styles.askBtnText}>Stop</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
 
           {phase === 'choose' ? (
             <>
@@ -366,48 +347,63 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
             </>
           ) : (
             <>
-              {askFor ? (
-                <View style={styles.ask} accessibilityLiveRegion="polite">
-                  <Text style={styles.askTitle}>{`Back from ${bookName(askFor)}`}</Text>
-                  <Text style={styles.askBody}>
-                    {(() => {
-                      const n = steps.find((s) => s.bookmaker === askFor)?.legs.length ?? 0;
-                      return `Did you place ${n === 1 ? 'this bet' : `these ${n} bets`} as ${n === 1 ? 'a single' : 'singles'}?`;
-                    })()}
-                  </Text>
-                  <View style={styles.askButtons}>
-                    <Pressable onPress={() => answer(askFor, 'placed')} accessibilityRole="button" accessibilityLabel="Placed, track these bets" style={[styles.askBtn, styles.askPrimary]}>
-                      <Text style={styles.askPrimaryText}>Placed · track</Text>
-                    </Pressable>
-                    <Pressable onPress={() => answer(askFor, 'todo')} accessibilityRole="button" accessibilityLabel="Not yet" style={styles.askBtn}>
-                      <Text style={styles.askBtnText}>Not yet</Text>
-                    </Pressable>
-                    <Pressable onPress={() => answer(askFor, 'skipped')} accessibilityRole="button" accessibilityLabel="Skip this sportsbook" style={styles.askBtn}>
-                      <Text style={styles.askBtnText}>Skip</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ) : null}
               <ScrollView style={styles.list} bounces={false}>
                 {steps.map((step) => {
-                  const st = status[step.bookmaker] ?? 'todo';
+                  const n = trackedIn(step);
+                  const all = n === step.legs.length;
                   const isNext = step === nextStep;
+                  const statusText = all
+                    ? 'All tracked'
+                    : n > 0
+                      ? `${n} of ${step.legs.length} tracked`
+                      : opened.has(step.bookmaker)
+                        ? 'Tick what you placed'
+                        : isNext
+                          ? 'Next'
+                          : 'Waiting';
                   return (
                     <View key={step.bookmaker} style={[styles.step, isNext && styles.stepNext]}>
                       <View style={styles.stepTop}>
                         <Text style={styles.stepTitle}>{`${step.name} · ${step.legs.length} ${step.legs.length === 1 ? 'pick' : 'picks'}`}</Text>
-                        <Text style={[styles.stepStatus, st === 'placed' && styles.stepPlaced]}>
-                          {st === 'placed' ? 'Placed' : st === 'skipped' ? 'Skipped' : st === 'opened' ? 'Opened' : isNext ? 'Next' : 'Waiting'}
-                        </Text>
+                        <Text style={[styles.stepStatus, n > 0 && styles.stepPlaced]}>{statusText}</Text>
                       </View>
-                      {st === 'placed' || st === 'skipped' ? null : (
-                        <>
-                          {step.legs.map((l) => (
-                            <View key={l.key} style={styles.leg}>
+                      {step.legs.map((l) => {
+                        const on = isTracked(l.pick);
+                        return (
+                          <Pressable
+                            key={l.key}
+                            onPress={() => togglePlaced(l)}
+                            accessibilityRole="checkbox"
+                            accessibilityState={{ checked: on }}
+                            accessibilityLabel={`Placed: ${trueMinus(l.label)} ${linesPriceText(l.price)}, ${stakeText(l.stake.risk, l.stake.win)}`}
+                            accessibilityHint={on ? 'Takes it out of tracked bets' : 'Adds it to tracked bets'}
+                            style={({ pressed }) => [styles.leg, pressed && styles.pressed]}
+                          >
+                            <Ionicons
+                              name={on ? 'checkmark-circle' : 'ellipse-outline'}
+                              size={22}
+                              color={on ? colors.betInk : colors.textTertiary}
+                            />
+                            <View style={styles.rowBody}>
                               <Text style={styles.legLabel} numberOfLines={2}>{`${trueMinus(l.label)} ${linesPriceText(l.price)}`}</Text>
                               <Text style={styles.legStake}>{stakeText(l.stake.risk, l.stake.win)}</Text>
                             </View>
-                          ))}
+                          </Pressable>
+                        );
+                      })}
+                      {all ? null : (
+                        <>
+                          {step.legs.length > 1 ? (
+                            <Pressable
+                              onPress={() => placeAll(step)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Placed all ${step.legs.length} at ${step.name}, track them`}
+                              hitSlop={8}
+                              style={styles.markPlaced}
+                            >
+                              <Text style={styles.link}>{`Placed all ${step.legs.length}`}</Text>
+                            </Pressable>
+                          ) : null}
                           {step.links.length <= 1 ? (
                             <Pressable
                               onPress={() => void openStep(step, step.links[0] ?? null)}
@@ -439,11 +435,6 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                               {`${step.unlinked.length === 1 ? 'One pick' : `${step.unlinked.length} picks`} can’t be added by link. Find ${step.unlinked.length === 1 ? 'it' : 'them'} in ${step.name}.`}
                             </Text>
                           ) : null}
-                          {st === 'opened' ? (
-                            <Pressable onPress={() => setAskFor(step.bookmaker)} accessibilityRole="button" accessibilityLabel={`Mark ${step.name} bets as placed`} style={styles.markPlaced}>
-                              <Text style={styles.link}>Mark as placed</Text>
-                            </Pressable>
-                          ) : null}
                         </>
                       )}
                     </View>
@@ -451,14 +442,10 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, onTrack, onCl
                 })}
                 <Text style={styles.note}>{BET_ALL_SINGLES_NOTE}</Text>
               </ScrollView>
-              {allDone ? (
-                <View style={styles.footer}>
-                  <Text style={styles.summary}>
-                    {placedLegs === 0 ? 'Nothing was tracked.' : `${placedLegs} ${placedLegs === 1 ? 'bet' : 'bets'} added to tracked bets.`}
-                  </Text>
-                  <PrimaryButton label="Done" onPress={onClose} />
-                </View>
-              ) : null}
+              <View style={styles.footer}>
+                {placedLegs > 0 ? <Text style={styles.summary}>Untick a bet to take it out of tracked bets.</Text> : null}
+                <PrimaryButton label="Done" onPress={onClose} />
+              </View>
             </>
           )}
         </Pressable>
@@ -544,34 +531,13 @@ const styles = StyleSheet.create({
   },
   footer: { paddingTop: spacing.sm, gap: spacing.sm },
   summary: { fontSize: font.size.footnote, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
-  ask: {
-    ...cardDense,
-    marginBottom: spacing.md,
-    gap: spacing.xs,
-    borderWidth: 1.5,
-    borderColor: colors.tint,
-  },
-  askTitle: { fontSize: font.size.body, fontWeight: font.weight.bold, color: colors.textPrimary },
-  askBody: { fontSize: font.size.footnote, color: colors.textSecondary },
-  askButtons: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
-  askBtn: {
-    flex: 1,
-    minHeight: 44,
-    borderRadius: radii.sm,
-    backgroundColor: colors.tintSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  askPrimary: { backgroundColor: colors.tint },
-  askBtnText: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textPrimary },
-  askPrimaryText: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textInverse },
   step: { ...cardDense, marginBottom: spacing.sm, gap: spacing.sm },
   stepNext: { borderWidth: 1.5, borderColor: colors.tint },
   stepTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm },
   stepTitle: { flex: 1, fontSize: font.size.body, fontWeight: font.weight.bold, color: colors.textPrimary },
   stepStatus: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textSecondary },
   stepPlaced: { color: colors.betInk },
-  leg: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
+  leg: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   legLabel: { flex: 1, fontSize: font.size.footnote, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
   legStake: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
   open: {
