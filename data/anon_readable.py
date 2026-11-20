@@ -918,6 +918,13 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "log_app_error",
     "log_app_timings",
     "save_device_push_token",
+    # Not called by the website directly: site_public_record reads through it
+    # (data/migrations/site_public_record_2026_11.sql), and Postgres checks
+    # EXECUTE on a function inside a view against the caller.
+    "site_public_record_rows",
+    # PostgREST pre-request hook; PostgREST calls it as anon too
+    # (data/migrations/premium_gate_matview_2026_11_20.sql).
+    "premium_pre_request",
 )
 
 # Granted to authenticated and service_role. PUBLIC and anon are revoked.

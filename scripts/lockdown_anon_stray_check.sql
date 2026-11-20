@@ -49,7 +49,7 @@ BEGIN
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'public'
-     AND p.proname NOT IN ('log_app_error', 'log_app_timings', 'save_device_push_token')
+     AND p.proname NOT IN ('log_app_error', 'log_app_timings', 'save_device_push_token', 'site_public_record_rows', 'premium_pre_request')
      AND has_function_privilege('anon', p.oid, 'EXECUTE');
   IF bad IS NOT NULL THEN
     RAISE EXCEPTION 'anon still executes: %', bad;
