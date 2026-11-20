@@ -25,6 +25,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, Bet all: a Placed tick on each pick tracks it at once; the per-book question and the "Stop Bet all?" warning are gone |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, premium gate part 1: signed-in reads of model and Stats data require has_app_access() (66 policies), ops tables closed to signed-in; the scored-picks matview is part 2 |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, anon-key lockdown step B part 1 applied (anon off Stats, odds, scoreboard, ops); part 2 (tracked_bets owner policies) written for the SQL editor |
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, view migrations: byom_facts_schema, open_picks, and discord_publish_state skip after anon-lockdown step A instead of re-running DDL |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, view migrations: byom_official_legs skips after anon-lockdown step A and drops byom_bets before replacing it, so the refresh pass no longer dies on the widened return type |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, anon-key lockdown step A applied to production; the website record view now reads a definer function (anon was refused through an invoker view) |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, BetMGM opened its app with no bet: the link now asks www.<st> first and opens the game's page with the selection (app + Discord) |
