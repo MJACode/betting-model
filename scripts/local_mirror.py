@@ -398,16 +398,29 @@ def keyset_where(info: TableInfo, lo: Sequence[str] | None,
     btree on (a, b) answers as an index range. Keys travel as their Postgres
     text form and are cast back with the column's own type, so a timestamp or
     numeric key round-trips exactly.
+
+    On a key of two or more columns each bound also gets a plain bound on the
+    first column (a >= x, a <= y). The row comparison already implies it, so the
+    rows that match do not change. What changes is the plan: Postgres prices a
+    row comparison by its first column alone and the two ends as unrelated, so
+    on 2026-11-20 it put a 50,000-row chunk of nfl_odds_history at 2.7 million
+    rows and read the whole 4.4 GB table to check it, 33 s a chunk, 104 times
+    in one night. With the plain bound it put the same chunk at 4,508 rows and
+    used the index.
     """
     cols = ", ".join(f"{ALIAS}.{quote_ident(c)}" for c in info.pk)
+    lead = f"{ALIAS}.{quote_ident(info.pk[0])}"
     parts: list[str] = []
     params: list[Any] = []
-    for bound, op in ((lo, ">"), (hi, "<=")):
+    for bound, op, lead_op in ((lo, ">", ">="), (hi, "<=", "<=")):
         if bound is None:
             continue
         ph = ", ".join(f"%s::{t}" for t in info.pk_types)
         parts.append(f"({cols}) {op} ({ph})")
         params.extend(bound)
+        if len(info.pk) > 1:
+            parts.append(f"{lead} {lead_op} %s::{info.pk_types[0]}")
+            params.append(bound[0])
     return (("WHERE " + " AND ".join(parts)) if parts else ""), params
 
 
