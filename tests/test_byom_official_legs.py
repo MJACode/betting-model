@@ -1526,18 +1526,19 @@ def test_rebuild_under_step_a_keeps_anon_off_and_the_later_files_widen_byom_bets
         cur.execute((mig / name).read_text(encoding="utf-8"))
     widened = _byom_bets_result(cur)
     assert "actual" in widened and "home_score" in widened and "away_score" in widened
+    for sig in _SEVEN:
+        cur.execute(
+            "SELECT has_function_privilege('anon', %s::regprocedure, 'EXECUTE'),"
+            "       has_function_privilege('authenticated', %s::regprocedure, 'EXECUTE'),"
+            "       has_function_privilege('service_role', %s::regprocedure, 'EXECUTE')",
+            (sig, sig, sig))
+        assert cur.fetchone() == (False, True, True), sig
     cur.execute("""
-        SELECT has_function_privilege('anon',
-                 'public.byom_bets(integer, jsonb, text)', 'EXECUTE'),
-               has_function_privilege('authenticated',
-                 'public.byom_bets(integer, jsonb, text)', 'EXECUTE'),
-               has_function_privilege('service_role',
-                 'public.byom_bets(integer, jsonb, text)', 'EXECUTE'),
-               position('byom_bets_actual_v1' in prosrc) > 0,
+        SELECT position('byom_bets_actual_v1' in prosrc) > 0,
                position('byom_no_half_yards_v1' in (
                  SELECT prosrc FROM pg_proc
                   WHERE oid = 'public.byom_legs(integer, jsonb, text)'::regprocedure)) > 0
           FROM pg_proc
          WHERE oid = 'public.byom_bets(integer, jsonb, text)'::regprocedure
     """)
-    assert cur.fetchone() == (False, True, True, True, True)
+    assert cur.fetchone() == (True, True)
