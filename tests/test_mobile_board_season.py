@@ -92,8 +92,27 @@ def test_h2h_does_not_shift_the_nba_label_a_second_time():
     assert "season + 1" not in body, body
 
 
-def test_grade_legend_names_the_nba_season_the_way_bettors_do():
-    """The defence grade stays on last season; for the NBA, "the 2026 season"
-    beside a 2026-27 board reads as this season. It says 2025-26."""
+def test_grade_legend_names_the_nba_season_through_the_shared_formatter():
+    """For the NBA, "the 2026 season" reads as the one in progress in October.
+    The legend names the season through teamSeasonLabel, the Teams board's own
+    formatter (#1194, 2026-11-05), so the two can never disagree."""
     src = (ROOT / "mobile" / "src" / "screens" / "StatsScreen.tsx").read_text(encoding="utf-8")
-    assert "sport === 'NBA'" in src[src.index("const matchupTooltip"):src.index("const matchupTooltip") + 1200]
+    start = src.index("const matchupTooltip")
+    tooltip = src[start:src.index("}, [sport, defenceSeason]);", start)]
+    assert "teamSeasonLabel(sport, defenceSeason)" in tooltip
+    assert "the ${seasonName} season" in tooltip
+
+
+@needs_node
+def test_the_shared_formatter_names_the_nba_season_the_way_bettors_do(tmp_path):
+    """NBA 2026 is "2025-26"; a calendar-year sport keeps "2026"."""
+    catalog = ROOT / "mobile" / "src" / "lib" / "teamStatCatalog.ts"
+    (tmp_path / "teamStatCatalog.ts").write_text(catalog.read_text(encoding="utf-8"), encoding="utf-8")
+    script = ("const { teamSeasonLabel } = await import('./teamStatCatalog.ts');\n"
+              "console.log(['NBA', 'MLB'].map((s) => teamSeasonLabel(s, 2026)).join(','));\n")
+    proc = subprocess.run(
+        [NODE, "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert proc.stdout.strip() == "2025-26,2026"

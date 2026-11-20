@@ -75,7 +75,12 @@ after all of them (CLAUDE.md §1b).
 3. **Free archives.** ESPN's core API odds (one provider a game, opening and
    closing numbers, coverage varies by season), closing lines in a stats API
    (the college football stats API carries closes), sportsdataverse season
-   files, a prediction market's history.
+   files, a prediction market's history. Kalshi and Polymarket keep free
+   hourly price history by market (Kalshi with bid and ask): the NBL's game
+   markets from 2025-12-04 on Kalshi, liquid (median 126,016 contracts a team
+   market in 2025-26), and from 2026-01-09 on Polymarket (2026-11-14). Not a
+   book a pick may name; a second price, and a reference where no sharp
+   book is in the feed.
    Also the **free public archives** a sport's own community keeps.
    UFC has two (2026-11-13): fight-canon-db (GitHub releases, MIT;
    BestFightOdds open and closing range, 2007+) and the Ultimate UFC
@@ -128,6 +133,11 @@ often carries only the game clock; look for a feed that stamps events in UTC.
 EuroLeague's shot chart (`live.euroleague.net/api/Points`) does: every shot
 carries `UTC`, so the last shot of the second quarter and the first of the
 third bracket halftime (`data/ingestors/euroleague_shots.py`).
+
+**Price a purchase on days with and without games.** A day with no game
+can still hold a snapshot every five minutes: the NBL's cost 3,090 credits
+against 3,930 and 4,380 for one- and two-game days at the same cadence
+(2026-11-14), so a plan that counts only game days is a third short.
 
 **Buying history.** Plan the credit budget from measured numbers
 (`data/ingestors/odds_quota.plan_credit_budget`, which refuses when it cannot
@@ -196,6 +206,12 @@ define it here when it is built.
   halftime and in-play state, and prop unders against a sharp book; no
   pre-game full-game spread or moneyline has passed in any pro basketball
   search. Women's and men's games differ in periods and overtime.
+  **A league with one book a pick may name** (the NBL, 2026-11-14,
+  `docs/sports/nbl.md`): BetRivers alone prices it among the US books on the
+  feed, full game only, and the sharp book enters the history late (Pinnacle
+  from 2026-27), so two seasons measure value against the exchange and the
+  local books' consensus. Every derivative row then waits on the book's own
+  board (route 4) before it can park.
 - **Low-scoring, goal by goal (hockey, soccer).** Count models price the full
   game, the regulation 3-way and the periods together; the starting goalie (or
   keeper) is a gate, priced only after it is confirmed; overtime decides which

@@ -1831,6 +1831,17 @@ should be -200"): every bet it found was -500 or shorter (188 bets +34.59 units
 +6.13% at DraftKings' close), so at a -200 floor it could never bet. Go-live
 gate standing, all four: 0 settled of 50. Re-read each at 50 settled bets.
 
+**One bet a game (2026-11-19, mike: "Strict, moneyline first").** A game keeps
+one EuroLeague bet across the five models: the moneyline's, else the spread's,
+else the first half's, else the first-quarter total's. The halftime spread bets
+only a game with no pre-game bet. The cuts above are unchanged, but for the
+spread and first-half models the replay column is no longer the live
+population. In the replay (`python -m scripts.euroleague_stacking_check
+--live`, section 5) every one of their bets from 2025-26 sits on a game the
+moneyline also bet, so they keep no game and bet only when the moneyline
+cannot. The 205 bets the rule keeps: +46.25 units, +23.78% [10.4, 36.3]. The
+whole story is `docs/sports/euroleague.md`, "One bet a game, moneyline first".
+
 ## UFC — `ufc_open_moneyline`, fight winner a week out (2026-11-13, mike)
 
 mike, 2026-11-13: *"Use the model building skill to build models for UFC"*,

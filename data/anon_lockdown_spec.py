@@ -262,7 +262,7 @@ STEP_B_DEVICE_FUNCTIONS: tuple[str, ...] = (
     "public.log_sgp_price(text, text, integer, numeric, integer, integer, jsonb, text)",
     "public.member_books_get(text)",
     "public.member_books_set(text, text[])",
-    "public.save_device_push_token(text, text, text, boolean, text)",
+    "public.save_device_push_token(text, text, text, boolean, text, uuid)",
 )
 
 STEP_B_PUBLIC_FUNCTIONS: frozenset[str] = frozenset({
@@ -272,6 +272,14 @@ STEP_B_PUBLIC_FUNCTIONS: frozenset[str] = frozenset({
 ANON_KEEP_RELATIONS: frozenset[str] = frozenset({"site_public_record"})
 ANON_KEEP_FUNCTIONS: frozenset[str] = frozenset({
     "log_app_error",
+    # The website record view reads through this SECURITY DEFINER function,
+    # and Postgres checks EXECUTE on a function inside a view against the
+    # CALLER, so anon keeps it. It returns site_public_record's rows only.
+    "site_public_record_rows",
+    # PostgREST's pre-request hook (premium_gate_matview_2026_11_20.sql).
+    # PostgREST calls it as the request's role, anon included; without
+    # EXECUTE every anon request would fail. It returns at once for anon.
+    "premium_pre_request",
     "log_app_timings",
     # Stays callable without a session so a signed-out opt-out still
     # reaches the server. It is not opt-out-only: a caller who already
@@ -365,23 +373,37 @@ INSERT INTO public.site_retired_models (model_id) VALUES
   {values}
 ON CONFLICT (model_id) DO NOTHING;
 
+-- The rows come from a SECURITY DEFINER function, not straight from
+-- v_public_track_record. That view is security_invoker and reads push_sent
+-- (via v_discord_published), and an invoker view nested in a definer view
+-- still checks the CALLER: after step A, anon got 42501 on
+-- v_discord_published and the website lost its record (2026-11-19, fixed
+-- in production the same evening).
+CREATE OR REPLACE FUNCTION public.site_public_record_rows()
+RETURNS TABLE (sport text, picks integer, wins integer, losses integer, pushes integer,
+               units numeric, risked numeric, first_date date, last_date date)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT r.sport,
+         sum(r.picks)::integer, sum(r.wins)::integer, sum(r.losses)::integer, sum(r.pushes)::integer,
+         round(sum(r.units), 2), round(sum(r.risked), 2),
+         min(r.first_date)::date, max(r.last_date)::date
+    FROM public.v_public_track_record r
+   WHERE NOT EXISTS (SELECT 1 FROM public.site_retired_models s WHERE s.model_id = r.model_id)
+   GROUP BY r.sport
+$fn$;
+ALTER FUNCTION public.site_public_record_rows() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.site_public_record_rows() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.site_public_record_rows() TO postgres, service_role, anon, authenticated;
+
 CREATE OR REPLACE VIEW public.site_public_record
 WITH (security_invoker = false, security_barrier = true) AS
-SELECT r.sport,
-       SUM(r.picks)::integer AS picks,
-       SUM(r.wins)::integer AS wins,
-       SUM(r.losses)::integer AS losses,
-       SUM(r.pushes)::integer AS pushes,
-       ROUND(SUM(r.units), 2)::numeric(12, 2) AS units,
-       ROUND(SUM(r.risked), 2)::numeric(12, 2) AS risked,
-       MIN(r.first_date)::date AS first_date,
-       MAX(r.last_date)::date AS last_date,
+SELECT f.sport, f.picks, f.wins, f.losses, f.pushes,
+       f.units::numeric(12, 2) AS units,
+       f.risked::numeric(12, 2) AS risked,
+       f.first_date, f.last_date,
        now() AS refreshed_at
-  FROM public.v_public_track_record r
- WHERE NOT EXISTS (
-       SELECT 1 FROM public.site_retired_models s
-        WHERE s.model_id = r.model_id)
- GROUP BY r.sport;
+  FROM public.site_public_record_rows() f;
 
 REVOKE ALL ON public.site_public_record FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.site_public_record TO anon, authenticated;
@@ -681,7 +703,7 @@ BEGIN
   SELECT string_agg(p.oid::regprocedure::text, ',') INTO bad
     FROM pg_proc p
    WHERE p.pronamespace = 'public'::regnamespace
-     AND p.proname NOT IN ('log_app_error', 'log_app_timings', 'save_device_push_token')
+     AND p.proname NOT IN ('log_app_error', 'log_app_timings', 'save_device_push_token', 'site_public_record_rows', 'premium_pre_request')
      AND has_function_privilege('anon', p.oid, 'EXECUTE');
   IF bad IS NOT NULL THEN
     RAISE EXCEPTION 'anon still executes: %', bad;

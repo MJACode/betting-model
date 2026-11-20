@@ -182,6 +182,10 @@ was written down. Do not relitigate them; the evidence is in
 
 ### 0. Orient — timeboxed, and it produces facts, not prose
 
+- **If the skill does not load** (the Skill tool answers "Unknown skill"),
+  the session's checkout is on a branch without it. Make a worktree from
+  `origin/master`, read this file there, and build in that worktree. It
+  happened in two builds (learning log, 2026-11-13 and 2026-11-14).
 - Read `references/learning-log.md`: what earlier uses learned, what they
   corrected, and the open items they left.
 - Run the skill's self-check, `python -m pytest -q
@@ -215,7 +219,11 @@ brief to its first live model in a day (2026-11-09 to 11-10,
    sources from the odds clean-up** (`data/prune_odds.PROTECTED_SOURCES`
    lives in code, so until it merges, production thins what was bought), and
    put the measured cost of a large purchase to mike in chat (EuroLeague,
-   2026-11-12, `references/learning-log.md`).
+   2026-11-12, `references/learning-log.md`). Measure it on trial days with
+   and without games, and size it against the balance and the platform's
+   burn to the plan's refill before asking: when it does not fit, the
+   question is a top-up or the refill date, not the purchase (NBL,
+   2026-11-14).
 5. Scout outside the repo for this league (step 2b).
 6. Run the closest league's working methods **unchanged** as the first
    candidates, then the scouted leads and the rest of the grid. Unchanged
@@ -490,6 +498,12 @@ route; tests that fail without the change; the league doc and the session log.
 **The card replays the research bet for bet before it ships.** That replay is
 what found every copy error in the last new league.
 
+**When the card decides is measured, not assumed** (mike, 2026-11-14). Fixed
+hours, "every check until it bets" and "the last read before the start" are
+all candidates, replayed on the card's own path at the live check rate and
+chosen on out-of-sample units. The pick rule locks a BET, never a game that
+did not bet (`references/porting-traps.md`, "When the model decides").
+
 The commit carries `Updated-By:`. The reply that ships it states the price
 range, the bar it cleared (or plainly that it did not), the expected volume,
 and the go-live gate standing as a fact. The branch waits for mike's "merge";
@@ -536,10 +550,10 @@ live slate, or a card's only deciding run.
 
 ## The reply
 
-CLAUDE.md §0 governs: the four headings, nothing above them, each fact once.
-For this work, **"Quick summary of what was done" leads with the grid and the
-results table** (bets, units, return with interval, CLV, early/late), then the
-approach. Every model that is about to ship states its price range there. It
-ends with the line *"What this build taught the skill: …"*, naming what was
-added or corrected. Decisions are written so mike can answer without opening a
+CLAUDE.md §0 governs: the five headings, nothing above them, each fact once.
+For this work, **"Outcome / findings" leads with the grid and the results
+table** (bets, units, return with interval, CLV, early/late), and every model
+that is about to ship states its price range there. "Quick summary of what was
+done" then gives the approach, and ends with the line *"What this build taught
+the skill: …"*, naming what was added or corrected. Decisions are written so mike can answer without opening a
 file: what he gets or loses, one idea per sentence, a recommendation.

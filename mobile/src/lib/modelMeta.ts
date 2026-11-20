@@ -1318,38 +1318,48 @@ const MINUTES_BEFORE_TIP_MODELS: readonly string[] = [
 ];
 
 // The four EuroLeague pre-game rules' page text (UX review, 2026-11-14): what
-// each bets and the prices it lays, and no "line" for the two moneylines. The
-// three side models bet only home underdogs, so each page says one game can
-// carry more than one of their bets, all on the same team (mike, 2026-11-18).
+// each bets and the prices it lays, and no "line" for the two moneylines.
+// Since 2026-11-19 (mike, "Strict, moneyline first") a game gets one bet at
+// most across the five EuroLeague models (models/euroleague_pregame.
+// one_bet_a_game), so every page says so, and the Spreads and First Half
+// pages say they bet only when the models ahead of them do not: in the replay
+// every one of their bets sat beside a Moneyline bet.
 const EUROLEAGUE_CHECKED =
   'This model checks each game once, five to ten minutes before tip-off, at the sportsbook with the best ' +
   'price, which may not be DraftKings. ';
+const EUROLEAGUE_ONE_BET =
+  'Each EuroLeague game gets one bet at most from the five EuroLeague models. When more than one would bet ' +
+  'the same game, the bet goes to the first in this order: Moneyline, Spreads, First Half Moneyline, First ' +
+  'Quarter Totals. The fifth model, Live Spreads, bets at halftime, and only on a game that had no bet before ' +
+  'tip-off. ';
 const MINUTES_BEFORE_TIP_BODY: Readonly<Record<string, string>> = {
   euroleague_home_ml:
     EUROLEAGUE_CHECKED +
     'It bets the home team’s moneyline only when the home team is the underdog on the full-game spread. ' +
     'It never lays more than -200. ' +
-    'The EuroLeague Spreads and First Half Moneyline models also bet only home underdogs. ' +
-    'So when two or all three of these models bet the same game, every bet is on the same team. ' +
+    EUROLEAGUE_ONE_BET +
     'A posted bet is never re-priced: it stays at the price it posted at.',
   euroleague_home_dog_spread:
     EUROLEAGUE_CHECKED +
     'It bets the home team against the full-game spread only when the home team is the underdog. ' +
-    'The EuroLeague Moneyline and First Half Moneyline models also bet only home underdogs. ' +
-    'So when two or all three of these models bet the same game, every bet is on the same team. ' +
+    EUROLEAGUE_ONE_BET +
+    'The EuroLeague Moneyline model, ahead of this one in that order, looks at every game this model bets. ' +
+    'So this model bets a game only when the Moneyline model passes on it. Expect few bets. ' +
     'A posted bet is never re-priced: it stays at the line and price it posted at.',
   euroleague_h1_dog_ml:
     EUROLEAGUE_CHECKED +
     'It bets the home team’s first-half moneyline only when the home team is the underdog for the first half ' +
     'and on the full-game spread. The bet settles on the first half’s score alone, and a ' +
     'tied first half returns the stake. ' +
-    'The EuroLeague Moneyline and Spreads models also bet only home underdogs. ' +
-    'So when two or all three of these models bet the same game, every bet is on the same team. ' +
+    EUROLEAGUE_ONE_BET +
+    'The EuroLeague Moneyline model, ahead of this one in that order, looks at every game this model bets. ' +
+    'So this model bets a game only when the Moneyline and Spreads models both pass on it. Expect few bets. ' +
     'A posted bet is never re-priced: it stays at the price it posted at.',
   euroleague_q1_club_share_total:
     EUROLEAGUE_CHECKED +
-    'It bets the first-quarter total, over or under, and settles on the first quarter’s points alone. A ' +
-    'posted bet is never re-priced: it stays at the line and price it posted at.',
+    'It bets the first-quarter total, over or under, and settles on the first quarter’s points alone. ' +
+    EUROLEAGUE_ONE_BET +
+    'A posted bet is never re-priced: it stays at the line and price it posted at.',
 };
 
 export interface ModelPageTiming {
@@ -1431,7 +1441,9 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         body:
           'This model checks each EuroLeague game during its halftime break and bets it at most once, at the ' +
           'sportsbook with the best offer. The bet is on the full-game spread: it settles on the final ' +
-          `score, overtime included, not on the second half. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
+          'score, overtime included, not on the second half. It bets only a game that had no EuroLeague bet ' +
+          'before tip-off, because each game gets one bet at most from the five EuroLeague models. ' +
+          `${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
         empty: `This model checks each EuroLeague game during its halftime break. ${LIVE_NOT_IN_LIST}`,
         note: 'In-play bets appear on Live Signals, not in this list.',
       };
