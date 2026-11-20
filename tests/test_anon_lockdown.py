@@ -958,3 +958,73 @@ def test_tracked_bets_owner_migration_through_the_worker_path():
         ok, err = _can(dsn, "anon", "DELETE FROM tracked_bets;")
         assert not ok
         assert _psql(dsn, "SELECT count(*) FROM tracked_bets;").strip() == "4"
+
+
+def test_premium_gate_through_the_worker_path():
+    """Premium gate part 1: a signed-in account without access reads 0 rows of
+    model and Stats data; a comped account reads everything; anon still reads
+    only the website record. Applied twice through the worker's apply path."""
+    from data.view_migrations import _apply_one
+    import psycopg2
+
+    assert "premium_gate_2026_11_20.sql" in ACTIVE_MIGRATIONS
+    assert "premium_gate_2026_11_20_undo.sql" not in ACTIVE_MIGRATIONS
+    sql = (MIGRATIONS / "premium_gate_2026_11_20.sql").read_text(encoding="utf-8")
+    files = _sql_files()
+    with scratch_cluster("premium-gate-") as dsn:
+        _psql(dsn, _fixture_sql())
+        _psql_file(dsn, files["site"])
+        _psql_file(dsn, files["a"])
+        _psql_file(dsn, files["b"])
+        _psql(dsn, "INSERT INTO picks (id) VALUES (1); INSERT INTO games DEFAULT VALUES;"
+              if "games" in _psql(dsn, "SELECT to_regclass('public.games');")
+              else "INSERT INTO picks (id) VALUES (1);")
+        _psql(dsn, f"INSERT INTO public.access_grants (user_id, access_source) "
+                   f"VALUES ('{X}', 'comped');")
+
+        class _Conn:
+            def __init__(self, raw):
+                self.raw = raw
+
+            def execute(self, q, params=None):
+                cur = self.raw.cursor()
+                cur.execute(q, params)
+                return cur
+
+            def commit(self):
+                self.raw.commit()
+
+            def rollback(self):
+                self.raw.rollback()
+
+        raw = psycopg2.connect(dsn)
+        try:
+            conn = _Conn(raw)
+            assert _apply_one(conn, "premium_gate_2026_11_20.sql", sql) is None
+            assert _apply_one(conn, "premium_gate_2026_11_20.sql", sql) is None
+        finally:
+            raw.close()
+
+        open_left = _psql(dsn, """
+          SELECT count(*) FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
+           WHERE c.relnamespace = 'public'::regnamespace AND p.polcmd IN ('r','*')
+             AND pg_get_expr(p.polqual, p.polrelid) = 'true';""")
+        assert open_left.strip() == "0"
+        comped = _psql(dsn, f"""
+          BEGIN;
+          SELECT set_config('request.jwt.claims', '{{"sub": "{X}"}}', true);
+          SET LOCAL ROLE authenticated;
+          SELECT count(*) FROM picks;
+          ROLLBACK;""")
+        assert comped.strip().splitlines()[-1] == "1"
+        nobody = _psql(dsn, f"""
+          BEGIN;
+          SELECT set_config('request.jwt.claims', '{{"sub": "{Y}"}}', true);
+          SET LOCAL ROLE authenticated;
+          SELECT count(*) FROM picks;
+          ROLLBACK;""")
+        assert nobody.strip().splitlines()[-1] == "0"
+        ok, _ = _can(dsn, "anon", "SELECT sport FROM site_public_record;")
+        assert ok
+        ok, _ = _can(dsn, "anon", "SELECT 1 FROM picks;")
+        assert not ok
