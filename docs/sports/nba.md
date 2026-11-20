@@ -13,6 +13,10 @@
 > changes came out of it, both below: `nba_prop_projection` no longer bets threes
 > overs, and the three shooting-luck total models wait for 10 games again. What
 > was asked, tried, found and left open: **`docs/nba_reassessment_2026_11.md`**.
+>
+> **First basket (2026-11-20, mike):** a market never priced before. The fair price,
+> the books' margins, what history costs and what is not yet known:
+> **`docs/nba_first_basket.md`**. Both first-basket markets are collected; nothing bets them.
 
 ## The models
 

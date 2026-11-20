@@ -5016,6 +5016,13 @@ PROP_MARKETS_NBA = [
     # the refresh pass both fetch exactly this list.
     "player_blocks_steals",
     "player_rebounds_assists",
+    # Added 2026-11-20 (mike: "invent a new way to make this profitable"):
+    # who scores the game's first basket, and each team's. Collected for the
+    # first-basket model's forward test; no model reads them yet, so nothing
+    # bets them. Seven books quote them (1 credit an event a market live);
+    # history is sold back to at least 2024-03 (docs/nba_first_basket.md).
+    "player_first_basket",
+    "player_first_team_basket",
 ]
 
 # NFL player prop markets (The Odds API americanfootball_nfl player-prop keys).
