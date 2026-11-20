@@ -1470,3 +1470,75 @@ def test_rebuilding_drops_byom_bets_before_replacing_its_return_type(scratch):
     assert cur.fetchone() == (True, True, True)
     cur.execute(sql)
     assert _byom_bets_result(cur) == result
+
+
+_LATER_SQL = (
+    BAND_SQL, LOCK_READ_SQL, PUSHDOWN_SQL, PROP_LOOKUP_SQL, NHL_SQL,
+    SAVE_SQL, UNITS_SQL, TREND_SQL, ACTUAL_SQL, HALF_YARDS_SQL,
+)
+_SEVEN = (
+    "public.byom_risk_units(numeric)",
+    "public.byom_win_units(numeric)",
+    "public.byom_leg_label(text, text, text, numeric, text)",
+    "public.byom_legs(integer, jsonb, text)",
+    "public.byom_record(integer, jsonb)",
+    "public.byom_bets(integer, jsonb, text)",
+    "public.byom_backtest(integer, jsonb)",
+)
+
+
+def test_rebuild_under_step_a_keeps_anon_off_and_the_later_files_widen_byom_bets(scratch):
+    """Default privileges grant anon EXECUTE on a new function.
+
+    Step A has already revoked it. A rebuild must take that direct grant
+    off again and give service_role EXECUTE. The files after this one
+    then put actual, home_score and away_score back, and anon stays off."""
+    _pg, cur = scratch
+    cur.execute("CREATE ROLE service_role NOLOGIN")
+    cur.execute("""
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+          GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role
+    """)
+    cur.execute("""
+        CREATE TABLE public.picks (id integer);
+        REVOKE ALL ON public.picks FROM PUBLIC, anon, authenticated;
+        REVOKE ALL ON public.byom_official_legs FROM anon;
+    """)
+    cur.execute("""
+        CREATE OR REPLACE FUNCTION public.byom_leg_label(
+            p_market text, p_side text, p_team text,
+            p_point numeric, p_player text)
+        RETURNS text LANGUAGE sql IMMUTABLE
+        SET search_path = public, pg_temp
+        AS $$ SELECT 'x' $$
+    """)
+    mig = ROOT / "data" / "migrations"
+    cur.execute((mig / SQL_NAME).read_text(encoding="utf-8"))
+    assert "actual" not in _byom_bets_result(cur)
+    for sig in _SEVEN:
+        cur.execute(
+            "SELECT has_function_privilege('anon', %s::regprocedure, 'EXECUTE'),"
+            "       has_function_privilege('authenticated', %s::regprocedure, 'EXECUTE'),"
+            "       has_function_privilege('service_role', %s::regprocedure, 'EXECUTE')",
+            (sig, sig, sig))
+        assert cur.fetchone() == (False, True, True), sig
+    for name in _LATER_SQL:
+        cur.execute((mig / name).read_text(encoding="utf-8"))
+    widened = _byom_bets_result(cur)
+    assert "actual" in widened and "home_score" in widened and "away_score" in widened
+    for sig in _SEVEN:
+        cur.execute(
+            "SELECT has_function_privilege('anon', %s::regprocedure, 'EXECUTE'),"
+            "       has_function_privilege('authenticated', %s::regprocedure, 'EXECUTE'),"
+            "       has_function_privilege('service_role', %s::regprocedure, 'EXECUTE')",
+            (sig, sig, sig))
+        assert cur.fetchone() == (False, True, True), sig
+    cur.execute("""
+        SELECT position('byom_bets_actual_v1' in prosrc) > 0,
+               position('byom_no_half_yards_v1' in (
+                 SELECT prosrc FROM pg_proc
+                  WHERE oid = 'public.byom_legs(integer, jsonb, text)'::regprocedure)) > 0
+          FROM pg_proc
+         WHERE oid = 'public.byom_bets(integer, jsonb, text)'::regprocedure
+    """)
+    assert cur.fetchone() == (True, True)
