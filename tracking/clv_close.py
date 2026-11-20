@@ -37,6 +37,10 @@ WHERE THE QUOTES COME FROM. Our own stored rows (`odds`, `player_prop_odds`)
 for games from STORED_FROM, when nothing was being deleted; for older games,
 the quotes bought from the feed's history into `clv_close_quotes`
 (scripts/clv_close_history.py), together with whatever stored rows survived.
+Tennis is the exception: its prices are only in `tennis_odds_quotes`
+(scripts/tennis_moneyline_card.py), stored change-only, so a pull is read
+from the card's own poll ledger (tennis_quotes, below). Until 2026-11-20 this
+module read none of them, and every tennis bet was stamped with no close.
 
 HOW IT IS WRITTEN. The earlier writers (paper_tracker._capture_clv and the
 recompute in clv_standard_v2_2026_10_14.sql) still stamp a bet first; this
@@ -317,6 +321,55 @@ def history_quotes(conn, bet: Bet) -> list[Quote]:
     return out
 
 
+_TENNIS_TOURS = ("ATP", "WTA")
+_TENNIS_TABLES = ("tennis_moneyline_decisions", "tennis_odds_fetches", "tennis_odds_quotes")
+
+
+def _tennis_ready(conn) -> bool:
+    row = conn.execute("SELECT " + " AND ".join(
+        f"to_regclass('public.{t}') IS NOT NULL" for t in _TENNIS_TABLES)).fetchone()
+    conn.commit()
+    return bool(row and row[0])
+
+
+def tennis_quotes(conn, bet: Bet) -> list[Quote]:
+    """The bet book's tennis match-winner quote at each of the card's polls
+    after the bet and at or before the start.
+
+    `tennis_odds_quotes` holds a row only when a book's quote CHANGED, and its
+    `snapshot_ts` is the poll that saw the change. So a row after the bet is
+    not the test of a pull after the bet: a book whose price held still has no
+    row then. The pulls are the card's live polls in `tennis_odds_fetches`
+    (one per book group, `snapshot_ts` the poll instant, `events` > 0 when the
+    feed answered with matches), and the book's quote at a pull is its newest
+    row at or before it. The match is the feed event the card decided
+    (`tennis_moneyline_decisions`, by game id); pick_side home is the feed's
+    home player, as the card wrote it."""
+    if (bet.bound is None or bet.market != "h2h"
+            or bet.game_id.split("_", 1)[0] not in _TENNIS_TOURS or not _tennis_ready(conn)):
+        return []
+    rows = conn.execute("""
+        WITH ev AS (
+            SELECT DISTINCT event_id, sport_key FROM public.tennis_moneyline_decisions
+             WHERE game_id = %s),
+        polls AS (
+            SELECT DISTINCT ev.event_id, f.snapshot_ts AS pulled_at
+              FROM ev JOIN public.tennis_odds_fetches f
+                ON f.sport_key = ev.sport_key AND f.endpoint = 'live' AND f.events > 0
+               AND f.snapshot_ts > %s AND f.snapshot_ts <= %s)
+        SELECT p.pulled_at, q.home_price, q.away_price
+          FROM polls p
+          CROSS JOIN LATERAL (
+               SELECT t.home_price, t.away_price FROM public.tennis_odds_quotes t
+                WHERE t.event_id = p.event_id AND t.bookmaker = %s AND t.market = 'h2h'
+                  AND t.snapshot_ts <= p.pulled_at
+                ORDER BY t.snapshot_ts DESC LIMIT 1) q
+    """, (bet.game_id, bet.created_at, bet.bound, bet.bet_book)).fetchall()
+    conn.commit()
+    return [Quote("h2h", _utc(r[0]), None, {"home_price": _f(r[1]), "away_price": _f(r[2])}, "feed")
+            for r in rows]
+
+
 def _game_quote(market, fetched, vals, source, bet: Bet) -> Quote:
     spread, total, home, away, draw, over, under = vals
     number = _f(spread) if "spreads" in market else (_f(total) if "totals" in market else None)
@@ -420,7 +473,8 @@ def quotes_for(conn, bet: Bet, history: bool = True) -> list[Quote]:
     """Every quote choose_final may use: to the first-play bound when there is
     one, else to the listed start."""
     b = late_bet(bet) or bet
-    return feed_quotes(conn, b) + (history_quotes(conn, b) if history else [])
+    return (feed_quotes(conn, b) + tennis_quotes(conn, b)
+            + (history_quotes(conn, b) if history else []))
 
 
 def close_for(conn, bet: Bet) -> Close:
