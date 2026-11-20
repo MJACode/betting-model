@@ -83,7 +83,10 @@ def test_refresh_dispatch_observes_and_daily_does_not():
     table = _SRC[_SRC.index("step_fns = {"):_SRC.index("success = _timed_step")]
     assert "step_health_check(run_date, fail_on_crit=False)" in table
     daily = [ln for ln in _SRC.splitlines() if 'results["health_check"]' in ln]
-    assert daily == ['    results["health_check"] = step_health_check(run_date)'], (
+    # Eight spaces: since #1186 (2026-11-05) every daily step sits inside the
+    # deploy-drain `try:` of run_daily_pipeline. The exact indent still pins
+    # the call as unconditional: one wrapped in an `if` would be deeper.
+    assert daily == ['        results["health_check"] = step_health_check(run_date)'], (
         "daily must keep the default fail_on_crit=True; a flag here would "
         "drop the Actions-red intent")
 

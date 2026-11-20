@@ -1736,5 +1736,167 @@
     "requested_by": "mike",
     "note": "The first run of the daily Betfair ANZ store on the worker itself, so the worker's own network and database path is tested the day it ships (issue #1371). Expected: 16 files listed, 2 fetched (2026_09 and 2026_10, the daily check of the two newest months), 0 rows stored, because 2026-10 was the last file published as of 2026-11-16.",
     "args": {}
+  },
+  {
+    "key": "ncaaf-hourly-history-2023",
+    "job_type": "historical_odds",
+    "requested_by": "mike",
+    "note": "mike 2026-11-14: 'Buy all of it now'. Every hour (00-23 UTC) of NCAAF moneyline and spread history for the per-model decision-timing replay of ncaaf_moneyline_market (scripts/ncaaf_moneyline_timing.py). 20 credits a snapshot (two markets, ten books, one region); the stored 14Z and 23Z hours skip on the ledger; capped at 52,000. Queued directly on 2026-11-14 as worker_jobs 1316678-1316680 under these keys, so this entry inserts nothing.",
+    "args": {
+      "sport": "NCAAF",
+      "start": "2023-08-17",
+      "end": "2023-12-09",
+      "hours_utc": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23
+      ],
+      "markets": [
+        "h2h",
+        "spreads"
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "betmgm",
+        "williamhill_us",
+        "fanatics",
+        "bovada",
+        "pinnacle",
+        "betrivers",
+        "hardrockbet",
+        "betparx"
+      ],
+      "credit_cap": 52000
+    }
+  },
+  {
+    "key": "ncaaf-hourly-history-2024",
+    "job_type": "historical_odds",
+    "requested_by": "mike",
+    "note": "mike 2026-11-14: 'Buy all of it now'. Every hour (00-23 UTC) of NCAAF moneyline and spread history for the per-model decision-timing replay of ncaaf_moneyline_market (scripts/ncaaf_moneyline_timing.py). 20 credits a snapshot (two markets, ten books, one region); the stored 14Z and 23Z hours skip on the ledger; capped at 52,000. Queued directly on 2026-11-14 as worker_jobs 1316678-1316680 under these keys, so this entry inserts nothing.",
+    "args": {
+      "sport": "NCAAF",
+      "start": "2024-08-15",
+      "end": "2024-12-07",
+      "hours_utc": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23
+      ],
+      "markets": [
+        "h2h",
+        "spreads"
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "betmgm",
+        "williamhill_us",
+        "fanatics",
+        "bovada",
+        "pinnacle",
+        "betrivers",
+        "hardrockbet",
+        "betparx"
+      ],
+      "credit_cap": 52000
+    }
+  },
+  {
+    "key": "ncaaf-hourly-history-2025",
+    "job_type": "historical_odds",
+    "requested_by": "mike",
+    "note": "mike 2026-11-14: 'Buy all of it now'. Every hour (00-23 UTC) of NCAAF moneyline and spread history for the per-model decision-timing replay of ncaaf_moneyline_market (scripts/ncaaf_moneyline_timing.py). 20 credits a snapshot (two markets, ten books, one region); the stored 14Z and 23Z hours skip on the ledger; capped at 52,000. Queued directly on 2026-11-14 as worker_jobs 1316678-1316680 under these keys, so this entry inserts nothing.",
+    "args": {
+      "sport": "NCAAF",
+      "start": "2025-08-14",
+      "end": "2025-12-06",
+      "hours_utc": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23
+      ],
+      "markets": [
+        "h2h",
+        "spreads"
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "betmgm",
+        "williamhill_us",
+        "fanatics",
+        "bovada",
+        "pinnacle",
+        "betrivers",
+        "hardrockbet",
+        "betparx"
+      ],
+      "credit_cap": 52000
+    }
   }
 ]

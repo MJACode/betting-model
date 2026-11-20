@@ -45,9 +45,14 @@ def test_every_rule_file_is_path_scoped(path):
     assert "paths:" in front, f"{path.name} is not path-scoped"
     globs = re.findall(r'^\s*-\s*"(.+?)"', front, re.M)
     assert globs, f"{path.name} declares paths: with no patterns"
+    # A file .gitignore names line for line is local by design: `.env` exists
+    # on the PC's main checkout and nowhere git puts a copy (a worktree, CI).
+    # The rule still loads where the file is. Any other missing path is a typo.
+    local_only = {ln.strip() for ln in
+                  (REPO / ".gitignore").read_text(encoding="utf-8").splitlines()}
     for g in globs:
         top = g.split("/")[0].replace("**", "")
-        if top:
+        if top and g not in local_only:
             assert (REPO / top).exists(), (
                 f"{path.name} scopes to {g!r} but {top!r} does not exist — the "
                 f"rule would never load")

@@ -147,9 +147,18 @@ def test_closing_line_reads_name_the_book():
     """CLV close is parameterized (sharp first, then the pick's book).
     An unfiltered odds read would let any book's number become the close."""
     src = _source("tracking/paper_tracker.py")
+    # Two ways a read may name its book: a bound parameter, or (in SQL that
+    # runs per pick) the pick's own bet book, spelled exactly as
+    # _bet_price_and_book picks it: decision_book when the pick carries a
+    # decision price, else DraftKings. The second is the NCAAB first-half
+    # "is there a close yet" test in the CLV backfill scan (#1167, 2026-11-04).
+    own_book = (r"bookmaker\s*=\s*lower\(btrim\(CASE\s+"
+                r"WHEN\s+p\.decision_odds\s+IS\s+NOT\s+NULL\s+"
+                r"AND\s+btrim\(COALESCE\(p\.decision_book,\s*''\)\)\s*<>\s*''\s+"
+                r"THEN\s+p\.decision_book\s+ELSE\s+'draftkings'\s+END\)\)")
     for block in src.split("FROM odds")[1:]:
         window = block[:500]
-        assert re.search(r"bookmaker\s*=\s*%s", window), (
+        assert re.search(r"bookmaker\s*=\s*%s", window) or re.search(own_book, window), (
             "a paper_tracker odds read names no bookmaker — any book's "
             "price could become the close"
         )
