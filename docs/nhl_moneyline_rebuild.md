@@ -232,17 +232,18 @@ made: nothing graded below beats the live model.
 
 **The live record, by what decided it** (settled pre-game BETs on 2026-27
 games, VOID and DUPLICATE excluded, staked like the published record: to win
-1u, risk capped at 3u; `picks`, read 2026-11-20 ~01:30Z):
+1u, risk capped at 3u; production `picks`, read 2026-11-20 04:09Z):
 
 | who decided | bets | W-L | units | return on risk |
 |---|---|---|---|---|
-| the retired tree model (registry 170), written 09-22..10-02 | 6 | 1-5 | -2.99 | -62.0% |
-| the live model (registry 176) before the goalie gate, 10-16..10-20 | 11 | 5-6 | -1.68 | -14.0% |
-| the live model since the goalie gate, 10-22..11-18 | 55 | 28-27 | +1.39 | +2.4% (roughly -27..+32) |
+| the retired tree model (registry 170), games 09-29..10-07 (one preseason) | 6 | 1-5 | -2.99 | -62.0% |
+| the live model (registry 176) before the goalie gate, games 10-16..10-20 | 11 | 5-6 | -1.68 | -14.0% |
+| the live model since the goalie gate, games 10-22..11-19 | 56 | 29-27 | +2.39 | +4.0% (roughly -25..+33) |
 
-The season's loss is the first 17 bets: the retired model and the five days
-the live model decided before both starting goalies were confirmed. Since the
-gate (2026-10-20) the record is level, and 55 bets cannot tell +2% from +6%.
+Regular season to date: 72 settled, 35-37, -1.04u. Every unit of it was lost
+in the first 16 regular-season bets: the retired model and the five days the
+live model decided before both starting goalies were confirmed. Since the gate
+(2026-10-20) the model is up, and 56 bets cannot tell +4% from 0 or from +6%.
 
 **Closing-line value: two definitions, do not compare them.** The "beat
 Pinnacle close" column in this file's tables is Pinnacle's own move from its
@@ -314,7 +315,7 @@ end at 2026-10-12 (the one-off backfill; no scheduled job writes them). No live
 model reads them, so nothing is broken, but no expected-goals version can be
 served until that ingest is scheduled, and none above earned it.
 
-**Read.** The current model with its goalie gate is level live. Replayed at
+**Read.** The current model with its goalie gate is +2.39u on 56 live. Replayed at
 0.06 it is positive in 5 of 6 seasons at the last fetch and 3 of 6 at ~8 h
 (2025-26 negative at both). None of the seven alternatives beats
 it, and no version beats Pinnacle on accuracy. The next measurement is the
