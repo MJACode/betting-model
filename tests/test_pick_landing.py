@@ -21,7 +21,7 @@ DK = "https://sportsbook.draftkings.com/?outcomes=0HC84998421N1950_1"
 FD = "https://sportsbook.fanduel.com/addToBetslip?marketId=42.579972737&selectionId=484735"
 MGM = ("https://sports.{state}.betmgm.com/en/sports"
        "?options=19976337-1562536174-2307719716&type=Single")
-MGM_MA = ("https://www.ma.betmgm.com/en/sportsapp/sports"
+MGM_MA = ("https://www.ma.betmgm.com/en/sportsapp/sports/events/19976337"
           "?options=19976337-1562536174-2307719716&type=Single")
 
 

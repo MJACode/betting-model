@@ -197,9 +197,22 @@ def _betmgm_slip(filled: str) -> str | None:
     match = _MGM_STORED.match(filled)
     if not match:
         return None
-    claimed = f"{match.group(1)}/sportsapp/sports{match.group(2) or ''}"
+    query = match.group(2) or ""
+    claimed = f"{match.group(1)}/sportsapp/sports{_betmgm_event_path(query)}{query}"
     return claimed.replace("https://sports.ma.betmgm.com/",
                            "https://www.ma.betmgm.com/", 1)
+
+
+_MGM_ONE_CLASSIC = re.compile(r"[?&]options=(\d+)-\d+-\d+(?:&|$)")
+
+
+def _betmgm_event_path(query: str) -> str:
+    """``betmgmEventPath`` in betslipLinks.ts: ``/events/<fixture>`` for one
+    classic ``fixture-market-option`` selection, else "". BetMGM's docs:
+    "Add one selection and open the event page". The member lands on the
+    game even when the selection does not reach the slip (Matt, 2026-11-20)."""
+    found = _MGM_ONE_CLASSIC.search(query)
+    return f"/events/{found.group(1)}" if found else ""
 
 
 def slip_url(key: str, link: str | None) -> str | None:

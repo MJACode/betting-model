@@ -90,10 +90,33 @@ export function linkShape(url: string | null): string | null {
  */
 export function appClaimedAlternates(book: string, claimed: string | null): string[] {
   if (book !== 'betmgm' || !claimed) return [];
-  const m = /^https:\/\/sports\.([a-z]{2})\.betmgm\.com(\/.*)$/.exec(claimed);
+  const m = /^https:\/\/(www|sports)\.([a-z]{2})\.betmgm\.com(\/.*)$/.exec(claimed);
   if (!m) return [];
-  const [, st, rest] = m;
-  return [`www.${st}.betmgm.com`, `${st}.betmgm.com`].map((host) => `https://${host}${rest}`);
+  const [, first, st, rest] = m;
+  const hosts = first === 'www'
+    ? [`sports.${st}.betmgm.com`, `${st}.betmgm.com`]
+    : [`www.${st}.betmgm.com`, `${st}.betmgm.com`];
+  return hosts.map((host) => `https://${host}${rest}`);
+}
+
+/**
+ * `/events/<fixtureId>` for a BetMGM betslip query that names ONE selection
+ * in the classic `fixture-market-option` form, else "".
+ *
+ * BetMGM's deep-link docs (sportsapi.nj.betmgm.com/restapi/
+ * generatedeeplink.html, read by worker job 1343418): "Add one selection
+ * and open the event page", `/en/sports/events/<fixtureId>?options=<fixture>-
+ * <market>-<option>`. Matt, 2026-11-20: the app opened with no bet on the
+ * slip from `/en/sportsapp/sports?options=…`. On the event page the member
+ * is on that game even when the selection does not land, or has closed
+ * (BetMGM opens a new market when a main line moves: Houston @ Kansas 1H,
+ * 69.5 → 70.5, market 1580492642 → 1580492631). A `2:`/`6:`-prefixed fixture
+ * (the newer id form) and a multi-selection query keep the old path: no
+ * event page for them is documented.
+ */
+export function betmgmEventPath(query: string): string {
+  const m = /[?&]options=(\d+)-\d+-\d+(?:&|$)/.exec(query);
+  return m ? `/events/${m[1]}` : '';
 }
 
 /** The books whose app claims a link (the cases below). */
@@ -110,6 +133,9 @@ export const APP_CLAIMING_BOOKS: readonly string[] = ['draftkings', 'fanduel', '
  *   fanduel         sportsbook.fanduel.com      every path
  *   williamhill_us  sportsbook.caesars.com      /us/<state>/bet/*
  *   betmgm          sports.<state>.betmgm.com   /<lang>/sportsapp/* ONLY
+ *                   (and www.<state>, <state>: job 1343418. Built on
+ *                   www.<state> first since 2026-11-20; iOS took it on
+ *                   5 of 5 logged taps.)
  *
  * BetMGM's stored betslip link is `/en/sports?options=…`, which its app does
  * not claim, so it always opened Safari (Matt, 2026-11-12: "MGM link took me
@@ -144,11 +170,17 @@ export function appClaimedLink(
       if (filled) return /^https:\/\/sportsbook\.caesars\.com\/us\/[a-z]{2}\/bet\//.test(filled) ? filled : null;
       return st ? `https://sportsbook.caesars.com/us/${st}/bet/` : null;
     case 'betmgm': {
+      // www.<state> first: iOS refused sports.<state> and took www.<state>
+      // on every logged BetMGM tap (app_errors alt_host, 2026-11-15 to
+      // 2026-11-20, 5 of 5). sports.<state> is still asked after a refusal
+      // (appClaimedAlternates).
       if (filled) {
-        const m = /^(https:\/\/sports\.[a-z]{2}\.betmgm\.com\/[a-z]{2})\/sports(\?.*)?$/.exec(filled);
-        return m ? `${m[1]}/sportsapp/sports${m[2] ?? ''}` : null;
+        const m = /^https:\/\/sports\.([a-z]{2})\.betmgm\.com\/([a-z]{2})\/sports(\?.*)?$/.exec(filled);
+        if (!m) return null;
+        const [, host, lang, query = ''] = m;
+        return `https://www.${host}.betmgm.com/${lang}/sportsapp/sports${betmgmEventPath(query)}${query}`;
       }
-      return st ? `https://sports.${st}.betmgm.com/en/sportsapp/sports` : null;
+      return st ? `https://www.${st}.betmgm.com/en/sportsapp/sports` : null;
     }
     default:
       return null;
