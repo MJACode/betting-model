@@ -338,7 +338,13 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      # past games.
                      "odds_api_euroleague_history",
                      "odds_api_euroleague_inplay_history",
-                     "odds_api_euroleague_period_history")
+                     "odds_api_euroleague_period_history",
+                     # NBL (2026-11-14): every snapshot the feed holds of the
+                     # full game, pre-game (change-only) and in play
+                     # (data/ingestors/nbl_odds_history.py). Paid rows on past
+                     # games.
+                     "odds_api_nbl_history",
+                     "odds_api_nbl_inplay_history")
 
 # Sports whose `odds` rows keep their whole PRICE PATH (2026-10-17, mike: "We
 # need nba spread / ml / totals models ... find edge"; docs/nba_models_2026.md
@@ -373,7 +379,11 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
 # EuroLeague joins it from its first stored day (2026-11-12): a new league whose
 # research reads when each book moved, and a small board (about ten games a
 # round).
-PATH_KEPT_SPORTS = ("NBA", "NCAAB", "NCAABW", "NCAAF", "EUROLEAGUE")
+#
+# The NBL joins it from its first stored day (2026-11-14): a new league whose
+# research reads when each book moved against the one book a pick may name
+# (BetRivers), on a board of two to five games a day.
+PATH_KEPT_SPORTS = ("NBA", "NCAAB", "NCAABW", "NCAAF", "EUROLEAGUE", "NBL")
 
 
 def _unprotected(params: dict, table: str | None = None) -> str:

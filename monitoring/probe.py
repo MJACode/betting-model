@@ -86,6 +86,8 @@ _SPORT_TOKENS = {
     "basketball_wncaab": "NCAABW", "womens-college-basketball": "NCAABW",
     # EuroLeague (2026-11-12): the Odds API key.
     "basketball_euroleague": "EUROLEAGUE",
+    # NBL (2026-11-14): the Odds API key.
+    "basketball_nbl": "NBL",
 }
 
 # A request that never returns is the one failure mode this repo has no defence

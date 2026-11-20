@@ -116,6 +116,7 @@ MAX_SILENCE: dict = {
     "ncaab_odds_capture": 20,
     # The women's capture: the same cadence and the same bound.
     "ncaabw_odds_capture": 20,
+    "nbl_odds_capture": 20,
     # Every five minutes, 24x7. The tick beats when it returns, including the
     # ones that poll nothing because the cadence has not elapsed, so 20
     # minutes is four missed ticks: a stopped feed, not a quiet afternoon.

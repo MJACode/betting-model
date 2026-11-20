@@ -474,6 +474,21 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "euroleague_inplay_quotes",
     "euroleague_odds_unmatched",
     "euroleague_period_fetches",
+    # NBL (2026-11-14). Created on demand by data/ingestors/nbl_teams.ensure_tables
+    # and data/ingestors/nbl_espn.ensure_tables (identity, schedule, quarter
+    # scores, ESPN's raw events and game summaries) and
+    # data/ingestors/nbl_odds_history.py (the purchase ledger, in-play quotes,
+    # unplaced events). Never read by the app.
+    "nbl_teams",
+    "nbl_events",
+    "nbl_espn_raw",
+    "nbl_period_scores",
+    "nbl_espn_summaries",
+    "nbl_odds_snapshots",
+    "nbl_inplay_quotes",
+    "nbl_odds_unmatched",
+    # scripts/nbl_dk_probe.py: DraftKings' raw NBL board answers (run by mike).
+    "nbl_dk_raw",
     # Tennis (2026-11-13). Created on demand by
     # data/ingestors/tennis_archive.ensure_tables (the match archive),
     # data/ingestors/tennis_espn.ensure_tables (ESPN's results) and

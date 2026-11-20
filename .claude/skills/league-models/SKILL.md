@@ -182,6 +182,10 @@ was written down. Do not relitigate them; the evidence is in
 
 ### 0. Orient — timeboxed, and it produces facts, not prose
 
+- **If the skill does not load** (the Skill tool answers "Unknown skill"),
+  the session's checkout is on a branch without it. Make a worktree from
+  `origin/master`, read this file there, and build in that worktree. It
+  happened in two builds (learning log, 2026-11-13 and 2026-11-14).
 - Read `references/learning-log.md`: what earlier uses learned, what they
   corrected, and the open items they left.
 - Run the skill's self-check, `python -m pytest -q
@@ -215,7 +219,11 @@ brief to its first live model in a day (2026-11-09 to 11-10,
    sources from the odds clean-up** (`data/prune_odds.PROTECTED_SOURCES`
    lives in code, so until it merges, production thins what was bought), and
    put the measured cost of a large purchase to mike in chat (EuroLeague,
-   2026-11-12, `references/learning-log.md`).
+   2026-11-12, `references/learning-log.md`). Measure it on trial days with
+   and without games, and size it against the balance and the platform's
+   burn to the plan's refill before asking: when it does not fit, the
+   question is a top-up or the refill date, not the purchase (NBL,
+   2026-11-14).
 5. Scout outside the repo for this league (step 2b).
 6. Run the closest league's working methods **unchanged** as the first
    candidates, then the scouted leads and the rest of the grid. Unchanged
