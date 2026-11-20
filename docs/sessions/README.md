@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, the PC backup copies only what changed each night and checks everything once a month, its schedule and runs on the dashboard; the other four odds indexes rebuilt, 3.38 GB back (#1493, #1478) |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Performance tab: the sportsbook-sync note now sits on the same 16pt gutter as the other cards (#1491) |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Key Metrics: an exec summary tab (results, beating the close, models, operations), first in the ops dashboard |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, the three NCAAF totals bet after kickoff voided out of the record (mike; worker job 1478685, void notice posted) |
