@@ -2927,13 +2927,22 @@ def _tally(rows: list[tuple]) -> dict:
     return t
 
 
+def all_matched_text(pushes: int) -> str:
+    """Every measured bet closed at the price taken: none beat it, none
+    trailed it. The app says the same (mobile/src/lib/clvBeat.allMatchedText)."""
+    return "1 matched the close" if pushes == 1 else f"all {pushes} matched the close"
+
+
 def clv_line(t: dict) -> str:
     """Headline beat rate, with its denominator.
 
     Beat rate is beats / (beats + losses). ``clv_n`` is that denominator.
     A 0% close is a push (``clv_push``) and is not in it. The push count is
     inside the parentheses when it is not zero: ``50% beat close (1/2, 7 push)``.
-    An all-push slate has no rate to divide, so the line is ``0 measured, N push``.
+    An all-push slate has no rate to divide, so the line is ``all N matched the
+    close`` (``1 matched the close`` for one). It said ``0 measured, N push``
+    until 2026-11-20, which read as "nothing was measured" on a night when
+    every EuroLeague bet was measured and closed at the price taken.
     Nothing measured and no pushes → empty, and the caller omits the clause.
 
     The denominator is not decoration: CLV is only captured where the same
@@ -2945,7 +2954,7 @@ def clv_line(t: dict) -> str:
     if decisive <= 0 and pushes <= 0:
         return ""
     if decisive <= 0:
-        return f"0 measured, {pushes} push"
+        return all_matched_text(pushes)
     pct = beats / decisive * 100
     line = f"{pct:.0f}% beat close ({beats}/{decisive}"
     if pushes:

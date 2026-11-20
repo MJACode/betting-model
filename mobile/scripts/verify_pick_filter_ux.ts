@@ -5,7 +5,7 @@
  *
  * Designer locks (Matt greenlit 2026-09-14): idle chrome is search + Filters;
  * Public hides when under 20% of on-screen rows have a split; search is in the badge / pills /
- * Clear all; leaving Today resets Signal; any segment change resets an
+ * Clear all; a narrowed Signal resets on every board; any segment change resets an
  * impossible Market; Games-empty copy names the board and offers Clear games.
  */
 
@@ -82,8 +82,10 @@ check('Signals/Live Minimums name the action-filter overlap',
   /Optional extra floor/.test(pf));
 check('Market section still hides when it cannot cut', /\{marketCutBites \? \(/.test(pf));
 
-check('leaving Today resets Signal to all three',
-  /view !== 'today'/.test(screen) && /next\.signals = new Set\(ALL_SIGNALS\)/.test(screen));
+// Every board is a signals board since All was removed (2026-11-20), so the
+// Signal filter is held at all three on every view, not only off Today.
+check('a narrowed Signal filter resets to all three',
+  !/view !== 'today'/.test(screen) && /next\.signals = new Set\(ALL_SIGNALS\)/.test(screen));
 check('Signal\/Market locks apply on the first paint',
   // The board is cut with displayFilter, or with cutFilter, which is
   // displayFilter with the model selection reduced to what the bar shows

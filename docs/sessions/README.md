@@ -20,6 +20,11 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, the PC backup's chunk check read the whole NFL odds history table (Postgres misprices a range on a many-column key); each check now also bounds the first column and uses the index; today's full stopped and restarted (#1494) |
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, Picks: All segment removed (Matt); Signals default, empty state carries the scored count and refresh times, multi-pick line-moved push opens the app |
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, an all-push closing-line set reads "all N matched the close", not "0 measured, N push" (Discord, X, the app): every EuroLeague bet of 11-19 had been measured |
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, NBA first basket graded at real prices (50,698 credits of history): nothing passes; the blend +7.5% / +9.5% fails only the interval |
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, tennis bets get their closing price: the final close reads the tennis card's own change-only price table through its poll ledger; the one settled ATP bet re-measured, +2.27% (#1505 for Pinnacle) |
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, NBA: the 0-6 night measured (projection unders 34-53 vs 46.8 claimed), and first basket priced for the first time; both first-basket markets now collected |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, pre-request hook lost anon EXECUTE through the worker's combined-grant rewrite; granted by hand, migration and test fixed (no request affected) |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, founders (Matt, Mike) recorded in app_founders for unlimited MCP questions |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, premium gate part 2: PostgREST pre-request hook refuses the six scored-picks matview endpoints to signed-in accounts without access; tracked bets were never hidden (app never reads the table) |
@@ -29,8 +34,6 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, view migrations: byom_facts_schema, open_picks, and discord_publish_state skip after anon-lockdown step A instead of re-running DDL |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, view migrations: byom_official_legs skips after anon-lockdown step A and drops byom_bets before replacing it, so the refresh pass no longer dies on the widened return type |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, anon-key lockdown step A applied to production; the website record view now reads a definer function (anon was refused through an invoker view) |
-| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, tennis bets get their closing price: the final close reads the tennis card's own change-only price table through its poll ledger; the one settled ATP bet re-measured, +2.27% (#1505 for Pinnacle) |
-| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, NBA: the 0-6 night measured (projection unders 34-53 vs 46.8 claimed), and first basket priced for the first time; both first-basket markets now collected |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, BetMGM opened its app with no bet: the link now asks www.<st> first and opens the game's page with the selection (app + Discord) |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, view migrations: byom_official_legs skips after anon-lockdown step A and drops byom_bets before replacing it, so the refresh pass no longer dies on the widened return type |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, NHL moneyline assessment: the season's loss is the retired model and the five days before the goalie gate (29-27, +2.39u since); seven alternatives graded, none beats it; no change |

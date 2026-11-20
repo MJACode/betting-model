@@ -34,7 +34,10 @@ import {
   roiText,
   sinceLine,
   winRateText,
+  closingLineBody,
 } from '../src/lib/recordHero';
+import { allMatchedText, formatClvBeatLine } from '../src/lib/clvBeat';
+import { buildShareMessage } from '../src/lib/shareRecord';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -77,7 +80,7 @@ check('spoken label names All-time and the date', spoken.includes('All-time') &&
 check('visible title is not the VoiceOver label', heroVisibleLabel(DISCORD_ALL_TIME_LABEL) === HERO_VISIBLE_ALL_TIME && heroVisibleLabel('NFL') === 'Total profit · NFL');
 check('units caption', UNITS_CAPTION === 'Units · 1 to win');
 check('spoken grid names the four cells',
-  spoken.includes('Return on bets, 2.5 percent') && spoken.includes('439 wins') && spoken.includes('Win rate 53.8%') && spoken.includes('Beat the closing line 54%'));
+  spoken.includes('Return on bets, 2.5 percent') && spoken.includes('439 wins') && spoken.includes('Win rate 53.8%') && spoken.includes('Beat the closing line, 54%'));
 check('spoken grid does not use Yesterday\'s book name', !/flat-bet roi/i.test(spoken));
 const sheet = roiSheetBody();
 check('sheet title and body',
@@ -118,6 +121,38 @@ const columnsMissing = heroAccessibilityLabel({
 check('a missing units column is unavailable and the record is still spoken',
   columnsMissing.startsWith('Units unavailable') && columnsMissing.includes('Return on bets, unavailable') && columnsMissing.includes('6 wins'),
   columnsMissing);
+
+// Every bet measured, every close at our price: say so. "0 measured" said
+// the opposite (EuroLeague, 2026-11-19: eight bets, all at our price).
+check('all-matched wording', allMatchedText(8) === 'all 8 matched the close' && allMatchedText(1) === '1 matched the close'
+  && allMatchedText(8, { sentence: true }) === 'All 8 matched the close' && allMatchedText(1, { sentence: true }) === '1 matched the close');
+const shareAll = buildShareMessage({
+  picks: 8, wins: 4, losses: 4, pushes: 0, units: 0, risked: 8, roi: 0, winRate: 0.5,
+  clvSettled: 8, clvBeat: 0, clvPush: 8, clvBeatRate: null,
+} as unknown as Parameters<typeof buildShareMessage>[0]);
+check('share text for an all-matched set does not open with a beat',
+  shareAll.includes('At the book we bet, all 8 matched the close') && !shareAll.includes('Beat the closing price'), shareAll);
+check('share line for an all-matched set', formatClvBeatLine(0, 0, 8) === 'all 8 matched the close');
+check('share line with a beat keeps the rate', formatClvBeatLine(3, 1, 24) === '75% beat close (3/4, 24 push)');
+const allMatchedSpoken = heroAccessibilityLabel({
+  notLoaded: false, picks: 8, label: 'EUROLEAGUE', units: 0, risked: 8, roi: 0,
+  wins: 4, losses: 4, pushes: 0, winRate: 0.5, clvBeatRate: null, clvPush: 8,
+});
+check('spoken label for an all-matched set', allMatchedSpoken.includes('Beat the closing line, all 8 matched the close') && !allMatchedSpoken.includes('0 measured'), allMatchedSpoken);
+const allMatchedSheet = closingLineBody({
+  clvSettled: 8, clvBeatRate: null, clvPush: 8,
+  clvGameSettled: 8, clvGameBeatRate: null, clvGamePush: 8,
+  clvPropSettled: 0, clvPropBeatRate: null, clvPropPush: 0,
+  marketClvSettled: 0, marketClvBeatRate: null,
+});
+check('sheet for an all-matched set', allMatchedSheet.endsWith('All 8 matched the close') && !allMatchedSheet.includes('0 measured'), allMatchedSheet.slice(-60));
+const splitSheet = closingLineBody({
+  clvSettled: 12, clvBeatRate: 0.75, clvPush: 8,
+  clvGameSettled: 8, clvGameBeatRate: null, clvGamePush: 8,
+  clvPropSettled: 4, clvPropBeatRate: 0.75, clvPropPush: 0,
+  marketClvSettled: 0, marketClvBeatRate: null,
+});
+check('a split with only matches says so', splitSheet.includes('Game lines  All 8 matched the close') && !splitSheet.includes('0 measured'), splitSheet);
 
 check('2x text stacks', heroStacks(2, 390) && heroStacks(HERO_STACK_AT, 430) && !heroStacks(1, 390));
 check('narrow phone stacks before 1.2', heroStacks(1.15, 375) && !heroStacks(1.15, 390));

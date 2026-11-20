@@ -1,12 +1,18 @@
 /**
  * Merged Picks tab — a single home for the daily board with a
- * `All | Signals | Live | Scoreboard` segmented control. Replaces the old separate
- * Picks and Signals tabs (which both showed BET picks and read as redundant):
- *   - All      = every scored pick today (the old Picks tab; labelled
- *                "Today" until 2026-09-26, Matt).
- *   - Signals  = picks that crossed the bet line and are still live.
+ * `Signals | Live Signals | Scoreboard` segmented control. Replaces the old
+ * separate Picks and Signals tabs (which both showed BET picks and read as
+ * redundant):
+ *   - Signals  = picks that crossed the bet line and are still live. The
+ *                default segment.
  *   - Live Signals = in-play picks. Always on screen; empty when nothing is
  *     live, which is itself the answer (see below).
+ *   - Scoreboard = scores.
+ *
+ * THE ALL SEGMENT WAS REMOVED 2026-11-20 (Matt: "users only care about the
+ * signal and live signal bets and seeing the score board"). It listed every
+ * scored pick — AVOID, no-signal and paused-model rows included. Those rows
+ * stay in `picks` and on the Record tab; only this board stopped showing them.
  *
  * LIVE WAS A BOTTOM TAB UNTIL 2026-09-06 (Matt's call, after measurement). It
  * was the same PickCard, over the same sport filter, in a header that was a
@@ -69,7 +75,6 @@ import {
   loadPresentation,
   showLivePricesBanner,
   sportChipsAvailable,
-  todayHeaderCounts,
   sportSpokenName,
 } from '@/lib/loadState';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
@@ -192,7 +197,7 @@ export function PicksHomeScreen() {
   const { books: myBooks, ready: myBooksReady } = usePreferredBooks();
   const [betAllOpen, setBetAllOpen] = useState(false);
 
-  const [view, setView] = useState<PicksView>('today');
+  const [view, setView] = useState<PicksView>('signals');
   const [sbSport, setSbSport] = useState<ScoreboardSport>('NFL');
   const [sbDate, setSbDate] = useState(todayET);
   const sbDates = sbDate === todayET() ? liveSlateDatesET() : [sbDate];
@@ -312,11 +317,13 @@ export function PicksHomeScreen() {
     () => new Set(liveInProgress.map((d) => d.pick.sport)),
     [liveInProgress],
   );
-  // Sports with anything on today's board — the rest are muted in the toggle so
-  // the eye lands on the ones that actually have picks.
+  // Sports with a SIGNAL today — the rest are muted in the toggle so the eye
+  // lands on the ones that actually have bets. Every scored row counted while
+  // All was the default board; with Signals the default (2026-11-20), a sport
+  // holding only AVOID / no-signal / paused rows opens an empty board.
   const sportsWithPicks = useMemo(
-    () => new Set([...allData, ...pausedData].map((d) => d.pick.sport)),
-    [allData, pausedData],
+    () => new Set(allData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)).map((d) => d.pick.sport)),
+    [allData, thresholdsRevision],
   );
   // A sport whose ONLY rows today are in-play picks must not read as "nothing
   // here": fetchPicksForDate excludes is_live rows, so without this union the
@@ -426,14 +433,17 @@ export function PicksHomeScreen() {
   }, [openPaywall, signalsLocked]);
 
   useEffect(() => {
-    if (signalsLocked && freeSegmentOpensPaywall(view)) setView('today');
+    if (signalsLocked && freeSegmentOpensPaywall(view)) setView('scoreboard');
   }, [signalsLocked, view]);
 
   useEffect(() => {
     if (!requestedView || picksHold) return;
-    const next = (requestedView as string) === 'lines' ? 'scoreboard' : requestedView;
+    // 'lines' and 'today' are retired segments an older push or link can
+    // still name: Lines became Scoreboard, and All (2026-11-20) became
+    // Signals, the board nearest to "everything scored".
+    const raw = requestedView as string;
+    const next: PicksView = raw === 'lines' ? 'scoreboard' : raw === 'today' ? 'signals' : requestedView;
     if (signalsLocked && freeSegmentOpensPaywall(next)) openPaywall();
-    else if (signalsLocked) setView(next === 'scoreboard' ? 'scoreboard' : 'today');
     else setView(next);
     navigation.setParams({ view: undefined } as never);
   }, [requestedView, navigation, signalsLocked, picksHold, openPaywall]);
@@ -453,7 +463,7 @@ export function PicksHomeScreen() {
   );
 
   const activeItems: EnrichedPick[] =
-    view === 'today' ? todayData : view === 'live' ? liveData : view === 'scoreboard' ? [] : live;
+    view === 'live' ? liveData : view === 'scoreboard' ? [] : live;
 
   // Today's FINISHED games for this view (Matt, 2026-11-15: "filter on
   // completed games from the day"). They join the board only through the
@@ -463,9 +473,8 @@ export function PicksHomeScreen() {
   // cut by passesRecordFilter (the Record tab's test); an ungraded one by
   // passesActionFilter, as on the open board. Live and Scores have none.
   const finishedItems: EnrichedPick[] = useMemo(() => {
-    if (view !== 'today' && view !== 'signals') return [];
+    if (view !== 'signals') return [];
     const mine = finishedData.filter((d) => d.pick.sport === sport);
-    if (view === 'today') return mine;
     return mine.filter((d) => {
       const graded = d.pick.result === 'WIN' || d.pick.result === 'LOSS' || d.pick.result === 'PUSH';
       return (graded ? passesRecordFilter(d.pick) : passesActionFilter(d.pick)) && !isUnlockedPreview(d.pick);
@@ -636,7 +645,7 @@ export function PicksHomeScreen() {
       resetImpossibleMarket(filter, present),
       presentModelsFor(selectableModelIds),
     );
-    if (view !== 'today' && afterMarket.signals.size < ALL_SIGNALS.length) {
+    if (afterMarket.signals.size < ALL_SIGNALS.length) {
       const next = afterMarket === filter ? cloneFilter(filter) : afterMarket;
       next.signals = new Set(ALL_SIGNALS);
       return next;
@@ -752,7 +761,6 @@ export function PicksHomeScreen() {
   // Signals / Live views: exposure of the recommended stakes on screen, each
   // at the pick's own stake_units when it carries one (the card's stake).
   const signalExposure = useMemo(() => {
-    if (view === 'today') return 0;
     return openFiltered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick), d.pick.stake_units), 0);
   }, [openFiltered, view]);
 
@@ -797,9 +805,7 @@ export function PicksHomeScreen() {
     : failed
     ? view === 'live'
       ? 'Live signals unavailable'
-      : todayHeaderCounts({ date, known: false, ...todayStats })
-    : view === 'today'
-      ? todayHeaderCounts({ date, known: !todayUnknown, ...todayStats })
+      : `${date} · — pre-game signals`
       // NO DATE on the live board, and that is not a tidy-up. The board can now
       // hold a game that kicked off before midnight ET, which the whole system
       // files under YESTERDAY -- Discord posted it under that date, the track
@@ -904,7 +910,6 @@ export function PicksHomeScreen() {
           contentContainerStyle={[styles.subTabsScroll, subTabsReach.content]}
         >
           <View style={styles.subTabs} accessibilityRole="tablist">
-            <SubTabBtn label="All" count={todayUnknown ? null : todayStats.total} active={view === 'today'} onPress={() => selectView('today')} onLayout={onSegmentLayout('today')} />
             <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} hideCount={signalsLocked} locked={signalsLocked} lockedLabel="Signals, Premium" active={view === 'signals'} onPress={() => selectView('signals')} onLayout={onSegmentLayout('signals')} />
             {/* UNCONDITIONAL, on every sport (matt, 2026-09-12) — see the file
                 header. The count and the dot carry what the conditional render
@@ -1119,8 +1124,8 @@ export function PicksHomeScreen() {
           selectedGameStates={selectedStates}
           onToggleGameState={toggleState}
           onClearGameStates={clearStates}
-          showSignals={view === 'today'}
-          itemNoun={view === 'today' ? 'pick' : view === 'live' ? 'live pick' : 'signal'}
+          showSignals={false}
+          itemNoun={view === 'live' ? 'live pick' : 'signal'}
         />
       ) : null}
 
@@ -1187,7 +1192,7 @@ export function PicksHomeScreen() {
                 void slip.toggle(slipKeyForPick(item.pick), betslipPlayerFromPick(item.pick));
               }}
               liveState={liveStates.get(item.pick.game_id) ?? null}
-              showSignalBadge={view === 'today'}
+              showSignalBadge={false}
               paused={isPausedForDisplay(item.pick)}
               layout="signals"
               teamAbbrevs={ncaafAbbrevs}
@@ -1210,6 +1215,7 @@ export function PicksHomeScreen() {
               view={view}
               sport={sport}
               date={date}
+              scored={todayStats.total}
               hasAny={activeItems.length > 0}
               search={emptiedBySearch ? search.trim() : ''}
               onClearSearch={() => setSearch('')}
@@ -1264,8 +1270,9 @@ const EUROLEAGUE_PREGAME_EMPTY =
   'EuroLeague pre-game picks post five to ten minutes before each tip-off, when that game is checked. Bets ' +
   'made at halftime post on Live Signals.';
 
+const REFRESH_TIMES = 'Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.';
+
 function boardLabel(view: PicksView): string {
-  if (view === 'today') return 'All';
   if (view === 'signals') return 'Signals';
   if (view === 'scoreboard') return 'Scoreboard';
   return 'Live';
@@ -1297,6 +1304,7 @@ function EmptyForView({
   view,
   sport,
   date,
+  scored,
   hasAny,
   search,
   onClearSearch,
@@ -1309,6 +1317,10 @@ function EmptyForView({
   view: PicksView;
   sport: string;
   date: string;
+  /** Every pick scored today for this sport, signal or not. An empty Signals
+   *  board must tell "not run yet" from "ran, nothing crossed" (UX_REVIEW §3) —
+   *  the All board, which used to carry that count, was removed 2026-11-20. */
+  scored: number;
   hasAny: boolean;
   /** Non-empty only when the search query alone emptied the board (M12). */
   search: string;
@@ -1359,48 +1371,28 @@ function EmptyForView({
       />
     );
   }
-  if (view === 'today') {
-    return (
-      <EmptyState
-        title={
-          // EuroLeague's pre-game models post game by game, minutes before
-          // each tip, not on the refresh cadence (2026-11-14).
-          sport === 'EUROLEAGUE' ? 'No EuroLeague picks yet today' : `No ${sport} picks today`
-        }
-        subtitle={
-          // The women's totals model posts when DraftKings opens a game's
-          // total, not on the refresh cadence, so the refresh times would
-          // send a member back at the wrong hour (UX review, 2026-11-10).
-          // The tennis card is the same: it runs every ten minutes, around
-          // the clock, and decides each match about 30 minutes before its
-          // listed start (scripts/tennis_moneyline_card.py).
-          sport === 'NCAABW'
-            ? `No NCAABW picks have posted for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
-            : sport === 'ATP' || sport === 'WTA'
-              ? `No ${sport} picks have posted for ${date} yet. Each match shows here about 30 minutes before its listed start, once the model has checked it. It bets only a few; the rest show as no bet.`
-              : // The five EuroLeague pre-game models decide each game once, five to
-                // ten minutes before its tip (scripts/euroleague_pregame_card.py), so
-                // the refresh times would send a member back at the wrong hour.
-                sport === 'EUROLEAGUE'
-                ? EUROLEAGUE_PREGAME_EMPTY
-                : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
-        }
-        subtitleAccessibilityLabel={
-          sport === 'ATP' || sport === 'WTA'
-            ? `No ${sportSpokenName(sport)} picks have posted for ${date} yet. Each match shows here about 30 minutes before its listed start, once the model has checked it. It bets only a few; the rest show as no bet.`
-            : undefined
-        }
-      />
-    );
-  }
   if (view === 'signals') {
     return (
       <EmptyState
         title={sport === 'EUROLEAGUE' ? 'No EuroLeague signals right now' : 'No signal bets right now'}
         subtitle={
+          // Three sports do not post on the refresh cadence, so "check back
+          // after the next refresh" would send a member back at the wrong hour.
+          // This copy lived on the All board until All was removed (2026-11-20).
           sport === 'EUROLEAGUE'
             ? EUROLEAGUE_PREGAME_EMPTY
-            : 'Zero picks is a valid signal — no high-conviction plays right now. Open the All board to see everything the model scored, or check back after the next refresh.'
+            : sport === 'NCAABW'
+              ? `No NCAABW signals for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
+              : sport === 'ATP' || sport === 'WTA'
+                ? `No ${sport} signals for ${date} yet. The model checks each match about 30 minutes before its listed start, and bets only a few.`
+                : scored === 0
+                  ? `No ${sport} picks have been scored for ${date} yet. ${REFRESH_TIMES}`
+                  : `${scored} checked for ${date}, none crossed the bet line. ${REFRESH_TIMES}`
+        }
+        subtitleAccessibilityLabel={
+          sport === 'ATP' || sport === 'WTA'
+            ? `No ${sportSpokenName(sport)} signals for ${date} yet. The model checks each match about 30 minutes before its listed start, and bets only a few.`
+            : undefined
         }
       />
     );
@@ -1417,8 +1409,8 @@ function EmptyForView({
       return (
         <EmptyState
           title={`No live model for ${sportDisplayName(sport)} yet`}
-          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sportDisplayName(sport)}. The All and Signals boards carry ${sportDisplayName(sport)}’s pre-game picks.`}
-          subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSentence(sportSpokenName)}, so this board stays empty for ${sportSpokenName(sport)}. The All and Signals boards carry its pre-game picks.`}
+          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sportDisplayName(sport)}. The Signals board carries ${sportDisplayName(sport)}’s pre-game picks.`}
+          subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSentence(sportSpokenName)}, so this board stays empty for ${sportSpokenName(sport)}. The Signals board carries its pre-game picks.`}
         />
       );
     }

@@ -16,6 +16,7 @@ import { ErrorBanner } from '@/components/ErrorState';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { OpeningVsLiveRow, OpeningSliceRow } from '@/types';
 import { SHADOW_TRACK_START } from '@/lib/recordStart';
+import { allMatchedText } from '@/lib/clvBeat';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 // The shadow track keeps its own, longer window — a comparison needs history to
@@ -187,11 +188,13 @@ export function OpeningComparisonScreen() {
   );
 }
 
-function clvBeatLabel(beats: number, decisive: number, pushes: number): string {
-  if (decisive <= 0 && pushes <= 0) return '—';
-  if (decisive <= 0) return `0 measured, ${pushes} push`;
+/** "Beat close 75%, 24 push". An all-matched set drops the prefix: "Beat close all 8
+ *  matched the close" wraps after the count and its first line reads as a win. */
+function clvBeatStat(beats: number, decisive: number, pushes: number): string {
+  if (decisive <= 0 && pushes <= 0) return 'Beat close —';
+  if (decisive <= 0) return allMatchedText(pushes, { sentence: true });
   const pct = formatPct(beats / decisive, 0);
-  return pushes > 0 ? `${pct}, ${pushes} push` : pct;
+  return `Beat close ${pushes > 0 ? `${pct}, ${pushes} push` : pct}`;
 }
 
 function TrackCard({
@@ -225,7 +228,7 @@ function TrackCard({
           <View style={styles.trackStats}>
             <Text style={styles.trackStat}>Win {formatPct(winRate, 0)}</Text>
             <Text style={styles.trackStat}>
-              Beat close {clvBeatLabel(clvBeat, clvDecisive, clvPush)}
+              {clvBeatStat(clvBeat, clvDecisive, clvPush)}
             </Text>
           </View>
         </>

@@ -35,6 +35,8 @@ LIBS = (
     "a11y.ts",
     "recordStart.ts",
     "tone.ts",
+    "clvBeat.ts",
+    "shareRecord.ts",
 )
 
 

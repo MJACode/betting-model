@@ -101,9 +101,9 @@ def test_the_sport_chip_is_the_hook_not_an_allowlist():
     There is no second list that could keep NHL off once the rows arrive."""
     src = _read(PICKS)
     assert "const { data: allData," in src and "useTodayPicks()" in src
-    # Paused models' rows join the All board (Matt, 2026-09-26), so the chip
-    # counts them too -- still straight from the hook, never an allowlist.
-    assert "new Set([...allData, ...pausedData].map((d) => d.pick.sport))" in src
+    # Since All was removed (2026-11-20) the chip counts a sport's SIGNALS --
+    # still straight from the hook's rows, never an allowlist.
+    assert "new Set(allData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)).map((d) => d.pick.sport))" in src
     # The toggle renders NHL. A fetch the chip cannot show is not a fix.
     sports = _read(MOBILE / "src" / "hooks" / "useSportFilter.ts")
     line = next(l for l in sports.splitlines() if l.startswith("export const SPORTS"))

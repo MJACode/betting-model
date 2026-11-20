@@ -1180,7 +1180,7 @@ def test_exactly_flat_clv_is_a_push():
     """A close that equals the price taken is a push, not a non-beat."""
     t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, 0.0)])
     assert (t["clv_n"], t["clv_beat"], t["clv_push"]) == (0, 0, 1)
-    assert dn.clv_line(t) == "0 measured, 1 push"
+    assert dn.clv_line(t) == "1 matched the close"
 
 
 def test_tally_line_omits_clv_unless_asked():

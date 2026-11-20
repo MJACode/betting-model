@@ -46,12 +46,7 @@ const VIEW_FOR_TYPE: Record<string, PicksView> = {
   live_signals: 'live',
   // A fresh BET is a signal, so Signals is the shortest path to it.
   new_bets: 'signals',
-  // LINE MOVEMENT, not a retraction (CLAUDE.md §1c): the pick stands at the
-  // number it was given and what changed is the market — which is why the push
-  // itself says "moved past the bet line" rather than "flipped to AVOID". Once
-  // the line has moved past the cut it is no longer a signal, so Signals is the
-  // one board it is guaranteed NOT to be on. Today shows everything scored.
-  dropped: 'today',
+  // `dropped` has no board: see routeForPush.
 };
 
 function asPositiveInt(v: unknown): number | null {
@@ -83,6 +78,18 @@ export function routeForPush(data: unknown): PushRoute | null {
   if (type === 'feedback_reply') {
     const threadId = asPositiveInt(d.threadId);
     return threadId == null ? null : { kind: 'feedbackThread', threadId };
+  }
+
+  // "Moved past the bet line" is LINE MOVEMENT, not a retraction (CLAUDE.md
+  // §1c): the pick stands at the number it was given. It opened the All board
+  // until All was removed (Matt, 2026-11-20), and no board is left that shows
+  // it — once the line has moved past the cut it is not a signal, so Signals is
+  // the one board it is guaranteed NOT to be on, and landing there reads as
+  // the picks being taken back. So a one-pick push opens the pick, beside its
+  // moved line, and a several-pick push only opens the app.
+  if (type === 'dropped') {
+    const pickId = asPositiveInt(d.pickId);
+    return pickId == null ? null : { kind: 'pick', pickId };
   }
 
   // A line change is always about one tracked bet, so it always opens that bet.

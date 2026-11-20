@@ -24,7 +24,7 @@ import {
   gameDayLabelET,
   labelWithoutStake,
 } from '@/lib/format';
-import { clvOutcome } from '@/lib/clvBeat';
+import { allMatchedText, clvOutcome } from '@/lib/clvBeat';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelDetailTitle, modelLong, modelPageTiming, modelShort, sportOfModel } from '@/lib/modelMeta';
 import { navShowsSportOnly } from '@/lib/modelBadgeLayout';
@@ -359,7 +359,7 @@ export function BuiltInModelDetailScreen() {
                     label="Beat close"
                     value={
                       clv.beatRate == null
-                        ? (clv.pushes > 0 ? `0 measured, ${clv.pushes} push` : '—')
+                        ? (clv.pushes > 0 ? allMatchedText(clv.pushes, { sentence: true }) : '—')
                         : formatPct(clv.beatRate)
                     }
                     tint={
@@ -554,7 +554,8 @@ function computeClvStats(
   }
   const decisive = beats + losses;
   const beatRate = decisive > 0 ? beats / decisive : null;
-  const caption = pushes > 0
+  // An all-matched set already says so in the value; "8 push" here would say it twice.
+  const caption = pushes > 0 && decisive > 0
     ? `${vals.length} picks with CLV, ${pushes} push`
     : `${vals.length} picks with CLV`;
   return { avg, beatRate, count: vals.length, caption, pushes };
