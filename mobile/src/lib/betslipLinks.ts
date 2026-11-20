@@ -110,7 +110,7 @@ export function appClaimedAlternates(book: string, claimed: string | null): stri
  * slip from `/en/sportsapp/sports?options=…`. On the event page the member
  * is on that game even when the selection does not land, or has closed
  * (BetMGM opens a new market when a main line moves: Houston @ Kansas 1H,
- * 69.5 → 70.5, market 1580492642 → 1580492631). A `6:`-prefixed fixture
+ * 69.5 → 70.5, market 1580492642 → 1580492631). A `2:`/`6:`-prefixed fixture
  * (the newer id form) and a multi-selection query keep the old path: no
  * event page for them is documented.
  */
@@ -133,6 +133,9 @@ export const APP_CLAIMING_BOOKS: readonly string[] = ['draftkings', 'fanduel', '
  *   fanduel         sportsbook.fanduel.com      every path
  *   williamhill_us  sportsbook.caesars.com      /us/<state>/bet/*
  *   betmgm          sports.<state>.betmgm.com   /<lang>/sportsapp/* ONLY
+ *                   (and www.<state>, <state>: job 1343418. Built on
+ *                   www.<state> first since 2026-11-20; iOS took it on
+ *                   5 of 5 logged taps.)
  *
  * BetMGM's stored betslip link is `/en/sports?options=…`, which its app does
  * not claim, so it always opened Safari (Matt, 2026-11-12: "MGM link took me

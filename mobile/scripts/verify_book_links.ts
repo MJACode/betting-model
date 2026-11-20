@@ -143,7 +143,8 @@ check('...except when the build knows the app IS installed (an unknown still sho
 const MGM = 'https://sports.{state}.betmgm.com/en/sports?options=20076228-1575284363-2342468393&type=Single';
 check('BetMGM: one classic selection opens its game page under /sportsapp/ on www.<st>, query kept (Matt, 2026-11-20: app opened, no bet)',
   appClaimedLink('betmgm', MGM, 'NJ') === 'https://www.nj.betmgm.com/en/sportsapp/sports/events/20076228?options=20076228-1575284363-2342468393&type=Single');
-check('BetMGM: a 6:-form or multi-selection query keeps /sportsapp/sports (no documented event page for it)',
+check('BetMGM: a 2:/6:-form or multi-selection query keeps /sportsapp/sports (no documented event page for it)',
+  appClaimedLink('betmgm', STORED.betmgm!, 'ma') === 'https://www.ma.betmgm.com/en/sportsapp/sports?options=2:7828205-204281167-782135455&type=Single' &&
   appClaimedLink('betmgm', 'https://sports.{state}.betmgm.com/en/sports?options=6:49541-4449646-7262057&type=Single', 'ma') === 'https://www.ma.betmgm.com/en/sportsapp/sports?options=6:49541-4449646-7262057&type=Single'
   && appClaimedLink('betmgm', 'https://sports.{state}.betmgm.com/en/sports?options=1-2-3,4-5-6&type=combo', 'ma') === 'https://www.ma.betmgm.com/en/sportsapp/sports?options=1-2-3,4-5-6&type=combo');
 check('BetMGM: no link still opens the app, at its claimed root on www.<st>', appClaimedLink('betmgm', null, 'pa') === 'https://www.pa.betmgm.com/en/sportsapp/sports');
