@@ -250,6 +250,6 @@ GRANT EXECUTE ON FUNCTION public.log_picks_changes() TO PUBLIC;
 GRANT EXECUTE ON FUNCTION public.log_sgp_price(text, text, integer, numeric, integer, integer, jsonb, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.member_books_get(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.member_books_set(text, text[]) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.save_device_push_token(text, text, text, boolean, text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.save_device_push_token(text, text, text, boolean, text, uuid) TO anon, authenticated;
 NOTIFY pgrst, 'reload schema';
 COMMIT;

@@ -262,7 +262,7 @@ STEP_B_DEVICE_FUNCTIONS: tuple[str, ...] = (
     "public.log_sgp_price(text, text, integer, numeric, integer, integer, jsonb, text)",
     "public.member_books_get(text)",
     "public.member_books_set(text, text[])",
-    "public.save_device_push_token(text, text, text, boolean, text)",
+    "public.save_device_push_token(text, text, text, boolean, text, uuid)",
 )
 
 STEP_B_PUBLIC_FUNCTIONS: frozenset[str] = frozenset({

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, anon-key lockdown step B part 1 applied (anon off Stats, odds, scoreboard, ops); part 2 (tracked_bets owner policies) written for the SQL editor |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, view migrations: byom_official_legs skips after anon-lockdown step A and drops byom_bets before replacing it, so the refresh pass no longer dies on the widened return type |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, anon-key lockdown step A applied to production; the website record view now reads a definer function (anon was refused through an invoker view) |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, Picks filter Model section: each model's total published record and a hot / cold tag (3u on 8+ bets, last 7 days); new view v_public_track_record_model_daily built from the daily view's definition |

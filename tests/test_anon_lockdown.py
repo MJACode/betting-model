@@ -384,7 +384,7 @@ def test_steps_a_and_b_on_scratch_postgres():
         assert ok, err
         ok, err = _can(
             dsn, "anon",
-            "SELECT public.save_device_push_token('t','device-1','ios',false,'n');")
+            "SELECT public.save_device_push_token('t','device-1','ios',false,'n',NULL::uuid);")
         assert ok, err
         ok, _ = _can(dsn, "authenticated", "SELECT 1 FROM picks;")
         assert ok
