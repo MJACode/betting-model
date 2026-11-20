@@ -400,6 +400,56 @@ def test_a_standing_bet_keeps_the_game():
     assert "already bet" in ds[0].detail
 
 
+# ── one bet a game (mike, 2026-11-19: "Strict, moneyline first") ────────────
+
+def _row(model, gid="G1", signal="BET", label=None, paused=None):
+    return {"game_id": gid, "model_id": model, "signal_type": signal,
+            "pick_label": label or f"{model} pick", "downgrade_reason": paused}
+
+
+def test_the_order_is_moneyline_spread_first_half_first_quarter_then_halftime():
+    assert R.ONE_A_GAME_ORDER == (R.HOME_ML, R.HOME_DOG_SPREAD, R.H1_DOG_ML, R.Q1_SHARE_TOTAL)
+    assert set(R.ONE_A_GAME_MODELS) == set(R.MODELS) | {"euroleague_live_spread_ht"}
+    assert R.one_a_game_rank("euroleague_live_spread_ht") > R.one_a_game_rank(R.Q1_SHARE_TOTAL)
+
+
+def test_four_bets_on_one_game_keep_the_moneyline_and_say_why_for_the_rest():
+    rows = [_row(R.Q1_SHARE_TOTAL), _row(R.H1_DOG_ML), _row(R.HOME_DOG_SPREAD), _row(R.HOME_ML, label="MAD ML")]
+    drop = R.one_bet_a_game(rows, [])
+    assert set(drop) == {("G1", R.HOME_DOG_SPREAD), ("G1", R.H1_DOG_ML), ("G1", R.Q1_SHARE_TOTAL)}
+    assert set(drop.values()) == {"one bet a game: MAD ML keeps it"}
+
+
+def test_a_moneyline_a_gate_refused_leaves_the_game_to_the_spread():
+    rows = [_row(R.HOME_ML, signal="NONE"), _row(R.H1_DOG_ML), _row(R.HOME_DOG_SPREAD, label="MAD +1.5")]
+    assert R.one_bet_a_game(rows, []) == {("G1", R.H1_DOG_ML): "one bet a game: MAD +1.5 keeps it"}
+
+
+def test_the_first_quarter_total_bets_a_game_none_of_the_side_models_bet():
+    rows = [_row(R.HOME_ML, signal="NONE"), _row(R.HOME_DOG_SPREAD, signal="NONE"), _row(R.Q1_SHARE_TOTAL)]
+    assert R.one_bet_a_game(rows, []) == {}
+
+
+def test_a_standing_bet_keeps_its_game_whatever_its_order():
+    # a pick that exists stands (CLAUDE.md 1c): a first-quarter total bet earlier
+    # keeps the game against a moneyline decided later
+    standing = [{"game_id": "G1", "model_id": R.Q1_SHARE_TOTAL, "label": "First Quarter Over 41.5"}]
+    drop = R.one_bet_a_game([_row(R.HOME_ML), _row(R.HOME_ML, gid="G2")], standing)
+    assert drop == {("G1", R.HOME_ML): "one bet a game: First Quarter Over 41.5 keeps it"}
+
+
+def test_each_game_keeps_its_own_one_bet():
+    rows = [_row(R.HOME_ML, gid="G1"), _row(R.HOME_DOG_SPREAD, gid="G1"),
+            _row(R.HOME_DOG_SPREAD, gid="G2"), _row(R.H1_DOG_ML, gid="G2"), _row(R.Q1_SHARE_TOTAL, gid="G3")]
+    assert set(R.one_bet_a_game(rows, [])) == {("G1", R.HOME_DOG_SPREAD), ("G2", R.H1_DOG_ML)}
+
+
+def test_a_paused_models_row_neither_keeps_the_game_nor_is_changed():
+    rows = [_row(R.HOME_ML, paused="model paused"), _row(R.HOME_DOG_SPREAD), _row(R.H1_DOG_ML)]
+    drop = R.one_bet_a_game(rows, [], paused_note="model paused")
+    assert set(drop) == {("G1", R.H1_DOG_ML)}
+
+
 # ── the probability ──────────────────────────────────────────────────────────
 
 def test_the_uplift_is_the_win_share_less_the_mean_no_vig_before_the_season_pushes_out():

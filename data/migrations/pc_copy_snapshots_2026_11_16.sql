@@ -44,7 +44,7 @@ BEGIN
      AND to_regclass('public.pc_copy_snapshots_snapshot_id_seq') IS NOT NULL
   THEN
     IF COALESCE(obj_description('public.pc_copy_snapshots'::regclass, 'pg_class'), '')
-         = 'pc_copy_snapshots 3484e844935a'
+         = 'pc_copy_snapshots 0b2063f4b58d'
        AND (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.pc_copy_snapshots'::regclass)
        AND NOT EXISTS (
          SELECT 1 FROM pg_class c, aclexplode(c.relacl) a
@@ -111,13 +111,25 @@ BEGIN
     disk_total_bytes     BIGINT,
     disk_free_bytes      BIGINT,
     report_ms            INTEGER,
+    -- diff (the nightly catch-up) or full (monthly: every row checked). NULL
+    -- before 2026-11-20, when every run also re-copied each table under 2M
+    -- rows whole (mike, 2026-11-19: "a diff and a full backup like once a month")
+    copy_kind            TEXT,
+    -- the LocalMirror task as Task Scheduler held it when the row was written:
+    -- {state, next_run_at, last_run_at, last_result, triggers[], last_full,
+    --  next_full_from}, plus {error} when the task could not be read
+    schedule             JSONB,
     CONSTRAINT pc_copy_snapshots_source CHECK (source IN ('nightly', 'manual')),
     CONSTRAINT pc_copy_snapshots_pass UNIQUE (source, pass_id)
   );
+
+  -- Added 2026-11-19, to the table production already has.
+  ALTER TABLE public.pc_copy_snapshots ADD COLUMN IF NOT EXISTS copy_kind TEXT;
+  ALTER TABLE public.pc_copy_snapshots ADD COLUMN IF NOT EXISTS schedule JSONB;
 
   ALTER TABLE public.pc_copy_snapshots ENABLE ROW LEVEL SECURITY;
   REVOKE ALL ON public.pc_copy_snapshots FROM PUBLIC, anon, authenticated;
   REVOKE ALL ON SEQUENCE public.pc_copy_snapshots_snapshot_id_seq FROM PUBLIC, anon, authenticated;
 
-  COMMENT ON TABLE public.pc_copy_snapshots IS 'pc_copy_snapshots 3484e844935a';
+  COMMENT ON TABLE public.pc_copy_snapshots IS 'pc_copy_snapshots 0b2063f4b58d';
 END $mig$;

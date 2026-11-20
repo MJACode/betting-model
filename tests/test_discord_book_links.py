@@ -18,7 +18,7 @@ DK = "https://sportsbook.draftkings.com/?outcomes=0HC84998421N1950_1"
 FD = "https://sportsbook.fanduel.com/addToBetslip?marketId=42.579972737&selectionId=484735"
 MGM = ("https://sports.{state}.betmgm.com/en/sports"
        "?options=19976337-1562536174-2307719716&type=Single")
-MGM_MA = ("https://www.ma.betmgm.com/en/sportsapp/sports"
+MGM_MA = ("https://www.ma.betmgm.com/en/sportsapp/sports/events/19976337"
           "?options=19976337-1562536174-2307719716&type=Single")
 CZR = ("https://sportsbook.caesars.com/us/{state}/bet/betslip"
        "?selectionIds=00089d98-6c2a-3493-920d-b8fdd3b7c660")
@@ -265,3 +265,21 @@ def test_the_module_does_not_call_the_network():
     src = open(links.__file__, encoding="utf-8").read()
     assert "requests" not in src
     assert "urlopen" not in src
+
+
+def test_betmgm_event_page_only_for_one_classic_selection():
+    """Matt, 2026-11-20: BetMGM's app opened with no bet. One classic
+    fixture-market-option selection opens that game's page (BetMGM's docs:
+    "Add one selection and open the event page"). The 6:-form and a
+    multi-selection query keep the old path."""
+    from tracking.book_slip_links import slip_url
+    tv2 = ("https://sports.{state}.betmgm.com/en/sports"
+           "?options=6:49541-4449646-7262057&type=Single")
+    assert slip_url("betmgm", tv2) == (
+        "https://www.ma.betmgm.com/en/sportsapp/sports"
+        "?options=6:49541-4449646-7262057&type=Single")
+    combo = ("https://sports.{state}.betmgm.com/en/sports"
+             "?options=1-2-3,4-5-6&type=combo")
+    assert slip_url("betmgm", combo) == (
+        "https://www.ma.betmgm.com/en/sportsapp/sports"
+        "?options=1-2-3,4-5-6&type=combo")

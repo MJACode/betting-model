@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import http.client
 import json
 import os
 import re
@@ -169,7 +170,10 @@ class GitHub:
                     time.sleep(5 * (attempt + 1))
                     continue
                 return exc.code, body, hdrs
-            except (urllib.error.URLError, TimeoutError) as exc:
+            # A response cut off mid-read (http.client.IncompleteRead, 2026-11-18 and
+            # 11-19) or a reset connection is retried like a dropped one.
+            except (urllib.error.URLError, TimeoutError, http.client.HTTPException,
+                    ConnectionError) as exc:
                 if attempt < 4:
                     time.sleep(5 * (attempt + 1))
                     continue

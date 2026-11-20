@@ -299,6 +299,15 @@ Ranges are re-pulled mostly because the pruner changed them overnight.
 With deletions stopped and repeats no longer written, a night's work becomes
 roughly the day's new rows.
 
+**Done 2026-11-19 (items 2 and 4).** mike that day: *"we should just be running
+a diff and a full backup like once a month"*. Every keyed table is now caught up
+each night, and an unchanged one copies nothing. The two latest-price caches are
+left for the monthly full. The full runs at the first pass on or after the 1st
+of each month: every chunk is hashed against Postgres, and every file on the PC
+is read back. Not a weekend afternoon, as planned above: the PC skips nights,
+so the full is due by date and runs at the next pass. Items 1 and 3 stand as
+before. `docs/local_ops.md` has the detail.
+
 ## 7. Order of work
 
 1. Stop the deleting jobs (section 2), and make the PC copy append-only the
@@ -445,7 +454,20 @@ python scripts/archive_rows.py status
   - **That 8% is not today's figure.** Read from the chart's own data after the run, the headline is the lowest daily point of the last 7 days. It is 11-17, the day of the props index rebuild. The daily points for 11-18 and 11-19 both read 99%, the latter after this rebuild. So the headline stays at 8% until 11-17 leaves the window, and the next run reads the latest daily point instead.
 - **Result:** `odds_pkey` went from 1.86 to 1.26 GB. All the table's indexes went from 10.58 to 9.98 GB, freeing 0.60 GB, as estimated. Database plus write-ahead log went from 80.90 to 80.30 GB. All 5 indexes are valid.
 - **Checks:** before the run, no other lock, no vacuum, no transaction over 60 s and no broken index. During it, the worker's refresh steps ran on schedule and the failure alerter sent no alerts. 139 rows reached `odds` during the rebuild (IDs 90,460,314 to 90,460,452, 136 NFL and 3 NCAAB), read back by the rebuilt primary key. There were 0 app errors and 0 app reads, so the app side was not tested.
-- **Not done:** the other four indexes (`idx_odds_book_snap` 6.67, `idx_odds_date` 0.88, `idx_odds_game` 0.86, `idx_odds_source_inplay` 0.30 GB). Their gain is not known: the size estimate overstates non-unique indexes 1.7 to 6.7 times. They can run on a night when the chart's latest daily point reads 50% or more (#1478).
+- **The other four, the same day** (19:14 to 19:50 ET; mike, in chat: *"run the other four indexes now"*; #1478). The chart's latest daily point read 99% before the first and again before the largest. Each was rebuilt one at a time, in two runs, and the largest started only after the first three had ended.
+
+  | Index | Before (19:14 ET) | After (19:50 ET) | Took |
+  |---|---|---|---|
+  | `idx_odds_source_inplay` | 0.30 GB | 0.14 GB | 280 s |
+  | `idx_odds_game` | 0.86 | 0.46 | 401 s |
+  | `idx_odds_date` | 0.89 | 0.46 | 333 s |
+  | `idx_odds_book_snap` | 6.70 | 4.30 | 505 s |
+  | **All five** (with `odds_pkey` 1.27) | **10.02** | **6.64** | |
+
+  - Freed 3.38 GB. Database plus write-ahead log went from 81.13 to 77.82 GB. All 5 indexes are valid, and no rebuild copy was left behind.
+  - With the primary key that morning, the table's indexes went from 10.58 to 6.64 GB: 3.94 GB back.
+  - During it, the worker ran 238 pipeline steps between 19:17 and 19:50 ET, all successful. 26 of them were odds writes, which wrote 15,135 rows.
+  - There were 0 app errors and 0 app reads, so the app side was not tested at this hour either.
 
 **How to run it again:**
 - **The client must match the database extension exactly.** The extension is 1.5.2, and that is the highest version Supabase offers. The PostgreSQL apt repository the image uses (PGDG) has 1.5.3, which refuses to run: "program 'pg_repack 1.5.3' does not match database library 'pg_repack 1.5.2'". `scripts/pg_repack_helper.sh` builds 1.5.2 from the upstream source tag when apt has no exact match.

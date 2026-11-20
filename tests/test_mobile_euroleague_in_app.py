@@ -118,18 +118,56 @@ def _long_label(meta: str, model: str) -> str:
     return re.search(r"longLabel: '([^']*)'", entry).group(1)
 
 
-def test_each_side_models_page_says_the_other_two_bet_the_same_team():
-    """mike, 2026-11-18: "Yes, add it". The three EuroLeague side models bet
-    only home underdogs, so a game two or three of them bet carries every bet
-    on one team. Each page names the other two by the name the app shows."""
+ONE_BET = ("Each EuroLeague game gets one bet at most from the five EuroLeague models. When more than one "
+           "would bet the same game, the bet goes to the first in this order: Moneyline, Spreads, First Half "
+           "Moneyline, First Quarter Totals. The fifth model, Live Spreads, bets at halftime, and only on a game "
+           "that had no bet before tip-off. ")
+
+
+def _literals(src: str) -> str:
+    return "".join(re.findall(r"'((?:[^'\\]|\\.)*)'", src))
+
+
+def _const(meta: str, name: str) -> str:
+    """A module-level string constant's text, its literals joined."""
+    return _literals(re.search(r"^const " + name + r" =\n(.*?);\n", meta, re.M | re.S).group(1))
+
+
+def _entry(meta: str, model: str) -> str:
+    """The model's entry in MINUTES_BEFORE_TIP_BODY, as source."""
+    block = re.search(r"const MINUTES_BEFORE_TIP_BODY[^=]*= \{\n(.*?)^\};", meta, re.M | re.S).group(1)
+    return re.search(r"^  " + model + r":\n(.*?)(?=^  \w+:\n|\Z)", block, re.M | re.S).group(1)
+
+
+def test_every_pre_game_models_page_states_one_bet_a_game_in_the_order_it_runs():
+    """mike, 2026-11-19: "Strict, moneyline first". The order on the page is
+    the order the card keeps a game's bet in (models/euroleague_pregame.
+    ONE_A_GAME_ORDER), by the names the app shows."""
+    import models.euroleague_pregame as R
     meta = _read("lib/modelMeta.ts")
-    for model in SIDE_MODELS:
+    names = [_long_label(meta, m).removeprefix("EuroLeague ") for m in R.ONE_A_GAME_ORDER]
+    assert ("the bet goes to the first in this order: Moneyline, Spreads, First Half Moneyline, "
+            "First Quarter Totals.") in ONE_BET
+    assert names == ["Moneyline", "Spreads", "First Half Moneyline", "First Quarter Totals"]
+    assert _long_label(meta, "euroleague_live_spread_ht") == "EuroLeague Live Spreads"
+    assert _const(meta, "EUROLEAGUE_ONE_BET") == ONE_BET
+    for model in R.ONE_A_GAME_ORDER:
         body = _page_body(meta, model)
-        others = [_long_label(meta, m).removeprefix("EuroLeague ") for m in SIDE_MODELS if m != model]
-        assert f"The EuroLeague {others[0]} and {others[1]} models also bet only home underdogs. " in body, model
-        assert "So when two or all three of these models bet the same game, every bet is on the same team. " in body, model
-    # the totals model bets no side, so it carries no such line
-    assert "same team" not in _page_body(meta, "euroleague_q1_club_share_total")
+        assert "    EUROLEAGUE_ONE_BET +\n" in _entry(meta, model), model
+        # the stacked-bets sentence of 2026-11-18 is no longer true
+        assert "same team" not in body and "two or all three" not in body, model
+    assert "Expect few bets. " in _page_body(meta, "euroleague_home_dog_spread")
+    assert "Expect few bets. " in _page_body(meta, "euroleague_h1_dog_ml")
+    assert "Expect few bets" not in _page_body(meta, "euroleague_home_ml")
+
+
+def test_the_halftime_models_page_says_it_bets_only_a_game_with_no_pre_game_bet():
+    meta = _read("lib/modelMeta.ts")
+    i = meta.index("if (modelId === EUROLEAGUE_HALFTIME_MODEL) {")
+    block = meta[i:meta.index("note:", i)]
+    text = _literals(block)
+    assert ("It bets only a game that had no EuroLeague bet before tip-off, because each game gets one bet at "
+            "most from the five EuroLeague models. ") in text
 
 
 def test_the_recap_and_the_board_clock_know_the_sport():

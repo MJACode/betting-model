@@ -8,7 +8,29 @@ import { isMissingRelation, errorMessage } from './dbErrors'
  * Every number was read on the PC, from the copy's own files.
  *
  * Reads only pc_copy_snapshots: the last 120 days, oldest first.
+ *
+ * copy_kind is diff (the nightly catch-up) or full (monthly), NULL before
+ * 2026-11-20. schedule is the LocalMirror task as Task Scheduler held it when
+ * the row was written, with the last monthly full and when the next is due
+ * (local_mirror_report.py read_schedule); NULL on rows before 2026-11-20.
  */
+
+export type PcCopyTrigger = { type: string; enabled: boolean | null; at?: string; delay?: string }
+
+export type PcCopySchedule = {
+  task: string
+  read_at: string
+  diff?: string
+  full?: string
+  state?: string | null
+  next_run_at?: string | null
+  last_run_at?: string | null
+  last_result?: number | null
+  triggers?: PcCopyTrigger[]
+  last_full: { run_id: string | null; run_started_at: string | null; run_finished_at: string | null; failed_tables: string[] | null } | null
+  next_full_from: string | null
+  error?: string
+}
 
 export type PcCopyDiffering = {
   table: string
@@ -49,6 +71,8 @@ export type PcCopyPoint = {
   total_bytes: number | null
   disk_total_bytes: number | null
   disk_free_bytes: number | null
+  copy_kind: string | null
+  schedule: PcCopySchedule | null
 }
 
 type Result =
@@ -77,7 +101,8 @@ export default async function (_req: { params: Record<string, never>; user: User
                 storage_bytes::float8 AS storage_bytes, github_bytes::float8 AS github_bytes,
                 duckdb_bytes::float8 AS duckdb_bytes, other_bytes::float8 AS other_bytes,
                 total_bytes::float8 AS total_bytes,
-                disk_total_bytes::float8 AS disk_total_bytes, disk_free_bytes::float8 AS disk_free_bytes
+                disk_total_bytes::float8 AS disk_total_bytes, disk_free_bytes::float8 AS disk_free_bytes,
+                copy_kind, schedule
            FROM pc_copy_snapshots
           WHERE taken_at >= now() - interval '120 days'
           ORDER BY taken_at, snapshot_id`,

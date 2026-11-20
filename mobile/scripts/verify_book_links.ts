@@ -141,9 +141,13 @@ check('...except when the build knows the app IS installed (an unknown still sho
 // The claimed forms are the ones each host's apple-app-site-association file
 // carries (worker job 1224851, 2026-11-12).
 const MGM = 'https://sports.{state}.betmgm.com/en/sports?options=20076228-1575284363-2342468393&type=Single';
-check('BetMGM: the betslip link moves under /sportsapp/, the only path its app claims, query kept',
-  appClaimedLink('betmgm', MGM, 'NJ') === 'https://sports.nj.betmgm.com/en/sportsapp/sports?options=20076228-1575284363-2342468393&type=Single');
-check('BetMGM: no link still opens the app, at its claimed root', appClaimedLink('betmgm', null, 'pa') === 'https://sports.pa.betmgm.com/en/sportsapp/sports');
+check('BetMGM: one classic selection opens its game page under /sportsapp/ on www.<st>, query kept (Matt, 2026-11-20: app opened, no bet)',
+  appClaimedLink('betmgm', MGM, 'NJ') === 'https://www.nj.betmgm.com/en/sportsapp/sports/events/20076228?options=20076228-1575284363-2342468393&type=Single');
+check('BetMGM: a 2:/6:-form or multi-selection query keeps /sportsapp/sports (no documented event page for it)',
+  appClaimedLink('betmgm', STORED.betmgm!, 'ma') === 'https://www.ma.betmgm.com/en/sportsapp/sports?options=2:7828205-204281167-782135455&type=Single' &&
+  appClaimedLink('betmgm', 'https://sports.{state}.betmgm.com/en/sports?options=6:49541-4449646-7262057&type=Single', 'ma') === 'https://www.ma.betmgm.com/en/sportsapp/sports?options=6:49541-4449646-7262057&type=Single'
+  && appClaimedLink('betmgm', 'https://sports.{state}.betmgm.com/en/sports?options=1-2-3,4-5-6&type=combo', 'ma') === 'https://www.ma.betmgm.com/en/sportsapp/sports?options=1-2-3,4-5-6&type=combo');
+check('BetMGM: no link still opens the app, at its claimed root on www.<st>', appClaimedLink('betmgm', null, 'pa') === 'https://www.pa.betmgm.com/en/sportsapp/sports');
 check('BetMGM: a template with no state is never asked about', appClaimedLink('betmgm', MGM, null) === null && appClaimedLink('betmgm', null, null) === null);
 check('BetMGM: a link of a shape we have not seen is not rewritten', appClaimedLink('betmgm', 'https://sports.nj.betmgm.com/en/casino?x=1', 'nj') === null);
 check('FanDuel and DraftKings: the stored link as it is, else the claimed root',
@@ -171,8 +175,10 @@ check('the hand-off waits for the saved state; it never reads it before storage 
 // 2026-11-15 (job 1343418): every BetMGM host claims /*/sportsapp/*, and iOS
 // refused sports.ma on Matt's phone. The other hosts are asked in turn.
 const mgmClaimed = appClaimedLink('betmgm', STORED.betmgm!, 'MA')!;
-check('BetMGM: refused on sports.<st>, the same link is asked on www.<st> then <st>; never a host without the state',
-  JSON.stringify(appClaimedAlternates('betmgm', mgmClaimed).map((u) => new URL(u).host)) === JSON.stringify(['www.ma.betmgm.com', 'ma.betmgm.com'])
+check('BetMGM: asked on www.<st> first (the host iOS took, 5 of 5 logged taps); refused, the same link on sports.<st> then <st>; never a host without the state',
+  new URL(mgmClaimed).host === 'www.ma.betmgm.com'
+  && JSON.stringify(appClaimedAlternates('betmgm', mgmClaimed).map((u) => new URL(u).host)) === JSON.stringify(['sports.ma.betmgm.com', 'ma.betmgm.com'])
+  && JSON.stringify(appClaimedAlternates('betmgm', 'https://sports.ma.betmgm.com/en/sportsapp/sports').map((u) => new URL(u).host)) === JSON.stringify(['www.ma.betmgm.com', 'ma.betmgm.com'])
   && appClaimedAlternates('betmgm', mgmClaimed).every((u) => u.endsWith(mgmClaimed.slice(mgmClaimed.indexOf('/en/sportsapp/'))))
   && appClaimedAlternates('fanduel', 'https://sportsbook.fanduel.com/x').length === 0 && appClaimedAlternates('betmgm', null).length === 0);
 const alts = chain.slice(at('if (viaApp === false) {'), at('if (viaApp === false && installed === null)'));
@@ -199,7 +205,7 @@ const hlog = read('src/lib/handoffLog.ts');
 check('the log uses a kind the RPC accepts (a refused kind stops the crash queue)', hlog.includes("kind: 'js_error'") && read('../data/migrations/app_errors_freeze_kinds_2026_11_06.sql').includes("'js_error'"));
 check('one row per book and route per session, the build number and the opened scheme on it', hlog.includes('const key = `${miss.book}:${miss.route}`;') && hlog.includes('if (logged.has(key)) return;') && hlog.includes('nativeBuild: nativeBuild()') && hlog.includes('scheme: miss.scheme ?? null') && hlog.includes('claimed: linkShape(miss.claimed)') && !hlog.includes('miss.claimed,'));
 check('the logged link carries no query and no state (the picker says "Stored on this device only")',
-  linkShape(appClaimedLink('betmgm', STORED.betmgm!, 'NJ')) === 'sports.<st>.betmgm.com/en/sportsapp/sports'
+  linkShape(appClaimedLink('betmgm', STORED.betmgm!, 'NJ')) === 'www.<st>.betmgm.com/en/sportsapp/sports'
   && linkShape(appClaimedLink('williamhill_us', null, 'mi')) === 'sportsbook.caesars.com/us/<st>/bet/'
   && linkShape('https://sportsbook.draftkings.com/event/1?outcomes=2') === 'sportsbook.draftkings.com/event/1' && linkShape(null) === null);
 const openInApp = read('src/lib/openInApp.ts');
