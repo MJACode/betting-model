@@ -28,6 +28,10 @@ WHAT IT READS, all on this disk and nothing from the database:
   * github\\_mirror_summary.json: when the GitHub copy last finished, and which
     repositories failed.
   * the size of everything under the root, split by copy, and the free disk.
+  * the run's kind (diff, nightly; full, monthly) from STATE.json, and the
+    schedule: the LocalMirror task as Task Scheduler holds it (its triggers,
+    next and last run, last result), with the last monthly full
+    (supabase_mirror\\LAST_FULL.json) and the date the next one is due from.
 
 WHAT IT WRITES. One INSERT, in one short transaction: no read of any other
 table, no UPDATE, no DELETE. A nightly pass that is reported twice keeps its
@@ -59,13 +63,21 @@ import os
 import re
 import shutil
 import socket
+import subprocess
 import sys
 import time
 import traceback
 from pathlib import Path
 from typing import Any
 
+from zoneinfo import ZoneInfo
+
 UTC = dt.timezone.utc
+ET = ZoneInfo("America/New_York")
+TASK_NAME = "LocalMirror"
+TASK_PATH = "\\BettingModel\\"
+TASK_READ_TIMEOUT_S = 60
+KINDS = ("diff", "full")
 
 DEFAULT_ROOT = Path(r"C:\Users\micha\Documents\betting_local_copies")
 DEFAULT_ENV_FILE = Path(r"C:\Users\micha\documents\betting-model\.env")
@@ -101,8 +113,9 @@ COLUMNS: tuple[str, ...] = (
     "tables_bytes", "schema_bytes", "storage_bytes", "github_bytes", "duckdb_bytes",
     "other_bytes", "total_bytes", "total_files",
     "disk_total_bytes", "disk_free_bytes", "report_ms",
+    "copy_kind", "schedule",
 )
-JSON_COLUMNS = frozenset({"failed_tables", "differing_tables"})
+JSON_COLUMNS = frozenset({"failed_tables", "differing_tables", "schedule"})
 
 INSERT_SQL = (
     "INSERT INTO public.pc_copy_snapshots ("
@@ -266,9 +279,102 @@ def read_github(root: Path) -> tuple[dt.datetime | None, int | None, int | None]
     if not isinstance(s, dict):
         return None, None, None
     repos = s.get("repos") if isinstance(s.get("repos"), list) else []
+    # A repository fails when its git copy failed, or when its issues and pull
+    # requests could not be exported (2026-11-18 and 11-19: 2 of 4 stopped on a
+    # cut-off read while git was fine, and this counted 0).
     failed = sum(1 for r in repos
-                 if not (isinstance(r, dict) and isinstance(r.get("git"), dict) and r["git"].get("ok")))
+                 if not (isinstance(r, dict) and isinstance(r.get("git"), dict) and r["git"].get("ok"))
+                 or (isinstance(r, dict) and r.get("error")))
     return parse_iso(s.get("at")), len(repos), failed
+
+
+# The task as Task Scheduler holds it, as one line of JSON. Times in UTC; a
+# time Windows has not set (a task that never ran) reads as null.
+_TASK_PS = r"""
+$ErrorActionPreference = 'Stop'
+$t = Get-ScheduledTask -TaskPath '{path}' -TaskName '{name}'
+$i = $t | Get-ScheduledTaskInfo
+function U($d) {{ if ($d -and $d.Year -gt 1999) {{ $d.ToUniversalTime().ToString('o') }} else {{ $null }} }}
+[pscustomobject]@{{
+  state = $t.State.ToString()
+  next_run_at = U $i.NextRunTime
+  last_run_at = U $i.LastRunTime
+  last_result = $i.LastTaskResult
+  triggers = @($t.Triggers | ForEach-Object {{ [pscustomobject]@{{
+    type = $_.CimClass.CimClassName; start = $_.StartBoundary; delay = $_.Delay; enabled = $_.Enabled }} }})
+}} | ConvertTo-Json -Depth 4 -Compress
+"""
+
+_TRIGGER_TYPES = {"MSFT_TaskDailyTrigger": "daily", "MSFT_TaskLogonTrigger": "sign-in",
+                  "MSFT_TaskTimeTrigger": "once", "MSFT_TaskWeeklyTrigger": "weekly",
+                  "MSFT_TaskBootTrigger": "start-up"}
+
+
+def read_task(name: str = TASK_NAME, path: str = TASK_PATH) -> dict[str, Any]:
+    """The LocalMirror task from Task Scheduler. Raises when it cannot be read."""
+    out = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+         _TASK_PS.format(path=path, name=name)],
+        capture_output=True, text=True, encoding="utf-8", timeout=TASK_READ_TIMEOUT_S)
+    if out.returncode != 0:
+        raise RuntimeError((out.stderr or out.stdout or "").strip().splitlines()[0][:200]
+                           if (out.stderr or out.stdout).strip() else f"exit {out.returncode}")
+    got = json.loads(out.stdout)
+    return got if isinstance(got, dict) else {}
+
+
+def _trigger(t: Any) -> dict[str, Any] | None:
+    if not isinstance(t, dict):
+        return None
+    start = t.get("start") if isinstance(t.get("start"), str) else None
+    m = re.search(r"T(\d{2}:\d{2})", start or "")
+    out: dict[str, Any] = {"type": _TRIGGER_TYPES.get(t.get("type"), t.get("type")),
+                           "enabled": t.get("enabled") if isinstance(t.get("enabled"), bool) else None}
+    if out["type"] == "daily" and m:
+        out["at"] = m.group(1)  # local clock time on the PC (Eastern)
+    if isinstance(t.get("delay"), str) and t["delay"]:
+        out["delay"] = t["delay"]  # ISO 8601, e.g. PT2M after sign-in
+    return out
+
+
+def next_full_from(last_full: dict | None) -> str | None:
+    """The 1st (Eastern) of the month after the last full started, as a date;
+    None when there has been none (the next pass runs it). The same rule as
+    scripts/local_mirror.py choose_kind."""
+    started = parse_iso((last_full or {}).get("run_started_at"))
+    if started is None:
+        return None
+    e = started.astimezone(ET)
+    y, mo = (e.year + 1, 1) if e.month == 12 else (e.year, e.month + 1)
+    return dt.date(y, mo, 1).isoformat()
+
+
+def read_schedule(mirror: Path, now: dt.datetime) -> dict[str, Any]:
+    """The backup's schedule: the task's triggers, next and last run, and the
+    monthly full. A task that cannot be read is recorded, not raised: the row
+    is still written."""
+    last_full = _load_json(mirror / "LAST_FULL.json")
+    last_full = last_full if isinstance(last_full, dict) else None
+    out: dict[str, Any] = {
+        "task": TASK_PATH + TASK_NAME, "read_at": now.astimezone(UTC).isoformat(timespec="seconds"),
+        "diff": "every pass except the month's full", "full": "the first pass on or after the 1st of each month",
+        "last_full": None if last_full is None else {
+            k: last_full.get(k) for k in ("run_id", "run_started_at", "run_finished_at", "failed_tables")},
+        "next_full_from": next_full_from(last_full),
+    }
+    try:
+        task = read_task()
+    except Exception as exc:  # noqa: BLE001 - recorded, never fatal
+        out["error"] = scrub(exc)[:300]
+        return out
+    out.update({
+        "state": task.get("state") if isinstance(task.get("state"), str) else None,
+        "next_run_at": task.get("next_run_at") if isinstance(task.get("next_run_at"), str) else None,
+        "last_run_at": task.get("last_run_at") if isinstance(task.get("last_run_at"), str) else None,
+        "last_result": _int(task.get("last_result")),
+        "triggers": [t for t in (_trigger(x) for x in (task.get("triggers") or [])) if t],
+    })
+    return out
 
 
 def is_whole_run(run_tables: int | None, tables_on_disk: int) -> bool:
@@ -380,6 +486,8 @@ def build_row(root: Path, *, source: str, pass_id: str, host: str | None,
         "disk_total_bytes": disk_total,
         "disk_free_bytes": disk_free,
         "report_ms": None,
+        "copy_kind": state.get("kind") if state.get("kind") in KINDS else None,
+        "schedule": json.dumps(read_schedule(mirror, now)),
     }
     row["report_ms"] = int((time.monotonic() - t0) * 1000)
     return row
@@ -495,6 +603,7 @@ def write_with_retries(url: str, row: dict[str, Any], *, attempts: int = WRITE_A
 def _summary(row: dict[str, Any]) -> str:
     differing = json.loads(row["differing_tables"]) if row["differing_tables"] else []
     failed = json.loads(row["failed_tables"]) if row["failed_tables"] else []
+    sched = json.loads(row["schedule"]) if row.get("schedule") else {}
     gb = 1e9
     return (f"pass {row['pass_id']} ({row['source']}); copy run {row['copy_run_id']} "
             f"{row['copy_started_at']} -> {row['copy_finished_at']}, {row['copy_tables']} table(s), "
@@ -503,6 +612,9 @@ def _summary(row: dict[str, Any]) -> str:
             f"{row['total_bytes'] / gb:.2f} GB under the root "
             f"(tables {row['tables_bytes'] / gb:.2f}, GitHub {row['github_bytes'] / gb:.2f}); "
             f"disk free {(row['disk_free_bytes'] or 0) / gb:.1f} of {(row['disk_total_bytes'] or 0) / gb:.1f} GB; "
+            f"kind {row['copy_kind']}; next task run {sched.get('next_run_at')}, "
+            f"next full from {sched.get('next_full_from') or 'the next pass'}"
+            f"{'; task not read: ' + sched['error'] if sched.get('error') else ''}; "
             f"read in {row['report_ms']} ms")
 
 

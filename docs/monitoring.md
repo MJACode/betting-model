@@ -180,11 +180,12 @@ copy of the whole Supabase project and of GitHub on mike's PC
 (`scripts/local_mirror_report.py`, run last by the LocalMirror task; rows by
 hand are marked so). Every number is read on the PC from the copy's own files,
 and the tile reads it through `backend/ops/getPcCopy.ts` (the last 120 days).
-Five cards:
+Six cards:
 
 | Card | What it says | When it turns red or orange |
 |---|---|---|
-| Last nightly copy | how long ago the last nightly copy finished, when, how long it took, how many of the tables on disk it covered | red when the last nightly pass's copy did not finish, or ended with an error; orange when no nightly report has come for 36 hours (or none at all 36 hours after the first report), when the DuckDB views did not rebuild, or when the row was written by the next pass's catch-up (the pass stopped before reporting, so its exit codes are unknown) |
+| Last nightly copy | how long ago the last nightly copy finished, its kind (nightly diff or monthly full), when, how long it took, how many of the tables on disk it covered, how many rows it copied | red when the last nightly pass's copy did not finish, or ended with an error; orange when no nightly report has come for 36 hours (or none at all 36 hours after the first report), when the DuckDB views did not rebuild, or when the row was written by the next pass's catch-up (the pass stopped before reporting, so its exit codes are unknown) |
+| Next backup | how long until the LocalMirror task next runs, its triggers (daily at 00:30 Eastern, and 2 minutes after sign-in), when the next monthly full is due, and when the last one ran. Read from Task Scheduler by each report (`pc_copy_snapshots.schedule`, from 2026-11-20) | red when the task is switched off or has no daily trigger; orange when the PC could not read its task |
 | Tables that differ | the tables whose latest exact-count check found a different number of rows than Supabase, and the tables the last run could not copy | red when a table could not be copied; orange when a count differs (usually rows that changed between the copy and its check, which the next run takes) |
 | Size of the copy | the bytes under the copy's folder: the database copy, GitHub, everything else (mostly an older full copy kept under `snapshots\`, then logs and other jobs' files), and the growth a day once there is a day of reports | never |
 | Free disk | free space on the PC's disk, and its share | orange under 15% free, red under 5% |
@@ -193,7 +194,10 @@ Five cards:
 A table that changes all day, such as `latest_odds`, can show as differing.
 That is the copy's own check catching rows that changed between the copy and
 the count, and the next run takes them. Below the cards: the differing and
-failed tables, and each copy's size over time.
+failed tables, the last 14 backup runs (when each started, its kind, how long
+it took, how many rows it copied, and how it ended), and each copy's size over
+time. A run before 2026-11-20 shows as "Nightly (before 11-20)": it re-copied every
+small table whole.
 
 **Layouts on this tab are not saved.** The layout functions accept four tab
 names and `dashboard_layouts` checks the same four; adding a fifth changes

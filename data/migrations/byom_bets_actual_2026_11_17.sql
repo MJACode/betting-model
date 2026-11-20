@@ -92,7 +92,9 @@ BEGIN
   $body$;
   $fn$;
 
-  REVOKE ALL ON FUNCTION public.byom_bets(integer, jsonb, text) FROM PUBLIC;
+  -- DROP + CREATE above is a new function. Supabase default privileges
+  -- grant anon EXECUTE directly; REVOKE FROM PUBLIC leaves that grant.
+  REVOKE ALL ON FUNCTION public.byom_bets(integer, jsonb, text) FROM PUBLIC, anon;
   GRANT EXECUTE ON FUNCTION public.byom_bets(integer, jsonb, text)
     TO authenticated;
   IF to_regclass('public.picks') IS NULL

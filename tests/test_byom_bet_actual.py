@@ -87,7 +87,7 @@ def test_migration_is_active_and_safe():
     assert "position('byom_bets_actual_v1' in p.prosrc)" in sql
     for col in ("actual numeric", "home_score numeric", "away_score numeric"):
         assert col in sql
-    assert "FROM PUBLIC" in sql
+    assert "FROM PUBLIC, anon" in sql
     assert "TO authenticated;" in sql
     assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in sql
     assert "TO service_role;" in sql
