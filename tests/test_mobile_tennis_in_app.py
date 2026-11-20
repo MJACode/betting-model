@@ -346,8 +346,11 @@ def test_the_empty_today_board_says_when_tennis_posts():
     checks about 30 minutes before its listed start, bet or not, and bets only
     a few (UX review, 2026-11-14)."""
     picks = _read(PICKS_HOME)
-    assert ("Each match shows here about 30 minutes before its listed start, once the model has "
-            "checked it. It bets only a few; the rest show as no bet.") in picks
+    # On the Signals board since All was removed (2026-11-20): a no-bet match
+    # no longer shows anywhere on Picks, so the copy no longer promises one.
+    assert ("signals for ${date} yet. The model checks each match about 30 minutes before its "
+            "listed start, and bets only a few.") in picks
+    assert "the rest show as no bet" not in picks
     assert "Picks post about 30 minutes before each match the model bets" not in picks
 
 

@@ -553,7 +553,7 @@ def test_voiceover_names_the_womens_chip_in_words():
 
 def test_the_empty_boards_say_where_the_womens_picks_are():
     picks = _read(SRC / "screens" / "PicksHomeScreen.tsx")
-    # Today: the women's model posts when DraftKings opens a total, not on the
+    # Signals: the women's model posts when DraftKings opens a total, not on the
     # refresh cadence the other sports' copy names.
     assert ("Pre-game picks post as DraftKings opens each game’s total, mostly on game day. "
             "Bets made at halftime post on Live Signals.") in picks
