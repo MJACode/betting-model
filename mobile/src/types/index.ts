@@ -756,7 +756,7 @@ export interface ParlayTrackRow {
  * push router in lib/ — and lib/ importing a type from screens/ inverts the
  * layering. It was spelled out inline in all three.
  */
-export type PicksView = 'today' | 'signals' | 'live' | 'scoreboard';
+export type PicksView = 'signals' | 'live' | 'scoreboard';
 
 export type TabParamList = {
   // Merged Picks home (Today | Signals | Live) replaces the old Picks +

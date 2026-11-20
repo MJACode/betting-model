@@ -237,9 +237,11 @@ def _build_messages(tokens: list[str], new_bets: list[dict], dropped: list[dict]
         # and what changed is the market. The wording now says that.
         title = (f"📉 {len(dropped)} pick{'s' if len(dropped) != 1 else ''} "
                  "moved past the bet line")
-        # Lands on Today, not Signals: once the line has moved past the cut the
+        # Never lands on Signals: once the line has moved past the cut the
         # pick is no longer a signal, so Signals is the one board it is
-        # guaranteed NOT to be on.
+        # guaranteed NOT to be on. One pick opens that pick; several open the
+        # app only, since the All board they used to land on was removed
+        # (Matt, 2026-11-20; mobile/src/lib/pushRoute.ts).
         events.append((title, _summary_body([s["label"] for s in dropped]),
                        _route("dropped", dropped)))
 

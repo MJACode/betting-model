@@ -94,8 +94,7 @@ def test_the_pre_game_boards_say_when_euroleague_picks_post():
     copy = ("'EuroLeague pre-game picks post five to ten minutes before each tip-off, when that game is checked. Bets ' +\n"
             "  'made at halftime post on Live Signals.'")
     assert copy in src
-    assert src.count("? EUROLEAGUE_PREGAME_EMPTY") == 2      # the All board and the Signals board
-    assert "sport === 'EUROLEAGUE' ? 'No EuroLeague picks yet today' : `No ${sport} picks today`" in src
+    assert src.count("? EUROLEAGUE_PREGAME_EMPTY") == 1      # the Signals board (All removed 2026-11-20)
     assert "title={sport === 'EUROLEAGUE' ? 'No EuroLeague signals right now' : 'No signal bets right now'}" in src
     assert "title={`No ${sportDisplayName(sport)} live signals right now`}" in src
     stats = (SRC / "screens" / "StatsScreen.tsx").read_text(encoding="utf-8")
