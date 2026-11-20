@@ -1247,7 +1247,9 @@ export function PicksHomeScreen() {
           sport={sportDisplayName(sport)}
           candidates={betAll}
           myBooks={myBooks}
+          isTracked={tracked.isTracked}
           onTrack={tracked.trackMany}
+          onUntrack={tracked.untrackPick}
           onClose={() => setBetAllOpen(false)}
         />
       ) : null}

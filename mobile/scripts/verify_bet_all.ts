@@ -144,7 +144,13 @@ check('the button keeps the "Bet all N" form at zero, never "See why" (Matt, 202
   home.includes('{`Bet all ${betAll.picks.length}`}') && !home.includes("'See why'"));
 check('the sheet defaults to Best line', sheet.includes("useState<BetAllMode>('best')"));
 check('the sheet never builds a parlay', !/parlay|combineBetslipLinks|useParlaySlip/i.test(sheet.replace(/not Parlay|Parlay\)|parlay\./g, '')));
-check('Placed tracks every leg of that book', sheet.includes('if (step) onTrack(step.legs.map((l) => l.pick));'));
+check('each pick has its own Placed tick that tracks or untracks it (Matt, 2026-11-20)',
+  sheet.includes('if (isTracked(leg.pick)) onUntrack(leg.pick);') && sheet.includes('else onTrack([leg.pick]);'));
+check('Placed all tracks only the picks not yet tracked', sheet.includes('const rest = step.legs.filter((l) => !isTracked(l.pick)).map((l) => l.pick);'));
+check('the tick reads tracked state, not a sheet-local copy', sheet.includes('const on = isTracked(l.pick);'));
+check('no per-book "Did you place" question and no "Stop Bet all?" warning (Matt, 2026-11-20)',
+  !sheet.includes('Did you place') && !sheet.includes('Stop Bet all') && !sheet.includes('setConfirmStop'));
+check('the screen wires tracking both ways', home.includes('isTracked={tracked.isTracked}') && home.includes('onUntrack={tracked.untrackPick}'));
 
 // ── UX review fixes ──────────────────────────────────────────────────────
 check('the board names the main reason nothing is ready',
@@ -153,9 +159,7 @@ check('the main reason is plural for a count over one (\'5 games started\', not 
   betAllMainSkip([{ reason: 'started' }, { reason: 'started' }]) === '2 games started'
   && betAllMainSkip([{ reason: 'started' }]) === '1 game started');
 check('another book’s price says where the model found it', sheet.includes('foundAtText(bookLabel(record), formatAmerican(modelPrice))'));
-check('mid-send the backdrop does not close the sheet', sheet.includes("onPress={phase === 'send' ? undefined : onClose}"));
-check('the X asks before dropping an unanswered book', sheet.includes('if (pendingAnswer) setConfirmStop(true);'));
-check('VoiceOver hears the placed question', sheet.includes('AccessibilityInfo.announceForAccessibility('));
+check('VoiceOver is told to tick placed bets on return', sheet.includes('Tick each bet you placed to track it.'));
 check('the app’s own segmented control', sheet.includes('<SegmentTabs'));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
