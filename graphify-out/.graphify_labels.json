@@ -1,7 +1,5 @@
 {
-  "1": "Mobile player stats page",
   "17": "NBA first quarter props search study",
-  "20": "Mobile stats board",
   "23": "NBA game two projection model",
   "24": "NBA fifth search period shares",
   "25": "NBA game model research harness",
@@ -113,7 +111,6 @@
   "329": "NFL opener spread board selection",
   "330": "EuroLeague in-play loop tests",
   "333": "NFL wind fire window tests",
-  "336": "Player positions ingestor, tests",
   "337": "NFL sport runbook",
   "338": "iOS app build and App Store docs",
   "340": "Supabase edge functions overview doc",
