@@ -315,3 +315,24 @@ move them into a live record (the record counts an in-play bet only from an
 in-play model posted to a live channel); mike chose to take the three out of
 the record instead, and they were voided the same day (`docs/sports/ncaaf.md`).
 
+
+**Tennis (2026-11-20).** The final close read only `odds`, `player_prop_odds`
+and `clv_close_quotes`, and tennis prices are in none of them: the tennis card
+stores them in `tennis_odds_quotes` (`docs/sports/tennis.md`). So every tennis
+bet was stamped "no pull of this book after the bet and before the start", and
+the tennis models showed no closing-line value at all (the one bet then
+settled, `atp_moneyline_shop`'s Alexander Zverev ML at Hard Rock -275 on
+2026-11-19). `clv_close.tennis_quotes` now reads them. That table is
+change-only, a row only when a book's quote changed, so a row after the bet
+is not the test of a pull after the bet. The pulls are the card's own live
+polls in `tennis_odds_fetches` (every 10 minutes, `events` > 0), and the
+book's quote at a pull is its newest row at or before it. The match is the
+feed event the card decided (`tennis_moneyline_decisions`, by game id).
+Re-measured with `python -m scripts.clv_close_history remeasure-none --model
+atp_moneyline_shop wta_moneyline_shop --apply`: the Zverev bet closed at Hard
+Rock -300 (its 19:23 UTC pull, seven minutes before the listed 19:30 start),
++2.27%, a beat. A book that stops quoting a match leaves no row to say so, so
+its last row reads as standing; the card decides on the same reading. The
+feed moved that match's listed start from 19:30 to 19:37 after the bet; the
+rule bounds on the start stored on the game (19:30). Pinnacle's fair close for
+tennis is still not written (`market_clv_pct`): its writer reads `odds` only.
