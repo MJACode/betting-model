@@ -592,6 +592,11 @@ def test_worker_migrations_do_not_reopen_anon():
                 window = "\n".join(lines[max(0, i - 8):i])
                 if not re.search(r"\bGRANT\b", line) and not re.search(r"\bGRANT\b", window):
                     continue
+                # A function anon must keep after the lockdown (the spec's
+                # keep list) is granted on purpose, not reopened.
+                fn = re.search(r"FUNCTION\s+public\.(\w+)\s*\(", line)
+                if fn and fn.group(1) in ANON_KEEP_FUNCTIONS:
+                    continue
                 assert "public.picks" in window or "public.picks" in line, (
                     f"{name}:{i} {line.strip()}")
 
@@ -1058,9 +1063,17 @@ def test_premium_gate_matview_hook_through_the_worker_path():
 
     assert "premium_gate_matview_2026_11_20.sql" in ACTIVE_MIGRATIONS
     assert "premium_gate_matview_2026_11_20_undo.sql" not in ACTIVE_MIGRATIONS
-    sql = (MIGRATIONS / "premium_gate_matview_2026_11_20.sql").read_text(encoding="utf-8")
+    from data.view_migrations import _without_combined_anon_grants
+    # The worker rewrites "TO anon, authenticated" to "TO authenticated" once
+    # step A is in (view_migrations._anon_lock_started). Apply what the worker
+    # actually runs: on 2026-11-20 the raw file passed here while production
+    # lost anon EXECUTE on the hook.
+    sql = _without_combined_anon_grants(
+        (MIGRATIONS / "premium_gate_matview_2026_11_20.sql").read_text(encoding="utf-8"))
     with scratch_cluster("premium-hook-") as dsn:
         _psql(dsn, _fixture_sql())
+        _psql_file(dsn, _sql_files()["site"])
+        _psql_file(dsn, _sql_files()["a"])
         _psql(dsn, "CREATE ROLE authenticator NOINHERIT LOGIN;")
         _psql(dsn, f"INSERT INTO public.access_grants (user_id, access_source) "
                    f"VALUES ('{X}', 'comped');")
@@ -1111,6 +1124,8 @@ def test_premium_gate_matview_hook_through_the_worker_path():
         assert ok, err
         ok, err = hook("anon", None, "/site_public_record")
         assert ok, err
+        assert _psql(dsn, "SELECT has_function_privilege('anon', "
+                          "'public.premium_pre_request()', 'EXECUTE');").strip() == "t"
 
 
 def test_app_founders_through_the_worker_path():
