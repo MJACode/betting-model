@@ -311,7 +311,7 @@ def test_spec_counts_match_the_baseline():
     assert EXPECTED_ANON_SEQUENCES == 67
     assert ANON_KEEP_FUNCTIONS == {
         "log_app_error", "log_app_timings", "save_device_push_token",
-        "site_public_record_rows"}
+        "site_public_record_rows", "premium_pre_request"}
 
 
 def test_steps_a_and_b_on_scratch_postgres():
@@ -1047,3 +1047,67 @@ def test_premium_gate_through_the_worker_path():
         assert ok
         ok, _ = _can(dsn, "anon", "SELECT 1 FROM picks;")
         assert not ok
+
+
+def test_premium_gate_matview_hook_through_the_worker_path():
+    """Gate part 2: the pre-request hook refuses the six endpoints over
+    mv_scored_pick_outcomes to a signed-in account without access, lets a
+    comped account and anon through, and is set on authenticator once."""
+    from data.view_migrations import _apply_one
+    import psycopg2
+
+    assert "premium_gate_matview_2026_11_20.sql" in ACTIVE_MIGRATIONS
+    assert "premium_gate_matview_2026_11_20_undo.sql" not in ACTIVE_MIGRATIONS
+    sql = (MIGRATIONS / "premium_gate_matview_2026_11_20.sql").read_text(encoding="utf-8")
+    with scratch_cluster("premium-hook-") as dsn:
+        _psql(dsn, _fixture_sql())
+        _psql(dsn, "CREATE ROLE authenticator NOINHERIT LOGIN;")
+        _psql(dsn, f"INSERT INTO public.access_grants (user_id, access_source) "
+                   f"VALUES ('{X}', 'comped');")
+
+        class _Conn:
+            def __init__(self, raw):
+                self.raw = raw
+
+            def execute(self, q, params=None):
+                cur = self.raw.cursor()
+                cur.execute(q, params)
+                return cur
+
+            def commit(self):
+                self.raw.commit()
+
+            def rollback(self):
+                self.raw.rollback()
+
+        raw = psycopg2.connect(dsn)
+        try:
+            conn = _Conn(raw)
+            assert _apply_one(conn, "premium_gate_matview_2026_11_20.sql", sql) is None
+            assert _apply_one(conn, "premium_gate_matview_2026_11_20.sql", sql) is None
+        finally:
+            raw.close()
+
+        setting = _psql(dsn, """
+          SELECT s.cfg FROM pg_db_role_setting rs JOIN pg_roles r ON r.oid = rs.setrole
+          CROSS JOIN LATERAL unnest(rs.setconfig) s(cfg)
+           WHERE r.rolname = 'authenticator' AND s.cfg LIKE 'pgrst.db_pre_request=%';""")
+        assert setting.strip() == "pgrst.db_pre_request=public.premium_pre_request"
+
+        def hook(role, sub, path):
+            claims = '{"sub": "%s"}' % sub if sub else None
+            return _can(dsn, role,
+                        f"SELECT set_config('request.path', '{path}', true); "
+                        "SELECT public.premium_pre_request();", claims=claims)
+
+        for path in ("/mv_scored_pick_outcomes", "/v_model_full_outcome_picks",
+                     "/v_model_full_outcome_record", "/rpc/custom_model_backtest",
+                     "/rpc/custom_model_backtest_posted", "/rpc/custom_model_picks"):
+            ok, err = hook("authenticated", Y, path)
+            assert not ok and "42501" in err, path
+            ok, err = hook("authenticated", X, path)
+            assert ok, err
+        ok, err = hook("authenticated", Y, "/games")
+        assert ok, err
+        ok, err = hook("anon", None, "/site_public_record")
+        assert ok, err

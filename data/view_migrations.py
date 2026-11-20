@@ -772,6 +772,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # policy that said USING (true) now requires has_app_access(); ops tables
     # the app never reads lose the authenticated grant. No-op once applied.
     "premium_gate_2026_11_20.sql",
+    # Premium gate part 2: a PostgREST pre-request hook refuses the six
+    # endpoints over mv_scored_pick_outcomes to signed-in accounts without
+    # access (a matview cannot carry RLS). No-op once the hook is set.
+    "premium_gate_matview_2026_11_20.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

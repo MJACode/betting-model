@@ -276,6 +276,10 @@ ANON_KEEP_FUNCTIONS: frozenset[str] = frozenset({
     # and Postgres checks EXECUTE on a function inside a view against the
     # CALLER, so anon keeps it. It returns site_public_record's rows only.
     "site_public_record_rows",
+    # PostgREST's pre-request hook (premium_gate_matview_2026_11_20.sql).
+    # PostgREST calls it as the request's role, anon included; without
+    # EXECUTE every anon request would fail. It returns at once for anon.
+    "premium_pre_request",
     "log_app_timings",
     # Stays callable without a session so a signed-out opt-out still
     # reaches the server. It is not opt-out-only: a caller who already
@@ -699,7 +703,7 @@ BEGIN
   SELECT string_agg(p.oid::regprocedure::text, ',') INTO bad
     FROM pg_proc p
    WHERE p.pronamespace = 'public'::regnamespace
-     AND p.proname NOT IN ('log_app_error', 'log_app_timings', 'save_device_push_token', 'site_public_record_rows')
+     AND p.proname NOT IN ('log_app_error', 'log_app_timings', 'save_device_push_token', 'site_public_record_rows', 'premium_pre_request')
      AND has_function_privilege('anon', p.oid, 'EXECUTE');
   IF bad IS NOT NULL THEN
     RAISE EXCEPTION 'anon still executes: %', bad;
