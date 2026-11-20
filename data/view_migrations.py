@@ -407,10 +407,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # NHL spreads on ±1.5), the same read as tracking/paper_tracker; it
     # stamps most new captures, so the two must not differ.
     "clv_standard_v2_2026_10_14.sql",
-    # 2026-10-16: Build Your Own Model facts. Empty tables, anon SELECT,
-    # catalog return on the second pass. Win, loss, or push. The line
-    # basis is a label. Does not touch picks, the record views, or a
-    # live model. Unapplied until the worker's next pass.
+    # 2026-10-16: Build Your Own Model facts. Empty tables. The second
+    # pass returns on the tables, props_scanned_at, RLS, the two policies,
+    # and authenticated SELECT. Anon is granted only while anon can read
+    # picks. Win, loss, or push. The line basis is a label. Does not touch
+    # picks, the record views, or a live model.
     "byom_facts_schema_2026_10_16.sql",
     # 2026-10-16: NHL Stats-tab reads (season totals, per-game value arrays,
     # team totals, latest pre-game prop quote). Display only. Does not
@@ -708,7 +709,8 @@ ACTIVE_MIGRATIONS: list[str] = [
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT
     # grant. Returns on a catalog read once the view's comment matches the
-    # hash of its body. It calls published_pick_stake, so on a fresh database
+    # hash of its body and authenticated can read it. Anon is not part of
+    # that check. It calls published_pick_stake, so on a fresh database
     # it waits (a NOTICE, not an error) until the pair below has run. Does
     # not write picks, push_sent or the record. Sits before the pair.
     "open_picks_view_2026_11_04.sql",
