@@ -230,6 +230,12 @@ def _row(pass_id: str, source: str = "nightly") -> dict:
         github_bytes=613_000_004, duckdb_bytes=2_895_872, other_bytes=3_840_000_005,
         total_bytes=11_082_000_006, total_files=21_171,
         disk_total_bytes=999_000_000_007, disk_free_bytes=529_600_000_008, report_ms=1400,
+        copy_kind="full",
+        schedule=json.dumps({"task": "\\BettingModel\\LocalMirror", "state": "Ready",
+                             "next_run_at": "2026-11-17T05:30:00+00:00",
+                             "last_full": "2026-11-16T05:43:24+00:00",
+                             "next_full_from": "2026-12-01",
+                             "triggers": [{"kind": "daily", "at": "00:30"}]}),
     )
     return row
 
