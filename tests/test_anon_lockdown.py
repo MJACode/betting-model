@@ -902,10 +902,15 @@ def test_tracked_bets_owner_migration_through_the_worker_path():
         _psql_file(dsn, files["site"])
         _psql_file(dsn, files["a"])
         _psql(dsn, "REVOKE ALL ON public.tracked_bets FROM anon;")
-        _psql(dsn, "INSERT INTO public.app_timings (device_id, user_id) "
-                   f"VALUES ('mapped-device', '{X}');"
-              if "app_timings" in _psql(dsn, "SELECT to_regclass('public.app_timings');")
-              else "SELECT 1;")
+        # Production shape (measured 2026-11-20): app_timings has device_id but
+        # NO user_id; feedback_threads has both. The 15:17 UTC worker pass
+        # failed on exactly this ("column user_id does not exist").
+        _psql(dsn, "CREATE TABLE IF NOT EXISTS public.app_timings "
+                   "(id bigserial PRIMARY KEY, device_id text, kind text);")
+        _psql(dsn, "CREATE TABLE IF NOT EXISTS public.feedback_threads "
+                   "(id bigserial PRIMARY KEY, device_id text, user_id uuid);")
+        _psql(dsn, "INSERT INTO public.feedback_threads (device_id, user_id) "
+                   f"VALUES ('mapped-device', '{X}');")
         _psql(dsn, "INSERT INTO tracked_bets (device_id, pick_id) VALUES "
                    "('mapped-device', 1), ('unknown-device', 2), ('unknown-device', 3);")
 
@@ -937,6 +942,20 @@ def test_tracked_bets_owner_migration_through_the_worker_path():
             raw.close()
 
         assert _psql(dsn, "SELECT count(*) FROM tracked_bets;").strip() == "3"
+        mapped = _psql(dsn, "SELECT user_id::text FROM tracked_bets "
+                            "WHERE device_id = 'mapped-device';")
+        assert X in mapped
+        # The helpers read app_timings at call time; they must not 42703.
+        ok, err = _can(
+            dsn, "authenticated",
+            "SELECT public.untrack_tracked_bet('unknown-device', 2);",
+            claims='{"sub": "%s"}' % Y)
+        assert ok, err
+        ok, err = _can(
+            dsn, "authenticated",
+            "SELECT public.clear_my_tracked_bets('unknown-device');",
+            claims='{"sub": "%s"}' % Y)
+        assert ok, err
         ok, err = _can(
             dsn, "authenticated",
             f"INSERT INTO tracked_bets (device_id, pick_id, user_id) VALUES ('d2', 8, '{Y}');",
