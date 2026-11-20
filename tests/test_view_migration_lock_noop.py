@@ -121,6 +121,8 @@ def test_discord_publish_state_compares_the_whole_view_and_policy():
     assert "polpermissive" in head and "permissive IS TRUE" in head
     assert "polroles" in head
     assert "roles IS NOT DISTINCT FROM ARRAY['anon', 'authenticated']" in head
+    assert "roles IS NOT DISTINCT FROM ARRAY['authenticated']" in head
+    assert "NOT has_table_privilege('anon', 'public.picks', 'SELECT')" in head
     # The expected strings are what PG 17 prints for the DDL in this file.
     assert ("SELECT lock_key, kind FROM push_sent s WHERE kind = ANY "
             in head)

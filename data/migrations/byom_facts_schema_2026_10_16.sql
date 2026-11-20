@@ -61,10 +61,21 @@ BEGIN
          SELECT 1 FROM pg_policy
           WHERE polrelid = 'public.byom_prop_facts'::regclass
             AND polname = 'anon read byom_prop_facts')
-       AND has_table_privilege('anon', 'public.byom_game_facts', 'SELECT')
        AND has_table_privilege('authenticated', 'public.byom_game_facts', 'SELECT')
-       AND has_table_privilege('anon', 'public.byom_prop_facts', 'SELECT')
        AND has_table_privilege('authenticated', 'public.byom_prop_facts', 'SELECT')
+       -- Pre-lockdown anon can read both tables. Step A revokes that.
+       -- The tables, column, RLS and policies are still present, so this
+       -- file must not ENABLE ROW LEVEL SECURITY again on every pass.
+       AND (
+         (has_table_privilege('anon', 'public.byom_game_facts', 'SELECT')
+          AND has_table_privilege('anon', 'public.byom_prop_facts', 'SELECT'))
+         OR (
+           to_regclass('public.picks') IS NOT NULL
+           AND NOT has_table_privilege('anon', 'public.picks', 'SELECT')
+           AND NOT has_table_privilege('anon', 'public.byom_game_facts', 'SELECT')
+           AND NOT has_table_privilege('anon', 'public.byom_prop_facts', 'SELECT')
+         )
+       )
        AND NOT EXISTS (
          SELECT 1
            FROM (VALUES

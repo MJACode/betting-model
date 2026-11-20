@@ -123,6 +123,9 @@ def test_it_is_one_statement_that_returns_on_a_catalog_read_once_applied():
     assert guard < code.index("RETURN;", guard) < first_ddl
     assert "has_table_privilege('anon', 'public.open_picks', 'SELECT')" in code
     assert "has_table_privilege('authenticated', 'public.open_picks', 'SELECT')" in code
+    guard = code[:first_ddl]
+    assert "NOT has_table_privilege('anon', 'public.picks', 'SELECT')" in guard
+    assert "open_picks already present - skipping" in guard
 
 
 def test_it_waits_for_what_it_reads_instead_of_failing_the_pass():

@@ -80,17 +80,27 @@ BEGIN
        AND qual IS NOT DISTINCT FROM want_qual
        AND cmd IS NOT DISTINCT FROM 'r'
        AND permissive IS TRUE
-       AND roles IS NOT DISTINCT FROM ARRAY['anon', 'authenticated']
-       AND has_column_privilege('anon', 'public.push_sent', 'lock_key', 'SELECT')
-       AND has_column_privilege('anon', 'public.push_sent', 'kind', 'SELECT')
        AND NOT has_column_privilege('anon', 'public.push_sent', 'message_id', 'SELECT')
        AND has_column_privilege('authenticated', 'public.push_sent', 'lock_key', 'SELECT')
        AND has_column_privilege('authenticated', 'public.push_sent', 'kind', 'SELECT')
        AND NOT has_column_privilege('authenticated', 'public.push_sent', 'message_id', 'SELECT')
-       AND has_table_privilege('anon', 'public.v_discord_published', 'SELECT')
        AND has_table_privilege('authenticated', 'public.v_discord_published', 'SELECT')
        AND NOT has_table_privilege('anon', 'public.v_discord_published', 'INSERT')
        AND NOT has_table_privilege('authenticated', 'public.v_discord_published', 'INSERT')
+       AND (
+         (roles IS NOT DISTINCT FROM ARRAY['anon', 'authenticated']
+          AND has_column_privilege('anon', 'public.push_sent', 'lock_key', 'SELECT')
+          AND has_column_privilege('anon', 'public.push_sent', 'kind', 'SELECT')
+          AND has_table_privilege('anon', 'public.v_discord_published', 'SELECT'))
+         OR (
+           to_regclass('public.picks') IS NOT NULL
+           AND NOT has_table_privilege('anon', 'public.picks', 'SELECT')
+           AND roles IS NOT DISTINCT FROM ARRAY['authenticated']
+           AND NOT has_column_privilege('anon', 'public.push_sent', 'lock_key', 'SELECT')
+           AND NOT has_column_privilege('anon', 'public.push_sent', 'kind', 'SELECT')
+           AND NOT has_table_privilege('anon', 'public.v_discord_published', 'SELECT')
+         )
+       )
     THEN
       RAISE NOTICE 'v_discord_published already matches - skipping';
       RETURN;

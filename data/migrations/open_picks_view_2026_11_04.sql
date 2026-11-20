@@ -43,9 +43,17 @@ BEGIN
   IF to_regclass('public.open_picks') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.open_picks'), 'pg_class'), '')
          = 'open_picks 1605a3f8d18f'
-     AND has_table_privilege('anon', 'public.open_picks', 'SELECT')
      AND has_table_privilege('authenticated', 'public.open_picks', 'SELECT')
+     AND (
+       has_table_privilege('anon', 'public.open_picks', 'SELECT')
+       OR (
+         to_regclass('public.picks') IS NOT NULL
+         AND NOT has_table_privilege('anon', 'public.picks', 'SELECT')
+         AND NOT has_table_privilege('anon', 'public.open_picks', 'SELECT')
+       )
+     )
   THEN
+    RAISE NOTICE 'open_picks already present - skipping';
     RETURN;
   END IF;
 

@@ -177,3 +177,46 @@ def test_schema_applies_twice_on_scratch_postgres_and_anon_can_only_read():
         if conn is not None:
             conn.close()
         cluster.stop()
+
+
+def test_step_a_skips_and_does_not_give_anon_select_back():
+    """Step A revokes anon. The skip has to hold, or ENABLE ROW LEVEL
+    SECURITY takes ACCESS EXCLUSIVE on every refresh pass."""
+    psycopg2 = pytest.importorskip("psycopg2")
+    from tests.byom_scratch import ScratchPostgres, pg_bin
+
+    if pg_bin("initdb") is None:
+        pytest.skip("initdb is not installed")
+
+    cluster = ScratchPostgres()
+    conn = None
+    try:
+        conn = psycopg2.connect(cluster.start())
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE ROLE anon NOLOGIN;
+            CREATE ROLE authenticated NOLOGIN;
+        """)
+        cur.execute(SQL)
+        cur.execute("""
+            CREATE TABLE public.picks (id integer);
+            REVOKE ALL ON public.picks FROM PUBLIC, anon, authenticated;
+            REVOKE ALL ON public.byom_game_facts FROM anon;
+            REVOKE ALL ON public.byom_prop_facts FROM anon;
+        """)
+        conn.notices.clear()
+        cur.execute(SQL)
+        assert any(
+            "byom facts schema already present - skipping" in n
+            for n in conn.notices)
+        for rel in ("public.byom_game_facts", "public.byom_prop_facts"):
+            cur.execute(
+                "SELECT has_table_privilege('anon', %s, 'SELECT'),"
+                "       has_table_privilege('authenticated', %s, 'SELECT')",
+                (rel, rel))
+            assert cur.fetchone() == (False, True), rel
+    finally:
+        if conn is not None:
+            conn.close()
+        cluster.stop()
