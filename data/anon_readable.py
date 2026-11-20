@@ -179,6 +179,9 @@ AUTHENTICATED_READABLE: tuple[str, ...] = (
     "open_picks",
     "v_public_track_record",
     "v_public_track_record_daily",
+    # Per model per day, built from the daily view's own definition
+    # (data/migrations/public_track_record_model_daily_2026_11_18.sql).
+    "v_public_track_record_model_daily",
 )
 
 # The only relation anon may read after steps A and B. Granted by

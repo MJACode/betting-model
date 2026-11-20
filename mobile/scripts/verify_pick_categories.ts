@@ -24,9 +24,14 @@ import {
   applyFilter,
   categoriesAreNarrowed,
   categoryCountsFor,
+  effectiveModelCut,
   freshFilter,
+  modelsAreNarrowed,
   presentCategoriesFor,
+  presentModelsFor,
+  resetImpossibleModels,
   selectedCategories,
+  selectedModels,
   type ModelCategory,
   type PicksFilterState,
 } from '../src/lib/pickFilterState';
@@ -229,6 +234,81 @@ check(
   'every NFL prop model is a player prop',
   NFL_PROPS.every((id) => modelCategory(id) === 'player_prop'),
 );
+
+// ── 7. the MODEL cut (Matt, 2026-11-18): scoped to the board, like Market ──
+{
+  const NHL = ['nhl_moneyline', 'nhl_prop_shots_on_goal', 'nhl_prop_shots_on_goal', 'nhl_prop_saves'];
+  const NCAAB = ['ncaab_spread_market', 'ncaab_first_half_total'];
+  const paused = (id: string) => id === 'nhl_prop_saves';
+  const present = presentModelsFor(NHL, paused);
+  check(
+    'the Model list holds only the board\'s models, most picks first, paused left out',
+    present.map((m) => `${m.modelId}:${m.count}`).join(',') ===
+      'nhl_prop_shots_on_goal:2,nhl_moneyline:1',
+    present.map((m) => `${m.modelId}:${m.count}`).join(','),
+  );
+  const fresh = freshFilter();
+  check('an empty model selection keeps every pick', applyFilter(NHL.map(pick), fresh).length === NHL.length);
+  const sogOnly: PicksFilterState = { ...freshFilter(), models: new Set(['nhl_prop_shots_on_goal']) };
+  const kept = applyFilter(NHL.map(pick), sogOnly).map((i) => i.pick.model_id);
+  check(
+    'picking one model keeps only that model\'s picks',
+    kept.length === 2 && kept.every((id) => id === 'nhl_prop_shots_on_goal'),
+    kept.join(','),
+  );
+  check(
+    'picking one of two listed models is a narrowing cut, counted once',
+    modelsAreNarrowed(sogOnly, present) &&
+      activeFilterCount(sogOnly, presentCategoriesFor(NHL), present) === 1,
+    String(activeFilterCount(sogOnly, presentCategoriesFor(NHL), present)),
+  );
+  const both: PicksFilterState = {
+    ...freshFilter(),
+    models: new Set(['nhl_prop_shots_on_goal', 'nhl_moneyline']),
+  };
+  check('picking every listed model is not a narrowing cut', !modelsAreNarrowed(both, present));
+  // Switch to NCAAB with an NHL-only selection: the board would be empty with
+  // no NCAAB model named anywhere. It must be cleared, not kept.
+  const ncaabPresent = presentModelsFor(NCAAB);
+  check(
+    'an NHL model selection on the NCAAB board is cleared',
+    selectedModels(sogOnly, ncaabPresent).length === 0 &&
+      resetImpossibleModels(sogOnly, ncaabPresent).models.size === 0,
+  );
+  check(
+    'a selection that still overlaps the board is left alone',
+    resetImpossibleModels(sogOnly, present) === sogOnly,
+  );
+
+  // The three hidden cuts from the PR #1492 review. In each, the bar shows no
+  // model cut (no pill, no count), so the board must not be cut either.
+  // nhl_prop_saves stands for a model whose picks all draw as PAUSED: on the
+  // board, never listed.
+  const cut = (st: PicksFilterState, p: typeof present) =>
+    applyFilter(NHL.map(pick), effectiveModelCut(st, p)).length;
+  check(
+    'review M1.1: every listed model ticked = no cut; the unlisted paused rows stay',
+    !modelsAreNarrowed(both, present) && cut(both, present) === NHL.length,
+    String(cut(both, present)),
+  );
+  const onlyMl = presentModelsFor(['nhl_moneyline', 'nhl_prop_saves'], paused);
+  check(
+    'review M1.2: a selection where only one model is listable = no cut',
+    cut(both, onlyMl) === NHL.length,
+    String(cut(both, onlyMl)),
+  );
+  const nothingListed = presentModelsFor(['nhl_prop_saves'], paused);
+  check(
+    'review M1.3: a board with nothing listable = no cut, and the reset clears it',
+    cut(sogOnly, nothingListed) === NHL.length &&
+      resetImpossibleModels(sogOnly, nothingListed).models.size === 0,
+  );
+  check(
+    'a real narrowing still cuts, to the listed models only',
+    cut(sogOnly, present) === 2,
+    String(cut(sogOnly, present)),
+  );
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
