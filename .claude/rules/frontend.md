@@ -120,7 +120,11 @@ outside the manifest from the day they shipped and would have lost anon SELECT
 the moment the default grant is revoked — silently, as an empty screen, which
 is the failure mode that manifest exists to end.
 
-**A PAUSED MODEL'S PICKS SHOW ON THE ALL BOARD, AND ONLY THERE.** (Matt,
+**A PAUSED MODEL'S PICKS SHOWED ON THE ALL BOARD, AND ONLY THERE — AND THE ALL
+BOARD WAS REMOVED 2026-11-20** (Matt: *"users only care about the signal and
+live signal bets and seeing the score board"*), so an unposted, unsettled
+paused pick now shows on no Picks board; its settled record is untouched (§1c).
+The history: (Matt,
 2026-09-26: *"NFL is only showing tackle bets. It should be all bets"* — 11 of
 12 NFL prop models were paused, so the 2026-09-19 hide left NFL a tackles
 board.) `useTodayPicks` returns them as `pausedData`, apart from `data`; only

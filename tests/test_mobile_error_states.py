@@ -295,8 +295,10 @@ def test_picks_home_no_fake_zeros_and_neutral_chips():
     home = _read(SRC / "screens" / "PicksHomeScreen.tsx")
     assert "knownCount(0, { loaded, error," in home
     assert "knownCount(0, { loaded: liveLoaded, error: liveError," in home
-    assert "todayHeaderCounts({ date, known: !todayUnknown, ...todayStats })" in home
-    assert "count={todayUnknown ? null : todayStats.total}" in home
+    # The All segment, and the header and count it carried, were removed
+    # 2026-11-20 (Matt). A failed load still says "—", never 0.
+    assert "`${date} · — pre-game signals`" in home
+    assert '<SubTabBtn label="All"' not in home
     assert "count={todayUnknown ? null : live.length}" in home
     assert "count={liveUnknown ? null : liveData.length}" in home
     assert "${todayUnknown ? '—' : live.length} pre-game signals" in home
