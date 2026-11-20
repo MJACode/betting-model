@@ -47,11 +47,15 @@ BEGIN
       ON public.tracked_bets (user_id);
 
   -- Fill a legacy row only when its device maps to exactly one account.
-  IF to_regclass('public.app_timings') IS NOT NULL THEN
+  -- Production's app_timings has no user_id column (measured 2026-11-20), so
+  -- check the column, not the table.
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
+              AND table_name = 'app_timings' AND column_name = 'user_id') THEN
     src := 'SELECT device_id, user_id FROM public.app_timings'
         || ' WHERE user_id IS NOT NULL AND device_id IS NOT NULL';
   END IF;
-  IF to_regclass('public.feedback_threads') IS NOT NULL THEN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
+              AND table_name = 'feedback_threads' AND column_name = 'user_id') THEN
     IF src <> '' THEN src := src || ' UNION '; END IF;
     src := src || 'SELECT device_id, user_id FROM public.feedback_threads'
         || ' WHERE user_id IS NOT NULL AND device_id IS NOT NULL';
@@ -133,13 +137,16 @@ BEGIN
       IF p_device_id IS NULL OR p_device_id !~ '^[A-Za-z0-9-]{8,64}$' THEN
         RAISE EXCEPTION 'untrack_tracked_bet: bad device id' USING ERRCODE = '22023';
       END IF;
-      IF to_regclass('public.app_timings') IS NOT NULL THEN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
+                  AND table_name = 'app_timings' AND column_name = 'user_id') THEN
         EXECUTE
           'SELECT EXISTS (SELECT 1 FROM public.app_timings'
           || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
           INTO other_owner USING p_device_id, uid;
       END IF;
-      IF NOT other_owner AND to_regclass('public.feedback_threads') IS NOT NULL THEN
+      IF NOT other_owner AND EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'feedback_threads'
+                    AND column_name = 'user_id') THEN
         EXECUTE
           'SELECT EXISTS (SELECT 1 FROM public.feedback_threads'
           || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
@@ -176,13 +183,16 @@ BEGIN
       IF p_device_id IS NULL OR p_device_id !~ '^[A-Za-z0-9-]{8,64}$' THEN
         RAISE EXCEPTION 'clear_my_tracked_bets: bad device id' USING ERRCODE = '22023';
       END IF;
-      IF to_regclass('public.app_timings') IS NOT NULL THEN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
+                  AND table_name = 'app_timings' AND column_name = 'user_id') THEN
         EXECUTE
           'SELECT EXISTS (SELECT 1 FROM public.app_timings'
           || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'
           INTO other_owner USING p_device_id, uid;
       END IF;
-      IF NOT other_owner AND to_regclass('public.feedback_threads') IS NOT NULL THEN
+      IF NOT other_owner AND EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'feedback_threads'
+                    AND column_name = 'user_id') THEN
         EXECUTE
           'SELECT EXISTS (SELECT 1 FROM public.feedback_threads'
           || ' WHERE device_id = $1 AND user_id IS NOT NULL AND user_id <> $2)'

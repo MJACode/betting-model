@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, premium gate part 1: signed-in reads of model and Stats data require has_app_access() (66 policies), ops tables closed to signed-in; the scored-picks matview is part 2 |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, anon-key lockdown step B part 1 applied (anon off Stats, odds, scoreboard, ops); part 2 (tracked_bets owner policies) written for the SQL editor |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, view migrations: byom_official_legs skips after anon-lockdown step A and drops byom_bets before replacing it, so the refresh pass no longer dies on the widened return type |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, anon-key lockdown step A applied to production; the website record view now reads a definer function (anon was refused through an invoker view) |
