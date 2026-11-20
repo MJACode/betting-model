@@ -239,6 +239,38 @@ pre-off price path, because every free price is a close.
 5. **The framework**: unchanged. A scope is not a build, so step 7's
    shipping list was used as the checklist and not executed.
 
+## 2026-11-14: NCAAF moneyline, its decision timing replayed at every hour (`ncaaf_moneyline_market`)
+
+1. **League and scope**: college football's moneyline model, live since
+   2026-11-10 and decided once at 14:00 UTC. mike, 2026-11-14: when a model
+   decides is a per-model parameter, chosen by out-of-sample expected units;
+   "Buy all of it now" for every hour of 2023-2025 (152,680 credits).
+2. **Tried**: the live card's own read and decision at every whole UTC hour
+   of three seasons, graded as 26 timings (each fixed hour on game day,
+   every hour until it bets, the last read before kickoff) after the card's
+   price and EV floors; chosen on 2023-2024, confirmed on 2025, BH-FDR over
+   all 26 (`scripts/ncaaf_moneyline_timing.py`).
+3. **New**: "When the model decides" in `porting-traps.md` (the method, and
+   the hockey evidence for the live check rate); the timing inventory of
+   every model with its credit number (`docs/decision_timing.md`); a light
+   read of a purchase's rows by primary-key range instead of a by-hand
+   mirror run (`scripts/ncaaf_hourly_extract.py`).
+4. **Corrected**: `shipping.md` said "a game is decided once"; the lock is on
+   a BET, and a card's "EACH GAME DECIDED ONCE (CLAUDE.md 1c)" is a timing
+   choice under the pick rule's name. Measured on the bought hours: the
+   feed's own stamp on every row is within a minute of its pull at every
+   UTC hour, so the card's 60-minute window thins no quiet hour; an old
+   stamp in a change-only store is the store's doing, not the feed's.
+5. **The framework**: step 7 now measures the timing before shipping and
+   says the lock is on a BET.
+
+Result: no timing clears. 14:00 UTC (live) is the 2023-2024 choice, +0.81
+units on 2025; checking every hour until it bets triples the bets for +1.6%;
+the bet price sits 3-4% below Pinnacle's close at every fixed hour. And a
+purchase can damage what it touches: the history job's game upsert moved
+1,690 stored kickoffs (fixed, restored). Read a purchase's side effects on
+`games`, not only its odds rows.
+
 ## 2026-11-14 — Tennis round 1: the match winner live (`atp_moneyline_shop`, `wta_moneyline_shop`), the games markets' line shop null
 
 1. **League and scope**: tennis, both tours (mike, 2026-11-13: *"build

@@ -100,7 +100,7 @@ upper limit on the price.
 9 a.m. ET in winter and 10 a.m. ET in summer time. The card runs hourly at
 five past (UTC) and only the run in the 14:00 hour decides. The decision goes
 into `ncaaf_moneyline_decisions` with every book's moneyline and spread and
-its flags, bet or not, and the game is never decided again (CLAUDE.md §1c). A
+its flags, bet or not, and the game is never decided again (a timing choice, not the pick rule: mike, 2026-11-14, CLAUDE.md §1c). A
 game kicking off less than five minutes after 14:00 UTC, or already under way,
 is not bet. A missed 14:00 is recorded as `missed` with no bet and fails the
 run; every due game with no deciding book's moneyline in the hour, an artifact
@@ -216,6 +216,21 @@ on 11.
   priced the stored 13:55 UTC pull, where every quote was stamped 4 to 19
   minutes before 14:00 UTC (the build prints it). Live, a quote is the hourly
   refresh's, stamped about 13:16 UTC. A price can move in those 40 minutes.
+
+**When it decides: replayed at every hour, 2026-11-14 (mike: timing is a
+per-model parameter).** Every hour of 2023-2025 was bought (152,680 credits;
+full-game moneyline and spread at the ten books, source `odds_api_historical`,
+2023-08-17 to 12-09, 2024-08-15 to 12-07, 2025-08-14 to 12-06) and the card's own read and decision replayed at each whole UTC hour, graded
+as 26 timings: each fixed hour, every hour until it bets, and the last read
+before kickoff (`scripts/ncaaf_moneyline_timing.py`). **No timing clears.**
+14:00 UTC, the live check, is the one chosen on 2023-2024 (+13.88 units), but
+nothing survives the false-discovery test and on 2025 it made +0.81 units on
+93 bets (interval -21.0% to +23.0%). Checking every hour until it bets makes
+951 bets for +8.32 units (+1.6%) and lost 3.52 in 2025. At every fixed hour
+the bet price averages 3-4% below Pinnacle's no-vig close (14:00: -3.83%,
+beating it on 22.9% of bets): the market moves against these bets. The live
+check is unchanged at 14:00 UTC. Every timing's table, and the replay's checks:
+`docs/decision_timing.md`.
 
 **Review at 50 settled bets** (gate standing, CLAUDE.md §2: at least 50
 settled picks, positive flat-bet ROI, calibration within 5%). Read beside the

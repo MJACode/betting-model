@@ -195,11 +195,35 @@ down this list.
   the proposed hockey hold was wrong when measured, and two basketball leagues
   were told "no 10-game wait" by mike. The NBA totals wait came back on
   2026-11-18: those games were break-even in the replay and 21-29 live.
-- **A first-come cap** ("lock the first qualifying quote") can fire far more
-  often live than in the backtest (18% of games against 3.5%), because the live
-  path sees many more quotes. Replay the live cadence.
-- **Fetch cadence changes the bet list.** Only a handful of in-play research
-  bets were the same bet at the loop's real fetch times.
+
+## When the model decides (mike, 2026-11-14)
+
+- **When a model decides is a per-model parameter, chosen by out-of-sample
+  expected units.** "Decide once at a fixed time" and "check every hour until
+  it bets" are both candidates; neither is a blanket rule. CLAUDE.md §1c locks
+  a BET once it is made and says nothing about freezing a game that did not
+  bet. So a card's "EACH GAME DECIDED ONCE (CLAUDE.md 1c)" is a timing choice
+  under the pick rule's name. About 17 rule models carried that line on
+  2026-11-14: the college basketball pre-game cards, the women's college
+  totals, five pro basketball rules, four EuroLeague pre-game rules and the
+  college football moneyline. Copy the card, never that reason.
+- **Measure it, on the card's own decision path.** Replay it at every time the
+  stored prices allow: each fixed hour; every check until it bets, the first
+  BET locking; the last read before the start. Choose on the early seasons,
+  confirm on the last one, and count the timing as a searched parameter
+  (BH-FDR over every candidate). Report each timing's games in scope, games
+  priced, bets, units by season, return with its interval, chance of a
+  positive season and CLV against Pinnacle's close, so a thin hour and a
+  losing hour can be told apart. If no timing clears out of sample, say so;
+  never hand the model its best-looking hour. The first replay:
+  `scripts/ncaaf_moneyline_timing.py`.
+- **Replay at the live check rate, never a sparser one.** A rule that keeps
+  checking sees many more quotes live than a backtest with two pulls a day,
+  so it fires far more often. The hockey regulation moneyline locked the first
+  qualifying quote out of about 18 looks, up to 72 hours out: it fired on 18%
+  of games live against 3.5% in the backtest, and went 5-18, -9.10 units
+  (`docs/nhl_clv_ev_assessment.md`). In play, only a handful of research bets
+  were the same bet at the loop's real fetch times.
 
 ## The app and the ids
 
