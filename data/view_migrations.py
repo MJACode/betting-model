@@ -765,6 +765,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # definition's md5 changes. Creates nothing if the edit does not apply.
     # SELECT only; writes no pick, snapshot or push_sent row.
     "public_track_record_model_daily_2026_11_18.sql",
+    # Anon-key lockdown step B part 2: tracked_bets rows owned by auth.uid().
+    # One DO block; returns at once when the owner policies are in place.
+    "tracked_bets_owner_2026_11_20.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

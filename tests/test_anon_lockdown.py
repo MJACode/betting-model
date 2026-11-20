@@ -879,3 +879,82 @@ def test_signed_in_hooks_refetch_when_auth_changes():
         src = (root / name).read_text(encoding="utf-8")
         assert "signedIn" in src, name
         assert "[authReady, signedIn]" in src, name
+
+
+def test_tracked_bets_owner_migration_through_the_worker_path():
+    """Step B part 2 ships as an ACTIVE_MIGRATIONS file the worker applies.
+
+    Production state on 2026-11-20: step A and step B part 1 applied (anon has
+    no grant on tracked_bets), the two legacy policies still open to
+    authenticated with true. Run the file through the worker's own apply path
+    twice: the first pass makes every row owner-scoped and keeps every row; the
+    second is a no-op.
+    """
+    from data.view_migrations import _apply_one
+    from data.db import get_connection  # noqa: F401  (import check only)
+    import psycopg2
+
+    assert "tracked_bets_owner_2026_11_20.sql" in ACTIVE_MIGRATIONS
+    sql = (MIGRATIONS / "tracked_bets_owner_2026_11_20.sql").read_text(encoding="utf-8")
+    files = _sql_files()
+    with scratch_cluster("tb-owner-") as dsn:
+        _psql(dsn, _fixture_sql())
+        _psql_file(dsn, files["site"])
+        _psql_file(dsn, files["a"])
+        _psql(dsn, "REVOKE ALL ON public.tracked_bets FROM anon;")
+        _psql(dsn, "INSERT INTO public.app_timings (device_id, user_id) "
+                   f"VALUES ('mapped-device', '{X}');"
+              if "app_timings" in _psql(dsn, "SELECT to_regclass('public.app_timings');")
+              else "SELECT 1;")
+        _psql(dsn, "INSERT INTO tracked_bets (device_id, pick_id) VALUES "
+                   "('mapped-device', 1), ('unknown-device', 2), ('unknown-device', 3);")
+
+        class _Conn:
+            def __init__(self, raw):
+                self.raw = raw
+
+            def execute(self, q, params=None):
+                cur = self.raw.cursor()
+                cur.execute(q, params)
+                return cur
+
+            def commit(self):
+                self.raw.commit()
+
+            def rollback(self):
+                self.raw.rollback()
+
+        raw = psycopg2.connect(dsn)
+        try:
+            conn = _Conn(raw)
+            assert _apply_one(conn, "tracked_bets_owner_2026_11_20.sql", sql) is None
+            first = _psql(dsn, "SELECT string_agg(polname, ',' ORDER BY polname) "
+                               "FROM pg_policy WHERE polrelid = 'public.tracked_bets'::regclass;")
+            assert first.strip() == (
+                "tracked_bets_owner_delete,tracked_bets_owner_insert,tracked_bets_owner_select")
+            assert _apply_one(conn, "tracked_bets_owner_2026_11_20.sql", sql) is None
+        finally:
+            raw.close()
+
+        assert _psql(dsn, "SELECT count(*) FROM tracked_bets;").strip() == "3"
+        ok, err = _can(
+            dsn, "authenticated",
+            f"INSERT INTO tracked_bets (device_id, pick_id, user_id) VALUES ('d2', 8, '{Y}');",
+            claims='{"sub": "%s"}' % X)
+        assert not ok and ("42501" in err or "row-level security" in err)
+        ok, err = _can(
+            dsn, "authenticated",
+            "INSERT INTO tracked_bets (device_id, pick_id) VALUES ('d1', 7);",
+            claims='{"sub": "%s"}' % X, commit=True)
+        assert ok, err
+        gone = _psql(dsn, f"""
+          BEGIN;
+          SELECT set_config('request.jwt.claims', '{{"sub": "{Y}"}}', true);
+          SET LOCAL ROLE authenticated;
+          WITH gone AS (DELETE FROM tracked_bets RETURNING 1) SELECT count(*) FROM gone;
+          ROLLBACK;
+        """)
+        assert gone.strip().endswith("0")
+        ok, err = _can(dsn, "anon", "DELETE FROM tracked_bets;")
+        assert not ok
+        assert _psql(dsn, "SELECT count(*) FROM tracked_bets;").strip() == "4"
