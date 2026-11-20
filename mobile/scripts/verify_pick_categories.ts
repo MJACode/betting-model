@@ -24,6 +24,7 @@ import {
   applyFilter,
   categoriesAreNarrowed,
   categoryCountsFor,
+  effectiveModelCut,
   freshFilter,
   modelsAreNarrowed,
   presentCategoriesFor,
@@ -277,6 +278,35 @@ check(
   check(
     'a selection that still overlaps the board is left alone',
     resetImpossibleModels(sogOnly, present) === sogOnly,
+  );
+
+  // The three hidden cuts from the PR #1492 review. In each, the bar shows no
+  // model cut (no pill, no count), so the board must not be cut either.
+  // nhl_prop_saves stands for a model whose picks all draw as PAUSED: on the
+  // board, never listed.
+  const cut = (st: PicksFilterState, p: typeof present) =>
+    applyFilter(NHL.map(pick), effectiveModelCut(st, p)).length;
+  check(
+    'review M1.1: every listed model ticked = no cut; the unlisted paused rows stay',
+    !modelsAreNarrowed(both, present) && cut(both, present) === NHL.length,
+    String(cut(both, present)),
+  );
+  const onlyMl = presentModelsFor(['nhl_moneyline', 'nhl_prop_saves'], paused);
+  check(
+    'review M1.2: a selection where only one model is listable = no cut',
+    cut(both, onlyMl) === NHL.length,
+    String(cut(both, onlyMl)),
+  );
+  const nothingListed = presentModelsFor(['nhl_prop_saves'], paused);
+  check(
+    'review M1.3: a board with nothing listable = no cut, and the reset clears it',
+    cut(sogOnly, nothingListed) === NHL.length &&
+      resetImpossibleModels(sogOnly, nothingListed).models.size === 0,
+  );
+  check(
+    'a real narrowing still cuts, to the listed models only',
+    cut(sogOnly, present) === 2,
+    String(cut(sogOnly, present)),
   );
 }
 

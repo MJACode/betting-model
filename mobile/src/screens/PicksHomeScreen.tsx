@@ -126,6 +126,7 @@ import { slipKeyForPick } from '@/lib/parlay';
 import {
   ALL_SIGNALS,
   presentCategoriesFor,
+  effectiveModelCut,
   presentModelsFor,
   resetImpossibleMarket,
   resetImpossibleModels,
@@ -501,7 +502,9 @@ export function PicksHomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [boardItems, thresholdsRevision],
   );
-  const { records: modelRecords, status: modelRecordsStatus } = useModelFilterRecords(date);
+  // ET today, not the slate's date: the hot / cold window is the 7 days
+  // ending yesterday on the calendar, whatever slate is loaded.
+  const { records: modelRecords, status: modelRecordsStatus } = useModelFilterRecords();
 
   // ── The GAMES cut, shared with the Stats tab ───────────────────────────────
   // Matt, 2026-09-09: one selection across both tabs, so picking tonight's
@@ -643,12 +646,18 @@ export function PicksHomeScreen() {
   useEffect(() => {
     if (displayFilter !== filter) setFilter(displayFilter);
   }, [displayFilter, filter]);
+  // What the board is CUT with: the model selection as the bar shows it
+  // (effectiveModelCut). displayFilter keeps the boxes the user ticked.
+  const cutFilter = useMemo(
+    () => effectiveModelCut(displayFilter, presentModelsFor(selectableModelIds)),
+    [displayFilter, selectableModelIds],
+  );
 
   // Every cut except the search box. Split out so the empty state can tell
   // "search emptied it" from "the filters emptied it" (usability audit M12).
   const unsearched = useMemo(
     () =>
-      applyFilter(datedItems, displayFilter).filter(
+      applyFilter(datedItems, cutFilter).filter(
         (d) =>
           isGameSelected(d.pick.game_id, gamePicker.selected) &&
           // A Signal filter asks what the MODEL called, and a paused model
@@ -659,7 +668,7 @@ export function PicksHomeScreen() {
           // counted three bets (UX review, 2026-09-26).
           (displayFilter.signals.size === ALL_SIGNALS.length || !isPausedForDisplay(d.pick)),
       ),
-    [datedItems, displayFilter, gamePicker.selected, thresholdsRevision],
+    [datedItems, displayFilter, cutFilter, gamePicker.selected, thresholdsRevision],
   );
   const filtered = useMemo(() => searchPicks(unsearched, search), [unsearched, search]);
   // The board as filtered, minus any game that is over. Bet all and the
@@ -722,8 +731,8 @@ export function PicksHomeScreen() {
     if (boardItems.length === 0 || filtered.length > 0 || gamePicker.selected.size === 0) {
       return false;
     }
-    return searchPicks(applyFilter(datedItems, displayFilter), search).length > 0;
-  }, [boardItems, datedItems, filtered.length, displayFilter, search, gamePicker.selected]);
+    return searchPicks(applyFilter(datedItems, cutFilter), search).length > 0;
+  }, [boardItems, datedItems, filtered.length, cutFilter, search, gamePicker.selected]);
 
   // Search alone emptied the board: the filters and Games still leave picks,
   // the query matched none of them. The generic "widen signals / thresholds"

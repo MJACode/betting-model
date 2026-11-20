@@ -152,7 +152,7 @@ def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
         if name == "public_track_record_model_daily_2026_11_18.sql":
             body = (ROOT / "data" / "migrations" / name).read_text(encoding="utf-8")
             code = "\n".join(l for l in body.splitlines() if not l.lstrip().startswith("--"))
-            created = re.findall(r"VIEW\s+public\.(\w+)", code)
+            created = re.findall(r"VIEW\s+(?:IF\s+EXISTS\s+)?public\.(\w+)", code)
             assert created and set(created) == {"v_public_track_record_model_daily"}, created
             continue
         # Reads the record view's filter out of its definition to build the

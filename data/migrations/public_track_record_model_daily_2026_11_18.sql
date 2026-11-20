@@ -55,18 +55,29 @@ BEGIN
     RAISE NOTICE 'v_public_track_record_model_daily: the daily view no longer starts SELECT game_date, sport; not created';
     RETURN;
   END IF;
-  IF body !~ 'GROUP BY game_date, sport\s' THEN
+  IF body !~ 'GROUP BY game_date, sport(\s|;|$)' THEN
     RAISE NOTICE 'v_public_track_record_model_daily: the daily view no longer groups by game_date, sport; not created';
     RETURN;
   END IF;
-  body := regexp_replace(body, 'GROUP BY game_date, sport(\s)', 'GROUP BY game_date, sport, model_id\1');
+  body := regexp_replace(body, 'GROUP BY game_date, sport(\s|;|$)', 'GROUP BY game_date, sport, model_id\1');
   body := regexp_replace(body, ';\s*$', '');
 
-  EXECUTE 'CREATE OR REPLACE VIEW public.v_public_track_record_model_daily WITH (security_invoker = on) AS ' || body;
-  EXECUTE format('COMMENT ON VIEW public.v_public_track_record_model_daily IS %L', marker);
-  REVOKE ALL ON public.v_public_track_record_model_daily FROM PUBLIC;
-  REVOKE ALL ON public.v_public_track_record_model_daily FROM anon;
-  REVOKE ALL ON public.v_public_track_record_model_daily FROM authenticated;
-  GRANT SELECT ON public.v_public_track_record_model_daily TO authenticated;
+  -- DROP, then CREATE: CREATE OR REPLACE cannot rename, drop, reorder or
+  -- retype a column, so a later change to the daily view's columns would
+  -- raise here and fail the pass for every file after this one. Nothing
+  -- depends on this view. The block is fail-soft, as the header promises: a
+  -- failure is a NOTICE and the view is left as it was (the sub-block rolls
+  -- back its own DROP).
+  BEGIN
+    EXECUTE 'DROP VIEW IF EXISTS public.v_public_track_record_model_daily';
+    EXECUTE 'CREATE VIEW public.v_public_track_record_model_daily WITH (security_invoker = on) AS ' || body;
+    EXECUTE format('COMMENT ON VIEW public.v_public_track_record_model_daily IS %L', marker);
+    REVOKE ALL ON public.v_public_track_record_model_daily FROM PUBLIC;
+    REVOKE ALL ON public.v_public_track_record_model_daily FROM anon;
+    REVOKE ALL ON public.v_public_track_record_model_daily FROM authenticated;
+    GRANT SELECT ON public.v_public_track_record_model_daily TO authenticated;
+  EXCEPTION WHEN others THEN
+    RAISE NOTICE 'v_public_track_record_model_daily not rebuilt: %', SQLERRM;
+  END;
 END
 $mig$;

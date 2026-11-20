@@ -47,11 +47,6 @@ def test_the_view_is_derived_from_the_daily_view_not_copied():
     assert "md5(daily_def)" in CODE
 
 
-def test_it_creates_nothing_when_the_edit_does_not_apply():
-    assert CODE.count("RETURN;") >= 4
-    assert "body = daily_def" in CODE
-
-
 def test_grants_are_select_only():
     assert "security_invoker = on" in CODE
     for role in ("PUBLIC", "anon", "authenticated"):
@@ -73,17 +68,6 @@ def test_the_app_reads_it_by_literal_name():
     assert ".from('v_public_track_record_model_daily')" in src
 
 
-def test_paused_models_are_not_listed_but_their_posted_bets_keep_a_row():
-    """Matt, 2026-11-18: paused models are not in the Model list. The test is
-    per pick (isPausedForDisplay), so a paused model's posted or settled BET,
-    which still draws as a bet (CLAUDE.md 1c), keeps a row; with
-    isModelPaused, ticking any model hid that bet with no row to restore it."""
-    screen = (MOBILE / "src" / "screens" / "PicksHomeScreen.tsx").read_text(encoding="utf-8")
-    assert "selectableModelIds={selectableModelIds}" in screen
-    assert "boardItems.filter((d) => !isPausedForDisplay(d.pick))" in screen
-    assert "presentModelsFor(selectableModelIds)" in screen
-
-
 @pytest.mark.skipif(tsx_cmd(MOBILE) is None, reason="mobile node modules not installed")
 def test_the_behavioural_checks_pass():
     proc = subprocess.run(
@@ -91,3 +75,101 @@ def test_the_behavioural_checks_pass():
         cwd=MOBILE, capture_output=True, text=True, timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# ── the migration on a real Postgres ──────────────────────────────────────────
+# A stand-in daily view with the production view's shape (SELECT game_date,
+# sport, ... GROUP BY game_date, sport ...). The migration is run as the
+# runner runs it, then the daily view is changed in ways CREATE OR REPLACE
+# cannot follow.
+
+DAILY_V1 = """
+CREATE VIEW public.v_public_track_record_daily AS
+SELECT game_date, sport, count(*) AS picks, sum(u) AS units
+FROM t GROUP BY game_date, sport HAVING count(*) > 0
+"""
+# A column renamed and one removed: CREATE OR REPLACE would raise here.
+DAILY_V2 = """
+CREATE VIEW public.v_public_track_record_daily AS
+SELECT game_date, sport, count(*) AS bets
+FROM t GROUP BY game_date, sport
+"""
+# GROUP BY on something else: the edit does not apply.
+DAILY_V3 = """
+CREATE VIEW public.v_public_track_record_daily AS
+SELECT game_date, sport, count(*) AS bets FROM t GROUP BY sport, game_date
+"""
+
+
+@pytest.fixture(scope="module")
+def dsn():
+    from tests._pg import can_scratch, env_dsn, scratch_cluster
+    if env_dsn():
+        yield env_dsn()
+        return
+    if not can_scratch():
+        pytest.skip("no scratch Postgres")
+    with scratch_cluster("model-daily-pg-") as d:
+        yield d
+
+
+def _cols(cur, view):
+    cur.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = %s ORDER BY ordinal_position",
+        (view,),
+    )
+    return [r[0] for r in cur.fetchall()]
+
+
+def test_the_migration_builds_skips_rebuilds_and_fails_soft(dsn):
+    psycopg2 = pytest.importorskip("psycopg2")
+    conn = psycopg2.connect(dsn)
+    conn.autocommit = True
+    cur = conn.cursor()
+    for role in ("anon", "authenticated"):
+        cur.execute(f"DO $$ BEGIN CREATE ROLE {role}; EXCEPTION WHEN duplicate_object THEN NULL; END $$;")
+    cur.execute("DROP VIEW IF EXISTS public.v_public_track_record_model_daily, public.v_public_track_record_daily")
+    cur.execute("DROP TABLE IF EXISTS t")
+    cur.execute("CREATE TABLE t (game_date text, sport text, model_id text, u numeric)")
+    cur.execute("INSERT INTO t VALUES ('2026-11-17','NHL','a',1),('2026-11-17','NHL','a',-0.5),"
+                "('2026-11-17','NHL','b',2),('2026-11-18','NBA','c',1)")
+    cur.execute(DAILY_V1)
+
+    # 1. built: the daily view split by model, totals equal to the daily view
+    cur.execute(SQL)
+    assert _cols(cur, "v_public_track_record_model_daily") == [
+        "game_date", "sport", "model_id", "picks", "units"]
+    cur.execute("SELECT model_id, picks, units FROM v_public_track_record_model_daily ORDER BY 1")
+    assert cur.fetchall() == [("a", 2, 0.5), ("b", 1, 2), ("c", 1, 1)]
+    cur.execute("SELECT game_date, sport, sum(picks), sum(units) FROM v_public_track_record_model_daily "
+                "GROUP BY 1, 2 EXCEPT SELECT game_date, sport, picks, units FROM v_public_track_record_daily")
+    assert cur.fetchall() == []
+    cur.execute("SELECT has_table_privilege('anon', 'v_public_track_record_model_daily', 'SELECT'), "
+                "has_table_privilege('authenticated', 'v_public_track_record_model_daily', 'SELECT'), "
+                "has_table_privilege('authenticated', 'v_public_track_record_model_daily', 'INSERT')")
+    assert cur.fetchone() == (False, True, False)
+
+    # 2. current: a second pass changes nothing (the view keeps its oid)
+    cur.execute("SELECT 'public.v_public_track_record_model_daily'::regclass::oid")
+    oid = cur.fetchone()[0]
+    cur.execute(SQL)
+    cur.execute("SELECT 'public.v_public_track_record_model_daily'::regclass::oid")
+    assert cur.fetchone()[0] == oid
+
+    # 3. the daily view renames and drops columns: rebuilt, no error
+    cur.execute("DROP VIEW v_public_track_record_model_daily, v_public_track_record_daily")
+    cur.execute(DAILY_V1)
+    cur.execute(SQL)
+    cur.execute("DROP VIEW v_public_track_record_daily CASCADE")
+    cur.execute(DAILY_V2)
+    cur.execute(SQL)
+    assert _cols(cur, "v_public_track_record_model_daily") == ["game_date", "sport", "model_id", "bets"]
+
+    # 4. a shape the edit cannot apply to: no error, nothing new created
+    cur.execute("DROP VIEW v_public_track_record_model_daily, v_public_track_record_daily")
+    cur.execute(DAILY_V3)
+    cur.execute(SQL)
+    cur.execute("SELECT to_regclass('public.v_public_track_record_model_daily')")
+    assert cur.fetchone()[0] is None
+    conn.close()

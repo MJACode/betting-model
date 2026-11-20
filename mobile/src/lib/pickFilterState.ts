@@ -208,10 +208,34 @@ export function resetImpossibleModels(
   present: PresentModel[],
 ): PicksFilterState {
   if (state.models.size === 0) return state;
-  if (present.length === 0) return state;
-  if (selectedModels(state, present).length > 0) return state;
+  // A board with nothing listable (every pick draws as PAUSED) has no Model
+  // section to undo a cut from, so a leftover selection is cleared too.
+  if (present.length > 0 && selectedModels(state, present).length > 0) return state;
   const next = cloneFilter(state);
   next.models = new Set();
+  return next;
+}
+
+/**
+ * The state applyFilter should CUT with: the model selection reduced to the
+ * models listed on this board, and no cut at all when that leaves none or
+ * all of them (PR #1492 review). The raw selection stays in the state, so the
+ * boxes the user ticked stay ticked; only the cut follows what the bar shows.
+ *
+ * Without this, ticking every listed model read as "no filter" (no pill, no
+ * count, "All models") while applyFilter still dropped every pick of a model
+ * that is not listed, which on the All board is every PAUSED row: a hidden
+ * cut with no undo, the thing the Market scoping exists to prevent.
+ */
+export function effectiveModelCut(
+  state: PicksFilterState,
+  present: PresentModel[],
+): PicksFilterState {
+  if (state.models.size === 0) return state;
+  const keep = modelsAreNarrowed(state, present) ? selectedModels(state, present) : [];
+  if (keep.length === state.models.size && keep.every((id) => state.models.has(id))) return state;
+  const next = cloneFilter(state);
+  next.models = new Set(keep);
   return next;
 }
 

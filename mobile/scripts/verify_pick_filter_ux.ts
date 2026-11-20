@@ -85,7 +85,14 @@ check('Market section still hides when it cannot cut', /\{marketCutBites \? \(/.
 check('leaving Today resets Signal to all three',
   /view !== 'today'/.test(screen) && /next\.signals = new Set\(ALL_SIGNALS\)/.test(screen));
 check('Signal\/Market locks apply on the first paint',
-  /displayFilter/.test(screen) && /applyFilter\((?:activeItems|datedItems), displayFilter\)/.test(screen));
+  // The board is cut with displayFilter, or with cutFilter, which is
+  // displayFilter with the model selection reduced to what the bar shows
+  // (effectiveModelCut, PR #1492) — never with the raw `filter`.
+  /displayFilter/.test(screen) &&
+    (/applyFilter\((?:activeItems|datedItems), displayFilter\)/.test(screen) ||
+      (/effectiveModelCut\(displayFilter,/.test(screen) &&
+        /applyFilter\((?:activeItems|datedItems), cutFilter\)/.test(screen))) &&
+    !/applyFilter\((?:activeItems|datedItems), filter\)/.test(screen));
 check('any segment change resets an impossible Market',
   /resetImpossibleMarket/.test(screen));
 check('Public share is measured on on-screen rows',
