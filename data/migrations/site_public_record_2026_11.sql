@@ -50,23 +50,37 @@ INSERT INTO public.site_retired_models (model_id) VALUES
   ('ufc_method_of_victory')
 ON CONFLICT (model_id) DO NOTHING;
 
+-- The rows come from a SECURITY DEFINER function, not straight from
+-- v_public_track_record. That view is security_invoker and reads push_sent
+-- (via v_discord_published), and an invoker view nested in a definer view
+-- still checks the CALLER: after step A, anon got 42501 on
+-- v_discord_published and the website lost its record (2026-11-19, fixed
+-- in production the same evening).
+CREATE OR REPLACE FUNCTION public.site_public_record_rows()
+RETURNS TABLE (sport text, picks integer, wins integer, losses integer, pushes integer,
+               units numeric, risked numeric, first_date date, last_date date)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT r.sport,
+         sum(r.picks)::integer, sum(r.wins)::integer, sum(r.losses)::integer, sum(r.pushes)::integer,
+         round(sum(r.units), 2), round(sum(r.risked), 2),
+         min(r.first_date)::date, max(r.last_date)::date
+    FROM public.v_public_track_record r
+   WHERE NOT EXISTS (SELECT 1 FROM public.site_retired_models s WHERE s.model_id = r.model_id)
+   GROUP BY r.sport
+$fn$;
+ALTER FUNCTION public.site_public_record_rows() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.site_public_record_rows() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.site_public_record_rows() TO postgres, service_role, anon, authenticated;
+
 CREATE OR REPLACE VIEW public.site_public_record
 WITH (security_invoker = false, security_barrier = true) AS
-SELECT r.sport,
-       SUM(r.picks)::integer AS picks,
-       SUM(r.wins)::integer AS wins,
-       SUM(r.losses)::integer AS losses,
-       SUM(r.pushes)::integer AS pushes,
-       ROUND(SUM(r.units), 2)::numeric(12, 2) AS units,
-       ROUND(SUM(r.risked), 2)::numeric(12, 2) AS risked,
-       MIN(r.first_date)::date AS first_date,
-       MAX(r.last_date)::date AS last_date,
+SELECT f.sport, f.picks, f.wins, f.losses, f.pushes,
+       f.units::numeric(12, 2) AS units,
+       f.risked::numeric(12, 2) AS risked,
+       f.first_date, f.last_date,
        now() AS refreshed_at
-  FROM public.v_public_track_record r
- WHERE NOT EXISTS (
-       SELECT 1 FROM public.site_retired_models s
-        WHERE s.model_id = r.model_id)
- GROUP BY r.sport;
+  FROM public.site_public_record_rows() f;
 
 REVOKE ALL ON public.site_public_record FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.site_public_record TO anon, authenticated;

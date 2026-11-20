@@ -135,23 +135,32 @@ def _ledger(c):
         "SELECT game_id, model_id, status FROM euroleague_pregame_decisions").fetchall()}
 
 
+def _detail(c, model):
+    return c.execute("SELECT detail FROM euroleague_pregame_decisions WHERE game_id = %s AND model_id = %s",
+                     (G1, model)).fetchone()[0]
+
+
 def test_the_decision_fetch_decides_every_model_once_and_a_rerun_writes_nothing(db):
     now = TIP - timedelta(minutes=9)
     out = card.run_card(do_publish=True, now=now)
     p = _picks(db)
     # the home moneyline at the best fetched price, not the stale hourly one
     assert p[R.HOME_ML][:4] == ("BET", "home", "fanduel", 145.0)
-    assert p[R.HOME_DOG_SPREAD][:5] == ("BET", "home", "fanduel", -105.0, 3.5)
-    assert p[R.H1_DOG_ML][:4] == ("BET", "home", "fanduel", 130.0)
+    # one bet a game (mike, 2026-11-19: "Strict, moneyline first"): the other
+    # three rules bet too, and are NONE rows at the side and price they took
+    assert p[R.HOME_DOG_SPREAD][:5] == ("NONE", "home", "fanduel", -105.0, 3.5)
+    assert p[R.H1_DOG_ML][:4] == ("NONE", "home", "fanduel", 130.0)
     assert p[R.H1_DOG_ML][5] == "PAN @ MAD — First Half MAD ML"
     # 0.27 of 160 = 43.2 against 41.5: the over, at the best over price
-    assert p[R.Q1_SHARE_TOTAL][:5] == ("BET", "over", "fanduel", -110.0, 41.5)
+    assert p[R.Q1_SHARE_TOTAL][:5] == ("NONE", "over", "fanduel", -110.0, 41.5)
+    for m in (R.HOME_DOG_SPREAD, R.H1_DOG_ML, R.Q1_SHARE_TOTAL):
+        assert _detail(db, m).endswith("; refused one bet a game: MAD ML keeps it"), m
     led = _ledger(db)
     assert {m for (g, m) in led if g == G1} == set(R.MODELS)
     # the first run ever: the game that tipped before the card existed is
     # recorded missed without failing the run
     assert {led[(G2, m)] for m in R.MODELS} == {"missed"}
-    assert out["written"] == 4
+    assert out["written"] == 1
     n = db.execute("SELECT COUNT(*) FROM picks").fetchone()[0]
     again = card.run_card(do_publish=True, now=now + timedelta(minutes=1))
     assert again["written"] == 0 and db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == n
@@ -169,8 +178,39 @@ def test_a_game_that_tips_undecided_after_the_first_run_fails_it(db):
 def test_a_switched_off_model_writes_nothing(db, monkeypatch):
     monkeypatch.setenv("RUN_EUROLEAGUE_HOME_ML", "0")
     card.run_card(do_publish=True, now=TIP - timedelta(minutes=9))
-    assert R.HOME_ML not in _picks(db)
+    p = _picks(db)
+    assert R.HOME_ML not in p
     assert (G1, R.HOME_ML) not in _ledger(db)
+    # with no moneyline the spread keeps the game
+    assert {m: v[0] for m, v in p.items()} == {
+        R.HOME_DOG_SPREAD: "BET", R.H1_DOG_ML: "NONE", R.Q1_SHARE_TOTAL: "NONE"}
+    assert _detail(db, R.H1_DOG_ML).endswith("one bet a game: MAD +3.5 keeps it")
+
+
+def test_a_standing_bet_of_a_later_model_keeps_the_game(db):
+    """A pick that exists stands (CLAUDE.md 1c): a first-quarter total bet
+    before the card's run keeps the game against the moneyline decided now."""
+    db.execute("INSERT INTO picks (game_id, model_id, sport, game_date, pick_side, pick_label, signal_type, "
+               "scored_line, model_probability, dk_implied_prob, edge) VALUES "
+               "(%s, %s, 'EUROLEAGUE', '2026-11-20', 'over', 'PAN @ MAD — First Quarter Over 41.5', 'BET', "
+               "41.5, 0.6, 0.52, 0.08)", (G1, R.Q1_SHARE_TOTAL))
+    db.commit()
+    out = card.run_card(do_publish=True, now=TIP - timedelta(minutes=9))
+    p = _picks(db)
+    assert out["written"] == 0
+    assert {m: v[0] for m, v in p.items()} == {
+        R.HOME_ML: "NONE", R.HOME_DOG_SPREAD: "NONE", R.H1_DOG_ML: "NONE", R.Q1_SHARE_TOTAL: "BET"}
+    assert _detail(db, R.HOME_ML).endswith("one bet a game: PAN @ MAD — First Quarter Over 41.5 keeps it")
+
+
+def test_a_voided_or_paused_bet_keeps_no_game(db):
+    for model, cond, why in ((R.Q1_SHARE_TOTAL, "VOID", None), (R.H1_DOG_ML, None, config.PAUSED_NOTE)):
+        db.execute("INSERT INTO picks (game_id, model_id, sport, game_date, pick_side, pick_label, signal_type, "
+                   "condition_status, downgrade_reason) VALUES "
+                   "(%s, %s, 'EUROLEAGUE', '2026-11-20', 'home', 'x', 'BET', %s, %s)", (G1, model, cond, why))
+    db.commit()
+    card.run_card(do_publish=True, now=TIP - timedelta(minutes=9))
+    assert _picks(db)[R.HOME_ML][0] == "BET"
 
 
 def test_a_standing_halftime_spread_that_cannot_win_beside_the_moneyline_keeps_the_game(db):
@@ -185,8 +225,9 @@ def test_a_standing_halftime_spread_that_cannot_win_beside_the_moneyline_keeps_t
     assert p[R.HOME_ML][0] == "NONE"
     # MAD +3.5 and PAN -3.5 cannot both win either
     assert p[R.HOME_DOG_SPREAD][0] == "NONE"
-    # the first-half bet can win beside it
-    assert p[R.H1_DOG_ML][0] == "BET"
+    # the first-half bet could win beside it, but the halftime bet keeps the game
+    assert p[R.H1_DOG_ML][0] == "NONE"
+    assert _detail(db, R.H1_DOG_ML).endswith("one bet a game: PAN -3.5 (live) keeps it")
     assert config.PAUSED_NOTE
 
 
@@ -194,24 +235,55 @@ def test_a_conflicting_bet_that_lands_while_the_run_decides_still_closes_the_gam
     """The halftime spread's BET can be written between the card's decision and
     its write (another process). The write re-reads the standing bets under the
     lock: the moneyline that cannot win beside it is written NONE."""
-    real = card.standing_full_game
+    real = card.standing_bets
     calls = []
 
     def racing(conn, ids):
         calls.append(ids)
-        if len(calls) == 1:            # the decision's read: nothing standing yet
-            db.execute("INSERT INTO picks (game_id, model_id, sport, game_date, pick_side, pick_label, "
-                       "signal_type, scored_line, model_probability, dk_implied_prob, edge) VALUES "
-                       "(%s, 'euroleague_live_spread_ht', 'EUROLEAGUE', '2026-11-20', 'away', 'PAN -3.5 (live)', "
-                       "'BET', 3.5, 0.55, 0.52, 0.03)", (G1,))
-            db.commit()
+        if len(calls) <= 2:            # the decision's and the rows' reads: nothing standing yet
+            if len(calls) == 2:
+                db.execute("INSERT INTO picks (game_id, model_id, sport, game_date, pick_side, pick_label, "
+                           "signal_type, scored_line, model_probability, dk_implied_prob, edge) VALUES "
+                           "(%s, 'euroleague_live_spread_ht', 'EUROLEAGUE', '2026-11-20', 'away', "
+                           "'PAN -3.5 (live)', 'BET', 3.5, 0.55, 0.52, 0.03)", (G1,))
+                db.commit()
             return []
         return real(conn, ids)
 
-    monkeypatch.setattr(card, "standing_full_game", racing)
+    monkeypatch.setattr(card, "standing_bets", racing)
     card.run_card(do_publish=True, now=TIP - timedelta(minutes=9))
-    assert len(calls) >= 2
-    assert _picks(db)[R.HOME_ML][0] == "NONE"
+    assert len(calls) >= 3
+    p = _picks(db)
+    assert p[R.HOME_ML][0] == "NONE"
+    # the game keeps the one bet that landed first: no pre-game BET at all
+    assert {v[0] for m, v in p.items() if m in R.MODELS} == {"NONE"}
     detail = db.execute("SELECT detail FROM euroleague_pregame_decisions WHERE game_id = %s AND model_id = %s",
                         (G1, R.HOME_ML)).fetchone()[0]
     assert "already bet" in detail
+
+
+def test_a_bet_that_lands_after_the_rows_are_built_still_keeps_the_game(db, monkeypatch):
+    """One bet a game is chosen again under the locks: a first-quarter total
+    BET written by another process after the card built its rows (and that can
+    win beside the moneyline) still keeps the game, so the moneyline is NONE."""
+    real = card.standing_bets
+    calls = []
+
+    def racing(conn, ids):
+        calls.append(ids)
+        if len(calls) <= 2:
+            if len(calls) == 2:
+                db.execute("INSERT INTO picks (game_id, model_id, sport, game_date, pick_side, pick_label, "
+                           "signal_type, scored_line, model_probability, dk_implied_prob, edge) VALUES "
+                           "(%s, %s, 'EUROLEAGUE', '2026-11-20', 'over', 'PAN @ MAD — First Quarter Over 41.5', "
+                           "'BET', 41.5, 0.6, 0.52, 0.08)", (G1, R.Q1_SHARE_TOTAL))
+                db.commit()
+            return []
+        return real(conn, ids)
+
+    monkeypatch.setattr(card, "standing_bets", racing)
+    card.run_card(do_publish=True, now=TIP - timedelta(minutes=9))
+    assert len(calls) >= 3
+    bets = db.execute("SELECT model_id FROM picks WHERE game_id = %s AND signal_type = 'BET'", (G1,)).fetchall()
+    assert [m for (m,) in bets] == [R.Q1_SHARE_TOTAL]
+    assert _detail(db, R.HOME_ML).endswith("one bet a game: PAN @ MAD — First Quarter Over 41.5 keeps it")

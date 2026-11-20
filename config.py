@@ -5667,6 +5667,48 @@ EUROLEAGUE_PERIOD_BOOKMAKERS: list = [
     "pinnacle", "bovada", "gtbets", "betus", "mybookieag",
 ]
 
+# NBL (Australia's National Basketball League, 2026-11-14): the odds feed's club
+# name -> the club code (data/ingestors/nbl_teams.py), which is ESPN's own
+# abbreviation. Every name on the feed's NBL events read 2026-11-14 (history
+# snapshots of 2024-12, 2025-02, 2025-11, 2026-01 and 2026-10, and today's
+# board): ten names, ten clubs. Compared accent-folded.
+NBL_ODDS_API_MAP: dict = {
+    "Adelaide 36ers": "ADL",
+    "Brisbane Bullets": "BRI",
+    "Cairns Taipans": "CNS",
+    "Illawarra Hawks": "HWK",
+    "Melbourne United": "MEL",
+    "New Zealand Breakers": "NZL",
+    "Perth Wildcats": "PER",
+    "S.E. Melbourne Phoenix": "PNX",
+    "South East Melbourne Phoenix": "PNX",
+    "Sydney Kings": "SYD",
+    "Tasmania JackJumpers": "TAS",
+}
+
+# NBL books (docs/sports/nbl.md, "The books"). Read off history snapshots at
+# every region on 2025-02-01 and 2026-01-10 and at the line-shop ten on
+# 2024-12-01, 2025-02-01, 2025-11-23 and 2026-10-02: BETRIVERS IS THE ONLY BOOK
+# A PICK MAY NAME THAT PRICES THE NBL, in every snapshot, and only the full
+# game; DraftKings, FanDuel, BetMGM, Caesars, Fanatics, Hard Rock and betPARX
+# priced none. Pinnacle appears only from the 2026-27 season. The rest are
+# Australian and European books and the Betfair exchange. Ten named books bill
+# as one region (30 credits a history snapshot for three markets); these ten
+# are BetRivers, Pinnacle, the exchange (the only sharp moneyline before
+# 2026-27) and the seven books that priced every sampled game's moneyline,
+# spread and total.
+NBL_HISTORY_BOOKMAKERS: list = [
+    "betrivers", "pinnacle", "betfair_ex_au", "sportsbet", "tab",
+    "tabtouch", "unibet", "coolbet", "playup", "pointsbetau",
+]
+# The live pull asks for the line-shop ten plus these: twenty books, two
+# regions (6 credits a pass for three markets). None is a book a pick may name;
+# they are the Australian consensus and the exchange the history holds.
+NBL_EXTRA_BOOKMAKERS: list = [
+    "betfair_ex_au", "sportsbet", "tab", "tabtouch", "unibet", "coolbet",
+    "playup", "pointsbetau", "ladbrokes_au", "neds",
+]
+
 # The Odds API team name → CFBD canonical school name.
 #
 # LOAD-BEARING CONVENTION: the canonical NCAAF team identifier is the CFBD

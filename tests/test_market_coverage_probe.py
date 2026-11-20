@@ -269,6 +269,9 @@ def test_an_all_line_leg_slip_does_not_claim_a_model():
     edge in the hold note."""
     src = io.open(ROOT / "mobile" / "src" / "screens" / "ParlayScreen.tsx",
                   encoding="utf-8").read()
-    assert "const modelBacked = legs.some((l) => !isLineLeg(l));" in src
+    # pricedLegs, not legs (#1115, 2026-11-04): a pre-game alt held on the slip
+    # after kickoff is left out of the price, so it cannot make the price a
+    # model's either.
+    assert "const modelBacked = pricedLegs.some((l) => !isLineLeg(l));" in src
     assert "modelBacked ? 'Model' : 'Implied'" in src
     assert "modelBacked={modelBacked}" in src

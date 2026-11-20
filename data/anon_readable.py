@@ -474,6 +474,21 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "euroleague_inplay_quotes",
     "euroleague_odds_unmatched",
     "euroleague_period_fetches",
+    # NBL (2026-11-14). Created on demand by data/ingestors/nbl_teams.ensure_tables
+    # and data/ingestors/nbl_espn.ensure_tables (identity, schedule, quarter
+    # scores, ESPN's raw events and game summaries) and
+    # data/ingestors/nbl_odds_history.py (the purchase ledger, in-play quotes,
+    # unplaced events). Never read by the app.
+    "nbl_teams",
+    "nbl_events",
+    "nbl_espn_raw",
+    "nbl_period_scores",
+    "nbl_espn_summaries",
+    "nbl_odds_snapshots",
+    "nbl_inplay_quotes",
+    "nbl_odds_unmatched",
+    # scripts/nbl_dk_probe.py: DraftKings' raw NBL board answers (run by mike).
+    "nbl_dk_raw",
     # Tennis (2026-11-13). Created on demand by
     # data/ingestors/tennis_archive.ensure_tables (the match archive),
     # data/ingestors/tennis_espn.ensure_tables (ESPN's results) and
@@ -903,6 +918,13 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "log_app_error",
     "log_app_timings",
     "save_device_push_token",
+    # Not called by the website directly: site_public_record reads through it
+    # (data/migrations/site_public_record_2026_11.sql), and Postgres checks
+    # EXECUTE on a function inside a view against the caller.
+    "site_public_record_rows",
+    # PostgREST pre-request hook; PostgREST calls it as anon too
+    # (data/migrations/premium_gate_matview_2026_11_20.sql).
+    "premium_pre_request",
 )
 
 # Granted to authenticated and service_role. PUBLIC and anon are revoked.

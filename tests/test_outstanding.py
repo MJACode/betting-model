@@ -97,7 +97,10 @@ def test_the_cache_round_trips_and_expires(tmp_path):
 
 def test_session_start_prints_the_cache_without_asking_github(tmp_path, monkeypatch, capsys):
     path = str(tmp_path / "cache.json")
-    o.write_cache(_gathered(), path)
+    # Stamped now, not NOW: main() reads the cache against the real clock, and
+    # a cache stamped at the fixed NOW is over 24 hours old from 2026-11-14 on.
+    fresh = (dt.datetime.now(dt.timezone.utc),) + _gathered()[1:]
+    o.write_cache(fresh, path)
     monkeypatch.setattr(o, "cache_path", lambda: path)
     monkeypatch.setattr(o, "gather", lambda **_: (_ for _ in ()).throw(AssertionError("asked GitHub")))
     assert o.main(["--session-start"]) == 0

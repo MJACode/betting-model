@@ -71,7 +71,8 @@ def test_tracking_reads_the_latest_list_not_a_render_copy():
     track = src.split("export async function trackPicks(")[1].split("\n}\n")[0]
     assert "const ids = idCache ?? [];" in track
     sheet = _read(MOBILE / "src" / "components" / "BetAllSheet.tsx")
-    assert "onTrack(step.legs.map((l) => l.pick))" in sheet
+    assert "else onTrack([leg.pick]);" in sheet
+    assert "if (rest.length > 0) onTrack(rest);" in sheet
     home = _read(MOBILE / "src" / "screens" / "PicksHomeScreen.tsx")
     assert "onTrack={tracked.trackMany}" in home
 

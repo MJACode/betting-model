@@ -211,3 +211,30 @@ def test_ignore_ledger_still_resumes_its_own_pulls():
     assert _ledger_entry_is_resumable(datetime(2026, 9, 8, tzinfo=timezone.utc)) is True
     # Unparseable -> not resumable -> re-pull. One extra call beats a hole.
     assert _ledger_entry_is_resumable(None) is False
+
+
+# ── bug 3: a backfill snapshot overwriting a stored kickoff ──────────────────
+
+def test_a_history_snapshot_sets_the_kickoff_only_in_the_day_before_it():
+    """2026-11-14: the hourly NCAAF purchase moved 84 stored kickoffs by more
+    than an hour, Florida at Miami from 23:30 to 16:00 UTC, because a fill
+    job's snapshot nine days early still listed the placeholder time and was
+    written last. A snapshot sets the kickoff only inside the 24 hours before
+    the kickoff it lists, before the game starts."""
+    from data.ingestors.odds_ingestor import _history_game_rows
+    rows = [{"game_id": "early", "commence_time": "2025-09-20T16:00:00Z"},
+            {"game_id": "near", "commence_time": "2025-09-11T23:30:00Z"},
+            {"game_id": "started", "commence_time": "2025-09-11T10:00:00Z"},
+            {"game_id": "no_time", "commence_time": None}]
+    setting, stubs = _history_game_rows(rows, "2025-09-11T11:00:00Z")
+    assert [r["game_id"] for r in setting] == ["near"]
+    assert [r["game_id"] for r in stubs] == ["early", "started", "no_time"]
+
+
+def test_a_snapshot_outside_the_window_never_overwrites_a_stored_game():
+    import data.ingestors.odds_ingestor as oi
+    src = inspect.getsource(oi._insert_game_stubs)
+    assert "ON CONFLICT(game_id) DO NOTHING" in src
+    body = inspect.getsource(run_historical_odds_range)
+    assert "_history_game_rows(game_rows, snapshot_at)" in body
+    assert "_upsert_games(conn, game_rows)" not in body

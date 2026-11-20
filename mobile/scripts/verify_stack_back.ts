@@ -15,7 +15,10 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = join(import.meta.dirname, '..');
-const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
+// LF, whatever the checkout: git on Windows (core.autocrlf) writes CRLF, and
+// the patterns below end a function on a newline, a brace, a newline. The
+// repo itself stores LF.
+const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 const listTsx = (dir: string): string[] =>
   readdirSync(join(ROOT, dir), { recursive: true, encoding: 'utf8' })
     .filter((f) => f.endsWith('.tsx'))

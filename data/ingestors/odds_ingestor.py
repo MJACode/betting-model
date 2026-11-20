@@ -38,6 +38,7 @@ from config import (
     LINE_SHOP_BOOKMAKERS,
     NCAABW_EXTRA_BOOKMAKERS,
     EUROLEAGUE_EXTRA_BOOKMAKERS,
+    NBL_EXTRA_BOOKMAKERS,
     SPORTS,
     WNBA_ODDS_API_MAP,
     NBA_ODDS_API_MAP,
@@ -84,6 +85,10 @@ SPORT_KEYS = {
     # EuroLeague's own API owns the schedule (data/ingestors/euroleague_api.py)
     # and the feed's events are resolved onto it (euroleague_teams.py).
     "EUROLEAGUE": "basketball_euroleague",
+    # 2026-11-14: Australia's NBL, read-only against `games` the same way:
+    # ESPN owns the schedule (data/ingestors/nbl_espn.py) and the feed's events
+    # are resolved onto it (nbl_teams.py).
+    "NBL": "basketball_nbl",
 }
 
 # The NFL is the one sport here whose games this ingestor MUST NOT create.
@@ -120,12 +125,12 @@ NFL_GAMES_ARE_NOT_OURS = True
 # (the two historical entry points do), and turning that off is its own change
 # with its own backfills to check; NCAAB starts closed.
 NCAAB_GAMES_ARE_NOT_OURS = True
-RESOLVE_ONLY_SPORTS = frozenset({"NCAAB", "NCAABW", "EUROLEAGUE"})
+RESOLVE_ONLY_SPORTS = frozenset({"NCAAB", "NCAABW", "EUROLEAGUE", "NBL"})
 
 # The sports whose games come from a schedule another ingestor owns, so every
 # live caller builds a resolver before parsing and skips the sport (never
 # mints) when it cannot build one. See _schedule_resolver.
-SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB", "NCAABW", "EUROLEAGUE")
+SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB", "NCAABW", "EUROLEAGUE", "NBL")
 
 # Sports stored even when DraftKings does not list the event yet.
 #
@@ -145,7 +150,9 @@ SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB", "NCAABW", "EUROLEAGUE")
 # EuroLeague too (2026-11-12): DraftKings priced 3 of the 10 games listed that
 # day (it first posts a median 45-73 hours before the tip, while other books
 # list a round five days out), and it priced no sampled game in 2020-21.
-DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB", "NCAABW", "EUROLEAGUE"})
+# The NBL too (2026-11-14): DraftKings priced no NBL game in any snapshot read
+# (docs/sports/nbl.md), so with the gate no NBL row would ever be stored.
+DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB", "NCAABW", "EUROLEAGUE", "NBL"})
 
 # Books stored for ONE sport on top of LINE_SHOP_BOOKMAKERS, and asked for in
 # that sport's bulk call. Women's college basketball only (2026-11-09,
@@ -154,7 +161,8 @@ DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB", "NCAABW", "EUROLEAGUE"})
 # consensus and the reference. None is a book a pick may name. Every other
 # sport's call and stored books are unchanged.
 SPORT_EXTRA_BOOKMAKERS: dict = {"NCAABW": tuple(NCAABW_EXTRA_BOOKMAKERS),
-                                 "EUROLEAGUE": tuple(EUROLEAGUE_EXTRA_BOOKMAKERS)}
+                                 "EUROLEAGUE": tuple(EUROLEAGUE_EXTRA_BOOKMAKERS),
+                                 "NBL": tuple(NBL_EXTRA_BOOKMAKERS)}
 
 
 def sport_bookmakers_param(sport: str) -> str:
@@ -433,7 +441,7 @@ def _normalize_team(name: str, sport: str) -> str:
         # ncaaf_teams registry and falls back to the input unchanged.
         from data.ingestors.cfbd_ingestor import resolve_odds_api_school
         return resolve_odds_api_school(name)
-    if sport in ("NCAAB", "NCAABW", "EUROLEAGUE"):
+    if sport in ("NCAAB", "NCAABW", "EUROLEAGUE", "NBL"):
         # NCAAB never mints an id here (NCAAB_GAMES_ARE_NOT_OURS): the game id
         # comes from ESPN's schedule through the resolver, so this value is
         # never used. Returned untouched and silently, because the 3-letter
@@ -566,6 +574,19 @@ def _euroleague_resolver(conn, around_date: str):
         return None
 
 
+def _nbl_resolver(conn, around_date: str):
+    """The NBL's twin of _euroleague_resolver: data/ingestors/nbl_teams.py owns
+    the matching, and anything that stops the resolver being built returns
+    None, so the caller skips the NBL for the pass and never mints an id."""
+    try:
+        from data.ingestors import nbl_teams
+        nbl_teams.reset_registry_cache()
+        return nbl_teams.make_resolver(conn, str(around_date)[:10], days_fwd=30)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(f"NBL: could not build the schedule resolver ({exc}); odds skipped")
+        return None
+
+
 def _schedule_resolver(sport: str, conn, around_date: str):
     """The resolver for a SCHEDULE_RESOLVED_SPORTS sport, or None.
 
@@ -583,6 +604,8 @@ def _schedule_resolver(sport: str, conn, around_date: str):
         return _ncaabw_resolver(conn, around_date)
     if sport == "EUROLEAGUE":
         return _euroleague_resolver(conn, around_date)
+    if sport == "NBL":
+        return _nbl_resolver(conn, around_date)
     return None
 
 
@@ -1385,6 +1408,10 @@ def _season_label(sport: str, game_date: str) -> int:
         # two seasons — data/season_labels.py.
         from data.season_labels import nhl_season_label
         return nhl_season_label(game_date)
+    if sport == "NBL" and month >= 7:
+        # Labelled by the ENDING year (2026-27 is 2027, ESPN's own label); the
+        # preseason opens in August. Never minted here; the stored label is ESPN's.
+        return year + 1
     if sport == "EUROLEAGUE" and month >= 8:
         # Labelled by the ENDING year (E2026 is 2027) and it opens in late
         # September. Never minted here; the stored label is the API's own.
@@ -1764,7 +1791,7 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     # committed (see the commit before the resolver below). NCAABW (2026-11-09)
     # follows it for the same reason, so the two run last, men's then women's.
     sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF", "NFL",
-                                    "NCAAB", "NCAABW", "EUROLEAGUE"]
+                                    "NCAAB", "NCAABW", "EUROLEAGUE", "NBL"]
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
@@ -2165,6 +2192,60 @@ def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
         conn.close()
 
 
+# A history snapshot sets a stored game's kickoff only when it was taken in
+# this many hours before that kickoff, before the game started.
+HISTORY_KICKOFF_WINDOW_H = 24
+
+
+def _history_game_rows(game_rows: list[dict], snapshot_at: str) -> tuple[list[dict], list[dict]]:
+    """Split one history snapshot's game rows: (rows that may set the stored
+    kickoff, rows that may only insert a missing game).
+
+    2026-11-14. `_upsert_games` lets every snapshot overwrite `commence_time`,
+    which is right for the live feed (the newest listing is the best) and wrong
+    for a backfill, whose snapshots do not arrive in time order. The hourly
+    NCAAF purchase changed the stored kickoff of 1,590 of 3,911 odds rows of
+    2023-2025 games: most by minutes (a post-start snapshot listing the actual
+    start), 84 by more than an hour, among them Florida at Miami 2025-09-20
+    moved from 23:30 to 16:00 UTC by a fill job's 2025-09-11 snapshot, which
+    still carried the early-week placeholder. So a snapshot sets the kickoff
+    only when it was taken inside the HISTORY_KICKOFF_WINDOW_H hours before
+    the kickoff it lists; any other snapshot only inserts a game not yet
+    stored (`_insert_game_stubs`) and never overwrites one.
+    """
+    t = _parse_utc(snapshot_at)
+    setting, stubs = [], []
+    for r in game_rows:
+        c = _parse_utc(r.get("commence_time"))
+        if t is not None and c is not None and t < c <= t + timedelta(hours=HISTORY_KICKOFF_WINDOW_H):
+            setting.append(r)
+        else:
+            stubs.append(r)
+    return setting, stubs
+
+
+def _parse_utc(v) -> datetime | None:
+    if not v:
+        return None
+    try:
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def _insert_game_stubs(conn: DBConnection, game_rows: list[dict]) -> int:
+    """Insert games not yet stored; a stored game is left exactly as it is."""
+    if not game_rows:
+        return 0
+    conn.executemany("""
+        INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, commence_time, data_source)
+        VALUES (%(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(home_team)s, %(away_team)s, %(commence_time)s, %(data_source)s)
+        ON CONFLICT(game_id) DO NOTHING
+    """, game_rows)
+    return len(game_rows)
+
+
 def run_historical_odds_range(sport: str, start: str, end: str,
                               hours_utc: list[int] | None = None,
                               bookmakers: list[str] | None = None,
@@ -2300,7 +2381,9 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     flipped = _mark_in_play(game_rows, odds_rows)
                     stats["marked_in_play"] += flipped
                     if game_rows:
-                        stats["games"] += _upsert_games(conn, game_rows)
+                        setting, stubs = _history_game_rows(game_rows, snapshot_at)
+                        stats["games"] += _upsert_games(conn, setting) if setting else 0
+                        stats["games"] += _insert_game_stubs(conn, stubs)
                     if odds_rows:
                         stats["odds_rows"] += _insert_odds(conn, odds_rows)
                     conn.execute("""
@@ -2367,7 +2450,7 @@ def get_latest_odds_for_game(conn: DBConnection,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run odds ingestor")
     parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF",
-                                            "NFL", "NCAAB", "NCAABW", "EUROLEAGUE"],
+                                            "NFL", "NCAAB", "NCAABW", "EUROLEAGUE", "NBL"],
                         help="Sport to fetch (default: all)")
     parser.add_argument("--snapshot", default="open",
                         choices=["open", "close", "live"],

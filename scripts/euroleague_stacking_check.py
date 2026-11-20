@@ -19,7 +19,10 @@ prints:
      bets each drops, graded on their own (units, return, 95% interval
      resampled by game date), by season;
   4. risk beside units: stake per game, the spread of a game's result, the
-     worst night and the deepest drawdown, for every-bet against one-a-game.
+     worst night and the deepest drawdown, for every-bet against one-a-game;
+  5. the live rule since 2026-11-19 (mike: "Strict, moneyline first"): one
+     bet a game across all five models, through the card's own
+     models.euroleague_pregame.one_bet_a_game, on games all five priced.
 
 Graded on the POSTED stake (tracking.discord_notifier.stake_for: one unit to
 win, risk capped at 3, a push returns the stake). The pre-game build's own
@@ -190,6 +193,16 @@ def keep_one(x: pd.DataFrame, order: tuple) -> pd.DataFrame:
              .drop_duplicates("game_id").drop(columns="_o"))
 
 
+def one_bet_a_game(x: pd.DataFrame) -> pd.DataFrame:
+    """The live rule (models.euroleague_pregame.one_bet_a_game, the card's own
+    code): per game, the first BET in ONE_A_GAME_ORDER keeps it, the halftime
+    spread last."""
+    rows = [{"game_id": g, "model_id": m, "signal_type": "BET", "pick_label": m}
+            for g, m in zip(x.game_id, x.model_id)]
+    drop = R.one_bet_a_game(rows, [])
+    return x[[(g, m) not in drop for g, m in zip(x.game_id, x.model_id)]]
+
+
 def keep_one_per_team(x: pd.DataFrame, order: tuple) -> pd.DataFrame:
     """One bet a game per TEAM: same-team stacks collapse, opposite sides stay."""
     rank = {m: i for i, m in enumerate(order)}
@@ -282,6 +295,22 @@ def one_a_game(b: pd.DataFrame, cov: pd.DataFrame, models, rng, seasons, title) 
     print(pd.DataFrame(risks).drop_duplicates("rule").to_string(index=False))
 
 
+def live_rule(b: pd.DataFrame, cov: pd.DataFrame, rng, seasons=(2026, 2027)) -> None:
+    models = list(R.ONE_A_GAME_MODELS)
+    ok = cov[cov.status.isin(PRICED) & cov.model_id.isin(models)]
+    n = ok.groupby("game_id").model_id.nunique()
+    games = set(n[n == len(models)].index)
+    x = b[b.model_id.isin(models) & b.game_id.isin(games)]
+    k = one_bet_a_game(x)
+    print(f"\n=== 5. one bet a game, moneyline first (live since 2026-11-19), {len(games)} games all five priced")
+    print(pd.DataFrame([summary(x, "every bet", rng, seasons), summary(k, "one bet a game", rng, seasons),
+                        summary(x.drop(k.index), "   the bets it drops", rng, seasons)]).to_string(index=False))
+    print(pd.DataFrame([risk_profile(x, "every bet"), risk_profile(k, "one bet a game")]).to_string(index=False))
+    kept = k.groupby("model_id").size().reindex(models, fill_value=0)
+    print("bets kept by model:", {SHORT[m]: int(v) for m, v in kept.items()},
+          "| games with 2+ bets:", int((k.groupby("game_id").size() >= 2).sum()))
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--refresh", action="store_true", help="replay the models again")
@@ -314,6 +343,7 @@ def main(argv=None) -> None:
                "the three pre-game side models, 2025-26 on")
     if HT in side:
         one_a_game(b, cov, side, rng, (2026, 2027), "the four side models, 2025-26 on")
+        live_rule(b, cov, rng)
 
 
 if __name__ == "__main__":

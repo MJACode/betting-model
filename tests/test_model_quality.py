@@ -293,8 +293,11 @@ def test_dispatch_table_and_daily_both_call_the_step():
     assert '"model-quality":' in table
     assert "step_model_quality(run_date)" in table
     daily = [ln for ln in src.splitlines() if 'results["model_quality"]' in ln]
+    # Eight spaces: since #1186 (2026-11-05) every daily step sits inside the
+    # deploy-drain `try:` of run_daily_pipeline. The exact indent still pins
+    # the call as unconditional: one wrapped in an `if` would be deeper.
     assert daily == [
-        '    results["model_quality"] = step_model_quality(run_date)'
+        '        results["model_quality"] = step_model_quality(run_date)'
     ]
 
 
