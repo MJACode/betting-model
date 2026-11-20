@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, an all-push closing-line set reads "all N matched the close", not "0 measured, N push" (Discord, X, the app): every EuroLeague bet of 11-19 had been measured |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, pre-request hook lost anon EXECUTE through the worker's combined-grant rewrite; granted by hand, migration and test fixed (no request affected) |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, founders (Matt, Mike) recorded in app_founders for unlimited MCP questions |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, premium gate part 2: PostgREST pre-request hook refuses the six scored-picks matview endpoints to signed-in accounts without access; tracked bets were never hidden (app never reads the table) |

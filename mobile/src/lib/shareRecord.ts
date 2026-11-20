@@ -19,6 +19,9 @@ function clvShareLine(s: TrackRecordSummary): string | null {
   if (s.clvBeatRate == null && pushes <= 0) return null;
   const clause = formatClvBeatLine(beats, losses, pushes);
   if (!clause) return null;
+  // An all-matched set beat nothing: "Beat the closing price ..., all 8 matched"
+  // would open by claiming a win.
+  if (decisive <= 0) return `At the book we bet, ${clause}`;
   return `Beat the closing price at the book we bet, ${clause}`;
 }
 

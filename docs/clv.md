@@ -35,8 +35,11 @@ of a percent is that zero: a **push**. A push is not a beat and not a
 loss. The headline beat rate is beats / (beats + losses). Pushes are
 left out of the denominator and shown beside it (`50% beat close (1/2, 7 push)`;
 the push clause is omitted when there are none; an all-push set is
-`0 measured, N push` and is not divided). The average still includes
-them as 0. `clv_beat_close` is true only for a beat, and it is NULL when
+`all N matched the close`, or `1 matched the close`, and is not divided). The average still includes
+them as 0. The all-push wording was `0 measured, N push` until 2026-11-20 (mike:
+*"Euroleague said 0 measured in the records last night"*): that night every
+pre-game EuroLeague bet with a close had been measured, 8 of 8 at the price
+taken, and the line read as though none had been. `clv_beat_close` is true only for a beat, and it is NULL when
 `clv_pct` is NULL.
 
 If that book has no pre-start snapshot on the same line, both are NULL and
