@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant: request logs kept while the account is open (Privacy), App Review accounts see the AI Assistant but cannot connect (mcp_meter v2) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all: picks already tracked read "Tracking" and start unticked, so a placed bet is not sent to a book twice |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant (MCP) database gate: mcp_stats/mcp_meter schemas, NOLOGIN roles, entitlement (paid/comped/founder, not trial), per-call gate with question bursts and limits, terms acceptance, member status RPCs |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, scored-picks matview readers are discovered from the catalog and must be on the pre-request hook; the six-name list is unchanged |
