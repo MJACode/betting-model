@@ -106,7 +106,7 @@ export function findUseBeforeDeclare(files: string[]): Finding[] {
       stmts.forEach((s, idx) => {
         if (!ts.isVariableStatement(s)) return;
         if (!(s.declarationList.flags & (ts.NodeFlags.Const | ts.NodeFlags.Let))) return;
-        const collect = (name: ts.BindingName) => {
+        const collect = (name: ts.BindingName): void => {
           if (ts.isIdentifier(name)) {
             const sym = checker.getSymbolAtLocation(name);
             if (sym) declaredAt.set(sym, idx);
@@ -118,7 +118,9 @@ export function findUseBeforeDeclare(files: string[]): Finding[] {
       });
       if (declaredAt.size === 0) return;
       stmts.forEach((s, idx) => {
-        const scan = (n: ts.Node) => {
+        // Explicit return types: each helper hands itself to ts.forEachChild,
+        // and without one tsc reports TS7022 (its type depends on itself).
+        const scan = (n: ts.Node): void => {
           if (ts.isIdentifier(n)) {
             const sym = checker.getSymbolAtLocation(n);
             const at = sym ? declaredAt.get(sym) : undefined;
@@ -137,7 +139,7 @@ export function findUseBeforeDeclare(files: string[]): Finding[] {
         scan(s);
       });
     };
-    const visit = (n: ts.Node) => {
+    const visit = (n: ts.Node): void => {
       if (ts.isBlock(n) && n.parent && ts.isFunctionLike(n.parent)) visitBody(n);
       ts.forEachChild(n, visit);
     };
