@@ -71,6 +71,11 @@ import {
   type GameState,
   type GameStateOption,
 } from '@/lib/gameStateFilter';
+import {
+  TRACKED_CUT_LABEL,
+  type TrackedCut,
+  type TrackedCutOption,
+} from '@/lib/trackedFilter';
 import { signalDisplayName } from '@/lib/tone';
 import type { SignalType } from '@/types';
 
@@ -89,6 +94,7 @@ const EMPTY_DATES: DateOption[] = [];
 const EMPTY_STATES: GameStateOption[] = [];
 const EMPTY_STATE_SELECTION: Set<GameState> = new Set();
 const EMPTY_RECORDS: Record<string, ModelRecordSummary> = {};
+const EMPTY_TRACKED: TrackedCutOption[] = [];
 
 interface Props {
   state: PicksFilterState;
@@ -155,6 +161,14 @@ interface Props {
   selectedGameStates?: Set<GameState>;
   onToggleGameState?: (state: GameState) => void;
   onClearGameStates?: () => void;
+  /**
+   * All / Not tracked / Tracked, read from the card's Track button (Matt,
+   * 2026-11-21: show the bets not yet placed). 'all' = no cut. The section
+   * only renders when something on the board is tracked, or the cut is set.
+   */
+  trackedOptions?: TrackedCutOption[];
+  trackedCut?: TrackedCut;
+  onTrackedCutChange?: (cut: TrackedCut) => void;
   /** Hide the Signal section (Signals are all BET — the chips are noise). */
   showSignals?: boolean;
   /** Noun for counts and the sheet footer, e.g. "pick" / "signal". */
@@ -187,6 +201,9 @@ export function PickFilters({
   selectedGameStates = EMPTY_STATE_SELECTION,
   onToggleGameState,
   onClearGameStates,
+  trackedOptions = EMPTY_TRACKED,
+  trackedCut = 'all',
+  onTrackedCutChange,
   showSignals = true,
   itemNoun = 'pick',
 }: Props) {
@@ -286,6 +303,13 @@ export function PickFilters({
   const stateCutBites =
     !!onToggleGameState &&
     (gameStateOptions.length > 1 || statesNarrowed || gameStateOptions.some((o) => o.state === 'final'));
+  // The Tracked cut: in the bar while it narrows. Offered whenever the board
+  // holds picks and the screen can apply it — "Not tracked" on a board with
+  // nothing tracked yet is still a real answer (every pick), and hiding the
+  // section until the first tap of Track made it undiscoverable.
+  const trackedNarrowed = trackedCut !== 'all';
+  const trackedCutBites = !!onTrackedCutChange && (trackedOptions.length > 0 || trackedNarrowed);
+  const trackedSummary = TRACKED_CUT_LABEL[trackedCut];
   const searchActive = search.trim().length > 0;
   const pills = useMemo(() => {
     const out = buildPills(state, onChange, presentCategories, presentModels);
@@ -301,6 +325,13 @@ export function PickFilters({
     }
     if (statesNarrowed && onClearGameStates) {
       out.push({ key: 'gameStates', label: stateSummary, onRemove: onClearGameStates });
+    }
+    if (trackedNarrowed && onTrackedCutChange) {
+      out.push({
+        key: 'tracked',
+        label: trackedSummary,
+        onRemove: () => onTrackedCutChange('all'),
+      });
     }
     if (gamesNarrowed && onClearGames) {
       out.push({
@@ -324,6 +355,9 @@ export function PickFilters({
     statesNarrowed,
     stateSummary,
     onClearGameStates,
+    trackedNarrowed,
+    trackedSummary,
+    onTrackedCutChange,
     gamesNarrowed,
     games,
     selectedGames,
@@ -334,6 +368,7 @@ export function PickFilters({
     activeFilterCount(state, presentCategories, presentModels) +
     (datesNarrowed ? 1 : 0) +
     (statesNarrowed ? 1 : 0) +
+    (trackedNarrowed ? 1 : 0) +
     (gamesNarrowed ? 1 : 0) +
     (searchActive ? 1 : 0);
 
@@ -341,6 +376,7 @@ export function PickFilters({
     onChange(freshFilter());
     onClearDates?.();
     onClearGameStates?.();
+    onTrackedCutChange?.('all');
     onClearGames?.();
     onSearchChange('');
   };
@@ -447,6 +483,33 @@ export function PickFilters({
                   count={o.count}
                   active={isGameStateSelected(o.state, selectedGameStates)}
                   onPress={() => onToggleGameState!(o.state)}
+                  accessibilityLabel={`${o.label}, ${o.count} ${itemNoun}${o.count === 1 ? '' : 's'}`}
+                />
+              ))}
+            </View>
+          </FilterSection>
+        ) : null}
+
+        {/* TRACKED after Status: both ask "can I still act on this?", and
+            "Not tracked" is the list of signals not yet placed (Matt,
+            2026-11-21). Reads the same isTracked the card's Track button
+            draws, so a chip can never disagree with the card. */}
+        {trackedCutBites ? (
+          <FilterSection
+            title="Tracked"
+            subtitle={`Not tracked shows the ${itemNoun}s you haven’t placed yet.`}
+            summary={trackedSummary}
+            defaultOpen={trackedNarrowed}
+            onClear={trackedNarrowed ? () => onTrackedCutChange!('all') : undefined}
+          >
+            <View style={styles.chipWrap}>
+              {trackedOptions.map((o) => (
+                <FilterChip
+                  key={o.cut}
+                  label={o.label}
+                  count={o.count}
+                  active={trackedCut === o.cut}
+                  onPress={() => onTrackedCutChange!(o.cut)}
                   accessibilityLabel={`${o.label}, ${o.count} ${itemNoun}${o.count === 1 ? '' : 's'}`}
                 />
               ))}

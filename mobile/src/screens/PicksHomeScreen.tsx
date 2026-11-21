@@ -104,6 +104,11 @@ import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePi
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
+import {
+  passesTrackedCut,
+  trackedCutOptionsFor,
+  type TrackedCut,
+} from '@/lib/trackedFilter';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { BetAllSheet } from '@/components/BetAllSheet';
 import { BET_ALL_LIVE_NOTE, betAllCandidates, betAllMainSkip } from '@/lib/betAll';
@@ -598,10 +603,23 @@ export function PicksHomeScreen() {
     [stateByItem, selectedStates],
   );
 
+  // The Tracked cut (Matt, 2026-11-21: "show bets that have not been placed
+  // ... go off of the track indicator"). Reads the same isTracked the card's
+  // Track button draws. Default All, unpersisted (lib/trackedFilter).
+  const [trackedCut, setTrackedCut] = useState<TrackedCut>('all');
+  const trackedIds = tracked.ids;
+  const trackedLive = tracked.liveSnapshots;
+
   const datedItems = useMemo(
     () =>
-      boardItems.filter((d) => isDateSelected(d.pick.game_date, selectedDates) && statusOk(d)),
-    [boardItems, selectedDates, statusOk],
+      boardItems.filter(
+        (d) =>
+          isDateSelected(d.pick.game_date, selectedDates) &&
+          statusOk(d) &&
+          passesTrackedCut(trackedCut, tracked.isTracked(d.pick)),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [boardItems, selectedDates, statusOk, trackedCut, trackedIds, trackedLive],
   );
 
   // The Games list follows the Date cut, so picking Saturday lists Saturday's
@@ -680,6 +698,35 @@ export function PicksHomeScreen() {
     [datedItems, displayFilter, cutFilter, gamePicker.selected, thresholdsRevision],
   );
   const filtered = useMemo(() => searchPicks(unsearched, search), [unsearched, search]);
+  // The board with EVERY cut but Tracked (search included). The chip counts
+  // come from it, so each chip says what tapping it would show, and so does
+  // the empty state: Tracked is named only when it alone emptied the board
+  // (UX review, 2026-11-21).
+  const trackedPool = useMemo(
+    () =>
+      searchPicks(
+        applyFilter(
+          boardItems.filter((d) => isDateSelected(d.pick.game_date, selectedDates) && statusOk(d)),
+          cutFilter,
+        ).filter(
+          (d) =>
+            isGameSelected(d.pick.game_id, gamePicker.selected) &&
+            (displayFilter.signals.size === ALL_SIGNALS.length || !isPausedForDisplay(d.pick)),
+        ),
+        search,
+      ),
+    [boardItems, selectedDates, statusOk, cutFilter, gamePicker.selected, displayFilter, search, thresholdsRevision],
+  );
+  const trackedOptions = useMemo(
+    () =>
+      boardItems.length > 0
+        ? trackedCutOptionsFor(trackedPool.map((d) => tracked.isTracked(d.pick)))
+        : [],
+    // tracked.isTracked is rebuilt every render; its inputs are ids + live.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [boardItems.length, trackedPool, trackedIds, trackedLive],
+  );
+  const emptiedByTracked = trackedCut !== 'all' && filtered.length === 0 && trackedPool.length > 0;
   // The board as filtered, minus any game that is over. Bet all and the
   // header's "staked" read this, so picking Final never adds a finished game
   // to the money or to Bet all's skip list (PR review, 2026-11-15).
@@ -1124,6 +1171,9 @@ export function PicksHomeScreen() {
           selectedGameStates={selectedStates}
           onToggleGameState={toggleState}
           onClearGameStates={clearStates}
+          trackedOptions={trackedOptions}
+          trackedCut={trackedCut}
+          onTrackedCutChange={setTrackedCut}
           showSignals={false}
           itemNoun={view === 'live' ? 'live pick' : 'signal'}
         />
@@ -1227,6 +1277,9 @@ export function PicksHomeScreen() {
               onClearGames={gamePicker.clear}
               finishedHidden={activeItems.length === 0 && !selectedStates.has('final') ? finishedItems.length : 0}
               onShowFinal={() => toggleState('final')}
+              emptiedByTracked={emptiedByTracked}
+              trackedCut={trackedCut}
+              onShowAllTracked={() => setTrackedCut('all')}
             />
           )
         }
@@ -1316,6 +1369,9 @@ function EmptyForView({
   onClearGames,
   finishedHidden,
   onShowFinal,
+  emptiedByTracked,
+  trackedCut,
+  onShowAllTracked,
 }: {
   view: PicksView;
   sport: string;
@@ -1336,6 +1392,11 @@ function EmptyForView({
    *  over" must say so, not "no picks yet" (UX review, 2026-11-15). */
   finishedHidden: number;
   onShowFinal: () => void;
+  /** True only when the Tracked cut ALONE emptied the board (every other
+   *  cut still leaves picks). trackedCut then picks the wording. */
+  emptiedByTracked: boolean;
+  trackedCut: TrackedCut;
+  onShowAllTracked: () => void;
 }) {
   if (!hasAny && finishedHidden > 0) {
     return (
@@ -1366,11 +1427,29 @@ function EmptyForView({
       />
     );
   }
+  if (hasAny && emptiedByTracked) {
+    return (
+      <EmptyState
+        title={
+          trackedCut === 'untracked'
+            ? `You’ve tracked every pick on ${boardLabel(view)}`
+            : `Nothing tracked on ${boardLabel(view)} yet`
+        }
+        subtitle={
+          trackedCut === 'untracked'
+            ? 'Every pick left after your filters is already in your tracked bets.'
+            : 'Tap Track on a card once you’ve placed the bet.'
+        }
+        actionLabel="Show all"
+        onAction={onShowAllTracked}
+      />
+    );
+  }
   if (hasAny) {
     return (
       <EmptyState
         title="No picks match your filter"
-        subtitle="Try widening signals, categories, or lowering the thresholds. Search, Date, Status and Games also narrow this list — they show as pills above."
+        subtitle="Try widening signals, categories, or lowering the thresholds. Search, Date, Status, Tracked and Games also narrow this list — they show as pills above."
       />
     );
   }
