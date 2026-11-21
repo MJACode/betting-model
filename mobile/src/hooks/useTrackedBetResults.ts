@@ -9,6 +9,7 @@ import {
   mergeTrackedSummaries,
   type TrackedBetRow,
   type TrackedBetSummary,
+  type TrackedStakeFor,
 } from '@/lib/trackedPerformance';
 import { computeLiveTrackedResults } from '@/lib/liveTracked';
 import { trackedStakeFor } from '@/lib/trackedStake';
@@ -79,24 +80,42 @@ export function useTrackedBetResults() {
     [stakes.mode, stakes.customStakes],
   );
 
-  const { rows, summary } = useMemo(() => {
-    const nonLive = computeTrackedResults(ids, picks, stakeFor);
-    const live = computeLiveTrackedResults(
-      liveSnapshots,
-      livePicks,
-      (id) => finalGameIds.has(id),
-      stakeFor,
-    );
-    return {
-      rows: sortTrackedRows([...nonLive.rows, ...live.rows]),
-      summary: mergeTrackedSummaries(nonLive.summary, live.summary),
-    };
-  }, [ids, picks, liveSnapshots, livePicks, finalGameIds, stakeFor]);
+  const score = useCallback(
+    (sf: TrackedStakeFor) => {
+      const nonLive = computeTrackedResults(ids, picks, sf);
+      const live = computeLiveTrackedResults(
+        liveSnapshots,
+        livePicks,
+        (id) => finalGameIds.has(id),
+        sf,
+      );
+      return {
+        rows: sortTrackedRows([...nonLive.rows, ...live.rows]),
+        summary: mergeTrackedSummaries(nonLive.summary, live.summary),
+      };
+    },
+    [ids, picks, liveSnapshots, livePicks, finalGameIds],
+  );
+
+  const { rows, summary } = useMemo(() => score(stakeFor), [score, stakeFor]);
+
+  // The Insights card is scored at "My stakes" whichever basis the list shows
+  // (Matt, 2026-11-21): the member's own stake where set, else the posted one.
+  const myStakeFor = useMemo(
+    () => trackedStakeFor('custom', stakes.customStakes),
+    [stakes.customStakes],
+  );
+  const myStakeRows = useMemo(
+    () => (stakes.mode === 'custom' ? rows : score(myStakeFor).rows),
+    [stakes.mode, rows, score, myStakeFor],
+  );
 
   return {
     /** Graded tracked bets — open first, then settled newest-first. */
     rows,
     summary,
+    /** The same bets scored at "My stakes", for the Insights card. */
+    myStakeRows,
     loading,
     refresh: load,
     /** Untrack from a pick (branches live vs pick_id). */

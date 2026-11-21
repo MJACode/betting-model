@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -21,6 +21,9 @@ import { ErrorBanner } from '@/components/ErrorState';
 import { useManualBets, type ManualBet, type ManualBetResult } from '@/hooks/useManualBets';
 import { useTrackedBetResults, type StakeMode } from '@/hooks/useTrackedBetResults';
 import { ManualBetModal } from '@/components/ManualBetModal';
+import { PerformanceInsightsCard } from '@/components/PerformanceInsightsCard';
+import { useModelDailyRecordFull } from '@/hooks/useModelDailyRecordFull';
+import { buildInsightBets } from '@/lib/performanceInsightsInput';
 import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatAmerican, formatFlatStake, formatFlatUnits } from '@/lib/format';
 import { unitsSpeech } from '@/lib/a11y';
 import type { SyncedBet } from '@/lib/sharpsports';
@@ -61,6 +64,20 @@ export function PerformanceScreen() {
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
+
+  const modelDaily = useModelDailyRecordFull();
+  // Scored at "My stakes" and with the logged bets folded in (Matt, 2026-11-21).
+  const insightBets = useMemo(
+    () => buildInsightBets(tracked.myStakeRows, manual.bets),
+    [tracked.myStakeRows, manual.bets],
+  );
+  const insightsCard = (
+    <PerformanceInsightsCard
+      bets={insightBets}
+      modelDaily={modelDaily.rows}
+      modelDailyReady={modelDaily.status === 'ready'}
+    />
+  );
 
   const manualCard = (
     <ManualBetsCard bets={manual.bets} onAdd={() => setShowAdd(true)} onRowPress={settleManual} />
@@ -153,6 +170,7 @@ export function PerformanceScreen() {
             <Ionicons name="chevron-forward" size={15} color={colors.tint} />
           </Pressable>
 
+          {insightsCard}
           {manualCard}
           {trackedCard}
           <BetslipBarSpacer />
@@ -263,6 +281,7 @@ export function PerformanceScreen() {
           bets.slice(0, 100).map((b) => <BetRow key={b.bet_id} bet={b} />)
         )}
 
+        {insightsCard}
         {trackedCard}
         {manualCard}
 
