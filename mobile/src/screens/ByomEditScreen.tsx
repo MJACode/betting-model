@@ -29,6 +29,7 @@ import { ByomSeasonBreakdown } from '@/components/byom/ByomSeasonBreakdown';
 import { currentByomSeason } from '@/lib/byomRecord';
 import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { EmptyState } from '@/components/EmptyState';
+import { PremiumLock } from '@/components/PremiumLock';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/Skeleton';
 import { useByomRecord } from '@/hooks/useByomRecord';
@@ -36,7 +37,7 @@ import { useByomSavedModel } from '@/hooks/useByomSavedModel';
 import { useByomSeason } from '@/hooks/useByomSeason';
 import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { deleteByomModel, fetchByomModels, saveByomModel, type ByomFilters, byomBetsAvailable } from '@/lib/byom';
-import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
+import { errorText, friendlyCause, isAbortError, isPremiumAccessRefusal, PREMIUM_ACCESS_HINT } from '@/lib/errors';
 import {
   byomEmptyLabel,
   draftFromFilters,
@@ -70,7 +71,7 @@ export function ByomEditScreen() {
   const navigation = useNavigation<Nav>();
   const { modelId } = useRoute<Route>().params;
   const { scope } = useByomSeason();
-  const { model, loading, error, missing, reload, signedIn } = useByomSavedModel(modelId);
+  const { model, loading, error, noAccess, missing, reload, signedIn } = useByomSavedModel(modelId);
   const [name, setName] = useState('');
   const [seeded, setSeeded] = useState(false);
   const [market, setMarket] = useState<ByomMarket | null>(null);
@@ -141,7 +142,8 @@ export function ByomEditScreen() {
   const previewWaiting = sideReason == null
     && previewFilters != null
     && preview.record == null
-    && preview.error == null;
+    && preview.error == null
+    && !preview.noAccess;
   const trimmed = name.trim();
   const saveDisabled = saving
     || model == null
@@ -214,6 +216,10 @@ export function ByomEditScreen() {
       navigation.goBack();
     } catch (e: unknown) {
       if (isAbortError(e)) return;
+      if (isPremiumAccessRefusal(e)) {
+        setSaveMessage(PREMIUM_ACCESS_HINT);
+        return;
+      }
       const raw = errorText(e);
       const blocked = sideBlockFromError(raw);
       if (blocked === OTHER_SPORT_NAME) {
@@ -251,6 +257,10 @@ export function ByomEditScreen() {
         <Skeleton label="this model">
           <View style={styles.skel} />
         </Skeleton>
+      ) : noAccess && model == null ? (
+        <PremiumLock locked>
+          <EmptyState title="This model is no longer saved" />
+        </PremiumLock>
       ) : error && model == null ? (
         <ErrorState what="this model" error={error} onRetry={() => void reload()} />
       ) : !signedIn ? (
@@ -344,10 +354,11 @@ export function ByomEditScreen() {
             <>
               <ByomSeasonToggle />
               {market != null && isPropMarket(market) ? (
+                <PremiumLock locked={preview.noAccess}>
                 <ByomBetCount
-                  record={preview.record}
+                  record={preview.noAccess ? null : preview.record}
                   loading={preview.loading || previewWaiting}
-                  error={previewFilters != null ? preview.error : null}
+                  error={previewFilters != null && !preview.noAccess ? preview.error : null}
                   onRetry={() => void preview.reload()}
                   showsUnits={unitsVisible}
                   closeRecord={preview.closeRecord}
@@ -358,11 +369,13 @@ export function ByomEditScreen() {
                     })
                     : undefined}
                 />
+                </PremiumLock>
               ) : (
+              <PremiumLock locked={preview.noAccess}>
               <ByomPreviewCard
-                record={preview.record}
+                record={preview.noAccess ? null : preview.record}
                 loading={preview.loading || previewWaiting}
-                error={previewFilters != null ? preview.error : null}
+                error={previewFilters != null && !preview.noAccess ? preview.error : null}
                 onRetry={() => void preview.reload()}
                 showsUnits={unitsVisible}
                 emptyLabel={previewFilters == null ? '—' : byomEmptyLabel(sport, facts.status, previewFilters)}
@@ -374,6 +387,7 @@ export function ByomEditScreen() {
                   })
                   : undefined}
               />
+              </PremiumLock>
               )}
               <ByomSeasonBreakdown
                 record={preview.record}
@@ -417,9 +431,9 @@ export function ByomEditScreen() {
         side={side}
         primetime={primetime}
         propFilters={propFilters}
-        record={preview.record}
+        record={preview.noAccess ? null : preview.record}
         loading={preview.loading || previewWaiting}
-        error={sideReason == null ? preview.error : null}
+        error={sideReason == null && !preview.noAccess ? preview.error : null}
         showsUnits={unitsVisible}
         blocked={sideReason}
         onRetry={() => void preview.reload()}

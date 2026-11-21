@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAuth } from '@/hooks/useAuth';
-import { errorText, isAbortError } from '@/lib/errors';
+import { isAbortError, isPremiumAccessRefusal, splitLoadError } from '@/lib/errors';
 import {
   fetchByomModels,
   fetchByomScopedRecord,
@@ -45,6 +45,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
   const [rows, setRows] = useState<ByomLeaderboardRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [noAccess, setNoAccess] = useState(false);
   const seq = useRef(0);
   const seenScope = useRef(scope);
   const built = sport === 'NFL' || sport === 'NBA' || sport === 'NHL';
@@ -56,6 +57,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
       seq.current += 1;
       setRows([]);
       setError(null);
+      setNoAccess(false);
       setLoading(false);
       return;
     }
@@ -66,6 +68,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
     }
     setLoading(true);
     setError(null);
+    setNoAccess(false);
     try {
       const models = (await fetchByomModels()).filter((model) => model.sport === byomSport);
       if (seq.current !== id) return;
@@ -91,7 +94,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
             timing: timed.headline,
           };
         } catch (e: unknown) {
-          if (isAbortError(e)) throw e;
+          if (isAbortError(e) || isPremiumAccessRefusal(e)) throw e;
           return {
             model, record: null as ByomRecord | null, ungraded: false, failed: true, timing: 'close' as const,
           };
@@ -110,6 +113,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
         model: item.model,
         record: item.record,
       })));
+      setNoAccess(false);
       setRows(ranked.map((item) => ({
         model: item.model,
         record: item.record,
@@ -121,9 +125,12 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
       })));
     } catch (e: unknown) {
       if (seq.current !== id) return;
+      const split = splitLoadError(e);
+      if (split.noAccess) setRows([]);
+      setNoAccess(split.noAccess);
       // A failed refresh keeps the rows already on screen. The list
-      // banners that failure. A failed first load has nothing to keep.
-      if (!isAbortError(e)) setError(errorText(e));
+      // banners that failure. A refusal clears them and is not an error.
+      setError(split.error);
     } finally {
       if (seq.current === id) setLoading(false);
     }
@@ -133,7 +140,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
     void load();
   }, [load]);
 
-  return { rows, loading, error, reload: load, signedIn, authReady: ready };
+  return { rows, loading, error, noAccess, reload: load, signedIn, authReady: ready };
 }
 
 export type { ByomFilters };

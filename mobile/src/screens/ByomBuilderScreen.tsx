@@ -20,6 +20,7 @@ import { ByomBetCount } from '@/components/byom/ByomBetCount';
 import { ByomMarketField, ByomSideFields } from '@/components/byom/ByomFields';
 import { ByomFilterSheet } from '@/components/byom/ByomFilterSheet';
 import { ByomPreviewCard } from '@/components/byom/ByomPreviewCard';
+import { PremiumLock } from '@/components/PremiumLock';
 import {
   ByomMoreFiltersCard,
   ByomPropSideFields,
@@ -35,7 +36,7 @@ import { useByomSeason } from '@/hooks/useByomSeason';
 import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { fetchByomModels, saveByomModel, byomBetsAvailable } from '@/lib/byom';
-import { friendlyCause, errorText, isAbortError } from '@/lib/errors';
+import { friendlyCause, errorText, isAbortError, isPremiumAccessRefusal, PREMIUM_ACCESS_HINT } from '@/lib/errors';
 import {
   betTypeLabel,
   byomEmptyLabel,
@@ -200,6 +201,10 @@ export function ByomBuilderScreen() {
       navigation.goBack();
     } catch (e: unknown) {
       if (isAbortError(e)) return;
+      if (isPremiumAccessRefusal(e)) {
+        setSaveMessage(PREMIUM_ACCESS_HINT);
+        return;
+      }
       const raw = errorText(e);
       const blocked = sideBlockFromError(raw);
       if (blocked === OTHER_SPORT_NAME) {
@@ -220,7 +225,8 @@ export function ByomBuilderScreen() {
   const previewWaiting = sideReason == null
     && previewFilters != null
     && preview.record == null
-    && preview.error == null;
+    && preview.error == null
+    && !preview.noAccess;
   const matchedBets = preview.record?.bets ?? 0;
   const nextLabel = step === 2
     && market != null
@@ -352,10 +358,11 @@ export function ByomBuilderScreen() {
         <>
           <ByomSeasonToggle />
           {step === 2 && market != null && isPropMarket(market) ? (
+            <PremiumLock locked={preview.noAccess}>
             <ByomBetCount
-              record={preview.record}
+              record={preview.noAccess ? null : preview.record}
               loading={preview.loading || previewWaiting}
-              error={preview.error}
+              error={preview.noAccess ? null : preview.error}
               onRetry={() => void preview.reload()}
               showsUnits={showsUnits(filters)}
               closeRecord={preview.closeRecord}
@@ -366,11 +373,13 @@ export function ByomBuilderScreen() {
                 })
                 : undefined}
             />
+            </PremiumLock>
           ) : (
+            <PremiumLock locked={preview.noAccess}>
             <ByomPreviewCard
-              record={preview.record}
+              record={preview.noAccess ? null : preview.record}
               loading={preview.loading || previewWaiting}
-              error={preview.error}
+              error={preview.noAccess ? null : preview.error}
               onRetry={() => void preview.reload()}
               showsUnits={showsUnits(filters)}
               emptyLabel={byomEmptyLabel(sport, facts.status, filters)}
@@ -382,6 +391,7 @@ export function ByomBuilderScreen() {
                 })
                 : undefined}
             />
+            </PremiumLock>
           )}
           <ByomSeasonBreakdown
             record={preview.record}
@@ -438,9 +448,9 @@ export function ByomBuilderScreen() {
         side={side}
         primetime={primetime}
         propFilters={propFilters}
-        record={preview.record}
+        record={preview.noAccess ? null : preview.record}
         loading={preview.loading || previewWaiting}
-        error={sideReason == null ? preview.error : null}
+        error={sideReason == null && !preview.noAccess ? preview.error : null}
         showsUnits={filters != null && showsUnits(filters)}
         blocked={sideReason}
         onRetry={() => void preview.reload()}

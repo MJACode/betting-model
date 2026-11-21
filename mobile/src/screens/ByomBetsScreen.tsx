@@ -23,6 +23,7 @@ import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ByomPillToggle } from '@/components/byom/ByomPillToggle';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
 import { EmptyState } from '@/components/EmptyState';
+import { PremiumLock } from '@/components/PremiumLock';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/Skeleton';
 import { useByomSeason } from '@/hooks/useByomSeason';
@@ -37,7 +38,7 @@ import { byomActualText } from '@/lib/byomActual';
 import { byomFilters } from '@/lib/byomFilters';
 import { propMarketLabel, type ByomSeasonScope, byomStartWord } from '@/lib/byomRecord';
 import { unitsSpeech } from '@/lib/a11y';
-import { errorText, isAbortError } from '@/lib/errors';
+import { splitLoadError } from '@/lib/errors';
 import { formatAmerican, formatGameDateET, formatSigned } from '@/lib/format';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -122,6 +123,7 @@ export function ByomBetsScreen() {
   const [list, setList] = useState<LoadedList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [noAccess, setNoAccess] = useState(false);
   const filterKey = JSON.stringify(byomFilters(rawFilters));
   const seq = useRef(0);
 
@@ -133,14 +135,19 @@ export function ByomBetsScreen() {
     const id = ++seq.current;
     setLoading(true);
     setError(null);
+    setNoAccess(false);
     try {
       const next = await fetchByomScopedBets(
         scope, JSON.parse(filterKey), timing, new Date(), sport);
       if (seq.current !== id) return;
       setList({ ...next, timing, scope });
+      setNoAccess(false);
     } catch (e: unknown) {
       if (seq.current !== id) return;
-      if (!isAbortError(e)) setError(errorText(e));
+      const split = splitLoadError(e);
+      if (split.noAccess) setList(null);
+      setNoAccess(split.noAccess);
+      setError(split.error);
     } finally {
       if (seq.current === id) setLoading(false);
     }
@@ -178,7 +185,19 @@ export function ByomBetsScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
-      {shown == null && (loading || error == null) ? (
+      {shown == null && noAccess ? (
+        <View style={styles.content}>
+          {header}
+          <PremiumLock locked>
+            <EmptyState
+              title="No bets match"
+              subtitle={timing === 'official'
+                ? 'No bet fit your rules at a DraftKings line.'
+                : `None of these bets had a DraftKings line at ${start}.`}
+            />
+          </PremiumLock>
+        </View>
+      ) : shown == null && (loading || error == null) ? (
         <View style={styles.content}>
           {header}
           <Skeleton label="these bets">

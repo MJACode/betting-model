@@ -12,12 +12,13 @@ import {
   type ByomFilters,
   type ByomModel,
 } from '@/lib/byom';
-import { errorText, isAbortError } from '@/lib/errors';
+import { splitLoadError } from '@/lib/errors';
 
 export function useByomModels() {
   const [models, setModels] = useState<ByomModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [noAccess, setNoAccess] = useState(false);
   // A response lands only when no newer load has started.
   const seq = useRef(0);
 
@@ -25,13 +26,18 @@ export function useByomModels() {
     const id = ++seq.current;
     setLoading(true);
     setError(null);
+    setNoAccess(false);
     try {
       const next = await fetchByomModels();
       if (seq.current !== id) return;
       setModels(next);
+      setNoAccess(false);
     } catch (e: unknown) {
       if (seq.current !== id) return;
-      if (!isAbortError(e)) setError(errorText(e));
+      const split = splitLoadError(e);
+      if (split.noAccess) setModels([]);
+      setNoAccess(split.noAccess);
+      setError(split.error);
     } finally {
       if (seq.current === id) setLoading(false);
     }
@@ -55,5 +61,5 @@ export function useByomModels() {
     await load();
   }, [load]);
 
-  return { models, loading, error, reload: load, save, remove };
+  return { models, loading, error, noAccess, reload: load, save, remove };
 }

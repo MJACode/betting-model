@@ -23,6 +23,7 @@ import {
 } from '@/hooks/useCustomModelStats';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { EmptyState } from '@/components/EmptyState';
+import { PremiumLock } from '@/components/PremiumLock';
 import { RangeSlider } from '@/components/filters/RangeSlider';
 import {
   CHIP_GROUPS,
@@ -125,7 +126,7 @@ export function ModelEditScreen() {
 
   // Server-graded backtest over EVERY scored pick (BET + AVOID + dead-zone),
   // debounced so chip-tapping doesn't fire an RPC per touch.
-  const { stats: backtestStats, loading: backtestLoading } = useCustomModelBacktest(
+  const { stats: backtestStats, loading: backtestLoading, noAccess } = useCustomModelBacktest(
     cleanRules.length > 0 ? draft : null,
     { debounceMs: 350 },
   );
@@ -375,6 +376,7 @@ export function ModelEditScreen() {
         loading={backtestLoading || todayLoading}
         todayMatches={todayMatches}
         backtest={backtest}
+        noAccess={noAccess}
         saveLabel={editingId ? 'Save changes' : 'Create model'}
         onSave={onSave}
       />
@@ -401,6 +403,7 @@ function PreviewFooter({
   loading,
   todayMatches,
   backtest,
+  noAccess,
   saveLabel,
   onSave,
 }: {
@@ -412,6 +415,7 @@ function PreviewFooter({
   loading: boolean;
   todayMatches: number;
   backtest: CustomModelStats | null;
+  noAccess: boolean;
   saveLabel: string;
   onSave: () => void;
 }) {
@@ -427,6 +431,8 @@ function PreviewFooter({
         <Text style={styles.previewEmpty}>
           Every bet type here is retired — add a live one to see matches.
         </Text>
+      ) : hasRules && noAccess && !loading ? (
+        <PremiumLock locked />
       ) : hasRules ? (
         <View style={styles.previewRow}>
           <PreviewStat label="Today" value={loading ? '—' : String(todayMatches)} caption="matching" />
@@ -458,7 +464,7 @@ function PreviewFooter({
           now a state a user reaches by picking a perfectly good market (UX
           review). Deliberately NOT the go-live-gate wording — that is banned
           from the app as copy AND as a constant (.claude/rules/frontend.md). */}
-      {hasRules && !allRetired && !loading && backtest?.picks === 0 ? (
+      {hasRules && !allRetired && !loading && !noAccess && backtest?.picks === 0 ? (
         <Text style={styles.previewEmpty}>
           New market — no settled picks yet, so there is no record to show.
         </Text>
