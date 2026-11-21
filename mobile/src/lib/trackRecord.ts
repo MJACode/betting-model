@@ -7,7 +7,6 @@
  */
 
 import { clvBeatRate } from '@/lib/clvBeat';
-import { isModelRetired } from '@/lib/thresholds';
 import type { ParlayTrackRow, TrackRecordRow } from '@/types';
 
 export interface TrackRecordSummary {
@@ -94,9 +93,10 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
   // zero would print a 0.00 record. Leave them unset so the screen shows a dash.
   const postedKnown = rows.some((r) => r.units != null || r.risked != null);
   for (const r of rows) {
-    // The view drops a retired model once threshold_sync prunes its row; until
-    // then the row survives and would count. Same guard as passesActionFilter.
-    if (isModelRetired(r.model_id)) continue;
+    // A retired model's posted bets stay in the record (Matt, 2026-11-21: the
+    // "SignalBase Record History" sheet, the source of truth, counts every
+    // graded posted pick, and Discord never dropped them). Only the view's own
+    // strikes (config.RECORD_EXCLUSIONS) take a model out.
     wins += Number(r.wins ?? 0);
     losses += Number(r.losses ?? 0);
     pushes += Number(r.pushes ?? 0);
@@ -157,7 +157,6 @@ export interface SportGroup {
 export function groupBySport(rows: TrackRecordRow[]): SportGroup[] {
   const bySport = new Map<string, TrackRecordRow[]>();
   for (const r of rows) {
-    if (isModelRetired(r.model_id)) continue;
     if (Number(r.picks ?? 0) <= 0) continue; // no settled picks yet
     const list = bySport.get(r.sport) ?? [];
     list.push(r);

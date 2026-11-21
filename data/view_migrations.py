@@ -340,9 +340,17 @@ ACTIVE_MIGRATIONS: list[str] = [
     # (config.RECORD_EXCLUSIONS). Patches the LIVE view text with one clause,
     # so it must run after every migration that owns the two record views.
     "record_strikes_nfl_live_prop_2026_10_04.sql",
-    # 2026-11-13 (mike): the three retired UFC models struck from the record
-    # (config.RECORD_EXCLUSIONS); the same one-clause patch of the live views.
-    "record_strikes_ufc_retired_2026_11_13.sql",
+    # record_strikes_ufc_retired_2026_11_13.sql (mike, 2026-11-13) is RETIRED
+    # from this list: the UFC models are back in the record (Matt, 2026-11-21,
+    # the "SignalBase Record History" sheet is the source of truth), and the
+    # strike would put its clause back on every pass. In its place:
+    # 2026-11-21 (Matt): the record matches the sheet. The UFC strike comes
+    # out of the two record views, published_pick_stake(numeric, numeric)
+    # becomes the flat 1u stake, and the website record stops dropping
+    # site_retired_models. Where the strike ran (after the views' owners,
+    # before the CLV stamp). The stake part waits for pick_stake_units below
+    # on a fresh database; every part is guarded on its property.
+    "record_matches_sheet_2026_11_21.sql",
     # 2026-10-09 (mike, "Count each fight once"): two UFC fights were bet
     # twice by ufc_total_rounds under two game ids each. The extra copies are
     # marked condition_status='DUPLICATE' (result untouched; no-ops after
@@ -802,6 +810,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # AI assistant (MCP): Disconnect cuts the app off (its Auth sessions are
     # refused by mcp_meter.begin_call_session). Runs while that function is missing.
     "mcp_session_revoke_2026_11_21.sql",
+    # 2026-11-21 (Matt): one row per run of the hourly record-vs-sheet check
+    # (tracking/record_sheet_check.py). Creates the table once.
+    "record_sheet_checks_2026_11_21.sql",
     # AI assistant (MCP): prop_prices carries alternate lines too (Matt,
     # 2026-11-21), market = base market + is_alternate. Runs while that
     # column is missing.

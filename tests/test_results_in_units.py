@@ -131,16 +131,16 @@ def test_the_dashboard_stake_is_the_published_stake():
     assert h["_units_at_risk"]([(0.03, -110, None), (0.03, None, -200)]) == "3.1u"
 
 
-def test_the_dashboard_reads_a_picks_own_stake():
-    # picks.stake_units (pick_stake_units_2026_11_06.sql): 2u to win at -110
-    # lays 2.2u; at -200 the 3u risk cap binds and the win is recomputed.
+def test_the_dashboard_stakes_every_pick_flat():
+    # Matt, 2026-11-21: the record is flat 1u to win on every pick, as the
+    # record sheet counts it. picks.stake_units = 2 no longer sizes a pick.
     h = _dashboard_helpers()
-    assert h["_stake_cell"](0.03, -110, None, 2) == "2.2u to win 2u"
-    assert h["_stake_cell"](0.03, -200, None, 2) == "3u to win 1.5u"
+    assert h["_stake_cell"](0.03, -110, None, 2) == "1.1u to win 1u"
+    assert h["_stake_cell"](0.03, -400, None, 2) == "3u to win 0.75u"
     assert h["_stake_cell"](0.03, -110, None, float("nan")) == "1.1u to win 1u"
-    assert h["_units_cell"]("WIN", -110, 2) == "+2.00u"
-    assert h["_units_cell"]("LOSS", -110, 2) == "-2.20u"
-    assert h["_units_at_risk"]([(0.03, -110, None, 2), (0.03, -110, None, None)]) == "3.3u"
+    assert h["_units_cell"]("WIN", -110, 2) == "+1.00u"
+    assert h["_units_cell"]("LOSS", -110, 2) == "-1.10u"
+    assert h["_units_at_risk"]([(0.03, -110, None, 2), (0.03, -110, None, None)]) == "2.2u"
 
 
 # ── email/render_picks_email.py ──────────────────────────────────────────────

@@ -1429,6 +1429,21 @@ def _job_publish_x_results(**kw):
         conn.close()
 
 
+def _validate_no_args(args: dict) -> dict:
+    if args:
+        raise ValueError("this job takes no arguments")
+    return {}
+
+
+def _job_record_sheet_check(**kw):
+    """Run the record-vs-sheet check once, on demand (it also runs hourly).
+    Report only; returns the counts and the findings."""
+    from tracking.record_sheet_check import run_record_sheet_check
+    res = run_record_sheet_check()
+    res["findings"] = (res.get("findings") or [])[:50]
+    return res
+
+
 def _job_publish_results(**kw):
     """Re-post one settled day's recap to BOTH surfaces, Discord and X.
 
@@ -2901,6 +2916,7 @@ JOBS = {
     # Both surfaces, one job: the 2026-09-09 recovery. Same validator as the
     # X-only job; the argument is the same one field.
     "publish_results": (_job_publish_results, _validate_publish_x_results),
+    "record_sheet_check": (_job_record_sheet_check, _validate_no_args),
     "publish_discord_signals": (_job_publish_discord_signals,
                                 _validate_publish_discord_signals),
     # One-off void notice. dry_run defaults true. Does not edit or delete
