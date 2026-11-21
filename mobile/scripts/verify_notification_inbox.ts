@@ -17,7 +17,6 @@ import {
   inboxTimeLabel,
   mutedSports,
   unreadCount,
-  unreadPill,
   visibleInbox,
   type InboxRow,
 } from '../src/lib/notificationInbox';
@@ -106,14 +105,6 @@ check('feedback with no sport stays', visible.some((r) => r.id === '6'));
 check('unread count ignores the muted row and the old row', unreadCount(visible) === 3);
 check('a read feedback row is not unread', unreadCount(visible.filter((r) => r.kind === 'feedback_reply')) === 0);
 
-const pill = unreadPill(visible);
-check('the pill counts unread only', pill?.count === 3);
-check(
-  'the pill names the unread kinds',
-  pill?.summary === 'Live pick, new signals, line move',
-);
-check('a clear inbox has no pill', unreadPill(visible.map((r) => ({ ...r, read_at: now.toISOString() }))) === null);
-
 check('today is Today', inboxSection(live.sent_at, now) === 'TODAY');
 check('yesterday is Earlier', inboxSection(feedback.sent_at, now) === 'EARLIER');
 check('8 minutes reads 8m', inboxTimeLabel(live.sent_at, now) === '8m');
@@ -169,7 +160,7 @@ const bellScreens = [
 for (const rel of bellScreens) {
   check(`${rel} renders the bell`, src(rel).includes('<NotificationBell />'));
 }
-check('Picks renders the unread pill', src('src/screens/PicksHomeScreen.tsx').includes('<UnreadNotificationsPill />'));
+check('Picks no longer renders an unread banner (Matt, 2026-11-21: the bell is enough)', !src('src/screens/PicksHomeScreen.tsx').includes('UnreadNotificationsPill'));
 check('the badge handler is on', /shouldSetBadge:\s*true/.test(src('src/lib/pushPresentation.ts')));
 check(
   'sports switches follow SPORTS and use a gold track',
