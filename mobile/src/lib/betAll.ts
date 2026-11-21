@@ -5,9 +5,12 @@
  *
  *   best  (the default) each pick at its best line among the member's books,
  *         so the picks split across books and the member opens one book at a
- *         time.
+ *         time. A best price with no betslip link is sent to the best-priced
+ *         book that has a link at the same number. With none, it stays on
+ *         the best price, for the member to add in that book.
  *   book  every pick at one book. A pick that book does not have is named,
- *         never dropped without a word.
+ *         never dropped without a word. The book the member picked is the
+ *         book, link or not.
  *
  * Live bets are not part of it, and the sheet says so (Matt, same day).
  *
@@ -20,7 +23,7 @@
  */
 import type { EnrichedPick, LiveGameStateRow, Pick } from '@/types';
 import { pickPriceView } from './pickPriceView';
-import { bookLabel, bookName, handoffQuotesForPick, LINE_SHOP_BOOKS } from './markets';
+import { bookLabel, bookName, handoffQuotesForPick, LINE_SHOP_BOOKS, numOrNull } from './markets';
 import { pickSportsbookRows } from './pickBooks';
 import { pickCtaFor } from './pickCta';
 import { openForAction } from './discordPublish';
@@ -32,7 +35,7 @@ import {
   type UnitStake,
 } from './thresholds';
 import { americanToDecimal, labelWithoutStake } from './format';
-import { combineSinglesLinks } from './betslipLinks';
+import { combineSinglesLinks, isUsableBetslipLink } from './betslipLinks';
 
 export type BetAllMode = 'best' | 'book';
 
@@ -77,6 +80,12 @@ export interface BetAllQuote {
   bookmaker: string;
   price: number;
   link: string | null;
+  /**
+   * The number this price is at (spreads: the home number). Null on a
+   * moneyline, and on a quote built without one. A number that is not the
+   * pick's scored line is a different bet.
+   */
+  line?: number | null;
 }
 
 export interface BetAllPick {
@@ -148,10 +157,12 @@ export function betAllCandidates(
       skip('notAtMyBooks');
       continue;
     }
-    const rows = pickSportsbookRows(
-      handoffQuotesForPick(pick, item.bookRows, view.heroPrice, view.priceAge, myBooks),
-      null,
-    ).filter((r) => r.price != null && !r.otherLine && myBooks.includes(r.bookmaker));
+    const handoff = handoffQuotesForPick(pick, item.bookRows, view.heroPrice, view.priceAge, myBooks);
+    // handoff quotes are already the pick's own number (markets.pickLineQuotes).
+    const lineOf = new Map(handoff.map((q) => [q.bookmaker, q.line]));
+    const rows = pickSportsbookRows(handoff, null).filter(
+      (r) => r.price != null && !r.otherLine && myBooks.includes(r.bookmaker),
+    );
     if (rows.length === 0) {
       skip('noPrice');
       continue;
@@ -160,7 +171,12 @@ export function betAllCandidates(
       key,
       pick,
       label,
-      quotes: rows.map((r) => ({ bookmaker: r.bookmaker, price: r.price as number, link: r.link })),
+      quotes: rows.map((r) => ({
+        bookmaker: r.bookmaker,
+        price: r.price as number,
+        link: r.link,
+        line: lineOf.get(r.bookmaker) ?? null,
+      })),
     });
   }
   return { picks, skipped };
@@ -198,8 +214,35 @@ function shopOrder(book: string): number {
   return i < 0 ? LINE_SHOP_BOOKS.length : i;
 }
 
+/** Quotes at the pick's own number, in the stored order (best payout first).
+ *  A quote whose line is a different number is a different bet. A quote
+ *  with no line is the pick's number: moneylines have none, and a quote
+ *  built without one is the same bet the list already filtered to. */
+function quotesAtNumber(p: BetAllPick): readonly BetAllQuote[] {
+  const scored = numOrNull(p.pick.scored_line);
+  if (scored == null) return p.quotes;
+  const same = p.quotes.filter((q) => q.line == null || q.line === scored);
+  return same.length > 0 ? same : p.quotes;
+}
+
+/**
+ * The book best-line sends this pick to.
+ *
+ * The best price at the pick's number, when that book has a betslip link.
+ * Otherwise the best-priced book that has a link at that same number.
+ * No linked book at that number: the best price, and the step lists it
+ * unlinked. A link at a different number is not a candidate. One-book
+ * mode does not use this: the member's book is the book.
+ */
+export function quoteForBestLine(p: BetAllPick): BetAllQuote {
+  const pool = quotesAtNumber(p);
+  const best = pool[0]!;
+  if (isUsableBetslipLink(best.link)) return best;
+  return pool.find((q) => isUsableBetslipLink(q.link)) ?? best;
+}
+
 function legAt(p: BetAllPick, q: BetAllQuote): BetAllLeg {
-  const best = p.quotes[0]!;
+  const best = quotesAtNumber(p)[0]!;
   return {
     key: p.key,
     pick: p.pick,
@@ -214,7 +257,8 @@ function legAt(p: BetAllPick, q: BetAllQuote): BetAllLeg {
 }
 
 function stepFor(bookmaker: string, legs: BetAllLeg[]): BetAllStep {
-  const linked = legs.filter((l) => l.link != null && l.link.trim() !== '');
+  // The same test quoteForBestLine uses. A stored "NaN" is not a link.
+  const linked = legs.filter((l) => isUsableBetslipLink(l.link));
   const unlinked = legs.filter((l) => !linked.includes(l));
   const one = linked.length > 1 ? combineSinglesLinks(linked.map((l) => l.link)) : null;
   return {
@@ -227,12 +271,12 @@ function stepFor(bookmaker: string, legs: BetAllLeg[]): BetAllStep {
   };
 }
 
-/** Best line: each selected pick at its best book. Biggest book first. */
+/** Best line: each selected pick at the book `quoteForBestLine` names. Biggest book first. */
 export function bestLinePlan(picks: readonly BetAllPick[], selected: ReadonlySet<string>): BetAllStep[] {
   const byBook = new Map<string, BetAllLeg[]>();
   for (const p of picks) {
     if (!selected.has(p.key)) continue;
-    const q = p.quotes[0]!;
+    const q = quoteForBestLine(p);
     const legs = byBook.get(q.bookmaker) ?? [];
     legs.push(legAt(p, q));
     byBook.set(q.bookmaker, legs);

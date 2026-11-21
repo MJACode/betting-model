@@ -176,9 +176,33 @@ def test_keyset_sql_compares_the_whole_key_as_one_row():
     assert '(__m."a", __m."b") > (%s::bigint, %s::text)' in sql
     assert '(__m."a", __m."b") <= (%s::bigint, %s::text)' in sql
     assert sql.rstrip().endswith('ORDER BY __m."a", __m."b" LIMIT %s')
-    assert params == ["10", "k010", "20", "k020"]
+    assert params == ["10", "k010", "10", "20", "k020", "20"]
     sql, params = lm.page_sql(info, None, None)
     assert "WHERE" not in sql and params == []
+
+
+def test_a_range_on_a_many_column_key_also_bounds_its_first_column():
+    """Postgres prices a row comparison by its first column alone, and prices
+    the two ends of a range as if they were unrelated. So on 2026-11-20 it put
+    a 50,000-row chunk of nfl_odds_history at 2.7 million rows and read the
+    whole 4.4 GB table to check it, 33 s each, 104 times in one night. With a
+    plain range on the first key column as well, it priced the same chunk at
+    4,508 rows and used the index. The extra range is implied by the row
+    comparison, so it changes which rows match not at all."""
+    info = table()
+    sql, params = lm.summaries_sql(info, ["10", "k010"], [["20", "k020"], ["30", "k030"]], True)
+    where = sql.split(" WHERE ", 1)[1]
+    assert '__m."a" >= %s::bigint' in where
+    assert '__m."a" <= %s::bigint' in where
+    assert params[-6:] == ["10", "k010", "10", "30", "k030", "30"]
+
+    sql, params = lm.page_sql(info, ["10", "k010"], None)  # the tail: lower bound only
+    assert '__m."a" >= %s::bigint' in sql and '__m."a" <=' not in sql
+    assert params == ["10", "k010", "10"]
+
+    one = table(pk=("a",), pk_types=("bigint",))  # a one-column bound is already plain
+    sql, params = lm.page_sql(one, ["10"], ["20"])
+    assert '__m."a" >=' not in sql and params == ["10", "20"]
 
 
 def test_a_halved_batch_does_not_end_the_range_early(tmp_path):

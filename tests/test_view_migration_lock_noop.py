@@ -26,6 +26,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 MIG = ROOT / "data" / "migrations"
 
@@ -121,6 +123,13 @@ def test_discord_publish_state_compares_the_whole_view_and_policy():
     assert "polpermissive" in head and "permissive IS TRUE" in head
     assert "polroles" in head
     assert "roles IS NOT DISTINCT FROM ARRAY['anon', 'authenticated']" in head
+    # Step A runs ALTER POLICY ... TO authenticated. That list skips too.
+    # Anon privileges are not part of the skip.
+    assert "roles IS NOT DISTINCT FROM ARRAY['authenticated']" in head
+    assert "has_column_privilege('anon'" not in head
+    assert "has_table_privilege('anon', 'public.v_discord_published'" not in head
+    assert "has_column_privilege('authenticated', 'public.push_sent', 'lock_key', 'SELECT')" in head
+    assert "has_table_privilege('authenticated', 'public.v_discord_published', 'SELECT')" in head
     # The expected strings are what PG 17 prints for the DDL in this file.
     assert ("SELECT lock_key, kind FROM push_sent s WHERE kind = ANY "
             in head)
@@ -407,3 +416,131 @@ def test_identity_argument_guards_include_parameter_names():
             if not parts or any(not _NAMED_IDENTITY_ARG.fullmatch(part) for part in parts):
                 bad.append(f"{path.name}: {literal}")
     assert bad == []
+
+
+def _ddl_counter(cur) -> None:
+    cur.execute("""
+        CREATE TABLE ddl_seen (n integer NOT NULL);
+        INSERT INTO ddl_seen VALUES (0);
+        CREATE FUNCTION count_ddl() RETURNS event_trigger LANGUAGE plpgsql AS
+        $$ BEGIN UPDATE ddl_seen SET n = n + 1; END $$;
+        CREATE EVENT TRIGGER count_ddl ON ddl_command_start
+          EXECUTE FUNCTION count_ddl()
+    """)
+
+
+def _ddl_n(cur) -> int:
+    cur.execute("SELECT n FROM ddl_seen")
+    return cur.fetchone()[0]
+
+
+def _notices(conn) -> list[str]:
+    found = [n.strip() for n in conn.notices]
+    del conn.notices[:]
+    return found
+
+
+def _policy_roles(cur) -> list[str]:
+    cur.execute("""
+        SELECT ARRAY(SELECT r::regrole::text FROM unnest(p.polroles) r ORDER BY 1)
+          FROM pg_policy p
+         WHERE p.polrelid = 'public.push_sent'::regclass
+           AND p.polname = 'anon_read_discord_publish'
+    """)
+    return list(cur.fetchone()[0])
+
+
+def test_step_a_skips_discord_publish_state_and_leaves_anon_revoked():
+    """A fresh database runs the body. The next pass skips. Step A revokes
+    anon and retargets the policy to authenticated; the next pass skips
+    and does not put anon back on the policy or the grants."""
+    psycopg2 = pytest.importorskip("psycopg2")
+    from tests.byom_scratch import ScratchPostgres, pg_bin
+
+    if pg_bin("initdb") is None:
+        pytest.skip("initdb is not installed")
+
+    sql = _sql("discord_publish_state_2026_09_23.sql")
+    cluster = ScratchPostgres()
+    conn = None
+    try:
+        conn = psycopg2.connect(cluster.start())
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE ROLE anon NOLOGIN;
+            CREATE ROLE authenticated NOLOGIN;
+            CREATE TABLE public.push_sent (
+              lock_key text,
+              kind text,
+              message_id text,
+              sent_at timestamptz
+            );
+            CREATE TABLE public.picks (id integer);
+            GRANT SELECT ON public.picks TO anon;
+        """)
+        cur.execute("SELECT to_regclass('public.v_discord_published')")
+        assert cur.fetchone()[0] is None
+        _ddl_counter(cur)
+        cur.execute("CREATE TABLE ddl_probe (id integer)")
+        assert _ddl_n(cur) >= 1
+        cur.execute("DROP TABLE ddl_probe")
+        cur.execute("UPDATE ddl_seen SET n = 0")
+        cur.execute(sql)
+        first = _ddl_n(cur)
+        assert first > 0, "the counter did not see this file's DDL"
+        assert _policy_roles(cur) == ["anon", "authenticated"]
+        cur.execute("""
+            SELECT has_column_privilege('anon', 'public.push_sent', 'lock_key', 'SELECT'),
+                   has_table_privilege('anon', 'public.v_discord_published', 'SELECT'),
+                   has_column_privilege('authenticated', 'public.push_sent', 'lock_key', 'SELECT'),
+                   has_column_privilege('authenticated', 'public.push_sent', 'message_id', 'SELECT')
+        """)
+        assert cur.fetchone() == (True, True, True, False)
+        cur.execute("UPDATE ddl_seen SET n = 0")
+        cur.execute(sql)
+        second = _ddl_n(cur)
+        if second != 0:
+            cur.execute("SELECT pg_get_viewdef('public.v_discord_published'::regclass, true)")
+            got = cur.fetchone()[0]
+            raise AssertionError(f"the second pass ran DDL\nviewdef:\n{got}")
+        assert any("already matches - skipping" in n for n in _notices(conn))
+        cur.execute("""
+            REVOKE ALL ON public.picks FROM PUBLIC, anon, authenticated;
+            REVOKE ALL ON public.v_discord_published FROM anon;
+            REVOKE ALL ON TABLE public.push_sent FROM anon;
+            REVOKE SELECT (lock_key, kind, message_id, sent_at)
+              ON public.push_sent FROM anon;
+            ALTER POLICY anon_read_discord_publish
+              ON public.push_sent TO authenticated;
+        """)
+        assert _policy_roles(cur) == ["authenticated"]
+        cur.execute("UPDATE ddl_seen SET n = 0")
+        _notices(conn)
+        cur.execute(sql)
+        third = _ddl_n(cur)
+        if third != 0:
+            cur.execute("SELECT pg_get_viewdef('public.v_discord_published'::regclass, true)")
+            got = cur.fetchone()[0]
+            raise AssertionError(
+                f"step A sent the file back through DDL\nroles={_policy_roles(cur)}\nviewdef:\n{got}")
+        assert any("already matches - skipping" in n for n in _notices(conn))
+        assert _policy_roles(cur) == ["authenticated"]
+        cur.execute("""
+            SELECT has_column_privilege('anon', 'public.push_sent', 'lock_key', 'SELECT'),
+                   has_column_privilege('anon', 'public.push_sent', 'kind', 'SELECT'),
+                   has_column_privilege('anon', 'public.push_sent', 'message_id', 'SELECT'),
+                   has_table_privilege('anon', 'public.v_discord_published', 'SELECT'),
+                   has_table_privilege('anon', 'public.v_discord_published', 'INSERT'),
+                   has_column_privilege('authenticated', 'public.push_sent', 'lock_key', 'SELECT'),
+                   has_column_privilege('authenticated', 'public.push_sent', 'kind', 'SELECT'),
+                   has_column_privilege('authenticated', 'public.push_sent', 'message_id', 'SELECT'),
+                   has_table_privilege('authenticated', 'public.v_discord_published', 'SELECT'),
+                   has_table_privilege('authenticated', 'public.v_discord_published', 'INSERT')
+        """)
+        assert cur.fetchone() == (
+            False, False, False, False, False, True, True, False, True, False)
+    finally:
+        if conn is not None:
+            conn.close()
+        cluster.stop()

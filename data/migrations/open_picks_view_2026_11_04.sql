@@ -23,9 +23,11 @@
 -- Discord's book names).
 --
 -- The skip compares the view's comment to a marker that is the hash of the
--- view body, so a changed body is applied on the next pass. It also waits,
--- without raising, until published_pick_stake and v_discord_published exist:
--- on a fresh database this file runs before the posted-stake functions.
+-- view body, so a changed body is applied on the next pass, and requires
+-- authenticated SELECT. It does not look at anon: step A revoked that grant
+-- and the view is unchanged. It also waits, without raising, until
+-- published_pick_stake and v_discord_published exist: on a fresh database
+-- this file runs before the posted-stake functions.
 --
 -- security_invoker, so the caller's own grants on picks, games,
 -- model_action_thresholds and v_discord_published apply. SELECT only. Does
@@ -43,9 +45,11 @@ BEGIN
   IF to_regclass('public.open_picks') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.open_picks'), 'pg_class'), '')
          = 'open_picks 1605a3f8d18f'
-     AND has_table_privilege('anon', 'public.open_picks', 'SELECT')
+     -- The comment is the body hash. Authenticated SELECT is the grant
+     -- step A keeps. Anon SELECT is not part of the skip.
      AND has_table_privilege('authenticated', 'public.open_picks', 'SELECT')
   THEN
+    RAISE NOTICE 'open_picks already present - skipping';
     RETURN;
   END IF;
 

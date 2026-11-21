@@ -31,9 +31,14 @@
 --    the schema off when it is on the search_path) against what Postgres 17
 --    prints for the DDL below, read from production 2026-10-02. It also
 --    checks the policy's command (SELECT), that it is permissive, and that
---    its roles are exactly anon and authenticated. CHANGING THE VIEW OR
---    POLICY BELOW MEANS CHANGING want_def / want_qual TOO, or the new body
---    is never applied. Anything missing falls through and the DDL still runs.
+--    its roles are authenticated. Anon may still be on that list from before
+--    step A; step A runs ALTER POLICY ... TO authenticated, so the list is
+--    also exactly authenticated. The grants it requires are authenticated's
+--    (lock_key and kind, not message_id, and SELECT on the view, not
+--    INSERT). Anon privileges are not part of the skip: step A revoked
+--    them. CHANGING THE VIEW OR POLICY BELOW MEANS CHANGING want_def /
+--    want_qual TOO, or the new body is never applied. Anything missing
+--    falls through and the DDL still runs.
 --
 -- Idempotent. One statement (a DO block) so view_migrations can re-run it.
 
@@ -80,16 +85,14 @@ BEGIN
        AND qual IS NOT DISTINCT FROM want_qual
        AND cmd IS NOT DISTINCT FROM 'r'
        AND permissive IS TRUE
-       AND roles IS NOT DISTINCT FROM ARRAY['anon', 'authenticated']
-       AND has_column_privilege('anon', 'public.push_sent', 'lock_key', 'SELECT')
-       AND has_column_privilege('anon', 'public.push_sent', 'kind', 'SELECT')
-       AND NOT has_column_privilege('anon', 'public.push_sent', 'message_id', 'SELECT')
+       AND (
+         roles IS NOT DISTINCT FROM ARRAY['anon', 'authenticated']
+         OR roles IS NOT DISTINCT FROM ARRAY['authenticated']
+       )
        AND has_column_privilege('authenticated', 'public.push_sent', 'lock_key', 'SELECT')
        AND has_column_privilege('authenticated', 'public.push_sent', 'kind', 'SELECT')
        AND NOT has_column_privilege('authenticated', 'public.push_sent', 'message_id', 'SELECT')
-       AND has_table_privilege('anon', 'public.v_discord_published', 'SELECT')
        AND has_table_privilege('authenticated', 'public.v_discord_published', 'SELECT')
-       AND NOT has_table_privilege('anon', 'public.v_discord_published', 'INSERT')
        AND NOT has_table_privilege('authenticated', 'public.v_discord_published', 'INSERT')
     THEN
       RAISE NOTICE 'v_discord_published already matches - skipping';
