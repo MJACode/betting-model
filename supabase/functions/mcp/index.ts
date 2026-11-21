@@ -35,7 +35,12 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const DB_URL = Deno.env.get("SUPABASE_DB_URL") ?? "";
 // The public address members paste (a Vercel rewrite to this function).
 const PUBLIC_URL = Deno.env.get("MCP_PUBLIC_URL") ?? "https://signalbase-ai.com/mcp";
-const AUTH_ISSUER = `${SUPABASE_URL}/auth/v1`;
+// Members only ever see signalbase-ai.com (Matt, 2026-11-21: the sign-in must
+// not name the database). The authorization server is advertised at the public
+// origin; Vercel forwards /auth/v1/* to Supabase Auth, and the metadata below is
+// Supabase's own with its origin swapped for ours.
+const PUBLIC_ORIGIN = new URL(PUBLIC_URL).origin;
+const AUTH_ISSUER = `${PUBLIC_ORIGIN}/auth/v1`;
 
 const sql = postgres(DB_URL, { max: 3, prepare: false, idle_timeout: 20 });
 const auth = createClient(SUPABASE_URL, ANON_KEY, {
@@ -654,6 +659,21 @@ async function handleRpc(msg: any, who: Who): Promise<unknown | null> {
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+
+  // Authorization server metadata (RFC 8414 / OIDC discovery), served at the
+  // public origin so a client never sends the member to the Supabase host.
+  if (req.method === "GET" && (url.pathname.includes("/.well-known/oauth-authorization-server") ||
+                               url.pathname.includes("/.well-known/openid-configuration"))) {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/.well-known/oauth-authorization-server/auth/v1`);
+      if (!r.ok) return respond({ error: "unavailable" }, 502);
+      const meta = JSON.parse((await r.text()).replaceAll(SUPABASE_URL, PUBLIC_ORIGIN));
+      meta.issuer = AUTH_ISSUER;
+      return respond(meta, 200, { "Cache-Control": "public, max-age=300" });
+    } catch {
+      return respond({ error: "unavailable" }, 502);
+    }
+  }
 
   // Protected resource metadata (RFC 9728): which server issues our tokens.
   if (req.method === "GET" && url.pathname.includes("/.well-known/oauth-protected-resource")) {

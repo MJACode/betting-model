@@ -43,6 +43,30 @@
     {
       "source": "/.well-known/oauth-protected-resource",
       "destination": "https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/mcp/.well-known/oauth-protected-resource"
+    },
+    {
+      "source": "/.well-known/oauth-authorization-server/auth/v1",
+      "destination": "https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/mcp/.well-known/oauth-authorization-server"
+    },
+    {
+      "source": "/.well-known/oauth-authorization-server",
+      "destination": "https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/mcp/.well-known/oauth-authorization-server"
+    },
+    {
+      "source": "/.well-known/openid-configuration/auth/v1",
+      "destination": "https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/mcp/.well-known/openid-configuration"
+    },
+    {
+      "source": "/auth/v1/.well-known/openid-configuration",
+      "destination": "https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/mcp/.well-known/openid-configuration"
+    },
+    {
+      "source": "/auth/v1/.well-known/oauth-authorization-server",
+      "destination": "https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/mcp/.well-known/oauth-authorization-server"
+    },
+    {
+      "source": "/auth/v1/:path*",
+      "destination": "https://vvprgnrmzeekokzkrkfu.supabase.co/auth/v1/:path*"
     }
   ]
 }
