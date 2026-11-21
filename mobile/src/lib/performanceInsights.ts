@@ -103,7 +103,7 @@ export interface PeriodInsights {
   period: InsightPeriod;
   window: InsightWindow;
   record: InsightRecord;
-  /** The window before this one; null on 'all'. */
+  /** The same days of the window before this one; null on 'all'. */
   previous: InsightRecord | null;
   best: InsightBet | null;
   worst: InsightBet | null;
@@ -122,9 +122,17 @@ function parts(d: string): [number, number, number] {
   return [y, m, day];
 }
 
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** A calendar date from parts that may overflow (day 0 is the last of the month before). */
 function iso(y: number, m: number, d: number): string {
   const dt = new Date(Date.UTC(y, m - 1, d));
-  return dt.toISOString().slice(0, 10);
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+}
+
+function dayNumber(d: string): number {
+  const [y, m, day] = parts(d);
+  return Math.round(Date.UTC(y, m - 1, day) / 86_400_000);
 }
 
 export function shiftDays(d: string, n: number): string {
@@ -138,8 +146,26 @@ function mondayIndex(d: string): number {
   return (new Date(Date.UTC(y, m - 1, day)).getUTCDay() + 6) % 7;
 }
 
-/** The window holding `today` for a period, and the one before it. */
+/**
+ * The window holding `today` for a period, and the SAME DAYS of the one
+ * before it: Monday to Wednesday against last Monday to Wednesday, the 1st to
+ * the 19th against last month's 1st to 19th, so an unfinished week is not
+ * read as a drop (UX review, 2026-11-21). `current` runs to the period's end,
+ * so a game later this week already counts as this week's open bet.
+ */
 export function periodWindows(
+  period: InsightPeriod,
+  today: string,
+): { current: InsightWindow; previous: InsightWindow | null } {
+  const full = fullPeriodWindows(period, today);
+  const { current, previous } = full;
+  if (!previous || !previous.from || !previous.to || !current.from || period === 'day') return full;
+  const elapsed = Math.max(0, dayNumber(today) - dayNumber(current.from));
+  const sameDaysEnd = shiftDays(previous.from, elapsed);
+  return { current, previous: { from: previous.from, to: sameDaysEnd < previous.to ? sameDaysEnd : previous.to } };
+}
+
+function fullPeriodWindows(
   period: InsightPeriod,
   today: string,
 ): { current: InsightWindow; previous: InsightWindow | null } {

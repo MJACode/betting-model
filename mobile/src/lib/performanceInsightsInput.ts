@@ -11,7 +11,7 @@
 import { decisionOdds } from './decisionPrice';
 import { etDate } from './format';
 import { sportDisplayName } from './liveSports';
-import { bookName, marketClassForModel, pickTitleText, storedQuoteBook } from './markets';
+import { LINE_SHOP_BOOKS, bookLabel, bookName, marketClassForModel, pickTitleText, storedQuoteBook } from './markets';
 import { isPropModel } from './modelMeta';
 import type { InsightBet, InsightStatus } from './performanceInsights';
 import type { TrackedBetRow } from './trackedPerformance';
@@ -78,11 +78,27 @@ export function insightFromTracked(row: TrackedBetRow): InsightBet | null {
   };
 }
 
+/**
+ * A typed book in the name a tracked pick's book uses, so "DK", "draftkings"
+ * and "DraftKings" are one Book row. Matches a book's key, short label or full
+ * name, ignoring case; anything else stays as typed.
+ */
+export function canonicalBookName(typed: string | null | undefined): string | null {
+  const t = typed?.trim();
+  if (!t) return null;
+  const low = t.toLowerCase();
+  for (const key of LINE_SHOP_BOOKS) {
+    if (low === key.toLowerCase() || low === bookLabel(key).toLowerCase() || low === bookName(key).toLowerCase()) {
+      return bookName(key);
+    }
+  }
+  return t;
+}
+
 export function insightFromManual(b: ManualBet): InsightBet | null {
   const placed = new Date(b.placed_at);
   if (Number.isNaN(placed.getTime())) return null;
   const decided = b.result === 'won' || b.result === 'lost';
-  const book = b.book?.trim();
   return {
     key: `m:${b.id}`,
     date: etDate(placed),
@@ -94,7 +110,7 @@ export function insightFromManual(b: ManualBet): InsightBet | null {
     odds: b.odds_american,
     sport: null,
     betType: null,
-    book: book ? book : null,
+    book: canonicalBookName(b.book),
     modelId: null,
     clvPct: null,
     source: 'logged',

@@ -39,6 +39,9 @@ export function useTrackedBetResults() {
   const [livePicks, setLivePicks] = useState<Pick[]>([]);
   const [finalGameIds, setFinalGameIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  // True once a fetch has finished. Before that, tracked ids with no rows are
+  // "still loading", not "nothing tracked" (the Insights card's empty state).
+  const [fetchedOnce, setFetchedOnce] = useState(false);
 
   const liveGameIds = useMemo(
     () => Array.from(new Set(liveSnapshots.map((s) => s.game_id))),
@@ -67,6 +70,7 @@ export function useTrackedBetResults() {
       console.warn('[trackedBetResults] fetch failed', err);
     } finally {
       setLoading(false);
+      setFetchedOnce(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ids, liveGameKey]);
@@ -117,6 +121,8 @@ export function useTrackedBetResults() {
     /** The same bets scored at "My stakes", for the Insights card. */
     myStakeRows,
     loading,
+    /** Tracked bets exist but their rows have not arrived yet. */
+    pending: loading || (!fetchedOnce && ids.length + liveSnapshots.length > 0),
     refresh: load,
     /** Untrack from a pick (branches live vs pick_id). */
     untrackPick,

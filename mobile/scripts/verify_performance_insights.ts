@@ -52,7 +52,11 @@ function bet(o: Partial<InsightBet>): InsightBet {
   const sat = periodWindows('week', '2026-11-21');
   check('week of a Saturday starts Monday', sat.current.from === '2026-11-16', sat.current);
   check('week of a Saturday ends Sunday', sat.current.to === '2026-11-22', sat.current);
-  check('last week is the Monday–Sunday before', sat.previous?.from === '2026-11-09' && sat.previous?.to === '2026-11-15', sat.previous);
+  check('a Saturday compares with last Monday to Saturday', sat.previous?.from === '2026-11-09' && sat.previous?.to === '2026-11-14', sat.previous);
+  const wed = periodWindows('week', '2026-11-18');
+  check('a Wednesday compares with last Monday to Wednesday', wed.previous?.from === '2026-11-09' && wed.previous?.to === '2026-11-11', wed.previous);
+  const endSun = periodWindows('week', '2026-11-22');
+  check('a Sunday compares with the whole of last week', endSun.previous?.to === '2026-11-15', endSun.previous);
   const sun = periodWindows('week', '2026-11-22');
   check('a Sunday is the end of its week, not the start of the next', sun.current.from === '2026-11-16', sun.current);
   const mon = periodWindows('week', '2026-11-23');
@@ -60,7 +64,11 @@ function bet(o: Partial<InsightBet>): InsightBet {
   const leap = periodWindows('month', '2028-02-10');
   check('a leap February runs to the 29th', leap.current.from === '2028-02-01' && leap.current.to === '2028-02-29', leap.current);
   const jan = periodWindows('month', '2026-01-05');
-  check('January compares with last December', jan.previous?.from === '2025-12-01' && jan.previous?.to === '2025-12-31', jan.previous);
+  check('January 5th compares with December 1st to 5th', jan.previous?.from === '2025-12-01' && jan.previous?.to === '2025-12-05', jan.previous);
+  const mar31 = periodWindows('month', '2026-03-31');
+  check('March 31st compares with all of February, not into March', mar31.previous?.to === '2026-02-28', mar31.previous);
+  const yrPrev = periodWindows('year', '2026-02-01');
+  check('the year so far compares with the same days last year', yrPrev.previous?.from === '2025-01-01' && yrPrev.previous?.to === '2025-02-01', yrPrev.previous);
   const yr = periodWindows('year', '2026-11-21');
   check('a year is the calendar year', yr.current.from === '2026-01-01' && yr.current.to === '2026-12-31', yr.current);
   const day = periodWindows('day', '2026-03-01');
@@ -88,20 +96,21 @@ function bet(o: Partial<InsightBet>): InsightBet {
     bet({ date: '2026-11-16', status: 'won', profit: 250, title: 'Big dog' }),
     bet({ date: '2026-11-18', status: 'lost', profit: -300, risked: 300, title: 'Heavy fav' }),
     bet({ date: '2026-11-21', status: 'lost', profit: -100, risked: 100 }),
-    bet({ date: '2026-11-15', status: 'won', profit: 500, title: 'Last week' }),
+    bet({ date: '2026-11-14', status: 'won', profit: 500, title: 'Last week' }),
+    bet({ date: '2026-11-15', status: 'lost', profit: -900, risked: 900, title: 'Last Sunday' }),
   ];
   const w = periodInsights(bets, 'week', '2026-11-21');
   check('the week counts only its own bets', w.record.bets === 3, w.record);
   check('best bet is the biggest win in the window', w.best?.title === 'Big dog', w.best);
   check('toughest loss is the biggest loss in the window', w.worst?.title === 'Heavy fav', w.worst);
-  check('last week is the comparison', w.previous?.net === 500, w.previous);
+  check('the comparison is the same days last week', w.previous?.net === 500, w.previous);
   check('the units line runs by day', JSON.stringify(w.curve) === JSON.stringify([
     { date: '2026-11-16', cum: 250 },
     { date: '2026-11-18', cum: -50 },
     { date: '2026-11-21', cum: -150 },
   ]), w.curve);
   const all = periodInsights(bets, 'all', '2026-11-21');
-  check('all time has every bet and no comparison', all.record.bets === 4 && all.previous === null, all);
+  check('all time has every bet and no comparison', all.record.bets === 5 && all.previous === null, all);
 }
 
 // ── Groups: every group shown, best first; a bet with no value sits out ─────

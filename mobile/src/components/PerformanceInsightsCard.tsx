@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Dimensions, StyleSheet, Text, View } from 'react-native';
 
 import { EquityCurve } from '@/components/EquityCurve';
+import { SegmentTabs } from '@/components/GroupTabs';
+import { SkeletonList } from '@/components/Skeleton';
 import { unitsSpeech } from '@/lib/a11y';
 import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatFlatUnits, formatPctSigned, formatSigned, todayET } from '@/lib/format';
 import {
@@ -15,7 +17,7 @@ import {
   type InsightWindow,
   type ModelDayRecord,
 } from '@/lib/performanceInsights';
-import { colors, font, pnlColor, radii, spacing, card } from '@/lib/theme';
+import { colors, font, pnlColor, spacing, card } from '@/lib/theme';
 
 /**
  * The Performance tab's Insights card (Matt, 2026-11-21): a recap for today,
@@ -28,19 +30,27 @@ import { colors, font, pnlColor, radii, spacing, card } from '@/lib/theme';
 
 const PERIODS: { value: InsightPeriod; label: string; noun: string; prev: string }[] = [
   { value: 'day', label: 'Today', noun: 'today', prev: 'yesterday' },
-  { value: 'week', label: 'Week', noun: 'this week', prev: 'last week' },
-  { value: 'month', label: 'Month', noun: 'this month', prev: 'last month' },
-  { value: 'year', label: 'Year', noun: 'this year', prev: 'last year' },
+  // The comparison is the same days of the last period (lib/performanceInsights
+  // periodWindows), so an unfinished week does not read as a drop.
+  { value: 'week', label: 'Week', noun: 'this week', prev: 'the same days last week' },
+  { value: 'month', label: 'Month', noun: 'this month', prev: 'the same days last month' },
+  { value: 'year', label: 'Year', noun: 'this year', prev: 'the same days last year' },
   { value: 'all', label: 'All', noun: 'all time', prev: '' },
 ];
 
 type Split = 'sport' | 'type' | 'book' | 'price';
+/** Shorter than the Record tab's main curve (EquityCurve's 212 default): one card among several. */
+const INSIGHTS_CHART_HEIGHT = 150;
+
+const PERIOD_KEYS = PERIODS.map((p) => p.value);
+
 const SPLITS: { value: Split; label: string }[] = [
   { value: 'sport', label: 'Sport' },
   { value: 'type', label: 'Bet type' },
   { value: 'book', label: 'Book' },
   { value: 'price', label: 'Price' },
 ];
+const SPLIT_KEYS = SPLITS.map((s) => s.value);
 
 function shortDate(d: string, opts: Intl.DateTimeFormatOptions): string {
   const [y, m, day] = d.split('-').map(Number);
@@ -77,10 +87,13 @@ function roiText(roi: number | null): string | null {
 
 export function PerformanceInsightsCard({
   bets,
+  loading,
   modelDaily,
   modelDailyReady,
 }: {
   bets: InsightBet[];
+  /** Tracked picks still loading with nothing in hand: never say "none" yet. */
+  loading: boolean;
   modelDaily: ModelDayRecord[];
   modelDailyReady: boolean;
 }) {
@@ -101,6 +114,11 @@ export function PerformanceInsightsCard({
   const groups: InsightGroup[] =
     split === 'sport' ? ins.bySport : split === 'type' ? ins.byBetType : split === 'book' ? ins.byBook : ins.byPrice;
   const chartWidth = Dimensions.get('window').width - spacing.lg * 4;
+  const hasLoggedInWindow = ins.record.bets > 0 && bets.some(
+    (b) => b.source === 'logged' && b.status !== 'open' &&
+      (ins.window.from == null || b.date >= ins.window.from) &&
+      (ins.window.to == null || b.date <= ins.window.to),
+  );
 
   const header = (
     <View style={styles.header}>
@@ -110,6 +128,15 @@ export function PerformanceInsightsCard({
       <Text style={styles.window}>{windowLabel(period, ins.window)}</Text>
     </View>
   );
+
+  if (bets.length === 0 && loading) {
+    return (
+      <View style={styles.card}>
+        {header}
+        <SkeletonList label="your insights" rows={2} />
+      </View>
+    );
+  }
 
   if (bets.length === 0) {
     return (
@@ -131,24 +158,15 @@ export function PerformanceInsightsCard({
     <View style={styles.card}>
       {header}
 
-      <View style={styles.pills} accessibilityRole="radiogroup">
-        {PERIODS.map((p) => {
-          const active = p.value === period;
-          return (
-            <Pressable
-              key={p.value}
-              onPress={() => setPeriod(p.value)}
-              // ~28pt pill: 8 + 28 + 8 = 44pt, as the stake-basis pills.
-              hitSlop={{ top: 8, bottom: 8 }}
-              accessibilityRole="radio"
-              accessibilityState={{ checked: active, selected: active }}
-              accessibilityLabel={`Recap for ${p.noun}`}
-              style={[styles.pill, active && styles.pillActive]}
-            >
-              <Text style={[styles.pillText, active && styles.pillTextActive]}>{p.label}</Text>
-            </Pressable>
-          );
-        })}
+      <View style={styles.tabs}>
+        <SegmentTabs
+          items={PERIOD_KEYS}
+          active={period}
+          onChange={setPeriod}
+          labelFor={(p) => PERIODS.find((x) => x.value === p)?.label ?? p}
+          accessibilityLabelFor={(p) => `Recap for ${PERIODS.find((x) => x.value === p)?.noun ?? p}`}
+          fit
+        />
       </View>
 
       {r.bets === 0 ? (
@@ -190,7 +208,7 @@ export function PerformanceInsightsCard({
                 points={ins.curve.map((p) => ({ date: p.date, cumUnits: p.cum / FLAT_UNIT }))}
                 seriesId={`insights-${period}`}
                 width={chartWidth}
-                height={150}
+                height={INSIGHTS_CHART_HEIGHT}
                 endUnits={r.net / FLAT_UNIT}
               />
             </View>
@@ -206,23 +224,16 @@ export function PerformanceInsightsCard({
           {decided > 0 ? (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Where your units come from</Text>
-              <View style={styles.pills} accessibilityRole="radiogroup">
-                {SPLITS.map((s) => {
-                  const active = s.value === split;
-                  return (
-                    <Pressable
-                      key={s.value}
-                      onPress={() => setSplit(s.value)}
-                      hitSlop={{ top: 8, bottom: 8 }}
-                      accessibilityRole="radio"
-                      accessibilityState={{ checked: active, selected: active }}
-                      accessibilityLabel={`Group by ${s.label.toLowerCase()}`}
-                      style={[styles.pill, active && styles.pillActive]}
-                    >
-                      <Text style={[styles.pillText, active && styles.pillTextActive]}>{s.label}</Text>
-                    </Pressable>
-                  );
-                })}
+              <View style={styles.tabs}>
+                <SegmentTabs
+                  items={SPLIT_KEYS}
+                  active={split}
+                  onChange={setSplit}
+                  labelFor={(k) => SPLITS.find((x) => x.value === k)?.label ?? k}
+                  accessibilityLabelFor={(k) => `Group by ${(SPLITS.find((x) => x.value === k)?.label ?? k).toLowerCase()}`}
+                  second
+                  fit
+                />
               </View>
               {groups.length === 0 ? (
                 <Text style={styles.caption}>
@@ -231,7 +242,7 @@ export function PerformanceInsightsCard({
               ) : (
                 groups.map((g) => <GroupRow key={g.label} g={g} />)
               )}
-              {split === 'sport' || split === 'type' ? (
+              {(split === 'sport' || split === 'type') && hasLoggedInWindow ? (
                 <Text style={styles.caption}>Tracked picks only: a logged bet doesn’t name its sport or market.</Text>
               ) : null}
             </View>
@@ -337,10 +348,10 @@ function VersusSection({ vs, noun }: { vs: NonNullable<ReturnType<typeof versusM
   let verdict: string | null = null;
   if (you != null && them != null) {
     const gap = Math.abs(you - them) * 100;
-    const pts = `${gap.toFixed(1)} ${gap.toFixed(1) === '1.0' ? 'point' : 'points'} of ROI`;
-    if (you > them) verdict = `Your picks are ahead of tailing every one by ${pts}.`;
-    else if (you < them) verdict = `Tailing every posted pick did ${pts} better.`;
-    else verdict = 'Level with tailing every posted pick.';
+    const pts = `${gap.toFixed(1)} ${gap.toFixed(1) === '1.0' ? 'point' : 'points'}`;
+    if (you > them) verdict = `Your ROI is ${pts} ahead of the models’ posted picks.`;
+    else if (you < them) verdict = `The models’ posted picks are ${pts} of ROI ahead of yours.`;
+    else verdict = 'Your ROI matches the models’ posted picks.';
   }
   const n = vs.models.length;
   return (
@@ -394,25 +405,10 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   window: { fontSize: font.size.footnote, color: colors.textTertiary, fontWeight: font.weight.semibold },
-  empty: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 18 },
-  pills: {
-    flexDirection: 'row',
-    backgroundColor: colors.bg,
-    borderRadius: radii.pill,
-    padding: 3,
-    marginBottom: spacing.sm,
-  },
-  pill: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 5,
-    borderRadius: radii.pill,
-  },
-  pillActive: { backgroundColor: colors.tint },
-  pillText: { fontSize: font.size.footnote, color: colors.textSecondary, fontWeight: font.weight.medium },
-  pillTextActive: { color: colors.textInverse, fontWeight: font.weight.semibold },
+  empty: { fontSize: font.size.footnote, color: colors.textSecondary },
+  tabs: { marginBottom: spacing.sm },
   hero: { fontSize: font.size.title1, fontWeight: font.weight.bold, marginTop: spacing.xs },
-  heroSub: { fontSize: font.size.callout, color: colors.textPrimary, fontWeight: font.weight.semibold, marginTop: 2 },
+  heroSub: { fontSize: font.size.callout, color: colors.textPrimary, fontWeight: font.weight.semibold, marginTop: spacing.xs },
   chart: { marginTop: spacing.sm },
   section: {
     marginTop: spacing.md,
@@ -426,8 +422,8 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: spacing.xs,
   },
-  body: { fontSize: font.size.callout, color: colors.textPrimary, marginTop: 2 },
-  caption: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: spacing.xs, lineHeight: 16 },
+  body: { fontSize: font.size.callout, color: colors.textPrimary, marginTop: spacing.xs },
+  caption: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: spacing.xs },
   row: {
     minHeight: 44,
     flexDirection: 'row',
@@ -437,6 +433,6 @@ const styles = StyleSheet.create({
   rowMain: { flex: 1 },
   rowLabel: { fontSize: font.size.caption, color: colors.textTertiary },
   rowTitle: { fontSize: font.size.body, color: colors.textPrimary, fontWeight: font.weight.medium },
-  rowSub: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
+  rowSub: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: spacing.xs },
   rowRight: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.md },
 });

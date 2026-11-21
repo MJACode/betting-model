@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fetchModelDailyRecordFull } from '@/lib/queries';
 import type { ModelDayRecord } from '@/lib/performanceInsights';
@@ -6,29 +6,39 @@ import type { ModelDayRecord } from '@/lib/performanceInsights';
 export type ModelDailyStatus = 'loading' | 'ready' | 'error';
 
 /**
- * Every model's posted record by day, read once per mount, for the Insights
- * card's "you vs the models you follow". A failed read hides that one section
- * (status 'error'); the rest of the card never waits on it. A plain useEffect,
- * never useFocusEffect (.claude/rules/frontend.md).
+ * Every model's posted record by day, for the Insights card's "you vs the
+ * models you follow". Read on mount and again on `reload()` (the screen calls
+ * it on pull-to-refresh and on focus), so the models' side settles as games
+ * do, like the member's own. A failed first read hides that one section
+ * (status 'error'); a failed reload keeps the last rows. A plain useEffect,
+ * never useFocusEffect (.claude/rules/frontend.md): focus belongs to the screen.
  */
-export function useModelDailyRecordFull(): { rows: ModelDayRecord[]; status: ModelDailyStatus } {
+export function useModelDailyRecordFull(): {
+  rows: ModelDayRecord[];
+  status: ModelDailyStatus;
+  reload: () => void;
+} {
   const [state, setState] = useState<{ rows: ModelDayRecord[]; status: ModelDailyStatus }>({
     rows: [],
     status: 'loading',
   });
-  useEffect(() => {
-    let mounted = true;
+  const mounted = useRef(true);
+  const reload = useCallback(() => {
     fetchModelDailyRecordFull('2000-01-01')
       .then((rows) => {
-        if (mounted) setState({ rows, status: 'ready' });
+        if (mounted.current) setState({ rows, status: 'ready' });
       })
       .catch((err: unknown) => {
-        console.warn('[modelDailyRecordFull] read failed; vs-models section hidden', err);
-        if (mounted) setState({ rows: [], status: 'error' });
+        console.warn('[modelDailyRecordFull] read failed', err);
+        if (mounted.current) setState((s) => (s.status === 'ready' ? s : { rows: [], status: 'error' }));
       });
-    return () => {
-      mounted = false;
-    };
   }, []);
-  return state;
+  useEffect(() => {
+    mounted.current = true;
+    reload();
+    return () => {
+      mounted.current = false;
+    };
+  }, [reload]);
+  return { ...state, reload };
 }

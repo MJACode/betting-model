@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { NotificationBell } from '@/components/NotificationBell';
 import { SettingsButton } from '@/components/SettingsButton';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSportsbookSync } from '@/hooks/useSportsbookSync';
 import { ErrorBanner } from '@/components/ErrorState';
 import { useManualBets, type ManualBet, type ManualBetResult } from '@/hooks/useManualBets';
@@ -66,6 +66,20 @@ export function PerformanceScreen() {
   };
 
   const modelDaily = useModelDailyRecordFull();
+  // Re-read the models' side when the tab comes back into view, so "you vs
+  // the models" compares the same moment as the tracked picks. The screen,
+  // not the hook, owns focus (.claude/rules/frontend.md).
+  const reloadModelDaily = modelDaily.reload;
+  const firstFocus = React.useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (firstFocus.current) {
+        firstFocus.current = false;
+        return;
+      }
+      reloadModelDaily();
+    }, [reloadModelDaily]),
+  );
   // Scored at "My stakes" and with the logged bets folded in (Matt, 2026-11-21).
   const insightBets = useMemo(
     () => buildInsightBets(tracked.myStakeRows, manual.bets),
@@ -74,6 +88,7 @@ export function PerformanceScreen() {
   const insightsCard = (
     <PerformanceInsightsCard
       bets={insightBets}
+      loading={(tracked.pending || !manual.ready) && insightBets.length === 0}
       modelDaily={modelDaily.rows}
       modelDailyReady={modelDaily.status === 'ready'}
     />
@@ -200,6 +215,7 @@ export function PerformanceScreen() {
             onRefresh={() => {
               void refresh(true);
               void tracked.refresh();
+              modelDaily.reload();
             }}
           />
         }
