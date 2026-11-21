@@ -343,7 +343,8 @@ def test_aborts_render_nothing_and_every_catch_skips_them():
     assert es.count("if (silent) return null;") == 2
     unguarded = []
     for p in list(SRC.rglob("*.ts")) + list(SRC.rglob("*.tsx")):
-        rel = str(p.relative_to(MOBILE))
+        # as_posix: on Windows str() gives src\lib\..., which "/lib/" never matched.
+        rel = p.relative_to(MOBILE).as_posix()
         if "/lib/" in rel or "SignInScreen" in rel:
             continue
         for i, line in enumerate(_read(p).splitlines(), 1):
