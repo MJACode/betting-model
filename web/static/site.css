@@ -741,3 +741,142 @@ a {
     min-height: 64px;
   }
 }
+
+/* AI assistant consent page (/oauth/consent) */
+.consent-main {
+  background: var(--bg);
+  padding: 48px 0 72px;
+}
+.consent-wrap {
+  max-width: 520px;
+}
+.consent-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 28px 24px;
+  box-shadow: var(--shadow);
+}
+.consent-card h1 {
+  font-size: 1.5rem;
+  line-height: 1.25;
+  margin: 0 0 12px;
+  color: var(--ink);
+}
+.consent-eyebrow {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--caption);
+}
+.consent-muted {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+.consent-small {
+  color: var(--muted);
+  font-size: 0.875rem;
+  margin: 16px 0 0;
+}
+.consent-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.consent-form label {
+  font-weight: 600;
+  color: var(--ink);
+}
+.consent-form input {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #c9ced6;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 1rem;
+}
+.consent-form input[aria-invalid="true"] {
+  border-color: var(--avoid);
+}
+.consent-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.consent-list li {
+  padding-left: 26px;
+  position: relative;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.consent-list li::before {
+  position: absolute;
+  left: 0;
+  font-weight: 700;
+}
+.consent-list li.yes::before {
+  content: "\2713";
+  color: var(--bet);
+}
+.consent-list li.no::before {
+  content: "\2715";
+  color: var(--caption);
+}
+.consent-check {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 0 0 16px;
+  line-height: 1.45;
+  color: var(--ink);
+  min-height: 44px;
+}
+.consent-check input {
+  width: 22px;
+  height: 22px;
+  margin: 1px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--navy);
+}
+.consent-primary,
+.consent-secondary {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.consent-primary {
+  border: none;
+  background: var(--navy);
+  color: #ffffff;
+  margin-bottom: 10px;
+}
+.consent-primary:disabled {
+  background: #9aa3b2;
+  cursor: not-allowed;
+}
+.consent-secondary {
+  border: 1px solid #c9ced6;
+  background: var(--card);
+  color: var(--ink);
+}
+.consent-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--ink);
+  text-decoration: underline;
+  cursor: pointer;
+  min-height: 44px;
+}

@@ -245,3 +245,25 @@ def test_app_review_sees_it_but_cannot_connect(dsn):
     status = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
     assert status["can_view"] is True and status["preview_only"] is True
     assert status["eligible"] is False
+
+
+def test_stats_views_file_shape():
+    """mcp_stats_views: listed after the foundation, one DO block, read role only.
+
+    2026-11-21: its first draft skipped on obj_description('x'::regclass), which
+    raises 42P01 before the view exists, so the first worker pass would have
+    failed. The skip must go through to_regclass.
+    """
+    name = "mcp_stats_views_2026_11_21.sql"
+    assert name in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index("mcp_foundation_2026_11_21.sql") < ACTIVE_MIGRATIONS.index(name)
+    sql = (MIGRATIONS / name).read_text(encoding="utf-8")
+    body = "\n".join(ln for ln in sql.splitlines() if not ln.strip().startswith("--"))
+    assert body.strip().startswith("DO $views$") and body.strip().endswith("$views$;")
+    assert "'mcp_stats.player_games'::regclass" not in body
+    assert "obj_description(to_regclass('mcp_stats.player_games')" in body
+    assert "GRANT SELECT ON ALL TABLES IN SCHEMA mcp_stats TO mcp_reader" in body
+    import re
+    assert not re.search(r"GRANT[^;]*\b(anon|authenticated)\b", body)
+    for forbidden in ("source", "data_source", "bookmaker AS", "pick", "model"):
+        assert not re.search(r"\b" + forbidden + r"\b\s*(,|$| AS)", body.split("CREATE OR REPLACE VIEW mcp_stats.books")[1], re.M), forbidden
