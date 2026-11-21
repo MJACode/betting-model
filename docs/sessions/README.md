@@ -19,6 +19,9 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all crash fix: `selected` read before declared; use-before-declare guard over mobile/src (Matt) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all lists tracked picks again (Untracked only switch removed; board Tracked filter replaces it) (Matt) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Picks filter sheet: Tracked cut (All / Not tracked / Tracked) off the Track button (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant: alternate prop lines visible + `get_prop_board` slate tool (one call, price band) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Every settled bet counts: the under-10-bet "Too few to judge yet" greying/caption removed from every model record surface (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Website deploy fixed (Vercel root dir `web`), first live Claude connection, sign-in served from signalbase-ai.com only |

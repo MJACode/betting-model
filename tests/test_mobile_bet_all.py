@@ -90,19 +90,23 @@ def test_batch_tracking_keeps_every_pick():
 
 
 
-def test_untracked_only_switch_leaves_out_tracked_picks():
-    """Matt, 2026-11-21: an "Untracked only" switch, on by default, leaves
-    out picks already tracked with the Track button. Off, they come back,
-    marked "Tracking", like any other pick. It replaced the start-unticked
-    and re-tick logic, which is gone."""
+def test_bet_all_lists_tracked_picks_like_the_board():
+    """Matt, 2026-11-21: once the board gained its own Tracked filter, Bet
+    all shows the picks already tracked too. The sheet's "Untracked only"
+    switch is gone; tracked picks are listed and ticked, marked "Tracking",
+    and the board's "Not tracked" filter is how to leave them out."""
     sheet = _read(MOBILE / "src" / "components" / "BetAllSheet.tsx")
-    assert "const [untrackedOnly, setUntrackedOnly] = useState(true);" in sheet
-    assert "setUntrackedOnly(true);" in sheet  # every open starts on
-    assert "untrackedOnly ? allPicks.filter((p) => !isTracked(p.pick)) : allPicks" in sheet
-    assert 'accessibilityLabel="Untracked only"' in sheet
+    assert "const picks = allPicks;" in sheet
+    assert "untrackedOnly" not in sheet
+    assert 'accessibilityLabel="Untracked only"' not in sheet
+    assert "!isTracked(p.pick)" not in sheet
     assert ">Tracking</Text>" in sheet
-    # All tracked with the switch on: an empty state that turns it off.
-    assert "onAction={() => setUntrackedOnly(false)}" in sheet
-    # The re-tick machinery is removed.
+    # Every pick, tracked or not, starts ticked.
+    assert "setSelected(new Set(allPicks.map((p) => p.key)));" in sheet
+    # A ticked tracked pick is named above the button (UX review).
+    assert "you’re already tracking ${trackedTicked === 1 ? 'is' : 'are'} included" in sheet
+    # Send-step progress counts only legs placed in this run.
+    assert "step.legs.filter((l) => !trackedAtStart.has(l.key))" in sheet
+    # The re-tick machinery stays removed.
     assert "seenTracked" not in sheet
     assert "untrackedKeys" not in sheet
