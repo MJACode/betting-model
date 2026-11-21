@@ -544,7 +544,8 @@ with nobody signing in for days still skips those nights.
 
 ```bat
 :: Register (runs as you, only while you are logged on):
-schtasks /Create /TN "BettingModel\LocalMirror" /SC DAILY /ST 00:30 /RL LIMITED /F /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Users\micha\Documents\betting_local_copies\bin\local_mirror_run.ps1"
+:: (through bin\run_hidden.pyw, so no window opens: see "Every scheduled task starts windowless" below)
+schtasks /Create /TN "BettingModel\LocalMirror" /SC DAILY /ST 00:30 /RL LIMITED /F /TR "C:\Windows\pyw.exe C:\Users\micha\Documents\betting_local_copies\bin\run_hidden.pyw powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Users\micha\Documents\betting_local_copies\bin\local_mirror_run.ps1"
 
 :: The sign-in trigger was added in PowerShell, not by the line above:
 :: New-ScheduledTaskTrigger -AtLogOn -User MAHOME\micha, Delay PT2M, then
@@ -834,6 +835,55 @@ whose command line names the module**: each reader treats ANY other process
 naming it as a second copy, so a `cmd /c "... tennis_dk_probe ..."` wrapper
 makes the reader refuse to start. The launcher files avoid the name on purpose.
 Logs: `data\local\research\tennis_research\logs\{pinnacle,dk2}.{out,err}`.
+
+## Every scheduled task starts windowless (2026-11-21)
+
+The three tasks (`LocalMirror`, `DkLiveBoard`, `TennisFeeds`) start as
+`C:\Windows\pyw.exe C:\Users\micha\Documents\betting_local_copies\bin\run_hidden.pyw powershell.exe <the old arguments>`.
+mike asked why PowerShell windows kept appearing (*"yes, switch them"*).
+
+How the launcher works:
+
+- `run_hidden.pyw` (in the repo as `scripts/run_hidden.pyw`) runs under
+  `pythonw`, which has no window of its own.
+- It starts the command with no window, waits for it, and exits with the
+  command's exit code.
+- `pyw.exe` is the Python launcher in `C:\Windows`, so a Python upgrade does not
+  break the path.
+- Task Scheduler does not search the user's PATH. A bare `pythonw.exe` failed
+  with 0x80070002, "file not found".
+- The backup's refresh of `bin` copies only its own `.py` files, so it never
+  replaces or removes this one. Copy it there by hand after changing it.
+
+**Why.** Each task asked for `powershell.exe -WindowStyle Hidden`, but on this
+PC console programs open in Windows Terminal, and Windows Terminal ignores that
+flag. Each feed's window stayed open for its whole run. For the DraftKings feed
+that is up to 45 minutes after the last live game.
+
+Measured 2026-11-21, with throwaway tasks where noted:
+
+| Launch form | Visible window | Exit 7 reaches Task Scheduler |
+|---|---|---|
+| `powershell.exe -WindowStyle Hidden` (the old form) | yes: the DraftKings feed's window and the 11:22 tennis run's, each in the same second its task fired | yes |
+| `conhost.exe --headless powershell.exe ...` (used for about ten minutes) | no | **no, it reads 0**: the backup runner's failure code would have been lost |
+| `pyw.exe run_hidden.pyw powershell.exe ...` (now) | no | yes |
+
+The DraftKings task's own command line, run as a throwaway task while the feed
+held its lock, opened no window and stopped at the lock check with result 0,
+which is what a second start does.
+
+**One side effect.** Ending a task in Task Scheduler (or hitting its time
+limit) now stops only the launcher. The PowerShell runner and its child process
+keep running. In the old form the child (the feed's Python) already survived an
+End. Measured with a stand-in script and child.
+
+A second start still cannot double up: the DraftKings feed holds
+127.0.0.1:47232, the backup holds its lock file, and each tennis reader refuses
+while another copy runs. To stop a feed for real, end its `python.exe` and
+`powershell.exe` in Task Manager.
+
+To switch a task back, drop the launcher:
+`Set-ScheduledTask -TaskPath '\BettingModel\' -TaskName <name> -Action (New-ScheduledTaskAction -Execute powershell.exe -Argument '<the arguments after "powershell.exe">')`.
 
 ## Where everything on this PC lives (2026-11-16, CLAUDE.md §7)
 
