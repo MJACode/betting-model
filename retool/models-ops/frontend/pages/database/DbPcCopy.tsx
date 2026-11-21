@@ -246,9 +246,13 @@ export default function DbPcCopy({ data, loading, error, now = Date.now() }: Pro
   // usually rows that changed between the copy and its check (the next run
   // takes them), so it asks for a look rather than raising an alarm.
   const diffTone: StatTone = failed.length ? 'critical' : differing.length ? 'warning' : 'good'
+  // From 2026-11-22 differing_tables leaves out tables the run did not check, and a nightly diff does not check the two current-line caches.
+  const isDiff = latest.copy_kind === 'diff'
   const diffCaption = differing.length
-    ? `${differing.slice(0, 3).map(t => t.table.replace(/^public\./, '')).join(', ')}${differing.length > 3 ? ` and ${differing.length - 3} more` : ''}: row counts differ at the latest check`
-    : `All ${fmtCount(latest.local_tables)} tables matched Supabase at their latest check`
+    ? `${differing.slice(0, 3).map(t => t.table.replace(/^public\./, '')).join(', ')}${differing.length > 3 ? ` and ${differing.length - 3} more` : ''}: row counts differ at the latest check${isDiff ? ' (the two current-line caches are checked only by the monthly full)' : ''}`
+    : isDiff
+      ? 'Every table this nightly diff checked matched Supabase. The two current-line caches (latest_odds, latest_prop_odds) are checked only by the monthly full.'
+      : `All ${fmtCount(latest.local_tables)} tables matched Supabase at their latest check`
   const failedCaption = failed.length
     ? ` · ${failed.length} could not be copied in the last run: ${failed.slice(0, 2).map(t => t.replace(/^public\./, '')).join(', ')}${failed.length > 2 ? '…' : ''}`
     : ''
