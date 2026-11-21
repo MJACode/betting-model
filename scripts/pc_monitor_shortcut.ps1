@@ -22,8 +22,10 @@ if (-not (Test-Path $Pythonw)) {
     if (-not $found) { throw "pythonw.exe not found; pass -Pythonw <path>" }
     $Pythonw = $found.Source
 }
-& $Pythonw -c "import psutil, psycopg2, dotenv" 2>$null
-if ($LASTEXITCODE -ne 0) { throw "$Pythonw lacks psutil, psycopg2 or python-dotenv" }
+# pythonw does not make PowerShell wait, so ask python.exe in the same folder.
+$python = Join-Path (Split-Path $Pythonw) "python.exe"
+& $python -c "import psutil, psycopg2, dotenv" 2>$null
+if ($LASTEXITCODE -ne 0) { throw "$python lacks psutil, psycopg2 or python-dotenv" }
 
 if (-not (Test-Path (Join-Path $Feed "pc_monitor\__main__.py"))) {
     if (Test-Path $Feed) { git -C $Feed checkout -q --detach -f $Ref }
