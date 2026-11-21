@@ -66,7 +66,7 @@ function insideDeferredFunction(node: ts.Node, stmt: ts.Node): boolean {
   let n: ts.Node | undefined = node.parent;
   while (n && n !== stmt) {
     if (ts.isFunctionLike(n)) {
-      const p = n.parent;
+      const p: ts.Node | undefined = n.parent;
       // `const f = () => …`, `function f() {…}`, an object method, a JSX prop
       // handler (onPress={() => …}): defined here, called later.
       if (!p || !ts.isCallExpression(p) || p.expression === n) return true;

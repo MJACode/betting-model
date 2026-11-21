@@ -541,21 +541,18 @@ export function convictionFor(
 }
 
 /**
- * The conviction a pick publishes: its own `stake_units` (picks.stake_units,
- * units to win) when that is a finite number from 1 to 3, else the flat unit.
- *
- * Mirrors tracking/discord_notifier.pick_conviction. Coerced with Number()
- * because PostgREST can send a NUMERIC as a string, and Python's float()
- * reads one too; null, a blank, NaN, Infinity and anything outside 1..3 are
- * the flat 1u on both sides.
+ * The conviction a pick publishes: the flat unit, on every pick. Until
+ * 2026-11-21 a pick's own `stake_units` (1..3) overrode it; see the body.
  */
 export function pickConviction(
   serverKellyFraction: number | null | undefined,
-  stakeUnits?: number | null,
+  // Kept so every caller keeps one signature. Not a stake any more (below).
+  _stakeUnits?: number | null,
 ): number {
-  if (stakeUnits == null) return convictionFor(serverKellyFraction);
-  const u = Number(stakeUnits);
-  if (Number.isFinite(u) && u >= MIN_CONVICTION && u <= MAX_CONVICTION) return u;
+  // FLAT on every pick (Matt, 2026-11-21): the "SignalBase Record History"
+  // sheet is the source of truth and counts every graded posted pick at 1u to
+  // win. picks.stake_units stays on the row as what was written. Mirrors
+  // tracking/discord_notifier.pick_conviction and published_pick_stake.
   return convictionFor(serverKellyFraction);
 }
 

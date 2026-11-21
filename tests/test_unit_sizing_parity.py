@@ -97,7 +97,9 @@ def test_the_fixture_actually_covers_the_interesting_branches():
     # outside 1..3 fall back to flat. The fixture spans the price axis for
     # both.
     assert all(c["conviction"] == 1.0 for c in cases if "stake_units" not in c), "conviction is flat"
-    assert any(c.get("stake_units") == 2 and c["conviction"] == 2.0 for c in cases), "no 2u case"
+    # A stake_units of 2 is still in the fixture, and is the flat 1u since
+    # 2026-11-21 (Matt: the record sheet counts every pick at 1u to win).
+    assert any(c.get("stake_units") == 2 and c["conviction"] == 1.0 for c in cases), "no 2u-row case"
     assert any(c.get("stake_units") == 3 and c["capped"] for c in cases), "no capped 3u case"
     assert all(c["conviction"] == 1.0 for c in cases if c.get("stake_units") in (0.5, 4)),         "a stake outside 1..3 must be the flat unit"
     assert any(c["risk"] > c["win"] for c in cases), "no favourite case"

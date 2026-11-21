@@ -50,27 +50,31 @@ def _stake_sql(price, units) -> tuple[float, float]:
 
 
 @pytest.mark.parametrize("units", UNITS)
-def test_the_three_argument_stake_body_is_stake_for(units):
+def test_a_picks_stake_units_no_longer_sizes_it(units):
+    """Matt, 2026-11-21: flat 1u to win on every pick, as the record sheet
+    counts it. The 2026-11-06 body below is history; the live function is the
+    one record_matches_sheet_2026_11_21.sql writes, which calls the
+    one-argument stake and ignores units."""
     for price in PRICES:
-        want = stake_for(None, price, units)
-        risk, win = _stake_sql(price, units)
-        assert risk == pytest.approx(want.risk, abs=1e-9), (price, units)
-        assert win == pytest.approx(want.win, abs=1e-9), (price, units)
+        want = stake_for(None, price, None)
+        got = stake_for(None, price, units)
+        assert (got.risk, got.win) == (want.risk, want.win), (price, units)
         for result in ("WIN", "LOSS", "PUSH", "NO_ACTION", None):
             assert unit_profit(price, result, units) == pytest.approx(
                 want.win if result == "WIN" else -want.risk if result == "LOSS" else 0.0, abs=1e-9)
             assert unit_risked(price, result, units) == pytest.approx(
                 want.risk if result in ("WIN", "LOSS") else 0.0, abs=1e-9)
+    flat = (ROOT / "data" / "migrations" / "record_matches_sheet_2026_11_21.sql").read_text(encoding="utf-8")
+    assert "SELECT s.risk, s.win FROM public.published_pick_stake(price) s" in flat
 
 
-def test_a_stake_outside_one_to_three_is_the_flat_unit():
-    for u in (None, 0, 0.5, 3.01, 4, "x", float("nan")):
+def test_every_stake_is_the_flat_unit():
+    for u in (None, 0, 0.5, 2, 3, 3.01, 4, "x", float("nan")):
         assert pick_conviction(0.03, u) == 1.0, u
-    assert pick_conviction(0.03, 2) == 2.0 and pick_conviction(0.03, 3) == 3.0
-    # 2u to win at -110 lays 2.2u; at -200 the 3u cap binds and the win drops to 1.5u
-    assert (round(stake_for(None, -110, 2).risk, 6), stake_for(None, -110, 2).win) == (2.2, 2.0)
-    s = stake_for(None, -200, 2)
-    assert (s.risk, s.win, s.capped) == (3.0, 1.5, True)
+    s = stake_for(None, -110, 2)
+    assert (round(s.risk, 6), s.win) == (1.1, 1.0)
+    s = stake_for(None, -400, 2)
+    assert (s.risk, s.win, s.capped) == (3.0, 0.75, True)
 
 
 def test_the_two_argument_functions_are_unchanged():
@@ -269,14 +273,15 @@ def test_the_audit_trigger_copies_the_stake_into_picks_log(dsn):
     raw.close()
 
 
-def test_a_two_unit_pick_posts_its_stake_and_why():
+def test_a_row_written_at_two_units_posts_the_flat_unit():
+    """A row the 2026-11-06 sizing wrote at 2u posts, and counts, at 1u since
+    2026-11-21 (Matt), and does not explain a stake it no longer has."""
     from tracking.discord_notifier import _signal_field
     base = {"label": "Duke @ Kansas — First Half Under 69.5", "sport": "NCAAB", "kelly": 0.02,
             "dk_odds": -110, "decision_odds": -110, "decision_book": "fanduel",
             "decision_odds_raw": -110, "best_book": "fanduel", "best_odds": -110}
     two = _signal_field({**base, "stake_units": 2,
                          "stake_reason": "Two models agree: NCAAB Totals also bet Kansas vs Duke Under 140.5"})
-    assert "**2.2u to win 2u**" in two["value"]
-    assert two["value"].endswith("Two models agree: NCAAB Totals also bet Kansas vs Duke Under 140.5")
+    assert "**1.1u to win 1u**" in two["value"] and "agree" not in two["value"]
     one = _signal_field({**base, "stake_units": None, "stake_reason": None})
     assert "**1.1u to win 1u**" in one["value"] and "agree" not in one["value"]
