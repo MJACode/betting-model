@@ -158,7 +158,7 @@ const TOOLS = [
   {
     name: "get_best_price",
     title: "Best prop price",
-    description: "Best over and under price for a player's prop at the major US sportsbooks, for today's and upcoming games.",
+    description: "Best over and under price for a player's prop at the major US sportsbooks, for today's and upcoming games. With a line the books don't list, returns the nearest listed lines and says so.",
     inputSchema: {
       type: "object", additionalProperties: false, required: ["player_id", "stat"],
       properties: { player_id: playerIdProp, stat: statProp, line: { type: "number", minimum: 0, maximum: 1000 } },
@@ -464,8 +464,7 @@ async function runTool(name: string, a: Record<string, unknown>, user: string): 
             from mcp_stats.prop_prices pp join mcp_stats.games g on g.game_id = pp.game_id
            where pp.sport = ${p.sport} and pp.market = ${mk.market} and g.game_date >= ${today}
              and lower(pp.player_name) = lower(${pl.player_name})
-             and (${line}::numeric is null or pp.line = ${line}::numeric)
-           order by g.starts_at nulls last, pp.line limit 60`;
+           order by g.starts_at nulls last, pp.line limit 120`;
       });
       if (!rows.length) throw new ToolError("not_found");
       // Best over and best under per line, for the earliest game listed.
@@ -479,9 +478,22 @@ async function runTool(name: string, a: Record<string, unknown>, user: string): 
         if (r.under_price !== null && (!e.best_under || Number(r.under_price) > e.best_under.price)) e.best_under = { price: Number(r.under_price), book: r.book };
         byLine.set(L, e);
       }
-      const lines = [...byLine.values()].slice(0, 5);
+      // A line the books don't list is not "not found" (Matt, 2026-11-21): the
+      // asked-for line when listed, otherwise the listed lines nearest to it.
+      const all = [...byLine.values()];
+      const exact = line !== null && byLine.has(line);
+      const lines = line === null
+        ? all.slice(0, 5)
+        : exact
+          ? [byLine.get(line)!]
+          : all.sort((x, y) => Math.abs(x.line - line) - Math.abs(y.line - line) || x.line - y.line).slice(0, 3);
       return {
-        data: { player: first.player_name, stat, game: { away: first.away_team, home: first.home_team, starts_at: first.starts_at }, lines },
+        data: {
+          player: first.player_name, stat,
+          game: { away: first.away_team, home: first.home_team, starts_at: first.starts_at },
+          ...(line !== null ? { requested_line: line, requested_line_listed: exact } : {}),
+          lines,
+        },
         rows: lines.length,
       };
     }
