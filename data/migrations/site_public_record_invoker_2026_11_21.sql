@@ -3,8 +3,8 @@
 --
 -- The hand file site_public_record_2026_11.sql created this view with
 -- security_invoker off. Supabase's security_definer_view lint flags that.
--- An invoker view that read v_public_track_record itself is what refused
--- anon after step A (42501 on v_discord_published, about 26 minutes).
+-- An invoker view that read the published record view itself is what
+-- refused anon after step A (42501, about 26 minutes).
 -- The function is the read. This file only changes the view option and
 -- keeps the same ten columns.
 --
