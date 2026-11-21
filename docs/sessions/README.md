@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, site_public_record is security_invoker; anon still reads the website record through site_public_record_rows |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant (MCP): Supabase OAuth server and dynamic registration on, mockups (7 screens) approved, Terms §19 and Privacy lines drafted |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, Picks: All segment removed (Matt); Signals default, empty state carries the scored count and refresh times, multi-pick line-moved push opens the app |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, an all-push closing-line set reads "all N matched the close", not "0 measured, N push" (Discord, X, the app): every EuroLeague bet of 11-19 had been measured |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, NBA first basket graded at real prices (50,698 credits of history): nothing passes; the blend +7.5% / +9.5% fails only the interval |
