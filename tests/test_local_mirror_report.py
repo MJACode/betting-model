@@ -372,6 +372,101 @@ class _Conn:
         pass
 
 
+def test_a_table_the_copy_left_as_it_is_is_not_listed_from_an_older_check(copy_root):
+    """2026-11-21: a diff leaves the two latest-line caches as they are, so
+    their manifests keep the last full's verdict. latest_prop_odds changed
+    while the 11-20 full copied it, and every nightly row to Dec 1 would have
+    listed it as differing. The run that checked it still lists it."""
+    state_path = copy_root / "supabase_mirror" / "STATE.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    _write(state_path, {**state, "kind": "diff", "skipped_tables": ["public.odds"]})
+    assert json.loads(_row(copy_root)["differing_tables"]) == []
+    _write(state_path, {**state, "kind": "full", "skipped_tables": []})
+    assert [d["table"] for d in json.loads(_row(copy_root)["differing_tables"])] == ["public.odds"]
+
+
+class _Cur:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def execute(self, sql, params=None):
+        self.conn.statements.append(sql)
+        self.last = sql
+
+    def fetchone(self):
+        if _asks_for_copy_run(self.last):
+            return self.conn.recorded
+        return (99,)
+
+    def close(self):
+        pass
+
+
+def _asks_for_copy_run(sql: str) -> bool:
+    return sql.startswith("SELECT") and "copy_run_id" in sql
+
+
+def _inserts(statements: list[str]) -> int:
+    return sum(sql.startswith("INSERT INTO public.pc_copy_snapshots") for sql in statements)
+
+
+class _RecordingConn(_Conn):
+    def __init__(self, recorded):
+        self.recorded, self.statements = recorded, []
+
+    def cursor(self):
+        return _Cur(self)
+
+    def commit(self):
+        self.statements.append("COMMIT")
+
+    def rollback(self):
+        self.statements.append("ROLLBACK")
+
+
+def test_catch_up_writes_nothing_for_a_copy_a_report_by_hand_already_recorded(
+        copy_root, tmp_path, monkeypatch, capsys):
+    """2026-11-21: the 11-20 full was recorded by hand (row 10, its own stamp,
+    source manual), and the next pass's catch-up recorded the same copy run
+    again (row 11). ON CONFLICT on source and pass id cannot see that."""
+    _logs(copy_root, "20261120T194436Z")
+    _write(copy_root / "supabase_mirror" / "STATE.json", {
+        "run_started_at": "2026-11-20T19:44:38+00:00", "run_id": "20261120T194438Z",
+        "run_finished_at": "2026-11-20T23:30:08+00:00", "tables": 4, "kind": "full",
+        "failed_tables": [], "mismatched_tables": [], "rows_pulled": 16871400})
+    env = tmp_path / "x.env"
+    env.write_text("DATABASE_URL=postgresql://u@h/db\n", encoding="utf-8")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    argv = ["--root", str(copy_root), "--env-file", str(env), "--catch-up", "--before", "20261121T053003Z"]
+
+    recorded = _RecordingConn(recorded=(10,))
+    monkeypatch.setattr(rep, "connect", lambda url: recorded)
+    assert rep.main(argv) == 0
+    assert _inserts(recorded.statements) == 0, recorded.statements
+    assert any(_asks_for_copy_run(sql) for sql in recorded.statements)
+    assert "copy run 20261120T194438Z, already has a row" in capsys.readouterr().out
+
+    fresh = _RecordingConn(recorded=None)
+    monkeypatch.setattr(rep, "connect", lambda url: fresh)
+    assert rep.main(argv) == 0
+    asked = next(i for i, sql in enumerate(fresh.statements) if _asks_for_copy_run(sql))
+    assert _inserts(fresh.statements[asked:]) == 1
+    assert "wrote pc_copy_snapshots row 99" in capsys.readouterr().out
+
+
+def test_a_report_by_hand_never_asks_whether_its_copy_run_has_a_row(copy_root, tmp_path, monkeypatch):
+    """A pass whose own copy did not finish reports the previous run again, as
+    the dashboard's copy_this_pass false: only the catch-up is guarded."""
+    env = tmp_path / "x.env"
+    env.write_text("DATABASE_URL=postgresql://u@h/db\n", encoding="utf-8")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    conn = _RecordingConn(recorded=(10,))
+    monkeypatch.setattr(rep, "connect", lambda url: conn)
+    assert rep.main(["--root", str(copy_root), "--env-file", str(env)]) == 0
+    assert not any(_asks_for_copy_run(sql) for sql in conn.statements)
+    assert _inserts(conn.statements) == 1
+
+
 def test_a_connection_error_is_tried_again_and_the_row_still_lands(monkeypatch):
     psycopg2 = pytest.importorskip("psycopg2")
     calls, pauses = [], []
@@ -383,7 +478,7 @@ def test_a_connection_error_is_tried_again_and_the_row_still_lands(monkeypatch):
         return _Conn()
 
     monkeypatch.setattr(rep, "connect", connect)
-    monkeypatch.setattr(rep, "insert_row", lambda conn, row: 7)
+    monkeypatch.setattr(rep, "insert_row", lambda conn, row, **kw: 7)
     assert rep.write_with_retries("postgresql://x", {}, sleep=pauses.append) == 7
     assert len(calls) == 3 and pauses == [30.0, 60.0]
 
@@ -404,7 +499,7 @@ def test_a_database_that_stays_away_fails_the_report_and_a_wrong_statement_is_no
     calls.clear()
     monkeypatch.setattr(rep, "connect", lambda url: calls.append(url) or _Conn())
 
-    def wrong(conn, row):
+    def wrong(conn, row, **kw):
         raise psycopg2.ProgrammingError("column \"nope\" does not exist")
 
     monkeypatch.setattr(rep, "insert_row", wrong)

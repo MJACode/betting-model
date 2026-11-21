@@ -29,6 +29,7 @@ import {
   bestLinePlan,
   bookCoverage,
   oneBookPlan,
+  quoteForBestLine,
   planTotals,
   type BetAllPick,
 } from '../src/lib/betAll';
@@ -78,12 +79,17 @@ check('one link is returned as is', combineSinglesLinks([DK_A]) === DK_A);
 function pk(id: number, label: string, kelly = 0.02, stakeUnits: number | null = null): Pick {
   return { pick_id: id, pick_label: label, kelly_fraction: kelly, stake_units: stakeUnits } as unknown as Pick;
 }
-function bp(id: number, label: string, quotes: [string, number, string | null][]): BetAllPick {
+function bp(
+  id: number,
+  label: string,
+  quotes: [string, number, string | null, number?][],
+  scored: number | null = null,
+): BetAllPick {
   return {
     key: String(id),
-    pick: pk(id, label),
+    pick: { ...pk(id, label), scored_line: scored } as unknown as Pick,
     label,
-    quotes: quotes.map(([bookmaker, price, link]) => ({ bookmaker, price, link })),
+    quotes: quotes.map(([bookmaker, price, link, line]) => ({ bookmaker, price, link, line: line ?? null })),
   };
 }
 const picks: BetAllPick[] = [
@@ -119,6 +125,79 @@ check('stake is sized at that book’s price',
 const t = planTotals(best);
 check('totals add every leg', t.legs === 4 && Math.abs(t.win - best.flatMap((s) => s.legs).reduce((n, l) => n + l.stake.win, 0)) < 1e-9);
 
+// ── a best price with no link, at the pick's own number ─────────────────
+// Measured 2026-11-18: Caesars alternate +10.5 had −140 and no selection id;
+// DraftKings had −142 and a link. The main Caesars number was +9.
+const DK_ALT = 'https://sportsbook.draftkings.com/?outcomes=0HC87302851P1050_1';
+const liu = bp(21, 'Long Island University +10.5', [
+  ['williamhill_us', -140, null, 10.5],
+  ['draftkings', -142, DK_ALT, 10.5],
+], 10.5);
+const liuPlan = bestLinePlan([liu], new Set(['21']));
+check('Caesars −140 with no link at +10.5 goes to DraftKings −142',
+  liuPlan.length === 1 && liuPlan[0]!.bookmaker === 'draftkings'
+  && liuPlan[0]!.legs[0]!.price === -142 && liuPlan[0]!.legs[0]!.link === DK_ALT
+  && liuPlan[0]!.links.length === 1 && liuPlan[0]!.unlinked.length === 0
+  && liuPlan[0]!.legs[0]!.atBest === false);
+const liuNan = bp(27, 'Long Island University +10.5', [
+  ['williamhill_us', -140, 'NaN', 10.5],
+  ['draftkings', -142, DK_ALT, 10.5],
+], 10.5);
+check('a stored "NaN" is no link, so the same pick still goes to DraftKings',
+  quoteForBestLine(liuNan).bookmaker === 'draftkings');
+check('one sportsbook still opens the book the member picked, link or not',
+  oneBookPlan([liu], new Set(['21']), 'williamhill_us').step?.unlinked.length === 1
+  && oneBookPlan([liu], new Set(['21']), 'draftkings').step?.links[0] === DK_ALT);
+
+const stayLinked = bp(22, 'Drake -3.5', [
+  ['fanduel', -105, FD_A, -3.5],
+  ['draftkings', -110, DK_A, -3.5],
+], -3.5);
+const stayPlan = bestLinePlan([stayLinked], new Set(['22']));
+check('a linked best book stays put',
+  stayPlan[0]!.bookmaker === 'fanduel' && stayPlan[0]!.legs[0]!.price === -105 && stayPlan[0]!.legs[0]!.atBest === true);
+
+const noLink = bp(23, 'Utah State -30.5', [
+  ['williamhill_us', 105, null, -30.5],
+  ['draftkings', 101, null, -30.5],
+], -30.5);
+const noLinkPlan = bestLinePlan([noLink], new Set(['23']));
+check('no linked book at that number stays unlinked on the best price',
+  noLinkPlan[0]!.bookmaker === 'williamhill_us' && noLinkPlan[0]!.legs[0]!.price === 105
+  && noLinkPlan[0]!.links.length === 0 && noLinkPlan[0]!.unlinked.length === 1);
+const nanOnly = bp(28, 'Utah State -30.5', [
+  ['williamhill_us', 105, 'NaN', -30.5],
+  ['draftkings', 101, 'NaN', -30.5],
+], -30.5);
+const nanPlan = bestLinePlan([nanOnly], new Set(['28']));
+check('a "NaN" link and no usable book stays unlinked on the best price',
+  nanPlan[0]!.bookmaker === 'williamhill_us' && nanPlan[0]!.links.length === 0 && nanPlan[0]!.unlinked.length === 1);
+
+const otherNumber = bp(24, 'Long Island University +10.5', [
+  ['fanduel', -105, FD_A, 9.5],
+  ['williamhill_us', -140, null, 10.5],
+], 10.5);
+const otherPlan = bestLinePlan([otherNumber], new Set(['24']));
+check('a linked book at a different number is not used',
+  otherPlan[0]!.bookmaker === 'williamhill_us' && otherPlan[0]!.legs[0]!.price === -140
+  && otherPlan[0]!.links.length === 0 && otherPlan[0]!.unlinked.length === 1);
+
+const rider = bp(25, 'Rider ML', [['williamhill_us', 145, CZR_A]]);
+const mixed = bestLinePlan([liu, stayLinked, noLink, otherNumber, rider], new Set(['21', '22', '23', '24', '25']));
+const mixedBy = new Map(mixed.map((s) => [s.bookmaker, s]));
+check('a mixed card keeps each pick on its own book',
+  mixed.map((s) => s.bookmaker).join(',') === 'williamhill_us,draftkings,fanduel'
+  && mixedBy.get('draftkings')!.legs.map((l) => l.key).join(',') === '21'
+  && mixedBy.get('fanduel')!.legs.map((l) => l.key).join(',') === '22'
+  && mixedBy.get('williamhill_us')!.legs.map((l) => l.key).join(',') === '23,24,25'
+  && mixedBy.get('williamhill_us')!.unlinked.map((l) => l.key).join(',') === '23,24'
+  && mixedBy.get('williamhill_us')!.links.length === 1
+  && mixedBy.get('draftkings')!.links[0] === DK_ALT);
+const covRouted = bookCoverage([liu], new Set(['21']), ['draftkings', 'williamhill_us']);
+check('coverage still counts the best price, not the book the link moved the pick to',
+  covRouted.find((c) => c.bookmaker === 'williamhill_us')?.atBest === 1
+  && covRouted.find((c) => c.bookmaker === 'draftkings')?.atBest === 0);
+
 // ── what never reaches Bet all ───────────────────────────────────────────
 // A live BET that clears its model's cut (ncaab_live_spread_h1, min edge 0)
 // and was posted, so only the live rule can keep it out.
@@ -143,6 +222,10 @@ check('the board shows the live call-out beside the button', home.includes('{BET
 check('the button keeps the "Bet all N" form at zero, never "See why" (Matt, 2026-11-15)',
   home.includes('{`Bet all ${betAll.picks.length}`}') && !home.includes("'See why'"));
 check('the sheet defaults to Best line', sheet.includes("useState<BetAllMode>('best')"));
+check('the best-line list uses the same book as the plan',
+  sheet.includes('quoteForBestLine(p)') && sheet.includes('quoteForBestLine(p).bookmaker'));
+check('one sportsbook still reads that book’s own quote',
+  sheet.includes('p.quotes.find((x) => x.bookmaker === chosenBook)'));
 check('the sheet never builds a parlay', !/parlay|combineBetslipLinks|useParlaySlip/i.test(sheet.replace(/not Parlay|Parlay\)|parlay\./g, '')));
 check('each pick has its own Placed tick that tracks or untracks it (Matt, 2026-11-20)',
   sheet.includes('if (isTracked(leg.pick)) onUntrack(leg.pick);') && sheet.includes('else onTrack([leg.pick]);'));

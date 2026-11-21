@@ -20,6 +20,19 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, premium-gate refusal (42501 + "premium access required" + the subscription hint) maps to the existing lock or empty state on Models, model detail, and BYOM; other errors stay errors |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, The first monthly full and nightly diff of the PC backup; the dashboard's duplicate entry, stale "differs" and false total line fixed (#1539) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all: an "Untracked only" switch (on by default) replaces the start-unticked logic |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant: request logs kept while the account is open (Privacy), App Review accounts see the AI Assistant but cannot connect (mcp_meter v2) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all: picks already tracked read "Tracking" and start unticked, so a placed bet is not sent to a book twice |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant (MCP) database gate: mcp_stats/mcp_meter schemas, NOLOGIN roles, entitlement (paid/comped/founder, not trial), per-call gate with question bursts and limits, terms acceptance, member status RPCs |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, scored-picks matview readers are discovered from the catalog and must be on the pre-request hook; the six-name list is unchanged |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, site_public_record is security_invoker; anon still reads the website record through site_public_record_rows |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant (MCP): Supabase OAuth server and dynamic registration on, mockups (7 screens) approved, Terms §19 and Privacy lines drafted |
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, the PC backup's chunk check read the whole NFL odds history table (Postgres misprices a range on a many-column key); each check now also bounds the first column and uses the index; today's full stopped and restarted (#1494) |
+| 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, the test suite no longer writes job check-in rows (#1456, PR #1462): guard failed on master (27 connections) and passes; full suite same 19 failures as master; no-address run 3:16, not 14 h; at least five tests still reach a database by other routes |
+| 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, PR #1466: master merged in; the Caesars reroute (`quoteForBestLine`) is the same code as d218ef1d |
+| 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, Bet all: a best price with no betslip link goes to the best linked book at the same number (Caesars alternate spreads have no selection id) |
+| 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, view migrations: byom_facts_schema, open_picks, and discord_publish_state skip after anon-lockdown step A instead of re-running DDL |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, Picks: All segment removed (Matt); Signals default, empty state carries the scored count and refresh times, multi-pick line-moved push opens the app |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, an all-push closing-line set reads "all N matched the close", not "0 measured, N push" (Discord, X, the app): every EuroLeague bet of 11-19 had been measured |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, NBA first basket graded at real prices (50,698 credits of history): nothing passes; the blend +7.5% / +9.5% fails only the interval |

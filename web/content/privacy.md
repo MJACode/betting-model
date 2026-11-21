@@ -13,6 +13,7 @@ This Privacy Policy explains how Signal Base LLC ("Signal Base LLC," "we," "us")
 - **Saved content:** custom models you build and save, bankroll and unit settings, bets you log manually, and tracked or saved picks and parlays. When you are signed in, these are saved to your account; otherwise some stay only on your device.
 - **Feedback and support messages** you send in the app.
 - **Discord linking:** if you link Discord, your Discord user ID, username, and membership/role status.
+- **AI assistant connection (optional, paid members):** if you connect an AI assistant such as Claude, ChatGPT or Grok, we record which assistant you connected, when you accepted the AI assistant terms (and which version), and a log of each request it makes to us: the tool used, its inputs, the time and the result size. We never receive the text of your conversations with the assistant.
 - **Sportsbook linking (optional):** if you connect a sportsbook through our provider SharpSports, they give us read-only data about your linked accounts and bet history (for example bets, stakes, odds, and results). We do not receive your sportsbook password.
 
 **Information collected automatically**
@@ -34,12 +35,12 @@ We share information only with:
 - **Service providers** who process it on our behalf: Supabase (database, authentication, hosting of backend functions); Railway (backend hosting and data processing); our website host; Expo (app updates and push notifications); Apple and Google (sign-in, app distribution, push, payments); RevenueCat (in-app subscriptions); Whop and Stripe (payments); Discord (community and membership roles); SharpSports (optional sportsbook linking); Sentry (Functional Software, Inc.) (crash and diagnostic reports).
 - **Legal and safety:** when required by law or to protect rights, safety, and the Service.
 - **Business transfers:** in a merger, acquisition, or sale of assets.
-- **With your consent.**
+- **With your consent,** including the AI assistant you choose to connect: the Stats data it requests, and your questions, go to that assistant's provider and are handled under its own terms and privacy policy.
 
 Sports data and odds we display come from third-party sources (for example ESPN, league data feeds, The Odds API, and others); we do not send them your personal information.
 
 ## 4. Retention
-We keep information as long as your account is active or as needed to provide the Service, then delete or de-identify it, unless law requires us to keep it longer. Specifically: crash and error logs are kept for 12 months; account data is kept until you delete your account, plus up to 30 days to complete deletion from our systems; feedback and support threads are kept until you delete them or your account.
+We keep information as long as your account is active or as needed to provide the Service, then delete or de-identify it, unless law requires us to keep it longer. Specifically: crash and error logs are kept for 12 months; account data is kept until you delete your account, plus up to 30 days to complete deletion from our systems; feedback and support threads are kept until you delete them or your account; AI assistant request logs are kept while your account is open, for security and to enforce usage limits.
 
 When you delete your account in the app, it is removed right away, and remaining server data and backups are purged within 30 days.
 

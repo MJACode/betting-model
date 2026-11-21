@@ -398,16 +398,29 @@ def keyset_where(info: TableInfo, lo: Sequence[str] | None,
     btree on (a, b) answers as an index range. Keys travel as their Postgres
     text form and are cast back with the column's own type, so a timestamp or
     numeric key round-trips exactly.
+
+    On a key of two or more columns each bound also gets a plain bound on the
+    first column (a >= x, a <= y). The row comparison already implies it, so the
+    rows that match do not change. What changes is the plan: Postgres prices a
+    row comparison by its first column alone and the two ends as unrelated, so
+    on 2026-11-20 it put a 50,000-row chunk of nfl_odds_history at 2.7 million
+    rows and read the whole 4.4 GB table to check it, 33 s a chunk, 104 times
+    in one night. With the plain bound it put the same chunk at 4,508 rows and
+    used the index.
     """
     cols = ", ".join(f"{ALIAS}.{quote_ident(c)}" for c in info.pk)
+    lead = f"{ALIAS}.{quote_ident(info.pk[0])}"
     parts: list[str] = []
     params: list[Any] = []
-    for bound, op in ((lo, ">"), (hi, "<=")):
+    for bound, op, lead_op in ((lo, ">", ">="), (hi, "<=", "<=")):
         if bound is None:
             continue
         ph = ", ".join(f"%s::{t}" for t in info.pk_types)
         parts.append(f"({cols}) {op} ({ph})")
         params.extend(bound)
+        if len(info.pk) > 1:
+            parts.append(f"{lead} {lead_op} %s::{info.pk_types[0]}")
+            params.append(bound[0])
     return (("WHERE " + " AND ".join(parts)) if parts else ""), params
 
 
@@ -1789,11 +1802,21 @@ def _fmt_table(results: list[TableResult]) -> str:
         server = "" if r.server_rows is None else f"{r.server_rows:,}"
         lines.append(f"{r.fq:<52} {r.mode:<11} {r.local_rows:>13,} {server:>14} {diff:>9} "
                      f"{r.tail_new:>10,}  {status}")
+    # 'diff' is taken over the tables this run counted in Supabase only. Over
+    # every table, a skipped cache's local rows read as missing from Supabase:
+    # the 11-21 diff's TOTAL said -13,237,404, which was latest_odds plus
+    # latest_prop_odds less 8 real rows (2026-11-21).
+    checked = [r for r in results if r.server_rows is not None]
     tot_l = sum(r.local_rows for r in results)
-    tot_s = sum(r.server_rows or 0 for r in results)
+    tot_s = sum(r.server_rows for r in checked)
+    tot_diff = tot_s - sum(r.local_rows for r in checked)
     lines.append("-" * len(head))
     lines.append(f"{'TOTAL (' + str(len(results)) + ' tables)':<52} {'':<11} {tot_l:>13,} {tot_s:>14,} "
-                 f"{tot_s - tot_l:>+9,} {sum(r.tail_new for r in results):>10,}")
+                 f"{tot_diff:>+9,} {sum(r.tail_new for r in results):>10,}")
+    if len(checked) < len(results):
+        lines.append(f"'supabase rows' and 'diff' cover the {len(checked)} table(s) counted in Supabase "
+                     f"this run; the other {len(results) - len(checked)} were not counted (a cache left "
+                     f"as it is, or a table that failed).")
     lines.append("'newer keys' = rows whose key is past the last copied key: written after "
                  "the copy, taken by the next run. Not counted in 'diff'.")
     return "\n".join(lines)

@@ -87,6 +87,12 @@ def test_the_skip_guard_refuses_every_write_verb():
     for verb in ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
         assert f"('{verb}')" in code
     assert "has_table_privilege(role.name, rel.name, verb.name)" in code
+    # Step A revoked anon SELECT. The skip stays on authenticated SELECT,
+    # the tables, the scan column, RLS, and the policies.
+    assert "has_table_privilege('anon', 'public.byom_game_facts', 'SELECT')" not in code
+    assert "has_table_privilege('anon', 'public.byom_prop_facts', 'SELECT')" not in code
+    assert "has_table_privilege('authenticated', 'public.byom_game_facts', 'SELECT')" in code
+    assert "has_table_privilege('authenticated', 'public.byom_prop_facts', 'SELECT')" in code
 
 
 def test_both_tables_are_on_the_anon_read_list():
@@ -173,6 +179,112 @@ def test_schema_applies_twice_on_scratch_postgres_and_anon_can_only_read():
         cur.execute(
             "SELECT ats_home_result, ml_home_result FROM public.byom_game_facts")
         assert cur.fetchone() == ("push", "tie")
+    finally:
+        if conn is not None:
+            conn.close()
+        cluster.stop()
+
+
+def _roles(cur) -> None:
+    cur.execute("""
+        DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+            CREATE ROLE anon NOLOGIN;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+            CREATE ROLE authenticated NOLOGIN;
+          END IF;
+        END $$
+    """)
+
+
+def _ddl_counter(cur) -> None:
+    cur.execute("""
+        CREATE TABLE ddl_seen (n integer NOT NULL);
+        INSERT INTO ddl_seen VALUES (0);
+        CREATE FUNCTION count_ddl() RETURNS event_trigger LANGUAGE plpgsql AS
+        $$ BEGIN UPDATE ddl_seen SET n = n + 1; END $$;
+        CREATE EVENT TRIGGER count_ddl ON ddl_command_start
+          EXECUTE FUNCTION count_ddl()
+    """)
+
+
+def _ddl_n(cur) -> int:
+    cur.execute("SELECT n FROM ddl_seen")
+    return cur.fetchone()[0]
+
+
+def _notices(conn) -> list[str]:
+    found = [n.strip() for n in conn.notices]
+    del conn.notices[:]
+    return found
+
+
+def test_step_a_skips_and_does_not_give_anon_the_grant_back():
+    """A fresh database runs the body. The next pass skips. After step A
+    (anon revoked, policies retargeted to authenticated) the pass skips
+    again and anon still cannot read the tables."""
+    psycopg2 = pytest.importorskip("psycopg2")
+    from tests.byom_scratch import ScratchPostgres, pg_bin
+
+    if pg_bin("initdb") is None:
+        pytest.skip("initdb is not installed")
+
+    cluster = ScratchPostgres()
+    conn = None
+    try:
+        conn = psycopg2.connect(cluster.start())
+        conn.autocommit = True
+        cur = conn.cursor()
+        _roles(cur)
+        cur.execute("SELECT to_regclass('public.byom_game_facts')")
+        assert cur.fetchone()[0] is None
+        _ddl_counter(cur)
+        cur.execute("CREATE TABLE ddl_probe (id integer)")
+        assert _ddl_n(cur) >= 1
+        cur.execute("DROP TABLE ddl_probe")
+        cur.execute("UPDATE ddl_seen SET n = 0")
+        cur.execute(SQL)
+        assert _ddl_n(cur) > 0, "the counter did not see this file's DDL"
+        cur.execute("""
+            SELECT has_table_privilege('anon', 'public.byom_game_facts', 'SELECT'),
+                   has_table_privilege('authenticated', 'public.byom_game_facts', 'SELECT')
+        """)
+        assert cur.fetchone() == (True, True)
+        cur.execute("UPDATE ddl_seen SET n = 0")
+        cur.execute(SQL)
+        assert _ddl_n(cur) == 0, "the second pass ran DDL"
+        assert any("already present - skipping" in n for n in _notices(conn))
+        # Step A: picks exists, anon cannot read it, anon loses the facts
+        # grants, and the policies are authenticated only.
+        cur.execute("""
+            CREATE TABLE public.picks (id integer);
+            REVOKE ALL ON public.picks FROM PUBLIC, anon, authenticated;
+            REVOKE ALL ON public.byom_game_facts FROM anon;
+            REVOKE ALL ON public.byom_prop_facts FROM anon;
+            ALTER POLICY "anon read byom_game_facts"
+              ON public.byom_game_facts TO authenticated;
+            ALTER POLICY "anon read byom_prop_facts"
+              ON public.byom_prop_facts TO authenticated;
+        """)
+        cur.execute("UPDATE ddl_seen SET n = 0")
+        _notices(conn)
+        cur.execute(SQL)
+        assert _ddl_n(cur) == 0, "step A sent the file back through DDL"
+        assert any("already present - skipping" in n for n in _notices(conn))
+        cur.execute("""
+            SELECT has_table_privilege('anon', 'public.byom_game_facts', 'SELECT'),
+                   has_table_privilege('anon', 'public.byom_prop_facts', 'SELECT'),
+                   has_table_privilege('anon', 'public.byom_game_facts', 'INSERT'),
+                   has_table_privilege('authenticated', 'public.byom_game_facts', 'SELECT'),
+                   has_table_privilege('authenticated', 'public.byom_prop_facts', 'SELECT'),
+                   (SELECT ARRAY(SELECT r::regrole::text
+                                    FROM unnest(p.polroles) r ORDER BY 1)
+                      FROM pg_policy p
+                     WHERE p.polrelid = 'public.byom_game_facts'::regclass
+                       AND p.polname = 'anon read byom_game_facts')
+        """)
+        assert cur.fetchone() == (False, False, False, True, True, ["authenticated"])
     finally:
         if conn is not None:
             conn.close()

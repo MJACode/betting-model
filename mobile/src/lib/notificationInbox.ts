@@ -40,15 +40,6 @@ export interface InboxRow {
 
 export type InboxSection = 'TODAY' | 'EARLIER';
 
-const PILL_LABEL: Record<string, string> = {
-  live_signals: 'Live pick',
-  new_bets: 'new signals',
-  dropped: 'line move',
-  line_change: 'line move',
-  feedback_reply: 'feedback',
-  test: 'test',
-};
-
 export function mutedSports(prefs: { sport: string; enabled: boolean }[]): Set<string> {
   return new Set(prefs.filter((p) => p.enabled === false).map((p) => p.sport));
 }
@@ -69,18 +60,6 @@ export function unreadRows(rows: InboxRow[]): InboxRow[] {
 
 export function unreadCount(rows: InboxRow[]): number {
   return unreadRows(rows).length;
-}
-
-/** "3 new · Live pick, new signals, line move". Null when nothing is unread. */
-export function unreadPill(rows: InboxRow[]): { count: number; summary: string } | null {
-  const unread = unreadRows(rows);
-  if (unread.length === 0) return null;
-  const labels: string[] = [];
-  for (const row of unread) {
-    const label = PILL_LABEL[row.kind] ?? 'alert';
-    if (!labels.includes(label)) labels.push(label);
-  }
-  return { count: unread.length, summary: labels.slice(0, 3).join(', ') };
 }
 
 /** The ET calendar day before `today` (YYYY-MM-DD). */

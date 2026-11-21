@@ -176,9 +176,33 @@ def test_keyset_sql_compares_the_whole_key_as_one_row():
     assert '(__m."a", __m."b") > (%s::bigint, %s::text)' in sql
     assert '(__m."a", __m."b") <= (%s::bigint, %s::text)' in sql
     assert sql.rstrip().endswith('ORDER BY __m."a", __m."b" LIMIT %s')
-    assert params == ["10", "k010", "20", "k020"]
+    assert params == ["10", "k010", "10", "20", "k020", "20"]
     sql, params = lm.page_sql(info, None, None)
     assert "WHERE" not in sql and params == []
+
+
+def test_a_range_on_a_many_column_key_also_bounds_its_first_column():
+    """Postgres prices a row comparison by its first column alone, and prices
+    the two ends of a range as if they were unrelated. So on 2026-11-20 it put
+    a 50,000-row chunk of nfl_odds_history at 2.7 million rows and read the
+    whole 4.4 GB table to check it, 33 s each, 104 times in one night. With a
+    plain range on the first key column as well, it priced the same chunk at
+    4,508 rows and used the index. The extra range is implied by the row
+    comparison, so it changes which rows match not at all."""
+    info = table()
+    sql, params = lm.summaries_sql(info, ["10", "k010"], [["20", "k020"], ["30", "k030"]], True)
+    where = sql.split(" WHERE ", 1)[1]
+    assert '__m."a" >= %s::bigint' in where
+    assert '__m."a" <= %s::bigint' in where
+    assert params[-6:] == ["10", "k010", "10", "30", "k030", "30"]
+
+    sql, params = lm.page_sql(info, ["10", "k010"], None)  # the tail: lower bound only
+    assert '__m."a" >= %s::bigint' in sql and '__m."a" <=' not in sql
+    assert params == ["10", "k010", "10"]
+
+    one = table(pk=("a",), pk_types=("bigint",))  # a one-column bound is already plain
+    sql, params = lm.page_sql(one, ["10"], ["20"])
+    assert '__m."a" >=' not in sql and params == ["10", "20"]
 
 
 def test_a_halved_batch_does_not_end_the_range_early(tmp_path):
@@ -774,3 +798,20 @@ def test_auto_runs_the_full_once_a_month_and_a_diff_otherwise(tmp_path):
         "a run by hand on a few tables is never the month's full"
     assert lm.choose_kind("full", tmp_path, nov19, partial=False)[0] == "full"
     assert lm.choose_kind("diff", tmp_path, dec3, partial=False)[0] == "diff"
+
+
+def test_the_total_line_takes_its_diff_over_the_tables_counted_in_supabase():
+    """2026-11-21: the diff's TOTAL said -13,237,404 rows, which was the two
+    caches the diff leaves as they are (no Supabase count) less 8 real rows."""
+    results = [
+        lm.TableResult("public.latest_odds", "skipped", local_rows=3_479_051),
+        lm.TableResult("public.latest_prop_odds", "skipped", local_rows=9_758_361),
+        lm.TableResult("public.tennis_dk_selections", "incremental", local_rows=256_928,
+                       server_rows=256_936, mismatched=2),
+        lm.TableResult("public.picks", "incremental", local_rows=100, server_rows=100),
+    ]
+    text = lm._fmt_table(results)
+    total = next(line for line in text.splitlines() if line.startswith("TOTAL"))
+    assert total.split()[3:7] == ["13,494,440", "257,036", "+8", "0"], total
+    assert "cover the 2 table(s) counted in Supabase this run; the other 2 were not counted" in text
+    assert "were not counted" not in lm._fmt_table(results[2:])
