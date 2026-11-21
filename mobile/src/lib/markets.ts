@@ -234,8 +234,9 @@ export function matchupLedBet(label: string): string | null {
  * total's or a first half's bet without the matchup, every other label as
  * stored. A team total names its team and the row's date places the game; a
  * first half names no team, so pickRowMatchup puts it on its own line. A prop
- * keeps its player name. The row's accessibility label keeps the whole stored
- * label, less the old NFL sizing figure (labelWithoutStake), as this title is.
+ * keeps its player name. The row's accessibility label reads the pick's title
+ * (pickTitleText): the stored label less the old NFL sizing figure, and a Yes-only
+ * prop as the book sells it, as this title is.
  */
 export function pickRowTitle(pick: TitlePick): string {
   const label = labelWithoutStake(pick.pick_label);
@@ -245,7 +246,7 @@ export function pickRowTitle(pick: TitlePick): string {
 }
 
 /** The fields a title reads: the stored label and, for a Yes-only prop, which market it is. */
-type TitlePick = { pick_label: string; model_id?: string | null; prop_market?: string | null };
+export type TitlePick = { pick_label: string; model_id?: string | null; prop_market?: string | null };
 
 /**
  * A Yes-only prop's title in the words the book sells it under. First basket, Anytime TD and
@@ -2573,7 +2574,11 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
         (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
         (nbaPosted ? ' Void if the player doesn’t play.' : '') +
         (pick.model_id === 'nba_prop_first_basket'
-          ? ' Void if the player doesn’t start.' + firstBasketRuleNote(pick.decision_book)
+          ? ' Void if the player doesn’t start.' +
+            (pick.decision_book === 'betmgm'
+              ? ' BetMGM keeps the bet live if he comes on before the first field goal.'
+              : '') +
+            firstBasketRuleNote(pick.decision_book)
           : ''),
     };
   }

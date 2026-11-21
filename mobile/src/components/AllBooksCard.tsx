@@ -8,6 +8,7 @@ import {
   formatSideLine,
   isBettableBook,
   marketForPick,
+  oneWayMarket,
 } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
@@ -54,7 +55,7 @@ export function AllBooksCard({
   // One book pricing a side isn't a comparison — nothing to shop.
   if (quotes.length < 2) return null;
 
-  const showLine = quotes.some((q) => q.line != null);
+  const showLine = !(market != null && oneWayMarket(market, 'under')) && quotes.some((q) => q.line != null);
 
   return (
     <View style={styles.card}>

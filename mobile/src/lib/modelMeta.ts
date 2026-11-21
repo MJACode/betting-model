@@ -1482,12 +1482,6 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
       note: 'In-play bets appear on Live Signals, not in this list.',
     };
   }
-  // The NBA first quarter's moneyline (models/nba_q1_trend_ml.py): a moneyline
-  // has no line, so its page names only the price, as its Pick Detail note
-  // does. It says a tied quarter returns the stake (some books also sell a
-  // three-way first-quarter moneyline, where a tie loses), and that it bets the
-  // same team in the same games as the first-quarter spread model (UX review,
-  // 2026-11-07).
   // NBA first basket (scripts/nba_first_basket_card.py): checked once a game, 5-20 minutes before
   // tip, on the starters the books list; at most one player a game, at the best price; each book's
   // own settlement rule (UX review, 2026-11-20). Not MINUTES_BEFORE_TIP_MODELS: that copy names
@@ -1498,15 +1492,22 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
       body:
         'This model checks each game once, 5 to 20 minutes before tip-off, on the starters the ' +
         'sportsbooks list, and bets at most one player a game, at the book with the best price, which ' +
-        'may not be DraftKings. DraftKings, BetMGM, Fanatics and BetRivers pay only on a made field ' +
-        'goal; FanDuel, Caesars and Hard Rock count a free throw. A posted bet is never re-priced: it ' +
-        'stays at the price it posted at.',
+        'may not be DraftKings. DraftKings, Fanatics and BetMGM (where it is listed as First Field ' +
+        'Goal) pay only on a made field goal, and BetRivers is reported to. FanDuel and Caesars count ' +
+        'a free throw; Hard Rock Bet’s rule says the first point, which reads the same. A posted ' +
+        'bet is never re-priced: it stays at the price it posted at.',
       empty:
         'This model checks each game 5 to 20 minutes before tip-off and bets only some of them. ' +
         'Nothing has posted today so far.',
       note: 'Posted 5 to 20 minutes before tip-off and never re-priced.',
     };
   }
+  // The NBA first quarter's moneyline (models/nba_q1_trend_ml.py): a moneyline
+  // has no line, so its page names only the price, as its Pick Detail note
+  // does. It says a tied quarter returns the stake (some books also sell a
+  // three-way first-quarter moneyline, where a tie loses), and that it bets the
+  // same team in the same games as the first-quarter spread model (UX review,
+  // 2026-11-07).
   if (modelId === 'nba_q1_trend_ml') {
     return {
       title: 'Checked once per game',

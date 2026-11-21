@@ -23,6 +23,7 @@ import {
   bookName,
   formatSideLine,
   marketForPick,
+  oneWayMarket,
   storedQuoteBook,
 } from '@/lib/markets';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
@@ -142,7 +143,8 @@ export function ReasoningCard({ pick, paused = false, stale = false }: Props) {
         />
       ) : null}
 
-      {pick.scored_line != null ? (
+      {/* A Yes-only prop has no line to have moved (UX review, 2026-11-20). */}
+      {pick.scored_line != null && !(lineMarket != null && oneWayMarket(lineMarket, 'under')) ? (
         <Row label="Line at score time" value={formatSideLine(pick.scored_line, pick.pick_side, lineMarket)} sub={`The ${bookName(lineBook(pick) ?? bookKey)} line when we generated this pick. If it has since moved against you, the edge may be smaller now.`} />
       ) : null}
     </View>
