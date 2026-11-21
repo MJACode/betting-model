@@ -31,9 +31,9 @@ PUBLIC_OBJECTS = frozenset({
     "site_public_record_rows",
 })
 
-# Readers the worker migrations are supposed to leave behind. Missing any of
-# these means the scratch catalog is not the one production's migrations
-# build, and an empty discovery would pass without looking.
+# Objects the migrations must leave in the catalog. This is not the
+# discovery check: a broken walk can still see these names and pass.
+# EXPECTED_DISCOVERED is what the walk itself has to return.
 REQUIRED_PRESENT = (
     "mv_scored_pick_outcomes",
     "v_model_full_outcome_picks",
@@ -42,6 +42,16 @@ REQUIRED_PRESENT = (
     "custom_model_backtest_posted",
     "custom_model_picks",
     "premium_pre_request",
+)
+
+# premium_pre_request is the gate, not a reader, so it is not in this set.
+EXPECTED_DISCOVERED = (
+    "mv_scored_pick_outcomes",
+    "v_model_full_outcome_picks",
+    "v_model_full_outcome_record",
+    "custom_model_backtest",
+    "custom_model_picks",
+    "custom_model_backtest_posted",
 )
 
 _READ = re.compile(
@@ -56,8 +66,42 @@ _FIXTURE = r"""
 CREATE ROLE anon NOLOGIN;
 CREATE ROLE authenticated NOLOGIN;
 CREATE ROLE service_role NOLOGIN BYPASSRLS;
+CREATE ROLE supabase_admin NOLOGIN;
 CREATE ROLE authenticator NOINHERIT LOGIN;
 GRANT anon, authenticated, service_role TO postgres;
+
+-- Default privileges, measured from production pg_default_acl (read-only).
+-- The migrations run as postgres, so a new view or function with no GRANT
+-- picks up postgres's defaults, not supabase_admin's. postgres on public
+-- grants tables/views and functions to postgres and service_role only
+-- (anon and authenticated are absent; PUBLIC EXECUTE on functions is
+-- revoked). Sequences go to postgres, authenticated and service_role.
+-- The global function default is EXECUTE for postgres only.
+-- supabase_admin's public defaults are the Supabase stock grants (anon,
+-- authenticated, postgres, service_role). They are here so the catalog
+-- matches production. They do not apply to objects postgres creates.
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres
+  REVOKE ALL ON FUNCTIONS FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres
+  GRANT EXECUTE ON FUNCTIONS TO postgres;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  REVOKE ALL ON TABLES FROM PUBLIC, anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  GRANT ALL ON TABLES TO postgres, service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  REVOKE ALL ON FUNCTIONS FROM PUBLIC, anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  GRANT ALL ON FUNCTIONS TO postgres, service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  REVOKE ALL ON SEQUENCES FROM PUBLIC, anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  GRANT ALL ON SEQUENCES TO postgres, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
+  GRANT ALL ON TABLES TO anon, authenticated, postgres, service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
+  GRANT ALL ON FUNCTIONS TO anon, authenticated, postgres, service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
+  GRANT ALL ON SEQUENCES TO anon, authenticated, postgres, service_role;
 
 CREATE SCHEMA IF NOT EXISTS auth;
 CREATE TABLE auth.users (id uuid PRIMARY KEY);
@@ -425,6 +469,13 @@ def test_every_scored_picks_reader_is_on_the_pre_request_hook() -> None:
 
             found = _discover(cur)
             names = ", ".join(f"{kind} {name}" for kind, name, _oid in found)
+            discovered_names = {name for _kind, name, _oid in found}
+            not_found = [name for name in EXPECTED_DISCOVERED if name not in discovered_names]
+            assert not not_found, (
+                "discovery did not return these readers. The objects can exist "
+                "in the catalog while the pg_depend / prosrc walk misses them: "
+                + ", ".join(not_found)
+                + ". Discovered: " + (names or "(nothing)"))
             uncovered = []
             for kind, name, oid in found:
                 label = f"{kind} {name}"
@@ -448,5 +499,37 @@ def test_every_scored_picks_reader_is_on_the_pre_request_hook() -> None:
             assert not uncovered, (
                 "scored-picks readers the pre-request hook does not cover "
                 "(discovered: " + names + "):\n" + "\n".join(uncovered))
+
+            # A new view, no GRANT, owned by postgres the way a migration
+            # creates one. postgres's public defaults do not grant anon.
+            # supabase_admin's defaults would, and they must not apply here.
+            cur.execute(
+                "CREATE VIEW public._matview_gate_default_priv_probe AS "
+                "SELECT * FROM public.mv_scored_pick_outcomes")
+            cur.execute(
+                """
+                SELECT pg_get_userbyid(relowner)
+                  FROM pg_class
+                 WHERE oid = 'public._matview_gate_default_priv_probe'::regclass
+                """)
+            owner = cur.fetchone()[0]
+            assert owner == "postgres", (
+                "the probe view is owned by %s; migrations run as postgres" % owner)
+            probed = _discover(cur)
+            probe_rows = [
+                (kind, oid) for kind, name, oid in probed
+                if name == "_matview_gate_default_priv_probe"]
+            assert probe_rows, (
+                "discovery did not flag a view over mv_scored_pick_outcomes "
+                "that has no explicit GRANT. Discovered: "
+                + ", ".join(f"{kind} {name}" for kind, name, _oid in probed))
+            if _anon_can_read(cur, probe_rows[0][0], probe_rows[0][1]):
+                raise AssertionError(
+                    "anon can read _matview_gate_default_priv_probe, which has "
+                    "no GRANT. Migrations run as postgres. postgres's default "
+                    "privileges on public tables and views do not include anon, "
+                    "so a new reader would be open on production and this "
+                    "scratch database did not catch it.")
+            cur.execute("DROP VIEW public._matview_gate_default_priv_probe")
         finally:
             raw.close()
