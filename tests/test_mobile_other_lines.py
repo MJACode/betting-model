@@ -52,3 +52,19 @@ def test_a_different_line_is_never_best_nor_the_sheets_bet():
     assert "row.price != null && !row.otherLine" in card
     sheet = _read(SRC / "components" / "PickBooksSheet.tsx")
     assert "PICK_BOOKS_OTHER_LINE_NOTE" in sheet
+
+
+def test_a_different_line_row_offers_find_alt_line():
+    """Matt, 2026-11-21: when the pick's line is not at the member's books,
+    each different-line row offers "Find alt line", opening that game at the
+    book so the member can switch to the model's number there."""
+    books = _read(SRC / "lib" / "pickBooks.ts")
+    assert "export const FIND_ALT_LINE_LABEL = 'Find alt line'" in books
+    sheet = _read(SRC / "components" / "PickBooksSheet.tsx")
+    assert "const findAlt = row.otherLine && row.lineText != null && row.link != null" in sheet
+    assert "{FIND_ALT_LINE_LABEL}" in sheet
+    assert "PICK_BOOKS_FIND_ALT_NOTE" in sheet
+    assert "findAltLineHint(row.name)" in sheet
+    # The row still opens the book at its own line, at that book only.
+    card = _read(SRC / "components" / "PickCard.tsx")
+    assert "openBookBetslip(row.bookmaker, row.link, { sameBookOnly: true })" in card
