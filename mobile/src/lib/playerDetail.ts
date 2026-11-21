@@ -27,6 +27,7 @@ import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { logStatValue, type GameWindow, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropMarket, statForPropModel, type StatDef } from '@/lib/statCatalog';
 import { modelLong, modelShort, sportOfModel } from '@/lib/modelMeta';
+import { oneWayMarket } from '@/lib/markets';
 import type { GameRow, PropOddsByBookRow, PropOddsSnapshotRow, SettledPick } from '@/types';
 
 // ── Line conversions ─────────────────────────────────────────────────────────
@@ -429,6 +430,8 @@ export interface PlayerPickLine {
   /** Over / under split of the settled picks, for the "we've been on the under" read. */
   overs: number;
   unders: number;
+  /** A Yes-only market (first basket, anytime TD): every pick is the Yes, so no over/under split. */
+  yesOnly?: boolean;
 }
 
 export interface PlayerPickRecord {
@@ -510,6 +513,7 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
         modelId: p.model_id,
         label,
         wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0, overs: 0, unders: 0,
+        yesOnly: market != null && oneWayMarket(market, 'under'),
       };
       by.set(key, line);
     }
@@ -547,7 +551,7 @@ export function playerLineNote(
   line: PlayerPickLine,
   lines: readonly PlayerPickLine[],
 ): string | undefined {
-  const side = line.overs + line.unders > 0
+  const side = !line.yesOnly && line.overs + line.unders > 0
     ? `${line.overs} over${line.overs === 1 ? '' : 's'} · ${line.unders} under${line.unders === 1 ? '' : 's'}`
     : undefined;
   const shared = lines.filter((other) => other.label === line.label).length > 1;

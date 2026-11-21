@@ -280,3 +280,17 @@ def test_a_tick_decides_first_basket_before_the_stat_props_and_warms_after_publi
                       "nba-props", "nba-first-basket-warm"]
     assert ran[0][1][-2:] == ["--fetch", "G5"] and ran[1][1][-2:] == ["--step", "nba-first-basket"]
     assert published == ["nba-prop-window"]
+
+
+
+def test_the_app_names_first_basket_as_sold_everywhere_it_titles_a_pick():
+    """The stored label keeps "Over 0.5" (every reader keyed on "Over" parses it); the app titles it
+    "<player> First Basket" through one helper, and the Signals card's own table agrees."""
+    from pathlib import Path
+    lib = Path(__file__).resolve().parent.parent / "mobile" / "src" / "lib"
+    markets = (lib / "markets.ts").read_text(encoding="utf-8")
+    signals = (lib / "signalsCard.ts").read_text(encoding="utf-8")
+    assert "if (market === 'player_first_basket') return 'First Basket';" in markets
+    assert "if (market === 'player_first_basket') return side === 'under';" in markets
+    assert "player_first_basket: 'First Basket'," in signals
+    assert "nba_prop_first_basket: 'player_first_basket'," in markets

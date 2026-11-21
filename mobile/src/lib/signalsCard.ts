@@ -28,6 +28,18 @@ export function trueMinus(text: string): string {
  * ("Tackles + Assists", "Three-pointers", "Points + Rebounds + Assists"),
  * not the scorer's short forms, so the headline does not parse `pick_label`.
  */
+/**
+ * The Yes-only props, by the name the book sells each under: stored "<player> Over 0.5 First
+ * Basket", headlined "<player> First Basket" (UX review, 2026-11-20). The same three as
+ * markets.ts oneWayMarket / propDisplayLabel; kept here because this file imports format.ts
+ * alone (tests/test_mobile_pick_cta.py runs it with only that beside it).
+ */
+const YES_ONLY_BET: Readonly<Record<string, string>> = {
+  player_anytime_td: 'Anytime TD',
+  player_goal_scorer_anytime: 'Anytime Goal',
+  player_first_basket: 'First Basket',
+};
+
 const PROP_BET_STAT: Readonly<Record<string, string>> = {
   pitcher_strikeouts: 'Strikeouts',
   pitcher_hits_allowed: 'Hits',
@@ -246,8 +258,10 @@ export function signalsBetHeadline(fields: SignalsBetFields): string {
     const word = side === 'over' ? 'Over' : 'Under';
     const prop = isPropMarket(market, player);
     const stat = (fields.stat ?? '').trim() || (prop && market ? PROP_BET_STAT[market] ?? '' : '');
-    if (prop && market === 'player_anytime_td' && player) {
-      bet = `${player} Anytime TD`;
+    // A Yes-only prop (Anytime TD, Anytime Goal, First Basket) reads as the book sells it, with no
+    // "Over 0.5" (UX review, 2026-11-20).
+    if (prop && market && player && YES_ONLY_BET[market]) {
+      bet = `${player} ${YES_ONLY_BET[market]}`;
     } else if (prop && (!player || !stat) && stored) {
       bet = stored;
       fromLabel = true;

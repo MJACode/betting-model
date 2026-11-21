@@ -22,7 +22,6 @@ import {
   formatPctSigned,
   formatSigned,
   gameDayLabelET,
-  labelWithoutStake,
 } from '@/lib/format';
 import { allMatchedText, clvOutcome } from '@/lib/clvBeat';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
@@ -35,7 +34,7 @@ import { roundsToZero, signalDisplayName } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, postedPickUnits, publishedRecordKeeps } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
-import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { bookLabelShort, pickTitleText, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { PickRowTitle } from '@/components/PickRowTitle';
@@ -456,7 +455,7 @@ function TodayPickRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[labelWithoutStake(pick.pick_label), signalDisplayName(pick.signal_type), timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
+      accessibilityLabel={[pickTitleText(pick), signalDisplayName(pick.signal_type), timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
       style={styles.pickRow}
       onPress={onPress}
     >
@@ -500,7 +499,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={[
-        labelWithoutStake(pick.pick_label),
+        pickTitleText(pick),
         pick.result,
         dayLabelSpokenET(pick.game_date),
         `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`,

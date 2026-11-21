@@ -1096,6 +1096,9 @@ export function modelLong(modelId: string): string {
  * keeps the plain sentence.
  */
 const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
+  // 0.25 x the model + 0.75 x the other books' median no-vig (models/nba_first_basket.py).
+  nba_prop_first_basket:
+    'The chance he scores the game’s first basket: one part our model, three parts the other books’ prices.',
   nba_prop_projection:
     'What our model says is the chance this side hits. Read it as an upper bound: graded on the last ' +
     'three NBA seasons, the bets it would have made averaged 53% here, won 50%, and were priced at 48%.',
@@ -1485,6 +1488,25 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
   // three-way first-quarter moneyline, where a tie loses), and that it bets the
   // same team in the same games as the first-quarter spread model (UX review,
   // 2026-11-07).
+  // NBA first basket (scripts/nba_first_basket_card.py): checked once a game, 5-20 minutes before
+  // tip, on the starters the books list; at most one player a game, at the best price; each book's
+  // own settlement rule (UX review, 2026-11-20). Not MINUTES_BEFORE_TIP_MODELS: that copy names
+  // five to ten minutes.
+  if (modelId === 'nba_prop_first_basket') {
+    return {
+      title: 'Checked once per game',
+      body:
+        'This model checks each game once, 5 to 20 minutes before tip-off, on the starters the ' +
+        'sportsbooks list, and bets at most one player a game, at the book with the best price, which ' +
+        'may not be DraftKings. DraftKings, BetMGM, Fanatics and BetRivers pay only on a made field ' +
+        'goal; FanDuel, Caesars and Hard Rock count a free throw. A posted bet is never re-priced: it ' +
+        'stays at the price it posted at.',
+      empty:
+        'This model checks each game 5 to 20 minutes before tip-off and bets only some of them. ' +
+        'Nothing has posted today so far.',
+      note: 'Posted 5 to 20 minutes before tip-off and never re-priced.',
+    };
+  }
   if (modelId === 'nba_q1_trend_ml') {
     return {
       title: 'Checked once per game',

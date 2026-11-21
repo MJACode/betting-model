@@ -237,9 +237,38 @@ export function matchupLedBet(label: string): string | null {
  * keeps its player name. The row's accessibility label keeps the whole stored
  * label, less the old NFL sizing figure (labelWithoutStake), as this title is.
  */
-export function pickRowTitle(pick: { pick_label: string }): string {
+export function pickRowTitle(pick: TitlePick): string {
   const label = labelWithoutStake(pick.pick_label);
+  const yes = yesOnlyTitle(pick);
+  if (yes) return `${yes.player} ${yes.stat}`;
   return matchupLedBet(label) ?? label;
+}
+
+/** The fields a title reads: the stored label and, for a Yes-only prop, which market it is. */
+type TitlePick = { pick_label: string; model_id?: string | null; prop_market?: string | null };
+
+/**
+ * A Yes-only prop's title in the words the book sells it under. First basket, Anytime TD and
+ * Anytime Goal are stored "<player> Over 0.5 First Basket": every reader keyed on "Over" still
+ * parses that (tracking/pick_integrity.py, tracking/clv_close.py, playerNameFromPickLabel), but no
+ * book sells "Over 0.5" there, so the title reads "<player> First Basket" (UX review, 2026-11-20).
+ * Null for every other pick. The stored label is not changed.
+ */
+export function yesOnlyTitle(pick: TitlePick): { player: string; stat: string } | null {
+  const market = pick.model_id
+    ? propMarketForPick({ model_id: pick.model_id, prop_market: pick.prop_market })
+    : pick.prop_market ?? null;
+  if (!market || !oneWayMarket(market, 'under')) return null;
+  const stat = propDisplayLabel(market, '');
+  const m = /^(.+?)\s+Over\s+0\.5\b/i.exec(labelWithoutStake(pick.pick_label));
+  if (!stat || !m) return null;
+  return { player: m[1].trim(), stat };
+}
+
+/** Every surface's one-line text of a pick: the Yes-only title, else the stored label. */
+export function pickTitleText(pick: TitlePick): string {
+  const yes = yesOnlyTitle(pick);
+  return yes ? `${yes.player} ${yes.stat}` : labelWithoutStake(pick.pick_label);
 }
 
 /**
@@ -253,10 +282,13 @@ export function pickRowMatchup(pick: { pick_label: string }): string | null {
   return label.slice(0, label.indexOf(' — ')).trim();
 }
 
-export function splitPickTitle(pick: { pick_label: string }): {
+export function splitPickTitle(pick: TitlePick): {
   primary: string;
   secondary: string | null;
 } {
+  // A Yes-only prop: the bold line is what the book sells ("First Basket"), the player under it.
+  const yes = yesOnlyTitle(pick);
+  if (yes) return { primary: yes.stat, secondary: yes.player };
   // The old NFL sizing figure ("· 0.79u") is not the stake the card shows.
   const label = labelWithoutStake(pick.pick_label);
   // A team total or a first half: the bold line is the bet (the card's header
@@ -2319,16 +2351,20 @@ const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_
 
 /**
  * How each book settles first basket (house rules read 2026-11-20; models/nba_first_basket.py
- * FIELD_GOAL_BOOKS). These pay on the first made field goal; the rest on the first points of any
- * kind, free throws included.
+ * FIELD_GOAL_BOOKS / ANY_SCORE_BOOKS, which settlement reads).
  */
 const FIRST_BASKET_FIELD_GOAL_BOOKS: readonly string[] = ['draftkings', 'betmgm', 'fanatics', 'betrivers'];
+const FIRST_BASKET_ANY_SCORE_BOOKS: readonly string[] = ['fanduel', 'williamhill_us', 'hardrockbet'];
 
 export function firstBasketRuleNote(book: string | null | undefined): string {
   if (!book) return '';
-  return FIRST_BASKET_FIELD_GOAL_BOOKS.includes(book)
-    ? ' This book pays on the first made field goal: a free throw first doesn’t count.'
-    : ' This book pays on the first points of any kind, free throws included.';
+  if (FIRST_BASKET_FIELD_GOAL_BOOKS.includes(book)) {
+    return ` ${bookName(book)} pays only on the first made field goal: a free throw first doesn’t count.`;
+  }
+  if (FIRST_BASKET_ANY_SCORE_BOOKS.includes(book)) {
+    return ` ${bookName(book)} pays on the first points of any kind, free throws included.`;
+  }
+  return '';
 }
 
 /**
@@ -2519,7 +2555,8 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
         // A moneyline has no line (UX review, 2026-11-03), and an opening
         // price moves fast: the opening-moneyline model says so where the
         // member places the bet.
-        (POSTED_MONEYLINE_MODELS.includes(pick.model_id)
+        // First basket has no line either: it is Yes at a price (UX review, 2026-11-20).
+        (POSTED_MONEYLINE_MODELS.includes(pick.model_id) || pick.model_id === 'nba_prop_first_basket'
           ? 'Posted once and never re-priced. This is when the bet posted, at the price shown.'
           : 'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
             'shown.') +
