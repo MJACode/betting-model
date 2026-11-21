@@ -2359,6 +2359,11 @@ const FIRST_BASKET_ANY_SCORE_BOOKS: readonly string[] = ['fanduel', 'williamhill
 
 export function firstBasketRuleNote(book: string | null | undefined): string {
   if (!book) return '';
+  // BetRivers' rule is from a secondary source only (its own rules page could not be read), so it
+  // is hedged here exactly as on the model page; settlement treats it as field goal only.
+  if (book === 'betrivers') {
+    return ' BetRivers is reported to pay only on the first made field goal: a free throw first doesn’t count.';
+  }
   if (FIRST_BASKET_FIELD_GOAL_BOOKS.includes(book)) {
     return ` ${bookName(book)} pays only on the first made field goal: a free throw first doesn’t count.`;
   }
@@ -2575,10 +2580,11 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
         (nbaPosted ? ' Void if the player doesn’t play.' : '') +
         (pick.model_id === 'nba_prop_first_basket'
           ? ' Void if the player doesn’t start.' +
-            (pick.decision_book === 'betmgm'
-              ? ' BetMGM keeps the bet live if he comes on before the first field goal.'
+            (decisionBook(pick) === 'betmgm'
+              ? ' BetMGM lists it as First Field Goal, and keeps the bet live if he comes on before' +
+                ' the first field goal.'
               : '') +
-            firstBasketRuleNote(pick.decision_book)
+            firstBasketRuleNote(decisionBook(pick))
           : ''),
     };
   }

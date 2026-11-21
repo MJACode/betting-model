@@ -67,7 +67,7 @@ export interface ParlayLeg {
    *  from. False for custom/saved legs. */
   isLive: boolean;
   isFavorite: boolean; // dk_odds < 0
-  label: string; // pick.pick_label
+  label: string; // pickTitleText(pick): the stored label, with Over 0.5 dropped on a Yes-only prop
   modelProb: number; // pick.model_probability
   decimalOdds: number; // americanToDecimal(dk_odds)
   americanOdds: number; // dk_odds (non-null, validated)

@@ -1494,7 +1494,7 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         'sportsbooks list, and bets at most one player a game, at the book with the best price, which ' +
         'may not be DraftKings. DraftKings, Fanatics and BetMGM (where it is listed as First Field ' +
         'Goal) pay only on a made field goal, and BetRivers is reported to. FanDuel and Caesars count ' +
-        'a free throw; Hard Rock Bet’s rule says the first point, which reads the same. A posted ' +
+        'a free throw; Hard Rock Bet’s rule says the first point, so a free throw should count there too. A posted ' +
         'bet is never re-priced: it stays at the price it posted at.',
       empty:
         'This model checks each game 5 to 20 minutes before tip-off and bets only some of them. ' +

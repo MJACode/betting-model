@@ -87,7 +87,7 @@ export function AllBooksCard({
             accessibilityState={{ disabled: reference }}
             disabled={reference}
             accessibilityLabel={`${reference ? '' : 'Open '}${bookName(q.bookmaker)}, ${
-              q.line != null ? `${formatSideLine(q.line, pick.pick_side, market)} at ` : ''
+              showLine && q.line != null ? `${formatSideLine(q.line, pick.pick_side, market)} at ` : ''
             }${formatAmerican(q.price)}${
               q.isBest ? ', best price' : ''
             }${reference ? ', reference price only' : ''}`}
