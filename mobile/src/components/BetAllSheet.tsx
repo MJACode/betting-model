@@ -303,7 +303,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
               </View>
               {untracked.length > 1 ? (
                 <Pressable
-                  onPress={() => setSelected(allSelected ? new Set() : new Set(untracked.map((p) => p.key)))}
+                  onPress={() => setSelected((prev) => (allSelected ? new Set() : new Set([...prev, ...untracked.map((p) => p.key)])))}
                   accessibilityRole="button"
                   accessibilityLabel={allSelected ? 'Select none' : 'Select all'}
                   hitSlop={12}

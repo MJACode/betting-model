@@ -105,5 +105,5 @@ def test_a_tracked_pick_starts_unticked_and_says_tracking():
     # Only newly tracked picks leave the selection, so a deliberate re-tick holds.
     assert "!seenTracked.current.has(k)" in sheet
     # Select all never puts a tracked pick back in.
-    assert "new Set(untracked.map((p) => p.key))" in sheet
+    assert "new Set([...prev, ...untracked.map((p) => p.key)])" in sheet
     assert "new Set(picks.map((p) => p.key)))}" not in sheet
