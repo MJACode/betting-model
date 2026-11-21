@@ -50,6 +50,59 @@ export function isNotFoundError(e: unknown): boolean {
   return /\bPGRST116\b/.test(raw);
 }
 
+/**
+ * The PostgREST pre-request hook in
+ * data/migrations/premium_gate_matview_2026_11_20.sql. A signed-in account
+ * without has_app_access() is refused on the six scored-picks endpoints with
+ * this SQLSTATE, this message, and this hint. 42501 alone is not the signal:
+ * permission denied, "sign in required", and an RLS violation use it too.
+ */
+export const PREMIUM_ACCESS_CODE = '42501';
+export const PREMIUM_ACCESS_MESSAGE = 'premium access required';
+export const PREMIUM_ACCESS_HINT =
+  'An active subscription, trial or comped grant is required.';
+
+/** errorText() keeps message and code and drops the hint. */
+const PREMIUM_ACCESS_TEXT = `${PREMIUM_ACCESS_MESSAGE} (${PREMIUM_ACCESS_CODE})`;
+
+/**
+ * True only for the hook's refusal. An object must carry the code, the
+ * message, and the hint. The string form is what errorText() stores, which
+ * has already dropped the hint.
+ */
+export function isPremiumAccessRefusal(e: unknown): boolean {
+  if (typeof e === 'string') return e.trim() === PREMIUM_ACCESS_TEXT;
+  if (e == null || typeof e !== 'object') return false;
+  const o = e as Record<string, unknown>;
+  const code = typeof o.code === 'string' ? o.code.trim() : '';
+  const message = typeof o.message === 'string' ? o.message.trim() : '';
+  const hint = typeof o.hint === 'string' ? o.hint.trim() : '';
+  return code === PREMIUM_ACCESS_CODE
+    && message === PREMIUM_ACCESS_MESSAGE
+    && hint === PREMIUM_ACCESS_HINT;
+}
+
+export type GateLoad = 'no-access' | 'error';
+
+/**
+ * Refusal is the no-access state. Every other real failure is an error.
+ * An abort is neither.
+ */
+export function gateLoad(e: unknown): GateLoad | null {
+  if (e == null || e === '') return null;
+  if (isAbortError(e)) return null;
+  if (isPremiumAccessRefusal(e)) return 'no-access';
+  return 'error';
+}
+
+/** What a catch block stores. A refusal never becomes the error string. */
+export function splitLoadError(e: unknown): { noAccess: boolean; error: string | null } {
+  const kind = gateLoad(e);
+  if (kind === 'no-access') return { noAccess: true, error: null };
+  if (kind === 'error') return { noAccess: false, error: errorText(e) };
+  return { noAccess: false, error: null };
+}
+
 /** What kind of failure a load hit, so the copy can say what to do about it. */
 export type ErrorKind = 'offline' | 'slow' | 'auth' | 'server';
 

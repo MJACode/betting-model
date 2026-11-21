@@ -12,7 +12,7 @@
  *
  * An intentional cancel (isAbortError) is never a failure here.
  */
-import { isAbortError, isNotFoundError } from './errors';
+import { isAbortError, isNotFoundError, isPremiumAccessRefusal } from './errors';
 
 export type LoadBody = 'skeleton' | 'error' | 'content';
 
@@ -25,7 +25,10 @@ export interface LoadInput {
 }
 
 function failure(error: unknown): boolean {
-  return Boolean(error) && !isAbortError(error);
+  // The premium-gate refusal is no-access, not a failed load. A screen that
+  // still holds the raw error (or errorText's "premium access required
+  // (42501)") must not render ErrorState for it.
+  return Boolean(error) && !isAbortError(error) && !isPremiumAccessRefusal(error);
 }
 
 /**

@@ -8,6 +8,7 @@ import { ByomModelRow } from '@/components/byom/ByomModelRow';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
 import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { EmptyState } from '@/components/EmptyState';
+import { PremiumLock } from '@/components/PremiumLock';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { Skeleton, SkeletonRow } from '@/components/Skeleton';
 import { useByomLeaderboard } from '@/hooks/useByomLeaderboard';
@@ -30,7 +31,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
   const built = sport === 'NFL' || sport === 'NBA' || sport === 'NHL';
   const byomSport = asByomSport(sport);
   const facts = useNbaGameFacts(byomSport);
-  const { rows, loading, error, reload, signedIn, authReady } = useByomLeaderboard(sport, scope);
+  const { rows, loading, error, noAccess, reload, signedIn, authReady } = useByomLeaderboard(sport, scope);
   const busy = built && (!authReady || (signedIn && loading && rows.length === 0));
   const failedRefresh = error != null && rows.length > 0;
 
@@ -101,6 +102,13 @@ export function ByomModelList({ sport }: { sport: Sport }) {
               </View>
             ))}
           </Skeleton>
+        ) : noAccess ? (
+          <PremiumLock locked>
+            <EmptyState
+              title={`No ${sportDisplayName(sport)} models yet`}
+              subtitle="Pick a bet type and a side, then see how it would have done before you save it."
+            />
+          </PremiumLock>
         ) : error && rows.length === 0 ? (
           <ErrorState
             what={`your ${sport} models`}

@@ -6,6 +6,7 @@ import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { PremiumLock } from '@/components/PremiumLock';
 import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
@@ -65,7 +66,7 @@ export function ModelDetailScreen() {
     (model?.rules.length ?? 0) > 0 && (model?.rules ?? []).every((r) => isModelRetired(r.model_id));
   // Backtests run against every scored pick (BET + AVOID + dead-zone), graded
   // server-side — not just the settled BET set.
-  const { stats, picks: matchingPicks, loading, error, retry } = useCustomModelBacktest(
+  const { stats, picks: matchingPicks, loading, error, noAccess, retry } = useCustomModelBacktest(
     model ?? null,
     { withPicks: true },
   );
@@ -103,7 +104,7 @@ export function ModelDetailScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <FlatList
         ListFooterComponent={<BetslipBarSpacer />}
-        data={[...matchingPicks].sort((a, b) => b.game_date.localeCompare(a.game_date))}
+        data={noAccess ? [] : [...matchingPicks].sort((a, b) => b.game_date.localeCompare(a.game_date))}
         keyExtractor={(p) => String(p.pick_id)}
         ListHeaderComponent={
           <>
@@ -146,6 +147,10 @@ export function ModelDetailScreen() {
               ) : null}
             </View>
 
+            {noAccess ? (
+              <PremiumLock locked />
+            ) : (
+            <>
             <View style={styles.statRow}>
               <StatTile label="Picks matched" value={String(stats.picks)} caption={`since ${BACKTEST_START}`} />
               <StatTile
@@ -170,6 +175,8 @@ export function ModelDetailScreen() {
                 caption="all graded picks"
               />
             </View>
+            </>
+            )}
 
             {error ? (
               <ErrorBanner
@@ -220,7 +227,7 @@ export function ModelDetailScreen() {
               ))
             )}
 
-            <Text style={styles.sectionHeader}>Graded picks</Text>
+            {noAccess ? null : <Text style={styles.sectionHeader}>Graded picks</Text>}
           </>
         }
         renderItem={({ item }) => (
@@ -257,7 +264,7 @@ export function ModelDetailScreen() {
         ListEmptyComponent={
           loading ? (
             <SkeletonList label="this model's picks" rows={4} style={styles.skeleton} />
-          ) : (
+          ) : noAccess ? null : (
             allRetired ? (
               <EmptyState
                 title="Bet types retired"

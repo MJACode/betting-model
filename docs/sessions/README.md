@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, premium-gate refusal (42501 + "premium access required" + the subscription hint) maps to the existing lock or empty state on Models, model detail, and BYOM; other errors stay errors |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, The first monthly full and nightly diff of the PC backup; the dashboard's duplicate entry, stale "differs" and false total line fixed (#1539) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all: an "Untracked only" switch (on by default) replaces the start-unticked logic |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant: request logs kept while the account is open (Privacy), App Review accounts see the AI Assistant but cannot connect (mcp_meter v2) |

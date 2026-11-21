@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { errorText, isAbortError } from '@/lib/errors';
+import { splitLoadError } from '@/lib/errors';
 import { fetchByomScopedRecord, type ByomFilters, type ByomTiming } from '@/lib/byom';
 import { byomFilters } from '@/lib/byomFilters';
 import {
@@ -31,6 +31,7 @@ export function useByomRecord(
   const [seasons, setSeasons] = useState<ByomSeasonRow[]>([]);
   const [loading, setLoading] = useState(filters != null);
   const [error, setError] = useState<string | null>(null);
+  const [noAccess, setNoAccess] = useState(false);
   const filterKey = filters == null ? '' : JSON.stringify(byomFilters(filters));
   const seq = useRef(0);
 
@@ -40,12 +41,14 @@ export function useByomRecord(
       setRecord(null);
       setCloseRecord(null);
       setError(null);
+      setNoAccess(false);
       setLoading(false);
       return;
     }
     const id = ++seq.current;
     setLoading(true);
     setError(null);
+    setNoAccess(false);
     setRecord(null);
     setCloseRecord(null);
     setSeasons([]);
@@ -69,7 +72,14 @@ export function useByomRecord(
       }))));
     } catch (e: unknown) {
       if (seq.current !== id) return;
-      if (!isAbortError(e)) setError(errorText(e));
+      const split = splitLoadError(e);
+      if (split.noAccess) {
+        setRecord(null);
+        setCloseRecord(null);
+        setSeasons([]);
+      }
+      setNoAccess(split.noAccess);
+      setError(split.error);
     } finally {
       if (seq.current === id) setLoading(false);
     }
@@ -79,5 +89,5 @@ export function useByomRecord(
     void load();
   }, [load]);
 
-  return { record, closeRecord, timing, seasons, loading, error, reload: load };
+  return { record, closeRecord, timing, seasons, loading, error, noAccess, reload: load };
 }

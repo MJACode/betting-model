@@ -12,6 +12,7 @@ import { ByomSeasonBreakdown } from '@/components/byom/ByomSeasonBreakdown';
 import { currentByomSeason } from '@/lib/byomRecord';
 import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { EmptyState } from '@/components/EmptyState';
+import { PremiumLock } from '@/components/PremiumLock';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/Skeleton';
 import { useByomRecord } from '@/hooks/useByomRecord';
@@ -34,7 +35,7 @@ export function ByomDetailScreen() {
   const navigation = useNavigation<Nav>();
   const { modelId } = useRoute<Route>().params;
   const { scope } = useByomSeason();
-  const { model, loading, error, missing, reload, signedIn } = useByomSavedModel(modelId);
+  const { model, loading, error, noAccess, missing, reload, signedIn } = useByomSavedModel(modelId);
   const graded = model != null && !isWholeSeason(model.filters);
   const sport: ByomSport = asByomSport(model?.sport);
   const filterMarket = model?.filters.markets?.[0] ?? null;
@@ -101,6 +102,10 @@ export function ByomDetailScreen() {
           <Skeleton label="this model">
           <View style={styles.skel} />
         </Skeleton>
+      ) : noAccess && model == null ? (
+        <PremiumLock locked>
+          <EmptyState title="This model is no longer saved" />
+        </PremiumLock>
       ) : error && model == null ? (
         <ErrorState
           what="this model"
@@ -130,21 +135,23 @@ export function ByomDetailScreen() {
           <Text style={styles.market}>{marketLabel(model.filters, sport)}</Text>
           {filterLine ? <Text style={styles.filters}>{filterLine}</Text> : null}
           <ByomSeasonToggle />
+          <PremiumLock locked={graded && preview.noAccess}>
           <ByomPreviewCard
-            record={preview.record}
+            record={preview.noAccess ? null : preview.record}
             loading={graded && preview.loading}
-            error={graded ? preview.error : null}
+            error={graded && !preview.noAccess ? preview.error : null}
             onRetry={() => void preview.reload()}
             showsUnits={showsUnits(model.filters)}
             emptyLabel={graded && model ? byomEmptyLabel(sport, facts.status, model.filters) : '—'}
             closeRecord={graded ? preview.closeRecord : null}
             closingHeadline={preview.timing === 'close'}
-            onShowBets={graded && byomBetsAvailable() && preview.record != null && preview.record.bets > 0
+            onShowBets={graded && !preview.noAccess && byomBetsAvailable() && preview.record != null && preview.record.bets > 0
               ? () => navigation.navigate('ByomBets', {
                 filters: model.filters, sport, title: model.name, timing: preview.timing,
               })
               : undefined}
           />
+          </PremiumLock>
           <ByomSeasonBreakdown
             record={preview.record}
             seasons={preview.seasons}
