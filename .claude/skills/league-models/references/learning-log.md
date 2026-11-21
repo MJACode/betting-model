@@ -30,6 +30,30 @@ review as its own entry.
 
 ---
 
+## 2026-11-20 — NBA first basket: a market never priced, built live on a five-of-six grade
+
+1. **League and scope**: NBA, mike after an 0-6 night ("invent a new way"). One market no NBA search
+   had priced: who scores the game's first points (`player_first_basket`), and each team's
+   (`player_first_team_basket`). New model id `nba_prop_first_basket`.
+2. **Tried**: the structure on stored play-by-play (tip win rate split-half 0.79; the tip winner
+   scores first 66.6%; a points-per-game share prices it worse than a flat fifth), a walk-forward
+   fair price (beats both baselines in four unseen seasons), then three registered tests at bought
+   prices (10 credits a game a market; 3,368 games): the model alone +5.9% and the books' median
+   prices it better; the median alone +3.2%; a 0.25 / 0.75 blend +7.5% on 1,930 (first basket) and
+   +9.5% on 1,056 (team), five bars of six, every interval below zero at its low end. mike shipped
+   the first-basket blend (`docs/nba_first_basket.md`).
+3. **New**: a market whose books do not agree on what settles it: DraftKings, BetMGM, Fanatics and
+   BetRivers pay on the first made field goal, FanDuel, Caesars and Hard Rock on the first points.
+   Read every book's house rule before grading, and settle per bet book. And a trap: this repo tells
+   a prop from a game pick by `_prop_` in the model id (settlers, views, the app), so a prop model id
+   without it is graded and shown as a game pick.
+4. **Corrected**: was "the model is the edge" (the plan), now "the books' median knows more than the
+   model; the blend is the edge", because the model alone lost to the median on log loss (0.32249
+   against 0.32142).
+5. **The framework**: nothing in `SKILL.md`. One note for the price step: a market priced as a set of
+   names (first basket, anytime) needs each book's no-vig over its own list, and a fair price from
+   the OTHER books, or the bet book's margin is in its own reference.
+
 ## 2026-11-17 — Horse racing: US Hong Kong payouts measured against the Club's dividends
 
 1. **League and scope**: thoroughbred racing, the "whats next" after the

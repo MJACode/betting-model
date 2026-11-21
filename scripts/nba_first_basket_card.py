@@ -366,4 +366,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # API telemetry for the live monitor (monitoring/), as every script the scheduler runs carries.
+    # Best-effort and silent.
+    try:
+        from monitoring.probe import install as _install_api_probe
+        _install_api_probe("nba-first-basket")
+    except Exception:  # noqa: BLE001
+        pass
+
     main()
