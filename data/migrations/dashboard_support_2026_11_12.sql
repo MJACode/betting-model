@@ -27,7 +27,7 @@ DO $mig$
 BEGIN
   IF to_regclass('public.model_display_names') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.model_display_names'), 'pg_class'), '')
-         = 'dashboard_support f915870de915'
+         = 'dashboard_support 9a68e95d7317'
      AND to_regclass('public.dashboard_layouts') IS NOT NULL
      AND NOT has_table_privilege('anon', 'public.dashboard_layouts', 'SELECT')
      AND NOT has_table_privilege('authenticated', 'public.dashboard_layouts', 'SELECT')
@@ -103,6 +103,7 @@ BEGIN
         ('nba_live_spread_q12', 'NBA Early Live Spreads', 'Early Spread'),
         ('nba_moneyline', 'NBA Moneyline', 'ML'),
         ('nba_over_under', 'NBA Totals', 'O/U'),
+        ('nba_prop_first_basket', 'NBA First Basket', 'First Basket'),
         ('nba_prop_market', 'NBA Props', 'Props'),
         ('nba_prop_player_assists', 'NBA Assists', 'AST'),
         ('nba_prop_player_blocks', 'NBA Blocks', 'BLK'),
@@ -179,6 +180,6 @@ BEGIN
         -- names:end
       ) AS n(model_id, name, short_name)
   $view$;
-  EXECUTE $c$COMMENT ON VIEW public.model_display_names IS 'dashboard_support f915870de915'$c$;
+  EXECUTE $c$COMMENT ON VIEW public.model_display_names IS 'dashboard_support 9a68e95d7317'$c$;
   REVOKE ALL ON public.model_display_names FROM anon, authenticated;
 END $mig$;

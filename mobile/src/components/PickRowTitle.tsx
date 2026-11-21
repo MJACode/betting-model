@@ -1,9 +1,9 @@
 import React from 'react';
 import { Text, type StyleProp, type TextStyle } from 'react-native';
-import { pickRowMatchup, pickRowTitle } from '@/lib/markets';
+import { pickRowMatchup, pickRowTitle, type TitlePick } from '@/lib/markets';
 
 interface Props {
-  pick: { pick_label: string };
+  pick: TitlePick;
   titleStyle: StyleProp<TextStyle>;
   matchupStyle: StyleProp<TextStyle>;
 }

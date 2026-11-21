@@ -77,6 +77,9 @@ data/local/over_lean*.csv
 # Research data moved in from the home folder (2026-11-16, CLAUDE.md §7):
 # spools and caches, gigabytes, never committed.
 data/local/research/
+# The NBA first-basket card's prepared state, one file per game date
+# (scripts/nba_first_basket_card.prepared_for): rebuilt from Supabase on demand.
+data/local/cache/nba_first_basket/
 # The always-on feeds' own copies of the project (DraftKings live board,
 # tennis), kept on origin/master by their launchers. Never committed, never
 # removed by a session.

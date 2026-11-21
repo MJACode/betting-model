@@ -23,7 +23,7 @@
  */
 import type { EnrichedPick, LiveGameStateRow, Pick } from '@/types';
 import { pickPriceView } from './pickPriceView';
-import { bookLabel, bookName, handoffQuotesForPick, LINE_SHOP_BOOKS, numOrNull } from './markets';
+import { bookLabel, bookName, handoffQuotesForPick, LINE_SHOP_BOOKS, numOrNull, pickTitleText } from './markets';
 import { pickSportsbookRows } from './pickBooks';
 import { pickCtaFor } from './pickCta';
 import { openForAction } from './discordPublish';
@@ -34,7 +34,7 @@ import {
   stakeFor,
   type UnitStake,
 } from './thresholds';
-import { americanToDecimal, labelWithoutStake } from './format';
+import { americanToDecimal } from './format';
 import { combineSinglesLinks, isUsableBetslipLink } from './betslipLinks';
 
 export type BetAllMode = 'best' | 'book';
@@ -91,7 +91,9 @@ export interface BetAllQuote {
 export interface BetAllPick {
   key: string;
   pick: Pick;
-  /** The pick's label word for word, without the stake suffix (CLAUDE.md §00). */
+  /** The pick's label word for word, without the stake suffix (CLAUDE.md §00); a Yes-only prop
+   *  drops only its "Over 0.5" (pickTitleText takes the player from the label; no number is
+   *  invented). */
   label: string;
   /** Same bet at the member's books, best payout first. Never empty. */
   quotes: BetAllQuote[];
@@ -137,7 +139,7 @@ export function betAllCandidates(
     if (pick.is_live === true) continue;
     if (pick.signal_type !== 'BET' || !passesActionFilter(pick)) continue;
     if (isUnlockedPreview(pick) || isPausedForDisplay(pick) || !openForAction(pick)) continue;
-    const label = labelWithoutStake(pick.pick_label).trim();
+    const label = pickTitleText(pick).trim();
     const liveState = liveStateFor(pick.game_id) ?? null;
     const skip = (reason: BetAllSkipReason) => skipped.push({ key, pick, label, reason });
     if (!pickCtaFor(pick, game, liveState).handoff) {

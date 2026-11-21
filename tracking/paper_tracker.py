@@ -284,6 +284,10 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     "nba_prop_market":              ("nba_player", "FROM_PROP_MARKET"),
     # The NBA projection model (2026-10-16): six markets under one id, either side.
     "nba_prop_projection":          ("nba_player", "FROM_PROP_MARKET"),
+    # NBA first basket (2026-11-20, models/nba_first_basket.py): settled per BET BOOK from the
+    # play-by-play, the first made field goal or the first points by that book's own rule
+    # (models.nba_first_basket.first_basket_outcome); a non-starter is NO_ACTION.
+    "nba_prop_first_basket":        ("nba_first_basket", "FIRST_BASKET"),
     # NHL skater props — resolved from nhl_skater_game_log by player_id
     "nhl_prop_blocked_shots":       ("nhl_skater", "blocked_shots"),
     "nhl_prop_assists":             ("nhl_skater", "assists"),
@@ -832,6 +836,11 @@ def _settle_prop_picks(
     # day's settlement for the sports that were already there.
     nhl_actuals = (_load_nhl_prop_actuals(conn, game_date)
                    if any(_PROP_STAT_MAP.get(str(r[2]), ("",))[0] == "nhl_skater" for r in prop_picks) else {})
+    fb_facts = {}
+    if any(_PROP_STAT_MAP.get(str(r[2]), ("",))[0] == "nba_first_basket" for r in prop_picks):
+        from models.nba_first_basket import settle_facts
+        fb_facts = settle_facts(conn, sorted({str(r[1]) for r in prop_picks
+                                              if _PROP_STAT_MAP.get(str(r[2]), ("",))[0] == "nba_first_basket"}))
     nhl_goalie_actuals, nhl_goalie_games = (
         _load_nhl_goalie_actuals(conn, game_date)
         if any(_PROP_STAT_MAP.get(str(r[2]), ("",))[0] == "nhl_goalie" for r in prop_picks) else ({}, set()))
@@ -853,6 +862,7 @@ def _settle_prop_picks(
         "nfl_player":  nfl_logged_games,
         "nhl_skater":  nhl_logged_games,
         "nhl_goalie":  nhl_goalie_games,
+        "nba_first_basket": set(fb_facts),
     }
 
     wins = losses = pushes = no_actions = 0
@@ -916,6 +926,22 @@ def _settle_prop_picks(
                 row_data = nba_actuals.get((player_id, game_id))
                 if row_data:
                     actual_stat = _nba_prop_actual(row_data, stat_col)
+
+        elif player_type == "nba_first_basket":
+            # By name within the game (the decision mapped the bet book's spelling to the same box
+            # names). Not in the box = did not play; in it but not a starter = no action at every
+            # deciding book; both leave actual_stat None, and the branch below writes NO_ACTION.
+            facts = fb_facts.get(game_id)
+            if facts:
+                from models.nba_first_basket import first_basket_outcome, name_norm
+                m = _PICK_LABEL_RE.match(pick_label or "")
+                nm = name_norm(player_key or (m.group(1).strip() if m else ""))
+                espn = facts["played"].get(nm)
+                if espn is not None:
+                    book = (conn.execute("SELECT decision_book FROM picks WHERE pick_id = %s",
+                                         (pick_id,)).fetchone() or [None])[0]
+                    actual_stat = first_basket_outcome(book, nm in facts["starters"], espn,
+                                                       facts["first_any"], facts["first_fg"])
 
         elif player_type == "nhl_skater":
             # A skater who dressed has a row; one who did not has none, and the

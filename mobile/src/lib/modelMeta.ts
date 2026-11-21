@@ -407,6 +407,16 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NBA first basket (models/nba_first_basket.py, 2026-11-20): who scores the game's first
+  // points, from the opening tip and each starter's share of his team's first scores, blended with
+  // the other books' price. Decided once, 5-20 minutes before tip. The stat is in the label.
+  nba_prop_first_basket: {
+    shortLabel: 'First Basket',
+    longLabel: 'NBA First Basket',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
   // NBA full-game totals, overs only (models/nba_total_luck.py, 2026-10-17).
   // A team's points allowed include how well its opponents happened to shoot
   // threes and free throws, which is mostly luck. When a total projected with
@@ -1086,6 +1096,9 @@ export function modelLong(modelId: string): string {
  * keeps the plain sentence.
  */
 const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
+  // 0.25 x the model + 0.75 x the other books' median no-vig (models/nba_first_basket.py).
+  nba_prop_first_basket:
+    'The chance he scores the game’s first basket: one part our model, three parts the other books’ prices.',
   nba_prop_projection:
     'What our model says is the chance this side hits. Read it as an upper bound: graded on the last ' +
     'three NBA seasons, the bets it would have made averaged 53% here, won 50%, and were priced at 48%.',
@@ -1467,6 +1480,26 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         `finds one. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
       empty: `This model bets while games are being played. ${LIVE_NOT_IN_LIST}`,
       note: 'In-play bets appear on Live Signals, not in this list.',
+    };
+  }
+  // NBA first basket (scripts/nba_first_basket_card.py): checked once a game, 5-20 minutes before
+  // tip, on the starters the books list; at most one player a game, at the best price; each book's
+  // own settlement rule (UX review, 2026-11-20). Not MINUTES_BEFORE_TIP_MODELS: that copy names
+  // five to ten minutes.
+  if (modelId === 'nba_prop_first_basket') {
+    return {
+      title: 'Checked once per game',
+      body:
+        'This model checks each game once, 5 to 20 minutes before tip-off, on the starters the ' +
+        'sportsbooks list, and bets at most one player a game, at the book with the best price, which ' +
+        'may not be DraftKings. DraftKings, Fanatics and BetMGM (where it is listed as First Field ' +
+        'Goal) pay only on a made field goal, and BetRivers is reported to. FanDuel and Caesars count ' +
+        'a free throw; Hard Rock Bet’s rule says the first point, so a free throw should count there too. A posted ' +
+        'bet is never re-priced: it stays at the price it posted at.',
+      empty:
+        'This model checks each game 5 to 20 minutes before tip-off and bets only some of them. ' +
+        'Nothing has posted today so far.',
+      note: 'Posted 5 to 20 minutes before tip-off and never re-priced.',
     };
   }
   // The NBA first quarter's moneyline (models/nba_q1_trend_ml.py): a moneyline

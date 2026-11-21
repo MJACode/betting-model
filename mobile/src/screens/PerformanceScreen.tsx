@@ -21,7 +21,7 @@ import { ErrorBanner } from '@/components/ErrorState';
 import { useManualBets, type ManualBet, type ManualBetResult } from '@/hooks/useManualBets';
 import { useTrackedBetResults, type StakeMode } from '@/hooks/useTrackedBetResults';
 import { ManualBetModal } from '@/components/ManualBetModal';
-import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatAmerican, formatFlatStake, formatFlatUnits, labelWithoutStake } from '@/lib/format';
+import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatAmerican, formatFlatStake, formatFlatUnits } from '@/lib/format';
 import { unitsSpeech } from '@/lib/a11y';
 import type { SyncedBet } from '@/lib/sharpsports';
 import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance';
@@ -29,7 +29,7 @@ import { postedTrackedStake } from '@/lib/trackedStake';
 import { colors, font, pnlColor, radii, spacing, opacity, card, cardDense } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
-import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { bookLabelShort, pickTitleText, storedQuoteBook } from '@/lib/markets';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { PickRowTitle } from '@/components/PickRowTitle';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -81,7 +81,7 @@ export function PerformanceScreen() {
         }
       }}
       onRowLongPress={(row) => {
-        Alert.alert('Stop tracking?', labelWithoutStake(row.pick.pick_label), [
+        Alert.alert('Stop tracking?', pickTitleText(row.pick), [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Untrack',
@@ -479,7 +479,7 @@ function TrackedBetsCard({
               onLongPress={() => onRowLongPress(row)}
               accessibilityRole="button"
               accessibilityLabel={[
-                labelWithoutStake(row.pick.pick_label),
+                pickTitleText(row.pick),
                 formatGameDate(row.pick.game_date),
                 decisionOdds(row.pick) != null
                   ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
@@ -622,7 +622,7 @@ function StakeEditModal({
         <View style={styles.stakeModalCard} accessibilityViewIsModal>
           <Text style={styles.stakeModalTitle}>Your stake for this bet, in units</Text>
           <Text style={styles.stakeModalLabel} numberOfLines={2}>
-            {labelWithoutStake(row?.pick.pick_label)}
+            {row ? pickTitleText(row.pick) : ''}
           </Text>
           <Text style={styles.stakeModalHint}>
             What you risk on this bet, settled at its posted price. Leave it empty to keep the

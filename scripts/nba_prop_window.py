@@ -50,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import data.ingestors.nba_prop_close_ingestor as close_ing  # noqa: E402
 import models.nba_prop_market as mk  # noqa: E402
 import scripts.nba_prop_market_card as card  # noqa: E402
+import scripts.nba_first_basket_card as fb_card  # noqa: E402
 import scripts.nba_prop_projection_card as projection_card  # noqa: E402
 from data.db import get_connection  # noqa: E402
 
@@ -58,6 +59,8 @@ _ET = ZoneInfo("America/New_York")
 # Minutes before tip in which a game is fetched for a decision, both ends
 # inclusive. Five minutes wider than DECISION_WINDOW_MIN (45, 57) at each end.
 LOOK_AHEAD_MIN = (40, 62)
+# The first-basket card's look-ahead: its window (5, 20) widened by two minutes each side.
+FIRST_BASKET_LOOK_MIN = (3, 22)
 
 
 @dataclass
@@ -65,6 +68,12 @@ class Plan:
     decide: list[str] = field(default_factory=list)    # games to fetch and decide
     close: list[str] = field(default_factory=list)     # bet games owed a close
     project: list[str] = field(default_factory=list)   # games due the projection model's frame
+    # games the first-basket card decides on this tick: 3-22 minutes from tip, undecided
+    # (scripts/nba_first_basket_card.py; its own door, its own window)
+    first_basket: list[str] = field(default_factory=list)
+    # today's first-basket state is not prepared yet and a game is 22-62 minutes out: build it now,
+    # so the decision that follows reads the cache (scripts/nba_first_basket_card.prepared_for)
+    first_basket_warm: bool = False
     # An NBA game tips within LOOK_AHEAD_MIN: publish on this tick even with nothing else to do,
     # so a bet a failed or capped Discord run held back still posts before its game starts.
     publish: bool = False
@@ -91,8 +100,31 @@ def plan(conn, now: datetime) -> Plan:
     taken = close_ing.closes_taken(conn, sorted(bet)) if bet else set()
     owed = sorted(g for g, v in bet.items()
                   if close_ing.due(v["tip"], now, has_bet=True, close_taken=g in taken))
+    fb_due = first_basket_due(conn, now)
     return Plan(decide=near, close=owed, project=projection_card.to_project(conn, now),
-                publish=publish)
+                publish=publish or bool(fb_due), first_basket=fb_due,
+                first_basket_warm=first_basket_warm_due(conn, now))
+
+
+def first_basket_warm_due(conn, now: datetime) -> bool:
+    """A game 22-62 minutes out and no prepared state for today's date: one read, no API call."""
+    if fb_card.cache_path(now.astimezone(_ET).date().isoformat()).exists():
+        return False
+    games = fb_card.slate(conn, now, horizon_min=LOOK_AHEAD_MIN[1])
+    return any(FIRST_BASKET_LOOK_MIN[1] < mk.minutes_to_tip(v["tip"], now) <= LOOK_AHEAD_MIN[1]
+               for v in games.values())
+
+
+def first_basket_due(conn, now: datetime) -> list[str]:
+    """The regular-season games 3-22 minutes from tip (FIRST_BASKET_LOOK_MIN, a little wider than
+    the card's 5-20) that the first-basket card has neither decided nor bet. One read; no API call."""
+    games = fb_card.slate(conn, now, horizon_min=FIRST_BASKET_LOOK_MIN[1])
+    near = sorted(g for g, v in games.items()
+                  if mk.minutes_to_tip(v["tip"], now) >= FIRST_BASKET_LOOK_MIN[0])
+    if not near:
+        return []
+    done = fb_card.decided_games(conn, near) | fb_card.games_with_a_bet(conn, near)
+    return [g for g in near if g not in done]
 
 
 def plan_tick(now: datetime | None = None) -> Plan:

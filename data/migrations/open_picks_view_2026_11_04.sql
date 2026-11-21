@@ -44,7 +44,7 @@ BEGIN
 
   IF to_regclass('public.open_picks') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.open_picks'), 'pg_class'), '')
-         = 'open_picks 1605a3f8d18f'
+         = 'open_picks 2b674293294e'
      -- The comment is the body hash. Authenticated SELECT is the grant
      -- step A keeps. Anon SELECT is not part of the skip.
      AND has_table_privilege('authenticated', 'public.open_picks', 'SELECT')
@@ -168,6 +168,7 @@ BEGIN
              WHEN 'nba_prop_player_dd' THEN 'NBA Double-Double'
              WHEN 'nba_prop_market' THEN 'NBA Props'
              WHEN 'nba_prop_projection' THEN 'NBA Projected Props'
+             WHEN 'nba_prop_first_basket' THEN 'NBA First Basket'
              WHEN 'nba_total_luck' THEN 'NBA Totals'
              WHEN 'nba_team_total_luck' THEN 'NBA Team Totals'
              WHEN 'nba_first_half_total_luck' THEN 'NBA First Half Totals'
@@ -286,7 +287,7 @@ BEGIN
       )
     ORDER BY g.commence_time::timestamptz NULLS LAST, p.created_at, p.pick_id
 $view$;
-  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks 1605a3f8d18f'$c$;
+  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks 2b674293294e'$c$;
   REVOKE ALL ON public.open_picks FROM anon, authenticated;
   GRANT SELECT ON public.open_picks TO authenticated;
   IF to_regclass('public.picks') IS NULL

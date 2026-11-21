@@ -79,7 +79,8 @@ FIRST_PLAY_MARGIN = timedelta(seconds=60)
 BATCH = 400
 
 _FULL_GAME_ALT = {"spreads": "alternate_spreads", "totals": "alternate_totals"}
-_ROW_MARKET_MODELS = ("nfl_prop_market", "wnba_prop_market", "nba_prop_market", "nba_prop_projection")
+_ROW_MARKET_MODELS = ("nfl_prop_market", "wnba_prop_market", "nba_prop_market", "nba_prop_projection",
+                      "nba_prop_first_basket")
 _PLAYER_RE = re.compile(r"^(.+?)\s+(?:Over|Under)\s+")
 _SIDE_COL = {"home": "home_price", "away": "away_price", "draw": "draw_price",
              "over": "over_price", "under": "under_price"}

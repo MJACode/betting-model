@@ -122,6 +122,8 @@ const PROP_MARKET_BY_MODEL: Record<string, string> = {
   nba_prop_player_steals: 'player_steals',
   nba_prop_player_turnovers: 'player_turnovers',
   nba_prop_player_dd: 'player_double_double',
+  // NBA first basket (models/nba_first_basket.py, 2026-11-20): Yes only, stored as Over 0.5.
+  nba_prop_first_basket: 'player_first_basket',
   nhl_prop_blocked_shots: 'player_blocked_shots',
   nhl_prop_saves: 'player_total_saves',
   nhl_prop_shots_on_goal: 'player_shots_on_goal',
@@ -147,6 +149,8 @@ const PROP_MARKET_BY_MODEL: Record<string, string> = {
 export function propDisplayLabel(market: string | null, statLabel: string): string {
   if (market === 'player_anytime_td') return 'Anytime TD';
   if (market === 'player_goal_scorer_anytime') return 'Anytime Goal';
+  // Sold as "First Basket" (Yes); a leg reading "Over 0.5" is not a bet anyone can find.
+  if (market === 'player_first_basket') return 'First Basket';
   return statLabel;
 }
 
@@ -161,6 +165,8 @@ export function oneWayMarket(market: string | null, side: 'over' | 'under'): boo
   // Anytime goal scorer is the same Yes/No shape: the book posts Yes (over
   // 0.5) and no No, stored as player_goal_scorer_anytime.
   if (market === 'player_goal_scorer_anytime') return side === 'under';
+  // First basket is Yes only at every book the model bets (Hard Rock's No is not a pick).
+  if (market === 'player_first_basket') return side === 'under';
   return market === 'player_anytime_td' && side === 'under';
 }
 
@@ -228,12 +234,42 @@ export function matchupLedBet(label: string): string | null {
  * total's or a first half's bet without the matchup, every other label as
  * stored. A team total names its team and the row's date places the game; a
  * first half names no team, so pickRowMatchup puts it on its own line. A prop
- * keeps its player name. The row's accessibility label keeps the whole stored
- * label, less the old NFL sizing figure (labelWithoutStake), as this title is.
+ * keeps its player name. The row's accessibility label reads the pick's title
+ * (pickTitleText): the stored label less the old NFL sizing figure, and a Yes-only
+ * prop as the book sells it, as this title is.
  */
-export function pickRowTitle(pick: { pick_label: string }): string {
+export function pickRowTitle(pick: TitlePick): string {
   const label = labelWithoutStake(pick.pick_label);
+  const yes = yesOnlyTitle(pick);
+  if (yes) return `${yes.player} ${yes.stat}`;
   return matchupLedBet(label) ?? label;
+}
+
+/** The fields a title reads: the stored label and, for a Yes-only prop, which market it is. */
+export type TitlePick = { pick_label: string; model_id?: string | null; prop_market?: string | null };
+
+/**
+ * A Yes-only prop's title in the words the book sells it under. First basket, Anytime TD and
+ * Anytime Goal are stored "<player> Over 0.5 First Basket": every reader keyed on "Over" still
+ * parses that (tracking/pick_integrity.py, tracking/clv_close.py, playerNameFromPickLabel), but no
+ * book sells "Over 0.5" there, so the title reads "<player> First Basket" (UX review, 2026-11-20).
+ * Null for every other pick. The stored label is not changed.
+ */
+export function yesOnlyTitle(pick: TitlePick): { player: string; stat: string } | null {
+  const market = pick.model_id
+    ? propMarketForPick({ model_id: pick.model_id, prop_market: pick.prop_market })
+    : pick.prop_market ?? null;
+  if (!market || !oneWayMarket(market, 'under')) return null;
+  const stat = propDisplayLabel(market, '');
+  const m = /^(.+?)\s+Over\s+0\.5\b/i.exec(labelWithoutStake(pick.pick_label));
+  if (!stat || !m) return null;
+  return { player: m[1].trim(), stat };
+}
+
+/** Every surface's one-line text of a pick: the Yes-only title, else the stored label. */
+export function pickTitleText(pick: TitlePick): string {
+  const yes = yesOnlyTitle(pick);
+  return yes ? `${yes.player} ${yes.stat}` : labelWithoutStake(pick.pick_label);
 }
 
 /**
@@ -247,10 +283,13 @@ export function pickRowMatchup(pick: { pick_label: string }): string | null {
   return label.slice(0, label.indexOf(' — ')).trim();
 }
 
-export function splitPickTitle(pick: { pick_label: string }): {
+export function splitPickTitle(pick: TitlePick): {
   primary: string;
   secondary: string | null;
 } {
+  // A Yes-only prop: the bold line is what the book sells ("First Basket"), the player under it.
+  const yes = yesOnlyTitle(pick);
+  if (yes) return { primary: yes.stat, secondary: yes.player };
   // The old NFL sizing figure ("· 0.79u") is not the stake the card shows.
   const label = labelWithoutStake(pick.pick_label);
   // A team total or a first half: the bold line is the bet (the card's header
@@ -2053,6 +2092,8 @@ const BET_BOOK_LINE_MODELS: readonly string[] = [
   'ncaab_first_half_total',
   'nba_prop_market',
   'nba_prop_projection',
+  // NBA first basket (scripts/nba_first_basket_card.py): the same row, line 0.5 at every book.
+  'nba_prop_first_basket',
   'nba_team_total_luck',
   'nba_total_luck',
   'ncaab_spread_market',
@@ -2310,6 +2351,29 @@ export interface PickTiming {
 const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_projection'];
 
 /**
+ * How each book settles first basket (house rules read 2026-11-20; models/nba_first_basket.py
+ * FIELD_GOAL_BOOKS / ANY_SCORE_BOOKS, which settlement reads).
+ */
+const FIRST_BASKET_FIELD_GOAL_BOOKS: readonly string[] = ['draftkings', 'betmgm', 'fanatics', 'betrivers'];
+const FIRST_BASKET_ANY_SCORE_BOOKS: readonly string[] = ['fanduel', 'williamhill_us', 'hardrockbet'];
+
+export function firstBasketRuleNote(book: string | null | undefined): string {
+  if (!book) return '';
+  // BetRivers' rule is from a secondary source only (its own rules page could not be read), so it
+  // is hedged here exactly as on the model page; settlement treats it as field goal only.
+  if (book === 'betrivers') {
+    return ' BetRivers is reported to pay only on the first made field goal: a free throw first doesn’t count.';
+  }
+  if (FIRST_BASKET_FIELD_GOAL_BOOKS.includes(book)) {
+    return ` ${bookName(book)} pays only on the first made field goal: a free throw first doesn’t count.`;
+  }
+  if (FIRST_BASKET_ANY_SCORE_BOOKS.includes(book)) {
+    return ` ${bookName(book)} pays on the first points of any kind, free throws included.`;
+  }
+  return '';
+}
+
+/**
  * When this bet posted, and what that time means for the number beside it.
  *
  * created_at IS the post time for every locked pick, because a locked row is
@@ -2484,6 +2548,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'euroleague_home_dog_spread' ||
     pick.model_id === 'euroleague_h1_dog_ml' ||
     pick.model_id === 'euroleague_q1_club_share_total' ||
+    // NBA first basket decides each game once, 5-20 minutes before tip
+    // (scripts/nba_first_basket_card.py), on the starters the books list.
+    pick.model_id === 'nba_prop_first_basket' ||
     nbaPosted
   ) {
     return {
@@ -2494,7 +2561,8 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
         // A moneyline has no line (UX review, 2026-11-03), and an opening
         // price moves fast: the opening-moneyline model says so where the
         // member places the bet.
-        (POSTED_MONEYLINE_MODELS.includes(pick.model_id)
+        // First basket has no line either: it is Yes at a price (UX review, 2026-11-20).
+        (POSTED_MONEYLINE_MODELS.includes(pick.model_id) || pick.model_id === 'nba_prop_first_basket'
           ? 'Posted once and never re-priced. This is when the bet posted, at the price shown.'
           : 'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
             'shown.') +
@@ -2509,7 +2577,15 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
             ' This pick is for the total and price shown at the book named, not a later one.'
           : '') +
         (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
-        (nbaPosted ? ' Void if the player doesn’t play.' : ''),
+        (nbaPosted ? ' Void if the player doesn’t play.' : '') +
+        (pick.model_id === 'nba_prop_first_basket'
+          ? ' Void if the player doesn’t start.' +
+            (decisionBook(pick) === 'betmgm'
+              ? ' BetMGM lists it as First Field Goal, and keeps the bet live if he comes on before' +
+                ' the first field goal.'
+              : '') +
+            firstBasketRuleNote(decisionBook(pick))
+          : ''),
     };
   }
 

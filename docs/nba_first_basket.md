@@ -124,3 +124,39 @@ Not registered, seen in test 1's splits, not acted on: home starters +19.4% (1,2
 
 Files: `<R>/first_basket/grade_*.csv|parquet`, `grade2_*`, `grade3_bets.parquet`; scripts
 `fb_grade.py`, `fb_grade2.py`, `fb_grade3.py`.
+
+## 7. Live (2026-11-20, mike: "yes")
+
+mike put the blend live on 2026-11-20, after section 6, knowing it fails the interval bar. It is
+`nba_prop_first_basket` (`models/nba_first_basket.py`, `scripts/nba_first_basket_card.py`; config and
+caps in `docs/thresholds.md`). The id carries `_prop_` because every settler, view and app path that
+tells a player prop from a game pick reads the name.
+
+- **The rule is test 2b, unchanged**: 0.25 x the model + 0.75 x the median no-vig of the other deciding
+  books quoting the starter (three or more), EV >= 0.05 at the book's price, one bet a game.
+- **When**: once a game, 5-20 minutes before tip, on the newest fetch; the five-minute window job
+  fetches the games 3-22 minutes out and decides them first in its tick.
+- **The starters** are the ones the books list (the grade used the box's). Replayed on the bought
+  snapshots of 2024-25..2026-27 (`<R>/scripts/fb_fidelity.py`), the live code made 1,862 bets against
+  the grade's 1,930: 1,690 identical (game, player and book), 61 the same player at another book, 76
+  another player, 103 graded only, 35 live only. 100 games were declined because a team listed three
+  starters or fewer.
+- **Its state** (the tip and first-score counts, every season since 2018-19, decayed by half a season)
+  is learned from `nba_first_basket_games` / `_players`, backfilled for 2018-19..2024-25 on
+  2026-11-20, and points from `nba_player_game_log`. Against the research model on the same 39,150
+  starter-games: mean difference 0.00003, largest 0.00288 (`<R>/scripts/fb_parity.py`). It is built
+  once a game date (read 56.3 s, learned 27.0 s) and cached under `data/local/cache/nba_first_basket/`.
+- **Settled by each book's own rule** (house rules read 2026-11-20, `<R>/first_basket/book_rules.md`):
+  the first made field goal at DraftKings, BetMGM, Fanatics and BetRivers (BetRivers from a secondary
+  source); the first points of any kind at FanDuel, Caesars and Hard Rock (Hard Rock's says "first
+  point", free throws not named). Every bet is a listed starter, and a non-starter is no action at
+  every book (BetMGM alone voids only a player who does not play). The price is not split by book:
+  the grade priced every quote one way. On each book's own rule the graded bets made +18.91 units,
+  +9.67% (-3.17% to +23.02%). Seen, not acted on: bets at the first-points books +20.7% (718), at the
+  field-goal books +3.7% (1,212).
+- **What it lays**: +425 to +9900, 5th percentile +625, median +1000, 95th +1645
+  (`grade2_2b_blend_bets.parquet`); about 5.5 bets a night over 353 game dates; a median 0.10 unit at
+  risk a bet, at 1 unit to win.
+- **The market may go.** AP and Front Office Sports reported on 2026-10-16 that the NBA asked its
+  partner books to stop offering single-player "first-of" bets. Nine books quoted it on 2026-11-20 and
+  the 2026-27 history holds it on 226 games.
