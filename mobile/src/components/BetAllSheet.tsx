@@ -78,9 +78,6 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
   // pick is listed and ticked like any other, marked "Tracking"; to leave
   // them out, pick "Not tracked" in the board's filter sheet.
   const picks = allPicks;
-  // Tracked picks that are ticked: named above the button so a bet already
-  // placed is never sent to a book again unnoticed (UX review, 2026-11-21).
-  const trackedTicked = picks.filter((p) => selected.has(p.key) && isTracked(p.pick)).length;
   // The picks already tracked when Start was tapped. The send step's progress
   // counts only bets placed in THIS run, so a pick tracked before it does not
   // read as done here (UX review, 2026-11-21).
@@ -91,6 +88,11 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
   const [steps, setSteps] = useState<BetAllStep[]>([]);
   const [opened, setOpened] = useState<Set<string>>(() => new Set());
   const awaiting = useRef<string | null>(null);
+  // Tracked picks that are ticked: named above the button so a bet already
+  // placed is never sent to a book again unnoticed (UX review, 2026-11-21).
+  // Read AFTER `selected` is declared: above it, the shipped bundle reads
+  // `selected` as undefined and every open of the sheet crashed (2026-11-21).
+  const trackedTicked = picks.filter((p) => selected.has(p.key) && isTracked(p.pick)).length;
 
   // A fresh sheet every time it opens: every pick ticked, Best line.
   const pickKeys = allPicks.map((p) => p.key).join(',');

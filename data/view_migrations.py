@@ -813,6 +813,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-11-21 (Matt): one row per run of the hourly record-vs-sheet check
     # (tracking/record_sheet_check.py). Creates the table once.
     "record_sheet_checks_2026_11_21.sql",
+    # AI assistant (MCP): prop_prices carries alternate lines too (Matt,
+    # 2026-11-21), market = base market + is_alternate. Runs while that
+    # column is missing.
+    "mcp_stats_alt_lines_2026_11_21.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

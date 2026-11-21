@@ -282,7 +282,6 @@ def test_discord_free_pick_candidates_refuse(monkeypatch):
 
 def test_push_pregame_refuses_and_does_not_ledger(monkeypatch):
     monkeypatch.setattr(push_notifier, "_new_bet_signals", lambda c, d: [GOOD, BAD])
-    monkeypatch.setattr(push_notifier, "_dropped_signals", lambda c, d: [])
     conn = _Conn()
     push_notifier._send_signal_changes(conn, "2026-09-13", False)
     assert conn.ledgered() == {GOOD["lock_key"]}
@@ -293,16 +292,6 @@ def test_push_live_refuses_and_does_not_ledger(monkeypatch):
     conn = _Conn()
     monkeypatch.setattr(push_notifier, "get_connection", lambda: conn)
     push_notifier.notify_live_signals("2026-09-13")
-    assert conn.ledgered() == {GOOD["lock_key"]}
-
-
-def test_push_dropped_refuses_and_does_not_ledger(monkeypatch):
-    """The "moved past the bet line" alert names a pick too, so it is checked
-    like every other send path."""
-    monkeypatch.setattr(push_notifier, "_new_bet_signals", lambda c, d: [])
-    monkeypatch.setattr(push_notifier, "_dropped_signals", lambda c, d: [GOOD, BAD])
-    conn = _Conn()
-    push_notifier._send_signal_changes(conn, "2026-09-13", False)
     assert conn.ledgered() == {GOOD["lock_key"]}
 
 

@@ -6,10 +6,15 @@ locked opening signals against a `push_sent` ledger to find:
 
   • new_bet — a signal that just cleared the action thresholds (a fresh,
     bettable BET the user would want to know about), not yet pushed.
-  • dropped — a previously-pushed signal whose live pick has since flipped to
-    AVOID (the line moved against it), game not yet started, not yet pushed.
 
-It sends ONE summary push per event type per device (not one per signal) to bound
+THERE IS NO "DROPPED" PUSH (Matt, 2026-11-21: "When a bet becomes a signal,
+it stays. Then we will tell the user how much it has moved since it was
+locked by showing it on the card. Nothing else is needed."). A signal is a
+locked BET (CLAUDE.md §1c); line movement after the lock is shown on the
+pick's card, not announced. The removed "moved past the bet line" alert had
+fired once, on 2026-07-11, before picks locked.
+
+It sends ONE summary push per device (not one per signal) to bound
 noise, then ledgers every notified lock_key so nothing is pushed twice across the
 hourly runs. Idempotent and safe to re-run; --dry-run prints intended pushes
 without sending or ledgering.
@@ -165,48 +170,6 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
             for r in rows]
 
 
-def _dropped_signals(conn, target_date: str) -> list[dict]:
-    """Signals we previously pushed as new_bet whose live pick is now AVOID
-    (flipped against us), still pre-settlement, not yet pushed as dropped."""
-    rows = conn.execute(f"""
-        SELECT DISTINCT os.lock_key, os.pick_label, os.sport, os.locked_at,
-               p.pick_id, os.model_id, os.pick_side, os.scored_line,
-               g.home_team, g.away_team
-        FROM opening_signals os
-        LEFT JOIN games g ON g.game_id = os.game_id
-        JOIN push_sent prior
-          ON prior.lock_key = os.lock_key AND prior.kind = 'new_bet'
-        -- MATCHED ON THE LOCK_KEY, not on the component columns (2026-09-09).
-        -- The old join carried `COALESCE(p.player_id,'') =
-        -- COALESCE(os.player_id,'')`, which is not a match at all for a model
-        -- that leaves player_id NULL: every `nfl_prop_market` pick in a game
-        -- matched every shadow row for that game, so one flipped prop could
-        -- announce another prop as dropped. opening_signals stores no
-        -- player_key/prop_market column, and does not need one -- its lock_key
-        -- already carries them, and it is the identity every surface agrees on.
-        JOIN picks p
-          ON os.lock_key = {lock_key_sql()}
-         AND p.pick_side = os.pick_side
-         AND p.game_date = os.game_date
-        WHERE os.game_date = %s
-          AND os.lock_key NOT LIKE '%%:early'
-          AND os.result IS NULL
-          AND p.signal_type = 'AVOID'
-          -- A paused model's AVOID is its real verdict but not a signal
-          -- (scorer._paused_signal): it never announces a "dropped" bet.
-          {config.paused_row_exclusion_sql("p")}
-          AND NOT EXISTS (
-              SELECT 1 FROM push_sent s
-              WHERE s.lock_key = os.lock_key AND s.kind = 'dropped'
-          )
-        ORDER BY os.locked_at
-    """, (target_date,)).fetchall()
-    return [{"lock_key": r[0], "label": r[1], "sport": r[2], "pick_id": r[4],
-             "model_id": r[5], "side": r[6], "line": r[7],
-             "home": r[8], "away": r[9]}
-            for r in rows]
-
-
 # ── Message building ─────────────────────────────────────────────────────────
 
 def _summary_body(labels: list[str]) -> str:
@@ -220,30 +183,14 @@ def _summary_body(labels: list[str]) -> str:
     return body
 
 
-def _build_messages(tokens: list[str], new_bets: list[dict], dropped: list[dict]) -> list[dict]:
-    """One message per (token × non-empty event type)."""
+def _build_messages(tokens: list[str], new_bets: list[dict]) -> list[dict]:
+    """One message per token, when there are new bets."""
     messages: list[dict] = []
     events: list[tuple[str, str, dict]] = []
     if new_bets:
         title = f"🟢 {len(new_bets)} new BET signal{'s' if len(new_bets) != 1 else ''}"
         events.append((title, _summary_body([s["label"] for s in new_bets]),
                        _route("new_bets", new_bets)))
-    if dropped:
-        # LINE MOVEMENT, not a retraction. "flipped to AVOID" told the reader
-        # their locked pick had been taken back, while the app's own tooltip
-        # says "a signal shown here won't flip to AVOID later" — two surfaces
-        # describing one pick differently, which CLAUDE.md §1b forbids. §1c
-        # settles which is true: the pick stands at the number it was given,
-        # and what changed is the market. The wording now says that.
-        title = (f"📉 {len(dropped)} pick{'s' if len(dropped) != 1 else ''} "
-                 "moved past the bet line")
-        # Never lands on Signals: once the line has moved past the cut the
-        # pick is no longer a signal, so Signals is the one board it is
-        # guaranteed NOT to be on. One pick opens that pick; several open the
-        # app only, since the All board they used to land on was removed
-        # (Matt, 2026-11-20; mobile/src/lib/pushRoute.ts).
-        events.append((title, _summary_body([s["label"] for s in dropped]),
-                       _route("dropped", dropped)))
 
     for token in tokens:
         for title, body, data in events:
@@ -420,7 +367,7 @@ def _store_inbox(conn, rows: list[dict]) -> None:
     insert_rows(conn, rows)
 
 
-def _fanout_summaries(conn, plan, new_bets, dropped, build) -> tuple[list[dict], list[dict]]:
+def _fanout_summaries(conn, plan, new_bets, build) -> tuple[list[dict], list[dict]]:
     """One summary per user, rebuilt after that user's mutes are removed.
 
     Rows are returned, not written. The caller inserts them after the send,
@@ -433,20 +380,17 @@ def _fanout_summaries(conn, plan, new_bets, dropped, build) -> tuple[list[dict],
     for user_id, group in groups:
         muted = mutes.get(user_id, set()) if user_id else set()
         bets = visible_signals(new_bets, muted)
-        drops = visible_signals(dropped, muted)
-        if not bets and not drops:
+        if not bets:
             continue
         tokens = [d["token"] for d in group if d.get("token")]
         if not tokens:
             continue
-        built = build(tokens, bets, drops)
+        built = build(tokens, bets)
         if user_id:
             bet_keys = [str(s["lock_key"]) for s in bets if s.get("lock_key")]
-            drop_keys = [str(s["lock_key"]) for s in drops if s.get("lock_key")]
             for msg in built:
                 kind = str((msg.get("data") or {}).get("type") or "alert")
-                parts = bet_keys if kind == "new_bets" else drop_keys
-                msg["data"] = bind_inbox_id(user_id, kind, parts, msg.get("data") or {})
+                msg["data"] = bind_inbox_id(user_id, kind, bet_keys, msg.get("data") or {})
             rows.extend(_stamp_owned([(user_id, msg) for msg in built], unread))
         messages.extend(built)
     return messages, rows
@@ -513,7 +457,7 @@ def _feedback_inbox_rows(conn, replies: list[dict], messages: list[dict]) -> lis
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 def notify_signal_changes(target_date: str | None = None, dry_run: bool = False) -> int:
-    """Detect new/dropped signals, push a summary to every enabled device, and
+    """Detect new signals, push a summary to every enabled device, and
     ledger what was sent. Returns the number of push messages sent."""
     if target_date is None:
         target_date = date.today().isoformat()
@@ -537,9 +481,8 @@ def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
     """The body of notify_signal_changes, under the publisher lock."""
     # Refused picks are neither pushed nor ledgered (tracking/pick_integrity).
     new_bets = refuse_mismatched(_new_bet_signals(conn, target_date), "Push")
-    dropped = refuse_mismatched(_dropped_signals(conn, target_date), "Push(dropped)")
-    if not new_bets and not dropped:
-        logger.info(f"Push: no new/dropped signals for {target_date}")
+    if not new_bets:
+        logger.info(f"Push: no new signals for {target_date}")
         return 0
 
     plan = _inbox_plan(conn)
@@ -553,15 +496,13 @@ def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
         device_count = sum(len(group) for _, group in plan[0])
 
     logger.info(
-        f"Push: {len(new_bets)} new, {len(dropped)} dropped for {target_date}; "
+        f"Push: {len(new_bets)} new for {target_date}; "
         f"{device_count} device(s)"
     )
 
     if dry_run:
         for s in new_bets:
             logger.info(f"[dry-run] new_bet → {s['label']}")
-        for s in dropped:
-            logger.info(f"[dry-run] dropped → {s['label']}")
         return 0
 
     # Ledger regardless of token count, so a signal with zero devices online
@@ -569,21 +510,15 @@ def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
     sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
     inbox_rows: list[dict] = []
     if plan is None:
-        messages = _build_messages(tokens, new_bets, dropped) if tokens else []
+        messages = _build_messages(tokens, new_bets) if tokens else []
     else:
-        messages, inbox_rows = _fanout_summaries(conn, plan, new_bets, dropped, _build_messages)
+        messages, inbox_rows = _fanout_summaries(conn, plan, new_bets, _build_messages)
     sent = _expo_send(messages, conn) if messages else 0
     _store_inbox(conn, inbox_rows)
 
     for s in new_bets:
         conn.execute(
             "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, 'new_bet', %s) "
-            "ON CONFLICT (lock_key, kind) DO NOTHING",
-            (s["lock_key"], sent_at),
-        )
-    for s in dropped:
-        conn.execute(
-            "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, 'dropped', %s) "
             "ON CONFLICT (lock_key, kind) DO NOTHING",
             (s["lock_key"], sent_at),
         )

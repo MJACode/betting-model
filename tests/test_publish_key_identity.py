@@ -146,8 +146,7 @@ def test_every_publisher_mints_the_key_from_the_shared_helper():
     """A hand-rolled copy is how the surfaces drifted in the first place."""
     for sql in (_sql(dn._new_signals, "2026-09-09"),
                 _sql(dn._locked_signals, "2026-09-09"),
-                _sql(pn._new_bet_signals, "2026-09-09"),
-                _sql(pn._dropped_signals, "2026-09-09")):
+                _sql(pn._new_bet_signals, "2026-09-09")):
         assert lock_key_sql() in sql
 
 
