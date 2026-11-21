@@ -1,14 +1,14 @@
 # Signal-flip push notifications
 
 The **backend is built and live**: a `push-notifications` pipeline step detects
-new/dropped signals and pushes a summary to every opted-in device via the keyless
+new signals and pushes a summary to every opted-in device via the keyless
 Expo Push API. What remains is the **mobile half**, which needs a native rebuild +
 push credentials — only doable on Matt's machine with the Apple/Google accounts.
 This file is the precise enablement guide.
 
 > **Now three producers** (all share the same tokens + `push_sent` ledger; this
 > doc's enablement covers all of them):
-> - `notify_signal_changes` — new/dropped pre-game BET signals (hourly pipeline).
+> - `notify_signal_changes` — new pre-game BET signals (hourly pipeline).
 > - `notify_line_changes` — Track-a-bet: a tracked bet's DK line moved ≥
 >   `config.LINE_CHANGE_NOTIFY_PP` (hourly pipeline). Needs `device_id` on the
 >   token row (see the hook below).
@@ -27,12 +27,13 @@ This file is the precise enablement guide.
   - `new_bet`: a locked `opening_signals` row that clears the current
     `model_action_thresholds` cut (same filter the app's `passesActionFilter` uses)
     and hasn't been pushed.
-  - `dropped`: a previously-pushed signal whose live pick is now `AVOID`
-    (flipped against us), pre-settlement.
-  - Sends **one summary push per event type per device** (not one per signal),
+  - There is **no `dropped` push** (removed 2026-11-21, Matt: a signal stays a
+    signal; how far the line has moved since the lock is shown on its card).
+    It had fired once, on 2026-07-11.
+  - Sends **one summary push per device** (not one per signal),
     then ledgers every `lock_key`. Idempotent across the hourly runs.
 - **Pipeline**: runs last as Step 11; `python run_pipeline.py --step push-notifications`
-  (supports `--dry-run`). No-op when there are no devices or no new/dropped signals.
+  (supports `--dry-run`). No-op when there are no devices or no new signals.
 
 ## Status, measured — NO PUSH HAS EVER REACHED A PHONE (re-measured 2026-09-12)
 
@@ -162,7 +163,7 @@ live pick (~45s stale by construction) discarded the point of the notification.
 | one pick in the batch | that pick's detail screen |
 | `live_signals` (several) | Picks → Live segment |
 | `new_bets` (several) | Picks → Signals |
-| `dropped` | Picks → Today (a flipped pick is no longer a signal) |
+| `dropped` | no longer sent (2026-11-21); an old one naming one pick opens it |
 | `line_change` | the tracked bet's detail (always exactly one) |
 | `feedback_reply` | that support thread |
 

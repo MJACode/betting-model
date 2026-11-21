@@ -109,12 +109,12 @@ def test_the_route_helper_only_sets_sport_when_it_is_unambiguous():
 def test_every_summary_producer_can_deep_link_a_single_pick():
     """Two pushes of the same shape must not behave differently.
 
-    _dropped_signals had no pick_id, so a one-pick "moved past the bet line"
-    push dumped the reader on the whole Today board to find it while the
-    identical new_bets push opened the pick (UX review, 2026-09-06).
+    The "moved past the bet line" producer, which once lacked pick_id, was
+    removed 2026-11-21 (Matt): a signal stays, its card shows the move.
     """
     src = _read(NOTIFIER)
-    for fn in ("_new_bet_signals", "_dropped_signals", "_new_live_signals"):
+    assert "def _dropped_signals(" not in src
+    for fn in ("_new_bet_signals", "_new_live_signals"):
         body = re.search(rf"def {fn}\(.*?\n\n\n", src, re.S)
         assert body, f"{fn} not found"
         assert '"pick_id"' in body.group(0), (

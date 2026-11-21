@@ -62,7 +62,7 @@ def test_one_remaining_pick_keeps_a_single_pick_route():
         {"sport": "UFC", "label": "muted fighter", "pick_id": 10},
     ]
     kept = visible_signals(signals, {"UFC"})
-    messages = _build_messages(["ExponentPushToken[abcdefghij]"], kept, [])
+    messages = _build_messages(["ExponentPushToken[abcdefghij]"], kept)
     assert len(messages) == 1
     assert messages[0]["title"] == "🟢 1 new BET signal"
     assert messages[0]["data"]["pickId"] == 9
@@ -80,7 +80,7 @@ def test_a_multi_sport_remainder_does_not_name_one_sport():
         {"sport": "UFC", "label": "C", "pick_id": 3},
     ]
     kept = visible_signals(signals, {"UFC"})
-    msg = _build_messages(["ExponentPushToken[abcdefghij]"], kept, [])[0]
+    msg = _build_messages(["ExponentPushToken[abcdefghij]"], kept)[0]
     assert msg["title"] == "🟢 2 new BET signals"
     assert "pickId" not in msg["data"]
     assert "sport" not in msg["data"]
@@ -224,7 +224,6 @@ def test_send_signal_changes_filters_mutes_and_ledgers_them(monkeypatch):
     sent: list[list[dict]] = []
     monkeypatch.setattr(pn, "refuse_mismatched", lambda rows, *_a, **_k: rows)
     monkeypatch.setattr(pn, "_new_bet_signals", lambda _c, _d: _signals())
-    monkeypatch.setattr(pn, "_dropped_signals", lambda _c, _d: [])
     monkeypatch.setattr(pn, "_inbox_plan", lambda _c: plan)
     monkeypatch.setattr(pn, "_expo_send", lambda messages, conn=None: sent.append(messages) or len(messages))
     conn = _Recorder()
