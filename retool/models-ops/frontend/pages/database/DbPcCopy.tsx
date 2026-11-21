@@ -157,7 +157,14 @@ export default function DbPcCopy({ data, loading, error, now = Date.now() }: Pro
     const firstWithSize = points.find(p => p.total_bytes != null)
     const schedule = [...points].reverse().find(p => p.schedule != null)?.schedule ?? null
     // One line per copy run, newest first. A run reported twice (by hand, then
-    // by the pass) is listed once.
+    // by the pass) is listed once, from the row that knows its exit code
+    // (supabase_exit not null) when there is one, else from the newest row.
+    const withExit = new Map<string, PcCopyPoint>()
+    for (const p of [...points].reverse()) {
+      if (p.copy_this_pass === false || !p.copy_started_at || p.supabase_exit == null) continue
+      const key = p.copy_run_id ?? p.copy_started_at
+      if (!withExit.has(key)) withExit.set(key, p)
+    }
     const seen = new Set<string>()
     const runs: PcCopyPoint[] = []
     for (const p of [...points].reverse()) {
@@ -172,7 +179,7 @@ export default function DbPcCopy({ data, loading, error, now = Date.now() }: Pro
       const key = p.copy_run_id ?? p.copy_started_at
       if (seen.has(key)) continue
       seen.add(key)
-      runs.push(p)
+      runs.push(withExit.get(key) ?? p)
       if (runs.length >= 14) break
     }
     return { latest, nightly, firstWithSize, schedule, runs }

@@ -798,3 +798,20 @@ def test_auto_runs_the_full_once_a_month_and_a_diff_otherwise(tmp_path):
         "a run by hand on a few tables is never the month's full"
     assert lm.choose_kind("full", tmp_path, nov19, partial=False)[0] == "full"
     assert lm.choose_kind("diff", tmp_path, dec3, partial=False)[0] == "diff"
+
+
+def test_the_total_line_takes_its_diff_over_the_tables_counted_in_supabase():
+    """2026-11-21: the diff's TOTAL said -13,237,404 rows, which was the two
+    caches the diff leaves as they are (no Supabase count) less 8 real rows."""
+    results = [
+        lm.TableResult("public.latest_odds", "skipped", local_rows=3_479_051),
+        lm.TableResult("public.latest_prop_odds", "skipped", local_rows=9_758_361),
+        lm.TableResult("public.tennis_dk_selections", "incremental", local_rows=256_928,
+                       server_rows=256_936, mismatched=2),
+        lm.TableResult("public.picks", "incremental", local_rows=100, server_rows=100),
+    ]
+    text = lm._fmt_table(results)
+    total = next(line for line in text.splitlines() if line.startswith("TOTAL"))
+    assert total.split()[3:7] == ["13,494,440", "257,036", "+8", "0"], total
+    assert "cover the 2 table(s) counted in Supabase this run; the other 2 were not counted" in text
+    assert "were not counted" not in lm._fmt_table(results[2:])
