@@ -74,6 +74,71 @@ def test_qr_svg_and_length_limit():
         qr.encode("x" * 200)
 
 
+# ── the stream of API calls and data movement ───────────────────────────────
+
+# Rows as api_call_log returns them (call_id, epoch, api, category, method,
+# path, sport, status, ok, duration_ms, resp_bytes, credits, quota_remaining,
+# error, source); values seen in the table on 2026-11-21.
+CALL_PC = (9001, 1795301000.5, "DraftKings", "book", "GET", "/api/sportscontent/dkusoh/v1/leagues/87637",
+           "NCAAF", 200, True, 173, 48211, None, None, None, "data.ingestors.dk_live_board")
+CALL_ODDS = (9002, 1795301001.0, "The Odds API", "odds", "GET",
+             "/v4/sports/basketball_ncaab/odds?regions=us&markets=h2h,spreads,totals&bookmakers=draftkings",
+             "NCAAB", 200, True, 128, 9120, 2.0, 4123456, None, "pipeline")
+CALL_FAILED = (9003, 1795301002.0, "Action Network", "public", "GET", "/web/v2/scoreboard/nhl?date=20261122",
+               None, 503, False, 114, None, None, None, "HTTP 503 Service Unavailable", "pipeline")
+
+
+def test_calls_become_events_with_the_machine_that_made_them():
+    from pc_monitor import readers as R
+    pc = R.call_event(CALL_PC, R.PC_CALL_SOURCES)
+    assert pc["where"] == "pc" and pc["provider"] == "DraftKings" and pc["ms"] == 173 and pc["ok"]
+    odds = R.call_event(CALL_ODDS, R.PC_CALL_SOURCES)
+    assert odds["where"] == "worker" and odds["credits"] == 2.0 and odds["credits_left"] == 4123456
+    assert "?" not in odds["what"] and "regions" not in odds["what"]      # no query string on a phone
+    bad = R.call_event(CALL_FAILED, R.PC_CALL_SOURCES)
+    assert bad["ok"] is False and bad["status"] == 503 and "503" in bad["error"]
+    assert R.module_of(["python.exe", "-m", "scripts.tennis_dk_probe"]) == "scripts.tennis_dk_probe"
+    assert R.module_of(["powershell.exe", "-File", "x.ps1"]) is None
+
+
+def test_a_saved_row_reads_with_the_home_number():
+    from pc_monitor import readers as R
+    e = R.save_event((70711, "NCAAF", "401752991", 1795301003.0, "Q3", 21, 14, -3.5, 51.5))
+    assert e["kind"] == "saved" and e["where"] == "pc"
+    assert "home 21, away 14 (Q3)" in e["what"] and "home spread -3.5" in e["what"] and "total 51.5" in e["what"]
+
+
+def test_the_timeline_buckets_calls_by_provider_and_keeps_colours_fixed():
+    from pc_monitor import readers as R
+    now = 1795301005.0
+    b0 = (now // 10) * 10
+    rows = [(b0, "DraftKings", "data.ingestors.dk_live_board", 9, 0, 0),
+            (b0, "The Odds API", "pipeline", 3, 1, 6.0),
+            (b0 - 10, "NHL API", "pipeline", 2, 0, 0),           # not a fixed slot: Other
+            (b0 - 700, "DraftKings", "pipeline", 99, 0, 0)]      # outside the window
+    tl = R.call_timeline(rows, now, R.PC_CALL_SOURCES)
+    series = {s["name"]: s["counts"] for s in tl["series"]}
+    assert tl["n"] == 60 and series["DraftKings"][-1] == 9 and series["The Odds API"][-1] == 3
+    assert series["Other"][-2] == 2 and sum(series["DraftKings"]) == 9
+    assert tl["failed"][-1] == 1
+    assert [s["name"] for s in tl["series"]] == [*R.PROVIDER_SLOTS, "Other"]   # order never follows volume
+    assert tl["calls_last_min"] == {"pc": 9, "worker": 5}
+    odds = next(p for p in tl["providers"] if p["name"] == "The Odds API")
+    assert odds == {"name": "The Odds API", "where": "worker", "slot": "The Odds API",
+                    "calls": 3, "failed": 1, "credits": 6.0}
+
+
+def test_the_view_carries_the_stream_newest_first_and_the_phone_copy_is_trimmed():
+    from pc_monitor import readers as R
+    from pc_monitor.app import view
+    events = [R.call_event(r, R.PC_CALL_SOURCES) for r in (CALL_PC, CALL_ODDS, CALL_FAILED)]
+    panels = {"events": {"data": events, "read_at": 1795301003.0}}
+    v = view(panels, 1795301005.0)
+    assert [e["id"] for e in v["flow"]["events"]] == ["c9003", "c9002", "c9001"]
+    assert v["flow"]["odds_api_credits_left"] == 4123456
+    assert len(view(panels, 1795301005.0, stream_limit=2)["flow"]["events"]) == 2
+
+
 # ── how often the PC writes ─────────────────────────────────────────────────
 
 def test_the_pc_writes_fast_only_while_a_phone_is_watching():

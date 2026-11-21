@@ -375,6 +375,102 @@ def last_json_line(text: str | None) -> dict[str, Any] | None:
     return None
 
 
+# ── API calls and data movement ─────────────────────────────────────────────
+
+# Every outgoing call the system makes is a row in api_call_log, from the worker
+# and from this PC alike (monitoring/probe.py writes it). Which machine made a
+# call is worked out from the program that made it: a module this PC is
+# running (or has run this session) is this PC; everything else is the worker.
+PC_CALL_SOURCES = frozenset({"data.ingestors.dk_live_board"})
+
+# Fixed colour slots, by provider, so a provider keeps its colour whatever its
+# volume. Everything else is "Other" (grey on the page).
+PROVIDER_SLOTS = ("DraftKings", "The Odds API", "ESPN (site)", "ESPN (core)", "CFBD", "www.bovada.lv")
+
+
+def module_of(cmdline: Iterable[str] | None) -> str | None:
+    """'python -m data.ingestors.dk_live_board ...' -> 'data.ingestors.dk_live_board'."""
+    args = list(cmdline or [])
+    for i, a in enumerate(args):
+        if a == "-m" and i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def _short_path(path: Any) -> str:
+    """The call's path without its query string (which can carry parameters
+    nobody needs on a phone)."""
+    p = str(path or "").split("?", 1)[0]
+    return p if len(p) <= 70 else p[:67] + "..."
+
+
+def call_event(row: tuple, pc_sources: Iterable[str]) -> dict[str, Any]:
+    """One api_call_log row (call_id, epoch, api, category, method, path, sport,
+    status, ok, duration_ms, resp_bytes, credits, quota_remaining, error,
+    source) as a stream event."""
+    (cid, at, api, category, method, path, sport, status, ok, ms, size, credits,
+     remaining, error, source) = row
+    return {
+        "id": f"c{cid}", "at": at, "kind": "call",
+        "where": "pc" if source in set(pc_sources) else "worker",
+        "provider": api, "category": category, "what": f"{method} {_short_path(path)}",
+        "by": source, "sport": sport, "status": status, "ok": bool(ok), "ms": ms,
+        "bytes": size, "credits": float(credits) if credits else None,
+        "credits_left": float(remaining) if remaining is not None else None,
+        "error": (str(error)[:120] if error else None),
+    }
+
+
+def save_event(row: tuple) -> dict[str, Any]:
+    """One new dk_live_reads row (id, sport, game_id, epoch, period_label,
+    home_score, away_score, spread_home, total_line): a line or score change
+    this PC saved to the database."""
+    rid, sport, game, at, period, hs, as_, spread, total = row
+    bits = [f"{sport} game {game}"]
+    if hs is not None and as_ is not None:
+        bits.append(f"home {hs}, away {as_}" + (f" ({period})" if period else ""))
+    if spread is not None:
+        bits.append(f"home spread {spread:+g}")
+    if total is not None:
+        bits.append(f"total {total:g}")
+    return {"id": f"s{rid}", "at": at, "kind": "saved", "where": "pc", "provider": "Supabase",
+            "what": "saved to dk_live_reads: " + ", ".join(bits), "ok": True}
+
+
+def call_timeline(rows: list[tuple], now: float, pc_sources: Iterable[str],
+                  bucket_s: int = 10, window_s: int = 600) -> dict[str, Any]:
+    """Calls per bucket over the window, by provider slot, from rows of
+    (bucket epoch, api, source, calls, failed, credits); plus a per-provider
+    table and the calls a minute each machine made over the last minute."""
+    pcs = set(pc_sources)
+    n = window_s // bucket_s
+    start = (now // bucket_s) * bucket_s - (n - 1) * bucket_s
+    series = {name: [0] * n for name in (*PROVIDER_SLOTS, "Other")}
+    failed = [0] * n
+    providers: dict[tuple[str, str], dict[str, Any]] = {}
+    last_min = {"pc": 0, "worker": 0}
+    for b, api, source, calls, bad, credits in rows:
+        i = int((b - start) // bucket_s)
+        if not 0 <= i < n:
+            continue
+        slot = api if api in series and api != "Other" else "Other"
+        series[slot][i] += int(calls)
+        failed[i] += int(bad or 0)
+        where = "pc" if source in pcs else "worker"
+        p = providers.setdefault((api, where), {"name": api, "where": where, "slot": slot,
+                                                "calls": 0, "failed": 0, "credits": 0.0})
+        p["calls"] += int(calls)
+        p["failed"] += int(bad or 0)
+        p["credits"] += float(credits or 0)
+        if b >= now - 60:
+            last_min[where] += int(calls)
+    return {"start": start, "bucket_s": bucket_s, "n": n,
+            "series": [{"name": k, "counts": v} for k, v in series.items()],
+            "failed": failed,
+            "providers": sorted(providers.values(), key=lambda p: -p["calls"]),
+            "calls_last_min": last_min}
+
+
 # ── judgements ──────────────────────────────────────────────────────────────
 
 def feed_presence(running: bool, now: float, in_window: bool | None,
