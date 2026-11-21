@@ -1922,6 +1922,22 @@ def step_nba_props(dry_run: bool = False) -> bool:
         return False
 
 
+def step_nba_first_basket(dry_run: bool = False) -> bool:
+    """NBA first basket (`nba_prop_first_basket`, models/nba_first_basket.py): decides each
+    regular-season game once, 5-20 minutes before tip, on the newest first-basket fetch, and writes
+    at most one bet a game through its OWN door (scripts/nba_first_basket_card.py), not the NBA prop
+    door. Run by the five-minute NBA prop window job right after its fetch. LIVE, no write switch
+    (mike, 2026-11-20). A look with no game in its window writes nothing."""
+    try:
+        from scripts.nba_first_basket_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA first basket: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA first basket failed: {exc}")
+        return False
+
+
 def step_nba_prop_market(dry_run: bool = False) -> bool:
     """The old name for step_nba_props, kept so existing callers keep working. One model's card
     alone never writes (the card that ran first would win the game's one bet)."""
@@ -3140,7 +3156,7 @@ Examples:
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
-                                 "nba-props", "nba-prop-market", "nba-prop-close",
+                                 "nba-props", "nba-prop-market", "nba-prop-close", "nba-first-basket",
                                  "nba-prop-projection", "nba-prop-project",
                                  "nba-total-luck", "nba-team-total-luck", "nba-first-half-total-luck", "nba-q1-trend",
                                  "nba-q1-trend-ml",
@@ -3240,6 +3256,7 @@ Examples:
             "nhl-goalie-designations-today": lambda: step_nhl_goalie_designations(today_only=True),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "nba-props": lambda: step_nba_props(dry_run=args.dry_run),
+            "nba-first-basket": lambda: step_nba_first_basket(dry_run=args.dry_run),
             "nba-prop-market": lambda: step_nba_prop_market(dry_run=args.dry_run),
             "nba-prop-close": lambda: step_nba_prop_close(),
             "nba-prop-projection": lambda: step_nba_prop_projection(dry_run=args.dry_run),

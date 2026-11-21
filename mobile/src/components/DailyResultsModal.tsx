@@ -16,7 +16,7 @@ import { colors, font, pnlColor, radii, spacing, opacity, card, cardDense } from
 import { friendlyCause } from '@/lib/errors';
 import { sportSpokenName } from '@/lib/loadState';
 import { unitsSpeech } from '@/lib/a11y';
-import { addDays, formatAmerican, labelWithoutStake } from '@/lib/format';
+import { addDays, formatAmerican } from '@/lib/format';
 import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { modelHistoryMark, modelLong, modelShort } from '@/lib/modelMeta';
 import { postedPickUnits } from '@/lib/thresholds';
@@ -37,7 +37,7 @@ import {
   type SportDayBreakdown,
 } from '@/lib/dailyResults';
 import type { Pick } from '@/types';
-import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { bookLabelShort, pickTitleText, storedQuoteBook } from '@/lib/markets';
 import { decisionOdds } from '@/lib/decisionPrice';
 
 /**
@@ -576,7 +576,7 @@ function PickRow({ pick }: { pick: Pick }) {
       </View>
       <View style={styles.modelNameWrap}>
         <Text style={styles.modelName} numberOfLines={2}>
-          {labelWithoutStake(pick.pick_label)}
+          {pickTitleText(pick)}
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}
@@ -604,7 +604,7 @@ function PendingPickRow({ pick }: { pick: Pick }) {
       </View>
       <View style={styles.modelNameWrap}>
         <Text style={styles.modelName} numberOfLines={2}>
-          {labelWithoutStake(pick.pick_label)}
+          {pickTitleText(pick)}
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}

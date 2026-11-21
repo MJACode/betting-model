@@ -657,6 +657,32 @@ for -1.908 units, EV at close +2.96% on the 5 that closed at the same number.
 On a whole number (6.0) the stated EV ignores the push, so it overstates the
 true EV by the push share; the lab did the same.
 
+## NBA — `nba_prop_first_basket`, first basket (2026-11-20, mike)
+
+Who scores the game's first points: the model's probability (the opening tip and each starter's share
+of his team's first scores) blended 0.25 / 0.75 with the median no-vig of the OTHER deciding books, bet
+at the book whose price that blend makes worth the most (`models/nba_first_basket.py`,
+`scripts/nba_first_basket_card.py`; the grade is `docs/nba_first_basket.md` section 6, registered in
+`data/local/research/nba_research/first_basket/prereg.md` as test 2b). mike put it live on
+2026-11-20 knowing it passed five of the six house bars and failed the interval.
+
+| Setting | Value | Where |
+|---|---|---|
+| prob / edge cut | 0.0 / 0.0 — the cut is EV | `ACTION_THRESHOLDS`, both threshold dicts |
+| EV floor | 0.05, on the blend (graded; neighbours 0.00 +6.02%, 0.10 +12.43%) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200 (never reached: the 1,930 graded bets ran +425 to +9900, median +1000) | `MODEL_MIN_ODDS` |
+| caps | one bet a game, its own door: it does not share the stat-prop models' one-a-game / six-a-night slots | `scripts/nba_first_basket_card.py` |
+| decided once | the first look 5-20 min before tip with first-basket quotes; a row in `nba_first_basket_decisions`, never looked at again | same |
+| looks | the five-minute job, games 3-22 min from tip, first in its tick | `scheduler.run_nba_prop_window`, `scripts/nba_prop_window.first_basket_due` |
+| books | the seven graded books that `BEST_LINE_BOOKMAKERS` allows; betPARX and Bovada never | `models/nba_first_basket.deciding_books` |
+| settles | each book's own rule: first made field goal at DraftKings, BetMGM, Fanatics, BetRivers; first points of any kind at FanDuel, Caesars, Hard Rock; a non-starter is no action | `models/nba_first_basket.first_basket_outcome` |
+
+| Graded (2024-25..2026-27, the bought snapshot 10 minutes before tip) | Bets | Units | Return (95% interval) |
+|---|---|---|---|
+| settled on the first points of any kind (the definition it was fitted on) | 1,930 | +14.56 | +7.45% (-5.00% to +20.85%) |
+| settled on each book's own rule | 1,930 | +18.91 | +9.67% (-3.17% to +23.02%) |
+| the live code replayed on the same snapshots (book-listed starters) | 1,862 | +19.80 | +10.92% |
+
 ## NBA — `nba_prop_market`, the 2026-27 rule (2026-10-15, mike)
 
 The twelve 2026-06-19 NBA models are retired (`config.RETIRED_MODELS`). One

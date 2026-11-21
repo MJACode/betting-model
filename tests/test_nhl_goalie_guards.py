@@ -569,6 +569,7 @@ _GUARDS = ("refuse_unknown(", "_refuse_unknown_nhl_bets(")
 ALLOWED = {
     "nfl/live_model/pick_writer.py": "NFL in-play picks only; it writes no NHL row",
     "scripts/nba_prop_market_card.py": "NBA player props only",
+    "scripts/nba_first_basket_card.py": "NBA first basket only (sport NBA, nba_prop_first_basket)",
     "scripts/nba_total_luck_card.py": "NBA full-game totals only",
     "scripts/ncaab_total_card.py": "NCAAB full-game totals only",
     "scripts/ncaabw_total_card.py": "NCAABW (women's college basketball) full-game totals only",

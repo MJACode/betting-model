@@ -21,7 +21,7 @@
 
 import { americanToDecimal, isVersusSport, labelWithoutStake } from '@/lib/format';
 import { stakeFor, KELLY_MULTIPLIER, type UnitStake } from '@/lib/thresholds';
-import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
+import { isBettableBook, linkForSide, marketForPick, pickTitleText, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
@@ -67,7 +67,7 @@ export interface ParlayLeg {
    *  from. False for custom/saved legs. */
   isLive: boolean;
   isFavorite: boolean; // dk_odds < 0
-  label: string; // pick.pick_label
+  label: string; // pickTitleText(pick): the stored label, with Over 0.5 dropped on a Yes-only prop
   modelProb: number; // pick.model_probability
   decimalOdds: number; // americanToDecimal(dk_odds)
   americanOdds: number; // dk_odds (non-null, validated)
@@ -241,8 +241,9 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     isGameLine: isGameLineModel(p.model_id),
     isLive: p.is_live === true,
     isFavorite: odds < 0,
-    // No old NFL sizing figure ("· 0.79u"): the slip shows its own stake.
-    label: labelWithoutStake(p.pick_label),
+    // No old NFL sizing figure ("· 0.79u"): the slip shows its own stake. A Yes-only prop reads
+    // as the book sells it ("<player> First Basket"; pickTitleText).
+    label: pickTitleText(p),
     modelProb: p.model_probability,
     decimalOdds: americanToDecimal(odds),
     americanOdds: odds,

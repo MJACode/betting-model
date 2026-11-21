@@ -982,9 +982,11 @@ check(
 {
   const src = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf-8');
   check('PickCard titles through splitPickTitle', src.includes('splitPickTitle'));
+  // The title's words (pickTitleText): the stored label, except a Yes-only prop, which is
+  // spoken as the book sells it ("Trae Young First Basket"; UX review, 2026-11-20).
   check(
-    'board cardLabel still announces the stored pick_label',
-    /joinCardSpeech\(\[[\s\S]*?pick\.pick_label/.test(src) && /accessibilityLabel=\{cardLabel\}/.test(src),
+    'board cardLabel announces the pick title',
+    /joinCardSpeech\(\[[\s\S]*?pickTitleText\(pick\)/.test(src) && /accessibilityLabel=\{cardLabel\}/.test(src),
   );
   check(
     'Signals cardLabel is the structured speech, not the stored label',

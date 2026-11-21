@@ -7,7 +7,7 @@ import type { PeriodKey, TeamPeriodRow } from '@/lib/teamPeriodSplits';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
-import { errorText, isAbortError, isNotFoundError } from './errors';
+import { errorText, isAbortError, isNotFoundError, isPremiumAccessRefusal } from './errors';
 import { ALT_GAME_MARKET, foldAltGameRows, pregameLadderVisible, type GameLineMarket } from './lineLegs';
 import { byTime, HISTORY_ROWS, utcSecond } from './lineHistory';
 import {
@@ -2698,13 +2698,18 @@ export async function fetchCustomModelBacktest(
     supabase.rpc('custom_model_backtest', args),
     supabase.rpc('custom_model_backtest_posted', args),
   ]);
+  // premium_pre_request refuses both RPCs with 42501, message "premium
+  // access required", and the subscription hint. Callers map that exact
+  // error through splitLoadError. Any other error still throws.
+  if (isPremiumAccessRefusal(error)) throw error;
   if (error) throw error;
   // Until data/migrations/custom_model_backtest_posted_2026_11_03.sql is
   // applied the function does not exist, and any other failure of this second
   // figure must not take down a screen the summary can still draw: either way
   // the summary stands on its 1u-risked units (postedKnown false), and the
-  // screen's caption says so.
-  if (posted.error && !postedFunctionMissing(posted.error)) {
+  // screen's caption says so. The same refusal on the posted RPC alone is
+  // not a warning: the summary call is the one the screen maps.
+  if (posted.error && !postedFunctionMissing(posted.error) && !isPremiumAccessRefusal(posted.error)) {
     console.warn('[customModelBacktest] posted-stake units unavailable', posted.error);
   }
   const row = (data as unknown as CustomBacktestSummary[] | null)?.[0];
@@ -2749,6 +2754,8 @@ export async function fetchCustomModelPicks(
     p_filters: sanitizeFilters(filters),
     p_limit: limit,
   });
+  // Same refusal as custom_model_backtest. Callers map it; other errors throw.
+  if (isPremiumAccessRefusal(error)) throw error;
   if (error) throw error;
   return (data ?? []) as unknown as CustomBacktestPickRow[];
 }
@@ -2792,6 +2799,10 @@ export interface FullOutcomeRecord {
 
 export async function fetchModelFullOutcomeRecord(): Promise<Record<string, FullOutcomeRecord>> {
   const { data, error } = await supabase.from('v_model_full_outcome_record').select('*');
+  // premium_pre_request refuses this view. The Models list reads
+  // v_public_track_record instead; a caller that still hits this one maps
+  // the refusal through splitLoadError. Any other error still throws.
+  if (isPremiumAccessRefusal(error)) throw error;
   if (error) throw error;
   const map: Record<string, FullOutcomeRecord> = {};
   for (const r of (data ?? []) as unknown as FullOutcomeRecord[]) map[r.model_id] = r;
@@ -2900,6 +2911,9 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
     .order('game_date', { ascending: false })
     .order('pick_id', { ascending: false })
     .limit(1000);
+  // premium_pre_request refuses this view. useModelPickHistory maps that
+  // refusal; any other error still throws.
+  if (isPremiumAccessRefusal(error)) throw error;
   if (error) throw error;
   return (data ?? []) as unknown as FullOutcomePickRow[];
 }

@@ -61,9 +61,11 @@ BEGIN
          SELECT 1 FROM pg_policy
           WHERE polrelid = 'public.byom_prop_facts'::regclass
             AND polname = 'anon read byom_prop_facts')
-       AND has_table_privilege('anon', 'public.byom_game_facts', 'SELECT')
+       -- Authenticated SELECT, not anon. Step A revoked anon and left
+       -- the tables, props_scanned_at, RLS, these policies, and
+       -- authenticated SELECT. Requiring anon SELECT sent every later
+       -- pass through the DDL below.
        AND has_table_privilege('authenticated', 'public.byom_game_facts', 'SELECT')
-       AND has_table_privilege('anon', 'public.byom_prop_facts', 'SELECT')
        AND has_table_privilege('authenticated', 'public.byom_prop_facts', 'SELECT')
        AND NOT EXISTS (
          SELECT 1

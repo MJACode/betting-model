@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { splitLoadError } from '@/lib/errors';
 import { fetchModelFullOutcomePicks, type FullOutcomePickRow } from '@/lib/queries';
 
 /**
@@ -7,22 +8,34 @@ import { fetchModelFullOutcomePicks, type FullOutcomePickRow } from '@/lib/queri
  * the published record. The model detail screen does not use this hook; it
  * lists posted settled bets so its count matches the Record.
  *
- * Failure-tolerant: any fetch error leaves rows empty. Models the view does
- * not grade (UFC/NHL/NBA) return zero rows.
+ * A premium-gate refusal leaves rows empty and sets noAccess. Any other
+ * fetch error leaves rows empty and sets error, so a screen can show it.
+ * Models the view does not grade (UFC/NHL/NBA) return zero rows.
  */
 export function useModelPickHistory(modelId: string) {
   const [rows, setRows] = useState<FullOutcomePickRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [noAccess, setNoAccess] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError(null);
+    setNoAccess(false);
     fetchModelFullOutcomePicks(modelId)
       .then((r) => {
-        if (!cancelled) setRows(r);
+        if (cancelled) return;
+        setRows(r);
+        setNoAccess(false);
+        setError(null);
       })
-      .catch(() => {
-        if (!cancelled) setRows([]);
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        const split = splitLoadError(e);
+        setRows([]);
+        setNoAccess(split.noAccess);
+        setError(split.error);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -32,5 +45,5 @@ export function useModelPickHistory(modelId: string) {
     };
   }, [modelId]);
 
-  return { rows, loading };
+  return { rows, loading, error, noAccess };
 }

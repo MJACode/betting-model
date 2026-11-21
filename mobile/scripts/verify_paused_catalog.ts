@@ -215,8 +215,10 @@ check('an active batter prop is still a bet type you can build on',
   check('NBA is Player props only — its moneyline and spread are retired',
     row('NBA').join(',') === 'Player props|All player markets');
   const nbaProps = betTypePickerGroups().find((g) => g.sport === 'NBA')?.choices.find((c) => c.slot === 'props');
-  check('NBA Player props writes the two live NBA prop models, not a retired per-stat model',
-    nbaProps?.modelIds.join(',') === 'nba_prop_market,nba_prop_projection', nbaProps?.modelIds.join(','));
+  // "All player markets": the two stat-prop models and, from 2026-11-20, first basket (mike).
+  check('NBA Player props writes the three live NBA prop models, not a retired per-stat model',
+    nbaProps?.modelIds.join(',') === 'nba_prop_market,nba_prop_projection,nba_prop_first_basket',
+    nbaProps?.modelIds.join(','));
   check('the NBA totals overs are a game line the picker does not offer as a slot',
     MODEL_META.nba_total_luck?.type === 'game' && betSlotForModel('nba_total_luck', 'game') === null);
   check('the NBA home team-total unders are a game line the picker does not offer as a slot',
@@ -375,8 +377,11 @@ check('the projection model alone keeps NBA priced when the rule is paused',
 setServerThresholds({
   nba_prop_market: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: true },
   nba_prop_projection: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: true },
+  // First basket bets on NBA players too (2026-11-20): with it live, a player page still has a
+  // live prop model, so all three are paused here.
+  nba_prop_first_basket: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: true },
 });
-check('with both NBA prop models paused, no live prop model prices NBA players',
+check('with all three NBA prop models paused, no live prop model prices NBA players',
   !sportHasLivePropModel('NBA'));
 setServerThresholds(null);
 

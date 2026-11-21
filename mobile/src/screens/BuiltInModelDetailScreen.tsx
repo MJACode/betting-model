@@ -5,6 +5,7 @@ import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { PremiumLock } from '@/components/PremiumLock';
 import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
@@ -22,7 +23,6 @@ import {
   formatPctSigned,
   formatSigned,
   gameDayLabelET,
-  labelWithoutStake,
 } from '@/lib/format';
 import { allMatchedText, clvOutcome } from '@/lib/clvBeat';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
@@ -35,7 +35,7 @@ import { roundsToZero, signalDisplayName } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, postedPickUnits, publishedRecordKeeps } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
-import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { bookLabelShort, pickTitleText, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { PickRowTitle } from '@/components/PickRowTitle';
@@ -62,6 +62,7 @@ export function BuiltInModelDetailScreen() {
     records: fullOutcomeRecords,
     loading: settledLoading,
     error: settledError,
+    noAccess,
     refresh: refreshSettled,
   } = useSettledPicksSincePaperStart();
 
@@ -237,6 +238,9 @@ export function BuiltInModelDetailScreen() {
           )
         }
         ListFooterComponent={
+          noAccess ? (
+            <PremiumLock locked />
+          ) : (
           <>
             <Text style={styles.sectionHeader}>Since {LIVE_RECORD_START_SHORT} · settled bets, as posted</Text>
             <View style={styles.statRow}>
@@ -434,6 +438,7 @@ export function BuiltInModelDetailScreen() {
             ) : null}
             <BetslipBarSpacer />
           </>
+          )
         }
         contentContainerStyle={styles.list}
       />
@@ -456,7 +461,7 @@ function TodayPickRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[labelWithoutStake(pick.pick_label), signalDisplayName(pick.signal_type), timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
+      accessibilityLabel={[pickTitleText(pick), signalDisplayName(pick.signal_type), timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
       style={styles.pickRow}
       onPress={onPress}
     >
@@ -500,7 +505,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={[
-        labelWithoutStake(pick.pick_label),
+        pickTitleText(pick),
         pick.result,
         dayLabelSpokenET(pick.game_date),
         `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`,

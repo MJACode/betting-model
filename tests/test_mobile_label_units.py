@@ -94,9 +94,19 @@ SITES = {
 @pytest.mark.parametrize("rel,count", sorted(SITES.items()))
 def test_every_label_shown_beside_a_stake_drops_the_old_figure(rel, count):
     src = _read(SRC / rel)
-    assert src.count("labelWithoutStake(") >= count, rel
+    # pickTitleText (lib/markets.ts) is the stored label through labelWithoutStake, with a
+    # Yes-only prop titled as the book sells it (UX review, 2026-11-20): it counts the same.
+    assert src.count("labelWithoutStake(") + src.count("pickTitleText(") >= count, rel
     # No bare label left in a Text child or a spoken label at those sites.
     code = "\n".join(line.split("//", 1)[0] for line in src.splitlines())
     assert not re.search(r"\{\s*(?:\w+\.)*pick\.pick_label\s*\}", code), rel
     assert not re.search(r"\{\s*item\.pick_label\s*\}", code), rel
     assert not re.search(r"accessibilityLabel=\{\[\s*(?:\w+\.)*pick_label\b", code), rel
+
+
+def test_the_pick_title_drops_the_old_figure_too():
+    src = _read(SRC / "lib" / "markets.ts")
+    m = re.search(r"export function pickTitleText\(.*?\n\}\n", src, re.S)
+    assert m and "labelWithoutStake(pick.pick_label)" in m.group(0)
+    y = re.search(r"export function yesOnlyTitle\(.*?\n\}\n", src, re.S)
+    assert y and "labelWithoutStake(pick.pick_label)" in y.group(0)

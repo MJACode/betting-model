@@ -1804,7 +1804,10 @@ def run_nfl_prop_card() -> None:
 # tick about an hour before tip, so a slow frame never delays a decision: the
 # ESPN injury pull, then the frame over every box line since 2018-19.
 NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 120, "cards": 120, "close": 60,
-                             "injuries": 60, "project": 240}
+                             "injuries": 60, "project": 240,
+                             # the first-basket card can build the day's state itself if the warm
+                             # step has not (56 s read + 27 s learn, measured 2026-11-20)
+                             "first_basket": 240, "first_basket_warm": 240}
 
 
 def run_nba_prop_window() -> None:
@@ -1830,15 +1833,27 @@ def run_nba_prop_window() -> None:
     """
     from scripts.nba_prop_window import plan_tick
     plan = plan_tick()
-    if not plan.decide and not plan.close and not plan.project:
+    if (not plan.decide and not plan.close and not plan.project and not plan.first_basket
+            and not plan.first_basket_warm):
         if plan.publish:
             # Only a game near its tip: post anything still unposted for it.
             _publish_new_signals("nba-prop-window")
         return
-    log.info("NBA prop window: deciding %s; closes due %s; projecting %s",
-             plan.decide, plan.close, plan.project)
+    log.info("NBA prop window: deciding %s; closes due %s; projecting %s; first basket %s%s",
+             plan.decide, plan.close, plan.project, plan.first_basket,
+             " (warming its state)" if plan.first_basket_warm else "")
     t = NBA_PROP_WINDOW_TIMEOUT_S
     outcomes: dict[str, str] = {}
+    if plan.first_basket:
+        # FIRST, because its window (5-20 minutes before tip) is the narrowest: its own door, its
+        # own fetch of exactly its games, then its decision. A game in both lists is fetched twice
+        # this tick, which is the price of not making the first basket wait behind the stat props.
+        outcomes["nba-first-basket-fetch"] = _run(
+            [sys.executable, "-m", "scripts.nba_prop_window", "--fetch", *plan.first_basket],
+            "nba-first-basket-fetch", timeout=t["fetch"])
+        outcomes["nba-first-basket"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-first-basket"],
+            "nba-first-basket", timeout=t["first_basket"])
     if plan.decide:
         outcomes["nba-prop-window-fetch"] = _run(
             [sys.executable, "-m", "scripts.nba_prop_window", "--fetch", *plan.decide],
@@ -1856,6 +1871,10 @@ def run_nba_prop_window() -> None:
             [sys.executable, "run_pipeline.py", "--step", "nba-prop-close"],
             "nba-prop-close", timeout=t["close"])
     _publish_new_signals("nba-prop-window")
+    if plan.first_basket_warm:
+        outcomes["nba-first-basket-warm"] = _run(
+            [sys.executable, "-m", "scripts.nba_first_basket_card", "--warm"],
+            "nba-first-basket-warm", timeout=t["first_basket_warm"])
     if plan.project:
         outcomes["nba-injuries"] = _run(
             [sys.executable, "-m", "data.ingestors.injury_ingestor", "--sport", "NBA"],

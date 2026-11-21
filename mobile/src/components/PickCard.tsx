@@ -13,7 +13,6 @@ import {
   gameDayLabelET,
   gameStatus,
   isVersusSport,
-  labelWithoutStake,
   postponedLabel,
   postponedSpeech,
   postponedStart,
@@ -31,6 +30,7 @@ import {
   numOrNull,
   otherLineQuotesForPick,
   pickTimingInfo,
+  pickTitleText,
   playerNameFromPickLabel,
   propMarketForPick,
   splitPickTitle,
@@ -672,8 +672,8 @@ export function PickCard({
     : joinCardSpeech([
         matchup,
         statusSpeech,
-        // The title's words (splitPickTitle): no old NFL sizing figure.
-        labelWithoutStake(pick.pick_label),
+        // The title's words (splitPickTitle): no old NFL sizing figure, and a Yes-only prop as sold.
+        pickTitleText(pick),
         paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type),
         // The signals footer speaks the model. The board layout has no
         // model line, so a shared paused or retired name is spoken here.

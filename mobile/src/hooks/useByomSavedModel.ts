@@ -7,13 +7,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAuth } from '@/hooks/useAuth';
 import { fetchByomModels, type ByomModel } from '@/lib/byom';
-import { errorText, isAbortError } from '@/lib/errors';
+import { splitLoadError } from '@/lib/errors';
 
 export function useByomSavedModel(modelId: string) {
   const { signedIn, ready } = useAuth();
   const [model, setModel] = useState<ByomModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [noAccess, setNoAccess] = useState(false);
   const [missing, setMissing] = useState(false);
   const seq = useRef(0);
 
@@ -24,21 +25,27 @@ export function useByomSavedModel(modelId: string) {
       setModel(null);
       setMissing(false);
       setError(null);
+      setNoAccess(false);
       setLoading(false);
       return;
     }
     const id = ++seq.current;
     setLoading(true);
     setError(null);
+    setNoAccess(false);
     try {
       const models = await fetchByomModels();
       if (seq.current !== id) return;
       const found = models.find((row) => row.model_id === modelId) ?? null;
       setModel(found);
       setMissing(found == null);
+      setNoAccess(false);
     } catch (e: unknown) {
       if (seq.current !== id) return;
-      if (!isAbortError(e)) setError(errorText(e));
+      const split = splitLoadError(e);
+      if (split.noAccess) setModel(null);
+      setNoAccess(split.noAccess);
+      setError(split.error);
     } finally {
       if (seq.current === id) setLoading(false);
     }
@@ -48,5 +55,5 @@ export function useByomSavedModel(modelId: string) {
     void load();
   }, [load]);
 
-  return { model, loading: !ready || loading, error, missing, reload: load, signedIn };
+  return { model, loading: !ready || loading, error, noAccess, missing, reload: load, signedIn };
 }

@@ -29,7 +29,7 @@ import { isDuplicateCopy, postedPickUnits } from '@/lib/thresholds';
 import { todayET } from '@/lib/format';
 import { LIVE_RECORD_START } from '@/lib/recordStart';
 import { attachDiscordPublish } from '@/lib/discordPublish';
-import { errorText, isAbortError } from '@/lib/errors';
+import { splitLoadError } from '@/lib/errors';
 import { pickMatchesModel } from './useCustomModels';
 import type { CustomModel, SettledPick, SignalType } from '@/types';
 
@@ -62,12 +62,14 @@ export function useSettledPicksSincePaperStart() {
   const [records, setRecords] = useState<Record<string, FullOutcomeRecord>>({});
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [noAccess, setNoAccess] = useState(false);
   const seq = useRef(0);
 
   const load = useCallback(async (opts?: { full?: boolean }) => {
     const id = ++seq.current;
     setLoading(true);
     setError(null);
+    setNoAccess(false);
     try {
       const cached = opts?.full ? [] : await readSettledCache();
       if (seq.current !== id) return;
@@ -107,9 +109,18 @@ export function useSettledPicksSincePaperStart() {
       setRows(stamped);
       setRecords(recs);
     } catch (e: unknown) {
-      // Cached rows stay on screen — a failed refresh shouldn't blank the
-      // backtest, it just leaves it as stale as the last successful load.
-      if (seq.current === id && !isAbortError(e)) setError(errorText(e));
+      if (seq.current !== id) return;
+      const split = splitLoadError(e);
+      if (split.noAccess) {
+        // A refusal is not a stale cache. The rows on screen would be the
+        // gated record.
+        setRows([]);
+        setRecords({});
+      }
+      setNoAccess(split.noAccess);
+      // A failed refresh keeps the cache. A refusal does not, and it is not
+      // an error string.
+      setError(split.error);
     } finally {
       if (seq.current === id) setLoading(false);
     }
@@ -119,7 +130,7 @@ export function useSettledPicksSincePaperStart() {
     void load();
   }, [load]);
 
-  return { rows, records, loading, error, refresh: load };
+  return { rows, records, loading, error, noAccess, refresh: load };
 }
 
 /** Adapt a published per-model record to the stats the screens render: the
@@ -176,6 +187,7 @@ export function useCustomModelBacktest(
   const [serverPicks, setServerPicks] = useState<BacktestPickRow[]>([]);
   const [serverLoading, setServerLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [noAccess, setNoAccess] = useState(false);
   // Bumped by Retry on a failed backtest (usability audit M1).
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
@@ -199,9 +211,13 @@ export function useCustomModelBacktest(
       setServerStats(EMPTY_STATS);
       setServerPicks([]);
       setServerLoading(false);
+      setError(null);
+      setNoAccess(false);
       return;
     }
     setServerLoading(true);
+    setError(null);
+    setNoAccess(false);
     const run = () => {
       const filters = model?.filters;
       Promise.all([
@@ -224,11 +240,18 @@ export function useCustomModelBacktest(
               units: postedPickUnits({ dk_odds: p.dk_odds, decision_odds: p.decision_odds, result: p.result }).units,
             })),
           );
+          setNoAccess(false);
           setError(null);
         })
         .catch((e: unknown) => {
           if (reqId.current !== id) return;
-          if (!isAbortError(e)) setError(errorText(e));
+          const split = splitLoadError(e);
+          if (split.noAccess) {
+            setServerStats(EMPTY_STATS);
+            setServerPicks([]);
+          }
+          setNoAccess(split.noAccess);
+          setError(split.error);
         })
         .finally(() => {
           if (reqId.current === id) setServerLoading(false);
@@ -285,7 +308,7 @@ export function useCustomModelBacktest(
 
   const loading = serverLoading || (uncovered.length > 0 && settledLoading);
 
-  return { stats, picks, loading, error, retry };
+  return { stats, picks, loading, error, noAccess, retry };
 }
 
 /** Full-universe backtest stats for every saved custom model (Models list). */
@@ -293,6 +316,7 @@ export function useCustomModelBacktests(models: CustomModel[]) {
   const { rows: settled } = useSettledPicksSincePaperStart();
   const [statsById, setStatsById] = useState<Record<string, CustomModelStats>>({});
   const [loading, setLoading] = useState<boolean>(false);
+  const [noAccess, setNoAccess] = useState(false);
   const reqId = useRef(0);
 
   const key = useMemo(
@@ -307,6 +331,7 @@ export function useCustomModelBacktests(models: CustomModel[]) {
       return;
     }
     setLoading(true);
+    setNoAccess(false);
     Promise.all(
       models.map(async (m) => {
         const { covered, uncovered } = splitRulesByCoverage(m.rules);
@@ -322,10 +347,17 @@ export function useCustomModelBacktests(models: CustomModel[]) {
       }),
     )
       .then((entries) => {
-        if (reqId.current === id) setStatsById(Object.fromEntries(entries));
+        if (reqId.current !== id) return;
+        setNoAccess(false);
+        setStatsById(Object.fromEntries(entries));
       })
-      .catch(() => {
-        // Keep whatever rendered last — a failed refresh shouldn't blank the list.
+      .catch((e: unknown) => {
+        if (reqId.current !== id) return;
+        const split = splitLoadError(e);
+        if (split.noAccess) setStatsById({});
+        setNoAccess(split.noAccess);
+        // A real failure keeps the last stats. A refusal does not, and it
+        // is not stored as an error string.
       })
       .finally(() => {
         if (reqId.current === id) setLoading(false);
@@ -334,6 +366,6 @@ export function useCustomModelBacktests(models: CustomModel[]) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, settled]);
 
-  return { statsById, loading };
+  return { statsById, loading, noAccess };
 }
 

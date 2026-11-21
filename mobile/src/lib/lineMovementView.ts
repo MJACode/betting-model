@@ -54,6 +54,7 @@ import {
   lineFromSnapshot,
   lockedLineAtHistoryBook,
   movementFromSameBookHistory,
+  oneWayMarket,
   priceForSide,
   snapshotMatchesLock,
   storedQuoteBook,
@@ -166,7 +167,8 @@ export function lineMovementView(
     market.startsWith('totals') ||
     market.startsWith('team_totals') ||
     market.startsWith('spreads') ||
-    isProp;
+    // A Yes-only prop (first basket, anytime) has no line to move: its column would be 0.5s.
+    (isProp && !oneWayMarket(market, 'under'));
   /** Home-relative on spreads, like scored_line. */
   const lineOf = (s: Snap) => lineFromSnapshot(s, market);
   const priceOf = (s: Snap) => priceForSide(s, side);

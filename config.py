@@ -800,6 +800,11 @@ ACTION_THRESHOLDS: dict = {
     # night from 2026-11-04 (mike: "we can go slightly more than 4 if we need
     # to"): +183.7 units against +153.6 in tip order, where the units stop
     # growing (docs/nba_models_2026.md section 14).
+    # 2026-11-20 (mike: "yes"): NBA first basket (models/nba_first_basket.py). Graded rule:
+    # 0.25 x its model + 0.75 x the other books' median no-vig, EV >= 0.05 at the bet book,
+    # one bet a game; 1,930 bets, +7.45% (-5.00..+20.85), five of six bars
+    # (docs/nba_first_basket.md).
+    "nba_prop_first_basket":    {"min_prob": 0.0, "min_edge": 0.0},
     "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
     # The NBA projection model (2026-10-16, mike: "build the projection model",
     # "maximize units won"): minutes x per-minute rate, a negative-binomial width
@@ -2471,6 +2476,8 @@ MODEL_MIN_ODDS: dict = {
     # regraded at (24,572 bets, +2.96%, 90% CI +1.85..+4.05, positive every
     # season; docs/nba_models_2026.md 4.3). Pinned for the same reason as
     # nhl_over_under: a Railway DEFAULT_MIN_ODDS override must not move it.
+    # The first-basket rule lays no favourite: its 1,930 graded bets ran +425 to +9900, median +1000.
+    "nba_prop_first_basket":     -200,
     "nba_prop_market":           -200,
     # The projection model was graded at the same -200 floor. Without threes
     # overs (not bet from 2026-11-18) it lays -200 to +375, median +105, on its
@@ -2832,6 +2839,8 @@ MODEL_OWN_EV_FLOOR: dict = {
     # Both neighbours positive, both date halves positive (+3.5 / +2.2), the
     # newest season (never used to choose) +2.1%. Expect about +2% live: the
     # top cell of a 1,518-cell search carries winner's curse.
+    # Its graded floor (test 2b, first_basket/prereg.md); neighbours 0.00 +6.02%, 0.10 +12.43%.
+    "nba_prop_first_basket":     0.05,
     "nba_prop_market":           0.00,
     # The lowest of its six cells' floors (rebounds unders). Each market's own
     # floor (0.01-0.05) is applied on top, in models/nba_prop_projection.CARD.
@@ -3096,6 +3105,9 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # other models, which pulls a near-even probability toward 0.5 -- the
     # same reason nhl_over_under and nfl_prop_market are here.
     "nba_prop_market",
+    # 2026-11-20 (mike). The first-basket rule decides on 0.25 x its model + 0.75 x the other
+    # books' median no-vig, the number its 0.05 floor was graded on; a borrowed map would move it.
+    "nba_prop_first_basket",
     # Its probability is already calibrated, per market, inside its own
     # artifact (a Platt map fitted on the graded seasons' main-line pairs); a
     # second, pooled map would move every number it was graded on.
@@ -3282,6 +3294,7 @@ SCORING_METHODS: dict = {
     "mlb_total_market":    "rule",    # models/mlb_game_market.py — Pin-lean vs soft implied 2pp, INSERT gated
     "mlb_total_public_fade": "rule",  # models/mlb_total_public_fade.py — fade public OVER, bet UNDER, INSERT gated
     "nhl_over_under":      "rule",    # models/nhl_totals_market.py — Pinnacle no-vig vs bettable books, same fetch
+    "nba_prop_first_basket": "rule",    # models/nba_first_basket.py — tip + first-score share, blended with the books' median (mike, 2026-11-20)
     "nba_prop_market":     "rule",    # models/nba_prop_market.py — Pinnacle no-vig under vs bettable books, same line, same fetch (mike, 2026-10-15)
     # Trained, off-registry.
     "ncaaf_live_win_prob": "engine",  # two-stage LightGBM, ncaaf_live/engine/remaining.py
@@ -3418,6 +3431,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_moneyline":            0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_moneyline_regulation": 0.05,
     "nhl_over_under":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nba_prop_first_basket":    0.0,    # 2026-11-20 mike: cut is EV (0.05), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV (0.00), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
@@ -3529,6 +3543,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_moneyline":            0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_moneyline_regulation": 0.40,   # 3-way market — lower per-side prob
     "nhl_over_under":           0.0,    # cut is EV; see ACTION_THRESHOLDS
+    "nba_prop_first_basket":    0.0,    # 2026-11-20 mike: cut is EV; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV; see ACTION_THRESHOLDS
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS

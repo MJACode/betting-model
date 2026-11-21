@@ -256,6 +256,31 @@ def test_the_report_adds_one_row_and_a_second_report_of_the_pass_keeps_it(db):
     raw.rollback()
 
 
+def test_the_catch_up_adds_no_second_row_for_a_copy_a_report_by_hand_recorded(db):
+    """2026-11-21, rows 10 and 11: the 11-20 full was reported by hand under
+    its own stamp, then the next pass's catch-up reported the same copy run
+    under the pass's stamp. The catch-up now finds the first row and stops; a
+    nightly report still records the run again (its copy did not finish)."""
+    conn, raw = db
+    _apply(conn)
+    by_hand = _row("20261120T233329Z", source="manual")
+    by_hand.update(copy_run_id="20261120T194438Z", copy_this_pass=None)
+    assert isinstance(rep.insert_row(raw, by_hand), int)
+    catch_up = _row("20261120T194436Z")
+    catch_up.update(copy_run_id="20261120T194438Z")
+    assert rep.insert_row(raw, catch_up, unless_copy_recorded=True) is None
+    with raw.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {TABLE} WHERE copy_run_id = '20261120T194438Z'")
+        assert cur.fetchone()[0] == 1
+    other = _row("20261121T053003Z")
+    other.update(copy_run_id="20261121T053019Z")
+    assert isinstance(rep.insert_row(raw, other, unless_copy_recorded=True), int)  # a new run lands
+    again = _row("20261122T053003Z")
+    again.update(copy_run_id="20261121T053019Z", copy_this_pass=False)
+    assert isinstance(rep.insert_row(raw, again), int)  # a pass whose own copy did not finish
+    raw.rollback()
+
+
 def test_each_value_lands_in_the_column_of_its_name(db):
     """Every value distinct, so a swapped pair of columns shows."""
     conn, raw = db

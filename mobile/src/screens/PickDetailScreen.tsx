@@ -43,7 +43,7 @@ import { openForAction } from '@/lib/discordPublish';
 import { betslipPlayerFromPick } from '@/lib/betslipGuard';
 import { slipKeyForPick } from '@/lib/parlay';
 import {
-  basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus, isVersusSport, labelWithoutStake,
+  basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus, isVersusSport,
 } from '@/lib/format';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, isPropModel, modelLongWithMark, sportOfModel } from '@/lib/modelMeta';
@@ -64,6 +64,8 @@ import {
   numOrNull,
   playerNameFromPickLabel,
   priceAgeFor,
+  oneWayMarket,
+  pickTitleText,
   propMarketForPick,
   onlyDecidingQuote,
   storedQuoteBook,
@@ -496,12 +498,12 @@ function PickDetailContent({
       <ScrollView contentContainerStyle={styles.list}>
         <View style={styles.header}>
           <View style={styles.titleRow}>
-            <Text style={[styles.label, styles.labelFlex]}>{labelWithoutStake(pick.pick_label)}</Text>
+            <Text style={[styles.label, styles.labelFlex]}>{pickTitleText(pick)}</Text>
             {/* Recent news for the player this prop is on — same icon, same
                 sheet as the player detail screen. */}
             <PlayerNewsButton
               playerName={playerName ?? 'Player'}
-              subtitle={labelWithoutStake(pick.pick_label)}
+              subtitle={pickTitleText(pick)}
               news={playerNews}
             />
           </View>
@@ -804,7 +806,7 @@ function PickDetailContent({
       {bookSheet.canOpen ? (
         <PickBooksSheet
           visible={booksOpen}
-          title={labelWithoutStake(pick.pick_label)}
+          title={pickTitleText(pick)}
           subtitle={bookSheetSubtitle}
           lineNote={bookSheet.lineNote}
           rows={bookSheet.rows}
@@ -842,6 +844,8 @@ function ClvCard({ pick }: { pick: Pick }) {
   const market = pick.model_id.includes('prop')
     ? propMarketForPick(pick)
     : gameMarketForModel(pick.model_id);
+  // A Yes-only prop has no line to show: "Yes at +900", not "Over 0.5 at +900" (UX review, 2026-11-20).
+  const yesOnly = market != null && oneWayMarket(market, 'under');
   const lineCLV = pick.line_clv_pts;
   const lineMoved = lineCLV != null && lineCLV !== 0;
   const hasPrice = !lineMoved && pick.clv_pct != null;
@@ -912,7 +916,7 @@ function ClvCard({ pick }: { pick: Pick }) {
         <View style={styles.clvRow}>
           <Text style={styles.clvRowLabel}>Price taken ({betName})</Text>
           <Text style={styles.clvRowValue} numberOfLines={1}>
-            {formatSideLine(pick.scored_line, pick.pick_side, market)} at{' '}
+            {yesOnly ? 'Yes' : formatSideLine(pick.scored_line, pick.pick_side, market)} at{' '}
             {formatAmerican(bet.price)}
           </Text>
         </View>
@@ -921,7 +925,7 @@ function ClvCard({ pick }: { pick: Pick }) {
         <View style={styles.clvRow}>
           <Text style={styles.clvRowLabel}>Closing line ({closeName})</Text>
           <Text style={styles.clvRowValue} numberOfLines={1}>
-            {formatSideLine(pick.closing_line, pick.pick_side, market)} at{' '}
+            {yesOnly ? 'Yes' : formatSideLine(pick.closing_line, pick.pick_side, market)} at{' '}
             {formatAmerican(pick.closing_dk_odds)}
           </Text>
         </View>
