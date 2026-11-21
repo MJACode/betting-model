@@ -13,19 +13,59 @@
   main checkout's .env at run time, so a rotated password reaches the next run.
 
   The scripts run from <Root>\bin, a stable copy outside the repo and outside
-  any worktree. Before each run they are refreshed from origin/master of the
-  main checkout when they exist there, so a merged fix reaches the next run;
-  otherwise the copy in bin is used as it is.
+  any worktree. Before each run the main checkout fetches master, and the
+  scripts are refreshed from its origin/master when they exist there, so a
+  merged fix reaches the next run; otherwise the copy in bin is used as it is.
+  This file itself is not refreshed: a change to it is copied into bin by hand.
+
+  -RefreshOnly fetches and refreshes, then stops before any copy: the step on
+  its own, to check it without running a pass.
 #>
 param(
     [string]$Root = "C:\Users\micha\Documents\betting_local_copies",
-    [string]$Repo = "C:\Users\micha\documents\betting-model"
+    [string]$Repo = "C:\Users\micha\documents\betting-model",
+    [int]$FetchTimeoutS = 120,
+    [switch]$RefreshOnly
 )
 $ErrorActionPreference = "Continue"
 $bin  = Join-Path $Root "bin"
 $logs = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $bin, $logs | Out-Null
 $ts = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+
+# Fetch master first. The refresh below reads origin/master of the main
+# checkout, which is only as new as that checkout's last fetch, and nothing
+# fetches it on a schedule: from 20:50 ET on 11-20 to 02:03 ET on 11-21 nothing
+# did, across the 00:30 run (its reflog, 2026-11-21, #1542). The fetch must
+# never stop the pass. The task has no window, so no prompt may open: git's own
+# (GIT_TERMINAL_PROMPT) and Git Credential Manager's (GCM_INTERACTIVE). It gets
+# FetchTimeoutS seconds, then it is stopped with everything it started. On any
+# failure the refresh uses the ref it already has. fetch_<stamp>.log names the
+# commit the refresh read.
+$env:GIT_TERMINAL_PROMPT = "0"
+$env:GCM_INTERACTIVE = "never"
+$fetchLog = Join-Path $logs "fetch_$ts.log"
+$fetchErr = Join-Path $logs "fetch_$ts.err"
+try {
+    $fp = Start-Process -FilePath "git" -NoNewWindow -PassThru `
+        -ArgumentList @("-C", "`"$Repo`"", "fetch", "--quiet", "--no-tags", "origin", "master") `
+        -RedirectStandardOutput $fetchLog -RedirectStandardError $fetchErr
+    $null = $fp.Handle  # keeps ExitCode readable after the process ends (PowerShell 5.1)
+    if (-not $fp.WaitForExit($FetchTimeoutS * 1000)) {
+        $null = & taskkill.exe /T /F /PID $fp.Id 2>&1
+        $null = $fp.WaitForExit(10000)
+        $fetchNote = "fetch stopped after $FetchTimeoutS s"
+    } elseif ($fp.ExitCode -ne 0) {
+        $fetchNote = "fetch ended with code $($fp.ExitCode)"
+    } else {
+        $fetchNote = "fetched"
+    }
+} catch {
+    $fetchNote = "fetch could not start: $($_.Exception.Message)"
+}
+$head = (& git -C $Repo rev-parse --verify --quiet origin/master 2>$null | Out-String).Trim()
+if (-not $head) { $head = "none" }
+Add-Content -Path $fetchLog -Value "$((Get-Date).ToUniversalTime().ToString('s'))Z $fetchNote; the refresh reads origin/master at $head"
 
 foreach ($f in @("local_mirror.py", "local_mirror_github.py", "local_mirror_duckdb.py", "local_mirror_report.py")) {
     $tmp = Join-Path $bin "$f.new"
@@ -38,6 +78,8 @@ foreach ($f in @("local_mirror.py", "local_mirror_github.py", "local_mirror_duck
         Remove-Item -Force $tmp -ErrorAction SilentlyContinue
     }
 }
+
+if ($RefreshOnly) { exit 0 }
 
 $python = (Get-Command python -ErrorAction Stop).Source
 $env:PYTHONIOENCODING = "utf-8"
