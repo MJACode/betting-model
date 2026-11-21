@@ -14,7 +14,9 @@ exit code. By hand it runs with --source manual (the default) and no exit codes.
 And first in each pass, with --catch-up: on 2026-11-16 the runner ended about
 nine hours in while its copy carried on, so that pass never reached its last
 step. The catch-up writes such a pass's row at the start of the next pass,
-when its copy did finish (see catch_up_row), with its exit codes unknown.
+when its copy did finish (see catch_up_row), with its exit codes unknown, and
+only when no row yet records that copy run (a report run by hand after it
+counts).
 
 WHAT IT READS, all on this disk and nothing from the database:
   * supabase_mirror\\STATE.json: the last finished run of the Supabase copy (any
@@ -24,7 +26,9 @@ WHAT IT READS, all on this disk and nothing from the database:
     (copy_this_pass false).
   * every supabase_mirror\\tables\\*\\manifest.json: rows on disk, and each
     table's latest exact-count check against Supabase. A table whose latest
-    check counted a different number of rows is listed in differing_tables.
+    check counted a different number of rows is listed in differing_tables,
+    unless the copy run left that table as it is (a cache, in a diff): its
+    manifest still holds an older run's verdict, not this run's.
   * github\\_mirror_summary.json: when the GitHub copy last finished, and which
     repositories failed.
   * the size of everything under the root, split by copy, and the free disk.
@@ -35,7 +39,9 @@ WHAT IT READS, all on this disk and nothing from the database:
 
 WHAT IT WRITES. One INSERT, in one short transaction: no read of any other
 table, no UPDATE, no DELETE. A nightly pass that is reported twice keeps its
-first row (ON CONFLICT DO NOTHING on source and pass id). Rows are never
+first row (ON CONFLICT DO NOTHING on source and pass id). The catch-up first
+reads this table for its copy run, and writes nothing when a row has it
+(COPY_RECORDED_SQL). Rows are never
 deleted (CLAUDE.md section 1b). The copy itself still never writes to the
 database: scripts/local_mirror.py reads only.
 
@@ -123,6 +129,17 @@ INSERT_SQL = (
     + ") VALUES ("
     + ", ".join("%s::jsonb" if c in JSON_COLUMNS else "%s" for c in COLUMNS)
     + ") ON CONFLICT (source, pass_id) DO NOTHING RETURNING snapshot_id"
+)
+
+# The catch-up's guard: a finished copy run that a row already records gets no
+# second one. ON CONFLICT cannot see it, because a report run by hand carries
+# its own stamp and source (2026-11-21: the 11-20 full was recorded by hand as
+# row 10, and the next pass's catch-up recorded it again as row 11). Only the
+# catch-up asks: a pass whose own copy did not finish legitimately reports the
+# previous run again, with copy_this_pass false.
+COPY_RECORDED_SQL = (
+    "SELECT snapshot_id FROM public.pc_copy_snapshots "
+    "WHERE copy_run_id = %s AND copy_finished_at IS NOT NULL ORDER BY snapshot_id LIMIT 1"
 )
 
 _URL_RE = re.compile(r"postgres(?:ql)?://[^\s'\"]+", re.IGNORECASE)
@@ -440,6 +457,13 @@ def build_row(root: Path, *, source: str, pass_id: str, host: str | None,
     copy_finished = parse_iso(state.get("run_finished_at"))
     failed = state.get("failed_tables")
     tables, rows, differing = read_tables(mirror)
+    # A table this copy run left as it is (a cache, in a diff) was not checked
+    # by it: its manifest still holds the last full's verdict. Listing it would
+    # repeat that verdict every night to the next full (2026-11-21:
+    # latest_prop_odds, which changed while the 11-20 full copied it).
+    skipped = state.get("skipped_tables")
+    skipped = {str(t) for t in skipped} if isinstance(skipped, list) else set()
+    differing = [d for d in differing if d["table"] not in skipped]
     if pass_started is not None:
         # The pass's own copy: a run that finished, started after the pass did,
         # and covered the whole table list. A one-table run by hand rewrites
@@ -493,13 +517,20 @@ def build_row(root: Path, *, source: str, pass_id: str, host: str | None,
     return row
 
 
-def insert_row(conn, row: dict[str, Any]) -> int | None:
+def insert_row(conn, row: dict[str, Any], *, unless_copy_recorded: bool = False) -> int | None:
     """Write the row in one short transaction. The new snapshot_id, or None when
-    this source and pass id already have a row (it is kept, not replaced)."""
+    this source and pass id already have a row (it is kept, not replaced), or,
+    with unless_copy_recorded (the catch-up), when a row already records the
+    row's finished copy run."""
     cur = conn.cursor()
     try:
         cur.execute(f"SET LOCAL statement_timeout = '{STATEMENT_TIMEOUT_S}s'")
         cur.execute("SET LOCAL idle_in_transaction_session_timeout = '30s'")
+        if unless_copy_recorded and row.get("copy_run_id"):
+            cur.execute(COPY_RECORDED_SQL, [row["copy_run_id"]])
+            if cur.fetchone() is not None:
+                conn.rollback()
+                return None
         cur.execute(INSERT_SQL, [row[c] for c in COLUMNS])
         got = cur.fetchone()
         conn.commit()
@@ -573,7 +604,8 @@ def describe_failure(exc: BaseException) -> str:
 
 
 def write_with_retries(url: str, row: dict[str, Any], *, attempts: int = WRITE_ATTEMPTS,
-                       pause_s: float = RETRY_PAUSE_S, sleep=None) -> int | None:
+                       pause_s: float = RETRY_PAUSE_S, sleep=None,
+                       unless_copy_recorded: bool = False) -> int | None:
     """insert_row on a fresh connection, tried again after a connection error.
 
     The nightly report runs once per pass, so a database that cannot be reached
@@ -584,7 +616,7 @@ def write_with_retries(url: str, row: dict[str, Any], *, attempts: int = WRITE_A
         try:
             conn = connect(url)
             try:
-                return insert_row(conn, row)
+                return insert_row(conn, row, unless_copy_recorded=unless_copy_recorded)
             finally:
                 try:
                     conn.close()
@@ -672,11 +704,14 @@ def main(argv: list[str] | None = None) -> int:
         print("DATABASE_URL is not set and is not in the env file; no row written", flush=True)
         return 2
     try:
-        snapshot_id = write_with_retries(url, row)
+        snapshot_id = write_with_retries(url, row, unless_copy_recorded=args.catch_up)
     except Exception as exc:  # noqa: BLE001
         print(f"no row written: {describe_failure(exc)}", flush=True)
         return 3
-    if snapshot_id is None:
+    if snapshot_id is None and args.catch_up:
+        print(f"pass {pass_id}: it, or its copy run {row['copy_run_id']}, already has a row; "
+              f"kept it, wrote nothing", flush=True)
+    elif snapshot_id is None:
         print(f"pass {pass_id} ({row['source']}) already has a row; kept it, wrote nothing", flush=True)
     else:
         print(f"wrote pc_copy_snapshots row {snapshot_id}", flush=True)

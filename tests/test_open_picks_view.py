@@ -19,6 +19,8 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost/db")
@@ -121,8 +123,9 @@ def test_it_is_one_statement_that_returns_on_a_catalog_read_once_applied():
     first_ddl = code.index("CREATE OR REPLACE VIEW")
     guard = code.index("= 'open_picks ")
     assert guard < code.index("RETURN;", guard) < first_ddl
-    assert "has_table_privilege('anon', 'public.open_picks', 'SELECT')" in code
+    assert "has_table_privilege('anon', 'public.open_picks', 'SELECT')" not in code
     assert "has_table_privilege('authenticated', 'public.open_picks', 'SELECT')" in code
+    assert "open_picks already present - skipping" in code
 
 
 def test_it_waits_for_what_it_reads_instead_of_failing_the_pass():
@@ -326,6 +329,135 @@ def test_rows_are_ordered_by_start_time():
 
 
 # ── The doc no longer asks anyone to paste ───────────────────────────────────
+
+def _exec(cur, sql: str) -> None:
+    """psycopg2 treats % as a placeholder. The view's LIKE pattern is data."""
+    cur.execute(sql.replace("%", "%%"))
+
+
+def _ddl_counter(cur) -> None:
+    cur.execute("""
+        CREATE TABLE ddl_seen (n integer NOT NULL);
+        INSERT INTO ddl_seen VALUES (0);
+        CREATE FUNCTION count_ddl() RETURNS event_trigger LANGUAGE plpgsql AS
+        $$ BEGIN UPDATE ddl_seen SET n = n + 1; END $$;
+        CREATE EVENT TRIGGER count_ddl ON ddl_command_start
+          EXECUTE FUNCTION count_ddl()
+    """)
+
+
+def _ddl_n(cur) -> int:
+    cur.execute("SELECT n FROM ddl_seen")
+    return cur.fetchone()[0]
+
+
+def _notices(conn) -> list[str]:
+    found = [n.strip() for n in conn.notices]
+    del conn.notices[:]
+    return found
+
+
+def test_step_a_skips_and_does_not_give_anon_the_grant_back():
+    """Prerequisites present and the view missing: the body runs. The next
+    pass skips. After step A revokes anon, the pass skips again and anon
+    still cannot read the view."""
+    psycopg2 = pytest.importorskip("psycopg2")
+    from tests.byom_scratch import ScratchPostgres, pg_bin
+
+    if pg_bin("initdb") is None:
+        pytest.skip("initdb is not installed")
+
+    cluster = ScratchPostgres()
+    conn = None
+    try:
+        conn = psycopg2.connect(cluster.start())
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE ROLE anon NOLOGIN;
+            CREATE ROLE authenticated NOLOGIN;
+            CREATE TABLE public.picks (
+              pick_id bigint,
+              sport text,
+              game_date text,
+              pick_label text,
+              decision_odds numeric,
+              dk_odds numeric,
+              decision_book text,
+              model_id text,
+              created_at timestamptz,
+              game_id text,
+              signal_type text,
+              result text,
+              is_live boolean,
+              condition_status text,
+              downgrade_reason text,
+              player_id text,
+              player_key text,
+              prop_market text
+            );
+            CREATE TABLE public.games (
+              game_id text,
+              commence_time timestamptz,
+              home_team text,
+              away_team text
+            );
+            CREATE TABLE public.model_action_thresholds (
+              model_id text,
+              paused boolean
+            );
+            CREATE TABLE public.v_discord_published (
+              lock_key text,
+              kind text
+            );
+            CREATE FUNCTION public.published_pick_stake(
+              price numeric, OUT risk numeric, OUT win numeric)
+            LANGUAGE sql IMMUTABLE AS $$ SELECT 1.0, 1.0 $$;
+            GRANT SELECT ON public.picks TO anon;
+        """)
+        cur.execute("SELECT to_regclass('public.open_picks')")
+        assert cur.fetchone()[0] is None
+        _ddl_counter(cur)
+        cur.execute("CREATE TABLE ddl_probe (id integer)")
+        assert _ddl_n(cur) >= 1
+        cur.execute("DROP TABLE ddl_probe")
+        cur.execute("UPDATE ddl_seen SET n = 0")
+        _exec(cur, SQL)
+        assert _ddl_n(cur) > 0, "the counter did not see this file's DDL"
+        cur.execute("SELECT to_regclass('public.open_picks') IS NOT NULL")
+        assert cur.fetchone()[0] is True
+        cur.execute("""
+            SELECT has_table_privilege('anon', 'public.open_picks', 'SELECT'),
+                   has_table_privilege('authenticated', 'public.open_picks', 'SELECT')
+        """)
+        assert cur.fetchone() == (True, True)
+        cur.execute("UPDATE ddl_seen SET n = 0")
+        _exec(cur, SQL)
+        assert _ddl_n(cur) == 0, "the second pass ran DDL"
+        assert any("already present - skipping" in n for n in _notices(conn))
+        cur.execute("""
+            REVOKE ALL ON public.picks FROM PUBLIC, anon, authenticated;
+            REVOKE ALL ON public.open_picks FROM anon;
+        """)
+        cur.execute("UPDATE ddl_seen SET n = 0")
+        _notices(conn)
+        _exec(cur, SQL)
+        assert _ddl_n(cur) == 0, "step A sent the file back through DDL"
+        assert any("already present - skipping" in n for n in _notices(conn))
+        cur.execute("""
+            SELECT has_table_privilege('anon', 'public.open_picks', 'SELECT'),
+                   has_table_privilege('anon', 'public.open_picks', 'INSERT'),
+                   has_table_privilege('authenticated', 'public.open_picks', 'SELECT'),
+                   obj_description('public.open_picks'::regclass, 'pg_class')
+        """)
+        row = cur.fetchone()
+        assert row[0] is False and row[1] is False and row[2] is True
+        assert row[3] == "open_picks 2b674293294e"
+    finally:
+        if conn is not None:
+            conn.close()
+        cluster.stop()
+
 
 def test_the_doc_points_at_the_view_and_asks_for_no_paste():
     doc = (ROOT / "docs" / "mobile_picks_prompt.md").read_text(encoding="utf-8")
