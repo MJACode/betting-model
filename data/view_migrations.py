@@ -791,6 +791,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # NOLOGIN roles, limits, entitlement, the per-call gate, terms acceptance.
     # Runs only while its "mcp_meter v1" marker is missing.
     "mcp_foundation_2026_11_21.sql",
+    # AI assistant (MCP): the Stats views the connector reads (mcp_stats) and
+    # trigram name-search indexes. Runs only while "mcp_stats v1" is missing.
+    "mcp_stats_views_2026_11_21.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
