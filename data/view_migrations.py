@@ -787,6 +787,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Does not rewrite picks or the record views. Sits before the
     # posted-stake pair, which stays last.
     "site_public_record_invoker_2026_11_21.sql",
+    # AI assistant (MCP) foundation: mcp_stats / mcp_meter schemas, the two
+    # NOLOGIN roles, limits, entitlement, the per-call gate, terms acceptance.
+    # Runs only while its "mcp_meter v1" marker is missing.
+    "mcp_foundation_2026_11_21.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
