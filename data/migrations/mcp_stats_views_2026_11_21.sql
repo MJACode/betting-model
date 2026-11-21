@@ -11,7 +11,7 @@
 --   players          one row per player appearance (for name search)
 --   games            the slate: teams, start, score
 --   prop_prices      latest PRE-GAME player-prop prices at the seven bettable
---                    books (config.BEST_LINE_BOOKMAKERS), main lines only
+--                    books (config.BEST_LINE_BOOKMAKERS), main and alternate lines
 --   game_prices      latest pre-game moneyline, spread and total, same books
 --   prop_markets     stat -> prop market, per sport
 --   books            book key -> display name (the seven bettable books)
@@ -223,13 +223,17 @@ BEGIN
 
   -- Pre-game only: a quote taken after the start is an in-play price.
   CREATE OR REPLACE VIEW mcp_stats.prop_prices AS
-  SELECT g.sport, p.game_id, p.market, p.player_name, p.team, b.book,
-         p.line, p.over_price, p.under_price, p.snapshot_at
+  -- Main and alternate lines (mcp_stats_alt_lines_2026_11_21.sql, Matt
+  -- 2026-11-21): market is the base market, is_alternate names the feed.
+  SELECT g.sport, p.game_id,
+         regexp_replace(p.market, '_alternate$', '') AS market,
+         p.player_name, p.team, b.book,
+         p.line, p.over_price, p.under_price, p.snapshot_at,
+         (p.market LIKE '%\_alternate' ESCAPE '\') AS is_alternate
     FROM public.latest_prop_odds p
     JOIN mcp_stats.books b ON b.book_key = p.bookmaker
     JOIN public.games g ON g.game_id = p.game_id
-   WHERE p.market NOT LIKE '%\_alternate' ESCAPE '\'
-     AND (g.commence_time IS NULL OR p.snapshot_at <= g.commence_time);
+   WHERE (g.commence_time IS NULL OR p.snapshot_at <= g.commence_time);
 
   CREATE OR REPLACE VIEW mcp_stats.game_prices AS
   SELECT g.sport, o.game_id, o.market, b.book,

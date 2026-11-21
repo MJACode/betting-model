@@ -802,6 +802,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # AI assistant (MCP): Disconnect cuts the app off (its Auth sessions are
     # refused by mcp_meter.begin_call_session). Runs while that function is missing.
     "mcp_session_revoke_2026_11_21.sql",
+    # AI assistant (MCP): prop_prices carries alternate lines too (Matt,
+    # 2026-11-21), market = base market + is_alternate. Runs while that
+    # column is missing.
+    "mcp_stats_alt_lines_2026_11_21.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
