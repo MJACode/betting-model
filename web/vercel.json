@@ -30,5 +30,19 @@
         }
       ]
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/mcp",
+      "destination": "https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/mcp"
+    },
+    {
+      "source": "/.well-known/oauth-protected-resource/mcp",
+      "destination": "https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/mcp/.well-known/oauth-protected-resource"
+    },
+    {
+      "source": "/.well-known/oauth-protected-resource",
+      "destination": "https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/mcp/.well-known/oauth-protected-resource"
+    }
   ]
 }

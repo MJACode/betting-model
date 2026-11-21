@@ -228,6 +228,21 @@ def record_js() -> str:
     return "const CONFIG = " + json.dumps(payload, indent=2) + ";\n" + math + "\n" + boot
 
 
+# Terms version a member accepts on the consent page. Must equal
+# mcp_meter.limits.terms_version (mcp_foundation_2026_11_21.sql).
+MCP_TERMS_VERSION = "2026-11-21"
+
+
+def consent_js() -> str:
+    config = json.loads((WEB / "src" / "public-config.json").read_text(encoding="utf-8"))
+    url = config["supabaseUrl"]
+    key = config["supabaseAnonKey"]
+    assert_public_anon(url, key)
+    payload = {"supabaseUrl": url, "supabaseAnonKey": key, "termsVersion": MCP_TERMS_VERSION}
+    boot = (WEB / "src" / "consent-boot.js").read_text(encoding="utf-8")
+    return "const CONFIG = " + json.dumps(payload, indent=2) + ";\n" + boot
+
+
 def header() -> str:
     return """<a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
@@ -272,8 +287,13 @@ def footer(year: int) -> str:
 </footer>"""
 
 
-def shell(title: str, description: str, body: str, year: int, script: bool) -> str:
-    extra = '<script src="/record.js" defer></script>' if script else ""
+def shell(title: str, description: str, body: str, year: int, script: bool | str) -> str:
+    if script is True:
+        extra = '<script src="/record.js" defer></script>'
+    elif script:
+        extra = f'<script src="/{script}" defer></script>'
+    else:
+        extra = ""
     csp = (
         "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; "
         "connect-src 'self' https://vvprgnrmzeekokzkrkfu.supabase.co; "
@@ -371,6 +391,14 @@ def build(out: Path, when_iso: str | None) -> str:
     for name in ("site.css", "mark.png", "favicon.png"):
         shutil.copyfile(STATIC / name, out / name)
     (out / "record.js").write_text(record_js(), encoding="utf-8")
+    consent_body = (TEMPLATES / "consent.html").read_text(encoding="utf-8")
+    (out / "oauth" / "consent").mkdir(parents=True, exist_ok=True)
+    (out / "oauth" / "consent" / "index.html").write_text(
+        shell("Connect your AI assistant — Signal Base",
+              "Approve an AI assistant's read-only access to Signal Base Stats.",
+              consent_body, year, script="consent.js"),
+        encoding="utf-8")
+    (out / "consent.js").write_text(consent_js(), encoding="utf-8")
     for html in out.rglob("*.html"):
         text = html.read_text(encoding="utf-8")
         if "[" in text:

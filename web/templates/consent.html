@@ -1,0 +1,64 @@
+<main id="main" class="consent-main">
+    <div class="wrap consent-wrap">
+      <section class="consent-card" aria-live="polite">
+        <p class="consent-eyebrow">Signal Base Stats</p>
+
+        <div id="state-loading">
+          <h1>Connecting your AI assistant</h1>
+          <p class="consent-muted">Loading the request.</p>
+        </div>
+
+        <form id="state-email" class="consent-form" hidden>
+          <h1>Sign in to Signal Base</h1>
+          <p class="consent-muted">Use the email on your Signal Base account. We'll send you a 6-digit code.</p>
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="email" required>
+          <button type="submit" class="consent-primary">Send code</button>
+        </form>
+
+        <form id="state-code" class="consent-form" hidden>
+          <h1>Check your email</h1>
+          <p class="consent-muted">Enter the 6-digit code we sent to <span id="code-email"></span>.</p>
+          <label for="code">Code</label>
+          <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="\d{6}" maxlength="6" required>
+          <button type="submit" class="consent-primary">Sign in</button>
+          <button type="button" id="code-back" class="consent-link">Use a different email</button>
+        </form>
+
+        <div id="state-consent" hidden>
+          <h1><span id="client-name"></span> wants to read your Signal Base Stats</h1>
+          <p class="consent-muted">It will send you back to <strong id="client-host"></strong> when you're done. Only allow apps you set up yourself.</p>
+          <ul class="consent-list">
+            <li class="yes">Read Stats: hit rates, recent games, leaders and best prices</li>
+            <li class="no">Cannot see your picks, bets, sportsbooks or account details</li>
+            <li class="no">Cannot change anything: read-only</li>
+            <li class="no">Cannot place bets or buy anything</li>
+          </ul>
+          <p id="limit-line" class="consent-muted">10 questions a day, resetting at midnight ET.</p>
+          <label class="consent-check" for="agree">
+            <input id="agree" type="checkbox">
+            <span>I agree to the <a href="/terms#19-ai-assistant-access" target="_blank" rel="noopener">AI Assistant Terms</a>: personal use only, no sharing, reselling or bulk downloading.</span>
+          </label>
+          <button type="button" id="allow" class="consent-primary" disabled>Allow</button>
+          <button type="button" id="deny" class="consent-secondary">Cancel</button>
+          <p class="consent-small">Signed in as <span id="who"></span>. <button type="button" id="sign-out" class="consent-link">Not you?</button></p>
+        </div>
+
+        <div id="state-ineligible" hidden>
+          <h1>Not available on your account yet</h1>
+          <p id="ineligible-text" class="consent-muted"></p>
+          <button type="button" id="ineligible-close" class="consent-secondary">Go back</button>
+        </div>
+
+        <div id="state-error" hidden>
+          <h1>Something went wrong</h1>
+          <p id="error-text" class="consent-muted"></p>
+        </div>
+
+        <div id="state-done" hidden>
+          <h1>You're connected</h1>
+          <p class="consent-muted">Returning you to your assistant.</p>
+        </div>
+      </section>
+    </div>
+  </main>
