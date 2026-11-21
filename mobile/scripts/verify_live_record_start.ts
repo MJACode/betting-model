@@ -34,7 +34,6 @@ import {
   LIVE_RECORD_START,
   LIVE_RECORD_START_LABEL,
   LIVE_RECORD_START_SHORT,
-  MIN_PICKS_FOR_COLOURED_ROI,
   SHADOW_TRACK_START,
 } from '../src/lib/recordStart';
 
@@ -140,9 +139,15 @@ const paperCopy = FILES.filter((f) => {
 check('no user-facing screen describes the platform as paper',
   paperCopy.length === 0, paperCopy.map((f) => relative(SRC, f)).join(', '));
 
-check('a small-sample floor exists and is below the go-live gate',
-  MIN_PICKS_FOR_COLOURED_ROI > 0 && MIN_PICKS_FOR_COLOURED_ROI < 50,
-  String(MIN_PICKS_FOR_COLOURED_ROI));
+// Matt, 2026-11-21: every settled bet counts and every row shows its record in
+// full. No small-sample floor, caption or greying on a record surface.
+const THIN = /MIN_PICKS_FOR_COLOURED_ROI|thinSampleCaption|Too few to judge/;
+const thinCopy = FILES.filter((f) => {
+  const rel = relative(SRC, f).replace(/\\/g, '/');
+  return /screens\/|components\/|lib\/recordHero/.test(rel) && THIN.test(readFileSync(f, 'utf-8'));
+});
+check('no record surface greys or captions a model for having few bets',
+  thinCopy.length === 0, thinCopy.map((f) => relative(SRC, f)).join(', '));
 
 // The PAPER check above greps for a WORD, and passed for days while four
 // surfaces made the same claim as a NUMBER: "not backed for real money until

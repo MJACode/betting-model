@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Every settled bet counts: the under-10-bet "Too few to judge yet" greying/caption removed from every model record surface (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant app screens (Settings tile, setup/connected/trial, Picks intro, unlocked sheet) + Disconnect cuts the app off (begin_call_session) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant connector server (edge function `mcp`) + website approval page at /oauth/consent |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant Stats views (mcp_stats) + trigram name search: all lookups 1-62 ms on production as the read role |

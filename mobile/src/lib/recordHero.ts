@@ -14,7 +14,7 @@
 import { spokenDate, unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
 import { allMatchedText } from '@/lib/clvBeat';
 import { formatPct, formatPctSigned, formatSigned } from '@/lib/format';
-import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT } from '@/lib/recordStart';
 import { pnlTone } from '@/lib/tone';
 
 /** Discord's all-time field name. A sport filter replaces it with that sport. */
@@ -190,7 +190,6 @@ function splitPiece(label: string, settled: number, rate: number | null, pushes:
   if (settled <= 0) return '';
   const decisive = Math.max(0, settled - pushes);
   if (decisive <= 0) return `${label}  ${allMatchedText(pushes, { sentence: true })}`;
-  const pushNote = pushes > 0 ? `, ${pushes} push` : '';
-  if (decisive < MIN_PICKS_FOR_COLOURED_ROI) return `${label}  ${thinSampleCaption()}${pushNote}`;
+  const pushNote = pushes > 0 ? `, ${pushes} push${pushes === 1 ? '' : 'es'}` : '';
   return `${label}  ${rate != null ? formatPct(rate, 0) : '—'} of ${decisive}${pushNote}`;
 }

@@ -34,7 +34,7 @@ import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, postedPickUnits, publishedRecordKeeps } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
-import { LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { LIVE_RECORD_START_SHORT } from '@/lib/recordStart';
 import { bookLabelShort, pickTitleText, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
@@ -154,19 +154,12 @@ export function BuiltInModelDetailScreen() {
   const decided = stats.wins + stats.losses;
   // Settled with no book price: staked at the bare 1u, as the Record tab does.
   const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
-  // The row that opened this screen greys a thin ROI and captions it; the
-  // drill-down is where a member lingers and screenshots, so it cannot be the
-  // one surface that shows the same 1-bet number in full bet-green with no
-  // qualifier. Same constant, same caption, same rule.
-  const thin = decided < MIN_PICKS_FOR_COLOURED_ROI;
+  // Every settled bet counts and every tile shows its number in full, however
+  // few bets it has (Matt, 2026-11-21; lib/recordStart).
   // Each tile's tone comes from the number it prints, rounded as printed.
   // One unit basis (CLAUDE.md §2): the published stake, the Record tab's.
-  const roiColor = thin
-    ? colors.textSecondary
-    : pnlColor(stats.roi, 1, 100);
-  const pnlTint = thin
-    ? colors.textSecondary
-    : pnlColor(stats.units, 2);
+  const roiColor = pnlColor(stats.roi, 1, 100);
+  const pnlTint = pnlColor(stats.units, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -264,7 +257,7 @@ export function BuiltInModelDetailScreen() {
                 label="Return on bets"
                 value={stats.risked > 0 ? formatPctSigned(stats.roi) : '—'}
                 tint={roiColor}
-                caption={thin && stats.risked > 0 ? thinSampleCaption() : 'each pick to win 1u'}
+                caption="each pick to win 1u"
               />
               <StatTile
                 label="Units"
