@@ -339,6 +339,8 @@ def test_report_line_and_newest_pass():
     names = ["report_20261121T143104Z.log", "supabase_20261121T162749Z.err", "dk_live_board_20261121.log",
              "catchup_20261121T053003Z.log"]
     assert R.newest_pass(names) == "20261121T162749Z"
+    # A pass's first file is its fetch log (seen 2026-11-21 at 15:08).
+    assert R.newest_pass(names + ["fetch_20261121T200831Z.log"]) == "20261121T200831Z"
     assert R.pass_started_at("20261121T162749Z") == utc("2026-11-21T16:27:49")
 
 

@@ -407,7 +407,7 @@ def sport_status(row: dict[str, Any], feed_running: bool) -> dict[str, str]:
     return {"tone": "warn", "text": f"no live game, and the read every {IDLE_POLL_SEC:.0f} s is late"}
 
 
-_PASS_FILE = re.compile(r"^(bin_refresh|catchup|github|supabase|duckdb|report)_(\d{8}T\d{6}Z)\.(log|err)$")
+_PASS_FILE = re.compile(r"^(fetch|bin_refresh|catchup|github|supabase|duckdb|report)_(\d{8}T\d{6}Z)\.(log|err)$")
 
 
 def newest_pass(names: Iterable[str]) -> str | None:

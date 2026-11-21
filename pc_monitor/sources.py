@@ -253,7 +253,7 @@ def backup_files() -> dict[str, Any]:
     files: dict[str, dict[str, Any]] = {}
     errors = []
     if pid:
-        for stage in ("bin_refresh", "catchup", "github", "supabase", "duckdb", "report"):
+        for stage in ("fetch", "bin_refresh", "catchup", "github", "supabase", "duckdb", "report"):
             for ext in ("log", "err"):
                 info = file_info(LOG_DIR / f"{stage}_{pid}.{ext}")
                 if info:
