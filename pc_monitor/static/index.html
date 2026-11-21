@@ -226,11 +226,21 @@ function renderTennis(now, t) {
   h += fact("Last pass", last ? `${day(last.start_at)} <small>${passTook(last)}</small>` : "—");
   h += fact("Pinnacle prices saved, last hour", t.db ? n0(t.db.rows_hour) : "—");
   h += taskFacts(now, t.task) + `</div>`;
-  h += `<h3>Last pass, by source</h3><table><tr><th>Source</th><th>What it read</th><th class="num">Finished</th><th class="num">Exit code</th></tr>`;
-  for (const name of ["dk", "pinnacle", "tennisexplorer"]) {
+  // A pass is open while the task runs and not every source has finished in it.
+  const names = ["dk", "pinnacle", "tennisexplorer"];
+  const open = last && t.task?.state === "Running" && names.some(n => !last.collectors?.[n]);
+  h += `<h3>${open ? "This pass, by source" : "Last pass, by source"}</h3><table><tr><th>Source</th><th>What it read</th><th class="num">Finished</th><th class="num">Exit code</th></tr>`;
+  for (const name of names) {
     const c = t.collectors?.[name] || {}, ex = last?.collectors?.[name];
-    h += `<tr><td>${COLLECTOR_NAMES[name]}</td><td>${collectorSummary(name, c.summary)}</td><td class="num">${time(ex?.at ?? c.written_at)}</td>
-      <td class="num">${ex ? (ex.exit_code == null ? `<span class="note">not recorded</span>` : ex.exit_code) : "—"}</td></tr>`;
+    let what = collectorSummary(name, c.summary), when = time(ex?.at ?? c.written_at), code = "—";
+    if (ex) code = ex.exit_code == null ? `<span class="note">not recorded</span>` : ex.exit_code;
+    else if (open && c.written_at != null && c.written_at >= last.start_at) {
+      // The launcher empties a source's summary file when it starts it.
+      what = pill("ok", "reading now"); when = "—";
+    } else if (open) {
+      what += ` <span class="note">(previous pass; this one has not reached it yet)</span>`;
+    }
+    h += `<tr><td>${COLLECTOR_NAMES[name]}</td><td>${what}</td><td class="num">${when}</td><td class="num">${code}</td></tr>`;
   }
   h += `</table>`;
   if (t.passes?.length > 1) {

@@ -1140,9 +1140,9 @@
     "semantic_hash": ""
   },
   "data/view_migrations.py": {
-    "mtime": 1795280901.0572681,
-    "seen": 1795288527.0305266,
-    "ast_hash": "c9091c892e19a6bdcebef67de20450d9",
+    "mtime": 1795291283.8139813,
+    "seen": 1795292277.020165,
+    "ast_hash": "fcfb6cf0498f1cb28fca457f9b79cf1a",
     "semantic_hash": ""
   },
   "dk_mlb_sample.json": {
@@ -7806,8 +7806,8 @@
     "semantic_hash": ""
   },
   "docs/local_ops.md": {
-    "mtime": 1795288046.270811,
-    "seen": 1795288527.0477629,
+    "mtime": 1795291285.324834,
+    "seen": 1795292277.0316975,
     "ast_hash": "fe106fea807b54ac5ff0963814c0b003",
     "semantic_hash": ""
   },
@@ -16620,9 +16620,9 @@
     "semantic_hash": ""
   },
   "data/migrations/mcp_stats_views_2026_11_21.sql": {
-    "mtime": 1795280900.830376,
-    "seen": 1795288527.0303006,
-    "ast_hash": "3076d29530592e0fc6464c4d5d901cf2",
+    "mtime": 1795291283.811969,
+    "seen": 1795292277.0199919,
+    "ast_hash": "46f1b9825cd4002ef229749b3d9fd919",
     "semantic_hash": ""
   },
   "data/migrations/mcp_status_client_2026_11_21.sql": {
@@ -16710,33 +16710,33 @@
     "semantic_hash": ""
   },
   "pc_monitor/__init__.py": {
-    "mtime": 1795287093.00739,
-    "seen": 1795288527.0324597,
-    "ast_hash": "0ffd30583bf94de99543003188df0fa6",
+    "mtime": 1795291284.5917294,
+    "seen": 1795292277.0216339,
+    "ast_hash": "80a2ad93933549c481d2c2bbc0a1e1b5",
     "semantic_hash": ""
   },
   "pc_monitor/__main__.py": {
-    "mtime": 1795287390.4807389,
-    "seen": 1795288527.0324626,
-    "ast_hash": "921cf9778c0da56894d9a8e3b94d4840",
+    "mtime": 1795291925.0571702,
+    "seen": 1795292277.0216355,
+    "ast_hash": "6f0109baedabd9d2d39be502f9ca78e9",
     "semantic_hash": ""
   },
   "pc_monitor/app.py": {
-    "mtime": 1795287363.2477558,
-    "seen": 1795288527.032465,
-    "ast_hash": "08b8270a66e0f6d278723568eb95c6f2",
+    "mtime": 1795291612.4553845,
+    "seen": 1795292277.0216374,
+    "ast_hash": "6f775c3c736eb5b8799b465c0bfaecfc",
     "semantic_hash": ""
   },
   "pc_monitor/readers.py": {
-    "mtime": 1795287713.8937654,
-    "seen": 1795288527.0324671,
-    "ast_hash": "cf867e0097106753729060a0aa597f92",
+    "mtime": 1795291802.255702,
+    "seen": 1795292277.021639,
+    "ast_hash": "a8c96403e247f4c1f2c7015c44c28528",
     "semantic_hash": ""
   },
   "pc_monitor/sources.py": {
-    "mtime": 1795287807.1047735,
-    "seen": 1795288527.0324705,
-    "ast_hash": "412db9a3967e02fa15ad10d4646118e7",
+    "mtime": 1795291803.620644,
+    "seen": 1795292277.021642,
+    "ast_hash": "aec4b4023dfa1684890ddfa4ff6d5f74",
     "semantic_hash": ""
   },
   "scripts/nba_first_basket_card.py": {
@@ -16746,15 +16746,15 @@
     "semantic_hash": ""
   },
   "scripts/pc_monitor_shortcut.ps1": {
-    "mtime": 1795287894.1774962,
-    "seen": 1795288527.0339744,
-    "ast_hash": "9a6a4eae64d65428c40ea18f0f0f4ee6",
+    "mtime": 1795291285.6872582,
+    "seen": 1795292277.0227964,
+    "ast_hash": "6185bd1e13c051c30ca6d0ce423ab4f0",
     "semantic_hash": ""
   },
   "supabase/functions/mcp/index.ts": {
-    "mtime": 1795280942.9475038,
-    "seen": 1795288527.0342262,
-    "ast_hash": "b6f5b2c494a7583dec8fc04d4cb355d6",
+    "mtime": 1795291284.206243,
+    "seen": 1795292277.022987,
+    "ast_hash": "1a4f740b9270f5bb7808567e32769245",
     "semantic_hash": ""
   },
   "tests/test_mcp_foundation.py": {
@@ -16788,9 +16788,9 @@
     "semantic_hash": ""
   },
   "tests/test_pc_monitor.py": {
-    "mtime": 1795287769.1107874,
-    "seen": 1795288527.0469196,
-    "ast_hash": "7c4595b2c6a1f5c45b7352d58cbb1182",
+    "mtime": 1795291909.8881407,
+    "seen": 1795292277.031031,
+    "ast_hash": "73cfed13c8548e48749890c0c29a09e0",
     "semantic_hash": ""
   },
   "tests/test_premium_gate_matview_coverage.py": {
@@ -16812,15 +16812,27 @@
     "semantic_hash": ""
   },
   "pc_monitor/static/index.html": {
-    "mtime": 1795287864.8807592,
-    "seen": 1795288527.048091,
-    "ast_hash": "393021d9c6051195da6f621c5aa97fb6",
+    "mtime": 1795291707.0819569,
+    "seen": 1795292277.0319448,
+    "ast_hash": "45d15f9a5ae4ef9ab674cb6324fa6df0",
     "semantic_hash": ""
   },
   "web/templates/consent.html": {
     "mtime": 1795280943.9929762,
     "seen": 1795288527.0481613,
     "ast_hash": "cfb0b6303d12b6a0f74cb5efb9058366",
+    "semantic_hash": ""
+  },
+  "data/migrations/mcp_stats_alt_lines_2026_11_21.sql": {
+    "mtime": 1795291283.8099594,
+    "seen": 1795292277.0199888,
+    "ast_hash": "1f8e14221f3a9e033b88abc87b4f25cb",
+    "semantic_hash": ""
+  },
+  "tests/test_mcp_alt_lines.py": {
+    "mtime": 1795291284.210267,
+    "seen": 1795292277.0235279,
+    "ast_hash": "efc490c0029e4d7188d95535274ed77d",
     "semantic_hash": ""
   }
 }
