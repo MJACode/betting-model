@@ -381,6 +381,39 @@ def test_view_without_the_database_still_shows_tasks_processes_and_logs():
     assert view({}, NOW)["feed"]["presence"]["tone"] == "bad"
 
 
+def _feed_rows(read_at: float) -> dict:
+    return {"data": [{"sport": "NCAAF", "age_s": 1.7, "ok": True, "live_events": 11, "matched": 11,
+                      "detail": "", "db_now": read_at}], "read_at": read_at, "error": None}
+
+
+def test_old_database_rows_are_never_judged_late():
+    """After the database drops (or the collectors pause), the last rows stay
+    in memory. Their ages keep growing, but that is not evidence the feed is
+    late, so they must turn grey, not red."""
+    from pc_monitor.app import view
+    procs = {"data": [{"pid": 16256, "started_at": NOW - 8000, "role": "dk_feed", "label": "x",
+                       "cmdline": FEED_CMD, "cpu_pct": 0.4, "mem_mb": 116.0}], "read_at": NOW}
+    fresh = view({"db_feed": _feed_rows(NOW - 1), "processes": procs,
+                  "db": {"data": {"connected": True}, "read_at": NOW - 1}}, NOW)
+    assert fresh["feed"]["sports"][0]["status"]["tone"] == "ok"
+    assert fresh["db"]["connected"] is True
+    dropped = view({"db_feed": _feed_rows(NOW - 30), "processes": procs,
+                    "db": {"data": {"connected": True}, "read_at": NOW - 30, "error": "OperationalError",
+                           "failed_at": NOW - 5}}, NOW)
+    s = dropped["feed"]["sports"][0]
+    assert s["status"]["tone"] == "idle"
+    assert s["status"]["text"] == "not read from the database for 30 s"
+    assert dropped["db"]["connected"] is False
+    assert dropped["feed"]["sources"]["db_feed"]["stale_s"] == pytest.approx(30)
+
+
+def test_old_process_list_makes_the_feed_unknown_not_down():
+    from pc_monitor.app import view
+    old = {"data": [], "read_at": NOW - 90}
+    p = view({"processes": old}, NOW)["feed"]["presence"]
+    assert p["tone"] == "idle" and p["text"] == "unknown: processes not read for 90 s"
+
+
 # ── log files: encodings and big files ──────────────────────────────────────
 
 def test_log_text_sniffs_utf16_and_drops_a_partial_first_line(tmp_path):

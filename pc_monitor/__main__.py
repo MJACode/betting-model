@@ -87,6 +87,10 @@ def _update_checkout() -> bool:
     from pc_monitor.sources import hidden_run
     if "/.claude/feeds/" not in ROOT.as_posix().lower() + "/":
         return False
+    # origin/master in use; another remote branch only to test this path.
+    ref = os.environ.get("PC_MONITOR_UPDATE_REF", "origin/master")
+    if not ref.startswith("origin/"):
+        return False
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
 
     def git(*args: str, timeout: float = 30) -> str | None:
@@ -97,15 +101,15 @@ def _update_checkout() -> bool:
             return None
         return r.stdout.strip() if r.returncode == 0 else None
 
-    if git("fetch", "-q", "origin", "master", timeout=45) is None:
+    if git("fetch", "-q", "origin", ref[len("origin/"):], timeout=45) is None:
         print("git fetch failed - starting on the code already here", file=sys.stderr)
-    if git("cat-file", "-e", "origin/master:pc_monitor/__main__.py") is None:
+    if git("cat-file", "-e", f"{ref}:pc_monitor/__main__.py") is None:
         return False  # the pull request that adds this app is not merged yet
-    head, master = git("rev-parse", "HEAD"), git("rev-parse", "origin/master")
+    head, master = git("rev-parse", "HEAD"), git("rev-parse", ref)
     if not head or not master or head == master:
         return False
-    if git("checkout", "-q", "--detach", "-f", "origin/master") is None:
-        print("git checkout of origin/master failed - starting on the code already here", file=sys.stderr)
+    if git("checkout", "-q", "--detach", "-f", ref) is None:
+        print(f"git checkout of {ref} failed - starting on the code already here", file=sys.stderr)
         return False
     print(f"moved {head[:8]} -> {master[:8]}", file=sys.stderr)
     return True

@@ -253,13 +253,37 @@ def _window_text(window: dict | None) -> str | None:
     return f"{s // 60:02d}:{s % 60:02d} to {e // 60:02d}:{e % 60:02d}"
 
 
-def _stamp(p: dict[str, Any]) -> dict[str, Any]:
-    return {"read_at": p.get("read_at"), "error": p.get("error"), "failed_at": p.get("failed_at")}
+# How old each panel may get before what it holds is no longer shown as
+# current: a few of its read intervals. Past it, its judgements turn grey and
+# say how long it has not been read (a database that dropped, or a window
+# reopened after the collectors paused).
+STALE_AFTER_S = {"processes": 10, "feed_log": 15, "launcher_log": 30, "backup": 15, "tennis": 60,
+                 "tables_done": 60, "tasks": 120, "db_feed": 10, "db_minutes": 60, "db_tennis": 240,
+                 "db_backup": 240, "stderr": 120}
+
+
+def stale_for(p: dict[str, Any], name: str, now: float) -> float | None:
+    """Seconds since the panel was last read, when that is past its limit;
+    None while it is current. A panel never read counts as stale from start."""
+    ra = p.get("read_at")
+    if ra is None:
+        return float("inf") if p.get("error") else None
+    age = now - ra
+    return age if age > STALE_AFTER_S.get(name, 60) else None
+
+
+def _stamp(p: dict[str, Any], name: str | None = None, now: float | None = None) -> dict[str, Any]:
+    out = {"read_at": p.get("read_at"), "error": p.get("error"), "failed_at": p.get("failed_at")}
+    if name and now is not None:
+        s = stale_for(p, name, now)
+        out["stale_s"] = None if s is None or s == float("inf") else s
+    return out
 
 
 def view(panels: dict[str, dict[str, Any]], now: float) -> dict[str, Any]:
     """Everything the page shows, judged against `now`."""
     g = lambda k: panels.get(k) or {}  # noqa: E731
+    st = lambda k: _stamp(g(k), k, now)  # noqa: E731
     tasks = g("tasks").get("data") or []
     by_script = {t["script"]: t for t in tasks if t.get("script")}
     procs = g("processes").get("data") or []
@@ -287,28 +311,39 @@ def view(panels: dict[str, dict[str, Any]], now: float) -> dict[str, Any]:
             minutes.setdefault(r["sport"], [0] * 60)[r["ago_min"]] = r["rows"]
     # The feed's ages are read every 2 s; age them by the time since that read.
     db_age = (now - db_feed["read_at"]) if db_feed.get("read_at") else 0
+    feed_stale = stale_for(db_feed, "db_feed", now)
+    procs_stale = stale_for(g("processes"), "processes", now)
     sports = []
     for r in db_feed.get("data") or []:
         row = dict(r)
         if row.get("age_s") is not None:
             row["age_s"] = row["age_s"] + db_age
-        row["status"] = R.sport_status(row, feed_proc is not None)
+        if feed_stale is not None:
+            # Old rows are not evidence the feed is late: say what is known.
+            row["status"] = {"tone": "idle", "text": f"not read from the database for {int(feed_stale)} s"}
+        else:
+            row["status"] = R.sport_status(row, feed_proc is not None)
         m = minutes.get(r["sport"], [0] * 60)
         row["minutes"] = m
         row["rows_last_min"] = m[0]
         row["rows_hour"] = sum(m)
         sports.append(row)
+    if procs_stale is not None:
+        presence = {"tone": "idle", "text": "unknown: processes not read for "
+                    + ("a while" if procs_stale == float("inf") else f"{int(procs_stale)} s")}
+    else:
+        presence = R.feed_presence(feed_proc is not None, now, in_window, runs, _window_text(window))
     feed = {
         "task": dk_task,
-        "presence": R.feed_presence(feed_proc is not None, now, in_window, runs, _window_text(window)),
+        "presence": presence,
         "process": strip([feed_proc])[0] if feed_proc else None,
         "launcher": strip(job_procs("dk_live_board_run.ps1")),
         "log": {k: feed_log.get(k) for k in ("path", "last_line_at", "started_at", "last_read", "rate", "stopped")},
         "problems": feed_log.get("problems") or [],
         "runs_today": [r for r in runs if (r.get("start_at") or 0) >= today0],
         "sports": sports,
-        "sources": {"feed_log": _stamp(g("feed_log")), "db_feed": _stamp(db_feed),
-                    "db_minutes": _stamp(g("db_minutes")), "launcher_log": _stamp(g("launcher_log"))},
+        "sources": {"feed_log": st("feed_log"), "db_feed": st("db_feed"),
+                    "db_minutes": st("db_minutes"), "launcher_log": st("launcher_log")},
     }
 
     # Backup
@@ -316,6 +351,8 @@ def view(panels: dict[str, dict[str, Any]], now: float) -> dict[str, Any]:
     b = g("backup").get("data") or {}
     status = R.backup_status(b.get("pass_id"), b.get("files") or {}, b.get("progress"), b.get("progress_mtime"),
                              b.get("state"), now, bool(bk_task and bk_task.get("state") == "Running"))
+    if (bs := stale_for(g("backup"), "backup", now)) is not None and bs != float("inf"):
+        status["warnings"].append(f"the backup's files have not been read for {int(bs)} s")
     backup = {
         "task": bk_task, "status": status,
         "tables_done": g("tables_done").get("data") if status.get("copy") else None,
@@ -324,7 +361,7 @@ def view(panels: dict[str, dict[str, Any]], now: float) -> dict[str, Any]:
         "db_row": g("db_backup").get("data"),
         "errors": b.get("errors") or [],
         "processes": strip(job_procs("local_mirror_run.ps1")),
-        "sources": {"files": _stamp(g("backup")), "db_backup": _stamp(g("db_backup"))},
+        "sources": {"files": st("backup"), "db_backup": st("db_backup")},
     }
 
     # Tennis
@@ -335,7 +372,7 @@ def view(panels: dict[str, dict[str, Any]], now: float) -> dict[str, Any]:
         "collectors": t.get("collectors") or {},
         "db": g("db_tennis").get("data"),
         "processes": strip(job_procs("tennis_feeds_run.ps1")),
-        "sources": {"logs": _stamp(g("tennis")), "db_tennis": _stamp(g("db_tennis"))},
+        "sources": {"logs": st("tennis"), "db_tennis": st("db_tennis")},
     }
 
     known = {"dk_live_board_run.ps1", "local_mirror_run.ps1", "tennis_feeds_run.ps1"}
@@ -345,10 +382,11 @@ def view(panels: dict[str, dict[str, Any]], now: float) -> dict[str, Any]:
     db = g("db")
     return {
         "app": APP_ID, "now": now,
-        "db": {"connected": db.get("error") is None and db.get("read_at") is not None, **_stamp(db)},
+        "db": {"connected": db.get("error") is None and db.get("read_at") is not None
+               and feed_stale is None, **_stamp(db)},
         "feed": feed, "backup": backup, "tennis": tennis, "other_tasks": others,
-        "tasks": tasks, "tasks_source": _stamp(g("tasks")),
-        "processes": strip(procs), "processes_source": _stamp(g("processes")),
+        "tasks": tasks, "tasks_source": st("tasks"),
+        "processes": strip(procs), "processes_source": st("processes"),
         "stderr": g("stderr").get("data") or [],
     }
 

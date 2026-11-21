@@ -102,6 +102,7 @@ const fact = (k, v) => `<div class="fact"><div class="k">${esc(k)}</div><div cla
 function stamp(now, name, s) {
   if (!s) return "";
   if (s.error) return `<span class="e">${esc(name)}: ${esc(s.error)}${s.read_at ? ` (last good read ${age(now, s.read_at)})` : ""}</span>`;
+  if (s.stale_s) return `<span class="e">${esc(name)} not read for ${dur(s.stale_s)}</span>`;
   return `${esc(name)} read ${s.read_at ? age(now, s.read_at) : "not yet"}`;
 }
 const stamps = (now, obj) => `<div class="src">${Object.entries(obj || {}).map(([k, v]) => stamp(now, k, v)).filter(Boolean).join(" · ")}</div>`;
