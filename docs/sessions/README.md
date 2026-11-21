@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, "Find alt line" on Other lines rows: opens the game at the member's book to switch to the model's line (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all crash fix: `selected` read before declared; use-before-declare guard over mobile/src (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all lists tracked picks again (Untracked only switch removed; board Tracked filter replaces it) (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Picks filter sheet: Tracked cut (All / Not tracked / Tracked) off the Track button (Matt) |

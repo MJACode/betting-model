@@ -20,7 +20,21 @@ export const PICK_BOOKS_OTHER_LINE_NOTE =
 
 /** The note when every priced row is at a different number: no Best, no Bet. */
 export const PICK_BOOKS_OTHER_LINES_ONLY_NOTE =
-  'Only books you selected. A different line is a different bet; the model’s pick, edge and record stay at its line. Tap a book to open it.';
+  'Only books you selected. A different line is a different bet; the model’s pick, edge and record stay at its line.';
+
+/** The action on a row at a different number (Matt, 2026-11-21): the row
+ *  opens the game at that book, with the book's own line on the slip, so the
+ *  member can switch to the pick's number in the book's alternate lines. */
+export const FIND_ALT_LINE_LABEL = 'Find alt line';
+
+/** Added under the note whenever a row offers Find alt line. */
+export const PICK_BOOKS_FIND_ALT_NOTE =
+  'Your book opens on this game with its own line on the slip. Switch to the model’s line in its alternate lines before you bet.';
+
+/** Spoken hint for a Find alt line row. */
+export function findAltLineHint(bookFullName: string): string {
+  return `Opens this game at ${bookFullName} to find the alternate line`;
+}
 
 export interface PickSportsbookRow {
   bookmaker: string;
