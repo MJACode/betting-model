@@ -435,6 +435,34 @@ def test_log_text_sniffs_utf16_and_drops_a_partial_first_line(tmp_path):
     assert tail16.endswith("INFO line 59\n") and tail16.splitlines()[0].startswith("2026-11-21 13:")
 
 
+def test_under_pythonw_output_goes_to_the_log_even_when_a_stream_is_handed_over(tmp_path, monkeypatch):
+    """A pythonw started by a pythonw (the restart after an update) is handed a
+    stdout whose reader is closed; its first print raised OSError and it died
+    silently (2026-11-21). Under pythonw both streams must go to the log."""
+    import io
+    import sys
+    import pc_monitor.__main__ as M
+    import pc_monitor.sources as S
+    monkeypatch.setattr(S, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(sys, "executable", r"C:\Python314\pythonw.exe")
+    handed = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", handed)
+    monkeypatch.setattr(sys, "stderr", handed)
+    M._quiet_stdio()
+    try:
+        assert sys.stdout is not handed and sys.stderr is sys.stdout
+        print("start pid 1", flush=True)
+    finally:
+        sys.stdout.close()
+    assert "start pid 1" in next(tmp_path.glob("pc_monitor_*.log")).read_text(encoding="utf-8")
+    # From a console, the console keeps its output.
+    monkeypatch.setattr(sys, "executable", r"C:\Python314\python.exe")
+    monkeypatch.setattr(sys, "stdout", handed)
+    monkeypatch.setattr(sys, "stderr", handed)
+    M._quiet_stdio()
+    assert sys.stdout is handed
+
+
 # ── guards ──────────────────────────────────────────────────────────────────
 
 def test_constants_match_the_code_they_mirror():

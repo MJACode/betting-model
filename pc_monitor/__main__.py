@@ -27,8 +27,18 @@ PORT = int(os.environ.get("PC_MONITOR_PORT", "8790"))
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _under_pythonw() -> bool:
+    return Path(sys.executable).name.lower().startswith("pythonw")
+
+
 def _quiet_stdio() -> None:
-    if sys.stdout is not None and sys.stderr is not None:
+    """Send output to the log file when there is no console.
+
+    Under pythonw both streams go to the log, even when they look present: a
+    pythonw started by another pythonw (the relaunch after an update) is handed
+    a pipe whose reader is already closed, and its first print raised OSError
+    (measured 2026-11-21), so it died before writing a line."""
+    if not _under_pythonw() and sys.stdout is not None and sys.stderr is not None:
         return
     from pc_monitor.sources import LOG_DIR
     try:
@@ -36,8 +46,8 @@ def _quiet_stdio() -> None:
         fh = open(LOG_DIR / f"pc_monitor_{datetime.now():%Y%m%d}.log", "a", encoding="utf-8", buffering=1)
     except OSError:
         fh = open(os.devnull, "w", encoding="utf-8")
-    sys.stdout = sys.stdout or fh
-    sys.stderr = sys.stderr or fh
+    sys.stdout = fh
+    sys.stderr = fh
 
 
 def _message_box(text: str) -> None:
@@ -141,7 +151,9 @@ def main() -> int:
         import subprocess
         from pc_monitor.sources import CREATE_NO_WINDOW
         subprocess.Popen([sys.executable, "-m", "pc_monitor", "--no-update", *sys.argv[1:]],
-                         cwd=str(ROOT), stdin=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+                         cwd=str(ROOT), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+        print("restarting on the new code", flush=True)
         return 0
 
     sys.path.insert(0, str(ROOT))
@@ -168,4 +180,13 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception:  # noqa: BLE001 - with no console, the log is the only witness
+        import traceback
+        traceback.print_exc()
+        _message_box("The monitor stopped with an error. Its log is in "
+                     "Documents\\betting_local_copies\\logs\\pc_monitor_<date>.log")
+        raise SystemExit(1)
