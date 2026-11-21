@@ -76,6 +76,8 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
   // 2026-11-21). Ticking it again still includes it.
   const untrackedKeys = () => new Set(picks.filter((p) => !isTracked(p.pick)).map((p) => p.key));
   const [selected, setSelected] = useState<Set<string>>(untrackedKeys);
+  // The tracked keys this sheet has already seen (see the late-load effect).
+  const seenTracked = useRef<Set<string>>(new Set());
   const [book, setBook] = useState<string | null>(null);
   const [phase, setPhase] = useState<'choose' | 'send'>('choose');
   const [steps, setSteps] = useState<BetAllStep[]>([]);
@@ -88,6 +90,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
     if (!visible) return;
     setMode('best');
     setSelected(untrackedKeys());
+    seenTracked.current = new Set(picks.filter((p) => isTracked(p.pick)).map((p) => p.key));
     setBook(null);
     setPhase('choose');
     setSteps([]);
@@ -102,12 +105,16 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
   }, [pickKeys]);
 
   // Tracked state can load after the sheet opens: a pick that turns out to
-  // be tracked leaves the selection while the member is still choosing.
+  // be tracked leaves the selection while the member is still choosing. Only
+  // NEWLY tracked keys leave, so a tracked pick the member ticked back in on
+  // purpose stays ticked (PR #1532 review).
   const trackedKeys = picks.filter((p) => isTracked(p.pick)).map((p) => p.key).join(',');
   useEffect(() => {
-    if (phase !== 'choose' || !trackedKeys) return;
-    const t = new Set(trackedKeys.split(','));
-    setSelected((prev) => new Set([...prev].filter((k) => !t.has(k))));
+    const now = new Set(trackedKeys ? trackedKeys.split(',') : []);
+    const added = [...now].filter((k) => !seenTracked.current.has(k));
+    seenTracked.current = now;
+    if (phase !== 'choose' || added.length === 0) return;
+    setSelected((prev) => new Set([...prev].filter((k) => !added.includes(k))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackedKeys]);
 
@@ -233,7 +240,10 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
     return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [picks]);
 
-  const allSelected = picks.length > 0 && picks.every((p) => selected.has(p.key));
+  // Select all covers untracked picks only: one tap must not put a placed
+  // bet back in (PR #1532 review). A tracked pick is opt-in, row by row.
+  const untracked = picks.filter((p) => !isTracked(p.pick));
+  const allSelected = untracked.length > 0 && untracked.every((p) => selected.has(p.key));
   const trackedCount = picks.filter((p) => isTracked(p.pick)).length;
 
   const ctaLabel =
@@ -291,9 +301,9 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
                   labelFor={(m) => (m === 'best' ? 'Best line' : 'One sportsbook')}
                 />
               </View>
-              {picks.length > 1 ? (
+              {untracked.length > 1 ? (
                 <Pressable
-                  onPress={() => setSelected(allSelected ? new Set() : new Set(picks.map((p) => p.key)))}
+                  onPress={() => setSelected(allSelected ? new Set() : new Set(untracked.map((p) => p.key)))}
                   accessibilityRole="button"
                   accessibilityLabel={allSelected ? 'Select none' : 'Select all'}
                   hitSlop={12}
