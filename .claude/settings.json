@@ -48,6 +48,16 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "mcp__.*Supabase__(execute_sql|apply_migration)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/picks_read_only_guard.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Bash|Grep",
         "hooks": [
           {

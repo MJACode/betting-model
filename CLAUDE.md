@@ -211,6 +211,9 @@ disk, and the fix is an importer, not an allowlist entry.
 storage and GitHub, outside the repo, by `scripts/local_mirror*.py`. A backup,
 never a second store: `docs/local_ops.md`.
 
+**THE MODEL PICKS ARE READ-ONLY FOR CLAUDE** (Matt 11-21): SELECT
+`picks*`/`results_snapshots` freely; never write them. Hook-enforced.
+
 **NO DATA IS EVER DELETED; ONLY MIKE CAN OVERRIDE IT, IN CHAT.** (mike,
 2026-11-14.) No prune, retention, cleanup or hand-run DELETE destroys a stored
 row. A row leaves the live database only by ARCHIVING: copied, verified (count,
@@ -448,9 +451,6 @@ every writer: `models/nhl_goalie_gate.py`, `docs/sports/nhl.md`.
 > merging. Mobile JS-only merges ship over the air automatically
 > (`.github/workflows/mobile-ota.yml` fires on push to master touching
 > `mobile/**`); anything touching a native module needs a TestFlight build.
->
-> **Every change under `mobile/src` is reviewed by the `frontend-ux-designer`
-> agent before its PR opens** — a standing rule, §1b. `/ux-review` runs it.
 
 ```bash
 python run_pipeline.py                      # full daily pipeline
