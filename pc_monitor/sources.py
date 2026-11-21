@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -368,7 +369,7 @@ class Database:
             self.connect()
         try:
             cur = self.conn.execute(sql, params)
-            rows = cur.fetchall() if " returning " in sql.lower() else []
+            rows = cur.fetchall() if re.search(r"\breturning\b", sql, re.IGNORECASE) else []
             self.conn.commit()
             return rows
         except Exception:

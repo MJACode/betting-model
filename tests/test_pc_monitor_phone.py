@@ -96,6 +96,32 @@ class _FakeDb:
         return [(12.0,)]                                  # a phone asked 12 s ago
 
 
+def test_a_write_returns_the_rows_of_its_returning_clause_and_commits():
+    """The real statements, through the real Database.write, on a stand-in
+    connection. (2026-11-21: the first run on the PC raised IndexError on every
+    publish, because RETURNING sat after a line break and was not seen.)"""
+    from pc_monitor import sources as S
+
+    class Cur:
+        def fetchall(self):
+            return [("tok",)]
+
+    class Conn:
+        commits = 0
+
+        def execute(self, sql, params=None):
+            return Cur()
+
+        def commit(self):
+            Conn.commits += 1
+
+    db = S.Database()
+    db.conn = Conn()
+    assert db.write(S.SQL_PHONE_ROW, ("MAHome", "new"))[0][0] == "tok"
+    assert db.write(S.SQL_PUBLISH, ("{}", "MAHome")) == []
+    assert Conn.commits == 2
+
+
 def test_the_written_view_never_carries_the_token():
     from pc_monitor.app import Collector
     c = Collector()
