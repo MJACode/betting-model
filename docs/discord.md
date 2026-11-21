@@ -951,3 +951,44 @@ WHERE sent_at::timestamptz > NOW() - INTERVAL '1 day'
 ORDER BY sent_at;
 ```
 
+
+## 33. The record sheet is the reference (2026-11-21, Matt and mike)
+
+mike: *"use this as the single source of truth"* — the **"SignalBase Record
+History"** Google sheet (`https://docs.google.com/spreadsheets/d/1FaUkZnjirMrh0G3Je3RpNoO6d9wq6CcKGZr9bbSovXo/htmlview`).
+Matt: *"we should always do a check against this. still do what we're doing
+today, but use that as a reference point to make sure that we're always in
+sync with it"*, and where they disagreed, *"Google is right"*.
+
+**So the record is still computed from `picks`** (Discord's `_SETTLED_SQL`, the
+two record views, the website's `site_public_record`), and it must agree with
+the sheet pick for pick. Where they differ, the record changes, never the check.
+
+**What changed to make them agree (measured 2026-11-21, all 1,705 graded picks
+diffed by `pick_id`; the only two differences):**
+
+| Gap | Record | Sheet | Fix |
+|---|---|---|---|
+| Stake | 4 NCAAB picks at 2u (`stake_units`): +2, +2, +2, −2.50 | 1u to win: +1, +1, +1, −1.25 | Flat 1u on every surface: `pick_conviction` / `pickConviction` / `published_pick_stake(numeric, numeric)` ignore `stake_units`; NCAAB stops writing 2u (`NCAAB_AGREEMENT_STAKE_UNITS` = 1). Matt: *"Record + stop 2u picks"* |
+| UFC | struck (mike 11-13) | counts `ufc_total_rounds` 1-0, +1.00u (Mario Pinto vs Ryan Spann Under 1.5, 2026-09-05) | Strike removed from `RECORD_EXCLUSIONS`, the strike file retired, the clause taken out of the views; the app and the website stop dropping retired models. Matt: *"Yes, put it back"* |
+
+After both: 900-802-3 on both. Units +59.86 in the record against the sheet's
++59.85 headline: the sheet rounds each pick to the cent before it sums, and
+rounds three plus-money losses a cent up (#1660578, #4473237 at +113; #3849773
+at +177).
+
+**The check.** `tracking/record_sheet_check.py`, hourly at :47 on the worker
+(`record_sheet_check`), and on demand as the `record_sheet_check` worker job.
+It reads the sheet's Picks tab as CSV, diffs every graded pick (result, and
+units within a cent), Discord's last all-time line, and each daily recap from
+2026-11-21 on (within 0.05u for the summed lines). Each run is a row in
+`record_sheet_checks`; any difference posts one ops alert per distinct set per
+ET day. A pick graded in the last three hours is not yet a gap (the sheet
+refreshes about hourly). Report only: it never changes a pick, view or post.
+
+**Not changed, on purpose:** Discord's old daily recaps for 2026-09-05, 09-26,
+10-27 and 11-17 still say what they said when posted (no restatement without
+mike's approval, `config.RECORD_RESTATEMENT_APPROVALS`), and 08-29..08-31 sit
+before the record's 09-01 start. The check starts its daily comparison at
+2026-11-21 so it does not report them every hour. Who writes the sheet is not
+recorded in this repo.

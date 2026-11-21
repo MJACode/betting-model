@@ -211,8 +211,8 @@ disk, and the fix is an importer, not an allowlist entry.
 storage and GitHub, outside the repo, by `scripts/local_mirror*.py`. A backup,
 never a second store: `docs/local_ops.md`.
 
-**THE MODEL PICKS ARE READ-ONLY FOR CLAUDE** (Matt 11-21): SELECT
-`picks*`/`results_snapshots` freely; never write them. Hook-enforced.
+**THE MODEL PICKS ARE READ-ONLY FOR CLAUDE** (Matt): SELECT `picks*` and
+`results_snapshots` freely; never write them.
 
 **NO DATA IS EVER DELETED; ONLY MIKE CAN OVERRIDE IT, IN CHAT.** (mike,
 2026-11-14.) No prune, retention, cleanup or hand-run DELETE destroys a stored
@@ -353,7 +353,7 @@ props. Ten sports are live today (§8). **GOLF was retired 2026-09-08** (mike) �
 **Every model is live real money.** There is no second mode that counts a
 graded pick in the win-loss record and leaves it out of the units, and there
 is no hold-back ledger. Units and the record are the same graded set, sized by `stake_for`
-(1u to win, risk capped at 3) at `COALESCE(decision_odds, dk_odds)`. A pick with no price is not given a
+(1u to win, risk capped at 3) at `COALESCE(decision_odds, dk_odds)`. **The record must match the "SignalBase Record History" sheet** (Matt, mike 11-21; `docs/discord.md` §33). A pick with no price is not given a
 made-up price. (mike, 2026-10-14, and 2026-10-08: do not ask to hold a model
 back.) Report gate standing — ≥ 50 settled picks, positive flat-bet ROI,
 calibration error ≤ 5% — and build the model live.
@@ -451,6 +451,8 @@ every writer: `models/nhl_goalie_gate.py`, `docs/sports/nhl.md`.
 > merging. Mobile JS-only merges ship over the air automatically
 > (`.github/workflows/mobile-ota.yml` fires on push to master touching
 > `mobile/**`); anything touching a native module needs a TestFlight build.
+>
+> **`mobile/src` changes get the UX review first** (§1b): `/ux-review`.
 
 ```bash
 python run_pipeline.py                      # full daily pipeline
@@ -640,13 +642,13 @@ What stays here is what has to be known BEFORE deciding which file to open
 | **Odds providers: what exists, what it costs, what it adds** | `docs/odds_sources.md` |
 | **NHL 2026-27: markets, evidence, defects, plan** | `docs/nhl_market_research.md` |
 | **The eleven NFL prop models hold no information the line lacks** | `docs/nfl_prop_information_test.md` |
-| **The search for a profitable NFL prop model: tackles was the wrong stat, DK is flat** | `docs/nfl_prop_profitability_search.md` |
-| **The stat models: what is exhausted, what the outside world does, the one method left (market-anchored shape simulation)** | `docs/nfl_prop_method_search.md` |
+| **The search for a profitable NFL prop model** | `docs/nfl_prop_profitability_search.md` |
+| **NFL prop stat models: what is exhausted, the one method left** | `docs/nfl_prop_method_search.md` |
 | **NFL prop lines lean over — the measured bias, and the per-side cut it bought** | `docs/nfl_prop_over_lean.md` |
 | **nfl_prop_market 2026 remeasure — no cut change, no 24h-ceiling change** | `docs/nfl_prop_market_2026.md` |
 | **MLB runline / O/U edge search (paper totals 2pp, spreads gated)** | `docs/mlb_runline_ou_edge_search.md` |
 | **MLB totals public-OVER fade (paper UNDER, INSERT default 0)** | `docs/mlb_total_public_fade.md` |
-| **MLB market-handicap features (public/RLM/steam; RL+OU matrix; retrain next)** | `docs/mlb_market_handicap_features.md` |
+| **MLB market-handicap features (public/RLM/steam)** | `docs/mlb_market_handicap_features.md` |
 | **NFL prop Out/Doubtful veto (ESPN status_ts vs quote)** | `docs/nfl_prop_injury_veto.md` |
 | **CLV: no-vig two-way close, sharp book when present** | `docs/clv.md` |
 | **Build Your Own Model, NFL facts (not picks)** | `docs/byom_nfl.md` |

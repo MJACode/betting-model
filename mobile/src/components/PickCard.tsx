@@ -297,8 +297,8 @@ export function PickCard({
 
   // Stake stays on the deciding price, never the Now snapshot — §6.
   // On 'mine' the risk is grossed up at their price, so "Bet 0.95u · Win 1u"
-  // is what that book takes to win the same unit. The units to win are the
-  // pick's own stake_units when it carries one (2u: "Bet 2.2u · Win 2u").
+  // is what that book takes to win the same unit. Flat 1u to win since
+  // 2026-11-21: the pick's stake_units is kept on the row and sizes nothing.
   const stake = stakeFor(pick.kelly_fraction, myQuote ? myQuote.price : decisionOdds(pick), pick.stake_units);
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
