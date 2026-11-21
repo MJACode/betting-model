@@ -5,6 +5,7 @@ import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { PremiumLock } from '@/components/PremiumLock';
 import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
@@ -62,6 +63,7 @@ export function BuiltInModelDetailScreen() {
     records: fullOutcomeRecords,
     loading: settledLoading,
     error: settledError,
+    noAccess,
     refresh: refreshSettled,
   } = useSettledPicksSincePaperStart();
 
@@ -237,6 +239,9 @@ export function BuiltInModelDetailScreen() {
           )
         }
         ListFooterComponent={
+          noAccess ? (
+            <PremiumLock locked />
+          ) : (
           <>
             <Text style={styles.sectionHeader}>Since {LIVE_RECORD_START_SHORT} · settled bets, as posted</Text>
             <View style={styles.statRow}>
@@ -434,6 +439,7 @@ export function BuiltInModelDetailScreen() {
             ) : null}
             <BetslipBarSpacer />
           </>
+          )
         }
         contentContainerStyle={styles.list}
       />

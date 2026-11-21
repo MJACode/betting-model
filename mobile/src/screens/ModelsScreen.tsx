@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { PremiumLock } from '@/components/PremiumLock';
 import { ModelBadgeRow } from '@/components/ModelBadgeRow';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { errorSurface, loadPresentation } from '@/lib/loadState';
@@ -60,7 +61,7 @@ export function ModelsScreen() {
   const navigation = useNavigation<Nav>();
   const [tab, setTab] = useState<Tab>('builtin');
   const { sport } = useSportFilter();
-  const { rows, records, loading, error, refresh } = useSettledPicksSincePaperStart();
+  const { rows, records, loading, error, noAccess, refresh } = useSettledPicksSincePaperStart();
   // Nothing settled has loaded yet (first fetch in flight, or it failed): the
   // per-model stats would all be EMPTY_STATS, and a card per model reading
   // "0 picks · No settled bets yet" is a claim, not a placeholder (audit H3).
@@ -148,7 +149,7 @@ export function ModelsScreen() {
       {tab === 'builtin' ? (
         <FlatList
           ListFooterComponent={<BetslipBarSpacer />}
-          data={firstLoad || failedLoad ? [] : builtInWithStats}
+          data={firstLoad || failedLoad || noAccess ? [] : builtInWithStats}
           keyExtractor={(item) => item.modelId}
           // Every active model is listed whether or not it has settled a bet.
           // ListEmptyComponent fires when the sport has no catalog models
@@ -160,7 +161,7 @@ export function ModelsScreen() {
           // is EMPTY_STATS, so the zeros mean "not loaded yet": spinner. Once it
           // lands and nothing has settled, they mean what they say.
           ListHeaderComponent={
-            firstLoad || failedLoad ? null : (
+            noAccess ? null : firstLoad || failedLoad ? null : (
               !loading &&
               builtInWithStats.length > 0 &&
               builtInWithStats.every((m) => m.stats.picks === 0)
@@ -185,7 +186,14 @@ export function ModelsScreen() {
           // store over the bundled list — and until the inputs card was removed
           // something always rendered, so this path had never been seen.
           ListEmptyComponent={
-            firstLoad ? (
+            noAccess ? (
+              <PremiumLock locked>
+                <EmptyState
+                  title={`No settled bets yet for ${sportDisplayName(sport)}`}
+                  subtitle={`${builtInWithStats.length === 1 ? 'This model is' : 'These models are'} live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
+                />
+              </PremiumLock>
+            ) : firstLoad ? (
               <Skeleton label={`${sport} model records`}>
                 {[0, 1, 2, 3].map((i) => (
                   <View key={i} style={styles.skeletonCard}>

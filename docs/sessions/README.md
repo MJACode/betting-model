@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, premium-gate refusal (42501 + "premium access required" + the subscription hint) maps to the existing lock or empty state on Models, model detail, and BYOM; other errors stay errors |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, Picks: All segment removed (Matt); Signals default, empty state carries the scored count and refresh times, multi-pick line-moved push opens the app |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, an all-push closing-line set reads "all N matched the close", not "0 measured, N push" (Discord, X, the app): every EuroLeague bet of 11-19 had been measured |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, NBA first basket graded at real prices (50,698 credits of history): nothing passes; the blend +7.5% / +9.5% fails only the interval |

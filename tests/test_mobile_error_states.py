@@ -200,6 +200,10 @@ eq(errorSurface(cold, false), 'banner', 'Custom cold failure');
 eq(errorSurface({ ...cold, hasData: true }, false), 'banner', 'Custom refresh failure');
 eq(errorSurface({ ...cold, error: null }, false), 'none', 'Custom no error');
 eq(errorSurface({ ...cold, error: abort }, false), 'none', 'Custom abort');
+const refusal = { code: '42501', message: 'premium access required', hint: 'An active subscription, trial or comped grant is required.' };
+eq(loadPresentation({ loading: false, error: refusal, hasData: false }), { body: 'content', banner: false }, 'refusal is not an error body');
+eq(loadPresentation({ loading: false, error: { code: '42501', message: 'permission denied for table picks' }, hasData: false }), { body: 'error', banner: false }, 'other 42501 is an error');
+eq(errorSurface({ loading: false, error: refusal, hasData: false }, true), 'none', 'refusal is not ErrorState');
 eq(countLabel(knownCount(0, { loaded: false, error: 'x', hasData: false })), '—', 'dash on failure');
 eq(countLabel(knownCount(0, { loaded: true, error: null, hasData: false })), '0', 'real zero');
 eq(countLabel(knownCount(7, { loaded: true, error: 'x', hasData: true })), '7', 'kept count');
@@ -358,6 +362,76 @@ def test_models_custom_tab_says_a_failed_load():
     assert "surface === 'banner' ?" in models and "surface === 'state' ?" in models
     assert "error && !failedLoad" not in models
     assert re.search(r"firstLoad \|\| failedLoad \? null : \(\s*!loading &&", models), "ternary not parenthesised"
+
+
+def test_premium_gate_refusal_maps_to_no_access(tmp_path):
+    """The matview hook refuses with 42501 + a fixed message + hint. That is
+    no-access. Every other failure, including every other 42501, is an error."""
+    if not _node_strips_types():
+        pytest.skip("node >= 22.6 not available")
+    sql = _read(ROOT / "data" / "migrations" / "premium_gate_matview_2026_11_20.sql")
+    errors = _read(SRC / "lib" / "errors.ts")
+    for needle in (
+        "42501",
+        "premium access required",
+        "An active subscription, trial or comped grant is required.",
+    ):
+        assert needle in sql
+        assert needle in errors
+    queries = _read(SRC / "lib" / "queries.ts")
+    for fn in (
+        "fetchCustomModelBacktest",
+        "fetchCustomModelPicks",
+        "fetchModelFullOutcomeRecord",
+        "fetchModelFullOutcomePicks",
+    ):
+        body = queries.split(f"export async function {fn}", 1)[1].split("\nexport ", 1)[0]
+        assert "isPremiumAccessRefusal(" in body, fn
+    for rel in (
+        "src/hooks/useCustomModelStats.ts",
+        "src/hooks/useModelPickHistory.ts",
+        "src/hooks/useByomRecord.ts",
+        "src/hooks/useByomLeaderboard.ts",
+        "src/hooks/useByomSavedModel.ts",
+        "src/screens/ByomBetsScreen.tsx",
+    ):
+        assert "splitLoadError(" in _read(MOBILE / rel), rel
+    for rel in (
+        "src/screens/ModelsScreen.tsx",
+        "src/screens/ModelDetailScreen.tsx",
+        "src/screens/ModelEditScreen.tsx",
+        "src/screens/BuiltInModelDetailScreen.tsx",
+        "src/screens/ByomDetailScreen.tsx",
+        "src/screens/ByomEditScreen.tsx",
+        "src/screens/ByomBuilderScreen.tsx",
+        "src/screens/ByomBetsScreen.tsx",
+        "src/components/byom/ByomModelList.tsx",
+    ):
+        assert "PremiumLock" in _read(MOBILE / rel), rel
+    (tmp_path / "errors.ts").write_text(errors, encoding="utf-8")
+    script = """
+import { errorText, gateLoad, isPremiumAccessRefusal } from './errors.ts';
+const eq = (got, want, what) => { if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`${what}: ${JSON.stringify(got)}`); };
+const refusal = {
+  code: '42501',
+  message: 'premium access required',
+  hint: 'An active subscription, trial or comped grant is required.',
+};
+eq(isPremiumAccessRefusal(refusal), true, 'object');
+eq(gateLoad(refusal), 'no-access', 'object maps to no-access');
+eq(gateLoad(errorText(refusal)), 'no-access', 'errorText string maps to no-access');
+eq(gateLoad({ code: '42501', message: 'permission denied for table picks' }), 'error', 'other 42501');
+eq(gateLoad({ code: '42501', message: 'premium access required' }), 'error', 'missing hint');
+eq(gateLoad({ code: '42501', message: 'premium access required', hint: 'sign in' }), 'error', 'other hint');
+eq(gateLoad({ code: '42501', message: 'untrack_tracked_bet: sign in required', hint: 'An active subscription, trial or comped grant is required.' }), 'error', 'other message');
+eq(gateLoad({ code: 'PGRST301', message: 'premium access required', hint: 'An active subscription, trial or comped grant is required.' }), 'error', 'other code');
+eq(gateLoad('premium access required'), 'error', 'message without code');
+eq(gateLoad('Failed to fetch'), 'error', 'network');
+eq(gateLoad({ name: 'AbortError' }), null, 'abort');
+eq(gateLoad(null), null, 'null');
+"""
+    proc = _run_node(script, tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 def test_picks_home_and_live_picks_use_load_state():
