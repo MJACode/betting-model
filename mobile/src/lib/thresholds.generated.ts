@@ -4,7 +4,7 @@
  * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).
  * Regenerate: python -m scripts.generate_mobile_thresholds
  * Check (CI):  python -m scripts.generate_mobile_thresholds --check
- * Last generated: 2026-11-20
+ * Last generated: 2026-11-21
  */
 
 export interface ModelThreshold {
@@ -174,9 +174,6 @@ export const RETIRED_MODELS = new Set<string>([
 
 export const RECORD_EXCLUDED_MODELS = new Set<string>([
   'nfl_live_prop',
-  'ufc_method_of_victory',
-  'ufc_moneyline',
-  'ufc_total_rounds',
 ]);
 
 export const DUPLICATE_STATUS = 'DUPLICATE';

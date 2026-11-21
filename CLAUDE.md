@@ -350,7 +350,7 @@ props. Ten sports are live today (§8). **GOLF was retired 2026-09-08** (mike) �
 **Every model is live real money.** There is no second mode that counts a
 graded pick in the win-loss record and leaves it out of the units, and there
 is no hold-back ledger. Units and the record are the same graded set, sized by `stake_for`
-(1u to win, risk capped at 3) at `COALESCE(decision_odds, dk_odds)`. A pick with no price is not given a
+(1u to win, risk capped at 3) at `COALESCE(decision_odds, dk_odds)`. **The record must match the "SignalBase Record History" sheet** (Matt, mike 11-21; `docs/discord.md` §33). A pick with no price is not given a
 made-up price. (mike, 2026-10-14, and 2026-10-08: do not ask to hold a model
 back.) Report gate standing — ≥ 50 settled picks, positive flat-bet ROI,
 calibration error ≤ 5% — and build the model live.
@@ -449,8 +449,7 @@ every writer: `models/nhl_goalie_gate.py`, `docs/sports/nhl.md`.
 > (`.github/workflows/mobile-ota.yml` fires on push to master touching
 > `mobile/**`); anything touching a native module needs a TestFlight build.
 >
-> **Every change under `mobile/src` is reviewed by the `frontend-ux-designer`
-> agent before its PR opens** — a standing rule, §1b. `/ux-review` runs it.
+> **`mobile/src` changes get the UX review first** (§1b): `/ux-review`.
 
 ```bash
 python run_pipeline.py                      # full daily pipeline

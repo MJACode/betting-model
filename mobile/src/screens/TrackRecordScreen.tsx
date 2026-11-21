@@ -339,8 +339,8 @@ export function TrackRecordScreen() {
           Every pick Discord posted counts as it was posted — at the line and price we scored it,
           under the criteria that applied that day. Updated after each morning settlement. A
           pick only leaves the record if it was voided, meaning the model should never have
-          produced it. If we pause a model, its past bets stay here; it just stops producing
-          new picks.
+          produced it. If we pause or retire a model, its past bets stay here; it just stops
+          producing new picks.
         </Text>
         <BetslipBarSpacer />
       </ScrollView>

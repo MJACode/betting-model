@@ -143,42 +143,15 @@ RECORD_EXCLUSIONS: tuple[dict[str, str], ...] = (
             "the app via RECORD_EXCLUDED_MODELS in thresholds.generated.ts."
         ),
     },
-    {
-        "model_id": "ufc_moneyline",
-        "asked_by": "mike, 2026-11-13",
-        "reason": (
-            "\"Ignore and delete any existing models\" for UFC, then \"yes\" to taking "
-            "the retired models' posted bet off the published record. Retired the same "
-            "day (RETIRED_MODELS, #1293); retiring alone left them in the record views, "
-            "which exclude only this list. Posted in the window: one NO_ACTION. The views drop it via "
-            "data/migrations/record_strikes_ufc_retired_2026_11_13.sql; the app via "
-            "RECORD_EXCLUDED_MODELS in thresholds.generated.ts."
-        ),
-    },
-    {
-        "model_id": "ufc_total_rounds",
-        "asked_by": "mike, 2026-11-13",
-        "reason": (
-            "\"Ignore and delete any existing models\" for UFC, then \"yes\" to taking "
-            "the retired models' posted bet off the published record. Retired the same "
-            "day (RETIRED_MODELS, #1293); retiring alone left them in the record views, "
-            "which exclude only this list. Posted in the window: 1-0, +1.0 units (Mario Pinto vs Ryan Spann Under 1.5, the 2026-09-05 card). The views drop it via "
-            "data/migrations/record_strikes_ufc_retired_2026_11_13.sql; the app via "
-            "RECORD_EXCLUDED_MODELS in thresholds.generated.ts."
-        ),
-    },
-    {
-        "model_id": "ufc_method_of_victory",
-        "asked_by": "mike, 2026-11-13",
-        "reason": (
-            "\"Ignore and delete any existing models\" for UFC, then \"yes\" to taking "
-            "the retired models' posted bet off the published record. Retired the same "
-            "day (RETIRED_MODELS, #1293); retiring alone left them in the record views, "
-            "which exclude only this list. Posted in the window: none. The views drop it via "
-            "data/migrations/record_strikes_ufc_retired_2026_11_13.sql; the app via "
-            "RECORD_EXCLUDED_MODELS in thresholds.generated.ts."
-        ),
-    },
+    # The three retired UFC models (ufc_moneyline, ufc_total_rounds,
+    # ufc_method_of_victory) were struck here on 2026-11-13 (mike) and are NOT
+    # struck any more. Matt, 2026-11-21: the "SignalBase Record History" sheet
+    # is the source of truth (mike: "use this as the single source of truth"),
+    # and it counts ufc_total_rounds' one posted bet (Mario Pinto vs Ryan Spann
+    # Under 1.5, 2026-09-05, WIN, +1.0 units). Asked whether to put it back in
+    # the record: "Yes, put it back". The other two have no graded posted bet.
+    # data/migrations/record_matches_sheet_2026_11_21.sql takes the strike
+    # clause out of the record views; the 2026-11-13 strike file is retired.
 )
 
 
@@ -2246,7 +2219,12 @@ KELLY_MULTIPLIER: float     = float(os.environ.get("KELLY_MULTIPLIER",      0.10
 # (+50.4). 2u because the interval's low end (10.7%) is still 1.7x the base
 # return; 3u leans on the point estimate. 1 turns it off. Every other model
 # and every other NCAAB bet stays flat 1u (stake_units NULL).
-NCAAB_AGREEMENT_STAKE_UNITS: float = float(os.environ.get("NCAAB_AGREEMENT_STAKE_UNITS", 2.0))
+# OFF since 2026-11-21 (Matt): the record is flat 1u to win on every pick, as
+# the "SignalBase Record History" sheet counts it, and a pick is never posted
+# at a stake the record does not count ("Record + stop 2u picks"). 1.0 makes
+# models/ncaab_stake.agreement return the flat unit. Raising it again would
+# post 2u picks that every record surface counts as 1u.
+NCAAB_AGREEMENT_STAKE_UNITS: float = float(os.environ.get("NCAAB_AGREEMENT_STAKE_UNITS", 1.0))
 # Edges above this magnitude are almost certainly model noise — filter them out
 MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20))
 

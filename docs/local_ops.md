@@ -227,6 +227,64 @@ traffic as well as anything you run yourself — including when the worker is
 down, which is when you want it. Needs `DATABASE_URL` in `.env`; loopback-only
 unless you set `MONITOR_TOKEN`. Runbook: `docs/monitoring.md`.
 
+## Betting PC monitor — the jobs on this PC, in one window (2026-11-21, mike)
+
+mike: *"is there a way to create a desktop app / monitoring dash so I can see
+the data throughput in real time for all these processes running locally?"*,
+then *"I want something on my computer"*. **Double-click "Betting PC monitor"
+on the desktop.** It opens its own window (Edge in app mode) onto a small
+server on this PC, http://127.0.0.1:8790/, updated every second. It shows
+every task in Task Scheduler's `\BettingModel\` folder; a new task there
+appears on its own.
+
+| Job | What it shows | Read from |
+|---|---|---|
+| DraftKings in-play feed | each league's freshness (red past the 8 s the in-play models accept; an idle league is read every 30 s), live games matched, rows saved per minute over the last hour, reads a second, the runs today, warnings collapsed with a count | `dk_live_feed` every 2 s, `dk_live_reads` every 15 s, the feed's log (path from its `--log` argument) and its launcher log |
+| Backup to this PC | the stage of the newest pass, and while tables copy: the table, rows copied, rows a second, tables done of 338; the last finished copy and report | the pass's log files, `supabase_mirror\progress.json` and `STATE.json`, `pc_copy_snapshots` |
+| Tennis feeds | each source's last pass (DraftKings prices stored, Pinnacle matches, TennisExplorer rows), recent passes, Pinnacle prices saved in the last hour | `tennis_feeds_*.log`, `tennis_pinnacle_prices` |
+| Every job | task state and last result in plain words, its processes with CPU and memory | Task Scheduler every 30 s, psutil every second |
+
+Things it will not mislead you on:
+
+- **The reads-a-second figure covers all leagues together.** The feed logs one
+  line per 100 reads and records nothing per league, so the window measures
+  over its last few hundred reads and says so.
+- **No percent bar for the backup.** `progress.json`'s `estimated_total_rows`
+  is the whole database; a nightly pass copies only the new rows.
+- **`progress.json` outlives its run.** It counts as live only while it is
+  fresh and `STATE.json` has not recorded the run as finished.
+- **Two task results that look like errors are not.** `0x800710E0` on the feed
+  task is a once-a-minute start skipped because the feed is already running;
+  TennisFeeds shows "Ready" between passes.
+- **The tennis launcher leaves exit codes blank**; they show as "not
+  recorded", never as 0.
+
+It never opens a console window: every child process (the Task Scheduler read,
+git) starts with `CREATE_NO_WINDOW`, and `tests/test_pc_monitor.py` fails on
+any that does not. Without the database it still shows tasks, processes and
+logs, with the database marked unreachable. It writes nothing but its own log,
+`betting_local_copies\logs\pc_monitor_<date>.log`.
+
+**Where it runs from.** The shortcut runs
+`pythonw -m pc_monitor` in its own copy of the repo,
+`.claude\feeds\pc-monitor`, never a session's worktree. Each start moves that
+copy to origin/master, once origin/master contains the app. A second click
+opens another window onto the running app.
+
+**It starts by itself at sign-in** (mike, 2026-11-21: *"Yes, at sign-in"*).
+The task `\BettingModel\PcMonitor` runs `pythonw -m pc_monitor --stay
+--no-window` in that copy two minutes after sign-in. It runs as mike, only
+while he is signed in, with no time limit, and never as a second copy. With
+`--stay` it keeps collecting with no window open, so the shortcut only opens a
+window onto it. Started without the task (the shortcut alone), it exits 10
+minutes after the last window closes. A merge reaches the running copy at its
+next start, which is normally the next sign-in.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pc_monitor_shortcut.ps1 -SignInTask   # (re)make the shortcut and the sign-in task
+python -m pc_monitor --no-window --no-update --port 8791                             # a second copy, for testing
+```
+
 ## Tests
 
 ```bash
@@ -486,7 +544,8 @@ with nobody signing in for days still skips those nights.
 
 ```bat
 :: Register (runs as you, only while you are logged on):
-schtasks /Create /TN "BettingModel\LocalMirror" /SC DAILY /ST 00:30 /RL LIMITED /F /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Users\micha\Documents\betting_local_copies\bin\local_mirror_run.ps1"
+:: (through bin\run_hidden.pyw, so no window opens: see "Every scheduled task starts windowless" below)
+schtasks /Create /TN "BettingModel\LocalMirror" /SC DAILY /ST 00:30 /RL LIMITED /F /TR "C:\Windows\pyw.exe C:\Users\micha\Documents\betting_local_copies\bin\run_hidden.pyw powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Users\micha\Documents\betting_local_copies\bin\local_mirror_run.ps1"
 
 :: The sign-in trigger was added in PowerShell, not by the line above:
 :: New-ScheduledTaskTrigger -AtLogOn -User MAHOME\micha, Delay PT2M, then
@@ -714,13 +773,14 @@ schedule; the log names it. It reads every second while a game is live (mike:
 minute halves it back. Five refusals in a row back the feed off two minutes
 (this address is the one DraftKings would block).
 
-**The schedule: every minute 11am-3am ET, registered 2026-11-12** (mike:
-*"yes"*). The task `BettingModel\DkLiveBoard` runs
-`betting_local_copies\bin\dk_live_board_run.ps1` (in the repo as
-`scripts/dk_live_board_run.ps1`) every minute from 11:00 for 16 hours, and two
+**The schedule: every minute 9am-3am ET** (registered 2026-11-12 for 11am,
+mike: *"yes"*; read back from Task Scheduler on 2026-11-21: every minute from
+09:00 for 18 hours). The task `BettingModel\DkLiveBoard` runs the feed
+worktree's `scripts\dk_live_board_run.ps1` through
+`betting_local_copies\bin\run_hidden.pyw` (no console window), and two
 minutes after sign-in. A start while a run is going is ignored
-(`MultipleInstances = IgnoreNew`), and a feed already running holds
-127.0.0.1:47231, so a second one exits at once. The launcher puts its own
+(`MultipleInstances = IgnoreNew`, recorded as result `0x800710E0`), and a feed
+already running holds 127.0.0.1:47232, so a second one exits at once. The launcher puts its own
 worktree, `C:\Users\micha\Documents\betting-model\.claude\feeds\dk-live-board`, on origin/master before
 each start, so what runs is always master and never another session's branch.
 Until the feed is merged and its tables exist it logs one line and exits. Like
@@ -775,6 +835,55 @@ whose command line names the module**: each reader treats ANY other process
 naming it as a second copy, so a `cmd /c "... tennis_dk_probe ..."` wrapper
 makes the reader refuse to start. The launcher files avoid the name on purpose.
 Logs: `data\local\research\tennis_research\logs\{pinnacle,dk2}.{out,err}`.
+
+## Every scheduled task starts windowless (2026-11-21)
+
+The three tasks (`LocalMirror`, `DkLiveBoard`, `TennisFeeds`) start as
+`C:\Windows\pyw.exe C:\Users\micha\Documents\betting_local_copies\bin\run_hidden.pyw powershell.exe <the old arguments>`.
+mike asked why PowerShell windows kept appearing (*"yes, switch them"*).
+
+How the launcher works:
+
+- `run_hidden.pyw` (in the repo as `scripts/run_hidden.pyw`) runs under
+  `pythonw`, which has no window of its own.
+- It starts the command with no window, waits for it, and exits with the
+  command's exit code.
+- `pyw.exe` is the Python launcher in `C:\Windows`, so a Python upgrade does not
+  break the path.
+- Task Scheduler does not search the user's PATH. A bare `pythonw.exe` failed
+  with 0x80070002, "file not found".
+- The backup's refresh of `bin` copies only its own `.py` files, so it never
+  replaces or removes this one. Copy it there by hand after changing it.
+
+**Why.** Each task asked for `powershell.exe -WindowStyle Hidden`, but on this
+PC console programs open in Windows Terminal, and Windows Terminal ignores that
+flag. Each feed's window stayed open for its whole run. For the DraftKings feed
+that is up to 45 minutes after the last live game.
+
+Measured 2026-11-21, with throwaway tasks where noted:
+
+| Launch form | Visible window | Exit 7 reaches Task Scheduler |
+|---|---|---|
+| `powershell.exe -WindowStyle Hidden` (the old form) | yes: the DraftKings feed's window and the 11:22 tennis run's, each in the same second its task fired | yes |
+| `conhost.exe --headless powershell.exe ...` (used for about ten minutes) | no | **no, it reads 0**: the backup runner's failure code would have been lost |
+| `pyw.exe run_hidden.pyw powershell.exe ...` (now) | no | yes |
+
+The DraftKings task's own command line, run as a throwaway task while the feed
+held its lock, opened no window and stopped at the lock check with result 0,
+which is what a second start does.
+
+**One side effect.** Ending a task in Task Scheduler (or hitting its time
+limit) now stops only the launcher. The PowerShell runner and its child process
+keep running. In the old form the child (the feed's Python) already survived an
+End. Measured with a stand-in script and child.
+
+A second start still cannot double up: the DraftKings feed holds
+127.0.0.1:47232, the backup holds its lock file, and each tennis reader refuses
+while another copy runs. To stop a feed for real, end its `python.exe` and
+`powershell.exe` in Task Manager.
+
+To switch a task back, drop the launcher:
+`Set-ScheduledTask -TaskPath '\BettingModel\' -TaskName <name> -Action (New-ScheduledTaskAction -Execute powershell.exe -Argument '<the arguments after "powershell.exe">')`.
 
 ## Where everything on this PC lives (2026-11-16, CLAUDE.md §7)
 
