@@ -11,8 +11,11 @@
 -- the role list again. No EXCEPTION handler swallows an error.
 
 -- Apply this, deploy the website, and confirm the record row BEFORE step A.
--- security_invoker is off on purpose: anon must not need SELECT on picks.
--- The Supabase linter flags that (security_definer_view). It is intentional.
+-- security_invoker is off in this hand file: anon must not need SELECT on
+-- picks. The worker file site_public_record_invoker_2026_11_21.sql turns
+-- the view to security_invoker and leaves the read in
+-- site_public_record_rows(). That is what clears the linter. This file
+-- stays out of ACTIVE_MIGRATIONS.
 
 BEGIN;
 

@@ -20,6 +20,13 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, NBA first basket live (nba_prop_first_basket): the graded blend, decided 5-20 min before tip, settled by each book's own rule; 2018-19..2024-25 first-basket history backfilled |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all: an "Untracked only" switch (on by default) replaces the start-unticked logic |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant: request logs kept while the account is open (Privacy), App Review accounts see the AI Assistant but cannot connect (mcp_meter v2) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all: picks already tracked read "Tracking" and start unticked, so a placed bet is not sent to a book twice |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant (MCP) database gate: mcp_stats/mcp_meter schemas, NOLOGIN roles, entitlement (paid/comped/founder, not trial), per-call gate with question bursts and limits, terms acceptance, member status RPCs |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, scored-picks matview readers are discovered from the catalog and must be on the pre-request hook; the six-name list is unchanged |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, site_public_record is security_invoker; anon still reads the website record through site_public_record_rows |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant (MCP): Supabase OAuth server and dynamic registration on, mockups (7 screens) approved, Terms §19 and Privacy lines drafted |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, Picks: All segment removed (Matt); Signals default, empty state carries the scored count and refresh times, multi-pick line-moved push opens the app |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, an all-push closing-line set reads "all N matched the close", not "0 measured, N push" (Discord, X, the app): every EuroLeague bet of 11-19 had been measured |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, NBA first basket graded at real prices (50,698 credits of history): nothing passes; the blend +7.5% / +9.5% fails only the interval |
