@@ -26,7 +26,7 @@ import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing, opacity } from '@/lib/theme';
-import { LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { LIVE_RECORD_START_LABEL } from '@/lib/recordStart';
 import type { RootStackParamList } from '@/types';
 import type { CustomModelStats } from '@/lib/customModelBacktest';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
@@ -271,24 +271,15 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   // Picks settled with no book price: staked at the bare 1u, as the Record
   // tab books them. Named on the row so the reader knows which they are.
   const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
-  // A percentage on a handful of bets is not a result — see
-  // MIN_PICKS_FOR_COLOURED_ROI. The number still shows; it just stops wearing
-  // the colour that claims it means something.
-  const thin = decided < MIN_PICKS_FOR_COLOURED_ROI;
-  // One sentence, shared with the Record tab's rows and gate-free — see
-  // thinSampleCaption, which is the only place this wording is written.
-  const thinNote = thinSampleCaption();
+  // Every settled bet counts and every row shows its record in full, however
+  // few bets it has (Matt, 2026-11-21; lib/recordStart).
   const { width: windowWidth, fontScale } = useWindowDimensions();
   const recordBelow = modelRecordBelow(fontScale, windowWidth);
   // Each figure's tone comes from the number it prints, rounded as printed.
   // One unit basis (CLAUDE.md §2): the published stake, the Record tab's.
-  const roiColor = thin
-    ? colors.textSecondary
-    : pnlColor(stats.roi, 1, 100);
+  const roiColor = pnlColor(stats.roi, 1, 100);
   const unitsText = formatSigned(stats.units, 2, 'u');
-  const profitColor = thin
-    ? colors.textSecondary
-    : pnlColor(stats.units, 2);
+  const profitColor = pnlColor(stats.units, 2);
   return (
     <Pressable
       onPress={onPress}
@@ -298,7 +289,6 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         (decided > 0 ? `, ${stats.wins} wins and ${stats.losses} losses` : '') +
         (stats.risked > 0 ? `, ${returnOnBetsSpeech(formatPctSigned(stats.roi))}, ${unitsSpeech(unitsText)}` : '') +
         (stats.picks === 0 ? ', no settled bets yet' : '') +
-        (thin && stats.picks > 0 ? `, ${thinNote}` : '') +
         (unpriced > 0 ? `, ${unpriced} unpriced, staked at 1 unit` : '')
       }
       style={({ pressed }) => [
@@ -324,13 +314,10 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
             // "0 picks · — · —" with no explanation is indistinguishable from a
             // failed fetch — the rule this file already states at the list's
             // EmptyState, which only fires when EVERY model is at zero and so
-            // says nothing about one row among many. NOT thinNote: "Too few to
-            // judge yet" implies there are some. Newly common on the NFL tab,
+            // says nothing about one row among many. Newly common on the NFL tab,
             // which lists twelve prop models unpaused on 2026-09-06/09 with no
             // settled record inside the published window (UX review).
             <Text style={styles.subtle}>No settled bets yet</Text>
-          ) : thin ? (
-            <Text style={styles.subtle}>{thinNote}</Text>
           ) : null}
           {unpriced > 0 ? (
             // Its own line: on a 375pt phone the sub-line has ~160pt, and a
@@ -442,10 +429,7 @@ const styles = StyleSheet.create({
   subtle: {
     fontSize: font.size.caption,
     // textTertiary on bgCard is ~3.4:1 — below the AA floor, and UX_REVIEW §5
-    // says size does not exempt it. These three lines are the only users of
-    // this style, and one of them is the caveat that exists to stop a member
-    // reading a -100% on one bet as a result; it cannot be the least legible
-    // text on the row.
+    // says size does not exempt it.
     color: colors.textSecondary,
     marginTop: 1,
   },

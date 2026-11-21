@@ -57,50 +57,16 @@ export const BACKTEST_START_LABEL = 'April 14, 2026';
 export const SHADOW_TRACK_START = '2026-04-14';
 
 /**
- * Below this many settled picks, an ROI is not coloured as a result.
+ * EVERY SETTLED BET COUNTS, AND EVERY ROW SHOWS ITS RECORD IN FULL.
  *
- * The window is days old, so the board currently holds models at 1, 5 and 8
- * settled bets. `ncaaf_live_win_prob` is 0-1 and renders -100%;
- * `mlb_prop_pitcher_outs` is 6-2 and renders +60.6% in green. Neither number
- * means anything, and the green one is the one a member screenshots.
+ * Matt, 2026-11-21: "I don't care if they're not enough bets to tell if it's
+ * successful. We're still keeping track of it regardless, so it counts ... stop
+ * making those decisions without asking me."
  *
- * The row is NEVER hidden — "nothing hidden, nothing cherry-picked" is the
- * promise on the same screen. What changes is only that the number stops
- * wearing the bet/avoid colour that says "this is a result", and the row says
- * that it is provisional. 10 is the floor for treating a percentage as signal
- * at all.
- *
- * It deliberately does NOT carry the platform's >= 50-settled go-live gate any
- * more. That number was exported here purely to be quoted at members, and
- * quoting it announced "not backed yet" about live models. The gate still
- * governs backing server-side; it is not app copy.
+ * There used to be a 10-decided-bet floor here (MIN_PICKS_FOR_COLOURED_ROI)
+ * under which a model's ROI and units were greyed and captioned "Too few to
+ * judge yet". It was a display judgement nobody asked for, and it is gone: a
+ * 1-bet model shows its ROI in the same colour as a 500-bet one. Do not bring
+ * back a sample-size floor, caption or greying on any record surface without
+ * Matt's approval in chat (CLAUDE.md §1b).
  */
-export const MIN_PICKS_FOR_COLOURED_ROI = 10;
-
-/**
- * The ONE sentence every surface uses for "this record is too thin to read".
- *
- * Two callers — the Models tab's built-in rows and the Record tab's model rows.
- * It lives here, beside the constant that triggers it, for the same reason
- * `RETIRED_RULE_CAPTION` exists in `lib/modelMeta`: this state had drifted into
- * four phrasings across those two screens before it was pulled together.
- *
- * It says NOTHING about a go-live gate, and it takes no count. It used to read
- * "N of 50 settled · too few to judge", quoting the >= 50-settled bar from
- * CLAUDE.md §2 — which announced "this model is not backed yet" on every row
- * that had not reached it (Matt, 2026-09-06, first on `ncaaf_live_win_prob`,
- * then on `ncaaf_spread` showing the same line). Every model is live real
- * money; a progress bar toward being backed described something the app does not do.
- *
- * What survives is arithmetic, not status: below MIN_PICKS_FOR_COLOURED_ROI
- * decided bets a percentage is noise — `ncaaf_live_win_prob` is 0-1 and renders
- * -100% — so the number stops wearing the bet/avoid colour and this line says
- * why. Never returns empty: grey on its own does not explain itself.
- *
- * The go-live gate itself is untouched and still real. It lives server-side
- * (`models/backtester.GO_LIVE_MIN_PICKS`) where it governs whether a model is
- * backed; it is simply no longer narrated to members row by row.
- */
-export function thinSampleCaption(): string {
-  return 'Too few to judge yet';
-}

@@ -229,6 +229,7 @@ and here is what would have to change" is a complete answer; "shall I unpause
 it?" is not.** `scripts/paused_model_assessment.py`,
 `docs/paused_model_assessment.md`.
 
+**EVERY BET COUNTS; ASK BEFORE ANY DISPLAY RULE** (Matt 11-21): nothing greys a model for few bets.
 **NOTHING AUTOPAUSES.** (mike, 2026-09-14.) Real money is on every live model. A
 pause or unpause needs his explicit approval in `config.PAUSED_MODELS` with
 `Updated-By:`. The 250-bet review reports; it never writes `model_auto_pauses`.
@@ -378,8 +379,7 @@ model without one is a bug, pinned by
 `tests/test_config.py::test_every_model_carries_its_own_thresholds`), so the
 module-level `BET_EDGE_THRESHOLD` / `AVOID_EDGE_THRESHOLD` fallback is never
 reached in practice. It is **0.10**, not the ±3% this section documented until
-2026-08-29 — the original spec value, which was raised with the general
-tightening and never corrected here.
+2026-08-29.
 
 ### Tenth-Kelly Bet Sizing
 `f = 0.10 x (model_prob - implied) / (1 - implied)`, capped at 5% of bankroll.

@@ -41,7 +41,7 @@ import { ROW_SLOP_PAD } from '@/lib/a11y';
 import { colors, font, pnlColor, radii, spacing, opacity, card } from '@/lib/theme';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
-import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT } from '@/lib/recordStart';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 /** First day of the tracked record. Every published number starts here.
@@ -381,21 +381,12 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
           {unpriced > 0 ? ` · ${unpriced} unpriced, staked at 1u` : ''}
           {mark ? ` · ${mark}` : ''}
         </Text>
-        {decided < MIN_PICKS_FOR_COLOURED_ROI && risked > 0 ? (
-          // Its own line, not a fourth segment: the sub-line is already three
-          // segments wide beside the ROI column, and a mid-phrase wrap orphans
-          // the one segment that qualifies the number next to it. Same shape
-          // the Models tab already uses for the same reason — and it only fires
-          // when there is an ROI to qualify. An unpriced pick is staked at 1
-          // unit, so its ROI still shows, and "N unpriced" names the gap.
-          <Text style={styles.modelSub}>{thinSampleCaption()}</Text>
-        ) : null}
       </View>
       <Text
         style={[
           styles.modelRoi,
           pctBelow && styles.modelRoiStacked,
-          { color: decided < MIN_PICKS_FOR_COLOURED_ROI ? colors.textSecondary : roiColor(roi) },
+          { color: roiColor(roi) },
         ]}
       >
         {risked > 0 ? formatPctSigned(roi) : '—'}
@@ -513,8 +504,7 @@ const styles = StyleSheet.create({
   modelLeftStacked: { ...STACKED_BLOCK, alignSelf: 'stretch' },
   modelName: { fontSize: font.size.body, color: colors.textPrimary, fontWeight: font.weight.medium },
   // textSecondary, not textTertiary: tertiary on this ground is ~3.4:1 and
-  // below the AA floor (UX_REVIEW §5), and this style now carries the caveat
-  // line that exists to stop a thin ROI being read as a result.
+  // below the AA floor (UX_REVIEW §5).
   modelSub: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 2 },
   modelRoi: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.md },
   modelRoiStacked: { alignSelf: 'flex-end', marginTop: spacing.xs, marginLeft: 0 },
