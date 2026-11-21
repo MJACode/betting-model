@@ -19,11 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-<<<<<<< HEAD
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Betting PC monitor: a desktop window for the jobs on mike's PC (in-play feed, backup, tennis), no console windows, works without the database, starts at sign-in (mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, "moved past the bet line" push removed (Matt): a signal stays, the card shows the move; it had fired once ever |
-=======
-| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Betting PC monitor: a desktop window for the jobs on mike's PC (in-play feed, backup, tennis), no console windows, works without the database (mike) |
->>>>>>> dd179ec8 (Betting PC monitor: operator notes, session entry, shortcut script fix, graph refresh)
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all crash fix: `selected` read before declared; use-before-declare guard over mobile/src (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all lists tracked picks again (Untracked only switch removed; board Tracked filter replaces it) (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Picks filter sheet: Tracked cut (All / Not tracked / Tracked) off the Track button (Matt) |
