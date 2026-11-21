@@ -34,9 +34,28 @@ _COLUMNS = (
     "units", "risked", "first_date", "last_date", "refreshed_at",
 )
 
-# The website asks for these seven. The other three stay on the view.
-_SITE_COLUMNS = ("sport", "picks", "wins", "losses", "pushes", "units", "risked")
+# Production, 2026-11-21, in order. format_type prints timestamptz as
+# "timestamp with time zone" and numeric(12,2) with the typmod.
+_PROD_TYPES = (
+    ("sport", "text"),
+    ("picks", "integer"),
+    ("wins", "integer"),
+    ("losses", "integer"),
+    ("pushes", "integer"),
+    ("units", "numeric(12,2)"),
+    ("risked", "numeric(12,2)"),
+    ("first_date", "date"),
+    ("last_date", "date"),
+    ("refreshed_at", "timestamp with time zone"),
+)
 
+# The function cannot store a numeric typmod. Postgres prints the return
+# type without (12,2). The view casts those two columns.
+_FN_RESULT = (
+    "TABLE(sport text, picks integer, wins integer, losses integer, "
+    "pushes integer, units numeric, risked numeric, first_date date, "
+    "last_date date)"
+)
 
 def _code(sql: str) -> str:
     return "\n".join(ln.split("--", 1)[0] for ln in sql.splitlines())
@@ -76,6 +95,16 @@ def test_it_is_one_statement_and_the_skip_is_not_an_anon_grant():
     assert any("public.picks" in ln for ln in window)
     assert "GRANT EXECUTE ON FUNCTION public.site_public_record_rows() TO anon;" in code
     assert "%" not in SQL
+
+
+def test_the_view_casts_match_production_and_the_function_pins_search_path():
+    hand = (ROOT / "data" / "migrations" / "site_public_record_2026_11.sql").read_text(
+        encoding="utf-8")
+    assert "LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp" in hand
+    assert "units numeric, risked numeric, first_date date, last_date date" in hand
+    assert "f.units::numeric(12, 2) AS units" in SQL
+    assert "f.risked::numeric(12, 2) AS risked" in SQL
+    assert "now() AS refreshed_at" in SQL
 
 
 def test_the_hand_file_still_builds_the_definer_view_and_names_this_one():
@@ -288,12 +317,26 @@ def _normalize(rows):
 
 def _columns(cur) -> list[tuple]:
     cur.execute("""
-        SELECT column_name, data_type, numeric_precision, numeric_scale
-          FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'site_public_record'
-         ORDER BY ordinal_position
+        SELECT a.attname, format_type(a.atttypid, a.atttypmod)
+          FROM pg_attribute a
+         WHERE a.attrelid = 'public.site_public_record'::regclass
+           AND a.attnum > 0 AND NOT a.attisdropped
+         ORDER BY a.attnum
     """)
-    return list(cur.fetchall())
+    return [(name, typ) for name, typ in cur.fetchall()]
+
+
+def _assert_prod_shape(cur) -> None:
+    assert _columns(cur) == list(_PROD_TYPES)
+    cur.execute("""
+        SELECT pg_get_function_result(p.oid), p.proconfig
+          FROM pg_proc p
+         WHERE p.oid = 'public.site_public_record_rows()'::regprocedure
+    """)
+    result, proconfig = cur.fetchone()
+    assert result == _FN_RESULT
+    assert proconfig is not None
+    assert "search_path=public, pg_temp" in proconfig
 
 
 def _cluster():
@@ -344,14 +387,8 @@ def test_step_a_already_applied_anon_still_reads_and_the_second_pass_is_a_noop()
             assert "refreshed_at" in viewdef
             assert "v_public_track_record" not in viewdef
             assert _normalize(_rows(conn)) == before
-            cols = _columns(cur)
-            assert [c[0] for c in cols] == list(_COLUMNS)
-            assert all(name in [c[0] for c in cols] for name in _SITE_COLUMNS)
-            by_name = {c[0]: c for c in cols}
-            assert by_name["units"][1:] == ("numeric", 12, 2)
-            assert by_name["risked"][1:] == ("numeric", 12, 2)
-            assert by_name["refreshed_at"][1] == "timestamp with time zone"
-            assert "model_id" not in by_name
+            _assert_prod_shape(cur)
+            assert "model_id" not in {name for name, _typ in _columns(cur)}
             refused = _refused(conn, "SELECT 1 FROM public.v_public_track_record")
             assert "42501" in refused
             cur.execute("""
@@ -397,6 +434,7 @@ def test_apply_then_reapply_then_step_a_reapply_does_not_run_ddl():
             assert _ddl_n(cur) > 0, "the counter did not see this file's DDL"
             assert _invoker(cur) is True
             assert _normalize(_rows(conn)) == before
+            _assert_prod_shape(cur)
             cur.execute("""
                 SELECT has_table_privilege('anon', 'public.picks', 'SELECT'),
                        has_table_privilege('anon', 'public.site_public_record', 'SELECT')

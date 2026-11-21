@@ -447,3 +447,11 @@ jobs:
           fi
           grep -q 'test_steps_a_and_b_on_scratch_postgres PASSED' /tmp/anon-lockdown-pytest.txt
           grep -q 'test_lockdown_runbook_sql_runs_on_scratch_postgres PASSED' /tmp/anon-lockdown-pytest.txt
+          python -m pytest -v --tb=short tests/test_site_public_record_invoker.py | tee /tmp/site-record-pytest.txt
+          if grep -q SKIPPED /tmp/site-record-pytest.txt; then
+            echo "tests/test_site_public_record_invoker.py was skipped; the scratch cluster did not run"
+            exit 1
+          fi
+          grep -q '7 passed' /tmp/site-record-pytest.txt
+          grep -q 'test_step_a_already_applied_anon_still_reads_and_the_second_pass_is_a_noop PASSED' /tmp/site-record-pytest.txt
+          grep -q 'test_apply_then_reapply_then_step_a_reapply_does_not_run_ddl PASSED' /tmp/site-record-pytest.txt
