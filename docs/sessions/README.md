@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant app screens (Settings tile, setup/connected/trial, Picks intro, unlocked sheet) + Disconnect cuts the app off (begin_call_session) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant connector server (edge function `mcp`) + website approval page at /oauth/consent |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant Stats views (mcp_stats) + trigram name search: all lookups 1-62 ms on production as the read role |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, NBA first basket live (nba_prop_first_basket): the graded blend, decided 5-20 min before tip, settled by each book's own rule; 2018-19..2024-25 first-basket history backfilled |

@@ -306,6 +306,8 @@ export const font = {
     android: 'sans-serif',
     default: 'System',
   }),
+  /** Monospace, for an address or code a member types elsewhere. */
+  mono: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
   size: {
     // Below caption. Both were already in the StyleSheets as literals (row
     // team abbrevs, meta lines, column headers); naming them stops the next

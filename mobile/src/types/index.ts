@@ -642,6 +642,8 @@ export type RootStackParamList = {
   SettingsSection: { section: SettingsSectionId };
   /** The 7-day notifications inbox. Same screen from the bell and the Picks pill. */
   Notifications: undefined;
+  /** Settings › AI Assistant: connect Claude, ChatGPT or Grok to Stats. */
+  AiAssistant: undefined;
   // Account deletion. Reachable from Settings only while signed in.
   DeleteAccount: undefined;
   // In-app feedback: the composer + your past conversations, and one thread.

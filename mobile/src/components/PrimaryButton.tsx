@@ -25,11 +25,14 @@ import { colors, font, opacity, radii, spacing } from '@/lib/theme';
  *                (UX_REVIEW §2), so never use it on a light surface.
  *  - `secondary` white with a hairline, ink label — the quieter action beside
  *                a primary; visible on both `bg` and a white sheet.
+ *  - `chromeSecondary` clear with a navy hairline, white label — the quieter
+ *                action beside a `brand` button on the navy chrome (the AI
+ *                Assistant intro card and unlocked sheet, 2026-11-21).
  *
  * Disabled is always the same fill at `opacity.disabled`, so a disabled
  * button still reads as the button it will become.
  */
-export type PrimaryButtonVariant = 'primary' | 'brand' | 'secondary';
+export type PrimaryButtonVariant = 'primary' | 'brand' | 'secondary' | 'chromeSecondary';
 
 export function PrimaryButton({
   label,
@@ -65,8 +68,9 @@ export function PrimaryButton({
   const inactive = disabled || loading;
   // Secondary sits on a card, so its label is body ink (black in Light, as
   // brandInk was; white in Dark). Brand sits on amber in both themes.
+  // chromeSecondary sits on the navy chrome, so its label is onChrome.
   const fg =
-    variant === 'primary' ? colors.textInverse : variant === 'brand' ? colors.brandInk : colors.textPrimary;
+    variant === 'primary' ? colors.textInverse : variant === 'chromeSecondary' ? colors.onChrome : variant === 'brand' ? colors.brandInk : colors.textPrimary;
   return (
     <Pressable
       onPress={onPress}
@@ -81,6 +85,7 @@ export function PrimaryButton({
         variant === 'primary' && styles.primary,
         variant === 'brand' && styles.brand,
         variant === 'secondary' && styles.secondary,
+        variant === 'chromeSecondary' && styles.chromeSecondary,
         disabled && styles.disabled,
         pressed && !inactive && styles.pressed,
         style,
@@ -121,6 +126,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgCard,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.separatorOpaque,
+  },
+  chromeSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.brandSeparator,
   },
   disabled: { opacity: opacity.disabled },
   pressed: { opacity: opacity.pressed },

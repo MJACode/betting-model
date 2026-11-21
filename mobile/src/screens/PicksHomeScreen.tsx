@@ -93,6 +93,7 @@ import { SettingsButton } from '@/components/SettingsButton';
 import { BetslipButton } from '@/components/BetslipButton';
 import { LiveDot } from '@/components/LiveDot';
 import { SignalLockCard } from '@/components/SignalLockCard';
+import { AiAssistantIntro } from '@/components/AiAssistantIntro';
 import { showToast } from '@/components/Toast';
 import { useMembership } from '@/hooks/useMembership';
 import { useGameSelection } from '@/hooks/useGameSelection';
@@ -1134,6 +1135,10 @@ export function PicksHomeScreen() {
         keyExtractor={(row) => row.key}
         ListHeaderComponent={
           <>
+          {/* One-time AI Assistant card / trial-to-paid sheet (mockups 5, 7). */}
+          {view === 'signals' ? (
+            <AiAssistantIntro onSetUp={() => navigation.navigate('AiAssistant')} />
+          ) : null}
           {betAll && betAll.picks.length + betAll.skipped.length > 0 ? (
             <View style={styles.betAllRow}>
               <View style={styles.betAllText}>
