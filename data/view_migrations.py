@@ -796,6 +796,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # AI assistant (MCP): the Stats views the connector reads (mcp_stats) and
     # trigram name-search indexes. Runs only while "mcp_stats v1" is missing.
     "mcp_stats_views_2026_11_21.sql",
+    # AI assistant (MCP): mcp_my_status() names the connected app
+    # (connected_client_name / _host). Runs while "mcp_my_status v2" is missing.
+    "mcp_status_client_2026_11_21.sql",
+    # AI assistant (MCP): Disconnect cuts the app off (its Auth sessions are
+    # refused by mcp_meter.begin_call_session). Runs while that function is missing.
+    "mcp_session_revoke_2026_11_21.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

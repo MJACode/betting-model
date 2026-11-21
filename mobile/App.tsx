@@ -34,6 +34,7 @@ import { PlayerStatsScreen } from '@/screens/PlayerStatsScreen';
 import { TeamStatsScreen } from '@/screens/TeamStatsScreen';
 import { ExplainerScreen } from '@/screens/ExplainerScreen';
 import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
+import { AiAssistantScreen } from '@/screens/AiAssistantScreen';
 import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
 import { OpeningComparisonScreen } from '@/screens/OpeningComparisonScreen';
 import { SettingsScreen, SettingsSectionScreen } from '@/screens/SettingsScreen';
@@ -526,6 +527,11 @@ function App() {
             name="Notifications"
             component={NotificationsScreen}
             options={{ title: 'Notifications' }}
+          />
+          <Stack.Screen
+            name="AiAssistant"
+            component={AiAssistantScreen}
+            options={{ title: 'AI Assistant' }}
           />
           {/* Chevron-only Back (2026-11-16), same button as Player Stats. Its own
               button only for the empty-stack fallback (Tabs under Settings);

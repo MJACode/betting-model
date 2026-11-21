@@ -1016,5 +1016,9 @@ RPC_AFTER_SIGN_IN: tuple[str, ...] = (
     # notification_inbox_2026_11_19.sql grants EXECUTE to authenticated
     # only. The sweep must not name it before that migration is applied.
     "forget_my_notifications",
+    # AI assistant: the member's status and Disconnect.
+    # mcp_foundation_2026_11_21.sql grants EXECUTE to authenticated only.
+    "mcp_my_status",
+    "mcp_disconnect",
 )
 
