@@ -11,7 +11,6 @@
 import { formatPctSigned, formatSigned, isVersusSport } from '@/lib/format';
 import {
   isContaminatedPregamePick,
-  isModelRetired,
   passesActionFilter,
   passesRecordFilter,
   postedPickUnits,
@@ -310,12 +309,11 @@ export function computeDailyResults(
     // CLV is the one thing that stays pre-game only, and it already is:
     // _capture_clv and all four record views filter is_live. An in-play price
     // has no meaningful closing line to be compared against.
-    // A retired model — live or pre-game — is out of every total; its picks
-    // stay in the DB as the record of what was published (§1c), nothing more.
-    // (Until 2026-09-02 this was gated on is_live. passesActionFilter below
-    // refuses a retired model too, so this is the explicit statement of the
-    // rule, not the only thing enforcing it.)
-    if (isModelRetired(p.model_id)) continue;
+    // A retired model's GRADED posted bets count, as on the Record tab and in
+    // Discord (Matt, 2026-11-21: the record sheet, the reference, counts every
+    // graded posted pick). passesRecordFilter + RECORD_EXCLUDED_MODELS decide
+    // what leaves the record. An ungraded "placed" row of a retired model is
+    // still refused, by passesActionFilter below.
 
     // ...but `is_live` alone does not mean "in-play bet". The column carries a
     // SECOND population: the session-114 repair rows — ~14k PRE-GAME prop picks

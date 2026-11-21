@@ -312,14 +312,15 @@ def conviction_for(kelly_fraction) -> float:
 
 
 def pick_conviction(kelly_fraction, stake_units=None) -> float:
-    """The conviction a pick publishes: its own stake_units when that is a
-    number from 1 to 3, else conviction_for() (flat)."""
-    try:
-        u = float(stake_units)
-    except (TypeError, ValueError):
-        return conviction_for(kelly_fraction)
-    if MIN_CONVICTION <= u <= MAX_CONVICTION:
-        return u
+    """The conviction a pick publishes: FLAT, conviction_for(), on every pick.
+
+    Matt, 2026-11-21: the "SignalBase Record History" sheet is the source of
+    truth, and it counts every graded posted pick at 1u to win. `stake_units`
+    (picks.stake_units, NCAAB agreement sizing, 2026-11-06 to 2026-11-21) is
+    kept on the row as what was written and is no longer a stake on any
+    surface. The argument stays so every caller keeps one signature; the SQL
+    twin is published_pick_stake(numeric, numeric) as of
+    record_matches_sheet_2026_11_21.sql, and the app's pickConviction."""
     return conviction_for(kelly_fraction)
 
 

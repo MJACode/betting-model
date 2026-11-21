@@ -932,6 +932,21 @@ def run_model_quality_job() -> None:
         log.exception("ERROR model-quality crashed")
 
 
+def run_record_sheet_check_job() -> None:
+    """The published record against the "SignalBase Record History" sheet
+    (Matt, 2026-11-21: mike made the sheet the reference). Report only: it
+    stores a row in record_sheet_checks and posts one ops alert per distinct
+    set of differences per day. It never changes a pick, a view or a post."""
+    try:
+        from tracking.record_sheet_check import run_record_sheet_check
+        res = run_record_sheet_check()
+        log.info("record sheet check: ok=%s record=%s sheet=%s findings=%s alerted=%s",
+                 res.get("ok"), res.get("record"), res.get("sheet"),
+                 len(res.get("findings") or []), res.get("alerted"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR record sheet check crashed")
+
+
 def run_threshold_review() -> None:
     # In-process for the same reason as the watchdog: its output is a Discord
     # post and a pause, not an exit code, so an exception here must surface as
@@ -3296,6 +3311,17 @@ def build_scheduler() -> BlockingScheduler:
         id="model_quality",
         name="Model quality monitor (daily 11:00am ET, report only)",
         max_instances=1, coalesce=True, misfire_grace_time=300,
+    )
+
+    # Record vs the "SignalBase Record History" sheet — hourly at :47 (Matt,
+    # 2026-11-21: "always do a check against this"). The sheet refreshes about
+    # once an hour; a pick graded in the last 3 hours is not yet a gap.
+    sched.add_job(
+        run_record_sheet_check_job,
+        CronTrigger(minute=47, timezone=TIMEZONE),
+        id="record_sheet_check",
+        name="Record vs sheet check (hourly :47, report only)",
+        max_instances=1, coalesce=True, misfire_grace_time=600,
     )
 
     # Baseball Savant refresh — Mondays 5:30am ET, before the 6am pipeline.

@@ -82,25 +82,26 @@ const boardText = (p: Pick) => {
   return s.priced ? `${formatUnits(s.risk)} → ${formatUnits(s.win)}` : formatUnits(s.conviction);
 };
 
-// ── A 2u pick at -110 ───────────────────────────────────────────────────────
+// ── A row written at 2u (2026-11-06 to 2026-11-21) ──────────────────────────
+// Matt, 2026-11-21: flat 1u to win on every pick, as the record sheet counts
+// it. picks.stake_units stays on the row and sizes nothing.
 const two = mkPick({ stake_units: 2, stake_reason: REASON });
 {
   const s = stakeFor(two.kelly_fraction, two.decision_odds, two.stake_units);
-  check('a 2u pick at -110 is 2.2u to win 2u', formatStake(s) === '2.2u to win 2u', formatStake(s));
-  check('the signals card prints Bet 2.2u · Win 2u', signalsText(two) === 'Bet 2.2u · Win 2u', signalsText(two));
-  check('the board card prints 2.2u → 2u', boardText(two) === '2.2u → 2u', boardText(two));
-  check('the card shows the reason', stakeReasonLine(s, two.stake_reason) === REASON,
+  check('a 2u row at -110 is 1.1u to win 1u', formatStake(s) === '1.1u to win 1u', formatStake(s));
+  check('the signals card prints Bet 1.1u · Win 1u', signalsText(two) === 'Bet 1.1u · Win 1u', signalsText(two));
+  check('the board card prints 1.1u → 1u', boardText(two) === '1.1u → 1u', boardText(two));
+  check('the card shows no reason for a stake it no longer has', stakeReasonLine(s, two.stake_reason) === null,
     String(stakeReasonLine(s, two.stake_reason)));
 }
-// PostgREST can send a NUMERIC as a string. Python's float() reads one too.
 {
   const s = stakeFor(0.02, -110, '2' as unknown as number);
-  check('a string "2" is 2u, as Python float("2") is', formatStake(s) === '2.2u to win 2u', formatStake(s));
+  check('a string "2" is the flat 1u', formatStake(s) === '1.1u to win 1u', formatStake(s));
 }
 // The risk cap still binds, and the win is recomputed from the capped risk.
 {
-  const s = stakeFor(0.02, -200, 2);
-  check('a 2u pick at -200 lays the 3u cap to win 1.5u', formatStake(s) === '3u to win 1.5u', formatStake(s));
+  const s = stakeFor(0.02, -400, 2);
+  check('a 2u row at -400 lays the 3u cap to win 0.75u', formatStake(s) === '3u to win 0.75u', formatStake(s));
 }
 
 // ── A pick without stake_units is unchanged ────────────────────────────────
@@ -126,8 +127,8 @@ check('a 2u pick with a blank reason shows no reason line',
   stakeReasonLine(stakeFor(0.02, -110, 2), '   ') === null);
 check('a 2u pick with no reason shows no reason line',
   stakeReasonLine(stakeFor(0.02, -110, 2), null) === null);
-check('pickConviction: 2 is 2, null is the flat 1u, 4 is the flat 1u',
-  pickConviction(0.02, 2) === 2 && pickConviction(0.02, null) === 1 && pickConviction(0.02, 4) === 1);
+check('pickConviction: 2, null and 4 are all the flat 1u',
+  pickConviction(0.02, 2) === 1 && pickConviction(0.02, null) === 1 && pickConviction(0.02, 4) === 1);
 check('pickConviction: NaN and Infinity are the flat 1u',
   pickConviction(0.02, NaN) === 1 && pickConviction(0.02, Infinity) === 1);
 
@@ -135,9 +136,9 @@ check('pickConviction: NaN and Infinity are the flat 1u',
 {
   const win = postedPickUnits({ ...two, result: 'WIN' });
   const loss = postedPickUnits({ ...two, result: 'LOSS' });
-  check('posted record: a 2u win at -110 is +2u', near(win.units, 2) && near(win.risked, 2.2),
+  check('posted record: a 2u row\'s win at -110 is +1u', near(win.units, 1) && near(win.risked, 1.1),
     `${win.units} / ${win.risked}`);
-  check('posted record: a 2u loss at -110 is -2.2u', near(loss.units, -2.2) && near(loss.risked, 2.2),
+  check('posted record: a 2u row\'s loss at -110 is -1.1u', near(loss.units, -1.1) && near(loss.risked, 1.1),
     `${loss.units} / ${loss.risked}`);
   const flat = postedPickUnits({ ...mkPick(), result: 'WIN' });
   check('posted record: a pick without stake_units still wins 1u', near(flat.units, 1) && near(flat.risked, 1.1),
@@ -145,13 +146,13 @@ check('pickConviction: NaN and Infinity are the flat 1u',
 }
 {
   const t = postedTrackedStake(two);
-  check('tracked tab, as posted: a 2u pick risks 2.2u to win 2u', near(t.risk, 220) && near(t.win, 200),
+  check('tracked tab, as posted: a 2u row risks 1.1u to win 1u', near(t.risk, 110) && near(t.win, 100),
     `${t.risk} / ${t.win}`);
   const own = customTrackedStake(two, 50);
   check('tracked tab, my stakes: the member\'s own amount is not scaled by stake_units',
     near(own.risk, 50) && Math.abs(own.win - 50 / 1.1) < 1e-9, `${own.risk} / ${own.win}`);
 }
-check('exposure: unitsFor lays 2.2u on a 2u pick at -110', near(unitsFor(0.02, -110, 2), 2.2));
+check('exposure: unitsFor lays 1.1u on a 2u row at -110', near(unitsFor(0.02, -110, 2), 1.1));
 check('exposure: unitsFor two-argument call is unchanged', near(unitsFor(0.02, -110), 1.1));
 
 // ── The surfaces pass the pick's stake_units (source) ──────────────────────
@@ -209,8 +210,8 @@ setServerThresholds({});
     result: 'WIN', condition_status: null, profit_flat: 90.91,
   }] as unknown as SettledPick[];
   const official = computeBuiltInModelStats('nba_total_luck', settled);
-  check('official model page (fallback behind the view): a 2u win books +2u on 2.2u risked',
-    near(official.units, 2) && near(official.risked, 2.2), `${official.units} on ${official.risked}`);
+  check('official model page (fallback behind the view): a 2u row\'s win books +1u on 1.1u risked',
+    near(official.units, 1) && near(official.risked, 1.1), `${official.units} on ${official.risked}`);
   const model = {
     id: 'm', name: 'm', rules: [{ model_id: 'nba_total_luck', min_prob: 0, min_edge: -9 }],
     filters: {}, created_at: '', updated_at: '',

@@ -140,7 +140,10 @@ def test_the_record_surfaces_do_not_drop_paused_models():
     model; they must not filter it out of the published record."""
     track = _read(MOBILE / "src" / "lib" / "trackRecord.ts")
     assert "isModelPaused" not in track
-    assert "isModelRetired" in track
+    # Nor a retirement (Matt, 2026-11-21): the record sheet, the reference,
+    # counts a retired model's posted bets, and so does Discord. Only the
+    # view's strikes take a model out.
+    assert "isModelRetired" not in track
 
     daily = _read(MOBILE / "src" / "lib" / "dailyResults.ts")
     # Graded rows go through passesRecordFilter (pause-blind). Ungraded
