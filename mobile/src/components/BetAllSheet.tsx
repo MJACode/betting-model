@@ -71,19 +71,23 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
   const insets = useSafeAreaInsets();
   const { picks, skipped } = candidates;
   const [mode, setMode] = useState<BetAllMode>('best');
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(picks.map((p) => p.key)));
+  // A pick already tracked starts unticked: the Track button means it was
+  // placed, so Bet all does not send it to a book a second time (Matt,
+  // 2026-11-21). Ticking it again still includes it.
+  const untrackedKeys = () => new Set(picks.filter((p) => !isTracked(p.pick)).map((p) => p.key));
+  const [selected, setSelected] = useState<Set<string>>(untrackedKeys);
   const [book, setBook] = useState<string | null>(null);
   const [phase, setPhase] = useState<'choose' | 'send'>('choose');
   const [steps, setSteps] = useState<BetAllStep[]>([]);
   const [opened, setOpened] = useState<Set<string>>(() => new Set());
   const awaiting = useRef<string | null>(null);
 
-  // A fresh sheet every time it opens: every pick ticked, Best line.
+  // A fresh sheet every time it opens: every untracked pick ticked, Best line.
   const pickKeys = picks.map((p) => p.key).join(',');
   useEffect(() => {
     if (!visible) return;
     setMode('best');
-    setSelected(new Set(picks.map((p) => p.key)));
+    setSelected(untrackedKeys());
     setBook(null);
     setPhase('choose');
     setSteps([]);
@@ -96,6 +100,16 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
     setSelected((prev) => new Set([...prev].filter((k) => picks.some((p) => p.key === k))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickKeys]);
+
+  // Tracked state can load after the sheet opens: a pick that turns out to
+  // be tracked leaves the selection while the member is still choosing.
+  const trackedKeys = picks.filter((p) => isTracked(p.pick)).map((p) => p.key).join(',');
+  useEffect(() => {
+    if (phase !== 'choose' || !trackedKeys) return;
+    const t = new Set(trackedKeys.split(','));
+    setSelected((prev) => new Set([...prev].filter((k) => !t.has(k))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackedKeys]);
 
   // Back from a book: no question, only a spoken nudge for VoiceOver (iOS
   // has no live regions), since a sighted member sees the ticks.
@@ -170,13 +184,15 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
     // (UX_REVIEW §0, the card's "Found at HRB +110"). The record stays there.
     const record = storedQuoteBook(p.pick);
     const modelPrice = decisionOdds(p.pick);
+    const tracked = isTracked(p.pick);
     const foundAt =
       q && q.bookmaker !== record && modelPrice != null ? ` · ${foundAtText(bookLabel(record), formatAmerican(modelPrice))}` : '';
-    const sub = !available
+    const detail = !available
       ? `Not at ${bookName(chosenBook!)}`
       : notBest
         ? `${stakeText(stake!.risk, stake!.win)} · ${bookLabel(best.bookmaker)} ${linesPriceText(best.price)} is better${foundAt}`
         : `${stakeText(stake!.risk, stake!.win)}${foundAt}`;
+    const sub = tracked ? `Tracking · ${detail}` : detail;
     return (
       <Pressable
         key={p.key}
@@ -197,7 +213,9 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
             {trueMinus(p.label)}
           </Text>
           <Text style={styles.rowSub} numberOfLines={2}>
-            {sub}
+            {/* Same word as the card's Track button, so the two read as one state; keep in step with `sub`. */}
+            {tracked ? <Text style={styles.trackedTag}>Tracking</Text> : null}
+            {tracked ? ` · ${detail}` : detail}
           </Text>
         </View>
         <Text style={[styles.price, !available && styles.muted]}>{q ? linesPriceText(q.price) : '—'}</Text>
@@ -216,6 +234,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
   }, [picks]);
 
   const allSelected = picks.length > 0 && picks.every((p) => selected.has(p.key));
+  const trackedCount = picks.filter((p) => isTracked(p.pick)).length;
 
   const ctaLabel =
     totals.legs === 0
@@ -250,7 +269,11 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
                 {phase === 'choose' ? `Bet all · ${sport}` : `Bet all · ${placedLegs} of ${totalLegs} tracked`}
               </Text>
               <Text style={styles.subtitle}>
-                {phase === 'choose' ? BET_ALL_LIVE_NOTE : 'Tick each bet once you’ve placed it to track it.'}
+                {phase === 'choose'
+                  ? trackedCount > 0
+                    ? `${BET_ALL_LIVE_NOTE} Already tracking ${trackedCount}, so ${trackedCount === 1 ? 'it starts' : 'they start'} unticked.`
+                    : BET_ALL_LIVE_NOTE
+                  : 'Tick each bet once you’ve placed it to track it.'}
               </Text>
             </View>
             <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close Bet all">
@@ -517,6 +540,7 @@ const styles = StyleSheet.create({
   rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   rowBody: { flex: 1, minWidth: 0 },
   rowTitle: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary },
+  trackedTag: { color: colors.tint, fontWeight: font.weight.semibold },
   rowSub: { marginTop: 2, fontSize: font.size.footnote, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
   price: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
   muted: { color: colors.textTertiary },
