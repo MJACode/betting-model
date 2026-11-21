@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant (MCP) database gate: mcp_stats/mcp_meter schemas, NOLOGIN roles, entitlement (paid/comped/founder, not trial), per-call gate with question bursts and limits, terms acceptance, member status RPCs |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, scored-picks matview readers are discovered from the catalog and must be on the pre-request hook; the six-name list is unchanged |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant (MCP): Supabase OAuth server and dynamic registration on, mockups (7 screens) approved, Terms §19 and Privacy lines drafted |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, Picks: All segment removed (Matt); Signals default, empty state carries the scored count and refresh times, multi-pick line-moved push opens the app |
