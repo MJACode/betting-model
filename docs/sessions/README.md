@@ -19,6 +19,13 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all: an "Untracked only" switch (on by default) replaces the start-unticked logic |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant: request logs kept while the account is open (Privacy), App Review accounts see the AI Assistant but cannot connect (mcp_meter v2) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all: picks already tracked read "Tracking" and start unticked, so a placed bet is not sent to a book twice |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant (MCP) database gate: mcp_stats/mcp_meter schemas, NOLOGIN roles, entitlement (paid/comped/founder, not trial), per-call gate with question bursts and limits, terms acceptance, member status RPCs |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, scored-picks matview readers are discovered from the catalog and must be on the pre-request hook; the six-name list is unchanged |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, site_public_record is security_invoker; anon still reads the website record through site_public_record_rows |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant (MCP): Supabase OAuth server and dynamic registration on, mockups (7 screens) approved, Terms §19 and Privacy lines drafted |
 | 2026-11-20 | [2026-11](./2026-11.md) | 2026-11-20, the PC backup's chunk check read the whole NFL odds history table (Postgres misprices a range on a many-column key); each check now also bounds the first column and uses the index; today's full stopped and restarted (#1494) |
 | 2026-11-18 | [2026-11](./2026-11.md) | 2026-11-18, the test suite no longer writes job check-in rows (#1456, PR #1462): guard failed on master (27 connections) and passes; full suite same 19 failures as master; no-address run 3:16, not 14 h; at least five tests still reach a database by other routes |
 | 2026-11-19 | [2026-11](./2026-11.md) | 2026-11-19, PR #1466: master merged in; the Caesars reroute (`quoteForBestLine`) is the same code as d218ef1d |

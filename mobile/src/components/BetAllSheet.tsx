@@ -5,6 +5,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Modal } from '@/components/TrackedModal';
 import { SegmentTabs } from '@/components/GroupTabs';
+import { AppSwitch } from '@/components/AppSwitch';
+import { EmptyState } from '@/components/EmptyState';
 import {
   BET_ALL_LIVE_NOTE,
   BET_ALL_SINGLES_NOTE,
@@ -70,21 +72,30 @@ function stakeText(risk: number, win: number): string {
  */
 export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, onTrack, onUntrack, onClose }: Props) {
   const insets = useSafeAreaInsets();
-  const { picks, skipped } = candidates;
+  const { picks: allPicks, skipped } = candidates;
   const [mode, setMode] = useState<BetAllMode>('best');
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(picks.map((p) => p.key)));
+  // "Untracked only" (Matt, 2026-11-21): on by default, it leaves out every
+  // pick already tracked with the Track button, so Bet all does not send a
+  // placed bet to a book a second time. Off, tracked picks come back like any
+  // other, marked "Tracking". Everything below reads the filtered `picks`.
+  const [untrackedOnly, setUntrackedOnly] = useState(true);
+  const trackedCount = allPicks.filter((p) => isTracked(p.pick)).length;
+  const picks = untrackedOnly ? allPicks.filter((p) => !isTracked(p.pick)) : allPicks;
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(allPicks.map((p) => p.key)));
   const [book, setBook] = useState<string | null>(null);
   const [phase, setPhase] = useState<'choose' | 'send'>('choose');
   const [steps, setSteps] = useState<BetAllStep[]>([]);
   const [opened, setOpened] = useState<Set<string>>(() => new Set());
   const awaiting = useRef<string | null>(null);
 
-  // A fresh sheet every time it opens: every pick ticked, Best line.
-  const pickKeys = picks.map((p) => p.key).join(',');
+  // A fresh sheet every time it opens: every pick ticked, Best line,
+  // Untracked only on.
+  const pickKeys = allPicks.map((p) => p.key).join(',');
   useEffect(() => {
     if (!visible) return;
     setMode('best');
-    setSelected(new Set(picks.map((p) => p.key)));
+    setUntrackedOnly(true);
+    setSelected(new Set(allPicks.map((p) => p.key)));
     setBook(null);
     setPhase('choose');
     setSteps([]);
@@ -94,7 +105,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
   }, [visible]);
   // A pick that leaves the board (its game started) leaves the selection.
   useEffect(() => {
-    setSelected((prev) => new Set([...prev].filter((k) => picks.some((p) => p.key === k))));
+    setSelected((prev) => new Set([...prev].filter((k) => allPicks.some((p) => p.key === k))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickKeys]);
 
@@ -171,13 +182,15 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
     // (UX_REVIEW §0, the card's "Found at HRB +110"). The record stays there.
     const record = storedQuoteBook(p.pick);
     const modelPrice = decisionOdds(p.pick);
+    const tracked = isTracked(p.pick);
     const foundAt =
       q && q.bookmaker !== record && modelPrice != null ? ` · ${foundAtText(bookLabel(record), formatAmerican(modelPrice))}` : '';
-    const sub = !available
+    const detail = !available
       ? `Not at ${bookName(chosenBook!)}`
       : notBest
         ? `${stakeText(stake!.risk, stake!.win)} · ${bookLabel(best.bookmaker)} ${linesPriceText(best.price)} is better${foundAt}`
         : `${stakeText(stake!.risk, stake!.win)}${foundAt}`;
+    const sub = tracked ? `Tracking · ${detail}` : detail;
     return (
       <Pressable
         key={p.key}
@@ -198,7 +211,9 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
             {trueMinus(p.label)}
           </Text>
           <Text style={styles.rowSub} numberOfLines={2}>
-            {sub}
+            {/* Same word as the card's Track button, so the two read as one state; keep in step with `sub`. */}
+            {tracked ? <Text style={styles.trackedTag}>Tracking</Text> : null}
+            {tracked ? ` · ${detail}` : detail}
           </Text>
         </View>
         <Text style={[styles.price, !available && styles.muted]}>{q ? linesPriceText(q.price) : '—'}</Text>
@@ -217,10 +232,14 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
   }, [picks]);
 
   const allSelected = picks.length > 0 && picks.every((p) => selected.has(p.key));
+  // Picks on the list that are ticked; a hidden tracked pick is not counted.
+  const selectedShown = picks.filter((p) => selected.has(p.key)).length;
 
   const ctaLabel =
     totals.legs === 0
-      ? 'Select a pick'
+      ? picks.length === 0 && trackedCount > 0
+        ? 'Nothing left to bet'
+        : 'Select a pick'
       : planSteps.length === 1
         ? `Open ${planSteps[0]!.name} with ${totals.legs} ${totals.legs === 1 ? 'pick' : 'picks'}`
         : `Start · ${planSteps.length} sportsbooks, one at a time`;
@@ -251,7 +270,9 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
                 {phase === 'choose' ? `Bet all · ${sport}` : `Bet all · ${placedLegs} of ${totalLegs} tracked`}
               </Text>
               <Text style={styles.subtitle}>
-                {phase === 'choose' ? BET_ALL_LIVE_NOTE : 'Tick each bet once you’ve placed it to track it.'}
+                {phase === 'choose'
+                  ? BET_ALL_LIVE_NOTE
+                  : 'Tick each bet once you’ve placed it to track it.'}
               </Text>
             </View>
             <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close Bet all">
@@ -269,9 +290,43 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
                   labelFor={(m) => (m === 'best' ? 'Best line' : 'One sportsbook')}
                 />
               </View>
+              {trackedCount > 0 ? (
+                <View style={styles.switchRow}>
+                  <View style={styles.rowBody}>
+                    <Text style={styles.switchLabel}>Untracked only</Text>
+                    <Text style={styles.rowSub}>
+                      {untrackedOnly
+                        ? `Leaving out ${trackedCount} you’re already tracking`
+                        : `Showing ${trackedCount} you’re already tracking`}
+                    </Text>
+                  </View>
+                  {/* iOS does not tie the adjacent Text to a Switch, so it is named here. */}
+                  <AppSwitch
+                    value={untrackedOnly}
+                    onValueChange={setUntrackedOnly}
+                    trackColor={{ true: colors.tint }}
+                    accessibilityLabel="Untracked only"
+                    accessibilityValue={{
+                      text: untrackedOnly
+                        ? `Leaving out ${trackedCount} you’re already tracking`
+                        : `Showing ${trackedCount} you’re already tracking`,
+                    }}
+                  />
+                </View>
+              ) : null}
               {picks.length > 1 ? (
                 <Pressable
-                  onPress={() => setSelected(allSelected ? new Set() : new Set(picks.map((p) => p.key)))}
+                  // Acts on the picks shown; a hidden tracked pick keeps its tick.
+                  onPress={() =>
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      for (const p of picks) {
+                        if (allSelected) next.delete(p.key);
+                        else next.add(p.key);
+                      }
+                      return next;
+                    })
+                  }
                   accessibilityRole="button"
                   accessibilityLabel={allSelected ? 'Select none' : 'Select all'}
                   hitSlop={12}
@@ -291,11 +346,11 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
                         onPress={() => setBook(c.bookmaker)}
                         accessibilityRole="button"
                         accessibilityState={{ selected: on }}
-                        accessibilityLabel={`${c.name}, has ${c.covered} of ${selected.size}, ${c.atBest} at the best price`}
+                        accessibilityLabel={`${c.name}, has ${c.covered} of ${selectedShown}, ${c.atBest} at the best price`}
                         style={[styles.chip, on && styles.chipOn]}
                       >
                         <Text style={[styles.chipBook, on && styles.chipBookOn]}>{c.short}</Text>
-                        <Text style={styles.chipMeta}>{`${c.covered} of ${selected.size}`}</Text>
+                        <Text style={styles.chipMeta}>{`${c.covered} of ${selectedShown}`}</Text>
                       </Pressable>
                     );
                   })}
@@ -303,7 +358,13 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
               ) : null}
 
               <ScrollView style={styles.list} bounces={false}>
-                {mode === 'best' ? (
+                {picks.length === 0 && trackedCount > 0 ? (
+                  <EmptyState
+                    title={trackedCount === 1 ? 'You’re already tracking this pick' : `You’re already tracking all ${trackedCount}`}
+                    actionLabel={trackedCount === 1 ? 'Show it' : 'Show them'}
+                    onAction={() => setUntrackedOnly(false)}
+                  />
+                ) : mode === 'best' ? (
                   bestGroups.map(([b, ps]) => (
                     <View key={b} style={styles.group}>
                       <Text style={styles.groupTitle}>{`${bookName(b)} · best line`}</Text>
@@ -340,7 +401,9 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
               <View style={styles.footer}>
                 <Text style={styles.summary}>
                   {totals.legs === 0
-                    ? 'No picks selected'
+                    ? picks.length === 0 && trackedCount > 0
+                      ? 'Every pick here is already tracked'
+                      : 'No picks selected'
                     : `${totals.legs} single ${totals.legs === 1 ? 'bet' : 'bets'} · ${planSteps.length} ${planSteps.length === 1 ? 'sportsbook' : 'sportsbooks'} · ${stakeText(totals.risk, totals.win)}`}
                 </Text>
                 <PrimaryButton label={ctaLabel} onPress={start} disabled={totals.legs === 0} />
@@ -479,6 +542,8 @@ const styles = StyleSheet.create({
   title: { fontSize: font.size.title3, fontWeight: font.weight.bold, color: colors.textPrimary },
   subtitle: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2 },
   segment: { marginBottom: spacing.sm },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 44, marginBottom: spacing.xs },
+  switchLabel: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary },
   selectAll: { alignSelf: 'flex-end', minHeight: 44, justifyContent: 'center' },
   markPlaced: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   chips: { flexGrow: 0, marginBottom: spacing.md },
@@ -518,6 +583,7 @@ const styles = StyleSheet.create({
   rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   rowBody: { flex: 1, minWidth: 0 },
   rowTitle: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary },
+  trackedTag: { color: colors.tint, fontWeight: font.weight.semibold },
   rowSub: { marginTop: 2, fontSize: font.size.footnote, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
   price: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
   muted: { color: colors.textTertiary },

@@ -87,3 +87,22 @@ def test_batch_tracking_keeps_every_pick():
         timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+
+def test_untracked_only_switch_leaves_out_tracked_picks():
+    """Matt, 2026-11-21: an "Untracked only" switch, on by default, leaves
+    out picks already tracked with the Track button. Off, they come back,
+    marked "Tracking", like any other pick. It replaced the start-unticked
+    and re-tick logic, which is gone."""
+    sheet = _read(MOBILE / "src" / "components" / "BetAllSheet.tsx")
+    assert "const [untrackedOnly, setUntrackedOnly] = useState(true);" in sheet
+    assert "setUntrackedOnly(true);" in sheet  # every open starts on
+    assert "untrackedOnly ? allPicks.filter((p) => !isTracked(p.pick)) : allPicks" in sheet
+    assert 'accessibilityLabel="Untracked only"' in sheet
+    assert ">Tracking</Text>" in sheet
+    # All tracked with the switch on: an empty state that turns it off.
+    assert "onAction={() => setUntrackedOnly(false)}" in sheet
+    # The re-tick machinery is removed.
+    assert "seenTracked" not in sheet
+    assert "untrackedKeys" not in sheet

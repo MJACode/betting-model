@@ -90,7 +90,6 @@ import {
 import { SportToggle } from '@/components/SportToggle';
 import { NotificationBell } from '@/components/NotificationBell';
 import { SettingsButton } from '@/components/SettingsButton';
-import { UnreadNotificationsPill } from '@/components/UnreadNotificationsPill';
 import { BetslipButton } from '@/components/BetslipButton';
 import { LiveDot } from '@/components/LiveDot';
 import { SignalLockCard } from '@/components/SignalLockCard';
@@ -1135,7 +1134,6 @@ export function PicksHomeScreen() {
         keyExtractor={(row) => row.key}
         ListHeaderComponent={
           <>
-          <UnreadNotificationsPill />
           {betAll && betAll.picks.length + betAll.skipped.length > 0 ? (
             <View style={styles.betAllRow}>
               <View style={styles.betAllText}>
