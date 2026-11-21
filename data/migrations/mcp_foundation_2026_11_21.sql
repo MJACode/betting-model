@@ -27,13 +27,17 @@
 -- timestamp (CLAUDE.md "no data is ever deleted").
 --
 -- One DO block in ACTIVE_MIGRATIONS. It runs only while the marker
--- 'mcp_meter v1' is missing from mcp_meter.begin_call, so a pass after the
+-- 'mcp_meter v2' is missing from mcp_meter.begin_call, so a pass after the
 -- first issues no DDL. A change bumps the marker.
+--
+-- v2 (Matt, 2026-11-21): App Review accounts are 'app_review': they can see
+-- the AI Assistant screens (mcp_my_status.can_view) but cannot connect
+-- (begin_call refuses them as not_entitled).
 
 DO $mcp$
 BEGIN
   IF to_regprocedure('mcp_meter.begin_call(uuid,text,text,jsonb,timestamptz)') IS NOT NULL
-     AND position('mcp_meter v1' IN (SELECT prosrc FROM pg_proc
+     AND position('mcp_meter v2' IN (SELECT prosrc FROM pg_proc
           WHERE oid = to_regprocedure('mcp_meter.begin_call(uuid,text,text,jsonb,timestamptz)'))) > 0
   THEN
     RETURN;
@@ -153,6 +157,9 @@ BEGIN
         WHEN EXISTS (SELECT 1 FROM public.access_grants g
                       WHERE g.user_id = p_user AND g.access_source = 'comped'
                         AND (g.expires_at IS NULL OR g.expires_at > now())) THEN 'comped'
+        WHEN EXISTS (SELECT 1 FROM public.access_grants g
+                      WHERE g.user_id = p_user AND g.access_source = 'app_review'
+                        AND (g.expires_at IS NULL OR g.expires_at > now())) THEN 'app_review'
         WHEN EXISTS (SELECT 1 FROM public.subscriptions s
                       WHERE s.user_id = p_user AND s.status = 'trialing'
                         AND (s.current_period_end IS NULL OR s.current_period_end > now())) THEN 'trial'
@@ -180,7 +187,7 @@ BEGIN
     RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''
     AS $fn$
-    -- mcp_meter v1 (mcp_foundation_2026_11_21.sql)
+    -- mcp_meter v2 (mcp_foundation_2026_11_21.sql)
     DECLARE
       lim        mcp_meter.limits%ROWTYPE;
       t          timestamptz := coalesce(p_at, now());
@@ -203,7 +210,7 @@ BEGIN
       PERFORM pg_advisory_xact_lock(hashtextextended('mcp:' || p_user::text, 0));
 
       ent := mcp_meter.entitlement(p_user);
-      IF ent IN ('none', 'trial') THEN
+      IF ent IN ('none', 'trial', 'app_review') THEN
         verdict := 'not_entitled';
       ELSIF EXISTS (SELECT 1 FROM mcp_meter.suspensions s
                      WHERE s.user_id = p_user AND s.cleared_at IS NULL) THEN
@@ -345,6 +352,8 @@ BEGIN
       RETURN jsonb_build_object(
         'entitlement', ent,
         'eligible', ent IN ('founder', 'paid', 'comped'),
+        'can_view', ent IN ('founder', 'paid', 'comped', 'app_review'),
+        'preview_only', ent = 'app_review',
         'unlimited', ent = 'founder',
         'trial_converts_at', (SELECT max(s.trial_end) FROM public.subscriptions s
                                WHERE s.user_id = uid AND s.status = 'trialing'),

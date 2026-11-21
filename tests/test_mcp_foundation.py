@@ -28,6 +28,7 @@ PAID = X
 TRIAL = Y
 COMPED = "33333333-3333-3333-3333-333333333333"
 NOBODY = "44444444-4444-4444-4444-444444444444"
+REVIEW = "88888888-8888-8888-8888-888888888888"
 MATT = "33f61a85-b7ee-4a00-9641-73600e410305"
 T0 = "2026-11-21 15:00:00+00"  # 10:00 ET
 
@@ -78,13 +79,14 @@ def dsn():
         _psql_file(d, _sql_files()["site"])
         _psql_file(d, _sql_files()["a"])
         _psql(d, f"""
-          INSERT INTO auth.users (id) VALUES ('{COMPED}'), ('{NOBODY}'), ('{MATT}'),
+          INSERT INTO auth.users (id) VALUES ('{COMPED}'), ('{NOBODY}'), ('{MATT}'), ('{REVIEW}'),
             ('a2f697f8-02e1-4006-b7b2-6f7a0999f62c');
           ALTER TABLE public.subscriptions ADD COLUMN IF NOT EXISTS trial_end timestamptz;
           INSERT INTO public.subscriptions (user_id, status, current_period_end, trial_end) VALUES
             ('{PAID}', 'active', now() + interval '20 days', NULL),
             ('{TRIAL}', 'trialing', now() + interval '5 days', now() + interval '5 days');
-          INSERT INTO public.access_grants (user_id, access_source) VALUES ('{COMPED}', 'comped');
+          INSERT INTO public.access_grants (user_id, access_source) VALUES
+            ('{COMPED}', 'comped'), ('{REVIEW}', 'app_review');
         """)
         _apply(d, "app_founders_2026_11_20.sql")
         _apply(d, "mcp_foundation_2026_11_21.sql")
@@ -92,7 +94,7 @@ def dsn():
         _psql(d, f"""
           INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES
             ('{PAID}', '2026-11-21'), ('{COMPED}', '2026-11-21'), ('{MATT}', '2026-11-21'),
-            ('{TRIAL}', '2026-11-21');
+            ('{TRIAL}', '2026-11-21'), ('{REVIEW}', '2026-11-21');
         """)
         yield d
 
@@ -107,8 +109,8 @@ def test_entitlement(dsn):
     rows = _psql(dsn, f"""
       SELECT mcp_meter.entitlement('{PAID}'), mcp_meter.entitlement('{TRIAL}'),
              mcp_meter.entitlement('{COMPED}'), mcp_meter.entitlement('{NOBODY}'),
-             mcp_meter.entitlement('{MATT}');""").strip()
-    assert rows == "paid|trial|comped|none|founder"
+             mcp_meter.entitlement('{MATT}'), mcp_meter.entitlement('{REVIEW}');""").strip()
+    assert rows == "paid|trial|comped|none|founder|app_review"
 
 
 def test_trial_and_no_access_are_refused(dsn):
@@ -232,3 +234,14 @@ def test_nothing_in_the_meter_is_readable_outside_the_gate(dsn):
         FROM unnest(ARRAY['authenticator', 'anon', 'authenticated']) r,
              unnest(ARRAY['mcp_reader', 'mcp_meter_role']) m;""")
     assert member.strip() == "f"
+
+
+def test_app_review_sees_it_but_cannot_connect(dsn):
+    """Matt, 2026-11-21: the reviewer can see the AI Assistant, not connect."""
+    assert _call(dsn, REVIEW, T0)["reason"] == "not_entitled"
+    ok, out = _can(dsn, "authenticated", "SELECT public.mcp_my_status()::text;",
+                   claims='{"sub": "%s"}' % REVIEW)
+    assert ok, out
+    status = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
+    assert status["can_view"] is True and status["preview_only"] is True
+    assert status["eligible"] is False
