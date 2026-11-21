@@ -91,6 +91,7 @@ import {
 import { colors, font, radii, spacing, opacity, card } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { AiAssistantTile } from '@/components/AiAssistantTile';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -165,6 +166,8 @@ export function SettingsScreen() {
 
   return (
     <SettingsScroll>
+      {/* Above the grid (mockup 1): paying, comped, trial and App Review only. */}
+      <AiAssistantTile onPress={() => navigation.navigate('AiAssistant')} />
       {paired.length > 0 ? (
         <View style={styles.grid}>
           {paired.map((id) => (

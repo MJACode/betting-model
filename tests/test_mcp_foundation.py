@@ -91,6 +91,17 @@ def dsn():
         _apply(d, "app_founders_2026_11_20.sql")
         _apply(d, "mcp_foundation_2026_11_21.sql")
         _apply(d, "mcp_foundation_2026_11_21.sql")  # second pass: no-op
+        _psql(d, """
+          CREATE TABLE IF NOT EXISTS auth.oauth_clients (
+            id uuid PRIMARY KEY, client_name text, redirect_uris text);
+          INSERT INTO auth.oauth_clients VALUES
+            ('c1a0de00-0000-4000-8000-000000000001', 'Claude',
+             'https://claude.ai/api/mcp/auth_callback,https://claude.com/api/mcp/auth_callback');
+        """)
+        _apply(d, "mcp_status_client_2026_11_21.sql")
+        _apply(d, "mcp_status_client_2026_11_21.sql")  # second pass: no-op
+        _apply(d, "mcp_session_revoke_2026_11_21.sql")
+        _apply(d, "mcp_session_revoke_2026_11_21.sql")  # second pass: no-op
         _psql(d, f"""
           INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES
             ('{PAID}', '2026-11-21'), ('{COMPED}', '2026-11-21'), ('{MATT}', '2026-11-21'),
@@ -245,6 +256,73 @@ def test_app_review_sees_it_but_cannot_connect(dsn):
     status = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
     assert status["can_view"] is True and status["preview_only"] is True
     assert status["eligible"] is False
+
+
+def test_status_names_the_connected_app(dsn):
+    who = "99999999-9999-4999-8999-999999999999"
+    client = "c1a0de00-0000-4000-8000-000000000001"
+    _psql(dsn, f"""
+      INSERT INTO auth.users (id) VALUES ('{who}');
+      INSERT INTO public.access_grants (user_id, access_source) VALUES ('{who}', 'comped');
+      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-21');""")
+    claims = '{"sub": "%s"}' % who
+    ok, out = _can(dsn, "authenticated", "SELECT public.mcp_my_status()::text;", claims=claims)
+    assert ok, out
+    before = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
+    assert before["connected_client_name"] is None and before["connected_client_host"] is None
+    assert _call(dsn, who, T0, client=client)["allowed"] is True
+    ok, out = _can(dsn, "authenticated", "SELECT public.mcp_my_status()::text;", claims=claims)
+    assert ok, out
+    after = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
+    assert after["connected_client"] == client
+    assert after["connected_client_name"] == "Claude"
+    assert after["connected_client_host"] == "claude.ai"
+    assert after["questions_used"] == 1 and after["questions_left"] == 9
+    ok, err = _can(dsn, "anon", "SELECT public.mcp_my_status();")
+    assert not ok and "42501" in err
+
+
+def _scall(dsn: str, user: str, session: str, at: str, client: str = "claude") -> dict:
+    out = _psql(dsn, f"""
+      BEGIN;
+      SET LOCAL ROLE mcp_meter_role;
+      SELECT mcp_meter.begin_call_session('{user}'::uuid, '{client}', '{session}', 'get_slate',
+                                          '{{}}'::jsonb, '{at}'::timestamptz)::text;
+      COMMIT;""")
+    return json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
+
+
+def test_disconnect_cuts_the_app_off(dsn):
+    """Disconnect must stop the app's existing sign-in, not just free the slot."""
+    who = "aaaaaaaa-0000-4000-8000-00000000000a"
+    _psql(dsn, f"""
+      INSERT INTO auth.users (id) VALUES ('{who}');
+      INSERT INTO public.access_grants (user_id, access_source) VALUES ('{who}', 'comped');
+      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-21');""")
+    assert _scall(dsn, who, "s1", T0)["allowed"] is True
+    assert _scall(dsn, who, "s2", "2026-11-21 15:01:00+00")["allowed"] is True  # second approval, same app
+    ok, err = _can(dsn, "authenticated", "SELECT public.mcp_disconnect();",
+                   claims='{"sub": "%s"}' % who, commit=True)
+    assert ok, err
+    for s in ("s1", "s2"):
+        r = _scall(dsn, who, s, "2026-11-21 15:05:00+00")
+        assert r["allowed"] is False and r["reason"] == "disconnected", (s, r)
+    logged = _psql(dsn, f"SELECT count(*) FROM mcp_meter.calls WHERE user_id = '{who}' AND outcome = 'disconnected';")
+    assert logged.strip() == "2"
+    # A fresh approval is a new session, and works (the other app may take the slot too).
+    assert _scall(dsn, who, "s3", "2026-11-21 15:06:00+00", client="chatgpt")["allowed"] is True
+    ok, err = _can(dsn, "authenticated",
+                   f"SELECT mcp_meter.begin_call_session('{who}', 'x', 's9', 'y', '{{}}'::jsonb, now());")
+    assert not ok and "42501" in err
+    for role in ("anon", "authenticated", "mcp_reader", "mcp_meter_role"):
+        ok, err = _can(dsn, role, "SELECT 1 FROM mcp_meter.connection_sessions;")
+        assert not ok and "42501" in err, role
+
+
+def test_status_client_listed_after_the_views():
+    i = ACTIVE_MIGRATIONS.index
+    assert (i("mcp_stats_views_2026_11_21.sql") < i("mcp_status_client_2026_11_21.sql")
+            < i("mcp_session_revoke_2026_11_21.sql"))
 
 
 def test_stats_views_file_shape():

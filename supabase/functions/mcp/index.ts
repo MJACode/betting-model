@@ -269,10 +269,13 @@ type Gate = {
   unlimited: boolean; questions_used: number; questions_left: number | null; resets_at: string;
 };
 
-async function beginCall(user: string, client: string, tool: string, params: unknown): Promise<Gate> {
+// begin_call_session (mcp_session_revoke_2026_11_21.sql) refuses a Supabase
+// Auth session whose connection the member disconnected, then meters as
+// begin_call does. A token without a session_id claim passes NULL.
+async function beginCall(who: Who, tool: string, params: unknown): Promise<Gate> {
   return await sql.begin(async (tx) => {
     await tx`set local role mcp_meter_role`;
-    const [row] = await tx`select mcp_meter.begin_call(${user}::uuid, ${client}, ${tool}, ${JSON.stringify(params ?? {})}::jsonb, null) as g`;
+    const [row] = await tx`select mcp_meter.begin_call_session(${who.user}::uuid, ${who.client}, ${who.session}, ${tool}, ${JSON.stringify(params ?? {})}::jsonb, null) as g`;
     return row.g as Gate;
   });
 }
@@ -529,6 +532,8 @@ function gateMessage(g: Gate): string {
       return "rate_limited: Too many requests in a minute. Wait a moment and ask again.";
     case "one_app":
       return "one_app: Signal Base is connected to a different assistant. Disconnect it in the Signal Base app (Settings, AI Assistant) to use this one.";
+    case "disconnected":
+      return "disconnected: This assistant was disconnected from Signal Base. To use it again, remove Signal Base from your assistant's connectors and add it again.";
     case "suspended":
       return "suspended: AI assistant access is paused on this account. Contact Signal Base support.";
     default:
@@ -560,7 +565,9 @@ function unauthorized() {
   });
 }
 
-async function whoIs(req: Request): Promise<{ user: string; client: string } | null> {
+type Who = { user: string; client: string; session: string | null };
+
+async function whoIs(req: Request): Promise<Who | null> {
   const h = req.headers.get("authorization") ?? "";
   const m = /^Bearer\s+(.+)$/i.exec(h);
   if (!m) return null;
@@ -568,17 +575,19 @@ async function whoIs(req: Request): Promise<{ user: string; client: string } | n
   const { data, error } = await auth.auth.getUser(token);
   if (error || !data?.user?.id) return null;
   let client = "unknown";
+  let session: string | null = null;
   try {
     const payload = JSON.parse(new TextDecoder().decode(unb64u(token.split(".")[1])));
     client = String(payload.client_id ?? payload.azp ?? "unknown").slice(0, 200);
+    if (typeof payload.session_id === "string" && payload.session_id) session = payload.session_id.slice(0, 100);
   } catch { /* keep unknown */ }
-  return { user: data.user.id, client };
+  return { user: data.user.id, client, session };
 }
 
 const rpcResult = (id: unknown, result: unknown) => ({ jsonrpc: "2.0", id, result });
 const rpcError = (id: unknown, code: number, message: string) => ({ jsonrpc: "2.0", id, error: { code, message } });
 
-async function handleRpc(msg: any, who: { user: string; client: string }): Promise<unknown | null> {
+async function handleRpc(msg: any, who: Who): Promise<unknown | null> {
   if (!msg || msg.jsonrpc !== "2.0" || typeof msg.method !== "string") {
     return rpcError(msg?.id ?? null, -32600, "invalid_request");
   }
@@ -613,7 +622,7 @@ async function handleRpc(msg: any, who: { user: string; client: string }): Promi
 
       let gate: Gate;
       try {
-        gate = await beginCall(who.user, who.client, name, args);
+        gate = await beginCall(who, name, args);
       } catch {
         return rpcResult(id, { content: [{ type: "text", text: "unavailable: Signal Base Stats is unavailable right now." }], isError: true });
       }
