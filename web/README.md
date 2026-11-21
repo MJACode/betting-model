@@ -32,6 +32,8 @@ node --test src/record-math.test.mjs
 
 Create a project from this repo. Do not change DNS from here.
 
+Deploys come from Vercel's Git link: each push to `master` deploys production. Connecting the repo does not deploy by itself; the next push to `master` does. Between about 2026-11-19 and 2026-11-21 the link was missing, so merges did not reach the site (the live Terms lacked §19, and `/mcp` and `/oauth/consent` returned 404). If a merged change is not live, check Deployments first, then Settings → Git.
+
 - Root Directory: `web`
 - Framework Preset: Other
 - Build Command: `python3 build.py` (also set in `vercel.json`)
