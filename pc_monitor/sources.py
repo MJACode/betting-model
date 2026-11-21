@@ -360,6 +360,25 @@ class Database:
         finally:
             release_read(self.conn)
 
+    def write(self, sql: str, params: Any = None) -> list[tuple]:
+        """One statement that changes a row, committed at once (release_read
+        leaves uncommitted writes alone, and the idle-in-transaction limit
+        would end the session). Returns the rows of a RETURNING clause."""
+        if self.conn is None:
+            self.connect()
+        try:
+            cur = self.conn.execute(sql, params)
+            rows = cur.fetchall() if " returning " in sql.lower() else []
+            self.conn.commit()
+            return rows
+        except Exception:
+            try:
+                self.conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            self.close()
+            raise
+
     def close(self) -> None:
         try:
             if self.conn is not None:
@@ -396,6 +415,28 @@ SELECT snapshot_id, CAST(EXTRACT(EPOCH FROM taken_at) AS double precision), pass
        copy_rows_pulled, local_tables, local_rows
 FROM pc_copy_snapshots ORDER BY snapshot_id DESC LIMIT 1
 """
+
+
+# The phone link (data/migrations/pc_monitor_state_2026_11_21.sql). The row is
+# made once with a fresh token; later starts keep the token, so a link saved on
+# the phone keeps working.
+SQL_PHONE_ROW = """
+INSERT INTO pc_monitor_state (host, phone_token) VALUES (%s, %s)
+ON CONFLICT (host) DO UPDATE SET host = EXCLUDED.host
+RETURNING phone_token
+"""
+
+SQL_DEMAND = """
+SELECT CAST(EXTRACT(EPOCH FROM (now() - demand_at)) AS double precision)
+FROM pc_monitor_state WHERE host = %s
+"""
+
+SQL_PUBLISH = """
+UPDATE pc_monitor_state SET view = CAST(%s AS jsonb), published_at = now() WHERE host = %s
+"""
+
+# The cloud monitor serves the phone page from here (monitoring/server.py /pc/).
+PUBLIC_BASE = os.environ.get("PC_MONITOR_PUBLIC_URL", "https://worker-production-229d.up.railway.app")
 
 
 def now() -> float:

@@ -28,6 +28,20 @@ IDLE_SLACK_SEC = 30.0
 FEED_RESTART_GRACE_SEC = 180.0
 # The backup rewrites progress.json every few seconds while it copies tables.
 PROGRESS_FRESH_SEC = 120.0
+# The phone page: the PC rewrites its row this often while a phone has asked
+# within PHONE_WATCHING_SEC, and once a minute otherwise (a 13 KB row rewritten
+# every 2 s all day would be hundreds of MB of dead rows for nobody).
+PUBLISH_FAST_SEC = 2.0
+PUBLISH_SLOW_SEC = 60.0
+PHONE_WATCHING_SEC = 60.0
+
+
+def publish_interval(demand_age_s: float | None) -> float:
+    """How often the PC writes its view for the phone, given how long ago a
+    phone last asked (None: never)."""
+    if demand_age_s is not None and demand_age_s < PHONE_WATCHING_SEC:
+        return PUBLISH_FAST_SEC
+    return PUBLISH_SLOW_SEC
 
 
 # ── time ────────────────────────────────────────────────────────────────────

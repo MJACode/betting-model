@@ -12,6 +12,7 @@
       "features/**",
       "tracking/**",
       "monitoring/**",
+      "pc_monitor/**",
       "requirements*.txt",
       "railway.json",
       "Procfile"

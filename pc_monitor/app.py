@@ -17,6 +17,8 @@ against the current time. Nothing is written to disk except the app's own log.
 from __future__ import annotations
 
 import json
+import secrets
+import socket
 import threading
 import time
 import traceback
@@ -76,6 +78,33 @@ class Collector:
         self._due: dict[str, float] = {}
         self._cache: dict[str, tuple[Any, Any]] = {}
         self.procs: S.ProcessTable | None = None
+        # The phone page (pc_monitor_state): this PC's row, its link's token,
+        # and when the view was last written there.
+        self.host = socket.gethostname()
+        self.phone_token: str | None = None
+        self._demand_age: float | None = None
+        self._last_publish: float | None = None
+
+    def phone_url(self) -> str | None:
+        return f"{S.PUBLIC_BASE}/pc/?token={self.phone_token}" if self.phone_token else None
+
+    def _publish(self, db: S.Database) -> None:
+        """Write the page's view to this PC's row: every 2 s while a phone is
+        watching, once a minute otherwise. The token is never in the view."""
+        if self.phone_token is None:
+            self.phone_token = db.write(S.SQL_PHONE_ROW, (self.host, secrets.token_urlsafe(24)))[0][0]
+        if self._due_now("db_demand", R.PUBLISH_FAST_SEC):
+            rows = db.rows(S.SQL_DEMAND, (self.host,))
+            self._demand_age = rows[0][0] if rows else None
+        interval = R.publish_interval(self._demand_age)
+        if self._last_publish is not None and time.time() - self._last_publish < interval:
+            return
+        payload = view(self.panels.all(), time.time())
+        payload["host"] = self.host
+        db.write(S.SQL_PUBLISH, (json.dumps(payload, default=str), self.host))
+        self._last_publish = time.time()
+        self.panels.put("publish", {"at": self._last_publish, "every_s": interval,
+                                    "phone_watching": interval == R.PUBLISH_FAST_SEC})
 
     # ── scheduling ──────────────────────────────────────────────────────────
     def active(self) -> bool:
@@ -227,6 +256,12 @@ class Collector:
                         "snapshot_id": rows[0][0], "taken_at": rows[0][1], "pass_id": rows[0][2],
                         "kind": rows[0][3], "rows_pulled": rows[0][4], "local_tables": rows[0][5],
                         "local_rows": rows[0][6]} if rows else None)
+                try:
+                    self._publish(db)
+                except Exception as exc:  # noqa: BLE001
+                    self.panels.put("publish", error=type(exc).__name__)
+                    log(f"phone publish failed ({type(exc).__name__})")
+                    db.close()
                 self.panels.put("db", {"connected": True})
                 backoff = 0.0
             except Exception as exc:  # noqa: BLE001
@@ -430,11 +465,24 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/state":
             collector.last_viewer = time.time()
             try:
-                body = json.dumps(view(collector.panels.all(), time.time()), default=_json_default)
+                v = view(collector.panels.all(), time.time())
+                # Only the PC's own window gets the phone link; the copy
+                # written for the phone (Collector._publish) never has it.
+                pub = collector.panels.get("publish")
+                v["phone"] = {"url": collector.phone_url(), "last_sent_at": (pub.get("data") or {}).get("at"),
+                              "watching": (pub.get("data") or {}).get("phone_watching"),
+                              "error": pub.get("error")}
+                body = json.dumps(v, default=_json_default)
             except Exception as exc:  # noqa: BLE001
                 log(f"view failed: {traceback.format_exc(limit=4)}")
                 return self._send(500, json.dumps({"error": _err(exc)}).encode(), "application/json")
             return self._send(200, body.encode(), "application/json")
+        if route == "/api/phone-qr.svg":
+            url = collector.phone_url()
+            if not url:
+                return self._send(404, b'{"error":"no phone link yet"}', "application/json")
+            from pc_monitor.qr import svg
+            return self._send(200, svg(url).encode(), "image/svg+xml")
         return self._send(404, b'{"error":"not found"}', "application/json")
 
 

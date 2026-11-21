@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="PC monitor">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f1216">
+<meta name="referrer" content="no-referrer">
 <title>Betting PC monitor</title>
 <style>
 :root {
@@ -56,6 +62,30 @@ code, .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px
 svg.spark { display: block; }
 .err { color: var(--bad); }
 .empty { color: var(--muted); font-style: italic; }
+#remote { margin: 0 18px 4px; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+#remote.fresh { color: var(--muted); padding: 0 0 0 2px; }
+#remote.old { color: var(--bad); background: var(--bad-bg); font-weight: 600; }
+/* The PC stopped reporting: nothing below is current, so nothing keeps its colour. */
+main.stale .pill, main.stale svg.spark { filter: grayscale(1); opacity: .5; }
+main.stale .big, main.stale .t-ok, main.stale .t-warn, main.stale .t-bad { color: var(--muted) !important; }
+.phone { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.phone img { width: 168px; height: 168px; border-radius: 8px; background: #fff; }
+@media (max-width: 700px) {
+  body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  header { padding: 10px 12px 4px; gap: 6px; }
+  header h1 { font-size: 17px; }
+  header .sub { display: none; }
+  header .right { margin-left: 0; width: 100%; justify-content: space-between; }
+  main { padding: 6px 10px 14px; gap: 10px; }
+  section { padding: 10px; }
+  #remote { margin: 0 10px 4px; }
+  /* Wide tables scroll inside their card rather than pushing the page sideways. */
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  td, th { white-space: nowrap; }
+  svg.spark { width: 120px; height: auto; }
+  .facts { gap: 4px 16px; }
+  .fact .v { font-size: 14px; }
+}
 </style>
 </head>
 <body>
@@ -64,7 +94,9 @@ svg.spark { display: block; }
   <span class="sub">the betting model's jobs on this computer</span>
   <span class="right"><span id="db"></span><span id="updated"></span></span>
 </header>
+<div id="remote" hidden></div>
 <main>
+  <section class="wide" id="phone" hidden></section>
   <section class="wide" id="feed"></section>
   <section id="backup"></section>
   <section id="tennis"></section>
@@ -284,15 +316,52 @@ function renderOther(now, s) {
   $("other").innerHTML = items.length ? `<h2>Other tasks and error logs</h2>${items.join("")}` : "";
 }
 
+// The same page runs on the PC (http://127.0.0.1:8790/) and on the phone
+// (the cloud monitor's /pc/?token=...): ask the path it was served from, and
+// carry the query string, which holds the phone link's token.
+const API = location.pathname.replace(/\/?$/, "/") + "api/state" + location.search;
+// Past this the phone shows the PC as not reporting (off, asleep, or its
+// monitor stopped). The PC writes every 2 s while a phone watches.
+const PC_SILENT_S = 90;
+
+function renderPhone(now, p) {
+  // Only the PC's own window gets the link; the phone's copy never has it.
+  $("phone").hidden = !p;
+  if (!p) return;
+  let h = `<h2>On your phone</h2><div class="phone">`;
+  h += p.url ? `<img src="/api/phone-qr.svg" alt="QR code for the phone link">` : `<div class="empty">the link appears once the database answers</div>`;
+  h += `<div><div>Point your iPhone camera at the code and open the link.</div>`;
+  h += `<div>Then tap Share → <b>Add to Home Screen</b>, and it opens like an app.</div>`;
+  h += `<div class="note">It shows this same page, sent from this PC: every 2 s while your phone is looking, once a minute otherwise. Keep the link to yourself; it opens this page and nothing else.</div>`;
+  if (p.error) h += `<div class="err">last send failed: ${esc(p.error)}</div>`;
+  else if (p.last_sent_at) h += `<div class="note">Last sent ${age(now, p.last_sent_at)}${p.watching ? " · a phone is watching" : ""}.</div>`;
+  h += `</div></div>`;
+  $("phone").innerHTML = h;
+}
+
+function renderRemote(s) {
+  const a = s.pc_reported_age_s;
+  const el = $("remote");
+  if (a == null) { el.hidden = true; document.querySelector("main").classList.remove("stale"); return; }
+  el.hidden = false;
+  const old = a > PC_SILENT_S;
+  el.className = old ? "old" : "fresh";
+  el.textContent = old
+    ? `The PC last reported ${dur(a)} ago. It may be off, asleep, or its monitor stopped. Everything below is as of then.`
+    : `From the PC${s.host ? " (" + s.host + ")" : ""}, ${dur(a)} ago.`;
+  document.querySelector("main").classList.toggle("stale", old);
+}
+
 let lastOk = null, failing = null;
 async function tick() {
   try {
-    const r = await fetch("/api/state", {cache: "no-store"});
-    if (!r.ok) throw new Error("HTTP " + r.status);
+    const r = await fetch(API, {cache: "no-store"});
+    if (!r.ok) throw new Error(r.status === 503 ? "the PC has not reported yet" : "HTTP " + r.status);
     const s = await r.json();
     const now = s.now;
     lastOk = Date.now(); failing = null;
     $("db").innerHTML = s.db.connected ? pill("ok", "database connected") : pill(s.db.error ? "bad" : "idle", s.db.error ? "database unreachable" : "database connecting");
+    renderRemote(s); renderPhone(now, s.phone);
     renderFeed(now, s.feed); renderBackup(now, s.backup); renderTennis(now, s.tennis);
     renderTasks(now, s); renderProcs(now, s); renderOther(now, s);
   } catch (e) {
