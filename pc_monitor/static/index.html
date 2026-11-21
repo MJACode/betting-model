@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>This PC</title>
+<style>
+:root {
+  --bg: #f5f6f8; --card: #ffffff; --ink: #1b1f24; --muted: #667080; --line: #e3e6eb;
+  --ok: #1a7f37; --ok-bg: #e6f4ea; --warn: #9a6700; --warn-bg: #fff4d6;
+  --bad: #c62828; --bad-bg: #fdecec; --idle: #57606a; --idle-bg: #eef0f3;
+  --bar: #4f7cff; --bar-dim: #c9d4f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --card: #171b21; --ink: #e6e9ee; --muted: #8b95a3; --line: #262c35;
+    --ok: #4ac26b; --ok-bg: #12301c; --warn: #d6a72b; --warn-bg: #33290f;
+    --bad: #ff6b6b; --bad-bg: #3a1717; --idle: #9aa4b2; --idle-bg: #222831;
+    --bar: #6f95ff; --bar-dim: #2b3550;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 13px/1.45 "Segoe UI", system-ui, sans-serif; }
+header { display: flex; align-items: baseline; gap: 14px; padding: 14px 18px 6px; flex-wrap: wrap; }
+header h1 { font-size: 20px; margin: 0; font-weight: 600; }
+header .sub { color: var(--muted); }
+header .right { margin-left: auto; display: flex; gap: 8px; align-items: center; color: var(--muted); }
+main { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 8px 18px 18px; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+section.wide { grid-column: 1 / -1; }
+@media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+h3 { font-size: 12px; margin: 12px 0 4px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.ok { color: var(--ok); background: var(--ok-bg); } .warn { color: var(--warn); background: var(--warn-bg); }
+.bad { color: var(--bad); background: var(--bad-bg); } .idle { color: var(--idle); background: var(--idle-bg); }
+.t-ok { color: var(--ok); } .t-warn { color: var(--warn); } .t-bad { color: var(--bad); } .t-idle { color: var(--muted); }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 4px 0; }
+.fact .k { color: var(--muted); font-size: 12px; } .fact .v { font-size: 15px; font-weight: 600; }
+.fact .v small { font-weight: 400; color: var(--muted); font-size: 12px; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); }
+td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td .pill { white-space: normal; }
+.big { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.note { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.src { color: var(--muted); font-size: 11px; margin-top: 8px; }
+.src .e { color: var(--bad); }
+.prob { padding: 4px 0; border-bottom: 1px dashed var(--line); }
+.prob:last-child { border-bottom: none; }
+.prob .c { font-weight: 700; margin-right: 6px; }
+code, .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+svg.spark { display: block; }
+.err { color: var(--bad); }
+.empty { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<header>
+  <h1>This PC</h1>
+  <span class="sub">the betting model's jobs on this computer</span>
+  <span class="right"><span id="db"></span><span id="updated"></span></span>
+</header>
+<main>
+  <section class="wide" id="feed"></section>
+  <section id="backup"></section>
+  <section id="tennis"></section>
+  <section id="tasks"></section>
+  <section id="procs"></section>
+  <section class="wide" id="other" hidden></section>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pill = (tone, text) => `<span class="pill ${tone || "idle"}">${esc(text)}</span>`;
+const n0 = v => v == null ? "—" : Math.round(v).toLocaleString();
+const time = t => t == null ? "—" : new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+const timeS = t => t == null ? "—" : new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+const day = t => {
+  if (t == null) return "—";
+  const d = new Date(t * 1000), now = new Date();
+  const same = d.toDateString() === now.toDateString();
+  const tmr = new Date(now.getTime() + 864e5).toDateString() === d.toDateString();
+  const yst = new Date(now.getTime() - 864e5).toDateString() === d.toDateString();
+  return (same ? "" : tmr ? "tomorrow " : yst ? "yesterday " : d.toLocaleDateString([], {month: "short", day: "numeric"}) + " ") + time(t);
+};
+const dur = s => {
+  if (s == null) return "—";
+  s = Math.max(0, s);
+  if (s < 60) return `${Math.round(s)} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  return m ? `${h} h ${m} min` : `${h} h`;
+};
+const age = (now, t) => t == null ? "—" : dur(now - t) + " ago";
+const fact = (k, v) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`;
+
+function stamp(now, name, s) {
+  if (!s) return "";
+  if (s.error) return `<span class="e">${esc(name)}: ${esc(s.error)}${s.read_at ? ` (last good read ${age(now, s.read_at)})` : ""}</span>`;
+  return `${esc(name)} read ${s.read_at ? age(now, s.read_at) : "not yet"}`;
+}
+const stamps = (now, obj) => `<div class="src">${Object.entries(obj || {}).map(([k, v]) => stamp(now, k, v)).filter(Boolean).join(" · ")}</div>`;
+
+function taskLine(now, t) {
+  if (!t) return pill("idle", "task not found");
+  const st = t.state === "Running" ? pill("ok", "task running") : t.state === "Ready" ? pill("idle", "task ready")
+           : t.state === "Disabled" ? pill("bad", "task disabled") : pill("warn", "task " + (t.state || "?"));
+  return `${st} ${pill(t.result?.tone, t.result?.text)}`;
+}
+function taskFacts(now, t) {
+  if (!t) return "";
+  return fact("Schedule", esc(t.schedule)) + fact("Last started", day(t.last_run_at)) + fact("Next start", day(t.next_run_at));
+}
+
+function spark(m, tone) {
+  const w = 180, h = 26, n = 60, bw = w / n;
+  const max = Math.max(1, ...m);
+  let bars = "";
+  for (let i = 0; i < n; i++) {         // left = 60 min ago, right = the last minute
+    const v = m[n - 1 - i] || 0, bh = v ? Math.max(2, v / max * (h - 2)) : 0;
+    if (bh) bars += `<rect x="${(i * bw).toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${(bw - .6).toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--bar)"/>`;
+  }
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect x="0" y="${h - 1}" width="${w}" height="1" fill="var(--bar-dim)"/>${bars}</svg>`;
+}
+
+function procRows(now, ps) {
+  if (!ps || !ps.length) return "";
+  return ps.map(p => `<tr><td class="mono">${esc(p.label)}</td><td class="num">${p.pid}</td>
+    <td class="num">${p.cpu_pct == null ? "—" : p.cpu_pct.toFixed(1) + "%"}</td>
+    <td class="num">${p.mem_mb == null ? "—" : n0(p.mem_mb) + " MB"}</td><td class="num">${dur(now - p.started_at)}</td></tr>`).join("");
+}
+const procTable = (now, ps) => ps && ps.length ? `<table><tr><th>Process</th><th class="num">PID</th><th class="num">CPU</th><th class="num">Memory</th><th class="num">Up for</th></tr>${procRows(now, ps)}</table>` : "";
+
+function problems(list) {
+  if (!list || !list.length) return `<div class="empty">none in today's log</div>`;
+  return list.map(p => `<div class="prob"><span class="c t-${p.level === "WARNING" ? "warn" : "bad"}">${p.count}×</span>
+    ${esc(p.message)} <span class="note">— ${p.count > 1 ? `first ${time(p.first_at)}, ` : ""}last ${timeS(p.last_at)}</span></div>`).join("");
+}
+
+function renderFeed(now, f) {
+  const p = f.process, rate = f.log?.rate;
+  let h = `<h2>DraftKings in-play feed ${taskLine(now, f.task)} ${pill(f.presence.tone, f.presence.text)}</h2>`;
+  h += `<div class="facts">`;
+  h += fact("Reads a second", rate ? `${rate.per_s.toFixed(2)} <small>all leagues together</small>` : "—");
+  h += fact("Feed up for", p ? dur(now - p.started_at) : "—");
+  h += fact("CPU / memory", p ? `${p.cpu_pct == null ? "—" : p.cpu_pct.toFixed(1) + "%"} <small>of the PC</small> · ${n0(p.mem_mb)} MB` : "—");
+  h += fact("Last log line", f.log?.last_line_at ? age(now, f.log.last_line_at) : "—");
+  h += taskFacts(now, f.task);
+  h += `</div>`;
+  if (rate) h += `<div class="note">The feed writes one log line every 100 reads, counting every league together, so the rate is measured over its last ${n0(rate.reads)} reads (${time(rate.from_at)} to ${time(rate.to_at)}). It does not record reads per league.</div>`;
+
+  h += `<h3>By league</h3><table><tr><th>League</th><th>Freshness</th><th class="num">Last read</th><th class="num">Live games</th><th class="num">Rows saved, last minute</th><th class="num">Last hour</th><th>Rows saved per minute, last 60 min</th></tr>`;
+  if (!f.sports.length) h += `<tr><td colspan="7" class="empty">no rows from the database yet</td></tr>`;
+  for (const s of f.sports) {
+    const live = s.live_events ? `${s.matched ?? 0} of ${s.live_events} matched` : "none";
+    h += `<tr><td><b>${esc(s.sport)}</b></td><td>${pill(s.status.tone, s.status.text)}</td>
+      <td class="num big t-${s.status.tone}">${s.age_s == null ? "—" : s.age_s < 100 ? s.age_s.toFixed(1) + " s" : dur(s.age_s)}</td>
+      <td class="num">${live}</td><td class="num">${n0(s.rows_last_min)}</td><td class="num">${n0(s.rows_hour)}</td><td>${spark(s.minutes)}</td></tr>`;
+  }
+  h += `</table><div class="note">A row is saved for a game each time its score, period, spread, total, moneyline or (in football) down and distance changes. The in-play models use a league's feed only while its last read is under 8 s old; a league with no live game is read every 30 s.</div>`;
+
+  const runs = f.runs_today || [];
+  h += `<h3>Runs today</h3>`;
+  const runText = (r, i) => {
+    if (r.exit_at) return `${time(r.start_at)}–${time(r.exit_at)} <span class="${r.exit_code === 0 ? "note" : "t-bad"}">(exit ${r.exit_code})</span>`;
+    // Only the newest run can still be going; an older one with no exit line
+    // ended with its launcher, which wrote nothing.
+    return i === runs.length - 1 && p ? `${time(r.start_at)}–now` : `${time(r.start_at)}–? <span class="note">(no exit recorded)</span>`;
+  };
+  h += runs.length ? `<div>${runs.map(runText).join(" · ")}</div>`
+    + `<div class="note">It stops after 45 minutes with no live game (exit 0) and the task starts it again within a minute.</div>` : `<div class="empty">none</div>`;
+  h += `<h3>Warnings and errors</h3>${problems(f.problems)}`;
+  if (f.log?.path) h += `<div class="note mono">${esc(f.log.path)}</div>`;
+  h += stamps(now, f.sources);
+  $("feed").innerHTML = h;
+}
+
+function renderBackup(now, b) {
+  const s = b.status || {}, c = s.copy, last = s.last_copy, rep = b.report, row = b.db_row;
+  const tone = s.stage === "finished" ? "ok" : s.stage === "no backup pass found" ? "idle" : "warn";
+  let h = `<h2>Backup to this PC ${taskLine(now, b.task)}</h2><div class="facts">`;
+  h += fact("This pass", `${pill(tone === "warn" ? "ok" : tone, s.stage || "—")} <small>started ${day(s.pass_started_at)}</small>`);
+  h += taskFacts(now, b.task) + `</div>`;
+  if (c) {
+    h += `<h3>Copying the database now</h3><div class="facts">`;
+    h += fact("Table", `<span class="mono">${esc(c.table)}</span>`);
+    h += fact("Rows copied", n0(c.rows_pulled));
+    h += fact("Rows a second", `${n0(c.rows_per_s)} <small>while reading</small>`);
+    h += fact("Tables done", b.tables_done == null ? "—" : `${n0(b.tables_done)} <small>of ${n0(b.tables_total)}</small>`);
+    h += fact("Running for", `${dur(c.elapsed_s)} <small>${c.paused_s ? dur(c.paused_s) + " paused" : ""}</small>`);
+    h += fact("Progress written", age(now, c.updated_at)) + `</div>`;
+  }
+  for (const w of s.warnings || []) h += `<div class="t-warn">⚠ ${esc(w)}</div>`;
+  if (last) {
+    h += `<h3>Last finished copy</h3><div class="facts">`;
+    h += fact("Finished", day(last.finished_at)) + fact("Took", dur(last.finished_at - last.started_at));
+    h += fact("Kind", esc(last.kind === "diff" ? "new rows only" : last.kind === "full" ? "full copy" : last.kind));
+    h += fact("Rows copied", n0(last.rows_pulled)) + fact("Tables", n0(last.tables));
+    h += fact("Failed / differing", `<span class="${last.failed_tables || last.mismatched_tables ? "t-bad" : ""}">${last.failed_tables} / ${last.mismatched_tables}</span>`) + `</div>`;
+  }
+  if (rep) h += `<div class="note">Last report: ${n0(rep.rows)} rows in ${n0(rep.tables)} tables on disk, ${rep.failed} failed, ${rep.differing} differing; ${rep.disk_free_gb} of ${rep.disk_total_gb} GB free${rep.snapshot_row ? `; saved to the database as row ${rep.snapshot_row}` : ""}.</div>`;
+  if (row) h += `<div class="note">Newest backup row in the database: ${row.snapshot_id}, written ${day(row.taken_at)}.</div>`;
+  if (b.errors?.length) h += `<h3>Errors</h3>` + b.errors.map(e => `<div class="err mono">${esc(e.file)}: ${e.lines.map(esc).join("<br>")}</div>`).join("");
+  h += procTable(now, b.processes);
+  h += stamps(now, b.sources);
+  $("backup").innerHTML = h;
+}
+
+const COLLECTOR_NAMES = {dk: "DraftKings", pinnacle: "Pinnacle", tennisexplorer: "TennisExplorer"};
+function collectorSummary(name, s) {
+  if (!s) return `<span class="empty">no summary</span>`;
+  if (name === "dk") return `${n0(s.seen)} prices seen, <b>${n0(s.stored)}</b> stored, ${n0(s.leagues)} leagues${s.leagues_gone ? ` (${s.leagues_gone} gone)` : ""}`;
+  if (name === "pinnacle") return `${n0(s.matchups)} matches, ${n0(s.prices_seen)} prices seen`;
+  if (name === "tennisexplorer") return `${n0(s.rows)} rows from ${n0(s.pages)} pages`;
+  return esc(JSON.stringify(s));
+}
+function renderTennis(now, t) {
+  const last = t.passes?.[0];
+  let h = `<h2>Tennis feeds ${taskLine(now, t.task)}</h2><div class="facts">`;
+  h += fact("Last pass", last ? `${day(last.start_at)} <small>${passTook(last)}</small>` : "—");
+  h += fact("Pinnacle prices saved, last hour", t.db ? n0(t.db.rows_hour) : "—");
+  h += taskFacts(now, t.task) + `</div>`;
+  h += `<h3>Last pass, by source</h3><table><tr><th>Source</th><th>What it read</th><th class="num">Finished</th><th class="num">Exit code</th></tr>`;
+  for (const name of ["dk", "pinnacle", "tennisexplorer"]) {
+    const c = t.collectors?.[name] || {}, ex = last?.collectors?.[name];
+    h += `<tr><td>${COLLECTOR_NAMES[name]}</td><td>${collectorSummary(name, c.summary)}</td><td class="num">${time(ex?.at ?? c.written_at)}</td>
+      <td class="num">${ex ? (ex.exit_code == null ? `<span class="note">not recorded</span>` : ex.exit_code) : "—"}</td></tr>`;
+  }
+  h += `</table>`;
+  if (t.passes?.length > 1) {
+    h += `<h3>Recent passes</h3><div>${t.passes.map(p => `${time(p.start_at)} <span class="note">${passTook(p)}</span>`).join(" · ")}</div>`;
+  }
+  h += `<div class="note">Between passes the task shows "ready"; that is normal.</div>`;
+  h += procTable(now, t.processes);
+  h += stamps(now, t.sources);
+  $("tennis").innerHTML = h;
+}
+function passTook(p) {
+  const ends = Object.values(p.collectors || {}).map(c => c.at).filter(x => x != null);
+  return ends.length ? `took ${dur(Math.max(...ends) - p.start_at)}` : "running";
+}
+
+function renderTasks(now, s) {
+  let h = `<h2>Scheduled tasks <span class="note">Task Scheduler, folder \\BettingModel\\</span></h2>`;
+  h += `<table><tr><th>Task</th><th>State</th><th>Last result</th><th class="num">Last started</th><th class="num">Next start</th></tr>`;
+  for (const t of s.tasks || []) {
+    h += `<tr><td><b>${esc(t.name)}</b><div class="note">${esc(t.schedule)}</div></td><td>${esc(t.state)}</td>
+      <td>${pill(t.result?.tone, t.result?.text)} <span class="note mono">${esc(t.result?.code || "")}</span></td>
+      <td class="num">${day(t.last_run_at)}</td><td class="num">${day(t.next_run_at)}</td></tr>`;
+  }
+  if (!(s.tasks || []).length) h += `<tr><td colspan="5" class="empty">not read yet</td></tr>`;
+  h += `</table>` + stamps(now, {"Task Scheduler": s.tasks_source});
+  $("tasks").innerHTML = h;
+}
+function renderProcs(now, s) {
+  const ps = s.processes || [];
+  const cpu = ps.reduce((a, p) => a + (p.cpu_pct || 0), 0), mem = ps.reduce((a, p) => a + (p.mem_mb || 0), 0);
+  let h = `<h2>Processes <span class="note">${ps.length} running · ${cpu.toFixed(1)}% of the PC's CPU · ${n0(mem)} MB</span></h2>`;
+  h += ps.length ? procTable(now, ps) : `<div class="empty">none of the jobs has a process running</div>`;
+  h += stamps(now, {processes: s.processes_source});
+  $("procs").innerHTML = h;
+}
+function renderOther(now, s) {
+  const items = [];
+  for (const o of s.other_tasks || []) items.push(`<h3>${esc(o.task.name)}</h3>${taskLine(now, o.task)}${procTable(now, o.processes)}`);
+  for (const e of s.stderr || []) items.push(`<div class="err mono">${esc(e.file)} (${day(e.mtime)}): ${e.lines.map(esc).join("<br>")}</div>`);
+  $("other").hidden = !items.length;
+  $("other").innerHTML = items.length ? `<h2>Other tasks and error logs</h2>${items.join("")}` : "";
+}
+
+let lastOk = null, failing = null;
+async function tick() {
+  try {
+    const r = await fetch("/api/state", {cache: "no-store"});
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const s = await r.json();
+    const now = s.now;
+    lastOk = Date.now(); failing = null;
+    $("db").innerHTML = s.db.connected ? pill("ok", "database connected") : pill(s.db.error ? "bad" : "idle", s.db.error ? "database unreachable" : "database connecting");
+    renderFeed(now, s.feed); renderBackup(now, s.backup); renderTennis(now, s.tennis);
+    renderTasks(now, s); renderProcs(now, s); renderOther(now, s);
+  } catch (e) {
+    failing = String(e);
+  }
+  $("updated").textContent = failing ? `monitor not answering (${failing})${lastOk ? `, last update ${Math.round((Date.now() - lastOk) / 1000)} s ago` : ""}`
+                                     : `updated ${new Date().toLocaleTimeString()}`;
+  setTimeout(tick, 1000);
+}
+tick();
+</script>
+</body>
+</html>
