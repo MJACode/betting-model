@@ -269,12 +269,19 @@ logs, with the database marked unreachable. It writes nothing but its own log,
 `pythonw -m pc_monitor` in its own copy of the repo,
 `.claude\feeds\pc-monitor`, never a session's worktree. Each start moves that
 copy to origin/master, once origin/master contains the app. A second click
-opens another window onto the running app. Closing every window leaves it
-running for 10 minutes, then it exits. It does not start at sign-in unless
-mike asks for that (`--stay` is the switch a sign-in task would use).
+opens another window onto the running app.
+
+**It starts by itself at sign-in** (mike, 2026-11-21: *"Yes, at sign-in"*).
+The task `\BettingModel\PcMonitor` runs `pythonw -m pc_monitor --stay
+--no-window` in that copy two minutes after sign-in. It runs as mike, only
+while he is signed in, with no time limit, and never as a second copy. With
+`--stay` it keeps collecting with no window open, so the shortcut only opens a
+window onto it. Started without the task (the shortcut alone), it exits 10
+minutes after the last window closes. A merge reaches the running copy at its
+next start, which is normally the next sign-in.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pc_monitor_shortcut.ps1   # (re)make the shortcut
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pc_monitor_shortcut.ps1 -SignInTask   # (re)make the shortcut and the sign-in task
 python -m pc_monitor --no-window --no-update --port 8791                             # a second copy, for testing
 ```
 
