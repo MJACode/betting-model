@@ -89,21 +89,20 @@ def test_batch_tracking_keeps_every_pick():
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
-def test_a_tracked_pick_starts_unticked_and_says_tracking():
-    """Matt, 2026-11-21: Bet all should show a pick already placed with the
-    Track button. It starts unticked (not sent to a book twice), reads
-    "Tracking" like the card's button, and leaves the selection if tracked
-    state loads after the sheet opens."""
+
+def test_untracked_only_switch_leaves_out_tracked_picks():
+    """Matt, 2026-11-21: an "Untracked only" switch, on by default, leaves
+    out picks already tracked with the Track button. Off, they come back,
+    marked "Tracking", like any other pick. It replaced the start-unticked
+    and re-tick logic, which is gone."""
     sheet = _read(MOBILE / "src" / "components" / "BetAllSheet.tsx")
-    assert "picks.filter((p) => !isTracked(p.pick))" in sheet
-    assert "useState<Set<string>>(untrackedKeys)" in sheet
-    assert "setSelected(untrackedKeys());" in sheet
-    assert "new Set(picks.map((p) => p.key)));\n    setBook(null);" not in sheet
+    assert "const [untrackedOnly, setUntrackedOnly] = useState(true);" in sheet
+    assert "setUntrackedOnly(true);" in sheet  # every open starts on
+    assert "untrackedOnly ? allPicks.filter((p) => !isTracked(p.pick)) : allPicks" in sheet
+    assert 'accessibilityLabel="Untracked only"' in sheet
     assert ">Tracking</Text>" in sheet
-    assert "`Tracking · ${detail}`" in sheet
-    assert "}, [trackedKeys]);" in sheet
-    # Only newly tracked picks leave the selection, so a deliberate re-tick holds.
-    assert "!seenTracked.current.has(k)" in sheet
-    # Select all never puts a tracked pick back in.
-    assert "new Set([...prev, ...untracked.map((p) => p.key)])" in sheet
-    assert "new Set(picks.map((p) => p.key)))}" not in sheet
+    # All tracked with the switch on: an empty state that turns it off.
+    assert "onAction={() => setUntrackedOnly(false)}" in sheet
+    # The re-tick machinery is removed.
+    assert "seenTracked" not in sheet
+    assert "untrackedKeys" not in sheet
