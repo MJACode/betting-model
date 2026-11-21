@@ -87,3 +87,23 @@ def test_batch_tracking_keeps_every_pick():
         timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_a_tracked_pick_starts_unticked_and_says_tracking():
+    """Matt, 2026-11-21: Bet all should show a pick already placed with the
+    Track button. It starts unticked (not sent to a book twice), reads
+    "Tracking" like the card's button, and leaves the selection if tracked
+    state loads after the sheet opens."""
+    sheet = _read(MOBILE / "src" / "components" / "BetAllSheet.tsx")
+    assert "picks.filter((p) => !isTracked(p.pick))" in sheet
+    assert "useState<Set<string>>(untrackedKeys)" in sheet
+    assert "setSelected(untrackedKeys());" in sheet
+    assert "new Set(picks.map((p) => p.key)));\n    setBook(null);" not in sheet
+    assert ">Tracking</Text>" in sheet
+    assert "`Tracking · ${detail}`" in sheet
+    assert "}, [trackedKeys]);" in sheet
+    # Only newly tracked picks leave the selection, so a deliberate re-tick holds.
+    assert "!seenTracked.current.has(k)" in sheet
+    # Select all never puts a tracked pick back in.
+    assert "new Set([...prev, ...untracked.map((p) => p.key)])" in sheet
+    assert "new Set(picks.map((p) => p.key)))}" not in sheet
