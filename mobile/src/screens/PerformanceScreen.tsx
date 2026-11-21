@@ -22,9 +22,16 @@ import { useManualBets, type ManualBet, type ManualBetResult } from '@/hooks/use
 import { useTrackedBetResults, type StakeMode } from '@/hooks/useTrackedBetResults';
 import { ManualBetModal } from '@/components/ManualBetModal';
 import { PerformanceInsightsCard } from '@/components/PerformanceInsightsCard';
+import { BetDateHeader } from '@/components/BetDateHeader';
+import {
+  groupByDate,
+  isDateOpen,
+  summarizeDate,
+  visibleDateGroups,
+} from '@/lib/betDateGroups';
 import { useModelDailyRecordFull } from '@/hooks/useModelDailyRecordFull';
 import { buildInsightBets } from '@/lib/performanceInsightsInput';
-import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatAmerican, formatFlatStake, formatFlatUnits } from '@/lib/format';
+import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatAmerican, formatFlatStake, formatFlatUnits, etDate } from '@/lib/format';
 import { unitsSpeech } from '@/lib/a11y';
 import type { SyncedBet } from '@/lib/sharpsports';
 import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance';
@@ -367,7 +374,12 @@ function ManualBetsCard({
             {formatFlatUnits(net)} · {wins}–{losses}
             {settled.length < bets.length ? ` · ${bets.length - settled.length} open` : ''}
           </Text>
-          {bets.map((b) => (
+          <DateGroupedList
+            items={bets}
+            dateOf={manualBetDate}
+            statusOf={(b) => b.result}
+            profitOf={(b) => Number(b.profit ?? 0)}
+            renderItem={(b) => (
             <Pressable
               key={b.id}
               onPress={() => onRowPress(b)}
@@ -402,8 +414,9 @@ function ManualBetsCard({
                 {b.result === 'open' ? 'Open' : formatFlatUnits(b.profit)}
               </Text>
             </Pressable>
-          ))}
-          <Text style={styles.manualHint}>Tap a bet to settle it or remove it.</Text>
+            )}
+          />
+          <Text style={styles.manualHint}>Tap a day to fold it · tap a bet to settle or remove it.</Text>
         </>
       )}
     </View>
@@ -415,7 +428,70 @@ function manualResultColor(result: ManualBetResult, profit: number): string {
   return pnlColor(profit, 2, FLAT_UNIT_TONE_SCALE);
 }
 
-const TRACKED_ROW_CAP = 40;
+/** A logged bet's day: the ET date it was placed. */
+function manualBetDate(b: ManualBet): string {
+  const d = new Date(b.placed_at);
+  return Number.isNaN(d.getTime()) ? '' : etDate(d);
+}
+
+/**
+ * A bet list grouped by bet date, newest first, each day folding under its
+ * header (Matt, 2026-11-21). The two newest days start open; the newest seven
+ * show until "See all". A day with an open bet always shows, open. Replaces
+ * the 40-row cap the tracked list had.
+ */
+function DateGroupedList<T>({
+  items,
+  dateOf,
+  statusOf,
+  profitOf,
+  renderItem,
+}: {
+  items: readonly T[];
+  dateOf: (t: T) => string;
+  statusOf: (t: T) => string;
+  profitOf: (t: T) => number;
+  renderItem: (t: T) => React.ReactNode;
+}) {
+  const [taps, setTaps] = useState<Record<string, boolean>>({});
+  const [showAll, setShowAll] = useState(false);
+  const groups = groupByDate(items, dateOf);
+  const hasOpen = (g: { items: T[] }) => g.items.some((t) => statusOf(t) === 'open');
+  const shown = visibleDateGroups(groups, showAll, hasOpen);
+  const hidden = groups.length - shown.length;
+  return (
+    <>
+      {shown.map((g, i) => {
+        const open = isDateOpen(g.date, i, taps, hasOpen(g));
+        return (
+          <View key={g.date || 'undated'}>
+            <BetDateHeader
+              date={g.date}
+              count={g.items.length}
+              summary={summarizeDate(g.items, statusOf, profitOf)}
+              open={open}
+              onToggle={() => setTaps((t) => ({ ...t, [g.date]: !open }))}
+            />
+            {open ? g.items.map(renderItem) : null}
+          </View>
+        );
+      })}
+      {hidden > 0 ? (
+        // One-way, as in the references: collapsing a long list back would
+        // leave a member scrolled deep into nothing (UX review, 2026-11-21).
+        <Pressable
+          onPress={() => setShowAll(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`See all, ${hidden} more ${hidden === 1 ? 'day' : 'days'}`}
+          style={({ pressed }) => [styles.seeAll, pressed && styles.btnPressed]}
+        >
+          <Text style={styles.seeAllText}>{`See all · ${hidden} more ${hidden === 1 ? 'day' : 'days'}`}</Text>
+          <Ionicons name="chevron-down" size={14} color={colors.tint} />
+        </Pressable>
+      ) : null}
+    </>
+  );
+}
 
 // As posted is the Record tab's stake (lib/trackedStake), so a tracked pick
 // shows the Record's units. My stakes is the member's own override.
@@ -507,7 +583,12 @@ function TrackedBetsCard({
             })}
           </View>
           <Text style={styles.trackedBasis}>{stakeCaption(stakeMode)}</Text>
-          {rows.slice(0, TRACKED_ROW_CAP).map((row) => (
+          <DateGroupedList
+            items={rows}
+            dateOf={(row) => row.pick.game_date}
+            statusOf={(row) => row.status}
+            profitOf={(row) => row.profit}
+            renderItem={(row) => (
             <Pressable
               key={row.pick.pick_id}
               onPress={() => onRowPress(row)}
@@ -543,7 +624,6 @@ function TrackedBetsCard({
                 <PickRowTitle pick={row.pick} titleStyle={styles.manualDesc} matchupStyle={styles.manualSub} />
                 <Text style={styles.manualSub} numberOfLines={1}>
                   {[
-                    formatGameDate(row.pick.game_date),
                     decisionOdds(row.pick) != null
                       ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
                       : null,
@@ -573,11 +653,9 @@ function TrackedBetsCard({
                 {trackedResultLabel(row)}
               </Text>
             </Pressable>
-          ))}
-          {rows.length > TRACKED_ROW_CAP ? (
-            <Text style={styles.manualHint}>Showing the {TRACKED_ROW_CAP} most recent.</Text>
-          ) : null}
-          <Text style={styles.manualHint}>Tap a bet for details · hold to untrack.</Text>
+            )}
+          />
+          <Text style={styles.manualHint}>Tap a day to fold it · tap a bet for details · hold to untrack.</Text>
         </>
       )}
     </View>
@@ -1083,5 +1161,15 @@ const styles = StyleSheet.create({
   btnPressed: {
     opacity: opacity.pressed,
   },
+  seeAll: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  seeAllText: { fontSize: font.size.footnote, color: colors.tint, fontWeight: font.weight.semibold },
   skeleton: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
 });

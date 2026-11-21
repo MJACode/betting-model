@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Performance tab bet lists grouped by date: fold per day, See all, open bets always shown (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Performance tab Insights card: recaps by period (Mon–Sun weeks, same-days comparison), best/worst, breakdowns, CLV, form, you vs the models (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, The PC's scheduled tasks start without a window (all three through `bin\run_hidden.pyw`, which keeps exit codes; mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, the record matches the SignalBase Record History sheet (flat 1u, UFC win back, hourly check) (Matt) |
