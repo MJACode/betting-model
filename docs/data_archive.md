@@ -100,7 +100,7 @@ they remove.
 
 | Job | Table | Measured |
 |---|---|---|
-| `data/prune_odds.py`, daily ~06:30-08:50 ET | `odds`, `player_prop_odds` (books other than DraftKings, the sharp books and paid-history sources) | 2.50M `odds` + 6.27M prop rows + 0.34M repeat rows deleted in the seven runs 11-08 to 11-14 (worker logs). The prop backlog is still walking back toward 2026-09-01, so September's 38.7M prop rows are next. |
+| `data/prune_odds.py`, daily ~06:30-08:50 ET | `odds`, `player_prop_odds` (books other than DraftKings and paid-history sources; the sharp books are spared in `player_prop_odds` only, so Pinnacle's game lines in `odds` keep just an opener and a close per settled game outside `PATH_KEPT_SPORTS`, measured on NHL 2026-11-21, `docs/nhl_sharp_vs_soft.md`) | 2.50M `odds` + 6.27M prop rows + 0.34M repeat rows deleted in the seven runs 11-08 to 11-14 (worker logs). The prop backlog is still walking back toward 2026-09-01, so September's 38.7M prop rows are next. |
 | `monitoring/store.py` `prune()` | `api_call_log`, older than 7 days | 11.6M rows deleted since 03-30. Daily totals survive in `api_call_daily`; the individual calls do not. |
 | `data/app_timings_retention.py` | `app_timings` | app load-time records |
 | `data/ingestors/player_news_ingestor.py` | `player_news`, older than 21 days | 9,855 rows |

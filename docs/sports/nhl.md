@@ -254,6 +254,14 @@
 >   or paused-model BET holds nothing. Moneyline and same-team regulation, or
 >   moneyline and the regulation draw, can both win and both stand.
 
+> **2026-11-21: `docs/nhl_sharp_vs_soft.md` runs `nhl_over_under`'s rule
+> (Pinnacle's no-vig price against a bettable book in the same fetch) on every
+> NHL market.** Puck line not established (it rests on ten dates and the
+> de-vig method); the first-period total held on 2023-26, but the book that carried it
+> quotes none in 2026-27 (bought 2026-11-21); moneyline, team totals, alternate totals and the 3-way show
+> nothing for that rule. Settled 2026-27 games keep only each non-DraftKings
+> book's opener and close, so this season cannot be replayed.
+
 > **2026-10-08: `docs/nhl_clv_ev_assessment.md` is the current grade of every
 > NHL model for closing-line value and expected value.** The prop backtest
 > figures quoted below before that date are inflated by a shared-name defect

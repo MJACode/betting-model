@@ -114,6 +114,22 @@ error.
   reference); baseball props, -4.01% on 6,931 ("the edge is specific to a
   market"); baseball totals once quotes had to be within 300 seconds (no bets
   left).
+  *Not established*: hockey puck line (2026-11-21), the totals rule
+  unchanged: 1,710 bets +6.0% (-0.3, +12.3), CLV +2.3%, retail placebos
+  negative, grading and quote timing checked, but +1.4% without its ten best
+  dates and +1.5% on the power de-vig. *Candidate, one book and one side*:
+  hockey first-period total, 250 bets +16.2% (+1.9, +30.0), retail placebos
+  -3.7% to +2.8%, 88% unders, 74% at one book (whose blind under loses 2.4%),
+  one snapshot a game; in 2026-27 that book quotes no first-period total in
+  the feed, and the rule finds 4 bets on 362 games. *Null for the
+  rule*: hockey moneyline, team totals, alternate totals
+  (`docs/nhl_sharp_vs_soft.md`).
+  *Candidate, selection across markets*: the same rule on every hockey market
+  at one daily moment, keeping only the night's largest EV: 478 bets +16.0%
+  (+2.2, +29.8) at 2%, holds on the power de-vig and without its ten best
+  nights; but a DraftKings reference keeps about two-thirds of it, so part is
+  an outlier-price effect, and one season of six lost
+  (`scripts/nhl_best_bet_a_night_lab.py`).
   *Shipped, missed the stricter bar*: tennis match winner (2026-11-14), the
   best of seven US books against Pinnacle's POWER-de-vigged pair about 30
   minutes before the listed start, EV 0.02 to 0.05 with each book's
