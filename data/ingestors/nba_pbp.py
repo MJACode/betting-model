@@ -1287,7 +1287,8 @@ def build_gap_game(game_id: str, game_date: str, ev: dict, swapped: bool, data: 
     return g
 
 
-def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dict:
+def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False,
+              only_game_ids: list[str] | None = None) -> dict:
     """Load every `games` row of the season that no stored ESPN game matched,
     from ESPN's free scoreboard and summary endpoints (the release is missing
     a few: six late-February 2019-20 games, for one).
@@ -1295,6 +1296,10 @@ def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dic
     At most MAX_GAPS games a call, oldest first. The rest are `deferred` for
     the next run: a season the release was never loaded (the one in progress)
     is not fetched whole in one call, and it is not left at zero either.
+
+    `only_game_ids` limits the pull to those ids (still only finals with no
+    stored play-by-play). settle_picks uses it for first-basket picks so a
+    finished game grades on the pass that sees the final, not the next 6am.
 
     One game's summary or build failing is that game's error. Games already
     built are committed in batches of GAMES_PER_COMMIT, and the read
@@ -1308,11 +1313,17 @@ def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dic
     if get_json is None:
         from data.ingestors.nba_results_ingestor import _http_get_json as get_json
     ensure_tables(conn)
-    missing = conn.execute("""
+    sql = """
         SELECT g.game_id, g.game_date, g.home_score, g.away_score FROM games g
          WHERE g.sport = 'NBA' AND g.season = %s AND g.home_score IS NOT NULL
            AND NOT EXISTS (SELECT 1 FROM nba_pbp_games p WHERE p.game_id = g.game_id)
-         ORDER BY g.game_date, g.game_id""", (season,)).fetchall()
+    """
+    params: list = [season]
+    if only_game_ids is not None:
+        sql += " AND g.game_id = ANY(%s)"
+        params.append(list(only_game_ids))
+    sql += " ORDER BY g.game_date, g.game_id"
+    missing = conn.execute(sql, tuple(params)).fetchall()
     stats = Counter(missing=len(missing))
     stats["season"] = season
     first_error = None
@@ -1400,6 +1411,52 @@ def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dic
     if first_error:
         out["first_error"] = first_error
     return out
+
+
+def pending_first_basket_ids(conn) -> dict[int, list[str]]:
+    """{season: [game_id]} for final games that still have an unsettled
+    first-basket BET and no stored play-by-play. The grader reads nba_pbp;
+    a game missing from it is left out of settle_facts and the pick waits."""
+    rows = conn.execute("""
+        SELECT g.season, g.game_id
+          FROM games g
+          JOIN picks p ON p.game_id = g.game_id
+         WHERE p.model_id = 'nba_prop_first_basket'
+           AND p.signal_type = 'BET'
+           AND p.result IS NULL
+           AND g.home_score IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM nba_pbp_games x WHERE x.game_id = g.game_id)
+         GROUP BY g.season, g.game_id
+         ORDER BY g.season, g.game_id
+    """).fetchall()
+    out: dict[int, list[str]] = {}
+    for season, gid in rows:
+        out.setdefault(int(season), []).append(str(gid))
+    return out
+
+
+def ensure_pending_first_basket(get_json=None, *, connect=None) -> dict:
+    """Load play-by-play for final games whose first-basket BETs cannot grade
+    yet. settle_picks calls this on its own connection: the only other writer
+    is the 6am nba-quarters step, which runs AFTER that morning's settle and
+    on no refresh pass, so a game that ended in the afternoon would otherwise
+    stay ungraded until the next morning's second pass.
+
+    No HTTP when nothing is waiting. One game's failure is that game's error
+    inside fill_gaps; the picks stay pending for the next pass."""
+    from data.db import get_connection
+    own = connect is None
+    conn = (connect or get_connection)()
+    try:
+        by_season = pending_first_basket_ids(conn)
+        stats = {"games": sum(len(v) for v in by_season.values()), "seasons": {}}
+        for season, ids in by_season.items():
+            stats["seasons"][str(season)] = fill_gaps(
+                conn, season, get_json=get_json, only_game_ids=ids)
+        return stats
+    finally:
+        if own:
+            conn.close()
 
 
 # ── --rebuild: named games re-derived from what Supabase already holds ─────

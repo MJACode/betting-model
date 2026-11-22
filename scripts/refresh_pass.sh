@@ -368,6 +368,11 @@ step push-notifications
 #   ncaab-results    no ESPN call unless a started NCAAB game in the last 14
 #                    days is unscored; then one scoreboard call per such date
 #   ncaabw-results   the same for women's college basketball (NCAABW)
+#   ncaaf-results    CFBD /games for a season that still has an unscored game
+#                    in the last 10 days (two calls: regular and postseason).
+#                    The 6am pipeline was the only caller, so a Saturday final
+#                    sat with a null score until the next morning while NBA,
+#                    NCAAB and NHL graded on this pass.
 # GROUP 3 — results ingests. Independent of each other, each hitting a
 # different external service, and all of them must finish before settle.
 par game-log-today
@@ -377,6 +382,7 @@ par ufc-results-poll
 par nba-results
 par ncaab-results
 par ncaabw-results
+par ncaaf-results
 par_wait
 
 # Hourly only. Both hit an external service hard enough that a 10-minute
