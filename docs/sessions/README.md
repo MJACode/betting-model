@@ -20,12 +20,15 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, DailyFaceoff's goalie archive from 2021-11-18 stored by a worker job, for the confirmed-goalie re-test (mike) |
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, odds clean-up keeps NHL's whole price path (NHL in PATH_KEPT_SPORTS; about 2 GB a season) (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, the PC backup fetches master before refreshing its scripts (#1542, #1558); first run on it clean, #1541 closed (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, first-basket and NCAAF bets grade on the refresh: play-by-play pulled for waiting first-basket finals, ncaaf-results added before settle |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, NHL goalie window: each refresh pass starts a goalie tick as it ends, and the window starts at 9:00 ET (#1568; evening ESPN reads were 10 minutes apart) (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, every table read-only for Claude: hook refuses writes/DDL and runs each MCP query in BEGIN READ ONLY (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant connector: NCAAF twin games merged (alias_ids), whole slate with has_lines, lines found under either id |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, picks read-only for Claude: hook blocks MCP writes to picks*/results_snapshots, reads allowed (Matt) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, NHL every market against Pinnacle's no-vig price: puck line not established (ten dates, de-vig), first-period total's book (William Hill) quotes none in 2026-27 after the purchase (mike) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, NHL game picks land late: the goalie rule (36% of games confirmed in the last hour), late soft-book prices; earlier is no better against Pinnacle's close; the goalie poll misses reads (mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Betting PC monitor on the phone: PC writes its page to pc_monitor_state, cloud monitor serves /pc/ (phone-only token, QR in the PC window) (mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Performance tab bet lists grouped by date: fold per day, See all, open bets always shown (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Performance tab Insights card: recaps by period (Mon–Sun weeks, same-days comparison), best/worst, breakdowns, CLV, form, you vs the models (Matt) |

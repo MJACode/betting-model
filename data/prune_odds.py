@@ -70,8 +70,9 @@ had already broken the same claim (NFL_2026_06_ARI_LA
 player_pass_yds_alternate: williamhill_us holds 38 state rows, and only 2 of
 their source rows survive the prune).
 
-NBA, NCAAB, NCAABW and NCAAF keep their whole price path (NBA 2026-10-17,
-NCAAB 2026-10-26, NCAABW 2026-11-09, NCAAF 2026-11-10):
+NBA, NCAAB, NCAABW, NCAAF, EuroLeague, the NBL and NHL keep their whole price
+path (NBA 2026-10-17, NCAAB 2026-10-26, NCAABW 2026-11-09, NCAAF 2026-11-10,
+EuroLeague 2026-11-12, NBL 2026-11-14, NHL 2026-11-21):
 the two tiers skip every `PATH_KEPT_SPORTS` row, and `thin_repeats` deletes
 only the middle of an unchanged run, keeping the row where each book moved and
 the last row it held. The thinning never touches the books above either, nor a
@@ -383,7 +384,20 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
 # The NBL joins it from its first stored day (2026-11-14): a new league whose
 # research reads when each book moved against the one book a pick may name
 # (BetRivers), on a board of two to five games a day.
-PATH_KEPT_SPORTS = ("NBA", "NCAAB", "NCAABW", "NCAAF", "EUROLEAGUE", "NBL")
+#
+# NHL joins it 2026-11-21 (mike: "Yes, keep it"). A settled NHL game kept each
+# non-DraftKings book's opener and close only, Pinnacle included: Pinnacle is
+# protected in player_prop_odds alone (PROTECTED_BY_TABLE), not here. Measured
+# in production that day: the 12 games of 2026-11-07 held 2,061 non-DraftKings
+# rows (352 Pinnacle), against 74,899 (11,125 Pinnacle) on the 12 games of
+# 2026-11-19; on the local copy, CGY at EDM 2026-10-28 kept 2 Pinnacle fetches
+# of 110. Every NHL date to 2026-11-13 was thinned; from 2026-11-14 the job
+# deletes nothing (config.DATA_DELETION_APPROVALS is empty), so this governs
+# what happens when it is switched back on. So no settled 2026-27 game could be replayed for a
+# rule that prices a bettable book against Pinnacle in the same fetch (the puck
+# line and the 3-way price, docs/nhl_sharp_vs_soft.md). The games already
+# thinned cannot be put back.
+PATH_KEPT_SPORTS = ("NBA", "NCAAB", "NCAABW", "NCAAF", "EUROLEAGUE", "NBL", "NHL")
 
 
 def _unprotected(params: dict, table: str | None = None) -> str:

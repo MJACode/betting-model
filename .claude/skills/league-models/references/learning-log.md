@@ -30,6 +30,41 @@ review as its own entry.
 
 ---
 
+## 2026-11-21 — NHL, every market against Pinnacle's no-vig price (the totals rule's method)
+
+1. **League and scope**: NHL, mike ("build models that beat the pinnacle no vig line … Yes, run
+   it"), after finding the NHL moneyline loses to Pinnacle's close at every lead time. One method,
+   the live `nhl_over_under` rule unchanged, run on every market the odds table stores: puck line,
+   moneyline, regulation 3-way, first-period total, team totals, alternate totals and spreads.
+2. **Tried**: a same-fetch replay that reproduces `nhl_over_under`'s evidence bet for bet first
+   (`scripts/nhl_sharp_vs_soft_lab.py validate`), then every market at eight floors and three lead
+   windows, then the kill tests on the two positive markets. Puck line: positive at every floor
+   (+6.0% on 1,710 at 0.015), grading sign checked against Pinnacle's close, blind both-sides loses
+   the margin, retail placebos (DraftKings, FanDuel, Bovada) all negative, quotes a median 1 s apart.
+   Then it falls to +1.4% without its ten best dates and +1.5% on the power de-vig: not
+   established. First-period total: +16.2% on 250 (+1.9, +30.0), still positive without its ten best
+   dates and on the power de-vig, retail placebos -3.7% to +2.8%, the bet book's blind under -2.4%;
+   but 88% unders and 74% at one book, one snapshot a game. The current season, bought on mike's
+   go-ahead (346 games, 10,430 credits), shows that book no longer quotes the market in the feed:
+   4 bets on 362 games. A one-book edge can vanish between seasons; check the book still quotes
+   the market before spending on the re-test's model work. 3-way, moneyline, team and alternate totals: nothing for this rule.
+3. **New**: two traps in `porting-traps.md` (the odds clean-up leaves a settled game only each
+   book's opener and close, so an in-season replay is not the rule's input; bought-history rows carry
+   their import time in `created_at`), and one kill test in `kill-tests.md` (grade the live
+   comparator on the same test). Results in `methods.md` §2. A purchase the session's permission
+   check refused (10,370 credits, a buyer mike pre-approved) was put to the user in chat, not routed
+   around; it ran on his "Yes, buy them".
+4. **Corrected**: `docs/data_archive.md` says the clean-up spares "the sharp books"; in `odds` it
+   does not (`data/prune_odds.PROTECTED_BY_TABLE` protects Pinnacle in `player_prop_odds` only).
+5. **The framework**: nothing changed in `SKILL.md`. Worth promoting if it recurs: before reading a
+   neighbourhood as a plateau, run "without the ten best dates" — it moved this one more than any
+   other test.
+6. **Follow-up, 2026-11-22** (mike: fewer bets, 1-5 unit stakes): per market, return does not
+   reliably rise with EV (the bands flip with the de-vig method), so sizing by EV mostly
+   multiplies noise. Selecting ACROSS markets at one moment and keeping only the night's
+   largest EV is the version that held on both de-vig methods. Run the retail-reference
+   placebo on any cross-market selection: it kept two-thirds of this one.
+
 ## 2026-11-20 — NBA first basket: a market never priced, built live on a five-of-six grade
 
 1. **League and scope**: NBA, mike after an 0-6 night ("invent a new way"). One market no NBA search
