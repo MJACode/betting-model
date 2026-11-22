@@ -23,6 +23,11 @@ export function gameMarketForModel(modelId: string): string | null {
   if (modelId === 'ufc_method_of_victory') return null; // prob-only, never priced
   if (modelId === 'ufc_total_rounds') return 'totals';
   if (modelId === 'nhl_moneyline_regulation') return 'h2h_3way';
+  // NHL best bet a night (models/nhl_best_bet_night.py): its total and its
+  // regulation 3-way carry neither 'over_under' nor the 3-way id above. The
+  // puck line ('puckline') and the moneyline (the h2h default) need nothing.
+  if (modelId === 'nhl_night_total') return 'totals';
+  if (modelId === 'nhl_night_regulation') return 'h2h_3way';
   if (modelId.startsWith('golf_')) return null; // golf odds live in golf_odds, not the odds table
   // NFL card models: DK line snapshots are mirrored into the odds table by
   // scripts/nfl_wind_publisher.py on every scheduled card run, so movement
@@ -356,6 +361,9 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'euroleague_home_ml') return 'game_ml';
   if (modelId === 'euroleague_h1_dog_ml') return 'game_ml';
   if (modelId === 'euroleague_q1_club_share_total') return 'game_total';
+  // NHL best bet a night: a total and a regulation 3-way without the substrings.
+  if (modelId === 'nhl_night_total') return 'game_total';
+  if (modelId === 'nhl_night_regulation') return 'game_ml';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -2404,6 +2412,9 @@ const POSTED_MONEYLINE_MODELS: readonly string[] = [
   'nba_q1_trend_ml',
   'atp_moneyline_shop',
   'wta_moneyline_shop',
+  // The NHL best bet a night's moneyline and 3-way: a price, no line.
+  'nhl_night_moneyline',
+  'nhl_night_regulation',
 ];
 
 /**
@@ -2551,6 +2562,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     // NBA first basket decides each game once, 5-20 minutes before tip
     // (scripts/nba_first_basket_card.py), on the starters the books list.
     pick.model_id === 'nba_prop_first_basket' ||
+    // NHL best bet a night writes one bet a night, once, after both goalies
+    // are confirmed, and never re-prices (scripts/nhl_best_bet_night_card.py).
+    pick.model_id.startsWith('nhl_night_') ||
     nbaPosted
   ) {
     return {

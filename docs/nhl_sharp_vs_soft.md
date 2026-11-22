@@ -291,6 +291,54 @@ goalies confirmed and timed (42% of teams in 2021-22, 80% in 2025-26).
 - **Volume:** 39 to 117 bets a season in the backtest, on 42-80% coverage.
   Live, ESPN confirms nearly every game, so about one bet on most game nights.
 
+## The live model: NHL best bet a night (built 2026-11-22)
+
+mike, 2026-11-22: "Yes" to the version above on four markets (puck line,
+moneyline, regulation 3-way, total), power de-vig, EV >= 0.01, price -200 or
+better, flat stake, one bet a night, never on a game that already holds an NHL
+bet. Four rule ids, one per market, one family:
+`nhl_night_puckline`, `nhl_night_total`, `nhl_night_moneyline`,
+`nhl_night_regulation` (`models/nhl_best_bet_night.py`,
+`scripts/nhl_best_bet_night_card.py`). It runs on every refresh pass right
+after the totals card and on every goalie-window tick that decides games.
+
+**The live code, replayed** (`scripts/nhl_best_bet_night_replay.py`): every
+stored fetch is a pass, a pass sees only what was fetched by then and only
+games whose two goalies the archive shows confirmed by then, and the night's
+bet is the first pass with a candidate, its largest EV. 2021-22 to 2025-26:
+
+| | bets | units (1u) | flat return | 95% | CLV | without 10 best nights | 2022 | 2023 | 2024 | 2025 | 2026 |
+|---|---:|---:|---:|---|---:|---:|---|---|---|---|---|
+| live code replayed | 349 | +62.6 | +15.3% | +2.0..+28.6 | +2.21% | +52.6 | +4.5 | +4.9 | +5.5 | +22.6 | +25.1 |
+| research C (above), re-run | 323 | +66.5 | +19.3% | +6.4..+32.3 | +2.13% | +56.5 | +4.5 | +4.9 | +12.1 | +24.4 | +20.5 |
+
+- **Bet for bet:** every research night is a live night; on 303 of the 323 the
+  live code makes the same bet (game, market, side), 292 at the same book and
+  price. 26 nights only the live code bets (+1.4u); 20 nights it picks another
+  bet (live -1.2u, research +4.0u). The research row reads +66.5u here against
+  +63.9u in the table above: the same 323 bets, ties in fetch time broken by a
+  stable sort here.
+- **By market (live replay):** total 111 bets +21.2u (+21.0%), puck line 83
+  +25.6u (+20.3%), moneyline 57 +12.1u (+18.0%), regulation 3-way 98 +3.6u
+  (+3.1%, median price +365). The 3-way is the weak leg.
+- **Early and late halves:** +17.8u on the first 174 bets, +44.8u on the last 175.
+- **Prices:** median +105, shortest -200 (the floor), longest +500; 11% shorter
+  than -150, 5% shorter than -175. At 1u to win, risk per bet is median 0.95u,
+  largest 2.00u.
+- **The replay's cutoff is the scheduled puck drop.** Live, the feed lists a
+  game about ten minutes after its scheduled puck drop and the card stops ten
+  minutes before that. The stored history mixes the feed's time and the
+  scheduled time (4% of 2021-22 games sit 5-15 minutes past the hour or half
+  hour, 59% of 2023-24, 85% of 2025-26), so a replay cut at the stored time
+  less ten minutes stopped early on every game stored at its scheduled time and
+  read +31.9u on 278 bets. None of the research's 81 bets fetched in the last
+  ten minutes before the stored start was at or after the scheduled puck drop.
+- **Not replayed:** the skip of a game holding another model's NHL bet, and the
+  live check rate (history holds about noon and the start hour).
+- **Live dry run, 2026-11-22 09:41 ET (reads only):** 5 games, all held for
+  goalies. With the hold lifted in memory: 111 book-to-Pinnacle comparisons,
+  none at 1% EV at that hour.
+
 ## Next mechanisms (the stuck ladder for the null markets)
 
 1. **Team totals priced off the full-game total and moneyline.** Prediction: a

@@ -64,6 +64,7 @@ from models.scorer import (
     _build_pick_label,
     _get_current_bankroll,
     _insert_picks,
+    conflicting_standing_bet,
     quarter_kelly,
 )
 from tracking.pick_integrity import pick_problems
@@ -216,6 +217,14 @@ def publish(conn, rows: list[dict]) -> int:
             LIMIT 1
         """, (r["game_id"], MODEL_ID)).fetchone()
         if got:
+            continue
+        # One game never carries two bets that cannot both win (mike,
+        # 2026-10-17): the NHL best bet a night may already hold the other
+        # side of this total (models/scorer.conflicting_standing_bet).
+        held = conflicting_standing_bet(conn, r)
+        if held is not None:
+            logger.info(f"{MODEL_ID}: {r['pick_label']} not bet on {r['game_id']} -- "
+                        f"cannot both win with {held['pick_label']}, already bet on this game")
             continue
         _insert_picks(conn, [r])
         written += 1

@@ -657,6 +657,21 @@ for -1.908 units, EV at close +2.96% on the 5 that closed at the same number.
 On a whole number (6.0) the stated EV ignores the push, so it overstates the
 true EV by the push share; the lab did the same.
 
+**The NHL best bet a night, `nhl_night_puckline` / `nhl_night_total` /
+`nhl_night_moneyline` / `nhl_night_regulation`** (built 2026-11-22, mike; one
+family, at most one bet a night across the four; `models/nhl_best_bet_night.py`).
+Pinnacle's power-de-vigged price against the bettable books in the same fetch,
+after both goalies are confirmed. Each id carries the family's measured cut:
+EV >= **0.01** (`config.MODEL_OWN_EV_FLOOR`), price **-200** or better
+(`MODEL_MIN_ODDS`), action cut 0.0 / 0.0 so every surface shows what the card
+wrote, decided on Pinnacle's own number (`MODELS_ON_OWN_PROBABILITY`). Floors
+as floors, all five markets (`docs/nhl_sharp_vs_soft.md`): 1% 345 bets +62.6u,
+2% 183 bets +25.4u, 3% 80 bets +3.0u; a higher floor did not do better, so the
+stake is flat. The live code replayed on the four markets: 349 bets, +62.6u,
++15.3% (+2.0..+28.6), every season positive; the 3-way leg is the weakest (98
+bets, +3.6u). The four floors are the family's, not swept per id: a per-id
+sweep changes which bet each night gets, so it is a sweep of the whole card.
+
 ## NBA — `nba_prop_first_basket`, first basket (2026-11-20, mike)
 
 Who scores the game's first points: the model's probability (the opening tip and each starter's share

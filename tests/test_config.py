@@ -233,6 +233,11 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          # measured on Pinnacle's power-de-vigged chance, and they have no record.
          "atp_moneyline_shop",
          "wta_moneyline_shop",
+         # 2026-11-22 (mike, "Yes"): the NHL best bet a night; its 0.01 EV cut
+         # was measured on Pinnacle's power-de-vigged chance, as nhl_over_under's
+         # on Pinnacle's own price, and it has no record.
+         "nhl_night_puckline", "nhl_night_total", "nhl_night_moneyline",
+         "nhl_night_regulation",
          # 2026-11-02 (mike): NCAAB spreads; its 0.03 cut was measured on its
          # own P(win | no push) at the bet book's line, and it has no record.
          "ncaab_spread_market",
@@ -387,6 +392,8 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "ufc_open_moneyline",       # 2026-11-13 (mike): Pinnacle's no-vig chance moved by the fighter ratings
         "atp_moneyline_shop",       # 2026-11-14 (mike): Pinnacle's power-de-vigged chance
         "wta_moneyline_shop",       # 2026-11-14 (mike): the same, women's tour
+        # 2026-11-22 (mike): the NHL best bet a night, Pinnacle's power-de-vigged chance.
+        "nhl_night_puckline", "nhl_night_total", "nhl_night_moneyline", "nhl_night_regulation",
         "ncaab_spread_market",      # 2026-11-02 (mike): the margin table's P(win, push left out)
         "ncaab_moneyline_own_spread",  # 2026-11-02 (mike): the margin table's P(side wins) at the book's own spread
         "ncaab_moneyline_first_post",  # 2026-11-03 (mike): the same, at the book's first moneyline post

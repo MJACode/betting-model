@@ -1964,9 +1964,9 @@ def _nhl_window_tick_after(label: str) -> None:
 # calls); the prop odds step buys only what is owed; the scoring is the NHL
 # game models for the named games; the cards are reads and a handful of writes.
 NHL_GOALIE_WINDOW_TIMEOUT_S = {"poll": 120, "odds": 120, "prop_odds": 120, "score": 180,
-                               "totals": 120, "props": 180}
+                               "totals": 120, "night": 120, "props": 180}
 # Every step runs while _NHL_WINDOW_LOCK is held.
-NHL_GOALIE_WINDOW_LOCKED_STEPS = ("poll", "odds", "prop_odds", "score", "totals", "props")
+NHL_GOALIE_WINDOW_LOCKED_STEPS = ("poll", "odds", "prop_odds", "score", "totals", "night", "props")
 # {game_id: known_at} this process has run the deciders on. A restart empties
 # it and the next tick runs them once more for every known game; every NHL
 # decider is insert-once, so that re-run writes nothing already written.
@@ -2040,6 +2040,9 @@ def run_nhl_goalie_window() -> None:
                          t["score"]),
                         ("nhl-over-under", [sys.executable, "run_pipeline.py", "--step",
                                             "nhl-over-under"], t["totals"]),
+                        # After the totals card, so a game it bet is skipped.
+                        ("nhl-best-bet-night", [sys.executable, "run_pipeline.py", "--step",
+                                                "nhl-best-bet-night"], t["night"]),
                     ]
                 else:
                     log.warning("NHL goalie window: no NHL game odds this tick; the side "

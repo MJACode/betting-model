@@ -265,9 +265,12 @@ def test_insert_once_under_the_model_lock(monkeypatch):
     # Any BET on the game counts: the other side, a VOIDed one, a settled one.
     assert "pick_side" not in sqls[2] and "condition_status" not in sqls[2]
     assert "result" not in sqls[2]
+    # Then the BETs standing on the game, so the card never bets the other
+    # side of a total the NHL best bet a night already holds (2026-11-22).
+    assert sqls[3].startswith("SELECT model_id, pick_side, pick_label, scored_line FROM picks")
     # The insert's started-game check (#931) reads the pregame cutoff first.
-    assert sqls[3].startswith("SELECT game_id") and "FROM games" in sqls[3]
-    assert sqls[4].startswith("INSERT INTO picks")
+    assert sqls[4].startswith("SELECT game_id") and "FROM games" in sqls[4]
+    assert sqls[5].startswith("INSERT INTO picks")
     assert conn.commits == 1
     # A second identical pass writes nothing.
     assert card.publish(conn, [dict(r) for r in rows]) == 0
@@ -281,3 +284,36 @@ def test_insert_once_under_the_model_lock(monkeypatch):
     assert card.publish(other, [dict(r) for r in over]) == 0
     assert other.inserted == []
     assert not any(s.startswith("INSERT") for s, _ in other.statements)
+
+
+class _StandingConn(_LockConn):
+    """As _LockConn, and the standing-BET read returns `standing`."""
+
+    def __init__(self, standing):
+        super().__init__()
+        self.standing = list(standing)
+        self._rows = []
+
+    def execute(self, sql, params=None):
+        super().execute(sql, params)
+        self._rows = self.standing if "SELECT model_id, pick_side" in sql else []
+        return self
+
+    def fetchall(self):
+        return self._rows
+
+
+def test_the_card_never_bets_the_other_side_of_a_standing_night_total(monkeypatch):
+    """One game never carries two bets that cannot both win (mike,
+    2026-10-17). The NHL best bet a night took Over 6.0 first; the totals card
+    later finds the under on the same game and writes nothing."""
+    import models.nhl_goalie_gate as gate
+    monkeypatch.setattr(gate, "matchup_states", lambda conn, ids, now=None: {g: gate.Matchup(g, None) for g in ids})
+    rows = card.pick_rows([_bet()], GAMES, bankroll=10_000)
+    assert rows and rows[0]["pick_side"] == "under" and rows[0]["scored_line"] == 6.0
+    held = _StandingConn([("nhl_night_total", "over", "PHI @ OTT Over 6.0", 6.0)])
+    assert card.publish(held, [dict(r) for r in rows]) == 0
+    assert held.inserted == []
+    # The same side at the same number can both win, so it does not block.
+    same = _StandingConn([("nhl_night_total", "under", "PHI @ OTT Under 6.0", 6.0)])
+    assert card.publish(same, [dict(r) for r in rows]) == 1

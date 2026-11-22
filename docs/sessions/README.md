@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, NHL best bet a night built as four rule cards; side-conflict check covers puck line, total and rule cards; live code replayed 349 bets +62.6u (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, best bet a night re-tested with both goalies confirmed: +18.1% on 345 (power), every season positive, totals carry much of it (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, DailyFaceoff's goalie archive from 2021-11-18 stored by a worker job, for the confirmed-goalie re-test (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, odds clean-up keeps NHL's whole price path (NHL in PATH_KEPT_SPORTS; about 2 GB a season) (mike) |

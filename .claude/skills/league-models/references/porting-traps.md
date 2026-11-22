@@ -295,3 +295,23 @@ down this list.
   `h2h_h1` result arm, `totals_q1` in no totals arm, and every non-NCAAB period
   read off `nba_period_scores`, so EuroLeague period picks would have stayed
   pending forever.
+- **A stored start time can be two different clocks.** (NHL, 2026-11-22.) The
+  odds feed lists a game about ten minutes after its scheduled puck drop, and
+  settlement later moves some games back to the scheduled time, so history
+  mixes both: 4% of 2021-22 NHL games sit 5-15 minutes past the hour or half
+  hour, 59% of 2023-24, 85% of 2025-26 (SELECT on `games.commence_time`). A
+  replay that cut at "stored start less the live 10-minute margin" stopped 10
+  minutes early on every game stored at its scheduled time, lost 71 nights and
+  read +31.9u where the live rule makes +62.6u. Cut a replay at the moment the
+  live rule really stops (here the scheduled puck drop,
+  `scripts/nhl_best_bet_night_replay.scheduled_start`), and before blaming the
+  research for a late bet, check it against the scheduled time: none of the
+  research's 81 last-10-minute bets was after it.
+- **A new card on a market another model already bets must be seen by that
+  model.** (NHL, 2026-11-22; the second time after EuroLeague, above.) The
+  side-conflict check only read models in `config.MODELS`, so a rule card's
+  bet was invisible to the side models deciding after it, and the totals card
+  only read its own bets. The check now resolves rule cards
+  (`models/scorer._rule_card_markets`) and covers the puck line and the total
+  over every final score.
+

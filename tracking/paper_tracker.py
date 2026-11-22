@@ -2722,6 +2722,15 @@ _RULE_MODEL_MARKETS = {
     # NHL full-game totals (models/nhl_totals_market.py). scored_line is the
     # total; the stored final includes the shootout goal, as books settle it.
     "nhl_over_under": "totals",
+    # NHL best bet a night (models/nhl_best_bet_night.py), one market per id.
+    # The puck line's scored_line is the HOME number (section 4); the total's
+    # settles on the stored final (shootout goal in); the moneyline on
+    # home_win (overtime and shootout in); the regulation 3-way on
+    # home_win_reg / went_to_ot, as nhl_moneyline_regulation settles.
+    "nhl_night_puckline": "spreads",
+    "nhl_night_total": "totals",
+    "nhl_night_moneyline": "h2h",
+    "nhl_night_regulation": "h2h_3way",
     # NBA full-game totals, overs (models/nba_total_luck.py). scored_line is
     # the total; the stored final includes overtime, as books settle it.
     "nba_total_luck": "totals",

@@ -32,6 +32,8 @@ import models.nhl_moneyline_anchored as anc
 import models.scorer as sc
 import scripts.nhl_prop_card as blocked
 import scripts.nhl_props_card as props
+import models.nhl_best_bet_night as night
+import scripts.nhl_best_bet_night_card as night_card
 import scripts.nhl_totals_card as totals
 from data.ingestors import nhl_prop_odds_ingestor as prop_odds
 
@@ -625,6 +627,8 @@ def test_the_three_nhl_insert_sites_call_the_guard_in_their_own_body():
     assert "refuse_unknown(" in inspect.getsource(blocked.publish)
     # and the totals card, which inserts through the scorer, refuses first too
     assert "refuse_unknown(" in inspect.getsource(totals.publish)
+    # and the best bet a night's card, the same way
+    assert "refuse_unknown(" in inspect.getsource(night_card.publish)
 
 
 def test_every_nhl_model_is_behind_a_goalie_guard():
@@ -638,7 +642,8 @@ def test_every_nhl_model_is_behind_a_goalie_guard():
                    "nhl_prop_blocked_shots", "nhl_prop_saves", "nhl_prop_shots_on_goal",
                    "nhl_prop_assists"}
     by_scorer = {m for m, (sp, _, _) in MODELS.items() if sp == "NHL"}
-    by_cards = {totals.MODEL_ID} | set(props.PROP_MODEL_IDS)
+    # The NHL best bet a night's card refuses at its insert too (2026-11-22).
+    by_cards = {totals.MODEL_ID} | set(props.PROP_MODEL_IDS) | set(night.MODEL_IDS)
     assert nhl - by_scorer - by_cards == set(), "an NHL model no goalie guard reaches"
     # the scorer's guard is by SPORT, so a new NHL model in MODELS is covered
     src = inspect.getsource(sc.score_game)
@@ -714,7 +719,7 @@ def test_a_tick_polls_then_decides_the_newly_known_games(monkeypatch):
     scheduler, calls = _tick(monkeypatch, {KNOWN: t0})
     scheduler.run_nhl_goalie_window()
     assert calls == ["nhl-goalie-poll", "nhl-odds", "nhl-prop-odds", "nhl-goalie-window-score",
-                     "nhl-over-under", "nhl-prop-scoring", "publish"]
+                     "nhl-over-under", "nhl-best-bet-night", "nhl-prop-scoring", "publish"]
     assert scheduler._NHL_DECIDED == {KNOWN: t0}
 
 
@@ -794,7 +799,7 @@ def test_a_pass_starts_a_tick_the_moment_it_ends(monkeypatch, which):
         t.join(timeout=10)
     assert calls[0] in ("daily-pipeline", "refresh-pass[evening]")
     assert calls[1:] == ["nhl-goalie-poll", "nhl-odds", "nhl-prop-odds", "nhl-goalie-window-score",
-                         "nhl-over-under", "nhl-prop-scoring", "publish"]
+                         "nhl-over-under", "nhl-best-bet-night", "nhl-prop-scoring", "publish"]
     tick = [s for s in seen if s[0] == "nhl-goalie-poll"]
     assert tick and tick[0][1] == "nhl-goalie-after-pass" and tick[0][2] is False
     assert not scheduler._NHL_WINDOW_LOCK.locked()
@@ -910,7 +915,7 @@ def test_the_wait_covers_everything_the_window_may_take_under_its_lock():
     overlap it, which is what the lock is for."""
     import scheduler
     t = scheduler.NHL_GOALIE_WINDOW_TIMEOUT_S
-    steps = {"poll", "odds", "prop_odds", "score", "totals", "props"}
+    steps = {"poll", "odds", "prop_odds", "score", "totals", "night", "props"}
     held = sum(t[k] for k in steps)
     assert set(scheduler.NHL_GOALIE_WINDOW_LOCKED_STEPS) == steps == set(t)
     assert scheduler._nhl_window_wait_s() > held

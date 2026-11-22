@@ -30,6 +30,30 @@ review as its own entry.
 
 ---
 
+## 2026-11-22 — NHL best bet a night built as four rule cards (one bet a night)
+
+1. **League and scope**: NHL, mike ("Yes" to building the best bet a night on the puck line,
+   moneyline, regulation 3-way and total, after both goalies are confirmed, one bet a night, flat
+   stake, skipping a game that already holds an NHL bet). `models/nhl_best_bet_night.py`,
+   `scripts/nhl_best_bet_night_card.py`, ids `nhl_night_puckline`, `nhl_night_total`,
+   `nhl_night_moneyline`, `nhl_night_regulation`.
+2. **Tried**: the live code replayed over 2021-22 to 2025-26 against the research's version C
+   (`scripts/nhl_best_bet_night_replay.py`): 349 bets, +62.6u, +15.3% (+2.0..+28.6), every season
+   positive; 303 of the research's 323 nights the same game, market and side. A live dry run on
+   2026-11-22's slate (reads only): all 5 games held for goalies at 09:41 ET; with the hold lifted
+   in memory, 111 book-to-Pinnacle comparisons, none at 1% EV.
+3. **New**: two traps in `porting-traps.md` (a stored start time is two clocks; a new card must be
+   seen by every model on the game). The side-conflict check now works over final scores, so the
+   puck line and the total joined the moneyline and 3-way (`models/scorer._SIDE_ENDINGS`).
+4. **Corrected**: the first replay read +31.9u on 278 bets and looked like half the research. The
+   replay was wrong, not the research: it cut at the stored start less 10 minutes, and the stored
+   start is the scheduled time for many games. Cut at the scheduled puck drop, it matches.
+   Two build bugs the dry run and the tests caught before any merge: the pipeline's step list did
+   not accept `nhl-best-bet-night` (argparse would have refused every pass), and the price query
+   named two columns `created_at` (it failed on the database every time; unit tests cannot see SQL).
+5. **The framework**: step 7 gained two lines: cut a replay where the live rule stops, and a new
+   card is seen by every model on the same game (promoted: EuroLeague 2026-11-14 was the first).
+
 ## 2026-11-21 — NHL, every market against Pinnacle's no-vig price (the totals rule's method)
 
 1. **League and scope**: NHL, mike ("build models that beat the pinnacle no vig line … Yes, run
