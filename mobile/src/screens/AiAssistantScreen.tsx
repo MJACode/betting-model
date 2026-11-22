@@ -21,19 +21,21 @@ import {
   SETUP_GUIDES,
   TRY_ASKING,
   aiAssistantMode,
-  connectedAppName,
+  connectedAssistants,
   connectedSinceLine,
+  maxAssistants,
   questionsLeftLine,
   questionsMeter,
   perDayLabel,
+  sharedLimitLine,
   shortDateET,
   type AssistantId,
+  type ConnectedAssistant,
   type McpStatus,
 } from '@/lib/aiAssistant';
 import { errorText } from '@/lib/errors';
 import { colors, font, radii, spacing, opacity, card, sectionHeaderText } from '@/lib/theme';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
-import { PrimaryButton } from '@/components/PrimaryButton';
 import { SegmentTabs } from '@/components/GroupTabs';
 import { ErrorState } from '@/components/ErrorState';
 import { showToast } from '@/components/Toast';
@@ -45,6 +47,10 @@ import { showToast } from '@/components/Toast';
  * end date, no purchase button), preview (App Review: the steps, no address),
  * suspended, setup, connected, and hidden for anyone else. The server enforces
  * every rule; this screen only reports it.
+ *
+ * Connected (Matt, 2026-11-22): up to three assistants, one row each with its
+ * own Disconnect, and ONE questions meter above them, because the daily limit
+ * is shared.
  *
  * The address is shared through the system share sheet, which includes Copy:
  * the app has no clipboard module, and adding one would need a store build.
@@ -128,8 +134,8 @@ export function AiAssistantScreen() {
 
         {mode === 'setup' ? (
           <Text style={styles.footnote}>
-            Connected apps: none yet. Once you tap Allow in your assistant, pull down here to see
-            it, with today’s count and a Disconnect button.
+            Connected assistants: none yet. Once you tap Allow in your assistant, pull down here to
+            see it, with today’s count and a Disconnect button.
           </Text>
         ) : null}
 
@@ -146,8 +152,8 @@ function shareAddress() {
 
 function AddressCard({ status, compact = false }: { status: McpStatus; compact?: boolean }) {
   const limit = status.unlimited
-    ? 'Founder account: no daily limit'
-    : `${perDayLabel(status)} · resets at midnight ET · one connected app at a time`;
+    ? sharedLimitLine(status)
+    : `${sharedLimitLine(status)} · resets at midnight ET`;
   return (
     <View style={styles.card}>
       <Text style={styles.heading}>{compact ? 'Server address' : 'Your server address'}</Text>
@@ -208,42 +214,16 @@ function ConnectedCard({
   onDisconnect,
 }: {
   status: McpStatus;
-  onDisconnect: () => Promise<void>;
+  onDisconnect: (assistant: string | null) => Promise<void>;
 }) {
-  const [busy, setBusy] = useState(false);
   const now = new Date();
-  const name = connectedAppName(status);
   const meter = questionsMeter(status);
-  const confirm = () => {
-    Alert.alert(
-      `Disconnect ${name}?`,
-      `${name} stops answering from Signal Base right away. To use it again, remove Signal Base from its connectors and add it back.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Disconnect',
-          style: 'destructive',
-          onPress: () => {
-            setBusy(true);
-            onDisconnect()
-              .then(() => showToast(`${name} disconnected`))
-              .catch((e: unknown) => Alert.alert('Couldn’t disconnect', errorText(e)))
-              .finally(() => setBusy(false));
-          },
-        },
-      ],
-    );
-  };
+  const assistants = connectedAssistants(status);
+  const max = maxAssistants(status);
+  const room = max - assistants.length;
   return (
     <>
       <View style={styles.card}>
-        <View style={styles.connectedRow}>
-          <View style={styles.dot} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>{`${name} is connected`}</Text>
-            <Text style={styles.small}>{connectedSinceLine(status, now)}</Text>
-          </View>
-        </View>
         {meter ? (
           <View style={styles.meterWrap}>
             <View style={styles.meterHead}>
@@ -254,12 +234,15 @@ function ConnectedCard({
               style={styles.meterTrack}
               accessible
               accessibilityRole="progressbar"
-              accessibilityLabel={`${meter.used} of ${meter.total} questions used today`}
+              accessibilityLabel={`${meter.used} of ${meter.total} questions used today, shared by your assistants`}
               accessibilityValue={{ min: 0, max: meter.total, now: meter.used }}
             >
               <View style={[styles.meterFill, { width: `${(meter.used / meter.total) * 100}%` }]} />
             </View>
             <Text style={styles.small}>{questionsLeftLine(status, now)}</Text>
+            {assistants.length > 1 ? (
+              <Text style={styles.small}>Shared by every assistant you connect.</Text>
+            ) : null}
           </View>
         ) : (
           <View style={styles.meterHead}>
@@ -270,18 +253,95 @@ function ConnectedCard({
           </View>
         )}
       </View>
+
+      <View style={styles.section}>
+        <Text style={[styles.heading, styles.headingGutter]}>
+          {`Connected assistants · ${assistants.length} of ${max}`}
+        </Text>
+        <View style={[styles.card, styles.listCard]}>
+          {assistants.map((a, i) => (
+            <AssistantRow
+              key={a.assistant ?? 'all'}
+              item={a}
+              first={i === 0}
+              now={now}
+              onDisconnect={onDisconnect}
+            />
+          ))}
+        </View>
+      </View>
+
       <AddressCard status={status} compact />
-      <PrimaryButton
-        label={`Disconnect ${name}`}
-        variant="secondary"
-        onPress={confirm}
-        loading={busy}
-      />
       <Text style={styles.footnote}>
-        One app at a time. To switch to another assistant, disconnect first, then connect the new
-        one.
+        {room > 0
+          ? `You can connect ${room === 1 ? 'one more assistant' : `${room} more assistants`}: follow its steps below. Reconnecting the same assistant doesn’t use a place.`
+          : `All ${max} places are in use. Disconnect one to connect a different assistant.`}
       </Text>
     </>
+  );
+}
+
+function AssistantRow({
+  item,
+  first,
+  now,
+  onDisconnect,
+}: {
+  item: ConnectedAssistant;
+  first: boolean;
+  now: Date;
+  onDisconnect: (assistant: string | null) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const { name } = item;
+  const count =
+    item.questions_today === null
+      ? null
+      : `${item.questions_today} question${item.questions_today === 1 ? '' : 's'} today`;
+  const confirm = () => {
+    Alert.alert(
+      `Disconnect ${name}?`,
+      `${name} stops answering from Signal Base right away. Your other assistants keep working. To use ${name} again, remove Signal Base from its connectors and add it back.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: () => {
+            setBusy(true);
+            onDisconnect(item.assistant)
+              .then(() => showToast(`${name} disconnected`))
+              .catch((e: unknown) => Alert.alert('Couldn’t disconnect', errorText(e)))
+              .finally(() => setBusy(false));
+          },
+        },
+      ],
+    );
+  };
+  return (
+    <View style={[styles.assistantRow, !first && styles.rowDivider]}>
+      <View style={styles.dot} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.cardTitle}>{name}</Text>
+        <Text style={styles.small}>{connectedSinceLine(item, now)}</Text>
+        {count ? <Text style={styles.small}>{count}</Text> : null}
+      </View>
+      <Pressable
+        onPress={confirm}
+        disabled={busy}
+        accessibilityRole="button"
+        accessibilityLabel={`Disconnect ${name}`}
+        accessibilityState={{ disabled: busy, busy }}
+        hitSlop={8}
+        style={({ pressed }) => [styles.disconnectButton, pressed && styles.pressed]}
+      >
+        {busy ? (
+          <ActivityIndicator color={colors.avoidInk} />
+        ) : (
+          <Text style={styles.disconnectText}>Disconnect</Text>
+        )}
+      </Pressable>
+    </View>
   );
 }
 
@@ -415,7 +475,27 @@ const styles = StyleSheet.create({
   },
   checkRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
   checkText: { flex: 1, fontFamily: font.family, fontSize: font.size.body, lineHeight: 21, color: colors.textPrimary },
-  connectedRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  listCard: { paddingVertical: 0, gap: 0 },
+  assistantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
+  disconnectButton: {
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  disconnectText: {
+    fontFamily: font.family,
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.avoidInk,
+  },
   dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.bet },
   meterWrap: { gap: spacing.sm },
   meterHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

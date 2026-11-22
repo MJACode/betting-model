@@ -5,7 +5,8 @@
  * Matt, 2026-11-20/21: paying and comped members connect; founders are
  * unlimited; a free trial sees the screen and the date it unlocks; the App
  * Review account sees the screens but cannot connect. 10 questions a day,
- * reset at midnight ET, one connected app at a time. The server enforces every
+ * reset at midnight ET. Since 2026-11-22 (Matt): up to three assistants at
+ * once, sharing the 10, each disconnected on its own. The server enforces every
  * one of those (mcp_meter.begin_call); this file only chooses the words.
  *
  * Pure: no React, no network. The reads live in aiAssistantApi.ts.
@@ -14,7 +15,22 @@
 export const MCP_SERVER_ADDRESS = 'signalbase-ai.com/mcp';
 export const MCP_SERVER_URL = `https://${MCP_SERVER_ADDRESS}`;
 
-/** The row `public.mcp_my_status()` returns (mcp_status_client_2026_11_21.sql). */
+/** One connected assistant (mcp_multi_assistant_2026_11_22.sql). */
+export interface McpAssistant {
+  /** 'claude' | 'chatgpt' | 'grok', another app's host, or a client id. */
+  assistant: string;
+  client_name: string | null;
+  client_host: string | null;
+  connected_at: string | null;
+  last_used_at: string | null;
+  questions_today: number;
+}
+
+/**
+ * The row `public.mcp_my_status()` returns (mcp_status_client_2026_11_21.sql,
+ * `assistants` and `max_assistants` from mcp_multi_assistant_2026_11_22.sql;
+ * a server without them reads as one connected app).
+ */
 export interface McpStatus {
   entitlement: 'founder' | 'paid' | 'comped' | 'app_review' | 'trial' | 'none';
   eligible: boolean;
@@ -29,6 +45,8 @@ export interface McpStatus {
   connected_client_host?: string | null;
   connected_at: string | null;
   last_used_at: string | null;
+  assistants?: McpAssistant[];
+  max_assistants?: number;
   questions_per_day: number;
   questions_used: number;
   questions_left: number | null;
@@ -42,7 +60,7 @@ export interface McpStatus {
  *  - preview    App Review: the setup screen, without the address to connect
  *  - suspended  access paused by support
  *  - setup      eligible, nothing connected yet
- *  - connected  eligible, one app connected
+ *  - connected  eligible, at least one assistant connected
  */
 export type AiAssistantMode = 'hidden' | 'trial' | 'preview' | 'suspended' | 'setup' | 'connected';
 
@@ -52,7 +70,7 @@ export function aiAssistantMode(status: McpStatus | null): AiAssistantMode {
   if (status.preview_only) return 'preview';
   if (!status.eligible) return 'hidden';
   if (status.suspended) return 'suspended';
-  return status.connected_client ? 'connected' : 'setup';
+  return connectedAssistants(status).length > 0 ? 'connected' : 'setup';
 }
 
 export type AssistantId = 'claude' | 'chatgpt' | 'grok';
@@ -64,7 +82,11 @@ export type AssistantId = 'claude' | 'chatgpt' | 'grok';
  * it did not prove.
  */
 export function connectedAppName(status: McpStatus | null): string {
-  const host = (status?.connected_client_host ?? '').toLowerCase();
+  return nameFor(status?.connected_client_host, status?.connected_client_name);
+}
+
+function nameFor(hostIn: string | null | undefined, registeredIn: string | null | undefined): string {
+  const host = (hostIn ?? '').toLowerCase();
   const known: [string, string][] = [
     ['claude.ai', 'Claude'],
     ['claude.com', 'Claude'],
@@ -76,8 +98,58 @@ export function connectedAppName(status: McpStatus | null): string {
   for (const [suffix, name] of known) {
     if (host === suffix || host.endsWith(`.${suffix}`)) return name;
   }
-  const registered = (status?.connected_client_name ?? '').trim();
+  const registered = (registeredIn ?? '').trim();
   return registered.length > 0 ? registered.slice(0, 40) : 'An app';
+}
+
+/** One row of the connected list. `assistant` null: an older server, disconnect all. */
+export interface ConnectedAssistant {
+  assistant: string | null;
+  name: string;
+  connected_at: string | null;
+  last_used_at: string | null;
+  questions_today: number | null;
+}
+
+const KNOWN_ASSISTANTS: Record<string, string> = { claude: 'Claude', chatgpt: 'ChatGPT', grok: 'Grok' };
+
+/**
+ * Every connected assistant, oldest connection first. The server groups a
+ * member's sign-ins by the host they return to, so a reconnected Claude is
+ * still one Claude. A server from before 2026-11-22 sends no list: its one
+ * connected app becomes the only row.
+ */
+export function connectedAssistants(status: McpStatus | null): ConnectedAssistant[] {
+  if (!status) return [];
+  if (Array.isArray(status.assistants)) {
+    return status.assistants.map((a) => ({
+      assistant: a.assistant,
+      name: KNOWN_ASSISTANTS[a.assistant] ?? nameFor(a.client_host, a.client_name),
+      connected_at: a.connected_at,
+      last_used_at: a.last_used_at,
+      questions_today: typeof a.questions_today === 'number' ? a.questions_today : null,
+    }));
+  }
+  if (!status.connected_client) return [];
+  return [{
+    assistant: null,
+    name: connectedAppName(status),
+    connected_at: status.connected_at,
+    last_used_at: status.last_used_at,
+    questions_today: null,
+  }];
+}
+
+/** "Claude", "Claude and Grok", "Claude, ChatGPT and Grok". */
+export function namesLine(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/** How many assistants may be connected at once (3 unless the server says). */
+export function maxAssistants(status: McpStatus | null): number {
+  const n = status?.max_assistants;
+  return typeof n === 'number' && n > 0 ? n : 3;
 }
 
 const ET = 'America/New_York';
@@ -117,7 +189,10 @@ export function agoLabel(iso: string | null | undefined, now: Date): string | nu
 }
 
 /** "Since Nov 20 · last used 4 min ago" / "Since Nov 20 · not used yet". */
-export function connectedSinceLine(status: McpStatus, now: Date): string {
+export function connectedSinceLine(
+  status: Pick<McpStatus, 'connected_at' | 'last_used_at'>,
+  now: Date,
+): string {
   const since = shortDateET(status.connected_at);
   const used = agoLabel(status.last_used_at, now);
   const usedPart = used ? `last used ${used}` : 'not used yet';
@@ -142,6 +217,13 @@ export function questionsLeftLine(status: McpStatus, now: Date): string {
   return meter.left === 0 ? `Daily limit reached · ${reset}` : `${meter.left} left · ${reset}`;
 }
 
+/** "Up to 3 assistants at once, sharing 10 questions a day." */
+export function sharedLimitLine(status: McpStatus | null): string {
+  const n = maxAssistants(status);
+  if (status?.unlimited) return `Up to ${n} assistants at once · founder account: no daily limit`;
+  return `Up to ${n} assistants at once, sharing ${perDayLabel(status)}`;
+}
+
 /** "10 questions a day", from the server's limit (10 if it is missing). */
 export function perDayLabel(status: McpStatus | null): string {
   const n = status?.questions_per_day && status.questions_per_day > 0 ? status.questions_per_day : 10;
@@ -160,7 +242,7 @@ export function aiTileSummary(status: McpStatus | null): string {
   if (mode === 'suspended') return 'Paused on this account';
   if (mode === 'connected') {
     const meter = questionsMeter(status);
-    const name = connectedAppName(status);
+    const name = namesLine(connectedAssistants(status).map((a) => a.name));
     return meter ? `${name} connected · ${meter.left} of ${meter.total} left today` : `${name} connected · no limit`;
   }
   return 'Ask Claude, ChatGPT or Grok about Stats';

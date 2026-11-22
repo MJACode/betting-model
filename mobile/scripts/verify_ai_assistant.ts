@@ -78,6 +78,32 @@ eq('unlocked sheet once', ai.shouldShowUnlockedSheet(s({}), 'trial', true), fals
 eq('no sheet without a seen trial', ai.shouldShowUnlockedSheet(s({}), null, false), false);
 eq('no sheet while still a trial', ai.shouldShowUnlockedSheet(s({ entitlement: 'trial', eligible: false }), 'trial', false), false);
 
+// Several assistants, one shared pool (Matt, 2026-11-22).
+const two = s({
+  connected_client: 'c2', questions_used: 4, questions_left: 6, max_assistants: 3,
+  assistants: [
+    { assistant: 'claude', client_name: 'Claude', client_host: 'claude.ai', connected_at: '2026-11-20T15:00:00Z', last_used_at: null, questions_today: 3 },
+    { assistant: 'grok', client_name: 'Grok', client_host: 'grok.com', connected_at: '2026-11-22T13:27:00Z', last_used_at: null, questions_today: 1 },
+  ],
+});
+eq('two assistants are connected', ai.aiAssistantMode(two), 'connected');
+eq('names come from the assistant key', ai.connectedAssistants(two).map((a: { name: string }) => a.name).join(','), 'Claude,Grok');
+eq('each row disconnects its own assistant', ai.connectedAssistants(two).map((a: { assistant: string }) => a.assistant).join(','), 'claude,grok');
+eq('per-assistant count', ai.connectedAssistants(two)[0].questions_today, 3);
+eq('tile names both, one shared count', ai.aiTileSummary(two), 'Claude and Grok connected · 6 of 10 left today');
+eq('three names', ai.namesLine(['Claude', 'ChatGPT', 'Grok']), 'Claude, ChatGPT and Grok');
+eq('an empty list is set up', ai.aiAssistantMode(s({ connected_client: null, assistants: [] })), 'setup');
+eq('an unknown host is named by what it registered, never a brand',
+  ai.connectedAssistants(s({ assistants: [{ assistant: 'evil.example', client_name: 'Claude', client_host: 'evil.example', connected_at: null, last_used_at: null, questions_today: 0 }] }))[0].name, 'Claude');
+eq('a lookalike host is not the Claude key either',
+  ai.connectedAssistants(s({ assistants: [{ assistant: 'evilclaude.ai', client_name: null, client_host: 'evilclaude.ai', connected_at: null, last_used_at: null, questions_today: 0 }] }))[0].name, 'An app');
+const old = ai.connectedAssistants(s({ connected_client: 'c', connected_client_host: 'grok.com' }));
+eq('an older server is one row', old.length, 1);
+eq('an older server disconnects everything', old[0].assistant, null);
+eq('max falls back to 3', ai.maxAssistants(s({})), 3);
+eq('shared limit line', ai.sharedLimitLine(s({})), 'Up to 3 assistants at once, sharing 10 questions a day');
+eq('shared limit line, founder', ai.sharedLimitLine(s({ unlimited: true })), 'Up to 3 assistants at once · founder account: no daily limit');
+
 // Every guide names the address, and the address is the one the server serves.
 eq('address', ai.MCP_SERVER_URL, 'https://signalbase-ai.com/mcp');
 for (const g of ai.SETUP_GUIDES) {
