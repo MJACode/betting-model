@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { McpStatus } from '@/lib/aiAssistant';
 import { LAST_ENTITLEMENT_KEY } from '@/lib/aiAssistant';
-import { disconnectMcp, fetchMcpStatus } from '@/lib/aiAssistantApi';
+import { disconnectMcpAssistant, fetchMcpStatus } from '@/lib/aiAssistantApi';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { errorText, isAbortError } from '@/lib/errors';
 import { useAuth } from './useAuth';
@@ -85,8 +85,11 @@ export interface UseAiAssistant {
   loaded: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  /** Disconnect, then re-read. Throws on failure so the caller can say so. */
-  disconnect: () => Promise<void>;
+  /**
+   * Disconnect one assistant (null: every one, on a server that has no list),
+   * then re-read. Throws on failure so the caller can say so.
+   */
+  disconnect: (assistant: string | null) => Promise<void>;
 }
 
 export function useAiAssistant(): UseAiAssistant {
@@ -108,8 +111,17 @@ export function useAiAssistant(): UseAiAssistant {
   }, [authStatus, signedIn]);
 
   const doRefresh = useCallback(() => refresh(signedIn), [signedIn]);
-  const disconnect = useCallback(async () => {
-    await disconnectMcp();
+  const disconnect = useCallback(async (assistant: string | null) => {
+    await disconnectMcpAssistant(assistant);
+    // A read already in flight may have started before the disconnect; wait
+    // for it, then read again so the list reflects the server after it.
+    if (inFlight) {
+      try {
+        await inFlight;
+      } catch {
+        /* its error is already in state */
+      }
+    }
     await refresh(signedIn);
   }, [signedIn]);
 

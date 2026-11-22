@@ -821,6 +821,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # UTC-dated twin is collapsed into the priced ET row, alias_ids keeps
     # both ids (Matt, 2026-11-21). Runs while the "twins v2" marker is missing.
     "mcp_stats_games_twins_2026_11_21.sql",
+    # AI assistant (MCP): several assistants per member, one shared daily
+    # pool, a reconnect is the same assistant, disconnect per assistant
+    # (Matt, 2026-11-22). Runs while "mcp_meter v3" is missing from begin_call.
+    "mcp_multi_assistant_2026_11_22.sql",
     # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
     # monitor's page, written by mike's PC (pc_monitor/) and served to his
     # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,
