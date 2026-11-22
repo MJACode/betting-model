@@ -174,9 +174,12 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
         # never reached production: both branches merged together (2026-11-14).
         "clv-standard-v2-power-80-0.05-12-tennis-moneyline-shop",
         "clv-standard-v2-power-80-0.05-12-euroleague-pregame",
+        # the tennis and EuroLeague pre-game comment, which production holds from
+        # 2026-11-14, before the NHL best bet a night (2026-11-22) names its four ids.
+        "clv-standard-v2-power-80-0.05-12-tennis-euroleague-pregame",
     }
     assert declared not in stamped_before, (
-        "clv_game_market changed (the tennis match-winner models and the EuroLeague pre-game rules) after production may have "
+        "clv_game_market changed (the NHL best bet a night's four ids) after production may have "
         "stamped this comment; without a new comment the guard never re-creates it")
 
 
@@ -184,7 +187,7 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
 # production never re-created the function: the guard above could not see it, because it reads only the comment.
 # Editing clv_game_market now fails here until the comment is bumped AND this hash is set to the new body's.
 # The hash is the merged body: nba_q1_trend_ml from #1218 and ncaaf_moneyline_market from this branch.
-GAME_MARKET_BODY = {"clv-standard-v2-power-80-0.05-12-tennis-euroleague-pregame": "7c50c3a298d17778"}
+GAME_MARKET_BODY = {"clv-standard-v2-power-80-0.05-12-tennis-euroleague-pregame-nhl-night": "3af7f3daec7cacd5"}
 
 
 def test_an_edit_to_the_market_map_bumps_the_comment():

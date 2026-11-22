@@ -405,6 +405,10 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # power-de-vigged chance.
          "atp_moneyline_shop",
          "wta_moneyline_shop",
+         # 2026-11-22 (mike, "Yes"): the NHL best bet a night; Pinnacle's
+         # power-de-vigged chance.
+         "nhl_night_puckline", "nhl_night_total", "nhl_night_moneyline",
+         "nhl_night_regulation",
          # 2026-11-02 (mike): NCAAB spreads; the margin table's P(win, push left out).
          "ncaab_spread_market",
          # 2026-11-02 (mike): NCAAB moneylines; the margin table's P(side wins).

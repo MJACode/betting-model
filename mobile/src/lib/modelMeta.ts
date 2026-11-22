@@ -616,6 +616,36 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NHL best bet a night (models/nhl_best_bet_night.py): one bet a night across
+  // these four markets, after both goalies are confirmed.
+  nhl_night_puckline: {
+    shortLabel: 'Best Spread',
+    longLabel: 'NHL Best Bet Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nhl_night_total: {
+    shortLabel: 'Best O/U',
+    longLabel: 'NHL Best Bet Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nhl_night_moneyline: {
+    shortLabel: 'Best ML',
+    longLabel: 'NHL Best Bet Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nhl_night_regulation: {
+    shortLabel: 'Best 3-Way',
+    longLabel: 'NHL Best Bet 3-Way Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Blocked shots at DraftKings (models/nhl_prop_blocked_shots.py). The stat
   // label is the wording the server writes into pick_label.
   nhl_prop_blocked_shots: {
@@ -1166,6 +1196,20 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   wta_moneyline_shop:
     'The chance this player wins the match: Pinnacle’s price with its margin removed, about 30 minutes ' +
     'before the listed start. Edge is how much higher that is than the chance the price we bet implies.',
+  // The NHL best bet a night (models/nhl_best_bet_night.py): Pinnacle's chance
+  // with its margin removed, the number its EV floor was measured on.
+  nhl_night_puckline:
+    'The chance this side covers: Pinnacle’s price with its margin removed. Edge is how much higher that ' +
+    'is than the chance the price we bet implies.',
+  nhl_night_total:
+    'The chance this side hits: Pinnacle’s price with its margin removed. Edge is how much higher that is ' +
+    'than the chance the price we bet implies.',
+  nhl_night_moneyline:
+    'The chance this team wins, overtime and shootout included: Pinnacle’s price with its margin removed. ' +
+    'Edge is how much higher that is than the chance the price we bet implies.',
+  nhl_night_regulation:
+    'The chance of this result after 60 minutes (regulation): Pinnacle’s price with its margin removed. ' +
+    'Edge is how much higher that is than the chance the price we bet implies.',
   // P(cover | no push) at the bet's own number (models/ncaab_first_half_spread.py):
   // on a whole-number first-half line a push is possible and is left out.
   ncaab_first_half_spread:
@@ -1540,6 +1584,26 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
       note: 'Posted a week or more before the fight and never re-priced.',
     };
   }
+  // The NHL best bet a night (models/nhl_best_bet_night.py): four models share
+  // one bet a night, so on most nights three of the four pages are empty on
+  // purpose, and the default "check back after the next refresh" would send
+  // people back for a bet that will not come.
+  if (modelId.startsWith('nhl_night_')) {
+    const sideOnly = modelId === 'nhl_night_moneyline' || modelId === 'nhl_night_regulation';
+    return {
+      title: 'One bet a night',
+      body:
+        'One of four NHL Best Bet models that share one bet a night at most: spread, total, moneyline or ' +
+        'regulation 3-way. It checks each game once both starting goalies are confirmed, skips a game that ' +
+        'already has an NHL bet, and bets at the sportsbook with the best price, which may not be ' +
+        'DraftKings. It never lays more than -200. A posted bet is never re-priced: it stays at the ' +
+        (sideOnly ? 'price it posted at.' : 'line and price it posted at.'),
+      empty:
+        'The four NHL Best Bet models post one bet a night at most, so most nights this one has none. ' +
+        'Nothing has posted today so far.',
+      note: 'Posted once both goalies are confirmed and never re-priced.',
+    };
+  }
   // The tennis match-winner models (scripts/tennis_moneyline_card.py): each
   // match is decided once, 25 to 35 minutes before its listed start, at the
   // best price, never shorter than -500.
@@ -1842,6 +1906,9 @@ export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | 
   if (id === 'nba_q1_trend_ml') return null;
   // The EuroLeague first half's moneyline and first quarter's total, the same.
   if (id === 'euroleague_h1_dog_ml' || id === 'euroleague_q1_club_share_total') return null;
+  // The NHL best bet a night shares one bet a night across four markets; it is
+  // not the builder's NHL ML or Spread row (UX review, 2026-11-22).
+  if (id.startsWith('nhl_night_')) return null;
   // The EuroLeague home moneyline has no 'moneyline' in its id.
   if (id === 'euroleague_home_ml') return type === 'game' ? 'ml' : null;
   if (type !== 'game') return 'props';

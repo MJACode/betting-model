@@ -452,7 +452,7 @@ def test_step_a_skips_and_does_not_give_anon_the_grant_back():
         """)
         row = cur.fetchone()
         assert row[0] is False and row[1] is False and row[2] is True
-        assert row[3] == "open_picks 2b674293294e"
+        assert row[3] == "open_picks 1a3c89387da6"
     finally:
         if conn is not None:
             conn.close()

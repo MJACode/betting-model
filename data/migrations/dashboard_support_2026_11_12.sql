@@ -27,7 +27,7 @@ DO $mig$
 BEGIN
   IF to_regclass('public.model_display_names') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.model_display_names'), 'pg_class'), '')
-         = 'dashboard_support 9a68e95d7317'
+         = 'dashboard_support 4b5eb7a5e88b'
      AND to_regclass('public.dashboard_layouts') IS NOT NULL
      AND NOT has_table_privilege('anon', 'public.dashboard_layouts', 'SELECT')
      AND NOT has_table_privilege('authenticated', 'public.dashboard_layouts', 'SELECT')
@@ -157,6 +157,10 @@ BEGIN
         ('nfl_wind_totals', 'NFL Totals', 'O/U'),
         ('nhl_moneyline', 'NHL Moneyline', 'ML'),
         ('nhl_moneyline_regulation', 'NHL 3-Way Moneyline', '3-Way'),
+        ('nhl_night_moneyline', 'NHL Best Bet Moneyline', 'Best ML'),
+        ('nhl_night_puckline', 'NHL Best Bet Spreads', 'Best Spread'),
+        ('nhl_night_regulation', 'NHL Best Bet 3-Way Moneyline', 'Best 3-Way'),
+        ('nhl_night_total', 'NHL Best Bet Totals', 'Best O/U'),
         ('nhl_over_under', 'NHL Totals', 'O/U'),
         ('nhl_prop_assists', 'NHL Assists', 'AST'),
         ('nhl_prop_blocked_shots', 'NHL Blocked Shots', 'BLK'),
@@ -180,6 +184,6 @@ BEGIN
         -- names:end
       ) AS n(model_id, name, short_name)
   $view$;
-  EXECUTE $c$COMMENT ON VIEW public.model_display_names IS 'dashboard_support 9a68e95d7317'$c$;
+  EXECUTE $c$COMMENT ON VIEW public.model_display_names IS 'dashboard_support 4b5eb7a5e88b'$c$;
   REVOKE ALL ON public.model_display_names FROM anon, authenticated;
 END $mig$;
