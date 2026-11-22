@@ -323,7 +323,8 @@ BEGIN
                  'last_used_at', g.last_used_at,
                  'questions_today', (SELECT count(DISTINCT k.question_no) FROM mcp_meter.calls k
                                       WHERE k.user_id = uid AND k.day_et = d AND k.outcome = 'ok'
-                                        AND k.assistant = g.assistant)) AS e
+                                        AND coalesce(k.assistant, mcp_meter.assistant_of(k.client_id))
+                                            = g.assistant)) AS e
           FROM (SELECT c.assistant,
                        min(c.connected_at) AS connected_at,
                        max(c.last_used_at) AS last_used_at,

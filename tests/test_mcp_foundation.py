@@ -305,6 +305,11 @@ def test_status_lists_each_assistant(dsn):
     assert by["grok"]["questions_today"] == 1
     assert st["questions_used"] >= 2 and st["questions_left"] == 10 - st["questions_used"]
     assert st["connected_client"] is not None  # older builds still see a connected app
+    # A call logged before the migration has no assistant column; it still
+    # counts toward its assistant (review L1, 2026-11-22).
+    _psql(dsn, f"""UPDATE mcp_meter.calls SET assistant = NULL
+                    WHERE user_id = '{who}' AND client_id = '{GROK}';""")
+    assert {a["assistant"]: a for a in _status(dsn, who)["assistants"]}["grok"]["questions_today"] == 1
 
 
 def test_later_passes_never_restore_one_app(dsn):
