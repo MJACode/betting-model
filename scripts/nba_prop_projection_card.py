@@ -547,6 +547,7 @@ def pick_label(b: pj.ProjectionBet) -> str:
 
 def pick_rows(bets: list[pj.ProjectionBet], bankroll: float) -> list[dict]:
     """Card bets -> picks rows (scripts/nba_prop_market_card.pick_rows's shape, either side)."""
+    from models.scorer import _pause_note
     rows = []
     for b in bets:
         label = pick_label(b)
@@ -591,6 +592,9 @@ def pick_rows(bets: list[pj.ProjectionBet], bankroll: float) -> list[dict]:
             "best_implied_prob": None if at_dk else round(dec_implied, 4),
             "best_edge": None if at_dk else decision_edge,
             "best_bet_link": None if at_dk else b.link,
+            # config.PAUSED_NOTE while the model is paused (models.scorer._pause_note): the row's own
+            # marker, which every publisher and record query keys on (as scripts/nba_total_luck_card).
+            "downgrade_reason": _pause_note(MODEL_ID),
             # the shared door's ranking key (scripts/nba_props_card), not a column
             "_ev": round(b.ev, 4), "_tip": b.tip,
         })

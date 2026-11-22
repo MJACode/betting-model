@@ -154,17 +154,17 @@ def test_the_gap_uses_only_games_before_the_game_date():
 
 # ── the ten-game wait (back 2026-11-18) ──────────────────────────────────────
 
-def test_the_live_wait_is_ten_games_on_all_three_models():
-    """RULE (mike, 2026-11-18, reversing his 2026-11-02 "remove it"): the three
-    shooting-luck total models bet no game until both teams have played 10 this
-    season. One number, each model's own default, and no card passes another.
+def test_the_live_wait_is_twenty_games_on_all_three_models():
+    """RULE (mike, 2026-11-22, the low-volume NBA plan; 10 from 2026-11-18,
+    reversing his 2026-11-02 "remove it"): the three shooting-luck total models
+    bet no game until both teams have played 20 this season. One number, each model's own default, and no card passes another.
     With one game enough, 50 of their first 56 settled bets had a team under 10
     games: 21-29, -11.10 units (docs/nba_reassessment_2026_11.md). Lowering it
     needs a backtest of the games it lets in, not an edit here."""
     import inspect
     import models.nba_first_half_total_luck as fh
     import models.nba_team_total_luck as tt
-    assert tl.LIVE_MIN_GAMES >= 10, "the 10-game wait is off again"
+    assert tl.LIVE_MIN_GAMES >= 20, "the 20-game wait is off again"
     for mod in (tl, tt, fh):
         assert mod.LIVE_MIN_GAMES == tl.LIVE_MIN_GAMES, mod.__name__
         default = inspect.signature(mod.decide).parameters["min_games"].default
@@ -185,9 +185,10 @@ def test_the_replays_keep_the_graded_ten_game_population():
         assert src.count("min_games=MIN_GAMES") == calls, name
 
 
-@pytest.mark.parametrize("n,priced", [(1, False), (9, False), (10, True), (12, True)])
-def test_both_teams_need_ten_games(monkeypatch, art, n, priced):
-    """RULE: no bet until both teams have played 10 games this season. A game
+@pytest.mark.parametrize("n,priced", [(1, False), (19, False), (20, True), (22, True)])
+def test_both_teams_need_twenty_games(monkeypatch, art, n, priced):
+    """RULE: no bet until both teams have played 20 games this season (10 until
+    2026-11-22, the low-volume NBA plan). A game
     held for the wait is a RECORDED decision carrying the reason (the card
     writes every decision to its ledger), never a missing one."""
     games, box = _season(n)
@@ -204,11 +205,14 @@ def test_both_teams_need_ten_games(monkeypatch, art, n, priced):
     assert (len(bets) == 1) is priced, (decisions, diag)
     assert len(decisions) == 1 and decisions[0].game_id == t.game_id[0]
     if not priced:
-        assert decisions[0].detail == "early_season: a team has under 10 games"
+        assert decisions[0].detail == "early_season: a team has under 20 games"
         assert decisions[0].n_bets == 0 and decisions[0].gap is None
-    # the replays' population is the same rule passed by hand
-    again = tl.decide(t, q, box, games, times, art, scheduled=games, min_games=tl.MIN_GAMES)
+    # the live default is the 20-game rule passed by hand. The replays still grade their
+    # registered 10-game population (MIN_GAMES); the 20-game one was graded in the
+    # 2026-11-21 stake-tiers study (models/nba_total_luck.LIVE_MIN_GAMES).
+    again = tl.decide(t, q, box, games, times, art, scheduled=games, min_games=20)
     assert [d.detail for d in again[1]] == [d.detail for d in decisions]
+    assert tl.MIN_GAMES == 10
 
 
 def test_a_missing_box_score_declines_the_game(art):

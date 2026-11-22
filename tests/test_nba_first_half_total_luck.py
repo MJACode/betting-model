@@ -403,10 +403,11 @@ def test_the_floor_and_the_thresholds_are_the_model_s_own():
     assert fh.MODEL_ID not in config.PAUSED_MODELS
 
 
-@pytest.mark.parametrize("n,held", [(1, True), (9, True), (10, False)])
-def test_both_teams_need_ten_games(art, n, held):
+@pytest.mark.parametrize("n,held", [(1, True), (19, True), (20, False)])
+def test_both_teams_need_twenty_games(art, n, held):
     """RULE (mike, 2026-11-18, reversing 2026-11-02's no wait): no bet until
-    both teams have played 10 games this season. The real ratings, no stand-in
+    both teams have played 20 games this season (20 from 2026-11-22, the
+    low-volume NBA plan). The real ratings, no stand-in
     (the full-game model's synthetic season). A held game is a recorded
     decision with the reason, never a missing one."""
     from tests.test_nba_total_luck import _season
@@ -423,7 +424,7 @@ def test_both_teams_need_ten_games(art, n, held):
     assert len(decisions) == 1 and diag["early_season"] == (1 if held else 0), (decisions, diag)
     if held:
         assert bets == [] and decisions[0].n_bets == 0 and decisions[0].gap_total is None
-        assert decisions[0].detail == "early_season: a team has under 10 games"
+        assert decisions[0].detail == "early_season: a team has under 20 games"
     else:
         # past the wait the game is scored: it has a gap and a reason of its own
         assert decisions[0].gap_total is not None

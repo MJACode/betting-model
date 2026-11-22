@@ -38,6 +38,15 @@ import models.nba_live_loop as LP
 from data.ingestors.nba_live_feed import Fetch, parse_scoreboard
 
 
+@pytest.fixture(autouse=True)
+def _in_play_model_unpaused(monkeypatch):
+    """The in-play first-half spread model is paused under the low-volume NBA plan (mike,
+    2026-11-22; tests/test_nba_low_volume_plan.py). These tests exercise the loop's mechanics, so
+    each runs with the model unpaused; the pause test adds it back itself."""
+    import config
+    monkeypatch.setattr(config, "PAUSED_MODELS", set(config.PAUSED_MODELS) - {M.SPREAD_Q12})
+
+
 @pytest.fixture(scope="module")
 def art():
     return M.load_artifact()
