@@ -309,22 +309,26 @@ bet is the first pass with a candidate, its largest EV. 2021-22 to 2025-26:
 
 | | bets | units (1u) | flat return | 95% | CLV | without 10 best nights | 2022 | 2023 | 2024 | 2025 | 2026 |
 |---|---:|---:|---:|---|---:|---:|---|---|---|---|---|
-| live code replayed | 349 | +62.6 | +15.3% | +2.0..+28.6 | +2.21% | +52.6 | +4.5 | +4.9 | +5.5 | +22.6 | +25.1 |
+| live code replayed | 323 | +66.5 | +20.0% | +6.9..+33.1 | +2.13% | +56.5 | +4.5 | +4.9 | +12.1 | +26.3 | +18.6 |
 | research C (above), re-run | 323 | +66.5 | +19.3% | +6.4..+32.3 | +2.13% | +56.5 | +4.5 | +4.9 | +12.1 | +24.4 | +20.5 |
 
-- **Bet for bet:** every research night is a live night; on 303 of the 323 the
-  live code makes the same bet (game, market, side), 292 at the same book and
-  price. 26 nights only the live code bets (+1.4u); 20 nights it picks another
-  bet (live -1.2u, research +4.0u). The research row reads +66.5u here against
+- **Bet for bet:** the same 323 nights; on 319 the live code makes the same bet
+  (game, market, side), 307 at the same book and price; the other 4 differ by
+  0.1u in all. The research row reads +66.5u here against
   +63.9u in the table above: the same 323 bets, ties in fetch time broken by a
   stable sort here.
-- **By market (live replay):** total 111 bets +21.2u (+21.0%), puck line 83
-  +25.6u (+20.3%), moneyline 57 +12.1u (+18.0%), regulation 3-way 98 +3.6u
-  (+3.1%, median price +365). The 3-way is the weak leg.
-- **Early and late halves:** +17.8u on the first 174 bets, +44.8u on the last 175.
-- **Prices:** median +105, shortest -200 (the floor), longest +500; 11% shorter
-  than -150, 5% shorter than -175. At 1u to win, risk per bet is median 0.95u,
+- **By market (live replay):** total 117 bets +25.5u (+23.5%), puck line 88
+  +24.8u (+20.1%), moneyline 59 +11.8u (+17.2%), regulation 3-way 59 +4.4u
+  (+15.6%, median price +370).
+- **Early and late halves:** +26.6u on the first 161 bets, +39.9u on the last 162.
+- **Prices:** median +104, shortest -200 (the floor), longest +500; 13% shorter
+  than -150, 6% shorter than -175. At 1u to win, risk per bet is median 0.96u,
   largest 2.00u.
+- **The goalie timing is per market.** Pinnacle's four markets are not fetched
+  together (2026-11-08 to 11-21: 19 of 96 games had their newest 3-way price
+  more than 30 minutes older than their newest total). Checked per game, the
+  replay read 349 bets and +62.6u: 26 more nights, mostly 3-way bets priced
+  before the goalie news. The card checks each market's own newest fetch.
 - **The replay's cutoff is the scheduled puck drop.** Live, the feed lists a
   game about ten minutes after its scheduled puck drop and the card stops ten
   minutes before that. The stored history mixes the feed's time and the

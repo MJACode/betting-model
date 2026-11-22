@@ -667,9 +667,9 @@ EV >= **0.01** (`config.MODEL_OWN_EV_FLOOR`), price **-200** or better
 wrote, decided on Pinnacle's own number (`MODELS_ON_OWN_PROBABILITY`). Floors
 as floors, all five markets (`docs/nhl_sharp_vs_soft.md`): 1% 345 bets +62.6u,
 2% 183 bets +25.4u, 3% 80 bets +3.0u; a higher floor did not do better, so the
-stake is flat. The live code replayed on the four markets: 349 bets, +62.6u,
-+15.3% (+2.0..+28.6), every season positive; the 3-way leg is the weakest (98
-bets, +3.6u). The four floors are the family's, not swept per id: a per-id
+stake is flat. The live code replayed on the four markets: 323 bets, +66.5u,
++20.0% (+6.9..+33.1), every season positive; the 3-way leg is the weakest (59
+bets, +4.4u). The four floors are the family's, not swept per id: a per-id
 sweep changes which bet each night gets, so it is a sweep of the whole card.
 
 ## NBA — `nba_prop_first_basket`, first basket (2026-11-20, mike)

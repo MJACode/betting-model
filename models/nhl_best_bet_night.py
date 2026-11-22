@@ -16,7 +16,8 @@ They are ONE rule and share one night: at most one bet a night across the four.
 THE RULE, per unstarted game whose two goalies are confirmed
 (models/nhl_goalie_gate.py), on every refresh pass and goalie-window tick:
   1. Per market, take the newest stored fetch that holds Pinnacle's price,
-     taken after the matchup became known; skip the market this pass if a
+     taken after the matchup became known (after_confirmation, per market:
+     the four are not fetched together); skip the market this pass if a
      newer fetch exists without Pinnacle ("pinnacle_withdrawn"), as
      models/nhl_totals_market.py does.
   2. De-vig Pinnacle by the POWER method (each implied chance raised to the one
@@ -42,9 +43,10 @@ flat. Without totals the proportional split is +5.7% on 276: totals carry a
 good part of it, and nhl_over_under bets totals the same way, game by game.
 THIS CODE, REPLAYED over the same seasons (scripts/nhl_best_bet_night_replay.py,
 2026-11-22: every stored fetch a pass, goalies as the archive has them, cut at
-the scheduled puck drop): 349 bets, +62.6u, +15.3% (+2.0..+28.6), CLV +2.21%,
-every season positive, +52.6u without the ten best nights. On 303 of the
-research's 323 nights it makes the same bet (game, market and side).
+the scheduled puck drop, goalie timing per market): 323 bets, +66.5u, +20.0%
+(+6.9..+33.1), CLV +2.13%, every season positive, +56.5u without the ten best
+nights. On 319 of the research's 323 nights it makes the same bet (game,
+market and side); the other 4 differ by 0.1u in all.
 NOT IN THE BACKTEST: the skip of a game that already holds an NHL bet, and the
 live decision moment (the history holds about noon and the start hour; live,
 the goalie window decides within minutes of a confirmation).
@@ -214,6 +216,28 @@ def load_quotes(conn, game_ids) -> list[dict]:
                 q[k] = float(q[k])
         out.append(q)
     return out
+
+
+def after_confirmation(quotes, known_at: dict) -> tuple[list[dict], list[tuple[str, str]]]:
+    """The quotes of each (game, market) whose newest Pinnacle fetch was taken
+    at or after the game's goalie matchup became known, and the pairs held.
+
+    Per MARKET, not per game: Pinnacle's four markets are not fetched together
+    (2026-11-08 to 11-21, 19 of 96 games had their newest 3-way price more than
+    30 minutes older than their newest total), so a game-level check would
+    price a market set before the goalie news. A game with no recorded moment
+    keeps its quotes, as scripts/nhl_totals_card.after_confirmation does."""
+    newest: dict = {}
+    for q in quotes:
+        if q.get("book") == SHARP_BOOK:
+            ts = _fetch_ts(q)
+            key = (q["game_id"], q["market"])
+            if ts is not None and (key not in newest or ts > newest[key]):
+                newest[key] = ts
+    held = sorted(k for k, ts in newest.items()
+                  if known_at.get(k[0]) is not None and ts < known_at[k[0]])
+    drop = set(held)
+    return [q for q in quotes if (q["game_id"], q["market"]) not in drop], held
 
 
 def game_candidates(quotes, soft_books=None, min_odds=None, now=None,

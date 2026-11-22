@@ -7,8 +7,8 @@ code itself over history and lines its bets up against the research's:
   every night, every stored fetch time in order is one pass. A pass sees only
   rows fetched by then, only games whose two goalies DailyFaceoff had confirmed
   by then (nhl_goalie_archive, the research's reading), only games whose
-  scheduled puck drop is still ahead (see scheduled_start). The live card's own
-  after_confirmation and game_candidates price it, with the pass time as `now`
+  scheduled puck drop is still ahead (see scheduled_start). The live model's own
+  after_confirmation (per market) and game_candidates price it, with the pass time as `now`
   (so the live age check applies). The night's bet is the first pass with any
   candidate, its largest EV; the night then stops.
 
@@ -31,7 +31,6 @@ import pandas as pd
 import models.nhl_best_bet_night as nb
 from scripts import nhl_sharp_vs_soft_lab as L
 from scripts.nhl_best_bet_confirmed_goalies import confirmations, report
-from scripts.nhl_totals_card import after_confirmation
 
 ET = "America/New_York"
 SEASONS = (2022, 2026)
@@ -105,7 +104,7 @@ def replay(o: pd.DataFrame, conf: pd.Series) -> pd.DataFrame:
             if live.empty:
                 continue
             known = {g: a.to_pydatetime() for g, a in live.groupby("game_id").conf_at.first().items()}
-            quotes = after_confirmation(_records(live), known)
+            quotes, _ = nb.after_confirmation(_records(live), known)
             best, _ = nb.game_candidates(quotes, now=t.to_pydatetime())
             if not best:
                 continue

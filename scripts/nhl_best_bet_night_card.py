@@ -17,9 +17,10 @@ doubles a bet another model already made, and never bets against one
 (the side-conflict rule, CLAUDE.md "one game never carries two bets that
 cannot both win").
 
-BOTH STARTING GOALIES CONFIRMED FIRST (mike, 2026-10-20), and the price
-fetched after it, exactly as the totals card: models/nhl_goalie_gate.py, then
-scripts/nhl_totals_card.after_confirmation, then refuse_unknown at the insert.
+BOTH STARTING GOALIES CONFIRMED FIRST (mike, 2026-10-20), and each market's
+price fetched after it: models/nhl_goalie_gate.py, then
+models/nhl_best_bet_night.after_confirmation (per market), then refuse_unknown
+at the insert.
 
 ROW SHAPE: the totals card's (scripts/nhl_totals_card.pick_rows), per market.
 Flat stake (picks.stake_units NULL): a higher EV floor did not do better in
@@ -44,10 +45,15 @@ import models.nhl_goalie_gate as goalie_gate  # noqa: E402
 from data.db import get_connection  # noqa: E402
 from models.market_relative import implied  # noqa: E402
 from models.scorer import _build_pick_label, _get_current_bankroll, _insert_picks, quarter_kelly  # noqa: E402
-from scripts.nhl_totals_card import after_confirmation, slate  # noqa: E402
+from scripts.nhl_totals_card import slate  # noqa: E402
 from tracking.pick_integrity import pick_problems  # noqa: E402
 
 SPORT = "NHL"
+# Does a player-prop BET on a game count as "an NHL bet" for the skip? Built as
+# mike said it, yes. Measured 2026-11-22 on 2026-27's 372 started games: 234
+# held a BET placed before the start, 108 of them player props only, so props
+# can block up to 63% of games against 34% for side and total bets alone.
+SKIP_GAMES_WITH_PROP_BETS = True
 
 
 def label_for(c: nb.Candidate, home: str, away: str) -> str:
@@ -117,12 +123,19 @@ def nights_with_bet(conn, nights) -> set[str]:
 
 
 def games_with_bet(conn, game_ids) -> set[str]:
+    """The games already holding an NHL BET. A VOID row (never a pick) and one
+    written while its model was paused (not a signal) hold nothing, as in the
+    side-conflict check."""
     game_ids = list(game_ids)
     if not game_ids:
         return set()
+    from config import PAUSED_NOTE
+    props = "" if SKIP_GAMES_WITH_PROP_BETS else "AND prop_market IS NULL AND model_id NOT LIKE 'nhl_prop_%%' "
     return {r[0] for r in conn.execute(
         "SELECT DISTINCT game_id FROM picks WHERE game_id = ANY(%s) AND sport = 'NHL' "
-        "AND signal_type = 'BET'", (game_ids,)).fetchall()}
+        "AND signal_type = 'BET' AND condition_status IS DISTINCT FROM 'VOID' "
+        "AND downgrade_reason IS DISTINCT FROM %s " + props,
+        (game_ids, PAUSED_NOTE)).fetchall()}
 
 
 def publish(conn, rows: list[dict]) -> int:
@@ -167,7 +180,11 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         if not games:
             return {"games": len(held), "held": len(held), "candidates": 0, "picks": 0, "published": 0}
         known_at = {g: states[g].known_at for g in games}
-        quotes = after_confirmation(nb.load_quotes(conn, games), known_at)
+        quotes, waiting = nb.after_confirmation(nb.load_quotes(conn, games), known_at)
+        if waiting:
+            logger.info(f"NHL best bet a night: {len(waiting)} market(s) wait for a Pinnacle fetch "
+                        f"taken after both goalies were confirmed: "
+                        + ", ".join(f"{g} {m}" for g, m in waiting))
         cands, diag = nb.game_candidates(quotes, now=now)
         picks = nb.pick_of_the_night(cands, games,
                                      nights_with_bet(conn, [g["game_date"] for g in games.values()]),

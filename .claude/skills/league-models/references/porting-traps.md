@@ -302,7 +302,7 @@ down this list.
   hour, 59% of 2023-24, 85% of 2025-26 (SELECT on `games.commence_time`). A
   replay that cut at "stored start less the live 10-minute margin" stopped 10
   minutes early on every game stored at its scheduled time, lost 71 nights and
-  read +31.9u where the live rule makes +62.6u. Cut a replay at the moment the
+  read +31.9u where the live rule makes +66.5u. Cut a replay at the moment the
   live rule really stops (here the scheduled puck drop,
   `scripts/nhl_best_bet_night_replay.scheduled_start`), and before blaming the
   research for a late bet, check it against the scheduled time: none of the
@@ -314,4 +314,12 @@ down this list.
   only read its own bets. The check now resolves rule cards
   (`models/scorer._rule_card_markets`) and covers the puck line and the total
   over every final score.
+- **"Priced after the news" is per market, not per game.** (NHL, 2026-11-22.)
+  The totals card's goalie filter keeps a game when its newest Pinnacle fetch
+  is after the confirmation; with one market that is right. A card on four
+  markets priced each on that market's own newest fetch, and Pinnacle's
+  markets are not fetched together (19 of 96 recent games had the 3-way more
+  than 30 minutes older than the total). Checked per game, the replay bet 26
+  extra nights, mostly 3-way prices set before the goalie news.
+  `models/nhl_best_bet_night.after_confirmation` checks each (game, market).
 

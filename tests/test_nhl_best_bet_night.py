@@ -272,8 +272,12 @@ def test_the_game_check_counts_any_nhl_model_and_the_night_check_only_the_family
     card.games_with_bet(_C(), [G1])
     card.nights_with_bet(_C(), ["2026-11-22"])
     games_sql, night_sql = seen
-    assert "sport = 'NHL'" in games_sql[0] and "model_id" not in games_sql[0]
-    assert "signal_type = 'BET'" in games_sql[0]
+    assert "sport = 'NHL'" in games_sql[0] and "signal_type = 'BET'" in games_sql[0]
+    # Built as mike said it: a player-prop bet counts too (one switch).
+    assert card.SKIP_GAMES_WITH_PROP_BETS is True and "prop_market" not in games_sql[0]
+    # A VOID row and a paused model's row are not bets.
+    assert "condition_status IS DISTINCT FROM 'VOID'" in games_sql[0]
+    assert games_sql[1][1] == config.PAUSED_NOTE
     assert set(night_sql[1][0]) == set(nb.MODEL_IDS) and "signal_type = 'BET'" in night_sql[0]
 
 
@@ -358,3 +362,76 @@ def test_the_names_follow_the_house_rule():
         entry = meta[meta.index(f"  {mid}: {{"):][:200]
         assert f"shortLabel: '{short}'" in entry and f"longLabel: '{long}'" in entry
         assert "Puck" not in entry
+
+
+# ── the goalie timing is per market (2026-11-22) ─────────────────────────────
+
+def test_a_market_priced_before_the_goalies_were_known_waits():
+    """Pinnacle's four markets are not fetched together: a 3-way from before
+    the confirmation must not ride on a total fetched after it."""
+    known = {G1: NOW - timedelta(minutes=30), G2: None}
+    before, after = NOW - timedelta(minutes=45), NOW - timedelta(minutes=5)
+    quotes = [tot("pinnacle", -110.0, -110.0, ts=after),
+              q("pinnacle", "h2h_3way", ts=before, home_price=140.0, draw_price=320.0, away_price=170.0),
+              q("betrivers", "h2h_3way", ts=before, home_price=145.0, draw_price=360.0, away_price=160.0),
+              q("pinnacle", "h2h", game=G2, ts=before, home_price=-110.0, away_price=-110.0)]
+    kept, held = nb.after_confirmation(quotes, known)
+    assert held == [(G1, "h2h_3way")]
+    assert {(x["game_id"], x["market"]) for x in kept} == {(G1, "totals"), (G2, "h2h")}
+
+
+# ── the write path, unstubbed ────────────────────────────────────────────────
+
+@pytest.mark.parametrize("mid", nb.MODEL_IDS)
+def test_the_real_ev_gate_clears_at_the_floor_and_refuses_under_it(mid):
+    from models.honest_ev import gate
+    assert gate(mid, 0.5, 104.0).clears            # EV +0.020
+    assert not gate(mid, 0.5, 101.0).clears        # EV +0.005, under 0.01
+    # It decides on Pinnacle's own number, not a borrowed correction.
+    assert gate(mid, 0.5, 104.0).cal_prob == 0.5
+
+
+def test_the_rows_have_the_totals_cards_shape():
+    import models.nhl_totals_market as mk
+    import scripts.nhl_totals_card as tcard
+    tb = mk.NhlTotalBet(game_id=G1, side="over", book="betmgm", line=6.5, price=110.0, fair=0.5,
+                        ev=0.05, sharp_over=-110.0, sharp_under=-110.0, created_at=FETCH,
+                        soft_snapshot_at=None, sharp_snapshot_at=None, link="https://betmgm/over",
+                        dk_price=None, dk_link=None)
+    (t_row,) = tcard.pick_rows([tb], GAMES, bankroll=10_000)
+    rows = card.pick_rows([nb.Candidate(game_id=G1, market=m, model_id=nb.MARKET_MODEL[m],
+                                        side=s, book="betmgm", line=ln, price=110.0, fair=0.5, ev=0.05,
+                                        created_at=FETCH, link="https://betmgm/x", dk_price=None,
+                                        dk_link=None)
+                           for m, s, ln in (("spreads", "away", -1.5), ("totals", "over", 6.5),
+                                            ("h2h", "home", None), ("h2h_3way", "draw", None))],
+                          GAMES, bankroll=10_000)
+    assert len(rows) == 4                            # the real gate let each through
+    for r in rows:
+        assert set(r) == set(t_row), r["model_id"]
+
+
+@pytest.mark.parametrize("mid,side,line,score,ot,result", [
+    # (home, away) final; ot = went to overtime or a shootout
+    ("nhl_night_regulation", "draw", None, (4, 3), 1, "WIN"),
+    ("nhl_night_regulation", "home", None, (4, 3), 1, "LOSS"),
+    ("nhl_night_regulation", "away", None, (2, 4), 0, "WIN"),
+    ("nhl_night_moneyline", "home", None, (4, 3), 1, "WIN"),
+    ("nhl_night_moneyline", "away", None, (4, 3), 1, "LOSS"),
+    ("nhl_night_puckline", "away", -1.5, (3, 2), 0, "WIN"),      # BOS +1.5, lost by one
+    ("nhl_night_puckline", "away", -1.5, (4, 2), 0, "LOSS"),
+    ("nhl_night_puckline", "home", -1.5, (4, 2), 0, "WIN"),      # TOR -1.5
+    ("nhl_night_puckline", "home", -1.5, (4, 3), 1, "LOSS"),     # an OT win is by one
+    ("nhl_night_total", "over", 6.5, (4, 3), 1, "WIN"),          # the OT goal counts
+    ("nhl_night_total", "under", 6.5, (4, 3), 1, "LOSS"),
+])
+def test_each_market_settles_as_the_books_grade_it(mid, side, line, score, ot, result):
+    from tracking.paper_tracker import _compute_result, _market_for_pick
+    market = _market_for_pick(mid)
+    assert market == next(m for m, i in nb.MARKET_MODEL.items() if i == mid)
+    h, a = score
+    reg_winner = (1 if h > a else 0) if not ot else None
+    got, _, _ = _compute_result(side, market, h, a, int(h > a), 0 if ot else reg_winner, ot,
+                                -110.0, line if market == "spreads" else None,
+                                line if market == "totals" else None, 10.0)
+    assert got == result
