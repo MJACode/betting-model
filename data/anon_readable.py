@@ -661,6 +661,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/nhl_derivative_odds_history.py, same shape as
     # odds_history_pulls: a fixed name, never read by the app.
     "nhl_derivative_odds_pulls",
+    # DailyFaceoff's starting-goalie archive, who started and when it was
+    # confirmed. Created on --apply by data/ingestors/nhl_goalie_archive.py;
+    # a model input, never read by the app.
+    "nhl_goalie_archive",
     "odds_history_pulls",
     # NBA purchase fetches OFF the hour (a gap fill at 23:30Z): odds_history_pulls
     # keys on an integer hour and cannot hold them. Created on demand by
