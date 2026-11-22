@@ -390,8 +390,10 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
 # protected in player_prop_odds alone (PROTECTED_BY_TABLE), not here. Measured
 # in production that day: the 12 games of 2026-11-07 held 2,061 non-DraftKings
 # rows (352 Pinnacle), against 74,899 (11,125 Pinnacle) on the 12 games of
-# 2026-11-19, not yet cleaned; on the local copy, CGY at EDM 2026-10-28 kept 2
-# Pinnacle fetches of 110. So no settled 2026-27 game could be replayed for a
+# 2026-11-19; on the local copy, CGY at EDM 2026-10-28 kept 2 Pinnacle fetches
+# of 110. Every NHL date to 2026-11-13 was thinned; from 2026-11-14 the job
+# deletes nothing (config.DATA_DELETION_APPROVALS is empty), so this governs
+# what happens when it is switched back on. So no settled 2026-27 game could be replayed for a
 # rule that prices a bettable book against Pinnacle in the same fetch (the puck
 # line and the 3-way price, docs/nhl_sharp_vs_soft.md). The games already
 # thinned cannot be put back.
