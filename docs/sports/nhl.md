@@ -148,7 +148,7 @@
 > **When it runs.** Early in every refresh pass (step
 > `nhl-goalie-designations`, before any NHL decider; today and tomorrow on
 > the hourly passes, today only on the evening ones), after `nhl_stats` in
-> the 6am run, and every five minutes from 11:00 to 23:55 ET in the NHL
+> the 6am run, and every five minutes from 9:00 to 23:55 ET in the NHL
 > goalie window (`scheduler.run_nhl_goalie_window`,
 > `scripts/nhl_goalie_window.py`). The window polls today's games; for any
 > game that has just become known it fetches NHL game odds (step `nhl-odds`:
@@ -163,12 +163,52 @@
 > While a refresh pass or the daily run is in progress the window does
 > nothing, the poll included (the pass polls first and decides after, and a
 > rewrite in the middle of its scoring could put two models on different
-> goalies); it checks again after taking its own lock. A pass that starts
-> during a tick waits for it, then lets go of the lock rather than holding
-> it for its whole run. Its heartbeat must beat within 30 minutes from 11:30
-> to 23:59 ET (`tracking/job_heartbeat.ACTIVE_HOURS_ET`), and within 700
-> overnight. An unchanged slate costs ESPN the listing plus one call a game,
-> a tick.
+> goalies); it checks again after taking its own lock. **Each pass, and the
+> daily run, starts one tick the moment it lets go of its lock**
+> (`scheduler._nhl_window_after_pass`), inside the window's hours, on a
+> short thread of its own, and not while a deploy is draining the process.
+> Only the process that runs the window job does this (`main()` sets
+> `_NHL_AFTER_PASS_TICKS`; tests leave it off). A pass that starts during a
+> tick waits for it, then lets go of the lock rather than holding it for its
+> whole run. Its heartbeat must beat within 30 minutes from 9:30 to 23:59 ET
+> (`tracking/job_heartbeat.ACTIVE_HOURS_ET`), and within 700 overnight. An
+> unchanged slate costs ESPN the listing plus one call a game, a tick.
+>
+> **Why a pass starts a tick, and the window starts at 9:00 (#1568,
+> 2026-11-22).** Until then nothing read ESPN between a pass's own read (14
+> seconds after it starts, the median of 60 evening first reads) and the next
+> tick after it ended, and the window started at 11:00. ESPN goalie changes
+> read 2026-10-24 to 11-21, gap from the read before:
+> - 18:00-23:59 ET: median 10.0 minutes, 90th percentile 10.2 (66 changes).
+>   The evening pass starts every ten minutes and runs about six and a half
+>   (worker log 2026-11-21 23:00-00:00 UTC), so both ticks of every ten
+>   minutes landed inside one. ESPN was read once every ten minutes.
+> - 11:00-17:59 ET: 70 changes read 13 minutes late. The hourly pass at :17
+>   cost the :20 and :25 ticks.
+> - Before 11:00 ET, only the hourly passes read ESPN. 25 starters were first
+>   read as confirmed at the 11:00 tick, up to 43 minutes after the 10:17
+>   pass, and 3 were already confirmed at 10:17. None was confirmed at 9:17.
+> - The 60-minute gaps (31) are all for the next day's games, which only the
+>   hourly passes read. No game is decided before its game day.
+>
+> This mattered at the end: of 191 games 2026-10-24 to 11-20, 36 were first
+> read as confirmed under 10 minutes before the listed start, too late for
+> any gated model, and for 11 of them the last read that still showed no
+> confirmation came before that cutoff.
+>
+> **What it buys.** Replaying 2026-11-21 23:00-24:00 UTC (the log's pass
+> starts and ends) through the real `run_refresh_pass` and
+> `run_nhl_goalie_window`, time compressed: 6 reads 10.0 minutes apart before,
+> 12 reads after, median 5.0 minutes apart and at most 6.6. The evening gap is
+> now at most about one pass. That night's passes ran 5.7-6.7 minutes, and
+> nightly medians over the 14 days to 11-22 were 7.8-9.6 (`pipeline_runs`).
+> A pass that runs past its ten-minute slot leaves no read between it and the
+> next pass. Why not a tick that waits for the pass: the scheduler's pool
+> (10 threads) was full at 00:00:00 UTC on 11-22, and a waiting tick would
+> hold a thread most of every evening. Why not inside the pass's own job: the
+> pass would end later and push the next pass off its slot. A tick that
+> decides takes about a minute (20:55:00-20:56:05 UTC, 7 games), so a pass
+> that starts while one runs now waits up to that long.
 >
 > **Props decide on a fetch taken after the confirmation.** A game whose
 > matchup became known after its newest prop fetch owes one more opening

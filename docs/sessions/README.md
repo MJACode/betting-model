@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, NHL goalie window: each refresh pass starts a goalie tick as it ends, and the window starts at 9:00 ET (#1568; evening ESPN reads were 10 minutes apart) (mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Betting PC monitor on the phone: PC writes its page to pc_monitor_state, cloud monitor serves /pc/ (phone-only token, QR in the PC window) (mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, The PC's scheduled tasks start without a window (all three through `bin\run_hidden.pyw`, which keeps exit codes; mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, the record matches the SignalBase Record History sheet (flat 1u, UFC win back, hourly check) (Matt) |
