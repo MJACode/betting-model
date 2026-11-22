@@ -2,8 +2,9 @@
 
 NBA bets only the three shooting-luck game-total models (full-game over, first-half over, home
 team-total under), once both teams have played 20 games and at most ten
-a week across the three, and the first-quarter spread. The prop models, first basket, the in-play
-first-half spread and the first-quarter moneyline are paused. Evidence:
+a week across the three, the first-quarter spread, and first basket (kept live: mike, 2026-11-22,
+"Keep the 1st basket model though"). The two stat-prop models, the in-play first-half spread and the
+first-quarter moneyline are paused. Evidence:
 data/local/research/nba_research/reassess/studies/2026-11-21-stake-tiers/RESULT.md.
 """
 import inspect
@@ -14,12 +15,13 @@ import models.nba_team_total_luck as tt
 import models.nba_total_luck as tl
 from scripts import nba_game_totals_door as door
 
-PAUSED = ("nba_prop_projection", "nba_prop_market", "nba_prop_first_basket",
-          "nba_live_spread_q12", "nba_q1_trend_ml")
-LIVE = ("nba_total_luck", "nba_first_half_total_luck", "nba_team_total_luck", "nba_q1_trend")
+PAUSED = ("nba_prop_projection", "nba_prop_market", "nba_live_spread_q12", "nba_q1_trend_ml")
+# First basket stays live (mike, 2026-11-22: "Keep the 1st basket model though").
+LIVE = ("nba_total_luck", "nba_first_half_total_luck", "nba_team_total_luck", "nba_q1_trend",
+        "nba_prop_first_basket")
 
 
-def test_the_five_are_paused_and_the_four_bet():
+def test_the_four_are_paused_and_the_five_bet():
     for m in PAUSED:
         assert m in config.PAUSED_MODELS, m
     for m in LIVE:
