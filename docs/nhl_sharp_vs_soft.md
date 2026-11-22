@@ -279,9 +279,10 @@ goalies confirmed and timed (42% of teams in 2021-22, 80% in 2025-26).
 
 - **The placebo passes here.** All five markets, power, 0.01: Pinnacle +62.6u
   (+18.1%); DraftKings as the reference +20.8u (+5.9%); FanDuel +4.3u (+1.8%).
-- **Bigger edges do not win more.** All five, power: 1-2% EV 162 bets +37.2u,
-  2-3% 103 bets +22.4u, 3% and up 80 bets +3.0u. Staking up by edge is not
-  supported in this version; the return is in the 1-3% band.
+- **A higher floor does not win more.** All five, power, as floors (each floor
+  can pick a different bet on the same night, so these are not bands): 1% and
+  up 345 bets +62.6u, 2% and up 183 bets +25.4u (+10.0%), 3% and up 80 bets
+  +3.0u (-11.1%). Staking up by edge is not supported in this version.
 - **Totals carry much of it.** Without totals and the first period, the
   proportional version is +5.7% with an interval through zero. The live totals
   model (`nhl_over_under`) already bets totals the same way, game by game, so a
