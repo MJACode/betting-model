@@ -347,6 +347,9 @@ def test_catch_up_writes_the_previous_pass_when_its_whole_copy_finished(copy_roo
     assert row["source"] == "nightly" and row["pass_id"] == "20261116T054324Z"
     assert row["copy_this_pass"] is True
     assert row["github_exit"] is None and row["supabase_exit"] is None and row["duckdb_exit"] is None
+    # It cannot know whether that pass reported (the write finds out), so it
+    # must not say it did not: on 2026-11-22 it said so above "already has a row".
+    assert "no report" not in why, why
 
 
 @pytest.mark.parametrize("start, end, tables, why", [

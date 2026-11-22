@@ -435,7 +435,10 @@ def catch_up_row(root: Path, *, before: str, host: str | None, now: dt.datetime,
     row = build_row(root, source="nightly", pass_id=prev, host=host,
                     exits={"github": None, "supabase": None, "duckdb": None}, now=now,
                     started_monotonic=started_monotonic)
-    return row, f"pass {prev}: its copy finished at {finished.isoformat()} and it has no report of its own"
+    # Not "it has no report of its own": nothing here looks for one. That said
+    # so every night, above the line saying its row was already there
+    # (2026-11-22). The write below finds out, and the next line says which.
+    return row, f"pass {prev}: its copy finished at {finished.isoformat()}; its row is written unless one already records it"
 
 
 def _stamp_of(name: str) -> str | None:
