@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -346,6 +347,9 @@ def test_catch_up_writes_the_previous_pass_when_its_whole_copy_finished(copy_roo
     assert row["source"] == "nightly" and row["pass_id"] == "20261116T054324Z"
     assert row["copy_this_pass"] is True
     assert row["github_exit"] is None and row["supabase_exit"] is None and row["duckdb_exit"] is None
+    # It cannot know whether that pass reported (the write finds out), so it
+    # must not say it did not: on 2026-11-22 it said so above "already has a row".
+    assert "no report" not in why, why
 
 
 @pytest.mark.parametrize("start, end, tables, why", [
@@ -538,30 +542,61 @@ sys.exit({code})
 '''
 
 
-def _run_runner(tmp_path, codes):
-    """The real runner, against a throwaway root and a throwaway repo whose
-    origin/master holds stand-in scripts. Returns (the finished process, every
-    call each stand-in saw, in order)."""
-    repo, root, log_dir = tmp_path / "repo", tmp_path / "root", tmp_path / "stub_logs"
-    log_dir.mkdir()
+def _write_stubs(scripts: Path, codes: dict, version: int = 1) -> None:
     # The GitHub copy runs alongside and is the slowest here, so a report that
     # did not wait for it starts before it ends.
     sleeps = {"local_mirror.py": 1.0, "local_mirror_github.py": 5.0,
               "local_mirror_report.py": 0.0, "local_mirror_duckdb.py": 0.0}
     ps1 = RUNNER.read_text(encoding="utf-8")
-    (repo / "scripts").mkdir(parents=True)
+    scripts.mkdir(parents=True, exist_ok=True)
     for name, sleep in sleeps.items():
         if f'"{name}"' not in ps1:
             continue  # a step this runner does not have
-        (repo / "scripts" / name).write_text(
-            _STUB.format(pad="#" * 1100, sleep=sleep, code=codes.get(name, 0)), encoding="utf-8")
+        (scripts / name).write_text(
+            _STUB.format(pad="#" * 1100, sleep=sleep, code=codes.get(name, 0)) + f"# stub version {version}\n",
+            encoding="utf-8")
+
+
+def _git(cwd: Path, env: dict, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True, env=env, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def _run_runner(tmp_path, codes, *, behind_upstream=False, origin_url=None, extra_args=(), env_extra=None):
+    """The real runner, against a throwaway root and a throwaway repo whose
+    origin/master holds stand-in scripts. Returns (the finished process, every
+    call each stand-in saw, in order, the root).
+
+    behind_upstream: the repo is a clone of an upstream that has since moved on
+    by one commit (version 2 of the stand-ins), so its origin/master is stale
+    until something fetches. origin_url: point origin somewhere else (a fetch
+    that fails, or one that hangs)."""
+    repo, root, log_dir = tmp_path / "repo", tmp_path / "root", tmp_path / "stub_logs"
+    log_dir.mkdir()
     env = {**os.environ, "STUB_LOG_DIR": str(log_dir), "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
-    for cmd in (["git", "init", "-q"], ["git", "add", "-A"], ["git", "commit", "-q", "-m", "stubs"],
-                ["git", "update-ref", "refs/remotes/origin/master", "HEAD"]):
-        subprocess.run(cmd, cwd=repo, check=True, env=env, capture_output=True)
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", **(env_extra or {})}
+    if behind_upstream:
+        upstream = tmp_path / "upstream"
+        _write_stubs(upstream / "scripts", codes, version=1)
+        _git(upstream, env, "init", "-q", "-b", "master")
+        _git(upstream, env, "add", "-A")
+        _git(upstream, env, "commit", "-q", "-m", "stubs v1")
+        _git(tmp_path, env, "clone", "-q", str(upstream), str(repo))
+        _write_stubs(upstream / "scripts", codes, version=2)
+        _git(upstream, env, "commit", "-q", "-am", "stubs v2")
+    else:
+        _write_stubs(repo / "scripts", codes)
+        _git(repo, env, "init", "-q")
+        _git(repo, env, "add", "-A")
+        _git(repo, env, "commit", "-q", "-m", "stubs")
+        _git(repo, env, "update-ref", "refs/remotes/origin/master", "HEAD")
+    if origin_url is not None:
+        if behind_upstream:
+            _git(repo, env, "remote", "set-url", "origin", origin_url)
+        else:
+            _git(repo, env, "remote", "add", "origin", origin_url)
     run = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(RUNNER),
-                          "-Root", str(root), "-Repo", str(repo)],
+                          "-Root", str(root), "-Repo", str(repo), *extra_args],
                          capture_output=True, text=True, timeout=300, env=env)
     seen = {}
     for p in log_dir.glob("*.jsonl"):
@@ -607,6 +642,61 @@ def test_a_crashed_step_fails_the_task_and_the_report_gets_its_real_code(tmp_pat
     report = seen["local_mirror_report"][-1]["argv"]
     assert report[report.index("--supabase-exit") + 1] == "-1073741819"
     assert run.returncode == 255, (run.returncode, run.stdout, run.stderr)
+
+
+def _fetch_log(root: Path) -> str:
+    logs = sorted((root / "logs").glob("fetch_*.log"))
+    assert len(logs) == 1, logs
+    return logs[0].read_text(encoding="utf-8")
+
+
+@_NEEDS_PS
+def test_the_runner_fetches_master_before_it_refreshes_its_scripts(tmp_path):
+    """#1542, 2026-11-21: the refresh read the main checkout's origin/master as
+    of its last fetch, and nothing fetched it on a schedule (none from 20:50 ET
+    on 11-20 to 02:03 ET on 11-21, across the 00:30 run). A fix merged in such a
+    gap missed that night's run."""
+    run, seen, root = _run_runner(tmp_path, {}, behind_upstream=True)
+    assert run.returncode == 0, (run.stdout, run.stderr)
+    upstream_head = _git(tmp_path / "upstream", os.environ, "rev-parse", "HEAD")
+    assert "# stub version 2" in (root / "bin" / "local_mirror_report.py").read_text(encoding="utf-8")
+    log = _fetch_log(root)
+    assert "fetched; the refresh reads origin/master at " + upstream_head in log, log
+    assert len(seen["local_mirror_report"]) == 2  # the pass still ran: catch-up, then the report
+
+
+@_NEEDS_PS
+@pytest.mark.parametrize("case", ["fails", "hangs"])
+def test_a_fetch_that_fails_or_hangs_leaves_the_pass_running_on_the_ref_it_has(tmp_path, case):
+    """The task has no window and no one watching: a fetch that cannot reach
+    GitHub, or never answers, must not stop the night's copy."""
+    if case == "fails":
+        kw = {"origin_url": str(tmp_path / "no_such_repo")}
+    else:
+        # An ssh "server" that never answers: the stand-in for a network that hangs.
+        sleeper = f'"{Path(sys.executable).as_posix()}" -c "import time; time.sleep(90)"'
+        kw = {"origin_url": "ssh://example.invalid/repo.git", "env_extra": {"GIT_SSH_COMMAND": sleeper},
+              "extra_args": ("-FetchTimeoutS", "3")}
+    t0 = time.monotonic()
+    run, seen, root = _run_runner(tmp_path, {}, behind_upstream=True, **kw)
+    took = time.monotonic() - t0
+    assert run.returncode == 0, (run.stdout, run.stderr)
+    assert len(seen["local_mirror_report"]) == 2, sorted(seen)
+    assert "# stub version 1" in (root / "bin" / "local_mirror_report.py").read_text(encoding="utf-8")
+    log = _fetch_log(root)
+    want = "fetch ended with code" if case == "fails" else "fetch stopped after 3 s"
+    assert want in log and "the refresh reads origin/master at " in log, log
+    if case == "hangs":
+        assert took < 60, took  # stopped at 3 s, not left for the ssh stand-in's 90
+
+
+@_NEEDS_PS
+def test_refresh_only_fetches_and_refreshes_then_stops_before_any_copy(tmp_path):
+    run, seen, root = _run_runner(tmp_path, {}, behind_upstream=True, extra_args=("-RefreshOnly",))
+    assert run.returncode == 0, (run.stdout, run.stderr)
+    assert seen == {}, sorted(seen)
+    assert "# stub version 2" in (root / "bin" / "local_mirror.py").read_text(encoding="utf-8")
+    assert "fetched;" in _fetch_log(root)
 
 
 # -- the run's kind and the schedule (mike, 2026-11-19: "ensure the backup
