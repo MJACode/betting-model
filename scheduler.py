@@ -35,12 +35,13 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         Returns without an API call when no game is in either range. mike,
         2026-10-16: "we're not leaving our games" -- the hourly passes put no
         look 45-57 minutes before any tip at or before 6pm ET.)
-  * NHL goalie window     every 5 min, 11:00-23:55 ET -> run_nhl_goalie_window
+  * NHL goalie window     every 5 min, 9:00-23:55 ET -> run_nhl_goalie_window
         (scripts/nhl_goalie_window.py: no NHL model bets until both starting
         goalies are confirmed, mike 2026-10-20; the goalie poll for today's
         games, then, for any game whose matchup has just become known, one
         NHL odds fetch and the NHL deciders. Nothing while a refresh pass or
-        the daily run is in progress. A day with no NHL game makes no call.)
+        the daily run is in progress; each starts one tick the moment it ends.
+        A day with no NHL game makes no call.)
   * NCAAB odds capture    every 5 min, 24x7     -> run_ncaab_odds_capture
         (scripts/ncaab_odds_capture.py: the college basketball board, one
         bulk call, stored only where a price or line moved against
@@ -535,9 +536,11 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
             except Exception:  # noqa: BLE001 — the retry is the point
                 log.exception("daily-pipeline retry: ops note failed")
         _wait_for_nhl_window("daily-pipeline")
-        return _run([sys.executable, "run_pipeline.py"], "daily-pipeline")
+        status = _run([sys.executable, "run_pipeline.py"], "daily-pipeline")
     finally:
         _DAILY_LOCK.release()
+    _nhl_window_after_pass("daily-pipeline")     # as after a refresh pass (#1568)
+    return status
 
 
 # One refresh pass at a time in this process. The three refresh crons are
@@ -643,6 +646,9 @@ def run_refresh_pass(mode: str = "hourly") -> str | None:
         _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
     finally:
         _REFRESH_LOCK.release()
+    # The NHL goalie window stood down for this pass; read ESPN again now,
+    # not at the next pass's start (#1568).
+    _nhl_window_after_pass(f"refresh-pass[{mode}]")
 
 
 def run_savant_refresh() -> None:
@@ -930,6 +936,21 @@ def run_model_quality_job() -> None:
                  result.get("ok"), result.get("crit"), result.get("warn"))
     except Exception:  # noqa: BLE001 - must never kill the scheduler
         log.exception("ERROR model-quality crashed")
+
+
+def run_record_sheet_check_job() -> None:
+    """The published record against the "SignalBase Record History" sheet
+    (Matt, 2026-11-21: mike made the sheet the reference). Report only: it
+    stores a row in record_sheet_checks and posts one ops alert per distinct
+    set of differences per day. It never changes a pick, a view or a post."""
+    try:
+        from tracking.record_sheet_check import run_record_sheet_check
+        res = run_record_sheet_check()
+        log.info("record sheet check: ok=%s record=%s sheet=%s findings=%s alerted=%s",
+                 res.get("ok"), res.get("record"), res.get("sheet"),
+                 len(res.get("findings") or []), res.get("alerted"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR record sheet check crashed")
 
 
 def run_threshold_review() -> None:
@@ -1887,6 +1908,55 @@ def run_nba_prop_window() -> None:
         raise RuntimeError(f"NBA prop window step(s) did not finish: {bad}")
 
 
+# The NHL goalie window's hours, Eastern: its CronTrigger (every five minutes)
+# and the tick a refresh pass starts when it ends (_nhl_window_after_pass).
+NHL_GOALIE_WINDOW_HOURS_ET = (9, 23)
+# Set by main() in the process that runs the NHL goalie window job. Off
+# everywhere else, tests included: a tick polls ESPN and writes picks, and the
+# tests that run a refresh pass with a stubbed _run must not start one.
+_NHL_AFTER_PASS_TICKS = False
+
+
+def _nhl_window_after_pass(label: str) -> None:
+    """One NHL goalie window tick, started the moment a refresh pass or the
+    daily run lets go of its lock, inside the window's hours (#1568).
+
+    A scheduled tick that finds a pass running does nothing (it must never
+    poll beside one). From 6pm ET the evening pass starts every ten minutes and
+    runs about six and a half (worker log, 2026-11-21 23:00-00:00 UTC), so both
+    ticks of every ten minutes landed inside one and ESPN was read once every
+    ten minutes, when each pass started: median gap 10.0 minutes, 66 changes of
+    starter or status 2026-10-24..11-21. Each hourly pass at :17 cost the :20
+    and :25 ticks the same way (70 changes read 13 minutes late). This tick
+    reads ESPN as each pass ends instead.
+
+    On its own short thread, not in the scheduler's pool: the pool's 10
+    threads were all busy at 00:00:00 UTC on 2026-11-22, so a tick parked in
+    it waiting for passes would hold back the minute jobs, and running the
+    tick inside the pass's own job would make the pass end later and push the
+    next ten-minute pass off its slot. The tick takes _NHL_WINDOW_LOCK as
+    every tick does, so a scheduled tick and this one never run together, and
+    a pass that starts meanwhile wins or waits for it as before. Nothing while
+    a deploy is draining the process.
+    """
+    from zoneinfo import ZoneInfo
+    from tracking.deploy_drain import requested
+    if not _NHL_AFTER_PASS_TICKS or requested():
+        return
+    first, last = NHL_GOALIE_WINDOW_HOURS_ET
+    if not first <= datetime.now(ZoneInfo(TIMEZONE)).hour <= last:
+        return
+    threading.Thread(target=_nhl_window_tick_after, args=(label,),
+                     name="nhl-goalie-after-pass", daemon=True).start()
+
+
+def _nhl_window_tick_after(label: str) -> None:
+    try:
+        run_nhl_goalie_window()
+    except Exception:  # noqa: BLE001 - the next scheduled tick tries the same games again
+        log.exception("NHL goalie window after %s: a step did not finish", label)
+
+
 # Each step of an NHL goalie window tick is bounded, so one stuck step cannot
 # hold the job (max_instances=1) or a refresh pass waiting on its lock
 # (_wait_for_nhl_window) for long. The poll is ESPN plus one DailyFaceoff page;
@@ -1911,12 +1981,15 @@ def run_nhl_goalie_window() -> None:
     are confirmed (models/nhl_goalie_gate.py), so a game is decided when its
     goalies are confirmed, which can be at warmups, about 25 minutes before
     puck drop. The hourly passes (:17, 7am-5pm ET) would miss a matinee
-    confirmed between them. Every five minutes, 11:00-23:55 ET.
+    confirmed between them. Every five minutes, 9:00-23:55 ET (from 11:00
+    until #1568: ESPN confirms after the morning skate, and 25 starters were
+    first read at the 11:00 tick, up to 43 minutes after the 10:17 pass).
 
     A day with no unstarted NHL game: one read and return. A refresh pass or
     the daily run in progress: return before anything, the poll included (the
     pass polls first and decides after, and a poll rewriting a goalie row in
-    the middle of its scoring could put two models on different goalies).
+    the middle of its scoring could put two models on different goalies). The
+    pass starts a tick of its own the moment it ends (_nhl_window_after_pass).
     Otherwise, holding _NHL_WINDOW_LOCK for the whole tick: the goalie poll for
     today's games. If it failed, nothing is decided this tick. Then, for the
     games whose matchup is known and not yet decided by this process: the NHL
@@ -1941,7 +2014,8 @@ def run_nhl_goalie_window() -> None:
         # after this read waits for the tick (_wait_for_nhl_window).
         if _REFRESH_LOCK.locked() or _DAILY_LOCK.locked():
             log.info("NHL goalie window: a refresh pass or the daily run is in progress; "
-                     "it polls the goalies and decides the NHL games itself")
+                     "it polls the goalies and decides the NHL games itself, and starts "
+                     "a tick when it ends")
             return
         outcomes["nhl-goalie-poll"] = _run(
             [sys.executable, "run_pipeline.py", "--step", "nhl-goalie-designations-today"],
@@ -3298,6 +3372,17 @@ def build_scheduler() -> BlockingScheduler:
         max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
+    # Record vs the "SignalBase Record History" sheet — hourly at :47 (Matt,
+    # 2026-11-21: "always do a check against this"). The sheet refreshes about
+    # once an hour; a pick graded in the last 3 hours is not yet a gap.
+    sched.add_job(
+        run_record_sheet_check_job,
+        CronTrigger(minute=47, timezone=TIMEZONE),
+        id="record_sheet_check",
+        name="Record vs sheet check (hourly :47, report only)",
+        max_instances=1, coalesce=True, misfire_grace_time=600,
+    )
+
     # Baseball Savant refresh — Mondays 5:30am ET, before the 6am pipeline.
     #
     # It had NO schedule until 2026-08-31. The ingestor existed as a manual
@@ -3661,16 +3746,18 @@ def build_scheduler() -> BlockingScheduler:
         max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 
-    # NHL goalie window -- every five minutes, 11:00-23:55 ET
+    # NHL goalie window -- every five minutes, 9:00-23:55 ET
     # (run_nhl_goalie_window). No NHL model bets until both starting goalies
     # are confirmed (mike, 2026-10-20), and confirmations come from the morning
-    # skate (late morning) to warmups (about 25 minutes before the last puck
-    # drop, around 10:30pm ET). Unconditional, like the cards it runs.
+    # skate (ESPN's first, 2026-10-24..11-21: between the 9:17 and 10:17 passes)
+    # to warmups (about 25 minutes before the last puck drop, around 10:30pm
+    # ET). Unconditional, like the cards it runs.
     sched.add_job(
         run_nhl_goalie_window,
-        CronTrigger(hour="11-23", minute="*/5", timezone=TIMEZONE),
+        CronTrigger(hour="{}-{}".format(*NHL_GOALIE_WINDOW_HOURS_ET), minute="*/5",
+                    timezone=TIMEZONE),
         id="nhl_goalie_window",
-        name="NHL goalie window (every 5 min, 11:00-23:55 ET: decide games once both goalies are confirmed)",
+        name="NHL goalie window (every 5 min, 9:00-23:55 ET: decide games once both goalies are confirmed)",
         max_instances=1, coalesce=True, misfire_grace_time=120,
     )
 
@@ -3970,6 +4057,7 @@ def build_scheduler() -> BlockingScheduler:
 
 
 def main() -> None:
+    global _NHL_AFTER_PASS_TICKS
     from datetime import datetime
 
     # Telemetry first: the probe records the scheduler's own HTTP traffic, and
@@ -3988,6 +4076,9 @@ def main() -> None:
         log.exception("Monitoring failed to start (pipeline continues)")
 
     sched = build_scheduler()
+    # The process that runs the NHL goalie window also runs a tick as each
+    # refresh pass ends (_nhl_window_after_pass).
+    _NHL_AFTER_PASS_TICKS = sched.get_job("nhl_goalie_window") is not None
 
     # Before any pass this process starts, and before sched.start() can fire
     # the :17 cron. Same-kind orphan cleanup does not run again for an

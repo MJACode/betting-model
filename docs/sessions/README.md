@@ -19,9 +19,23 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, first-basket and NCAAF bets grade on the refresh: play-by-play pulled for waiting first-basket finals, ncaaf-results added before settle |
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, NHL goalie window: each refresh pass starts a goalie tick as it ends, and the window starts at 9:00 ET (#1568; evening ESPN reads were 10 minutes apart) (mike) |
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, every table read-only for Claude: hook refuses writes/DDL and runs each MCP query in BEGIN READ ONLY (Matt) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant connector: NCAAF twin games merged (alias_ids), whole slate with has_lines, lines found under either id |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, picks read-only for Claude: hook blocks MCP writes to picks*/results_snapshots, reads allowed (Matt) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Betting PC monitor on the phone: PC writes its page to pc_monitor_state, cloud monitor serves /pc/ (phone-only token, QR in the PC window) (mike) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Performance tab bet lists grouped by date: fold per day, See all, open bets always shown (Matt) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Performance tab Insights card: recaps by period (Mon–Sun weeks, same-days comparison), best/worst, breakdowns, CLV, form, you vs the models (Matt) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, The PC's scheduled tasks start without a window (all three through `bin\run_hidden.pyw`, which keeps exit codes; mike) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, the record matches the SignalBase Record History sheet (flat 1u, UFC win back, hourly check) (Matt) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Betting PC monitor: a desktop window for the jobs on mike's PC (in-play feed, backup, tennis), no console windows, works without the database, starts at sign-in (mike) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, "moved past the bet line" push removed (Matt): a signal stays, the card shows the move; it had fired once ever |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, "Find alt line" on Other lines rows: opens the game at the member's book to switch to the model's line (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all crash fix: `selected` read before declared; use-before-declare guard over mobile/src (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Bet all lists tracked picks again (Untracked only switch removed; board Tracked filter replaces it) (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Picks filter sheet: Tracked cut (All / Not tracked / Tracked) off the Track button (Matt) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant: alternate prop lines visible + `get_prop_board` slate tool (one call, price band) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Every settled bet counts: the under-10-bet "Too few to judge yet" greying/caption removed from every model record surface (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Website deploy fixed (Vercel root dir `web`), first live Claude connection, sign-in served from signalbase-ai.com only |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant app screens (Settings tile, setup/connected/trial, Picks intro, unlocked sheet) + Disconnect cuts the app off (begin_call_session) |

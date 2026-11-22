@@ -588,6 +588,35 @@ def test_a_failed_quarter_pull_leaves_every_other_pick_grading(settle_pass, monk
             "_settle_tennis_picks", "_settle_golf_picks"} <= set(calls)
 
 
+def test_settle_picks_loads_first_basket_plays_before_it_grades_props(settle_pass, monkeypatch):
+    """RULE: first-basket settlement reads nba_pbp, and nba-quarters (the only
+    other writer) runs after the 6am settle and on no refresh pass. The pull
+    has to happen on this pass, before the prop grader, or a final from this
+    afternoon stays ungraded until tomorrow."""
+    calls, periods = settle_pass
+    monkeypatch.setattr(periods, "ensure_first_half_period_scores", lambda *a, **k: {})
+    monkeypatch.setattr("data.ingestors.nba_pbp.ensure_pending_first_basket",
+                        lambda *a, **k: calls.append("first_basket") or {"games": 0})
+    pt.settle_picks("2026-11-21")
+    assert "first_basket" in calls
+    assert calls.index("first_basket") < calls.index("_settle_prop_picks_window")
+
+
+def test_a_failed_first_basket_pull_leaves_every_other_pick_grading(settle_pass, monkeypatch):
+    calls, periods = settle_pass
+    monkeypatch.setattr(periods, "ensure_first_half_period_scores", lambda *a, **k: {})
+
+    def boom(*a, **k):
+        calls.append("first_basket")
+        raise RuntimeError("ESPN is down")
+
+    monkeypatch.setattr("data.ingestors.nba_pbp.ensure_pending_first_basket", boom)
+    pt.settle_picks("2026-11-21")
+    assert "first_basket" in calls
+    assert {"_settle_game_picks_window", "_settle_prop_picks_window", "_settle_ufc_picks",
+            "_settle_tennis_picks", "_settle_golf_picks"} <= set(calls)
+
+
 def test_the_6am_order_is_what_the_comment_says():
     """If nba-quarters ever moves before settle, the fetch in settle_picks is a
     no-op rather than wrong; this pins the fact the comment states today."""

@@ -148,7 +148,7 @@ def test_scoring_follows_every_ingest():
 def test_settle_follows_every_results_ingest():
     """Otherwise there is nothing new for it to grade."""
     for res in ("game-log-today", "nfl-results", "nhl-results", "ufc-results-poll",
-                "nba-results", "ncaab-results"):
+                "nba-results", "ncaab-results", "ncaaf-results"):
         assert _order(res) < _order("settle")
 
 

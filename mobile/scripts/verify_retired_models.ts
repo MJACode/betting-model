@@ -127,16 +127,22 @@ check('a rule on a retired prop is dropped from the backtest, both sides',
     return covered.length === 1 && uncovered.length === 0
       && covered[0]?.model_id === 'mlb_prop_batter_hits';
   })());
-// Pinned as an OUTCOME: passesActionFilter refuses the retired model first,
-// and the recap's own isModelRetired guard (no longer gated on is_live) is the
-// second line. Removing either alone still passes; removing both must not.
-check('the daily recap drops a retired PRE-GAME pick',
+// Matt, 2026-11-21: a retired model's GRADED posted bet stays in the day, as
+// on the Record tab and in Discord (the record sheet counts it). An ungraded
+// one is still never a placed bet: passesActionFilter refuses it.
+check('the daily recap keeps a retired model\'s graded bet',
   (() => {
     const p = pregame('mlb_prop_batter_hr');
     const day = computeDailyResults(p.game_date, [
       { ...p, result: 'LOSS', profit_flat: -100, settled_at: '2026-08-28T03:00:00Z' } as never,
     ]);
-    return day.overall.picks === 0 && day.sports.length === 0 && day.gradedPicks.length === 0;
+    return day.overall.picks === 1 && day.gradedPicks.length === 1;
+  })());
+check('the daily recap does not place a retired model\'s ungraded pick',
+  (() => {
+    const p = pregame('mlb_prop_batter_hr');
+    const day = computeDailyResults(p.game_date, [{ ...p, result: null } as never]);
+    return day.overall.picks === 0 && day.gradedPicks.length === 0;
   })());
 
 // ── Never actionable ─────────────────────────────────────────────────────────

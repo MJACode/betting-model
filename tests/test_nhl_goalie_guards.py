@@ -662,9 +662,14 @@ def test_the_designation_poll_runs_before_every_nhl_decider_in_the_pass():
     assert '"nhl-goalie-designations-today": lambda: step_nhl_goalie_designations(today_only=True)' in rp
 
 
-def test_the_window_job_is_every_five_minutes_from_11am_to_1155pm_et(monkeypatch):
+def test_the_window_job_is_every_five_minutes_from_9am_to_1155pm_et(monkeypatch):
+    """From 9:00, not 11:00 (#1568). ESPN confirms after the morning skate,
+    and before 11:00 only the hourly passes at :17 read it: 25 starters
+    confirmed 2026-10-24..11-21 were first read at the 11:00 tick, up to 43
+    minutes after the 10:17 pass, and 3 were already confirmed at 10:17. None
+    was confirmed at the 9:17 pass."""
     import scheduler
-    from tracking.job_heartbeat import MAX_SILENCE
+    from tracking.job_heartbeat import ACTIVE_HOURS_ET, MAX_SILENCE
     monkeypatch.setattr("tracking.job_heartbeat.seed", lambda *a, **k: None, raising=False)
     sched = scheduler.build_scheduler()
     job = sched.get_job("nhl_goalie_window")
@@ -677,10 +682,14 @@ def test_the_window_job_is_every_five_minutes_from_11am_to_1155pm_et(monkeypatch
         if t is None or t >= day + timedelta(days=1):
             break
         fires.append(t)
-    assert len(fires) == 13 * 12
-    assert (fires[0].hour, fires[0].minute) == (11, 0) and (fires[-1].hour, fires[-1].minute) == (23, 55)
+    assert len(fires) == 15 * 12
+    assert (fires[0].hour, fires[0].minute) == (9, 0) and (fires[-1].hour, fires[-1].minute) == (23, 55)
+    assert {(b - a).total_seconds() for a, b in zip(fires, fires[1:])} == {300}
+    assert scheduler.NHL_GOALIE_WINDOW_HOURS_ET == (fires[0].hour, fires[-1].hour)
     assert "nhl_goalie_window" in scheduler._PIPELINE_JOBS
-    assert MAX_SILENCE["nhl_goalie_window"] >= 665
+    overnight = (fires[0] + timedelta(days=1) - fires[-1]).total_seconds() / 60
+    assert MAX_SILENCE["nhl_goalie_window"] > overnight
+    assert ACTIVE_HOURS_ET["nhl_goalie_window"][:2] == (fires[0].hour, fires[-1].hour)
 
 
 def _tick(monkeypatch, decide):
@@ -754,6 +763,69 @@ def test_a_tick_does_nothing_while_a_refresh_pass_or_the_daily_run_runs(monkeypa
         held.release()
     assert calls == []
     assert not scheduler._NHL_WINDOW_LOCK.locked()
+
+
+def _after_pass_ticks():
+    return [t for t in threading.enumerate() if t.name == "nhl-goalie-after-pass"]
+
+
+@pytest.mark.parametrize("which", ["refresh", "daily"])
+def test_a_pass_starts_a_tick_the_moment_it_ends(monkeypatch, which):
+    """#1568. From 6pm ET the evening pass starts every ten minutes and runs
+    about six and a half (worker log, 2026-11-21 23:00-00:00 UTC), so both
+    ticks of every ten minutes landed inside one and did nothing: ESPN was
+    read once every ten minutes, when each pass started (66 changes of starter
+    or status read 18:00-23:59 ET 2026-10-24..11-21, median gap 10.0 minutes).
+    Each pass now reads it again as it ends, never while it runs, and on a
+    thread of its own (the scheduler's pool was full at 00:00:00 UTC)."""
+    scheduler, calls = _tick(monkeypatch, {KNOWN: datetime(2026, 11, 21, 23, 0, tzinfo=timezone.utc)})
+    monkeypatch.setattr(scheduler, "_NHL_AFTER_PASS_TICKS", True)
+    monkeypatch.setattr(scheduler, "NHL_GOALIE_WINDOW_HOURS_ET", (0, 23))
+    seen = []
+    monkeypatch.setattr(scheduler, "_run", lambda cmd, label, **kw: (
+        seen.append((label, threading.current_thread().name,
+                     scheduler._REFRESH_LOCK.locked() or scheduler._DAILY_LOCK.locked()))
+        or calls.append(label) or "ok"))
+    if which == "daily":
+        assert scheduler.run_daily_pipeline() == "ok"
+    else:
+        scheduler.run_refresh_pass("evening")
+    for t in _after_pass_ticks():
+        t.join(timeout=10)
+    assert calls[0] in ("daily-pipeline", "refresh-pass[evening]")
+    assert calls[1:] == ["nhl-goalie-poll", "nhl-odds", "nhl-prop-odds", "nhl-goalie-window-score",
+                         "nhl-over-under", "nhl-prop-scoring", "publish"]
+    tick = [s for s in seen if s[0] == "nhl-goalie-poll"]
+    assert tick and tick[0][1] == "nhl-goalie-after-pass" and tick[0][2] is False
+    assert not scheduler._NHL_WINDOW_LOCK.locked()
+
+
+@pytest.mark.parametrize("why", ["off", "hours", "drain"])
+def test_no_tick_after_a_pass_off_the_worker_outside_the_hours_or_in_a_deploy(monkeypatch, why):
+    """Only the process that runs the window job starts one (main() sets the
+    flag; every test that runs a pass with a stubbed _run leaves it off), only
+    inside the window's hours, and never while a deploy is draining the
+    process: a poll cut by the drain fails the tick."""
+    from tracking import deploy_drain
+    scheduler, calls = _tick(monkeypatch, {KNOWN: None})
+    monkeypatch.setattr(scheduler, "_NHL_AFTER_PASS_TICKS", why != "off")
+    monkeypatch.setattr(scheduler, "NHL_GOALIE_WINDOW_HOURS_ET", (24, 24) if why == "hours" else (0, 23))
+    if why == "drain":
+        deploy_drain.request()
+    try:
+        scheduler._nhl_window_after_pass("refresh-pass[evening]")
+        for t in _after_pass_ticks():
+            t.join(timeout=10)
+    finally:
+        deploy_drain.reset_for_tests()
+    assert calls == []
+
+
+def test_the_after_pass_tick_is_off_unless_the_worker_turns_it_on():
+    import scheduler
+    assert scheduler._NHL_AFTER_PASS_TICKS is False
+    src = inspect.getsource(scheduler.main)
+    assert '_NHL_AFTER_PASS_TICKS = sched.get_job("nhl_goalie_window") is not None' in src
 
 
 def test_a_pass_that_starts_as_the_tick_takes_its_lock_still_wins(monkeypatch):
@@ -1003,13 +1075,14 @@ class _HeartbeatDB:
 
 @pytest.mark.parametrize("now_et, last_et, late", [
     ((2026, 10, 20, 18, 0), (2026, 10, 20, 16, 0), True),     # two hours silent mid-slate
-    ((2026, 10, 20, 11, 31), (2026, 10, 19, 23, 55), True),   # never started this morning
-    ((2026, 10, 20, 11, 10), (2026, 10, 19, 23, 55), False),  # first ticks still due
+    ((2026, 10, 20, 9, 31), (2026, 10, 19, 23, 55), True),    # never started this morning
+    ((2026, 10, 20, 11, 31), (2026, 10, 19, 23, 55), True),
+    ((2026, 10, 20, 9, 10), (2026, 10, 19, 23, 55), False),   # first ticks still due
     ((2026, 10, 20, 2, 0), (2026, 10, 19, 23, 55), False),    # off overnight by design
     ((2026, 10, 20, 23, 58), (2026, 10, 20, 23, 55), False),
 ])
 def test_a_stopped_window_is_reported_within_half_an_hour_while_it_should_run(now_et, last_et, late):
-    """The window is off from 23:55 to 11:00 ET, so its overnight bound is 700
+    """The window is off from 23:55 to 9:00 ET, so its overnight bound is 700
     minutes. Inside its hours it beats every five minutes, and a window that
     stopped at noon used to be reported near midnight, after the slate."""
     from zoneinfo import ZoneInfo

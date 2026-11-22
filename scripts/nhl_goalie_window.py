@@ -11,7 +11,7 @@ hourly passes and never be decided. This job puts a look every five minutes
 over the hours NHL games are confirmed and played.
 
 WHAT A TICK DOES (scheduler.run_nhl_goalie_window, every five minutes from
-11:00 to 23:55 ET):
+9:00 to 23:55 ET):
   1. today_slate(): today's unstarted NHL games, the same slate the prop cards
      use (scripts/nhl_prop_card.slate). None: the tick returns, no call made.
   2. The goalie poll for today's games (run_pipeline step
@@ -33,7 +33,10 @@ WHAT A TICK DOES (scheduler.run_nhl_goalie_window, every five minutes from
 A tick does nothing at all, the poll included, while a refresh pass or the
 daily run is in progress (each polls and runs the same deciders itself), and
 it holds its lock from the poll to the publish, so a goalie row is never
-rewritten in the middle of a pass's scoring.
+rewritten in the middle of a pass's scoring. Each pass starts one tick the
+moment it ends (scheduler._nhl_window_after_pass; until #1568 none did, so
+from 6pm ET, with a pass every ten minutes, ESPN was read only when each
+pass started).
 
 `--score` is models.scorer.run_scorer with `only_games` and
 `game_models_only=True`: the pre-game line poller's own entry point, the one

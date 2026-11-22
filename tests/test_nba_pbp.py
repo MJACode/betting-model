@@ -534,3 +534,56 @@ def test_a_play_by_play_error_fails_the_step_rebuilds_and_reaches_pipeline_log(m
     assert "_timed_step(" in window and '"nba-quarters"' in window, (
         "the 6am nba-quarters step must go through _timed_step"
     )
+
+
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+def test_fill_gaps_limits_the_pull_to_the_named_games(monkeypatch):
+    """A settle pass asks for the finals that still have an ungraded first-basket
+    bet. The season-wide oldest-100 pull would spend the call on old gaps and
+    leave tonight's game out."""
+    seen = {}
+
+    class Conn:
+        def execute(self, sql, params=None):
+            seen["sql"] = " ".join(sql.split())
+            seen["params"] = params
+            return _Rows([])
+
+        def commit(self):
+            pass
+
+    monkeypatch.setattr(nb, "ensure_tables", lambda conn: None)
+    out = nb.fill_gaps(Conn(), 2027, only_game_ids=["NBA_2026-11-21_MIL_PHI"])
+    assert "g.game_id = ANY(%s)" in seen["sql"]
+    assert seen["params"] == (2027, ["NBA_2026-11-21_MIL_PHI"])
+    assert out["missing"] == 0
+
+    nb.fill_gaps(Conn(), 2027)
+    assert "ANY" not in seen["sql"]
+    assert seen["params"] == (2027,)
+
+
+def test_ensure_pending_first_basket_fills_only_waiting_finals(monkeypatch):
+    class Conn:
+        def execute(self, *a, **k):
+            return _Rows([(2027, "NBA_2026-11-21_MIL_PHI"),
+                          (2027, "NBA_2026-11-21_POR_NYK")])
+
+        def close(self):
+            pass
+
+    calls = []
+    monkeypatch.setattr(
+        nb, "fill_gaps",
+        lambda conn, season, **k: calls.append((season, k.get("only_game_ids"))) or {"filled": 2})
+    out = nb.ensure_pending_first_basket(connect=lambda: Conn())
+    assert calls == [(2027, ["NBA_2026-11-21_MIL_PHI", "NBA_2026-11-21_POR_NYK"])]
+    assert out["games"] == 2
+    assert out["seasons"]["2027"]["filled"] == 2

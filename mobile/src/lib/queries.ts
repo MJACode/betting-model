@@ -3,6 +3,7 @@ import { nhlSeasonCandidates } from '@/lib/nhlSkaterTotals';
 import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
 import type { ModelDailyRow, ModelTotalRow } from '@/lib/modelHeat';
+import type { ModelDayRecord } from '@/lib/performanceInsights';
 import type { PeriodKey, TeamPeriodRow } from '@/lib/teamPeriodSplits';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
@@ -3275,6 +3276,25 @@ export async function fetchModelDailyRecord(from: string): Promise<ModelDailyRow
     supabase
       .from('v_public_track_record_model_daily')
       .select('game_date, model_id, picks, units')
+      .gte('game_date', from)
+      .order('game_date', { ascending: true })
+      .order('sport', { ascending: true })
+      .order('model_id', { ascending: true })
+      .range(lo, hi),
+  );
+}
+
+/**
+ * Each model's posted record by day, with its W-L-P and units risked, for the
+ * Performance tab's "you vs the models you follow" (lib/performanceInsights).
+ * 580 rows on 2026-11-21, one row per model per game day (20 at most in a
+ * day); paged all the same, because the 1,000-row cap is silent.
+ */
+export async function fetchModelDailyRecordFull(from: string): Promise<ModelDayRecord[]> {
+  return fetchAllPages<ModelDayRecord>((lo, hi) =>
+    supabase
+      .from('v_public_track_record_model_daily')
+      .select('game_date, model_id, wins, losses, pushes, units, risked')
       .gte('game_date', from)
       .order('game_date', { ascending: true })
       .order('sport', { ascending: true })

@@ -426,6 +426,15 @@ nothing was watching the traffic.
 
 ## Reaching it
 
+**`/pc/` is a different page: mike's PC, not the pipeline** (2026-11-21). It
+serves the Betting PC monitor's page (`pc_monitor/static/index.html`) from the
+row mike's PC writes (`pc_monitor_state`). It has its own check: the phone
+link's token, kept in that row, opens `/pc/` and nothing else, and
+`MONITOR_TOKEN` opens it too. Every viewer shares one read every 2 s
+(`MONITOR_TTL_PC`). A phone's visit stamps `demand_at` at most every 10 s, which
+makes the PC send fresh data every 2 s. `docs/local_ops.md` ("Betting PC
+monitor") has the rest.
+
 **On the worker (phone-friendly).** The dashboard runs as a daemon thread inside
 `scheduler.py`. It needs two things in Railway:
 

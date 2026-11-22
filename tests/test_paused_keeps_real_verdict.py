@@ -272,10 +272,9 @@ def test_live_publishers_share_the_row_gate():
     assert EXCL in _sql_of(pn._new_live_signals, "2026-09-28")
 
 
-def test_push_new_bets_and_dropped_skip_a_paused_row():
+def test_push_new_bets_skip_a_paused_row():
     from tracking import push_notifier as pn
     assert EXCL in _sql_of(pn._new_bet_signals, "2026-09-28")
-    assert EXCL in _sql_of(pn._dropped_signals, "2026-09-28")
 
 
 def test_opening_signal_capture_skips_a_paused_row():

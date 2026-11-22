@@ -3598,6 +3598,21 @@ def settle_picks(game_date: str = None) -> dict:
             logger.warning(
                 f"NBA quarter scores failed ({exc}) — first-half picks stay pending")
 
+        # First-basket picks grade off nba_pbp (who scored the first points /
+        # first field goal, and who started). The only other writer is the 6am
+        # nba-quarters step, which runs AFTER settle and on no refresh pass, so
+        # a final from this afternoon would otherwise wait until tomorrow.
+        # Same shape as the quarter pull above: own connection, no-op when
+        # nothing is waiting, a failure leaves the pick pending.
+        try:
+            from data.ingestors.nba_pbp import ensure_pending_first_basket
+            baskets = ensure_pending_first_basket()
+            if baskets.get("games"):
+                logger.info(f"NBA first-basket play-by-play: {baskets}")
+        except Exception as exc:
+            logger.warning(
+                f"NBA first-basket play-by-play failed ({exc}) — those picks stay pending")
+
         wins = losses = pushes = no_actions = 0
         total_profit_flat  = 0.0
         total_profit_kelly = 0.0
