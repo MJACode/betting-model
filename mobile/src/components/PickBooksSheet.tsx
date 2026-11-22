@@ -5,6 +5,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  FIND_ALT_LINE_LABEL,
+  findAltLineHint,
+  PICK_BOOKS_FIND_ALT_NOTE,
   PICK_BOOKS_NOTE,
   PICK_BOOKS_OTHER_LINE_NOTE,
   PICK_BOOKS_OTHER_LINES_ONLY_NOTE,
@@ -23,6 +26,11 @@ import { colors, font, radii, spacing, opacity } from '@/lib/theme';
  * bet under the book's name ("Coppin State +11.5 · different line"). It is
  * never Best and never the bottom button, and the note says the model's pick
  * and record stay at its own line.
+ *
+ * Each such row also carries "Find alt line" (Matt, 2026-11-21): the row
+ * opens that game at the book, through the book's own-line link (the only
+ * link stored per book), and the note tells the member to switch to the
+ * model's number in the book's alternate lines. One tap target, the row.
  */
 export function PickBooksSheet({
   visible,
@@ -94,13 +102,16 @@ export function PickBooksSheet({
                   : row.otherLine && row.lineText
                     ? `${row.name}, ${trueMinus(row.lineText)}, different line, ${row.priceText}`
                     : `${row.name}, ${row.priceText}${row.isBest ? ', best price' : ''}`;
+                // Only with a link: without one the tap opens the book's home, not
+                // this game, so the row keeps its plain "Opens" hint (UX review).
+                const findAlt = row.otherLine && row.lineText != null && row.link != null;
                 return (
                   <Pressable
                     key={row.bookmaker}
                     onPress={() => onRow(row)}
                     accessibilityRole="button"
-                    accessibilityLabel={spoken}
-                    accessibilityHint={`Opens ${row.name}`}
+                    accessibilityLabel={findAlt ? `${spoken}, ${FIND_ALT_LINE_LABEL}` : spoken}
+                    accessibilityHint={findAlt ? findAltLineHint(row.name) : `Opens ${row.name}`}
                     style={({ pressed }) => [
                       styles.row,
                       i > 0 && styles.rowDivider,
@@ -116,6 +127,16 @@ export function PickBooksSheet({
                         <Text style={styles.otherLine}>
                           {`${trueMinus(row.lineText)} · different line`}
                         </Text>
+                      ) : null}
+                      {findAlt ? (
+                        <View
+                          style={styles.findAlt}
+                          accessibilityElementsHidden
+                          importantForAccessibility="no-hide-descendants"
+                        >
+                          <Text style={styles.findAltText}>{FIND_ALT_LINE_LABEL}</Text>
+                          <Ionicons name="open-outline" size={13} color={colors.tint} />
+                        </View>
                       ) : null}
                     </View>
                     <View style={styles.priceSide}>
@@ -162,6 +183,7 @@ export function PickBooksSheet({
               : rows.some((r) => r.price != null && !r.otherLine)
                 ? `${PICK_BOOKS_NOTE} ${PICK_BOOKS_OTHER_LINE_NOTE}`
                 : PICK_BOOKS_OTHER_LINES_ONLY_NOTE}
+            {rows.some((r) => r.otherLine && r.lineText != null && r.link != null) ? ` ${PICK_BOOKS_FIND_ALT_NOTE}` : ''}
           </Text>
         </Pressable>
       </View>
@@ -252,6 +274,17 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     fontVariant: ['tabular-nums'],
+  },
+  findAlt: {
+    marginTop: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  findAltText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   book: {
     flexShrink: 1,

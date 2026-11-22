@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -360,6 +361,25 @@ class Database:
         finally:
             release_read(self.conn)
 
+    def write(self, sql: str, params: Any = None) -> list[tuple]:
+        """One statement that changes a row, committed at once (release_read
+        leaves uncommitted writes alone, and the idle-in-transaction limit
+        would end the session). Returns the rows of a RETURNING clause."""
+        if self.conn is None:
+            self.connect()
+        try:
+            cur = self.conn.execute(sql, params)
+            rows = cur.fetchall() if re.search(r"\breturning\b", sql, re.IGNORECASE) else []
+            self.conn.commit()
+            return rows
+        except Exception:
+            try:
+                self.conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            self.close()
+            raise
+
     def close(self) -> None:
         try:
             if self.conn is not None:
@@ -396,6 +416,50 @@ SELECT snapshot_id, CAST(EXTRACT(EPOCH FROM taken_at) AS double precision), pass
        copy_rows_pulled, local_tables, local_rows
 FROM pc_copy_snapshots ORDER BY snapshot_id DESC LIMIT 1
 """
+
+
+# The stream of API calls: every outgoing call, worker and PC (api_call_log,
+# written by monitoring/probe.py). By primary key, so each read is an index scan.
+_CALL_COLS = """call_id, CAST(EXTRACT(EPOCH FROM ts) AS double precision), api, category, method, path,
+       sport, status, ok, duration_ms, resp_bytes, credits, quota_remaining, error, source"""
+SQL_CALLS_RECENT = f"SELECT {_CALL_COLS} FROM api_call_log ORDER BY call_id DESC LIMIT 150"
+SQL_CALLS_SINCE = f"SELECT {_CALL_COLS} FROM api_call_log WHERE call_id > %s ORDER BY call_id LIMIT 500"
+
+# Calls per 10 s over the last 10 minutes, by provider and program (idx_api_call_ts).
+SQL_CALL_BUCKETS = """
+SELECT CAST(FLOOR(EXTRACT(EPOCH FROM ts) / 10) * 10 AS double precision), api, source,
+       count(*), sum(CASE WHEN ok THEN 0 ELSE 1 END), sum(COALESCE(credits, 0))
+FROM api_call_log WHERE ts > now() - interval '10 minutes' GROUP BY 1, 2, 3
+"""
+
+# Line and score changes this PC saved (dk_live_reads), by primary key.
+SQL_SAVES_START = "SELECT COALESCE(max(id), 0) FROM dk_live_reads"
+SQL_SAVES_SINCE = """
+SELECT id, sport, game_id, CAST(EXTRACT(EPOCH FROM read_at) AS double precision), period_label,
+       home_score, away_score, spread_home, total_line
+FROM dk_live_reads WHERE id > %s ORDER BY id LIMIT 300
+"""
+
+# The phone link (data/migrations/pc_monitor_state_2026_11_21.sql). The row is
+# made once with a fresh token; later starts keep the token, so a link saved on
+# the phone keeps working.
+SQL_PHONE_ROW = """
+INSERT INTO pc_monitor_state (host, phone_token) VALUES (%s, %s)
+ON CONFLICT (host) DO UPDATE SET host = EXCLUDED.host
+RETURNING phone_token
+"""
+
+SQL_DEMAND = """
+SELECT CAST(EXTRACT(EPOCH FROM (now() - demand_at)) AS double precision)
+FROM pc_monitor_state WHERE host = %s
+"""
+
+SQL_PUBLISH = """
+UPDATE pc_monitor_state SET view = CAST(%s AS jsonb), published_at = now() WHERE host = %s
+"""
+
+# The cloud monitor serves the phone page from here (monitoring/server.py /pc/).
+PUBLIC_BASE = os.environ.get("PC_MONITOR_PUBLIC_URL", "https://worker-production-229d.up.railway.app")
 
 
 def now() -> float:

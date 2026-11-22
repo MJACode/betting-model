@@ -16,7 +16,10 @@ against the current time. Nothing is written to disk except the app's own log.
 
 from __future__ import annotations
 
+import collections
 import json
+import secrets
+import socket
 import threading
 import time
 import traceback
@@ -76,6 +79,106 @@ class Collector:
         self._due: dict[str, float] = {}
         self._cache: dict[str, tuple[Any, Any]] = {}
         self.procs: S.ProcessTable | None = None
+        # The phone page (pc_monitor_state): this PC's row, its link's token,
+        # and when the view was last written there.
+        self.host = socket.gethostname()
+        self.phone_token: str | None = None
+        self._demand_age: float | None = None
+        self._last_publish: float | None = None
+        # The stream of API calls and data movement: newest last, in memory only.
+        self.events: collections.deque = collections.deque(maxlen=400)
+        self._events_lock = threading.Lock()
+        self._call_cursor: int | None = None
+        self._save_cursor: int | None = None
+        self.pc_sources: set[str] = set(R.PC_CALL_SOURCES)
+        self._copy_table: str | None = None
+        self._tennis_seen: set[tuple] | None = None
+
+    def add_events(self, events: list[dict[str, Any]]) -> None:
+        if not events:
+            return
+        with self._events_lock:
+            self.events.extend(events)
+            snapshot = list(self.events)
+        self.panels.put("events", snapshot)
+
+    def _read_stream(self, db: S.Database) -> None:
+        """New API calls every second, the PC's saved rows every 2 s, and the
+        per-provider counts every 10 s."""
+        if self._due_now("db_calls", 1):
+            if self._call_cursor is None:
+                rows = list(reversed(db.rows(S.SQL_CALLS_RECENT)))
+            else:
+                rows = db.rows(S.SQL_CALLS_SINCE, (self._call_cursor,))
+            if rows:
+                self._call_cursor = rows[-1][0]
+                self.add_events([R.call_event(r, self.pc_sources) for r in rows])
+            self.panels.put("calls", {"cursor": self._call_cursor})
+        if self._due_now("db_saves", 2):
+            if self._save_cursor is None:
+                self._save_cursor = db.rows(S.SQL_SAVES_START)[0][0]
+            else:
+                rows = db.rows(S.SQL_SAVES_SINCE, (self._save_cursor,))
+                if rows:
+                    self._save_cursor = rows[-1][0]
+                    self.add_events([R.save_event(r) for r in rows])
+        if self._due_now("db_call_buckets", 10):
+            self.panels.put("call_buckets", db.rows(S.SQL_CALL_BUCKETS))
+
+    def _local_events(self) -> None:
+        """Backup and tennis moments, from the panels the local loop reads."""
+        procs = self.panels.get("processes").get("data") or []
+        for p in procs:
+            m = R.module_of(p.get("cmdline"))
+            if m:
+                self.pc_sources.add(m)
+        b = self.panels.get("backup").get("data") or {}
+        prog = b.get("progress") or {}
+        age = time.time() - (R.parse_iso(prog.get("now")) or 0)
+        table = prog.get("table") if age < R.PROGRESS_FRESH_SEC else None
+        if table and table != self._copy_table and self._copy_table is not None:
+            self.add_events([{"id": f"b{prog.get('now')}{table}", "at": R.parse_iso(prog.get("now")),
+                              "kind": "backup", "where": "pc", "provider": "Supabase", "ok": True,
+                              "what": f"backup copying {table} ({int(prog.get('rows_pulled') or 0):,} rows so far)"}])
+        if table or self._copy_table is None:
+            self._copy_table = table or ""
+        t = self.panels.get("tennis").get("data") or {}
+        passes = t.get("passes") or []
+        seen = {(p.get("start_at"), n) for p in passes for n in (p.get("collectors") or {})}
+        if self._tennis_seen is not None and passes:
+            last = passes[-1]
+            new = []
+            for name, ex in (last.get("collectors") or {}).items():
+                if (last.get("start_at"), name) not in self._tennis_seen:
+                    summary = ((t.get("collectors") or {}).get(name) or {}).get("summary") or {}
+                    new.append({"id": f"t{last.get('start_at')}{name}", "at": ex.get("at"), "kind": "tennis",
+                                "where": "pc", "provider": name, "ok": ex.get("exit_code") in (0, None),
+                                "what": f"tennis {name} pass finished: "
+                                        + ", ".join(f"{k} {v}" for k, v in summary.items() if k != "seen_at")})
+            self.add_events(new)
+        if passes:
+            self._tennis_seen = seen
+
+    def phone_url(self) -> str | None:
+        return f"{S.PUBLIC_BASE}/pc/?token={self.phone_token}" if self.phone_token else None
+
+    def _publish(self, db: S.Database) -> None:
+        """Write the page's view to this PC's row: every 2 s while a phone is
+        watching, once a minute otherwise. The token is never in the view."""
+        if self.phone_token is None:
+            self.phone_token = db.write(S.SQL_PHONE_ROW, (self.host, secrets.token_urlsafe(24)))[0][0]
+        if self._due_now("db_demand", R.PUBLISH_FAST_SEC):
+            rows = db.rows(S.SQL_DEMAND, (self.host,))
+            self._demand_age = rows[0][0] if rows else None
+        interval = R.publish_interval(self._demand_age)
+        if self._last_publish is not None and time.time() - self._last_publish < interval:
+            return
+        payload = view(self.panels.all(), time.time(), pc_sources=self.pc_sources, stream_limit=60)
+        payload["host"] = self.host
+        db.write(S.SQL_PUBLISH, (json.dumps(payload, default=str), self.host))
+        self._last_publish = time.time()
+        self.panels.put("publish", {"at": self._last_publish, "every_s": interval,
+                                    "phone_watching": interval == R.PUBLISH_FAST_SEC})
 
     # ── scheduling ──────────────────────────────────────────────────────────
     def active(self) -> bool:
@@ -140,6 +243,10 @@ class Collector:
                     self._run("tennis", self._read_tennis)
                 if self._due_now("stderr", 30):
                     self._run("stderr", self._read_stderr)
+                try:
+                    self._local_events()
+                except Exception:  # noqa: BLE001
+                    log(f"stream events failed: {traceback.format_exc(limit=3)}")
             self.stop.wait(1.0)
 
     def _feed_log_path(self) -> Path | None:
@@ -227,6 +334,13 @@ class Collector:
                         "snapshot_id": rows[0][0], "taken_at": rows[0][1], "pass_id": rows[0][2],
                         "kind": rows[0][3], "rows_pulled": rows[0][4], "local_tables": rows[0][5],
                         "local_rows": rows[0][6]} if rows else None)
+                self._read_stream(db)
+                try:
+                    self._publish(db)
+                except Exception as exc:  # noqa: BLE001
+                    self.panels.put("publish", error=type(exc).__name__)
+                    log(f"phone publish failed ({type(exc).__name__})")
+                    db.close()
                 self.panels.put("db", {"connected": True})
                 backoff = 0.0
             except Exception as exc:  # noqa: BLE001
@@ -259,7 +373,7 @@ def _window_text(window: dict | None) -> str | None:
 # reopened after the collectors paused).
 STALE_AFTER_S = {"processes": 10, "feed_log": 15, "launcher_log": 30, "backup": 15, "tennis": 60,
                  "tables_done": 60, "tasks": 120, "db_feed": 10, "db_minutes": 60, "db_tennis": 240,
-                 "db_backup": 240, "stderr": 120}
+                 "db_backup": 240, "stderr": 120, "calls": 10, "call_buckets": 60}
 
 
 def stale_for(p: dict[str, Any], name: str, now: float) -> float | None:
@@ -280,7 +394,30 @@ def _stamp(p: dict[str, Any], name: str | None = None, now: float | None = None)
     return out
 
 
-def view(panels: dict[str, dict[str, Any]], now: float) -> dict[str, Any]:
+def flow_view(panels: dict[str, dict[str, Any]], now: float, pc_sources: set[str],
+              stream_limit: int, sports: list[dict[str, Any]], backup_copy: dict | None) -> dict[str, Any]:
+    """The "API calls and data movement" section: the newest events, calls per
+    10 s by provider, and the rates the flow diagram draws."""
+    g = lambda k: panels.get(k) or {}  # noqa: E731
+    events = g("events").get("data") or []
+    newest = sorted(events, key=lambda e: e.get("at") or 0, reverse=True)[:stream_limit]
+    credits_left = next((e["credits_left"] for e in reversed(events)
+                         if e.get("credits_left") is not None), None)
+    return {
+        "events": newest,
+        "timeline": R.call_timeline(g("call_buckets").get("data") or [], now, pc_sources),
+        "saved_last_min": sum(s.get("rows_last_min") or 0 for s in sports),
+        "backup_rows_per_s": (backup_copy or {}).get("rows_per_s"),
+        "backup_table": (backup_copy or {}).get("table"),
+        "odds_api_credits_left": credits_left,
+        "slots": list(R.PROVIDER_SLOTS),
+        "sources": {"calls": _stamp(g("calls"), "calls", now),
+                    "call_buckets": _stamp(g("call_buckets"), "call_buckets", now)},
+    }
+
+
+def view(panels: dict[str, dict[str, Any]], now: float, pc_sources: set[str] | None = None,
+         stream_limit: int = 150) -> dict[str, Any]:
     """Everything the page shows, judged against `now`."""
     g = lambda k: panels.get(k) or {}  # noqa: E731
     st = lambda k: _stamp(g(k), k, now)  # noqa: E731
@@ -380,8 +517,10 @@ def view(panels: dict[str, dict[str, Any]], now: float) -> dict[str, Any]:
               for tk in tasks if tk.get("script") not in known]
 
     db = g("db")
+    flow = flow_view(panels, now, pc_sources or set(R.PC_CALL_SOURCES), stream_limit,
+                     sports, status.get("copy"))
     return {
-        "app": APP_ID, "now": now,
+        "app": APP_ID, "now": now, "flow": flow,
         "db": {"connected": db.get("error") is None and db.get("read_at") is not None
                and feed_stale is None, **_stamp(db)},
         "feed": feed, "backup": backup, "tennis": tennis, "other_tasks": others,
@@ -430,11 +569,24 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/state":
             collector.last_viewer = time.time()
             try:
-                body = json.dumps(view(collector.panels.all(), time.time()), default=_json_default)
+                v = view(collector.panels.all(), time.time(), pc_sources=collector.pc_sources)
+                # Only the PC's own window gets the phone link; the copy
+                # written for the phone (Collector._publish) never has it.
+                pub = collector.panels.get("publish")
+                v["phone"] = {"url": collector.phone_url(), "last_sent_at": (pub.get("data") or {}).get("at"),
+                              "watching": (pub.get("data") or {}).get("phone_watching"),
+                              "error": pub.get("error")}
+                body = json.dumps(v, default=_json_default)
             except Exception as exc:  # noqa: BLE001
                 log(f"view failed: {traceback.format_exc(limit=4)}")
                 return self._send(500, json.dumps({"error": _err(exc)}).encode(), "application/json")
             return self._send(200, body.encode(), "application/json")
+        if route == "/api/phone-qr.svg":
+            url = collector.phone_url()
+            if not url:
+                return self._send(404, b'{"error":"no phone link yet"}', "application/json")
+            from pc_monitor.qr import svg
+            return self._send(200, svg(url).encode(), "image/svg+xml")
         return self._send(404, b'{"error":"not found"}', "application/json")
 
 

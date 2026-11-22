@@ -280,6 +280,50 @@ window onto it. Started without the task (the shortcut alone), it exits 10
 minutes after the last window closes. A merge reaches the running copy at its
 next start, which is normally the next sign-in.
 
+**API calls and data movement** (mike, 2026-11-21: *"show the stream of api
+calls and information in a section that basically just shows all the api calls
+and data movement? like a visualization as well?"*). The second card on the
+page.
+
+- **Calls.** Every outgoing call the system makes, from the worker and from
+  this PC, comes from `api_call_log`, which `monitoring/probe.py` writes for
+  every request. New calls are read every second by primary key, and calls per
+  10 s by provider every 10 s.
+- **Which machine.** A call counts as "This PC" when the program that made it
+  is one this PC runs (today, the DraftKings in-play feed).
+- **Data moved.** The rows this PC saves to `dk_live_reads`, each backup table
+  as it starts copying, and each tennis source's pass.
+- **The picture.** A flow diagram from each provider to the machine that called
+  it, then the PC's saves into Supabase and Supabase into the PC backup. Each
+  call is a moving dot, and line thickness is calls a minute (10-minute
+  average). Below it:
+  - a stacked chart of calls every 10 s for 10 minutes, with fixed colours per
+    provider and a hover breakdown;
+  - a per-provider table (calls, failures, Odds API credits);
+  - the live stream, filterable by machine, failures and data moved.
+- **Query strings** are dropped from the paths shown.
+
+**On the phone** (mike, 2026-11-21: *"can u create an app for my phone
+too"*). The PC window has an "On your phone" card with a QR code. Scan it,
+open the link, then Share → Add to Home Screen and it opens like an app. A phone
+cannot reach the PC, so:
+
+- The PC writes the page's view to one private row, `pc_monitor_state`
+  (`data/migrations/pc_monitor_state_2026_11_21.sql`). It writes every 2 s while
+  a phone is looking and once a minute otherwise (about 13 KB a write).
+- The cloud monitor on the worker serves the same page at
+  `https://worker-production-229d.up.railway.app/pc/` from that row
+  (`monitoring/server.py`).
+- The link's token is made once by the PC and kept in the row. It opens `/pc/`
+  and nothing else; the dashboard's own `MONITOR_TOKEN` still opens everything.
+  Nobody but the database owner and the service role reads the row.
+- When the PC has not reported for 90 s (off, asleep, or the monitor stopped),
+  the phone page turns grey and says when it last reported.
+- The QR code is drawn by `pc_monitor/qr.py`. A QR package could not be
+  installed, and the link must not go to an online QR service because it
+  carries the token. `tests/test_pc_monitor_phone.py` checks it module for
+  module against `qrcode-terminal`.
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pc_monitor_shortcut.ps1 -SignInTask   # (re)make the shortcut and the sign-in task
 python -m pc_monitor --no-window --no-update --port 8791                             # a second copy, for testing

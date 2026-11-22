@@ -817,6 +817,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-11-21), market = base market + is_alternate. Runs while that
     # column is missing.
     "mcp_stats_alt_lines_2026_11_21.sql",
+    # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
+    # monitor's page, written by mike's PC (pc_monitor/) and served to his
+    # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,
+    # anon, authenticated and backroom_reader revoked; touches no view, pick,
+    # cut or record. Returns on a catalog read once it exists and is locked.
+    "pc_monitor_state_2026_11_21.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
