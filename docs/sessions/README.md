@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant connector: NCAAF twin games merged (alias_ids), whole slate with has_lines, lines found under either id |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, picks read-only for Claude: hook blocks MCP writes to picks*/results_snapshots, reads allowed (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Betting PC monitor on the phone: PC writes its page to pc_monitor_state, cloud monitor serves /pc/ (phone-only token, QR in the PC window) (mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Performance tab bet lists grouped by date: fold per day, See all, open bets always shown (Matt) |
