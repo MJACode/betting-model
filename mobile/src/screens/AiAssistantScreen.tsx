@@ -37,7 +37,7 @@ import { errorText } from '@/lib/errors';
 import { colors, font, radii, spacing, opacity, card, sectionHeaderText } from '@/lib/theme';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { SegmentTabs } from '@/components/GroupTabs';
-import { ErrorState } from '@/components/ErrorState';
+import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { showToast } from '@/components/Toast';
 
 /**
@@ -86,6 +86,9 @@ export function AiAssistantScreen() {
 
         {error && !status ? (
           <ErrorState what="AI Assistant" error={error} onRetry={() => void refresh()} retrying={loading} />
+        ) : null}
+        {error && status ? (
+          <ErrorBanner what="AI Assistant" error={error} onRetry={() => void refresh()} retrying={loading} />
         ) : null}
 
         {mode === 'hidden' && status ? (
@@ -221,37 +224,41 @@ function ConnectedCard({
   const assistants = connectedAssistants(status);
   const max = maxAssistants(status);
   const room = max - assistants.length;
+  const shared = assistants.length > 1;
   return (
     <>
-      <View style={styles.card}>
-        {meter ? (
-          <View style={styles.meterWrap}>
+      <View style={styles.section}>
+        <Text style={[styles.heading, styles.headingGutter]}>Questions today</Text>
+        <View style={styles.card}>
+          {meter ? (
+            <View style={styles.meterWrap}>
+              <View style={styles.meterHead}>
+                <Text style={styles.body}>{shared ? 'All assistants' : 'Used'}</Text>
+                <Text style={styles.meterCount}>{`${meter.used} of ${meter.total} used`}</Text>
+              </View>
+              <View
+                style={styles.meterTrack}
+                accessible
+                accessibilityRole="progressbar"
+                accessibilityLabel={`${meter.used} of ${meter.total} questions used today${shared ? ', shared by your assistants' : ''}`}
+                accessibilityValue={{ min: 0, max: meter.total, now: meter.used }}
+              >
+                <View style={[styles.meterFill, { width: `${(meter.used / meter.total) * 100}%` }]} />
+              </View>
+              <Text style={styles.small}>{questionsLeftLine(status, now)}</Text>
+              {shared ? (
+                <Text style={styles.small}>Shared by every assistant you connect.</Text>
+              ) : null}
+            </View>
+          ) : (
             <View style={styles.meterHead}>
-              <Text style={styles.body}>Questions today</Text>
-              <Text style={styles.meterCount}>{`${meter.used} of ${meter.total} used`}</Text>
+              <Text style={styles.body}>All assistants</Text>
+              <View style={styles.founderPill}>
+                <Text style={styles.founderText}>Founder · unlimited</Text>
+              </View>
             </View>
-            <View
-              style={styles.meterTrack}
-              accessible
-              accessibilityRole="progressbar"
-              accessibilityLabel={`${meter.used} of ${meter.total} questions used today, shared by your assistants`}
-              accessibilityValue={{ min: 0, max: meter.total, now: meter.used }}
-            >
-              <View style={[styles.meterFill, { width: `${(meter.used / meter.total) * 100}%` }]} />
-            </View>
-            <Text style={styles.small}>{questionsLeftLine(status, now)}</Text>
-            {assistants.length > 1 ? (
-              <Text style={styles.small}>Shared by every assistant you connect.</Text>
-            ) : null}
-          </View>
-        ) : (
-          <View style={styles.meterHead}>
-            <Text style={styles.body}>Questions today</Text>
-            <View style={styles.founderPill}>
-              <Text style={styles.founderText}>Founder · unlimited</Text>
-            </View>
-          </View>
-        )}
+          )}
+        </View>
       </View>
 
       <View style={styles.section}>
@@ -264,6 +271,7 @@ function ConnectedCard({
               key={a.assistant ?? 'all'}
               item={a}
               first={i === 0}
+              others={assistants.length - 1}
               now={now}
               onDisconnect={onDisconnect}
             />
@@ -274,7 +282,7 @@ function ConnectedCard({
       <AddressCard status={status} compact />
       <Text style={styles.footnote}>
         {room > 0
-          ? `You can connect ${room === 1 ? 'one more assistant' : `${room} more assistants`}: follow its steps below. Reconnecting the same assistant doesn’t use a place.`
+          ? `You can connect ${room === 1 ? 'one more assistant' : `${room} more assistants`}: follow its steps below. They share your ${perDayLabel(status)}. Reconnecting the same assistant doesn’t use a place.`
           : `All ${max} places are in use. Disconnect one to connect a different assistant.`}
       </Text>
     </>
@@ -284,24 +292,27 @@ function ConnectedCard({
 function AssistantRow({
   item,
   first,
+  others,
   now,
   onDisconnect,
 }: {
   item: ConnectedAssistant;
   first: boolean;
+  others: number;
   now: Date;
   onDisconnect: (assistant: string | null) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const { name } = item;
   const count =
-    item.questions_today === null
+    item.questions_today === null || item.questions_today === 0
       ? null
       : `${item.questions_today} question${item.questions_today === 1 ? '' : 's'} today`;
+  const keepGoing = others > 0 && item.assistant !== null ? ' Your other assistants keep working.' : '';
   const confirm = () => {
     Alert.alert(
       `Disconnect ${name}?`,
-      `${name} stops answering from Signal Base right away. Your other assistants keep working. To use ${name} again, remove Signal Base from its connectors and add it back.`,
+      `${name} stops answering from Signal Base right away.${keepGoing} To use ${name} again, remove Signal Base from its connectors and add it back.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {

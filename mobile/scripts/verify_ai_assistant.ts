@@ -97,6 +97,11 @@ eq('an unknown host is named by what it registered, never a brand',
   ai.connectedAssistants(s({ assistants: [{ assistant: 'evil.example', client_name: 'Claude', client_host: 'evil.example', connected_at: null, last_used_at: null, questions_today: 0 }] }))[0].name, 'Claude');
 eq('a lookalike host is not the Claude key either',
   ai.connectedAssistants(s({ assistants: [{ assistant: 'evilclaude.ai', client_name: null, client_host: 'evilclaude.ai', connected_at: null, last_used_at: null, questions_today: 0 }] }))[0].name, 'An app');
+eq('two unknown apps are told apart',
+  ai.connectedAssistants(s({ assistants: [
+    { assistant: 'a.example', client_name: null, client_host: 'a.example', connected_at: null, last_used_at: null, questions_today: 0 },
+    { assistant: 'b.example', client_name: null, client_host: 'b.example', connected_at: null, last_used_at: null, questions_today: 0 },
+  ] })).map((a: { name: string }) => a.name).join(','), 'An app (a.example),An app (b.example)');
 const old = ai.connectedAssistants(s({ connected_client: 'c', connected_client_host: 'grok.com' }));
 eq('an older server is one row', old.length, 1);
 eq('an older server disconnects everything', old[0].assistant, null);

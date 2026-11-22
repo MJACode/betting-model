@@ -29,7 +29,7 @@ export interface McpAssistant {
 /**
  * The row `public.mcp_my_status()` returns (mcp_status_client_2026_11_21.sql,
  * `assistants` and `max_assistants` from mcp_multi_assistant_2026_11_22.sql;
- * a server without them reads as one connected app).
+ * a server without them reads as a single row).
  */
 export interface McpStatus {
   entitlement: 'founder' | 'paid' | 'comped' | 'app_review' | 'trial' | 'none';
@@ -122,13 +122,19 @@ const KNOWN_ASSISTANTS: Record<string, string> = { claude: 'Claude', chatgpt: 'C
 export function connectedAssistants(status: McpStatus | null): ConnectedAssistant[] {
   if (!status) return [];
   if (Array.isArray(status.assistants)) {
-    return status.assistants.map((a) => ({
+    const rows = status.assistants.map((a) => ({
       assistant: a.assistant,
       name: KNOWN_ASSISTANTS[a.assistant] ?? nameFor(a.client_host, a.client_name),
       connected_at: a.connected_at,
       last_used_at: a.last_used_at,
       questions_today: typeof a.questions_today === 'number' ? a.questions_today : null,
+      host: a.client_host,
     }));
+    // Two rows must never read the same: a repeated name carries its host.
+    return rows.map(({ host, ...r }) => {
+      const repeated = rows.filter((x) => x.name === r.name).length > 1;
+      return repeated ? { ...r, name: `${r.name} (${host ?? r.assistant})` } : r;
+    });
   }
   if (!status.connected_client) return [];
   return [{

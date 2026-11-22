@@ -113,6 +113,15 @@ export function useAiAssistant(): UseAiAssistant {
   const doRefresh = useCallback(() => refresh(signedIn), [signedIn]);
   const disconnect = useCallback(async (assistant: string | null) => {
     await disconnectMcpAssistant(assistant);
+    // A read already in flight may have started before the disconnect; wait
+    // for it, then read again so the list reflects the server after it.
+    if (inFlight) {
+      try {
+        await inFlight;
+      } catch {
+        /* its error is already in state */
+      }
+    }
     await refresh(signedIn);
   }, [signedIn]);
 
