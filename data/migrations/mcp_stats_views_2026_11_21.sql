@@ -214,12 +214,45 @@ BEGIN
   UNION ALL SELECT 'MLB', player_id, player_name, team, game_date, season FROM public.player_game_log
   UNION ALL SELECT 'UFC', fighter_id, fighter_name, NULL, game_date, season FROM public.ufc_fight_log;
 
+  -- One row per NCAAF game; twins collapsed (mcp_stats_games_twins_2026_11_21.sql).
   CREATE OR REPLACE VIEW mcp_stats.games AS
   SELECT g.sport, g.game_id, g.game_date, g.season,
          coalesce(g.first_pitch_at, g.commence_time) AS starts_at,
          g.home_team, g.away_team, g.home_score, g.away_score,
-         (g.home_score IS NOT NULL AND g.away_score IS NOT NULL) AS final
-    FROM public.games g;
+         (g.home_score IS NOT NULL AND g.away_score IS NOT NULL) AS final,
+         ARRAY[g.game_id] AS alias_ids
+    FROM public.games g
+   WHERE g.sport <> 'NCAAF'
+  UNION ALL
+  SELECT t.sport, t.game_id, coalesce(t.et_date, t.game_date), t.season, t.starts_at,
+         t.home_team, t.away_team,
+         coalesce(t.home_score, t.twin_home_score),
+         coalesce(t.away_score, t.twin_away_score),
+         (coalesce(t.home_score, t.twin_home_score) IS NOT NULL
+          AND coalesce(t.away_score, t.twin_away_score) IS NOT NULL),
+         t.alias_ids
+    FROM (
+      SELECT g.sport, g.game_id, g.game_date, g.season,
+             coalesce(g.first_pitch_at, g.commence_time) AS starts_at,
+             to_char(nullif(coalesce(g.first_pitch_at, g.commence_time), '')::timestamptz
+                     AT TIME ZONE 'America/New_York', 'YYYY-MM-DD') AS et_date,
+             g.home_team, g.away_team, g.home_score, g.away_score,
+             max(g.home_score) OVER w AS twin_home_score,
+             max(g.away_score) OVER w AS twin_away_score,
+             array_agg(g.game_id) OVER w AS alias_ids,
+             row_number() OVER (w ORDER BY
+               (g.game_date = to_char(nullif(coalesce(g.first_pitch_at, g.commence_time), '')::timestamptz
+                                      AT TIME ZONE 'America/New_York', 'YYYY-MM-DD')) DESC NULLS LAST,
+               (g.data_source IS DISTINCT FROM 'cfbd') DESC,
+               g.game_id) AS rn
+        FROM public.games g
+       WHERE g.sport = 'NCAAF'
+      WINDOW w AS (PARTITION BY g.home_team, g.away_team,
+                   coalesce(to_char(nullif(coalesce(g.first_pitch_at, g.commence_time), '')::timestamptz
+                                    AT TIME ZONE 'America/New_York', 'YYYY-MM-DD'),
+                            g.game_id))
+    ) t
+   WHERE t.rn = 1;
 
   -- Pre-game only: a quote taken after the start is an in-play price.
   CREATE OR REPLACE VIEW mcp_stats.prop_prices AS
