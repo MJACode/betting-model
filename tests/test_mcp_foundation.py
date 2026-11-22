@@ -39,6 +39,9 @@ CLAUDE_2 = "c1a0de00-0000-4000-8000-000000000002"
 CHATGPT = "c1a0de00-0000-4000-8000-000000000003"
 GROK = "c1a0de00-0000-4000-8000-000000000004"
 OTHER_APP = "c1a0de00-0000-4000-8000-000000000005"
+# Registered with a Claude redirect FIRST and another host after it (review L2).
+MIXED_APP = "c1a0de00-0000-4000-8000-000000000006"
+CLAUDE_TWO_HOSTS = "c1a0de00-0000-4000-8000-000000000007"
 
 
 def _now_utc() -> str:
@@ -51,7 +54,7 @@ def _member(dsn: str, who: str) -> None:
     _psql(dsn, f"""
       INSERT INTO auth.users (id) VALUES ('{who}');
       INSERT INTO public.access_grants (user_id, access_source) VALUES ('{who}', 'comped');
-      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-21');""")
+      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-22');""")
 
 
 def _status(dsn: str, who: str) -> dict:
@@ -128,7 +131,10 @@ def dsn():
             ('{CLAUDE_2}', 'Claude', 'https://claude.ai/api/mcp/auth_callback'),
             ('{CHATGPT}', 'ChatGPT', 'https://chatgpt.com/connector_platform_oauth_redirect'),
             ('{GROK}', 'Grok', 'https://grok.com/connectors-oauth-exchange-code/'),
-            ('{OTHER_APP}', 'Claude', 'https://evil.example/cb');
+            ('{OTHER_APP}', 'Claude', 'https://evil.example/cb'),
+            ('{MIXED_APP}', 'Claude', 'https://claude.ai/api/mcp/auth_callback,https://other.example/cb'),
+            ('{CLAUDE_TWO_HOSTS}', 'Claude',
+             'https://claude.ai/api/mcp/auth_callback, https://claude.com/api/mcp/auth_callback');
         """)
         _apply(d, "mcp_status_client_2026_11_21.sql")
         _apply(d, "mcp_status_client_2026_11_21.sql")  # second pass: no-op
@@ -136,10 +142,12 @@ def dsn():
         _apply(d, "mcp_session_revoke_2026_11_21.sql")  # second pass: no-op
         _apply(d, "mcp_multi_assistant_2026_11_22.sql")
         _apply(d, "mcp_multi_assistant_2026_11_22.sql")  # second pass: no-op
+        _apply(d, "mcp_assistant_family_2026_11_22.sql")
+        _apply(d, "mcp_assistant_family_2026_11_22.sql")  # second pass: no-op
         _psql(d, f"""
           INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES
-            ('{PAID}', '2026-11-21'), ('{COMPED}', '2026-11-21'), ('{MATT}', '2026-11-21'),
-            ('{TRIAL}', '2026-11-21'), ('{REVIEW}', '2026-11-21');
+            ('{PAID}', '2026-11-22'), ('{COMPED}', '2026-11-22'), ('{MATT}', '2026-11-22'),
+            ('{TRIAL}', '2026-11-22'), ('{REVIEW}', '2026-11-22');
         """)
         yield d
 
@@ -315,7 +323,8 @@ def test_status_lists_each_assistant(dsn):
 def test_later_passes_never_restore_one_app(dsn):
     """Every MCP migration runs on every worker pass; none may undo v3."""
     for name in ("mcp_foundation_2026_11_21.sql", "mcp_status_client_2026_11_21.sql",
-                 "mcp_session_revoke_2026_11_21.sql", "mcp_multi_assistant_2026_11_22.sql"):
+                 "mcp_session_revoke_2026_11_21.sql", "mcp_multi_assistant_2026_11_22.sql",
+                 "mcp_assistant_family_2026_11_22.sql"):
         _apply(dsn, name)
     src = _psql(dsn, """
       SELECT position('mcp_meter v3' IN (SELECT prosrc FROM pg_proc
@@ -333,7 +342,7 @@ def test_suspension(dsn):
     _psql(dsn, f"""
       INSERT INTO auth.users (id) VALUES ('{who}');
       INSERT INTO public.access_grants (user_id, access_source) VALUES ('{who}', 'comped');
-      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-21');
+      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-22');
       INSERT INTO mcp_meter.suspensions (user_id, reason) VALUES ('{who}', 'test');""")
     assert _call(dsn, who, T0)["reason"] == "suspended"
 
@@ -345,14 +354,14 @@ def test_member_functions(dsn):
     status = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
     assert status["entitlement"] == "trial" and status["eligible"] is False
     assert status["trial_converts_at"] is not None
-    ok, err = _can(dsn, "authenticated", "SELECT public.mcp_accept_terms('2026-11-21', 'claude');",
+    ok, err = _can(dsn, "authenticated", "SELECT public.mcp_accept_terms('2026-11-22', 'claude');",
                    claims='{"sub": "%s"}' % NOBODY, commit=True)
     assert ok, err
     ok, err = _can(dsn, "authenticated", "SELECT public.mcp_accept_terms('1999-01-01');",
                    claims='{"sub": "%s"}' % NOBODY)
     assert not ok and "22023" in err
     for fn in ("public.mcp_my_status()", "public.mcp_disconnect()",
-               "public.mcp_accept_terms('2026-11-21')"):
+               "public.mcp_accept_terms('2026-11-22')"):
         ok, err = _can(dsn, "anon", f"SELECT {fn};")
         assert not ok and "42501" in err, fn
 
@@ -395,7 +404,7 @@ def test_status_names_the_connected_app(dsn):
     _psql(dsn, f"""
       INSERT INTO auth.users (id) VALUES ('{who}');
       INSERT INTO public.access_grants (user_id, access_source) VALUES ('{who}', 'comped');
-      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-21');""")
+      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-22');""")
     claims = '{"sub": "%s"}' % who
     ok, out = _can(dsn, "authenticated", "SELECT public.mcp_my_status()::text;", claims=claims)
     assert ok, out
@@ -429,7 +438,7 @@ def test_disconnect_cuts_the_app_off(dsn):
     _psql(dsn, f"""
       INSERT INTO auth.users (id) VALUES ('{who}');
       INSERT INTO public.access_grants (user_id, access_source) VALUES ('{who}', 'comped');
-      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-21');""")
+      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-22');""")
     assert _scall(dsn, who, "s1", T0)["allowed"] is True
     assert _scall(dsn, who, "s2", "2026-11-21 15:01:00+00")["allowed"] is True  # second approval, same app
     ok, err = _can(dsn, "authenticated", "SELECT public.mcp_disconnect();",
@@ -476,3 +485,42 @@ def test_stats_views_file_shape():
     assert not re.search(r"GRANT[^;]*\b(anon|authenticated)\b", body)
     for forbidden in ("source", "data_source", "bookmaker AS", "pick", "model"):
         assert not re.search(r"\b" + forbidden + r"\b\s*(,|$| AS)", body.split("CREATE OR REPLACE VIEW mcp_stats.books")[1], re.M), forbidden
+
+
+def test_every_redirect_host_names_the_assistant(dsn):
+    """Review L2 (Matt, 2026-11-22): a Claude redirect listed first is not enough."""
+    out = _psql(dsn, f"""
+      SELECT mcp_meter.assistant_of('{CLAUDE_1}'), mcp_meter.assistant_of('{CLAUDE_TWO_HOSTS}'),
+             mcp_meter.assistant_of('{MIXED_APP}'), mcp_meter.assistant_of('{OTHER_APP}'),
+             mcp_meter.assistant_of('not-a-registered-client');""").strip()
+    assert out == f"claude|claude|client:{MIXED_APP}|evil.example|not-a-registered-client"
+    # So it cannot ride in Claude's place past the cap.
+    who = "66666666-6666-6666-6666-66666666666a"
+    _member(dsn, who)
+    for c in (CLAUDE_1, CHATGPT, GROK):
+        assert _call(dsn, who, T0, client=c)["allowed"] is True, c
+    r = _call(dsn, who, "2026-11-21 15:05:00+00", client=MIXED_APP)
+    assert r["allowed"] is False and r["reason"] == "app_limit"
+    assert _call(dsn, who, "2026-11-21 15:06:00+00", client=CLAUDE_TWO_HOSTS)["allowed"] is True
+
+
+def test_terms_are_the_2026_11_22_version(dsn):
+    """Matt, 2026-11-22: section 19 changed, so members accept the new version."""
+    assert _psql(dsn, "SELECT terms_version FROM mcp_meter.limits WHERE id = 1;").strip() == "2026-11-22"
+    who = "66666666-6666-6666-6666-66666666666b"
+    _psql(dsn, f"""
+      INSERT INTO auth.users (id) VALUES ('{who}');
+      INSERT INTO public.access_grants (user_id, access_source) VALUES ('{who}', 'comped');
+      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-21');""")
+    assert _call(dsn, who, T0)["reason"] == "terms_required"  # the old acceptance no longer covers it
+    claims = '{"sub": "%s"}' % who
+    ok, err = _can(dsn, "authenticated", "SELECT public.mcp_accept_terms('2026-11-21');", claims=claims)
+    assert not ok and "22023" in err
+    ok, err = _can(dsn, "authenticated", "SELECT public.mcp_accept_terms('2026-11-22', 'claude');",
+                   claims=claims, commit=True)
+    assert ok, err
+    assert _call(dsn, who, "2026-11-21 15:01:00+00")["allowed"] is True
+    assert _status(dsn, who)["terms_version"] == "2026-11-22"
+    # The site sends the version it reads from mcp_my_status, so the two cannot drift.
+    boot = (ROOT / "web/src/consent-boot.js").read_text(encoding="utf-8")
+    assert "mcp_my_status" in boot and "terms_version" in boot
