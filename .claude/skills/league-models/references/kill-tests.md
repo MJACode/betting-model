@@ -145,6 +145,12 @@ finding either way.
   **before** the best quote is picked, not after.
 - **The best dates.** The result without its ten best dates. One moneyline
   rule went from positive to -9.3 units.
+- **Grade the live comparator on the same test.** "Without its ten best dates"
+  and "on the power de-vig" mean little alone; run them on the closest live
+  model too. NHL 2026-11-21: the puck-line shop rule fell to +1.4% without
+  its ten best dates and +1.5% on the power de-vig, where the live totals rule
+  kept +2.1% and +4.8%; the comparison, not the absolute number, is what
+  ruled it out (`docs/nhl_sharp_vs_soft.md`).
 - **The other reads.** If the rule is decided at one pull time, read it at
   every other stored pull. Positive at one read only is not a rule.
 - **Multiplicity.** When many cells or rules are tried, count them and apply

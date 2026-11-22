@@ -122,6 +122,18 @@ down this list.
   other book's opener. UFC's ingest keeps a fight once DraftKings lists it
   (every book's first stored row equals DraftKings' on all 345 fights of
   2026), so an opener study needs the feed's history, not our store.
+- **A settled game's live price path is gone, so an in-season replay is not the
+  rule's real input** (NHL, 2026-11-21). The odds clean-up keeps each
+  non-DraftKings book's opener and close in `odds` once a game is a few days
+  old; Pinnacle is protected only in `player_prop_odds`, and only the sports in
+  `data/prune_odds.PATH_KEPT_SPORTS` keep the whole path. An NHL replay of
+  2026-27 under the goalie gate found 1 totals bet where the live rule wrote 15.
+  Before replaying the current season, count each book's stored fetches on a
+  settled game against a game from yesterday (`docs/nhl_sharp_vs_soft.md`).
+- **Bought-history rows carry their import time in `created_at`.** Bound them
+  pre-game on `snapshot_at`, and live rows on both; a `created_at <=
+  commence_time` filter silently drops every bought row
+  (`scripts/nhl_sharp_vs_soft_lab.py`).
 - **The in-play snapshot is served minutes before the asked instant** (261 to
   300 seconds, men's college).
 

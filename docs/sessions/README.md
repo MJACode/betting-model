@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, NHL every market against Pinnacle's no-vig price: puck line not established (ten dates, de-vig), first-period total's book (William Hill) quotes none in 2026-27 after the purchase (mike) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, NHL game picks land late: the goalie rule (36% of games confirmed in the last hour), late soft-book prices; earlier is no better against Pinnacle's close; the goalie poll misses reads (mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Betting PC monitor on the phone: PC writes its page to pc_monitor_state, cloud monitor serves /pc/ (phone-only token, QR in the PC window) (mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, The PC's scheduled tasks start without a window (all three through `bin\run_hidden.pyw`, which keeps exit codes; mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, the record matches the SignalBase Record History sheet (flat 1u, UFC win back, hourly check) (Matt) |
