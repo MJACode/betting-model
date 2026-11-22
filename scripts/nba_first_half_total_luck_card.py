@@ -299,6 +299,7 @@ def publish(conn, rows: list[dict], decisions: list[fh.FirstHalfDecision],
     # One NBA game-total bet a game (scripts/nba_game_totals_door.py): a game another
     # of the three models has bet is decided here with no bet, the reason on its row.
     taken = door.other_bets(conn, gids, MODEL_ID)
+    cap = door.WeeklyCap(conn, gids)     # ten game-total bets a week across the three
     by_game = {r["game_id"]: r for r in rows}
     n_bets = n_decided = 0
     for d in sorted(decisions, key=lambda x: x.game_id):
@@ -310,6 +311,10 @@ def publish(conn, rows: list[dict], decisions: list[fh.FirstHalfDecision],
             logger.info(f"{MODEL_ID}: {d.game_id} not written, {taken[d.game_id]} already bet it "
                         f"(one NBA game-total bet a game)")
             detail, row = f"{detail}; {door.reason(taken[d.game_id])}", None
+        if row is not None and row.get("signal_type") == "BET" and cap.full(d.game_id):
+            logger.info(f"{MODEL_ID}: {d.game_id} not written, the week already holds "
+                        f"{door.MAX_NBA_GAME_TOTAL_BETS_PER_WEEK} NBA game-total bets")
+            detail, row = f"{detail}; {cap.reason(d.game_id)}", None
         if row is None:
             # Scored, no bet written: its NONE row, so the All board shows it
             # (scripts/nba_none_rows.py).
@@ -330,6 +335,8 @@ def publish(conn, rows: list[dict], decisions: list[fh.FirstHalfDecision],
         n_decided += 1
         if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
             n_bets += is_bet
+            if is_bet:
+                cap.add(d.game_id)
     conn.commit()
     return n_bets, n_decided
 

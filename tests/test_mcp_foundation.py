@@ -3,8 +3,10 @@
 Every rule Matt set on 2026-11-20/21, run on a scratch cluster through the
 worker's own apply path: paid and comped only (not trial), terms first,
 10 questions a day where a burst of lookups is one question, 30 lookups a day,
-5 a minute, founders unlimited, one connected app, suspension, and nothing in
-mcp_meter readable by anon, authenticated or the read role.
+5 a minute, founders unlimited, suspension, and nothing in mcp_meter readable
+by anon, authenticated or the read role. Since 2026-11-22 (Matt): up to three
+assistants per member, one shared daily pool, a reconnect is the same
+assistant, and disconnect is per assistant (mcp_multi_assistant_2026_11_22.sql).
 """
 
 from __future__ import annotations
@@ -31,6 +33,32 @@ NOBODY = "44444444-4444-4444-4444-444444444444"
 REVIEW = "88888888-8888-8888-8888-888888888888"
 MATT = "33f61a85-b7ee-4a00-9641-73600e410305"
 T0 = "2026-11-21 15:00:00+00"  # 10:00 ET
+# OAuth clients as Supabase Auth registers them: every reconnect is a new id.
+CLAUDE_1 = "c1a0de00-0000-4000-8000-000000000001"
+CLAUDE_2 = "c1a0de00-0000-4000-8000-000000000002"
+CHATGPT = "c1a0de00-0000-4000-8000-000000000003"
+GROK = "c1a0de00-0000-4000-8000-000000000004"
+OTHER_APP = "c1a0de00-0000-4000-8000-000000000005"
+
+
+def _now_utc() -> str:
+    """mcp_my_status() reads TODAY in ET, so a call it should count is made now."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S+00")
+
+
+def _member(dsn: str, who: str) -> None:
+    _psql(dsn, f"""
+      INSERT INTO auth.users (id) VALUES ('{who}');
+      INSERT INTO public.access_grants (user_id, access_source) VALUES ('{who}', 'comped');
+      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{who}', '2026-11-21');""")
+
+
+def _status(dsn: str, who: str) -> dict:
+    ok, out = _can(dsn, "authenticated", "SELECT public.mcp_my_status()::text;",
+                   claims='{"sub": "%s"}' % who)
+    assert ok, out
+    return json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
 
 
 class _Conn:
@@ -91,17 +119,23 @@ def dsn():
         _apply(d, "app_founders_2026_11_20.sql")
         _apply(d, "mcp_foundation_2026_11_21.sql")
         _apply(d, "mcp_foundation_2026_11_21.sql")  # second pass: no-op
-        _psql(d, """
+        _psql(d, f"""
           CREATE TABLE IF NOT EXISTS auth.oauth_clients (
             id uuid PRIMARY KEY, client_name text, redirect_uris text);
           INSERT INTO auth.oauth_clients VALUES
             ('c1a0de00-0000-4000-8000-000000000001', 'Claude',
-             'https://claude.ai/api/mcp/auth_callback,https://claude.com/api/mcp/auth_callback');
+             'https://claude.ai/api/mcp/auth_callback,https://claude.com/api/mcp/auth_callback'),
+            ('{CLAUDE_2}', 'Claude', 'https://claude.ai/api/mcp/auth_callback'),
+            ('{CHATGPT}', 'ChatGPT', 'https://chatgpt.com/connector_platform_oauth_redirect'),
+            ('{GROK}', 'Grok', 'https://grok.com/connectors-oauth-exchange-code/'),
+            ('{OTHER_APP}', 'Claude', 'https://evil.example/cb');
         """)
         _apply(d, "mcp_status_client_2026_11_21.sql")
         _apply(d, "mcp_status_client_2026_11_21.sql")  # second pass: no-op
         _apply(d, "mcp_session_revoke_2026_11_21.sql")
         _apply(d, "mcp_session_revoke_2026_11_21.sql")  # second pass: no-op
+        _apply(d, "mcp_multi_assistant_2026_11_22.sql")
+        _apply(d, "mcp_multi_assistant_2026_11_22.sql")  # second pass: no-op
         _psql(d, f"""
           INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES
             ('{PAID}', '2026-11-21'), ('{COMPED}', '2026-11-21'), ('{MATT}', '2026-11-21'),
@@ -181,20 +215,117 @@ def test_founders_are_unlimited(dsn):
     assert r["unlimited"] is True and r["questions_left"] is None
 
 
-def test_one_app_at_a_time_and_disconnect(dsn):
-    other = "66666666-6666-6666-6666-666666666666"
-    _psql(dsn, f"""
-      INSERT INTO auth.users (id) VALUES ('{other}');
-      INSERT INTO public.access_grants (user_id, access_source) VALUES ('{other}', 'comped');
-      INSERT INTO mcp_meter.terms_acceptances (user_id, terms_version) VALUES ('{other}', '2026-11-21');""")
-    assert _call(dsn, other, T0, client="claude")["allowed"] is True
-    assert _call(dsn, other, "2026-11-21 15:05:00+00", client="chatgpt")["reason"] == "one_app"
-    ok, err = _can(dsn, "authenticated", "SELECT public.mcp_disconnect();",
-                   claims='{"sub": "%s"}' % other, commit=True)
+def test_several_assistants_share_one_pool(dsn):
+    """Matt, 2026-11-22: connect more than one assistant; the 10 are shared."""
+    who = "66666666-6666-6666-6666-666666666666"
+    _member(dsn, who)
+    assert _call(dsn, who, T0, client=CLAUDE_1)["questions_used"] == 1
+    # Another assistant 10 s later is its own question, from the same pool.
+    r = _call(dsn, who, "2026-11-21 15:00:10+00", client=GROK)
+    assert r["allowed"] is True and r["assistant"] == "grok"
+    assert r["questions_used"] == 2 and r["questions_left"] == 8
+    # Claude's follow-up lookup stays Claude's question; the pool does not go back.
+    r = _call(dsn, who, "2026-11-21 15:00:20+00", client=CLAUDE_1)
+    assert r["questions_used"] == 2 and r["questions_left"] == 8
+    assert _call(dsn, who, "2026-11-21 15:00:30+00", client=CHATGPT)["questions_used"] == 3
+    # Fill the pool from all three, 3 minutes apart (no burst, no rate limit).
+    clients = [CLAUDE_1, GROK, CHATGPT]
+    for i in range(7):
+        r = _call(dsn, who, f"2026-11-21 15:{3 + 3 * i:02d}:00+00", client=clients[i % 3])
+        assert r["allowed"] is True, r
+    assert r["questions_used"] == 10 and r["questions_left"] == 0
+    for c in clients:
+        out = _call(dsn, who, "2026-11-21 16:00:00+00", client=c)
+        assert out["allowed"] is False and out["reason"] == "limit_reached", (c, out)
+        assert out["questions_left"] == 0
+    # Midnight ET resets the pool for everyone.
+    assert _call(dsn, who, "2026-11-22 15:00:00+00", client=GROK)["questions_used"] == 1
+
+
+def test_a_reconnect_is_the_same_assistant_and_three_is_the_cap(dsn):
+    """2026-11-22: a reconnected Claude registers a new client id and was refused."""
+    who = "66666666-6666-6666-6666-666666666667"
+    _member(dsn, who)
+    for c in (CLAUDE_1, CHATGPT, GROK):
+        assert _call(dsn, who, T0, client=c, tool="get_slate")["allowed"] is True, c
+    # Claude reconnected: new client id, same assistant, let in at the cap.
+    r = _call(dsn, who, "2026-11-21 15:05:00+00", client=CLAUDE_2)
+    assert r["allowed"] is True and r["assistant"] == "claude"
+    # A fourth DIFFERENT assistant is refused; a name it chose does not make it Claude.
+    r = _call(dsn, who, "2026-11-21 15:06:00+00", client=OTHER_APP)
+    assert r["allowed"] is False and r["reason"] == "app_limit" and r["assistant"] == "evil.example"
+    assert r["max_assistants"] == 3
+    # Nothing is replaced or deleted: four active client rows, three assistants.
+    rows = _psql(dsn, f"""SELECT count(*), count(DISTINCT assistant) FROM mcp_meter.connections
+                          WHERE user_id = '{who}' AND revoked_at IS NULL;""").strip()
+    assert rows == "4|3"
+    # Disconnecting one assistant frees a place.
+    ok, err = _can(dsn, "authenticated", "SELECT public.mcp_disconnect_assistant('grok');",
+                   claims='{"sub": "%s"}' % who, commit=True)
     assert ok, err
-    assert _call(dsn, other, "2026-11-21 15:10:00+00", client="chatgpt")["allowed"] is True
-    kept = _psql(dsn, f"SELECT count(*) FROM mcp_meter.connections WHERE user_id = '{other}';")
-    assert kept.strip() == "2"  # the disconnected one is kept, with revoked_at
+    assert _call(dsn, who, "2026-11-21 15:07:00+00", client=OTHER_APP)["allowed"] is True
+
+
+def test_disconnect_is_per_assistant(dsn):
+    who = "66666666-6666-6666-6666-666666666668"
+    _member(dsn, who)
+    assert _scall(dsn, who, "claude-s", T0, client=CLAUDE_1)["allowed"] is True
+    assert _scall(dsn, who, "grok-s", "2026-11-21 15:01:00+00", client=GROK)["allowed"] is True
+    ok, err = _can(dsn, "authenticated", "SELECT public.mcp_disconnect_assistant('grok');",
+                   claims='{"sub": "%s"}' % who, commit=True)
+    assert ok, err
+    r = _scall(dsn, who, "grok-s", "2026-11-21 15:05:00+00", client=GROK)
+    assert r["allowed"] is False and r["reason"] == "disconnected"
+    assert _scall(dsn, who, "claude-s", "2026-11-21 15:05:00+00", client=CLAUDE_1)["allowed"] is True
+    # The old no-argument Disconnect (older app builds) still ends every assistant.
+    ok, err = _can(dsn, "authenticated", "SELECT public.mcp_disconnect();",
+                   claims='{"sub": "%s"}' % who, commit=True)
+    assert ok, err
+    r = _scall(dsn, who, "claude-s", "2026-11-21 15:09:00+00", client=CLAUDE_1)
+    assert r["allowed"] is False and r["reason"] == "disconnected"
+    kept = _psql(dsn, f"SELECT count(*) FROM mcp_meter.connections WHERE user_id = '{who}';")
+    assert kept.strip() == "2"  # kept, with revoked_at
+    for role in ("anon",):
+        ok, err = _can(dsn, role, "SELECT public.mcp_disconnect_assistant('claude');")
+        assert not ok and "42501" in err
+
+
+def test_status_lists_each_assistant(dsn):
+    who = "66666666-6666-6666-6666-666666666669"
+    _member(dsn, who)
+    before = _status(dsn, who)
+    assert before["assistants"] == [] and before["max_assistants"] == 3
+    _call(dsn, who, _now_utc(), client=CLAUDE_1)
+    _call(dsn, who, _now_utc(), client=GROK)
+    _call(dsn, who, _now_utc(), client=CLAUDE_2)  # Claude reconnected
+    st = _status(dsn, who)
+    by = {a["assistant"]: a for a in st["assistants"]}
+    assert set(by) == {"claude", "grok"}
+    assert by["claude"]["client_host"] == "claude.ai" and by["grok"]["client_host"] == "grok.com"
+    assert by["grok"]["questions_today"] == 1
+    assert st["questions_used"] >= 2 and st["questions_left"] == 10 - st["questions_used"]
+    assert st["connected_client"] is not None  # older builds still see a connected app
+    # A call logged before the migration has no assistant column; it still
+    # counts toward its assistant (review L1, 2026-11-22).
+    _psql(dsn, f"""UPDATE mcp_meter.calls SET assistant = NULL
+                    WHERE user_id = '{who}' AND client_id = '{GROK}';""")
+    assert {a["assistant"]: a for a in _status(dsn, who)["assistants"]}["grok"]["questions_today"] == 1
+
+
+def test_later_passes_never_restore_one_app(dsn):
+    """Every MCP migration runs on every worker pass; none may undo v3."""
+    for name in ("mcp_foundation_2026_11_21.sql", "mcp_status_client_2026_11_21.sql",
+                 "mcp_session_revoke_2026_11_21.sql", "mcp_multi_assistant_2026_11_22.sql"):
+        _apply(dsn, name)
+    src = _psql(dsn, """
+      SELECT position('mcp_meter v3' IN (SELECT prosrc FROM pg_proc
+               WHERE oid = 'mcp_meter.begin_call(uuid,text,text,jsonb,timestamptz)'::regprocedure)) > 0,
+             position('mcp_my_status v3' IN (SELECT prosrc FROM pg_proc
+               WHERE oid = 'public.mcp_my_status()'::regprocedure)) > 0,
+             to_regclass('mcp_meter.mcp_connections_one_active') IS NULL;""").strip()
+    assert src == "t|t|t"
+    assert (ACTIVE_MIGRATIONS.index("mcp_session_revoke_2026_11_21.sql")
+            < ACTIVE_MIGRATIONS.index("mcp_multi_assistant_2026_11_22.sql"))
 
 
 def test_suspension(dsn):
@@ -270,7 +401,7 @@ def test_status_names_the_connected_app(dsn):
     assert ok, out
     before = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
     assert before["connected_client_name"] is None and before["connected_client_host"] is None
-    assert _call(dsn, who, T0, client=client)["allowed"] is True
+    assert _call(dsn, who, _now_utc(), client=client)["allowed"] is True
     ok, out = _can(dsn, "authenticated", "SELECT public.mcp_my_status()::text;", claims=claims)
     assert ok, out
     after = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
@@ -282,7 +413,7 @@ def test_status_names_the_connected_app(dsn):
     assert not ok and "42501" in err
 
 
-def _scall(dsn: str, user: str, session: str, at: str, client: str = "claude") -> dict:
+def _scall(dsn: str, user: str, session: str, at: str, client: str = "claude") -> dict:  # noqa: E302
     out = _psql(dsn, f"""
       BEGIN;
       SET LOCAL ROLE mcp_meter_role;

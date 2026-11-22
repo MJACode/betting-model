@@ -1,0 +1,41 @@
+# After a PR merges, post a short summary of it to this repo's Backroom channel.
+# No secret: the job sends a GitHub OIDC token (audience "backroom"); Backroom checks it against GitHub's keys
+# and only accepts repos it lists in PR_SUMMARY_REPOS. Backroom writes the summary, so nothing here needs an API key.
+# pull_request_target runs this file from the base branch and checks nothing out.
+name: PR summary to Backroom
+
+on:
+  pull_request_target:
+    branches: [master]
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  id-token: write
+
+jobs:
+  post:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Post to Backroom
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKROOM_URL: https://backroom-production-89ca1f97.up.railway.app
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          tok=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=backroom" | jq -r .value)
+          echo "::add-mask::$tok"
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename' | head -n 300 | jq -R . | jq -s . > files.json
+          jq -n --slurpfile files files.json --slurpfile ev "$GITHUB_EVENT_PATH" '($ev[0].pull_request) as $p | {
+            repo: env.GITHUB_REPOSITORY, number: $p.number, title: $p.title, url: $p.html_url, body: ($p.body // ""),
+            author: $p.user.login, merged_by: ($p.merged_by.login // ""), base: $p.base.ref,
+            additions: $p.additions, deletions: $p.deletions, changed_files: $p.changed_files, files: $files[0] }' > payload.json
+          for i in 1 2 3; do
+            if curl -sS --fail-with-body -X POST "$BACKROOM_URL/api/hooks/pr" -H "Authorization: Bearer $tok" -H "content-type: application/json" --data @payload.json; then echo; exit 0; fi
+            echo " (try $i failed)"; sleep $((i * 20))
+          done
+          exit 1
