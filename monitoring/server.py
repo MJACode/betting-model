@@ -55,6 +55,13 @@ TTL_DISCORD = float(os.environ.get("MONITOR_TTL_DISCORD", "600"))
 TTL_LIVECAL = float(os.environ.get("MONITOR_TTL_LIVECAL", "300"))
 META_EVERY_SEC = float(os.environ.get("MONITOR_META_SEC", "10"))
 MAX_STREAMS = int(os.environ.get("MONITOR_MAX_STREAMS", "6"))
+# The Betting PC monitor on mike's phone (/pc/): the page from pc_monitor/, its
+# data from the row mike's PC writes (pc_monitor_state). Every viewer shares one
+# read per TTL_PC, and a phone's "I am watching" stamp is written at most once
+# per PC_DEMAND_EVERY_S, which is what makes the PC send fresh data every 2 s.
+PC_PAGE = Path(__file__).resolve().parent.parent / "pc_monitor" / "static" / "index.html"
+TTL_PC = float(os.environ.get("MONITOR_TTL_PC", "2"))
+PC_DEMAND_EVERY_S = 10.0
 
 _streams = threading.Semaphore(MAX_STREAMS)
 
@@ -133,6 +140,54 @@ def ops(conn) -> dict:
     }
 
 
+def pc_state() -> dict | None:
+    """The newest row a PC wrote, or None before any has. Raises when the
+    database cannot be read and nothing is cached (cache.cached serves the last
+    good value through a failed refresh)."""
+    def fetch():
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT view, CAST(EXTRACT(EPOCH FROM (now() - published_at)) AS double precision), "
+                "phone_token, host FROM pc_monitor_state ORDER BY published_at DESC LIMIT 1").fetchone()
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+        if row is None:
+            return None
+        return {"view": row[0], "age_s": row[1], "token": row[2], "host": row[3], "read_at": time.time()}
+    return cache.cached("pc_state", TTL_PC, fetch)
+
+
+def pc_mark_demand(host: str) -> None:
+    """Stamp that a phone is looking, at most once per PC_DEMAND_EVERY_S."""
+    def write():
+        conn = _connect()
+        try:
+            conn.execute("UPDATE pc_monitor_state SET demand_at = now() WHERE host = %s", (host,))
+            conn.commit()
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+        return True
+    cache.cached("pc_demand", PC_DEMAND_EVERY_S, write)
+
+
+def pc_payload(state: dict, now: float) -> dict:
+    """What the phone page receives: the PC's view, how long ago the PC wrote
+    it (the database clock, plus the time since this server read it), and never
+    the link's token."""
+    v = dict(state.get("view") or {})
+    v.pop("phone", None)
+    age = state.get("age_s")
+    v["pc_reported_age_s"] = None if age is None else age + max(0.0, now - state.get("read_at", now))
+    return v
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "signalbase-monitor"
     protocol_version = "HTTP/1.1"
@@ -179,6 +234,11 @@ class Handler(BaseHTTPRequestHandler):
         if pick_id is not None:
             return self._pick_page(pick_id)
 
+        # The PC page has its own check: the phone link's token opens it, and
+        # only it.
+        if route == "/pc" or route.startswith("/pc/"):
+            return self._pc(route, qs, parts.query)
+
         if not self._authorised(qs):
             return self._send(401, b'{"error":"unauthorised"}', "application/json")
 
@@ -202,6 +262,49 @@ class Handler(BaseHTTPRequestHandler):
             return self._stream(qs)
 
         return self._send(404, b'{"error":"not found"}', "application/json")
+
+    def _pc_authorised(self, qs: dict) -> bool:
+        """The dashboard's own token, or the phone link's token from the PC's
+        row. The phone token is checked here only, so it opens /pc/ and nothing
+        else."""
+        if self._authorised(qs):
+            return True
+        supplied = str(self.headers.get("X-Monitor-Token") or (qs.get("token") or [""])[0])
+        if not supplied:
+            return False
+        try:
+            state = pc_state()
+        except Exception:  # noqa: BLE001
+            return False
+        phone = (state or {}).get("token")
+        return bool(phone) and hmac.compare_digest(supplied, str(phone))
+
+    def _pc(self, route: str, qs: dict, query: str):
+        if route == "/pc":
+            self.send_response(302)
+            self.send_header("Location", "/pc/" + (f"?{query}" if query else ""))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return None
+        extra = {"Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex"}
+        try:
+            if not self._pc_authorised(qs):
+                return self._send(401, b'{"error":"unauthorised"}', "application/json")
+            if route == "/pc/":
+                return self._send(200, PC_PAGE.read_bytes(), "text/html; charset=utf-8", extra)
+            if route == "/pc/api/state":
+                state = pc_state()
+                if not state:
+                    return self._send(503, b'{"error":"the PC has not reported yet"}',
+                                      "application/json", extra)
+                try:
+                    pc_mark_demand(state["host"])
+                except Exception:  # noqa: BLE001 - the page still shows what there is
+                    pass
+                return self._send(200, dumps(pc_payload(state, time.time())), "application/json", extra)
+            return self._send(404, b'{"error":"not found"}', "application/json")
+        except Exception as exc:  # noqa: BLE001 - this server runs inside the worker
+            return self._send(503, dumps({"error": type(exc).__name__}), "application/json")
 
     def _pick_page(self, pick_id: int):
         from tracking.pick_landing import render_pick_http
