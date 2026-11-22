@@ -124,6 +124,12 @@ error.
   the feed, and the rule finds 4 bets on 362 games. *Null for the
   rule*: hockey moneyline, team totals, alternate totals
   (`docs/nhl_sharp_vs_soft.md`).
+  *Candidate, selection across markets*: the same rule on every hockey market
+  at one daily moment, keeping only the night's largest EV: 478 bets +16.0%
+  (+2.2, +29.8) at 2%, holds on the power de-vig and without its ten best
+  nights; but a DraftKings reference keeps about two-thirds of it, so part is
+  an outlier-price effect, and one season of six lost
+  (`scripts/nhl_best_bet_a_night_lab.py`).
   *Shipped, missed the stricter bar*: tennis match winner (2026-11-14), the
   best of seven US books against Pinnacle's POWER-de-vigged pair about 30
   minutes before the listed start, EV 0.02 to 0.05 with each book's

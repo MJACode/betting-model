@@ -59,6 +59,11 @@ review as its own entry.
 5. **The framework**: nothing changed in `SKILL.md`. Worth promoting if it recurs: before reading a
    neighbourhood as a plateau, run "without the ten best dates" — it moved this one more than any
    other test.
+6. **Follow-up, 2026-11-22** (mike: fewer bets, 1-5 unit stakes): per market, return does not
+   reliably rise with EV (the bands flip with the de-vig method), so sizing by EV mostly
+   multiplies noise. Selecting ACROSS markets at one moment and keeping only the night's
+   largest EV is the version that held on both de-vig methods. Run the retail-reference
+   placebo on any cross-market selection: it kept two-thirds of this one.
 
 ## 2026-11-20 — NBA first basket: a market never priced, built live on a five-of-six grade
 

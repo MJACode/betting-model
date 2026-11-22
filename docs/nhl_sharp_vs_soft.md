@@ -196,6 +196,61 @@ standing item on the jobs that still delete data.
   later can be replayed at the live check rate.
 - **3-way:** a season with more than one snapshot a game, kept, as above.
 
+## Fewer bets, bigger stakes (2026-11-22)
+
+mike, 2026-11-22: fewer bets, 1-5 unit stakes, beat Pinnacle, maximise units.
+Seasons 2020-21 to 2025-26 (2026-27 is thinned). Stakes are "X units to win",
+risk capped at 3X.
+
+**Does a bigger edge win more?** Not reliably, market by market. The bands
+flip with the de-vig method: the moneyline's 3-4% band is +11.7% split in
+proportion and -6.4% on the power split; the puck line's 1-1.5% band is -7.4%
+and +5.8%. The full-game total's biggest edges lost on both (4-6%: -27.2% and
+-16.1%). Staking 1-5u by edge on a single market mostly multiplies the same
+noise (`data/local/research/nhl_shop_markets/staking.py`, not committed).
+
+**The best bet a night** (`scripts/nhl_best_bet_a_night_lab.py`). Every game's
+quotes in all five markets at one moment, the game-date 15:00-17:59 UTC fetch
+(about noon ET); Pinnacle's no-vig price against the bettable books in that
+same fetch; one bet a game (its largest EV); then the largest EV of the night.
+
+| EV floor | bets a night | de-vig | bets | units (1u) | flat return | 95% | CLV | without 10 best nights | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
+|---|---|---|---:|---:|---:|---|---:|---:|---|---|---|---|---|---|
+| 0.02 | 1 | proportional | 478 | +36.4 | +16.0% | +2.2..+29.8 | +3.50% | +26.4 | +5.6 | +20.6 | -11.8 | +7.9 | +3.2 | +10.8 |
+| 0.02 | 1 | power | 382 | +30.7 | +15.4% | +1.4..+29.4 | +2.57% | +20.7 | +6.8 | +10.2 | -10.4 | +14.3 | +2.7 | +7.2 |
+| 0.01 | 2 | power | 1,009 | +66.3 | +10.9% | +2.9..+18.8 | +1.81% | +46.3 | +9.9 | +20.6 | -4.5 | +10.0 | +11.9 | +18.4 |
+| 0.03 | 1 | proportional | 331 | +30.2 | +21.5% | +3.8..+39.2 | +4.28% | +20.2 | | | | | | |
+| 0.01 | every game | proportional | 2,171 | +41.0 | +3.5% | -2.7..+9.7 | +2.24% | +1.5 | | | | | | |
+
+Both halves of the period are positive in every row shown. The markets of the
+0.02 / 1 / proportional bets: puck line 206, moneyline 101, 3-way 93, totals 69,
+first period 9.
+
+**Stakes on it** (the best bet a night at EV >= 1%, then staked by its EV):
+
+| stakes | de-vig | bets | avg stake | units | per unit staked | worst drawdown | without 10 best nights | 2023 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| flat 1u | proportional | 702 | 1.00 | +5.4 | +0.008 | 29.4 | -4.6 | -26.1 |
+| skip under 2%, 3u at 2-4%, 5u at 4%+ | proportional | 478 | 3.98 | +134.4 | +0.071 | 52.9 | +84.4 | -34.0 |
+| flat 1u | power | 647 | 1.00 | +36.2 | +0.056 | 16.9 | +26.2 | -8.8 |
+| skip under 2%, 3u at 2-4%, 5u at 4%+ | power | 382 | 3.71 | +113.7 | +0.080 | 55.3 | +63.7 | -32.9 |
+
+**What holds against it:**
+- **The placebo is only half a pass.** With DraftKings as the reference, the same
+  selection makes +24.9u on 470 at 0.02 (+10.6%, -3.1..+24.4); with FanDuel it
+  loses (-16.5u on 565). Part of the edge is picking the night's biggest price
+  outlier against any decent reference, not Pinnacle's information alone.
+- **2022-23 lost in every version**, by 26 to 34 units at the 3-5u stakes.
+- **In-sample.** Well over 100 cells were read across the two scripts, on the
+  same six seasons. The
+  pattern holds across the neighbours (floors 1-3%, one or two a night, both
+  de-vig methods), not in one cell.
+- **It decides at noon ET, before most goalies are confirmed.** mike's rule
+  (2026-10-20) allows no NHL bet before both goalies are confirmed. Deciding
+  at confirmation cannot be replayed: confirmation times exist only from
+  2026-10-24, and this season's prices are thinned.
+- **The first-period market's book is gone** in 2026-27 (9 of the 478 bets).
+
 ## Next mechanisms (the stuck ladder for the null markets)
 
 1. **Team totals priced off the full-game total and moneyline.** Prediction: a
