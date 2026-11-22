@@ -170,7 +170,7 @@ tried and what each returned:
    it, then point a one-off service's start command at it (`prop-probe` exists for
    this) or add a scheduler job. See `docs/cloud_worker.md`.
 3. **Matt's machine** — ask for a specific command, not a vague blocker.
-4. **The Supabase MCP** — READS and (since 2026-11-16) WRITES production.
+4. **The Supabase MCP** — READS production; writes are hook-blocked.
 
 **The general form of this rule — a banner is not a test, reachability and
 capability are two separate measurements, a missing credential is not a missing
@@ -178,7 +178,7 @@ capability, one absent route is not zero routes — is in the global
 `~/.claude/CLAUDE.md` §0 and loads on every project.** It is not repeated here.
 What is project-specific is the four routes above and the MEASURED limit of each
 tool, which the session-start hook injects verbatim
-(`.claude/hooks/connector_reminder.json`): Supabase `execute_sql` now writes,
+(`.claude/hooks/connector_reminder.json`): Supabase `execute_sql` is read-only,
 Railway `list-variables` hides the values, and there is no node and no Railway
 CLI on this machine. The cases that cost a day each: `docs/rules_evidence.md`.
 **THE CURRENT STATE OF A SYSTEM IS NOT ITS CAPABILITY, AND WORK YOU CAN DO IS
@@ -210,6 +210,9 @@ disk, and the fix is an importer, not an allowlist entry.
 **Everything is also carbon-copied to mike's PC** (mike, 2026-11-03): database,
 storage and GitHub, outside the repo, by `scripts/local_mirror*.py`. A backup,
 never a second store: `docs/local_ops.md`.
+
+**THE DATABASE IS READ-ONLY FOR CLAUDE** (Matt): SELECT any table
+freely; never write, alter or grant. A hook enforces it.
 
 **NO DATA IS EVER DELETED; ONLY MIKE CAN OVERRIDE IT, IN CHAT.** (mike,
 2026-11-14.) No prune, retention, cleanup or hand-run DELETE destroys a stored
@@ -639,13 +642,13 @@ What stays here is what has to be known BEFORE deciding which file to open
 | **Odds providers: what exists, what it costs, what it adds** | `docs/odds_sources.md` |
 | **NHL 2026-27: markets, evidence, defects, plan** | `docs/nhl_market_research.md` |
 | **The eleven NFL prop models hold no information the line lacks** | `docs/nfl_prop_information_test.md` |
-| **The search for a profitable NFL prop model: tackles was the wrong stat, DK is flat** | `docs/nfl_prop_profitability_search.md` |
-| **The stat models: what is exhausted, what the outside world does, the one method left (market-anchored shape simulation)** | `docs/nfl_prop_method_search.md` |
+| **The search for a profitable NFL prop model** | `docs/nfl_prop_profitability_search.md` |
+| **NFL prop stat models: what is exhausted, the one method left** | `docs/nfl_prop_method_search.md` |
 | **NFL prop lines lean over — the measured bias, and the per-side cut it bought** | `docs/nfl_prop_over_lean.md` |
 | **nfl_prop_market 2026 remeasure — no cut change, no 24h-ceiling change** | `docs/nfl_prop_market_2026.md` |
 | **MLB runline / O/U edge search (paper totals 2pp, spreads gated)** | `docs/mlb_runline_ou_edge_search.md` |
 | **MLB totals public-OVER fade (paper UNDER, INSERT default 0)** | `docs/mlb_total_public_fade.md` |
-| **MLB market-handicap features (public/RLM/steam; RL+OU matrix; retrain next)** | `docs/mlb_market_handicap_features.md` |
+| **MLB market-handicap features (public/RLM/steam)** | `docs/mlb_market_handicap_features.md` |
 | **NFL prop Out/Doubtful veto (ESPN status_ts vs quote)** | `docs/nfl_prop_injury_veto.md` |
 | **CLV: no-vig two-way close, sharp book when present** | `docs/clv.md` |
 | **Build Your Own Model, NFL facts (not picks)** | `docs/byom_nfl.md` |

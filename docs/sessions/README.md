@@ -19,9 +19,14 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, every table read-only for Claude: hook refuses writes/DDL and runs each MCP query in BEGIN READ ONLY (Matt) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, AI assistant connector: NCAAF twin games merged (alias_ids), whole slate with has_lines, lines found under either id |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, picks read-only for Claude: hook blocks MCP writes to picks*/results_snapshots, reads allowed (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, NHL every market against Pinnacle's no-vig price: puck line not established (ten dates, de-vig), first-period total's book (William Hill) quotes none in 2026-27 after the purchase (mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, NHL game picks land late: the goalie rule (36% of games confirmed in the last hour), late soft-book prices; earlier is no better against Pinnacle's close; the goalie poll misses reads (mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Betting PC monitor on the phone: PC writes its page to pc_monitor_state, cloud monitor serves /pc/ (phone-only token, QR in the PC window) (mike) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Performance tab bet lists grouped by date: fold per day, See all, open bets always shown (Matt) |
+| 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Performance tab Insights card: recaps by period (Mon–Sun weeks, same-days comparison), best/worst, breakdowns, CLV, form, you vs the models (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, The PC's scheduled tasks start without a window (all three through `bin\run_hidden.pyw`, which keeps exit codes; mike) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, the record matches the SignalBase Record History sheet (flat 1u, UFC win back, hourly check) (Matt) |
 | 2026-11-21 | [2026-11](./2026-11.md) | 2026-11-21, Betting PC monitor: a desktop window for the jobs on mike's PC (in-play feed, backup, tennis), no console windows, works without the database, starts at sign-in (mike) |
