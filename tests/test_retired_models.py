@@ -309,20 +309,17 @@ def test_paused_nfl_props_still_in_prop_models_and_thresholds():
         assert mid in config.ACTION_THRESHOLDS, mid
 
 
-def test_the_retired_ufc_models_are_struck_from_the_published_record():
-    """mike, 2026-11-13: "yes" to taking their posted bet off the record.
-    Retiring alone left it in the record views, which exclude only
-    RECORD_EXCLUSIONS, so the three are struck there and in a view patch."""
+def test_the_retired_ufc_models_are_back_in_the_published_record():
+    """mike struck them on 2026-11-13; Matt, 2026-11-21, put them back ("Yes,
+    put it back"): the record sheet, the reference, counts ufc_total_rounds'
+    posted win. No strike is left in config, the strike file no longer runs
+    (it would put its clause back every pass), and the file that takes the
+    clause out does."""
     struck = {e["model_id"] for e in config.RECORD_EXCLUSIONS if not e.get("before")}
-    assert set(RETIRED_UFC) <= struck
+    assert not set(RETIRED_UFC) & struck
     sql = config.record_exclusion_sql("p")
     for m in RETIRED_UFC:
-        assert f"p.model_id <> '{m}'" in sql
+        assert f"'{m}'" not in sql
     from data.view_migrations import ACTIVE_MIGRATIONS
-    mig = "record_strikes_ufc_retired_2026_11_13.sql"
-    assert mig in ACTIVE_MIGRATIONS
-    assert ACTIVE_MIGRATIONS.index(mig) > ACTIVE_MIGRATIONS.index(
-        "record_strikes_nfl_live_prop_2026_10_04.sql")
-    body = (ROOT / "data" / "migrations" / mig).read_text(encoding="utf-8")
-    for m in RETIRED_UFC:
-        assert f"model_id <> ''{m}''::text" in body
+    assert "record_strikes_ufc_retired_2026_11_13.sql" not in ACTIVE_MIGRATIONS
+    assert "record_matches_sheet_2026_11_21.sql" in ACTIVE_MIGRATIONS

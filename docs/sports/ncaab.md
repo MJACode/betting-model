@@ -1748,6 +1748,11 @@ NCAAB bet on the same game and the same side is 2u to win.
 
 ### Agreement sizing: 2u when a second model agrees (2026-11-06, mike)
 
+> **OFF since 2026-11-21 (Matt).** Every pick is flat 1u to win, as the record
+> sheet counts it (`docs/discord.md` §33). `NCAAB_AGREEMENT_STAKE_UNITS`
+> defaults to 1, so nothing is written at 2u, and a row written at 2u between
+> 11-06 and 11-21 posts and counts at 1u. The evidence below is kept as found.
+
 mike, 2026-11-06: *"I want a pick that has a higher confidence and higher long
 term win to be higher units, you can slice this from back testing"*.
 
