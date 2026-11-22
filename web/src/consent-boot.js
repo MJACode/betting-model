@@ -162,11 +162,19 @@
   function decide(action) {
     $("allow").disabled = true;
     $("deny").disabled = true;
+    // The version accepted is the one the database holds now
+    // (mcp_my_status.terms_version), so a terms change in a migration and
+    // this page's build can never disagree; CONFIG is the fallback.
     var first = action === "approve"
-      ? call("POST", REST + "/rpc/mcp_accept_terms", {
-          p_version: CONFIG.termsVersion,
-          p_client: (details && details.client && (details.client.name || details.client.client_name)) || null
-        }, true)
+      ? call("POST", REST + "/rpc/mcp_my_status", {}, true)
+          .then(function (s) { return (s && s.terms_version) || CONFIG.termsVersion; },
+                function () { return CONFIG.termsVersion; })
+          .then(function (version) {
+            return call("POST", REST + "/rpc/mcp_accept_terms", {
+              p_version: version,
+              p_client: (details && details.client && (details.client.name || details.client.client_name)) || null
+            }, true);
+          })
       : Promise.resolve();
     first
       .then(function () {

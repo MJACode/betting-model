@@ -81,7 +81,7 @@ These Terms are governed by the laws of the Commonwealth of Massachusetts, witho
 
 **Your assistant is a third party.** When you connect an assistant, your questions and the data returned are sent to that provider and handled under its own terms and privacy policy, not ours. AI answers can be wrong or incomplete, are informational only, and are not betting advice (see sections 2 and 3).
 
-**Logging, suspension and ending access.** We log each request (the tool used, its inputs, the time and the connected app) to enforce these limits and protect the Service, as described in our Privacy Policy. We may suspend or end AI assistant access at any time, including automatically when we detect unusual use; the rest of the app keeps working. You can disconnect any assistant at any time in Settings › AI Assistant. Access ends when your paid subscription ends.
+**Logging, suspension and ending access.** We log each request (the tool used, its inputs, the time and the connected app) to enforce these limits and protect the Service, as described in our Privacy Policy. We may suspend or end AI assistant access at any time, including automatically when we detect unusual use; the rest of the app keeps working. You can disconnect any assistant at any time in Settings › AI Assistant; that ends its current connection, and you can connect it again later by approving it again in that assistant. Access ends when your paid subscription ends.
 
 ## 20. Contact
 Signal Base LLC · Email: Signalbaseskinny@gmail.com

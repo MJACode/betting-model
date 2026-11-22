@@ -825,6 +825,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # pool, a reconnect is the same assistant, disconnect per assistant
     # (Matt, 2026-11-22). Runs while "mcp_meter v3" is missing from begin_call.
     "mcp_multi_assistant_2026_11_22.sql",
+    # AI assistant (MCP): an assistant is named from every redirect host, not
+    # the first (review L2), and the AI assistant terms move to 2026-11-22
+    # (Matt, "Update the terms"). Runs while "assistant_of v2" is missing.
+    "mcp_assistant_family_2026_11_22.sql",
     # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
     # monitor's page, written by mike's PC (pc_monitor/) and served to his
     # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,
