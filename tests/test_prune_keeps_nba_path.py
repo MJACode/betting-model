@@ -116,14 +116,15 @@ def test_the_two_prune_tiers_never_select_a_path_kept_sport():
     # NCAABW (women's college basketball) 2026-11-09, for the same reason.
     # NCAAF 2026-11-10: its settled games held one or two rows a book.
     # EUROLEAGUE 2026-11-12, from its first stored day; the NBL 2026-11-14.
+    # NHL 2026-11-21 (mike): settled games kept each book's opener and close.
     assert "path_kept_sports" in pred and params["path_kept_sports"] == (
-        "NBA", "NCAAB", "NCAABW", "NCAAF", "EUROLEAGUE", "NBL")
+        "NBA", "NCAAB", "NCAABW", "NCAAF", "EUROLEAGUE", "NBL", "NHL")
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE odds (bookmaker, source, sport)")
     db.executemany("INSERT INTO odds VALUES (?, NULL, ?)",
                    [("fanduel", "NBA"), ("fanduel", "NCAAB"), ("fanduel", "NCAABW"),
                     ("fanduel", "NCAAF"), ("fanduel", "EUROLEAGUE"), ("fanduel", "NBL"),
-                    ("fanduel", "MLB")])
+                    ("pinnacle", "NHL"), ("fanduel", "MLB")])
     # the predicate's own SQL, run: only the MLB line-shop row is prunable
     sql = pred
     for k, v in params.items():
@@ -143,6 +144,27 @@ def test_ncaaf_keeps_each_book_s_moves_and_loses_only_repeats():
     ids = [c.quote("CFB", _ts(i), h, a, sport="NCAAF") for i, (h, a) in enumerate(path)]
     po.thin_repeats(c, today="2026-10-22")
     assert c.ids() == {ids[0], ids[2], ids[3], ids[5]}
+
+
+def test_nhl_keeps_pinnacle_s_moves_and_loses_only_repeats():
+    """NHL joined 2026-11-21 (mike: "Yes, keep it"). A settled NHL game used to
+    keep each non-DraftKings book's opener and close only, Pinnacle included
+    (it is protected in player_prop_odds alone), so no 2026-27 game could be
+    replayed against Pinnacle at the rule's own check rate. Every move stays;
+    the middle of an unchanged run goes; an MLB game beside it is untouched."""
+    assert "NHL" in po.PATH_KEPT_SPORTS
+    c = _Conn()
+    c.game("HOK", sport="NHL")
+    c.game("MLB", sport="MLB")
+    path = [(150, -170), (150, -170), (150, -170), (155, -175), (155, -175), (160, -180)]
+    nhl = [c.quote("HOK", _ts(i), h, a, book="pinnacle", market="spreads", sport="NHL")
+           for i, (h, a) in enumerate(path)]
+    mlb = {c.quote("MLB", _ts(i), -110, -110, sport="MLB") for i in range(4)}
+    po.thin_repeats(c, today="2026-10-22")
+    assert c.ids() == {nhl[0], nhl[2], nhl[3], nhl[4], nhl[5]} | mlb
+    # Lossless: every as-of read returns the price it did before the thinning.
+    assert c.as_of("HOK", _ts(1), book="pinnacle") == (150, -170)
+    assert c.as_of("HOK", _ts(4), book="pinnacle") == (155, -175)
 
 
 def test_ncaab_keeps_its_path_like_the_nba():
