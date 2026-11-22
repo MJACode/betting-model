@@ -295,3 +295,31 @@ down this list.
   `h2h_h1` result arm, `totals_q1` in no totals arm, and every non-NCAAB period
   read off `nba_period_scores`, so EuroLeague period picks would have stayed
   pending forever.
+- **A stored start time can be two different clocks.** (NHL, 2026-11-22.) The
+  odds feed lists a game about ten minutes after its scheduled puck drop, and
+  settlement later moves some games back to the scheduled time, so history
+  mixes both: 4% of 2021-22 NHL games sit 5-15 minutes past the hour or half
+  hour, 59% of 2023-24, 85% of 2025-26 (SELECT on `games.commence_time`). A
+  replay that cut at "stored start less the live 10-minute margin" stopped 10
+  minutes early on every game stored at its scheduled time, lost 71 nights and
+  read +31.9u where the live rule makes +66.5u. Cut a replay at the moment the
+  live rule really stops (here the scheduled puck drop,
+  `scripts/nhl_best_bet_night_replay.scheduled_start`), and before blaming the
+  research for a late bet, check it against the scheduled time: none of the
+  research's 81 last-10-minute bets was after it.
+- **A new card on a market another model already bets must be seen by that
+  model.** (NHL, 2026-11-22; the second time after EuroLeague, above.) The
+  side-conflict check only read models in `config.MODELS`, so a rule card's
+  bet was invisible to the side models deciding after it, and the totals card
+  only read its own bets. The check now resolves rule cards
+  (`models/scorer._rule_card_markets`) and covers the puck line and the total
+  over every final score.
+- **"Priced after the news" is per market, not per game.** (NHL, 2026-11-22.)
+  The totals card's goalie filter keeps a game when its newest Pinnacle fetch
+  is after the confirmation; with one market that is right. A card on four
+  markets priced each on that market's own newest fetch, and Pinnacle's
+  markets are not fetched together (19 of 96 recent games had the 3-way more
+  than 30 minutes older than the total). Checked per game, the replay bet 26
+  extra nights, mostly 3-way prices set before the goalie news.
+  `models/nhl_best_bet_night.after_confirmation` checks each (game, market).
+

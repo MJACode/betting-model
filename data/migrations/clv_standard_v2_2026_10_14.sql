@@ -32,7 +32,7 @@
 
 DO $mig$
 DECLARE
-  fn_comment text := 'clv-standard-v2-power-80-0.05-12-tennis-euroleague-pregame';
+  fn_comment text := 'clv-standard-v2-power-80-0.05-12-tennis-euroleague-pregame-nhl-night';
   work_left boolean;
   def text;
   new_def text;
@@ -233,6 +233,10 @@ BEGIN
         WHEN 'euroleague_home_dog_spread' THEN 'spreads'
         WHEN 'euroleague_h1_dog_ml' THEN 'h2h_h1'
         WHEN 'euroleague_q1_club_share_total' THEN 'totals_q1'
+        WHEN 'nhl_night_puckline' THEN 'spreads'
+        WHEN 'nhl_night_total' THEN 'totals'
+        WHEN 'nhl_night_moneyline' THEN 'h2h'
+        WHEN 'nhl_night_regulation' THEN 'h2h_3way'
         ELSE 'h2h'
       END
     $body$;
@@ -384,7 +388,7 @@ BEGIN
     $body$;
 
     COMMENT ON FUNCTION public.clv_power_fair(double precision[]) IS
-      'clv-standard-v2-power-80-0.05-12-tennis-euroleague-pregame';
+      'clv-standard-v2-power-80-0.05-12-tennis-euroleague-pregame-nhl-night';
   END IF;
 
   SELECT EXISTS (

@@ -80,15 +80,18 @@ def test_a_market_not_listed_is_never_a_conflict():
     assert sc.picks_cannot_both_win(a, b) is False
 
 
-def test_both_nhl_side_models_are_held_back_and_nothing_else_is():
-    assert sc.side_checked_models() == {"nhl_moneyline", "nhl_moneyline_regulation"}
+def test_the_nhl_side_models_are_held_back_and_nothing_else_is():
+    """The puck line joined on 2026-11-22 (it has bet nothing since
+    2026-08-01, so this changes no pick it has made)."""
+    assert sc.side_checked_models() == {"nhl_moneyline", "nhl_moneyline_regulation",
+                                        "nhl_puckline"}
 
 
 # ── the check itself ─────────────────────────────────────────────────────────
 
 def test_tonights_case_a_standing_bet_keeps_the_game():
     """BOS (Regulation) was bet first; LAK ML comes after and is not bet."""
-    conn = _Conn([("nhl_moneyline_regulation", "away", "BOS (Regulation)")])
+    conn = _Conn([("nhl_moneyline_regulation", "away", "BOS (Regulation)", None)])
     new = [ml("home", "LAK ML"), ml("away", "BOS ML", signal="NONE")]
     assert sc._apply_side_conflicts(conn, GID, new) == 1
     lak = new[0]
@@ -130,7 +133,7 @@ def test_a_paused_models_bet_neither_holds_nor_loses_the_game():
 
 
 def test_no_new_bet_means_no_read():
-    conn = _Conn([("nhl_moneyline_regulation", "away", "BOS (Regulation)")])
+    conn = _Conn([("nhl_moneyline_regulation", "away", "BOS (Regulation)", None)])
     assert sc._apply_side_conflicts(conn, GID, [ml("home", "LAK ML", signal="NONE")]) == 0
     assert conn.calls == []
 
@@ -144,8 +147,81 @@ def test_the_standing_read_skips_void_and_paused_rows_and_reads_both_models():
     assert "condition_status IS DISTINCT FROM 'VOID'" in sql
     assert "downgrade_reason IS DISTINCT FROM" in sql
     assert params[0] == GID
-    assert set(params[1]) == {"nhl_moneyline", "nhl_moneyline_regulation"}
+    assert set(params[1]) == {"nhl_moneyline", "nhl_moneyline_regulation", "nhl_puckline",
+                              # the rule cards' bets stand too (2026-11-22)
+                              "nhl_night_puckline", "nhl_night_total", "nhl_night_moneyline",
+                              "nhl_night_regulation", "nhl_over_under"}
     assert params[2] == config.PAUSED_NOTE
+    assert "scored_line" in sql
+
+
+# ── the puck line, the total, and the rule cards (2026-11-22) ───────────────
+#
+# The NHL best bet a night (models/nhl_best_bet_night.py) bets the puck line,
+# the total, the moneyline and the 3-way from its own card. A side model that
+# decides after it must see that bet; scored_line is the HOME number.
+
+def pl(side, label, line, **kw):
+    return _pick("nhl_puckline", side, label, scored_line=line, **kw)
+
+
+def night(market, side, label, line=None, **kw):
+    mid = {"spreads": "nhl_night_puckline", "totals": "nhl_night_total",
+           "h2h": "nhl_night_moneyline", "h2h_3way": "nhl_night_regulation"}[market]
+    return _pick(mid, side, label, scored_line=line, **kw)
+
+
+@pytest.mark.parametrize("a,b,clash", [
+    (pl("home", "LAK -1.5", -1.5), ml("away", "BOS ML"), True),
+    (pl("home", "LAK -1.5", -1.5), ml("home", "LAK ML"), False),
+    (pl("away", "BOS +1.5", -1.5), ml("home", "LAK ML"), False),       # LAK by one wins both
+    (pl("away", "BOS +1.5", -1.5), pl("home", "LAK -1.5", -1.5), True),
+    (pl("home", "LAK +1.5", 1.5), pl("away", "BOS -1.5", 1.5), True),
+    (pl("home", "LAK -1.5", -1.5), reg("draw", "BOS @ LAK Draw (Regulation)"), True),  # OT is by one
+    (pl("away", "BOS -1.5", 1.5), reg("draw", "BOS @ LAK Draw (Regulation)"), True),
+    (pl("home", "LAK +1.5", 1.5), reg("draw", "BOS @ LAK Draw (Regulation)"), False),
+    (pl("home", "LAK -1.5", -1.5), reg("home", "LAK (Regulation)"), False),
+    (night("totals", "over", "Over 6.5", 6.5), night("totals", "under", "Under 6.5", 6.5), True),
+    (night("totals", "over", "Over 5.5", 5.5), night("totals", "under", "Under 6.5", 6.5), False),
+    (night("totals", "over", "Over 6.5", 6.5), night("totals", "under", "Under 5.5", 5.5), True),
+    (night("totals", "under", "Under 6.5", 6.5), ml("home", "LAK ML"), False),
+    (night("h2h", "home", "LAK ML"), reg("away", "BOS (Regulation)"), True),
+    (night("h2h_3way", "draw", "BOS @ LAK Draw (Regulation)"), ml("home", "LAK ML"), False),
+])
+def test_puck_lines_totals_and_rule_cards(a, b, clash):
+    assert sc.picks_cannot_both_win(a, b) is clash
+    assert sc.picks_cannot_both_win(b, a) is clash
+
+
+def test_a_line_that_cannot_be_read_is_not_guessed_at():
+    assert sc.picks_cannot_both_win(pl("home", "LAK -1.5", None), ml("away", "BOS ML")) is False
+
+
+def test_a_standing_night_bet_keeps_the_game_from_a_side_model():
+    """The night card bet LAK -1.5 at 3pm; the moneyline model decides BOS ML
+    later in the evening's pass, and is not bet."""
+    conn = _Conn([("nhl_night_puckline", "home", "LAK -1.5", -1.5)])
+    new = [ml("away", "BOS ML")]
+    assert sc._apply_side_conflicts(conn, GID, new) == 1
+    assert new[0]["signal_type"] == "NONE"
+    assert "LAK -1.5" in new[0]["downgrade_reason"]
+
+
+def test_a_standing_total_never_blocks_a_side():
+    conn = _Conn([("nhl_night_total", "under", "Under 6.5", 6.5)])
+    new = [ml("away", "BOS ML"), pl("home", "LAK -1.5", -1.5, signal="NONE")]
+    assert sc._apply_side_conflicts(conn, GID, new) == 0
+    assert new[0]["signal_type"] == "BET"
+
+
+def test_the_totals_card_reads_the_same_standing_bets():
+    conn = _Conn([("nhl_night_total", "over", "Over 6.5", 6.5)])
+    under = {"game_id": GID, "model_id": "nhl_over_under", "pick_side": "under",
+             "pick_label": "Under 6.5", "scored_line": 6.5}
+    held = sc.conflicting_standing_bet(conn, under)
+    assert held is not None and held["pick_label"] == "Over 6.5"
+    conn = _Conn([("nhl_night_total", "over", "Over 5.5", 5.5)])
+    assert sc.conflicting_standing_bet(conn, under) is None
 
 
 # ── the regulation model decides when the moneyline model does ──────────────

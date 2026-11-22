@@ -669,6 +669,14 @@ ACTION_THRESHOLDS: dict = {
     # the edge over the price taken is about half a point, which a 0.05 edge
     # cut would hide on every surface.
     "nhl_over_under":           {"min_prob": 0.0, "min_edge": 0.0},
+    # NHL best bet a night (mike, 2026-11-22: "Yes"), four ids, one rule, one bet a
+    # night: models/nhl_best_bet_night.py. THE CUT IS EV, in MODEL_OWN_EV_FLOOR,
+    # on Pinnacle's power-de-vigged price; prob / edge 0.0 so every surface shows
+    # what the card wrote, as for nhl_over_under.
+    "nhl_night_puckline":      {"min_prob": 0.0, "min_edge": 0.0},
+    "nhl_night_total":         {"min_prob": 0.0, "min_edge": 0.0},
+    "nhl_night_moneyline":     {"min_prob": 0.0, "min_edge": 0.0},
+    "nhl_night_regulation":    {"min_prob": 0.0, "min_edge": 0.0},
     "nhl_puckline":             {"min_prob": 0.55, "min_edge": 0.05},
     # NHL blocked shots at DraftKings (models/nhl_prop_blocked_shots.py, mike
     # 2026-10-01: "just build profitable models"). THE CUT IS EV, in
@@ -2467,6 +2475,12 @@ MODEL_MIN_ODDS: dict = {
     # was graded at (scripts/nhl_totals_lab.py, `price >= -200`). Pinned here
     # so a Railway DEFAULT_MIN_ODDS override cannot move it off its evidence.
     "nhl_over_under":            -200,
+    # NHL best bet a night (mike, 2026-11-22): -200 is the floor its evidence was
+    # graded at (scripts/nhl_best_bet_confirmed_goalies.py via the lab's MIN_ODDS).
+    "nhl_night_puckline":       -200,
+    "nhl_night_total":          -200,
+    "nhl_night_moneyline":      -200,
+    "nhl_night_regulation":     -200,
     # NBA prop rule (mike, 2026-10-15). -200 is the floor its evidence was
     # regraded at (24,572 bets, +2.96%, 90% CI +1.85..+4.05, positive every
     # season; docs/nba_models_2026.md 4.3). Pinned for the same reason as
@@ -2824,6 +2838,15 @@ MODEL_OWN_EV_FLOOR: dict = {
     # was replicated on 2024-25 and 2025-26: same fetch every time, units
     # within 0.06 (models/nhl_totals_market.py).
     "nhl_over_under":            0.01,
+    # NHL best bet a night (mike, 2026-11-22). At each game's first fetch after both
+    # goalies were confirmed, the first bet of the night, power de-vig, 2021-22 to
+    # 2025-26 (docs/nhl_sharp_vs_soft.md): EV >= 0.01 323 bets +63.9u +18.6%
+    # (+5.6..+31.6), every season positive; >= 0.02 +9.0% on 164; >= 0.03 -11.1%
+    # on 80. 0.01 is the floor that holds; a higher one did not do better.
+    "nhl_night_puckline":       0.01,
+    "nhl_night_total":          0.01,
+    "nhl_night_moneyline":      0.01,
+    "nhl_night_regulation":     0.01,
     # NBA prop rule (mike, 2026-10-15). Its own walk-forward grid on three
     # priced seasons, pooled unders, one bet per player and market, at the
     # best bettable book (scripts/nba_prop_market_lab.py):
@@ -3052,6 +3075,13 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # and 0.565 to exactly 0.500 (probability_calibration.apply_calibration),
     # which is EV -0.024 at -105: under it the model could never bet.
     "nhl_over_under",
+    # 2026-11-22 (mike). The best-bet-a-night rule's probability IS Pinnacle's
+    # power-de-vigged price, which its 0.01 floor was graded on; a borrowed map
+    # would move it, as for nhl_over_under.
+    "nhl_night_puckline",
+    "nhl_night_total",
+    "nhl_night_moneyline",
+    "nhl_night_regulation",
     # 2026-10-12 (mike: "yes"). Its probability IS the sharp reference's no-vig
     # price, which its cut and its 0.07 floor were measured on. The promoted
     # map is an offset (a=1, b=-0.28) fitted on n=23 graded picks and marked
@@ -3289,6 +3319,10 @@ SCORING_METHODS: dict = {
     "mlb_total_market":    "rule",    # models/mlb_game_market.py — Pin-lean vs soft implied 2pp, INSERT gated
     "mlb_total_public_fade": "rule",  # models/mlb_total_public_fade.py — fade public OVER, bet UNDER, INSERT gated
     "nhl_over_under":      "rule",    # models/nhl_totals_market.py — Pinnacle no-vig vs bettable books, same fetch
+    "nhl_night_puckline": "rule",    # models/nhl_best_bet_night.py — one bet a night, Pinnacle power no-vig vs bettable books (mike, 2026-11-22)
+    "nhl_night_total":    "rule",    # models/nhl_best_bet_night.py — one bet a night, Pinnacle power no-vig vs bettable books (mike, 2026-11-22)
+    "nhl_night_moneyline":"rule",    # models/nhl_best_bet_night.py — one bet a night, Pinnacle power no-vig vs bettable books (mike, 2026-11-22)
+    "nhl_night_regulation":"rule",    # models/nhl_best_bet_night.py — one bet a night, Pinnacle power no-vig vs bettable books (mike, 2026-11-22)
     "nba_prop_first_basket": "rule",    # models/nba_first_basket.py — tip + first-score share, blended with the books' median (mike, 2026-11-20)
     "nba_prop_market":     "rule",    # models/nba_prop_market.py — Pinnacle no-vig under vs bettable books, same line, same fetch (mike, 2026-10-15)
     # Trained, off-registry.
@@ -3426,6 +3460,10 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_moneyline":            0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_moneyline_regulation": 0.05,
     "nhl_over_under":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nhl_night_puckline":      0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nhl_night_total":         0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nhl_night_moneyline":     0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nhl_night_regulation":    0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_first_basket":    0.0,    # 2026-11-20 mike: cut is EV (0.05), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV (0.00), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
@@ -3538,6 +3576,10 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_moneyline":            0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_moneyline_regulation": 0.40,   # 3-way market — lower per-side prob
     "nhl_over_under":           0.0,    # cut is EV; see ACTION_THRESHOLDS
+    "nhl_night_puckline":      0.0,    # cut is EV; see ACTION_THRESHOLDS
+    "nhl_night_total":         0.0,    # cut is EV; see ACTION_THRESHOLDS
+    "nhl_night_moneyline":     0.0,    # cut is EV; see ACTION_THRESHOLDS
+    "nhl_night_regulation":    0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nba_prop_first_basket":    0.0,    # 2026-11-20 mike: cut is EV; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV; see ACTION_THRESHOLDS
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS

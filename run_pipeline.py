@@ -1870,6 +1870,22 @@ def step_nhl_over_under(dry_run: bool = False) -> bool:
         return False
 
 
+def step_nhl_best_bet_night(dry_run: bool = False) -> bool:
+    """NHL best bet a night (models/nhl_best_bet_night.py, mike 2026-11-22): at
+    most one bet a night across the puck line, total, moneyline and regulation
+    3-way, once both goalies of the game are confirmed, against Pinnacle's
+    no-vig price. Runs right after the totals card, so a game that card bet is
+    skipped (scripts/nhl_best_bet_night_card.py)."""
+    try:
+        from scripts.nhl_best_bet_night_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NHL best bet a night: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL best bet a night failed: {exc}")
+        return False
+
+
 def step_mlb_total_public_fade(run_date: str, dry_run: bool = False) -> bool:
     """Paper MLB totals public-fade card only. INSERT gated (default 0)."""
     try:
@@ -3160,7 +3176,7 @@ Examples:
                                  "nba-prop-projection", "nba-prop-project",
                                  "nba-total-luck", "nba-team-total-luck", "nba-first-half-total-luck", "nba-q1-trend",
                                  "nba-q1-trend-ml",
-                                 "nhl-over-under", "nhl-odds",
+                                 "nhl-over-under", "nhl-best-bet-night", "nhl-odds",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "nhl-schedule", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
@@ -3251,6 +3267,7 @@ Examples:
             "mlb-game-market": lambda: step_mlb_game_market(run_date, dry_run=args.dry_run),
             "mlb-total-public-fade": lambda: step_mlb_total_public_fade(run_date, dry_run=args.dry_run),
             "nhl-over-under": lambda: step_nhl_over_under(dry_run=args.dry_run),
+            "nhl-best-bet-night": lambda: step_nhl_best_bet_night(dry_run=args.dry_run),
             "nhl-odds":     lambda: step_nhl_odds(run_date),
             "nhl-goalie-designations": lambda: step_nhl_goalie_designations(),
             "nhl-goalie-designations-today": lambda: step_nhl_goalie_designations(today_only=True),
