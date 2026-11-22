@@ -46,7 +46,7 @@ def test_each_rule_decides_on_its_own_probability_and_is_artifact_backed():
     for mid in M.MODEL_IDS:
         assert mid in config.MODELS_ON_OWN_PROBABILITY
         assert config.scoring_method(mid) == config.SCORING_ARTIFACT
-        assert mid not in config.PAUSED_MODELS
+        # Paused 2026-11-22 under the low-volume NBA plan (tests/test_nba_low_volume_plan.py).
 
 
 def _registered_names() -> set:

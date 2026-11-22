@@ -34,6 +34,15 @@ run_nba_total_luck_window), so the full game is first; the team total and the
 first half decide in the same tick, side by side, and whichever commits first
 keeps the game.
 
+TEN A WEEK, ACROSS THE THREE (mike, 2026-11-22: "minimizing the number of bets
+that we have and maximizing the number of units ... 6-10 bets a week"; yes to the
+low-volume plan). At most MAX_NBA_GAME_TOTAL_BETS_PER_WEEK BETs a week, Monday to
+Sunday by game date, across the three models, first come first served. Graded
+(data/local/research/nba_research/reassess/studies/2026-11-21-stake-tiers):
+both teams 20+ games, ten a week by the luck gap +17.6% on 504 bets, ten a week
+at random +16.3% (500 draws), so taking the first ten loses nothing the gap would
+have kept. A bet the cap drops leaves its decision row, reason weekly_cap().
+
 HOW: each card's publish takes LOCK_KEY's lock BEFORE its own model's lock, then
 re-reads the other two models' BETs inside it. A dropped bet leaves no picks row;
 its decision row is still written, with n_bets 0 and the reason in its detail
@@ -43,6 +52,7 @@ from __future__ import annotations
 
 MODEL_IDS = ("nba_total_luck", "nba_team_total_luck", "nba_first_half_total_luck")
 MAX_NBA_GAME_TOTAL_BETS_PER_GAME = 1
+MAX_NBA_GAME_TOTAL_BETS_PER_WEEK = 10
 # One advisory-lock key shared by the three cards. Taken FIRST, before each
 # card's own model lock, by every writer that takes it: no cycle can form.
 LOCK_KEY = "nba_game_totals_one_a_game"
@@ -71,3 +81,42 @@ def other_bets(conn, game_ids: list[str], model_id: str) -> dict[str, str]:
 def reason(other_model_id: str) -> str:
     """The decision row's note for a bet this rule dropped."""
     return f"one_total_a_game:{other_model_id}_already_bet"
+
+
+def week_of(game_id: str) -> str:
+    """The Monday (ET game date) of the week a game falls in, from its id (NBA_<date>_<away>_<home>)."""
+    from datetime import date, timedelta
+    d = date.fromisoformat(game_id.split("_")[1])
+    return (d - timedelta(days=d.weekday())).isoformat()
+
+
+class WeeklyCap:
+    """The three models' BETs already written in each week the decided games fall in, counted under the
+    shared lock (lock() first), and kept current as this publish writes. A VOIDed or DUPLICATE bet does
+    not take a place: it was never a bet."""
+
+    def __init__(self, conn, game_ids: list[str]):
+        from datetime import date, timedelta
+        self.counts: dict[str, int] = {}
+        weeks = sorted({week_of(g) for g in game_ids})
+        if not weeks:
+            return
+        lo, hi = weeks[0], (date.fromisoformat(weeks[-1]) + timedelta(days=6)).isoformat()
+        for r in conn.execute(
+                "SELECT game_id, condition_status FROM picks WHERE model_id = ANY(%s) "
+                "AND signal_type = 'BET' AND game_date >= %s AND game_date <= %s",
+                (list(MODEL_IDS), lo, hi)).fetchall():
+            if len(r) > 1 and r[1] in ("VOID", "DUPLICATE"):
+                continue
+            w = week_of(r[0])
+            self.counts[w] = self.counts.get(w, 0) + 1
+
+    def full(self, game_id: str) -> bool:
+        return self.counts.get(week_of(game_id), 0) >= MAX_NBA_GAME_TOTAL_BETS_PER_WEEK
+
+    def add(self, game_id: str) -> None:
+        w = week_of(game_id)
+        self.counts[w] = self.counts.get(w, 0) + 1
+
+    def reason(self, game_id: str) -> str:
+        return f"weekly_cap:{MAX_NBA_GAME_TOTAL_BETS_PER_WEEK}_a_week_from_{week_of(game_id)}"

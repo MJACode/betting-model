@@ -1737,6 +1737,22 @@ PAUSED_MODELS: set = {
     # active with stale classifier artifacts — paused so neither can ever
     # surface a pick. ncaaf_spread stays LIVE on the margin-regression model.
     "ncaaf_moneyline",
+    # 2026-11-22 (mike: "yes for now" to the low-volume NBA plan). NBA bets only
+    # the three game-total over models (both teams 20+ games, ten a week across
+    # the three) and the first-quarter spread; these five stop betting. Not a
+    # loss pause: they place about 2,100 bets a season, and his goal is the fewest
+    # bets for the most units on a 100-unit bankroll. Season simulation
+    # (data/local/research/nba_research/reassess/studies/2026-11-21-stake-tiers,
+    # bankroll100.py): with them the middle case makes +74 units a season, but
+    # if the prop models keep this season's live -15.3% the season loses 84 units
+    # and a 100-unit losing stretch comes 58% of the time; without them +32 units
+    # and 0.1%. Their settled records stay in the record (CLAUDE.md 1c).
+    # Updated-By: mike.
+    "nba_prop_projection",
+    "nba_prop_market",
+    "nba_prop_first_basket",
+    "nba_live_spread_q12",
+    "nba_q1_trend_ml",
     # ncaaf_over_under UNPAUSED 2026-08-25: replaced the dead AUC-0.49
     # classifier with a TOTAL-REGRESSION artifact (kind="total_regression",
     # scripts/ncaaf_margin_eval --fit-totals). It predicts the total from
