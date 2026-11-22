@@ -105,8 +105,8 @@ MAX_SILENCE: dict = {
     # nba_team_total_luck and nba_first_half_total_luck
     # (scripts/nba_pregame_window.py), so one entry.
     "nba_total_luck_window": 20,
-    # Every five minutes, 11:00-23:55 ET, and it beats on the idle ticks too.
-    # Off overnight by design (23:55 to 11:00 is 665 minutes), so the bound has
+    # Every five minutes, 9:00-23:55 ET, and it beats on the idle ticks too.
+    # Off overnight by design (23:55 to 9:00 is 545 minutes), so the bound has
     # to clear that gap, as the NFL in-play worker's does. Inside its hours the
     # tighter bound in ACTIVE_HOURS_ET applies.
     "nhl_goalie_window": 700,
@@ -180,7 +180,7 @@ MAX_SILENCE: dict = {
 # overnight. Without it the NHL goalie window, if it stopped at noon, was
 # reported around 23:40 ET, after the slate it exists for.
 ACTIVE_HOURS_ET: dict = {
-    "nhl_goalie_window": (11, 23, 30),
+    "nhl_goalie_window": (9, 23, 30),
     # The NBA in-play loop beats every 5 minutes while a slate runs
     # (models/nba_live_loop.Loop.heartbeat) and on every idle relaunch (every
     # 10 minutes), so 30 minutes of silence in its hours is a hung loop.
