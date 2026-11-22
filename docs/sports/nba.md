@@ -19,7 +19,8 @@
 > **`docs/nba_first_basket.md`**.
 >
 > **The low-volume plan (2026-11-22, mike: "yes for now").** NBA bets only four models: the three
-> game-total overs (`nba_total_luck`, `nba_first_half_total_luck`, `nba_team_total_luck`), once both
+> shooting-luck game-total models (`nba_total_luck` full-game over, `nba_first_half_total_luck`
+> first-half over, `nba_team_total_luck` home team-total under), once both
 > teams have played **20** games, at most one a game and **ten a week** across the three
 > (`scripts/nba_game_totals_door.py`), and the first-quarter spread (`nba_q1_trend`). Paused, under
 > his name: `nba_prop_projection`, `nba_prop_market`, `nba_prop_first_basket`, `nba_live_spread_q12`,

@@ -1,6 +1,7 @@
 """The low-volume NBA plan (mike, 2026-11-22: "yes for now").
 
-NBA bets only the three game-total over models, once both teams have played 20 games and at most ten
+NBA bets only the three shooting-luck game-total models (full-game over, first-half over, home
+team-total under), once both teams have played 20 games and at most ten
 a week across the three, and the first-quarter spread. The prop models, first basket, the in-play
 first-half spread and the first-quarter moneyline are paused. Evidence:
 data/local/research/nba_research/reassess/studies/2026-11-21-stake-tiers/RESULT.md.
@@ -73,3 +74,18 @@ def test_each_game_total_card_consults_the_cap_before_it_writes_a_bet():
         src = inspect.getsource(card.publish)
         assert "door.WeeklyCap(conn, gids)" in src, card.__name__
         assert "cap.full(d.game_id)" in src and "cap.add(d.game_id)" in src, card.__name__
+
+
+def test_a_paused_nba_prop_card_marks_every_row_it_writes():
+    """The prop cards keep running while paused (as every rule card does); each row they write carries
+    config.PAUSED_NOTE, the marker every publisher and record query keys on, so a bet written while
+    paused is never posted and never counted (the UX review of PR #1580 found the marker missing)."""
+    import scripts.nba_first_basket_card as fbc
+    import scripts.nba_prop_market_card as mkc
+    import scripts.nba_prop_projection_card as pjc
+    from tests.test_nba_prop_market import _bet
+    (row,) = mkc.pick_rows([_bet()], bankroll=1000.0)
+    assert row["downgrade_reason"] == config.PAUSED_NOTE
+    for card in (mkc, pjc, fbc):
+        assert "downgrade_reason" in card._COLS, card.__name__
+        assert '"downgrade_reason": _pause_note(MODEL_ID)' in inspect.getsource(card.pick_rows), card.__name__

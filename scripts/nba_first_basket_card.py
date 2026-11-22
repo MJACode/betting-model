@@ -208,6 +208,7 @@ def pick_label(bet: fbm.FirstBasketBet) -> str:
 
 def pick_rows(bets: list[fbm.FirstBasketBet], bankroll: float, ids: dict | None = None) -> list[dict]:
     """Bets -> picks rows. `ids`: {game_id: NBA.com player id} where one resolved."""
+    from models.scorer import _pause_note
     rows = []
     for b in bets:
         label = pick_label(b)
@@ -242,6 +243,9 @@ def pick_rows(bets: list[fbm.FirstBasketBet], bankroll: float, ids: dict | None 
             "best_implied_prob": None if at_dk else round(dec_implied, 4),
             "best_edge": None if at_dk else decision_edge,
             "best_bet_link": None if at_dk else b.link,
+            # config.PAUSED_NOTE while the model is paused (models.scorer._pause_note): the row's own
+            # marker, which every publisher and record query keys on (as scripts/nba_total_luck_card).
+            "downgrade_reason": _pause_note(MODEL_ID),
             "_ev": round(b.ev, 4),
         })
     return rows
@@ -252,7 +256,8 @@ _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", 
          "scored_line", "kelly_fraction", "recommended_bet", "bankroll_at_pick", "signal_type",
          "confidence_tier", "prop_market", "player_key", "player_id", "dk_bet_link", "line_book",
          "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
-         "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link")
+         "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link",
+         "downgrade_reason")
 _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
            f"VALUES ({', '.join('%(' + c + ')s' for c in _COLS)}) "
            f"ON CONFLICT DO NOTHING RETURNING pick_id")

@@ -1738,7 +1738,8 @@ PAUSED_MODELS: set = {
     # surface a pick. ncaaf_spread stays LIVE on the margin-regression model.
     "ncaaf_moneyline",
     # 2026-11-22 (mike: "yes for now" to the low-volume NBA plan). NBA bets only
-    # the three game-total over models (both teams 20+ games, ten a week across
+    # the three shooting-luck game-total models (full-game and first-half overs, home
+    # team-total under; both teams 20+ games, ten a week across
     # the three) and the first-quarter spread; these five stop betting. Not a
     # loss pause: they place about 2,100 bets a season, and his goal is the fewest
     # bets for the most units on a 100-unit bankroll. Season simulation
