@@ -189,3 +189,6 @@ graphify-out/.graphify_root
 graphify-out/.graphify_*.json
 !graphify-out/.graphify_labels.json
 !graphify-out/.graphify_labels.pending.json
+
+# Disposable master-baseline worktrees (CLAUDE.md section 7)
+.claude/worktrees/

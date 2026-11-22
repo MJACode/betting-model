@@ -89,6 +89,10 @@ const DEFAULT_ROWS = 10;
 // get_prop_board: a full NBA slate at one line was 70 players on 2026-11-21.
 const BOARD_MAX_ROWS = 50;
 const BOARD_DEFAULT_ROWS = 25;
+// get_slate returns the whole day. The 20-row cap cut a 59-game NCAAF Saturday
+// at its 13:05 ET kickoffs, so the night games were never listed (2026-11-21).
+// The biggest day stored since 2026-11-14 is 71 NCAAB games.
+const SLATE_MAX_ROWS = 200;
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
@@ -102,7 +106,7 @@ const TOOLS = [
   {
     name: "get_slate",
     title: "Games on a day",
-    description: "Games for one league today or tomorrow (ET): game id, start time, teams, score if final.",
+    description: "Every game for one league today or tomorrow (ET), in kickoff order: game id, start time, teams, score if final, and has_lines (whether get_game_lines has sportsbook prices for it).",
     inputSchema: {
       type: "object", additionalProperties: false, required: ["sport"],
       properties: { sport: sportProp, day: { type: "string", enum: ["today", "tomorrow"], default: "today" } },
@@ -346,20 +350,24 @@ async function runTool(name: string, a: Record<string, unknown>, user: string): 
       const day = pick(a.day, ["today", "tomorrow"] as const, "today");
       const date = etDate(day === "today" ? 0 : 1);
       const rows = await read((tx) => tx`
-        select game_id, starts_at, away_team, home_team, home_score, away_score, final
-          from mcp_stats.games where sport = ${sport} and game_date = ${date}
-         order by starts_at nulls last, game_id limit ${MAX_ROWS}`);
+        select g.game_id, g.starts_at, g.away_team, g.home_team, g.home_score, g.away_score, g.final,
+               exists (select 1 from mcp_stats.game_prices gp
+                        where gp.sport = g.sport and gp.game_id = any(g.alias_ids)) as has_lines
+          from mcp_stats.games g where g.sport = ${sport} and g.game_date = ${date}
+         order by g.starts_at nulls last, g.game_id limit ${SLATE_MAX_ROWS + 1}`);
+      const truncated = rows.length > SLATE_MAX_ROWS;
       const games = [];
-      for (const r of rows) {
+      for (const r of rows.slice(0, SLATE_MAX_ROWS)) {
         games.push({
           game_id: await seal(user, "g", sport, r.game_id),
           starts_at: r.starts_at, away: r.away_team, home: r.home_team,
           away_score: r.final ? numOut(r.away_score) : null,
           home_score: r.final ? numOut(r.home_score) : null,
           final: !!r.final,
+          has_lines: !!r.has_lines,
         });
       }
-      return { data: { sport, date, games }, rows: games.length };
+      return { data: { sport, date, games, ...(truncated ? { truncated: true } : {}) }, rows: games.length };
     }
 
     case "find_player": {
@@ -589,11 +597,17 @@ async function runTool(name: string, a: Record<string, unknown>, user: string): 
 
     case "get_game_lines": {
       const g = await unseal(user, "g", a.game_id);
+      // A game can be stored under two ids (NCAAF: the CFBD UTC-dated twin and
+      // the odds feed's ET id); alias_ids names both, so the prices are found
+      // whichever id a game id from an older slate carries.
       const rows = await read((tx) => tx`
+        with gm as (
+          select away_team, home_team, starts_at, alias_ids from mcp_stats.games
+           where sport = ${g.sport} and game_date >= ${etDate(-1)} and ${g.id} = any(alias_ids) limit 1)
         select gp.market, gp.book, gp.home_price, gp.away_price, gp.draw_price, gp.spread_home, gp.total_line,
                gp.over_price, gp.under_price, gm.away_team, gm.home_team, gm.starts_at
-          from mcp_stats.game_prices gp join mcp_stats.games gm on gm.game_id = gp.game_id
-         where gp.sport = ${g.sport} and gp.game_id = ${g.id} limit 60`);
+          from gm join mcp_stats.game_prices gp on gp.game_id = any(gm.alias_ids)
+         where gp.sport = ${g.sport} limit 60`);
       if (!rows.length) throw new ToolError("not_found");
       const best = (cands: any[], price: string) =>
         cands.filter((r) => r[price] !== null)
