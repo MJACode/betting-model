@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, odds clean-up keeps NHL's whole price path (NHL in PATH_KEPT_SPORTS; about 2 GB a season) (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, the PC backup fetches master before refreshing its scripts (#1542, #1558); first run on it clean, #1541 closed (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, first-basket and NCAAF bets grade on the refresh: play-by-play pulled for waiting first-basket finals, ncaaf-results added before settle |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, NHL goalie window: each refresh pass starts a goalie tick as it ends, and the window starts at 9:00 ET (#1568; evening ESPN reads were 10 minutes apart) (mike) |
