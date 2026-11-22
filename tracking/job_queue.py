@@ -1102,6 +1102,40 @@ def _validate_nhl_derivative_odds_history(args: dict) -> dict:
     return {"apply": apply, "probe": probe, "seasons": cleaned}
 
 
+# DailyFaceoff's starting-goalie archive (data/ingestors/nhl_goalie_archive.py):
+# who started in goal for every NHL game from 2021-11-18, and when it was
+# confirmed. Free (one page a date), idempotent: a date already stored is not
+# fetched again. mike, 2026-11-22: "yes to all" to the backfill.
+_NHL_GOALIE_ARCHIVE_ARGS = frozenset({"apply", "start", "end"})
+
+
+def _job_nhl_goalie_archive(**kw):
+    """Fetch and store DailyFaceoff's archived goalie cards. Dry run unless apply."""
+    argv: list[str] = []
+    if kw.get("start"):
+        argv += ["--start", str(kw["start"])]
+    if kw.get("end"):
+        argv += ["--end", str(kw["end"])]
+    if kw.get("apply"):
+        argv.append("--apply")
+    return _run_script_main("data.ingestors.nhl_goalie_archive", argv)[-4000:]
+
+
+def _validate_nhl_goalie_archive(args: dict) -> dict:
+    extra = sorted(set(args) - _NHL_GOALIE_ARCHIVE_ARGS)
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes apply, start and end")
+    if "apply" in args and not isinstance(args["apply"], bool):
+        raise ValueError("apply must be true or false")
+    out = {"apply": bool(args.get("apply", False)), "start": None, "end": None}
+    for k in ("start", "end"):
+        if args.get(k) is not None:
+            out[k] = datetime.strptime(str(args[k]), "%Y-%m-%d").date().isoformat()
+    if out["start"] and out["end"] and out["start"] > out["end"]:
+        raise ValueError(f"start after end: {out['start']} > {out['end']}")
+    return out
+
+
 # ── NHL research scripts, run where the database is ─────────────────────────
 #
 # 2026-10-08. The NHL backtests and labs read production through
@@ -2996,6 +3030,8 @@ JOBS = {
     # _job_nhl_derivative_odds_history.
     "nhl_derivative_odds_history": (_job_nhl_derivative_odds_history,
                                     _validate_nhl_derivative_odds_history),
+    # DailyFaceoff's goalie archive, free. See _job_nhl_goalie_archive.
+    "nhl_goalie_archive": (_job_nhl_goalie_archive, _validate_nhl_goalie_archive),
     # Measure-only: one allowlisted NHL backtest or lab, its printout on the
     # row. Writes nothing else. See _job_nhl_research.
     "nhl_research": (_job_nhl_research, _validate_nhl_research),

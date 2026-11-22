@@ -1898,5 +1898,14 @@
       ],
       "credit_cap": 52000
     }
+  },
+  {
+    "key": "nhl-goalie-archive-2026-11-22",
+    "job_type": "nhl_goalie_archive",
+    "requested_by": "mike",
+    "note": "mike, 2026-11-22: 'Decisions: yes to all' (backfill DailyFaceoff's goalie times and re-test the best bet a night on confirmed-goalie games). Fetches DailyFaceoff's starting-goalie page for every NHL date from 2021-11-18 to yesterday, one page every 1.5 s, and stores each team's goalie, status, and the time of the news item (and of the X post it links) in nhl_goalie_archive. Free, no Odds API credits; a date already stored is skipped.",
+    "args": {
+      "apply": true
+    }
   }
 ]
