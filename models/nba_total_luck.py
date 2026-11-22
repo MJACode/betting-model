@@ -54,8 +54,9 @@ THE RULE, per regular-season game:
   2. PROJECTION: pace = mean of the two teams' possessions per game;
        total = pace/100 x [ORtg_H + DRtg_A + ORtg_A + DRtg_H - 2 x league rating]
      gap = adjusted total - raw total, in points.
-  3. BOTH TEAMS NEED 10+ GAMES this season (LIVE_MIN_GAMES; CLAUDE.md
-     section 3). Restored 2026-11-18 on mike's instruction ("NBA is bleeding
+  3. BOTH TEAMS NEED 20+ GAMES this season (LIVE_MIN_GAMES; 20 from 2026-11-22,
+     mike's low-volume NBA plan; 10 before that, CLAUDE.md
+     section 3). The 10 was restored 2026-11-18 on mike's instruction ("NBA is bleeding
      money ... just do it"), reversing his instruction of 2026-11-02, which
      had taken the wait off (one game was enough from 11-02 to 11-17). The
      evidence above is the games with both teams on 10+ (MIN_GAMES, which the
@@ -175,9 +176,14 @@ MIN_GAMES = 10               # the population every lab and replay graded
 # from 2026-11-18 (mike), reversing 2026-11-02's no wait (it was 1 from
 # 2026-11-02 to 2026-11-17). The reason is rule 3 of the docstring. Do not
 # lower it without a backtest of the games it lets in:
-# tests/test_nba_total_luck.py::test_the_live_wait_is_ten_games_on_all_three_models
-# fails below 10.
-LIVE_MIN_GAMES = 10
+# tests/test_nba_total_luck.py::test_the_live_wait_is_twenty_games_on_all_three_models
+# fails below 20.
+# 20 from 2026-11-22 (mike: yes to the low-volume NBA plan): with both teams 20+
+# games the three models' bets returned +15.3% on 743 (2023-24..2025-26) against
+# +5.8% on the 199 at 10-19 games; on the full-game model's unseen seasons
+# (2020-21..2022-23) +5.0% on 205 against -4.4% on 83
+# (data/local/research/nba_research/reassess/studies/2026-11-21-stake-tiers).
+LIVE_MIN_GAMES = 20
 
 BOX_COLS = {"points": "pts", "fg_att": "fga", "fg3_made": "fg3m", "fg3_att": "fg3a",
             "ft_made": "ftm", "ft_att": "fta", "offensive_reb": "oreb", "turnovers": "tov"}

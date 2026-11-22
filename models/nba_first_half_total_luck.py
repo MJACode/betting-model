@@ -41,7 +41,8 @@ already bets.
 THE RULE, per regular-season game:
   1. RATINGS AND COMPLETENESS: exactly models/nba_total_luck.py's (team_box,
      f4_projections, missing_inputs, regular_season), imported. Both teams need
-     10+ games this season (LIVE_MIN_GAMES, the full-game model's): the wait is
+     20+ games this season (LIVE_MIN_GAMES, the full-game model's; 20 from 2026-11-22,
+     mike's low-volume NBA plan): the 10-game wait was
      back from 2026-11-18 on mike's instruction, reversing his of 2026-11-02
      (one game was enough from 11-02 to 11-17). It is the population the
      evidence above was graded on; the reason is rule 3 of

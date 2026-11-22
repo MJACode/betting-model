@@ -209,16 +209,26 @@ check('an active batter prop is still a bet type you can build on',
   check('NFL has no moneyline model, so it does not invent an ML row',
     row('NFL').join(',') === 'Spread|Spread line,Player props|All player markets');
   // The NBA rebuild retired nba_moneyline and nba_spread (config
-  // RETIRED_MODELS); the live NBA models are the nba_prop_market rule and the
-  // nba_prop_projection model, both props, so the picker offers Player props
-  // and nothing else for NBA.
-  check('NBA is Player props only — its moneyline and spread are retired',
-    row('NBA').join(',') === 'Player props|All player markets');
+  // RETIRED_MODELS); NBA's picker models are its three prop models. All three
+  // are paused from 2026-11-22 (mike, the low-volume NBA plan), and the picker
+  // hides a paused model (Matt, 2026-09-19), so NBA has no picker row. The game
+  // totals still bet but were never a picker slot (below).
+  check('NBA has no picker row while its three prop models are paused (2026-11-22)',
+    row('NBA').join(',') === '', row('NBA').join(','));
+  // Unpaused on the server, NBA is Player props only, writing the three prop models.
+  setServerThresholds({
+    nba_prop_market: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: false },
+    nba_prop_projection: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: false },
+    nba_prop_first_basket: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: false },
+  });
+  check('unpaused, NBA is Player props only — its moneyline and spread are retired',
+    row('NBA').join(',') === 'Player props|All player markets', row('NBA').join(','));
   const nbaProps = betTypePickerGroups().find((g) => g.sport === 'NBA')?.choices.find((c) => c.slot === 'props');
   // "All player markets": the two stat-prop models and, from 2026-11-20, first basket (mike).
-  check('NBA Player props writes the three live NBA prop models, not a retired per-stat model',
+  check('unpaused, NBA Player props writes the three NBA prop models, not a retired per-stat model',
     nbaProps?.modelIds.join(',') === 'nba_prop_market,nba_prop_projection,nba_prop_first_basket',
     nbaProps?.modelIds.join(','));
+  setServerThresholds(null);
   check('the NBA totals overs are a game line the picker does not offer as a slot',
     MODEL_META.nba_total_luck?.type === 'game' && betSlotForModel('nba_total_luck', 'game') === null);
   check('the NBA home team-total unders are a game line the picker does not offer as a slot',
@@ -299,7 +309,10 @@ check('a pick a paused model already made still opens its player\'s stat page',
 // Read from the model catalog. The NBA and NFL live prop models are
 // multi-market rules with no single stat, so the old stat-catalog test told an
 // NBA or NFL player page that no prop model priced it.
-check('a live prop model prices NBA players (nba_prop_market)', sportHasLivePropModel('NBA'));
+// NBA's three prop models are paused from 2026-11-22 (the low-volume plan): no live prop model
+// prices NBA players until one is unpaused (the server-flag checks below unpause them).
+check('no live prop model prices NBA players while its prop models are paused (2026-11-22)',
+  !sportHasLivePropModel('NBA'));
 check('a live prop model prices NFL players (nfl_prop_market)', sportHasLivePropModel('NFL'));
 check('no prop model prices NCAAF players', !sportHasLivePropModel('NCAAF'));
 
@@ -371,6 +384,7 @@ setServerThresholds(null);
 // still does; with both paused, none does.
 setServerThresholds({
   nba_prop_market: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: true },
+  nba_prop_projection: { min_prob: 0, min_edge: 0, min_odds: -200, prob_only: false, paused: false },
 });
 check('the projection model alone keeps NBA priced when the rule is paused',
   sportHasLivePropModel('NBA'));

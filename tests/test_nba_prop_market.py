@@ -780,7 +780,7 @@ def test_config_registers_a_rule_outside_the_training_registries():
     assert config.MODEL_OWN_EV_FLOOR[mid] == 0.0
     assert config.SCORING_METHODS[mid] == "rule"
     assert mid not in config.MODELS and mid not in config.PROP_MODELS
-    assert mid not in config.LIVE_MODELS and mid not in config.PAUSED_MODELS
+    assert mid not in config.LIVE_MODELS   # paused 2026-11-22: tests/test_nba_low_volume_plan.py
     assert mid.startswith("nba_prop_") and "live" not in mid
 
 
