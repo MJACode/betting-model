@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, best bet a night re-tested with both goalies confirmed: +18.1% on 345 (power), every season positive, totals carry much of it (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, DailyFaceoff's goalie archive from 2021-11-18 stored by a worker job, for the confirmed-goalie re-test (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, odds clean-up keeps NHL's whole price path (NHL in PATH_KEPT_SPORTS; about 2 GB a season) (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, the PC backup fetches master before refreshing its scripts (#1542, #1558); first run on it clean, #1541 closed (mike) |

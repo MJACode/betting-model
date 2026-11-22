@@ -251,6 +251,45 @@ first period 9.
   2026-10-24, and this season's prices are thinned.
 - **The first-period market's book is gone** in 2026-27 (9 of the 478 bets).
 
+## The best bet a night with both goalies confirmed (2026-11-22)
+
+mike's rule allows no NHL bet before both goalies are confirmed, and the noon
+version above decides before most are. DailyFaceoff's goalie archive
+(`nhl_goalie_archive`, stored 2026-11-22: 14,232 team rows, 1,137 dates,
+2021-11-18 to 2026-11-21) says when each confirmation was posted: the earlier of
+the news item and its X post. A team never marked confirmed counts as not
+confirmed. That leaves 2,869 of 7,116 games of 2021-22 to 2025-26 with both
+goalies confirmed and timed (42% of teams in 2021-22, 80% in 2025-26).
+`scripts/nhl_best_bet_confirmed_goalies.py`.
+
+- **At noon, confirmed games only:** 35 bets in five seasons. Goalies are rarely
+  confirmed by late morning, so this version barely bets.
+- **Each game at its first stored fetch after both goalies were confirmed, and
+  the first bet of the night only** (causal; history holds about noon and the
+  start hour, so most bets land in the last hour, median 0.4 h):
+
+| markets | de-vig | EV floor | bets | units (1u) | flat return | 95% | CLV | without 10 best nights | 2022 | 2023 | 2024 | 2025 | 2026 |
+|---|---|---|---:|---:|---:|---|---:|---:|---|---|---|---|---|
+| all five | power | 0.01 | 345 | +62.6 | +18.1% | +5.5..+30.7 | +2.11% | +52.6 | +3.1 | +4.9 | +11.5 | +21.8 | +21.3 |
+| all five | proportional | 0.01 | 366 | +36.9 | +12.2% | -1.8..+26.2 | +2.53% | +26.9 | +4.5 | +5.0 | +3.1 | +13.1 | +11.2 |
+| no first period | power | 0.01 | 323 | +63.9 | +18.6% | +5.6..+31.6 | +2.08% | +53.9 | +0.4 | +4.9 | +12.1 | +24.0 | +22.4 |
+| no first period | proportional | 0.01 | 347 | +32.8 | +11.4% | -3.2..+26.0 | +2.51% | +22.8 | +3.2 | +5.8 | +0.5 | +12.3 | +11.0 |
+| puck line, moneyline, 3-way only | power | 0.01 | 246 | +41.5 | +13.9% | -1.8..+29.6 | +2.13% | +31.5 | +3.3 | +1.7 | +8.9 | +10.5 | +17.0 |
+| puck line, moneyline, 3-way only | proportional | 0.01 | 276 | +10.3 | +5.7% | -11.9..+23.3 | +2.61% | +0.3 | +3.2 | -0.1 | -2.0 | +0.1 | +9.0 |
+
+- **The placebo passes here.** All five markets, power, 0.01: Pinnacle +62.6u
+  (+18.1%); DraftKings as the reference +20.8u (+5.9%); FanDuel +4.3u (+1.8%).
+- **Bigger edges do not win more.** All five, power: 1-2% EV 162 bets +37.2u,
+  2-3% 103 bets +22.4u, 3% and up 80 bets +3.0u. Staking up by edge is not
+  supported in this version; the return is in the 1-3% band.
+- **Totals carry much of it.** Without totals and the first period, the
+  proportional version is +5.7% with an interval through zero. The live totals
+  model (`nhl_over_under`) already bets totals the same way, game by game, so a
+  one-a-night model that includes totals would often take a bet it already
+  holds.
+- **Volume:** 39 to 117 bets a season in the backtest, on 42-80% coverage.
+  Live, ESPN confirms nearly every game, so about one bet on most game nights.
+
 ## Next mechanisms (the stuck ladder for the null markets)
 
 1. **Team totals priced off the full-game total and moneyline.** Prediction: a
