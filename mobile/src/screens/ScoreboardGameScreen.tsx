@@ -112,6 +112,7 @@ export function ScoreboardGameScreen() {
   // The 30s poll re-reads the best-price lines too, so they keep pace with
   // the DraftKings block; a ref, because the poll's closure outlives renders.
   const refreshLinesRef = useRef<(() => void) | null>(null);
+  const polledOnce = useRef(false);
   refreshLinesRef.current = matchupOn ? m.refreshLines : null;
   // Pull to refresh shows its spinner until every section has settled.
   const [pulling, setPulling] = useState(false);
@@ -120,12 +121,18 @@ export function ScoreboardGameScreen() {
   // own render can come before any section has flipped to loading.
   const sawSettling = useRef(false);
   useEffect(() => {
-    if (!pulling) return;
+    if (!pulling) return undefined;
+    // A pull where nothing reloads (no sections to read) still ends.
+    const stop = setTimeout(() => {
+      sawSettling.current = false;
+      setPulling(false);
+    }, 10_000);
     if (settling) sawSettling.current = true;
     else if (sawSettling.current) {
       sawSettling.current = false;
       setPulling(false);
     }
+    return () => clearTimeout(stop);
   }, [pulling, settling]);
   // The way in says "Matchup", so the page does too.
   useEffect(() => {
@@ -193,7 +200,9 @@ export function ScoreboardGameScreen() {
       }
       setMovement(moved);
       setLinesError(merged.error);
-      refreshLinesRef.current?.();
+      // Not on the first load: the lines section is already reading then.
+      if (polledOnce.current) refreshLinesRef.current?.();
+      polledOnce.current = true;
     } catch (e: unknown) {
       if (gen !== loadGen.current) return;
       if (!isAbortError(e)) setError(errorText(e));

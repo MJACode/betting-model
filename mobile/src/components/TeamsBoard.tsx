@@ -809,7 +809,7 @@ function TeamRow({
         accessibilityLabel={
           onOpen
             ? `${row.team}, ${row.wins} ${row.wins === 1 ? 'win' : 'wins'}, ${row.losses} ${row.losses === 1 ? 'loss' : 'losses'}. Open team page${
-                onOpenGame ? `${subline ? `. ${sublineSpoken(subline)}` : ''}. Matchup available in actions` : ''
+                onOpenGame ? `${subline ? `. ${sublineSpoken(subline)}` : ''}. Matchup in actions` : ''
               }`
             : undefined
         }

@@ -14,7 +14,7 @@
  *   injury_status_current NBA ............. 104 rows (92 Out, 12 Day-To-Day)
  *   v_latest_odds_all_books, one game ..... ~40 rows
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useSection } from '@/hooks/useTeamDetail';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
@@ -96,6 +96,13 @@ export function useMatchup(game: GameRow | null, enabled: boolean) {
     on && game ? () => fetchGameLineRowsAllMarkets(game.game_id) : null,
     [on, game?.game_id, nonce, linesNonce],
   );
+  // True once the lines read has answered at least once (data or error), so
+  // the first paint is a skeleton, never "none of your books has posted".
+  const [linesLoaded, setLinesLoaded] = useState(false);
+  useEffect(() => {
+    if (!lines.loading && (lines.data.length > 0 || lines.error != null || on)) setLinesLoaded(true);
+  }, [lines.loading, lines.data, lines.error, on]);
+  useEffect(() => setLinesLoaded(false), [game?.game_id]);
   // Pre-game prices only: the view drops in-play rows but does not bound on
   // the start, and the evening refresh keeps writing `open` rows after it
   // (CLAUDE.md §6). Measured 2026-11-23: 0 of 1,530 NBA rows over the prior
@@ -179,6 +186,7 @@ export function useMatchup(game: GameRow | null, enabled: boolean) {
       board.loading || awayRecent.loading || homeRecent.loading || awayCovers.loading ||
       homeCovers.loading || meetings.loading || injuries.loading || lines.loading,
     linesAsOf,
+    linesLoaded,
     injuriesAsOf,
     books,
     board,

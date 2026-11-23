@@ -184,15 +184,15 @@ export function BestPriceSection({
     ? { main: `Under ${b.under.line}`, sub: `${formatAmerican(b.under.price)} · ${bookLabel(b.under.row.bookmaker)}` }
     : { main: '—' };
   const totalSpoken =
-    `Total${b?.over?.line != null ? ` ${b.over.line}` : ''}: ` +
-    `over ${b?.over ? `${formatAmerican(b.over.price)} at ${bookLabel(b.over.book)}` : 'not posted'}; ` +
-    `under ${b?.under ? `${formatAmerican(b.under.price)} at ${bookLabel(b.under.row.bookmaker)}` : 'not posted'}`;
+    `Total: ` +
+    `over ${b?.over ? `${b.over.line} at ${formatAmerican(b.over.price)}, ${bookLabel(b.over.book)}` : 'not posted'}; ` +
+    `under ${b?.under ? `${b.under.line} at ${formatAmerican(b.under.price)}, ${bookLabel(b.under.row.bookmaker)}` : 'not posted'}`;
   const none = b != null && !b.awayMl && !b.homeMl && !b.awaySpread && !b.homeSpread && !b.over && !b.under;
   const asOf = m.linesAsOf ? `Prices as of ${formatStampET(m.linesAsOf)}` : null;
   return (
     <Section
       title="Best price at your books"
-      loading={m.linesLoading && b == null}
+      loading={!m.linesLoaded || b == null}
       error={m.linesError}
       onRetry={onRetry}
       note={started ? 'This game has started. Last pre-game prices stored.' : asOf}
