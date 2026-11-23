@@ -87,6 +87,13 @@ export function PerformanceScreen() {
       reloadModelDaily();
     }, [reloadModelDaily]),
   );
+  // Tracked picks starts folded on EVERY visit to the tab (Matt, 2026-11-23:
+  // "always collapsed to start"). Tab screens stay mounted, so leaving the
+  // tab bumps a key that remounts the card folded.
+  const [trackedFoldKey, setTrackedFoldKey] = useState(0);
+  useFocusEffect(
+    useCallback(() => () => setTrackedFoldKey((k) => k + 1), []),
+  );
   // Scored at "My stakes" and with the logged bets folded in (Matt, 2026-11-21).
   const insightBets = useMemo(
     () => buildInsightBets(tracked.myStakeRows, manual.bets),
@@ -111,13 +118,15 @@ export function PerformanceScreen() {
       accessibilityLabel="Add a bet"
       style={({ pressed }) => [styles.headerIconBtn, pressed && styles.btnPressed]}
     >
-      <Ionicons name="add-circle-outline" size={24} color={colors.tint} />
+      <Ionicons name="add" size={26} color={colors.tint} />
     </Pressable>
   );
   const manualCard = <ManualBetsCard bets={manual.bets} onRowPress={settleManual} />;
   const trackedCard = (
     <TrackedBetsCard
+      key={trackedFoldKey}
       rows={tracked.rows}
+      pending={tracked.pending}
       summary={tracked.summary}
       trackedCount={tracked.trackedCount}
       stakeMode={tracked.stakeMode}
@@ -477,6 +486,7 @@ function stakeChipText(row: TrackedBetRow): string {
 
 function TrackedBetsCard({
   rows,
+  pending,
   summary,
   trackedCount,
   stakeMode,
@@ -486,6 +496,8 @@ function TrackedBetsCard({
   onRowLongPress,
 }: {
   rows: TrackedBetRow[];
+  /** Still loading: show a skeleton, never the empty-state copy. */
+  pending: boolean;
   summary: TrackedBetSummary;
   trackedCount: number;
   stakeMode: StakeMode;
@@ -496,7 +508,7 @@ function TrackedBetsCard({
 }) {
   // The card starts folded to its title and record line, and so does every
   // day inside it (Matt, 2026-11-23: "Tracked picks should always be
-  // collapsed to start"). Not remembered: each visit starts folded.
+  // collapsed to start"). The screen remounts it on every visit (key).
   const [expanded, setExpanded] = useState(false);
   const foldable = rows.length > 0;
   const summaryLine =
@@ -504,6 +516,9 @@ function TrackedBetsCard({
       ? `${formatFlatUnits(summary.net)} · ${summary.wins}–${summary.losses}` +
         (summary.pushes > 0 ? `–${summary.pushes}` : '')
       : 'Nothing settled yet') + (summary.open > 0 ? ` · ${summary.open} open` : '');
+  // Folded, the stake toggle is hidden, so the line names its own basis: the
+  // Insights headline above is at the member's stakes (UX review 2026-11-23).
+  const basis = stakeMode === 'custom' ? 'your stakes' : 'as posted';
   const summarySpeech = unitsSpeech(
     (summary.settled > 0
       ? `${formatFlatUnits(summary.net)}, ${summary.wins} won, ${summary.losses} lost` +
@@ -516,7 +531,7 @@ function TrackedBetsCard({
         <Pressable
           onPress={() => setExpanded((e) => !e)}
           accessibilityRole="button"
-          accessibilityLabel={`Tracked picks, ${trackedCount}, ${summarySpeech}`}
+          accessibilityLabel={`Tracked picks, ${trackedCount} tracked, ${summarySpeech}, ${basis}`}
           accessibilityState={{ expanded }}
           accessibilityHint={expanded ? 'Hides your tracked picks' : 'Shows your tracked picks'}
           style={({ pressed }) => [styles.trackedToggle, pressed && styles.btnPressed]}
@@ -527,6 +542,7 @@ function TrackedBetsCard({
               {trackedCount > 0 ? <Text style={styles.trackedCount}>{trackedCount}</Text> : null}
             </View>
             <Text style={[styles.manualSummary, !expanded && styles.trackedSummaryFolded]}>{summaryLine}</Text>
+            {!expanded ? <Text style={styles.trackedBasisFolded}>Units {basis}</Text> : null}
           </View>
           <Ionicons
             name={expanded ? 'chevron-up' : 'chevron-down'}
@@ -541,7 +557,9 @@ function TrackedBetsCard({
         </View>
       )}
 
-      {rows.length === 0 ? (
+      {rows.length === 0 && pending ? (
+        <SkeletonList label="your tracked picks" rows={2} />
+      ) : rows.length === 0 ? (
         <Text style={styles.manualEmpty}>
           Tap the bell on any pick to track it. Once games settle, your tracked bets score here
           automatically.
@@ -989,6 +1007,7 @@ const styles = StyleSheet.create({
   },
   trackedToggle: { minHeight: 44, flexDirection: 'row', alignItems: 'center' },
   trackedSummaryFolded: { marginBottom: 0 },
+  trackedBasisFolded: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
   trackedChevron: { marginLeft: spacing.sm },
   trackedCount: {
     fontSize: font.size.footnote,

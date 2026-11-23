@@ -10,18 +10,20 @@ import { colors, font, opacity, spacing } from '@/lib/theme';
  * headline and the units chart folds, starting closed). The header is the
  * whole tap target, 44pt tall, with a trailing chevron and an optional
  * one-line peek (`hint`) so a closed section still says what is inside.
+ *
+ * Chevrons: a SECTION folds with a trailing down/up chevron (this, and the
+ * Tracked picks card); a ROW inside a list folds with BetDateHeader's leading
+ * forward/down chevron. New folds follow the same split.
  */
 export function FoldSection({
   title,
   hint,
-  hintColor,
   initiallyOpen = false,
   children,
 }: {
   title: string;
   /** Short value shown at the right of a section header, e.g. "+1.00u". */
   hint?: string | null;
-  hintColor?: string;
   initiallyOpen?: boolean;
   children: React.ReactNode;
 }) {
@@ -36,11 +38,11 @@ export function FoldSection({
         accessibilityHint={open ? 'Hides this section' : 'Shows this section'}
         style={({ pressed }) => [styles.header, pressed && styles.pressed]}
       >
-        <Text style={styles.title} numberOfLines={1}>
-          {title}
-        </Text>
+        {/* Wraps rather than truncates at large Dynamic Type: on a closed
+            fold the title is the only clue to what is inside. */}
+        <Text style={styles.title}>{title}</Text>
         {hint ? (
-          <Text style={[styles.hint, hintColor ? { color: hintColor } : null]} numberOfLines={1}>
+          <Text style={styles.hint} numberOfLines={1}>
             {hint}
           </Text>
         ) : null}
@@ -65,7 +67,8 @@ const styles = StyleSheet.create({
   header: {
     minHeight: 44,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    paddingVertical: spacing.sm + 2,
   },
   pressed: { opacity: opacity.pressed },
   title: {
@@ -79,7 +82,9 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textSecondary,
     marginLeft: spacing.sm,
+    marginTop: 2,
+    flexShrink: 0,
   },
-  chevron: { marginLeft: spacing.xs },
+  chevron: { marginLeft: spacing.xs, marginTop: 3 },
   body: { paddingBottom: spacing.xs },
 });

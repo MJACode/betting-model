@@ -257,7 +257,7 @@ export function PerformanceInsightsCard({
       )}
 
       {streak.kind ? (
-        <FoldSection title="Form" hint={streak.length === 1 ? (streak.kind === 'W' ? 'Won the last' : 'Lost the last') : `${streak.kind === 'W' ? 'Won' : 'Lost'} ${streak.length} straight`}>
+        <FoldSection title="Form" hint={streak.length === 1 ? (streak.kind === 'W' ? 'Won the last one' : 'Lost the last one') : `${streak.kind === 'W' ? 'Won' : 'Lost'} ${streak.length} straight`}>
           <Text style={styles.body} accessibilityLabel={formSpeech(streak)}>
             Last {streak.last10Wins + streak.last10Losses}: {streak.last10Wins}–{streak.last10Losses} ·{' '}
             {streak.kind === 'W' ? 'Won' : 'Lost'} {streak.length === 1 ? 'the last one' : `the last ${streak.length}`}
@@ -275,7 +275,7 @@ export function PerformanceInsightsCard({
 
 function formSpeech(s: ReturnType<typeof streakOf>): string {
   const n = s.last10Wins + s.last10Losses;
-  return `Form. Last ${n}: ${s.last10Wins} won, ${s.last10Losses} lost. ${s.kind === 'W' ? 'Won' : 'Lost'} ${
+  return `Last ${n}: ${s.last10Wins} won, ${s.last10Losses} lost. ${s.kind === 'W' ? 'Won' : 'Lost'} ${
     s.length === 1 ? 'the last one' : `the last ${s.length}`
   }.`;
 }
