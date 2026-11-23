@@ -86,15 +86,20 @@ export function MatchupPicks({
   // A refresh that failed AFTER a good load keeps the last answer on screen
   // and says so (PR #1595 review, L4) — the app's own stale-board banner, so
   // VoiceOver announces it and Retry shows it is running (UX review).
+  // The banner's `reassurance` line is the Picks board's alone
+  // (tests/test_mobile_error_states.py), so the "what you are seeing" line
+  // is a caption under it.
   const staleNote =
     today.loaded && today.error ? (
-      <ErrorBanner
-        what="the latest picks"
-        error={today.error}
-        onRetry={today.refresh}
-        retrying={today.loading}
-        reassurance="Showing the last picks loaded."
-      />
+      <View style={styles.stale}>
+        <ErrorBanner
+          what="the latest picks"
+          error={today.error}
+          onRetry={today.refresh}
+          retrying={today.loading}
+        />
+        <Text style={styles.staleCaption}>Showing the last picks loaded.</Text>
+      </View>
     ) : null;
 
   if (picks.length > 0) {
@@ -149,6 +154,12 @@ export function MatchupPicks({
 
 const styles = StyleSheet.create({
   pickCards: { marginHorizontal: -spacing.lg },
+  stale: { gap: spacing.xs },
+  staleCaption: {
+    fontFamily: font.family,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+  },
   noPickNote: {
     fontFamily: font.family,
     fontSize: font.size.footnote,
