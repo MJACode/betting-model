@@ -30,6 +30,50 @@ review as its own entry.
 
 ---
 
+## 2026-11-23 — Review
+
+1. **Scope.** The weekly self-review, run on mike's PC. Since: the 2026-11-16 Review
+   entry. Five entries have been written since, so the "every fifth entry" whole-log read
+   is due; this run read each new entry's Corrected and Framework lines and found no
+   trap in two entries that is not already a rule, and did not re-read all 1,000+ lines.
+2. **Tried.** `config.py` against its 2026-11-16 state: `ACTION_THRESHOLDS` gained
+   `nba_prop_first_basket` and `nhl_night_puckline`, `_total`, `_moneyline`, `_regulation`
+   (all five already have log entries, 11-20 and 11-22; no gap). `PAUSED_MODELS` gained
+   `nba_prop_projection`, `nba_prop_market`, `nba_prop_first_basket`, `nba_live_spread_q12`,
+   `nba_q1_trend_ml` (mike, 2026-11-22, the NBA low-volume plan: its session entry, but no
+   log entry names it). Nothing retired. **Live records**, read directly and read-only
+   (settled BETs by `model_id`, units on the posted stake; all time / bets created since
+   2026-11-16): `nba_prop_projection` 132 bets 49-83, -16.16 units, -15.2% / 33, -13.63;
+   `ncaaf_over_under` 117, 66-51, +9.48, +7.3% / 8, -4.78; `ncaab_first_half_total` 111,
+   64-47, +6.62, +4.9% / 30, -5.45; `ncaab_first_half_spread` 51, 32-19, +11.05, +19.4% / 12,
+   +1.43; `nhl_moneyline` 77, 36-41, -3.92, -4.9% (71 since its 2026-10-15 rebuild, -0.93);
+   `mlb_live_total_runs` 162, +18.90, +9.5% and `ncaaf_live_total` 98, -5.20, -4.4% (no new
+   bets, off season); `nba_prop_market` 20, -7.32. Under 50 settled, nothing changed:
+   `nfl_wind_totals` 40 (+2.50, +6.0%), `nba_total_luck` 37 (-2.71, -6.7%),
+   `nba_team_total_luck` 39 (-1.13), `nba_first_half_total_luck` 21 (+4.01),
+   `ncaabw_total_blend` 22 (-1.10), `ncaabw_live_total_ht` 37 (-3.62), `euroleague_home_ml`
+   10 (-1.52), `euroleague_h1_dog_ml` 13 (-0.63), `euroleague_home_dog_spread` 5 (+2.95),
+   `euroleague_live_spread_ht` 4, `euroleague_q1_club_share_total` 1, `atp_moneyline_shop` 1,
+   `ncaaf_moneyline_market` 9 (+0.88), `nba_prop_first_basket` 8 (+0.03), `ncaab_total_blend` 3,
+   `nfl_live_leader_ml` 6. No settled bet yet: `ufc_open_moneyline`, `wta_moneyline_shop`
+   and the four `nhl_night_*` models. The record is by `model_id` and not by live
+   artifact; "since" is by `created_at`.
+3. **New.** Scouting routes re-probed and dated in `scouting.md`: reddit.com now answers
+   200 (was 403), tapology's robots.txt 403 (was 200), geegeez.co.uk 200 (was 403),
+   bloodhorse.com 301; the rest as on 2026-11-16.
+4. **Corrected.** Was: "live `nba_prop_projection` ... 99 bets 41-58, -2.54 units, -3.2%,
+   an interval that wide cannot overturn" the backtest's +3.60%. Now: 132 bets 49-83,
+   -16.16 units, -15.2% (`methods.md`), because 33 more settled and lost 13.63 units. It is
+   over the 50-bet bar, so the entry now says it failed live; mike had already paused it on
+   2026-11-22. Also `ncaaf_over_under` was 105 bets +14.42 units +12.4%, now 117 bets
+   +9.48 units +7.3%, because 12 more settled at -4.78 units on the 8 created since;
+   still positive, return roughly halved.
+5. **The framework.** Nothing changed in `SKILL.md`. Open: the NBA low-volume plan
+   (ten game totals a week, 20-game wait, four models bet) has no log entry of its own;
+   its session entry is the record. A pattern worth watching: the pro basketball projection
+   and `nba_total_luck` models both trailed their backtests live, so a backtest-positive
+   NBA model should not be called live evidence until its settled live return agrees.
+
 ## 2026-11-22 — NHL best bet a night built as four rule cards (one bet a night)
 
 1. **League and scope**: NHL, mike ("Yes" to building the best bet a night on the puck line,
