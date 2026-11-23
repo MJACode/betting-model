@@ -35,8 +35,12 @@
       .forEach(function (s) { $(s).hidden = s !== id; });
   }
 
-  function fail(message) {
+  // retry=false only where trying again cannot help (the link itself is
+  // broken); everywhere else "Try again" re-runs loadRequest, which goes back
+  // to the email step when signed out or reloads the request when signed in.
+  function fail(message, retry) {
     $("error-text").textContent = message;
+    $("error-retry").hidden = retry === false;
     show("state-error");
   }
 
@@ -83,7 +87,7 @@
 
   function loadRequest() {
     if (!/^[A-Za-z0-9_-]{8,100}$/.test(authorizationId)) {
-      fail("This link is missing its connection request. Start again from your AI assistant.");
+      fail("This link is missing its connection request. Start again from your AI assistant.", false);
       return;
     }
     if (!jwt()) { show("state-email"); return; }
@@ -176,6 +180,12 @@
   });
 
   $("code-back").addEventListener("click", function () { show("state-email"); });
+
+  $("error-retry").addEventListener("click", function () {
+    $("allow").disabled = !$("agree").checked;
+    $("deny").disabled = false;
+    loadRequest();
+  });
 
   $("agree").addEventListener("change", function () { $("allow").disabled = !$("agree").checked; });
 

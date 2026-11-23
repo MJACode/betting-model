@@ -24,3 +24,10 @@ def test_send_code_is_single_flight_and_429_goes_to_code_step():
     assert "e.status === 429" in js
     html = (ROOT / "web/templates/consent.html").read_text(encoding="utf-8")
     assert 'id="send-code"' in html and 'id="code-note"' in html
+
+
+def test_error_step_offers_try_again():
+    html = (ROOT / "web/templates/consent.html").read_text(encoding="utf-8")
+    assert 'id="error-retry"' in html
+    js = (ROOT / "web/src/consent-boot.js").read_text(encoding="utf-8")
+    assert '$("error-retry").addEventListener("click"' in js
