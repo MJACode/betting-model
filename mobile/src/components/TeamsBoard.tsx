@@ -847,8 +847,10 @@ function TeamRow({
             the record truncates first at large Dynamic Type. */}
         {subline && onOpenGame ? (
           // No hitSlop: it would reach into the name and record lines, 1pt
-          // away, and steal the team page's press (UX review). Assistive
-          // tech reaches it through the row's "Open matchup" action above.
+          // away, and steal the team page's press (UX review). It is
+          // accessible={false} because VoiceOver cannot focus inside the
+          // team-name element; VoiceOver reaches it through that row's
+          // "Open matchup" action instead.
           <Pressable
             onPress={onOpenGame}
             style={({ pressed }) => [styles.rowGameLink, pressed ? styles.pressed : null]}
