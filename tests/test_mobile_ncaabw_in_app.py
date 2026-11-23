@@ -548,7 +548,9 @@ def test_voiceover_names_the_womens_chip_in_words():
     assert "accessibilityLabel={sportSpokenName(s)}" in stats
     recap = _read(SRC / "components" / "DailyResultsModal.tsx")
     assert "s === 'ALL' ? 'All sports' : sportSpokenName(s)" in recap
-    assert "accessibilityLabel={`${sportSpokenName(s.sport)}, ${sub}${" in recap
+    # The sport card speaks its name through CollapsibleList (2026-11-23).
+    assert "spokenTitle={sportSpokenName(s.sport)}" in recap
+    assert "accessibilityLabel={`${spokenTitle}, ${spokenSub ?? sub}`}" in recap
 
 
 def test_the_empty_boards_say_where_the_womens_picks_are():

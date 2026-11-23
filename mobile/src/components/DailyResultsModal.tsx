@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, font, pnlColor, radii, spacing, opacity, card, cardDense } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
 import { sportSpokenName } from '@/lib/loadState';
-import { unitsSpeech } from '@/lib/a11y';
+import { joinLabel, unitsSpeech } from '@/lib/a11y';
 import { addDays, formatAmerican } from '@/lib/format';
 import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { modelHistoryMark, modelLong, modelShort } from '@/lib/modelMeta';
@@ -75,6 +75,17 @@ export function DailyResultsModal({
   // Sport cards open collapsed — the header carries the sport's record; a tap
   // shows its models.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  // The pick lists and the games list below the sport cards open collapsed
+  // too (Matt, 2026-11-23: "a lot of data at the bottom") — one section per
+  // sport's picks, keyed `picks:<SPORT>`, and `games` for Games scored.
+  const [openLists, setOpenLists] = useState<ReadonlySet<string>>(new Set());
+  const toggleList = (key: string) =>
+    setOpenLists((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   // Snap the sport filter back to All every time the modal opens — a sticky
   // per-sport filter from a previous open would read as missing data.
@@ -83,11 +94,15 @@ export function DailyResultsModal({
     if (visible && !wasVisible.current) {
       setSportFilter('ALL');
       setExpanded(new Set());
+      setOpenLists(new Set());
     }
     wasVisible.current = visible;
   }, [visible]);
   // A new day starts collapsed too.
-  useEffect(() => setExpanded(new Set()), [date]);
+  useEffect(() => {
+    setExpanded(new Set());
+    setOpenLists(new Set());
+  }, [date]);
   const toggleSport = (sport: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -126,6 +141,23 @@ export function DailyResultsModal({
   // One sport filtered, or only one sport played: its card opens — collapsing
   // the only card would add a tap and hide nothing.
   const single = sportFilter !== 'ALL' || activeSections.length === 1;
+  // The day's picks, one group per sport in the same order as the sport cards
+  // (graded first, then still-open). A sport the lib knows but ALL_SPORTS
+  // doesn't is still grouped — never dropped.
+  const pickGroups = [
+    ...ALL_SPORTS,
+    ...Array.from(
+      new Set([...scoped.gradedPicks, ...scoped.pendingPicks].map((p) => p.sport)),
+    ).filter((sp) => !ALL_SPORTS.includes(sp)),
+  ]
+    .map((sport) => ({
+      sport,
+      graded: scoped.gradedPicks.filter((p) => p.sport === sport),
+      pending: scoped.pendingPicks.filter((p) => p.sport === sport),
+    }))
+    .filter((g) => g.graded.length + g.pending.length > 0);
+  // One sport filtered, or only one sport had picks: its list opens.
+  const singlePicks = sportFilter !== 'ALL' || pickGroups.length === 1;
   const noPickSports = quietSections.filter((s) => s.unpublished === 0).map((s) => s.sport);
   const notPostedSports = quietSections.filter((s) => s.unpublished > 0).map((s) => s.sport);
 
@@ -390,30 +422,50 @@ export function DailyResultsModal({
               </View>
             ) : null}
 
-            {/* Every pick behind the record — graded first, then still-open */}
-            {scoped.gradedPicks.length > 0 || scoped.pendingPicks.length > 0 ? (
-              <View style={styles.sportCard}>
-                <Text style={styles.picksTitle}>The picks</Text>
-                {scoped.gradedPicks.map((p) => (
-                  <PickRow key={p.pick_id} pick={p} />
-                ))}
-                {scoped.pendingPicks.map((p) => (
-                  <PendingPickRow key={p.pick_id} pick={p} />
-                ))}
-              </View>
-            ) : null}
+            {/* Every pick behind the record — one collapsible section per
+                sport, graded first, then still-open. */}
+            {pickGroups.map((g) => {
+              const key = `picks:${g.sport}`;
+              const count = g.graded.length + g.pending.length;
+              // The record and units are on the sport card above — this line
+              // only says what opening the section will show.
+              const sub = `${count} ${count === 1 ? 'pick' : 'picks'}${
+                g.pending.length > 0 ? ` · ${g.pending.length} pending` : ''
+              }`;
+              return (
+                <CollapsibleList
+                  key={key}
+                  title={`${g.sport} picks`}
+                  spokenTitle={`${sportSpokenName(g.sport)} picks`}
+                  sub={sub}
+                  open={singlePicks || openLists.has(key)}
+                  collapsible={!singlePicks}
+                  onToggle={() => toggleList(key)}
+                >
+                  {g.graded.map((p) => (
+                    <PickRow key={p.pick_id} pick={p} />
+                  ))}
+                  {g.pending.map((p) => (
+                    <PendingPickRow key={p.pick_id} pick={p} />
+                  ))}
+                </CollapsibleList>
+              );
+            })}
 
             {/* Every game the models scored that day */}
             {scoped.games.length > 0 ? (
-              <View style={styles.sportCard}>
-                <Text style={styles.picksTitle}>Games scored</Text>
-                <Text style={styles.gamesSub}>
-                  Every game the models looked at this day, whether or not a pick fired.
-                </Text>
+              <CollapsibleList
+                title="Games scored"
+                spokenTitle="Games scored"
+                sub={`${scoped.games.length} ${scoped.games.length === 1 ? 'game' : 'games'} · every game the models looked at, pick or not`}
+                open={openLists.has('games')}
+                collapsible
+                onToggle={() => toggleList('games')}
+              >
                 {scoped.games.map((g) => (
                   <GameScoreRow key={g.gameId} game={g} showSport={sportFilter === 'ALL'} />
                 ))}
-              </View>
+              </CollapsibleList>
             ) : null}
 
             <Text style={styles.footer}>
@@ -455,26 +507,85 @@ function SportCard({
       : s.pending > 0
         ? 'Signals fired — results not graded yet'
         : `${recordLine(s.total)} · ${dayUnitsText(s.total.units)}`;
+  const right =
+    roiText != null ? (
+      <Text
+        style={[styles.sportRoi, { color: s.total.risked > 0 ? roiColor(s.total.roi) : colors.textSecondary }]}
+        accessibilityLabel={s.total.risked > 0 ? undefined : 'Return on bets unavailable'}
+      >
+        {roiText}
+      </Text>
+    ) : s.pending > 0 ? (
+      <Text style={styles.sportEmptyNote}>
+        {s.pending} {s.pending === 1 ? 'pick' : 'picks'} pending
+      </Text>
+    ) : (
+      <Text style={styles.sportEmptyNote}>{dayUnitsText(s.total.units)}</Text>
+    );
+  // Spoken, not read off the glyphs: "4 wins, 1 loss, plus 2.86 units", never
+  // "four dash one … plus 2.86 u".
+  const spokenSub = joinLabel([
+    s.total.picks > 0 || s.pending === 0 ? recordSpeech(s.total) : null,
+    s.total.picks > 0 || s.pending === 0 ? unitsSpeech(dayUnitsText(s.total.units)) : null,
+    s.pending > 0 ? `${s.pending} pending` : null,
+    s.total.picks > 0
+      ? s.total.risked > 0
+        ? `${roiText} return`
+        : 'return unavailable'
+      : null,
+  ]);
+  return (
+    <CollapsibleList
+      title={s.sport}
+      spokenTitle={sportSpokenName(s.sport)}
+      sub={sub}
+      spokenSub={spokenSub}
+      right={right}
+      open={open}
+      collapsible={collapsible && s.models.length > 0}
+      onToggle={onToggle}
+      hint={open ? 'Hides the models' : 'Shows the models'}
+    >
+      {s.models.map((m) => (
+        <ModelRow key={m.modelId} model={m} />
+      ))}
+    </CollapsibleList>
+  );
+}
+
+/** A card whose header (title + one summary line) toggles the rows under it. */
+function CollapsibleList({
+  title,
+  spokenTitle,
+  sub,
+  spokenSub,
+  right,
+  open,
+  collapsible,
+  onToggle,
+  hint,
+  children,
+}: {
+  title: string;
+  spokenTitle: string;
+  sub: string;
+  /** What VoiceOver reads for `sub`, when the glyphs don't speak well. */
+  spokenSub?: string;
+  /** Right side of the header, before the chevron (e.g. the sport's ROI). */
+  right?: React.ReactNode;
+  open: boolean;
+  collapsible: boolean;
+  onToggle: () => void;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   const header = (
     <>
       <View style={styles.sportHeader}>
-        <Text style={styles.sportName}>{s.sport}</Text>
+        <Text style={styles.sportName}>{title}</Text>
         <View style={styles.sportHeaderRight}>
-          {roiText != null ? (
-            <Text
-              style={[styles.sportRoi, { color: s.total.risked > 0 ? roiColor(s.total.roi) : colors.textSecondary }]}
-              accessibilityLabel={s.total.risked > 0 ? undefined : 'Return on bets unavailable'}
-            >
-              {roiText}
-            </Text>
-          ) : s.pending > 0 ? (
-            <Text style={styles.sportEmptyNote}>
-              {s.pending} {s.pending === 1 ? 'pick' : 'picks'} pending
-            </Text>
-          ) : (
-            <Text style={styles.sportEmptyNote}>{dayUnitsText(s.total.units)}</Text>
-          )}
-          {collapsible && s.models.length > 0 ? (
+          {right}
+          {collapsible ? (
             <Ionicons
               name={open ? 'chevron-up' : 'chevron-down'}
               size={16}
@@ -488,21 +599,13 @@ function SportCard({
   );
   return (
     <View style={styles.sportCard}>
-      {collapsible && s.models.length > 0 ? (
+      {collapsible ? (
         <Pressable
           onPress={onToggle}
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
-          accessibilityLabel={`${sportSpokenName(s.sport)}, ${sub}${
-            s.total.picks === 0
-              ? s.pending > 0
-                ? `, ${s.pending} pending`
-                : ''
-              : s.total.risked > 0
-                ? `, ${roiText} return`
-                : ', return unavailable'
-          }`}
-          accessibilityHint={open ? 'Hides the models' : 'Shows the models'}
+          accessibilityLabel={`${spokenTitle}, ${spokenSub ?? sub}`}
+          accessibilityHint={hint ?? (open ? 'Hides the list' : 'Shows the list')}
           style={({ pressed }) => [styles.sportToggle, pressed && { opacity: opacity.pressed }]}
         >
           {header}
@@ -510,7 +613,7 @@ function SportCard({
       ) : (
         header
       )}
-      {open ? s.models.map((m) => <ModelRow key={m.modelId} model={m} />) : null}
+      {open ? children : null}
     </View>
   );
 }
@@ -639,7 +742,18 @@ function GameScoreRow({ game, showSport }: { game: DayGameSummary; showSport: bo
   );
 }
 
-function recordLine(s: DayStakeStats): string {
+type RecordCounts = { wins: number; losses: number; pushes: number };
+
+function recordSpeech(s: RecordCounts): string {
+  const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  return joinLabel([
+    n(s.wins, 'win', 'wins'),
+    n(s.losses, 'loss', 'losses'),
+    s.pushes > 0 ? n(s.pushes, 'push', 'pushes') : null,
+  ]);
+}
+
+function recordLine(s: RecordCounts): string {
   const base = `${s.wins}–${s.losses}`;
   return s.pushes > 0 ? `${base}–${s.pushes}` : base;
 }
@@ -867,18 +981,6 @@ const styles = StyleSheet.create({
   sportHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   quietLine: { fontSize: font.size.footnote, color: colors.textTertiary, lineHeight: 20 },
   quietLabel: { fontWeight: font.weight.semibold },
-  picksTitle: {
-    fontSize: font.size.headline,
-    fontWeight: font.weight.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  gamesSub: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    marginTop: -spacing.sm + 2,
-    marginBottom: spacing.sm,
-  },
 
   modelRow: {
     flexDirection: 'row',
