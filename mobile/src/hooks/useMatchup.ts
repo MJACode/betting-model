@@ -40,7 +40,12 @@ export const MATCHUP_MEETINGS = 5;
 export function useMatchup(game: GameRow | null, enabled: boolean) {
   const { books, ready: booksReady } = usePreferredBooks();
   const [nonce, setNonce] = useState(0);
+  // The lines alone re-read on the screen's 30s poll, so the best-price cells
+  // keep pace with the DraftKings block below them; the other six reads only
+  // on a pull (UX review, 2026-11-23).
+  const [linesNonce, setLinesNonce] = useState(0);
   const refresh = () => setNonce((n) => n + 1);
+  const refreshLines = () => setLinesNonce((n) => n + 1);
 
   const on = enabled && game != null && !!game.home_team && !!game.away_team;
   const sport = (game?.sport ?? 'NBA') as Sport;
@@ -89,8 +94,21 @@ export function useMatchup(game: GameRow | null, enabled: boolean) {
   const lines = useSection<OddsByBookRow[]>(
     [],
     on && game ? () => fetchGameLineRowsAllMarkets(game.game_id) : null,
-    [on, game?.game_id, nonce],
+    [on, game?.game_id, nonce, linesNonce],
   );
+  // Pre-game prices only: the view drops in-play rows but does not bound on
+  // the start, and the evening refresh keeps writing `open` rows after it
+  // (CLAUDE.md §6). Measured 2026-11-23: 0 of 1,530 NBA rows over the prior
+  // week were stamped after tip-off — so this is a guard, not a fix.
+  const commence = game?.commence_time ?? null;
+  const pregame = useMemo(() => {
+    const tip = commence ? Date.parse(commence) : NaN;
+    if (!Number.isFinite(tip)) return lines.data;
+    return lines.data.filter((r) => {
+      const at = r.snapshot_at ? Date.parse(r.snapshot_at) : NaN;
+      return !Number.isFinite(at) || at <= tip;
+    });
+  }, [lines.data, commence]);
 
   const ranks = useMemo(() => {
     const rows = board.data.rows;
@@ -129,9 +147,9 @@ export function useMatchup(game: GameRow | null, enabled: boolean) {
   const best = useMemo(() => {
     if (!game || !booksReady) return null;
     const games = [game];
-    const ml = buildTeamLineIndex(lines.data, games, { market: 'h2h', books });
-    const spread = buildTeamLineIndex(lines.data, games, { market: 'spreads', books });
-    const over = buildTeamLineIndex(lines.data, games, { market: 'totals', books });
+    const ml = buildTeamLineIndex(pregame, games, { market: 'h2h', books });
+    const spread = buildTeamLineIndex(pregame, games, { market: 'spreads', books });
+    const over = buildTeamLineIndex(pregame, games, { market: 'totals', books });
     return {
       awayMl: ml.get(away) ?? null,
       homeMl: ml.get(home) ?? null,
@@ -139,12 +157,29 @@ export function useMatchup(game: GameRow | null, enabled: boolean) {
       homeSpread: spread.get(home) ?? null,
       // The over is the same quote from either side; the home key is used.
       over: over.get(home) ?? null,
-      under: bestUnder(lines.data, game.game_id, books),
+      under: bestUnder(pregame, game.game_id, books),
     };
-  }, [game, booksReady, books, lines.data, away, home]);
+  }, [game, booksReady, books, pregame, away, home]);
+
+  // Freshness for two sections whose numbers move before tip-off: the newest
+  // price among the member's books, and the newest injury report on either team.
+  const linesAsOf = useMemo(() => {
+    const mine = new Set<string>(books);
+    return newest(pregame.filter((r) => mine.has(r.bookmaker)).map((r) => r.snapshot_at ?? null));
+  }, [pregame, books]);
+  const injuriesAsOf = useMemo(
+    () => newest([...injured.away, ...injured.home].map((r) => r.as_of)),
+    [injured],
+  );
 
   return {
     refresh,
+    refreshLines,
+    anyLoading:
+      board.loading || awayRecent.loading || homeRecent.loading || awayCovers.loading ||
+      homeCovers.loading || meetings.loading || injuries.loading || lines.loading,
+    linesAsOf,
+    injuriesAsOf,
     books,
     board,
     awayRow: rowFor(away),
@@ -163,4 +198,18 @@ export function useMatchup(game: GameRow | null, enabled: boolean) {
     linesLoading: lines.loading || !booksReady,
     linesError: lines.error,
   };
+}
+
+function newest(stamps: (string | null | undefined)[]): string | null {
+  let best: string | null = null;
+  let bestAt = -Infinity;
+  for (const s of stamps) {
+    if (!s) continue;
+    const at = Date.parse(s);
+    if (Number.isFinite(at) && at > bestAt) {
+      bestAt = at;
+      best = s;
+    }
+  }
+  return best;
 }

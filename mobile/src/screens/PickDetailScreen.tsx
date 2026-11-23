@@ -571,7 +571,9 @@ function PickDetailContent({
               sport has one: ranks side by side, form, rest, injuries. */}
           {game && hasMatchupView(game.sport) ? (
             <Pressable
-              onPress={() => navigation.navigate('ScoreboardGame', { gameId: game.game_id })}
+              // pop: a member who came Matchup → pick → here goes BACK to that
+              // matchup, not onto a second copy of it (UX review).
+              onPress={() => navigation.navigate('ScoreboardGame', { gameId: game.game_id }, { pop: true })}
               style={({ pressed }) => [styles.matchupLink, pressed ? styles.matchupLinkPressed : null]}
               accessibilityRole="button"
               accessibilityLabel={`Matchup, ${game.away_team} at ${game.home_team}`}

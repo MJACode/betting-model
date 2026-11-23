@@ -808,7 +808,23 @@ function TeamRow({
         accessibilityRole={onOpen ? 'button' : undefined}
         accessibilityLabel={
           onOpen
-            ? `${row.team}, ${row.wins} ${row.wins === 1 ? 'win' : 'wins'}, ${row.losses} ${row.losses === 1 ? 'loss' : 'losses'}. Open team page`
+            ? `${row.team}, ${row.wins} ${row.wins === 1 ? 'win' : 'wins'}, ${row.losses} ${row.losses === 1 ? 'loss' : 'losses'}. Open team page${
+                onOpenGame ? `${subline ? `. ${sublineSpoken(subline)}` : ''}. Matchup available in actions` : ''
+              }`
+            : undefined
+        }
+        // The team-name press is ONE element to VoiceOver, so the game line
+        // inside it cannot be focused; its matchup is offered as a rotor
+        // action instead (UX review Blocker, 2026-11-23).
+        accessibilityActions={
+          onOpenGame ? [{ name: 'activate' }, { name: 'openMatchup', label: 'Open matchup' }] : undefined
+        }
+        onAccessibilityAction={
+          onOpenGame
+            ? (e) => {
+                if (e.nativeEvent.actionName === 'openMatchup') onOpenGame();
+                else if (e.nativeEvent.actionName === 'activate') onOpen?.();
+              }
             : undefined
         }
         accessibilityHint={onOpen ? 'Shows the next game, line movement, splits and head-to-head' : undefined}
@@ -830,13 +846,13 @@ function TeamRow({
             line — a record is a stat and a fixture is a schedule, and merged,
             the record truncates first at large Dynamic Type. */}
         {subline && onOpenGame ? (
+          // No hitSlop: it would reach into the name and record lines, 1pt
+          // away, and steal the team page's press (UX review). Assistive
+          // tech reaches it through the row's "Open matchup" action above.
           <Pressable
             onPress={onOpenGame}
             style={({ pressed }) => [styles.rowGameLink, pressed ? styles.pressed : null]}
-            hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
-            accessibilityRole="button"
-            accessibilityLabel={`${sublineSpoken(subline)}. Open matchup`}
-            accessibilityHint="Shows both teams side by side, our pick and the best price"
+            accessible={false}
           >
             <Text style={[styles.rowSubline, styles.rowGameLinkText]} numberOfLines={1}>
               {subline}

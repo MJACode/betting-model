@@ -224,7 +224,7 @@ def test_the_teams_row_game_line_opens_the_matchup():
 def test_the_pick_detail_page_links_to_the_matchup():
     d = _read(DETAIL)
     assert "hasMatchupView(game.sport)" in d
-    assert "navigation.navigate('ScoreboardGame', { gameId: game.game_id })" in d
+    assert "navigation.navigate('ScoreboardGame', { gameId: game.game_id }, { pop: true })" in d
 
 
 def test_the_picks_scoreboard_still_opens_the_game():

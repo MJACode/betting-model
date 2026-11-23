@@ -6,42 +6,70 @@
  *
  * Every number here is read, not estimated: ranks from team_stats_board,
  * cover marks from team_period_results, injuries from injury_status_current.
- * A section whose read failed says so in its own card; the others still draw.
+ * A section whose read failed says so in its own card with a Retry; the
+ * others still draw.
+ *
+ * Every row speaks TEAM NAMES, never "away" / "home", and the total row says
+ * over and under in words — a price read to the wrong side is wrong
+ * information, not missing information (UX review, 2026-11-23).
  */
 import React from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
+import { SkeletonList } from '@/components/Skeleton';
 import type { useMatchup } from '@/hooks/useMatchup';
 import { MATCHUP_FORM_GAMES } from '@/hooks/useMatchup';
-import { formatAmerican, formatSigned } from '@/lib/format';
+import { formatAmerican, formatGameDateET, formatSigned, formatStampET } from '@/lib/format';
 import { formatAts, formatOu, pairRanks, restText, type PairedRank } from '@/lib/gameMatchup';
 import { bookLabel } from '@/lib/markets';
 import type { TeamLineQuote } from '@/lib/statsOdds';
 import { formatTeamLine, ordinal, type TeamStatRank } from '@/lib/teamDetail';
 import { formatRecord, formatTeamStat } from '@/lib/teamStatCatalog';
-import { card, colors, font, spacing, sectionHeaderText } from '@/lib/theme';
+import { card, colors, font, opacity, spacing, sectionHeaderText } from '@/lib/theme';
 import type { TeamStatsRow } from '@/types';
 
 type Matchup = ReturnType<typeof useMatchup>;
+
+/** Above this text scale a row stacks: the label on its own line, the two
+ *  teams in two equal columns under it, instead of three squeezed columns. */
+const STACK_FONT_SCALE = 1.35;
 
 export function Section({
   title,
   children,
   loading,
   error,
+  onRetry,
+  note,
 }: {
   title: string;
   children: React.ReactNode;
   loading?: boolean;
   error?: string | null;
+  onRetry?: () => void;
+  /** A freshness line under the title ("Updated 6:12 PM"). */
+  note?: string | null;
 }) {
   return (
     <View style={styles.card}>
       <Text style={styles.title} accessibilityRole="header">{title}</Text>
+      {note ? <Text style={styles.note}>{note}</Text> : null}
       {loading ? (
-        <ActivityIndicator style={styles.spinner} accessibilityLabel={`Loading ${title.toLowerCase()}`} />
+        <SkeletonList label={title.toLowerCase()} rows={3} />
       ) : error ? (
-        <Text style={styles.note}>Couldn’t load this section. Pull down to try again.</Text>
+        <View style={styles.errorRow}>
+          <Text style={[styles.note, styles.flex]}>Couldn’t load this section.</Text>
+          {onRetry ? (
+            <Pressable
+              onPress={onRetry}
+              style={({ pressed }) => [styles.retry, pressed ? styles.pressed : null]}
+              accessibilityRole="button"
+              accessibilityLabel={`Retry ${title.toLowerCase()}`}
+            >
+              <Text style={styles.retryText}>Retry</Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : (
         children
       )}
@@ -49,64 +77,144 @@ export function Section({
   );
 }
 
-/** "BOS" over "GSW" column heads, away left and home right, for every table here. */
-function TeamHeads({ away, home, middle }: { away: string; home: string; middle?: string }) {
+/** One side's cell: the main figure, an optional line under it, and whether
+ *  that side is marked as the better league rank. */
+interface Cell {
+  main: string;
+  sub?: string;
+  better?: boolean;
+}
+
+function useStacked(): boolean {
+  return useWindowDimensions().fontScale > STACK_FONT_SCALE;
+}
+
+/** "BOS" over "GSW" column heads, away left and home right. Hidden from
+ *  VoiceOver: every row below speaks its own team names. */
+function TeamHeads({ away, home }: { away: string; home: string }) {
+  const stacked = useStacked();
   return (
     <View style={styles.row} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
       <Text style={[styles.cellSide, styles.head]}>{away}</Text>
-      <Text style={[styles.cellMid, styles.head]}>{middle ?? ''}</Text>
+      {stacked ? null : <View style={styles.cellMid} />}
       <Text style={[styles.cellSide, styles.head, styles.right]}>{home}</Text>
     </View>
   );
 }
 
-// ── Best price ──────────────────────────────────────────────────────────────
-
-function quoteText(q: TeamLineQuote | null): { main: string; book: string } {
-  if (!q) return { main: '—', book: '' };
-  const line = q.market === 'h2h' ? '' : `${formatTeamLine(q.line, q.market === 'totals' ? 'totals' : 'spreads')} `;
-  return { main: `${line}${formatAmerican(q.price)}`, book: bookLabel(q.book) };
-}
-
-function PriceRow({ label, away, home }: { label: string; away: { main: string; book: string }; home: { main: string; book: string } }) {
+function CellView({ cell, right }: { cell: Cell; right?: boolean }) {
   return (
-    <View
-      style={styles.row}
-      accessible
-      accessibilityLabel={`${label}: away ${away.main}${away.book ? ` at ${away.book}` : ''}; home ${home.main}${home.book ? ` at ${home.book}` : ''}`}
-    >
-      <View style={styles.cellSide}>
-        <Text style={styles.value}>{away.main}</Text>
-        {away.book ? <Text style={styles.sub}>{away.book}</Text> : null}
-      </View>
-      <Text style={[styles.cellMid, styles.label]}>{label}</Text>
-      <View style={[styles.cellSide, styles.alignEnd]}>
-        <Text style={[styles.value, styles.right]}>{home.main}</Text>
-        {home.book ? <Text style={[styles.sub, styles.right]}>{home.book}</Text> : null}
-      </View>
+    <View style={[styles.cellSide, right ? styles.alignEnd : null]}>
+      <Text style={[styles.value, right ? styles.right : null]}>{cell.main}</Text>
+      {cell.sub ? (
+        <Text style={[styles.sub, right ? styles.right : null, cell.better ? styles.better : null]}>
+          {cell.better ? '● ' : ''}
+          {cell.sub}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
-export function BestPriceSection({ m, away, home, started }: { m: Matchup; away: string; home: string; started: boolean }) {
-  const b = m.best;
-  const over = b?.over ? { main: `o${b.over.line} ${formatAmerican(b.over.price)}`, book: bookLabel(b.over.book) } : { main: '—', book: '' };
-  const under = b?.under ? { main: `u${b.under.line} ${formatAmerican(b.under.price)}`, book: bookLabel(b.under.row.bookmaker) } : { main: '—', book: '' };
-  const none = b != null && !b.awayMl && !b.homeMl && !b.awaySpread && !b.homeSpread && !b.over && !b.under;
+/** away | label | home, or label over two columns at large text. */
+function TriRow({ label, away, home, spoken }: { label: string; away: Cell; home: Cell; spoken: string }) {
+  const stacked = useStacked();
+  if (stacked) {
+    return (
+      <View style={styles.stackRow} accessible accessibilityLabel={spoken}>
+        <Text style={styles.label}>{label}</Text>
+        <View style={styles.stackCells}>
+          <CellView cell={away} />
+          <CellView cell={home} right />
+        </View>
+      </View>
+    );
+  }
   return (
-    <Section title="Best price at your books" loading={m.linesLoading} error={m.linesError}>
-      {started ? (
-        <Text style={styles.note}>This game has started. These were the last pre-game prices stored.</Text>
-      ) : null}
+    <View style={styles.row} accessible accessibilityLabel={spoken}>
+      <CellView cell={away} />
+      <Text style={[styles.cellMid, styles.label]}>{label}</Text>
+      <CellView cell={home} right />
+    </View>
+  );
+}
+
+// ── Our pick ────────────────────────────────────────────────────────────────
+
+/** The heading above the pick cards, which sit on the page, not in a card. */
+export function SectionHeading({ title }: { title: string }) {
+  return <Text style={[styles.title, styles.bareTitle]} accessibilityRole="header">{title}</Text>;
+}
+
+// ── Best price ──────────────────────────────────────────────────────────────
+
+/** The line on top, the price and book under it ("−3.5" over "−110 · DraftKings"). */
+function quoteCell(q: TeamLineQuote | null): Cell {
+  if (!q) return { main: '—' };
+  const book = bookLabel(q.book);
+  if (q.market === 'h2h') return { main: formatAmerican(q.price), sub: book };
+  return { main: formatTeamLine(q.line, 'spreads'), sub: `${formatAmerican(q.price)} · ${book}` };
+}
+
+function quoteSpoken(team: string, q: TeamLineQuote | null): string {
+  if (!q) return `${team} not posted`;
+  const book = bookLabel(q.book);
+  if (q.market === 'h2h') return `${team} ${formatAmerican(q.price)} at ${book}`;
+  return `${team} ${formatTeamLine(q.line, 'spreads')} at ${formatAmerican(q.price)}, ${book}`;
+}
+
+export function BestPriceSection({
+  m,
+  away,
+  home,
+  started,
+  onRetry,
+}: {
+  m: Matchup;
+  away: string;
+  home: string;
+  started: boolean;
+  onRetry: () => void;
+}) {
+  const b = m.best;
+  const over: Cell = b?.over
+    ? { main: `Over ${b.over.line}`, sub: `${formatAmerican(b.over.price)} · ${bookLabel(b.over.book)}` }
+    : { main: '—' };
+  const under: Cell = b?.under
+    ? { main: `Under ${b.under.line}`, sub: `${formatAmerican(b.under.price)} · ${bookLabel(b.under.row.bookmaker)}` }
+    : { main: '—' };
+  const totalSpoken =
+    `Total${b?.over?.line != null ? ` ${b.over.line}` : ''}: ` +
+    `over ${b?.over ? `${formatAmerican(b.over.price)} at ${bookLabel(b.over.book)}` : 'not posted'}; ` +
+    `under ${b?.under ? `${formatAmerican(b.under.price)} at ${bookLabel(b.under.row.bookmaker)}` : 'not posted'}`;
+  const none = b != null && !b.awayMl && !b.homeMl && !b.awaySpread && !b.homeSpread && !b.over && !b.under;
+  const asOf = m.linesAsOf ? `Prices as of ${formatStampET(m.linesAsOf)}` : null;
+  return (
+    <Section
+      title="Best price at your books"
+      loading={m.linesLoading && b == null}
+      error={m.linesError}
+      onRetry={onRetry}
+      note={started ? 'This game has started. Last pre-game prices stored.' : asOf}
+    >
       {none ? (
         <Text style={styles.note}>None of your sportsbooks has posted this game yet.</Text>
       ) : (
         <>
           <TeamHeads away={away} home={home} />
-          <PriceRow label="Moneyline" away={quoteText(b?.awayMl ?? null)} home={quoteText(b?.homeMl ?? null)} />
-          <PriceRow label="Spread" away={quoteText(b?.awaySpread ?? null)} home={quoteText(b?.homeSpread ?? null)} />
-          <PriceRow label="Total" away={over} home={under} />
-          <Text style={styles.note}>Total: over on the left, under on the right.</Text>
+          <TriRow
+            label="Moneyline"
+            away={quoteCell(b?.awayMl ?? null)}
+            home={quoteCell(b?.homeMl ?? null)}
+            spoken={`Moneyline: ${quoteSpoken(away, b?.awayMl ?? null)}; ${quoteSpoken(home, b?.homeMl ?? null)}`}
+          />
+          <TriRow
+            label="Spread"
+            away={quoteCell(b?.awaySpread ?? null)}
+            home={quoteCell(b?.homeSpread ?? null)}
+            spoken={`Spread: ${quoteSpoken(away, b?.awaySpread ?? null)}; ${quoteSpoken(home, b?.homeSpread ?? null)}`}
+          />
+          <TriRow label="Total" away={over} home={under} spoken={totalSpoken} />
         </>
       )}
     </Section>
@@ -115,12 +223,11 @@ export function BestPriceSection({ m, away, home, started }: { m: Matchup; away:
 
 // ── Side-by-side ranks ──────────────────────────────────────────────────────
 
-function rankCell(r: TeamStatRank | null): { value: string; rank: string } {
-  if (!r) return { value: '—', rank: '' };
-  return {
-    value: formatTeamStat(r.value, r.def.format),
-    rank: r.rank != null ? ordinal(r.rank) : '',
-  };
+function rankCell(r: TeamStatRank | null, record: string | null, better: boolean): Cell {
+  if (!r) return { main: '—' };
+  const rank = r.rank != null ? ordinal(r.rank) : '';
+  const sub = [rank, record].filter(Boolean).join(' · ');
+  return { main: formatTeamStat(r.value, r.def.format), sub: sub || undefined, better };
 }
 
 function CompareRow({
@@ -136,35 +243,18 @@ function CompareRow({
   awayRow: TeamStatsRow | null;
   homeRow: TeamStatsRow | null;
 }) {
-  const a = rankCell(pair.away);
-  const h = rankCell(pair.home);
   // The W-L behind a betting percent, so 100% over 3 games never reads like 100% over 30.
   const aRec = pair.away && awayRow ? formatRecord(awayRow, pair.away.def) : null;
   const hRec = pair.home && homeRow ? formatRecord(homeRow, pair.home.def) : null;
-  const edgeTeam = pair.edge === 'away' ? away : pair.edge === 'home' ? home : null;
+  const a = rankCell(pair.away, aRec, pair.edge === 'away');
+  const h = rankCell(pair.home, hRec, pair.edge === 'home');
+  const side = (team: string, c: Cell, r: TeamStatRank | null, rec: string | null) =>
+    `${team} ${c.main}${r?.rank != null ? `, ${ordinal(r.rank)}` : ''}${rec ? `, ${rec}` : ''}`;
+  const better = pair.edge === 'away' ? away : pair.edge === 'home' ? home : null;
   const spoken =
-    `${pair.label}: ${away} ${a.value}${a.rank ? `, ${a.rank}` : ''}${aRec ? `, ${aRec}` : ''}; ` +
-    `${home} ${h.value}${h.rank ? `, ${h.rank}` : ''}${hRec ? `, ${hRec}` : ''}` +
-    (edgeTeam ? `. Edge ${edgeTeam}` : '');
-  return (
-    <View style={styles.row} accessible accessibilityLabel={spoken}>
-      <View style={styles.cellSide}>
-        <Text style={[styles.value, pair.edge === 'away' ? styles.edge : null]}>
-          {a.value}
-          {pair.edge === 'away' ? ' ▲' : ''}
-        </Text>
-        <Text style={styles.sub}>{[a.rank, aRec].filter(Boolean).join(' · ')}</Text>
-      </View>
-      <Text style={[styles.cellMid, styles.label]}>{pair.label}</Text>
-      <View style={[styles.cellSide, styles.alignEnd]}>
-        <Text style={[styles.value, styles.right, pair.edge === 'home' ? styles.edge : null]}>
-          {pair.edge === 'home' ? '▲ ' : ''}
-          {h.value}
-        </Text>
-        <Text style={[styles.sub, styles.right]}>{[h.rank, hRec].filter(Boolean).join(' · ')}</Text>
-      </View>
-    </View>
-  );
+    `${pair.label}: ${side(away, a, pair.away, aRec)}; ${side(home, h, pair.home, hRec)}` +
+    (better ? `. ${better} ranks better` : '');
+  return <TriRow label={pair.label} away={a} home={h} spoken={spoken} />;
 }
 
 export function CompareSection({
@@ -172,20 +262,25 @@ export function CompareSection({
   away,
   home,
   group,
+  onRetry,
 }: {
   m: Matchup;
   away: string;
   home: string;
   group: 'efficiency' | 'betting';
+  onRetry: () => void;
 }) {
   const pairs = pairRanks(m.ranks[group].away, m.ranks[group].home);
   const empty = !m.awayRow && !m.homeRow;
   const of = m.ranks[group].away[0]?.of ?? m.ranks[group].home[0]?.of ?? 0;
+  // Name only the stat on THIS card that has no better side.
+  const unranked = pairs.filter((p) => (p.away ?? p.home)?.def.better == null).map((p) => p.label);
   return (
     <Section
-      title={group === 'efficiency' ? 'Team comparison' : 'Season betting record'}
+      title={group === 'efficiency' ? 'Team comparison' : 'Against the spread this season'}
       loading={m.board.loading}
       error={m.board.error}
+      onRetry={onRetry}
     >
       {empty ? (
         <Text style={styles.note}>No team stats for these teams yet this season.</Text>
@@ -196,7 +291,8 @@ export function CompareSection({
             <CompareRow key={p.key} pair={p} away={away} home={home} awayRow={m.awayRow} homeRow={m.homeRow} />
           ))}
           <Text style={styles.note}>
-            {`▲ marks the better league rank${of ? ` (of ${of})` : ''}. Pace and over rate have no better side.`}
+            {`● better league rank${of ? ` (of ${of})` : ''}.`}
+            {unranked.length ? ` ${unranked.join(' and ')} ${unranked.length === 1 ? 'has' : 'have'} no better side.` : ''}
           </Text>
         </>
       )}
@@ -206,39 +302,49 @@ export function CompareSection({
 
 // ── Last 10, rest ───────────────────────────────────────────────────────────
 
-function SimpleRow({ label, away, home, spoken }: { label: string; away: string; home: string; spoken?: string }) {
+function PlainRow({ label, away, home, awayVal, homeVal }: { label: string; away: string; home: string; awayVal: string; homeVal: string }) {
   return (
-    <View style={styles.row} accessible accessibilityLabel={spoken ?? `${label}: away ${away}; home ${home}`}>
-      <Text style={[styles.cellSide, styles.value]}>{away}</Text>
-      <Text style={[styles.cellMid, styles.label]}>{label}</Text>
-      <Text style={[styles.cellSide, styles.value, styles.right]}>{home}</Text>
-    </View>
+    <TriRow
+      label={label}
+      away={{ main: awayVal }}
+      home={{ main: homeVal }}
+      spoken={`${label}: ${away} ${awayVal}; ${home} ${homeVal}`}
+    />
   );
 }
 
-export function FormSection({ m, away, home }: { m: Matchup; away: string; home: string }) {
+export function FormSection({ m, away, home, onRetry }: { m: Matchup; away: string; home: string; onRetry: () => void }) {
   const f = m.form;
   const wl = (s: typeof f.away) => (s.games === 0 ? '—' : `${s.wins}-${s.losses}`);
   const margin = (s: typeof f.away) => (s.avgMargin == null ? '—' : formatSigned(s.avgMargin, 1));
   return (
-    <Section title={`Last ${MATCHUP_FORM_GAMES} games`} loading={m.formLoading} error={m.formError}>
+    <Section title={`Last ${MATCHUP_FORM_GAMES} games`} loading={m.formLoading} error={m.formError} onRetry={onRetry}>
       <TeamHeads away={away} home={home} />
-      <SimpleRow label="Record" away={wl(f.away)} home={wl(f.home)} />
-      <SimpleRow label="Avg margin" away={margin(f.away)} home={margin(f.home)} />
-      <SimpleRow label="ATS" away={formatAts(f.awayCover)} home={formatAts(f.homeCover)} />
-      <SimpleRow label="Over / under" away={formatOu(f.awayCover)} home={formatOu(f.homeCover)} />
-      <SimpleRow label="Rest" away={restText(f.awayRest)} home={restText(f.homeRest)} />
-      <Text style={styles.note}>ATS and over/under are against the stored closing line.</Text>
+      <PlainRow label="Record" away={away} home={home} awayVal={wl(f.away)} homeVal={wl(f.home)} />
+      <PlainRow label="Avg margin" away={away} home={home} awayVal={margin(f.away)} homeVal={margin(f.home)} />
+      <PlainRow label="ATS" away={away} home={home} awayVal={formatAts(f.awayCover)} homeVal={formatAts(f.homeCover)} />
+      <PlainRow label="Over / under" away={away} home={home} awayVal={formatOu(f.awayCover)} homeVal={formatOu(f.homeCover)} />
+      <PlainRow label="Rest" away={away} home={home} awayVal={restText(f.awayRest)} homeVal={restText(f.homeRest)} />
+      <Text style={styles.note}>
+        ATS and over/under are graded against DraftKings’ last line before tip-off (other books’ median when
+        DraftKings had none).
+      </Text>
     </Section>
   );
 }
 
 // ── Head-to-head ────────────────────────────────────────────────────────────
 
-export function HeadToHeadSection({ m, away, home }: { m: Matchup; away: string; home: string }) {
+/** A stored ISO game day as "Sat, 3/14/26". 16:00 UTC is still that day in ET,
+ *  so the day never slips back across midnight. */
+function gameDay(date: string): string {
+  return formatGameDateET(`${date}T16:00:00Z`, { withYear: true }) || date;
+}
+
+export function HeadToHeadSection({ m, away, home, onRetry }: { m: Matchup; away: string; home: string; onRetry: () => void }) {
   const h = m.h2h;
   return (
-    <Section title="Head-to-head" loading={m.meetingsLoading} error={m.meetingsError}>
+    <Section title="Head-to-head" loading={m.meetingsLoading} error={m.meetingsError} onRetry={onRetry}>
       {h.meetings.length === 0 ? (
         <Text style={styles.note}>{`${away} and ${home} haven’t played in the games we store.`}</Text>
       ) : (
@@ -251,9 +357,9 @@ export function HeadToHeadSection({ m, away, home }: { m: Matchup; away: string;
             <Text
               key={g.gameId}
               style={styles.meeting}
-              accessibilityLabel={`${g.date}: ${away} ${g.result === 'W' ? 'won' : g.result === 'L' ? 'lost' : 'tied'} ${g.scored} to ${g.allowed}${g.isHome ? ' at home' : ' away'}`}
+              accessibilityLabel={`${gameDay(g.date)}: ${away} ${g.result === 'W' ? 'won' : g.result === 'L' ? 'lost' : 'tied'} ${g.scored} to ${g.allowed} ${g.isHome ? 'at home' : `at ${home}`}`}
             >
-              {`${g.date}  ${away} ${g.scored}–${g.allowed} ${g.isHome ? 'vs' : '@'} ${home}  ${g.result}`}
+              {`${gameDay(g.date)}  ${away} ${g.scored}–${g.allowed} ${g.isHome ? 'vs' : '@'} ${home}  ${g.result}`}
             </Text>
           ))}
         </>
@@ -264,7 +370,7 @@ export function HeadToHeadSection({ m, away, home }: { m: Matchup; away: string;
 
 // ── Injuries ────────────────────────────────────────────────────────────────
 
-export function InjurySection({ m, away, home }: { m: Matchup; away: string; home: string }) {
+export function InjurySection({ m, away, home, onRetry }: { m: Matchup; away: string; home: string; onRetry: () => void }) {
   const list = (team: string, rows: Matchup['injured']['away']) => (
     <View style={styles.injuryTeam}>
       <Text style={styles.injuryHead}>{team}</Text>
@@ -280,7 +386,13 @@ export function InjurySection({ m, away, home }: { m: Matchup; away: string; hom
     </View>
   );
   return (
-    <Section title="Injuries" loading={m.injuriesLoading} error={m.injuriesError}>
+    <Section
+      title="Injuries"
+      loading={m.injuriesLoading}
+      error={m.injuriesError}
+      onRetry={onRetry}
+      note={m.injuriesAsOf ? `Updated ${formatStampET(m.injuriesAsOf)}` : null}
+    >
       {list(away, m.injured.away)}
       {list(home, m.injured.home)}
     </Section>
@@ -290,7 +402,17 @@ export function InjurySection({ m, away, home }: { m: Matchup; away: string; hom
 const styles = StyleSheet.create({
   card: { ...card, gap: spacing.sm },
   title: { ...sectionHeaderText },
-  spinner: { paddingVertical: spacing.md },
+  bareTitle: { marginTop: spacing.sm },
+  flex: { flex: 1 },
+  errorRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  retry: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: spacing.md },
+  retryText: {
+    fontFamily: font.family,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  pressed: { opacity: opacity.pressed },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -299,6 +421,13 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
   },
+  stackRow: {
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  stackCells: { flexDirection: 'row', gap: spacing.md },
   cellSide: { flex: 1 },
   cellMid: { flex: 1.1, textAlign: 'center', paddingHorizontal: spacing.xs },
   alignEnd: { alignItems: 'flex-end' },
@@ -321,13 +450,13 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontVariant: ['tabular-nums'],
   },
-  edge: { color: colors.gradeGood, fontWeight: font.weight.bold },
   sub: {
     fontFamily: font.family,
     fontSize: font.size.caption,
     color: colors.textSecondary,
     fontVariant: ['tabular-nums'],
   },
+  better: { color: colors.gradeGood, fontWeight: font.weight.bold },
   note: {
     fontFamily: font.family,
     fontSize: font.size.caption,

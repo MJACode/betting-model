@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
@@ -12,6 +12,7 @@ import {
   HeadToHeadSection,
   InjurySection,
   Section,
+  SectionHeading,
 } from '@/components/MatchupSections';
 import { PickCard } from '@/components/PickCard';
 import { useThresholdsRevision } from '@/hooks/useActionThresholds';
@@ -47,6 +48,7 @@ import {
   scoreboardMarketsFor,
   type ScoreboardQuote,
 } from '@/lib/scoreboard';
+import { REFRESH_TIMES } from '@/lib/format';
 import { colors, font, spacing, sectionHeaderText, card } from '@/lib/theme';
 import type { GameRow, RootStackParamList } from '@/types';
 import { SkeletonList } from '@/components/Skeleton';
@@ -101,6 +103,34 @@ export function ScoreboardGameScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [matchupOn, gameId, today.data, today.finishedData, thresholdsRevision],
   );
+  // Any row for this game on its day, BET or not: with none, the models have
+  // not scored it yet, which is not the same answer as "no pick" (UX review).
+  const scored = useMemo(
+    () => [...today.data, ...today.pausedData, ...today.finishedData].some((d) => d.pick.game_id === gameId),
+    [today.data, today.pausedData, today.finishedData, gameId],
+  );
+  // The 30s poll re-reads the best-price lines too, so they keep pace with
+  // the DraftKings block; a ref, because the poll's closure outlives renders.
+  const refreshLinesRef = useRef<(() => void) | null>(null);
+  refreshLinesRef.current = matchupOn ? m.refreshLines : null;
+  // Pull to refresh shows its spinner until every section has settled.
+  const [pulling, setPulling] = useState(false);
+  const settling = m.anyLoading || today.loading;
+  // Cleared only once a load was SEEN in flight and then settled: the pull's
+  // own render can come before any section has flipped to loading.
+  const sawSettling = useRef(false);
+  useEffect(() => {
+    if (!pulling) return;
+    if (settling) sawSettling.current = true;
+    else if (sawSettling.current) {
+      sawSettling.current = false;
+      setPulling(false);
+    }
+  }, [pulling, settling]);
+  // The way in says "Matchup", so the page does too.
+  useEffect(() => {
+    if (matchupOn) navigation.setOptions({ title: 'Matchup' });
+  }, [matchupOn, navigation]);
   const abbrevs = useNcaafAbbrevs(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -163,6 +193,7 @@ export function ScoreboardGameScreen() {
       }
       setMovement(moved);
       setLinesError(merged.error);
+      refreshLinesRef.current?.();
     } catch (e: unknown) {
       if (gen !== loadGen.current) return;
       if (!isAbortError(e)) setError(errorText(e));
@@ -210,17 +241,21 @@ export function ScoreboardGameScreen() {
 
   const started = card.footerBadge === 'LIVE' || game?.home_score != null;
   const refreshAll = () => {
+    setPulling(true);
     void load();
     if (matchupOn) {
       m.refresh();
       today.refresh();
     }
   };
+  const retrySections = () => {
+    m.refresh();
+  };
 
   return (
     <ScrollView
       contentContainerStyle={styles.page}
-      refreshControl={matchupOn ? <RefreshControl refreshing={false} onRefresh={refreshAll} /> : undefined}
+      refreshControl={matchupOn ? <RefreshControl refreshing={pulling} onRefresh={refreshAll} /> : undefined}
     >
       {linesError ? (
         <ErrorBanner
@@ -263,37 +298,58 @@ export function ScoreboardGameScreen() {
           {/* Our verdict first: the Signals board's own cards for this game,
               or a plain "No pick" — never a lean below the bar (Matt,
               2026-11-23: "No pick, just stats in their matchup"). */}
-          <Section title="Our pick" loading={today.loading && !today.loaded}>
-            {picks.length === 0 ? (
-              <Text style={styles.noPick}>No pick from our models on this game.</Text>
-            ) : (
-              picks.map((item) => (
-                <PickCard
-                  key={item.pick.pick_id}
-                  item={item}
-                  onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
-                  tracked={tracked.isTracked(item.pick)}
-                  onToggleTrack={() => tracked.toggle(item.pick)}
-                  inSlip={slip.has(slipKeyForPick(item.pick))}
-                  onToggleSlip={() => {
-                    void slip.toggle(slipKeyForPick(item.pick), betslipPlayerFromPick(item.pick));
-                  }}
-                  showSignalBadge={false}
-                  paused={isPausedForDisplay(item.pick)}
-                  layout="signals"
-                />
-              ))
-            )}
-          </Section>
-          <BestPriceSection m={m} away={game.away_team} home={game.home_team} started={started} />
-          <CompareSection m={m} away={game.away_team} home={game.home_team} group="efficiency" />
-          <FormSection m={m} away={game.away_team} home={game.home_team} />
-          <CompareSection m={m} away={game.away_team} home={game.home_team} group="betting" />
-          <HeadToHeadSection m={m} away={game.away_team} home={game.home_team} />
-          <InjurySection m={m} away={game.away_team} home={game.home_team} />
+          {picks.length > 0 ? (
+            // The board's own cards on the page, not inside a second card:
+            // the wrapper cancels the page gutter so PickCard's own margin
+            // gives the Signals board's gutter (UX review, 2026-11-23).
+            <>
+              <SectionHeading title="Our pick" />
+              <View style={styles.pickCards}>
+                {picks.map((item) => (
+                  <PickCard
+                    key={item.pick.pick_id}
+                    item={item}
+                    onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
+                    tracked={tracked.isTracked(item.pick)}
+                    onToggleTrack={() => tracked.toggle(item.pick)}
+                    inSlip={slip.has(slipKeyForPick(item.pick))}
+                    onToggleSlip={() => {
+                      void slip.toggle(slipKeyForPick(item.pick), betslipPlayerFromPick(item.pick));
+                    }}
+                    showSignalBadge={false}
+                    paused={isPausedForDisplay(item.pick)}
+                    layout="signals"
+                  />
+                ))}
+              </View>
+            </>
+          ) : (
+            // A failed read is never "No pick": the member would be told the
+            // models passed on a game they may have bet (UX review Blocker).
+            <Section
+              title="Our pick"
+              loading={!today.loaded && !today.error}
+              error={today.loaded ? null : today.error}
+              onRetry={today.refresh}
+            >
+              {scored ? (
+                <Text style={styles.noPick}>No pick from our models on this game.</Text>
+              ) : (
+                <Text style={styles.noPick}>
+                  Our models haven’t scored this game yet. <Text style={styles.noPickNote}>{REFRESH_TIMES}</Text>
+                </Text>
+              )}
+            </Section>
+          )}
+          <BestPriceSection m={m} away={game.away_team} home={game.home_team} started={started} onRetry={retrySections} />
+          <CompareSection m={m} away={game.away_team} home={game.home_team} group="efficiency" onRetry={retrySections} />
+          <FormSection m={m} away={game.away_team} home={game.home_team} onRetry={retrySections} />
+          <CompareSection m={m} away={game.away_team} home={game.home_team} group="betting" onRetry={retrySections} />
+          <HeadToHeadSection m={m} away={game.away_team} home={game.home_team} onRetry={retrySections} />
+          <InjurySection m={m} away={game.away_team} home={game.home_team} onRetry={retrySections} />
         </>
       ) : null}
-      <Text style={styles.book}>{matchupOn ? 'DraftKings line movement' : 'DraftKings'}</Text>
+      <Text style={styles.book}>{matchupOn ? 'DraftKings lines and movement' : 'DraftKings'}</Text>
       {/* The board's tabs: a fight has no spread at DraftKings (review L4). */}
       {marketsFor(card.sport).map((m) => (
         <View key={m.id} style={styles.block}>
@@ -349,6 +405,13 @@ const styles = StyleSheet.create({
   record: {
     fontFamily: font.family,
     fontSize: font.size.callout,
+    fontWeight: font.weight.regular,
+    color: colors.textSecondary,
+  },
+  pickCards: { marginHorizontal: -spacing.lg },
+  noPickNote: {
+    fontFamily: font.family,
+    fontSize: font.size.footnote,
     fontWeight: font.weight.regular,
     color: colors.textSecondary,
   },
