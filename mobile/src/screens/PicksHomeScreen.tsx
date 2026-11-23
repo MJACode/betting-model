@@ -156,7 +156,7 @@ import {
   unitsFor,
   formatUnits,
 } from '@/lib/thresholds';
-import { formatPct, gameStatus, liveSlateDatesET, todayET } from '@/lib/format';
+import { REFRESH_TIMES, formatPct, gameStatus, liveSlateDatesET, todayET } from '@/lib/format';
 import { reachFrame, unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
 
 /**
@@ -1326,7 +1326,6 @@ const EUROLEAGUE_PREGAME_EMPTY =
   'EuroLeague pre-game picks post five to ten minutes before each tip-off, when that game is checked. Bets ' +
   'made at halftime post on Live Signals.';
 
-const REFRESH_TIMES = 'Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.';
 
 function boardLabel(view: PicksView): string {
   if (view === 'signals') return 'Signals';

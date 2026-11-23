@@ -118,6 +118,7 @@ export function TeamsBoard({
   sport,
   onAdded,
   onOpenTeam,
+  onOpenGame,
 }: {
   sport: Sport;
   /** After a line is added — the Stats screen bounces back to the betslip
@@ -128,6 +129,9 @@ export function TeamsBoard({
    *  stats to help a user make a bet". The board hands over the row and the
    *  season it is showing, so the page labels the same season. */
   onOpenTeam?: (row: TeamStatsRow, season: number | null) => void;
+  /** A tap on the row's game line ("8:40 PM ET · @ GSW") opens that game's
+   *  matchup page (Matt, 2026-11-23). Only passed for sports that have one. */
+  onOpenGame?: (gameId: string) => void;
 }) {
   const groups = useMemo(() => teamGroupsForSport(sport), [sport]);
   const [stat, setStat] = useState<TeamStatDef | null>(() => defaultTeamStatFor(sport));
@@ -666,6 +670,7 @@ export function TeamsBoard({
         keyExtractor={(item) => item.row.team}
         renderItem={({ item: { row: item, rank } }) => {
           const quote = lineByTeam.get(item.team) ?? null;
+          const slateGame = slateGameFor({ team: item.team }, slateGameIndex)?.game ?? null;
           return (
             <TeamRow
               rank={rank}
@@ -675,7 +680,7 @@ export function TeamsBoard({
               quote={quote}
               started={startedTeams.get(item.team) ?? null}
               subline={slateSubline(
-                slateGameFor({ team: item.team }, slateGameIndex)?.game ?? null,
+                slateGame,
                 // Only when the LINE column is hidden — it prints the same
                 // word, and twice on one row reads as a bug (UX review).
                 showLines ? null : startedTeams.get(item.team) ?? null,
@@ -685,6 +690,7 @@ export function TeamsBoard({
               onLinePress={quote ? () => setLineSheet(quote) : undefined}
               // The team page labels its numbers "season": hand it the
               // board's own season row, never the period-filtered copy.
+              onOpenGame={onOpenGame && slateGame ? () => onOpenGame(slateGame.game.game_id) : undefined}
               onOpen={
                 onOpenTeam
                   ? () => onOpenTeam(rows.find((r) => r.team === item.team) ?? item, season)
@@ -744,6 +750,7 @@ function TeamRow({
   showLine,
   onLinePress,
   onOpen,
+  onOpenGame,
 }: {
   rank: number;
   row: TeamStatsRow;
@@ -758,6 +765,9 @@ function TeamRow({
   /** Opens the team's page. The name and record are the target; the LINE
    *  pill keeps its own tap, so the two never fight for one press. */
   onOpen?: () => void;
+  /** Opens this row's game (the matchup page). The game line is its target:
+   *  a press there is caught here, before the team page's press around it. */
+  onOpenGame?: () => void;
 }) {
   const value = teamStatValue(row, def);
   const thin = isThinSample(row, def);
@@ -798,7 +808,23 @@ function TeamRow({
         accessibilityRole={onOpen ? 'button' : undefined}
         accessibilityLabel={
           onOpen
-            ? `${row.team}, ${row.wins} ${row.wins === 1 ? 'win' : 'wins'}, ${row.losses} ${row.losses === 1 ? 'loss' : 'losses'}. Open team page`
+            ? `${row.team}, ${row.wins} ${row.wins === 1 ? 'win' : 'wins'}, ${row.losses} ${row.losses === 1 ? 'loss' : 'losses'}. Open team page${
+                onOpenGame ? `${subline ? `. ${sublineSpoken(subline)}` : ''}. Matchup in actions` : ''
+              }`
+            : undefined
+        }
+        // The team-name press is ONE element to VoiceOver, so the game line
+        // inside it cannot be focused; its matchup is offered as a rotor
+        // action instead (UX review Blocker, 2026-11-23).
+        accessibilityActions={
+          onOpenGame ? [{ name: 'activate' }, { name: 'openMatchup', label: 'Open matchup' }] : undefined
+        }
+        onAccessibilityAction={
+          onOpenGame
+            ? (e) => {
+                if (e.nativeEvent.actionName === 'openMatchup') onOpenGame();
+                else if (e.nativeEvent.actionName === 'activate') onOpen?.();
+              }
             : undefined
         }
         accessibilityHint={onOpen ? 'Shows the next game, line movement, splits and head-to-head' : undefined}
@@ -819,7 +845,23 @@ function TeamRow({
             on every flip (UX review, 2026-09-05). Not MERGED into the record
             line — a record is a stat and a fixture is a schedule, and merged,
             the record truncates first at large Dynamic Type. */}
-        {subline ? (
+        {subline && onOpenGame ? (
+          // No hitSlop: it would reach into the name and record lines, 1pt
+          // away, and steal the team page's press (UX review). It is
+          // accessible={false} because VoiceOver cannot focus inside the
+          // team-name element; VoiceOver reaches it through that row's
+          // "Open matchup" action instead.
+          <Pressable
+            onPress={onOpenGame}
+            style={({ pressed }) => [styles.rowGameLink, pressed ? styles.pressed : null]}
+            accessible={false}
+          >
+            <Text style={[styles.rowSubline, styles.rowGameLinkText]} numberOfLines={1}>
+              {subline}
+            </Text>
+            <Ionicons name="chevron-forward" size={12} color={colors.tint} />
+          </Pressable>
+        ) : subline ? (
           <Text
             style={styles.rowSubline}
             numberOfLines={1}
@@ -1094,6 +1136,8 @@ const styles = StyleSheet.create({
   // below it: textTertiary is ~3.4:1 on the card at this size, under the AA
   // floor, and this is the line Matt asked for (UX review, 2026-09-05).
   rowSubline: { fontSize: font.size.micro, color: colors.textSecondary, marginTop: 1 },
+  rowGameLink: { flexDirection: 'row', alignItems: 'center', gap: 2, alignSelf: 'flex-start', maxWidth: '100%' },
+  rowGameLinkText: { color: colors.tint, flexShrink: 1 },
   valueWrap: { alignItems: 'flex-end', width: 72 },
   colHeaderLine: { minWidth: 66, textAlign: 'right' },
   lineWrap: { minWidth: 66, alignItems: 'flex-end' },

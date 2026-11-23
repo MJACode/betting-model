@@ -85,7 +85,7 @@ export interface NextGame {
   publicSide: Partial<Record<TeamMarket, PublicRead | null>>;
 }
 
-function useSection<T>(
+export function useSection<T>(
   initial: T,
   load: (() => Promise<T>) | null,
   deps: readonly unknown[],

@@ -236,6 +236,7 @@ import {
   type RulerScale,
 } from '@/lib/lineRuler';
 import { supportsTeamBoard, teamBoardSeason, teamSeasonLabel } from '@/lib/teamStatCatalog';
+import { hasMatchupView } from '@/lib/gameMatchup';
 import {
   ATD_COPY,
   ATD_HIT_W,
@@ -2617,6 +2618,9 @@ export function StatsScreen() {
               fromParlay: fromParlay || undefined,
             })
           }
+          // The row's game line opens that game's matchup page, for the
+          // sports that have one (lib/matchup, NBA first — Matt, 2026-11-23).
+          onOpenGame={hasMatchupView(sport) ? (gameId) => navigation.navigate('ScoreboardGame', { gameId }) : undefined}
         />
       </SafeAreaView>
     );

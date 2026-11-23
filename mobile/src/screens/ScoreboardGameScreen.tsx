@@ -1,9 +1,29 @@
-import React, { useCallback, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { useFocusEffect, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import {
+  BestPriceSection,
+  CompareSection,
+  FormSection,
+  HeadToHeadSection,
+  InjurySection,
+  Section,
+  SectionHeading,
+} from '@/components/MatchupSections';
+import { PickCard } from '@/components/PickCard';
+import { useThresholdsRevision } from '@/hooks/useActionThresholds';
+import { useMatchup } from '@/hooks/useMatchup';
+import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { useTrackedBets } from '@/hooks/useTrackedBets';
+import { betslipPlayerFromPick } from '@/lib/betslipGuard';
+import { gamePicks, hasMatchupView } from '@/lib/gameMatchup';
+import { slipKeyForPick } from '@/lib/parlay';
+import { isPausedForDisplay, isUnlockedPreview, passesActionFilter, passesRecordFilter } from '@/lib/thresholds';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { errorText, isAbortError } from '@/lib/errors';
@@ -28,11 +48,13 @@ import {
   scoreboardMarketsFor,
   type ScoreboardQuote,
 } from '@/lib/scoreboard';
+import { REFRESH_TIMES } from '@/lib/format';
 import { colors, font, spacing, sectionHeaderText, card } from '@/lib/theme';
-import type { RootStackParamList } from '@/types';
+import type { GameRow, RootStackParamList } from '@/types';
 import { SkeletonList } from '@/components/Skeleton';
 
 type Route = RouteProp<RootStackParamList, 'ScoreboardGame'>;
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 const MARKETS = [
   { id: 'h2h' as const, title: 'Moneyline' },
@@ -47,13 +69,75 @@ function marketsFor(sport: string) {
 }
 
 /**
- * One game: DraftKings moneyline, spread and total, and how the line moved.
- * No box score, no signal, no bet button. Scores come from the same stored
- * feeds as the board.
+ * One game. Every sport: DraftKings moneyline, spread and total, and how the
+ * line moved, with scores from the same stored feeds as the board.
+ *
+ * NBA (lib/matchup MATCHUP_SPORTS) is the MATCHUP page (Matt, 2026-11-23: "we
+ * don't have a nice match up view with games to figure out who to bet"): our
+ * picks on this game first — the Signals board's own cards and its own
+ * filters, or a plain "No pick" — then the best price at the member's books,
+ * the two teams side by side, last 10, rest, head-to-head and injuries.
  */
 export function ScoreboardGameScreen() {
   const route = useRoute<Route>();
+  const navigation = useNavigation<Nav>();
   const gameId = route.params.gameId;
+  const [game, setGame] = useState<GameRow | null>(null);
+  const matchupOn = hasMatchupView(game?.sport);
+  const m = useMatchup(game, matchupOn);
+  // The board's picks for this game's day. The same hook Picks reads, so the
+  // cards below are the Signals board's cards, never a second copy of them.
+  const today = useTodayPicks(game?.game_date);
+  const thresholdsRevision = useThresholdsRevision();
+  const tracked = useTrackedBets();
+  const slip = useParlaySlip();
+  const picks = useMemo(
+    () =>
+      matchupOn
+        ? gamePicks(gameId, today.data, today.finishedData, {
+            action: (d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick),
+            record: (d) => passesRecordFilter(d.pick) && !isUnlockedPreview(d.pick),
+          })
+        : [],
+    // thresholdsRevision: the action filter reads a module store.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [matchupOn, gameId, today.data, today.finishedData, thresholdsRevision],
+  );
+  // Any row for this game on its day, BET or not: with none, the models have
+  // not scored it yet, which is not the same answer as "no pick" (UX review).
+  const scored = useMemo(
+    () => [...today.data, ...today.pausedData, ...today.finishedData].some((d) => d.pick.game_id === gameId),
+    [today.data, today.pausedData, today.finishedData, gameId],
+  );
+  // The 30s poll re-reads the best-price lines too, so they keep pace with
+  // the DraftKings block; a ref, because the poll's closure outlives renders.
+  const refreshLinesRef = useRef<(() => void) | null>(null);
+  const polledOnce = useRef(false);
+  refreshLinesRef.current = matchupOn ? m.refreshLines : null;
+  // Pull to refresh shows its spinner until every section has settled.
+  const [pulling, setPulling] = useState(false);
+  const settling = m.anyLoading || today.loading;
+  // Cleared only once a load was SEEN in flight and then settled: the pull's
+  // own render can come before any section has flipped to loading.
+  const sawSettling = useRef(false);
+  useEffect(() => {
+    if (!pulling) return undefined;
+    // A pull where nothing reloads (no sections to read) still ends.
+    const stop = setTimeout(() => {
+      sawSettling.current = false;
+      setPulling(false);
+    }, 10_000);
+    if (settling) sawSettling.current = true;
+    else if (sawSettling.current) {
+      sawSettling.current = false;
+      setPulling(false);
+    }
+    return () => clearTimeout(stop);
+  }, [pulling, settling]);
+  // The way in says "Matchup", so the page does too.
+  useEffect(() => {
+    if (matchupOn) navigation.setOptions({ title: 'Matchup' });
+  }, [matchupOn, navigation]);
   const abbrevs = useNcaafAbbrevs(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +155,7 @@ export function ScoreboardGameScreen() {
     try {
       const game = await fetchScoreboardGame(gameId);
       if (gen !== loadGen.current) return;
+      setGame(game);
       if (!game) {
         setCard(null);
         setError('This game isn’t on the board.');
@@ -115,6 +200,9 @@ export function ScoreboardGameScreen() {
       }
       setMovement(moved);
       setLinesError(merged.error);
+      // Not on the first load: the lines section is already reading then.
+      if (polledOnce.current) refreshLinesRef.current?.();
+      polledOnce.current = true;
     } catch (e: unknown) {
       if (gen !== loadGen.current) return;
       if (!isAbortError(e)) setError(errorText(e));
@@ -160,8 +248,24 @@ export function ScoreboardGameScreen() {
     ? `Live${card.footerText ? ` · ${card.footerText}` : ''}`
     : card.footerText;
 
+  const started = card.footerBadge === 'LIVE' || game?.home_score != null;
+  const refreshAll = () => {
+    setPulling(true);
+    void load();
+    if (matchupOn) {
+      m.refresh();
+      today.refresh();
+    }
+  };
+  const retrySections = () => {
+    m.refresh();
+  };
+
   return (
-    <ScrollView contentContainerStyle={styles.page}>
+    <ScrollView
+      contentContainerStyle={styles.page}
+      refreshControl={matchupOn ? <RefreshControl refreshing={pulling} onRefresh={refreshAll} /> : undefined}
+    >
       {linesError ? (
         <ErrorBanner
           what="DraftKings lines"
@@ -184,15 +288,77 @@ export function ScoreboardGameScreen() {
           retrying={retrying}
         />
       ) : null}
-      <Text style={styles.matchup} accessibilityRole="header">{card.awayFull}</Text>
-      <Text style={styles.matchup}>{card.homeFull}</Text>
+      <Text style={styles.matchup} accessibilityRole="header">
+        {card.awayFull}
+        {matchupOn && m.awayRow ? <Text style={styles.record}>{`  ${m.awayRow.wins}-${m.awayRow.losses}`}</Text> : null}
+      </Text>
+      <Text style={styles.matchup}>
+        {card.homeFull}
+        {matchupOn && m.homeRow ? <Text style={styles.record}>{`  ${m.homeRow.wins}-${m.homeRow.losses}`}</Text> : null}
+      </Text>
       <Text style={styles.scoreBig}>{card.away.score}–{card.home.score}</Text>
       <Text style={styles.status}>
         {statusWord}
         {card.updatedLabel ? ` · ${card.updatedLabel}` : ''}
       </Text>
-      <Text style={styles.book}>DraftKings</Text>
       {card.situation ? <Text style={styles.situation}>{card.situation}</Text> : null}
+      {matchupOn && game ? (
+        <>
+          {/* Our verdict first: the Signals board's own cards for this game,
+              or a plain "No pick" — never a lean below the bar (Matt,
+              2026-11-23: "No pick, just stats in their matchup"). */}
+          {picks.length > 0 ? (
+            // The board's own cards on the page, not inside a second card:
+            // the wrapper cancels the page gutter so PickCard's own margin
+            // gives the Signals board's gutter (UX review, 2026-11-23).
+            <>
+              <SectionHeading title="Our pick" />
+              <View style={styles.pickCards}>
+                {picks.map((item) => (
+                  <PickCard
+                    key={item.pick.pick_id}
+                    item={item}
+                    onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
+                    tracked={tracked.isTracked(item.pick)}
+                    onToggleTrack={() => tracked.toggle(item.pick)}
+                    inSlip={slip.has(slipKeyForPick(item.pick))}
+                    onToggleSlip={() => {
+                      void slip.toggle(slipKeyForPick(item.pick), betslipPlayerFromPick(item.pick));
+                    }}
+                    showSignalBadge={false}
+                    paused={isPausedForDisplay(item.pick)}
+                    layout="signals"
+                  />
+                ))}
+              </View>
+            </>
+          ) : (
+            // A failed read is never "No pick": the member would be told the
+            // models passed on a game they may have bet (UX review Blocker).
+            <Section
+              title="Our pick"
+              loading={!today.loaded && !today.error}
+              error={today.loaded ? null : today.error}
+              onRetry={today.refresh}
+            >
+              {scored ? (
+                <Text style={styles.noPick}>No pick from our models on this game.</Text>
+              ) : (
+                <Text style={styles.noPick}>
+                  Our models haven’t scored this game yet. <Text style={styles.noPickNote}>{REFRESH_TIMES}</Text>
+                </Text>
+              )}
+            </Section>
+          )}
+          <BestPriceSection m={m} away={game.away_team} home={game.home_team} started={started} onRetry={retrySections} />
+          <CompareSection m={m} away={game.away_team} home={game.home_team} group="efficiency" onRetry={retrySections} />
+          <FormSection m={m} away={game.away_team} home={game.home_team} onRetry={retrySections} />
+          <CompareSection m={m} away={game.away_team} home={game.home_team} group="betting" onRetry={retrySections} />
+          <HeadToHeadSection m={m} away={game.away_team} home={game.home_team} onRetry={retrySections} />
+          <InjurySection m={m} away={game.away_team} home={game.home_team} onRetry={retrySections} />
+        </>
+      ) : null}
+      <Text style={styles.book}>{matchupOn ? 'DraftKings lines and movement' : 'DraftKings'}</Text>
       {/* The board's tabs: a fight has no spread at DraftKings (review L4). */}
       {marketsFor(card.sport).map((m) => (
         <View key={m.id} style={styles.block}>
@@ -203,7 +369,7 @@ export function ScoreboardGameScreen() {
           )}
         </View>
       ))}
-      <Text style={styles.note}>Game markets only. No bet from here.</Text>
+      {matchupOn ? null : <Text style={styles.note}>Game markets only. No bet from here.</Text>}
       <BetslipBarSpacer />
     </ScrollView>
   );
@@ -243,6 +409,25 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  record: {
+    fontFamily: font.family,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.regular,
+    color: colors.textSecondary,
+  },
+  pickCards: { marginHorizontal: -spacing.lg },
+  noPickNote: {
+    fontFamily: font.family,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.regular,
+    color: colors.textSecondary,
+  },
+  noPick: {
+    fontFamily: font.family,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
   scoreBig: {
