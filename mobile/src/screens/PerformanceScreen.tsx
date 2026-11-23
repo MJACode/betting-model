@@ -101,9 +101,20 @@ export function PerformanceScreen() {
     />
   );
 
-  const manualCard = (
-    <ManualBetsCard bets={manual.bets} onAdd={() => setShowAdd(true)} onRowPress={settleManual} />
+  // "Add a bet" is a small + at the very top, beside the bell (Matt,
+  // 2026-11-23: the full-width button took too much room).
+  const addBetButton = (
+    <Pressable
+      onPress={() => setShowAdd(true)}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel="Add a bet"
+      style={({ pressed }) => [styles.headerIconBtn, pressed && styles.btnPressed]}
+    >
+      <Ionicons name="add-circle-outline" size={24} color={colors.tint} />
+    </Pressable>
   );
+  const manualCard = <ManualBetsCard bets={manual.bets} onRowPress={settleManual} />;
   const trackedCard = (
     <TrackedBetsCard
       rows={tracked.rows}
@@ -146,8 +157,8 @@ export function PerformanceScreen() {
   );
 
   // The real-world state: sportsbook sync isn't live yet, so self-tracking IS
-  // the Performance tab. Sync is a small "coming soon" note at the top, not a
-  // CTA — the connect flow has no live keys behind it and would dead-end.
+  // the Performance tab. No sync note here: Settings already carries the
+  // sportsbook call (Matt, 2026-11-23), as does the Record tab its own link.
   if (!linked && !loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -156,6 +167,7 @@ export function PerformanceScreen() {
             <View style={styles.titleRow}>
               <Text style={styles.title}>Performance</Text>
               <View style={styles.headerActions}>
+                {addBetButton}
                 <NotificationBell />
                 <SettingsButton />
               </View>
@@ -169,28 +181,6 @@ export function PerformanceScreen() {
           {error ? (
             <ErrorBanner what="your synced bets" error={error} onRetry={() => void refresh(true)} retrying={loading} />
           ) : null}
-
-          <View style={styles.soon}>
-            <Ionicons name="link-outline" size={15} color={colors.textTertiary} />
-            <View style={styles.soonText}>
-              <Text style={styles.soonTitle}>Sportsbook sync — coming soon</Text>
-              <Text style={styles.soonSub}>
-                Automatic bet import from DraftKings, FanDuel and more. Until then, log your bets
-                below.
-              </Text>
-            </View>
-          </View>
-
-          <Pressable
-            onPress={() => navigation.navigate('TrackRecord')}
-            accessibilityRole="button"
-            accessibilityLabel="See the model’s verified track record"
-            style={({ pressed }) => [styles.trackLink, pressed && styles.btnPressed]}
-          >
-            <Ionicons name="shield-checkmark-outline" size={16} color={colors.tint} />
-            <Text style={styles.trackLinkText}>See the model’s verified track record</Text>
-            <Ionicons name="chevron-forward" size={15} color={colors.tint} />
-          </Pressable>
 
           {insightsCard}
           {manualCard}
@@ -231,6 +221,7 @@ export function PerformanceScreen() {
           <View style={styles.titleRow}>
             <Text style={styles.title}>Performance</Text>
             <View style={styles.headerActions}>
+              {addBetButton}
               <NotificationBell />
               <SettingsButton />
             </View>
@@ -244,17 +235,6 @@ export function PerformanceScreen() {
         {error ? (
           <ErrorBanner what="your synced bets" error={error} onRetry={() => void refresh(true)} retrying={loading} />
         ) : null}
-
-        <Pressable
-          onPress={() => navigation.navigate('TrackRecord')}
-          accessibilityRole="button"
-          accessibilityLabel="See the model’s verified track record"
-          style={({ pressed }) => [styles.trackLink, pressed && styles.btnPressed]}
-        >
-          <Ionicons name="shield-checkmark-outline" size={16} color={colors.tint} />
-          <Text style={styles.trackLinkText}>See the model’s verified track record</Text>
-          <Ionicons name="chevron-forward" size={15} color={colors.tint} />
-        </Pressable>
 
         {needsReconnect ? (
           <Pressable
@@ -323,11 +303,9 @@ export function PerformanceScreen() {
 
 function ManualBetsCard({
   bets,
-  onAdd,
   onRowPress,
 }: {
   bets: ManualBet[];
-  onAdd: () => void;
   onRowPress: (b: ManualBet) => void;
 }) {
   const settled = bets.filter((b) => b.result !== 'open');
@@ -339,29 +317,13 @@ function ManualBetsCard({
     <View style={styles.manualCard}>
       <View style={styles.manualHeader}>
         <Text style={styles.manualTitle}>Your bets</Text>
-        {bets.length > 0 ? (
-          <Pressable
-            onPress={onAdd}
-            // ~18pt text link in the card header: 13 + 18 + 13 = 44pt.
-            hitSlop={{ top: 13, bottom: 13, left: 8, right: 8 }}
-            accessibilityRole="button"
-            accessibilityLabel="Add a bet"
-            style={styles.addManualBtn}
-          >
-            <Ionicons name="add" size={16} color={colors.tint} />
-            <Text style={styles.addManualText}>Add a bet</Text>
-          </Pressable>
-        ) : null}
       </View>
 
       {bets.length === 0 ? (
-        <>
-          <Text style={styles.manualEmpty}>
-            Record the bets you place — any book, any sport — and your record builds here. Stored on
-            this device.
-          </Text>
-          <PrimaryButton label="Add a bet" onPress={onAdd} />
-        </>
+        <Text style={styles.manualEmpty}>
+          Record the bets you place — any book, any sport — with the + at the top. Your record
+          builds here, stored on this device.
+        </Text>
       ) : (
         <>
           <Text
@@ -446,12 +408,15 @@ function DateGroupedList<T>({
   statusOf,
   profitOf,
   renderItem,
+  startFolded = false,
 }: {
   items: readonly T[];
   dateOf: (t: T) => string;
   statusOf: (t: T) => string;
   profitOf: (t: T) => number;
   renderItem: (t: T) => React.ReactNode;
+  /** Every day starts folded, open bets or not (the tracked list, Matt 2026-11-23). */
+  startFolded?: boolean;
 }) {
   const [taps, setTaps] = useState<Record<string, boolean>>({});
   const [showAll, setShowAll] = useState(false);
@@ -462,7 +427,7 @@ function DateGroupedList<T>({
   return (
     <>
       {shown.map((g, i) => {
-        const open = isDateOpen(g.date, i, taps, hasOpen(g));
+        const open = startFolded ? (taps[g.date] ?? false) : isDateOpen(g.date, i, taps, hasOpen(g));
         return (
           <View key={g.date || 'undated'}>
             <BetDateHeader
@@ -529,37 +494,60 @@ function TrackedBetsCard({
   onRowPress: (row: TrackedBetRow) => void;
   onRowLongPress: (row: TrackedBetRow) => void;
 }) {
+  // The card starts folded to its title and record line, and so does every
+  // day inside it (Matt, 2026-11-23: "Tracked picks should always be
+  // collapsed to start"). Not remembered: each visit starts folded.
+  const [expanded, setExpanded] = useState(false);
+  const foldable = rows.length > 0;
+  const summaryLine =
+    (summary.settled > 0
+      ? `${formatFlatUnits(summary.net)} · ${summary.wins}–${summary.losses}` +
+        (summary.pushes > 0 ? `–${summary.pushes}` : '')
+      : 'Nothing settled yet') + (summary.open > 0 ? ` · ${summary.open} open` : '');
+  const summarySpeech = unitsSpeech(
+    (summary.settled > 0
+      ? `${formatFlatUnits(summary.net)}, ${summary.wins} won, ${summary.losses} lost` +
+        (summary.pushes > 0 ? `, ${summary.pushes} pushed` : '')
+      : 'Nothing settled yet') + (summary.open > 0 ? `, ${summary.open} open` : ''),
+  );
   return (
     <View style={styles.manualCard}>
-      <View style={styles.manualHeader}>
-        <Text style={styles.manualTitle}>Tracked picks</Text>
-        {trackedCount > 0 ? (
-          <Text style={styles.trackedCount}>{trackedCount}</Text>
-        ) : null}
-      </View>
+      {foldable ? (
+        <Pressable
+          onPress={() => setExpanded((e) => !e)}
+          accessibilityRole="button"
+          accessibilityLabel={`Tracked picks, ${trackedCount}, ${summarySpeech}`}
+          accessibilityState={{ expanded }}
+          accessibilityHint={expanded ? 'Hides your tracked picks' : 'Shows your tracked picks'}
+          style={({ pressed }) => [styles.trackedToggle, pressed && styles.btnPressed]}
+        >
+          <View style={{ flex: 1 }}>
+            <View style={styles.manualHeader}>
+              <Text style={styles.manualTitle}>Tracked picks</Text>
+              {trackedCount > 0 ? <Text style={styles.trackedCount}>{trackedCount}</Text> : null}
+            </View>
+            <Text style={[styles.manualSummary, !expanded && styles.trackedSummaryFolded]}>{summaryLine}</Text>
+          </View>
+          <Ionicons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={colors.textTertiary}
+            style={styles.trackedChevron}
+          />
+        </Pressable>
+      ) : (
+        <View style={styles.manualHeader}>
+          <Text style={styles.manualTitle}>Tracked picks</Text>
+        </View>
+      )}
 
       {rows.length === 0 ? (
         <Text style={styles.manualEmpty}>
           Tap the bell on any pick to track it. Once games settle, your tracked bets score here
           automatically.
         </Text>
-      ) : (
+      ) : !expanded ? null : (
         <>
-          <Text
-            style={styles.manualSummary}
-            accessibilityLabel={unitsSpeech(
-              (summary.settled > 0
-                ? `${formatFlatUnits(summary.net)}, ${summary.wins} won, ${summary.losses} lost` +
-                  (summary.pushes > 0 ? `, ${summary.pushes} pushed` : '')
-                : 'Nothing settled yet') + (summary.open > 0 ? `, ${summary.open} open` : ''),
-            )}
-          >
-            {summary.settled > 0
-              ? `${formatFlatUnits(summary.net)} · ${summary.wins}–${summary.losses}` +
-                (summary.pushes > 0 ? `–${summary.pushes}` : '')
-              : 'Nothing settled yet'}
-            {summary.open > 0 ? ` · ${summary.open} open` : ''}
-          </Text>
           <View style={styles.stakePills} accessibilityRole="radiogroup">
             {STAKE_MODES.map((m) => {
               const active = stakeMode === m.value;
@@ -588,6 +576,7 @@ function TrackedBetsCard({
             dateOf={(row) => row.pick.game_date}
             statusOf={(row) => row.status}
             profitOf={(row) => row.profit}
+            startFolded
             renderItem={(row) => (
             <Pressable
               key={row.pick.pick_id}
@@ -858,6 +847,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
+  headerIconBtn: { padding: 4 },
   title: {
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
@@ -905,50 +895,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     marginTop: 2,
-  },
-  soon: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.separatorOpaque,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    // Same inset as every other card on the tab; without it the note ran
-    // edge to edge (Matt, 2026-11-19, screenshot).
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  soonText: { flex: 1 },
-  soonTitle: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-  },
-  soonSub: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    lineHeight: 16,
-    marginTop: 1,
-  },
-  trackLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  trackLinkText: {
-    flex: 1,
-    fontSize: font.size.callout,
-    color: colors.tint,
-    fontWeight: font.weight.semibold,
   },
   reconnect: {
     flexDirection: 'row',
@@ -1015,8 +961,6 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
-  addManualBtn: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  addManualText: { fontSize: font.size.footnote, color: colors.tint, fontWeight: font.weight.semibold },
   manualEmpty: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 18 },
   manualSummary: {
     fontSize: font.size.callout,
@@ -1043,6 +987,9 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     fontStyle: 'italic',
   },
+  trackedToggle: { minHeight: 44, flexDirection: 'row', alignItems: 'center' },
+  trackedSummaryFolded: { marginBottom: 0 },
+  trackedChevron: { marginLeft: spacing.sm },
   trackedCount: {
     fontSize: font.size.footnote,
     color: colors.textTertiary,
