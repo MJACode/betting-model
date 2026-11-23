@@ -130,6 +130,49 @@
       });
   }
 
+  // Supabase sends one code per email per window and answers 429 inside it,
+  // so "Resend code" waits this long after each send before it can be tapped.
+  // A 429 is still handled if the server's window is longer than this.
+  var RESEND_WAIT_SECONDS = 60;
+  var resendTimer = null;
+
+  function startResendWait() {
+    var button = $("code-resend");
+    var left = RESEND_WAIT_SECONDS;
+    clearInterval(resendTimer);
+    function tick() {
+      if (left <= 0) {
+        clearInterval(resendTimer);
+        button.disabled = false;
+        button.textContent = "Resend code";
+        return;
+      }
+      button.disabled = true;
+      button.textContent = "Resend code in " + left + "s";
+      left -= 1;
+    }
+    tick();
+    resendTimer = setInterval(tick, 1000);
+  }
+
+  function codeStep(note) {
+    $("code-email").textContent = email;
+    $("code-note").textContent = note || "";
+    $("code-note").hidden = !note;
+    show("state-code");
+    startResendWait();
+    $("code").focus();
+  }
+
+  // Resolves "sent", "wait" (429: a code went out moments ago) or rejects.
+  function requestCode() {
+    return call("POST", AUTH + "/otp", { email: email, create_user: false })
+      .then(function () { return "sent"; }, function (e) {
+        if (e.status === 429) return "wait";
+        throw e;
+      });
+  }
+
   $("state-email").addEventListener("submit", function (ev) {
     ev.preventDefault();
     var button = $("send-code");
@@ -138,28 +181,43 @@
     if (!email) return;
     button.disabled = true;
     button.textContent = "Sending...";
-    function codeStep(note) {
-      $("code-email").textContent = email;
-      $("code-note").textContent = note || "";
-      $("code-note").hidden = !note;
-      show("state-code");
-      $("code").focus();
-    }
-    call("POST", AUTH + "/otp", { email: email, create_user: false })
-      .then(function () { codeStep(""); })
-      .catch(function (e) {
+    requestCode()
+      .then(function (outcome) {
         // 429 means a code was sent moments ago (Supabase allows one per
         // email per window): the member should enter that code, not see an
         // error. Seen 2026-11-23: one 200 then nine 429s from repeat taps.
-        if (e.status === 429) {
-          codeStep("A code was already sent a moment ago. Check your inbox and spam folder, or wait a minute before asking for another.");
-          return;
-        }
+        codeStep(outcome === "wait"
+          ? "A code was already sent a moment ago. Check your inbox and spam folder, or wait a minute before asking for another."
+          : "");
+      }, function () {
         fail("We couldn't send a code to that email. Use the email on your Signal Base account.");
       })
       .then(function () {
         button.disabled = false;
         button.textContent = "Send code";
+      });
+  });
+
+  $("code-resend").addEventListener("click", function () {
+    var button = $("code-resend");
+    if (button.disabled || !email) return;
+    button.disabled = true;
+    button.textContent = "Sending...";
+    requestCode()
+      .then(function (outcome) {
+        $("code").value = "";
+        $("code").removeAttribute("aria-invalid");
+        $("code-note").textContent = outcome === "wait"
+          ? "A code was sent less than a minute ago. Check your inbox and spam folder, or try again shortly."
+          : "We sent a new code to " + email + ". Use the newest one: earlier codes may no longer work.";
+        $("code-note").hidden = false;
+        startResendWait();
+        $("code").focus();
+      }, function () {
+        $("code-note").textContent = "We couldn't send a new code. Wait a moment and try again.";
+        $("code-note").hidden = false;
+        button.disabled = false;
+        button.textContent = "Resend code";
       });
   });
 
@@ -179,7 +237,10 @@
       });
   });
 
-  $("code-back").addEventListener("click", function () { show("state-email"); });
+  $("code-back").addEventListener("click", function () {
+    clearInterval(resendTimer);
+    show("state-email");
+  });
 
   $("error-retry").addEventListener("click", function () {
     $("allow").disabled = !$("agree").checked;
