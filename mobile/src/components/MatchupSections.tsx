@@ -370,7 +370,25 @@ export function HeadToHeadSection({ m, away, home, onRetry }: { m: Matchup; away
 
 // ── Injuries ────────────────────────────────────────────────────────────────
 
-export function InjurySection({ m, away, home, onRetry }: { m: Matchup; away: string; home: string; onRetry: () => void }) {
+/**
+ * The CURRENT injury report (injury_status_current keeps no history). Before
+ * tip-off that is the report for this game; once it has started it is not,
+ * and the note says so rather than passing today's list off as the game's
+ * (PR #1595 review, L2).
+ */
+export function InjurySection({
+  m,
+  away,
+  home,
+  started,
+  onRetry,
+}: {
+  m: Matchup;
+  away: string;
+  home: string;
+  started: boolean;
+  onRetry: () => void;
+}) {
   const list = (team: string, rows: Matchup['injured']['away']) => (
     <View style={styles.injuryTeam}>
       <Text style={styles.injuryHead}>{team}</Text>
@@ -391,7 +409,13 @@ export function InjurySection({ m, away, home, onRetry }: { m: Matchup; away: st
       loading={m.injuriesLoading}
       error={m.injuriesError}
       onRetry={onRetry}
-      note={m.injuriesAsOf ? `Updated ${formatStampET(m.injuriesAsOf)}` : null}
+      note={
+        started
+          ? `Current report, not as of tip-off${m.injuriesAsOf ? ` · Updated ${formatStampET(m.injuriesAsOf)}` : ''}`
+          : m.injuriesAsOf
+            ? `Updated ${formatStampET(m.injuriesAsOf)}`
+            : null
+      }
     >
       {list(away, m.injured.away)}
       {list(home, m.injured.home)}

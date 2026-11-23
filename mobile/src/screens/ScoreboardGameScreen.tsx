@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
@@ -12,18 +12,10 @@ import {
   HeadToHeadSection,
   InjurySection,
   Section,
-  SectionHeading,
 } from '@/components/MatchupSections';
-import { PickCard } from '@/components/PickCard';
-import { useThresholdsRevision } from '@/hooks/useActionThresholds';
 import { useMatchup } from '@/hooks/useMatchup';
-import { useParlaySlip } from '@/hooks/useParlaySlip';
-import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { useTrackedBets } from '@/hooks/useTrackedBets';
-import { betslipPlayerFromPick } from '@/lib/betslipGuard';
-import { gamePicks, hasMatchupView } from '@/lib/gameMatchup';
-import { slipKeyForPick } from '@/lib/parlay';
-import { isPausedForDisplay, isUnlockedPreview, passesActionFilter, passesRecordFilter } from '@/lib/thresholds';
+import { hasMatchupView } from '@/lib/gameMatchup';
+import { MatchupPicks } from '@/components/MatchupPicks';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { errorText, isAbortError } from '@/lib/errors';
@@ -48,7 +40,6 @@ import {
   scoreboardMarketsFor,
   type ScoreboardQuote,
 } from '@/lib/scoreboard';
-import { REFRESH_TIMES } from '@/lib/format';
 import { colors, font, spacing, sectionHeaderText, card } from '@/lib/theme';
 import type { GameRow, RootStackParamList } from '@/types';
 import { SkeletonList } from '@/components/Skeleton';
@@ -85,30 +76,6 @@ export function ScoreboardGameScreen() {
   const [game, setGame] = useState<GameRow | null>(null);
   const matchupOn = hasMatchupView(game?.sport);
   const m = useMatchup(game, matchupOn);
-  // The board's picks for this game's day. The same hook Picks reads, so the
-  // cards below are the Signals board's cards, never a second copy of them.
-  const today = useTodayPicks(game?.game_date);
-  const thresholdsRevision = useThresholdsRevision();
-  const tracked = useTrackedBets();
-  const slip = useParlaySlip();
-  const picks = useMemo(
-    () =>
-      matchupOn
-        ? gamePicks(gameId, today.data, today.finishedData, {
-            action: (d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick),
-            record: (d) => passesRecordFilter(d.pick) && !isUnlockedPreview(d.pick),
-          })
-        : [],
-    // thresholdsRevision: the action filter reads a module store.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [matchupOn, gameId, today.data, today.finishedData, thresholdsRevision],
-  );
-  // Any row for this game on its day, BET or not: with none, the models have
-  // not scored it yet, which is not the same answer as "no pick" (UX review).
-  const scored = useMemo(
-    () => [...today.data, ...today.pausedData, ...today.finishedData].some((d) => d.pick.game_id === gameId),
-    [today.data, today.pausedData, today.finishedData, gameId],
-  );
   // The 30s poll re-reads the best-price lines too, so they keep pace with
   // the DraftKings block; a ref, because the poll's closure outlives renders.
   const refreshLinesRef = useRef<(() => void) | null>(null);
@@ -116,7 +83,10 @@ export function ScoreboardGameScreen() {
   refreshLinesRef.current = matchupOn ? m.refreshLines : null;
   // Pull to refresh shows its spinner until every section has settled.
   const [pulling, setPulling] = useState(false);
-  const settling = m.anyLoading || today.loading;
+  // The picks block reports its own read (components/MatchupPicks).
+  const [picksLoading, setPicksLoading] = useState(false);
+  const [pullNonce, setPullNonce] = useState(0);
+  const settling = m.anyLoading || picksLoading;
   // Cleared only once a load was SEEN in flight and then settled: the pull's
   // own render can come before any section has flipped to loading.
   const sawSettling = useRef(false);
@@ -254,7 +224,7 @@ export function ScoreboardGameScreen() {
     void load();
     if (matchupOn) {
       m.refresh();
-      today.refresh();
+      setPullNonce((n) => n + 1);
     }
   };
   const retrySections = () => {
@@ -307,55 +277,18 @@ export function ScoreboardGameScreen() {
           {/* Our verdict first: the Signals board's own cards for this game,
               or a plain "No pick" — never a lean below the bar (Matt,
               2026-11-23: "No pick, just stats in their matchup"). */}
-          {picks.length > 0 ? (
-            // The board's own cards on the page, not inside a second card:
-            // the wrapper cancels the page gutter so PickCard's own margin
-            // gives the Signals board's gutter (UX review, 2026-11-23).
-            <>
-              <SectionHeading title="Our pick" />
-              <View style={styles.pickCards}>
-                {picks.map((item) => (
-                  <PickCard
-                    key={item.pick.pick_id}
-                    item={item}
-                    onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
-                    tracked={tracked.isTracked(item.pick)}
-                    onToggleTrack={() => tracked.toggle(item.pick)}
-                    inSlip={slip.has(slipKeyForPick(item.pick))}
-                    onToggleSlip={() => {
-                      void slip.toggle(slipKeyForPick(item.pick), betslipPlayerFromPick(item.pick));
-                    }}
-                    showSignalBadge={false}
-                    paused={isPausedForDisplay(item.pick)}
-                    layout="signals"
-                  />
-                ))}
-              </View>
-            </>
-          ) : (
-            // A failed read is never "No pick": the member would be told the
-            // models passed on a game they may have bet (UX review Blocker).
-            <Section
-              title="Our pick"
-              loading={!today.loaded && !today.error}
-              error={today.loaded ? null : today.error}
-              onRetry={today.refresh}
-            >
-              {scored ? (
-                <Text style={styles.noPick}>No pick from our models on this game.</Text>
-              ) : (
-                <Text style={styles.noPick}>
-                  Our models haven’t scored this game yet. <Text style={styles.noPickNote}>{REFRESH_TIMES}</Text>
-                </Text>
-              )}
-            </Section>
-          )}
+          <MatchupPicks
+            gameId={gameId}
+            gameDate={game.game_date}
+            refreshNonce={pullNonce}
+            onLoadingChange={setPicksLoading}
+          />
           <BestPriceSection m={m} away={game.away_team} home={game.home_team} started={started} onRetry={retrySections} />
           <CompareSection m={m} away={game.away_team} home={game.home_team} group="efficiency" onRetry={retrySections} />
           <FormSection m={m} away={game.away_team} home={game.home_team} onRetry={retrySections} />
           <CompareSection m={m} away={game.away_team} home={game.home_team} group="betting" onRetry={retrySections} />
           <HeadToHeadSection m={m} away={game.away_team} home={game.home_team} onRetry={retrySections} />
-          <InjurySection m={m} away={game.away_team} home={game.home_team} onRetry={retrySections} />
+          <InjurySection m={m} away={game.away_team} home={game.home_team} started={started} onRetry={retrySections} />
         </>
       ) : null}
       <Text style={styles.book}>{matchupOn ? 'DraftKings lines and movement' : 'DraftKings'}</Text>
@@ -416,19 +349,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.regular,
     color: colors.textSecondary,
-  },
-  pickCards: { marginHorizontal: -spacing.lg },
-  noPickNote: {
-    fontFamily: font.family,
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.regular,
-    color: colors.textSecondary,
-  },
-  noPick: {
-    fontFamily: font.family,
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
   },
   scoreBig: {
     fontFamily: font.family,
