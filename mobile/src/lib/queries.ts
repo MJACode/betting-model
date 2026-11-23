@@ -5,6 +5,7 @@ import { fetchAllPages } from '@/lib/paging';
 import type { ModelDailyRow, ModelTotalRow } from '@/lib/modelHeat';
 import type { ModelDayRecord } from '@/lib/performanceInsights';
 import type { PeriodKey, TeamPeriodRow } from '@/lib/teamPeriodSplits';
+import type { CoverRow } from '@/lib/gameMatchup';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
@@ -3671,6 +3672,32 @@ export async function fetchTeamPeriodRows(
         .range(from, to),
     (r) => `${r.game_id}|${r.team}`,
   );
+}
+
+/**
+ * One team's newest full-game results against the stored line, for the
+ * matchup page's "last 10 ATS / O-U" (lib/matchup coverSummary). At most
+ * `limit` rows. Sized 2026-11-23: 98 FG rows for BOS across 2025-26 and
+ * 2026-27, every one carrying `ats`; the read returns the newest 10.
+ */
+export async function fetchTeamFullGameCovers(
+  sport: string,
+  team: string,
+  beforeDate: string,
+  limit = 10,
+): Promise<CoverRow[]> {
+  const { data, error } = await supabase
+    .from('team_period_results')
+    .select('game_id,game_date,is_home,ats,ou')
+    .eq('sport', sport)
+    .eq('team', team)
+    .eq('period', 'FG')
+    .lt('game_date', beforeDate)
+    .order('game_date', { ascending: false })
+    .order('game_id', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as unknown as CoverRow[];
 }
 
 // ── Team detail (screens/TeamStatsScreen) ───────────────────────────────────

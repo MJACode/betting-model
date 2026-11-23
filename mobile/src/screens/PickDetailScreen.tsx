@@ -82,6 +82,7 @@ import {
   recordNoteFor,
 } from '@/lib/myBooks';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
+import { hasMatchupView } from '@/lib/gameMatchup';
 import { colors, font, pnlColor, radii, spacing, sectionHeaderText, opacity, cardDense } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
 import { errorText, isAbortError, isNotFoundError } from '@/lib/errors';
@@ -565,6 +566,20 @@ function PickDetailContent({
               </Text>
               <GameStatusPill game={game} compact={false} live={liveState} />
             </View>
+          ) : null}
+          {/* The matchup page for this game (Matt, 2026-11-23), where the
+              sport has one: ranks side by side, form, rest, injuries. */}
+          {game && hasMatchupView(game.sport) ? (
+            <Pressable
+              onPress={() => navigation.navigate('ScoreboardGame', { gameId: game.game_id })}
+              style={({ pressed }) => [styles.matchupLink, pressed ? styles.matchupLinkPressed : null]}
+              accessibilityRole="button"
+              accessibilityLabel={`Matchup, ${game.away_team} at ${game.home_team}`}
+              accessibilityHint="Opens both teams side by side: ranks, last 10, rest, head-to-head and injuries"
+            >
+              <Text style={styles.matchupLinkText}>Matchup</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+            </Pressable>
           ) : null}
           {liveBases ? <Text style={styles.liveBases}>{liveBases}</Text> : null}
         </View>
@@ -1121,6 +1136,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
+  },
+  matchupLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
+    marginTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  matchupLinkPressed: { opacity: opacity.pressed },
+  matchupLinkText: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   matchup: {
     fontSize: font.size.footnote,
