@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, AI assistant consent page: Resend code button (Matt) |
 | 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, AI assistant consent page: one step at a time, a resent code is not an error, Try again (Matt) |
 | 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, Performance tab: tracked picks start folded, header + to add a bet, Insights sections fold, sync note and track-record link removed (Matt) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, AI assistant: four game-context tools (injuries, rest, public % of bets/money, defense vs position), one shared 10-a-day pool (Matt) |
