@@ -14,7 +14,7 @@
  *   injury_status_current NBA ............. 104 rows (92 Out, 12 Day-To-Day)
  *   v_latest_odds_all_books, one game ..... ~40 rows
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { useSection } from '@/hooks/useTeamDetail';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
@@ -83,26 +83,26 @@ export function useMatchup(game: GameRow | null, enabled: boolean) {
   );
   const meetings = useSection<GameRow[]>(
     [],
-    on ? () => fetchHeadToHead(sport, away, home, MATCHUP_MEETINGS) : null,
-    [on, sport, away, home, nonce],
+    on ? () => fetchHeadToHead(sport, away, home, MATCHUP_MEETINGS, date) : null,
+    [on, sport, away, home, date, nonce],
   );
   const injuries = useSection<InjuryStatusRow[]>(
     [],
     on ? () => fetchInjuryStatus(sport) : null,
     [on, sport, nonce],
   );
-  const lines = useSection<OddsByBookRow[]>(
-    [],
-    on && game ? () => fetchGameLineRowsAllMarkets(game.game_id) : null,
+  // Each read carries the game it answered for. "Loaded" is then a fact
+  // about THIS game, not the order two effects happen to run in (PR #1595
+  // review, L3): the first paint is a skeleton, never "none of your books
+  // has posted", and a later game id starts unloaded again.
+  const lines = useSection<{ gameId: string | null; rows: OddsByBookRow[] }>(
+    { gameId: null, rows: [] },
+    on && game
+      ? async () => ({ gameId: game.game_id, rows: await fetchGameLineRowsAllMarkets(game.game_id) })
+      : null,
     [on, game?.game_id, nonce, linesNonce],
   );
-  // True once the lines read has answered at least once (data or error), so
-  // the first paint is a skeleton, never "none of your books has posted".
-  const [linesLoaded, setLinesLoaded] = useState(false);
-  useEffect(() => {
-    if (!lines.loading && (lines.data.length > 0 || lines.error != null || on)) setLinesLoaded(true);
-  }, [lines.loading, lines.data, lines.error, on]);
-  useEffect(() => setLinesLoaded(false), [game?.game_id]);
+  const linesLoaded = (game != null && lines.data.gameId === game.game_id) || lines.error != null;
   // Pre-game prices only: the view drops in-play rows but does not bound on
   // the start, and the evening refresh keeps writing `open` rows after it
   // (CLAUDE.md §6). Measured 2026-11-23: 0 of 1,530 NBA rows over the prior
@@ -110,12 +110,12 @@ export function useMatchup(game: GameRow | null, enabled: boolean) {
   const commence = game?.commence_time ?? null;
   const pregame = useMemo(() => {
     const tip = commence ? Date.parse(commence) : NaN;
-    if (!Number.isFinite(tip)) return lines.data;
-    return lines.data.filter((r) => {
+    if (!Number.isFinite(tip)) return lines.data.rows;
+    return lines.data.rows.filter((r) => {
       const at = r.snapshot_at ? Date.parse(r.snapshot_at) : NaN;
       return !Number.isFinite(at) || at <= tip;
     });
-  }, [lines.data, commence]);
+  }, [lines.data.rows, commence]);
 
   const ranks = useMemo(() => {
     const rows = board.data.rows;

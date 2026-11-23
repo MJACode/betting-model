@@ -39,6 +39,7 @@ LIB = SRC / "lib" / "gameMatchup.ts"
 SCREEN = SRC / "screens" / "ScoreboardGameScreen.tsx"
 HOOK = SRC / "hooks" / "useMatchup.ts"
 SECTIONS = SRC / "components" / "MatchupSections.tsx"
+PICKS = SRC / "components" / "MatchupPicks.tsx"
 BOARD = SRC / "components" / "TeamsBoard.tsx"
 STATS = SRC / "screens" / "StatsScreen.tsx"
 DETAIL = SRC / "screens" / "PickDetailScreen.tsx"
@@ -186,14 +187,43 @@ def test_the_pure_half_imports_nothing_from_the_app():
 # ── 2. "No pick" is the Signals board's answer ─────────────────────────────
 
 def test_the_page_uses_the_signals_board_filters_and_cards():
+    p = _read(PICKS)
+    assert "useTodayPicks(gameDate)" in p
+    assert "passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)" in p
+    assert "passesRecordFilter(d.pick) && !isUnlockedPreview(d.pick)" in p
+    assert "<PickCard" in p and 'layout="signals"' in p
+    assert "No pick from our models on this game." in p
+    # Never a lean below the bar: neither file reads an edge of its own.
+    for src in (p, _read(SCREEN)):
+        assert "decisionEdge" not in src and ".edge" not in src
+
+
+def test_only_a_matchup_page_reads_the_day_s_picks_board():
+    # PR #1595 review M1: mounted on the screen, useTodayPicks read a whole
+    # day's board for every NFL / MLB / NHL game page and threw it away. It
+    # lives in MatchupPicks, which the screen mounts only under matchupOn.
     s = _read(SCREEN)
-    assert "useTodayPicks(game?.game_date)" in s
-    assert "passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)" in s
-    assert "passesRecordFilter(d.pick) && !isUnlockedPreview(d.pick)" in s
-    assert "<PickCard" in s and 'layout="signals"' in s
-    assert "No pick from our models on this game." in s
-    # Never a lean below the bar: the page reads no edge of its own.
-    assert "decisionEdge" not in s and ".edge" not in s
+    assert "useTodayPicks" not in s
+    i = s.index("{matchupOn && game ? (")
+    assert s.index("<MatchupPicks", i) > i
+    assert s.index("<MatchupPicks") > s.index("{matchupOn && game ? (")
+
+
+def test_head_to_head_stops_before_this_game():
+    # PR #1595 review L1: a final game listed itself as a past meeting.
+    q = _read(QUERIES)
+    i = q.index("export async function fetchHeadToHead")
+    body = q[i:q.index("\n}\n", i)]
+    assert "beforeDate?: string" in body
+    assert "q.lt('game_date', beforeDate)" in body
+    assert "fetchHeadToHead(sport, away, home, MATCHUP_MEETINGS, date)" in _read(HOOK)
+
+
+def test_prices_loaded_is_keyed_on_the_game_it_answered_for():
+    # PR #1595 review L3: no effect-order dependence.
+    h = _read(HOOK)
+    assert "lines.data.gameId === game.game_id" in h
+    assert "setLinesLoaded" not in h
 
 
 def test_the_page_is_not_focus_aware_beyond_its_own_poll():

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, Matchup page follow-up: picks board read on NBA pages only, head-to-head bounded, injury and stale-picks notes (Matt) |
 | 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, Daily results: the picks fold by sport, Games scored folds (Matt) |
 | 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, NBA game matchup page: our pick or "No pick", best price, ranks side by side, last 10 ATS/O-U, rest, H2H, injuries; three ways in (Matt) |
 | 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, AI assistant consent page: Resend code button (Matt) |
