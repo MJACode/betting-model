@@ -885,3 +885,8 @@ a {
   cursor: pointer;
   min-height: 44px;
 }
+.consent-link:disabled {
+  color: #6b7280;
+  text-decoration: none;
+  cursor: default;
+}

@@ -156,10 +156,8 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/ParlayScreen.tsx', 'missingNote,pressed', 1], // 39.5pt
   ['src/screens/PaywallScreen.tsx', '', 5], // 38.3, 38.3, 38.3, 39.5, 39.5pt — close is 44pt
   ['src/screens/PerformanceScreen.tsx', '', 3], // 39.5, 41.8, 41.8pt
-  ['src/screens/PerformanceScreen.tsx', 'addManualBtn', 1], // 42.0pt
   ['src/screens/PerformanceScreen.tsx', 'reconnect,btnPressed', 1], // 40.0pt
   ['src/screens/PerformanceScreen.tsx', 'stakePill,stakePillActive', 1], // 41.5pt
-  ['src/screens/PerformanceScreen.tsx', 'trackLink,btnPressed', 2], // 43.0, 43.0pt
   ['src/screens/PickDetailScreen.tsx', 'viewStatsBtn,viewStatsBtnPressed', 1], // 41.8pt
   ['src/screens/PlayerStatsScreen.tsx', 'gameRow', 1], // 34.3pt
   ['src/screens/SavedParlaysScreen.tsx', '', 1], // 43.0pt

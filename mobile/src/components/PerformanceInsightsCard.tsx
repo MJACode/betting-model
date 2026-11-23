@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Dimensions, StyleSheet, Text, View } from 'react-native';
 
 import { EquityCurve } from '@/components/EquityCurve';
+import { FoldSection } from '@/components/FoldSection';
 import { SegmentTabs } from '@/components/GroupTabs';
 import { SkeletonList } from '@/components/Skeleton';
 import { unitsSpeech } from '@/lib/a11y';
@@ -26,6 +27,10 @@ import { colors, font, pnlColor, spacing, card } from '@/lib/theme';
  * closing line, form, the units line, and the member against every posted
  * pick from the models they follow. Scored at "My stakes"; logged bets are
  * folded in. The maths is lib/performanceInsights.ts.
+ *
+ * Only the period tabs, the headline and the units chart are always open;
+ * every section under them folds, starting closed (Matt, 2026-11-23: "a lot
+ * of great content here, but it's overwhelming").
  */
 
 const PERIODS: { value: InsightPeriod; label: string; noun: string; prev: string }[] = [
@@ -215,15 +220,14 @@ export function PerformanceInsightsCard({
           ) : null}
 
           {ins.best || ins.worst ? (
-            <View style={styles.section}>
+            <FoldSection title={ins.best && ins.worst ? 'Best bet & toughest loss' : ins.best ? 'Best bet' : 'Toughest loss'}>
               {ins.best ? <BetLine label="Best bet" bet={ins.best} /> : null}
               {ins.worst ? <BetLine label="Toughest loss" bet={ins.worst} /> : null}
-            </View>
+            </FoldSection>
           ) : null}
 
           {decided > 0 ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Where your units come from</Text>
+            <FoldSection title="Where your units come from">
               <View style={styles.tabs}>
                 <SegmentTabs
                   items={SPLIT_KEYS}
@@ -245,7 +249,7 @@ export function PerformanceInsightsCard({
               {(split === 'sport' || split === 'type') && hasLoggedInWindow ? (
                 <Text style={styles.caption}>Tracked picks only: a logged bet doesn’t name its sport or market.</Text>
               ) : null}
-            </View>
+            </FoldSection>
           ) : null}
 
           <ClvSection clv={ins.clv} />
@@ -253,14 +257,13 @@ export function PerformanceInsightsCard({
       )}
 
       {streak.kind ? (
-        <View style={styles.section} accessible accessibilityLabel={formSpeech(streak)}>
-          <Text style={styles.sectionTitle}>Form</Text>
-          <Text style={styles.body}>
+        <FoldSection title="Form" hint={streak.length === 1 ? (streak.kind === 'W' ? 'Won the last one' : 'Lost the last one') : `${streak.kind === 'W' ? 'Won' : 'Lost'} ${streak.length} straight`}>
+          <Text style={styles.body} accessibilityLabel={formSpeech(streak)}>
             Last {streak.last10Wins + streak.last10Losses}: {streak.last10Wins}–{streak.last10Losses} ·{' '}
             {streak.kind === 'W' ? 'Won' : 'Lost'} {streak.length === 1 ? 'the last one' : `the last ${streak.length}`}
           </Text>
           <Text style={styles.caption}>Across every settled bet, not just {meta.noun}. Pushes are skipped.</Text>
-        </View>
+        </FoldSection>
       ) : null}
 
       {vs ? <VersusSection vs={vs} noun={meta.noun} /> : null}
@@ -272,7 +275,7 @@ export function PerformanceInsightsCard({
 
 function formSpeech(s: ReturnType<typeof streakOf>): string {
   const n = s.last10Wins + s.last10Losses;
-  return `Form. Last ${n}: ${s.last10Wins} won, ${s.last10Losses} lost. ${s.kind === 'W' ? 'Won' : 'Lost'} ${
+  return `Last ${n}: ${s.last10Wins} won, ${s.last10Losses} lost. ${s.kind === 'W' ? 'Won' : 'Lost'} ${
     s.length === 1 ? 'the last one' : `the last ${s.length}`
   }.`;
 }
@@ -328,9 +331,11 @@ function ClvSection({ clv }: { clv: ReturnType<typeof periodInsights>['clv'] }) 
         (clv.pushes > 0 ? `, ${clv.pushes} matched` : '')
       : `All ${clv.pushes} matched the close`;
   return (
-    <View style={styles.section} accessible accessibilityLabel={`Closing line. ${line}. Average ${clv.avgPct != null ? formatSigned(clv.avgPct, 1, '%') : 'not measured'}.`}>
-      <Text style={styles.sectionTitle}>Closing line</Text>
-      <Text style={styles.body}>
+    <FoldSection title="Closing line" hint={pct != null ? `${pct}% beat` : null}>
+      <Text
+        style={styles.body}
+        accessibilityLabel={`${line}. Average ${clv.avgPct != null ? formatSigned(clv.avgPct, 1, '%') : 'not measured'}.`}
+      >
         {line}
         {clv.avgPct != null ? ` · avg ${formatSigned(clv.avgPct, 1, '%')}` : ''}
       </Text>
@@ -338,7 +343,7 @@ function ClvSection({ clv }: { clv: ReturnType<typeof periodInsights>['clv'] }) 
         Getting a better price than the close is the earliest sign of an edge, long before the record shows it.
         Tracked picks with a measured close only.
       </Text>
-    </View>
+    </FoldSection>
   );
 }
 
@@ -355,8 +360,7 @@ function VersusSection({ vs, noun }: { vs: NonNullable<ReturnType<typeof versusM
   }
   const n = vs.models.length;
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>You vs the models you follow</Text>
+    <FoldSection title="You vs the models you follow">
       <VersusRow label="Your picks" r={vs.you} />
       <VersusRow label={`Every posted pick, same ${n === 1 ? 'model' : `${n} models`}`} r={vs.models_record} />
       {verdict ? <Text style={styles.body}>{verdict}</Text> : null}
@@ -364,7 +368,7 @@ function VersusSection({ vs, noun }: { vs: NonNullable<ReturnType<typeof versusM
         Your tracked picks {noun} against every pick those models posted over the same days. Compared on ROI, since
         your stakes differ from the posted ones. Logged bets have no model, so they sit out.
       </Text>
-    </View>
+    </FoldSection>
   );
 }
 
@@ -410,18 +414,6 @@ const styles = StyleSheet.create({
   hero: { fontSize: font.size.title1, fontWeight: font.weight.bold, marginTop: spacing.xs },
   heroSub: { fontSize: font.size.callout, color: colors.textPrimary, fontWeight: font.weight.semibold, marginTop: spacing.xs },
   chart: { marginTop: spacing.sm },
-  section: {
-    marginTop: spacing.md,
-    paddingTop: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
-  },
-  sectionTitle: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-    marginBottom: spacing.xs,
-  },
   body: { fontSize: font.size.callout, color: colors.textPrimary, marginTop: spacing.xs },
   caption: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: spacing.xs },
   row: {
