@@ -128,15 +128,35 @@
 
   $("state-email").addEventListener("submit", function (ev) {
     ev.preventDefault();
+    var button = $("send-code");
+    if (button.disabled) return;
     email = $("email").value.trim();
     if (!email) return;
+    button.disabled = true;
+    button.textContent = "Sending...";
+    function codeStep(note) {
+      $("code-email").textContent = email;
+      $("code-note").textContent = note || "";
+      $("code-note").hidden = !note;
+      show("state-code");
+      $("code").focus();
+    }
     call("POST", AUTH + "/otp", { email: email, create_user: false })
-      .then(function () {
-        $("code-email").textContent = email;
-        show("state-code");
-        $("code").focus();
+      .then(function () { codeStep(""); })
+      .catch(function (e) {
+        // 429 means a code was sent moments ago (Supabase allows one per
+        // email per window): the member should enter that code, not see an
+        // error. Seen 2026-11-23: one 200 then nine 429s from repeat taps.
+        if (e.status === 429) {
+          codeStep("A code was already sent a moment ago. Check your inbox and spam folder, or wait a minute before asking for another.");
+          return;
+        }
+        fail("We couldn't send a code to that email. Use the email on your Signal Base account.");
       })
-      .catch(function () { fail("We couldn't send a code to that email. Use the email on your Signal Base account."); });
+      .then(function () {
+        button.disabled = false;
+        button.textContent = "Send code";
+      });
   });
 
   $("state-code").addEventListener("submit", function (ev) {

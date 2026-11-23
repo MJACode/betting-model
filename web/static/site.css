@@ -743,6 +743,11 @@ a {
 }
 
 /* AI assistant consent page (/oauth/consent) */
+/* .consent-form sets display:flex, which beats the [hidden] attribute the
+   page's show() toggles, so every step rendered at once (2026-11-23). */
+.consent-card [hidden] {
+  display: none !important;
+}
 .consent-main {
   background: var(--bg);
   padding: 48px 0 72px;
