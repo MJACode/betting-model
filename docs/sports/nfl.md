@@ -174,6 +174,11 @@ in-week during the season.
   VOIDED, not deleted (`scripts/void_picks.py`); BUF @ HOU at |dev| 2.0
   stands. Full table: `docs/thresholds.md`.
 
+  **A ceiling of 5.0 points since 2026-11-24 (mike):** a book more than 5.0
+  points off Pinnacle is a feed error and is not bet. The largest real gap
+  stored is 4.5. The pick that forced it was BetMGM "PHI @ DAL — DAL +5.5"
+  against DAL -8.5 everywhere else: `docs/nfl_opener_dev_ceiling.md`.
+
   **2026 live track (no unit bump):** live through 2026; retire if the season
   finishes ≤ flat. Wind: `MAX_FIRE_LEAD` stays 4; measure the deployed
   Open-Meteo population. Do not unpause paused XGB props off this track.
