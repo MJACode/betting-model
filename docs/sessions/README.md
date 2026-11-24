@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, NCAAB first-half models: when they bet, and whether earlier checks pay (mike) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, Betslip and saved parlays: Log bet puts the slip in Your bets (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, AI assistant connector: saved preferences profile (free), books filter, capability log for elicitation (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, Stats board controls fold on scroll; player hit rate inline (Matt) |
