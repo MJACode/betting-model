@@ -3,11 +3,12 @@ The opener's ceiling: a gap to Pinnacle no real number has ever shown is a feed
 error, and the model does not bet it (mike, 2026-11-24).
 
 The board in these tests is the real one. At 20:56:01Z on 2026-11-24 The Odds
-API served BetMGM's PHI @ DAL spread as DAL +5.5 (-110 / -108). One poll
+API served BetMGM's PHI @ DAL spread as DAL +5.5 (-110 / -108), for nine
+polls. One poll
 earlier it was DAL -8.5 (-108 / -110), and every other book and Pinnacle stayed
 at DAL -8.5 (Hard Rock -9). The card wrote "PHI @ DAL — DAL +5.5" at BetMGM
 -110, a 14-point gap, and posted it. mike: "dal +5.5 that doesn't exist in any
-way shape or form".
+way shape or form". The 5.0 is set from the data, after his report.
 """
 
 import importlib.util
@@ -99,8 +100,8 @@ class TestWhereTheCeilingSits:
     """Neighbourhood, from the stored quotes (docs/nfl_opener_dev_ceiling.md).
 
     The largest gap any bettable book has held against Pinnacle two to ten days
-    out: 3.5 points in 2021-2025, 4.5 in 2026 (ARI @ SEA, five books agreeing
-    after Pinnacle moved). The gaps of 5.5 and more since 2021 are all feed
+    out: 3.5 points in 2021-2025, 4.5 in 2026 (ARI @ SEA, five books moving to
+    SEA -8.5..-9.5 ahead of Pinnacle, which followed within the hour). The gaps of 5.5 and more since 2021 are all feed
     glitches: BetMGM TEN @ NYG 2026-09-24 (5.5, three polls), BetRivers HOU @
     TEN 2026-10-07 (14, an alternate line at -770), BetMGM PHI @ DAL today (14).
     """

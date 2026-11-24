@@ -1,6 +1,6 @@
 # The NFL opener spread model's ceiling: no bet on a gap no real number has shown
 
-**Rule (mike, 2026-11-24):** the opener spread model does not bet a book that is
+**Rule (added 2026-11-24, after mike's report of the pick below; the 5.0 is set from the data and is his to change):** the opener spread model does not bet a book that is
 more than **5.0 points** off Pinnacle's spread. Such a quote is dropped as a feed
 error before the game's largest gap is chosen, so a believable second book on
 the same game still bets. The declined audit row names the dropped quote.
@@ -12,8 +12,8 @@ Code: `MAX_DEV` and `beyond_ceiling` in `nfl/models/opener_spread.py`. Tests:
 At 20:56:01 UTC on 2026-11-24 The Odds API served BetMGM's PHI @ DAL spread as
 DAL +5.5 (-110 / -108). One poll earlier (20:55:01) it was DAL -8.5 (-108 / -110).
 Every other book stayed at DAL -8.5 (Hard Rock -9), and so did Pinnacle (-106 / -106).
-The feed kept serving +5.5 for five one-minute polls, 20:56:01 to 21:00:14, the
-last the archive held when this was written (`nfl_odds_history`).
+The feed kept serving +5.5 for nine one-minute polls, 20:56:01 to 21:04:01, then
+went back to DAL -8.5 (`nfl_odds_history`).
 
 The card wrote pick 4757860, "PHI @ DAL — DAL +5.5 · NEW 0m", at BetMGM -110 at
 20:56:03. That was a 14-point gap. The model priced it at the clamped top of its
@@ -50,7 +50,7 @@ The 2026 quotes at 4+ points, by episode:
 
 | Game | Book | Gap | How long | What it was |
 |---|---|---:|---|---|
-| ARI @ SEA, 2026-11-04 | Caesars, BetRivers, BetMGM, FanDuel, Fanatics | 3.5-4.5 | 10+ min | Real. Pinnacle moved to SEA -13 and five books lagged together |
+| ARI @ SEA, 2026-11-04 | Caesars, BetRivers, BetMGM, FanDuel, Fanatics | 3.5-4.5 | ~10 min | Real. Five books moved to SEA -8.5 to -9.5 from 18:50 while Pinnacle held -13; Pinnacle was at -8.5 by 19:56 |
 | CIN @ BAL, 2026-10-21 | FanDuel | 4.0 | 5+ min | Bet by the model (BAL +1.5), lost |
 | TEN @ NYG, 2026-09-22 | BetMGM | 4.0 | ~12 min | Feed glitch, the voided 2026-09-22 pick |
 | TEN @ NYG, 2026-09-24 | BetMGM | 5.5 | 3 polls | Feed glitch; the game already had its pick |
@@ -61,17 +61,24 @@ The 2026 quotes at 4+ points, by episode:
 between 4.5 and 14.
 - Any ceiling from 5.5 up to 14 removes today's quote and the HOU @ TEN alternate line.
 - A ceiling from 4.5 to 5.4 also removes the 2026-09-24 BetMGM glitch. 5.0 sits here.
-- Below 4.5 it starts cutting ARI @ SEA-type gaps, where several books really lagged Pinnacle.
+- Below 4.5 it starts cutting ARI @ SEA-type gaps, where several books really moved before Pinnacle.
 
-**Replay over the model's written bets.** Of the 34 BETs the model has written
-this season, every one but pick 4757860 was priced at or below 0.6259, the
+**Replay over the model's written bets.** This rests on each bet's stored
+probability, not on a rerun over the stored boards. Of the 35 BETs the model
+had written this season by 21:25 UTC on 2026-11-24, every one but pick 4757860
+was priced at or below 0.6259, the
 4.0-point knot of a table that only rises with the gap. So every one of them had
 a gap of at most 4.0. The ceiling would have removed exactly one bet: this one.
 
 ## What it does not catch
 
 A phantom inside the ceiling. TEN @ NYG on 2026-09-22 was 4.0 points at its
-widest and 2.0 at the tick that fired, and this rule would still bet it.
+widest and 2.0 at the tick that fired, and this rule would still bet it. The
+same day as this pick, at 21:25 UTC, the model wrote "TEN @ JAX — TEN +16.5"
+(pick 4758513) off a BetRivers number that lasted one poll: BetRivers went
+JAX -15.5 (85 polls) to -16.5 (one poll) to -14.5, against -14.5 at Pinnacle
+and every other book. A 2-point gap, inside the ceiling. Whether BetRivers'
+site showed it is not measurable from here.
 
 ## Found on the way: the 2020 BetMGM rows are in the backtest
 

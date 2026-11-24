@@ -248,11 +248,12 @@ LEAD_HI_DAYS = float(os.environ.get("NFL_OPENER_MAX_LEAD_DAYS", "10"))
 FRESH_MINUTES = 60.0
 
 # THE CEILING: A GAP NO REAL NUMBER HAS EVER SHOWN IS A FEED ERROR, NOT A BET.
-# (mike, 2026-11-24.)
+# (2026-11-24, after mike's report of the pick below. The 5.0 is set from the
+# data; it is his to change.)
 #
 # At 20:56:01Z on 2026-11-24 the feed served BetMGM's PHI @ DAL spread as
-# DAL +5.5 (-110 / -108). One poll earlier it was DAL -8.5 (-108 / -110), and
-# every other book and Pinnacle stayed at DAL -8.5. Nothing above stopped a
+# DAL +5.5 (-110 / -108) for nine polls, to 21:04:01. One poll earlier it was
+# DAL -8.5 (-108 / -110), and every other book and Pinnacle stayed at DAL -8.5. Nothing above stopped a
 # 14-point gap: the card wrote "PHI @ DAL — DAL +5.5" at BetMGM, claimed a
 # +24pp edge off the clamped top of DEV_WIN_PROB, and posted it. mike: "dal
 # +5.5 that doesn't exist in any way shape or form".
@@ -261,8 +262,9 @@ FRESH_MINUTES = 60.0
 # books against Pinnacle at the same snapshot, two to ten days out;
 # docs/nfl_opener_dev_ceiling.md):
 #   * 2021-2025, ~97,000 paired quotes: the largest gap is 3.5 points.
-#   * 2026, minute-level: the largest real gap is 4.5 (ARI @ SEA 2026-11-04,
-#     five books agreeing after Pinnacle moved to -13).
+#   * 2026, minute-level: the largest real gap is 4.5 (ARI @ SEA 2026-11-04:
+#     five books moved to SEA -8.5..-9.5 from 18:50Z while Pinnacle held -13;
+#     Pinnacle was at -8.5 too by 19:56Z).
 #   * Every gap of 5.5 or more since 2021 is a short-lived feed glitch: BetMGM
 #     TEN @ NYG 2026-09-24 (5.5, three polls), BetRivers HOU @ TEN 2026-10-07
 #     (14, an alternate line at -770 that Kelly happened to skip), and this
