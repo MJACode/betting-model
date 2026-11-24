@@ -294,10 +294,30 @@ seasons it made +31.57 units more than the live check (interval -8.69 to
   laying 12 or more in the half. On 21 of those games the total model bets an
   under an hour before. The schedule would flip which of the two stands.
 
-**No live timing has changed.** mike has to see this result first (the rule
-above). The live capture calls 15:00 UTC but not 18:00 UTC
-(`data/ingestors/ncaab_first_half_odds.MARKS`), so the change needs that call
-added as well as the card change.
+**Live from 2026-11-24 (mike: "yes").** The capture now calls 18:00 UTC as
+well as 15:00 UTC, and the spread card checks at both and at ten minutes
+(`docs/sports/ncaab.md`, the first-half spread's "When"). Before the change the
+early prices were checked on this season's live feed (2026-11-03..11-23,
+`data/local/research/ncaab_fh_timing/live_check.py` on mike's PC):
+- **The card's own decision rebuilt from the stored rows** matched it on 856 of
+  863 ten-minute decisions and 45 of its 52 bets. The other 7 are 2026-11-03..06
+  bets placed under the old 0.02 cut, which the rebuild does not apply.
+- **The early prices are fresh.** At 15:00 UTC the model would have bet 43
+  games, every one on a call that landed within 10 minutes of 15:00. The feed's
+  copy of each bet book's first-half spread was at most 4.5 minutes old at the
+  call (median 0.6 minutes; `ncaab_first_half_fetches.book_ages`, the minutes
+  since the feed last updated that book's market).
+- **The new card on a real 15:00 UTC slate** (2026-11-24, read only, run as of
+  15:04 UTC): 75 games checked, 2 bets, 64 below the cut, 9 with no quote, in
+  9.2 seconds (the job allows the card 240). That day's 75 calls were all
+  requested within 28 seconds of 15:00 (the fetch step allows 300), so the
+  18:00 UTC batch leaves the first-half total's hour-before decisions inside
+  their five-minute freshness rule.
+- **The market moved off those numbers.** The same book still showed the same
+  number at the ten-minute call on 16 of the 43.
+- **Graded so far:** 15:00 UTC plus ten minutes made 68 bets, 42-25-1, +14.46
+  units. Ten minutes alone made 44 bets, 28-16, +10.47 units. The 18:00 UTC
+  call was not captured before this change.
 
 ### Where the extra units come from, and closing value
 

@@ -799,9 +799,10 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statLabel: '',
   },
   // Men's college basketball, the first half's spread
-  // (models/ncaab_first_half_spread.py MODEL_ID). It decides each game once,
-  // about ten minutes before tip, at the best first-half spread any bettable
-  // book hangs, and settles on the first half's score (no overtime). The label
+  // (models/ncaab_first_half_spread.py MODEL_ID). It checks each game at 15:00
+  // and 18:00 UTC and about ten minutes before tip, bets at the first check
+  // that finds a bet (mike, 2026-11-24), at the best first-half spread any
+  // bettable book hangs, and settles on the first half's score (no overtime). The label
   // is "Duke @ Kansas — First Half Duke +3.5". A game line, not a picker slot.
   ncaab_first_half_spread: {
     // The first half's spread, spelled out like 'F5 Spread' (UX review,
@@ -1359,12 +1360,10 @@ const OPENING_LINE_MODELS: readonly string[] = [
 ];
 
 // The models that check each game once, five to ten minutes before tip, and
-// post only the bets they find: the NCAAB first-half spread card
-// (scripts/ncaab_first_half_spread_card.py), on the first-half lines fetched
-// ten minutes before each tip, or a retry up to five minutes before it. Its
-// page fills game by game through the evening, minutes before each tip.
+// post only the bets they find. Their page fills game by game, minutes before
+// each tip. (The NCAAB first-half spread card was one until 2026-11-24, when
+// it gained its 15:00 and 18:00 UTC checks: modelPageTiming's own case.)
 const MINUTES_BEFORE_TIP_MODELS: readonly string[] = [
-  'ncaab_first_half_spread',
   // The four EuroLeague pre-game rules (scripts/euroleague_pregame_card.py),
   // on the lines fetched ten minutes before each tip, or a retry up to five
   // minutes before it.
@@ -1620,6 +1619,26 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         'This model posts about 30 minutes before each match it bets, and bets only some of them. ' +
         'Nothing has posted yet.',
       note: 'Posted about 30 minutes before the listed start and never re-priced.',
+    };
+  }
+  // The NCAAB first-half spread card (scripts/ncaab_first_half_spread_card.py,
+  // mike 2026-11-24): checks at 15:00 and 18:00 UTC and five to ten minutes
+  // before tip; the first bet locks the game. The page gives both Eastern
+  // offsets (10am and 1pm, 11am and 2pm from mid-March), as the NCAAB Spreads
+  // page does (UX review, 2026-11-24).
+  if (modelId === 'ncaab_first_half_spread') {
+    return {
+      title: 'Checked up to three times per game',
+      body:
+        'This model checks each game up to three times: at 10am and 1pm ET on game day (11am and 2pm ET ' +
+        'from mid-March), and five to ten minutes before tip-off. It bets at the sportsbook with the best ' +
+        'line and price, which may not be DraftKings. The first check that finds a bet posts it, and that ' +
+        'game is not checked again. A posted bet is never re-priced: it stays at the line and price it ' +
+        'posted at.',
+      empty:
+        'This model checks each game at 10am and 1pm ET (11am and 2pm ET from mid-March) and five to ten ' +
+        'minutes before tip-off, and bets only some of them. Nothing has posted today so far.',
+      note: 'Posted at the first check that found a bet and never re-priced.',
     };
   }
   if (HOUR_BEFORE_TIP_MODELS.includes(modelId)) {

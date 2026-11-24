@@ -34,9 +34,12 @@ today, so nothing can trip it there yet; the check is in place for the day
 one exists.
 
 THE FIRST-HALF UNDER HAS ITS OWN, EARLIER RULE (models/ncaab_first_half_total.
-UNDER_BIG_FAVOURITE): that model decides fifty minutes before the first-half
-spread model does, so a pair check alone would keep the under and drop the
-favourite, the leg that pays. docs/sports/ncaab.md, "An under beside a big
+UNDER_BIG_FAVOURITE): that model decides an hour before tip, and the
+first-half spread model's last check is ten minutes before, so a pair check
+alone would keep the under and drop the favourite, the leg that pays. Since
+2026-11-24 the spread model also checks at 15:00 and 18:00 UTC, and a
+favourite it bets there stands first; the rule here then holds the later
+under back, as written. docs/sports/ncaab.md, "An under beside a big
 favourite".
 """
 from __future__ import annotations

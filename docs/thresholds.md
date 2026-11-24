@@ -1620,7 +1620,7 @@ the pooled interval's lower bound is below zero.
 | EV floor | 0.03, on its own probability, unchanged at the 0.025 cut: an edge above 0.025 at -200 or longer is EV above 0.0375, so the floor removes nothing the cut takes (the replay's smallest EV at 0.025 is +0.0436; at 0.02 it was +0.0346, 1,253 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned; it laid -140 to +125 | `MODEL_MIN_ODDS` |
 | early season | no wait (mike, 2026-11-02). With the old 10-game rule the same cut made +6.87 units on 698 bets (+0.90%) | the card |
-| decided once | on the tip-minus-10 first-half fetch (or its retries, 5 to 10.5 minutes before tip); a row in `ncaab_first_half_spread_decisions`, bet or not | `scripts/ncaab_first_half_spread_card.py`, `scheduler.run_ncaab_first_half_window` |
+| decided once | at the first of three checks that bets: the first-half calls at 15:00 and 18:00 UTC (bets only, mike 2026-11-24), then the tip-minus-10 fetch (or its retries, 5 to 10.5 minutes before tip), bet or not; a row in `ncaab_first_half_spread_decisions` | `scripts/ncaab_first_half_spread_card.py`, `scheduler.run_ncaab_first_half_window` |
 
 **The neighbourhood** (the research's grid, every game, 2023-24..2025-26;
 date-resampled 95% interval):
