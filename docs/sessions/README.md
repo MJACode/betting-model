@@ -27,6 +27,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, Performance tab: tracked picks start folded, header + to add a bet, Insights sections fold, sync note and track-record link removed (Matt) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, AI assistant: four game-context tools (injuries, rest, public % of bets/money, defense vs position), one shared 10-a-day pool (Matt) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, NHL best bet a night built as four rule cards; side-conflict check covers puck line, total and rule cards; live code replayed 323 bets +66.5u, same bet as the research on 319 of 323 nights (mike) |
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, NBA first basket stays live under the low-volume plan (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, NBA low-volume plan: four models live (game-total overs at 20+ games, ten a week; first-quarter spread), five paused |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, AI assistant: terms 2026-11-22, assistant named from every redirect host (L2), connector deployed (Matt) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, AI assistant: up to 3 assistants per member, one shared 10-a-day pool, a reconnect is the same assistant, disconnect per assistant (Matt) |
