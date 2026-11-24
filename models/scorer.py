@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import functools
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import os
@@ -1138,28 +1139,90 @@ def _refuse_unknown_nhl_bets(conn, picks: list[dict]) -> None:
 #   - two such BETs decided in the SAME pass are both written NONE: the models
 #     disagree about the game and there is no telling which is wrong.
 #
+# An ending is a final score and whether it came after regulation, so one table
+# covers the moneyline, the regulation 3-way, the puck line and the total.
+# Overtime and the shootout are won by one goal, and the final score carries it.
+#
 # Only markets listed here are checked. Assessed across every sport on
 # 2026-10-17: no other pair of pre-game models has bet outcomes that cannot
 # both win since 2026-08-01 (the only opposite-side pair, MLB first-five
 # moneyline against the full-game +1.5 run line, can both win). A market that
-# can conflict joins by adding its endings here.
-_SIDE_ENDINGS: dict[tuple[str, str], dict[str, frozenset]] = {
-    ("NHL", "h2h"): {
-        "home": frozenset({"home_regulation", "home_overtime"}),
-        "away": frozenset({"away_regulation", "away_overtime"}),
-    },
-    ("NHL", "h2h_3way"): {
-        "home": frozenset({"home_regulation"}),
-        "away": frozenset({"away_regulation"}),
-        "draw": frozenset({"home_overtime", "away_overtime"}),
-    },
-}
+# can conflict joins by adding it here. The puck line and the total joined on
+# 2026-11-22 with the NHL best bet a night (models/nhl_best_bet_night.py): its
+# rule cards bet all four markets, and a side model deciding after one of them
+# must see it.
+_NHL_MAX_GOALS = 15
+_NHL_GAME_ENDINGS = tuple(
+    [(h, a, False) for h in range(_NHL_MAX_GOALS + 1)
+     for a in range(_NHL_MAX_GOALS + 1) if h != a]
+    + [(t + 1, t, True) for t in range(_NHL_MAX_GOALS)]
+    + [(t, t + 1, True) for t in range(_NHL_MAX_GOALS)])
+
+
+def _nhl_pick_wins(market: str, side, line):
+    """The test a pick wins on, over one (home, away, after_regulation) ending.
+
+    None when the pick cannot be read (an unknown side, a line missing)."""
+    if market == "h2h":
+        return {"home": lambda h, a, ot: h > a,
+                "away": lambda h, a, ot: a > h}.get(side)
+    if market == "h2h_3way":
+        return {"home": lambda h, a, ot: not ot and h > a,
+                "away": lambda h, a, ot: not ot and a > h,
+                "draw": lambda h, a, ot: ot}.get(side)
+    if line is None:
+        return None
+    line = float(line)
+    if market == "spreads":
+        # scored_line is the HOME number (CLAUDE.md 4): the away side gets -line.
+        return {"home": lambda h, a, ot: (h - a) + line > 0,
+                "away": lambda h, a, ot: (a - h) - line > 0}.get(side)
+    if market == "totals":
+        return {"over": lambda h, a, ot: h + a > line,
+                "under": lambda h, a, ot: h + a < line}.get(side)
+    return None
+
+
+@functools.lru_cache(maxsize=512)
+def _nhl_endings(market: str, side, line) -> frozenset | None:
+    test = _nhl_pick_wins(market, side, line)
+    if test is None:
+        return None
+    return frozenset(e for e in _NHL_GAME_ENDINGS if test(*e))
+
+
+_SIDE_ENDINGS = {("NHL", m): functools.partial(_nhl_endings, m)
+                 for m in ("h2h", "h2h_3way", "spreads", "totals")}
+
+
+def _rule_card_markets() -> dict[str, tuple[str, str]]:
+    """The rule cards (not in MODELS) whose standing BETs the check must see.
+
+    Their rows are written by their own cards, never by run_scorer, so they
+    are never held back here; a side model deciding after one of them reads it
+    as a standing BET. The cards themselves skip a game that already holds a
+    conflicting BET (scripts/nhl_totals_card, scripts/nhl_best_bet_night_card)."""
+    import models.nhl_best_bet_night as night
+    import models.nhl_totals_market as totals
+    out = {mid: ("NHL", market) for market, mid in night.MARKET_MODEL.items()}
+    out[totals.MODEL_ID] = ("NHL", "totals")
+    return out
+
+
+def _side_market(model_id) -> tuple[str | None, str | None]:
+    if model_id in MODELS:
+        sport, market, _ = MODELS[model_id]
+        return sport, market
+    return _rule_card_markets().get(model_id, (None, None))
 
 
 def _endings_won(pick: dict) -> frozenset | None:
     """The game endings this pick wins on, or None for a market not listed."""
-    sport, market, _ = MODELS.get(pick.get("model_id"), (None, None, None))
-    return _SIDE_ENDINGS.get((sport, market), {}).get(pick.get("pick_side"))
+    fn = _SIDE_ENDINGS.get(_side_market(pick.get("model_id")))
+    if fn is None:
+        return None
+    line = pick.get("scored_line")
+    return fn(pick.get("pick_side"), None if line is None else float(line))
 
 
 def picks_cannot_both_win(a: dict, b: dict) -> bool:
@@ -1173,12 +1236,37 @@ def side_checked_models() -> set:
             if (sport, market) in _SIDE_ENDINGS}
 
 
+def standing_side_bets(conn, game_id: str) -> list[dict]:
+    """The BETs standing on a game that the check compares against.
+
+    A standing BET counts unless it is VOID or was written while its model was
+    paused (not a signal, so it holds nothing)."""
+    ids = sorted(side_checked_models() | set(_rule_card_markets()))
+    return [
+        {"model_id": m, "pick_side": s, "pick_label": label, "scored_line": line}
+        for m, s, label, line in conn.execute("""
+            SELECT model_id, pick_side, pick_label, scored_line FROM picks
+            WHERE game_id = %s AND signal_type = 'BET'
+              AND model_id = ANY(%s)
+              AND condition_status IS DISTINCT FROM 'VOID'
+              AND downgrade_reason IS DISTINCT FROM %s
+        """, (game_id, ids, config.PAUSED_NOTE)).fetchall()]
+
+
+def conflicting_standing_bet(conn, pick: dict) -> dict | None:
+    """The standing BET on the pick's game it cannot both win with, if any."""
+    if _endings_won(pick) is None:
+        return None
+    return next((s for s in standing_side_bets(conn, pick["game_id"])
+                 if picks_cannot_both_win(pick, s)), None)
+
+
 def _apply_side_conflicts(conn, game_id: str, picks: list[dict]) -> int:
     """Turn every BET in `picks` that cannot win alongside another BET on the
     game into NONE with the reason. Mutates in place; returns how many.
 
-    A standing BET counts unless it is VOID or was written while its model was
-    paused (not a signal, so it holds nothing).
+    The standing BETs are standing_side_bets(): the side models' and the rule
+    cards'.
     """
     def bets(p):
         return (p.get("signal_type") == "BET" and not _is_paused_row(p)
@@ -1187,15 +1275,7 @@ def _apply_side_conflicts(conn, game_id: str, picks: list[dict]) -> int:
     new = [p for p in picks if bets(p)]
     if not new:
         return 0
-    standing = [
-        {"model_id": m, "pick_side": s, "pick_label": label}
-        for m, s, label in conn.execute("""
-            SELECT model_id, pick_side, pick_label FROM picks
-            WHERE game_id = %s AND signal_type = 'BET'
-              AND model_id = ANY(%s)
-              AND condition_status IS DISTINCT FROM 'VOID'
-              AND downgrade_reason IS DISTINCT FROM %s
-        """, (game_id, sorted(side_checked_models()), config.PAUSED_NOTE)).fetchall()]
+    standing = standing_side_bets(conn, game_id)
     notes: dict[int, str] = {}
     for p in new:
         held = next((s for s in standing if picks_cannot_both_win(p, s)), None)
@@ -3407,7 +3487,10 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
                 OR p.model_id = 'mlb_total_public_fade' OR p.model_id = 'nfl_wind_totals'
                 OR p.model_id = 'ncaab_total_blend'
                 OR p.model_id = 'ncaabw_total_blend'
+                OR p.model_id = 'nhl_night_total'
                 THEN 'totals'
+              -- The NHL best bet a night's regulation 3-way, not the moneyline.
+              WHEN p.model_id = 'nhl_night_regulation' THEN 'h2h_3way'
               -- The home team's own points, not the game total.
               WHEN p.model_id = 'nba_team_total_luck' THEN 'team_totals_home'
               -- The first half's points, not the game total.

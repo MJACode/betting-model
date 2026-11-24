@@ -1024,5 +1024,8 @@ RPC_AFTER_SIGN_IN: tuple[str, ...] = (
     # mcp_foundation_2026_11_21.sql grants EXECUTE to authenticated only.
     "mcp_my_status",
     "mcp_disconnect",
+    # mcp_multi_assistant_2026_11_22.sql grants EXECUTE to authenticated only
+    # (Matt, 2026-11-22: disconnect one assistant of several).
+    "mcp_disconnect_assistant",
 )
 

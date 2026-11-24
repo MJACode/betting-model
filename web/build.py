@@ -228,9 +228,10 @@ def record_js() -> str:
     return "const CONFIG = " + json.dumps(payload, indent=2) + ";\n" + math + "\n" + boot
 
 
-# Terms version a member accepts on the consent page. Must equal
-# mcp_meter.limits.terms_version (mcp_foundation_2026_11_21.sql).
-MCP_TERMS_VERSION = "2026-11-21"
+# Fallback terms version for the consent page, which accepts the version
+# mcp_my_status reports (mcp_meter.limits.terms_version). Bumped to
+# 2026-11-22 by mcp_assistant_family_2026_11_22.sql (Matt).
+MCP_TERMS_VERSION = "2026-11-22"
 
 
 def consent_js() -> str:

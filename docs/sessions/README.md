@@ -19,8 +19,18 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, Matchup page follow-up: picks board read on NBA pages only, head-to-head bounded, injury and stale-picks notes (Matt) |
+| 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, Daily results: the picks fold by sport, Games scored folds (Matt) |
+| 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, NBA game matchup page: our pick or "No pick", best price, ranks side by side, last 10 ATS/O-U, rest, H2H, injuries; three ways in (Matt) |
+| 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, AI assistant consent page: Resend code button (Matt) |
+| 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, AI assistant consent page: one step at a time, a resent code is not an error, Try again (Matt) |
+| 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, Performance tab: tracked picks start folded, header + to add a bet, Insights sections fold, sync note and track-record link removed (Matt) |
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, AI assistant: four game-context tools (injuries, rest, public % of bets/money, defense vs position), one shared 10-a-day pool (Matt) |
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, NHL best bet a night built as four rule cards; side-conflict check covers puck line, total and rule cards; live code replayed 323 bets +66.5u, same bet as the research on 319 of 323 nights (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, NBA first basket stays live under the low-volume plan (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, NBA low-volume plan: four models live (game-total overs at 20+ games, ten a week; first-quarter spread), five paused |
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, AI assistant: terms 2026-11-22, assistant named from every redirect host (L2), connector deployed (Matt) |
+| 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, AI assistant: up to 3 assistants per member, one shared 10-a-day pool, a reconnect is the same assistant, disconnect per assistant (Matt) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, best bet a night re-tested with both goalies confirmed: +18.1% on 345 (power), every season positive, totals carry much of it (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, DailyFaceoff's goalie archive from 2021-11-18 stored by a worker job, for the confirmed-goalie re-test (mike) |
 | 2026-11-22 | [2026-11](./2026-11.md) | 2026-11-22, odds clean-up keeps NHL's whole price path (NHL in PATH_KEPT_SPORTS; about 2 GB a season) (mike) |

@@ -35,6 +35,19 @@ def test_wiring():
     assert "<AiAssistantIntro" in picks
     api = _read("src/lib/aiAssistantApi.ts")
     assert "rpc('mcp_my_status')" in api and "rpc('mcp_disconnect')" in api
+    # One Disconnect per assistant (Matt, 2026-11-22), wired to the screen.
+    assert "rpc('mcp_disconnect_assistant', { p_assistant: assistant })" in api
+    screen = _read("src/screens/AiAssistantScreen.tsx")
+    assert "onDisconnect(item.assistant)" in screen and "connectedAssistants(status)" in screen
+
+
+def test_no_one_app_wording_left():
+    """2026-11-22: several assistants may connect; nothing may still say one."""
+    for rel in ("src/lib/aiAssistant.ts", "src/screens/AiAssistantScreen.tsx"):
+        text = _read(rel).lower()
+        assert "one connected app" not in text and "one app at a time" not in text, rel
+    terms = (ROOT / "web/content/terms.md").read_text(encoding="utf-8").lower()
+    assert "one connected assistant" not in terms and "up to three connected assistants" in terms
 
 
 def test_address_matches_the_server():

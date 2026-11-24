@@ -496,7 +496,13 @@ quote bounds); the app name, CLV market and settlement entries; the Discord
 route; tests that fail without the change; the league doc and the session log.
 
 **The card replays the research bet for bet before it ships.** That replay is
-what found every copy error in the last new league.
+what found every copy error in the last new league. Cut the replay where the
+live rule really stops, not at the stored start (`references/porting-traps.md`,
+"A stored start time can be two different clocks").
+
+**A new card is seen by every model that bets the same game** (twice now:
+EuroLeague 2026-11-14, NHL 2026-11-22): the side-conflict check and every other
+card on the market read its standing bets, and a test fails without that.
 
 **When the card decides is measured, not assumed** (mike, 2026-11-14). Fixed
 hours, "every check until it bets" and "the last read before the start" are

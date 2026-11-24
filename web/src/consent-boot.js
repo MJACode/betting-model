@@ -35,8 +35,12 @@
       .forEach(function (s) { $(s).hidden = s !== id; });
   }
 
-  function fail(message) {
+  // retry=false only where trying again cannot help (the link itself is
+  // broken); everywhere else "Try again" re-runs loadRequest, which goes back
+  // to the email step when signed out or reloads the request when signed in.
+  function fail(message, retry) {
     $("error-text").textContent = message;
+    $("error-retry").hidden = retry === false;
     show("state-error");
   }
 
@@ -83,7 +87,7 @@
 
   function loadRequest() {
     if (!/^[A-Za-z0-9_-]{8,100}$/.test(authorizationId)) {
-      fail("This link is missing its connection request. Start again from your AI assistant.");
+      fail("This link is missing its connection request. Start again from your AI assistant.", false);
       return;
     }
     if (!jwt()) { show("state-email"); return; }
@@ -126,17 +130,95 @@
       });
   }
 
+  // Supabase sends one code per email per window and answers 429 inside it,
+  // so "Resend code" waits this long after each send before it can be tapped.
+  // A 429 is still handled if the server's window is longer than this.
+  var RESEND_WAIT_SECONDS = 60;
+  var resendTimer = null;
+
+  function startResendWait() {
+    var button = $("code-resend");
+    var left = RESEND_WAIT_SECONDS;
+    clearInterval(resendTimer);
+    function tick() {
+      if (left <= 0) {
+        clearInterval(resendTimer);
+        button.disabled = false;
+        button.textContent = "Resend code";
+        return;
+      }
+      button.disabled = true;
+      button.textContent = "Resend code in " + left + "s";
+      left -= 1;
+    }
+    tick();
+    resendTimer = setInterval(tick, 1000);
+  }
+
+  function codeStep(note) {
+    $("code-email").textContent = email;
+    $("code-note").textContent = note || "";
+    $("code-note").hidden = !note;
+    show("state-code");
+    startResendWait();
+    $("code").focus();
+  }
+
+  // Resolves "sent", "wait" (429: a code went out moments ago) or rejects.
+  function requestCode() {
+    return call("POST", AUTH + "/otp", { email: email, create_user: false })
+      .then(function () { return "sent"; }, function (e) {
+        if (e.status === 429) return "wait";
+        throw e;
+      });
+  }
+
   $("state-email").addEventListener("submit", function (ev) {
     ev.preventDefault();
+    var button = $("send-code");
+    if (button.disabled) return;
     email = $("email").value.trim();
     if (!email) return;
-    call("POST", AUTH + "/otp", { email: email, create_user: false })
-      .then(function () {
-        $("code-email").textContent = email;
-        show("state-code");
-        $("code").focus();
+    button.disabled = true;
+    button.textContent = "Sending...";
+    requestCode()
+      .then(function (outcome) {
+        // 429 means a code was sent moments ago (Supabase allows one per
+        // email per window): the member should enter that code, not see an
+        // error. Seen 2026-11-23: one 200 then nine 429s from repeat taps.
+        codeStep(outcome === "wait"
+          ? "A code was already sent a moment ago. Check your inbox and spam folder, or wait a minute before asking for another."
+          : "");
+      }, function () {
+        fail("We couldn't send a code to that email. Use the email on your Signal Base account.");
       })
-      .catch(function () { fail("We couldn't send a code to that email. Use the email on your Signal Base account."); });
+      .then(function () {
+        button.disabled = false;
+        button.textContent = "Send code";
+      });
+  });
+
+  $("code-resend").addEventListener("click", function () {
+    var button = $("code-resend");
+    if (button.disabled || !email) return;
+    button.disabled = true;
+    button.textContent = "Sending...";
+    requestCode()
+      .then(function (outcome) {
+        $("code").value = "";
+        $("code").removeAttribute("aria-invalid");
+        $("code-note").textContent = outcome === "wait"
+          ? "A code was sent less than a minute ago. Check your inbox and spam folder, or try again shortly."
+          : "We sent a new code to " + email + ". Use the newest one: earlier codes may no longer work.";
+        $("code-note").hidden = false;
+        startResendWait();
+        $("code").focus();
+      }, function () {
+        $("code-note").textContent = "We couldn't send a new code. Wait a moment and try again.";
+        $("code-note").hidden = false;
+        button.disabled = false;
+        button.textContent = "Resend code";
+      });
   });
 
   $("state-code").addEventListener("submit", function (ev) {
@@ -155,18 +237,35 @@
       });
   });
 
-  $("code-back").addEventListener("click", function () { show("state-email"); });
+  $("code-back").addEventListener("click", function () {
+    clearInterval(resendTimer);
+    show("state-email");
+  });
+
+  $("error-retry").addEventListener("click", function () {
+    $("allow").disabled = !$("agree").checked;
+    $("deny").disabled = false;
+    loadRequest();
+  });
 
   $("agree").addEventListener("change", function () { $("allow").disabled = !$("agree").checked; });
 
   function decide(action) {
     $("allow").disabled = true;
     $("deny").disabled = true;
+    // The version accepted is the one the database holds now
+    // (mcp_my_status.terms_version), so a terms change in a migration and
+    // this page's build can never disagree; CONFIG is the fallback.
     var first = action === "approve"
-      ? call("POST", REST + "/rpc/mcp_accept_terms", {
-          p_version: CONFIG.termsVersion,
-          p_client: (details && details.client && (details.client.name || details.client.client_name)) || null
-        }, true)
+      ? call("POST", REST + "/rpc/mcp_my_status", {}, true)
+          .then(function (s) { return (s && s.terms_version) || CONFIG.termsVersion; },
+                function () { return CONFIG.termsVersion; })
+          .then(function (version) {
+            return call("POST", REST + "/rpc/mcp_accept_terms", {
+              p_version: version,
+              p_client: (details && details.client && (details.client.name || details.client.client_name)) || null
+            }, true);
+          })
       : Promise.resolve();
     first
       .then(function () {

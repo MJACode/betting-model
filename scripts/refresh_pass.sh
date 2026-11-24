@@ -257,6 +257,10 @@ par_wait
 # writer to picks runs one at a time. Insert-once under the model's own lock,
 # so every later pass on a game already bet is a no-op.
 step nhl-over-under
+# NHL best bet a night (models/nhl_best_bet_night.py): at most one bet a night,
+# after both goalies are confirmed. After the totals card, so a game that card
+# just bet is skipped.
+step nhl-best-bet-night
 # NBA full-game totals, overs (nba_total_luck) is NOT run here. It decides on a
 # fetch 60-66 minutes before tip in its own one-minute job with its own fetch
 # (scheduler.run_nba_total_luck_window), because a pass that overruns its ten

@@ -944,3 +944,7 @@ export function addDays(date: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+/** When lines and picks refresh, for an empty board's "not scored yet" copy.
+ *  One string, shared by the Picks board and the matchup page. */
+export const REFRESH_TIMES = 'Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.';

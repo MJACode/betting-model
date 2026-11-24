@@ -5,6 +5,7 @@ import { fetchAllPages } from '@/lib/paging';
 import type { ModelDailyRow, ModelTotalRow } from '@/lib/modelHeat';
 import type { ModelDayRecord } from '@/lib/performanceInsights';
 import type { PeriodKey, TeamPeriodRow } from '@/lib/teamPeriodSplits';
+import type { CoverRow } from '@/lib/gameMatchup';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
@@ -3673,6 +3674,32 @@ export async function fetchTeamPeriodRows(
   );
 }
 
+/**
+ * One team's newest full-game results against the stored line, for the
+ * matchup page's "last 10 ATS / O-U" (lib/matchup coverSummary). At most
+ * `limit` rows. Sized 2026-11-23: 98 FG rows for BOS across 2025-26 and
+ * 2026-27, every one carrying `ats`; the read returns the newest 10.
+ */
+export async function fetchTeamFullGameCovers(
+  sport: string,
+  team: string,
+  beforeDate: string,
+  limit = 10,
+): Promise<CoverRow[]> {
+  const { data, error } = await supabase
+    .from('team_period_results')
+    .select('game_id,game_date,is_home,ats,ou')
+    .eq('sport', sport)
+    .eq('team', team)
+    .eq('period', 'FG')
+    .lt('game_date', beforeDate)
+    .order('game_date', { ascending: false })
+    .order('game_id', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as unknown as CoverRow[];
+}
+
 // ── Team detail (screens/TeamStatsScreen) ───────────────────────────────────
 //
 // Every read here was sized on production before it shipped (frontend rule:
@@ -3764,14 +3791,19 @@ export async function fetchNbaTeamQ1Season(team: string, season: number): Promis
   }));
 }
 
-/** The last N finished meetings between two teams in one sport, newest first. */
+/**
+ * The last N finished meetings between two teams in one sport, newest first.
+ * `beforeDate` bounds them to games before one game, so a game's own page
+ * never lists that game, or a later one, as a past meeting (PR #1595 review).
+ */
 export async function fetchHeadToHead(
   sport: string,
   team: string,
   opponent: string,
   limit = 10,
+  beforeDate?: string,
 ): Promise<GameRow[]> {
-  const { data, error } = await supabase
+  let q = supabase
     .from('games')
     .select(GAME_COLUMNS)
     .eq('sport', sport)
@@ -3779,7 +3811,9 @@ export async function fetchHeadToHead(
       `and(home_team.eq."${team}",away_team.eq."${opponent}"),` +
         `and(home_team.eq."${opponent}",away_team.eq."${team}")`,
     )
-    .not('home_score', 'is', null)
+    .not('home_score', 'is', null);
+  if (beforeDate) q = q.lt('game_date', beforeDate);
+  const { data, error } = await q
     .order('game_date', { ascending: false })
     .limit(limit);
   if (error) throw error;
