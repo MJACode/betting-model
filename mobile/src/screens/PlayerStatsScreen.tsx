@@ -94,7 +94,7 @@ import { computeHitRate, isHit, type HitDirection } from '@/lib/hitRate';
 import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
-import { colors, font, radii, spacing, sectionHeaderText, opacity, card, cardDense } from '@/lib/theme';
+import { colors, font, radii, spacing, sectionHeaderText, opacity, card, cardDense, inkFor } from '@/lib/theme';
 import { reachFrame, unitsSpeech } from '@/lib/a11y';
 import { ErrorBanner } from '@/components/ErrorState';
 import { MatchupStrengthBar } from '@/components/MatchupStrengthBar';
@@ -1079,40 +1079,40 @@ export function PlayerStatsScreen() {
           <>
             {/* Hit-rate summary + line stepper */}
             <View style={styles.hitCard}>
+              {/* The rate rides the count line (Matt, 2026-11-24). It was a
+                  separate badge on the right of this row, and a long label
+                  ("10+ Points · vs average defenses · last 10 · board line")
+                  pushed it off the card edge so "100%" printed as "100".
+                  Inline it cannot be pushed anywhere, and it sits next to the
+                  line it rates. The words take the text-safe ink (inkFor),
+                  not the bright fill the badge used. */}
               <View style={styles.hitTop}>
-                <View>
-                  <Text style={styles.hitLabel}>
-                    {minutesContext
-                      ? `Minutes · ${windowLabel}`
-                      : `${headline} · ${windowLabel}${lineProvenance ? ` · ${lineProvenance}` : ''}`}
-                  </Text>
-                  <Text style={styles.hitCount}>
-                    {minutesContext
-                      ? playingTitle
-                      : nonePlayed
-                        ? 'No played games in this window'
-                        : noEvidence
-                          ? noEvidenceText
-                          : `Hit ${hits} of ${hitTotal} games`}
-                  </Text>
-                </View>
-                {minutesContext ? null : (
-                  <View
-                    style={[styles.hitBadge, { backgroundColor: hitColor }]}
-                    accessible
-                    accessibilityLabel={
-                      nonePlayed
-                        ? 'No played games in this window'
-                        : noEvidence
-                          ? noEvidenceText
-                          : `Hit rate ${Math.round(hitPct * 100)} percent`
-                    }
-                  >
-                    <Text style={styles.hitBadgeText}>
-                      {noEvidence || nonePlayed ? '—' : `${Math.round(hitPct * 100)}%`}
+                <Text style={styles.hitLabel}>
+                  {minutesContext
+                    ? `Minutes · ${windowLabel}`
+                    : `${headline} · ${windowLabel}${lineProvenance ? ` · ${lineProvenance}` : ''}`}
+                </Text>
+                <Text
+                  style={styles.hitCount}
+                  accessibilityLabel={
+                    minutesContext || nonePlayed || noEvidence
+                      ? undefined
+                      : `Hit ${hits} of ${hitTotal} games, hit rate ${Math.round(hitPct * 100)} percent`
+                  }
+                >
+                  {minutesContext
+                    ? playingTitle
+                    : nonePlayed
+                      ? 'No played games in this window'
+                      : noEvidence
+                        ? noEvidenceText
+                        : `Hit ${hits} of ${hitTotal} games`}
+                  {minutesContext || nonePlayed || noEvidence ? null : (
+                    <Text style={[styles.hitRateInline, { color: inkFor(hitColor) }]}>
+                      {` · ${Math.round(hitPct * 100)}%`}
                     </Text>
-                  </View>
-                )}
+                  )}
+                </Text>
               </View>
 
               <View style={[styles.statsRow, cardLayout !== 'inline' && styles.statsRowStacked]}>
@@ -2296,10 +2296,10 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     marginBottom: spacing.md,
   },
+  // A column now: the rate is inline on the count line, so nothing sits
+  // beside the label to be pushed off the card.
   hitTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
   },
   hitLabel: {
     fontSize: font.size.footnote,
@@ -2312,19 +2312,9 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     marginTop: 2,
   },
-  hitBadge: {
-    minWidth: 56,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.md,
-    alignItems: 'center',
-  },
-  // Dark on every fill (5.9–9.6:1). White was 2.22:1 on the green and
-  // 2.20:1 on the amber — the same fault as audit H6.
-  hitBadgeText: {
-    fontSize: font.size.title3,
+  // The rate inline on the count line, in the hue's text-safe ink.
+  hitRateInline: {
     fontWeight: font.weight.bold,
-    color: colors.onBright,
   },
   statsRow: {
     flexDirection: 'row',
