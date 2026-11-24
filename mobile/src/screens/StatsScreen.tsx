@@ -18,6 +18,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { ScrollView as GestureScrollView, State, TapGestureHandler } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -390,7 +391,7 @@ function BoardSkeleton() {
 }
 
 // Fold the board's controls once the list has scrolled this far, and only
-// when the list would still scroll this much more with them folded.
+// when the list has at least this much scroll room (measured unfolded).
 const COLLAPSE_AFTER_PT = 40;
 const COLLAPSE_MIN_ROOM_PT = 320;
 
@@ -2248,40 +2249,89 @@ export function StatsScreen() {
   // the stat chips, the ruler and the window strip put the first player row
   // past the middle of the screen. Scrolling the board down folds them into
   // one summary bar ("12+ Points · L10 · Hit Rates"); tapping the bar, or
-  // pulling the list back to the top, opens them again. Nothing is removed.
+  // scrolling back to the top, opens them again. Nothing is removed.
   //
-  // Two guards against a loop. It only folds when the list is long enough to
-  // still scroll after the controls give their height back, and it only
-  // re-opens at the top on a USER drag — when a short list grows into the
-  // freed space its offset clamps to 0 by itself, and that must not count.
+  // Guards (UX review, 2026-11-24):
+  // - No loop. It folds only past COLLAPSE_AFTER_PT on a list with more than
+  //   COLLAPSE_MIN_ROOM_PT of scroll room (measured with the controls open),
+  //   and re-opens at the top only on a USER scroll — a drag, its momentum,
+  //   or a status-bar tap. A short list growing into the freed space clamps
+  //   its offset to 0 with no drag in front of it, and that must not count.
+  // - Never while the keyboard is up: folding unmounts the ruler's typing
+  //   field, and its draft commits only on blur or Done, so it would be lost.
+  // - Never under VoiceOver/TalkBack: the reader scrolls the list as focus
+  //   moves row to row, which would fold the controls with no intent, and a
+  //   user who cannot see the fold gains nothing from the room.
+  // - Reduce Motion: the fold snaps instead of animating.
+  // - A new board (sport, segment, players/teams, mode, read) opens unfolded.
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
-  const userDragging = useRef(false);
-  const setCollapsedAnimated = useCallback((next: boolean) => {
-    setControlsCollapsed((prev) => {
-      if (prev === next) return prev;
-      if (Platform.OS === 'ios') LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      return next;
+  const collapsedRef = useRef(false);
+  const userScrolling = useRef(false);
+  const reduceMotion = useReduceMotion();
+  const [screenReaderOn, setScreenReaderOn] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void AccessibilityInfo.isScreenReaderEnabled().then((on) => {
+      if (alive) setScreenReaderOn(on);
     });
+    const sub = AccessibilityInfo.addEventListener('screenReaderChanged', setScreenReaderOn);
+    return () => {
+      alive = false;
+      sub.remove();
+    };
   }, []);
+  const setCollapsedAnimated = useCallback(
+    (next: boolean, animate = true) => {
+      if (collapsedRef.current === next) return;
+      collapsedRef.current = next;
+      if (animate && !reduceMotion && Platform.OS === 'ios') {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      }
+      setControlsCollapsed(next);
+    },
+    [reduceMotion],
+  );
+  useEffect(() => {
+    setCollapsedAnimated(false, false);
+  }, [sport, segment, boardMode, effectiveMode, readKey, setCollapsedAnimated]);
+  useEffect(() => {
+    if (screenReaderOn) setCollapsedAnimated(false, false);
+  }, [screenReaderOn, setCollapsedAnimated]);
   const onBoardScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
       const y = contentOffset.y;
       const room = contentSize.height - layoutMeasurement.height;
-      if (y > COLLAPSE_AFTER_PT && room > COLLAPSE_MIN_ROOM_PT) setCollapsedAnimated(true);
-      else if (y <= 0 && userDragging.current) setCollapsedAnimated(false);
+      if (y > COLLAPSE_AFTER_PT && room > COLLAPSE_MIN_ROOM_PT) {
+        if (screenReaderOn || Keyboard.isVisible()) return;
+        setCollapsedAnimated(true);
+      } else if (y <= 0 && userScrolling.current) {
+        setCollapsedAnimated(false);
+      }
     },
-    [setCollapsedAnimated],
+    [setCollapsedAnimated, screenReaderOn],
   );
+  // Back at the top however the user got there: under momentum (the usual
+  // flick home), on release, or by a status-bar tap.
+  const reopenIfAtTop = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (e.nativeEvent.contentOffset.y <= 0) setCollapsedAnimated(false);
+  };
   const boardScrollProps = {
     onScroll: onBoardScroll,
     scrollEventThrottle: 32,
     onScrollBeginDrag: () => {
-      userDragging.current = true;
+      userScrolling.current = true;
     },
-    onScrollEndDrag: () => {
-      userDragging.current = false;
+    onScrollEndDrag: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      reopenIfAtTop(e);
+      const v = e.nativeEvent.velocity?.y ?? 0;
+      if (v === 0) userScrolling.current = false;
     },
+    onMomentumScrollEnd: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (userScrolling.current) reopenIfAtTop(e);
+      userScrolling.current = false;
+    },
+    onScrollToTop: () => setCollapsedAnimated(false),
   };
   const lineOnlySection =
     lineOnlyList.length > 0 ? (
@@ -2824,14 +2874,15 @@ export function StatsScreen() {
   // Not an effect: this sits below the `!stat` early return, so a hook here
   // would change the hook count. A same-render state reset is allowed.
   if (notesOpen && boardNotes.length === 0) setNotesOpen(false);
-  const controlsSummary = [
-    // The same words the ruler's caption uses, NHL's "3 or more shots" too.
-    effectiveMode === 'hitRate' && lineHeadline ? lineHeadline : stat.label,
+  const controlsSummaryParts = [
+    // The bet's own name wherever the board has one: the ruler's caption in
+    // Hit Rates, and the no-ruler caption ("Anytime Goal", not "Goals") that
+    // folds away with the controls.
+    (effectiveMode === 'hitRate' || (!canHitRate && showOdds)) && lineHeadline ? lineHeadline : stat.label,
     TIME_WINDOWS.find((w) => w.value === timeWindow)?.label ?? null,
     canHitRate ? (effectiveMode === 'hitRate' ? 'Hit Rates' : 'Averages') : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  ].filter((part): part is string => Boolean(part));
+  const controlsSummary = controlsSummaryParts.join(' · ');
   const windowStripHidden =
     sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0;
   const notesButton =
@@ -2965,20 +3016,26 @@ export function StatsScreen() {
 
       {controlsCollapsed ? (
         // The folded controls: one row that says what the board is showing and
-        // opens the controls again. Same summary the ruler reads to VoiceOver.
-        <Pressable
-          onPress={() => setCollapsedAnimated(false)}
-          accessibilityRole="button"
-          accessibilityLabel={`Board: ${controlsSummary}`}
-          accessibilityHint="Shows the stat, line and window controls"
-          style={({ pressed }) => [styles.fixedRow, styles.controlsSummary, pressed && styles.pressed]}
-        >
-          <Ionicons name="options-outline" size={15} color={colors.tint} />
-          <Text style={styles.controlsSummaryText} numberOfLines={1}>
-            {controlsSummary}
-          </Text>
-          <Ionicons name="chevron-down" size={16} color={colors.tint} />
-        </Pressable>
+        // opens the controls again. The board-notes ⓘ stays on it, so the
+        // missing-price and coverage notes are still one tap away.
+        <View style={[styles.fixedRow, styles.controlsSummaryRow]}>
+          <Pressable
+            onPress={() => setCollapsedAnimated(false)}
+            accessibilityRole="button"
+            // Commas, so VoiceOver pauses where the bar prints a middle dot.
+            accessibilityLabel={`Board: ${controlsSummaryParts.join(', ')}`}
+            accessibilityState={{ expanded: false }}
+            accessibilityHint="Shows the stat, line and window controls"
+            style={({ pressed }) => [styles.controlsSummary, pressed && styles.pressed]}
+          >
+            <Ionicons name="options-outline" size={15} color={colors.tint} />
+            <Text style={styles.controlsSummaryText} numberOfLines={1}>
+              {controlsSummary}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color={colors.tint} />
+          </Pressable>
+          {notesButton}
+        </View>
       ) : (
         <>
         {/* Stat selector — the primary control, under the header's tab rows,
@@ -5625,14 +5682,20 @@ function HitRateRow({
 
 const styles = StyleSheet.create({
   // The folded controls row (see controlsCollapsed). 44pt tap target.
+  controlsSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.separator,
+  },
   controlsSummary: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     minHeight: 44,
     paddingHorizontal: spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.separator,
   },
   controlsSummaryText: {
     flex: 1,
