@@ -834,6 +834,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # defense vs position (Matt, 2026-11-22). Runs while "mcp_stats context v1"
     # is missing from the comment on mcp_stats.injuries.
     "mcp_stats_context_2026_11_22.sql",
+    # AI assistant (MCP): a saved preferences profile per member (free, not
+    # one of the 10 questions) and a log of what each assistant advertises
+    # when it connects, elicitation included (Matt, 2026-11-24). Runs while
+    # "mcp_preferences v1" is missing from mcp_meter.profile_call.
+    "mcp_preferences_2026_11_24.sql",
     # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
     # monitor's page, written by mike's PC (pc_monitor/) and served to his
     # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,
