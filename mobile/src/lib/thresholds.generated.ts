@@ -131,7 +131,6 @@ export const PAUSED_MODELS = new Set<string>([
   'mlb_prop_pitcher_walks',
   'mlb_runline',
   'nba_live_spread_q12',
-  'nba_prop_first_basket',
   'nba_prop_market',
   'nba_prop_projection',
   'nba_q1_trend_ml',
