@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, NFL opener spread: no bet on a gap no real number has shown (mike) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, NCAAB first-half spread: checks at 15:00 and 18:00 UTC as well as ten minutes before tip (mike) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, NCAAB first-half models: when they bet, and whether earlier checks pay (mike) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, Betslip and saved parlays: Log bet puts the slip in Your bets (Matt) |
