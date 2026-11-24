@@ -21,7 +21,7 @@
 
 import { americanToDecimal, isVersusSport, labelWithoutStake } from '@/lib/format';
 import { stakeFor, KELLY_MULTIPLIER, type UnitStake } from '@/lib/thresholds';
-import { isBettableBook, linkForSide, marketForPick, pickTitleText, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
+import { bookName, isBettableBook, linkForSide, marketForPick, pickTitleText, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
@@ -738,6 +738,78 @@ export function priceBooksForParlay(
     for (const q of quotes) q.isBest = q.decimalPayout === bestDecimal;
   }
   return quotes;
+}
+
+/** What the "Track bet" button pre-fills in the Your bets form. */
+export interface ParlayTrackPrefill {
+  description: string;
+  book: string | null; // display name, e.g. "BetRivers"
+  oddsAmerican: number | null;
+}
+
+/**
+ * Pre-fill for logging a betslip as one bet in Your bets (Matt, 2026-11-24:
+ * "No way for me to add this to tracker"). The member types the stake; every
+ * field stays editable. Nothing is pre-filled that no book posted.
+ *
+ * - Description: EVERY leg on the slip, labels word for word (CLAUDE.md §00:
+ *   a pick is quoted from its label, never rebuilt). Legs whose game has
+ *   started are still in the bet the member placed, so they stay in.
+ * - Book + odds: the starred tile of the "Place this bet at" row — or, with no
+ *   star, the only fully-priced book. Blank when a leg is out of the price
+ *   (`pricedLegs` is shorter than `legs`: that price is for a different bet),
+ *   or when no single book qualifies. A same-game estimate names the book and
+ *   leaves the odds blank: the estimate is ours, not the book's.
+ */
+export function parlayTrackPrefill(
+  legs: ParlayLeg[],
+  pricedLegs: ParlayLeg[],
+  quotes: BetslipBookQuote[],
+): ParlayTrackPrefill {
+  const description = trackDescription(legs);
+  if (pricedLegs.length !== legs.length) return { description, book: null, oddsAmerican: null };
+  const full = quotes.filter((q) => q.americanOdds != null);
+  const pick = quotes.find((q) => q.isBest && q.americanOdds != null) ?? (full.length === 1 ? full[0] : null);
+  if (pick == null || pick.americanOdds == null) {
+    return { description, book: null, oddsAmerican: null };
+  }
+  const estimate = pick.sgpEstimated && !pick.entered;
+  return {
+    description,
+    book: bookName(pick.book),
+    oddsAmerican: estimate ? null : Math.round(pick.americanOdds),
+  };
+}
+
+/** Empty for an empty slip, so the form stays disabled. */
+function trackDescription(legs: ParlayLeg[]): string {
+  const labels = legs.map((l) => l.label.trim()).filter((s) => s.length > 0);
+  if (labels.length === 0) return '';
+  return labels.length === 1 ? labels[0] : `${labels.length}-leg parlay: ${labels.join(' · ')}`;
+}
+
+/**
+ * The same pre-fill for a SAVED parlay, at the book its card's "Bet on" button
+ * opens (`savedHandoffBookFor`) — the book the member most likely placed it
+ * at. A saved slip carries no live per-book prices (savedLegToParlayLeg), so
+ * the only price it holds is the one its card shows, which is DraftKings'
+ * only when every leg was DraftKings-priced. Anywhere else the book is named
+ * and the odds are left for the member: one book's name over another book's
+ * number is the mismatch §6 forbids.
+ */
+export function savedParlayTrackPrefill(legs: ParlayLeg[], handoffBook: string): ParlayTrackPrefill {
+  const description = trackDescription(legs);
+  if (legs.length === 0) return { description, book: null, oddsAmerican: null };
+  const allDk = legs.every((l) => l.dkPriced !== false);
+  if (handoffBook !== MODEL_BOOK || !allDk) {
+    return { description, book: bookName(handoffBook), oddsAmerican: null };
+  }
+  const odds = computeParlayMetrics(legs).americanOdds;
+  return {
+    description,
+    book: bookName(MODEL_BOOK),
+    oddsAmerican: Number.isFinite(odds) ? Math.round(odds) : null,
+  };
 }
 
 /**

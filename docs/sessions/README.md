@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, Betslip and saved parlays: Log bet puts the slip in Your bets (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, AI assistant connector: saved preferences profile (free), books filter, capability log for elicitation (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, Stats board controls fold on scroll; player hit rate inline (Matt) |
 | 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, Matchup page follow-up: picks board read on NBA pages only, head-to-head bounded, injury and stale-picks notes (Matt) |

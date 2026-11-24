@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,11 +9,17 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { EmptyState } from '@/components/EmptyState';
 import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
+import { useManualBets, type ManualBetInput } from '@/hooks/useManualBets';
+import { ManualBetModal } from '@/components/ManualBetModal';
+import { showToast } from '@/components/Toast';
+import { markSlipLogged, savedParlayLogKey, useLoggedSlips } from '@/lib/loggedSlips';
 import { setParlayRestore } from '@/hooks/useParlayRestore';
 import {
   computeParlayMetrics,
   savedHandoffBookFor,
   savedLegToParlayLeg,
+  savedParlayTrackPrefill,
+  type ParlayTrackPrefill,
   type SavedParlay,
 } from '@/lib/parlay';
 import { bookName, booksName, MODEL_BOOK } from '@/lib/markets';
@@ -116,6 +122,38 @@ export function SavedParlaysScreen() {
   // the links it was saved with, so an older save legitimately has DK only.
   // Each leg's link is AT the book being opened, never DK's slip under another
   // book's label.
+  // "Log bet": log a saved slip in Your bets (Performance tab), pre-filled at
+  // the book its "Bet on" button opens. Asks before logging one twice.
+  const manualBets = useManualBets();
+  const isLogged = useLoggedSlips();
+  const [trackPrefill, setTrackPrefill] = useState<ParlayTrackPrefill | null>(null);
+  const [trackKey, setTrackKey] = useState<string | null>(null);
+  const openTrack = (sp: SavedParlay) => {
+    const key = savedParlayLogKey(sp.id);
+    const open = () => {
+      setTrackKey(key);
+      setTrackPrefill(
+        savedParlayTrackPrefill(
+          sp.legs.map(savedLegToParlayLeg),
+          savedHandoffBookFor(sp.legs, preferredBooks).book,
+        ),
+      );
+    };
+    if (!isLogged(key)) return open();
+    Alert.alert('Already logged', 'You’ve already logged this parlay in Your bets. Log it again?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log again', onPress: open },
+    ]);
+  };
+  const addTracked = useCallback(
+    (input: ManualBetInput) => {
+      manualBets.add(input);
+      if (trackKey) markSlipLogged(trackKey);
+      showToast('Added to Your bets on Performance', { announce: true });
+    },
+    [manualBets, trackKey],
+  );
+
   const betAtBook = (sp: SavedParlay) => {
     const { book, links } = savedHandoffBookFor(sp.legs, preferredBooks);
     setHandoff({
@@ -171,6 +209,8 @@ export function SavedParlaysScreen() {
             bookReady={bookReady}
             onBet={() => betAtBook(item)}
             onEdit={() => editInBuilder(item)}
+            logged={isLogged(savedParlayLogKey(item.id))}
+            onTrack={() => openTrack(item)}
             onDelete={() => deleteNow(item)}
           />
         )}
@@ -190,6 +230,13 @@ export function SavedParlaysScreen() {
         </View>
       ) : null}
 
+      <ManualBetModal
+        visible={trackPrefill != null}
+        prefill={trackPrefill}
+        onClose={() => setTrackPrefill(null)}
+        onAdd={addTracked}
+      />
+
       <ParlayDkHandoff
         visible={handoff != null}
         legs={handoff?.legs ?? []}
@@ -207,6 +254,8 @@ function SavedParlayCard({
   bookReady,
   onBet,
   onEdit,
+  logged,
+  onTrack,
   onDelete,
 }: {
   parlay: SavedParlay;
@@ -218,8 +267,15 @@ function SavedParlayCard({
   bookReady: boolean;
   onBet: () => void;
   onEdit: () => void;
+  /** Logged in Your bets this session (lib/loggedSlips). */
+  logged: boolean;
+  onTrack: () => void;
   onDelete: () => void;
 }) {
+  // Three buttons share one row; past ~1.3 their labels no longer fit, so the
+  // row stacks (the betslip grid's rule, UX review).
+  const { fontScale } = useWindowDimensions();
+  const stacked = fontScale > 1.3;
   const metrics = useMemo(
     () => computeParlayMetrics(parlay.legs.map(savedLegToParlayLeg)),
     [parlay.legs],
@@ -326,7 +382,7 @@ function SavedParlayCard({
               : `${booksName(preferredBooks)} ${preferredBooks.length === 1 ? 'doesn’t' : 'don’t'} price every leg — opens ${bookName(handoffBook)}`}
           </Text>
         ) : null}
-        <View style={styles.secondaryRow}>
+        <View style={[styles.secondaryRow, stacked && styles.secondaryStacked]}>
           <Pressable
             hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
             accessibilityRole="button"
@@ -336,6 +392,18 @@ function SavedParlayCard({
           >
             <Ionicons name="create-outline" size={16} color={colors.tint} />
             <Text style={styles.editBtnText}>Edit in builder</Text>
+          </Pressable>
+          <Pressable
+            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+            accessibilityRole="button"
+            accessibilityLabel={logged ? 'Logged in Your bets' : 'Log this parlay in Your bets'}
+            accessibilityHint={logged ? 'Asks before logging it again' : 'Opens a form with the legs filled in'}
+            accessibilityState={{ selected: logged }}
+            onPress={onTrack}
+            style={({ pressed }) => [styles.editBtn, pressed && styles.pressed]}
+          >
+            <Ionicons name={logged ? 'checkmark-circle' : 'add-circle-outline'} size={16} color={colors.tint} />
+            <Text style={styles.editBtnText}>{logged ? 'Logged' : 'Log bet'}</Text>
           </Pressable>
           <Pressable
             hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
@@ -548,6 +616,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
   },
+  secondaryStacked: {
+    flexDirection: 'column',
+  },
   editBtn: {
     flex: 1,
     flexDirection: 'row',
@@ -558,8 +629,11 @@ const styles = StyleSheet.create({
     borderColor: colors.tint,
     borderRadius: radii.md,
     paddingVertical: spacing.sm,
+    minHeight: 44,
   },
   editBtnText: {
+    flexShrink: 1,
+    textAlign: 'center',
     color: colors.tint,
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
@@ -572,8 +646,11 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     borderRadius: radii.md,
     paddingVertical: spacing.sm,
+    minHeight: 44,
   },
   deleteBtnText: {
+    flexShrink: 1,
+    textAlign: 'center',
     color: colors.avoidInk,
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
