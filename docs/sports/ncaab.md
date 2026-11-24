@@ -1041,9 +1041,11 @@ games: against 15:00 UTC, 18:00 UTC and an hour before tip, the paired
 per-date difference's interval spans zero at cuts 0.01, 0.02 and 0.03 (at
 0.02, the hour-before rule made 13.21 units less, interval [-62.11, 36.01]).
 Checking at 15:00 UTC and 18:00 UTC as well as ten minutes before, with the
-first bet locking, does beat it, and clears the timing test (2026-11-24,
-`docs/decision_timing.md`, "The NCAAB first-half models"). It is not live:
-mike decides.
+first bet locking, makes more units and clears the timing test (2026-11-24,
+`docs/decision_timing.md`, "The NCAAB first-half models"). Its edge over
+the single check is clear only on 2025-26 at the live cut, and its 15:00 UTC
+prices are not yet checked against the live feed. It is not live: mike
+decides (#1602).
 
 **The shipped code reproduces it exactly.** The build replays 2023-24 to 2025-26
 through the card's own functions (the as-of consensus, the team term, the

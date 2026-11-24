@@ -271,7 +271,28 @@ seasons it made +31.57 units more than the live check (interval -8.69 to
   +39.69 for the live check. January on made +16.49 against +18.34. So the
   gain is all in the first two months of the season.
 - **Where its bets land:** 420 at 15:00 UTC (+34.87 units), 233 at 18:00 UTC
-  (+25.73), and 475 at ten minutes (+29.01).
+  (+25.73), and 475 at ten minutes (+29.01). From January on, the early bets
+  lost: 168 bets, -4.57 units (15:00 UTC -11.63 on 105, 18:00 UTC +7.06 on 63).
+- **The test's false-discovery step decides nothing here.** All 15 schedules
+  pass it, because the model makes money at every check time. The comparison
+  that matters is against the live check: +17.20 units on the first two seasons
+  (p 0.19), +14.37 on 2025-26 (p 0.028), and -8.69 to +73.05 over three.
+- **At the neighbouring cut, 0.02,** the same schedule is chosen and clears
+  (2025-26 +32.09 units, p 0.026). Its edge over the live check there is
+  smaller: +11.95 units on the first two seasons (p 0.30), +8.29 on 2025-26
+  (p 0.21).
+- **The 15:00 UTC prices are not checked against the live feed.** The history
+  stamps every quote of a purchase with one time, so a quote a book had not
+  updated reads as current. The pattern above fits that: the line moves our
+  way, but the same pick is no cheaper. The live capture has stored 15:00 UTC
+  this season (about 810 games, each book's own update age in
+  `ncaab_first_half_fetches.book_ages`). Its coverage is thinner: 82% of
+  15:00 UTC calls carry a first-half line, at 5.7 books, against 93% and 6.8
+  later.
+- **The rule against a first-half under and a big favourite's spread on one
+  game** keeps the earlier bet. 67 of the schedule's early bets back a side
+  laying 12 or more in the half. On 21 of those games the total model bets an
+  under an hour before. The schedule would flip which of the two stands.
 
 **No live timing has changed.** mike has to see this result first (the rule
 above). The live capture calls 15:00 UTC but not 18:00 UTC
