@@ -1040,6 +1040,10 @@ chose among.) No earlier fetch time beats ten minutes before tip on the same
 games: against 15:00 UTC, 18:00 UTC and an hour before tip, the paired
 per-date difference's interval spans zero at cuts 0.01, 0.02 and 0.03 (at
 0.02, the hour-before rule made 13.21 units less, interval [-62.11, 36.01]).
+Checking at 15:00 UTC and 18:00 UTC as well as ten minutes before, with the
+first bet locking, does beat it, and clears the timing test (2026-11-24,
+`docs/decision_timing.md`, "The NCAAB first-half models"). It is not live:
+mike decides.
 
 **The shipped code reproduces it exactly.** The build replays 2023-24 to 2025-26
 through the card's own functions (the as-of consensus, the team term, the
@@ -1210,6 +1214,9 @@ about 64 minutes before tip (median 64.4); live it is about 60. Each decision,
 bet or not, goes into `ncaab_first_half_total_decisions` with every book's
 priced quote and each book's own update age, and the game is never decided
 again (CLAUDE.md §1c).
+Its timing was re-measured on 2026-11-24 (`docs/decision_timing.md`, "The
+NCAAB first-half models"). An hour before is its best single check, and no
+schedule of several checks clears the test.
 
 **The evidence** (the research's round 5 grid, every game, quotes bought an
 hour before tip, graded at their own prices to win one unit; 95% interval

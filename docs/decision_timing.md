@@ -194,6 +194,117 @@ than 5 minutes before the stored kickoff. Which side is wrong is not measured
 (issue #1352); the replay reads only pre-game rows, so those games read
 slightly thin at the late hours, which cannot change the verdict.
 
+## The NCAAB first-half models (2026-11-24)
+
+mike asked why NCAAB bets go out about an hour before tip, and whether that
+loses closing value.
+
+**Which NCAAB models bet late.** Only the two first-half models (`picks`, BETs
+on 2026-11-01..11-24, voids left out). The first-half total model's 115 bets
+were all written 57 to 60 minutes before tip. The first-half spread model's 52
+were all written 10 minutes before. The full-game models bet hours ahead
+(median lead): spread 535 minutes (42 bets), moneyline off its own spread 505
+(15), first-post moneyline 1,266 (14), totals 1,192 (3).
+
+**How it was measured.** Each model's own build replay
+(`scripts/ncaab_first_half_total_build.py` and
+`scripts/ncaab_first_half_spread_build.py`: their fit, replay and grade) was
+run at each check time the history holds: 15:00 UTC (`_derivative_15z`), 18:00
+UTC (`_18z`, games that tip after it), an hour before tip (`_tip60`) and ten
+minutes before (`_close`). The 2023-24 to 2025-26 seasons, each fitted on
+earlier seasons only. The inputs are the local copy of Supabase taken
+2026-11-24 05:30 UTC (`odds`, `games`, `ncaab_period_scores`). Both models are
+replayed at the live cut, 0.025, and the total keeps its -200 limit. The
+total's replay leaves out its big-favourite under rule at every time alike.
+A schedule is a list of check times. Each game is bet at the first time in the
+list where the model bets, and a bet locks. A time where the model does not
+bet leaves the game open for the next one. Every one of the 15 schedules
+built from the four times was graded on the games the live time decided, at
+its own prices, to win one unit. The test is the one above. The schedule is
+chosen on 2023-24 and 2024-25, it must survive Benjamini-Hochberg at q 0.10
+there, and on 2025-26 alone it must make positive units with a one-sided p of
+0.10 or less. The scripts are in `data/local/research/ncaab_fh_timing/` on
+mike's PC (not committed: they read the local copy).
+
+### First-half total (live: one check, an hour before tip)
+
+| Checks | Bets | Units | ROI | 2023-24 | 2024-25 | 2025-26 |
+|---|---|---|---|---|---|---|
+| **an hour before (live)** | **1,854** | **+125.91** | **+6.02%** | **+55.54** | **+39.15** | **+31.23** |
+| 15:00 UTC | 1,144 | +74.98 | +5.75% | +7.76 | +33.81 | +33.41 |
+| 18:00 UTC | 1,381 | +66.00 | +4.20% | +19.79 | +32.17 | +14.05 |
+| ten minutes before | 2,129 | +62.58 | +2.62% | +32.18 | +39.82 | -9.42 |
+| 15:00, 18:00 UTC, an hour before | 2,682 | +178.02 | +5.85% | +59.91 | +79.51 | +38.60 |
+| 15:00 UTC, an hour before | 2,379 | +163.81 | +6.08% | +52.48 | +66.75 | +44.58 |
+
+The hour-before check is the best single time. Ten minutes before is the worst.
+It made -9.42 units in 2025-26, so moving this model closer to tip would lose.
+
+**The test: no schedule clears.** Chosen on 2023-24 and 2024-25: 15:00 UTC,
+18:00 UTC and an hour before. It made +139.42 units there, against +94.69 for
+the live check (+44.73, one-sided p 0.062). On 2025-26 alone it made +38.60
+units on 910 bets, +3.66% (interval -2.68% to +10.11%), p 0.125. That misses
+0.10, so the live check stays. Its gain over the live check that season was
++7.37 units (p 0.36). It lays -190 to +165 (median -113), and the live check
+lays -160 to +115.
+
+### First-half spread (live: one check, ten minutes before tip)
+
+| Checks | Bets | Units | ROI | 2023-24 | 2024-25 | 2025-26 |
+|---|---|---|---|---|---|---|
+| **ten minutes before (live)** | **760** | **+58.03** | **+6.91%** | **+30.22** | **+12.13** | **+15.68** |
+| 15:00 UTC | 420 | +34.87 | +7.37% | +12.30 | +14.72 | +7.85 |
+| 18:00 UTC | 444 | +51.25 | +10.26% | +11.45 | +24.06 | +15.73 |
+| an hour before | 566 | +29.62 | +4.69% | +16.74 | +13.02 | -0.14 |
+| 15:00, 18:00 UTC, ten minutes before | 1,128 | +89.60 | +7.14% | +35.02 | +24.53 | +30.05 |
+
+**The test: 15:00 UTC, 18:00 UTC and ten minutes before CLEARS.** Chosen on
+2023-24 and 2024-25: +59.55 units on 954 bets (p 0.033), against +42.35 for the
+live check (+17.20, p 0.19). It survives Benjamini-Hochberg. On 2025-26 alone it
+made +30.05 units on 174 bets, +15.15% (interval +1.05% to +28.49%), p 0.018.
+That is +14.37 units over the live check that season (p 0.028). Over the three
+seasons it made +31.57 units more than the live check (interval -8.69 to
++73.05), and more in every season.
+- **Prices:** -148 to +125, median -110 (5th to 95th: -125 to +100). The live
+  check lays -140 to +125.
+- **When the gain comes:** November and December made +73.11 units against
+  +39.69 for the live check. January on made +16.49 against +18.34. So the
+  gain is all in the first two months of the season.
+- **Where its bets land:** 420 at 15:00 UTC (+34.87 units), 233 at 18:00 UTC
+  (+25.73), and 475 at ten minutes (+29.01).
+
+**No live timing has changed.** mike has to see this result first (the rule
+above). The live capture calls 15:00 UTC but not 18:00 UTC
+(`data/ingestors/ncaab_first_half_odds.MARKS`), so the change needs that call
+added as well as the card change.
+
+### Where the extra units come from, and closing value
+
+- **The same pick is no cheaper earlier.** 174 of the spread schedule's 420
+  15:00 UTC bets were also bet on the same side at ten minutes. The early
+  number averaged -0.017 points against the later one (46 better, 44 worse).
+  For the total, 617 bets at 15:00 UTC had the same side an hour before, at
+  +0.045 points (155 better, 161 worse).
+- **The gain is bets the later check no longer makes.** Before tip, the market
+  moved to the model's side, and by the later check the edge was gone. Those
+  bets beat the same book's ten-minute close. The spread schedule's 15:00 UTC
+  bets had the line move their way 237 times and against them 36 times, a
+  mean of +0.74 points. Its 18:00 UTC bets: 98 and 13, +0.54 points. On the
+  games all four times cover, the total's 15:00 UTC bets: 506 and 147, +0.66
+  points. Its hour-before bets: 302 and 96, +0.15 points.
+- **Against Pinnacle's no-vig ten-minute close, every time reads negative.**
+  This counts only bets where Pinnacle's close sits on our line. That subset
+  leaves out the bets the market moved toward, so it reads low. Total:
+  -4.76% (15:00 UTC) to -3.43% (ten minutes), the schedule -4.29%. Spread:
+  -4.23% to -2.42%, the schedule -2.81%. The first-half total's own evidence
+  says the same (`docs/sports/ncaab.md`): its profit is information the close
+  lacks.
+
+**What cannot be replayed.** The live capture's other six times (180, 120, 50,
+40, 30 and 20 minutes before tip) have no history bought. The inventory below
+puts the purchase at a 1,130,160-credit ceiling. The balance was 1,068,948 at
+13:21 UTC on 2026-11-24 (`odds_api_quota`).
+
 ## The inventory of every other model (2026-11-14)
 
 Read only: no paid call, no job. Credits are the arithmetic in
