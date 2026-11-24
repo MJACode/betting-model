@@ -42,6 +42,7 @@ import {
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useManualBets, type ManualBetInput } from '@/hooks/useManualBets';
 import { ManualBetModal } from '@/components/ManualBetModal';
+import { betslipLogKey, markSlipLogged, useLoggedSlips } from '@/lib/loggedSlips';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
 import { useEnteredSgpPrices, useSgpHaircuts } from '@/hooks/useSgpHaircuts';
 import type { SgpHaircuts } from '@/lib/sgpPricing';
@@ -935,27 +936,52 @@ function SlipBody({
     [pricedLegs],
   );
   const pregameCount = legs.length - pricedLegs.length;
-  // "Track bet": log this slip in Your bets (Performance tab), pre-filled with
-  // the legs and the starred tile's book and price — the same quotes the
-  // "Place this bet at" row shows (Matt, 2026-11-24).
+  // "Log bet": log this slip in Your bets (Performance tab), pre-filled with
+  // every leg and the starred tile's book and price — the same quotes the
+  // "Place this bet at" row shows (Matt, 2026-11-24). Not "Track": that word
+  // is the pick card's line-alert follow (TrackButton), a different thing.
   const manualBets = useManualBets();
+  const isLogged = useLoggedSlips();
+  const logKey = betslipLogKey(legs.map((l) => l.slipKey));
+  const logged = isLogged(logKey);
   // Snapshotted at the tap, not memoised: a price refresh while the form is
   // open would otherwise re-fill it and wipe the stake being typed.
   const [trackPrefill, setTrackPrefill] = useState<ParlayTrackPrefill | null>(null);
   const openTrack = useCallback(() => {
-    setTrackPrefill(
-      parlayTrackPrefill(
-        pricedLegs,
-        priceBooksForParlay(pricedLegs, 1, BETTABLE_BOOKS, sgpFits, enteredPrices),
-      ),
-    );
-  }, [pricedLegs, sgpFits, enteredPrices]);
+    const open = () =>
+      setTrackPrefill(
+        parlayTrackPrefill(
+          legs,
+          pricedLegs,
+          priceBooksForParlay(pricedLegs, 1, BETTABLE_BOOKS, sgpFits, enteredPrices),
+        ),
+      );
+    if (!isLogged(logKey)) return open();
+    Alert.alert('Already logged', 'You’ve already logged this slip in Your bets. Log it again?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log again', onPress: open },
+    ]);
+  }, [legs, pricedLegs, sgpFits, enteredPrices, isLogged, logKey]);
   const addTracked = useCallback(
     (input: ManualBetInput) => {
       manualBets.add(input);
+      markSlipLogged(logKey);
       showToast('Added to Your bets on Performance', { announce: true });
     },
-    [manualBets],
+    [manualBets, logKey],
+  );
+  const logButton = (
+    <Pressable
+      accessibilityLabel={logged ? 'Logged in Your bets' : 'Log this parlay in Your bets'}
+      accessibilityHint={logged ? 'Asks before logging it again' : 'Opens a form with the legs and price filled in'}
+      accessibilityState={{ selected: logged }}
+      onPress={openTrack}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}
+    >
+      <Ionicons name={logged ? 'checkmark-circle' : 'add-circle-outline'} size={18} color={colors.tint} />
+      <Text style={styles.gridBtnText}>{logged ? 'Logged' : 'Log bet'}</Text>
+    </Pressable>
   );
   // Past ~1.3 the two-up grid's fixed 45% cells are narrower than their own
   // labels, so it stacks instead of truncating them (UX review).
@@ -1238,6 +1264,7 @@ function SlipBody({
           pregameCount={pregameCount}
           onSaved={onSaved}
         />
+        {logButton}
         <Pressable
           accessibilityLabel="Find players"
           onPress={onFindPlayers}
@@ -1255,16 +1282,6 @@ function SlipBody({
         >
           <Ionicons name="create-outline" size={18} color={colors.tint} />
           <Text style={styles.gridBtnText}>Custom leg</Text>
-        </Pressable>
-        <Pressable
-          accessibilityLabel="Track bet"
-          accessibilityHint="Adds this parlay to Your bets on the Performance tab"
-          onPress={openTrack}
-          accessibilityRole="button"
-          style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}
-        >
-          <Ionicons name="checkmark-circle-outline" size={18} color={colors.tint} />
-          <Text style={styles.gridBtnText}>Track bet</Text>
         </Pressable>
       </View>
 

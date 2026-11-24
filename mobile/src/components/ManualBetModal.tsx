@@ -3,6 +3,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -95,10 +96,13 @@ export function ManualBetModal({
           accessibilityLabel="Close add a bet"
         />
         <View style={styles.sheet}>
-          <Text style={styles.title}>{prefill ? 'Track this bet' : 'Add a bet'}</Text>
+          {/* Scrolls: a multi-leg description, a wrapped subtitle and the
+              keyboard at large text sizes can push the button off screen. */}
+          <ScrollView keyboardShouldPersistTaps="handled" bounces={false}>
+          <Text style={styles.title}>{prefill ? 'Log this bet' : 'Add a bet'}</Text>
           <Text style={styles.subtitle}>
             {prefill
-              ? 'Adds it to Your bets on the Performance tab. Enter your stake, and check the odds match your book. Tracked on this device only.'
+              ? 'Saved to Your bets on Performance, on this device. Add your stake and check the odds match your book.'
               : 'For bets your sportsbook didn’t sync. Tracked on this device only.'}
           </Text>
 
@@ -129,6 +133,8 @@ export function ManualBetModal({
             <Field label="Stake (units)" style={{ flex: 1 }}>
               <TextInput
                 accessibilityLabel="Stake in units"
+                // The one field a slip can't fill: start there.
+                autoFocus={prefill != null}
                 style={styles.input}
                 value={stake}
                 onChangeText={setStake}
@@ -150,7 +156,7 @@ export function ManualBetModal({
             </Field>
           </View>
 
-          <PrimaryButton label="Add bet" onPress={submit} disabled={!valid} accessibilityHint={addHint} style={styles.addBtn} />
+          <PrimaryButton label={prefill ? 'Add to Your bets' : 'Add bet'} onPress={submit} disabled={!valid} accessibilityHint={addHint} style={styles.addBtn} />
           <Pressable
             onPress={onClose}
             accessibilityRole="button"
@@ -159,6 +165,7 @@ export function ManualBetModal({
           >
             <Text style={styles.cancelText}>Cancel</Text>
           </Pressable>
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -186,6 +193,7 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, justifyContent: 'flex-end' },
   backdropFill: { ...StyleSheet.absoluteFillObject, backgroundColor: '#00000055' },
   sheet: {
+    maxHeight: '90%',
     backgroundColor: colors.bgElevated,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,

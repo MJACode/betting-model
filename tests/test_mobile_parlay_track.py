@@ -1,4 +1,4 @@
-"""Betslip / saved parlay "Track bet" (Matt, 2026-11-24: "No way for me to add
+"""Betslip / saved parlay "Log bet" (Matt, 2026-11-24: "No way for me to add
 this to tracker").
 
 The behavioural checks live in `mobile/scripts/verify_parlay_track.ts`. This
@@ -23,18 +23,18 @@ def _read(rel: str) -> str:
     return (MOBILE / rel).read_text(encoding="utf-8")
 
 
-def test_betslip_has_track_bet_wired_to_your_bets():
+def test_betslip_has_log_bet_wired_to_your_bets():
     src = _read("src/screens/ParlayScreen.tsx")
-    assert 'accessibilityLabel="Track bet"' in src
+    assert "'Log this parlay in Your bets'" in src
     assert "<ManualBetModal" in src
     assert "manualBets.add(input)" in src
     # Priced off the same quotes the "Place this bet at" row shows.
     assert "priceBooksForParlay(pricedLegs, 1, BETTABLE_BOOKS, sgpFits, enteredPrices)" in src
 
 
-def test_saved_parlay_has_track_bet_wired_to_your_bets():
+def test_saved_parlay_has_log_bet_wired_to_your_bets():
     src = _read("src/screens/SavedParlaysScreen.tsx")
-    assert 'accessibilityLabel="Track bet"' in src
+    assert "'Log this parlay in Your bets'" in src
     assert "<ManualBetModal" in src
     assert "savedParlayTrackPrefill(" in src
     assert "manualBets.add(input)" in src
@@ -56,3 +56,11 @@ def test_the_behavioural_checks_pass():
         timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_logging_twice_asks_first():
+    """UX review: a second identical entry doubles the member's own P&L."""
+    for rel in ("src/screens/ParlayScreen.tsx", "src/screens/SavedParlaysScreen.tsx"):
+        src = _read(rel)
+        assert "markSlipLogged(" in src, rel
+        assert "'Already logged'" in src, rel
