@@ -8,15 +8,18 @@ Planned every minute (scheduler.run_ncaab_first_half_window, 24x7). A tick:
      a game appearing on the board; a game the feed does not list has no
      first-half market and no event to call). For each, the newest fetch time
      that has passed (data/ingestors/ncaab_first_half_odds.MARKS: 15:00 UTC on
-     its date, then 180, 120, 60, 50, 40, 30, 20, 10 and 3 minutes before tip)
-     with no ok call since is due. And the games each card must look at: not
-     decided by it, ten minutes or less from tip for the spread card, sixty
-     for the total card. Reads only; no API call.
+     its date, 18:00 UTC, then 180, 120, 60, 50, 40, 30, 20, 10 and 3 minutes
+     before tip) with no ok call since is due. And the games each card must look
+     at: not decided by it, ten minutes or less from tip for the spread card or
+     inside one of its early checks (15:00 and 18:00 UTC,
+     scripts/ncaab_first_half_spread_card.early_candidates), sixty for the total
+     card. Reads only; no API call.
   2. --fetch G...: one event call per due game, the decision fetches first
      (data/ingestors/ncaab_first_half_odds.py). Exit 1 when a call failed, not
      when the books offered nothing.
-  3. The spread card (scripts/ncaab_first_half_spread_card.py) decides each
-     game on its tip-minus-10 fetch, the total card
+  3. The spread card (scripts/ncaab_first_half_spread_card.py) checks each
+     game at 15:00 and 18:00 UTC and bets it there only when it finds a bet,
+     else decides it on its tip-minus-10 fetch; the total card
      (scripts/ncaab_first_half_total_card.py) on its tip-minus-60 fetch; each
      writes its bets, and the job publishes them.
 
@@ -73,7 +76,7 @@ def enabled() -> bool:
 class Plan:
     fetch: list = field(default_factory=list)       # game ids due a call
     marks: dict = field(default_factory=dict)       # game id -> mark
-    card: list = field(default_factory=list)        # undecided games <= CARD_LEAD_MIN out
+    card: list = field(default_factory=list)        # undecided games <= CARD_LEAD_MIN out, or in an early check
     total_card: list = field(default_factory=list)  # undecided by the total card, <= TOTAL_CARD_LEAD_MIN
 
     def __bool__(self) -> bool:
@@ -115,7 +118,7 @@ def lead_minutes(tip: datetime, t: datetime) -> float:
 
 def plan(conn, now: datetime) -> Plan:
     """What this tick has to do, from what is stored. Reads only."""
-    from scripts.ncaab_first_half_spread_card import decided_games
+    from scripts.ncaab_first_half_spread_card import decided_games, early_candidates
     from scripts.ncaab_first_half_total_card import decided_games as total_decided
     games = slate(conn, now)
     if not games:
@@ -132,6 +135,9 @@ def plan(conn, now: datetime) -> Plan:
             p.fetch.append(gid)
             p.marks[gid] = due[0]
     near = sorted(g for g, v in games.items() if lead_minutes(v["tip"], now) <= CARD_LEAD_MIN)
+    # The spread card's early checks: run it while one may be due (it finds
+    # and prices the call itself, once).
+    near = sorted(set(near) | set(early_candidates(games, now)))
     if near:
         done = decided_games(conn, near)
         p.card = [g for g in near if g not in done]

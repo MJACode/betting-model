@@ -2520,9 +2520,10 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // the book's price. The NCAAB spread card (scripts/ncaab_spread_card.py) and
   // the NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decide each
   // game once, at 15:00 UTC on game day, the same way.
-  // The NCAAB first-half spread card decides each game once, about ten
-  // minutes before tip, the same way, and the NCAAB first-half total card
-  // about an hour before tip. The NCAAB opening-moneyline card
+  // The NCAAB first-half spread card bets each game at most once, at the
+  // first of its checks (15:00 UTC, 18:00 UTC, about ten minutes before tip)
+  // that finds a bet, the same way, and the NCAAB first-half total card
+  // decides once about an hour before tip. The NCAAB opening-moneyline card
   // (scripts/ncaab_moneyline_first_post_card.py) bets a game at most once,
   // the moment a book first posts its moneyline, and never re-prices.
   // The NCAABW totals card (scripts/ncaabw_total_card.py), the women's,

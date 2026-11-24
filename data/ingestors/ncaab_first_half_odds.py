@@ -18,14 +18,15 @@ and NCAAB live feeds, odds_ingestor._get_event_odds), so a call costs at most 4
 credits and an empty answer 0. credits_last records the feed's own
 x-requests-last for each call: the bill is read, never assumed.
 
-WHEN (scripts/ncaab_first_half_window.py plans it, every minute). Ten fetch
-times per game: 15:00 UTC on its Eastern date, then 180, 120, 60, 50, 40, 30,
-20, 10 and 3 minutes before tip (MARKS). A time is due once it has passed and no
-ok call for the game has landed since; a missed time is covered by the next
-tick, and a time the next one overtakes is skipped. A failed call at a history
-time waits for the next time; a failed call at a decision time (DECISION_MARKS)
-or at the closing time (CLOSE_MARK) is retried every minute. At most 10 x 4 = 40
-credits a game (an empty answer and an HTTP
+WHEN (scripts/ncaab_first_half_window.py plans it, every minute). Eleven fetch
+times per game: 15:00 and 18:00 UTC on its Eastern date, then 180, 120, 60, 50,
+40, 30, 20, 10 and 3 minutes before tip (MARKS). A time is due once it has
+passed and no ok call for the game has landed since; a missed time is covered
+by the next tick, and a time the next one overtakes is skipped. A failed call
+at a history time waits for the next time; a failed call at a decision time
+(DECISION_MARKS), at one of the spread's early checks (EARLY_MARKS, 15:00 and
+18:00 UTC, added 2026-11-24) or at the closing time (CLOSE_MARK) is retried
+every minute. At most 11 x 4 = 44 credits a game (an empty answer and an HTTP
 404 billed 0 in the measured calls, the purchase's api_call_log). The call at tip minus 10 (DECISION_MARK) is the one the spread card decides
 on (scripts/ncaab_first_half_spread_card.py); the call at tip minus 60
 (TOTAL_DECISION_MARK) is the one the total card decides on
@@ -108,21 +109,30 @@ SNAPSHOT_TYPE = "open"
 EVENTS, EVENT_ODDS = "events", "event_odds"
 _ET = ZoneInfo("America/New_York")
 
-# The fetch times: (mark, minutes before tip), None = 15:00 UTC on the game's
-# Eastern date. DECISION_MARK is the research's close (tip minus 10 minutes),
-# the first-half spread's decision; TOTAL_DECISION_MARK the research's tip60
-# purchase (tip minus 60), the first-half total's. A call at either is retried
-# every minute until one lands (due_mark).
-MARKS = (("15z", None), ("T-180", 180), ("T-120", 120), ("T-60", 60), ("T-50", 50),
-         ("T-40", 40), ("T-30", 30), ("T-20", 20), ("T-10", 10), ("T-3", 3))
+# The fetch times: (mark, minutes before tip), None = a fixed UTC hour on the
+# game's Eastern date (FIXED_HOUR_UTC). DECISION_MARK is the research's close
+# (tip minus 10 minutes), the first-half spread's decision; TOTAL_DECISION_MARK
+# the research's tip60 purchase (tip minus 60), the first-half total's. A call
+# at either is retried every minute until one lands (due_mark).
+MARKS = (("15z", None), ("18z", None), ("T-180", 180), ("T-120", 120), ("T-60", 60),
+         ("T-50", 50), ("T-40", 40), ("T-30", 30), ("T-20", 20), ("T-10", 10), ("T-3", 3))
+FIXED_HOUR_UTC = {"15z": 15, "18z": 18}
 DECISION_MARK = "T-10"
 TOTAL_DECISION_MARK = "T-60"
 DECISION_MARKS = (DECISION_MARK, TOTAL_DECISION_MARK)
+# The first-half spread's two early checks (mike, 2026-11-24;
+# docs/decision_timing.md, "The NCAAB first-half models"): the research's
+# 15:00 and 18:00 UTC purchases. The spread card bets a game on one of them
+# only when it finds a bet there; otherwise the game waits for the next check.
+# Retried every minute like a decision call, so a failed call is not a lost
+# check (scripts/ncaab_first_half_spread_card.EARLY_WINDOW_MIN bounds how late
+# a retry may land and still be checked).
+EARLY_MARKS = ("15z", "18z")
 # The closing fetch: the line every first-half bet is graded against for CLV.
 # Not a decision time. Retried every minute like one, so a failed call still
 # leaves a close.
 CLOSE_MARK = "T-3"
-RETRIED_MARKS = DECISION_MARKS + (CLOSE_MARK,)
+RETRIED_MARKS = DECISION_MARKS + EARLY_MARKS + (CLOSE_MARK,)
 MAX_CREDITS_PER_CALL = len(API_MARKETS)      # one per market returned, one region
 # No call this close to tip: the answer could land after the start.
 LAST_CALL_LEAD = timedelta(seconds=30)
@@ -261,6 +271,30 @@ def decision_fetches(conn, game_ids: list[str], now: datetime | None = None,
     return out
 
 
+def calls_since(conn, game_ids: list[str], since: datetime,
+                now: datetime) -> dict[str, list[tuple[datetime, dict]]]:
+    """{game_id: [(fetch_at, book ages), ...]}: every ok event call for these
+    games that landed in [since, now], any mark (the first-half spread's early
+    checks are found by when a call landed, not by its name). Reads only."""
+    if not game_ids or not ledger_exists(conn):
+        return {}
+    rows = conn.execute(f"""
+        SELECT game_id, fetch_at, book_ages FROM {LEDGER_TABLE}
+        WHERE game_id = ANY(%s) AND endpoint = %s AND ok AND fetch_at >= %s AND fetch_at <= %s
+    """, (list(game_ids), EVENT_ODDS, since, now)).fetchall()
+    out: dict[str, list[tuple[datetime, dict]]] = {}
+    for gid, ts, ages in rows:
+        t = _aware(ts)
+        if t is None:
+            continue
+        try:
+            a = json.loads(ages) if ages else {}
+        except (TypeError, ValueError):
+            a = {}
+        out.setdefault(gid, []).append((t, a))
+    return out
+
+
 # ── the schedule ─────────────────────────────────────────────────────────────
 
 def _when(stamp) -> datetime | None:
@@ -276,6 +310,19 @@ def _z(t: datetime) -> str:
     return t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def fixed_time(game_date: str, mark: str) -> datetime:
+    """A fixed-hour mark's instant: FIXED_HOUR_UTC[mark]:00 UTC on the game's
+    Eastern date (the research's 15z and 18z purchases)."""
+    d = datetime.fromisoformat(str(game_date)[:10])
+    return datetime(d.year, d.month, d.day, FIXED_HOUR_UTC[mark], tzinfo=timezone.utc)
+
+
+def early_times(game_date: str, tip: datetime) -> list[tuple[str, datetime]]:
+    """The first-half spread's early check instants (EARLY_MARKS) before this
+    game's tip, earliest first, whatever name the shared fetch time carries."""
+    return [(m, t) for m in EARLY_MARKS if (t := fixed_time(game_date, m)) < tip]
+
+
 def slots(game_date: str, tip: datetime) -> list[tuple[str, datetime]]:
     """The game's fetch times before its tip, earliest first. Two marks at the
     same instant are one fetch time: the earlier-listed mark names it, unless
@@ -283,11 +330,7 @@ def slots(game_date: str, tip: datetime) -> list[tuple[str, datetime]]:
     minus 60, and is retried and decided on as that)."""
     out: dict[datetime, str] = {}
     for mark, lead in MARKS:
-        if lead is None:
-            d = datetime.fromisoformat(str(game_date)[:10])
-            t = datetime(d.year, d.month, d.day, 15, tzinfo=timezone.utc)
-        else:
-            t = tip - timedelta(minutes=lead)
+        t = fixed_time(game_date, mark) if lead is None else tip - timedelta(minutes=lead)
         if t < tip and (t not in out or mark in DECISION_MARKS):
             out[t] = mark
     return sorted(((m, t) for t, m in out.items()), key=lambda x: x[1])

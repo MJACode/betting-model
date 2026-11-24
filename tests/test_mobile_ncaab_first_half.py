@@ -100,8 +100,11 @@ eq([m.type, m.shortLabel, m.statKey, m.statLabel], ['game', '1H Spread', null, '
 eq(modelLong('ncaab_first_half_spread'), 'NCAAB First Half Spreads', 'long name');
 eq(betSlotForModel('ncaab_first_half_spread', 'game'), null, 'not a picker slot');
 const t = modelPageTiming('ncaab_first_half_spread');
-eq([t.title, t.empty.includes('five to ten minutes before tip-off'), t.note.includes('five to ten minutes')],
-   ['Checked once per game', true, true], 'page');
+// three checks since 2026-11-24 (mike): 10am and 1pm ET (11am and 2pm from mid-March), minutes before tip
+eq([t.title, t.body.includes('at 10am and 1pm ET on game day (11am and 2pm ET from mid-March), and five to ' +
+                             'ten minutes before tip-off'),
+    t.empty.includes('five to ten minutes before tip-off'), t.note.includes('first check')],
+   ['Checked up to three times per game', true, true, true], 'page');
 """)
 
 

@@ -126,11 +126,12 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         number and its alternate ladder, four minutes before each start)
   * NCAAB first half      every minute, 24x7    -> run_ncaab_first_half_window
         (scripts/ncaab_first_half_window.py: one first-half call per listed
-        game at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10
-        minutes before tip, at most 4 credits a call; then the
-        ncaab_first_half_spread card decides each game once on its tip-minus-10
-        fetch, the ncaab_first_half_total card on its tip-minus-60 fetch, and
-        the job publishes. A tick with nothing due makes no call.
+        game at 15:00 and 18:00 UTC on its date and 180, 120, 60, 50, 40, 30,
+        20, 10 and 3 minutes before tip, at most 4 credits a call; then the
+        ncaab_first_half_spread card bets a game at 15:00 or 18:00 UTC when it
+        finds a bet there, else decides it once on its tip-minus-10 fetch, the
+        ncaab_first_half_total card on its tip-minus-60 fetch, and the job
+        publishes. A tick with nothing due makes no call.
         RUN_NCAAB_FIRST_HALF=0 stops it.)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
@@ -2495,14 +2496,16 @@ def run_clv_closing_pull() -> None:
 def run_ncaab_first_half_window() -> None:
     """One NCAAB first-half tick (scripts/ncaab_first_half_window.py).
 
-    ONE planning read: the listed games due a first-half call (15:00 UTC on
-    their date, then 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip),
-    the games ten minutes or less from tip the spread model has not decided,
-    and the games sixty minutes or less from tip the total model has not
-    decided. Most ticks have none and return without a call. Otherwise: the
-    fetch for exactly the due games, the decision calls (tip minus 10 and tip
-    minus 60) first; then the ncaab_first_half_spread card, which decides each
-    game once on its tip-minus-10 fetch, and the ncaab_first_half_total card,
+    ONE planning read: the listed games due a first-half call (15:00 and
+    18:00 UTC on their date, then 180, 120, 60, 50, 40, 30, 20, 10 and 3
+    minutes before tip), the games ten minutes or less from tip or inside an
+    early check (15:00 and 18:00 UTC) the spread model has not decided, and
+    the games sixty minutes or less from tip the total model has not decided.
+    Most ticks have none and return without a call. Otherwise: the fetch for
+    exactly the due games, the decision calls (tip minus 10 and tip minus 60)
+    first; then the ncaab_first_half_spread card, which bets a game at its
+    15:00 or 18:00 UTC check when it finds a bet there and otherwise decides it
+    once on its tip-minus-10 fetch, and the ncaab_first_half_total card,
     which decides each game once on its tip-minus-60 fetch; then publish what
     they wrote. A step that fails or is killed raises AFTER publishing, so
     the heartbeat records "error" and the failure alerter reports it, while a

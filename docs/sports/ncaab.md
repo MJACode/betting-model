@@ -998,10 +998,26 @@ line from its `fh_lib.py`, `fh_prep.py`, `fh_score.py` and `fh_grade.py`):
    2026-11-07; see "The bar raised to 0.025" below); otherwise the
    game is decided with no bet.
 
-**When.** The capture fetches each game's first-half lines nine times
-(below). The decision is the fetch ten minutes before tip. If it fails, the
-job retries every minute, and a fetch that lands 5 to 10 minutes before tip
-still decides. With none by 5 minutes out, the game is not decided: the
+**When (from 2026-11-24, mike).** Three checks, and the first bet locks the
+game: the capture's calls at 15:00 and 18:00 UTC on the game's date, then the
+fetch ten minutes before tip. An early check is the newest call that landed
+within 10 minutes of 15:00 or 18:00 UTC (a failed call is retried every
+minute), priced within 5 minutes of landing exactly as the ten-minute fetch is.
+When it bets, the bet and the game's decision row are written and the game is
+never checked again. When it does not, only a row in
+`ncaab_first_half_spread_checks` is written (every book's priced quote), and
+the game waits for the next check. A missed early check is not a failure. The
+evidence: `docs/decision_timing.md`, "The NCAAB first-half models" (2023-24 to
+2025-26: +89.60 units on 1,128 bets against +58.03 on 760 for the ten-minute
+check alone; cleared the timing test on 2025-26 alone). Checked on this
+season's live feed first (2026-11-03..11-23): every early bet's book had
+updated its quote at most 4.5 minutes before the call (median 0.6), and 15:00
+UTC plus ten minutes made 68 bets, +14.46 units, against 44 bets, +10.47, for
+ten minutes alone, graded so far.
+
+**The ten-minute decision.** The capture fetches each game's first-half lines
+eleven times (below). If the ten-minute fetch fails, the job retries every
+minute, and a fetch that lands 5 to 10 minutes before tip still decides. With none by 5 minutes out, the game is not decided: the
 20-minute fetch is not used instead, because the research graded only the
 ten-minute snapshot. The card then fails its run, and the failure alerter names
 the game once it tips (`undecided:ncaab_first_half_spread`). Each decision, bet
@@ -1042,10 +1058,8 @@ per-date difference's interval spans zero at cuts 0.01, 0.02 and 0.03 (at
 0.02, the hour-before rule made 13.21 units less, interval [-62.11, 36.01]).
 Checking at 15:00 UTC and 18:00 UTC as well as ten minutes before, with the
 first bet locking, makes more units and clears the timing test (2026-11-24,
-`docs/decision_timing.md`, "The NCAAB first-half models"). Its edge over
-the single check is clear only on 2025-26 at the live cut, and its 15:00 UTC
-prices are not yet checked against the live feed. It is not live: mike
-decides (#1602).
+`docs/decision_timing.md`, "The NCAAB first-half models"). Live from
+2026-11-24 (mike): "When", above.
 
 **The shipped code reproduces it exactly.** The build replays 2023-24 to 2025-26
 through the card's own functions (the as-of consensus, the team term, the
@@ -1062,10 +1076,11 @@ graded games.
 | EV floor | 0.03, just under the smallest EV the cut admitted in the replay (+0.0346; median +0.0552), on its own probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned (it laid -140 to +125) | `MODEL_MIN_ODDS` |
 | books | the eight above, and only those `BEST_LINE_BOOKMAKERS` still lists | `models/ncaab_first_half_spread.BOOKS` |
+| early checks | the call landed within 10 minutes of 15:00 or 18:00 UTC on the game's date, more than 10.5 minutes before tip; bets only, a row in `ncaab_first_half_spread_checks` either way (mike, 2026-11-24) | `scripts/ncaab_first_half_spread_card.EARLY_WINDOW_MIN`, `data/ingestors/ncaab_first_half_odds.EARLY_MARKS` |
 | decision fetch | 5 to 10.5 minutes before tip, the tip-minus-10 call or its retries | `scripts/ncaab_first_half_spread_card.DECISION_LEAD_MIN` |
-| decided once | a row in `ncaab_first_half_spread_decisions`, bet or not | the card |
+| decided once | a row in `ncaab_first_half_spread_decisions`, at the early check that bet or at the decision fetch, bet or not | the card |
 | settlement | the first half's margin plus the home number (period 1 of `ncaab_period_scores`); pending while the periods are missing or do not add up to the final | `tracking/paper_tracker._ncaab_first_half_points` |
-| closing value | the bet book's newest pre-tip row on the same line, strictly after the pick was created. The card decides on the tip-minus-10 call, the last fetch, so that pull is the price taken and a spread usually stays unmeasured | `tracking/paper_tracker._closing_odds`, the CLV migration |
+| closing value | the bet book's newest pre-tip row on the same line, strictly after the pick was created. An early bet is measured against the later calls' rows; a ten-minute bet against the closing call 3 minutes before tip (`CLOSE_MARK`, from 2026-11-18) | `tracking/paper_tracker._closing_odds`, the CLV migration |
 | kill switch | `RUN_NCAAB_FIRST_HALF=0` stops the fetches and the card | `scripts/ncaab_first_half_window.enabled` |
 | frozen numbers | fitted on 2021-2026 | `models/saved/ncaab_first_half_spread_2027.json` |
 
@@ -1124,7 +1139,7 @@ game day from 13.3 to 10.7, 2u picks from about 61 a season to 41, for about
 `data/ingestors/ncaab_first_half_odds.py`, run by the window job
 (`scheduler.run_ncaab_first_half_window`, every minute). For every game the
 feed lists (one with a bettable book's full-game spread stored), one per-event
-call at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10 minutes
+call at 15:00 and 18:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10 minutes
 before tip, the ten-minute call first on a busy tick. Each call asks for four
 markets: first-half moneyline, spread and total, and both team totals. All
 four are stored (source `odds_api_ncaab_first_half_live`, protected from the
@@ -2160,7 +2175,7 @@ built; **nothing is bought until a worker job is queued.**
 | ESPN schedule + results | Teams, venues, every game (neutral flag, conference game), finals for settlement; the daily pipeline refreshes 14 days ahead, every refresh pass fills finals for started games | `data/ingestors/ncaab_espn_ingestor.py`, steps `ncaab-schedule` / `ncaab-results` |
 | Live odds | Full-game moneyline, spread and total from the ten line-shop books on every refresh pass; NCAAB is exempt from the DraftKings-must-list gate so every book's first post is kept | `data/ingestors/odds_ingestor.py` |
 | Totals model card | Every five minutes, three after each capture poll: decides each game once at DraftKings' first posted total, bets only while it still stands, writes the bets, then publishes them (the 22:00 / 15:00 UTC rule until 2026-11-03) | `scripts/ncaab_total_card.py`, job `ncaab_total_card` |
-| First-half spread model and capture | Every minute: each listed game's first-half lines (moneyline, spread, total, team totals) at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip, at most 4 credits a call; the first-half spread model decides each game once on the tip-minus-10 fetch and the first-half total model on the tip-minus-60 fetch, each writes its bets, then the job publishes them | `scripts/ncaab_first_half_window.py`, `data/ingestors/ncaab_first_half_odds.py`, `scripts/ncaab_first_half_spread_card.py`, `scripts/ncaab_first_half_total_card.py`, job `ncaab_first_half_window` |
+| First-half spread model and capture | Every minute: each listed game's first-half lines (moneyline, spread, total, team totals) at 15:00 and 18:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20, 10 and 3 minutes before tip, at most 4 credits a call; the first-half spread model bets a game at its 15:00 or 18:00 UTC check when it finds a bet there, else decides it once on the tip-minus-10 fetch, and the first-half total model decides on the tip-minus-60 fetch, each writes its bets, then the job publishes them | `scripts/ncaab_first_half_window.py`, `data/ingestors/ncaab_first_half_odds.py`, `scripts/ncaab_first_half_spread_card.py`, `scripts/ncaab_first_half_total_card.py`, job `ncaab_first_half_window` |
 | Opener capture | Every 5 minutes, change-only (a row is written only when a book's price or line moved), so the time each book first posts is known; each tick also writes the opening moneyline model's fill check | `scripts/ncaab_odds_capture.py`, job `ncaab_odds_capture` |
 | Opening moneyline model card | Every minute: one planning read for a bettable book's new moneyline on a game; the card prices it off the same book's spread, decides it once, writes the bet, then publishes it | `scripts/ncaab_moneyline_first_post_card.py`, job `ncaab_moneyline_first_post` |
 | Price-path retention | NCAAB keeps every book's whole price path (the clean-up job only removes unchanged middles), and the close it keeps for any sport is the last price before the start | `data/prune_odds.py` (`PATH_KEPT_SPORTS`) |

@@ -6,7 +6,23 @@ LIVE, real money (mike, 2026-11-02). Runs in the NCAAB first-half window job
 fetches, and writes picks only; the job then publishes them like every other
 card. RUN_NCAAB_FIRST_HALF=0 stops it before it reads anything.
 
-WHEN A GAME IS DECIDED. On its decision fetch: the newest ok first-half call
+WHEN A GAME IS CHECKED (mike, 2026-11-24; docs/decision_timing.md, "The NCAAB
+first-half models"). Three times, and the first bet locks: the calls at 15:00
+and 18:00 UTC on its date (the capture's EARLY_MARKS), then its decision fetch
+ten minutes before tip. An EARLY CHECK is the newest ok call that landed within
+EARLY_WINDOW_MIN (10) of 15:00 or 18:00 UTC, whatever mark names it, decided
+within MAX_DECISION_DELAY_MIN of landing, on a game more than 10.5 minutes from
+tip. It is priced exactly as the decision fetch is. When it bets (after the
+price floor, the EV floor and the pair rule), the bet, the game's decision row
+and the check's row are written in one transaction and the game is never
+checked again. When it does not, only the check's row is written
+(ncaab_first_half_spread_checks, every book's priced quote), no NONE row, and
+the game waits for the next check. An early check that never lands is not a
+failure: the next check covers the game. Replayed on 2023-24 to 2025-26 this
+schedule made +89.60 units on 1,128 bets against +58.03 on 760 for the
+ten-minute check alone, and cleared the timing test on 2025-26 alone.
+
+THE DECISION FETCH. The newest ok first-half call
 made for the tip-minus-10 time (data/ingestors/ncaab_first_half_odds.py,
 DECISION_MARK) that landed DECISION_LEAD_MIN (5 to 10.5) minutes before tip.
 The research graded the purchase ten minutes before tip and nothing else; a
@@ -47,10 +63,12 @@ lose the only graded moment.
 
 EACH GAME DECIDED ONCE (CLAUDE.md 1c). The decision, bet or not, is written to
 ncaab_first_half_spread_decisions in the same transaction as the game's bet,
-under the model's transaction-scoped advisory lock. A game with a decision row,
-or with any ncaab_first_half_spread BET, is never decided again: a later tick,
-a moved line or a better price writes nothing. The row keeps every book's
-priced quote, so the cut can be swept on live data (CLAUDE.md 1b).
+under the model's transaction-scoped advisory lock: at the early check that
+bet, or at the decision fetch. A game with a decision row, or with any
+ncaab_first_half_spread BET, is never decided again: a later tick, a moved line
+or a better price writes nothing. A check with no bet decides nothing (the
+lock is on a BET, not a game). The rows keep every book's priced quote, so the
+cut can be swept on live data (CLAUDE.md 1b).
 
 A game priced below the cut is a NONE row (no stake) in the same
 transaction, so the app's All board shows every scored game (Matt,
@@ -74,7 +92,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -102,6 +120,10 @@ DECISION_LEAD_MIN = (5.0, 10.5)
 # A decision fetch is decided on only this soon after it landed (module
 # docstring), the first-half total card's MAX_DECISION_DELAY_MIN.
 MAX_DECISION_DELAY_MIN = 5.0
+# An early check is a call that landed at most this many minutes after 15:00
+# or 18:00 UTC (module docstring): the capture retries a failed early call
+# every minute, so ten minutes of retries.
+EARLY_WINDOW_MIN = 10.0
 
 
 def enabled() -> bool:
@@ -192,6 +214,117 @@ def decided_games(conn, game_ids: list[str]) -> set[str]:
             f"SELECT game_id FROM {DECISIONS_TABLE} WHERE game_id = ANY(%s)",
             (list(game_ids),)).fetchall()}
     return done | games_with_a_bet(conn, game_ids)
+
+
+# ── the early checks' ledger ─────────────────────────────────────────────────
+# One row per early check (module docstring, WHEN A GAME IS CHECKED), bet or
+# not, keyed on the game and the call it priced, so a call is priced once.
+# The decisions ledger's columns. Worker-only (data/anon_readable).
+CHECKS_TABLE = "ncaab_first_half_spread_checks"
+CHECKS_COLS = DECISIONS_COLS
+CHECKS_DDL = """
+CREATE TABLE IF NOT EXISTS ncaab_first_half_spread_checks (
+    game_id         TEXT NOT NULL,
+    decided_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    fetch_at        TEXT NOT NULL,
+    lead_min        REAL,
+    status          TEXT NOT NULL,
+    detail          TEXT,
+    n_bets          INTEGER NOT NULL,
+    book            TEXT,
+    side            TEXT,
+    line            REAL,
+    price           REAL,
+    p_side          REAL,
+    edge            REAL,
+    mu              REAL,
+    fg_spread       REAL,
+    fg_books        INTEGER,
+    tau_home        REAL,
+    tau_away        REAL,
+    n_home          INTEGER,
+    n_away          INTEGER,
+    missing_halves  INTEGER,
+    offers          TEXT,
+    book_ages       TEXT,
+    PRIMARY KEY (game_id, fetch_at)
+)
+"""
+_INSERT_CHECK = (
+    f"INSERT INTO {CHECKS_TABLE} ({', '.join(_DECISION_VALUES)}) "
+    f"VALUES ({', '.join('%(' + c + ')s' for c in _DECISION_VALUES)}) "
+    f"ON CONFLICT (game_id, fetch_at) DO NOTHING")
+
+
+def ensure_checks_table(conn) -> None:
+    """Create the early checks' ledger once, locked down, and cost nothing after that."""
+    if schema_is_current(conn, CHECKS_TABLE, columns=CHECKS_COLS,
+                         rls=True, revoked_from=API_ROLES):
+        return
+    conn.execute(CHECKS_DDL)
+    lock_down(conn, CHECKS_TABLE)
+    conn.commit()
+
+
+def early_windows(game_date: str, tip: datetime) -> list[tuple[datetime, datetime]]:
+    """This game's early checks as (opens, closes) instants: a call landing in
+    [opens, closes] is the check. Only checks more than DECISION_LEAD_MIN[1]
+    minutes before tip; the decision fetch covers the rest."""
+    out = []
+    for _, t in feed.early_times(game_date, tip):
+        if (tip - t).total_seconds() / 60.0 > DECISION_LEAD_MIN[1]:
+            out.append((t, t + timedelta(minutes=EARLY_WINDOW_MIN)))
+    return out
+
+
+def early_candidates(games: dict[str, dict], now: datetime) -> list[str]:
+    """The games an early check may be due for now: inside a check's window
+    plus MAX_DECISION_DELAY_MIN, and more than DECISION_LEAD_MIN[1] minutes
+    from tip. Pure; the window job runs the card for these."""
+    out = []
+    for gid, g in sorted(games.items()):
+        if (g["tip"] - now).total_seconds() / 60.0 <= DECISION_LEAD_MIN[1]:
+            continue
+        for opens, closes in early_windows(g["game_date"], g["tip"]):
+            if opens <= now <= closes + timedelta(minutes=MAX_DECISION_DELAY_MIN):
+                out.append(gid)
+                break
+    return out
+
+
+def _checked(conn, game_ids: list[str]) -> set[tuple[str, datetime]]:
+    """(game, call instant) for every early check already priced."""
+    if not game_ids or not _table_exists(conn, CHECKS_TABLE):
+        return set()
+    return {(gid, t) for gid, ts in conn.execute(
+        f"SELECT game_id, fetch_at FROM {CHECKS_TABLE} WHERE game_id = ANY(%s)",
+        (list(game_ids),)).fetchall() if (t := feed._aware(ts)) is not None}
+
+
+def early_due(conn, games: dict[str, dict], now: datetime) -> dict[str, tuple[datetime, dict]]:
+    """{game_id: (fetch_at, book ages)}: the early check to price now for each
+    game not decided: its newest ok call, when that call landed inside one of
+    its windows at most MAX_DECISION_DELAY_MIN ago and has not been priced."""
+    cands = early_candidates(games, now)
+    if not cands:
+        return {}
+    done = decided_games(conn, cands)
+    cands = [g for g in cands if g not in done]
+    calls = feed.calls_since(conn, cands, now - timedelta(
+        minutes=EARLY_WINDOW_MIN + MAX_DECISION_DELAY_MIN), now)
+    seen = _checked(conn, cands)
+    out: dict[str, tuple[datetime, dict]] = {}
+    for gid in cands:
+        g = games[gid]
+        wins = early_windows(g["game_date"], g["tip"])
+        newest = max(calls.get(gid, []), key=lambda x: x[0], default=None)
+        if newest is None:
+            continue
+        t, ages = newest
+        if ((now - t).total_seconds() / 60.0 <= MAX_DECISION_DELAY_MIN
+                and any(o <= t <= c for o, c in wins) and (gid, t) not in seen):
+            out[gid] = (t, ages)
+    return out
 
 
 # ── the season's finished games (the team term's input) ──────────────────────
@@ -539,15 +672,19 @@ def decision_row(d: fh.Decision, fetch_at: datetime, lead: float, ages: dict, mi
             "book_ages": json.dumps(ages, sort_keys=True) if ages else None}
 
 
-def publish(conn, rows: list[dict], decided: list[dict]) -> tuple[int, int]:
+def publish(conn, rows: list[dict], decided: list[dict],
+            checked: list[dict] = ()) -> tuple[int, int]:
     """Write each decided game once: its decision row and its pick (BET or
     NONE) in ONE
     transaction, under the model's lock, the ledger and the picks re-read
-    inside it. -> (bets written, decisions written)."""
-    if not decided:
+    inside it; and each early check's row (`checked`) in the same one.
+    -> (bets written, decisions written)."""
+    if not decided and not checked:
         return 0, 0
     from scripts.nfl_wind_publisher import _lock_model
     _lock_model(conn, MODEL_ID)
+    for rec in checked:
+        conn.execute(_INSERT_CHECK, {c: rec.get(c) for c in _DECISION_VALUES})
     done = decided_games(conn, sorted({r["game_id"] for r in decided}))
     by_game = {r["game_id"]: r for r in rows}
     n_bets = n_decided = 0
@@ -613,12 +750,16 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         near = {g: v for g, v in games.items()
                 if lead_minutes(v["tip"], now) <= DECISION_LEAD_MIN[1]}
         diag["games"] = len(near)
-        if not near:
+        early = early_due(conn, {g: v for g, v in games.items() if g not in near}, now)
+        diag["early_checks"] = len(early)
+        if not near and not early:
             logger.info(render([], diag))
             return {"games": 0, "bets": 0, "published": 0, "decided": 0, "diag": diag}
         if do_publish:
             ensure_decisions_table(conn)
-        done = decided_games(conn, sorted(near))
+            if early:
+                ensure_checks_table(conn)
+        done = decided_games(conn, sorted(near)) if near else set()
         diag["already_decided"] = len(done)
         fetched = feed.decision_fetches(conn, sorted(set(near) - done), now)
         due: dict[str, tuple[datetime, dict]] = {}
@@ -646,14 +787,15 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             diag["missed"] -= len(gone)
             problems = [g for g in problems if g in have]
         decisions, records = [], []
-        cuts = {g: f[0] for g, f in due.items()}
+        checks = {**due, **early}       # every call priced this run: (fetch_at, ages)
+        cuts = {g: f[0] for g, f in checks.items()}
         quotes = decision_quotes(conn, cuts)
         fgc = fg_consensus(conn, cuts)
         books = bet_books()
         stale: list[str] = []
         capped: list[str] = []
-        for season in sorted({games[g]["season"] for g in due}):
-            gids = sorted(g for g in due if games[g]["season"] == season)
+        for season in sorted({games[g]["season"] for g in checks}):
+            gids = sorted(g for g in checks if games[g]["season"] == season)
             art = artifact(season)
             if art is None:
                 diag["wrong_season"] += len(gids)
@@ -667,7 +809,7 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             targets = pd.DataFrame({"game_id": gids,
                                     "home_team": [games[g]["home"] for g in gids],
                                     "away_team": [games[g]["away"] for g in gids],
-                                    "stamp": [pd.Timestamp(due[g][0]) for g in gids]})
+                                    "stamp": [pd.Timestamp(checks[g][0]) for g in gids]})
             tau = fh.team_effects(res, season, art["prior_team_sums"], targets,
                                   art["tilt"]["k"], art["tilt"]["w_prev"]).set_index("game_id")
             for gid in gids:
@@ -675,18 +817,20 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 t = tau.loc[gid].to_dict() if gid in tau.index else None
                 d = fh.decide(gid, q, fgc.get(gid), t, art, config.MODEL_EDGE_THRESHOLDS[MODEL_ID],
                               books=books)
-                diag[d.status] = diag.get(d.status, 0) + 1
+                key = ("early_" if gid in early else "") + d.status
+                diag[key] = diag.get(key, 0) + 1
                 diag["quotes_dropped"] += _log_dropped(
                     fh.out_of_range(q, books), "first-half", "spread_home", fh.QUOTE_PRICES)
                 if d.status == "edge_cap":
                     logger.error(f"NCAAB first-half card: {gid} not bet, its edge is a data "
                                  f"error: {d.detail}")
-                    capped.append(gid)
-                miss = (missing_halves(sgames, tg, games[gid]["home"], due[gid][0])
-                        + missing_halves(sgames, tg, games[gid]["away"], due[gid][0]))
+                    if gid not in early:        # an early check decides nothing: the next one does
+                        capped.append(gid)
+                at = checks[gid][0]
+                miss = (missing_halves(sgames, tg, games[gid]["home"], at)
+                        + missing_halves(sgames, tg, games[gid]["away"], at))
                 decisions.append(d)
-                records.append((d, due[gid][0], lead_minutes(games[gid]["tip"], due[gid][0]),
-                                due[gid][1], miss))
+                records.append((d, at, lead_minutes(games[gid]["tip"], at), checks[gid][1], miss))
         published = n_decided = 0
         if do_publish and decisions:
             from models.scorer import _get_current_bankroll
@@ -695,10 +839,18 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             # (models/cbb_pairs.py; mike, 2026-11-11): the later of the two becomes a NONE row.
             cbb_pairs.hold_back(conn, rows, refused)
             bet_ids = {r["game_id"] for r in rows if r["signal_type"] == "BET"}
-            decided = [decision_row(d, fa, lead, ages, miss, d.game_id in bet_ids,
-                                    refused.get(d.game_id))
-                       for d, fa, lead, ages, miss in records]
-            published, n_decided = publish(conn, rows, decided)
+            # An early check writes its bet only: with none, the game stays open.
+            # It gets no decision row, so publish writes no NONE row for it
+            # (publish writes a pick only beside a decision); only the check's
+            # row is kept.
+            every = [decision_row(d, fa, lead, ages, miss, d.game_id in bet_ids,
+                                  refused.get(d.game_id))
+                     for d, fa, lead, ages, miss in records]
+            decided = [r for r in every if r["game_id"] not in early or r["game_id"] in bet_ids]
+            checked = [r for r in every if r["game_id"] in early]
+            # A run with no early check calls publish exactly as before.
+            published, n_decided = (publish(conn, rows, decided, checked) if checked
+                                    else publish(conn, rows, decided))
         logger.info("\n" + render(decisions, diag, published if do_publish else None,
                                   n_decided if do_publish else None))
         why = []

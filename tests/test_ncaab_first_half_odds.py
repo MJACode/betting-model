@@ -30,13 +30,14 @@ FEED_HOME, FEED_AWAY = "Kansas Jayhawks", "Duke Blue Devils"
 
 # ── the schedule ─────────────────────────────────────────────────────────────
 
-def test_ten_fetch_times_a_game_ending_three_minutes_before_tip():
+def test_eleven_fetch_times_a_game_ending_three_minutes_before_tip():
     s = feed.slots(DATE, TIP)
-    assert [m for m, _ in s] == ["15z", "T-180", "T-120", "T-60", "T-50", "T-40", "T-30",
+    assert [m for m, _ in s] == ["15z", "18z", "T-180", "T-120", "T-60", "T-50", "T-40", "T-30",
                                  "T-20", "T-10", "T-3"]
     assert s[0][1] == datetime(2026, 11, 10, 15, 0, tzinfo=UTC)
+    assert s[1][1] == datetime(2026, 11, 10, 18, 0, tzinfo=UTC)
     assert s[-1] == (feed.CLOSE_MARK, TIP - timedelta(minutes=3))
-    assert len(s) * feed.MAX_CREDITS_PER_CALL == 40
+    assert len(s) * feed.MAX_CREDITS_PER_CALL == 44
     # The closing call lands after the spread card's decision window closes
     # (5 minutes before tip), so the card can never decide on it.
     from scripts.ncaab_first_half_spread_card import DECISION_LEAD_MIN
@@ -92,6 +93,55 @@ def test_a_failed_history_fetch_waits_for_the_next_time_but_the_decision_is_retr
     # a failed -10 call is retried the next minute
     t10 = TIP - timedelta(minutes=10)
     assert feed.due_mark(DATE, TIP, t10 + timedelta(minutes=1), None, t10 + timedelta(seconds=2))[0] == "T-10"
+
+
+def test_a_failed_early_check_call_is_retried_every_minute():
+    # 15:00 and 18:00 UTC are the first-half spread's early checks (mike,
+    # 2026-11-24): a failed call there is called again the next minute, as a
+    # decision call is, not left for the next fetch time.
+    t18 = datetime(2026, 11, 10, 18, 0, tzinfo=UTC)
+    failed = t18 + timedelta(seconds=3)
+    assert feed.due_mark(DATE, TIP, t18 + timedelta(minutes=1), t18 - timedelta(hours=3), failed) == ("18z", t18)
+    t15 = datetime(2026, 11, 10, 15, 0, tzinfo=UTC)
+    assert feed.due_mark(DATE, TIP, t15 + timedelta(minutes=4), None, t15 + timedelta(seconds=2)) == ("15z", t15)
+    # one that landed ends it
+    assert feed.due_mark(DATE, TIP, t18 + timedelta(minutes=2), t18 + timedelta(seconds=40)) is None
+
+
+def test_an_early_check_shared_with_a_decision_time_keeps_the_decision_s_name():
+    # A 2pm ET tip: 18:00 UTC is its tip minus 60, named for the total's
+    # decision; the spread's early check finds the call by when it landed.
+    tip = datetime(2026, 11, 10, 19, 0, tzinfo=UTC)
+    s = dict((t, m) for m, t in feed.slots(DATE, tip))
+    assert s[datetime(2026, 11, 10, 18, 0, tzinfo=UTC)] == "T-60"
+    assert feed.early_times(DATE, tip) == [("15z", datetime(2026, 11, 10, 15, 0, tzinfo=UTC)),
+                                           ("18z", datetime(2026, 11, 10, 18, 0, tzinfo=UTC))]
+    from scripts.ncaab_first_half_spread_card import early_windows
+    assert [o for o, _ in early_windows(DATE, tip)] == [datetime(2026, 11, 10, 15, 0, tzinfo=UTC),
+                                                        datetime(2026, 11, 10, 18, 0, tzinfo=UTC)]
+
+
+def test_an_early_check_inside_the_last_ten_and_a_half_minutes_is_left_to_the_decision():
+    from scripts.ncaab_first_half_spread_card import early_windows
+    tip = datetime(2026, 11, 10, 18, 10, tzinfo=UTC)      # 18:00 UTC is its tip minus 10
+    assert [o.hour for o, _ in early_windows(DATE, tip)] == [15]
+    tip = datetime(2026, 11, 10, 15, 0, tzinfo=UTC)       # tips at 15:00: no early check
+    assert early_windows(DATE, tip) == []
+
+
+def test_the_card_runs_for_an_early_check_only_inside_its_window():
+    from scripts.ncaab_first_half_spread_card import early_candidates
+    games = {GID: {"game_date": DATE, "tip": TIP}}
+    t15 = datetime(2026, 11, 10, 15, 0, tzinfo=UTC)
+    assert early_candidates(games, t15 - timedelta(seconds=1)) == []
+    assert early_candidates(games, t15) == [GID]
+    # ten minutes of retries, then five to decide on the last of them
+    assert early_candidates(games, t15 + timedelta(minutes=15)) == [GID]
+    assert early_candidates(games, t15 + timedelta(minutes=15, seconds=1)) == []
+    assert early_candidates(games, datetime(2026, 11, 10, 18, 7, tzinfo=UTC)) == [GID]
+    # never inside the decision fetch's own span
+    late = {GID: {"game_date": DATE, "tip": datetime(2026, 11, 10, 18, 9, tzinfo=UTC)}}
+    assert early_candidates(late, datetime(2026, 11, 10, 18, 1, tzinfo=UTC)) == []
 
 
 def test_nothing_is_due_before_the_first_time():
