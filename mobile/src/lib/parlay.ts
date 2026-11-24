@@ -21,7 +21,7 @@
 
 import { americanToDecimal, isVersusSport, labelWithoutStake } from '@/lib/format';
 import { stakeFor, KELLY_MULTIPLIER, type UnitStake } from '@/lib/thresholds';
-import { isBettableBook, linkForSide, marketForPick, pickTitleText, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
+import { bookName, isBettableBook, linkForSide, marketForPick, pickTitleText, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
@@ -738,6 +738,61 @@ export function priceBooksForParlay(
     for (const q of quotes) q.isBest = q.decimalPayout === bestDecimal;
   }
   return quotes;
+}
+
+/** What the "Track bet" button pre-fills in the Your bets form. */
+export interface ParlayTrackPrefill {
+  description: string;
+  book: string | null; // display name, e.g. "BetRivers"
+  oddsAmerican: number | null;
+}
+
+/**
+ * Pre-fill for logging a betslip as one bet in Your bets (Matt, 2026-11-24:
+ * "No way for me to add this to tracker"). The member types the stake; every
+ * field stays editable.
+ *
+ * - Description: the slip's leg labels, word for word (CLAUDE.md §00: a pick
+ *   is quoted from its label, never rebuilt).
+ * - Book + odds: the top quote from `priceBooksForParlay`, which is sorted best
+ *   payout first with DraftKings first on a tie — the starred tile. Only a
+ *   book that prices EVERY leg has a combined price; with none, both are null
+ *   rather than a number no book posted.
+ */
+export function parlayTrackPrefill(
+  legs: ParlayLeg[],
+  quotes: BetslipBookQuote[],
+): ParlayTrackPrefill {
+  const description = trackDescription(legs);
+  const top = quotes[0];
+  if (top == null || top.americanOdds == null) {
+    return { description, book: null, oddsAmerican: null };
+  }
+  return { description, book: bookName(top.book), oddsAmerican: Math.round(top.americanOdds) };
+}
+
+function trackDescription(legs: ParlayLeg[]): string {
+  const labels = legs.map((l) => l.label.trim()).filter((s) => s.length > 0);
+  return labels.length === 1 ? labels[0] : `${labels.length}-leg parlay: ${labels.join(' · ')}`;
+}
+
+/**
+ * The same pre-fill for a SAVED parlay. A saved slip carries no live per-book
+ * prices (savedLegToParlayLeg), so the price is the one its card shows
+ * (`computeParlayMetrics` over the saved legs). That price is DraftKings' only
+ * when every leg was DraftKings-priced; a leg priced elsewhere (a Stats line DK
+ * never posted) leaves the book blank rather than naming the wrong one.
+ */
+export function savedParlayTrackPrefill(legs: ParlayLeg[]): ParlayTrackPrefill {
+  const description = trackDescription(legs);
+  if (legs.length === 0) return { description, book: null, oddsAmerican: null };
+  const odds = computeParlayMetrics(legs).americanOdds;
+  const allDk = legs.every((l) => l.dkPriced !== false);
+  return {
+    description,
+    book: allDk ? bookName(MODEL_BOOK) : null,
+    oddsAmerican: Number.isFinite(odds) ? Math.round(odds) : null,
+  };
 }
 
 /**

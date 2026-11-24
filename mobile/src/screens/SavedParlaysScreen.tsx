@@ -9,11 +9,16 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { EmptyState } from '@/components/EmptyState';
 import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
+import { useManualBets, type ManualBetInput } from '@/hooks/useManualBets';
+import { ManualBetModal } from '@/components/ManualBetModal';
+import { showToast } from '@/components/Toast';
 import { setParlayRestore } from '@/hooks/useParlayRestore';
 import {
   computeParlayMetrics,
   savedHandoffBookFor,
   savedLegToParlayLeg,
+  savedParlayTrackPrefill,
+  type ParlayTrackPrefill,
   type SavedParlay,
 } from '@/lib/parlay';
 import { bookName, booksName, MODEL_BOOK } from '@/lib/markets';
@@ -116,6 +121,17 @@ export function SavedParlaysScreen() {
   // the links it was saved with, so an older save legitimately has DK only.
   // Each leg's link is AT the book being opened, never DK's slip under another
   // book's label.
+  // "Track bet": log a saved slip in Your bets (Performance tab), pre-filled.
+  const manualBets = useManualBets();
+  const [trackPrefill, setTrackPrefill] = useState<ParlayTrackPrefill | null>(null);
+  const addTracked = useCallback(
+    (input: ManualBetInput) => {
+      manualBets.add(input);
+      showToast('Added to Your bets on Performance', { announce: true });
+    },
+    [manualBets],
+  );
+
   const betAtBook = (sp: SavedParlay) => {
     const { book, links } = savedHandoffBookFor(sp.legs, preferredBooks);
     setHandoff({
@@ -171,6 +187,7 @@ export function SavedParlaysScreen() {
             bookReady={bookReady}
             onBet={() => betAtBook(item)}
             onEdit={() => editInBuilder(item)}
+            onTrack={() => setTrackPrefill(savedParlayTrackPrefill(item.legs.map(savedLegToParlayLeg)))}
             onDelete={() => deleteNow(item)}
           />
         )}
@@ -190,6 +207,13 @@ export function SavedParlaysScreen() {
         </View>
       ) : null}
 
+      <ManualBetModal
+        visible={trackPrefill != null}
+        prefill={trackPrefill}
+        onClose={() => setTrackPrefill(null)}
+        onAdd={addTracked}
+      />
+
       <ParlayDkHandoff
         visible={handoff != null}
         legs={handoff?.legs ?? []}
@@ -207,6 +231,7 @@ function SavedParlayCard({
   bookReady,
   onBet,
   onEdit,
+  onTrack,
   onDelete,
 }: {
   parlay: SavedParlay;
@@ -218,6 +243,7 @@ function SavedParlayCard({
   bookReady: boolean;
   onBet: () => void;
   onEdit: () => void;
+  onTrack: () => void;
   onDelete: () => void;
 }) {
   const metrics = useMemo(
@@ -336,6 +362,17 @@ function SavedParlayCard({
           >
             <Ionicons name="create-outline" size={16} color={colors.tint} />
             <Text style={styles.editBtnText}>Edit in builder</Text>
+          </Pressable>
+          <Pressable
+            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+            accessibilityRole="button"
+            accessibilityLabel="Track bet"
+            accessibilityHint="Adds this parlay to Your bets on the Performance tab"
+            onPress={onTrack}
+            style={({ pressed }) => [styles.editBtn, pressed && styles.pressed]}
+          >
+            <Ionicons name="checkmark-circle-outline" size={16} color={colors.tint} />
+            <Text style={styles.editBtnText}>Track bet</Text>
           </Pressable>
           <Pressable
             hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}

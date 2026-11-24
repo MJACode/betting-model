@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -15,20 +15,41 @@ import type { ManualBetInput } from '@/hooks/useManualBets';
 import { FLAT_UNIT } from '@/lib/format';
 import { PrimaryButton } from '@/components/PrimaryButton';
 
-/** Add-a-bet form for the manual fallback (sync gaps / unsupported books). */
+/** Fields a caller can fill in before the form opens. The stake is never
+ *  pre-filled: it is the one number only the member knows. */
+export interface ManualBetPrefill {
+  description: string;
+  book: string | null;
+  oddsAmerican: number | null;
+}
+
+/** Add-a-bet form for the manual fallback (sync gaps / unsupported books), and
+ *  the betslip's "Track bet" (`prefill` set from the slip). */
 export function ManualBetModal({
   visible,
   onClose,
   onAdd,
+  prefill,
 }: {
   visible: boolean;
   onClose: () => void;
   onAdd: (input: ManualBetInput) => void;
+  prefill?: ManualBetPrefill | null;
 }) {
   const [desc, setDesc] = useState('');
   const [book, setBook] = useState('');
   const [stake, setStake] = useState('');
   const [odds, setOdds] = useState('');
+
+  // Each open from a slip starts from that slip. Without a prefill (the
+  // Performance tab's "Add a bet") a half-typed draft is kept, as before.
+  useEffect(() => {
+    if (!visible || prefill == null) return;
+    setDesc(prefill.description);
+    setBook(prefill.book ?? '');
+    setOdds(prefill.oddsAmerican == null ? '' : String(prefill.oddsAmerican));
+    setStake('');
+  }, [visible, prefill]);
 
   const reset = () => {
     setDesc('');
@@ -74,15 +95,20 @@ export function ManualBetModal({
           accessibilityLabel="Close add a bet"
         />
         <View style={styles.sheet}>
-          <Text style={styles.title}>Add a bet</Text>
+          <Text style={styles.title}>{prefill ? 'Track this bet' : 'Add a bet'}</Text>
           <Text style={styles.subtitle}>
-            For bets your sportsbook didn’t sync. Tracked on this device only.
+            {prefill
+              ? 'Adds it to Your bets on the Performance tab. Enter your stake, and check the odds match your book. Tracked on this device only.'
+              : 'For bets your sportsbook didn’t sync. Tracked on this device only.'}
           </Text>
 
           <Field label="Bet">
             <TextInput
               accessibilityLabel="Bet"
-              style={styles.input}
+              // A tracked slip names every leg, so it wraps instead of
+              // scrolling sideways in one line.
+              multiline
+              style={[styles.input, styles.inputMulti]}
               value={desc}
               onChangeText={setDesc}
               placeholder="e.g. Yankees ML"
@@ -184,6 +210,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     color: colors.textPrimary,
   },
+  inputMulti: { maxHeight: 120, textAlignVertical: 'top' },
   addBtn: { marginTop: spacing.sm },
   cancelBtn: { paddingVertical: spacing.md, alignItems: 'center' },
   cancelText: { color: colors.textSecondary, fontSize: font.size.body },

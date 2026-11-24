@@ -40,6 +40,8 @@ import {
   useSavedParlays,
 } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
+import { useManualBets, type ManualBetInput } from '@/hooks/useManualBets';
+import { ManualBetModal } from '@/components/ManualBetModal';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
 import { useEnteredSgpPrices, useSgpHaircuts } from '@/hooks/useSgpHaircuts';
 import type { SgpHaircuts } from '@/lib/sgpPricing';
@@ -52,9 +54,12 @@ import {
   makeCustomLeg,
   CUSTOM_MODEL_ID,
   parlayRecommendedUnits,
+  parlayTrackPrefill,
+  priceBooksForParlay,
   slipKeyForPick,
   type LineShop,
   type ParlayLeg,
+  type ParlayTrackPrefill,
 } from '@/lib/parlay';
 import { formatStake, formatUnits } from '@/lib/thresholds';
 import { unitsSpeech } from '@/lib/a11y';
@@ -65,7 +70,7 @@ import {
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
+import { bookLabel, bookName, BETTABLE_BOOKS, MODEL_BOOK } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -930,6 +935,28 @@ function SlipBody({
     [pricedLegs],
   );
   const pregameCount = legs.length - pricedLegs.length;
+  // "Track bet": log this slip in Your bets (Performance tab), pre-filled with
+  // the legs and the starred tile's book and price — the same quotes the
+  // "Place this bet at" row shows (Matt, 2026-11-24).
+  const manualBets = useManualBets();
+  // Snapshotted at the tap, not memoised: a price refresh while the form is
+  // open would otherwise re-fill it and wipe the stake being typed.
+  const [trackPrefill, setTrackPrefill] = useState<ParlayTrackPrefill | null>(null);
+  const openTrack = useCallback(() => {
+    setTrackPrefill(
+      parlayTrackPrefill(
+        pricedLegs,
+        priceBooksForParlay(pricedLegs, 1, BETTABLE_BOOKS, sgpFits, enteredPrices),
+      ),
+    );
+  }, [pricedLegs, sgpFits, enteredPrices]);
+  const addTracked = useCallback(
+    (input: ManualBetInput) => {
+      manualBets.add(input);
+      showToast('Added to Your bets on Performance', { announce: true });
+    },
+    [manualBets],
+  );
   // Past ~1.3 the two-up grid's fixed 45% cells are narrower than their own
   // labels, so it stacks instead of truncating them (UX review).
   const { fontScale } = useWindowDimensions();
@@ -1229,7 +1256,24 @@ function SlipBody({
           <Ionicons name="create-outline" size={18} color={colors.tint} />
           <Text style={styles.gridBtnText}>Custom leg</Text>
         </Pressable>
+        <Pressable
+          accessibilityLabel="Track bet"
+          accessibilityHint="Adds this parlay to Your bets on the Performance tab"
+          onPress={openTrack}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}
+        >
+          <Ionicons name="checkmark-circle-outline" size={18} color={colors.tint} />
+          <Text style={styles.gridBtnText}>Track bet</Text>
+        </Pressable>
       </View>
+
+      <ManualBetModal
+        visible={trackPrefill != null}
+        prefill={trackPrefill}
+        onClose={() => setTrackPrefill(null)}
+        onAdd={addTracked}
+      />
 
       {/* CLEAR IS NOT A PEER OF THE THREE ABOVE (UX review). In the grid it was
           the same size and shape as "Custom leg" and sat bottom-right, under a
