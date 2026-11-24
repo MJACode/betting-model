@@ -122,8 +122,8 @@ DECISION_LEAD_MIN = (5.0, 10.5)
 MAX_DECISION_DELAY_MIN = 5.0
 # An early check is a call that landed at most this many minutes after 15:00
 # or 18:00 UTC (module docstring): the capture retries a failed early call
-# every minute, so ten minutes of retries.
-EARLY_WINDOW_MIN = 10.0
+# every minute for exactly as long (feed.EARLY_RETRY_MIN).
+EARLY_WINDOW_MIN = feed.EARLY_RETRY_MIN
 
 
 def enabled() -> bool:

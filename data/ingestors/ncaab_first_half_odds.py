@@ -128,6 +128,10 @@ DECISION_MARKS = (DECISION_MARK, TOTAL_DECISION_MARK)
 # check (scripts/ncaab_first_half_spread_card.EARLY_WINDOW_MIN bounds how late
 # a retry may land and still be checked).
 EARLY_MARKS = ("15z", "18z")
+# ...but only for this many minutes: the card's early check uses a call landed
+# within them, and the next fetch time is hours away, so a game the feed keeps
+# refusing would otherwise be called, and fail the job, every minute until it.
+EARLY_RETRY_MIN = 10.0
 # The closing fetch: the line every first-half bet is graded against for CLV.
 # Not a decision time. Retried every minute like one, so a failed call still
 # leaves a close.
@@ -355,6 +359,9 @@ def due_mark(game_date: str, tip: datetime, now: datetime, last_ok: datetime | N
     if last_ok is not None and last_ok >= t:
         return None
     if mark not in RETRIED_MARKS and last_try is not None and last_try >= t:
+        return None
+    if (mark in EARLY_MARKS and last_try is not None and last_try >= t
+            and now > t + timedelta(minutes=EARLY_RETRY_MIN)):
         return None
     return mark, t
 

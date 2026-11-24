@@ -1002,7 +1002,9 @@ line from its `fh_lib.py`, `fh_prep.py`, `fh_score.py` and `fh_grade.py`):
 game: the capture's calls at 15:00 and 18:00 UTC on the game's date, then the
 fetch ten minutes before tip. An early check is the newest call that landed
 within 10 minutes of 15:00 or 18:00 UTC (a failed call is retried every
-minute), priced within 5 minutes of landing exactly as the ten-minute fetch is.
+minute for those 10 minutes, then left: 65 of the first 930 15:00 UTC calls
+failed, 57 of them refused for too many requests), priced within 5 minutes of
+landing exactly as the ten-minute fetch is.
 When it bets, the bet and the game's decision row are written and the game is
 never checked again. When it does not, only a row in
 `ncaab_first_half_spread_checks` is written (every book's priced quote), and
@@ -1010,10 +1012,16 @@ the game waits for the next check. A missed early check is not a failure. The
 evidence: `docs/decision_timing.md`, "The NCAAB first-half models" (2023-24 to
 2025-26: +89.60 units on 1,128 bets against +58.03 on 760 for the ten-minute
 check alone; cleared the timing test on 2025-26 alone). Checked on this
-season's live feed first (2026-11-03..11-23): every early bet's book had
-updated its quote at most 4.5 minutes before the call (median 0.6), and 15:00
+season's live feed first (2026-11-03..11-23): the feed's copy of every early
+bet's quote was at most 4.5 minutes old at the call (median 0.6), and 15:00
 UTC plus ten minutes made 68 bets, +14.46 units, against 44 bets, +10.47, for
 ten minutes alone, graded so far.
+**Agreement sizing now meets a new order.** The two-unit stake goes to the
+later of two same-side NCAAB bets (`models/ncaab_stake.py`). Until now the
+first-half spread always bet after the full-game spread's 15:00 UTC decision
+(6 such pairs this season). An early first-half bet can now come first, and
+then the full-game spread bet carries the two units, a pairing the stake's
+backtest never held. Flagged, not changed.
 
 **The ten-minute decision.** The capture fetches each game's first-half lines
 eleven times (below). If the ten-minute fetch fails, the job retries every

@@ -108,6 +108,25 @@ def test_a_failed_early_check_call_is_retried_every_minute():
     assert feed.due_mark(DATE, TIP, t18 + timedelta(minutes=2), t18 + timedelta(seconds=40)) is None
 
 
+def test_a_failed_early_call_is_retried_only_inside_its_ten_minutes():
+    # The early check uses a call landed within ten minutes of 15:00 or 18:00
+    # UTC; after that a retry buys nothing the card can use, and a game the
+    # feed keeps refusing would fail the job every minute until the next time.
+    t15 = datetime(2026, 11, 10, 15, 0, tzinfo=UTC)
+    failed = t15 + timedelta(seconds=5)
+    assert feed.due_mark(DATE, TIP, t15 + timedelta(minutes=9), None, failed) == ("15z", t15)
+    assert feed.due_mark(DATE, TIP, t15 + timedelta(minutes=10, seconds=1), None,
+                         t15 + timedelta(minutes=9, seconds=5)) is None
+    assert feed.due_mark(DATE, TIP, t15 + timedelta(hours=2), None, failed) is None
+    t18 = datetime(2026, 11, 10, 18, 0, tzinfo=UTC)
+    assert feed.due_mark(DATE, TIP, t18 + timedelta(minutes=30), None, t18 + timedelta(seconds=5)) is None
+    # a game never tried at all is still called once, late, for the history
+    assert feed.due_mark(DATE, TIP, t15 + timedelta(hours=2), None, None) == ("15z", t15)
+    # and the spread card's window is the same ten minutes
+    from scripts.ncaab_first_half_spread_card import EARLY_WINDOW_MIN
+    assert EARLY_WINDOW_MIN == feed.EARLY_RETRY_MIN == 10.0
+
+
 def test_an_early_check_shared_with_a_decision_time_keeps_the_decision_s_name():
     # A 2pm ET tip: 18:00 UTC is its tip minus 60, named for the total's
     # decision; the spread's early check finds the call by when it landed.
