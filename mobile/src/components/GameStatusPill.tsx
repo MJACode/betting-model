@@ -86,10 +86,10 @@ function wrap(node: React.ReactElement, speech: string, onPress?: () => void): R
   return (
     <Pressable
       onPress={onPress}
-      // The pill is ~17pt tall; 14pt above and below brings the target to
-      // ~45pt. Sideways only 4pt: the signals row spaces chips 4pt apart, and
-      // a wider slop would steal taps from the Sharp Score pill (UX review).
-      hitSlop={{ top: 14, bottom: 14, left: 4, right: 4 }}
+      // 16pt above and below: 12 + 32 = 44pt on the a11y scanner's measure
+      // of this row. Sideways only 4pt: the signals row spaces chips 4pt
+      // apart, and a wider slop would steal taps from the Sharp Score pill.
+      hitSlop={{ top: 16, bottom: 16, left: 4, right: 4 }}
       accessibilityRole="button"
       accessibilityLabel={speech}
       accessibilityHint="Opens this game on the scoreboard"
