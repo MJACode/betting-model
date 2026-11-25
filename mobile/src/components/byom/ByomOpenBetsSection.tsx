@@ -20,7 +20,7 @@ const TOOLTIP = {
  *
  * With no bets and no error it renders nothing, unless `emptyText` is given
  * (the model's own page, where "none yet" must read differently from "not
- * working"). A failed first load shows a banner with Retry. `cap` shows that
+ * working"). A failed load shows the app's error banner with Retry. `cap` shows that
  * many cards and a "Show all" row (the Picks board, so official signals stay
  * near the top).
  */
@@ -48,7 +48,7 @@ export function ByomOpenBetsSection({
   emptyText?: string;
   error?: string | null;
   retrying?: boolean;
-  onRetry?: () => void;
+  onRetry: () => void;
   onOpen?: (bet: ByomOpenBet) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -65,7 +65,7 @@ export function ByomOpenBetsSection({
         tooltip={TOOLTIP}
       />
       <View style={inset ? styles.inset : undefined}>
-        {empty && error && onRetry ? (
+        {error ? (
           <ErrorBanner
             what="your open bets"
             error={error}
@@ -94,7 +94,6 @@ export function ByomOpenBetsSection({
             <Text style={styles.moreText}>{`Show all ${bets.length}`}</Text>
           </Pressable>
         ) : null}
-        {(!empty || !onRetry) && error ? <Text style={styles.error}>{`Couldn’t refresh: ${error}`}</Text> : null}
       </View>
     </View>
   );
@@ -118,9 +117,5 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.tint,
-  },
-  error: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
   },
 });
