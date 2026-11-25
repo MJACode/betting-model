@@ -55,7 +55,9 @@ def football_board():
 
 
 def test_every_sport_with_an_in_play_model_is_read():
-    assert B.LEAGUES == {"NCAAB": "92483", "NCAABW": "36647", "NBA": "42648", "NCAAF": "87637", "NFL": "88808"}
+    assert B.LEAGUES == {"NCAAB": "92483", "NCAABW": "36647", "NBA": "42648", "NCAAF": "87637", "NFL": "88808",
+                         "NHL": None, "EUROLEAGUE": None}
+    assert {sp for sp, lid in B.LEAGUES.items() if lid is None} == set(B.DISCOVER)
     assert set(B.RESOLVERS) == set(B.LEAGUES)
 
 
