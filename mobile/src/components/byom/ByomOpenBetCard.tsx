@@ -3,35 +3,40 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { formatAmerican, formatDayTimeET } from '@/lib/format';
+import { foundAtText } from '@/lib/myBooks';
 import { matchupLabel, type ByomOpenBet } from '@/lib/byomAlerts';
-import { colors, font, opacity, radii, spacing } from '@/lib/theme';
+import { cardDense, colors, font, opacity, spacing } from '@/lib/theme';
 
 /**
  * One open bet from the member's own model (Matt, 2026-11-25).
  *
- * The label is the stored bet word for word, beside the price it first fit
- * at. "Fit" is when that line first matched the rules; a later move does
- * not change the card (the bet is the first fit, CLAUDE.md §1c). Not a
- * pick: no track, betslip or Record entry.
+ * The label is the stored bet word for word, with the DraftKings price it
+ * first fit at. "Fit" is when that line first matched the rules; a later
+ * move does not change the card (the bet is the first fit, CLAUDE.md §1c).
+ * Not a pick: no track, betslip or Record entry.
  */
 export function ByomOpenBetCard({
   bet,
   showModel = true,
+  showFit = true,
   onPress,
 }: {
   bet: ByomOpenBet;
   /** False on the model's own page, where the name is the screen title. */
   showModel?: boolean;
+  /** False on the Picks board, to keep each card short (UX review). */
+  showFit?: boolean;
   onPress?: () => void;
 }) {
   const matchup = matchupLabel(bet);
   const kick = formatDayTimeET(bet.commence_time);
-  const fit = bet.locked_at ? formatDayTimeET(bet.locked_at) : '';
-  const price = formatAmerican(bet.price);
+  const fit = showFit && bet.locked_at ? formatDayTimeET(bet.locked_at) : '';
+  // The builder grades at DraftKings only (docs/byom_nfl.md).
+  const price = foundAtText('DK', formatAmerican(bet.price));
   const meta = [matchup, bet.started ? 'Started' : kick].filter(Boolean).join(' · ');
   const spoken = [
     showModel ? `${bet.model_name}.` : '',
-    `${bet.label}, ${price}.`,
+    `${bet.label}. ${foundAtText('DraftKings', formatAmerican(bet.price))}.`,
     meta ? `${meta}.` : '',
     fit ? `Fit your rules ${fit}.` : '',
   ].filter(Boolean).join(' ');
@@ -44,10 +49,8 @@ export function ByomOpenBetCard({
           <Text style={styles.model} numberOfLines={1}>{bet.model_name}</Text>
         </View>
       ) : null}
-      <View style={styles.betRow}>
-        <Text style={styles.label}>{bet.label}</Text>
-        <Text style={styles.price}>{price}</Text>
-      </View>
+      <Text style={styles.label}>{bet.label}</Text>
+      <Text style={styles.price}>{price}</Text>
       {meta ? <Text style={styles.meta}>{meta}</Text> : null}
       {fit ? <Text style={styles.fit}>{`Fit your rules ${fit}`}</Text> : null}
     </>
@@ -74,13 +77,7 @@ export function ByomOpenBetCard({
 }
 
 const styles = StyleSheet.create({
-  card: {
-    minHeight: 44,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-  },
+  card: { ...cardDense, minHeight: 44, marginBottom: spacing.sm },
   pressed: { opacity: opacity.pressed },
   modelRow: {
     flexDirection: 'row',
@@ -94,31 +91,23 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: font.weight.semibold,
   },
-  betRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
   label: {
-    flexShrink: 1,
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
   price: {
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
+    marginTop: spacing.xs,
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
     fontVariant: ['tabular-nums'],
   },
   meta: {
-    marginTop: spacing.xs,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
   fit: {
-    marginTop: 2,
+    marginTop: spacing.xs,
     fontSize: font.size.caption,
     color: colors.textTertiary,
   },

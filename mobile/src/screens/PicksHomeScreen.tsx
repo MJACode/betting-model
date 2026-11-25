@@ -425,7 +425,7 @@ export function PicksHomeScreen() {
   const { user } = useAuth();
   // Bets from the member's own models (Matt, 2026-11-25), on Signals for
   // the sport on screen. Reloaded on focus, so a tapped alert's bet is there.
-  const myModelBets = useByomOpenBets(view === 'signals' && !signalsLocked);
+  const myModelBets = useByomOpenBets(view === 'signals' && !signalsLocked, false);
   const reloadMyModelBets = myModelBets.reload;
   useFocusEffect(useCallback(() => {
     void reloadMyModelBets();
@@ -1212,6 +1212,10 @@ export function PicksHomeScreen() {
               title="My models"
               bets={myModelBetsHere}
               error={myModelBets.error}
+              retrying={myModelBets.loading}
+              onRetry={() => void myModelBets.reload()}
+              cap={3}
+              showFit={false}
               onOpen={(bet) => navigation.navigate('ByomDetail', { modelId: bet.model_id })}
             />
           ) : null}

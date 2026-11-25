@@ -10,7 +10,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { fetchByomOpenBets, type ByomOpenBet } from '@/lib/byomAlerts';
 import { isAbortError, splitLoadError } from '@/lib/errors';
 
-export function useByomOpenBets(enabled = true) {
+/** `loadOnMount` false when the screen's focus effect does the first load. */
+export function useByomOpenBets(enabled = true, loadOnMount = true) {
   const { user } = useAuth();
   const [bets, setBets] = useState<ByomOpenBet[]>([]);
   const [available, setAvailable] = useState(false);
@@ -49,8 +50,8 @@ export function useByomOpenBets(enabled = true) {
   }, [active]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (loadOnMount) void load();
+  }, [load, loadOnMount]);
 
   return { bets, available, loading, error, reload: load };
 }

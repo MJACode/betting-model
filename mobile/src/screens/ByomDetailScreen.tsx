@@ -50,7 +50,7 @@ export function ByomDetailScreen() {
   const preview = useByomRecord(scope, graded && model ? model.filters : null, sport);
   // Open bets and alerts: NFL only for now (Matt, 2026-11-25).
   const alertsSport = model?.sport === 'NFL';
-  const openBets = useByomOpenBets(alertsSport);
+  const openBets = useByomOpenBets(alertsSport, false);
   const thisModelBets = openBets.bets.filter((b) => b.model_id === modelId);
 
   const reloadOpenBets = openBets.reload;
@@ -151,6 +151,11 @@ export function ByomDetailScreen() {
                 showModel={false}
                 inset={false}
                 error={openBets.error}
+                retrying={openBets.loading}
+                onRetry={() => void openBets.reload()}
+                emptyText={openBets.available
+                  ? 'No open bets. You’ll get an alert when this model finds one.'
+                  : undefined}
               />
               <ByomAlertToggle modelId={model.model_id} modelName={model.name} />
             </>
