@@ -4281,7 +4281,7 @@ export async function fetchDkInplayForGames(gameIds: readonly string[]): Promise
 export async function fetchInplayAtBooksForGame(
   gameId: string,
   books: readonly string[],
-): Promise<{ rows: OddsByBookRow[]; error: string | null }> {
+): Promise<{ rows: OddsByBookRow[]; error: string | null; failedBooks: string[] }> {
   const asks = SCOREBOARD_MARKETS.flatMap((market) => books.map((book) => ({ market, book })));
   const results = await Promise.all(asks.map(async ({ market, book }) => {
     try {
@@ -4304,13 +4304,15 @@ export async function fetchInplayAtBooksForGame(
       return {
         row: quote ? { ...quote, game_id: g.game_id, game_date: g.game_date, market, bookmaker: book } : null,
         error: null as string | null,
+        book,
       };
     } catch (e) {
-      return { row: null, error: isAbortError(e) ? null : errorText(e) };
+      return { row: null, error: isAbortError(e) ? null : errorText(e), book };
     }
   }));
   const rows = results.flatMap((r) => (r.row ? [r.row as OddsByBookRow] : []));
-  return { rows, error: results.find((r) => r.error)?.error ?? null };
+  const failedBooks = [...new Set(results.filter((r) => r.error).map((r) => r.book))];
+  return { rows, error: results.find((r) => r.error)?.error ?? null, failedBooks };
 }
 
 /** The next game for one sport after an ET date. One row. */

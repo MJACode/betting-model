@@ -128,6 +128,7 @@ export function ScoreboardGameScreen() {
   // books' live lines (UX review, 2026-11-25).
   const [booksDue, setBooksDue] = useState(false);
   const [booksLoaded, setBooksLoaded] = useState(false);
+  const [failedBooks, setFailedBooks] = useState<string[]>([]);
   const inplayHold = useRef<ScoreboardQuote[]>([]);
   const loadGen = useRef(0);
 
@@ -175,15 +176,18 @@ export function ScoreboardGameScreen() {
       if (gen !== loadGen.current) return;
       inplayHold.current = inplay;
       setCard(presentScoreboard({ game, pregame: dk, inplay, feed, abbrevs }));
-      setBooksDue(maybeLive);
+      // A feed that says Final is not live, though `games` has no score yet.
+      const booksNow = maybeLive && !feed?.ended;
+      setBooksDue(booksNow);
       // After the card, on its own: the score never waits on up to 21 line
       // reads (UX review, 2026-11-25). Not before the member's book list has
       // loaded, so a default list never shows for one poll.
-      if (maybeLive && booksReady) {
+      if (booksNow && booksReady) {
         void fetchInplayAtBooksForGame(gameId, books).then((at) => {
           if (gen !== loadGen.current) return;
           setBookRows(at.rows);
           setBookError(at.error);
+          setFailedBooks(at.failedBooks);
           setBooksLoaded(true);
         });
       }
@@ -255,6 +259,7 @@ export function ScoreboardGameScreen() {
       teams={{ away: card.away.name, home: card.home.name, awayFull: card.awayFull, homeFull: card.homeFull }}
       loading={!booksLoaded}
       error={bookError}
+      failedBooks={failedBooks}
       onRetry={() => void load()}
     />
   ) : null;

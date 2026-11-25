@@ -83,16 +83,20 @@ export interface Cell {
   main: string;
   sub?: string;
   better?: boolean;
+  /** Drawn in the secondary ink: a live line with no move in a while. */
+  muted?: boolean;
 }
 
-function useStacked(): boolean {
+export function useStacked(): boolean {
   return useWindowDimensions().fontScale > STACK_FONT_SCALE;
 }
 
 /** "BOS" over "GSW" column heads, away left and home right. Hidden from
- *  VoiceOver: every row below speaks its own team names. */
-export function TeamHeads({ away, home }: { away: string; home: string }) {
+ *  VoiceOver: every row below speaks its own team names. `hideStacked`: the
+ *  rows below name their own sides at large text (TriRow `sides`). */
+export function TeamHeads({ away, home, hideStacked }: { away: string; home: string; hideStacked?: boolean }) {
   const stacked = useStacked();
+  if (stacked && hideStacked) return null;
   return (
     <View style={styles.row} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
       <Text style={[styles.cellSide, styles.head]}>{away}</Text>
@@ -105,9 +109,9 @@ export function TeamHeads({ away, home }: { away: string; home: string }) {
 function CellView({ cell, right }: { cell: Cell; right?: boolean }) {
   return (
     <View style={[styles.cellSide, right ? styles.alignEnd : null]}>
-      <Text style={[styles.value, right ? styles.right : null]}>{cell.main}</Text>
+      <Text style={[styles.value, right ? styles.right : null, cell.muted ? styles.muted : null]}>{cell.main}</Text>
       {cell.sub ? (
-        <Text style={[styles.sub, right ? styles.right : null, cell.better ? styles.better : null]}>
+        <Text style={[styles.sub, right ? styles.right : null, cell.better ? styles.better : null, cell.muted ? styles.muted : null]}>
           {cell.better ? '● ' : ''}
           {cell.sub}
         </Text>
@@ -116,9 +120,39 @@ function CellView({ cell, right }: { cell: Cell; right?: boolean }) {
   );
 }
 
-/** away | label | home, or label over two columns at large text. */
-export function TriRow({ label, away, home, spoken }: { label: string; away: Cell; home: Cell; spoken: string }) {
+/** away | label | home, or label over two columns at large text. With
+ *  `sides`, at large text each side gets its own full-width line under its
+ *  name instead: half the width split "o220.5" mid-number at AX4 (UX review,
+ *  2026-11-25). */
+export function TriRow({
+  label,
+  away,
+  home,
+  spoken,
+  sides,
+}: {
+  label: string;
+  away: Cell;
+  home: Cell;
+  spoken: string;
+  sides?: { away: string; home: string };
+}) {
   const stacked = useStacked();
+  if (stacked && sides) {
+    return (
+      <View style={styles.stackRow} accessible accessibilityLabel={spoken}>
+        <Text style={styles.label}>{label}</Text>
+        <View style={styles.stackSide}>
+          <Text style={styles.head}>{sides.away}</Text>
+          <CellView cell={away} />
+        </View>
+        <View style={styles.stackSide}>
+          <Text style={styles.head}>{sides.home}</Text>
+          <CellView cell={home} />
+        </View>
+      </View>
+    );
+  }
   if (stacked) {
     return (
       <View style={styles.stackRow} accessible accessibilityLabel={spoken}>
@@ -201,20 +235,22 @@ export function BestPriceSection({
         <Text style={styles.note}>None of your sportsbooks has posted this game yet.</Text>
       ) : (
         <>
-          <TeamHeads away={away} home={home} />
+          <TeamHeads away={away} home={home} hideStacked />
           <TriRow
             label="Moneyline"
             away={quoteCell(b?.awayMl ?? null)}
             home={quoteCell(b?.homeMl ?? null)}
             spoken={`Moneyline: ${quoteSpoken(away, b?.awayMl ?? null)}; ${quoteSpoken(home, b?.homeMl ?? null)}`}
+            sides={{ away, home }}
           />
           <TriRow
             label="Spread"
             away={quoteCell(b?.awaySpread ?? null)}
             home={quoteCell(b?.homeSpread ?? null)}
             spoken={`Spread: ${quoteSpoken(away, b?.awaySpread ?? null)}; ${quoteSpoken(home, b?.homeSpread ?? null)}`}
+            sides={{ away, home }}
           />
-          <TriRow label="Total" away={over} home={under} spoken={totalSpoken} />
+          <TriRow label="Total" away={over} home={under} spoken={totalSpoken} sides={{ away: 'Over', home: 'Under' }} />
         </>
       )}
     </Section>
@@ -452,6 +488,8 @@ const styles = StyleSheet.create({
     borderTopColor: colors.separator,
   },
   stackCells: { flexDirection: 'row', gap: spacing.md },
+  stackSide: { gap: spacing.xs },
+  muted: { color: colors.textSecondary },
   cellSide: { flex: 1 },
   cellMid: { flex: 1.1, textAlign: 'center', paddingHorizontal: spacing.xs },
   alignEnd: { alignItems: 'flex-end' },

@@ -25,6 +25,7 @@ export function LiveAtBooks({
   teams,
   loading,
   error,
+  failedBooks,
   onRetry,
 }: {
   sport: string;
@@ -35,6 +36,8 @@ export function LiveAtBooks({
   teams: { away: string; home: string; awayFull: string; homeFull: string };
   loading: boolean;
   error: string | null;
+  /** The books whose read failed, for the caption. */
+  failedBooks: readonly string[];
   onRetry: () => void;
 }) {
   const [market, setMarket] = useState<Market>(markets.includes('spreads') ? 'spreads' : markets[0] ?? 'h2h');
@@ -44,6 +47,7 @@ export function LiveAtBooks({
   }, [rows, books, markets]);
   const none = markets.every((m) => (byMarket.get(m) ?? []).length === 0);
   const title = (m: Market) => (m === 'h2h' ? 'Moneyline' : scoreboardMarketLabel(m, sport));
+  const sides = market === 'totals' ? { away: 'Over', home: 'Under' } : { away: teams.away, home: teams.home };
   const lines = byMarket.get(market) ?? [];
   return (
     <Section
@@ -57,11 +61,17 @@ export function LiveAtBooks({
         <Text style={styles.note}>None of your sportsbooks has a live line stored for this game.</Text>
       ) : (
         <>
-          <SegmentTabs compact items={markets} active={market} onChange={setMarket} labelFor={title} />
-          <TeamHeads
-            away={market === 'totals' ? 'Over' : teams.away}
-            home={market === 'totals' ? 'Under' : teams.home}
+          {/* Full width and `fit`, with the board's short labels: three
+              compact tabs ran off the card at AX3 (UX review, 2026-11-25). */}
+          <SegmentTabs
+            fit
+            items={markets}
+            active={market}
+            onChange={setMarket}
+            labelFor={(m) => scoreboardMarketLabel(m, sport)}
+            accessibilityLabelFor={title}
           />
+          {lines.length > 0 ? <TeamHeads away={sides.away} home={sides.home} hideStacked /> : null}
           {lines.length === 0 ? (
             <Text style={styles.note}>None of your sportsbooks has a live {title(market).toLowerCase()} stored.</Text>
           ) : (
@@ -69,8 +79,9 @@ export function LiveAtBooks({
               <TriRow
                 key={l.book}
                 label={`${bookName(l.book)}\n${l.age}`}
-                away={l.away}
-                home={l.home}
+                away={{ ...l.away, muted: l.quiet }}
+                home={{ ...l.home, muted: l.quiet }}
+                sides={sides}
                 spoken={
                   market === 'totals'
                     ? `${title(market)}, ${bookName(l.book)}: ${l.awaySpoken}; ${l.homeSpoken}; ${l.ageSpoken}`
@@ -80,11 +91,22 @@ export function LiveAtBooks({
               />
             ))
           )}
-          {error ? <Text style={styles.note}>Couldn’t load some of your books. This page tries again every 30 seconds.</Text> : null}
+          {error ? (
+            <Text style={styles.note}>
+              {`Couldn’t load ${failedBooks.length > 0 ? prose(failedBooks.map(bookName)) : 'some of your books'}. ` +
+                'This page tries again every 30 seconds.'}
+            </Text>
+          ) : null}
         </>
       )}
     </Section>
   );
+}
+
+/** "FanDuel", "FanDuel and BetMGM", "FanDuel, BetMGM and Caesars". */
+function prose(names: readonly string[]): string {
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
 const styles = StyleSheet.create({
