@@ -1136,6 +1136,45 @@ def _validate_nhl_goalie_archive(args: dict) -> dict:
     return out
 
 
+# The league's official NBA injury report archive
+# (data/ingestors/nba_injury_report.py): every PDF, stored with the time it was
+# issued. Free (a CDN), idempotent: nba_injury_report_pulls is the ledger, so a
+# URL already requested is never requested again. The dev sandbox cannot reach
+# ak-static.cms.nba.com (proxy 403, 2026-11-25), the worker can. Matt,
+# 2026-11-25: "yes back fill injury report" -- the archive had no writer after
+# the 2026-10-15 backfill.
+_NBA_INJURY_REPORT_ARGS = frozenset({"first_season", "last_season", "on_or_after"})
+
+
+def _job_nba_injury_report(**kw):
+    """Backfill the official NBA injury reports for the seasons' game dates."""
+    argv = ["--backfill", "--oldest-first", "--seasons",
+            str(kw["first_season"]), str(kw["last_season"])]
+    if kw.get("on_or_after"):
+        argv += ["--on-or-after", str(kw["on_or_after"])]
+    return _run_script_main("data.ingestors.nba_injury_report", argv)[-4000:]
+
+
+def _validate_nba_injury_report(args: dict) -> dict:
+    extra = sorted(set(args) - _NBA_INJURY_REPORT_ARGS)
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes first_season, "
+                         "last_season and on_or_after")
+    out = {}
+    for k in ("first_season", "last_season"):
+        v = args.get(k)
+        if isinstance(v, bool) or not isinstance(v, int) or not 2019 <= v <= 2100:
+            raise ValueError(f"{k} must be an NBA season (ending year, 2019 on), got {v!r}")
+        out[k] = v
+    if out["first_season"] > out["last_season"]:
+        raise ValueError(f"first_season after last_season: {out}")
+    out["on_or_after"] = None
+    if args.get("on_or_after") is not None:
+        out["on_or_after"] = datetime.strptime(
+            str(args["on_or_after"]), "%Y-%m-%d").date().isoformat()
+    return out
+
+
 # ── NHL research scripts, run where the database is ─────────────────────────
 #
 # 2026-10-08. The NHL backtests and labs read production through
@@ -3032,6 +3071,8 @@ JOBS = {
                                     _validate_nhl_derivative_odds_history),
     # DailyFaceoff's goalie archive, free. See _job_nhl_goalie_archive.
     "nhl_goalie_archive": (_job_nhl_goalie_archive, _validate_nhl_goalie_archive),
+    # The official NBA injury report PDFs, free. See _job_nba_injury_report.
+    "nba_injury_report": (_job_nba_injury_report, _validate_nba_injury_report),
     # Measure-only: one allowlisted NHL backtest or lab, its printout on the
     # row. Writes nothing else. See _job_nhl_research.
     "nhl_research": (_job_nhl_research, _validate_nhl_research),
