@@ -103,6 +103,7 @@ import { useTodayPicks, TODAY_POLL_MS, TODAY_RESUME_MIN_AGE_MS } from '@/hooks/u
 import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
+import { useCardScoreFeeds } from '@/hooks/useCardScoreFeeds';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import {
   passesTrackedCut,
@@ -492,6 +493,10 @@ export function PicksHomeScreen() {
     () => (finishedItems.length > 0 ? [...activeItems, ...finishedItems] : activeItems),
     [activeItems, finishedItems],
   );
+
+  // Score + clock for every started non-MLB game on the board, from the feeds
+  // the Scoreboard tab reads (Matt, 2026-11-24). MLB comes from liveStates.
+  const { byGame: scoreFeeds } = useCardScoreFeeds(boardItems.map((d) => d.game));
 
   // Restrict the filter's Market options to what is on screen — on EVERY view,
   // not just the signal ones. Today passed `undefined` here until 2026-09-09,
@@ -1245,6 +1250,8 @@ export function PicksHomeScreen() {
                 void slip.toggle(slipKeyForPick(item.pick), betslipPlayerFromPick(item.pick));
               }}
               liveState={liveStates.get(item.pick.game_id) ?? null}
+              scoreFeed={scoreFeeds.get(item.pick.game_id) ?? null}
+              onOpenGame={() => navigation.navigate('ScoreboardGame', { gameId: item.pick.game_id })}
               showSignalBadge={false}
               paused={isPausedForDisplay(item.pick)}
               layout="signals"
