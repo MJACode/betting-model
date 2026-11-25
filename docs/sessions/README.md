@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, NBA official injury-report archive: backfill as a worker job (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, Pick cards: every sport's live score in the card, and the score opens the game (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, NFL opener spread: no bet on a gap no real number has shown (mike) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, NCAAB first-half spread: checks at 15:00 and 18:00 UTC as well as ten minutes before tip (mike) |
