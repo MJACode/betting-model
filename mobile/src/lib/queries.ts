@@ -4268,6 +4268,51 @@ export async function fetchDkInplayForGames(gameIds: readonly string[]): Promise
   })));
 }
 
+/**
+ * The newest in-play row at each of `books` for one live game's three game
+ * markets: the game sheet's "Live at your books" (mike, 2026-11-25: "why not
+ * FanDuel, MGM etc"). One request per market and book, each a LIMIT 1 on
+ * idx_odds_book_snap through the odds_game_id_fkey embed, the shape of
+ * fetchDkInplayForGames: at most 3 x 7 requests of one row each. Not one
+ * request per market over every book: DraftKings' own board writes a row per
+ * price change, so its rows would fill any window and push the other books
+ * out of it. A failed request leaves that book out and is reported once.
+ */
+export async function fetchInplayAtBooksForGame(
+  gameId: string,
+  books: readonly string[],
+): Promise<{ rows: OddsByBookRow[]; error: string | null }> {
+  const asks = SCOREBOARD_MARKETS.flatMap((market) => books.map((book) => ({ market, book })));
+  const results = await Promise.all(asks.map(async ({ market, book }) => {
+    try {
+      const { data, error } = await supabase
+        .from('games')
+        .select(`game_id, game_date, odds!odds_game_id_fkey(${LIVE_INPLAY_QUOTE})`)
+        .eq('game_id', gameId)
+        .eq('odds.market', market)
+        .eq('odds.bookmaker', book)
+        .eq('odds.snapshot_type', 'in_play')
+        .order('snapshot_at', { foreignTable: 'odds', ascending: false })
+        .limit(1, { foreignTable: 'odds' });
+      if (error) throw error;
+      const g = ((data ?? []) as unknown as {
+        game_id: string;
+        game_date: string;
+        odds: Omit<OddsByBookRow, 'game_id' | 'game_date' | 'market' | 'bookmaker'>[] | null;
+      }[])[0];
+      const quote = g?.odds?.[0];
+      return {
+        row: quote ? { ...quote, game_id: g.game_id, game_date: g.game_date, market, bookmaker: book } : null,
+        error: null as string | null,
+      };
+    } catch (e) {
+      return { row: null, error: isAbortError(e) ? null : errorText(e) };
+    }
+  }));
+  const rows = results.flatMap((r) => (r.row ? [r.row as OddsByBookRow] : []));
+  return { rows, error: results.find((r) => r.error)?.error ?? null };
+}
+
 /** The next game for one sport after an ET date. One row. */
 export async function fetchNextScoreboardGame(sport: string, afterDate: string): Promise<GameRow | null> {
   const { data, error } = await supabase

@@ -87,10 +87,11 @@ class Sess:
 
 class WriteConn:
     def __init__(self):
-        self.rows, self.beats = [], []
+        self.rows, self.beats, self.odds = [], [], []
 
     def executemany(self, sql, rows):
-        self.rows.extend(dict(r) for r in rows)
+        # the board's lines also go to `odds` (dk_live_board.ODDS_LOG_SPORTS)
+        (self.odds if "INSERT INTO odds" in sql else self.rows).extend(dict(r) for r in rows)
 
     def execute(self, sql, params=None):
         if "dk_live_feed" in sql:
@@ -98,6 +99,9 @@ class WriteConn:
         return self
 
     def commit(self):
+        pass
+
+    def rollback(self):
         pass
 
     def close(self):
