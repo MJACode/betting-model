@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, AI assistant (MCP): every stored game market, EuroLeague and NBL, and the missing props (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, Signals card: live score gets its own line (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, NBA official injury-report archive: backfill as a worker job (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, Pick cards: every sport's live score in the card, and the score opens the game (Matt) |

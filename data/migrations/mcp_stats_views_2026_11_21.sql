@@ -12,7 +12,9 @@
 --   games            the slate: teams, start, score
 --   prop_prices      latest PRE-GAME player-prop prices at the seven bettable
 --                    books (config.BEST_LINE_BOOKMAKERS), main and alternate lines
---   game_prices      latest pre-game moneyline, spread and total, same books
+--   game_prices      latest pre-game game markets (every period, team totals,
+--                    alternates; period / kind / is_alternate), same books
+--                    (mcp_stats_all_markets_2026_11_25.sql)
 --   prop_markets     stat -> prop market, per sport
 --   books            book key -> display name (the seven bettable books)
 --
@@ -59,6 +61,11 @@ BEGIN
     ('NBA','assists','player_assists'), ('NBA','threes','player_threes'),
     ('NBA','steals','player_steals'), ('NBA','blocks','player_blocks'),
     ('NBA','pra','player_points_rebounds_assists'),
+    ('NBA','rebounds_assists','player_rebounds_assists'),
+    ('NBA','blocks_steals','player_blocks_steals'),
+    ('NBA','double_double','player_double_double'),
+    ('NBA','first_basket','player_first_basket'),
+    ('NBA','first_team_basket','player_first_team_basket'),
     ('WNBA','points','player_points'), ('WNBA','rebounds','player_rebounds'),
     ('WNBA','assists','player_assists'), ('WNBA','threes','player_threes'),
     ('WNBA','pra','player_points_rebounds_assists'),
@@ -68,14 +75,18 @@ BEGIN
     ('NFL','rush_yds','player_rush_yds'), ('NFL','rush_attempts','player_rush_attempts'),
     ('NFL','receptions','player_receptions'), ('NFL','reception_yds','player_reception_yds'),
     ('NFL','rush_reception_yds','player_rush_reception_yds'),
+    ('NFL','anytime_td','player_anytime_td'), ('NFL','sacks','player_sacks'),
+    ('NFL','tackles_assists','player_tackles_assists'),
     ('NCAAF','pass_yds','player_pass_yds'), ('NCAAF','pass_tds','player_pass_tds'),
     ('NCAAF','pass_completions','player_pass_completions'),
     ('NCAAF','pass_attempts','player_pass_attempts'),
     ('NCAAF','rush_yds','player_rush_yds'), ('NCAAF','receptions','player_receptions'),
     ('NCAAF','reception_yds','player_reception_yds'),
+    ('NCAAF','anytime_td','player_anytime_td'),
     ('NHL','assists','player_assists'),
     ('NHL','points','player_points'), ('NHL','shots_on_goal','player_shots_on_goal'),
     ('NHL','blocked_shots','player_blocked_shots'), ('NHL','saves','player_total_saves'),
+    ('NHL','goals','player_goal_scorer_anytime'),
     ('MLB','hits','batter_hits'), ('MLB','home_runs','batter_home_runs'),
     ('MLB','total_bases','batter_total_bases'), ('MLB','rbi','batter_rbis'),
     ('MLB','runs','batter_runs_scored'), ('MLB','walks','batter_walks'),
@@ -94,7 +105,12 @@ BEGIN
       ('points', l.points), ('rebounds', l.rebounds), ('assists', l.assists),
       ('threes', l.fg3_made), ('steals', l.steals), ('blocks', l.blocks),
       ('turnovers', l.turnovers), ('minutes', l.minutes),
-      ('pra', coalesce(l.points, 0) + coalesce(l.rebounds, 0) + coalesce(l.assists, 0))
+      ('pra', coalesce(l.points, 0) + coalesce(l.rebounds, 0) + coalesce(l.assists, 0)),
+      ('rebounds_assists', coalesce(l.rebounds, 0) + coalesce(l.assists, 0)),
+      ('blocks_steals', coalesce(l.blocks, 0) + coalesce(l.steals, 0)),
+      ('double_double', CASE WHEN (coalesce(l.points, 0) >= 10)::int + (coalesce(l.rebounds, 0) >= 10)::int
+                                  + (coalesce(l.assists, 0) >= 10)::int + (coalesce(l.steals, 0) >= 10)::int
+                                  + (coalesce(l.blocks, 0) >= 10)::int >= 2 THEN 1 ELSE 0 END)
     ) AS s(stat, value)
   UNION ALL
   SELECT 'WNBA', l.player_id, l.player_name, l.team, NULL, l.game_id, l.game_date, l.season,
@@ -137,7 +153,11 @@ BEGIN
       ('rush_attempts', l.carries::numeric), ('rush_tds', l.rushing_tds::numeric),
       ('receptions', l.receptions::numeric), ('targets', l.targets::numeric),
       ('reception_yds', l.receiving_yards), ('rec_tds', l.receiving_tds::numeric),
-      ('rush_reception_yds', coalesce(l.rushing_yards, 0) + coalesce(l.receiving_yards, 0))
+      ('rush_reception_yds', coalesce(l.rushing_yards, 0) + coalesce(l.receiving_yards, 0)),
+      ('anytime_td', (coalesce(l.rushing_tds, 0) + coalesce(l.receiving_tds, 0))::numeric),
+      ('sacks', l.def_sacks::numeric),
+      ('tackles_assists', CASE WHEN l.def_tackles_solo IS NULL AND l.def_tackle_assists IS NULL THEN NULL
+                               ELSE (coalesce(l.def_tackles_solo, 0) + coalesce(l.def_tackle_assists, 0))::numeric END)
     ) AS s(stat, value)
   UNION ALL
   SELECT 'NCAAF', l.player_id, l.player_name, l.team, l.opponent, l.game_id, l.game_date, l.season,
@@ -149,7 +169,8 @@ BEGIN
       ('interceptions', l.interceptions::numeric), ('rush_yds', l.rushing_yards::numeric),
       ('rush_attempts', l.carries::numeric), ('rush_tds', l.rushing_tds::numeric),
       ('receptions', l.receptions::numeric), ('reception_yds', l.receiving_yards::numeric),
-      ('rec_tds', l.receiving_tds::numeric)
+      ('rec_tds', l.receiving_tds::numeric),
+      ('anytime_td', (coalesce(l.rushing_tds, 0) + coalesce(l.receiving_tds, 0))::numeric)
     ) AS s(stat, value)
   UNION ALL
   SELECT 'NHL', l.player_id::text, l.player_name, l.team, l.opponent, l.game_id, l.game_date, l.season,
@@ -271,12 +292,26 @@ BEGIN
   CREATE OR REPLACE VIEW mcp_stats.game_prices AS
   SELECT g.sport, o.game_id, o.market, b.book,
          o.home_price, o.away_price, o.draw_price, o.spread_home, o.total_line,
-         o.over_price, o.under_price, o.snapshot_at
+         o.over_price, o.under_price, o.snapshot_at,
+         coalesce(
+           (SELECT right(p, 1) || upper(left(p, 1))
+              FROM (SELECT substring(o.market FROM '_([qhp][1-4])(?:_|$)') AS p) s
+             WHERE p IS NOT NULL),
+           'game') AS period,
+         CASE
+           WHEN o.market ~ '^h2h_3_?way' THEN 'moneyline_3way'
+           WHEN o.market ~ '^h2h' THEN 'moneyline'
+           WHEN o.market ~ 'spreads' THEN 'spread'
+           WHEN o.market ~ 'team_totals.*_home' THEN 'team_total_home'
+           WHEN o.market ~ 'team_totals.*_away' THEN 'team_total_away'
+           WHEN o.market ~ 'totals' THEN 'total'
+           ELSE o.market
+         END AS kind,
+         (o.market ~ '(^alternate_|_alternate$)') AS is_alternate
     FROM public.latest_odds o
     JOIN mcp_stats.books b ON b.book_key = o.bookmaker
     JOIN public.games g ON g.game_id = o.game_id
-   WHERE o.market IN ('h2h', 'spreads', 'totals')
-     AND (g.commence_time IS NULL OR o.snapshot_at <= g.commence_time);
+   WHERE (g.commence_time IS NULL OR o.snapshot_at <= g.commence_time);
 
   -- Readable by the connector's read role only.
   REVOKE ALL ON ALL TABLES IN SCHEMA mcp_stats FROM PUBLIC, anon, authenticated, mcp_meter_role;
