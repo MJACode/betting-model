@@ -941,3 +941,61 @@ export function splitsSpeech(
   const homeName = market === 'totals' ? 'Under' : card.homeFull;
   return `${label}: ${side(awayName, splits.away)}; ${side(homeName, splits.home)}.`;
 }
+
+// ── The pick card's score pill (Matt, 2026-11-24) ──────────────────────────
+// A pick card reads the SAME feed this board reads, so a live NCAAB card shows
+// "35–39 · Half" instead of a bare LIVE badge.
+
+/** The fields of a game the card's score pill reads. */
+export interface FeedGame {
+  sport: string;
+  home_team: string;
+  away_team: string;
+  home_score: number | null;
+  away_score: number | null;
+}
+
+export interface FeedView {
+  kind: 'live' | 'final';
+  score: string;
+  clock: string;
+  speech: string;
+}
+
+/**
+ * The pill from the Scoreboard's feed, or null to fall back to `live` / the
+ * clock. A score already stored on `games` wins: that is the settled result.
+ */
+export function feedView(
+  game: FeedGame | null | undefined,
+  feed: ScoreboardFeed | null | undefined,
+  now: number = Date.now(),
+): FeedView | null {
+  if (!game || !feed) return null;
+  if (game.home_score != null && game.away_score != null) return null;
+  // A read that failed keeps the last feed, so its age is checked here, at
+  // render, not only when it was fetched: a frozen score never reads LIVE.
+  // The pill then falls back to the bare badge (UX review).
+  if (!feed.ended) {
+    const maxAge = game.sport === 'NCAAF' ? NCAAF_LIVE_MAX_AGE_MS : ESPN_LIVE_MAX_AGE_MS;
+    const ts = parseStamp(feed.snapshotAt).getTime();
+    if (!Number.isFinite(ts) || now - ts > maxAge) return null;
+  }
+  const score = feed.awayScore != null && feed.homeScore != null ? `${feed.awayScore}–${feed.homeScore}` : '';
+  const said =
+    feed.awayScore != null && feed.homeScore != null
+      ? `${game.away_team} ${feed.awayScore}, ${game.home_team} ${feed.homeScore}`
+      : '';
+  if (feed.ended) {
+    if (!score) return null;
+    return { kind: 'final', score, clock: '', speech: `Final, ${said}` };
+  }
+  if (!feed.inProgress) return null;
+  const clock = feed.clockLabel.trim();
+  return {
+    kind: 'live',
+    score,
+    clock,
+    speech: ['Live', clock, said].filter((p) => p.length > 0).join(', '),
+  };
+}

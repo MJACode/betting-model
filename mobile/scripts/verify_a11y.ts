@@ -680,7 +680,10 @@ check('PickCard: "Price check" is spoken once — in cardLabel, the nested chip 
 check('PickCard: no nested element inside the card is separately accessible', !/\n\s+accessible\n/.test(card.slice(card.indexOf('accessibilityLabel={cardLabel}'))));
 check('SharpScorePill: "Sharp score N of 100, band" (M5)', /accessibilityLabel=\{sharpScoreSpeech\(score, BAND_WORD\[band\]\)\}/.test(read('src/components/SharpScorePill.tsx')));
 const pill = read('src/components/GameStatusPill.tsx');
-check('GameStatusPill: live and final speak gameStatusSpeech (M22)', (pill.match(/accessibilityLabel=\{spoken \?\? '(Live|Final)'\}/g) ?? []).length === 2 && /accessibilityLabel=\{spoken \?\? undefined\}/.test(pill));
+// Live and final carry gameStatusSpeech as `speech`, and the one wrapper both
+// go through (a Pressable when the card can open the game, 2026-11-24) puts
+// it on accessibilityLabel.
+check('GameStatusPill: live and final speak gameStatusSpeech (M22)', (pill.match(/speech: spoken \?\? '(Live|Final)'/g) ?? []).length === 2 && /accessibilityLabel=\{spoken \?\? undefined\}/.test(pill) && (pill.match(/accessibilityLabel=\{speech\}/g) ?? []).length === 2);
 
 console.log('\nM9 / M10 / M18 / M19 / M25 / M26');
 const perf = read('src/screens/PerformanceScreen.tsx');

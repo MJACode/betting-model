@@ -58,6 +58,7 @@ import {
   NOT_AT_MY_BOOKS_AT_THIS_LINE,
   recordNoteShortFor,
 } from '@/lib/myBooks';
+import { feedView, type ScoreboardFeed } from '@/lib/scoreboard';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
@@ -120,6 +121,12 @@ interface Props {
   /** Freshest live snapshot for this pick's game — drives the score + inning
    * beside the LIVE badge. Omitted (or null) falls back to a bare badge. */
   liveState?: LiveGameStateRow | null;
+  /** The Scoreboard tab's live / final feed for this game, every sport but
+   * MLB (useCardScoreFeeds). Puts "35–39 · Half" beside the LIVE badge. */
+  scoreFeed?: ScoreboardFeed | null;
+  /** Opens this game on the scoreboard. When set, a started game's score pill
+   * is a button of its own; the rest of the card still opens the pick. */
+  onOpenGame?: () => void;
   /** Board layout, All only: BET / AVOID / NEUTRAL before the stored label.
    * The signals layout always shows that chip — All includes NONE rows. */
   showSignalBadge?: boolean;
@@ -170,7 +177,7 @@ function BookControl({
 }
 
 export function PickCard({
-  item, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
+  item, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState, scoreFeed, onOpenGame,
   showSignalBadge = false,
   paused = false,
   layout = 'board',
@@ -635,9 +642,18 @@ export function PickCard({
     : 'Stake unavailable';
   // A graded BET on a finished game says how it did (Matt, 2026-11-15).
   const resultView = pickResultView(pick, paused);
+  // The Scoreboard feed's score is what the pill shows, so it is also what
+  // VoiceOver hears: the card is one element and the pill's own label never
+  // reaches it (UX review, 2026-11-24).
+  const fedStatus = movedTo ? null : feedView(game, scoreFeed);
   const baseStatusSpeech = movedTo
     ? postponedSpeech(movedTo)
-    : gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
+    : fedStatus
+      ? fedStatus.speech
+      : gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
+  // Started by the clock or the live row, or by the feed: a game that tips
+  // before its listed time is live on the feed first.
+  const gameStarted = gameStatus(game, liveState).kind !== 'pre' || fedStatus != null;
   const statusSpeech = resultView
     ? [baseStatusSpeech, resultView.spoken].filter(Boolean).join('. ')
     : baseStatusSpeech;
@@ -664,7 +680,7 @@ export function PickCard({
         modelName: `${markedModel} model`,
         posted: timing?.label ?? null,
         paused: null,
-        gameStatus: gameStatus(game, liveState).kind !== 'pre' ? baseStatusSpeech : null,
+        gameStatus: gameStarted ? baseStatusSpeech : null,
         sharp: sharp && !signalsMuted ? sharpScoreSpeech(sharp.score, sharp.band) : null,
         started: startedSpoken,
         move: signalsMoveSpoken,
@@ -698,6 +714,7 @@ export function PickCard({
   const actionHandoff = signals ? handoff : boardHandoff;
   const actionOtherLines = !actionHandoff && !startedText ? otherLinesControl : null;
   const actionControl = signals ? signalsControl : boardControl;
+  const canOpenGame = Boolean(onOpenGame) && gameStarted;
   const a11yActions = [
     ...(actionHandoff && actionControl
       ? [{
@@ -711,6 +728,9 @@ export function PickCard({
         : []),
     ...(canSlip ? [{ name: 'slip', label: inSlip ? 'Remove from betslip' : 'Add to betslip' }] : []),
     ...(canTrack ? [{ name: 'track', label: tracked ? 'Untrack' : 'Track' }] : []),
+    // The score pill is a button inside the card's own button, which VoiceOver
+    // reads as one element, so the scoreboard is offered here as well.
+    ...(canOpenGame ? [{ name: 'game', label: 'Open game on scoreboard' }] : []),
   ];
 
   return (
@@ -732,6 +752,7 @@ export function PickCard({
         else if (name === 'book' && actionOtherLines) setBooksOpen(true);
         else if (name === 'slip' && canSlip) onToggleSlip!();
         else if (name === 'track' && canTrack) onToggleTrack!();
+        else if (name === 'game' && canOpenGame) onOpenGame!();
       }}
       accessibilityHint="Opens the full breakdown, including recent form and matchup context."
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
@@ -745,7 +766,7 @@ export function PickCard({
         {/* Live clock stays on this pill (Fixtured-style score + period).
             Do not invent a second clock chrome on the card. */}
         <View style={styles.headerStatus}>
-          <GameStatusPill game={game} live={liveState} scheduledStart={pick.game_time} />
+          <GameStatusPill game={game} live={liveState} feed={scoreFeed} scheduledStart={pick.game_time} onPress={onOpenGame} />
           {resultView ? <PickResultChip view={resultView} /> : null}
         </View>
       </View>
@@ -1124,8 +1145,8 @@ export function PickCard({
               </Text>
             </View>
           ) : null}
-          {gameStatus(game, liveState).kind !== 'pre' ? (
-            <GameStatusPill game={game} live={liveState} scheduledStart={pick.game_time} />
+          {gameStarted ? (
+            <GameStatusPill game={game} live={liveState} feed={scoreFeed} scheduledStart={pick.game_time} onPress={onOpenGame} />
           ) : null}
           {resultView ? <PickResultChip view={resultView} /> : null}
         </View>
