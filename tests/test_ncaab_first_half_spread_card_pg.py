@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -86,8 +87,27 @@ def world(dsn, monkeypatch):
     """Today's game tipping 9 minutes from now (so the real NOW() of the fetch
     is its tip-minus-10 time), and yesterday's finished game of both teams with
     its halves and closing lines."""
+    with _world(dsn, monkeypatch, timedelta(minutes=9, seconds=30)) as w:
+        yield w
+
+
+@pytest.fixture()
+def early_world(dsn, monkeypatch):
+    """The same game tipping four hours from now, with its 15:00 UTC early
+    check moved to half a minute ago (so the real NOW() of the fetch lands
+    inside it) and its 18:00 UTC one two hours ahead."""
     now = datetime.now(UTC).replace(microsecond=0)
-    tip = now + timedelta(minutes=9, seconds=30)
+    real = feed.fixed_time
+    at = {"15z": now - timedelta(seconds=30), "18z": now + timedelta(hours=2)}
+    monkeypatch.setattr(feed, "fixed_time", lambda game_date, mark: at.get(mark) or real(game_date, mark))
+    with _world(dsn, monkeypatch, timedelta(hours=4)) as w:
+        yield w
+
+
+@contextmanager
+def _world(dsn, monkeypatch, tip_in):
+    now = datetime.now(UTC).replace(microsecond=0)
+    tip = now + tip_in
     gdate = tip.astimezone(ET).date().isoformat()
     gid = f"NCAAB_{gdate}_duke_kansas"
     ptip = now - timedelta(days=1)
@@ -101,6 +121,7 @@ def world(dsn, monkeypatch):
                     f"'{role}') THEN CREATE ROLE {role}; END IF; END $$")
     cur.execute("DROP TABLE IF EXISTS games, odds, latest_odds, odds_api_quota, picks, "
                 "ncaab_period_scores, ncaab_first_half_fetches, ncaab_first_half_spread_decisions, "
+                "ncaab_first_half_spread_checks, "
                 "ncaab_first_half_total_decisions, ncaab_first_half_team_games")
     for ddl in (GAMES_DDL, ODDS_DDL, LATEST_DDL, QUOTA_DDL, PICKS_DDL, box.PERIODS_DDL):
         cur.execute(ddl)
@@ -159,7 +180,8 @@ def world(dsn, monkeypatch):
     import models.scorer as scorer
     monkeypatch.setattr(scorer, "_get_current_bankroll", lambda conn: 1000.0)
     try:
-        yield {"gid": gid, "pid": pid, "tip": tip, "raw": raw, "connect": connect, "calls": calls}
+        yield {"gid": gid, "pid": pid, "tip": tip, "raw": raw, "connect": connect, "calls": calls,
+               "body": body}
     finally:
         raw.close()
 
@@ -210,6 +232,59 @@ def test_the_tip_minus_10_fetch_decides_once_and_writes_the_bet(world):
     assert q(raw, "SELECT count(*) FROM picks") == [(1,)]
     assert q(raw, "SELECT count(*) FROM ncaab_first_half_spread_decisions") == [(1,)]
     assert not win.plan_tick().card
+
+
+def test_an_early_check_that_bets_locks_the_game(early_world):
+    gid, raw = early_world["gid"], early_world["raw"]
+    plan = win.plan_tick()
+    assert plan.fetch == [gid] and plan.marks[gid] == "15z" and plan.card == [gid]
+    feed.fetch_first_half([gid])
+    res = card.run_card(do_publish=True)
+    assert res["published"] == 1 and res["decided"] == 1 and res["diag"]["early_checks"] == 1
+    d = q(raw, "SELECT status, book, side, line, price, lead_min FROM ncaab_first_half_spread_decisions "
+               "WHERE game_id = %s", (gid,))
+    assert d[0][:5] == ("bets", "fanduel", "home", -1.5, 100) and d[0][5] > 200
+    assert q(raw, "SELECT status, n_bets FROM ncaab_first_half_spread_checks WHERE game_id = %s",
+             (gid,)) == [("bets", 1)]
+    assert q(raw, "SELECT signal_type, decision_book, scored_line FROM picks WHERE game_id = %s",
+             (gid,)) == [("BET", "fanduel", -1.5)]
+    # the bet locks the game: no later check or decision writes anything
+    again = card.run_card(do_publish=True)
+    assert again["published"] == 0 and again["decided"] == 0
+    assert q(raw, "SELECT count(*) FROM picks") == [(1,)]
+    assert q(raw, "SELECT count(*) FROM ncaab_first_half_spread_checks") == [(1,)]
+    assert not win.plan_tick().card
+    # both new tables are worker-only
+    for t in ("ncaab_first_half_spread_checks", "ncaab_first_half_spread_decisions"):
+        assert q(raw, "SELECT relrowsecurity FROM pg_class WHERE relname = %s", (t,)) == [(True,)]
+
+
+def test_an_early_check_without_a_bet_leaves_the_game_open(early_world):
+    gid, raw = early_world["gid"], early_world["raw"]
+    # every book on the model's own number, at -110 both ways: nothing clears
+    early_world["body"]["bookmakers"] = [
+        {"key": b, "last_update": _iso(datetime.now(UTC)), "markets": [
+            {"key": "spreads_h1", "outcomes": [
+                {"name": FEED_HOME, "price": -110, "point": -4.5},
+                {"name": FEED_AWAY, "price": -110, "point": 4.5}]}]}
+        for b in ("draftkings", "fanduel")]
+    feed.fetch_first_half([gid])
+    res = card.run_card(do_publish=True)
+    assert res["published"] == 0 and res["decided"] == 0 and res["diag"]["early_checks"] == 1
+    assert q(raw, "SELECT status, n_bets, line FROM ncaab_first_half_spread_checks WHERE game_id = %s",
+             (gid,)) == [("below_cut", 0, -4.5)]
+    # no NONE row and no decision: the next check decides
+    assert q(raw, "SELECT count(*) FROM picks") == [(0,)]
+    assert q(raw, "SELECT count(*) FROM ncaab_first_half_spread_decisions") == [(0,)]
+    conn = early_world["connect"]()
+    try:
+        assert card.decided_games(conn, [gid]) == set()
+    finally:
+        conn.close()
+    # the call is priced once: the next run finds nothing to check
+    assert card.run_card(do_publish=True)["diag"]["early_checks"] == 0
+    assert q(raw, "SELECT count(*) FROM ncaab_first_half_spread_checks") == [(1,)]
+    assert win.plan_tick().card == [gid]
 
 
 def test_a_dry_run_writes_nothing(world):

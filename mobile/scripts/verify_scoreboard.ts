@@ -8,6 +8,7 @@ import {
   feedFromMlb,
   feedFromEspn,
   feedFromNcaaf,
+  feedView,
   mergeDkInplay,
   movementText,
   marketCell,
@@ -391,6 +392,36 @@ check('the nudge names the day, the league and its noun',
   scoreboardSwitchLine({ EUROLEAGUE: 5, UFC: 3 }, 'NFL', 'tomorrow')
     === 'Or switch sport above — EuroLeague has 5 games tomorrow.'
   && scoreboardSwitchLine({ UFC: 1 }, 'NFL') === 'Or switch sport above — UFC has 1 fight today.');
+
+// ── The pick card's score pill (Matt, 2026-11-24) ──────────────────────────
+// The row is production's, read 2026-11-24 23:48 UTC: Queens @ Wofford at the
+// half while the card said a bare LIVE.
+{
+  const at = Date.parse('2026-11-24T23:48:23Z');
+  const wofford = {
+    sport: 'NCAAB', away_team: 'Queens University', home_team: 'Wofford',
+    home_score: null, away_score: null,
+  };
+  const half = feedFromEspn({
+    game_id: 'NCAAB_2026-11-24_queens-university_wofford', state: 'in',
+    home_score: 39, away_score: 35, clock_label: 'Half', situation: null,
+    possession: null, snapshot_at: '2026-11-24T23:48:00.000826+00:00',
+  } as never, at);
+  const v = feedView(wofford, half, at);
+  check('the card pill shows the feed score away–home and its clock',
+    v?.kind === 'live' && v.score === '35–39' && v.clock === 'Half');
+  check('VoiceOver hears the score with each team named',
+    v?.speech === 'Live, Half, Queens University 35, Wofford 39');
+  check('a feed older than the ESPN freshness window does not read LIVE',
+    feedView(wofford, half, at + 11 * 60 * 1000) === null);
+  check('a stored final on games wins over the feed',
+    feedView({ ...wofford, home_score: 80, away_score: 70 }, half, at) === null);
+  const ended = half && { ...half, inProgress: false, ended: true, clockLabel: 'Final' };
+  const fin = feedView(wofford, ended, at + 3 * 60 * 60 * 1000);
+  check('an ended feed reads FINAL with the score, however old',
+    fin?.kind === 'final' && fin.score === '35–39' && fin.speech === 'Final, Queens University 35, Wofford 39');
+  check('no feed, no pill from the feed', feedView(wofford, null, at) === null);
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

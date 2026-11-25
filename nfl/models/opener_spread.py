@@ -247,6 +247,48 @@ LEAD_HI_DAYS = float(os.environ.get("NFL_OPENER_MAX_LEAD_DAYS", "10"))
 # the card always passes them.
 FRESH_MINUTES = 60.0
 
+# THE CEILING: A GAP NO REAL NUMBER HAS EVER SHOWN IS A FEED ERROR, NOT A BET.
+# (2026-11-24, after mike's report of the pick below. The 5.0 is set from the
+# data; it is his to change.)
+#
+# At 20:56:01Z on 2026-11-24 the feed served BetMGM's PHI @ DAL spread as
+# DAL +5.5 (-110 / -108) for nine polls, to 21:04:01. One poll earlier it was
+# DAL -8.5 (-108 / -110), and every other book and Pinnacle stayed at DAL -8.5. Nothing above stopped a
+# 14-point gap: the card wrote "PHI @ DAL — DAL +5.5" at BetMGM, claimed a
+# +24pp edge off the clamped top of DEV_WIN_PROB, and posted it. mike: "dal
+# +5.5 that doesn't exist in any way shape or form".
+#
+# Where the ceiling sits, from the stored quotes (nfl_odds_history, bettable
+# books against Pinnacle at the same snapshot, two to ten days out;
+# docs/nfl_opener_dev_ceiling.md):
+#   * 2021-2025, ~97,000 paired quotes: the largest gap is 3.5 points.
+#   * 2026, minute-level: the largest real gap is 4.5 (ARI @ SEA 2026-11-04:
+#     five books moved to SEA -8.5..-9.5 from 18:50Z while Pinnacle held -13;
+#     Pinnacle was at -8.5 too by 19:56Z).
+#   * Every gap of 5.5 or more since 2021 is a short-lived feed glitch: BetMGM
+#     TEN @ NYG 2026-09-24 (5.5, three polls), BetRivers HOU @ TEN 2026-10-07
+#     (14, an alternate line at -770 that Kelly happened to skip), and this
+#     one. Nothing real sits between 4.5 and 14.
+#   * 2020 carries ~1,000 BetMGM quotes 3+ points off; they are a 2020 feed
+#     defect, and they are in the backtest -- tracked separately.
+# So 5.0 removes three glitch episodes and no real number ever stored.
+#
+# This filters a QUOTE, not a game: a believable book on the same game still
+# bets. And it is not the fresh-number gate mike rejected on 2026-09-22: a
+# brand-new number inside the ceiling still fires at once, with its age on it.
+# What it does NOT catch: a phantom inside the ceiling (TEN @ NYG 2026-09-22
+# was 4.0, and 2.0 at the deciding tick).
+MAX_DEV = 5.0
+
+
+def beyond_ceiling(dev):
+    """True for a gap to Pinnacle no real number has shown (see MAX_DEV).
+
+    Takes one gap or a Series of them (a boolean Series back), so both callers
+    use the same comparison and an empty board stays an empty board.
+    """
+    return abs(dev) > MAX_DEV
+
 # Pooled validated ATS at the deployment threshold. Kept for reference and as
 # the fallback: this is what the card used for EVERY bet until 2026-08-22.
 POOLED_MODEL_PROB = 0.5688      # six-season pooled ATS (was 0.5818 on three)
@@ -487,6 +529,9 @@ def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
 
     soft = piv[piv.book != REFERENCE].merge(pin, on=["home", "away"], how="inner")
     soft["dev"] = soft.point - soft.pin_home_line
+    # A feed error is dropped as a quote, before the game's largest gap is
+    # chosen, so a believable second book on the same game still counts.
+    soft = soft[~beyond_ceiling(soft.dev)]
     soft = soft[soft.dev.abs() >= threshold]
     if soft.empty:
         return pd.DataFrame()
@@ -611,6 +656,19 @@ def evaluate_board(frame: pd.DataFrame, sched: pd.DataFrame,
                                 current_line=pin_line, **common))
             continue
         soft["dev"] = soft.point - pin_line
+        # Same filter as select_opener_bets, applied BEFORE the largest gap is
+        # chosen: the phantom quote must not become `best` and hide a
+        # believable book behind a "declined".
+        bad = soft[beyond_ceiling(soft.dev)]
+        soft = soft[~beyond_ceiling(soft.dev)]
+        ignored = "".join(
+            f" · ignored {b.book} {b.point:+.1f}, {abs(b.dev):.1f} pts off Pinnacle"
+            f" {pin_line:+.1f}, beyond the {MAX_DEV} pt ceiling (a feed error)"
+            for b in bad.itertuples())
+        if soft.empty:
+            out.append(eval_row(qualifies=False, reason=ignored.lstrip(" ·"),
+                                current_line=pin_line, **common))
+            continue
         soft = soft.iloc[soft.dev.abs().values.argsort()[::-1]]   # largest first
         best = soft.iloc[0]
         dev = float(best.dev)
@@ -618,7 +676,8 @@ def evaluate_board(frame: pd.DataFrame, sched: pd.DataFrame,
         if abs(dev) < threshold:
             out.append(eval_row(
                 qualifies=False,
-                reason=f"deviation {dev:+.2f} below the {threshold} pt threshold",
+                reason=f"deviation {dev:+.2f} below the {threshold} pt threshold"
+                       + ignored,
                 current_line=float(best.point), current_book=best.book,
                 current_price=int(best.price), **common))
             continue

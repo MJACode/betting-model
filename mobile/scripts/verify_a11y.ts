@@ -163,8 +163,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/SavedParlaysScreen.tsx', '', 1], // 43.0pt
   ['src/screens/SavedParlaysScreen.tsx', 'betBtn,pressed', 1], // 43.0pt
   ['src/screens/SavedParlaysScreen.tsx', 'clearAllBtn,pressed', 1], // 39.5pt
-  ['src/screens/SavedParlaysScreen.tsx', 'deleteBtn,pressed', 1], // 40.0pt
-  ['src/screens/SavedParlaysScreen.tsx', 'editBtn,pressed', 1], // 40.0pt
   ['src/screens/SettingsScreen.tsx', 'bookPickRow', 2], // 41.8, 41.8pt
   ['src/screens/SettingsScreen.tsx', 'pressed', 1], // 38.3pt
   ['src/screens/SettingsScreen.tsx', 'doneBtn,pressed', 1], // 41.8pt — #831's keyboard Done (landed on master after this rule); follow-up with the rest
@@ -682,7 +680,10 @@ check('PickCard: "Price check" is spoken once — in cardLabel, the nested chip 
 check('PickCard: no nested element inside the card is separately accessible', !/\n\s+accessible\n/.test(card.slice(card.indexOf('accessibilityLabel={cardLabel}'))));
 check('SharpScorePill: "Sharp score N of 100, band" (M5)', /accessibilityLabel=\{sharpScoreSpeech\(score, BAND_WORD\[band\]\)\}/.test(read('src/components/SharpScorePill.tsx')));
 const pill = read('src/components/GameStatusPill.tsx');
-check('GameStatusPill: live and final speak gameStatusSpeech (M22)', (pill.match(/accessibilityLabel=\{spoken \?\? '(Live|Final)'\}/g) ?? []).length === 2 && /accessibilityLabel=\{spoken \?\? undefined\}/.test(pill));
+// Live and final carry gameStatusSpeech as `speech`, and the one wrapper both
+// go through (a Pressable when the card can open the game, 2026-11-24) puts
+// it on accessibilityLabel.
+check('GameStatusPill: live and final speak gameStatusSpeech (M22)', (pill.match(/speech: spoken \?\? '(Live|Final)'/g) ?? []).length === 2 && /accessibilityLabel=\{spoken \?\? undefined\}/.test(pill) && (pill.match(/accessibilityLabel=\{speech\}/g) ?? []).length === 2);
 
 console.log('\nM9 / M10 / M18 / M19 / M25 / M26');
 const perf = read('src/screens/PerformanceScreen.tsx');
@@ -697,7 +698,7 @@ const onboarding = read('src/components/OnboardingModal.tsx');
 check('M19: Skip and Next have roles; dots read "Page N of 5"', /accessibilityLabel="Skip intro"/.test(onboarding) && /const total = SLIDES\.length \+ 1;/.test(onboarding) && /accessibilityLabel=\{pageLabel\(step, total\)\}/.test(onboarding) && /\? `Save \$\{selected\.length\} sportsbook/.test(onboarding) && /: `Next, \$\{pageLabel\(step \+ 1, total\)/.test(onboarding));
 const manual = read('src/components/ManualBetModal.tsx');
 check('M25: disabled "Add bet" says why (accessibilityHint = addBetHint) and exposes disabled',
-  /const addHint = valid \? undefined : addBetHint\(\{ bet: desc, stake \}\);/.test(manual) && /accessibilityHint=\{addHint\}/.test(manual) && /<PrimaryButton label="Add bet"[^>]*disabled=\{!valid\}/.test(manual)
+  /const addHint = valid \? undefined : addBetHint\(\{ bet: desc, stake \}\);/.test(manual) && /accessibilityHint=\{addHint\}/.test(manual) && /<PrimaryButton label=\{prefill \? 'Add to Your bets' : 'Add bet'\}[^>]*disabled=\{!valid\}/.test(manual)
     // The disabled state is exposed by PrimaryButton itself (UI pass 2026-11-14).
     && /accessibilityState=\{\{ disabled: inactive,/.test(read('src/components/PrimaryButton.tsx')));
 check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '"Stake in units"', '"Odds, American"'].every((l) => manual.includes(`accessibilityLabel=${l}`)));

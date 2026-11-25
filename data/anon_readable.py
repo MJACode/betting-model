@@ -646,6 +646,9 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "ncaab_first_half_spread_decisions",
     "ncaab_first_half_fetches",
     "ncaab_first_half_team_games",
+    # Its early checks' ledger (15:00 and 18:00 UTC, mike 2026-11-24): one row
+    # per check priced, bet or not. Created on demand by the card.
+    "ncaab_first_half_spread_checks",
     # The NCAAB first-half total model's decisions ledger
     # (scripts/ncaab_first_half_total_card.py, created on demand); it reads the
     # same fetch ledger and team games as the spread model.

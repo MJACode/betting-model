@@ -3791,14 +3791,19 @@ export async function fetchNbaTeamQ1Season(team: string, season: number): Promis
   }));
 }
 
-/** The last N finished meetings between two teams in one sport, newest first. */
+/**
+ * The last N finished meetings between two teams in one sport, newest first.
+ * `beforeDate` bounds them to games before one game, so a game's own page
+ * never lists that game, or a later one, as a past meeting (PR #1595 review).
+ */
 export async function fetchHeadToHead(
   sport: string,
   team: string,
   opponent: string,
   limit = 10,
+  beforeDate?: string,
 ): Promise<GameRow[]> {
-  const { data, error } = await supabase
+  let q = supabase
     .from('games')
     .select(GAME_COLUMNS)
     .eq('sport', sport)
@@ -3806,7 +3811,9 @@ export async function fetchHeadToHead(
       `and(home_team.eq."${team}",away_team.eq."${opponent}"),` +
         `and(home_team.eq."${opponent}",away_team.eq."${team}")`,
     )
-    .not('home_score', 'is', null)
+    .not('home_score', 'is', null);
+  if (beforeDate) q = q.lt('game_date', beforeDate);
+  const { data, error } = await q
     .order('game_date', { ascending: false })
     .limit(limit);
   if (error) throw error;

@@ -786,3 +786,30 @@ def test_the_migration_is_one_statement():
     assert sql.count("$mig$") == 2
     assert "UPDATE public.picks" not in code
     assert "DELETE FROM" not in code
+
+
+def test_the_notice_names_the_book_the_pick_was_decided_at(monkeypatch):
+    # 2026-11-24: the void notices for "PHI @ DAL — DAL +5.5" (BetMGM -110)
+    # and "TEN @ JAX — TEN +16.5" (BetRivers -112) both said "@ DraftKings".
+    # The void SELECT did not read decision_book, so book_for_pick fell back
+    # to DraftKings for any pick with a price. The signal post never did.
+    def opener_row(pick_id, label, game_id, odds, book):
+        return (
+            pick_id, "NFL", "nfl_opener_spread", game_id, "2026-11-26", "home",
+            label, "VOID", odds, None, None, 0, None, None, None,
+            "2026-11-24 20:56:03+00:00", "DAL", "PHI",
+            f"{game_id}:nfl_opener_spread", "1574000000000000000",
+            "2026-11-24T15:56:05-05:00", 1, 0, None, None, book, odds,
+        )
+    rows = [opener_row(4757860, "PHI @ DAL — DAL +5.5 · NEW 0m",
+                       "NFL_2026_12_PHI_DAL", -110, "betmgm"),
+            opener_row(4758513, "TEN @ JAX — TEN +16.5 · NEW 0m",
+                       "NFL_2026_12_TEN_JAX", -112, "betrivers")]
+    _bind(monkeypatch, rows)
+    out = dn.notify_discord_void([4757860, 4758513], reason="x" * 30, dry_run=True)
+    fields = out["payloads"][0]["payload"]["embeds"][0]["fields"]
+    by_name = {f["name"]: f["value"] for f in fields}
+    dal = by_name["PHI @ DAL — DAL +5.5 · NEW 0m"]
+    ten = by_name["TEN @ JAX — TEN +16.5 · NEW 0m"]
+    assert "-110 @ [BetMGM]" in dal and "DraftKings" not in dal
+    assert "-112 @ [BetRivers]" in ten and "DraftKings" not in ten

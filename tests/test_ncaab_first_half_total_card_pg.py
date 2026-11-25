@@ -82,6 +82,7 @@ def world(dsn, monkeypatch):
                     f"'{role}') THEN CREATE ROLE {role}; END IF; END $$")
     cur.execute("DROP TABLE IF EXISTS games, odds, latest_odds, odds_api_quota, picks, "
                 "ncaab_period_scores, ncaab_first_half_fetches, ncaab_first_half_spread_decisions, "
+                "ncaab_first_half_spread_checks, "
                 "ncaab_first_half_total_decisions, ncaab_first_half_team_games")
     for ddl in (GAMES_DDL, ODDS_DDL, LATEST_DDL, QUOTA_DDL, PICKS_DDL, box.PERIODS_DDL):
         cur.execute(ddl)

@@ -6,6 +6,7 @@ import {
   FlatList,
   InputAccessoryView,
   Keyboard,
+  LayoutAnimation,
   PixelRatio,
   Platform,
   useWindowDimensions,
@@ -17,6 +18,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { ScrollView as GestureScrollView, State, TapGestureHandler } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -387,6 +389,11 @@ function BoardSkeleton() {
     </View>
   );
 }
+
+// Fold the board's controls once the list has scrolled this far, and only
+// when the list has at least this much scroll room (measured unfolded).
+const COLLAPSE_AFTER_PT = 40;
+const COLLAPSE_MIN_ROOM_PT = 320;
 
 const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
   // H2H FIRST, which is where the competitor screenshot Matt sent puts it
@@ -2237,6 +2244,95 @@ export function StatsScreen() {
       prev.visual === visual && prev.overhang === overhang ? prev : { visual, overhang },
     );
   }, []);
+  // CONTROLS FOLD AWAY ON SCROLL (Matt, 2026-11-24: "Top section takes up
+  // way too much real estate. You can barely see players."). On a 390pt phone
+  // the stat chips, the ruler and the window strip put the first player row
+  // past the middle of the screen. Scrolling the board down folds them into
+  // one summary bar ("12+ Points · L10 · Hit Rates"); tapping the bar, or
+  // scrolling back to the top, opens them again. Nothing is removed.
+  //
+  // Guards (UX review, 2026-11-24):
+  // - No loop. It folds only past COLLAPSE_AFTER_PT on a list with more than
+  //   COLLAPSE_MIN_ROOM_PT of scroll room (measured with the controls open),
+  //   and re-opens at the top only on a USER scroll — a drag, its momentum,
+  //   or a status-bar tap. A short list growing into the freed space clamps
+  //   its offset to 0 with no drag in front of it, and that must not count.
+  // - Never while the keyboard is up: folding unmounts the ruler's typing
+  //   field, and its draft commits only on blur or Done, so it would be lost.
+  // - Never under VoiceOver/TalkBack: the reader scrolls the list as focus
+  //   moves row to row, which would fold the controls with no intent, and a
+  //   user who cannot see the fold gains nothing from the room.
+  // - Reduce Motion: the fold snaps instead of animating.
+  // - A new board (sport, segment, players/teams, mode, read) opens unfolded.
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  const collapsedRef = useRef(false);
+  const userScrolling = useRef(false);
+  const reduceMotion = useReduceMotion();
+  const [screenReaderOn, setScreenReaderOn] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void AccessibilityInfo.isScreenReaderEnabled().then((on) => {
+      if (alive) setScreenReaderOn(on);
+    });
+    const sub = AccessibilityInfo.addEventListener('screenReaderChanged', setScreenReaderOn);
+    return () => {
+      alive = false;
+      sub.remove();
+    };
+  }, []);
+  const setCollapsedAnimated = useCallback(
+    (next: boolean, animate = true) => {
+      if (collapsedRef.current === next) return;
+      collapsedRef.current = next;
+      if (animate && !reduceMotion && Platform.OS === 'ios') {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      }
+      setControlsCollapsed(next);
+    },
+    [reduceMotion],
+  );
+  useEffect(() => {
+    setCollapsedAnimated(false, false);
+  }, [sport, segment, boardMode, effectiveMode, readKey, setCollapsedAnimated]);
+  useEffect(() => {
+    if (screenReaderOn) setCollapsedAnimated(false, false);
+  }, [screenReaderOn, setCollapsedAnimated]);
+  const onBoardScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+      const y = contentOffset.y;
+      const room = contentSize.height - layoutMeasurement.height;
+      if (y > COLLAPSE_AFTER_PT && room > COLLAPSE_MIN_ROOM_PT) {
+        if (screenReaderOn || Keyboard.isVisible()) return;
+        setCollapsedAnimated(true);
+      } else if (y <= 0 && userScrolling.current) {
+        setCollapsedAnimated(false);
+      }
+    },
+    [setCollapsedAnimated, screenReaderOn],
+  );
+  // Back at the top however the user got there: under momentum (the usual
+  // flick home), on release, or by a status-bar tap.
+  const reopenIfAtTop = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (e.nativeEvent.contentOffset.y <= 0) setCollapsedAnimated(false);
+  };
+  const boardScrollProps = {
+    onScroll: onBoardScroll,
+    scrollEventThrottle: 32,
+    onScrollBeginDrag: () => {
+      userScrolling.current = true;
+    },
+    onScrollEndDrag: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      reopenIfAtTop(e);
+      const v = e.nativeEvent.velocity?.y ?? 0;
+      if (v === 0) userScrolling.current = false;
+    },
+    onMomentumScrollEnd: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (userScrolling.current) reopenIfAtTop(e);
+      userScrolling.current = false;
+    },
+    onScrollToTop: () => setCollapsedAnimated(false),
+  };
   const lineOnlySection =
     lineOnlyList.length > 0 ? (
       <View>
@@ -2778,6 +2874,15 @@ export function StatsScreen() {
   // Not an effect: this sits below the `!stat` early return, so a hook here
   // would change the hook count. A same-render state reset is allowed.
   if (notesOpen && boardNotes.length === 0) setNotesOpen(false);
+  const controlsSummaryParts = [
+    // The bet's own name wherever the board has one: the ruler's caption in
+    // Hit Rates, and the no-ruler caption ("Anytime Goal", not "Goals") that
+    // folds away with the controls.
+    (effectiveMode === 'hitRate' || (!canHitRate && showOdds)) && lineHeadline ? lineHeadline : stat.label,
+    TIME_WINDOWS.find((w) => w.value === timeWindow)?.label ?? null,
+    canHitRate ? (effectiveMode === 'hitRate' ? 'Hit Rates' : 'Averages') : null,
+  ].filter((part): part is string => Boolean(part));
+  const controlsSummary = controlsSummaryParts.join(' · ');
   const windowStripHidden =
     sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0;
   const notesButton =
@@ -2909,259 +3014,285 @@ export function StatsScreen() {
 
       <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
 
-      {/* Stat selector — the primary control, under the header's tab rows,
-          and the one row on this screen that is never allowed to cost less: it
-          is the board's subject, one tap, directly manipulated.
-          ONE row. It was a chip row per group (4 for NFL), then a group tab row
-          above a chip row, then a group dropdown pill pinned at the head of the
-          chips (UX review, 2026-09-12). The pill cost three taps to get from
-          Passing to Receiving and read as one of the chips, so the position
-          row above now scopes the chips instead (Designer, Option A, Matt
-          2026-09-25) and this row is chips only. */}
-      <View style={styles.statPicker}>
-        <View style={styles.statRow}>
+      {controlsCollapsed ? (
+        // The folded controls: one row that says what the board is showing and
+        // opens the controls again. The board-notes ⓘ stays on it, so the
+        // missing-price and coverage notes are still one tap away.
+        <View style={[styles.fixedRow, styles.controlsSummaryRow]}>
+          <Pressable
+            onPress={() => setCollapsedAnimated(false)}
+            accessibilityRole="button"
+            // Commas, so VoiceOver pauses where the bar prints a middle dot.
+            accessibilityLabel={`Board: ${controlsSummaryParts.join(', ')}`}
+            accessibilityState={{ expanded: false }}
+            accessibilityHint="Shows the stat, line and window controls"
+            style={({ pressed }) => [styles.controlsSummary, pressed && styles.pressed]}
+          >
+            <Ionicons name="options-outline" size={15} color={colors.tint} />
+            <Text style={styles.controlsSummaryText} numberOfLines={1}>
+              {controlsSummary}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color={colors.tint} />
+          </Pressable>
+          {notesButton}
+        </View>
+      ) : (
+        <>
+        {/* Stat selector — the primary control, under the header's tab rows,
+            and the one row on this screen that is never allowed to cost less: it
+            is the board's subject, one tap, directly manipulated.
+            ONE row. It was a chip row per group (4 for NFL), then a group tab row
+            above a chip row, then a group dropdown pill pinned at the head of the
+            chips (UX review, 2026-09-12). The pill cost three taps to get from
+            Passing to Receiving and read as one of the chips, so the position
+            row above now scopes the chips instead (Designer, Option A, Matt
+            2026-09-25) and this row is chips only. */}
+        <View style={styles.statPicker}>
+          <View style={styles.statRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.rowScroller}
+              contentContainerStyle={styles.chipRowInline}
+              keyboardShouldPersistTaps="handled"
+            >
+              {chipsForSegment(sport, segment).map((s) => (
+                <FilterChip
+                  key={`${s.group}:${String(s.key)}`}
+                  label={s.label}
+                  active={s.key === stat.key && s.group === stat.group}
+                  onPress={() => pickStat(s)}
+                />
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+
+        {/* Averages on a sport with no hit-rate ruler. The pill still prices a
+            side, and nothing else on the board names it. Same quiet caption as
+            the no-lines note. The Goals chip stays "Goals"; the bet is Anytime
+            Goal (markets.ts propDisplayLabel).
+            The pill does not also say the snapshot is old. Prop rows carry
+            snapshot_at, and the game-line age rule (markets.priceAgeApplies)
+            does not cover props — their normal age is hours. A second caption
+            on this shared cell would be a new flag on every sport's board.
+            It stays INLINE when the other notes moved behind the ⓘ: it names
+            the bet, it is not an explanation (UX review, 2026-10-29). */}
+        {!canHitRate && showOdds && lineHeadline ? (
+          <View style={styles.noLinesRow}>
+            <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+            <Text
+              style={styles.noLinesText}
+              numberOfLines={headlineLines}
+              accessibilityLabel={lineHeadline}
+            >
+              {lineHeadline}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Line picker: the mode, a tick ruler, then the headline. */}
+        {effectiveMode === 'hitRate' ? (
+          <ThresholdChromeScroll
+            enabled={lineScroll}
+            maxHeight={Math.max(160, Math.round(windowHeight * 0.45))}
+          >
+            <View pointerEvents="box-none" style={styles.lineStack}>
+            {/* Compact B: the direction is a label, the book's number sits on
+                the same line, and the ruler underneath is the short tick row.
+                The label still opens At Least / Over / Under. */}
+            <View style={styles.lineCaption}>
+              {/* Locked to the one side the member's books actually sell. It
+                  loses the chip's fill and border, because a DIMMED BORDERED
+                  CHIP is iOS for "a button you cannot use right now" and gets
+                  tapped again; a label has no container (UX review). The text
+                  stays at full textSecondary strength rather than being faded
+                  onto a chip, which would land at ~3.5:1. The reason lives in
+                  the coverage note below, so this carries no accessibilityState
+                  and no sentence — VoiceOver was reading the whole thing twice,
+                  once here and once from the caption, and announcing "dimmed"
+                  on an element declared as static text. */}
+              <Pressable
+                onPress={() => setModeOpen(true)}
+                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                accessibilityRole="button"
+                // Not "Show bets that are": this control survives on a column
+                // with no line at all (NCAAF carries, sacks), where it is the
+                // only place left that would still say "bets" (UX review,
+                // 2026-09-05). The threshold is what it actually sets, priced
+                // or not.
+                accessibilityLabel="Threshold direction"
+                accessibilityValue={{ text: hitModeLabel(hitMode) }}
+                accessibilityHint="Opens the At Least, Over, Under options"
+                style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
+              >
+                <Text style={styles.dirPillText} numberOfLines={1}>
+                  {hitMode === 'atLeast' ? 'At least' : hitModeLabel(hitMode)}
+                </Text>
+              </Pressable>
+              {/* At Least only, and a footnote rather than a headline. The row
+                  this replaces restated the stat, the number and the direction —
+                  all three already on screen — in the screen's second-largest
+                  type, outweighing the hit rate the board exists to show (UX
+                  review, 2026-09-12). Only the book's half-point line was novel,
+                  so only it survives. Over and Under ARE that number already. */}
+              {hitMode === 'atLeast' ? (
+                // Silent: `describe` below already appends this exact string to
+                // the ruler's accessibilityValue, so leaving it reachable made
+                // VoiceOver read "Over 1.5" twice — once in the adjustable, once
+                // on the next swipe. Same double-read the direction pill's note
+                // records fixing on 2026-09-05.
+                <Text style={styles.bookLine} numberOfLines={1} importantForAccessibility="no">
+                  {hitModeLineLabel(lineN, hitMode)}
+                </Text>
+              ) : null}
+            </View>
+            <View
+              pointerEvents="box-none"
+              style={[
+                styles.lineRulerPad,
+                {
+                  height: rulerChrome.visual + rulerChrome.overhang * 2,
+                  // The top wing overlaps the caption. "At least" sits on the
+                  // left of that line, clear of the marker. The bottom wing
+                  // stays inside this pad: a negative margin here pulled the
+                  // window chip under the marker into the wing (UX review).
+                  marginTop: -rulerChrome.overhang,
+                  zIndex: 1,
+                },
+              ]}
+            >
+              {/* Every mode resolves a stop to the SAME half-point line — only
+                  the face differs — so a mode change renames the bet without
+                  moving it (lib/hitMode.ts). The stops are not quite the same
+                  SET, though: Under n names "n-1 or fewer", so it needs one
+                  extra to reach the ceiling At Least and Over both express at
+                  maxLineN. Without it "10 or fewer Hits" is unsayable while
+                  "10+ Hits" is (UX review, 2026-09-06). Both that extra stop and
+                  the PITCH of the stops are the scale's business now — NFL and
+                  NCAAF yardage counts in fives (lib/lineRuler.ts). */}
+              <LineRuler
+                value={lineN}
+                scale={rulerScale}
+                baseCount={baseStopCount(stat)}
+                onChange={setLineN}
+                format={(n) => rulerValueLabel(n, hitMode)}
+                // Carries the book's number in At Least mode because the
+                // headline row that used to print it is gone: the ruler is the
+                // one element a screen-reader user drives, so dropping it here
+                // would take the book's line off the screen entirely for them —
+                // the exact regression the 2026-09-05 fix prevented.
+                describe={(n) =>
+                  hitMode === 'atLeast'
+                    ? `${hitModeHeadline(n, hitMode, stat?.label ?? '')}, ${hitModeLineLabel(n, hitMode)}`
+                    : hitModeHeadline(n, hitMode, stat?.label ?? '')
+                }
+                a11yLabel={`${stat?.label ?? ''} line`}
+                statLabel={stat?.label ?? ''}
+                onNotice={setLineNotice}
+                onEditBar={setLineEditBar}
+                // Read in the face's idiom ("50" is 50+ in At Least; "50.5" is
+                // that line in Over/Under). Clamping happens on commit, against
+                // the stops VoiceOver can step — LineRuler's `hi`, not
+                // `scale.max`. Junk still parses as nothing.
+                parseTyped={(text) => parseTypedLine(text, hitMode)}
+                onChrome={onRulerChrome}
+              />
+            </View>
+            {Platform.OS !== 'ios' && lineEditBar ? (
+              <ThresholdDoneBar onCancel={lineEditBar.cancel} onDone={lineEditBar.commit} />
+            ) : null}
+            {lineNotice ? (
+              <View style={styles.lineNotice} accessibilityLiveRegion={Platform.OS === 'android' ? 'polite' : undefined}>
+                <Ionicons name="information-circle-outline" size={14} color={colors.tint} />
+                <Text style={styles.lineNoticeText}>{lineNotice}</Text>
+              </View>
+            ) : null}
+            </View>
+          </ThresholdChromeScroll>
+        ) : null}
+
+        {/* Time window strip (L3…L20), with Hit Rates | Averages riding the end.
+            THE SLATE CHIP USED TO LIVE AT THE END OF THIS ROW. Matt moved it into
+            the Filters sheet on 2026-09-12 ("in the filter at the top we should
+            have a toggle for playing today") — with the board no longer starting
+            filtered, a chip that only sometimes rendered, sat next to four time
+            windows it had nothing to do with, and re-read the board on tap was
+            the wrong home for it. It is one line in `Availability` now, beside
+            the Games cut it actually composes with.
+            RN ScrollViews default to flexGrow/flexShrink 1, so a direct child of
+            the screen column gets crushed to a sliver whenever the controls +
+            list overflow the screen (labels clip out entirely). The WRAPPER is
+            that child now and carries the pin. The scroller is flex: 1 with
+            basis 0 (styles.rowScroller) so it takes the width the labels leave
+            and the chips scroll; a content-sized basis measured "Hit Rates" and
+            "Averages" down to their padding at 390×1. The FlatList below stays
+            the one flexible region. */}
+        {windowStripHidden ? (
+          notesButton ? <View style={styles.notesFallbackRow}>{notesButton}</View> : null
+        ) : (
+        <View style={[styles.fixedRow, styles.windowStrip]}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             style={styles.rowScroller}
-            contentContainerStyle={styles.chipRowInline}
+            contentContainerStyle={styles.windowRow}
             keyboardShouldPersistTaps="handled"
           >
-            {chipsForSegment(sport, segment).map((s) => (
+            {TIME_WINDOWS.filter((w) => w.value !== 'h2h' || canHitRate).map((w) => (
               <FilterChip
-                key={`${s.group}:${String(s.key)}`}
-                label={s.label}
-                active={s.key === stat.key && s.group === stat.group}
-                onPress={() => pickStat(s)}
+                key={String(w.value)}
+                label={w.label}
+                // "H2H" is the one chip on this strip that does not decode from
+                // the rest of the screen, and VoiceOver reads it "H two H".
+                accessibilityLabel={
+                  w.value === 'h2h'
+                    ? 'Head to head — versus next opponent, last 2 seasons'
+                    : undefined
+                }
+                active={w.value === timeWindow}
+                onPress={() => pickWindow(w.value)}
               />
             ))}
           </ScrollView>
-        </View>
-      </View>
-
-      {/* Averages on a sport with no hit-rate ruler. The pill still prices a
-          side, and nothing else on the board names it. Same quiet caption as
-          the no-lines note. The Goals chip stays "Goals"; the bet is Anytime
-          Goal (markets.ts propDisplayLabel).
-          The pill does not also say the snapshot is old. Prop rows carry
-          snapshot_at, and the game-line age rule (markets.priceAgeApplies)
-          does not cover props — their normal age is hours. A second caption
-          on this shared cell would be a new flag on every sport's board.
-          It stays INLINE when the other notes moved behind the ⓘ: it names
-          the bet, it is not an explanation (UX review, 2026-10-29). */}
-      {!canHitRate && showOdds && lineHeadline ? (
-        <View style={styles.noLinesRow}>
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text
-            style={styles.noLinesText}
-            numberOfLines={headlineLines}
-            accessibilityLabel={lineHeadline}
-          >
-            {lineHeadline}
-          </Text>
-        </View>
-      ) : null}
-
-      {/* Line picker: the mode, a tick ruler, then the headline. */}
-      {effectiveMode === 'hitRate' ? (
-        <ThresholdChromeScroll
-          enabled={lineScroll}
-          maxHeight={Math.max(160, Math.round(windowHeight * 0.45))}
-        >
-          <View pointerEvents="box-none" style={styles.lineStack}>
-          {/* Compact B: the direction is a label, the book's number sits on
-              the same line, and the ruler underneath is the short tick row.
-              The label still opens At Least / Over / Under. */}
-          <View style={styles.lineCaption}>
-            {/* Locked to the one side the member's books actually sell. It
-                loses the chip's fill and border, because a DIMMED BORDERED
-                CHIP is iOS for "a button you cannot use right now" and gets
-                tapped again; a label has no container (UX review). The text
-                stays at full textSecondary strength rather than being faded
-                onto a chip, which would land at ~3.5:1. The reason lives in
-                the coverage note below, so this carries no accessibilityState
-                and no sentence — VoiceOver was reading the whole thing twice,
-                once here and once from the caption, and announcing "dimmed"
-                on an element declared as static text. */}
-            <Pressable
-              onPress={() => setModeOpen(true)}
-              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-              accessibilityRole="button"
-              // Not "Show bets that are": this control survives on a column
-              // with no line at all (NCAAF carries, sacks), where it is the
-              // only place left that would still say "bets" (UX review,
-              // 2026-09-05). The threshold is what it actually sets, priced
-              // or not.
-              accessibilityLabel="Threshold direction"
-              accessibilityValue={{ text: hitModeLabel(hitMode) }}
-              accessibilityHint="Opens the At Least, Over, Under options"
-              style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
-            >
-              <Text style={styles.dirPillText} numberOfLines={1}>
-                {hitMode === 'atLeast' ? 'At least' : hitModeLabel(hitMode)}
-              </Text>
-            </Pressable>
-            {/* At Least only, and a footnote rather than a headline. The row
-                this replaces restated the stat, the number and the direction —
-                all three already on screen — in the screen's second-largest
-                type, outweighing the hit rate the board exists to show (UX
-                review, 2026-09-12). Only the book's half-point line was novel,
-                so only it survives. Over and Under ARE that number already. */}
-            {hitMode === 'atLeast' ? (
-              // Silent: `describe` below already appends this exact string to
-              // the ruler's accessibilityValue, so leaving it reachable made
-              // VoiceOver read "Over 1.5" twice — once in the adjustable, once
-              // on the next swipe. Same double-read the direction pill's note
-              // records fixing on 2026-09-05.
-              <Text style={styles.bookLine} numberOfLines={1} importantForAccessibility="no">
-                {hitModeLineLabel(lineN, hitMode)}
-              </Text>
-            ) : null}
-          </View>
-          <View
-            pointerEvents="box-none"
-            style={[
-              styles.lineRulerPad,
-              {
-                height: rulerChrome.visual + rulerChrome.overhang * 2,
-                // The top wing overlaps the caption. "At least" sits on the
-                // left of that line, clear of the marker. The bottom wing
-                // stays inside this pad: a negative margin here pulled the
-                // window chip under the marker into the wing (UX review).
-                marginTop: -rulerChrome.overhang,
-                zIndex: 1,
-              },
-            ]}
-          >
-            {/* Every mode resolves a stop to the SAME half-point line — only
-                the face differs — so a mode change renames the bet without
-                moving it (lib/hitMode.ts). The stops are not quite the same
-                SET, though: Under n names "n-1 or fewer", so it needs one
-                extra to reach the ceiling At Least and Over both express at
-                maxLineN. Without it "10 or fewer Hits" is unsayable while
-                "10+ Hits" is (UX review, 2026-09-06). Both that extra stop and
-                the PITCH of the stops are the scale's business now — NFL and
-                NCAAF yardage counts in fives (lib/lineRuler.ts). */}
-            <LineRuler
-              value={lineN}
-              scale={rulerScale}
-              baseCount={baseStopCount(stat)}
-              onChange={setLineN}
-              format={(n) => rulerValueLabel(n, hitMode)}
-              // Carries the book's number in At Least mode because the
-              // headline row that used to print it is gone: the ruler is the
-              // one element a screen-reader user drives, so dropping it here
-              // would take the book's line off the screen entirely for them —
-              // the exact regression the 2026-09-05 fix prevented.
-              describe={(n) =>
-                hitMode === 'atLeast'
-                  ? `${hitModeHeadline(n, hitMode, stat?.label ?? '')}, ${hitModeLineLabel(n, hitMode)}`
-                  : hitModeHeadline(n, hitMode, stat?.label ?? '')
-              }
-              a11yLabel={`${stat?.label ?? ''} line`}
-              statLabel={stat?.label ?? ''}
-              onNotice={setLineNotice}
-              onEditBar={setLineEditBar}
-              // Read in the face's idiom ("50" is 50+ in At Least; "50.5" is
-              // that line in Over/Under). Clamping happens on commit, against
-              // the stops VoiceOver can step — LineRuler's `hi`, not
-              // `scale.max`. Junk still parses as nothing.
-              parseTyped={(text) => parseTypedLine(text, hitMode)}
-              onChrome={onRulerChrome}
-            />
-          </View>
-          {Platform.OS !== 'ios' && lineEditBar ? (
-            <ThresholdDoneBar onCancel={lineEditBar.cancel} onDone={lineEditBar.commit} />
-          ) : null}
-          {lineNotice ? (
-            <View style={styles.lineNotice} accessibilityLiveRegion={Platform.OS === 'android' ? 'polite' : undefined}>
-              <Ionicons name="information-circle-outline" size={14} color={colors.tint} />
-              <Text style={styles.lineNoticeText}>{lineNotice}</Text>
+          {/* Hit Rates | Averages — a two-value switch, so it rides the end of
+              this row instead of spending a third full-width underline-tab row
+              on the screen (UX review, 2026-09-12). Still SegmentTabs and not a
+              hand-rolled segment: the tablist/tab/selected roles travel with the
+              component, and that is the point of reusing it. The row is a View
+              with the scroller flexing inside it, so `fixedRow` still pins the
+              whole strip to its natural height and the FlatList stays the one
+              flexible child of the screen column. */}
+          {canHitRate && !stackModeTabs ? (
+            <View style={[styles.modeSeg, notesButton ? styles.modeSegBeforeNotes : null]}>
+              <SegmentTabs
+                items={MODES}
+                active={effectiveMode}
+                onChange={pickMode}
+                compact
+                labelFor={(m) => (m === 'hitRate' ? 'Hit Rates' : 'Averages')}
+              />
             </View>
           ) : null}
-          </View>
-        </ThresholdChromeScroll>
-      ) : null}
-
-      {/* Time window strip (L3…L20), with Hit Rates | Averages riding the end.
-          THE SLATE CHIP USED TO LIVE AT THE END OF THIS ROW. Matt moved it into
-          the Filters sheet on 2026-09-12 ("in the filter at the top we should
-          have a toggle for playing today") — with the board no longer starting
-          filtered, a chip that only sometimes rendered, sat next to four time
-          windows it had nothing to do with, and re-read the board on tap was
-          the wrong home for it. It is one line in `Availability` now, beside
-          the Games cut it actually composes with.
-          RN ScrollViews default to flexGrow/flexShrink 1, so a direct child of
-          the screen column gets crushed to a sliver whenever the controls +
-          list overflow the screen (labels clip out entirely). The WRAPPER is
-          that child now and carries the pin. The scroller is flex: 1 with
-          basis 0 (styles.rowScroller) so it takes the width the labels leave
-          and the chips scroll; a content-sized basis measured "Hit Rates" and
-          "Averages" down to their padding at 390×1. The FlatList below stays
-          the one flexible region. */}
-      {windowStripHidden ? (
-        notesButton ? <View style={styles.notesFallbackRow}>{notesButton}</View> : null
-      ) : (
-      <View style={[styles.fixedRow, styles.windowStrip]}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.rowScroller}
-          contentContainerStyle={styles.windowRow}
-          keyboardShouldPersistTaps="handled"
-        >
-          {TIME_WINDOWS.filter((w) => w.value !== 'h2h' || canHitRate).map((w) => (
-            <FilterChip
-              key={String(w.value)}
-              label={w.label}
-              // "H2H" is the one chip on this strip that does not decode from
-              // the rest of the screen, and VoiceOver reads it "H two H".
-              accessibilityLabel={
-                w.value === 'h2h'
-                  ? 'Head to head — versus next opponent, last 2 seasons'
-                  : undefined
-              }
-              active={w.value === timeWindow}
-              onPress={() => pickWindow(w.value)}
-            />
-          ))}
-        </ScrollView>
-        {/* Hit Rates | Averages — a two-value switch, so it rides the end of
-            this row instead of spending a third full-width underline-tab row
-            on the screen (UX review, 2026-09-12). Still SegmentTabs and not a
-            hand-rolled segment: the tablist/tab/selected roles travel with the
-            component, and that is the point of reusing it. The row is a View
-            with the scroller flexing inside it, so `fixedRow` still pins the
-            whole strip to its natural height and the FlatList stays the one
-            flexible child of the screen column. */}
-        {canHitRate && !stackModeTabs ? (
-          <View style={[styles.modeSeg, notesButton ? styles.modeSegBeforeNotes : null]}>
-            <SegmentTabs
-              items={MODES}
-              active={effectiveMode}
-              onChange={pickMode}
-              compact
-              labelFor={(m) => (m === 'hitRate' ? 'Hit Rates' : 'Averages')}
-            />
-          </View>
+          {notesButton}
+        </View>
+        )}
+        {/* At accessibility text sizes the inline segment is ~302pt of a 375pt
+            row and nothing in the strip can shrink (tabCompact is flex: 0, and a
+            plain View defaults to flexShrink: 0 in RN), so the time-window chips
+            are squeezed to nothing and "Averages" clips. The 38pt row is the
+            right answer for exactly the users who need it, and only for them
+            (UX review, 2026-09-12). */}
+        {canHitRate && stackModeTabs ? (
+          <SegmentTabs
+            items={MODES}
+            active={effectiveMode}
+            onChange={pickMode}
+            labelFor={(m) => (m === 'hitRate' ? 'Hit Rates' : 'Averages')}
+          />
         ) : null}
-        {notesButton}
-      </View>
+        </>
       )}
-      {/* At accessibility text sizes the inline segment is ~302pt of a 375pt
-          row and nothing in the strip can shrink (tabCompact is flex: 0, and a
-          plain View defaults to flexShrink: 0 in RN), so the time-window chips
-          are squeezed to nothing and "Averages" clips. The 38pt row is the
-          right answer for exactly the users who need it, and only for them
-          (UX review, 2026-09-12). */}
-      {canHitRate && stackModeTabs ? (
-        <SegmentTabs
-          items={MODES}
-          active={effectiveMode}
-          onChange={pickMode}
-          labelFor={(m) => (m === 'hitRate' ? 'Hit Rates' : 'Averages')}
-        />
-      ) : null}
 
       {/* A failed load is recoverable far more often than not — PostgREST
           answers 503 for as long as it takes to rebuild its schema cache — so
@@ -3271,6 +3402,7 @@ export function StatsScreen() {
 
       {effectiveMode === 'hitRate' ? (
         <FlatList
+          {...boardScrollProps}
           ListFooterComponent={<>{lineOnlySection}<BetslipBarSpacer /></>}
           data={hitData}
           // `slateChecking` counts as loading under H2H: the load gate skips
@@ -3338,6 +3470,7 @@ export function StatsScreen() {
         />
       ) : (
         <FlatList
+          {...boardScrollProps}
           ListFooterComponent={<>{lineOnlySection}<BetslipBarSpacer /></>}
           data={rowsAreStale ? EMPTY_ROWS : ranked}
           keyExtractor={(item) => item.row.player_id}
@@ -5548,6 +5681,28 @@ function HitRateRow({
 }
 
 const styles = StyleSheet.create({
+  // The folded controls row (see controlsCollapsed). 44pt tap target.
+  controlsSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.separator,
+  },
+  controlsSummary: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+  },
+  controlsSummaryText: {
+    flex: 1,
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
   container: { flex: 1, backgroundColor: colors.bg },
 
   // Applied to the horizontal chip/pill scrollers that sit directly in the

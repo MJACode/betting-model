@@ -450,7 +450,7 @@ const badgeText = /badgeText: \{[\s\S]*?\}/.exec(toggle)?.[0] ?? '';
 check('SportToggle count badge: onBright on bet (H6)', /colors\.bet\b/.test(badge) && /color: colors\.onBright/.test(badgeText));
 check('SportToggle muted label has no extra opacity (M17)', !/labelMuted: \{[^}]*opacity/.test(toggle));
 const player = read('src/screens/PlayerStatsScreen.tsx');
-check('player hit-rate badge text is dark on its bright fill', /hitBadgeText: \{[^}]*color: colors\.onBright/.test(player));
+check('player hit rate is inline text in the text-safe ink, never the bright fill', /styles\.hitRateInline, \{ color: inkFor\(hitColor\) \}/.test(player) && !/hitBadge/.test(player));
 // Tracking / In slip ON state: outlined in tint + checkmark, never green
 // (UX_REVIEW §2: green means only "good for the user").
 const trackSrc = read('src/components/TrackButton.tsx');
