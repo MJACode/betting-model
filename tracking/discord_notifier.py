@@ -3832,7 +3832,12 @@ def _void_rows_sql() -> str:
                sig.message_id, sig.sent_at,
                (sig.kind IS NOT NULL) AS has_signal,
                (void.kind IS NOT NULL) AS already_voided,
-               p.dk_bet_link, p.best_bet_link
+               p.dk_bet_link, p.best_bet_link,
+               -- The book the pick was decided at, read the way the signal
+               -- post reads it. Without it book_for_pick falls back to
+               -- DraftKings, and the 2026-11-24 notices for a BetMGM and a
+               -- BetRivers pick said "@ DraftKings".
+               p.decision_book, p.decision_odds AS decision_odds_raw
           FROM picks p
           LEFT JOIN games g ON g.game_id = p.game_id
           LEFT JOIN push_sent sig
@@ -3873,6 +3878,8 @@ def _pick_from_row(row) -> dict:
         "already_voided": bool(row[22]),
         "bet_link": row[23] if len(row) > 23 else None,
         "best_bet_link": row[24] if len(row) > 24 else None,
+        "decision_book": row[25] if len(row) > 25 else None,
+        "decision_odds_raw": row[26] if len(row) > 26 else None,
     }
 
 
