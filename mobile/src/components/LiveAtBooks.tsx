@@ -3,7 +3,7 @@ import { StyleSheet, Text } from 'react-native';
 
 import { SegmentTabs } from '@/components/GroupTabs';
 import { Section, TeamHeads, TriRow } from '@/components/MatchupSections';
-import { bookName } from '@/lib/markets';
+import { bookName, booksName } from '@/lib/markets';
 import { liveBookLines, scoreboardMarketLabel, type LiveBookRow } from '@/lib/scoreboard';
 import { colors, font } from '@/lib/theme';
 
@@ -93,7 +93,7 @@ export function LiveAtBooks({
           )}
           {error ? (
             <Text style={styles.note}>
-              {`Couldn’t load ${failedBooks.length > 0 ? prose(failedBooks.map(bookName)) : 'some of your books'}. ` +
+              {`Couldn’t load ${failedLabel(failedBooks)}. ` +
                 'This page tries again every 30 seconds.'}
             </Text>
           ) : null}
@@ -103,10 +103,12 @@ export function LiveAtBooks({
   );
 }
 
-/** "FanDuel", "FanDuel and BetMGM", "FanDuel, BetMGM and Caesars". */
-function prose(names: readonly string[]): string {
-  if (names.length <= 1) return names.join('');
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+/** "FanDuel", "FanDuel and BetMGM", "3 of your sportsbooks": booksName's two-book
+ *  rule. Not its "your 3 sportsbooks", which would read as all of them. */
+function failedLabel(books: readonly string[]): string {
+  if (books.length === 0) return 'some of your sportsbooks';
+  if (books.length <= 2) return booksName(books);
+  return `${books.length} of your sportsbooks`;
 }
 
 const styles = StyleSheet.create({

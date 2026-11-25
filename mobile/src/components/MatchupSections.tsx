@@ -83,7 +83,7 @@ export interface Cell {
   main: string;
   sub?: string;
   better?: boolean;
-  /** Drawn in the secondary ink: a live line with no move in a while. */
+  /** Drawn in the tertiary ink: a live line with no move in a while. */
   muted?: boolean;
 }
 
@@ -489,7 +489,7 @@ const styles = StyleSheet.create({
   },
   stackCells: { flexDirection: 'row', gap: spacing.md },
   stackSide: { gap: spacing.xs },
-  muted: { color: colors.textSecondary },
+  muted: { color: colors.textTertiary },
   cellSide: { flex: 1 },
   cellMid: { flex: 1.1, textAlign: 'center', paddingHorizontal: spacing.xs },
   alignEnd: { alignItems: 'flex-end' },
