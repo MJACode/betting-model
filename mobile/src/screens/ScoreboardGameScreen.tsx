@@ -15,7 +15,7 @@ import {
 } from '@/components/MatchupSections';
 import { useMatchup } from '@/hooks/useMatchup';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
-import { bookLabel } from '@/lib/markets';
+import { LiveAtBooks } from '@/components/LiveAtBooks';
 import { hasMatchupView } from '@/lib/gameMatchup';
 import { MatchupPicks } from '@/components/MatchupPicks';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
@@ -36,7 +36,6 @@ import {
   feedFromEspn,
   feedFromMlb,
   feedFromNcaaf,
-  liveBookLines,
   mergeDkInplay,
   movementText,
   presentScoreboard,
@@ -121,9 +120,14 @@ export function ScoreboardGameScreen() {
   const [linesError, setLinesError] = useState<string | null>(null);
   // Every book the member uses, live (mike, 2026-11-25: "why not FanDuel,
   // MGM etc"). Read only once the game has started and has no final score.
-  const { books } = usePreferredBooks();
+  const { books, ready: booksReady } = usePreferredBooks();
   const [bookRows, setBookRows] = useState<OddsByBookRow[]>([]);
   const [bookError, setBookError] = useState<string | null>(null);
+  // Started and not settled: the read and the section share this one test,
+  // so a sport with no live score feed (WNBA, UFC, tennis) still gets its
+  // books' live lines (UX review, 2026-11-25).
+  const [booksDue, setBooksDue] = useState(false);
+  const [booksLoaded, setBooksLoaded] = useState(false);
   const inplayHold = useRef<ScoreboardQuote[]>([]);
   const loadGen = useRef(0);
 
@@ -142,7 +146,7 @@ export function ScoreboardGameScreen() {
       }
       const started = game.commence_time != null && Date.parse(game.commence_time) <= Date.now();
       const maybeLive = started && (game.home_score == null || game.away_score == null);
-      const [dk, ends, inplayRows, mlb, ncaaf, espn, atBooks] = await Promise.all([
+      const [dk, ends, inplayRows, mlb, ncaaf, espn] = await Promise.all([
         fetchScoreboardDkOddsForGame(gameId).catch(() => []),
         Promise.all(marketsFor(game.sport).map(async (m) => [m.id, await fetchDkMarketEnds(gameId, m.id)] as const)).catch(
           () => [] as const,
@@ -153,9 +157,6 @@ export function ScoreboardGameScreen() {
         ESPN_LIVE_SPORTS.includes(game.sport)
           ? fetchLiveScoreboard([gameId]).catch(() => [])
           : Promise.resolve([]),
-        maybeLive
-          ? fetchInplayAtBooksForGame(gameId, books)
-          : Promise.resolve({ rows: [] as OddsByBookRow[], error: null as string | null }),
       ]);
       const merged = mergeDkInplay(
         new Map([[gameId, inplayHold.current]]),
@@ -174,8 +175,18 @@ export function ScoreboardGameScreen() {
       if (gen !== loadGen.current) return;
       inplayHold.current = inplay;
       setCard(presentScoreboard({ game, pregame: dk, inplay, feed, abbrevs }));
-      setBookRows(atBooks.rows);
-      setBookError(atBooks.error);
+      setBooksDue(maybeLive);
+      // After the card, on its own: the score never waits on up to 21 line
+      // reads (UX review, 2026-11-25). Not before the member's book list has
+      // loaded, so a default list never shows for one poll.
+      if (maybeLive && booksReady) {
+        void fetchInplayAtBooksForGame(gameId, books).then((at) => {
+          if (gen !== loadGen.current) return;
+          setBookRows(at.rows);
+          setBookError(at.error);
+          setBooksLoaded(true);
+        });
+      }
       const moved: Record<string, string | null> = {};
       for (const [market, pair] of ends) {
         const live = market === 'spreads' || market === 'totals' || market === 'h2h'
@@ -198,7 +209,7 @@ export function ScoreboardGameScreen() {
         setRetrying(false);
       }
     }
-  }, [gameId, abbrevs, books]);
+  }, [gameId, abbrevs, books, booksReady]);
 
   useFocusEffect(
     useCallback(() => {
@@ -235,6 +246,18 @@ export function ScoreboardGameScreen() {
     : card.footerText;
 
   const started = card.footerBadge === 'LIVE' || game?.home_score != null;
+  const liveBooks = booksDue ? (
+    <LiveAtBooks
+      sport={card.sport}
+      markets={marketsFor(card.sport).map((mk) => mk.id)}
+      rows={bookRows}
+      books={books}
+      teams={{ away: card.away.name, home: card.home.name, awayFull: card.awayFull, homeFull: card.homeFull }}
+      loading={!booksLoaded}
+      error={bookError}
+      onRetry={() => void load()}
+    />
+  ) : null;
   const refreshAll = () => {
     setPulling(true);
     void load();
@@ -288,19 +311,7 @@ export function ScoreboardGameScreen() {
         {card.updatedLabel ? ` · ${card.updatedLabel}` : ''}
       </Text>
       {card.situation ? <Text style={styles.situation}>{card.situation}</Text> : null}
-      {card.phase === 'live' ? (
-        <LiveAtBooks
-          card={card}
-          rows={bookRows}
-          books={books}
-          error={bookError}
-          onRetry={() => {
-            setRetrying(true);
-            void load();
-          }}
-          retrying={retrying}
-        />
-      ) : null}
+      {matchupOn ? null : liveBooks}
       {matchupOn && game ? (
         <>
           {/* Our verdict first: the Signals board's own cards for this game,
@@ -312,6 +323,7 @@ export function ScoreboardGameScreen() {
             refreshNonce={pullNonce}
             onLoadingChange={setPicksLoading}
           />
+          {liveBooks}
           <BestPriceSection m={m} away={game.away_team} home={game.home_team} started={started} onRetry={retrySections} />
           <CompareSection m={m} away={game.away_team} home={game.home_team} group="efficiency" onRetry={retrySections} />
           <FormSection m={m} away={game.away_team} home={game.home_team} onRetry={retrySections} />
@@ -345,62 +357,6 @@ function newest(rows: ScoreboardQuote[]): ScoreboardQuote[] {
     if (!prev || at > (prev.snapshot_at ?? '')) by.set(row.market, row);
   }
   return [...by.values()];
-}
-
-/**
- * Each book the member uses, its own live number per market, newest first in
- * the member's book order. Rows older than LIVE_BOOK_MAX_AGE_MS are a book
- * that stopped posting, and are left out (lib/scoreboard liveBookLines).
- */
-function LiveAtBooks({
-  card,
-  rows,
-  books,
-  error,
-  onRetry,
-  retrying,
-}: {
-  card: ReturnType<typeof presentScoreboard>;
-  rows: OddsByBookRow[];
-  books: readonly string[];
-  error: string | null;
-  onRetry: () => void;
-  retrying: boolean;
-}) {
-  const teams = { away: card.away.name, home: card.home.name };
-  return (
-    <View style={styles.block}>
-      <Text style={styles.blockTitle} accessibilityRole="header">Live at your books</Text>
-      {error ? <ErrorBanner what="live lines at your books" error={error} onRetry={onRetry} retrying={retrying} /> : null}
-      {marketsFor(card.sport).map((m) => {
-        const lines = liveBookLines(rows, m.id, books, teams, bookLabel);
-        return (
-          <View key={m.id} style={styles.bookMarket}>
-            <Text style={styles.bookMarketTitle}>
-              {m.id === 'h2h' ? m.title : scoreboardMarketLabel(m.id, card.sport)}
-            </Text>
-            {lines.length === 0 ? (
-              <Text style={styles.move}>No book you use has a live line stored for this market.</Text>
-            ) : (
-              lines.map((l) => (
-                <View key={l.book} style={styles.bookRow} accessible accessibilityLabel={l.spoken}>
-                  <Text style={styles.bookName} numberOfLines={1}>{l.label}</Text>
-                  <Text style={styles.bookCell}>
-                    {m.id === 'totals' ? l.away : `${teams.away} ${l.away}`}
-                  </Text>
-                  <Text style={styles.bookCell}>
-                    {m.id === 'totals' ? l.home : `${teams.home} ${l.home}`}
-                  </Text>
-                  <Text style={styles.bookAge}>{l.age}</Text>
-                </View>
-              ))
-            )}
-          </View>
-        );
-      })}
-      <Text style={styles.note}>Each book's own number, read every 30 seconds.</Text>
-    </View>
-  );
 }
 
 function MarketLines({
@@ -465,35 +421,6 @@ const styles = StyleSheet.create({
     ...sectionHeaderText,
   },
   lines: { gap: spacing.xs },
-  bookMarket: { gap: spacing.xs },
-  bookMarketTitle: {
-    fontFamily: font.family,
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-  },
-  bookRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm, minHeight: 28 },
-  bookName: {
-    flex: 1.2,
-    fontFamily: font.family,
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
-  bookCell: {
-    flex: 1.4,
-    fontFamily: font.family,
-    fontSize: font.size.callout,
-    color: colors.textPrimary,
-    fontVariant: ['tabular-nums'],
-  },
-  bookAge: {
-    flex: 0.8,
-    textAlign: 'right',
-    fontFamily: font.family,
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-  },
   line: {
     fontFamily: font.family,
     fontSize: font.size.callout,

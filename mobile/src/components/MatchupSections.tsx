@@ -79,7 +79,7 @@ export function Section({
 
 /** One side's cell: the main figure, an optional line under it, and whether
  *  that side is marked as the better league rank. */
-interface Cell {
+export interface Cell {
   main: string;
   sub?: string;
   better?: boolean;
@@ -91,7 +91,7 @@ function useStacked(): boolean {
 
 /** "BOS" over "GSW" column heads, away left and home right. Hidden from
  *  VoiceOver: every row below speaks its own team names. */
-function TeamHeads({ away, home }: { away: string; home: string }) {
+export function TeamHeads({ away, home }: { away: string; home: string }) {
   const stacked = useStacked();
   return (
     <View style={styles.row} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
@@ -117,7 +117,7 @@ function CellView({ cell, right }: { cell: Cell; right?: boolean }) {
 }
 
 /** away | label | home, or label over two columns at large text. */
-function TriRow({ label, away, home, spoken }: { label: string; away: Cell; home: Cell; spoken: string }) {
+export function TriRow({ label, away, home, spoken }: { label: string; away: Cell; home: Cell; spoken: string }) {
   const stacked = useStacked();
   if (stacked) {
     return (

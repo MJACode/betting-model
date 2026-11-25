@@ -707,7 +707,7 @@ export function presentScoreboard(input: {
     awayFull: game.away_team,
     homeFull: game.home_team,
     liveQuotes,
-    accessibilityLabel: `${matchup}, ${stateWord}, ${scoreSpeech}. ${possSpeech}${footerText}. ${situationSpeech}${lineSpeech}. ${updatedLabel ? `${updatedLabel}. ` : ''}DraftKings. Opens the game.`,
+    accessibilityLabel: `${matchup}, ${stateWord}, ${scoreSpeech}. ${possSpeech}${footerText}. ${situationSpeech}${lineSpeech}. ${updatedLabel ? `${updatedLabel}. ` : ''}DraftKings. ${phase === 'live' ? 'Opens live lines at your books.' : 'Opens the game.'}`,
   };
 }
 
@@ -1006,13 +1006,16 @@ export function feedView(
 // ── Live lines at the member's books (the game sheet) ─────────────────────────
 
 /**
- * How long a book's newest in-play row may stand as its live number on the
- * game sheet. The odds feed re-reads a live game every few minutes and
- * DraftKings' own board every second (data/ingestors/dk_live_board.py), so a
- * row older than this is a book that stopped posting the market, not a price.
- * The same 15 minutes MLB's live state uses.
+ * After this long with no new row, a book's live number is shown as "No move
+ * in 22m" rather than with a plain age. A row is written when the book CHANGES
+ * the number (the odds feed stamps the market's own last_update; DraftKings'
+ * board writes only a changed read, data/ingestors/dk_live_board.py), so an old
+ * row is a line that has not moved, or a book that stopped posting it, and the
+ * stored rows cannot tell the two apart. The number stays on screen, said to be
+ * that old, rather than vanishing while the book may still offer it (UX review,
+ * 2026-11-25).
  */
-export const LIVE_BOOK_MAX_AGE_MS = 15 * 60 * 1000;
+export const LIVE_BOOK_QUIET_MS = 15 * 60 * 1000;
 
 /** The fields of an in-play odds row this file reads. */
 export interface LiveBookRow {
@@ -1027,35 +1030,49 @@ export interface LiveBookRow {
   snapshot_at?: string | null;
 }
 
-export interface LiveBookLine {
-  book: string;
-  label: string;
-  /** "+3.5 −110", "o220.5 −112" or "+135": the away side, or the over. */
-  away: string;
-  /** The home side, or the under. */
-  home: string;
-  /** "Now" under a minute, else "4m ago". */
-  age: string;
-  spoken: string;
+/** The line on top and the price under it, as the matchup rows draw them. */
+export interface LiveBookCell {
+  main: string;
+  sub?: string;
 }
 
-function ageText(ms: number): string {
-  const min = Math.floor(ms / 60_000);
-  return min < 1 ? 'Now' : `${min}m ago`;
+export interface LiveBookLine {
+  book: string;
+  /** The away side, or the over. */
+  away: LiveBookCell;
+  /** The home side, or the under. */
+  home: LiveBookCell;
+  /** "+3.5 at −110", "over 220.5 at −112", "+135". */
+  awaySpoken: string;
+  homeSpoken: string;
+  /** "Now", "4m ago", or "No move in 22m" once quiet. */
+  age: string;
+  /** "moved just now", "moved 4 minutes ago", "no move in 22 minutes". */
+  ageSpoken: string;
+  quiet: boolean;
+}
+
+/** The age of a book's newest live row, for the eye and for VoiceOver. */
+export function liveAge(ms: number): { age: string; ageSpoken: string; quiet: boolean } {
+  const min = Math.max(0, Math.floor(ms / 60_000));
+  const minutes = `${min} minute${min === 1 ? '' : 's'}`;
+  if (ms > LIVE_BOOK_QUIET_MS) {
+    return { age: `No move in ${min}m`, ageSpoken: `no move in ${minutes}`, quiet: true };
+  }
+  if (min < 1) return { age: 'Now', ageSpoken: 'moved just now', quiet: false };
+  return { age: `${min}m ago`, ageSpoken: `moved ${minutes} ago`, quiet: false };
 }
 
 /**
- * One line per book the member uses that has a fresh in-play row for the
- * market, in the member's own book order. Each book shows its OWN number: a
- * live line moves every few seconds and books disagree, so nothing here picks
- * an anchor. A row without its line or without both prices is no line.
+ * One line per book the member uses that has an in-play row for the market,
+ * in the member's own book order. Each book shows its OWN number: a live line
+ * moves every few seconds and books disagree, so nothing here picks an anchor
+ * or a best. A row without its line or without both prices is no line.
  */
 export function liveBookLines(
   rows: readonly LiveBookRow[],
   market: 'h2h' | 'spreads' | 'totals',
   books: readonly string[],
-  teams: { away: string; home: string },
-  label: (book: string) => string,
   now: number = Date.now(),
 ): LiveBookLine[] {
   const rank = new Map(books.map((b, i) => [b, i] as const));
@@ -1070,31 +1087,30 @@ export function liveBookLines(
   const out: { at: number; line: LiveBookLine }[] = [];
   for (const [book, r] of newestByBook) {
     const at = parseStamp(r.snapshot_at ?? '').getTime();
-    if (!Number.isFinite(at) || now - at > LIVE_BOOK_MAX_AGE_MS) continue;
-    const name = label(book);
-    let away: string;
-    let home: string;
-    let spoken: string;
+    if (!Number.isFinite(at)) continue;
+    let line: Omit<LiveBookLine, 'age' | 'ageSpoken' | 'quiet'>;
     if (market === 'spreads') {
       const sp = num(r.spread_home);
       if (sp == null || num(r.home_price) == null || num(r.away_price) == null) continue;
-      away = `${signed(-sp)} ${priceText(r.away_price)}`;
-      home = `${signed(sp)} ${priceText(r.home_price)}`;
-      spoken = `${name}: ${teams.away} ${away}, ${teams.home} ${home}`;
+      const a = { main: signed(-sp), sub: priceText(r.away_price) };
+      const h = { main: signed(sp), sub: priceText(r.home_price) };
+      line = { book, away: a, home: h, awaySpoken: `${a.main} at ${a.sub}`, homeSpoken: `${h.main} at ${h.sub}` };
     } else if (market === 'totals') {
       const t = num(r.total_line);
       if (t == null || num(r.over_price) == null || num(r.under_price) == null) continue;
-      away = `o${plain(t)} ${priceText(r.over_price)}`;
-      home = `u${plain(t)} ${priceText(r.under_price)}`;
-      spoken = `${name}: over ${plain(t)} ${priceText(r.over_price)}, under ${plain(t)} ${priceText(r.under_price)}`;
+      const a = { main: `o${plain(t)}`, sub: priceText(r.over_price) };
+      const h = { main: `u${plain(t)}`, sub: priceText(r.under_price) };
+      line = {
+        book, away: a, home: h,
+        awaySpoken: `over ${plain(t)} at ${a.sub}`, homeSpoken: `under ${plain(t)} at ${h.sub}`,
+      };
     } else {
       if (num(r.home_price) == null || num(r.away_price) == null) continue;
-      away = priceText(r.away_price);
-      home = priceText(r.home_price);
-      spoken = `${name}: ${teams.away} ${away}, ${teams.home} ${home}`;
+      const a = { main: priceText(r.away_price) };
+      const h = { main: priceText(r.home_price) };
+      line = { book, away: a, home: h, awaySpoken: a.main, homeSpoken: h.main };
     }
-    const age = ageText(now - at);
-    out.push({ at: rank.get(book) ?? 0, line: { book, label: name, away, home, age, spoken: `${spoken}, ${age}` } });
+    out.push({ at: rank.get(book) ?? 0, line: { ...line, ...liveAge(now - at) } });
   }
   return out.sort((a, b) => a.at - b.at).map((x) => x.line);
 }

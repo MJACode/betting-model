@@ -27,7 +27,7 @@ import {
   scoreboardSwitchLine,
   scoreboardMarketsFor,
   liveBookLines,
-  LIVE_BOOK_MAX_AGE_MS,
+  LIVE_BOOK_QUIET_MS,
   SCOREBOARD_BOOK_NOTE,
   SCOREBOARD_LIVE_BOOK_NOTE,
   type ScoreboardGame,
@@ -434,41 +434,41 @@ check('the nudge names the day, the league and its noun',
 {
   const now = Date.parse('2026-11-25T01:00:00Z');
   const at = (sec: number) => new Date(now - sec * 1000).toISOString();
-  const label = (b: string) => ({ draftkings: 'DraftKings', fanduel: 'FanDuel', betmgm: 'BetMGM' } as Record<string, string>)[b] ?? b;
   const rows = [
     { market: 'spreads', bookmaker: 'fanduel', spread_home: -3.5, home_price: -110, away_price: -110, snapshot_at: at(90) },
     { market: 'spreads', bookmaker: 'draftkings', spread_home: -4, home_price: -105, away_price: -115, snapshot_at: at(5) },
     { market: 'spreads', bookmaker: 'draftkings', spread_home: -2, home_price: -110, away_price: -110, snapshot_at: at(600) },
     { market: 'spreads', bookmaker: 'betmgm', spread_home: -3.5, home_price: -110, away_price: -110,
-      snapshot_at: at(LIVE_BOOK_MAX_AGE_MS / 1000 + 60) },
+      snapshot_at: at(LIVE_BOOK_QUIET_MS / 1000 + 7 * 60) },
     { market: 'spreads', bookmaker: 'pinnacle', spread_home: -3.5, home_price: -108, away_price: -108, snapshot_at: at(10) },
     { market: 'totals', bookmaker: 'fanduel', total_line: 220.5, over_price: -112, under_price: -108, snapshot_at: at(30) },
     { market: 'totals', bookmaker: 'draftkings', total_line: null, over_price: -110, under_price: -110, snapshot_at: at(3) },
     { market: 'h2h', bookmaker: 'betmgm', home_price: -160, away_price: 135, snapshot_at: at(20) },
   ];
   const books = ['draftkings', 'fanduel', 'betmgm'];
-  const teams = { away: 'BOS', home: 'IND' };
-  const sp = liveBookLines(rows, 'spreads', books, teams, label, now);
+  const sp = liveBookLines(rows, 'spreads', books, now);
   check('live spreads: each book its own newest number, in the member book order',
-    sp.map((l) => l.book).join(',') === 'draftkings,fanduel');
-  check('live spreads: the away side is the home number turned over',
-    sp[0]?.away === '+4 −115' && sp[0]?.home === '−4 −105');
-  check('live spreads: a book older than the live window is left out',
-    !sp.some((l) => l.book === 'betmgm'));
+    sp.map((l) => l.book).join(',') === 'draftkings,fanduel,betmgm');
+  check('live spreads: the away side is the home number turned over, price under it',
+    sp[0]?.away.main === '+4' && sp[0]?.away.sub === '−115' && sp[0]?.home.main === '−4' && sp[0]?.home.sub === '−105');
+  check('live spreads: a line with no move in 15 minutes stays, said to be quiet',
+    sp[2]?.quiet === true && sp[2]?.age === 'No move in 22m' && sp[2]?.ageSpoken === 'no move in 22 minutes');
   check('live spreads: a book the member does not use is left out',
     !sp.some((l) => l.book === 'pinnacle'));
-  check('live spreads: age reads Now under a minute, else minutes',
-    sp[0]?.age === 'Now' && sp[1]?.age === '1m ago');
-  check('live spreads: VoiceOver names the book, both sides and the age',
-    sp[0]?.spoken === 'DraftKings: BOS +4 −115, IND −4 −105, Now');
-  const tot = liveBookLines(rows, 'totals', books, teams, label, now);
-  check('live totals: a row with no line is no line',
-    tot.map((l) => l.book).join(',') === 'fanduel' && tot[0]?.away === 'o220.5 −112' && tot[0]?.home === 'u220.5 −108');
-  const ml = liveBookLines(rows, 'h2h', books, teams, label, now);
-  check('live moneyline: away and home prices', ml[0]?.away === '+135' && ml[0]?.home === '−160');
-  check('no rows, no lines', liveBookLines([], 'h2h', books, teams, label, now).length === 0);
+  check('live spreads: age reads Now under a minute, else minutes, and VoiceOver hears words',
+    sp[0]?.age === 'Now' && sp[0]?.ageSpoken === 'moved just now' && sp[1]?.age === '1m ago'
+      && sp[1]?.ageSpoken === 'moved 1 minute ago' && sp[1]?.quiet === false);
+  check('live spreads: VoiceOver hears the line at the price',
+    sp[0]?.awaySpoken === '+4 at −115' && sp[0]?.homeSpoken === '−4 at −105');
+  const tot = liveBookLines(rows, 'totals', books, now);
+  check('live totals: a row with no line is no line; over and under',
+    tot.map((l) => l.book).join(',') === 'fanduel' && tot[0]?.away.main === 'o220.5' && tot[0]?.home.sub === '−108'
+      && tot[0]?.awaySpoken === 'over 220.5 at −112');
+  const ml = liveBookLines(rows, 'h2h', books, now);
+  check('live moneyline: away and home prices', ml[0]?.away.main === '+135' && ml[0]?.home.main === '−160');
+  check('no rows, no lines', liveBookLines([], 'h2h', books, now).length === 0);
   check('a live card says the sheet has your books',
-    SCOREBOARD_LIVE_BOOK_NOTE !== SCOREBOARD_BOOK_NOTE && SCOREBOARD_LIVE_BOOK_NOTE.includes('your books'));
+    (SCOREBOARD_LIVE_BOOK_NOTE as string) !== SCOREBOARD_BOOK_NOTE && SCOREBOARD_LIVE_BOOK_NOTE.includes('your books'));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
