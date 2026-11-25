@@ -90,6 +90,25 @@ answered with an empty list for one query. A change from 2026-11-15 on drf.com a
 racing.draftkings.com may be the user agent, not the site: the earlier probes did
 not record theirs.
 
+**Re-probe from mike's PC, 2026-11-23** (curl with a Chrome user agent, redirects not
+followed). Unchanged: cris.unibo.it and iris.uniroma4.it 403; euroleaguebasketball.net 429;
+forum.sportsbookreview.com 000 while sportsbookreview.com/forum/ 200; covers.com/forum, arXiv,
+Kaggle, centaur.reading.ac.uk, bettingexpert.com, the OddsPortal, BetExplorer, Flashscore and
+bestfightodds robots.txt, the ESPN tennis scoreboard, Pinnacle's matchups API, TennisExplorer,
+Betfair's commission page, econpapers, api.github.com all 200; pinnacle.com/en/betting-articles/
+301 and eurohoops.net 302 (not followed); promo.betfair.com 403; tennis-data.co.uk 403;
+drf.com 403; racing.draftkings.com 200; twinspires.com 000; eprints.soton.ac.uk 401;
+oddschecker.com 403; aussportsbetting.com 403; hoops.com.au 403; Sackmann's `tennis_atp` 404.
+Changed: **reddit.com (www) now 200 (was 403)** and old.reddit.com 302 (was 403): the page
+answers, whether it serves a thread to a plain fetch was not tested; **tapology.com robots.txt
+403 (was read, 200, on 2026-11-16)**; bloodhorse.com 301 (was 200); **geegeez.co.uk 200 (was
+403)**. New, answered: Kalshi's `exchange/status` 200 and Polymarket's `gamma-api` events
+(with `--compressed`) 200, both re-confirmed. Not probed, by rule: DraftKings' site API and
+the NBL stats API (permission check refused them 2026-11-13 and 2026-11-14). `WebSearch`
+answered (2026-11-23, "closing line value sports betting model research"): practitioner and
+promotional pages plus Karl Whelan's blog arguing positive closing line value does not
+guarantee long-run profit (NBA moneylines); no peer-reviewed study.
+
 Not yet probed, worth trying: sports-analytics conference papers (the MIT
 Sloan conference), journals (Journal of Quantitative Analysis in Sports,
 Journal of Sports Analytics, International Journal of Forecasting), sharp

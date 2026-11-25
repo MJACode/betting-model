@@ -20,6 +20,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, AI assistant (MCP): every stored game market, EuroLeague and NBL, and the missing props (Matt) |
+| 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, Signals card: live score gets its own line (Matt) |
+| 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, NBA official injury-report archive: backfill as a worker job (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, Pick cards: every sport's live score in the card, and the score opens the game (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, NFL opener spread: no bet on a gap no real number has shown (mike) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, NCAAB first-half spread: checks at 15:00 and 18:00 UTC as well as ten minutes before tip (mike) |
@@ -28,6 +30,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, AI assistant connector: saved preferences profile (free), books filter, capability log for elicitation (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, Stats board controls fold on scroll; player hit rate inline (Matt) |
 | 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, Matchup page follow-up: picks board read on NBA pages only, head-to-head bounded, injury and stale-picks notes (Matt) |
+| 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, League skill weekly review (scheduled run) |
 | 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, Daily results: the picks fold by sport, Games scored folds (Matt) |
 | 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, NBA game matchup page: our pick or "No pick", best price, ranks side by side, last 10 ATS/O-U, rest, H2H, injuries; three ways in (Matt) |
 | 2026-11-23 | [2026-11](./2026-11.md) | 2026-11-23, AI assistant consent page: Resend code button (Matt) |

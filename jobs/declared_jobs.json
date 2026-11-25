@@ -1907,5 +1907,16 @@
     "args": {
       "apply": true
     }
+  },
+  {
+    "key": "nba-injury-report-2027-from-2026-10-15",
+    "job_type": "nba_injury_report",
+    "requested_by": "matt",
+    "note": "Matt, 2026-11-25: 'yes back fill injury report'. nba_injury_report_pulls was last written 2026-10-16 00:09 UTC by the one-off backfill and nothing has written it since. Fetches every official NBA injury report PDF for each 2026-27 (season 2027) game date and the day before it, from 2026-10-15 to yesterday ET. Free CDN, no Odds API credits; a URL already in the ledger is skipped.",
+    "args": {
+      "first_season": 2027,
+      "last_season": 2027,
+      "on_or_after": "2026-10-15"
+    }
   }
 ]
