@@ -2850,6 +2850,34 @@ def _job_byom_refresh(**kw):
         conn.close()
 
 
+def _validate_byom_alerts(args: dict) -> dict:
+    """NFL only (Matt, 2026-11-25: "start with just NFL"). rebuild defaults
+    true; false skips the rebuild of the next games and only matches."""
+    from byom.alerts import ALERT_SPORTS
+
+    sport = str(args.get("sport") or "NFL").strip().upper()
+    if sport not in ALERT_SPORTS:
+        raise ValueError(f"byom_alerts runs for {ALERT_SPORTS}, got {sport!r}")
+    rebuild = args.get("rebuild", True)
+    if not isinstance(rebuild, bool):
+        raise ValueError(f"rebuild must be true or false, got {rebuild!r}")
+    return {"sport": sport, "rebuild": rebuild}
+
+
+def _job_byom_alerts(**kw):
+    """Rebuild the next NFL games, find new bets on members' own models,
+    and alert them (byom/alerts.py). Never reads or writes picks, never
+    posts to Discord. Does nothing until byom_alerts_2026_11_25.sql is in."""
+    from byom.alerts import run
+
+    conn = _byom_connection()
+    try:
+        return run(conn, sport=str(kw.get("sport") or "NFL"),
+                   rebuild=bool(kw.get("rebuild", True)))
+    finally:
+        conn.close()
+
+
 def _validate_daily_pipeline(args: dict) -> dict:
     """No arguments. A stake, a threshold, or a model id is not a way in."""
     if args:
@@ -3110,6 +3138,11 @@ JOBS = {
     # 2026-11-05: the planner's row counts for the BYOM tables
     # (byom/analyze.py). No arguments, no rows changed.
     "byom_analyze": (_job_byom_analyze, lambda a: {}),
+    # 2026-11-25 (Matt): alerts for members' own NFL models. Queued by
+    # scheduler.queue_byom_alerts after every refresh pass, one row per
+    # pass. Writes byom_game_facts, byom_prop_facts, byom_official_legs
+    # (next games only) and byom_alerts. Never picks.
+    "byom_alerts": (_job_byom_alerts, _validate_byom_alerts),
 }
 
 

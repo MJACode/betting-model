@@ -178,6 +178,8 @@ import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ScoreboardBoard } from '@/components/ScoreboardBoard';
 import { useScoreboard } from '@/hooks/useScoreboard';
 import { useAuth } from '@/hooks/useAuth';
+import { useByomOpenBets } from '@/hooks/useByomOpenBets';
+import { ByomOpenBetsSection } from '@/components/byom/ByomOpenBetsSection';
 import { freeSegmentOpensPaywall } from '@/lib/authShell';
 import { restorePurchases } from '@/lib/billing';
 import { type ScoreboardSport } from '@/lib/scoreboard';
@@ -421,6 +423,17 @@ export function PicksHomeScreen() {
   // subscriber does not flash the lock.
   const { contentLocked: signalsLocked, hold: picksHold } = useMembership();
   const { user } = useAuth();
+  // Bets from the member's own models (Matt, 2026-11-25), on Signals for
+  // the sport on screen. Reloaded on focus, so a tapped alert's bet is there.
+  const myModelBets = useByomOpenBets(view === 'signals' && !signalsLocked);
+  const reloadMyModelBets = myModelBets.reload;
+  useFocusEffect(useCallback(() => {
+    void reloadMyModelBets();
+  }, [reloadMyModelBets]));
+  const myModelBetsHere = useMemo(
+    () => myModelBets.bets.filter((b) => b.sport === sport),
+    [myModelBets.bets, sport],
+  );
   const board = useScoreboard(
     view === 'scoreboard' && !signalsLocked && !picksHold,
     sbDates,
@@ -1193,6 +1206,14 @@ export function PicksHomeScreen() {
           {/* One-time AI Assistant card / trial-to-paid sheet (mockups 5, 7). */}
           {view === 'signals' ? (
             <AiAssistantIntro onSetUp={() => navigation.navigate('AiAssistant')} />
+          ) : null}
+          {view === 'signals' && !signalsLocked ? (
+            <ByomOpenBetsSection
+              title="My models"
+              bets={myModelBetsHere}
+              error={myModelBets.error}
+              onOpen={(bet) => navigation.navigate('ByomDetail', { modelId: bet.model_id })}
+            />
           ) : null}
           {betAll && betAll.picks.length + betAll.skipped.length > 0 ? (
             <View style={styles.betAllRow}>

@@ -650,6 +650,36 @@ def run_refresh_pass(mode: str = "hourly") -> str | None:
     # The NHL goalie window stood down for this pass; read ESPN again now,
     # not at the next pass's start (#1568).
     _nhl_window_after_pass(f"refresh-pass[{mode}]")
+    # Matt, 2026-11-25: members' own models alert on every odds refresh.
+    queue_byom_alerts(mode)
+
+
+def queue_byom_alerts(mode: str = "hourly") -> None:
+    """Queue one byom_alerts job (NFL) for the pass that just ran.
+
+    The job queue runs it on its next tick, under its one-job lock, so the
+    rebuild never overlaps the daily BYOM refresh. The dedupe key is the
+    pass's ET minute: a second call for the same pass queues nothing.
+    Never raises into the scheduler. Writes nothing in picks.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        from data.db import get_connection
+        from tracking.job_queue import enqueue
+        stamp = datetime.now(ZoneInfo(TIMEZONE)).strftime("%Y-%m-%dT%H:%M")
+        conn = get_connection()
+        try:
+            job_id = enqueue(
+                conn, "byom_alerts", {"sport": "NFL"},
+                requested_by="scheduler",
+                note=f"BYOM NFL alerts after refresh-pass[{mode}] (Matt, 2026-11-25).",
+                dedupe_key=f"byom-nfl-alerts-{stamp}")
+            log.info("BYOM NFL alerts: queued %s", job_id)
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR BYOM alerts enqueue failed")
 
 
 def run_savant_refresh() -> None:
