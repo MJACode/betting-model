@@ -631,7 +631,9 @@ class BookFeeds:
                 gap = DISCOVER_SEC if book.discover else POLL_SEC
                 self.due[key] = now + gap
                 res = self.read(book, sport)
-                if res.get("refused"):
+                if res.get("refused") and res.get("shared"):
+                    pass                  # the same answer another sport already counted
+                elif res.get("refused"):
                     self.refusals[book.key] = self.refusals.get(book.key, 0) + 1
                     if self.refusals[book.key] >= REFUSALS_BEFORE_BACKOFF:
                         log.warning("%s: %d refusals in a row - leaving it alone %.0f s",
@@ -685,6 +687,7 @@ class BookFeeds:
         res = self._finish(book, sport, at, url, status, text, status == 200 and not refused,
                            live, matched, written, detail, body=body, capture=shared is None)
         res["refused"] = refused
+        res["shared"] = shared is not None
         return res
 
     def _lines(self, book: Book, sport: str, events: list[BookEvent], at: datetime) -> tuple[int, int, int]:

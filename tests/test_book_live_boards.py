@@ -373,6 +373,32 @@ def test_a_refusal_is_recorded_and_three_leave_the_book_alone():
     assert len([u for u in sess.urls if "fanduel" in u]) == asked + 1
 
 
+def test_one_shared_refusal_counts_once_not_once_per_sport():
+    """NBA, NCAAB and NCAABW share BetRivers' one answer: a single refused
+    answer is one refusal, so it takes three passes, not one, to back off."""
+    t = [0.0]
+    conn, sess = Conn(), Sess(lambda url: Resp(429, text="Too Many Requests"))
+    f = L.BookFeeds(lambda: conn, lambda: ["NBA", "NCAAB", "NCAABW"], session_factory=lambda: sess,
+                    resolvers={}, odds_log=lambda c, r: 0, monotonic=lambda: t[0],
+                    clock=lambda: datetime(2026, 11, 26, 1, 0, tzinfo=timezone.utc))
+    f.ready, f.games_live = True, (1e18, set())
+
+    def asked():
+        return len([u for u in sess.urls if "kambicdn" in u])
+
+    for n in range(1, L.REFUSALS_BEFORE_BACKOFF + 1):
+        res = [r for r in f.pass_once() if r["book"] == "betrivers"]
+        # all three sports until the third refusal, which backs off at once
+        assert [r["detail"] for r in res] == ["refused"] * (3 if n < L.REFUSALS_BEFORE_BACKOFF else 1)
+        assert asked() == n                                    # one request a pass
+        t[0] += L.POLL_SEC
+    f.pass_once()
+    assert asked() == L.REFUSALS_BEFORE_BACKOFF                # now backed off, all three sports
+    t[0] += L.BACKOFF_SEC
+    f.pass_once()
+    assert asked() == L.REFUSALS_BEFORE_BACKOFF + 1
+
+
 def test_a_network_error_never_raises():
     f, _conn, _logged, _ = feeds(lambda url: ConnectionError("reset"))
     res = f.read(FANDUEL, "NBA")
