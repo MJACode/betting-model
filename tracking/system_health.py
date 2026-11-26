@@ -65,6 +65,128 @@ KNOWN_UNTRAINED = {
 
 OK, STALE, EMPTY, SKIPPED, ERROR = "OK", "STALE", "EMPTY", "SKIPPED", "ERROR"
 
+# A shot table may trail the team log by a game that finished overnight and
+# whose play-by-play is not final yet. Two days is the October 2026 outage
+# (shots froze on the 12th, logs did not) without flagging that one game.
+NHL_FEED_LAG_DAYS = 2
+
+
+def iso_minus(day: str, n: int) -> str:
+    return (datetime.strptime(day[:10], "%Y-%m-%d") - timedelta(days=n)).strftime("%Y-%m-%d")
+
+
+def feed_lag(name: str, latest: str | None, source_latest: str | None,
+             slack_days: int = NHL_FEED_LAG_DAYS) -> tuple[str, str]:
+    """OK when `latest` is within slack_days of `source_latest`. Both are ISO dates."""
+    if not source_latest:
+        return STALE, f"{name}: the team log has no date to compare"
+    if not latest:
+        return STALE, f"{name} is empty; team log reaches {source_latest}"
+    floor = iso_minus(str(source_latest), slack_days)
+    if str(latest)[:10] >= floor:
+        return OK, f"{name} {str(latest)[:10]}, team log {str(source_latest)[:10]}"
+    return (STALE,
+            f"{name} stops at {str(latest)[:10]}; team log reaches {str(source_latest)[:10]}")
+
+
+def snapshot_lag(name: str, latest: str | None, as_of: str | None,
+                 slack_days: int = 1) -> tuple[str, str]:
+    """OK when a snapshot date is within slack_days of the date it should have reached."""
+    if not as_of:
+        return STALE, f"{name}: no date to compare"
+    if not latest:
+        return STALE, f"{name} has no snapshot; expected by {as_of}"
+    floor = iso_minus(str(as_of), slack_days)
+    if str(latest)[:10] >= floor:
+        return OK, f"{name} snapshot {str(latest)[:10]} (as of {str(as_of)[:10]})"
+    return (STALE,
+            f"{name} snapshot stops at {str(latest)[:10]}; as of {str(as_of)[:10]}")
+
+
+def _nhl_feed_table(conn, report, check: str, table: str, log_max) -> None:
+    """WARN when a per-game NHL table trails the team log by more than two days.
+
+    A missing table is SKIPPED. The check is not gated on the table itself.
+    """
+    try:
+        latest = _scalar(conn, f"SELECT MAX(game_date) FROM {table}")
+    except Exception as exc:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        text = str(exc).lower()
+        if table in text or "does not exist" in text:
+            report.add(check, SKIPPED, "WARN", f"{table} is not installed yet",
+                       reason=REASON_GATE_SHUT)
+        else:
+            report.add(check, ERROR, "WARN", f"query failed: {exc}"[:200])
+        return
+    status, detail = feed_lag(table, latest, None if log_max is None else str(log_max))
+    report.add(check, status, "WARN", detail, latest=latest, cadence="each game day")
+
+
+def _line_snapshot_freshness(conn, report, yday: str) -> None:
+    """A game day should have a Daily Faceoff snapshot dated that day.
+
+    One day of slack: the 6am check runs before that morning's scrape, so
+    it looks at yesterday.
+    """
+    try:
+        last_game = _scalar(conn, """
+            SELECT MAX(game_date) FROM games
+            WHERE sport = 'NHL' AND game_date <= ?
+        """, (yday,))
+        latest = _scalar(conn,
+            "SELECT MAX(game_date) FROM dailyfaceoff_line_snapshots")
+    except Exception as exc:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        text = str(exc).lower()
+        if "dailyfaceoff_line_snapshots" in text or "does not exist" in text:
+            report.add("dailyfaceoff_lines_freshness", SKIPPED, "WARN",
+                       "dailyfaceoff_line_snapshots is not installed yet",
+                       reason=REASON_GATE_SHUT)
+        else:
+            report.add("dailyfaceoff_lines_freshness", ERROR, "WARN",
+                       f"query failed: {exc}"[:200])
+        return
+    status, detail = snapshot_lag(
+        "dailyfaceoff_line_snapshots",
+        None if latest is None else str(latest),
+        None if last_game is None else str(last_game),
+        slack_days=1)
+    report.add("dailyfaceoff_lines_freshness", status, "WARN", detail,
+               latest=latest, cadence="each game day")
+
+
+def _edge_snapshot_freshness(conn, report, run_date: str) -> None:
+    """The nightly EDGE snapshot should be this morning or last night."""
+    try:
+        latest = _scalar(conn,
+            "SELECT MAX(snapshot_date) FROM nhl_edge_skater_snapshots")
+    except Exception as exc:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        text = str(exc).lower()
+        if "nhl_edge_skater_snapshots" in text or "does not exist" in text:
+            report.add("nhl_edge_freshness", SKIPPED, "WARN",
+                       "nhl_edge_skater_snapshots is not installed yet",
+                       reason=REASON_GATE_SHUT)
+        else:
+            report.add("nhl_edge_freshness", ERROR, "WARN",
+                       f"query failed: {exc}"[:200])
+        return
+    status, detail = snapshot_lag(
+        "nhl_edge_skater_snapshots",
+        None if latest is None else str(latest), run_date, slack_days=1)
+    report.add("nhl_edge_freshness", status, "WARN", detail,
+               latest=latest, cadence="nightly")
+
 # ── How long a gate may stay shut before the GATE is the suspect ─────────────
 # A SKIPPED check is not a passing check -- it is a check that did not run. The
 # rule that a check must never gate on the thing it detects (.claude/rules/
@@ -1842,6 +1964,84 @@ def run_system_health(run_date: str | None = None) -> dict:
                       f"season {run_date[:4]}: batter and pitcher both present")
         except Exception as exc:  # noqa: BLE001
             r.add("savant_player_types", SKIPPED, "WARN", str(exc)[:120])
+
+        # NHL shots and MoneyPuck. The shot ingestor had no schedule, so
+        # nhl_shot_events stopped on 2026-10-12 while the team log did not.
+        # The gate is NHL finals in `games`, not the shot table: a check
+        # gated on the table it watches stays SKIPPED for the whole outage.
+        # MoneyPuck.com is the supplemental file (credit MoneyPuck.com). It
+        # lands at 7:20am, after this 6am check, so one morning of lag is
+        # inside NHL_FEED_LAG_DAYS. A missing table is SKIPPED until the
+        # migration has been applied, and the transaction is rolled back so
+        # the rest of the run still writes.
+        try:
+            nhl_finals = _scalar(conn, """
+                SELECT COUNT(*) FROM games
+                WHERE sport = 'NHL' AND home_score IS NOT NULL
+                  AND game_date >= ? AND game_date <= ?
+            """, ((d - timedelta(days=7)).strftime("%Y-%m-%d"), yday))
+        except Exception as exc:  # noqa: BLE001
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            nhl_finals = None
+            r.add("nhl_shot_freshness", ERROR, "WARN", f"query failed: {exc}"[:200])
+            r.add("moneypuck_freshness", ERROR, "WARN", f"query failed: {exc}"[:200])
+            for name in ("nhl_shift_freshness", "nhl_officials_freshness",
+                         "dailyfaceoff_lines_freshness", "nhl_edge_freshness"):
+                r.add(name, ERROR, "WARN", f"query failed: {exc}"[:200])
+        else:
+            if not nhl_finals:
+                note = "no NHL finals in the last 7 days"
+                for name in ("nhl_shot_freshness", "moneypuck_freshness",
+                             "nhl_shift_freshness", "nhl_officials_freshness",
+                             "dailyfaceoff_lines_freshness", "nhl_edge_freshness"):
+                    r.add(name, SKIPPED, "WARN", note,
+                          reason=REASON_GATE_SHUT, cadence="each game day")
+            else:
+                log_max = None
+                try:
+                    log_max = _scalar(conn,
+                        "SELECT MAX(game_date) FROM nhl_team_game_log")
+                    shot_max = _scalar(conn,
+                        "SELECT MAX(game_date) FROM nhl_shot_events")
+                except Exception as exc:  # noqa: BLE001
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    r.add("nhl_shot_freshness", ERROR, "WARN", f"query failed: {exc}"[:200])
+                else:
+                    status, detail = feed_lag("nhl_shot_events", shot_max, log_max)
+                    r.add("nhl_shot_freshness", status, "WARN", detail,
+                          latest=shot_max, cadence="each game day")
+                try:
+                    mp_max = _scalar(conn,
+                        "SELECT MAX(game_date) FROM moneypuck_team_games")
+                except Exception as exc:  # noqa: BLE001
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    text = str(exc).lower()
+                    if "moneypuck_team_games" in text or "does not exist" in text:
+                        r.add("moneypuck_freshness", SKIPPED, "WARN",
+                              "moneypuck_team_games is not installed yet",
+                              reason=REASON_GATE_SHUT)
+                    else:
+                        r.add("moneypuck_freshness", ERROR, "WARN",
+                              f"query failed: {exc}"[:200])
+                else:
+                    status, detail = feed_lag("moneypuck_team_games", mp_max, log_max)
+                    r.add("moneypuck_freshness", status, "WARN",
+                          detail + " (MoneyPuck.com)",
+                          latest=mp_max, cadence="each game day")
+                _nhl_feed_table(conn, r, "nhl_shift_freshness", "nhl_shifts", log_max)
+                _nhl_feed_table(conn, r, "nhl_officials_freshness", "nhl_game_officials",
+                                log_max)
+                _line_snapshot_freshness(conn, r, yday)
+                _edge_snapshot_freshness(conn, r, run_date)
 
         # ── Final scores landing (all sports; catches dead local ingest jobs) ─
         # GOLF is excluded in the query and again in classify_missing_finals.

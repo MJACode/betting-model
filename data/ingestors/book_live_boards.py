@@ -596,6 +596,8 @@ def ensure_tables(conn) -> None:
         conn.execute(FEED_DDL)
         lock_down(conn, FEED_TABLE)
     conn.commit()
+    from data.ingestors.book_throttle import ensure_table as ensure_throttle_table
+    ensure_throttle_table(conn)
 
 
 def _et_day(at: datetime) -> str:
@@ -661,6 +663,11 @@ class BookFeeds:
         self.betmgm_keys = BetMGMKeys(BETMGM_ACCESS_IDS)
         self._booted: set[str] = set()             # books whose session was warmed (Caesars)
         self.captures = Captures()
+        # A book rate limiting or refusing us: one row per episode in
+        # book_throttle_events, which the worker turns into an ops alert
+        # (data/ingestors/book_throttle.py).
+        from data.ingestors.book_throttle import ThrottleTracker
+        self.throttle = ThrottleTracker(REFUSALS_BEFORE_BACKOFF, clock=self.clock)
         self.conn = None
         self.ready = False
         self.games_live: tuple[float, set] = (-1e9, set())
@@ -715,6 +722,7 @@ class BookFeeds:
         if not self.dry_run and not self.ready:
             ensure_tables(self.c())
             self.ready = True
+            self.throttle.table_ready = True
         live = set(self.live_sports()) | self._live_from_games()
         now = self.monotonic()
         results = []
@@ -734,12 +742,14 @@ class BookFeeds:
                 self.last_http = self.monotonic()
                 res = self.read(book, sport)
                 now = self.monotonic()
+                was = self.gap.get(book.key, POLL_SEC)
+                self._note_throttle(book, sport, res, DISCOVER_SEC if book.discover else was)
                 if book.discover:
                     self.due[key] = now + DISCOVER_SEC
                     results.append(res)
                     continue
                 refused = bool(res.get("refused")) and not res.get("shared")
-                gap = next_book_gap(self.gap.get(book.key, POLL_SEC), refused)
+                gap = next_book_gap(was, refused)
                 self.gap[book.key] = gap
                 self.due[key] = now + gap
                 if refused:
@@ -753,10 +763,28 @@ class BookFeeds:
                         self.due[key] = now + BACKOFF_SEC
                         self.refusals[book.key] = 0
                         self.gap[book.key] = POLL_SEC
+                        self.throttle.backoff(book.key, sport, BACKOFF_SEC, poll_s=was)
                 elif not res.get("shared"):
                     self.refusals[book.key] = 0
                 results.append(res)
+        if not self.dry_run and self.throttle.pending:
+            try:
+                self.throttle.flush(self.c())
+            except Exception as exc:      # noqa: BLE001
+                log.error("throttle events: %s", exc)
+                self._recycle()
         return results
+
+    def _note_throttle(self, book: Book, sport: str, res: dict, poll_s: float) -> None:
+        """Hand one real request's answer to the throttle tracker. A shared
+        answer was already counted, and "no url" sent no request."""
+        from data.ingestors.book_throttle import reason_for
+        if res.get("shared") or res.get("detail") == "no url":
+            return
+        status = res.get("status")
+        self.throttle.observe(book.key, sport, clean=bool(res.get("ok")),
+                              reason=reason_for(status, bool(res.get("refused")), status is not None),
+                              status=status, poll_s=poll_s, detail=str(res.get("detail") or ""))
 
     def _url_for(self, book: Book, sport: str) -> str | None:
         """The book's url for this sport, with BetMGM's current access id."""

@@ -42,8 +42,8 @@ def test_an_split_markets_counts_only_split_markets_per_period():
                      "30": {"event": {"moneyline": [{"bet_info": {"tickets": {"percent": 50}}}]}}}},
         {"markets": {"15": {"event": {"moneyline": [{"bet_info": {"tickets": {"percent": 61}}}]}}}},
     ]}
-    # Book 30 (Open) is not asked; a 0% split is a split; a null one is not.
-    assert P.an_split_markets(payload) == {"15": {"event": {"moneyline": 2}, "firsthalf": {"total": 1}}}
+    # Book 30 (Open) is not asked; 0% (Action Network's no-split placeholder) and null are not splits.
+    assert P.an_split_markets(payload) == {"15": {"event": {"moneyline": 2}}}
 
 
 def test_probe_reports_each_source_and_fails_when_dk_is_unreachable(capsys):
@@ -66,7 +66,8 @@ def test_registered_as_a_worker_job_and_declared():
     declared = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     mine = [d for d in declared if d["job_type"] == "splits_markets_probe"]
     # The first run (markets and periods) and the rerun for team-total entry shapes, each run once.
-    assert [d["key"] for d in mine] == ["splits-markets-probe-2026-11-26", "splits-team-totals-probe-2026-11-26"]
+    assert [d["key"] for d in mine] == ["splits-markets-probe-2026-11-26", "splits-team-totals-probe-2026-11-26",
+                                        "splits-nonzero-probe-2026-11-26"]
     assert all(d["requested_by"] == "matt" and d["args"] == {} for d in mine)
 
 
@@ -85,3 +86,19 @@ def test_samples_print_before_the_capped_summary(capsys):
     P.probe(get=lambda url, **kw: (200, "" if "dknetwork" in url else json.dumps(team), None), today="20261126")
     after = capsys.readouterr().out.split(P.SUMMARY_MARK, 1)[1].strip().splitlines()
     assert after[0].startswith("team_score sample nba:")
+
+
+def test_a_split_needs_a_non_zero_share_on_a_pre_game_entry():
+    def g(tix, money, live=False):
+        return {"games": [{"markets": {"15": {"firstquarter": {"total": [
+            {"is_live": live, "bet_info": {"tickets": {"percent": tix}, "money": {"percent": money}}}]}}}}]}
+    assert P.an_split_markets(g(0, 0)) == {}
+    assert P.an_split_markets(g(0, 12)) == {"15": {"firstquarter": {"total": 1}}}
+    assert P.an_split_markets(g(55, 60, live=True)) == {}
+
+
+def test_asks_exactly_as_the_ingestor_does():
+    seen = []
+    P.probe(get=lambda url, **kw: seen.append(kw.get("params")) or (200, "{}", None), today="20261126")
+    an = [p for p in seen if p and "periods" in p]
+    assert an and all(p["bookIds"] == "15" for p in an)

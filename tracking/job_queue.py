@@ -880,6 +880,26 @@ def _job_splits_markets_probe(**kw):
     return {"summary": summary[:6000] or "(no output)", "stdout": text[-50_000:]}
 
 
+def _job_splits_coverage_probe(**kw):
+    """Which splits exist per Action Network book, period and market, in which
+    sports, and whether DK Network shows player-prop splits (mike, 2026-11-26).
+    Writes nothing, no Odds API call (scripts/splits_coverage_probe.py)."""
+    from scripts.splits_coverage_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.splits_coverage_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:6000] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _job_dk_prop_splits_probe(**kw):
+    """DK Network's player-prop split articles (count, dates, layout) and tennis
+    splits on Action Network (mike, 2026-11-26). Writes nothing, no Odds API
+    call (scripts/dk_prop_splits_probe.py)."""
+    from scripts.dk_prop_splits_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.dk_prop_splits_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:6000] or "(no output)", "stdout": text[-50_000:]}
+
+
 def _job_book_app_links_probe(**kw):
     """Each sportsbook's apple-app-site-association file, and whether the
     betslip links we store are claimed by its app. Writes nothing, no Odds API
@@ -1524,6 +1544,14 @@ def _validate_no_args(args: dict) -> dict:
     return {}
 
 
+def _job_book_throttle_test_alert(**kw):
+    """Post the book-throttling alert's red and green messages to ops, titled
+    TEST (tracking/book_throttle_watch.post_test_alerts). mike, 2026-11-26:
+    "Send a test alert to ops so I can see it". Writes no table."""
+    from tracking.book_throttle_watch import post_test_alerts
+    return post_test_alerts()
+
+
 def _job_record_sheet_check(**kw):
     """Run the record-vs-sheet check once, on demand (it also runs hourly).
     Report only; returns the counts and the findings."""
@@ -2008,6 +2036,34 @@ def _validate_void_picks(args: dict) -> dict:
                          f"got {allow_graded!r}")
     return {"pick_ids": ids, "reason": reason[:500], "allow_posted": allow_posted,
             "allow_graded": allow_graded}
+
+
+def _job_premium_access(**kw):
+    """Grant or expire comped app premium for one email (Matt, 2026-11-26:
+    "You do the scripts"). scripts/premium_access.py holds the SQL and the
+    rules: grant creates the email login if missing plus one indefinite comped
+    grant; expire sets expires_at on active comped grants and deletes nothing;
+    delete_login deletes a login only once replaced_by holds access, after
+    copying it into the result. One request per job, one transaction."""
+    from data.db import get_connection
+    from scripts.premium_access import apply
+
+    conn = get_connection()
+    try:
+        out = apply(conn, kw["action"], kw["email"], kw["note"],
+                    replaced_by=kw.get("replaced_by"))
+        conn.commit()
+        return out
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _validate_premium_access(args: dict) -> dict:
+    from scripts.premium_access import validate
+    return validate(args)
 
 
 def _job_ncaaf_pbp_pull(**kw):
@@ -2997,6 +3053,8 @@ def _job_byom_game_facts(**kw):
 JOBS = {
     "verify_checks": (_job_verify_checks, _validate_verify_checks),
     "void_picks":      (_job_void_picks,       _validate_void_picks),
+    # Comped premium, one email per job. See scripts/premium_access.py.
+    "premium_access": (_job_premium_access, _validate_premium_access),
     "backfill_publish_keys": (_job_backfill_publish_keys, lambda a: {}),
     # ONE-SHOT. Loops the ordinary settle backfill until the raw_one_sided
     # pedigree is gone (or 40 passes). See _job_clv_backfill.
@@ -3037,6 +3095,7 @@ JOBS = {
     # X-only job; the argument is the same one field.
     "publish_results": (_job_publish_results, _validate_publish_x_results),
     "record_sheet_check": (_job_record_sheet_check, _validate_no_args),
+    "book_throttle_test_alert": (_job_book_throttle_test_alert, _validate_no_args),
     "publish_discord_signals": (_job_publish_discord_signals,
                                 _validate_publish_discord_signals),
     # One-off void notice. dry_run defaults true. Does not edit or delete
@@ -3099,6 +3158,10 @@ JOBS = {
     # Where the Scoreboard splits can come from: DK Network + AN book ids. Free, writes nothing.
     "splits_source_probe": (_job_splits_source_probe, _validate_splits_source_probe),
     "splits_markets_probe": (_job_splits_markets_probe, _validate_splits_markets_probe),
+    # Splits per book / period / market / sport, and DK Network prop splits. Free, writes nothing.
+    "splits_coverage_probe": (_job_splits_coverage_probe, _validate_splits_markets_probe),
+    # DK Network prop-split articles and tennis splits. Free, writes nothing.
+    "dk_prop_splits_probe": (_job_dk_prop_splits_probe, _validate_splits_markets_probe),
     # One on-demand run of the daily Betfair ANZ racing-file store. Free, idempotent.
     "betfair_monthly_store": (_job_betfair_monthly_store, _validate_betfair_monthly_store),
     "book_app_links_probe": (_job_book_app_links_probe, _validate_book_app_links_probe),

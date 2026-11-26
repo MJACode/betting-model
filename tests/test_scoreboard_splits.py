@@ -165,3 +165,14 @@ def test_wired_into_the_refresh_pass_and_migrations():
     assert sql.index("RETURN;") < sql.index("CREATE TABLE")
     assert "GRANT SELECT ON public.scoreboard_splits TO authenticated" in sql
     assert "has_table_privilege('anon', 'public.picks', 'SELECT')" in sql
+
+
+def test_wnba_is_polled_and_matches_on_the_full_team_name():
+    assert "WNBA" in ss.SPORTS
+    games = [{"game_id": "WNBA_2026-09-10_NY_LV", "sport": "WNBA", "game_date": "2026-09-09",
+              "home_team": "LV", "away_team": "NY", "commence_time": "2026-09-10T02:00:00+00:00"}]
+    # Action Network's abbreviations are not ours (LVA, NYL); the full name carries the match.
+    g = _game(CAR_GB, start="2026-09-10T02:00:00.000Z",
+              home=("LVA", "Las Vegas Aces"), away=("NYL", "New York Liberty"))
+    rows = ss.build_rows("WNBA", {"games": [g]}, games, datetime(2026, 9, 9, 18, 0, tzinfo=timezone.utc))
+    assert rows and {r["game_id"] for r in rows} == {"WNBA_2026-09-10_NY_LV"}

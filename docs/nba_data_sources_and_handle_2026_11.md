@@ -437,8 +437,7 @@ Neither cell is a bet.
 **DraftKings splits for NBA, NHL and NCAAF.** The page answers for each league when asked by
 event group directly: NBA 42648 parsed 5 games, NHL 42133 parsed 7, NCAAF 87637 parsed 10, every
 team of the right league (probe `dk2`). `data/ingestors/dk_splits.KNOWN_EVENT_GROUPS` now holds
-them; the worker runs master, so they are collected only once this branch is merged. NCAAB
-(92483) parsed 10 games, but the ingestor has no NCAAB team matcher yet.
+them, on master through PR #1650, which also added NCAAB (92483) with its own school matcher.
 
 ### D8. Historical money, tested: Polymarket order flow against Pinnacle
 

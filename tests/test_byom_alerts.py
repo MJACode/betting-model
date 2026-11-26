@@ -15,6 +15,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL_NAME = "byom_alerts_2026_11_25.sql"
+WEEK_SQL = "byom_week_of_lock_2026_11_26.sql"
 USER_A = "11111111-1111-1111-1111-111111111111"
 USER_B = "22222222-2222-2222-2222-222222222222"
 
@@ -185,6 +186,9 @@ def scratch():
         cur.execute(sql)  # the second run returns before any DDL
         cur.execute("SELECT 'public.byom_my_open_bets()'::regprocedure::oid")
         assert cur.fetchone()[0] == first_oid
+        week = (ROOT / "data/migrations" / WEEK_SQL).read_text(encoding="utf-8")
+        cur.execute(week)
+        cur.execute(week)  # returns before any DDL once applied
         cur.execute(f"""
             INSERT INTO byom_game_facts (
               canonical_key, sport, season, week, away_team, home_team,

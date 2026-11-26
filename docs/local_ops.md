@@ -905,6 +905,34 @@ SELECT book, sport, last_read_at, ok, status, live_events, matched, written, det
 SELECT book, sport, fetched_at, status, bytes FROM book_live_raw ORDER BY fetched_at DESC LIMIT 30;
 ```
 
+**A book throttling us is a red alert in ops** (mike, 2026-11-26: *"a red
+alert that goes to the ops channel if you detect that the book is rate
+limiting or throttling our connection"*). Both readers on this machine
+(DraftKings' board and the other books' thread) hand every request's answer
+to `data/ingestors/book_throttle.py`, which writes a row to
+`book_throttle_events` only when something changes:
+
+- **`throttled`** opens an episode: the first **429**, or the reader's own
+  back-off count in a row (3 for the other books, 5 for DraftKings) of
+  **403 / 503 / a bot-challenge page / no answer at all** (a timeout or a
+  dropped connection). A 400, 404 or 500 is a broken page, not throttling,
+  and neither opens nor closes one.
+- **`backoff`** each time the reader benches the book inside an episode.
+- **`cleared`** on the first clean answer after it.
+
+The worker's `tracking/book_throttle_watch.py` (every 2 minutes, the
+`book_throttle_watch` job) posts one red message per episode and a green one
+when it clears, ledgered in `push_sent` (kinds `book_throttle` /
+`book_throttle_clear`) only after the post confirms. **Not paged:** a book with
+no 200 in `book_live_raw` in the 7 days before (a standing block, such as
+Caesars today), and an answer that is slow but arrives (no request time is
+recorded). The history:
+
+```sql
+SELECT at, book, sport, kind, reason, status, in_a_row, poll_s, detail
+  FROM book_throttle_events ORDER BY at DESC LIMIT 50;
+```
+
 **A merge reaches this machine by itself.** Every 5 minutes the feed fetches
 origin/master; when a merge changed one of its own files it exits (code 3) and
 the launcher checks the new master out and starts it again at once. A merge

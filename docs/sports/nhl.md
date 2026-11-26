@@ -403,7 +403,11 @@
   capped at 10,000 rows a call, so they are pulled a week at a time and a
   capped page is refused. `totalShotAttempts` is NULL before 2022-23; the 5v5
   counts (`sat_for_5v5`) go back the whole way and are what Corsi uses.
-- **Every shot attempt since 2018-19** (2026-10-13), from the free play-by-play
+- **Every shot attempt since 2018-19** (backfill 2026-10-13; the daily
+  `nhl-shots` step, after settlement and before the health check, continues
+  it — until 2026-11-26 nothing on the schedule called the ingestor, so the
+  table and the xG rollups stopped at 2026-10-12 while the game logs did
+  not), from the free play-by-play
   feed (`api-web.nhle.com/v1/gamecenter/<id>/play-by-play`): `nhl_shot_events`,
   one row per shot on goal, miss, block and goal — 1,238,808 rows over all
   10,604 games in `nhl_team_game_log`. Location (raw, and rotated so the
@@ -430,7 +434,28 @@
   +567 to +1,162 a season from 2022-23. Shares (xGF%) hold: 0.991 / 0.983
   correlation with MoneyPuck's team xGF% in 2023-24 / 2024-25. Per team-game
   and per goalie-game sums: `nhl_team_game_xg`, `nhl_goalie_game_xg`
-  (`data/nhl_xg_aggregates.py`).
+  (`data/nhl_xg_aggregates.py`). The morning `nhl-shots` step scores only
+  shots that have no xG yet and rolls up only games missing a team row.
+- **MoneyPuck.com** (2026-11-26), personal non-commercial use of the files on
+  https://moneypuck.com/data.htm, credited wherever they are shown. Tables
+  `moneypuck_shots`, `moneypuck_team_games`, `moneypuck_skater_games`,
+  `moneypuck_goalie_games`, `moneypuck_line_games` (lines and pairings),
+  `moneypuck_players`. `nhl_game_id` is the league id, so the rows join to
+  `nhl_team_game_log` / `games`; `our_game_id` is filled from the log.
+  Nothing that writes a pick reads them. Sizes and the backfill command:
+  `data/ingestors/moneypuck_nhl.py`.
+- **Shift charts, officials, lines, EDGE** (2026-11-26), personal
+  non-commercial, not a pick input. `nhl_shifts` is every shift from
+  `api.nhle.com/stats/rest/en/shiftcharts` (2023-24 onward).
+  `nhl_shift_linemates` is shared ice from overlapping shifts; the chart
+  has no strength, so it is not a power-play unit. `nhl_game_officials`
+  and `nhl_healthy_scratches` are the gamecenter right rail. Daily Faceoff
+  line combinations and PP1/PP2 are `dailyfaceoff_line_snapshots`, one
+  insert per run. NHL EDGE skater, goalie and team detail is a nightly
+  `snapshot_date` row (`nhl_edge_*_snapshots`); the endpoint is
+  season-to-date, so there is no backfill. Commands:
+  `data/ingestors/nhl_shifts.py`, `nhl_right_rail.py`,
+  `dailyfaceoff_lines.py`, `nhl_edge.py`.
 - **One function rates goalies and teams for training and for scoring**:
   `data/nhl_asof.py`. Strictly before the date asked about. A goalie's save%
   and GAA are taken over this season and last and regressed to the league
@@ -528,6 +553,12 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation
 | NHL results (`nhl-results`) | GitHub Actions (step 0b, **before settle**) and every refresh pass | daily 7am, hourly 7am–5pm ET, every 10 min 6–11pm ET | `ingest_nhl_scores_for_date` — trailing-3-day final scores + regulation outcomes into `games` (settlement reads `home_score`; the MLB statsapi fetch in paper_tracker doesn't cover NHL). Then `nhl_period_scores_api.top_up`: finals that have no `nhl_api_score` row, from the same `/v1/score` goals array, at most 40 dates a pass |
 | NHL odds (h2h/totals/spreads bulk + per-event 3-way) | GitHub Actions (`step_odds`) | 6am + hourly to 5pm + every 10 min 6pm–11pm | DK lines; 3-way attempted per-event (bulk 422s it), non-fatal when absent |
 | NHL team + goalie stats (`nhl_stats`) | GitHub Actions (`step_nhl_stats`) | daily 7am | season-to-date team metrics + probable-starter goalie rows (ESPN `probableStartingGoalie` overlay) |
+| NHL shots and xG (`nhl-shots`) | Railway worker, daily pipeline, after settlement and before the health check | daily, with the 6am run | `data/ingestors/nhl_shot_events.py` for the current season (a stored game is not fetched again), then `data.nhl_xg.score_unscored` and `data.nhl_xg_aggregates.apply_missing`. A game whose feed did not answer fails the step. Not a pick input |
+| MoneyPuck (`moneypuck-nhl`) | Railway worker, its own cron | daily 7:20am ET | The current season's shot, skater, goalie and line files, the player bios, and `all_teams.csv` filtered to that season. One download per file. Credit MoneyPuck.com. Not a pick input. History is `python -m data.ingestors.moneypuck_nhl --backfill --apply` |
+| NHL shifts (`nhl-shifts`) | Railway worker, daily pipeline after shots, and its own cron | daily 6am pass and 7:35am ET | Current-season shift charts for games not yet stored. A stored game is not fetched again. History is `python -m data.ingestors.nhl_shifts --backfill --apply` (2023-24 through the current season). Not a pick input |
+| NHL officials (`nhl-officials`) | Railway worker, daily pipeline after shifts, and its own cron | daily 6am pass and 7:50am ET | Refs, linesmen and healthy scratches from the right rail, same seasons as the shifts. Not a pick input |
+| Daily Faceoff lines (`dailyfaceoff-lines`) | Railway worker, its own cron | 11:10am and 5:10pm ET | Line combinations and PP1/PP2 (and the rest of the page) for every team, on a date that has an NHL game. Each run inserts a snapshot. A Cloudflare block of one team is a warning; a block of every team fails the step. Not a pick input |
+| NHL EDGE (`nhl-edge`) | Railway worker, its own cron | daily 2:40am ET | Season-to-date skater, goalie and team detail, keyed by that ET date. No backfill. Not a pick input |
 | NHL totals (`nhl-over-under`) | Railway worker (`step_nhl_over_under`) | 6am (right after the odds step) + every refresh pass (right after `par odds`) | `scripts/nhl_totals_card.py`: every unstarted NHL game, Pinnacle vs the bettable books in the newest fetch; writes at most one `nhl_over_under` BET a game, once, under the model's advisory lock. Logs a diagnostic line every pass (`no_sharp`, `pinnacle_withdrawn`, ...) so an empty card can be told from a broken one |
 | NHL best bet a night (`nhl-best-bet-night`) | Railway worker (`step_nhl_best_bet_night`) | every refresh pass (right after `nhl-over-under`) + every goalie-window tick that decides games | `scripts/nhl_best_bet_night_card.py`: unstarted games with both goalies confirmed and a Pinnacle fetch taken after it; writes at most one BET a night across its four ids, under the family's advisory lock, skipping any game already holding an NHL BET. Logs the same diagnostic line as the totals card |
 | NHL scoring (`step_scoring`) | GitHub Actions | 6am + every refresh pass | `run_scorer` NHL branch → picks (incl. `_score_nhl_3way`); `nhl_over_under` is not in it |

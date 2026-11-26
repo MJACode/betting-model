@@ -90,6 +90,7 @@ def scratch():
         cur.execute(ncaab)
         cur.execute(ncaab)  # the second run skips both functions
         cur.execute((ROOT / "data/migrations/byom_alerts_2026_11_25.sql").read_text(encoding="utf-8"))
+        cur.execute((ROOT / "data/migrations/byom_week_of_lock_2026_11_26.sql").read_text(encoding="utf-8"))
         cur.execute("""
             INSERT INTO byom_game_facts (
               canonical_key, sport, season, week, away_team, home_team,

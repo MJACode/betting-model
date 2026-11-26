@@ -1,8 +1,9 @@
 /**
  * Open bets and alerts on the member's own models (Matt, 2026-11-25).
  *
- * A bet here is the first DraftKings line and price that fit the model's
- * rules on a game that has not been graded yet: the same lock the model's
+ * A bet here is the first DraftKings line and price in the 7 days before
+ * kickoff that fit the model's rules (Matt, 2026-11-26: game week only), on
+ * a game that has not been graded yet: the same lock the model's
  * record uses. The worker stores it once (byom_alerts) and never changes
  * it when the line moves. These are not picks: they are never in the
  * Record tab, Discord or the published record.

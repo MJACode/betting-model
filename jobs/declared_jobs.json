@@ -1943,5 +1943,78 @@
     "requested_by": "matt",
     "note": "Matt 2026-11-26 ('yes add splits'): re-runs the splits-markets probe, which now prints the first game's consensus team-total entries (core_bet_type_6_team_score) per sport verbatim, so their side / team / line / bet_info shape is known before a parser is written. Writes nothing, no Odds API credits.",
     "args": {}
+  },
+  {
+    "key": "book-throttle-test-alert-2026-11-26",
+    "job_type": "book_throttle_test_alert",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26 ('Send a test alert to ops so I can see it'): posts the book-throttling alert's red and green messages to the ops channel, each titled TEST, built on a made-up FanDuel 429. Writes no table, no Odds API credits.",
+    "args": {}
+  },
+  {
+    "key": "premium-expire-ryan-pad-murphy-2026-11-26",
+    "job_type": "premium_access",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-26: delete Ryan.pad.Murphy from premium. Expired, not deleted (no-delete rule).",
+    "args": {
+      "action": "expire",
+      "email": "ryan.pad.murphy@gmail.com",
+      "note": "expired by Matt 2026-11-26 (replaced by rmurphisms@gmail.com)"
+    }
+  },
+  {
+    "key": "premium-grant-rmurphisms-2026-11-26",
+    "job_type": "premium_access",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-26: replace ryan.pad.murphy with rmurphisms, add larrypizzi3",
+    "args": {
+      "action": "grant",
+      "email": "rmurphisms@gmail.com",
+      "note": "comped by Matt 2026-11-26 (full access)"
+    }
+  },
+  {
+    "key": "premium-grant-larrypizzi3-2026-11-26",
+    "job_type": "premium_access",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-26: replace ryan.pad.murphy with rmurphisms, add larrypizzi3",
+    "args": {
+      "action": "grant",
+      "email": "larrypizzi3@gmail.com",
+      "note": "comped by Matt 2026-11-26 (full access)"
+    }
+  },
+  {
+    "key": "splits-nonzero-probe-2026-11-26",
+    "job_type": "splits_markets_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-26 ('yes add splits'): the 14:17 UTC pass stored no period splits although it ran. The first probe counted 0/0 (Action Network's no-split placeholder) as a split and asked without bookIds=15. This rerun asks exactly as the ingestor does and counts only non-zero splits, per sport, period and market, team totals included. Writes nothing, no Odds API credits.",
+    "args": {}
+  },
+  {
+    "key": "premium-delete-login-ryan-pad-murphy-2026-11-26",
+    "job_type": "premium_access",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-26: delete the old login now that rmurphisms@gmail.com is set up (\"Only delete it if he has a new account we set up\").",
+    "args": {
+      "action": "delete_login",
+      "email": "ryan.pad.murphy@gmail.com",
+      "replaced_by": "rmurphisms@gmail.com",
+      "note": "deleted by Matt 2026-11-26, replaced by rmurphisms@gmail.com"
+    }
+  },
+  {
+    "key": "splits-coverage-probe-2026-11-26",
+    "job_type": "splits_coverage_probe",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26 ('1) yes 2) yes' to building every remaining splits source): per Action Network book, period and market, games with a non-zero split, sides equal to consensus, median gap to consensus and median money-minus-tickets gap; WNBA and MLB on their last played date; candidate slugs for UFC, tennis, EuroLeague, NCAAW; DK Network market filters and prop text per event group, and two DK Network article pages. Decides what gets stored. Writes nothing, no Odds API credits.",
+    "args": {}
+  },
+  {
+    "key": "dk-prop-splits-probe-2026-11-26",
+    "job_type": "dk_prop_splits_probe",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26 ('Do all the outstanding tasks now'): before a prop-splits scraper is written, how many DK Network player-prop split articles exist (WordPress posts API searches), their date range and titles, and how two article bodies lay out the numbers; plus tennis splits on Action Network, which the coverage probe skipped. Writes nothing, no Odds API credits.",
+    "args": {}
   }
 ]

@@ -21,6 +21,13 @@ artifacts. Nothing else was edited; text is verbatim.
 |---|---|---|
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Earlier NBA prop snapshots bought, historical exchange money imported and tested (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NBA data sources, and handle / money data across markets (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings splits for NBA, NHL, NCAAF and NCAAB; the prop-splits probe (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NHL shifts, Daily Faceoff lines, officials, EDGE snapshots |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Public splits for every market: what exists, the period-splits correction, the coverage probe (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, premium_access delete_login; account calls are Matt's (matt) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Comped premium as a worker job (matt) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, A red ops alert when a book throttles the live reads (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, MoneyPuck NHL files, and the shot/xG catch-up |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Other books polled as fast as they allow, targeting 1 s (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, PC monitor redesign (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, BetMGM's public access id, Caesars' browser headers (mike) |
@@ -29,6 +36,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, The PC monitor follows master by itself (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, PC monitor: EuroLeague listed, live lines by sportsbook (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Every book's own live page, from mike's machine (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, My models: a bet locks on a game-week line only (Matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, My models: members only, the line now, the worker applies alerts (Matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, My models: NCAAB game lines on the builder, and NCAAB alerts (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, Live lines from every book; NHL and EuroLeague on the DK board; EuroLeague live scores (mike) |

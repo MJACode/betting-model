@@ -185,3 +185,31 @@ was ~514k credits against a ~291k estimate; the per-event cost was 583, not the
 gain is real and the bets it unlocks are not profitable. What survives is the
 machinery (`models/prop_ladder`), the Kalshi recorder, and a now-graded reason
 not to spend more on this idea.
+
+## 5. Betting-splits feeds, priced (2026-11-26, mike: "yes" to pricing them)
+
+Paid feeds of % of bets and % of money per side. **Every figure below is from web-search excerpts of the
+vendors' own pages; no page was opened** (this sandbox could not resolve docs.sharpapi.io or sharpapi.io, and
+developer.sportradar.com was not tried). Read the page before anything is bought.
+
+| | SharpAPI | Sportradar Betting Splits |
+|---|---|---|
+| Price | Pro $229/month (the tier the splits page names); Hobby $79, Sharp $399, Enterprise custom; 3-day trial on paid plans. The docs' tier tables disagree on whether Pro includes splits | Not published; trial and price through sales |
+| Whose splits | DraftKings and Circa (handle % and bets %); a newer page adds BetMGM, tickets only | An aggregate of "over 150 bookmakers", not one book |
+| Markets | Moneyline, spread, total. No props, periods or team totals found | Moneyline, spread, total (puck line on NHL). Props not in any splits doc found |
+| Leagues | NBA and NCAAB in the examples; NFL, NCAAF, NBA, NCAAB in its MCP schema | NFL, MLB, NHL, NBA, WNBA, NCAAF, NCAAB, NCAAW, soccer (v3; v2 was deprecated 2026-09-30) |
+| History | 48 hours, about every 5 minutes; long-term history is Enterprise | The previous 200 days |
+| Cadence | About 5 minutes | Hourly from 30 days out, every minute in the last hour |
+
+**Player-prop splits: no vendor found that documents them with a price.** A third-party DraftKings scraper on
+Apify carries DraftKings' bet and handle shares "where published", and does not say props carry them. DK Network
+publishes prop splits only as one-off articles for featured games ("Super Bowl Player Prop & Novelty Prop
+Splits", 2025-02-09; "Colts vs. Chiefs Player Prop Bet Splits for Sunday", 2026-09-20). Its splits table offers
+Moneyline, Spread and Total only, for every event group asked (NFL, NBA, NHL, NCAAF, NCAAB; worker_jobs 1722475).
+
+**Recommendation at the time of pricing: buy neither yet** (mike agreed, 2026-11-26). Neither adds props or periods. SharpAPI's 48 hours
+of history cannot be backtested, and Sportradar's aggregate is the same kind of number as the free Action Network
+consensus, whose money share stopped being a separate measurement in the 2024 offseason (measured on the NBA,
+`docs/nba_data_sources_and_handle_2026_11.md` A4, on the `claude/festive-gauss-kk7v7h` branch until merged).
+DraftKings' own split is free on DK Network and is now collected for NFL, with NBA, NHL and NCAAF on that branch.
+Circa's own split (via SharpAPI or VSiN) is the one single-book number not available free.

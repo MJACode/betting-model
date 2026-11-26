@@ -20,7 +20,7 @@ REQUIRED = (
 def _auth_user_inserts():
     for path in sorted((REPO / "scripts").rglob("*.sql")) + sorted(
         (REPO / "data" / "migrations").rglob("*.sql")
-    ):
+    ) + [REPO / "scripts" / "premium_access.py"]:
         text = path.read_text(encoding="utf-8")
         for m in re.finditer(r"INSERT\s+INTO\s+auth\.users\s*\((.*?)\)", text, re.I | re.S):
             cols = {c.strip().lower() for c in m.group(1).split(",")}

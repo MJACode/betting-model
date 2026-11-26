@@ -565,6 +565,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # with the line now. Returns before any DDL once byom_my_open_bets
     # carries byom_alerts_members_v1. Does not write picks.
     "byom_alerts_2026_11_25.sql",
+    # 2026-11-26 (Matt, "Game week only"): a BYOM bet locks only on a
+    # DraftKings line from the 7 days before kickoff, for the record and
+    # alerts. Patches byom_legs and byom_my_open_bets at anchors; adds
+    # byom_alerts.lock_rule (old rows kept, not shown). Returns before any
+    # DDL once both carry byom_week_of_lock_v1. Does not write picks.
+    "byom_week_of_lock_2026_11_26.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.
@@ -860,6 +866,17 @@ ACTIVE_MIGRATIONS: list[str] = [
     # _p1, ...). Runs while scoreboard_splits_history_market_period_check is
     # missing or the old market check remains.
     "scoreboard_splits_period_markets_2026_11_26.sql",
+    # MoneyPuck.com NHL files (shots, team / skater / goalie / line
+    # game-by-game, player bios). Research rows, not a pick input.
+    # Credit MoneyPuck.com. Creates the tables once; the 7:20am job fills
+    # the current season and the backfill command fills the history.
+    "moneypuck_nhl_2026_11_26.sql",
+    # NHL shift charts, right-rail officials and scratches, Daily Faceoff
+    # line snapshots, and NHL EDGE season-to-date snapshots. Research
+    # rows, not a pick input. Creates the tables once. The morning steps
+    # and the crons fill them; the shift and right-rail backfill commands
+    # fill 2023-24 through the current season. EDGE has no backfill.
+    "nhl_free_feeds_2026_11_26.sql",
     # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
     # monitor's page, written by mike's PC (pc_monitor/) and served to his
     # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,

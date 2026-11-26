@@ -60,7 +60,10 @@ MAX_PAGES = 8
 # never found them. NBA / NCAAF are DraftKings' ids in dk_live_board.LEAGUES.
 KNOWN_EVENT_GROUPS: dict[str, str] = {"NFL": "88808", "NBA": "42648", "NHL": "42133",
                                       "NCAAF": "87637"}
-SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB")
+# NCAAB (mike, 2026-11-26, "do all the outstanding tasks"): event group 92483 parsed 10 NCAAB
+# games in the same probe; its teams match through the NCAAB odds resolver (team_matches).
+KNOWN_EVENT_GROUPS["NCAAB"] = "92483"
+SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB", "NCAAB")
 # The sport names as the page's sport list prints them (the probe's text:
 # "Sports NFL NBA NHL MLB WNBA UFC UFL NCAA Football NCAA Basketball ...").
 _SPORT_LABELS = {"NFL": "NFL", "NBA": "NBA", "NHL": "NHL", "MLB": "MLB",
@@ -215,8 +218,30 @@ def _full_names(sport: str) -> dict[str, list[str]]:
     return out
 
 
+def ncaab_school(dk_name: str, registry: list[dict]) -> str | None:
+    """DK Network's NCAAB name -> our school (`games.home_team` is ncaab_teams.school).
+
+    First the odds feed's own resolver (display name, "school mascot", school, short
+    name, alternates, shortened schools). Then the pro-style "ABBR Mascot" DK prints for
+    the pro leagues ("JAX Jaguars"), against ESPN's abbreviation and mascot. Two teams
+    claiming the name is no answer, never a guess."""
+    from data.ingestors.ncaab_teams import _fold, resolve_team_name
+    espn = resolve_team_name(dk_name, registry)
+    if espn is None:
+        key = _fold(dk_name)
+        hits = {t["espn_id"] for t in registry
+                if t.get("abbreviation") and t.get("mascot")
+                and _fold(f"{t['abbreviation']} {t['mascot']}") == key}
+        espn = next(iter(hits)) if len(hits) == 1 else None
+    if espn is None:
+        return None
+    schools = {t["school"] for t in registry if t["espn_id"] == espn}
+    return next(iter(schools)) if len(schools) == 1 else None
+
+
 def team_matches(sport: str, dk_name: str, our_id: str,
-                 names: dict[str, list[str]] | None = None) -> bool:
+                 names: dict[str, list[str]] | None = None,
+                 registry: list[dict] | None = None) -> bool:
     """Does DK Network's 'JAX Jaguars' name our team id? Pro sports: DK
     prints a short city then the nickname, so the nickname (everything after
     the first word) must end one of our full names for that id. 'LA Rams' and
@@ -228,6 +253,8 @@ def team_matches(sport: str, dk_name: str, our_id: str,
             return resolve_odds_api_school(dk_name) == our_id
         except Exception:                                     # noqa: BLE001
             return dk_name == our_id
+    if sport == "NCAAB":
+        return bool(registry) and ncaab_school(dk_name, registry) == our_id
     parts = dk_name.split(" ", 1)
     if len(parts) != 2:
         return False
@@ -237,12 +264,13 @@ def team_matches(sport: str, dk_name: str, our_id: str,
 
 
 def match(sport: str, parsed: dict, games: Iterable[dict],
-          names: dict[str, list[str]] | None = None) -> dict | None:
+          names: dict[str, list[str]] | None = None,
+          registry: list[dict] | None = None) -> dict | None:
     """The one slate game with both teams, nearest DK's printed date (within a
     day: DK prints the ET date, a late start can sit on our next date)."""
     hits = [g for g in games
-            if team_matches(sport, parsed["home"], g.get("home_team") or "", names)
-            and team_matches(sport, parsed["away"], g.get("away_team") or "", names)]
+            if team_matches(sport, parsed["home"], g.get("home_team") or "", names, registry)
+            and team_matches(sport, parsed["away"], g.get("away_team") or "", names, registry)]
     if not hits:
         return None
     if parsed.get("date"):
@@ -257,7 +285,8 @@ def match(sport: str, parsed: dict, games: Iterable[dict],
 
 
 def build_rows(sport: str, parsed_games: list[dict], games: list[dict],
-               now: datetime, counts: dict | None = None) -> list[dict]:
+               now: datetime, counts: dict | None = None,
+               registry: list[dict] | None = None) -> list[dict]:
     """Rows for scoreboard_splits from one sport's parsed games. Started games
     are skipped so the stored row stays the last pre-start split."""
     counts = counts if counts is not None else {}
@@ -266,9 +295,13 @@ def build_rows(sport: str, parsed_games: list[dict], games: list[dict],
     stamp = now.isoformat()
     seen: set[str] = set()
     for p in parsed_games:
-        g = match(sport, p, games, names)
+        g = match(sport, p, games, names, registry)
         if g is None:
             counts["unmatched"] = counts.get("unmatched", 0) + 1
+            # The first names that did not match, so a missing alias is visible in the log.
+            miss = counts.setdefault("unmatched_names", [])
+            if len(miss) < 4:
+                miss.append(f"{p['away']} @ {p['home']}")
             continue
         if g["game_id"] in seen:
             continue
@@ -396,7 +429,11 @@ def run(conn=None, *, now: datetime | None = None,
                 continue
             parsed = fetch_sport(get, eg, now)
             counts: dict = {"parsed": len(parsed)}
-            rows = build_rows(sport, parsed, slate, now, counts)
+            registry = None
+            if sport == "NCAAB":
+                from data.ingestors.ncaab_teams import load_registry
+                registry = load_registry(conn)
+            rows = build_rows(sport, parsed, slate, now, counts, registry)
             if rows:
                 conn.executemany(UPSERT_SQL, [{k: v for k, v in r.items() if k != "odds"}
                                               for r in rows])
