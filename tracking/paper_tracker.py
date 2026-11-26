@@ -282,6 +282,8 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     # The NBA prop rule (2026-10-15): five markets under one id, settled from
     # nba_player_game_log by (player_id, game_id).
     "nba_prop_market":              ("nba_player", "FROM_PROP_MARKET"),
+    # The same rule decided 10 hours before tip, a paper test (mike, 2026-11-26).
+    "nba_prop_market_early":        ("nba_player", "FROM_PROP_MARKET"),
     # The NBA projection model (2026-10-16): six markets under one id, either side.
     "nba_prop_projection":          ("nba_player", "FROM_PROP_MARKET"),
     # NBA first basket (2026-11-20, models/nba_first_basket.py): settled per BET BOOK from the
@@ -349,6 +351,7 @@ _PROP_MARKET_STAT_BY_MODEL = {
     "nfl_live_prop":    _NFL_MARKET_STAT,
     "wnba_prop_market": _WNBA_MARKET_STAT,
     "nba_prop_market":  _NBA_MARKET_STAT,
+    "nba_prop_market_early": _NBA_MARKET_STAT,
     "nba_prop_projection": _NBA_MARKET_STAT,
 }
 
@@ -1848,6 +1851,7 @@ _PROP_MARKET_FOR_MODEL = {
     # (_bet_price_and_book) by the name in its label, which is that book's own
     # spelling (scripts/nba_prop_market_card.pick_rows).
     "nba_prop_market":  "FROM_PROP_MARKET",
+    "nba_prop_market_early": "FROM_PROP_MARKET",   # the same card's rows, decided 10 hours out
     # The projection card writes decision_book and the book's own spelling the same way.
     "nba_prop_projection": "FROM_PROP_MARKET",
     "nhl_prop_blocked_shots": "player_blocked_shots",

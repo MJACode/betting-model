@@ -1960,6 +1960,22 @@ def step_nba_props(dry_run: bool = False) -> bool:
         return False
 
 
+def step_nba_prop_market_early(dry_run: bool = False) -> bool:
+    """`nba_prop_market_early` (scripts/nba_prop_market_early_card.py): nba_prop_market's rule
+    decided 9.5-10.5 hours before tip on points, rebounds and threes, a PAPER test (mike,
+    2026-11-26). The id is paused, so every row carries the pause marker and nothing posts it; it
+    settles and is graded. Its own door, outside the NBA prop door's one-a-game cap. Run by every
+    refresh pass after the prop fetch."""
+    try:
+        from scripts.nba_prop_market_early_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA prop market, 10 hours (paper): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA prop market, 10 hours (paper) failed: {exc}")
+        return False
+
+
 def step_nba_first_basket(dry_run: bool = False) -> bool:
     """NBA first basket (`nba_prop_first_basket`, models/nba_first_basket.py): decides each
     regular-season game once, 5-20 minutes before tip, on the newest first-basket fetch, and writes
@@ -3194,7 +3210,7 @@ Examples:
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
-                                 "nba-props", "nba-prop-market", "nba-prop-close", "nba-first-basket",
+                                 "nba-props", "nba-prop-market", "nba-prop-market-early", "nba-prop-close", "nba-first-basket",
                                  "nba-prop-projection", "nba-prop-project",
                                  "nba-total-luck", "nba-team-total-luck", "nba-first-half-total-luck", "nba-q1-trend",
                                  "nba-q1-trend-ml",
@@ -3296,6 +3312,7 @@ Examples:
             "nhl-goalie-designations-today": lambda: step_nhl_goalie_designations(today_only=True),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "nba-props": lambda: step_nba_props(dry_run=args.dry_run),
+            "nba-prop-market-early": lambda: step_nba_prop_market_early(dry_run=args.dry_run),
             "nba-first-basket": lambda: step_nba_first_basket(dry_run=args.dry_run),
             "nba-prop-market": lambda: step_nba_prop_market(dry_run=args.dry_run),
             "nba-prop-close": lambda: step_nba_prop_close(),
