@@ -64,8 +64,10 @@ SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB", "NCAAB", "WNBA")
 # consensus for NFL, NCAAF or NCAAB (NBA and NHL had no games that day), and
 # the hourly passes at 15:19, 15:28 and 16:18 UTC stored 0 period rows in all
 # five sports (worker log). The fetch is left in place so a period split shows
-# up in the history the day consensus starts serving one; whether any single
-# book splits periods is what scripts/splits_coverage_probe.py measures.
+# up in the history the day consensus starts serving one. No single book does
+# either: worker_jobs 1722475 (scripts/splits_coverage_probe.py, 18:05 UTC)
+# asked every book for every period and found no period and no team-total
+# split at any book in NBA, NHL, NFL, NCAAF or NCAAB.
 PERIODS_BY_SPORT: dict[str, tuple[str, ...]] = {
     "NBA": ("firsthalf", "secondhalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
     "NFL": ("firsthalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
