@@ -440,3 +440,80 @@ def test_the_board_starts_the_thread_and_restarts_on_its_file():
     assert "data/ingestors/book_live_boards.py" in B.FEED_FILES
     main = src[src.index("def main("):]
     assert main.index("if not a.dry_run:\n        # Every other book") < main.index("while end is None")
+
+
+# ─── BetMGM: the right public access id, read off its public page ─────────────
+# mike, 2026-11-26: "Get we're just scraping odds data ... let's just do it".
+
+import base64 as _b64  # noqa: E402
+
+BETMGM = next(b for b in L.BOOKS if b.key == "betmgm")
+CAESARS = next(b for b in L.BOOKS if b.key == "williamhill_us")
+_FRESH = _b64.b64encode(b"11111111-2222-3333-4444-555555555555").decode()
+BETMGM_PAGE_HTML = f'<html><script src="/en/app.js"></script>window.cfg={{"accessId":"{_FRESH}"}}</html>'
+
+
+def _betmgm_answer(url):
+    if "betmgm.com/en/sports" in url:
+        return Resp(200, text=BETMGM_PAGE_HTML)
+    if "/cds-api/bettingoffer/fixtures" in url:
+        return Resp(400, text='{"message":"Access id not allowed for application"}')
+    return Resp(200, text="")                       # the page's config / js assets
+
+
+def test_a_wrong_site_access_id_is_dropped_and_the_public_page_gives_the_right_one():
+    f, _conn, _logged, sess = feeds(_betmgm_answer)
+    res = f.read(BETMGM, "NBA")
+    assert res["ok"] is False and res["status"] == 400
+    # the id we sent (the first hardcoded one) is marked bad and never offered again
+    assert L.BETMGM_ACCESS_IDS[0] in f.betmgm_keys.bad
+    # the page was read and the id it ships is now the current one
+    assert any("betmgm.com/en/sports" in u for u in sess.urls)
+    assert f.betmgm_keys.current() == _FRESH
+    # the next url carries the public id read off the page
+    assert f._url_for(BETMGM, "NBA") == L._betmgm_url("NBA", _FRESH)
+
+
+def test_with_no_id_at_all_the_page_is_read_before_any_fixtures_call():
+    f, _conn, _logged, sess = feeds(_betmgm_answer)
+    f.betmgm_keys = L.BetMGMKeys(())                 # nothing to try
+    res = f.read(BETMGM, "NBA")
+    assert res["detail"] == "no url"                 # no id, so no fixtures request
+    assert not any("/cds-api/" in u for u in sess.urls)
+    assert any("/en/sports" in u for u in sess.urls) and f.betmgm_keys.current() == _FRESH
+
+
+def test_the_page_is_not_re_read_within_the_discover_window():
+    f, _conn, _logged, sess = feeds(_betmgm_answer)
+    f.read(BETMGM, "NBA")
+    pages = sum("/en/sports" in u for u in sess.urls)
+    f.read(BETMGM, "NCAAB")                          # the fresh id works now; no new page read
+    assert sum("/en/sports" in u for u in sess.urls) == pages
+
+
+# ─── Caesars: request the way the site's own JS does, then stop ──────────────
+
+def test_caesars_warms_the_site_then_sends_the_browser_xhr_headers():
+    def answer(url):
+        return Resp(200, text="<html></html>") if url == L.CAESARS_SITE else Resp(200, body={"competitions": []})
+    f, _conn, _logged, sess = feeds(answer)
+    f.read(CAESARS, "NBA")
+    api = next(u for u in sess.urls if "americanwagering.com" in u)
+    assert sess.urls.index(L.CAESARS_SITE) < sess.urls.index(api)     # site loaded first, for cookies
+    hdr = sess.headers[sess.urls.index(api)]
+    assert hdr and hdr.get("Origin") == "https://sportsbook.caesars.com"
+    # warmed once only
+    f.read(CAESARS, "NCAAB")
+    assert sum(u == L.CAESARS_SITE for u in sess.urls) == 1
+
+
+def test_caesars_still_blocked_stays_refused_with_no_escalation():
+    calls = []
+
+    def answer(url):
+        calls.append(url)
+        return Resp(200, text="<html></html>") if url == L.CAESARS_SITE else Resp(403, text="<html>403 ERROR</html>")
+    f, _conn, _logged, sess = feeds(answer)
+    res = f.read(CAESARS, "NBA")
+    assert res["refused"] is True and res["detail"] == "refused"
+    assert sum("americanwagering.com" in u for u in calls) == 1       # one try, no retry to beat the wall

@@ -871,14 +871,29 @@ stop a DraftKings read. Each book and live sport is asked once every 30 s.
   game"; `live_events` against `matched` in `book_live_feed` shows the gap.
 - **BetMGM, Caesars, Fanatics and Hard Rock are captured, not parsed.** Their
   answers go to `book_live_raw` (at most 3 a day per book, sport and status)
-  until a stored answer shows the shape. BetMGM answers 400 ("Access id not
-  allowed for application"); its page loads the id from a config call that a
-  Claude session here was refused permission to make (2026-11-26). Caesars
-  answers 403. Fanatics and Hard Rock start from their home pages.
-- **No bot-wall work.** A plain request in a browser's TLS shape; a challenge
-  or a 403 is recorded as refused, and three in a row leave that book alone
-  for 10 minutes. `BOOK_LIVE_BOARDS=0` in this machine's environment turns
-  the thread off.
+  until a stored answer shows the shape, then a parser is written from it (as
+  FanDuel's was). Two needed the request shaped the way their own site shapes
+  it before they would answer (mike, 2026-11-26: *"we're just scraping odds
+  data ... let's just do it"*):
+  - **BetMGM** answered 400 "Access id not allowed for application": the two
+    published access ids are for other BetMGM sites. The access id is a PUBLIC
+    web token its own logged-out page ships, the same kind of value as
+    FanDuel's `_ak`, so the feed reads BetMGM's public Ohio page (and the
+    config/JS it names) for the one this site ships, uses it, and never sends a
+    400'd id again (`access_ids_in`, `BetMGMKeys`).
+  - **Caesars** answered 403 from CloudFront on a cold hit to its API host: its
+    own JS calls that host after loading the site and with `Origin` / `Referer`
+    / `Accept` headers, so the feed loads the site once for cookies
+    (`CAESARS_SITE`) and sends those headers (`CAESARS_HEADERS`). This is
+    requesting the way the site does. If CloudFront still blocks a
+    browser-shaped request it stays **refused** (nothing solves a challenge or
+    rotates fingerprints to beat one) and that book goes to the paid Odds API
+    feed instead.
+- **No bot-wall work.** The request is shaped like the book's own browser (TLS
+  fingerprint, and the headers its site sends); a challenge or a 403 is
+  recorded as refused, never worked around, and three in a row leave that book
+  alone for 10 minutes. `BOOK_LIVE_BOARDS=0` in this machine's environment
+  turns the thread off.
 - **Not NCAAF or MLB**, for the same reason as DraftKings' lines above.
 
 Each book and sport's last read, and what it answered:

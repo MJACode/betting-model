@@ -50,6 +50,7 @@ in-play rows (checked 2026-11-25).
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import logging
 import os
@@ -415,11 +416,79 @@ BETMGM_ACCESS_IDS = tuple(v for v in os.environ.get(
 ).split(",") if v)
 BETMGM_SPORT_IDS = {"NBA": "7", "NCAAB": "7", "NCAABW": "7", "EUROLEAGUE": "7", "NFL": "11", "NHL": "12"}
 
+# The access id is a PUBLIC web token BetMGM's own logged-out page ships in its
+# query string, the same kind of value as FanDuel's public `_ak` key. The two
+# hardcoded above are for other BetMGM sites and the Ohio API answers them with
+# a clean JSON 400 "Access id not allowed for application" (every read
+# 2026-11-26): the request reaches the app, it is just the wrong site's token.
+# So the right one is read off BetMGM's own public Ohio page (and the config/JS
+# it names), exactly as FanDuel's key is. A US id is a UUID, base64-encoded (48
+# chars). A 400'd id is marked bad and never sent again.
+BETMGM_PAGE = "https://sports.{state}.betmgm.com/en/sports"
+BETMGM_PAGE_EXTRA = 6           # same-site config/JS files read beside the page
+_B64_48 = re.compile(r"(?<![A-Za-z0-9+/])([A-Za-z0-9+/]{48})(?![A-Za-z0-9+/=])")
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def access_ids_in(text: str) -> list[str]:
+    """Every 48-char base64 token in `text` that decodes to a UUID (a BetMGM
+    access id), in order, de-duplicated. Pure."""
+    out: list[str] = []
+    for tok in _B64_48.findall(text or ""):
+        try:
+            dec = base64.b64decode(tok, validate=True).decode("ascii")
+        except Exception:                 # noqa: BLE001
+            continue
+        if _UUID.match(dec) and tok not in out:
+            out.append(tok)
+    return out
+
+
+def page_assets(page: str, origin: str, limit: int = BETMGM_PAGE_EXTRA) -> list[str]:
+    """Same-site config and script URLs a page names, configs first. Pure."""
+    scripts = re.findall(r'(?:src|href)="(/[^"#]+\.js[^"]*)"', page or "")
+    configs = re.findall(r'"(/[a-z]{2}/api/[a-z/]*config[^"]*)"', page or "", re.I)
+    out: list[str] = []
+    for path in configs + scripts:
+        url = origin + path
+        if url not in out:
+            out.append(url)
+    return out[:limit]
+
+
+class BetMGMKeys:
+    """The access ids to try, discovered ones first; a 400'd id is marked bad
+    and never offered again."""
+
+    def __init__(self, ids: tuple[str, ...] = ()):
+        self.ids = list(ids)
+        self.bad: set[str] = set()
+        self.page_at: float | None = None
+
+    def current(self) -> str | None:
+        return next((i for i in self.ids if i not in self.bad), None)
+
+    def add(self, found: list[str]) -> list[str]:
+        new = [i for i in found if i not in self.ids]
+        self.ids = new + self.ids
+        return new
+
 # Caesars: api.americanwagering.com/regions/us/locations/<state>/brands/czr/
 # sb/v3/... (declanwalpole/sportsbook-odds-scraper, events by id). The live
 # list path is not published; this asks for the sport's schedule.
 CAESARS_SPORTS = {"NBA": "basketball", "NCAAB": "basketball", "NCAABW": "basketball",
                   "EUROLEAGUE": "basketball", "NFL": "americanfootball", "NHL": "icehockey"}
+# A cold hit on Caesars' API host got a CloudFront 403: the site's own JS calls
+# that host cross-origin with these headers and after loading the site, so the
+# feed does the same: loads the site once for cookies (CAESARS_SITE), then
+# sends the Origin / Referer / Accept the browser's XHR sends. This is making
+# the request the way the site does, not defeating a bot wall: if CloudFront
+# still blocks a browser-shaped request it stays recorded as refused, and
+# nothing here solves a challenge or rotates fingerprints to get past one.
+CAESARS_SITE = "https://sportsbook.caesars.com/"
+CAESARS_HEADERS = {"Origin": "https://sportsbook.caesars.com",
+                   "Referer": "https://sportsbook.caesars.com/",
+                   "Accept": "application/json, text/plain, */*"}
 
 
 @dataclass(frozen=True)
@@ -448,12 +517,13 @@ def _betrivers_url(sport: str) -> str | None:
             f"?lang=en_US&market={KAMBI_MARKET}&useCombined=true")
 
 
-def _betmgm_url(sport: str) -> str | None:
+def _betmgm_url(sport: str, key: str | None = None) -> str | None:
     sid = BETMGM_SPORT_IDS.get(sport)
-    if not sid or not BETMGM_ACCESS_IDS:
+    key = key or (BETMGM_ACCESS_IDS[0] if BETMGM_ACCESS_IDS else None)
+    if not sid or not key:
         return None
     return (f"https://sports.{STATE}.betmgm.com/cds-api/bettingoffer/fixtures"
-            f"?x-bwin-accessid={BETMGM_ACCESS_IDS[0]}&lang=en-us&country=US&userCountry=US"
+            f"?x-bwin-accessid={key}&lang=en-us&country=US&userCountry=US"
             f"&subdivision=US-{STATE.upper()}&fixtureTypes=Standard&state=Live&offerMapping=Filtered"
             f"&offerCategories=Gridable&sportIds={sid}&skip=0&take=50")
 
@@ -472,7 +542,8 @@ BOOKS: tuple[Book, ...] = (
     Book("betrivers", tuple(s for s in LIVE_SPORTS if s in KAMBI_LEAGUES), _betrivers_url, parse_kambi,
          headers=KAMBI_HEADERS),
     Book("betmgm", tuple(s for s in LIVE_SPORTS if s in BETMGM_SPORT_IDS), _betmgm_url),
-    Book("williamhill_us", tuple(s for s in LIVE_SPORTS if s in CAESARS_SPORTS), _caesars_url),
+    Book("williamhill_us", tuple(s for s in LIVE_SPORTS if s in CAESARS_SPORTS), _caesars_url,
+         headers=CAESARS_HEADERS),
     Book("fanatics", ("*",), lambda _s: "https://sportsbook.fanatics.com/", discover=True),
     Book("hardrockbet", ("*",), lambda _s: "https://app.hardrock.bet/", discover=True),
 )
@@ -562,6 +633,8 @@ class BookFeeds:
         self.last: dict[tuple, dict] = {}          # (book, game_id) -> last row
         self.ids: dict[tuple, tuple | None] = {}   # (book, event_id) -> (game_id, flipped)
         self.shared: dict[str, tuple[float, int, str]] = {}   # url -> (when, status, text)
+        self.betmgm_keys = BetMGMKeys(BETMGM_ACCESS_IDS)
+        self._booted: set[str] = set()             # books whose session was warmed (Caesars)
         self.captures = Captures()
         self.conn = None
         self.ready = False
@@ -648,14 +721,64 @@ class BookFeeds:
                 results.append(res)
         return results
 
+    def _url_for(self, book: Book, sport: str) -> str | None:
+        """The book's url for this sport, with BetMGM's current access id."""
+        if book.key == "betmgm":
+            key = self.betmgm_keys.current()
+            return _betmgm_url(sport, key) if key else None
+        return book.url(sport)
+
+    def _warm(self, book: Book, sess) -> None:
+        """Load Caesars' site once per session so its cookies are set, the way
+        a browser does before the site's JS calls the API cross-origin."""
+        if book.key != "williamhill_us" or book.key in self._booted:
+            return
+        self._booted.add(book.key)
+        try:
+            sess.get(CAESARS_SITE, timeout=15)
+        except Exception:                 # noqa: BLE001
+            pass
+
+    def _betmgm_page(self, book: Book, sess) -> None:
+        """Read BetMGM's public page (and up to BETMGM_PAGE_EXTRA of the config
+        and script files it names) for the access ids it ships, at most every
+        DISCOVER_SEC. The page's answer is stored like a home page (sport '*')."""
+        k = self.betmgm_keys
+        if k.page_at is not None and self.monotonic() - k.page_at < DISCOVER_SEC:
+            return
+        k.page_at = self.monotonic()
+        url = BETMGM_PAGE.format(state=STATE)
+        origin = url.split("/en/", 1)[0]
+        at = self.clock()
+        try:
+            r = sess.get(url, timeout=15)
+            status, text = int(r.status_code), r.text or ""
+        except Exception as exc:          # noqa: BLE001
+            self._finish(book, "*", at, url, None, "", False, 0, 0, 0, f"page: {type(exc).__name__}"[:120])
+            return
+        found = access_ids_in(text)
+        if status == 200 and not is_challenge(status, text):
+            for extra in page_assets(text, origin):
+                try:
+                    found += [i for i in access_ids_in(sess.get(extra, timeout=15).text or "") if i not in found]
+                except Exception:         # noqa: BLE001
+                    continue
+        new = k.add(found)
+        log.info("betmgm page: %d access id(s), %d new", len(found), len(new))
+        self._finish(book, "*", at, url, status, text, status == 200, 0, 0, 0,
+                     f"page: {len(found)} access id(s), {len(new)} new")
+
     def read(self, book: Book, sport: str) -> dict:
         """One request. Never raises."""
-        url = book.url(sport)
-        if url is None:
-            return {"book": book.key, "sport": sport, "ok": False, "detail": "no url"}
         sess = self.sessions.get(book.key)
         if sess is None:
             sess = self.sessions[book.key] = self.session_factory()
+        self._warm(book, sess)
+        url = self._url_for(book, sport)
+        if url is None:
+            if book.key == "betmgm":
+                self._betmgm_page(book, sess)
+            return {"book": book.key, "sport": sport, "ok": False, "detail": "no url"}
         at = self.clock()
         shared = self.shared.get(url)
         if shared is not None and self.monotonic() - shared[0] < SHARED_READ_SEC:
@@ -670,6 +793,13 @@ class BookFeeds:
                 return self._finish(book, sport, at, url, None, "", False, 0, 0, 0,
                                     f"{type(exc).__name__}: {exc}"[:300])
             self.shared[url] = (self.monotonic(), status, text)
+        if book.key == "betmgm" and status == 400 and "access id" in (text or "").lower():
+            # This id is for another BetMGM site: never send it again, and read
+            # the public page for the one this site ships.
+            m = re.search(r"x-bwin-accessid=([^&]+)", url)
+            if m:
+                self.betmgm_keys.bad.add(m.group(1))
+            self._betmgm_page(book, sess)
         refused = is_challenge(status, text)
         body = None
         if status == 200 and not refused:

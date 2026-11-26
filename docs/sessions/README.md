@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, BetMGM's public access id, Caesars' browser headers (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, BetRivers' live lines, and FanDuel cut to each sport's own games (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, The monitor restart, second try: ask the monitor itself (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, The PC monitor follows master by itself (mike) |
