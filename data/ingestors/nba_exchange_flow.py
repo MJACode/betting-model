@@ -423,7 +423,8 @@ def poly_trades(pace: Pace, cid: str) -> list[dict]:
             if len(data) >= 500:
                 # a full page with no cursor cannot be told from a truncated read: refuse it
                 raise RuntimeError(f"polymarket trades {cid}: a full page and no cursor "
-                                   f"(body keys {sorted(body) if isinstance(body, dict) else 'list'})")
+                                   f"(body keys {sorted(body) if isinstance(body, dict) else 'list'}, "
+                                   f"pagination {str(body.get('pagination') if isinstance(body, dict) else None)[:200]})")
             break
     return out
 
