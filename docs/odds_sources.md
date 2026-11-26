@@ -202,11 +202,12 @@ developer.sportradar.com was not tried). Read the page before anything is bought
 | Cadence | About 5 minutes | Hourly from 30 days out, every minute in the last hour |
 
 **Player-prop splits: no vendor found that documents them with a price.** A third-party DraftKings scraper on
-Apify carries DraftKings' bet and handle shares "where published", and does not say props carry them. Whether DK
-Network itself publishes prop splits is measured by `scripts/splits_coverage_probe.py` (worker job
-`splits_coverage_probe`).
+Apify carries DraftKings' bet and handle shares "where published", and does not say props carry them. DK Network
+publishes prop splits only as one-off articles for featured games ("Super Bowl Player Prop & Novelty Prop
+Splits", 2025-02-09; "Colts vs. Chiefs Player Prop Bet Splits for Sunday", 2026-09-20). Its splits table offers
+Moneyline, Spread and Total only, for every event group asked (NFL, NBA, NHL, NCAAF, NCAAB; worker_jobs 1722475).
 
-**Recommendation at the time of pricing: buy neither yet.** Neither adds props or periods. SharpAPI's 48 hours
+**Recommendation at the time of pricing: buy neither yet** (mike agreed, 2026-11-26). Neither adds props or periods. SharpAPI's 48 hours
 of history cannot be backtested, and Sportradar's aggregate is the same kind of number as the free Action Network
 consensus, whose money share stopped being a separate measurement in the 2024 offseason (measured on the NBA,
 `docs/nba_data_sources_and_handle_2026_11.md` A4, on the `claude/festive-gauss-kk7v7h` branch until merged).
