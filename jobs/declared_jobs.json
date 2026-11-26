@@ -2034,5 +2034,14 @@
     "args": {
       "pages": 50
     }
+  },
+  {
+    "key": "dk-prop-splits-raw-tables-2-2026-11-26",
+    "job_type": "dk_prop_splits_import",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26: the same re-read as dk-prop-splits-raw-tables-2026-11-26, which was queued at 19:35 UTC before any pass had created dk_prop_split_tables, so it could write nothing. The job now applies the view migrations first. Free, no Odds API credits; a version whose tables are kept is not fetched again.",
+    "args": {
+      "pages": 50
+    }
   }
 ]

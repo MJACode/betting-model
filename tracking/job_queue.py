@@ -903,9 +903,20 @@ def _job_dk_prop_splits_probe(**kw):
 def _job_dk_prop_splits_import(pages: int, **kw):
     """DraftKings' player-prop splits from DK Network's articles, the newest
     `pages` pages of search results (mike, 2026-11-26). Free, idempotent:
-    an article version already in dk_prop_split_articles is not fetched."""
+    a version whose tables are already kept is not fetched."""
+    from data.db import get_connection
     from data.ingestors.dk_prop_splits import run
-    return run(pages=pages)
+    from data.view_migrations import apply_view_migrations
+
+    conn = get_connection()
+    try:
+        # A declared job can be claimed before the deploy's first pass has
+        # applied its migrations (dk_prop_split_tables_2026_11_26.sql), and
+        # run() writes nothing until both tables exist. Idempotent, never raises.
+        apply_view_migrations(conn)
+        return run(conn, pages=pages)
+    finally:
+        conn.close()
 
 
 def _validate_dk_prop_splits_import(args: dict) -> dict:
