@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ErrorBanner } from '@/components/ErrorState';
@@ -34,6 +34,9 @@ import { colors, font, opacity, radii, sectionHeaderText, spacing } from '@/lib/
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+/** How long a swiped-away alert can be brought back before the hide is written. */
+const UNDO_MS = 4500;
 
 function NotificationsHeaderActions() {
   const navigation = useNavigation<Nav>();
@@ -82,20 +85,35 @@ export function NotificationsScreen() {
   // for this member; the stored row is kept (CLAUDE.md section 1b).
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const canDelete = inbox.canDelete && inbox.rows.length > 0;
   const betslipInset = useBetslipBarInset();
+  const insets = useSafeAreaInsets();
+  // The betslip bar's height already includes the home-indicator inset, and
+  // the SafeAreaView pads by it too. Count it once.
+  const aboveBetslip = Math.max(0, betslipInset - insets.bottom);
   const openSwipe = useRef<Swipeable | null>(null);
+
+  // A swiped-away row is hidden at once and written after UNDO_MS, so Undo
+  // never touches the server. Leaving the screen writes it straight away.
+  const [pending, setPending] = useState<InboxRow[]>([]);
+  const pendingRef = useRef<InboxRow[]>([]);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rows = useMemo(() => {
+    if (pending.length === 0) return inbox.rows;
+    const gone = new Set(pending.map((r) => r.id));
+    return inbox.rows.filter((r) => !gone.has(r.id));
+  }, [inbox.rows, pending]);
+  const canDelete = inbox.canDelete && rows.length > 0;
 
   // A row that left the list (deleted, muted, aged out) leaves the selection,
   // and an emptied list leaves select mode.
   useEffect(() => {
-    const ids = new Set(inbox.rows.map((r) => r.id));
+    const ids = new Set(rows.map((r) => r.id));
     setSelected((prev) => {
       const next = new Set([...prev].filter((id) => ids.has(id)));
       return next.size === prev.size ? prev : next;
     });
-    if (inbox.rows.length === 0) setSelecting(false);
-  }, [inbox.rows]);
+    if (rows.length === 0) setSelecting(false);
+  }, [rows]);
 
   const startSelecting = () => {
     openSwipe.current?.close();
@@ -106,9 +124,8 @@ export function NotificationsScreen() {
     setSelecting(false);
     setSelected(new Set());
   };
-  const allSelected = inbox.rows.length > 0 && selected.size === inbox.rows.length;
-  const toggleAll = () =>
-    setSelected(allSelected ? new Set() : new Set(inbox.rows.map((r) => r.id)));
+  const allSelected = rows.length > 0 && selected.size === rows.length;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(rows.map((r) => r.id)));
   const toggleRow = (row: InboxRow) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -125,29 +142,67 @@ export function NotificationsScreen() {
         Alert.alert('Couldn’t delete', 'Check your connection and try again.');
         return;
       }
-      AccessibilityInfo.announceForAccessibility(
-        rows.length === 1 ? 'Notification deleted' : `${rows.length} notifications deleted`,
-      );
     },
     [deleteRows],
   );
 
+  const commitPending = useCallback(() => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = null;
+    const toWrite = pendingRef.current;
+    pendingRef.current = [];
+    setPending([]);
+    if (toWrite.length) void runDelete(toWrite);
+  }, [runDelete]);
+
+  // Leaving the screen (or the app closing it) writes what is still pending.
+  const commitRef = useRef(commitPending);
+  commitRef.current = commitPending;
+  useEffect(() => () => commitRef.current(), []);
+
+  const swipeDelete = (row: InboxRow) => {
+    // One undo at a time: an earlier swipe is written now.
+    commitPending();
+    pendingRef.current = [row];
+    setPending([row]);
+    AccessibilityInfo.announceForAccessibility('Notification deleted');
+    undoTimer.current = setTimeout(commitPending, UNDO_MS);
+  };
+
+  const undoDelete = () => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = null;
+    pendingRef.current = [];
+    setPending([]);
+  };
+
   const deleteSelected = () => {
-    const rows = inbox.rows.filter((r) => selected.has(r.id));
-    if (rows.length === 0) return;
+    const chosen = rows.filter((r) => selected.has(r.id));
+    if (chosen.length === 0) return;
     const title = allSelected
-      ? 'Delete all notifications?'
-      : rows.length === 1
+      ? chosen.length === 1
         ? 'Delete this notification?'
-        : `Delete ${rows.length} notifications?`;
-    Alert.alert(title, 'They’ll be removed from this list. This can’t be undone.', [
+        : `Delete all ${chosen.length} notifications?`
+      : chosen.length === 1
+        ? 'Delete this notification?'
+        : `Delete ${chosen.length} notifications?`;
+    const body =
+      chosen.length === 1
+        ? 'It’ll be removed from this list. This can’t be undone.'
+        : 'They’ll be removed from this list. This can’t be undone.';
+    Alert.alert(title, body, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
         style: 'destructive',
         onPress: () => {
           stopSelecting();
-          void runDelete(rows);
+          commitPending();
+          void runDelete(chosen).then(() =>
+            AccessibilityInfo.announceForAccessibility(
+              chosen.length === 1 ? 'Notification deleted' : `${chosen.length} notifications deleted`,
+            ),
+          );
         },
       },
     ]);
@@ -167,13 +222,13 @@ export function NotificationsScreen() {
   );
 
   const sections = useMemo(() => {
-    const today = inbox.rows.filter((row) => inboxSection(row.sent_at, now) === 'TODAY');
-    const earlier = inbox.rows.filter((row) => inboxSection(row.sent_at, now) === 'EARLIER');
+    const today = rows.filter((row) => inboxSection(row.sent_at, now) === 'TODAY');
+    const earlier = rows.filter((row) => inboxSection(row.sent_at, now) === 'EARLIER');
     const out: { title: string; data: InboxRow[] }[] = [];
     if (today.length) out.push({ title: 'Today', data: today });
     if (earlier.length) out.push({ title: 'Earlier', data: earlier });
     return out;
-  }, [inbox.rows, now]);
+  }, [rows, now]);
 
   const openRow = (row: InboxRow) => {
     if (selecting) {
@@ -188,7 +243,9 @@ export function NotificationsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.windowRow}>
-        <Text style={styles.window}>Showing the last 7 days</Text>
+        <Text style={styles.window} accessibilityLiveRegion="polite">
+          {selecting ? `${selected.size} selected` : 'Showing the last 7 days'}
+        </Text>
         {canDelete ? (
           <Pressable
             onPress={selecting ? stopSelecting : startSelecting}
@@ -197,7 +254,7 @@ export function NotificationsScreen() {
             hitSlop={8}
             style={({ pressed }) => [styles.selectBtn, pressed && { opacity: opacity.pressed }]}
           >
-            <Text style={styles.selectText} maxFontSizeMultiplier={1.4}>
+            <Text style={styles.selectText}>
               {selecting ? 'Cancel' : 'Select'}
             </Text>
           </Pressable>
@@ -243,7 +300,8 @@ export function NotificationsScreen() {
           refreshControl={
             <RefreshControl refreshing={inbox.loading} onRefresh={() => void inbox.refresh()} tintColor={colors.tint} />
           }
-          ListFooterComponent={<BetslipBarSpacer />}
+          // In select mode the bar below already lifts the list clear of the slip.
+          ListFooterComponent={selecting ? null : <BetslipBarSpacer />}
           renderSectionHeader={({ section }) => (
             <Text style={styles.section}>{section.title}</Text>
           )}
@@ -255,7 +313,7 @@ export function NotificationsScreen() {
               selecting={selecting}
               selected={selected.has(item.id)}
               swipeToDelete={inbox.canDelete && !selecting}
-              onDelete={() => void runDelete([item])}
+              onDelete={() => swipeDelete(item)}
               onSwipeOpen={(ref) => {
                 if (openSwipe.current && openSwipe.current !== ref) openSwipe.current.close();
                 openSwipe.current = ref;
@@ -266,15 +324,15 @@ export function NotificationsScreen() {
         />
       )}
       {selecting && sections.length > 0 ? (
-        <View style={[styles.selectBar, { marginBottom: betslipInset }]}>
+        <View style={[styles.selectBar, { marginBottom: aboveBetslip }]}>
           <Pressable
             onPress={toggleAll}
             accessibilityRole="button"
             accessibilityLabel={allSelected ? 'Deselect all' : 'Select all'}
             style={({ pressed }) => [styles.selectBarBtn, pressed && { opacity: opacity.pressed }]}
           >
-            <Text style={styles.selectText} maxFontSizeMultiplier={1.4}>
-              {allSelected ? 'Deselect All' : 'Select All'}
+            <Text style={styles.selectText}>
+              {allSelected ? 'Deselect all' : 'Select all'}
             </Text>
           </Pressable>
           <Pressable
@@ -296,12 +354,23 @@ export function NotificationsScreen() {
               size={18}
               color={selected.size === 0 ? colors.textTertiary : colors.avoid}
             />
-            <Text
-              style={[styles.deleteText, selected.size === 0 && styles.markTextOff]}
-              maxFontSizeMultiplier={1.4}
-            >
+            <Text style={[styles.deleteText, selected.size === 0 && styles.markTextOff]}>
               {selected.size === 0 ? 'Delete' : `Delete (${selected.size})`}
             </Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {pending.length > 0 ? (
+        <View style={[styles.undoBar, { bottom: spacing.xl + aboveBetslip }]}>
+          <Text style={styles.undoText}>Notification deleted</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Undo delete"
+            onPress={undoDelete}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+            style={styles.undoBtn}
+          >
+            <Text style={styles.undoAction}>Undo</Text>
           </Pressable>
         </View>
       ) : null}
@@ -378,8 +447,12 @@ function InboxListRow({
   if (!swipeToDelete) return content;
   const renderRightActions = () => (
     <Pressable
+      // VoiceOver reaches delete through the row's own Delete action. RNGH
+      // renders this button behind a closed row, so keep it out of the tree.
       accessibilityRole="button"
       accessibilityLabel="Delete notification"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
       onPress={() => {
         swipeRef.current?.close();
         onDelete();
@@ -387,9 +460,7 @@ function InboxListRow({
       style={({ pressed }) => [styles.swipeDelete, pressed && { opacity: opacity.pressed }]}
     >
       <Ionicons name="trash-outline" size={22} color={colors.onChrome} />
-      <Text style={styles.swipeDeleteText} maxFontSizeMultiplier={1.4}>
-        Delete
-      </Text>
+      <Text style={styles.swipeDeleteText}>Delete</Text>
     </Pressable>
   );
   return (
@@ -450,6 +521,31 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
     color: colors.avoid,
+  },
+  undoBar: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.textPrimary,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  undoBtn: { minHeight: 44, justifyContent: 'center' },
+  undoText: {
+    color: colors.bg,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.medium,
+  },
+  // Same ink and underline as SavedParlays' undo banner (UX review, 2026-11-16).
+  undoAction: {
+    color: colors.bg,
+    textDecorationLine: 'underline',
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
   },
   check: { justifyContent: 'center', alignSelf: 'center' },
   rowSelected: { backgroundColor: colors.tintSoft },

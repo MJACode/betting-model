@@ -55,6 +55,9 @@ let inflight: Promise<void> | null = null;
 let inflightFor: string | null | undefined;
 /** Last server page, before the mute filter, so unmuting a sport can show it. */
 let fetched: InboxRow[] = [];
+/** Rows this member deleted in this process. A load that started before the
+ *  hide was written would otherwise put them back until the next refresh. */
+const hiddenIds = new Set<string>();
 
 function emit(next: InboxSnapshot) {
   snapshot = next;
@@ -128,7 +131,7 @@ async function load(userId: string | null): Promise<void> {
     return;
   }
   const muted = mutedSports((prefs.data ?? []) as { sport: string; enabled: boolean }[]);
-  fetched = (inbox.data ?? []) as InboxRow[];
+  fetched = ((inbox.data ?? []) as InboxRow[]).filter((r) => !hiddenIds.has(r.id));
   const rows = visibleInbox(fetched, muted, new Date());
   const unread = unreadCount(rows);
   emit({ rows, muted, unread, loading: false, loaded: true, error: null, userId, canDelete });
@@ -271,6 +274,7 @@ export function useNotificationInbox(): InboxSnapshot & {
     if (!userId || targets.length === 0 || !snapshot.canDelete) return false;
     const now = new Date().toISOString();
     const ids = new Set(targets.map((r) => r.id));
+    ids.forEach((id) => hiddenIds.add(id));
     fetched = fetched.filter((r) => !ids.has(r.id));
     const rows = visibleInbox(fetched, snapshot.muted, new Date());
     const unread = unreadCount(rows);
@@ -300,6 +304,7 @@ export function useNotificationInbox(): InboxSnapshot & {
     }
     const results = await Promise.all(writes);
     if (results.some((r) => r.error)) {
+      ids.forEach((id) => hiddenIds.delete(id));
       void refreshNotificationInbox(userId);
       return false;
     }
