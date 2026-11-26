@@ -38,7 +38,9 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 /** How long a swiped-away alert can be brought back before the hide is written. */
 const UNDO_MS = 4500;
 
-function NotificationsHeaderActions() {
+/** While rows are being selected, Delete is the one bulk action on screen;
+ *  "Mark all read" steps aside (Matt, 2026-11-26). */
+function NotificationsHeaderActions({ selecting }: { selecting: boolean }) {
   const navigation = useNavigation<Nav>();
   const { unread, markAllRead } = useNotificationInbox();
   const canMark = unread > 0;
@@ -53,21 +55,23 @@ function NotificationsHeaderActions() {
       >
         <Ionicons name="settings-outline" size={22} color={colors.tint} />
       </Pressable>
-      <Pressable
-        onPress={() => void markAllRead()}
-        disabled={!canMark}
-        accessibilityRole="button"
-        accessibilityLabel="Mark all read"
-        accessibilityState={{ disabled: !canMark }}
-        hitSlop={8}
-        accessibilityShowsLargeContentViewer
-        accessibilityLargeContentTitle="Mark all read"
-        style={({ pressed }) => [styles.markBtn, pressed && canMark && { opacity: opacity.pressed }]}
-      >
-        <Text style={[styles.markText, !canMark && styles.markTextOff]} maxFontSizeMultiplier={1.4}>
-          Mark all read
-        </Text>
-      </Pressable>
+      {selecting ? null : (
+        <Pressable
+          onPress={() => void markAllRead()}
+          disabled={!canMark}
+          accessibilityRole="button"
+          accessibilityLabel="Mark all read"
+          accessibilityState={{ disabled: !canMark }}
+          hitSlop={8}
+          accessibilityShowsLargeContentViewer
+          accessibilityLargeContentTitle="Mark all read"
+          style={({ pressed }) => [styles.markBtn, pressed && canMark && { opacity: opacity.pressed }]}
+        >
+          <Text style={[styles.markText, !canMark && styles.markTextOff]} maxFontSizeMultiplier={1.4}>
+            Mark all read
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -77,13 +81,13 @@ export function NotificationsScreen() {
   const inbox = useNotificationInbox();
   const now = useMemo(() => new Date(), [inbox.rows]);
 
-  useLayoutEffect(() => {
-    navigation.setOptions({ headerRight: () => <NotificationsHeaderActions /> });
-  }, [navigation]);
 
   // Select mode: tap rows to pick them, then Delete. "Delete" hides the alert
   // for this member; the stored row is kept (CLAUDE.md section 1b).
   const [selecting, setSelecting] = useState(false);
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerRight: () => <NotificationsHeaderActions selecting={selecting} /> });
+  }, [navigation, selecting]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const betslipInset = useBetslipBarInset();
   const insets = useSafeAreaInsets();
