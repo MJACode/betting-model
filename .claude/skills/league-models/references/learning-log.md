@@ -30,6 +30,31 @@ review as its own entry.
 
 ---
 
+## 2026-11-26: NBA props decided 10 hours before tip, and real-money history (`nba_prop_market_early`)
+
+1. **Scope.** mike, 2026-11-26: NBA data sources because the prop and game models were weak,
+   handle data across every market and whether it helps, then "yes" to buying earlier NBA prop
+   snapshots, to historical money data, and to a forward paper test of `nba_prop_market` at 10
+   hours. Doc: `docs/nba_data_sources_and_handle_2026_11.md`.
+2. **Tried.**
+   - Action Network's closing splits on 2020-21..2025-26: 24 fade / follow cells, none clears.
+   - One prop snapshot at tip minus 10 hours for every 2023-24..2025-26 game (182,647 credits).
+   - `nba_prop_market`'s frozen rule at 10 hours against an hour before tip, same games.
+   - Kalshi and Polymarket order flow against Pinnacle's later move and the result.
+3. **New.**
+   - Exchange trade history as a priced, timestamped money source (`scouting.md`).
+   - A fourth instance of quotes from different moments (`kill-tests.md`).
+   - Decision time is still a per-model parameter (`porting-traps.md`, "When the model
+     decides"): the same frozen rule returned +5.8% a bet at 10 hours against +2.6% an hour
+     out. `nba_prop_market_early` is that rule at 10 hours, PAUSED as a paper test.
+4. **Corrected.** Action Network's money % is no longer a separate measurement: from the 2024
+   offseason it tracks its ticket % (median gap 25 points in April 2024, 1 in October 2024).
+   A "sharp money" reading cannot be made from it for NBA after 2023-24.
+5. **The framework.** Nothing in `SKILL.md` changed. The quotes-from-one-moment rule already
+   covers the trap; this is its fourth logged case.
+
+---
+
 ## 2026-11-23 — Review
 
 1. **Scope.** The weekly self-review, run on mike's PC. Since: the 2026-11-16 Review

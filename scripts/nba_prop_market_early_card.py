@@ -55,7 +55,16 @@ WINDOW_MIN = (570, 630)          # 9.5 to 10.5 hours: the graded snapshot sat at
 MARKETS = ("player_points", "player_rebounds", "player_threes")
 DECISIONS_TABLE = "nba_prop_market_early_decisions"
 DECISIONS_COLS = rule_card.DECISIONS_COLS
-DECISIONS_DDL = rule_card.DECISIONS_DDL.replace(rule_card.DECISIONS_TABLE, DECISIONS_TABLE)
+DECISIONS_DDL = """
+CREATE TABLE IF NOT EXISTS nba_prop_market_early_decisions (
+    game_id     TEXT PRIMARY KEY,
+    decided_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    fetch_at    TEXT NOT NULL,
+    n_quotes    INTEGER NOT NULL,
+    n_bets      INTEGER NOT NULL,
+    detail      TEXT
+)
+"""
 _INSERT_DECISION = rule_card._INSERT_DECISION.replace(rule_card.DECISIONS_TABLE, DECISIONS_TABLE)
 
 

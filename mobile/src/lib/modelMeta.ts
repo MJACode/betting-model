@@ -390,6 +390,15 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The same rule decided 10 hours before tip on points, rebounds and threes,
+  // paused while it is tested (mike, 2026-11-26; scripts/nba_prop_market_early_card.py).
+  nba_prop_market_early: {
+    shortLabel: 'Props',
+    longLabel: 'NBA Props (10 hours)',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
   // The NBA projection model (models/nba_prop_projection.py): projects each
   // player's count from his minutes and per-minute rates and bets the books'
   // main line, in the same 45-57 minute window as the rule above. ONE id across six markets (steals,
