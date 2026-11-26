@@ -1952,6 +1952,39 @@
     "args": {}
   },
   {
+    "key": "premium-expire-ryan-pad-murphy-2026-11-26",
+    "job_type": "premium_access",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-26: delete Ryan.pad.Murphy from premium. Expired, not deleted (no-delete rule).",
+    "args": {
+      "action": "expire",
+      "email": "ryan.pad.murphy@gmail.com",
+      "note": "expired by Matt 2026-11-26 (replaced by rmurphisms@gmail.com)"
+    }
+  },
+  {
+    "key": "premium-grant-rmurphisms-2026-11-26",
+    "job_type": "premium_access",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-26: replace ryan.pad.murphy with rmurphisms, add larrypizzi3",
+    "args": {
+      "action": "grant",
+      "email": "rmurphisms@gmail.com",
+      "note": "comped by Matt 2026-11-26 (full access)"
+    }
+  },
+  {
+    "key": "premium-grant-larrypizzi3-2026-11-26",
+    "job_type": "premium_access",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-26: replace ryan.pad.murphy with rmurphisms, add larrypizzi3",
+    "args": {
+      "action": "grant",
+      "email": "larrypizzi3@gmail.com",
+      "note": "comped by Matt 2026-11-26 (full access)"
+    }
+  },
+  {
     "key": "splits-nonzero-probe-2026-11-26",
     "job_type": "splits_markets_probe",
     "requested_by": "matt",
