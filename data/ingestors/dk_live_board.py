@@ -680,43 +680,131 @@ def feed_changed_on_master(root: Path = ROOT) -> bool:
         return False
 
 
-# The PC monitor (pc_monitor/) runs from its own worktree beside this feed's,
-# .claude/feeds/pc-monitor, under this scheduled task. It loads a merge only
-# when it starts (until its own master check is running), so this feed, which
-# restarts on every merge that changes it, restarts the monitor's task when
-# that copy is behind origin/master on the monitor's files (mike, 2026-11-26:
-# "Do it for me on my pc ... Figure it out"). Both worktrees share one repo,
-# so origin/master is the one the feed's launcher just fetched.
+# The PC monitor (pc_monitor/) checks origin/master by itself from the build
+# that answers /healthz with self_update >= PC_MONITOR_SELF_UPDATE. An older
+# one loads a merge only when it starts, and it may not run under its task (a
+# shortcut start), so this feed, which restarts on every merge that changes it,
+# asks the monitor itself on 127.0.0.1 and, when it is older, ends THAT process
+# (only after confirming it runs pc_monitor) and starts the task, or the same
+# command from the same folder when the task cannot start (mike, 2026-11-26:
+# "Do it for me on my pc ... Figure it out"). One attempt per feed run.
 PC_MONITOR_TASK = r"\BettingModel\PcMonitor"
-PC_MONITOR_PATHS = ("pc_monitor/", "data/db.py")
+PC_MONITOR_PORT = int(os.environ.get("PC_MONITOR_PORT", "8790"))
+PC_MONITOR_SELF_UPDATE = 1
 
 
-def pc_monitor_behind(root: Path, git) -> bool:
-    """True when the monitor's worktree is behind origin/master on its files.
-    `git(cwd, *args)` returns stdout or None; a failure is False."""
-    copy = root.parent / "pc-monitor"
-    if not (copy / ".git").exists():
+def pc_monitor_health(port: int = PC_MONITOR_PORT) -> dict | None:
+    """The monitor's /healthz, or None when nothing (or something else) answers."""
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=2) as r:
+            d = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:                               # noqa: BLE001
+        return None
+    return d if isinstance(d, dict) and d.get("app") == "pc_monitor" else None
+
+
+def pc_monitor_outdated(health: dict | None) -> bool:
+    """True for a running monitor that predates its own master check."""
+    if health is None:
         return False
-    out = git(copy, "diff", "--name-only", "HEAD", "origin/master", "--", *PC_MONITOR_PATHS)
-    return bool(out and out.strip())
+    try:
+        return int(health.get("self_update") or 0) < PC_MONITOR_SELF_UPDATE
+    except (TypeError, ValueError):
+        return True
 
 
-def restart_pc_monitor_if_behind(root: Path = ROOT, git=None, run=None) -> str:
-    """End and start the monitor's scheduled task when its copy is behind.
-    Windows only; every failure is reported, never raised."""
-    if os.name != "nt" and run is None:
-        return "not Windows: nothing to restart"
+def listening_pid(netstat_text: str, port: int) -> int | None:
+    """The pid LISTENING on 127.0.0.1:<port> or 0.0.0.0:<port> in `netstat -ano`. Pure."""
+    for line in (netstat_text or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].upper() == "TCP" and parts[3].upper() == "LISTENING" \
+                and parts[1].rsplit(":", 1)[-1] == str(port) and parts[1].rsplit(":", 1)[0] in ("127.0.0.1", "0.0.0.0"):
+            try:
+                return int(parts[4])
+            except ValueError:
+                return None
+    return None
+
+
+def _pc_monitor_process_windows(port: int) -> dict | None:
+    """Without psutil: netstat for the pid, PowerShell for its command line."""
     import subprocess
-    no_window = 0x08000000                          # CREATE_NO_WINDOW: no console flashes up
-
-    def _git(cwd, *args):
-        try:
-            r = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, timeout=60,
-                               stdin=subprocess.DEVNULL, creationflags=no_window,
-                               env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
-        except Exception:                           # noqa: BLE001
+    no_window = 0x08000000
+    try:
+        ns = subprocess.run(["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True, timeout=30,
+                            stdin=subprocess.DEVNULL, creationflags=no_window).stdout
+        pid = listening_pid(ns, port)
+        if pid is None:
             return None
-        return r.stdout if r.returncode == 0 else None
+        ps = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                             f"$p = Get-CimInstance Win32_Process -Filter 'ProcessId={pid}'; "
+                             "$p.CommandLine; $p.ExecutablePath"],
+                            capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+                            creationflags=no_window).stdout.splitlines()
+    except Exception:                               # noqa: BLE001
+        return None
+    cmd = ps[0] if ps else ""
+    if "pc_monitor" not in cmd:
+        return None
+    copy = ROOT.parent / "pc-monitor"
+    return {"pid": pid, "exe": ps[1].strip() if len(ps) > 1 else "pythonw.exe",
+            "cwd": str(copy) if copy.exists() else None, "cmdline": cmd.split()}
+
+
+def pc_monitor_process(port: int = PC_MONITOR_PORT) -> dict | None:
+    """The process listening on the monitor's port, when it runs pc_monitor:
+    {pid, exe, cwd, cmdline}. None otherwise, or when it cannot be told."""
+    try:
+        import psutil
+    except ImportError:
+        return _pc_monitor_process_windows(port) if os.name == "nt" else None
+    try:
+        pid = next((c.pid for c in psutil.net_connections(kind="tcp")
+                    if c.laddr and c.laddr.port == port and c.status == psutil.CONN_LISTEN and c.pid), None)
+        if pid is None:
+            return None
+        proc = psutil.Process(pid)
+        cmd = proc.cmdline()
+        if "pc_monitor" not in " ".join(cmd):
+            return None
+        return {"pid": pid, "exe": proc.exe(), "cwd": proc.cwd(), "cmdline": cmd}
+    except Exception:                               # noqa: BLE001
+        return None
+
+
+def _end_process(pid: int) -> bool:
+    try:
+        import psutil
+        p = psutil.Process(pid)
+        p.terminate()
+        p.wait(timeout=10)
+        return True
+    except ImportError:
+        import subprocess
+        try:
+            return subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, timeout=30,
+                                  stdin=subprocess.DEVNULL, creationflags=0x08000000).returncode == 0
+        except Exception:                           # noqa: BLE001
+            return False
+    except Exception:                               # noqa: BLE001
+        return False
+
+
+def restart_pc_monitor_if_outdated(health=pc_monitor_health, find=pc_monitor_process, end=_end_process,
+                                   run=None, start=None, sleep=time.sleep) -> str:
+    """End an outdated monitor and start it on master's code. Never raises."""
+    h = health()
+    if h is None:
+        return "no PC monitor answering: nothing to restart"
+    if not pc_monitor_outdated(h):
+        return "the PC monitor follows master by itself"
+    proc = find()
+    if proc is None:
+        return "the PC monitor is outdated, but its process could not be confirmed: left alone"
+    import subprocess
+    no_window = 0x08000000                          # CREATE_NO_WINDOW
 
     def _run(argv):
         try:
@@ -725,13 +813,29 @@ def restart_pc_monitor_if_behind(root: Path = ROOT, git=None, run=None) -> str:
         except Exception:                           # noqa: BLE001
             return None
 
-    git, run = git or _git, run or _run
-    if not pc_monitor_behind(root, git):
-        return "the PC monitor is on master's code"
-    end = run(["schtasks", "/End", "/TN", PC_MONITOR_TASK])
-    time.sleep(3.0 if run is _run else 0.0)         # its port is free before the new copy binds it
-    start = run(["schtasks", "/Run", "/TN", PC_MONITOR_TASK])
-    return f"the PC monitor was behind master: task ended ({end}) and started ({start})"
+    def _start(p):
+        if not p.get("cwd"):
+            return False
+        exe = Path(p["exe"])
+        w = exe.with_name("pythonw.exe")
+        try:
+            subprocess.Popen([str(w if w.exists() else exe), "-m", "pc_monitor", "--stay", "--no-window"],
+                             cwd=p["cwd"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, creationflags=no_window | 0x00000008)  # DETACHED_PROCESS
+            return True
+        except Exception:                           # noqa: BLE001
+            return False
+
+    run, start = run or _run, start or _start
+    if not end(proc["pid"]):
+        return f"the PC monitor (pid {proc['pid']}) is outdated and could not be ended"
+    sleep(2.0)
+    code = run(["schtasks", "/Run", "/TN", PC_MONITOR_TASK])
+    if code == 0:
+        return f"the PC monitor (pid {proc['pid']}) was outdated: ended, and its task started"
+    ok = start(proc)
+    return (f"the PC monitor (pid {proc['pid']}) was outdated: ended; its task did not start ({code}), "
+            f"so it was started from {proc['cwd']}: {'ok' if ok else 'failed'}")
 
 
 def columns_ready(conn) -> bool:
@@ -986,7 +1090,7 @@ def main(argv=None) -> int:
         import threading
 
         def _monitor():
-            log.info("%s", restart_pc_monitor_if_behind())
+            log.info("%s", restart_pc_monitor_if_outdated())
         threading.Thread(target=_monitor, name="pc_monitor_restart", daemon=True).start()
     if not a.dry_run:
         # Every other book's own live page, on its own thread and connection

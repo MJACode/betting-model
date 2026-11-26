@@ -278,45 +278,65 @@ def test_the_puck_line_is_nhls_spread():
 
 # ─── the PC monitor follows master (2026-11-26, mike: "Figure it out") ────────
 
-def test_the_pc_monitor_is_behind_only_when_master_changed_its_files(tmp_path):
-    feed = tmp_path / "feeds" / "dk-live-board"
-    copy = tmp_path / "feeds" / "pc-monitor"
-    feed.mkdir(parents=True)
-    calls = []
-
-    def git(cwd, *args):
-        calls.append((cwd, args))
-        return "pc_monitor/app.py\n"
-    assert B.pc_monitor_behind(feed, git) is False and calls == []         # no copy: nothing to do
-    copy.mkdir()
-    (copy / ".git").write_text("gitdir: elsewhere", encoding="utf-8")       # a worktree's .git is a file
-    assert B.pc_monitor_behind(feed, git) is True
-    assert calls[-1][0] == copy and calls[-1][1][:4] == ("diff", "--name-only", "HEAD", "origin/master")
-    assert set(B.PC_MONITOR_PATHS) <= set(calls[-1][1])
-    assert B.pc_monitor_behind(feed, lambda cwd, *a: "") is False
-    assert B.pc_monitor_behind(feed, lambda cwd, *a: None) is False         # git failed: never restart
+def test_only_a_monitor_without_its_own_master_check_is_outdated():
+    assert B.pc_monitor_outdated(None) is False                              # nothing answering
+    assert B.pc_monitor_outdated({"app": "pc_monitor"}) is True              # the build before #1624
+    assert B.pc_monitor_outdated({"app": "pc_monitor", "self_update": B.PC_MONITOR_SELF_UPDATE}) is False
+    assert B.pc_monitor_outdated({"app": "pc_monitor", "self_update": "x"}) is True
 
 
-def test_a_behind_monitor_is_ended_then_started_and_a_current_one_is_left_alone(tmp_path):
-    feed = tmp_path / "feeds" / "dk-live-board"
-    copy = tmp_path / "feeds" / "pc-monitor"
-    feed.mkdir(parents=True)
-    copy.mkdir()
-    (copy / ".git").write_text("gitdir: elsewhere", encoding="utf-8")
-    ran = []
-    out = B.restart_pc_monitor_if_behind(feed, git=lambda cwd, *a: "pc_monitor/app.py",
-                                         run=lambda argv: ran.append(argv) or 0)
-    assert ran == [["schtasks", "/End", "/TN", B.PC_MONITOR_TASK], ["schtasks", "/Run", "/TN", B.PC_MONITOR_TASK]]
-    assert "behind" in out
-    ran.clear()
-    B.restart_pc_monitor_if_behind(feed, git=lambda cwd, *a: "", run=lambda argv: ran.append(argv) or 0)
-    assert ran == []
+def _restart(health, proc, task_code=0, start_ok=True):
+    did = []
+    out = B.restart_pc_monitor_if_outdated(
+        health=lambda: health, find=lambda: proc,
+        end=lambda pid: did.append(("end", pid)) or True,
+        run=lambda argv: did.append(("run", tuple(argv))) or task_code,
+        start=lambda p: did.append(("start", p["cwd"])) or start_ok,
+        sleep=lambda s: None)
+    return out, did
 
 
-def test_the_feed_checks_the_monitor_on_windows_only_and_off_its_read_path():
+PROC = {"pid": 4242, "exe": r"C:\Python313\python.exe", "cwd": r"C:\bm\.claude\feeds\pc-monitor",
+        "cmdline": ["pythonw.exe", "-m", "pc_monitor"]}
+
+
+def test_an_outdated_monitor_is_ended_and_its_task_started():
+    out, did = _restart({"app": "pc_monitor"}, PROC)
+    assert did == [("end", 4242), ("run", ("schtasks", "/Run", "/TN", B.PC_MONITOR_TASK))]
+    assert "task started" in out
+
+
+def test_when_the_task_cannot_start_the_same_command_starts_from_the_same_folder():
+    out, did = _restart({"app": "pc_monitor"}, PROC, task_code=1)
+    assert did[-1] == ("start", PROC["cwd"]) and "started from" in out
+
+
+def test_a_current_monitor_an_absent_one_or_an_unconfirmed_process_is_left_alone():
+    for health, proc in (({"app": "pc_monitor", "self_update": B.PC_MONITOR_SELF_UPDATE}, PROC),
+                         (None, PROC), ({"app": "pc_monitor"}, None)):
+        _out, did = _restart(health, proc)
+        assert did == [], (health, proc)
+
+
+def test_the_monitor_marker_matches_the_feed_and_the_feed_checks_off_its_read_path():
+    from pc_monitor import app as A
+    assert A.SELF_UPDATE == B.PC_MONITOR_SELF_UPDATE
     src = Path(B.__file__).read_text(encoding="utf-8")
     main = src[src.index("def main("):]
     assert 'if not a.dry_run and os.name == "nt":' in main
-    assert "threading.Thread(target=_monitor" in main
-    assert main.index("restart_pc_monitor_if_behind") < main.index("while end is None")
-    assert B.restart_pc_monitor_if_behind() in ("not Windows: nothing to restart",) or os.name == "nt"
+    assert "threading.Thread(target=_monitor" in main and "restart_pc_monitor_if_outdated()" in main
+    page = Path(A.__file__).read_text(encoding="utf-8")
+    assert '"self_update": SELF_UPDATE' in page
+
+
+def test_the_listening_pid_is_read_off_netstat():
+    text = """
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1180
+  TCP    127.0.0.1:8790         0.0.0.0:0              LISTENING       4242
+  TCP    127.0.0.1:8790         127.0.0.1:51234        ESTABLISHED     4242
+  TCP    127.0.0.1:47232        0.0.0.0:0              LISTENING       16256
+"""
+    assert B.listening_pid(text, 8790) == 4242
+    assert B.listening_pid(text, 47232) == 16256
+    assert B.listening_pid(text, 9999) is None

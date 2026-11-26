@@ -282,11 +282,16 @@ minutes after the last window closes.
 **A merge reaches it by itself** (mike, 2026-11-26: *"Figure it out"*). While
 it runs it checks origin/master every 5 minutes, and when a merge changed
 `pc_monitor/` or `data/db.py` it stops its server and starts a copy of itself
-on the new code (no new window: an open window reconnects). The DraftKings
-feed backs this up: each time it restarts on a merge, it compares the
-monitor's worktree with origin/master and, when it is behind, ends and starts
-`\BettingModel\PcMonitor`. That is also how the change that added the 5-minute
-check reached the monitor already running.
+on the new code (no new window: an open window reconnects). Its `/healthz`
+says so (`self_update`). The DraftKings feed covers a monitor from before
+that: each time it starts, it asks 127.0.0.1:8790/healthz, and when the
+answer has no `self_update` it ends that process (after confirming it runs
+`pc_monitor`) and starts `\BettingModel\PcMonitor`, or the same command from
+the same folder when the task cannot start. Once per feed run. The first try
+(2026-11-26, #1624) looked for the monitor's folder beside the feed's and
+restarted the task; the running monitor had been started by the shortcut, not
+the task, so nothing changed. Asking the monitor itself does not depend on
+either.
 
 **Live lines by sportsbook** (mike, 2026-11-26: *"I don't see euro league in
 there and can we have a clearer breakout of live data by sports book"*). The
