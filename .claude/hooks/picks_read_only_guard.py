@@ -14,14 +14,37 @@ Two layers on every Supabase `execute_sql` call:
 `apply_migration` is refused outright: migrations land through a reviewed PR
 and the worker's `data.view_migrations`, never from a chat.
 
+3. A query that passes is first sent to Supabase's read-only query endpoint
+   (`/v1/projects/{ref}/database/query/read-only`, run as
+   `supabase_read_only_user`) and its rows come back as this hook's answer,
+   so the MCP call is never made and the claude.ai connector's "always ask"
+   prompt never shows (mike, 2026-11-26). The token is a Supabase access
+   token: the cloud proxy injects it for api.supabase.com (an environment
+   network secret), or SUPABASE_ACCESS_TOKEN on a local machine. With no
+   token, an auth error, a role permission error or no network, the hook
+   falls back to layer 2 and the MCP call runs as before. Set
+   SUPABASE_SQL_VIA_API=0 to skip the route.
+
 This governs Claude's MCP route only. The pipeline writes through
 DATABASE_URL and is untouched by this hook.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+import urllib.error
+import urllib.request
+
+PROJECT_REF = "vvprgnrmzeekokzkrkfu"
+API_URL = "https://api.supabase.com"
+MAX_ANSWER_CHARS = 100_000
+ANSWERED = (
+    "ANSWERED WITHOUT A PROMPT: the repo hook ran this read-only query through "
+    "Supabase's read-only query API (as supabase_read_only_user), so the MCP "
+    "call was not sent. This is the query's real result, not an error."
+)
 
 WRITE_KEYWORDS = (
     r"insert|update|delete|merge|upsert|truncate|alter|drop|create|grant|revoke|"
@@ -66,6 +89,53 @@ def wrap_read_only(sql: str) -> str:
     return "BEGIN READ ONLY;\n" + sql.strip().rstrip(";") + ";\nROLLBACK;"
 
 
+def _debug(msg: str) -> None:
+    """Why the API route fell back, when SUPABASE_SQL_VIA_API_DEBUG=1."""
+    if os.environ.get("SUPABASE_SQL_VIA_API_DEBUG") == "1":
+        print(f"api route fell back: {msg}", file=sys.stderr)
+
+
+def run_via_api(sql: str) -> str | None:
+    """The hook's own answer for a read query, or None to fall back to the
+    MCP call. Never raises."""
+    if os.environ.get("SUPABASE_SQL_VIA_API", "1") == "0":
+        return None
+    base = os.environ.get("SUPABASE_API_URL", API_URL).rstrip("/")
+    ref = os.environ.get("SUPABASE_PROJECT_REF", PROJECT_REF)
+    # In a cloud session the proxy replaces this placeholder with the saved
+    # network secret; on a PC, SUPABASE_ACCESS_TOKEN carries the real one.
+    token = os.environ.get("SUPABASE_ACCESS_TOKEN") or "sbp_injected_by_proxy"
+    req = urllib.request.Request(
+        f"{base}/v1/projects/{ref}/database/query/read-only",
+        data=json.dumps({"query": sql}).encode(),
+        headers={"Authorization": f"Bearer {token}",
+                 "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            body = resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")
+        if e.code == 400 and "permission denied" not in detail.lower():
+            return ("The query failed (Supabase read-only query API, HTTP 400): "
+                    + detail[:MAX_ANSWER_CHARS])
+        _debug(f"HTTP {e.code}: {detail[:300]}")
+        return None
+    except Exception as e:  # no network, proxy refusal, timeout
+        _debug(f"{type(e).__name__}: {str(e)[:300]}")
+        return None
+    try:
+        body = json.dumps(json.loads(body), indent=1, default=str)
+    except ValueError:
+        pass
+    if len(body) > MAX_ANSWER_CHARS:
+        body = (body[:MAX_ANSWER_CHARS]
+                + f"\n... cut at {MAX_ANSWER_CHARS:,} characters; "
+                  "narrow the query or add a LIMIT.")
+    return f"{ANSWERED}\nRows (JSON):\n{body}"
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -83,6 +153,11 @@ def main() -> int:
     reason = blocked_reason(sql)
     if reason:
         print(reason, file=sys.stderr)
+        return 2
+
+    answer = run_via_api(sql)
+    if answer is not None:
+        print(answer, file=sys.stderr)
         return 2
 
     print(json.dumps({

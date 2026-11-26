@@ -53,6 +53,16 @@
           {
             "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/picks_read_only_guard.py\"",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/supabase_api_bash_guard.py\"",
             "timeout": 10
           }
         ]
