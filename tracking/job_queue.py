@@ -2010,6 +2010,32 @@ def _validate_void_picks(args: dict) -> dict:
             "allow_graded": allow_graded}
 
 
+def _job_premium_access(**kw):
+    """Grant or expire comped app premium for one email (Matt, 2026-11-26:
+    "You do the scripts"). scripts/premium_access.py holds the SQL and the
+    rules: grant creates the email login if missing plus one indefinite comped
+    grant; expire sets expires_at on active comped grants and deletes nothing.
+    One request per job, one transaction, idempotent."""
+    from data.db import get_connection
+    from scripts.premium_access import apply
+
+    conn = get_connection()
+    try:
+        out = apply(conn, kw["action"], kw["email"], kw["note"])
+        conn.commit()
+        return out
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _validate_premium_access(args: dict) -> dict:
+    from scripts.premium_access import validate
+    return validate(args)
+
+
 def _job_ncaaf_pbp_pull(**kw):
     """Pull CFBD play-by-play for a season into `ncaaf_plays`, ON THE WORKER.
 
@@ -2997,6 +3023,8 @@ def _job_byom_game_facts(**kw):
 JOBS = {
     "verify_checks": (_job_verify_checks, _validate_verify_checks),
     "void_picks":      (_job_void_picks,       _validate_void_picks),
+    # Comped premium, one email per job. See scripts/premium_access.py.
+    "premium_access": (_job_premium_access, _validate_premium_access),
     "backfill_publish_keys": (_job_backfill_publish_keys, lambda a: {}),
     # ONE-SHOT. Loops the ordinary settle backfill until the raw_one_sided
     # pedigree is gone (or 40 passes). See _job_clv_backfill.
