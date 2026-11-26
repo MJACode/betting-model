@@ -202,5 +202,23 @@ def run_book_throttle_watch(conn=None, now: datetime | None = None, post=None) -
     return res
 
 
+def post_test_alerts(post=None) -> dict:
+    """The red and the green message, built by the same functions a real
+    episode uses, on a made-up FanDuel 429, each titled TEST. mike, 2026-11-26:
+    "Send a test alert to ops so I can see it". Writes no table, so nothing
+    reads it as an episode; one POST each, no retry."""
+    now = datetime.now(timezone.utc)
+    ev = {"at": now, "host": "MAHome", "book": "fanduel", "sport": "NBA", "kind": "throttled",
+          "reason": "rate_limited", "status": 429, "in_a_row": 1, "poll_s": 1.0,
+          "episode": "test", "detail": ""}
+    cleared = {"at": now + timedelta(seconds=40), "detail": "answered cleanly again after 40 s"}
+    note = "\n\n*Test message: no book is throttling us. This is what the alert looks like.*"
+    title, detail = red_message(ev, 1, None)
+    red = post_ops_alert(f"TEST: {title}", detail + note, post=post)
+    title, detail = green_message(ev, cleared, 1)
+    green = post_ops_alert(f"TEST: {title}", detail + note, recovery=True, post=post)
+    return {"red_posted": bool(red), "green_posted": bool(green)}
+
+
 if __name__ == "__main__":  # pragma: no cover
     print(run_book_throttle_watch())
