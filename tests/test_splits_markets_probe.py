@@ -61,8 +61,27 @@ def test_probe_reports_each_source_and_fails_when_dk_is_unreachable(capsys):
     assert asked == set(P.AN_PERIODS)
 
 
-def test_registered_as_a_worker_job_and_declared_once():
+def test_registered_as_a_worker_job_and_declared():
     assert "splits_markets_probe" in job_queue.JOBS
     declared = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     mine = [d for d in declared if d["job_type"] == "splits_markets_probe"]
-    assert len(mine) == 1 and mine[0]["requested_by"] == "matt" and mine[0]["args"] == {}
+    # The first run (markets and periods) and the rerun for team-total entry shapes, each run once.
+    assert [d["key"] for d in mine] == ["splits-markets-probe-2026-11-26", "splits-team-totals-probe-2026-11-26"]
+    assert all(d["requested_by"] == "matt" and d["args"] == {} for d in mine)
+
+
+def test_team_score_sample_keeps_the_raw_entries_and_drops_links():
+    payload = {"games": [{"home_team_id": 1, "away_team_id": 2, "markets": {"15": {"event": {
+        P.TEAM_SCORE_KEY: [{"side": "over", "team_id": 1, "value": 112.5, "deeplink": "x",
+                            "bet_info": {"tickets": {"percent": 61}}}]}}}}]}
+    out = P.team_score_sample(payload)
+    assert out[0] == {"home_team_id": 1, "away_team_id": 2}
+    assert out[1] == {"side": "over", "team_id": 1, "value": 112.5, "bet_info": {"tickets": {"percent": 61}}}
+    assert P.team_score_sample({"games": [{"markets": {"15": {"event": {}}}}]}) == []
+
+
+def test_samples_print_before_the_capped_summary(capsys):
+    team = {"games": [{"home_team_id": 1, "markets": {"15": {"event": {P.TEAM_SCORE_KEY: [{"side": "over"}]}}}}]}
+    P.probe(get=lambda url, **kw: (200, "" if "dknetwork" in url else json.dumps(team), None), today="20261126")
+    after = capsys.readouterr().out.split(P.SUMMARY_MARK, 1)[1].strip().splitlines()
+    assert after[0].startswith("team_score sample nba:")

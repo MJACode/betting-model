@@ -94,8 +94,27 @@ def an_split_markets(payload: dict, books=AN_BOOKS) -> dict:
     return out
 
 
+TEAM_SCORE_KEY = "core_bet_type_6_team_score"
+
+
+def team_score_sample(payload: dict, book: str = "15", limit: int = 4) -> list[dict]:
+    """The first game's consensus team-total entries, verbatim but for long fields, so the entry shape (side, team,
+    value, bet_info) can be read before a parser is written (Matt 2026-11-26, "yes add splits"). Pure."""
+    for g in payload.get("games") or []:
+        block = ((g.get("markets") or {}).get(book) or {})
+        for period in block.values():
+            if isinstance(period, dict) and isinstance(period.get(TEAM_SCORE_KEY), list) and period[TEAM_SCORE_KEY]:
+                out = []
+                for e in period[TEAM_SCORE_KEY][:limit]:
+                    out.append({k: v for k, v in e.items() if k not in ("deeplink", "deeplinks")} if isinstance(e, dict)
+                               else e)
+                return [{"home_team_id": g.get("home_team_id"), "away_team_id": g.get("away_team_id")}] + out
+    return []
+
+
 def probe(get=_get, today: str | None = None) -> int:
     summary: list[str] = []
+    samples: list[str] = []
     failed = False
 
     status, body, err = get(DK_URL)
@@ -130,11 +149,16 @@ def probe(get=_get, today: str | None = None) -> int:
                 else:
                     line = (f"an {slug} {period}: games={len(payload.get('games') or [])} "
                             f"splits={an_split_markets(payload)}")
+                    if period == "event":
+                        sample = team_score_sample(payload)
+                        if sample:
+                            samples.append(f"team_score sample {slug}: {json.dumps(sample, default=str)[:900]}")
             print(line)
             summary.append(line)
 
     print(SUMMARY_MARK)
-    for line in summary:
+    # Samples first: the job keeps the summary's first 6,000 characters.
+    for line in samples + summary:
         print(line)
     return 1 if failed else 0
 
