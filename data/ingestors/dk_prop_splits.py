@@ -6,14 +6,16 @@ NFL games: 34 found through the site's WordPress posts API, 2026-09-14 to 2026-1
 and some Sunday slates (worker_jobs 1723195). The search stopped at its 1,000-post cap and a 2025-02-09 Super Bowl
 article exists outside that list, so 34 is a floor.
 
-Two table layouts were measured (worker_jobs 1723195, the bodies of posts 481849 and 443922):
+Seven table headers are kept in ``dk_prop_split_tables`` (2026-11-26): Player | Market | Line | Handle split | Bet
+split; Player prop | Line | Handle leader | Bet leader; Player prop | Line | Handle % | Bet %; Player prop |
+Handle % | Bet % (the line is the prop text's last number); and the multi-game Game | Player prop | (Line) |
+Handle % | Bet %. A share cell prints as "66%", "Over 67%", "Over (99.1%)", "Over: 99.3% Under: 0.7%",
+"Over 60% / Under 40%" or "50% each" (`shares`). Each stored row records one side and its share for handle and for
+bets: ``side_line`` when the line cell names the side the bare shares belong to ("Under 20.5" / "66%"),
+``leaders`` when each share names its own side, storing the larger (the leader; the other side is the rest of
+100, and the printed cell is kept). A bare share with no side named anywhere is not stored.
 
-* ``side_line`` (November): Player | Market | Line | Handle split | Bet split, the line cell naming the side
-  ("Under 20.5"), the two shares that side's.
-* ``leaders`` (September): Player prop | Line | Handle leader | Bet leader, each leader cell a side and its share
-  ("Over (99.1%)"); the handle and bet leaders can be different sides.
-
-Any other table (the anytime-touchdown rank lists carry no percentages) is counted as skipped, never guessed at.
+Rank lists (the anytime-touchdown tables) carry no percentages and are counted as skipped, never guessed at.
 Every table, parsed or not, is kept as printed in ``dk_prop_split_tables`` (header and body cells), so a layout no
 parser reads yet can be parsed later from the database: the first import (worker_jobs 1724494) parsed 4 of 35
 versions, and 31 from 2026-09-17 to 2026-11-16 use a layout that had not been seen.
@@ -52,12 +54,17 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 _BLOCK = re.compile(r"<h[23][^>]*>(?P<h>.*?)</h[23]>|(?P<t><table\b.*?</table>)", re.S | re.I)
 _ROW = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.S | re.I)
 _CELL = re.compile(r"<t([hd])\b[^>]*>(.*?)</t[hd]>", re.S | re.I)
-_SIDE_LINE = re.compile(r"^(?P<side>[A-Za-z]+)\s+(?P<line>[+\-]?\d+(?:\.\d+)?)$")
-_LEADER = re.compile(r"^(?P<side>[A-Za-z]+)\s*\(\s*(?P<pct>\d{1,3}(?:\.\d+)?)\s*%\s*\)$")
+_SIDE_LINE = re.compile(r"^(?P<side>over|under|yes|no)\s+(?P<line>[+\-]?\d+(?:\.\d+)?)$", re.I)
+_LINE = re.compile(r"^[+\-]?\d+(?:\.\d+)?$")
+_TRAILING_LINE = re.compile(r"\s(?P<line>\d+(?:\.\d+)?)$")
+# One share, in each way a cell has printed it: "Over 67%", "Over (99.1%)", "Over: 99.3%".
+_SHARE = re.compile(r"\b(?P<side>over|under|yes|no)\b\s*[:(]?\s*(?P<pct>\d{1,3}(?:\.\d+)?)\s*%", re.I)
 _PCT = re.compile(r"^(?P<pct>\d{1,3}(?:\.\d+)?)\s*%$")
+_EACH = re.compile(r"^(?P<pct>\d{1,3}(?:\.\d+)?)\s*%\s+each$", re.I)      # "50% each": an even split
 # "Updated Monday, Nov. 23 at 6:04 p.m. ET." / "Updated September 14, 2026." (the two bodies measured).
 _UPDATED = re.compile(r"Updated\b.{0,90}?(?:\bET\b\.?|\d{4}\.)|Updated\b.{0,60}", re.I)
 _TITLE_GAME = re.compile(r"^(?P<a>\w[\w.' ]*?) vs\.? (?P<b>\w[\w.' ]*?) player\b", re.I)
+_CELL_GAME = re.compile(r"^(?P<a>.+?) (?:vs\.?|@|at) (?P<b>.+)$", re.I)
 
 
 def text_of(html: str) -> str:
@@ -100,28 +107,90 @@ def _col(header: list[str], *needles: str, exclude: str = "") -> int | None:
     return None
 
 
-def parse_row(layout: str, cols: dict, cells: list[str]) -> dict | None:
-    """One table row -> the stored fields, or None when a cell does not read. Pure."""
+def shares(cell: str) -> dict:
+    """{side: share} a cell prints: {'over': 99.3, 'under': 0.7}, {'over': 67.0}, {None: 66.0} for a bare
+    "66%", both sides for "50% each". "N/A", a dash and an empty cell give {}. Every shape in the kept tables
+    (2026-11-26, 3,162 rows) is one of these. Pure."""
+    each = _EACH.match((cell or "").strip())
+    if each:
+        return {"over": float(each.group("pct")), "under": float(each.group("pct"))}
+    found: dict = {}
+    for m in _SHARE.finditer(cell or ""):
+        found.setdefault(m.group("side").lower(), float(m.group("pct")))
+    if found:
+        return found
+    m = _PCT.match((cell or "").strip())
+    return {None: float(m.group("pct"))} if m else {}
+
+
+def _lead(sh: dict, named: str | None) -> tuple[str | None, float | None]:
+    """(side, share) to store: the side the line names when the cell is a bare share, else the cell's larger
+    share (the leader; a tie keeps the side printed first). A share with no side and no named side is
+    unreadable."""
+    if not sh:
+        return None, None
+    if None in sh:
+        return (named, sh[None]) if named else (None, None)
+    side = max(sh, key=lambda k: sh[k])
+    return side, sh[side]
+
+
+def table_columns(header: list[str]) -> dict | None:
+    """The columns of a prop-split table, or None when it is not one (rank lists, anything else). Pure."""
+    cols = {"handle": _col(header, "handle"), "bets": _col(header, "bet", exclude="handle"),
+            "line": _col(header, "line"), "game": _col(header, "game"),
+            "prop": _col(header, "player prop"), "player": _col(header, "player", exclude="prop"),
+            "market": _col(header, "market")}
+    if cols["handle"] is None and cols["bets"] is None:
+        return None
+    if cols["prop"] is None and (cols["player"] is None or cols["market"] is None):
+        return None
+    return cols
+
+
+def parse_row(cols: dict, cells: list[str]) -> dict | None:
+    """One table row -> the stored fields, or None when it does not read. `layout` is 'side_line' when the line
+    cell names the side the bare shares belong to, 'leaders' when each share names its own side. Pure."""
     def cell(k):
         i = cols.get(k)
         return cells[i].strip() if i is not None and i < len(cells) else ""
 
-    if layout == "side_line":
-        m = _SIDE_LINE.match(cell("line"))
-        h, b = _PCT.match(cell("handle")), _PCT.match(cell("bets"))
-        if not (m and (h or b) and cell("player")):
-            return None
-        side = m.group("side").lower()
-        return {"prop_text": f"{cell('player')} {cell('market')}".strip(), "player": cell("player"),
-                "market": cell("market") or None, "line_value": _num(m.group("line")),
-                "handle_side": side if h else None, "handle_pct": _num(h.group("pct")) if h else None,
-                "bets_side": side if b else None, "bets_pct": _num(b.group("pct")) if b else None}
-    h, b = _LEADER.match(cell("handle")), _LEADER.match(cell("bets"))
-    if not ((h or b) and cell("prop")):
+    if cols.get("prop") is not None:
+        prop, player, market = cell("prop"), None, None
+    else:
+        player, market = cell("player"), cell("market")
+        prop = f"{player} {market}".strip()
+    if not prop:
         return None
-    return {"prop_text": cell("prop"), "player": None, "market": None, "line_value": _num(cell("line")),
-            "handle_side": h.group("side").lower() if h else None, "handle_pct": _num(h.group("pct")) if h else None,
-            "bets_side": b.group("side").lower() if b else None, "bets_pct": _num(b.group("pct")) if b else None}
+    named, line = None, None
+    m = _SIDE_LINE.match(cell("line"))
+    if m:
+        named, line = m.group("side").lower(), _num(m.group("line"))
+    elif _LINE.match(cell("line")):
+        line = _num(cell("line"))
+    elif cols.get("line") is None:
+        t = _TRAILING_LINE.search(prop)            # "Dak Prescott Passing Completions 23.5"
+        line = _num(t.group("line")) if t else None
+    hs, hp = _lead(shares(cell("handle")), named)
+    bs, bp = _lead(shares(cell("bets")), named)
+    if hp is None and bp is None:
+        return None
+    return {"prop_text": prop, "player": player or None, "market": market or None, "line_value": line,
+            "handle_side": hs, "handle_pct": hp, "bets_side": bs, "bets_pct": bp,
+            "layout": "side_line" if named else "leaders", "game_text": cell("game") or None}
+
+
+def parse_table(header: list[str], body: list[list[str]]) -> list[dict]:
+    """Every readable row of one table, with its row_no (1-based, as printed). Pure."""
+    cols = table_columns(header)
+    if cols is None:
+        return []
+    out = []
+    for row_no, cells in enumerate(body, start=1):
+        r = parse_row(cols, cells)
+        if r is not None:
+            out.append({"row_no": row_no, **r})
+    return out
 
 
 def parse_article(html: str) -> tuple[list[dict], int]:
@@ -142,33 +211,13 @@ def parse_article_tables(html: str) -> tuple[list[dict], int, list[dict]]:
             section = text_of(m.group("h")) or section
             continue
         table_no += 1
-        header, rows = _table(m.group("t"))
-        printed = {"table_no": table_no, "section": section, "header": header, "body": rows, "layout": None}
-        tables.append(printed)
-        handle = _col(header, "handle")
-        bets = _col(header, "bet", exclude="handle")
-        line = _col(header, "line")
-        if _col(header, "player prop") is not None and handle is not None:
-            layout = "leaders"
-            cols = {"prop": _col(header, "player prop"), "line": line, "handle": handle, "bets": bets}
-        elif _col(header, "player") is not None and _col(header, "market") is not None and handle is not None:
-            layout = "side_line"
-            cols = {"player": _col(header, "player"), "market": _col(header, "market"), "line": line,
-                    "handle": handle, "bets": bets}
-        else:
+        header, body = _table(m.group("t"))
+        rows = parse_table(header, body)
+        tables.append({"table_no": table_no, "section": section, "header": header, "body": body,
+                       "layout": rows[0]["layout"] if rows else None})
+        if not rows:
             skipped += 1
-            continue
-        kept = 0
-        for row_no, cells in enumerate(rows, start=1):
-            r = parse_row(layout, cols, cells)
-            if r is None:
-                continue
-            kept += 1
-            out.append({"table_no": table_no, "row_no": row_no, "section": section, "layout": layout, **r})
-        if not kept:
-            skipped += 1
-        else:
-            printed["layout"] = layout
+        out.extend({"table_no": table_no, "section": section, **r} for r in rows)
     return out, skipped, tables
 
 
@@ -187,17 +236,15 @@ def _ts(v) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def title_game(title: str, posted: datetime | None, games: list[dict]) -> str | None:
-    """The one NFL game a title names ("Bengals vs. Commanders Player Prop ..."), within a day before and three
-    after the post's ET date, or None. Multi-game titles ("NFL Week 4 Sunday ...") name none. Pure."""
-    m = _TITLE_GAME.match(title or "")
-    if not m or posted is None:
+def _pair_game(nick_a: str, nick_b: str, posted: datetime | None, games: list[dict]) -> str | None:
+    """The one NFL game between the two nicknames, within a day before and three after the post's ET date."""
+    if posted is None:
         return None
     from config import NFL_ODDS_API_MAP
     def ids(nick: str) -> set[str]:
         n = " " + nick.strip().lower()
         return {abbr for full, abbr in NFL_ODDS_API_MAP.items() if full.lower().endswith(n)}
-    a, b = ids(m.group("a")), ids(m.group("b"))
+    a, b = ids(nick_a), ids(nick_b)
     if not a or not b:
         return None
     day = posted.astimezone(_ET).date()
@@ -206,6 +253,22 @@ def title_game(title: str, posted: datetime | None, games: list[dict]) -> str | 
             and g["home_team"] != g["away_team"]
             and -1 <= (date.fromisoformat(g["game_date"]) - day).days <= 3}
     return next(iter(hits)) if len(hits) == 1 else None
+
+
+def title_game(title: str, posted: datetime | None, games: list[dict]) -> str | None:
+    """The one NFL game a title names ("Bengals vs. Commanders Player Prop ..."), or None. Multi-game titles
+    ("NFL Week 4 Sunday ...") name none. Pure."""
+    m = _TITLE_GAME.match(title or "")
+    return _pair_game(m.group("a"), m.group("b"), posted, games) if m else None
+
+
+def cell_game(text: str | None, posted: datetime | None, games: list[dict]) -> str | None:
+    """The one NFL game a multi-game table's Game cell names ("BAL Ravens vs. ATL Falcons", "Cowboys vs.
+    Texans"), by each side's last word, or None. Pure."""
+    m = _CELL_GAME.match((text or "").strip())
+    if not m:
+        return None
+    return _pair_game(m.group("a").split()[-1], m.group("b").split()[-1], posted, games)
 
 
 def _default_get(url: str, params: dict) -> tuple[int | None, str, dict]:
@@ -273,6 +336,71 @@ ON CONFLICT (post_id, post_modified, table_no, row_no) DO NOTHING
 """
 
 
+GAMES_SQL = ("SELECT game_id, game_date::text, home_team, away_team FROM public.games "
+             "WHERE sport = 'NFL' AND game_date::date BETWEEN %(lo)s AND %(hi)s")
+
+
+def _games_near(conn, posted: datetime | None) -> list[dict]:
+    if posted is None:
+        return []
+    d = posted.astimezone(_ET).date()
+    cols = ("game_id", "game_date", "home_team", "away_team")
+    return [dict(zip(cols, r)) for r in conn.execute(
+        GAMES_SQL, {"lo": d - timedelta(days=1), "hi": d + timedelta(days=3)}).fetchall()]
+
+
+def _row_params(common: dict, rows: list[dict], posted: datetime | None, games: list[dict]) -> list[dict]:
+    """Insert parameters: a multi-game table's row takes the game its Game cell names, any other row the
+    article's."""
+    out = []
+    for r in rows:
+        r = dict(r)
+        text = r.pop("game_text", None)
+        out.append({**common, **r, "game_id": cell_game(text, posted, games) if text else common["game_id"]})
+    return out
+
+
+def reparse(conn) -> dict:
+    """Parse rows from the kept tables of every version the ledger shows stored nothing from tables it had,
+    so a layout read by a newer parser is stored without fetching the page again (2026-11-26: 31 versions)."""
+    versions = conn.execute(
+        "SELECT a.post_id, a.post_modified, a.post_date, a.game_id FROM public.dk_prop_split_articles a "
+        "WHERE a.rows_stored = 0 AND a.tables_skipped > 0 AND EXISTS (SELECT 1 FROM public.dk_prop_split_tables t "
+        "WHERE t.post_id = a.post_id AND t.post_modified = a.post_modified)").fetchall()
+    out = {"versions": 0, "rows": 0}
+    for post_id, modified, posted, game_id in versions:
+        posted = _ts(posted)
+        tables = conn.execute(
+            "SELECT table_no, section, header, body FROM public.dk_prop_split_tables "
+            "WHERE post_id = %(p)s AND post_modified = %(m)s ORDER BY table_no",
+            {"p": post_id, "m": modified}).fetchall()
+        rows, skipped, layouts = [], 0, {}
+        for table_no, section, header, body in tables:
+            header = json.loads(header) if isinstance(header, str) else header
+            body = json.loads(body) if isinstance(body, str) else body
+            got = parse_table(header, body)
+            if not got:
+                skipped += 1
+                continue
+            layouts[table_no] = got[0]["layout"]
+            rows.extend({"table_no": table_no, "section": section, **r} for r in got)
+        if not rows:
+            continue
+        common = {"post_id": post_id, "post_modified": modified, "game_id": game_id, "source": SOURCE}
+        conn.executemany(ROW_SQL, _row_params(common, rows, posted, _games_near(conn, posted)))
+        # The ledger's counts and the kept table's layout describe what is now stored; nothing is removed.
+        conn.execute("UPDATE public.dk_prop_split_articles SET rows_stored = %(n)s, tables_skipped = %(k)s "
+                     "WHERE post_id = %(p)s AND post_modified = %(m)s AND rows_stored = 0",
+                     {"n": len(rows), "k": skipped, "p": post_id, "m": modified})
+        conn.executemany("UPDATE public.dk_prop_split_tables SET layout = %(l)s WHERE post_id = %(p)s "
+                         "AND post_modified = %(m)s AND table_no = %(t)s AND layout IS NULL",
+                         [{"l": l, "p": post_id, "m": modified, "t": t} for t, l in layouts.items()])
+        conn.commit()
+        out["versions"] += 1
+        out["rows"] += len(rows)
+    return out
+
+
 def run(conn=None, *, pages: int = 1, get: Callable | None = None) -> dict:
     """One pass: read every prop-split article version not yet in the ledger. Returns counts."""
     get = get or _default_get
@@ -294,7 +422,6 @@ def run(conn=None, *, pages: int = 1, get: Callable | None = None) -> dict:
                 | {(int(r[0]), _ts(r[1])) for r in conn.execute(
                     "SELECT post_id, post_modified FROM public.dk_prop_split_articles WHERE post_id = ANY(%(ids)s) "
                     "AND rows_stored = 0 AND tables_skipped = 0", ids).fetchall()}) if posts else set()
-        cols = ("game_id", "game_date", "home_team", "away_team")
         out = {"posts": len(posts), "new_versions": 0, "rows": 0, "tables_skipped": 0, "with_game": 0}
         for p in posts:
             if p["modified"] is None or (p["id"], p["modified"]) in seen:
@@ -309,20 +436,14 @@ def run(conn=None, *, pages: int = 1, get: Callable | None = None) -> dict:
             modified = _ts(body.get("modified_gmt")) or p["modified"]
             html = (body.get("content") or {}).get("rendered") or ""
             rows, skipped, tables = parse_article_tables(html)
-            game_id = None
-            if p["date"] is not None:
-                d = p["date"].astimezone(_ET).date()
-                games = [dict(zip(cols, r)) for r in conn.execute(
-                    "SELECT game_id, game_date::text, home_team, away_team FROM public.games "
-                    "WHERE sport = 'NFL' AND game_date::date BETWEEN %(lo)s AND %(hi)s",
-                    {"lo": d - timedelta(days=1), "hi": d + timedelta(days=3)}).fetchall()]
-                game_id = title_game(p["title"], p["date"], games)
+            games = _games_near(conn, p["date"])
+            game_id = title_game(p["title"], p["date"], games)
             common = {"post_id": p["id"], "post_modified": modified, "game_id": game_id, "source": SOURCE}
             if tables:
                 conn.executemany(TABLE_SQL, [{**common, **t, "header": json.dumps(t["header"]),
                                               "body": json.dumps(t["body"])} for t in tables])
             if rows:
-                conn.executemany(ROW_SQL, [{**common, **r} for r in rows])
+                conn.executemany(ROW_SQL, _row_params(common, rows, p["date"], games))
             conn.execute(ARTICLE_SQL, {**common, "post_date": p["date"], "title": p["title"], "link": p["link"],
                                        "updated_text": updated_text(html), "rows_stored": len(rows),
                                        "tables_skipped": skipped})
@@ -332,6 +453,7 @@ def run(conn=None, *, pages: int = 1, get: Callable | None = None) -> dict:
             out["tables_skipped"] += skipped
             out["with_game"] += 1 if game_id else 0
             time.sleep(0.5)
+        out["reparsed"] = reparse(conn)
         logger.info(f"dk_prop_splits: {out}")
         return out
     finally:

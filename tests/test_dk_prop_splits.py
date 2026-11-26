@@ -100,14 +100,22 @@ def test_title_game_names_one_game_or_none():
 
 
 class _Conn:
-    def __init__(self, kept=(), empty=()):
+    def __init__(self, kept=(), empty=(), legacy=(), stored=None):
         self.kept, self.empty = list(kept), list(empty)    # versions with tables kept / ledgered with no table
-        self.articles, self.rows, self.tables = [], [], []
+        self.legacy = list(legacy)                          # (post_id, modified, post_date, game_id) to re-parse
+        self.stored = stored or {}                          # (post_id, modified) -> [(table_no, section, h, b)]
+        self.articles, self.rows, self.tables, self.updates = [], [], [], []
 
     def execute(self, sql, params=None):
         rows = []
         if "to_regclass" in sql:
             rows = [(True,)]
+        elif "a.rows_stored = 0 AND a.tables_skipped > 0" in sql:
+            rows = self.legacy
+        elif "SELECT table_no, section, header, body" in sql:
+            rows = self.stored.get((params["p"], params["m"]), [])
+        elif sql.startswith("UPDATE"):
+            self.updates.append((sql, params))
         elif "FROM public.dk_prop_split_tables" in sql:
             rows = self.kept
         elif "FROM public.dk_prop_split_articles" in sql:
@@ -120,6 +128,9 @@ class _Conn:
         return type("C", (), {"fetchone": lambda s: rows[0] if rows else None, "fetchall": lambda s: rows})()
 
     def executemany(self, sql, rows):
+        if sql.startswith("UPDATE"):
+            self.updates.extend((sql, r) for r in rows)
+            return
         if "INSERT INTO public.dk_prop_split_tables" in sql:
             self.tables.extend(rows)
             return
@@ -153,7 +164,8 @@ def test_run_stores_a_new_version_with_its_game_and_ledger_row(monkeypatch):
     asked: list = []
     conn = _Conn()
     out = dps.run(conn, pages=3, get=_get(asked))
-    assert out == {"posts": 1, "new_versions": 1, "rows": 3, "tables_skipped": 1, "with_game": 1}
+    assert out == {"posts": 1, "new_versions": 1, "rows": 3, "tables_skipped": 1, "with_game": 1,
+                   "reparsed": {"versions": 0, "rows": 0}}
     assert {r["game_id"] for r in conn.rows} == {"NFL_2026_12_CIN_WAS"}
     assert conn.rows[0]["post_modified"] == datetime(2026, 11, 23, 23, 4, tzinfo=timezone.utc)
     (art,) = conn.articles
@@ -225,8 +237,9 @@ def test_wired_into_the_splits_step_and_a_declared_backfill():
     declared = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     entries = [d for d in declared if d.get("job_type") == "dk_prop_splits_import"]
     assert [d["key"] for d in entries] == ["dk-prop-splits-backfill-2026-11-26", "dk-prop-splits-raw-tables-2026-11-26",
-                                           "dk-prop-splits-raw-tables-2-2026-11-26"]
-    assert all(d["args"] == {"pages": 50} and d["requested_by"] == "mike" for d in entries)
+                                           "dk-prop-splits-raw-tables-2-2026-11-26", "dk-prop-splits-reparse-2026-11-26"]
+    assert [d["args"]["pages"] for d in entries] == [50, 50, 50, 1]
+    assert all(d["requested_by"] == "mike" for d in entries)
 
 
 def test_the_import_job_applies_migrations_before_it_reads(monkeypatch):
@@ -244,3 +257,106 @@ def test_the_import_job_applies_migrations_before_it_reads(monkeypatch):
     monkeypatch.setattr(dps, "run", lambda conn, pages: order.append(("run", pages)) or {"posts": 0})
     assert job_queue._job_dk_prop_splits_import(pages=3) == {"posts": 0}
     assert order == ["migrate", ("run", 3), "close"]
+
+
+# ── every layout the kept tables show (dk_prop_split_tables, 2026-11-26 19:50 UTC; rows verbatim) ─────────────
+
+def test_shares_reads_each_way_a_cell_prints_a_share():
+    assert dps.shares("66%") == {None: 66.0}
+    assert dps.shares("Over 67%") == {"over": 67.0}
+    assert dps.shares("Over (99.1%)") == {"over": 99.1}
+    assert dps.shares("Over: 99.3% Under: 0.7%") == {"over": 99.3, "under": 0.7}
+    assert dps.shares("Over: 100.0% Under: N/A") == {"over": 100.0}
+    assert dps.shares("N/A") == {} and dps.shares("") == {}
+    # The other shapes the kept tables print (handle split / bet split columns).
+    assert dps.shares("Over 60% / Under 40%") == {"over": 60.0, "under": 40.0}
+    assert dps.shares("Over 100% / Under \u2014") == {"over": 100.0}
+    assert dps.shares("50% each") == {"over": 50.0, "under": 50.0}
+
+
+def _one(header, row):
+    (r,) = dps.parse_table(header, [row])
+    return (r["prop_text"], r["line_value"], r["handle_side"], r["handle_pct"], r["bets_side"], r["bets_pct"],
+            r["layout"], r["game_text"])
+
+
+def test_every_kept_layout_parses():
+    # Player | Market | Line ("19.5") | "Over 67%" | "Under 57%": each share names its own side (post 477266).
+    assert _one(["player", "market", "line", "handle split", "bet split"],
+                ["Jacoby Brissett", "Interceptions thrown", "0.5", "Under 65%", "Over 65%"]) == (
+        "Jacoby Brissett Interceptions thrown", 0.5, "under", 65.0, "over", 65.0, "leaders", None)
+    # Player prop | Line | both sides' shares, one N/A (post 456652): the larger is the leader.
+    assert _one(["player prop", "line", "handle %", "bet %"],
+                ["CeeDee Lamb longest reception", "26.5", "Over: 99.3% Under: 0.7%", "Over: 98.1% Under: 1.9%"]) == (
+        "CeeDee Lamb longest reception", 26.5, "over", 99.3, "over", 98.1, "leaders", None)
+    assert _one(["player prop", "line", "handle %", "bet %"],
+                ["Cade Otton longest reception", "14.5", "Over: N/A Under: 100.0%", "Over: N/A Under: 100.0%"])[2:6] \
+        == ("under", 100.0, "under", 100.0)
+    # No line column: the line is the prop text's last number (post 465594).
+    assert _one(["player prop", "handle %", "bet %"],
+                ["Dak Prescott Passing Completions 23.5", "Over: 90% Under: 10%", "Over: 68% Under: 32%"]) == (
+        "Dak Prescott Passing Completions 23.5", 23.5, "over", 90.0, "over", 68.0, "leaders", None)
+    # Multi-game tables carry a Game cell; a line printed N/A stays unknown (posts 454261, 457765).
+    assert _one(["game", "player prop", "line", "handle %", "bet %"],
+                ["Cowboys vs. Texans", "Brandon Aubrey kicking points", "N/A", "Over: 99.5% Under: 0.5%",
+                 "Over: 94.4% Under: 5.6%"]) == (
+        "Brandon Aubrey kicking points", None, "over", 99.5, "over", 94.4, "leaders", "Cowboys vs. Texans")
+    assert _one(["game", "player prop", "handle %", "bet %"],
+                ["CHI Bears vs. GB Packers", "Jordan Love Pass Yds 243.5", "Over: 42.5% Under: 57.5%",
+                 "Over: 63.8% Under: 36.2%"]) == (
+        "Jordan Love Pass Yds 243.5", 243.5, "under", 57.5, "over", 63.8, "leaders", "CHI Bears vs. GB Packers")
+    # The rank lists (four header spellings) carry no share and are not prop tables.
+    for h in (["rank", "most bet by handle", "most bet by bets"], ["rank", "most popular by handle",
+              "most popular by bets"], ["rank", "by handle", "by bets"], ["rank", "most bet by handle",
+              "most bet by tickets"]):
+        assert dps.parse_table(h, [["1", "Ja'Marr Chase", "Ja'Marr Chase"]]) == []
+
+
+def test_cell_game_reads_a_multi_game_tables_game_cell():
+    posted = datetime(2026, 11, 22, 15, 0, tzinfo=timezone.utc)
+    assert dps.cell_game("MIN Vikings vs. SF 49ers", posted, GAMES) == "NFL_2026_12_MIN_SF"
+    assert dps.cell_game("Vikings vs. 49ers", posted, GAMES) == "NFL_2026_12_MIN_SF"
+    assert dps.cell_game("Vikings", posted, GAMES) is None
+
+
+def test_reparse_stores_rows_from_kept_tables_and_updates_only_empty_ledger_rows():
+    v = (477266, V)
+    header = ["game", "player prop", "line", "handle %", "bet %"]
+    body = [["Vikings vs. 49ers", "Brock Purdy Pass Yds", "250.5", "Over: 61% Under: 39%", "Over: 70% Under: 30%"],
+            ["Bengals vs. Commanders", "Joe Burrow Pass Yds", "302.5", "Over: 55% Under: 45%", "Over: 58% Under: 42%"]]
+    conn = _Conn(legacy=[(477266, V, "2026-11-22T15:00:00+00:00", None)],
+                 stored={v: [(1, "Rank", ["rank", "by handle", "by bets"], [["1", "A", "A"]]),
+                             (2, "Sunday", json.dumps(header), json.dumps(body))]})
+    assert dps.reparse(conn) == {"versions": 1, "rows": 2}
+    assert [(r["table_no"], r["row_no"], r["game_id"], r["handle_side"], r["handle_pct"]) for r in conn.rows] == [
+        (2, 1, "NFL_2026_12_MIN_SF", "over", 61.0), (2, 2, "NFL_2026_12_CIN_WAS", "over", 55.0)]
+    assert all("game_text" not in r for r in conn.rows)
+    ledger = [p for sql, p in conn.updates if "dk_prop_split_articles" in sql]
+    assert ledger == [{"n": 2, "k": 1, "p": 477266, "m": V}]
+    assert all("AND rows_stored = 0" in sql for sql, _ in conn.updates if "dk_prop_split_articles" in sql)
+    layout = [p for sql, p in conn.updates if "dk_prop_split_tables" in sql]
+    assert layout == [{"l": "leaders", "p": 477266, "m": V, "t": 2}]
+
+
+def test_reparse_leaves_a_version_whose_tables_still_do_not_read():
+    v = (1, V)
+    conn = _Conn(legacy=[(1, V, None, None)], stored={v: [(1, None, ["rank", "by handle", "by bets"], [])]})
+    assert dps.reparse(conn) == {"versions": 0, "rows": 0}
+    assert conn.rows == [] and conn.updates == []
+
+
+def test_a_bare_share_with_no_side_named_anywhere_is_not_stored():
+    # "20.5" names no side and "66%" names none: which side holds 66% is unknown, so nothing is guessed.
+    assert dps.parse_table(["player", "market", "line", "handle split", "bet split"],
+                           [["Jayden Daniels", "Passing completions", "20.5", "66%", "56%"]]) == []
+
+
+def test_run_reparses_kept_tables_of_versions_that_stored_nothing(monkeypatch):
+    monkeypatch.setattr(dps.time, "sleep", lambda s: None)
+    v = (477266, V)
+    header = ["player prop", "handle %", "bet %"]
+    body = [["Dak Prescott Passing Completions 23.5", "Over: 90% Under: 10%", "Over: 68% Under: 32%"]]
+    conn = _Conn(kept=[(481849, V)], legacy=[(477266, V, None, None)], stored={v: [(1, None, header, body)]})
+    out = dps.run(conn, pages=1, get=_get([]))
+    assert out["new_versions"] == 0 and out["reparsed"] == {"versions": 1, "rows": 1}
+    assert [(r["post_id"], r["line_value"], r["handle_pct"]) for r in conn.rows] == [(477266, 23.5, 90.0)]

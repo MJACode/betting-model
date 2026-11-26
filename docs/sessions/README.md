@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings prop splits: every kept layout parsed (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings prop splits: every article table kept as printed (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings prop splits into Supabase; DK splits aliases; tennis closed (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings splits for NBA, NHL, NCAAF and NCAAB; the prop-splits probe (mike) |
