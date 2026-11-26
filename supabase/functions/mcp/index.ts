@@ -294,7 +294,7 @@ const TOOLS = [
   {
     name: "get_public_splits",
     title: "Public betting percentages for a game",
-    description: "% of bets and % of money on each side of the moneyline, spread and total for one game, before it starts: the latest numbers and the first ones recorded. book is DraftKings where DraftKings publishes its own split (NFL), otherwise Consensus (a blend of books). Each spread side carries its own team and number.",
+    description: "% of bets and % of money on each side of the moneyline, spread and total for one game, before it starts: the latest numbers and the first ones recorded. book is DraftKings where DraftKings publishes its own split (full game only), otherwise Consensus (a blend of books). Consensus also splits periods, keyed like \"1Q total\" or \"1H spread\": NBA halves and quarters, NFL and NCAAF first half and quarters, NCAAB halves, NHL first period. Each spread side carries its own team and number.",
     inputSchema: {
       type: "object", additionalProperties: false, required: ["game_id"],
       properties: { game_id: gameIdProp },
@@ -980,7 +980,7 @@ async function runTool(name: string, a: Record<string, unknown>, user: string): 
       const markets: Record<string, any[]> = {};
       for (const r of rows.filter((x: any) => x.which === "latest")) {
         const f = rows.find((x: any) => x.which === "first" && x.book === r.book && x.market === r.market && x.side === r.side);
-        const key = r.market === "h2h" ? "moneyline" : r.market === "spreads" ? "spread" : r.market === "totals" ? "total" : r.market;
+        const key = splitsKey(r.market);
         (markets[key] ??= []).push({
           book: r.book, side: r.side, team: teamOf(r.side), line: numOut(r.line_value), price: numOut(r.odds),
           bets_pct: numOut(r.bet_pct), money_pct: numOut(r.money_pct), updated: r.snapshot_at,
@@ -1041,6 +1041,16 @@ async function runTool(name: string, a: Record<string, unknown>, user: string): 
     }
   }
   throw new ToolError("invalid_input");
+}
+
+// A splits row's market -> its key in get_public_splits: "spread" for the full
+// game, "1Q spread" for a period (scoreboard_splits.PERIOD_SUFFIX names).
+const SPLIT_KINDS: Record<string, string> = { h2h: "moneyline", spreads: "spread", totals: "total" };
+const SPLIT_PERIODS: Record<string, string> = { h1: "1H", h2: "2H", q1: "1Q", q2: "2Q", q3: "3Q", q4: "4Q", p1: "1P" };
+function splitsKey(market: string): string {
+  const m = /^(h2h|spreads|totals)(?:_(h1|h2|q[1-4]|p1))?$/.exec(market);
+  if (!m) return market;
+  return m[2] ? `${SPLIT_PERIODS[m[2]]} ${SPLIT_KINDS[m[1]]}` : SPLIT_KINDS[m[1]];
 }
 
 // The game behind a game id (any of its alias ids). Not found -> not_found.

@@ -51,7 +51,44 @@ from data.ingestors.nba_public_splits_ingestor import (
     validate_sides,
 )
 
-SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB")
+SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB", "NCAAB")
+
+# Period splits (Matt, 2026-11-26: "Yes on splits", hourly). Measured by
+# worker_jobs 1698627 (scripts/splits_markets_probe.py) on 2026-11-26: the v2
+# scoreboard's consensus (book 15) carries moneyline / spread / total splits per
+# period, for every game of the slate, in exactly these. Left out on purpose:
+# 2nd halves for NFL / NCAAF (consensus on 0 of 16 and 2 of 69 games) and
+# anything NHL beyond the first period (empty). Team totals
+# (core_bet_type_6_team_score) are also split, but their entry shape was not
+# recorded, so they are not parsed yet.
+PERIODS_BY_SPORT: dict[str, tuple[str, ...]] = {
+    "NBA": ("firsthalf", "secondhalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
+    "NFL": ("firsthalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
+    "NCAAF": ("firsthalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
+    "NCAAB": ("firsthalf", "secondhalf"),
+    "NHL": ("firstperiod",),
+}
+# The odds table's period suffix for each v2 period (h2h_q1, totals_h1, ...), so
+# mcp_stats reads one naming for prices and splits.
+PERIOD_SUFFIX = {"firsthalf": "h1", "secondhalf": "h2", "firstquarter": "q1", "secondquarter": "q2",
+                 "thirdquarter": "q3", "fourthquarter": "q4", "firstperiod": "p1"}
+# Hourly, not every pass: the hourly passes start at :17 (7am-5pm ET) and the
+# evening passes every 10 minutes, so this window holds exactly one pass an hour.
+PERIOD_MINUTES = range(15, 30)
+
+
+def periods_due(now: datetime) -> bool:
+    return now.astimezone(_ET).minute in PERIOD_MINUTES
+
+
+def periods_storable(conn) -> bool:
+    """scoreboard_splits_period_markets_2026_11_26.sql has run: the history's
+    market check accepts a period suffix. Until it has, no period is fetched,
+    so a refused row can never fail the full-game append beside it."""
+    row = conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = "
+        "'scoreboard_splits_history_market_period_check')").fetchone()
+    return bool(row and row[0])
 V2_URL = "https://api.actionnetwork.com/web/v2/scoreboard/{slug}"
 REQUEST_TIMEOUT = 20
 # Today and tomorrow (ET): the Scoreboard's forward days.
@@ -103,7 +140,7 @@ def team_candidates(sport: str, team: dict | None) -> set[str]:
     return {c for c in out if c}
 
 
-def parse_game(sport: str, game: dict) -> dict | None:
+def parse_game(sport: str, game: dict, period: str = "event") -> dict | None:
     """One Action Network game -> {date, home_ids, away_ids, sides}, or None
     when it carries no usable split. `sides` is {(market, side): {tickets,
     money, value}} after the pair rules (0/0 is missing, a pair must sum to
@@ -113,9 +150,12 @@ def parse_game(sport: str, game: dict) -> dict | None:
     away = team_candidates(sport, teams.get(game.get("away_team_id")))
     if not home or not away:
         return None
-    sides = validate_sides(parse_v2_sides(game, CONSENSUS_BOOK))
+    sides = validate_sides(parse_v2_sides(game, CONSENSUS_BOOK, period))
     sides = {k: v for k, v in sides.items()
              if v.get("tickets") is not None or v.get("money") is not None}
+    if period != "event":
+        # Pair rules run on the base market; the stored name carries the period.
+        sides = {(f"{m}_{PERIOD_SUFFIX[period]}", side): v for (m, side), v in sides.items()}
     if not sides:
         return None
     return {"date": et_game_date(game.get("start_time")), "home": home,
@@ -148,7 +188,7 @@ def _parse_ts(v: Any) -> datetime | None:
 
 
 def build_rows(sport: str, payload: dict, games: list[dict], now: datetime,
-               counts: dict | None = None) -> list[dict]:
+               counts: dict | None = None, period: str = "event") -> list[dict]:
     """Rows to upsert from one scoreboard payload. Started games are left
     alone so the stored row stays the last pre-start split."""
     rows: list[dict] = []
@@ -156,7 +196,7 @@ def build_rows(sport: str, payload: dict, games: list[dict], now: datetime,
     for game in (payload or {}).get("games") or []:
         if not isinstance(game, dict):
             continue
-        parsed = parse_game(sport, game)
+        parsed = parse_game(sport, game, period)
         if parsed is None:
             continue
         g = match(parsed, games)
@@ -169,7 +209,7 @@ def build_rows(sport: str, payload: dict, games: list[dict], now: datetime,
             if counts is not None:
                 counts["started"] = counts.get("started", 0) + 1
             continue
-        if counts is not None:
+        if counts is not None and period == "event":
             counts["games"] = counts.get("games", 0) + 1
         for (market, side), v in sorted(parsed["sides"].items()):
             rows.append({
@@ -181,11 +221,11 @@ def build_rows(sport: str, payload: dict, games: list[dict], now: datetime,
     return rows
 
 
-def _default_fetch(sport: str, day: str) -> dict | None:
+def _default_fetch(sport: str, day: str, period: str = "event") -> dict | None:
     import requests
 
     url = V2_URL.format(slug=sport.lower())
-    params = {"bookIds": CONSENSUS_BOOK, "date": day.replace("-", ""), "periods": "event"}
+    params = {"bookIds": CONSENSUS_BOOK, "date": day.replace("-", ""), "periods": period}
     try:
         r = requests.get(url, params=params, headers=_headers(sport), timeout=REQUEST_TIMEOUT)
     except Exception as exc:                                  # noqa: BLE001
@@ -275,11 +315,17 @@ def append_history(conn, rows: list[dict], source: str) -> int:
 
 
 def run(conn=None, *, now: datetime | None = None,
-        fetch: Callable[[str, str], dict | None] | None = None) -> dict:
+        fetch: Callable[[str, str], dict | None] | None = None,
+        fetch_period: Callable[[str, str, str], dict | None] | None = None) -> dict:
     """One pass: every sport with an unstarted game today or tomorrow (ET).
-    Returns {sport: {games, rows, unmatched, started}}."""
+    Returns {sport: {games, rows, unmatched, started}}. Period splits are
+    fetched on the hourly window only (periods_due), through `fetch_period`;
+    a caller that passes its own `fetch` and no `fetch_period` gets none."""
     now = now or datetime.now(timezone.utc)
+    if fetch_period is None and fetch is None:
+        fetch_period = _default_fetch
     fetch = fetch or _default_fetch
+    with_periods = fetch_period is not None and periods_due(now)
     today = now.astimezone(_ET).date()
     days = [(today + timedelta(days=i)).isoformat() for i in range(DAYS_AHEAD + 1)]
     own = conn is None
@@ -299,6 +345,7 @@ def run(conn=None, *, now: datetime | None = None,
             "WHERE sport = ANY(%(sports)s) AND game_date::text = ANY(%(days)s)",
             {"sports": list(SPORTS), "days": days},
         ).fetchall()]
+        with_periods = with_periods and periods_storable(conn)
         out: dict = {}
         for sport in SPORTS:
             slate = [g for g in games if g["sport"] == sport]
@@ -314,6 +361,13 @@ def run(conn=None, *, now: datetime | None = None,
                     continue
                 rows.extend(build_rows(sport, payload, slate, now, counts))
                 time.sleep(0.5)
+                for period in (PERIODS_BY_SPORT.get(sport, ()) if with_periods else ()):
+                    pp = fetch_period(sport, day, period)
+                    if pp is not None:
+                        got = build_rows(sport, pp, slate, now, None, period)
+                        counts[period] = counts.get(period, 0) + len(got)
+                        rows.extend(got)
+                    time.sleep(0.5)
             counts["rows"] = len(rows)
             counts["history"] = append_history(conn, rows, HISTORY_SOURCE)
             out[sport] = counts
