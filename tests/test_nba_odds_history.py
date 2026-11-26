@@ -323,3 +323,86 @@ def test_a_fetch_is_ledgered_by_its_instant_off_the_hour_and_by_its_hour_on_it(w
     assert any(ledger in q and q.startswith("SELECT") for q in conn.sql)
     assert any(ledger in q and q.startswith("INSERT") for q in conn.sql)
     assert not any(other in q for q in conn.sql)
+
+
+# ── the earlier prop snapshot (mike, 2026-11-26) ─────────────────────────────
+
+class _EarlyConn:
+    """Records every statement; the ledger SELECT returns the games already asked."""
+
+    def __init__(self, asked=()):
+        self.asked, self.sql, self.many = list(asked), [], []
+
+    def execute(self, sql, params=None):
+        self.sql.append((sql, params))
+
+        class Cur:
+            def __init__(s, rows):
+                s.rows = rows
+
+            def fetchall(s):
+                return s.rows
+        if "SELECT game_id FROM nba_prop_early_fetches" in sql:
+            return Cur([(g,) for g in self.asked])
+        return Cur([])
+
+    def executemany(self, sql, rows):
+        self.many.append((sql, rows))
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+
+def _early_setup(monkeypatch, games):
+    import data.ddl_guard as guard
+    monkeypatch.setattr(guard, "schema_is_current", lambda *a, **k: True)
+    monkeypatch.setattr(h, "lock_down", lambda *a, **k: ())
+    monkeypatch.setattr(h, "_known_games", lambda conn, f, l: {g["game_id"]: dict(g) for g in games})
+
+
+_GAME = {"game_id": "NBA_2026-01-15_PHX_DET", "game_date": "2026-01-15", "home": "DET",
+         "away": "PHX", "commence_time": "2026-01-16T00:30:00Z"}
+
+
+def test_early_props_land_in_their_own_table_with_a_ledger_row(monkeypatch):
+    _early_setup(monkeypatch, [_GAME])
+    body = {"timestamp": "2026-01-15T18:25:00Z", "data": {"bookmakers": [{"key": "draftkings", "markets": [
+        {"key": "player_threes", "outcomes": [
+            {"name": "Over", "description": "Cade Cunningham", "price": 120, "point": 1.5},
+            {"name": "Under", "description": "Cade Cunningham", "price": -150, "point": 1.5}]},
+        {"key": "player_assists", "outcomes": [
+            {"name": "Over", "description": "Cade Cunningham", "price": -110, "point": 9.5},
+            {"name": "Under", "description": "Cade Cunningham", "price": -110, "point": 9.5}]}]}]}}
+    meter, conn = _PropMeter(body), _EarlyConn()
+    s = h.buy_props_early(conn, meter, 2026, 2026, 360)
+    assert meter.asked[-1]["markets"] == ",".join(h.EARLY_PROP_MARKETS)
+    assert meter.asked[-1]["date"] == "2026-01-15T18:30:00Z"            # tip 00:30Z minus 6 hours
+    (sql, rows), = conn.many
+    assert "INSERT INTO nba_prop_odds_early" in sql and "player_prop_odds" not in sql
+    assert [r["market"] for r in rows] == ["player_threes"]             # assists is not one of the five
+    assert rows[0]["lead_min"] == 360
+    ledger = [p for q, p in conn.sql if "INSERT INTO nba_prop_early_fetches" in q]
+    assert ledger == [("NBA_2026-01-15_PHX_DET", 360, "2026-01-15T18:25:00Z", 1)]
+    assert s["prop_rows"] == 1 and s["games_planned"] == 1
+
+
+def test_an_answer_with_none_of_the_five_is_still_ledgered(monkeypatch):
+    _early_setup(monkeypatch, [_GAME])
+    meter, conn = _PropMeter({"timestamp": "2026-01-15T18:25:00Z", "data": {"bookmakers": []}}), _EarlyConn()
+    s = h.buy_props_early(conn, meter, 2026, 2026, 360)
+    assert conn.many == []
+    ledger = [p for q, p in conn.sql if "INSERT INTO nba_prop_early_fetches" in q]
+    assert ledger == [("NBA_2026-01-15_PHX_DET", 360, "2026-01-15T18:25:00Z")]
+    assert s["empty_games"] == 1
+
+
+def test_a_game_already_asked_at_this_lead_is_not_bought_again(monkeypatch):
+    _early_setup(monkeypatch, [_GAME])
+    meter, conn = _PropMeter({"data": {}}), _EarlyConn(asked=["NBA_2026-01-15_PHX_DET"])
+    s = h.buy_props_early(conn, meter, 2026, 2026, 360)
+    assert meter.asked == [] and s["games_planned"] == 0
+    (sql, params), = [(q, p) for q, p in conn.sql if "FROM nba_prop_early_fetches" in q]
+    assert params == (360,)                                              # the ledger is read per lead
