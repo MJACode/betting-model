@@ -244,6 +244,9 @@ par public-betting
 # NBA splits: a pre-tip snapshot per pass into nba_public_splits (never
 # public_betting, which the scorer reads), plus yesterday's archive once.
 par nba-public-splits
+# NBA quarter and half lines before tip, for the AI assistant (Matt, 2026-11-26):
+# its own source and 'open' rows, never a model's (data/ingestors/nba_period_lines_live.py).
+par nba-period-lines
 # Scoreboard % bets / % money for every sport, display only
 # (scoreboard_splits; never public_betting).
 par scoreboard-splits
