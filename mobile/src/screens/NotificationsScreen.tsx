@@ -1,13 +1,25 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useCallback, useLayoutEffect, useMemo } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  RefreshControl,
+  SectionList,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ErrorBanner } from '@/components/ErrorState';
 import { readAuthUserId } from '@/hooks/useAuth';
+import { useBetslipBarInset } from '@/hooks/useBetslipBarInset';
 import { openPushRoute } from '@/hooks/usePushDeepLink';
 import { refreshNotificationInbox, useNotificationInbox } from '@/hooks/useNotificationInbox';
 import {
@@ -66,6 +78,81 @@ export function NotificationsScreen() {
     navigation.setOptions({ headerRight: () => <NotificationsHeaderActions /> });
   }, [navigation]);
 
+  // Select mode: tap rows to pick them, then Delete. "Delete" hides the alert
+  // for this member; the stored row is kept (CLAUDE.md section 1b).
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const canDelete = inbox.canDelete && inbox.rows.length > 0;
+  const betslipInset = useBetslipBarInset();
+  const openSwipe = useRef<Swipeable | null>(null);
+
+  // A row that left the list (deleted, muted, aged out) leaves the selection,
+  // and an emptied list leaves select mode.
+  useEffect(() => {
+    const ids = new Set(inbox.rows.map((r) => r.id));
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+    if (inbox.rows.length === 0) setSelecting(false);
+  }, [inbox.rows]);
+
+  const startSelecting = () => {
+    openSwipe.current?.close();
+    setSelected(new Set());
+    setSelecting(true);
+  };
+  const stopSelecting = () => {
+    setSelecting(false);
+    setSelected(new Set());
+  };
+  const allSelected = inbox.rows.length > 0 && selected.size === inbox.rows.length;
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(inbox.rows.map((r) => r.id)));
+  const toggleRow = (row: InboxRow) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(row.id)) next.delete(row.id);
+      else next.add(row.id);
+      return next;
+    });
+
+  const deleteRows = inbox.deleteRows;
+  const runDelete = useCallback(
+    async (rows: InboxRow[]) => {
+      const ok = await deleteRows(rows);
+      if (!ok) {
+        Alert.alert('Couldn’t delete', 'Check your connection and try again.');
+        return;
+      }
+      AccessibilityInfo.announceForAccessibility(
+        rows.length === 1 ? 'Notification deleted' : `${rows.length} notifications deleted`,
+      );
+    },
+    [deleteRows],
+  );
+
+  const deleteSelected = () => {
+    const rows = inbox.rows.filter((r) => selected.has(r.id));
+    if (rows.length === 0) return;
+    const title = allSelected
+      ? 'Delete all notifications?'
+      : rows.length === 1
+        ? 'Delete this notification?'
+        : `Delete ${rows.length} notifications?`;
+    Alert.alert(title, 'They’ll be removed from this list. This can’t be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          stopSelecting();
+          void runDelete(rows);
+        },
+      },
+    ]);
+  };
+
   const dismissVisible = inbox.dismissVisible;
   useFocusEffect(
     useCallback(() => {
@@ -89,6 +176,10 @@ export function NotificationsScreen() {
   }, [inbox.rows, now]);
 
   const openRow = (row: InboxRow) => {
+    if (selecting) {
+      toggleRow(row);
+      return;
+    }
     void inbox.markRead(row);
     const route = routeForPush(row.route);
     if (route) openPushRoute(navigation, route);
@@ -96,7 +187,22 @@ export function NotificationsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <Text style={styles.window}>Showing the last 7 days</Text>
+      <View style={styles.windowRow}>
+        <Text style={styles.window}>Showing the last 7 days</Text>
+        {canDelete ? (
+          <Pressable
+            onPress={selecting ? stopSelecting : startSelecting}
+            accessibilityRole="button"
+            accessibilityLabel={selecting ? 'Cancel selecting' : 'Select notifications'}
+            hitSlop={8}
+            style={({ pressed }) => [styles.selectBtn, pressed && { opacity: opacity.pressed }]}
+          >
+            <Text style={styles.selectText} maxFontSizeMultiplier={1.4}>
+              {selecting ? 'Cancel' : 'Select'}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
       {inbox.error ? (
         <ErrorBanner
           what="notifications"
@@ -141,10 +247,64 @@ export function NotificationsScreen() {
           renderSectionHeader={({ section }) => (
             <Text style={styles.section}>{section.title}</Text>
           )}
-          renderItem={({ item }) => <InboxListRow row={item} now={now} onPress={() => openRow(item)} />}
+          renderItem={({ item }) => (
+            <InboxListRow
+              row={item}
+              now={now}
+              onPress={() => openRow(item)}
+              selecting={selecting}
+              selected={selected.has(item.id)}
+              swipeToDelete={inbox.canDelete && !selecting}
+              onDelete={() => void runDelete([item])}
+              onSwipeOpen={(ref) => {
+                if (openSwipe.current && openSwipe.current !== ref) openSwipe.current.close();
+                openSwipe.current = ref;
+              }}
+            />
+          )}
           contentContainerStyle={styles.list}
         />
       )}
+      {selecting && sections.length > 0 ? (
+        <View style={[styles.selectBar, { marginBottom: betslipInset }]}>
+          <Pressable
+            onPress={toggleAll}
+            accessibilityRole="button"
+            accessibilityLabel={allSelected ? 'Deselect all' : 'Select all'}
+            style={({ pressed }) => [styles.selectBarBtn, pressed && { opacity: opacity.pressed }]}
+          >
+            <Text style={styles.selectText} maxFontSizeMultiplier={1.4}>
+              {allSelected ? 'Deselect All' : 'Select All'}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={deleteSelected}
+            disabled={selected.size === 0}
+            accessibilityRole="button"
+            accessibilityLabel={
+              selected.size === 0 ? 'Delete' : `Delete ${selected.size} selected`
+            }
+            accessibilityState={{ disabled: selected.size === 0 }}
+            style={({ pressed }) => [
+              styles.selectBarBtn,
+              styles.selectBarDelete,
+              pressed && selected.size > 0 && { opacity: opacity.pressed },
+            ]}
+          >
+            <Ionicons
+              name="trash-outline"
+              size={18}
+              color={selected.size === 0 ? colors.textTertiary : colors.avoid}
+            />
+            <Text
+              style={[styles.deleteText, selected.size === 0 && styles.markTextOff]}
+              maxFontSizeMultiplier={1.4}
+            >
+              {selected.size === 0 ? 'Delete' : `Delete (${selected.size})`}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -153,19 +313,50 @@ function InboxListRow({
   row,
   now,
   onPress,
+  selecting,
+  selected,
+  swipeToDelete,
+  onDelete,
+  onSwipeOpen,
 }: {
   row: InboxRow;
   now: Date;
   onPress: () => void;
+  selecting: boolean;
+  selected: boolean;
+  swipeToDelete: boolean;
+  onDelete: () => void;
+  onSwipeOpen: (ref: Swipeable | null) => void;
 }) {
   const unread = row.read_at == null;
-  return (
+  const swipeRef = useRef<Swipeable | null>(null);
+  const label = `${unread ? 'Unread. ' : ''}${row.title}. ${row.body}`;
+  const content = (
     <Pressable
       onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${unread ? 'Unread. ' : ''}${row.title}. ${row.body}`}
-      style={({ pressed }) => [styles.row, pressed && { opacity: opacity.pressed }]}
+      accessibilityRole={selecting ? 'checkbox' : 'button'}
+      accessibilityState={selecting ? { checked: selected } : undefined}
+      accessibilityLabel={label}
+      // VoiceOver has no swipe: the same delete is a rotor action.
+      accessibilityActions={swipeToDelete ? [{ name: 'delete', label: 'Delete' }] : undefined}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'delete') onDelete();
+      }}
+      style={({ pressed }) => [
+        styles.row,
+        selected && styles.rowSelected,
+        pressed && { opacity: opacity.pressed },
+      ]}
     >
+      {selecting ? (
+        <View style={styles.check} importantForAccessibility="no">
+          <Ionicons
+            name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+            size={24}
+            color={selected ? colors.tint : colors.textTertiary}
+          />
+        </View>
+      ) : null}
       <View style={styles.iconTile}>
         <Ionicons name={inboxIconName(row) as 'notifications'} size={18} color={colors.tint} />
       </View>
@@ -184,6 +375,33 @@ function InboxListRow({
       {unread ? <View style={styles.dot} importantForAccessibility="no" /> : <View style={styles.dotSpacer} />}
     </Pressable>
   );
+  if (!swipeToDelete) return content;
+  const renderRightActions = () => (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Delete notification"
+      onPress={() => {
+        swipeRef.current?.close();
+        onDelete();
+      }}
+      style={({ pressed }) => [styles.swipeDelete, pressed && { opacity: opacity.pressed }]}
+    >
+      <Ionicons name="trash-outline" size={22} color={colors.onChrome} />
+      <Text style={styles.swipeDeleteText} maxFontSizeMultiplier={1.4}>
+        Delete
+      </Text>
+    </Pressable>
+  );
+  return (
+    <Swipeable
+      ref={swipeRef}
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      onSwipeableWillOpen={() => onSwipeOpen(swipeRef.current)}
+    >
+      {content}
+    </Swipeable>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -197,12 +415,56 @@ const styles = StyleSheet.create({
     color: colors.tint,
   },
   markTextOff: { color: colors.textTertiary },
-  window: {
-    fontSize: font.size.footnote,
-    color: colors.textTertiary,
+  windowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xs,
     paddingBottom: spacing.sm,
+  },
+  window: {
+    flexShrink: 1,
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
+  },
+  selectBtn: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'flex-end' },
+  selectText: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  selectBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    backgroundColor: colors.bgElevated,
+  },
+  selectBarBtn: { minHeight: 44, justifyContent: 'center', flexDirection: 'row', alignItems: 'center' },
+  selectBarDelete: { gap: spacing.xs },
+  deleteText: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.avoid,
+  },
+  check: { justifyContent: 'center', alignSelf: 'center' },
+  rowSelected: { backgroundColor: colors.tintSoft },
+  swipeDelete: {
+    minHeight: 44,
+    width: 92,
+    backgroundColor: colors.avoid,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 2,
+  },
+  swipeDeleteText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.onChrome,
   },
   list: { paddingBottom: spacing.xl },
   section: {
@@ -220,6 +482,8 @@ const styles = StyleSheet.create({
     minHeight: 44,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
+    // Opaque so the swipe's red action is hidden until the row slides.
+    backgroundColor: colors.bg,
   },
   iconTile: {
     width: 36,

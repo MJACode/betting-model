@@ -33,6 +33,9 @@ export interface InboxSnapshot {
   loaded: boolean;
   error: string | null;
   userId: string | null;
+  /** False until notification_inbox_hide_2026_11_26.sql adds deleted_at. The
+   *  screen hides its delete controls rather than offer one that fails. */
+  canDelete: boolean;
 }
 
 const listeners = new Set<(s: InboxSnapshot) => void>();
@@ -45,6 +48,7 @@ let snapshot: InboxSnapshot = {
   loaded: false,
   error: null,
   userId: null,
+  canDelete: false,
 };
 
 let inflight: Promise<void> | null = null;
@@ -60,21 +64,48 @@ function emit(next: InboxSnapshot) {
 async function load(userId: string | null): Promise<void> {
   if (!userId) {
     fetched = [];
-    emit({ rows: [], muted: new Set(), unread: 0, loading: false, loaded: true, error: null, userId: null });
+    emit({
+      rows: [],
+      muted: new Set(),
+      unread: 0,
+      loading: false,
+      loaded: true,
+      error: null,
+      userId: null,
+      canDelete: false,
+    });
     await applyUnreadBadge(0, Notifications);
     return;
   }
   emit({ ...snapshot, loading: true, error: null, userId });
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const [inbox, prefs] = await Promise.all([
-    supabase
-      .from('notification_inbox')
-      .select('id, kind, title, body, sport, route, notification_id, sent_at, read_at')
-      .eq('user_id', userId)
-      .gte('sent_at', since)
-      .order('sent_at', { ascending: false }),
+  // "Delete" is a hide: deleted_at is stamped and the row stays (no data is
+  // ever deleted). Until the column exists, read the way we always did.
+  const readInbox = (withHidden: boolean) =>
+    withHidden
+      ? supabase
+          .from('notification_inbox')
+          .select('id, kind, title, body, sport, route, notification_id, sent_at, read_at')
+          .eq('user_id', userId)
+          .gte('sent_at', since)
+          .is('deleted_at', null)
+          .order('sent_at', { ascending: false })
+      : supabase
+          .from('notification_inbox')
+          .select('id, kind, title, body, sport, route, notification_id, sent_at, read_at')
+          .eq('user_id', userId)
+          .gte('sent_at', since)
+          .order('sent_at', { ascending: false });
+  const [first, prefs] = await Promise.all([
+    readInbox(true),
     supabase.from('notification_sport_prefs').select('sport, enabled').eq('user_id', userId),
   ]);
+  let inbox = first;
+  let canDelete = true;
+  if (inbox.error && /deleted_at/i.test(inbox.error.message ?? '')) {
+    canDelete = false;
+    inbox = await readInbox(false);
+  }
   if (inbox.error || prefs.error) {
     const message = inbox.error?.message || prefs.error?.message || 'Could not load notifications';
     // A missing table (migration not applied) is an empty inbox, not an error
@@ -91,6 +122,7 @@ async function load(userId: string | null): Promise<void> {
       loaded: true,
       error: missing ? null : message,
       userId,
+      canDelete: missing ? false : snapshot.canDelete,
     });
     if (missing) await applyUnreadBadge(0, Notifications);
     return;
@@ -99,7 +131,7 @@ async function load(userId: string | null): Promise<void> {
   fetched = (inbox.data ?? []) as InboxRow[];
   const rows = visibleInbox(fetched, muted, new Date());
   const unread = unreadCount(rows);
-  emit({ rows, muted, unread, loading: false, loaded: true, error: null, userId });
+  emit({ rows, muted, unread, loading: false, loaded: true, error: null, userId, canDelete });
   await applyUnreadBadge(unread, Notifications);
 }
 
@@ -168,6 +200,7 @@ export function useNotificationInbox(): InboxSnapshot & {
   markRead: (row: InboxRow) => Promise<void>;
   markAllRead: () => Promise<void>;
   dismissVisible: () => Promise<void>;
+  deleteRows: (rows: InboxRow[]) => Promise<boolean>;
   setSportEnabled: (sport: string, enabled: boolean) => Promise<void>;
 } {
   const [local, setLocal] = useState(snapshot);
@@ -229,6 +262,50 @@ export function useNotificationInbox(): InboxSnapshot & {
     );
   }, []);
 
+  /** Hide these rows from the list, the bell and the badge. The row is kept
+   *  (deleted_at stamped, read_at too if it was unread). Resolves false and
+   *  reloads the list if the write fails, so nothing vanishes that is still
+   *  stored as visible. */
+  const deleteRows = useCallback(async (targets: InboxRow[]) => {
+    const userId = snapshot.userId;
+    if (!userId || targets.length === 0 || !snapshot.canDelete) return false;
+    const now = new Date().toISOString();
+    const ids = new Set(targets.map((r) => r.id));
+    fetched = fetched.filter((r) => !ids.has(r.id));
+    const rows = visibleInbox(fetched, snapshot.muted, new Date());
+    const unread = unreadCount(rows);
+    emit({ ...snapshot, rows, unread });
+    await applyUnreadBadge(unread, Notifications);
+    await dismissInboxNotifications(targets.map((r) => r.notification_id), Notifications);
+    const unreadIds = targets.filter((r) => r.read_at == null).map((r) => r.id);
+    const readIds = targets.filter((r) => r.read_at != null).map((r) => r.id);
+    const writes = [];
+    if (unreadIds.length) {
+      writes.push(
+        supabase
+          .from('notification_inbox')
+          .update({ deleted_at: now, read_at: now })
+          .eq('user_id', userId)
+          .in('id', unreadIds),
+      );
+    }
+    if (readIds.length) {
+      writes.push(
+        supabase
+          .from('notification_inbox')
+          .update({ deleted_at: now })
+          .eq('user_id', userId)
+          .in('id', readIds),
+      );
+    }
+    const results = await Promise.all(writes);
+    if (results.some((r) => r.error)) {
+      void refreshNotificationInbox(userId);
+      return false;
+    }
+    return true;
+  }, []);
+
   const setSportEnabled = useCallback(async (sport: string, enabled: boolean) => {
     const userId = snapshot.userId ?? readAuthUserId();
     if (!userId) return;
@@ -245,7 +322,7 @@ export function useNotificationInbox(): InboxSnapshot & {
     if (error) void refreshNotificationInbox(userId);
   }, []);
 
-  return { ...local, refresh, markRead, markAllRead, dismissVisible, setSportEnabled };
+  return { ...local, refresh, markRead, markAllRead, dismissVisible, deleteRows, setSportEnabled };
 }
 
 /** The Settings test push, recorded so it shows in the inbox. No sport. */
