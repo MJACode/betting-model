@@ -14,6 +14,8 @@ import {
   Section,
 } from '@/components/MatchupSections';
 import { useMatchup } from '@/hooks/useMatchup';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
+import { LiveAtBooks } from '@/components/LiveAtBooks';
 import { hasMatchupView } from '@/lib/gameMatchup';
 import { MatchupPicks } from '@/components/MatchupPicks';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
@@ -22,6 +24,7 @@ import { errorText, isAbortError } from '@/lib/errors';
 import {
   fetchDkInplayForGames,
   fetchDkMarketEnds,
+  fetchInplayAtBooksForGame,
   fetchLiveGameStateById,
   fetchLiveScoreboard,
   fetchNcaafScoreboard,
@@ -41,7 +44,7 @@ import {
   type ScoreboardQuote,
 } from '@/lib/scoreboard';
 import { colors, font, spacing, sectionHeaderText, card } from '@/lib/theme';
-import type { GameRow, RootStackParamList } from '@/types';
+import type { GameRow, OddsByBookRow, RootStackParamList } from '@/types';
 import { SkeletonList } from '@/components/Skeleton';
 
 type Route = RouteProp<RootStackParamList, 'ScoreboardGame'>;
@@ -115,6 +118,17 @@ export function ScoreboardGameScreen() {
   const [movement, setMovement] = useState<Record<string, string | null>>({});
   const [retrying, setRetrying] = useState(false);
   const [linesError, setLinesError] = useState<string | null>(null);
+  // Every book the member uses, live (mike, 2026-11-25: "why not FanDuel,
+  // MGM etc"). Read only once the game has started and has no final score.
+  const { books, ready: booksReady } = usePreferredBooks();
+  const [bookRows, setBookRows] = useState<OddsByBookRow[]>([]);
+  const [bookError, setBookError] = useState<string | null>(null);
+  // Started and not settled: the read and the section share this one test,
+  // so a sport with no live score feed (WNBA, UFC, tennis) still gets its
+  // books' live lines (UX review, 2026-11-25).
+  const [booksDue, setBooksDue] = useState(false);
+  const [booksLoaded, setBooksLoaded] = useState(false);
+  const [failedBooks, setFailedBooks] = useState<string[]>([]);
   const inplayHold = useRef<ScoreboardQuote[]>([]);
   const loadGen = useRef(0);
 
@@ -131,6 +145,8 @@ export function ScoreboardGameScreen() {
         setError('This game isn’t on the board.');
         return;
       }
+      const started = game.commence_time != null && Date.parse(game.commence_time) <= Date.now();
+      const maybeLive = started && (game.home_score == null || game.away_score == null);
       const [dk, ends, inplayRows, mlb, ncaaf, espn] = await Promise.all([
         fetchScoreboardDkOddsForGame(gameId).catch(() => []),
         Promise.all(marketsFor(game.sport).map(async (m) => [m.id, await fetchDkMarketEnds(gameId, m.id)] as const)).catch(
@@ -160,6 +176,21 @@ export function ScoreboardGameScreen() {
       if (gen !== loadGen.current) return;
       inplayHold.current = inplay;
       setCard(presentScoreboard({ game, pregame: dk, inplay, feed, abbrevs }));
+      // A feed that says Final is not live, though `games` has no score yet.
+      const booksNow = maybeLive && !feed?.ended;
+      setBooksDue(booksNow);
+      // After the card, on its own: the score never waits on up to 21 line
+      // reads (UX review, 2026-11-25). Not before the member's book list has
+      // loaded, so a default list never shows for one poll.
+      if (booksNow && booksReady) {
+        void fetchInplayAtBooksForGame(gameId, books).then((at) => {
+          if (gen !== loadGen.current) return;
+          setBookRows(at.rows);
+          setBookError(at.error);
+          setFailedBooks(at.failedBooks);
+          setBooksLoaded(true);
+        });
+      }
       const moved: Record<string, string | null> = {};
       for (const [market, pair] of ends) {
         const live = market === 'spreads' || market === 'totals' || market === 'h2h'
@@ -182,7 +213,7 @@ export function ScoreboardGameScreen() {
         setRetrying(false);
       }
     }
-  }, [gameId, abbrevs]);
+  }, [gameId, abbrevs, books, booksReady]);
 
   useFocusEffect(
     useCallback(() => {
@@ -219,6 +250,19 @@ export function ScoreboardGameScreen() {
     : card.footerText;
 
   const started = card.footerBadge === 'LIVE' || game?.home_score != null;
+  const liveBooks = booksDue ? (
+    <LiveAtBooks
+      sport={card.sport}
+      markets={marketsFor(card.sport).map((mk) => mk.id)}
+      rows={bookRows}
+      books={books}
+      teams={{ away: card.away.name, home: card.home.name, awayFull: card.awayFull, homeFull: card.homeFull }}
+      loading={!booksLoaded}
+      error={bookError}
+      failedBooks={failedBooks}
+      onRetry={() => void load()}
+    />
+  ) : null;
   const refreshAll = () => {
     setPulling(true);
     void load();
@@ -272,6 +316,7 @@ export function ScoreboardGameScreen() {
         {card.updatedLabel ? ` · ${card.updatedLabel}` : ''}
       </Text>
       {card.situation ? <Text style={styles.situation}>{card.situation}</Text> : null}
+      {matchupOn ? null : liveBooks}
       {matchupOn && game ? (
         <>
           {/* Our verdict first: the Signals board's own cards for this game,
@@ -283,6 +328,7 @@ export function ScoreboardGameScreen() {
             refreshNonce={pullNonce}
             onLoadingChange={setPicksLoading}
           />
+          {liveBooks}
           <BestPriceSection m={m} away={game.away_team} home={game.home_team} started={started} onRetry={retrySections} />
           <CompareSection m={m} away={game.away_team} home={game.home_team} group="efficiency" onRetry={retrySections} />
           <FormSection m={m} away={game.away_team} home={game.home_team} onRetry={retrySections} />

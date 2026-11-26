@@ -844,6 +844,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # when it connects, elicitation included (Matt, 2026-11-24). Runs while
     # "mcp_preferences v1" is missing from mcp_meter.profile_call.
     "mcp_preferences_2026_11_24.sql",
+    # AI assistant (MCP): every stored game market (quarters, halves, periods,
+    # team totals, 3-way, alternates; EuroLeague and NBL) and the missing props
+    # (Matt, 2026-11-25). Runs while mcp_stats.game_prices has no `period`
+    # column or prop_markets has no anytime_td row.
+    "mcp_stats_all_markets_2026_11_25.sql",
     # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
     # monitor's page, written by mike's PC (pc_monitor/) and served to his
     # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,

@@ -489,6 +489,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "nbl_odds_unmatched",
     # scripts/nbl_dk_probe.py: DraftKings' raw NBL board answers (run by mike).
     "nbl_dk_raw",
+    # data/ingestors/book_live_boards.py (mike's machine, 2026-11-25): every
+    # other book's raw live answers, and each book and sport's last read.
+    "book_live_raw",
+    "book_live_feed",
     # Tennis (2026-11-13). Created on demand by
     # data/ingestors/tennis_archive.ensure_tables (the match archive),
     # data/ingestors/tennis_espn.ensure_tables (ESPN's results) and

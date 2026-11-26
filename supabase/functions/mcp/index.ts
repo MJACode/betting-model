@@ -60,7 +60,10 @@ const INSTRUCTIONS =
   "Signal Base Stats is read-only and for Signal Base members, limited to 10 " +
   "questions a day per member, resetting at midnight ET. It answers questions about " +
   "player and team stats, tonight's slate and sportsbook prices for NBA, WNBA, " +
-  "NCAAB, NCAAW, NFL, NCAAF, NHL, MLB and UFC. Use find_player first to get a " +
+  "NCAAB, NCAAW, NFL, NCAAF, NHL, MLB and UFC, and game prices for EuroLeague and " +
+  "NBL. get_game_lines covers quarters, halves and NHL periods (period), team " +
+  "totals, 3-way moneylines and alternate spreads and totals; it lists the " +
+  "periods each game has. Use find_player first to get a " +
   "player id, then the other tools. For a question across the whole slate at " +
   "one line (who is priced to clear 14.5 points tonight, at -600 or longer), " +
   "use get_prop_board: one call instead of one per player. Prices include " +
@@ -91,24 +94,32 @@ const INSTRUCTIONS =
 
 // ── Fixed vocabularies ───────────────────────────────────────────────────────
 
-const SPORTS = ["NBA", "WNBA", "NCAAB", "NCAABW", "NFL", "NCAAF", "NHL", "MLB", "UFC"] as const;
+const SPORTS = ["NBA", "WNBA", "NCAAB", "NCAABW", "NFL", "NCAAF", "NHL", "MLB", "UFC", "EUROLEAGUE", "NBL"] as const;
 type Sport = typeof SPORTS[number];
 
 const STATS: Record<Sport, string[]> = {
-  NBA: ["points", "rebounds", "assists", "threes", "steals", "blocks", "turnovers", "pra", "minutes"],
+  NBA: ["points", "rebounds", "assists", "threes", "steals", "blocks", "turnovers", "pra", "minutes",
+    "rebounds_assists", "blocks_steals", "double_double", "first_basket", "first_team_basket"],
   WNBA: ["points", "rebounds", "assists", "threes", "steals", "blocks", "turnovers", "pra", "minutes"],
   NCAAB: ["points", "rebounds", "assists", "threes", "steals", "blocks", "turnovers", "pra", "minutes"],
   NCAABW: ["points", "rebounds", "assists", "threes", "steals", "blocks", "turnovers", "pra", "minutes"],
   NFL: ["pass_yds", "pass_tds", "pass_completions", "pass_attempts", "interceptions", "rush_yds",
-    "rush_attempts", "rush_tds", "receptions", "targets", "reception_yds", "rec_tds", "rush_reception_yds"],
+    "rush_attempts", "rush_tds", "receptions", "targets", "reception_yds", "rec_tds", "rush_reception_yds",
+    "anytime_td", "sacks", "tackles_assists"],
   NCAAF: ["pass_yds", "pass_tds", "pass_completions", "pass_attempts", "interceptions", "rush_yds",
-    "rush_attempts", "rush_tds", "receptions", "reception_yds", "rec_tds"],
+    "rush_attempts", "rush_tds", "receptions", "reception_yds", "rec_tds", "anytime_td"],
   NHL: ["goals", "assists", "points", "shots_on_goal", "blocked_shots", "hits", "pp_points",
     "saves", "goals_against", "shots_against"],
   MLB: ["hits", "home_runs", "total_bases", "rbi", "runs", "walks", "batter_strikeouts", "stolen_bases",
     "pitcher_strikeouts", "pitcher_outs", "earned_runs", "hits_allowed", "walks_allowed"],
   UFC: ["sig_strikes", "takedowns", "knockdowns"],
+  // Game prices only: no player stats are stored for these leagues.
+  EUROLEAGUE: [],
+  NBL: [],
 };
+// Yes/no props (double_double, first_basket, first_team_basket, anytime_td, NHL
+// goals at 0.5) are stored as Over 0.5, usually with no under. first_basket and
+// first_team_basket have prices only: their history is not in player_games.
 const ALL_STATS = [...new Set(Object.values(STATS).flat())];
 // The books mcp_stats.prop_prices and game_prices carry (measured 2026-11-24).
 const BOOKS = ["DraftKings", "FanDuel", "BetMGM", "Caesars", "BetRivers", "Hard Rock Bet", "Fanatics"] as const;
@@ -116,6 +127,8 @@ const ANGLES = ["recent_form", "matchup", "injuries", "public_splits", "rest", "
 const PREF_KEYS = ["sports", "favorite_teams", "avoid_teams", "min_price", "max_price", "sides",
   "bet_style", "stats", "books", "angles", "notes"] as const;
 const WINDOWS = ["L5", "L10", "L20", "season"] as const;
+// mcp_stats.game_prices.period (mcp_stats_all_markets_2026_11_25.sql).
+const PERIODS = ["game", "1H", "2H", "1Q", "2Q", "3Q", "4Q", "1P", "2P", "3P"] as const;
 const SIDES = ["over", "under"] as const;
 const MAX_ROWS = 20;
 const DEFAULT_ROWS = 10;
@@ -130,7 +143,7 @@ const SLATE_MAX_ROWS = 200;
 // ── Tools ────────────────────────────────────────────────────────────────────
 
 const ro = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-const sportProp = { type: "string", enum: SPORTS, description: "League. NCAABW is women's college basketball." };
+const sportProp = { type: "string", enum: SPORTS, description: "League. NCAABW is women's college basketball. EUROLEAGUE and NBL have game prices only (no player stats)." };
 const statProp = { type: "string", enum: ALL_STATS, description: "Stat name, as shown in the Signal Base app." };
 const playerIdProp = { type: "string", description: "A player id from find_player (valid today only)." };
 const gameIdProp = { type: "string", description: "A game id from get_slate (valid today only)." };
@@ -240,10 +253,19 @@ const TOOLS = [
   {
     name: "get_game_lines",
     title: "Game lines",
-    description: "Best moneyline, spread and total prices for one game at the major US sportsbooks.",
+    description: "Best prices for one game at the major US sportsbooks, for one period: moneyline, " +
+      "spread, total, team totals and (where offered) the 3-way moneyline. period is the full game by " +
+      "default; 1H/2H, 1Q-4Q (basketball) and 1P-3P (NHL) where stored. available_periods lists what this " +
+      "game has. home_spread or total asks for the best price at that exact number, alternate lines " +
+      "included. home_spread is the HOME team's number (-3.5 = home favoured by 3.5).",
     inputSchema: {
       type: "object", additionalProperties: false, required: ["game_id"],
-      properties: { game_id: gameIdProp, books: booksProp },
+      properties: {
+        game_id: gameIdProp, books: booksProp,
+        period: { type: "string", enum: PERIODS, default: "game" },
+        home_spread: { type: "number", minimum: -100, maximum: 100 },
+        total: { type: "number", minimum: 0, maximum: 500 },
+      },
     },
     annotations: ro,
   },
@@ -819,45 +841,85 @@ async function runTool(name: string, a: Record<string, unknown>, user: string): 
     case "get_game_lines": {
       const g = await unseal(user, "g", a.game_id);
       const books = booksArg(a.books);
+      const period = pick(a.period, PERIODS, "game");
+      const homeSpread = a.home_spread === undefined ? null : num(a.home_spread, -100, 100);
+      const totalAt = a.total === undefined ? null : num(a.total, 0, 500);
       // A game can be stored under two ids (NCAAF: the CFBD UTC-dated twin and
       // the odds feed's ET id); alias_ids names both, so the prices are found
-      // whichever id a game id from an older slate carries.
-      const rows = await read((tx) => tx`
+      // whichever id a game id from an older slate carries. One period at a
+      // time: a full NBA game carries ~500 alternate rows across seven books (BOS@WAS 2026-11-24: 234 spread, 304 total).
+      const rows: any[] = await read((tx) => tx`
         with gm as (
           select away_team, home_team, starts_at, alias_ids from mcp_stats.games
-           where sport = ${g.sport} and game_date >= ${etDate(-1)} and ${g.id} = any(alias_ids) limit 1)
-        select gp.market, gp.book, gp.home_price, gp.away_price, gp.draw_price, gp.spread_home, gp.total_line,
-               gp.over_price, gp.under_price, gm.away_team, gm.home_team, gm.starts_at
-          from gm join mcp_stats.game_prices gp on gp.game_id = any(gm.alias_ids)
-         where gp.sport = ${g.sport}
-           and (${books}::jsonb is null or gp.book in (select jsonb_array_elements_text(${books}::jsonb)))
-         limit 60`);
-      if (!rows.length) throw new ToolError("not_found");
+           where sport = ${g.sport} and game_date >= ${etDate(-1)} and ${g.id} = any(alias_ids) limit 1),
+        gp as (
+          select gp.* from gm join mcp_stats.game_prices gp on gp.game_id = any(gm.alias_ids)
+           where gp.sport = ${g.sport}
+             and (${books}::jsonb is null or gp.book in (select jsonb_array_elements_text(${books}::jsonb))))
+        select gp.kind, gp.is_alternate, gp.book, gp.home_price, gp.away_price, gp.draw_price,
+               gp.spread_home, gp.total_line, gp.over_price, gp.under_price,
+               gm.away_team, gm.home_team, gm.starts_at,
+               (select array_agg(distinct period) from gp) as periods
+          from gm left join gp on gp.period = ${period}
+         limit 4000`);
+      if (!rows.length || !rows[0].periods) throw new ToolError("not_found");
+      const available = PERIODS.filter((p) => (rows[0].periods as string[]).includes(p));
       const best = (cands: any[], price: string) =>
         cands.filter((r) => r[price] !== null)
           .reduce((b: any, r: any) => (!b || Number(r[price]) > b.price ? { price: Number(r[price]), book: r.book } : b), null);
-      const ml = rows.filter((r: any) => r.market === "h2h");
-      const sp = rows.filter((r: any) => r.market === "spreads");
-      const to = rows.filter((r: any) => r.market === "totals");
-      const mode = (xs: any[], k: string) => {
-        const c = new Map<number, number>();
-        for (const x of xs) if (x[k] !== null) c.set(Number(x[k]), (c.get(Number(x[k])) ?? 0) + 1);
-        return [...c.entries()].sort((p, q) => q[1] - p[1])[0]?.[0] ?? null;
+      const of = (kind: string, alt = false) => rows.filter((r: any) => r.kind === kind && (alt || !r.is_alternate));
+      // Each book's main (not alternate) number, grouped. The headline is the
+      // number most books hang; a tie goes to the one nearest the median of
+      // every book's number (2026-11-24 BOS@WAS 1Q total: 56.5 x2, 57.5 x2,
+      // 60.5 x1 -> 57.5). The rest are listed under other_lines, never priced
+      // into the headline: Hard Rock's 60.5 at +175 is not a price on 57.5.
+      const main = (kind: string, k: string, sides: [string, string]) => {
+        const xs = of(kind).filter((r: any) => r[k] !== null);
+        if (!xs.length) return null;
+        const vals = xs.map((r: any) => Number(r[k])).sort((p: number, q: number) => p - q);
+        const med = vals.length % 2 ? vals[(vals.length - 1) / 2] : (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2;
+        const byLine = new Map<number, any[]>();
+        for (const r of xs) byLine.set(Number(r[k]), [...(byLine.get(Number(r[k])) ?? []), r]);
+        const ranked = [...byLine.entries()].sort((p, q) =>
+          q[1].length - p[1].length || Math.abs(p[0] - med) - Math.abs(q[0] - med) || p[0] - q[0]);
+        const priced = ([line, at]: [number, any[]]) =>
+          ({ line, books: at.length, [sides[0]]: best(at, sides[0] + "_price"), [sides[1]]: best(at, sides[1] + "_price") });
+        const [head, ...rest] = ranked.map(priced);
+        return { ...head, other_lines: rest } as Record<string, any>;
       };
-      const spreadHome = mode(sp, "spread_home");
-      const total = mode(to, "total_line");
-      const spAt = sp.filter((r: any) => Number(r.spread_home) === spreadHome);
-      const toAt = to.filter((r: any) => Number(r.total_line) === total);
-      return {
-        data: {
-          game: { away: rows[0].away_team, home: rows[0].home_team, starts_at: rows[0].starts_at },
-          books: books ? JSON.parse(books) : "all",
-          moneyline: ml.length ? { home: best(ml, "home_price"), away: best(ml, "away_price"), draw: best(ml, "draw_price") } : null,
-          spread: spAt.length ? { home_line: spreadHome, home: best(spAt, "home_price"), away: best(spAt, "away_price") } : null,
-          total: toAt.length ? { line: total, over: best(toAt, "over_price"), under: best(toAt, "under_price") } : null,
-        },
-        rows: 3,
+      const ml = of("moneyline");
+      const ml3 = of("moneyline_3way");
+      const sp = main("spread", "spread_home", ["home", "away"]);
+      const to = main("total", "total_line", ["over", "under"]);
+      const ttHome = main("team_total_home", "total_line", ["over", "under"]);
+      const ttAway = main("team_total_away", "total_line", ["over", "under"]);
+      const spAt = homeSpread === null ? [] : of("spread", true).filter((r: any) => Number(r.spread_home) === homeSpread);
+      const toAt = totalAt === null ? [] : of("total", true).filter((r: any) => Number(r.total_line) === totalAt);
+      const data: Record<string, unknown> = {
+        game: { away: rows[0].away_team, home: rows[0].home_team, starts_at: rows[0].starts_at },
+        period,
+        available_periods: available,
+        books: books ? JSON.parse(books) : "all",
+        moneyline: ml.length ? { home: best(ml, "home_price"), away: best(ml, "away_price"), draw: best(ml, "draw_price") } : null,
+        spread: sp ? { home_line: sp.line, books: sp.books, home: sp.home, away: sp.away,
+                       other_lines: sp.other_lines.map((o: any) => ({ home_line: o.line, books: o.books, home: o.home, away: o.away })) } : null,
+        total: to,
       };
+      if (ml3.length) data.moneyline_3way = { home: best(ml3, "home_price"), draw: best(ml3, "draw_price"), away: best(ml3, "away_price") };
+      if (ttHome || ttAway) data.team_totals = { home: ttHome, away: ttAway };
+      if (homeSpread !== null) {
+        data.spread_at = spAt.length
+          ? { home_line: homeSpread, home: best(spAt, "home_price"), away: best(spAt, "away_price") }
+          : { home_line: homeSpread, coverage: "none" };
+      }
+      if (totalAt !== null) {
+        data.total_at = toAt.length
+          ? { line: totalAt, over: best(toAt, "over_price"), under: best(toAt, "under_price") }
+          : { line: totalAt, coverage: "none" };
+      }
+      const n = rows.filter((r: any) => r.kind !== null).length;
+      if (!n) data.coverage = "none";
+      return { data, rows: n ? 1 : 0 };
     }
 
     case "get_injuries": {

@@ -1114,7 +1114,7 @@ export function PickCard({
         <Text style={styles.matchupLine}>
           {contextLine}
         </Text>
-        {flagged || (showSharp && sharp && !signalsMuted) || (showTier && pick.confidence_tier) || gameStatus(game, liveState).kind !== 'pre' ? (
+        {flagged || (showSharp && sharp && !signalsMuted) || (showTier && pick.confidence_tier) ? (
         <View style={styles.contextTrail}>
           {flagged ? (
             <View
@@ -1145,13 +1145,20 @@ export function PickCard({
               </Text>
             </View>
           ) : null}
+        </View>
+        ) : null}
+      </View>
+      {/* Score · clock · LIVE gets its own line once the game starts (Matt,
+          2026-11-25): beside the chips it squeezed the matchup into a
+          one-word-per-line column. */}
+      {gameStarted || resultView ? (
+        <View style={styles.statusRow}>
           {gameStarted ? (
             <GameStatusPill game={game} live={liveState} feed={scoreFeed} scheduledStart={pick.game_time} onPress={onOpenGame} />
           ) : null}
           {resultView ? <PickResultChip view={resultView} /> : null}
         </View>
-        ) : null}
-      </View>
+      ) : null}
 
       <View style={styles.betRow}>
         <Text style={[styles.betLeft, quietHeadline && styles.betMuted]}>
@@ -1828,6 +1835,15 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     alignItems: 'center',
     gap: spacing.xs,
+  },
+  // Started game: score, clock and LIVE/FINAL on their own line under the
+  // matchup, leading-aligned, so the matchup keeps the full card width.
+  statusRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
   },
   betRow: {
     flexDirection: 'row',

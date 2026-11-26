@@ -23,6 +23,7 @@ import { sportDisplayName } from '@/lib/liveSports';
 import {
   ESPN_LIVE_SPORTS,
   SCOREBOARD_BOOK_NOTE,
+  SCOREBOARD_LIVE_BOOK_NOTE,
   marketCell,
   nextSlateText,
   orderScoreboard,
@@ -543,7 +544,9 @@ function GameCard({
           ) : null}
           {card.footerText ? <Text style={styles.footerText}>{card.footerText}</Text> : null}
         </View>
-        <Text style={styles.bookNote}>{SCOREBOARD_BOOK_NOTE}</Text>
+        <Text style={styles.bookNote}>
+          {card.phase === 'live' ? SCOREBOARD_LIVE_BOOK_NOTE : SCOREBOARD_BOOK_NOTE}
+        </Text>
       </View>
       {card.updatedLabel ? <Text style={styles.updated}>{card.updatedLabel}</Text> : null}
     </Pressable>

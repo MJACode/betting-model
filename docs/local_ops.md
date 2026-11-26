@@ -779,6 +779,66 @@ launcher from its own worktree, `bm-live-feed\scripts\dk_live_board_run.ps1`,
 so the launcher and the feed always come from the same master. The feed's log
 is `betting_local_copies\logs\dk_live_board_feed_<date>.log` (UTF-8).
 
+**Since 2026-11-25 (mike: *"just do it"*) it also reads NHL and EuroLeague,
+and its lines reach the app.** Two changes:
+
+- **NHL and EuroLeague league ids are read off DraftKings' own sports page by
+  name** (`DISCOVER`: `/sports/hockey` for "NHL", `/sports/basketball` for
+  "Euroleague"), because no Claude session can reach DraftKings to read them.
+  DraftKings lists a league only while it has offers, so a league it does not
+  list is asked for again every 10 minutes and nothing is read for it until
+  then. The log line `league id <n> (<name>)` is the first read; `no single
+  DraftKings league named ...` names every league it saw that comes close. NHL
+  teams resolve by nickname (or the nickname a full name ends with),
+  EuroLeague clubs through `euroleague_teams`' resolver. Nothing decides on
+  these two yet; they feed the Scoreboard.
+- **Every changed line is also written to `odds`** as an in-play DraftKings
+  row (`source = 'dk_live_board'`), for NBA, NCAAB, NCAABW, NFL, NHL and
+  EuroLeague, so the app's Scoreboard shows the second-by-second number. Not
+  NCAAF: its live picks are stamped off in-play `odds` rows and the NCAAF loop
+  writes its own DraftKings rows there.
+
+The board's lines in `odds` over the last hour:
+
+```sql
+SELECT sport, market, count(*), max(snapshot_at) FROM odds
+ WHERE snapshot_type = 'in_play' AND source = 'dk_live_board'
+   AND snapshot_at > to_char(now() - interval '1 hour', 'YYYY-MM-DD"T"HH24:MI:SS')
+ GROUP BY 1, 2 ORDER BY 1, 2;
+```
+
+**Since 2026-11-25 the same process also reads every other book's own live
+page** (`data/ingestors/book_live_boards.py`, mike: *"yes do it for all
+books"*), on its own thread and database connection, so it cannot delay or
+stop a DraftKings read. Each book and live sport is asked once every 30 s.
+
+- **FanDuel is parsed.** Its league page (the call its own site makes, the
+  public web key the open-source scrapers all carry) holds every game in play.
+  The live moneyline, spread and total go to `odds` as in-play `fanduel` rows
+  (`source = 'fanduel_board'`) for NBA, NFL, NHL, NCAAB, NCAABW and
+  EuroLeague. The parser was built from a real capture of the NBA page
+  (2026-11-23, 9 games in play); the NHL, college and EuroLeague page ids and
+  hockey's market names are not yet seen and are checked against the stored
+  answers.
+- **BetMGM, Caesars, BetRivers, Fanatics and Hard Rock are captured, not
+  parsed.** Their answers go to `book_live_raw` (at most 3 a day per book,
+  sport and status) until a stored answer shows the shape. BetRivers,
+  Fanatics and Hard Rock start from their home pages, for the hosts and the
+  state's code their scripts use.
+- **No bot-wall work.** A plain request in a browser's TLS shape; a challenge
+  or a 403 is recorded as refused, and three in a row leave that book alone
+  for 10 minutes. `BOOK_LIVE_BOARDS=0` in this machine's environment turns
+  the thread off.
+- **Not NCAAF or MLB**, for the same reason as DraftKings' lines above.
+
+Each book and sport's last read, and what it answered:
+
+```sql
+SELECT book, sport, last_read_at, ok, status, live_events, matched, written, detail
+  FROM book_live_feed ORDER BY book, sport;
+SELECT book, sport, fetched_at, status, bytes FROM book_live_raw ORDER BY fetched_at DESC LIMIT 30;
+```
+
 **A merge reaches this machine by itself.** Every 5 minutes the feed fetches
 origin/master; when a merge changed one of its own files it exits (code 3) and
 the launcher checks the new master out and starts it again at once. A merge

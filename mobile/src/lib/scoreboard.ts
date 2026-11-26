@@ -4,8 +4,9 @@
  * Live scores are whatever a stored feed already wrote: MLB from
  * live_game_state, NCAAF from ncaaf_live_states, and NFL / NBA / NHL /
  * NCAAB / NCAABW from live_scoreboard (data/ingestors/live_scoreboard.py,
- * every minute from ESPN, Matt 2026-10-29 and 2026-11-15). The other
- * sports (EuroLeague, WNBA, UFC, tennis) have no live feed: a game shows
+ * every minute from ESPN, Matt 2026-10-29 and 2026-11-15), and EuroLeague
+ * into the same table from EuroLeague's own live API (mike, 2026-11-25). The
+ * other sports (WNBA, UFC, tennis) have no live feed: a game shows
  * Upcoming, then Final once `games` has the result. A clock that has passed is not a score. A game
  * with no fresh stored row stays Upcoming until `games` has a final score.
  * Nothing here fills a number in.
@@ -39,8 +40,8 @@ export type ScoreboardPhase = 'upcoming' | 'live' | 'final';
 /** One list per sport, in this order (Matt, 2026-10-29: no status filter). */
 export const SCOREBOARD_PHASE_ORDER: readonly ScoreboardPhase[] = ['live', 'upcoming', 'final'];
 
-/** Sports whose live score comes from live_scoreboard. */
-export const ESPN_LIVE_SPORTS: readonly string[] = ['NFL', 'NBA', 'NHL', 'NCAAB', 'NCAABW'];
+/** Sports whose live score comes from live_scoreboard: ESPN's, and EuroLeague's own API. */
+export const ESPN_LIVE_SPORTS: readonly string[] = ['NFL', 'NBA', 'NHL', 'NCAAB', 'NCAABW', 'EUROLEAGUE'];
 
 /** Sports whose `games` row names a school, not a code. */
 const SCHOOL_SPORTS: ReadonlySet<string> = new Set(['NCAAB', 'NCAABW']);
@@ -93,6 +94,8 @@ export const NCAAF_LIVE_MAX_AGE_MS = 45 * 60 * 1000;
 export const SCOREBOARD_MARKETS = ['h2h', 'spreads', 'totals'] as const;
 
 export const SCOREBOARD_BOOK_NOTE = 'DK · tap for game ›';
+/** A live card: the sheet lists every book the member uses (liveBookLines). */
+export const SCOREBOARD_LIVE_BOOK_NOTE = 'DK · tap for your books ›';
 
 export interface ScoreboardQuote {
   market: string;
@@ -704,7 +707,7 @@ export function presentScoreboard(input: {
     awayFull: game.away_team,
     homeFull: game.home_team,
     liveQuotes,
-    accessibilityLabel: `${matchup}, ${stateWord}, ${scoreSpeech}. ${possSpeech}${footerText}. ${situationSpeech}${lineSpeech}. ${updatedLabel ? `${updatedLabel}. ` : ''}DraftKings. Opens the game.`,
+    accessibilityLabel: `${matchup}, ${stateWord}, ${scoreSpeech}. ${possSpeech}${footerText}. ${situationSpeech}${lineSpeech}. ${updatedLabel ? `${updatedLabel}. ` : ''}DraftKings. ${phase === 'live' ? 'Opens live lines at your books.' : 'Opens the game.'}`,
   };
 }
 
@@ -998,4 +1001,116 @@ export function feedView(
     clock,
     speech: ['Live', clock, said].filter((p) => p.length > 0).join(', '),
   };
+}
+
+// ── Live lines at the member's books (the game sheet) ─────────────────────────
+
+/**
+ * After this long with no new row, a book's live number is shown as "No move
+ * in 22m" rather than with a plain age. A row is written when the book CHANGES
+ * the number (the odds feed stamps the market's own last_update; DraftKings'
+ * board writes only a changed read, data/ingestors/dk_live_board.py), so an old
+ * row is a line that has not moved, or a book that stopped posting it, and the
+ * stored rows cannot tell the two apart. The number stays on screen, said to be
+ * that old, rather than vanishing while the book may still offer it (UX review,
+ * 2026-11-25).
+ */
+export const LIVE_BOOK_QUIET_MS = 15 * 60 * 1000;
+
+/** The fields of an in-play odds row this file reads. */
+export interface LiveBookRow {
+  market: string;
+  bookmaker: string;
+  home_price?: number | string | null;
+  away_price?: number | string | null;
+  spread_home?: number | string | null;
+  total_line?: number | string | null;
+  over_price?: number | string | null;
+  under_price?: number | string | null;
+  snapshot_at?: string | null;
+}
+
+/** The line on top and the price under it, as the matchup rows draw them. */
+export interface LiveBookCell {
+  main: string;
+  sub?: string;
+}
+
+export interface LiveBookLine {
+  book: string;
+  /** The away side, or the over. */
+  away: LiveBookCell;
+  /** The home side, or the under. */
+  home: LiveBookCell;
+  /** "+3.5 at −110", "over 220.5 at −112", "+135". */
+  awaySpoken: string;
+  homeSpoken: string;
+  /** "Now", "4m ago", or "No move in 22m" once quiet. */
+  age: string;
+  /** "moved just now", "moved 4 minutes ago", "no move in 22 minutes". */
+  ageSpoken: string;
+  quiet: boolean;
+}
+
+/** The age of a book's newest live row, for the eye and for VoiceOver. */
+export function liveAge(ms: number): { age: string; ageSpoken: string; quiet: boolean } {
+  const min = Math.max(0, Math.floor(ms / 60_000));
+  const minutes = `${min} minute${min === 1 ? '' : 's'}`;
+  if (ms > LIVE_BOOK_QUIET_MS) {
+    return { age: `No move in ${min}m`, ageSpoken: `no move in ${minutes}`, quiet: true };
+  }
+  if (min < 1) return { age: 'Now', ageSpoken: 'moved just now', quiet: false };
+  return { age: `${min}m ago`, ageSpoken: `moved ${minutes} ago`, quiet: false };
+}
+
+/**
+ * One line per book the member uses that has an in-play row for the market,
+ * in the member's own book order. Each book shows its OWN number: a live line
+ * moves every few seconds and books disagree, so nothing here picks an anchor
+ * or a best. A row without its line or without both prices is no line.
+ */
+export function liveBookLines(
+  rows: readonly LiveBookRow[],
+  market: 'h2h' | 'spreads' | 'totals',
+  books: readonly string[],
+  now: number = Date.now(),
+): LiveBookLine[] {
+  const rank = new Map(books.map((b, i) => [b, i] as const));
+  const newestByBook = new Map<string, LiveBookRow>();
+  for (const r of rows) {
+    if (r.market !== market || !rank.has(r.bookmaker)) continue;
+    const prev = newestByBook.get(r.bookmaker);
+    if (!prev || parseStamp(r.snapshot_at ?? '').getTime() > parseStamp(prev.snapshot_at ?? '').getTime()) {
+      newestByBook.set(r.bookmaker, r);
+    }
+  }
+  const out: { at: number; line: LiveBookLine }[] = [];
+  for (const [book, r] of newestByBook) {
+    const at = parseStamp(r.snapshot_at ?? '').getTime();
+    if (!Number.isFinite(at)) continue;
+    let line: Omit<LiveBookLine, 'age' | 'ageSpoken' | 'quiet'>;
+    if (market === 'spreads') {
+      const sp = num(r.spread_home);
+      if (sp == null || num(r.home_price) == null || num(r.away_price) == null) continue;
+      const a = { main: signed(-sp), sub: priceText(r.away_price) };
+      const h = { main: signed(sp), sub: priceText(r.home_price) };
+      line = { book, away: a, home: h, awaySpoken: `${a.main} at ${a.sub}`, homeSpoken: `${h.main} at ${h.sub}` };
+    } else if (market === 'totals') {
+      const t = num(r.total_line);
+      if (t == null || num(r.over_price) == null || num(r.under_price) == null) continue;
+      const a = { main: `o${plain(t)}`, sub: priceText(r.over_price) };
+      const h = { main: `u${plain(t)}`, sub: priceText(r.under_price) };
+      line = {
+        book, away: a, home: h,
+        awaySpoken: `over ${plain(t)} at ${a.sub}`, homeSpoken: `under ${plain(t)} at ${h.sub}`,
+      };
+    } else {
+      if (num(r.home_price) == null || num(r.away_price) == null) continue;
+      const a = { main: priceText(r.away_price) };
+      const h = { main: priceText(r.home_price) };
+      line = { book, away: a, home: h, awaySpoken: a.main, homeSpoken: h.main };
+    }
+    out.push({ at: rank.get(book) ?? 0, line: { ...line, ...liveAge(now - at) } });
+  }
+  return out.sort((a, b) => a.at - b.at).map((x) => x.line);
 }

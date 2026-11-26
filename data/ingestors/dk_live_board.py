@@ -63,6 +63,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -77,8 +78,46 @@ log = logging.getLogger("data.ingestors.dk_live_board")
 
 # DraftKings' league ids, each read off its own board's `leagues` key (2026-11-13):
 # 92483 "NCAAB", 36647 "College Basketball (W)", 42648 "NBA", 87637 "College
-# Football", 88808 "NFL".
-LEAGUES = {"NCAAB": "92483", "NCAABW": "36647", "NBA": "42648", "NCAAF": "87637", "NFL": "88808"}
+# Football", 88808 "NFL". None: the id is read off DraftKings' own sports page
+# by the league's name at the board's first read (DISCOVER), because it could
+# not be read from a Claude session (DraftKings refuses it and the worker).
+LEAGUES = {"NCAAB": "92483", "NCAABW": "36647", "NBA": "42648", "NCAAF": "87637", "NFL": "88808",
+           "NHL": None, "EUROLEAGUE": None}
+# (sports page, the league's name with case, spaces and punctuation folded).
+# DraftKings lists a league only while it has offers (EuroLeague was absent on
+# 2026-11-13, 89 hours before its next game), so a league not found is asked
+# for again every DISCOVER_RETRY_SEC, and nothing is read for it until then.
+# Exactly one league of that name must be on the page; two is no league.
+DISCOVER = {"NHL": ("https://sportsbook.draftkings.com/sports/hockey", "nhl"),
+            "EUROLEAGUE": ("https://sportsbook.draftkings.com/sports/basketball", "euroleague")}
+DISCOVER_RETRY_SEC = 600.0
+# Every league entry on a sports page carries its id and name in one of these
+# two shapes (read off the tennis and basketball pages, scripts/nbl_dk_probe.py).
+_NAV_A = re.compile(r'"eventGroupId":"?(\d+)"?,"eventGroupName":"([^"]+)"')
+_NAV_B = re.compile(r'\{"name":"([^"]+)","displayGroupId":"?\d+"?,"eventGroupId":"?(\d+)"?')
+
+# THE LINES GO TO `odds` TOO (2026-11-25, mike: "just do it"). The app's
+# Scoreboard reads in-play lines from `odds`, so without this the board's
+# second-by-second DraftKings number reached no screen: an NFL game had 8,869
+# board reads in the week to 11-24 and 16 in-play `odds` rows, an NHL game
+# none. Rows are bookmaker 'draftkings', snapshot_type 'in_play', source
+# ODDS_SOURCE, one per market whose number or price changed.
+# NOT NCAAF: ncaaf_live/serve.py stamps each live pick's best price off the
+# newest in-play `odds` row per book (models.scorer._best_live_price), and the
+# NCAAF loop already writes its own DraftKings rows there, so a second writer
+# would change the price a live pick is stamped at. Every other sport here has
+# no decision that reads in-play DraftKings rows from `odds` (checked
+# 2026-11-25: the NBA loop reads its own source's rows and Pinnacle's, the
+# college basketball loops read dk_live_reads, the NFL leader excludes
+# in_play, the NHL and EuroLeague models are pre-game).
+ODDS_SOURCE = "dk_live_board"
+ODDS_LOG_SPORTS = frozenset({"NCAAB", "NCAABW", "NBA", "NFL", "NHL", "EUROLEAGUE"})
+# odds column -> the read's column, per market.
+ODDS_MARKETS = {
+    "spreads": {"spread_home": "spread_home", "home_price": "spread_home_price", "away_price": "spread_away_price"},
+    "totals": {"total_line": "total_line", "over_price": "over_price", "under_price": "under_price"},
+    "h2h": {"home_price": "home_ml", "away_price": "away_ml"},
+}
 BOARD_URL = "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusoh/v1/leagues/{league}"
 BOOT_URL = "https://sportsbook.draftkings.com/leagues/basketball/ncaab"
 HALVES = {"NCAAB"}                     # every other sport here plays quarters
@@ -103,6 +142,8 @@ LOCK_PORT = int(os.environ.get("DK_LIVE_LOCK_PORT", "47232"))
 MASTER_CHECK_SEC = 300.0
 NEW_MASTER_EXIT = 3
 FEED_FILES = ("data/ingestors/dk_live_board.py", "data/ingestors/ncaab_teams.py", "data/ingestors/ncaabw_teams.py",
+              "data/ingestors/euroleague_teams.py", "data/ingestors/live_price_log.py",
+              "data/ingestors/book_live_boards.py",
               "data/db.py", "scripts/dk_live_board_run.ps1")
 IDLE_POLL_SEC = float(os.environ.get("DK_LIVE_IDLE_POLL_SEC", "30"))
 RESOLVE_RETRY_SEC = 60.0
@@ -302,12 +343,64 @@ def changed(prev: dict | None, row: dict) -> bool:
     return prev is None or any(prev.get(k) != row.get(k) for k in CHANGE_KEY)
 
 
+def _stamp(at) -> str:
+    return at.isoformat() if hasattr(at, "isoformat") else str(at)
+
+
+def odds_rows(prev: dict | None, row: dict, sport: str) -> list[dict]:
+    """The in-play `odds` rows one read of a game adds: one per market whose
+    number or either price differs from the game's last row, with both prices
+    on offer (and the line, for a spread or a total). A market off the board
+    adds nothing: a row with no line would read as a line. Pure."""
+    from data.ingestors.live_price_log import build_row
+    out = []
+    for market, cols in ODDS_MARKETS.items():
+        vals = {oc: row.get(rc) for oc, rc in cols.items()}
+        prices = [v for k, v in vals.items() if k.endswith("_price")]
+        lines = [v for k, v in vals.items() if not k.endswith("_price")]
+        if any(v is None for v in prices + lines):
+            continue
+        if prev is not None and all(prev.get(rc) == row.get(rc) for rc in cols.values()):
+            continue
+        r = build_row(row["game_id"], sport, market, "draftkings", _stamp(row["read_at"]), **vals)
+        r["source"] = ODDS_SOURCE
+        out.append(r)
+    return out
+
+
+def league_ids_on_page(page: str) -> dict[str, str]:
+    """{league id: name} for every league a DraftKings sports page names. Pure."""
+    out: dict[str, str] = {}
+    for lid, name in _NAV_A.findall(page or ""):
+        out[lid] = name
+    for name, lid in _NAV_B.findall(page or ""):
+        out.setdefault(lid, name)
+    return out
+
+
+def _fold_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+def discover_league(page: str, want: str) -> tuple[str | None, dict]:
+    """(the one league id whose folded name is `want`, or None; every league on
+    the page whose name contains it, for the log). Pure."""
+    leagues = league_ids_on_page(page)
+    hits = [lid for lid, name in leagues.items() if _fold_name(name) == want]
+    near = {lid: name for lid, name in leagues.items() if want in _fold_name(name)}
+    return (hits[0] if len(hits) == 1 else None), near
+
+
 class Board:
     """One sport's feed: read, resolve, write the changes and the beat."""
 
     def __init__(self, sport: str, connect, session_factory, resolver_factory, *, dry_run: bool = False,
-                 clock=None, on_rows=None):
+                 clock=None, on_rows=None, odds_log=None):
         self.sport, self.connect, self.dry_run = sport, connect, dry_run
+        self.league_id = LEAGUES.get(sport)
+        self.discovered_at = -1e9
+        # (conn, rows) -> rows written; the live price log unless a test injects one.
+        self.odds_log = odds_log
         # Dry runs hand each read's changed rows here instead of the database
         # (a local measurement of the loop on the live board).
         self.on_rows = on_rows
@@ -335,7 +428,7 @@ class Board:
         if self.resolver is None or time.monotonic() - self.resolver_at > RESOLVER_REFRESH_SEC:
             self.resolver = self.resolver_factory(self.c())
             self.resolver_at = time.monotonic()
-        home, away = ((ev.home_nick, ev.away_nick) if self.sport in NICKNAME_SPORTS
+        home, away = ((ev.home_nick or ev.home_name, ev.away_nick or ev.away_name) if self.sport in NICKNAME_SPORTS
                       else (ev.home_name, ev.away_name))
         hit = None if self.resolver is None else self.resolver(home or "", away or "", ev.start or "")
         if hit is None:
@@ -346,12 +439,42 @@ class Board:
         self.ids[ev.dk_event_id] = (str(hit[0]), bool(hit[1]))
         return self.ids[ev.dk_event_id]
 
+    def _league(self) -> str | None:
+        """The league's DraftKings id: LEAGUES', or read off its sports page by
+        name (DISCOVER), asked for at most every DISCOVER_RETRY_SEC. None until
+        DraftKings lists exactly one league of that name."""
+        if self.league_id is not None:
+            return self.league_id
+        if self.sport not in DISCOVER or time.monotonic() - self.discovered_at < DISCOVER_RETRY_SEC:
+            return None
+        self.discovered_at = time.monotonic()
+        url, want = DISCOVER[self.sport]
+        try:
+            r = self.sess.get(url, timeout=15)
+        except Exception as exc:          # noqa: BLE001
+            log.warning("%s: league lookup failed: %s: %s", self.sport, type(exc).__name__, exc)
+            return None
+        if r.status_code != 200:
+            log.warning("%s: league lookup HTTP %s at %s", self.sport, r.status_code, url)
+            return None
+        lid, near = discover_league(r.text, want)
+        if lid is None:
+            log.warning("%s: no single DraftKings league named %r on %s (leagues naming it: %s); "
+                        "asking again in %.0f s", self.sport, want, url, near or "none", DISCOVER_RETRY_SEC)
+            return None
+        self.league_id = lid
+        log.info("%s: DraftKings league id %s (%s), read off %s", self.sport, lid, near.get(lid), url)
+        return lid
+
     def read(self) -> dict:
         """One read. Returns counters; never raises upward."""
         if self.sess is None:
             self.sess = self.session_factory(self.sport)
+        league = self._league()
+        if league is None:
+            return {"ok": True, "live": 0, "matched": 0, "written": 0, "detail": "league not listed"}
         try:
-            r = self.sess.get(BOARD_URL.format(league=LEAGUES[self.sport]), timeout=10)
+            r = self.sess.get(BOARD_URL.format(league=league), timeout=10)
         except Exception as exc:          # noqa: BLE001
             return self._beat(False, 0, 0, f"{type(exc).__name__}: {exc}"[:300])
         at = self.clock()
@@ -365,7 +488,7 @@ class Board:
             evs = parse_board(r.json(), self.sport)
         except Exception as exc:          # noqa: BLE001
             return self._beat(False, 0, 0, f"unparsable board: {type(exc).__name__}", at)
-        rows, present = [], set()
+        rows, present, odds = [], set(), []
         for ev in evs:
             hit = self._resolve(ev)
             if hit is None:
@@ -374,6 +497,8 @@ class Board:
             row = {"sport": self.sport, "game_id": hit[0], "read_at": at, **oriented(ev, hit[1])}
             if changed(self.last.get(hit[0]), row):
                 rows.append(row)
+                if self.sport in ODDS_LOG_SPORTS:
+                    odds.extend(odds_rows(self.last.get(hit[0]), row, self.sport))
         # A game off the board (finished, pulled) gets a row with no line, so
         # a reader never takes its last line for one still on offer.
         for gid, prev in self.last.items():
@@ -406,7 +531,18 @@ class Board:
             return {"ok": False, "live": len(evs), "matched": matched, "written": 0}
         for row in rows:
             self.last[row["game_id"]] = row
-        return {"ok": True, "live": len(evs), "matched": matched, "written": len(rows)}
+        # After the reads commit, in its own transaction: the odds log can
+        # never cost the reads a row. It swallows its own failure.
+        logged = 0
+        if odds:
+            if self.odds_log is None:
+                from data.ingestors.live_price_log import record_live_prices
+                self.odds_log = record_live_prices
+            try:
+                logged = int(self.odds_log(conn, odds) or 0)
+            except Exception as exc:      # noqa: BLE001
+                log.warning("%s: odds log failed (non-fatal): %s", self.sport, exc)
+        return {"ok": True, "live": len(evs), "matched": matched, "written": len(rows), "odds": logged}
 
     def _upsert_beat(self, conn, at, ok: bool, live: int, matched: int, detail: str) -> None:
         conn.execute("""
@@ -606,7 +742,33 @@ NFL_NICKNAMES = {
     "Raiders": "LV", "Dolphins": "MIA", "Vikings": "MIN", "Patriots": "NE", "Saints": "NO", "Giants": "NYG",
     "Jets": "NYJ", "Eagles": "PHI", "Steelers": "PIT", "Seahawks": "SEA", "49ers": "SF", "Buccaneers": "TB",
     "Titans": "TEN", "Commanders": "WAS"}
-NICKNAME_SPORTS = {"NBA": NBA_NICKNAMES, "NFL": NFL_NICKNAMES}
+# NHL: OUR ids are the games table's (every one of the 32 checked 2026-11-25);
+# the nicknames are the Odds API names' (odds_ingestor.NHL_ODDS_API_MAP) less
+# the city. DraftKings' NHL nickname field is not yet seen, so a team also
+# resolves by the nickname its full name ends with ("BOS Bruins").
+NHL_NICKNAMES = {
+    "Ducks": "ANA", "Bruins": "BOS", "Sabres": "BUF", "Flames": "CGY", "Hurricanes": "CAR",
+    "Blackhawks": "CHI", "Avalanche": "COL", "Blue Jackets": "CBJ", "Stars": "DAL", "Red Wings": "DET",
+    "Oilers": "EDM", "Panthers": "FLA", "Kings": "LAK", "Wild": "MIN", "Canadiens": "MTL", "Predators": "NSH",
+    "Devils": "NJD", "Islanders": "NYI", "Rangers": "NYR", "Senators": "OTT", "Flyers": "PHI",
+    "Penguins": "PIT", "Sharks": "SJS", "Kraken": "SEA", "Blues": "STL", "Lightning": "TBL",
+    "Maple Leafs": "TOR", "Mammoth": "UTA", "Hockey Club": "UTA", "Canucks": "VAN",
+    "Golden Knights": "VGK", "Capitals": "WSH", "Jets": "WPG"}
+NICKNAME_SPORTS = {"NBA": NBA_NICKNAMES, "NFL": NFL_NICKNAMES, "NHL": NHL_NICKNAMES}
+
+
+def nickname_team(nick: dict, name: str) -> str | None:
+    """OUR id for a DraftKings nickname, or for a full name that ends with
+    exactly one nickname (the longest: "Red Wings" over "Wings"). Pure."""
+    name = (name or "").strip()
+    if name in nick:
+        return nick[name]
+    ends = [k for k in nick if name.endswith(" " + k)]
+    if not ends:
+        return None
+    longest = max(len(k) for k in ends)
+    ids = {nick[k] for k in ends if len(k) == longest}
+    return ids.pop() if len(ids) == 1 else None
 
 # DraftKings' college football school names that differ from OUR (CFBD) names
 # once accents and punctuation are folded; read off the 2026-11-13..15 slate
@@ -659,12 +821,25 @@ def nickname_resolver(sport: str):
         games = _slate_games(conn, sport)
 
         def resolve(home: str, away: str, start: str):
-            h, a = nick.get(home), nick.get(away)
+            h, a = nickname_team(nick, home), nickname_team(nick, away)
             if not h or not a:
                 return None
             return pair_match(games, h, a, start, key=lambda t: t)
         return resolve
     return factory
+
+
+def euroleague_resolver(conn):
+    """EuroLeague: DraftKings' club names through the same resolver the odds
+    feed's names use (data.ingestors.euroleague_teams: the name map, then the
+    clubs' stored names with accents folded), onto EuroLeague's own games by
+    the unordered pair nearest the listed start. A name it does not know stays
+    unmatched and is logged by the board."""
+    from data.ingestors.euroleague_teams import make_resolver
+    inner = make_resolver(conn, _today_et())
+    if inner is None:
+        return None
+    return lambda home, away, start: inner(home, away, start)
 
 
 def ncaaf_resolver(conn):
@@ -679,7 +854,8 @@ def ncaaf_resolver(conn):
 
 
 RESOLVERS = {"NCAAB": ncaab_resolver, "NCAABW": ncaabw_resolver, "NBA": nickname_resolver("NBA"),
-             "NFL": nickname_resolver("NFL"), "NCAAF": ncaaf_resolver}
+             "NFL": nickname_resolver("NFL"), "NCAAF": ncaaf_resolver, "NHL": nickname_resolver("NHL"),
+             "EUROLEAGUE": euroleague_resolver}
 
 
 def main(argv=None) -> int:
@@ -720,6 +896,15 @@ def main(argv=None) -> int:
     log.info("reading %s; a live league every %.1f s, an idle one every %.0f s, at least %.1f s between requests",
              ", ".join(boards), a.poll, IDLE_POLL_SEC, MIN_GAP_SEC)
     plan = Pacer(list(boards), a.poll)
+    if not a.dry_run:
+        # Every other book's own live page, on its own thread and connection
+        # (data/ingestors/book_live_boards.py, mike 2026-11-25: "do it for all
+        # books"). It cannot delay or stop a DraftKings read.
+        try:
+            from data.ingestors.book_live_boards import start_in_background
+            start_in_background(get_connection, lambda: [sp for sp, v in plan.live.items() if v])
+        except Exception as exc:          # noqa: BLE001
+            log.error("other books not started: %s", exc)
     end = None if a.minutes is None else time.monotonic() + a.minutes * 60
     idle_since = None
     n = 0

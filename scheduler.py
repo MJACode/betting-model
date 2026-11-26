@@ -1347,8 +1347,8 @@ def run_ncaaf_live_loop() -> None:
 
 def run_live_scoreboard() -> None:
     # One tick of the Scoreboard's live scores for NFL, NBA, NHL, NCAAB and
-    # NCAABW (Matt,
-    # 2026-10-29). In process, not a subprocess: an idle tick is one
+    # NCAABW from ESPN (Matt, 2026-10-29), and EuroLeague from its own live
+    # API (mike, 2026-11-25). In process, not a subprocess: an idle tick is one
     # database read, and a tick with live games is one ESPN call per live
     # sport. Raises on a database error so the heartbeat marks it failed.
     from data.ingestors.live_scoreboard import run_once
