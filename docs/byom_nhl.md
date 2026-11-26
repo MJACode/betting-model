@@ -23,3 +23,6 @@ Matt, 2026-11-05: "Yes go". NHL is game bets only: moneyline, puck line
   (`refresh.PROP_SPORTS`).
 - **SQL.** `byom_nhl_2026_11_05.sql` (ACTIVE_MIGRATIONS) lets `byom_legs`
   and `byom_save_model` accept NHL.
+
+NCAAB game lines joined the builder the same way on 2026-11-26:
+`docs/byom_ncaab.md`.

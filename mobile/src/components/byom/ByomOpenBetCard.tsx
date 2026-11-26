@@ -33,7 +33,8 @@ export function ByomOpenBetCard({
   const fit = showFit && bet.locked_at ? formatDayTimeET(bet.locked_at) : '';
   // The builder grades at DraftKings only (docs/byom_nfl.md).
   const price = foundAtText('DK', formatAmerican(bet.price));
-  const meta = [matchup, bet.started ? 'Started' : kick].filter(Boolean).join(' · ');
+  // Time first, so a long school name cuts the matchup, not the time.
+  const meta = [bet.started ? 'Started' : kick, matchup].filter(Boolean).join(' · ');
   const spoken = [
     showModel ? `${bet.model_name}.` : '',
     `${bet.label}. ${foundAtText('DraftKings', formatAmerican(bet.price))}.`,
@@ -51,7 +52,7 @@ export function ByomOpenBetCard({
       ) : null}
       <Text style={styles.label}>{bet.label}</Text>
       <Text style={styles.price}>{price}</Text>
-      {meta ? <Text style={styles.meta}>{meta}</Text> : null}
+      {meta ? <Text style={styles.meta} numberOfLines={2}>{meta}</Text> : null}
       {fit ? <Text style={styles.fit}>{`Fit your rules ${fit}`}</Text> : null}
     </>
   );

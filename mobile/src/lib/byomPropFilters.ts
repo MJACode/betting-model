@@ -194,6 +194,20 @@ export const NBA_MONTHS: readonly { value: number; label: string }[] = [
   { value: 6, label: 'Jun' },
 ];
 
+/**
+ * Months with NCAAB games, from a count of games 2021-2027 (measured
+ * 2026-11-26): Nov 9,311, Dec 8,302, Jan 10,153, Feb 9,460, Mar 4,117,
+ * Apr 46. October, May and June have none, so they are not offered.
+ */
+export const NCAAB_MONTHS: readonly { value: number; label: string }[] = [
+  { value: 11, label: 'Nov' },
+  { value: 12, label: 'Dec' },
+  { value: 1, label: 'Jan' },
+  { value: 2, label: 'Feb' },
+  { value: 3, label: 'Mar' },
+  { value: 4, label: 'Apr' },
+];
+
 export const NFL_DAYS: readonly { value: number; label: string }[] = [
   { value: 4, label: 'Thu' },
   { value: 0, label: 'Sun' },
@@ -218,6 +232,7 @@ export const KICK_SLOTS: readonly { value: ByomKickSlot; label: string; pill: st
 ];
 
 export function monthsFor(sport: ByomSportId) {
+  if (sport === 'NCAAB') return NCAAB_MONTHS;
   return sport === 'NFL' ? NFL_MONTHS : NBA_MONTHS;
 }
 
@@ -557,7 +572,8 @@ export function applyPropFilterKeys(
   if (state.prevResult) next.prev_result = state.prevResult;
   if (state.prevAts) next.prev_ats = state.prevAts;
   if (state.prevTotal) next.prev_total = state.prevTotal;
-  if (state.division != null) next.division_game = state.division;
+  // No NCAAB conference table: a division filter would match nothing.
+  if (state.division != null && opts.sport !== 'NCAAB') next.division_game = state.division;
   if (opts.sport === 'NFL') {
     if (state.kickSlots.length > 0) {
       next.kick_slots = [...state.kickSlots];

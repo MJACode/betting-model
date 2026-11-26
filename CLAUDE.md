@@ -653,7 +653,6 @@ What stays here is what has to be known BEFORE deciding which file to open
 | **CLV: no-vig two-way close, sharp book when present** | `docs/clv.md` |
 | **Build Your Own Model, NFL facts (not picks)** | `docs/byom_nfl.md` |
 | **Build Your Own Model, NBA props (not picks)** | `docs/byom_nba.md` |
-| **Build Your Own Model, NCAAB game lines (not picks)** | `docs/byom_ncaab.md` |
 
 **Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf,ncaab,ncaabw}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —

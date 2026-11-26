@@ -105,8 +105,11 @@ export function ByomFilterSheet({
       ? 'Updating…'
       : `Show ${bets} bet${bets === 1 ? '' : 's'}`;
   const prop = isPropMarket(market);
-  // A total has no Matchup tab, so a stale 'matchup' falls back to Odds.
-  const shown = tab === 'matchup' && market === 'totals' ? 'odds' : tab;
+  // A total has no Matchup tab, and neither does a game bet on a sport with
+  // no team list (NHL, NCAAB: the team search would never return a row,
+  // UX review 2026-11-26). A stale 'matchup' falls back to Odds.
+  const noMatchup = market === 'totals' || (!prop && teamsForSport(sport).length === 0);
+  const shown = tab === 'matchup' && noMatchup ? 'odds' : tab;
   const gameSide = side === 'home' ? 'Home' : side === 'away' ? 'Away'
     : side === 'over' ? 'Over' : side === 'under' ? 'Under' : 'Any';
   const sideLabel = !prop
@@ -158,7 +161,7 @@ export function ByomFilterSheet({
           </Pressable>
         </View>
         <View style={styles.segment} accessibilityRole="tablist">
-          {(market === 'totals'
+          {(noMatchup
             ? (['odds', 'time', 'trends'] as const)
             : (['odds', 'time', 'matchup', 'trends'] as const)).map((item) => {
             const selected = item === shown;
