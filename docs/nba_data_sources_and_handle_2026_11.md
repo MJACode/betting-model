@@ -476,7 +476,8 @@ shares bought before tip, 814,908 fifteen-minute rows.
    points of closing value, below any sportsbook margin.
 3. **Retail sportsbook handle with history still cannot be bought or rebuilt:**
    - VSiN is Cloudflare-blocked from the worker, and the Wayback Machine refuses it.
-   - DraftKings' own splits for NBA, NHL and NCAAF start collecting once this branch is merged.
+   - DraftKings' own splits for NBA, NHL, NCAAF and NCAAB collect forward only, on master since
+     PR #1650.
 4. **The earlier prop snapshot is the more promising lead.** `nba_prop_market`'s frozen rule at
    10 hours returned +5.8% a bet on 7,572 bets against +2.6% at 1 hour on the same games, ahead in
    every season. Its 2025-26 value against Pinnacle's later price was +0.78%.
