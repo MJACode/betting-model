@@ -447,6 +447,7 @@ def books_view(db_books: dict[str, Any], sports: list[dict[str, Any]], now: floa
                      "sport": s.get("sport"), "age_s": s.get("age_s"), "http": None,
                      "live_events": s.get("live_events") or 0, "matched": s.get("matched") or 0,
                      "written": s.get("rows_last_min"), "written_what": "rows saved, last minute",
+                     "rows_hour": s.get("rows_hour"), "minutes": s.get("minutes"),
                      "status": s.get("status") or {"tone": "idle", "text": ""}})
     for r in db_books.get("data") or []:
         book = r.get("book")

@@ -33,17 +33,25 @@
   }
 }
 * { box-sizing: border-box; }
+html, body { max-width: 100%; overflow-x: hidden; }
 body { margin: 0; background: var(--bg); color: var(--ink);
-  font: 13px/1.45 "Segoe UI", system-ui, sans-serif; }
-header { display: flex; align-items: baseline; gap: 14px; padding: 14px 18px 6px; flex-wrap: wrap; }
-header h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  font: 13px/1.45 "Segoe UI", system-ui, sans-serif; -webkit-text-size-adjust: 100%; }
+header { display: flex; align-items: baseline; gap: 14px; padding: 16px 18px 8px; flex-wrap: wrap; }
+header h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
 header .sub { color: var(--muted); }
 header .right { margin-left: auto; display: flex; gap: 8px; align-items: center; color: var(--muted); }
-main { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 8px 18px 18px; }
-section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+main { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 8px 18px 24px; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 16px 14px;
+  min-width: 0; box-shadow: 0 1px 2px rgba(16,22,30,.04); }
 section.wide { grid-column: 1 / -1; }
 @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
-h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* Any table or diagram wider than the screen scrolls here, on touch, with a
+   fade at the right edge so it reads as "there is more". The page itself never
+   scrolls sideways (html/body overflow-x hidden), which is what trapped the
+   phone before. */
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -2px; padding: 0 2px; }
+.scroll table { min-width: 100%; }
+h2 { font-size: 15px; margin: 0 0 10px; font-weight: 700; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; letter-spacing: -.01em; }
 h3 { font-size: 12px; margin: 12px 0 4px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .ok { color: var(--ok); background: var(--ok-bg); } .warn { color: var(--warn); background: var(--warn-bg); }
@@ -107,17 +115,31 @@ main.stale .big, main.stale .t-ok, main.stale .t-warn, main.stale .t-bad { color
   main { padding: 6px 10px 14px; gap: 10px; }
   section { padding: 10px; }
   #remote { margin: 0 10px 4px; }
-  /* Wide tables scroll inside their card rather than pushing the page sideways. */
-  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Secondary columns fold away so the key ones fit with no sideways scroll;
+     what is left still scrolls inside its .scroll wrapper if it needs to. */
+  .col-sec { display: none; }
   td, th, td .pill { white-space: nowrap; }
-  svg.spark { width: 120px; height: auto; }
-  /* The flow diagram keeps a readable size and scrolls sideways inside its card. */
-  #flow-diagram { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  #flow-diagram svg { min-width: 720px; }
-  #flow-stream td.what { max-width: 260px; }
-  .facts { gap: 4px 16px; }
-  .fact .v { font-size: 14px; }
+  svg.spark { width: 110px; height: auto; }
+  #flow-diagram svg { min-width: 680px; }
+  #flow-stream td.what { max-width: 240px; }
+  .facts { gap: 8px; }
+  .fact { flex: 1 1 44%; }
+  .fact .v { font-size: 15px; }
 }
+/* A soft fade at a scroll container's right edge: there is more to the side. */
+.scroll { position: relative; }
+.scroll::after { content: ""; position: sticky; top: 0; right: 0; float: right; width: 22px; height: 1px; }
+@media (hover: none) {
+  .scroll { scrollbar-width: none; }
+  .scroll::-webkit-scrollbar { display: none; }
+}
+/* Compact stat tiles for a section's headline numbers. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 2px 0 4px; }
+.tile { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.tile .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+.tile .v { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 1px; }
+.tile .v small { font-weight: 400; color: var(--muted); font-size: 11px; }
+@media (max-width: 700px) { .tiles { grid-template-columns: 1fr 1fr; } }
 </style>
 </head>
 <body>
@@ -213,7 +235,7 @@ function procRows(now, ps) {
     <td class="num">${p.cpu_pct == null ? "—" : p.cpu_pct.toFixed(1) + "%"}</td>
     <td class="num">${p.mem_mb == null ? "—" : n0(p.mem_mb) + " MB"}</td><td class="num">${dur(now - p.started_at)}</td></tr>`).join("");
 }
-const procTable = (now, ps) => ps && ps.length ? `<table><tr><th>Process</th><th class="num">PID</th><th class="num">CPU</th><th class="num">Memory</th><th class="num">Up for</th></tr>${procRows(now, ps)}</table>` : "";
+const procTable = (now, ps) => ps && ps.length ? `<div class="scroll"><table><tr><th>Process</th><th class="num">PID</th><th class="num">CPU</th><th class="num">Memory</th><th class="num">Up for</th></tr>${procRows(now, ps)}</table></div>` : "";
 
 function problems(list) {
   if (!list || !list.length) return `<div class="empty">none in today's log</div>`;
@@ -221,38 +243,29 @@ function problems(list) {
     ${esc(p.message)} <span class="note">— ${p.count > 1 ? `first ${time(p.first_at)}, ` : ""}last ${timeS(p.last_at)}</span></div>`).join("");
 }
 
+const tile = (k, v) => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`;
+
 function renderFeed(now, f) {
+  // The DraftKings scraper's own health. The per-league lines live once, in
+  // the "Live lines by sportsbook" table below, so they are not repeated here.
   const p = f.process, rate = f.log?.rate;
   let h = `<h2>DraftKings in-play feed ${taskLine(now, f.task)} ${pill(f.presence.tone, f.presence.text)}</h2>`;
-  h += `<div class="facts">`;
-  h += fact("Reads a second", rate ? `${rate.per_s.toFixed(2)} <small>all leagues together</small>` : "—");
-  h += fact("Feed up for", p ? dur(now - p.started_at) : "—");
-  h += fact("CPU / memory", p ? `${p.cpu_pct == null ? "—" : p.cpu_pct.toFixed(1) + "%"} <small>of the PC</small> · ${n0(p.mem_mb)} MB` : "—");
-  h += fact("Last log line", f.log?.last_line_at ? age(now, f.log.last_line_at) : "—");
-  h += taskFacts(now, f.task);
+  const blank = `<span class="note">no data</span>`;
+  h += `<div class="tiles">`;
+  h += tile("Reads / sec", rate ? `${rate.per_s.toFixed(2)} <small>all leagues</small>` : blank);
+  h += tile("Up for", p ? dur(now - p.started_at) : blank);
+  h += tile("CPU · memory", p ? `${p.cpu_pct == null ? "" : p.cpu_pct.toFixed(1) + "%"} <small>·</small> ${n0(p.mem_mb)}<small> MB</small>` : blank);
+  h += tile("Last log line", f.log?.last_line_at ? age(now, f.log.last_line_at) : blank);
   h += `</div>`;
-  if (rate) h += `<div class="note">The feed writes one log line every 100 reads, counting every league together, so the rate is measured over its last ${n0(rate.reads)} reads (${time(rate.from_at)} to ${time(rate.to_at)}). It does not record reads per league.</div>`;
-
-  h += `<h3>By league</h3><table><tr><th>League</th><th>Freshness</th><th class="num">Last read</th><th class="num">Live games</th><th class="num">Rows saved, last minute</th><th class="num">Last hour</th><th>Rows saved per minute, last 60 min</th></tr>`;
-  if (!f.sports.length) h += `<tr><td colspan="7" class="empty">no rows from the database yet</td></tr>`;
-  for (const s of f.sports) {
-    const live = s.live_events ? `${s.matched ?? 0} of ${s.live_events} matched` : "none";
-    h += `<tr><td><b>${esc(s.sport)}</b></td><td>${pill(s.status.tone, s.status.text)}</td>
-      <td class="num big t-${s.status.tone}">${s.age_s == null ? "—" : s.age_s < 100 ? s.age_s.toFixed(1) + " s" : dur(s.age_s)}</td>
-      <td class="num">${live}</td><td class="num">${n0(s.rows_last_min)}</td><td class="num">${n0(s.rows_hour)}</td><td>${spark(s.minutes)}</td></tr>`;
-  }
-  h += `</table><div class="note">A row is saved for a game each time its score, period, spread, total, moneyline or (in football) down and distance changes. The in-play models use a league's feed only while its last read is under 8 s old; a league with no live game is read every 30 s.</div>`;
 
   const runs = f.runs_today || [];
-  h += `<h3>Runs today</h3>`;
   const runText = (r, i) => {
-    if (r.exit_at) return `${time(r.start_at)}–${time(r.exit_at)} <span class="${r.exit_code === 0 ? "note" : "t-bad"}">(exit ${r.exit_code})</span>`;
-    // Only the newest run can still be going; an older one with no exit line
-    // ended with its launcher, which wrote nothing.
-    return i === runs.length - 1 && p ? `${time(r.start_at)}–now` : `${time(r.start_at)}–? <span class="note">(no exit recorded)</span>`;
+    if (r.exit_at) return `${time(r.start_at)}&ndash;${time(r.exit_at)} <span class="${r.exit_code === 0 ? "note" : "t-bad"}">(exit ${r.exit_code})</span>`;
+    return i === runs.length - 1 && p ? `${time(r.start_at)}&ndash;now` : `${time(r.start_at)}&ndash;? <span class="note">(no exit recorded)</span>`;
   };
+  h += `<h3>Runs today</h3>`;
   h += runs.length ? `<div>${runs.map(runText).join(" · ")}</div>`
-    + `<div class="note">It stops after 45 minutes with no live game (exit 0) and the task starts it again within a minute.</div>` : `<div class="empty">none</div>`;
+    + `<div class="note">It stops after 45 min with no live game (exit 0) and the task restarts it within a minute.</div>` : `<div class="empty">none</div>`;
   h += `<h3>Warnings and errors</h3>${problems(f.problems)}`;
   if (f.log?.path) h += `<div class="note mono">${esc(f.log.path)}</div>`;
   h += stamps(now, f.sources);
@@ -260,28 +273,42 @@ function renderFeed(now, f) {
 }
 
 const KIND_WORDS = {
-  "parsed": "live lines saved",
-  "captured": "answer stored, no lines yet",
-  "home page": "home page stored, no lines yet",
+  "parsed": "lines saved",
+  "captured": "stored, no parser yet",
+  "home page": "home page only",
 };
+const KIND_TONE = { "parsed": "ok", "captured": "idle", "home page": "idle" };
+
 function renderBooks(now, b) {
   if (!b) { $("books").innerHTML = ""; return; }
-  let h = `<h2>Live lines by sportsbook <span class="note">each book's own live page, read from this PC</span></h2>`;
-  h += `<table><tr><th>Sportsbook</th><th>League</th><th>Status</th><th class="num">Last read</th><th class="num">Answer</th><th class="num">Live games</th><th class="num">On our games</th><th class="num">Saved</th></tr>`;
-  if (!b.rows.length) h += `<tr><td colspan="8" class="empty">no rows from the database yet</td></tr>`;
+  let h = `<h2>Live lines by sportsbook <span class="note">every book's own live page, read from this PC</span></h2>`;
+  h += `<div class="scroll"><table><tr>`
+     + `<th>Sportsbook</th><th>League</th><th>Status</th>`
+     + `<th class="num">Last read</th><th class="num">Live</th>`
+     + `<th class="num col-sec">On ours</th><th class="num col-sec">Answer</th>`
+     + `<th class="num">Saved</th><th class="col-sec">Last 60 min</th></tr>`;
+  if (!b.rows.length) h += `<tr><td colspan="9" class="empty">no rows from the database yet</td></tr>`;
   let prev = null;
   for (const r of b.rows) {
     const first = r.book !== prev;
     prev = r.book;
-    const name = first ? `<b>${esc(r.name)}</b><div class="note">${esc(KIND_WORDS[r.kind] || r.kind)}</div>` : "";
+    const name = first
+      ? `<b>${esc(r.name)}</b> <span class="pill ${KIND_TONE[r.kind] || "idle"}">${esc(KIND_WORDS[r.kind] || r.kind)}</span>`
+      : "";
     const ageText = r.age_s == null ? "" : r.age_s < 100 ? r.age_s.toFixed(1) + " s" : dur(r.age_s);
-    const saved = r.written == null ? "" : `${n0(r.written)} <small>${esc(r.written_what)}</small>`;
-    h += `<tr${first ? ' class="group"' : ""}><td>${name}</td><td>${esc(r.sport)}</td>
-      <td>${pill(r.status.tone, r.status.text)}</td><td class="num">${ageText}</td>
-      <td class="num">${r.http == null ? "" : esc(r.http)}</td><td class="num">${n0(r.live_events)}</td>
-      <td class="num">${n0(r.matched)}</td><td class="num">${saved}</td></tr>`;
+    const saved = r.written == null ? "" : `${n0(r.written)}`;
+    const hasMin = Array.isArray(r.minutes) && r.minutes.some(v => v);
+    h += `<tr${first ? ' class="group"' : ""}><td>${name}</td><td>${esc(r.sport)}</td>`
+       + `<td>${pill(r.status.tone, r.status.text)}</td>`
+       + `<td class="num t-${r.status.tone}">${ageText}</td>`
+       + `<td class="num">${r.live_events ? n0(r.live_events) : ""}</td>`
+       + `<td class="num col-sec">${r.live_events ? n0(r.matched) : ""}</td>`
+       + `<td class="num col-sec">${r.http == null ? "" : esc(r.http)}</td>`
+       + `<td class="num">${saved}</td>`
+       + `<td class="col-sec">${hasMin ? spark(r.minutes) : ""}</td></tr>`;
   }
-  h += `</table><div class="note">DraftKings is read every second while a league has a game live; every other book every 30 s, and only while its league has a game live, so an old last read is a league with no game on. FanDuel and BetRivers lines are saved to the same table the app reads; BetMGM and Caesars answers are stored until a parser is written from them; Fanatics and Hard Rock have only their home pages stored. NCAAF and MLB lines from other books are not saved (their live picks are priced off those rows).</div>`;
+  h += `</table></div>`;
+  h += `<div class="note">DraftKings is read every second a league has a game live; every other book every 30 s, and only while its league has a game on, so an old last read means no live game, not a stall. <b>Saved</b> is rows written on the last read (DraftKings: the last minute). FanDuel and BetRivers lines flow into the app; BetMGM and Caesars are stored until their parser is written; Fanatics and Hard Rock have only their home page. NCAAF and MLB from other books are not saved.</div>`;
   if (b.source) h += stamps(now, {book_live_feed: b.source});
   $("books").innerHTML = h;
 }
@@ -334,7 +361,7 @@ function renderTennis(now, t) {
   // A pass is open while the task runs and not every source has finished in it.
   const names = ["dk", "pinnacle", "tennisexplorer"];
   const open = last && t.task?.state === "Running" && names.some(n => !last.collectors?.[n]);
-  h += `<h3>${open ? "This pass, by source" : "Last pass, by source"}</h3><table><tr><th>Source</th><th>What it read</th><th class="num">Finished</th><th class="num">Exit code</th></tr>`;
+  h += `<h3>${open ? "This pass, by source" : "Last pass, by source"}</h3><div class="scroll"><table><tr><th>Source</th><th>What it read</th><th class="num">Finished</th><th class="num">Exit code</th></tr>`;
   for (const name of names) {
     const c = t.collectors?.[name] || {}, ex = last?.collectors?.[name];
     let what = collectorSummary(name, c.summary), when = time(ex?.at ?? c.written_at), code = "—";
@@ -347,7 +374,7 @@ function renderTennis(now, t) {
     }
     h += `<tr><td>${COLLECTOR_NAMES[name]}</td><td>${what}</td><td class="num">${when}</td><td class="num">${code}</td></tr>`;
   }
-  h += `</table>`;
+  h += `</table></div>`;
   if (t.passes?.length > 1) {
     h += `<h3>Recent passes</h3><div>${t.passes.map(p => `${time(p.start_at)} <span class="note">${passTook(p)}</span>`).join(" · ")}</div>`;
   }
@@ -363,14 +390,14 @@ function passTook(p) {
 
 function renderTasks(now, s) {
   let h = `<h2>Scheduled tasks <span class="note">Task Scheduler, folder \\BettingModel\\</span></h2>`;
-  h += `<table><tr><th>Task</th><th>State</th><th>Last result</th><th class="num">Last started</th><th class="num">Next start</th></tr>`;
+  h += `<div class="scroll"><table><tr><th>Task</th><th>State</th><th>Last result</th><th class="num">Last started</th><th class="num">Next start</th></tr>`;
   for (const t of s.tasks || []) {
     h += `<tr><td><b>${esc(t.name)}</b><div class="note">${esc(t.schedule)}</div></td><td>${esc(t.state)}</td>
       <td>${pill(t.result?.tone, t.result?.text)} <span class="note mono">${esc(t.result?.code || "")}</span></td>
       <td class="num">${day(t.last_run_at)}</td><td class="num">${day(t.next_run_at)}</td></tr>`;
   }
   if (!(s.tasks || []).length) h += `<tr><td colspan="5" class="empty">not read yet</td></tr>`;
-  h += `</table>` + stamps(now, {"Task Scheduler": s.tasks_source});
+  h += `</table></div>` + stamps(now, {"Task Scheduler": s.tasks_source});
   $("tasks").innerHTML = h;
 }
 function renderProcs(now, s) {
@@ -603,13 +630,13 @@ function renderFlow(now, f, remoteStale) {
   const ckey = `${tl.start}|${f.sources?.call_buckets?.read_at}`;
   if (ckey !== FLOW.chartKey || $("flow-chart").clientWidth !== FLOW.width) { renderChart(tl); FLOW.chartKey = ckey; }
 
-  let t = `<table><tr><th>Provider</th><th>Called from</th><th class="num">Calls, last 10 min</th><th class="num">Failed</th><th class="num">Credits</th></tr>`;
+  let t = `<div class="scroll"><table><tr><th>Provider</th><th>Called from</th><th class="num">Calls, last 10 min</th><th class="num">Failed</th><th class="num">Credits</th></tr>`;
   for (const p of tl.providers.slice(0, 14)) {
     t += `<tr><td><span class="chip" style="background:${slotColor(p.slot)}"></span>${esc(provName(p.name))}</td><td>${p.where === "pc" ? "This PC" : "Cloud worker"}</td>
       <td class="num">${n0(p.calls)}</td><td class="num ${p.failed ? "t-bad" : ""}">${n0(p.failed)}</td><td class="num">${p.credits ? n0(p.credits) : ""}</td></tr>`;
   }
   if (!tl.providers.length) t += `<tr><td colspan="5" class="empty">no calls read yet</td></tr>`;
-  $("flow-providers").innerHTML = t + `</table>`;
+  $("flow-providers").innerHTML = t + `</table></div>`;
 
   if (!$("flow-filters").childElementCount) {
     $("flow-filters").innerHTML = FILTERS.map(([k, label]) => `<button data-k="${k}">${label}</button>`).join("");
@@ -623,7 +650,7 @@ function renderFlow(now, f, remoteStale) {
   const keep = {all: () => true, pc: e => e.where === "pc", worker: e => e.where === "worker",
                 failed: e => e.kind === "call" && !e.ok, moved: e => e.kind !== "call"}[FLOW.filter];
   const rows = f.events.filter(keep);
-  $("flow-stream").innerHTML = rows.length ? `<table>${rows.map(streamRow).join("")}</table>` : `<div class="empty">nothing in the last ${f.events.length} events</div>`;
+  $("flow-stream").innerHTML = rows.length ? `<div class="scroll"><table>${rows.map(streamRow).join("")}</table></div>` : `<div class="empty">nothing in the last ${f.events.length} events</div>`;
   $("flow-src").innerHTML = stamps(now, f.sources).replace(/^<div class="src">|<\/div>$/g, "") +
     ` · shows the newest ${f.events.length} events · "This PC" means the call came from a program running on this PC`;
 }
