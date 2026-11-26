@@ -1925,6 +1925,14 @@ def step_scoreboard_splits(run_date: str) -> bool:
     except Exception as exc:
         logger.error(f"✗ Scoreboard splits (Action Network) failed: {exc}")
         ok = False
+    # DraftKings' player-prop splits from DK Network's articles (mike, 2026-11-26):
+    # the newest page of search results; a version already read is not fetched.
+    try:
+        from data.ingestors.dk_prop_splits import run as run_dk_props
+        logger.success(f"✓ DraftKings prop splits (articles): {run_dk_props(pages=1)}")
+    except Exception as exc:
+        logger.error(f"✗ DraftKings prop splits (articles) failed: {exc}")
+        ok = False
     return ok
 
 

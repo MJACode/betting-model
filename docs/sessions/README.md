@@ -21,6 +21,7 @@ artifacts. Nothing else was edited; text is verbatim.
 |---|---|---|
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Earlier NBA prop snapshots bought, historical exchange money imported and tested (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NBA data sources, and handle / money data across markets (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings prop splits into Supabase; DK splits aliases; tennis closed (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings splits for NBA, NHL, NCAAF and NCAAB; the prop-splits probe (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NHL shifts, Daily Faceoff lines, officials, EDGE snapshots |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Public splits for every market: what exists, the period-splits correction, the coverage probe (mike) |

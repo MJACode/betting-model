@@ -205,7 +205,8 @@ developer.sportradar.com was not tried). Read the page before anything is bought
 Apify carries DraftKings' bet and handle shares "where published", and does not say props carry them. DK Network
 publishes prop splits only as one-off articles for featured games ("Super Bowl Player Prop & Novelty Prop
 Splits", 2025-02-09; "Colts vs. Chiefs Player Prop Bet Splits for Sunday", 2026-09-20). Its splits table offers
-Moneyline, Spread and Total only, for every event group asked (NFL, NBA, NHL, NCAAF, NCAAB; worker_jobs 1722475).
+Moneyline, Spread and Total only, for every event group asked (NFL, NBA, NHL, NCAAF, NCAAB; worker_jobs 1722475). Those articles are now stored: `data/ingestors/dk_prop_splits.py` into `dk_prop_splits` (34
+found 2026-09-14 to 2026-11-23, NFL primetime games, worker_jobs 1723195).
 
 **Recommendation at the time of pricing: buy neither yet** (mike agreed, 2026-11-26). Neither adds props or periods. SharpAPI's 48 hours
 of history cannot be backtested, and Sportradar's aggregate is the same kind of number as the free Action Network
