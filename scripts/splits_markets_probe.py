@@ -86,8 +86,11 @@ def an_split_markets(payload: dict, books=AN_BOOKS) -> dict:
                 for market, arr in mkts.items():
                     if not isinstance(arr, list):
                         continue
-                    has = any(isinstance(e, dict) and (e.get("bet_info") or {}).get("tickets", {}).get("percent")
-                              is not None for e in arr)
+                    # A real split has a non-zero share: 0/0 is Action Network's "no split" placeholder
+                    # (the pair rules drop it), which the 2026-11-26 first run counted as a split.
+                    has = any(isinstance(e, dict) and not e.get("is_live") and any(
+                        ((e.get("bet_info") or {}).get(k) or {}).get("percent") not in (None, 0)
+                        for k in ("tickets", "money")) for e in arr)
                     if has:
                         cell = out.setdefault(book_id, {}).setdefault(period, {})
                         cell[market] = cell.get(market, 0) + 1
@@ -135,8 +138,9 @@ def probe(get=_get, today: str | None = None) -> int:
     day = today or datetime.now(_ET).strftime("%Y%m%d")
     for slug in AN_SPORTS:
         for period in AN_PERIODS:
+            # Exactly the ingestor's request (bookIds=15), so a filter the endpoint treats differently shows here.
             status, text, err = get(AN_SCOREBOARD.format(slug=slug),
-                                    params={"date": day, "periods": period},
+                                    params={"bookIds": "15", "date": day, "periods": period},
                                     headers={"Accept": "application/json",
                                              "Referer": f"https://www.actionnetwork.com/{slug}/public-betting"})
             if err or status != 200:
