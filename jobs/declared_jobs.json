@@ -1990,5 +1990,17 @@
     "requested_by": "matt",
     "note": "Matt 2026-11-26 ('yes add splits'): the 14:17 UTC pass stored no period splits although it ran. The first probe counted 0/0 (Action Network's no-split placeholder) as a split and asked without bookIds=15. This rerun asks exactly as the ingestor does and counts only non-zero splits, per sport, period and market, team totals included. Writes nothing, no Odds API credits.",
     "args": {}
+  },
+  {
+    "key": "premium-delete-login-ryan-pad-murphy-2026-11-26",
+    "job_type": "premium_access",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-26: delete the old login now that rmurphisms@gmail.com is set up (\"Only delete it if he has a new account we set up\").",
+    "args": {
+      "action": "delete_login",
+      "email": "ryan.pad.murphy@gmail.com",
+      "replaced_by": "rmurphisms@gmail.com",
+      "note": "deleted by Matt 2026-11-26, replaced by rmurphisms@gmail.com"
+    }
   }
 ]

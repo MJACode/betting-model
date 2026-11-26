@@ -45,10 +45,21 @@ def test_validate_refuses(bad):
         pa.validate(_ok(**bad))
 
 
-def test_no_statement_deletes():
-    sql = [v for k, v in vars(pa).items() if k.endswith("_SQL")]
-    assert len(sql) == 6
-    assert not re.search(r"\b(delete|truncate|drop)\b", " ".join(sql), re.I)
+def test_the_only_delete_is_one_login_by_id():
+    sql = {k: v for k, v in vars(pa).items() if k.endswith("_SQL")}
+    deleting = [k for k, v in sql.items()
+                if re.search(r"\b(delete|truncate|drop)\b", v, re.I)]
+    assert deleting == ["DELETE_LOGIN_SQL"]
+    assert sql["DELETE_LOGIN_SQL"] == "DELETE FROM auth.users WHERE id = %s::uuid"
+
+
+def test_delete_login_needs_a_different_replacement():
+    with pytest.raises(ValueError):
+        pa.validate(_ok(action="delete_login"))
+    with pytest.raises(ValueError):
+        pa.validate(_ok(action="delete_login", replaced_by="someone@example.com"))
+    out = pa.validate(_ok(action="delete_login", replaced_by="New@Example.com"))
+    assert out["replaced_by"] == "new@example.com"
 
 
 def test_the_job_is_registered_and_declared_entries_validate():
@@ -97,7 +108,7 @@ def test_grant_and_expire_on_a_scratch_cluster():
                 is_sso_user boolean NOT NULL DEFAULT false,
                 is_anonymous boolean NOT NULL DEFAULT false);
             CREATE TABLE auth.identities (
-                provider_id text NOT NULL, user_id uuid NOT NULL REFERENCES auth.users(id),
+                provider_id text NOT NULL, user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
                 identity_data jsonb NOT NULL, provider text NOT NULL,
                 last_sign_in_at timestamptz, created_at timestamptz, updated_at timestamptz,
                 id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -154,6 +165,49 @@ def test_grant_and_expire_on_a_scratch_cluster():
         conn.commit()
         assert g3["user_id"] == g["user_id"] and g3["grants_changed"] == 1
         assert has_access(g["user_id"])
+
+        # delete_login: refused while the replacement has no login with access.
+        with pytest.raises(ValueError, match="has not been replaced"):
+            pa.apply(conn, "delete_login", "new@example.com", "x" * 10,
+                     replaced_by="repl@example.com")
+        conn.rollback()
+        r = pa.apply(conn, "grant", "repl@example.com", "comped by Matt test")
+        conn.commit()
+        # refused while the old login still has access.
+        with pytest.raises(ValueError, match="still has app access"):
+            pa.apply(conn, "delete_login", "new@example.com", "x" * 10,
+                     replaced_by="repl@example.com")
+        conn.rollback()
+        pa.apply(conn, "expire", "new@example.com", "x" * 10)
+        conn.commit()
+        # refused while the old login owns member data.
+        conn.execute("CREATE TABLE public.subscriptions (user_id uuid "
+                     "REFERENCES auth.users(id) ON DELETE CASCADE)")
+        conn.execute("INSERT INTO public.subscriptions VALUES (%s::uuid)", (g["user_id"],))
+        conn.commit()
+        with pytest.raises(ValueError, match="owns member data"):
+            pa.apply(conn, "delete_login", "new@example.com", "x" * 10,
+                     replaced_by="repl@example.com")
+        conn.rollback()
+        conn.execute("DROP TABLE public.subscriptions")
+        conn.commit()
+        assert conn.execute("SELECT count(*) FROM auth.users").fetchone()[0] == 2
+
+        # all checks pass: archived into the result, then deleted.
+        d = pa.apply(conn, "delete_login", "new@example.com", "x" * 10,
+                     replaced_by="repl@example.com")
+        conn.commit()
+        assert d["result"] == "deleted"
+        assert d["archive"]["user"]["email"] == "new@example.com"
+        assert "encrypted_password" not in d["archive"]["user"]
+        assert len(d["archive"]["identities"]) == 1
+        assert len(d["archive"]["access_grants"]) == 2
+        emails = [x[0] for x in conn.execute("SELECT email FROM auth.users").fetchall()]
+        assert emails == ["repl@example.com"]
+        assert has_access(r["user_id"])
+        again = pa.apply(conn, "delete_login", "new@example.com", "x" * 10,
+                         replaced_by="repl@example.com")
+        assert again["result"].startswith("no login")
     finally:
         if raw is not None:
             raw.close()

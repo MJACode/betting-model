@@ -2022,14 +2022,16 @@ def _job_premium_access(**kw):
     """Grant or expire comped app premium for one email (Matt, 2026-11-26:
     "You do the scripts"). scripts/premium_access.py holds the SQL and the
     rules: grant creates the email login if missing plus one indefinite comped
-    grant; expire sets expires_at on active comped grants and deletes nothing.
-    One request per job, one transaction, idempotent."""
+    grant; expire sets expires_at on active comped grants and deletes nothing;
+    delete_login deletes a login only once replaced_by holds access, after
+    copying it into the result. One request per job, one transaction."""
     from data.db import get_connection
     from scripts.premium_access import apply
 
     conn = get_connection()
     try:
-        out = apply(conn, kw["action"], kw["email"], kw["note"])
+        out = apply(conn, kw["action"], kw["email"], kw["note"],
+                    replaced_by=kw.get("replaced_by"))
         conn.commit()
         return out
     except Exception:

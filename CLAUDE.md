@@ -220,6 +220,7 @@ row. A row leaves the live database only by ARCHIVING: copied, verified (count,
 hash), then removed; the archive and the PC copy never delete. A cache rebuilt
 from a stored table (`latest_*`) is not a record. Overrides carry
 `Updated-By: mike`. What still deletes, and the plan: `docs/data_archive.md`.
+**Accounts: Matt's call** (11-26); deletes via `premium_access`.
 
 **A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND "SHOULD WE
 UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A pause banks the
