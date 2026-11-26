@@ -582,3 +582,60 @@ def test_rls_hides_another_users_inbox_rows():
         if conn is not None:
             conn.close()
         cluster.stop()
+
+
+# ── Delete from the list (notification_inbox_hide_2026_11_26.sql) ───────────
+
+HIDE = ROOT / "data" / "migrations" / "notification_inbox_hide_2026_11_26.sql"
+
+
+def test_delete_is_a_hide_not_a_delete():
+    """CLAUDE.md section 1b: no data is ever deleted. The app's Delete stamps
+    deleted_at; neither the migration nor the app issues a DELETE."""
+    from data.view_migrations import ACTIVE_MIGRATIONS
+
+    sql = HIDE.read_text(encoding="utf-8")
+    assert HIDE.name not in ACTIVE_MIGRATIONS
+    assert "HAND APPLIED" in sql
+    assert "ADD COLUMN IF NOT EXISTS deleted_at timestamptz" in sql
+    assert "DELETE FROM" not in sql.upper().replace("ON DELETE", "")
+    # A hidden alert cannot be un-hidden by a client update.
+    assert "a deleted alert stays deleted" in sql
+    # Every column the original freeze protected is still frozen.
+    for col in ("id", "user_id", "kind", "title", "body", "sport", "route",
+                "notification_id", "sent_at"):
+        assert f"NEW.{col} IS DISTINCT FROM OLD.{col}" in sql
+
+    hook = (ROOT / "mobile" / "src" / "hooks" / "useNotificationInbox.ts").read_text(encoding="utf-8")
+    assert ".delete()" not in hook  # the PostgREST delete; Set.delete(x) is fine
+    assert "deleted_at: now" in hook
+    assert ".is('deleted_at', null)" in hook
+
+
+def test_unread_count_skips_hidden_rows_once_the_column_exists():
+    from tracking.notification_inbox import unread_counts
+
+    class Conn:
+        def __init__(self, has_column):
+            self.has_column = has_column
+            self.sql = []
+
+        def execute(self, sql, params=None):
+            self.sql.append(sql)
+            has = self.has_column
+
+            class R:
+                def fetchone(self):
+                    return (1,) if has else None
+
+                def fetchall(self):
+                    return [("u1", None)]
+            return R()
+
+    after = Conn(True)
+    assert unread_counts(after, {}) == {"u1": 1}
+    assert "deleted_at IS NULL" in after.sql[-1]
+
+    before = Conn(False)
+    assert unread_counts(before, {}) == {"u1": 1}
+    assert "deleted_at" not in before.sql[-1]
