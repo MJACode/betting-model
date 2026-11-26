@@ -896,13 +896,29 @@ stop a DraftKings read. Each book and live sport is polled as fast as the book a
   alone for 10 minutes. `BOOK_LIVE_BOARDS=0` in this machine's environment
   turns the thread off.
 - **Not NCAAF or MLB**, for the same reason as DraftKings' lines above.
+- **What each book has on offer, per read: `book_live_reads`** (2026-11-26,
+  mike: *"We want best line"*). The record a live decision needs before it can
+  bet another book's number, which `odds` cannot give: a suspended market adds
+  no `odds` row, so the last number reads as current, and a restart writes
+  every number again as if new. Per book and game, a row whenever any of the
+  eight numbers changes (a market leaving the page goes NULL), and an all-NULL
+  row when a game the last clean read listed is gone. Only a clean, parsed
+  read writes. `after_start` marks each game's first row after the feed
+  starts (how long that number had been up is unknown). `page_age_s` is the
+  answer's own `Age` header: FanDuel's page is a CloudFront copy
+  (`max-age=30, stale-while-revalidate=60`, answers 13-21 s old when read
+  2026-11-26), so its numbers were on the site at `read_at - page_age_s`;
+  BetRivers' answers were a cache miss (no Age) or 2 s old. `book_live_feed`
+  carries the newest answer's age too. Nothing decides on either yet.
 
 Each book and sport's last read, and what it answered:
 
 ```sql
-SELECT book, sport, last_read_at, ok, status, live_events, matched, written, detail
+SELECT book, sport, last_read_at, ok, status, live_events, matched, written, detail, page_age_s
   FROM book_live_feed ORDER BY book, sport;
 SELECT book, sport, fetched_at, status, bytes FROM book_live_raw ORDER BY fetched_at DESC LIMIT 30;
+SELECT book, sport, game_id, read_at, page_age_s, after_start, spread_home, total_line
+  FROM book_live_reads ORDER BY read_at DESC LIMIT 30;
 ```
 
 **A book throttling us is a red alert in ops** (mike, 2026-11-26: *"a red

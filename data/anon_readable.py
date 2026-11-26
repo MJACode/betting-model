@@ -493,6 +493,9 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # other book's raw live answers, and each book and sport's last read.
     "book_live_raw",
     "book_live_feed",
+    # The same thread (2026-11-26): what each book has on offer at each read,
+    # for the in-play models' best line. Read by the worker, never by the app.
+    "book_live_reads",
     # data/ingestors/book_throttle.py (mike's machine, 2026-11-26): each time a
     # book rate limits or refuses our live reads, and when it answers again.
     # Read by the worker's tracking/book_throttle_watch.py, never by the app.
