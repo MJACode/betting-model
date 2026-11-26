@@ -702,6 +702,32 @@ def run_moneypuck_nhl() -> None:
          "moneypuck-nhl", timeout=3600)
 
 
+def run_nhl_shifts() -> None:
+    # Current season only. The 2023-24 backfill is the module's --backfill,
+    # not this job. A stored game is not fetched again. Not a pick input.
+    _run([sys.executable, "run_pipeline.py", "--step", "nhl-shifts"],
+         "nhl-shifts", timeout=3600)
+
+
+def run_nhl_officials() -> None:
+    _run([sys.executable, "run_pipeline.py", "--step", "nhl-officials"],
+         "nhl-officials", timeout=3600)
+
+
+def run_dailyfaceoff_lines() -> None:
+    # Game-day scrape. The module skips a date with no NHL game. A
+    # Cloudflare block of one team is a warning; a block of every team
+    # fails the step. Each run inserts a snapshot and does not update one.
+    _run([sys.executable, "run_pipeline.py", "--step", "dailyfaceoff-lines"],
+         "dailyfaceoff-lines", timeout=1800)
+
+
+def run_nhl_edge() -> None:
+    # Season-to-date snapshot for this ET date. No backfill exists.
+    _run([sys.executable, "run_pipeline.py", "--step", "nhl-edge"],
+         "nhl-edge", timeout=3600)
+
+
 def run_pipeline_watch() -> None:
     # The pipeline watch. In-process for the same reason as the watchdog and
     # the review: its output is a Discord post, not an exit code.
@@ -1205,6 +1231,14 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "db_health_snapshot",
                   # MoneyPuck.com files, 7:20am ET. Research rows, no picks.
                   "moneypuck_nhl",
+                  # NHL shift charts, 7:35am ET. Research rows, no picks.
+                  "nhl_shifts",
+                  # Officials and healthy scratches, 7:50am ET.
+                  "nhl_officials",
+                  # Daily Faceoff lines, 11:10am and 5:10pm ET on game days.
+                  "dailyfaceoff_lines",
+                  # NHL EDGE season-to-date snapshot, 2:40am ET.
+                  "nhl_edge",
                   # Queues the daily BYOM NFL refresh onto job_queue, which
                   # is also a pipeline job. Keep it last: a test reads
                   # '"byom_nfl_refresh"}' to pin it to the pipeline role.
@@ -3379,6 +3413,43 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour=7, minute=20, timezone=TIMEZONE),
         id="moneypuck_nhl",
         name="MoneyPuck NHL (daily 7:20am ET)",
+        max_instances=1, coalesce=True, misfire_grace_time=3600,
+    )
+
+    # Shift charts for completed games. 7:35 is after the 6am pipeline's
+    # own pass, so a game the pipeline missed is picked up here. The
+    # historical backfill is not this job.
+    sched.add_job(
+        run_nhl_shifts,
+        CronTrigger(hour=7, minute=35, timezone=TIMEZONE),
+        id="nhl_shifts",
+        name="NHL shift charts (daily 7:35am ET)",
+        max_instances=1, coalesce=True, misfire_grace_time=3600,
+    )
+    sched.add_job(
+        run_nhl_officials,
+        CronTrigger(hour=7, minute=50, timezone=TIMEZONE),
+        id="nhl_officials",
+        name="NHL officials and scratches (daily 7:50am ET)",
+        max_instances=1, coalesce=True, misfire_grace_time=3600,
+    )
+    # Lines are posted on the morning of a game and move again before
+    # puck drop. Two snapshots. An off day fetches nothing.
+    sched.add_job(
+        run_dailyfaceoff_lines,
+        CronTrigger(hour="11,17", minute=10, timezone=TIMEZONE),
+        id="dailyfaceoff_lines",
+        name="Daily Faceoff lines (11:10am and 5:10pm ET)",
+        max_instances=1, coalesce=True, misfire_grace_time=3600,
+    )
+    # After the west-coast games, before the 6am pipeline. snapshot_date
+    # is that ET morning. The first snapshot is whenever this first runs;
+    # the endpoint cannot be asked for a past day.
+    sched.add_job(
+        run_nhl_edge,
+        CronTrigger(hour=2, minute=40, timezone=TIMEZONE),
+        id="nhl_edge",
+        name="NHL EDGE snapshot (daily 2:40am ET)",
         max_instances=1, coalesce=True, misfire_grace_time=3600,
     )
 
