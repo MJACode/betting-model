@@ -81,14 +81,18 @@ def _run(now, monkeypatch, storable=True):
 
 
 def test_periods_are_fetched_on_the_hourly_window_only(monkeypatch):
+    # The mechanism, on the NFL fixture; which sports are asked is pinned below.
+    monkeypatch.setitem(ss.PERIODS_BY_SPORT, "NFL", ("firsthalf", "firstquarter"))
     calls, conn, out = _run(IN_WINDOW, monkeypatch)
     assert [c[2] for c in calls] == ["event", *ss.PERIODS_BY_SPORT["NFL"]]
     assert {r["market"] for r in conn.rows} >= {"spreads", "totals_q1", "spreads_h1"}
+    assert ss.PERIODS_BY_SPORT["NFL"] == ("firsthalf", "firstquarter")
     calls, _, _ = _run(OUT_WINDOW, monkeypatch)
     assert [c[2] for c in calls] == ["event"]
 
 
 def test_no_period_is_fetched_until_the_check_allows_it(monkeypatch):
+    monkeypatch.setitem(ss.PERIODS_BY_SPORT, "NFL", ("firstquarter",))
     calls, conn, _ = _run(IN_WINDOW, monkeypatch, storable=False)
     assert [c[2] for c in calls] == ["event"]
     assert {r["market"] for r in conn.rows} <= {"h2h", "spreads", "totals"}
@@ -111,7 +115,15 @@ def test_migration_guard_is_the_named_constraint():
 
 
 def test_ncaab_is_polled():
-    assert "NCAAB" in ss.SPORTS and ss.PERIODS_BY_SPORT["NCAAB"] == ("firsthalf", "secondhalf")
+    assert "NCAAB" in ss.SPORTS
+
+
+def test_only_sports_not_measured_empty_are_asked_for_periods(monkeypatch):
+    """splits-nonzero-probe-2026-11-26: no non-zero consensus period split for NFL, NCAAF or NCAAB
+    (Matt, "Ok"). NBA and NHL stay until the 11-27 probe measures them."""
+    assert set(ss.PERIODS_BY_SPORT) == {"NBA", "NHL"}
+    calls, _, _ = _run(IN_WINDOW, monkeypatch)
+    assert [c[2] for c in calls] == ["event"]          # the NFL fixture: full game only
 
 
 def test_mcp_labels_period_splits():

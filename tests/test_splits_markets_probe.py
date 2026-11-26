@@ -67,7 +67,7 @@ def test_registered_as_a_worker_job_and_declared():
     mine = [d for d in declared if d["job_type"] == "splits_markets_probe"]
     # The first run (markets and periods) and the rerun for team-total entry shapes, each run once.
     assert [d["key"] for d in mine] == ["splits-markets-probe-2026-11-26", "splits-team-totals-probe-2026-11-26",
-                                        "splits-nonzero-probe-2026-11-26"]
+                                        "splits-nonzero-probe-2026-11-26", "splits-nba-nhl-probe-2026-11-27"]
     assert all(d["requested_by"] == "matt" and d["args"] == {} for d in mine)
 
 
@@ -102,3 +102,22 @@ def test_asks_exactly_as_the_ingestor_does():
     P.probe(get=lambda url, **kw: seen.append(kw.get("params")) or (200, "{}", None), today="20261126")
     an = [p for p in seen if p and "periods" in p]
     assert an and all(p["bookIds"] == "15" for p in an)
+
+
+def test_a_share_sent_as_text_is_read_as_a_number():
+    def g(v):
+        return {"games": [{"markets": {"15": {"event": {"total": [
+            {"bet_info": {"tickets": {"percent": v}, "money": {"percent": v}}}]}}}}]}
+    assert P.an_split_markets(g("0")) == {} and P.an_split_markets(g("0.0")) == {}
+    assert P.an_split_markets(g("41")) == {"15": {"event": {"total": 1}}}
+    assert P.an_split_markets(g("n/a")) == {}
+
+
+def test_only_the_consensus_book_is_read():
+    assert P.AN_BOOKS == ("15",)
+
+
+def test_the_nba_nhl_rerun_waits_for_a_game_day():
+    declared = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
+    d = next(d for d in declared if d["key"] == "splits-nba-nhl-probe-2026-11-27")
+    assert d["run_after"] == "2026-11-27T16:00:00+00:00"

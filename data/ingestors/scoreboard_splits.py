@@ -53,19 +53,18 @@ from data.ingestors.nba_public_splits_ingestor import (
 
 SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB", "NCAAB")
 
-# Period splits (Matt, 2026-11-26: "Yes on splits", hourly). Measured by
-# worker_jobs 1698627 (scripts/splits_markets_probe.py) on 2026-11-26: the v2
-# scoreboard's consensus (book 15) carries moneyline / spread / total splits per
-# period, for every game of the slate, in exactly these. Left out on purpose:
-# 2nd halves for NFL / NCAAF (consensus on 0 of 16 and 2 of 69 games) and
-# anything NHL beyond the first period (empty). Team totals
-# (core_bet_type_6_team_score) are also split, but their entry shape was not
-# recorded, so they are not parsed yet.
+# Period splits (Matt, 2026-11-26: "Yes on splits", hourly). What is measured:
+# worker_jobs for splits-nonzero-probe-2026-11-26 (15:15 UTC), asking exactly as
+# this module does (bookIds=15) and counting only non-zero shares, found NO
+# consensus period split for NFL (16 games), NCAAF (69) or NCAAB (11): Action
+# Network returns a 0% / 0% placeholder for every period, which validate_sides
+# drops. So those sports are not asked (Matt, "Ok"). NBA and NHL had no games
+# that day and are unmeasured; they stay until splits-nba-nhl-probe-2026-11-27
+# reports. The first probe (worker_jobs 1698627) counted the 0/0 placeholder as
+# a split and is not evidence. Team totals (core_bet_type_6_team_score) carry
+# the same placeholder and are not parsed (Matt, "Ok").
 PERIODS_BY_SPORT: dict[str, tuple[str, ...]] = {
     "NBA": ("firsthalf", "secondhalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
-    "NFL": ("firsthalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
-    "NCAAF": ("firsthalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
-    "NCAAB": ("firsthalf", "secondhalf"),
     "NHL": ("firstperiod",),
 }
 # The odds table's period suffix for each v2 period (h2h_q1, totals_h1, ...), so
