@@ -115,6 +115,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   meta: {
+    marginTop: spacing.xs,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },

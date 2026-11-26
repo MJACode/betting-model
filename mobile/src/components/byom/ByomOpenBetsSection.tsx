@@ -10,7 +10,7 @@ import { colors, font, opacity, spacing } from '@/lib/theme';
 const TOOLTIP = {
   title: 'Bets from your models',
   body:
-    'The first DraftKings line and price in game week that fit your model’s rules, '
+    'The first DraftKings line and price in the 7 days before kickoff that fit your model’s rules, '
     + 'on games not graded yet. A later line move does not change the bet. '
     + 'If DraftKings has moved, the card also shows its line now. '
     + 'These are yours only and are not in the Record.',
