@@ -456,6 +456,8 @@ export interface PlayerPickRecord {
  */
 const PLAYER_LINE_QUALIFIER: Readonly<Record<string, string | null>> = {
   nba_prop_market: null,
+  // The same rule decided 10 hours before tip: "Points (Early)" beside the rule's "Points".
+  nba_prop_market_early: 'Early',
   nfl_prop_market: null,
   wnba_prop_market: null,
   nba_prop_projection: 'Projection',

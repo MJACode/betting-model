@@ -306,8 +306,10 @@ def minutes_to_tip(tip: datetime, now: datetime) -> float:
     return (tip - now).total_seconds() / 60.0
 
 
-def in_window(tip: datetime, now: datetime) -> bool:
-    lo, hi = DECISION_WINDOW_MIN
+def in_window(tip: datetime, now: datetime, window: tuple[int, int] | None = None) -> bool:
+    """`window` (minutes before tip, both ends inclusive) defaults to DECISION_WINDOW_MIN; only
+    the 10-hour paper card (scripts/nba_prop_market_early_card.py) passes another."""
+    lo, hi = window or DECISION_WINDOW_MIN
     return lo <= minutes_to_tip(tip, now) <= hi
 
 
@@ -373,7 +375,8 @@ QUOTE_COLS = ("game_id", "player", "market", "book", "line", "over_price",
 
 
 def load_quotes(conn, games: dict[str, dict], now: datetime,
-                lookback_min: int = 5) -> list[dict]:
+                lookback_min: int = 5, window: tuple[int, int] | None = None,
+                markets: tuple[str, ...] | None = None) -> list[dict]:
     """The pre-game prop rows find_bets needs for `games`, one statement.
 
     `snapshot_type = 'open'` only: the closing snapshot the card buys for CLV
@@ -390,7 +393,7 @@ def load_quotes(conn, games: dict[str, dict], now: datetime,
     if not games:
         return []
     earliest = min(g["tip"] for g in games.values())
-    lower = (earliest - timedelta(minutes=DECISION_WINDOW_MIN[1] + lookback_min))
+    lower = (earliest - timedelta(minutes=(window or DECISION_WINDOW_MIN)[1] + lookback_min))
     books = sorted(set(SOFT_BOOKS) | {SHARP_BOOK, REFERENCE_BOOK})
     rows = conn.execute("""
         SELECT game_id, player_name, market, bookmaker, line, over_price,
@@ -400,7 +403,7 @@ def load_quotes(conn, games: dict[str, dict], now: datetime,
         WHERE game_id = ANY(%s) AND market = ANY(%s) AND bookmaker = ANY(%s)
           AND snapshot_type = 'open'
           AND snapshot_at >= %s
-    """, (list(games), list(MARKETS), books,
+    """, (list(games), list(markets or MARKETS), books,
           lower.astimezone(timezone.utc).isoformat())).fetchall()
     out = []
     for r in rows:
@@ -440,13 +443,14 @@ def fetch_times(rows: list[dict]) -> list[datetime]:
     return sorted({t for t in (parse_ts(r.get("snapshot_at")) for r in rows) if t})
 
 
-def window_was_fetched(rows: list[dict], tip: datetime) -> bool:
+def window_was_fetched(rows: list[dict], tip: datetime,
+                       window: tuple[int, int] | None = None) -> bool:
     """Did any pre-game fetch of this game land inside its decision window?
 
     The prop fetch runs on every refresh pass, so a game with no fetch inside
     the window had no pass that could decide it.
     """
-    lo, hi = DECISION_WINDOW_MIN
+    lo, hi = window or DECISION_WINDOW_MIN
     return any(lo <= minutes_to_tip(tip, t) <= hi for t in fetch_times(rows))
 
 
@@ -456,6 +460,9 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
               now: datetime, taken: set[str] | None = None,
               soft_books: tuple[str, ...] | None = None,
               decided: set[str] | None = None,
+              window: tuple[int, int] | None = None,
+              model_id: str | None = None,
+              markets: tuple[str, ...] | None = None,
               ) -> tuple[list[NbaPropBet], dict, list[NbaPropDecision]]:
     """Every qualifying proposition, and the games this look decides. Pure.
 
@@ -465,6 +472,11 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
     `decided` games that already have a decision row: neither is looked at
     again. Returns (bets, diag, decisions), one decision for each game whose
     newest in-window fetch held Pinnacle.
+
+    `window`, `model_id` and `markets` default to this model's (DECISION_WINDOW_MIN, MODEL_ID,
+    MARKETS). The 10-hour paper card passes its own (mike, 2026-11-26): the same rule, decided
+    9.5-10.5 hours before tip, on the three markets graded there, gated and floored under its
+    own id.
     """
     from models.honest_ev import gate
 
@@ -472,7 +484,10 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
     soft = tuple(b for b in soft if b not in NEVER_BET)
     taken = taken or set()
     decided = decided or set()
-    floor = config.min_odds_for(MODEL_ID)
+    lo_min, hi_min = window or DECISION_WINDOW_MIN
+    mid = model_id or MODEL_ID
+    mkts = tuple(markets or MARKETS)
+    floor = config.min_odds_for(mid)
     stale_after = timedelta(minutes=STALE_SOFT_MAX_MIN)
     diag = dict.fromkeys(DIAG_KEYS, 0)
 
@@ -490,7 +505,7 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
         diag["games"] += 1
         lead = minutes_to_tip(tip, now)
         rows = _pre_tip(by_game.get(gid, []), tip, now)
-        if lead > DECISION_WINDOW_MIN[1]:
+        if lead > hi_min:
             diag["too_early"] += 1
             continue
         if gid in taken:
@@ -499,14 +514,14 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
         if gid in decided:
             diag["already_decided"] += 1
             continue
-        if lead < DECISION_WINDOW_MIN[0]:
+        if lead < lo_min:
             diag["too_late"] += 1
-            if not window_was_fetched(rows, tip):
+            if not window_was_fetched(rows, tip, (lo_min, hi_min)):
                 diag["window_missed"] += 1
             continue
         diag["in_window"] += 1
 
-        rows = [r for r in rows if r.get("market") in MARKETS]
+        rows = [r for r in rows if r.get("market") in mkts]
         pins = [r for r in rows if r.get("book") == SHARP_BOOK]
         if not pins:
             diag["no_sharp"] += 1
@@ -516,7 +531,7 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
         if newest > pin_fetch:
             diag["pinnacle_withdrawn"] += 1
             continue
-        if minutes_to_tip(tip, pin_fetch) > DECISION_WINDOW_MIN[1]:
+        if minutes_to_tip(tip, pin_fetch) > hi_min:
             diag["stale_fetch"] += 1             # the newest price predates the window
             continue
         diag["pinnacle_present"] += 1
@@ -591,7 +606,7 @@ def find_bets(quotes: list[dict], games: dict[str, dict], roster: Roster,
                 if price < floor:
                     diag["below_price_floor"] += 1
                     continue
-                ev = gate(MODEL_ID, fair, price)
+                ev = gate(mid, fair, price)
                 if ev.ev is None or not ev.clears:
                     diag["below_ev_floor"] += 1
                     continue

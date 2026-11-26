@@ -90,4 +90,8 @@ def test_a_paused_nba_prop_card_marks_every_row_it_writes():
     assert row["downgrade_reason"] == config.PAUSED_NOTE
     for card in (mkc, pjc, fbc):
         assert "downgrade_reason" in card._COLS, card.__name__
-        assert '"downgrade_reason": _pause_note(MODEL_ID)' in inspect.getsource(card.pick_rows), card.__name__
+        # nba_prop_market_card.pick_rows takes the id it writes under (its own by default, or the
+        # 10-hour paper card's, 2026-11-26), so its marker is read under that id.
+        marker = ('"downgrade_reason": _pause_note(model_id)' if card is mkc
+                  else '"downgrade_reason": _pause_note(MODEL_ID)')
+        assert marker in inspect.getsource(card.pick_rows), card.__name__

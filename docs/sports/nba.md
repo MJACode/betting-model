@@ -14,6 +14,10 @@
 > overs, and the three shooting-luck total models wait for 10 games again. What
 > was asked, tried, found and left open: **`docs/nba_reassessment_2026_11.md`**.
 >
+> **Data sources and public splits (2026-11-26, mike):** what else could feed the NBA models, and whether
+> handle / money data helps (measured: not on the free source we hold):
+> **`docs/nba_data_sources_and_handle_2026_11.md`**.
+>
 > **First basket (2026-11-20, mike):** a market never priced before, live as
 > `nba_prop_first_basket` from 2026-11-20 on mike's yes after the grade:
 > **`docs/nba_first_basket.md`**.
@@ -45,6 +49,7 @@
 | `nba_live_spread_q12` | IN PLAY. The game-state model (IG-2) against the live spread in quarters 1-2: per game, the first fetch holding a fresh quote decides, at the best of the eight deciding books, -200 floor, when the model's EV is 0.05 or better; the fetches are the archive's hourly purchase moments, each hour minus 264 seconds. Settled on the full-game score at the HOME number. The quarter-3 moneyline and spread (`nba_live_ml_q3`, `nba_live_spread_q3`) are held out: they fail the house standard on those fetches. Section "In play" below. | **LIVE 2026-11-04** (artifact `models/saved/nba_live_ig2_2027.json`, `models/nba_live_ig2.py`, loop `models/nba_live_loop.py`, job `nba_live`) |
 | `nba_prop_first_basket` | Who scores the game's first points (Yes, stored as Over 0.5): the model's probability from the opening tip and each starter's share of his team's first scores, blended 0.25 / 0.75 with the other books' median no-vig, bet at the book where that blend is worth the most when its EV is 0.05 or more. One bet a game, its own door (not the stat-prop door). Decided once, 5-20 minutes before tip, on the starters the books list. Settled by each book's own rule (first made field goal or first points). Graded +7.45% on 1,930 bets, five bars of six (`docs/nba_first_basket.md`). | **LIVE** 2026-11-20 (rule — `models/nba_first_basket.py`, card `scripts/nba_first_basket_card.py`, step `nba-first-basket`) |
 | `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-57 minutes before tip. One bet a game across both NBA prop models, at most six a night (four until 2026-11-04), each bet ranked by its EV percentile within its own model (`scripts/nba_props_card.py`, mike 2026-10-20 and 2026-11-04). The only NBA model that bets the play-in, the playoffs and the Cup final (below). | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-props`) |
+| `nba_prop_market_early` | `nba_prop_market`'s rule, decided once 9.5-10.5 hours before tip, on points, rebounds and threes only, every qualifying proposition, its own door (no cap). A forward PAPER test (mike, 2026-11-26): the 10-hour grade was +5.8% a bet on 7,572 bets against +2.6% an hour before tip (`docs/nba_data_sources_and_handle_2026_11.md`, D5). | **PAUSED** (paper; rule, card `scripts/nba_prop_market_early_card.py`, step `nba-prop-market-early`) |
 
 Graded on 2023-24 → 2025-26, the population it bets (every qualifying
 proposition, −200 floor, no double/triple-double): 24,572 bets, +781.3 units,

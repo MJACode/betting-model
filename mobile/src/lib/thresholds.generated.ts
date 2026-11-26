@@ -4,7 +4,7 @@
  * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).
  * Regenerate: python -m scripts.generate_mobile_thresholds
  * Check (CI):  python -m scripts.generate_mobile_thresholds --check
- * Last generated: 2026-11-22
+ * Last generated: 2026-11-26
  */
 
 export interface ModelThreshold {
@@ -44,6 +44,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nba_live_spread_q12: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_prop_first_basket: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_prop_market: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  nba_prop_market_early: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_prop_projection: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_q1_trend: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_q1_trend_ml: { min_prob: 0, min_edge: 0, min_odds: -200 },
@@ -132,6 +133,7 @@ export const PAUSED_MODELS = new Set<string>([
   'mlb_runline',
   'nba_live_spread_q12',
   'nba_prop_market',
+  'nba_prop_market_early',
   'nba_prop_projection',
   'nba_q1_trend_ml',
   'ncaaf_moneyline',
