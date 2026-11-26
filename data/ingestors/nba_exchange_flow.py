@@ -357,10 +357,13 @@ def poly_events_by_slug(pace: Pace, games_by_date: dict, first_date: str = "2024
     one page of 100 on its first run (2026-11-26), so the games table drives the read
     instead. A slug Polymarket does not have is counted, and the first ones logged."""
     out, missing = [], []
+    played_by = datetime.now(timezone.utc) - timedelta(hours=4)
     for d in sorted(games_by_date):
         if d < first_date:
             continue
         for g in games_by_date[d]:
+            if g["tip"] > played_by:      # not played yet: its trades are not all in
+                continue
             slug = poly_slug(g, d)
             r = _get(pace, f"{GAMMA}/events/slug/{slug}", {})
             if r is not None and r.status_code == 200:
@@ -431,9 +434,13 @@ def next_cursor(body, headers) -> str | None:
     cursor-only). The end marker some cursor APIs use ('LTE=') is no cursor."""
     found = None
     if isinstance(body, dict):
-        for k, v in body.items():
-            if "cursor" in k.lower() and isinstance(v, str) and v:
-                found = v
+        # top level first, then one level down (the v2 API answers {'data', 'pagination'})
+        for part in [body] + [v for v in body.values() if isinstance(v, dict)]:
+            for k, v in part.items():
+                if "cursor" in k.lower() and isinstance(v, str) and v:
+                    found = v
+                    break
+            if found is not None:
                 break
     if found is None:
         for k, v in (headers or {}).items():

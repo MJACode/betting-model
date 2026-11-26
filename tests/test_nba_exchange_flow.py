@@ -93,3 +93,8 @@ def test_a_full_page_with_no_cursor_is_refused_not_kept(monkeypatch):
     monkeypatch.setattr(f, "_POLY_TAKER_PARAM", [{}])
     with pytest.raises(RuntimeError):
         f.poly_trades(None, "0xabc")
+
+
+def test_the_cursor_inside_a_pagination_object_is_found():
+    assert f.next_cursor({"data": [], "pagination": {"next_cursor": "p2", "has_more": True}}, {}) == "p2"
+    assert f.next_cursor({"data": [], "pagination": {"has_more": False}}, {}) is None
