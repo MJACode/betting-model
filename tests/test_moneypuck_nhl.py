@@ -155,10 +155,24 @@ def test_migration_enables_rls_and_credits_moneypuck():
 
 
 def test_no_pick_model_reads_moneypuck():
+    """Live scoring does not read MoneyPuck.
+
+    models/nhl_props.py may name the tables for a shots backtest whose flag
+    defaults off. The card scores the live spec and does not call that path.
+    """
+    allowed = { (ROOT / "models" / "nhl_props.py").resolve() }
     for path in (ROOT / "models").rglob("*.py"):
         text = path.read_text(encoding="utf-8").lower()
+        if path.resolve() in allowed:
+            continue
         assert "moneypuck" not in text, path
     assert "moneypuck" not in (ROOT / "config.py").read_text(encoding="utf-8").lower()
+    props = (ROOT / "models" / "nhl_props.py").read_text(encoding="utf-8")
+    assert "USE_MONEYPUCK_SHOTS = False" in props
+    card = (ROOT / "scripts" / "nhl_props_card.py").read_text(encoding="utf-8")
+    assert "add_moneypuck_skater_features" not in card
+    assert "shots_spec" not in card
+    assert "moneypuck" not in card.lower()
 
 
 def test_the_module_credits_moneypuck():

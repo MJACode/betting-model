@@ -138,6 +138,106 @@ class TestTheGoalieFrame:
         assert len(row) == 1 and int(row.started.iloc[0]) == 1 and row[list(P.SAVES.features)].notna().all(axis=None)
 
 
+def _shot_inputs(sk: pd.DataFrame, tm: pd.DataFrame):
+    """MoneyPuck rows and one linemate pair per team-game, aligned to the synthetic log."""
+    rng = np.random.default_rng(1)
+    skaters = sk[["player_id", "nhl_game_id"]].copy()
+    skaters["i_f_x_goals"] = rng.uniform(0.05, 0.8, len(skaters))
+    skaters["i_f_shot_attempts"] = rng.uniform(1, 8, len(skaters))
+    skaters["i_f_high_danger_shots"] = rng.uniform(0, 3, len(skaters))
+    teams = tm[["nhl_game_id", "team", "game_date"]].copy()
+    teams["shots_on_goal_against"] = rng.uniform(20, 40, len(teams))
+    teams["x_goals_against"] = rng.uniform(1.5, 4.5, len(teams))
+    mates = []
+    for gid, team in sk.groupby(["nhl_game_id", "team"]).groups:
+        ids = sorted(sk[(sk.nhl_game_id == gid) & (sk.team == team)].player_id.unique())
+        if len(ids) >= 2:
+            mates.append({"nhl_game_id": gid, "player_id_lo": int(ids[0]), "player_id_hi": int(ids[1]),
+                          "shared_seconds": 600})
+    return skaters, teams, pd.DataFrame(mates)
+
+
+class TestMoneyPuckShotsFeatures:
+    def test_the_live_spec_does_not_carry_them(self):
+        assert P.USE_MONEYPUCK_SHOTS is False
+        assert P.shots_spec(False) is P.SHOTS
+        assert not any(f.startswith("mp_") or f.endswith("_trend") or f.startswith("lm_")
+                       or f.startswith("pp_share") or f.startswith("pp_unit") or f.startswith("opp_mp_")
+                       for f in P.SHOTS.features)
+        card_src = (ROOT / "scripts" / "nhl_props_card.py").read_text(encoding="utf-8")
+        assert "add_moneypuck_skater_features" not in card_src
+        assert "shots_spec" not in card_src
+        with pytest.raises(ValueError):
+            P.shots_spec(True, ("shots_l",))
+
+    def test_a_missing_shift_chart_does_not_drop_the_row(self):
+        sk, _, tm = _log()
+        skaters, teams, mates = _shot_inputs(sk, tm)
+        spec = P.shots_spec(True)
+        frame = P.add_moneypuck_skater_features(P.build_skater_frame(sk, tm), skaters, teams,
+                                                mates.iloc[0:0])
+        kept = P.usable(spec, frame)
+        assert len(kept) > 0
+        assert kept[list(P.SHIFT_OPTIONAL_FEATURES)].isna().all().all()
+        assert kept[[f for f in P.MONEYPUCK_SHOT_FEATURES if f not in P.SHIFT_OPTIONAL_FEATURES]].notna().all().all()
+
+    def test_a_games_own_numbers_are_not_one_of_its_inputs(self):
+        sk, _, tm = _log()
+        skaters, teams, mates = _shot_inputs(sk, tm)
+        spec = P.shots_spec(True)
+        feats = list(spec.features)
+        before = P.add_moneypuck_skater_features(P.build_skater_frame(sk, tm), skaters, teams, mates)
+        last = int(sk.nhl_game_id.max())
+        loud_sk = skaters.copy()
+        loud_sk.loc[loud_sk.nhl_game_id == last, ["i_f_x_goals", "i_f_shot_attempts", "i_f_high_danger_shots"]] = 80
+        loud_tm = teams.copy()
+        loud_tm.loc[loud_tm.nhl_game_id == last, ["shots_on_goal_against", "x_goals_against"]] = 80
+        loud_log = sk.copy()
+        loud_log.loc[loud_log.nhl_game_id == last, ["shots", "shot_attempts", "toi_seconds", "pp_toi_seconds"]] = 500
+        loud_mates = mates.copy()
+        loud_mates.loc[loud_mates.nhl_game_id == last, "shared_seconds"] = 5000
+        after = P.add_moneypuck_skater_features(P.build_skater_frame(loud_log, tm), loud_sk, loud_tm, loud_mates)
+        a = before[before.nhl_game_id == last].sort_values("player_id")[feats].astype(float)
+        b = after[after.nhl_game_id == last].sort_values("player_id")[feats].astype(float)
+        pd.testing.assert_frame_equal(a.reset_index(drop=True), b.reset_index(drop=True))
+
+        earlier = int(sorted(sk.nhl_game_id.unique())[-5])
+        later = last
+        moved_sk = skaters.copy()
+        moved_sk.loc[moved_sk.nhl_game_id == earlier, "i_f_x_goals"] = 80
+        moved = P.add_moneypuck_skater_features(P.build_skater_frame(sk, tm), moved_sk, teams, mates)
+        assert not np.allclose(
+            before[before.nhl_game_id == later].sort_values("player_id").mp_xg_l.astype(float),
+            moved[moved.nhl_game_id == later].sort_values("player_id").mp_xg_l.astype(float))
+        # The earlier game's chart is an input to a later game, and not to itself.
+        assert not np.allclose(
+            before[before.nhl_game_id == later].sort_values("player_id").lm_q_l.astype(float),
+            moved[moved.nhl_game_id == later].sort_values("player_id").lm_q_l.astype(float))
+        pd.testing.assert_series_equal(
+            before[before.nhl_game_id == earlier].sort_values("player_id").lm_q_l.astype(float).reset_index(drop=True),
+            moved[moved.nhl_game_id == earlier].sort_values("player_id").lm_q_l.astype(float).reset_index(drop=True),
+            check_names=False)
+
+    def test_tonights_row_matches_the_played_row(self):
+        sk, _, tm = _log()
+        skaters, teams, mates = _shot_inputs(sk, tm)
+        spec = P.shots_spec(True)
+        feats = list(spec.features)
+        last = int(sk.nhl_game_id.max())
+        played = P.add_moneypuck_skater_features(P.build_skater_frame(sk, tm), skaters, teams, mates)
+        want = played[played.nhl_game_id == last].set_index("player_id")[feats]
+        held = sk[sk.nhl_game_id == last]
+        up = held[["player_id", "player_name", "position", "season", "game_date", "team", "opponent", "is_home"]].assign(
+            game_id="NHL_tonight")
+        frame = P.add_moneypuck_skater_features(
+            P.build_skater_frame(sk[sk.nhl_game_id != last], tm[tm.nhl_game_id != last], up),
+            skaters[skaters.nhl_game_id != last], teams[teams.nhl_game_id != last],
+            mates[mates.nhl_game_id != last])
+        got = frame[frame.upcoming].set_index("player_id")[feats]
+        pd.testing.assert_frame_equal(got.sort_index().astype(float), want.sort_index().astype(float),
+                                      check_names=False)
+
+
 class TestTheDistribution:
     def test_no_excess_variance_is_exactly_poisson(self):
         from scipy.stats import poisson
