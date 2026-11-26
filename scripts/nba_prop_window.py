@@ -31,6 +31,16 @@ minutes later, tries again. The card, not this job, applies the window.
 The refresh pass keeps its own NBA prop fetch (every game, seven days ahead),
 card and close steps. This job adds looks; it removes none.
 
+THE EARLY LANE (mike, 2026-11-26: "yes ship it I don't care about credits").
+nba_prop_market_early (scripts/nba_prop_market_early_card.py, paused, a paper test) decides a
+game once, 570-630 minutes before tip. The refresh passes leave no look in that window for a tip
+strictly between 14:47 and 16:47 ET (the overnight passes stop at 4:17am ET, the hourly ones start
+at 7:17am): 51 of 1,230 regular-season games in 2025-26. So the same tick also fetches props for
+EXACTLY the games 595-607 minutes from tip (EARLY_LOOK_MIN, the graded 10-hour lead; the snapshot
+it was graded on was bought at tip minus 600) that the early card has neither decided nor bet,
+and runs that card (step nba-prop-market-early). It runs last on the tick, after every live
+model's steps, because nothing it writes is published.
+
     python -m scripts.nba_prop_window                 # print what a tick would do
     python -m scripts.nba_prop_window --fetch G1 G2   # fetch props for these games
 """
@@ -50,6 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import data.ingestors.nba_prop_close_ingestor as close_ing  # noqa: E402
 import models.nba_prop_market as mk  # noqa: E402
 import scripts.nba_prop_market_card as card  # noqa: E402
+import scripts.nba_prop_market_early_card as early_card  # noqa: E402
 import scripts.nba_first_basket_card as fb_card  # noqa: E402
 import scripts.nba_prop_projection_card as projection_card  # noqa: E402
 from data.db import get_connection  # noqa: E402
@@ -61,6 +72,10 @@ _ET = ZoneInfo("America/New_York")
 LOOK_AHEAD_MIN = (40, 62)
 # The first-basket card's look-ahead: its window (5, 20) widened by two minutes each side.
 FIRST_BASKET_LOOK_MIN = (3, 22)
+# The early card's look-ahead: the graded lead (the snapshot bought at tip minus 600 minutes) to a
+# little past it, inside its window (570, 630). Twelve minutes, so two or three ticks of five land
+# in it for every tip.
+EARLY_LOOK_MIN = (595, 607)
 
 
 @dataclass
@@ -77,6 +92,9 @@ class Plan:
     # An NBA game tips within LOOK_AHEAD_MIN: publish on this tick even with nothing else to do,
     # so a bet a failed or capped Discord run held back still posts before its game starts.
     publish: bool = False
+    # games the early card decides on this tick: 595-607 minutes from tip, neither decided nor bet
+    # by it (scripts/nba_prop_market_early_card.py; paused, its own door, its own window)
+    early: list[str] = field(default_factory=list)
 
 
 def plan(conn, now: datetime) -> Plan:
@@ -103,7 +121,22 @@ def plan(conn, now: datetime) -> Plan:
     fb_due = first_basket_due(conn, now)
     return Plan(decide=near, close=owed, project=projection_card.to_project(conn, now),
                 publish=publish or bool(fb_due), first_basket=fb_due,
-                first_basket_warm=first_basket_warm_due(conn, now))
+                first_basket_warm=first_basket_warm_due(conn, now),
+                early=early_due(conn, now))
+
+
+def early_due(conn, now: datetime) -> list[str]:
+    """The regular-season games 595-607 minutes from tip (EARLY_LOOK_MIN) that the early card has
+    neither decided nor bet. One read of the slate (and the ledger when a game is that far out);
+    no API call."""
+    games = card.slate(conn, now, horizon_min=EARLY_LOOK_MIN[1])   # as the early card reads it
+    near = sorted(g for g, v in games.items()
+                  if mk.minutes_to_tip(v["tip"], now) >= EARLY_LOOK_MIN[0])
+    if not near:
+        return []
+    early_card.ensure_decisions_table(conn)
+    done = early_card.decided_games(conn, near) | early_card.games_with_a_bet(conn, near)
+    return [g for g in near if g not in done]
 
 
 def first_basket_warm_due(conn, now: datetime) -> bool:

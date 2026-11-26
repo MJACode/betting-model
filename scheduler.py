@@ -34,7 +34,10 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         the closing snapshot for bet games 12-25 minutes out, and publish.
         Returns without an API call when no game is in either range. mike,
         2026-10-16: "we're not leaving our games" -- the hourly passes put no
-        look 45-57 minutes before any tip at or before 6pm ET.)
+        look 45-57 minutes before any tip at or before 6pm ET. And props for
+        the games 595-607 minutes from tip the paused nba_prop_market_early
+        card has not decided, then that card: no refresh pass looks 570-630
+        minutes before a tip between 14:47 and 16:47 ET. mike, 2026-11-26.)
   * NHL goalie window     every 5 min, 9:00-23:55 ET -> run_nhl_goalie_window
         (scripts/nhl_goalie_window.py: no NHL model bets until both starting
         goalies are confirmed, mike 2026-10-20; the goalie poll for today's
@@ -1925,6 +1928,8 @@ def run_nfl_prop_card() -> None:
 # ESPN injury pull, then the frame over every box line since 2018-19.
 NBA_PROP_WINDOW_TIMEOUT_S = {"fetch": 120, "cards": 120, "close": 60,
                              "injuries": 60, "project": 240,
+                             # the paused 10-hour card (scripts/nba_prop_market_early_card.py)
+                             "early": 120,
                              # the first-basket card can build the day's state itself if the warm
                              # step has not (56 s read + 27 s learn, measured 2026-11-20)
                              "first_basket": 240, "first_basket_warm": 240}
@@ -1950,18 +1955,24 @@ def run_nba_prop_window() -> None:
     that fails or is killed raises AFTER publishing, so the heartbeat records
     "error" and the failure alerter reports it, while a bet that was written
     still goes out.
+
+    LAST, the early lane: props for exactly the games 595-607 minutes from tip
+    that nba_prop_market_early has not decided, then that card (paused, so
+    nothing it writes is published; scripts/nba_prop_window.py says why it
+    exists).
     """
     from scripts.nba_prop_window import plan_tick
     plan = plan_tick()
     if (not plan.decide and not plan.close and not plan.project and not plan.first_basket
-            and not plan.first_basket_warm):
+            and not plan.first_basket_warm and not plan.early):
         if plan.publish:
             # Only a game near its tip: post anything still unposted for it.
             _publish_new_signals("nba-prop-window")
         return
-    log.info("NBA prop window: deciding %s; closes due %s; projecting %s; first basket %s%s",
+    log.info("NBA prop window: deciding %s; closes due %s; projecting %s; first basket %s%s; "
+             "early (10 hours) %s",
              plan.decide, plan.close, plan.project, plan.first_basket,
-             " (warming its state)" if plan.first_basket_warm else "")
+             " (warming its state)" if plan.first_basket_warm else "", plan.early)
     t = NBA_PROP_WINDOW_TIMEOUT_S
     outcomes: dict[str, str] = {}
     if plan.first_basket:
@@ -2002,6 +2013,15 @@ def run_nba_prop_window() -> None:
         outcomes["nba-prop-project"] = _run(
             [sys.executable, "-m", "scripts.nba_prop_projection_card", "--project", *plan.project],
             "nba-prop-project", timeout=t["project"])
+    if plan.early:
+        # After every live model's steps: this card is paused, so nothing it writes is published,
+        # and its window (570-630 minutes) is never at risk from one slow tick.
+        outcomes["nba-prop-early-fetch"] = _run(
+            [sys.executable, "-m", "scripts.nba_prop_window", "--fetch", *plan.early],
+            "nba-prop-early-fetch", timeout=t["fetch"])
+        outcomes["nba-prop-market-early"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-prop-market-early"],
+            "nba-prop-market-early", timeout=t["early"])
     bad = {k: v for k, v in outcomes.items() if v != "ok"}
     if bad:
         raise RuntimeError(f"NBA prop window step(s) did not finish: {bad}")

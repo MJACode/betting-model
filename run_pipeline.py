@@ -2110,7 +2110,8 @@ def step_nba_prop_market_early(dry_run: bool = False) -> bool:
     decided 9.5-10.5 hours before tip on points, rebounds and threes, a PAPER test (mike,
     2026-11-26). The id is paused, so every row carries the pause marker and nothing posts it; it
     settles and is graded. Its own door, outside the NBA prop door's one-a-game cap. Run by every
-    refresh pass after the prop fetch."""
+    refresh pass after the prop fetch, and by the NBA prop window job 595-607 minutes before an
+    undecided game's tip (scripts/nba_prop_window.py)."""
     try:
         from scripts.nba_prop_market_early_card import run_card
         result = run_card(do_publish=not dry_run)
