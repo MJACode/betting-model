@@ -1215,7 +1215,6 @@ export function PicksHomeScreen() {
               retrying={myModelBets.loading}
               onRetry={() => void myModelBets.reload()}
               cap={3}
-              showFit={false}
               onOpen={(bet) => navigation.navigate('ByomDetail', { modelId: bet.model_id })}
             />
           ) : null}

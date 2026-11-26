@@ -224,6 +224,20 @@ function is in `RPC_ANON_CALLABLE`. It reads the facts tables, not
 
 ## Official pick and the bet list
 
+**Game week only (Matt, 2026-11-26).** Only a DraftKings line from the 7
+days before kickoff can become the official bet. DraftKings posts a
+season's lines in August, and before this the first fitting quote was
+often one of those: on "Tets" (home favorite, spread, primetime), 23 of 27
+graded 2026 bets locked more than 14 days early (median 48.3 days; 2025
+52.9, 2024 53.0), and all 20 open bets locked 2026-08-31. A line already in
+force when game week opens locks at that moment, at that line; a line that
+moves inside game week locks at its first fitting quote there. Every saved
+model's record is re-graded at once (the record is computed, not stored);
+saved snapshots keep the totals they stored. `byom_alerts` rows written
+under the old rule keep `lock_rule = 'first_line'` and are not shown.
+`data/migrations/byom_week_of_lock_2026_11_26.sql`. The text below
+describes the search inside that window.
+
 Matt, 2026-11-04. A builder bet becomes official at the first DraftKings
 quote at or before kickoff where the leg fits the model's rules and the
 side has an American price. That line and price are the bet of record. A
