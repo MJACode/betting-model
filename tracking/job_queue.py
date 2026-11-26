@@ -870,6 +870,16 @@ def _job_splits_source_probe(**kw):
     return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
 
 
+def _job_splits_markets_probe(**kw):
+    """Which markets and periods DK Network and Action Network split beyond the
+    full game (Matt, 2026-11-26). Writes nothing, no Odds API call
+    (scripts/splits_markets_probe.py)."""
+    from scripts.splits_markets_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.splits_markets_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:6000] or "(no output)", "stdout": text[-50_000:]}
+
+
 def _job_book_app_links_probe(**kw):
     """Each sportsbook's apple-app-site-association file, and whether the
     betslip links we store are claimed by its app. Writes nothing, no Odds API
@@ -907,6 +917,12 @@ def _validate_book_app_links_probe(args: dict) -> dict:
 
 
 def _validate_splits_source_probe(args: dict) -> dict:
+    if args:
+        raise ValueError(f"unknown args {sorted(args)}; this job takes none")
+    return {}
+
+
+def _validate_splits_markets_probe(args: dict) -> dict:
     if args:
         raise ValueError(f"unknown args {sorted(args)}; this job takes none")
     return {}
@@ -2850,6 +2866,34 @@ def _job_byom_refresh(**kw):
         conn.close()
 
 
+def _validate_byom_alerts(args: dict) -> dict:
+    """NFL only (Matt, 2026-11-25: "start with just NFL"). rebuild defaults
+    true; false skips the rebuild of the next games and only matches."""
+    from byom.alerts import ALERT_SPORTS
+
+    sport = str(args.get("sport") or "NFL").strip().upper()
+    if sport not in ALERT_SPORTS:
+        raise ValueError(f"byom_alerts runs for {ALERT_SPORTS}, got {sport!r}")
+    rebuild = args.get("rebuild", True)
+    if not isinstance(rebuild, bool):
+        raise ValueError(f"rebuild must be true or false, got {rebuild!r}")
+    return {"sport": sport, "rebuild": rebuild}
+
+
+def _job_byom_alerts(**kw):
+    """Rebuild the next NFL games, find new bets on members' own models,
+    and alert them (byom/alerts.py). Never reads or writes picks, never
+    posts to Discord. Does nothing until byom_alerts_2026_11_25.sql is in."""
+    from byom.alerts import run
+
+    conn = _byom_connection()
+    try:
+        return run(conn, sport=str(kw.get("sport") or "NFL"),
+                   rebuild=bool(kw.get("rebuild", True)))
+    finally:
+        conn.close()
+
+
 def _validate_daily_pipeline(args: dict) -> dict:
     """No arguments. A stake, a threshold, or a model id is not a way in."""
     if args:
@@ -3051,6 +3095,7 @@ JOBS = {
     "ncaab_injury_probe": (_job_ncaab_injury_probe, _validate_ncaab_injury_probe),
     # Where the Scoreboard splits can come from: DK Network + AN book ids. Free, writes nothing.
     "splits_source_probe": (_job_splits_source_probe, _validate_splits_source_probe),
+    "splits_markets_probe": (_job_splits_markets_probe, _validate_splits_markets_probe),
     # One on-demand run of the daily Betfair ANZ racing-file store. Free, idempotent.
     "betfair_monthly_store": (_job_betfair_monthly_store, _validate_betfair_monthly_store),
     "book_app_links_probe": (_job_book_app_links_probe, _validate_book_app_links_probe),
@@ -3110,6 +3155,11 @@ JOBS = {
     # 2026-11-05: the planner's row counts for the BYOM tables
     # (byom/analyze.py). No arguments, no rows changed.
     "byom_analyze": (_job_byom_analyze, lambda a: {}),
+    # 2026-11-25 (Matt): alerts for members' own NFL models. Queued by
+    # scheduler.queue_byom_alerts after every refresh pass, one row per
+    # pass. Writes byom_game_facts, byom_prop_facts, byom_official_legs
+    # (next games only) and byom_alerts. Never picks.
+    "byom_alerts": (_job_byom_alerts, _validate_byom_alerts),
 }
 
 

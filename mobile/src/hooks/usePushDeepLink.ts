@@ -70,6 +70,9 @@ function navigateTo(navRef: NavRef, route: PushRoute): boolean {
     case 'feedbackThread':
       navRef.navigate('FeedbackThread', { threadId: route.threadId });
       return true;
+    case 'byomModel':
+      navRef.navigate('ByomDetail', { modelId: route.modelId });
+      return true;
     case 'board':
       // Sport FIRST: the board is sport-scoped, so navigating before the switch
       // lands shows the wrong sport's picks for a frame and then swaps under

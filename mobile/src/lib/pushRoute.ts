@@ -36,7 +36,9 @@ export type PushRoute =
   /** Open the Picks board on a view, optionally switching sport first. */
   | { kind: 'board'; view: PicksView; sport: Sport | null }
   /** Open one support conversation. */
-  | { kind: 'feedbackThread'; threadId: number };
+  | { kind: 'feedbackThread'; threadId: number }
+  /** Open one of the member's own models, where its open bets are. */
+  | { kind: 'byomModel'; modelId: string };
 
 /** Which board view each summary push belongs on. */
 const VIEW_FOR_TYPE: Record<string, PicksView> = {
@@ -54,6 +56,12 @@ function asPositiveInt(v: unknown): number | null {
   // numbers, so accept both rather than dropping a valid route on a type.
   const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function asUuid(v: unknown): string | null {
+  return typeof v === 'string' && UUID_RE.test(v) ? v : null;
 }
 
 function asSport(v: unknown): Sport | null {
@@ -90,6 +98,13 @@ export function routeForPush(data: unknown): PushRoute | null {
   if (type === 'dropped') {
     const pickId = asPositiveInt(d.pickId);
     return pickId == null ? null : { kind: 'pick', pickId };
+  }
+
+  // A bet from the member's own model (2026-11-25) opens that model, where
+  // the bet's card sits under Open bets. Not a pick: there is no pickId.
+  if (type === 'byom_bet') {
+    const modelId = asUuid(d.modelId);
+    return modelId == null ? null : { kind: 'byomModel', modelId };
   }
 
   // A line change is always about one tracked bet, so it always opens that bet.

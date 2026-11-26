@@ -7,6 +7,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ByomPreviewCard } from '@/components/byom/ByomPreviewCard';
+import { ByomAlertToggle } from '@/components/byom/ByomAlertToggle';
+import { ByomOpenBetsSection } from '@/components/byom/ByomOpenBetsSection';
+import { useByomOpenBets } from '@/hooks/useByomOpenBets';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
 import { ByomSeasonBreakdown } from '@/components/byom/ByomSeasonBreakdown';
 import { currentByomSeason } from '@/lib/byomRecord';
@@ -45,10 +48,16 @@ export function ByomDetailScreen() {
     : propFilterSummary(model.filters, sport, filterMarket);
   const facts = useNbaGameFacts(model == null ? null : sport);
   const preview = useByomRecord(scope, graded && model ? model.filters : null, sport);
+  // Open bets and alerts: NFL only for now (Matt, 2026-11-25).
+  const alertsSport = model?.sport === 'NFL';
+  const openBets = useByomOpenBets(alertsSport, false);
+  const thisModelBets = openBets.bets.filter((b) => b.model_id === modelId);
 
+  const reloadOpenBets = openBets.reload;
   useFocusEffect(useCallback(() => {
     void reload();
-  }, [reload]));
+    void reloadOpenBets();
+  }, [reload, reloadOpenBets]));
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -134,6 +143,23 @@ export function ByomDetailScreen() {
           ) : null}
           <Text style={styles.market}>{marketLabel(model.filters, sport)}</Text>
           {filterLine ? <Text style={styles.filters}>{filterLine}</Text> : null}
+          {alertsSport ? (
+            <>
+              <ByomOpenBetsSection
+                title="Open bets"
+                bets={thisModelBets}
+                showModel={false}
+                inset={false}
+                error={openBets.error}
+                retrying={openBets.loading}
+                onRetry={() => void openBets.reload()}
+                emptyText={openBets.available
+                  ? 'No open bets. You’ll get an alert when this model finds one.'
+                  : undefined}
+              />
+              <ByomAlertToggle modelId={model.model_id} modelName={model.name} />
+            </>
+          ) : null}
           <ByomSeasonToggle />
           <PremiumLock locked={graded && preview.noAccess}>
           <ByomPreviewCard
