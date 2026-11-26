@@ -319,3 +319,45 @@ the listed start only) and `nba_exchange_flow_fetches`.
 - **Dunks & Threes:** API documentation at `/api/v2/documentation`; a subscribe page; no price on
   the pages read in the first run.
 - **arXiv 2609.06739** (Dmochowski, submitted 2026-09-06) exists; abstract read.
+
+### D5. The earlier snapshot, graded: `nba_prop_market`'s rule at 10 hours against 1 hour
+
+The purchase finished at 15:46 UTC: 3,690 games, 940,309 rows, 30 games with nothing posted at
+10 hours, 7 feed events not in `games`, **182,647 credits** (balance 778,051).
+
+The rule, unchanged from `models/nba_prop_market.py`: Pinnacle's coherent two-way quote (implied
+sum 1.00 to 1.15) gives the no-vig under; every soft book in `BEST_LINE_BOOKMAKERS` at Pinnacle's
+exact line, its own quote coherent, under at -200 or better; EV = fair under x decimal - 1 > 0;
+the best EV per player and market. Graded on the box score (`minutes > 0`; a push is no result),
+1 unit to win, risk capped at 3. Same games, same three markets bought early (points, rebounds,
+threes), no card cap. Early = `nba_prop_odds_early` (tip minus 10 hours); late = the existing
+tip-minus-55-minute purchase in `player_prop_odds`. Queries in this session's scratchpad
+(`early_replay.sql`), run per season, read-only.
+
+| Season | Early bets | Early units | Early per bet (90% CI) | Late bets | Late units | Late per bet (90% CI) |
+|---|---|---|---|---|---|---|
+| 2023-24 | 2,962 | +210.9 | +7.1% (+4.0 to +10.2) | 5,027 | +265.3 | +5.3% (+2.9 to +7.7) |
+| 2024-25 | 2,487 | +102.2 | +4.1% (+0.7 to +7.6) | 5,026 | +51.2 | +1.0% (-1.4 to +3.4) |
+| 2025-26 | 2,123 | +124.9 | +5.9% (+2.3 to +9.5) | 5,198 | +73.9 | +1.4% (-0.9 to +3.8) |
+| **All** | **7,572** | **+438.0** | **+5.8% (+3.8 to +7.7)** | **15,251** | **+390.4** | **+2.6% (+1.2 to +3.9)** |
+
+Return on risk by season, early / late: +6.74% / +4.93%, +3.74% / +0.94%, +5.63% / +1.33%.
+By market, all seasons, early: points 3,228 bets, rebounds 2,397, threes 1,947; each positive
+every season.
+
+**Closing check, 2025-26:** of 2,201 early candidates, 1,967 have a Pinnacle quote at tip minus 55
+minutes. The line moved toward the under bettor on 254 and against on 259; on the 1,454 where it
+stayed, the early price's EV against Pinnacle's LATER no-vig under averages **+0.78%** (2.58% at
+the bet), and 56.6% are still +EV at that later price.
+
+**Read with care:**
+- **Two arms, one population.** The two arms share most propositions, so the difference between
+  them is not two independent samples. Early has half the bets because fewer books and fewer
+  Pinnacle quotes are up at 10 hours.
+- **Results run ahead of the closing check.** Early's results (+5.8% a bet) run well ahead of its
+  closing-line value (+0.78%), so part of the gap is likely variance.
+- **Limits.** A 10-hour price is quoted with lower limits at most books; whether it can be bet at
+  size is not measured.
+- **Not a ship decision.** This is a frozen rule applied at a time it was never tuned on, so it
+  is out of sample for timing. Moving `nba_prop_market`'s decision time is a model update
+  (`Updated-By`), and the model is paused.
