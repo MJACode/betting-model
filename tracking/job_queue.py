@@ -880,6 +880,16 @@ def _job_splits_markets_probe(**kw):
     return {"summary": summary[:6000] or "(no output)", "stdout": text[-50_000:]}
 
 
+def _job_splits_coverage_probe(**kw):
+    """Which splits exist per Action Network book, period and market, in which
+    sports, and whether DK Network shows player-prop splits (mike, 2026-11-26).
+    Writes nothing, no Odds API call (scripts/splits_coverage_probe.py)."""
+    from scripts.splits_coverage_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.splits_coverage_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:6000] or "(no output)", "stdout": text[-50_000:]}
+
+
 def _job_book_app_links_probe(**kw):
     """Each sportsbook's apple-app-site-association file, and whether the
     betslip links we store are claimed by its app. Writes nothing, no Odds API
@@ -3138,6 +3148,8 @@ JOBS = {
     # Where the Scoreboard splits can come from: DK Network + AN book ids. Free, writes nothing.
     "splits_source_probe": (_job_splits_source_probe, _validate_splits_source_probe),
     "splits_markets_probe": (_job_splits_markets_probe, _validate_splits_markets_probe),
+    # Splits per book / period / market / sport, and DK Network prop splits. Free, writes nothing.
+    "splits_coverage_probe": (_job_splits_coverage_probe, _validate_splits_markets_probe),
     # One on-demand run of the daily Betfair ANZ racing-file store. Free, idempotent.
     "betfair_monthly_store": (_job_betfair_monthly_store, _validate_betfair_monthly_store),
     "book_app_links_probe": (_job_book_app_links_probe, _validate_book_app_links_probe),
