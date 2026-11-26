@@ -480,10 +480,14 @@ yet graded, kickoff within the last 24 hours or later, 200 at most),
 - *The line now on the card.* `now_label`, `now_price`, `now_at`: DraftKings'
   latest main line for the same market and side (`latest_odds`, line_key
   0) or the same player's latest prop line (`latest_prop_odds`), labelled
-  by `byom_leg_label`. Shown only when it differs from the bet. The bet
-  stays the line it fit at.
+  by `byom_leg_label`. A pre-start quote only (`snapshot_at <= commence`).
+  Shown as "DK now BUF -2.5 · -105 · 3:12 PM ET" only when it differs from
+  the bet and the game has not started. The bet stays the line it fit at.
+  A locked member sees the "Included with Premium" card where the alerts
+  were.
 - *Delete.* A model or account delete still removes its alert rows.
-- *NHL* keeps its Matchup tab; only NCAAB game bets hide it.
+- *NHL* keeps its Matchup tab, now with the 32 team codes stored in
+  `byom_game_facts` (season 2027); only NCAAB game bets hide it.
 
 **Applying it.** `data/migrations/byom_alerts_2026_11_25.sql` was written
 to be hand applied and never was (no `byom_alerts` table on 2026-11-26).

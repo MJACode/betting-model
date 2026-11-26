@@ -314,6 +314,11 @@ def test_member_rpcs_are_their_own_and_anon_has_none(scratch, monkeypatch):
     monkeypatch.setattr("tracking.push_notifier._expo_send", lambda m, conn=None: 0)
     alerts.run(conn, rebuild=False, today=datetime.now(timezone.utc))
     cur = raw.cursor()
+    # A newer DraftKings quote taken after the start is not the line now.
+    cur.execute("""INSERT INTO latest_odds VALUES
+        ('NFL_2026_13_DET_BUF', 'spreads', 'draftkings',
+         to_char(now() + interval '2 days', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+         150, -180, -9.5, NULL, NULL, NULL, 0)""")
     cur.execute("SET ROLE authenticated")
     cur.execute("SELECT set_config('byom.uid', %s, false)", (USER_A,))
     cur.execute("SELECT model_name, label, price, started, now_label, now_price "

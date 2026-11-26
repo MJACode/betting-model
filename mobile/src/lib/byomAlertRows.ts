@@ -84,8 +84,11 @@ export function parseOpenBet(row: unknown): ByomOpenBet | null {
  * when there is no current quote or nothing moved. Both strings come from
  * the server; nothing here rebuilds a line (CLAUDE.md §00).
  */
-export function movedLine(bet: Pick<ByomOpenBet, 'label' | 'price' | 'now_label' | 'now_price'>):
-  { label: string; price: number } | null {
+export function movedLine(
+  bet: Pick<ByomOpenBet, 'label' | 'price' | 'now_label' | 'now_price' | 'started'>,
+): { label: string; price: number } | null {
+  // After the start a quote is in-play or frozen, and either reads as live.
+  if (bet.started) return null;
   if (bet.now_label == null || bet.now_price == null) return null;
   if (bet.now_label === bet.label && bet.now_price === bet.price) return null;
   return { label: bet.now_label, price: bet.now_price };

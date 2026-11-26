@@ -49,6 +49,8 @@ check('a moved line shows the server label and price', JSON.stringify(moved && m
 const same = parseOpenBet({ ...row, now_label: 'BUF +1', now_price: -110 });
 check('an unmoved line shows nothing', same != null && movedLine(same) === null);
 check('no current quote shows nothing', bet != null && movedLine(bet) === null);
+check('after the start the line now is not shown', moved != null && movedLine({ ...moved, started: true }) === null);
+check('a price-only move still shows', same != null && movedLine({ ...same, now_price: -120 }) !== null);
 
 // NCAAB game lines on the builder (Matt, 2026-11-26).
 const nov = new Date('2026-11-26T15:00:00Z');

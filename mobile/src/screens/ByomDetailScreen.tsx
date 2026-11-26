@@ -52,9 +52,14 @@ export function ByomDetailScreen() {
   // Open bets and alerts: NFL (Matt, 2026-11-25) and NCAAB (2026-11-26).
   // Members only (Matt, 2026-11-26), the same gate as Picks: a locked member
   // sees no open bets and no alert switch. The server refuses them too.
-  const { contentLocked } = useMembership();
-  const alertsSport = (model?.sport === 'NFL' || model?.sport === 'NCAAB') && !contentLocked;
+  const { contentLocked, hold: membershipHold } = useMembership();
+  const alertSportModel = model?.sport === 'NFL' || model?.sport === 'NCAAB';
+  const alertsSport = alertSportModel && !contentLocked && !membershipHold;
   const openBets = useByomOpenBets(alertsSport, false);
+  // A lapsed member sees why alerts stopped, the way the record says so
+  // below (UX review 2026-11-26), not an empty slot.
+  const alertsLocked = alertSportModel && !membershipHold
+    && (contentLocked || openBets.noAccess);
   const thisModelBets = openBets.bets.filter((b) => b.model_id === modelId);
 
   const reloadOpenBets = openBets.reload;
@@ -147,6 +152,11 @@ export function ByomDetailScreen() {
           ) : null}
           <Text style={styles.market}>{marketLabel(model.filters, sport)}</Text>
           {filterLine ? <Text style={styles.filters}>{filterLine}</Text> : null}
+          {alertsLocked ? (
+            <View style={styles.alertsLock}>
+              <PremiumLock locked />
+            </View>
+          ) : null}
           {alertsSport && !openBets.noAccess ? (
             <>
               <ByomOpenBetsSection
@@ -210,6 +220,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   content: { padding: spacing.lg },
   banner: { marginHorizontal: 0 },
+  alertsLock: { marginBottom: spacing.lg },
   market: {
     marginTop: spacing.xs,
     marginBottom: spacing.sm,

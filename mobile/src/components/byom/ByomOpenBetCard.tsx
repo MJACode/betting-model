@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { formatAmerican, formatDayTimeET } from '@/lib/format';
+import { formatAmerican, formatDayTimeET, formatGameTimeET } from '@/lib/format';
 import { foundAtText } from '@/lib/myBooks';
 import { matchupLabel, movedLine, type ByomOpenBet } from '@/lib/byomAlerts';
 import { cardDense, colors, font, opacity, spacing } from '@/lib/theme';
@@ -36,13 +36,18 @@ export function ByomOpenBetCard({
   // Matt, 2026-11-26: the line now on the card. The bet stays the line it
   // fit at (CLAUDE.md §1c); this only says where DraftKings is today.
   const moved = movedLine(bet);
-  const nowText = moved ? `Now ${moved.label} · DK ${formatAmerican(moved.price)}` : null;
+  // DraftKings is the subject, so it reads as the book's line, not the bet
+  // (UX review 2026-11-26). The time says how old the quote is.
+  const nowAt = moved && bet.now_at ? formatGameTimeET(bet.now_at) : '';
+  const nowText = moved
+    ? [`DK now ${moved.label}`, formatAmerican(moved.price), nowAt].filter(Boolean).join(' · ')
+    : null;
   // Time first, so a long school name cuts the matchup, not the time.
   const meta = [bet.started ? 'Started' : kick, matchup].filter(Boolean).join(' · ');
   const spoken = [
     showModel ? `${bet.model_name}.` : '',
     `${bet.label}. ${foundAtText('DraftKings', formatAmerican(bet.price))}.`,
-    moved ? `DraftKings now ${moved.label} at ${formatAmerican(moved.price)}.` : '',
+    moved ? `DraftKings now ${moved.label} at ${formatAmerican(moved.price)}${nowAt ? `, as of ${nowAt}` : ''}.` : '',
     meta ? `${meta}.` : '',
     fit ? `Fit your rules ${fit}.` : '',
   ].filter(Boolean).join(' ');
@@ -110,6 +115,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   now: {
+    marginTop: spacing.xs,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     fontVariant: ['tabular-nums'],

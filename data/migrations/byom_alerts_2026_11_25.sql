@@ -253,6 +253,9 @@ BEGIN
              AND o.bookmaker = 'draftkings'
              AND o.market = a.market
              AND o.line_key = 0
+             -- Pre-game only (CLAUDE.md 6): the evening refresh keeps
+             -- writing open rows after the start.
+             AND o.snapshot_at::timestamptz <= a.commence_time
           UNION ALL
           SELECT q.line,
                  CASE a.leg_side WHEN 'over' THEN q.over_price
@@ -265,6 +268,7 @@ BEGIN
              AND q.bookmaker = 'draftkings'
              AND q.market = a.market
              AND q.player_name = a.player_name
+             AND q.snapshot_at::timestamptz <= a.commence_time
           ORDER BY 3 DESC NULLS LAST
           LIMIT 1
         ) now_line ON true
