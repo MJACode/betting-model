@@ -51,18 +51,25 @@ from data.ingestors.nba_public_splits_ingestor import (
     validate_sides,
 )
 
-SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB", "NCAAB")
+# WNBA added 2026-11-26 (mike, "1) yes"): inert until its season has an unstarted game. Teams match on the
+# full name through the odds feed's normaliser (WNBA_ODDS_API_MAP); scripts/splits_coverage_probe.py counts
+# how many of its last played date's games the matcher finds.
+SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB", "NCAAB", "WNBA")
 
 # Period splits (Matt, 2026-11-26: "Yes on splits", hourly). What is measured:
-# worker_jobs for splits-nonzero-probe-2026-11-26 (15:15 UTC), asking exactly as
-# this module does (bookIds=15) and counting only non-zero shares, found NO
-# consensus period split for NFL (16 games), NCAAF (69) or NCAAB (11): Action
-# Network returns a 0% / 0% placeholder for every period, which validate_sides
-# drops. So those sports are not asked (Matt, "Ok"). NBA and NHL had no games
-# that day and are unmeasured; they stay until splits-nba-nhl-probe-2026-11-27
-# reports. The first probe (worker_jobs 1698627) counted the 0/0 placeholder as
-# a split and is not evidence. Team totals (core_bet_type_6_team_score) carry
-# the same placeholder and are not parsed (Matt, "Ok").
+# consensus serves NO period split. The first list came from worker_jobs
+# 1698627, which counted Action Network's 0/0 placeholder as a split. Counting
+# only non-zero shares, worker_jobs 1717775 (15:15 UTC, bookIds=15) found no
+# period and no team-total split at consensus for NFL (16 games), NCAAF (69) or
+# NCAAB (11); the hourly passes at 15:19, 15:28 and 16:18 UTC stored 0 period
+# rows in all five sports; and worker_jobs 1722475 (scripts/
+# splits_coverage_probe.py, 18:05 UTC, mike) asked every book for every period
+# and found none at any book in NBA, NHL, NFL, NCAAF or NCAAB.
+# mike's session kept the fetch for every sport so a split would be stored the
+# day one is served; Matt then chose to stop asking NFL, NCAAF and NCAAB ("Ok",
+# "Merge", 2026-11-26). NBA and NHL are still asked until
+# splits-nba-nhl-probe-2026-11-27 reports. Team totals carry the same
+# placeholder and are not parsed (Matt, "Ok").
 PERIODS_BY_SPORT: dict[str, tuple[str, ...]] = {
     "NBA": ("firsthalf", "secondhalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
     "NHL": ("firstperiod",),

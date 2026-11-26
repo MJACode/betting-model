@@ -1,8 +1,9 @@
 """Action Network consensus splits per period (Matt, 2026-11-26: "Yes on splits", polled hourly).
 
-Measured first (worker_jobs 1698627, scripts/splits_markets_probe.py): the v2 scoreboard's consensus carries
-moneyline / spread / total splits per period. Stored in scoreboard_splits_history under the odds table's period
-names, so the AI assistant reads one naming for prices and splits.
+Built on worker_jobs 1698627, which counted Action Network's 0/0 placeholder as a split. Corrected the same day:
+counting only non-zero shares (worker_jobs 1717775) consensus serves no period split, and the hourly passes stored
+0 period rows (data/ingestors/scoreboard_splits.py, the comment above PERIODS_BY_SPORT). These tests pin the
+parser and the storage names, so a period split is stored correctly on the day one is served.
 """
 from __future__ import annotations
 

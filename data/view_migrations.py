@@ -866,11 +866,26 @@ ACTIVE_MIGRATIONS: list[str] = [
     # _p1, ...). Runs while scoreboard_splits_history_market_period_check is
     # missing or the old market check remains.
     "scoreboard_splits_period_markets_2026_11_26.sql",
+    # DraftKings' player-prop handle and bet shares from DK Network's prop-split
+    # articles (mike, 2026-11-26). Two worker-only tables, RLS on, anon and
+    # authenticated revoked; touches no pick, odds, split or record table.
+    # Returns on a catalog read once both exist and are locked.
+    "dk_prop_splits_2026_11_26.sql",
+    # Every table of every DK Network prop-split article version, as printed,
+    # so a layout no parser reads yet is kept (mike, 2026-11-26: 31 of 35
+    # versions use one). Worker-only, RLS on, anon / authenticated revoked.
+    "dk_prop_split_tables_2026_11_26.sql",
     # MoneyPuck.com NHL files (shots, team / skater / goalie / line
     # game-by-game, player bios). Research rows, not a pick input.
     # Credit MoneyPuck.com. Creates the tables once; the 7:20am job fills
     # the current season and the backfill command fills the history.
     "moneypuck_nhl_2026_11_26.sql",
+    # NHL shift charts, right-rail officials and scratches, Daily Faceoff
+    # line snapshots, and NHL EDGE season-to-date snapshots. Research
+    # rows, not a pick input. Creates the tables once. The morning steps
+    # and the crons fill them; the shift and right-rail backfill commands
+    # fill 2023-24 through the current season. EDGE has no backfill.
+    "nhl_free_feeds_2026_11_26.sql",
     # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
     # monitor's page, written by mike's PC (pc_monitor/) and served to his
     # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,

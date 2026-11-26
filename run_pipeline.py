@@ -764,6 +764,90 @@ def step_nhl_shots(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
+def step_nhl_shifts(run_date: str, dry_run: bool = False) -> bool:
+    """Shift charts for the current season's completed games. Not a pick input.
+
+    A game already stored is not fetched again. A game the feed did not
+    answer fails the step.
+    """
+    if dry_run:
+        logger.info("NHL shifts: dry run, not fetching")
+        return True
+    try:
+        from data.ingestors.nhl_shifts import daily
+        result = daily(run_date, apply=True)
+        if result.get("failed") or not result.get("ok"):
+            logger.error(f"✗ NHL shifts: {len(result.get('failed') or {})} games not stored; "
+                         f"{result.get('games')} written")
+            return False
+        logger.success(f"✓ NHL shifts: {result.get('games')} games, {result.get('rows')} shifts")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL shifts failed: {exc}")
+        return False
+
+
+def step_nhl_officials(run_date: str, dry_run: bool = False) -> bool:
+    """Officials and healthy scratches for the current season. Not a pick input."""
+    if dry_run:
+        logger.info("NHL officials: dry run, not fetching")
+        return True
+    try:
+        from data.ingestors.nhl_right_rail import daily
+        result = daily(run_date, apply=True)
+        if result.get("failed") or not result.get("ok"):
+            logger.error(f"✗ NHL officials: {len(result.get('failed') or {})} games not stored; "
+                         f"{result.get('games')} written")
+            return False
+        logger.success(f"✓ NHL officials: {result.get('games')} games, "
+                       f"{result.get('scratches')} scratches")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL officials failed: {exc}")
+        return False
+
+
+def step_dailyfaceoff_lines(run_date: str, dry_run: bool = False) -> bool:
+    """Daily Faceoff lines and PP units, one new snapshot. Not a pick input.
+
+    No NHL game today: the step does not fetch. A morning Cloudflare
+    blocks is a failed step once every team page fails.
+    """
+    if dry_run:
+        logger.info("DailyFaceoff lines: dry run, not fetching")
+        return True
+    try:
+        from data.ingestors.dailyfaceoff_lines import daily
+        result = daily(run_date, apply=True)
+        logger.success(f"✓ DailyFaceoff lines: {result.get('teams')} teams, "
+                       f"{result.get('written')} rows")
+        return bool(result.get("ok"))
+    except Exception as exc:
+        logger.error(f"✗ DailyFaceoff lines failed: {exc}")
+        return False
+
+
+def step_nhl_edge(run_date: str, dry_run: bool = False) -> bool:
+    """Tonight's NHL EDGE season-to-date snapshot. Not a pick input.
+
+    There is no backfill. The same snapshot_date is replaced on a retry.
+    """
+    if dry_run:
+        logger.info("NHL EDGE: dry run, not fetching")
+        return True
+    try:
+        from data.ingestors.nhl_edge import daily
+        result = daily(run_date, apply=True)
+        logger.success(
+            f"✓ NHL EDGE {result.get('snapshot_date')}: "
+            f"{result.get('skaters')} skaters, {result.get('goalies')} goalies, "
+            f"{result.get('teams')} teams")
+        return bool(result.get("ok"))
+    except Exception as exc:
+        logger.error(f"✗ NHL EDGE failed: {exc}")
+        return False
+
+
 def step_moneypuck(run_date: str, dry_run: bool = False) -> bool:
     """MoneyPuck.com's current-season files. Credit MoneyPuck.com.
 
@@ -1841,6 +1925,14 @@ def step_scoreboard_splits(run_date: str) -> bool:
     except Exception as exc:
         logger.error(f"✗ Scoreboard splits (Action Network) failed: {exc}")
         ok = False
+    # DraftKings' player-prop splits from DK Network's articles (mike, 2026-11-26):
+    # the newest page of search results; a version already read is not fetched.
+    try:
+        from data.ingestors.dk_prop_splits import run as run_dk_props
+        logger.success(f"✓ DraftKings prop splits (articles): {run_dk_props(pages=1)}")
+    except Exception as exc:
+        logger.error(f"✗ DraftKings prop splits (articles) failed: {exc}")
+        ok = False
     return ok
 
 
@@ -2010,6 +2102,22 @@ def step_nba_props(dry_run: bool = False) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ NBA prop cards failed: {exc}")
+        return False
+
+
+def step_nba_prop_market_early(dry_run: bool = False) -> bool:
+    """`nba_prop_market_early` (scripts/nba_prop_market_early_card.py): nba_prop_market's rule
+    decided 9.5-10.5 hours before tip on points, rebounds and threes, a PAPER test (mike,
+    2026-11-26). The id is paused, so every row carries the pause marker and nothing posts it; it
+    settles and is graded. Its own door, outside the NBA prop door's one-a-game cap. Run by every
+    refresh pass after the prop fetch."""
+    try:
+        from scripts.nba_prop_market_early_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA prop market, 10 hours (paper): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA prop market, 10 hours (paper) failed: {exc}")
         return False
 
 
@@ -3023,6 +3131,19 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
             checkpoint("nhl_shots")
             results["nhl_shots"] = step_nhl_shots(run_date, dry_run=dry_run)
 
+        # Shift charts and the right rail. Same window as the shots: the
+        # current season, games already stored are not fetched again, and
+        # the health check below is what stays red if a step stops.
+        # Daily Faceoff lines and NHL EDGE are their own crons (a game-day
+        # scrape, and a nightly season-to-date snapshot).
+        if not dry_run:
+            logger.info("Step 11e: NHL shift charts (current season)...")
+            checkpoint("nhl_shifts")
+            results["nhl_shifts"] = step_nhl_shifts(run_date, dry_run=dry_run)
+            logger.info("Step 11f: NHL officials and scratches (current season)...")
+            checkpoint("nhl_officials")
+            results["nhl_officials"] = step_nhl_officials(run_date, dry_run=dry_run)
+
         # ── Step 12: System health check (feed freshness — after all ingestion) ────
         # Daily: CRIT failure returns False → the run shows red. Results land in
         # system_health_checks (anon-readable) for Claude mobile / the app.
@@ -3255,12 +3376,14 @@ Examples:
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
-                                 "nba-props", "nba-prop-market", "nba-prop-close", "nba-first-basket",
+                                 "nba-props", "nba-prop-market", "nba-prop-market-early", "nba-prop-close", "nba-first-basket",
                                  "nba-prop-projection", "nba-prop-project",
                                  "nba-total-luck", "nba-team-total-luck", "nba-first-half-total-luck", "nba-q1-trend",
                                  "nba-q1-trend-ml",
                                  "nhl-over-under", "nhl-best-bet-night", "nhl-odds",
                                  "nhl-shots", "moneypuck-nhl",
+                                 "nhl-shifts", "nhl-officials",
+                                 "dailyfaceoff-lines", "nhl-edge",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "nhl-schedule", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
@@ -3356,10 +3479,15 @@ Examples:
             "nhl-odds":     lambda: step_nhl_odds(run_date),
             "nhl-shots":    lambda: step_nhl_shots(run_date, dry_run=args.dry_run),
             "moneypuck-nhl": lambda: step_moneypuck(run_date, dry_run=args.dry_run),
+            "nhl-shifts":   lambda: step_nhl_shifts(run_date, dry_run=args.dry_run),
+            "nhl-officials": lambda: step_nhl_officials(run_date, dry_run=args.dry_run),
+            "dailyfaceoff-lines": lambda: step_dailyfaceoff_lines(run_date, dry_run=args.dry_run),
+            "nhl-edge":     lambda: step_nhl_edge(run_date, dry_run=args.dry_run),
             "nhl-goalie-designations": lambda: step_nhl_goalie_designations(),
             "nhl-goalie-designations-today": lambda: step_nhl_goalie_designations(today_only=True),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "nba-props": lambda: step_nba_props(dry_run=args.dry_run),
+            "nba-prop-market-early": lambda: step_nba_prop_market_early(dry_run=args.dry_run),
             "nba-first-basket": lambda: step_nba_first_basket(dry_run=args.dry_run),
             "nba-prop-market": lambda: step_nba_prop_market(dry_run=args.dry_run),
             "nba-prop-close": lambda: step_nba_prop_close(),

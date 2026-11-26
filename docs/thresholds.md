@@ -698,6 +698,30 @@ at the book whose price that blend makes worth the most (`models/nba_first_baske
 | settled on each book's own rule | 1,930 | +18.91 | +9.67% (-3.17% to +23.02%) |
 | the live code replayed on the same snapshots (book-listed starters) | 1,862 | +19.80 | +10.92% |
 
+## NBA, `nba_prop_market_early`: the same rule at 10 hours, PAPER (2026-11-26, mike)
+
+mike, 2026-11-26: yes to a forward paper test of `nba_prop_market` decided 10 hours before tip.
+A new id, PAUSED from its first row (`config.PAUSED_MODELS`, `Updated-By: mike`): its rows carry
+the pause marker, settle and are graded, and no publisher reads them. Unpausing it is his call.
+
+| Setting | Value | Where |
+|---|---|---|
+| prob / edge cut | 0.0 / 0.0, the cut is EV | `ACTION_THRESHOLDS`, both threshold dicts |
+| EV floor | 0.00, on Pinnacle's proportional no-vig under | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200 | `MODEL_MIN_ODDS` |
+| window | the first look 570-630 min before tip whose newest fetch holds Pinnacle; once, in `nba_prop_market_early_decisions` | `scripts/nba_prop_market_early_card.py` |
+| markets | points, rebounds, threes (the three graded at 10 hours) | same |
+| caps | none: every qualifying proposition, as graded; its own door, outside the NBA prop door | same |
+| looks | every refresh pass, after the prop fetch | step `nba-prop-market-early` |
+| games | regular season only | `scripts/nba_prop_market_card.slate` |
+
+**The evidence** (`docs/nba_data_sources_and_handle_2026_11.md`, D5): the rule on a snapshot
+bought 10 hours before every 2023-24..2025-26 tip, 7,572 bets, +438.0 units, +5.8% a bet (90% CI
++3.8 to +7.7), against 15,251 bets, +2.6% a bet, for the same rule an hour before tip on the same
+games; ahead every season. 2025-26 value against Pinnacle's later price: +0.78%. Live, Pinnacle's
+points props were up 10 hours out on 26 of 73 games (2026-11-15 to 11-24), so most games log
+`no_sharp`.
+
 ## NBA — `nba_prop_market`, the 2026-27 rule (2026-10-15, mike)
 
 The twelve 2026-06-19 NBA models are retired (`config.RETIRED_MODELS`). One

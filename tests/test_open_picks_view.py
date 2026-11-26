@@ -57,6 +57,14 @@ def _view_body() -> str:
     return m.group(1)
 
 
+def _marker() -> str:
+    """The marker the view's COMMENT must carry: the body's own hash. Read from
+    the file, so a view edit cannot leave a copied literal behind in a test
+    (one did, 2026-11-26, and only a scratch-Postgres run showed it)."""
+    body = _view_body().replace("\r\n", "\n")
+    return "open_picks " + hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+
+
 def _select_list(body: str) -> str:
     code = _code(body)
     i = code.index("SELECT")
@@ -144,8 +152,7 @@ def test_the_marker_is_the_hash_of_the_view_body():
     """The skip compares the view's comment to a marker. The marker is the
     body's own hash, so editing the view without changing the marker is a red
     test here rather than a change that never reaches production."""
-    body = _view_body().replace("\r\n", "\n")
-    want = "open_picks " + hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+    want = _marker()
     code = _code(SQL)
     assert code.count(f"'{want}'") == 2, (
         f"set the marker to '{want}' in both the skip and the COMMENT")
@@ -452,7 +459,7 @@ def test_step_a_skips_and_does_not_give_anon_the_grant_back():
         """)
         row = cur.fetchone()
         assert row[0] is False and row[1] is False and row[2] is True
-        assert row[3] == "open_picks 1a3c89387da6"
+        assert row[3] == _marker()
     finally:
         if conn is not None:
             conn.close()

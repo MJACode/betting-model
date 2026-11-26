@@ -1,0 +1,362 @@
+"""DraftKings prop splits from DK Network's articles (data/ingestors/dk_prop_splits.py).
+
+The two bodies are cut from the HTML worker_jobs 1723195 printed for posts 481849 (2026-11-23, the side_line
+layout) and 443922 (2026-09-14, the leaders layout), entities and markup as served. No network, no database.
+"""
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+from data.ingestors import dk_prop_splits as dps
+
+ROOT = Path(__file__).resolve().parents[1]
+
+NOV = (
+    '<p class="wp-block-paragraph"><em>Updated Monday, Nov. 23 at 6:04 p.m. ET.</em></p>\n\n'
+    '<figure class="wp-block-table"><table><thead><tr><th>Rank</th><th>Most bet by handle</th>'
+    '<th>Most bet by bets</th></tr></thead><tbody><tr><td>1</td><td>Ja&#8217;Marr Chase</td>'
+    '<td>Ja&#8217;Marr Chase</td></tr></tbody></table></figure>\n\n'
+    '<h2 id="bengals-vs-commanders-player-prop-betting-splits" class="wp-block-heading">Bengals vs. Commanders '
+    'player prop betting splits</h2>\n\n<h3 id="h-bengals-vs-commanders-passing-prop-betting-splits" '
+    'class="wp-block-heading">Bengals vs. Commanders passing prop betting splits</h3>\n\n'
+    '<figure class="wp-block-table"><table><thead><tr><th>Player</th><th>Market</th><th>Line</th>'
+    '<th>Handle split</th><th>Bet split</th></tr></thead><tbody><tr><td>Jayden Daniels</td>'
+    '<td>Passing completions</td><td>Under 20.5</td><td>66%</td><td>56%</td></tr><tr><td>Joe Burrow</td>'
+    '<td>Passing completions</td><td>Under 27.5</td><td>96%</td><td>82%</td></tr><tr><td>Jayden Daniels</td>'
+    '<td>Passing yards</td><td>Over 222.5</td><td>50%</td><td>78%</td></tr></tbody></table></figure>')
+
+SEP = (
+    '<p class="wp-block-paragraph"><em>Updated September 14, 2026. Splits are a snapshot and may change before '
+    'kickoff.</em></p>\n\n<h3 class="wp-block-heading">Passing player prop bet splits</h3>\n\n'
+    '<figure class="wp-block-table"><table class="has-fixed-layout"><thead><tr><th>Player prop</th><th>Line</th>'
+    '<th>Handle leader</th><th>Bet leader</th></tr></thead><tbody><tr><td>Bo Nix Passing Completions</td>'
+    '<td>21.5</td><td>Over (99.1%)</td><td>Over (97.1%)</td></tr><tr><td>Patrick Mahomes Longest Passing '
+    'Completion</td><td>35.5</td><td>Over (65.7%)</td><td>Under (53.1%)</td></tr><tr><td>Bo Nix passing yards '
+    '&#8211; first half</td><td>109.5</td><td>Under (75.4%)</td><td>Under (66.7%)</td></tr></tbody></table>'
+    '</figure>')
+
+
+def test_side_line_layout_reads_the_named_sides_shares_and_skips_the_rank_table():
+    rows, skipped = dps.parse_article(NOV)
+    assert skipped == 1                               # the anytime-TD rank list carries no percentages
+    assert [(r["player"], r["market"], r["line_value"], r["handle_side"], r["handle_pct"], r["bets_side"],
+             r["bets_pct"]) for r in rows] == [
+        ("Jayden Daniels", "Passing completions", 20.5, "under", 66.0, "under", 56.0),
+        ("Joe Burrow", "Passing completions", 27.5, "under", 96.0, "under", 82.0),
+        ("Jayden Daniels", "Passing yards", 222.5, "over", 50.0, "over", 78.0)]
+    assert {r["layout"] for r in rows} == {"side_line"}
+    assert rows[0]["section"] == "Bengals vs. Commanders passing prop betting splits"
+    assert [(r["table_no"], r["row_no"]) for r in rows] == [(2, 1), (2, 2), (2, 3)]
+
+
+def test_leaders_layout_keeps_each_leaders_own_side():
+    rows, skipped = dps.parse_article(SEP)
+    assert skipped == 0
+    assert [(r["prop_text"], r["line_value"], r["handle_side"], r["handle_pct"], r["bets_side"], r["bets_pct"])
+            for r in rows] == [
+        ("Bo Nix Passing Completions", 21.5, "over", 99.1, "over", 97.1),
+        # The handle leader and the bet leader are different sides on this row.
+        ("Patrick Mahomes Longest Passing Completion", 35.5, "over", 65.7, "under", 53.1),
+        ("Bo Nix passing yards – first half", 109.5, "under", 75.4, "under", 66.7)]
+    assert all(r["player"] is None and r["layout"] == "leaders" for r in rows)
+
+
+def test_a_table_with_unknown_columns_is_skipped_not_guessed():
+    html = "<table><tr><th>Player</th><th>Odds</th></tr><tr><td>Bo Nix</td><td>-110</td></tr></table>"
+    assert dps.parse_article(html) == ([], 1)
+    # Rows that WOULD read under the side_line columns, under headers that are not that layout.
+    html = ("<table><tr><th>Name</th><th>Prop</th><th>Pick</th><th>Money</th><th>Tickets</th></tr>"
+            "<tr><td>Bo Nix</td><td>Passing yards</td><td>Over 220.5</td><td>60%</td><td>55%</td></tr></table>")
+    assert dps.parse_article(html) == ([], 1)
+
+
+def test_updated_text_and_title_filter():
+    assert dps.updated_text(NOV) == "Updated Monday, Nov. 23 at 6:04 p.m. ET."
+    assert dps.updated_text(SEP) == "Updated September 14, 2026."
+    assert dps.is_prop_split_title("Vikings vs. 49ers Player Prop & Anytime TD Betting Splits for Sunday Night")
+    assert not dps.is_prop_split_title("DraftKings Sportsbook Betting Splits for NFL")
+
+
+GAMES = [{"game_id": "NFL_2026_12_CIN_WAS", "game_date": "2026-11-23", "home_team": "WAS", "away_team": "CIN"},
+         {"game_id": "NFL_2026_12_MIN_SF", "game_date": "2026-11-22", "home_team": "SF", "away_team": "MIN"}]
+
+
+def test_title_game_names_one_game_or_none():
+    posted = datetime(2026, 11, 23, 23, 0, tzinfo=timezone.utc)
+    assert dps.title_game("Bengals vs. Commanders Player Prop & Anytime TD Betting Splits", posted, GAMES) \
+        == "NFL_2026_12_CIN_WAS"
+    assert dps.title_game("Vikings vs. 49ers Player Prop & Anytime TD Betting Splits",
+                          datetime(2026, 11, 22, 20, 0, tzinfo=timezone.utc), GAMES) == "NFL_2026_12_MIN_SF"
+    assert dps.title_game("NFL Week 4 Sunday Player Prop Bet Splits", posted, GAMES) is None
+    # Two games of the same pair inside the window: no answer, never a guess.
+    twice = GAMES + [{**GAMES[0], "game_id": "NFL_2026_12_WAS_CIN", "home_team": "CIN", "away_team": "WAS",
+                      "game_date": "2026-11-25"}]
+    assert dps.title_game("Bengals vs. Commanders Player Prop Bet Splits", posted, twice) is None
+    # Outside a day before to three after the post's date: no game.
+    assert dps.title_game("Bengals vs. Commanders Player Prop Bet Splits",
+                          datetime(2026, 11, 10, 20, 0, tzinfo=timezone.utc), GAMES) is None
+
+
+class _Conn:
+    def __init__(self, kept=(), empty=(), legacy=(), stored=None):
+        self.kept, self.empty = list(kept), list(empty)    # versions with tables kept / ledgered with no table
+        self.legacy = list(legacy)                          # (post_id, modified, post_date, game_id) to re-parse
+        self.stored = stored or {}                          # (post_id, modified) -> [(table_no, section, h, b)]
+        self.articles, self.rows, self.tables, self.updates = [], [], [], []
+
+    def execute(self, sql, params=None):
+        rows = []
+        if "to_regclass" in sql:
+            rows = [(True,)]
+        elif "a.rows_stored = 0 AND a.tables_skipped > 0" in sql:
+            rows = self.legacy
+        elif "SELECT table_no, section, header, body" in sql:
+            rows = self.stored.get((params["p"], params["m"]), [])
+        elif sql.startswith("UPDATE"):
+            self.updates.append((sql, params))
+        elif "FROM public.dk_prop_split_tables" in sql:
+            rows = self.kept
+        elif "FROM public.dk_prop_split_articles" in sql:
+            assert "rows_stored = 0 AND tables_skipped = 0" in sql
+            rows = self.empty
+        elif "FROM public.games" in sql:
+            rows = [(g["game_id"], g["game_date"], g["home_team"], g["away_team"]) for g in GAMES]
+        elif "INSERT INTO public.dk_prop_split_articles" in sql:
+            self.articles.append(params)
+        return type("C", (), {"fetchone": lambda s: rows[0] if rows else None, "fetchall": lambda s: rows})()
+
+    def executemany(self, sql, rows):
+        if sql.startswith("UPDATE"):
+            self.updates.extend((sql, r) for r in rows)
+            return
+        if "INSERT INTO public.dk_prop_split_tables" in sql:
+            self.tables.extend(rows)
+            return
+        assert "INSERT INTO public.dk_prop_splits\n" in sql
+        self.rows.extend(rows)
+
+    def commit(self):
+        pass
+
+
+def _get(asked):
+    def get(url, params):
+        asked.append((url, params))
+        if url == dps.WP_POSTS:
+            if params["page"] > 1:
+                return 200, "[]", {}
+            return 200, json.dumps([
+                {"id": 481849, "date_gmt": "2026-11-23T23:00:00", "modified_gmt": "2026-11-23T23:04:00",
+                 "link": "a", "title": {"rendered": "Bengals vs. Commanders Player Prop &amp; Anytime TD Betting "
+                                                    "Splits for Monday Night Football"}},
+                {"id": 1, "date_gmt": "2026-11-23T12:00:00", "modified_gmt": "2026-11-23T12:00:00",
+                 "link": "b", "title": {"rendered": "Monday Night Football picks"}}]), {"X-WP-TotalPages": "1"}
+        if url == f"{dps.WP_POSTS}/481849":
+            return 200, json.dumps({"modified_gmt": "2026-11-23T23:04:00", "content": {"rendered": NOV}}), {}
+        raise AssertionError(f"unexpected fetch {url}")
+    return get
+
+
+def test_run_stores_a_new_version_with_its_game_and_ledger_row(monkeypatch):
+    monkeypatch.setattr(dps.time, "sleep", lambda s: None)
+    asked: list = []
+    conn = _Conn()
+    out = dps.run(conn, pages=3, get=_get(asked))
+    assert out == {"posts": 1, "new_versions": 1, "rows": 3, "tables_skipped": 1, "with_game": 1,
+                   "reparsed": {"versions": 0, "rows": 0}}
+    assert {r["game_id"] for r in conn.rows} == {"NFL_2026_12_CIN_WAS"}
+    assert conn.rows[0]["post_modified"] == datetime(2026, 11, 23, 23, 4, tzinfo=timezone.utc)
+    (art,) = conn.articles
+    assert art["rows_stored"] == 3 and art["tables_skipped"] == 1 and art["game_id"] == "NFL_2026_12_CIN_WAS"
+    assert art["updated_text"] == "Updated Monday, Nov. 23 at 6:04 p.m. ET."
+    # Every table kept as printed, the rank list included, with the layout only where one was parsed.
+    assert [(t["table_no"], t["layout"], json.loads(t["header"])[0]) for t in conn.tables] == [
+        (1, None, "rank"), (2, "side_line", "player")]
+    assert json.loads(conn.tables[0]["body"]) == [["1", "Ja’Marr Chase", "Ja’Marr Chase"]]
+    # The search is asked newest first, and the non-prop post's body is never fetched.
+    assert asked[0][1]["orderby"] == "date" and asked[0][1]["order"] == "desc"
+    assert [u for u, _ in asked].count(f"{dps.WP_POSTS}/481849") == 1
+
+
+V = datetime(2026, 11, 23, 23, 4, tzinfo=timezone.utc)
+
+
+def test_run_does_not_fetch_a_version_whose_tables_are_kept(monkeypatch):
+    monkeypatch.setattr(dps.time, "sleep", lambda s: None)
+    asked: list = []
+    conn = _Conn(kept=[(481849, V)])
+    out = dps.run(conn, pages=1, get=_get(asked))
+    assert out["new_versions"] == 0 and conn.rows == [] and conn.articles == []
+    assert all(u == dps.WP_POSTS for u, _ in asked)
+
+
+def test_run_does_not_fetch_a_version_the_ledger_shows_had_no_table(monkeypatch):
+    monkeypatch.setattr(dps.time, "sleep", lambda s: None)
+    asked: list = []
+    out = dps.run(_Conn(empty=[(481849, V)]), pages=1, get=_get(asked))
+    assert out["new_versions"] == 0 and all(u == dps.WP_POSTS for u, _ in asked)
+
+
+def test_a_version_read_before_its_tables_were_kept_is_read_once_more():
+    # 2026-11-26: 31 versions ledgered with 0 rows and skipped tables, none kept. Neither skip set holds them,
+    # and the ledger row that recorded nothing stored takes the new counts; a row with rows is never rewritten.
+    sql = " ".join(dps.ARTICLE_SQL.split())
+    assert "DO UPDATE SET rows_stored = EXCLUDED.rows_stored, tables_skipped = EXCLUDED.tables_skipped" in sql
+    assert "WHERE public.dk_prop_split_articles.rows_stored = 0 AND EXCLUDED.rows_stored > 0" in sql
+
+
+def test_raw_table_migration_is_guarded_locked_down_and_after_the_first():
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    name = "dk_prop_split_tables_2026_11_26.sql"
+    assert ACTIVE_MIGRATIONS.index(name) > ACTIVE_MIGRATIONS.index("dk_prop_splits_2026_11_26.sql")
+    sql = (ROOT / "data" / "migrations" / name).read_text(encoding="utf-8")
+    assert sql.index("RETURN;") < sql.index("CREATE TABLE")
+    assert "ALTER TABLE public.dk_prop_split_tables ENABLE ROW LEVEL SECURITY" in sql
+    assert "REVOKE ALL ON public.dk_prop_split_tables FROM anon, authenticated" in sql
+
+
+def test_migration_is_guarded_locked_down_and_active():
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    assert "dk_prop_splits_2026_11_26.sql" in ACTIVE_MIGRATIONS
+    sql = (ROOT / "data" / "migrations" / "dk_prop_splits_2026_11_26.sql").read_text(encoding="utf-8")
+    assert sql.index("RETURN;") < sql.index("CREATE TABLE")
+    for t in ("dk_prop_split_articles", "dk_prop_splits"):
+        assert f"ALTER TABLE public.{t} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"REVOKE ALL ON public.{t} FROM anon, authenticated" in sql
+    statements = "\n".join(l for l in sql.splitlines() if not l.lstrip().startswith("--")).upper()
+    assert "DELETE" not in statements and "UPDATE " not in statements
+
+
+def test_wired_into_the_splits_step_and_a_declared_backfill():
+    src = (ROOT / "run_pipeline.py").read_text(encoding="utf-8")
+    assert "from data.ingestors.dk_prop_splits import run as run_dk_props" in src
+    from tracking import job_queue
+    assert job_queue.JOBS["dk_prop_splits_import"][1]({"pages": 50}) == {"pages": 50}
+    declared = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
+    entries = [d for d in declared if d.get("job_type") == "dk_prop_splits_import"]
+    assert [d["key"] for d in entries] == ["dk-prop-splits-backfill-2026-11-26", "dk-prop-splits-raw-tables-2026-11-26",
+                                           "dk-prop-splits-raw-tables-2-2026-11-26", "dk-prop-splits-reparse-2026-11-26"]
+    assert [d["args"]["pages"] for d in entries] == [50, 50, 50, 1]
+    assert all(d["requested_by"] == "mike" for d in entries)
+
+
+def test_the_import_job_applies_migrations_before_it_reads(monkeypatch):
+    # A declared job can be claimed before the deploy's first pass creates dk_prop_split_tables.
+    from tracking import job_queue
+    import data.db
+    import data.view_migrations
+    order = []
+
+    class C:
+        def close(self):
+            order.append("close")
+    monkeypatch.setattr(data.db, "get_connection", lambda: C())
+    monkeypatch.setattr(data.view_migrations, "apply_view_migrations", lambda conn: order.append("migrate"))
+    monkeypatch.setattr(dps, "run", lambda conn, pages: order.append(("run", pages)) or {"posts": 0})
+    assert job_queue._job_dk_prop_splits_import(pages=3) == {"posts": 0}
+    assert order == ["migrate", ("run", 3), "close"]
+
+
+# ── every layout the kept tables show (dk_prop_split_tables, 2026-11-26 19:50 UTC; rows verbatim) ─────────────
+
+def test_shares_reads_each_way_a_cell_prints_a_share():
+    assert dps.shares("66%") == {None: 66.0}
+    assert dps.shares("Over 67%") == {"over": 67.0}
+    assert dps.shares("Over (99.1%)") == {"over": 99.1}
+    assert dps.shares("Over: 99.3% Under: 0.7%") == {"over": 99.3, "under": 0.7}
+    assert dps.shares("Over: 100.0% Under: N/A") == {"over": 100.0}
+    assert dps.shares("N/A") == {} and dps.shares("") == {}
+    # The other shapes the kept tables print (handle split / bet split columns).
+    assert dps.shares("Over 60% / Under 40%") == {"over": 60.0, "under": 40.0}
+    assert dps.shares("Over 100% / Under \u2014") == {"over": 100.0}
+    assert dps.shares("50% each") == {"over": 50.0, "under": 50.0}
+
+
+def _one(header, row):
+    (r,) = dps.parse_table(header, [row])
+    return (r["prop_text"], r["line_value"], r["handle_side"], r["handle_pct"], r["bets_side"], r["bets_pct"],
+            r["layout"], r["game_text"])
+
+
+def test_every_kept_layout_parses():
+    # Player | Market | Line ("19.5") | "Over 67%" | "Under 57%": each share names its own side (post 477266).
+    assert _one(["player", "market", "line", "handle split", "bet split"],
+                ["Jacoby Brissett", "Interceptions thrown", "0.5", "Under 65%", "Over 65%"]) == (
+        "Jacoby Brissett Interceptions thrown", 0.5, "under", 65.0, "over", 65.0, "leaders", None)
+    # Player prop | Line | both sides' shares, one N/A (post 456652): the larger is the leader.
+    assert _one(["player prop", "line", "handle %", "bet %"],
+                ["CeeDee Lamb longest reception", "26.5", "Over: 99.3% Under: 0.7%", "Over: 98.1% Under: 1.9%"]) == (
+        "CeeDee Lamb longest reception", 26.5, "over", 99.3, "over", 98.1, "leaders", None)
+    assert _one(["player prop", "line", "handle %", "bet %"],
+                ["Cade Otton longest reception", "14.5", "Over: N/A Under: 100.0%", "Over: N/A Under: 100.0%"])[2:6] \
+        == ("under", 100.0, "under", 100.0)
+    # No line column: the line is the prop text's last number (post 465594).
+    assert _one(["player prop", "handle %", "bet %"],
+                ["Dak Prescott Passing Completions 23.5", "Over: 90% Under: 10%", "Over: 68% Under: 32%"]) == (
+        "Dak Prescott Passing Completions 23.5", 23.5, "over", 90.0, "over", 68.0, "leaders", None)
+    # Multi-game tables carry a Game cell; a line printed N/A stays unknown (posts 454261, 457765).
+    assert _one(["game", "player prop", "line", "handle %", "bet %"],
+                ["Cowboys vs. Texans", "Brandon Aubrey kicking points", "N/A", "Over: 99.5% Under: 0.5%",
+                 "Over: 94.4% Under: 5.6%"]) == (
+        "Brandon Aubrey kicking points", None, "over", 99.5, "over", 94.4, "leaders", "Cowboys vs. Texans")
+    assert _one(["game", "player prop", "handle %", "bet %"],
+                ["CHI Bears vs. GB Packers", "Jordan Love Pass Yds 243.5", "Over: 42.5% Under: 57.5%",
+                 "Over: 63.8% Under: 36.2%"]) == (
+        "Jordan Love Pass Yds 243.5", 243.5, "under", 57.5, "over", 63.8, "leaders", "CHI Bears vs. GB Packers")
+    # The rank lists (four header spellings) carry no share and are not prop tables.
+    for h in (["rank", "most bet by handle", "most bet by bets"], ["rank", "most popular by handle",
+              "most popular by bets"], ["rank", "by handle", "by bets"], ["rank", "most bet by handle",
+              "most bet by tickets"]):
+        assert dps.parse_table(h, [["1", "Ja'Marr Chase", "Ja'Marr Chase"]]) == []
+
+
+def test_cell_game_reads_a_multi_game_tables_game_cell():
+    posted = datetime(2026, 11, 22, 15, 0, tzinfo=timezone.utc)
+    assert dps.cell_game("MIN Vikings vs. SF 49ers", posted, GAMES) == "NFL_2026_12_MIN_SF"
+    assert dps.cell_game("Vikings vs. 49ers", posted, GAMES) == "NFL_2026_12_MIN_SF"
+    assert dps.cell_game("Vikings", posted, GAMES) is None
+
+
+def test_reparse_stores_rows_from_kept_tables_and_updates_only_empty_ledger_rows():
+    v = (477266, V)
+    header = ["game", "player prop", "line", "handle %", "bet %"]
+    body = [["Vikings vs. 49ers", "Brock Purdy Pass Yds", "250.5", "Over: 61% Under: 39%", "Over: 70% Under: 30%"],
+            ["Bengals vs. Commanders", "Joe Burrow Pass Yds", "302.5", "Over: 55% Under: 45%", "Over: 58% Under: 42%"]]
+    conn = _Conn(legacy=[(477266, V, "2026-11-22T15:00:00+00:00", None)],
+                 stored={v: [(1, "Rank", ["rank", "by handle", "by bets"], [["1", "A", "A"]]),
+                             (2, "Sunday", json.dumps(header), json.dumps(body))]})
+    assert dps.reparse(conn) == {"versions": 1, "rows": 2}
+    assert [(r["table_no"], r["row_no"], r["game_id"], r["handle_side"], r["handle_pct"]) for r in conn.rows] == [
+        (2, 1, "NFL_2026_12_MIN_SF", "over", 61.0), (2, 2, "NFL_2026_12_CIN_WAS", "over", 55.0)]
+    assert all("game_text" not in r for r in conn.rows)
+    ledger = [p for sql, p in conn.updates if "dk_prop_split_articles" in sql]
+    assert ledger == [{"n": 2, "k": 1, "p": 477266, "m": V}]
+    assert all("AND rows_stored = 0" in sql for sql, _ in conn.updates if "dk_prop_split_articles" in sql)
+    layout = [p for sql, p in conn.updates if "dk_prop_split_tables" in sql]
+    assert layout == [{"l": "leaders", "p": 477266, "m": V, "t": 2}]
+
+
+def test_reparse_leaves_a_version_whose_tables_still_do_not_read():
+    v = (1, V)
+    conn = _Conn(legacy=[(1, V, None, None)], stored={v: [(1, None, ["rank", "by handle", "by bets"], [])]})
+    assert dps.reparse(conn) == {"versions": 0, "rows": 0}
+    assert conn.rows == [] and conn.updates == []
+
+
+def test_a_bare_share_with_no_side_named_anywhere_is_not_stored():
+    # "20.5" names no side and "66%" names none: which side holds 66% is unknown, so nothing is guessed.
+    assert dps.parse_table(["player", "market", "line", "handle split", "bet split"],
+                           [["Jayden Daniels", "Passing completions", "20.5", "66%", "56%"]]) == []
+
+
+def test_run_reparses_kept_tables_of_versions_that_stored_nothing(monkeypatch):
+    monkeypatch.setattr(dps.time, "sleep", lambda s: None)
+    v = (477266, V)
+    header = ["player prop", "handle %", "bet %"]
+    body = [["Dak Prescott Passing Completions 23.5", "Over: 90% Under: 10%", "Over: 68% Under: 32%"]]
+    conn = _Conn(kept=[(481849, V)], legacy=[(477266, V, None, None)], stored={v: [(1, None, header, body)]})
+    out = dps.run(conn, pages=1, get=_get([]))
+    assert out["new_versions"] == 0 and out["reparsed"] == {"versions": 1, "rows": 1}
+    assert [(r["post_id"], r["line_value"], r["handle_pct"]) for r in conn.rows] == [(477266, 23.5, 90.0)]

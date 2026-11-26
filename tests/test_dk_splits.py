@@ -162,3 +162,183 @@ def test_never_written_to_public_betting_and_wired_into_refresh_and_migrations()
            ).read_text(encoding="utf-8")
     assert sql.index("RETURN;") < sql.index("ALTER TABLE")
     assert "REVOKE ALL ON public.scoreboard_splits_history FROM anon, authenticated" in sql
+
+
+def test_nba_nhl_and_ncaaf_are_fetched_without_a_link_on_the_page():
+    """The splits page links only NFL (measured 2026-11-26), so a run whose landing page
+    names no other sport must still ask for NBA's event group when an NBA game is ahead."""
+    from datetime import datetime, timezone
+
+    asked = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            class C:
+                def __init__(s, rows):
+                    s.rows = rows
+
+                def fetchone(s):
+                    return (1,)
+
+                def fetchall(s):
+                    return s.rows
+            if "FROM public.games" in sql:
+                return C([("NBA_2026-11-27_MIA_NYK", "NBA", "2026-11-27", "NYK", "MIA",
+                           "2026-11-28T00:30:00+00:00")])
+            return C([])
+
+        def executemany(self, *a):
+            pass
+
+        def commit(self):
+            pass
+
+    def get(params):
+        asked.append(params)
+        return '<a href="?tb_eg=88808&amp;tb_edate=n7days">NFL</a>' if params is None else ""
+
+    dk.run(Conn(), now=datetime(2026, 11, 26, 16, 0, tzinfo=timezone.utc), get=get)
+    assert any(p and p.get("tb_eg") == "42648" for p in asked)
+
+
+# ── NCAAB (mike, 2026-11-26) ─────────────────────────────────────────────────
+
+REGISTRY = [
+    {"espn_id": 150, "school": "Duke", "slug": "duke", "mascot": "Blue Devils",
+     "display_name": "Duke Blue Devils", "short_name": "Duke", "abbreviation": "DUKE",
+     "is_d1": True, "alt": []},
+    {"espn_id": 96, "school": "Kentucky", "slug": "kentucky", "mascot": "Wildcats",
+     "display_name": "Kentucky Wildcats", "short_name": "Kentucky", "abbreviation": "UK",
+     "is_d1": True, "alt": []},
+    {"espn_id": 222, "school": "Villanova", "slug": "villanova", "mascot": "Wildcats",
+     "display_name": "Villanova Wildcats", "short_name": "Villanova", "abbreviation": "VILL",
+     "is_d1": True, "alt": []},
+]
+NCAAB_GAME = {"game_id": "NCAAB_2026-11-27_kentucky_duke", "sport": "NCAAB",
+              "game_date": "2026-11-27", "home_team": "Duke", "away_team": "Kentucky",
+              "commence_time": "2026-11-28T00:00:00+00:00"}
+NCAAB_PARSED = {"home": "DUKE Blue Devils", "away": "UK Wildcats", "date": "2026-11-27",
+                "sides": {("spreads", "home"): {"tickets": 61.0, "money": 70.0, "value": -4.5,
+                                                "odds": -110}}}
+
+
+def test_ncaab_school_reads_the_resolver_then_abbreviation_and_mascot():
+    assert dk.ncaab_school("Duke Blue Devils", REGISTRY) == "Duke"
+    # DK's pro-style "ABBR Mascot": no school prefixes "UK", so the resolver alone finds nothing.
+    assert dk.ncaab_school("UK Wildcats", REGISTRY) == "Kentucky"
+    # Two schools share the mascot: no answer, never a guess.
+    assert dk.ncaab_school("Wildcats", REGISTRY) is None
+    assert dk.ncaab_school("Nowhere Zeds", REGISTRY) is None
+
+
+def test_ncaab_rows_match_our_school_ids_and_name_what_did_not_match():
+    counts: dict = {}
+    other = {**NCAAB_PARSED, "home": "Nowhere Zeds"}
+    rows = dk.build_rows("NCAAB", [NCAAB_PARSED, other], [NCAAB_GAME],
+                         datetime(2026, 11, 27, 15, 0, tzinfo=timezone.utc), counts, REGISTRY)
+    assert [(r["game_id"], r["market"], r["side"], r["bet_pct"], r["money_pct"]) for r in rows] == [
+        ("NCAAB_2026-11-27_kentucky_duke", "spreads", "home", 61.0, 70.0)]
+    assert counts["games"] == 1 and counts["unmatched"] == 1
+    assert counts["unmatched_names"] == ["UK Wildcats @ Nowhere Zeds"]
+    # Without the registry nothing matches: NCAAB never falls back to the pro nickname rule.
+    assert dk.build_rows("NCAAB", [NCAAB_PARSED], [NCAAB_GAME],
+                         datetime(2026, 11, 27, 15, 0, tzinfo=timezone.utc), {}) == []
+
+
+def test_ncaab_run_asks_its_event_group_and_loads_the_registry():
+    from data.ingestors import ncaab_teams
+
+    ncaab_teams.reset_registry_cache()
+    asked, upserts = [], []
+    page = ("DUKE Blue Devils Selection x UK Wildcats @ DUKE Blue Devils Fri 11/27 · 7:00 PM ET "
+            "Selection Odds Handle Bets Spread UK Wildcats +4.5 −110 30% 39% "
+            "DUKE Blue Devils -4.5 −110 70% 61% Total Over 150.5 −110 55% 60% Under 150.5 −110 45% 40%")
+
+    class Conn:
+        def execute(self, sql, params=None):
+            class C:
+                def __init__(s, rows):
+                    s.rows = rows
+
+                def fetchone(s):
+                    return (1,) if s.rows is None else (s.rows[0] if s.rows else None)
+
+                def fetchall(s):
+                    return s.rows or []
+            if "FROM public.games" in sql:
+                g = NCAAB_GAME
+                return C([(g["game_id"], "NCAAB", g["game_date"], g["home_team"], g["away_team"],
+                           g["commence_time"])])
+            if "FROM ncaab_teams" in sql:
+                return C([(t["espn_id"], t["school"], t["slug"], t["mascot"], t["display_name"],
+                           t["short_name"], t["abbreviation"], t["is_d1"], "") for t in REGISTRY])
+            if "to_regclass" in sql:
+                return C([(False,)])
+            return C(None)
+
+        def executemany(self, sql, rows):
+            upserts.extend(rows)
+
+        def commit(self):
+            pass
+
+    def get(params):
+        asked.append(params)
+        if params is None or params.get("tb_eg") != "92483" or params.get("tb_page") != "1":
+            return ""
+        return page
+
+    try:
+        out = dk.run(Conn(), now=datetime(2026, 11, 27, 15, 0, tzinfo=timezone.utc), get=get)
+    finally:
+        ncaab_teams.reset_registry_cache()
+    assert any(p and p.get("tb_eg") == "92483" for p in asked)
+    assert out["NCAAB"]["games"] == 1
+    assert {(r["game_id"], r["market"], r["side"]) for r in upserts} >= {
+        ("NCAAB_2026-11-27_kentucky_duke", "spreads", "home")}
+
+
+def test_ncaab_two_schools_with_the_same_abbreviation_and_mascot_resolve_to_nothing():
+    twins = [{**REGISTRY[1], "espn_id": 1, "school": "Miami", "mascot": "Hurricanes",
+              "display_name": "Miami Hurricanes", "short_name": "Miami", "abbreviation": "MIA"},
+             {**REGISTRY[1], "espn_id": 2, "school": "Miami (OH)", "mascot": "Hurricanes",
+              "display_name": "Miami (OH) RedHawks", "short_name": "Miami OH", "abbreviation": "MIA"}]
+    assert dk.ncaab_school("MIA Hurricanes", twins) is None
+    assert dk.ncaab_school("MIA Hurricanes", twins[:1]) == "Miami"
+
+
+def test_measured_college_aliases_match_our_school_ids():
+    # The worker's first NCAAF / NCAAB pass (2026-11-26 18:35 UTC) left exactly these unmatched.
+    assert dk.team_matches("NCAAB", "Miami FL", "Miami", registry=REGISTRY)
+    assert dk.team_matches("NCAAF", "Miami FL", "Miami")
+    assert dk.team_matches("NCAAF", "FIU", "Florida International")
+    assert not dk.team_matches("NCAAF", "Miami FL", "Miami (OH)")
+
+
+def test_a_game_dk_orients_the_other_way_matches_with_sides_relabelled():
+    # DK "Baylor @ Gonzaga"; our schedule has Baylor at home (NCAAB_2026-11-26_gonzaga_baylor).
+    reg = REGISTRY + [
+        {"espn_id": 239, "school": "Baylor", "slug": "baylor", "mascot": "Bears",
+         "display_name": "Baylor Bears", "short_name": "Baylor", "abbreviation": "BAY",
+         "is_d1": True, "alt": []},
+        {"espn_id": 2250, "school": "Gonzaga", "slug": "gonzaga", "mascot": "Bulldogs",
+         "display_name": "Gonzaga Bulldogs", "short_name": "Gonzaga", "abbreviation": "GONZ",
+         "is_d1": True, "alt": []}]
+    ours = {"game_id": "NCAAB_2026-11-26_gonzaga_baylor", "sport": "NCAAB", "game_date": "2026-11-26",
+            "home_team": "Baylor", "away_team": "Gonzaga", "commence_time": "2026-11-27T02:00:00+00:00"}
+    parsed = {"home": "Gonzaga", "away": "Baylor", "date": "2026-11-26",
+              "sides": {("spreads", "home"): {"tickets": 66.0, "money": 72.0, "value": -2.5, "odds": -110},
+                        ("spreads", "away"): {"tickets": 34.0, "money": 28.0, "value": 2.5, "odds": -110},
+                        ("totals", "over"): {"tickets": 58.0, "money": 61.0, "value": 151.5, "odds": -110}}}
+    counts: dict = {}
+    rows = dk.build_rows("NCAAB", [parsed], [ours], datetime(2026, 11, 26, 18, 0, tzinfo=timezone.utc),
+                         counts, reg)
+    got = {(r["market"], r["side"]): (r["bet_pct"], r["line_value"]) for r in rows}
+    # Gonzaga's own -2.5 and its 66% now sit on our away side; the total is untouched.
+    assert got == {("spreads", "away"): (66.0, -2.5), ("spreads", "home"): (34.0, 2.5),
+                   ("totals", "over"): (58.0, 151.5)}
+    assert counts["swapped"] == 1 and "unmatched" not in counts
+    # The orientation DK prints is tried first: a game that matches as printed is never swapped.
+    hit, swapped = dk.match_oriented("NCAAB", {**parsed, "home": "Baylor", "away": "Gonzaga"}, [ours],
+                                     registry=reg)
+    assert hit is ours and swapped is False
