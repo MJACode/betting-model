@@ -249,7 +249,7 @@ function renderFeed(now, f) {
   // The DraftKings scraper's own health. The per-league lines live once, in
   // the "Live lines by sportsbook" table below, so they are not repeated here.
   const p = f.process, rate = f.log?.rate;
-  let h = `<h2>DraftKings in-play feed ${taskLine(now, f.task)} ${pill(f.presence.tone, f.presence.text)}</h2>`;
+  let h = `<h2>Live scraper (this PC) <span class="note">the DraftKings board; the other books run inside it</span> ${taskLine(now, f.task)} ${pill(f.presence.tone, f.presence.text)}</h2>`;
   const blank = `<span class="note">no data</span>`;
   h += `<div class="tiles">`;
   h += tile("Reads / sec", rate ? `${rate.per_s.toFixed(2)} <small>all leagues</small>` : blank);

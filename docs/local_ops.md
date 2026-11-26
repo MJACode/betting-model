@@ -239,7 +239,8 @@ appears on its own.
 
 | Job | What it shows | Read from |
 |---|---|---|
-| DraftKings in-play feed | each league's freshness (red past the 8 s the in-play models accept; an idle league is read every 30 s), live games matched, rows saved per minute over the last hour, reads a second, the runs today, warnings collapsed with a count | `dk_live_feed` every 2 s, `dk_live_reads` every 15 s, the feed's log (path from its `--log` argument) and its launcher log |
+| Live scraper (this PC) | the DraftKings board process's own health: reads a second, up for, CPU and memory, last log line, the runs today, warnings collapsed with a count. The per-league freshness (red past the 8 s the in-play models accept) moved to the "Live lines by sportsbook" table, which also carries the other books. The other six books run on a thread inside this process. | `dk_live_feed` / `book_live_feed` every 2 s, `dk_live_reads` every 15 s, the feed's log (path from its `--log` argument) and its launcher log |
+| Live lines by sportsbook | one row per book and league: DraftKings first (its per-league freshness, live games, rows saved per minute as a sparkline), then every other book's last read (status, HTTP answer, live games placed on our games, lines changed) | `dk_live_feed`, `book_live_feed` every 2-5 s |
 | Backup to this PC | the stage of the newest pass, and while tables copy: the table, rows copied, rows a second, tables done of 338; the last finished copy and report | the pass's log files, `supabase_mirror\progress.json` and `STATE.json`, `pc_copy_snapshots` |
 | Tennis feeds | each source's last pass (DraftKings prices stored, Pinnacle matches, TennisExplorer rows), recent passes, Pinnacle prices saved in the last hour | `tennis_feeds_*.log`, `tennis_pinnacle_prices` |
 | Every job | task state and last result in plain words, its processes with CPU and memory | Task Scheduler every 30 s, psutil every second |
