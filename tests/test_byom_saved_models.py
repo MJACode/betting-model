@@ -65,6 +65,9 @@ def test_the_migration_is_not_registered_and_not_anon_granted():
         "mcp_my_status",
         "mcp_disconnect",
         "mcp_disconnect_assistant",
+        "byom_my_open_bets",
+        "byom_alert_settings",
+        "byom_set_alerts",
     )
     assert not (set(RPC_AFTER_SIGN_IN) & set(RPC_ANON_CALLABLE))
     assert not (set(RPC_AFTER_SIGN_IN) & set(RPC_REVOKE))

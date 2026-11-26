@@ -23,6 +23,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, Live lines from every book; NHL and EuroLeague on the DK board; EuroLeague live scores (mike) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, AI assistant (MCP): every stored game market, EuroLeague and NBL, and the missing props (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, Signals card: live score gets its own line (Matt) |
+| 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, My models: alerts and open-bet cards, NFL first (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, NBA official injury-report archive: backfill as a worker job (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, Pick cards: every sport's live score in the card, and the score opens the game (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, NFL opener spread: no bet on a gap no real number has shown (mike) |

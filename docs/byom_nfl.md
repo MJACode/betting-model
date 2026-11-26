@@ -427,3 +427,53 @@ is unchanged. NBA props are a separate sport on the same builder.
 `byom_save_model`, `byom_list_models`, and `byom_delete_model`.
 `useByomBacktest` and `useByomModels` still drop a slower response.
 `byomFilters` rejects a mixed-case or unknown key.
+
+## Alerts and open bets (2026-11-25)
+
+Matt, 2026-11-25: alert the member when one of their saved models has a
+bet, and show it as a card. NFL only to start. Chosen the same day: alert
+on every odds refresh, cards on the Picks tab (Signals, "My models") and
+on the model's page ("Open bets"), on by default with a switch per model,
+and kept out of the official record.
+
+**The bet.** `byom_legs(season, filters, 'open')` returns the official
+legs on games that have not started and are not graded: the first
+DraftKings line and price that fit the rules, the same lock the model's
+record uses. 'official' and 'close' are unchanged. A leg whose price is
+not American is not an alert.
+
+**The pass.** `byom/alerts.py`, worker job `byom_alerts`, queued by
+`scheduler.queue_byom_alerts` after every refresh pass (one row per pass,
+keyed on the pass's ET minute). It:
+
+1. rebuilds facts and official candidates for NFL games that kick off
+   today through `UPCOMING_DAYS` (2) ET days ahead and have not started.
+   Later games are rebuilt by the daily 10:41am refresh. Stored odds
+   only, no API credits;
+2. runs `byom_legs(..., 'open')` for every NFL model with
+   `alerts_enabled`, and inserts each bet into `byom_alerts` once
+   (`ON CONFLICT DO NOTHING` on model, game, market, side, player). A
+   later pass where the line moved does not change the row;
+3. sends one push per model per pass to that member's devices and
+   writes one `notification_inbox` row (kind `byom_bet`), unless the
+   member muted NFL. The body is the stored `byom_leg_label`.
+   `notified_at` is set once, with or without a device.
+
+Push payload: `{v, type: 'byom_bet', sport, modelId, alertId?}`. A tap
+opens the model's page.
+
+**Not picks.** Nothing reads or writes `picks`, posts to Discord or X, or
+is in the Record. A model delete or account delete removes its
+`byom_alerts` rows (`ON DELETE CASCADE`), the same as its snapshots.
+
+**The RPCs** (signed in, `auth.uid()`): `byom_my_open_bets()` (bets not
+yet graded, kickoff within the last 24 hours or later, 200 at most),
+`byom_alert_settings()`, `byom_set_alerts(model_id, enabled)`.
+
+**Applying it.** `data/migrations/byom_alerts_2026_11_25.sql` is hand
+applied and is not in `ACTIVE_MIGRATIONS`. Until it is, the job returns
+`not_applied` and the app shows no section and no switch. It patches the
+live `byom_legs` at anchors (raises and changes nothing if one is not
+there) the way `byom_no_half_yards_2026_11_17.sql` does. A later file
+that re-creates `byom_legs` from its own text must keep the `open`
+branch. Tests: `tests/test_byom_alerts.py`, `mobile/scripts/verify_byom_alerts.ts`.

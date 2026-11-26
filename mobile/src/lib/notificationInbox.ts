@@ -123,6 +123,7 @@ export function inboxRouteCaption(row: InboxRow): string {
   if (hasPick && (type === 'dropped' || row.kind === 'dropped')) {
     return 'Today · opens this pick';
   }
+  if (type === 'byom_bet' || row.kind === 'byom_bet') return 'My models · opens this model';
   if (hasPick) return 'Signals · opens this pick';
   if (type === 'live_signals') return 'Live · opens Picks · Live Signals';
   if (type === 'new_bets') return 'Signals · opens Picks · Signals';
@@ -136,6 +137,8 @@ export function inboxIconName(row: InboxRow): string {
   if (row.kind === 'feedback_reply') return 'chatbubble-ellipses';
   if (row.kind === 'live_signals') return 'locate';
   if (row.kind === 'new_bets') return 'flash';
+  // A bet from the member's own model, not an official pick (2026-11-25).
+  if (row.kind === 'byom_bet') return 'construct';
   if (row.kind === 'dropped') return 'analytics';
   if (row.kind === 'line_change') {
     return /against/i.test(row.title) ? 'trending-down' : 'trending-up';

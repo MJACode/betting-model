@@ -1034,5 +1034,11 @@ RPC_AFTER_SIGN_IN: tuple[str, ...] = (
     # mcp_multi_assistant_2026_11_22.sql grants EXECUTE to authenticated only
     # (Matt, 2026-11-22: disconnect one assistant of several).
     "mcp_disconnect_assistant",
+    # Alerts and open bets on the member's own models (Matt, 2026-11-25).
+    # byom_alerts_2026_11_25.sql grants EXECUTE to authenticated only and
+    # is hand applied, so the sweep must not name them.
+    "byom_my_open_bets",
+    "byom_alert_settings",
+    "byom_set_alerts",
 )
 
