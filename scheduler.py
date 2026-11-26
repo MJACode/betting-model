@@ -655,7 +655,7 @@ def run_refresh_pass(mode: str = "hourly") -> str | None:
 
 
 def queue_byom_alerts(mode: str = "hourly") -> None:
-    """Queue one byom_alerts job (NFL) for the pass that just ran.
+    """Queue one byom_alerts job per alert sport for the pass that just ran.
 
     The job queue runs it on its next tick, under its one-job lock, so the
     rebuild never overlaps the daily BYOM refresh. The dedupe key is the
@@ -666,16 +666,22 @@ def queue_byom_alerts(mode: str = "hourly") -> None:
         from zoneinfo import ZoneInfo
 
         from data.db import get_connection
+        from byom.alerts import ALERT_SPORTS
         from tracking.job_queue import enqueue
         stamp = datetime.now(ZoneInfo(TIMEZONE)).strftime("%Y-%m-%dT%H:%M")
         conn = get_connection()
         try:
-            job_id = enqueue(
-                conn, "byom_alerts", {"sport": "NFL"},
-                requested_by="scheduler",
-                note=f"BYOM NFL alerts after refresh-pass[{mode}] (Matt, 2026-11-25).",
-                dedupe_key=f"byom-nfl-alerts-{stamp}")
-            log.info("BYOM NFL alerts: queued %s", job_id)
+            # One sport's failure does not skip the other.
+            for sport in ALERT_SPORTS:
+                try:
+                    job_id = enqueue(
+                        conn, "byom_alerts", {"sport": sport},
+                        requested_by="scheduler",
+                        note=f"BYOM {sport} alerts after refresh-pass[{mode}] (Matt, 2026-11-25).",
+                        dedupe_key=f"byom-{sport.lower()}-alerts-{stamp}")
+                    log.info("BYOM %s alerts: queued %s", sport, job_id)
+                except Exception:  # noqa: BLE001
+                    log.exception("ERROR BYOM %s alerts enqueue failed", sport)
         finally:
             conn.close()
     except Exception:  # noqa: BLE001 - must never kill the scheduler
@@ -934,8 +940,8 @@ def run_byom_nfl_refresh() -> None:
             # builder). nba_player_game_log lands by about 1:30am ET
             # (measured 2026-11-04), so this hour covers both. One sport's
             # failure does not skip the other.
-            # NHL game bets joined 2026-11-05.
-            for sport in ("NFL", "NBA", "NHL"):
+            # NHL game bets joined 2026-11-05. NCAAB game lines 2026-11-26.
+            for sport in ("NFL", "NBA", "NHL", "NCAAB"):
                 try:
                     job_id = enqueue(
                         conn, "byom_refresh", {"sport": sport, "apply": True},
@@ -3225,7 +3231,7 @@ def build_scheduler() -> BlockingScheduler:
         run_byom_nfl_refresh,
         CronTrigger(hour=10, minute=41, timezone=TIMEZONE),
         id="byom_nfl_refresh",
-        name="BYOM NFL, NBA and NHL refresh (queued daily 10:41am ET)",
+        name="BYOM NFL, NBA, NHL and NCAAB refresh (queued daily 10:41am ET)",
     )
 
     # Heartbeat watchdog — every 15 minutes, around the clock.

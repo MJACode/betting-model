@@ -15,7 +15,7 @@ const MINUS = '\u2212';
 
 export type ByomKickSlot = 'early' | 'late' | 'prime';
 export type ByomPriceBand = 'plus' | 'mid' | 'heavy' | 'custom';
-export type ByomSportId = 'NFL' | 'NBA' | 'NHL';
+export type ByomSportId = 'NFL' | 'NBA' | 'NHL' | 'NCAAB';
 export type ByomLineMove = 'toward' | 'against' | 'none';
 export type ByomPrevResult = 'won' | 'lost';
 export type ByomPrevAts = 'covered' | 'not_covered';

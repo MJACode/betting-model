@@ -28,7 +28,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export function ByomModelList({ sport }: { sport: Sport }) {
   const navigation = useNavigation<Nav>();
   const { scope } = useByomSeason();
-  const built = sport === 'NFL' || sport === 'NBA' || sport === 'NHL';
+  const built = sport === 'NFL' || sport === 'NBA' || sport === 'NHL' || sport === 'NCAAB';
   const byomSport = asByomSport(sport);
   const facts = useNbaGameFacts(byomSport);
   const { rows, loading, error, noAccess, reload, signedIn, authReady } = useByomLeaderboard(sport, scope);
@@ -131,7 +131,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
         ) : (
           <EmptyState
             title={`No ${sportDisplayName(sport)} models yet`}
-            subtitle="Switch to NFL, NBA or NHL to build a model."
+            subtitle="Switch to NFL, NBA, NHL or NCAAB to build a model."
           />
         )
       }

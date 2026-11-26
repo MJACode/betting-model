@@ -35,8 +35,8 @@ from loguru import logger
 from byom.game_facts import parse_date
 from byom.refresh import _aware, _clock, _season_for
 
-# Matt, 2026-11-25: NFL first.
-ALERT_SPORTS = ("NFL",)
+# Matt, 2026-11-25: NFL first. NCAAB game lines 2026-11-26 ("Do NCAAB next").
+ALERT_SPORTS = ("NFL", "NCAAB")
 
 # Not a lock window. Games that kick off today through this many ET days
 # ahead are rebuilt on every pass. A later game is rebuilt by the daily
@@ -158,10 +158,16 @@ def find_new_bets(conn, sport: str = "NFL", today=None) -> list[dict]:
     season = _season_for(sport, as_of)
     found = []
     for model_id, user_id, name, filters in conn.execute(_MODELS, (sport,)).fetchall():
+        # byom_save_model keeps the sport in its own column and strips it
+        # from filters, and byom_legs reads a missing sport as NFL. So the
+        # model's sport goes back in here, or an NCAAB model is matched
+        # against NFL games.
+        stored = dict(filters) if isinstance(filters, dict) else {}
+        stored["sport"] = sport
         params = {
             "model_id": model_id, "user_id": user_id, "sport": sport,
             "season": season,
-            "filters": json.dumps(filters if isinstance(filters, dict) else (filters or {})),
+            "filters": json.dumps(stored),
         }
         conn.execute("SAVEPOINT byom_alert_model")
         try:

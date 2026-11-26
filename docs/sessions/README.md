@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, My models: NCAAB game lines on the builder, and NCAAB alerts (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, My models: alerts and open-bet cards, NFL first (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, NBA official injury-report archive: backfill as a worker job (Matt) |
 | 2026-11-24 | [2026-11](./2026-11.md) | 2026-11-24, Pick cards: every sport's live score in the card, and the score opens the game (Matt) |

@@ -82,7 +82,7 @@ export function ByomAlertToggle({ modelId, modelName }: { modelId: string; model
   }
 
   const note = enabled
-    ? 'You get a notification when this model finds a bet. NFL only for now.'
+    ? 'You get a notification when this model finds a bet.'
     : 'No notifications from this model. Its bets still show here.';
   return (
     <View style={styles.card}>

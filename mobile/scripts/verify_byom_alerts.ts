@@ -10,6 +10,7 @@
 
 import { routeForPush, PUSH_ROUTE_VERSION } from '../src/lib/pushRoute';
 import { isMissingFunction, matchupLabel, parseOpenBet } from '../src/lib/byomAlertRows';
+import { asByomSport, byomHasProps, byomSeasonName, byomStartWord, byomUsesRest, seasonListFor } from '../src/lib/byomRecord';
 
 let failed = 0;
 function check(name: string, ok: boolean, detail?: unknown): void {
@@ -41,6 +42,15 @@ check('the matchup is away @ home', bet != null && matchupLabel(bet) === 'DET @ 
 check('a row with no price is dropped', parseOpenBet({ ...row, price: null }) === null);
 check('a row with no label is dropped', parseOpenBet({ ...row, label: '' }) === null);
 check('a missing RPC reads as not applied', isMissingFunction({ code: 'PGRST202' }) && !isMissingFunction({ code: '42501' }));
+
+// NCAAB game lines on the builder (Matt, 2026-11-26).
+const nov = new Date('2026-11-26T15:00:00Z');
+const ncaab = seasonListFor('NCAAB', nov);
+check('NCAAB seasons run 2021 to the ending year 2027', ncaab[0] === 2021 && ncaab[ncaab.length - 1] === 2027, ncaab);
+check('NCAAB is game bets only', !byomHasProps('NCAAB') && byomHasProps('NFL') && byomHasProps('NBA') && !byomHasProps('NHL'));
+check('NCAAB uses rest chips and tipoff', byomUsesRest('NCAAB') && byomStartWord('NCAAB') === 'tipoff');
+check('an NCAAB season reads 2026-27', byomSeasonName('NCAAB', 2027) === '2026-27');
+check('NCAAB round-trips as a sport', asByomSport('NCAAB') === 'NCAAB' && asByomSport('NCAAF') === 'NFL');
 
 if (failed > 0) {
   console.log(`${failed} check(s) failed`);

@@ -48,7 +48,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
   const [noAccess, setNoAccess] = useState(false);
   const seq = useRef(0);
   const seenScope = useRef(scope);
-  const built = sport === 'NFL' || sport === 'NBA' || sport === 'NHL';
+  const built = sport === 'NFL' || sport === 'NBA' || sport === 'NHL' || sport === 'NCAAB';
   const byomSport: ByomSport = asByomSport(sport);
   const enabled = built && ready && signedIn;
 

@@ -554,6 +554,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # the close. Patches the live body at two anchors (raises if either
     # is not there exactly once). Skips once byom_no_half_yards_v1.
     "byom_no_half_yards_2026_11_17.sql",
+    # 2026-11-26 (Matt, "Do NCAAB next"; game lines only): byom_legs and
+    # byom_save_model accept NCAAB, ending-year seasons. Patches both live
+    # bodies at anchors (raises if one is not there exactly once). Skips
+    # once both carry byom_ncaab_v1. Does not write picks.
+    "byom_ncaab_2026_11_26.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.

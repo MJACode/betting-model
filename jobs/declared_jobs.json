@@ -1145,6 +1145,17 @@
     }
   },
   {
+    "key": "byom-ncaab-game-facts",
+    "job_type": "byom_game_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-26: NCAAB game lines on the builder (\"Do NCAAB next\"; game lines, no props). enabled and apply are true, so sync_declared_jobs enqueues this once. Every NCAAB season from 2021 (measured 2026-11-26: 0 of 300 sampled 2018-2020 games have a DraftKings line, 194 of 300 in 2021). Writes byom_game_facts and the official candidates in byom_official_legs. The job applies ACTIVE_MIGRATIONS first, so byom_ncaab_2026_11_26.sql is in place. The NHL backfill took 781 s for about 7,600 games; NCAAB holds about 6,000 games a season, so expect roughly an hour. The daily refresh keeps the current season current. Reads stored odds only: no API credits. Does not write picks.",
+    "args": {
+      "sport": "NCAAB",
+      "apply": true
+    }
+  },
+  {
     "key": "byom-nhl-game-facts",
     "job_type": "byom_game_facts",
     "requested_by": "owner",
