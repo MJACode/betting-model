@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Permission prompts in every new chat (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, A red ops alert when a book throttles the live reads (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, MoneyPuck NHL files, and the shot/xG catch-up |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Other books polled as fast as they allow, targeting 1 s (mike) |
