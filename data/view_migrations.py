@@ -866,6 +866,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # _p1, ...). Runs while scoreboard_splits_history_market_period_check is
     # missing or the old market check remains.
     "scoreboard_splits_period_markets_2026_11_26.sql",
+    # DraftKings' player-prop handle and bet shares from DK Network's prop-split
+    # articles (mike, 2026-11-26). Two worker-only tables, RLS on, anon and
+    # authenticated revoked; touches no pick, odds, split or record table.
+    # Returns on a catalog read once both exist and are locked.
+    "dk_prop_splits_2026_11_26.sql",
     # MoneyPuck.com NHL files (shots, team / skater / goalie / line
     # game-by-game, player bios). Research rows, not a pick input.
     # Credit MoneyPuck.com. Creates the tables once; the 7:20am job fills

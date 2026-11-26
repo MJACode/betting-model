@@ -2016,5 +2016,14 @@
     "requested_by": "mike",
     "note": "mike 2026-11-26 ('Do all the outstanding tasks now'): before a prop-splits scraper is written, how many DK Network player-prop split articles exist (WordPress posts API searches), their date range and titles, and how two article bodies lay out the numbers; plus tennis splits on Action Network, which the coverage probe skipped. Writes nothing, no Odds API credits.",
     "args": {}
+  },
+  {
+    "key": "dk-prop-splits-backfill-2026-11-26",
+    "job_type": "dk_prop_splits_import",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26 ('Do all the outstanding tasks now'): every DK Network player-prop split article the WordPress search returns, up to 50 pages of 100, into dk_prop_split_articles / dk_prop_splits. The probe (worker_jobs 1723195) found 34 from 2026-09-14 to 2026-11-23 within its 1,000-post cap, and a 2025-02-09 Super Bowl article outside it. Free, no Odds API credits; a version already stored is not fetched.",
+    "args": {
+      "pages": 50
+    }
   }
 ]
