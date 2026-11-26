@@ -1936,5 +1936,12 @@
     "requested_by": "matt",
     "note": "Matt 2026-11-26 ('Yes on 3'): which markets and periods carry % of bets / % of money beyond the full-game moneyline, spread and total. DK Network: every sport page's market filters and row labels. Action Network: NBA, NHL, NFL, NCAAB, NCAAF for eight periods values. Writes nothing, no Odds API credits.",
     "args": {}
+  },
+  {
+    "key": "splits-team-totals-probe-2026-11-26",
+    "job_type": "splits_markets_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-26 ('yes add splits'): re-runs the splits-markets probe, which now prints the first game's consensus team-total entries (core_bet_type_6_team_score) per sport verbatim, so their side / team / line / bet_info shape is known before a parser is written. Writes nothing, no Odds API credits.",
+    "args": {}
   }
 ]
