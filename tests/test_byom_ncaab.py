@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_byom_alerts import CHAIN, ROOT
+from tests.test_byom_alerts import CHAIN, ROOT, STUBS
 
 SQL_NAME = "byom_ncaab_2026_11_26.sql"
 USER_A = "11111111-1111-1111-1111-111111111111"
@@ -83,7 +83,7 @@ def scratch():
             GRANT USAGE ON SCHEMA auth TO anon, authenticated;
             CREATE TABLE device_push_tokens (
               token text, device_id text, user_id uuid, enabled boolean);
-        """)
+        """ + STUBS + f"INSERT INTO members VALUES ('{USER_A}');")
         for name in CHAIN:
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         ncaab = (ROOT / "data/migrations" / SQL_NAME).read_text(encoding="utf-8")

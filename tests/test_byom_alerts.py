@@ -18,6 +18,30 @@ SQL_NAME = "byom_alerts_2026_11_25.sql"
 USER_A = "11111111-1111-1111-1111-111111111111"
 USER_B = "22222222-2222-2222-2222-222222222222"
 
+# Members only (Matt, 2026-11-26). The two per-user checks has_app_access()
+# makes, stubbed on a table the tests fill; and the two latest-line tables.
+STUBS = """
+    CREATE TABLE members (user_id uuid PRIMARY KEY);
+    CREATE FUNCTION public.app_subscription_access_for(p_user_id uuid)
+      RETURNS boolean LANGUAGE sql STABLE AS $$
+      SELECT EXISTS (SELECT 1 FROM members WHERE user_id = p_user_id) $$;
+    CREATE FUNCTION public.app_grant_access_for(p_user_id uuid)
+      RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT false $$;
+    CREATE FUNCTION public.has_app_access()
+      RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER AS $$
+      SELECT auth.uid() IS NOT NULL
+         AND public.app_subscription_access_for(auth.uid()) $$;
+    GRANT EXECUTE ON FUNCTION public.has_app_access() TO authenticated;
+    CREATE TABLE latest_odds (
+      game_id text, market text, bookmaker text, snapshot_at text,
+      home_price numeric, away_price numeric, spread_home numeric,
+      total_line numeric, over_price numeric, under_price numeric,
+      line_key numeric);
+    CREATE TABLE latest_prop_odds (
+      game_id text, market text, player_name text, bookmaker text,
+      line numeric, snapshot_at text, over_price numeric, under_price numeric);
+"""
+
 CHAIN = (
     "byom_facts_schema_2026_10_16.sql",
     "byom_dk_start_price_2026_10_23.sql",
@@ -40,14 +64,18 @@ CHAIN = (
 
 # ── static ───────────────────────────────────────────────────────────────────
 
-def test_the_migration_is_hand_applied_and_never_touches_picks():
+def test_the_worker_applies_the_migration_and_it_never_touches_picks():
     from data.view_migrations import ACTIVE_MIGRATIONS
     from scripts.apply_anon_grants import MAY_BE_UNAPPLIED
 
-    assert SQL_NAME not in ACTIVE_MIGRATIONS
+    # Matt, 2026-11-26: "You run the supabase". The worker applies it.
+    assert SQL_NAME in ACTIVE_MIGRATIONS
+    assert (ACTIVE_MIGRATIONS.index(SQL_NAME)
+            > ACTIVE_MIGRATIONS.index("byom_no_half_yards_2026_11_17.sql"))
     sql = (ROOT / "data/migrations" / SQL_NAME).read_text(encoding="utf-8")
-    assert "HAND APPLIED" in sql
     assert "byom_open_bets_v1" in sql
+    assert "byom_alerts_members_v1" in sql
+    assert "premium access required" in sql
     assert "auth.uid()" in sql
     assert "REVOKE ALL ON public.byom_alerts FROM PUBLIC, anon, authenticated" in sql
     assert "byom_alerts" not in MAY_BE_UNAPPLIED
@@ -147,12 +175,16 @@ def scratch():
             GRANT USAGE ON SCHEMA auth TO anon, authenticated;
             CREATE TABLE device_push_tokens (
               token text, device_id text, user_id uuid, enabled boolean);
-        """)
+        """ + STUBS)
         for name in CHAIN:
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         sql = (ROOT / "data/migrations" / SQL_NAME).read_text(encoding="utf-8")
         cur.execute(sql)
-        cur.execute(sql)  # the second run skips the patch and changes nothing
+        cur.execute("SELECT 'public.byom_my_open_bets()'::regprocedure::oid")
+        first_oid = cur.fetchone()[0]
+        cur.execute(sql)  # the second run returns before any DDL
+        cur.execute("SELECT 'public.byom_my_open_bets()'::regprocedure::oid")
+        assert cur.fetchone()[0] == first_oid
         cur.execute(f"""
             INSERT INTO byom_game_facts (
               canonical_key, sport, season, week, away_team, home_team,
@@ -188,6 +220,13 @@ def scratch():
                'NFL', '{{"markets":["spreads"],"side":"home"}}');
             INSERT INTO device_push_tokens VALUES
               ('ExponentPushToken[a]', 'dev-a', '{USER_A}', true);
+            INSERT INTO members VALUES ('{USER_A}'), ('{USER_B}');
+            -- DraftKings now: BUF -2.5 at -105, after the bet fit at -1 -110.
+            INSERT INTO latest_odds VALUES
+              ('NFL_2026_13_DET_BUF', 'spreads', 'draftkings', '2026-11-26T12:00:00Z',
+               -105, -115, -2.5, NULL, NULL, NULL, 0),
+              ('NFL_2026_13_DET_BUF', 'spreads', 'fanduel', '2026-11-26T12:05:00Z',
+               -120, 100, -3.5, NULL, NULL, NULL, 0);
         """)
         raw.autocommit = False
         from data.db import DBConnection
@@ -275,10 +314,17 @@ def test_member_rpcs_are_their_own_and_anon_has_none(scratch, monkeypatch):
     monkeypatch.setattr("tracking.push_notifier._expo_send", lambda m, conn=None: 0)
     alerts.run(conn, rebuild=False, today=datetime.now(timezone.utc))
     cur = raw.cursor()
+    # A newer DraftKings quote taken after the start is not the line now.
+    cur.execute("""INSERT INTO latest_odds VALUES
+        ('NFL_2026_13_DET_BUF', 'spreads', 'draftkings',
+         to_char(now() + interval '2 days', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+         150, -180, -9.5, NULL, NULL, NULL, 0)""")
     cur.execute("SET ROLE authenticated")
     cur.execute("SELECT set_config('byom.uid', %s, false)", (USER_A,))
-    cur.execute("SELECT model_name, label, price, started FROM byom_my_open_bets()")
-    assert cur.fetchall() == [("Home spreads", "BUF -1", -110, False)]
+    cur.execute("SELECT model_name, label, price, started, now_label, now_price "
+                "FROM byom_my_open_bets()")
+    # The bet stays the line it fit at; DraftKings' line now is beside it.
+    assert cur.fetchall() == [("Home spreads", "BUF -1", -110, False, "BUF -2.5", -105)]
     cur.execute("SELECT model_id::text, alerts_enabled FROM byom_alert_settings() ORDER BY 1")
     assert [r[1] for r in cur.fetchall()] == [True, True]
     cur.execute("SELECT byom_set_alerts('aaaaaaaa-0000-0000-0000-000000000002', false)")
@@ -293,6 +339,30 @@ def test_member_rpcs_are_their_own_and_anon_has_none(scratch, monkeypatch):
     cur.execute("SET ROLE anon")
     with pytest.raises(psycopg2.errors.InsufficientPrivilege):
         cur.execute("SELECT * FROM byom_my_open_bets()")
+    raw.rollback()
+
+
+def test_members_only(scratch, monkeypatch):
+    psycopg2, raw, conn = scratch
+    from byom import alerts
+
+    monkeypatch.setattr("tracking.push_notifier._expo_send", lambda m, conn=None: 0)
+    cur = raw.cursor()
+    cur.execute("DELETE FROM members WHERE user_id = %s", (USER_B,))
+    raw.commit()
+    report = alerts.run(conn, rebuild=False, today=datetime.now(timezone.utc))
+    assert report["announced"]["alerts"] == 1
+    cur.execute("SELECT DISTINCT user_id::text FROM byom_alerts")
+    assert cur.fetchall() == [(USER_A,)]
+    cur.execute("SET ROLE authenticated")
+    cur.execute("SELECT set_config('byom.uid', %s, false)", (USER_B,))
+    with pytest.raises(psycopg2.Error) as refused:
+        cur.execute("SELECT * FROM byom_my_open_bets()")
+    # The premium gate's own refusal, so the app shows its locked state.
+    assert refused.value.pgcode == "42501"
+    assert refused.value.diag.message_primary == "premium access required"
+    assert refused.value.diag.message_hint == (
+        "An active subscription, trial or comped grant is required.")
     raw.rollback()
 
 

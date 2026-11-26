@@ -20,6 +20,13 @@ export interface ByomOpenBet {
   detected_at: string;
   /** Kickoff has passed; the result is not in yet. */
   started: boolean;
+  /**
+   * DraftKings' line in force now for the same bet, labelled by the server
+   * (byom_leg_label) like `label`. Null when no current quote is stored.
+   */
+  now_label: string | null;
+  now_price: number | null;
+  now_at: string | null;
 }
 
 export type ByomOpenBetsResult =
@@ -66,7 +73,25 @@ export function parseOpenBet(row: unknown): ByomOpenBet | null {
     locked_at: str(r.locked_at),
     detected_at: detected,
     started: r.started === true,
+    now_label: str(r.now_label),
+    now_price: num(r.now_price),
+    now_at: str(r.now_at),
   };
+}
+
+/**
+ * The line now, when it differs from the bet's: "BUF -2.5", "-105". Null
+ * when there is no current quote or nothing moved. Both strings come from
+ * the server; nothing here rebuilds a line (CLAUDE.md §00).
+ */
+export function movedLine(
+  bet: Pick<ByomOpenBet, 'label' | 'price' | 'now_label' | 'now_price' | 'started'>,
+): { label: string; price: number } | null {
+  // After the start a quote is in-play or frozen, and either reads as live.
+  if (bet.started) return null;
+  if (bet.now_label == null || bet.now_price == null) return null;
+  if (bet.now_label === bet.label && bet.now_price === bet.price) return null;
+  return { label: bet.now_label, price: bet.now_price };
 }
 
 /** "DET @ BUF" from the stored teams, or null. */
