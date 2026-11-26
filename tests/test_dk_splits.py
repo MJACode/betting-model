@@ -305,3 +305,40 @@ def test_ncaab_two_schools_with_the_same_abbreviation_and_mascot_resolve_to_noth
               "display_name": "Miami (OH) RedHawks", "short_name": "Miami OH", "abbreviation": "MIA"}]
     assert dk.ncaab_school("MIA Hurricanes", twins) is None
     assert dk.ncaab_school("MIA Hurricanes", twins[:1]) == "Miami"
+
+
+def test_measured_college_aliases_match_our_school_ids():
+    # The worker's first NCAAF / NCAAB pass (2026-11-26 18:35 UTC) left exactly these unmatched.
+    assert dk.team_matches("NCAAB", "Miami FL", "Miami", registry=REGISTRY)
+    assert dk.team_matches("NCAAF", "Miami FL", "Miami")
+    assert dk.team_matches("NCAAF", "FIU", "Florida International")
+    assert not dk.team_matches("NCAAF", "Miami FL", "Miami (OH)")
+
+
+def test_a_game_dk_orients_the_other_way_matches_with_sides_relabelled():
+    # DK "Baylor @ Gonzaga"; our schedule has Baylor at home (NCAAB_2026-11-26_gonzaga_baylor).
+    reg = REGISTRY + [
+        {"espn_id": 239, "school": "Baylor", "slug": "baylor", "mascot": "Bears",
+         "display_name": "Baylor Bears", "short_name": "Baylor", "abbreviation": "BAY",
+         "is_d1": True, "alt": []},
+        {"espn_id": 2250, "school": "Gonzaga", "slug": "gonzaga", "mascot": "Bulldogs",
+         "display_name": "Gonzaga Bulldogs", "short_name": "Gonzaga", "abbreviation": "GONZ",
+         "is_d1": True, "alt": []}]
+    ours = {"game_id": "NCAAB_2026-11-26_gonzaga_baylor", "sport": "NCAAB", "game_date": "2026-11-26",
+            "home_team": "Baylor", "away_team": "Gonzaga", "commence_time": "2026-11-27T02:00:00+00:00"}
+    parsed = {"home": "Gonzaga", "away": "Baylor", "date": "2026-11-26",
+              "sides": {("spreads", "home"): {"tickets": 66.0, "money": 72.0, "value": -2.5, "odds": -110},
+                        ("spreads", "away"): {"tickets": 34.0, "money": 28.0, "value": 2.5, "odds": -110},
+                        ("totals", "over"): {"tickets": 58.0, "money": 61.0, "value": 151.5, "odds": -110}}}
+    counts: dict = {}
+    rows = dk.build_rows("NCAAB", [parsed], [ours], datetime(2026, 11, 26, 18, 0, tzinfo=timezone.utc),
+                         counts, reg)
+    got = {(r["market"], r["side"]): (r["bet_pct"], r["line_value"]) for r in rows}
+    # Gonzaga's own -2.5 and its 66% now sit on our away side; the total is untouched.
+    assert got == {("spreads", "away"): (66.0, -2.5), ("spreads", "home"): (34.0, 2.5),
+                   ("totals", "over"): (58.0, 151.5)}
+    assert counts["swapped"] == 1 and "unmatched" not in counts
+    # The orientation DK prints is tried first: a game that matches as printed is never swapped.
+    hit, swapped = dk.match_oriented("NCAAB", {**parsed, "home": "Baylor", "away": "Gonzaga"}, [ours],
+                                     registry=reg)
+    assert hit is ours and swapped is False
