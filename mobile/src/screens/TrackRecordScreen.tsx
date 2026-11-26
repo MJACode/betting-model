@@ -163,7 +163,7 @@ export function TrackRecordScreen() {
       >
         <View style={styles.titleRow}>
           <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-            Track Record
+            Signal Record
           </Text>
           {/* Icon-only actions — labeled pills pushed Share off narrow screens. */}
           <View style={styles.rightActions}>
@@ -238,7 +238,7 @@ export function TrackRecordScreen() {
             refresh over a record already on screen is a banner instead. */}
         {error && rows.length === 0 ? (
           <View style={styles.errCard}>
-            <ErrorState compact what="the track record" error={error} onRetry={() => void load()} retrying={loading} />
+            <ErrorState compact what="the Signal Record" error={error} onRetry={() => void load()} retrying={loading} />
           </View>
         ) : error ? (
           <ErrorBanner
@@ -254,7 +254,7 @@ export function TrackRecordScreen() {
             Option B: posted-stake units beside a sparkline, then the 2×2 grid.
             The end pill on the curve is the same heroUnits string. */}
         {loading && rows.length === 0 && !error ? (
-          <Skeleton label="the track record" style={styles.heroCard}>
+          <Skeleton label="the Signal Record" style={styles.heroCard}>
             <View style={styles.skelTop}>
               <View>
                 <SkeletonBlock width={70} height={12} />

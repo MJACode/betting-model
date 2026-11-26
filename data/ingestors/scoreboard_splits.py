@@ -56,23 +56,22 @@ from data.ingestors.nba_public_splits_ingestor import (
 # how many of its last played date's games the matcher finds.
 SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB", "NCAAB", "WNBA")
 
-# Period splits (Matt, 2026-11-26: "Yes on splits", hourly).
-# CORRECTION (mike, 2026-11-26, later the same day): consensus serves NO period
-# split. The list below was chosen from worker_jobs 1698627, which counted
-# Action Network's 0/0 placeholder as a split. Counting only non-zero shares,
-# worker_jobs 1717775 (15:15 UTC) found no period and no team-total split at
-# consensus for NFL, NCAAF or NCAAB (NBA and NHL had no games that day), and
-# the hourly passes at 15:19, 15:28 and 16:18 UTC stored 0 period rows in all
-# five sports (worker log). The fetch is left in place so a period split shows
-# up in the history the day consensus starts serving one. No single book does
-# either: worker_jobs 1722475 (scripts/splits_coverage_probe.py, 18:05 UTC)
-# asked every book for every period and found no period and no team-total
-# split at any book in NBA, NHL, NFL, NCAAF or NCAAB.
+# Period splits (Matt, 2026-11-26: "Yes on splits", hourly). What is measured:
+# consensus serves NO period split. The first list came from worker_jobs
+# 1698627, which counted Action Network's 0/0 placeholder as a split. Counting
+# only non-zero shares, worker_jobs 1717775 (15:15 UTC, bookIds=15) found no
+# period and no team-total split at consensus for NFL (16 games), NCAAF (69) or
+# NCAAB (11); the hourly passes at 15:19, 15:28 and 16:18 UTC stored 0 period
+# rows in all five sports; and worker_jobs 1722475 (scripts/
+# splits_coverage_probe.py, 18:05 UTC, mike) asked every book for every period
+# and found none at any book in NBA, NHL, NFL, NCAAF or NCAAB.
+# mike's session kept the fetch for every sport so a split would be stored the
+# day one is served; Matt then chose to stop asking NFL, NCAAF and NCAAB ("Ok",
+# "Merge", 2026-11-26). NBA and NHL are still asked until
+# splits-nba-nhl-probe-2026-11-27 reports. Team totals carry the same
+# placeholder and are not parsed (Matt, "Ok").
 PERIODS_BY_SPORT: dict[str, tuple[str, ...]] = {
     "NBA": ("firsthalf", "secondhalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
-    "NFL": ("firsthalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
-    "NCAAF": ("firsthalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
-    "NCAAB": ("firsthalf", "secondhalf"),
     "NHL": ("firstperiod",),
 }
 # The odds table's period suffix for each v2 period (h2h_q1, totals_h1, ...), so

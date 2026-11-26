@@ -294,7 +294,7 @@ const TOOLS = [
   {
     name: "get_public_splits",
     title: "Public betting percentages for a game",
-    description: "% of bets and % of money on each side of the moneyline, spread and total for one game, before it starts: the latest numbers and the first ones recorded. book is DraftKings where DraftKings publishes its own split (full game only), otherwise Consensus (a blend of books). Consensus also splits periods, keyed like \"1Q total\" or \"1H spread\": NBA halves and quarters, NFL and NCAAF first half and quarters, NCAAB halves, NHL first period. Each spread side carries its own team and number.",
+    description: "% of bets and % of money on each side of the moneyline, spread and total for one game, before it starts: the latest numbers and the first ones recorded. book is DraftKings where DraftKings publishes its own split (full game only), otherwise Consensus (a blend of books). A period split, where one exists, is keyed like \"1Q total\". Each spread side carries its own team and number.",
     inputSchema: {
       type: "object", additionalProperties: false, required: ["game_id"],
       properties: { game_id: gameIdProp },
