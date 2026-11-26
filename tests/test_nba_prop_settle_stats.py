@@ -133,7 +133,8 @@ def test_combo_markets_are_mapped_to_helpers_and_only_the_nba_rule_uses_them():
     # sport's market rule pointed here would settle its picks from the NBA box.
     users = sorted(mid for mid, stat_map in pt._PROP_MARKET_STAT_BY_MODEL.items()
                    if stat_map is m)
-    assert users == ["nba_prop_market", "nba_prop_projection"], users
+    # 2026-11-26 (mike): nba_prop_market_early, the same rule decided 10 hours before tip, settles the same way.
+    assert users == ["nba_prop_market", "nba_prop_market_early", "nba_prop_projection"], users
     for sentinel in set(m.values()):
         assert pt._nba_prop_actual(FULL_ROW, sentinel) is not None, sentinel
 

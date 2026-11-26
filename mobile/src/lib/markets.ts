@@ -2099,6 +2099,8 @@ const BET_BOOK_LINE_MODELS: readonly string[] = [
   'ncaab_first_half_spread',
   'ncaab_first_half_total',
   'nba_prop_market',
+  // The same card's rows, decided 10 hours before tip (scripts/nba_prop_market_early_card.py).
+  'nba_prop_market_early',
   'nba_prop_projection',
   // NBA first basket (scripts/nba_first_basket_card.py): the same row, line 0.5 at every book.
   'nba_prop_first_basket',
@@ -2351,12 +2353,18 @@ export interface PickTiming {
 }
 
 /**
- * The NBA prop models that post once, 45-57 minutes before tip, off the books'
- * prices, with no lineup check, and whose bet is void when the player sits:
- * the rule (scripts/nba_prop_market_card.py) and the projection model
- * (scripts/nba_prop_projection_card.py).
+ * The NBA prop models that post once off the books' prices, with no lineup
+ * check, and whose bet is void when the player sits: the rule
+ * (scripts/nba_prop_market_card.py) and the projection model
+ * (scripts/nba_prop_projection_card.py), 45-57 minutes before tip, and the
+ * rule's 10-hour copy (scripts/nba_prop_market_early_card.py), 9.5-10.5 hours
+ * before tip.
  */
-const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_projection'];
+const NBA_POSTED_PROP_MODELS: readonly string[] = [
+  'nba_prop_market',
+  'nba_prop_projection',
+  'nba_prop_market_early',
+];
 
 /**
  * How each book settles first basket (house rules read 2026-11-20; models/nba_first_basket.py

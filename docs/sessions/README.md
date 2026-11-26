@@ -20,6 +20,15 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Delete notifications from the inbox (matt) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, `nba_prop_market_early`, the prop rule at 10 hours, a paused paper test (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Earlier NBA prop snapshots bought, historical exchange money imported and tested (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NBA data sources, and handle / money data across markets (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings prop splits: every kept layout parsed (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings prop splits: every article table kept as printed (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings prop splits into Supabase; DK splits aliases; tennis closed (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings splits for NBA, NHL, NCAAF and NCAAB; the prop-splits probe (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NHL shifts, Daily Faceoff lines, officials, EDGE snapshots |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Public splits for every market: what exists, the period-splits correction, the coverage probe (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, premium_access delete_login; account calls are Matt's (matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Comped premium as a worker job (matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, A red ops alert when a book throttles the live reads (mike) |

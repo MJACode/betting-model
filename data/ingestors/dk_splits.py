@@ -54,8 +54,16 @@ REQUEST_TIMEOUT = 25
 MAX_PAGES = 8
 # Measured 2026-11-03 (worker_jobs 936774): NFL is the page's default and its
 # links carry tb_eg=88808. Every other id comes from discover_event_groups.
-KNOWN_EVENT_GROUPS: dict[str, str] = {"NFL": "88808"}
-SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB")
+# NBA, NHL and NCAAF measured 2026-11-26 (scripts/research_probe_2026_11_26.py dk2): the page
+# asked for each id directly parsed 5 NBA, 7 NHL and 10 NCAAF games with Handle % and Bets %,
+# teams of the right league. The page's own links carry only the NFL id, so discovery alone
+# never found them. NBA / NCAAF are DraftKings' ids in dk_live_board.LEAGUES.
+KNOWN_EVENT_GROUPS: dict[str, str] = {"NFL": "88808", "NBA": "42648", "NHL": "42133",
+                                      "NCAAF": "87637"}
+# NCAAB (mike, 2026-11-26, "do all the outstanding tasks"): event group 92483 parsed 10 NCAAB
+# games in the same probe; its teams match through the NCAAB odds resolver (team_matches).
+KNOWN_EVENT_GROUPS["NCAAB"] = "92483"
+SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB", "NCAAB")
 # The sport names as the page's sport list prints them (the probe's text:
 # "Sports NFL NBA NHL MLB WNBA UFC UFL NCAA Football NCAA Basketball ...").
 _SPORT_LABELS = {"NFL": "NFL", "NBA": "NBA", "NHL": "NHL", "MLB": "MLB",
@@ -210,19 +218,55 @@ def _full_names(sport: str) -> dict[str, list[str]]:
     return out
 
 
+# DK Network college names that no resolver reads, each measured as an unmatched name in the
+# worker's first pass with NCAAF and NCAAB (2026-11-26 18:35 UTC), mapped to our school id
+# (games.home_team). Only names that were seen; the pass logs any new one in unmatched_names.
+DK_COLLEGE_ALIASES: dict[str, dict[str, str]] = {
+    "NCAAF": {"Miami FL": "Miami", "FIU": "Florida International"},
+    "NCAAB": {"Miami FL": "Miami"},
+}
+
+
+def ncaab_school(dk_name: str, registry: list[dict]) -> str | None:
+    """DK Network's NCAAB name -> our school (`games.home_team` is ncaab_teams.school).
+
+    First the odds feed's own resolver (display name, "school mascot", school, short
+    name, alternates, shortened schools). Then the pro-style "ABBR Mascot" DK prints for
+    the pro leagues ("JAX Jaguars"), against ESPN's abbreviation and mascot. Two teams
+    claiming the name is no answer, never a guess."""
+    from data.ingestors.ncaab_teams import _fold, resolve_team_name
+    espn = resolve_team_name(dk_name, registry)
+    if espn is None:
+        key = _fold(dk_name)
+        hits = {t["espn_id"] for t in registry
+                if t.get("abbreviation") and t.get("mascot")
+                and _fold(f"{t['abbreviation']} {t['mascot']}") == key}
+        espn = next(iter(hits)) if len(hits) == 1 else None
+    if espn is None:
+        return None
+    schools = {t["school"] for t in registry if t["espn_id"] == espn}
+    return next(iter(schools)) if len(schools) == 1 else None
+
+
 def team_matches(sport: str, dk_name: str, our_id: str,
-                 names: dict[str, list[str]] | None = None) -> bool:
+                 names: dict[str, list[str]] | None = None,
+                 registry: list[dict] | None = None) -> bool:
     """Does DK Network's 'JAX Jaguars' name our team id? Pro sports: DK
     prints a short city then the nickname, so the nickname (everything after
     the first word) must end one of our full names for that id. 'LA Rams' and
     'LA Chargers' share the city word, which is why the city is not used.
     NCAAF: the odds feed's school resolver, which strips a mascot."""
+    alias = DK_COLLEGE_ALIASES.get(sport, {}).get(dk_name)
+    if alias is not None:
+        return alias == our_id
     if sport == "NCAAF":
         try:
             from data.ingestors.cfbd_ingestor import resolve_odds_api_school
             return resolve_odds_api_school(dk_name) == our_id
         except Exception:                                     # noqa: BLE001
             return dk_name == our_id
+    if sport == "NCAAB":
+        return bool(registry) and ncaab_school(dk_name, registry) == our_id
     parts = dk_name.split(" ", 1)
     if len(parts) != 2:
         return False
@@ -232,19 +276,40 @@ def team_matches(sport: str, dk_name: str, our_id: str,
 
 
 def match(sport: str, parsed: dict, games: Iterable[dict],
-          names: dict[str, list[str]] | None = None) -> dict | None:
+          names: dict[str, list[str]] | None = None,
+          registry: list[dict] | None = None) -> dict | None:
     """The one slate game with both teams, nearest DK's printed date (within a
     day: DK prints the ET date, a late start can sit on our next date)."""
+    hit, _ = match_oriented(sport, parsed, games, names, registry)
+    return hit
+
+
+def match_oriented(sport: str, parsed: dict, games: Iterable[dict],
+                   names: dict[str, list[str]] | None = None,
+                   registry: list[dict] | None = None) -> tuple[dict | None, bool]:
+    """(game, swapped). DK's home and away first; only when that finds nothing, the
+    pair the other way round, which is how a neutral-site game DK and our schedule
+    orient differently matches (measured 2026-11-26: DK "Baylor @ Gonzaga" is our
+    NCAAB_2026-11-26_gonzaga_baylor). `swapped` tells the caller to relabel sides."""
+    games = list(games)
+    hit = _match_pair(sport, parsed["home"], parsed["away"], parsed.get("date"), games, names, registry)
+    if hit is not None:
+        return hit, False
+    hit = _match_pair(sport, parsed["away"], parsed["home"], parsed.get("date"), games, names, registry)
+    return hit, hit is not None
+
+
+def _match_pair(sport, home, away, when, games, names, registry) -> dict | None:
     hits = [g for g in games
-            if team_matches(sport, parsed["home"], g.get("home_team") or "", names)
-            and team_matches(sport, parsed["away"], g.get("away_team") or "", names)]
+            if team_matches(sport, home, g.get("home_team") or "", names, registry)
+            and team_matches(sport, away, g.get("away_team") or "", names, registry)]
     if not hits:
         return None
-    if parsed.get("date"):
-        want = date.fromisoformat(parsed["date"])
+    if when:
+        want = date.fromisoformat(when)
         near = [g for g in hits
                 if abs((date.fromisoformat(g["game_date"]) - want).days) <= 1]
-        exact = [g for g in near if g["game_date"] == parsed["date"]]
+        exact = [g for g in near if g["game_date"] == when]
         if len(exact) == 1:
             return exact[0]
         return near[0] if len(near) == 1 else None
@@ -252,7 +317,8 @@ def match(sport: str, parsed: dict, games: Iterable[dict],
 
 
 def build_rows(sport: str, parsed_games: list[dict], games: list[dict],
-               now: datetime, counts: dict | None = None) -> list[dict]:
+               now: datetime, counts: dict | None = None,
+               registry: list[dict] | None = None) -> list[dict]:
     """Rows for scoreboard_splits from one sport's parsed games. Started games
     are skipped so the stored row stays the last pre-start split."""
     counts = counts if counts is not None else {}
@@ -261,9 +327,13 @@ def build_rows(sport: str, parsed_games: list[dict], games: list[dict],
     stamp = now.isoformat()
     seen: set[str] = set()
     for p in parsed_games:
-        g = match(sport, p, games, names)
+        g, swapped = match_oriented(sport, p, games, names, registry)
         if g is None:
             counts["unmatched"] = counts.get("unmatched", 0) + 1
+            # The first names that did not match, so a missing alias is visible in the log.
+            miss = counts.setdefault("unmatched_names", [])
+            if len(miss) < 4:
+                miss.append(f"{p['away']} @ {p['home']}")
             continue
         if g["game_id"] in seen:
             continue
@@ -273,7 +343,13 @@ def build_rows(sport: str, parsed_games: list[dict], games: list[dict],
             counts["started"] = counts.get("started", 0) + 1
             continue
         counts["games"] = counts.get("games", 0) + 1
-        for (market, side), v in sorted(p["sides"].items()):
+        sides = p["sides"]
+        if swapped:
+            # A side's line is its own number, so relabelling home and away is the whole change.
+            flip = {"home": "away", "away": "home"}
+            sides = {(m, flip.get(sd, sd)): v for (m, sd), v in sides.items()}
+            counts["swapped"] = counts.get("swapped", 0) + 1
+        for (market, side), v in sorted(sides.items()):
             rows.append({
                 "game_id": g["game_id"], "sport": sport, "game_date": g["game_date"],
                 "market": market, "side": side,
@@ -391,7 +467,11 @@ def run(conn=None, *, now: datetime | None = None,
                 continue
             parsed = fetch_sport(get, eg, now)
             counts: dict = {"parsed": len(parsed)}
-            rows = build_rows(sport, parsed, slate, now, counts)
+            registry = None
+            if sport == "NCAAB":
+                from data.ingestors.ncaab_teams import load_registry
+                registry = load_registry(conn)
+            rows = build_rows(sport, parsed, slate, now, counts, registry)
             if rows:
                 conn.executemany(UPSERT_SQL, [{k: v for k, v in r.items() if k != "odds"}
                                               for r in rows])

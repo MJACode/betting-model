@@ -787,6 +787,9 @@ ACTION_THRESHOLDS: dict = {
     # (docs/nba_first_basket.md).
     "nba_prop_first_basket":    {"min_prob": 0.0, "min_edge": 0.0},
     "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
+    # nba_prop_market's rule decided 10 hours before tip, a PAPER test (mike, 2026-11-26):
+    # the same cut; its EV floor is in MODEL_OWN_EV_FLOOR. scripts/nba_prop_market_early_card.py.
+    "nba_prop_market_early":    {"min_prob": 0.0, "min_edge": 0.0},
     # The NBA projection model (2026-10-16, mike: "build the projection model",
     # "maximize units won"): minutes x per-minute rate, a negative-binomial width
     # and a per-market calibration map; six cells, each with its own side(s) and
@@ -1763,6 +1766,14 @@ PAUSED_MODELS: set = {
     "nba_prop_market",
     "nba_live_spread_q12",
     "nba_q1_trend_ml",
+    # 2026-11-26 (mike: yes to "a forward paper test of nba_prop_market at 10 hours"). A NEW
+    # id, paused from its first row so it writes, settles and is graded but never posts: the
+    # same rule decided 9.5-10.5 hours before tip on points, rebounds and threes. The 2023-24 to
+    # 2025-26 grade on a snapshot bought at 10 hours: 7,572 bets, +5.8% a bet (90% CI +3.8 to
+    # +7.7) against +2.6% for the same rule an hour before tip on the same games
+    # (docs/nba_data_sources_and_handle_2026_11.md, D5). Unpausing is mike's call.
+    # Updated-By: mike.
+    "nba_prop_market_early",
     # ncaaf_over_under UNPAUSED 2026-08-25: replaced the dead AUC-0.49
     # classifier with a TOTAL-REGRESSION artifact (kind="total_regression",
     # scripts/ncaaf_margin_eval --fit-totals). It predicts the total from
@@ -2489,6 +2500,7 @@ MODEL_MIN_ODDS: dict = {
     # The first-basket rule lays no favourite: its 1,930 graded bets ran +425 to +9900, median +1000.
     "nba_prop_first_basket":     -200,
     "nba_prop_market":           -200,
+    "nba_prop_market_early":     -200,    # the same floor as the rule it copies (mike, 2026-11-26)
     # The projection model was graded at the same -200 floor. Without threes
     # overs (not bet from 2026-11-18) it lays -200 to +375, median +105, on its
     # graded bets at the seven deciding books. The +3000 tail it had was
@@ -2861,6 +2873,7 @@ MODEL_OWN_EV_FLOOR: dict = {
     # Its graded floor (test 2b, first_basket/prereg.md); neighbours 0.00 +6.02%, 0.10 +12.43%.
     "nba_prop_first_basket":     0.05,
     "nba_prop_market":           0.00,
+    "nba_prop_market_early":     0.00,    # the rule's own floor, the one graded at 10 hours (mike, 2026-11-26)
     # The lowest of its six cells' floors (rebounds unders). Each market's own
     # floor (0.01-0.05) is applied on top, in models/nba_prop_projection.CARD.
     "nba_prop_projection":       0.01,
@@ -3131,6 +3144,7 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # other models, which pulls a near-even probability toward 0.5 -- the
     # same reason nhl_over_under and nfl_prop_market are here.
     "nba_prop_market",
+    "nba_prop_market_early",   # Pinnacle no-vig is its probability, as for the rule it copies
     # 2026-11-20 (mike). The first-basket rule decides on 0.25 x its model + 0.75 x the other
     # books' median no-vig, the number its 0.05 floor was graded on; a borrowed map would move it.
     "nba_prop_first_basket",
@@ -3325,6 +3339,7 @@ SCORING_METHODS: dict = {
     "nhl_night_moneyline":"rule",    # models/nhl_best_bet_night.py — one bet a night, Pinnacle power no-vig vs bettable books (mike, 2026-11-22)
     "nhl_night_regulation":"rule",    # models/nhl_best_bet_night.py — one bet a night, Pinnacle power no-vig vs bettable books (mike, 2026-11-22)
     "nba_prop_first_basket": "rule",    # models/nba_first_basket.py — tip + first-score share, blended with the books' median (mike, 2026-11-20)
+    "nba_prop_market_early": "rule",  # models/nba_prop_market.py at 10 hours, paper (mike, 2026-11-26)
     "nba_prop_market":     "rule",    # models/nba_prop_market.py — Pinnacle no-vig under vs bettable books, same line, same fetch (mike, 2026-10-15)
     # Trained, off-registry.
     "ncaaf_live_win_prob": "engine",  # two-stage LightGBM, ncaaf_live/engine/remaining.py
@@ -3467,6 +3482,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_night_regulation":    0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_first_basket":    0.0,    # 2026-11-20 mike: cut is EV (0.05), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV (0.00), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nba_prop_market_early":    0.0,    # 2026-11-26 mike: cut is EV (0.00), in MODEL_OWN_EV_FLOOR; paper
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
@@ -3583,6 +3599,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_night_regulation":    0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nba_prop_first_basket":    0.0,    # 2026-11-20 mike: cut is EV; see ACTION_THRESHOLDS
     "nba_prop_market":          0.0,    # 2026-10-15 mike: cut is EV; see ACTION_THRESHOLDS
+    "nba_prop_market_early":    0.0,    # 2026-11-26 mike: cut is EV; paper
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS

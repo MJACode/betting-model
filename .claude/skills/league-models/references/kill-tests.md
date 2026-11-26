@@ -74,7 +74,11 @@ finding either way.
   edges three times: a best-price-against-the-sharp-book grid, a sharp-against-
   soft totals rule (about +11%, and no bets at all once the quotes had to be
   within 300 seconds of each other), and a public-fade rule whose +25% came
-  from a first-quote source the live card never used.
+  from a first-quote source the live card never used. A fourth time on
+  2026-11-26: Kalshi's NBA price "6 hours out" against Pinnacle's "6 hour"
+  snapshot correlated +0.498 with Pinnacle's later move; aligned so every
+  Kalshi trade came before Pinnacle's snapshot, +0.049
+  (`docs/nba_data_sources_and_handle_2026_11.md`, D6).
 - **Freeze, then read unseen seasons.** Once a candidate is chosen, freeze it
   and grade it unchanged on seasons it never saw (buy them if needed). One
   logistic model's +8.0% became +3.0% on 1,268 unseen bets.
