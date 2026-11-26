@@ -816,15 +816,29 @@ stop a DraftKings read. Each book and live sport is asked once every 30 s.
   public web key the open-source scrapers all carry) holds every game in play.
   The live moneyline, spread and total go to `odds` as in-play `fanduel` rows
   (`source = 'fanduel_board'`) for NBA, NFL, NHL, NCAAB, NCAABW and
-  EuroLeague. The parser was built from a real capture of the NBA page
-  (2026-11-23, 9 games in play); the NHL, college and EuroLeague page ids and
-  hockey's market names are not yet seen and are checked against the stored
-  answers.
-- **BetMGM, Caesars, BetRivers, Fanatics and Hard Rock are captured, not
-  parsed.** Their answers go to `book_live_raw` (at most 3 a day per book,
-  sport and status) until a stored answer shows the shape. BetRivers,
-  Fanatics and Hard Rock start from their home pages, for the hosts and the
-  state's code their scripts use.
+  EuroLeague. Pages: `nba`, `nfl`, `nhl`, `ncaab` (men), `ncaaw` (women),
+  and EuroLeague is a tab of the basketball page. **Each page is cut to the
+  sport's own competition by exact name**: the NBA page carries eBasketball,
+  and the men's college page carries the women's games, which were reaching
+  the men's reader until 2026-11-26 (none was written: no women's pair is a
+  men's game). A competition not named in `FANDUEL_PAGES` gets no lines.
+- **BetRivers is parsed** (since 2026-11-26). It is Kambi's platform; Ohio's
+  offering `rsiusoh`. One in-play list per sport (basketball, hockey,
+  football) carries every live game's main moneyline, spread and total, so
+  NBA, NCAAB and NCAABW share one request. Leagues are cut by Kambi's own key
+  (`nba`, `nba_cup`, `ncaab`, `ncaaw`, `nhl`, `nfl`; AHL is left out), and
+  only the exact main-market names are read (team totals and second-half
+  lines carry the same "main" tag). Rows: in-play `betrivers`,
+  `source = 'betrivers_board'`. BetRivers Ohio lists no EuroLeague.
+- **College names** go through `BOOK_CBB_ALIASES` (FanDuel's "Connecticut"
+  is our "UConn"). An unplaced game is logged as "does not resolve onto a
+  game"; `live_events` against `matched` in `book_live_feed` shows the gap.
+- **BetMGM, Caesars, Fanatics and Hard Rock are captured, not parsed.** Their
+  answers go to `book_live_raw` (at most 3 a day per book, sport and status)
+  until a stored answer shows the shape. BetMGM answers 400 ("Access id not
+  allowed for application"); its page loads the id from a config call that a
+  Claude session here was refused permission to make (2026-11-26). Caesars
+  answers 403. Fanatics and Hard Rock start from their home pages.
 - **No bot-wall work.** A plain request in a browser's TLS shape; a challenge
   or a 403 is recorded as refused, and three in a row leave that book alone
   for 10 minutes. `BOOK_LIVE_BOARDS=0` in this machine's environment turns

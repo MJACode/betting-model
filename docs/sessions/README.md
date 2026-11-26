@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, BetRivers' live lines, and FanDuel cut to each sport's own games (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Every book's own live page, from mike's machine (mike) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, Live lines from every book; NHL and EuroLeague on the DK board; EuroLeague live scores (mike) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, AI assistant (MCP): every stored game market, EuroLeague and NBL, and the missing props (Matt) |

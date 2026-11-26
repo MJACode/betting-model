@@ -16,15 +16,19 @@ read, which the NCAAB in-play models decide on. BOOK_LIVE_BOARDS=0 turns it off.
 
 WHAT EACH BOOK IS, AND WHAT IS KNOWN ABOUT IT. Every endpoint below is what
 the book's own website calls, taken from open-source scrapers (named per
-book); none is documented by the book, none was reachable from a Claude
-session to check (DraftKings, the books and the proxy all refuse it), and any
-can change. So a book is one of two kinds:
+book) and read from this machine; none is documented by the book, and any can
+change. So a book is one of two kinds:
   * PARSED: its answer's shape was seen in a real capture, and its live main
-    lines go to `odds` as in-play rows (source '<book>_board'). FanDuel.
+    lines go to `odds` as in-play rows (source '<book>_board'). FanDuel and
+    BetRivers (Kambi), both measured live from mike's machine 2026-11-26.
   * CAPTURED: the answer is stored raw in `book_live_raw` and nothing is parsed
-    until a stored answer shows the shape. BetMGM, BetRivers, Caesars, and the
-    Fanatics and Hard Rock home pages (no endpoint is known for either; the
-    page names the hosts its scripts call).
+    until a stored answer shows the shape. BetMGM, Caesars, and the Fanatics
+    and Hard Rock home pages (no endpoint is known for either; the page names
+    the hosts its scripts call).
+A book's page that lists more than our league (eBasketball on FanDuel's NBA
+page, women's games on its men's college page, AHL beside NHL on BetRivers)
+is cut to the competitions named here, by exact name; a competition that is
+not named gets no lines.
 Every read, either kind, upserts `book_live_feed` (book, sport): when it last
 answered, its HTTP status, and how many live games it listed and placed on our
 games rows. A refusal, a bot challenge or a wrong guess is a row there, never
@@ -63,6 +67,10 @@ POLL_SEC = float(os.environ.get("BOOK_POLL_SEC", "30"))
 DISCOVER_SEC = 6 * 3600.0                            # a home page, for its API hosts
 BACKOFF_SEC = 600.0                                  # after REFUSALS_BEFORE_BACKOFF refusals
 REFUSALS_BEFORE_BACKOFF = 3
+# One answer serves every sport that reads the same URL within this long
+# (BetRivers' one basketball list is NBA, NCAAB and NCAABW): a book is asked
+# once, not once per sport.
+SHARED_READ_SEC = 10.0
 CAPTURES_PER_DAY = int(os.environ.get("BOOK_CAPTURES_PER_DAY", "3"))
 RESOLVER_REFRESH_SEC = 600.0
 MAX_BODY_TEXT = 200_000
@@ -119,13 +127,32 @@ _KEY_PARAMS = ("_ak", "x-bwin-accessid")
 # the projects), so a read can be up to that much behind the book.
 
 FANDUEL_AK = os.environ.get("FANDUEL_AK", "FhMFpcPWXMeyZxOx")
-FANDUEL_PAGES = {"NBA": "nba", "NFL": "nfl", "NHL": "nhl", "NCAAB": "ncaab", "NCAABW": "wncaab",
-                 "EUROLEAGUE": "euroleague"}
-# Seen in the NBA capture: MONEY_LINE, MATCH_HANDICAP_(2-WAY),
-# TOTAL_POINTS_(OVER/UNDER). The hockey names are not yet seen; a market type
-# not listed is no line (its answer is captured, so the next change can add it).
-FANDUEL_TYPES = {"MONEY_LINE": "h2h", "MATCH_HANDICAP_(2-WAY)": "spreads", "PUCK_LINE": "spreads",
-                 "TOTAL_POINTS_(OVER/UNDER)": "totals", "TOTAL_GOALS_(OVER/UNDER)": "totals"}
+# sport -> (the page FanDuel's site reads it from, the competitions on that
+# page that ARE this sport). Read from mike's machine 2026-11-26 01:00Z:
+#   nba    NBA (10 games) beside "eBasketball H2H GG League 4x5 Mins" (14)
+#   ncaab  "NCAA Basketball Mens Games" (50) beside "NCAA Basketball Women’s
+#          Games" (1: Oregon State (W) @ Vanderbilt (W)), so a women's line
+#          could land on a men's game without the cut
+#   ncaaw  the women's page (the old id 'wncaab' answers 404); the same
+#          women's competition, with a curly apostrophe (U+2019)
+#   nhl    NHL (14);  nfl  NFL (31)
+#   EuroLeague has no page id ('euroleague' answers 404); it is a tab of the
+#   basketball page (page=SPORT&eventTypeId=7522), whose own text names
+#   "Men's Euroleague Games". No EuroLeague game was listed that night (a FIBA
+#   window), so that name is not yet seen on a game.
+FANDUEL_PAGES = {
+    "NBA": ("page=CUSTOM&customPageId=nba", ("NBA",)),
+    "NFL": ("page=CUSTOM&customPageId=nfl", ("NFL",)),
+    "NHL": ("page=CUSTOM&customPageId=nhl", ("NHL",)),
+    "NCAAB": ("page=CUSTOM&customPageId=ncaab", ("NCAA Basketball Mens Games",)),
+    "NCAABW": ("page=CUSTOM&customPageId=ncaaw", ("NCAA Basketball Women’s Games",)),
+    "EUROLEAGUE": ("page=SPORT&eventTypeId=7522", ("Men's Euroleague Games",)),
+}
+# Seen in the NBA and NHL captures (2026-11-23, 11-26): MONEY_LINE,
+# MATCH_HANDICAP_(2-WAY) (the NHL puck line too), TOTAL_POINTS_(OVER/UNDER)
+# (the NHL total too). A market type not listed is no line.
+FANDUEL_TYPES = {"MONEY_LINE": "h2h", "MATCH_HANDICAP_(2-WAY)": "spreads",
+                 "TOTAL_POINTS_(OVER/UNDER)": "totals"}
 
 
 @dataclass
@@ -154,16 +181,62 @@ def _price(runner: dict) -> float | None:
         return None
 
 
-def parse_fanduel(body: dict) -> list[BookEvent]:
-    """Every in-play game on one FanDuel league page, with its main lines.
-    A market with more than one live market of its kind on the same game is
-    left out (it is not knowable which one the page shows as main). Pure."""
+_RANK = re.compile(r"^\(\d+\)\s*")
+_WOMEN_TAG = re.compile(r"\s*[\(\[]W[\)\]]\s*$")
+# College names these books write that our resolvers do not read, each one a
+# live game that did not place on 2026-11-26 01:10Z although it is on our
+# schedule (games: UConn, Omaha, The Citadel, Cal State Bakersfield, South
+# Carolina Upstate, St. Thomas). FanDuel's first four, BetRivers' last two.
+BOOK_CBB_ALIASES = {"Connecticut": "UConn", "Nebraska Omaha": "Omaha", "Citadel": "The Citadel",
+                    "CSU Bakersfield": "Cal State Bakersfield", "USC Upstate": "South Carolina Upstate",
+                    "St. Thomas (MN)": "St. Thomas"}
+
+
+def team_name(name: str, sport: str) -> str:
+    """A book's team name as our resolvers read it: a college ranking
+    ("(12) Vanderbilt") off the front, and on WOMEN'S games only, the "(W)"
+    tag off the end, then BOOK_CBB_ALIASES. The tag is never taken off a
+    men's name, so a women's game that reached a men's reader stays
+    unmatched. Pure."""
+    n = (name or "").strip()
+    if sport in ("NCAAB", "NCAABW"):
+        n = _RANK.sub("", n)
+    if sport == "NCAABW":
+        n = _WOMEN_TAG.sub("", n)
+    n = n.strip()
+    if sport in ("NCAAB", "NCAABW"):
+        n = BOOK_CBB_ALIASES.get(n, n)
+    return n
+
+
+_unlisted_seen: set[tuple[str, str, str]] = set()
+
+
+def _note_unlisted(book: str, sport: str, name: str) -> None:
+    if (book, sport, name) not in _unlisted_seen:
+        _unlisted_seen.add((book, sport, name))
+        log.info("%s %s: live games in %r are not this sport's; no lines", book, sport, name)
+
+
+def parse_fanduel(body: dict, sport: str) -> list[BookEvent]:
+    """Every in-play game of `sport` on one FanDuel page, with its main lines:
+    only games in a competition FANDUEL_PAGES names for the sport (exact
+    name); an unnamed competition gets no lines. A market with more than one
+    live market of its kind on the same game is left out (it is not knowable
+    which one the page shows as main). Pure."""
     att = (body or {}).get("attachments") or {}
     events = att.get("events") or {}
+    comps = att.get("competitions") or {}
+    keep = set(FANDUEL_PAGES.get(sport, ("", ()))[1])
     by_event: dict[str, dict[str, list[dict]]] = {}
     for m in (att.get("markets") or {}).values():
         kind = FANDUEL_TYPES.get(m.get("marketType"))
         if not kind or m.get("inPlay") is not True or m.get("marketStatus") != "OPEN":
+            continue
+        ev = events.get(str(m.get("eventId"))) or {}
+        comp = str((comps.get(str(ev.get("competitionId"))) or {}).get("name") or "")
+        if comp not in keep:
+            _note_unlisted("fanduel", sport, comp)
             continue
         by_event.setdefault(str(m.get("eventId")), {}).setdefault(kind, []).append(m)
     out = []
@@ -212,7 +285,118 @@ def parse_fanduel(body: dict) -> list[BookEvent]:
                 continue
             away, home = (s.strip() for s in n.split(" @ ", 1))
         out.append(BookEvent(event_id=eid, name=str(ev.get("name") or ""), start=ev.get("openDate"),
-                             home_name=home, away_name=away, **row))
+                             home_name=team_name(home, sport), away_name=team_name(away, sport), **row))
+    return out
+
+
+# ── BetRivers: PARSED (Kambi) ────────────────────────────────────────────────
+#
+# BetRivers is Kambi's platform. Ohio's offering is 'rsiusoh', market 'US-OH'
+# (read off oh.betrivers.com's own page, 2026-11-25). One call per sport,
+# listView/<sport>/all/all/all/in-play.json, lists every live game of every
+# league in that sport WITH its main moneyline, spread and total: measured
+# 2026-11-26 01:00Z, 24 live basketball games (NBA 5, NCAAB 17, NCAAW 2) and
+# 17 hockey (NHL 11, AHL 6), and the three NCAAB games listed without a
+# moneyline had none in their own bet-offer call either (Kambi pulls it in a
+# lopsided game), so no per-game call is made. Ohio's league list (group.json)
+# has NBA, NBA Cup, NCAAB, NCAAW, NHL and NFL, and no EuroLeague.
+#
+# A game: event.homeName / awayName / start / state 'STARTED' / path[].termKey
+# (['basketball', 'nba']). An offer: criterion.label, tags (MAIN on the main
+# moneyline, MAIN_LINE on the main spread and total; team totals and
+# second-half lines carry MAIN_LINE too, so the LABEL decides), outcomes[]
+# with participant (the team), line in thousandths (-22500 is -22.5),
+# oddsAmerican as a string, status OPEN / SUSPENDED. A suspended offer loses
+# its MAIN_LINE tag. Names: "CHI Bulls", "NY Knicks" (our nickname resolver
+# reads the nickname), "(12) Vanderbilt (W)" on women's games.
+
+KAMBI_OFFERING = os.environ.get("BETRIVERS_OFFERING", f"rsius{STATE}")
+KAMBI_MARKET = os.environ.get("BETRIVERS_MARKET", f"US-{STATE.upper()}")
+KAMBI_BASE = os.environ.get("BETRIVERS_KAMBI", "https://eu.offering-api.kambicdn.com/offering/v2018")
+# sport -> (Kambi's sport path, the league termKeys that ARE this sport)
+KAMBI_LEAGUES = {"NBA": ("basketball", ("nba", "nba_cup")), "NCAAB": ("basketball", ("ncaab",)),
+                 "NCAABW": ("basketball", ("ncaaw",)), "NHL": ("ice_hockey", ("nhl",)),
+                 "NFL": ("american_football", ("nfl",))}
+# The main markets' labels, exactly as seen (NFL's on its pre-game list, the
+# same offers it keeps open in play). Anything else is not a main line.
+KAMBI_LABELS = {
+    "Moneyline": "h2h", "Moneyline - Inc. OT and Shootout": "h2h",
+    "Point Spread": "spreads", "Puck Line - Inc. OT and Shootout": "spreads",
+    "Total Points - Including Overtime": "totals", "Total Points": "totals",
+    "Total Goals - Inc. OT and Shootout": "totals",
+}
+KAMBI_HEADERS = {"Origin": "https://oh.betrivers.com", "Referer": "https://oh.betrivers.com/"}
+
+
+def _kambi_price(o: dict) -> float | None:
+    try:
+        return float(int(str(o.get("oddsAmerican")).replace("+", "")))
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_kambi(body: dict, sport: str) -> list[BookEvent]:
+    """Every started game of `sport` on one Kambi in-play list, with its main
+    lines: only leagues KAMBI_LEAGUES names for the sport, only offers whose
+    label is in KAMBI_LABELS and whose tag marks them main, only OPEN outcomes
+    with a price, each team's side read off its own participant name. A kind
+    with two main offers on one game is left out. Pure."""
+    keep = set(KAMBI_LEAGUES.get(sport, ("", ()))[1])
+    out = []
+    for item in (body or {}).get("events") or []:
+        ev = item.get("event") or {}
+        leagues = {str(p.get("termKey")) for p in ev.get("path") or []}
+        if not leagues & keep:
+            if ev.get("group"):
+                _note_unlisted("betrivers", sport, str(ev.get("group")))
+            continue
+        if ev.get("state") != "STARTED":
+            continue
+        home, away = str(ev.get("homeName") or ""), str(ev.get("awayName") or "")
+        if not home or not away or home == away:
+            continue
+        by_kind: dict[str, list[dict]] = {}
+        for bo in item.get("betOffers") or []:
+            kind = KAMBI_LABELS.get(str((bo.get("criterion") or {}).get("label") or ""))
+            tags = set(bo.get("tags") or [])
+            if kind and tags & {"MAIN", "MAIN_LINE"}:
+                by_kind.setdefault(kind, []).append(bo)
+        row = {}
+        for kind, offers in by_kind.items():
+            if len(offers) != 1:
+                log.info("BetRivers event %s: %d main %s offers; none taken", ev.get("id"), len(offers), kind)
+                continue
+            outs = [o for o in offers[0].get("outcomes") or []
+                    if o.get("status") == "OPEN" and _kambi_price(o) is not None]
+            if kind in ("h2h", "spreads"):
+                h = [o for o in outs if o.get("participant") == home]
+                a = [o for o in outs if o.get("participant") == away]
+                if len(h) != 1 or len(a) != 1:
+                    continue
+                h, a = h[0], a[0]
+                if kind == "h2h":
+                    row.update(home_ml=_kambi_price(h), away_ml=_kambi_price(a))
+                else:
+                    try:
+                        line = int(h["line"]) / 1000.0
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    row.update(spread_home=line, spread_home_price=_kambi_price(h),
+                               spread_away_price=_kambi_price(a))
+            else:
+                o = [x for x in outs if x.get("type") == "OT_OVER"]
+                u = [x for x in outs if x.get("type") == "OT_UNDER"]
+                if len(o) != 1 or len(u) != 1:
+                    continue
+                try:
+                    line = int(o[0]["line"]) / 1000.0
+                except (KeyError, TypeError, ValueError):
+                    continue
+                row.update(total_line=line, over_price=_kambi_price(o[0]), under_price=_kambi_price(u[0]))
+        if not row:
+            continue
+        out.append(BookEvent(event_id=str(ev.get("id")), name=str(ev.get("name") or ""), start=ev.get("start"),
+                             home_name=team_name(home, sport), away_name=team_name(away, sport), **row))
     return out
 
 
@@ -231,11 +415,6 @@ BETMGM_ACCESS_IDS = tuple(v for v in os.environ.get(
 ).split(",") if v)
 BETMGM_SPORT_IDS = {"NBA": "7", "NCAAB": "7", "NCAABW": "7", "EUROLEAGUE": "7", "NFL": "11", "NHL": "12"}
 
-# BetRivers: <state>.betrivers.com/api/service/sportsbook/offering/listview/
-# events (DionHuang06/Oddiqo: cageCode per state, NJ 2, Ontario 249; NBA
-# groupId 1000093652; pageSize at most 20). The Ohio cage code is not
-# published, so the state's home page is captured for it first.
-
 # Caesars: api.americanwagering.com/regions/us/locations/<state>/brands/czr/
 # sb/v3/... (declanwalpole/sportsbook-odds-scraper, events by id). The live
 # list path is not published; this asks for the sport's schedule.
@@ -248,8 +427,9 @@ class Book:
     key: str                      # our bookmaker key (odds.bookmaker)
     sports: tuple[str, ...]       # the sports it is asked about while live
     url: Callable[[str], str | None]
-    parse: Callable[[dict], list[BookEvent]] | None = None
+    parse: Callable[[dict, str], list[BookEvent]] | None = None
     discover: bool = False        # a home page, read every DISCOVER_SEC, sport '*'
+    headers: dict | None = None   # sent with every request, as the book's own page sends them
 
 
 def _fanduel_url(sport: str) -> str | None:
@@ -257,7 +437,15 @@ def _fanduel_url(sport: str) -> str | None:
     if not page:
         return None
     return (f"https://sbapi.{STATE}.sportsbook.fanduel.com/api/content-managed-page"
-            f"?page=CUSTOM&customPageId={page}&_ak={FANDUEL_AK}&timezone=America%2FNew_York")
+            f"?{page[0]}&_ak={FANDUEL_AK}&timezone=America%2FNew_York")
+
+
+def _betrivers_url(sport: str) -> str | None:
+    league = KAMBI_LEAGUES.get(sport)
+    if not league:
+        return None
+    return (f"{KAMBI_BASE}/{KAMBI_OFFERING}/listView/{league[0]}/all/all/all/in-play.json"
+            f"?lang=en_US&market={KAMBI_MARKET}&useCombined=true")
 
 
 def _betmgm_url(sport: str) -> str | None:
@@ -281,9 +469,10 @@ LIVE_SPORTS = ("NBA", "NFL", "NHL", "NCAAB", "NCAABW", "EUROLEAGUE")
 
 BOOKS: tuple[Book, ...] = (
     Book("fanduel", tuple(s for s in LIVE_SPORTS if s in FANDUEL_PAGES), _fanduel_url, parse_fanduel),
+    Book("betrivers", tuple(s for s in LIVE_SPORTS if s in KAMBI_LEAGUES), _betrivers_url, parse_kambi,
+         headers=KAMBI_HEADERS),
     Book("betmgm", tuple(s for s in LIVE_SPORTS if s in BETMGM_SPORT_IDS), _betmgm_url),
     Book("williamhill_us", tuple(s for s in LIVE_SPORTS if s in CAESARS_SPORTS), _caesars_url),
-    Book("betrivers", ("*",), lambda _s: f"https://{STATE}.betrivers.com/", discover=True),
     Book("fanatics", ("*",), lambda _s: "https://sportsbook.fanatics.com/", discover=True),
     Book("hardrockbet", ("*",), lambda _s: "https://app.hardrock.bet/", discover=True),
 )
@@ -372,6 +561,7 @@ class BookFeeds:
         self.refusals: dict[str, int] = {}
         self.last: dict[tuple, dict] = {}          # (book, game_id) -> last row
         self.ids: dict[tuple, tuple | None] = {}   # (book, event_id) -> (game_id, flipped)
+        self.shared: dict[str, tuple[float, int, str]] = {}   # url -> (when, status, text)
         self.captures = Captures()
         self.conn = None
         self.ready = False
@@ -465,12 +655,19 @@ class BookFeeds:
         if sess is None:
             sess = self.sessions[book.key] = self.session_factory()
         at = self.clock()
-        try:
-            r = sess.get(url, timeout=15)
-            status, text = int(r.status_code), r.text or ""
-        except Exception as exc:          # noqa: BLE001
-            return self._finish(book, sport, at, url, None, "", False, 0, 0, 0,
-                                f"{type(exc).__name__}: {exc}"[:300])
+        shared = self.shared.get(url)
+        if shared is not None and self.monotonic() - shared[0] < SHARED_READ_SEC:
+            status, text = shared[1], shared[2]
+        else:
+            shared = None
+            try:
+                kw = {"headers": book.headers} if book.headers else {}
+                r = sess.get(url, timeout=15, **kw)
+                status, text = int(r.status_code), r.text or ""
+            except Exception as exc:          # noqa: BLE001
+                return self._finish(book, sport, at, url, None, "", False, 0, 0, 0,
+                                    f"{type(exc).__name__}: {exc}"[:300])
+            self.shared[url] = (self.monotonic(), status, text)
         refused = is_challenge(status, text)
         body = None
         if status == 200 and not refused:
@@ -482,11 +679,11 @@ class BookFeeds:
         detail = "refused" if refused else ("" if status == 200 else f"HTTP {status}")
         if body is not None and book.parse is not None:
             try:
-                live, matched, written = self._lines(book, sport, book.parse(body), at)
+                live, matched, written = self._lines(book, sport, book.parse(body, sport), at)
             except Exception as exc:      # noqa: BLE001
                 detail = f"parse failed: {type(exc).__name__}: {exc}"[:300]
         res = self._finish(book, sport, at, url, status, text, status == 200 and not refused,
-                           live, matched, written, detail, body=body)
+                           live, matched, written, detail, body=body, capture=shared is None)
         res["refused"] = refused
         return res
 
@@ -522,7 +719,8 @@ class BookFeeds:
             self.odds_log = record_live_prices
         return len(events), matched, int(self.odds_log(self.c(), rows) or 0)
 
-    def _finish(self, book, sport, at, url, status, text, ok, live, matched, written, detail, body=None) -> dict:
+    def _finish(self, book, sport, at, url, status, text, ok, live, matched, written, detail, body=None,
+                capture=True) -> dict:
         res = {"book": book.key, "sport": sport, "ok": ok, "status": status, "live": live,
                "matched": matched, "written": written, "detail": detail}
         if self.dry_run:
@@ -530,7 +728,7 @@ class BookFeeds:
             return res
         try:
             conn = self.c()
-            if status is not None and self.captures.want(book.key, sport, status, at):
+            if capture and status is not None and self.captures.want(book.key, sport, status, at):
                 conn.execute(
                     f"INSERT INTO {RAW_TABLE} (fetched_at, book, sport, url, status, bytes, payload, body) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s) ON CONFLICT DO NOTHING",
