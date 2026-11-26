@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import collections
 import json
+import os
 import secrets
 import socket
 import threading
@@ -33,6 +34,10 @@ from pc_monitor import sources as S
 
 STATIC = Path(__file__).resolve().parent / "static"
 APP_ID = "pc_monitor"
+# /healthz carries this from the build that checks origin/master by itself
+# (pc_monitor/__main__.watch_master). DraftKings' feed restarts a monitor whose
+# /healthz lacks it (dk_live_board.PC_MONITOR_SELF_UPDATE; a test keeps them equal).
+SELF_UPDATE = 1
 # Collect while a window has asked for data within this long.
 VIEWER_TIMEOUT_S = 60.0
 
@@ -622,7 +627,8 @@ class Handler(BaseHTTPRequestHandler):
         route = self.path.split("?", 1)[0]
         collector: Collector = self.server.collector  # type: ignore[attr-defined]
         if route == "/healthz":
-            return self._send(200, json.dumps({"app": APP_ID}).encode(), "application/json")
+            return self._send(200, json.dumps({"app": APP_ID, "self_update": SELF_UPDATE,
+                                               "pid": os.getpid()}).encode(), "application/json")
         if route in ("/", "/index.html"):
             return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
         if route == "/api/state":
