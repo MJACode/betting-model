@@ -62,6 +62,8 @@ on (2,398 games); referees, venue and attendance per game.
 | Their decisions, bet or not | `euroleague_pregame_decisions` (one row a game and model) | at the decision |
 | Their bets and NONE rows | `picks`, the app, push, the EuroLeague pre-game Discord channel (`DISCORD_CHANNEL_EUROLEAGUE` / `DISCORD_WEBHOOK_EUROLEAGUE`; unset, nothing posts) | at the decision |
 | Their settlement | `tracking/paper_tracker._RULE_MODEL_MARKETS`: the moneylines on `home_win`, the spread on the final margin against the home number, the first half on quarters 1-2 and the first quarter on quarter 1 of `euroleague_period_scores` (overtime never counts; a tied half pushes) | the next settle pass after the final and its quarters are stored |
+| The Scoreboard's live score (2026-11-25, mike) | `data/ingestors/live_scoreboard.py`, job `live_scoreboard` on pollers: EuroLeague's own PlayByPlay, one game at a time, `source = 'euroleague_api'` | every minute while a game is in progress, except 25-110 s after each five-minute mark (the halftime loop's read window, so this can never rate-limit it) |
+| DraftKings' live line, second by second | `data/ingestors/dk_live_board.py` on mike's machine, into `dk_live_reads` and `odds` (`source = 'dk_live_board'`); league id read off DraftKings' basketball page by name | while DraftKings lists the league (it did not on 2026-11-13); nothing decides on it yet |
 
 ## Halftime spread: `euroleague_live_spread_ht` (live 2026-11-13, mike)
 

@@ -1,5 +1,16 @@
 """Live scores for the app's Scoreboard: NFL, NBA, NHL, NCAAB and NCAABW,
-from ESPN.
+from ESPN, and EuroLeague from EuroLeague's own live API.
+
+EuroLeague (mike, 2026-11-25: "Why don't I see euroleague in the live feed"):
+ESPN does not carry it, so its games went from Upcoming to Final on the
+Scoreboard and no in-play line was ever read for them. Its state comes from
+live.euroleague.net/api/PlayByPlay, the answer the halftime loop already
+reads (data/ingestors/euroleague_live_feed.py): `Live`, the quarter arrays
+with each play's running score (A is the home club) and the quarter's clock
+counting down from 10:00, an 'EP' at a quarter's end and an 'EG' at the
+game's (read off E2026 game 110, tests/fixtures/euroleague_live). One call per
+game in progress, one at a time, never inside the halftime loop's read
+window (EUROLEAGUE_QUIET_S), so this can never be what rate-limits a bet.
 
 Matt, 2026-11-15: the Scoreboard covers every sport with games, and men's and
 women's college basketball get live scores now. Their games are matched to
@@ -44,6 +55,7 @@ downDistanceText, shortDownDistanceText}}}.
 """
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable
@@ -361,8 +373,9 @@ INSERT INTO public.live_scoreboard
 VALUES
     (%(game_id)s, %(sport)s, %(game_date)s, %(event_id)s, %(state)s,
      %(home_score)s, %(away_score)s, %(period)s, %(clock_label)s,
-     %(situation)s, %(possession)s, %(snapshot_at)s, 'espn_site')
+     %(situation)s, %(possession)s, %(snapshot_at)s, %(source)s)
 ON CONFLICT (game_id) DO UPDATE SET
+    source = EXCLUDED.source,
     state = EXCLUDED.state,
     home_score = EXCLUDED.home_score,
     away_score = EXCLUDED.away_score,
@@ -389,8 +402,135 @@ def _event_games(conn, sport: str, game_ids: list[str]) -> dict[str, str]:
     return {str(r[0]): r[1] for r in rows}
 
 
+# ── EuroLeague, from EuroLeague's own live API ───────────────────────────────
+
+EUROLEAGUE = "EUROLEAGUE"
+_EL_ID = re.compile(r"^EUROLEAGUE_(E\d{4})_(\d+)$")
+_EL_QUARTERS = ("FirstQuarter", "SecondQuarter", "ThirdQuarter", "ForthQuarter", "ExtraTime")
+# The halftime loop reads EuroLeague's API at each five-minute mark plus
+# models.euroleague_live_ht.FETCH_AFTER_SEC (37 s), three calls a game and
+# three more after the odds call, PAUSE_S apart; Cloudflare refused four
+# calls at once (HTTP 429, 2026-11-13) and a refusal backs that loop off 30 s.
+# So no Scoreboard call is made from 25 s to 110 s after a mark: with this job
+# on the minute, one tick in five skips EuroLeague, and its row stays inside
+# the app's 10-minute freshness window.
+EUROLEAGUE_QUIET_S = (25, 110)
+
+
+def euroleague_quiet(now: datetime) -> bool:
+    """True inside the halftime loop's read window of the five-minute cycle."""
+    into = (now.minute % 5) * 60 + now.second
+    return EUROLEAGUE_QUIET_S[0] <= into < EUROLEAGUE_QUIET_S[1]
+
+
+def euroleague_code(game_id: str) -> tuple[str, int] | None:
+    m = _EL_ID.match(str(game_id or ""))
+    return (m.group(1), int(m.group(2))) if m else None
+
+
+def _el_plays(pbp: dict, quarter: str) -> list[dict]:
+    return [p for p in ((pbp or {}).get(quarter) or []) if isinstance(p, dict)]
+
+
+def _el_type(play: dict) -> str:
+    return str(play.get("PLAYTYPE") or "").strip()
+
+
+def parse_euroleague(game: dict, pbp: dict | None) -> dict | None:
+    """One live_scoreboard row for a EuroLeague game from its PlayByPlay
+    answer, or None when it holds no game in progress or finished. Pure.
+
+    A quarter is under way once its 'BP' is logged (the break's substitutions
+    are logged in the next quarter's array before it, so an array that is not
+    empty is not a quarter begun). The score is the last play that carries
+    one; before the first basket of a begun game it is 0-0. The clock is the
+    quarter's last stamped MARKERTIME (time left). EuroLeague's A must be our
+    home club, else the answer is not used: nothing here turns sides over."""
+    if not pbp:
+        return None
+    home, away = str(pbp.get("CodeTeamA") or "").strip(), str(pbp.get("CodeTeamB") or "").strip()
+    if home != game.get("home_team") or away != game.get("away_team"):
+        logger.warning(f"live_scoreboard {EUROLEAGUE} {game.get('game_id')}: clubs {away}@{home} "
+                       f"are not ours ({game.get('away_team')}@{game.get('home_team')}); not used")
+        return None
+    quarters = [_el_plays(pbp, q) for q in _EL_QUARTERS]
+    plays = [p for q in quarters for p in q]
+    ended = any(_el_type(p) == "EG" for p in plays)
+    begun = [i for i, q in enumerate(quarters) if any(_el_type(p) == "BP" for p in q)]
+    if not begun or (pbp.get("Live") is not True and not ended):
+        return None
+    cur = begun[-1]
+    scored = [p for p in plays if p.get("POINTS_A") is not None and p.get("POINTS_B") is not None]
+    home_score = _int(scored[-1]["POINTS_A"]) if scored else 0
+    away_score = _int(scored[-1]["POINTS_B"]) if scored else 0
+    tag = "OT" if cur == 4 else f"Q{cur + 1}"
+    in_play = [p for p in quarters[cur] if _el_type(p) not in ("IN", "OUT")]
+    clocks = [str(p.get("MARKERTIME") or "").strip() for p in in_play]
+    clock = next((c for c in reversed(clocks) if c), "")
+    if ended:
+        label = "Final/OT" if quarters[4] else "Final"
+    elif in_play and _el_type(in_play[-1]) == "EP":
+        label = "Half" if cur == 1 else f"End {tag}"
+    else:
+        label = f"{tag} {clock}".strip()
+    code = euroleague_code(game.get("game_id"))
+    return {
+        "event_id": str(code[1]) if code else "",
+        "game_id": game["game_id"],
+        "game_date": game.get("game_date"),
+        "sport": EUROLEAGUE,
+        "home": home,
+        "away": away,
+        "home_score": home_score,
+        "away_score": away_score,
+        "state": "post" if ended else "in",
+        "period": cur + 1,
+        "clock_label": label,
+        "situation": None,
+        "possession": None,
+    }
+
+
+def _euroleague_default_fetch() -> Callable[[str, int], dict | None]:
+    from data.ingestors.euroleague_live_feed import EuroleagueApi
+    api = EuroleagueApi()
+    return lambda season, code: api._get("PlayByPlay", season, code)
+
+
+def _euroleague_tick(conn, games: list[dict], finished: set[str], now: datetime,
+                     fetch: Callable[[str, int], dict | None] | None) -> int | None:
+    """Rows written for EuroLeague this tick, or None when nothing was due or
+    the halftime loop's read window holds the tick off."""
+    due = []
+    for g in games:
+        if g.get("sport") != EUROLEAGUE or g.get("game_id") in finished:
+            continue
+        if g.get("home_score") is not None and g.get("away_score") is not None:
+            continue
+        start = _parse_ts(g.get("commence_time"))
+        if start is not None and start - LEAD <= now <= start + TAIL:
+            due.append(g)
+    if not due or euroleague_quiet(now):
+        return None
+    fetch = fetch or _euroleague_default_fetch()
+    stamp = now.isoformat()
+    n = 0
+    for g in due:
+        code = euroleague_code(g["game_id"])
+        if code is None:
+            continue
+        row = parse_euroleague(g, fetch(*code))
+        if row is None:
+            continue
+        conn.execute(UPSERT_SQL, {**row, "snapshot_at": stamp, "source": "euroleague_api"})
+        n += 1
+    conn.commit()
+    return n
+
+
 def run_once(conn=None, *, now: datetime | None = None,
-             fetch: Callable[[str, list[str]], dict | None] | None = None) -> dict:
+             fetch: Callable[[str, list[str]], dict | None] | None = None,
+             euroleague_fetch: Callable[[str, int], dict | None] | None = None) -> dict:
     """One tick. Returns {sport: rows written} for the sports it polled."""
     from config import live_slate_dates
 
@@ -413,7 +553,7 @@ def run_once(conn=None, *, now: datetime | None = None,
             "SELECT game_id, sport, game_date::text, home_team, away_team, "
             "home_score, away_score, commence_time::text FROM public.games "
             "WHERE sport = ANY(%(sports)s) AND game_date::text = ANY(%(dates)s)",
-            {"sports": list(SPORT_PATHS), "dates": dates},
+            {"sports": [*SPORT_PATHS, EUROLEAGUE], "dates": dates},
         ).fetchall()]
         if not games:
             return {}
@@ -439,7 +579,7 @@ def run_once(conn=None, *, now: datetime | None = None,
                 rows = match_games(sport, parse_scoreboard(sport, data), games, event_games)
                 stamp = now.isoformat()
                 for row in rows:
-                    conn.execute(UPSERT_SQL, {**row, "snapshot_at": stamp})
+                    conn.execute(UPSERT_SQL, {**row, "snapshot_at": stamp, "source": "espn_site"})
                 conn.commit()
                 written[sport] = len(rows)
             except Exception as exc:                          # noqa: BLE001
@@ -447,6 +587,14 @@ def run_once(conn=None, *, now: datetime | None = None,
                 failed[sport] = f"{type(exc).__name__}: {exc}"
                 logger.error(f"live_scoreboard {sport}: {failed[sport]}")
             time.sleep(0.1)
+        try:
+            n = _euroleague_tick(conn, games, finished, now, euroleague_fetch)
+            if n is not None:
+                written[EUROLEAGUE] = n
+        except Exception as exc:                              # noqa: BLE001
+            conn.rollback()
+            failed[EUROLEAGUE] = f"{type(exc).__name__}: {exc}"
+            logger.error(f"live_scoreboard {EUROLEAGUE}: {failed[EUROLEAGUE]}")
         if written:
             logger.info(f"live_scoreboard: {written}")
         if failed:
