@@ -217,7 +217,7 @@ export function ModelsScreen() {
                   BUILTIN_MODEL_IDS.some(
                     (id) => sportOf(id) === sport && !isModelRetired(id),
                   )
-                    ? 'Paused models are hidden here. Their settled record stays on Track Record.'
+                    ? 'Paused models are hidden here. Their settled record stays on Signal Record.'
                     : 'No built-in models cover this sport yet.'
                 }
               />

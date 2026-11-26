@@ -180,7 +180,7 @@ export function OpeningComparisonScreen() {
           {SHADOW_TRACK_START}. This experiment keeps a longer history than the published
           record on purpose — a comparison needs something to compare against. It is a shadow
           experiment: it doesn’t change the picks you see
-          or our published track record. No bet rule is built from it yet; we’re measuring first.
+          or our published Signal Record. No bet rule is built from it yet; we’re measuring first.
         </Text>
         <BetslipBarSpacer />
       </ScrollView>
