@@ -439,3 +439,45 @@ event group directly: NBA 42648 parsed 5 games, NHL 42133 parsed 7, NCAAF 87637 
 team of the right league (probe `dk2`). `data/ingestors/dk_splits.KNOWN_EVENT_GROUPS` now holds
 them; the worker runs master, so they are collected only once this branch is merged. NCAAB
 (92483) parsed 10 games, but the ingestor has no NCAAB team matcher yet.
+
+### D8. Historical money, tested: Polymarket order flow against Pinnacle
+
+**The import.** `source = 'polymarket_all'`, 2026-11-26 17:22 to about 18:00 UTC: 2,659 games
+ledgered (2,604 read after they were played), 4,587,085 trades before tip, about $902.9M of
+shares bought before tip.
+- **Trades are taker-only:** the API accepted `takerOnly=true`, so each trade is signed by the
+  side that took liquidity.
+- **82 slugs not found,** mostly late October 2025.
+- **3 games refused** because their trade count was an exact multiple of 500: a full last page
+  with `has_more` false and no cursor, refused by design.
+- **55 games were ledgered before their tip,** games not yet played on the first corrected run.
+  The fix now skips them, and every test here requires the ledger row to postdate the tip.
+
+**The test.** Same as D6, with Pinnacle's `p6` and close, early flow from buckets closed before
+`p6`:
+
+| Season | Games | Early flow vs Pinnacle's later move | Flow after `p6` vs the same window's move | All flow vs result minus close |
+|---|---|---|---|---|
+| 2024-25 | 1,174 | -0.046 (SE 0.029) | +0.203 | +0.005 |
+| 2025-26 to 01-14 | 486 | -0.115 (SE 0.045) | +0.156 | -0.092 |
+| 2025-26 from 01-15 | 592 | -0.066 (SE 0.041) | +0.145 | +0.107 |
+
+**Read:** the same as Kalshi.
+- **Early flow:** Pinnacle then moves slightly against it, in every cut on both exchanges.
+- **Late flow:** moves with the line.
+- **Results beyond the close:** nothing; the sign flips between the two halves of one season.
+
+## E. Verdict after the second pass
+
+1. **Historical money data exists and is now stored.** Kalshi (1,494 games, 2025-10 on) and
+   Polymarket (2,604 played games, 2024-10 on) are real matched money with real timestamps, in
+   Supabase (`nba_exchange_flow`).
+2. **On about 3,700 game-seasons it carries no information the Pinnacle price lacks.** The one
+   consistent effect, early flow followed by a small move the other way, is worth about 0.3
+   points of closing value, below any sportsbook margin.
+3. **Retail sportsbook handle with history still cannot be bought or rebuilt:**
+   - VSiN is Cloudflare-blocked from the worker, and the Wayback Machine refuses it.
+   - DraftKings' own splits for NBA, NHL and NCAAF start collecting once this branch is merged.
+4. **The earlier prop snapshot is the more promising lead.** `nba_prop_market`'s frozen rule at
+   10 hours returned +5.8% a bet on 7,572 bets against +2.6% at 1 hour on the same games, ahead in
+   every season. Its 2025-26 value against Pinnacle's later price was +0.78%.
