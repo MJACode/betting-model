@@ -28,8 +28,10 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, The PC monitor follows master by itself (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, PC monitor: EuroLeague listed, live lines by sportsbook (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Every book's own live page, from mike's machine (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, My models: members only, the line now, the worker applies alerts (Matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, My models: NCAAB game lines on the builder, and NCAAB alerts (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, Live lines from every book; NHL and EuroLeague on the DK board; EuroLeague live scores (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Period splits from Action Network consensus, hourly (Matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, AI assistant: MCP redeployed, NBA quarter lines before tip, splits-markets probe (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, AI assistant (MCP): every stored game market, EuroLeague and NBL, and the missing props (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, Signals card: live score gets its own line (Matt) |

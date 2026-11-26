@@ -236,14 +236,20 @@ def _game_meta(game: dict, known: set[str]) -> dict:
     }
 
 
-def parse_v2_sides(game: dict, book_id: int = CONSENSUS_BOOK) -> dict:
+def parse_v2_sides(game: dict, book_id: int = CONSENSUS_BOOK, period_key: str = "event") -> dict:
     """{(market, side): {value, odds, tickets, money}} from a v2 game.
 
     Only pre-game entries (is_live false). An in-progress game carries both
     pre-game and live entries for the same side; the live ones show 0/0.
+    `period_key` is the v2 block to read: 'event' (the full game, the
+    default) or a period the scoreboard was asked for (`periods=firsthalf`,
+    `firstquarter`, ...; data/ingestors/scoreboard_splits.PERIODS_BY_SPORT).
     """
     block = (game.get("markets") or {}).get(str(book_id)) or {}
-    period = block.get("event") if isinstance(block.get("event"), dict) else block
+    if isinstance(block.get(period_key), dict):
+        period = block.get(period_key)
+    else:
+        period = block if period_key == "event" else {}
     out: dict = {}
     for an_key, market in _V2_MARKETS.items():
         for e in (period or {}).get(an_key) or []:

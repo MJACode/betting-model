@@ -559,6 +559,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # bodies at anchors (raises if one is not there exactly once). Skips
     # once both carry byom_ncaab_v1. Does not write picks.
     "byom_ncaab_2026_11_26.sql",
+    # 2026-11-26 (Matt: "You run the supabase"): the member alerts file,
+    # written to be hand applied and never applied. byom_legs 'open',
+    # byom_models.alerts_enabled, byom_alerts, and the members-only RPCs
+    # with the line now. Returns before any DDL once byom_my_open_bets
+    # carries byom_alerts_members_v1. Does not write picks.
+    "byom_alerts_2026_11_25.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.
@@ -849,6 +855,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # (Matt, 2026-11-25). Runs while mcp_stats.game_prices has no `period`
     # column or prop_markets has no anytime_td row.
     "mcp_stats_all_markets_2026_11_25.sql",
+    # Period splits (Matt, 2026-11-26): scoreboard_splits_history's market
+    # check also allows h2h/spreads/totals with one period suffix (_h1, _q1,
+    # _p1, ...). Runs while scoreboard_splits_history_market_period_check is
+    # missing or the old market check remains.
+    "scoreboard_splits_period_markets_2026_11_26.sql",
     # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
     # monitor's page, written by mike's PC (pc_monitor/) and served to his
     # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,

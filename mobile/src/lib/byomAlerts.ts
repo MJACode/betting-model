@@ -18,7 +18,7 @@
 import { parseOpenBet, isMissingFunction, type ByomOpenBet, type ByomOpenBetsResult } from './byomAlertRows';
 import { supabase } from './supabase';
 
-export { isMissingFunction, matchupLabel, parseOpenBet } from './byomAlertRows';
+export { isMissingFunction, matchupLabel, movedLine, parseOpenBet } from './byomAlertRows';
 export type { ByomOpenBet, ByomOpenBetsResult } from './byomAlertRows';
 
 export async function fetchByomOpenBets(): Promise<ByomOpenBetsResult> {

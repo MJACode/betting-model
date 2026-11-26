@@ -9,7 +9,7 @@
  */
 
 import { routeForPush, PUSH_ROUTE_VERSION } from '../src/lib/pushRoute';
-import { isMissingFunction, matchupLabel, parseOpenBet } from '../src/lib/byomAlertRows';
+import { isMissingFunction, matchupLabel, movedLine, parseOpenBet } from '../src/lib/byomAlertRows';
 import { asByomSport, byomHasProps, byomSeasonName, byomStartWord, byomUsesRest, seasonListFor } from '../src/lib/byomRecord';
 
 let failed = 0;
@@ -42,6 +42,15 @@ check('the matchup is away @ home', bet != null && matchupLabel(bet) === 'DET @ 
 check('a row with no price is dropped', parseOpenBet({ ...row, price: null }) === null);
 check('a row with no label is dropped', parseOpenBet({ ...row, label: '' }) === null);
 check('a missing RPC reads as not applied', isMissingFunction({ code: 'PGRST202' }) && !isMissingFunction({ code: '42501' }));
+
+// The line now (Matt, 2026-11-26): server-labelled, shown only when it moved.
+const moved = parseOpenBet({ ...row, now_label: 'BUF -2.5', now_price: -105, now_at: '2026-11-26T12:00:00Z' });
+check('a moved line shows the server label and price', JSON.stringify(moved && movedLine(moved)) === JSON.stringify({ label: 'BUF -2.5', price: -105 }));
+const same = parseOpenBet({ ...row, now_label: 'BUF +1', now_price: -110 });
+check('an unmoved line shows nothing', same != null && movedLine(same) === null);
+check('no current quote shows nothing', bet != null && movedLine(bet) === null);
+check('after the start the line now is not shown', moved != null && movedLine({ ...moved, started: true }) === null);
+check('a price-only move still shows', same != null && movedLine({ ...same, now_price: -120 }) !== null);
 
 // NCAAB game lines on the builder (Matt, 2026-11-26).
 const nov = new Date('2026-11-26T15:00:00Z');
