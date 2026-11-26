@@ -1,0 +1,68 @@
+"""scripts/splits_markets_probe.py: the parsers, on fixtures shaped like the 2026-11-03 probe's measured pages."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import scripts.splits_markets_probe as P
+from tracking import job_queue
+
+ROOT = Path(__file__).resolve().parents[1]
+
+# DK Network's text, as worker_jobs 936774 measured it (tags reduced to the shape the parser reads).
+DK_PAGE = (
+    '<a href="https://dknetwork.draftkings.com/draftkings-sportsbook-betting-splits/?tb_eg=88808&#038;'
+    'itm_content=NFL&#038;tb_edate=n7days&#038;tb_emt=Moneyline">x</a>'
+    '<a href="https://dknetwork.draftkings.com/draftkings-sportsbook-betting-splits/?tb_eg=88808&#038;'
+    'itm_content=NFL&#038;tb_edate=n7days&#038;tb_emt=Spread">x</a>'
+    '<a href="https://dknetwork.draftkings.com/draftkings-sportsbook-betting-splits/?tb_eg=42648&#038;'
+    'itm_content=NBA&#038;tb_edate=n7days&#038;tb_emt=Total">x</a>'
+    "<div>JAX Jaguars @ BAL Ravens Thu 11/5 Selection Odds Handle Bets Moneyline BAL Ravens +350 22% 10% "
+    "Spread JAX Jaguars -8.5 -115 86% 82% Total Over 42.5 -105 50% 50% Under 42.5 -115 50% 50%</div>"
+    "<div>CIN Bengals @ ATL Falcons Selection Odds Handle Bets Moneyline ATL Falcons +136 17% 16% "
+    "Spread CIN Bengals -3 -115 50% 81% Total Over 52.5 -102 100% 100%</div>")
+
+
+def test_dk_sport_links():
+    assert P.dk_sport_links(DK_PAGE) == {"88808": "NFL", "42648": "NBA"}
+
+
+def test_dk_markets_reads_filters_and_row_labels():
+    d = P.dk_markets(DK_PAGE)
+    assert d["filters"] == ["Moneyline", "Spread", "Total"]
+    assert d["games"] == 2
+    assert d["labels"] == {"Moneyline": 2, "Spread": 2, "Total": 2}
+
+
+def test_an_split_markets_counts_only_split_markets_per_period():
+    payload = {"games": [
+        {"markets": {"15": {"event": {"moneyline": [{"bet_info": {"tickets": {"percent": 55}}}],
+                                      "spread": [{"bet_info": {"tickets": {"percent": None}}}]},
+                            "firsthalf": {"total": [{"bet_info": {"tickets": {"percent": 0}}}]}},
+                     "30": {"event": {"moneyline": [{"bet_info": {"tickets": {"percent": 50}}}]}}}},
+        {"markets": {"15": {"event": {"moneyline": [{"bet_info": {"tickets": {"percent": 61}}}]}}}},
+    ]}
+    # Book 30 (Open) is not asked; a 0% split is a split; a null one is not.
+    assert P.an_split_markets(payload) == {"15": {"event": {"moneyline": 2}, "firsthalf": {"total": 1}}}
+
+
+def test_probe_reports_each_source_and_fails_when_dk_is_unreachable(capsys):
+    calls = []
+
+    def get(url, **kw):
+        calls.append((url, kw.get("params")))
+        if "dknetwork" in url:
+            return None, "", "ConnectionError: no route"
+        return 200, json.dumps({"games": []}), None
+    assert P.probe(get=get, today="20261126") == 1
+    out = capsys.readouterr().out
+    assert P.SUMMARY_MARK in out and "dk: ConnectionError" in out
+    asked = {(p or {}).get("periods") for u, p in calls if "actionnetwork" in u}
+    assert asked == set(P.AN_PERIODS)
+
+
+def test_registered_as_a_worker_job_and_declared_once():
+    assert "splits_markets_probe" in job_queue.JOBS
+    declared = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
+    mine = [d for d in declared if d["job_type"] == "splits_markets_probe"]
+    assert len(mine) == 1 and mine[0]["requested_by"] == "matt" and mine[0]["args"] == {}

@@ -1744,6 +1744,28 @@ def step_nba_public_splits(run_date: str) -> bool:
         return False
 
 
+def step_nba_period_lines() -> bool:
+    """
+    NBA quarter and half lines before tip, for the AI assistant (Matt,
+    2026-11-26): each game's twelve period markets once it is within 7 hours of
+    tip, and the nine no model already buys once within 75 minutes
+    (data/ingestors/nba_period_lines_live.py). Its own source and 'open' rows
+    only, so no model's decision or CLV reads them. Paid: at most 21 credits a
+    game, under odds_quota's reserve. A failed game is retried next pass.
+    """
+    try:
+        from data.ingestors.nba_period_lines_live import run
+        result = run()
+        if result.get("failed"):
+            logger.error(f"✗ NBA period lines: {result}")
+            return False
+        logger.success(f"✓ NBA period lines: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA period lines failed: {exc}")
+        return False
+
+
 def step_scoreboard_splits(run_date: str) -> bool:
     """
     % of bets and % of money for the app's Scoreboard: DraftKings' own split
@@ -3168,7 +3190,7 @@ Examples:
                                  "savant", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news", "player-positions",
                                  "player-news-refresh",
-                                 "umpires", "public-betting", "nba-public-splits", "scoreboard-splits", "scoring",
+                                 "umpires", "public-betting", "nba-public-splits", "nba-period-lines", "scoreboard-splits", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
@@ -3251,6 +3273,7 @@ Examples:
             "umpires":      lambda: step_umpires(run_date),
             "public-betting": lambda: step_public_betting(run_date),
             "nba-public-splits": lambda: step_nba_public_splits(run_date),
+            "nba-period-lines": lambda: step_nba_period_lines(),
             "scoreboard-splits": lambda: step_scoreboard_splits(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
             "game-log":     lambda: step_game_log(run_date),
