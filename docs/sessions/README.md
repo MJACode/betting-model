@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, A red ops alert when a book throttles the live reads (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Other books polled as fast as they allow, targeting 1 s (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, PC monitor redesign (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, BetMGM's public access id, Caesars' browser headers (mike) |
