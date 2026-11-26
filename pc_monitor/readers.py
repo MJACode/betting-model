@@ -36,6 +36,57 @@ PUBLISH_SLOW_SEC = 60.0
 PHONE_WATCHING_SEC = 60.0
 
 
+# Every league DraftKings' board reads (dk_live_board.LEAGUES), so a league
+# with no dk_live_feed row is still listed; and the detail the board writes for
+# a league DraftKings is not listing (dk_live_board.NOT_LISTED). A test keeps
+# both equal to the board's.
+FEED_LEAGUES = ("EUROLEAGUE", "NBA", "NCAAB", "NCAABW", "NCAAF", "NFL", "NHL")
+NOT_LISTED = "not listed by DraftKings"
+
+# The other books (data/ingestors/book_live_boards.py, BOOKS): what the feed
+# does with each one's answer, in the order the page lists them. "parsed": its
+# live lines go to `odds`; "captured": its answer is stored until a parser is
+# written from it; "home page": its home page is stored for the hosts it calls.
+# A test keeps this equal to BOOKS.
+BOOK_KINDS = {"fanduel": "parsed", "betrivers": "parsed", "betmgm": "captured",
+              "williamhill_us": "captured", "fanatics": "home page", "hardrockbet": "home page"}
+BOOK_NAMES = {"draftkings": "DraftKings", "fanduel": "FanDuel", "betrivers": "BetRivers",
+              "betmgm": "BetMGM", "williamhill_us": "Caesars", "fanatics": "Fanatics",
+              "hardrockbet": "Hard Rock"}
+# A book is read every BOOK_POLL_SEC while its league has a game live
+# (book_live_boards.POLL_SEC), and not at all otherwise; its home page every
+# BOOK_HOME_PAGE_SEC (DISCOVER_SEC) while anything is live.
+BOOK_POLL_SEC = 30.0
+BOOK_HOME_PAGE_SEC = 6 * 3600.0
+
+
+def book_status(row: dict[str, Any], kind: str | None) -> dict[str, str]:
+    """One book and league's last read in book_live_feed, in words."""
+    age, live = row.get("age_s"), row.get("live_events") or 0
+    detail = str(row.get("detail") or "")
+    if age is None:
+        return {"tone": "idle", "text": "never read"}
+    if detail == "refused":
+        return {"tone": "bad", "text": "refused by the book (a 403 or a bot check); left alone, never worked around"}
+    if row.get("ok") is False:
+        status = row.get("status")
+        return {"tone": "bad", "text": f"the last answer was HTTP {status}" if status else (detail or "the last read failed")}
+    if kind == "home page":
+        if age > BOOK_HOME_PAGE_SEC * 2:
+            return {"tone": "idle", "text": "home page stored; not read lately (read only while a game is live)"}
+        return {"tone": "idle", "text": "home page stored, for the hosts its scripts call; no lines yet"}
+    if kind == "captured":
+        return {"tone": "idle", "text": "answer stored for writing its parser; no lines yet"}
+    if age > BOOK_POLL_SEC * 3:
+        return {"tone": "idle", "text": "not read lately: a league is read only while it has a game live"}
+    if live == 0:
+        return {"tone": "idle", "text": "no live game on its page"}
+    matched = row.get("matched") or 0
+    if matched < live:
+        return {"tone": "warn", "text": f"{live - matched} of {live} live games not placed on our games"}
+    return {"tone": "ok", "text": "fresh"}
+
+
 def publish_interval(demand_age_s: float | None) -> float:
     """How often the PC writes its view for the phone, given how long ago a
     phone last asked (None: never)."""
@@ -506,6 +557,9 @@ def sport_status(row: dict[str, Any], feed_running: bool) -> dict[str, str]:
         return {"tone": "idle", "text": "never read"}
     if not feed_running:
         return {"tone": "idle", "text": "feed not running"}
+    if str(row.get("detail") or "").startswith(NOT_LISTED):
+        return {"tone": "idle", "text": "DraftKings is not listing this league right now (it lists a league "
+                                        "only while it has offers); asked again every 10 min"}
     if row.get("ok") is False:
         return {"tone": "bad", "text": "the last read failed"}
     if live > 0:

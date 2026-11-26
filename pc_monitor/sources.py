@@ -396,6 +396,14 @@ SELECT sport, CAST(EXTRACT(EPOCH FROM (now() - last_read_at)) AS double precisio
 FROM dk_live_feed ORDER BY sport
 """
 
+# Every other book's last read per league (data/ingestors/book_live_boards.py):
+# one row per book and league, so the whole table is a few dozen rows.
+SQL_BOOKS = """
+SELECT book, sport, CAST(EXTRACT(EPOCH FROM (now() - last_read_at)) AS double precision) AS age_s,
+       ok, status, live_events, matched, written, detail
+FROM book_live_feed ORDER BY book, sport
+"""
+
 # Index-only scan on dk_live_reads_sport_read_idx (measured 2026-11-21: 14 ms
 # for 3,002 rows). The sport list keeps the index's leading column bound.
 SQL_MINUTES = """

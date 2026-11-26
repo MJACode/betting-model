@@ -56,6 +56,7 @@ table { width: 100%; border-collapse: collapse; }
 th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); }
 td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
 tr:last-child td { border-bottom: none; }
+tr.group td { border-top: 2px solid var(--line); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 td .pill { white-space: normal; border-radius: 6px; }
 .big { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -129,6 +130,7 @@ main.stale .big, main.stale .t-ok, main.stale .t-warn, main.stale .t-bad { color
 <main>
   <section class="wide" id="phone" hidden></section>
   <section class="wide" id="feed"></section>
+  <section class="wide" id="books"></section>
   <section class="wide" id="flow">
     <h2>API calls and data movement <span class="note">every outgoing call the system makes, and the rows this PC moves</span></h2>
     <div class="facts" id="flow-stats"></div>
@@ -255,6 +257,33 @@ function renderFeed(now, f) {
   if (f.log?.path) h += `<div class="note mono">${esc(f.log.path)}</div>`;
   h += stamps(now, f.sources);
   $("feed").innerHTML = h;
+}
+
+const KIND_WORDS = {
+  "parsed": "live lines saved",
+  "captured": "answer stored, no lines yet",
+  "home page": "home page stored, no lines yet",
+};
+function renderBooks(now, b) {
+  if (!b) { $("books").innerHTML = ""; return; }
+  let h = `<h2>Live lines by sportsbook <span class="note">each book's own live page, read from this PC</span></h2>`;
+  h += `<table><tr><th>Sportsbook</th><th>League</th><th>Status</th><th class="num">Last read</th><th class="num">Answer</th><th class="num">Live games</th><th class="num">On our games</th><th class="num">Saved</th></tr>`;
+  if (!b.rows.length) h += `<tr><td colspan="8" class="empty">no rows from the database yet</td></tr>`;
+  let prev = null;
+  for (const r of b.rows) {
+    const first = r.book !== prev;
+    prev = r.book;
+    const name = first ? `<b>${esc(r.name)}</b><div class="note">${esc(KIND_WORDS[r.kind] || r.kind)}</div>` : "";
+    const ageText = r.age_s == null ? "" : r.age_s < 100 ? r.age_s.toFixed(1) + " s" : dur(r.age_s);
+    const saved = r.written == null ? "" : `${n0(r.written)} <small>${esc(r.written_what)}</small>`;
+    h += `<tr${first ? ' class="group"' : ""}><td>${name}</td><td>${esc(r.sport)}</td>
+      <td>${pill(r.status.tone, r.status.text)}</td><td class="num">${ageText}</td>
+      <td class="num">${r.http == null ? "" : esc(r.http)}</td><td class="num">${n0(r.live_events)}</td>
+      <td class="num">${n0(r.matched)}</td><td class="num">${saved}</td></tr>`;
+  }
+  h += `</table><div class="note">DraftKings is read every second while a league has a game live; every other book every 30 s, and only while its league has a game live, so an old last read is a league with no game on. FanDuel and BetRivers lines are saved to the same table the app reads; BetMGM and Caesars answers are stored until a parser is written from them; Fanatics and Hard Rock have only their home pages stored. NCAAF and MLB lines from other books are not saved (their live picks are priced off those rows).</div>`;
+  if (b.source) h += stamps(now, {book_live_feed: b.source});
+  $("books").innerHTML = h;
 }
 
 function renderBackup(now, b) {
@@ -610,6 +639,7 @@ async function tick() {
     $("db").innerHTML = s.db.connected ? pill("ok", "database connected") : pill(s.db.error ? "bad" : "idle", s.db.error ? "database unreachable" : "database connecting");
     renderRemote(s); renderPhone(now, s.phone);
     renderFeed(now, s.feed);
+    renderBooks(now, s.books);
     try { renderFlow(now, s.flow, s.pc_reported_age_s != null && s.pc_reported_age_s > PC_SILENT_S); }
     catch (e) { $("flow-src").textContent = "could not draw this section: " + e; }
     renderBackup(now, s.backup); renderTennis(now, s.tennis);

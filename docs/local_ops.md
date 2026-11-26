@@ -280,6 +280,29 @@ window onto it. Started without the task (the shortcut alone), it exits 10
 minutes after the last window closes. A merge reaches the running copy at its
 next start, which is normally the next sign-in.
 
+**Live lines by sportsbook** (mike, 2026-11-26: *"I don't see euro league in
+there and can we have a clearer breakout of live data by sports book"*). The
+card under the in-play feed: one row per book and league, DraftKings first
+(its `dk_live_feed` rows), then every other book in `book_live_boards.BOOKS`
+order (`book_live_feed`, read every 5 s): status in words, last read, the
+book's HTTP answer, live games, how many were placed on our games, and lines
+changed. A book's kind sits under its name: live lines saved (FanDuel,
+BetRivers), answer stored with no lines yet (BetMGM, Caesars), or home page
+stored (Fanatics, Hard Rock). An old last read is a league with no game on,
+not a late feed: a book is read only while its league has a game live.
+
+**Every league the feed reads is listed**, with or without a row
+(`readers.FEED_LEAGUES`, pinned to `dk_live_board.LEAGUES`). A league
+DraftKings is not listing (EuroLeague on most days) now has a `dk_live_feed`
+row, written at most once a minute, whose detail says so; the page shows
+"DraftKings is not listing this league right now".
+
+The window loads new code only when it starts. To see a merged change now:
+
+```powershell
+schtasks /End /TN "\BettingModel\PcMonitor"; schtasks /Run /TN "\BettingModel\PcMonitor"
+```
+
 **API calls and data movement** (mike, 2026-11-21: *"show the stream of api
 calls and information in a section that basically just shows all the api calls
 and data movement? like a visualization as well?"*). The second card on the

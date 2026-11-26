@@ -321,6 +321,16 @@ class Collector:
                     self.panels.put("db_feed", [
                         {"sport": r[0], "age_s": r[1], "ok": r[2], "live_events": r[3],
                          "matched": r[4], "detail": r[5], "db_now": r[6]} for r in rows])
+                if self._due_now("db_books", 5):
+                    # Its own try: a books read that fails (the table not made
+                    # yet) costs only this panel. rows() reconnects next time.
+                    try:
+                        rows = db.rows(S.SQL_BOOKS)
+                        self.panels.put("db_books", [
+                            {"book": r[0], "sport": r[1], "age_s": r[2], "ok": r[3], "status": r[4],
+                             "live_events": r[5], "matched": r[6], "written": r[7], "detail": r[8]} for r in rows])
+                    except Exception as exc:  # noqa: BLE001
+                        self.panels.put("db_books", error=type(exc).__name__)
                 if self._due_now("db_minutes", 15):
                     sports = [r["sport"] for r in (self.panels.get("db_feed").get("data") or [])]
                     rows = db.rows(S.SQL_MINUTES, (sports,)) if sports else []
@@ -373,6 +383,7 @@ def _window_text(window: dict | None) -> str | None:
 # reopened after the collectors paused).
 STALE_AFTER_S = {"processes": 10, "feed_log": 15, "launcher_log": 30, "backup": 15, "tennis": 60,
                  "tables_done": 60, "tasks": 120, "db_feed": 10, "db_minutes": 60, "db_tennis": 240,
+                 "db_books": 20,
                  "db_backup": 240, "stderr": 120, "calls": 10, "call_buckets": 60}
 
 
@@ -416,6 +427,44 @@ def flow_view(panels: dict[str, dict[str, Any]], now: float, pc_sources: set[str
     }
 
 
+def books_view(db_books: dict[str, Any], sports: list[dict[str, Any]], now: float) -> dict[str, Any]:
+    """Live lines by sportsbook: DraftKings' own board (its dk_live_feed rows,
+    already judged in `sports`) and every other book's last read per league
+    (book_live_feed), one row each, books in the page's order."""
+    order = ["draftkings", *R.BOOK_KINDS]
+    stale = stale_for(db_books, "db_books", now)
+    db_age = (now - db_books["read_at"]) if db_books.get("read_at") else 0
+    rows = []
+    for s in sports:
+        if s.get("age_s") is None and s.get("detail") == "no row yet":
+            continue
+        rows.append({"book": "draftkings", "name": R.BOOK_NAMES["draftkings"], "kind": "parsed",
+                     "sport": s.get("sport"), "age_s": s.get("age_s"), "http": None,
+                     "live_events": s.get("live_events") or 0, "matched": s.get("matched") or 0,
+                     "written": s.get("rows_last_min"), "written_what": "rows saved, last minute",
+                     "status": s.get("status") or {"tone": "idle", "text": ""}})
+    for r in db_books.get("data") or []:
+        book = r.get("book")
+        kind = R.BOOK_KINDS.get(book)
+        row = dict(r)
+        if row.get("age_s") is not None:
+            row["age_s"] = row["age_s"] + db_age
+        if stale is not None:
+            status = {"tone": "idle", "text": "not read from the database lately" if stale == float("inf")
+                      else f"not read from the database for {int(stale)} s"}
+        else:
+            status = R.book_status(row, kind)
+        rows.append({"book": book, "name": R.BOOK_NAMES.get(book, book), "kind": kind or "unknown",
+                     "sport": "home page" if r.get("sport") == "*" else r.get("sport"),
+                     "age_s": row.get("age_s"), "http": r.get("status"),
+                     "live_events": r.get("live_events") or 0, "matched": r.get("matched") or 0,
+                     "written": r.get("written"), "written_what": "lines changed, last read",
+                     "detail": r.get("detail"), "status": status})
+    rank = {b: i for i, b in enumerate(order)}
+    rows.sort(key=lambda x: (rank.get(x["book"], len(rank)), str(x["sport"])))
+    return {"rows": rows, "source": _stamp(db_books, "db_books", now) if db_books else None}
+
+
 def view(panels: dict[str, dict[str, Any]], now: float, pc_sources: set[str] | None = None,
          stream_limit: int = 150) -> dict[str, Any]:
     """Everything the page shows, judged against `now`."""
@@ -451,7 +500,15 @@ def view(panels: dict[str, dict[str, Any]], now: float, pc_sources: set[str] | N
     feed_stale = stale_for(db_feed, "db_feed", now)
     procs_stale = stale_for(g("processes"), "processes", now)
     sports = []
-    for r in db_feed.get("data") or []:
+    rows_in = list(db_feed.get("data") or [])
+    if db_feed.get("data") is not None:
+        # Every league the feed reads, with or without a row: a league
+        # DraftKings has never listed would otherwise not be on the page.
+        have = {r.get("sport") for r in rows_in}
+        rows_in += [{"sport": sp, "age_s": None, "ok": None, "live_events": 0, "matched": 0,
+                     "detail": "no row yet"} for sp in R.FEED_LEAGUES if sp not in have]
+        rows_in.sort(key=lambda r: str(r.get("sport")))
+    for r in rows_in:
         row = dict(r)
         if row.get("age_s") is not None:
             row["age_s"] = row["age_s"] + db_age
@@ -482,6 +539,8 @@ def view(panels: dict[str, dict[str, Any]], now: float, pc_sources: set[str] | N
         "sources": {"feed_log": st("feed_log"), "db_feed": st("db_feed"),
                     "db_minutes": st("db_minutes"), "launcher_log": st("launcher_log")},
     }
+
+    books = books_view(g("db_books"), sports, now)
 
     # Backup
     bk_task = by_script.get("local_mirror_run.ps1")
@@ -523,7 +582,7 @@ def view(panels: dict[str, dict[str, Any]], now: float, pc_sources: set[str] | N
         "app": APP_ID, "now": now, "flow": flow,
         "db": {"connected": db.get("error") is None and db.get("read_at") is not None
                and feed_stale is None, **_stamp(db)},
-        "feed": feed, "backup": backup, "tennis": tennis, "other_tasks": others,
+        "feed": feed, "books": books, "backup": backup, "tennis": tennis, "other_tasks": others,
         "tasks": tasks, "tasks_source": st("tasks"),
         "processes": strip(procs), "processes_source": st("processes"),
         "stderr": g("stderr").get("data") or [],

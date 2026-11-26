@@ -91,6 +91,9 @@ LEAGUES = {"NCAAB": "92483", "NCAABW": "36647", "NBA": "42648", "NCAAF": "87637"
 DISCOVER = {"NHL": ("https://sportsbook.draftkings.com/sports/hockey", "nhl"),
             "EUROLEAGUE": ("https://sportsbook.draftkings.com/sports/basketball", "euroleague")}
 DISCOVER_RETRY_SEC = 600.0
+# The dk_live_feed detail for a league DraftKings does not list right now
+# (pc_monitor/readers.py reads it; a test keeps the two equal).
+NOT_LISTED = "not listed by DraftKings"
 # Every league entry on a sports page carries its id and name in one of these
 # two shapes (read off the tennis and basketball pages, scripts/nbl_dk_probe.py).
 _NAV_A = re.compile(r'"eventGroupId":"?(\d+)"?,"eventGroupName":"([^"]+)"')
@@ -407,6 +410,7 @@ class Board:
         self.sport, self.connect, self.dry_run = sport, connect, dry_run
         self.league_id = LEAGUES.get(sport)
         self.discovered_at = -1e9
+        self.not_listed_at = -1e9
         # (conn, rows) -> rows written; the live price log unless a test injects one.
         self.odds_log = odds_log
         # Dry runs hand each read's changed rows here instead of the database
@@ -480,7 +484,12 @@ class Board:
             self.sess = self.session_factory(self.sport)
         league = self._league()
         if league is None:
-            return {"ok": True, "live": 0, "matched": 0, "written": 0, "detail": "league not listed"}
+            # A row in dk_live_feed says so, at most once a minute, so the PC
+            # monitor shows the league and why it has no reads (mike,
+            # 2026-11-26: "I don't see euro league in there"). No reader of
+            # dk_live_feed decides on these two leagues.
+            self._not_listed_beat()
+            return {"ok": True, "live": 0, "matched": 0, "written": 0, "detail": NOT_LISTED}
         try:
             r = self.sess.get(BOARD_URL.format(league=league), timeout=10)
         except Exception as exc:          # noqa: BLE001
@@ -551,6 +560,19 @@ class Board:
             except Exception as exc:      # noqa: BLE001
                 log.warning("%s: odds log failed (non-fatal): %s", self.sport, exc)
         return {"ok": True, "live": len(evs), "matched": matched, "written": len(rows), "odds": logged}
+
+    def _not_listed_beat(self) -> None:
+        if self.dry_run or time.monotonic() - self.not_listed_at < 60.0:
+            return
+        self.not_listed_at = time.monotonic()
+        try:
+            conn = self.c()
+            self._upsert_beat(conn, self.clock(), True, 0, 0,
+                              f"{NOT_LISTED}; asked again every {DISCOVER_RETRY_SEC / 60:.0f} min")
+            conn.commit()
+        except Exception as exc:          # noqa: BLE001
+            log.error("%s: beat failed: %s", self.sport, exc)
+            self._recycle()
 
     def _upsert_beat(self, conn, at, ok: bool, live: int, matched: int, detail: str) -> None:
         conn.execute("""

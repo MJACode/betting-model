@@ -211,7 +211,7 @@ def test_a_league_not_listed_reads_no_board_until_the_retry():
     try:
         mod.time.monotonic = lambda: clock[0]
         res = b.read()
-        assert res["detail"] == "league not listed" and sess.urls == [eu]
+        assert res["detail"] == B.NOT_LISTED and sess.urls == [eu]
         clock[0] += 60
         b.read()
         assert sess.urls == [eu]                       # not asked again inside the retry
