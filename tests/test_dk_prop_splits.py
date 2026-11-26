@@ -224,5 +224,23 @@ def test_wired_into_the_splits_step_and_a_declared_backfill():
     assert job_queue.JOBS["dk_prop_splits_import"][1]({"pages": 50}) == {"pages": 50}
     declared = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     entries = [d for d in declared if d.get("job_type") == "dk_prop_splits_import"]
-    assert [d["key"] for d in entries] == ["dk-prop-splits-backfill-2026-11-26", "dk-prop-splits-raw-tables-2026-11-26"]
+    assert [d["key"] for d in entries] == ["dk-prop-splits-backfill-2026-11-26", "dk-prop-splits-raw-tables-2026-11-26",
+                                           "dk-prop-splits-raw-tables-2-2026-11-26"]
     assert all(d["args"] == {"pages": 50} and d["requested_by"] == "mike" for d in entries)
+
+
+def test_the_import_job_applies_migrations_before_it_reads(monkeypatch):
+    # A declared job can be claimed before the deploy's first pass creates dk_prop_split_tables.
+    from tracking import job_queue
+    import data.db
+    import data.view_migrations
+    order = []
+
+    class C:
+        def close(self):
+            order.append("close")
+    monkeypatch.setattr(data.db, "get_connection", lambda: C())
+    monkeypatch.setattr(data.view_migrations, "apply_view_migrations", lambda conn: order.append("migrate"))
+    monkeypatch.setattr(dps, "run", lambda conn, pages: order.append(("run", pages)) or {"posts": 0})
+    assert job_queue._job_dk_prop_splits_import(pages=3) == {"posts": 0}
+    assert order == ["migrate", ("run", 3), "close"]
