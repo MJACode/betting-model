@@ -464,6 +464,23 @@ def probe_poly2() -> None:
         say("poly2", "docs", d.status_code, page_text(d.text)[:1500])
 
 
+def probe_pages2() -> None:
+    """Dunks & Threes' price and API scope (mike asked for the price, 2026-11-26)."""
+    for u in ("https://dunksandthrees.com/subscribe", "https://dunksandthrees.com/api/v2/documentation",
+              "https://dunksandthrees.com/terms"):
+        r = get(u, timeout=45)
+        if not isinstance(r, requests.Response):
+            say("pages2", u, "network", repr(r)[:160])
+            continue
+        t = page_text(r.text)
+        i = t.find("Previous slide Next slide")
+        body = t[i + 26:] if i >= 0 else t
+        money = sorted(set(re.findall(r"[^.]{0,100}\$\s?\d[\d,.]*[^.]{0,80}", body)))[:20]
+        say("pages2", u, "HTTP", r.status_code, "len", len(t))
+        say("pages2", u, "text", body[:3500])
+        say("pages2", u, "dollar mentions", money)
+
+
 def probe_dk2() -> None:
     """The splits page asked for other event groups directly. The page's own links name
     only NFL (88808) on the first run, so discovery finds nothing else. The ids are
@@ -489,7 +506,7 @@ def probe_dk2() -> None:
 
 SECTIONS = {"props": probe_props, "kalshi": probe_kalshi, "poly": probe_poly,
             "wayback": probe_wayback, "dk": probe_dk, "pages": probe_pages,
-            "kalshi2": probe_kalshi2, "poly2": probe_poly2, "dk2": probe_dk2}
+            "kalshi2": probe_kalshi2, "poly2": probe_poly2, "dk2": probe_dk2, "pages2": probe_pages2}
 
 
 def main(argv: list[str]) -> None:
