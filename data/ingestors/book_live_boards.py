@@ -64,14 +64,35 @@ from typing import Callable
 log = logging.getLogger("data.ingestors.book_live_boards")
 
 STATE = os.environ.get("BOOK_LIVE_STATE", "oh")      # DraftKings' board reads dkusoh
-POLL_SEC = float(os.environ.get("BOOK_POLL_SEC", "30"))
+# A book is polled this fast while its league has a game live (mike,
+# 2026-11-26: "Everything needs to be 1 second or less"), AS FAST AS THE BOOK
+# ALLOWS: POLL_SEC between clean reads, doubling to MAX_POLL_SEC each time the
+# book pushes back (429/403/5xx/challenge), halving back to the floor as it
+# answers cleanly again. This finds each book's fastest safe rate instead of a
+# guessed constant. These pages cost no Odds API credits.
+POLL_SEC = float(os.environ.get("BOOK_POLL_SEC", "1.0"))
+MAX_POLL_SEC = float(os.environ.get("BOOK_MAX_POLL_SEC", "30"))
+# No two book requests from this thread are closer than this, whichever book:
+# the DraftKings feed runs in the same process on the same home IP, and a burst
+# of scraping is what gets a residential address flagged. At 0.2 s the thread
+# makes at most five requests a second across every book, each to a different
+# host, so no one host sees more than ~1/s.
+MIN_REQUEST_GAP_SEC = float(os.environ.get("BOOK_MIN_REQUEST_GAP_SEC", "0.2"))
 DISCOVER_SEC = 6 * 3600.0                            # a home page, for its API hosts
 BACKOFF_SEC = 600.0                                  # after REFUSALS_BEFORE_BACKOFF refusals
 REFUSALS_BEFORE_BACKOFF = 3
 # One answer serves every sport that reads the same URL within this long
 # (BetRivers' one basketball list is NBA, NCAAB and NCAABW): a book is asked
-# once, not once per sport.
-SHARED_READ_SEC = 10.0
+# once, not once per sport. At the 1 s poll this only dedupes within a pass.
+SHARED_READ_SEC = 1.0
+
+
+def next_book_gap(gap: float, refused: bool, floor: float = POLL_SEC, ceiling: float = MAX_POLL_SEC) -> float:
+    """The next interval for a book: the floor after a clean read, doubled
+    (to the ceiling) each time it pushes back. Pure."""
+    if refused:
+        return min(ceiling, max(gap, floor) * 2.0)
+    return floor
 CAPTURES_PER_DAY = int(os.environ.get("BOOK_CAPTURES_PER_DAY", "3"))
 RESOLVER_REFRESH_SEC = 600.0
 MAX_BODY_TEXT = 200_000
@@ -616,11 +637,15 @@ class BookFeeds:
     """One pass over every book: each live sport it carries, POLL_SEC apart."""
 
     def __init__(self, connect, live_sports: Callable[[], list[str]], *, session_factory=None,
-                 resolvers=None, odds_log=None, clock=None, monotonic=time.monotonic, dry_run=False):
+                 resolvers=None, odds_log=None, clock=None, monotonic=time.monotonic, dry_run=False,
+                 sleep=time.sleep):
         self.connect, self.live_sports, self.dry_run = connect, live_sports, dry_run
         self.session_factory = session_factory or _session
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.monotonic = monotonic
+        self.sleep = sleep
+        self.gap: dict[str, float] = {}            # book -> current poll interval (adaptive)
+        self.last_http = None                      # monotonic of the last request, for MIN_REQUEST_GAP_SEC
         self.odds_log = odds_log
         if resolvers is None:
             from data.ingestors.dk_live_board import RESOLVERS
@@ -701,12 +726,23 @@ class BookFeeds:
                 key = (book.key, sport)
                 if now < self.due.get(key, 0.0):
                     continue
-                gap = DISCOVER_SEC if book.discover else POLL_SEC
-                self.due[key] = now + gap
+                # Never burst the home IP: space real requests across all books.
+                if self.last_http is not None:
+                    wait = MIN_REQUEST_GAP_SEC - (self.monotonic() - self.last_http)
+                    if wait > 0:
+                        self.sleep(wait)
+                self.last_http = self.monotonic()
                 res = self.read(book, sport)
-                if res.get("refused") and res.get("shared"):
-                    pass                  # the same answer another sport already counted
-                elif res.get("refused"):
+                now = self.monotonic()
+                if book.discover:
+                    self.due[key] = now + DISCOVER_SEC
+                    results.append(res)
+                    continue
+                refused = bool(res.get("refused")) and not res.get("shared")
+                gap = next_book_gap(self.gap.get(book.key, POLL_SEC), refused)
+                self.gap[book.key] = gap
+                self.due[key] = now + gap
+                if refused:
                     self.refusals[book.key] = self.refusals.get(book.key, 0) + 1
                     if self.refusals[book.key] >= REFUSALS_BEFORE_BACKOFF:
                         log.warning("%s: %d refusals in a row - leaving it alone %.0f s",
@@ -716,7 +752,8 @@ class BookFeeds:
                                 self.due[k] = now + BACKOFF_SEC
                         self.due[key] = now + BACKOFF_SEC
                         self.refusals[book.key] = 0
-                else:
+                        self.gap[book.key] = POLL_SEC
+                elif not res.get("shared"):
                     self.refusals[book.key] = 0
                 results.append(res)
         return results
@@ -913,11 +950,12 @@ def start_in_background(connect, live_sports: Callable[[], list[str]]) -> thread
             except Exception as exc:      # noqa: BLE001
                 log.error("book feeds pass failed: %s", exc)
                 feeds._recycle()
-            time.sleep(1.0)
+            time.sleep(0.3)
 
     t = threading.Thread(target=run, name="book_live_boards", daemon=True)
     t.start()
-    log.info("other books: %s, every %.0f s per live sport", ", ".join(b.key for b in BOOKS), POLL_SEC)
+    log.info("other books: %s, up to every %.1f s per live sport (backing off on refusal)",
+             ", ".join(b.key for b in BOOKS), POLL_SEC)
     return t
 
 

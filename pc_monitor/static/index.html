@@ -308,7 +308,7 @@ function renderBooks(now, b) {
        + `<td class="col-sec">${hasMin ? spark(r.minutes) : ""}</td></tr>`;
   }
   h += `</table></div>`;
-  h += `<div class="note">DraftKings is read every second a league has a game live; every other book every 30 s, and only while its league has a game on, so an old last read means no live game, not a stall. <b>Saved</b> is rows written on the last read (DraftKings: the last minute). FanDuel and BetRivers lines flow into the app; BetMGM and Caesars are stored until their parser is written; Fanatics and Hard Rock have only their home page. NCAAF and MLB from other books are not saved.</div>`;
+  h += `<div class="note">Every book is read about once a second while its league has a game live, as fast as the book allows (it eases off only if a book pushes back), and not at all otherwise, so an old last read means no live game, not a stall. <b>Saved</b> is rows written on the last read (DraftKings: the last minute). FanDuel and BetRivers lines flow into the app; BetMGM and Caesars are stored until their parser is written; Fanatics and Hard Rock have only their home page. NCAAF and MLB from other books are not saved.</div>`;
   if (b.source) h += stamps(now, {book_live_feed: b.source});
   $("books").innerHTML = h;
 }

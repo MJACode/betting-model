@@ -54,10 +54,13 @@ BOOK_NAMES = {"draftkings": "DraftKings", "fanduel": "FanDuel", "betrivers": "Be
               "betmgm": "BetMGM", "williamhill_us": "Caesars", "fanatics": "Fanatics",
               "hardrockbet": "Hard Rock"}
 # A book is read every BOOK_POLL_SEC while its league has a game live
-# (book_live_boards.POLL_SEC), and not at all otherwise; its home page every
-# BOOK_HOME_PAGE_SEC (DISCOVER_SEC) while anything is live.
-BOOK_POLL_SEC = 30.0
+# (book_live_boards.POLL_SEC, as fast as the book allows), and not at all
+# otherwise; its home page every BOOK_HOME_PAGE_SEC (DISCOVER_SEC) while
+# anything is live. BOOK_STALE_SEC is how long with no read means "no live
+# game" rather than a brief hiccup (a book only reads while its league is on).
+BOOK_POLL_SEC = 1.0
 BOOK_HOME_PAGE_SEC = 6 * 3600.0
+BOOK_STALE_SEC = 60.0
 
 
 def book_status(row: dict[str, Any], kind: str | None) -> dict[str, str]:
@@ -75,7 +78,7 @@ def book_status(row: dict[str, Any], kind: str | None) -> dict[str, str]:
         return {"tone": "idle", "text": "home page stored"}
     if kind == "captured":
         return {"tone": "idle", "text": "answer stored, no parser yet"}
-    if age > BOOK_POLL_SEC * 3:
+    if age > BOOK_STALE_SEC:
         return {"tone": "idle", "text": "not read lately"}
     if live == 0:
         return {"tone": "idle", "text": "no live game"}
