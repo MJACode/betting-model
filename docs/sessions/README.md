@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Public splits for every market: what exists, the period-splits correction, the coverage probe (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, premium_access delete_login; account calls are Matt's (matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Comped premium as a worker job (matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, A red ops alert when a book throttles the live reads (mike) |
