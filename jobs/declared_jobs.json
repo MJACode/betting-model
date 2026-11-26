@@ -2025,5 +2025,14 @@
     "args": {
       "pages": 50
     }
+  },
+  {
+    "key": "dk-prop-splits-raw-tables-2026-11-26",
+    "job_type": "dk_prop_splits_import",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26 ('Do all the outstanding tasks now'): the first import (worker_jobs 1724494) parsed 4 of 35 article versions and kept no table it could not parse. Reads every version once more, up to 50 search pages, to keep every table as printed in dk_prop_split_tables, so the unseen layout of 31 versions (2026-09-17 to 2026-11-16) is parsed from the database. Free, no Odds API credits.",
+    "args": {
+      "pages": 50
+    }
   }
 ]
