@@ -620,7 +620,7 @@ BEGIN
       x_rebounds               DOUBLE PRECISION,
       rebounds                 DOUBLE PRECISION,
       x_freeze                 DOUBLE PRECISION,
-      freeze                   DOUBLE PRECISION,
+      freeze_actual            DOUBLE PRECISION,
       x_on_goal                DOUBLE PRECISION,
       ongoal                   DOUBLE PRECISION,
       x_play_stopped           DOUBLE PRECISION,

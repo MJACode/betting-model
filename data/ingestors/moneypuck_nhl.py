@@ -47,6 +47,7 @@ import os
 import tempfile
 import time
 import zipfile
+from decimal import Decimal
 from pathlib import Path
 
 import requests
@@ -138,6 +139,16 @@ def _blank(value) -> bool:
     return text == "" or text.upper() in {"NA", "N/A", "NULL", "NONE", "NAN"}
 
 
+def _int(value) -> int:
+    """int() that also takes a float-formatted whole number ('8475883.0'),
+    which the older season files use for ids."""
+    text = str(value).strip()
+    try:
+        return int(text)
+    except ValueError:
+        return int(Decimal(text))
+
+
 def _measure(row: dict, table: dict) -> dict:
     out = {}
     for src, col, _sql, kind in table["measures"]:
@@ -147,23 +158,23 @@ def _measure(row: dict, table: dict) -> dict:
         elif kind == "text":
             out[col] = str(value)
         elif kind == "bigint":
-            out[col] = int(value)
+            out[col] = _int(value)
         else:
             out[col] = float(value)
     return out
 
 
 def _season_pair(row: dict) -> tuple[int, int]:
-    start = int(row["season"])
+    start = _int(row["season"])
     return start, start + 1
 
 
 def shot_record(row: dict) -> dict | None:
     start, end = _season_pair(row)
-    number = int(row["game_id"])
+    number = _int(row["game_id"])
     record = {
         "nhl_game_id": nhl_game_id_from_shot(start, number),
-        "event_id": int(row["id"]),
+        "event_id": _int(row["id"]),
         "season_start": start,
         "season_end": end,
         "mp_game_number": number,
@@ -184,7 +195,7 @@ def _game_record(row: dict, table: dict, extra: dict) -> dict | None:
     if not team or _blank(row.get("situation")) or _blank(row.get("gameId")):
         return None
     record = {
-        "nhl_game_id": int(row["gameId"]),
+        "nhl_game_id": _int(row["gameId"]),
         "season_start": start,
         "season_end": end,
         "game_date": iso_date(row.get("gameDate")),
@@ -212,7 +223,7 @@ def line_record(row: dict) -> dict | None:
 def _player_record(row: dict, table: dict) -> dict | None:
     if _blank(row.get("playerId")):
         return None
-    return _game_record(row, table, {"player_id": int(row["playerId"])})
+    return _game_record(row, table, {"player_id": _int(row["playerId"])})
 
 
 def skater_record(row: dict) -> dict | None:
@@ -228,7 +239,7 @@ def player_record(row: dict) -> dict | None:
         return None
     weight = row.get("weight")
     return {
-        "player_id": int(row["playerId"]),
+        "player_id": _int(row["playerId"]),
         "name": row.get("name") or None,
         "position": row.get("position") or None,
         "team_code": row.get("team") or None,
@@ -295,14 +306,16 @@ def _keep_season(season: int | None):
         return None
 
     def pred(row: dict) -> bool:
-        return int(row["season"]) == season
+        return _int(row["season"]) == season
 
     return pred
 
 
 def _cache_path(run_date: str, url: str) -> Path:
-    name = url.rstrip("/").split("/")[-1]
-    return CACHE_DIR / run_date / name
+    # The folder is part of the name: skaters/2025.zip, goalies/2025.zip and
+    # lines/2025.zip (and the two 2008_to_2024.zip bundles) share a file name.
+    parts = url.rstrip("/").split("/")
+    return CACHE_DIR / run_date / f"{parts[-2]}__{parts[-1]}"
 
 
 def download(url: str, dest: Path) -> bool:

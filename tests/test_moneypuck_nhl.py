@@ -165,3 +165,20 @@ def test_the_module_credits_moneypuck():
     text = (ROOT / "data" / "ingestors" / "moneypuck_nhl.py").read_text(encoding="utf-8")
     assert "MoneyPuck.com" in text
     assert "https://moneypuck.com/data.htm" in text
+
+
+def test_cache_path_keeps_same_named_files_apart():
+    from data.ingestors.moneypuck_nhl import _cache_path
+    base = "https://peter-tanner.com/moneypuck/downloads/seasonPlayersSummary"
+    paths = {
+        _cache_path("2026-11-26", f"{base}/{kind}/{name}")
+        for kind in ("skaters", "goalies", "lines")
+        for name in ("2025.zip", "2008_to_2024.zip")
+    }
+    assert len(paths) == 6
+
+
+def test_int_takes_float_formatted_ids():
+    from data.ingestors.moneypuck_nhl import _int
+    assert _int("8475883.0") == 8475883
+    assert _int("8475883") == 8475883
