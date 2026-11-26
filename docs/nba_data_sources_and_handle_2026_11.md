@@ -442,9 +442,9 @@ them; the worker runs master, so they are collected only once this branch is mer
 
 ### D8. Historical money, tested: Polymarket order flow against Pinnacle
 
-**The import.** `source = 'polymarket_all'`, 2026-11-26 17:22 to about 18:00 UTC: 2,659 games
-ledgered (2,604 read after they were played), 4,587,085 trades before tip, about $902.9M of
-shares bought before tip.
+**The import.** `source = 'polymarket_all'`, 2026-11-26 17:22 to 17:59 UTC: 2,695 games
+ledgered (2,640 read after they were played), 4,620,125 trades before tip, about $914.6M of
+shares bought before tip, 814,908 fifteen-minute rows.
 - **Trades are taker-only:** the API accepted `takerOnly=true`, so each trade is signed by the
   side that took liquidity.
 - **82 slugs not found,** mostly late October 2025.
@@ -470,7 +470,7 @@ shares bought before tip.
 ## E. Verdict after the second pass
 
 1. **Historical money data exists and is now stored.** Kalshi (1,494 games, 2025-10 on) and
-   Polymarket (2,604 played games, 2024-10 on) are real matched money with real timestamps, in
+   Polymarket (2,640 played games, 2024-10 on) are real matched money with real timestamps, in
    Supabase (`nba_exchange_flow`).
 2. **On about 3,700 game-seasons it carries no information the Pinnacle price lacks.** The one
    consistent effect, early flow followed by a small move the other way, is worth about 0.3
