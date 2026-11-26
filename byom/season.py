@@ -41,6 +41,12 @@ def current_nhl_season(today: date | datetime | None = None) -> int:
     return current_nba_season(today)
 
 
+def current_ncaab_season(today: date | datetime | None = None) -> int:
+    """Ending year, the NBA split. games labels the season that opens in
+    November 2026 as 2027 (measured 2026-11-26: min game_date 2026-11-01)."""
+    return current_nba_season(today)
+
+
 def current_nba_season(today: date | datetime | None = None) -> int:
     """Ending year. October through December are next year's label.
 

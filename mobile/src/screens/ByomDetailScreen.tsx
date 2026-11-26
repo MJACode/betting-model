@@ -48,8 +48,8 @@ export function ByomDetailScreen() {
     : propFilterSummary(model.filters, sport, filterMarket);
   const facts = useNbaGameFacts(model == null ? null : sport);
   const preview = useByomRecord(scope, graded && model ? model.filters : null, sport);
-  // Open bets and alerts: NFL only for now (Matt, 2026-11-25).
-  const alertsSport = model?.sport === 'NFL';
+  // Open bets and alerts: NFL (Matt, 2026-11-25) and NCAAB (2026-11-26).
+  const alertsSport = model?.sport === 'NFL' || model?.sport === 'NCAAB';
   const openBets = useByomOpenBets(alertsSport, false);
   const thisModelBets = openBets.bets.filter((b) => b.model_id === modelId);
 

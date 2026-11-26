@@ -59,13 +59,14 @@ def test_the_migration_is_hand_applied_and_never_touches_picks():
         assert banned not in code
 
 
-def test_the_job_is_registered_nfl_only():
+def test_the_job_is_registered_nfl_and_ncaab():
     from tracking.job_queue import JOBS, _validate_byom_alerts
 
     assert "byom_alerts" in JOBS
     assert _validate_byom_alerts({}) == {"sport": "NFL", "rebuild": True}
     assert _validate_byom_alerts({"sport": " nfl ", "rebuild": False}) == {
         "sport": "NFL", "rebuild": False}
+    assert _validate_byom_alerts({"sport": "ncaab"})["sport"] == "NCAAB"
     with pytest.raises(ValueError):
         _validate_byom_alerts({"sport": "NBA"})
     with pytest.raises(ValueError):
@@ -76,7 +77,8 @@ def test_every_refresh_pass_queues_the_alert_job():
     src = (ROOT / "scheduler.py").read_text(encoding="utf-8")
     body = src[src.index("def run_refresh_pass"):src.index("def queue_byom_alerts")]
     assert "queue_byom_alerts(mode)" in body
-    assert 'dedupe_key=f"byom-nfl-alerts-{stamp}"' in src
+    assert 'dedupe_key=f"byom-{sport.lower()}-alerts-{stamp}"' in src
+    assert "for sport in ALERT_SPORTS" in src
 
 
 def test_upcoming_games_are_today_through_two_days_and_not_started():

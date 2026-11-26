@@ -2749,12 +2749,13 @@ def _validate_byom_game_facts(args: dict) -> dict:
     from byom.constants import (
         DK_HISTORY_START_SEASON,
         NBA_DK_HISTORY_START_SEASON,
+        NCAAB_DK_HISTORY_START_SEASON,
         NHL_DK_HISTORY_START_SEASON,
     )
 
     sport = str(args.get("sport") or "NFL").strip().upper()
-    if sport not in ("NFL", "NBA", "NHL"):
-        raise ValueError(f"byom_game_facts builds NFL, NBA or NHL, got {sport!r}")
+    if sport not in ("NFL", "NBA", "NHL", "NCAAB"):
+        raise ValueError(f"byom_game_facts builds NFL, NBA, NHL or NCAAB, got {sport!r}")
     season = args.get("season")
     if season in (None, ""):
         season = None
@@ -2762,7 +2763,8 @@ def _validate_byom_game_facts(args: dict) -> dict:
         season = int(season)
         floor = {"NFL": DK_HISTORY_START_SEASON,
                  "NBA": NBA_DK_HISTORY_START_SEASON,
-                 "NHL": NHL_DK_HISTORY_START_SEASON}[sport]
+                 "NHL": NHL_DK_HISTORY_START_SEASON,
+                 "NCAAB": NCAAB_DK_HISTORY_START_SEASON}[sport]
         if season < floor:
             raise ValueError(
                 f"season {season} is before DraftKings history ({floor})")
@@ -2837,8 +2839,8 @@ def _validate_byom_refresh(args: dict) -> dict:
     """Current-season refresh. apply defaults false, so a queued job
     reports freshness and writes nothing until someone asks."""
     sport = str(args.get("sport") or "NFL").strip().upper()
-    if sport not in ("NFL", "NBA", "NHL"):
-        raise ValueError(f"byom_refresh builds NFL, NBA or NHL, got {sport!r}")
+    if sport not in ("NFL", "NBA", "NHL", "NCAAB"):
+        raise ValueError(f"byom_refresh builds NFL, NBA, NHL or NCAAB, got {sport!r}")
     apply = args.get("apply", False)
     if not isinstance(apply, bool):
         raise ValueError(f"apply must be true or false, got {apply!r}")
@@ -2867,8 +2869,9 @@ def _job_byom_refresh(**kw):
 
 
 def _validate_byom_alerts(args: dict) -> dict:
-    """NFL only (Matt, 2026-11-25: "start with just NFL"). rebuild defaults
-    true; false skips the rebuild of the next games and only matches."""
+    """NFL first (Matt, 2026-11-25), NCAAB next (2026-11-26). rebuild
+    defaults true; false skips the rebuild of the next games and only
+    matches."""
     from byom.alerts import ALERT_SPORTS
 
     sport = str(args.get("sport") or "NFL").strip().upper()

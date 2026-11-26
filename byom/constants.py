@@ -31,4 +31,11 @@ NBA_DK_HISTORY_START_SEASON = 2021
 # NHL season is the ending year, the same split as NBA.
 NHL_DK_HISTORY_START_SEASON = 2021
 
+# Measured 2026-11-26 on games joined to odds (bookmaker draftkings,
+# market h2h/spreads/totals), 300 games per season sampled: NCAAB 2018,
+# 2019 and 2020 have 0 of 300 with a DraftKings line; 2021 (2020-21) has
+# 194 of 300. NCAAB season is the ending year, the same split as NBA.
+# Matt, 2026-11-26: NCAAB game lines on the builder ("Do NCAAB next").
+NCAAB_DK_HISTORY_START_SEASON = 2021
+
 SPORT = "NFL"

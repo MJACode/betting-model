@@ -37,7 +37,7 @@ def test_the_backfill_is_declared_and_the_daily_refresh_queues_nhl():
     assert len(nhl) == 1
     assert nhl[0]["enabled"] is True and nhl[0]["args"] == {"sport": "NHL", "apply": True}
     sched = (ROOT / "scheduler.py").read_text(encoding="utf-8")
-    assert 'for sport in ("NFL", "NBA", "NHL"):' in sched
+    assert 'for sport in ("NFL", "NBA", "NHL", "NCAAB"):' in sched
 
 
 def test_nhl_writes_official_candidates_and_starts_in_2021():

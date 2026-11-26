@@ -22,11 +22,14 @@ from zoneinfo import ZoneInfo
 from byom.constants import DK_HISTORY_START_SEASON, SPORT
 from byom.game_facts import parse_date, parse_game_id
 from byom.load import _fetch, _games
-from byom.season import current_nba_season, current_nfl_season, current_nhl_season
+from byom.season import (
+    current_nba_season, current_ncaab_season, current_nfl_season, current_nhl_season,
+)
 
 # NFL and NBA (Matt, 2026-11-04: the NBA builder gets the same refresh).
 # NHL game bets joined 2026-11-05 (Matt: "Yes go").
-REFRESH_SPORTS = ("NFL", "NBA", "NHL")
+# NCAAB game lines joined 2026-11-26 (Matt: "Do NCAAB next").
+REFRESH_SPORTS = ("NFL", "NBA", "NHL", "NCAAB")
 
 # Sports whose builder has player props. A game in any other sport is
 # never due for a missing prop pass, or every past game would be due
@@ -39,6 +42,8 @@ def _season_for(sport: str, as_of) -> int:
         return current_nba_season(as_of)
     if sport == "NHL":
         return current_nhl_season(as_of)
+    if sport == "NCAAB":
+        return current_ncaab_season(as_of)
     return current_nfl_season(as_of)
 
 

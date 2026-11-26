@@ -101,7 +101,7 @@ export function ByomMarketField({
   explainMissing?: boolean;
 }) {
   const props = sport === 'NBA' ? NBA_PROP_MARKETS : NFL_PROP_MARKETS;
-  // NHL is game bets only (Matt, 2026-11-05).
+  // NHL and NCAAB are game bets only (Matt, 2026-11-05 and 2026-11-26).
   const withProps = byomHasProps(sport ?? 'NFL');
   const gameMarkets = GAME_MARKETS.map((option) => (
     ({ ...option, label: gameMarketLabel(option.value, sport ?? 'NFL') })));
@@ -141,7 +141,7 @@ export function ByomMarketField({
               <Text style={styles.historyLead}>{NBA_GAME_BETS_WHEN}</Text>
             ) : null}
           </View>
-        ) : sport === 'NBA' || sport === 'NHL' ? (
+        ) : sport === 'NBA' || sport === 'NHL' || sport === 'NCAAB' ? (
           <View style={styles.grid}>
             {gameMarkets.map((option) => (
               <MarketTile
@@ -225,7 +225,7 @@ export function ByomSideFields({
 }) {
   const prop = isPropMarket(market);
   const yesOnly = isYesOnlyProp(market);
-  const showNbaRest = sport === 'NHL'
+  const showNbaRest = sport === 'NHL' || sport === 'NCAAB'
     || (sport === 'NBA' && (factsStatus === 'ready' || rest != null));
   return (
     <View>

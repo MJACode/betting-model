@@ -31,29 +31,39 @@ export const BYOM_NBA_FIRST_SEASON = 2023;
  */
 export const BYOM_NHL_FIRST_SEASON = 2021;
 
-export type ByomSport = 'NFL' | 'NBA' | 'NHL';
+/**
+ * First NCAAB season with a DraftKings line (byom.constants
+ * NCAAB_DK_HISTORY_START_SEASON, measured 2026-11-26). Ending-year label:
+ * 2021 is 2020-21.
+ */
+export const BYOM_NCAAB_FIRST_SEASON = 2021;
+
+export type ByomSport = 'NFL' | 'NBA' | 'NHL' | 'NCAAB';
 
 /** A sport string from a route param or a row. Anything else is NFL. */
 export function asByomSport(value: unknown): ByomSport {
-  return value === 'NBA' || value === 'NHL' ? value : 'NFL';
-}
-
-/** The builder offers player props on these sports. NHL is game bets only. */
-export function byomHasProps(sport: ByomSport): boolean {
-  return sport !== 'NHL';
+  return value === 'NBA' || value === 'NHL' || value === 'NCAAB' ? value : 'NFL';
 }
 
 /**
- * NBA and NHL: seasons named by the ending year, rest-day chips
+ * The builder offers player props on these sports. NHL and NCAAB are game
+ * bets only (Matt, 2026-11-05 and 2026-11-26).
+ */
+export function byomHasProps(sport: ByomSport): boolean {
+  return sport === 'NFL' || sport === 'NBA';
+}
+
+/**
+ * NBA, NHL and NCAAB: seasons named by the ending year, rest-day chips
  * (back-to-back, 2+ days) instead of primetime.
  */
 export function byomUsesRest(sport: ByomSport): boolean {
-  return sport === 'NBA' || sport === 'NHL';
+  return sport !== 'NFL';
 }
 
 /** The word for game start. */
 export function byomStartWord(sport: ByomSport): string {
-  if (sport === 'NBA') return 'tipoff';
+  if (sport === 'NBA' || sport === 'NCAAB') return 'tipoff';
   if (sport === 'NHL') return 'puck drop';
   return 'kickoff';
 }
@@ -355,6 +365,14 @@ export function currentNhlSeason(now: Date = new Date()): number {
   return currentNbaSeason(now);
 }
 
+/** 2021 through the current NCAAB season, inclusive. The NBA split. */
+export function ncaabSeasonList(now: Date = new Date()): number[] {
+  const end = currentNbaSeason(now);
+  const seasons: number[] = [];
+  for (let year = BYOM_NCAAB_FIRST_SEASON; year <= end; year += 1) seasons.push(year);
+  return seasons;
+}
+
 /** 2021 through the current NHL season, inclusive. */
 export function nhlSeasonList(now: Date = new Date()): number[] {
   const end = currentNhlSeason(now);
@@ -374,6 +392,7 @@ export function currentByomSeason(sport: ByomSport, now: Date = new Date()): num
 export function seasonListFor(sport: ByomSport, now: Date = new Date()): number[] {
   if (sport === 'NBA') return nbaSeasonList(now);
   if (sport === 'NHL') return nhlSeasonList(now);
+  if (sport === 'NCAAB') return ncaabSeasonList(now);
   return nflSeasonList(now);
 }
 
@@ -509,7 +528,7 @@ export function smallSampleNote(record: ByomRecord | null): string | null {
   return `Only ${record.bets} bet${record.bets === 1 ? '' : 's'}. A record this small can come from luck. Check it holds in more than one season.`;
 }
 
-/** NFL labels the start year. NBA and NHL label the ending year: 2027 is 2026-27. */
+/** NFL labels the start year. NBA, NHL and NCAAB label the ending year: 2027 is 2026-27. */
 export function byomSeasonName(sport: ByomSport, season: number): string {
   if (sport === 'NFL') return String(season);
   return `${season - 1}-${String(season % 100).padStart(2, '0')}`;
