@@ -320,6 +320,10 @@ def poly_events(pace: Pace) -> list[dict]:
         if cursor:
             params["next_cursor"] = cursor
         r = _get(pace, f"{GAMMA}/events/keyset", params)
+        if cursor and r is not None and r.status_code == 400:
+            params.pop("next_cursor")
+            params["cursor"] = cursor
+            r = _get(pace, f"{GAMMA}/events/keyset", params)
         if r is None or r.status_code != 200:
             logger.warning(f"polymarket keyset HTTP {getattr(r, 'status_code', None)}")
             break
@@ -373,7 +377,14 @@ def poly_trades(pace: Pace, cid: str) -> list[dict]:
         elif offset:
             params["offset"] = offset
         r = _get(pace, f"{PDATA}/v2/trades", params)
+        if cursor and r is not None and r.status_code == 400:
+            params.pop("next_cursor")
+            params["cursor"] = cursor
+            r = _get(pace, f"{PDATA}/v2/trades", params)
         if r is None or r.status_code != 200:
+            if r is not None and r.status_code == 400 and (cursor or offset):
+                logger.warning(f"polymarket trades {cid}: page refused ({r.text[:160]}); "
+                               f"{len(out)} trades kept")
             break
         body = r.json()
         data = body.get("data") if isinstance(body, dict) else body
@@ -395,9 +406,10 @@ def poly_one(pace: Pace, ev: dict, games_by_date: dict, nick: dict,
     mk = _moneyline_market(ev)
     if not m or mk is None:
         return {"unmatched": f"{slug}: no moneyline market"}
+    raw = mk.get("outcomes") or "[]"
     try:
-        outcomes = json.loads(mk.get("outcomes") or "[]")
-    except ValueError:
+        outcomes = raw if isinstance(raw, list) else json.loads(raw)
+    except (TypeError, ValueError):
         outcomes = []
     teams = [team_for_outcome(o, nick) for o in outcomes]
     if len(teams) != 2 or None in teams or teams[0] == teams[1]:
@@ -488,7 +500,7 @@ def _store(conn, out: dict) -> None:
     conn.commit()
 
 
-def run(source: str, apply: bool, limit: int | None, workers: int = 4) -> dict:
+def run(source: str, apply: bool, limit: int | None, workers: int = 8) -> dict:
     from data.db import get_connection
     conn = get_connection()
     stats = defaultdict(int)
@@ -502,10 +514,10 @@ def run(source: str, apply: bool, limit: int | None, workers: int = 4) -> dict:
         nick = nickname_map()
         jobs = []
         if source in ("kalshi", "both"):
-            kp = Pace(8.0)
+            kp = Pace(12.0)
             jobs += [("kalshi", ev, kp) for ev in kalshi_games(kp)]
         if source in ("polymarket", "both"):
-            pp = Pace(8.0)
+            pp = Pace(12.0)
             jobs += [("polymarket", ev, pp) for ev in poly_events(pp)]
         if limit:
             jobs = jobs[:limit]
@@ -554,7 +566,7 @@ def main() -> None:
     ap.add_argument("--source", choices=("kalshi", "polymarket", "both"), default="both")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--limit", type=int)
-    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--workers", type=int, default=8)
     a = ap.parse_args()
     print(run(a.source, a.apply, a.limit, a.workers))
 
