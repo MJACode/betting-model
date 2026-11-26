@@ -409,3 +409,33 @@ Pinnacle price lacks.
 - **Late flow** moves with the line, which it should.
 
 Neither cell is a bet.
+
+### D7. Polymarket, Dunks & Threes, DraftKings splits
+
+**Polymarket import.**
+- **First run (16:45 UTC), 1,052 games under `source = 'polymarket'`: incomplete, do not read.**
+  Games 2024-10-22 to 2025-03-22, ledgered with at most 500 trades each. The v2 trades API pages
+  by cursor only (it answers 400 to an offset, "pages are cursor-only"), and that run read no
+  cursor. The rows are kept (no row is deleted) and labelled in the code.
+- **The full import** runs under `source = 'polymarket_all'`:
+  - it reads the cursor from the body or a header;
+  - a read that cannot page raises, and the game is not ledgered;
+  - games are fetched one by one by slug (`nba-<away>-<home>-<ET date>`, our codes in lower
+    case), because the keyset event list stopped after one page of 100.
+
+**Dunks & Threes** (its own pages, read from the worker 2026-11-26):
+- **Price:** Basic $24.95 a year, Premium $49.95 a year, Premium + API $250.00 a year.
+- **API (v2):** 90 requests a minute. Endpoints for EPM and skills, team EPM, game predictions and
+  box-score predictions. Every row carries `asof_dt` / `update_dt`, and EPM runs from 2001-02.
+- **The history is the current model run over past dates.** `epm_source` is "v2 for every date
+  currently served", so the as-of history was recomputed by today's model, with hindsight in
+  the model, not in the data.
+- **Terms:** a personal licence; reproduction and automated copying are prohibited, and so is
+  commercial exploitation "except with our express written permission". Using it inside a paid
+  app's models needs their written permission.
+
+**DraftKings splits for NBA, NHL and NCAAF.** The page answers for each league when asked by
+event group directly: NBA 42648 parsed 5 games, NHL 42133 parsed 7, NCAAF 87637 parsed 10, every
+team of the right league (probe `dk2`). `data/ingestors/dk_splits.KNOWN_EVENT_GROUPS` now holds
+them; the worker runs master, so they are collected only once this branch is merged. NCAAB
+(92483) parsed 10 games, but the ingestor has no NCAAB team matcher yet.
