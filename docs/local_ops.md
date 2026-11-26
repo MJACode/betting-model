@@ -807,6 +807,38 @@ SELECT sport, market, count(*), max(snapshot_at) FROM odds
  GROUP BY 1, 2 ORDER BY 1, 2;
 ```
 
+**Since 2026-11-25 the same process also reads every other book's own live
+page** (`data/ingestors/book_live_boards.py`, mike: *"yes do it for all
+books"*), on its own thread and database connection, so it cannot delay or
+stop a DraftKings read. Each book and live sport is asked once every 30 s.
+
+- **FanDuel is parsed.** Its league page (the call its own site makes, the
+  public web key the open-source scrapers all carry) holds every game in play.
+  The live moneyline, spread and total go to `odds` as in-play `fanduel` rows
+  (`source = 'fanduel_board'`) for NBA, NFL, NHL, NCAAB, NCAABW and
+  EuroLeague. The parser was built from a real capture of the NBA page
+  (2026-11-23, 9 games in play); the NHL, college and EuroLeague page ids and
+  hockey's market names are not yet seen and are checked against the stored
+  answers.
+- **BetMGM, Caesars, BetRivers, Fanatics and Hard Rock are captured, not
+  parsed.** Their answers go to `book_live_raw` (at most 3 a day per book,
+  sport and status) until a stored answer shows the shape. BetRivers,
+  Fanatics and Hard Rock start from their home pages, for the hosts and the
+  state's code their scripts use.
+- **No bot-wall work.** A plain request in a browser's TLS shape; a challenge
+  or a 403 is recorded as refused, and three in a row leave that book alone
+  for 10 minutes. `BOOK_LIVE_BOARDS=0` in this machine's environment turns
+  the thread off.
+- **Not NCAAF or MLB**, for the same reason as DraftKings' lines above.
+
+Each book and sport's last read, and what it answered:
+
+```sql
+SELECT book, sport, last_read_at, ok, status, live_events, matched, written, detail
+  FROM book_live_feed ORDER BY book, sport;
+SELECT book, sport, fetched_at, status, bytes FROM book_live_raw ORDER BY fetched_at DESC LIMIT 30;
+```
+
 **A merge reaches this machine by itself.** Every 5 minutes the feed fetches
 origin/master; when a merge changed one of its own files it exits (code 3) and
 the launcher checks the new master out and starts it again at once. A merge
