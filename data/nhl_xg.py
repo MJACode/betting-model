@@ -94,11 +94,7 @@ def load_shot_frame(refresh: bool = False, seasons: tuple[int, int] = (2019, 202
             logger.info(f"season {s}: {len(rows):,} rows in {time.time() - t:.1f}s")
     finally:
         conn.close()
-    df = pd.concat(parts, ignore_index=True)
-    for c in NUMERIC_FRAME_COLS:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    for c in STRING_FRAME_COLS:
-        df[c] = df[c].astype("string")
+    df = _finish_frame(pd.concat(parts, ignore_index=True))
     df.to_parquet(FRAME_PATH, index=False)
     logger.info(f"shot frame: {len(df):,} rows -> {FRAME_PATH}")
     return df
@@ -314,11 +310,41 @@ def xg_column(df: pd.DataFrame, out: dict) -> pd.Series:
 
 # ── write-back ───────────────────────────────────────────────────────────────
 
-def write_xg(df: pd.DataFrame, xg: pd.Series, version: str) -> int:
+# Rows the stored model never scores, so a daily pass must not refit just
+# because they are still NULL: blocked shots, shootout attempts, and the
+# handful of unblocked attempts with no coordinates.
+UNSCORED_WHERE = (
+    "xg IS NULL AND event_type IN ('shot-on-goal', 'missed-shot', 'goal') "
+    "AND period_type <> 'SO' AND x_norm IS NOT NULL AND y_norm IS NOT NULL"
+)
+MODEL_VERSION = "nhl_xg_v1_lightgbm_fit2019-2022"
+# Bit-identical to the xG already stored. Wider than this, the refit is a
+# different fit and is stamped so, not written over the stored version.
+MATCH_ABS = 1e-4
+# A refit this far from the stored xG is not the model. Refuse to write it.
+REFUSE_ABS = 0.05
+SAVED_MODEL = (Path(__file__).resolve().parents[1] / "models" / "saved"
+               / f"{MODEL_VERSION}.pkl")
+
+
+def _finish_frame(df: pd.DataFrame) -> pd.DataFrame:
+    for c in NUMERIC_FRAME_COLS:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    for c in STRING_FRAME_COLS:
+        df[c] = df[c].astype("string")
+    return df
+
+
+def write_xg(df: pd.DataFrame, xg: pd.Series, version: str, only_null: bool = False) -> int:
     """UPDATE nhl_shot_events, WRITE_BATCH rows a statement, under the load
-    gate. Idempotent: it sets the value, it does not add to it."""
+    gate. Idempotent: it sets the value, it does not add to it.
+
+    only_null leaves a stored xG alone. The daily catch-up scores the shots
+    it just inserted and does not rewrite the 1.2M rows already scored.
+    """
     todo = df.loc[xg.notna(), ["nhl_game_id", "event_id"]].assign(xg=xg[xg.notna()])
     assert "'" not in version
+    null_guard = " AND s.xg IS NULL" if only_null else ""
     conn = get_connection()
     n = 0
     try:
@@ -329,7 +355,7 @@ def write_xg(df: pd.DataFrame, xg: pd.Series, version: str) -> int:
             sql = (f"UPDATE nhl_shot_events AS s SET xg = v.xg::double precision, "
                    f"xg_model_version = '{version}' "
                    f"FROM (VALUES {values}) AS v(g, e, xg) "
-                   "WHERE s.nhl_game_id = v.g AND s.event_id = v.e")
+                   f"WHERE s.nhl_game_id = v.g AND s.event_id = v.e{null_guard}")
             if b % LOAD_CHECK_EVERY == 0:
                 wait_for_quiet_db(conn)
             try:
@@ -347,6 +373,125 @@ def write_xg(df: pd.DataFrame, xg: pd.Series, version: str) -> int:
         conn.close()
     logger.success(f"xg written on {n:,} events as {version}")
     return n
+
+
+def _ps_rate(df: pd.DataFrame) -> float | None:
+    ps = df[((_obj(df["strength"]) == "PS") & (_obj(df["period_type"]) != "SO")
+             & _obj(df["event_type"]).isin(UNBLOCKED)).astype(bool)]
+    ps_train = ps[ps["season"].isin(TRAIN_SEASONS)]
+    if len(ps_train) == 0:
+        return None
+    return float((ps_train["event_type"] == "goal").mean())
+
+
+def _predict(df: pd.DataFrame, model: BoostedXG, ps_rate: float | None) -> pd.Series:
+    xg = pd.Series(np.nan, index=df.index)
+    mask = model_mask(df)
+    if bool(mask.any()):
+        xg.loc[mask] = model.predict(build_features(df.loc[mask]))
+    if ps_rate is not None:
+        ps = ((_obj(df["strength"]) == "PS") & (_obj(df["period_type"]) != "SO")
+              & _obj(df["event_type"]).isin(UNBLOCKED) & df["x_norm"].notna()
+              & df["y_norm"].notna())
+        xg.loc[ps.astype(bool)] = ps_rate
+    return xg
+
+
+def _model_path() -> Path | None:
+    for path in (SAVED_MODEL, WORK_DIR / f"{MODEL_VERSION}.pkl"):
+        if path.exists():
+            return path
+    return None
+
+
+def load_or_fit_model() -> tuple[BoostedXG, str, float | None]:
+    """The committed artifact, else the one this machine already fit, else a
+    refit on 2018-19 through 2021-22.
+
+    The original fit lived in a temp directory and was never committed, which
+    is why a new machine cannot score a shot without fitting again. A refit
+    whose sample of stored xG matches is the same model. One that drifts a
+    little is stamped with a _rerun suffix. One that misses by more than
+    REFUSE_ABS is not written.
+    """
+    path = _model_path()
+    if path is not None:
+        with path.open("rb") as fh:
+            blob = pickle.load(fh)
+        logger.info(f"xG model from {path}: {blob['version']}")
+        return blob["model"], blob["version"], blob.get("ps_rate")
+
+    train = load_shot_frame(refresh=True, seasons=(TRAIN_SEASONS[0], TRAIN_SEASONS[-1]))
+    mask = model_mask(train)
+    data = train[mask]
+    y = (_obj(data["event_type"]) == "goal").to_numpy().astype("int8")
+    model = BoostedXG().fit(
+        build_features(data), y, groups=data["nhl_game_id"].to_numpy())
+    ps_rate = _ps_rate(train)
+    pred = _predict(train, model, ps_rate)
+    conn = get_connection()
+    try:
+        sample = conn.execute(
+            "SELECT nhl_game_id, event_id, xg FROM nhl_shot_events "
+            "WHERE season BETWEEN ? AND ? AND xg IS NOT NULL "
+            "AND event_type IN ('shot-on-goal', 'missed-shot', 'goal') "
+            "AND period_type <> 'SO' AND COALESCE(strength, '') <> 'PS' "
+            "AND x_norm IS NOT NULL "
+            "ORDER BY nhl_game_id, event_id LIMIT 400",
+            (TRAIN_SEASONS[0], TRAIN_SEASONS[-1])).fetchall()
+        conn.commit()
+    finally:
+        conn.close()
+    got = train[["nhl_game_id", "event_id"]].assign(pred=pred)
+    chk = pd.DataFrame(sample, columns=["nhl_game_id", "event_id", "xg"]).merge(
+        got, on=["nhl_game_id", "event_id"], how="left")
+    if chk["pred"].isna().any():
+        raise RuntimeError("the refit has no prediction for a stored training shot")
+    gap = (chk["pred"] - chk["xg"]).abs()
+    worst = float(gap.max())
+    logger.info(f"refit vs stored xG on {len(chk)} training shots: "
+                f"max abs {worst:.6g}, median {float(gap.median()):.6g}")
+    if worst <= MATCH_ABS:
+        version = MODEL_VERSION
+    elif worst <= REFUSE_ABS:
+        version = MODEL_VERSION + "_rerun"
+        logger.warning(f"refit is not bit-identical (max abs {worst:.6g}); "
+                       f"new shots will be stamped {version}")
+    else:
+        raise RuntimeError(
+            f"refit disagrees with stored xG by {worst:.4f} on a training shot; "
+            "not writing it")
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+    out = WORK_DIR / f"{MODEL_VERSION}.pkl"
+    with out.open("wb") as fh:
+        pickle.dump({"model": model, "version": version, "ps_rate": ps_rate}, fh)
+    logger.info(f"saved {out}")
+    return model, version, ps_rate
+
+
+def score_unscored(apply: bool) -> dict:
+    """Score shots that have no xG yet. Blocked shots and shootout attempts
+    stay NULL. Writes nothing on a row that already has an xG."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            f"SELECT {', '.join(FRAME_COLS)} FROM nhl_shot_events WHERE {UNSCORED_WHERE}"
+        ).fetchall()
+        conn.commit()
+    finally:
+        conn.close()
+    if not rows:
+        logger.info("nhl xG: no unscored modelable shots")
+        return {"written": 0, "candidates": 0, "version": None}
+    df = _finish_frame(pd.DataFrame.from_records(rows, columns=list(FRAME_COLS)))
+    model, version, ps_rate = load_or_fit_model()
+    xg = _predict(df, model, ps_rate)
+    n = int(xg.notna().sum())
+    if apply and n:
+        write_xg(df, xg, version, only_null=True)
+    logger.success(f"nhl xG: {n:,} of {len(df):,} unscored shots as {version}"
+                   + ("" if apply else " (dry run)"))
+    return {"written": n if apply else 0, "candidates": len(df), "version": version}
 
 
 def save_artifacts(out: dict, xg: pd.Series, df: pd.DataFrame, version: str) -> None:

@@ -47,6 +47,10 @@ KIND = "byom_bet"
 
 _READY = """
 SELECT to_regclass('public.byom_alerts') IS NOT NULL
+   -- Members only (Matt, 2026-11-26): the two checks has_app_access() makes
+   -- for auth.uid(), per user. Without them nobody is alerted (fails closed).
+   AND to_regprocedure('public.app_subscription_access_for(uuid)') IS NOT NULL
+   AND to_regprocedure('public.app_grant_access_for(uuid)') IS NOT NULL
    AND EXISTS (
      SELECT 1 FROM pg_proc p
       WHERE p.oid = to_regprocedure('public.byom_legs(integer, jsonb, text)')
@@ -57,6 +61,8 @@ _MODELS = """
 SELECT model_id::text, user_id::text, name, filters
   FROM byom_models
  WHERE sport = %s AND alerts_enabled
+   AND (public.app_subscription_access_for(user_id)
+        OR public.app_grant_access_for(user_id))
  ORDER BY created_at
 """
 

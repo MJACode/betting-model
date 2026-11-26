@@ -692,6 +692,16 @@ def run_savant_refresh() -> None:
     _run([sys.executable, "run_pipeline.py", "--step", "savant"], "savant-refresh")
 
 
+def run_moneypuck_nhl() -> None:
+    # MoneyPuck.com's non-shot files update around 6:45am ET and the shot
+    # file around 3:40am, so 7:20 is after both and after the 7:15 watch.
+    # One download per file. Exit 1 is a FAIL line here; the next morning's
+    # health check is the one the failure alerter posts.
+    # Credit MoneyPuck.com. Not a pick input.
+    _run([sys.executable, "run_pipeline.py", "--step", "moneypuck-nhl"],
+         "moneypuck-nhl", timeout=3600)
+
+
 def run_pipeline_watch() -> None:
     # The pipeline watch. In-process for the same reason as the watchdog and
     # the review: its output is a Discord post, not an exit code.
@@ -1012,6 +1022,20 @@ def run_threshold_review() -> None:
         log.exception("ERROR threshold-review crashed")
 
 
+def run_book_throttle_watch() -> None:
+    """A red ops alert when a sportsbook rate limits or refuses the live reads
+    on mike's machine, and a green one when it answers again
+    (tracking/book_throttle_watch.py). In-process: its output is a post."""
+    try:
+        from tracking.book_throttle_watch import run_book_throttle_watch as _run
+        res = _run()
+        if res.get("alerted") or res.get("cleared"):
+            log.info("BookThrottleWatch: %s alerted, %s cleared",
+                     len(res["alerted"]), len(res["cleared"]))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR book-throttle-watch crashed")
+
+
 def run_heartbeat_watchdog() -> None:
     # Called IN-PROCESS rather than through _run's subprocess, deliberately.
     # _run reports failure by logging it, and a log line is exactly the channel
@@ -1111,6 +1135,8 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "failure_alerter",
+                  # Ops alerts for a book throttling the PC's live reads.
+                  "book_throttle_watch",
                   # Copies Sentry into sentry_events. Runs on pipeline already
                   # (it is not a poller job); named here so the set says so.
                   "sentry_events_sync",
@@ -1177,6 +1203,8 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes one database health snapshot an hour; reads only
                   # Postgres's own statistics. Not a loop.
                   "db_health_snapshot",
+                  # MoneyPuck.com files, 7:20am ET. Research rows, no picks.
+                  "moneypuck_nhl",
                   # Queues the daily BYOM NFL refresh onto job_queue, which
                   # is also a pipeline job. Keep it last: a test reads
                   # '"byom_nfl_refresh"}' to pin it to the pipeline role.
@@ -3282,6 +3310,21 @@ def build_scheduler() -> BlockingScheduler:
         max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
+    # Book throttling -> ops Discord, every 2 minutes, 24x7 (mike,
+    # 2026-11-26: "a red alert that goes to the ops channel if you detect that
+    # the book is rate limiting or throttling our connection"). Two minutes,
+    # not the alerter's ten: the readers poll at 1 s, and a book that has
+    # started refusing is worth knowing about inside the same game. The tick
+    # is one indexed read of book_throttle_events, which is empty on a
+    # healthy night.
+    sched.add_job(
+        run_book_throttle_watch,
+        CronTrigger(minute="*/2", timezone=TIMEZONE),
+        id="book_throttle_watch",
+        name="Book throttling -> ops Discord (every 2 min, 24x7)",
+        max_instances=1, coalesce=True, misfire_grace_time=60,
+    )
+
     # Worker job queue — every 5 minutes.
     #
     # Exists because four times in one session work was handed back as "run this
@@ -3325,6 +3368,18 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour=7, minute=15, timezone=TIMEZONE),
         id="pipeline_watch",
         name="Pipeline watch (daily 7:15am ET)",
+    )
+
+    # MoneyPuck.com. Shots update ~3:40am ET, the other files ~6:45am ET.
+    # 7:20 is after both and after the 7:15 watch. One download per file.
+    # The in-house shot/xG catch-up is the daily pipeline (step nhl-shots),
+    # not this job: it has to land before the health check.
+    sched.add_job(
+        run_moneypuck_nhl,
+        CronTrigger(hour=7, minute=20, timezone=TIMEZONE),
+        id="moneypuck_nhl",
+        name="MoneyPuck NHL (daily 7:20am ET)",
+        max_instances=1, coalesce=True, misfire_grace_time=3600,
     )
 
     # Weekly results, and the monthly results on the first Monday. 7:30am ET

@@ -1945,6 +1945,13 @@
     "args": {}
   },
   {
+    "key": "book-throttle-test-alert-2026-11-26",
+    "job_type": "book_throttle_test_alert",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26 ('Send a test alert to ops so I can see it'): posts the book-throttling alert's red and green messages to the ops channel, each titled TEST, built on a made-up FanDuel 429. Writes no table, no Odds API credits.",
+    "args": {}
+  },
+  {
     "key": "premium-expire-ryan-pad-murphy-2026-11-26",
     "job_type": "premium_access",
     "requested_by": "matt",

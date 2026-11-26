@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAuth } from '@/hooks/useAuth';
 import { fetchByomOpenBets, type ByomOpenBet } from '@/lib/byomAlerts';
-import { isAbortError, splitLoadError } from '@/lib/errors';
+import { gateLoad, isAbortError, splitLoadError } from '@/lib/errors';
 
 /** `loadOnMount` false when the screen's focus effect does the first load. */
 export function useByomOpenBets(enabled = true, loadOnMount = true) {
@@ -17,6 +17,8 @@ export function useByomOpenBets(enabled = true, loadOnMount = true) {
   const [available, setAvailable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Members only (Matt, 2026-11-26): the server's premium refusal.
+  const [noAccess, setNoAccess] = useState(false);
   const seq = useRef(0);
   const active = enabled && user != null;
 
@@ -33,6 +35,7 @@ export function useByomOpenBets(enabled = true, loadOnMount = true) {
       const result = await fetchByomOpenBets();
       if (seq.current !== id) return;
       setError(null);
+      setNoAccess(false);
       if (result.status === 'unavailable') {
         setAvailable(false);
         setBets([]);
@@ -42,6 +45,12 @@ export function useByomOpenBets(enabled = true, loadOnMount = true) {
       }
     } catch (e: unknown) {
       if (seq.current !== id || isAbortError(e)) return;
+      if (gateLoad(e) === 'no-access') {
+        setNoAccess(true);
+        setBets([]);
+        setError(null);
+        return;
+      }
       // Keep the cards already shown; the screen shows the error beside them.
       setError(splitLoadError(e).error);
     } finally {
@@ -53,5 +62,5 @@ export function useByomOpenBets(enabled = true, loadOnMount = true) {
     if (loadOnMount) void load();
   }, [load, loadOnMount]);
 
-  return { bets, available, loading, error, reload: load };
+  return { bets, available, loading, error, noAccess, reload: load };
 }
