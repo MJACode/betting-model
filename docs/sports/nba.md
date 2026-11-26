@@ -14,6 +14,10 @@
 > overs, and the three shooting-luck total models wait for 10 games again. What
 > was asked, tried, found and left open: **`docs/nba_reassessment_2026_11.md`**.
 >
+> **Data sources and public splits (2026-11-26, mike):** what else could feed the NBA models, and whether
+> handle / money data helps (measured: not on the free source we hold):
+> **`docs/nba_data_sources_and_handle_2026_11.md`**.
+>
 > **First basket (2026-11-20, mike):** a market never priced before, live as
 > `nba_prop_first_basket` from 2026-11-20 on mike's yes after the grade:
 > **`docs/nba_first_basket.md`**.
