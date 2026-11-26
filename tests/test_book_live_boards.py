@@ -353,21 +353,24 @@ def test_ncaaf_and_mlb_are_never_asked_about():
         assert not ({"NCAAF", "MLB"} & set(b.sports)), b.key
 
 
-def test_a_refusal_is_recorded_and_three_leave_the_book_alone():
+def test_a_refusal_backs_off_and_three_leave_the_book_alone():
     t = [0.0]
     conn, sess = Conn(), Sess(lambda url: Resp(403, text="<html>Access Denied</html>"))
     f = L.BookFeeds(lambda: conn, lambda: ["NBA"], session_factory=lambda: sess, resolvers={},
-                    odds_log=lambda c, r: 0, monotonic=lambda: t[0],
+                    odds_log=lambda c, r: 0, monotonic=lambda: t[0], sleep=lambda _s: None,
                     clock=lambda: datetime(2026, 11, 26, 1, 0, tzinfo=timezone.utc))
     f.ready, f.games_live = True, (1e18, set())
+    gaps = []
     for _ in range(L.REFUSALS_BEFORE_BACKOFF):
         res = [r for r in f.pass_once() if r["book"] == "fanduel"]
         assert res and res[0]["ok"] is False and res[0]["detail"] == "refused"
-        t[0] += L.POLL_SEC
+        gaps.append(f.gap["fanduel"])
+        t[0] += 60                                            # past any gap: always due next pass
+    assert gaps[:2] == [2 * L.POLL_SEC, 4 * L.POLL_SEC]       # the gap doubles on each refusal
     asked = len([u for u in sess.urls if "fanduel" in u])
-    t[0] += L.POLL_SEC
+    t[0] += 60
     f.pass_once()
-    assert len([u for u in sess.urls if "fanduel" in u]) == asked      # backed off
+    assert len([u for u in sess.urls if "fanduel" in u]) == asked      # benched 10 min after three
     t[0] += L.BACKOFF_SEC
     f.pass_once()
     assert len([u for u in sess.urls if "fanduel" in u]) == asked + 1
@@ -379,7 +382,7 @@ def test_one_shared_refusal_counts_once_not_once_per_sport():
     t = [0.0]
     conn, sess = Conn(), Sess(lambda url: Resp(429, text="Too Many Requests"))
     f = L.BookFeeds(lambda: conn, lambda: ["NBA", "NCAAB", "NCAABW"], session_factory=lambda: sess,
-                    resolvers={}, odds_log=lambda c, r: 0, monotonic=lambda: t[0],
+                    resolvers={}, odds_log=lambda c, r: 0, monotonic=lambda: t[0], sleep=lambda _s: None,
                     clock=lambda: datetime(2026, 11, 26, 1, 0, tzinfo=timezone.utc))
     f.ready, f.games_live = True, (1e18, set())
 
@@ -391,7 +394,7 @@ def test_one_shared_refusal_counts_once_not_once_per_sport():
         # all three sports until the third refusal, which backs off at once
         assert [r["detail"] for r in res] == ["refused"] * (3 if n < L.REFUSALS_BEFORE_BACKOFF else 1)
         assert asked() == n                                    # one request a pass
-        t[0] += L.POLL_SEC
+        t[0] += 60
     f.pass_once()
     assert asked() == L.REFUSALS_BEFORE_BACKOFF                # now backed off, all three sports
     t[0] += L.BACKOFF_SEC
@@ -517,3 +520,36 @@ def test_caesars_still_blocked_stays_refused_with_no_escalation():
     res = f.read(CAESARS, "NBA")
     assert res["refused"] is True and res["detail"] == "refused"
     assert sum("americanwagering.com" in u for u in calls) == 1       # one try, no retry to beat the wall
+
+
+# ─── pacing: as fast as the book allows, never bursting (2026-11-26) ──────────
+# mike: "Everything needs to be 1 second or less".
+
+def test_next_book_gap_is_the_floor_until_the_book_pushes_back():
+    assert L.next_book_gap(L.POLL_SEC, False) == L.POLL_SEC          # clean read: the 1 s floor
+    assert L.next_book_gap(L.POLL_SEC, True) == 2 * L.POLL_SEC       # pushed back: double
+    assert L.next_book_gap(2 * L.POLL_SEC, True) == 4 * L.POLL_SEC
+    assert L.next_book_gap(L.MAX_POLL_SEC, True) == L.MAX_POLL_SEC   # capped at the ceiling
+    assert L.next_book_gap(16.0, True) == min(L.MAX_POLL_SEC, 32.0)
+    assert L.next_book_gap(8.0, False) == L.POLL_SEC                 # one clean read returns to the floor
+
+
+def test_a_clean_read_keeps_the_book_at_the_one_second_floor():
+    t = [100.0]
+    f, _conn, _logged, _ = feeds(lambda url: Resp(200, fanduel_page()))
+    f.monotonic = lambda: t[0]
+    f.sleep = lambda _s: None
+    f.pass_once()
+    assert f.gap["fanduel"] == L.POLL_SEC and L.POLL_SEC <= 1.0
+    assert f.due[("fanduel", "NBA")] == t[0] + L.POLL_SEC
+
+
+def test_no_two_requests_are_closer_than_the_min_gap():
+    sleeps = []
+    t = [0.0]
+    f, _conn, _logged, sess = feeds(lambda url: Resp(200, fanduel_page()), live=("NBA", "NHL"))
+    f.monotonic = lambda: t[0]                                       # time does not advance mid-pass
+    f.sleep = lambda s: sleeps.append(s)
+    f.pass_once()                                                    # FanDuel NBA and NHL are both due
+    assert len([u for u in sess.urls if "fanduel" in u]) >= 2        # two real requests
+    assert any(abs(s - L.MIN_REQUEST_GAP_SEC) < 1e-9 for s in sleeps)  # spaced by the min gap

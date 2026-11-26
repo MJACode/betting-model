@@ -847,7 +847,7 @@ SELECT sport, market, count(*), max(snapshot_at) FROM odds
 **Since 2026-11-25 the same process also reads every other book's own live
 page** (`data/ingestors/book_live_boards.py`, mike: *"yes do it for all
 books"*), on its own thread and database connection, so it cannot delay or
-stop a DraftKings read. Each book and live sport is asked once every 30 s.
+stop a DraftKings read. Each book and live sport is polled as fast as the book allows while its league has a game live (mike, 2026-11-26: "Everything needs to be 1 second or less"): BOOK_POLL_SEC (1 s) between clean reads, doubling to BOOK_MAX_POLL_SEC (30 s) each time the book pushes back (a 429, 403, 5xx or challenge) and halving back as it answers cleanly (next_book_gap); three refusals in a row still bench it 10 min. No two requests from the thread are closer than BOOK_MIN_REQUEST_GAP_SEC (0.2 s), so the home IP the DraftKings feed shares is never bursted. These pages cost no Odds API credits.
 
 - **FanDuel is parsed.** Its league page (the call its own site makes, the
   public web key the open-source scrapers all carry) holds every game in play.
