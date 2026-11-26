@@ -374,7 +374,32 @@ at each decision's own model mean and spread
 - **BetRivers** quoted at 32, had the better price at 7, and would have added
   no bet.
 
-**Next:** NCAAB's fast path takes the reader's quotes, issue #1644. Then NBA,
+**NCAAB's fast path takes them** (`models/ncaab_live_loop.py` `dk_slot`,
+`models/ncaab_live_dk.quote_states_books`). DraftKings' own holds run first,
+unchanged. Another book's quote is then added only if all of these hold:
+
+- it passes the reader's gates;
+- it is held, meaning the book's newest read is after the read that first
+  showed the number;
+- no point has been scored on DraftKings' board since its `stamp`;
+- it has stood 10 s on the page before the decision read;
+- it is within 6 points of DraftKings' own number on the market.
+
+The quote is priced at DraftKings' state when the book first showed it. A
+quote that fails a rule is dropped, never waited on. The night's cut, the
+price floor and every gate after the choice are unchanged. The best expected
+value across the books wins, and a tie keeps DraftKings.
+
+**The 10 s rule, measured 2026-11-26.** BetRivers moves AHEAD of DraftKings'
+score. Across 827 of DraftKings' NCAAB score changes, BetRivers' spread moved
+in the 5 s before 370 of them. In every other 5 s window, from 5 to 65 s
+before, it moved before 171 to 231.
+
+**Reading the bets.** A bet decided at another book carries "DraftKings board;
+<book>'s own page" in its ledger reason, so these bets can be reported as the
+new population they are. `NCAAB_LIVE_OTHER_BOOKS=0` turns it off.
+
+**Next:** NBA,
 whose next game is 2026-11-27. The women's halftime total waits on a
 comparison of the provider's copies with the books' own pages at the break: it
 already bets elsewhere (22 of 43), and its rule counts every book's row.
