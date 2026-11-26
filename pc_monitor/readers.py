@@ -67,23 +67,21 @@ def book_status(row: dict[str, Any], kind: str | None) -> dict[str, str]:
     if age is None:
         return {"tone": "idle", "text": "never read"}
     if detail == "refused":
-        return {"tone": "bad", "text": "refused by the book (a 403 or a bot check); left alone, never worked around"}
+        return {"tone": "bad", "text": "refused (403 / bot wall)"}
     if row.get("ok") is False:
         status = row.get("status")
-        return {"tone": "bad", "text": f"the last answer was HTTP {status}" if status else (detail or "the last read failed")}
+        return {"tone": "bad", "text": f"HTTP {status}" if status else (detail or "last read failed")}
     if kind == "home page":
-        if age > BOOK_HOME_PAGE_SEC * 2:
-            return {"tone": "idle", "text": "home page stored; not read lately (read only while a game is live)"}
-        return {"tone": "idle", "text": "home page stored, for the hosts its scripts call; no lines yet"}
+        return {"tone": "idle", "text": "home page stored"}
     if kind == "captured":
-        return {"tone": "idle", "text": "answer stored for writing its parser; no lines yet"}
+        return {"tone": "idle", "text": "answer stored, no parser yet"}
     if age > BOOK_POLL_SEC * 3:
-        return {"tone": "idle", "text": "not read lately: a league is read only while it has a game live"}
+        return {"tone": "idle", "text": "not read lately"}
     if live == 0:
-        return {"tone": "idle", "text": "no live game on its page"}
+        return {"tone": "idle", "text": "no live game"}
     matched = row.get("matched") or 0
     if matched < live:
-        return {"tone": "warn", "text": f"{live - matched} of {live} live games not placed on our games"}
+        return {"tone": "warn", "text": f"{live - matched} of {live} not matched"}
     return {"tone": "ok", "text": "fresh"}
 
 

@@ -610,3 +610,14 @@ def test_a_change_on_master_stops_the_server_for_a_restart():
     srv, flag, answers = Srv(), {"restart": False}, iter([False, True])
     M.watch_master(srv, flag, every=0, check=lambda: next(answers), sleep=lambda s: None)
     assert flag["restart"] is True and srv.stopped is True
+
+
+def test_the_page_is_consolidated_and_scrolls_sideways_on_a_phone():
+    # mike, 2026-11-26: the page looked messy, duplicated the per-league table,
+    # and would not scroll right on a phone.
+    page = (ROOT / "pc_monitor" / "static" / "index.html").read_text(encoding="utf-8")
+    feed = page[page.index("function renderFeed"):page.index("function renderBooks")]
+    assert "By league" not in feed                       # the per-league table lives once, in renderBooks
+    assert "renderBooks" in page and "Last 60 min" in page  # the sparkline moved into the one table
+    assert "overflow-x: hidden" in page                  # the page itself never pans sideways (the phone bug)
+    assert 'class="scroll"' in page                      # wide tables scroll inside their card instead
