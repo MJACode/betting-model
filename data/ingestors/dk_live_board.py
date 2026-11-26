@@ -143,6 +143,7 @@ MASTER_CHECK_SEC = 300.0
 NEW_MASTER_EXIT = 3
 FEED_FILES = ("data/ingestors/dk_live_board.py", "data/ingestors/ncaab_teams.py", "data/ingestors/ncaabw_teams.py",
               "data/ingestors/euroleague_teams.py", "data/ingestors/live_price_log.py",
+              "data/ingestors/book_live_boards.py",
               "data/db.py", "scripts/dk_live_board_run.ps1")
 IDLE_POLL_SEC = float(os.environ.get("DK_LIVE_IDLE_POLL_SEC", "30"))
 RESOLVE_RETRY_SEC = 60.0
@@ -895,6 +896,15 @@ def main(argv=None) -> int:
     log.info("reading %s; a live league every %.1f s, an idle one every %.0f s, at least %.1f s between requests",
              ", ".join(boards), a.poll, IDLE_POLL_SEC, MIN_GAP_SEC)
     plan = Pacer(list(boards), a.poll)
+    if not a.dry_run:
+        # Every other book's own live page, on its own thread and connection
+        # (data/ingestors/book_live_boards.py, mike 2026-11-25: "do it for all
+        # books"). It cannot delay or stop a DraftKings read.
+        try:
+            from data.ingestors.book_live_boards import start_in_background
+            start_in_background(get_connection, lambda: [sp for sp, v in plan.live.items() if v])
+        except Exception as exc:          # noqa: BLE001
+            log.error("other books not started: %s", exc)
     end = None if a.minutes is None else time.monotonic() + a.minutes * 60
     idle_since = None
     n = 0
