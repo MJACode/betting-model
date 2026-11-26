@@ -1983,5 +1983,12 @@
       "email": "larrypizzi3@gmail.com",
       "note": "comped by Matt 2026-11-26 (full access)"
     }
+  },
+  {
+    "key": "splits-nonzero-probe-2026-11-26",
+    "job_type": "splits_markets_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-26 ('yes add splits'): the 14:17 UTC pass stored no period splits although it ran. The first probe counted 0/0 (Action Network's no-split placeholder) as a split and asked without bookIds=15. This rerun asks exactly as the ingestor does and counts only non-zero splits, per sport, period and market, team totals included. Writes nothing, no Odds API credits.",
+    "args": {}
   }
 ]
