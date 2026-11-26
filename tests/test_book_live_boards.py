@@ -675,11 +675,56 @@ def test_a_failed_write_is_written_again_on_the_next_clean_read():
     assert row["after_start"] is True
 
 
+def test_each_row_carries_the_books_previous_clean_read():
+    pages = [fanduel_page(), fanduel_page(), fanduel_page()]
+    pages[2]["attachments"]["markets"]["m2"]["runners"][1]["winRunnerOdds"]["americanDisplayOdds"][
+        "americanOddsInt"] = -130
+    ages = ["5", "9", "2"]
+    clock = iter([datetime(2026, 11, 26, 22, 0, s, tzinfo=timezone.utc) for s in (0, 2, 4)])
+    f, conn, _logged, _ = feeds(lambda url: Resp(200, pages.pop(0), headers={"Age": ages.pop(0)}),
+                                clock=lambda: next(clock))
+    for _ in range(3):
+        _read(f)
+    first, moved = _offers(conn)
+    assert (first["prev_read_at"], first["prev_page_age_s"]) == (None, None)      # a start: unknown
+    assert moved["spread_home_price"] == -130 and moved["after_start"] is False
+    # the read before the one that showed -130 is the second (22:00:02, 9 s old),
+    # which wrote nothing but was clean
+    assert moved["prev_read_at"] == datetime(2026, 11, 26, 22, 0, 2, tzinfo=timezone.utc)
+    assert moved["prev_page_age_s"] == 9.0
+
+
+def test_a_failed_write_keeps_the_read_before_it_as_the_previous_read():
+    pages = [fanduel_page(), fanduel_page(), fanduel_page()]
+    for pg in pages[1:]:
+        pg["attachments"]["markets"]["m2"]["runners"][1]["winRunnerOdds"]["americanDisplayOdds"][
+            "americanOddsInt"] = -130
+    clock = iter([datetime(2026, 11, 26, 22, 0, s, tzinfo=timezone.utc) for s in (0, 2, 4)])
+    f, conn, _logged, _ = feeds(lambda url: Resp(200, pages.pop(0)), clock=lambda: next(clock))
+    _read(f)
+    real, calls = conn.executemany, {"n": 0}
+
+    def flaky(sql, rows):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("connection lost")
+        real(sql, rows)
+    conn.executemany = flaky
+    _read(f)                                  # showed -130, write failed
+    _read(f)                                  # writes it again
+    moved = _offers(conn)[-1]
+    assert moved["spread_home_price"] == -130
+    # never the failed read (22:00:02), which already showed the number
+    assert moved["prev_read_at"] == datetime(2026, 11, 26, 22, 0, 0, tzinfo=timezone.utc)
+
+
 def test_the_offer_table_is_created_guarded_locked_down_and_classified():
     from data import anon_readable
     src = (ROOT / "data/ingestors/book_live_boards.py").read_text(encoding="utf-8")
     ensure = src[src.index("def ensure_tables("):src.index("def _et_day(")]
     assert "schema_is_current(conn, READS_TABLE" in ensure and "lock_down(conn, READS_TABLE)" in ensure
-    assert "FEED_ALTER" in ensure
+    assert "FEED_ALTER" in ensure and "READS_ALTERS" in ensure
+    assert {"prev_read_at", "prev_page_age_s"} <= set(L.READS_COLS)
+    assert all("ADD COLUMN IF NOT EXISTS" in a for a in L.READS_ALTERS)
     assert "book_live_reads" in (ROOT / "data/anon_readable.py").read_text(encoding="utf-8")
     assert "page_age_s" in L.FEED_COLS

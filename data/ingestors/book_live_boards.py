@@ -158,11 +158,23 @@ FEED_ALTER = "ALTER TABLE book_live_feed ADD COLUMN IF NOT EXISTS page_age_s DOU
 #                2026-11-26 17:35Z was 13 s old), so its numbers were on the
 #                book's site at read_at - page_age_s. NULL when the book sends
 #                no Age (BetRivers' answer, same day, was a CDN miss with none).
-# Nothing decides on it yet: the loops that will are the next change.
+#   prev_read_at / prev_page_age_s  the same book and sport's PREVIOUS clean
+#                read (2026-11-26, issue #1644). A number on a row was not on
+#                the page at prev_read_at - prev_page_age_s, so the book set it
+#                after that: the only time from which "no score since the
+#                number was set" is guaranteed (read_at - page_age_s is when
+#                the page first SHOWED it, up to a CDN refresh later). NULL on
+#                a process's first read, and on every row written before these
+#                columns existed: such a number's start is unknown and it never
+#                qualifies. After a back-off the previous read is minutes old,
+#                which the same rule then refuses.
+# Nothing decides on it yet: models/book_live_quotes.py reads it for the
+# loops that will.
 READS_TABLE = "book_live_reads"
 READ_LINE_COLS = ("spread_home", "spread_home_price", "spread_away_price", "total_line",
                   "over_price", "under_price", "home_ml", "away_ml")
-READS_COLS = ("book", "sport", "game_id", "read_at", "page_age_s", "after_start", *READ_LINE_COLS)
+READS_COLS = ("book", "sport", "game_id", "read_at", "page_age_s", "after_start", *READ_LINE_COLS,
+              "prev_read_at", "prev_page_age_s")
 READS_INDEX = "book_live_reads_sport_read_idx"
 READS_DDL = """
 CREATE TABLE IF NOT EXISTS book_live_reads (
@@ -180,9 +192,17 @@ CREATE TABLE IF NOT EXISTS book_live_reads (
     under_price        DOUBLE PRECISION,
     home_ml            DOUBLE PRECISION,
     away_ml            DOUBLE PRECISION,
+    prev_read_at       TIMESTAMPTZ,
+    prev_page_age_s    DOUBLE PRECISION,
     PRIMARY KEY (book, game_id, read_at)
 )
 """
+# The table predates the prev_* columns (created 2026-11-26 22:08Z): added in
+# place, never recreated.
+READS_ALTERS = (
+    "ALTER TABLE book_live_reads ADD COLUMN IF NOT EXISTS prev_read_at TIMESTAMPTZ",
+    "ALTER TABLE book_live_reads ADD COLUMN IF NOT EXISTS prev_page_age_s DOUBLE PRECISION",
+)
 READS_INDEX_DDL = f"CREATE INDEX IF NOT EXISTS {READS_INDEX} ON book_live_reads (sport, read_at)"
 READS_INSERT = (f"INSERT INTO {READS_TABLE} ({', '.join(READS_COLS)}) "
                 f"VALUES ({', '.join(['%s'] * len(READS_COLS))}) ON CONFLICT DO NOTHING")
@@ -679,6 +699,8 @@ def ensure_tables(conn) -> None:
                              revoked_from=API_ROLES):
         conn.execute(READS_DDL)
         conn.execute(READS_INDEX_DDL)
+        for alter in READS_ALTERS:
+            conn.execute(alter)
         lock_down(conn, READS_TABLE)
     conn.commit()
     from data.ingestors.book_throttle import ensure_table as ensure_throttle_table
@@ -747,6 +769,9 @@ class BookFeeds:
         # (book, sport) -> the games the last clean read listed.
         self.state: dict[tuple, tuple] = {}
         self.listed: dict[tuple, set] = {}
+        # (book, sport) -> (read_at, page_age_s) of the last clean read whose
+        # rows were stored: the prev_* columns of the next read's rows.
+        self.prev_read: dict[tuple, tuple] = {}
         self.ids: dict[tuple, tuple | None] = {}   # (book, event_id) -> (game_id, flipped)
         self.shared: dict[str, tuple] = {}         # url -> (when, status, text, page age)
         self.betmgm_keys = BetMGMKeys(BETMGM_ACCESS_IDS)
@@ -1021,21 +1046,25 @@ class BookFeeds:
         the last clean read listed that is not on this one gets one all-NULL
         row. Pure given self.state and self.listed."""
         out, nxt = [], {}
+        prev = self.prev_read.get((book.key, sport), (None, None))
         for gid, nums in seen.items():
-            prev = self.state.get((book.key, gid), _UNSEEN)
-            if prev is _UNSEEN or prev != nums:
-                out.append((book.key, sport, gid, at, page_age_s, prev is _UNSEEN, *nums))
+            last = self.state.get((book.key, gid), _UNSEEN)
+            if last is _UNSEEN or last != nums:
+                out.append((book.key, sport, gid, at, page_age_s, last is _UNSEEN, *nums, *prev))
                 nxt[(book.key, gid)] = nums
         for gid in sorted(self.listed.get((book.key, sport), set()) - set(seen)):
-            prev = self.state.get((book.key, gid), _OFF)
-            if prev != _OFF:
-                out.append((book.key, sport, gid, at, page_age_s, False, *_OFF))
+            last = self.state.get((book.key, gid), _OFF)
+            if last != _OFF:
+                out.append((book.key, sport, gid, at, page_age_s, False, *_OFF, *prev))
                 nxt[(book.key, gid)] = _OFF
         return out, nxt
 
     def _log_offer(self, book: Book, sport: str, seen: dict, at: datetime, page_age_s: float | None) -> int:
         """Store one clean read's book_live_reads rows. A failed write leaves
-        the state as it was, so the next clean read writes the change again."""
+        the state, and the previous read, as they were: the next clean read
+        writes the change again, carrying the read before the failed one
+        (which did not show it) as its previous read, never the failed read
+        (which did)."""
         out, nxt = self.offer_rows(book, sport, seen, at, page_age_s)
         if out:
             try:
@@ -1048,6 +1077,7 @@ class BookFeeds:
                 return 0
         self.state.update(nxt)
         self.listed[(book.key, sport)] = set(seen)
+        self.prev_read[(book.key, sport)] = (at, page_age_s)
         return len(out)
 
     def _finish(self, book, sport, at, url, status, text, ok, live, matched, written, detail, body=None,
