@@ -226,9 +226,8 @@ def claimed_vs_realised(b: pd.DataFrame) -> list[dict]:
     return rows
 
 
-def report(spec: np_.Spec, data: dict, frame: pd.DataFrame, dump: str | None) -> None:
-    print(f"\n{'=' * 100}\n{spec.model_id}  ({spec.market}, settles on {spec.stat}; "
-          f"{'LIVE' if spec in np_.LIVE else 'NOT live'})\n{'=' * 100}")
+def prepare(spec: np_.Spec, data: dict, frame: pd.DataFrame) -> pd.DataFrame:
+    """Every priced side the walk-forward can score, with the model's probability on it."""
     px = prices(data, spec)
     pred = predictions(spec, frame)
     m = px.merge(pred.drop(columns=["season"]), on=["game_id", "pkey"], how="inner")
@@ -239,9 +238,157 @@ def report(spec: np_.Spec, data: dict, frame: pd.DataFrame, dump: str | None) ->
           f"matched to a prediction (unmatched = under {np_.MIN_GAMES} games, a name the log does not hold"
           + ("; or a goalie who did not start: void" if spec.kind == "goalie" else "") + "); "
           f"quotes by book {m.book.value_counts().to_dict()}")
-    s = sides(m)
+    return sides(m)
+
+
+def _population(s: pd.DataFrame) -> pd.DataFrame:
+    """One under per player-game: the best price, whatever the EV. The cut draws from this."""
+    return card(s, -9.0, ("under",), floor=None)
+
+
+def _decisive(b: pd.DataFrame) -> pd.DataFrame:
+    return b[b.actual != b.line]
+
+
+def log_loss(b: pd.DataFrame) -> float:
+    """Log loss of P(the under wins) on decisive unders. A push is not a win or a loss."""
+    d = _decisive(b)
+    if not len(d):
+        return float("nan")
+    y = d.won.to_numpy(dtype=float)
+    p = np.clip(d.p.to_numpy(dtype=float), 1e-6, 1 - 1e-6)
+    return float(-(y * np.log(p) + (1 - y) * np.log(1 - p)).mean())
+
+
+def calibration_error(b: pd.DataFrame, n_bins: int = 10) -> float:
+    """Mean absolute gap between claimed P(under) and the under's hit rate, weighted by count."""
+    d = _decisive(b)
+    if not len(d):
+        return float("nan")
+    y = d.won.to_numpy(dtype=float)
+    p = d.p.to_numpy(dtype=float)
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    err = 0.0
+    n = 0
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        m = (p >= lo) & (p <= hi if hi == 1 else p < hi)
+        k = int(m.sum())
+        if not k:
+            continue
+        err += abs(float(y[m].mean()) - float(p[m].mean())) * k
+        n += k
+    return err / n
+
+
+def profit_to_win(b: pd.DataFrame) -> np.ndarray:
+    """1u to win, risk capped at 3. The published record's stake. A push is 0."""
+    price = b.price.to_numpy(dtype=float)
+    win_per = np.where(price > 0, price / 100.0, 100.0 / np.abs(price))
+    risk = 1.0 / win_per
+    capped = risk > 3
+    risk = np.where(capped, 3.0, risk)
+    win = np.where(capped, 3.0 * win_per, 1.0)
+    push = (b.actual.to_numpy() == b.line.to_numpy())
+    won = b.won.to_numpy(dtype=bool) & ~push
+    return np.where(push, 0.0, np.where(won, win, -risk))
+
+
+def _metric_row(label: str, b: pd.DataFrame) -> dict:
+    d = _decisive(b)
+    to_win = profit_to_win(b)
+    row = {
+        "set": label,
+        "rows": len(b),
+        "decisive": len(d),
+        "pushes": int((b.actual == b.line).sum()) if len(b) else 0,
+        "log_loss": None if not len(d) else round(log_loss(b), 4),
+        "cal_err": None if not len(d) else round(calibration_error(b), 4),
+        "claimed": None if not len(d) else round(float(d.p.mean()), 3),
+        "hit": None if not len(d) else round(float(d.won.mean()), 3),
+    }
+    if len(b):
+        row["units_risked"] = round(float(b.profit.sum()), 2)
+        row["roi_risked"] = round(float(b.profit.mean()), 4)
+        row["units_to_win"] = round(float(to_win.sum()), 2)
+        row["roi_to_win"] = round(float(to_win.mean()), 4)
+        if len(b) >= 30:
+            row["95% by day"] = day_interval(b)
+    return row
+
+
+def _by_season(label: str, b: pd.DataFrame) -> list[dict]:
+    rows = []
+    for season in SEASONS:
+        q = b[b.season == season].sort_values(["game_date", "game_id", "pkey"])
+        name = f"{season - 1}-{str(season)[2:]}"
+        row = _metric_row(f"{label} {name}", q)
+        if len(q) >= 2:
+            h = len(q) // 2
+            early, late = q.iloc[:h], q.iloc[h:]
+            row["early_roi_risked"] = round(float(early.profit.mean()), 4)
+            row["late_roi_risked"] = round(float(late.profit.mean()), 4)
+            row["early_n"] = len(early)
+            row["late_n"] = len(late)
+        rows.append(row)
+    return rows
+
+
+def compare_saves(base: pd.DataFrame, mp: pd.DataFrame, floor: float) -> str:
+    """Current artifact's features against the MoneyPuck features, on one price set.
+
+    ROI on an identical bet list cannot differ: the price and the result are the
+    bet's. What can differ on that list is the probability (log loss, calibration).
+    Bet count, hit rate and units are compared on each model's own bets at the
+    live cut, and again on the bets both models take.
+    """
+    base_bets = card(base, floor, np_.SAVES.sides, per_game=np_.SAVES.max_per_game)
+    mp_bets = card(mp, floor, np_.SAVES.sides, per_game=np_.SAVES.max_per_game)
+    keys = ["game_id", "pkey", "book", "line", "side"]
+    both = base_bets.merge(mp_bets[keys], on=keys, how="inner")
+    mp_on_base = base_bets[keys].merge(mp, on=keys, how="inner")
+    rows = [
+        _metric_row("current, every best-price under", _population(base)),
+        _metric_row("moneypuck, every best-price under", _population(mp)),
+        _metric_row(f"current bets, EV>={floor:.2f}", base_bets),
+        _metric_row(f"moneypuck bets, EV>={floor:.2f}", mp_bets),
+        _metric_row(f"current bets scored by MoneyPuck p, EV>={floor:.2f}", mp_on_base),
+        _metric_row(f"bets both take, current p, EV>={floor:.2f}", both),
+    ]
+    # The intersection carries the current model's profit. Score MoneyPuck's p on it.
+    if len(both):
+        mp_both = both[keys].merge(mp, on=keys, how="inner")
+        rows.append(_metric_row(f"bets both take, MoneyPuck p, EV>={floor:.2f}", mp_both))
+    season_rows = []
+    season_rows += _by_season(f"current bets EV>={floor:.2f}", base_bets)
+    season_rows += _by_season(f"moneypuck bets EV>={floor:.2f}", mp_bets)
+    season_rows += _by_season("current, every under", _population(base))
+    season_rows += _by_season("moneypuck, every under", _population(mp))
+    lines = [
+        f"live cut EV>={floor:.2f}, unders, best price, floor {FLOOR}, own probability",
+        f"current bets {len(base_bets):,}; moneypuck bets {len(mp_bets):,}; "
+        f"both {len(both):,}; current bets MoneyPuck can score {len(mp_on_base):,}",
+        "",
+        pd.DataFrame(rows).to_string(index=False),
+        "",
+        pd.DataFrame(season_rows).to_string(index=False),
+    ]
+    # Neighbourhood, each model's own bets. 1u risked, so it lines up with the script's grid.
+    neigh = []
+    for cut in EV_CUTS:
+        for name, s in (("current", base), ("moneypuck", mp)):
+            b = card(s, cut, np_.SAVES.sides, per_game=np_.SAVES.max_per_game)
+            neigh.append({"model": name, "EV>=": cut, **{k: v for k, v in _metric_row(name, b).items() if k != "set"}})
+    lines += ["", pd.DataFrame(neigh).to_string(index=False)]
+    return "\n".join(lines)
+
+
+def report(spec: np_.Spec, data: dict, frame: pd.DataFrame, dump: str | None) -> pd.DataFrame:
+    print(f"\n{'=' * 100}\n{spec.model_id}  ({spec.market}, settles on {spec.stat}; "
+          f"{'LIVE features' if spec.features == np_.SAVES.features or spec in np_.LIVE else 'MONEYPACK FEATURES, not live'})\n{'=' * 100}")
+    s = prepare(spec, data, frame)
     dk = s[s.book == np_.BOOK]
-    print(f"DraftKings lines: {m[m.book == np_.BOOK].line.value_counts().head(8).to_dict()}")
+    m_lines = s[s.book == np_.BOOK]
+    print(f"DraftKings lines: {m_lines.line.value_counts().head(8).to_dict()}")
     for side in ("over", "under"):
         print(f"blind always {side} at DraftKings: "
               f"{line({}, dk[dk.side == side].sort_values(['game_date', 'game_id', 'pkey']))}")
@@ -276,7 +423,32 @@ def report(spec: np_.Spec, data: dict, frame: pd.DataFrame, dump: str | None) ->
         print(f"\nat EV >= {floor:.2f}: {len(b):,} bets over {days:,} priced game days ({len(b) / max(days, 1):.1f} a day; "
               f"most on one day {int(b.groupby('game_date').size().max())})")
     if dump:
-        s.assign(model_id=spec.model_id).to_pickle(Path(dump) / f"sides_{spec.model_id}.pkl")
+        tag = spec.model_id + ("_moneypuck" if "mp_xg_l" in spec.features else "")
+        s.assign(model_id=tag).to_pickle(Path(dump) / f"sides_{tag}.pkl")
+    return s
+
+
+def load_moneypuck(cache: str | None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """All-situation goalie and team rows. Prior-game features are built later, from these."""
+    cols_g = ["player_id", "nhl_game_id", "x_goals", "high_dangerx_goals", "goals"]
+    cols_t = ["nhl_game_id", "team", "game_date", "x_goals_for"]
+    if cache:
+        c = Path(cache)
+        return pd.read_pickle(c / "moneypuck_goalies.pkl"), pd.read_pickle(c / "moneypuck_teams.pkl")
+    from data.db import get_connection
+    conn = get_connection()
+    try:
+        goalies = pd.DataFrame(conn.execute(
+            "SELECT player_id, nhl_game_id, x_goals, high_dangerx_goals, goals "
+            "FROM moneypuck_goalie_games WHERE situation = %s",
+            (np_.MONEYPACK_SITUATION,)).fetchall(), columns=cols_g)
+        teams = pd.DataFrame(conn.execute(
+            "SELECT nhl_game_id, team_abbr, game_date, x_goals_for "
+            "FROM moneypuck_team_games WHERE situation = %s",
+            (np_.MONEYPACK_SITUATION,)).fetchall(), columns=cols_t)
+        return goalies, teams
+    finally:
+        conn.close()
 
 
 def main() -> None:
@@ -284,8 +456,28 @@ def main() -> None:
     ap.add_argument("--model", default=None, choices=sorted(np_.SPECS))
     ap.add_argument("--cache", default=None, help="a folder of pickles to read instead of the database")
     ap.add_argument("--dump", default=None, help="write the bet-level rows to this folder")
+    ap.add_argument("--moneypuck", action="store_true",
+                    help="walk-forward nhl_prop_saves with MoneyPuck goalie features, and compare it to the live features")
+    ap.add_argument("--results", default=None, help="write the MoneyPuck comparison here")
     a = ap.parse_args()
+    if a.moneypuck and a.model not in (None, "nhl_prop_saves"):
+        raise SystemExit("--moneypuck is the saves model only")
     data = load(a.cache)
+    if a.moneypuck:
+        spec = np_.saves_spec(True)
+        goalies, mp_teams = load_moneypuck(a.cache)
+        base = np_.build_frame(np_.SAVES, data["goalie"], data["teams"])
+        framed = np_.add_moneypuck_goalie_features(base, goalies, mp_teams)
+        print(f"MoneyPuck features on {int(framed[list(np_.MONEYPACK_GOALIE_FEATURES)].notna().all(axis=1).sum()):,} "
+              f"of {len(framed):,} goalie-starts")
+        current = report(np_.SAVES, data, base, a.dump)
+        enhanced = report(spec, data, framed, a.dump)
+        floor = config.MODEL_OWN_EV_FLOOR["nhl_prop_saves"]
+        text = compare_saves(current, enhanced, floor)
+        print(f"\n{'=' * 100}\nCOMPARISON\n{'=' * 100}\n{text}")
+        if a.results:
+            Path(a.results).write_text(text + "\n", encoding="utf-8")
+        return
     frames: dict[str, pd.DataFrame] = {}
     for spec in ([np_.SPECS[a.model]] if a.model else np_.SPECS.values()):
         if spec.kind not in frames:

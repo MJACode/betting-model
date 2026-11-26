@@ -138,6 +138,71 @@ class TestTheGoalieFrame:
         assert len(row) == 1 and int(row.started.iloc[0]) == 1 and row[list(P.SAVES.features)].notna().all(axis=None)
 
 
+def _mp(go: pd.DataFrame, tm: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    rng = np.random.default_rng(1)
+    starts = go[go.started == 1]
+    goalies = starts[["player_id", "nhl_game_id"]].copy()
+    goalies["x_goals"] = rng.uniform(1.5, 4.0, len(goalies))
+    goalies["high_dangerx_goals"] = goalies.x_goals * 0.35
+    goalies["goals"] = rng.integers(0, 6, len(goalies)).astype(float)
+    teams = tm[["nhl_game_id", "team", "game_date"]].copy()
+    teams["x_goals_for"] = rng.uniform(1.5, 4.5, len(teams))
+    return goalies, teams
+
+
+class TestMoneyPuckSavesFeatures:
+    def test_the_live_spec_does_not_carry_them(self):
+        assert P.USE_MONEYPACK_SAVES is False
+        assert P.saves_spec(False) is P.SAVES
+        assert not any(f.startswith("mp_") or f == "opp_mp_xgf" for f in P.SAVES.features)
+        card_src = (ROOT / "scripts" / "nhl_props_card.py").read_text(encoding="utf-8")
+        assert "add_moneypuck_goalie_features" not in card_src
+        assert "saves_spec" not in card_src
+
+    def test_a_games_own_xg_is_not_one_of_its_inputs(self):
+        _, go, tm = _log()
+        goalies, teams = _mp(go, tm)
+        spec = P.saves_spec(True)
+        feats = list(P.MONEYPACK_GOALIE_FEATURES)
+        before = P.add_moneypuck_goalie_features(P.build_goalie_frame(go, tm), goalies, teams)
+        loud_g = goalies.copy()
+        last = int(go.nhl_game_id.max())
+        loud_g.loc[loud_g.nhl_game_id == last, ["x_goals", "high_dangerx_goals", "goals"]] = 80
+        loud_t = teams.copy()
+        loud_t.loc[loud_t.nhl_game_id == last, "x_goals_for"] = 80
+        after = P.add_moneypuck_goalie_features(P.build_goalie_frame(go, tm), loud_g, loud_t)
+        a = before[before.nhl_game_id == last].sort_values("player_id")[feats].astype(float)
+        b = after[after.nhl_game_id == last].sort_values("player_id")[feats].astype(float)
+        pd.testing.assert_frame_equal(a.reset_index(drop=True), b.reset_index(drop=True))
+        # The same loud game does move a later row: the feature is prior games, not a constant.
+        earlier = int(sorted(go.nhl_game_id.unique())[-5])
+        later = int(sorted(go.nhl_game_id.unique())[-1])
+        loud_g = goalies.copy()
+        loud_g.loc[loud_g.nhl_game_id == earlier, "x_goals"] = 80
+        moved = P.add_moneypuck_goalie_features(P.build_goalie_frame(go, tm), loud_g, teams)
+        assert not np.allclose(
+            before[before.nhl_game_id == later].sort_values("player_id").mp_xg_l.astype(float),
+            moved[moved.nhl_game_id == later].sort_values("player_id").mp_xg_l.astype(float))
+
+    def test_tonights_row_matches_the_played_row(self):
+        _, go, tm = _log()
+        goalies, teams = _mp(go, tm)
+        spec = P.saves_spec(True)
+        feats = list(spec.features)
+        last = int(go.nhl_game_id.max())
+        played = P.add_moneypuck_goalie_features(P.build_goalie_frame(go, tm), goalies, teams)
+        want = played[played.nhl_game_id == last].set_index("player_id")[feats]
+        held = go[(go.nhl_game_id == last) & (go.started == 1)]
+        up = held[["player_id", "player_name", "season", "game_date", "team", "opponent", "is_home"]].assign(
+            game_id="NHL_tonight")
+        frame = P.add_moneypuck_goalie_features(
+            P.build_goalie_frame(go[go.nhl_game_id != last], tm[tm.nhl_game_id != last], up),
+            goalies[goalies.nhl_game_id != last], teams[teams.nhl_game_id != last])
+        got = frame[frame.upcoming].set_index("player_id")[feats]
+        pd.testing.assert_frame_equal(got.sort_index().astype(float), want.sort_index().astype(float),
+                                      check_names=False)
+
+
 class TestTheDistribution:
     def test_no_excess_variance_is_exactly_poisson(self):
         from scipy.stats import poisson

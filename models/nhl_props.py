@@ -66,7 +66,7 @@ every season positive both ways).
 from __future__ import annotations
 
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -102,6 +102,20 @@ class Spec:
 SAVES = Spec("nhl_prop_saves", "player_total_saves", "saves", "Saves", "goalie",
              ("saves_l", "saves_s", "sa_l", "opp_sf", "own_sa", "gp",
               "is_home", "rest", "own_rest", "opp_rest"), overdispersed=True)
+# Live scoring leaves this off. scripts/nhl_prop_backtest.py --moneypuck is the
+# only caller. Turning it on here would change tonight's saves card.
+USE_MONEYPACK_SAVES = False
+# Prior-game MoneyPuck inputs for a full-game saves prop. All-situation rows.
+# GSAx is x_goals minus goals (expected goals against minus goals against):
+# positive means the goalie allowed fewer goals than the shots were worth.
+# Half-lives match saves_l / saves_s (25 and 5) and the team shot rate (25).
+MONEYPACK_GOALIE_FEATURES = (
+    "mp_xg_l", "mp_xg_s",
+    "mp_hd_xg_l", "mp_hd_xg_s",
+    "mp_gsax_l", "mp_gsax_s",
+    "opp_mp_xgf",
+)
+MONEYPACK_SITUATION = "all"
 SHOTS = Spec("nhl_prop_shots_on_goal", "player_shots_on_goal", "shots", "Shots on Goal", "skater",
              ("shots_l", "shots_s", "shot_attempts_l", "shot_attempts_s", "opp_sa") + SKATER_USAGE,
              max_per_game=3)
@@ -119,6 +133,17 @@ TEAM_COLS = ("nhl_game_id", "game_id", "team", "opponent", "game_date",
              "shots_for", "shots_against", "goals_against", "times_shorthanded")
 _SKATER_STATS = ("shots", "shot_attempts", "assists", "points")
 _TEAM_STATS = {"sf": "shots_for", "sa": "shots_against", "ga": "goals_against", "pk_opps": "times_shorthanded"}
+
+
+def saves_spec(moneypuck: bool = False) -> Spec:
+    """The live saves spec, or the same spec plus the MoneyPuck goalie features.
+
+    The live card keeps `SAVES`. A backtest that wants the extra inputs asks
+    for them here and passes the MoneyPuck tables into `add_moneypuck_goalie_features`.
+    """
+    if not moneypuck:
+        return SAVES
+    return replace(SAVES, features=SAVES.features + MONEYPACK_GOALIE_FEATURES)
 
 
 def books() -> tuple[str, ...]:
@@ -265,6 +290,51 @@ def build_frame(spec: Spec, players: pd.DataFrame, teams: pd.DataFrame,
                 upcoming: pd.DataFrame | None = None) -> pd.DataFrame:
     build = build_goalie_frame if spec.kind == "goalie" else build_skater_frame
     return build(players, teams, upcoming)
+
+
+def add_moneypuck_goalie_features(frame: pd.DataFrame, goalies: pd.DataFrame,
+                                  teams: pd.DataFrame) -> pd.DataFrame:
+    """Prior-game MoneyPuck inputs on a goalie frame. The current game is not an input.
+
+    `goalies` is all-situation `moneypuck_goalie_games` (player_id, nhl_game_id,
+    x_goals, high_dangerx_goals, goals). `teams` is all-situation
+    `moneypuck_team_games` (nhl_game_id, team, game_date, x_goals_for).
+    Each feature is the shifted weighted mean of EARLIER rows, the same
+    arithmetic as saves_l. A goalie's own xG tonight, and the opponent's xG
+    tonight, are not in the row. Rows with no prior history stay null and
+    `usable` drops them.
+    """
+    d = frame.copy()
+    raw = goalies[["player_id", "nhl_game_id", "x_goals", "high_dangerx_goals", "goals"]].copy()
+    for c in ("x_goals", "high_dangerx_goals", "goals"):
+        raw[c] = pd.to_numeric(raw[c], errors="coerce")
+    d = d.merge(raw, on=["player_id", "nhl_game_id"], how="left")
+    d["mp_gsax_raw"] = d["x_goals"] - d["goals"]
+    d["game_date"] = pd.to_datetime(d["game_date"])
+    d = d.sort_values(["player_id", "game_date", "nhl_game_id"]).reset_index(drop=True)
+    g = d.groupby("player_id", sort=False)
+    d["mp_xg_l"], d["mp_xg_s"] = _ew(g, "x_goals", 25), _ew(g, "x_goals", 5)
+    d["mp_hd_xg_l"], d["mp_hd_xg_s"] = _ew(g, "high_dangerx_goals", 25), _ew(g, "high_dangerx_goals", 5)
+    d["mp_gsax_l"], d["mp_gsax_s"] = _ew(g, "mp_gsax_raw", 25), _ew(g, "mp_gsax_raw", 5)
+
+    played = teams[["nhl_game_id", "team", "game_date", "x_goals_for"]].copy()
+    played["x_goals_for"] = pd.to_numeric(played["x_goals_for"], errors="coerce")
+    played["game_date"] = pd.to_datetime(played["game_date"])
+    if "upcoming" in d.columns and d.upcoming.any():
+        upcoming = d.loc[d.upcoming, ["nhl_game_id", "team", "opponent", "game_date"]].drop_duplicates()
+        own = upcoming[["nhl_game_id", "team", "game_date"]]
+        opp_rows = upcoming[["nhl_game_id", "opponent", "game_date"]].rename(columns={"opponent": "team"})
+        extra = pd.concat([own, opp_rows], ignore_index=True)
+        extra["x_goals_for"] = np.nan
+        played = pd.concat([played, extra], ignore_index=True)
+    played = played.drop_duplicates(["nhl_game_id", "team"], keep="first")
+    played = played.sort_values(["team", "game_date", "nhl_game_id"]).reset_index(drop=True)
+    played["mp_xgf"] = _ew(played.groupby("team", sort=False), "x_goals_for", 25, 5)
+    opp = played[["nhl_game_id", "team", "mp_xgf"]].rename(
+        columns={"team": "opponent", "mp_xgf": "opp_mp_xgf"})
+    d = d.drop(columns=[c for c in ("opp_mp_xgf",) if c in d.columns])
+    d = d.merge(opp, on=["nhl_game_id", "opponent"], how="left")
+    return d.drop(columns=["x_goals", "high_dangerx_goals", "goals", "mp_gsax_raw"])
 
 
 def usable(spec: Spec, frame: pd.DataFrame) -> pd.DataFrame:
