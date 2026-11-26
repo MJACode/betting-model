@@ -442,13 +442,17 @@
   `moneypuck_goalie_games`, `moneypuck_line_games` (lines and pairings),
   `moneypuck_players`. `nhl_game_id` is the league id, so the rows join to
   `nhl_team_game_log` / `games`; `our_game_id` is filled from the log.
-  Nothing that writes a pick reads them. Sizes and the backfill command:
+  Nothing that writes a pick reads them. A flagged shots-on-goal backtest
+  reads skater and team rows; the live card does not
+  (`docs/nhl_prop_shots_moneypuck.md`). Sizes and the backfill command:
   `data/ingestors/moneypuck_nhl.py`.
 - **Shift charts, officials, lines, EDGE** (2026-11-26), personal
   non-commercial, not a pick input. `nhl_shifts` is every shift from
   `api.nhle.com/stats/rest/en/shiftcharts` (2023-24 onward).
   `nhl_shift_linemates` is shared ice from overlapping shifts; the chart
-  has no strength, so it is not a power-play unit. `nhl_game_officials`
+  has no strength, so it is not a power-play unit. The same shots backtest
+  derives prior-game linemate quality from it and does not read Daily Faceoff
+  or EDGE. The live card does not. `nhl_game_officials`
   and `nhl_healthy_scratches` are the gamecenter right rail. Daily Faceoff
   line combinations and PP1/PP2 are `dailyfaceoff_line_snapshots`, one
   insert per run. NHL EDGE skater, goalie and team detail is a nightly

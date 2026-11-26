@@ -30,6 +30,25 @@ review as its own entry.
 
 ---
 
+## 2026-11-26: NHL shots-on-goal, MoneyPuck and shift features, backtest only
+
+1. **Scope.** mike, 2026-11-26: one existing market, `nhl_prop_shots_on_goal`.
+   A flagged walk-forward of prior-game MoneyPuck skater rates, usage trends,
+   shift-chart linemates and opponent suppression. Not a new live model.
+   Result: `docs/nhl_prop_shots_moneypuck.md`.
+2. **Tried.** The live Poisson spec against that feature list, same prices,
+   same unders-only rule, cap of 3, −200 floor and EV ≥ 0.18, seasons 2023-24
+   through 2026-27 to date. Each group removed once. Overs checked; the live
+   model does not bet them, and they lose.
+3. **New.** The shift chart has no strength, so a power-play unit is shared ice
+   with teammates who took power-play time, and it is missing before 2023-24.
+   Requiring it deletes the fit that scores 2023-24. Recorded in the results
+   doc, not as a method that cleared.
+4. **Corrected.** Nothing in the skill's method list. The candidate does not
+   replace the live artifact: +84.03 units against +104.45 at the live cut,
+   1u risked, and the day intervals overlap.
+5. **The framework.** Nothing in SKILL.md changed.
+
 ## 2026-11-26: NBA props decided 10 hours before tip, and real-money history (`nba_prop_market_early`)
 
 1. **Scope.** mike, 2026-11-26: NBA data sources because the prop and game models were weak,
