@@ -51,16 +51,23 @@ from data.ingestors.nba_public_splits_ingestor import (
     validate_sides,
 )
 
-SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB", "NCAAB")
+# WNBA added 2026-11-26 (mike, "1) yes"): inert until its season has an unstarted game. Teams match on the
+# full name through the odds feed's normaliser (WNBA_ODDS_API_MAP); scripts/splits_coverage_probe.py counts
+# how many of its last played date's games the matcher finds.
+SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB", "NCAAB", "WNBA")
 
-# Period splits (Matt, 2026-11-26: "Yes on splits", hourly). Measured by
-# worker_jobs 1698627 (scripts/splits_markets_probe.py) on 2026-11-26: the v2
-# scoreboard's consensus (book 15) carries moneyline / spread / total splits per
-# period, for every game of the slate, in exactly these. Left out on purpose:
-# 2nd halves for NFL / NCAAF (consensus on 0 of 16 and 2 of 69 games) and
-# anything NHL beyond the first period (empty). Team totals
-# (core_bet_type_6_team_score) are also split, but their entry shape was not
-# recorded, so they are not parsed yet.
+# Period splits (Matt, 2026-11-26: "Yes on splits", hourly).
+# CORRECTION (mike, 2026-11-26, later the same day): consensus serves NO period
+# split. The list below was chosen from worker_jobs 1698627, which counted
+# Action Network's 0/0 placeholder as a split. Counting only non-zero shares,
+# worker_jobs 1717775 (15:15 UTC) found no period and no team-total split at
+# consensus for NFL, NCAAF or NCAAB (NBA and NHL had no games that day), and
+# the hourly passes at 15:19, 15:28 and 16:18 UTC stored 0 period rows in all
+# five sports (worker log). The fetch is left in place so a period split shows
+# up in the history the day consensus starts serving one. No single book does
+# either: worker_jobs 1722475 (scripts/splits_coverage_probe.py, 18:05 UTC)
+# asked every book for every period and found no period and no team-total
+# split at any book in NBA, NHL, NFL, NCAAF or NCAAB.
 PERIODS_BY_SPORT: dict[str, tuple[str, ...]] = {
     "NBA": ("firsthalf", "secondhalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
     "NFL": ("firsthalf", "firstquarter", "secondquarter", "thirdquarter", "fourthquarter"),
