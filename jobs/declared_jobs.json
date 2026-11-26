@@ -2052,5 +2052,13 @@
     "args": {
       "pages": 1
     }
+  },
+  {
+    "key": "splits-nba-nhl-probe-2026-11-27",
+    "job_type": "splits_markets_probe",
+    "requested_by": "matt",
+    "run_after": "2026-11-27T16:00:00+00:00",
+    "note": "Matt 2026-11-26 ('Ok'): NBA and NHL had no games when splits-nonzero-probe-2026-11-26 ran, so whether Action Network's consensus splits their periods is unmeasured. Runs at 11am ET on 11-27, before tip, counting only non-zero pre-game shares. Keeps or removes NBA / NHL in scoreboard_splits.PERIODS_BY_SPORT. Writes nothing, no Odds API credits.",
+    "args": {}
   }
 ]
