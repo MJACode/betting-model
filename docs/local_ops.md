@@ -277,8 +277,16 @@ The task `\BettingModel\PcMonitor` runs `pythonw -m pc_monitor --stay
 while he is signed in, with no time limit, and never as a second copy. With
 `--stay` it keeps collecting with no window open, so the shortcut only opens a
 window onto it. Started without the task (the shortcut alone), it exits 10
-minutes after the last window closes. A merge reaches the running copy at its
-next start, which is normally the next sign-in.
+minutes after the last window closes.
+
+**A merge reaches it by itself** (mike, 2026-11-26: *"Figure it out"*). While
+it runs it checks origin/master every 5 minutes, and when a merge changed
+`pc_monitor/` or `data/db.py` it stops its server and starts a copy of itself
+on the new code (no new window: an open window reconnects). The DraftKings
+feed backs this up: each time it restarts on a merge, it compares the
+monitor's worktree with origin/master and, when it is behind, ends and starts
+`\BettingModel\PcMonitor`. That is also how the change that added the 5-minute
+check reached the monitor already running.
 
 **Live lines by sportsbook** (mike, 2026-11-26: *"I don't see euro league in
 there and can we have a clearer breakout of live data by sports book"*). The
@@ -297,7 +305,7 @@ DraftKings is not listing (EuroLeague on most days) now has a `dk_live_feed`
 row, written at most once a minute, whose detail says so; the page shows
 "DraftKings is not listing this league right now".
 
-The window loads new code only when it starts. To see a merged change now:
+A merged change to the window shows within about 5 minutes (above). To force it:
 
 ```powershell
 schtasks /End /TN "\BettingModel\PcMonitor"; schtasks /Run /TN "\BettingModel\PcMonitor"

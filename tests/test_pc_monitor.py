@@ -579,3 +579,34 @@ def test_live_lines_by_sportsbook_lists_draftkings_then_every_book_in_order():
 def test_the_page_draws_the_sportsbook_section():
     page = (ROOT / "pc_monitor" / "static" / "index.html").read_text(encoding="utf-8")
     assert 'id="books"' in page and "renderBooks(now, s.books)" in page
+
+
+# ── the monitor follows master by itself (2026-11-26) ───────────────────────
+
+def test_the_monitor_restarts_only_when_master_changed_its_files(monkeypatch):
+    import pc_monitor.__main__ as M
+    asked = []
+
+    def git(*args):
+        asked.append(args)
+        return "pc_monitor/static/index.html\n" if args[0] == "diff" else ""
+    assert M.changed_on_master(git) is False and asked == []          # not its own copy: never
+    monkeypatch.setattr(M, "ROOT", Path("C:/Users/x/betting-model/.claude/feeds/pc-monitor"))
+    assert M.changed_on_master(git) is True
+    assert asked[0][:2] == ("fetch", "-q") and asked[1][:4] == ("diff", "--name-only", "HEAD", "origin/master")
+    assert set(M.WATCH_PATHS) <= set(asked[1])
+    assert M.changed_on_master(lambda *a: "") is False
+    assert M.changed_on_master(lambda *a: None) is False               # git failed: never restart
+
+
+def test_a_change_on_master_stops_the_server_for_a_restart():
+    import pc_monitor.__main__ as M
+
+    class Srv:
+        stopped = False
+
+        def shutdown(self):
+            self.stopped = True
+    srv, flag, answers = Srv(), {"restart": False}, iter([False, True])
+    M.watch_master(srv, flag, every=0, check=lambda: next(answers), sleep=lambda s: None)
+    assert flag["restart"] is True and srv.stopped is True

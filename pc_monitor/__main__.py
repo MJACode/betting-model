@@ -25,6 +25,11 @@ from pathlib import Path
 
 PORT = int(os.environ.get("PC_MONITOR_PORT", "8790"))
 ROOT = Path(__file__).resolve().parent.parent
+# While it runs, the monitor checks origin/master this often, and restarts on
+# the new code when a merge changed one of WATCH_PATHS (mike, 2026-11-26:
+# "Figure it out", after a merge reached the monitor only at the next sign-in).
+MASTER_CHECK_SEC = 300.0
+WATCH_PATHS = ("pc_monitor/", "data/db.py")
 
 
 def _under_pythonw() -> bool:
@@ -125,6 +130,42 @@ def _update_checkout() -> bool:
     return True
 
 
+def changed_on_master(git) -> bool:
+    """True when origin/master changes one of WATCH_PATHS against this copy's
+    HEAD. `git(*args)` returns stdout or None. Any git failure is False: never
+    restart on a doubt. Only for a copy under .claude/feeds/."""
+    if "/.claude/feeds/" not in ROOT.as_posix().lower() + "/":
+        return False
+    git("fetch", "-q", "origin", "master")
+    out = git("diff", "--name-only", "HEAD", "origin/master", "--", *WATCH_PATHS)
+    return bool(out and out.strip())
+
+
+def _git(*args: str) -> str | None:
+    from pc_monitor.sources import hidden_run
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+    try:
+        r = hidden_run(["git", *args], timeout=60, cwd=str(ROOT), env=env)
+    except Exception:  # noqa: BLE001
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def watch_master(srv, flag: dict, every: float = MASTER_CHECK_SEC, check=None, sleep=time.sleep) -> None:
+    """Every `every` seconds: when master changed the monitor, stop the server
+    so main() restarts on the new code. Runs on its own daemon thread."""
+    check = check or (lambda: changed_on_master(_git))
+    while True:
+        sleep(every)
+        try:
+            if check():
+                flag["restart"] = True
+                srv.shutdown()
+                return
+        except Exception:  # noqa: BLE001 - a failed check is a skipped check
+            pass
+
+
 def main() -> int:
     _quiet_stdio()
     ap = argparse.ArgumentParser(description="This PC: the betting model's jobs on this computer")
@@ -171,10 +212,26 @@ def main() -> int:
     if not args.no_window:
         time.sleep(0.3)
         open_window(url)
+    flag = {"restart": False}
+    if not args.no_update:
+        import threading
+        threading.Thread(target=watch_master, args=(srv, flag), name="watch_master", daemon=True).start()
     try:
         srv.serve_forever()
     finally:
         collector.stop.set()
+    if flag["restart"]:
+        # The port is released before the new copy starts; the new one moves
+        # this copy to origin/master itself (_update_checkout) and serves.
+        srv.server_close()
+        import subprocess
+        from pc_monitor.sources import CREATE_NO_WINDOW
+        argv = [a for a in sys.argv[1:] if a != "--no-update"]
+        subprocess.Popen([sys.executable, "-m", "pc_monitor", "--no-window", *[a for a in argv if a != "--no-window"]],
+                         cwd=str(ROOT), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+        log("a merge changed the monitor - restarting on the new code")
+        return 0
     log("stopped")
     return 0
 
