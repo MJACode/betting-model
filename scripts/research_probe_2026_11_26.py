@@ -401,8 +401,72 @@ def probe_pages() -> None:
         time.sleep(0.5)
 
 
+# ── second pass (after the first run's output) ───────────────────────────────
+
+def _ktrades(ticker: str) -> tuple[str, list[dict]]:
+    tr = _kpages("/markets/trades", {"ticker": ticker, "limit": 1000}, "trades", pages=40)
+    if tr:
+        return "live", tr
+    return "historical", _kpages("/historical/trades", {"ticker": ticker, "limit": 1000},
+                                 "trades", pages=40)
+
+
+def probe_kalshi2() -> None:
+    """The game-winner and total series the first pass cut off, and one settled game's
+    trades before and after the historical cutoff (2026-09-27 on the first run)."""
+    for tk in ("KXNBAGAME", "KXNBATOTAL", "KXNBASPREAD"):
+        evs = _kpages("/events", {"series_ticker": tk, "status": "settled", "limit": 200}, "events")
+        dated = sorted(e for e in (_kdate(e.get("event_ticker")) for e in evs) if e)
+        months = Counter(d[:7] for d in dated)
+        say("kalshi2", tk, "settled events", len(evs), "first", dated[:1], "last", dated[-1:],
+            "by month", dict(sorted(months.items())))
+        if tk != "KXNBAGAME" or not evs:
+            continue
+        by_date = sorted(evs, key=lambda e: _kdate(e.get("event_ticker")) or "9")
+        jan = [e for e in by_date if (_kdate(e.get("event_ticker")) or "").startswith("2026-01")]
+        nov = [e for e in by_date if (_kdate(e.get("event_ticker")) or "").startswith("2026-11")]
+        for ev in (by_date[:1] + jan[:1] + nov[:1]):
+            et = ev.get("event_ticker")
+            mk = _kpages("/markets", {"event_ticker": et, "limit": 100}, "markets", pages=1)
+            hmk = _kpages("/historical/markets", {"event_ticker": et, "limit": 100}, "markets", pages=1)
+            tickers = [m.get("ticker") for m in (mk or hmk)]
+            say("kalshi2", et, "live markets", len(mk), "historical markets", len(hmk),
+                [(m.get("ticker"), m.get("volume"), m.get("result")) for m in (mk or hmk)][:4])
+            for t in tickers[:1]:
+                src, tr = _ktrades(t)
+                times = sorted(x.get("created_time") for x in tr if x.get("created_time"))
+                contracts = sum(int(float(x.get("count") or x.get("count_fp") or 0)) for x in tr)
+                say("kalshi2", t, src, "trades", len(tr), "contracts", contracts,
+                    "first", times[:1], "last", times[-1:],
+                    "taker sides", dict(Counter(x.get("taker_side") for x in tr)),
+                    "keys", sorted(tr[0].keys()) if tr else [], "sample", tr[:2])
+
+
+def probe_poly2() -> None:
+    r = get(f"{GAMMA}/tags/slug/nba", timeout=30)
+    tag = r.json() if isinstance(r, requests.Response) and r.status_code == 200 else {}
+    k = get(f"{GAMMA}/events/keyset", {"tag_id": tag.get("id"), "closed": "true", "limit": 500},
+            timeout=60)
+    if isinstance(k, requests.Response):
+        body = k.json() if k.headers.get("content-type", "").startswith("application/json") else k.text
+        keys = sorted(body.keys()) if isinstance(body, dict) else type(body).__name__
+        say("poly2", "keyset HTTP", k.status_code, "shape", keys, str(body)[:300])
+    cid = "0xcc1b36e6d242ae34fa16b5f1a3663c5c626a817c33eaf34b7a826cd324110a1f"   # Pelicans vs. Wizards, 2025-01
+    for params in ({"market": cid, "limit": 500}, {"conditionId": cid, "limit": 500},
+                   {"condition_id": cid, "limit": 500}):
+        t = get(f"{PDATA}/v2/trades", params, timeout=60)
+        say("poly2", "v2 trades", params, "HTTP", getattr(t, "status_code", repr(t)),
+            getattr(t, "text", "")[:900])
+        if isinstance(t, requests.Response) and t.status_code == 200:
+            break
+    d = get("https://docs.polymarket.com/api-reference/data-api/overview", timeout=30)
+    if isinstance(d, requests.Response):
+        say("poly2", "docs", d.status_code, page_text(d.text)[:1500])
+
+
 SECTIONS = {"props": probe_props, "kalshi": probe_kalshi, "poly": probe_poly,
-            "wayback": probe_wayback, "dk": probe_dk, "pages": probe_pages}
+            "wayback": probe_wayback, "dk": probe_dk, "pages": probe_pages,
+            "kalshi2": probe_kalshi2, "poly2": probe_poly2}
 
 
 def main(argv: list[str]) -> None:
