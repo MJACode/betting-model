@@ -16,13 +16,23 @@ WHAT IT TOUCHES, AND NOTHING ELSE
   no data is ever deleted). Access ends the moment the row expires, because
   app_grant_access_for / discord_grant_access_for read expires_at.
 
-Both are idempotent: a second run changes nothing and says so.
+* `delete_login` -- deletes one email login, ONLY when it has been replaced
+  (Matt, 2026-11-26: "Only delete it if he has a new account we set up").
+  Refused unless `replaced_by` names a different email whose login holds
+  app access now, the old login holds no access, and it owns no user data
+  (subscriptions, tracked bets, Discord link, notifications, push tokens,
+  founder row, Signal Base usage). Before the delete, the login, its
+  identities and its grants are copied into the job result, which the
+  worker keeps in worker_jobs.result: that copy is the archive. Account
+  decisions are Matt's (CLAUDE.md section 1b).
+
+All three are idempotent: a second run changes nothing and says so.
 """
 from __future__ import annotations
 
 import re
 
-ACTIONS = ("grant", "expire")
+ACTIONS = ("grant", "expire", "delete_login")
 EMAIL_RE = re.compile(r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$")
 
 FIND_USER_SQL = (
@@ -104,7 +114,16 @@ def validate(args: dict) -> dict:
     if len(note) < 10:
         raise ValueError("note must say who asked and when (10+ characters); "
                          "it is written to the grant row")
-    return {"action": action, "email": email, "note": note[:300]}
+    out = {"action": action, "email": email, "note": note[:300]}
+    if action == "delete_login":
+        replaced_by = str(args.get("replaced_by") or "").strip().lower()
+        if not EMAIL_RE.match(replaced_by):
+            raise ValueError("delete_login needs replaced_by: the email of the "
+                             "account that replaces this one")
+        if replaced_by == email:
+            raise ValueError("replaced_by must be a different email")
+        out["replaced_by"] = replaced_by
+    return out
 
 
 def _state(conn, uid: str) -> list[dict]:
@@ -113,13 +132,84 @@ def _state(conn, uid: str) -> list[dict]:
              "notes": r[3], "active": bool(r[4])} for r in rows]
 
 
-def apply(conn, action: str, email: str, note: str) -> dict:
+# A login that owns any of these rows is not deleted: the cascade would take
+# the member's own data with it. A table not present is skipped.
+OWNED_TABLES = (
+    "public.subscriptions", "public.tracked_bets", "public.discord_links",
+    "public.notification_inbox", "public.notification_sport_prefs",
+    "public.device_push_tokens", "public.app_founders",
+    "mcp_meter.connections", "mcp_meter.calls", "mcp_meter.terms_acceptances",
+)
+
+HAS_ACCESS_SQL = "SELECT public.app_grant_access_for(%s::uuid)"
+
+ARCHIVE_USER_SQL = (
+    "SELECT to_jsonb(u) - 'encrypted_password' FROM auth.users u WHERE id = %s::uuid"
+)
+ARCHIVE_IDENTITIES_SQL = (
+    "SELECT coalesce(jsonb_agg(to_jsonb(i)), '[]'::jsonb) "
+    "FROM auth.identities i WHERE user_id = %s::uuid"
+)
+ARCHIVE_GRANTS_SQL = (
+    "SELECT coalesce(jsonb_agg(to_jsonb(g)), '[]'::jsonb) "
+    "FROM public.access_grants g WHERE user_id = %s::uuid"
+)
+
+# The one delete in this module: one login, by id, after every check passed.
+DELETE_LOGIN_SQL = "DELETE FROM auth.users WHERE id = %s::uuid"
+
+
+def _owned_rows(conn, uid: str) -> dict:
+    found = {}
+    for table in OWNED_TABLES:
+        if conn.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0] is None:
+            continue
+        n = conn.execute(f"SELECT count(*) FROM {table} WHERE user_id = %s::uuid",
+                         (uid,)).fetchone()[0]
+        if n:
+            found[table] = n
+    return found
+
+
+def _delete_login(conn, email: str, replaced_by: str, out: dict) -> dict:
+    uid = out["user_id"]
+    if uid is None:
+        out["result"] = "no login for this email; nothing to delete"
+        return out
+    row = conn.execute(FIND_USER_SQL, (replaced_by,)).fetchone()
+    if row is None or not conn.execute(HAS_ACCESS_SQL, (row[0],)).fetchone()[0]:
+        raise ValueError(f"refused: {replaced_by} has no login with app access, "
+                         "so this login has not been replaced")
+    if conn.execute(HAS_ACCESS_SQL, (uid,)).fetchone()[0]:
+        raise ValueError(f"refused: {email} still has app access; expire it first")
+    owned = _owned_rows(conn, uid)
+    if owned:
+        raise ValueError(f"refused: {email} owns member data {owned}")
+    out["replaced_by"] = replaced_by
+    out["replaced_by_user_id"] = row[0]
+    out["archive"] = {
+        "user": conn.execute(ARCHIVE_USER_SQL, (uid,)).fetchone()[0],
+        "identities": conn.execute(ARCHIVE_IDENTITIES_SQL, (uid,)).fetchone()[0],
+        "access_grants": conn.execute(ARCHIVE_GRANTS_SQL, (uid,)).fetchone()[0],
+    }
+    cur = conn.execute(DELETE_LOGIN_SQL, (uid,))
+    if cur.rowcount != 1:
+        raise RuntimeError(f"delete touched {cur.rowcount} rows, expected 1")
+    out["result"] = "deleted"
+    return out
+
+
+def apply(conn, action: str, email: str, note: str,
+          replaced_by: str | None = None) -> dict:
     """Run one validated request inside the caller's transaction. The caller
     commits. Returns what changed and the email's grants afterwards."""
     row = conn.execute(FIND_USER_SQL, (email,)).fetchone()
     uid = row[0] if row else None
     out = {"action": action, "email": email, "user_id": uid,
            "login_created": False, "grants_changed": 0}
+
+    if action == "delete_login":
+        return _delete_login(conn, email, replaced_by, out)
 
     if action == "expire":
         if uid is None:
