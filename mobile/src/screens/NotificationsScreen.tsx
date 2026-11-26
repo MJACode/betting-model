@@ -352,7 +352,7 @@ export function NotificationsScreen() {
             <Ionicons
               name="trash-outline"
               size={18}
-              color={selected.size === 0 ? colors.textTertiary : colors.avoid}
+              color={selected.size === 0 ? colors.textTertiary : colors.avoidInk}
             />
             <Text style={[styles.deleteText, selected.size === 0 && styles.markTextOff]}>
               {selected.size === 0 ? 'Delete' : `Delete (${selected.size})`}
@@ -520,7 +520,7 @@ const styles = StyleSheet.create({
   deleteText: {
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
-    color: colors.avoid,
+    color: colors.avoidInk,
   },
   undoBar: {
     position: 'absolute',
