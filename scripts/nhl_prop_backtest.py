@@ -91,13 +91,21 @@ def load(cache: str | None, seasons: list[int] | None = None) -> dict:
         conn.close()
 
 
+def _utc(series: pd.Series) -> pd.Series:
+    """Timestamps as UTC. Snapshot strings carry fractional seconds; pandas 3
+    will not infer that mix unless the format is named."""
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return pd.to_datetime(series, utc=True)
+    return pd.to_datetime(series, utc=True, format="ISO8601")
+
+
 def prices(data: dict, spec: np_.Spec) -> pd.DataFrame:
     """Coherent pre-game quotes for one market, every book, with the season."""
     px = data["prices"][data["prices"].market == spec.market].copy()
     for c in ("line", "over", "under"):
         px[c] = pd.to_numeric(px[c], errors="coerce")
     px = px.merge(data["games"][["game_id", "season", "commence_time"]], on="game_id")
-    late = pd.to_datetime(px.snap, utc=True) > pd.to_datetime(px.commence_time, utc=True)
+    late = _utc(px.snap) > _utc(px.commence_time)
     two = px.over.notna() & px.under.notna()
     total = px.over.map(np_.implied, na_action="ignore") + px.under.map(np_.implied, na_action="ignore")
     bad = two & ~total.between(*COHERENT_SUM)
