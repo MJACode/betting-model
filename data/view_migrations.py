@@ -871,6 +871,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # authenticated revoked; touches no pick, odds, split or record table.
     # Returns on a catalog read once both exist and are locked.
     "dk_prop_splits_2026_11_26.sql",
+    # Every table of every DK Network prop-split article version, as printed,
+    # so a layout no parser reads yet is kept (mike, 2026-11-26: 31 of 35
+    # versions use one). Worker-only, RLS on, anon / authenticated revoked.
+    "dk_prop_split_tables_2026_11_26.sql",
     # MoneyPuck.com NHL files (shots, team / skater / goalie / line
     # game-by-game, player bios). Research rows, not a pick input.
     # Credit MoneyPuck.com. Creates the tables once; the 7:20am job fills

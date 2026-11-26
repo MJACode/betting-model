@@ -14,6 +14,9 @@ Two table layouts were measured (worker_jobs 1723195, the bodies of posts 481849
   ("Over (99.1%)"); the handle and bet leaders can be different sides.
 
 Any other table (the anytime-touchdown rank lists carry no percentages) is counted as skipped, never guessed at.
+Every table, parsed or not, is kept as printed in ``dk_prop_split_tables`` (header and body cells), so a layout no
+parser reads yet can be parsed later from the database: the first import (worker_jobs 1724494) parsed 4 of 35
+versions, and 31 from 2026-09-17 to 2026-11-16 use a layout that had not been seen.
 
 WRITES. ``dk_prop_split_articles`` (one row per article version read: post id and WordPress's modified time) and
 ``dk_prop_splits`` (one row per table row of that version), both worker-only. A version already in the ledger is
@@ -123,7 +126,14 @@ def parse_row(layout: str, cols: dict, cells: list[str]) -> dict | None:
 
 def parse_article(html: str) -> tuple[list[dict], int]:
     """(rows, tables skipped) for one article body. Each row carries table_no, row_no, section, layout. Pure."""
+    rows, skipped, _ = parse_article_tables(html)
+    return rows, skipped
+
+
+def parse_article_tables(html: str) -> tuple[list[dict], int, list[dict]]:
+    """(rows, tables skipped, every table as printed: {table_no, section, header, body, layout}). Pure."""
     out: list[dict] = []
+    tables: list[dict] = []
     skipped = 0
     section = None
     table_no = 0
@@ -133,6 +143,8 @@ def parse_article(html: str) -> tuple[list[dict], int]:
             continue
         table_no += 1
         header, rows = _table(m.group("t"))
+        printed = {"table_no": table_no, "section": section, "header": header, "body": rows, "layout": None}
+        tables.append(printed)
         handle = _col(header, "handle")
         bets = _col(header, "bet", exclude="handle")
         line = _col(header, "line")
@@ -155,7 +167,9 @@ def parse_article(html: str) -> tuple[list[dict], int]:
             out.append({"table_no": table_no, "row_no": row_no, "section": section, "layout": layout, **r})
         if not kept:
             skipped += 1
-    return out, skipped
+        else:
+            printed["layout"] = layout
+    return out, skipped, tables
 
 
 def updated_text(html: str) -> str | None:
@@ -232,12 +246,21 @@ def find_posts(get, pages: int) -> list[dict]:
     return out
 
 
+# A version read again because its tables were not kept yet keeps its first ledger row, except that a row
+# recording nothing stored takes the new counts (the counts describe what is in dk_prop_splits).
 ARTICLE_SQL = """
 INSERT INTO public.dk_prop_split_articles
     (post_id, post_modified, post_date, title, link, updated_text, game_id, rows_stored, tables_skipped, source)
 VALUES (%(post_id)s, %(post_modified)s, %(post_date)s, %(title)s, %(link)s, %(updated_text)s, %(game_id)s,
         %(rows_stored)s, %(tables_skipped)s, %(source)s)
-ON CONFLICT (post_id, post_modified) DO NOTHING
+ON CONFLICT (post_id, post_modified) DO UPDATE SET
+    rows_stored = EXCLUDED.rows_stored, tables_skipped = EXCLUDED.tables_skipped
+WHERE public.dk_prop_split_articles.rows_stored = 0 AND EXCLUDED.rows_stored > 0
+"""
+TABLE_SQL = """
+INSERT INTO public.dk_prop_split_tables (post_id, post_modified, table_no, section, header, body, layout, source)
+VALUES (%(post_id)s, %(post_modified)s, %(table_no)s, %(section)s, %(header)s, %(body)s, %(layout)s, %(source)s)
+ON CONFLICT (post_id, post_modified, table_no) DO NOTHING
 """
 ROW_SQL = """
 INSERT INTO public.dk_prop_splits
@@ -258,13 +281,19 @@ def run(conn=None, *, pages: int = 1, get: Callable | None = None) -> dict:
         from data.db import get_connection
         conn = get_connection()
     try:
-        if conn.execute("SELECT to_regclass('public.dk_prop_splits') IS NOT NULL").fetchone()[0] is not True:
-            logger.info("dk_prop_splits: table not created yet; nothing written")
+        if conn.execute("SELECT to_regclass('public.dk_prop_splits') IS NOT NULL "
+                        "AND to_regclass('public.dk_prop_split_tables') IS NOT NULL").fetchone()[0] is not True:
+            logger.info("dk_prop_splits: tables not created yet; nothing written")
             return {}
         posts = find_posts(get, pages)
-        seen = {(int(r[0]), _ts(r[1])) for r in conn.execute(
-            "SELECT post_id, post_modified FROM public.dk_prop_split_articles WHERE post_id = ANY(%(ids)s)",
-            {"ids": [p["id"] for p in posts]}).fetchall()} if posts else set()
+        ids = {"ids": [p["id"] for p in posts]}
+        # Done: a version whose tables are kept, or one the ledger shows had no table at all.
+        seen = ({(int(r[0]), _ts(r[1])) for r in conn.execute(
+                    "SELECT DISTINCT post_id, post_modified FROM public.dk_prop_split_tables "
+                    "WHERE post_id = ANY(%(ids)s)", ids).fetchall()}
+                | {(int(r[0]), _ts(r[1])) for r in conn.execute(
+                    "SELECT post_id, post_modified FROM public.dk_prop_split_articles WHERE post_id = ANY(%(ids)s) "
+                    "AND rows_stored = 0 AND tables_skipped = 0", ids).fetchall()}) if posts else set()
         cols = ("game_id", "game_date", "home_team", "away_team")
         out = {"posts": len(posts), "new_versions": 0, "rows": 0, "tables_skipped": 0, "with_game": 0}
         for p in posts:
@@ -279,7 +308,7 @@ def run(conn=None, *, pages: int = 1, get: Callable | None = None) -> dict:
                 continue
             modified = _ts(body.get("modified_gmt")) or p["modified"]
             html = (body.get("content") or {}).get("rendered") or ""
-            rows, skipped = parse_article(html)
+            rows, skipped, tables = parse_article_tables(html)
             game_id = None
             if p["date"] is not None:
                 d = p["date"].astimezone(_ET).date()
@@ -289,6 +318,9 @@ def run(conn=None, *, pages: int = 1, get: Callable | None = None) -> dict:
                     {"lo": d - timedelta(days=1), "hi": d + timedelta(days=3)}).fetchall()]
                 game_id = title_game(p["title"], p["date"], games)
             common = {"post_id": p["id"], "post_modified": modified, "game_id": game_id, "source": SOURCE}
+            if tables:
+                conn.executemany(TABLE_SQL, [{**common, **t, "header": json.dumps(t["header"]),
+                                              "body": json.dumps(t["body"])} for t in tables])
             if rows:
                 conn.executemany(ROW_SQL, [{**common, **r} for r in rows])
             conn.execute(ARTICLE_SQL, {**common, "post_date": p["date"], "title": p["title"], "link": p["link"],
