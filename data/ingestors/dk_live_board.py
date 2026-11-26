@@ -680,6 +680,60 @@ def feed_changed_on_master(root: Path = ROOT) -> bool:
         return False
 
 
+# The PC monitor (pc_monitor/) runs from its own worktree beside this feed's,
+# .claude/feeds/pc-monitor, under this scheduled task. It loads a merge only
+# when it starts (until its own master check is running), so this feed, which
+# restarts on every merge that changes it, restarts the monitor's task when
+# that copy is behind origin/master on the monitor's files (mike, 2026-11-26:
+# "Do it for me on my pc ... Figure it out"). Both worktrees share one repo,
+# so origin/master is the one the feed's launcher just fetched.
+PC_MONITOR_TASK = r"\BettingModel\PcMonitor"
+PC_MONITOR_PATHS = ("pc_monitor/", "data/db.py")
+
+
+def pc_monitor_behind(root: Path, git) -> bool:
+    """True when the monitor's worktree is behind origin/master on its files.
+    `git(cwd, *args)` returns stdout or None; a failure is False."""
+    copy = root.parent / "pc-monitor"
+    if not (copy / ".git").exists():
+        return False
+    out = git(copy, "diff", "--name-only", "HEAD", "origin/master", "--", *PC_MONITOR_PATHS)
+    return bool(out and out.strip())
+
+
+def restart_pc_monitor_if_behind(root: Path = ROOT, git=None, run=None) -> str:
+    """End and start the monitor's scheduled task when its copy is behind.
+    Windows only; every failure is reported, never raised."""
+    if os.name != "nt" and run is None:
+        return "not Windows: nothing to restart"
+    import subprocess
+    no_window = 0x08000000                          # CREATE_NO_WINDOW: no console flashes up
+
+    def _git(cwd, *args):
+        try:
+            r = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, timeout=60,
+                               stdin=subprocess.DEVNULL, creationflags=no_window,
+                               env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
+        except Exception:                           # noqa: BLE001
+            return None
+        return r.stdout if r.returncode == 0 else None
+
+    def _run(argv):
+        try:
+            return subprocess.run(argv, capture_output=True, text=True, timeout=60,
+                                  stdin=subprocess.DEVNULL, creationflags=no_window).returncode
+        except Exception:                           # noqa: BLE001
+            return None
+
+    git, run = git or _git, run or _run
+    if not pc_monitor_behind(root, git):
+        return "the PC monitor is on master's code"
+    end = run(["schtasks", "/End", "/TN", PC_MONITOR_TASK])
+    time.sleep(3.0 if run is _run else 0.0)         # its port is free before the new copy binds it
+    start = run(["schtasks", "/Run", "/TN", PC_MONITOR_TASK])
+    return f"the PC monitor was behind master: task ended ({end}) and started ({start})"
+
+
 def columns_ready(conn) -> bool:
     row = conn.execute("""SELECT COUNT(*) FROM information_schema.columns
                            WHERE table_schema = 'public' AND table_name = 'dk_live_reads'
@@ -926,6 +980,14 @@ def main(argv=None) -> int:
     log.info("reading %s; a live league every %.1f s, an idle one every %.0f s, at least %.1f s between requests",
              ", ".join(boards), a.poll, IDLE_POLL_SEC, MIN_GAP_SEC)
     plan = Pacer(list(boards), a.poll)
+    if not a.dry_run and os.name == "nt":
+        # On its own thread: git and Task Scheduler can take seconds, and no
+        # DraftKings read waits on them.
+        import threading
+
+        def _monitor():
+            log.info("%s", restart_pc_monitor_if_behind())
+        threading.Thread(target=_monitor, name="pc_monitor_restart", daemon=True).start()
     if not a.dry_run:
         # Every other book's own live page, on its own thread and connection
         # (data/ingestors/book_live_boards.py, mike 2026-11-25: "do it for all

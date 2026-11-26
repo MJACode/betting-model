@@ -13,6 +13,9 @@ Pinned here:
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -271,3 +274,49 @@ def test_the_puck_line_is_nhls_spread():
     [ev] = B.parse_board(body, "NHL")
     assert (ev.spread_home, ev.spread_home_price, ev.spread_away_price) == (-1.5, 160.0, -190.0)
     assert ev.period == 1
+
+
+# ─── the PC monitor follows master (2026-11-26, mike: "Figure it out") ────────
+
+def test_the_pc_monitor_is_behind_only_when_master_changed_its_files(tmp_path):
+    feed = tmp_path / "feeds" / "dk-live-board"
+    copy = tmp_path / "feeds" / "pc-monitor"
+    feed.mkdir(parents=True)
+    calls = []
+
+    def git(cwd, *args):
+        calls.append((cwd, args))
+        return "pc_monitor/app.py\n"
+    assert B.pc_monitor_behind(feed, git) is False and calls == []         # no copy: nothing to do
+    copy.mkdir()
+    (copy / ".git").write_text("gitdir: elsewhere", encoding="utf-8")       # a worktree's .git is a file
+    assert B.pc_monitor_behind(feed, git) is True
+    assert calls[-1][0] == copy and calls[-1][1][:4] == ("diff", "--name-only", "HEAD", "origin/master")
+    assert set(B.PC_MONITOR_PATHS) <= set(calls[-1][1])
+    assert B.pc_monitor_behind(feed, lambda cwd, *a: "") is False
+    assert B.pc_monitor_behind(feed, lambda cwd, *a: None) is False         # git failed: never restart
+
+
+def test_a_behind_monitor_is_ended_then_started_and_a_current_one_is_left_alone(tmp_path):
+    feed = tmp_path / "feeds" / "dk-live-board"
+    copy = tmp_path / "feeds" / "pc-monitor"
+    feed.mkdir(parents=True)
+    copy.mkdir()
+    (copy / ".git").write_text("gitdir: elsewhere", encoding="utf-8")
+    ran = []
+    out = B.restart_pc_monitor_if_behind(feed, git=lambda cwd, *a: "pc_monitor/app.py",
+                                         run=lambda argv: ran.append(argv) or 0)
+    assert ran == [["schtasks", "/End", "/TN", B.PC_MONITOR_TASK], ["schtasks", "/Run", "/TN", B.PC_MONITOR_TASK]]
+    assert "behind" in out
+    ran.clear()
+    B.restart_pc_monitor_if_behind(feed, git=lambda cwd, *a: "", run=lambda argv: ran.append(argv) or 0)
+    assert ran == []
+
+
+def test_the_feed_checks_the_monitor_on_windows_only_and_off_its_read_path():
+    src = Path(B.__file__).read_text(encoding="utf-8")
+    main = src[src.index("def main("):]
+    assert 'if not a.dry_run and os.name == "nt":' in main
+    assert "threading.Thread(target=_monitor" in main
+    assert main.index("restart_pc_monitor_if_behind") < main.index("while end is None")
+    assert B.restart_pc_monitor_if_behind() in ("not Windows: nothing to restart",) or os.name == "nt"
