@@ -70,3 +70,26 @@ def test_buckets_keep_only_trades_before_the_listed_start():
 def test_the_polymarket_slug_is_away_home_and_the_et_date():
     g = {"game_id": "NBA_2025-01-05_NOP_WAS", "home": "WAS", "away": "NOP"}
     assert f.poly_slug(g, "2025-01-05") == "nba-nop-was-2025-01-05"
+
+
+def test_the_next_page_cursor_is_read_from_the_body_or_a_header():
+    assert f.next_cursor({"data": [], "next_cursor": "abc"}, {}) == "abc"
+    assert f.next_cursor({"data": [], "nextCursor": "xyz"}, {}) == "xyz"
+    assert f.next_cursor({"data": []}, {"X-Next-Cursor": "h1"}) == "h1"
+    assert f.next_cursor({"data": [], "next_cursor": "LTE="}, {}) is None
+    assert f.next_cursor({"data": []}, {}) is None
+
+
+def test_a_full_page_with_no_cursor_is_refused_not_kept(monkeypatch):
+    import pytest
+
+    class R:
+        status_code = 200
+        headers = {}
+
+        def json(self):
+            return {"data": [{"side": "BUY"}] * 500}
+    monkeypatch.setattr(f, "_get", lambda pace, url, params: R())
+    monkeypatch.setattr(f, "_POLY_TAKER_PARAM", [{}])
+    with pytest.raises(RuntimeError):
+        f.poly_trades(None, "0xabc")

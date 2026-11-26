@@ -51,6 +51,10 @@ KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 GAMMA = "https://gamma-api.polymarket.com"
 PDATA = "https://data-api.polymarket.com"
 KALSHI_SERIES = "KXNBAGAME"
+# Rows under source 'polymarket' (2026-11-26 16:45 run) hold only each game's newest 500 trades:
+# the v2 trades API pages by cursor only and that run read no cursor. They are kept (no row is
+# deleted) and must NOT be read; the full import is under this label.
+POLY_SOURCE = "polymarket_all"
 BUCKET_MIN = 15
 FLOW_TABLE = "nba_exchange_flow"
 LEDGER = "nba_exchange_flow_fetches"
@@ -397,34 +401,46 @@ def poly_trades(pace: Pace, cid: str) -> list[dict]:
         else:
             _POLY_TAKER_PARAM.append({})
     extra = _POLY_TAKER_PARAM[0]
-    out, cursor, offset = [], None, 0
-    for _ in range(400):
+    out, cursor = [], None
+    for _ in range(1000):
         params = {"conditionId": cid, "limit": 500, **extra}
         if cursor:
-            params["next_cursor"] = cursor
-        elif offset:
-            params["offset"] = offset
-        r = _get(pace, f"{PDATA}/v2/trades", params)
-        if cursor and r is not None and r.status_code == 400:
-            params.pop("next_cursor")
             params["cursor"] = cursor
-            r = _get(pace, f"{PDATA}/v2/trades", params)
+        r = _get(pace, f"{PDATA}/v2/trades", params)
         if r is None or r.status_code != 200:
-            if r is not None and r.status_code == 400 and (cursor or offset):
-                logger.warning(f"polymarket trades {cid}: page refused ({r.text[:160]}); "
-                               f"{len(out)} trades kept")
-            break
+            raise RuntimeError(f"polymarket trades {cid}: HTTP {getattr(r, 'status_code', None)} "
+                               f"after {len(out)} trades: {getattr(r, 'text', '')[:200]}")
         body = r.json()
         data = body.get("data") if isinstance(body, dict) else body
         if not data:
             break
         out += data
-        cursor = body.get("next_cursor") if isinstance(body, dict) else None
+        cursor = next_cursor(body, r.headers)
         if not cursor:
-            if len(data) < 500:
-                break
-            offset += len(data)
+            if len(data) >= 500:
+                # a full page with no cursor cannot be told from a truncated read: refuse it
+                raise RuntimeError(f"polymarket trades {cid}: a full page and no cursor "
+                                   f"(body keys {sorted(body) if isinstance(body, dict) else 'list'})")
+            break
     return out
+
+
+def next_cursor(body, headers) -> str | None:
+    """The next page's cursor wherever the v2 API puts it: a body key or a header whose
+    name holds 'cursor' (2026-11-26: the API answers 400 to an offset and says pages are
+    cursor-only). The end marker some cursor APIs use ('LTE=') is no cursor."""
+    found = None
+    if isinstance(body, dict):
+        for k, v in body.items():
+            if "cursor" in k.lower() and isinstance(v, str) and v:
+                found = v
+                break
+    if found is None:
+        for k, v in (headers or {}).items():
+            if "cursor" in k.lower() and v:
+                found = v
+                break
+    return None if found in (None, "", "LTE=", "-1") else found
 
 
 def poly_one(pace: Pace, ev: dict, games_by_date: dict, nick: dict,
@@ -453,7 +469,7 @@ def poly_one(pace: Pace, ev: dict, games_by_date: dict, nick: dict,
             break
     if game is None:
         return {"unmatched": f"{slug}: no games row for {sorted(pair)} near {d}"}
-    if ("polymarket", game["game_id"]) in done:
+    if (POLY_SOURCE, game["game_id"]) in done:
         return {"already": game["game_id"]}
     tip = game["tip"]
     tr = poly_trades(pace, mk.get("conditionId"))
@@ -466,13 +482,13 @@ def poly_one(pace: Pace, ev: dict, games_by_date: dict, nick: dict,
         leg = poly_leg(t, team, (pair - {team}).pop())
         if leg:
             legs.append(leg)
-    rows = bucket_rows("polymarket", game["game_id"], tip, legs, (game["home"], game["away"]))
+    rows = bucket_rows(POLY_SOURCE, game["game_id"], tip, legs, (game["home"], game["away"]))
     pre = [l for l in legs if l[3] < tip]
     sides = defaultdict(float)
     for t in tr:
         sides[(t.get("side") or "?").upper()] += float(t.get("size") or 0)
     return {"game": game, "rows": rows,
-            "ledger": {"source": "polymarket", "game_id": game["game_id"],
+            "ledger": {"source": POLY_SOURCE, "game_id": game["game_id"],
                        "market_ids": mk.get("conditionId"), "tip": tip, "trades_read": len(tr),
                        "pre_tip_trades": len(pre),
                        "pre_tip_notional": round(sum(c * p for _, p, c, _ in pre), 2),
@@ -546,7 +562,7 @@ def run(source: str, apply: bool, limit: int | None, workers: int = 8) -> dict:
             jobs += [("kalshi", ev, kp) for ev in kalshi_games(kp)]
         if source in ("polymarket", "both"):
             pp = Pace(12.0)
-            todo = {d: [g for g in gs if ("polymarket", g["game_id"]) not in done]
+            todo = {d: [g for g in gs if (POLY_SOURCE, g["game_id"]) not in done]
                     for d, gs in by_date.items()}
             jobs += [("polymarket", ev, pp) for ev in poly_events_by_slug(pp, todo)]
         if limit:
@@ -573,7 +589,7 @@ def run(source: str, apply: bool, limit: int | None, workers: int = 8) -> dict:
                 if "already" in out:
                     stats[f"{src}_already"] += 1
                     continue
-                key = (src, out["game"]["game_id"])
+                key = (out["ledger"]["source"], out["game"]["game_id"])
                 if key in done:
                     stats[f"{src}_duplicate_event"] += 1
                     continue
