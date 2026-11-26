@@ -361,3 +361,51 @@ the bet), and 56.6% are still +EV at that later price.
 - **Not a ship decision.** This is a frozen rule applied at a time it was never tuned on, so it
   is out of sample for timing. Moving `nba_prop_market`'s decision time is a model update
   (`Updated-By`), and the model is paused.
+
+### D6. Historical money, tested: Kalshi order flow against Pinnacle (1,437 games)
+
+Imported 2026-11-26 15:53 to 16:33 UTC: **1,494 regular-season games** (2025-10-21 to 2026-11-25),
+7,896,928 trades before the listed start, about $727M of contracts bought before tip, 566,956
+fifteen-minute rows. 291 settled events did not match a `games` row: October preseason games,
+playoff games, one non-NBA opponent (`LIO`) and one event with no markets. Sanity: Kalshi's last
+pre-tip home price against Pinnacle's no-vig close, 146 games of 2026-27: correlation 0.9966,
+mean absolute gap 1.33 points.
+
+Test (read-only SQL, this session): Pinnacle's no-vig home price at its last snapshot 6 to 12
+hours before tip (`p6`) and its last snapshot in the 90 minutes before tip (`pc`). Early flow =
+contracts bought on the home team minus the away team, as a share of both, from Kalshi buckets
+that closed before Pinnacle's `p6` snapshot. One standard error of a correlation is shown.
+
+| Measure | 2025-26 (1,169 games) | 2026-27 (268) | Both (1,437) |
+|---|---|---|---|
+| Early flow vs Pinnacle's LATER move (`pc - p6`) | -0.073 | -0.078 | **-0.074** (SE 0.026) |
+| Kalshi price minus Pinnacle at `p6`, vs the later move | -0.041 | +0.059 | -0.021 |
+| Flow after `p6` vs the move in the same window | +0.124 | +0.236 | +0.145 |
+| All pre-tip flow vs result minus Pinnacle's close | +0.034 | +0.125 | +0.050 |
+| Price gap at `p6` vs result minus close | -0.012 | +0.074 | +0.004 |
+
+**A trap caught on the way:** taking Kalshi's price "6 hours out" without aligning it to Pinnacle's
+snapshot time gave a correlation of **+0.498** with Pinnacle's later move (2026-27, 188 games).
+Aligned so every Kalshi trade is strictly before Pinnacle's snapshot, it is **+0.049** on the same
+season. Pinnacle's "6 hour" snapshot was often older than Kalshi's last trade, so Kalshi was simply
+showing a move that had already happened.
+
+Fading lopsided early flow (back the side the early money did not take) at Pinnacle's `p6`
+no-vig price, both seasons:
+
+| Lopsided at least | Games | CLV to Pinnacle close | Result minus fair |
+|---|---|---|---|
+| 0.2 | 1,172 | +0.22 pts (SE 0.09) | -2.73 pts (SE 1.26) |
+| 0.3 | 1,035 | +0.26 (0.09) | -2.44 (1.34) |
+| 0.4 | 879 | +0.28 (0.10) | -2.84 (1.43) |
+| 0.5 | 715 | +0.33 (0.10) | -3.85 (1.55) |
+
+**Read:** real money with real timestamps is available, and on 1,437 NBA games it tells nothing the
+Pinnacle price lacks.
+- **Early flow** is followed by Pinnacle moving slightly the other way. That is worth about
+  0.3 points of closing value to fade, below any sportsbook margin.
+- **Results:** the outcomes lean the opposite way, about 2 standard errors. The two measures
+  disagree.
+- **Late flow** moves with the line, which it should.
+
+Neither cell is a bet.
