@@ -565,6 +565,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # with the line now. Returns before any DDL once byom_my_open_bets
     # carries byom_alerts_members_v1. Does not write picks.
     "byom_alerts_2026_11_25.sql",
+    # 2026-11-26 (Matt, "Game week only"): a BYOM bet locks only on a
+    # DraftKings line from the 7 days before kickoff, for the record and
+    # alerts. Patches byom_legs and byom_my_open_bets at anchors; adds
+    # byom_alerts.lock_rule (old rows kept, not shown). Returns before any
+    # DDL once both carry byom_week_of_lock_v1. Does not write picks.
+    "byom_week_of_lock_2026_11_26.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.

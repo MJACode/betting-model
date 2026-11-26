@@ -10,7 +10,7 @@ import { colors, font, opacity, spacing } from '@/lib/theme';
 const TOOLTIP = {
   title: 'Bets from your models',
   body:
-    'The first DraftKings line and price that fit your model’s rules, '
+    'The first DraftKings line and price in game week that fit your model’s rules, '
     + 'on games not graded yet. A later line move does not change the bet. '
     + 'If DraftKings has moved, the card also shows its line now. '
     + 'These are yours only and are not in the Record.',
@@ -29,7 +29,6 @@ export function ByomOpenBetsSection({
   title,
   bets,
   showModel = true,
-  showFit = true,
   inset = true,
   cap,
   emptyText,
@@ -41,7 +40,6 @@ export function ByomOpenBetsSection({
   title: string;
   bets: ByomOpenBet[];
   showModel?: boolean;
-  showFit?: boolean;
   /** True in an edge-to-edge list (Picks), false inside a padded screen. */
   inset?: boolean;
   cap?: number;
@@ -81,7 +79,6 @@ export function ByomOpenBetsSection({
             key={bet.alert_id}
             bet={bet}
             showModel={showModel}
-            showFit={showFit}
             onPress={onOpen ? () => onOpen(bet) : undefined}
           />
         ))}

@@ -11,26 +11,22 @@ import { cardDense, colors, font, opacity, spacing } from '@/lib/theme';
  * One open bet from the member's own model (Matt, 2026-11-25).
  *
  * The label is the stored bet word for word, with the DraftKings price it
- * first fit at. "Fit" is when that line first matched the rules; a later
- * move does not change the card (the bet is the first fit, CLAUDE.md §1c).
+ * first fit at, on a game-week line. A later move does not change the
+ * card (CLAUDE.md §1c). Matt, 2026-11-26: no "Fit your rules" date.
  * Not a pick: no track, betslip or Record entry.
  */
 export function ByomOpenBetCard({
   bet,
   showModel = true,
-  showFit = true,
   onPress,
 }: {
   bet: ByomOpenBet;
   /** False on the model's own page, where the name is the screen title. */
   showModel?: boolean;
-  /** False on the Picks board, to keep each card short (UX review). */
-  showFit?: boolean;
   onPress?: () => void;
 }) {
   const matchup = matchupLabel(bet);
   const kick = formatDayTimeET(bet.commence_time);
-  const fit = showFit && bet.locked_at ? formatDayTimeET(bet.locked_at) : '';
   // The builder grades at DraftKings only (docs/byom_nfl.md).
   const price = foundAtText('DK', formatAmerican(bet.price));
   // Matt, 2026-11-26: the line now on the card. The bet stays the line it
@@ -49,7 +45,6 @@ export function ByomOpenBetCard({
     `${bet.label}. ${foundAtText('DraftKings', formatAmerican(bet.price))}.`,
     moved ? `DraftKings now ${moved.label} at ${formatAmerican(moved.price)}${nowAt ? `, as of ${nowAt}` : ''}.` : '',
     meta ? `${meta}.` : '',
-    fit ? `Fit your rules ${fit}.` : '',
   ].filter(Boolean).join(' ');
 
   const body = (
@@ -64,7 +59,6 @@ export function ByomOpenBetCard({
       <Text style={styles.price}>{price}</Text>
       {nowText ? <Text style={styles.now}>{nowText}</Text> : null}
       {meta ? <Text style={styles.meta} numberOfLines={2}>{meta}</Text> : null}
-      {fit ? <Text style={styles.fit}>{`Fit your rules ${fit}`}</Text> : null}
     </>
   );
 
@@ -123,10 +117,5 @@ const styles = StyleSheet.create({
   meta: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
-  },
-  fit: {
-    marginTop: spacing.xs,
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
   },
 });
