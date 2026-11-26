@@ -397,12 +397,13 @@ def test_old_database_rows_are_never_judged_late():
                        "cmdline": FEED_CMD, "cpu_pct": 0.4, "mem_mb": 116.0}], "read_at": NOW}
     fresh = view({"db_feed": _feed_rows(NOW - 1), "processes": procs,
                   "db": {"data": {"connected": True}, "read_at": NOW - 1}}, NOW)
-    assert fresh["feed"]["sports"][0]["status"]["tone"] == "ok"
+    ncaaf = lambda v: next(s for s in v["feed"]["sports"] if s["sport"] == "NCAAF")  # noqa: E731
+    assert ncaaf(fresh)["status"]["tone"] == "ok"
     assert fresh["db"]["connected"] is True
     dropped = view({"db_feed": _feed_rows(NOW - 30), "processes": procs,
                     "db": {"data": {"connected": True}, "read_at": NOW - 30, "error": "OperationalError",
                            "failed_at": NOW - 5}}, NOW)
-    s = dropped["feed"]["sports"][0]
+    s = ncaaf(dropped)
     assert s["status"]["tone"] == "idle"
     assert s["status"]["text"] == "not read from the database for 30 s"
     assert dropped["db"]["connected"] is False
@@ -493,3 +494,88 @@ def test_every_child_process_starts_without_a_window():
                 assert not (f.value.id == "os" and f.attr in ("system", "popen")), \
                     f"{path.name}:{node.lineno} uses os.{f.attr}, which opens a console"
     assert found >= 3   # hidden_run, the window, the relaunch: the guard is looking at real calls
+
+
+# ── leagues DraftKings does not list, and every other book (2026-11-26) ─────
+
+def test_feed_leagues_books_and_their_kinds_match_the_feed_code():
+    from data.ingestors import book_live_boards as L
+    from data.ingestors import dk_live_board as B
+    assert R.FEED_LEAGUES == tuple(sorted(B.LEAGUES))
+    assert R.NOT_LISTED == B.NOT_LISTED
+    kinds = {b.key: ("home page" if b.discover else "parsed" if b.parse is not None else "captured")
+             for b in L.BOOKS}
+    assert R.BOOK_KINDS == kinds and list(R.BOOK_KINDS) == [b.key for b in L.BOOKS]
+    assert set(R.BOOK_NAMES) == {"draftkings", *kinds}
+    assert R.BOOK_POLL_SEC == L.POLL_SEC and R.BOOK_HOME_PAGE_SEC == L.DISCOVER_SEC
+
+
+def test_a_league_draftkings_does_not_list_says_so():
+    row = {"age_s": 12.0, "ok": True, "live_events": 0, "detail": R.NOT_LISTED + "; asked again every 10 min"}
+    st = R.sport_status(row, True)
+    assert st["tone"] == "idle" and "not listing this league" in st["text"]
+
+
+def _procs():
+    return {"data": [{"pid": 16256, "started_at": NOW - 8000, "role": "dk_feed", "label": "x",
+                      "cmdline": FEED_CMD, "cpu_pct": 0.4, "mem_mb": 116.0}], "read_at": NOW}
+
+
+def test_every_league_the_feed_reads_is_listed_with_or_without_a_row():
+    from pc_monitor.app import view
+    feed = {"data": [{"sport": "NBA", "age_s": 1.0, "ok": True, "live_events": 3, "matched": 3,
+                      "detail": "", "db_now": NOW}], "read_at": NOW, "error": None}
+    v = view({"db_feed": feed, "processes": _procs(), "db": {"data": {"connected": True}, "read_at": NOW}}, NOW)
+    assert [s["sport"] for s in v["feed"]["sports"]] == list(R.FEED_LEAGUES)
+    eu = next(s for s in v["feed"]["sports"] if s["sport"] == "EUROLEAGUE")
+    assert eu["status"]["text"] == "never read"
+    nba = next(s for s in v["feed"]["sports"] if s["sport"] == "NBA")
+    assert nba["status"]["tone"] == "ok"
+
+
+@pytest.mark.parametrize("row,kind,tone,words", [
+    ({"age_s": 5.0, "ok": True, "live_events": 5, "matched": 5}, "parsed", "ok", "fresh"),
+    ({"age_s": 5.0, "ok": True, "live_events": 5, "matched": 2}, "parsed", "warn", "3 of 5"),
+    ({"age_s": 5.0, "ok": True, "live_events": 0, "matched": 0}, "parsed", "idle", "no live game"),
+    ({"age_s": 400.0, "ok": True, "live_events": 5, "matched": 5}, "parsed", "idle", "not read lately"),
+    ({"age_s": 5.0, "ok": False, "status": 403, "detail": "refused"}, "captured", "bad", "refused"),
+    ({"age_s": 5.0, "ok": False, "status": 400, "detail": "HTTP 400"}, "captured", "bad", "HTTP 400"),
+    ({"age_s": 5.0, "ok": True, "status": 200, "live_events": 0}, "captured", "idle", "answer stored"),
+    ({"age_s": 5.0, "ok": True, "status": 200}, "home page", "idle", "home page stored"),
+    ({"age_s": None}, "parsed", "idle", "never read"),
+])
+def test_each_books_last_read_in_words(row, kind, tone, words):
+    st = R.book_status(row, kind)
+    assert st["tone"] == tone and words in st["text"]
+
+
+def test_live_lines_by_sportsbook_lists_draftkings_then_every_book_in_order():
+    from pc_monitor.app import view
+    feed = {"data": [{"sport": "NHL", "age_s": 1.0, "ok": True, "live_events": 6, "matched": 6,
+                      "detail": "", "db_now": NOW}], "read_at": NOW, "error": None}
+    books = {"data": [
+        {"book": "williamhill_us", "sport": "NBA", "age_s": 4.0, "ok": False, "status": 403,
+         "live_events": 0, "matched": 0, "written": 0, "detail": "refused"},
+        {"book": "fanduel", "sport": "NHL", "age_s": 4.0, "ok": True, "status": 200,
+         "live_events": 5, "matched": 5, "written": 15, "detail": ""},
+        {"book": "hardrockbet", "sport": "*", "age_s": 4.0, "ok": True, "status": 200,
+         "live_events": 0, "matched": 0, "written": 0, "detail": ""},
+    ], "read_at": NOW, "error": None}
+    v = view({"db_feed": feed, "db_books": books, "processes": _procs(),
+              "db": {"data": {"connected": True}, "read_at": NOW}}, NOW)
+    rows = v["books"]["rows"]
+    assert [(r["book"], r["sport"]) for r in rows] == [
+        ("draftkings", "NHL"), ("fanduel", "NHL"), ("williamhill_us", "NBA"), ("hardrockbet", "home page")]
+    assert [r["status"]["tone"] for r in rows] == ["ok", "ok", "bad", "idle"]
+    assert rows[1]["written"] == 15 and rows[1]["name"] == "FanDuel" and rows[2]["name"] == "Caesars"
+    json.dumps(v)
+    # The database gone: the last rows stay, judged unknown rather than late.
+    old = view({"db_feed": feed, "db_books": {**books, "read_at": NOW - 60}, "processes": _procs(),
+                "db": {"data": {"connected": True}, "read_at": NOW}}, NOW)
+    fd = next(r for r in old["books"]["rows"] if r["book"] == "fanduel")
+    assert fd["status"]["tone"] == "idle" and "not read from the database" in fd["status"]["text"]
+
+
+def test_the_page_draws_the_sportsbook_section():
+    page = (ROOT / "pc_monitor" / "static" / "index.html").read_text(encoding="utf-8")
+    assert 'id="books"' in page and "renderBooks(now, s.books)" in page
