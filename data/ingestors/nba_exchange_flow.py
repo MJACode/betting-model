@@ -342,6 +342,34 @@ def poly_events(pace: Pace) -> list[dict]:
     return games
 
 
+def poly_slug(game: dict, game_date: str) -> str:
+    """Polymarket's game slug: away, home, ET date, our codes in lower case
+    ('nba-nop-was-2025-01-05' is NBA_2025-01-05_NOP_WAS, read 2026-11-26)."""
+    return f"nba-{game['away'].lower()}-{game['home'].lower()}-{game_date}"
+
+
+def poly_events_by_slug(pace: Pace, games_by_date: dict, first_date: str = "2024-10-01") -> list[dict]:
+    """One event per game in `games`, fetched by its slug. The keyset list stopped after
+    one page of 100 on its first run (2026-11-26), so the games table drives the read
+    instead. A slug Polymarket does not have is counted, and the first ones logged."""
+    out, missing = [], []
+    for d in sorted(games_by_date):
+        if d < first_date:
+            continue
+        for g in games_by_date[d]:
+            slug = poly_slug(g, d)
+            r = _get(pace, f"{GAMMA}/events/slug/{slug}", {})
+            if r is not None and r.status_code == 200:
+                ev = r.json()
+                if isinstance(ev, dict) and ev.get("slug"):
+                    out.append(ev)
+                    continue
+            missing.append(slug)
+    logger.info(f"polymarket by slug: {len(out)} events found, {len(missing)} slugs missing; "
+                f"first missing {missing[:15]}")
+    return out
+
+
 def _moneyline_market(ev: dict) -> dict | None:
     mk = ev.get("markets") or []
     for m in mk:
@@ -518,7 +546,9 @@ def run(source: str, apply: bool, limit: int | None, workers: int = 8) -> dict:
             jobs += [("kalshi", ev, kp) for ev in kalshi_games(kp)]
         if source in ("polymarket", "both"):
             pp = Pace(12.0)
-            jobs += [("polymarket", ev, pp) for ev in poly_events(pp)]
+            todo = {d: [g for g in gs if ("polymarket", g["game_id"]) not in done]
+                    for d, gs in by_date.items()}
+            jobs += [("polymarket", ev, pp) for ev in poly_events_by_slug(pp, todo)]
         if limit:
             jobs = jobs[:limit]
         logger.info(f"exchange flow: {len(jobs)} events to read, {len(done)} games already ledgered")

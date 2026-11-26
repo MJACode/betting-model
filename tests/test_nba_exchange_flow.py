@@ -65,3 +65,8 @@ def test_buckets_keep_only_trades_before_the_listed_start():
     assert by[("LAC", 30)]["vwap"] == 0.62
     # the 02:30 bucket's last trade bought UTA at 0.40, so LAC's implied price is 0.60
     assert by[("UTA", 30)]["last_price"] == 0.40 and by[("LAC", 30)]["last_price"] == 0.60
+
+
+def test_the_polymarket_slug_is_away_home_and_the_et_date():
+    g = {"game_id": "NBA_2025-01-05_NOP_WAS", "home": "WAS", "away": "NOP"}
+    assert f.poly_slug(g, "2025-01-05") == "nba-nop-was-2025-01-05"

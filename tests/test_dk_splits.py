@@ -162,3 +162,40 @@ def test_never_written_to_public_betting_and_wired_into_refresh_and_migrations()
            ).read_text(encoding="utf-8")
     assert sql.index("RETURN;") < sql.index("ALTER TABLE")
     assert "REVOKE ALL ON public.scoreboard_splits_history FROM anon, authenticated" in sql
+
+
+def test_nba_nhl_and_ncaaf_are_fetched_without_a_link_on_the_page():
+    """The splits page links only NFL (measured 2026-11-26), so a run whose landing page
+    names no other sport must still ask for NBA's event group when an NBA game is ahead."""
+    from datetime import datetime, timezone
+
+    asked = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            class C:
+                def __init__(s, rows):
+                    s.rows = rows
+
+                def fetchone(s):
+                    return (1,)
+
+                def fetchall(s):
+                    return s.rows
+            if "FROM public.games" in sql:
+                return C([("NBA_2026-11-27_MIA_NYK", "NBA", "2026-11-27", "NYK", "MIA",
+                           "2026-11-28T00:30:00+00:00")])
+            return C([])
+
+        def executemany(self, *a):
+            pass
+
+        def commit(self):
+            pass
+
+    def get(params):
+        asked.append(params)
+        return '<a href="?tb_eg=88808&amp;tb_edate=n7days">NFL</a>' if params is None else ""
+
+    dk.run(Conn(), now=datetime(2026, 11, 26, 16, 0, tzinfo=timezone.utc), get=get)
+    assert any(p and p.get("tb_eg") == "42648" for p in asked)

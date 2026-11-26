@@ -54,7 +54,12 @@ REQUEST_TIMEOUT = 25
 MAX_PAGES = 8
 # Measured 2026-11-03 (worker_jobs 936774): NFL is the page's default and its
 # links carry tb_eg=88808. Every other id comes from discover_event_groups.
-KNOWN_EVENT_GROUPS: dict[str, str] = {"NFL": "88808"}
+# NBA, NHL and NCAAF measured 2026-11-26 (scripts/research_probe_2026_11_26.py dk2): the page
+# asked for each id directly parsed 5 NBA, 7 NHL and 10 NCAAF games with Handle % and Bets %,
+# teams of the right league. The page's own links carry only the NFL id, so discovery alone
+# never found them. NBA / NCAAF are DraftKings' ids in dk_live_board.LEAGUES.
+KNOWN_EVENT_GROUPS: dict[str, str] = {"NFL": "88808", "NBA": "42648", "NHL": "42133",
+                                      "NCAAF": "87637"}
 SPORTS: tuple[str, ...] = ("NFL", "NCAAF", "NBA", "NHL", "MLB")
 # The sport names as the page's sport list prints them (the probe's text:
 # "Sports NFL NBA NHL MLB WNBA UFC UFL NCAA Football NCAA Basketball ...").
