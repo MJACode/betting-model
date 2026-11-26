@@ -1524,6 +1524,14 @@ def _validate_no_args(args: dict) -> dict:
     return {}
 
 
+def _job_book_throttle_test_alert(**kw):
+    """Post the book-throttling alert's red and green messages to ops, titled
+    TEST (tracking/book_throttle_watch.post_test_alerts). mike, 2026-11-26:
+    "Send a test alert to ops so I can see it". Writes no table."""
+    from tracking.book_throttle_watch import post_test_alerts
+    return post_test_alerts()
+
+
 def _job_record_sheet_check(**kw):
     """Run the record-vs-sheet check once, on demand (it also runs hourly).
     Report only; returns the counts and the findings."""
@@ -3037,6 +3045,7 @@ JOBS = {
     # X-only job; the argument is the same one field.
     "publish_results": (_job_publish_results, _validate_publish_x_results),
     "record_sheet_check": (_job_record_sheet_check, _validate_no_args),
+    "book_throttle_test_alert": (_job_book_throttle_test_alert, _validate_no_args),
     "publish_discord_signals": (_job_publish_discord_signals,
                                 _validate_publish_discord_signals),
     # One-off void notice. dry_run defaults true. Does not edit or delete

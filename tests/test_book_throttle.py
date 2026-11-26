@@ -399,3 +399,26 @@ def test_the_watch_is_scheduled_on_the_pipeline_service():
     assert "book_throttle_watch" in scheduler._PIPELINE_JOBS
     src = open(scheduler.__file__, encoding="utf-8").read()
     assert 'id="book_throttle_watch"' in src and "run_book_throttle_watch," in src
+
+
+def test_the_test_alert_is_the_real_red_and_green_message_titled_test(posts):
+    sent, post = posts
+    r = W.post_test_alerts(post=post)
+    assert r == {"red_posted": True, "green_posted": True}
+    red, green = (p["embeds"][0] for _u, p in sent)
+    assert all(u == "https://ops.example/webhook" for u, _p in sent)
+    assert red["color"] == 0xE74C3C and red["title"].endswith("TEST: FanDuel is rate limiting our live reads")
+    assert green["color"] == 0x2ECC71 and "TEST: FanDuel is answering" in green["title"]
+    assert "HTTP 429" in red["description"] and "Test message" in red["description"]
+
+
+def test_the_test_alert_is_an_allowlisted_job_and_declared_once():
+    import json
+    from tracking import job_queue as q
+    fn, validate = q.JOBS["book_throttle_test_alert"]
+    assert validate({}) == {}
+    with pytest.raises(ValueError):
+        validate({"x": 1})
+    declared = json.load(open("jobs/declared_jobs.json", encoding="utf-8"))
+    assert [d["key"] for d in declared if d["job_type"] == "book_throttle_test_alert"] == \
+        ["book-throttle-test-alert-2026-11-26"]
