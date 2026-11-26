@@ -538,7 +538,7 @@ TABLES: dict[str, dict] = {
             ('xRebounds', 'x_rebounds', 'DOUBLE PRECISION', 'float'),
             ('rebounds', 'rebounds', 'DOUBLE PRECISION', 'float'),
             ('xFreeze', 'x_freeze', 'DOUBLE PRECISION', 'float'),
-            ('freeze', 'freeze', 'DOUBLE PRECISION', 'float'),
+            ('freeze', 'freeze_actual', 'DOUBLE PRECISION', 'float'),
             ('xOnGoal', 'x_on_goal', 'DOUBLE PRECISION', 'float'),
             ('ongoal', 'ongoal', 'DOUBLE PRECISION', 'float'),
             ('xPlayStopped', 'x_play_stopped', 'DOUBLE PRECISION', 'float'),
