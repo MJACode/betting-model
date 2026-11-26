@@ -146,7 +146,7 @@ MASTER_CHECK_SEC = 300.0
 NEW_MASTER_EXIT = 3
 FEED_FILES = ("data/ingestors/dk_live_board.py", "data/ingestors/ncaab_teams.py", "data/ingestors/ncaabw_teams.py",
               "data/ingestors/euroleague_teams.py", "data/ingestors/live_price_log.py",
-              "data/ingestors/book_live_boards.py",
+              "data/ingestors/book_live_boards.py", "data/ingestors/book_throttle.py",
               "data/db.py", "scripts/dk_live_board_run.ps1")
 IDLE_POLL_SEC = float(os.environ.get("DK_LIVE_IDLE_POLL_SEC", "30"))
 RESOLVE_RETRY_SEC = 60.0
@@ -489,17 +489,21 @@ class Board:
             # 2026-11-26: "I don't see euro league in there"). No reader of
             # dk_live_feed decides on these two leagues.
             self._not_listed_beat()
-            return {"ok": True, "live": 0, "matched": 0, "written": 0, "detail": NOT_LISTED}
+            return {"ok": True, "live": 0, "matched": 0, "written": 0, "detail": NOT_LISTED, "asked": False}
         try:
             r = self.sess.get(BOARD_URL.format(league=league), timeout=10)
         except Exception as exc:          # noqa: BLE001
-            return self._beat(False, 0, 0, f"{type(exc).__name__}: {exc}"[:300])
+            res = self._beat(False, 0, 0, f"{type(exc).__name__}: {exc}"[:300])
+            res["status"] = None          # no answer at all (book_throttle: possible throttling)
+            return res
         at = self.clock()
         if r.status_code != 200:
             self.refusals += 1
             if self.refusals >= REFUSALS_BEFORE_BACKOFF:
                 self.sess = None          # a fresh session after the back-off
-            return self._beat(False, 0, 0, f"HTTP {r.status_code}", at)
+            res = self._beat(False, 0, 0, f"HTTP {r.status_code}", at)
+            res["status"] = int(r.status_code)
+            return res
         self.refusals = 0
         try:
             evs = parse_board(r.json(), self.sport)
@@ -545,7 +549,7 @@ class Board:
         except Exception as exc:          # noqa: BLE001
             log.error("%s: write failed: %s", self.sport, exc)
             self._recycle()
-            return {"ok": False, "live": len(evs), "matched": matched, "written": 0}
+            return {"ok": False, "live": len(evs), "matched": matched, "written": 0, "status": 200}
         for row in rows:
             self.last[row["game_id"]] = row
         # After the reads commit, in its own transaction: the odds log can
@@ -559,7 +563,8 @@ class Board:
                 logged = int(self.odds_log(conn, odds) or 0)
             except Exception as exc:      # noqa: BLE001
                 log.warning("%s: odds log failed (non-fatal): %s", self.sport, exc)
-        return {"ok": True, "live": len(evs), "matched": matched, "written": len(rows), "odds": logged}
+        return {"ok": True, "live": len(evs), "matched": matched, "written": len(rows), "odds": logged,
+                "status": 200}
 
     def _not_listed_beat(self) -> None:
         if self.dry_run or time.monotonic() - self.not_listed_at < 60.0:
@@ -1084,6 +1089,12 @@ def main(argv=None) -> int:
     log.info("reading %s; a live league every %.1f s, an idle one every %.0f s, at least %.1f s between requests",
              ", ".join(boards), a.poll, IDLE_POLL_SEC, MIN_GAP_SEC)
     plan = Pacer(list(boards), a.poll)
+    # DraftKings refusing or rate limiting this machine: one row per episode in
+    # book_throttle_events, which the worker posts to ops (book_throttle.py).
+    throttle = None
+    if not a.dry_run:
+        from data.ingestors.book_throttle import ThrottleTracker
+        throttle = ThrottleTracker(REFUSALS_BEFORE_BACKOFF)
     if not a.dry_run and os.name == "nt":
         # On its own thread: git and Task Scheduler can take seconds, and no
         # DraftKings read waits on them.
@@ -1114,9 +1125,12 @@ def main(argv=None) -> int:
         sp, wait = plan.next()
         if wait > 0:
             time.sleep(wait)
+        poll_s = plan.gap[sp] if plan.live.get(sp) else IDLE_POLL_SEC
         res = boards[sp].read()
         n += 1
-        plan.done(sp, res, boards[sp])
+        backed_off = plan.done(sp, res, boards[sp])
+        if throttle is not None:
+            note_throttle(throttle, sp, res, poll_s, backed_off, boards[sp].c)
         if n % 100 == 1:
             log.info("read %d (%s): %s", n, sp, res)
         if plan.any_live():
@@ -1127,6 +1141,26 @@ def main(argv=None) -> int:
             log.info("no live event in %s for %.0f minutes - exiting", ", ".join(boards), a.idle_exit)
             return 0
     return 0
+
+
+def note_throttle(throttle, sp: str, res: dict, poll_s: float, backed_off: bool, connect) -> None:
+    """Hand one DraftKings read to the throttle tracker and write any new row.
+    Never raises: nothing here may stop the next read."""
+    try:
+        from data.ingestors.book_throttle import reason_for
+        if res.get("asked", True):
+            status = res.get("status")
+            answered = "status" not in res or status is not None
+            # Clean is DraftKings answering 200, whether or not our write then worked.
+            throttle.observe("draftkings", sp, clean=status == 200,
+                             reason=reason_for(status, False, answered), status=status,
+                             poll_s=poll_s, detail=str(res.get("detail") or ""))
+        if backed_off:
+            throttle.backoff("draftkings", sp, BACKOFF_SEC, poll_s=poll_s)
+        if throttle.pending:
+            throttle.flush(connect())
+    except Exception as exc:              # noqa: BLE001
+        log.error("throttle events: %s", exc)
 
 
 class Pacer:
@@ -1152,7 +1186,8 @@ class Pacer:
             at = max(at, self.last_request + MIN_GAP_SEC)
         return sp, max(0.0, at - now)
 
-    def done(self, sp: str, res: dict, board=None) -> None:
+    def done(self, sp: str, res: dict, board=None) -> bool:
+        """Schedule the league's next read. True when this read benched it."""
         now = self.clock()
         self.last_request = now
         self.live[sp] = bool(res.get("live"))
@@ -1169,8 +1204,9 @@ class Pacer:
             log.error("%s: %d refusals in a row - backing off %.0f s", sp, board.refusals, BACKOFF_SEC)
             board.refusals = 0
             self.due[sp] = now + BACKOFF_SEC
-            return
+            return True
         self.due[sp] = now + (self.gap[sp] if self.live[sp] else IDLE_POLL_SEC)
+        return False
 
     def any_live(self) -> bool:
         return any(self.live.values())

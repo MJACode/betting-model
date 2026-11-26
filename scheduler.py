@@ -1022,6 +1022,20 @@ def run_threshold_review() -> None:
         log.exception("ERROR threshold-review crashed")
 
 
+def run_book_throttle_watch() -> None:
+    """A red ops alert when a sportsbook rate limits or refuses the live reads
+    on mike's machine, and a green one when it answers again
+    (tracking/book_throttle_watch.py). In-process: its output is a post."""
+    try:
+        from tracking.book_throttle_watch import run_book_throttle_watch as _run
+        res = _run()
+        if res.get("alerted") or res.get("cleared"):
+            log.info("BookThrottleWatch: %s alerted, %s cleared",
+                     len(res["alerted"]), len(res["cleared"]))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR book-throttle-watch crashed")
+
+
 def run_heartbeat_watchdog() -> None:
     # Called IN-PROCESS rather than through _run's subprocess, deliberately.
     # _run reports failure by logging it, and a log line is exactly the channel
@@ -1121,6 +1135,8 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "failure_alerter",
+                  # Ops alerts for a book throttling the PC's live reads.
+                  "book_throttle_watch",
                   # Copies Sentry into sentry_events. Runs on pipeline already
                   # (it is not a poller job); named here so the set says so.
                   "sentry_events_sync",
@@ -3292,6 +3308,21 @@ def build_scheduler() -> BlockingScheduler:
         id="failure_alerter",
         name="Failure alerter -> ops Discord (every 10 min, 24x7)",
         max_instances=1, coalesce=True, misfire_grace_time=300,
+    )
+
+    # Book throttling -> ops Discord, every 2 minutes, 24x7 (mike,
+    # 2026-11-26: "a red alert that goes to the ops channel if you detect that
+    # the book is rate limiting or throttling our connection"). Two minutes,
+    # not the alerter's ten: the readers poll at 1 s, and a book that has
+    # started refusing is worth knowing about inside the same game. The tick
+    # is one indexed read of book_throttle_events, which is empty on a
+    # healthy night.
+    sched.add_job(
+        run_book_throttle_watch,
+        CronTrigger(minute="*/2", timezone=TIMEZONE),
+        id="book_throttle_watch",
+        name="Book throttling -> ops Discord (every 2 min, 24x7)",
+        max_instances=1, coalesce=True, misfire_grace_time=60,
     )
 
     # Worker job queue — every 5 minutes.
