@@ -160,17 +160,22 @@ BACKOFF_SEC = 120.0
 # logs the label once, so a new name costs a decision, never a wrong one.
 _HALF_PERIODS = {"1st Half": 1, "2nd Half": 2, "Halftime": 1}
 _QUARTER_PERIODS = {"1st Quarter": 1, "2nd Quarter": 2, "3rd Quarter": 3, "4th Quarter": 4, "Halftime": 2}
+# NHL: "1st Period" seen live 2026-11-26 00:1x UTC (54 reads); the second and
+# third follow its pattern and are not yet seen. An intermission label is not
+# known, so it stays no period (logged once).
+_HOCKEY_PERIODS = {"1st Period": 1, "2nd Period": 2, "3rd Period": 3}
+HOCKEY = {"NHL"}
 _unknown_labels: set = set()
 
 
 def period_of(label: str | None, sport: str = "NCAAB") -> int | None:
     if not label:
         return None
-    table = _HALF_PERIODS if sport in HALVES else _QUARTER_PERIODS
+    table = _HALF_PERIODS if sport in HALVES else _HOCKEY_PERIODS if sport in HOCKEY else _QUARTER_PERIODS
     if label in table:
         return table[label]
     if "OT" in label.upper() or "OVERTIME" in label.upper():
-        return 3 if sport in HALVES else 5      # overtime: in no phase of any rule
+        return 3 if sport in HALVES else 4 if sport in HOCKEY else 5   # overtime: in no phase of any rule
     if (sport, label) not in _unknown_labels:
         _unknown_labels.add((sport, label))
         log.warning("%s: DraftKings period %r is not a known period - its games are skipped", sport, label)
@@ -233,7 +238,10 @@ def _int(x):
         return None
 
 
-_MAIN = {"Spread": "Spread", "Point Spread": "Spread", "Total": "Total", "Total Points": "Total",
+# "Puck Line": NHL's main spread. 0 of the first 54 NHL reads (2026-11-26)
+# carried a spread under the names above; this name is the board's usual one
+# and is not yet seen in an answer, so a miss leaves NHL without a spread, as now.
+_MAIN = {"Spread": "Spread", "Puck Line": "Spread", "Point Spread": "Spread", "Total": "Total", "Total Points": "Total",
          "Moneyline": "Moneyline"}
 
 

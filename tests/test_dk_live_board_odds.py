@@ -251,3 +251,23 @@ def test_nba_and_nfl_names_still_resolve_by_nickname():
 
 def test_every_league_has_a_resolver():
     assert set(B.RESOLVERS) == set(B.LEAGUES)
+
+
+# ─── NHL: its period names and its main spread (2026-11-26) ───────────────────
+
+def test_nhl_periods_are_periods_and_overtime_the_fourth():
+    assert [B.period_of(p, "NHL") for p in ("1st Period", "2nd Period", "3rd Period", "OT")] == [1, 2, 3, 4]
+    assert B.period_of("1st Quarter", "NHL") is None
+    assert B.period_of("1st Period", "NBA") is None
+
+
+def test_the_puck_line_is_nhls_spread():
+    body = board(home="BOS Bruins", away="TOR Maple Leafs", home_nick="Bruins", away_nick="Maple Leafs",
+                 spread_home=-1.5, home_price="+160", away_price="−190", total=6.5, league="42133")
+    for m in body["markets"]:
+        if m["name"] == "Spread":
+            m["name"] = "Puck Line"
+    body["events"][0]["liveGameState"]["period"] = "1st Period"
+    [ev] = B.parse_board(body, "NHL")
+    assert (ev.spread_home, ev.spread_home_price, ev.spread_away_price) == (-1.5, 160.0, -190.0)
+    assert ev.period == 1
