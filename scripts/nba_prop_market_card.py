@@ -257,16 +257,19 @@ def pick_label(bet: mk.NbaPropBet) -> str:
     return f"{bet.player} Under {bet.line:g} {mk.MARKET_LABEL[bet.market]}"
 
 
-def pick_rows(bets: list[mk.NbaPropBet], bankroll: float) -> list[dict]:
-    """Card bets -> picks rows. Pure given its inputs, so it is testable."""
+def pick_rows(bets: list[mk.NbaPropBet], bankroll: float,
+              model_id: str = MODEL_ID) -> list[dict]:
+    """Card bets -> picks rows. Pure given its inputs, so it is testable. `model_id` is this
+    model's unless the 10-hour paper card (scripts/nba_prop_market_early_card.py) passes its own,
+    which also gives its rows its own pause marker."""
     from models.scorer import _pause_note
     rows = []
     for b in bets:
         label = pick_label(b)
-        problems = pick_problems(label, mk.SIDE, b.line, MODEL_ID,
+        problems = pick_problems(label, mk.SIDE, b.line, model_id,
                                  prop_market=b.market)
         if problems:
-            logger.error(f"{MODEL_ID}: refusing {b.game_id} {label!r}: {'; '.join(problems)}")
+            logger.error(f"{model_id}: refusing {b.game_id} {label!r}: {'; '.join(problems)}")
             continue
         price = float(b.price)
         dec_implied = implied(price)
@@ -275,7 +278,7 @@ def pick_rows(bets: list[mk.NbaPropBet], bankroll: float) -> list[dict]:
         dk_implied = implied(dk) if dk is not None else None
         at_dk = b.book == mk.REFERENCE_BOOK
         rows.append({
-            "game_id": b.game_id, "model_id": MODEL_ID, "sport": SPORT,
+            "game_id": b.game_id, "model_id": model_id, "sport": SPORT,
             "game_date": b.game_date, "game_time": b.tip,
             "pick_side": mk.SIDE, "pick_label": label,
             # Pinnacle's proportional no-vig under, same line, same fetch. It IS
@@ -305,7 +308,7 @@ def pick_rows(bets: list[mk.NbaPropBet], bankroll: float) -> list[dict]:
             "best_bet_link": None if at_dk else b.link,
             # config.PAUSED_NOTE while the model is paused (models.scorer._pause_note): the row's own
             # marker, which every publisher and record query keys on (as scripts/nba_total_luck_card).
-            "downgrade_reason": _pause_note(MODEL_ID),
+            "downgrade_reason": _pause_note(model_id),
             "_ev": round(b.ev, 4), "_tip": b.tip,
         })
     return rows

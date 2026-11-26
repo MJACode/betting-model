@@ -180,6 +180,32 @@ CREATE TABLE IF NOT EXISTS {POSTSEASON_PROP_TABLE} (
 """
 POSTSEASON_PROP_INDEX = (f"CREATE INDEX IF NOT EXISTS idx_{POSTSEASON_PROP_TABLE}_game_market "
                          f"ON {POSTSEASON_PROP_TABLE} (game_id, market)")
+# An EARLIER prop snapshot for 2023-24 .. 2025-26 (mike, 2026-11-26: yes to "earlier NBA prop
+# snapshots for the past seasons", quoted at about 61,500 credits a season for one extra snapshot
+# of five markets). The five are the markets the two live prop models bet most this season
+# (`picks`, read 2026-11-26: threes 74, blocks 31, steals 31, rebounds 31, points 10). The rows
+# go to their own worker-only table: every reader of player_prop_odds for those seasons was
+# written against ONE snapshot a game (tip minus 60), and a second, earlier one in the same table
+# would be read as more rows of the same bet. The ledger holds every game asked for, rows or not,
+# so a game whose props had not posted yet is not bought twice.
+EARLY_PROP_MARKETS = ["player_threes", "player_rebounds", "player_blocks", "player_steals",
+                      "player_points"]
+EARLY_PROP_TABLE = "nba_prop_odds_early"
+EARLY_PROP_DDL = POSTSEASON_PROP_DDL.replace(POSTSEASON_PROP_TABLE, EARLY_PROP_TABLE).replace(
+    "    book_last_update TEXT,", "    book_last_update TEXT,\n    lead_min         INTEGER NOT NULL,")
+EARLY_PROP_INDEX = (f"CREATE INDEX IF NOT EXISTS idx_{EARLY_PROP_TABLE}_game_market "
+                    f"ON {EARLY_PROP_TABLE} (game_id, market)")
+EARLY_LEDGER = "nba_prop_early_fetches"
+EARLY_LEDGER_DDL = f"""
+CREATE TABLE IF NOT EXISTS {EARLY_LEDGER} (
+    game_id     TEXT NOT NULL,
+    lead_min    INTEGER NOT NULL,
+    snapshot_at TEXT,
+    rows        INTEGER NOT NULL,
+    fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (game_id, lead_min)
+)
+"""
 ET = ZoneInfo("America/New_York")
 
 
@@ -549,10 +575,12 @@ def _props_done(conn, game_ids: list[str], markets=("player_points",)) -> set[st
 def buy_props_date(conn, meter: Meter, game_date: str, games: list[dict],
                    lead_min: int, apply: bool = True, limit: int | None = None,
                    write=_insert_prop_odds, stamp_games: bool = True,
-                   markets: list[str] = PROP_MARKETS) -> dict:
+                   markets: list[str] = PROP_MARKETS, on_empty=None) -> dict:
     """One date's props. `write` stores the rows; `stamp_games` fills games.commence_time,
     which a postseason game (not in `games`) has no row to take. `markets` is what is asked
-    for and kept (the 14 full-game markets unless told otherwise)."""
+    for and kept (the 14 full-game markets unless told otherwise). `on_empty(conn, game,
+    snapshot_at)` is called for a game whose answer held none of `markets`, so a caller with
+    a ledger can record that it asked."""
     stats = {"date": game_date, "events": 0, "prop_rows": 0, "markets": defaultdict(set)}
     # The event list at noon Eastern lists the whole slate with its starts.
     noon = datetime.fromisoformat(f"{game_date}T12:00:00").replace(tzinfo=ET)
@@ -617,6 +645,9 @@ def buy_props_date(conn, meter: Meter, game_date: str, games: list[dict],
                 stats["prop_rows"] += len(rows)
         else:
             stats["prop_rows"] += len(rows)
+            if apply and on_empty is not None and not rows:
+                on_empty(conn, g, stamp)
+                stats["empty_games"] = stats.get("empty_games", 0) + 1
     if apply:
         conn.commit()
     stats["markets"] = {k: sorted(v) for k, v in stats["markets"].items()}
@@ -722,6 +753,87 @@ def buy_postseason_props(conn, meter: Meter, first_season: int, last_season: int
         if s.get("stopped"):
             totals["stopped"] = s["stopped"]
             logger.warning(f"postseason props stopping at {d}: {s['stopped']}")
+            break
+    totals["games_planned"] = n
+    return dict(totals)
+
+
+def _insert_early_props(conn, rows: list[dict], lead_min: int) -> int:
+    """One game's early rows and its ledger row, in the caller's transaction."""
+    if not rows:
+        return 0
+    conn.executemany(f"""
+        INSERT INTO {EARLY_PROP_TABLE} (
+            game_id, game_date, player_name, team, market, bookmaker, snapshot_type,
+            snapshot_at, line, over_price, under_price, book_last_update, lead_min
+        ) VALUES (
+            %(game_id)s, %(game_date)s, %(player_name)s, %(team)s, %(market)s, %(bookmaker)s,
+            %(snapshot_type)s, %(snapshot_at)s, %(line)s, %(over_price)s, %(under_price)s,
+            %(book_last_update)s, %(lead_min)s
+        )
+    """, [{**r, "book_last_update": r.get("book_last_update"), "lead_min": lead_min} for r in rows])
+    conn.execute(f"INSERT INTO {EARLY_LEDGER} (game_id, lead_min, snapshot_at, rows) "
+                 f"VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                 (rows[0]["game_id"], lead_min, rows[0].get("snapshot_at"), len(rows)))
+    return len(rows)
+
+
+def buy_props_early(conn, meter: Meter, first_season: int, last_season: int,
+                    lead_min: int) -> dict:
+    """One snapshot of EARLY_PROP_MARKETS per regular-season game at tip minus `lead_min`,
+    newest season first, into EARLY_PROP_TABLE. A game already in the ledger at this lead is
+    skipped, with or without rows."""
+    from data.ddl_guard import schema_is_current
+    if not schema_is_current(conn, EARLY_PROP_TABLE, columns=("lead_min",)):
+        conn.execute(EARLY_PROP_DDL)
+        conn.execute(EARLY_PROP_INDEX)
+    if not schema_is_current(conn, EARLY_LEDGER):
+        conn.execute(EARLY_LEDGER_DDL)
+    lock_down(conn, EARLY_PROP_TABLE)
+    lock_down(conn, EARLY_LEDGER)
+    conn.commit()
+    games = _known_games(conn, first_season, last_season)
+    games = {k: v for k, v in games.items() if v["game_date"] >= FIRST_PROPS_DATE}
+    done = {r[0] for r in conn.execute(
+        f"SELECT game_id FROM {EARLY_LEDGER} WHERE lead_min = %s", (lead_min,)).fetchall()}
+    for gid in done & set(games):
+        games[gid]["done"] = True
+    by_date: dict[str, list[dict]] = defaultdict(list)
+    for g in games.values():
+        by_date[g["game_date"]].append(g)
+    todo = sorted((d for d, gs in by_date.items() if not all(g.get("done") for g in gs)),
+                  reverse=True)
+    n = sum(1 for d in todo for g in by_date[d] if not g.get("done"))
+    logger.info(f"early props (tip - {lead_min} min): {len(games)} games, {len(done & set(games))} "
+                f"asked before, {n} to buy on {len(todo)} dates "
+                f"(at most ~{10 * len(EARLY_PROP_MARKETS) * n + len(todo):,} credits)")
+
+    def write(c, rows):
+        _insert_early_props(c, rows, lead_min)
+
+    def on_empty(c, g, stamp):
+        c.execute(f"INSERT INTO {EARLY_LEDGER} (game_id, lead_min, snapshot_at, rows) "
+                  f"VALUES (%s, %s, %s, 0) ON CONFLICT DO NOTHING", (g["game_id"], lead_min, stamp))
+        c.commit()
+
+    totals = defaultdict(int)
+    for d in todo:
+        s = buy_props_date(conn, meter, d, by_date[d], lead_min, write=write, stamp_games=False,
+                           markets=EARLY_PROP_MARKETS, on_empty=on_empty)
+        totals["events"] += s["events"]
+        totals["prop_rows"] += s["prop_rows"]
+        totals["empty_games"] += s.get("empty_games", 0)
+        if s.get("unmatched"):
+            totals["unmatched"] += len(s["unmatched"])
+        logger.info(f"early props {d}: {s['events']} games, {s['prop_rows']} rows, "
+                    f"{s.get('empty_games', 0)} with none | spent {meter.spent:,}, "
+                    f"balance {meter.remaining}")
+        if s.get("error"):
+            totals["date_errors"] += 1
+            logger.warning(f"{d}: event list answered {s['error']}")
+        if s.get("stopped"):
+            totals["stopped"] = s["stopped"]
+            logger.warning(f"early props stopping at {d}: {s['stopped']}")
             break
     totals["games_planned"] = n
     return dict(totals)
@@ -1158,6 +1270,9 @@ def main() -> None:
     ap.add_argument("--lines", action="store_true")
     ap.add_argument("--props", action="store_true")
     ap.add_argument("--derivatives", action="store_true")
+    ap.add_argument("--props-early", action="store_true",
+                    help="one earlier snapshot of EARLY_PROP_MARKETS at tip - --lead-min, "
+                         "into nba_prop_odds_early")
     ap.add_argument("--postseason-props", action="store_true",
                     help="play-in, playoff and Cup final props, into nba_postseason_prop_odds")
     ap.add_argument("--alternates", action="store_true",
@@ -1217,7 +1332,7 @@ def main() -> None:
             print(f"MEASURED {meter.spent} credits; balance {meter.remaining}")
             return
         if not a.seasons or not (a.lines or a.props or a.derivatives or a.alternates or a.fill_gaps
-                                 or a.instants or a.postseason_props or a.q1_props
+                                 or a.instants or a.postseason_props or a.q1_props or a.props_early
                                  or a.period_team_totals or a.period_lines):
             ap.error("give --lines, --fill-gaps, --props, --derivatives or --alternates "
                      "with --seasons FIRST LAST")
@@ -1237,6 +1352,8 @@ def main() -> None:
             print("props:", buy_props(conn, meter, *a.seasons, a.lead_min))
         if a.postseason_props:
             print("postseason props:", buy_postseason_props(conn, meter, *a.seasons, a.lead_min))
+        if a.props_early:
+            print("early props:", buy_props_early(conn, meter, *a.seasons, a.lead_min))
         if a.q1_props:
             print("first-quarter props:", buy_props(conn, meter, *a.seasons, a.lead_min,
                                                     markets=Q1_PROP_MARKETS,

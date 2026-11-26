@@ -285,6 +285,9 @@ step nba-props
 # game, 12-25 minutes before tip, filed 'close' so no card decides on it. A
 # pass with no bet game in that window spends nothing.
 step nba-prop-close
+# nba_prop_market's rule decided 9.5-10.5 hours before tip, a PAPER test (mike, 2026-11-26):
+# paused, so its rows never post; its own door, so it takes no game from the NBA prop cap.
+step nba-prop-market-early
 
 # MLB probable starters for today AND the look-ahead window. The scorer can
 # now price tomorrow's games (config.GAME_SCORE_AHEAD_DAYS), and MLB game

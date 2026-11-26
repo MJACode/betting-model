@@ -2016,5 +2016,49 @@
     "requested_by": "mike",
     "note": "mike 2026-11-26 ('Do all the outstanding tasks now'): before a prop-splits scraper is written, how many DK Network player-prop split articles exist (WordPress posts API searches), their date range and titles, and how two article bodies lay out the numbers; plus tennis splits on Action Network, which the coverage probe skipped. Writes nothing, no Odds API credits.",
     "args": {}
+  },
+  {
+    "key": "dk-prop-splits-backfill-2026-11-26",
+    "job_type": "dk_prop_splits_import",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26 ('Do all the outstanding tasks now'): every DK Network player-prop split article the WordPress search returns, up to 50 pages of 100, into dk_prop_split_articles / dk_prop_splits. The probe (worker_jobs 1723195) found 34 from 2026-09-14 to 2026-11-23 within its 1,000-post cap, and a 2025-02-09 Super Bowl article outside it. Free, no Odds API credits; a version already stored is not fetched.",
+    "args": {
+      "pages": 50
+    }
+  },
+  {
+    "key": "dk-prop-splits-raw-tables-2026-11-26",
+    "job_type": "dk_prop_splits_import",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26 ('Do all the outstanding tasks now'): the first import (worker_jobs 1724494) parsed 4 of 35 article versions and kept no table it could not parse. Reads every version once more, up to 50 search pages, to keep every table as printed in dk_prop_split_tables, so the unseen layout of 31 versions (2026-09-17 to 2026-11-16) is parsed from the database. Free, no Odds API credits.",
+    "args": {
+      "pages": 50
+    }
+  },
+  {
+    "key": "dk-prop-splits-raw-tables-2-2026-11-26",
+    "job_type": "dk_prop_splits_import",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26: the same re-read as dk-prop-splits-raw-tables-2026-11-26, which was queued at 19:35 UTC before any pass had created dk_prop_split_tables, so it could write nothing. The job now applies the view migrations first. Free, no Odds API credits; a version whose tables are kept is not fetched again.",
+    "args": {
+      "pages": 50
+    }
+  },
+  {
+    "key": "dk-prop-splits-reparse-2026-11-26",
+    "job_type": "dk_prop_splits_import",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26: parse the 31 article versions whose tables are kept in dk_prop_split_tables but whose layout no earlier parser read (five layouts, every cell shape in the 3,162 kept rows). The pass re-parses from the database; one search page, no page refetched. Free, no Odds API credits.",
+    "args": {
+      "pages": 1
+    }
+  },
+  {
+    "key": "splits-nba-nhl-probe-2026-11-27",
+    "job_type": "splits_markets_probe",
+    "requested_by": "matt",
+    "run_after": "2026-11-27T16:00:00+00:00",
+    "note": "Matt 2026-11-26 ('Ok'): NBA and NHL had no games when splits-nonzero-probe-2026-11-26 ran, so whether Action Network's consensus splits their periods is unmeasured. Runs at 11am ET on 11-27, before tip, counting only non-zero pre-game shares. Keeps or removes NBA / NHL in scoreboard_splits.PERIODS_BY_SPORT. Writes nothing, no Odds API credits.",
+    "args": {}
   }
 ]

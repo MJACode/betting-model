@@ -20,6 +20,14 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, In-play best line, step one: what each book has on offer (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Delete notifications from the inbox (matt) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, "Track Record" renamed "Signal Record" in the app's UI (Matt) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, `nba_prop_market_early`, the prop rule at 10 hours, a paused paper test (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Earlier NBA prop snapshots bought, historical exchange money imported and tested (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NBA data sources, and handle / money data across markets (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings prop splits: every kept layout parsed (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings prop splits: every article table kept as printed (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings prop splits into Supabase; DK splits aliases; tennis closed (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings splits for NBA, NHL, NCAAF and NCAAB; the prop-splits probe (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NHL shifts, Daily Faceoff lines, officials, EDGE snapshots |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Public splits for every market: what exists, the period-splits correction, the coverage probe (mike) |
@@ -39,6 +47,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, My models: members only, the line now, the worker applies alerts (Matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, My models: NCAAB game lines on the builder, and NCAAB alerts (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, Live lines from every book; NHL and EuroLeague on the DK board; EuroLeague live scores (mike) |
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Period splits: measured empty for NFL, NCAAF and NCAAB; trimmed (Matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Period splits from Action Network consensus, hourly (Matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, AI assistant: MCP redeployed, NBA quarter lines before tip, splits-markets probe (Matt) |
 | 2026-11-25 | [2026-11](./2026-11.md) | 2026-11-25, AI assistant (MCP): every stored game market, EuroLeague and NBL, and the missing props (Matt) |

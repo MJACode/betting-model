@@ -390,6 +390,18 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The same rule decided 10 hours before tip on points, rebounds and threes,
+  // paused while it is tested (mike, 2026-11-26; scripts/nba_prop_market_early_card.py).
+  // Its own badge and name, so it is never a second "Props" beside nba_prop_market (UX review,
+  // 2026-11-26). "Early" here means the morning decision; NBA's in-play "Early Spread" carries
+  // "Live" in its long name and shows only on Live.
+  nba_prop_market_early: {
+    shortLabel: 'Early Props',
+    longLabel: 'NBA Early Props',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
   // The NBA projection model (models/nba_prop_projection.py): projects each
   // player's count from his minutes and per-minute rates and bets the books'
   // main line, in the same 45-57 minute window as the rule above. ONE id across six markets (steals,
@@ -1543,6 +1555,22 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         'This model checks each game 5 to 20 minutes before tip-off and bets only some of them. ' +
         'Nothing has posted today so far.',
       note: 'Posted 5 to 20 minutes before tip-off and never re-priced.',
+    };
+  }
+  // NBA Early Props (scripts/nba_prop_market_early_card.py): checked once a game, about 10 hours
+  // before tip (9.5 to 10.5), at the best price; paused while it is tested (UX review, 2026-11-26).
+  // Not HOUR_BEFORE_TIP_MODELS: that copy says about an hour.
+  if (modelId === 'nba_prop_market_early') {
+    return {
+      title: 'Checked once per game',
+      body:
+        'This model checks each game once, about 10 hours before tip-off, and posts a bet only when ' +
+        'it finds one, at the sportsbook with the best price, which may not be DraftKings. A posted bet ' +
+        'is never re-priced: it stays at the line and price it posted at.',
+      empty:
+        'This model checks each game about 10 hours before tip-off and bets only some of them. ' +
+        'Nothing has posted today so far.',
+      note: 'Posted about 10 hours before tip-off and never re-priced.',
     };
   }
   // The NBA first quarter's moneyline (models/nba_q1_trend_ml.py): a moneyline

@@ -59,6 +59,22 @@ WHERE read_at IS NULL
   AND sent_at >= pg_catalog.now() - make_interval(days => %s)
 """
 
+# After notification_inbox_hide_2026_11_26.sql: a row the member deleted from
+# their list is hidden (deleted_at set, never removed) and is not unread.
+_UNREAD_VISIBLE = """
+SELECT user_id::text, sport
+FROM notification_inbox
+WHERE read_at IS NULL
+  AND deleted_at IS NULL
+  AND sent_at >= pg_catalog.now() - make_interval(days => %s)
+"""
+
+_HAS_DELETED_AT = """
+SELECT 1 FROM information_schema.columns
+ WHERE table_schema = 'public' AND table_name = 'notification_inbox'
+   AND column_name = 'deleted_at'
+"""
+
 _INSERT = """
 INSERT INTO notification_inbox
     (user_id, kind, title, body, sport, route, notification_id)
@@ -126,11 +142,23 @@ def load_mutes(conn) -> dict[str, set[str]]:
     return mutes
 
 
+def has_deleted_at(conn) -> bool:
+    """True once the hide migration is applied. A failed probe is False, so
+    the badge keeps counting the way it did before the column existed."""
+    try:
+        row = conn.execute(_HAS_DELETED_AT).fetchone()
+    except Exception as exc:  # noqa: BLE001 — a probe must not sink the push
+        logger.warning(f"Push inbox deleted_at probe failed: {exc}")
+        return False
+    return bool(row)
+
+
 def unread_counts(conn, mutes: dict[str, set[str]]) -> dict[str, int]:
     """Unread rows inside the 7-day window, after mutes. Sport-less rows count."""
     counts: dict[str, int] = {}
+    sql = _UNREAD_VISIBLE if has_deleted_at(conn) else _UNREAD
     try:
-        rows = conn.execute(_UNREAD, (RETENTION_DAYS,)).fetchall()
+        rows = conn.execute(sql, (RETENTION_DAYS,)).fetchall()
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"Push inbox unread count failed: {exc}")
         return counts

@@ -43,6 +43,7 @@ import { bookLabelShort, pickTitleText, storedQuoteBook } from '@/lib/markets';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { PickRowTitle } from '@/components/PickRowTitle';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import { SkeletonList } from '@/components/Skeleton';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -121,7 +122,20 @@ export function PerformanceScreen() {
       <Ionicons name="add" size={26} color={colors.tint} />
     </Pressable>
   );
-  const manualCard = <ManualBetsCard bets={manual.bets} onRowPress={settleManual} />;
+  // How to log a bet is a tooltip beside the title, not an empty "Your bets"
+  // card mid-screen (Matt, 2026-11-26). The card appears once a bet is logged.
+  const titleBlock = (
+    <View style={styles.titleWithInfo}>
+      <Text style={styles.title} accessibilityRole="header">Performance</Text>
+      <InfoTooltip
+        title="Logging your bets"
+        body="Tap + to record a bet you placed — any book, any sport. Your record builds here, stored on this device."
+        accessibilityLabel="About your bets"
+      />
+    </View>
+  );
+  const manualCard =
+    manual.bets.length > 0 ? <ManualBetsCard bets={manual.bets} onRowPress={settleManual} /> : null;
   const trackedCard = (
     <TrackedBetsCard
       key={trackedFoldKey}
@@ -174,7 +188,7 @@ export function PerformanceScreen() {
         <ScrollView contentContainerStyle={styles.list}>
           <View style={styles.header}>
             <View style={styles.titleRow}>
-              <Text style={styles.title}>Performance</Text>
+              {titleBlock}
               <View style={styles.headerActions}>
                 {addBetButton}
                 <NotificationBell />
@@ -228,7 +242,7 @@ export function PerformanceScreen() {
       >
         <View style={styles.header}>
           <View style={styles.titleRow}>
-            <Text style={styles.title}>Performance</Text>
+            {titleBlock}
             <View style={styles.headerActions}>
               {addBetButton}
               <NotificationBell />
@@ -328,68 +342,60 @@ function ManualBetsCard({
         <Text style={styles.manualTitle}>Your bets</Text>
       </View>
 
-      {bets.length === 0 ? (
-        <Text style={styles.manualEmpty}>
-          Record the bets you place — any book, any sport — with the + at the top. Your record
-          builds here, stored on this device.
-        </Text>
-      ) : (
-        <>
-          <Text
-            style={styles.manualSummary}
-            accessibilityLabel={unitsSpeech(
-              `${formatFlatUnits(net)}, ${wins} won, ${losses} lost` +
-                (settled.length < bets.length ? `, ${bets.length - settled.length} open` : ''),
-            )}
-          >
-            {formatFlatUnits(net)} · {wins}–{losses}
-            {settled.length < bets.length ? ` · ${bets.length - settled.length} open` : ''}
-          </Text>
-          <DateGroupedList
-            items={bets}
-            dateOf={manualBetDate}
-            statusOf={(b) => b.result}
-            profitOf={(b) => Number(b.profit ?? 0)}
-            renderItem={(b) => (
-            <Pressable
-              key={b.id}
-              onPress={() => onRowPress(b)}
-              accessibilityRole="button"
-              accessibilityLabel={[
-                b.description,
+      {/* Only rendered once a bet is logged; the how-to lives in the title's ⓘ. */}
+      <Text
+        style={styles.manualSummary}
+        accessibilityLabel={unitsSpeech(
+          `${formatFlatUnits(net)}, ${wins} won, ${losses} lost` +
+            (settled.length < bets.length ? `, ${bets.length - settled.length} open` : ''),
+        )}
+      >
+        {formatFlatUnits(net)} · {wins}–{losses}
+        {settled.length < bets.length ? ` · ${bets.length - settled.length} open` : ''}
+      </Text>
+      <DateGroupedList
+        items={bets}
+        dateOf={manualBetDate}
+        statusOf={(b) => b.result}
+        profitOf={(b) => Number(b.profit ?? 0)}
+        renderItem={(b) => (
+        <Pressable
+          key={b.id}
+          onPress={() => onRowPress(b)}
+          accessibilityRole="button"
+          accessibilityLabel={[
+            b.description,
+            b.book,
+            unitsSpeech(`${formatFlatStake(b.stake)} risk`),
+            b.odds_american != null ? formatAmerican(b.odds_american) : null,
+            b.result === 'open' ? 'Open' : unitsSpeech(formatFlatUnits(b.profit)),
+          ]
+            .filter(Boolean)
+            .join(', ')}
+          accessibilityHint="Settle or remove this bet"
+          style={styles.manualRow}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.manualDesc} numberOfLines={1}>
+              {b.description}
+            </Text>
+            <Text style={styles.manualSub} numberOfLines={1}>
+              {[
                 b.book,
-                unitsSpeech(`${formatFlatStake(b.stake)} risk`),
+                `${formatFlatStake(b.stake)} risk`,
                 b.odds_american != null ? formatAmerican(b.odds_american) : null,
-                b.result === 'open' ? 'Open' : unitsSpeech(formatFlatUnits(b.profit)),
               ]
                 .filter(Boolean)
-                .join(', ')}
-              accessibilityHint="Settle or remove this bet"
-              style={styles.manualRow}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.manualDesc} numberOfLines={1}>
-                  {b.description}
-                </Text>
-                <Text style={styles.manualSub} numberOfLines={1}>
-                  {[
-                    b.book,
-                    `${formatFlatStake(b.stake)} risk`,
-                    b.odds_american != null ? formatAmerican(b.odds_american) : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </Text>
-              </View>
-              <Text style={[styles.manualRight, { color: manualResultColor(b.result, b.profit) }]}>
-                {b.result === 'open' ? 'Open' : formatFlatUnits(b.profit)}
-              </Text>
-            </Pressable>
-            )}
-          />
-          <Text style={styles.manualHint}>Tap a day to fold it · tap a bet to settle or remove it.</Text>
-        </>
-      )}
+                .join(' · ')}
+            </Text>
+          </View>
+          <Text style={[styles.manualRight, { color: manualResultColor(b.result, b.profit) }]}>
+            {b.result === 'open' ? 'Open' : formatFlatUnits(b.profit)}
+          </Text>
+        </Pressable>
+        )}
+      />
+      <Text style={styles.manualHint}>Tap a day to fold it · tap a bet to settle or remove it.</Text>
     </View>
   );
 }
@@ -866,7 +872,16 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   headerIconBtn: { padding: 4 },
+  // Shrinks so the title wraps before it pushes the +, bell and settings off
+  // an SE-width row (UX review, 2026-11-26).
+  titleWithInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flexShrink: 1,
+  },
   title: {
+    flexShrink: 1,
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,

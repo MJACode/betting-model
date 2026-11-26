@@ -381,6 +381,8 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-10-15 (mike: "use what you've learned in this repo"): the NBA
          # prop rule; its number IS Pinnacle's no-vig under.
          "nba_prop_market",
+         # 2026-11-26 (mike): the same rule decided 10 hours before tip, a paused paper test.
+         "nba_prop_market_early",
          # 2026-11-20 (mike): NBA first basket; its model blended with the books' median.
          "nba_prop_first_basket",
          # 2026-10-16 (mike): the NBA projection model; calibrated inside its own artifact.

@@ -900,6 +900,38 @@ def _job_dk_prop_splits_probe(**kw):
     return {"summary": summary[:6000] or "(no output)", "stdout": text[-50_000:]}
 
 
+def _job_dk_prop_splits_import(pages: int, **kw):
+    """DraftKings' player-prop splits from DK Network's articles, the newest
+    `pages` pages of search results (mike, 2026-11-26). Free, idempotent:
+    a version whose tables are already kept is not fetched."""
+    from data.db import get_connection
+    from data.ingestors.dk_prop_splits import run
+    from data.view_migrations import apply_view_migrations
+
+    conn = get_connection()
+    try:
+        # A declared job can be claimed before the deploy's first pass has
+        # applied its migrations (dk_prop_split_tables_2026_11_26.sql), and
+        # run() writes nothing until both tables exist. Idempotent, never raises.
+        apply_view_migrations(conn)
+        return run(conn, pages=pages)
+    finally:
+        conn.close()
+
+
+def _validate_dk_prop_splits_import(args: dict) -> dict:
+    extra = sorted(set(args) - {"pages"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes pages")
+    raw = args.get("pages", 1)
+    if isinstance(raw, bool):
+        raise ValueError("pages must be a whole number")
+    n = int(raw)
+    if not 1 <= n <= 60:
+        raise ValueError(f"pages must be 1..60, got {n}")
+    return {"pages": n}
+
+
 def _job_book_app_links_probe(**kw):
     """Each sportsbook's apple-app-site-association file, and whether the
     betslip links we store are claimed by its app. Writes nothing, no Odds API
@@ -3162,6 +3194,8 @@ JOBS = {
     "splits_coverage_probe": (_job_splits_coverage_probe, _validate_splits_markets_probe),
     # DK Network prop-split articles and tennis splits. Free, writes nothing.
     "dk_prop_splits_probe": (_job_dk_prop_splits_probe, _validate_splits_markets_probe),
+    # DraftKings prop splits from DK Network's articles into Supabase. Free, idempotent.
+    "dk_prop_splits_import": (_job_dk_prop_splits_import, _validate_dk_prop_splits_import),
     # One on-demand run of the daily Betfair ANZ racing-file store. Free, idempotent.
     "betfair_monthly_store": (_job_betfair_monthly_store, _validate_betfair_monthly_store),
     "book_app_links_probe": (_job_book_app_links_probe, _validate_book_app_links_probe),

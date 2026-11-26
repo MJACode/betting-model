@@ -292,7 +292,7 @@ export function ExplainerScreen() {
           <P>
             Most picks services sell <Strong>accuracy</Strong> ("we hit 80%!") —
             one hero number, chosen after the fact, with no way to check it. We
-            publish the full track record instead: wins, losses, pushes and,
+            publish the full Signal Record instead: wins, losses, pushes and,
             where we have it, closing-line value on every settled pick —
             including the models that aren't working.
           </P>

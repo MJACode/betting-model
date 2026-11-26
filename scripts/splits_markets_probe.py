@@ -9,8 +9,9 @@ What is already measured (worker_jobs 936774, scripts/splits_source_probe.py, 20
 This asks the two questions left open, from the worker (this sandbox cannot resolve either host):
   1. DK Network, every sport the page links: which tb_emt market filters each sport page offers, and which market
      labels appear in its split rows.
-  2. Action Network, NBA / NHL / NFL / NCAAB / NCAAF: for each `periods` value, HTTP status, games, and per book the
-     period and market keys that carry a bet_info split.
+  2. Action Network, NBA / NHL / NFL / NCAAB / NCAAF: for each `periods` value, HTTP status, games, and the
+     consensus book's period and market keys that carry a non-zero, pre-game split (0/0 is Action Network's
+     no-split placeholder).
 
 Writes nothing, no Odds API call.
 
@@ -33,8 +34,9 @@ AN_SCOREBOARD = "https://api.actionnetwork.com/web/v2/scoreboard/{slug}"
 AN_SPORTS = ("nba", "nhl", "nfl", "ncaab", "ncaaf")
 AN_PERIODS = ("event", "firsthalf", "secondhalf", "firstquarter", "secondquarter", "thirdquarter",
               "fourthquarter", "firstperiod")
-# Consensus and the DraftKings / FanDuel / BetMGM / BetRivers NJ ids the 2026-11-03 probe saw carrying splits.
-AN_BOOKS = ("15", "68", "69", "71", "75")
+# The consensus book only: the request carries bookIds=15, as the ingestor's does, so any other book would just
+# be missing from the response, which would read as "no splits" (PR #1638 review).
+AN_BOOKS = ("15",)
 DK_LABELS = ("Moneyline", "Spread", "Total", "1st Half", "2nd Half", "1st Quarter", "1st Period",
              "Team Total", "Player", "Props", "Alternate")
 TIMEOUT = 25
@@ -73,6 +75,14 @@ def dk_markets(body: str) -> dict:
     return {"filters": emt, "games": len(rows), "labels": {k: v for k, v in labels.items() if v}}
 
 
+def _share(v) -> bool:
+    """A non-zero share, whether sent as a number or a string ("0" is no split). Pure."""
+    try:
+        return float(v) != 0
+    except (TypeError, ValueError):
+        return False
+
+
 def an_split_markets(payload: dict, books=AN_BOOKS) -> dict:
     """{book: {period key: {market key: games with a bet_info split}}}. Pure."""
     out: dict[str, dict[str, dict[str, int]]] = {}
@@ -89,7 +99,7 @@ def an_split_markets(payload: dict, books=AN_BOOKS) -> dict:
                     # A real split has a non-zero share: 0/0 is Action Network's "no split" placeholder
                     # (the pair rules drop it), which the 2026-11-26 first run counted as a split.
                     has = any(isinstance(e, dict) and not e.get("is_live") and any(
-                        ((e.get("bet_info") or {}).get(k) or {}).get("percent") not in (None, 0)
+                        _share(((e.get("bet_info") or {}).get(k) or {}).get("percent"))
                         for k in ("tickets", "money")) for e in arr)
                     if has:
                         cell = out.setdefault(book_id, {}).setdefault(period, {})
