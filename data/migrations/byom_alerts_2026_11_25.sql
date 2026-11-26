@@ -7,9 +7,19 @@
 -- model's page, on by default with a per-model switch, and kept out of the
 -- official record.
 --
--- HAND APPLIED. NOT in data/view_migrations.ACTIVE_MIGRATIONS. Until it is
--- applied, the worker job byom_alerts finds no byom_alerts table and does
--- nothing (byom/alerts.py), and the app's open-bets read fails quietly.
+-- In data/view_migrations.ACTIVE_MIGRATIONS since 2026-11-26 (Matt: "You run
+-- the supabase"; Claude cannot write production, so the worker applies it on
+-- its next pass). It was written to be hand applied and never was (checked
+-- 2026-11-26: no byom_alerts table). Until it lands, the worker job
+-- byom_alerts finds no table and does nothing (byom/alerts.py), and the
+-- app's open-bets read fails quietly.
+--
+-- Matt, 2026-11-26, after the first review: members only; the line now on
+-- the card; a model delete removes its alerts; NHL keeps its Matchup tab.
+-- byom_my_open_bets refuses a signed-in non-member with the premium gate's
+-- own refusal (42501, "premium access required", the same hint), and returns
+-- the DraftKings line in force now beside the bet (latest_odds,
+-- latest_prop_odds), labelled by byom_leg_label like the bet itself.
 --
 -- Four things:
 --
@@ -39,7 +49,10 @@
 --    byom_my_open_bets(), byom_alert_settings(), byom_set_alerts(uuid, bool).
 --    The tables are not granted to anon or authenticated.
 --
--- Skips once byom_legs carries byom_open_bets_v1 and every object exists.
+-- Every pass runs this file, so it returns before any DDL once every object
+-- below exists in its final shape (byom_alerts_members_v1 on the open-bets
+-- RPC). A DDL statement fires PostgREST's schema reload, which answers 503
+-- to the app while it runs (.claude/rules/operations.md).
 
 DO $mig$
 DECLARE
@@ -53,6 +66,22 @@ DECLARE
   v_anchor text;
   v_want integer;
 BEGIN
+  IF v_proc IS NOT NULL
+     AND (SELECT position('byom_open_bets_v1' in p.prosrc) > 0
+            FROM pg_proc p WHERE p.oid = v_proc)
+     AND EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'byom_models'
+                    AND column_name = 'alerts_enabled')
+     AND to_regclass('public.byom_alerts') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM pg_proc p
+                  WHERE p.oid = to_regprocedure('public.byom_my_open_bets()')
+                    AND position('byom_alerts_members_v1' in p.prosrc) > 0)
+     AND to_regprocedure('public.byom_alert_settings()') IS NOT NULL
+     AND to_regprocedure('public.byom_set_alerts(uuid, boolean)') IS NOT NULL
+  THEN
+    RETURN;
+  END IF;
+
   IF v_proc IS NULL OR to_regclass('public.byom_models') IS NULL THEN
     RAISE NOTICE 'byom_legs or byom_models is not on this database - skipping';
     RETURN;
@@ -131,9 +160,11 @@ BEGIN
     TO authenticated
     USING (user_id = auth.uid());
 
-  -- 4. The member's RPCs.
+  -- 4. The member's RPCs. The open-bets return type grew (the line now), so
+  -- an earlier body is dropped first: CREATE OR REPLACE cannot change it.
+  DROP FUNCTION IF EXISTS public.byom_my_open_bets();
   EXECUTE $fn$
-    CREATE OR REPLACE FUNCTION public.byom_my_open_bets()
+    CREATE FUNCTION public.byom_my_open_bets()
     RETURNS TABLE (
       alert_id uuid,
       model_id uuid,
@@ -152,7 +183,10 @@ BEGIN
       label text,
       locked_at timestamptz,
       detected_at timestamptz,
-      started boolean
+      started boolean,
+      now_label text,
+      now_price numeric,
+      now_at timestamptz
     )
     LANGUAGE plpgsql
     STABLE
@@ -162,26 +196,78 @@ BEGIN
     #variable_conflict use_column
     DECLARE
       -- byom_open_bets_v1
+      -- byom_alerts_members_v1
       v_uid uuid;
     BEGIN
       v_uid := auth.uid();
       IF v_uid IS NULL THEN
         RAISE EXCEPTION 'sign-in required';
       END IF;
+      -- Members only (Matt, 2026-11-26). The premium gate's own refusal, so
+      -- the app shows its locked state, not an error.
+      IF NOT COALESCE(public.has_app_access(), false) THEN
+        RAISE EXCEPTION USING ERRCODE = '42501',
+          MESSAGE = 'premium access required',
+          HINT = 'An active subscription, trial or comped grant is required.';
+      END IF;
       -- Open: not graded yet. A game with a final score in byom_game_facts,
       -- or a prop with a result, has left the list (its result is on the
       -- model's bet list). A game whose score never lands leaves 24 hours
       -- after kickoff.
+      -- The line now: DraftKings' latest main line for the same market and
+      -- side (latest_odds, line_key 0), or the same player's latest prop
+      -- line. Labelled by byom_leg_label, as the bet is. NFL game ids carry
+      -- the 'NFL_' prefix; NCAAB's canonical key is the game id.
       RETURN QUERY
       SELECT a.alert_id, a.model_id, m.name, a.sport, a.canonical_key,
              a.market, a.leg_side, a.team, NULLIF(a.player_name, ''),
              a.home_team, a.away_team, a.commence_time, a.point, a.price,
              a.label, a.locked_at, a.detected_at,
-             a.commence_time <= pg_catalog.now()
+             a.commence_time <= pg_catalog.now(),
+             CASE WHEN now_line.price IS NULL THEN NULL
+                  ELSE byom_leg_label(a.market, a.leg_side, a.team,
+                                      now_line.point, NULLIF(a.player_name, ''))
+             END,
+             now_line.price,
+             now_line.at
         FROM byom_alerts a
         JOIN byom_models m ON m.model_id = a.model_id
         LEFT JOIN byom_game_facts g
           ON g.canonical_key = a.canonical_key AND g.sport = a.sport
+        LEFT JOIN LATERAL (
+          SELECT CASE a.market
+                   WHEN 'spreads' THEN o.spread_home
+                   WHEN 'totals' THEN o.total_line
+                 END AS point,
+                 CASE
+                   WHEN a.market = 'totals' AND a.leg_side = 'over' THEN o.over_price
+                   WHEN a.market = 'totals' AND a.leg_side = 'under' THEN o.under_price
+                   WHEN a.leg_side = 'home' THEN o.home_price
+                   WHEN a.leg_side = 'away' THEN o.away_price
+                 END AS price,
+                 o.snapshot_at::timestamptz AS at
+            FROM latest_odds o
+           WHERE a.player_name = ''
+             AND o.game_id = CASE WHEN a.sport = 'NFL' THEN 'NFL_' || a.canonical_key
+                                  ELSE a.canonical_key END
+             AND o.bookmaker = 'draftkings'
+             AND o.market = a.market
+             AND o.line_key = 0
+          UNION ALL
+          SELECT q.line,
+                 CASE a.leg_side WHEN 'over' THEN q.over_price
+                                 WHEN 'under' THEN q.under_price END,
+                 q.snapshot_at::timestamptz
+            FROM latest_prop_odds q
+           WHERE a.player_name <> ''
+             AND q.game_id = CASE WHEN a.sport = 'NFL' THEN 'NFL_' || a.canonical_key
+                                  ELSE a.canonical_key END
+             AND q.bookmaker = 'draftkings'
+             AND q.market = a.market
+             AND q.player_name = a.player_name
+          ORDER BY 3 DESC NULLS LAST
+          LIMIT 1
+        ) now_line ON true
        WHERE a.user_id = v_uid
          AND m.user_id = v_uid
          AND a.commence_time > pg_catalog.now() - interval '24 hours'

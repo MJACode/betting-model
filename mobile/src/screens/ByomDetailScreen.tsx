@@ -10,6 +10,7 @@ import { ByomPreviewCard } from '@/components/byom/ByomPreviewCard';
 import { ByomAlertToggle } from '@/components/byom/ByomAlertToggle';
 import { ByomOpenBetsSection } from '@/components/byom/ByomOpenBetsSection';
 import { useByomOpenBets } from '@/hooks/useByomOpenBets';
+import { useMembership } from '@/hooks/useMembership';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
 import { ByomSeasonBreakdown } from '@/components/byom/ByomSeasonBreakdown';
 import { currentByomSeason } from '@/lib/byomRecord';
@@ -49,7 +50,10 @@ export function ByomDetailScreen() {
   const facts = useNbaGameFacts(model == null ? null : sport);
   const preview = useByomRecord(scope, graded && model ? model.filters : null, sport);
   // Open bets and alerts: NFL (Matt, 2026-11-25) and NCAAB (2026-11-26).
-  const alertsSport = model?.sport === 'NFL' || model?.sport === 'NCAAB';
+  // Members only (Matt, 2026-11-26), the same gate as Picks: a locked member
+  // sees no open bets and no alert switch. The server refuses them too.
+  const { contentLocked } = useMembership();
+  const alertsSport = (model?.sport === 'NFL' || model?.sport === 'NCAAB') && !contentLocked;
   const openBets = useByomOpenBets(alertsSport, false);
   const thisModelBets = openBets.bets.filter((b) => b.model_id === modelId);
 
@@ -143,7 +147,7 @@ export function ByomDetailScreen() {
           ) : null}
           <Text style={styles.market}>{marketLabel(model.filters, sport)}</Text>
           {filterLine ? <Text style={styles.filters}>{filterLine}</Text> : null}
-          {alertsSport ? (
+          {alertsSport && !openBets.noAccess ? (
             <>
               <ByomOpenBetsSection
                 title="Open bets"

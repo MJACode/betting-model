@@ -470,9 +470,27 @@ is in the Record. A model delete or account delete removes its
 yet graded, kickoff within the last 24 hours or later, 200 at most),
 `byom_alert_settings()`, `byom_set_alerts(model_id, enabled)`.
 
-**Applying it.** `data/migrations/byom_alerts_2026_11_25.sql` is hand
-applied and is not in `ACTIVE_MIGRATIONS`. Until it is, the job returns
-`not_applied` and the app shows no section and no switch. It patches the
+**Matt, 2026-11-26:**
+- *Members only.* `byom_my_open_bets` refuses a signed-in non-member with
+  the premium gate's own refusal (42501, "premium access required", same
+  hint); the worker alerts only users for whom
+  `app_subscription_access_for` or `app_grant_access_for` is true (the two
+  checks `has_app_access()` makes); the app hides the cards and the switch
+  when locked. Missing either function, nobody is alerted.
+- *The line now on the card.* `now_label`, `now_price`, `now_at`: DraftKings'
+  latest main line for the same market and side (`latest_odds`, line_key
+  0) or the same player's latest prop line (`latest_prop_odds`), labelled
+  by `byom_leg_label`. Shown only when it differs from the bet. The bet
+  stays the line it fit at.
+- *Delete.* A model or account delete still removes its alert rows.
+- *NHL* keeps its Matchup tab; only NCAAB game bets hide it.
+
+**Applying it.** `data/migrations/byom_alerts_2026_11_25.sql` was written
+to be hand applied and never was (no `byom_alerts` table on 2026-11-26).
+Matt, 2026-11-26: "You run the supabase". It is in `ACTIVE_MIGRATIONS`, so
+the worker applies it on its next pass, and returns before any DDL once
+`byom_my_open_bets` carries `byom_alerts_members_v1`. Until it lands, the
+job returns `not_applied` and the app shows no section and no switch. It patches the
 live `byom_legs` at anchors (raises and changes nothing if one is not
 there) the way `byom_no_half_yards_2026_11_17.sql` does. A later file
 that re-creates `byom_legs` from its own text must keep the `open`

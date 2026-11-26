@@ -559,6 +559,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # bodies at anchors (raises if one is not there exactly once). Skips
     # once both carry byom_ncaab_v1. Does not write picks.
     "byom_ncaab_2026_11_26.sql",
+    # 2026-11-26 (Matt: "You run the supabase"): the member alerts file,
+    # written to be hand applied and never applied. byom_legs 'open',
+    # byom_models.alerts_enabled, byom_alerts, and the members-only RPCs
+    # with the line now. Returns before any DDL once byom_my_open_bets
+    # carries byom_alerts_members_v1. Does not write picks.
+    "byom_alerts_2026_11_25.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.
