@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, DraftKings splits for NBA, NHL, NCAAF and NCAAB; the prop-splits probe (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NHL shifts, Daily Faceoff lines, officials, EDGE snapshots |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Public splits for every market: what exists, the period-splits correction, the coverage probe (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, premium_access delete_login; account calls are Matt's (matt) |
