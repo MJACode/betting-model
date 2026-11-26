@@ -310,10 +310,11 @@ At EV ≥ 0.06 (the live floor):
   +7.7 / -0.9 against the live recipe at the same moment, each interval about
   ±50 to ±65 units. Nothing.
 
-**Expected goals are not current.** `nhl_shot_events` and `nhl_team_game_xg`
-end at 2026-10-12 (the one-off backfill; no scheduled job writes them). No live
-model reads them, so nothing is broken, but no expected-goals version can be
-served until that ingest is scheduled, and none above earned it.
+**Expected goals were not current on this date.** `nhl_shot_events` and
+`nhl_team_game_xg` ended at 2026-10-12 (the one-off backfill; no scheduled job
+wrote them). No live model read them. The daily `nhl-shots` step, added
+2026-11-26, is what keeps them current. None of the alternatives above earned
+a cut change.
 
 **Read.** The current model with its goalie gate is +2.39u on 56 live. Replayed at
 0.06 it is positive in 5 of 6 seasons at the last fetch and 3 of 6 at ~8 h

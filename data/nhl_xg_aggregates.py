@@ -206,6 +206,92 @@ def write(table: str, key: tuple[str, ...], cols: tuple[str, ...], df: pd.DataFr
     return len(rows)
 
 
+MISSING_GAMES_SQL = """
+SELECT DISTINCT s.nhl_game_id
+FROM nhl_shot_events s
+WHERE s.season >= 2019
+  AND NOT EXISTS (
+        SELECT 1 FROM nhl_team_game_xg t
+        WHERE t.nhl_game_id = s.nhl_game_id)
+ORDER BY s.nhl_game_id
+"""
+
+
+def _attempts_for(conn, game_ids: list[int]) -> pd.DataFrame:
+    rows = conn.execute(
+        "SELECT nhl_game_id, event_type, period_type, situation_code, "
+        "shooting_team, goalie_id, xg, xg_model_version "
+        "FROM nhl_shot_events WHERE nhl_game_id = ANY(?)",
+        (list(game_ids),)).fetchall()
+    conn.commit()
+    df = pd.DataFrame(rows, columns=[
+        "nhl_game_id", "event_type", "period_type", "situation_code",
+        "shooting_team", "goalie_id", "xg", "xg_model_version"])
+    if df.empty:
+        return df
+    kind = _obj(df["event_type"])
+    keep = kind.isin(UNBLOCKED) & (_obj(df["period_type"]) != "SO")
+    out = df[keep.astype(bool)].copy()
+    out["goal"] = (_obj(out["event_type"]) == "goal").astype(int)
+    out["on_goal"] = _obj(out["event_type"]).isin(("shot-on-goal", "goal")).astype(int)
+    out["is_5v5"] = (_obj(out["situation_code"]) == FIVE_ON_FIVE).astype(int)
+    out["unscored"] = out["xg"].isna().astype(int)
+    out["xg0"] = out["xg"].fillna(0.0)
+    return out
+
+
+def apply_missing(apply: bool) -> dict:
+    """Team and goalie xG for games that have shots and no team-game row yet.
+
+    The full rebuild reads every shot into a parquet and checks it against
+    the whole stored xG. A morning catch-up only has the new games, so it
+    does not do that.
+    """
+    conn = get_connection()
+    try:
+        ids = [r[0] for r in conn.execute(MISSING_GAMES_SQL).fetchall()]
+        conn.commit()
+        if not ids:
+            logger.info("nhl xG aggregates: no games missing a team row")
+            return {"games": 0, "team_rows": 0, "goalie_rows": 0}
+        att = _attempts_for(conn, ids)
+        log = _read(
+            "SELECT nhl_game_id, team, opponent, is_home, game_id, season, game_type, "
+            "game_date, goals_for FROM nhl_team_game_log WHERE nhl_game_id = ANY(?)",
+            ["nhl_game_id", "team", "opponent", "is_home", "game_id", "season",
+             "game_type", "game_date", "goals_for"], (list(ids),))
+        goalie_log = _read(
+            "SELECT nhl_game_id, player_id, started, goals_against, shots_against "
+            "FROM nhl_goalie_game_log WHERE nhl_game_id = ANY(?)",
+            ["nhl_game_id", "player_id", "started", "goals_against", "shots_against"],
+            (list(ids),))
+    finally:
+        conn.close()
+    if att.empty:
+        logger.warning(f"{len(ids)} games have shots but no unblocked attempt; not aggregating")
+        return {"games": len(ids), "team_rows": 0, "goalie_rows": 0}
+    versions = [v for v in att["xg_model_version"].dropna().unique()]
+    version = versions[0] if len(versions) == 1 else (versions[-1] if versions else "unscored")
+    if len(versions) > 1:
+        logger.warning(f"new games carry more than one xG version: {versions}; "
+                       f"stamping {version}")
+    log = log[log["nhl_game_id"].isin(att["nhl_game_id"].unique())]
+    team = build_team_rows(att, log, str(version))
+    if att["goalie_id"].notna().any():
+        goalie = build_goalie_rows(att, log, goalie_log, str(version))
+    else:
+        goalie = pd.DataFrame(columns=list(GOALIE_COLS))
+    if len(team) and len(goalie):
+        report(team, goalie, log)
+    if len(goalie) and goalie["team"].isna().any():
+        raise RuntimeError("goalie rows without a team -- not writing")
+    if apply:
+        write("nhl_team_game_xg", ("nhl_game_id", "team"), TEAM_COLS, team)
+        if len(goalie):
+            write("nhl_goalie_game_xg", ("nhl_game_id", "goalie_id"), GOALIE_COLS, goalie)
+    return {"games": len(ids), "team_rows": len(team), "goalie_rows": len(goalie)}
+
+
 def run(apply: bool) -> None:
     att, version = attempts_frame()
     log = _read("SELECT nhl_game_id, team, opponent, is_home, game_id, season, game_type, "

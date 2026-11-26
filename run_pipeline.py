@@ -731,6 +731,59 @@ def step_nhl_game_logs(run_date: str) -> bool:
         return False
 
 
+def step_nhl_shots(run_date: str, dry_run: bool = False) -> bool:
+    """Play-by-play shots for the current season, then xG on the new ones.
+
+    The ingestor was a one-off. Nothing in the scheduler called it, so
+    nhl_shot_events and the two xG tables stopped on 2026-10-12 while the
+    game logs kept moving. It skips a game it already stored. A game whose
+    feed did not answer is a failed step, not a quiet morning.
+    """
+    if dry_run:
+        logger.info("NHL shots: dry run, not fetching")
+        return True
+    try:
+        from data.season_labels import nhl_season_label
+        from data.ingestors.nhl_shot_events import run as shot_run
+        from data.nhl_xg import score_unscored
+        from data.nhl_xg_aggregates import apply_missing
+        season = nhl_season_label(run_date)
+        result = shot_run(season, season, apply=True)
+        failed = result.get("failed") or {}
+        scored = score_unscored(apply=True)
+        rolled = apply_missing(apply=True)
+        if failed:
+            logger.error(f"✗ NHL shots: {len(failed)} games not stored; "
+                         f"xG {scored}; aggregates {rolled}")
+            return False
+        logger.success(f"✓ NHL shots: {result.get('games')} games, "
+                       f"{result.get('rows')} rows; xG {scored}; aggregates {rolled}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL shots failed: {exc}")
+        return False
+
+
+def step_moneypuck(run_date: str, dry_run: bool = False) -> bool:
+    """MoneyPuck.com's current-season files. Credit MoneyPuck.com.
+
+    One download per file. Not a pick input. A failed download or an empty
+    file fails the step so the scheduler logs it.
+    """
+    if dry_run:
+        logger.info("MoneyPuck: dry run, not fetching")
+        return True
+    try:
+        from data.ingestors.moneypuck_nhl import daily
+        result = daily(run_date, apply=True)
+        logger.success(f"✓ MoneyPuck.com: {result['written']} rows, "
+                       f"{len(result['files'])} files")
+        return bool(result.get("ok"))
+    except Exception as exc:
+        logger.error(f"✗ MoneyPuck.com failed: {exc}")
+        return False
+
+
 def step_weather(run_date: str, max_age_min: int | None = None,
                  ahead_days: int | None = None) -> bool:
     """Fetch and store weather for run_date AND the look-ahead window, from
@@ -2962,6 +3015,14 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
             checkpoint("prune_app_timings")
             results["prune_app_timings"] = step_prune_app_timings(run_date)
 
+        # Shots and xG. After the logs (step 0h1) and after settlement, so a
+        # catch-up of a few hundred games does not hold the morning recap.
+        # The health check below is what stays red if this step stops again.
+        if not dry_run:
+            logger.info("Step 11d: NHL shot events and xG (current season)...")
+            checkpoint("nhl_shots")
+            results["nhl_shots"] = step_nhl_shots(run_date, dry_run=dry_run)
+
         # ── Step 12: System health check (feed freshness — after all ingestion) ────
         # Daily: CRIT failure returns False → the run shows red. Results land in
         # system_health_checks (anon-readable) for Claude mobile / the app.
@@ -3199,6 +3260,7 @@ Examples:
                                  "nba-total-luck", "nba-team-total-luck", "nba-first-half-total-luck", "nba-q1-trend",
                                  "nba-q1-trend-ml",
                                  "nhl-over-under", "nhl-best-bet-night", "nhl-odds",
+                                 "nhl-shots", "moneypuck-nhl",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "nhl-schedule", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
@@ -3292,6 +3354,8 @@ Examples:
             "nhl-over-under": lambda: step_nhl_over_under(dry_run=args.dry_run),
             "nhl-best-bet-night": lambda: step_nhl_best_bet_night(dry_run=args.dry_run),
             "nhl-odds":     lambda: step_nhl_odds(run_date),
+            "nhl-shots":    lambda: step_nhl_shots(run_date, dry_run=args.dry_run),
+            "moneypuck-nhl": lambda: step_moneypuck(run_date, dry_run=args.dry_run),
             "nhl-goalie-designations": lambda: step_nhl_goalie_designations(),
             "nhl-goalie-designations-today": lambda: step_nhl_goalie_designations(today_only=True),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),

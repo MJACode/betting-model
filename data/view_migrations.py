@@ -860,6 +860,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # _p1, ...). Runs while scoreboard_splits_history_market_period_check is
     # missing or the old market check remains.
     "scoreboard_splits_period_markets_2026_11_26.sql",
+    # MoneyPuck.com NHL files (shots, team / skater / goalie / line
+    # game-by-game, player bios). Research rows, not a pick input.
+    # Credit MoneyPuck.com. Creates the tables once; the 7:20am job fills
+    # the current season and the backfill command fills the history.
+    "moneypuck_nhl_2026_11_26.sql",
     # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
     # monitor's page, written by mike's PC (pc_monitor/) and served to his
     # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,
