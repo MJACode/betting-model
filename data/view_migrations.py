@@ -849,6 +849,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # (Matt, 2026-11-25). Runs while mcp_stats.game_prices has no `period`
     # column or prop_markets has no anytime_td row.
     "mcp_stats_all_markets_2026_11_25.sql",
+    # Period splits (Matt, 2026-11-26): scoreboard_splits_history's market
+    # check also allows h2h/spreads/totals with one period suffix (_h1, _q1,
+    # _p1, ...). Runs while scoreboard_splits_history_market_period_check is
+    # missing or the old market check remains.
+    "scoreboard_splits_period_markets_2026_11_26.sql",
     # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
     # monitor's page, written by mike's PC (pc_monitor/) and served to his
     # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,
