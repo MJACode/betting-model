@@ -100,16 +100,19 @@ def test_title_game_names_one_game_or_none():
 
 
 class _Conn:
-    def __init__(self, seen=()):
-        self.seen = list(seen)
-        self.articles, self.rows = [], []
+    def __init__(self, kept=(), empty=()):
+        self.kept, self.empty = list(kept), list(empty)    # versions with tables kept / ledgered with no table
+        self.articles, self.rows, self.tables = [], [], []
 
     def execute(self, sql, params=None):
         rows = []
         if "to_regclass" in sql:
             rows = [(True,)]
+        elif "FROM public.dk_prop_split_tables" in sql:
+            rows = self.kept
         elif "FROM public.dk_prop_split_articles" in sql:
-            rows = self.seen
+            assert "rows_stored = 0 AND tables_skipped = 0" in sql
+            rows = self.empty
         elif "FROM public.games" in sql:
             rows = [(g["game_id"], g["game_date"], g["home_team"], g["away_team"]) for g in GAMES]
         elif "INSERT INTO public.dk_prop_split_articles" in sql:
@@ -117,7 +120,10 @@ class _Conn:
         return type("C", (), {"fetchone": lambda s: rows[0] if rows else None, "fetchall": lambda s: rows})()
 
     def executemany(self, sql, rows):
-        assert "INSERT INTO public.dk_prop_splits" in sql
+        if "INSERT INTO public.dk_prop_split_tables" in sql:
+            self.tables.extend(rows)
+            return
+        assert "INSERT INTO public.dk_prop_splits\n" in sql
         self.rows.extend(rows)
 
     def commit(self):
@@ -153,18 +159,50 @@ def test_run_stores_a_new_version_with_its_game_and_ledger_row(monkeypatch):
     (art,) = conn.articles
     assert art["rows_stored"] == 3 and art["tables_skipped"] == 1 and art["game_id"] == "NFL_2026_12_CIN_WAS"
     assert art["updated_text"] == "Updated Monday, Nov. 23 at 6:04 p.m. ET."
+    # Every table kept as printed, the rank list included, with the layout only where one was parsed.
+    assert [(t["table_no"], t["layout"], json.loads(t["header"])[0]) for t in conn.tables] == [
+        (1, None, "rank"), (2, "side_line", "player")]
+    assert json.loads(conn.tables[0]["body"]) == [["1", "Ja’Marr Chase", "Ja’Marr Chase"]]
     # The search is asked newest first, and the non-prop post's body is never fetched.
     assert asked[0][1]["orderby"] == "date" and asked[0][1]["order"] == "desc"
     assert [u for u, _ in asked].count(f"{dps.WP_POSTS}/481849") == 1
 
 
-def test_run_does_not_fetch_a_version_already_in_the_ledger(monkeypatch):
+V = datetime(2026, 11, 23, 23, 4, tzinfo=timezone.utc)
+
+
+def test_run_does_not_fetch_a_version_whose_tables_are_kept(monkeypatch):
     monkeypatch.setattr(dps.time, "sleep", lambda s: None)
     asked: list = []
-    conn = _Conn(seen=[(481849, datetime(2026, 11, 23, 23, 4, tzinfo=timezone.utc))])
+    conn = _Conn(kept=[(481849, V)])
     out = dps.run(conn, pages=1, get=_get(asked))
     assert out["new_versions"] == 0 and conn.rows == [] and conn.articles == []
     assert all(u == dps.WP_POSTS for u, _ in asked)
+
+
+def test_run_does_not_fetch_a_version_the_ledger_shows_had_no_table(monkeypatch):
+    monkeypatch.setattr(dps.time, "sleep", lambda s: None)
+    asked: list = []
+    out = dps.run(_Conn(empty=[(481849, V)]), pages=1, get=_get(asked))
+    assert out["new_versions"] == 0 and all(u == dps.WP_POSTS for u, _ in asked)
+
+
+def test_a_version_read_before_its_tables_were_kept_is_read_once_more():
+    # 2026-11-26: 31 versions ledgered with 0 rows and skipped tables, none kept. Neither skip set holds them,
+    # and the ledger row that recorded nothing stored takes the new counts; a row with rows is never rewritten.
+    sql = " ".join(dps.ARTICLE_SQL.split())
+    assert "DO UPDATE SET rows_stored = EXCLUDED.rows_stored, tables_skipped = EXCLUDED.tables_skipped" in sql
+    assert "WHERE public.dk_prop_split_articles.rows_stored = 0 AND EXCLUDED.rows_stored > 0" in sql
+
+
+def test_raw_table_migration_is_guarded_locked_down_and_after_the_first():
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    name = "dk_prop_split_tables_2026_11_26.sql"
+    assert ACTIVE_MIGRATIONS.index(name) > ACTIVE_MIGRATIONS.index("dk_prop_splits_2026_11_26.sql")
+    sql = (ROOT / "data" / "migrations" / name).read_text(encoding="utf-8")
+    assert sql.index("RETURN;") < sql.index("CREATE TABLE")
+    assert "ALTER TABLE public.dk_prop_split_tables ENABLE ROW LEVEL SECURITY" in sql
+    assert "REVOKE ALL ON public.dk_prop_split_tables FROM anon, authenticated" in sql
 
 
 def test_migration_is_guarded_locked_down_and_active():
@@ -185,5 +223,6 @@ def test_wired_into_the_splits_step_and_a_declared_backfill():
     from tracking import job_queue
     assert job_queue.JOBS["dk_prop_splits_import"][1]({"pages": 50}) == {"pages": 50}
     declared = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
-    (entry,) = [d for d in declared if d.get("job_type") == "dk_prop_splits_import"]
-    assert entry["args"] == {"pages": 50} and entry["requested_by"] == "mike"
+    entries = [d for d in declared if d.get("job_type") == "dk_prop_splits_import"]
+    assert [d["key"] for d in entries] == ["dk-prop-splits-backfill-2026-11-26", "dk-prop-splits-raw-tables-2026-11-26"]
+    assert all(d["args"] == {"pages": 50} and d["requested_by"] == "mike" for d in entries)
