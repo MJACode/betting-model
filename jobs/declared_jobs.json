@@ -2043,5 +2043,14 @@
     "args": {
       "pages": 50
     }
+  },
+  {
+    "key": "dk-prop-splits-reparse-2026-11-26",
+    "job_type": "dk_prop_splits_import",
+    "requested_by": "mike",
+    "note": "mike 2026-11-26: parse the 31 article versions whose tables are kept in dk_prop_split_tables but whose layout no earlier parser read (five layouts, every cell shape in the 3,162 kept rows). The pass re-parses from the database; one search page, no page refetched. Free, no Odds API credits.",
+    "args": {
+      "pages": 1
+    }
   }
 ]
