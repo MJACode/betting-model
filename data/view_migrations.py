@@ -871,6 +871,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Credit MoneyPuck.com. Creates the tables once; the 7:20am job fills
     # the current season and the backfill command fills the history.
     "moneypuck_nhl_2026_11_26.sql",
+    # NHL shift charts, right-rail officials and scratches, Daily Faceoff
+    # line snapshots, and NHL EDGE season-to-date snapshots. Research
+    # rows, not a pick input. Creates the tables once. The morning steps
+    # and the crons fill them; the shift and right-rail backfill commands
+    # fill 2023-24 through the current season. EDGE has no backfill.
+    "nhl_free_feeds_2026_11_26.sql",
     # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
     # monitor's page, written by mike's PC (pc_monitor/) and served to his
     # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,
