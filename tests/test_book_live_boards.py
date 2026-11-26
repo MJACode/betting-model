@@ -14,7 +14,11 @@ Pinned here:
     book alone for BACKOFF_SEC; a network error never raises;
   * at most CAPTURES_PER_DAY raw answers per book, sport and status a day,
     one an hour; the public web keys never reach the stored URL;
-  * the board starts the thread beside itself and restarts on its file.
+  * the board starts the thread beside itself and restarts on its file;
+  * book_live_reads: what each book has on offer at each clean read, a
+    suspended market and a game leaving the page included, the answer's own
+    age, and each game's first row after a start marked; a refused or failed
+    read records nothing, and a failed write is written again.
 """
 from __future__ import annotations
 
@@ -274,9 +278,10 @@ def test_one_betrivers_answer_serves_every_basketball_sport():
 
 
 class Resp:
-    def __init__(self, code, body=None, text=None):
+    def __init__(self, code, body=None, text=None, headers=None):
         import json
         self.status_code = code
+        self.headers = headers or {}
         self.text = text if text is not None else (json.dumps(body) if body is not None else "")
 
 
@@ -300,6 +305,10 @@ class Conn:
     def execute(self, sql, params=None):
         self.sql.append((sql, params))
         return self
+
+    def executemany(self, sql, rows):
+        for r in rows:
+            self.sql.append((sql, r))
 
     def fetchall(self):
         return []
@@ -553,3 +562,124 @@ def test_no_two_requests_are_closer_than_the_min_gap():
     f.pass_once()                                                    # FanDuel NBA and NHL are both due
     assert len([u for u in sess.urls if "fanduel" in u]) >= 2        # two real requests
     assert any(abs(s - L.MIN_REQUEST_GAP_SEC) < 1e-9 for s in sleeps)  # spaced by the min gap
+
+
+# ── book_live_reads: what each book has on offer at each read ────────────────
+
+def _read(f, sport="NBA"):
+    """One fresh read: back-to-back reads of one URL inside SHARED_READ_SEC
+    would reuse the first answer."""
+    f.shared.clear()
+    return f.read(FANDUEL, sport)
+
+
+def _offers(conn):
+    """The book_live_reads rows written, as dicts, in order."""
+    return [dict(zip(L.READS_COLS, p)) for sql, p in conn.sql if "INSERT INTO book_live_reads" in sql]
+
+
+def test_the_offer_columns_are_the_boards_line_columns():
+    assert L.READ_LINE_COLS == B.LINE_KEYS
+    assert L.READS_INSERT.count("%s") == len(L.READS_COLS)
+
+
+def test_a_clean_read_records_the_games_numbers_once_and_marks_its_first_row():
+    f, conn, _logged, _ = feeds(lambda url: Resp(200, fanduel_page()))
+    _read(f)
+    [row] = _offers(conn)
+    assert (row["book"], row["sport"], row["game_id"], row["after_start"]) == ("fanduel", "NBA", "NBA_G1", True)
+    assert (row["spread_home"], row["spread_home_price"], row["spread_away_price"]) == (7.5, -125.0, -106.0)
+    assert (row["total_line"], row["home_ml"], row["away_ml"]) == (230.5, 260.0, -360.0)
+    _read(f)
+    assert len(_offers(conn)) == 1                         # nothing changed, nothing written
+
+
+def test_a_suspended_market_is_a_row_with_that_market_null():
+    pages = [fanduel_page(), fanduel_page()]
+    pages[1]["attachments"]["markets"]["m2"]["marketStatus"] = "SUSPENDED"
+    f, conn, logged, _ = feeds(lambda url: Resp(200, pages.pop(0)))
+    _read(f)
+    n_odds = len(logged)
+    _read(f)
+    assert len(logged) == n_odds                           # `odds` cannot see the suspension
+    first, second = _offers(conn)
+    assert second["after_start"] is False
+    assert (second["spread_home"], second["spread_home_price"], second["spread_away_price"]) == (None, None, None)
+    assert second["total_line"] == 230.5 and second["home_ml"] == 260.0
+
+
+def test_a_game_that_leaves_the_page_gets_one_all_null_row():
+    empty = fanduel_page(in_play=False)
+    pages = [fanduel_page(), empty, empty]
+    f, conn, _logged, _ = feeds(lambda url: Resp(200, pages.pop(0)))
+    for _ in range(3):
+        _read(f)
+    first, gone = _offers(conn)
+    assert gone["game_id"] == "NBA_G1" and gone["after_start"] is False
+    assert all(gone[c] is None for c in L.READ_LINE_COLS)
+
+
+def test_a_game_back_on_the_page_is_written_without_the_start_mark():
+    pages = [fanduel_page(), fanduel_page(in_play=False), fanduel_page()]
+    f, conn, _logged, _ = feeds(lambda url: Resp(200, pages.pop(0)))
+    for _ in range(3):
+        _read(f)
+    back = _offers(conn)[-1]
+    assert back["after_start"] is False and back["spread_home"] == 7.5
+
+
+def test_a_refused_or_failed_read_records_nothing_and_takes_no_game_off():
+    answers = [Resp(200, fanduel_page()), Resp(403, text="<html>blocked</html>"), ConnectionError("down"),
+               Resp(200, fanduel_page())]
+    f, conn, _logged, _ = feeds(lambda url: answers.pop(0))
+    for _ in range(4):
+        _read(f)
+    assert len(_offers(conn)) == 1                         # only the first clean read
+
+
+def test_a_restart_marks_each_games_first_row_again():
+    f, conn, _logged, _ = feeds(lambda url: Resp(200, fanduel_page()))
+    _read(f)
+    g, conn2, _logged2, _ = feeds(lambda url: Resp(200, fanduel_page()))
+    _read(g)
+    [row] = _offers(conn2)
+    assert row["after_start"] is True
+
+
+def test_the_answers_own_age_is_kept_on_the_rows_and_the_feed():
+    f, conn, _logged, _ = feeds(lambda url: Resp(200, fanduel_page(), headers={"Age": "13"}))
+    _read(f)
+    [row] = _offers(conn)
+    assert row["page_age_s"] == 13.0
+    feed = [p for sql, p in conn.sql if "INSERT INTO book_live_feed" in sql]
+    assert feed[-1][-1] == 13.0
+    assert L.page_age(Resp(200, {}, headers={})) is None
+    assert L.page_age(Resp(200, {}, headers={"age": "x"})) is None
+
+
+def test_a_failed_write_is_written_again_on_the_next_clean_read():
+    f, conn, _logged, _ = feeds(lambda url: Resp(200, fanduel_page()))
+    calls = {"n": 0}
+    real = conn.executemany
+
+    def flaky(sql, rows):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("connection lost")
+        real(sql, rows)
+    conn.executemany = flaky
+    _read(f)
+    assert _offers(conn) == []
+    _read(f)
+    [row] = _offers(conn)
+    assert row["after_start"] is True
+
+
+def test_the_offer_table_is_created_guarded_locked_down_and_classified():
+    from data import anon_readable
+    src = (ROOT / "data/ingestors/book_live_boards.py").read_text(encoding="utf-8")
+    ensure = src[src.index("def ensure_tables("):src.index("def _et_day(")]
+    assert "schema_is_current(conn, READS_TABLE" in ensure and "lock_down(conn, READS_TABLE)" in ensure
+    assert "FEED_ALTER" in ensure
+    assert "book_live_reads" in (ROOT / "data/anon_readable.py").read_text(encoding="utf-8")
+    assert "page_age_s" in L.FEED_COLS

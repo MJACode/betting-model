@@ -304,6 +304,54 @@ read is under 8 s old; otherwise it decides the old way.
 On every fast path DraftKings is the only book a decision bets (the others are
 the provider's ~30 s-old copies), and the ledger or log names the board.
 
+### Best line on the fast path: where it stands (2026-11-26, mike: "We want best line")
+
+**Which book each in-play model bets, measured on its bets since 2026-11-13**
+(`picks` where `is_live`, BET; the ledgers' `reason` says which path decided):
+
+| Model | How it decides | Bets at DraftKings / elsewhere |
+|---|---|---|
+| NCAAB (three) | fast path: DraftKings only (`evaluate_states(..., (DK.BOOK,))`); slow path when the board is not live: the deciding books | 21 / 1 (the one, BetMGM, was a slow-path decision) |
+| NBA quarters 1-2 spread | fast path: DraftKings only (`FAST_BOOKS`); slow path: the eight deciding books | 4 / 2 (both slow path) |
+| NCAAF win probability and total | fast path: DraftKings only (`gameday.with_dk`) | no in-play bet in the window |
+| NFL late-game leader | DraftKings only, always (`nfl_live_leader/odds.py` asks for DraftKings) | 1 / 0 |
+| Women's halftime total | best of the deciding books (DraftKings off its board, the others the provider's copies) | 21 / 22 |
+| EuroLeague halftime spread | best of five books, the provider's copies (DraftKings' board is not read) | 2 / 4 |
+
+**The other books' own pages are display only.** FanDuel's and BetRivers'
+live lines (`odds` rows, source `<book>_board`, from mike's machine since
+2026-11-26 00:14Z / 03:19Z) feed the app's "Live at your books" sheet. No
+decision reads them: the only readers of other books' in-play rows
+(`scorer._live_book_quotes` / `_best_live_price`) serve MLB and NCAAF, which
+the feed does not write, and `latest_odds` holds no in-play rows.
+
+**Why they cannot simply join the fast path, measured 2026-11-26** (games both
+books carried, 00:14Z-17:30Z):
+
+- **They reprice later than DraftKings after a score.** Our reads showed a new
+  spread a median 20.2 s after DraftKings' score changed in NCAAB on FanDuel
+  (p90 56.9 s), 13.7 s on BetRivers (p90 27.5 s); NBA 18.8 s and 17.0 s.
+  DraftKings moved in the same read (median 0.0 s). Each book was re-read
+  every 1.7 s at 17:30Z, so that lag is the book's or its cache's, not ours
+  (the cadence was sampled with two sports live, not last night's four).
+- **FanDuel's page is a cache.** CloudFront, `max-age=30,
+  stale-while-revalidate=60`; one answer was 13 s old, two more 19 and 21 s.
+- **`odds` cannot say what is on offer.** A suspended market adds no row, so
+  the last number reads as current, and a feed restart writes every number as
+  new. `book_live_reads` (`docs/local_ops.md`) is the record that can; it
+  starts when this change reaches mike's machine.
+- **The prize, on DraftKings' own line only:** at the 42 fast NCAAB decisions
+  since FanDuel's feed began, FanDuel quoted a better price on DraftKings' line
+  3 times (1 of them a number up before the last score), BetRivers once. A
+  different line can also be better; only the model can say, which is the next
+  change's dry run.
+
+**Next:** the loops read `book_live_reads` and take another book's number
+only while that book's feed is fresh, the number is on offer, it was up after
+the game's last score (on the page's own clock, `read_at - page_age_s`), and
+it is not a first row after a start. The women's halftime total first (the
+score is frozen at the break), then NCAAB and NBA.
+
 ## NBA in play: the game-state model's quarters 1-2 spread (2026-11-04, mike)
 
 The full story, the evidence and the warning signs are in `docs/sports/nba.md`,
