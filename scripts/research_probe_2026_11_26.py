@@ -464,9 +464,32 @@ def probe_poly2() -> None:
         say("poly2", "docs", d.status_code, page_text(d.text)[:1500])
 
 
+def probe_dk2() -> None:
+    """The splits page asked for other event groups directly. The page's own links name
+    only NFL (88808) on the first run, so discovery finds nothing else. The ids are
+    DraftKings' own, as data/ingestors/dk_live_board.LEAGUES records them (NBA 42648,
+    NCAAB 92483, NCAAF 87637); 42133 is a candidate for NHL, kept only if the parsed
+    teams are NHL teams."""
+    from data.ingestors import dk_splits
+    now = datetime.now(timezone.utc)
+    for sport, eg in (("NBA", "42648"), ("NCAAB", "92483"), ("NCAAF", "87637"), ("NHL?", "42133")):
+        r = get(dk_splits.DK_URL, {"tb_eg": eg, "tb_edate": "n7days", "tb_emt": "0", "tb_page": "1"},
+                timeout=60, headers={"User-Agent": UA, "Accept": "text/html"})
+        if not isinstance(r, requests.Response) or r.status_code != 200:
+            say("dk2", sport, eg, "HTTP", getattr(r, "status_code", repr(r)))
+            continue
+        games = dk_splits.parse_page(dk_splits.page_text(r.text), now)
+        say("dk2", sport, eg, "games parsed", len(games),
+            [(g["away"], g["home"], g["date"], sorted(f"{k[0]}:{k[1]}" for k in g["sides"]))
+             for g in games[:6]])
+        if games:
+            g = games[0]
+            say("dk2", sport, "first game sides", {f"{k[0]}:{k[1]}": v for k, v in g["sides"].items()})
+
+
 SECTIONS = {"props": probe_props, "kalshi": probe_kalshi, "poly": probe_poly,
             "wayback": probe_wayback, "dk": probe_dk, "pages": probe_pages,
-            "kalshi2": probe_kalshi2, "poly2": probe_poly2}
+            "kalshi2": probe_kalshi2, "poly2": probe_poly2, "dk2": probe_dk2}
 
 
 def main(argv: list[str]) -> None:
