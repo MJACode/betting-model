@@ -61,7 +61,70 @@ def page(path: str, s: requests.Session) -> str:
     return body
 
 
+def hydrate(data: list, i: int, seen=None):
+    """SvelteKit's __data.json is `devalue`-encoded: values are indices into one flat array."""
+    if i < 0:
+        return None                                  # -1 undefined, -3 NaN, ... : none matter here
+    v = data[i]
+    if isinstance(v, dict):
+        return {k: hydrate(data, j) for k, j in v.items()}
+    if isinstance(v, list):
+        if v and isinstance(v[0], str) and v[0] in ("Date", "Set", "Map", "BigInt", "RegExp"):
+            return v[1] if len(v) > 1 else None
+        return [hydrate(data, j) for j in v]
+    return v
+
+
+def decoded(body: str) -> list:
+    out = []
+    for node in json.loads(body).get("nodes") or []:
+        if isinstance(node, dict) and node.get("type") == "data" and node.get("data"):
+            out.append(hydrate(node["data"], 0))
+    return out
+
+
+def walk(x, path="", found=None):
+    """Every dict that has a p_* key: where it sits, and one example."""
+    found = {} if found is None else found
+    if isinstance(x, dict):
+        pk = sorted(k for k in x if k.startswith("p_"))
+        if pk and path not in found:
+            found[path] = {k: x[k] for k in list(x)[:60]}
+        for k, v in x.items():
+            walk(v, f"{path}.{k}", found)
+    elif isinstance(x, list):
+        for v in x[:3]:
+            walk(v, f"{path}[]", found)
+    return found
+
+
+def decode_games() -> None:
+    s = requests.Session()
+    for gid in ("22301000", "22401168", "22501115"):
+        r = s.get(f"{BASE}/games/{gid}/__data.json", headers=UA, timeout=30)
+        log("decode", gid, "HTTP", r.status_code, "len", len(r.text))
+        try:
+            nodes = decoded(r.text)
+        except Exception as exc:  # noqa: BLE001
+            log("decode", gid, "ERROR", repr(exc), r.text[:300])
+            continue
+        for n, node in enumerate(nodes):
+            if isinstance(node, dict):
+                log("decode", gid, "node", n, "keys", json.dumps(sorted(node)[:80]))
+                for k in ("has_access", "has_custom", "game_info"):
+                    if k in node:
+                        log("decode", gid, "node", n, k, json.dumps(node[k], default=str)[:1500])
+        for path, ex in walk(nodes).items():
+            log("decode", gid, "p_dict", path, json.dumps(ex, default=str)[:2500])
+        time.sleep(1.5)
+    log("done")
+
+
 def main() -> None:
+    import sys
+    if "--decode" in sys.argv:
+        decode_games()
+        return
     s = requests.Session()
     game_links: list[str] = []
     for p in PAGES:
