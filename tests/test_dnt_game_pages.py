@@ -80,3 +80,36 @@ def test_rows_keep_the_free_predictions_and_the_actuals():
 def test_a_box_row_without_a_player_id_is_skipped():
     node = {"game_info": {"game_dt": "2024-03-20"}, "box": [{"player_name": "Team"}, None]}
     assert dnt.rows_for(1, node, None)[1] == []
+
+
+def test_a_429_is_waited_out_on_the_same_page_and_the_wait_follows_retry_after():
+    assert dnt.backoff_s("30", 1) == 30.0
+    assert dnt.backoff_s(None, 1) == dnt.BACKOFF_S and dnt.backoff_s(None, 3) == dnt.BACKOFF_S * 4
+    assert dnt.backoff_s(None, 20) == 900.0 and dnt.backoff_s("soon", 2) == dnt.BACKOFF_S * 2
+
+    class _R:
+        def __init__(self, code):
+            self.status_code, self.headers = code, {"Retry-After": "1"}
+
+    class _S:
+        def __init__(self, codes):
+            self.codes, self.asked = list(codes), []
+
+        def get(self, url, **kw):
+            self.asked.append(url)
+            return _R(self.codes.pop(0))
+
+    slept = []
+    import data.ingestors.dnt_game_pages as mod
+    orig = mod.time.sleep
+    mod.time.sleep = slept.append
+    try:
+        s = _S([429, 429, 200])
+        stats = {"http_429_waits": 0}
+        r = dnt.get_page(s, 22300010, stats)
+        assert r.status_code == 200 and len(set(s.asked)) == 1 and stats["http_429_waits"] == 2
+        s = _S([429] * dnt.MAX_429)
+        assert dnt.get_page(s, 22300011, {"http_429_waits": 0}) is None   # the run stops
+    finally:
+        mod.time.sleep = orig
+    assert slept and all(x == 1.0 for x in slept)

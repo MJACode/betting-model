@@ -43,7 +43,12 @@ from loguru import logger
 
 BASE = "https://dunksandthrees.com"
 SOURCE = "dnt_free_game_page"
-PACE_S = 1.2
+PACE_S = 3.0
+# The site answers 429 after about 170 pages at one every 1.2-1.5 s (measured 2026-11-27). On a
+# 429 the same id is asked again after a wait (their Retry-After, else BACKOFF_S doubling), and
+# the run stops after MAX_429 in a row rather than keep asking.
+BACKOFF_S = 60
+MAX_429 = 6
 UA = {"User-Agent": "Mozilla/5.0 (research; betting-model)", "Accept": "application/json"}
 # Their ids: 2, the season's starting year's last two digits, then the game number (5 digits).
 # A regular season is 1,230 games; ids past the last one answer 404 and are ledgered as such.
@@ -235,6 +240,29 @@ def _ledger(conn, row: dict) -> None:
     conn.commit()
 
 
+def backoff_s(retry_after: str | None, attempt: int) -> float:
+    """Seconds to wait after the attempt-th 429 in a row (1 = first)."""
+    try:
+        if retry_after is not None:
+            return min(900.0, max(1.0, float(retry_after)))
+    except ValueError:
+        pass
+    return min(900.0, BACKOFF_S * 2 ** (attempt - 1))
+
+
+def get_page(s: requests.Session, dnt_id: int, stats: dict) -> requests.Response | None:
+    """The page, waiting out a 429; None after MAX_429 in a row (the caller stops the run)."""
+    for attempt in range(1, MAX_429 + 1):
+        r = s.get(f"{BASE}/games/{dnt_id}/__data.json", headers=UA, timeout=40)
+        if r.status_code != 429:
+            return r
+        stats["http_429_waits"] += 1
+        wait = backoff_s(r.headers.get("Retry-After"), attempt)
+        logger.warning(f"D&T {dnt_id}: 429, waiting {wait:.0f}s (attempt {attempt})")
+        time.sleep(wait)
+    return None
+
+
 def run(seasons: tuple[int, ...], apply: bool, limit: int | None) -> dict:
     from data.db import get_connection
     conn = get_connection()
@@ -263,11 +291,15 @@ def run(seasons: tuple[int, ...], apply: bool, limit: int | None) -> dict:
                 continue                          # past this season's last game: stop asking
             time.sleep(PACE_S)
             try:
-                r = s.get(f"{BASE}/games/{dnt_id}/__data.json", headers=UA, timeout=40)
+                r = get_page(s, dnt_id, stats)
             except Exception as exc:  # noqa: BLE001 - not ledgered: the next run tries again
                 stats["network_error"] += 1
                 logger.warning(f"D&T {dnt_id}: {exc!r}")
                 continue
+            if r is None:
+                stats["stopped_on_429"] = dnt_id      # not ledgered: the next run starts here
+                logger.error(f"D&T game pages: still 429 after {MAX_429} waits at {dnt_id}; stopping")
+                break
             base = {"dnt_game_id": dnt_id, "source": SOURCE, "http_status": r.status_code,
                     "status_id": None, "n_players": 0, "game_id": None, "note": None}
             if r.status_code == 404:
