@@ -695,8 +695,9 @@ with a time and projected lineups at $39.99 a month; 401 without a key, nothing 
 `python -m data.ingestors.nba_box_enrich --seasons 2027 2027`, run from mike's PC at 18:51 UTC.
 Read back on production: enriched boxes 7,518 rows over 270 games, referee crews 811 rows over
 270 games, inactive lists 2,245 rows over 265 games, each to 2026-11-25; 270 games of 2026-27
-had a final score. The five games with no inactive rows are not named here: the source file lists
-none for them (F2: the league's lineup file has no inactive rows for 2026-10-21 and 10-22).
+had a final score. The five games with no inactive rows are all of 2026-10-26: DAL at MIA,
+GSW at DEN, IND at MIL, MEM at UTA and PHX at OKC (the source file has none for that date). The
+league's lineup file for that date is the route to fill them (#1674); not done.
 The load now runs once a day from the PC's `NbaFeeds` task (G4).
 
 ### G2. What is saved, and how
