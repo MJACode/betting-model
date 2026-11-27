@@ -192,3 +192,6 @@ graphify-out/.graphify_*.json
 
 # Disposable master-baseline worktrees (CLAUDE.md section 7)
 .claude/worktrees/
+# Local tools on mike's PC: a scratch Postgres (its data, logs and password
+# file) and a bun install. Never committed, and never read into the code graph.
+.claude/tools/
