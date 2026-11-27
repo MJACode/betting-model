@@ -411,6 +411,17 @@ unchanged. `NBA_LIVE_OTHER_BOOKS=0` turns it off. The model is paused under
 the low-volume NBA plan (mike, 2026-11-22), so this bets nothing while that
 holds.
 
+**NFL late-game leader too** (2026-11-27, `nfl_live_leader/gameday.py`
+`other_book_prices` / `best_book_decision`, issue #1652). On the fast path,
+another book's own-page moneyline on the leader's side takes the bet when it
+has the higher expected value. It must be confirmed by a later read, have
+stood 10 s, and have been set after the last score our state saw. It uses the
+same model, state and cut; a tie keeps DraftKings. DraftKings' own price stays
+in the DraftKings columns as the reference. The backtest's best-of-books gain
+was a stale book (William Hill unchanged after a score in 19.8% of 2024
+snapshots, `docs/nfl_edge_search.md`); this gate exists to refuse exactly
+that. `NFL_LIVE_LEADER_OTHER_BOOKS=0` turns it off.
+
 **Next:** the women's halftime total waits on a comparison of the provider's
 copies with the books' own pages at the break: it already bets elsewhere (22
 of 43), and its rule counts every book's row.
