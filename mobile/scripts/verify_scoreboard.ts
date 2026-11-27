@@ -9,6 +9,7 @@ import {
   feedFromEspn,
   feedFromNcaaf,
   feedView,
+  scoreSides,
   mergeDkInplay,
   movementText,
   marketCell,
@@ -427,6 +428,39 @@ check('the nudge names the day, the league and its noun',
   check('an ended feed reads FINAL with the score, however old',
     fin?.kind === 'final' && fin.score === '35–39' && fin.speech === 'Final, Queens University 35, Wofford 39');
   check('no feed, no pill from the feed', feedView(wofford, null, at) === null);
+  check('the feed view carries the raw away and home numbers for the labelled pill',
+    v?.awayScore === 35 && v?.homeScore === 39);
+}
+
+// Labelled, picked-side score (Matt, 2026-11-27: "50–59" read as St. John's
+// first on a St. John's ML card; St. John's was the away side, down 9).
+{
+  const sj = { sport: 'NCAAB', away_team: "St. John's", home_team: 'Iowa State' };
+  const s = scoreSides(sj, 50, 59, 'away');
+  check('each side is labelled, away first like the header',
+    s?.away.label === 'SJ' && s.away.score === 50 && s.home.label === 'IS' && s.home.score === 59);
+  check('an away pick marks the away side only', s?.away.picked === true && s.home.picked === false);
+  const h = scoreSides(sj, 50, 59, 'home');
+  check('a home pick marks the home side only', h?.home.picked === true && h.away.picked === false);
+  const o = scoreSides(sj, 50, 59, 'over');
+  check('a totals pick marks neither side', o?.away.picked === false && o.home.picked === false);
+  check('no score, no labelled score', scoreSides(sj, null, 59, 'away') === null);
+  const nc = scoreSides({ sport: 'NCAAB', away_team: 'North Carolina', home_team: 'Northern Colorado' }, 1, 2, 'away');
+  check('two schools with the same initials fall back to the last word',
+    nc?.away.label === 'CARO' && nc.home.label === 'COLO');
+  const nba = scoreSides({ sport: 'NBA', away_team: 'BOS', home_team: 'LAL' }, 100, 98, 'home');
+  check('a code sport keeps its code', nba?.away.label === 'BOS' && nba.home.label === 'LAL');
+  const st = scoreSides({ sport: 'NCAAB', away_team: 'Iowa State', home_team: 'Illinois State' }, 1, 2, 'away');
+  check('two "State" schools fall back to the first word, never STAT / STAT',
+    st?.away.label === 'IOWA' && st.home.label === 'ILLI');
+  check('names no label can separate show the bare score (null)',
+    scoreSides({ sport: 'NCAAB', away_team: 'Miami', home_team: 'Miami' }, 1, 2, 'away') === null);
+  const osu = scoreSides({ sport: 'NCAAF', away_team: 'Ohio State', home_team: 'Michigan' }, 1, 2, 'home');
+  check('NCAAF with no code map uses initials, not the first three letters',
+    osu?.away.label === 'OS' && osu.home.label === 'MICH');
+  const coded = scoreSides({ sport: 'NCAAF', away_team: 'Ohio State', home_team: 'Michigan' }, 1, 2, 'home',
+    new Map([['Ohio State', 'OSU'], ['Michigan', 'MICH']]));
+  check('NCAAF with the code map uses its codes', coded?.away.label === 'OSU' && coded.home.label === 'MICH');
 }
 
 

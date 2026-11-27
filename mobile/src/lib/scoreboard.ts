@@ -232,6 +232,12 @@ function initialsLabel(name: string): string {
     .toUpperCase();
 }
 
+/** Same last word too ("Iowa State" / "Illinois State"): the first word's first four letters. */
+function firstWordLabel(name: string): string {
+  const words = name.replace(/['’.]/g, '').replace(/[^A-Za-z\s]/g, ' ').split(/\s+/).filter((w) => w.length > 0);
+  return (words[0] ?? name).slice(0, 4).toUpperCase();
+}
+
 /** Two sides with the same initials: the first four letters of each last word. */
 function lastWordLabel(name: string): string {
   const words = name.replace(/['’.]/g, '').replace(/[^A-Za-z\s]/g, ' ').split(/\s+/).filter((w) => w.length > 0);
@@ -958,8 +964,61 @@ export interface FeedGame {
   away_score: number | null;
 }
 
+/** One side of a labelled score: "SJ 50". */
+export interface ScoreSide {
+  label: string;
+  score: number;
+  /** The side the pick is on. Only a home / away pick marks one. */
+  picked: boolean;
+}
+
+/**
+ * The score as two labelled sides, away first — the order of the card's
+ * "Away @ Home" header (Matt, 2026-11-27: a bare "50–59" read as our team
+ * first). Labels are the Scoreboard tab's discs, so the two screens name a
+ * side the same way. A totals, prop or draw pick marks neither side: there is
+ * no team of ours in the score.
+ */
+export function scoreSides(
+  game: { sport: string; away_team: string; home_team: string } | null | undefined,
+  awayScore: number | null | undefined,
+  homeScore: number | null | undefined,
+  pickSide?: string | null,
+  abbrevs?: ReadonlyMap<string, string> | null,
+): { away: ScoreSide; home: ScoreSide } | null {
+  if (!game || awayScore == null || homeScore == null) return null;
+  const label = (name: string) =>
+    // NCAAF with no code in the map: initials ("Ohio State" OS), not the
+    // first three letters ("OHI"), so a screen without the map still names
+    // the school recognisably (UX review, 2026-11-27).
+    game.sport === 'NCAAF' && !abbrevs?.get(name)?.trim()
+      ? initialsLabel(name)
+      : discLabel(name, game.sport, abbrevs);
+  let away = label(game.away_team);
+  let home = label(game.home_team);
+  // Same initials: last words ("CARO" / "COLO"); same last word too ("Iowa
+  // State" / "Illinois State"): first words; still the same: no labels, the
+  // bare score, rather than two identical names (UX review, 2026-11-27).
+  if (away === home) {
+    away = lastWordLabel(game.away_team);
+    home = lastWordLabel(game.home_team);
+  }
+  if (away === home) {
+    away = firstWordLabel(game.away_team);
+    home = firstWordLabel(game.home_team);
+  }
+  if (away === home) return null;
+  return {
+    away: { label: away, score: awayScore, picked: pickSide === 'away' },
+    home: { label: home, score: homeScore, picked: pickSide === 'home' },
+  };
+}
+
 export interface FeedView {
   kind: 'live' | 'final';
+  /** Raw numbers behind `score`, for the labelled pill. */
+  awayScore: number | null;
+  homeScore: number | null;
   score: string;
   clock: string;
   speech: string;
@@ -991,12 +1050,14 @@ export function feedView(
       : '';
   if (feed.ended) {
     if (!score) return null;
-    return { kind: 'final', score, clock: '', speech: `Final, ${said}` };
+    return { kind: 'final', awayScore: feed.awayScore, homeScore: feed.homeScore, score, clock: '', speech: `Final, ${said}` };
   }
   if (!feed.inProgress) return null;
   const clock = feed.clockLabel.trim();
   return {
     kind: 'live',
+    awayScore: feed.awayScore,
+    homeScore: feed.homeScore,
     score,
     clock,
     speech: ['Live', clock, said].filter((p) => p.length > 0).join(', '),
