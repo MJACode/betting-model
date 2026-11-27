@@ -765,8 +765,9 @@ its `snapshotStartedAtUtc` read 07:52 UTC at 18:55 UTC while the server's Last-M
 
 ### G4. Where it runs
 
-- **Today, by hand:** three loops started from the branch on mike's PC at 18:59, 19:13 and
-  19:16 UTC (ports 47241 to 47243), until 2026-12-31 or until the task takes over.
+- **Today, by hand:** loops started from the branch on mike's PC from 18:59 UTC; since 20:00 UTC
+  one loop of all twelve feeds (port 47241), until 2026-12-31 or until it is stopped after the
+  merge.
 - **After the merge, the worker reads eleven of the twelve** (G5): the job `nba_feeds`, every
   minute, around the clock.
 - **The PC keeps two things:** the daily box load, and Unabated's file. The task

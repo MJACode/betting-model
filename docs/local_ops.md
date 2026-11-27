@@ -1110,13 +1110,13 @@ SELECT feed, origin, max(fetched_at) AS last_read,
 FROM nba_feed_fetches GROUP BY 1, 2 ORDER BY 1;
 ```
 
-**Three loops were started by hand on 2026-11-27** from the branch, before the
-merge (ports 47241 to 47243; logs in
-`data\local\research\nba_research\logs\nba_feeds_*`). While the first runs,
-the task leaves at once. They decide what is due from the ledger, so once the
-worker's job is running they read only what it has not. After the merge and the
-registration, stop them (their process ids are in the session entry) so the
-task's loop takes over on this machine.
+**One loop of all twelve feeds was started by hand on 2026-11-27** from the
+branch, before the merge (port 47241; log
+`data\local\research\nba_research\logs\nba_feeds_all_loop.err`). While it
+runs, the task leaves at once. It decides what is due from the ledger, so once
+the worker's job is running it reads only what the worker has not. After the
+merge and the registration, stop it (its process id is in the session entry)
+so the task's loop takes over on this machine.
 
 ## Every scheduled task starts windowless (2026-11-21)
 
