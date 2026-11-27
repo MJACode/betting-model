@@ -333,6 +333,7 @@ jobs:
             tests/test_game_injury_gate.py \
             tests/test_espn_nhl_probables.py \
             tests/test_nhl_asof.py \
+            tests/test_nhl_referee_features.py \
             tests/test_nhl_prop_odds_gate.py \
             tests/test_nhl_prop_blocked_shots.py \
             tests/test_nhl_props.py \

@@ -30,6 +30,14 @@ review as its own entry.
 
 ---
 
+## 2026-11-27: NHL full-game total, referee crews
+
+1. **Scope.** A backtest only, 2026-11-27: add point-in-time referee features to the live NHL total and walk them forward. Do not register an artifact or change a live threshold, stake, or pause. Doc: `docs/nhl_totals_referee_backtest.md`.
+2. **Tried.** One market, the full-game total. The live rule (Pinnacle's no-vig against a bettable book, same fetch, same number, first snapshot, EV 0.01, price −200) against the same rule after an L2 logit shift from the referee crew. Features are strictly earlier games, shrunk to the league mean at K = 50. Folds are 2024-25 and 2025-26. Officials do not cover a priced 2026-27 history.
+3. **New.** The crew shift, and the measurement that `pp_opportunities` and `times_shorthanded` are the same number on all 4,591 joined games. Written into `references/methods.md` §5 as a failure. The team log omits the shootout goal; the feature uses the scoreboard total.
+4. **Corrected.** Nothing in the skill's method list was contradicted. The crew did not beat the sharp price: +2.2 units, interval −66.9 to +72.2, close EV −1.67% against the rule's +1.32%.
+5. **The framework.** Nothing changed. The flag ships off.
+
 ## 2026-11-26: NBA props decided 10 hours before tip, and real-money history (`nba_prop_market_early`)
 
 1. **Scope.** mike, 2026-11-26: NBA data sources because the prop and game models were weak,
