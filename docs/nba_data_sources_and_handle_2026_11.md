@@ -687,3 +687,86 @@ with a time and projected lineups at $39.99 a month; 401 without a key, nothing 
 5. **Earlier research already named most of the F4 captures** (2026-11-11 to 11-14: lineup file
    each minute, referee posting time, daily hustle, Pinnacle limits). Its own notes say none had
    started.
+
+## G. The collectors (2026-11-27, mike: "1) yes 2) yes")
+
+### G1. This season's missing feeds, loaded
+
+`python -m data.ingestors.nba_box_enrich --seasons 2027 2027`, run from mike's PC at 18:51 UTC.
+Read back on production: enriched boxes 7,518 rows over 270 games, referee crews 811 rows over
+270 games, inactive lists 2,245 rows over 265 games, each to 2026-11-25; 270 games of 2026-27
+had a final score. The five games with no inactive rows are not named here: the source file lists
+none for them (F2: the league's lineup file has no inactive rows for 2026-10-21 and 10-22).
+The load now runs once a day from the PC's `NbaFeeds` task (G4).
+
+### G2. What is saved, and how
+
+`data/ingestors/nba_feeds.py`. One change log for every feed, keyed on OUR read time, because
+the feeds restamp themselves (the lineup file rewrites every row's stamp about every 15 minutes
+with nothing changed). A row is written only when what we compare changed; a state that returns
+to an earlier value is written again; an item that leaves a feed that lists everything is
+written once as gone; a failed read writes its ledger row and nothing else.
+
+| Table | Holds |
+|---|---|
+| `nba_feed_fetches` | one row per read: feed, where from (`pc` / `worker`), HTTP status, bytes, items, how many changed, the error if any |
+| `nba_feed_changes` | one row per (feed, item, our read time) when the item's state changed; the state as JSON |
+| `nba_feed_latest` | the hash last stored per item: what the next read is compared with |
+
+All three are worker-only (row security on, no access for the app's public roles; read back
+2026-11-27). Reading "what was known at time T": the newest `nba_feed_changes` row per item with
+`seen_at <= T`.
+
+| Feed | Every | An item is | What is compared |
+|---|---|---|---|
+| `nba_lineups` | 1 min (15 min from 2am to 8am ET) | a player in a game, and each team's fives | Expected / Confirmed, Active / Inactive, position; the team's Expected five, confirmed starters and inactive list |
+| `nba_referees` | 1 min 8:30 to 10am ET, else 30 min | a game (NBA and G League), and the day's replay centre | the crew |
+| `underdog_news` | 2 min | a news item | title, text, the feed's created and updated times, player |
+| `sleeper_projections` | 10 min | a player on a date, today on | projected minutes and stats, injury status and note |
+| `pinnacle_nba` | 5 min | a pre-game market (game lines, periods, team totals, player props) | prices, points and the stake limit |
+| `unabated_props` | 15 min | (event, player, bet type, side, source) | line, price, opening line, opening price |
+| `prizepicks_lines` / `prizepicks_counts` | 10 min / 1 hour | a pre-game line | the line and its type / its pick count |
+| `underdog_lines` | 15 min | a pre-game NBA line | the line and each side's price and payout |
+| `sleeper_lines` / `sleeper_counts` | 10 min / 1 hour | a pre-game line | the line and payouts / picks on each side |
+| `yahoo_mgm_splits` | 10 min | a game | BetMGM's price, money % and bets % per option; this is a dated pre-tip handle series from 2026-11-27 |
+
+Pick counts sit in their own feeds so that a count ticking up is not a line row.
+
+### G3. Measured before the first production write, and after
+
+Two reads in memory, no database, 2.5 minutes apart (19:05 and 19:07 UTC): Pinnacle 560 of
+1,431 markets changed, PrizePicks lines 359 of 10,350, PrizePicks counts 1,101 of 1,472, Sleeper
+lines 98 of 1,439, Underdog lines 4 of 1,374, Unabated 0 of 38,085, Sleeper counts 4 of 1,246.
+Two Pinnacle reads two minutes apart straight after: 0 of 1,431. The 560 were one burst, not
+noise (spread limits of 10,000 appeared on 55 markets).
+
+First state stored 2026-11-27 18:59 to 19:17 UTC: about 60,000 rows, 40 MB in the change log and
+14 MB in the latest table. The database is 100 GB. Growth per day is to be read off
+`nba_feed_fetches` after a full day (#1676).
+
+Backfilled once: Underdog's news, every page it still served, 3,892 items back to 2026-10-28;
+BetMGM's splits for this season's games (count in the session entry).
+
+**Yahoo refuses a fast reader.** A first backfill at four requests a second was refused after
+about 650 requests (connection refused) and had stored nothing, because it stored at the end.
+It now stores date by date, one request a second, asks only for each date's home teams, and
+names the date to resume from.
+
+**Unabated's file did not change across three reads in 17 minutes** (same 96,031,477 bytes;
+its `snapshotStartedAtUtc` read 07:52 UTC at 18:55 UTC while the server's Last-Modified read
+19:03). Whether the public file is a delayed copy is not established; the ledger will show it.
+
+### G4. Where it runs
+
+- **Today, by hand:** three loops started from the branch on mike's PC at 18:59, 19:13 and
+  19:16 UTC (ports 47241 to 47243), until 2026-12-31 or until the task takes over.
+- **After the merge:** the PC task `BettingModel\NbaFeeds` (`scripts/nba_feeds_run.ps1`, every
+  minute and at sign-in; it leaves at once while a loop holds port 47241). It runs master from
+  its own copy, the daily box load first, then one loop of every feed for 24 hours. Registering
+  the task was refused by the session's permission check on 2026-11-27; mike registers it
+  (`docs/local_ops.md`, "NBA feeds").
+- **It runs only while mike is signed in to Windows.** A gap shows in `nba_feed_fetches`.
+- **The worker:** the official injury report is a step of the 6am run (`nba-injury-report`, the
+  three completed days before the run date; #1523). Which feeds answer from the worker: G5.
+
+### G5. From the Railway worker
