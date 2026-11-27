@@ -300,7 +300,7 @@ def run(seasons: tuple[int, ...], apply: bool, limit: int | None) -> dict:
             stats["stored"] += 1
             stats["matched"] += bool(gid)
             stats["players"] += len(players)
-            if n % 200 == 0:
+            if n % 100 == 0:
                 logger.info(f"D&T game pages: {n}/{len(todo)} {dict(stats)}")
         return dict(stats)
     finally:
