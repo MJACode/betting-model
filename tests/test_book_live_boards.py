@@ -355,11 +355,40 @@ def test_a_flipped_game_is_written_on_our_home_teams_side():
     assert (by["h2h"]["home_price"], by["h2h"]["away_price"]) == (-360.0, 260.0)
 
 
-def test_ncaaf_and_mlb_are_never_asked_about():
-    assert "NCAAF" not in L.LIVE_SPORTS and "MLB" not in L.LIVE_SPORTS
-    assert set(L.LIVE_SPORTS) <= set(B.ODDS_LOG_SPORTS)
+def test_mlb_is_never_asked_about_and_ncaaf_never_writes_odds_rows():
+    assert "MLB" not in L.LIVE_SPORTS and "NCAAF" in L.LIVE_SPORTS
+    assert "NCAAF" not in B.ODDS_LOG_SPORTS                 # its live picks are stamped off odds rows
+    assert set(L.LIVE_SPORTS) - {"NCAAF"} <= set(B.ODDS_LOG_SPORTS)
     for b in L.BOOKS:
-        assert not ({"NCAAF", "MLB"} & set(b.sports)), b.key
+        assert "MLB" not in set(b.sports), b.key
+    fd = next(b for b in L.BOOKS if b.key == "fanduel")
+    br = next(b for b in L.BOOKS if b.key == "betrivers")
+    assert "NCAAF" in fd.sports and "NCAAF" in br.sports
+
+
+def ncaaf_page():
+    """FanDuel's college football page in the NBA page's shape: one live game
+    in "NCAA Football Games" and one in "NCAA FCS"."""
+    page = {"attachments": {"events": {}, "markets": {}, "competitions": {}}}
+    _add_live_game(page, 501, 9001, "NCAA Football Games", "Ohio State Buckeyes", "Michigan Wolverines")
+    _add_live_game(page, 502, 9002, "NCAA FCS", "Montana Grizzlies", "Montana State Bobcats")
+    return page
+
+
+def test_ncaaf_is_recorded_on_book_live_reads_and_never_written_to_odds():
+    conn, logged, sess = Conn(), [], Sess(lambda url: Resp(200, ncaaf_page()))
+    f = L.BookFeeds(lambda: conn, lambda: ["NCAAF"], session_factory=lambda: sess,
+                    resolvers={"NCAAF": lambda c: (lambda h, a, s: ("NCAAF_G1", False) if h.startswith("Michigan")
+                                                   else ("NCAAF_FCS", False))},
+                    odds_log=lambda c, rows: logged.extend(rows) or len(rows),
+                    clock=lambda: datetime(2026, 11, 28, 18, 0, tzinfo=timezone.utc))
+    f.ready = True
+    f.games_live = (1e18, set())
+    res = f.read(FANDUEL, "NCAAF")
+    assert (res["ok"], res["live"], res["matched"], res["written"]) == (True, 1, 1, 0)
+    assert logged == []                                      # no odds rows, ever
+    [row] = _offers(conn)
+    assert (row["game_id"], row["sport"], row["spread_home"], row["total_line"]) == ("NCAAF_G1", "NCAAF", -4.5, 140.5)
 
 
 def test_a_refusal_backs_off_and_three_leave_the_book_alone():
