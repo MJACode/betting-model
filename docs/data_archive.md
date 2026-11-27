@@ -11,6 +11,16 @@ deleting jobs), #1344 (rank the slow queries on a morning window) and #1345
 or log that produced it, and all were read on 2026-11-14 between 19:38 and
 20:05 UTC.
 
+**What the rule does not cover: data a member controls** (Matt, 2026-11-26:
+*"This is fine because it's what a user controls. Adding a custom model and
+deleting or updating it."*). The rule protects what the system collects and
+records: odds, picks, results, the published record. A member's own content
+is theirs to create, update and delete, and what hangs off it goes with it:
+a Build Your Own Model model (`byom_models`) and its `byom_model_snapshots`
+and `byom_alerts` (ON DELETE CASCADE, `byom_delete_model`), and a whole
+account through `delete_my_account`. That is not a breach of the rule and
+needs no override.
+
 ## 1. What was measured
 
 > **Size is recorded every hour since 2026-11-16** (`db_health_snapshots`,

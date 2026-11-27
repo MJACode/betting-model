@@ -1685,6 +1685,75 @@ def _record_daily_pipeline_completion(conn, r) -> None:
     r.add("daily_pipeline_completion", status, "CRIT", detail)
 
 
+def check_eggz_recap(conn, report, run_date: str) -> None:
+    """WARN when a day Eggz graded has no recap after its morning.
+
+    A day is due at 6:00am ET the next morning, and only while it is still
+    inside the catch-up window. A day with no graded pick is not due.
+    Pending and needs_review lines do not make it due and do not excuse a
+    miss. The check does not post.
+    """
+    from tracking.eggz_picks import EGGZ_CATCHUP_DAYS
+    try:
+        rows = conn.execute(
+            """
+            SELECT c.game_date, COUNT(*)
+            FROM capper_picks c
+            WHERE COALESCE(c.capper_key, 'eggz') = 'eggz'
+              AND c.status = 'graded'
+              AND c.result IN ('WIN', 'LOSS', 'PUSH')
+              AND c.parlay_id IS NULL
+              AND c.game_date IS NOT NULL
+              AND c.game_date < ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM push_sent p
+                  WHERE p.lock_key = 'discord_eggz_results_day:' || c.game_date
+                    AND p.kind = 'discord_eggz_results_day')
+            GROUP BY c.game_date
+            ORDER BY c.game_date
+            """,
+            (run_date,),
+        ).fetchall()
+    except Exception as exc:                                  # noqa: BLE001
+        getattr(conn, "rollback", lambda: None)()
+        text = str(exc).lower()
+        if ("capper_picks" in text or "push_sent" in text
+                or "does not exist" in text or "no such table" in text):
+            report.add("eggz_recap", SKIPPED, "WARN",
+                       "capper_picks is not installed yet",
+                       cadence="each morning")
+            return
+        report.add("eggz_recap", ERROR, "WARN", f"query failed: {exc}"[:200],
+                   cadence="each morning")
+        return
+    now = datetime.now(ZoneInfo("America/New_York"))
+    today = datetime.strptime(run_date[:10], "%Y-%m-%d").date()
+    missing = []
+    for game_date, n in rows or []:
+        day = str(game_date)[:10]
+        try:
+            slate = datetime.strptime(day, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        age = (today - slate).days
+        if age < 1 or age > EGGZ_CATCHUP_DAYS:
+            continue
+        opens = datetime(slate.year, slate.month, slate.day, 6, tzinfo=ZoneInfo("America/New_York"))
+        opens = opens + timedelta(days=1)
+        if now >= opens:
+            missing.append(f"{day} ({int(n)})")
+    if not missing:
+        report.add(
+            "eggz_recap", OK, "WARN",
+            "every Eggz day with a graded pick in the catch-up window has a recap",
+            cadence="each morning")
+        return
+    report.add(
+        "eggz_recap", STALE, "WARN",
+        "Eggz recap missing: " + ", ".join(missing),
+        cadence="each morning")
+
+
 def run_system_health(run_date: str | None = None) -> dict:
     """Run all checks, upsert results into system_health_checks, log a summary.
 
@@ -3051,6 +3120,8 @@ def run_system_health(run_date: str | None = None) -> dict:
             # SKIPPED (inside) is honest, and it un-skips on its own as picks
             # accrue under the current regime -- it does not mean "calibrated".
             _report_model_calibration(r, conn, rows, bet_only_rows)
+
+        check_eggz_recap(conn, r, run_date)
 
         # ── Persist + summarize ──────────────────────────────────────────────
         # This runs AFTER every check, model_calibration included. It used to

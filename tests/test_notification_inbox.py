@@ -595,8 +595,8 @@ def test_delete_is_a_hide_not_a_delete():
     from data.view_migrations import ACTIVE_MIGRATIONS
 
     sql = HIDE.read_text(encoding="utf-8")
-    assert HIDE.name not in ACTIVE_MIGRATIONS
-    assert "HAND APPLIED" in sql
+    # Matt, 2026-11-26: "You do the db action". The worker applies it.
+    assert HIDE.name in ACTIVE_MIGRATIONS
     assert "ADD COLUMN IF NOT EXISTS deleted_at timestamptz" in sql
     assert "DELETE FROM" not in sql.upper().replace("ON DELETE", "")
     # A hidden alert cannot be un-hidden by a client update.
@@ -639,3 +639,15 @@ def test_unread_count_skips_hidden_rows_once_the_column_exists():
     before = Conn(False)
     assert unread_counts(before, {}) == {"u1": 1}
     assert "deleted_at" not in before.sql[-1]
+
+
+def test_the_hide_migration_returns_before_any_lock_once_applied():
+    """It runs on every pass. Once applied, it must return on a catalog read
+    before ALTER / DROP INDEX / CREATE take a lock
+    (tests/test_view_migration_lock_noop.py)."""
+    code = "\n".join(ln.split("--", 1)[0] for ln in HIDE.read_text(encoding="utf-8").splitlines())
+    head = code.split("ALTER TABLE", 1)[0]
+    assert "DROP INDEX" not in head and "CREATE" not in head
+    for prop in ("column_name = 'deleted_at'", "deleted_at IS NULL", "a deleted alert stays deleted"):
+        assert prop in head
+    assert head.count("RETURN;") == 2
