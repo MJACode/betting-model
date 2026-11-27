@@ -5,3 +5,5 @@ data/local/
 ncaaf_live/data/artifacts/
 docs/sessions/
 mobile/assets/
+# Local tools on mike's PC (a scratch Postgres with its password file): never summarised into the graph.
+.claude/tools/
