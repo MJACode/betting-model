@@ -58,7 +58,7 @@ const PHASE_LABEL: Record<ScoreboardPhase, string> = {
   final: 'Final',
 };
 
-function discColor(label: string): string {
+export function discColor(label: string): string {
   let h = 0;
   for (let i = 0; i < label.length; i++) h = (h + label.charCodeAt(i) * (i + 1)) % 997;
   return teamDisc[h % teamDisc.length] ?? teamDisc[0];

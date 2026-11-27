@@ -79,6 +79,12 @@ jobs:
         working-directory: mobile
         run: npx tsx scripts/verify_nba_first_basket.ts
 
+      # Stats → Games: day strip, today-only bet buttons at the member's best
+      # price, each opening the add-to-betslip sheet.
+      - name: Stats games board
+        working-directory: mobile
+        run: npx tsx scripts/verify_games_board.ts
+
       # Player page minutes: Low MIN threshold, DNP versus a stat line, and
       # minutes joined onto games outside the loaded window.
       - name: Player log

@@ -188,14 +188,15 @@ check('NCAABW has the NCAAB chips, Points first',
   statKeys.join());
 check('NCAABW has a hit-rate view', supportsHitRate(NCAABW));
 check('NCAABW has a player page', supportsPlayerDetail(NCAABW));
-check('NCAABW has a Teams board, Players | Teams',
+// Games joined every team sport's top row on 2026-11-27 (Stats → Games).
+check('NCAABW has a Teams board, Players | Teams | Games',
   supportsTeamBoard(NCAABW)
     && segmentsForSport(NCAABW).join() === 'players,teams'
-    && boardSegmentsFor(NCAABW).join() === 'players,teams');
+    && boardSegmentsFor(NCAABW).join() === 'players,teams,games');
 check('no NCAABW chip carries a prop market',
   statsForSport(NCAABW).every((d) => propMarketForStat(d) == null));
-check('NCAABW draws a Players | Teams row',
-  segmentsForSport(NCAABW).length === 2 && boardSegmentsFor(NCAABW).length === 2,
+check('NCAABW draws a Players | Teams | Games row',
+  segmentsForSport(NCAABW).length === 2 && boardSegmentsFor(NCAABW).length === 3,
   segmentsForSport(NCAABW).join(','));
 // The halftime total (models/ncaabw_live_ht.py, 2026-11-11) is the women's
 // in-play model: the Live board says when it bets, and the model resolves to
