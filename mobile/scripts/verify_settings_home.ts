@@ -182,7 +182,7 @@ eq(
 eq('390 at 1× does not stack six tiles', home.settingsHomeLayout([1, 2, 3, 4, 5, 6], 1, 390).fullWidth.length, 0);
 
 const labels = [
-  'Track record',
+  'Signal Record',
   'Live Signals (beta)',
   'How this works',
   'Replay intro',

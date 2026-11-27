@@ -148,7 +148,7 @@ export function PerformanceInsightsCard({
       <View style={styles.card}>
         {header}
         <Text style={styles.empty}>
-          Track a pick or log a bet and your daily, weekly, monthly and yearly recaps build here.
+          Track a pick, or log a bet with the + at the top, and your daily, weekly, monthly and yearly recaps build here.
         </Text>
       </View>
     );

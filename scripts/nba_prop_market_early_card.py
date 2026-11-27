@@ -28,7 +28,10 @@ the same transaction as its bets, under the model's advisory lock. The live feed
 Pinnacle's points props up 10 hours before tip on 26 of 73 games (2026-11-15 to 11-24), so most
 games will log `no_sharp` and not be decided; that is the rule, not a fault.
 
-Runs on every refresh pass after the prop fetch (step nba-prop-market-early). Regular season only.
+Runs on every refresh pass after the prop fetch (step nba-prop-market-early), and on the NBA prop
+window job's ticks 595-607 minutes before an undecided game's tip, after a fetch of exactly those
+games (scripts/nba_prop_window.py, EARLY_LOOK_MIN): the refresh passes leave no look in the window
+for a tip between 14:47 and 16:47 ET. Regular season only.
 
     python -m scripts.nba_prop_market_early_card              # print the card, write nothing
     python -m scripts.nba_prop_market_early_card --publish    # write decisions and paused bets

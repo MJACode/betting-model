@@ -304,6 +304,106 @@ read is under 8 s old; otherwise it decides the old way.
 On every fast path DraftKings is the only book a decision bets (the others are
 the provider's ~30 s-old copies), and the ledger or log names the board.
 
+### Best line on the fast path: where it stands (2026-11-26, mike: "We want best line")
+
+**Which book each in-play model bets, measured on its bets since 2026-11-13**
+(`picks` where `is_live`, BET; the ledgers' `reason` says which path decided):
+
+| Model | How it decides | Bets at DraftKings / elsewhere |
+|---|---|---|
+| NCAAB (three) | fast path: DraftKings only (`evaluate_states(..., (DK.BOOK,))`); slow path when the board is not live: the deciding books | 21 / 1 (the one, BetMGM, was a slow-path decision) |
+| NBA quarters 1-2 spread | fast path: DraftKings only (`FAST_BOOKS`); slow path: the eight deciding books | 4 / 2 (both slow path) |
+| NCAAF win probability and total | fast path: DraftKings only (`gameday.with_dk`) | no in-play bet in the window |
+| NFL late-game leader | DraftKings only, always (`nfl_live_leader/odds.py` asks for DraftKings) | 1 / 0 |
+| Women's halftime total | best of the deciding books (DraftKings off its board, the others the provider's copies) | 21 / 22 |
+| EuroLeague halftime spread | best of five books, the provider's copies (DraftKings' board is not read) | 2 / 4 |
+
+**The other books' own pages are display only.** FanDuel's and BetRivers'
+live lines (`odds` rows, source `<book>_board`, from mike's machine since
+2026-11-26 00:14Z / 03:19Z) feed the app's "Live at your books" sheet. No
+decision reads them: the only readers of other books' in-play rows
+(`scorer._live_book_quotes` / `_best_live_price`) serve MLB and NCAAF, which
+the feed does not write, and `latest_odds` holds no in-play rows.
+
+**Why they cannot simply join the fast path, measured 2026-11-26** (games both
+books carried, 00:14Z-17:30Z):
+
+- **They reprice later than DraftKings after a score.** Our reads showed a new
+  spread a median 20.2 s after DraftKings' score changed in NCAAB on FanDuel
+  (p90 56.9 s), 13.7 s on BetRivers (p90 27.5 s); NBA 18.8 s and 17.0 s.
+  DraftKings moved in the same read (median 0.0 s). Each book was re-read
+  every 1.7 s at 17:30Z, so that lag is the book's or its cache's, not ours
+  (the cadence was sampled with two sports live, not last night's four).
+- **FanDuel's page is a cache.** CloudFront, `max-age=30,
+  stale-while-revalidate=60`; one answer was 13 s old, two more 19 and 21 s.
+- **`odds` cannot say what is on offer.** A suspended market adds no row, so
+  the last number reads as current, and a feed restart writes every number as
+  new. `book_live_reads` (`docs/local_ops.md`) is the record that can; it
+  starts when this change reaches mike's machine.
+- **The prize, on DraftKings' own line only:** at the 42 fast NCAAB decisions
+  since FanDuel's feed began, FanDuel quoted a better price on DraftKings' line
+  3 times (1 of them a number up before the last score), BetRivers once. A
+  different line can also be better; only the model can say, which is the next
+  change's dry run.
+
+**The gate** (2026-11-26). `models/book_live_quotes.py` applies the first
+three conditions below; the model's own no-score rule runs from the `stamp`
+it returns. Another book's number may decide only while:
+
+- that book's newest answer was clean and its PAGE time (`read_at -
+  page_age_s`) is within DraftKings' 8 s. FanDuel's cached page will often
+  fail this; that is measured, not a setting to loosen;
+- the number is on offer at the game's newest row;
+- the read before it first appeared is known (not a first row after a start);
+- no point was scored after that previous read's page time (`stamp`). The page
+  did not show the number then, so the book set it after. `read_at -
+  page_age_s` is only when the page first SHOWED it, up to a CDN refresh
+  later, so it cannot carry this rule. The feed stores each row's previous
+  clean read (`prev_read_at`, `prev_page_age_s`) for exactly this.
+
+**What it would have added, measured before any model reads it** (an upper
+bound: the stored `odds` rows, stamped at first sight). At the 66 decisions the
+NCAAB models made on DraftKings' board from 2026-11-26 00:14Z to 22:25Z, priced
+at each decision's own model mean and spread
+(`data/local/research/ncaab_other_books_replay.py`):
+
+- **FanDuel** quoted at 58 of them and had the better price at 36. It would
+  have cleared the night's cut where DraftKings did not 4 times, and 3 of those
+  4 were a number up before DraftKings' last score. The gate refuses those, so
+  1 extra bet remains.
+- **BetRivers** quoted at 32, had the better price at 7, and would have added
+  no bet.
+
+**NCAAB's fast path takes them** (`models/ncaab_live_loop.py` `dk_slot`,
+`models/ncaab_live_dk.quote_states_books`). DraftKings' own holds run first,
+unchanged. Another book's quote is then added only if all of these hold:
+
+- it passes the reader's gates;
+- it is held, meaning the book's newest read is after the read that first
+  showed the number;
+- no point has been scored on DraftKings' board since its `stamp`;
+- it has stood 10 s on the page before the decision read;
+- it is within 6 points of DraftKings' own number on the market.
+
+The quote is priced at DraftKings' state when the book first showed it. A
+quote that fails a rule is dropped, never waited on. The night's cut, the
+price floor and every gate after the choice are unchanged. The best expected
+value across the books wins, and a tie keeps DraftKings.
+
+**The 10 s rule, measured 2026-11-26.** BetRivers moves AHEAD of DraftKings'
+score. Across 827 of DraftKings' NCAAB score changes, BetRivers' spread moved
+in the 5 s before 370 of them. In every other 5 s window, from 5 to 65 s
+before, it moved before 171 to 231.
+
+**Reading the bets.** A bet decided at another book carries "DraftKings board;
+<book>'s own page" in its ledger reason, so these bets can be reported as the
+new population they are. `NCAAB_LIVE_OTHER_BOOKS=0` turns it off.
+
+**Next:** NBA,
+whose next game is 2026-11-27. The women's halftime total waits on a
+comparison of the provider's copies with the books' own pages at the break: it
+already bets elsewhere (22 of 43), and its rule counts every book's row.
+
 ## NBA in play: the game-state model's quarters 1-2 spread (2026-11-04, mike)
 
 The full story, the evidence and the warning signs are in `docs/sports/nba.md`,

@@ -712,7 +712,7 @@ the pause marker, settle and are graded, and no publisher reads them. Unpausing 
 | window | the first look 570-630 min before tip whose newest fetch holds Pinnacle; once, in `nba_prop_market_early_decisions` | `scripts/nba_prop_market_early_card.py` |
 | markets | points, rebounds, threes (the three graded at 10 hours) | same |
 | caps | none: every qualifying proposition, as graded; its own door, outside the NBA prop door | same |
-| looks | every refresh pass, after the prop fetch | step `nba-prop-market-early` |
+| looks | every refresh pass, after the prop fetch; and the NBA prop window job's ticks 595-607 min before an undecided game's tip, after a fetch of exactly those games (added 2026-11-26, mike: "yes ship it I don't care about credits"): no refresh pass looks 570-630 min before a tip between 14:47 and 16:47 ET, 51 of 1,230 games in 2025-26 | step `nba-prop-market-early`; `scripts/nba_prop_window.EARLY_LOOK_MIN` |
 | games | regular season only | `scripts/nba_prop_market_card.slate` |
 
 **The evidence** (`docs/nba_data_sources_and_handle_2026_11.md`, D5): the rule on a snapshot

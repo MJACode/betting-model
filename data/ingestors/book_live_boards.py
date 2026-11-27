@@ -39,6 +39,14 @@ same client DraftKings' board uses), at most one per book and sport every
 BOOK_POLL_SEC. A book that answers with a challenge page is recorded as
 refused and left alone.
 
+WHAT EACH BOOK HAS ON OFFER, PER READ (2026-11-26, mike: "We want best line").
+`book_live_reads` (READS_TABLE below) records each game's eight numbers on
+each book whenever they change, a suspended market or a game leaving the page
+included, the answer's own age (FanDuel's page is a CDN copy up to 30 s old,
+90 s while it revalidates), and which rows are a game's first since a start.
+It is what a live decision needs before it can bet another book's number;
+nothing decides on it yet.
+
 NOT NCAAF, NOT MLB (dk_live_board.ODDS_LOG_SPORTS). Both sports' live picks
 are stamped off the newest in-play `odds` row per book
 (models.scorer._best_live_price), so a new writer for any book would move the
@@ -113,7 +121,8 @@ CREATE TABLE IF NOT EXISTS book_live_raw (
 )
 """
 FEED_TABLE = "book_live_feed"
-FEED_COLS = ("book", "sport", "last_read_at", "ok", "status", "live_events", "matched", "written", "detail")
+FEED_COLS = ("book", "sport", "last_read_at", "ok", "status", "live_events", "matched", "written", "detail",
+             "page_age_s")
 FEED_DDL = """
 CREATE TABLE IF NOT EXISTS book_live_feed (
     book          TEXT NOT NULL,
@@ -125,9 +134,99 @@ CREATE TABLE IF NOT EXISTS book_live_feed (
     matched       INTEGER NOT NULL DEFAULT 0,
     written       INTEGER NOT NULL DEFAULT 0,
     detail        TEXT,
+    page_age_s    DOUBLE PRECISION,
     PRIMARY KEY (book, sport)
 )
 """
+# The table predates page_age_s (2026-11-26): added in place, never recreated.
+FEED_ALTER = "ALTER TABLE book_live_feed ADD COLUMN IF NOT EXISTS page_age_s DOUBLE PRECISION"
+
+# WHAT EACH BOOK HAS ON OFFER AT EACH READ (mike, 2026-11-26: "We want best
+# line"). The record a live decision needs before it may bet another book's
+# number, which `odds` cannot give: a market the book suspends adds no row
+# there, so its last number reads as current, and a restart writes every number
+# again as if new. Here, per (book, game): a row whenever any of the eight
+# numbers changes, a market leaving the page included (its columns go NULL),
+# and an all-NULL row when a game the last clean read listed is not on this
+# one. Only a clean, parsed read writes; a refusal, an error or a backed-off
+# book writes nothing, so the last row stands only while book_live_feed says
+# the book is being read.
+#   after_start  the game's first row since this process started: how long
+#                that number had already been up is unknown.
+#   page_age_s   the answer's own Age header. FanDuel's page is a CDN copy
+#                (max-age 30, stale-while-revalidate 60; an answer read
+#                2026-11-26 17:35Z was 13 s old), so its numbers were on the
+#                book's site at read_at - page_age_s. NULL when the book sends
+#                no Age (BetRivers' answer, same day, was a CDN miss with none).
+#   prev_read_at / prev_page_age_s  the same book and sport's PREVIOUS clean
+#                read (2026-11-26, issue #1644). A number on a row was not on
+#                the page at prev_read_at - prev_page_age_s, so the book set it
+#                after that: the only time from which "no score since the
+#                number was set" is guaranteed (read_at - page_age_s is when
+#                the page first SHOWED it, up to a CDN refresh later). NULL on
+#                a process's first read, and on every row written before these
+#                columns existed: such a number's start is unknown and it never
+#                qualifies. After a back-off the previous read is minutes old,
+#                which the same rule then refuses.
+# Nothing decides on it yet: models/book_live_quotes.py reads it for the
+# loops that will.
+READS_TABLE = "book_live_reads"
+READ_LINE_COLS = ("spread_home", "spread_home_price", "spread_away_price", "total_line",
+                  "over_price", "under_price", "home_ml", "away_ml")
+READS_COLS = ("book", "sport", "game_id", "read_at", "page_age_s", "after_start", *READ_LINE_COLS,
+              "prev_read_at", "prev_page_age_s")
+READS_INDEX = "book_live_reads_sport_read_idx"
+READS_DDL = """
+CREATE TABLE IF NOT EXISTS book_live_reads (
+    book               TEXT NOT NULL,
+    sport              TEXT NOT NULL,
+    game_id            TEXT NOT NULL,
+    read_at            TIMESTAMPTZ NOT NULL,
+    page_age_s         DOUBLE PRECISION,
+    after_start        BOOLEAN NOT NULL DEFAULT FALSE,
+    spread_home        DOUBLE PRECISION,
+    spread_home_price  DOUBLE PRECISION,
+    spread_away_price  DOUBLE PRECISION,
+    total_line         DOUBLE PRECISION,
+    over_price         DOUBLE PRECISION,
+    under_price        DOUBLE PRECISION,
+    home_ml            DOUBLE PRECISION,
+    away_ml            DOUBLE PRECISION,
+    prev_read_at       TIMESTAMPTZ,
+    prev_page_age_s    DOUBLE PRECISION,
+    PRIMARY KEY (book, game_id, read_at)
+)
+"""
+# The table predates the prev_* columns (created 2026-11-26 22:08Z): added in
+# place, never recreated.
+READS_ALTERS = (
+    "ALTER TABLE book_live_reads ADD COLUMN IF NOT EXISTS prev_read_at TIMESTAMPTZ",
+    "ALTER TABLE book_live_reads ADD COLUMN IF NOT EXISTS prev_page_age_s DOUBLE PRECISION",
+)
+READS_INDEX_DDL = f"CREATE INDEX IF NOT EXISTS {READS_INDEX} ON book_live_reads (sport, read_at)"
+READS_INSERT = (f"INSERT INTO {READS_TABLE} ({', '.join(READS_COLS)}) "
+                f"VALUES ({', '.join(['%s'] * len(READS_COLS))}) ON CONFLICT DO NOTHING")
+_OFF = (None,) * len(READ_LINE_COLS)       # a game not on the page: nothing on offer
+_UNSEEN = object()
+
+
+def page_age(resp) -> float | None:
+    """The answer's own Age header in seconds (how old a CDN copy is), or None
+    when the book sends none or it does not parse. Pure."""
+    headers = getattr(resp, "headers", None)
+    if not headers:
+        return None
+    try:
+        items = headers.items()
+    except AttributeError:
+        return None
+    for k, v in items:
+        if str(k).lower() == "age":
+            try:
+                return float(str(v).strip())
+            except ValueError:
+                return None
+    return None
 
 # The query values a stored URL leaves out: public web keys, but keys.
 _KEY_PARAMS = ("_ak", "x-bwin-accessid")
@@ -594,7 +693,15 @@ def ensure_tables(conn) -> None:
         lock_down(conn, RAW_TABLE)
     if not schema_is_current(conn, FEED_TABLE, columns=FEED_COLS, rls=True, revoked_from=API_ROLES):
         conn.execute(FEED_DDL)
+        conn.execute(FEED_ALTER)
         lock_down(conn, FEED_TABLE)
+    if not schema_is_current(conn, READS_TABLE, columns=READS_COLS, indexes=(READS_INDEX,), rls=True,
+                             revoked_from=API_ROLES):
+        conn.execute(READS_DDL)
+        conn.execute(READS_INDEX_DDL)
+        for alter in READS_ALTERS:
+            conn.execute(alter)
+        lock_down(conn, READS_TABLE)
     conn.commit()
     from data.ingestors.book_throttle import ensure_table as ensure_throttle_table
     ensure_throttle_table(conn)
@@ -658,8 +765,15 @@ class BookFeeds:
         self.due: dict[tuple, float] = {}
         self.refusals: dict[str, int] = {}
         self.last: dict[tuple, dict] = {}          # (book, game_id) -> last row
+        # book_live_reads: (book, game_id) -> the eight numbers last stored, and
+        # (book, sport) -> the games the last clean read listed.
+        self.state: dict[tuple, tuple] = {}
+        self.listed: dict[tuple, set] = {}
+        # (book, sport) -> (read_at, page_age_s) of the last clean read whose
+        # rows were stored: the prev_* columns of the next read's rows.
+        self.prev_read: dict[tuple, tuple] = {}
         self.ids: dict[tuple, tuple | None] = {}   # (book, event_id) -> (game_id, flipped)
-        self.shared: dict[str, tuple[float, int, str]] = {}   # url -> (when, status, text)
+        self.shared: dict[str, tuple] = {}         # url -> (when, status, text, page age)
         self.betmgm_keys = BetMGMKeys(BETMGM_ACCESS_IDS)
         self._booted: set[str] = set()             # books whose session was warmed (Caesars)
         self.captures = Captures()
@@ -847,17 +961,17 @@ class BookFeeds:
         at = self.clock()
         shared = self.shared.get(url)
         if shared is not None and self.monotonic() - shared[0] < SHARED_READ_SEC:
-            status, text = shared[1], shared[2]
+            status, text, age = shared[1], shared[2], shared[3]
         else:
             shared = None
             try:
                 kw = {"headers": book.headers} if book.headers else {}
                 r = sess.get(url, timeout=15, **kw)
-                status, text = int(r.status_code), r.text or ""
+                status, text, age = int(r.status_code), r.text or "", page_age(r)
             except Exception as exc:          # noqa: BLE001
                 return self._finish(book, sport, at, url, None, "", False, 0, 0, 0,
                                     f"{type(exc).__name__}: {exc}"[:300])
-            self.shared[url] = (self.monotonic(), status, text)
+            self.shared[url] = (self.monotonic(), status, text, age)
         if book.key == "betmgm" and status == 400 and "access id" in (text or "").lower():
             # This id is for another BetMGM site: never send it again, and read
             # the public page for the one this site ships.
@@ -876,23 +990,27 @@ class BookFeeds:
         detail = "refused" if refused else ("" if status == 200 else f"HTTP {status}")
         if body is not None and book.parse is not None:
             try:
-                live, matched, written = self._lines(book, sport, book.parse(body, sport), at)
+                live, matched, written = self._lines(book, sport, book.parse(body, sport), at, age)
             except Exception as exc:      # noqa: BLE001
                 detail = f"parse failed: {type(exc).__name__}: {exc}"[:300]
         res = self._finish(book, sport, at, url, status, text, status == 200 and not refused,
-                           live, matched, written, detail, body=body, capture=shared is None)
+                           live, matched, written, detail, body=body, capture=shared is None,
+                           page_age_s=age)
         res["refused"] = refused
         res["shared"] = shared is not None
         return res
 
-    def _lines(self, book: Book, sport: str, events: list[BookEvent], at: datetime) -> tuple[int, int, int]:
-        """Place each live game on our games row and log the changed lines."""
+    def _lines(self, book: Book, sport: str, events: list[BookEvent], at: datetime,
+               page_age_s: float | None = None) -> tuple[int, int, int]:
+        """Place each live game on our games row, record what the book has on
+        offer (book_live_reads), and log the changed lines to `odds`."""
         from data.ingestors import dk_live_board as B
         if sport not in B.ODDS_LOG_SPORTS:
             return len(events), 0, 0
         resolve = None if self.dry_run else self._resolver(sport)
         rows = []
         matched = 0
+        seen: dict[str, tuple] = {}
         for ev in events:
             k = (book.key, ev.event_id)
             if k not in self.ids:
@@ -905,11 +1023,14 @@ class BookFeeds:
                 continue
             matched += 1
             row = {"game_id": hit[0], "read_at": at, **_oriented(ev, hit[1])}
+            seen[hit[0]] = tuple(row[c] for c in READ_LINE_COLS)
             prev = self.last.get((book.key, hit[0]))
             new = odds_rows(prev, row, sport, book.key)
             if new:
                 rows.extend(new)
                 self.last[(book.key, hit[0])] = row
+        if not self.dry_run:
+            self._log_offer(book, sport, seen, at, page_age_s)
         if not rows or self.dry_run:
             return len(events), matched, 0
         if self.odds_log is None:
@@ -917,8 +1038,50 @@ class BookFeeds:
             self.odds_log = record_live_prices
         return len(events), matched, int(self.odds_log(self.c(), rows) or 0)
 
+    def offer_rows(self, book: Book, sport: str, seen: dict, at: datetime,
+                   page_age_s: float | None) -> tuple[list[tuple], dict]:
+        """(the book_live_reads rows one clean read adds, the state they leave).
+        A game is written when its numbers differ from its last stored row,
+        its first row since this process started carrying after_start; a game
+        the last clean read listed that is not on this one gets one all-NULL
+        row. Pure given self.state and self.listed."""
+        out, nxt = [], {}
+        prev = self.prev_read.get((book.key, sport), (None, None))
+        for gid, nums in seen.items():
+            last = self.state.get((book.key, gid), _UNSEEN)
+            if last is _UNSEEN or last != nums:
+                out.append((book.key, sport, gid, at, page_age_s, last is _UNSEEN, *nums, *prev))
+                nxt[(book.key, gid)] = nums
+        for gid in sorted(self.listed.get((book.key, sport), set()) - set(seen)):
+            last = self.state.get((book.key, gid), _OFF)
+            if last != _OFF:
+                out.append((book.key, sport, gid, at, page_age_s, False, *_OFF, *prev))
+                nxt[(book.key, gid)] = _OFF
+        return out, nxt
+
+    def _log_offer(self, book: Book, sport: str, seen: dict, at: datetime, page_age_s: float | None) -> int:
+        """Store one clean read's book_live_reads rows. A failed write leaves
+        the state, and the previous read, as they were: the next clean read
+        writes the change again, carrying the read before the failed one
+        (which did not show it) as its previous read, never the failed read
+        (which did)."""
+        out, nxt = self.offer_rows(book, sport, seen, at, page_age_s)
+        if out:
+            try:
+                conn = self.c()
+                conn.executemany(READS_INSERT, out)
+                conn.commit()
+            except Exception as exc:      # noqa: BLE001
+                log.error("%s %s: book_live_reads write failed: %s", book.key, sport, exc)
+                self._recycle()
+                return 0
+        self.state.update(nxt)
+        self.listed[(book.key, sport)] = set(seen)
+        self.prev_read[(book.key, sport)] = (at, page_age_s)
+        return len(out)
+
     def _finish(self, book, sport, at, url, status, text, ok, live, matched, written, detail, body=None,
-                capture=True) -> dict:
+                capture=True, page_age_s=None) -> dict:
         res = {"book": book.key, "sport": sport, "ok": ok, "status": status, "live": live,
                "matched": matched, "written": written, "detail": detail}
         if self.dry_run:
@@ -934,12 +1097,13 @@ class BookFeeds:
                      json.dumps(body) if body is not None else None,
                      None if body is not None else text[:MAX_BODY_TEXT]))
             conn.execute(f"""
-                INSERT INTO {FEED_TABLE} (book, sport, last_read_at, ok, status, live_events, matched, written, detail)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO {FEED_TABLE} (book, sport, last_read_at, ok, status, live_events, matched, written, detail,
+                                          page_age_s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (book, sport) DO UPDATE SET last_read_at = EXCLUDED.last_read_at, ok = EXCLUDED.ok,
                     status = EXCLUDED.status, live_events = EXCLUDED.live_events, matched = EXCLUDED.matched,
-                    written = EXCLUDED.written, detail = EXCLUDED.detail
-            """, (book.key, sport, at, ok, status, live, matched, written, detail))
+                    written = EXCLUDED.written, detail = EXCLUDED.detail, page_age_s = EXCLUDED.page_age_s
+            """, (book.key, sport, at, ok, status, live, matched, written, detail, page_age_s))
             conn.commit()
         except Exception as exc:          # noqa: BLE001
             log.error("%s %s: write failed: %s", book.key, sport, exc)
