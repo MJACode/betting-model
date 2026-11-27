@@ -2421,13 +2421,21 @@ def _late_rows(conn, day: str, capper: Capper) -> list[tuple]:
             + "AND game_date < %s AND graded_at IS NOT NULL "
             "AND EXISTS (SELECT 1 FROM push_sent p "
             "WHERE p.lock_key = %s || capper_picks.game_date "
-            "AND p.kind = %s AND p.sent_at < capper_picks.graded_at) "
+            "AND p.kind = %s "
+            "AND p.sent_at < CAST(capper_picks.graded_at AS TEXT)) "
             "AND NOT EXISTS (SELECT 1 FROM push_sent p2 "
-            "WHERE p2.kind = %s AND p2.sent_at >= capper_picks.graded_at)",
+            "WHERE p2.kind = %s "
+            "AND p2.sent_at >= CAST(capper_picks.graded_at AS TEXT))",
             (day, f"{capper.results_prefix}_day:",
              f"{capper.results_prefix}_day", f"{capper.results_prefix}_day"),
         ).fetchall()
     except Exception:                                         # noqa: BLE001
+        # A failed statement aborts the Postgres transaction. Roll it
+        # back or the recap's next read dies and the day never posts.
+        try:
+            conn.rollback()
+        except Exception:                                     # noqa: BLE001
+            pass
         return []
 
 
@@ -2635,6 +2643,10 @@ def post_capper_recaps(capper: Capper, now: datetime | None = None,
                 ingest_messages(conn, capper=capper)
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"{capper.display_name} ingest before recap failed: {exc}")
+            try:
+                conn.rollback()
+            except Exception:                                 # noqa: BLE001
+                pass
         try:
             if capper is EGGZ:
                 grade_pending(conn)
@@ -2642,6 +2654,10 @@ def post_capper_recaps(capper: Capper, now: datetime | None = None,
                 grade_pending(conn, capper)
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"{capper.display_name} grade before recap failed: {exc}")
+            try:
+                conn.rollback()
+            except Exception:                                 # noqa: BLE001
+                pass
         posted = 0
         if in_daily_recap_window(now):
             catchup = EGGZ_CATCHUP_DAYS if capper.key == "eggz" else DAILY_CATCHUP_DAYS
