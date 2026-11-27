@@ -1140,10 +1140,10 @@
     "semantic_hash": "bf70b11adb73882452d02d4c44eb638f"
   },
   "data/view_migrations.py": {
-    "mtime": 1795786931.8734927,
-    "seen": 1795789383.8896878,
-    "ast_hash": "65fd6ead15469fc2fa6365814bb158a1",
-    "semantic_hash": "65fd6ead15469fc2fa6365814bb158a1"
+    "mtime": 1795791967.3078182,
+    "seen": 1795792215.6572926,
+    "ast_hash": "b4e2e7a0d1516c9cdd257fcf7f28e913",
+    "semantic_hash": "b4e2e7a0d1516c9cdd257fcf7f28e913"
   },
   "dk_mlb_sample.json": {
     "mtime": 1795786931.8775408,
@@ -15024,10 +15024,10 @@
     "semantic_hash": "c5ca0e07d9b3c6955a601284d39a0ef8"
   },
   "docs/data_archive.md": {
-    "mtime": 1795786931.9558222,
-    "seen": 1795789383.904175,
-    "ast_hash": "81460f14ec9931acd6d4bc9607b602db",
-    "semantic_hash": "81460f14ec9931acd6d4bc9607b602db"
+    "mtime": 1795791967.3098238,
+    "seen": 1795792215.6685314,
+    "ast_hash": "46d9bd49b8f2ae7d3bc2c7f204fb9cbe",
+    "semantic_hash": "46d9bd49b8f2ae7d3bc2c7f204fb9cbe"
   },
   "data/migrations/ncaaf_drop_phantom_lsu_ole_miss_2026_11_21.sql": {
     "mtime": 1795786931.6749315,
@@ -16332,10 +16332,10 @@
     "semantic_hash": "5e3da04d491b619206d1b18388993a61"
   },
   "tests/test_notification_inbox.py": {
-    "mtime": 1795787108.8658154,
-    "seen": 1795789383.902517,
-    "ast_hash": "ecbc16fc1e6d453abd0596d58d5ef7c9",
-    "semantic_hash": "ecbc16fc1e6d453abd0596d58d5ef7c9"
+    "mtime": 1795791967.3120775,
+    "seen": 1795792215.6671705,
+    "ast_hash": "18b223e5feaa2f6abd0f242450668615",
+    "semantic_hash": "18b223e5feaa2f6abd0f242450668615"
   },
   "tests/test_restore_acl_snapshot.py": {
     "mtime": 1795787109.7921202,
@@ -17490,10 +17490,10 @@
     "semantic_hash": "c1ac4f25daac565755abb10024dd3ac9"
   },
   "data/migrations/notification_inbox_hide_2026_11_26.sql": {
-    "mtime": 1795786931.684732,
-    "seen": 1795789383.8893647,
-    "ast_hash": "1199a32ed0d86439ab740d7e918262df",
-    "semantic_hash": "1199a32ed0d86439ab740d7e918262df"
+    "mtime": 1795791967.3078182,
+    "seen": 1795792215.6569781,
+    "ast_hash": "4327de6d7b49560af2412e226f8cb5f4",
+    "semantic_hash": "4327de6d7b49560af2412e226f8cb5f4"
   },
   "models/book_live_quotes.py": {
     "mtime": 1795786942.2918677,
