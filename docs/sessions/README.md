@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, Merged the best-line steps; NBA in play takes the other books too (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NCAAB in play bets the best line on the fast path (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, In-play best line, step two begins: the previous read, and one reader (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, `nba_prop_market_early` reaches every tip: an early lane in the NBA prop window job (mike) |

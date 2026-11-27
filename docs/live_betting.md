@@ -399,10 +399,21 @@ before, it moved before 171 to 231.
 <book>'s own page" in its ledger reason, so these bets can be reported as the
 new population they are. `NCAAB_LIVE_OTHER_BOOKS=0` turns it off.
 
-**Next:** NBA,
-whose next game is 2026-11-27. The women's halftime total waits on a
-comparison of the provider's copies with the books' own pages at the break: it
-already bets elsewhere (22 of 43), and its rule counts every book's row.
+**NBA quarters 1-2 spread takes them too** (2026-11-27, `models/nba_live_loop.py`
+`own_page_rows` / `fast_rows`). FanDuel's and BetRivers' own-page spreads join
+DraftKings' board quote on the fast path. Each must be confirmed by a later
+read and have stood 10 s. Each is stamped at the book's previous read, so the
+model's own FRESH rule runs from there: no point on ESPN's plays between the
+stamp and the fetch's served time, and Pinnacle paired within 60 s. They go
+through the same fetch as DraftKings' and Pinnacle's rows. The provider's
+copies of those books are never a fast decider, and the slow way is
+unchanged. `NBA_LIVE_OTHER_BOOKS=0` turns it off. The model is paused under
+the low-volume NBA plan (mike, 2026-11-22), so this bets nothing while that
+holds.
+
+**Next:** the women's halftime total waits on a comparison of the provider's
+copies with the books' own pages at the break: it already bets elsewhere (22
+of 43), and its rule counts every book's row.
 
 ## NBA in play: the game-state model's quarters 1-2 spread (2026-11-04, mike)
 
