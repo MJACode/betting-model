@@ -47,7 +47,9 @@ included, the answer's own age (FanDuel's page is a CDN copy up to 30 s old,
 It is what a live decision needs before it can bet another book's number;
 nothing decides on it yet.
 
-NOT NCAAF, NOT MLB (dk_live_board.ODDS_LOG_SPORTS). Both sports' live picks
+NCAAF IS READ BUT NEVER WRITES `odds` ROWS; MLB IS NOT READ
+(dk_live_board.ODDS_LOG_SPORTS). NCAAF's numbers go to book_live_reads only
+(2026-11-27, issue #1651). Both sports' live picks
 are stamped off the newest in-play `odds` row per book
 (models.scorer._best_live_price), so a new writer for any book would move the
 price a live pick is stamped at. No other decision reads another book's
@@ -268,6 +270,10 @@ FANDUEL_PAGES = {
     "NCAAB": ("page=CUSTOM&customPageId=ncaab", ("NCAA Basketball Mens Games",)),
     "NCAABW": ("page=CUSTOM&customPageId=ncaaw", ("NCAA Basketball Women’s Games",)),
     "EUROLEAGUE": ("page=SPORT&eventTypeId=7522", ("Men's Euroleague Games",)),
+    # Read from mike's machine 2026-11-27 13:2xZ (pre-game, nothing in play):
+    # "NCAA Football Games" (69 events) beside "NCAA FCS" (9), "NCAAF Awards"
+    # and "College Football Team Futures". Only the first is ours.
+    "NCAAF": ("page=CUSTOM&customPageId=ncaaf", ("NCAA Football Games",)),
 }
 # Seen in the NBA and NHL captures (2026-11-23, 11-26): MONEY_LINE,
 # MATCH_HANDICAP_(2-WAY) (the NHL puck line too), TOTAL_POINTS_(OVER/UNDER)
@@ -437,7 +443,10 @@ KAMBI_BASE = os.environ.get("BETRIVERS_KAMBI", "https://eu.offering-api.kambicdn
 # sport -> (Kambi's sport path, the league termKeys that ARE this sport)
 KAMBI_LEAGUES = {"NBA": ("basketball", ("nba", "nba_cup")), "NCAAB": ("basketball", ("ncaab",)),
                  "NCAABW": ("basketball", ("ncaaw",)), "NHL": ("ice_hockey", ("nhl",)),
-                 "NFL": ("american_football", ("nfl",))}
+                 "NFL": ("american_football", ("nfl",)),
+                 # 2026-11-27 13:2xZ: the football list carries ncaaf (68 events),
+                 # nfl (24) and ncaaf_fcs (9); only ncaaf is ours.
+                 "NCAAF": ("american_football", ("ncaaf",))}
 # The main markets' labels, exactly as seen (NFL's on its pre-game list, the
 # same offers it keeps open in play). Anything else is not a main line.
 KAMBI_LABELS = {
@@ -655,7 +664,11 @@ def _caesars_url(sport: str) -> str | None:
     return f"https://api.americanwagering.com/regions/us/locations/{STATE}/brands/czr/sb/v3/sports/{s}/events/schedule"
 
 
-LIVE_SPORTS = ("NBA", "NFL", "NHL", "NCAAB", "NCAABW", "EUROLEAGUE")
+# NCAAF since 2026-11-27 (issue #1651): read and recorded in book_live_reads
+# only. It never writes `odds` rows (dk_live_board.ODDS_LOG_SPORTS leaves it
+# out): NCAAF's live picks are stamped off the newest in-play odds row per book,
+# so another writer there would move a pick's price. MLB is never read.
+LIVE_SPORTS = ("NBA", "NFL", "NHL", "NCAAB", "NCAABW", "EUROLEAGUE", "NCAAF")
 
 BOOKS: tuple[Book, ...] = (
     Book("fanduel", tuple(s for s in LIVE_SPORTS if s in FANDUEL_PAGES), _fanduel_url, parse_fanduel),
@@ -1005,8 +1018,7 @@ class BookFeeds:
         """Place each live game on our games row, record what the book has on
         offer (book_live_reads), and log the changed lines to `odds`."""
         from data.ingestors import dk_live_board as B
-        if sport not in B.ODDS_LOG_SPORTS:
-            return len(events), 0, 0
+        log_odds = sport in B.ODDS_LOG_SPORTS          # NCAAF: book_live_reads only
         resolve = None if self.dry_run else self._resolver(sport)
         rows = []
         matched = 0
@@ -1024,6 +1036,8 @@ class BookFeeds:
             matched += 1
             row = {"game_id": hit[0], "read_at": at, **_oriented(ev, hit[1])}
             seen[hit[0]] = tuple(row[c] for c in READ_LINE_COLS)
+            if not log_odds:
+                continue
             prev = self.last.get((book.key, hit[0]))
             new = odds_rows(prev, row, sport, book.key)
             if new:
