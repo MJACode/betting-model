@@ -408,3 +408,25 @@ def test_a_failing_injury_report_step_reports_false_not_an_exception(monkeypatch
         raise RuntimeError("403")
     monkeypatch.setattr(nba_injury_report, "run_dates", boom)
     assert run_pipeline.step_nba_injury_report("2026-11-27") is False
+
+
+def test_a_feed_is_due_only_when_its_own_interval_has_passed():
+    now = datetime(2026, 11, 27, 19, 0, tzinfo=timezone.utc)                # 2pm ET
+    from datetime import timedelta
+    feeds = [nf.FEEDS["nba_lineups"], nf.FEEDS["pinnacle_nba"], nf.FEEDS["prizepicks_counts"]]
+    last = {"nba_lineups": now - timedelta(seconds=58), "pinnacle_nba": now - timedelta(seconds=120),
+            "prizepicks_counts": now - timedelta(minutes=61)}
+    assert [f.name for f in nf.due_feeds(feeds, last, now)] == ["nba_lineups", "prizepicks_counts"]
+    assert [f.name for f in nf.due_feeds(feeds, {}, now)] == [f.name for f in feeds]   # never read: due
+
+
+def test_the_worker_runs_the_feeds_every_minute_and_leaves_the_big_file_to_the_pc():
+    import inspect
+    import scheduler
+    src = inspect.getsource(scheduler.run_nba_feeds)
+    assert '"--tick"' in src and "NBA_FEEDS_WORKER_SKIP" in src and "timeout=" in src
+    assert scheduler.NBA_FEEDS_WORKER_SKIP == "unabated_props"
+    whole = inspect.getsource(scheduler)
+    assert 'id="nba_feeds"' in whole
+    assert scheduler.owns("nba_feeds") or scheduler.SERVICE_ROLE in ("poller", "pollers")
+    assert "nba_feeds" in scheduler._PIPELINE_JOBS and "nba_feeds" not in scheduler._POLLER_JOBS

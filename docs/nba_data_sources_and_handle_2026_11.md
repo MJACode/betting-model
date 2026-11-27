@@ -771,3 +771,30 @@ its `snapshotStartedAtUtc` read 07:52 UTC at 18:55 UTC while the server's Last-M
   three completed days before the run date; #1523). Which feeds answer from the worker: G5.
 
 ### G5. From the Railway worker
+
+The Railway `prop-probe` service, pinned to commit `a1c23849` of this branch with its start
+command set to `python -m data.ingestors.nba_feeds --once --measure /tmp/nba_feeds_probe.json`
+(no database, no key, nothing written), 2026-11-27 19:32 to 19:33 UTC. Its start command was
+put back afterwards; its source stays pinned to this branch, as after the 2026-11-26 probes.
+
+| Feed | Status from the worker | Items |
+|---|---|---|
+| `nba_lineups` | 200 | 132 |
+| `nba_referees` | 200 | 21 |
+| `underdog_news` | 200 | 300 (12 pages) |
+| `sleeper_projections` | 200 | 916 |
+| `pinnacle_nba` | 200 | 1,473 |
+| `unabated_props` | 200, 138,753,649 bytes | 61,755 |
+| `prizepicks_lines` / `prizepicks_counts` | 200 | 10,406 / 1,560 |
+| `underdog_lines` | 200 | 1,380 |
+| `sleeper_lines` / `sleeper_counts` | 200 | 1,440 / 1,264 |
+| `yahoo_mgm_splits` | 200 | 11 |
+
+**Every feed answers from the worker**, the league's lineup file under `stats.nba.com/js/data/`
+included (the `/stats/` endpoints the box loader needs were not probed there and are known to
+refuse it). So the capture does not depend on mike's PC: the worker job `nba_feeds`
+(`scheduler.run_nba_feeds`, every minute, 24x7) runs `--tick`, which reads each feed whose own
+interval has passed since its last read by anyone, by the ledger. It leaves out
+`unabated_props`: the worker was served a 139 MB file with 61,755 items where the PC got 96 MB
+and 38,085 at about the same time, and parsing it on the worker would hold about a gigabyte.
+The PC's loop reads that one. Why the two files differ is not established.

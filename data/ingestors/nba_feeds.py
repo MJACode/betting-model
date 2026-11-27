@@ -33,6 +33,7 @@ Expected five, a pulled line) is written once as {"gone": true}.
     python -m data.ingestors.nba_feeds --loop --until 2026-12-31T00:00:00
     python -m data.ingestors.nba_feeds --once --measure state.json   # no database
     python -m data.ingestors.nba_feeds --backfill-news               # every page, once
+    python -m data.ingestors.nba_feeds --tick --skip unabated_props  # the worker, every minute
 """
 from __future__ import annotations
 
@@ -817,6 +818,34 @@ def backfill_yahoo(conn, origin: str, first: date, last: date, pause: float = 1.
     return {"feed": feed.name, "games": games, "changed": changed, "error": None}
 
 
+def last_reads(conn) -> dict[str, datetime]:
+    """When each feed was last read, by anyone (this machine or the worker)."""
+    rows = _rows(conn.execute(
+        f"SELECT feed, max(fetched_at) FROM {FETCHES} "
+        "WHERE fetched_at > NOW() - INTERVAL '2 days' GROUP BY feed"))
+    return {r[0]: r[1] for r in rows}
+
+
+def due_feeds(feeds: list[Feed], last: dict[str, datetime], now: datetime) -> list[Feed]:
+    """The feeds whose own interval has passed since their last read (5 seconds
+    of slack, so a one-minute feed is not skipped by a tick that starts early)."""
+    out = []
+    for f in feeds:
+        at = last.get(f.name)
+        if at is None or (now - at).total_seconds() >= f.every_sec(now) - 5:
+            out.append(f)
+    return out
+
+
+def tick(conn, origin: str, feeds: list[Feed], now: datetime | None = None) -> list[dict]:
+    """One scheduled pass: read each feed that is due by the ledger. The worker
+    calls this every minute; it keeps no state of its own between calls, and a
+    feed the PC's loop has just read is not read again."""
+    now = now or datetime.now(timezone.utc)
+    return [one_read(conn, f, origin, now=datetime.now(timezone.utc))
+            for f in due_feeds(feeds, last_reads(conn), now)]
+
+
 def default_origin() -> str:
     return "worker" if os.environ.get("RAILWAY_ENVIRONMENT") else "pc"
 
@@ -826,6 +855,9 @@ def main(argv=None) -> int:
     ap.add_argument("--feeds", help="comma-separated; default every feed")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--loop", action="store_true")
+    ap.add_argument("--tick", action="store_true",
+                    help="one pass of the feeds that are due by the ledger (the worker's job)")
+    ap.add_argument("--skip", help="comma-separated feeds to leave out")
     ap.add_argument("--until", help="with --loop: stop at this UTC time")
     ap.add_argument("--origin", default=default_origin())
     ap.add_argument("--measure", help="keep state in this JSON file; write no database")
@@ -839,7 +871,8 @@ def main(argv=None) -> int:
     unknown = [n for n in names if n not in FEEDS]
     if unknown:
         ap.error(f"unknown feed(s): {unknown}; known: {sorted(FEEDS)}")
-    feeds = [FEEDS[n] for n in names]
+    skip = set(a.skip.split(",")) if a.skip else set()
+    feeds = [FEEDS[n] for n in names if n not in skip]
 
     measure = None
     if a.measure:
@@ -857,6 +890,10 @@ def main(argv=None) -> int:
         if a.backfill_yahoo:
             print(json.dumps(backfill_yahoo(conn, a.origin, date.fromisoformat(a.backfill_yahoo[0]),
                                             date.fromisoformat(a.backfill_yahoo[1]))))
+            return 0
+        if a.tick:
+            for res in tick(conn, a.origin, feeds):
+                print(json.dumps(res))
             return 0
         if not a.loop:
             for f in feeds:
