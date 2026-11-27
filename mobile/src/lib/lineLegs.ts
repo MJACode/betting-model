@@ -50,7 +50,7 @@ import { nhlOffLineCount } from '@/lib/nhlBoard';
 import { normalizePlayerName } from '@/lib/playerNews';
 import { CUSTOM_MODEL_ID, type LegBookPrice, type ParlayLeg } from '@/lib/parlay';
 import { bookName, isBettableBook, linkForSide, MODEL_BOOK, priceForSide } from '@/lib/markets';
-import type { StatsOddsQuote, TeamLineQuote } from '@/lib/statsOdds';
+import { teamLineCaption, type StatsOddsQuote, type TeamLineQuote } from '@/lib/statsOdds';
 import type { GameRow, OddsByBookRow, PropOddsByBookRow } from '@/types';
 
 export type LineSide = 'over' | 'under';
@@ -480,10 +480,9 @@ export function teamLineSheetChoices(
   if (ml) push(teamLineSheetInput(ml, sport), 'ML');
   const spread = quotes.spreads;
   if (spread && spread.line != null) {
-    const n = spread.line;
-    // The board's own caption for the same spread (statsOdds.teamLineCaption).
-    const signedLine = `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n)}`;
-    push(teamLineSheetInput(spread, sport), signedLine);
+    // The board pill's own caption, so the pill and the chip name the same
+    // bet the same way.
+    push(teamLineSheetInput(spread, sport), teamLineCaption(spread) ?? '');
   }
   const total = quotes.totals;
   if (total && total.line != null) {

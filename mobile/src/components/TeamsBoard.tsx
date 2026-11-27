@@ -450,6 +450,20 @@ export function TeamsBoard({
       buildTeamLineIndex(gameLines, slate.games, { market, books, gameIds: unstarted });
     return { h2h: build('h2h'), spreads: build('spreads'), totals: build('totals') };
   }, [gameLines, slate.games, books, unstarted]);
+  const lineChoices = useMemo(
+    () =>
+      lineSheet
+        ? teamLineSheetChoices(
+            {
+              h2h: linesByMarket.h2h.get(lineSheet.team),
+              spreads: linesByMarket.spreads.get(lineSheet.team),
+              totals: linesByMarket.totals.get(lineSheet.team),
+            },
+            sport,
+          )
+        : undefined,
+    [lineSheet, linesByMarket, sport],
+  );
   // Gated on the DAY and the BOOKS, never on which stat is selected and
   // never on the sport — the column must not come and go as the user taps
   // through chips. College basketball shows the same moneyline, spread and
@@ -746,18 +760,7 @@ export function TeamsBoard({
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
       <AddLineSheet
         input={lineSheet ? teamLineSheetInput(lineSheet, sport) : null}
-        choices={
-          lineSheet
-            ? teamLineSheetChoices(
-                {
-                  h2h: linesByMarket.h2h.get(lineSheet.team),
-                  spreads: linesByMarket.spreads.get(lineSheet.team),
-                  totals: linesByMarket.totals.get(lineSheet.team),
-                },
-                sport,
-              )
-            : undefined
-        }
+        choices={lineChoices}
         game={lineSheet ? slate.games.find((g) => g.game_id === lineSheet.gameId) ?? null : null}
         onClose={() => setLineSheet(null)}
         onAdded={onAdded}

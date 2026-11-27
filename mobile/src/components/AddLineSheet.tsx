@@ -20,7 +20,7 @@ import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing, sectionHeaderText, opacity } from '@/lib/theme';
 import type { GameRow } from '@/types';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { FilterChip } from '@/components/filters/FilterChip';
+import { SegmentTabs } from '@/components/GroupTabs';
 
 /**
  * "Add to betslip?" — what a tap on a Stats line pill opens.
@@ -154,6 +154,27 @@ export function AddLineSheet({
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
+          {/* The market switch sits directly under the title, above the
+              explainer: the explainer can grow to the two-line same-game
+              warning when the market changes, and a control above it never
+              moves under the thumb (UX review, 2026-11-27). */}
+          {chips ? (
+            <View style={styles.chips}>
+              <SegmentTabs
+                compact
+                fit
+                items={chips.map((c) => c.key)}
+                active={picked.key ?? chips[0]!.key}
+                onChange={(k) => setPicked({ for: openedKey, key: k })}
+                labelFor={(k) => chips.find((c) => c.key === k)?.label ?? ''}
+                accessibilityLabelFor={(k) => {
+                  const c = chips.find((x) => x.key === k);
+                  if (!c) return '';
+                  return `${lineLegLabel(c.input.spec)}${legs.has(k) ? ', in betslip' : ''}`;
+                }}
+              />
+            </View>
+          ) : null}
           {/* The ask, and where the book gets chosen — under the title, where
               the reference sheets put their one-line explainer, not as a
               caption under the list (UX review). */}
@@ -163,20 +184,6 @@ export function AddLineSheet({
               : shown?.explainer ?? 'Add it to your betslip now — you’ll choose the sportsbook there.'}
           </Text>
 
-          {chips ? (
-            <View style={styles.chips} accessibilityRole="tablist">
-              {chips.map((c) => (
-                <FilterChip
-                  key={c.key}
-                  label={c.label}
-                  size="sm"
-                  active={c.key === picked.key}
-                  onPress={() => setPicked({ for: openedKey, key: c.key })}
-                  accessibilityLabel={lineLegLabel(c.input.spec)}
-                />
-              ))}
-            </View>
-          ) : null}
 
           <Text style={styles.sectionTitle}>Where it&apos;s posted</Text>
           {/* One card, hairline rows: a read-only comparison, styled unlike
@@ -246,9 +253,6 @@ export function AddLineSheet({
 const styles = StyleSheet.create({
   cta: { marginTop: spacing.md },
   chips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
     marginBottom: spacing.md,
   },
   backdrop: {
