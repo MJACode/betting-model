@@ -56,7 +56,7 @@ const BET_ALL_SKIP_PLURAL: Record<BetAllSkipReason, string> = {
   priceCheck: 'price checks',
   oldPrice: 'old prices',
   notAtMyBooks: 'not at your books',
-  noPrice: 'no price at your books',
+  noPrice: 'not priced at your books',
 };
 
 /** Said wherever Bet all is offered (Matt, 2026-11-14). */
@@ -74,6 +74,37 @@ export function betAllMainSkip(skipped: readonly { reason: BetAllSkipReason }[])
   if (!top) return 'None ready';
   const text = top[1] === 1 ? BET_ALL_SKIP_TEXT[top[0]].toLowerCase() : BET_ALL_SKIP_PLURAL[top[0]];
   return `${top[1]} ${text}`;
+}
+
+/**
+ * Every skip reason with its count, most common first, for the banner:
+ * "3 not included: 2 old prices, 1 game started", the sheet's own word for
+ * them ("Not included"). Said whenever a signal is left
+ * out, not only when none are ready (Matt, 2026-11-27: "1 ready" beside four
+ * signals read as a bug). Null when nothing is skipped.
+ */
+export function betAllSkipSummary(skipped: readonly { reason: BetAllSkipReason }[]): string | null {
+  if (skipped.length === 0) return null;
+  const n = new Map<BetAllSkipReason, number>();
+  for (const s of skipped) n.set(s.reason, (n.get(s.reason) ?? 0) + 1);
+  const parts = [...n.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, count]) =>
+      `${count} ${count === 1 ? BET_ALL_SKIP_TEXT[reason].toLowerCase() : BET_ALL_SKIP_PLURAL[reason]}`,
+    );
+  return `${skipped.length} not included: ${parts.join(', ')}`;
+}
+
+/** Distinct sports among the picks Bet all can SEND, in first-seen order.
+ *  Skips are not counted: a sport whose signals are all skipped adds nothing
+ *  to send, so "across 2 sports" would overstate it (UX review, 2026-11-27). */
+export function betAllSports(c: BetAllCandidates): string[] {
+  const out: string[] = [];
+  for (const x of c.picks) {
+    const s = x.pick.sport;
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out;
 }
 
 export interface BetAllQuote {

@@ -31,10 +31,14 @@ import { openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing, sectionHeaderText, opacity, cardDense } from '@/lib/theme';
 import type { Pick } from '@/types';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { sportDisplayName } from '@/lib/liveSports';
 
 interface Props {
   visible: boolean;
   sport: string;
+  /** Name each pick's sport on its row: the all-sports sheet holds several
+   *  (Matt, 2026-11-27), and a label alone does not say which. */
+  showSport?: boolean;
   candidates: BetAllCandidates;
   myBooks: readonly string[];
   /** Whether a pick is already in the member's tracked bets
@@ -49,12 +53,23 @@ interface Props {
   onClose: () => void;
 }
 
+/** Picks split by sport, in the order each sport first appears. */
+function bySport(ps: readonly BetAllPick[]): [string, BetAllPick[]][] {
+  const m = new Map<string, BetAllPick[]>();
+  for (const p of ps) {
+    const s = p.pick.sport ?? '';
+    m.set(s, [...(m.get(s) ?? []), p]);
+  }
+  return [...m.entries()];
+}
+
 function stakeText(risk: number, win: number): string {
   return `Bet ${formatUnits(risk)} · Win ${formatUnits(win)}`;
 }
 
 /**
- * Bet all (Matt, 2026-11-14): every pre-game signal for one sport, sent to
+ * Bet all (Matt, 2026-11-14): every pre-game signal for one sport (or, from the top of Picks, every
+ * sport: Matt, 2026-11-27), sent to
  * the member's sportsbooks as single bets. Best line is the default; One
  * sportsbook puts every pick it has at one book. Live bets are not part of
  * it, and the sheet says so. lib/betAll.ts holds the rules.
@@ -68,7 +83,7 @@ function stakeText(risk: number, win: number): string {
  * than one pick has a "Placed all" shortcut. Nothing waits for an answer, so
  * closing the sheet never loses a placed bet and never needs a warning.
  */
-export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, onTrack, onUntrack, onClose }: Props) {
+export function BetAllSheet({ visible, sport, showSport = false, candidates, myBooks, isTracked, onTrack, onUntrack, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const { picks: allPicks, skipped } = candidates;
   const [mode, setMode] = useState<BetAllMode>('best');
@@ -179,6 +194,9 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
   const placedLegs = steps.reduce((n, s) => n + trackedIn(s), 0);
   const nextStep = steps.find((s) => trackedIn(s) < runLegs(s).length);
 
+  // "NFL · " before a row's detail, on the all-sports sheet only.
+  const sportPrefix = (pick: Pick) => (showSport && pick.sport ? `${sportDisplayName(pick.sport)} · ` : '');
+
   const pickRow = (p: BetAllPick, i: number) => {
     const inBookMode = mode === 'book' && chosenBook != null;
     const q = inBookMode ? p.quotes.find((x) => x.bookmaker === chosenBook) ?? null : quoteForBestLine(p);
@@ -199,7 +217,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
       : notBest
         ? `${stakeText(stake!.risk, stake!.win)} · ${bookLabel(best.bookmaker)} ${linesPriceText(best.price)} is better${foundAt}`
         : `${stakeText(stake!.risk, stake!.win)}${foundAt}`;
-    const sub = tracked ? `Tracking · ${detail}` : detail;
+    const sub = `${sportPrefix(p.pick)}${tracked ? `Tracking · ${detail}` : detail}`;
     return (
       <Pressable
         key={p.key}
@@ -220,7 +238,8 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
             {trueMinus(p.label)}
           </Text>
           <Text style={styles.rowSub} numberOfLines={2}>
-            {/* Same word as the card's Track button, so the two read as one state; keep in step with `sub`. */}
+            {/* Same word as the card's Track button, so the two read as one state. `sub` adds the
+                sport for VoiceOver only: on screen the sport is the group's header (UX review). */}
             {tracked ? <Text style={styles.trackedTag}>Tracking</Text> : null}
             {tracked ? ` · ${detail}` : detail}
           </Text>
@@ -231,14 +250,29 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
   };
 
   // Best line: picks grouped under the book the plan will open.
+  // On the all-sports sheet each book splits by sport, under a sport header,
+  // so the row's footnote keeps its room for "Found at" (UX review, 2026-11-27).
   const bestGroups = useMemo(() => {
     const m = new Map<string, BetAllPick[]>();
     for (const p of picks) {
       const b = quoteForBestLine(p).bookmaker;
       m.set(b, [...(m.get(b) ?? []), p]);
     }
-    return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
-  }, [picks]);
+    return [...m.entries()]
+      .sort((a, b) => b[1].length - a[1].length)
+      .flatMap(([b, ps]) =>
+        showSport
+          ? bySport(ps).map(([s, sp]) => ({ key: `${b}:${s}`, title: `${sportDisplayName(s)} · ${bookName(b)} · best line`, picks: sp }))
+          : [{ key: b, title: `${bookName(b)} · best line`, picks: ps }],
+      );
+  }, [picks, showSport]);
+  const bookGroups = useMemo(
+    () =>
+      showSport
+        ? bySport(picks).map(([s, sp]) => ({ key: s, title: sportDisplayName(s), picks: sp }))
+        : [{ key: 'all', title: null as string | null, picks }],
+    [picks, showSport],
+  );
 
   const allSelected = picks.length > 0 && picks.every((p) => selected.has(p.key));
   // Picks on the list that are ticked.
@@ -278,7 +312,9 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
               </Text>
               <Text style={styles.subtitle}>
                 {phase === 'choose'
-                  ? BET_ALL_LIVE_NOTE
+                  ? showSport
+                    ? `Every sport’s signals. Board filters don’t apply. ${BET_ALL_LIVE_NOTE}`
+                    : BET_ALL_LIVE_NOTE
                   : 'Tick each bet once you’ve placed it to track it.'}
               </Text>
             </View>
@@ -342,15 +378,20 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
 
               <ScrollView style={styles.list} bounces={false}>
                 {mode === 'best' ? (
-                  bestGroups.map(([b, ps]) => (
-                    <View key={b} style={styles.group}>
-                      <Text style={styles.groupTitle}>{`${bookName(b)} · best line`}</Text>
-                      <View style={styles.card}>{ps.map(pickRow)}</View>
+                  bestGroups.map((g) => (
+                    <View key={g.key} style={styles.group}>
+                      <Text style={styles.groupTitle} accessibilityRole="header">{g.title}</Text>
+                      <View style={styles.card}>{g.picks.map(pickRow)}</View>
                     </View>
                   ))
                 ) : (
                   <View style={styles.group}>
-                    <View style={styles.card}>{picks.map(pickRow)}</View>
+                    {bookGroups.map((g) => (
+                      <View key={g.key} style={g.title ? styles.group : undefined}>
+                        {g.title ? <Text style={styles.groupTitle} accessibilityRole="header">{g.title}</Text> : null}
+                        <View style={styles.card}>{g.picks.map(pickRow)}</View>
+                      </View>
+                    ))}
                     {onePlan.missing.length > 0 && chosenBook ? (
                       <Text style={styles.warn}>
                         {`${onePlan.missing.length} selected ${onePlan.missing.length === 1 ? 'pick isn’t' : 'picks aren’t'} at ${bookName(chosenBook)}. Best line includes ${onePlan.missing.length === 1 ? 'it' : 'them'}.`}
@@ -363,10 +404,10 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
                     <Text style={styles.groupTitle}>Not included</Text>
                     <View style={styles.card}>
                       {skipped.map((s, i) => (
-                        <View key={s.key} style={[styles.row, i > 0 && styles.rowDivider]} accessible accessibilityLabel={`${trueMinus(s.label)}, not included, ${BET_ALL_SKIP_TEXT[s.reason]}`}>
+                        <View key={s.key} style={[styles.row, i > 0 && styles.rowDivider]} accessible accessibilityLabel={`${sportPrefix(s.pick)}${trueMinus(s.label)}, not included, ${BET_ALL_SKIP_TEXT[s.reason]}`}>
                           <View style={styles.rowBody}>
                             <Text style={[styles.rowTitle, styles.muted]} numberOfLines={2}>{trueMinus(s.label)}</Text>
-                            <Text style={styles.rowSub}>{BET_ALL_SKIP_TEXT[s.reason]}</Text>
+                            <Text style={styles.rowSub}>{`${sportPrefix(s.pick)}${BET_ALL_SKIP_TEXT[s.reason]}`}</Text>
                           </View>
                         </View>
                       ))}
@@ -422,7 +463,7 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
                             onPress={() => togglePlaced(l)}
                             accessibilityRole="checkbox"
                             accessibilityState={{ checked: on }}
-                            accessibilityLabel={`Placed: ${trueMinus(l.label)} ${linesPriceText(l.price)}, ${stakeText(l.stake.risk, l.stake.win)}${trackedAtStart.has(l.key) ? ', already tracking' : ''}`}
+                            accessibilityLabel={`Placed: ${sportPrefix(l.pick)}${trueMinus(l.label)} ${linesPriceText(l.price)}, ${stakeText(l.stake.risk, l.stake.win)}${trackedAtStart.has(l.key) ? ', already tracking' : ''}`}
                             accessibilityHint={on ? 'Takes it out of tracked bets' : 'Adds it to tracked bets'}
                             style={({ pressed }) => [styles.leg, pressed && styles.pressed]}
                           >
@@ -435,8 +476,8 @@ export function BetAllSheet({ visible, sport, candidates, myBooks, isTracked, on
                               <Text style={styles.legLabel} numberOfLines={2}>{`${trueMinus(l.label)} ${linesPriceText(l.price)}`}</Text>
                               <Text style={styles.legStake}>
                                 {trackedAtStart.has(l.key)
-                                  ? `${stakeText(l.stake.risk, l.stake.win)} · Already tracking`
-                                  : stakeText(l.stake.risk, l.stake.win)}
+                                  ? `${sportPrefix(l.pick)}${stakeText(l.stake.risk, l.stake.win)} · Already tracking`
+                                  : `${sportPrefix(l.pick)}${stakeText(l.stake.risk, l.stake.win)}`}
                               </Text>
                             </View>
                           </Pressable>
