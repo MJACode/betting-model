@@ -333,3 +333,141 @@ def test_the_loop_wakes_at_the_window_not_on_its_next_tick():
     at = datetime(2026, 11, 13, 3, 55, 0, tzinfo=timezone.utc)
     assert LP.seconds_to_next_window(s, at) == pytest.approx(38.0)            # opens 03:55:38
     assert LP.seconds_to_next_window(s, datetime(2026, 11, 13, 3, 56, 0, tzinfo=timezone.utc)) == 0.0
+
+
+# ─── best line: another book's own page on the fast path (issue #1644) ───────
+#
+# mike, 2026-11-26: "We want best line". Pinned: a better price at another
+# book's own page is the bet when it passes the book's gates; a number the
+# book put up before the last basket, one far from DraftKings' number, and one
+# not yet confirmed are dropped, never waited on; DraftKings' own bet is
+# unchanged when nothing elsewhere beats it; a failed read of the other books
+# leaves the window DraftKings only.
+
+def book_quote(w, *, book="fanduel", stamp=6.0, shown=7.0, held=True, spread=(-6.5, 105.0, -125.0)):
+    return {"game_id": S.GAME_ID, "market": "spreads", "book": book,
+            "stamp": pd.Timestamp(w) + pd.Timedelta(seconds=stamp),
+            "shown": pd.Timestamp(w) + pd.Timedelta(seconds=shown), "held": held,
+            "spread_home": spread[0], "home_price": spread[1], "away_price": spread[2],
+            "total_line": float("nan"), "over_price": float("nan"), "under_price": float("nan")}
+
+
+class FakeBooks:
+    def __init__(self, rows=None, fail=False):
+        self.rows, self.fail, self.calls = rows or [], fail, 0
+
+    def quotes(self, game_ids, at, markets=("spreads", "totals")):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("book_live_reads unreachable")
+        from models import book_live_quotes as OB
+        return pd.DataFrame([r for r in self.rows if r["game_id"] in game_ids], columns=OB.QUOTE_COLS)
+
+
+def best_line_window(art, monkeypatch, quotes=None, fail=False, early_row=False):
+    plays = S.build_plays()
+    w = pd.Timestamp(S.wall_of(plays, 1, 600.0))
+    rows = None
+    if early_row:                      # DraftKings before Duke's basket: 12-6, -5.5 / 149.5
+        common = {"game_id": S.GAME_ID, "period_label": "1st Half", "period": 1,
+                  "spread_home_price": -110.0, "spread_away_price": -110.0,
+                  "over_price": -110.0, "under_price": -110.0}
+        rows = [{**common, "read_at": w - pd.Timedelta(seconds=10), "clock_s": 610.0, "home_score": 12,
+                 "away_score": 6, "spread_home": -5.5, "total_line": 149.5},
+                {**common, "read_at": w + pd.Timedelta(seconds=5), "clock_s": 595.0, "home_score": 14,
+                 "away_score": 6, "spread_home": -6.5, "total_line": 150.5}]
+    loop, db, clock, slot, dk = dk_window(art, monkeypatch, rows=rows)
+    loop.books = FakeBooks(quotes(w) if quotes else [], fail=fail)
+    return loop, db, w
+
+
+def test_a_better_price_on_another_books_own_page_is_the_bet(art, monkeypatch):
+    loop, db, _w = best_line_window(art, monkeypatch, quotes=lambda w: [book_quote(w)])
+    loop.tick()
+    row = db.ledger[(S.GAME_ID, M.SPREAD_H1)]
+    assert row["outcome"] == "bet" and "fanduel's own page" in row["reason"]
+    p = db.picks[0]
+    assert p["pick_label"] == "Duke -6.5 (live)" and p["scored_line"] == -6.5
+    assert (p["decision_book"], p["decision_odds"]) == ("fanduel", 105.0)
+    assert p["dk_odds"] == -110.0 and p["line_book"] is None      # DraftKings hung the same number
+
+
+def test_a_number_the_book_put_up_before_the_last_basket_is_not_taken(art, monkeypatch):
+    # FanDuel's previous read (its stamp) was 5 s before Duke's basket
+    loop, db, _w = best_line_window(art, monkeypatch, early_row=True,
+                                    quotes=lambda w: [book_quote(w, stamp=-5.0, shown=7.0)])
+    loop.tick()
+    p = db.picks[0]
+    assert (p["decision_book"], p["decision_odds"]) == ("draftkings", -110.0)
+    assert "own page" not in db.ledger[(S.GAME_ID, M.SPREAD_H1)]["reason"]
+
+
+def test_a_number_far_from_draftkings_is_not_taken(art, monkeypatch):
+    loop, db, _w = best_line_window(art, monkeypatch,
+                                    quotes=lambda w: [book_quote(w, spread=(-13.5, 150.0, -180.0))])
+    loop.tick()
+    assert db.picks[0]["decision_book"] == "draftkings"
+
+
+def test_an_unconfirmed_number_elsewhere_neither_bets_nor_holds_the_game(art, monkeypatch):
+    loop, db, _w = best_line_window(art, monkeypatch, quotes=lambda w: [book_quote(w, held=False)])
+    res = loop.tick()
+    assert not res.get("fast")                                   # decided now, not held a read
+    assert db.picks[0]["decision_book"] == "draftkings"
+
+
+def test_a_worse_price_elsewhere_leaves_draftkings_bet_exactly_as_it_was(art, monkeypatch):
+    base_loop, base_db, _w = best_line_window(art, monkeypatch)
+    base_loop.tick()
+    loop, db, _w = best_line_window(art, monkeypatch,
+                                    quotes=lambda w: [book_quote(w, spread=(-6.5, -120.0, 100.0))])
+    loop.tick()
+    keep = ("pick_label", "decision_book", "decision_odds", "scored_line", "model_probability", "decision_edge")
+    assert {k: db.picks[0][k] for k in keep} == {k: base_db.picks[0][k] for k in keep}
+    assert "own page" not in db.ledger[(S.GAME_ID, M.SPREAD_H1)]["reason"]
+
+
+def test_a_failed_read_of_the_other_books_leaves_the_window_draftkings_only(art, monkeypatch):
+    loop, db, _w = best_line_window(art, monkeypatch, fail=True)
+    loop.tick()
+    assert loop.books.calls == 1 and db.picks[0]["decision_book"] == "draftkings"
+
+
+def test_a_book_the_platform_does_not_let_a_pick_name_is_never_the_bet(art, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "BEST_LINE_BOOKMAKERS", [b for b in config.BEST_LINE_BOOKMAKERS if b != "fanduel"])
+    loop, db, _w = best_line_window(art, monkeypatch, quotes=lambda w: [book_quote(w)])
+    loop.tick()
+    assert db.picks[0]["decision_book"] == "draftkings"
+
+
+def test_another_books_state_is_draftkings_board_at_first_sight_and_its_basket_rule_runs_from_its_stamp():
+    reads = pd.DataFrame([read(0, 12, 6, spread=(-5.5, -110.0, -110.0)), read(5, 14, 6, clock=590.0),
+                          read(9, 14, 6, clock=585.0)])
+    fetch = T0 + pd.Timedelta(seconds=20)
+    q = pd.DataFrame([{"game_id": S.GAME_ID, "market": "spreads", "book": "betrivers",
+                       "stamp": T0 + pd.Timedelta(seconds=6), "shown": T0 + pd.Timedelta(seconds=9.5),
+                       "held": True, "spread_home": -6.5, "home_price": -105.0, "away_price": -115.0,
+                       "total_line": float("nan"), "over_price": float("nan"), "under_price": float("nan")}])
+    dk_qs = DK.quote_states_dk(reads, fetch, fouls())
+    [r] = DK.quote_states_books(q, reads, fetch, fouls(), dk_qs).to_dict("records")
+    assert (r["book"], r["clock_s"], r["h_pts"], r["a_pts"], r["pts_since"]) == ("betrivers", 585.0, 14, 6, 0.0)
+    assert r["fetch_at"] == fetch and r["stamp"] == T0 + pd.Timedelta(seconds=9.5)
+    stale = q.assign(stamp=T0 + pd.Timedelta(seconds=2))          # set before the 14-6 basket at 5 s
+    assert DK.quote_states_books(stale, reads, fetch, fouls(), dk_qs).empty
+    early = q.assign(stamp=T0 - pd.Timedelta(seconds=30))         # no DraftKings read that early
+    assert DK.quote_states_books(early, reads, fetch, fouls(), dk_qs).empty
+    assert DK.quote_states_books(q, reads, fetch, {}, dk_qs).empty  # no ESPN fouls: fail closed
+
+
+def test_another_books_number_must_have_stood_ten_seconds_before_it_decides():
+    # a book can move for a basket before DraftKings' board shows the score
+    reads = pd.DataFrame([read(0, 12, 6, spread=(-5.5, -110.0, -110.0)), read(5, 14, 6, clock=590.0),
+                          read(20, 14, 6, clock=575.0)])
+    q = pd.DataFrame([{"game_id": S.GAME_ID, "market": "spreads", "book": "betrivers",
+                       "stamp": T0 + pd.Timedelta(seconds=6), "shown": T0 + pd.Timedelta(seconds=8),
+                       "held": True, "spread_home": -6.5, "home_price": -105.0, "away_price": -115.0,
+                       "total_line": float("nan"), "over_price": float("nan"), "under_price": float("nan")}])
+    stood = DK.quote_states_books(q, reads, T0 + pd.Timedelta(seconds=18), fouls())
+    young = DK.quote_states_books(q, reads, T0 + pd.Timedelta(seconds=17), fouls())
+    assert len(stood) == 1 and young.empty and DK.CONFIRM_SEC == 10.0
