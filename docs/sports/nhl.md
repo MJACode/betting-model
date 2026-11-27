@@ -281,6 +281,12 @@
 > +1.32%. The return is not established (interval -0.6% to +10.1%); closing
 > line value is the case for it. Thresholds and the full grid:
 > `docs/thresholds.md`.
+>
+> **2026-11-27: referee crews were walked forward on this rule and did not
+> clear.** `USE_NHL_REF_FEATURES` stays False. On the officials seasons the
+> referee card was +2.2 units ahead of the rule, the day-clustered interval
+> ran −66.9 to +72.2, and close EV went from +1.32% to −1.67%.
+> `docs/nhl_totals_referee_backtest.md`.
 
 > **Read `docs/nhl_market_research.md` first (2026-09-20).** The 2026-06-21
 > holdout numbers in the table below were produced on season-final inputs. On

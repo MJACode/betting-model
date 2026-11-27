@@ -86,6 +86,12 @@ import config
 from models.market_relative import devig, implied
 
 MODEL_ID = "nhl_over_under"
+# Referee features stay off the live card. The walk-forward that measures
+# them is scripts/nhl_totals_referee_backtest.py (docs/nhl_totals_referee_backtest.md).
+# find_bets moves Pinnacle's no-vig only when this is True AND the caller
+# passes a fitted model. The card passes neither. Do not turn this on here:
+# that would be a model change, and this file's default is the live rule.
+USE_NHL_REF_FEATURES = False
 SHARP_BOOK = "pinnacle"
 # The book whose own price fills the dk_* columns (the scorer's convention).
 REFERENCE_BOOK = "draftkings"
@@ -227,9 +233,26 @@ def load_fetch_quotes(conn, games) -> list[dict]:
     return out
 
 
+def _fair_with_refs(p_over, p_under, game_id, ref_model, ref_by_game):
+    """Pinnacle's no-vig pair, unchanged unless the referee flag is on.
+
+    `ref_model.adjust_over` is the backtest's fitted shift. With the flag
+    off this returns the two probabilities it was given, even if a model
+    was passed, so the live card cannot pick it up by accident.
+    """
+    if (not USE_NHL_REF_FEATURES or ref_model is None or not ref_by_game
+            or p_over is None or game_id not in ref_by_game):
+        return p_over, p_under
+    adj = ref_model.adjust_over(float(p_over), ref_by_game[game_id])
+    if adj is None:
+        return p_over, p_under
+    adj = float(adj)
+    return adj, 1.0 - adj
+
+
 def find_bets(quotes, soft_books: tuple[str, ...] | None = None,
               min_ev: float | None = None, min_odds: float | None = None,
-              now=None) -> tuple[list[NhlTotalBet], dict]:
+              now=None, ref_model=None, ref_by_game=None) -> tuple[list[NhlTotalBet], dict]:
     """At most one bet a game from `quotes` (rows shaped as load_fetch_quotes
     returns them; any superset of those rows gives the same answer, because the
     fetch selection is re-applied here).
@@ -245,6 +268,10 @@ def find_bets(quotes, soft_books: tuple[str, ...] | None = None,
     there is no newer fetch, and the card would bet hours- or days-old prices.
     The fetch time is odds.created_at, the clock this rule already pairs on.
     None (the replay and unit-test callers) applies no age check.
+
+    `ref_model` / `ref_by_game` are read only when USE_NHL_REF_FEATURES is
+    True. The live card leaves both as None and leaves the flag False, so
+    the price is Pinnacle's no-vig exactly as before.
     """
     soft = tuple(soft_books) if soft_books is not None else SOFT_BOOKS
     floor_ev = config.min_ev_for(MODEL_ID) if min_ev is None else float(min_ev)
@@ -282,6 +309,7 @@ def find_bets(quotes, soft_books: tuple[str, ...] | None = None,
             diag["sharp_incoherent"] += 1
             continue
         p_over, p_under = devig(sharp["over_price"], sharp["under_price"])
+        p_over, p_under = _fair_with_refs(p_over, p_under, gid, ref_model, ref_by_game)
         line = float(sharp["total_line"])
 
         # The rest of Pinnacle's fetch: the newest row per book in it.

@@ -292,6 +292,14 @@ edge is where the rule misses something the state shows.
   played games.
 - **Public splits, reverse line movement, steam**: used as overlays (the
   baseball game-market gate); as fades they failed.
+- **Referee crew, shrunk prior games, as a shift of the sharp no-vig total.**
+  *Failed* on NHL full-game totals (2026-11-27): point-in-time goals, power
+  plays and shorthanded counts, K = 50, walk-forward 2024-25 and 2025-26.
+  The crew card was +2.2 units ahead of the sharp-versus-soft rule and the
+  day-clustered interval included zero; close EV went from +1.32% to −1.67%.
+  Power-play opportunities and times shorthanded are the same column in
+  `nhl_team_game_log`. Flag stays off
+  (`docs/nhl_totals_referee_backtest.md`).
 
 ## 6. Where the margin sits
 
