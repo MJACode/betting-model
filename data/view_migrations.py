@@ -886,6 +886,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # and the crons fill them; the shift and right-rail backfill commands
     # fill 2023-24 through the current season. EDGE has no backfill.
     "nhl_free_feeds_2026_11_26.sql",
+    # Delete from the notifications inbox (Matt, 2026-11-26: "You do the db
+    # action"). Adds notification_inbox.deleted_at, a hide, never a DELETE
+    # (CLAUDE.md 1b). 159 rows / 184 kB when written. Returns on a catalog
+    # read once the column, the unread-index predicate and the freeze rule hold.
+    "notification_inbox_hide_2026_11_26.sql",
     # 2026-11-21 (mike: "can u create an app for my phone too"): the Betting PC
     # monitor's page, written by mike's PC (pc_monitor/) and served to his
     # phone by the cloud monitor (/pc/). A new one-row-per-PC table, RLS on,

@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, Teams board: ML, spread, Over and Under all addable from any stat (matt) |
+| 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, Eggz recap uses his own grades (mike) |
 | 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, Bet all sports, and the banner says what it skipped (Matt) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, NCAAB in play bets the best line on the fast path (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, In-play best line, step two begins: the previous read, and one reader (mike) |
