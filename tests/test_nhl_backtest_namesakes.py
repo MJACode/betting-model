@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 
 import models.nhl_props as P
-from scripts.nhl_prop_backtest import namesakes
+from scripts.nhl_prop_backtest import _utc, namesakes
 
 
 def _frame(rows):
@@ -42,6 +42,14 @@ def test_namesakes_on_two_teams_collide_only_when_those_teams_meet():
                 ("g1", 2026, "NYI", "CAR", 8480222, "Sebastián Aho"),
                 ("g2", 2026, "CAR", "BOS", 8478427, "Sebastian Aho")])
     assert namesakes(f, f, 2026).tolist() == [True, True, False]
+
+
+def test_a_snapshot_with_fractional_seconds_parses():
+    # pandas 3 refuses to infer this mix. The open quotes are stored this way.
+    s = pd.Series(["2026-10-01T18:08:24.766793+00:00", "2026-10-01T18:08:24+00:00"])
+    got = _utc(s)
+    assert str(got.iloc[0]) == "2026-10-01 18:08:24.766793+00:00"
+    assert got.dt.tz is not None
 
 
 def test_a_unique_name_is_kept():

@@ -138,6 +138,135 @@ class TestTheGoalieFrame:
         assert len(row) == 1 and int(row.started.iloc[0]) == 1 and row[list(P.SAVES.features)].notna().all(axis=None)
 
 
+def _point_inputs(sk: pd.DataFrame, go: pd.DataFrame, tm: pd.DataFrame):
+    """MoneyPuck rows, one linemate pair per team-game, one referee, aligned to the synthetic log."""
+    rng = np.random.default_rng(1)
+    skaters = sk[["player_id", "nhl_game_id"]].copy()
+    skaters["on_ice_f_x_goals"] = rng.uniform(0.2, 1.5, len(skaters))
+    skaters["i_f_x_goals"] = rng.uniform(0.05, 0.8, len(skaters))
+    skaters["i_f_primary_assists"] = rng.integers(0, 3, len(skaters)).astype(float)
+    teams = tm[["nhl_game_id", "team", "game_date"]].copy()
+    teams["shots_on_goal_for"] = rng.uniform(20, 40, len(teams))
+    teams["x_goals_for"] = rng.uniform(1.5, 4.5, len(teams))
+    teams["x_goals_against"] = rng.uniform(1.5, 4.5, len(teams))
+    starts = go[go.started == 1][["player_id", "nhl_game_id", "team", "game_date"]].copy()
+    starts["x_goals"] = rng.uniform(1.5, 4.0, len(starts))
+    starts["goals"] = rng.integers(0, 5, len(starts)).astype(float)
+    mates = []
+    for gid, team in sk.groupby(["nhl_game_id", "team"]).groups:
+        ids = sorted(sk[(sk.nhl_game_id == gid) & (sk.team == team)].player_id.unique())
+        if len(ids) >= 2:
+            mates.append({"nhl_game_id": gid, "player_id_lo": int(ids[0]), "player_id_hi": int(ids[1]),
+                          "shared_seconds": 600})
+    refs = pd.DataFrame({"nhl_game_id": sk.nhl_game_id.unique(), "full_name": "Ref A"})
+    return skaters, teams, starts, pd.DataFrame(mates), refs
+
+
+class TestMoneyPuckPointsFeatures:
+    def test_the_live_spec_does_not_carry_them(self):
+        assert P.USE_MONEYPUCK_POINTS is False
+        assert P.assists_spec(False) is P.ASSISTS
+        assert P.points_spec(False) is P.POINTS
+        assert P.POINTS.model_id not in P.SPECS
+        assert P.POINTS not in P.LIVE
+        assert not any(f.startswith("mp_") or f.startswith("lm_") or f.startswith("pp_share")
+                       or f.startswith("pp_unit") or f.startswith("own_mp_") or f.startswith("opp_mp_")
+                       or f.startswith("opp_gsax") or f.startswith("ref_pp")
+                       for f in P.ASSISTS.features)
+        card_src = (ROOT / "scripts" / "nhl_props_card.py").read_text(encoding="utf-8")
+        assert "add_points_features" not in card_src
+        assert "points_spec" not in card_src
+        assert "assists_spec" not in card_src
+        assert "moneypuck" not in card_src.lower()
+        with pytest.raises(ValueError):
+            P.assists_spec(True, ("assists_l",))
+
+    def test_a_missing_shift_chart_and_referee_do_not_drop_the_row(self):
+        sk, go, tm = _log()
+        skaters, teams, starts, mates, _refs = _point_inputs(sk, go, tm)
+        spec = P.assists_spec(True)
+        frame = P.add_points_features(P.build_skater_frame(sk, tm), skaters, teams, starts,
+                                      mates.iloc[0:0], mates.iloc[0:0], tm)
+        kept = P.usable(spec, frame)
+        assert len(kept) > 0
+        assert kept[list(P.POINTS_OPTIONAL_FEATURES)].isna().all().all()
+        required = [f for f in P.MONEYPUCK_POINTS_FEATURES if f not in P.POINTS_OPTIONAL_FEATURES]
+        assert kept[required].notna().all().all()
+
+    def test_a_games_own_numbers_are_not_one_of_its_inputs(self):
+        sk, go, tm = _log()
+        skaters, teams, starts, mates, refs = _point_inputs(sk, go, tm)
+        spec = P.points_spec(True)
+        feats = list(spec.features)
+        before = P.add_points_features(P.build_skater_frame(sk, tm), skaters, teams, starts, mates, refs, tm)
+        last = int(sk.nhl_game_id.max())
+        loud_sk = skaters.copy()
+        loud_sk.loc[loud_sk.nhl_game_id == last, ["on_ice_f_x_goals", "i_f_x_goals", "i_f_primary_assists"]] = 80
+        loud_tm = teams.copy()
+        loud_tm.loc[loud_tm.nhl_game_id == last, ["shots_on_goal_for", "x_goals_for", "x_goals_against"]] = 80
+        loud_starts = starts.copy()
+        loud_starts.loc[loud_starts.nhl_game_id == last, ["x_goals", "goals"]] = 80
+        loud_log = sk.copy()
+        loud_log.loc[loud_log.nhl_game_id == last, ["shots", "shot_attempts", "assists", "points",
+                                                   "toi_seconds", "pp_toi_seconds"]] = 500
+        loud_team = tm.copy()
+        loud_team.loc[loud_team.nhl_game_id == last, "times_shorthanded"] = 40
+        loud_mates = mates.copy()
+        loud_mates.loc[loud_mates.nhl_game_id == last, "shared_seconds"] = 5000
+        after = P.add_points_features(P.build_skater_frame(loud_log, loud_team), loud_sk, loud_tm,
+                                      loud_starts, loud_mates, refs, loud_team)
+        a = before[before.nhl_game_id == last].sort_values("player_id")[feats].astype(float)
+        b = after[after.nhl_game_id == last].sort_values("player_id")[feats].astype(float)
+        pd.testing.assert_frame_equal(a.reset_index(drop=True), b.reset_index(drop=True))
+
+        earlier = int(sorted(sk.nhl_game_id.unique())[-5])
+        moved_sk = skaters.copy()
+        moved_sk.loc[moved_sk.nhl_game_id == earlier, "i_f_x_goals"] = 80
+        moved = P.add_points_features(P.build_skater_frame(sk, tm), moved_sk, teams, starts, mates, refs, tm)
+        assert not np.allclose(
+            before[before.nhl_game_id == last].sort_values("player_id").mp_xg_l.astype(float),
+            moved[moved.nhl_game_id == last].sort_values("player_id").mp_xg_l.astype(float))
+        assert not np.allclose(
+            before[before.nhl_game_id == last].sort_values("player_id").lm_xg_l.astype(float),
+            moved[moved.nhl_game_id == last].sort_values("player_id").lm_xg_l.astype(float))
+        pd.testing.assert_series_equal(
+            before[before.nhl_game_id == earlier].sort_values("player_id").lm_xg_l.astype(float).reset_index(drop=True),
+            moved[moved.nhl_game_id == earlier].sort_values("player_id").lm_xg_l.astype(float).reset_index(drop=True),
+            check_names=False)
+
+    def test_tonights_row_matches_the_played_row(self):
+        sk, go, tm = _log()
+        skaters, teams, starts, mates, refs = _point_inputs(sk, go, tm)
+        spec = P.assists_spec(True)
+        feats = list(spec.features)
+        last = int(sk.nhl_game_id.max())
+        played = P.add_points_features(P.build_skater_frame(sk, tm), skaters, teams, starts, mates, refs, tm)
+        want = played[played.nhl_game_id == last].set_index("player_id")[feats]
+        held = sk[sk.nhl_game_id == last]
+        up = held[["player_id", "player_name", "position", "season", "game_date", "team", "opponent", "is_home"]].assign(
+            game_id="NHL_tonight")
+        frame = P.build_skater_frame(sk[sk.nhl_game_id != last], tm[tm.nhl_game_id != last], up)
+        synth = int(frame.loc[frame.upcoming, "nhl_game_id"].iloc[0])
+        starters = starts[starts.nhl_game_id == last].copy()
+        starters["nhl_game_id"] = synth
+        starters[["x_goals", "goals"]] = np.nan
+        ref_row = pd.DataFrame({"nhl_game_id": [synth], "full_name": ["Ref A"]})
+        team_row = tm[tm.nhl_game_id == last][["nhl_game_id", "game_id", "team", "opponent", "game_date",
+                                               "shots_for", "shots_against", "goals_against", "times_shorthanded"]].copy()
+        team_row["nhl_game_id"] = synth
+        got_frame = P.add_points_features(
+            frame,
+            skaters[skaters.nhl_game_id != last],
+            teams[teams.nhl_game_id != last],
+            pd.concat([starts[starts.nhl_game_id != last], starters], ignore_index=True),
+            mates[mates.nhl_game_id != last],
+            pd.concat([refs[refs.nhl_game_id != last], ref_row], ignore_index=True),
+            pd.concat([tm[tm.nhl_game_id != last], team_row], ignore_index=True))
+        got = got_frame[got_frame.upcoming].set_index("player_id")[feats]
+        pd.testing.assert_frame_equal(got.sort_index().astype(float), want.sort_index().astype(float),
+                                      check_names=False)
+
+
 class TestTheDistribution:
     def test_no_excess_variance_is_exactly_poisson(self):
         from scipy.stats import poisson

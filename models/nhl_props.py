@@ -62,11 +62,19 @@ run about 10% wide and are left Poisson, as the lab had them: the wider
 distribution does not change what the model claims against what happens, and
 the result holds under either (+5.7% Poisson, +4.9% wider, at the 0.10 cut,
 every season positive both ways).
+
+THE POINTS AND ASSISTS CANDIDATE stays off the card. `USE_MONEYPUCK_POINTS` is
+false. `points_spec(True)` and `assists_spec(True)` add prior-game power-play
+share, shift-chart linemates, MoneyPuck on-ice and individual rates, team pace,
+opponent expected goals, the opposing starter's goals saved above expected, and
+the referee's power-play rate, for `scripts/nhl_prop_backtest.py --moneypuck`
+only. The card scores `ASSISTS`. Points is not a live market: `points_spec`
+is not in `SPECS` or `LIVE`, and nothing that writes a pick calls it.
 """
 from __future__ import annotations
 
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -107,8 +115,80 @@ SHOTS = Spec("nhl_prop_shots_on_goal", "player_shots_on_goal", "shots", "Shots o
              max_per_game=3)
 ASSISTS = Spec("nhl_prop_assists", "player_assists", "assists", "Assists", "skater",
                ("assists_l", "assists_s", "points_l", "opp_ga", "opp_pk_opps") + SKATER_USAGE)
+# Same shape as assists, with the target's own long and short rate in place of
+# assists_l / assists_s, and assists_l as the one related count (assists uses
+# points_l that way). Not registered: points has no live artifact, no threshold
+# and no card. scripts/nhl_prop_backtest.py --moneypuck is the only caller.
+POINTS_FEATURES = ("points_l", "points_s", "assists_l", "opp_ga", "opp_pk_opps") + SKATER_USAGE
+POINTS = Spec("nhl_prop_points", "player_points", "points", "Points", "skater", POINTS_FEATURES)
 SPECS: dict[str, Spec] = {s.model_id: s for s in (SAVES, SHOTS, ASSISTS)}
 LIVE: tuple[Spec, ...] = (SAVES, SHOTS, ASSISTS)
+
+# Live scoring leaves this off. The card scores ASSISTS and never calls
+# assists_spec(True) or points_spec(True).
+USE_MONEYPUCK_POINTS = False
+# All-situation MoneyPuck rows. Half-lives match the skater rates (30 / 6),
+# the ice-time rates (20 / 4) and the team rate (25).
+MONEYPUCK_SITUATION = "all"
+# A teammate at or above this power-play time that night took a power-play
+# shift. The shift chart has no strength, so this is the game log's pp_toi,
+# not a flag on the shift.
+PP_UNIT_SECONDS = 30
+MONEYPUCK_POINTS_FEATURES = (
+    "mp_onice_xg_l", "mp_onice_xg_s",
+    "mp_xg_l", "mp_xg_s",
+    "mp_pa_l", "mp_pa_s",
+    "pp_share_l", "pp_share_s",
+    "pp_unit_pts_l", "pp_unit_pts_s",
+    "pp_unit_xg_l", "pp_unit_xg_s",
+    "lm_pts_l", "lm_pts_s",
+    "lm_xg_l", "lm_xg_s",
+    "own_mp_pace_l", "own_mp_xgf_l",
+    "opp_mp_xga_l",
+    "opp_gsax_l",
+    "ref_pp_l",
+)
+# The shift chart and the officials feed start in 2023-24. Requiring these
+# would drop every earlier season, including the training set that scores
+# 2023-24. XGBoost treats NaN as missing. The other candidate features are
+# required: MoneyPuck skater rows start in 2018-19 and team and goalie rows
+# earlier, and power-play share comes from the skater log.
+POINTS_OPTIONAL_FEATURES = frozenset({
+    "pp_unit_pts_l", "pp_unit_pts_s", "pp_unit_xg_l", "pp_unit_xg_s",
+    "lm_pts_l", "lm_pts_s", "lm_xg_l", "lm_xg_s",
+    "ref_pp_l",
+})
+
+
+def _with_candidate(base: Spec, moneypuck: bool, drop: tuple[str, ...]) -> Spec:
+    """`base`, or the same spec plus the points/assists candidate features.
+
+    `drop` removes named candidate features so a group can be tested by taking
+    it out. Dropping a feature that is already on `base` is refused.
+    """
+    if not moneypuck and not drop:
+        return base
+    features = base.features + MONEYPUCK_POINTS_FEATURES
+    if drop:
+        gone = set(drop)
+        if gone & set(base.features):
+            raise ValueError(f"refusing to drop a live feature: {sorted(gone & set(base.features))}")
+        features = tuple(f for f in features if f not in gone)
+    if features == base.features:
+        return base
+    return replace(base, features=features)
+
+
+def points_spec(moneypuck: bool = False, drop: tuple[str, ...] = ()) -> Spec:
+    """The research points spec. Not in SPECS and not on the card."""
+    return _with_candidate(POINTS, moneypuck, drop)
+
+
+def assists_spec(moneypuck: bool = False, drop: tuple[str, ...] = ()) -> Spec:
+    """The live assists spec, or the same spec plus the candidate features."""
+    if not moneypuck and not drop:
+        return ASSISTS
+    return _with_candidate(ASSISTS, moneypuck, drop)
 
 SKATER_COLS = ("nhl_game_id", "player_id", "player_name", "position", "season", "game_date",
                "team", "opponent", "is_home", "shots", "shot_attempts", "assists", "points",
@@ -267,9 +347,211 @@ def build_frame(spec: Spec, players: pd.DataFrame, teams: pd.DataFrame,
     return build(players, teams, upcoming)
 
 
+def _linemate_raw(frame: pd.DataFrame, mates: pd.DataFrame) -> pd.DataFrame:
+    """One row per player-game: shared-ice quality from THAT game's chart.
+
+    The caller shifts it, so the chart of the game being scored is not an
+    input. Quality is the mate's prior points rate and prior individual
+    expected goals, weighted by shared seconds. Power-play unit quality uses
+    only mates who took at least PP_UNIT_SECONDS of power-play time that
+    night. The chart does not say which shifts were a power play.
+    """
+    cols = ["nhl_game_id", "player_id", "lm_pts_raw", "lm_xg_raw", "pp_unit_pts_raw", "pp_unit_xg_raw"]
+    empty = pd.DataFrame(columns=cols)
+    if mates is None or not len(mates):
+        return empty
+    pairs = mates[["nhl_game_id", "player_id_lo", "player_id_hi", "shared_seconds"]].copy()
+    for c in ("nhl_game_id", "player_id_lo", "player_id_hi"):
+        pairs[c] = pd.to_numeric(pairs[c], errors="coerce")
+    pairs["shared_seconds"] = pd.to_numeric(pairs["shared_seconds"], errors="coerce")
+    pairs = pairs.dropna()
+    pairs = pairs[pairs.shared_seconds > 0]
+    if not len(pairs):
+        return empty
+    left = pairs.rename(columns={"player_id_lo": "player_id", "player_id_hi": "mate"})
+    right = pairs.rename(columns={"player_id_hi": "player_id", "player_id_lo": "mate"})
+    edges = pd.concat([left, right], ignore_index=True)
+    prior = frame[["nhl_game_id", "player_id", "points_l", "mp_xg_l", "pp_toi_seconds"]].rename(
+        columns={"player_id": "mate", "points_l": "mate_pts", "mp_xg_l": "mate_xg",
+                 "pp_toi_seconds": "mate_pp"})
+    edges = edges.merge(prior, on=["nhl_game_id", "mate"], how="left")
+    known = edges.dropna(subset=["mate_pts", "mate_xg"])
+    if not len(known):
+        return empty
+    seconds = known.shared_seconds.to_numpy()
+    known = known.assign(w_pts=seconds * known.mate_pts.to_numpy(),
+                         w_xg=seconds * known.mate_xg.to_numpy())
+    grouped = known.groupby(["nhl_game_id", "player_id"], sort=False)
+    sec = grouped["shared_seconds"].sum()
+    lm = pd.DataFrame({
+        "lm_pts_raw": grouped["w_pts"].sum() / sec,
+        "lm_xg_raw": grouped["w_xg"].sum() / sec,
+    }).reset_index()
+    pp = known[known.mate_pp >= PP_UNIT_SECONDS]
+    if len(pp):
+        pgp = pp.groupby(["nhl_game_id", "player_id"], sort=False)
+        psec = pgp["shared_seconds"].sum()
+        unit = pd.DataFrame({
+            "pp_unit_pts_raw": pgp["w_pts"].sum() / psec,
+            "pp_unit_xg_raw": pgp["w_xg"].sum() / psec,
+        }).reset_index()
+        lm = lm.merge(unit, on=["nhl_game_id", "player_id"], how="left")
+    else:
+        lm["pp_unit_pts_raw"] = np.nan
+        lm["pp_unit_xg_raw"] = np.nan
+    return lm
+
+
+def _referee_pp(team_log: pd.DataFrame, officials: pd.DataFrame) -> pd.DataFrame:
+    """Each game's mean of its referees' prior power-play counts.
+
+    A game's count is the sum of both teams' `times_shorthanded` (each team's
+    shorthanded situations are the opponent's power plays). The mean is shifted,
+    so tonight's count is not an input. Games with no referee stay absent.
+    """
+    empty = pd.DataFrame(columns=["nhl_game_id", "ref_pp_l"])
+    if officials is None or not len(officials) or team_log is None or not len(team_log):
+        return empty
+    t = team_log[["nhl_game_id", "game_date", "times_shorthanded"]].copy()
+    t["times_shorthanded"] = pd.to_numeric(t["times_shorthanded"], errors="coerce")
+    t["nhl_game_id"] = pd.to_numeric(t["nhl_game_id"], errors="coerce")
+    t["game_date"] = pd.to_datetime(t["game_date"])
+    games = (t.dropna(subset=["nhl_game_id"])
+             .groupby("nhl_game_id", sort=False)
+             .agg(pp=("times_shorthanded", "sum"), game_date=("game_date", "min"))
+             .reset_index())
+    refs = officials[["nhl_game_id", "full_name"]].copy()
+    refs["nhl_game_id"] = pd.to_numeric(refs["nhl_game_id"], errors="coerce")
+    refs = refs.dropna(subset=["nhl_game_id", "full_name"]).drop_duplicates(["nhl_game_id", "full_name"])
+    refs = refs.merge(games, on="nhl_game_id", how="inner")
+    if not len(refs):
+        return empty
+    refs = refs.sort_values(["full_name", "game_date", "nhl_game_id"]).reset_index(drop=True)
+    refs["ref_prior"] = _ew(refs.groupby("full_name", sort=False), "pp", 25, 5)
+    out = refs.groupby("nhl_game_id", sort=False)["ref_prior"].mean().rename("ref_pp_l").reset_index()
+    return out
+
+
+def add_points_features(frame: pd.DataFrame, skaters: pd.DataFrame, teams: pd.DataFrame,
+                        goalies: pd.DataFrame, mates: pd.DataFrame, officials: pd.DataFrame,
+                        team_log: pd.DataFrame) -> pd.DataFrame:
+    """Prior-game candidate inputs on a skater frame. The current game is not an input.
+
+    Credit MoneyPuck.com for the skater, team and goalie tables (personal,
+    non-commercial). `skaters` is all-situation `moneypuck_skater_games`
+    (player_id, nhl_game_id, on_ice_f_x_goals, i_f_x_goals, i_f_primary_assists).
+    `teams` is all-situation `moneypuck_team_games` (nhl_game_id, team, game_date,
+    shots_on_goal_for, x_goals_for, x_goals_against). `goalies` is one row per
+    start (player_id, nhl_game_id, team, game_date, x_goals, goals): the
+    opposing starter's identity is the input, and his goals saved above expected
+    are from earlier starts only. `mates` is regular-season `nhl_shift_linemates`.
+    `officials` is regular-season referees (nhl_game_id, full_name). `team_log`
+    supplies `times_shorthanded`.
+
+    Each feature is a shifted weighted mean of EARLIER rows, the same arithmetic
+    as points_l. A player's own expected goals tonight, tonight's linemates,
+    tonight's power-play count and the starter's goals tonight are not in the
+    row. Daily Faceoff and EDGE are not read. Rows with no MoneyPuck history
+    stay null and `usable` drops them. Shift-chart and referee features stay
+    null before 2023-24 and `usable` keeps the row.
+    """
+    d = frame.copy()
+    raw_cols = ["player_id", "nhl_game_id", "on_ice_f_x_goals", "i_f_x_goals", "i_f_primary_assists"]
+    raw = skaters[raw_cols].copy()
+    for c in ("player_id", "nhl_game_id"):
+        raw[c] = pd.to_numeric(raw[c], errors="coerce")
+    for c in ("on_ice_f_x_goals", "i_f_x_goals", "i_f_primary_assists"):
+        raw[c] = pd.to_numeric(raw[c], errors="coerce")
+    raw = raw.dropna(subset=["player_id", "nhl_game_id"]).drop_duplicates(["player_id", "nhl_game_id"])
+    d = d.drop(columns=[c for c in raw.columns if c in d.columns and c not in ("player_id", "nhl_game_id")])
+    d = d.merge(raw, on=["player_id", "nhl_game_id"], how="left")
+    d["game_date"] = pd.to_datetime(d["game_date"])
+    d = d.sort_values(["player_id", "game_date", "nhl_game_id"]).reset_index(drop=True)
+    g = d.groupby("player_id", sort=False)
+    d["mp_onice_xg_l"], d["mp_onice_xg_s"] = _ew(g, "on_ice_f_x_goals", 30), _ew(g, "on_ice_f_x_goals", 6)
+    d["mp_xg_l"], d["mp_xg_s"] = _ew(g, "i_f_x_goals", 30), _ew(g, "i_f_x_goals", 6)
+    d["mp_pa_l"], d["mp_pa_s"] = _ew(g, "i_f_primary_assists", 30), _ew(g, "i_f_primary_assists", 6)
+
+    sums = (d.groupby(["nhl_game_id", "team"], sort=False)["pp_toi_seconds"]
+            .sum(min_count=1).rename("team_pp"))
+    d = d.drop(columns=[c for c in ("team_pp",) if c in d.columns])
+    d = d.merge(sums.reset_index(), on=["nhl_game_id", "team"], how="left")
+    own_pp = d["pp_toi_seconds"]
+    share = own_pp / d["team_pp"]
+    share = share.where(own_pp.notna() & d["team_pp"].notna())
+    share = share.mask((d["team_pp"] == 0) & own_pp.notna(), 0.0)
+    d["pp_share_raw"] = share
+    d = d.sort_values(["player_id", "game_date", "nhl_game_id"]).reset_index(drop=True)
+    g = d.groupby("player_id", sort=False)
+    d["pp_share_l"], d["pp_share_s"] = _ew(g, "pp_share_raw", 20), _ew(g, "pp_share_raw", 4)
+
+    raw_lm = _linemate_raw(d, mates)
+    d = d.drop(columns=[c for c in ("lm_pts_raw", "lm_xg_raw", "pp_unit_pts_raw", "pp_unit_xg_raw") if c in d.columns])
+    d = d.merge(raw_lm, on=["nhl_game_id", "player_id"], how="left")
+    d = d.sort_values(["player_id", "game_date", "nhl_game_id"]).reset_index(drop=True)
+    g = d.groupby("player_id", sort=False)
+    d["lm_pts_l"], d["lm_pts_s"] = _ew(g, "lm_pts_raw", 30), _ew(g, "lm_pts_raw", 6)
+    d["lm_xg_l"], d["lm_xg_s"] = _ew(g, "lm_xg_raw", 30), _ew(g, "lm_xg_raw", 6)
+    d["pp_unit_pts_l"], d["pp_unit_pts_s"] = _ew(g, "pp_unit_pts_raw", 30), _ew(g, "pp_unit_pts_raw", 6)
+    d["pp_unit_xg_l"], d["pp_unit_xg_s"] = _ew(g, "pp_unit_xg_raw", 30), _ew(g, "pp_unit_xg_raw", 6)
+
+    played = teams[["nhl_game_id", "team", "game_date", "shots_on_goal_for", "x_goals_for", "x_goals_against"]].copy()
+    for c in ("shots_on_goal_for", "x_goals_for", "x_goals_against"):
+        played[c] = pd.to_numeric(played[c], errors="coerce")
+    played["game_date"] = pd.to_datetime(played["game_date"])
+    played["nhl_game_id"] = pd.to_numeric(played["nhl_game_id"], errors="coerce")
+    if "upcoming" in d.columns and bool(d.upcoming.any()):
+        upcoming = d.loc[d.upcoming, ["nhl_game_id", "team", "opponent", "game_date"]].drop_duplicates()
+        own = upcoming[["nhl_game_id", "team", "game_date"]]
+        opp_rows = upcoming[["nhl_game_id", "opponent", "game_date"]].rename(columns={"opponent": "team"})
+        extra = pd.concat([own, opp_rows], ignore_index=True)
+        for c in ("shots_on_goal_for", "x_goals_for", "x_goals_against"):
+            extra[c] = np.nan
+        played = pd.concat([played, extra], ignore_index=True)
+    played = played.dropna(subset=["nhl_game_id", "team"]).drop_duplicates(["nhl_game_id", "team"], keep="first")
+    played = played.sort_values(["team", "game_date", "nhl_game_id"]).reset_index(drop=True)
+    tg = played.groupby("team", sort=False)
+    played["mp_pace"] = _ew(tg, "shots_on_goal_for", 25, 5)
+    played["mp_xgf"] = _ew(tg, "x_goals_for", 25, 5)
+    played["mp_xga"] = _ew(tg, "x_goals_against", 25, 5)
+    own_t = played[["nhl_game_id", "team", "mp_pace", "mp_xgf"]].rename(
+        columns={"mp_pace": "own_mp_pace_l", "mp_xgf": "own_mp_xgf_l"})
+    opp_t = played[["nhl_game_id", "team", "mp_xga"]].rename(
+        columns={"team": "opponent", "mp_xga": "opp_mp_xga_l"})
+    d = d.drop(columns=[c for c in ("own_mp_pace_l", "own_mp_xgf_l", "opp_mp_xga_l") if c in d.columns])
+    d = d.merge(own_t, on=["nhl_game_id", "team"], how="left").merge(opp_t, on=["nhl_game_id", "opponent"], how="left")
+
+    starts = goalies[["player_id", "nhl_game_id", "team", "game_date", "x_goals", "goals"]].copy()
+    for c in ("player_id", "nhl_game_id", "x_goals", "goals"):
+        starts[c] = pd.to_numeric(starts[c], errors="coerce")
+    starts["game_date"] = pd.to_datetime(starts["game_date"])
+    starts = starts.dropna(subset=["player_id", "nhl_game_id", "team"])
+    starts = starts.sort_values(["nhl_game_id", "team", "player_id"]).drop_duplicates(
+        ["nhl_game_id", "team"], keep="first")
+    starts["gsax_raw"] = starts["x_goals"] - starts["goals"]
+    starts = starts.sort_values(["player_id", "game_date", "nhl_game_id"]).reset_index(drop=True)
+    starts["opp_gsax_l"] = _ew(starts.groupby("player_id", sort=False), "gsax_raw", 25, 5)
+    opp_g = starts[["nhl_game_id", "team", "opp_gsax_l"]].rename(columns={"team": "opponent"})
+    d = d.drop(columns=[c for c in ("opp_gsax_l",) if c in d.columns])
+    d = d.merge(opp_g, on=["nhl_game_id", "opponent"], how="left")
+
+    refs = _referee_pp(team_log, officials)
+    d = d.drop(columns=[c for c in ("ref_pp_l",) if c in d.columns])
+    d = d.merge(refs, on="nhl_game_id", how="left")
+
+    drop = ["on_ice_f_x_goals", "i_f_x_goals", "i_f_primary_assists", "pp_share_raw", "team_pp",
+            "lm_pts_raw", "lm_xg_raw", "pp_unit_pts_raw", "pp_unit_xg_raw"]
+    return d.drop(columns=[c for c in drop if c in d.columns])
+
+
 def usable(spec: Spec, frame: pd.DataFrame) -> pd.DataFrame:
-    """Rows the model may train on or score: ten prior games and every input present."""
-    return frame[frame.gp >= MIN_GAMES].dropna(subset=list(spec.features))
+    """Rows the model may train on or score: ten prior games and every required input present.
+
+    Shift-chart and referee features may be missing. Requiring them would delete
+    the seasons those feeds do not cover. Every other feature on the spec is required.
+    """
+    required = [f for f in spec.features if f not in POINTS_OPTIONAL_FEATURES]
+    return frame[frame.gp >= MIN_GAMES].dropna(subset=required)
 
 
 # ── model ────────────────────────────────────────────────────────────────────
