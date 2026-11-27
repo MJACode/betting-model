@@ -19,7 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { gameBetCells, gamesDayHasLines, gamesDayStrip } from '../src/lib/gamesBoard';
+import { gameBetCells, gamesCardLabel, gamesDayHasLines, gamesDayStrip, newestSnapshot } from '../src/lib/gamesBoard';
 import { gameLineLegFromRows, lineLegKey, lineLegLabel } from '../src/lib/lineLegs';
 import { boardSegmentsFor, segmentLabel } from '../src/lib/statSegments';
 import { buildTeamLineIndex } from '../src/lib/statsOdds';
@@ -112,6 +112,49 @@ const cells = gameBetCells(game, idx, books, 'NFL')!;
   }, ['caesars'], 'NFL')!;
   check('none of the member\'s books → no buttons at all', [onlyMgm.away, onlyMgm.home].every((r) => r.ml == null && r.spread == null && r.total == null));
   check('a game with no teams yet has no cells', gameBetCells({ home_team: null, away_team: 'KC' }, idx, books, 'NFL') === null);
+}
+
+// 7. A doubleheader: two games, same two teams, one day. Indexed per game,
+// each game's buttons are its own prices and add its own leg (UX review,
+// 2026-11-27: a team-keyed index handed game 1 game 2's prices).
+{
+  const g1 = { ...game, game_id: 'MLB_G1', sport: 'MLB' } as unknown as GameRow;
+  const g2 = { ...game, game_id: 'MLB_G2', sport: 'MLB' } as unknown as GameRow;
+  const dh: OddsByBookRow[] = [
+    { ...row('draftkings', 'h2h', { home_price: -150, away_price: 130 }), game_id: 'MLB_G1' } as OddsByBookRow,
+    { ...row('draftkings', 'h2h', { home_price: -200, away_price: 170 }), game_id: 'MLB_G2' } as OddsByBookRow,
+  ];
+  const per = (g: GameRow) => {
+    const only = new Set([g.game_id]);
+    const b = (market: 'h2h' | 'spreads' | 'totals') => buildTeamLineIndex(dh, [g], { market, books, gameIds: only });
+    return gameBetCells(g, { h2h: b('h2h'), spreads: b('spreads'), totals: b('totals') }, books, 'MLB')!;
+  };
+  const c1 = per(g1);
+  const c2 = per(g2);
+  check('doubleheader game 1 shows game 1\'s price', c1.away.ml?.price === 130, `${c1.away.ml?.price}`);
+  check('doubleheader game 2 shows game 2\'s price', c2.away.ml?.price === 170, `${c2.away.ml?.price}`);
+  check('and each adds its own game\'s leg', c1.away.ml?.input.spec.game_id === 'MLB_G1' && c2.away.ml?.input.spec.game_id === 'MLB_G2');
+  // The shape the board must not use: one index over both games.
+  const both = buildTeamLineIndex(dh, [g1, g2], { market: 'h2h', books, gameIds: null });
+  check('(one index over both games keeps only one — why the board builds per game)', both.size === 2 && both.get('KC')!.gameId === 'MLB_G2');
+  check('the board builds its indexes per game', read('src/components/GamesBoard.tsx').includes('const only = new Set([g.game_id]);'));
+}
+
+// 8. Speech, freshness, lock.
+{
+  const upcoming = gamesCardLabel({ phase: 'upcoming', away: { name: 'KC', score: '' }, home: { name: 'BUF', score: '' }, footerText: '8:20 PM ET' });
+  check('an upcoming card speaks matchup and time, no prices or book', upcoming === 'KC at BUF, 8:20 PM ET.' && !/DraftKings|−|\+/.test(upcoming), upcoming);
+  const live = gamesCardLabel({ phase: 'live', away: { name: 'KC', score: '14' }, home: { name: 'BUF', score: '10' }, footerText: 'Q3 4:12' });
+  check('a live card speaks the score and clock', live === 'KC 14, BUF 10. Live, Q3 4:12.', live);
+  const fin = gamesCardLabel({ phase: 'final', away: { name: 'KC', score: '27' }, home: { name: 'BUF', score: '24' }, footerText: 'Final/OT' });
+  check('a final card speaks the score and how it ended', fin === 'KC 27, BUF 24. Final/OT.', fin);
+  check('the board does not reuse the Scoreboard\'s DraftKings speech', !read('src/components/GamesBoard.tsx').includes('card.accessibilityLabel'));
+  check('the newest snapshot is the "as of" time',
+    newestSnapshot([{ snapshot_at: '2026-11-27T15:00:00Z' }, { snapshot_at: '2026-11-27T16:05:00Z' }, { snapshot_at: null }]) === '2026-11-27T16:05:00Z');
+  const src = read('src/components/GamesBoard.tsx');
+  check('today\'s prices are re-read on a timer', src.includes('setInterval(() => void loadLines(), LINES_POLL_MS)'));
+  check('a locked member gets the unlock card, not the board', src.includes('Games is Premium') && src.includes('useScoreboard(!locked'));
+  check('Stats passes the membership lock', read('src/screens/StatsScreen.tsx').includes('locked={gamesLocked}'));
 }
 
 // 6. Wiring.

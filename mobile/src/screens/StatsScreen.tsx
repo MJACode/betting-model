@@ -45,6 +45,7 @@ import { showToast } from '@/components/Toast';
 import { StatsSportButton } from '@/components/StatsSportButton';
 import { TeamsBoard } from '@/components/TeamsBoard';
 import { GamesBoard } from '@/components/GamesBoard';
+import { useMembership } from '@/hooks/useMembership';
 import { NbaFirstBasketBoard } from '@/components/NbaFirstBasketBoard';
 import { InjuryChip } from '@/components/InjuryChip';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -480,6 +481,8 @@ export function StatsScreen() {
   const etDay = etDate(new Date(now));
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
+  // The Games board is the Scoreboard's content, and Premium like it.
+  const { contentLocked: gamesLocked } = useMembership();
   // The "hasn't posted lines" note is the switch — an instruction sits with
   // the control that performs it.
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -2785,6 +2788,8 @@ export function StatsScreen() {
         <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
         <GamesBoard
           sport={sport}
+          locked={gamesLocked}
+          onUnlock={() => navigation.navigate('Paywall')}
           onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
           onOpenGame={hasMatchupView(sport) ? (gameId) => navigation.navigate('ScoreboardGame', { gameId }) : undefined}
         />
@@ -4712,8 +4717,9 @@ function StatSegmentRow({
         labelFor={segmentLabel}
         accessibilityLabelFor={segmentAccessibilityLabel}
         tight
-        // Three tabs on the NBA (Players | Teams | 1st Basket): about 96pt each
-        // at 320pt, so labels shrink rather than truncate (UX review, 2026-11-08).
+        // Four tabs on the NBA (Players | Teams | 1st Basket | Games, since
+        // 2026-11-27): about 72pt each at 320pt, so labels shrink rather than
+        // truncate (UX review, 2026-11-08 and 2026-11-27).
         fit
       />
       {board === 'players' ? (

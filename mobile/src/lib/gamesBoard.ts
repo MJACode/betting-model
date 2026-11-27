@@ -168,3 +168,37 @@ export function gameBetCells(
   };
   return { away: row(away, 'over'), home: row(home, 'under') };
 }
+
+/**
+ * What VoiceOver hears for a card's header: the matchup, its state, and the
+ * score or start time — and no prices. The Scoreboard's own label speaks
+ * DraftKings' lines, which on this board would disagree with the buttons
+ * (each the best of the member's books) and would name lines on days that
+ * show none (UX review, 2026-11-27). The buttons speak their own prices.
+ */
+export function gamesCardLabel(card: {
+  phase: 'upcoming' | 'live' | 'final';
+  away: { name: string; score: string };
+  home: { name: string; score: string };
+  footerText: string;
+}): string {
+  const scores = `${card.away.name} ${card.away.score}, ${card.home.name} ${card.home.score}`;
+  if (card.phase === 'live') return `${scores}. Live${card.footerText ? `, ${card.footerText}` : ''}.`;
+  if (card.phase === 'final') return `${scores}. ${card.footerText || 'Final'}.`;
+  return `${card.away.name} at ${card.home.name}${card.footerText ? `, ${card.footerText}` : ''}.`;
+}
+
+/** The newest snapshot among the lines the board read: "Prices as of …". */
+export function newestSnapshot(rows: readonly { snapshot_at?: string | null }[]): string | null {
+  let best: string | null = null;
+  let bestMs = -Infinity;
+  for (const r of rows) {
+    if (!r.snapshot_at) continue;
+    const ms = Date.parse(r.snapshot_at);
+    if (Number.isFinite(ms) && ms > bestMs) {
+      bestMs = ms;
+      best = r.snapshot_at;
+    }
+  }
+  return best;
+}
