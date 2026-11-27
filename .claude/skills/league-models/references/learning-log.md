@@ -30,6 +30,27 @@ review as its own entry.
 
 ---
 
+## 2026-11-27: NHL points and assists, MoneyPuck, shifts and referees, backtest only
+
+1. **Scope.** mike, 2026-11-27: the points prop, which is not a live model, and
+   `nhl_prop_assists`, which is. A flagged walk-forward. Not a new live model.
+   Result: `docs/nhl_prop_points_moneypuck.md`.
+2. **Tried.** The assists-shaped points features, and the live assists features,
+   against prior-game power-play share, shift-chart linemates, MoneyPuck on-ice
+   and individual rates, team pace, opponent xG, the opposing starter's goals
+   saved above expected, and the referee power-play count. Same prices, unders
+   only, no per-game cap, −200 floor, EV ≥ 0.18, seasons 2023-24 through
+   2026-27 to date. Each group removed once. Overs checked.
+3. **New.** The shift chart still has no strength, so a power-play unit is
+   shared ice with teammates who took power-play time. Requiring the chart or
+   the officials feed, which both start in 2023-24, would delete the fit that
+   scores that season. Recorded in the results doc. Neither candidate cleared.
+4. **Corrected.** Nothing in the skill's method list. Assists candidate
+   +32.63 units against +32.25 for the live features at the live cut, 1u
+   risked, and the candidate's day interval crosses zero. Points candidate
+   −1.34 units against +9.33, both intervals including a loss.
+5. **The framework.** Nothing in SKILL.md changed.
+
 ## 2026-11-26: NBA props decided 10 hours before tip, and real-money history (`nba_prop_market_early`)
 
 1. **Scope.** mike, 2026-11-26: NBA data sources because the prop and game models were weak,

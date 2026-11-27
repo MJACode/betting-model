@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-27 | [2026-11](./2026-11.md) | 2026-11-27, NHL points and assists, MoneyPuck and shift features, backtest only (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, `nba_prop_market_early` reaches every tip: an early lane in the NBA prop window job (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, In-play best line, step one: what each book has on offer (mike) |
 | 2026-11-26 | [2026-11](./2026-11.md) | 2026-11-26, Delete notifications from the inbox (matt) |
