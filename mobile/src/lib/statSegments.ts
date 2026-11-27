@@ -30,7 +30,10 @@ export type StatSegment =
   | 'teams'
   // NBA only: the 1st Basket board (Matt, 2026-11-08). Its own board, like
   // Teams, with no catalog chips (components/NbaFirstBasketBoard.tsx).
-  | 'firstBasket';
+  | 'firstBasket'
+  // Every team sport: the Games board (Matt, 2026-11-27) — scores and today's
+  // bet lines, one card per game (components/GamesBoard.tsx).
+  | 'games';
 
 /** One chip in a segment: a catalog entry, by its group and column key. */
 interface ChipRef {
@@ -100,11 +103,18 @@ export function boardSegmentsFor(sport: Sport): BoardSegment[] {
   // 1st Basket rides the top row on the NBA only (Matt, 2026-11-08: "only the
   // stats tab", NBA). It is a board, not a stat chip: first basket is not an
   // over/under game-log stat, so it has no Hit Rate or Averages view.
-  return supportsFirstBasketBoard(sport) ? [...base, 'firstBasket'] : base;
+  const withBasket: BoardSegment[] = supportsFirstBasketBoard(sport) ? [...base, 'firstBasket'] : base;
+  return supportsGamesBoard(sport) ? [...withBasket, 'games'] : withBasket;
 }
 
 /** The top row's boards. */
-export type BoardSegment = 'players' | 'teams' | 'firstBasket';
+export type BoardSegment = 'players' | 'teams' | 'firstBasket' | 'games';
+
+/** The Games board needs two teams and a spread / total / moneyline market:
+ *  the team sports, the same set the Teams board serves. */
+export function supportsGamesBoard(sport: Sport): boolean {
+  return supportsTeamBoard(sport);
+}
 
 /** The 1st Basket board exists for the NBA and nowhere else. */
 export function supportsFirstBasketBoard(sport: Sport): boolean {
@@ -138,6 +148,7 @@ export function segmentLabel(seg: StatSegment): string {
     case 'pitchers': return 'Pitchers';
     case 'teams': return 'Teams';
     case 'firstBasket': return '1st Basket';
+    case 'games': return 'Games';
   }
 }
 
