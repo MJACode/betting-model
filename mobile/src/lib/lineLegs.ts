@@ -423,7 +423,13 @@ export function propLineSheetInput(
 
 /** A tapped Teams-board pill: the team's moneyline, its spread at the board's
  *  number, or the game total's Over. */
-export function teamLineSheetInput(quote: TeamLineQuote, sport: string): LineSheetInput {
+export function teamLineSheetInput(
+  quote: TeamLineQuote,
+  sport: string,
+  /** Totals only: which side of the number. Defaults to the Over, the side
+   *  the board's pill prices. */
+  totalSide: LineSide = 'over',
+): LineSheetInput {
   const spec: GameLineLegSpec = {
     kind: 'game',
     game_id: quote.gameId,
@@ -433,11 +439,58 @@ export function teamLineSheetInput(quote: TeamLineQuote, sport: string): LineShe
     opponent: quote.opponent,
     isHome: quote.isHome,
     line: quote.line,
-    side: quote.market === 'totals' ? 'over' : null,
+    side: quote.market === 'totals' ? totalSide : null,
   };
   const side = gameLegSide(spec);
   const prices = bettablePrices(quote.bookRows, (r) => priceForSide(r, side));
   return { spec, prices };
+}
+
+/** One bet the add-to-betslip sheet can switch to. */
+export interface LineSheetChoice {
+  /** The leg's own key — stable, and what the sheet selects by. */
+  key: string;
+  /** The chip's words: "ML", "−3", "Over 47.5", "Under 47.5". */
+  label: string;
+  input: LineSheetInput;
+}
+
+/**
+ * EVERY game line a team's row can add (Matt, 2026-11-26: "If you want to get
+ * ML, spread or over and under it's not available to add as a bet which it
+ * should be"). The pill still prices the one market the stat reads against
+ * (statsOdds.teamLineMarketFor); the sheet it opens offers all of them —
+ * the team's moneyline, its spread at the anchored number, and both sides of
+ * the game total — so the stat chosen never decides which bet can be made.
+ *
+ * A market is left out only when no book prices it: a chip with no price
+ * would add a leg the slip prunes on its next resolve. Order is fixed (ML,
+ * spread, Over, Under) so the chips never reshuffle between rows.
+ */
+export function teamLineSheetChoices(
+  quotes: Partial<Record<GameLineMarket, TeamLineQuote | null>>,
+  sport: string,
+): LineSheetChoice[] {
+  const out: LineSheetChoice[] = [];
+  const push = (input: LineSheetInput, label: string) => {
+    if (input.prices.length === 0) return;
+    out.push({ key: lineLegKey(input.spec), label, input });
+  };
+  const ml = quotes.h2h;
+  if (ml) push(teamLineSheetInput(ml, sport), 'ML');
+  const spread = quotes.spreads;
+  if (spread && spread.line != null) {
+    const n = spread.line;
+    // The board's own caption for the same spread (statsOdds.teamLineCaption).
+    const signedLine = `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n)}`;
+    push(teamLineSheetInput(spread, sport), signedLine);
+  }
+  const total = quotes.totals;
+  if (total && total.line != null) {
+    push(teamLineSheetInput(total, sport, 'over'), `Over ${total.line}`);
+    push(teamLineSheetInput(total, sport, 'under'), `Under ${total.line}`);
+  }
+  return out;
 }
 
 // ── Editing a prop line leg (Matt, 2026-10-28) ───────────────────────────────

@@ -26,7 +26,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { canSaveEdit, editScrollTarget, foldAltGameRows, gameEditMenu, gameLineHold, initialEditSegment, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, PREGAME_ALT_NOTE, pregameLadderVisible, slipLegCanEdit, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
+import { canSaveEdit, editScrollTarget, foldAltGameRows, gameEditMenu, gameLineHold, initialEditSegment, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, PREGAME_ALT_NOTE, pregameLadderVisible, slipLegCanEdit, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetChoices, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
 import { handoffBookFor, isValidCombo, priceBooksForParlay, savedHandoffBookFor, savedLegToParlayLeg, toSavedParlay } from '../src/lib/parlay';
 import { lineLegsAfterEdit } from '../src/lib/betslipGuard';
 import { EMPTY_INJURY_INDEX } from '../src/lib/injuryStatus';
@@ -161,8 +161,9 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   const sheet = read('src/components/AddLineSheet.tsx');
   check('the sheet says under its title where the book is chosen', sheet.includes('you’ll choose the sportsbook there'));
   check('the sheet marks the member\'s own books', sheet.includes(">Yours<") && sheet.includes('usePreferredBooks()'));
+  // `shown` is the selected chip's input, or `input` when there are no chips.
   check('the sheet\'s title is the proposition',
-    sheet.includes('const title = input?.title ?? (spec ? lineLegLabel(spec) : \'\');'));
+    sheet.includes('const title = shown?.title ?? (spec ? lineLegLabel(spec) : \'\');'));
   check('the close control is a button to VoiceOver', /accessibilityRole="button" accessibilityLabel="Close add line"/.test(sheet));
   check('no fixed-size badge and no hex literal', !/badge: \{[^}]*\bwidth: 40/.test(sheet) && !sheet.includes("'#000'"));
 }
@@ -241,6 +242,32 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   const input = teamLineSheetInput(q, 'MLB');
   check('the sheet lists bettable books only, best price first', input.prices.map((p) => p.book).join() === 'draftkings,fanduel' && input.prices[0]!.price === -120, input.prices.map((p) => `${p.book}:${p.price}`).join());
   check('the sheet title is the proposition', lineLegLabel(input.spec) === 'LAD -1.5');
+  // 2026-11-26, Matt: "If you want to get ML, spread or over and under it's
+  // not available to add as a bet which it should be." The sheet a team pill
+  // opens offers every game market, whichever stat the board is on.
+  {
+    const mlRows = rows.map((r) => ({ ...r, market: 'h2h', spread_home: null }));
+    const all = [...rows, ...mlRows, ...totalRows];
+    const opts = { books: ['draftkings'] as const, gameIds: null };
+    const by = (market: 'h2h' | 'spreads' | 'totals') => buildTeamLineIndex(all, [game], { ...opts, market }).get('LAD');
+    const choices = teamLineSheetChoices({ h2h: by('h2h'), spreads: by('spreads'), totals: by('totals') }, 'MLB');
+    check('a team sheet offers ML, spread, Over and Under, in that order',
+      choices.map((c) => c.label).join() === 'ML,−1.5,Over 8.5,Under 8.5', choices.map((c) => c.label).join());
+    check('each choice is its own proposition', new Set(choices.map((c) => c.key)).size === 4);
+    const under = choices[3]!.input;
+    check('the Under chip prices the Under and adds an Under leg',
+      under.spec.kind === 'game' && under.spec.side === 'under' && lineLegLabel(under.spec) === 'LAD vs WSH Under 8.5' && under.prices[0]!.price === -110,
+      `${lineLegLabel(under.spec)} ${under.prices.map((p) => p.price).join()}`);
+    const underLeg = gameLineLegFromRows(under.spec as GameLineLegSpec, totalRows, game)!;
+    check('the betslip prices that Under leg off the under price', underLeg != null && underLeg.americanOdds === -110 && underLeg.label === 'LAD vs WSH Under 8.5');
+    check('the Over chip is the same leg the board\'s total pill adds',
+      choices[2]!.key === lineLegKey(teamLineSheetInput(by('totals')!, 'MLB').spec));
+    const onlyMl = teamLineSheetChoices({ h2h: by('h2h'), spreads: null, totals: undefined }, 'MLB');
+    check('a market no book prices gets no chip', onlyMl.map((c) => c.label).join() === 'ML');
+    const board = read('src/components/TeamsBoard.tsx');
+    check('the Teams board hands the sheet every market', board.includes('choices={') && board.includes('teamLineSheetChoices('));
+    check('the sheet renders the choices', read('src/components/AddLineSheet.tsx').includes('choices?: readonly LineSheetChoice[]'));
+  }
   const pq: StatsOddsQuote = { playerKey: 'mookie betts', playerName: 'Mookie Betts', gameId: game.game_id, market: 'batter_hits', line: 1.5, side: 'over', book: 'betmgm', price: 230, link: null, bookRows: [row('betmgm', 1.5, 230, -320)] as unknown as StatsOddsQuote['bookRows'], offLine: true };
   const pin = propLineSheetInput(pq, 'MLB', 'Hits', '1+ Hits');
   // The book's own number, in the book's own words (2026-09-06). It read
