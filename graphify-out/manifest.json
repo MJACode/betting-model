@@ -48,10 +48,10 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "data/anon_readable.py": {
-    "mtime": 1795723586.2968473,
-    "seen": 1795786406.614691,
-    "ast_hash": "6d2b54d874c6356255a8ceac307dcf90",
-    "semantic_hash": "6d2b54d874c6356255a8ceac307dcf90"
+    "mtime": 1795786446.0400896,
+    "seen": 1795786589.1295626,
+    "ast_hash": "c797ad633c6e89c5609bd517b1d7143b",
+    "semantic_hash": ""
   },
   "data/db.py": {
     "mtime": 1795641584.8340318,
@@ -434,650 +434,650 @@
   "data/migrations/add_api_call_log.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150546,
-    "ast_hash": "5eaedaa1e3a53576b9285f59b6df3363",
-    "semantic_hash": "5eaedaa1e3a53576b9285f59b6df3363"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_best_line_columns_to_picks.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150596,
-    "ast_hash": "b8fbc55926b3564d6695dd14c71abe9d",
-    "semantic_hash": "b8fbc55926b3564d6695dd14c71abe9d"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_clv_method_2026_09_14.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150649,
-    "ast_hash": "7ca73a523adba384c04e062f7d52bbee",
-    "semantic_hash": "7ca73a523adba384c04e062f7d52bbee"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_discord_link_and_whop_memberships.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150663,
-    "ast_hash": "7b65db4e89e63428552c98b0e93604e2",
-    "semantic_hash": "7b65db4e89e63428552c98b0e93604e2"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_disk_io_indexes.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150682,
-    "ast_hash": "2ae871effb895f1266f6f7b9af2e1c75",
-    "semantic_hash": "2ae871effb895f1266f6f7b9af2e1c75"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_feedback_threads.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150732,
-    "ast_hash": "46d7e4fee97211682b1045670fe11803",
-    "semantic_hash": "46d7e4fee97211682b1045670fe11803"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_game_market_gate_2026_09_15.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615075,
-    "ast_hash": "3befbd2e3e8bb23d8ed34f6f2d17b5cd",
-    "semantic_hash": "3befbd2e3e8bb23d8ed34f6f2d17b5cd"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_game_weather_issued.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615077,
-    "ast_hash": "09fad11145520a88921ddfcaabc6d92a",
-    "semantic_hash": "09fad11145520a88921ddfcaabc6d92a"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_injuries_status_ts_2026_09_14.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615079,
-    "ast_hash": "4873f7c60e3ba7c0440e44a6c1b1f938",
-    "semantic_hash": "4873f7c60e3ba7c0440e44a6c1b1f938"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_kalshi_game_markets.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150825,
-    "ast_hash": "b6099ecb1625292c54572eff3949524d",
-    "semantic_hash": "b6099ecb1625292c54572eff3949524d"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_kalshi_ncaaf_events.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615085,
-    "ast_hash": "9fdc351bd3195239d5fd1496b583d932",
-    "semantic_hash": "9fdc351bd3195239d5fd1496b583d932"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_kalshi_prop_ladders.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150866,
-    "ast_hash": "50b2e2e092668acfcaa0915cf977b9fc",
-    "semantic_hash": "50b2e2e092668acfcaa0915cf977b9fc"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_latest_inplay_odds_all_books_view.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150885,
-    "ast_hash": "97df09a34b555a8d72a1886ad445c66c",
-    "semantic_hash": "97df09a34b555a8d72a1886ad445c66c"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_latest_prop_odds_all_books_view.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150904,
-    "ast_hash": "a31337169dda12f84624e99ff0d699ed",
-    "semantic_hash": "a31337169dda12f84624e99ff0d699ed"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_line_clv_to_picks.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150925,
-    "ast_hash": "f681b04966e2fe592d37fd298359baf0",
-    "semantic_hash": "f681b04966e2fe592d37fd298359baf0"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_live_game_state_latest_view.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150944,
-    "ast_hash": "7f6574f291140d7cf5dab7f0acda2c69",
-    "semantic_hash": "7f6574f291140d7cf5dab7f0acda2c69"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_message_id_to_push_sent.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615099,
-    "ast_hash": "e0e6d08fb09194420c3ff191538e6d3a",
-    "semantic_hash": "e0e6d08fb09194420c3ff191538e6d3a"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_min_odds_price_floor.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151006,
-    "ast_hash": "f17250148b970ba4b0ccb733b2240c24",
-    "semantic_hash": "f17250148b970ba4b0ccb733b2240c24"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_model_full_outcome_picks_view.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151035,
-    "ast_hash": "e29f12ccd94926298c13985e532c9bcf",
-    "semantic_hash": "e29f12ccd94926298c13985e532c9bcf"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_model_quality_checks_2026_09_19.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151054,
-    "ast_hash": "7325a63fa2b0aba1b0b7a8a0c30d6413",
-    "semantic_hash": "7325a63fa2b0aba1b0b7a8a0c30d6413"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_ncaaf_live_states.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151204,
-    "ast_hash": "135b03775ae13db5d10134a2e0a8b273",
-    "semantic_hash": "135b03775ae13db5d10134a2e0a8b273"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_ncaaf_player_stats_leaderboard.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615129,
-    "ast_hash": "9a370537c090c0ff447fcf99ef6ae28c",
-    "semantic_hash": "9a370537c090c0ff447fcf99ef6ae28c"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_ncaaf_plays.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151311,
-    "ast_hash": "b666e4fc489cec8831e2f0a049f080e7",
-    "semantic_hash": "b666e4fc489cec8831e2f0a049f080e7"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_ncaaf_qb_game.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151333,
-    "ast_hash": "5c424ca4d8187dd819f395825e9ec487",
-    "semantic_hash": "5c424ca4d8187dd819f395825e9ec487"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_ncaaf_tables.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615138,
-    "ast_hash": "90527bc7ccb56d0cab372abde0005e91",
-    "semantic_hash": "90527bc7ccb56d0cab372abde0005e91"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_ncaaf_venues.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151397,
-    "ast_hash": "5d7c942f1455a682ab990d4f42daf6a0",
-    "semantic_hash": "5d7c942f1455a682ab990d4f42daf6a0"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nfl_odds_history_source_and_pulls_2026_10_12.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151445,
-    "ast_hash": "76e28561aa8181791bee1c7f64811787",
-    "semantic_hash": "76e28561aa8181791bee1c7f64811787"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nfl_player_stats_leaderboard.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151462,
-    "ast_hash": "e8e3234c5fd9f81ac5295312a11199c5",
-    "semantic_hash": "e8e3234c5fd9f81ac5295312a11199c5"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nfl_prop_modeling_tables.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615148,
-    "ast_hash": "81accd7c20b3e13febcc519386a1d314",
-    "semantic_hash": "81accd7c20b3e13febcc519386a1d314"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nfl_research_data_backup_2026_10_12.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151495,
-    "ast_hash": "c21945f263288fe3177849a18ca86904",
-    "semantic_hash": "c21945f263288fe3177849a18ca86904"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nfl_stadium_weather_hourly.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151512,
-    "ast_hash": "a2951a94dd046e97f2aeed566bde4424",
-    "semantic_hash": "a2951a94dd046e97f2aeed566bde4424"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nhl_game_logs.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151526,
-    "ast_hash": "9099ffad0682786dfd9ffeb83fdc2ba9",
-    "semantic_hash": "9099ffad0682786dfd9ffeb83fdc2ba9"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nhl_period_scores.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151562,
-    "ast_hash": "7f22e0cd51c52b4d21d0bc726871f433",
-    "semantic_hash": "7f22e0cd51c52b4d21d0bc726871f433"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_odds_api_quota.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615165,
-    "ast_hash": "a746a1ee82e1c00541b1148d60c42268",
-    "semantic_hash": "a746a1ee82e1c00541b1148d60c42268"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_opening_signal_comparison_views.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151664,
-    "ast_hash": "8b92c8d4d1af3e9322f6a4bb99306dca",
-    "semantic_hash": "8b92c8d4d1af3e9322f6a4bb99306dca"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_opening_signals_shadow_track.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151679,
-    "ast_hash": "e3c80c423fec7d6378cf80f20c5abc11",
-    "semantic_hash": "e3c80c423fec7d6378cf80f20c5abc11"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_parlay_correlations.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.61517,
-    "ast_hash": "dff15cd343bac30f216186fcce3cba40",
-    "semantic_hash": "dff15cd343bac30f216186fcce3cba40"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_parlay_track_record.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615172,
-    "ast_hash": "c0a5433cd9f4c8d35e3a5c22df5ee9f9",
-    "semantic_hash": "c0a5433cd9f4c8d35e3a5c22df5ee9f9"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_picks_prop_market_and_player_key.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151736,
-    "ast_hash": "92f863223341ede0ab86d22b4d8d114b",
-    "semantic_hash": "92f863223341ede0ab86d22b4d8d114b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_pipeline_runs.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151752,
-    "ast_hash": "2a6b5df307d0c50198615005dc7fad19",
-    "semantic_hash": "2a6b5df307d0c50198615005dc7fad19"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_player_h2h_stat_values_rpcs.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151767,
-    "ast_hash": "d6d0c733fab137e713ac35c32918b486",
-    "semantic_hash": "d6d0c733fab137e713ac35c32918b486"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_player_news.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151786,
-    "ast_hash": "ba74a7b00ba024b8f2f379da058faa28",
-    "semantic_hash": "ba74a7b00ba024b8f2f379da058faa28"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_player_positions.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151824,
-    "ast_hash": "3d79b67bc891331cc2949e7244253733",
-    "semantic_hash": "3d79b67bc891331cc2949e7244253733"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_player_recent_games_rpcs.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151843,
-    "ast_hash": "cef62186f993e08b51547417e7a49612",
-    "semantic_hash": "cef62186f993e08b51547417e7a49612"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_player_season_stat_values_nfl.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615186,
-    "ast_hash": "3afd07c46fa426b2553437629a9bb992",
-    "semantic_hash": "3afd07c46fa426b2553437629a9bb992"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_player_season_stat_values_rpcs.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151874,
-    "ast_hash": "659ce01d9716698a67bd12e27fc3fb70",
-    "semantic_hash": "659ce01d9716698a67bd12e27fc3fb70"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_position_vs_opponent_bball_ncaaf.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151915,
-    "ast_hash": "8a1fb0c5478f89213d1d4f08cb3e8ea3",
-    "semantic_hash": "8a1fb0c5478f89213d1d4f08cb3e8ea3"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_position_vs_opponent_mlb.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151927,
-    "ast_hash": "5b5830b9b833378fec8a27202a85b51a",
-    "semantic_hash": "5b5830b9b833378fec8a27202a85b51a"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_position_vs_opponent_nfl.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151938,
-    "ast_hash": "84f2417dcbb359b4f36960e91e2205c0",
-    "semantic_hash": "84f2417dcbb359b4f36960e91e2205c0"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_push_notifications.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151953,
-    "ast_hash": "7f6c43aa4aa6ddfa45f7c3d502ec1c9b",
-    "semantic_hash": "7f6c43aa4aa6ddfa45f7c3d502ec1c9b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_results_snapshots.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151967,
-    "ast_hash": "94fb99cdfdfeb80b398eb165b5874292",
-    "semantic_hash": "94fb99cdfdfeb80b398eb165b5874292"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_system_health_checks.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152022,
-    "ast_hash": "2797f22bc6eb15ce90ae88228ae461e2",
-    "semantic_hash": "2797f22bc6eb15ce90ae88228ae461e2"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_team_stats_board.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152055,
-    "ast_hash": "af773699f482ec062cff7e2e623232ad",
-    "semantic_hash": "af773699f482ec062cff7e2e623232ad"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/alternate_prop_lines_view.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152086,
-    "ast_hash": "9fdaf6aa4b6d4d2c7d75cccf4eaddffd",
-    "semantic_hash": "9fdaf6aa4b6d4d2c7d75cccf4eaddffd"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/anon_read_public_betting_2026_09_20.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152208,
-    "ast_hash": "c7349744059ccd872927711e1086d86f",
-    "semantic_hash": "c7349744059ccd872927711e1086d86f"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/cache_team_stats_board.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152754,
-    "ast_hash": "46c007aa40d04445929e14afa1ed5c9b",
-    "semantic_hash": "46c007aa40d04445929e14afa1ed5c9b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/clear_unauthorized_auto_pauses_2026_09_14.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152785,
-    "ast_hash": "63a62e710a027a14e457d5143ffc79ea",
-    "semantic_hash": "63a62e710a027a14e457d5143ffc79ea"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/clv_price_taken_2026_10_08.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615283,
-    "ast_hash": "a953a11e22c014f69da361dc0c3395f2",
-    "semantic_hash": "a953a11e22c014f69da361dc0c3395f2"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/clv_standard_v2_2026_10_14.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152868,
-    "ast_hash": "20117424215dc3da49ef745d5890c645",
-    "semantic_hash": "20117424215dc3da49ef745d5890c645"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/custom_model_backtest_rpcs.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.61529,
-    "ast_hash": "508bc7582583651b3623054bd6efee1d",
-    "semantic_hash": "508bc7582583651b3623054bd6efee1d"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/decide_on_best_price_2026_09_09.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152947,
-    "ast_hash": "d8e9d2ccc45d9a192158c0ac5f9f8662",
-    "semantic_hash": "d8e9d2ccc45d9a192158c0ac5f9f8662"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/demote_ncaaf_over_under_platt_2026_09_26.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152978,
-    "ast_hash": "016a83aebffda5ea85b775ad8f3719ac",
-    "semantic_hash": "016a83aebffda5ea85b775ad8f3719ac"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/discord_post_one_pick_2026_10_14.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615299,
-    "ast_hash": "4abfb506caa67e8d2606cdff6c37399d",
-    "semantic_hash": "4abfb506caa67e8d2606cdff6c37399d"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/discord_publish_state_2026_09_23.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615301,
-    "ast_hash": "68473f2b5c4a547fa0707b26d165f5df",
-    "semantic_hash": "68473f2b5c4a547fa0707b26d165f5df"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/discord_void_notice_2026_10_09.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6153023,
-    "ast_hash": "15a1702b2339baea79d7fbdf8cc54585",
-    "semantic_hash": "15a1702b2339baea79d7fbdf8cc54585"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/drop_voided_nfl_prop_market_opening_signals_2026_09_14.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6153097,
-    "ast_hash": "31a2b27906e78aa5d06ecf1f2c749dc8",
-    "semantic_hash": "31a2b27906e78aa5d06ecf1f2c749dc8"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/drop_voided_nfl_wind_opening_signals_2026_09_14.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6153114,
-    "ast_hash": "4ec19666baf44fbf67ad61674b8ec8b4",
-    "semantic_hash": "4ec19666baf44fbf67ad61674b8ec8b4"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/enable_rls_on_pipeline_runs.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615313,
-    "ast_hash": "ad6199efcd7316548448f408c0557a86",
-    "semantic_hash": "ad6199efcd7316548448f408c0557a86"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/fix_runline_away_grading_in_full_outcome_views.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153154,
-    "ast_hash": "c6afcf1fe02ef90c0f34de970a87391a",
-    "semantic_hash": "c6afcf1fe02ef90c0f34de970a87391a"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/fix_scored_pick_outcomes_lateral.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153164,
-    "ast_hash": "a42c35ecd26645d8b2ee9ceb80857e20",
-    "semantic_hash": "a42c35ecd26645d8b2ee9ceb80857e20"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/home_run_units_follow_graded_profit_2026_10_14.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153183,
-    "ast_hash": "13934949d4d7f8527da180f9b8f91255",
-    "semantic_hash": "13934949d4d7f8527da180f9b8f91255"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/latest_line_state_tables.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153243,
-    "ast_hash": "b4626abbaea3f5f22af75818be70b421",
-    "semantic_hash": "b4626abbaea3f5f22af75818be70b421"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/live_pick_features_2026_09_08.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153278,
-    "ast_hash": "e392a1c3a2be9068840cea218cfe758f",
-    "semantic_hash": "e392a1c3a2be9068840cea218cfe758f"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/live_record_start_2026_09_01.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615329,
-    "ast_hash": "3781c76309f7532d133f50b189efb75c",
-    "semantic_hash": "3781c76309f7532d133f50b189efb75c"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/live_record_start_views_2026_09_01.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153305,
-    "ast_hash": "f13d0c78ac7317772d795bc84c5442af",
-    "semantic_hash": "f13d0c78ac7317772d795bc84c5442af"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/materialize_scored_pick_outcomes.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615334,
-    "ast_hash": "9a5a0384fba74a784a500429ca5c1c8e",
-    "semantic_hash": "9a5a0384fba74a784a500429ca5c1c8e"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/mlb_phantom_utc_rows_2026_09_07.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153615,
-    "ast_hash": "53d76fa3b974a02f4d9c06ef8c81fae1",
-    "semantic_hash": "53d76fa3b974a02f4d9c06ef8c81fae1"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/ncaaf_fcs_visitor_names_2026_09_07.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153822,
-    "ast_hash": "015d99fdba6696e98d68cc4b974d19c3",
-    "semantic_hash": "015d99fdba6696e98d68cc4b974d19c3"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/ncaaf_plays_numeric_not_bigint.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153839,
-    "ast_hash": "23169e811d1177d10985af1652879406",
-    "semantic_hash": "23169e811d1177d10985af1652879406"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/ncaaf_se_louisiana_ul_monroe_alias_2026_09_14.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615387,
-    "ast_hash": "f9d60e1eeb62e3e76fd22e0e8952e7fb",
-    "semantic_hash": "f9d60e1eeb62e3e76fd22e0e8952e7fb"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/ou_record_views_honest_era_gate.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615394,
-    "ast_hash": "44efc5a49429c85c83c30e96d6b7a374",
-    "semantic_hash": "44efc5a49429c85c83c30e96d6b7a374"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/pick_placement_checks_2026_09_22.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154008,
-    "ast_hash": "7dc9157fdcc7acd6af4a726432acbc74",
-    "semantic_hash": "7dc9157fdcc7acd6af4a726432acbc74"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/picks_one_row_per_pick.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615405,
-    "ast_hash": "cba071eb379a025deed737ee1f4c3f43",
-    "semantic_hash": "cba071eb379a025deed737ee1f4c3f43"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/picks_open_nonbet_index_2026_09_08.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154063,
-    "ast_hash": "cf0def4b1f2f797cb5174f0e6a1a0d9e",
-    "semantic_hash": "cf0def4b1f2f797cb5174f0e6a1a0d9e"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/player_recent_games_slate_teams.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615408,
-    "ast_hash": "5e7d960876287f175ea1c8b0348ee89b",
-    "semantic_hash": "5e7d960876287f175ea1c8b0348ee89b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/plays_times_2026_09_09.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154091,
-    "ast_hash": "04bd0490792901f8d02deec6799eb924",
-    "semantic_hash": "04bd0490792901f8d02deec6799eb924"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/promotions_endorsed_only_2026_09_07.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615422,
-    "ast_hash": "a40b97d96f9afdfbba20b8b29fea8ae8",
-    "semantic_hash": "a40b97d96f9afdfbba20b8b29fea8ae8"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/published_picks_record_2026_10_14.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154277,
-    "ast_hash": "1351ca5c6d2bdeae77450712fac46bd2",
-    "semantic_hash": "1351ca5c6d2bdeae77450712fac46bd2"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/push_game_date_into_latest_odds_views.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154308,
-    "ast_hash": "f2f73328c78e9111e684ecf0471a2417",
-    "semantic_hash": "f2f73328c78e9111e684ecf0471a2417"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/recompute_snapshot_units_2026_10_14.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154327,
-    "ast_hash": "215585b572fc36195346944b9e421d5f",
-    "semantic_hash": "215585b572fc36195346944b9e421d5f"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/record_counts_each_event_once_2026_10_09.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154342,
-    "ast_hash": "df47293b5c06a0d8a07f9a3369363a76",
-    "semantic_hash": "df47293b5c06a0d8a07f9a3369363a76"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/record_excludes_paused_rows_2026_09_28.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615436,
-    "ast_hash": "edfd23bdf8edfe850cbb8bf91aaf5920",
-    "semantic_hash": "edfd23bdf8edfe850cbb8bf91aaf5920"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/record_strikes_nfl_live_prop_2026_10_04.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615441,
-    "ast_hash": "4749dec88c533e9533d13659ec3ea596",
-    "semantic_hash": "4749dec88c533e9533d13659ec3ea596"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/record_views_count_each_event_once_2026_10_09.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154442,
-    "ast_hash": "5f45db31f88e38768a9225290272d268",
-    "semantic_hash": "5f45db31f88e38768a9225290272d268"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/require_price_for_published_units.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154456,
-    "ast_hash": "0dcc61466831bcbea7c23cf60b36b2bb",
-    "semantic_hash": "0dcc61466831bcbea7c23cf60b36b2bb"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/revoke_remaining_anon_write_grants.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154468,
-    "ast_hash": "901bb7c31e8786935926f63477d57cd2",
-    "semantic_hash": "901bb7c31e8786935926f63477d57cd2"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/score_off_any_book_line_2026_09_12.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154497,
-    "ast_hash": "38d14e6f9c22262772fb11bf6d6ac78d",
-    "semantic_hash": "38d14e6f9c22262772fb11bf6d6ac78d"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/settled_record_survives_a_pause_2026_09_12.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154542,
-    "ast_hash": "c174628722833b4437fcae8c2ebbc668",
-    "semantic_hash": "c174628722833b4437fcae8c2ebbc668"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/skip_scan_latest_odds_views.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154597,
-    "ast_hash": "ec77c4eb9bda323ae4bbf26f1cf52d9d",
-    "semantic_hash": "ec77c4eb9bda323ae4bbf26f1cf52d9d"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/team_stats_board_commence_bound_2026_09_30.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154695,
-    "ast_hash": "e78799d7da52b7405aa58a88276d9d92",
-    "semantic_hash": "e78799d7da52b7405aa58a88276d9d92"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/team_stats_board_line_probe_2026_09_28.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154714,
-    "ast_hash": "5cc6fd84c30008dc87321d3461d95c1e",
-    "semantic_hash": "5cc6fd84c30008dc87321d3461d95c1e"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/tighten_anon_write_grants.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154745,
-    "ast_hash": "7300e9556b3ad77e7bd7dabff4784d71",
-    "semantic_hash": "7300e9556b3ad77e7bd7dabff4784d71"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/track_record_clv_no_vig_2026_09_14.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615476,
-    "ast_hash": "da9fef24746133ab9af98f89fbab23df",
-    "semantic_hash": "da9fef24746133ab9af98f89fbab23df"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/track_record_include_live_models.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154773,
-    "ast_hash": "ed150e8725ddde654cb63220237362ab",
-    "semantic_hash": "ed150e8725ddde654cb63220237362ab"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/track_record_reads_graded_matview.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154785,
-    "ast_hash": "f59d144c5843b387782a8b9b1ec760cc",
-    "semantic_hash": "f59d144c5843b387782a8b9b1ec760cc"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/units_precision_for_public_record.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154823,
-    "ast_hash": "051db71cc9f872c44a634057f8b7f6fb",
-    "semantic_hash": "051db71cc9f872c44a634057f8b7f6fb"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/widen_ncaaf_plays_ints.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154845,
-    "ast_hash": "fb2be9f24c8aea59e56a42ebb0a85f5a",
-    "semantic_hash": "fb2be9f24c8aea59e56a42ebb0a85f5a"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/widen_picks_one_row_per_pick_2026_09_13.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154854,
-    "ast_hash": "c95f2350a02f69442206960c59554312",
-    "semantic_hash": "c95f2350a02f69442206960c59554312"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/name_match.py": {
     "mtime": 1795641584.9991338,
@@ -1118,8 +1118,8 @@
   "data/supabase_schema.sql": {
     "mtime": 1795641585.0031338,
     "seen": 1795786406.6155012,
-    "ast_hash": "9adcf45f12d9ff38d93039cfc5286ec4",
-    "semantic_hash": "9adcf45f12d9ff38d93039cfc5286ec4"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/team_board_cache.py": {
     "mtime": 1795641585.0031338,
@@ -1230,10 +1230,10 @@
     "semantic_hash": "b3cc3f55150a87c266d2de6844d0adbf"
   },
   "jobs/declared_jobs.json": {
-    "mtime": 1795722895.7051501,
-    "seen": 1795786406.6155264,
-    "ast_hash": "4fca65b59d4c69c9e0071d320b7faf8b",
-    "semantic_hash": "4fca65b59d4c69c9e0071d320b7faf8b"
+    "mtime": 1795786446.0600896,
+    "seen": 1795786589.1330936,
+    "ast_hash": "41c130b6285324d34af8caf10d0b8980",
+    "semantic_hash": ""
   },
   "mobile/App.tsx": {
     "mtime": 1795641585.3544466,
@@ -2856,10 +2856,10 @@
     "semantic_hash": "0e3c6352ed681e9a574312679ea965fc"
   },
   "mobile/src/screens/ExplainerScreen.tsx": {
-    "mtime": 1795641585.3834524,
-    "seen": 1795786406.616224,
-    "ast_hash": "d2a3964f7a46d0ce1bac7c01a1b0b637",
-    "semantic_hash": "d2a3964f7a46d0ce1bac7c01a1b0b637"
+    "mtime": 1795786446.0640895,
+    "seen": 1795786589.1434278,
+    "ast_hash": "a835bb9ac313baf3953c3691cf393bd5",
+    "semantic_hash": ""
   },
   "mobile/src/screens/FeedbackScreen.tsx": {
     "mtime": 1795641585.3834524,
@@ -2886,16 +2886,16 @@
     "semantic_hash": "0e0a7e4ad5003feb2d4192b0d9a374ca"
   },
   "mobile/src/screens/ModelsScreen.tsx": {
-    "mtime": 1795711394.337519,
-    "seen": 1795786406.6162302,
-    "ast_hash": "547eb9431c30b9c5ddf2c3f713989192",
-    "semantic_hash": "547eb9431c30b9c5ddf2c3f713989192"
+    "mtime": 1795786446.0640895,
+    "seen": 1795786589.1435106,
+    "ast_hash": "871a84b2be0defdc4f6499b752a6dd97",
+    "semantic_hash": ""
   },
   "mobile/src/screens/OpeningComparisonScreen.tsx": {
-    "mtime": 1795641585.3834524,
-    "seen": 1795786406.6162326,
-    "ast_hash": "968f54cc09ce873a7849cc55d6a009fb",
-    "semantic_hash": "968f54cc09ce873a7849cc55d6a009fb"
+    "mtime": 1795786446.0720897,
+    "seen": 1795786589.1435158,
+    "ast_hash": "26d6c69bcdac0faa9da8fc818d4e706b",
+    "semantic_hash": ""
   },
   "mobile/src/screens/ParlayScreen.tsx": {
     "mtime": 1795641585.3834524,
@@ -2910,10 +2910,10 @@
     "semantic_hash": "21a6ad5a88c1c866acbdee3009b5789a"
   },
   "mobile/src/screens/PerformanceScreen.tsx": {
-    "mtime": 1795641585.3834524,
-    "seen": 1795786406.6162362,
-    "ast_hash": "0e1ce10c5c20a5569dcb4b0212ca2e8c",
-    "semantic_hash": "0e1ce10c5c20a5569dcb4b0212ca2e8c"
+    "mtime": 1795786446.0720897,
+    "seen": 1795786589.1435618,
+    "ast_hash": "ee9196e3c6cd20c9b34bae1ae11ef9ce",
+    "semantic_hash": ""
   },
   "mobile/src/screens/PickDetailScreen.tsx": {
     "mtime": 1795641585.3834524,
@@ -2940,10 +2940,10 @@
     "semantic_hash": "3acf8b896f8c7fe8223fd461a7e198cb"
   },
   "mobile/src/screens/SettingsScreen.tsx": {
-    "mtime": 1795641585.3834524,
-    "seen": 1795786406.6162443,
-    "ast_hash": "cd13038e7fd46a0d66628e2f88128e72",
-    "semantic_hash": "cd13038e7fd46a0d66628e2f88128e72"
+    "mtime": 1795786446.080636,
+    "seen": 1795786589.1436768,
+    "ast_hash": "8e1e3192f92698774f7ec166ad55cd6e",
+    "semantic_hash": ""
   },
   "mobile/src/screens/SignInScreen.tsx": {
     "mtime": 1795641585.3834524,
@@ -2964,10 +2964,10 @@
     "semantic_hash": "186790f2329c30501b885d787e6158f2"
   },
   "mobile/src/screens/TrackRecordScreen.tsx": {
-    "mtime": 1795641585.3834524,
-    "seen": 1795786406.616249,
-    "ast_hash": "3eed4f74057185021a5cea570072cf55",
-    "semantic_hash": "3eed4f74057185021a5cea570072cf55"
+    "mtime": 1795786446.080636,
+    "seen": 1795786589.1437385,
+    "ast_hash": "bba63da3495f74d29c910748a5c55db6",
+    "semantic_hash": ""
   },
   "mobile/src/types/index.ts": {
     "mtime": 1795711394.341519,
@@ -3584,8 +3584,8 @@
   "nfl/live_model/migrations/add_nfl_live_model_tables.sql": {
     "mtime": 1795641588.7071185,
     "seen": 1795786406.616432,
-    "ast_hash": "bf03f9f0a39a1e07c5bd01c4d971ccb3",
-    "semantic_hash": "bf03f9f0a39a1e07c5bd01c4d971ccb3"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "nfl/live_model/models/__init__.py": {
     "mtime": 1795641588.7071185,
@@ -3942,16 +3942,16 @@
     "semantic_hash": "d7069e2d2b47e033c57eec940dbc89f4"
   },
   "run_pipeline.py": {
-    "mtime": 1795723586.3128626,
-    "seen": 1795786406.6166105,
-    "ast_hash": "71feb60a72e6094f458a6cfc555f7efb",
-    "semantic_hash": "71feb60a72e6094f458a6cfc555f7efb"
+    "mtime": 1795786446.0880895,
+    "seen": 1795786589.1502602,
+    "ast_hash": "5215e38dcbf4ada7b5d7fbae8745e7a3",
+    "semantic_hash": ""
   },
   "scheduler.py": {
-    "mtime": 1795717584.8965058,
-    "seen": 1795786406.616612,
-    "ast_hash": "ea0e3b752451896f6f87310e1a083525",
-    "semantic_hash": "ea0e3b752451896f6f87310e1a083525"
+    "mtime": 1795786446.0880895,
+    "seen": 1795786589.1502628,
+    "ast_hash": "8e068767047a6529a47ccb4f98dba37d",
+    "semantic_hash": ""
   },
   "scripts/_envfile.py": {
     "mtime": 1795641588.7157674,
@@ -7794,10 +7794,10 @@
     "semantic_hash": "b4cb54046c85838171695c78f1744649"
   },
   "docs/live_betting.md": {
-    "mtime": 1795641585.0160046,
-    "seen": 1795786406.618456,
-    "ast_hash": "868991d6749784b5f6aa51643503547a",
-    "semantic_hash": "868991d6749784b5f6aa51643503547a"
+    "mtime": 1795786446.0440896,
+    "seen": 1795786589.178182,
+    "ast_hash": "5bb2b0c1ebf60e98194f95bf477d2dfc",
+    "semantic_hash": ""
   },
   "docs/live_odds_freshness.md": {
     "mtime": 1795641585.0160046,
@@ -7806,10 +7806,10 @@
     "semantic_hash": "4de2271f8d350515d6828677058193bd"
   },
   "docs/local_ops.md": {
-    "mtime": 1795711393.845519,
-    "seen": 1795786406.6184578,
-    "ast_hash": "dfc34c0f54d3d7a92395313f0ec0200e",
-    "semantic_hash": "dfc34c0f54d3d7a92395313f0ec0200e"
+    "mtime": 1795786446.0440896,
+    "seen": 1795786589.1782017,
+    "ast_hash": "f4a5b814d9aa6ee22d1e9c0fa686b986",
+    "semantic_hash": ""
   },
   "docs/market_coverage.md": {
     "mtime": 1795641585.0160046,
@@ -8112,10 +8112,10 @@
     "semantic_hash": "92291570f563325485d6d3c3321547ec"
   },
   "docs/sports/nba.md": {
-    "mtime": 1795723586.3048627,
-    "seen": 1795786406.6185405,
-    "ast_hash": "aaa297321ce06c31aeb03396adbc2d87",
-    "semantic_hash": "aaa297321ce06c31aeb03396adbc2d87"
+    "mtime": 1795786446.0560896,
+    "seen": 1795786589.1797545,
+    "ast_hash": "493400c52cd9b89ccad319c3b6c201c8",
+    "semantic_hash": ""
   },
   "docs/sports/ncaaf.md": {
     "mtime": 1795641585.051929,
@@ -8166,10 +8166,10 @@
     "semantic_hash": "85770723d596a693f0fd8a5c8322180a"
   },
   "docs/thresholds.md": {
-    "mtime": 1795723586.3088627,
-    "seen": 1795786406.6185544,
-    "ast_hash": "4a17c19b21d42657aa3ff69dc1755caa",
-    "semantic_hash": "4a17c19b21d42657aa3ff69dc1755caa"
+    "mtime": 1795786446.0600896,
+    "seen": 1795786589.1800199,
+    "ast_hash": "81ac8a7300e2db13fd50d753747c0f50",
+    "semantic_hash": ""
   },
   "email/preview.html": {
     "mtime": 1795641585.051929,
@@ -8330,8 +8330,8 @@
   "data/migrations/abort_deploy_killed_evening_2026_10_16.sql": {
     "mtime": 1795641584.9966955,
     "seen": 1795786406.6150477,
-    "ast_hash": "17987e95a826266a96618413e2450171",
-    "semantic_hash": "17987e95a826266a96618413e2450171"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "features/nba_schedule_features.py": {
     "mtime": 1795641585.057755,
@@ -8430,10 +8430,10 @@
     "semantic_hash": "0e71a567d5936ec74f32ede297ea7c9a"
   },
   "scripts/nba_prop_window.py": {
-    "mtime": 1795641588.727134,
-    "seen": 1795786406.6168134,
-    "ast_hash": "76aa471cf435f947365c2851644df9a5",
-    "semantic_hash": "76aa471cf435f947365c2851644df9a5"
+    "mtime": 1795786446.0880895,
+    "seen": 1795786589.153805,
+    "ast_hash": "878ad0503772e23d9bf3d6573a8da0c9",
+    "semantic_hash": ""
   },
   "scripts/nba_research_cache.py": {
     "mtime": 1795641588.727134,
@@ -8556,10 +8556,10 @@
     "semantic_hash": "6e7b67b98a9cfbcce902e33542c8967e"
   },
   "tests/test_nba_prop_window.py": {
-    "mtime": 1795641588.779134,
-    "seen": 1795786406.6178627,
-    "ast_hash": "1e3e04456eec12745fd10e960e1d202d",
-    "semantic_hash": "1e3e04456eec12745fd10e960e1d202d"
+    "mtime": 1795786446.0920897,
+    "seen": 1795786589.1684847,
+    "ast_hash": "449babd6c8cb5b52e149abde845b6dd8",
+    "semantic_hash": ""
   },
   "tests/test_nba_props.py": {
     "mtime": 1795641588.779134,
@@ -8660,8 +8660,8 @@
   "data/migrations/ncaaf_citadel_alias_2026_10_16.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615377,
-    "ast_hash": "3a761b35ad84b63449e23ecfdc3585b9",
-    "semantic_hash": "3a761b35ad84b63449e23ecfdc3585b9"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "tests/test_ncaaf_citadel_alias_migration.py": {
     "mtime": 1795641588.787134,
@@ -8846,26 +8846,26 @@
   "data/migrations/add_nhl_skater_window_totals_2026_10_17.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151595,
-    "ast_hash": "4d798362432475f6d6ed3e84a5b17320",
-    "semantic_hash": "4d798362432475f6d6ed3e84a5b17320"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nhl_stats_views_2026_10_16.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151617,
-    "ast_hash": "32fa8d2236aa08cf29fb755a49229b29",
-    "semantic_hash": "32fa8d2236aa08cf29fb755a49229b29"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/published_pick_units_2026_10_17.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615426,
-    "ast_hash": "ed5ed9b22e7b01a59d2fc83ef6d9a87c",
-    "semantic_hash": "ed5ed9b22e7b01a59d2fc83ef6d9a87c"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/published_record_units_2026_10_16.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154294,
-    "ast_hash": "15a7608a77af3612f7ea062f2fe909f3",
-    "semantic_hash": "15a7608a77af3612f7ea062f2fe909f3"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_nhl_skater_stats.ts": {
     "mtime": 1795641585.356755,
@@ -8996,38 +8996,38 @@
   "data/migrations/add_app_errors.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615056,
-    "ast_hash": "58f625694e3a496e708d96ccdc6490d8",
-    "semantic_hash": "58f625694e3a496e708d96ccdc6490d8"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nfl_kickoff_wind_reads.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151423,
-    "ast_hash": "b9c303ed6be3b20a98929a1640e3995b",
-    "semantic_hash": "b9c303ed6be3b20a98929a1640e3995b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_player_position_unmatched.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151805,
-    "ast_hash": "293c526c61f14317a0c8fe7898f721d1",
-    "semantic_hash": "293c526c61f14317a0c8fe7898f721d1"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_facts_schema_2026_10_16.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152418,
-    "ast_hash": "6266e8b27d7d99595ea4515046328871",
-    "semantic_hash": "6266e8b27d7d99595ea4515046328871"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/member_sportsbooks_2026_10_19.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153595,
-    "ast_hash": "4f2736326b93e8401a59b285866a0e76",
-    "semantic_hash": "4f2736326b93e8401a59b285866a0e76"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/position_defense_ranks_nfl_2026_10_18.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154118,
-    "ast_hash": "05df69c5b37837320b42860a271902a3",
-    "semantic_hash": "05df69c5b37837320b42860a271902a3"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/check_tsc_baseline.py": {
     "mtime": 1795641585.3556008,
@@ -9548,8 +9548,8 @@
   "data/migrations/add_draw_price_to_latest_odds_view_2026_10_16.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150713,
-    "ast_hash": "d12ab4cc3bc99ffedf3a1b0c6f65c8a2",
-    "semantic_hash": "d12ab4cc3bc99ffedf3a1b0c6f65c8a2"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_lines_board.ts": {
     "mtime": 1795641585.356755,
@@ -9596,14 +9596,14 @@
   "data/migrations/social_post_media_2026_10_20.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154613,
-    "ast_hash": "70bb79f42bfe11bd63ef2aea876c7796",
-    "semantic_hash": "70bb79f42bfe11bd63ef2aea876c7796"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/social_post_queue_2026_10_20.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154633,
-    "ast_hash": "85bd986d9ec947e5e6eda9a2e6bb9af3",
-    "semantic_hash": "85bd986d9ec947e5e6eda9a2e6bb9af3"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "tests/test_social_posts.py": {
     "mtime": 1795641588.799134,
@@ -9650,26 +9650,26 @@
   "data/migrations/add_capper_picks_2026_10_20.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150625,
-    "ast_hash": "a37d28c4c9ce8bdeb15784a236bf8a27",
-    "semantic_hash": "a37d28c4c9ce8bdeb15784a236bf8a27"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/live_row_index_bets_only_2026_10_14.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153328,
-    "ast_hash": "bcd0ccbc9ebe8096fc652f6296514453",
-    "semantic_hash": "bcd0ccbc9ebe8096fc652f6296514453"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/social_profile_update_2026_10_20.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615465,
-    "ast_hash": "f2057bf1e14bcf9314cb8d659d853007",
-    "semantic_hash": "f2057bf1e14bcf9314cb8d659d853007"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/social_profile_url_2026_10_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154666,
-    "ast_hash": "8ddba17ff9e1c36cc942a225d2dcbad7",
-    "semantic_hash": "8ddba17ff9e1c36cc942a225d2dcbad7"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "scripts/nba_game5.py": {
     "mtime": 1795641588.723134,
@@ -9782,32 +9782,32 @@
   "data/migrations/add_nhl_goalie_designations_2026_10_20.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151545,
-    "ast_hash": "f6fcc7c22ce04a280712dc4c985b715f",
-    "semantic_hash": "f6fcc7c22ce04a280712dc4c985b715f"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nhl_shot_events.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151576,
-    "ast_hash": "367b5d53acde537c284f735cb4f86220",
-    "semantic_hash": "367b5d53acde537c284f735cb4f86220"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nhl_xg_aggregates.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615163,
-    "ast_hash": "b6a17f1d19a0d09a173bbf67f415be6d",
-    "semantic_hash": "b6a17f1d19a0d09a173bbf67f415be6d"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_backtest_rpc_2026_10_16.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615234,
-    "ast_hash": "927b298b85aab50b421cbe9d30ab4889",
-    "semantic_hash": "927b298b85aab50b421cbe9d30ab4889"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_saved_models_2026_10_16.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152673,
-    "ast_hash": "4c5c3b6d7068eb208c5a4d421b4e3430",
-    "semantic_hash": "4c5c3b6d7068eb208c5a4d421b4e3430"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/nhl_xg.py": {
     "mtime": 1795711393.8415189,
@@ -10064,14 +10064,14 @@
   "data/migrations/add_injury_status_current_2026_10_23.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150806,
-    "ast_hash": "608a59f2c7e366efedb5dff4f474348b",
-    "semantic_hash": "608a59f2c7e366efedb5dff4f474348b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/delete_my_account_2026_10_24.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152964,
-    "ast_hash": "4d92783b767f8bbc92919d28505ed593",
-    "semantic_hash": "4d92783b767f8bbc92919d28505ed593"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_delete_account.ts": {
     "mtime": 1795641585.356755,
@@ -10662,118 +10662,118 @@
     "semantic_hash": "378c8c91fee109b325f2551381b8b960"
   },
   "data/ingestors/scoreboard_splits.py": {
-    "mtime": 1795717584.8868291,
-    "seen": 1795786406.615003,
-    "ast_hash": "5a6a0bfca50a18484a83f4578d988210",
-    "semantic_hash": "5a6a0bfca50a18484a83f4578d988210"
+    "mtime": 1795786446.0440896,
+    "seen": 1795786589.1321323,
+    "ast_hash": "772b1208f7fa46507ffb215a3c94be5d",
+    "semantic_hash": ""
   },
   "data/migrations/add_alt_game_lines_2026_10_29.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615052,
-    "ast_hash": "2b3fcb88ebd41f63d811e7a1e88e27b7",
-    "semantic_hash": "2b3fcb88ebd41f63d811e7a1e88e27b7"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_live_scoreboard_2026_10_29.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6150963,
-    "ast_hash": "3f07ce981a523d947e0210f2b12b30a2",
-    "semantic_hash": "3f07ce981a523d947e0210f2b12b30a2"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_nba_team_q1_2026_10_28.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151097,
-    "ast_hash": "c982b4c07b6749eaeae20a38a137688f",
-    "semantic_hash": "c982b4c07b6749eaeae20a38a137688f"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_ncaaf_scoreboard_latest_2026_10_28.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151352,
-    "ast_hash": "5417a9f0910a21de8a93fac6fc556808",
-    "semantic_hash": "5417a9f0910a21de8a93fac6fc556808"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_scoreboard_splits_2026_10_29.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615198,
-    "ast_hash": "e458767c54566e5cfb43c8a447556643",
-    "semantic_hash": "e458767c54566e5cfb43c8a447556643"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/alternate_game_lines_latest_odds_2026_10_29.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615207,
-    "ast_hash": "14fd6f0ba239f6b3b9092a45d09db0a0",
-    "semantic_hash": "14fd6f0ba239f6b3b9092a45d09db0a0"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_backtest_prop_dk_prices_2026_10_28.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152308,
-    "ast_hash": "4e9e7b05dd5dbf12b181572cc81edb2c",
-    "semantic_hash": "4e9e7b05dd5dbf12b181572cc81edb2c"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_dk_price_fallback_2026_10_23.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152382,
-    "ast_hash": "cb5b008c9ee6fb1e019dbbb8c44f45e5",
-    "semantic_hash": "cb5b008c9ee6fb1e019dbbb8c44f45e5"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_dk_start_price_2026_10_23.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152399,
-    "ast_hash": "67c4300cf042fa87c74b839f8b5d128f",
-    "semantic_hash": "67c4300cf042fa87c74b839f8b5d128f"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_nba_props_2026_10_29.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152434,
-    "ast_hash": "330d4d87a8799c9a10cc73b7198cdef0",
-    "semantic_hash": "330d4d87a8799c9a10cc73b7198cdef0"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_prop_facts_dk_prices_2026_10_28.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152565,
-    "ast_hash": "826f19e997ceac8dac04c3f218c9022c",
-    "semantic_hash": "826f19e997ceac8dac04c3f218c9022c"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_prop_phase_a_filters_2026_10_29.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615261,
-    "ast_hash": "fb5aabd4b8451e242ce5ae8d1edcd0e0",
-    "semantic_hash": "fb5aabd4b8451e242ce5ae8d1edcd0e0"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_prop_side_2026_10_28.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152627,
-    "ast_hash": "a22ee15879261b02409c9da93afe6941",
-    "semantic_hash": "a22ee15879261b02409c9da93afe6941"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_prop_team_backfill_2026_10_29.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152642,
-    "ast_hash": "04563fa655b285e7df961eab043829dc",
-    "semantic_hash": "04563fa655b285e7df961eab043829dc"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_total_side_2026_10_25.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152692,
-    "ast_hash": "7373c3cb6bad0a09fe57ff4dc300c694",
-    "semantic_hash": "7373c3cb6bad0a09fe57ff4dc300c694"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/capper_parlaymatt_2026_10_28.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152768,
-    "ast_hash": "0d0afbc07db794a76f89003735a94c0a",
-    "semantic_hash": "0d0afbc07db794a76f89003735a94c0a"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/nba_window_reads_roster_team_2026_10_26.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153696,
-    "ast_hash": "27bf282f2a9bc34b521ac5a5c523e2db",
-    "semantic_hash": "27bf282f2a9bc34b521ac5a5c523e2db"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/ncaaf_scoreboard_game_index_2026_10_28.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153855,
-    "ast_hash": "680d3036805647972691b19559acb7b8",
-    "semantic_hash": "680d3036805647972691b19559acb7b8"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomBetCount.tsx": {
     "mtime": 1795641585.3651292,
@@ -10910,8 +10910,8 @@
   "data/migrations/add_ncaab_period_scores_2026_10_30.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151137,
-    "ast_hash": "4ad3a8154fd40a2b67bdae953a7fb7d3",
-    "semantic_hash": "4ad3a8154fd40a2b67bdae953a7fb7d3"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "tests/fixtures/ncaab_espn_box/scoreboard_2026-02-07.json": {
     "mtime": 1795641588.7621827,
@@ -11126,20 +11126,20 @@
   "data/migrations/add_app_timings.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615058,
-    "ast_hash": "ef72718717cbad1053512212ea8f759a",
-    "semantic_hash": "ef72718717cbad1053512212ea8f759a"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_ncaab_injury_changes_2026_10_30.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151114,
-    "ast_hash": "522e99277d1fdffbd7ff7811d727042f",
-    "semantic_hash": "522e99277d1fdffbd7ff7811d727042f"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/nba_wnba_game_log_season_index_2026_10_31.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615371,
-    "ast_hash": "92ab83a1a2431e138ded67448d93b1eb",
-    "semantic_hash": "92ab83a1a2431e138ded67448d93b1eb"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_perf_log.ts": {
     "mtime": 1795641585.356755,
@@ -11216,8 +11216,8 @@
   "data/migrations/app_timings_cap_2026_11_01.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152272,
-    "ast_hash": "c95c166648d8fac1999048d4c5a80682",
-    "semantic_hash": "c95c166648d8fac1999048d4c5a80682"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "tests/test_ncaab_total_card_pg.py": {
     "mtime": 1795641588.787134,
@@ -11240,8 +11240,8 @@
   "data/migrations/team_stats_board_main_run_line_2026_11_03.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154728,
-    "ast_hash": "e5b6f62e899c60eed2ecd7449e43f835",
-    "semantic_hash": "e5b6f62e899c60eed2ecd7449e43f835"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/src/components/AppSwitch.tsx": {
     "mtime": 1795641585.3651292,
@@ -11576,14 +11576,14 @@
   "data/migrations/add_ncaab_player_game_log_2026_11_03.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151161,
-    "ast_hash": "67983cb424dbec111ce630c7297e96db",
-    "semantic_hash": "67983cb424dbec111ce630c7297e96db"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/custom_model_backtest_posted_2026_11_03.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152885,
-    "ast_hash": "c01735b28c272a5a7a83b8556a712c39",
-    "semantic_hash": "c01735b28c272a5a7a83b8556a712c39"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_results_in_units.ts": {
     "mtime": 1795641585.3591337,
@@ -11768,32 +11768,32 @@
   "data/migrations/app_review_sign_in_attempts_2026_11_04.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615225,
-    "ast_hash": "984111fffcc6975224056284855aaa38",
-    "semantic_hash": "984111fffcc6975224056284855aaa38"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_official_legs_2026_11_04.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152496,
-    "ast_hash": "b3ef26ed1a14ed2014e4e1749b75dc98",
-    "semantic_hash": "b3ef26ed1a14ed2014e4e1749b75dc98"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_official_legs_lock_read_idx_2026_11_04.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152513,
-    "ast_hash": "b2f3ac24da26e01eb7448d90f23dfadb",
-    "semantic_hash": "b2f3ac24da26e01eb7448d90f23dfadb"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_official_lock_bands_2026_11_04.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615253,
-    "ast_hash": "21b6fb65afbe381050eba7e2cf1c020e",
-    "semantic_hash": "21b6fb65afbe381050eba7e2cf1c020e"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/clv_push_beat_rate_2026_11_04.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615285,
-    "ast_hash": "934784b5701963da43e7f2ec11344300",
-    "semantic_hash": "934784b5701963da43e7f2ec11344300"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_app_review_sign_in.ts": {
     "mtime": 1795641585.356755,
@@ -11972,26 +11972,26 @@
   "data/migrations/byom_official_market_pushdown_2026_11_04.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615255,
-    "ast_hash": "2a99ecbdbd9045259c8338f33b3a80ae",
-    "semantic_hash": "2a99ecbdbd9045259c8338f33b3a80ae"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_prop_lookup_2026_11_04.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615259,
-    "ast_hash": "30942cb1ead44700ff3989af2cf844a9",
-    "semantic_hash": "30942cb1ead44700ff3989af2cf844a9"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/nba_live_decisions_2026_11_04.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615368,
-    "ast_hash": "bedd44b14911178fe95e158d5aab13db",
-    "semantic_hash": "bedd44b14911178fe95e158d5aab13db"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/open_picks_view_2026_11_04.sql": {
     "mtime": 1795723586.3001943,
     "seen": 1795786406.6153922,
-    "ast_hash": "2eaa023899a8dbcc6ed6d2145f0b6fa3",
-    "semantic_hash": "2eaa023899a8dbcc6ed6d2145f0b6fa3"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "models/nba_live_ig2.py": {
     "mtime": 1795641585.387886,
@@ -12074,38 +12074,38 @@
   "data/migrations/add_access_grants_2026_11_05.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.61505,
-    "ast_hash": "77173aba5a13b5678e72581ce3626c3c",
-    "semantic_hash": "77173aba5a13b5678e72581ce3626c3c"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/app_errors_freeze_kinds_2026_11_06.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615222,
-    "ast_hash": "00003d67ef49dd88ef21ef545eb5e456",
-    "semantic_hash": "00003d67ef49dd88ef21ef545eb5e456"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_nhl_2026_11_05.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152468,
-    "ast_hash": "07a8b3f8ee022ec85b62addbfe548a06",
-    "semantic_hash": "07a8b3f8ee022ec85b62addbfe548a06"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_save_filters_2026_11_05.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152658,
-    "ast_hash": "31da55ac74c1f478a4a73aa57dfb860d",
-    "semantic_hash": "31da55ac74c1f478a4a73aa57dfb860d"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_trend_filters_2026_11_05.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152706,
-    "ast_hash": "af317e39b09033b3f5c8cc7c966f2852",
-    "semantic_hash": "af317e39b09033b3f5c8cc7c966f2852"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_units_inline_2026_11_05.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152725,
-    "ast_hash": "4ab222331030e24be177f50377b99675",
-    "semantic_hash": "4ab222331030e24be177f50377b99675"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_freeze_log.ts": {
     "mtime": 1795641585.356755,
@@ -12140,8 +12140,8 @@
   "scripts/grant_founder_comped_2026_11_05.sql": {
     "mtime": 1795641588.7201304,
     "seen": 1795786406.6167147,
-    "ast_hash": "7d57c3181ec7c1eab9705726535fd7fe",
-    "semantic_hash": "7d57c3181ec7c1eab9705726535fd7fe"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "tests/test_byom_analyze.py": {
     "mtime": 1795641588.7626154,
@@ -12248,14 +12248,14 @@
   "data/migrations/add_sentry_events.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151998,
-    "ast_hash": "602c22995e204ece1e41abecfb1cdf58",
-    "semantic_hash": "602c22995e204ece1e41abecfb1cdf58"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/add_sgp_price_observations_2026_11_06.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615201,
-    "ast_hash": "2a8cdc008c2b41608cb615f269cd4a84",
-    "semantic_hash": "2a8cdc008c2b41608cb615f269cd4a84"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/upload-ota-sourcemaps.mjs": {
     "mtime": 1795641585.356755,
@@ -12380,8 +12380,8 @@
   "data/migrations/pick_stake_units_2026_11_06.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615403,
-    "ast_hash": "07f52165a3756679fffeee1ac678e4b3",
-    "semantic_hash": "07f52165a3756679fffeee1ac678e4b3"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_pick_stake.ts": {
     "mtime": 1795641585.356755,
@@ -12440,20 +12440,20 @@
   "data/migrations/add_player_vs_defense_rpcs_2026_11_07.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151898,
-    "ast_hash": "67fa20c593d1a2ee6dda25b75a536bf9",
-    "semantic_hash": "67fa20c593d1a2ee6dda25b75a536bf9"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/internal_ncaab_margin_pricing_2026_11_07.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153226,
-    "ast_hash": "e208f63c7049a0014d7e11e9e7149950",
-    "semantic_hash": "e208f63c7049a0014d7e11e9e7149950"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/ncaab_live_decisions_2026_11_07.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615373,
-    "ast_hash": "4676665bc2558f4f664e8ef0fd85f19c",
-    "semantic_hash": "4676665bc2558f4f664e8ef0fd85f19c"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_defense_tier.ts": {
     "mtime": 1795641585.356755,
@@ -12480,10 +12480,10 @@
     "semantic_hash": "d30a56e8a52d46d8190634ec5fa03dbb"
   },
   "models/ncaab_live_loop.py": {
-    "mtime": 1795641585.387886,
-    "seen": 1795786406.6162965,
-    "ast_hash": "fe8c70d14d4315e2491ff5893ac9e97d",
-    "semantic_hash": "fe8c70d14d4315e2491ff5893ac9e97d"
+    "mtime": 1795786446.0840895,
+    "seen": 1795786589.1443663,
+    "ast_hash": "28ff08186f45530e16475d727dbbb571",
+    "semantic_hash": ""
   },
   "scripts/build_ncaab_live_ig_artifact.py": {
     "mtime": 1795641588.7178173,
@@ -12578,8 +12578,8 @@
   "data/migrations/add_nba_first_basket_2026_11_08.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6151075,
-    "ast_hash": "18d97697e89031a148ebe7d0ccdc2eeb",
-    "semantic_hash": "18d97697e89031a148ebe7d0ccdc2eeb"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_nba_first_basket.ts": {
     "mtime": 1795641585.356755,
@@ -13226,14 +13226,14 @@
   "data/migrations/anon_read_nba_player_dnp_2026_11_11.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152194,
-    "ast_hash": "e366e91b34c6dd9d46287f34ff19ee73",
-    "semantic_hash": "e366e91b34c6dd9d46287f34ff19ee73"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/ncaabw_live_decisions_2026_11_11.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153746,
-    "ast_hash": "2a7998af153a999faf01d9bddbe1bac2",
-    "semantic_hash": "2a7998af153a999faf01d9bddbe1bac2"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/config_books.ts": {
     "mtime": 1795641585.356692,
@@ -13392,10 +13392,10 @@
     "semantic_hash": "76cb3d2e9e521ea4cf48a0f2e5248579"
   },
   "mobile/scripts/verify_settings_home.ts": {
-    "mtime": 1795641585.3591337,
-    "seen": 1795786406.6156752,
-    "ast_hash": "1e9ecf9f3b812583ff50ee565b322f9c",
-    "semantic_hash": "1e9ecf9f3b812583ff50ee565b322f9c"
+    "mtime": 1795786446.0600896,
+    "seen": 1795786589.1350968,
+    "ast_hash": "46c4912cfa7c97c194f0f3673801de2b",
+    "semantic_hash": ""
   },
   "mobile/src/lib/settingsHome.ts": {
     "mtime": 1795641585.3751338,
@@ -13436,8 +13436,8 @@
   "data/migrations/model_volume_settings_2026_11_11.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153646,
-    "ast_hash": "8a39ad06b05d99906bf136671709020f",
-    "semantic_hash": "8a39ad06b05d99906bf136671709020f"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "scripts/model_volume_rehearsal.py": {
     "mtime": 1795641588.7226803,
@@ -13514,14 +13514,14 @@
   "data/migrations/add_ncaabw_player_game_log_2026_11_12.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615118,
-    "ast_hash": "d89d016c220a35208f78a48a8caed20f",
-    "semantic_hash": "d89d016c220a35208f78a48a8caed20f"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/dashboard_support_2026_11_12.sql": {
     "mtime": 1795723586.3001943,
     "seen": 1795786406.6152914,
-    "ast_hash": "f354e91087ded3ada252f86f767e6732",
-    "semantic_hash": "f354e91087ded3ada252f86f767e6732"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_other_lines.ts": {
     "mtime": 1795641585.356755,
@@ -13616,32 +13616,32 @@
   "data/migrations/add_team_period_results_2026_11_13.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152036,
-    "ast_hash": "899f08aa58c5e1c2197e93db7157f1c3",
-    "semantic_hash": "899f08aa58c5e1c2197e93db7157f1c3"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/dk_live_reads_2026_11_12.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615304,
-    "ast_hash": "9b2868326d175545cb1c1a4e850dd6d4",
-    "semantic_hash": "9b2868326d175545cb1c1a4e850dd6d4"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/dk_live_reads_all_sports_2026_11_13.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6153052,
-    "ast_hash": "7044cb2bcf2f14095040bc1b09f69cc1",
-    "semantic_hash": "7044cb2bcf2f14095040bc1b09f69cc1"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/live_latency_probe_2026_11_12.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153262,
-    "ast_hash": "58646e47c90a21b737c72df3a6e7c8c7",
-    "semantic_hash": "58646e47c90a21b737c72df3a6e7c8c7"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/sgp_per_leg_cut_2026_11_12.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154554,
-    "ast_hash": "7ba8979f5f7ae5413348bd8180573acb",
-    "semantic_hash": "7ba8979f5f7ae5413348bd8180573acb"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/ufc_identity.py": {
     "mtime": 1795641585.0031338,
@@ -13668,10 +13668,10 @@
     "semantic_hash": "9a5db707c13c76b72dfe9ef9f398149c"
   },
   "models/ncaab_live_dk.py": {
-    "mtime": 1795641585.387886,
-    "seen": 1795786406.616294,
-    "ast_hash": "2b0a9a706a3389ef926e727278115651",
-    "semantic_hash": "2b0a9a706a3389ef926e727278115651"
+    "mtime": 1795786446.0840895,
+    "seen": 1795786589.144346,
+    "ast_hash": "a8a53f5dd0f16faf6d31e35a4a9c2d38",
+    "semantic_hash": ""
   },
   "models/ufc_open_moneyline.py": {
     "mtime": 1795641585.9311337,
@@ -14226,10 +14226,10 @@
     "semantic_hash": "007bf2b7287b55f26ff61f8a38fb3ce8"
   },
   "tests/test_ncaab_live_dk.py": {
-    "mtime": 1795711394.349519,
-    "seen": 1795786406.6179423,
-    "ast_hash": "472ceacacf87f013d60327d1f4eca113",
-    "semantic_hash": "472ceacacf87f013d60327d1f4eca113"
+    "mtime": 1795786446.0920897,
+    "seen": 1795786589.169502,
+    "ast_hash": "230085b786e3cd06b7d4e36237266634",
+    "semantic_hash": ""
   },
   "tests/test_ncaabw_live_fast.py": {
     "mtime": 1795641588.787134,
@@ -14402,26 +14402,26 @@
   "data/migrations/clv_pinnacle_mainline_2026_10_14.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152813,
-    "ast_hash": "83c18498f029cb23f7cd5c88753051cf",
-    "semantic_hash": "83c18498f029cb23f7cd5c88753051cf"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/ncaaf_fcs_opponent_alias_2026_10_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615381,
-    "ast_hash": "96eb0fc92334f0416c56c1e74e982ef7",
-    "semantic_hash": "96eb0fc92334f0416c56c1e74e982ef7"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/record_strikes_ufc_retired_2026_11_13.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154428,
-    "ast_hash": "b7134af7f74d07bcd1313a3778238558",
-    "semantic_hash": "b7134af7f74d07bcd1313a3778238558"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/save_device_push_token_2026_11_11.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615448,
-    "ast_hash": "ad46d8b30edbe09849077afa21acae83",
-    "semantic_hash": "ad46d8b30edbe09849077afa21acae83"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/shims/react-native.mjs": {
     "mtime": 1795641585.356755,
@@ -14696,8 +14696,8 @@
   "data/migrations/euroleague_live_decisions_2026_11_13.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153142,
-    "ast_hash": "58eb6ab73ca91b9ebe6e97905da2faae",
-    "semantic_hash": "58eb6ab73ca91b9ebe6e97905da2faae"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_euroleague_ui.ts": {
     "mtime": 1795641585.356755,
@@ -14888,14 +14888,14 @@
   "data/migrations/injuries_read_indexes_2026_11_14.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153207,
-    "ast_hash": "8eb87e9edc58e62d708c60489276d80c",
-    "semantic_hash": "8eb87e9edc58e62d708c60489276d80c"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/team_stats_board_college_hoops_2026_11_12.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154683,
-    "ast_hash": "f05a0596b56ac6263bf2569ccac10226",
-    "semantic_hash": "f05a0596b56ac6263bf2569ccac10226"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/modules/open-in-app/expo-module.config.json": {
     "mtime": 1795641585.355558,
@@ -15032,8 +15032,8 @@
   "data/migrations/ncaaf_drop_phantom_lsu_ole_miss_2026_11_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153796,
-    "ast_hash": "d41585f43311d6d22e62d7f1dbeb8c6c",
-    "semantic_hash": "d41585f43311d6d22e62d7f1dbeb8c6c"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/shims/async-storage.mjs": {
     "mtime": 1795641585.356692,
@@ -15722,8 +15722,8 @@
   "data/migrations/db_health_snapshots_2026_11_15.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152933,
-    "ast_hash": "5091b8a37552a14787dbfb843d68e011",
-    "semantic_hash": "5091b8a37552a14787dbfb843d68e011"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_pick_games.ts": {
     "mtime": 1795641585.356755,
@@ -15800,14 +15800,14 @@
   "data/migrations/pc_copy_snapshots_2026_11_16.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153958,
-    "ast_hash": "45417f89ae59441e7f9eee724a2f91e6",
-    "semantic_hash": "45417f89ae59441e7f9eee724a2f91e6"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/scoreboard_splits_dk_history_2026_11_16.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154509,
-    "ast_hash": "f8319e8d833acbe7ebec9b622bdb3dc5",
-    "semantic_hash": "f8319e8d833acbe7ebec9b622bdb3dc5"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "retool/models-ops/backend/ops/getDatabaseHealth.ts": {
     "mtime": 1795641588.7128713,
@@ -15890,8 +15890,8 @@
   "scripts/grant_tester_comped_2026_11_16.sql": {
     "mtime": 1795641588.7201304,
     "seen": 1795786406.6167161,
-    "ast_hash": "c16b30646b96db45e4f47e2159ee533e",
-    "semantic_hash": "c16b30646b96db45e4f47e2159ee533e"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "scripts/local_mirror_report.py": {
     "mtime": 1795641588.7226803,
@@ -15950,14 +15950,14 @@
   "data/migrations/byom_bets_actual_2026_11_17.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152358,
-    "ast_hash": "bcacb59c4065c99304f90b2aaa10d289",
-    "semantic_hash": "bcacb59c4065c99304f90b2aaa10d289"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_no_half_yards_2026_11_17.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152484,
-    "ast_hash": "5e70b929a7dbe42c74c7d838367981e7",
-    "semantic_hash": "5e70b929a7dbe42c74c7d838367981e7"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/index.tsx": {
     "mtime": 1795641585.3551936,
@@ -16094,50 +16094,50 @@
   "data/migrations/anon_lockdown_step_a_2026_11.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152103,
-    "ast_hash": "3a2fa2950d472bebab4c71de1af56aa8",
-    "semantic_hash": "3a2fa2950d472bebab4c71de1af56aa8"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/anon_lockdown_step_a_2026_11_undo.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152117,
-    "ast_hash": "dfa1ec79421902085c096c29c0627d59",
-    "semantic_hash": "dfa1ec79421902085c096c29c0627d59"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/anon_lockdown_step_b_2026_11.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152136,
-    "ast_hash": "d690910674e91e48ae0755fec9ef9006",
-    "semantic_hash": "d690910674e91e48ae0755fec9ef9006"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/anon_lockdown_step_b_2026_11_undo.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615215,
-    "ast_hash": "9c0f67d7b44dd75bf0b7de7edd45b9e9",
-    "semantic_hash": "9c0f67d7b44dd75bf0b7de7edd45b9e9"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/clv_close_2026_11_19.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.61528,
-    "ast_hash": "31a232b76347b783636b10bd7e70ba9d",
-    "semantic_hash": "31a232b76347b783636b10bd7e70ba9d"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/model_health_2026_11_18.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615363,
-    "ast_hash": "ade46f976e7432d26c1698baaf15700a",
-    "semantic_hash": "ade46f976e7432d26c1698baaf15700a"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/notification_inbox_2026_11_19.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153903,
-    "ast_hash": "21a8523073a6acc2c4275af3622cd002",
-    "semantic_hash": "21a8523073a6acc2c4275af3622cd002"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/site_public_record_2026_11.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615457,
-    "ast_hash": "468ed050332943e0475ff7fee29f418b",
-    "semantic_hash": "468ed050332943e0475ff7fee29f418b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_notification_inbox.ts": {
     "mtime": 1795641585.356755,
@@ -16158,10 +16158,10 @@
     "semantic_hash": "a6edafdb3fa6ed0db624a1d55ad4f03b"
   },
   "mobile/src/hooks/useNotificationInbox.ts": {
-    "mtime": 1795641585.371104,
-    "seen": 1795786406.6159642,
-    "ast_hash": "d5ecd5aed59af79aa822589138e3a02e",
-    "semantic_hash": "d5ecd5aed59af79aa822589138e3a02e"
+    "mtime": 1795786446.0600896,
+    "seen": 1795786589.1391134,
+    "ast_hash": "237801b62345568f9a19653fc97c8d2c",
+    "semantic_hash": ""
   },
   "mobile/src/lib/notificationBadge.ts": {
     "mtime": 1795641585.3735445,
@@ -16182,16 +16182,16 @@
     "semantic_hash": "3d6212b32930f6862ee9c164e995402f"
   },
   "mobile/src/screens/NotificationsScreen.tsx": {
-    "mtime": 1795641585.3834524,
-    "seen": 1795786406.6162317,
-    "ast_hash": "ef42577a53e33e369f314c2324dd85cc",
-    "semantic_hash": "ef42577a53e33e369f314c2324dd85cc"
+    "mtime": 1795786446.0680895,
+    "seen": 1795786589.1435134,
+    "ast_hash": "d2bb5d5b31627051e235f7e2a5b674c2",
+    "semantic_hash": ""
   },
   "ops/acl_snapshots/pre_step_a_20261118.sql": {
     "mtime": 1795641588.7118976,
     "seen": 1795786406.616489,
-    "ast_hash": "e04ec062924d01048943f11e16e75913",
-    "semantic_hash": "e04ec062924d01048943f11e16e75913"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "retool/models-ops/backend/ops/getModelHealthBets.ts": {
     "mtime": 1795641588.7128713,
@@ -16262,20 +16262,20 @@
   "scripts/lockdown_acl_snapshot.sql": {
     "mtime": 1795641588.7226803,
     "seen": 1795786406.616748,
-    "ast_hash": "1ff47d04e53592995b6d054972144c0b",
-    "semantic_hash": "1ff47d04e53592995b6d054972144c0b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "scripts/lockdown_anon_stray_check.sql": {
     "mtime": 1795641588.7226803,
     "seen": 1795786406.616749,
-    "ast_hash": "a3064a452660a9e5dc067458212e1d7e",
-    "semantic_hash": "a3064a452660a9e5dc067458212e1d7e"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "scripts/lockdown_preapply_check.sql": {
     "mtime": 1795641588.7226803,
     "seen": 1795786406.6167498,
-    "ast_hash": "f99e60d7e6cb0765cf07b740695143b1",
-    "semantic_hash": "f99e60d7e6cb0765cf07b740695143b1"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "scripts/ncaabw_research/ht_dropped_bets.py": {
     "mtime": 1795641588.740569,
@@ -16332,10 +16332,10 @@
     "semantic_hash": "a61b3fb39a24cb9292784d72ba8d9be7"
   },
   "tests/test_notification_inbox.py": {
-    "mtime": 1795641588.795134,
-    "seen": 1795786406.6180878,
-    "ast_hash": "0d85158df5f4e482e8c553e243e2cda3",
-    "semantic_hash": "0d85158df5f4e482e8c553e243e2cda3"
+    "mtime": 1795786446.0920897,
+    "seen": 1795786589.1724021,
+    "ast_hash": "ba05e52033b5641fdf64303c9a3f69a6",
+    "semantic_hash": ""
   },
   "tests/test_restore_acl_snapshot.py": {
     "mtime": 1795641588.799134,
@@ -16350,10 +16350,10 @@
     "semantic_hash": "bf12238304c9f63d677dea591ef9103b"
   },
   "tracking/notification_inbox.py": {
-    "mtime": 1795641588.8094933,
-    "seen": 1795786406.6183598,
-    "ast_hash": "f0b961949bf7057729e5e89de87cc70e",
-    "semantic_hash": "f0b961949bf7057729e5e89de87cc70e"
+    "mtime": 1795786446.0920897,
+    "seen": 1795786589.1764286,
+    "ast_hash": "101894ba621a0f5ef308799d995838e2",
+    "semantic_hash": ""
   },
   "docs/nba_reassessment_2026_11.md": {
     "mtime": 1795641585.0160046,
@@ -16460,8 +16460,8 @@
   "data/migrations/public_track_record_model_daily_2026_11_18.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615424,
-    "ast_hash": "ecd737dcd0ed95dbc81352dfb2940cad",
-    "semantic_hash": "ecd737dcd0ed95dbc81352dfb2940cad"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_model_heat.ts": {
     "mtime": 1795641585.356755,
@@ -16556,44 +16556,44 @@
   "data/migrations/anon_lockdown_step_b_part2_tracked_bets_2026_11.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.615218,
-    "ast_hash": "30caa3640ff86df415ab9bf050cbb4fa",
-    "semantic_hash": "30caa3640ff86df415ab9bf050cbb4fa"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/app_founders_2026_11_20.sql": {
     "mtime": 1795641584.9967704,
     "seen": 1795786406.6152234,
-    "ast_hash": "ed55d49ce6470e934a3b4dee04bacc52",
-    "semantic_hash": "ed55d49ce6470e934a3b4dee04bacc52"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/premium_gate_2026_11_20.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154132,
-    "ast_hash": "e848c1094f1d04dd485616304fc3f07e",
-    "semantic_hash": "e848c1094f1d04dd485616304fc3f07e"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/premium_gate_2026_11_20_undo.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154158,
-    "ast_hash": "475796a58eea4a92d24f5fc48502ac0a",
-    "semantic_hash": "475796a58eea4a92d24f5fc48502ac0a"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/premium_gate_matview_2026_11_20.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154187,
-    "ast_hash": "c85bf77ac5a780fc06c8d2477bddc682",
-    "semantic_hash": "c85bf77ac5a780fc06c8d2477bddc682"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/premium_gate_matview_2026_11_20_undo.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154203,
-    "ast_hash": "c3ed199b88377d29e53bda80d48191b1",
-    "semantic_hash": "c3ed199b88377d29e53bda80d48191b1"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/tracked_bets_owner_2026_11_20.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154804,
-    "ast_hash": "92efb77d85262d6cf3748668a944e9e8",
-    "semantic_hash": "92efb77d85262d6cf3748668a944e9e8"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "tests/test_nba_first_basket_props.py": {
     "mtime": 1795641588.775134,
@@ -16610,32 +16610,32 @@
   "data/migrations/mcp_foundation_2026_11_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153388,
-    "ast_hash": "c6fd834d62b0b737a010f1dc11fd33b7",
-    "semantic_hash": "c6fd834d62b0b737a010f1dc11fd33b7"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/mcp_session_revoke_2026_11_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153436,
-    "ast_hash": "b952a2b2d3f7014a00da7c9feea15df8",
-    "semantic_hash": "b952a2b2d3f7014a00da7c9feea15df8"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/mcp_stats_views_2026_11_21.sql": {
     "mtime": 1795711393.8415189,
     "seen": 1795786406.6153553,
-    "ast_hash": "f2f7fb4f69214b2e1a428fe5f3c467f9",
-    "semantic_hash": "f2f7fb4f69214b2e1a428fe5f3c467f9"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/mcp_status_client_2026_11_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615357,
-    "ast_hash": "e64800faad7b0306d187c97d09f06b04",
-    "semantic_hash": "e64800faad7b0306d187c97d09f06b04"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/site_public_record_invoker_2026_11_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6154585,
-    "ast_hash": "044230bc0fb252866d209a78dfcc7aef",
-    "semantic_hash": "044230bc0fb252866d209a78dfcc7aef"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_ai_assistant.ts": {
     "mtime": 1795641585.356755,
@@ -16752,10 +16752,10 @@
     "semantic_hash": "23a8dcc4ac354cf6926c671087916d7f"
   },
   "supabase/functions/mcp/index.ts": {
-    "mtime": 1795711394.349519,
-    "seen": 1795786406.6172447,
-    "ast_hash": "4174234f98b92ac73d7a7f3af1cc8815",
-    "semantic_hash": "4174234f98b92ac73d7a7f3af1cc8815"
+    "mtime": 1795786446.0920897,
+    "seen": 1795786589.160446,
+    "ast_hash": "b883ab09a18ead55effda63a67377ca9",
+    "semantic_hash": ""
   },
   "tests/test_mcp_foundation.py": {
     "mtime": 1795641588.771134,
@@ -16826,8 +16826,8 @@
   "data/migrations/mcp_stats_alt_lines_2026_11_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153486,
-    "ast_hash": "1226acdc06e5f8268f56934c9a967b14",
-    "semantic_hash": "1226acdc06e5f8268f56934c9a967b14"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "tests/test_mcp_alt_lines.py": {
     "mtime": 1795641588.767134,
@@ -16838,14 +16838,14 @@
   "data/migrations/record_matches_sheet_2026_11_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615438,
-    "ast_hash": "9bb2c05b74f08f06e6959b4ceacbacbe",
-    "semantic_hash": "9bb2c05b74f08f06e6959b4ceacbacbe"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/record_sheet_checks_2026_11_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.61544,
-    "ast_hash": "fb88a8dfc5843a24891c27c9452612e8",
-    "semantic_hash": "fb88a8dfc5843a24891c27c9452612e8"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "tests/test_record_sheet_check.py": {
     "mtime": 1795641588.799134,
@@ -16868,8 +16868,8 @@
   "data/migrations/pc_monitor_state_2026_11_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153986,
-    "ast_hash": "1d5877b23afaaee7e1f00956382ba331",
-    "semantic_hash": "1d5877b23afaaee7e1f00956382ba331"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "pc_monitor/qr.py": {
     "mtime": 1795641588.7119458,
@@ -16898,8 +16898,8 @@
   "data/migrations/mcp_stats_games_twins_2026_11_21.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615353,
-    "ast_hash": "af44560a05a7b475d81567c94a9d6b2b",
-    "semantic_hash": "af44560a05a7b475d81567c94a9d6b2b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_bet_date_groups.ts": {
     "mtime": 1795641585.356755,
@@ -16920,10 +16920,10 @@
     "semantic_hash": "2d589eb0f7e9e57edc9ec8c7c37335e5"
   },
   "mobile/src/components/PerformanceInsightsCard.tsx": {
-    "mtime": 1795641585.3651292,
-    "seen": 1795786406.6157854,
-    "ast_hash": "889203c9030b93f6391b40d0c3023463",
-    "semantic_hash": "889203c9030b93f6391b40d0c3023463"
+    "mtime": 1795786446.0600896,
+    "seen": 1795786589.1366274,
+    "ast_hash": "6d88d85d2d9ff62e2e6077e4e20b3c93",
+    "semantic_hash": ""
   },
   "mobile/src/hooks/useModelDailyRecordFull.ts": {
     "mtime": 1795641585.371104,
@@ -16974,10 +16974,10 @@
     "semantic_hash": "3382056560c9df7f8e8635846882d23b"
   },
   "data/ingestors/book_live_boards.py": {
-    "mtime": 1795711393.837519,
-    "seen": 1795786406.6147096,
-    "ast_hash": "d52e5dee5a6a5bc0e96028ee476a6ed6",
-    "semantic_hash": "d52e5dee5a6a5bc0e96028ee476a6ed6"
+    "mtime": 1795786446.0440896,
+    "seen": 1795786589.129735,
+    "ast_hash": "8ba1c44bf4fe5750c87a205f456637f8",
+    "semantic_hash": ""
   },
   "data/ingestors/nba_period_lines_live.py": {
     "mtime": 1795711393.8415189,
@@ -16994,38 +16994,38 @@
   "data/migrations/byom_alerts_2026_11_25.sql": {
     "mtime": 1795711393.8415189,
     "seen": 1795786406.615229,
-    "ast_hash": "ec779170ae368fef430ba8cbe0ec38e7",
-    "semantic_hash": "ec779170ae368fef430ba8cbe0ec38e7"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/mcp_assistant_family_2026_11_22.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615336,
-    "ast_hash": "f880ffae6110feb078759c3bfae3299b",
-    "semantic_hash": "f880ffae6110feb078759c3bfae3299b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/mcp_multi_assistant_2026_11_22.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153405,
-    "ast_hash": "28521950a2d57607355d8f5de8559eaa",
-    "semantic_hash": "28521950a2d57607355d8f5de8559eaa"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/mcp_preferences_2026_11_24.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.615342,
-    "ast_hash": "5d23e135397aed424df2f4cc66a2eb83",
-    "semantic_hash": "5d23e135397aed424df2f4cc66a2eb83"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/mcp_stats_all_markets_2026_11_25.sql": {
     "mtime": 1795711393.8415189,
     "seen": 1795786406.6153462,
-    "ast_hash": "bbc0f00e12ea01fe5d5f3d4472df4809",
-    "semantic_hash": "bbc0f00e12ea01fe5d5f3d4472df4809"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/mcp_stats_context_2026_11_22.sql": {
     "mtime": 1795641584.9991338,
     "seen": 1795786406.6153502,
-    "ast_hash": "7fe5515300efc7e0f38b7229daf8027d",
-    "semantic_hash": "7fe5515300efc7e0f38b7229daf8027d"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "mobile/scripts/verify_byom_alerts.ts": {
     "mtime": 1795711394.325519,
@@ -17160,16 +17160,16 @@
     "semantic_hash": "5f59c661fc5c40a093efc5af66ac50ca"
   },
   "scripts/splits_markets_probe.py": {
-    "mtime": 1795711394.345519,
-    "seen": 1795786406.6171744,
-    "ast_hash": "eeb7b4a2322859daac69fe4aeff3b71a",
-    "semantic_hash": "eeb7b4a2322859daac69fe4aeff3b71a"
+    "mtime": 1795786446.0880895,
+    "seen": 1795786589.1590946,
+    "ast_hash": "24ec0f681003b857d8b346e66934fd2e",
+    "semantic_hash": ""
   },
   "tests/test_book_live_boards.py": {
-    "mtime": 1795711394.349519,
-    "seen": 1795786406.6173277,
-    "ast_hash": "8ec20819d952bdb5b0d1126c5064cd70",
-    "semantic_hash": "8ec20819d952bdb5b0d1126c5064cd70"
+    "mtime": 1795786446.0920897,
+    "seen": 1795786589.1620104,
+    "ast_hash": "d247253f84a0d9d124179dd91e58159b",
+    "semantic_hash": ""
   },
   "tests/test_byom_alerts.py": {
     "mtime": 1795711394.349519,
@@ -17262,10 +17262,10 @@
     "semantic_hash": "b4a1648b95eab4563e703ef978386f65"
   },
   "tests/test_splits_markets_probe.py": {
-    "mtime": 1795711394.353519,
-    "seen": 1795786406.6182327,
-    "ast_hash": "3e7581da98006c2eb5a35c83e56e6228",
-    "semantic_hash": "3e7581da98006c2eb5a35c83e56e6228"
+    "mtime": 1795786446.0920897,
+    "seen": 1795786589.1749501,
+    "ast_hash": "d09080498a3463fe4947e83f23f195f0",
+    "semantic_hash": ""
   },
   ".github/workflows/backroom-pr-summary.yml": {
     "mtime": 1795641584.8279953,
@@ -17354,44 +17354,44 @@
   "data/migrations/byom_ncaab_2026_11_26.sql": {
     "mtime": 1795711393.8415189,
     "seen": 1795786406.6152449,
-    "ast_hash": "7fb5a962d33b064573f37f043fcc946b",
-    "semantic_hash": "7fb5a962d33b064573f37f043fcc946b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/byom_week_of_lock_2026_11_26.sql": {
     "mtime": 1795711393.8415189,
     "seen": 1795786406.6152737,
-    "ast_hash": "f8c66ee5fcee1c6e18c3c33120e5fb0b",
-    "semantic_hash": "f8c66ee5fcee1c6e18c3c33120e5fb0b"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/dk_prop_split_tables_2026_11_26.sql": {
     "mtime": 1795721039.4087112,
     "seen": 1795786406.6153061,
-    "ast_hash": "5b3c86283b549807a02ee2edaf40434f",
-    "semantic_hash": "5b3c86283b549807a02ee2edaf40434f"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/dk_prop_splits_2026_11_26.sql": {
     "mtime": 1795719635.0246277,
     "seen": 1795786406.6153078,
-    "ast_hash": "5fe3bfc2d9d6d9634e5dc28e35ec3e97",
-    "semantic_hash": "5fe3bfc2d9d6d9634e5dc28e35ec3e97"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/moneypuck_nhl_2026_11_26.sql": {
     "mtime": 1795711393.8415189,
     "seen": 1795786406.615366,
-    "ast_hash": "d601fb4ecde860e182c2266a499f8366",
-    "semantic_hash": "d601fb4ecde860e182c2266a499f8366"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/nhl_free_feeds_2026_11_26.sql": {
     "mtime": 1795717584.8868291,
     "seen": 1795786406.6153882,
-    "ast_hash": "942ee185ed1096be8da8fcf4af121616",
-    "semantic_hash": "942ee185ed1096be8da8fcf4af121616"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "data/migrations/scoreboard_splits_period_markets_2026_11_26.sql": {
     "mtime": 1795711393.8415189,
     "seen": 1795786406.6154528,
-    "ast_hash": "c60e1a848e46698fc1adae50bc05ed10",
-    "semantic_hash": "c60e1a848e46698fc1adae50bc05ed10"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "scripts/dk_prop_splits_probe.py": {
     "mtime": 1795716898.7880445,
@@ -17402,14 +17402,14 @@
   "scripts/grant_comped_2026_11_26.sql": {
     "mtime": 1795711394.345519,
     "seen": 1795786406.6167135,
-    "ast_hash": "ebacb4cd87b3bfa9db723b331f4db786",
-    "semantic_hash": "ebacb4cd87b3bfa9db723b331f4db786"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "scripts/nba_prop_market_early_card.py": {
-    "mtime": 1795723586.3128626,
-    "seen": 1795786406.616804,
-    "ast_hash": "529594f708b626f78989b22b6a498c40",
-    "semantic_hash": "529594f708b626f78989b22b6a498c40"
+    "mtime": 1795786446.0880895,
+    "seen": 1795786589.1536646,
+    "ast_hash": "33214b55fd647c0329ff6f49456b716c",
+    "semantic_hash": ""
   },
   "scripts/premium_access.py": {
     "mtime": 1795711394.345519,
@@ -17496,10 +17496,10 @@
     "semantic_hash": "2eaa411cd221f3507b9a287673ed95bd"
   },
   "tests/test_scoreboard_period_splits.py": {
-    "mtime": 1795713619.6093833,
-    "seen": 1795786406.6182048,
-    "ast_hash": "f2a339ce289c195624c03b03df881772",
-    "semantic_hash": "f2a339ce289c195624c03b03df881772"
+    "mtime": 1795786446.0920897,
+    "seen": 1795786589.174443,
+    "ast_hash": "a4b59444878cbb930fba387013931e76",
+    "semantic_hash": ""
   },
   "tests/test_splits_coverage_probe.py": {
     "mtime": 1795713650.3973854,
@@ -17524,5 +17524,23 @@
     "seen": 1795786406.6184742,
     "ast_hash": "e14e1f8f7112ac9d978c06731b8fb73e",
     "semantic_hash": "e14e1f8f7112ac9d978c06731b8fb73e"
+  },
+  "models/book_live_quotes.py": {
+    "mtime": 1795786446.0840895,
+    "seen": 1795786589.143817,
+    "ast_hash": "d08311a326a7232e01c0b9f897478560",
+    "semantic_hash": ""
+  },
+  "tests/test_book_live_quotes.py": {
+    "mtime": 1795786446.0920897,
+    "seen": 1795786589.1620133,
+    "ast_hash": "4d631103ac79659d05fde3cecaa4758c",
+    "semantic_hash": ""
+  },
+  "mobile/package-lock.json": {
+    "mtime": 1795641585.3556008,
+    "seen": 1795786589.18084,
+    "ast_hash": "576f9982245ca1e096b10a8c550d0561",
+    "semantic_hash": ""
   }
 }
