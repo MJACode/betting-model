@@ -5,10 +5,11 @@
     1. Once a day: this season's enriched boxes, referee crews and inactive
        lists (data/ingestors/nba_box_enrich.py). stats.nba.com refuses the
        Railway worker, so this cannot run there.
-    2. A loop that saves every public NBA feed with no history, change by change
-       (data/ingestors/nba_feeds.py): the league's lineup file, referee crews as
-       posted, RotoWire's projections through Sleeper, Underdog's news, Pinnacle's
-       limits, Unabated's prop openers, three pick'em boards, BetMGM's splits.
+    2. A loop that saves Unabated's prop-opener file change by change
+       (data/ingestors/nba_feeds.py). The other eleven feeds of that module (the
+       league's lineup file, referee crews, projections, news, Pinnacle's limits,
+       the pick'em boards, BetMGM's splits) are read by the worker's one-minute
+       job; this file is 139 MB from the worker, so it is read here.
 
   Run by the scheduled task BettingModel\NbaFeeds every minute and two minutes
   after sign-in (mike, 2026-11-27: "2) yes"). The loop holds 127.0.0.1:47241, so
@@ -88,9 +89,11 @@ if (-not (Test-Path $marker)) {
     }
 }
 
-# 2. The loop, until $LoopHours from now.
+# 2. The loop, until $LoopHours from now. Only the feed the worker leaves out (Unabated's
+#    139 MB prop file): the worker's one-minute job reads every other feed, and one reader
+#    a feed keeps this address from polling Pinnacle beside the tennis logger.
 $until = (Get-Date).ToUniversalTime().AddHours($LoopHours).ToString("yyyy-MM-ddTHH:mm:ss")
-$p = Start-Process -FilePath $python -ArgumentList @("-m", "data.ingestors.nba_feeds", "--loop", "--until", $until) `
+$p = Start-Process -FilePath $python -ArgumentList @("-m", "data.ingestors.nba_feeds", "--loop", "--origin", "pc", "--feeds", "unabated_props", "--until", $until) `
     -WorkingDirectory $Feed -NoNewWindow -PassThru `
     -RedirectStandardOutput (Join-Path $logs "nba_feeds_loop_$day.log") `
     -RedirectStandardError (Join-Path $logs "nba_feeds_loop_stderr_$day.log")

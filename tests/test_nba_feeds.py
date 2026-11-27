@@ -430,3 +430,90 @@ def test_the_worker_runs_the_feeds_every_minute_and_leaves_the_big_file_to_the_p
     assert 'id="nba_feeds"' in whole
     assert scheduler.owns("nba_feeds") or scheduler.SERVICE_ROLE in ("poller", "pollers")
     assert "nba_feeds" in scheduler._PIPELINE_JOBS and "nba_feeds" not in scheduler._POLLER_JOBS
+
+
+# ---- "gone" is signal, not an artifact of a game starting or a blank read
+
+def test_a_line_whose_game_has_started_is_not_loaded_so_it_is_never_written_gone():
+    item = nf.parse_pinnacle(*_pin(), NOW)["10:s;0;ou"]
+    assert nf.item_expiry(item) == "2026-11-28T02:10:00+00:00"       # the tip
+    sql = []
+
+    class _C(_Conn):
+        def execute(self, q, params=None):
+            sql.append(q)
+
+            class _R:
+                def fetchall(self_inner):
+                    return []
+            return _R()
+    nf.load_latest(_C(), "pinnacle_nba")
+    assert "expires_at > NOW()" in sql[0]
+
+
+def test_each_item_is_stored_with_its_own_expiry():
+    conn = _Conn()
+    feed = nf.FEEDS["pinnacle_nba"]
+    read = nf.Read(200, 1, nf.parse_pinnacle(*_pin(), NOW), expires_at=NOW)
+    nf.store(conn, feed, "pc", NOW, read, {})
+    latest_params = conn.one[1][1]
+    assert nf.LATEST in conn.one[1][0] and latest_params[4] == "2026-11-28T02:10:00+00:00"
+
+
+def test_an_empty_read_while_live_items_are_held_is_an_error_not_everything_gone():
+    conn = _Conn()
+    feed = nf.FEEDS["prizepicks_lines"]
+    n = nf.store(conn, feed, "pc", NOW, nf.Read(200, 5, {}), {"17": "h", "18": "h"})
+    (sql, params), = conn.one
+    assert n == 0 and nf.FETCHES in sql and "empty read while 2 live items" in params[-1]
+
+
+def test_an_empty_read_with_nothing_held_is_just_an_empty_feed():
+    conn = _Conn()
+    n = nf.store(conn, nf.FEEDS["prizepicks_lines"], "pc", NOW, nf.Read(200, 5, {}), {})
+    assert n == 0 and conn.one[0][1][-1] is None
+
+
+def test_a_partial_read_marks_nothing_gone():
+    conn = _Conn()
+    feed = nf.FEEDS["nba_lineups"]
+    held = {"0022600064:1": "h"}
+    read = nf.Read(200, 5, {"0022600099:7": {"lineup": "Expected"}}, partial=True)
+    nf.store(conn, feed, "pc", NOW, read, held)
+    assert "0022600064:1" not in str(conn.one[0][1])              # the held row was not written gone
+    full = nf.Read(200, 5, {"0022600099:7": {"lineup": "Expected"}})
+    conn2 = _Conn()
+    nf.store(conn2, feed, "pc", NOW, full, held)
+    assert "0022600064:1" in str(conn2.one[0][1])                 # a full read does write it
+
+
+def test_the_lineup_read_keeps_one_dates_rows_when_the_other_file_is_missing(monkeypatch):
+    class _R:
+        def __init__(self, code, body=None):
+            self.status_code, self.content, self.headers, self._b = code, b"x", {"content-type": "application/json"}, body
+
+        def json(self):
+            return self._b
+
+    def fake_get(url, timeout=60, **params):
+        return _R(200, _lineups([_player(1)])) if "20261127" in url else _R(302)
+
+    monkeypatch.setattr(nf, "_get", fake_get)
+    late = datetime(2026, 11, 28, 5, 30, tzinfo=timezone.utc)      # 00:30 ET: yesterday and today
+    read = nf.read_lineups(late)
+    assert read.error is None and read.partial and "0022600064:1" in read.items
+    # yesterday's rows leave the read at 3am ET today
+    assert read.items["0022600064:1"]["_expires"] == "2026-11-28T08:00:00+00:00"
+
+    monkeypatch.setattr(nf, "_get", lambda url, timeout=60, **p: _R(403))
+    assert nf.read_lineups(late).error
+
+
+def test_sleeper_lines_are_not_treated_as_a_full_list():
+    assert nf.FEEDS["sleeper_lines"].lists_everything is False
+
+
+def test_the_worker_names_itself_in_the_ledger():
+    import inspect
+    import scheduler
+    assert '"--origin", "worker"' in inspect.getsource(scheduler.run_nba_feeds)

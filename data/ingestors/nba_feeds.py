@@ -26,7 +26,11 @@ feed's stamp is kept in the state for reference and left out of the comparison:
 every key of a state that starts with "_" is stored and not compared.
 
 An item that leaves a feed that lists everything (a starter dropped from an
-Expected five, a pulled line) is written once as {"gone": true}.
+Expected five, a pulled line) is written once as {"gone": true}, and only while
+its game has not started: each item carries the time it stops being compared
+("_expires": the tip for a line, 3am ET the next day for a lineup row), so a
+board emptying at the tip is not a wall of "gone" rows. A read that comes back
+empty while live items are held is recorded as an error, not as everything gone.
 
     python -m data.ingestors.nba_feeds --once                    # every feed, one read
     python -m data.ingestors.nba_feeds --once --feeds nba_lineups
@@ -169,6 +173,7 @@ class Read:
     items: dict[str, dict]
     expires_at: datetime | None = None
     error: str | None = None
+    partial: bool = False      # part of the feed did not answer: nothing is "gone"
 
 
 def _get(url: str, timeout: int = 60, **params) -> requests.Response:
@@ -191,7 +196,7 @@ def slate_dates(now: datetime | None = None) -> list[date]:
 LINEUPS_URL = "https://stats.nba.com/js/data/leaders/00_daily_lineups_{d}.json"
 
 
-def parse_lineups(payload: dict) -> dict[str, dict]:
+def parse_lineups(payload: dict, expires: str | None = None) -> dict[str, dict]:
     """One item per listed player, and one per team holding its Expected five
     and its Confirmed starters as lists, so a player DROPPED from a five shows
     as a change (the per-player item would only show as gone)."""
@@ -208,7 +213,7 @@ def parse_lineups(payload: dict) -> dict[str, dict]:
                     "game": gid, "team": abbr, "side": side[:4], "player": p.get("playerName"),
                     "lineup": p.get("lineupStatus"), "roster": p.get("rosterStatus"),
                     "pos": p.get("position") or "", "_feed_stamp": p.get("timestamp"),
-                    "_game_status": g.get("gameStatus"),
+                    "_game_status": g.get("gameStatus"), "_expires": expires,
                 }
                 if p.get("lineupStatus") == "Expected":
                     expected.append([pid, p.get("position") or ""])
@@ -220,21 +225,31 @@ def parse_lineups(payload: dict) -> dict[str, dict]:
                 "game": gid, "team": abbr, "side": side[:4],
                 "expected": sorted(expected), "confirmed_starters": sorted(confirmed),
                 "inactive": sorted(inactive), "_tip_text": g.get("gameStatusText"),
-                "_game_status": g.get("gameStatus"),
+                "_game_status": g.get("gameStatus"), "_expires": expires,
             }
     return items
 
 
 def read_lineups(now: datetime | None = None) -> Read:
+    """Each slate date's file. A date whose file does not answer (today's may
+    not exist before the league's first morning write) is left out and the read
+    is marked partial, so the other date's rows are kept and nothing is taken
+    for gone; the read is an error only when no date answers."""
     items: dict[str, dict] = {}
-    status, nbytes = None, 0
+    status, nbytes, missed = None, 0, []
     for d in slate_dates(now):
         r = _get(LINEUPS_URL.format(d=d.strftime("%Y%m%d")))
-        status, nbytes = r.status_code, nbytes + len(r.content)
+        nbytes += len(r.content)
         if r.status_code != 200 or "json" not in r.headers.get("content-type", "json"):
-            return Read(r.status_code, nbytes, {}, error=f"{d}: HTTP {r.status_code}")
-        items.update(parse_lineups(r.json()))
-    return Read(status, nbytes, items, expires_at=et_now(now) + timedelta(days=2))
+            missed.append(f"{d}: HTTP {r.status_code}")
+            continue
+        status = 200
+        # A date's rows stop being read at 3am ET the next day (slate_dates).
+        leaves = datetime.combine(d + timedelta(days=1), datetime.min.time(), ET) + timedelta(hours=3)
+        items.update(parse_lineups(r.json(), leaves.astimezone(timezone.utc).isoformat()))
+    if status is None:
+        return Read(None, nbytes, {}, error="; ".join(missed))
+    return Read(200, nbytes, items, expires_at=et_now(now) + timedelta(days=2), partial=bool(missed))
 
 
 # -- referee crews, as the league posts them (about 9:12am ET)
@@ -398,6 +413,7 @@ def parse_pinnacle(matchups: list, markets: list, now: datetime) -> dict[str, di
             "type": x.get("type"), "period": x.get("period"), "prices": prices, "limit": limit,
             "kind": mi["kind"], "what": mi["what"], "category": mi["category"],
             "home": mi["home"], "away": mi["away"], "start": mi["start"],
+            "_expires": mi["start"],
         }
     return items
 
@@ -494,6 +510,7 @@ def parse_prizepicks(payload: dict) -> tuple[dict[str, dict], dict[str, dict]]:
             "start": a.get("start_time"), "promo": bool(a.get("is_promo")),
             "flash_line": a.get("flash_sale_line_score"), "adjusted_odds": a.get("adjusted_odds"),
             "_updated_at": a.get("updated_at"), "_board_time": a.get("board_time"),
+            "_expires": a.get("start_time"),
         }
         if a.get("trending_count"):
             counts[str(x.get("id"))] = {
@@ -547,7 +564,7 @@ def parse_underdog_lines(payload: dict) -> dict[str, dict]:
                   "decimal": o.get("decimal_price"), "payout": o.get("payout_multiplier"),
                   "status": o.get("status")} for o in ln.get("options") or []],
                 key=lambda o: str(o["choice"])),
-            "_updated_at": ln.get("updated_at"),
+            "_updated_at": ln.get("updated_at"), "_expires": g.get("scheduled_at"),
         }
     return items
 
@@ -702,7 +719,9 @@ FEEDS: dict[str, Feed] = {f.name: f for f in (
     Feed("prizepicks_lines", read_prizepicks, lambda now: 600, lists_everything=True),
     Feed("prizepicks_counts", read_prizepicks_counts, lambda now: 3600),
     Feed("underdog_lines", read_underdog_lines, lambda now: 900, lists_everything=True),
-    Feed("sleeper_lines", read_sleeper_lines, lambda now: 600, lists_everything=True),
+    # Not lists_everything: a Sleeper line carries no start time, so a line leaving at
+    # the tip could not be told from a pulled one.
+    Feed("sleeper_lines", read_sleeper_lines, lambda now: 600),
     Feed("sleeper_counts", read_sleeper_counts, lambda now: 3600),
     Feed("yahoo_mgm_splits", read_yahoo_splits, lambda now: 600),
 )}
@@ -742,11 +761,38 @@ def _insert_many(conn, head: str, row: str, tail: str, rows: list[tuple]) -> Non
                      tuple(v for r in chunk for v in r))
 
 
+def item_expiry(state: dict) -> str | None:
+    """An item's own "_expires" as an ISO time, when it parses; else None (the
+    read's default is used). A gone row keeps no expiry of its own."""
+    raw = state.get("_expires")
+    if not raw:
+        return None
+    try:
+        t = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).isoformat()
+
+
+def guard_empty(feed: Feed, read: Read, latest: dict[str, str]) -> Read:
+    """A feed that lists everything, answering with nothing while live items
+    are held, is an error (a blank page, a changed shape), never "all gone"."""
+    if read.error or not feed.lists_everything or read.items:
+        return read
+    live = sum(1 for h in latest.values() if h != GONE_HASH)
+    if not live:
+        return read
+    return Read(read.status, read.nbytes, {}, expires_at=read.expires_at,
+                error=f"empty read while {live} live items are held")
+
+
 def store(conn, feed: Feed, origin: str, seen_at: datetime, read: Read,
           latest: dict[str, str]) -> int:
     """Write what changed, then the ledger row, in one transaction. A read that
     failed writes its ledger row only: an error is never taken for an empty feed."""
-    changes = [] if read.error else diff(latest, read.items, feed.lists_everything)
+    read = guard_empty(feed, read, latest)
+    changes = [] if read.error else diff(latest, read.items,
+                                         feed.lists_everything and not read.partial)
     stamp = seen_at.isoformat()
     exp = read.expires_at.isoformat() if read.expires_at else None
     if changes:
@@ -754,7 +800,7 @@ def store(conn, feed: Feed, origin: str, seen_at: datetime, read: Read,
             (feed.name, k, stamp, h, json.dumps(s, ensure_ascii=False), origin)
             for k, s, h in changes])
         _insert_many(conn, _LATEST_HEAD, _LATEST_ROW, _LATEST_TAIL,
-                     [(feed.name, k, h, stamp, exp) for k, s, h in changes])
+                     [(feed.name, k, h, stamp, item_expiry(s) or exp) for k, s, h in changes])
     conn.execute(_FETCH_INSERT, (feed.name, origin, stamp, read.status, read.nbytes,
                                  len(read.items), len(changes), read.error))
     conn.commit()
@@ -772,7 +818,9 @@ def one_read(conn, feed: Feed, origin: str, now: datetime | None = None,
     except Exception as exc:                                    # noqa: BLE001
         read = Read(None, 0, {}, error=f"{type(exc).__name__}: {str(exc)[:300]}")
     if measure is not None:
-        changes = [] if read.error else diff(latest, read.items, feed.lists_everything)
+        read = guard_empty(feed, read, latest)
+        changes = [] if read.error else diff(latest, read.items,
+                                             feed.lists_everything and not read.partial)
         for k, _s, h in changes:
             latest[k] = h
         n = len(changes)
@@ -906,12 +954,26 @@ def main(argv=None) -> int:
             print(json.dumps({"already_running": a.port}))
             return 0
         until = datetime.fromisoformat(a.until).replace(tzinfo=timezone.utc) if a.until else None
-        due = {f.name: 0.0 for f in feeds}
+        mine: dict[str, datetime] = {}
         while until is None or datetime.now(timezone.utc) < until:
-            for f in feeds:
-                if time.time() < due[f.name]:
-                    continue
+            now = datetime.now(timezone.utc)
+            # Due by the ledger (anyone's last read) when there is a database, so
+            # this loop and the worker's tick do not both read a feed.
+            last = dict(mine)
+            if conn is not None:
+                try:
+                    for name, at in last_reads(conn).items():
+                        if name not in last or at > last[name]:
+                            last[name] = at
+                except Exception as exc:                        # noqa: BLE001
+                    logger.warning(f"ledger read failed: {exc}")
+                    try:
+                        conn.rollback()
+                    except Exception:                           # noqa: BLE001
+                        pass
+            for f in due_feeds(feeds, last, now):
                 now = datetime.now(timezone.utc)
+                mine[f.name] = now
                 try:
                     res = one_read(conn, f, a.origin, now=now, measure=measure)
                     if res["changed"] or res["error"]:
@@ -922,8 +984,7 @@ def main(argv=None) -> int:
                         conn.rollback()
                     except Exception:                           # noqa: BLE001
                         pass
-                due[f.name] = time.time() + f.every_sec(now)
-            time.sleep(5)
+            time.sleep(10)
         return 0
     finally:
         if measure is not None and a.measure:

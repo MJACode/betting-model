@@ -1059,16 +1059,15 @@ naming it as a second copy, so a `cmd /c "... tennis_dk_probe ..."` wrapper
 makes the reader refuse to start. The launcher files avoid the name on purpose.
 Logs: `data\local\research\tennis_research\logs\{pinnacle,dk2}.{out,err}`.
 
-## NBA feeds: the league's lineup file and ten other feeds with no history, from HERE
+## NBA feeds: the daily box load and Unabated's prop file, from HERE
 
-Eleven public NBA feeds keep no history of their own (the league's Expected /
-Confirmed lineup file, referee crews as posted, RotoWire's projections through
-Sleeper, Underdog's news, Pinnacle's limits, Unabated's prop openers, three
-pick'em boards, BetMGM's splits). `data/ingestors/nba_feeds.py` saves each one
-change by change into `nba_feed_changes`, with a ledger row per read in
-`nba_feed_fetches` (`docs/nba_data_sources_and_handle_2026_11.md`, section G).
-The same launcher loads this season's enriched boxes, referee crews and
-inactive lists once a day (`data/ingestors/nba_box_enrich.py`): stats.nba.com
+Twelve public NBA feeds keep no history of their own. `data/ingestors/nba_feeds.py`
+saves each one change by change into `nba_feed_changes`, with a ledger row per
+read in `nba_feed_fetches` (`docs/nba_data_sources_and_handle_2026_11.md`,
+section G). The worker reads eleven of them every minute (`scheduler.run_nba_feeds`).
+This machine keeps two jobs: Unabated's prop-opener file, which is 139 MB from
+the worker, and the daily load of this season's enriched boxes, referee crews
+and inactive lists (`data/ingestors/nba_box_enrich.py`), because stats.nba.com
 refuses the Railway worker.
 
 **The schedule: every minute, and two minutes after sign-in** (mike, 2026-11-27:
@@ -1084,7 +1083,8 @@ processes only. It runs only while mike is signed in to Windows. Logs:
 `nba_box_enrich_<date>.log`.
 
 **Registering it** (a Claude session is refused this step; run it once in
-PowerShell):
+PowerShell, AFTER the feeds pull request is merged: the first line copies the
+launcher from the main checkout, which holds it only once master does):
 
 ```powershell
 $bin = "C:\Users\micha\Documents\betting_local_copies\bin"
@@ -1113,9 +1113,10 @@ FROM nba_feed_fetches GROUP BY 1, 2 ORDER BY 1;
 **Three loops were started by hand on 2026-11-27** from the branch, before the
 merge (ports 47241 to 47243; logs in
 `data\local\research\nba_research\logs\nba_feeds_*`). While the first runs,
-the task leaves at once. After the merge and the registration, stop the three
-(their process ids are in the session entry) so the task's one loop of every
-feed takes over.
+the task leaves at once. They decide what is due from the ledger, so once the
+worker's job is running they read only what it has not. After the merge and the
+registration, stop them (their process ids are in the session entry) so the
+task's loop takes over on this machine.
 
 ## Every scheduled task starts windowless (2026-11-21)
 

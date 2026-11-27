@@ -2234,8 +2234,11 @@ def run_nba_feeds() -> None:
     minute, 24x7: the lineup file is read each minute and the others when their
     own interval has passed, by the ledger, so a tick with nothing due is one
     database read. Free endpoints, no model reads them, nothing is published.
-    All twelve answered 200 from this service on 2026-11-27."""
-    _run([sys.executable, "-m", "data.ingestors.nba_feeds", "--tick",
+    All twelve answered 200 from the Railway probe service on 2026-11-27 (same
+    project and egress as this one; this service's own first tick is the check).
+    The origin is passed, not inferred: the ledger's `origin` column is how a
+    read by this job is told from one by the PC."""
+    _run([sys.executable, "-m", "data.ingestors.nba_feeds", "--tick", "--origin", "worker",
           "--skip", NBA_FEEDS_WORKER_SKIP], "nba-feeds", timeout=NBA_FEEDS_TIMEOUT_S)
 
 

@@ -696,17 +696,23 @@ with a time and projected lineups at $39.99 a month; 401 without a key, nothing 
 Read back on production: enriched boxes 7,518 rows over 270 games, referee crews 811 rows over
 270 games, inactive lists 2,245 rows over 265 games, each to 2026-11-25; 270 games of 2026-27
 had a final score. The five games with no inactive rows are all of 2026-10-26: DAL at MIA,
-GSW at DEN, IND at MIL, MEM at UTA and PHX at OKC (the source file has none for that date). The
-league's lineup file for that date is the route to fill them (#1674); not done.
-The load now runs once a day from the PC's `NbaFeeds` task (G4).
+GSW at DEN, IND at MIL, MEM at UTA and PHX at OKC. Why is not established (the source file was
+not opened for that date). The league's lineup file for that date is the route to fill them
+(#1674); not done. The load will run once a day from the PC's `NbaFeeds` task once that task is
+registered (G4); until then nothing schedules it.
 
 ### G2. What is saved, and how
 
 `data/ingestors/nba_feeds.py`. One change log for every feed, keyed on OUR read time, because
 the feeds restamp themselves (the lineup file rewrites every row's stamp about every 15 minutes
 with nothing changed). A row is written only when what we compare changed; a state that returns
-to an earlier value is written again; an item that leaves a feed that lists everything is
-written once as gone; a failed read writes its ledger row and nothing else.
+to an earlier value is written again; a failed read writes its ledger row and nothing else.
+An item that leaves a feed that lists everything (a starter dropped from an Expected five, a
+pulled line) is written once as gone, and only while its game has not started: each item is
+stored with the time it stops being compared (the tip for a line; 3am ET the next day for a
+lineup row), so a board emptying at tip-off is not thousands of "gone" rows. A read that comes
+back empty while live items are held is recorded as an error. Rows written before this rule
+(2026-11-27, before about 20:15 UTC) can include "gone" rows from a game starting.
 
 | Table | Holds |
 |---|---|
@@ -728,7 +734,7 @@ All three are worker-only (row security on, no access for the app's public roles
 | `unabated_props` | 15 min | (event, player, bet type, side, source) | line, price, opening line, opening price |
 | `prizepicks_lines` / `prizepicks_counts` | 10 min / 1 hour | a pre-game line | the line and its type / its pick count |
 | `underdog_lines` | 15 min | a pre-game NBA line | the line and each side's price and payout |
-| `sleeper_lines` / `sleeper_counts` | 10 min / 1 hour | a pre-game line | the line and payouts / picks on each side |
+| `sleeper_lines` / `sleeper_counts` | 10 min / 1 hour | a pre-game line | the line and payouts / picks on each side. No "gone" rows: a Sleeper line carries no start time |
 | `yahoo_mgm_splits` | 10 min | a game | BetMGM's price, money % and bets % per option; this is a dated pre-tip handle series from 2026-11-27 |
 
 Pick counts sit in their own feeds so that a count ticking up is not a line row.
@@ -761,12 +767,15 @@ its `snapshotStartedAtUtc` read 07:52 UTC at 18:55 UTC while the server's Last-M
 
 - **Today, by hand:** three loops started from the branch on mike's PC at 18:59, 19:13 and
   19:16 UTC (ports 47241 to 47243), until 2026-12-31 or until the task takes over.
-- **After the merge:** the PC task `BettingModel\NbaFeeds` (`scripts/nba_feeds_run.ps1`, every
-  minute and at sign-in; it leaves at once while a loop holds port 47241). It runs master from
-  its own copy, the daily box load first, then one loop of every feed for 24 hours. Registering
-  the task was refused by the session's permission check on 2026-11-27; mike registers it
-  (`docs/local_ops.md`, "NBA feeds").
-- **It runs only while mike is signed in to Windows.** A gap shows in `nba_feed_fetches`.
+- **After the merge, the worker reads eleven of the twelve** (G5): the job `nba_feeds`, every
+  minute, around the clock.
+- **The PC keeps two things:** the daily box load, and Unabated's file. The task
+  `BettingModel\NbaFeeds` (`scripts/nba_feeds_run.ps1`, every minute and at sign-in; it leaves
+  at once while a loop holds port 47241) runs master from its own copy. Registering the task
+  was refused by the session's permission check on 2026-11-27; mike registers it after the merge
+  (`docs/local_ops.md`, "NBA feeds"). It runs only while mike is signed in to Windows.
+- **One reader a feed.** The loop and the worker's job both decide what is due from the ledger
+  (anyone's last read), so a feed is not read by both.
 - **The worker:** the official injury report is a step of the 6am run (`nba-injury-report`, the
   three completed days before the run date; #1523). Which feeds answer from the worker: G5.
 
@@ -792,7 +801,9 @@ put back afterwards; its source stays pinned to this branch, as after the 2026-1
 
 **Every feed answers from the worker**, the league's lineup file under `stats.nba.com/js/data/`
 included (the `/stats/` endpoints the box loader needs were not probed there and are known to
-refuse it). So the capture does not depend on mike's PC: the worker job `nba_feeds`
+refuse it). The probe ran on the probe service, not on the worker itself; they share a project
+and its network, and the worker's own first tick after the merge is the check (rows with
+`origin = 'worker'`). So the capture does not depend on mike's PC: the worker job `nba_feeds`
 (`scheduler.run_nba_feeds`, every minute, 24x7) runs `--tick`, which reads each feed whose own
 interval has passed since its last read by anyone, by the ledger. It leaves out
 `unabated_props`: the worker was served a 139 MB file with 61,755 items where the PC got 96 MB
