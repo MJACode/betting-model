@@ -170,10 +170,13 @@ def test_no_pick_model_reads_moneypuck():
     assert "moneypuck" not in (ROOT / "config.py").read_text(encoding="utf-8").lower()
     props = (ROOT / "models" / "nhl_props.py").read_text(encoding="utf-8")
     assert "USE_MONEYPUCK_POINTS = False" in props
+    assert "USE_ASSISTS_NO_TEAM_PACE = False" in props
     card = (ROOT / "scripts" / "nhl_props_card.py").read_text(encoding="utf-8")
     assert "add_points_features" not in card
     assert "points_spec" not in card
     assert "assists_spec" not in card
+    assert "assists_no_team_pace" not in card
+    assert "USE_ASSISTS_NO_TEAM_PACE" not in card
     assert "moneypuck" not in card.lower()
 
 

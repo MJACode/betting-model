@@ -70,6 +70,13 @@ opponent expected goals, the opposing starter's goals saved above expected, and
 the referee's power-play rate, for `scripts/nhl_prop_backtest.py --moneypuck`
 only. The card scores `ASSISTS`. Points is not a live market: `points_spec`
 is not in `SPECS` or `LIVE`, and nothing that writes a pick calls it.
+
+THE NO-TEAM-PACE ASSISTS CANDIDATE is that candidate without team pace and
+team expected goals for (`own_mp_pace_l`, `own_mp_xgf_l`).
+`USE_ASSISTS_NO_TEAM_PACE` is false. `assists_no_team_pace_spec()` is what
+`scripts/nhl_prop_backtest.py --assists-no-team-pace` fits, one walk-forward
+fold at a time. It is not in `SPECS` or `LIVE`. The card does not call it,
+and turning the flag on does not change `ASSISTS`.
 """
 from __future__ import annotations
 
@@ -127,6 +134,10 @@ LIVE: tuple[Spec, ...] = (SAVES, SHOTS, ASSISTS)
 # Live scoring leaves this off. The card scores ASSISTS and never calls
 # assists_spec(True) or points_spec(True).
 USE_MONEYPUCK_POINTS = False
+# The assists candidate without team pace and team xG for. Off. The card
+# scores ASSISTS. The backtest calls assists_no_team_pace_spec() directly;
+# this flag does not swap the live spec.
+USE_ASSISTS_NO_TEAM_PACE = False
 # All-situation MoneyPuck rows. Half-lives match the skater rates (30 / 6),
 # the ice-time rates (20 / 4) and the team rate (25).
 MONEYPUCK_SITUATION = "all"
@@ -148,6 +159,9 @@ MONEYPUCK_POINTS_FEATURES = (
     "opp_gsax_l",
     "ref_pp_l",
 )
+# Team shot pace and team expected goals for. The no-pace assists candidate
+# drops these two and keeps every other candidate feature.
+TEAM_PACE_FEATURES = ("own_mp_pace_l", "own_mp_xgf_l")
 # The shift chart and the officials feed start in 2023-24. Requiring these
 # would drop every earlier season, including the training set that scores
 # 2023-24. XGBoost treats NaN as missing. The other candidate features are
@@ -189,6 +203,16 @@ def assists_spec(moneypuck: bool = False, drop: tuple[str, ...] = ()) -> Spec:
     if not moneypuck and not drop:
         return ASSISTS
     return _with_candidate(ASSISTS, moneypuck, drop)
+
+
+def assists_no_team_pace_spec() -> Spec:
+    """Assists candidate without team pace and team xG for.
+
+    Same model id as the live assists spec, a different feature list, and not
+    the object `SPECS` holds. `USE_ASSISTS_NO_TEAM_PACE` stays false: live
+    scoring reads `ASSISTS` and does not consult this function.
+    """
+    return assists_spec(True, TEAM_PACE_FEATURES)
 
 SKATER_COLS = ("nhl_game_id", "player_id", "player_name", "position", "season", "game_date",
                "team", "opponent", "is_home", "shots", "shot_attempts", "assists", "points",

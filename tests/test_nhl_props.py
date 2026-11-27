@@ -177,6 +177,8 @@ class TestMoneyPuckPointsFeatures:
         assert "add_points_features" not in card_src
         assert "points_spec" not in card_src
         assert "assists_spec" not in card_src
+        assert "assists_no_team_pace" not in card_src
+        assert "USE_ASSISTS_NO_TEAM_PACE" not in card_src
         assert "moneypuck" not in card_src.lower()
         with pytest.raises(ValueError):
             P.assists_spec(True, ("assists_l",))
@@ -265,6 +267,93 @@ class TestMoneyPuckPointsFeatures:
         got = got_frame[got_frame.upcoming].set_index("player_id")[feats]
         pd.testing.assert_frame_equal(got.sort_index().astype(float), want.sort_index().astype(float),
                                       check_names=False)
+
+
+class TestAssistsNoTeamPace:
+    def test_the_flag_is_off_and_the_live_spec_is_unchanged(self):
+        assert P.USE_ASSISTS_NO_TEAM_PACE is False
+        assert P.SPECS["nhl_prop_assists"] is P.ASSISTS
+        assert P.ASSISTS in P.LIVE
+        spec = P.assists_no_team_pace_spec()
+        assert spec is not P.ASSISTS
+        assert spec not in P.LIVE
+        assert spec.model_id == P.ASSISTS.model_id
+        assert spec.sides == ("under",)
+        assert spec.overdispersed is False
+        assert spec.max_per_game is None
+        assert spec.features == P.assists_spec(True, P.TEAM_PACE_FEATURES).features
+        for feature in P.TEAM_PACE_FEATURES:
+            assert feature not in spec.features
+            assert feature in P.MONEYPUCK_POINTS_FEATURES
+        for feature in P.ASSISTS.features:
+            assert feature in spec.features
+        for feature in P.MONEYPUCK_POINTS_FEATURES:
+            if feature not in P.TEAM_PACE_FEATURES:
+                assert feature in spec.features
+        assert "own_mp_pace_l" not in P.ASSISTS.features
+
+    def test_a_missing_team_pace_does_not_drop_the_row(self):
+        sk, go, tm = _log()
+        skaters, teams, starts, mates, refs = _point_inputs(sk, go, tm)
+        frame = P.add_points_features(P.build_skater_frame(sk, tm), skaters, teams, starts, mates, refs, tm)
+        frame = frame.copy()
+        frame["own_mp_pace_l"] = np.nan
+        frame["own_mp_xgf_l"] = np.nan
+        assert len(P.usable(P.assists_spec(True), frame)) == 0
+        kept = P.usable(P.assists_no_team_pace_spec(), frame)
+        assert len(kept) > 0
+        assert kept[["own_mp_pace_l", "own_mp_xgf_l"]].isna().all().all()
+
+
+def _pace_sides(p, won, profit, n=40, pkey="a", season=2024, ev=0.20):
+    rows = []
+    for i in range(n):
+        rows.append({
+            "game_id": f"g{i}",
+            "pkey": pkey,
+            "book": "draftkings",
+            "line": 0.5,
+            "side": "under",
+            "price": -110,
+            "p": p,
+            "won": won,
+            "profit": profit,
+            "actual": 0 if won else 1,
+            "game_date": f"2024-01-{(i % 28) + 1:02d}",
+            "season": season,
+            "ev": ev,
+        })
+    return pd.DataFrame(rows)
+
+
+class TestTheNoPaceReport:
+    def test_brier_is_the_mean_squared_gap(self):
+        b = _pace_sides(0.6, 1, 0.91)
+        assert bt.brier(b) == pytest.approx(0.16)
+
+    def test_the_same_slate_drops_a_player_only_one_model_scores(self):
+        live = _pace_sides(0.6, 1, 0.91, pkey="a")
+        extra = _pace_sides(0.6, 0, -1.0, n=5, pkey="b")
+        extra["game_id"] = [f"x{i}" for i in range(5)]
+        live = pd.concat([live, extra], ignore_index=True)
+        cand = _pace_sides(0.7, 1, 0.91, pkey="a")
+        left, right = bt.restrict_slate(live, cand)
+        assert set(left.pkey) == {"a"}
+        assert set(right.pkey) == {"a"}
+        assert len(left) == 40
+
+    def test_the_report_names_both_models_and_the_four_cuts(self):
+        live = _pace_sides(0.6, 1, 0.91)
+        cand = _pace_sides(0.7, 1, 0.91)
+        text = bt.pace_report(live, cand, 0.18, [2024])
+        assert "USE_ASSISTS_NO_TEAM_PACE=False" in text
+        assert "live same slate bets EV>=0.18" in text
+        assert "no-pace same slate bets EV>=0.18" in text
+        for cut in (0.12, 0.15, 0.18, 0.22):
+            assert f"EV>={cut:.2f}" in text
+        assert "RELIABILITY" in text
+        # 0.20 clears 0.18 and does not clear 0.22, so that row is empty.
+        assert "no-pace same slate EV>=0.22" in text
 
 
 class TestTheDistribution:
