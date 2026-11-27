@@ -399,10 +399,32 @@ before, it moved before 171 to 231.
 <book>'s own page" in its ledger reason, so these bets can be reported as the
 new population they are. `NCAAB_LIVE_OTHER_BOOKS=0` turns it off.
 
-**Next:** NBA,
-whose next game is 2026-11-27. The women's halftime total waits on a
-comparison of the provider's copies with the books' own pages at the break: it
-already bets elsewhere (22 of 43), and its rule counts every book's row.
+**NBA quarters 1-2 spread takes them too** (2026-11-27, `models/nba_live_loop.py`
+`own_page_rows` / `fast_rows`). FanDuel's and BetRivers' own-page spreads join
+DraftKings' board quote on the fast path. Each must be confirmed by a later
+read and have stood 10 s. Each is stamped at the book's previous read, so the
+model's own FRESH rule runs from there: no point on ESPN's plays between the
+stamp and the fetch's served time, and Pinnacle paired within 60 s. They go
+through the same fetch as DraftKings' and Pinnacle's rows. The provider's
+copies of those books are never a fast decider, and the slow way is
+unchanged. `NBA_LIVE_OTHER_BOOKS=0` turns it off. The model is paused under
+the low-volume NBA plan (mike, 2026-11-22), so this bets nothing while that
+holds.
+
+**NFL late-game leader too** (2026-11-27, `nfl_live_leader/gameday.py`
+`other_book_prices` / `best_book_decision`, issue #1652). On the fast path,
+another book's own-page moneyline on the leader's side takes the bet when it
+has the higher expected value. It must be confirmed by a later read, have
+stood 10 s, and have been set after the last score our state saw. It uses the
+same model, state and cut; a tie keeps DraftKings. DraftKings' own price stays
+in the DraftKings columns as the reference. The backtest's best-of-books gain
+was a stale book (William Hill unchanged after a score in 19.8% of 2024
+snapshots, `docs/nfl_edge_search.md`); this gate exists to refuse exactly
+that. `NFL_LIVE_LEADER_OTHER_BOOKS=0` turns it off.
+
+**Next:** the women's halftime total waits on a comparison of the provider's
+copies with the books' own pages at the break: it already bets elsewhere (22
+of 43), and its rule counts every book's row.
 
 ## NBA in play: the game-state model's quarters 1-2 spread (2026-11-04, mike)
 

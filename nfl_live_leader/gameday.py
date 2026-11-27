@@ -39,9 +39,16 @@ book-move or settled-state guard: none existed in the backtest, so each would
 bet a population whose return was never measured. The platform's own gates
 (min_odds_for, min_ev_for, the pause list) are still consulted; config.py is
 set so the first two cannot bind on this rule (see its comments). Overtime is
-never priced. Decided and settled at DraftKings only: the evidence holds at
-DraftKings, and a best-of-books price is a different, cross-book-latency effect
-the backtest measured separately and did not support.
+never priced. Decided at DraftKings, as graded, EXCEPT on the fast path since
+2026-11-27 (mike: "We want best line"; issue #1652): there another book's own
+live page may take the bet at a better price on the leader's side. The
+backtest's best-of-books gain was a book that had not caught up (William Hill's
+moneyline unchanged after a score in 19.8% of 2024 snapshots, and 5-minute
+snapshots could not show a quote was bettable; docs/nfl_edge_search.md). The
+own-page gate is built against exactly that: a page as fresh as DraftKings'
+board, the number on offer and confirmed by a later read, standing
+BOOK_STOOD_SEC, and set after the last score our state saw
+(models/book_live_quotes.py). The model and its cut are DraftKings'.
 """
 
 from __future__ import annotations
@@ -275,12 +282,39 @@ def side_prices(ctx: GameContext, q: dict | None) -> tuple:
 
 # ─── writing ──────────────────────────────────────────────────────────────────
 
-def build_pick(ctx: GameContext, st: LiveState, d: M.Decision, bankroll: float) -> dict:
+def build_pick(ctx: GameContext, st: LiveState, d: M.Decision, bankroll: float,
+               book: str = SNAPSHOT_BOOK, dk_price: float | None = None) -> dict:
     """One `picks` row from one BET decision -- the NCAAF live dict shape, every
-    key _insert_picks binds by name present."""
+    key _insert_picks binds by name present. At another book (`book`), the
+    decision columns are that book's price and the DraftKings columns are
+    DraftKings' own price on the same side (`dk_price`), else NULL."""
     from models.scorer import _confidence_tier, quarter_kelly
     team = ctx.home if d.side == "home" else ctx.away
     kf, rec = quarter_kelly(d.wp, d.implied, bankroll)
+    if book != SNAPSHOT_BOOK:
+        from data.live_quote_guard import american_to_implied
+        dk_imp = american_to_implied(dk_price) if dk_price is not None else None
+        return {
+            "game_id": ctx.game_id, "model_id": MODEL_ID, "sport": SPORT,
+            "game_date": ctx.game_date, "game_time": ctx.commence_time,
+            "pick_side": d.side, "pick_label": f"{team} ML (live)",
+            "model_probability": round(d.wp, 4),
+            "dk_implied_prob": None if dk_imp is None else round(dk_imp, 4),
+            "edge": None if dk_imp is None else round(d.wp - dk_imp, 4),
+            "dk_odds": None if dk_price is None else float(dk_price),
+            "scored_line": None,
+            "kelly_fraction": kf, "recommended_bet": rec, "bankroll_at_pick": bankroll,
+            "injury_flag": None, "injury_detail": None,
+            "signal_type": "BET", "confidence_tier": _confidence_tier(d.edge),
+            "is_live": True,
+            "inning_at_pick": int(st.period),
+            "score_diff_at_pick": int(st.home_score - st.away_score),
+            "best_book": book, "best_odds": float(d.price), "best_implied_prob": round(d.implied, 4),
+            "best_edge": round(d.edge, 4), "best_bet_link": None,
+            "line_book": None,
+            "decision_book": book, "decision_odds": float(d.price),
+            "decision_implied_prob": round(d.implied, 4), "decision_edge": round(d.edge, 4),
+        }
     return {
         "game_id": ctx.game_id, "model_id": MODEL_ID, "sport": SPORT,
         "game_date": ctx.game_date, "game_time": ctx.commence_time,
@@ -402,6 +436,71 @@ def notify_live(target_date: str) -> None:
 # off, or a game the board does not carry: the provider, as before.
 
 DK_ON = os.environ.get("NFL_LIVE_LEADER_DK", "1") != "0"
+# Best line on the fast path (module notes). NFL_LIVE_LEADER_OTHER_BOOKS=0
+# keeps it DraftKings only.
+OTHER_BOOKS_ON = os.environ.get("NFL_LIVE_LEADER_OTHER_BOOKS", "1") != "0"
+# A book can move for a score before our state has it (models/ncaab_live_dk.
+# CONFIRM_SEC, measured on BetRivers 2026-11-26).
+BOOK_STOOD_SEC = 10.0
+
+
+def book_source(conn_fn):
+    if not OTHER_BOOKS_ON:
+        return None
+    from models import book_live_quotes as OB
+    return OB.DbSource(conn_fn, SPORT)
+
+
+def other_book_prices(book_q, ctx: "GameContext", score_seen_at, now, stood_sec: float = BOOK_STOOD_SEC,
+                      books: tuple | None = None) -> dict:
+    """{book: (home_price, away_price)}: the game's moneyline on other books'
+    own pages (models.book_live_quotes.current_quotes) that a pick may name,
+    confirmed by a later read, shown at least `stood_sec` before `now`, and
+    set after the last score change we saw (the book's stamp is its previous
+    read: the number went up after it). Pure."""
+    import pandas as pd
+    if books is None:
+        import config
+        from models import book_live_quotes as OB
+        books = tuple(b for b in OB.BOOKS if b in set(config.BEST_LINE_BOOKMAKERS))
+    out: dict = {}
+    if book_q is None or not len(book_q):
+        return out
+    now = pd.Timestamp(now)
+    for _i, q in book_q.iterrows():
+        if q["game_id"] != ctx.game_id or q["market"] != "h2h" or q["book"] not in books or not bool(q["held"]):
+            continue
+        if (now - pd.Timestamp(q["shown"])).total_seconds() < stood_sec:
+            continue
+        if quote_predates_score(pd.Timestamp(q["stamp"]).isoformat(), score_seen_at):
+            continue
+        if pd.isna(q["home_price"]) or pd.isna(q["away_price"]):
+            continue
+        out[q["book"]] = (float(q["home_price"]), float(q["away_price"]))
+    return out
+
+
+def best_book_decision(art, st, ctx: "GameContext", dk_d, others: dict, edge_cut: float):
+    """(decision, book): DraftKings' decision, or another book's at its own
+    prices when that is a BET with a higher expected value per unit risked
+    (wp x decimal - 1). The same model, state and cut; a tie keeps
+    DraftKings. A DraftKings no-bet can become another book's bet only at a
+    price that clears the cut there."""
+    cands = [(dk_d, SNAPSHOT_BOOK)]
+    for book, (hp, ap) in sorted(others.items()):
+        d = M.decide(art, period=st.period, secs=st.secs, home_score=st.home_score,
+                     away_score=st.away_score, possession=st.possession,
+                     spread_home=ctx.spread_home, home_price=hp, away_price=ap,
+                     final=st.final, edge_cut=edge_cut)
+        cands.append((d, book))
+    bets = [(d, b) for d, b in cands if d is not None and d.bet and d.wp is not None and d.decimal]
+    if not bets:
+        return dk_d, SNAPSHOT_BOOK
+    best = bets[0]
+    for d, b in bets[1:]:
+        if d.wp * d.decimal - 1 > best[0].wp * best[0].decimal - 1 + 1e-12:
+            best = (d, b)
+    return best
 
 
 def dk_board_quotes(src, ctxs: list) -> dict | None:
@@ -534,6 +633,9 @@ def main(argv=None) -> int:
     fast_ready: list = []
     if dk_src is not None:
         log.info("fast path on: DraftKings' moneyline from its own board while that feed is live")
+    book_src = book_source(_conn) if dk_src is not None else None
+    if book_src is not None:
+        log.info("best line on the fast path: other books' own-page moneylines (book_live_reads)")
 
     if not a.dry_run:
         # The published record counts a settled BET only while Discord holds
@@ -701,6 +803,22 @@ def main(argv=None) -> int:
                                 SNAPSHOT_BOOK, priced_at))
                         d, note = evaluate(art, s, ctx, q, score_clock.last_change(s.event_id),
                                            edge_cut)
+                        book = SNAPSHOT_BOOK
+                        if (d is not None and book_src is not None and q is not None
+                                and q.get("source") == "dk_live_board"):
+                            try:
+                                import pandas as pd
+                                now_ts = pd.Timestamp.now(tz="UTC")
+                                others = other_book_prices(book_src.quotes({ctx.game_id}, now_ts, markets=("h2h",)),
+                                                           ctx, score_clock.last_change(s.event_id), now_ts)
+                            except Exception as exc:      # noqa: BLE001
+                                log.warning("other books' pages could not be read (DraftKings only): %s", exc)
+                                conn = _recycle(conn)
+                                others = {}
+                            if others:
+                                d, book = best_book_decision(art, s, ctx, d, others, edge_cut)
+                                if book != SNAPSHOT_BOOK:
+                                    note = f"{d.reason} at {book}'s own page"
                         # Posting delay, measured live: now minus ESPN's wallclock
                         # for the last real play. The evidence assumed 0 s; the
                         # 2025 return fell from +1.84u to -0.50u as the state
@@ -729,11 +847,12 @@ def main(argv=None) -> int:
                             if bankroll is None:
                                 from models.scorer import _get_current_bankroll
                                 bankroll = float(_get_current_bankroll(_conn()))
-                            pick = build_pick(ctx, s, d, bankroll)
+                            dk_side = hp if d.side == "home" else apx
+                            pick = build_pick(ctx, s, d, bankroll, book=book, dk_price=dk_side)
                             if write_bet(_conn(), pick):
                                 bets_written += 1
-                                log.info("WROTE BET %s %s at %+.0f wp=%.4f edge=%+.4f",
-                                         MODEL_ID, pick["pick_label"], d.price, d.wp, d.edge)
+                                log.info("WROTE BET %s %s at %s %+.0f wp=%.4f edge=%+.4f",
+                                         MODEL_ID, pick["pick_label"], book, d.price, d.wp, d.edge)
                             bet_dates.add(ctx.game_date)
                             done.add(s.event_id)
                         except Exception as exc:          # noqa: BLE001

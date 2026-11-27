@@ -132,6 +132,22 @@ DK_CATCHUP_GAP_SEC = float(os.environ.get("NBA_LIVE_DK_CATCHUP_GAP_SEC", "3"))
 DK_CATCHUP_MAX_SEC = float(os.environ.get("NBA_LIVE_DK_CATCHUP_MAX_SEC", "60"))
 SUMMARY_THREADS = 16
 FAST_BOOKS = ("draftkings", "pinnacle")      # the decider and the pair
+# BEST LINE ON THE FAST PATH (mike, 2026-11-26: "We want best line"; issue
+# #1644). FanDuel's and BetRivers' own-page spreads (models/book_live_quotes.py,
+# read on mike's machine) join DraftKings' board quote as deciders, each only
+# while its page is as fresh as the board must be, the number is on offer and
+# confirmed by a later read, and it has stood NBA_BOOK_STOOD_SEC on the page.
+# Each is stamped at the book's PREVIOUS read (the book set the number after
+# it), so the model's own FRESH rule (no point between the stamp and the
+# fetch's served time, Pinnacle paired within 60 s) runs from there. They go
+# through the same fetch as DraftKings' and Pinnacle's rows; the provider's
+# own copies of those books are never a fast decider. The slow way is
+# unchanged. NBA_LIVE_OTHER_BOOKS=0 turns it off.
+OTHER_BOOKS_ON = os.environ.get("NBA_LIVE_OTHER_BOOKS", "1") != "0"
+# A book can move for a basket before the score reaches us; inside this long
+# its number may carry it (models/ncaab_live_dk.CONFIRM_SEC: BetRivers moved in
+# the 5 s before 370 of 827 DraftKings NCAAB score changes, 2026-11-26).
+NBA_BOOK_STOOD_SEC = 10.0
 FETCH_WINDOW_SEC = float(os.environ.get("NBA_LIVE_FETCH_WINDOW_SEC", "240"))
 RETRY_GAP_SEC = float(os.environ.get("NBA_LIVE_RETRY_GAP_SEC", "60"))
 # ESPN's header score ahead of its play list: re-read once after this many
@@ -647,6 +663,53 @@ def overlay_dk_rows(rows_all: list, reads: pd.DataFrame, last_read, fetched_at) 
     return out, games
 
 
+def other_deciding_books() -> tuple:
+    """The books whose own page the fast path reads, less any a pick may not
+    name (config.BEST_LINE_BOOKMAKERS)."""
+    import config
+    from models import book_live_quotes as OB
+    allowed = set(config.BEST_LINE_BOOKMAKERS)
+    return tuple(b for b in OB.BOOKS if b in allowed)
+
+
+def own_page_rows(book_q: pd.DataFrame, rows_all: list, game_ids: set, at,
+                  stood_sec: float = NBA_BOOK_STOOD_SEC, books: tuple | None = None) -> list[dict]:
+    """Other books' own-page spreads (models.book_live_quotes.current_quotes)
+    as this fetch's `odds` rows, for the games the board decides: on a book a
+    pick may name, confirmed by a later read, shown at least `stood_sec`
+    before `at`, and stamped (snapshot_at) at the book's previous read. A game
+    whose market the provider's fetch does not carry gets none (no row to
+    pair with). Pure."""
+    books = other_deciding_books() if books is None else books
+    out = []
+    if book_q is None or not len(book_q):
+        return out
+    at = pd.Timestamp(at)
+    for _i, q in book_q.iterrows():
+        if (q["market"] != "spreads" or q["game_id"] not in game_ids or q["book"] not in books
+                or not bool(q["held"]) or (at - pd.Timestamp(q["shown"])).total_seconds() < stood_sec):
+            continue
+        tmpl = next((r for r in rows_all if r.get("game_id") == q["game_id"] and r.get("market") == "spreads"), None)
+        if tmpl is None:
+            continue
+        row = {k: None for k in tmpl}
+        row.update({"game_id": q["game_id"], "sport": tmpl.get("sport"), "market": "spreads", "bookmaker": q["book"],
+                    "snapshot_type": "in_play", "snapshot_at": pd.Timestamp(q["stamp"]).isoformat(),
+                    "home_price": float(q["home_price"]), "away_price": float(q["away_price"]),
+                    "spread_home": float(q["spread_home"]), "source": f"{q['book']}_board"})
+        out.append(row)
+    return out
+
+
+def fast_rows(rows_all: list, own_rows: list, game_ids: set) -> list:
+    """The fast path's rows for the board's games: the fetch's DraftKings
+    (already the board's) and Pinnacle rows, plus the books' own-page rows.
+    The provider's copies of the other books are left out: on the fast path
+    a book is bet off its own page or not at all."""
+    keep = [r for r in rows_all if r.get("game_id") in game_ids and r.get("bookmaker") in FAST_BOOKS]
+    return keep + [r for r in own_rows if r.get("game_id") in game_ids]
+
+
 def resolve_conflicts(decisions: list, standing: list[dict]) -> dict:
     """{model_id: reason} for this pass's bets that the one-game rule declines
     (mike, 2026-10-17: "It can't be both")."""
@@ -681,6 +744,7 @@ class Loop:
                  wait: float = PBP_WAIT_SEC, recheck: float = PBP_RECHECK_SEC, sleep=time.sleep,
                  clock=None, slate_dates=None, slots: Slots | None = None):
         self.dk = dk                           # DraftKings' own board (models/ncaab_live_dk.DbSource)
+        self.books = None                      # other books' own pages (models/book_live_quotes.DbSource)
         self.art, self.espn, self.feed, self.connect = art, espn, feed, connect
         self.dry_run, self.wait, self.recheck, self.sleep = dry_run, float(wait), float(recheck), sleep
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -990,9 +1054,19 @@ class Loop:
                 self.recycle()
         board = self.dk_board({c.game_id for c, _g in todo})
         fast_ids: set = set()
+        own_rows: list = []
         if board is not None:
             rows_all, fast_ids = overlay_dk_rows(rows_all, board[0], board[1], fetch.fetched_at)
             fast_ids &= {c.game_id for c, _g in todo}
+            if fast_ids and self.books is not None:
+                at = max(pd.Timestamp(board[1]), pd.Timestamp(fetch.fetched_at))
+                try:
+                    book_q = self.books.quotes(fast_ids, at, markets=("spreads",))
+                    own_rows = own_page_rows(book_q, rows_all, fast_ids, at)
+                except Exception as exc:              # noqa: BLE001
+                    log.warning("other books' pages could not be read (DraftKings only this window): %s", exc)
+                    self.recycle()
+                    own_rows = []
         rows = pd.DataFrame(rows_all)
         if rows.empty:
             for c, g in todo:
@@ -1006,7 +1080,16 @@ class Loop:
         # never evaluated, so its retry inside the window must still see them.
         seen_now = set(self.seen)
         q_all, _dropped, _qn = M.fetch_quotes(rows, gframe, seen_now)
-        fresh_stamps = seen_now - self.seen
+        q_own, seen_own = None, set(self.seen)
+        if own_rows:
+            # the same fetch's DraftKings and Pinnacle rows beside the books' own
+            # pages, read the way the grade reads one fetch. Its own copy of the
+            # earlier-fetch dedupe: the pass above has already marked this
+            # fetch's DraftKings and Pinnacle stamps.
+            rf = pd.DataFrame(fast_rows(rows_all, own_rows, fast_ids))
+            rf["created_at"] = fetch.fetched_at.isoformat()
+            q_own, _d2, _n2 = M.fetch_quotes(rf, gframe, seen_own)
+        fresh_stamps = (seen_now - self.seen) | (seen_own - self.seen)
         served = q_all["served_at"].max() if len(q_all) else pd.Timestamp(fetch.fetched_at)
         served = pd.Timestamp(served).to_pydatetime()
         have = set(q_all["game_id"]) if len(q_all) else set()
@@ -1021,6 +1104,8 @@ class Loop:
         if fast:
             ready = self.caught_up([c for c, _g in fast], board[0])
             q_fast = q_all[q_all["book"].isin(FAST_BOOKS)]
+            if q_own is not None and len(q_own):
+                q_fast = q_own[q_own["book"].isin(FAST_BOOKS + other_deciding_books())]
             for c, g in fast:
                 if c.game_id not in ready:
                     continue
@@ -1131,7 +1216,9 @@ class Loop:
         for rule, d, st in decs:
             outcome, reason, pick = ("bet", "BET", None) if d.bet else ("no_bet", d.reason, None)
             if source:
-                reason = f"{reason} ({source})"
+                book = (d.pick or {}).get("book")
+                own = book not in (None, "draftkings") and source == "DraftKings board"
+                reason = f"{reason} ({source}; {book}'s own page)" if own else f"{reason} ({source})"
             if d.bet:
                 if rule.model_id in conflicts:
                     outcome, reason = "declined", conflicts[rule.model_id]
@@ -1213,6 +1300,11 @@ def main(argv=None) -> int:
         loop.dk = DbSource(loop.c, sport="NBA")
         log.info("fast path on: DraftKings' own board for DraftKings' quote, ESPN read until it shows "
                  "DraftKings' score (every %.0f s, at most %.0f s)", DK_CATCHUP_GAP_SEC, DK_CATCHUP_MAX_SEC)
+        if OTHER_BOOKS_ON:
+            from models import book_live_quotes as OB
+            loop.books = OB.DbSource(loop.c, "NBA")
+            log.info("best line on the fast path: %s from their own pages (book_live_reads)",
+                     ", ".join(other_deciding_books()))
     if not a.dry_run:
         try:
             if not ledger_ready(loop.c()):

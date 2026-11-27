@@ -895,7 +895,13 @@ stop a DraftKings read. Each book and live sport is polled as fast as the book a
   recorded as refused, never worked around, and three in a row leave that book
   alone for 10 minutes. `BOOK_LIVE_BOARDS=0` in this machine's environment
   turns the thread off.
-- **Not NCAAF or MLB**, for the same reason as DraftKings' lines above.
+- **NCAAF is read and recorded in `book_live_reads` only (2026-11-27, issue
+  #1651); MLB is not read.** NCAAF never writes `odds` rows, for the same reason
+  as DraftKings' lines above. FanDuel's page is `customPageId=ncaaf`, cut to
+  "NCAA Football Games" (FCS, awards and futures sit beside it). BetRivers
+  uses Kambi's `ncaaf` league, cut from `ncaaf_fcs` and `nfl`. Both were read
+  2026-11-27 before any game was in play. The NCAAF in-play models do not read
+  these rows yet.
 - **What each book has on offer, per read: `book_live_reads`** (2026-11-26,
   mike: *"We want best line"*). The record a live decision needs before it can
   bet another book's number, which `odds` cannot give: a suspended market adds
