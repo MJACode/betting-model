@@ -26,6 +26,8 @@ import {
   BET_ALL_LIVE_NOTE,
   betAllCandidates,
   betAllMainSkip,
+  betAllSkipSummary,
+  betAllSports,
   bestLinePlan,
   bookCoverage,
   oneBookPlan,
@@ -244,6 +246,24 @@ check('the main reason is plural for a count over one (\'5 games started\', not 
 check('another book’s price says where the model found it', sheet.includes('foundAtText(bookLabel(record), formatAmerican(modelPrice))'));
 check('VoiceOver is told to tick placed bets on return', sheet.includes('Tick each bet you placed to track it.'));
 check('the app’s own segmented control', sheet.includes('<SegmentTabs'));
+
+// ── Bet all sports, and the skip line (Matt, 2026-11-27) ─────────────────
+check('the banner names every skip, most common first',
+  betAllSkipSummary([{ reason: 'started' }, { reason: 'oldPrice' }, { reason: 'oldPrice' }]) === '3 skipped: 2 old prices, 1 game started');
+check('one skip reads singular', betAllSkipSummary([{ reason: 'oldPrice' }]) === '1 skipped: 1 old price');
+check('nothing skipped says nothing', betAllSkipSummary([]) === null);
+check('the banner says the skips whenever any are left out, not only at zero ready',
+  home.includes('betAll.skipped.length > 0 ? `${betAllSkipSummary(betAll.skipped)}. ${BET_ALL_LIVE_NOTE}`'));
+{
+  const mk = (sport: string, id: number) => ({ pick: { sport, pick_id: id } as unknown as Pick });
+  check('betAllSports lists each sport once, picks and skips alike',
+    JSON.stringify(betAllSports({ picks: [mk('NFL', 1), mk('UFC', 2)] as never, skipped: [mk('NFL', 3), mk('NCAAF', 4)] as never })) === '["NFL","UFC","NCAAF"]');
+}
+check('Bet all sports reads every sport’s signals, not the filtered tab',
+  home.includes('const open = allData.filter(') && home.includes('betAllCandidates(open,'));
+check('Bet all sports leaves finished games out', home.includes("!== 'final',\n    );\n    const c = betAllCandidates(open"));
+check('Bet all sports shows only when signals span two or more sports', home.includes('betAllSports(c).length >= 2 ? c : null'));
+check('the all-sports sheet names each pick’s sport', home.includes("showSport={betAllScope === 'all'}") && sheet.includes('const sportPrefix = (pick: Pick) =>'));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

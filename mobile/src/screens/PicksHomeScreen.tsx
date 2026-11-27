@@ -112,7 +112,7 @@ import {
 } from '@/lib/trackedFilter';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { BetAllSheet } from '@/components/BetAllSheet';
-import { BET_ALL_LIVE_NOTE, betAllCandidates, betAllMainSkip } from '@/lib/betAll';
+import { BET_ALL_LIVE_NOTE, betAllCandidates, betAllSkipSummary, betAllSports } from '@/lib/betAll';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
 import { LIVE_PRICE_SLOT_ONLY } from '@/lib/markets';
@@ -203,7 +203,9 @@ export function PicksHomeScreen() {
   const slip = useParlaySlip();
   // Bet all (Matt, 2026-11-14): the member's books decide what it can send.
   const { books: myBooks, ready: myBooksReady } = usePreferredBooks();
-  const [betAllOpen, setBetAllOpen] = useState(false);
+  // Which Bet all sheet is open: this sport's board as filtered, or every
+  // sport's signals (Matt, 2026-11-27). Null when closed.
+  const [betAllScope, setBetAllScope] = useState<'sport' | 'all' | null>(null);
 
   const [view, setView] = useState<PicksView>('signals');
   const [sbSport, setSbSport] = useState<ScoreboardSport>('NFL');
@@ -761,6 +763,21 @@ export function PicksHomeScreen() {
         : null,
     [view, myBooksReady, openFiltered, liveStates, myBooks, thresholdsRevision],
   );
+  // Bet all across EVERY sport (Matt, 2026-11-27: one tap for every signal,
+  // not one per sport tab). It reads the signals themselves, not this tab's
+  // board: a filter or search set on one sport's tab cannot be seen from the
+  // top of the screen, so it would drop picks without a word. Finished games
+  // are left out, as the per-sport board leaves them out. Offered only when
+  // signals span two or more sports; with one, the board's own row is it.
+  const betAllEverySport = useMemo(() => {
+    if (view !== 'signals' || !myBooksReady || signalsLocked) return null;
+    const open = allData.filter(
+      (d) => gameStateOf(gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null)) !== 'final',
+    );
+    const c = betAllCandidates(open, (id) => liveStates.get(id) ?? null, myBooks);
+    return betAllSports(c).length >= 2 ? c : null;
+  }, [view, myBooksReady, signalsLocked, allData, liveStates, myBooks, thresholdsRevision]);
+  const betAllSheet = betAllScope === 'all' ? betAllEverySport : betAllScope === 'sport' ? betAll : null;
   const publicSortLive = useMemo(() => publicSortAvailable(filtered), [filtered]);
   useEffect(() => {
     if (!publicSortLive && sortKey === 'public') setSortKey('edge');
@@ -932,6 +949,23 @@ export function PicksHomeScreen() {
         <>
         {!signalsLocked && view !== 'scoreboard' ? (
         <Text style={styles.subtitle} accessibilityLabel={unknownCountSpeech(unitsSpeech(subtitle))}>{subtitle}</Text>
+        ) : null}
+        {/* Bet all across every sport (Matt, 2026-11-27), above the sport
+            chips because it covers all of them. */}
+        {betAllEverySport ? (
+          <Pressable
+            onPress={() => setBetAllScope('all')}
+            accessibilityRole="button"
+            accessibilityLabel={`Bet all sports: ${betAllEverySport.picks.length} of ${betAllEverySport.picks.length + betAllEverySport.skipped.length} signals ready across ${betAllSports(betAllEverySport).length} sports, as single bets`}
+            accessibilityHint="Opens every sport's pre-game signals. Board filters don't apply."
+            style={({ pressed }) => [styles.betAllSportsRow, pressed && styles.betAllPressed]}
+          >
+            <Ionicons name="layers-outline" size={18} color={colors.tint} />
+            <Text style={styles.betAllSportsText} numberOfLines={2}>
+              {`Bet all sports · ${betAllEverySport.picks.length} ready across ${betAllSports(betAllEverySport).length} sports`}
+            </Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+          </Pressable>
         ) : null}
         {/* Neutral chips until today's board (and the live one) is known: built
             from empty data, every chip read muted and "no picks today" after a
@@ -1222,16 +1256,19 @@ export function PicksHomeScreen() {
             <View style={styles.betAllRow}>
               <View style={styles.betAllText}>
                 <Text style={styles.betAllTitle}>
-                  {`${betAll.picks.length} ready to bet as singles`}
+                  {betAll.skipped.length > 0
+                    ? `${betAll.picks.length} of ${betAll.picks.length + betAll.skipped.length} ready to bet as singles`
+                    : `${betAll.picks.length} ready to bet as singles`}
                 </Text>
-                {/* With nothing ready, say the main reason here (UX review):
-                    the sheet still opens and lists every reason. */}
+                {/* Every skip, with its reason, whenever one is left out
+                    (Matt, 2026-11-27: "1 ready" beside four signals read as
+                    a bug). The sheet still names each pick. */}
                 <Text style={styles.betAllNote}>
-                  {betAll.picks.length === 0 ? `${betAllMainSkip(betAll.skipped)}. ${BET_ALL_LIVE_NOTE}` : BET_ALL_LIVE_NOTE}
+                  {betAll.skipped.length > 0 ? `${betAllSkipSummary(betAll.skipped)}. ${BET_ALL_LIVE_NOTE}` : BET_ALL_LIVE_NOTE}
                 </Text>
               </View>
               <Pressable
-                onPress={() => setBetAllOpen(true)}
+                onPress={() => setBetAllScope('sport')}
                 accessibilityRole="button"
                 accessibilityLabel={
                   betAll.picks.length === 0
@@ -1334,16 +1371,17 @@ export function PicksHomeScreen() {
       />
       </>
       )}
-      {betAll ? (
+      {betAllSheet ? (
         <BetAllSheet
-          visible={betAllOpen}
-          sport={sportDisplayName(sport)}
-          candidates={betAll}
+          visible={betAllScope != null}
+          sport={betAllScope === 'all' ? 'All sports' : sportDisplayName(sport)}
+          showSport={betAllScope === 'all'}
+          candidates={betAllSheet}
           myBooks={myBooks}
           isTracked={tracked.isTracked}
           onTrack={tracked.trackMany}
           onUntrack={tracked.untrackPick}
-          onClose={() => setBetAllOpen(false)}
+          onClose={() => setBetAllScope(null)}
         />
       ) : null}
     </SafeAreaView>
@@ -1649,6 +1687,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   betAllPressed: { opacity: opacity.pressed },
+  betAllSportsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 44,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.tint,
+  },
+  betAllSportsText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+    fontVariant: ['tabular-nums'],
+  },
   betAllButtonText: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textInverse, fontVariant: ['tabular-nums'] },
   container: {
     flex: 1,
