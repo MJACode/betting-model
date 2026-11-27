@@ -1,8 +1,8 @@
 -- Notification inbox: a member can delete an alert from their list.
 --
--- HAND APPLIED. Not in data/view_migrations.ACTIVE_MIGRATIONS, so the worker
--- will not run this. Matt applies it himself. Do not apply it from a session.
--- Requires notification_inbox_2026_11_19.sql first.
+-- Applied by the worker (data/view_migrations.ACTIVE_MIGRATIONS), at Matt's
+-- request on 2026-11-26 ("You do the db action"). Requires
+-- notification_inbox_2026_11_19.sql first; returns at once without it.
 --
 -- "Delete" in the app is a HIDE, not a DELETE (CLAUDE.md section 1b: no data
 -- is ever deleted). The row stays; deleted_at is stamped and the app, the
@@ -14,17 +14,40 @@
 -- Until this is applied the app reads without the column and hides the
 -- delete controls, and the worker counts unread as before.
 --
--- Re-running is safe.
+-- Runs on every pass, so it returns on a catalog read once all three
+-- properties hold (column, index predicate, freeze rule). No lock is taken
+-- on a re-run (tests/test_view_migration_lock_noop.py).
 
 DO $mig$
 BEGIN
+  IF pg_catalog.to_regclass('public.notification_inbox') IS NULL THEN
+    RETURN;
+  END IF;
+
+  IF EXISTS (
+       SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'notification_inbox'
+          AND column_name = 'deleted_at')
+     AND EXISTS (
+       SELECT 1 FROM pg_catalog.pg_indexes
+        WHERE schemaname = 'public' AND indexname = 'idx_notification_inbox_unread'
+          AND indexdef LIKE '%deleted_at IS NULL%')
+     AND EXISTS (
+       SELECT 1 FROM pg_catalog.pg_proc p
+         JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public' AND p.proname = 'notification_inbox_freeze'
+          AND p.prosrc LIKE '%a deleted alert stays deleted%')
+  THEN
+    RETURN;
+  END IF;
+
   ALTER TABLE public.notification_inbox
     ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 
   -- The unread index now also skips hidden rows, which is what the worker
   -- and the badge count.
   DROP INDEX IF EXISTS public.idx_notification_inbox_unread;
-  CREATE INDEX IF NOT EXISTS idx_notification_inbox_unread
+  CREATE INDEX idx_notification_inbox_unread
     ON public.notification_inbox (user_id)
     WHERE read_at IS NULL AND deleted_at IS NULL;
 
